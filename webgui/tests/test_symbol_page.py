@@ -317,7 +317,7 @@ def test_volatility_band_words_are_the_scorers():
                                   hv_current=30.0, atm_iv=36.5,
                                   iv_state="rising"))
     assert v["band"] == "high"
-    assert v["iv_hv_text"] == "IV 36.0 vs HV 30.0 · high (1.20×)"
+    assert v["iv_hv_text"] == "IV 36.00 vs HV 30.00 · high (1.20×)"
     assert v["em_day"] == pytest.approx(100 * 0.365 / 365 ** 0.5)
 
 
@@ -370,7 +370,7 @@ def test_a_position_row_carries_its_book_and_rescue_flag():
     rows = sp.position_band("MU", books)["rows"]
     by_book = {r["book"]: r for r in rows}
     assert by_book["account"]["flag"] == "AT RISK"
-    assert by_book["account"]["strikes"] == "180.0/175.0"
+    assert by_book["account"]["strikes"] == "180.00/175.00"
     # The captured book is never inspected by the rescue overlay: a dash, never
     # a clean bill of health nobody issued.
     assert by_book["captured"]["flag"] == "—"
@@ -540,7 +540,7 @@ def test_a_scanned_symbol_renders_every_band_and_fetches_nothing(world):
     assert any(t.startswith("Earnings Dec 17") for t in texts)
     assert any("Live since 09:15 · 1 gap" in t for t in texts)
     assert "No signals for MU today." not in texts
-    assert any(t.startswith("IV 48.0 vs HV 40.0") for t in texts)
+    assert any(t.startswith("IV 48.00 vs HV 40.00") for t in texts)
 
 
 def test_an_unknown_symbol_fetches_exactly_once_on_navigation(world):

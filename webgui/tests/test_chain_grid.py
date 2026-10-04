@@ -83,7 +83,7 @@ def test_cell_text_formats_by_field_and_dashes_non_readings():
     assert cg.cell_text("theta", -999.0) == "—"
     assert cg.cell_text("gamma", 0.0312) == "0.031"
     assert cg.cell_text("vega", 0.104) == "0.10"
-    assert cg.cell_text("volatility", 22.46) == "22.5"
+    assert cg.cell_text("volatility", 22.46) == "22.46"
     assert cg.cell_text("volatility", -999.0) == "—"
     assert cg.cell_text("openInterest", 4120) == "4.1k"
     assert cg.cell_text("openInterest", 0) == "0"   # zero OI is a real reading

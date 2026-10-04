@@ -76,8 +76,8 @@ def test_signal_rows_shortens_expiration_to_mmdd():
     assert rows[0]["expiration"] == "06/26"
 
 
-def test_signal_rows_strikes_strip_whole_number_decimals():
-    """Whole-number strikes render without a trailing '.0' (narrower column)."""
+def test_signal_rows_strikes_print_two_places():
+    """A whole-number strike keeps its decimals: 1085.00, never 1085 or 1085.0."""
     rows = scanner.signal_rows([
         {"symbol": "MU", "type": "PCS", "short_strike": 1085.0, "long_strike": 1070.0}])
     assert rows[0]["strikes"] == "1085.00/1070.00"

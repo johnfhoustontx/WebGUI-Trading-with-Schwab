@@ -21,7 +21,7 @@ import datetime as _dt
 import math
 from zoneinfo import ZoneInfo
 
-from pages.fmt import NO_READING, num
+from pages.fmt import NO_READING, num, plain, strike as _strike
 
 SHARES_PER_CONTRACT = 100
 POSITION_UNITS = "position"
@@ -35,17 +35,16 @@ _SETTLE_HOUR = 16
 
 # Below this, a dollar figure keeps its cents: a one-lot's theta of $0.38 printed
 # as "+$0" reads as a measured zero (found in the browser, 2026-09-11).
-_CENTS_BELOW = 10.0
 
 
 def _money(v, signed=False):
-    """``$1,234`` — whole dollars for a position figure, cents under $10."""
+    """``$1,234.00`` — a position figure, always to the cent."""
     v = num(v)
     if v is None:
         return NO_READING
     if abs(v) < 0.005:              # rounds to zero cents: never "-$0.00"
-        return "$0"
-    txt = f"${abs(v):,.2f}" if abs(v) < _CENTS_BELOW else f"${abs(v):,.0f}"
+        return "$0.00"
+    txt = f"${abs(v):,.2f}"
     if signed:
         return f"{'+' if v >= 0 else '-'}{txt}"
     return f"-{txt}" if v < 0 else txt
@@ -228,7 +227,7 @@ def position_tiles(legs, result):
         if spot:
             def _dist(b):
                 pct = (b - spot) / spot * 100.0
-                return f"{abs(pct):.1f}% {'above' if pct >= 0 else 'below'}"
+                return f"{abs(pct):.2f}% {'above' if pct >= 0 else 'below'}"
             shown = bes[:2] if len(bes) == 2 else bes[:1]
             sub = " and ".join(_dist(b) for b in shown) + " spot"
         t_be = _tile("breakeven", label, value, sub)
@@ -328,7 +327,7 @@ def days_text(days):
         return f"{hours} hour{'' if hours == 1 else 's'}"
     if d == 1:
         return "1 day"
-    return f"{d:g} days"
+    return f"{plain(d)} days"
 
 
 def curve_pnl_at(pairs, x):
@@ -503,7 +502,7 @@ def empty_state_text(meta, legs):
             return f"Pick a strike for leg {i + 1:02d}."
         listed = (strikes.get(str(leg.get("expiry"))) or {}).get(leg.get("option_type")) or []
         if not any(num(k) is not None and math.isclose(num(k), strike) for k in listed):
-            return (f"Leg {i + 1:02d}: the {strike:g} {leg.get('option_type')} is not listed "
+            return (f"Leg {i + 1:02d}: the {_strike(strike)} {leg.get('option_type')} is not listed "
                     f"for {_date_text(leg.get('expiry'))}. "
                     f"Pick another strike or reload the chain.")
     return "Pricing this position…"
@@ -528,7 +527,7 @@ def _fmt(kind, v):
     if v is None:
         return NO_READING
     if kind == "money":
-        return _money(v, signed=True) if v else "$0"
+        return _money(v, signed=True) if v else "$0.00"
     if kind == "int":
         return f"{v:+,.0f}"
     return f"{v:+,.2f}"
@@ -540,7 +539,7 @@ def _vol_move_text(mult):
     if math.isclose(mult, 0.5):
         return "halves"
     pct = abs(mult - 1.0) * 100.0
-    return f"{'rises' if mult > 1 else 'falls'} {pct:.0f}%"
+    return f"{'rises' if mult > 1 else 'falls'} {pct:.2f}%"
 
 
 def ivshock_table(ivshock, mult):

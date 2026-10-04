@@ -179,18 +179,18 @@ def _fmt(v, nd=2):
 
 
 def _net_prem_sub(net_m):
-    """Compact net-$ subline: '+$2.98B' / '-$540M' from net_m (in $M)."""
+    """Compact net-$ subline: '+$2.98B' / '-$540.00M' from net_m (in $M)."""
     try:
         m = float(net_m)
     except (TypeError, ValueError):
         return ""
     sign = "+" if m >= 0 else "-"
     a = abs(m)
-    return f"{sign}${a / 1000:.2f}B" if a >= 1000 else f"{sign}${a:.0f}M"
+    return f"{sign}${a / 1000:.2f}B" if a >= 1000 else f"{sign}${a:.2f}M"
 
 
 def _skew_word(pct):
-    """Signed skew % -> 'Call 31%' / 'Put 22%' / 'Even' / '—'."""
+    """Signed skew % -> 'Call 31.00%' / 'Put 22.00%' / 'Even' / '—'."""
     if pct is None:
         return "—"
     try:
@@ -199,7 +199,7 @@ def _skew_word(pct):
         return "—"
     if abs(p) < 1:
         return "Even"
-    return f"Call {p:.0f}%" if p > 0 else f"Put {abs(p):.0f}%"
+    return f"Call {p:.2f}%" if p > 0 else f"Put {abs(p):.2f}%"
 
 
 def tile_text(t):

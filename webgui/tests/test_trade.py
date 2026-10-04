@@ -84,10 +84,10 @@ def test_fundamentals_rows_formats_percents_and_margin():
         "eps_growth_ttm": 0.25, "roe": 1.41, "margin_expanding": True,
         "days_to_earnings": None,
     }))
-    assert rows["P/E"] == "28.0"
+    assert rows["P/E"] == "28.00"
     assert rows["PEG"] == "0.80"
-    assert rows["Revenue growth"] == "20.0%"
-    assert rows["ROE"] == "141.0%"
+    assert rows["Revenue growth"] == "20.00%"
+    assert rows["ROE"] == "141.00%"
     assert rows["Margins"] == "expanding"
     assert "Earnings in" not in rows  # None days-to-earnings omitted
 
@@ -248,8 +248,8 @@ def test_swing_headline_tilt_and_line():
     # the percentile lives in `tilt` (the ranked read), NOT in `line`
     assert head["tilt"] == "90th percentile · slight bullish tilt"
     assert head["tone"] == "pos"
-    assert "+1.4% excess / 20 days" in head["line"]
-    assert "52% beat-SPY" in head["line"]
+    assert "+1.35% excess / 20 days" in head["line"]
+    assert "52.30% beat-SPY" in head["line"]
 
 
 def test_swing_headline_partial_fields():
@@ -562,7 +562,7 @@ def test_an_artifact_predating_regimes_shows_nothing_rather_than_a_guess():
 
 def test_the_exposure_note_states_the_share():
     note = trade.swing_exposure_note({"risk_share": 0.476})
-    assert "48%" in note or "47.6%" in note
+    assert "47.60%" in note
 
 
 def test_a_material_share_carries_the_reversal_caveat():

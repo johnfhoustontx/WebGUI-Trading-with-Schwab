@@ -124,7 +124,7 @@ def eval_date_labels(dates):
 
 
 def fmt_pct(v):
-    return f"{v:+.1f}%" if isinstance(v, (int, float)) else "—"
+    return f"{v:+.2f}%" if isinstance(v, (int, float)) else "—"
 
 
 # ── the redesign's page-side readouts ────────────────────────────────────────
@@ -433,7 +433,7 @@ def _matrix_pct_text(pct):
         return f">{_MATRIX_PCT_LIMIT}%"
     if pct < -_MATRIX_PCT_LIMIT:
         return f"<-{_MATRIX_PCT_LIMIT}%"
-    return f"{pct:+.1f}%"
+    return f"{pct:+.2f}%"
 
 
 def matrix_cell_facts(pnl, basis, g_max, g_min):
@@ -465,7 +465,7 @@ def matrix_cell_facts(pnl, basis, g_max, g_min):
     ratio = min(abs(p) / scale, 1.0) if scale > 0 else 0.0
     alpha = round(_MATRIX_ALPHA_FLOOR + ratio * _MATRIX_ALPHA_SPAN, 3)
     return {
-        "dollars": f"{p:+,.0f}",
+        "dollars": f"{p:+,.2f}",
         "pct": _matrix_pct_text(matrix_pct_of(p, (basis or {}).get("denominator"))),
         "bg": f"rgba({_MATRIX_PROFIT_RGB if profit else _MATRIX_LOSS_RGB},{alpha})",
         "fg": _MATRIX_PROFIT_FG if profit else _MATRIX_LOSS_FG,
@@ -597,8 +597,8 @@ def compact_money(v, signed=False):
     if a >= 1_000_000:
         return f"{sign}${a / 1e6:,.2f}M"
     if a >= 100_000:
-        return f"{sign}${a / 1e3:,.0f}K"
-    return f"{sign}${a:,.0f}"
+        return f"{sign}${a / 1e3:,.2f}K"
+    return f"{sign}${a:,.2f}"
 
 
 def leg_strip_facts(legs):
@@ -641,7 +641,7 @@ def _dollars(v):
     f = _finite(v)
     if f is None:
         return _EM_DASH
-    return f"-${abs(f):,.0f}" if f < 0 else f"${f:,.0f}"
+    return f"-${abs(f):,.2f}" if f < 0 else f"${f:,.2f}"
 
 
 def max_dte_from_legs(legs, today=None):
@@ -762,7 +762,7 @@ def metric_cards(summary, legs, spot, max_dte):
     else:
         dte = _finite(max_dte)
         ror_card = {
-            "label": "RETURN ON RISK", "value": f"{ror:.1f}%",
+            "label": "RETURN ON RISK", "value": f"{ror:.2f}%",
             # max(dte, 1): a 0-DTE structure earns its whole return today, so
             # the per-day figure IS the return — not a division by zero.
             "sub": (f"{ror / max(dte, 1.0):.2f}% per day" if dte is not None
@@ -790,7 +790,7 @@ def metric_cards(summary, legs, spot, max_dte):
         pop_card = {"label": "PROB OF PROFIT", "value": _EM_DASH, "sub": _EM_DASH,
                     "accent": "dim"}
     else:
-        pop_card = {"label": "PROB OF PROFIT", "value": f"{pop:.1f}%",
+        pop_card = {"label": "PROB OF PROFIT", "value": f"{pop:.2f}%",
                     "sub": "lognormal · risk-neutral drift",
                     "accent": "pos" if pop >= 60 else ("warn" if pop >= 45 else "neg")}
 
@@ -1130,12 +1130,12 @@ def render(public=False):
                 with _cell("PRICE", "flex-[1_1_88px] max-w-[132px]"):
                     price_in = ui.number(value=100.0, format="%.2f").classes("w-full")
                 with _cell("IV %", "flex-[1_1_88px] max-w-[132px]"):
-                    iv_in = ui.number(value=20.0, format="%.1f").classes("w-full") \
+                    iv_in = ui.number(value=20.0, format="%.2f").classes("w-full") \
                         .tooltip("Implied from the chain on every load")
                 with _cell("RATE %", "flex-[1_1_88px] max-w-[132px]"):
                     rate_in = ui.number(value=4.5, format="%.2f").classes("w-full")
                 with _cell("IV Δ %", "flex-[1_1_88px] max-w-[132px]"):
-                    ivchg_in = ui.number(value=0.0, format="%.1f").classes("w-full")
+                    ivchg_in = ui.number(value=0.0, format="%.2f").classes("w-full")
                 with _cell("CONTRACTS", "flex-[1_1_88px] max-w-[132px]"):
                     contracts_in = ui.number(value=1, min=1, max=100,
                                              format="%.0f").classes("w-full")
@@ -1586,7 +1586,7 @@ def render(public=False):
             iv = extract_atm_iv(chain, spot)  # nearest listed expiry
         if iv is None:
             return
-        iv_in.value = round(iv, 1)        # fires on_value_change → _poke
+        iv_in.value = round(iv, 2)        # fires on_value_change → _poke
 
     @guard
     def do_calc():
@@ -1770,7 +1770,7 @@ def render(public=False):
         res = res or {}
         iv = res.get("iv")
         if iv is not None:
-            iv_in.value = round(iv, 1)    # fires on_value_change → _poke
+            iv_in.value = round(iv, 2)    # fires on_value_change → _poke
         # A failed implication keeps the field as it was: it runs on every load,
         # and the IV box under PRICING ASSUMPTIONS is always there to type into.
 
@@ -1937,7 +1937,7 @@ def render(public=False):
             state["pending_expiry"] = exp     # selected when the chain lands
         iv = sig.get("short_iv")
         if iv:
-            iv_in.value = round(iv, 1)
+            iv_in.value = round(iv, 2)
 
         legs = []
         for otype, side, strike_field, mark_field in _PREFILL_LEGS.get(t, []):

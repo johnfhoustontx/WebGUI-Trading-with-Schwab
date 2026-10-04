@@ -68,6 +68,7 @@ from pages.regime_mix import regime_picture as _regime_picture
 from pages import sentiment_bullbear as _bbmap
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
 from pages import news_view as _news
+from pages import fmt as _fmt
 from pages.fmt import num as _finite  # the ONE copy (pages/fmt.py)
 # The structure bar's geometry, shared with the Symbol Dossier. Used below, and
 # also re-exported: ``desk.structure_positions`` is what test_desk calls.
@@ -613,7 +614,7 @@ def _is_open(p):
 
 
 def strikes_text(p):
-    """'600.0/595.0' — the spread's two strikes, or an em-dash.
+    """'600.00/595.00' — the spread's two strikes, or an em-dash.
 
     Falls back to the CALL pair when there is no put side, which is what an iron
     condor's payload looks like from the put-first fields. Shared by all three
@@ -623,7 +624,7 @@ def strikes_text(p):
                                 ("call_short", "call_long")):
         sk, lk = p.get(short_key), p.get(long_key)
         if sk is not None:
-            return f"{sk}/{lk}"
+            return f"{_fmt.strike_text(sk)}/{_fmt.strike_text(lk)}"
     return "—"
 
 
@@ -1383,12 +1384,12 @@ def fmt_net_prem(v):
     here and never again. Doubling that scale is the classic way this column
     starts printing a plausible thousand-fold error."""
     f = _finite(v)
-    return _DASH if f is None else f"{f:+.1f}M"
+    return _DASH if f is None else f"{f:+.2f}M"
 
 
 def fmt_iv(v):
     f = _finite(v)
-    return _DASH if f is None else f"{f:.1f}%"
+    return _DASH if f is None else f"{f:.2f}%"
 
 
 def fmt_ratio(v):
@@ -2327,7 +2328,7 @@ DESK_NEON_CSS = f"""
           background-color: transparent; }}
 }}
 .desk-neon {{ animation-name: deskNeon;
-              animation-duration: {GLOW_SEC:g}s;
+              animation-duration: {_fmt.plain(GLOW_SEC)}s;
               animation-timing-function: linear;
               border-radius: 3px; }}
 .desk-neon-{GLOW_NEW} {{ --neon: {SPOT_HEX}; }}
@@ -3458,7 +3459,7 @@ def _position_row(row, glow):
         _cell(row["strikes"])
         # An em-dash, never a 1: a captured signal was never sized, and a
         # printed quantity would be this page inventing a position.
-        _cell(_DASH if row["quantity"] is None else f"{row['quantity']:g}")
+        _cell(_DASH if row["quantity"] is None else _fmt.plain(row["quantity"]))
         _cell(fmt_money(row["unrealized_pnl"]),
               signed_class(row["unrealized_pnl"]))
         # An untagged book gets the dash BARE, with no chip around it — the
@@ -3813,7 +3814,7 @@ def render():
         conf = reg["confidence"]
         # A withheld confidence prints NOTHING. It must never print 0% — that
         # is a reading, and "absent" is not one.
-        regime_sub.text = "" if conf is None else f"confidence {conf * 100:.0f}%"
+        regime_sub.text = "" if conf is None else f"confidence {conf * 100:.2f}%"
 
         fresh = freshness_facts(_view("options:gex_status"))
         fresh_lbl.text = fresh["label"]

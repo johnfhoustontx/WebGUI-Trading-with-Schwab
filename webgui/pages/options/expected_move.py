@@ -20,6 +20,8 @@ encodes a value."""
 
 import math
 
+from pages import fmt as _fmt
+
 from .theme import MUTED
 
 UP_COLOR = "#26a69a"
@@ -58,8 +60,8 @@ def em_lookback_options():
 
 
 def strike_options(strikes):
-    """{strike_float: label} for the strike ui.select — trailing .0 trimmed."""
-    return {float(s): f"{float(s):g}" for s in (strikes or [])}
+    """{strike_float: label} for the strike ui.select — two places."""
+    return {float(s): _fmt.strike(s) for s in (strikes or [])}
 
 
 def nearest_strike(strikes, spot):
@@ -108,7 +110,7 @@ def leg_lines(legs):
         side = leg.get("side", "")
         color = CALL_COLOR if otype == "call" else PUT_COLOR
         pl = {"value": float(strike), "color": color, "width": 1.5, "zIndex": 4,
-              "label": {"text": f"{side} {otype} {strike:g}",
+              "label": {"text": f"{side} {otype} {_fmt.strike(strike)}",
                         "style": {"color": color, "fontSize": "10px"}}}
         if side == "long":
             pl["dashStyle"] = "Dash"

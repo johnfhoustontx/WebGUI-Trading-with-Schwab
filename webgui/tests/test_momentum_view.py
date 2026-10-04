@@ -200,7 +200,7 @@ def test_quadrant_counts_and_shares_add_up():
     assert by["Leading"]["count"] == 9 and by["Weakening"]["count"] == 24
     assert by["Improving"]["count"] == 17 and by["Lagging"]["count"] == 19
     assert sum(p["count"] for p in V.quadrant_panels(_quad_rows())) == 69
-    assert by["Weakening"]["share"] == "35%"
+    assert by["Weakening"]["share"] == "34.78%"
 
 
 def test_quadrant_bars_scale_against_the_fullest_quadrant():
@@ -258,7 +258,7 @@ def test_every_quadrant_panel_carries_a_blurb():
 def test_quadrant_panels_of_nothing_still_render_all_four_at_zero():
     panels = V.quadrant_panels([])
     assert len(panels) == 4
-    assert all(p["count"] == 0 and p["share"] == "0%" for p in panels)
+    assert all(p["count"] == 0 and p["share"] == "0.00%" for p in panels)
 
 
 # ── 4 · what a score is made of ──────────────────────────────────────────────

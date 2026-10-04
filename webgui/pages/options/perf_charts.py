@@ -7,7 +7,8 @@ takes the ``perf_analytics``-shaped payload and returns a Highcharts option dict
 
 
 def signed_dollar(v):
-    return f"{'+' if v >= 0 else '-'}${abs(v):,.0f}" if isinstance(v, (int, float)) else "$0"
+    return (f"{'+' if v >= 0 else '-'}${abs(v):,.2f}"
+            if isinstance(v, (int, float)) else "$0.00")
 
 
 def equity_curve_figure(curve):

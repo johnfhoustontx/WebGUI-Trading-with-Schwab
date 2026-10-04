@@ -629,7 +629,7 @@ def test_a_legacy_ivshock_cache_renders_in_position_dollars():
     with ui.card() as container:
         sim.render()
     cells = _texts(container, "sim-shock-grid")
-    assert "-$1,000" in cells and "-$2,050" in cells and "-$1,050" in cells
+    assert "-$1,000.00" in cells and "-$2,050.00" in cells and "-$1,050.00" in cells
 
 
 def test_meta_arrival_fits_the_days_slider_and_offers_snaps():
@@ -672,8 +672,8 @@ def test_a_result_for_the_legs_on_screen_fills_the_tiles():
                     "units": "position"}})
     _fire(container, "_poll_result")
     values = _texts(container, "sim-tile")
-    assert "Entry credit" in values and "$120" in values
-    assert f"${width - 120:,.0f}" in values        # max loss = width minus the credit
+    assert "Entry credit" in values and "$120.00" in values
+    assert f"${width - 120:,.2f}" in values        # max loss = width minus the credit
     assert "+12" in values                          # delta, shares-equivalent
 
 

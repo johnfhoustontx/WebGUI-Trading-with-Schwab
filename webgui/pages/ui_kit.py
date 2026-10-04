@@ -391,9 +391,9 @@ def number_field(label, *, value=None, min=None, max=None, step=None, integer=Fa
         checks["Whole numbers only"] = \
             lambda v: v is None or float(v).is_integer()
     if min is not None:
-        checks[f"At least {min:g}"] = lambda v, lo=min: v is None or v >= lo
+        checks[f"At least {_fmt.plain(min)}"] = lambda v, lo=min: v is None or v >= lo
     if max is not None:
-        checks[f"At most {max:g}"] = lambda v, hi=max: v is None or v <= hi
+        checks[f"At most {_fmt.plain(max)}"] = lambda v, hi=max: v is None or v <= hi
     with field(label, grow=width == "w-full"):
         n = ui.number(value=value, step=step, format=format, on_change=on_change,
                       validation=checks).props(FIELD_PROPS).classes(width)

@@ -303,7 +303,7 @@ def test_the_cap_figure_is_named_only_when_the_payload_carries_it():
                spreads=_spreads(built=0, iron_condors=0, kept_after_cap=0,
                                 emitted=0),
                max_risk_dollars=250)
-    assert "$250 per-trade risk cap" in fv.bucket_card(e, "SWING",
+    assert "$250.00 per-trade risk cap" in fv.bucket_card(e, "SWING",
                                                        symbol="MU")["headline"]
 
 

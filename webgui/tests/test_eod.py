@@ -279,7 +279,7 @@ def test_toc_and_details_section():
 
 
 def test_pct_helper():
-    assert eod._pct(0.5) == "50%"
+    assert eod._pct(0.5) == "50.00%"
     assert eod._pct(None) == "—"
 
 

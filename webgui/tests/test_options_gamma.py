@@ -218,7 +218,7 @@ def test_term_heatmap_is_immune_to_an_uneven_strike_ladder():
                       "08/08": {100.0: {"net_gex_usd": -5}, 105.0: {"net_gex_usd": -4},
                                 115.0: {"net_gex_usd": -3}}}}
     fig = gamma.term_heatmap(grid)
-    assert fig["yAxis"]["categories"] == ["100", "105", "115"]
+    assert fig["yAxis"]["categories"] == ["100.00", "105.00", "115.00"]
     hm = next(s for s in fig["series"] if s["type"] == "heatmap")
     assert sorted({p[1] for p in hm["data"]}) == [0, 1, 2]   # row INDEX, not strike
     assert "rowsize" not in hm, "a categorical axis needs no strike-derived rowsize"
@@ -332,7 +332,7 @@ def test_term_heatmap_axes_and_zero_filter():
                     "2026-06-19": {450.0: {"net_gex_usd": -3}, 451.0: {"net_gex_usd": 0}}}}
     fig = gamma.term_heatmap(tg)
     assert fig["xAxis"]["categories"] == ["2026-06-18", "2026-06-19"]
-    assert "450" in fig["yAxis"]["categories"]
+    assert "450.00" in fig["yAxis"]["categories"]
     assert "451" not in fig["yAxis"]["categories"]   # all-zero strike filtered out
 
 
@@ -348,7 +348,7 @@ def test_term_heatmap_handles_json_string_strike_keys():
                     "2026-06-19": {"450.0": {"net_gex_usd": -3}, "451.0": {"net_gex_usd": 0}}}}
     fig = gamma.term_heatmap(tg)
     cats = fig["yAxis"]["categories"]
-    assert cats == ["450", "1000"]          # numeric order, not lexical "1000" < "450"
+    assert cats == ["450.00", "1000.00"]    # numeric order, not lexical "1000" < "450"
     assert "451" not in cats                 # all-zero strike still filtered
     assert any(p[2] == 9 for p in fig["series"][0]["data"])   # net value looked up by re-floated key
 
@@ -743,7 +743,7 @@ def test_flow_summary_text_variants():
         [{"ts": 1, "spot": 1, "call_prem": None, "put_prem": None}])
     s = g.flow_summary_text(
         [{"ts": 1, "spot": 1, "call_vol": 10, "put_vol": 5, "call_prem": 3.0e6, "put_prem": 1.0e6}])
-    assert "3.0M" in s and "1.0M" in s and "+2.0M" in s
+    assert "$3.00M" in s and "$1.00M" in s and "$+2.00M" in s
 
 
 def _proj_rows():
@@ -1423,10 +1423,10 @@ def test_net_prem_missing_names_selected_symbols_without_rows():
 def test_net_prem_summary_text_names_the_extremes():
     txt = gamma.net_prem_summary_text(_np_series(), ["QQQ", "SPY"])
     assert "2 symbols" in txt
-    assert "QQQ" in txt and "+$4.0M" in txt      # most call-led (last point)
-    assert "SPY" in txt and "-$8.0M" in txt      # most put-led
+    assert "QQQ" in txt and "+$4.00M" in txt     # most call-led (last point)
+    assert "SPY" in txt and "-$8.00M" in txt     # most put-led
     skew = gamma.net_prem_summary_text(_np_series(), ["QQQ", "SPY"], "skew")
-    assert "+67%" in skew and "-80%" in skew
+    assert "+66.67%" in skew and "-80.00%" in skew
 
 
 def test_net_prem_summary_text_reports_missing_names():
@@ -1539,7 +1539,7 @@ def test_net_prem_rows_are_sorted_by_timestamp():
     assert [ts for ts, _ in rows] == [_T1, _T2, _T3]
     assert [gamma.net_prem_value(row) for _ts, row in rows] == [-2.0, 0.0, 4.0]
     # ...and "latest" must be the NEWEST point, not the last one listed.
-    assert "+$4.0M" in gamma.net_prem_summary_text(desc, ["SPY"])
+    assert "+$4.00M" in gamma.net_prem_summary_text(desc, ["SPY"])
 
 
 def test_net_prem_missing_is_mode_aware_and_agrees_with_the_summary():
@@ -1556,15 +1556,15 @@ def test_net_prem_missing_is_mode_aware_and_agrees_with_the_summary():
 
 def test_net_prem_summary_adjectives_never_contradict_the_sign():
     # Whole selection put-led: the top of the range is the LEAST put-led one --
-    # "most call-led SPY -$4.0M" would read as a self-contradiction.
+    # "most call-led SPY -$4.00M" would read as a self-contradiction.
     down = {"SPY": [[_T1, 1.0e6, 5.0e6]], "QQQ": [[_T1, 1.0e6, 9.0e6]]}
     txt = gamma.net_prem_summary_text(down, ["SPY", "QQQ"])
-    assert "least put-led SPY -$4.0M" in txt and "most put-led QQQ -$8.0M" in txt
+    assert "least put-led SPY -$4.00M" in txt and "most put-led QQQ -$8.00M" in txt
     assert "most call-led" not in txt
 
     up = {"SPY": [[_T1, 5.0e6, 1.0e6]], "QQQ": [[_T1, 3.0e6, 1.0e6]]}
     txt = gamma.net_prem_summary_text(up, ["SPY", "QQQ"])
-    assert "most call-led SPY +$4.0M" in txt and "least call-led QQQ +$2.0M" in txt
+    assert "most call-led SPY +$4.00M" in txt and "least call-led QQQ +$2.00M" in txt
     assert "most put-led" not in txt
 
     # Straddling zero keeps both plain superlatives.

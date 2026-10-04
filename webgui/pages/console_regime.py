@@ -112,8 +112,8 @@ def change_text(row):
         return "—", K._ABSENT
     change = K._safe(row.get("change")) or 0.0
     if change >= 0:
-        return f"+{change * 100:.1f}pp", _C["positive"]
-    return f"−{abs(change) * 100:.1f}pp", _C["negative"]
+        return f"+{change * 100:.2f}pp", _C["positive"]
+    return f"−{abs(change) * 100:.2f}pp", _C["negative"]
 
 
 # --- 5.3 dial card ----------------------------------------------------------
@@ -141,10 +141,10 @@ def render_dial_card(regime, points):
                 f"grid grid-cols-2 gap-px w-full {K.HAIRLINE} "
                 f"border {K.RULE}"):
             _stat("LEAD",
-                  "—" if margin is None else f"+{margin * 100:.1f} pp",
+                  "—" if margin is None else f"+{margin * 100:.2f} pp",
                   f"over {runner}")
             _stat("TIGHTEST TODAY",
-                  "—" if tightest is None else f"{tightest * 100:.1f} pp",
+                  "—" if tightest is None else f"{tightest * 100:.2f} pp",
                   "intraday minimum")
 
 
@@ -227,7 +227,7 @@ def _share_row(row, lead):
                 ui.label(RM.regime_note(row)).classes(
                     f"text-[9.5px] tracking-[.16em] {K.DIM}")
         with ui.row().classes("items-center gap-3 w-full"):
-            ui.label(f"{row['now'] * 100:.1f}%").classes(
+            ui.label(f"{row['now'] * 100:.2f}%").classes(
                 f"w-[74px] shrink-0 text-[20px] font-medium text-[{hexv}]")
             with ui.element("div").classes(
                     f"flex-1 h-[12px] {K.track_classes()}"):
@@ -270,8 +270,8 @@ def _dominant_note(points, row):
     if not row:
         return "no reading yet"
     _key, margin, _tight = RM.lead_margin(points)
-    lead = "" if margin is None else f" · leads by {margin * 100:.1f} pp"
-    return f"{row['now'] * 100:.1f}% share{lead}"
+    lead = "" if margin is None else f" · leads by {margin * 100:.2f} pp"
+    return f"{row['now'] * 100:.2f}% share{lead}"
 
 
 def _move_note(row):

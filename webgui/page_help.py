@@ -417,8 +417,8 @@ four top picks, and the full ranked list.
   covers the whole list, so page 2 carries on from page 1. A naked short's max loss
   carries an **undefined risk** tag, since that figure is a margin estimate, not a
   cap.
-- **Cost** says which way the money moves: `$195 debit`, `$804 credit`, and
-  `$54,058 debit for 100 shares` when the trade holds stock.
+- **Cost** says which way the money moves: `$195.00 debit`, `$804.00 credit`, and
+  `$54,058.00 debit for 100 shares` when the trade holds stock.
 - **Checks** — the same go / no-go checklist the Market Scanner shows, in one
   chip per row: *Clear · 7 of 9*, *2 cautions*, *Blocked* (the paper ledger would
   refuse it), *Partly checked* (something the checks read hasn't loaded yet), or

@@ -720,7 +720,7 @@ def render(public=False):
 
     def _render_ivshock(result):
         mult = float(mult_slider.value)
-        mult_lbl.text = f"Volatility multiplier: {mult:g}"
+        mult_lbl.text = f"Volatility multiplier: {mult:.2f}"
         priced = (result or {}).get("mult")
         shown = priced if isinstance(priced, (int, float)) else mult
         table = sv.ivshock_table((result or {}).get("ivshock"), shown)
@@ -730,7 +730,7 @@ def render(public=False):
         ivshock_head.set_visibility(has)
         if not has:
             return
-        shock_hdr.text = f"Volatility times {shown:g}"
+        shock_hdr.text = f"Volatility times {shown:.2f}"
         ivshock_head.text = table["headline"]
         _set_tone(ivshock_head, table["tone"])
         for (b, s, c), row in zip(shock_cells, table["rows"]):
@@ -738,7 +738,7 @@ def render(public=False):
             _set_tone(c, row["tone"])
 
     def _render_figures():
-        ds_lbl.text = f"Price change: {ds_slider.value:+g}%"
+        ds_lbl.text = f"Price change: {ds_slider.value:+.2f}%"
         dt_lbl.text = f"Time passed: {sv.days_text(dt_slider.value)}"
         _paint_empty_states()
 

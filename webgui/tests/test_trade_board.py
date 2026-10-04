@@ -46,7 +46,7 @@ class TestRows:
         assert top["symbol"] == "AAA"
         assert top["score"] == "+0.81"
         assert top["pctl"] == "90th"
-        assert "+1.6%" in top["exp"]
+        assert top["exp"] == "+1.60%"
 
     def test_a_gated_row_shows_its_reasons_rather_than_vanishing(self):
         rows = {r["symbol"]: r for r in trade_board.board_rows(_BOARD)}
@@ -137,7 +137,7 @@ class TestPoolHeadlines:
 class TestTheBoardStatesWhatItRanksBy:
     def test_the_exposure_line_carries_the_share(self):
         line = trade_board.board_exposure_note(_BOARD)
-        assert "48%" in line
+        assert "47.60%" in line
 
     def test_it_warns_that_the_TOP_of_the_ranking_is_the_high_beta_end(self):
         line = trade_board.board_exposure_note(_BOARD).lower()
@@ -222,7 +222,7 @@ _BOOK = {
 
 def test_book_rows_format_the_position():
     rows = {r["symbol"]: r for r in trade_board.book_rows(_BOOK)}
-    assert rows["MU"]["pnl"] == "+8.0%"
+    assert rows["MU"]["pnl"] == "+8.00%"
     assert rows["MU"]["status"] == "open"
     assert rows["TMO"]["expression"] == "relative"
 
@@ -234,7 +234,7 @@ def test_a_position_with_no_mark_shows_a_dash():
 
 def test_the_book_summary_reports_each_side_separately():
     line = trade_board.book_summary_line(_BOOK)
-    assert "+2.1%" in line and "-0.8%" in line
+    assert "+2.10%" in line and "-0.80%" in line
 
 
 def test_a_side_with_no_closed_trades_says_so_rather_than_zero():

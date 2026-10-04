@@ -313,13 +313,13 @@ def test_summary_line_reports_breadth_weight_and_score():
               "SMH": {"change_pct": 9.0}}
     line = H.summary_line(_sd(), quotes, {"wpct": 0.70, "score": 7.8})
     # Industries are excluded from breadth — 1 of 2 SECTORS green.
-    assert line == "50% green · cap-weighted +0.70% · score 7.8/10"
+    assert line == "50.00% green · cap-weighted +0.70% · score 7.8/10"
 
 
 def test_summary_line_cold_cache_admits_the_gap():
     quotes = {"XLK": {"change_pct": 1.0}, "XLU": {"change_pct": -0.5}}
     line = H.summary_line(_sd(), quotes, None)
-    assert line == "50% green · cap-weighted —"     # no invented weight or score
+    assert line == "50.00% green · cap-weighted —"     # no invented weight or score
 
 
 def test_summary_line_with_no_quotes_is_empty_not_a_zero():

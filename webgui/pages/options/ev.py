@@ -72,7 +72,7 @@ def breakeven_facts(signal):
     margin_pp = None if pop is None else pop - breakeven_pct
     return {"breakeven_pct": breakeven_pct, "margin_pp": margin_pp,
             "tone": _margin_tone(margin_pp),
-            "text": f"needs {breakeven_pct:.1f}%"}
+            "text": f"needs {breakeven_pct:.2f}%"}
 
 
 def calibrated_facts(signal, payload):

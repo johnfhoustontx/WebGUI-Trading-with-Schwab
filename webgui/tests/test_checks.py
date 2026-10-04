@@ -144,7 +144,7 @@ def test_summary_chip():
     cautioned = checks.build_checks(_pcs(short_strike=104.0), MATRIX, REGIME, {}, CAPS)
     assert checks.summary(cautioned)["state"] == "warn"
     blocked = checks.build_checks(_pcs(**_risk(425.0)), MATRIX, REGIME, {}, CAPS)
-    assert checks.summary(blocked)["text"] == "Blocked · over $250 per trade"
+    assert checks.summary(blocked)["text"] == "Blocked · over $250.00 per trade"
 
 
 def test_summary_with_no_context_is_unchecked():
@@ -320,14 +320,14 @@ def test_a_short_straddle_measures_expected_move_from_its_breakevens():
     row = _legged("SHORT_STRADDLE", _STRADDLE, net_credit=900.0, breakevens=[96.0, 115.0])
     em = _line(row, "em")
     assert em["tone"] == "warn"
-    assert em["text"] == "Breakeven 115 is 0.8 expected moves from the price"
+    assert em["text"] == "Breakeven 115.00 is 0.83 expected moves from the price"
 
 
 def test_a_short_straddle_measures_walls_from_its_breakevens():
     row = _legged("SHORT_STRADDLE", _STRADDLE, net_credit=900.0, breakevens=[96.0, 115.0])
     wall = _line(row, "wall")
     assert wall["tone"] == "warn"                 # upper 115 is below the 120 call wall
-    assert wall["text"] == "Breakeven 115 is below the 120 call wall"
+    assert wall["text"] == "Breakeven 115.00 is below the 120.00 call wall"
     wide = _legged("SHORT_STRADDLE", _STRADDLE, net_credit=900.0, breakevens=[96.0, 125.0])
     assert _line(wide, "wall")["tone"] == "pos"
     assert _line(wide, "em")["tone"] == "pos"
@@ -339,8 +339,8 @@ def test_an_iron_butterfly_reads_a_breakeven_string():
     row = _legged("IRON_BUTTERFLY", legs, net_credit=500.0, breakeven="95.3 / 125")
     em, wall = _line(row, "em"), _line(row, "wall")
     assert em["tone"] == "pos" and em["text"].startswith("Breakeven ")
-    assert wall["text"] == ("Breakeven 95.3 is below the 102 put wall · "
-                            "Breakeven 125 is above the 120 call wall")
+    assert wall["text"] == ("Breakeven 95.30 is below the 102.00 put wall · "
+                            "Breakeven 125.00 is above the 120.00 call wall")
 
 
 def test_missing_breakevens_grey_both_lines():
@@ -354,7 +354,7 @@ def test_a_strangle_still_measures_its_short_strikes():
     legs = [{"kind": "put", "side": "short", "strike": 100.0},
             {"kind": "call", "side": "short", "strike": 121.0}]
     row = _legged("SHORT_STRANGLE", legs, net_credit=300.0, breakevens=[97.0, 124.0])
-    assert _line(row, "em")["text"].startswith("Short 100 put")
+    assert _line(row, "em")["text"].startswith("Short 100.00 put")
 
 
 # ── a missing live view is never "Clear" ──────────────────────────────────
@@ -430,11 +430,14 @@ def test_a_failing_check_logs_once_and_counts_repeats(monkeypatch, caplog):
 
 def test_a_short_strike_on_the_wall_says_at_and_is_amber():
     line = _line(_pcs(short_strike=102.0), "wall")
-    assert (line["tone"], line["text"]) == ("warn", "Short 102 put is at the 102 put wall")
+    assert (line["tone"], line["text"]) == ("warn", "Short 102.00 put is at the 102.00 put wall")
 
 
-@pytest.mark.parametrize("friction,shown", [(10.19, "10.1%"), (8.96, "8.9%"), (8.0, "8%")])
+@pytest.mark.parametrize("friction,shown", [(10.199, "10.19%"), (8.996, "8.99%"),
+                                            (8.0, "8.00%")])
 def test_friction_is_truncated_not_rounded(friction, shown):
+    """Two places since 2026-10-04, and still TRUNCATED: 10.199 must not print
+    as 10.20, a figure on the other side of a threshold."""
     assert f"round trip {shown} of" in _line(_pcs(friction_pct=friction), "cost")["text"]
 
 
@@ -446,7 +449,7 @@ def test_the_month_name_does_not_follow_the_host_locale():
 
 
 def test_expected_move_text_says_from_the_price():
-    assert _line(_pcs(), "em")["text"] == "Short 100 put is 1.6 expected moves from the price"
+    assert _line(_pcs(), "em")["text"] == "Short 100.00 put is 1.66 expected moves from the price"
 
 
 # ── the short chip (verdict) ──────────────────────────────────────────────

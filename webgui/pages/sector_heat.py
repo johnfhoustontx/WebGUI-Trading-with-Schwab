@@ -303,7 +303,7 @@ def summary_line(sector_data, quotes, summary):
     summary = summary if isinstance(summary, dict) else {}
     wpct = _num(summary.get("wpct"))
     score = _num(summary.get("score"))
-    parts = [f"{green:.0f}% green",
+    parts = [f"{green:.2f}% green",
              f"cap-weighted {fmt_pct(wpct) if wpct is not None else DASH}"]
     if score is not None:
         parts.append(f"score {score:.1f}/10")

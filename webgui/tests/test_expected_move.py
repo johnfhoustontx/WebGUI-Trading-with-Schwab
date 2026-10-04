@@ -257,8 +257,8 @@ def test_expected_move_figure_legs_empty_list_clears_lines():
     assert em.expected_move_figure(p, legs=[])["yAxis"]["plotLines"] == []
 
 
-def test_strike_options_labels_are_trimmed():
-    assert em.strike_options([765.0, 770.5]) == {765.0: "765", 770.5: "770.5"}
+def test_strike_options_labels_print_two_places():
+    assert em.strike_options([765.0, 770.5]) == {765.0: "765.00", 770.5: "770.50"}
     assert em.strike_options([]) == {}
 
 

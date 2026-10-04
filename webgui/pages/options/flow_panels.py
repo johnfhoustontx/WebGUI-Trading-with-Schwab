@@ -160,8 +160,8 @@ def _nice_ticks(lo, hi, count):
 # FORMATTING
 #############################################
 
-def fmt_m(value, decimals=1):
-    """A premium in $M, unsigned: ``251.6``. ``—`` for a missing reading."""
+def fmt_m(value, decimals=2):
+    """A premium in $M, unsigned: ``251.60``. ``—`` for a missing reading."""
     v = _num(value)
     return "—" if v is None else f"{v:,.{decimals}f}"
 
@@ -172,8 +172,12 @@ def fmt_m(value, decimals=1):
 _MONEY_UNITS = ((1.0, "M"), (1_000.0, "B"), (1_000_000.0, "T"))
 
 
-def fmt_axis_money(value, signed=False):
+def fmt_axis_money(value, signed=False, decimals=None):
     """An axis tick as a scaled dollar amount: ``946M`` / ``1.2B`` / ``−90M``.
+
+    ``decimals`` is for a READING set in the axis's units (a line's end label):
+    it prints exactly that many places, ``+425.00M``. A tick leaves it unset
+    and keeps the narrow form below - a scale mark, not a reading.
 
     The bare number these labels used to carry said nothing about magnitude — a
     premium axis reading ``0 237 473 710 946`` could be dollars, thousands or
@@ -196,16 +200,19 @@ def fmt_axis_money(value, signed=False):
         if a >= factor:
             scale, unit = factor, suffix
     n = a / scale
-    # Sub-unit and fractional values keep a decimal; whole ones drop it.
-    text = f"{n:,.1f}".rstrip("0").rstrip(".") if n < 100 else f"{n:,.0f}"
+    if decimals is not None:
+        text = f"{n:,.{decimals}f}"
+    else:
+        # Sub-unit and fractional values keep a decimal; whole ones drop it.
+        text = f"{n:,.1f}".rstrip("0").rstrip(".") if n < 100 else f"{n:,.0f}"
     if not signed:
         return f"{text}{unit}"
     # U+2212 MINUS, matching fmt_signed — a hyphen makes the column jitter.
     return f"{'+' if v >= 0 else '−'}{text}{unit}"
 
 
-def fmt_signed(value, decimals=1):
-    """A net reading with the sign LEADING (``+425`` / ``−90.2``), so it reads as
+def fmt_signed(value, decimals=2):
+    """A net reading with the sign LEADING (``+425.00`` / ``−90.20``), so it reads as
     a direction rather than as a negative quantity. Uses U+2212 MINUS, which is
     the same width as ``+`` in the mono face — a hyphen makes the column jitter
     as the sign flips."""
@@ -763,7 +770,7 @@ def field_svg(geom, times, colors, uid, mode=DEFAULT_MODE):
         # Same units as the axis it sits beside — a terminus reading "+425"
         # against an axis reading "+425M" invites the reader to guess.
         end_label = (fmt_signed(value) + "%" if skew
-                     else fmt_axis_money(value, signed=True))
+                     else fmt_axis_money(value, signed=True, decimals=2))
         parts.append(_text(FLD_VALUE_X, y_lab, end_label, 11,
                            C["label"], anchor="start", opacity="0.55"))
 
@@ -1179,7 +1186,7 @@ _SCRUB_JS = r"""
     // in skew, where the two modes' magnitudes are otherwise indistinguishable.
     return (v>=0?'+':'−')+num(Math.abs(v),d)+(D.unit||'');
   }
-  function dec(v){ v=Math.abs(v); return v>=100?0:(v>=10?1:2); }
+  function dec(v){ return 2; }
   function txt(s,v){ var e=g(s); if(e) e.textContent=v; }
   function paint_text(s,v,c){ var e=g(s); if(e){e.textContent=v; e.style.color=c;} }
   function dot(s,x,y){
@@ -1259,11 +1266,11 @@ _SCRUB_JS = r"""
     cur.setAttribute('x1',x); cur.setAttribute('x2',x);
     dot('dcall',x,D.yCall[i]); dot('dput',x,D.yPut[i]); dot('dspot',x,D.ySpot[i]);
     var net=D.call[i]-D.put[i], nc = net>=0?D.col.call:D.col.put;
-    txt('cspot', num(D.spot[i],2)); txt('ccall', num(D.call[i],1));
-    txt('cput', num(D.put[i],1)); paint_text('cnet', sgn(net,2), nc);
+    txt('cspot', num(D.spot[i],2)); txt('ccall', num(D.call[i],2));
+    txt('cput', num(D.put[i],2)); paint_text('cnet', sgn(net,2), nc);
     txt('time', D.t[i]);
-    txt('rspot', num(D.spot[i],2)); txt('rcall', num(D.call[i],1));
-    txt('rput', num(D.put[i],1)); paint_text('rnet', sgn(net,2), nc);
+    txt('rspot', num(D.spot[i],2)); txt('rcall', num(D.call[i],2));
+    txt('rput', num(D.put[i],2)); paint_text('rnet', sgn(net,2), nc);
     bar(g('bar'), net, netMax, D.col);
     ladder(i);
   }
@@ -1276,7 +1283,7 @@ _SCRUB_JS = r"""
     for(k=0;k<D.lines.length;k++){
       var L=D.lines[k], v=L.v[i];
       dot('d'+k, x, L.y[i]);
-      var chip=g('c'+k); if(chip) chip.textContent = sgn(v,1);
+      var chip=g('c'+k); if(chip) chip.textContent = sgn(v,2);
       if(v===null||v===undefined) dead.push({i:k}); else {
         live.push({i:k,k:L.k,c:L.c,v:v});
         if(Math.abs(v)>mx) mx=Math.abs(v);
@@ -1287,13 +1294,13 @@ _SCRUB_JS = r"""
     live.concat(dead).forEach(function(o){
       var row=g('row'+o.i); if(row&&board) board.appendChild(row);
       var ve=g('v'+o.i);
-      if(ve) ve.textContent = ('v' in o) ? sgn(o.v,1) : '—';
+      if(ve) ve.textContent = ('v' in o) ? sgn(o.v,2) : '—';
       bar(g('b'+o.i), ('v' in o)?o.v:0, mx, D.col);
     });
     if(live.length){
       var top=live[0], bot=live[live.length-1];
-      paint_text('lead',  top.k+' '+sgn(top.v,1), top.c);
-      paint_text('least', bot.k+' '+sgn(bot.v,1), bot.c);
+      paint_text('lead',  top.k+' '+sgn(top.v,2), top.c);
+      paint_text('least', bot.k+' '+sgn(bot.v,2), bot.c);
     }
   }
 

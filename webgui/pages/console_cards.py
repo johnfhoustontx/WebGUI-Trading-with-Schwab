@@ -185,7 +185,7 @@ def render_sentiment_card(arcs, bias, total, confidence, picture=""):
             with ui.row().classes("items-baseline justify-between w-full"):
                 ui.label("MODEL CONFIDENCE").classes(
                     f"text-[10px] tracking-[.22em] {K.DIM}")
-                ui.label("—" if conf is None else f"{conf * 100:.0f}%").classes(
+                ui.label("—" if conf is None else f"{conf * 100:.2f}%").classes(
                     f"text-[13px] text-[{hero_hex}]")
             K.mount_segmented(conf, hero_hex)
             _link("COMPONENTS →")

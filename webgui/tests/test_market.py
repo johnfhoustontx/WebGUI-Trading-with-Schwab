@@ -32,7 +32,7 @@ def test_tile_text_no_data():
 
 def test_tile_text_net_prem_and_basket():
     call = {"net_prem": True, "skew_pct": 49.0, "net_m": 2983.3}
-    assert market.tile_text(call) == {"last": "Call 49%", "change": "+$2.98B"}
+    assert market.tile_text(call) == {"last": "Call 49.00%", "change": "+$2.98B"}
     mag = {"basket": True, "avg_pct": 0.34, "breadth_text": "8/10 up"}
     assert market.tile_text(mag) == {"last": "+0.34%", "change": "8/10 up"}
 
@@ -88,8 +88,8 @@ def test_dir_color_and_border_and_change_classes():
 
 # ── descriptor line: skew where present, else description ─────────────────────
 def test_descriptor_line_prefers_skew_else_description():
-    assert market.descriptor_line({"prem_skew_pct": 42.9}) == "Call 43%"
-    assert market.descriptor_line({"prem_skew_pct": -22.0}) == "Put 22%"
+    assert market.descriptor_line({"prem_skew_pct": 42.9}) == "Call 42.90%"
+    assert market.descriptor_line({"prem_skew_pct": -22.0}) == "Put 22.00%"
     assert market.descriptor_line({"prem_skew_pct": None}) == "—"   # flagged, no data
     # no skew → the description, uppercased
     assert market.descriptor_line({"description": "20Y TSY"}) == "20Y TSY"

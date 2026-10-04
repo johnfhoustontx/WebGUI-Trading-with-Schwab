@@ -132,7 +132,7 @@ def dial_svg(confidence, name, uid="regime", accent=None, display_font=None):
     parts.append(_text(CX, NAME_Y, _esc(str(name or "").upper()), NAME_SIZE,
                        _P["title"], weight=700, spacing=NAME_TRACK,
                        family=fam or None))
-    parts.append(_text(CX, VALUE_Y, "—" if conf is None else f"{conf * 100:.0f}%",
+    parts.append(_text(CX, VALUE_Y, "—" if conf is None else f"{conf * 100:.2f}%",
                        VALUE_SIZE, accent if conf is not None else _P["muted"],
                        weight=600))
     parts.append(_text(CX, CAPTION_Y, "CONFIDENCE", CAPTION_SIZE, _P["icon"],

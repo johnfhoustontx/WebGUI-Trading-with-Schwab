@@ -41,7 +41,7 @@ def signed(v, nd=2, dash="—"):
     return ("+" if n >= 0 else "−") + body
 
 
-def signed_pct(v, nd=1, dash="—"):
+def signed_pct(v, nd=fmt.DECIMALS, dash="—"):
     """The same sign convention, as a percentage."""
     n = fmt.num(v)
     if n is None:
@@ -136,9 +136,9 @@ def percentile_rail(swing):
 
     stats = []
     if exp is not None:
-        stats.append(f"{exp:+.1%} vs SPY / {int(fmt.num(sm.get('horizon_days')) or 20)}d")
+        stats.append(f"{exp:+.2%} vs SPY / {int(fmt.num(sm.get('horizon_days')) or 20)}d")
     if hit is not None:
-        stats.append(f"{hit:.0%} beat-SPY")
+        stats.append(f"{hit:.2%} beat-SPY")
     return {
         "percentile": f"{int(pct)}th" if pct is not None else "—",
         "pos_pct": pct if pct is not None else 50.0,
@@ -299,7 +299,7 @@ def dealer_ladder(dealer, spot):
     for kind, val, label, cls, emph in sorted(marks, key=lambda m: m[1]):
         out.append({
             "kind": kind,
-            "label": f"{label} {val:g}",
+            "label": f"{label} {fmt.price(val)}",
             "pos_pct": max(0.0, min(100.0, (val - lo) / span * 100.0)),
             "text_class": cls,
             "emphasis": emph,
@@ -415,7 +415,7 @@ def _confidence(hit):
     edge = abs(h - 0.5)
     word = ("Moderate" if edge >= 0.05 else
             "Low" if edge >= 0.02 else "Very low")
-    return word, (f"{h:.0%} of past readings in this band beat the S&P over 20 "
+    return word, (f"{h:.2%} of past readings in this band beat the S&P over 20 "
                   f"trading days — a real but small edge, so size it as one.")
 
 
@@ -491,7 +491,7 @@ def recommendation(analysis):
     share = fmt.num(sm.get("risk_share"))
     caveat = ""
     if share is not None and side in ("long", "short") and head != "Stand aside":
-        caveat = (f"{share:.0%} of this model's weight sits on volatility "
+        caveat = (f"{share:.2%} of this model's weight sits on volatility "
                   f"factors, so the ranking is partly a bet on the market "
                   f"rather than on this company.")
 

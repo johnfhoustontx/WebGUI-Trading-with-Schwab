@@ -451,7 +451,7 @@ def test_captured_rows_carry_the_three_money_fields():
     assert row["entry_credit"] == 1.59
     assert row["current_value"] == 0.5
     assert row["unrealized_pnl"] == 109.0
-    assert row["strikes"] == "130.0/135.0"
+    assert row["strikes"] == "130.00/135.00"
 
 
 def test_captured_rows_use_the_live_dte_not_the_entry_day_snapshot():
@@ -496,10 +496,10 @@ def test_every_book_has_a_chip_and_a_page_to_open():
 
 def test_strikes_text_falls_back_to_the_call_side_for_an_iron_condor():
     assert d.strikes_text({"short_strike": 600.0, "long_strike": 595.0}) == \
-        "600.0/595.0"
+        "600.00/595.00"
     assert d.strikes_text({"short_strike": None, "long_strike": None,
                            "call_short": 620.0, "call_long": 625.0}) == \
-        "620.0/625.0"
+        "620.00/625.00"
     assert d.strikes_text({}) == "—"
 
 
@@ -845,8 +845,8 @@ def test_fmt_money_puts_the_minus_outside_the_dollar_sign():
 def test_fmt_net_prem_scales_exactly_once():
     """``net_prem_m`` arrives ALREADY in millions. Scaling it again here is the
     classic way this column starts printing a plausible thousand-fold error."""
-    assert d.fmt_net_prem(12.4) == "+12.4M"
-    assert d.fmt_net_prem(-8.1) == "-8.1M"
+    assert d.fmt_net_prem(12.4) == "+12.40M"
+    assert d.fmt_net_prem(-8.1) == "-8.10M"
 
 
 def test_strategy_and_dte_text():

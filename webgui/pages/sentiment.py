@@ -1015,7 +1015,7 @@ def render():
             with trend_detail_box:
                 ui.label(
                     f"Trend score {trend_gauge_value(trend):.0f} · "
-                    f"conf {_safe_float(trend.get('confidence')):.0%}"
+                    f"conf {_safe_float(trend.get('confidence')):.2%}"
                 ).classes("text-bold")
                 # Per-horizon state WORDS. The ring shows each horizon's number
                 # but has no room for its label, and the regime badge below names

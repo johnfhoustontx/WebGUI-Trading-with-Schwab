@@ -35,27 +35,27 @@ def test_format_signed_currency():
 
 
 def test_format_signed_pct_takes_a_fraction():
-    assert format_signed_pct(0.08) == "+8.0%"
-    assert format_signed_pct(-0.02) == "-2.0%"
-    assert format_signed_pct(0.0) == "+0.0%"
+    assert format_signed_pct(0.08) == "+8.00%"
+    assert format_signed_pct(-0.02) == "-2.00%"
+    assert format_signed_pct(0.0) == "+0.00%"
     assert format_signed_pct(None) == "—"
 
 
 def test_format_weight_takes_a_fraction():
-    assert format_weight(0.30) == "30.0%"
-    assert format_weight(0.0) == "0.0%"
+    assert format_weight(0.30) == "30.00%"
+    assert format_weight(0.0) == "0.00%"
     assert format_weight(None) == "—"
 
 
 def test_format_vs_sector():
-    assert format_vs_sector({"1M": 110.0, "3M": 95.0}) == "1M 110.0 / 3M 95.0"
+    assert format_vs_sector({"1M": 110.0, "3M": 95.0}) == "1M 110.00 / 3M 95.00"
     assert format_vs_sector(None) == "—"
     assert format_vs_sector({}) == "—"
 
 
 def test_format_vs_sector_none_value_renders_dash():
     # A None value for a window must not raise; it renders the DASH placeholder.
-    assert format_vs_sector({"1M": 110.0, "3M": None}) == "1M 110.0 / 3M —"
+    assert format_vs_sector({"1M": 110.0, "3M": None}) == "1M 110.00 / 3M —"
 
 
 # --- holdings rows ---------------------------------------------------------
@@ -89,8 +89,8 @@ def test_format_holdings_rows_full():
     assert row["market_value"] == "$1,750.00"
     assert row["day_pl"] == "+$25.00"
     assert row["total_pl"] == "+$250.00"
-    assert row["vs_sector"] == "1M 110.0 / 3M 95.0"
-    assert row["since_purchase"] == "+8.0%"
+    assert row["vs_sector"] == "1M 110.00 / 3M 95.00"
+    assert row["since_purchase"] == "+8.00%"
 
 
 def test_format_holdings_rows_none_comparisons_show_dash():
@@ -142,8 +142,8 @@ def test_format_sector_rows_full():
     assert len(rows) == 1
     row = rows[0]
     assert row["sector"] == "Technology"
-    assert row["weight"] == "30.0%"
-    assert row["benchmark_delta"] == "+5.0%"
+    assert row["weight"] == "30.00%"
+    assert row["benchmark_delta"] == "+5.00%"
 
 
 def test_format_sector_rows_none_values_show_dash():
@@ -155,7 +155,7 @@ def test_format_sector_rows_none_values_show_dash():
 def test_format_sector_rows_negative_delta():
     model = {"sectors": [_sector(benchmark_delta=-0.02)]}
     row = format_sector_rows(model)[0]
-    assert row["benchmark_delta"] == "-2.0%"
+    assert row["benchmark_delta"] == "-2.00%"
 
 
 def test_format_sector_rows_empty_model():
@@ -190,7 +190,7 @@ def test_format_performance_rows_full_card():
     assert rows == [{
         "symbol": "ABC", "grade_return": "A", "grade_capital": "B",
         "grade_risk": "A", "grade_execution": "B", "composite": "3.7 (A)",
-        "ann_return": "+40.0%", "vs_sector": "+6.0%", "drawdown": "2.0%",
+        "ann_return": "+40.00%", "vs_sector": "+6.00%", "drawdown": "2.00%",
         "top_action": "HOLD"}]
 
 

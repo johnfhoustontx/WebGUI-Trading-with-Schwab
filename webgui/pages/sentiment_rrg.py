@@ -34,6 +34,7 @@ border tokens.
 """
 import bus_client
 from nicegui import ui
+from pages import fmt as _fmt
 from pages import rrg_view as R
 from pages import ui_kit as kit
 from pages.options import theme
@@ -135,12 +136,12 @@ def render():
         xtick_box.clear()
         with ytick_box:
             for v in R.ticks(dom["y_lo"], dom["y_hi"]):
-                ui.label(f"{v:g}").classes(
+                ui.label(_fmt.plain(v)).classes(
                     f"{_TICK} right-2 -translate-y-1/2 "
                     f"top-[{R.py(v, dom['y_lo'], dom['y_hi']):.2f}%]")
         with xtick_box:
             for v in R.ticks(dom["x_lo"], dom["x_hi"]):
-                ui.label(f"{v:g}").classes(
+                ui.label(_fmt.plain(v)).classes(
                     f"{_TICK} top-2 -translate-x-1/2 "
                     f"left-[{R.px(v, dom['x_lo'], dom['x_hi']):.2f}%]")
 

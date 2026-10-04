@@ -147,11 +147,11 @@ def _sub(remaining, n):
 
 
 def _money(v):
-    """``$250`` for a real dollar reading, else "" - never a hardcoded figure."""
+    """``$250.00`` for a real dollar reading, else "" - never a hardcoded figure."""
     f = num(v)
     if f is None or f <= 0:
         return ""
-    return f"${f:,.0f}" if f == int(f) else f"${f:,.2f}"
+    return f"${f:,.2f}"
 
 
 def _plural(n, one, many=None):

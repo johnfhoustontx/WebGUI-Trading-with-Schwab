@@ -71,9 +71,9 @@ def footer_summary(points):
     parts = []
     if len(rows) > 1 and margin is not None:
         parts.append(f"{rows[0]['label']} leads {rows[1]['label']} "
-                     f"by {margin * 100:.1f} pp")
+                     f"by {margin * 100:.2f} pp")
     if tightest is not None:
-        parts.append(f"tightest spread today {tightest * 100:.1f} pp")
+        parts.append(f"tightest spread today {tightest * 100:.2f} pp")
     dormant = [r["label"].lower() for r in rows if r["now"] <= 0.0]
     if dormant:
         parts.append(f"{', '.join(dormant)} dormant")

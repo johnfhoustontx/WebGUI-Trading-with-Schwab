@@ -108,24 +108,24 @@ def test_tiles_are_always_six_in_a_fixed_order():
 def test_tiles_for_a_credit_spread():
     t = _by_key(sv.position_tiles(PCS_10, _result(delta=145.0, theta=42.0)))
     assert t["entry"]["label"] == "Entry credit"
-    assert t["entry"]["value"] == "$1,000"
-    assert t["max_profit"]["value"] == "$1,000"
+    assert t["entry"]["value"] == "$1,000.00"
+    assert t["max_profit"]["value"] == "$1,000.00"
     assert t["max_profit"]["tone"] == "pos"
-    assert t["max_loss"]["value"] == "$4,000"
+    assert t["max_loss"]["value"] == "$4,000.00"
     assert t["max_loss"]["tone"] == "neg"
     assert t["breakeven"]["label"] == "Breakeven"
     assert t["breakeven"]["value"] == "329.00"
-    assert t["breakeven"]["sub"] == "7.1% below spot"
+    assert t["breakeven"]["sub"] == "7.06% below spot"
     assert t["delta"]["value"] == "+145"
     assert t["delta"]["sub"] == "moves like 145 shares long"
-    assert t["theta"]["value"] == "+$42"
+    assert t["theta"]["value"] == "+$42.00"
     assert t["theta"]["tone"] == "pos"
 
 
 def test_a_debit_is_labelled_as_one():
     t = _by_key(sv.position_tiles([_leg("call", "long", 100.0)], _result(baseline=500.0)))
     assert t["entry"]["label"] == "Entry debit"
-    assert t["entry"]["value"] == "$500"
+    assert t["entry"]["value"] == "$500.00"
     assert t["max_profit"]["value"] == "Unlimited"
 
 
@@ -155,7 +155,7 @@ def test_a_legacy_per_share_payload_is_scaled_to_the_position():
     Greeks; the tile must not print 1.45 under a shares-equivalent label."""
     t = _by_key(sv.position_tiles(PCS_10, _result(delta=1.45, theta=0.42, units=None)))
     assert t["delta"]["value"] == "+145"
-    assert t["theta"]["value"] == "+$42"
+    assert t["theta"]["value"] == "+$42.00"
 
 
 def test_a_nan_greek_is_an_em_dash():
@@ -235,10 +235,10 @@ def test_whatif_readout_states_price_date_and_result():
     now = dt.datetime(2026, 9, 11, 11, 0, tzinfo=CT)
     pairs = [[100.0, -200.0], [110.0, 300.0]]
     text, tone = sv.whatif_readout(pairs, 105.0, 17, now)
-    assert text == "At 105.00 on Sep 28: profit $50"
+    assert text == "At 105.00 on Sep 28: profit $50.00"
     assert tone == "pos"
     text, tone = sv.whatif_readout(pairs, 101.0, 0, now)
-    assert text == "At 101.00 today: loss $150"
+    assert text == "At 101.00 today: loss $150.00"
     assert tone == "neg"
     text, _ = sv.whatif_readout(pairs, 101.0, 0.25, now)
     assert text.startswith("At 101.00 in 6 hours:")
@@ -330,7 +330,7 @@ def test_empty_state_names_a_strike_the_chain_does_not_list():
     legs = [_leg("put", "short", 330.0, 1, "2026-10-23"),
             _leg("put", "long", 330.0, 1, "2026-09-09")]
     assert sv.empty_state_text(_META, legs) == (
-        "Leg 02: the 330 put is not listed for Sep 9. "
+        "Leg 02: the 330.00 put is not listed for Sep 9. "
         "Pick another strike or reload the chain.")
 
 
@@ -353,12 +353,12 @@ def test_ivshock_table_rows_are_in_position_units():
     rows = {r["label"]: r for r in t["rows"]}
     assert list(rows) == ["Position value", "Delta", "Gamma", "Theta per day",
                           "Vega per volatility point"]
-    assert rows["Position value"]["base"] == "-$1,000"
-    assert rows["Position value"]["shock"] == "-$2,050"
-    assert rows["Position value"]["change"] == "-$1,050"
+    assert rows["Position value"]["base"] == "-$1,000.00"
+    assert rows["Position value"]["shock"] == "-$2,050.00"
+    assert rows["Position value"]["change"] == "-$1,050.00"
     assert rows["Position value"]["tone"] == "neg"
     assert rows["Delta"]["base"] == "+145"
-    assert rows["Theta per day"]["change"] == "+$18"
+    assert rows["Theta per day"]["change"] == "+$18.00"
     assert rows["Theta per day"]["tone"] == "pos"
 
 
@@ -368,11 +368,11 @@ def test_a_legacy_per_share_payload_builds_the_same_table():
 
 def test_ivshock_headline_states_the_result_in_words():
     t = sv.ivshock_table(_shock("position", 100.0), 1.5)
-    assert t["headline"] == "If volatility rises 50%, this position loses $1,050."
+    assert t["headline"] == "If volatility rises 50.00%, this position loses $1,050.00."
     assert t["tone"] == "neg"
     gain = {"base": {"theo_price": 500.0}, "shock": {"theo_price": 350.0}, "units": "position"}
     t = sv.ivshock_table(gain, 0.7)
-    assert t["headline"] == "If volatility falls 30%, this position loses $150."
+    assert t["headline"] == "If volatility falls 30.00%, this position loses $150.00."
     flat = {"base": {"theo_price": 500.0}, "shock": {"theo_price": 500.2}, "units": "position"}
     assert sv.ivshock_table(flat, 2.0)["headline"] == \
         "If volatility doubles, this position barely changes."
@@ -422,7 +422,7 @@ def test_replay_tick_positions_for_one_session_use_the_service_ticks():
 def test_replay_cursor_text_states_the_bar():
     trace = {"timestamps": ["2026-08-24T13:45:00"], "prices": [356.2],
              "pnl": [1230.0], "greeks": {"delta": [145.2]}, "units": "position"}
-    assert sv.replay_cursor_text(trace, 0) ==         "Aug 24 13:45 — price 356.20, profit $1,230, delta +145"
+    assert sv.replay_cursor_text(trace, 0) ==         "Aug 24 13:45 — price 356.20, profit $1,230.00, delta +145"
 
 
 def test_replay_cursor_text_at_the_first_bar_and_without_pnl():
@@ -500,7 +500,7 @@ def test_small_dollar_figures_keep_their_cents():
          "shock": {"theo_price": -243.0, "vega": -0.9}, "units": "position"}, 1.5)["rows"]}
     assert rows["Vega per volatility point"]["base"] == "-$0.82"
     assert rows["Vega per volatility point"]["change"] == "-$0.08"
-    assert rows["Position value"]["base"] == "-$230"
+    assert rows["Position value"]["base"] == "-$230.00"
     text, _ = sv.whatif_readout([[100.0, 0.0], [110.0, 4.28]], 105.0, 0,
                                 dt.datetime(2026, 9, 11, tzinfo=CT))
     assert text.endswith("profit $2.14")
@@ -538,14 +538,14 @@ def test_a_near_zero_delta_is_not_minus_zero():
 
 def test_a_rounding_zero_dollar_figure_is_plain_zero():
     t = _by_key(sv.position_tiles(PCS_10, _result(theta=-0.004)))
-    assert t["theta"]["value"] == "$0"
+    assert t["theta"]["value"] == "$0.00"
 
 
 def test_two_breakevens_give_both_distances():
     legs = [_leg("put", "short", 95.0), _leg("put", "long", 90.0),
             _leg("call", "short", 105.0), _leg("call", "long", 110.0)]
     t = _by_key(sv.position_tiles(legs, _result(baseline=-150.0, spot=100.0)))
-    assert t["breakeven"]["sub"] == "6.5% below and 6.5% above spot"
+    assert t["breakeven"]["sub"] == "6.50% below and 6.50% above spot"
 
 
 def test_the_cursor_on_a_daily_bar_reads_a_date_like_the_axis():

@@ -127,14 +127,14 @@ def board_rows(board):
             "pctl": f"{int(pct)}th" if pct is not None else "—",
             "score": tt.signed(comp, 2),
             "score_class": T.sign_text(comp),
-            "exp": tt.signed_pct(exp, 1),
+            "exp": tt.signed_pct(exp),
             "exp_class": T.sign_text(exp) if exp is not None else T.OFF,
-            "hit": f"{hit:.0%}" if hit is not None else "—",
+            "hit": f"{hit:.2%}" if hit is not None else "—",
             "band": r.get("band"),
-            "dtc": f"{dtc:.1f}" if dtc is not None else "—",
+            "dtc": f"{dtc:.2f}" if dtc is not None else "—",
             "dealer": r.get("dealer") or "not collected",
             "dealer_class": _dealer_class(r.get("dealer")),
-            "iv": f"{iv:.0f}" if iv is not None else "—",
+            "iv": f"{iv:.2f}" if iv is not None else "—",
             "iv_state": r.get("iv_state") or "",
             "iv_class": _iv_class(r.get("iv_state")),
             "gate": "; ".join(gates) if gates else "clear",
@@ -223,7 +223,7 @@ def board_exposure_note(board):
     share = fmt.num((board or {}).get("risk_share"))
     if share is None:
         return ""
-    return (f"{share:.0%} of the ranking weight sits on volatility factors — "
+    return (f"{share:.2%} of the ranking weight sits on volatility factors — "
             "so the top of this board is the high-beta end of the universe, "
             "and that ordering reverses when the market falls.")
 
@@ -249,7 +249,7 @@ def book_rows(book):
             "side": p.get("side") or "—",
             "expression": p.get("expression") or "—",
             "opened_on": p.get("opened_on") or "—",
-            "pnl": tt.signed_pct(pnl, 1),
+            "pnl": tt.signed_pct(pnl),
             "pnl_class": T.sign_text(pnl) if pnl is not None else T.OFF,
             "status": p.get("status") or "—",
             "close_reason": p.get("close_reason") or "",
@@ -263,8 +263,8 @@ def _side_bit(label, s):
     if not n or mean is None:
         return f"{label} — no closed trades"
     hr = fmt.num((s or {}).get("hit_rate"))
-    hit = f", {hr:.0%} hit" if hr is not None else ""
-    return f"{label} {mean:+.1%} mean over {n}{hit}"
+    hit = f", {hr:.2%} hit" if hr is not None else ""
+    return f"{label} {mean:+.2%} mean over {n}{hit}"
 
 
 def book_summary_line(book):

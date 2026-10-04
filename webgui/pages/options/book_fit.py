@@ -41,7 +41,7 @@ def short_reason(rung):
     rung = rung or {}
     cap = num(rung.get("cap"))
     if rung.get("code") == book_caps.TRADE_RISK_CAP and cap is not None:
-        return f"over ${cap:,.0f} per trade"
+        return f"over ${cap:,.2f} per trade"
     return _SHORT.get(rung.get("code"), "blocked")
 
 

@@ -124,7 +124,7 @@ def test_format_payload_builds_display_rows():
                                      errors=[])
     assert payload["holdings_rows"][0]["symbol"] == "AAPL"
     assert payload["holdings_rows"][0]["market_value"] == "$1,100.00"
-    assert payload["sector_rows"][0]["weight"] == "100.0%"
+    assert payload["sector_rows"][0]["weight"] == "100.00%"
     assert isinstance(payload["performance_rows"], list)
     # a card + a suggestion exist for the holding (REVIEW with no baseline)
     assert "AAPL" in payload["suggestions"]

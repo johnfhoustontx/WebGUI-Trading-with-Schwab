@@ -104,12 +104,12 @@ def test_legs_summary_empty_none():
     assert st.legs_summary(None) == "—"
 
 
-def test_legs_summary_drops_trailing_zero_on_whole_strike():
+def test_legs_summary_prints_a_whole_strike_to_two_places():
     legs = [{"kind": "call", "side": "long", "strike": 450.0}]
     assert st.legs_summary(legs) == "L 450.00C"
 
 
-def test_legs_summary_keeps_fractional_strike():
+def test_legs_summary_prints_a_fractional_strike_to_two_places():
     legs = [{"kind": "put", "side": "short", "strike": 437.5}]
     assert st.legs_summary(legs) == "S 437.50P"
 
@@ -690,7 +690,7 @@ def test_detail_signal_skips_a_non_numeric_breakeven():
 def test_panel_covered_call_shows_shares_and_per_position_money():
     from pages.options import detail
     s = st.detail_signal(_covered_call())
-    assert detail.contract_lines(s) == ["Buy 100 shares", "Sell 545 C"]
+    assert detail.contract_lines(s) == ["Buy 100 shares", "Sell 545.00 C"]
     assert detail.expiry_caption(s) == "Exp 2026-10-16"
     assert detail.cost_row(s) == ("Debit", "$53,616.00 per position")
     assert detail.money_for(s, s["max_loss"]) == "$53,616.00 per position"
@@ -699,8 +699,8 @@ def test_panel_covered_call_shows_shares_and_per_position_money():
 def test_panel_calendar_dates_each_leg_and_drops_the_single_exp():
     from pages.options import detail
     s = st.detail_signal(_calendar())
-    assert detail.contract_lines(s) == ["Sell 100 C  2026-10-16",
-                                        "Buy 100 C  2026-11-13"]
+    assert detail.contract_lines(s) == ["Sell 100.00 C  2026-10-16",
+                                        "Buy 100.00 C  2026-11-13"]
     assert detail.expiry_caption(s) is None
     assert detail.cost_row(s) == ("Debit", "$130.00 per contract")
 
@@ -708,6 +708,6 @@ def test_panel_calendar_dates_each_leg_and_drops_the_single_exp():
 def test_panel_butterfly_body_uses_the_tables_quantity_marker():
     from pages.options import detail
     s = st.detail_signal(_butterfly())
-    assert detail.contract_lines(s) == ["Buy 95 C  /  Sell 2× 100 C  /  Buy 105 C"]
+    assert detail.contract_lines(s) == ["Buy 95.00 C  /  Sell 2× 100.00 C  /  Buy 105.00 C"]
     assert detail.expiry_caption(s) == "Exp 2026-10-16"
     assert detail.breakeven_text(s["breakeven"]) == "$96.30 / $103.70"

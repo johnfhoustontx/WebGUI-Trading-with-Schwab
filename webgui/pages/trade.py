@@ -71,7 +71,7 @@ def _fmt(v, nd=1):
 
 
 def _pct(v):
-    return "—" if v is None else f"{v * 100:.1f}%"
+    return "—" if v is None else f"{v * 100:.2f}%"
 
 
 def _days(n):
@@ -154,7 +154,7 @@ def fundamentals_rows(f):
     if not f:
         return []
     rows = [
-        ("P/E", _fmt(f.get("pe_ratio"), 1)),
+        ("P/E", _fmt(f.get("pe_ratio"), 2)),
         ("PEG", _fmt(f.get("peg_ratio"), 2)),
         ("Revenue growth", _pct(f.get("rev_growth_ttm"))),
         ("EPS growth", _pct(f.get("eps_growth_ttm"))),
@@ -274,9 +274,9 @@ def swing_headline(sm):
     tilt, tone = swing_tilt(sm)
     parts = []
     if exp is not None:
-        parts.append(f"{exp:+.1%} excess / {_days(hzn)}")
+        parts.append(f"{exp:+.2%} excess / {_days(hzn)}")
     if hit is not None:
-        parts.append(f"{hit:.0%} beat-SPY")
+        parts.append(f"{hit:.2%} beat-SPY")
     return {"tilt": tilt, "tone": tone, "line": " · ".join(parts)}
 
 
@@ -352,7 +352,7 @@ def swing_exposure_note(sm):
     share = (sm or {}).get("risk_share")
     if not isinstance(share, (int, float)) or isinstance(share, bool):
         return ""
-    pct = f"{share:.0%}"
+    pct = f"{share:.2%}"
     base = f"{pct} of this score's weight sits on volatility factors"
     if share < _EXPOSURE_CAVEAT_AT:
         return base + "."
@@ -600,7 +600,7 @@ def plan_rows(plan):
         rows.append({"label": "Entry zone", "value": plan["entry_zone"],
                      "note": ""})
     if plan.get("stop") is not None:
-        rows.append({"label": "Stop", "value": f"{plan['stop']:g}",
+        rows.append({"label": "Stop", "value": fmt.price(plan['stop']),
                      "note": plan.get("stop_note") or ""})
     if plan.get("target"):
         rows.append({"label": "Target", "value": plan["target"], "note": ""})

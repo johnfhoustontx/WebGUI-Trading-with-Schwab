@@ -73,20 +73,22 @@ def _dict(v):
 
 
 def _strike(v):
-    """``100`` for 100.0, ``97.5`` for 97.5 - a strike as a trader writes it."""
-    return f"{v:,.0f}" if v == int(v) else f"{v:,.2f}".rstrip("0").rstrip(".")
+    """``100.00`` for 100.0, ``97.50`` for 97.5 - a strike or a level, to two
+    places like every other price on the screen."""
+    return f"{v:,.2f}"
 
 
-def _tenths(v):
-    """``v`` truncated to tenths, so a printed figure never rounds across a
-    threshold its colour was decided on (0.99 prints 0.9, 10.19 prints 10.1)."""
-    return math.floor(v * 10 + 1e-9) / 10
+def _hundredths(v):
+    """``v`` truncated to hundredths, so a printed figure never rounds across a
+    threshold its colour was decided on (0.999 prints 0.99, 10.199 prints
+    10.19)."""
+    return math.floor(v * 100 + 1e-9) / 100
 
 
 def _pct(v):
-    """``8`` for 8.0, ``10.1`` for 10.1 - truncated like every other figure here."""
-    t = _tenths(v)
-    return f"{t:.0f}" if t == int(t) else f"{t:.1f}"
+    """``8.00`` for 8.0, ``10.19`` for 10.199 - truncated like every other
+    figure here."""
+    return f"{_hundredths(v):.2f}"
 
 
 def _date(v):
@@ -310,9 +312,9 @@ def _em(row, matrix):
     suffix = " (scan price)" if from_scan else ""
     if dist <= 0:
         return _check("em", "warn", f"{name} is at or past the price{suffix}")
-    tenths = _tenths(dist)
-    text = f"{name} is {tenths:.1f} expected moves from the price{suffix}"
-    return _check("em", "pos" if tenths >= EM_OK else "warn", text)
+    shown = _hundredths(dist)
+    text = f"{name} is {shown:.2f} expected moves from the price{suffix}"
+    return _check("em", "pos" if shown >= EM_OK else "warn", text)
 
 
 def _wall(row, matrix):

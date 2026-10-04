@@ -179,7 +179,7 @@ def test_a_landed_result_paints_the_six_cards_and_the_matrix(page):
     for label in ("ENTRY CREDIT", "MAX RISK", "MAX RETURN", "RETURN ON RISK",
                   "BREAKEVEN(S)", "PROB OF PROFIT"):
         assert label in texts, f"metric card {label!r} missing"
-    assert "$320" in texts and "56.3%" in texts and "658.20" in texts
+    assert "$320.00" in texts and "56.30%" in texts and "658.20" in texts
     assert "PRICE × DATE · 2 ROWS · % OF MAX RETURN" in texts
     assert not [t for t in texts if t.startswith("AWAITING")]
 

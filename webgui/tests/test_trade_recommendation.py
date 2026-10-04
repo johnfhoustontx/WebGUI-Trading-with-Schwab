@@ -123,7 +123,7 @@ class TestConfidenceIsHonest:
 
     def test_the_confidence_note_states_the_actual_hit_rate(self):
         note = tt.recommendation(_a(hit=0.5268))["confidence_note"]
-        assert "53%" in note
+        assert "52.68%" in note
 
     def test_an_unknown_hit_rate_does_not_invent_confidence(self):
         r = tt.recommendation(_a(hit=None))
@@ -135,8 +135,8 @@ class TestTheRankSurvivesAsInformation:
     def test_the_rank_line_carries_the_band_and_the_calibrated_stats(self):
         line = tt.recommendation(_a())["rank_line"]
         assert "90th" in line
-        assert "+1.6%" in line
-        assert "53%" in line
+        assert "+1.57%" in line
+        assert "52.68%" in line
 
     def test_the_rank_line_does_not_claim_a_rank_among_todays_names(self):
         line = tt.recommendation(_a())["rank_line"].lower()
@@ -151,7 +151,7 @@ class TestTheCaveatTravelsWithTheRecommendation:
     def test_the_exposure_share_is_disclosed_on_the_recommendation(self):
         """It used to sit on the Evidence screen. A card that only ranked could
         afford that; a card that says "Buy" cannot."""
-        assert "48%" in tt.recommendation(_a(risk_share=0.476))["caveat"]
+        assert "47.60%" in tt.recommendation(_a(risk_share=0.476))["caveat"]
 
     def test_an_unknown_share_says_nothing_rather_than_implying_zero(self):
         assert tt.recommendation(_a(risk_share=None))["caveat"] == ""

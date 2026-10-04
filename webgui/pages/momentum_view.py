@@ -221,7 +221,7 @@ def quadrant_panels(rows, top_names=3):
         members = [_member(r) for r in got]
         out.append({
             "name": q, "count": len(got), "blurb": QUAD_BLURB[q],
-            "share": f"{round(len(got) / total * 100) if total else 0}%",
+            "share": f"{(len(got) / total * 100) if total else 0:.2f}%",
             "bar_pct": (len(got) / fullest * 100.0) if fullest else 0.0,
             "members": members,
             "names": members[:top_names],

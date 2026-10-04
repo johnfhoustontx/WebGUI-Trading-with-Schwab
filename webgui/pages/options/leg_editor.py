@@ -49,6 +49,7 @@ from types import SimpleNamespace
 
 from nicegui import ui
 
+from pages import fmt as _fmt
 from pages import ui_kit as kit
 
 from . import entry as _entry
@@ -258,8 +259,8 @@ _TABLE_GRIDS_TYPED = {
 
 
 def _strike_text(strike):
-    """A strike as the dropdown shows it: ``570``, ``567.5`` - never ``570.0``."""
-    return "" if strike is None else f"{strike:g}"
+    """A strike as the dropdown shows it: ``570.00``, ``567.50``."""
+    return "" if strike is None else _fmt.strike(strike)
 
 
 def strike_choices(strikes):

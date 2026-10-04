@@ -283,7 +283,8 @@ def test_table_strike_is_a_dropdown_of_the_real_ladder():
     _, container = _table([_leg()])
     sel = _hook(container, "leg-strike")
     assert isinstance(sel, ui.select)
-    assert sel.options == {560.0: "560", 565.0: "565", 570.0: "570", 575.0: "575"}
+    assert sel.options == {560.0: "560.00", 565.0: "565.00", 570.0: "570.00",
+                           575.0: "575.00"}
     assert sel.value == 570.0
 
 

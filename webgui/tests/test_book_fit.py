@@ -59,8 +59,8 @@ def test_no_sector_table_means_no_preview():
 
 def test_short_reason_for_the_checklist_chip():
     assert book_fit.short_reason({"code": "SECTOR_POSITION_CAP"}) == "sector full"
-    assert book_fit.short_reason({"code": "TRADE_RISK_CAP", "cap": 750.0}) == "over $750 per trade"
-    assert book_fit.short_reason({"code": "TRADE_RISK_CAP", "cap": 250.0}) == "over $250 per trade"
+    assert book_fit.short_reason({"code": "TRADE_RISK_CAP", "cap": 750.0}) == "over $750.00 per trade"
+    assert book_fit.short_reason({"code": "TRADE_RISK_CAP", "cap": 250.0}) == "over $250.00 per trade"
 
 
 def test_the_page_module_imports_exactly_book_caps_and_num():

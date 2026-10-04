@@ -29,7 +29,7 @@ def test_eval_date_labels():
 
 
 def test_formatters():
-    assert calc.fmt_pct(12.34) == "+12.3%"
+    assert calc.fmt_pct(12.34) == "+12.34%"
 
 
 def test_extract_atm_iv_picks_closest_strike():
@@ -492,7 +492,7 @@ def test_matrix_basis_uses_max_return_for_a_credit_spread():
     b = calc.matrix_basis({"max_profit": 180.0, "max_loss": 320.0,
                            "entry_credit": 180.0})
     assert b == {"kind": "max", "denominator": 180.0, "heading": "% MAX"}
-    assert calc.matrix_cell_facts(90.0, b, g_max=180.0, g_min=-320.0)["pct"] == "+50.0%"
+    assert calc.matrix_cell_facts(90.0, b, g_max=180.0, g_min=-320.0)["pct"] == "+50.00%"
 
 
 def test_matrix_basis_falls_back_to_cost_for_a_long_call():
@@ -502,8 +502,8 @@ def test_matrix_basis_falls_back_to_cost_for_a_long_call():
     b = calc.matrix_basis({"max_profit": calc.UNLIMITED, "max_loss": 400.0,
                            "entry_credit": -400.0})
     assert b == {"kind": "cost", "denominator": 400.0, "heading": "% COST"}
-    assert calc.matrix_cell_facts(500.0, b, g_max=500.0, g_min=-400.0)["pct"] == "+125.0%"
-    assert calc.matrix_cell_facts(-400.0, b, g_max=500.0, g_min=-400.0)["pct"] == "-100.0%"
+    assert calc.matrix_cell_facts(500.0, b, g_max=500.0, g_min=-400.0)["pct"] == "+125.00%"
+    assert calc.matrix_cell_facts(-400.0, b, g_max=500.0, g_min=-400.0)["pct"] == "-100.00%"
 
 
 def test_matrix_basis_claims_nothing_when_there_is_neither():
@@ -626,7 +626,7 @@ def test_matrix_cell_facts_survives_a_degenerate_grid():
     # by it, and the alpha must stay a legal CSS value.
     flat = calc.matrix_cell_facts(0.0, _basis(180.0), g_max=0.0, g_min=0.0)
     assert 0.0 < flat["alpha"] <= 1.0
-    assert flat["dollars"] == "+0"
+    assert flat["dollars"] == "+0.00"
 
 
 def test_matrix_cell_facts_never_renders_a_real_reading_as_no_reading():
@@ -641,7 +641,7 @@ def test_matrix_cell_facts_never_renders_a_real_reading_as_no_reading():
 
 def test_matrix_cell_pct_is_a_share_of_max_return():
     cell = calc.matrix_cell_facts(90.0, _basis(180.0), g_max=100.0, g_min=-50.0)
-    assert cell["pct"] == "+50.0%"
+    assert cell["pct"] == "+50.00%"
 
 
 def test_matrix_cell_pct_is_an_em_dash_without_a_max_return():
@@ -655,7 +655,7 @@ def test_matrix_cell_pct_is_an_em_dash_for_the_unlimited_sentinel():
     # measurement stated confidently.
     cell = calc.matrix_cell_facts(90.0, _basis(calc.UNLIMITED), g_max=100.0, g_min=-50.0)
     assert cell["pct"] == "—"
-    assert cell["dollars"] == "+90"          # the dollar figure is still real
+    assert cell["dollars"] == "+90.00"          # the dollar figure is still real
 
 
 def test_matrix_cell_pct_clamps_at_both_ends_not_just_the_top():
@@ -775,7 +775,7 @@ def test_matrix_html_names_the_percentage_column_after_its_denominator():
 
 def test_matrix_html_prints_the_percentage_against_max_return():
     html = calc.matrix_html(["Now", "Exp"], _matrix_data(), spot=450.0, summary={"max_profit": 180.0})
-    assert "+50.0%" in html          # the 90.0 cell against a 180 max return
+    assert "+50.00%" in html         # the 90.0 cell against a 180 max return
     assert "+90" in html
 
 
@@ -803,8 +803,8 @@ def test_matrix_html_gives_a_long_call_real_percentages_not_em_dashes():
                             summary={"max_profit": calc.UNLIMITED,
                                      "max_loss": 400.0, "entry_credit": -400.0})
     body = html.split("</thead>")[1]
-    assert "+22.5%" in body         # the +90 cell against a 400 cost
-    assert "-75.0%" in body         # …and the -300 cell
+    assert "+22.50%" in body        # the +90 cell against a 400 cost
+    assert "-75.00%" in body        # …and the -300 cell
     # The ONLY em-dashes left are the two belonging to the one cell that
     # genuinely carries no P&L — not a column-wide "no basis" wipe.
     assert body.count("—") == 2
@@ -876,12 +876,12 @@ def test_metric_card_values_carry_the_dollar_figures():
                                "breakevens": [658.2], "pop": 71.4},
                               legs=[], spot=668.41, max_dte=9)
     by_label = {c["label"]: c["value"] for c in cards}
-    assert by_label["ENTRY CREDIT"] == "$180"
-    assert by_label["MAX RISK"] == "$320"
-    assert by_label["MAX RETURN"] == "$180"
-    assert by_label["RETURN ON RISK"] == "56.3%"
+    assert by_label["ENTRY CREDIT"] == "$180.00"
+    assert by_label["MAX RISK"] == "$320.00"
+    assert by_label["MAX RETURN"] == "$180.00"
+    assert by_label["RETURN ON RISK"] == "56.30%"
     assert by_label["BREAKEVEN(S)"] == "658.20"
-    assert by_label["PROB OF PROFIT"] == "71.4%"
+    assert by_label["PROB OF PROFIT"] == "71.40%"
 
 
 def test_metric_cards_keep_the_designs_order():
@@ -959,7 +959,7 @@ def test_return_on_risk_sub_is_an_em_dash_without_a_horizon():
     # invented horizon of a single day.
     cards = calc.metric_cards({"return_on_risk": 56.0}, legs=[], spot=1.0, max_dte=None)
     ror = next(c for c in cards if c["label"] == "RETURN ON RISK")
-    assert ror["value"] == "56.0%"
+    assert ror["value"] == "56.00%"
     assert ror["sub"] == "—"
 
 
@@ -1006,7 +1006,7 @@ def test_max_return_keeps_the_sign_of_a_losing_structure():
     # CAN be negative. Printing it as "$300" would invert the reading.
     cards = calc.metric_cards({"max_profit": -300.0}, legs=[], spot=1.0, max_dte=9)
     ret = next(c for c in cards if c["label"] == "MAX RETURN")
-    assert ret["value"] == "-$300"
+    assert ret["value"] == "-$300.00"
 
 
 def test_prob_of_profit_accent_follows_the_reading():
@@ -1052,23 +1052,23 @@ def test_compact_money_renders_an_em_dash_for_no_reading():
 
 
 def test_compact_money_keeps_small_figures_exact():
-    assert calc.compact_money(320.0) == "$320"
-    assert calc.compact_money(-400.0) == "-$400"
-    assert calc.compact_money(180.0, signed=True) == "+$180"
-    assert calc.compact_money(-400.0, signed=True) == "-$400"
+    assert calc.compact_money(320.0) == "$320.00"
+    assert calc.compact_money(-400.0) == "-$400.00"
+    assert calc.compact_money(180.0, signed=True) == "+$180.00"
+    assert calc.compact_money(-400.0, signed=True) == "-$400.00"
 
 
 def test_compact_money_abbreviates_past_the_frame_width():
     # A naked put on a 660 strike is $65,700 and a naked NDX put is millions —
     # the ③ LEGS strip has ~130px for this, beside two other readings.
-    assert calc.compact_money(65_700.0) == "$65,700"
-    assert calc.compact_money(120_000.0) == "$120K"
+    assert calc.compact_money(65_700.0) == "$65,700.00"
+    assert calc.compact_money(120_000.0) == "$120.00K"
     assert calc.compact_money(2_488_000.0) == "$2.49M"
     assert calc.compact_money(-2_488_000.0, signed=True) == "-$2.49M"
 
 
 def test_compact_money_zero_is_a_reading_not_a_blank():
-    assert calc.compact_money(0.0) == "$0"
+    assert calc.compact_money(0.0) == "$0.00"
 
 
 def test_leg_strip_facts_reads_the_legs():
@@ -1076,9 +1076,9 @@ def test_leg_strip_facts_reads_the_legs():
             {"option_type": "put", "side": "long", "strike": 655, "premium": 1.2, "qty": 1}]
     facts = calc.leg_strip_facts(legs)
     assert facts["count"] == "2 LEGS"
-    assert facts["net"] == "NET +$180"
+    assert facts["net"] == "NET +$180.00"
     assert facts["net_tone"] == "pos"
-    assert facts["max_loss"] == "MAX LOSS $320"
+    assert facts["max_loss"] == "MAX LOSS $320.00"
 
 
 def test_leg_strip_facts_em_dashes_an_unpriced_template():
@@ -1097,21 +1097,21 @@ def test_leg_strip_facts_em_dashes_an_unbounded_loss():
     legs = [{"option_type": "call", "side": "short", "strike": 700, "premium": 2.0, "qty": 1}]
     facts = calc.leg_strip_facts(legs)
     assert facts["count"] == "1 LEG"
-    assert facts["net"] == "NET +$200"
+    assert facts["net"] == "NET +$200.00"
     assert facts["max_loss"] == "MAX LOSS —"
 
 
 def test_leg_strip_facts_marks_a_debit_negative():
     legs = [{"option_type": "call", "side": "long", "strike": 670, "premium": 4.0, "qty": 1}]
     facts = calc.leg_strip_facts(legs)
-    assert facts["net"] == "NET -$400"
+    assert facts["net"] == "NET -$400.00"
     assert facts["net_tone"] == "neg"
 
 
 def test_leg_strip_facts_on_no_legs():
     facts = calc.leg_strip_facts([])
     assert facts["count"] == "0 LEGS"
-    assert facts["net"] == "NET +$0"
+    assert facts["net"] == "NET +$0.00"
 
 
 # ── the two derived copy lines ──────────────────────────────────────────────
@@ -1379,7 +1379,7 @@ def test_a_real_max_loss_is_still_a_figure():
     risk = next(c for c in calc.metric_cards({"max_loss": 320.0}, legs=[], spot=1.0,
                                              max_dte=9)
                 if c["label"] == "MAX RISK")
-    assert risk["value"] == "$320"
+    assert risk["value"] == "$320.00"
     assert risk["sub"] == "worst case at expiry"
     assert risk["accent"] == "neg"
 

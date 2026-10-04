@@ -10,6 +10,9 @@ import datetime as dt
 import html as _html
 import math
 
+from ..fmt import plain as _plain
+from ..fmt import strike as _strike_text
+
 
 def _finite(v):
     """``v`` as a float when it is a real finite number, else None.
@@ -285,7 +288,7 @@ def cell_text(field, value):
     if field in _GREEK_FIELDS:
         return f"{v:.2f}"
     if field == "volatility":
-        return f"{v:.1f}" if 0 < v < _SENTINEL else "—"
+        return f"{v:.2f}" if 0 < v < _SENTINEL else "—"
     return _compact(v)
 
 
@@ -355,7 +358,8 @@ def expiry_pills(expiries, today):
 
 
 def _strike_attr(strike):
-    return f"{strike:g}"
+    """The ``data-strike`` a click reads back - the number, not its display."""
+    return _plain(strike)
 
 
 def grid_body_html(rows, call_cols, put_cols, track, tokens):
@@ -382,7 +386,8 @@ def grid_body_html(rows, call_cols, put_cols, track, tokens):
             if side == "put":
                 cls = tokens["strike_atm"] if row.get("atm") else tokens["strike"]
                 out.append(f'<div class="entry-gstrike {esc(cls)} text-center '
-                           f'rounded-[2px] py-0.5">{esc(k)}</div>')
+                           f'rounded-[2px] py-0.5">'
+                           f'{esc(_strike_text(row["strike"]))}</div>')
             contract = row.get(side) or {}
             for field in cols:
                 text = esc(cell_text(field, contract.get(field)))

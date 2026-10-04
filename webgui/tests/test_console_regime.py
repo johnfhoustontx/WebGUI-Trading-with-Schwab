@@ -117,8 +117,8 @@ def test_sparkline_never_raises(series):
 # ---------------------------------------------------------------- change
 def test_change_text_signs_and_colours():
     rows = {r["key"]: r for r in RM.rank_rows(_session())}
-    assert CR.change_text(rows["crisis"])[0] == "+4.9pp"
-    assert CR.change_text(rows["mean_reversion"])[0] == "−8.4pp"
+    assert CR.change_text(rows["crisis"])[0] == "+4.90pp"
+    assert CR.change_text(rows["mean_reversion"])[0] == "−8.40pp"
     assert CR.change_text(rows["crisis"])[1] != CR.change_text(
         rows["mean_reversion"])[1]
 

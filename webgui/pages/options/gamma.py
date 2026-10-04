@@ -26,6 +26,7 @@ import page_help as _page_help
 import visitor_limit
 from pages import busy as _busy
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
+from pages import fmt as _fmt    # the ONE numeric vocabulary (pages/fmt.py)
 from pages import ui_kit as kit
 from pages.ui_guard import guard, guard_async
 from shared import market_calendar as _mc
@@ -313,12 +314,12 @@ def line_annotations(spot, flip, walls):
     strike-axis plotLine labels."""
     anns = []
     if spot is not None:
-        anns.append({"value": spot, "text": f"Spot {spot:g}", "color": SPOT_COLOR})
+        anns.append({"value": spot, "text": f"Spot {_fmt.price(spot)}", "color": SPOT_COLOR})
     if flip is not None:
-        anns.append({"value": flip, "text": f"Gamma flip {flip:g}", "color": FLIP_COLOR})
+        anns.append({"value": flip, "text": f"Gamma flip {_fmt.price(flip)}", "color": FLIP_COLOR})
     for w in (walls or []):
         call = spot is None or w >= spot
-        anns.append({"value": w, "text": f"{'Call' if call else 'Put'} wall {w:g}",
+        anns.append({"value": w, "text": f"{'Call' if call else 'Put'} wall {_fmt.price(w)}",
                      "color": CALL_WALL_COLOR if call else PUT_WALL_COLOR})
     return anns
 
@@ -353,15 +354,16 @@ def wall_plot_lines(spot, walls, flip=None, projected_flip=None):
     isn't today (most of them). Non-numeric levels are skipped rather than raising."""
     out = []
     if _is_level(flip):
-        out.append(_level_plot_line(flip, f"Gamma flip {flip:g}", FLIP_COLOR))
+        out.append(_level_plot_line(flip, f"Gamma flip {_fmt.price(flip)}", FLIP_COLOR))
     if _is_level(projected_flip):
         out.append(_level_plot_line(
-            projected_flip, f"Proj. flip {projected_flip:g}", PROJ_FLIP_COLOR))
+            projected_flip, f"Proj. flip {_fmt.price(projected_flip)}",
+            PROJ_FLIP_COLOR))
     for w in (walls or []):
         if not _is_level(w):
             continue
         call = spot is None or w >= spot
-        out.append(_level_plot_line(w, f"{'Call' if call else 'Put'} wall {w:g}",
+        out.append(_level_plot_line(w, f"{'Call' if call else 'Put'} wall {_fmt.price(w)}",
                                     CALL_WALL_COLOR if call else PUT_WALL_COLOR))
     return out
 
@@ -447,7 +449,7 @@ def bars_from_gex(data, spot, n_side=N_SIDE):
         d = drift.get(strike)
         projected.append(net + d if isinstance(d, (int, float))
                          and not isinstance(d, bool) else None)
-        hovers.append(f"{strike:g}: net {net:,.0f} "
+        hovers.append(f"{_fmt.strike(strike)}: net {net:,.0f} "
                       f"(C {cell.get('call', 0):,.0f} / P {cell.get('put', 0):,.0f})")
     return {"strikes": strikes, "nets": nets, "colors": colors, "hovers": hovers,
             "projected": projected}
@@ -592,6 +594,8 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, hei
         # matches the heatmap's yAxis exactly.
         "xAxis": {**_dark_axis("Strike"), "min": yr[0], "max": yr[1],
                   "reversed": False, "startOnTick": False, "endOnTick": False,
+                  # A strike prints two places: 450.00, never 450.
+                  "labels": {"style": {"color": FONT}, "format": "{value:.2f}"},
                   "plotLines": plotlines},
         "yAxis": {**_dark_axis(label),
                   "plotLines": [{"value": 0, "color": "#777777", "width": 1, "zIndex": 3}]},
@@ -622,7 +626,7 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, hei
     # behind would be invisible in the pull-back case. Amber, matching the projected
     # flip line. Omitted entirely when the symbol has no 0-DTE book.
     proj_pts = [{"x": s_, "y": pv,
-                 "custom": {"hover": f"{s_:g}: projected close {pv:,.0f}"}}
+                 "custom": {"hover": f"{_fmt.strike(s_)}: projected close {pv:,.0f}"}}
                 for s_, pv in zip(b["strikes"], b.get("projected") or [])
                 if isinstance(pv, (int, float)) and not isinstance(pv, bool)]
     # ALWAYS emitted, empty when the symbol has no 0-DTE book. This element is
@@ -950,7 +954,7 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                "colsize": 1, "rowsize": rowsize,
                "interpolation": True, "borderWidth": 0, "states": no_fade,
                "tooltip": {"headerFormat": "",
-                           "pointFormat": "Strike {point.y} · net {point.value:,.0f}"}}]
+                           "pointFormat": "Strike {point.y:.2f} · net {point.value:,.0f}"}}]
     spots = m.get("spots") or []
     # Underlying price track over the session (on the shared Strike axis; a line series
     # ignores the colorAxis so it isn't recolored by net value). Built here, appended
@@ -1223,8 +1227,8 @@ def flow_summary_text(rows):
         return ("Premium not collected yet for this session — populates going "
                 "forward (price + volume shown).")
     cv, pv = int(last.get("call_vol") or 0), int(last.get("put_vol") or 0)
-    return (f"Today: call ${cp / 1e6:,.1f}M · put ${pp / 1e6:,.1f}M premium · "
-            f"net ${(cp - pp) / 1e6:+,.1f}M · {cv:,} call / {pv:,} put contracts")
+    return (f"Today: call ${cp / 1e6:,.2f}M · put ${pp / 1e6:,.2f}M premium · "
+            f"net ${(cp - pp) / 1e6:+,.2f}M · {cv:,} call / {pv:,} put contracts")
 
 
 # ── Net Prem view ───────────────────────────────────────────────────────────
@@ -1486,12 +1490,12 @@ def net_prem_missing(series, symbols, mode="dollars"):
 
 
 def _np_fmt(value, mode):
-    """A reading in its mode: ``+$4.0M`` / ``-80%`` (sign leads, so it reads as
-    a direction rather than as ``$-4.0M``)."""
+    """A reading in its mode: ``+$4.00M`` / ``-80.00%`` (sign leads, so it
+    reads as a direction rather than as ``$-4.00M``)."""
     sign = "+" if value >= 0 else "-"
     if mode == "skew":
-        return f"{sign}{abs(value):,.0f}%"
-    return f"{sign}${abs(value):,.1f}M"
+        return f"{sign}{abs(value):,.2f}%"
+    return f"{sign}${abs(value):,.2f}M"
 
 
 def _np_lead_label(value, high):
@@ -1677,7 +1681,7 @@ def term_heatmap(term_grid):
     exps = grid.get("expirations") or []
     raw_cells = grid.get("cells") or {}
     # Strike keys round-trip to STRINGS through Redis JSON; re-float per expiry so the
-    # numeric sort + ``{s:g}`` labels below work (idempotent for already-float keys).
+    # numeric sort + strike labels below work (idempotent for already-float keys).
     cells = {exp: _refloat_keys(raw_cells.get(exp) or {}) for exp in exps}
     strikes = sorted({k for exp in exps for k, v in (cells.get(exp) or {}).items()
                       if isinstance(k, (int, float)) and (v or {}).get("net_gex_usd")})
@@ -1699,7 +1703,7 @@ def term_heatmap(term_grid):
                   "style": {"color": FONT}},
         "xAxis": {**_dark_axis("Expiration"), "categories": exps,
                   "plotLines": expiry_separators(exps)},
-        "yAxis": {**_dark_axis("Strike"), "categories": [f"{s:g}" for s in strikes]},
+        "yAxis": {**_dark_axis("Strike"), "categories": [_fmt.strike(s) for s in strikes]},
         "colorAxis": _coloraxis(_robust_zmax(z)),
         "series": [{"type": "heatmap", "name": "net", "data": data,
                     "interpolation": True, "borderWidth": 0, "states": no_fade,
@@ -1717,7 +1721,7 @@ def summary_text(summary, view):
     if s.get("net_total") is not None:
         parts.append(f"net {s['net_total']:,.0f}")
     if s.get("flip") is not None:
-        parts.append(f"flip {s['flip']:.1f}")
+        parts.append(f"flip {_fmt.price(s['flip'])}")
     return "  ·  ".join(parts)
 
 

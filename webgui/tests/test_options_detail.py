@@ -440,20 +440,20 @@ def test_breakeven_text_formats_both_sides():
 
 def test_contract_lines_put_credit_spread():
     sig = {"type": "PCS", "short_strike": 400, "long_strike": 395, "width": 5}
-    assert detail.contract_lines(sig) == ["Sell 400 P  /  Buy 395 P", "5 wide"]
+    assert detail.contract_lines(sig) == ["Sell 400.00 P  /  Buy 395.00 P", "5.00 wide"]
 
 
 def test_contract_lines_call_credit_spread():
     sig = {"type": "CCS", "short_strike": 420, "long_strike": 425, "width": 5}
-    assert detail.contract_lines(sig)[0] == "Sell 420 C  /  Buy 425 C"
+    assert detail.contract_lines(sig)[0] == "Sell 420.00 C  /  Buy 425.00 C"
 
 
 def test_contract_lines_iron_condor_has_two_legs():
     sig = {"type": "IC", "short_strike": 390, "long_strike": 385,
            "call_short": 420, "call_long": 425}
     lines = detail.contract_lines(sig)
-    assert "Sell 390 P  /  Buy 385 P" in lines
-    assert "Sell 420 C  /  Buy 425 C" in lines
+    assert "Sell 390.00 P  /  Buy 385.00 P" in lines
+    assert "Sell 420.00 C  /  Buy 425.00 C" in lines
 
 
 def test_contract_lines_empty_when_no_strikes():
@@ -467,13 +467,13 @@ def test_contract_lines_empty_when_no_strikes():
 def test_contract_lines_long_call_from_legs():
     sig = {"type": "LONG_CALL",
            "legs": [{"kind": "call", "side": "long", "strike": 420.0, "qty": 1}]}
-    assert detail.contract_lines(sig) == ["Buy 420 C"]
+    assert detail.contract_lines(sig) == ["Buy 420.00 C"]
 
 
 def test_contract_lines_short_put_from_legs_names_the_right_side():
     sig = {"type": "SHORT_PUT",
            "legs": [{"kind": "put", "side": "short", "strike": 385.0, "qty": 1}]}
-    assert detail.contract_lines(sig) == ["Sell 385 P"]
+    assert detail.contract_lines(sig) == ["Sell 385.00 P"]
 
 
 def test_contract_lines_bull_call_keeps_emitted_long_then_short_order():
@@ -482,7 +482,7 @@ def test_contract_lines_bull_call_keeps_emitted_long_then_short_order():
         {"kind": "call", "side": "long", "strike": 400.0, "qty": 1},
         {"kind": "call", "side": "short", "strike": 410.0, "qty": 1},
     ]}
-    assert detail.contract_lines(sig) == ["Buy 400 C  /  Sell 410 C"]
+    assert detail.contract_lines(sig) == ["Buy 400.00 C  /  Sell 410.00 C"]
 
 
 def test_contract_lines_bear_put_is_labelled_as_puts():
@@ -492,7 +492,7 @@ def test_contract_lines_bear_put_is_labelled_as_puts():
         {"kind": "put", "side": "long", "strike": 400.0, "qty": 1},
         {"kind": "put", "side": "short", "strike": 390.0, "qty": 1},
     ]}
-    assert detail.contract_lines(sig) == ["Buy 400 P  /  Sell 390 P"]
+    assert detail.contract_lines(sig) == ["Buy 400.00 P  /  Sell 390.00 P"]
 
 
 def test_contract_lines_prefers_legs_when_both_shapes_are_present():
@@ -500,7 +500,7 @@ def test_contract_lines_prefers_legs_when_both_shapes_are_present():
     sig = {"type": "PCS", "short_strike": 400, "long_strike": 395, "width": 5,
            "legs": [{"kind": "put", "side": "short", "strike": 400.0, "qty": 1},
                     {"kind": "put", "side": "long", "strike": 395.0, "qty": 1}]}
-    assert detail.contract_lines(sig) == ["Sell 400 P  /  Buy 395 P", "5 wide"]
+    assert detail.contract_lines(sig) == ["Sell 400.00 P  /  Buy 395.00 P", "5.00 wide"]
 
 
 def test_contract_lines_iron_condor_legs_split_by_kind():
@@ -510,8 +510,8 @@ def test_contract_lines_iron_condor_legs_split_by_kind():
         {"kind": "call", "side": "short", "strike": 420.0, "qty": 1},
         {"kind": "call", "side": "long", "strike": 425.0, "qty": 1},
     ]}
-    assert detail.contract_lines(sig) == ["Sell 390 P  /  Buy 385 P",
-                                          "Sell 420 C  /  Buy 425 C"]
+    assert detail.contract_lines(sig) == ["Sell 390.00 P  /  Buy 385.00 P",
+                                          "Sell 420.00 C  /  Buy 425.00 C"]
 
 
 def test_contract_lines_shows_quantity_above_one():
@@ -524,12 +524,12 @@ def test_contract_lines_shows_quantity_above_one():
     # The marker is "2×", the same one the Strategy Finder's Legs cell prints
     # (strategy_table.legs_summary) - it read "2x" here until 2026-09-13.
     assert detail.contract_lines(sig) == [
-        "Buy 400 C  /  Sell 2× 410 C  /  Buy 420 C"]
+        "Buy 400.00 C  /  Sell 2× 410.00 C  /  Buy 420.00 C"]
 
 
 def test_contract_lines_empty_legs_falls_back_to_strike_keys():
     sig = {"type": "PCS", "short_strike": 400, "long_strike": 395, "legs": []}
-    assert detail.contract_lines(sig) == ["Sell 400 P  /  Buy 395 P"]
+    assert detail.contract_lines(sig) == ["Sell 400.00 P  /  Buy 395.00 P"]
 
 
 def test_contract_lines_ignores_legs_missing_a_strike():
@@ -558,15 +558,15 @@ def _opt(kind, side, strike, exp="2026-10-16", qty=1):
 
 def test_contract_lines_covered_call_shows_the_shares():
     sig = {"type": "COVERED_CALL", "legs": [_stock(), _opt("call", "short", 545.0)]}
-    assert detail.contract_lines(sig) == ["Buy 100 shares", "Sell 545 C"]
+    assert detail.contract_lines(sig) == ["Buy 100 shares", "Sell 545.00 C"]
 
 
 def test_contract_lines_protective_put_and_collar_keep_leg_order():
     pp = {"type": "PROTECTIVE_PUT", "legs": [_stock(), _opt("put", "long", 520.0)]}
-    assert detail.contract_lines(pp) == ["Buy 100 shares", "Buy 520 P"]
+    assert detail.contract_lines(pp) == ["Buy 100 shares", "Buy 520.00 P"]
     collar = {"type": "COLLAR", "legs": [_stock(), _opt("call", "short", 545.0),
                                          _opt("put", "long", 520.0)]}
-    assert detail.contract_lines(collar) == ["Buy 100 shares", "Sell 545 C", "Buy 520 P"]
+    assert detail.contract_lines(collar) == ["Buy 100 shares", "Sell 545.00 C", "Buy 520.00 P"]
 
 
 def test_share_leg_scales_with_lots_and_names_a_short_lot():
@@ -585,21 +585,21 @@ def test_contract_lines_calendar_dates_each_leg_on_its_own_line():
     sig = {"type": "CALENDAR_CALL", "expiration": "2026-10-16",
            "legs": [_opt("call", "short", 100.0, "2026-10-16"),
                     _opt("call", "long", 100.0, "2026-11-13")]}
-    assert detail.contract_lines(sig) == ["Sell 100 C  2026-10-16",
-                                          "Buy 100 C  2026-11-13"]
+    assert detail.contract_lines(sig) == ["Sell 100.00 C  2026-10-16",
+                                          "Buy 100.00 C  2026-11-13"]
 
 
 def test_contract_lines_diagonal_dates_each_leg():
     sig = {"type": "DIAGONAL_PUT", "expiration": "2026-10-16",
            "legs": [_opt("put", "short", 95.0, "2026-10-16"),
                     _opt("put", "long", 105.0, "2026-11-13")]}
-    assert detail.contract_lines(sig) == ["Sell 95 P  2026-10-16",
-                                          "Buy 105 P  2026-11-13"]
+    assert detail.contract_lines(sig) == ["Sell 95.00 P  2026-10-16",
+                                          "Buy 105.00 P  2026-11-13"]
 
 
 def test_contract_lines_share_leg_does_not_make_a_single_expiry_multi():
     sig = {"legs": [_stock(), _opt("call", "short", 545.0, "2026-10-16")]}
-    assert detail.contract_lines(sig) == ["Buy 100 shares", "Sell 545 C"]
+    assert detail.contract_lines(sig) == ["Buy 100 shares", "Sell 545.00 C"]
 
 
 def test_expiry_caption_single_expiry_is_unchanged():

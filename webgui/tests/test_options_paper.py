@@ -269,7 +269,7 @@ def test_synth_carries_legs_so_a_debit_trade_shows_its_contract():
     holding" disappeared for exactly the trades whose strikes live nowhere else.
     """
     s = paper.synth_from_trade(DEBIT_TRADE)
-    assert detail.contract_lines(s) == ["Buy 400 C  /  Sell 410 C"]
+    assert detail.contract_lines(s) == ["Buy 400.00 C  /  Sell 410.00 C"]
 
 
 def test_synth_long_put_single_leg():
@@ -278,14 +278,14 @@ def test_synth_long_put_single_leg():
                                 "short_strike": None, "long_strike": None,
                                 "legs": [{"kind": "put", "side": "long",
                                           "strike": 231.0, "qty": 1}]})
-    assert detail.contract_lines(s) == ["Buy 231 P"]
+    assert detail.contract_lines(s) == ["Buy 231.00 P"]
 
 
 def test_synth_credit_spread_keeps_the_strike_key_fallback():
     # A credit spread carries no legs at all; the strike-key path must be intact.
     s = paper.synth_from_trade(TRADE)
     assert not s.get("legs")
-    assert detail.contract_lines(s) == ["Sell 450 P  /  Buy 445 P"]
+    assert detail.contract_lines(s) == ["Sell 450.00 P  /  Buy 445.00 P"]
 
 
 def test_synth_max_loss_is_per_share_not_whole_position():

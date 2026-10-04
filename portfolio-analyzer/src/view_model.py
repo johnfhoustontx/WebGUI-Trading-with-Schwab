@@ -78,39 +78,40 @@ def format_signed_currency(value) -> str:
 
 
 def format_signed_pct(fraction) -> str:
-    """Format a *fraction* as a signed percent: ``0.08`` -> ``"+8.0%"``.
+    """Format a *fraction* as a signed percent: ``0.08`` -> ``"+8.00%"``.
 
-    ``None`` -> ``"—"``. Zero renders as ``"+0.0%"``.
+    ``None`` -> ``"—"``. Zero renders as ``"+0.00%"``. Two places, like every
+    percentage on a screen (the webgui's ``pages/fmt.py`` states the rule).
     """
     if fraction is None:
         return DASH
     pct = fraction * 100
     sign = "-" if pct < 0 else "+"
-    return f"{sign}{abs(pct):.1f}%"
+    return f"{sign}{abs(pct):.2f}%"
 
 
 def format_weight(fraction) -> str:
-    """Format a *fraction* as an unsigned percent: ``0.30`` -> ``"30.0%"``.
+    """Format a *fraction* as an unsigned percent: ``0.30`` -> ``"30.00%"``.
 
     ``None`` -> ``"—"``.
     """
     if fraction is None:
         return DASH
-    return f"{fraction * 100:.1f}%"
+    return f"{fraction * 100:.2f}%"
 
 
 def format_vs_sector(rs) -> str:
     """Format a vs-sector RS dict like ``{"1M": 110.0, "3M": 95.0}``.
 
     Renders each present window as ``"<window> <value>"`` joined by ``" / "``
-    (e.g. ``"1M 110.0 / 3M 95.0"``). A ``None`` value for a window renders the
-    DASH placeholder for that window (e.g. ``"1M 110.0 / 3M —"``). ``None`` or an
+    (e.g. ``"1M 110.00 / 3M 95.00"``). A ``None`` value for a window renders the
+    DASH placeholder for that window (e.g. ``"1M 110.00 / 3M —"``). ``None`` or an
     empty dict -> ``"—"``.
     """
     if not rs:
         return DASH
     parts = [
-        f"{window} {DASH if value is None else f'{value:.1f}'}"
+        f"{window} {DASH if value is None else f'{value:.2f}'}"
         for window, value in rs.items()
     ]
     return " / ".join(parts) if parts else DASH

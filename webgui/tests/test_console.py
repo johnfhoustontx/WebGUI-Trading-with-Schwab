@@ -162,7 +162,7 @@ def test_chip_severity_changes_the_colour_family():
 def test_dial_draws_an_arc_proportional_to_confidence():
     svg = D.dial_svg(0.56, "Whipsaw")
     assert svg.startswith("<svg") and svg.endswith("</svg>")
-    assert "WHIPSAW" in svg and "56%" in svg and "CONFIDENCE" in svg
+    assert "WHIPSAW" in svg and "56.00%" in svg and "CONFIDENCE" in svg
     assert svg.count("<path") == 2                # halo + value, no filter
     assert "<filter" not in svg and "<style" not in svg
     assert "dominant-baseline" not in svg

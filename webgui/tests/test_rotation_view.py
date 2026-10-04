@@ -281,8 +281,8 @@ def test_momentum_renders_to_two_places():
 
 
 def test_weight_renders_to_one_place_with_a_percent():
-    assert V.fmt_weight(32.53) == "32.5%"
-    assert V.fmt_weight(0) == "0.0%"
+    assert V.fmt_weight(32.53) == "32.53%"
+    assert V.fmt_weight(0) == "0.00%"
     assert V.fmt_weight(None) == "—"
 
 

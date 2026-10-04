@@ -38,6 +38,7 @@ from nicegui import background_tasks, core, run, ui
 
 import bus_client
 
+from .. import fmt as _fmt
 from ..fmt import num
 from ..ui_guard import is_deleted_error
 from . import checks, checks_feed, ev, svg
@@ -161,7 +162,7 @@ def factor_value_text(value, known):
     """Numeric text for a factor bar, or an em-dash when it was never measured."""
     if not known or not isinstance(value, (int, float)):
         return "—"
-    return f"{value:g}"
+    return _fmt.plain(value)
 
 
 #############################################
@@ -416,7 +417,7 @@ def flag_class(state):
 
 
 def _pct(v):
-    return f"{v:.1f}%" if isinstance(v, (int, float)) else "—"
+    return _fmt.pct(v) if isinstance(v, (int, float)) else "—"
 
 
 # Every adapter emits PER-SHARE dollars; the panel displays per-contract. One
@@ -543,7 +544,8 @@ def dte_text(signal):
     dte = s.get("dte")
     if not isinstance(dte, (int, float)) or isinstance(dte, bool):
         return "—"
-    return f"{dte:g} DTE at entry" if s.get("dte_is_entry") else f"{dte:g} DTE"
+    days = _fmt.plain(dte)
+    return f"{days} DTE at entry" if s.get("dte_is_entry") else f"{days} DTE"
 
 
 def gauge_metric(signal):
@@ -576,7 +578,8 @@ def _leg_pair(short_k, long_k, right):
     """One 'Sell X / Buy Y' instruction line, or None when strikes are absent."""
     if short_k is None or long_k is None:
         return None
-    return f"Sell {short_k:g} {right}  /  Buy {long_k:g} {right}"
+    return (f"Sell {_fmt.strike(short_k)} {right}  /  "
+            f"Buy {_fmt.strike(long_k)} {right}")
 
 
 def _leg_instruction(leg, with_expiry=False):
@@ -605,9 +608,9 @@ def _leg_instruction(leg, with_expiry=False):
         return None
     right = "C" if str(leg.get("kind", "")).lower() == "call" else "P"
     qty = leg.get("qty", 1)
-    mult = f"{qty:g}× " if isinstance(qty, (int, float)) and not isinstance(
+    mult = f"{_fmt.plain(qty)}× " if isinstance(qty, (int, float)) and not isinstance(
         qty, bool) and qty != 1 else ""
-    text = f"{action} {mult}{strike:g} {right}"
+    text = f"{action} {mult}{_fmt.strike(strike)} {right}"
     exp = leg.get("expiration")
     if with_expiry and exp:
         text += f"  {exp}"
@@ -682,7 +685,7 @@ def contract_lines(signal):
         # condor, whose two different widths one number could not describe.
         w = s.get("width")
         if len(lines) == 1 and isinstance(w, (int, float)) and not isinstance(w, bool):
-            lines.append(f"{w:g} wide")
+            lines.append(f"{_fmt.strike(w)} wide")
         return lines
     if s.get("type") == "IC":
         for sk, lk, right in ((s.get("short_strike"), s.get("long_strike"), "P"),
@@ -700,7 +703,7 @@ def contract_lines(signal):
         lines.append(line)
     w = s.get("width")
     if lines and isinstance(w, (int, float)) and not isinstance(w, bool):
-        lines.append(f"{w:g} wide")
+        lines.append(f"{_fmt.strike(w)} wide")
     return lines
 
 
@@ -820,7 +823,7 @@ def _build_cards(s):
         # the wide marks that make a priced EV meaningless (see ev.py).
         be = ev.breakeven_facts(s)
         if be:
-            _kv("Needs", f"{be['breakeven_pct']:.1f}%", be["tone"])
+            _kv("Needs", _fmt.pct(be['breakeven_pct']), be["tone"])
         # The one figure here whose probability is NOT read off the option's own
         # price. Absent unless its bucket cleared both gates service-side.
         cal = ev.calibrated_facts(s, _calibration())
@@ -853,7 +856,7 @@ def _build_cards(s):
             theta = s.get("net_theta")
             _greek("Θ", theta, color=(GREEN if isinstance(theta, (int, float)) and theta > 0 else RED))
             _greek("Vega", s.get("net_vega"), fmt="{:+.3f}")
-            _greek("IV", s.get("short_iv"), fmt="{:.1f}%")
+            _greek("IV", s.get("short_iv"), fmt="{:.2f}%")
 
     # Implied volatility (best-effort from available keys)
     if any(s.get(k) is not None for k in ("current_iv", "iv_rank", "iv_percentile", "short_iv")):
@@ -870,7 +873,7 @@ def _build_cards(s):
                 with ui.row().classes("items-center gap-2 w-full"):
                     ui.label("Rank").classes("text-xs w-12 opacity-80")
                     ui.html(svg.gradient_bar_svg(s["iv_rank"]))
-                    ui.label(f"{s['iv_rank']:g}").classes("text-xs w-8 text-right")
+                    ui.label(_fmt.plain(s['iv_rank'])).classes("text-xs w-8 text-right")
 
     with ui.expansion("Score factors").classes("w-full"):
         if s.get("rr_pct") is not None:

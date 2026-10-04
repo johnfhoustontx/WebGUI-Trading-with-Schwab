@@ -24,8 +24,8 @@ def money(v):
 
 
 def percent(frac):
-    """A 0..1 fraction as a 1-dp percent (``0.6667 → '66.7%'``); None/junk → '0.0%'."""
+    """A 0..1 fraction as a 2-dp percent (``0.6667 → '66.67%'``); None/junk → '0.00%'."""
     try:
-        return f"{float(frac) * 100:.1f}%"
+        return f"{float(frac) * 100:.2f}%"
     except (TypeError, ValueError):
-        return "0.0%"
+        return "0.00%"

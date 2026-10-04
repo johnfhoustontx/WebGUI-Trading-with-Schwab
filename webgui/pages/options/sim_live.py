@@ -412,7 +412,7 @@ def render():
                 ui.timer(0.05, _reflow_chart, once=True)
 
     def _repaint():
-        ds_lbl.text = f"Price change: {ds_slider.value:+g}%"
+        ds_lbl.text = f"Price change: {ds_slider.value:+.2f}%"
         dt_lbl.text = f"Time passed: {sv.days_text(dt_slider.value)}"
         legs = editor.get_legs()
         result = _for_screen()

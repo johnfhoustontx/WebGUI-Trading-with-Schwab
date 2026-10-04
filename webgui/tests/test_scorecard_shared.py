@@ -51,7 +51,7 @@ def test_the_paper_account_page_builds_a_scorecard_line():
     from pages.options import portfolio
     line = portfolio.scorecard_text(_perf())
     assert "7 closed" in line
-    assert "71.4%" in line
+    assert "71.43%" in line
     assert "+$420.00" in line
 
 
@@ -74,7 +74,7 @@ def test_the_scorecard_line_omits_an_undefined_profit_factor():
     from pages.options import portfolio
     line = portfolio.scorecard_text({**_perf(), "profit_factor": None})
     assert "profit factor" not in line.lower()
-    assert "71.4%" in line
+    assert "71.43%" in line
 
 
 # ── C4: the book's Greeks line ───────────────────────────────────────────────

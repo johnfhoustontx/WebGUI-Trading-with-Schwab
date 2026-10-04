@@ -36,6 +36,7 @@ from nicegui import run, ui
 
 import config_schema as cs
 import config_store as store
+from pages import fmt as _fmt
 from pages import ui_kit as kit
 from pages.options.theme import (BADGE_ACCENT, BADGE_MUTED, BADGE_WARN, CARD,
                                  EYEBROW, LABEL, MUTED, THEME, TXT_NEG,
@@ -95,10 +96,10 @@ def display_value(value, shipped_value, fld):
     if fld.kind == "money":
         return f"${v:,.2f}".rstrip("0").rstrip(".") if isinstance(v, float) else f"${v:,}"
     if fld.kind == "fraction":
-        return f"{v:g}%"
+        return f"{_fmt.plain(v)}%"
     if isinstance(v, list):
         if fld.kind == "ladder":
-            return ", ".join(f"{a:g}%→{b:g}%" for a, b in v)
+            return ", ".join(f"{_fmt.plain(a)}%→{_fmt.plain(b)}%" for a, b in v)
         return ", ".join(str(x) for x in v) or "none"
     return f"{v}{'' if not fld.unit or fld.kind == 'fraction' else ' ' + fld.unit}"
 

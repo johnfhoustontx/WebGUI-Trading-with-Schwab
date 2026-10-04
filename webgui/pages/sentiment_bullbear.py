@@ -369,8 +369,9 @@ def render():
                 ui.element("div").classes(
                     f"h-full rounded-full {_BREADTH_FILL[B.breadth_is_thin(share)]}"
                     f" w-[{width}%]")
-            ui.label(f"{width}%").classes(
-                f"{_FAINT} text-[10px] tabular-nums w-9 text-right")
+            # The bar snaps to a whole percent; the label prints the share.
+            ui.label(f"{float(share) * 100:.2f}%").classes(
+                f"{_FAINT} text-[10px] tabular-nums w-12 text-right")
 
     def _mark_row(node, level, leaf):
         """One grid row. Returns its chevron, or None for a leaf."""

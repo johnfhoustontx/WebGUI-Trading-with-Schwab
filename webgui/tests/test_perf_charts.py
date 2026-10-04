@@ -3,9 +3,9 @@ from pages.options import perf_charts as pc
 
 
 def test_signed_dollar():
-    assert pc.signed_dollar(120) == "+$120"
-    assert pc.signed_dollar(-90) == "-$90"
-    assert pc.signed_dollar(None) == "$0"
+    assert pc.signed_dollar(120) == "+$120.00"
+    assert pc.signed_dollar(-90) == "-$90.00"
+    assert pc.signed_dollar(None) == "$0.00"
 
 
 def test_equity_curve_figure_maps_series():

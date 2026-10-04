@@ -441,7 +441,7 @@ def breakdown_rows(norm_trades, key):
 
 def _pct(frac):
     n = _num(frac)
-    return "—" if n is None else f"{n * 100:.0f}%"
+    return "—" if n is None else f"{n * 100:.2f}%"
 
 
 def toc(sections):

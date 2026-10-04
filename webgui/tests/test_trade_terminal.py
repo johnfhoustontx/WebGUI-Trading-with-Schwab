@@ -91,7 +91,7 @@ class TestThePercentileRail:
     def test_it_states_the_calibrated_stats_beneath(self):
         rail = tt.percentile_rail({"percentile": 90, "score": 0.84,
                                    "expected_fwd": 0.016, "hit_rate": 0.53})
-        assert "+1.6%" in rail["stats"] and "53%" in rail["stats"]
+        assert "+1.60%" in rail["stats"] and "53.00%" in rail["stats"]
 
     def test_no_percentile_is_UNRANKED_and_parks_the_marker_centre(self):
         rail = tt.percentile_rail({})

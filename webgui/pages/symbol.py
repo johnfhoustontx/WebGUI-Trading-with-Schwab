@@ -54,6 +54,7 @@ from pages import desk as _desk
 from pages import news_view as _news
 from pages import symbol_facts as sf
 from pages import ui_kit as kit
+from pages import fmt as _fmt
 from pages.fmt import num as _num  # the ONE copy (pages/fmt.py)
 from pages.structure import (flip_read, regime_word, structure_map,
                              structure_positions, walls_trustworthy)
@@ -588,7 +589,7 @@ def volatility_band(facts):
     if ratio["ratio"] is None:
         text = "IV vs HV —"
     else:
-        text = (f"IV {iv:.1f} vs HV {hv:.1f} · {ratio['band']} "
+        text = (f"IV {iv:.2f} vs HV {hv:.2f} · {ratio['band']} "
                 f"({ratio['ratio']:.2f}×)")
     atm = _num(f.get("atm_iv"))
     em = sf.expected_move(f.get("spot"), atm if atm is not None else iv)
@@ -1217,7 +1218,7 @@ def render(symbol=None):
                     ui.label(f"{r['strategy']} {r['strikes']}").classes(_LINE)
                     ui.label(r["expiry"]).classes(f"{_SUB} tabular-nums")
                     if r["quantity"] is not None:
-                        ui.label(f"×{r['quantity']:g}").classes(
+                        ui.label(f"×{_fmt.plain(r['quantity'])}").classes(
                             f"{_SUB} tabular-nums")
                     ui.label(_desk.fmt_money(r["unrealized"])).classes(
                         f"text-[13px] tabular-nums "

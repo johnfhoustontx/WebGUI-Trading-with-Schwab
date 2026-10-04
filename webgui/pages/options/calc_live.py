@@ -729,7 +729,7 @@ def render():
             return
         iv = _num((res or {}).get("iv"))
         if iv is not None and iv > 0:
-            _set_quietly(iv_in, round(iv, 1))
+            _set_quietly(iv_in, round(iv, 2))
             recalc.poke(time.monotonic())  # price again at the implied IV
         # A failed implication keeps the field: the visitor can type one.
 

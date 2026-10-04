@@ -150,7 +150,7 @@ def fmt_mom(v):
 
 def fmt_weight(v):
     n = _num(v)
-    return DASH if n is None else f"{n:.1f}%"
+    return DASH if n is None else f"{n:.2f}%"
 
 
 def fmt_spread(v):
