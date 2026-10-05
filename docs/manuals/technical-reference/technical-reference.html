@@ -2939,7 +2939,7 @@ no Claude call: every input is a view another service already publishes.</p>
 </tr>
 <tr>
 <td><code>structure</code></td>
-<td><code>options:matrix</code> rows for <code>structure.symbols</code> (SPY, QQQ): <code>spot</code>, <code>flip</code>, <code>call_wall</code>, <code>net_gex</code>, <code>gex_regime</code></td>
+<td><code>options:matrix</code> rows for <code>structure.symbols</code> (SPY, QQQ): <code>spot</code>, <code>flip</code>, <code>call_wall</code>, <code>net_gex</code>, <code>gex_regime</code>; gated by <code>options:gex_status</code> <code>age_seconds</code></td>
 <td>every symbol above the flip with room ≥ <code>room_pct</code> (0.50)</td>
 <td>every symbol within <code>near_pct</code> (0.25) of the ceiling while above the flip, or below the flip</td>
 </tr>
@@ -2951,7 +2951,7 @@ no Claude call: every input is a view another service already publishes.</p>
 </tr>
 <tr>
 <td><code>flow</code></td>
-<td><code>options:flow_sides</code> joined to <code>options:flow_alerts</code> by alert id</td>
+<td><code>options:flow_sides</code> alone (each entry names its <code>side</code> and <code>osi</code>)</td>
 <td>call lean ≥ <code>lean_pts</code> (5.0) and put lean below it</td>
 <td>put lean ≥ <code>lean_pts</code> and call lean below it</td>
 </tr>
@@ -2965,37 +2965,67 @@ no Claude call: every input is a view another service already publishes.</p>
 </table>
 <p>All bounds are inclusive. Everything between the two is <code>neutral</code>.</p>
 <ul>
-<li><strong>Room</strong> is <code>(call_wall − spot) ÷ spot × 100</code>. At or through the ceiling counts as at
-  it. The symbols must agree: one at its ceiling and one with room is <code>neutral</code>.</li>
+<li><strong>Breadth needs a sample.</strong> Fewer than <code>breadth.min_tiles</code> (10) tiles with a price
+  (rising, falling or flat) is <code>none</code>: a quote outage that leaves one tile up would
+  otherwise read as 100% advancing. Every tile priced and none moving is <code>neutral</code>.</li>
+<li><strong>Volatility needs all five numbers:</strong> the VIX level and change, the one-day, the
+  three-month, and the SPX change. Each rule uses one of them, and a rule that cannot
+  be evaluated is not a rule that came out false, so a missing one is <code>none</code>.</li>
+<li>
+<p><strong>Cross-asset:</strong> two tiles that agree decide the row whatever the third says.
+  Otherwise a tile with no colour makes the row <code>none</code>, because it is the one that
+  could have decided it.</p>
+</li>
+<li>
+<p><strong>Room</strong> is <code>(call_wall − spot) ÷ spot × 100</code>. At or through the ceiling counts as at
+  it. The symbols must agree: one at its ceiling and one with room is <code>neutral</code>.</p>
+</li>
 <li><strong>Lean</strong> is <code>(Σ bought − Σ sold) ÷ Σ (bought + sold + unlabelled) × 100</code>, pooled by
   volume over the poll tallies of today's flagged contracts, calls and puts apart. A
-  contract flagged by two alerts is counted once. Unlabelled volume dilutes it.</li>
+  contract flagged by two alerts is counted once. Unlabelled volume dilutes it. Every
+  flagged contract is read, not only the ones still on the capped alert list.</li>
 <li><strong>Cross-asset counts the board's own colours.</strong> Whether a falling Treasury fund is
   good or bad for stocks is decided once, in <code>classify.color_state</code>; this row does not
   hold a second opinion.</li>
 </ul>
 <p><strong><code>none</code> is "no reading", never <code>neutral</code>.</strong> A row is <code>none</code> when a tile it needs has no
 number, a matrix row has no flip or (above the flip) no ceiling, a symbol's net gamma is
-exactly zero (the after-hours artefact the dealer panel also hides), fewer than
-<code>flow.min_contracts</code> (10) contracts are flagged, fewer than two cross-asset tiles have a
-colour, or its source view is absent. A row that raises is also <code>none</code>, and the other
-five still publish (<code>market.read.&lt;row&gt;</code> on <code>/health</code>).</p>
-<p><strong>Two kinds of "too old".</strong> The dashboard and the matrix are republished on a clock, so
-an old one means its publisher has stopped: they are dropped when their <code>:ts</code> side key
-is older than <code>stale_after_sec</code> (300). The two flow views are published only when
-something changes, so a quiet tape leaves them legitimately old: they are dropped when
-the session <code>date</code> they carry is not today's.</p>
+exactly zero (the after-hours artefact the dealer panel also hides), the dealer levels
+are not current, fewer than <code>flow.min_contracts</code> (10) contracts are flagged, or its
+source view is absent. A row that raises is also <code>none</code>, and the other five still
+publish (<code>market.read.&lt;row&gt;</code> on <code>/health</code>).</p>
+<p><strong>Too old.</strong> Every source is rewritten on a clock while its publisher is alive (an
+unchanged write still refreshes the view's <code>:ts</code>), so an old one means the publisher
+has stopped. A view is dropped when its <code>:ts</code> is older than <code>stale_after_sec</code> (300);
+the dashboard, republished every 3 seconds, has its own shorter limit,
+<code>dashboard_stale_after_sec</code> (60). The flow view is also dropped when the session
+<code>date</code> it carries is not today's.</p>
+<p><strong>Structure follows the collector, not the matrix.</strong> The matrix is republished every
+minute whether or not the GEX collector ran, so its own age proves nothing about the
+levels in it. The row is <code>none</code> (<code>facts.stale: true</code>, no levels handed on) when the
+collector's age is unknown or above <code>structure.stale_after_sec</code> (150). That age is
+<code>options:gex_status</code> <code>age_seconds</code> plus the age of the status view itself, so a status
+publisher that stops cannot leave the collector looking fresh. 150 is the limit the
+Desk's dealer panel greys its walls at (<code>desk.STALE_AFTER_SEC</code>); a mirror test pins
+the two.</p>
 <p><strong>Slots.</strong> A reading is taken on every clock multiple of <code>interval_min</code> (15 or 30)
 from the first one strictly after the 08:30 CT open through the 15:00 close inclusive,
 on trading days. The market service asks "is a slot due" on its existing poll; there is
-no timer. A late tick still fires the slot it is in, once. The 15:00 reading is
-<code>final</code>. On its first call after a start the service reads the published view back, so
-a restart neither repeats a slot nor loses the day's history.</p>
-<p><strong><code>cache:market:read</code></strong> (<code>MarketRead</code>, <code>skip_unchanged</code>): <code>date</code>, <code>ts</code>, <code>slot</code>,
+no timer. A late tick still fires the slot it is in, once, and a slot at or before
+the one already published is never due (an interval changed mid-session cannot put
+the day's history out of order). The 15:00 reading is <code>final</code>. On its first call after a start the service reads the published view back, so
+a restart neither repeats a slot nor loses the day's history. A reading that fails to
+build is retried after <code>retry_sec</code> (30), not on every poll.</p>
+<p><strong>The two switches apply between slots</strong>, because a switch turned off must not wait up
+to half an hour. <code>enabled = false</code> replaces a reading that is up with a retraction
+(<code>enabled: false</code>, no rows), once. A changed <code>public</code> republishes the reading that is
+up, unchanged but for the flag; that reaches yesterday's reading before the open too.</p>
+<p><strong><code>cache:market:read</code></strong> (<code>MarketRead</code>): <code>enabled</code>, <code>date</code>, <code>ts</code>, <code>slot</code>,
 <code>interval_min</code>, <code>next_slot</code>, <code>final</code>, <code>public</code>, <code>tally</code>, <code>rows</code>, <code>history</code>. Each row is
-<code>{key, verdict, facts, prev}</code> (<code>flow</code> also carries <code>estimate: true</code>); <code>prev</code> is the
-previous slot's <code>{verdict, facts}</code> for the same row, or <code>null</code>. <code>history</code> is the day's
-<code>{slot, verdicts}</code> list.</p>
+<code>{key, verdict, facts, prev}</code>; <code>prev</code> is the previous slot's <code>{verdict, facts}</code> for the
+same row, or <code>null</code>. The <code>flow</code> row also carries <code>estimate: true</code> and its own
+<code>public</code>, copied from <code>options:flow_sides</code> (Flow Alerts' <code>[sides] public</code>). <code>history</code>
+is the day's <code>{slot, verdicts}</code> list.</p>
 <p><strong>The Desk panel.</strong> The page maps each code to a word and a fixed chip class
 (<code>READ_WORDS</code>, <code>READ_CHIPS</code>); an unknown code is "No reading". It formats the facts
 itself and computes no verdict. <em>Since last</em> is "was …" when the code changed, else the
@@ -3003,7 +3033,12 @@ change in the row's main number (SPX percent, advancing count, VIX level, call l
 else "unchanged". The head is <code>live</code>, <code>close</code>, <code>stale</code> or <code>waiting</code>: <code>stale</code> is a
 reading from another day, or one older than two of its own intervals while the session
 is open. The one-second clock re-checks that, so a reading that stops arriving greys
-without a new one. On the public origin the panel shows only when <code>public</code> is <code>true</code>.</p>
+without a new one.</p>
+<p><strong>Hidden is not "no reading yet".</strong> A retraction hides the whole card on every origin.
+On the public origin a reading whose <code>public</code> is not <code>true</code> hides it too, and a row
+whose own <code>public</code> is not <code>true</code> (the Flow row) is drawn as "No reading · Not shown on
+this screen" with no figures and no "was", and the tally in the head is recounted from
+the rows as drawn (<code>read_hidden</code>, <code>read_view_shown</code>).</p>
 <p><strong>Known limitations.</strong></p>
 <ul>
 <li><strong>Every threshold is a starting guess.</strong> None has been measured against outcomes,

@@ -155,6 +155,33 @@ min_contracts = 10
 - The hover guide, the manuals, the routes file, the config reference and the
   changelog move in the same commits.
 
+## What review changed
+
+An independent review of the first build, before it was merged, changed these rules.
+The text above is the design as approved; where the two differ, this section is what
+the code does.
+
+- **Structure is gated by the collector's age, not the matrix's.** The matrix is
+  republished every minute whether or not the collector ran. The row reads
+  `options:gex_status` (`age_seconds` plus the status view's own age) and is "No
+  reading" past `[structure] stale_after_sec` (150, the dealer panel's limit) or
+  when the age is unknown. A fifth input view.
+- **Volatility needs all five numbers.** With the one-day VIX missing the first
+  build could say Tailwind without the check that most often overrides it.
+- **The switches apply between slots.** `enabled = false` publishes a retraction
+  (`enabled: false`, no rows) once and the Desk hides the card; a changed `public`
+  republishes the reading under the new flag.
+- **The Flow row carries the estimate's own public flag.** On the public origin a
+  row not marked public is drawn as "Not shown on this screen" and left out of the
+  tally. The row reads `options:flow_sides` alone, which now names each entry's
+  `side` and `osi`; the join to the capped alert list is gone.
+- **Breadth needs `min_tiles` (10) priced tiles**, and an all-flat board is Neutral.
+- **Cross-asset** with a tile missing is "No reading" unless two already agree.
+- **Sources are all judged by age**; the dashboard has its own limit (60 s); the
+  flow view is judged by date as well.
+- **A slot at or before the published one is never due; a failed build backs off
+  `retry_sec` (30); `near_pct` must sit below `room_pct`.**
+
 ## Not in this build
 
 - The verdict sentence and the three-pillar layout.

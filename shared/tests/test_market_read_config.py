@@ -68,6 +68,43 @@ def test_the_stale_limit_falls_back_when_unusable(monkeypatch, value, want):
     assert mr.load()["stale_after_sec"] == want
 
 
+@pytest.mark.parametrize("key,default", [("dashboard_stale_after_sec", 60),
+                                         ("retry_sec", 30)])
+@pytest.mark.parametrize("value", [45, 0, -5, math.nan, "x", None])
+def test_the_other_durations_fall_back_when_unusable(monkeypatch, key, default, value):
+    _with(monkeypatch, **{key: value})
+    assert mr.load()[key] == (45 if value == 45 else default)
+
+
+@pytest.mark.parametrize("value,want", [(90, 90), (0, 150), (-1, 150), (math.nan, 150),
+                                        ("150", 150), (None, 150)])
+def test_the_dealer_level_limit_falls_back_when_unusable(monkeypatch, value, want):
+    _with(monkeypatch, structure__stale_after_sec=value)
+    assert mr.load()["structure"]["stale_after_sec"] == want
+
+
+@pytest.mark.parametrize("room,near", [(0.25, 0.50), (0.30, 0.30), (0.0, 0.0)])
+def test_crossed_structure_bounds_both_fall_back(monkeypatch, room, near):
+    """Near at or above room leaves no neutral band and lets "near the
+    ceiling" win over "room to run": the pair is taken together or not at all."""
+    _with(monkeypatch, structure__room_pct=room, structure__near_pct=near)
+    got = mr.load()["structure"]
+    assert (got["room_pct"], got["near_pct"]) == (0.50, 0.25)
+
+
+def test_usable_structure_bounds_are_kept(monkeypatch):
+    _with(monkeypatch, structure__room_pct=1.0, structure__near_pct=0.0)
+    got = mr.load()["structure"]
+    assert (got["room_pct"], got["near_pct"]) == (1.0, 0.0)
+
+
+@pytest.mark.parametrize("value,want", [(25, 25), (1, 1), (0, 10), (-3, 10),
+                                        (2.9, 2), ("10", 10), (None, 10)])
+def test_min_tiles_is_a_whole_number_of_at_least_one(monkeypatch, value, want):
+    _with(monkeypatch, breadth__min_tiles=value)
+    assert mr.load()["breadth"]["min_tiles"] == want
+
+
 @pytest.mark.parametrize("key,default", [
     ("direction__move_pct", 0.25), ("structure__room_pct", 0.50),
     ("structure__near_pct", 0.25), ("volatility__vix_move_pct", 1.0),
@@ -93,7 +130,13 @@ def test_breadth_shares_that_do_not_make_sense_both_fall_back(monkeypatch, stron
 
 def test_usable_breadth_shares_are_kept(monkeypatch):
     _with(monkeypatch, breadth__strong_share=0.7, breadth__weak_share=0.3)
-    assert mr.load()["breadth"] == {"strong_share": 0.7, "weak_share": 0.3}
+    assert mr.load()["breadth"] == {"strong_share": 0.7, "weak_share": 0.3, "min_tiles": 10}
+
+
+def test_unusable_breadth_shares_do_not_cost_the_minimum_its_setting(monkeypatch):
+    _with(monkeypatch, breadth__strong_share=0.4, breadth__weak_share=0.6,
+          breadth__min_tiles=20)
+    assert mr.load()["breadth"] == {"strong_share": 0.60, "weak_share": 0.40, "min_tiles": 20}
 
 
 @pytest.mark.parametrize("bad", [None, "SPY", [], [1, 2], ["", "  "], 5])

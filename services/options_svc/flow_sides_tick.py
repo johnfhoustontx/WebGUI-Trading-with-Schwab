@@ -543,9 +543,14 @@ def after_alerts(bus, fresh, today, now_ts) -> None:
         if figures:
             bus.cache_set(CACHE_SIDES, {
                 "date": today, "public": public,
+                # ``side`` and ``osi`` ride each entry so a reader that pools
+                # the estimate (market_svc.market_read.flow) needs this view
+                # alone, not a join against the capped alert list.
                 "contracts": {aid: {"poll": f["poll"], "stream": f["stream"],
                                     "volume": f["volume"],
-                                    "at_alert": f["at_alert"]}
+                                    "at_alert": f["at_alert"],
+                                    "side": _S["flagged"][aid]["side"],
+                                    "osi": _S["flagged"][aid]["osi"]}
                               for aid, f in figures.items()}},
                 event=EVENT_SIDES, skip_unchanged=True)
         if followup is not None:

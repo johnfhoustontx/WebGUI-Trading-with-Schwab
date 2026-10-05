@@ -1659,6 +1659,10 @@ READ_QUESTIONS = {"direction": "Direction", "breadth": "Breadth",
 READ_HEADS = ("QUESTION", "READING", "SINCE LAST", "FOR STOCKS")
 READ_WAITING = ("No market read yet this session. The first is taken shortly "
                 "after the open.")
+# A row the service marked not-public, on the public origin. Not a dash: a dash
+# says the number is missing, and this one is withheld.
+READ_NOT_SHOWN = "Not shown on this screen"
+READ_LEVELS_STALE = "Dealer levels are not current"
 # Question | reading | since | chip. No fixed floor on the two text tracks: on a
 # narrow screen they wrap rather than scroll, so this panel needs no scroll shell.
 READ_COLS = ("grid grid-cols-[92px_minmax(0,5fr)_minmax(0,2fr)_auto] "
@@ -1671,15 +1675,55 @@ _READ_CROSS_NAMES = {"TLT": "Treasuries", "$DXY": "Dollar", "HYG": "Credit"}
 _READ_CROSS_STATES = {"on": "risk-on", "off": "risk-off", "flat": "flat"}
 
 
+def read_hidden(view) -> bool:
+    """Whether the panel must not be drawn AT ALL: the operator switched the
+    Market read off (the service publishes ``enabled: False``), or this is the
+    public origin and the reading is not marked public.
+
+    Hidden is not "no reading yet". That state has words of its own, and they
+    would be a false statement about a reading that exists and is withheld.
+
+    ⚠ Call it on the event loop: the capture check reads the client's request."""
+    if not isinstance(view, dict):
+        return False
+    if view.get("enabled") is False:
+        return True
+    return _shell.hides_non_public() and view.get("public") is not True
+
+
+def _read_row_closed(row) -> bool:
+    """A row carrying its own ``public`` flag that is not a real True. Only the
+    Flow row carries one: the estimate behind it has a public switch of its own
+    (Flow Alerts' ``[sides] public``)."""
+    return isinstance(row, dict) and "public" in row and row["public"] is not True
+
+
 def read_view_shown(view):
-    """``view`` if THIS render may show it, else None. On the public origin
+    """What THIS render may show of ``view``, else None. On the public origin
     (and in a gallery capture) only a view the service stamped ``public: True``
-    is shown; a missing flag is closed.
+    is shown; a missing flag is closed. A row closed on its own account is
+    replaced by an empty "No reading" row, and the tally is recounted from the
+    rows as drawn, so the withheld verdict is not readable from the count.
+
+    Returns ``view`` itself when nothing is withheld, and a new dict when a
+    row is: the view is the shared parse every tab holds, and is never edited.
 
     ⚠ Call it on the event loop: the capture check reads the client's request."""
     if not _shell.hides_non_public():
         return view
-    return view if isinstance(view, dict) and view.get("public") is True else None
+    if not isinstance(view, dict) or view.get("public") is not True:
+        return None
+    rows = view.get("rows")
+    if not isinstance(rows, list) or not any(_read_row_closed(r) for r in rows):
+        return view
+    shown = [{"key": r.get("key"), "verdict": "none", "facts": {}, "prev": None,
+              "estimate": r.get("estimate"), "hidden": True}
+             if _read_row_closed(r) else r for r in rows]
+    tally = dict.fromkeys(READ_WORDS, 0)
+    for r in shown:
+        if isinstance(r, dict):
+            tally[r.get("verdict") if r.get("verdict") in tally else "none"] += 1
+    return {**view, "rows": shown, "tally": tally}
 
 
 def _read_points(v):
@@ -1715,6 +1759,8 @@ def _read_structure_symbol(s):
 
 
 def _read_structure(f):
+    if f.get("stale") is True:
+        return READ_LEVELS_STALE
     symbols = [s for s in f.get("symbols") or () if isinstance(s, dict)]
     return " · ".join(_read_structure_symbol(s) for s in symbols) or _DASH
 
@@ -1800,11 +1846,13 @@ def read_rows(view):
             continue
         key = r.get("key")
         code = r.get("verdict") if r.get("verdict") in READ_WORDS else "none"
+        hidden = r.get("hidden") is True
         out.append({
             "key": key,
             "question": READ_QUESTIONS.get(key, str(key or "")),
-            "reading": read_reading(key, r.get("facts"), code),
-            "since": read_since(key, r),
+            "reading": (READ_NOT_SHOWN if hidden
+                        else read_reading(key, r.get("facts"), code)),
+            "since": "" if hidden else read_since(key, r),
             "verdict_word": READ_WORDS[code],
             "chip_class": READ_CHIPS[code],
             "estimate": r.get("estimate") is True,
@@ -1854,16 +1902,25 @@ def paint_read(body, head, view, memo, force=True):
     ``render`` is at its size ceiling. ``memo`` is the page's dict for this
     panel: with ``force=False`` (the one-second clock) it redraws only when the
     head would read differently, which is how a reading that stops updating
-    greys without a new one arriving."""
-    shown = read_view_shown(view)
+    greys without a new one arriving.
+
+    A hidden reading (``read_hidden``) takes the whole CARD off the page, title
+    and all: a titled card holding nothing invites the question of what is
+    missing."""
+    hidden = read_hidden(view)
+    shown = None if hidden else read_view_shown(view)
     header = read_header(shown, datetime.now(_CT))
-    key = (header["state"], header["text"], header["tally"],
+    key = (hidden, header["state"], header["text"], header["tally"],
            shown.get("ts") if isinstance(shown, dict) else None)
     if not force and memo.get("key") == key:
         return
     memo["key"] = key
     head.clear()
     body.clear()
+    # The card ``_panel`` built around this body.
+    body.parent_slot.parent.set_visibility(not hidden)
+    if hidden:
+        return
     with head:
         if header["text"]:
             ui.label(header["text"]).classes(f"text-[11px] tabular-nums {MUTED}")

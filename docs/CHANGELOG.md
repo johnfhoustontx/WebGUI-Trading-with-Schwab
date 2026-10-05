@@ -27,9 +27,33 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 - **Rules worth knowing.** `none` is "no reading" and is never shown or counted as
   Neutral; a producer-side test drives that from empty sources. Structure needs SPY
   and QQQ to agree. Cross-asset counts the Market Dashboard's own risk-on / risk-off
-  colours, so the two screens cannot disagree. The dashboard and matrix are judged by
-  age, the flow views by their date. A restart neither repeats a slot nor loses the
-  day's history.
+  colours, so the two screens agree at the moment of the reading. Every source is
+  judged by age, the flow view by its date as well. A restart neither repeats a slot
+  nor loses the day's history.
+- **What review changed, before it shipped.** An independent review found no critical
+  fault and four important ones; all four were real.
+  (1) *Structure trusted the matrix's age*, and the matrix is republished every minute
+  whether or not the collector ran, so a stalled collector would have gone on being
+  scored. It now follows the collector's own age by the dealer panel's rule (150 s,
+  unknown is stale), and says "Dealer levels are not current".
+  (2) *Volatility gave a tailwind with the one-day VIX missing*, which is the check
+  that most often overrides one. All five numbers are required now.
+  (3) *The switches waited for the next slot*, up to half an hour, and "off" left the
+  last reading on screen. Both apply on the next poll: off publishes a retraction and
+  the card leaves the page; a changed public flag republishes the reading.
+  (4) *The Flow row ignored the estimate's own public switch.* With Flow Alerts'
+  `[sides] public` off, the public Desk would have shown a verdict built from figures
+  the operator had withheld. The row carries that flag and the public page draws it
+  as "Not shown on this screen", recounting the tally.
+  Smaller: breadth needs ten priced tiles (one live tile no longer reads as 100%
+  advancing) and an all-flat board is Neutral; cross-asset with a tile missing is No
+  reading unless two already agree; the flow row reads every flagged contract from
+  `flow_sides` alone (which now carries `side` and `osi`) instead of joining the
+  capped alert list; a slot at or before the one published is never due; a failed
+  build is retried after 30 s, not every 3; the dashboard has its own 60 s limit;
+  `near_pct` must sit below `room_pct`. New tests pin the tile names against the
+  dashboard's own map, the breadth count against the Macro Board's on one payload,
+  and the panel as drawn.
 - **Found on the way.** The Desk's `render` was at 22 of 22 nested functions, so the
   painter is module-level and wired with a lambda. Five existing Desk tests failed on
   the first pass: two caught wording of mine that put "bought" and "sold" on the page

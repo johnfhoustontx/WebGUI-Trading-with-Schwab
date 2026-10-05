@@ -299,7 +299,8 @@ the market is open. Each one is a reading that already exists on another page; t
 panel only says which way it points and what changed since the last reading. It is the
 closest the app comes to reading the Desk, the [Market Dashboard](#market-dashboard) and
 [Flow Alerts](#flow-alerts) together, and it does it by fixed rule, with no generated
-text.
+text. A row whose data is missing or out of date reads **No reading**, which is not
+Neutral; when the panel is switched off in Settings it leaves the page.
 
 Use it to see **whether the layers agree**. A rising tape with structure and volatility
 both reading Headwind is a different day from one where all six agree. **No reading** is

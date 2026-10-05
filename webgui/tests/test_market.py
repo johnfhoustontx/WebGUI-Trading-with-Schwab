@@ -183,6 +183,30 @@ def test_breadth_counts_only_the_equity_frames():
     assert market.breadth_counts(payload) == (2, 1)
 
 
+# ⚠ Mirrored, to the letter, in services/market_svc/tests/test_market_read.py
+# (BREADTH_PIN). Two tiers cannot import each other, so the same payload is
+# counted on each side: the Macro Board's meter and the Desk's Market read must
+# print the same two numbers.
+BREADTH_PIN = {"categories": [
+    {"category": "Sector SPDR", "tiles": [
+        {"display": "XLK", "color_state": "risk_on_strong"},
+        {"display": "XLE", "color_state": "risk_off_mild"},
+        {"display": "XLU", "color_state": "flat"},
+        {"display": "XLB", "color_state": "no_data"}]},
+    {"category": "Top 10", "tiles": [
+        {"display": "BIG10", "color_state": "risk_on_mild", "basket": True},
+        {"display": "NVDA", "color_state": "risk_on_mild"},
+        {"display": "AAPL", "color_state": "risk_off_strong"}]},
+    {"category": "Broad-Market ETF", "tiles": [
+        {"display": "SPY", "color_state": "risk_on_mild"}]},
+    {"category": "Volatility", "tiles": [
+        {"display": "VIX", "color_state": "risk_off_strong"}]}]}
+
+
+def test_breadth_counts_what_the_market_read_counts_on_the_same_payload():
+    assert market.breadth_counts(BREADTH_PIN) == (3, 2)
+
+
 def test_breadth_categories_are_the_four_requested_and_real_frames():
     from services.market_svc import symbols
     assert market.BREADTH_CATEGORIES == (

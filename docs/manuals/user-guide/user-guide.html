@@ -845,7 +845,10 @@ way it points <strong>for stocks</strong>.</p>
 <li><strong>The chips are for stocks, not for the day's move.</strong> A tailwind helps stocks
   rise; a headwind holds them back. That reads the same on an up day and a down day.</li>
 <li><strong>No reading is not Neutral.</strong> It means the row's data was missing or out of
-  date: a symbol with no ceiling, too few flagged contracts, a feed that stopped.</li>
+  date: a symbol with no ceiling, too few flagged contracts, a feed that stopped.
+  Structure says <em>Dealer levels are not current</em> when the gamma collector has
+  fallen behind, the same moment the Dealer positioning panel greys its levels.
+  Volatility needs the VIX, the one-day and the three-month all present.</li>
 <li><strong>Since last</strong> is the change from the previous reading: "was Neutral" when the
   chip flipped, otherwise how far the row's main number moved, or "unchanged".</li>
 <li><strong>The head</strong> shows when the reading was taken and when the next one is due. The
@@ -866,7 +869,11 @@ way it points <strong>for stocks</strong>.</p>
 </ul>
 <p><strong>To change it:</strong> Settings → Configuration → <strong>Market read</strong>. Every threshold in
 the table is there, along with 15 or 30 minutes between readings, and the switch
-that keeps it off the public Desk. Changes apply at the next reading.</p>
+that keeps it off the public Desk. A threshold applies at the next reading. The
+two switches apply within a few seconds: turning the Market read off takes the
+panel off the Desk, and turning the public switch off takes it off the public
+Desk. The Flow row follows Flow Alerts' own public switch for the estimate as
+well: with that off, the public Desk shows the row as <em>Not shown on this screen</em>.</p>
 <h2 id="symbol">Symbol</h2>
 <p><strong>Route:</strong> <code>/symbol</code> — or <code>/symbol?symbol=MU</code> to open one name directly, which
 makes a dossier linkable and bookmarkable. In the rail it sits under the Desk,

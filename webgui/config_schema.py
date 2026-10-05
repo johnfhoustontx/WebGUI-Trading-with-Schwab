@@ -1681,16 +1681,24 @@ _MARKET_READ = ConfigFile(
     sections=(
         Section("Schedule", "", (
             Field("enabled", "Market read on",
-                  "Off stops new readings. The last one stays on the Desk until "
-                  "it is two intervals old, then greys.", kind="bool"),
+                  "Off stops new readings and takes the panel off the Desk "
+                  "within a few seconds.", kind="bool"),
             Field("public", "Show it on the public Desk",
-                  "Off = it appears in this app only.", kind="bool"),
+                  "Off = it appears in this app only. Applies within a few "
+                  "seconds. The Flow row also needs Flow Alerts' own public "
+                  "switch for the estimate.", kind="bool"),
             Field("interval_min", "A new reading every",
                   "On the clock, from the first one after the 08:30 Central open "
                   "to the 15:00 close.", kind="choice", choices=(15, 30), unit="min"),
             Field("stale_after_sec", "Ignore a source older than",
                   "A row whose source is older than this reads No reading.",
                   kind="int", unit="sec", min=60, max=3600, step=30),
+            Field("dashboard_stale_after_sec", "Ignore Market Dashboard tiles older than",
+                  "The tiles are republished every 3 seconds in the session, so "
+                  "this can be much shorter.",
+                  kind="int", unit="sec", min=10, max=3600, step=10),
+            Field("retry_sec", "After a failed reading, retry after", "",
+                  kind="int", unit="sec", min=5, max=600, step=5),
         )),
         Section("Direction", "The S&P 500 and Nasdaq 100 indexes, on the day.", (
             Field("direction.move_pct", "Both up or both down by at least", "",
@@ -1700,6 +1708,9 @@ _MARKET_READ = ConfigFile(
                 "Dashboard's equity frames.", (
             _pct("breadth.strong_share", "Tailwind when advancing at least", ""),
             _pct("breadth.weak_share", "Headwind when advancing at most", ""),
+            Field("breadth.min_tiles", "Needs at least this many tiles with a price",
+                  "Fewer reads No reading, so a quote outage cannot pass for a tape.",
+                  kind="int", min=1, max=80, step=1),
         )),
         Section("Structure", "Price against the dealer gamma flip and the ceiling.", (
             Field("structure.symbols", "Symbols read",
@@ -1708,8 +1719,13 @@ _MARKET_READ = ConfigFile(
                   "While price is above the flip.",
                   kind="float", unit="%", min=0, max=5, step=0.05),
             Field("structure.near_pct", "Headwind within this of the ceiling",
-                  "While dealers are long gamma. Below the flip is always a headwind.",
+                  "While dealers are long gamma. Below the flip is always a "
+                  "headwind. Must be below the room above, or both revert.",
                   kind="float", unit="%", min=0, max=5, step=0.05),
+            Field("structure.stale_after_sec", "Ignore dealer levels older than",
+                  "By the collector's last snapshot. The Desk's dealer panel "
+                  "greys its levels at the same age.",
+                  kind="int", unit="sec", min=60, max=3600, step=30),
         )),
         Section("Volatility", "The VIX and its one-day and three-month versions.", (
             Field("volatility.vix_move_pct", "A VIX move of at least",

@@ -1498,23 +1498,33 @@ connection and reconnect.</p>
 <h2 id="the-market-read-view">The Market read view</h2>
 <p><strong><code>cache:market:read</code></strong> is one reading of the Desk's scorecard, replaced on each clock
 slot in the regular session:</p>
-<pre><code>{date, ts, slot, interval_min, next_slot, final, public, tally, rows, history}
+<pre><code>{enabled, date, ts, slot, interval_min, next_slot, final, public, tally, rows, history}
 </code></pre>
 <ul>
-<li><code>slot</code> and <code>next_slot</code> are <code>"HH:MM"</code> Central; <code>next_slot</code> is <code>null</code> after the close
-  reading, which has <code>final: true</code>.</li>
+<li>
+<p><code>enabled: false</code> is a <strong>retraction</strong>: the operator switched the Market read off. It
+  has no rows, and a reader must show nothing, not "no reading yet".</p>
+</li>
+<li>
+<p><code>slot</code> and <code>next_slot</code> are <code>"HH:MM"</code> Central; <code>next_slot</code> is <code>null</code> after the close
+  reading, which has <code>final: true</code>.</p>
+</li>
 <li><code>tally</code> is <code>{tailwind, headwind, neutral, none}</code> counts.</li>
 <li><code>rows</code> is six objects in a fixed order — <code>direction</code>, <code>breadth</code>, <code>structure</code>,
   <code>volatility</code>, <code>flow</code>, <code>cross_asset</code> — each <code>{key, verdict, facts, prev}</code>. <code>verdict</code>
   is <code>tailwind</code>, <code>headwind</code>, <code>neutral</code> or <code>none</code>. <strong><code>none</code> means no reading and must
   never be shown or counted as <code>neutral</code>.</strong> <code>facts</code> are the numbers the verdict was
   decided from, and differ per row; <code>prev</code> is the same row's <code>{verdict, facts}</code> at the
-  previous slot, or <code>null</code>. The <code>flow</code> row carries <code>estimate: true</code>.</li>
+  previous slot, or <code>null</code>. The <code>flow</code> row carries <code>estimate: true</code> and its own
+  <code>public</code>, which is the bought/sold estimate's switch and can be <code>false</code> while the
+  reading's is <code>true</code>. The <code>structure</code> row's facts carry <code>stale: true</code> when the dealer
+  levels were not current.</li>
 <li><code>history</code> is <code>[{slot, verdicts: {key: code}}]</code> for the day.</li>
 </ul>
 <p>A reader must check <code>date</code> against today, treat a reading older than two
 <code>interval_min</code> in the session as stopped, and on the public origin show it only when
-<code>public</code> is exactly <code>true</code>. The rules and thresholds are in the Technical Reference,
+<code>public</code> is exactly <code>true</code>, and a row that carries its own <code>public</code> only when that is
+exactly <code>true</code> too (recounting <code>tally</code> without it). The rules and thresholds are in the Technical Reference,
 <em>Market read</em>.</p>
 <hr />
 <h1 id="cache-key-index">Cache Key Index</h1>
@@ -1604,7 +1614,8 @@ shows flow-alert rows must go through <code>webgui/pages/options/flow.alert_rows
 <code>n_alerts</code>) while the model is unvalidated. A <code>uoa</code> or <code>big_delta</code> alert also carries
 <strong><code>osi</code></strong>, the contract's own Schwab symbol (<code>null</code> when the chain row had none).</p>
 <p><strong><code>cache:options:flow_sides</code></strong> is <code>{date, public, contracts: {&lt;alert id&gt;: {poll,
-stream, volume, at_alert}}}</code>. <code>poll</code>, <code>stream</code> and <code>at_alert</code> are each <code>{bought,
+stream, volume, at_alert, side, osi}}}</code>. <code>side</code> is <code>call</code> or <code>put</code> and <code>osi</code> is the
+contract's symbol, so a reader that pools the estimate needs this view alone. <code>poll</code>, <code>stream</code> and <code>at_alert</code> are each <code>{bought,
 sold, unlabelled}</code> in contracts; <code>stream</code> is <code>null</code> until the contract has been
 streamed; <code>volume</code> is the contract's volume for the day and equals the sum of
 <code>poll</code>. <code>at_alert</code> is <code>poll</code> as it stood the minute the alert fired and never

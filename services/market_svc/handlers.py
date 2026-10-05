@@ -28,7 +28,9 @@ def publish_summary(bus, payload) -> int:
 def publish_read(bus, payload) -> int:
     """Validate against MarketRead and cache+publish. Returns the version."""
     mr = MarketRead(**payload)
-    return bus.cache_set(CACHE_READ, mr.model_dump(), event=EVENT_READ, skip_unchanged=True)
+    # No skip_unchanged: the payload carries its own ``ts``, and it is written
+    # once a slot (or once when a switch changes), never on a clock.
+    return bus.cache_set(CACHE_READ, mr.model_dump(), event=EVENT_READ)
 
 
 def handle_command(bus, command) -> None:

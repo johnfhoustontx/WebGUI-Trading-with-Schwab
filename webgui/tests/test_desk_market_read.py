@@ -153,6 +153,25 @@ def test_a_row_with_no_facts_prints_a_dash_not_a_zero(key):
     assert row["reading"] in ("—", "≈ —")
 
 
+def test_structure_on_levels_that_are_not_current_says_so():
+    """The service refuses the row when the collector is stale; the page must
+    say why, not print a row of dashes the reader has to decode."""
+    facts = {"stale": True, "symbols": [
+        {"symbol": "SPY", "mode": None, "room_pct": None, "state": "none"},
+        {"symbol": "QQQ", "mode": None, "room_pct": None, "state": "none"}]}
+    row = _rows(_view(rows=[_row("structure", "none", facts)]))["structure"]
+    assert row["reading"] == "Dealer levels are not current"
+    assert row["verdict_word"] == "No reading"
+
+
+def test_flow_with_no_tally_at_all_prints_a_dash_not_zero_contracts():
+    """What the SERVICE publishes when the flow view is missing or stale."""
+    facts = {"call_lean": None, "put_lean": None, "calls": None, "puts": None,
+             "contracts": None}
+    row = _rows(_view(rows=[_row("flow", "none", facts, estimate=True)]))["flow"]
+    assert row["reading"] == "≈ —"
+
+
 # --- since the last update ------------------------------------------------------
 
 def test_since_is_first_reading_with_no_previous():
@@ -252,6 +271,163 @@ def test_the_public_origin_shows_only_a_view_marked_public(monkeypatch):
     assert d.read_view_shown(no_flag) is None
     monkeypatch.setattr(shell, "is_public", lambda: False)
     assert d.read_view_shown(_view(public=False)) is not None
+
+
+def _public(monkeypatch, on=True):
+    import shell
+    monkeypatch.setattr(shell, "is_public", lambda: on)
+
+
+def _flow_row(public):
+    return _row("flow", "tailwind", {"call_lean": 12.0, "put_lean": 1.0, "calls": 10,
+                                     "puts": 4, "contracts": 14},
+                {"verdict": "neutral", "facts": {"call_lean": 2.0}},
+                estimate=True, public=public)
+
+
+def _with_flow(public):
+    view = _view()
+    view["rows"][4] = _flow_row(public)
+    view["tally"] = {"tailwind": 3, "headwind": 2, "neutral": 0, "none": 1}
+    return view
+
+
+@pytest.mark.parametrize("flag", [False, "true", None])
+def test_the_public_origin_never_shows_a_flow_row_not_marked_public(monkeypatch, flag):
+    """Flow Alerts has its own switch for the bought/sold estimate ([sides]
+    public). A reading built from the estimate must not put it back on the
+    public screens: no figures, no chip, no "was", and not in the tally."""
+    _public(monkeypatch)
+    shown = d.read_view_shown(_with_flow(flag))
+    row = {r["key"]: r for r in d.read_rows(shown)}["flow"]
+    assert row["verdict_word"] == "No reading"
+    assert row["chip_class"] == d.READ_CHIPS["none"]
+    assert row["reading"] == d.READ_NOT_SHOWN and row["since"] == ""
+    assert "12" not in row["reading"] and "Neutral" not in row["since"]
+    # The count the head prints is of the rows as DRAWN.
+    assert d.read_header(shown, _at(12, 50))["tally"] == (
+        "2 tailwinds · 2 headwinds · 2 no reading")
+    # The other five rows are untouched.
+    assert [r["verdict_word"] for r in d.read_rows(shown)] == [
+        "Tailwind", "Tailwind", "Headwind", "Headwind", "No reading", "No reading"]
+
+
+def test_the_public_origin_shows_a_flow_row_marked_public(monkeypatch):
+    _public(monkeypatch)
+    view = _with_flow(True)
+    shown = d.read_view_shown(view)
+    assert shown is view
+    row = {r["key"]: r for r in d.read_rows(shown)}["flow"]
+    assert row["verdict_word"] == "Tailwind" and row["since"] == "was Neutral"
+
+
+def test_the_app_shows_the_flow_row_whatever_its_public_flag(monkeypatch):
+    _public(monkeypatch, on=False)
+    view = _with_flow(False)
+    assert d.read_view_shown(view) is view
+    assert {r["key"]: r for r in d.read_rows(view)}["flow"]["verdict_word"] == "Tailwind"
+
+
+def test_redacting_a_row_does_not_change_the_shared_view(monkeypatch):
+    """``read_shared`` hands every tab the SAME parsed object."""
+    _public(monkeypatch)
+    view = _with_flow(False)
+    d.read_view_shown(view)
+    assert view["rows"][4]["verdict"] == "tailwind" and view["tally"]["tailwind"] == 3
+
+
+# --- hidden ------------------------------------------------------------------------
+
+def test_a_switched_off_market_read_hides_the_panel_everywhere(monkeypatch):
+    off = {"enabled": False, "date": MON, "ts": _ts(12, 47), "public": False,
+           "slot": "", "rows": [], "tally": {}, "history": []}
+    for public in (False, True):
+        _public(monkeypatch, on=public)
+        assert d.read_hidden(off) is True
+
+
+def test_a_reading_not_marked_public_hides_the_panel_on_the_public_origin(monkeypatch):
+    _public(monkeypatch)
+    assert d.read_hidden(_view(public=False)) is True
+    assert d.read_hidden(_view(public="true")) is True
+    assert d.read_hidden(_view(public=True)) is False
+    _public(monkeypatch, on=False)
+    assert d.read_hidden(_view(public=False)) is False
+
+
+@pytest.mark.parametrize("view", [None, 5])
+@pytest.mark.parametrize("public", [False, True])
+def test_nothing_published_yet_is_not_hidden(monkeypatch, view, public):
+    """It is the "no market read yet" state, which the panel says in words."""
+    _public(monkeypatch, on=public)
+    assert d.read_hidden(view) is False
+
+
+# --- drawn --------------------------------------------------------------------------
+
+def _draw(monkeypatch, view):
+    """Render the whole Desk with ``view`` on the bus; return the Market read
+    card's (visible, texts)."""
+    import test_desk as td
+    from nicegui import ui
+    data = td._full_payloads()
+    if view is not None:
+        data[d.READ_VIEW] = view
+    td._seed_bus(monkeypatch, data)
+    before = set(ui.context.client.elements)
+    d.render()
+    new = [e for k, e in ui.context.client.elements.items() if k not in before]
+    title = next(e for e in new if getattr(e, "text", None) == "Market read")
+    card = next(a for a in title.ancestors() if set(d.CARD.split()) <= set(a._classes))
+    inside = [getattr(e, "text", None) for e in new if card in e.ancestors()]
+    return card.visible, [t for t in inside if t]
+
+
+def _now_view(**over):
+    now = datetime.datetime.now(CT)
+    return _view(date=now.date().isoformat(), ts=int(now.timestamp()), **over)
+
+
+def test_the_panel_draws_a_seeded_reading(monkeypatch):
+    visible, texts = _draw(monkeypatch, _now_view())
+    assert visible is True
+    assert "$SPX +0.69% · $NDX +0.79%" in texts
+    assert [t for t in texts if t in ("TAILWIND", "HEADWIND", "NEUTRAL", "NO READING")] \
+        == ["TAILWIND", "TAILWIND", "HEADWIND", "HEADWIND", "NEUTRAL", "NO READING"]
+    assert list(d.READ_HEADS) == [t for t in texts if t in d.READ_HEADS]
+    assert "2 tailwinds · 2 headwinds · 1 neutral · 1 no reading" in texts
+
+
+def test_the_panel_with_no_reading_says_so(monkeypatch):
+    visible, texts = _draw(monkeypatch, None)
+    assert visible is True and d.READ_WAITING in texts
+
+
+def test_the_public_desk_does_not_draw_a_reading_marked_not_public(monkeypatch):
+    _public(monkeypatch)
+    visible, texts = _draw(monkeypatch, _now_view(public=False))
+    assert visible is False
+    # Not "No market read yet": that would be a false statement about a
+    # reading the operator has chosen not to show.
+    assert d.READ_WAITING not in texts
+    assert not any("SPX" in t or t == "TAILWIND" for t in texts)
+
+
+def test_a_switched_off_market_read_is_not_drawn(monkeypatch):
+    off = {"enabled": False, "date": MON, "ts": _ts(12, 47), "public": False,
+           "slot": "", "rows": [], "tally": {}, "history": []}
+    visible, texts = _draw(monkeypatch, off)
+    assert visible is False and d.READ_WAITING not in texts
+
+
+def test_the_public_desk_draws_the_flow_row_as_not_shown(monkeypatch):
+    _public(monkeypatch)
+    view = _with_flow(False)
+    now = datetime.datetime.now(CT)
+    view.update(date=now.date().isoformat(), ts=int(now.timestamp()))
+    visible, texts = _draw(monkeypatch, view)
+    assert visible is True and d.READ_NOT_SHOWN in texts
+    assert not any("points bought over sold" in t for t in texts)
 
 
 # --- wiring ------------------------------------------------------------------------

@@ -631,3 +631,23 @@ def test_the_breadth_frames_agree_between_the_macro_board_and_the_market_read():
         "services/market_svc/symbols.py:BREADTH_CATEGORIES - the Macro Board's "
         "advancing/declining meter and the Desk's Market read would then count "
         "different frames.")
+
+
+# --- how old dealer levels may be before they stop being a reading ------------
+# The Desk's dealer panel greys its walls past STALE_AFTER_SEC; the Market
+# read's Structure row refuses them past [structure] stale_after_sec. One
+# screen, two panels: with different limits a level would be greyed in one and
+# scored in the other.
+def test_the_market_read_refuses_dealer_levels_at_the_age_the_dealer_panel_greys_them():
+    page = _const("webgui/pages/desk.py", "STALE_AFTER_SEC")
+    service = _const("shared/market_read_config.py", "DEFAULTS")["structure"]["stale_after_sec"]
+    assert page and service == page, (
+        "shared/market_read_config.py [structure] stale_after_sec has drifted "
+        "from webgui/pages/desk.py:STALE_AFTER_SEC.")
+
+
+def test_the_breadth_pin_is_the_same_payload_in_both_tiers():
+    """Each tier counts BREADTH_PIN in its own suite and expects (3, 2). That
+    proves nothing unless the two payloads are one payload."""
+    assert (_const("services/market_svc/tests/test_market_read.py", "BREADTH_PIN")
+            == _const("webgui/tests/test_market.py", "BREADTH_PIN"))

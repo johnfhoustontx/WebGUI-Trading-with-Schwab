@@ -762,8 +762,11 @@ Consumers today: `portfolio_svc` and `sentiment_svc` (`/stream/quotes`),
 slot in the regular session:
 
 ```
-{date, ts, slot, interval_min, next_slot, final, public, tally, rows, history}
+{enabled, date, ts, slot, interval_min, next_slot, final, public, tally, rows, history}
 ```
+
+- `enabled: false` is a **retraction**: the operator switched the Market read off. It
+  has no rows, and a reader must show nothing, not "no reading yet".
 
 - `slot` and `next_slot` are `"HH:MM"` Central; `next_slot` is `null` after the close
   reading, which has `final: true`.
@@ -773,12 +776,16 @@ slot in the regular session:
   is `tailwind`, `headwind`, `neutral` or `none`. **`none` means no reading and must
   never be shown or counted as `neutral`.** `facts` are the numbers the verdict was
   decided from, and differ per row; `prev` is the same row's `{verdict, facts}` at the
-  previous slot, or `null`. The `flow` row carries `estimate: true`.
+  previous slot, or `null`. The `flow` row carries `estimate: true` and its own
+  `public`, which is the bought/sold estimate's switch and can be `false` while the
+  reading's is `true`. The `structure` row's facts carry `stale: true` when the dealer
+  levels were not current.
 - `history` is `[{slot, verdicts: {key: code}}]` for the day.
 
 A reader must check `date` against today, treat a reading older than two
 `interval_min` in the session as stopped, and on the public origin show it only when
-`public` is exactly `true`. The rules and thresholds are in the Technical Reference,
+`public` is exactly `true`, and a row that carries its own `public` only when that is
+exactly `true` too (recounting `tally` without it). The rules and thresholds are in the Technical Reference,
 *Market read*.
 
 ---
@@ -879,7 +886,8 @@ shows flow-alert rows must go through `webgui/pages/options/flow.alert_rows` (it
 **`osi`**, the contract's own Schwab symbol (`null` when the chain row had none).
 
 **`cache:options:flow_sides`** is `{date, public, contracts: {<alert id>: {poll,
-stream, volume, at_alert}}}`. `poll`, `stream` and `at_alert` are each `{bought,
+stream, volume, at_alert, side, osi}}}`. `side` is `call` or `put` and `osi` is the
+contract's symbol, so a reader that pools the estimate needs this view alone. `poll`, `stream` and `at_alert` are each `{bought,
 sold, unlabelled}` in contracts; `stream` is `null` until the contract has been
 streamed; `volume` is the contract's volume for the day and equals the sum of
 `poll`. `at_alert` is `poll` as it stood the minute the alert fired and never

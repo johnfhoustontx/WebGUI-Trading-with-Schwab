@@ -57,6 +57,9 @@ class MarketRead(_Base):
     switch is: a reader on the public origin shows the view only then.
     """
 
+    # False = the operator switched the Market read off: an EMPTY reading
+    # published once, so no screen keeps showing the last one.
+    enabled: bool = True
     date: str = ""                 # the CT session date, YYYY-MM-DD
     ts: int = 0                    # unix seconds the reading was taken
     slot: str = ""                 # "HH:MM" Central, the clock slot
@@ -65,5 +68,5 @@ class MarketRead(_Base):
     final: bool = False            # the reading taken at the close
     public: bool = False
     tally: dict = {}               # {verdict code: count}
-    rows: list[dict] = []          # [{key, verdict, facts, prev, estimate?}]
+    rows: list[dict] = []          # [{key, verdict, facts, prev, estimate?, public?}]
     history: list[dict] = []       # [{slot, verdicts: {key: code}}] for the day

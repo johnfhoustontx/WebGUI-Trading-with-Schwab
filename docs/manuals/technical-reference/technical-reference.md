@@ -2092,47 +2092,76 @@ no Claude call: every input is a view another service already publishes.
 |---|---|---|---|
 | `direction` | `market:dashboard` tiles `SPX`, `NDX` (`change_pct`) | both ≥ +`move_pct` (0.25) | both ≤ −`move_pct` |
 | `breadth` | `market:dashboard`, tiles of the four equity frames (`symbols.BREADTH_CATEGORIES`), by `color_state`; basket tiles skipped | advancing share ≥ `strong_share` (0.60) | ≤ `weak_share` (0.40) |
-| `structure` | `options:matrix` rows for `structure.symbols` (SPY, QQQ): `spot`, `flip`, `call_wall`, `net_gex`, `gex_regime` | every symbol above the flip with room ≥ `room_pct` (0.50) | every symbol within `near_pct` (0.25) of the ceiling while above the flip, or below the flip |
+| `structure` | `options:matrix` rows for `structure.symbols` (SPY, QQQ): `spot`, `flip`, `call_wall`, `net_gex`, `gex_regime`; gated by `options:gex_status` `age_seconds` | every symbol above the flip with room ≥ `room_pct` (0.50) | every symbol within `near_pct` (0.25) of the ceiling while above the flip, or below the flip |
 | `volatility` | `market:dashboard` tiles `VIX`, `VIX1D`, `VIX3M`, `SPX` | VIX `change_pct` ≤ −`vix_move_pct` (1.0) and VIX < VIX3M | VIX `change_pct` ≥ +`vix_move_pct` with SPX up, or VIX1D > VIX |
-| `flow` | `options:flow_sides` joined to `options:flow_alerts` by alert id | call lean ≥ `lean_pts` (5.0) and put lean below it | put lean ≥ `lean_pts` and call lean below it |
+| `flow` | `options:flow_sides` alone (each entry names its `side` and `osi`) | call lean ≥ `lean_pts` (5.0) and put lean below it | put lean ≥ `lean_pts` and call lean below it |
 | `cross_asset` | `market:dashboard` tiles `TLT`, `$DXY`, `HYG`, by `color_state` | at least two risk-on | at least two risk-off |
 
 All bounds are inclusive. Everything between the two is `neutral`.
+
+- **Breadth needs a sample.** Fewer than `breadth.min_tiles` (10) tiles with a price
+  (rising, falling or flat) is `none`: a quote outage that leaves one tile up would
+  otherwise read as 100% advancing. Every tile priced and none moving is `neutral`.
+- **Volatility needs all five numbers:** the VIX level and change, the one-day, the
+  three-month, and the SPX change. Each rule uses one of them, and a rule that cannot
+  be evaluated is not a rule that came out false, so a missing one is `none`.
+- **Cross-asset:** two tiles that agree decide the row whatever the third says.
+  Otherwise a tile with no colour makes the row `none`, because it is the one that
+  could have decided it.
 
 - **Room** is `(call_wall − spot) ÷ spot × 100`. At or through the ceiling counts as at
   it. The symbols must agree: one at its ceiling and one with room is `neutral`.
 - **Lean** is `(Σ bought − Σ sold) ÷ Σ (bought + sold + unlabelled) × 100`, pooled by
   volume over the poll tallies of today's flagged contracts, calls and puts apart. A
-  contract flagged by two alerts is counted once. Unlabelled volume dilutes it.
+  contract flagged by two alerts is counted once. Unlabelled volume dilutes it. Every
+  flagged contract is read, not only the ones still on the capped alert list.
 - **Cross-asset counts the board's own colours.** Whether a falling Treasury fund is
   good or bad for stocks is decided once, in `classify.color_state`; this row does not
   hold a second opinion.
 
 **`none` is "no reading", never `neutral`.** A row is `none` when a tile it needs has no
 number, a matrix row has no flip or (above the flip) no ceiling, a symbol's net gamma is
-exactly zero (the after-hours artefact the dealer panel also hides), fewer than
-`flow.min_contracts` (10) contracts are flagged, fewer than two cross-asset tiles have a
-colour, or its source view is absent. A row that raises is also `none`, and the other
-five still publish (`market.read.<row>` on `/health`).
+exactly zero (the after-hours artefact the dealer panel also hides), the dealer levels
+are not current, fewer than `flow.min_contracts` (10) contracts are flagged, or its
+source view is absent. A row that raises is also `none`, and the other five still
+publish (`market.read.<row>` on `/health`).
 
-**Two kinds of "too old".** The dashboard and the matrix are republished on a clock, so
-an old one means its publisher has stopped: they are dropped when their `:ts` side key
-is older than `stale_after_sec` (300). The two flow views are published only when
-something changes, so a quiet tape leaves them legitimately old: they are dropped when
-the session `date` they carry is not today's.
+**Too old.** Every source is rewritten on a clock while its publisher is alive (an
+unchanged write still refreshes the view's `:ts`), so an old one means the publisher
+has stopped. A view is dropped when its `:ts` is older than `stale_after_sec` (300);
+the dashboard, republished every 3 seconds, has its own shorter limit,
+`dashboard_stale_after_sec` (60). The flow view is also dropped when the session
+`date` it carries is not today's.
+
+**Structure follows the collector, not the matrix.** The matrix is republished every
+minute whether or not the GEX collector ran, so its own age proves nothing about the
+levels in it. The row is `none` (`facts.stale: true`, no levels handed on) when the
+collector's age is unknown or above `structure.stale_after_sec` (150). That age is
+`options:gex_status` `age_seconds` plus the age of the status view itself, so a status
+publisher that stops cannot leave the collector looking fresh. 150 is the limit the
+Desk's dealer panel greys its walls at (`desk.STALE_AFTER_SEC`); a mirror test pins
+the two.
 
 **Slots.** A reading is taken on every clock multiple of `interval_min` (15 or 30)
 from the first one strictly after the 08:30 CT open through the 15:00 close inclusive,
 on trading days. The market service asks "is a slot due" on its existing poll; there is
-no timer. A late tick still fires the slot it is in, once. The 15:00 reading is
-`final`. On its first call after a start the service reads the published view back, so
-a restart neither repeats a slot nor loses the day's history.
+no timer. A late tick still fires the slot it is in, once, and a slot at or before
+the one already published is never due (an interval changed mid-session cannot put
+the day's history out of order). The 15:00 reading is `final`. On its first call after a start the service reads the published view back, so
+a restart neither repeats a slot nor loses the day's history. A reading that fails to
+build is retried after `retry_sec` (30), not on every poll.
 
-**`cache:market:read`** (`MarketRead`, `skip_unchanged`): `date`, `ts`, `slot`,
+**The two switches apply between slots**, because a switch turned off must not wait up
+to half an hour. `enabled = false` replaces a reading that is up with a retraction
+(`enabled: false`, no rows), once. A changed `public` republishes the reading that is
+up, unchanged but for the flag; that reaches yesterday's reading before the open too.
+
+**`cache:market:read`** (`MarketRead`): `enabled`, `date`, `ts`, `slot`,
 `interval_min`, `next_slot`, `final`, `public`, `tally`, `rows`, `history`. Each row is
-`{key, verdict, facts, prev}` (`flow` also carries `estimate: true`); `prev` is the
-previous slot's `{verdict, facts}` for the same row, or `null`. `history` is the day's
-`{slot, verdicts}` list.
+`{key, verdict, facts, prev}`; `prev` is the previous slot's `{verdict, facts}` for the
+same row, or `null`. The `flow` row also carries `estimate: true` and its own
+`public`, copied from `options:flow_sides` (Flow Alerts' `[sides] public`). `history`
+is the day's `{slot, verdicts}` list.
 
 **The Desk panel.** The page maps each code to a word and a fixed chip class
 (`READ_WORDS`, `READ_CHIPS`); an unknown code is "No reading". It formats the facts
@@ -2141,7 +2170,13 @@ change in the row's main number (SPX percent, advancing count, VIX level, call l
 else "unchanged". The head is `live`, `close`, `stale` or `waiting`: `stale` is a
 reading from another day, or one older than two of its own intervals while the session
 is open. The one-second clock re-checks that, so a reading that stops arriving greys
-without a new one. On the public origin the panel shows only when `public` is `true`.
+without a new one.
+
+**Hidden is not "no reading yet".** A retraction hides the whole card on every origin.
+On the public origin a reading whose `public` is not `true` hides it too, and a row
+whose own `public` is not `true` (the Flow row) is drawn as "No reading · Not shown on
+this screen" with no figures and no "was", and the tally in the head is recounted from
+the rows as drawn (`read_hidden`, `read_view_shown`).
 
 **Known limitations.**
 

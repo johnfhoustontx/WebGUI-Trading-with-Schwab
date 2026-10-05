@@ -32,8 +32,6 @@ INDEX_TILES = ("SPX", "NDX")
 VIX_TILES = ("VIX", "VIX1D", "VIX3M")
 CROSS_ASSET_TILES = ("TLT", "$DXY", "HYG")
 
-# The alert kinds that name one contract (options_svc.flow_sides_tick.CONTRACT_TYPES).
-_CONTRACT_ALERTS = ("uoa", "big_delta")
 
 
 def _row(key, verdict, facts, **extra) -> dict:
@@ -65,7 +63,7 @@ def _last(tiles, name):
 def direction(dashboard, cfg) -> dict:
     """$SPX and $NDX on the day: both up, both down, or neither."""
     tiles = tiles_by_name(dashboard)
-    spx, ndx = _pct(tiles, "SPX"), _pct(tiles, "NDX")
+    spx, ndx = (_pct(tiles, name) for name in INDEX_TILES)
     facts = {"spx_pct": spx, "ndx_pct": ndx}
     if spx is None or ndx is None:
         return _row("direction", NONE, facts)
@@ -81,7 +79,7 @@ def breadth(dashboard, cfg) -> dict:
     """Advancers and decliners across the equity frames: the Macro Board's own
     count. Direction is the tile's polarity-aware ``color_state``, and a basket
     tile (the average of the names beside it) is skipped."""
-    adv = dec = 0
+    adv = dec = flat = 0
     cats = dashboard.get("categories") if isinstance(dashboard, dict) else None
     for cat in cats if isinstance(cats, list) else ():
         if not isinstance(cat, dict) or cat.get("category") not in BREADTH_CATEGORIES:
@@ -95,10 +93,17 @@ def breadth(dashboard, cfg) -> dict:
                 adv += 1
             elif state.startswith("risk_off"):
                 dec += 1
+            elif state == "flat":
+                flat += 1
+    facts = {"advancing": adv, "declining": dec, "flat": flat, "share": None}
+    # Too few tiles with a price is a quote outage, not a tape: one live tile
+    # out of forty would otherwise read as 100% advancing.
+    if adv + dec + flat < cfg["breadth"]["min_tiles"]:
+        return _row("breadth", NONE, facts)
     if adv + dec == 0:
-        return _row("breadth", NONE, {"advancing": 0, "declining": 0, "share": None})
-    share = adv / (adv + dec)
-    facts = {"advancing": adv, "declining": dec, "share": share}
+        # Every tile priced and none moving: a real reading, and a neutral one.
+        return _row("breadth", NEUTRAL, facts)
+    share = facts["share"] = adv / (adv + dec)
     if share >= cfg["breadth"]["strong_share"]:
         return _row("breadth", TAILWIND, facts)
     if share <= cfg["breadth"]["weak_share"]:
@@ -140,10 +145,22 @@ def _structure_of(row, cfg) -> dict:
     return out
 
 
-def structure(matrix, cfg) -> dict:
+def structure(matrix, status, cfg) -> dict:
     """Price against the dealer gamma flip and the ceiling, for each configured
     symbol. They must AGREE for the row to lean; one of them without a reading
-    leaves the row without one."""
+    leaves the row without one.
+
+    ``status`` is ``cache:options:gex_status``, and its ``age_seconds`` (how
+    long ago the collector last stored a snapshot) GATES the row. The matrix is
+    republished every minute whether or not the collector ran, so its own age
+    proves nothing about the levels in it. Unknown is stale: the rule the
+    Desk's dealer panel hides its walls by (``desk.freshness_facts``)."""
+    age = finite(status.get("age_seconds")) if isinstance(status, dict) else None
+    if age is None or age > cfg["structure"]["stale_after_sec"]:
+        # The levels are not handed on either: a "No reading" row that still
+        # printed where price sits against them would be a reading.
+        blank = [_structure_of({"symbol": s}, cfg) for s in cfg["structure"]["symbols"]]
+        return _row("structure", NONE, {"symbols": blank, "stale": True})
     rows = matrix.get("rows") if isinstance(matrix, dict) else None
     by_symbol = {}
     for r in rows if isinstance(rows, list) else ():
@@ -154,7 +171,7 @@ def structure(matrix, cfg) -> dict:
     for s, name in zip(symbols, cfg["structure"]["symbols"]):
         s["symbol"] = name
     states = {s["state"] for s in symbols}
-    facts = {"symbols": symbols}
+    facts = {"symbols": symbols, "stale": False}
     if not symbols or NONE in states:
         return _row("structure", NONE, facts)
     if len(states) == 1:
@@ -169,19 +186,23 @@ def volatility(dashboard, cfg) -> dict:
     source guard against reading the retired ``options:header`` field of that
     name, and a fact here must not be mistaken for it."""
     tiles = tiles_by_name(dashboard)
-    vix, vix_pct = _last(tiles, "VIX"), _pct(tiles, "VIX")
-    vix1d, vix3m = _last(tiles, "VIX1D"), _last(tiles, "VIX3M")
-    spx = _pct(tiles, "SPX")
+    name, name1d, name3m = VIX_TILES
+    vix, vix_pct = _last(tiles, name), _pct(tiles, name)
+    vix1d, vix3m = _last(tiles, name1d), _last(tiles, name3m)
+    spx = _pct(tiles, INDEX_TILES[0])
     facts = {"vix_level": vix, "vix_pct": vix_pct, "vix1d": vix1d, "vix3m": vix3m,
              "spx_pct": spx}
-    if vix is None or vix_pct is None:
+    # EVERY part, or no reading. Each rule below needs one of them, and a
+    # rule that cannot be evaluated is not a rule that came out false: with the
+    # one-day VIX missing, "tailwind" would be given without the check that
+    # most often overrides it.
+    if None in (vix, vix_pct, vix1d, vix3m, spx):
         return _row("volatility", NONE, facts)
     move = cfg["volatility"]["vix_move_pct"]
     # Fear rising while stocks rise, or the nearest day priced above the month.
-    if (vix_pct >= move and spx is not None and spx > 0) or (
-            vix1d is not None and vix1d > vix):
+    if (vix_pct >= move and spx > 0) or vix1d > vix:
         return _row("volatility", HEADWIND, facts)
-    if vix_pct <= -move and vix3m is not None and vix < vix3m:
+    if vix_pct <= -move and vix < vix3m:
         return _row("volatility", TAILWIND, facts)
     return _row("volatility", NEUTRAL, facts)
 
@@ -190,27 +211,29 @@ def _lean(bought, sold, total):
     return None if total <= 0 else (bought - sold) / total * 100.0
 
 
-def flow(sides, alerts, cfg) -> dict:
+def flow(sides, cfg) -> dict:
     """The bought / sold ESTIMATE pooled by volume over today's flagged
-    contracts, calls and puts apart. ``sides`` is ``cache:options:flow_sides``;
-    ``alerts`` is ``cache:options:flow_alerts``, which says which side each
-    contract is on. A contract flagged by two alerts is counted once."""
-    facts = {"call_lean": None, "put_lean": None, "calls": 0, "puts": 0,
-             "contracts": 0}
+    contracts, calls and puts apart. ``sides`` is ``cache:options:flow_sides``,
+    whose every entry names its contract (``osi``) and its ``side``. A contract
+    flagged by two alerts is counted once.
+
+    The row carries the view's own ``public`` flag: the operator can keep the
+    estimate off the public screens ([sides] public), and a reading built from
+    it must not put it back."""
+    facts = {"call_lean": None, "put_lean": None, "calls": None, "puts": None,
+             "contracts": None}
     contracts = sides.get("contracts") if isinstance(sides, dict) else None
-    listed = alerts.get("alerts") if isinstance(alerts, dict) else None
-    if (not isinstance(contracts, dict) or not isinstance(listed, list)
-            or sides.get("date") != alerts.get("date")):
-        return _row("flow", NONE, facts, estimate=True)
+    if not isinstance(contracts, dict):
+        return _row("flow", NONE, facts, estimate=True, public=True)
+    public = sides.get("public") is True
     pooled = {"call": [0.0, 0.0, 0.0], "put": [0.0, 0.0, 0.0]}
     counted = {"call": 0, "put": 0}
     seen = set()
-    for a in listed:
-        if not isinstance(a, dict) or a.get("type") not in _CONTRACT_ALERTS:
+    for aid, entry in contracts.items():
+        if not isinstance(entry, dict):
             continue
-        side, osi = a.get("side"), a.get("osi") or a.get("id")
-        entry = contracts.get(a.get("id"))
-        if side not in pooled or osi in seen or not isinstance(entry, dict):
+        side, osi = entry.get("side"), entry.get("osi") or aid
+        if side not in pooled or osi in seen:
             continue
         poll = entry.get("poll")
         if not isinstance(poll, dict):
@@ -227,15 +250,13 @@ def flow(sides, alerts, cfg) -> dict:
                  contracts=counted["call"] + counted["put"],
                  call_lean=_lean(*pooled["call"]), put_lean=_lean(*pooled["put"]))
     if facts["contracts"] < cfg["flow"]["min_contracts"]:
-        return _row("flow", NONE, facts, estimate=True)
+        return _row("flow", NONE, facts, estimate=True, public=public)
     need = cfg["flow"]["lean_pts"]
     calls_bought = facts["call_lean"] is not None and facts["call_lean"] >= need
     puts_bought = facts["put_lean"] is not None and facts["put_lean"] >= need
-    if calls_bought and not puts_bought:
-        return _row("flow", TAILWIND, facts, estimate=True)
-    if puts_bought and not calls_bought:
-        return _row("flow", HEADWIND, facts, estimate=True)
-    return _row("flow", NEUTRAL, facts, estimate=True)
+    verdict = (TAILWIND if calls_bought and not puts_bought else
+               HEADWIND if puts_bought and not calls_bought else NEUTRAL)
+    return _row("flow", verdict, facts, estimate=True, public=public)
 
 
 def cross_asset(dashboard, cfg) -> dict:
@@ -254,17 +275,21 @@ def cross_asset(dashboard, cfg) -> dict:
         on += word == "on"
         off += word == "off"
     facts = {"tiles": seen, "risk_on": on, "risk_off": off}
-    if sum(1 for t in seen if t["state"] is not None) < 2:
-        return _row("cross_asset", NONE, facts)
+    # Two agreeing decide it whatever the third says.
     if on >= 2:
         return _row("cross_asset", TAILWIND, facts)
     if off >= 2:
         return _row("cross_asset", HEADWIND, facts)
+    # Otherwise a missing tile is the one that could have decided it.
+    if any(t["state"] is None for t in seen):
+        return _row("cross_asset", NONE, facts)
     return _row("cross_asset", NEUTRAL, facts)
 
 
 # ── slots ────────────────────────────────────────────────────────────────────
-def _ct(now):
+def ct(now):
+    """``now`` in Central time. A naive datetime MEANS Central (the repo-wide
+    rule), so it is labelled, never converted from the machine's own zone."""
     return now.replace(tzinfo=_mc.CT) if now.tzinfo is None else now.astimezone(_mc.CT)
 
 
@@ -273,7 +298,7 @@ def _slot_time(now, interval_min):
     session. Slots are clock multiples of the interval from the first one
     strictly AFTER the open (nothing has traded at the open itself) through the
     close inclusive."""
-    now = _ct(now)
+    now = ct(now)
     day = now.date()
     if not _mc.is_trading_day(day):
         return None
@@ -291,7 +316,10 @@ def slot_due(now, last_slot, interval_min):
     if at is None:
         return None
     slot = at.strftime("%H:%M")
-    return None if slot == last_slot else slot
+    # "At or before", not "equal": an interval changed mid-session (15 -> 30)
+    # floors to an EARLIER mark than the one already published, and publishing
+    # that would put the day's history out of order.
+    return None if last_slot is not None and slot <= last_slot else slot
 
 
 def _on(date, slot):
@@ -330,17 +358,17 @@ def _safely(key, fn, *args) -> dict:
 
 
 def build(inputs, cfg, *, date, slot, ts, previous=None) -> dict:
-    """One reading. ``inputs`` holds the four views, each already None when it
-    is missing, stale or from another day: ``dashboard``, ``matrix``, ``sides``,
-    ``alerts``. ``previous`` is the last published reading; the same date
+    """One reading. ``inputs`` holds the four views, each already None when
+    it is missing, stale or from another day: ``dashboard``, ``matrix``,
+    ``gex_status``, ``sides``. ``previous`` is the last published reading; the same date
     supplies each row's ``prev`` and the day's ``history``."""
     dashboard, matrix = inputs.get("dashboard"), inputs.get("matrix")
     rows = [
         _safely("direction", direction, dashboard, cfg),
         _safely("breadth", breadth, dashboard, cfg),
-        _safely("structure", structure, matrix, cfg),
+        _safely("structure", structure, matrix, inputs.get("gex_status"), cfg),
         _safely("volatility", volatility, dashboard, cfg),
-        _safely("flow", flow, inputs.get("sides"), inputs.get("alerts"), cfg),
+        _safely("flow", flow, inputs.get("sides"), cfg),
         _safely("cross_asset", cross_asset, dashboard, cfg),
     ]
     same_day = isinstance(previous, dict) and previous.get("date") == date
@@ -355,7 +383,8 @@ def build(inputs, cfg, *, date, slot, ts, previous=None) -> dict:
     history.append({"slot": slot, "verdicts": {r["key"]: r["verdict"] for r in rows}})
     interval = cfg["interval_min"]
     return {
-        "date": date, "ts": ts, "slot": slot, "interval_min": interval,
+        "enabled": True, "date": date, "ts": ts, "slot": slot,
+        "interval_min": interval,
         "next_slot": next_slot(date, slot, interval), "final": is_final(date, slot),
         "public": cfg["public"] is True, "tally": tally(rows), "rows": rows,
         "history": history,

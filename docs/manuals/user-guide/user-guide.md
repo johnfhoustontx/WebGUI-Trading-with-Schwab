@@ -604,6 +604,9 @@ Anything in between is **Neutral**.
   rise; a headwind holds them back. That reads the same on an up day and a down day.
 - **No reading is not Neutral.** It means the row's data was missing or out of
   date: a symbol with no ceiling, too few flagged contracts, a feed that stopped.
+  Structure says *Dealer levels are not current* when the gamma collector has
+  fallen behind, the same moment the Dealer positioning panel greys its levels.
+  Volatility needs the VIX, the one-day and the three-month all present.
 - **Since last** is the change from the previous reading: "was Neutral" when the
   chip flipped, otherwise how far the row's main number moved, or "unchanged".
 - **The head** shows when the reading was taken and when the next one is due. The
@@ -624,7 +627,11 @@ Anything in between is **Neutral**.
 
 **To change it:** Settings → Configuration → **Market read**. Every threshold in
 the table is there, along with 15 or 30 minutes between readings, and the switch
-that keeps it off the public Desk. Changes apply at the next reading.
+that keeps it off the public Desk. A threshold applies at the next reading. The
+two switches apply within a few seconds: turning the Market read off takes the
+panel off the Desk, and turning the public switch off takes it off the public
+Desk. The Flow row follows Flow Alerts' own public switch for the estimate as
+well: with that off, the public Desk shows the row as *Not shown on this screen*.
 
 ## Symbol
 

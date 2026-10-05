@@ -108,7 +108,8 @@ def test_alert_reports_volume_from_before_it_fired():
     assert view["contracts"][AID] == {
         "poll": {"bought": 400.0, "sold": 0.0, "unlabelled": 1000.0},
         "stream": None, "volume": 1400.0,
-        "at_alert": {"bought": 400.0, "sold": 0.0, "unlabelled": 1000.0}}
+        "at_alert": {"bought": 400.0, "sold": 0.0, "unlabelled": 1000.0},
+        "side": "call", "osi": OSI}
 
 
 def test_published_tally_sums_to_the_volume():
@@ -194,7 +195,8 @@ def test_nothing_is_booked_before_the_regular_open():
     bus = _after([_alert()], _at(FRI, 8, 10))
     c = _view(bus, tick.CACHE_SIDES)["contracts"][AID]
     assert c == {"poll": {"bought": 0.0, "sold": 0.0, "unlabelled": 0.0},
-                 "stream": None, "volume": None, "at_alert": None}
+                 "stream": None, "volume": None, "at_alert": None,
+                 "side": "call", "osi": OSI}
     # The first poll after the bell seeds; the next one labels.
     tick.on_chain("SPY", _chain(_c(OSI, 300)), _at(FRI, 8, 31))
     tick.on_chain("SPY", _chain(_c(OSI, 500, last=1.10)), _at(FRI, 8, 32))

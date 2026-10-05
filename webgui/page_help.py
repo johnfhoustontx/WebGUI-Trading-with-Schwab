@@ -122,7 +122,9 @@ on · what am I holding.*
   otherwise how far the row's main number moved.
   It is a count of rules, **not a forecast** and not advice, and it is a
   different thing from Bias and Signal above. **No reading** means that row's
-  data was missing or out of date, which is not the same as Neutral. If the
+  data was missing or out of date, which is not the same as Neutral; Structure
+  says *Dealer levels are not current* when the gamma collector has fallen
+  behind. If the
   rows turn grey and the head says *not updating*, the readings have stopped
   arriving and you are looking at the last one.
 - **Market Summary** — the **highlights of the latest market report**: up to

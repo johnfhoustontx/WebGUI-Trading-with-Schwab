@@ -209,8 +209,13 @@ ticker and the contract is not one.
   one-second clock repaints only when the head would read differently, which is how
   a reading that stops arriving greys without a new one. The rows use `READ_COLS`,
   whose text tracks have no floor: on a narrow screen they wrap, so this panel needs
-  no scroll shell and no pin. `read_view_shown` is the public filter and runs on the
-  event loop. ⚠ The volatility fact is `vix_level`, not `vix`: a source guard
+  no scroll shell and no pin. `read_hidden` decides whether the card is drawn at all
+  (a retraction, `enabled: false`, on every origin; a reading not marked public on
+  the public one) and `paint_read` then hides the CARD, `body.parent_slot.parent`,
+  rather than leave a title over nothing. `read_view_shown` is the public filter: it
+  also swaps a row that carries its own `public` flag (Flow) for an empty "No
+  reading" row and recounts the tally, in a NEW dict, because the view is the shared
+  parse every tab holds. Both run on the event loop. ⚠ The volatility fact is `vix_level`, not `vix`: a source guard
   forbids the retired `options:header` field of that name on this page.
 - **The flow rows carry the bought / sold estimate (2026-10-04).**
   `options:flow_sides` joined `VIEWS` (twelve now) and `_REGION_VIEWS["flow"]`, so
