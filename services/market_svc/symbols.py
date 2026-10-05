@@ -61,6 +61,14 @@ CATEGORY_ORDER = [
 SORTED_CATEGORIES = ("Broad-Market ETF", "Top 10", "Sector SPDR",
                      "Thematic / Industry ETF", "Countries")
 
+# The frames an advance/decline count reads: the four EQUITY frames. Counting
+# the whole board would let a bid VIX and a rallying Treasury cancel out equity
+# selling. The Macro Board's meter keeps its own copy (webgui/pages/market.py,
+# Tier 1 cannot import this); shared/tests/test_cross_tier_mirrors.py pins the
+# two equal. Read here by market_read.breadth.
+BREADTH_CATEGORIES = ("Broad-Market ETF", "Top 10", "Sector SPDR",
+                      "Thematic / Industry ETF")
+
 
 def _q(csv, quote, desc, cat, polarity="normal", value_only=False, prem=False):
     # ``prem=True`` → the tile also shows a per-symbol call/put PREMIUM skew subline

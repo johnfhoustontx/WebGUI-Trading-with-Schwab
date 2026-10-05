@@ -617,3 +617,17 @@ def test_the_dossier_dedup_window_agrees_across_tiers():
         f"{DEDUP_MIRROR}:DOSSIER_DEDUP_SEC ({page}) has drifted from "
         f"{DEDUP_SOURCE}:DOSSIER_DEDUP_SEC ({service}). A Refresh inside the "
         "service's window would then enqueue a fetch the service silently drops.")
+
+
+# --- the equity frames an advance/decline count reads ------------------------
+# The Macro Board's meter (Tier 1) and the Desk's Market read (market_svc) both
+# count advancers and decliners. Two different frame lists would put two
+# different breadth numbers on screens a reader compares.
+def test_the_breadth_frames_agree_between_the_macro_board_and_the_market_read():
+    service = _const("services/market_svc/symbols.py", "BREADTH_CATEGORIES")
+    page = _const("webgui/pages/market.py", "BREADTH_CATEGORIES")
+    assert service and page == service, (
+        "webgui/pages/market.py:BREADTH_CATEGORIES has drifted from "
+        "services/market_svc/symbols.py:BREADTH_CATEGORIES - the Macro Board's "
+        "advancing/declining meter and the Desk's Market read would then count "
+        "different frames.")
