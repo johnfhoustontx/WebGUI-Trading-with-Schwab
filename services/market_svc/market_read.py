@@ -163,12 +163,16 @@ def structure(matrix, cfg) -> dict:
 
 
 def volatility(dashboard, cfg) -> dict:
-    """The VIX against its own day, its one-day and its three-month versions."""
+    """The VIX against its own day, its one-day and its three-month versions.
+
+    The level is published as ``vix_level``, not ``vix``: the Desk carries a
+    source guard against reading the retired ``options:header`` field of that
+    name, and a fact here must not be mistaken for it."""
     tiles = tiles_by_name(dashboard)
     vix, vix_pct = _last(tiles, "VIX"), _pct(tiles, "VIX")
     vix1d, vix3m = _last(tiles, "VIX1D"), _last(tiles, "VIX3M")
     spx = _pct(tiles, "SPX")
-    facts = {"vix": vix, "vix_pct": vix_pct, "vix1d": vix1d, "vix3m": vix3m,
+    facts = {"vix_level": vix, "vix_pct": vix_pct, "vix1d": vix1d, "vix3m": vix3m,
              "spx_pct": spx}
     if vix is None or vix_pct is None:
         return _row("volatility", NONE, facts)

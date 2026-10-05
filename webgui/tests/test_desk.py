@@ -3769,8 +3769,9 @@ def test_panel_heads_carry_every_panel_and_the_caps_stay_interpolated():
     """
     heads = d.PANEL_HEADS
     # "news" joined 2026-09-26 with the headlines strip (the news feed plan,
-    # Task 14); the set is still asserted EXACTLY.
-    assert set(heads) == {"dealer", "board", "flow", "positions", "news"}
+    # Task 14) and "read" on 2026-10-05 with the Market read panel; the set is
+    # still asserted EXACTLY.
+    assert set(heads) == {"dealer", "board", "flow", "positions", "news", "read"}
     for key, (title, use_line) in heads.items():
         assert title == title.capitalize(), key
         assert use_line, key

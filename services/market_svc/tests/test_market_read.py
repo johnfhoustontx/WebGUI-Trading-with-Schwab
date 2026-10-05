@@ -484,3 +484,11 @@ def test_public_is_true_only_for_a_real_true(cfg):
 def test_tally_counts_an_unknown_code_as_no_reading():
     assert mr.tally([{"verdict": "tailwind"}, {"verdict": "banana"}, {}]) \
         == {"tailwind": 1, "headwind": 0, "neutral": 0, "none": 2}
+
+
+def test_the_vix_level_is_published_as_vix_level_not_vix(cfg):
+    # The Desk carries a source guard against reading the retired
+    # options:header field called "vix"; a fact here must not share its name.
+    facts = mr.volatility(_vol(vix=15.55, vix_pct=1.57, vix1d=8.49, vix3m=18.04, spx=0.69),
+                          cfg)["facts"]
+    assert facts["vix_level"] == 15.55 and "vix" not in facts

@@ -1636,18 +1636,273 @@ def signed_class(v):
     return CON_NEG if f < 0 else MUTED
 
 
+# ── the market read (cache:market:read) ──────────────────────────────────────
+# Six readings, each marked a tailwind, a headwind or neutral FOR STOCKS, taken
+# on a clock slot by market_svc (services/market_svc/market_read.py). The
+# SERVICE decides each verdict code; this page turns the code into a word and a
+# fixed colour, and the numbers into a sentence. It computes no verdict of its
+# own, for the reason at the top of this file.
+# Design: docs/plans/2026-10-05-market-read-scorecard-design.md.
+READ_VIEW = "market:read"
+
+# The four codes, as whole words. An unknown code is "No reading": a missing
+# reading must never be shown as Neutral.
+READ_WORDS = {"tailwind": "Tailwind", "headwind": "Headwind",
+              "neutral": "Neutral", "none": "No reading"}
+# A finite code -> a FIXED chip class. Four codes, four looks: the absent
+# reading wears the muted chip, which is not the neutral one.
+READ_CHIPS = {"tailwind": CHIP_POS, "headwind": CHIP_WARN,
+              "neutral": CHIP_LABEL, "none": CHIP_MUTED}
+READ_QUESTIONS = {"direction": "Direction", "breadth": "Breadth",
+                  "structure": "Structure", "volatility": "Volatility",
+                  "flow": "Flow", "cross_asset": "Cross-asset"}
+READ_HEADS = ("QUESTION", "READING", "SINCE LAST", "FOR STOCKS")
+READ_WAITING = ("No market read yet this session. The first is taken shortly "
+                "after the open.")
+# Question | reading | since | chip. No fixed floor on the two text tracks: on a
+# narrow screen they wrap rather than scroll, so this panel needs no scroll shell.
+READ_COLS = ("grid grid-cols-[92px_minmax(0,5fr)_minmax(0,2fr)_auto] "
+             "gap-x-[12px] gap-y-0 w-full")
+_READ_TALLY_NOUNS = (("tailwind", "tailwind", "tailwinds"),
+                     ("headwind", "headwind", "headwinds"),
+                     ("neutral", "neutral", "neutral"),
+                     ("none", "no reading", "no reading"))
+_READ_CROSS_NAMES = {"TLT": "Treasuries", "$DXY": "Dollar", "HYG": "Credit"}
+_READ_CROSS_STATES = {"on": "risk-on", "off": "risk-off", "flat": "flat"}
+
+
+def read_view_shown(view):
+    """``view`` if THIS render may show it, else None. On the public origin
+    (and in a gallery capture) only a view the service stamped ``public: True``
+    is shown; a missing flag is closed.
+
+    ⚠ Call it on the event loop: the capture check reads the client's request."""
+    if not _shell.hides_non_public():
+        return view
+    return view if isinstance(view, dict) and view.get("public") is True else None
+
+
+def _read_points(v):
+    """A signed two-decimal number of POINTS, never a percentage."""
+    return f"{v:+.{_fmt.DECIMALS}f}"
+
+
+def _read_direction(f):
+    spx, ndx = _finite(f.get("spx_pct")), _finite(f.get("ndx_pct"))
+    if spx is None and ndx is None:
+        return _DASH
+    return f"$SPX {_fmt.pct(spx, signed=True)} · $NDX {_fmt.pct(ndx, signed=True)}"
+
+
+def _read_breadth(f):
+    share = _finite(f.get("share"))
+    if share is None:
+        return _DASH
+    return (f"{int(f.get('advancing') or 0)} advancing · "
+            f"{int(f.get('declining') or 0)} declining ({_fmt.pct(share * 100)})")
+
+
+def _read_structure_symbol(s):
+    sym, room = s.get("symbol") or "", _finite(s.get("room_pct"))
+    if s.get("mode") == "short":
+        return f"{sym} below the flip, short gamma"
+    if s.get("mode") != "long":
+        return f"{sym} {_DASH}"
+    if room is None:
+        return f"{sym} above the flip, long gamma"
+    side = "under" if room >= 0 else "above"
+    return f"{sym} {_fmt.pct(abs(room))} {side} its ceiling, long gamma"
+
+
+def _read_structure(f):
+    symbols = [s for s in f.get("symbols") or () if isinstance(s, dict)]
+    return " · ".join(_read_structure_symbol(s) for s in symbols) or _DASH
+
+
+def _read_volatility(f):
+    level = _finite(f.get("vix_level"))
+    if level is None:
+        return _DASH
+    return (f"VIX {_fmt.price(level)} ({_fmt.pct(_finite(f.get('vix_pct')), signed=True)})"
+            f" · one-day {_fmt.price(_finite(f.get('vix1d')))}"
+            f" · three-month {_fmt.price(_finite(f.get('vix3m')))}")
+
+
+def _read_flow(f, verdict):
+    """Always opens with ≈: the figures behind it are the bought/sold ESTIMATE."""
+    n = _finite(f.get("contracts"))
+    if n is None:
+        return f"≈ {_DASH}"
+    calls, puts = _finite(f.get("call_lean")), _finite(f.get("put_lean"))
+    if verdict not in ("tailwind", "headwind", "neutral"):
+        return f"≈ {int(n)} contracts flagged, too few to read"
+    return (f"≈ calls {_read_points(calls) if calls is not None else _DASH} · "
+            f"puts {_read_points(puts) if puts is not None else _DASH} "
+            f"points bought over sold · {int(n)} contracts")
+
+
+def _read_cross_asset(f):
+    parts = []
+    for t in f.get("tiles") or ():
+        if not isinstance(t, dict):
+            continue
+        name = _READ_CROSS_NAMES.get(t.get("name"), t.get("name") or "")
+        pct, state = _finite(t.get("pct")), _READ_CROSS_STATES.get(t.get("state"))
+        parts.append(f"{name} {_DASH}" if pct is None or state is None
+                     else f"{name} {_fmt.pct(pct, signed=True)} {state}")
+    return " · ".join(parts) or _DASH
+
+
+def read_reading(key, facts, verdict):
+    """One row's numbers as a sentence. A missing number is a dash, never a zero."""
+    f = facts if isinstance(facts, dict) else {}
+    if key == "flow":
+        return _read_flow(f, verdict)
+    builder = {"direction": _read_direction, "breadth": _read_breadth,
+               "structure": _read_structure, "volatility": _read_volatility,
+               "cross_asset": _read_cross_asset}.get(key)
+    return builder(f) if builder else _DASH
+
+
+# The one number each row's "since" compares, and how the change is worded.
+_READ_SINCE = {"direction": ("spx_pct", "$SPX {} points"),
+               "volatility": ("vix_level", "VIX {}"),
+               "flow": ("call_lean", "calls {} points")}
+
+
+def read_since(key, row):
+    """What changed since the last reading: the chip, else the row's main
+    number, else nothing."""
+    prev = row.get("prev")
+    if not isinstance(prev, dict):
+        return "first reading"
+    if prev.get("verdict") != row.get("verdict"):
+        return f"was {READ_WORDS.get(prev.get('verdict'), READ_WORDS['none'])}"
+    now_f = row.get("facts") if isinstance(row.get("facts"), dict) else {}
+    was_f = prev.get("facts") if isinstance(prev.get("facts"), dict) else {}
+    if key == "breadth":
+        a, b = _finite(now_f.get("advancing")), _finite(was_f.get("advancing"))
+        return (f"{int(a - b):+d} advancing" if a is not None and b is not None
+                and int(a - b) != 0 else "unchanged")
+    field, wording = _READ_SINCE.get(key, (None, ""))
+    a, b = _finite(now_f.get(field)), _finite(was_f.get(field))
+    if a is None or b is None or round(a - b, _fmt.DECIMALS) == 0:
+        return "unchanged"
+    return wording.format(_read_points(a - b))
+
+
+def read_rows(view):
+    """Display rows, in the service's order. Total over a malformed view."""
+    rows = view.get("rows") if isinstance(view, dict) else None
+    out = []
+    for r in rows if isinstance(rows, list) else ():
+        if not isinstance(r, dict):
+            continue
+        key = r.get("key")
+        code = r.get("verdict") if r.get("verdict") in READ_WORDS else "none"
+        out.append({
+            "key": key,
+            "question": READ_QUESTIONS.get(key, str(key or "")),
+            "reading": read_reading(key, r.get("facts"), code),
+            "since": read_since(key, r),
+            "verdict_word": READ_WORDS[code],
+            "chip_class": READ_CHIPS[code],
+            "estimate": r.get("estimate") is True,
+        })
+    return out
+
+
+def _read_tally(tally):
+    counts = tally if isinstance(tally, dict) else {}
+    parts = []
+    for code, one, many in _READ_TALLY_NOUNS:
+        n = _finite(counts.get(code))
+        if n:
+            parts.append(f"{int(n)} {one if int(n) == 1 else many}")
+    return " · ".join(parts)
+
+
+def read_header(view, now):
+    """``{state, text, tally}`` for the panel's head. ``state`` is ``waiting``
+    (no reading), ``live``, ``close`` (the reading taken at the close) or
+    ``stale``: from another day, or older than two of its own intervals while
+    the session is open, which means the service has stopped."""
+    if (not isinstance(view, dict) or not view.get("slot") or not view.get("date")
+            or not isinstance(view.get("rows"), list) or not view["rows"]):
+        return {"state": "waiting", "text": "", "tally": ""}
+    slot, tally = f"{view['slot']} CT", _read_tally(view.get("tally"))
+    if view["date"] != now.astimezone(_CT).date().isoformat():
+        try:
+            day = datetime.strptime(view["date"], "%Y-%m-%d")
+            when = f"{day.strftime('%a')} {day.day} {day.strftime('%b')} · "
+        except (TypeError, ValueError):
+            when = ""
+        return {"state": "stale", "text": f"{when}{slot} · previous session",
+                "tally": tally}
+    if view.get("final") is True:
+        return {"state": "close", "text": f"{slot} · the close", "tally": tally}
+    ts, interval = _finite(view.get("ts")), _finite(view.get("interval_min")) or 15
+    if ts is None or now.timestamp() - ts > 2 * interval * 60:
+        return {"state": "stale", "text": f"{slot} · not updating", "tally": tally}
+    nxt = view.get("next_slot")
+    return {"state": "live", "text": f"{slot} · next {nxt}" if nxt else slot,
+            "tally": tally}
+
+
+def paint_read(body, head, view, memo, force=True):
+    """Draw the Market read panel. Module-level, like the row builders, because
+    ``render`` is at its size ceiling. ``memo`` is the page's dict for this
+    panel: with ``force=False`` (the one-second clock) it redraws only when the
+    head would read differently, which is how a reading that stops updating
+    greys without a new one arriving."""
+    shown = read_view_shown(view)
+    header = read_header(shown, datetime.now(_CT))
+    key = (header["state"], header["text"], header["tally"],
+           shown.get("ts") if isinstance(shown, dict) else None)
+    if not force and memo.get("key") == key:
+        return
+    memo["key"] = key
+    head.clear()
+    body.clear()
+    with head:
+        if header["text"]:
+            ui.label(header["text"]).classes(f"text-[11px] tabular-nums {MUTED}")
+    with body:
+        if header["state"] == "waiting":
+            kit.empty(READ_WAITING)
+            return
+        ui.label(header["tally"]).classes(f"text-[12px] px-1 pb-2 {LABEL}")
+        with ui.element("div").classes(
+                f"{READ_COLS} px-1 pb-2 border-b {_HEAD_RULE}"):
+            for text in READ_HEADS:
+                ui.label(text).classes(_HEAD)
+        # A stale reading is greyed, not hidden: it is still the last thing known.
+        dim = " opacity-50" if header["state"] == "stale" else ""
+        with ui.column().classes(f"w-full gap-0{dim}"):
+            for row in read_rows(shown):
+                with ui.element("div").classes(f"{READ_COLS} {_ROW_STATIC}"):
+                    ui.label(row["question"]).classes(f"text-[13px] {LABEL}")
+                    ui.label(row["reading"]).classes(
+                        f"text-[12px] min-w-0 break-words {MUTED}")
+                    ui.label(row["since"]).classes(
+                        f"text-[11px] min-w-0 break-words {MUTED}")
+                    ui.label(row["verdict_word"].upper()).classes(
+                        f"{row['chip_class']} justify-self-start")
+
+
 # ── the page ─────────────────────────────────────────────────────────────────
 # Every cache view the Desk reads, in ONE tuple, because they are polled as one
 # batch. This page is the landing page and stays open all day, so a per-view
-# poller would be twelve Redis round-trips every two seconds for the life of the
-# session; ``read_versions`` reads the twelve tiny ``{key}:ver`` counters in a
+# poller would be thirteen Redis round-trips every two seconds for the life of the
+# session; ``read_versions`` reads the thirteen tiny ``{key}:ver`` counters in a
 # single pipelined round-trip and only the views that MOVED get deserialized.
 # ⚠ A new view belongs HERE, joining the existing batch — never in a poller or
 # a timer of its own.
 VIEWS = ("sentiment:regime", "sentiment:composite",
          "sentiment:history", "options:gex_status", "options:matrix",
          "options:flow_alerts", "options:flow_sides", "options:paper_account",
-         "options:captured", "sentiment:bullbear", "market:summary", NEWS_VIEW)
+         "options:captured", "sentiment:bullbear", "market:summary", NEWS_VIEW,
+         READ_VIEW)
 
 # Which views each region depends on. A repaint touches only the regions whose
 # inputs actually changed — without this, one 2 s header bump would rebuild all
@@ -1669,6 +1924,8 @@ _REGION_VIEWS = {
     # The headlines strip - one view. On the public origin the KEY read is
     # ``news:feed_public`` (see ``bus_key``); the view's name here is the same.
     "news": (NEWS_VIEW,),
+    # The market read - one view, replaced on a clock slot by market_svc.
+    "read": (READ_VIEW,),
     # The sentence (market_svc, on change) and the five views its live chips
     # read. Chips and sentence update IN PLACE, so a repaint here costs nothing
     # visible when only a day-move ticked.
@@ -3077,9 +3334,14 @@ PANEL_HEADS = {
     # vocabulary has always been careful about this; now the panel says so.
     "flow": ("Flow alerts",
              f"The {FLOW_ROWS_N} newest unusual trades. Which side traded, not "
-             f"who initiated."),
+             f"who initiated; ≈ marks an estimate."),
     "positions": ("Positions",
                   "What you are holding, and what needs a decision."),
+    # Not a forecast, and the head says so: each chip restates a reading that
+    # is already on a page, and says which way it points for stocks.
+    "read": ("Market read",
+             "Six readings, each a tailwind or a headwind for stocks. By rule, "
+             "not a forecast."),
     # A headline opens the ORIGINAL article; the strip itself is not a verdict.
     "news": ("Headlines",
              f"The {NEWS_ROWS_N} newest stories. Each opens the original "
@@ -3545,7 +3807,7 @@ def render():
         # The page's ONE header line: the name, and the Updated stamp for
         # ``HEADER_VIEW`` (see that constant for why it is the matrix and not
         # the freshness view the strip already prints). No page ACTIONS: the
-        # Desk commands nothing — it reads twelve views on one batched poll.
+        # Desk commands nothing — it reads thirteen views on one batched poll.
         kit.header("Desk", view=HEADER_VIEW, stale=True)
 
         # ── the autoplay unlock ──────────────────────────────────────────────
@@ -3773,6 +4035,8 @@ def render():
         # far more than it needs a column of its own, and a fifth cell in the
         # 2x2 grid would leave a hole beside it.
         news_body, _ = _panel(*PANEL_HEADS["news"])
+        # The market read: full width, above the summary it leads into.
+        read_body, read_head = _panel(*PANEL_HEADS["read"])
 
         # ── the market summary ───────────────────────────────────────────────
         # At the BOTTOM, full width: the four panels above are per-symbol, and
@@ -4101,7 +4365,9 @@ def render():
     painters = {"strip": _paint_strip, "bullbear": _paint_bullbear,
                 "dealer": _paint_dealer, "board": _paint_board,
                 "flow": _paint_flow, "positions": _paint_positions,
-                "news": _paint_news, "summary": _paint_summary}
+                "news": _paint_news, "summary": _paint_summary,
+                "read": lambda: paint_read(read_body, read_head, _view(READ_VIEW),
+                                           state.setdefault("read", {}))}
 
     # ── arrival detection ────────────────────────────────────────────────────
     # Thin: read the cache, build the rows, hand them to the module-level fold.
@@ -4234,12 +4500,14 @@ def render():
         facts = countdown_facts(datetime.now(_CT))
         clock_cap.text = facts["label"]
         clock_lbl.text = facts["text"]
+        paint_read(read_body, read_head, _view(READ_VIEW),
+                   state.setdefault("read", {}), force=False)
 
     @guard_async
     async def _poll():
         """ONE batched version probe per tick, not one per view.
 
-        ``read_versions`` reads the twelve tiny ``{key}:ver`` counters in a
+        ``read_versions`` reads the thirteen tiny ``{key}:ver`` counters in a
         single pipelined round-trip; a full payload is deserialized only for a
         view that actually moved."""
         # Probed and read by ``bus_key``: the public origin's news KEY is
