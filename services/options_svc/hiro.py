@@ -69,7 +69,9 @@ def classify_side(last, bid, ask) -> int:
 
 def _contracts(chain):
     """Yield ``(is_call, contract)`` for every contract dict in a Schwab chain,
-    ``is_call`` from the map it came from. Total over malformed input."""
+    ``is_call`` from the map it came from. Total over malformed input.
+
+    Also read by ``flow_sides.advance`` -- one chain walker, not two."""
     for mapkey, is_call in (("callExpDateMap", True), ("putExpDateMap", False)):
         exp_map = chain.get(mapkey)
         if not isinstance(exp_map, dict):
