@@ -27,7 +27,7 @@ Use this map to get from a screen to its numbers. Menu order matches the rail.
 
 | Menu page | Chapters that derive its numbers |
 |---|---|
-| **Desk** | Composition only — every figure is produced by the same function that produces it on the page it summarises, so follow that page's row. Its own two constants (the arrival glow, the voice cache) are in the *Constants Appendix* |
+| **Desk** | Composition only — every figure is produced by the same function that produces it on the page it summarises, so follow that page's row. The one exception is the **Market read** panel, whose verdicts are decided in the market service: see *Market read*. Its own two constants (the arrival glow, the voice cache) are in the *Constants Appendix* |
 | **Symbol** | Composition, like the Desk. Its own arithmetic — IV vs HV and the expected move — is in *Options Scoring* → **Expected move and IV analysis**; the signal age and score trend in **Signal age and score trend**; the look-up's cost in the *Constants Appendix* |
 | **Dealer Positioning** | *GEX / Gamma* · *Black-Scholes & the Simulator* (the Greeks behind charm and vanna) |
 | **Opportunity Board** | *GEX / Gamma* (the flip and flow series) · *Options Scoring* (its signal counts) |
@@ -2076,6 +2076,83 @@ session), `--force` (a weekend or holiday), `--out DIR`, `--k 2,3,4`,
 `--horizons 5,15`. It exits **1** when nothing was measured (every symbol failed, or a
 trading day with no stored minute for any symbol — a dead collector).
 
+## Market read
+
+**Files:** `services/market_svc/market_read.py` (pure: the six rows, the slots, the
+assembly), `scheduler.refresh_read` (reads the sources and publishes),
+`shared/market_read_config.py` + `config/market_read.toml`, `webgui/pages/desk.py`
+(`read_rows`, `read_header`, `paint_read`). Design:
+`docs/plans/2026-10-05-market-read-scorecard-design.md`.
+
+Six readings, each given a verdict **for stocks**: `tailwind`, `headwind`, `neutral`,
+or `none`. The verdict is absolute, not relative to the day's move. No Schwab call and
+no Claude call: every input is a view another service already publishes.
+
+| Row | Source | `tailwind` | `headwind` |
+|---|---|---|---|
+| `direction` | `market:dashboard` tiles `SPX`, `NDX` (`change_pct`) | both ≥ +`move_pct` (0.25) | both ≤ −`move_pct` |
+| `breadth` | `market:dashboard`, tiles of the four equity frames (`symbols.BREADTH_CATEGORIES`), by `color_state`; basket tiles skipped | advancing share ≥ `strong_share` (0.60) | ≤ `weak_share` (0.40) |
+| `structure` | `options:matrix` rows for `structure.symbols` (SPY, QQQ): `spot`, `flip`, `call_wall`, `net_gex`, `gex_regime` | every symbol above the flip with room ≥ `room_pct` (0.50) | every symbol within `near_pct` (0.25) of the ceiling while above the flip, or below the flip |
+| `volatility` | `market:dashboard` tiles `VIX`, `VIX1D`, `VIX3M`, `SPX` | VIX `change_pct` ≤ −`vix_move_pct` (1.0) and VIX < VIX3M | VIX `change_pct` ≥ +`vix_move_pct` with SPX up, or VIX1D > VIX |
+| `flow` | `options:flow_sides` joined to `options:flow_alerts` by alert id | call lean ≥ `lean_pts` (5.0) and put lean below it | put lean ≥ `lean_pts` and call lean below it |
+| `cross_asset` | `market:dashboard` tiles `TLT`, `$DXY`, `HYG`, by `color_state` | at least two risk-on | at least two risk-off |
+
+All bounds are inclusive. Everything between the two is `neutral`.
+
+- **Room** is `(call_wall − spot) ÷ spot × 100`. At or through the ceiling counts as at
+  it. The symbols must agree: one at its ceiling and one with room is `neutral`.
+- **Lean** is `(Σ bought − Σ sold) ÷ Σ (bought + sold + unlabelled) × 100`, pooled by
+  volume over the poll tallies of today's flagged contracts, calls and puts apart. A
+  contract flagged by two alerts is counted once. Unlabelled volume dilutes it.
+- **Cross-asset counts the board's own colours.** Whether a falling Treasury fund is
+  good or bad for stocks is decided once, in `classify.color_state`; this row does not
+  hold a second opinion.
+
+**`none` is "no reading", never `neutral`.** A row is `none` when a tile it needs has no
+number, a matrix row has no flip or (above the flip) no ceiling, a symbol's net gamma is
+exactly zero (the after-hours artefact the dealer panel also hides), fewer than
+`flow.min_contracts` (10) contracts are flagged, fewer than two cross-asset tiles have a
+colour, or its source view is absent. A row that raises is also `none`, and the other
+five still publish (`market.read.<row>` on `/health`).
+
+**Two kinds of "too old".** The dashboard and the matrix are republished on a clock, so
+an old one means its publisher has stopped: they are dropped when their `:ts` side key
+is older than `stale_after_sec` (300). The two flow views are published only when
+something changes, so a quiet tape leaves them legitimately old: they are dropped when
+the session `date` they carry is not today's.
+
+**Slots.** A reading is taken on every clock multiple of `interval_min` (15 or 30)
+from the first one strictly after the 08:30 CT open through the 15:00 close inclusive,
+on trading days. The market service asks "is a slot due" on its existing poll; there is
+no timer. A late tick still fires the slot it is in, once. The 15:00 reading is
+`final`. On its first call after a start the service reads the published view back, so
+a restart neither repeats a slot nor loses the day's history.
+
+**`cache:market:read`** (`MarketRead`, `skip_unchanged`): `date`, `ts`, `slot`,
+`interval_min`, `next_slot`, `final`, `public`, `tally`, `rows`, `history`. Each row is
+`{key, verdict, facts, prev}` (`flow` also carries `estimate: true`); `prev` is the
+previous slot's `{verdict, facts}` for the same row, or `null`. `history` is the day's
+`{slot, verdicts}` list.
+
+**The Desk panel.** The page maps each code to a word and a fixed chip class
+(`READ_WORDS`, `READ_CHIPS`); an unknown code is "No reading". It formats the facts
+itself and computes no verdict. *Since last* is "was …" when the code changed, else the
+change in the row's main number (SPX percent, advancing count, VIX level, call lean),
+else "unchanged". The head is `live`, `close`, `stale` or `waiting`: `stale` is a
+reading from another day, or one older than two of its own intervals while the session
+is open. The one-second clock re-checks that, so a reading that stops arriving greys
+without a new one. On the public origin the panel shows only when `public` is `true`.
+
+**Known limitations.**
+
+- **Every threshold is a starting guess.** None has been measured against outcomes,
+  and nobody has tested whether the tally predicts anything.
+- **The flow row is weak.** On 2026-10-05 the pooled lean on calls was under two
+  points; the row will read `neutral` on most days.
+- **Structure reads two symbols.** $SPX and $NDX are not read: the matrix carried no
+  flip for either index when this was built (2026-10-04 and 2026-10-05).
+- **No early-close handling.** On a half day the slots run to the normal close.
+
 ## Bought / sold estimate on flow alerts
 
 **Files:** `services/options_svc/flow_sides.py` (pure arithmetic),
@@ -2754,6 +2831,7 @@ A consolidated table of the load-bearing constants. The cited file governs.
 | Flow: hedging surge (HIRO model) | 15-min hedge impact ≥ **3×** normal (RMS of full windows over the 5 prior sessions) AND ≥ $25M; ≤ 50% unlabelled volume; cooldown 30 min per direction; phone push at **4×** only with `push = true` (ships `false`); `public = false`; watching `$SPX SPY QQQ IWM` | `[hiro]` |
 | Flow: hedging reversal (HIRO model) | running total clears zero by **1.0×** normal; none before 09:00 CT; cooldown 60 min; minute history kept 20 sessions | `[hiro]` |
 | Flow: bought / sold estimate | poll gap booked unlabelled past **450 s**; stream at most **200** contracts a day (hard limit 500); stream read timeout 45 s | `[sides]`, `flow_sides_tick.py`, `flow_stream.py` |
+| Market read | a reading every **15** min (or 30) from the first slot after the open to the close; sources older than **300 s** dropped; thresholds in the *Market read* section | `config/market_read.toml` |
 | Flow: opened or closed (next day) | open-interest change ÷ volume ≥ **+0.5** opened, ≤ **−0.5** closed; flagged contracts kept **20** sessions | `[followup]` |
 
 > **Five detectors, and the file is the source.** `services/options_svc/flow_alerts.py`

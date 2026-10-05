@@ -292,6 +292,21 @@ click-through the way the panels above are). **All headlines →** opens Market 
 where the filters and Trending live. On the public live Desk the strip shows only
 the feeds marked public.
 
+**Market read.** Full width, above the Market Summary. Six readings — direction,
+breadth, structure, volatility, flow and cross-asset — each marked **Tailwind**,
+**Headwind** or **Neutral** *for stocks*, retaken on the clock every 15 minutes while
+the market is open. Each one is a reading that already exists on another page; this
+panel only says which way it points and what changed since the last reading. It is the
+closest the app comes to reading the Desk, the [Market Dashboard](#market-dashboard) and
+[Flow Alerts](#flow-alerts) together, and it does it by fixed rule, with no generated
+text.
+
+Use it to see **whether the layers agree**. A rising tape with structure and volatility
+both reading Headwind is a different day from one where all six agree. **No reading** is
+not Neutral: it means that row had nothing to go on. And it is **not a forecast**: the
+thresholds are starting guesses, and nobody has measured whether the tally predicts
+anything.
+
 **Market Summary.** Full width, across the bottom. The highlights of the latest
 published **NeuralStrike market report** — the same report the website publishes
 five times a trading day (pre-market, the open, the first hour, midday and the

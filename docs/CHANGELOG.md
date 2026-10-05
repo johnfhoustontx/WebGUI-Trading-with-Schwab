@@ -4,7 +4,48 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-05 (**Flow-alert estimate: the first live session, and the tally at the alert.**)
+**Last updated:** 2026-10-05 (**The Market read: a rule-decided scorecard on the Desk.**)
+
+- **What it is.** A full-width panel above the Market Summary. Six rows — direction,
+  breadth, structure, volatility, flow, cross-asset — each marked Tailwind, Headwind,
+  Neutral or No reading under "For stocks", with what changed since the last reading.
+  A new reading on every 15-minute clock mark from 08:45 to the 15:00 close.
+  Design and plan: `docs/plans/2026-10-05-market-read-scorecard-{design,plan}.md`.
+- **Why.** The operator asked what could be inferred from the Desk and the Market
+  Dashboard together, then to include the flow alerts, then for it to live on the
+  page. Read by hand at 12:51 CT it came out as "up and broad, but capped; flow does
+  not confirm a chase". This does the same reading by fixed rule.
+- **Decisions the operator made.** The scorecard layout over a verdict sentence and
+  over a timeline; the words Tailwind / Headwind / Neutral, absolute "for stocks"
+  rather than relative to the day's move; placement above the Market Summary; every
+  15 minutes; public.
+- **The pieces.** `services/market_svc/market_read.py` (pure: six rows, slots,
+  assembly); `scheduler.refresh_read` on the service's existing poll;
+  `cache:market:read` (`MarketRead`); `config/market_read.toml` with a Settings →
+  Configuration section; module-level builders and `paint_read` in
+  `webgui/pages/desk.py`. No Schwab call, no Claude call.
+- **Rules worth knowing.** `none` is "no reading" and is never shown or counted as
+  Neutral; a producer-side test drives that from empty sources. Structure needs SPY
+  and QQQ to agree. Cross-asset counts the Market Dashboard's own risk-on / risk-off
+  colours, so the two screens cannot disagree. The dashboard and matrix are judged by
+  age, the flow views by their date. A restart neither repeats a slot nor loses the
+  day's history.
+- **Found on the way.** The Desk's `render` was at 22 of 22 nested functions, so the
+  painter is module-level and wired with a lambda. Five existing Desk tests failed on
+  the first pass: two caught wording of mine that put "bought" and "sold" on the page
+  with no estimate showing, one a sub-line over its length limit, one a fact I had
+  named `vix` (a guard forbids that retired field name on this page; it is
+  `vix_level` now), and one the exact set of panels, which gained `read`.
+- **Verified on the page harness** with a reading built by the service's own code:
+  position, the four chips, no overflow inside the panel at phone width, and a
+  three-hour-old reading greying with "not updating".
+- **Not measured.** Every threshold is a starting guess. Whether the tally says
+  anything about what happens next is untested. The flow row will read Neutral on
+  most days (the pooled call lean was under two points on 2026-10-05).
+
+---
+
+**Prior —** 2026-10-05 (**Flow-alert estimate: the first live session, and the tally at the alert.**)
 
 - **Promoted 2026-10-05 at 05:57 CT**, before the open, at `222124d`. Checked
   read-only at 11:36 to 11:41 CT with 73 to 74 contract alerts on 66 contracts.

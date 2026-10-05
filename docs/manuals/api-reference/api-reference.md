@@ -24,7 +24,7 @@ keys that feed it. Menu order matches the rail.
 | **Opportunity Board** | `options_svc` | `cache:options:matrix` |
 | **Flow Alerts** | `options_svc` | `cache:options:flow_alerts`, `:flow_sides`, `:flow_followup` |
 | **Market News** | `news_svc` :8216 | `cache:news:feed`, `:sec`, `:calendar`, `:status` (the public copy reads `:feed_public`, `:sec_public`, `:calendar_public`); also the Desk's headlines strip (`:feed`) and the Symbol page's news band (`:feed` + `:sec`) |
-| **Market Dashboard** | `market_svc` :8215 | `cache:market:dashboard`, `:summary` |
+| **Market Dashboard** | `market_svc` :8215 | `cache:market:dashboard`, `:summary`, `:read` (the Desk's Market read panel) |
 | **Sentiment** | `sentiment_svc` :8210 | `cache:sentiment:composite`, `:regime`, `:regime_history`, `:intraday_history` |
 | **Sector & Industry** | `sentiment_svc` | `cache:sentiment:sectors` |
 | **Sector Rotation** · **RRG** | `sentiment_svc` | `cache:sentiment:rotation` |
@@ -756,6 +756,33 @@ Consumers today: `portfolio_svc` and `sentiment_svc` (`/stream/quotes`),
 
 ---
 
+## The Market read view
+
+**`cache:market:read`** is one reading of the Desk's scorecard, replaced on each clock
+slot in the regular session:
+
+```
+{date, ts, slot, interval_min, next_slot, final, public, tally, rows, history}
+```
+
+- `slot` and `next_slot` are `"HH:MM"` Central; `next_slot` is `null` after the close
+  reading, which has `final: true`.
+- `tally` is `{tailwind, headwind, neutral, none}` counts.
+- `rows` is six objects in a fixed order — `direction`, `breadth`, `structure`,
+  `volatility`, `flow`, `cross_asset` — each `{key, verdict, facts, prev}`. `verdict`
+  is `tailwind`, `headwind`, `neutral` or `none`. **`none` means no reading and must
+  never be shown or counted as `neutral`.** `facts` are the numbers the verdict was
+  decided from, and differ per row; `prev` is the same row's `{verdict, facts}` at the
+  previous slot, or `null`. The `flow` row carries `estimate: true`.
+- `history` is `[{slot, verdicts: {key: code}}]` for the day.
+
+A reader must check `date` against today, treat a reading older than two
+`interval_min` in the session as stopped, and on the public origin show it only when
+`public` is exactly `true`. The rules and thresholds are in the Technical Reference,
+*Market read*.
+
+---
+
 # Cache Key Index
 
 Every Redis key by domain. Views without a strict contract are validated
@@ -892,6 +919,7 @@ cache:trade:markov_prior       cache:trade:universe_factors
 cache:portfolio:positions      events:portfolio:positions     (PortfolioModel)
 cache:market:dashboard         events:market:dashboard        (MarketDashboard)
 cache:market:summary           events:market:summary          (MarketSummary)
+cache:market:read              events:market:read             (MarketRead - the Desk's six readings)
 cache:news:feed                events:news:feed               (headlines - every kind but the SEC ones)
 cache:news:feed_public         events:news:feed_public        (public feeds only - a live-origin key)
 cache:news:sec                 events:news:sec                (Form 4s and offering filings)

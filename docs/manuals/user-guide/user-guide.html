@@ -94,7 +94,10 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#navigation-groups">Navigation groups</a></li>
 <li><a href="#alert-badges-and-chimes">Alert badges and chimes</a></li>
 <li><a href="#getting-help-on-any-page">Getting help on any page</a></li>
-<li><a href="#desk">Desk</a></li>
+<li><a href="#desk">Desk</a><ul>
+<li><a href="#the-market-read">The Market read</a></li>
+</ul>
+</li>
 <li><a href="#symbol">Symbol</a></li>
 </ul>
 </li>
@@ -693,6 +696,10 @@ structure · what should I act on · what am I holding.</em></p>
 <td>The five newest stories from Market News, one line each — time (Central), feed, and the headline, which opens the article in a new tab. <strong>All headlines →</strong> opens Market News. Full width</td>
 </tr>
 <tr>
+<td><strong>Market read</strong></td>
+<td>Six readings, each marked Tailwind, Headwind or Neutral for stocks, retaken every 15 minutes in the session. See <a href="#the-market-read">The Market read</a>. Full width</td>
+</tr>
+<tr>
 <td><strong>Market Summary</strong></td>
 <td>Up to five highlights from the latest published market report, with which report they came from and a link to the full report, over six live chips (Sentiment, Trend, Bias, Signal, Regime, Bull/Bear) — full width, at the bottom</td>
 </tr>
@@ -780,6 +787,86 @@ to misread:</p>
   published yet." instead of a blank space.</li>
 </ul>
 <hr />
+<h3 id="the-market-read">The Market read</h3>
+<p>The Desk, the Market Dashboard and Flow Alerts each show part of what the market
+is doing. The Market read lines six of those readings up and says, for each, which
+way it points <strong>for stocks</strong>.</p>
+<table>
+<thead>
+<tr>
+<th>Row</th>
+<th>What it reads</th>
+<th>Tailwind when</th>
+<th>Headwind when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Direction</strong></td>
+<td>The S&amp;P 500 and Nasdaq 100 indexes on the day</td>
+<td>Both are up at least 0.25%</td>
+<td>Both are down at least 0.25%</td>
+</tr>
+<tr>
+<td><strong>Breadth</strong></td>
+<td>Rising against falling funds and stocks on the Market Dashboard's equity frames</td>
+<td>60% or more are rising</td>
+<td>40% or fewer are rising</td>
+</tr>
+<tr>
+<td><strong>Structure</strong></td>
+<td>SPY and QQQ against the dealer gamma flip and the ceiling</td>
+<td>Both are above the flip with at least 0.50% of room to the ceiling</td>
+<td>Both are within 0.25% of the ceiling while dealers are long gamma, or both are below the flip</td>
+</tr>
+<tr>
+<td><strong>Volatility</strong></td>
+<td>The VIX, the one-day VIX and the three-month VIX</td>
+<td>The VIX is down at least 1% and below the three-month</td>
+<td>The VIX is up at least 1% on a day stocks are up, or the one-day is above the VIX</td>
+</tr>
+<tr>
+<td><strong>Flow</strong></td>
+<td>The bought/sold estimate, pooled over today's flagged contracts</td>
+<td>Calls lean bought by 5 points or more and puts do not</td>
+<td>Puts lean bought by 5 points or more and calls do not</td>
+</tr>
+<tr>
+<td><strong>Cross-asset</strong></td>
+<td>Long Treasuries, the dollar and high-yield credit, by their Market Dashboard colours</td>
+<td>At least two are risk-on</td>
+<td>At least two are risk-off</td>
+</tr>
+</tbody>
+</table>
+<p>Anything in between is <strong>Neutral</strong>.</p>
+<p><strong>How to read it</strong></p>
+<ul>
+<li><strong>The chips are for stocks, not for the day's move.</strong> A tailwind helps stocks
+  rise; a headwind holds them back. That reads the same on an up day and a down day.</li>
+<li><strong>No reading is not Neutral.</strong> It means the row's data was missing or out of
+  date: a symbol with no ceiling, too few flagged contracts, a feed that stopped.</li>
+<li><strong>Since last</strong> is the change from the previous reading: "was Neutral" when the
+  chip flipped, otherwise how far the row's main number moved, or "unchanged".</li>
+<li><strong>The head</strong> shows when the reading was taken and when the next one is due. The
+  15:00 reading is the close and stays on screen after hours. Before the first
+  reading of a day you see the previous session's, greyed.</li>
+<li><strong>Grey rows and "not updating"</strong> mean readings have stopped arriving. What you
+  see is the last one.</li>
+</ul>
+<p><strong>What it is not</strong></p>
+<ul>
+<li><strong>Not a forecast and not advice.</strong> It counts six rules. Nobody has yet measured
+  whether more tailwinds than headwinds means anything about what happens next.</li>
+<li><strong>Not the same as Bias and Signal.</strong> Those come from the sentiment score at the
+  top of the page. The two can disagree, and when they do, that is information.</li>
+<li><strong>The Flow row is the weakest.</strong> It rests on an estimate, and on its first live
+  day that estimate was nearly even between bought and sold. Expect it to read
+  Neutral most of the time.</li>
+</ul>
+<p><strong>To change it:</strong> Settings → Configuration → <strong>Market read</strong>. Every threshold in
+the table is there, along with 15 or 30 minutes between readings, and the switch
+that keeps it off the public Desk. Changes apply at the next reading.</p>
 <h2 id="symbol">Symbol</h2>
 <p><strong>Route:</strong> <code>/symbol</code> — or <code>/symbol?symbol=MU</code> to open one name directly, which
 makes a dossier linkable and bookmarkable. In the rail it sits under the Desk,

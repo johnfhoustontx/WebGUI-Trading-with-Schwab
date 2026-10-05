@@ -486,6 +486,7 @@ structure · what should I act on · what am I holding.*
 | **Live Flow Alerts** | The newest unusual-options events. A row that names one contract can carry a second line: the estimated share of its volume that was bought, sold, or could not be told |
 | **Positions** | Your paper trades and captured signals together, with live marks and an **OK / Watch / At risk / Rescue** flag |
 | **Headlines** | The five newest stories from Market News, one line each — time (Central), feed, and the headline, which opens the article in a new tab. **All headlines →** opens Market News. Full width |
+| **Market read** | Six readings, each marked Tailwind, Headwind or Neutral for stocks, retaken every 15 minutes in the session. See [The Market read](#the-market-read). Full width |
 | **Market Summary** | Up to five highlights from the latest published market report, with which report they came from and a link to the full report, over six live chips (Sentiment, Trend, Bias, Signal, Regime, Bull/Bear) — full width, at the bottom |
 
 **Hover Bias, Signal or the market regime word** and a sentence explains what it
@@ -579,6 +580,51 @@ to misread:
   published yet." instead of a blank space.
 
 ---
+
+### The Market read {#the-market-read}
+
+The Desk, the Market Dashboard and Flow Alerts each show part of what the market
+is doing. The Market read lines six of those readings up and says, for each, which
+way it points **for stocks**.
+
+| Row | What it reads | Tailwind when | Headwind when |
+|---|---|---|---|
+| **Direction** | The S&P 500 and Nasdaq 100 indexes on the day | Both are up at least 0.25% | Both are down at least 0.25% |
+| **Breadth** | Rising against falling funds and stocks on the Market Dashboard's equity frames | 60% or more are rising | 40% or fewer are rising |
+| **Structure** | SPY and QQQ against the dealer gamma flip and the ceiling | Both are above the flip with at least 0.50% of room to the ceiling | Both are within 0.25% of the ceiling while dealers are long gamma, or both are below the flip |
+| **Volatility** | The VIX, the one-day VIX and the three-month VIX | The VIX is down at least 1% and below the three-month | The VIX is up at least 1% on a day stocks are up, or the one-day is above the VIX |
+| **Flow** | The bought/sold estimate, pooled over today's flagged contracts | Calls lean bought by 5 points or more and puts do not | Puts lean bought by 5 points or more and calls do not |
+| **Cross-asset** | Long Treasuries, the dollar and high-yield credit, by their Market Dashboard colours | At least two are risk-on | At least two are risk-off |
+
+Anything in between is **Neutral**.
+
+**How to read it**
+
+- **The chips are for stocks, not for the day's move.** A tailwind helps stocks
+  rise; a headwind holds them back. That reads the same on an up day and a down day.
+- **No reading is not Neutral.** It means the row's data was missing or out of
+  date: a symbol with no ceiling, too few flagged contracts, a feed that stopped.
+- **Since last** is the change from the previous reading: "was Neutral" when the
+  chip flipped, otherwise how far the row's main number moved, or "unchanged".
+- **The head** shows when the reading was taken and when the next one is due. The
+  15:00 reading is the close and stays on screen after hours. Before the first
+  reading of a day you see the previous session's, greyed.
+- **Grey rows and "not updating"** mean readings have stopped arriving. What you
+  see is the last one.
+
+**What it is not**
+
+- **Not a forecast and not advice.** It counts six rules. Nobody has yet measured
+  whether more tailwinds than headwinds means anything about what happens next.
+- **Not the same as Bias and Signal.** Those come from the sentiment score at the
+  top of the page. The two can disagree, and when they do, that is information.
+- **The Flow row is the weakest.** It rests on an estimate, and on its first live
+  day that estimate was nearly even between bought and sold. Expect it to read
+  Neutral most of the time.
+
+**To change it:** Settings → Configuration → **Market read**. Every threshold in
+the table is there, along with 15 or 30 minutes between readings, and the switch
+that keeps it off the public Desk. Changes apply at the next reading.
 
 ## Symbol
 

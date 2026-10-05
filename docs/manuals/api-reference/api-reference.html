@@ -103,6 +103,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#trader-api">Trader API</a></li>
 <li><a href="#trade-stream-tracker">Trade-stream tracker</a></li>
 <li><a href="#streaming-server-sent-events">Streaming (server-sent events)</a></li>
+<li><a href="#the-market-read-view">The Market read view</a></li>
 </ul>
 </li>
 <li><a href="#cache-key-index">Cache Key Index</a></li>
@@ -163,7 +164,7 @@ keys that feed it. Menu order matches the rail.</p>
 <tr>
 <td><strong>Market Dashboard</strong></td>
 <td><code>market_svc</code> :8215</td>
-<td><code>cache:market:dashboard</code>, <code>:summary</code></td>
+<td><code>cache:market:dashboard</code>, <code>:summary</code>, <code>:read</code> (the Desk's Market read panel)</td>
 </tr>
 <tr>
 <td><strong>Sentiment</strong></td>
@@ -1494,6 +1495,28 @@ connection and reconnect.</p>
 <code>sentiment_svc</code> and <code>options_svc/flow_stream.py</code> (<code>/stream/options</code>).
 <code>services/_sse.py</code> has the line parser and the reconnect backoff.</p>
 <hr />
+<h2 id="the-market-read-view">The Market read view</h2>
+<p><strong><code>cache:market:read</code></strong> is one reading of the Desk's scorecard, replaced on each clock
+slot in the regular session:</p>
+<pre><code>{date, ts, slot, interval_min, next_slot, final, public, tally, rows, history}
+</code></pre>
+<ul>
+<li><code>slot</code> and <code>next_slot</code> are <code>"HH:MM"</code> Central; <code>next_slot</code> is <code>null</code> after the close
+  reading, which has <code>final: true</code>.</li>
+<li><code>tally</code> is <code>{tailwind, headwind, neutral, none}</code> counts.</li>
+<li><code>rows</code> is six objects in a fixed order — <code>direction</code>, <code>breadth</code>, <code>structure</code>,
+  <code>volatility</code>, <code>flow</code>, <code>cross_asset</code> — each <code>{key, verdict, facts, prev}</code>. <code>verdict</code>
+  is <code>tailwind</code>, <code>headwind</code>, <code>neutral</code> or <code>none</code>. <strong><code>none</code> means no reading and must
+  never be shown or counted as <code>neutral</code>.</strong> <code>facts</code> are the numbers the verdict was
+  decided from, and differ per row; <code>prev</code> is the same row's <code>{verdict, facts}</code> at the
+  previous slot, or <code>null</code>. The <code>flow</code> row carries <code>estimate: true</code>.</li>
+<li><code>history</code> is <code>[{slot, verdicts: {key: code}}]</code> for the day.</li>
+</ul>
+<p>A reader must check <code>date</code> against today, treat a reading older than two
+<code>interval_min</code> in the session as stopped, and on the public origin show it only when
+<code>public</code> is exactly <code>true</code>. The rules and thresholds are in the Technical Reference,
+<em>Market read</em>.</p>
+<hr />
 <h1 id="cache-key-index">Cache Key Index</h1>
 <p>Every Redis key by domain. Views without a strict contract are validated
 defensively in compute.</p>
@@ -1617,6 +1640,7 @@ cache:trade:markov_prior       cache:trade:universe_factors
 cache:portfolio:positions      events:portfolio:positions     (PortfolioModel)
 cache:market:dashboard         events:market:dashboard        (MarketDashboard)
 cache:market:summary           events:market:summary          (MarketSummary)
+cache:market:read              events:market:read             (MarketRead - the Desk's six readings)
 cache:news:feed                events:news:feed               (headlines - every kind but the SEC ones)
 cache:news:feed_public         events:news:feed_public        (public feeds only - a live-origin key)
 cache:news:sec                 events:news:sec                (Form 4s and offering filings)

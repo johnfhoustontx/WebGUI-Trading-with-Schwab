@@ -109,6 +109,22 @@ on · what am I holding.*
   mark and **open P&L**, and a status: **OK**, **Watch**, **At risk**,
   **Rescue**. The header totals open trades, open P&L, and how many need
   attention.
+- **Market read** — six readings, each marked **Tailwind**, **Headwind** or
+  **Neutral** under the heading **For stocks**. A new reading is taken every 15
+  minutes while the market is open, on the clock (12:45, 13:00…), and the last
+  one of the day is the close. Each row is something already on another page:
+  **Direction** (the S&P 500 and Nasdaq 100 on the day), **Breadth** (how many
+  funds and stocks are rising against falling), **Structure** (where SPY and
+  QQQ sit against the dealer flip and the ceiling), **Volatility** (the VIX and
+  its one-day and three-month versions), **Flow** (the bought/sold estimate,
+  marked ≈) and **Cross-asset** (Treasuries, the dollar and credit).
+  **Since last** says what changed: "was Neutral" when the chip flipped,
+  otherwise how far the row's main number moved.
+  It is a count of rules, **not a forecast** and not advice, and it is a
+  different thing from Bias and Signal above. **No reading** means that row's
+  data was missing or out of date, which is not the same as Neutral. If the
+  rows turn grey and the head says *not updating*, the readings have stopped
+  arriving and you are looking at the last one.
 - **Market Summary** — the **highlights of the latest market report**: up to
   five points, each one of the report's own section headlines, with which report
   they came from (for example *Market close report · 14 Sep · 16:20 CT*) and a

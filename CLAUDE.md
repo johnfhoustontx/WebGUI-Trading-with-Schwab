@@ -384,7 +384,8 @@ maps, and anything whose change needs code to follow it.
 - The files: `ports`, `environments`, `sessions` (windows, `[slots]`, activation),
   `scanner` (selection floors and, since 2026-10-04, `[selection]` strike rules),
   `trade_mgmt`, `paper`, `symbols`, `sectors`, `marketdata`, `services`,
-  `flow_alerts`, `notify`, `commissions`, `theme`, `news`, `edge`, and the public
+  `flow_alerts`, `notify`, `commissions`, `theme`, `news`, `edge`, `market_read`,
+  and the public
   tools' files.
 - `shared/market_calendar.py` is the single source for the NYSE calendar and the
   session/window predicates. Add no holiday literal or window constant elsewhere.

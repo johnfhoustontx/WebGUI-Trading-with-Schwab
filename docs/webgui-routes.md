@@ -36,7 +36,7 @@ spot + day %, gamma flip + signed distance, a positioned-div **structure bar**, 
 and put walls, net GEX, and a pins-or-runs chip) → **Opportunity Board** (top 5 by
 hotness, with ATM IV **and its direction**, and a setup tag) → **Live Flow Alerts**
 (newest 5) → **Positions** (paper and captured merged, with `rescue_state` flags and an
-`OPEN n · UNREALIZED $x · AT RISK m` header) → **MARKET SUMMARY** (full width,
+`OPEN n · UNREALIZED $x · AT RISK m` header) → **Headlines** → **Market read** (full width, six rule-decided readings; see its bullet below) → **MARKET SUMMARY** (full width,
 below the grid — see its own subsection below). Panels sit in a **2×2 grid**
 (`lg:grid-cols-2` — **not `xl`**, which is 1280px and silently collapses a 1265px
 window to one column). Read-only + **click-through**: every row opens its owning page
@@ -197,6 +197,21 @@ ticker and the contract is not one.
 - **`flow.alert_rows` gained `strike`/`expiry`/`dte`** (additive; no column declares
   them) so the Desk composes off the same row the Flow Alerts page draws rather than
   becoming a second reader of the raw payload.
+- **The Market read panel (2026-10-05).** Design
+  [`plans/2026-10-05-market-read-scorecard-design.md`](plans/2026-10-05-market-read-scorecard-design.md).
+  Reads `market:read` (in `VIEWS`, thirteen now; region `read`), published by
+  `market_svc` on each clock slot. The SERVICE decides each row's verdict code; the
+  page maps the code to a word and a fixed chip (`READ_WORDS`, `READ_CHIPS`: an
+  unknown code is "No reading", never Neutral) and formats the facts (`read_reading`,
+  `read_since`, `read_header`). ⚠ `render` is at 787 of 790 lines with 22 of 22
+  nested functions, so the painter is the module-level `paint_read` and the wiring is
+  a `lambda` in `painters` plus one call in `_tick_clock` (`force=False`): the
+  one-second clock repaints only when the head would read differently, which is how
+  a reading that stops arriving greys without a new one. The rows use `READ_COLS`,
+  whose text tracks have no floor: on a narrow screen they wrap, so this panel needs
+  no scroll shell and no pin. `read_view_shown` is the public filter and runs on the
+  event loop. ⚠ The volatility fact is `vix_level`, not `vix`: a source guard
+  forbids the retired `options:header` field of that name on this page.
 - **The flow rows carry the bought / sold estimate (2026-10-04).**
   `options:flow_sides` joined `VIEWS` (twelve now) and `_REGION_VIEWS["flow"]`, so
   the panel repaints when the estimate moves. `flow_rows(view, sides=...)` passes it
