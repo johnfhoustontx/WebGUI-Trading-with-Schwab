@@ -139,6 +139,38 @@ CREATE TABLE IF NOT EXISTS hiro_minutes (
 );
 """
 
+# Flagged flow-alert contracts, one row per alert per session
+# (services/options_svc/flow_sides_tick.py): the bought/sold tallies, and --
+# once the NEXT session has read it -- the open interest the contract moved to.
+# ``session_date`` is the CT session date as TEXT, so nothing here needs
+# localtime arithmetic. Its own retention (purge_flow_contract_days).
+FLOW_DAY_SCHEMA_SQL = """
+CREATE TABLE IF NOT EXISTS flow_contract_days (
+    session_date      TEXT    NOT NULL,
+    alert_id          TEXT    NOT NULL,
+    symbol            TEXT    NOT NULL,
+    osi               TEXT    NOT NULL,
+    side              TEXT,
+    strike            REAL,
+    expiry            TEXT,
+    alert_type        TEXT,
+    fired_ts          INTEGER,
+    oi_prev           REAL,
+    volume            REAL,
+    poll_bought       REAL    NOT NULL,
+    poll_sold         REAL    NOT NULL,
+    poll_unlabelled   REAL    NOT NULL,
+    stream_bought     REAL,
+    stream_sold       REAL,
+    stream_unlabelled REAL,
+    oi_next           REAL,
+    oi_next_date      TEXT,
+    verdict           TEXT,
+    oi_ratio          REAL,
+    PRIMARY KEY (session_date, alert_id)
+);
+"""
+
 
 _GRID_SIG_FIGS = 6
 
@@ -301,6 +333,7 @@ def init_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
     init_term_schema(conn)
     init_hiro_schema(conn)
+    init_flow_day_schema(conn)
 
 
 def init_term_schema(conn: sqlite3.Connection) -> None:
@@ -414,6 +447,119 @@ def purge_hiro(conn: sqlite3.Connection, keep_sessions: int = 20) -> int:
     y, m, dd = (int(x) for x in dates[keep_sessions - 1].split("-"))
     cutoff, _ = _local_unix_range(_dt.date(y, m, dd))
     cur = conn.execute("DELETE FROM hiro_minutes WHERE ts < ?", (cutoff,))
+    conn.commit()
+    return cur.rowcount or 0
+
+
+# ── flow_contract_days ───────────────────────────────────────────────────────
+def init_flow_day_schema(conn: sqlite3.Connection) -> None:
+    """Idempotent schema creation for the flow_contract_days table."""
+    conn.executescript(FLOW_DAY_SCHEMA_SQL)
+    conn.commit()
+
+
+# What the caller writes (the upsert), then what a resolution adds.
+_FLOW_DAY_WRITE_COLS = (
+    "session_date", "alert_id", "symbol", "osi", "side", "strike", "expiry",
+    "alert_type", "fired_ts", "oi_prev", "volume",
+    "poll_bought", "poll_sold", "poll_unlabelled",
+    "stream_bought", "stream_sold", "stream_unlabelled")
+_FLOW_DAY_COLS = _FLOW_DAY_WRITE_COLS + (
+    "oi_next", "oi_next_date", "verdict", "oi_ratio")
+# Replaced by a later upsert of the same alert: the running figures. The
+# identity columns are fixed at the first write, and the four resolution
+# columns are written by resolve_flow_contract_day alone.
+_FLOW_DAY_UPDATE_COLS = (
+    "oi_prev", "volume", "poll_bought", "poll_sold", "poll_unlabelled",
+    "stream_bought", "stream_sold", "stream_unlabelled")
+
+
+def _flow_day_params(row: dict) -> tuple:
+    for key in ("poll_bought", "poll_sold", "poll_unlabelled"):
+        v = float(row[key])
+        if not math.isfinite(v):
+            raise ValueError(
+                f"flow_contract_days {row.get('alert_id')!r}: non-finite {key}={v!r}")
+    return tuple(row.get(col) for col in _FLOW_DAY_WRITE_COLS)
+
+
+def upsert_flow_contract_days(conn: sqlite3.Connection, rows) -> None:
+    """Write flagged contracts in ONE commit. ``rows`` is an iterable of dicts
+    carrying ``_FLOW_DAY_WRITE_COLS``.
+
+    A row for an alert already stored REPLACES its running figures (open
+    interest that day, volume, both tallies): these are STATE -- the caller
+    holds the running tally and writes it whole -- unlike hiro_minutes, whose
+    rows are flows and accumulate. It never touches the resolution columns.
+    A missing or non-finite ``poll_*`` value RAISES (KeyError / TypeError /
+    ValueError) before anything is written. (UPSERT needs SQLite 3.24+.)"""
+    params = [_flow_day_params(row) for row in rows]
+    if not params:
+        return
+    cols = ", ".join(_FLOW_DAY_WRITE_COLS)
+    marks = ", ".join("?" for _ in _FLOW_DAY_WRITE_COLS)
+    sets = ", ".join(f"{c} = excluded.{c}" for c in _FLOW_DAY_UPDATE_COLS)
+    conn.executemany(
+        f"INSERT INTO flow_contract_days ({cols}) VALUES ({marks}) "
+        f"ON CONFLICT(session_date, alert_id) DO UPDATE SET {sets}", params)
+    conn.commit()
+
+
+def _flow_day_rows(cur) -> list[dict]:
+    return [dict(zip(_FLOW_DAY_COLS, r)) for r in cur.fetchall()]
+
+
+def load_flow_contract_days(conn: sqlite3.Connection, session_date: str) -> list[dict]:
+    """Every flagged contract of one session, ascending by fired time."""
+    cur = conn.execute(
+        f"SELECT {', '.join(_FLOW_DAY_COLS)} FROM flow_contract_days "
+        "WHERE session_date = ? ORDER BY fired_ts, alert_id", (session_date,))
+    return _flow_day_rows(cur)
+
+
+def load_unresolved_flow_days(conn: sqlite3.Connection, before: str) -> list[dict]:
+    """Rows with no verdict yet from a session strictly BEFORE ``before``."""
+    cur = conn.execute(
+        f"SELECT {', '.join(_FLOW_DAY_COLS)} FROM flow_contract_days "
+        "WHERE verdict IS NULL AND session_date < ? "
+        "ORDER BY session_date, fired_ts, alert_id", (before,))
+    return _flow_day_rows(cur)
+
+
+def resolve_flow_contract_day(conn: sqlite3.Connection, session_date: str,
+                              alert_id: str, *, oi_next, oi_next_date,
+                              verdict, oi_ratio) -> None:
+    """Record the next session's open interest and the verdict for one row.
+    A second call overwrites the first: the figure is re-read through the
+    session, because when Schwab's chain picks it up is not yet measured."""
+    conn.execute(
+        "UPDATE flow_contract_days SET oi_next = ?, oi_next_date = ?, "
+        "verdict = ?, oi_ratio = ? WHERE session_date = ? AND alert_id = ?",
+        (oi_next, oi_next_date, verdict, oi_ratio, session_date, alert_id))
+    conn.commit()
+
+
+def latest_flow_session_before(conn: sqlite3.Connection, before: str) -> str | None:
+    """The newest stored session date strictly before ``before``, or None."""
+    cur = conn.execute(
+        "SELECT MAX(session_date) FROM flow_contract_days WHERE session_date < ?",
+        (before,))
+    row = cur.fetchone()
+    return row[0] if row else None
+
+
+def purge_flow_contract_days(conn: sqlite3.Connection, keep_sessions: int = 20) -> int:
+    """Keep the last ``keep_sessions`` distinct session dates (at least one);
+    delete everything older. Returns rows deleted."""
+    keep_sessions = max(1, int(keep_sessions))
+    cur = conn.execute(
+        "SELECT DISTINCT session_date FROM flow_contract_days "
+        "ORDER BY session_date DESC")
+    dates = [r[0] for r in cur.fetchall()]
+    if len(dates) <= keep_sessions:
+        return 0
+    cur = conn.execute("DELETE FROM flow_contract_days WHERE session_date < ?",
+                       (dates[keep_sessions - 1],))
     conn.commit()
     return cur.rowcount or 0
 
