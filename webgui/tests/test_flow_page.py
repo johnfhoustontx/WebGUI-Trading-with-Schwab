@@ -238,7 +238,8 @@ def test_status_text_distinguishes_quiet_from_cold():
 # ── table + handoff ──────────────────────────────────────────────────────────
 def test_flow_columns_are_sortable_and_ordered():
     names = [c["name"] for c in flow.flow_columns()]
-    assert names == ["time", "age", "symbol", "kind", "side", "detail", "share", "text"]
+    assert names == ["time", "age", "symbol", "kind", "side", "detail", "sides",
+                     "share", "text"]
     assert all(c["sortable"] for c in flow.flow_columns())
     share = next(c for c in flow.flow_columns() if c["name"] == "share")
     assert share["field"] == "share_pct" and share["align"] == "right"
@@ -609,3 +610,206 @@ def test_the_status_line_says_when_the_filter_hides_rows():
     assert flow.filtered_status(base, 9, 5) == f"{base} · 5 shown"
     assert flow.filtered_status(base, 9, 9) == base
     assert flow.filtered_status(base, 0, 0) == base
+
+
+# ── bought / sold (estimate) ─────────────────────────────────────────────────
+# docs/plans/2026-10-04-flow-alert-sides-design.md
+import math  # noqa: E402
+
+import pytest  # noqa: E402
+
+_POLL = {"bought": 620.0, "sold": 300.0, "unlabelled": 80.0}
+_STREAM = {"bought": 710.0, "sold": 200.0, "unlabelled": 90.0}
+
+
+def _sides(contracts, date=_VIEW["date"], public=True):
+    return {"date": date, "public": public, "contracts": contracts}
+
+
+def test_shares_from_a_tally():
+    assert flow.shares(_POLL) == {"bought": 0.62, "sold": 0.30,
+                                  "unlabelled": 0.08, "volume": 1000.0}
+
+
+@pytest.mark.parametrize("bad", [
+    None, {}, 5, {"bought": 1}, {"bought": 1, "sold": 1},
+    {"bought": math.nan, "sold": 1, "unlabelled": 1},
+    {"bought": -1, "sold": 1, "unlabelled": 1},
+    {"bought": 0, "sold": 0, "unlabelled": 0},
+    {"bought": True, "sold": 300, "unlabelled": 80},
+    {"bought": "n/a", "sold": 300, "unlabelled": 80},
+])
+def test_shares_of_an_unusable_tally_is_none(bad):
+    assert flow.shares(bad) is None
+
+
+def test_sides_text_names_all_three_shares():
+    # The unlabelled share is always printed: a reading must never look
+    # better measured than it was.
+    assert flow.sides_text({"poll": _POLL, "stream": None}) \
+        == "≈ bought 62.00% · sold 30.00% · unlabelled 8.00%"
+
+
+def test_sides_text_prints_an_all_unlabelled_tally_as_it_is():
+    t = {"poll": {"bought": 0, "sold": 0, "unlabelled": 500}, "stream": None}
+    assert flow.sides_text(t) == "≈ bought 0.00% · sold 0.00% · unlabelled 100.00%"
+
+
+def test_sides_text_adds_the_stream_figure_once_it_has_volume():
+    text = flow.sides_text({"poll": _POLL, "stream": _STREAM})
+    assert text == ("≈ bought 62.00% · sold 30.00% · unlabelled 8.00%"
+                    " · since the alert: bought 71.00% · sold 20.00% of 1,000")
+
+
+def test_sides_text_leaves_out_a_stream_that_has_not_traded():
+    quiet = {"bought": 0.0, "sold": 0.0, "unlabelled": 0.0}
+    assert flow.sides_text({"poll": _POLL, "stream": quiet}) \
+        == flow.sides_text({"poll": _POLL, "stream": None})
+
+
+@pytest.mark.parametrize("entry", [None, {}, 5, {"poll": None, "stream": None},
+                                   {"poll": {"bought": 0, "sold": 0, "unlabelled": 0}}])
+def test_sides_text_is_empty_without_a_usable_tally(entry):
+    assert flow.sides_text(entry) == ""
+
+
+def test_alert_rows_carry_the_estimate_for_a_contract_alert():
+    rows = {r["id"]: r for r in flow.alert_rows(
+        _VIEW, _sides({_UOA["id"]: {"poll": _POLL, "stream": None, "volume": 1000.0}}))}
+    assert rows[_UOA["id"]]["sides"] == "≈ bought 62.00% · sold 30.00% · unlabelled 8.00%"
+    assert rows[_XO["id"]]["sides"] == ""        # no contract, no estimate
+    assert rows[_GF["id"]]["sides"] == ""
+
+
+def test_alert_rows_keep_the_stream_figure_on_its_own_line():
+    # One long line pushed the table past the page (measured on the harness at
+    # 1700 px), so the row carries the two figures apart and the cell stacks them.
+    (row,) = [r for r in flow.alert_rows(
+        _VIEW, _sides({_UOA["id"]: {"poll": _POLL, "stream": _STREAM}}))
+        if r["id"] == _UOA["id"]]
+    assert row["sides"] == "≈ bought 62.00% · sold 30.00% · unlabelled 8.00%"
+    assert row["sides_after"] == "since the alert: bought 71.00% · sold 20.00% of 1,000"
+    assert "props.row.sides_after" in flow._SIDES_SLOT
+
+
+def test_sides_parts_of_nothing_is_two_empty_strings():
+    assert flow.sides_parts(None) == ("", "")
+    assert flow.sides_parts({"poll": None, "stream": _STREAM}) \
+        == ("", "since the alert: bought 71.00% · sold 20.00% of 1,000")
+
+
+def test_alert_rows_without_a_sides_view_are_unchanged_but_for_the_empty_field():
+    for row in flow.alert_rows(_VIEW):
+        assert row["sides"] == "" and row["sides_after"] == ""
+    assert [r["id"] for r in flow.alert_rows(_VIEW)] \
+        == [r["id"] for r in flow.alert_rows(_VIEW, None)]
+
+
+def test_an_estimate_from_another_day_is_not_shown():
+    # The sides view is only published once a contract is flagged, so a quiet
+    # morning still holds yesterday's: its date is what says so.
+    stale = _sides({_UOA["id"]: {"poll": _POLL, "stream": None}}, date="2026-08-08")
+    assert all(r["sides"] == "" for r in flow.alert_rows(_VIEW, stale))
+
+
+@pytest.mark.parametrize("bad", [5, "x", [], {"contracts": 5},
+                                 {"date": _VIEW["date"], "contracts": None}])
+def test_alert_rows_survive_a_malformed_sides_view(bad):
+    assert all(r["sides"] == "" for r in flow.alert_rows(_VIEW, bad))
+
+
+def test_the_public_origin_hides_an_estimate_not_marked_public(monkeypatch):
+    private = _sides({}, public=False)
+    public = _sides({}, public=True)
+    _public(monkeypatch, True)
+    assert flow.sides_view_shown(private) is None
+    assert flow.sides_view_shown({"contracts": {}}) is None     # no flag: closed
+    assert flow.sides_view_shown({**public, "public": "true"}) is None
+    assert flow.sides_view_shown(public) is public
+    _public(monkeypatch, False)
+    assert flow.sides_view_shown(private) is private            # this app shows it
+
+
+def test_the_sides_column_sits_beside_what_traded_and_says_estimate():
+    labels = {c["name"]: c["label"] for c in flow.flow_columns()}
+    assert labels["sides"] == "Bought / sold (estimate)"
+
+
+# ── previous session: opened or closed ───────────────────────────────────────
+def _fu(**over):
+    row = {"session_date": "2026-10-02", "alert_id": "SPY|uoa|call|770|2026-10-09",
+           "symbol": "SPY", "osi": "SPY   261009C00770000", "side": "call",
+           "strike": 770.0, "expiry": "2026-10-09", "alert_type": "uoa",
+           "fired_ts": 1790951400, "oi_prev": 9985.0, "volume": 1000.0,
+           "poll_bought": 620.0, "poll_sold": 300.0, "poll_unlabelled": 80.0,
+           "stream_bought": None, "stream_sold": None, "stream_unlabelled": None,
+           "oi_next": 10600.0, "oi_next_date": "2026-10-05", "verdict": "opened",
+           "oi_ratio": 0.615}
+    row.update(over)
+    return row
+
+
+def _followup(rows, public=True):
+    return {"date": "2026-10-02", "public": public, "rows": rows}
+
+
+def test_followup_row_reads_in_whole_words():
+    (row,) = flow.followup_rows(_followup([_fu()]))
+    assert row == {
+        "id": "SPY|uoa|call|770|2026-10-09",
+        "symbol": "SPY",
+        "contract": "10/09 770.00C",
+        "kind": "Unusual volume",
+        "volume": 1000.0,
+        "sides": "≈ bought 62.00% · sold 30.00% · unlabelled 8.00%",
+        "oi": "9,985 → 10,600",
+        "change": "+61.50% of volume",
+        "reading": "Mostly opened",
+    }
+
+
+@pytest.mark.parametrize("verdict,want", [
+    ("opened", "Mostly opened"), ("closed", "Mostly closed"),
+    ("mixed", "Mixed, or traded within the day"),
+    ("expired", "Expired — no reading"), ("none", "No reading"),
+    (None, "Waiting for today's open interest"),
+    ("something new", "No reading"),
+])
+def test_followup_reading_words(verdict, want):
+    (row,) = flow.followup_rows(_followup([_fu(verdict=verdict)]))
+    assert row["reading"] == want
+
+
+def test_a_followup_row_still_waiting_prints_no_invented_figures():
+    (row,) = flow.followup_rows(_followup([_fu(
+        oi_next=None, oi_next_date=None, verdict=None, oi_ratio=None)]))
+    assert row["oi"] == "9,985 → —"
+    assert row["change"] == ""
+
+
+def test_a_followup_put_and_an_outsized_bet_are_labelled():
+    (row,) = flow.followup_rows(_followup([_fu(side="put", alert_type="big_delta",
+                                               oi_ratio=-0.7, verdict="closed")]))
+    assert row["contract"] == "10/09 770.00P"
+    assert row["kind"] == "Outsized bet"
+    assert row["change"] == "-70.00% of volume"
+
+
+def test_followup_rows_survive_malformed_input():
+    assert flow.followup_rows(None) == []
+    assert flow.followup_rows({"rows": 5}) == []
+    assert flow.followup_rows({"rows": [None, 5, "x"]}) == []
+    (row,) = flow.followup_rows(_followup([{"alert_id": "x"}]))
+    assert row["reading"] == "Waiting for today's open interest"
+    assert row["oi"] == "— → —" and row["sides"] == "" and row["contract"] == ""
+
+
+def test_followup_fields_cover_every_column():
+    (row,) = flow.followup_rows(_followup([_fu()]))
+    for col in flow.followup_columns():
+        assert col["field"] in row
+
+
+def test_followup_caption_names_the_session_in_words():
+    assert flow.followup_title(_followup([_fu()])) == "Previous session · Fri 2 Oct"
+    assert flow.followup_title({"rows": []}) == "Previous session"

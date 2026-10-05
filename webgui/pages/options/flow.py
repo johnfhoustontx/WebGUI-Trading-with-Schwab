@@ -146,6 +146,17 @@ _SHARE_SLOT = r'''
 '''
 
 
+# Bought / sold cell: the session's share, and under it what has traded since
+# the alert (only once the stream has volume). Two lines rather than one long
+# one: on one line the stream figure pushed the table past the page.
+_SIDES_SLOT = r'''
+  <q-td :props="props">
+    <div>{{ props.value }}</div>
+    <div v-if="props.row.sides_after" class="text-grey-6">{{ props.row.sides_after }}</div>
+  </q-td>
+'''
+
+
 def alert_kind_label(a):
     return _KIND_LABEL.get((a or {}).get("type"), "Flow")
 
@@ -353,17 +364,23 @@ def _shown(alerts):
             if not (isinstance(a, dict) and a.get("public") is False)]
 
 
-def alert_rows(view):
+def alert_rows(view, sides=None):
     """Display rows, NEWEST FIRST. The service appends oldest-first.
+
+    ``sides`` is the ``cache:options:flow_sides`` payload, ALREADY passed
+    through :func:`sides_view_shown` by the caller; each row's ``sides`` is the
+    bought / sold estimate for its contract, or ``""``.
 
     Total over a missing/malformed view — ``render()`` does no validation."""
     alerts = (view or {}).get("alerts") if isinstance(view, dict) else None
     if not isinstance(alerts, list):
         return []
+    estimates = _sides_contracts(sides, view.get("date"))
     rows = []
     for a in _shown(alerts):
         if not isinstance(a, dict):
             continue
+        sides, sides_after = sides_parts(estimates.get(a.get("id")))
         ts = a.get("ts")
         ts = ts if isinstance(ts, (int, float)) and not isinstance(ts, bool) else None
         rows.append({
@@ -389,6 +406,11 @@ def alert_rows(view):
             "expiry": a.get("expiry"),
             "dte": a.get("dte"),
             "detail": alert_detail(a),
+            # The bought / sold ESTIMATE: the session's share, and on a second
+            # line what has traded since the alert. Additive, like the three
+            # above; "" for an alert that names no contract or has no tally.
+            "sides": sides,
+            "sides_after": sides_after,
             "share_pct": _share_pct(a),     # numeric % for the sortable Share column
             "text": a.get("text", ""),
             "_tone_class": tone_class(a),
@@ -399,6 +421,180 @@ def alert_rows(view):
         })
     rows.reverse()
     return rows
+
+
+# ── bought / sold (estimate) ─────────────────────────────────────────────────
+# ``cache:options:flow_sides`` carries, per contract-level alert, the volume the
+# options service labelled bought, sold or unlabelled: from the minute poll for
+# the whole session, and from a stream of the contract after its alert. Schwab
+# publishes no trade tape, so every figure here is an ESTIMATE and the screen
+# says so: the text opens with "≈" and always prints the unlabelled share, so a
+# reading never looks better measured than it was.
+# Design: docs/plans/2026-10-04-flow-alert-sides-design.md.
+SIDES_VIEW = "options:flow_sides"
+FOLLOWUP_VIEW = "options:flow_followup"
+
+
+def shares(tally):
+    """``{bought, sold, unlabelled}`` volumes as fractions of their total, plus
+    that total as ``volume``. None for a tally that is missing a part, holds a
+    non-number or a negative, or sums to nothing. PURE."""
+    if not isinstance(tally, dict):
+        return None
+    parts = [_fmt.num(tally.get(k)) for k in ("bought", "sold", "unlabelled")]
+    if any(p is None or p < 0 for p in parts):
+        return None
+    total = sum(parts)
+    if total <= 0:
+        return None
+    b, s, u = parts
+    return {"bought": b / total, "sold": s / total, "unlabelled": u / total,
+            "volume": total}
+
+
+def _share(fraction):
+    return _fmt.pct(fraction * 100)
+
+
+def sides_parts(entry):
+    """One contract's estimate as ``(session, since_alert)`` text; either may
+    be ``""``. ``entry`` is one value of the view's ``contracts`` map:
+    ``{"poll": tally, "stream": tally}``.
+
+    ``session`` is the whole day from the minute poll; ``since_alert`` is the
+    stream, once it has volume. The two are never blended: they are different
+    samples of different stretches of the day."""
+    if not isinstance(entry, dict):
+        return "", ""
+    session = after = ""
+    poll = shares(entry.get("poll"))
+    if poll is not None:
+        session = (f"≈ bought {_share(poll['bought'])} · sold {_share(poll['sold'])}"
+                   f" · unlabelled {_share(poll['unlabelled'])}")
+    stream = shares(entry.get("stream"))
+    if stream is not None:
+        after = (f"since the alert: bought {_share(stream['bought'])} · "
+                 f"sold {_share(stream['sold'])} of {stream['volume']:,.0f}")
+    return session, after
+
+
+def sides_text(entry):
+    """:func:`sides_parts` on ONE line, for a reader with no room for two."""
+    return " · ".join(p for p in sides_parts(entry) if p)
+
+
+def _sides_contracts(sides, date):
+    """The view's ``{alert id: entry}`` map, or ``{}`` when the view is absent,
+    malformed, or from ANOTHER DAY. The view is only published once a contract
+    is flagged, so a quiet morning still holds yesterday's; its date says so."""
+    if not isinstance(sides, dict) or sides.get("date") != date:
+        return {}
+    contracts = sides.get("contracts")
+    return contracts if isinstance(contracts, dict) else {}
+
+
+def sides_view_shown(view):
+    """``view`` if THIS render may show it, else None. While hiding (the public
+    origin, a gallery capture) only a view the service stamped ``public: True``
+    is shown; a missing flag is closed. Used for both ``flow_sides`` and
+    ``flow_followup``.
+
+    ⚠ Call it on the event loop, for the reason in :func:`_shown`."""
+    if not _hiding():
+        return view
+    return view if isinstance(view, dict) and view.get("public") is True else None
+
+
+# ── previous session: opened or closed ───────────────────────────────────────
+# The next session's open interest for each contract flagged yesterday. The
+# change, as a share of that day's volume, says whether the volume mostly
+# opened new positions or closed old ones. A finite map of the service's
+# verdict codes to whole words; an unknown code reads as no reading.
+_VERDICT_WORDS = {
+    "opened": "Mostly opened",
+    "closed": "Mostly closed",
+    "mixed": "Mixed, or traded within the day",
+    "expired": "Expired — no reading",
+    "none": "No reading",
+}
+_VERDICT_WAITING = "Waiting for today's open interest"
+FOLLOWUP_CAPTION = (
+    "Open interest the morning after, for each contract flagged in the previous "
+    "session. If it rose by at least half of that day's volume, the volume "
+    "mostly opened new positions; if it fell by as much, it mostly closed old "
+    "ones. An estimate. A contract that expired on its alert day has no reading.")
+
+
+def _count(v):
+    f = _fmt.num(v)
+    return _fmt.NO_READING if f is None else f"{f:,.0f}"
+
+
+def _followup_contract(r):
+    strike = _fmt.num(r.get("strike"))
+    if strike is None or r.get("side") not in ("call", "put"):
+        return ""
+    cp = "C" if r["side"] == "call" else "P"
+    return f"{_exp_short(r.get('expiry'), None)} {strike:.2f}{cp}".strip()
+
+
+def followup_rows(view):
+    """Display rows for the Previous session panel, in the order the alerts
+    fired. Total over a missing or malformed view; a row that is not a dict is
+    skipped."""
+    rows = (view or {}).get("rows") if isinstance(view, dict) else None
+    if not isinstance(rows, list):
+        return []
+    out = []
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        verdict = r.get("verdict")
+        ratio = _fmt.num(r.get("oi_ratio"))
+        out.append({
+            "id": r.get("alert_id") or f"row|{len(out)}",
+            "symbol": r.get("symbol", ""),
+            "contract": _followup_contract(r),
+            "kind": (alert_kind_label({"type": r.get("alert_type")})
+                     if r.get("alert_type") else ""),
+            "volume": _fmt.num(r.get("volume")),
+            "sides": sides_text({"poll": {
+                "bought": r.get("poll_bought"), "sold": r.get("poll_sold"),
+                "unlabelled": r.get("poll_unlabelled")}}),
+            "oi": f"{_count(r.get('oi_prev'))} → {_count(r.get('oi_next'))}",
+            "change": ("" if ratio is None
+                       else f"{_fmt.pct(ratio * 100, signed=True)} of volume"),
+            "reading": (_VERDICT_WAITING if verdict is None
+                        else _VERDICT_WORDS.get(verdict, _VERDICT_WORDS["none"])),
+        })
+    return out
+
+
+# Whole contracts with thousands separators; the column stays numeric so it
+# sorts by size.
+_COUNT_FORMAT = ("(val) => (typeof val === 'number') "
+                 f"? val.toLocaleString('en-US') : '{_fmt.NO_READING}'")
+
+
+def followup_columns():
+    spec = [("symbol", "Symbol"), ("contract", "Contract"), ("kind", "Alert type"),
+            ("volume", "Volume that day"), ("sides", "Bought / sold (estimate)"),
+            ("oi", "Open interest, before → after"),
+            ("change", "Change"), ("reading", "Reading")]
+    cols = [{"name": f, "label": l, "field": f, "sortable": True, "align": "left"}
+            for f, l in spec]
+    next(c for c in cols if c["name"] == "volume")[":format"] = _COUNT_FORMAT
+    return cols
+
+
+def followup_title(view):
+    """"Previous session · Fri 2 Oct", or the bare heading with no usable date."""
+    date = view.get("date") if isinstance(view, dict) else None
+    try:
+        d = _dt.date.fromisoformat(date)
+    except (TypeError, ValueError):
+        return "Previous session"
+    return f"Previous session · {d.strftime('%a')} {d.day} {d.strftime('%b')}"
 
 
 # The kinds whose alerts the service may stamp ``public: False`` today.
@@ -529,6 +725,10 @@ def flow_columns():
     # "Share" alone never said share OF WHAT.
     cols.insert(6, {"name": "share", "label": "Share of flow",
                     "field": "share_pct", "sortable": True, "align": "right"})
+    # Beside "What traded": the bought / sold estimate for the same contract.
+    # "(estimate)" is in the header because Schwab publishes no trade tape.
+    cols.insert(6, {"name": "sides", "label": "Bought / sold (estimate)",
+                    "field": "sides", "sortable": True, "align": "left"})
     return cols
 
 
@@ -555,7 +755,12 @@ def render():
     # new tab — keeps what the reader switched off. On the public origin the
     # store is frozen: every visitor starts from the default and a click there
     # is never written (``app_settings.set`` is a no-op).
+    # ``payload`` is kept so the table can be rebuilt when only the bought/sold
+    # estimate moved: that view changes every minute, the alert list only when
+    # an alert fires.
     state = {"version": None, "rows": [], "symbol": None, "chips": None,
+             "payload": None, "sides": None, "sides_ver": None,
+             "follow_ver": None,
              "status": _copy.WAITING_OPTIONS,
              "hidden": parse_hidden_kinds(app_settings.get(HIDDEN_KINDS_KEY))}
 
@@ -587,10 +792,14 @@ def render():
         region = kit.region("Loading today's alerts…")
         with region.content:
             table = kit.table(flow_columns(), numeric=("share",))
+        # The previous session's flagged contracts and what their open interest
+        # did overnight. Empty (and so invisible) until the service publishes it.
+        follow_box = ui.column().classes("w-full gap-2")
     table.add_slot("body-cell-symbol", gamma_symbol_slot(linked))
     table.add_slot("body-cell-side", _TONE_SLOT)
     table.add_slot("body-cell-text", _TONE_SLOT)
     table.add_slot("body-cell-share", _SHARE_SLOT)
+    table.add_slot("body-cell-sides", _SIDES_SLOT)
 
     @guard
     def _open_gamma(e):
@@ -638,8 +847,20 @@ def render():
             r["age"] = age_text(r.get("ts"), now)
         _apply_filters()
 
+    def _paint_followup(view):
+        # On the event loop: ``sides_view_shown`` reads the client's request.
+        rows = followup_rows(sides_view_shown(view))
+        follow_box.clear()
+        if not rows:
+            return
+        with follow_box:
+            kit.section_title(followup_title(view))
+            kit.status_line(FOLLOWUP_CAPTION)
+            kit.table(followup_columns(), rows, numeric=("volume",))
+
     def _paint(payload):
-        state["rows"] = alert_rows(payload)
+        state["payload"] = payload
+        state["rows"] = alert_rows(payload, sides_view_shown(state["sides"]))
         opts = ["All"] + symbol_options(state["rows"])
         if list(symbol_sel.options) != opts:
             symbol_sel.options = opts
@@ -667,16 +888,34 @@ def render():
 
     @guard_async
     async def _poll():
-        # Cheap :ver probe off the loop; the full payload read only on a change.
-        v = await run.io_bound(bus_client.read_version, VIEW)
+        # ONE batched :ver probe off the loop; a payload is read only when its
+        # own version moved.
+        vers = await run.io_bound(bus_client.read_versions,
+                                  (VIEW, SIDES_VIEW, FOLLOWUP_VIEW))
+        moved = False
+        v = vers.get(VIEW)
         if v is not None and v != state["version"]:
             payload = await run.io_bound(bus_client.read, VIEW)
             if payload:
-                state["version"] = v
-                _paint(payload)
-                return
-        _tick_age()      # no new data — just keep the ages honest
+                state["version"], state["payload"] = v, payload
+                moved = True
+        sv = vers.get(SIDES_VIEW)
+        if sv is not None and sv != state["sides_ver"]:
+            state["sides"] = await run.io_bound(bus_client.read, SIDES_VIEW)
+            state["sides_ver"] = sv
+            moved = True
+        fv = vers.get(FOLLOWUP_VIEW)
+        if fv is not None and fv != state["follow_ver"]:
+            state["follow_ver"] = fv
+            _paint_followup(await run.io_bound(bus_client.read, FOLLOWUP_VIEW))
+        if moved and state["payload"]:
+            _paint(state["payload"])
+        else:
+            _tick_age()      # no new data — just keep the ages honest
 
+    state["sides"], state["sides_ver"] = bus_client.read_full(SIDES_VIEW)
+    follow, state["follow_ver"] = bus_client.read_full(FOLLOWUP_VIEW)
+    _paint_followup(follow)
     payload, version = bus_client.read_full(VIEW)
     if payload:
         state["version"] = version
