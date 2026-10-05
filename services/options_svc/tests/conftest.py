@@ -28,6 +28,17 @@ def _operator_toggles_into_tmp(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _no_flow_stream_thread(monkeypatch):
+    """``scheduler.loop`` starts the flow-alert stream worker, and several tests
+    run that loop. Each would leave a real daemon thread polling for the rest of
+    the test process. The worker's own tests call the real ``start`` they kept
+    at import (``test_flow_stream._REAL_START``)."""
+    import threading
+    from services.options_svc import flow_stream
+    monkeypatch.setattr(flow_stream, "start", threading.Event)
+
+
+@pytest.fixture(autouse=True)
 def _no_live_claude(monkeypatch):
     """Neutralize real Claude-client resolution across the whole options_svc suite.
 

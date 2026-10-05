@@ -18,7 +18,7 @@ import logging
 from zoneinfo import ZoneInfo
 
 from services import _heartbeat
-from services.options_svc import compute, finder_public, handlers
+from services.options_svc import compute, finder_public, flow_stream, handlers
 from shared import market_calendar as mc
 from shared.market_calendar import is_trading_day as _cal_is_trading_day
 
@@ -589,6 +589,15 @@ async def loop(bus):
             log.warning("startup BP reconcile corrected drift: %s", drift)
     except Exception:
         log.exception("startup buying-power reconcile degraded")
+    # Stream each flagged flow-alert contract after its alert (the bought/sold
+    # estimate; docs/plans/2026-10-04-flow-alert-sides-design.md). A daemon
+    # thread that idles until a contract is flagged. Started HERE because this
+    # loop only runs when schedulers are enabled, which keeps the worker out of
+    # the dev profile and out of pytest. Best-effort: never stops the loop.
+    try:
+        flow_stream.start()
+    except Exception:
+        log.exception("flow stream failed to start")
     last_gex_slot = None  # 1-min GEX history-collection slot (see gex_due)
     last_captured_manage_slot = None  # 5-min captured auto-manage slot (see captured_manage_due)
     paper_ran = set()  # (date, hour) of fired hourly manual paper cycles (see paper_cycle_due)

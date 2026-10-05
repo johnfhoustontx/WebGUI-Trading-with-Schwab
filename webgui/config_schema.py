@@ -481,7 +481,8 @@ _FLOW = ConfigFile(
                   "Alerts past this number keep the once-a-minute reading only. "
                   "Schwab allows 3,000 streamed option contracts in all, shared "
                   "with paper-trade tracking.",
-                  kind="int", unit="contracts", min=0, max=1000, step=10),
+                  # 500 = flow_sides_tick.STREAM_HARD_MAX (one request line).
+                  kind="int", unit="contracts", min=0, max=500, step=10),
         # No restart: options_svc re-reads [sides] (mtime-cached) every minute.
         ), restart=()),
         Section("Opened or closed (next day)",

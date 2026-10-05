@@ -296,6 +296,24 @@ def test_the_stream_set_is_capped(monkeypatch):
     assert len(_rows(FRI)) == 4                 # every alert still has its row
 
 
+@pytest.mark.parametrize("setting,want", [
+    (10_000, tick.STREAM_HARD_MAX),     # one request line holds only so many
+    (-5, 0), (0, 0), (2.9, 2),
+    ("200", 200), (None, 200), (float("nan"), 200),   # unusable -> the default
+])
+def test_the_stream_cap_is_bounded_whatever_the_setting(setting, want):
+    assert tick._stream_cap({"stream_max_contracts": setting}) == want
+
+
+def test_the_configuration_page_offers_no_more_than_the_hard_cap():
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[3]
+           / "webgui" / "config_schema.py").read_text(encoding="utf-8")
+    field = src[src.index('"sides.stream_max_contracts"'):]
+    field = field[:field.index("),")]
+    assert f"max={tick.STREAM_HARD_MAX}," in field
+
+
 @pytest.mark.parametrize("stream", [False, "true", 1, None])
 def test_the_stream_switch_must_be_a_real_true(monkeypatch, stream):
     _set_cfg(monkeypatch, sides={"stream": stream})

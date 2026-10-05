@@ -157,11 +157,18 @@ def on_chain(symbol, chain, now=None) -> None:
 
 
 # ── the stream worker's side ─────────────────────────────────────────────────
+# The most contracts the stream will ever hold, whatever the setting says. The
+# set travels as ONE query string to the proxy (about 24 characters a contract
+# once encoded), and an HTTP request line has a size limit: h11's is 16 KB. 500
+# contracts is ~12 KB. Settings -> Configuration offers no more than this.
+STREAM_HARD_MAX = 500
+
+
 def _stream_cap(sides) -> int:
     cap = _finite(sides.get("stream_max_contracts"))
     if cap is None:
         cap = flow_alerts._DEFAULTS["sides"]["stream_max_contracts"]
-    return max(0, int(cap))
+    return max(0, min(int(cap), STREAM_HARD_MAX))
 
 
 def wanted_osis() -> list:

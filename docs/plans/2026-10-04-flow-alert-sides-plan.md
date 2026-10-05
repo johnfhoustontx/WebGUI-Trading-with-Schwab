@@ -678,7 +678,9 @@ reconcile block:
 ```
 
 The scheduler loop itself only runs when `_scaffold._schedulers_enabled()`, so the
-dev profile and pytest never start the thread. Add a test that asserts
+dev profile never starts the thread. ⚠ Pytest DOES reach it: several tests run
+`scheduler.loop` directly, so the suite's `conftest.py` replaces
+`flow_stream.start` with a no-op (`_no_flow_stream_thread`). Add a test that asserts
 `flow_stream.start` is referenced from `scheduler.loop`'s source.
 
 **Step 5:** Options suite passes.

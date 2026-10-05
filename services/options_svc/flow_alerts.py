@@ -231,7 +231,11 @@ def detect_uoa(symbol, chain, cfg):
 
     Qualify a contract when volume/open-interest >= k AND volume >= vol_floor AND
     premium ($ = mark*vol*100) >= premium_floor; skip oi <= 0 (ratio undefined).
-    Return the top_n qualifiers by premium (desc). Pure + defensive → []."""
+    Return the top_n qualifiers by premium (desc). Pure + defensive → [].
+
+    Each carries ``osi``, the contract's own Schwab symbol (None if the chain
+    row has none): what ``flow_sides_tick`` matches its bought/sold tally by.
+    ``detect_big_delta`` carries the same field."""
     u = section(cfg, "uoa")
     k = u.get("k", 3.0); vol_floor = u.get("vol_floor", 500)
     prem_floor = u.get("premium_floor", 250000); top_n = u.get("top_n", 3)
@@ -263,8 +267,6 @@ def detect_uoa(symbol, chain, cfg):
                             premium = mark * vol * 100
                             if ratio < k or premium < prem_floor:
                                 continue
-                            # ``osi`` = the contract's own Schwab symbol: what
-                            # flow_sides_tick matches its bought/sold tally by.
                             out.append({"type": "uoa", "side": side, "symbol": symbol,
                                         "osi": c.get("symbol"),
                                         "strike": strike, "expiry": expiry, "dte": dte,
