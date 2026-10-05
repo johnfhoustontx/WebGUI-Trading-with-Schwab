@@ -536,3 +536,32 @@ def test_detectors_survive_a_scalar_section():
     series = [(60, 100.0, 0, 0, 100000.0, 200000.0), (120, 100.0, 0, 0, 260000.0, 200000.0)]
     out = flow_alerts.detect_flow_alerts("SPY", series, {"crossover": 5}, {}, 120)
     assert [a["type"] for a in out] == ["crossover"]   # ran with the built-in defaults
+
+
+# --- bought/sold tally + next-day open interest: config ---
+# docs/plans/2026-10-04-flow-alert-sides-design.md
+
+def test_sides_and_followup_defaults():
+    cfg = flow_alerts._merge(flow_alerts._DEFAULTS, {})
+    assert flow_alerts.section(cfg, "sides") == {
+        "enabled": True, "public": True, "stream": True,
+        "stream_max_contracts": 200}
+    assert flow_alerts.section(cfg, "followup") == {
+        "enabled": True, "opened_ratio": 0.5, "closed_ratio": -0.5,
+        "keep_sessions": 20}
+
+
+def test_sides_scalar_override_falls_back_to_defaults():
+    cfg = flow_alerts._merge(flow_alerts._DEFAULTS, {"sides": 5})
+    assert flow_alerts.section(cfg, "sides")["stream_max_contracts"] == 200
+
+
+def test_shipped_file_matches_the_sides_and_followup_defaults():
+    """The tracked config/flow_alerts.toml states both tables in full, with the
+    built-in values: a key present in one and not the other is how a default
+    and its documentation drift apart."""
+    import tomllib
+    with open(flow_alerts._TOML_PATH, "rb") as fh:
+        shipped = tomllib.load(fh)
+    for name in ("sides", "followup"):
+        assert shipped[name] == flow_alerts._DEFAULTS[name]

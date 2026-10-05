@@ -98,3 +98,28 @@ flip_band = 1.0           # dead zone around zero, in multiples of normal 15-min
 flip_not_before = "09:00" # CT -- the first half hour crosses zero constantly
 flip_cooldown_min = 60    # per symbol
 keep_sessions = 20        # hiro_minutes retention (the GEX snapshots keep only 5)
+
+[sides]
+# Bought / sold / unlabelled volume on the unusual-volume and outsized-bet alerts.
+# An ESTIMATE: Schwab publishes no trade tape, so new volume is labelled from where
+# the latest trade price sits against the bid and ask -- once a minute on the chain
+# poll (the whole session), and per tick on a stream of the contract after its alert.
+# Volume the service did not watch print is counted as unlabelled, never guessed.
+# Design: docs/plans/2026-10-04-flow-alert-sides-design.md.
+enabled = true              # measure, store and publish the estimate
+public  = true              # show it on the public live screens; false = this app only
+stream  = true              # stream a contract after its alert (false = the minute poll only)
+stream_max_contracts = 200  # most contracts streamed in one day; later alerts keep the poll
+                            #             figure only. Sized on 2026-10-02, which had 175
+                            #             contract alerts. The streamer's own limit is 3,000
+                            #             option symbols, shared with paper-trade tracking.
+
+[followup]
+# Next-day open interest for each flagged contract: was the volume opening or closing?
+# ratio = (next open interest - that day's open interest) / that day's volume.
+# A contract that expired on its alert day can never have a reading, and on
+# 2026-10-02 that was 152 of 175 alerts (87%).
+enabled = true
+opened_ratio = 0.5          # ratio at or above this reads "mostly opened"
+closed_ratio = -0.5         # ratio at or below this reads "mostly closed"; between = mixed
+keep_sessions = 20          # sessions of flagged contracts kept in gex_history.db

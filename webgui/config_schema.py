@@ -463,6 +463,43 @@ _FLOW = ConfigFile(
         # No restart: options_svc re-reads [hiro] (mtime-cached) on every
         # 1-minute tick -- the measurement, the rules and the purge alike.
         ), restart=()),
+        Section("Bought or sold (estimate)",
+                "An estimated bought / sold / unlabelled share on each unusual-volume "
+                "and outsized-bet alert. Schwab publishes no trade tape, so new volume "
+                "is labelled from where the latest trade price sits against the bid "
+                "and ask. Volume that printed while the service was not watching is "
+                "counted as unlabelled.", (
+            Field("sides.enabled", "Estimate bought and sold on flow alerts",
+                  "Off stops the measurement and removes the figures from every "
+                  "screen.", kind="bool"),
+            Field("sides.public", "Show the estimate on the public screens",
+                  "Off = the figures appear in this app only.", kind="bool"),
+            Field("sides.stream", "Stream a contract after its alert",
+                  "A finer reading of what trades after the alert. Off = the "
+                  "once-a-minute reading only.", kind="bool"),
+            Field("sides.stream_max_contracts", "Most contracts streamed in a day",
+                  "Alerts past this number keep the once-a-minute reading only. "
+                  "Schwab allows 3,000 streamed option contracts in all, shared "
+                  "with paper-trade tracking.",
+                  kind="int", unit="contracts", min=0, max=1000, step=10),
+        # No restart: options_svc re-reads [sides] (mtime-cached) every minute.
+        ), restart=()),
+        Section("Opened or closed (next day)",
+                "The next session's open interest for each flagged contract. The "
+                "change in open interest, divided by that day's volume, says "
+                "whether the volume mostly opened new positions or closed old "
+                "ones. A contract that expired on its alert day has no reading.", (
+            Field("followup.enabled", "Read next-day open interest", "", kind="bool"),
+            Field("followup.opened_ratio", "\"Mostly opened\" at",
+                  "Open interest rose by at least this share of the day's volume.",
+                  kind="float", unit="× volume", min=0, max=1, step=0.05),
+            Field("followup.closed_ratio", "\"Mostly closed\" at",
+                  "Open interest fell by at least this share of the day's volume "
+                  "(a negative number).",
+                  kind="float", unit="× volume", min=-1, max=0, step=0.05),
+            Field("followup.keep_sessions", "Keep flagged contracts for", "",
+                  kind="int", unit="sessions", min=1, max=250, step=1),
+        ), restart=()),
     ),
 )
 

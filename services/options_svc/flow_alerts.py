@@ -48,6 +48,17 @@ _DEFAULTS = {
              "cooldown_min": 30, "baseline_sessions": 5, "min_minutes": 30,
              "flip_enabled": True, "flip_band": 1.0, "flip_not_before": "09:00",
              "flip_cooldown_min": 60, "keep_sessions": 20},
+    # Bought / sold / unlabelled volume on the contract-level alerts (uoa,
+    # big_delta) -- an ESTIMATE from the 1-min chain poll, plus a level-one
+    # stream of each contract once it has fired
+    # (docs/plans/2026-10-04-flow-alert-sides-design.md). public = the figures
+    # may appear on the public live screens (the view's ``public`` flag).
+    "sides": {"enabled": True, "public": True, "stream": True,
+              "stream_max_contracts": 200},
+    # The next session's open interest for each flagged contract: opened or
+    # closed. ratio = (next - previous open interest) / that day's volume.
+    "followup": {"enabled": True, "opened_ratio": 0.5, "closed_ratio": -0.5,
+                 "keep_sessions": 20},
 }
 
 
