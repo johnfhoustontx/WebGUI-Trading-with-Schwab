@@ -448,6 +448,15 @@ Each tick polls the proxy's raw `/quotes`, normalizes `change` across INDEX / EQ
 the dollar-weighted premium skew from `cache:options:matrix`, and publishes
 `cache:market:dashboard`.
 
+**The tile map is a function, `symbols.symbol_map(today=None)`, not a constant.**
+Two of its entries are futures, and a futures contract expires every quarter, so
+their `display` (`/ES[Z26]`), `quote_symbol` (`/ESZ26`) and `description` are
+built on each call from `shared.futures.front_month(root, today)`. A consumer that
+finds a tile by `display` must not hard-code the contract: ask
+`front_month("/ES").display`, as `tools/nq_instruments.py` does. The roll offset
+is `[futures] roll_days_before_expiry` in `config/symbols.toml` (default 8),
+read on every call.
+
 **The summary is read off the published market report, with no Claude call**
 (2026-09-16). The daily market reports are rendered outside this repo and uploaded
 five times a trading day into `deploy/site/reports/` as `latest.html` (the page)

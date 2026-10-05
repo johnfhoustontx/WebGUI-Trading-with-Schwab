@@ -90,7 +90,7 @@ def test_tier2_market_svc_basket_matches():
     must match net_premium's 'by design'. Both now read one file."""
     from services.market_svc import symbols as msym
 
-    tile = next(e for e in msym.SYMBOL_MAP if e["display"] == "BIG10")
+    tile = next(e for e in msym.symbol_map() if e["display"] == "BIG10")
     assert tile["basket"] == symbols.big10()
 
 

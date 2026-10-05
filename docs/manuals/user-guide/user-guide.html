@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-04</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-05</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -1329,6 +1329,11 @@ ten mega-caps, sectors, thematic ETFs, factors, credit, crypto and countries.</p
   <strong>A/B skin toggle</strong> that is remembered. The meter counts the four <strong>stock</strong> frames
   only (broad ETFs, top ten, sectors, thematic), so a rising VIX or a bid Treasury is
   not counted as a decline.</li>
+<li>The two <strong>futures tiles</strong> name their contract in brackets: <code>/ES[Z26]</code> is the
+  December 2026 E-mini S&amp;P 500. They move to the next quarterly contract by
+  themselves, 8 days before the old one expires. To change the 8 days, open
+  Settings → Configuration → Symbols &amp; watchlists → <em>Index futures</em>; it takes
+  effect on the next refresh, with no restart.</li>
 <li>Tiles <strong>flash</strong> when their value changes.</li>
 </ul>
 <p>Updates about every 3 seconds during market hours, 15 seconds outside them, and 60

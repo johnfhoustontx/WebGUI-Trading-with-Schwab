@@ -225,15 +225,21 @@ def rank_tiles(tiles):
     return sorted(tiles, key=key)
 
 
-def build_dashboard(raw, *, sector_pcr, proxy_up, net_prem=None, symbol_prem=None):
+def build_dashboard(raw, *, sector_pcr, proxy_up, net_prem=None, symbol_prem=None,
+                    entries=None):
     """Assemble the ordered categories→tiles payload (pure).
 
     ``net_prem`` = the dollar-weighted call/put premium skew aggregate
     (``matrix.market_premium_aggregate`` output, or None) feeding the Net Prem
     external tile. ``symbol_prem`` = ``{symbol: (call, put)}`` (from the matrix
-    rows) feeding the per-symbol premium sublines on ``prem``-flagged tiles."""
+    rows) feeding the per-symbol premium sublines on ``prem``-flagged tiles.
+    ``entries`` = the ``symbols.symbol_map()`` result ``raw`` was fetched for
+    (default: today's), so the futures tiles are labelled with the contract
+    that was actually quoted."""
+    if entries is None:
+        entries = symbols.symbol_map()
     tiles_by_cat = {c: [] for c in symbols.CATEGORY_ORDER}
-    for e in symbols.SYMBOL_MAP:
+    for e in entries:
         t = _tile_base(e)
         if e["kind"] == "quote":
             n = _leg(raw, e["quote_symbol"])
@@ -313,10 +319,14 @@ def build_dashboard(raw, *, sector_pcr, proxy_up, net_prem=None, symbol_prem=Non
 
 def collect(bus):
     """Fetch + build the full dashboard payload (the scheduler's per-tick call)."""
-    raw = fetch_raw_quotes(symbols.quote_symbols())
+    # Resolved ONCE per poll: the futures tiles follow the front-month contract,
+    # and the fetch and the build must agree on which one that is.
+    entries = symbols.symbol_map()
+    raw = fetch_raw_quotes(symbols.quote_symbols(entries))
     pcr = read_sector_pcr(bus)
     net_prem = read_net_prem(bus)
     symbol_prem = read_symbol_premiums(bus)
     proxy_up = bool(raw) or bool(_proxy.health().get("up"))
     return build_dashboard(raw, sector_pcr=pcr, proxy_up=proxy_up,
-                           net_prem=net_prem, symbol_prem=symbol_prem)
+                           net_prem=net_prem, symbol_prem=symbol_prem,
+                           entries=entries)

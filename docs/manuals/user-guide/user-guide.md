@@ -1035,6 +1035,11 @@ ten mega-caps, sectors, thematic ETFs, factors, credit, crypto and countries.
   **A/B skin toggle** that is remembered. The meter counts the four **stock** frames
   only (broad ETFs, top ten, sectors, thematic), so a rising VIX or a bid Treasury is
   not counted as a decline.
+- The two **futures tiles** name their contract in brackets: `/ES[Z26]` is the
+  December 2026 E-mini S&P 500. They move to the next quarterly contract by
+  themselves, 8 days before the old one expires. To change the 8 days, open
+  Settings → Configuration → Symbols & watchlists → *Index futures*; it takes
+  effect on the next refresh, with no restart.
 - Tiles **flash** when their value changes.
 
 Updates about every 3 seconds during market hours, 15 seconds outside them, and 60

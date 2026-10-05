@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-04</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-05</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -1956,7 +1956,7 @@ intensity scales with the size of the move.</p>
 <tr>
 <td><strong>Equity Index Futures</strong></td>
 <td>/ES, /NQ</td>
-<td>The overnight tape, when cash is closed.</td>
+<td>The overnight tape, when cash is closed. Each tile names its contract in brackets (<code>/ES[Z26]</code> is December 2026) and moves to the next one by itself.</td>
 </tr>
 <tr>
 <td><strong>Broad-Market ETF</strong></td>
@@ -2032,6 +2032,14 @@ are ticking, the gateway and <code>market_svc</code> are both healthy.</p>
 <li><code>$DXY</code> is quoted <strong>via UUP</strong> because Schwab cannot quote the index directly, so its
   absolute level is not the dollar index value — only its direction is meaningful.</li>
 <li>Futures tiles keep moving when cash is closed. That is correct, not a bug.</li>
+<li><strong>The futures tiles change contract four times a year.</strong> Index futures expire
+  on the third Friday of March, June, September and December. The tiles switch
+  to the next contract 8 days before that, the Thursday of the week before
+  expiry, which is when trading volume moves. The label changes with it
+  (<code>/ES[Z26]</code> becomes <code>/ES[H27]</code>), and the price steps by the difference between
+  the two contracts, so a jump on a roll day is the roll and not the market. The
+  8 days is a setting: Settings → Configuration → Symbols &amp; watchlists → <em>Index
+  futures</em>.</li>
 </ul>
 <h3 id="related-pages_5">Related pages</h3>
 <p><a href="#sentiment">Sentiment</a> (turns much of this into one score) ·

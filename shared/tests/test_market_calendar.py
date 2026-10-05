@@ -150,6 +150,25 @@ def test_juneteenth_absent_before_2022():
     assert date(2022, 6, 20) in mc.nyse_holidays(2022)
 
 
+@pytest.mark.parametrize("year, month, expected", [
+    (2026, 9, date(2026, 9, 18)),     # month opens on a Tuesday
+    (2026, 5, date(2026, 5, 15)),     # month opens on a Friday: 1, 8, 15
+    (2026, 8, date(2026, 8, 21)),     # month opens on a Saturday: 7, 14, 21
+    (2027, 3, date(2027, 3, 19)),
+])
+def test_third_friday(year, month, expected):
+    assert mc.third_friday(year, month) == expected
+    assert expected.weekday() == 4
+
+
+def test_third_friday_is_a_weekday_rule_not_a_session_rule():
+    """It answers "which Friday", nothing more. June 2026's third Friday is
+    Juneteenth, a closure, and this still returns it; a caller that needs a
+    session asks ``is_trading_day`` / ``prev_trading_day``."""
+    assert mc.third_friday(2026, 6) == date(2026, 6, 19)
+    assert mc.is_holiday(date(2026, 6, 19)) is True
+
+
 # -- activation gate --------------------------------------------------------
 def test_extended_hours_inactive_before_activation():
     assert mc.extended_hours_active(dt.date(2026, 8, 14)) is False   # Friday

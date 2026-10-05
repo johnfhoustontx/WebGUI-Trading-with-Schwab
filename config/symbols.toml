@@ -22,7 +22,8 @@
 #     3-minute tail is switched on (config/marketdata.toml [collection]
 #     tail_interval_min, which ships at 1: every symbol every minute).
 #
-#   Edit + restart options_svc, market_svc and the webgui.
+#   Edit + restart options_svc, market_svc and the webgui ([futures] excepted:
+#   it is read on every poll).
 # ─────────────────────────────────────────────────────────────────────────────
 
 [collection]
@@ -46,6 +47,20 @@ megacaps = ["NVDA", "MSFT", "GOOGL", "AMZN", "META",
 # the "must match by design" comment they each carried is now enforced by the file.
 big10 = ["NVDA", "MSFT", "GOOGL", "AMZN", "META",
          "AAPL", "TSLA", "AVGO", "PLTR", "AMD"]
+
+[futures]
+# The Macro Board's two Equity Index Futures tiles (/ES and /NQ) and the NQ/ES
+# HUD quote the FRONT-MONTH contract, worked out from the date: the quarterly
+# cycle is March (H), June (M), September (U), December (Z), and a contract
+# expires on the third Friday of its month (shared/futures.py).
+#
+# This is how many days BEFORE that expiry the tiles switch to the next
+# contract. 8 is the conventional roll, the Thursday of the week before expiry,
+# which is when volume moves. 0 holds the expiring contract until expiry day.
+# A whole number from 0 to 30; anything else falls back to 8.
+#
+# Read on every poll, so a change here needs NO restart.
+roll_days_before_expiry = 8
 
 # ── Net Prem display groups ──────────────────────────────────────────────────
 # The selectable groups on the Dealer Positioning "Net Prem" subtab, in display

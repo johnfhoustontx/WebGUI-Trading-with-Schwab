@@ -492,6 +492,26 @@ def test_marketdata_mode_and_today_bar_are_choices_from_the_loader():
     assert tuple(bar.choices) == tuple(marketdata_config.TODAY_BARS)
 
 
+def test_the_futures_roll_offset_is_bounded_live_and_matches_the_loader():
+    """The Macro Board's /ES and /NQ tiles switch contract this many days before
+    expiry. market_svc works the contract out on every poll, so a saved change
+    needs no restart; the bounds are the loader's own, so the editor cannot
+    accept a value the service would then throw away."""
+    from shared import symbols as shared_symbols
+    cfg = cs.BY_NAME["symbols.toml"]
+    sec, roll = cs.locate(cfg, ("futures", "roll_days_before_expiry"))
+    assert roll.kind == "int" and roll.unit == "days"
+    assert (roll.min, roll.max) == (0, shared_symbols.FUTURES_ROLL_DAYS_MAX)
+    assert tuple(cs.restart_for(cfg, sec, roll)) == ()
+    assert cs.parse(roll, 8) == 8
+    with pytest.raises(ValueError, match="at most"):
+        cs.parse(roll, shared_symbols.FUTURES_ROLL_DAYS_MAX + 1)
+    assert _shipped("symbols.toml")["futures"]["roll_days_before_expiry"] == 8
+    # the rest of the file still restarts the services that cache it at import
+    sec, base = cs.locate(cfg, ("collection", "base"))
+    assert set(cs.restart_for(cfg, sec, base)) == {cs.OPTIONS, cs.MARKET, cs.WEBGUI}
+
+
 def test_the_collector_settings_are_bounded_and_say_why():
     cfg = cs.BY_NAME["marketdata.toml"]
     _s, fresh = cs.locate(cfg, ("collection", "fresh_max_age_sec"))

@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-04</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-05</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -989,6 +989,14 @@ MARKET SUMMARY frame.</p>
 <code>BIG10</code> basket, reads the cap-weighted put/call from <code>cache:sentiment:composite</code> and
 the dollar-weighted premium skew from <code>cache:options:matrix</code>, and publishes
 <code>cache:market:dashboard</code>.</p>
+<p><strong>The tile map is a function, <code>symbols.symbol_map(today=None)</code>, not a constant.</strong>
+Two of its entries are futures, and a futures contract expires every quarter, so
+their <code>display</code> (<code>/ES[Z26]</code>), <code>quote_symbol</code> (<code>/ESZ26</code>) and <code>description</code> are
+built on each call from <code>shared.futures.front_month(root, today)</code>. A consumer that
+finds a tile by <code>display</code> must not hard-code the contract: ask
+<code>front_month("/ES").display</code>, as <code>tools/nq_instruments.py</code> does. The roll offset
+is <code>[futures] roll_days_before_expiry</code> in <code>config/symbols.toml</code> (default 8),
+read on every call.</p>
 <p><strong>The summary is read off the published market report, with no Claude call</strong>
 (2026-09-16). The daily market reports are rendered outside this repo and uploaded
 five times a trading day into <code>deploy/site/reports/</code> as <code>latest.html</code> (the page)

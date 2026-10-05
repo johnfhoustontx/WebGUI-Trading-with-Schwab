@@ -125,13 +125,28 @@ def test_instrument_list_lets_the_reader_discover_prefixes():
 # CONTENT
 #############################################
 
-def test_exports_both_frames_and_the_basis_between_them():
+def test_exports_both_frames_and_the_basis_between_them(monkeypatch):
+    from shared import futures
+
+    # ``_state()`` is stamped 2026-07-30, when September was the front month.
+    monkeypatch.setattr(futures, "today_ct", lambda: date(2026, 7, 30))
     p = ns.build_state(_state(), **KW)
     assert p["nq_cash_flip"] == 27190.0
     assert p["nq_fut_flip"] == pytest.approx(27551.94)
     assert p["nq_basis"] == 361.94
     assert p["nq_contract"] == "/NQU26"
     assert p["es_contract"] == "/ESU26"
+
+
+def test_the_exported_contract_is_the_one_being_quoted_after_a_roll(monkeypatch):
+    """``{key}_contract`` tells the NinjaTrader panel which contract the futures
+    frame was measured against. After a roll that is the new front month."""
+    from shared import futures
+
+    monkeypatch.setattr(futures, "today_ct", lambda: date(2026, 10, 4))
+    p = ns.build_state(_state(), **KW)
+    assert p["nq_contract"] == "/NQZ26"
+    assert p["es_contract"] == "/ESZ26"
 
 
 @pytest.mark.parametrize("key", ["nq", "es"])

@@ -67,6 +67,61 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 - **Promote after the close.** A restart during a session turns the day's volume so
   far into *unlabelled* for every contract not yet flagged.
 
+---
+
+**Prior —** 2026-10-04 (**The Macro Board's /ES and /NQ tiles follow the front-month contract.**)
+
+- **What was wrong.** Both Equity Index Futures tiles were blank on the Macro
+  Board (seen on the public page, Sunday 2026-10-04 at 18:30 CT, with Globex
+  open). `services/market_svc/symbols.py` named the September 2026 contracts as
+  literals (`/ESU26`, `/NQU26`). That contract expired on 2026-09-18. Schwab
+  returns nothing for an expired contract: no error status, just the symbol in
+  the response's `invalidSymbols` list, which the service reads as "no data".
+  Confirmed against the prod proxy on 2026-10-04: `/ESZ26` and `/NQZ26` quote,
+  `/ESU26` is in `invalidSymbols`.
+- **The fix.** `shared/futures.py` works the front-month contract out from the
+  date. The cycle is March (H), June (M), September (U), December (Z); a
+  contract expires on the third Friday of its month, or the session before when
+  that Friday is a closure (June 2026 and June 2027 both, for Juneteenth). The
+  tiles switch to the next contract a set number of days before expiry.
+  `market_svc.symbols.symbol_map()` builds the two futures tiles from it on
+  every poll, so the label (`/ES[Z26]`), the quoted symbol (`/ESZ26`) and the
+  description ("E-mini S&P 500 future, Dec 2026") move together.
+- **There is no `SYMBOL_MAP` constant any more.** A map built at import is
+  right on the day the service starts and wrong after the next roll, and the
+  market service runs for weeks. Every reader calls `symbol_map()`; a test
+  fails if the constant comes back. `compute.collect` resolves the map once per
+  poll and passes it to both the fetch and the build, so the poll that
+  straddles a roll cannot fetch one contract and label the other.
+- **The roll offset is a setting.** `config/symbols.toml` `[futures]
+  roll_days_before_expiry`, shipped at 8 (the Thursday of the week before
+  expiry). Settings → Configuration → Symbols & watchlists → *Index futures*.
+  It is read on every poll, so a change needs no restart. A whole number from 0
+  to 30; anything else falls back to 8.
+- **The NQ/ES HUD had the same two literals.** `tools/nq_instruments.py` kept
+  its own copy of the tile name and the contract, with a test that the copy
+  matched the service. Matching is not the same as current: the test stayed
+  green while both were stale. The spec now holds only the root (`/NQ`, `/ES`)
+  and reads the tile name and contract from `shared/futures.py` when they are
+  used, so a HUD left running across a roll follows it. The NinjaTrader state
+  file's `nq_contract` / `es_contract` follow as well.
+- **An open Macro Board page crosses a roll by itself.** The page keys its
+  tiles by label; a label it has not seen makes it rebuild the board
+  (`market._update`), which is what a roll looks like to it.
+- **Calendar.** `shared/market_calendar.third_friday(year, month)` is new and
+  public. No holiday or date list was added anywhere.
+- **Tests.** `shared/tests/test_futures.py` (the day before the roll, the roll
+  day, after expiry, December into March of the next year, a zero offset, the
+  two Juneteenth expiries, an unusable config value), the market service's
+  symbol and dashboard tests on pinned dates either side of a roll, and the HUD
+  tests across six dates. The tests that named `/ES[U26]` now pass a September
+  date rather than relying on today's.
+- **Not changed.** The tile set, frame order and `BREADTH_CATEGORIES`. The
+  quote path (`futurePercentChange` for a future). Micro contracts and other
+  roots: only `/ES` and `/NQ` are tiles.
+
+---
+
 **Prior —** 2026-10-04 (**Two decimals on every price, strike, ratio, percentage and dollar total.**)
 
 - **What was wrong.** A symbol whose price was a whole number printed as `450`,
