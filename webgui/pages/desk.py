@@ -331,7 +331,7 @@ def opportunity_rows(matrix_view, limit=BOARD_ROWS_N):
 FLOW_ROWS_N = 9
 
 
-def flow_rows(flow_view, limit=FLOW_ROWS_N):
+def flow_rows(flow_view, limit=FLOW_ROWS_N, sides=None):
     """The newest ``limit`` flow alerts, newest first.
 
     Delegates wholesale to ``pages.options.flow.alert_rows`` — it already
@@ -339,18 +339,31 @@ def flow_rows(flow_view, limit=FLOW_ROWS_N):
     per-type detail line, and picks the tone class. Re-deriving any of that here
     would give the Desk a second, drifting copy of the Flow Alerts page.
 
-    Note what the rows deliberately do NOT say: which side INITIATED. Schwab
-    exposes no time-and-sales tape to this app, so "call side, 4.4x OI" is the
-    whole of what is known — ``flow_alerts.alert_text`` carries the same
+    Note what the alert itself deliberately does NOT say: which side INITIATED.
+    Schwab exposes no time-and-sales tape to this app, so "call side, 4.4x OI"
+    is the whole of what is KNOWN — ``flow_alerts.alert_text`` carries the same
     restraint ("No buy/sell claim"), and the Desk must not add one by paraphrase.
-    The one exception is the two HIRO rows (Hedging surge / reversal): they DO
-    make a buy/sell claim, but a MODELLED one — each print's initiator inferred
-    from where it sat against the quote. The panel draws the row's ``detail``
-    (falling back to the text only when it is empty), so the qualifier lives in
-    the detail itself: its dollar figure carries ``≈`` and it ends in "model"
-    (``flow._hiro_detail``). The Desk adds no stronger claim of its own.
+    Two things on a row do speak of buying and selling, and both are marked as
+    estimates in their own text, which the Desk prints unchanged:
+
+    * the two HIRO rows (Hedging surge / reversal), whose ``detail`` carries
+      ``≈`` and ends in "model" (``flow._hiro_detail``);
+    * ``sides`` / ``sides_after`` (2026-10-04), the bought / sold / unlabelled
+      share of a contract alert's volume from the options service's own tally.
+      ``sides`` is the ``cache:options:flow_sides`` payload, already passed
+      through ``flow.sides_view_shown`` by the caller; the text opens with
+      ``≈`` (``flow.sides_parts``).
+
+    The Desk adds no stronger claim of its own.
     """
-    return _flow.alert_rows(flow_view)[:max(0, int(limit))]
+    return _flow.alert_rows(flow_view, sides)[:max(0, int(limit))]
+
+
+def flow_estimate_line(row):
+    """The row's bought/sold estimate on one line, or ``""``: the session's
+    share, then what has traded since the alert. The two texts are the Flow
+    Alerts page's own (``flow.sides_parts``); this only joins them."""
+    return " · ".join(p for p in (row.get("sides"), row.get("sides_after")) if p)
 
 
 # ── the headlines strip (news feed) ─────────────────────────────────────────
@@ -1626,15 +1639,15 @@ def signed_class(v):
 # ── the page ─────────────────────────────────────────────────────────────────
 # Every cache view the Desk reads, in ONE tuple, because they are polled as one
 # batch. This page is the landing page and stays open all day, so a per-view
-# poller would be eleven Redis round-trips every two seconds for the life of the
-# session; ``read_versions`` reads the eleven tiny ``{key}:ver`` counters in a
+# poller would be twelve Redis round-trips every two seconds for the life of the
+# session; ``read_versions`` reads the twelve tiny ``{key}:ver`` counters in a
 # single pipelined round-trip and only the views that MOVED get deserialized.
 # ⚠ A new view belongs HERE, joining the existing batch — never in a poller or
 # a timer of its own.
 VIEWS = ("sentiment:regime", "sentiment:composite",
          "sentiment:history", "options:gex_status", "options:matrix",
-         "options:flow_alerts", "options:paper_account", "options:captured",
-         "sentiment:bullbear", "market:summary", NEWS_VIEW)
+         "options:flow_alerts", "options:flow_sides", "options:paper_account",
+         "options:captured", "sentiment:bullbear", "market:summary", NEWS_VIEW)
 
 # Which views each region depends on. A repaint touches only the regions whose
 # inputs actually changed — without this, one 2 s header bump would rebuild all
@@ -1649,7 +1662,9 @@ _REGION_VIEWS = {
     # once a NIGHT and its day-moves at the service's own quote cadence, so a
     # 2 s header bump rebuilding eleven chips is pure churn.
     "bullbear": ("sentiment:bullbear",),
-    "flow": ("options:flow_alerts",),
+    # The alert list moves when an alert fires; the bought/sold estimate for
+    # the contracts already listed moves every minute.
+    "flow": ("options:flow_alerts", "options:flow_sides"),
     "positions": ("options:paper_account", "options:captured"),
     # The headlines strip - one view. On the public origin the KEY read is
     # ``news:feed_public`` (see ``bus_key``); the view's name here is the same.
@@ -3393,8 +3408,23 @@ def _flow_row(row, glow):
         # `min-w-0` is what lets `truncate` bite: a grid item's automatic
         # minimum is its content, so without it a long detail line widens
         # the track past the panel instead of ellipsing inside it.
-        ui.label(row["detail"] or row["text"] or _DASH).classes(
-            f"text-[11px] min-w-0 truncate {MUTED}")
+        detail = row["detail"] or row["text"] or _DASH
+        # The bought/sold ESTIMATE rides under the detail, in the Flow Alerts
+        # page's own words. Only a row that HAS one is stacked: the rest keep
+        # their one-line height, which is what lets this panel carry so many.
+        estimate = flow_estimate_line(row)
+        if estimate:
+            # ``w-full`` on both: inside the stack a label is as wide as its
+            # text, so without a bounded width ``truncate`` never bites and a
+            # long estimate runs over the alert-type cell (seen on the harness).
+            with _stack():
+                ui.label(detail).classes(
+                    f"text-[11px] w-full min-w-0 truncate {MUTED}")
+                with ui.label(estimate).classes(
+                        f"text-[10px] w-full min-w-0 truncate {MUTED}"):
+                    ui.tooltip(estimate)    # the whole line, when it ellipses
+        else:
+            ui.label(detail).classes(f"text-[11px] min-w-0 truncate {MUTED}")
         # ``_tone_class`` is stamped by the Flow Alerts page from its own
         # finite (type, side) map — borrowed here rather than re-derived,
         # and shared by the kind and the side it qualifies.
@@ -3515,7 +3545,7 @@ def render():
         # The page's ONE header line: the name, and the Updated stamp for
         # ``HEADER_VIEW`` (see that constant for why it is the matrix and not
         # the freshness view the strip already prints). No page ACTIONS: the
-        # Desk commands nothing — it reads eleven views on one batched poll.
+        # Desk commands nothing — it reads twelve views on one batched poll.
         kit.header("Desk", view=HEADER_VIEW, stale=True)
 
         # ── the autoplay unlock ──────────────────────────────────────────────
@@ -3996,7 +4026,7 @@ def render():
             if view is None:
                 kit.empty(WAITING_OPTIONS)
                 return
-            rows = flow_rows(view)
+            rows = flow_rows(view, sides=_flow.sides_view_shown(_view("options:flow_sides")))
             if not rows:
                 kit.empty(EMPTY_FLOW)
                 return
@@ -4209,7 +4239,7 @@ def render():
     async def _poll():
         """ONE batched version probe per tick, not one per view.
 
-        ``read_versions`` reads the eleven tiny ``{key}:ver`` counters in a
+        ``read_versions`` reads the twelve tiny ``{key}:ver`` counters in a
         single pipelined round-trip; a full payload is deserialized only for a
         view that actually moved."""
         # Probed and read by ``bus_key``: the public origin's news KEY is

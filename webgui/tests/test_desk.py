@@ -348,11 +348,100 @@ def test_flow_kind_text_never_claims_who_initiated():
 def test_flow_rows_never_claims_a_buy_or_sell_side():
     """Schwab gives this app no time-and-sales tape, so nothing here knows who
     initiated. ``flow_alerts.alert_text``'s own docstring says: no buy/sell
-    claim — and the Desk must not add one by paraphrase."""
+    claim — and the Desk must not add one by paraphrase.
+
+    Since 2026-10-04 a row MAY carry a bought/sold ESTIMATE, but only from the
+    options service's own tally (the next two tests). With no such view, as
+    here, the row still says nothing about who initiated."""
     rows = d.flow_rows({"alerts": [{"type": "uoa", "side": "call", "symbol": "SPY",
                                     "ts": 1, "id": "a", "text": "x"}]})
     blob = " ".join(str(v) for v in rows[0].values()).lower()
     assert "buy" not in blob and "sell" not in blob
+    assert "bought" not in blob and "sold" not in blob
+
+
+_SIDES_ALERT = {"type": "uoa", "side": "call", "symbol": "SPY", "ts": 1, "id": "a",
+                "text": "x", "strike": 770.0, "expiry": "2026-10-09", "dte": 4,
+                "volume": 1000, "oi": 100, "vol_oi": 10.0, "premium": 5e6}
+_SIDES_VIEW = {"date": "2026-10-05", "public": True, "contracts": {"a": {
+    "poll": {"bought": 620.0, "sold": 300.0, "unlabelled": 80.0},
+    "stream": {"bought": 710.0, "sold": 200.0, "unlabelled": 90.0}}}}
+
+
+def test_flow_rows_carry_the_estimate_in_the_flow_pages_own_words():
+    """The Desk composes: the estimate is the Flow Alerts page's text, passed
+    through, never a second wording of the same numbers."""
+    from pages.options import flow
+    view = {"date": "2026-10-05", "alerts": [_SIDES_ALERT]}
+    rows = d.flow_rows(view, sides=_SIDES_VIEW)
+    assert rows == flow.alert_rows(view, _SIDES_VIEW)[:d.FLOW_ROWS_N]
+    assert rows[0]["sides"].startswith("≈ bought 62.00%")
+    assert rows[0]["sides_after"].startswith("since the alert: bought 71.00%")
+
+
+def test_the_only_bought_or_sold_claim_on_a_row_is_the_marked_estimate():
+    """Everything else on the row stays as it was: which side traded, never
+    who initiated. The estimate is the one exception, and it says "≈"."""
+    view = {"date": "2026-10-05", "alerts": [_SIDES_ALERT]}
+    row = d.flow_rows(view, sides=_SIDES_VIEW)[0]
+    rest = " ".join(str(v) for k, v in row.items()
+                    if k not in ("sides", "sides_after")).lower()
+    assert "bought" not in rest and "sold" not in rest
+    assert "buy" not in rest and "sell" not in rest
+    assert row["sides"].startswith("≈")
+
+
+def test_flow_rows_limit_still_applies_with_an_estimate():
+    view = {"date": "2026-10-05",
+            "alerts": [dict(_SIDES_ALERT, id=f"a{i}", ts=i) for i in range(30)]}
+    assert len(d.flow_rows(view, sides=_SIDES_VIEW)) == d.FLOW_ROWS_N
+    assert len(d.flow_rows(view, 3, sides=_SIDES_VIEW)) == 3
+
+
+def test_flow_estimate_line_joins_what_is_there():
+    assert d.flow_estimate_line({"sides": "≈ a", "sides_after": "since b"}) \
+        == "≈ a · since b"
+    assert d.flow_estimate_line({"sides": "≈ a", "sides_after": ""}) == "≈ a"
+    assert d.flow_estimate_line({"sides": "", "sides_after": "since b"}) == "since b"
+    assert d.flow_estimate_line({}) == ""
+    assert d.flow_estimate_line({"sides": None}) == ""
+
+
+def test_the_flow_region_repaints_when_the_estimate_moves():
+    """The estimate changes every minute; the alert list only when one fires."""
+    assert "options:flow_sides" in d.VIEWS
+    assert d._REGION_VIEWS["flow"] == ("options:flow_alerts", "options:flow_sides")
+
+
+def test_the_flow_painter_filters_the_estimate_for_the_public_origin():
+    """``sides_view_shown`` is the one public filter, and it must run on the
+    event loop (it reads the client's request): inside the painter."""
+    src = inspect.getsource(d.render)
+    painter = src[src.index("def _paint_flow("):]
+    painter = painter[:painter.index("def _paint_positions(")]
+    assert '_flow.sides_view_shown(_view("options:flow_sides"))' in painter
+
+
+def test_a_flow_row_with_no_estimate_is_built_exactly_as_before():
+    """Only a row that HAS an estimate gets the second line, so the others
+    keep their one-line height."""
+    src = inspect.getsource(d._flow_row)
+    assert "flow_estimate_line(row)" in src
+    stacked = src[src.index("if estimate:"):]
+    assert "_stack()" in stacked[:stacked.index("else:")]
+    assert "_stack()" not in stacked[stacked.index("else:"):]
+
+
+def test_the_estimate_line_is_bounded_so_it_can_ellipse():
+    """Inside the stack a label is as wide as its text. Without ``w-full`` the
+    ``truncate`` never bites, and a long estimate ran over the alert-type cell
+    (measured on the page harness: a 497 px line in a 389 px track)."""
+    src = inspect.getsource(d._flow_row)
+    stacked = src[src.index("with _stack():"):src.index("else:")]
+    classes = [line for line in stacked.splitlines() if "truncate" in line]
+    assert len(classes) == 2, classes
+    assert all("w-full" in c and "min-w-0" in c for c in classes), classes
+    assert "ui.tooltip(estimate)" in stacked
 
 
 def test_flow_rows_is_empty_for_a_missing_view():
