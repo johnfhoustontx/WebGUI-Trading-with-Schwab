@@ -263,7 +263,10 @@ def detect_uoa(symbol, chain, cfg):
                             premium = mark * vol * 100
                             if ratio < k or premium < prem_floor:
                                 continue
+                            # ``osi`` = the contract's own Schwab symbol: what
+                            # flow_sides_tick matches its bought/sold tally by.
                             out.append({"type": "uoa", "side": side, "symbol": symbol,
+                                        "osi": c.get("symbol"),
                                         "strike": strike, "expiry": expiry, "dte": dte,
                                         "cost": mark, "volume": int(vol), "oi": int(oi),
                                         "vol_oi": ratio, "premium": premium})
@@ -322,6 +325,7 @@ def detect_big_delta(symbol, chain, cfg):
                                 continue
                             gross += dn
                             cand.append({"type": "big_delta", "side": side, "symbol": symbol,
+                                         "osi": c.get("symbol"),
                                          "strike": strike, "expiry": expiry, "dte": dte,
                                          "delta": float(d), "volume": int(vol),
                                          "delta_notional": dn, "cost": _mark(c)})

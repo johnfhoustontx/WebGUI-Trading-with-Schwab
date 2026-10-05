@@ -556,6 +556,41 @@ def test_sides_scalar_override_falls_back_to_defaults():
     assert flow_alerts.section(cfg, "sides")["stream_max_contracts"] == 200
 
 
+def _one_contract_chain(contract):
+    return {"underlyingPrice": 100.0,
+            "callExpDateMap": {"2026-10-09:5": {"100.0": [contract]}},
+            "putExpDateMap": {}}
+
+
+_OSI = "SPY   261009C00100000"
+
+
+def test_detect_uoa_names_the_contract():
+    """The alert carries the contract's own Schwab symbol, so the bought/sold
+    tally is matched by contract and never by a key rebuilt from strike+expiry."""
+    cfg = {"uoa": {"k": 3.0, "vol_floor": 500, "premium_floor": 1000, "top_n": 3}}
+    c = {"symbol": _OSI, "totalVolume": 9000, "openInterest": 1000, "mark": 2.0}
+    (a,) = flow_alerts.detect_uoa("SPY", _one_contract_chain(c), cfg)
+    assert a["osi"] == _OSI
+
+
+def test_detect_big_delta_names_the_contract():
+    c = {"symbol": _OSI, "totalVolume": 300_000, "delta": 0.5, "mark": 1.0}
+    (a,) = flow_alerts.detect_big_delta("SPY", _one_contract_chain(c), _CFG)
+    assert a["osi"] == _OSI
+    assert "oi" not in a        # the tally supplies open interest, not this detector
+
+
+def test_detectors_carry_none_for_a_contract_with_no_symbol():
+    cfg = {"uoa": {"k": 3.0, "vol_floor": 500, "premium_floor": 1000, "top_n": 3}}
+    c = {"totalVolume": 9000, "openInterest": 1000, "mark": 2.0}
+    (a,) = flow_alerts.detect_uoa("SPY", _one_contract_chain(c), cfg)
+    assert a["osi"] is None
+    c = {"totalVolume": 300_000, "delta": 0.5, "mark": 1.0}
+    (a,) = flow_alerts.detect_big_delta("SPY", _one_contract_chain(c), _CFG)
+    assert a["osi"] is None
+
+
 def test_shipped_file_matches_the_sides_and_followup_defaults():
     """The tracked config/flow_alerts.toml states both tables in full, with the
     built-in values: a key present in one and not the other is how a default
