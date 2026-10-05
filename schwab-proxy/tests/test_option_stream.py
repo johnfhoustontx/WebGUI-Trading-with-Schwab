@@ -139,7 +139,7 @@ def test_on_option_message_fans_out_with_osi_filtering(monkeypatch):
     try:
         _on_option_message({"content": [
             {"key": "OPT_X", "LAST_PRICE": 1.25, "LAST_SIZE": 10.0,
-             "BID_PRICE": 1.20, "ASK_PRICE": 1.30},
+             "BID_PRICE": 1.20, "ASK_PRICE": 1.30, "TOTAL_VOLUME": 4200},
             {"key": "OPT_Q", "LAST_PRICE": 9.0},
         ]})
     finally:
@@ -154,7 +154,7 @@ def test_on_option_message_fans_out_with_osi_filtering(monkeypatch):
     q, tick = args
     assert q is fake["x-sub"]["queue"]
     assert tick == {"symbol": "OPT_X", "last": 1.25, "last_size": 10.0,
-                    "bid": 1.20, "ask": 1.30}
+                    "bid": 1.20, "ask": 1.30, "total_volume": 4200.0}
     # The OPT_Y subscriber matched nothing -> no calls.
     assert y_loop.calls == []
 
