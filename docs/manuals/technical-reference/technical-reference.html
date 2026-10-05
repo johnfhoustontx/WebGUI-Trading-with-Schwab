@@ -159,6 +159,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#directional-walls">Directional walls</a></li>
 <li><a href="#intraday-collection">Intraday collection</a></li>
 <li><a href="#hedging-flow-model-hiro">Hedging-flow model (HIRO)</a></li>
+<li><a href="#bought-sold-estimate-on-flow-alerts">Bought / sold estimate on flow alerts</a></li>
 </ul>
 </li>
 <li><a href="#rescue-tested-trades">Rescue Tested Trades</a><ul>
@@ -248,7 +249,7 @@ would mean writing the same formulas out four times and letting the copies drift
 </tr>
 <tr>
 <td><strong>Flow Alerts</strong></td>
-<td><em>GEX / Gamma</em> (the premium series, and <strong>Hedging-flow model (HIRO)</strong> for the two hedging alerts) · <em>Constants Appendix</em> (detector thresholds)</td>
+<td><em>GEX / Gamma</em> (the premium series, <strong>Hedging-flow model (HIRO)</strong> for the two hedging alerts, and <strong>Bought / sold estimate on flow alerts</strong>) · <em>Constants Appendix</em> (detector thresholds)</td>
 </tr>
 <tr>
 <td><strong>Market Dashboard</strong></td>
@@ -2904,6 +2905,153 @@ any stored day can be re-run: <code>--date YYYY-MM-DD</code> (default: the newes
 session), <code>--force</code> (a weekend or holiday), <code>--out DIR</code>, <code>--k 2,3,4</code>,
 <code>--horizons 5,15</code>. It exits <strong>1</strong> when nothing was measured (every symbol failed, or a
 trading day with no stored minute for any symbol — a dead collector).</p>
+<h2 id="bought-sold-estimate-on-flow-alerts">Bought / sold estimate on flow alerts</h2>
+<p><strong>Files:</strong> <code>services/options_svc/flow_sides.py</code> (pure arithmetic),
+<code>flow_sides_tick.py</code> (session state, the store, publishing), <code>flow_stream.py</code> (the
+stream worker), <code>options-scanner/gex_history_db.py</code> (the <code>flow_contract_days</code> table).
+Design: <code>docs/plans/2026-10-04-flow-alert-sides-design.md</code>.</p>
+<p>An <strong>estimate</strong>, for the two alert types that name one contract (<code>uoa</code>, <code>big_delta</code>).
+Schwab publishes no time-and-sales tape, so new volume is labelled by the same rule
+the hedging-flow model uses, <code>hiro.classify_side(last, bid, ask)</code>: at or through the
+ask is bought (+1), at or through the bid is sold (−1), otherwise the side of the
+midpoint the trade price sits on; exactly at the midpoint, or on a missing, locked or
+crossed quote, it is <strong>unlabelled</strong> (0).</p>
+<p><strong>Two sources, never blended.</strong></p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Minute poll (<code>poll</code>)</th>
+<th>Stream (<code>stream</code>)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Covers</td>
+<td>The whole collection window, every contract with volume in every fetched chain</td>
+<td>One contract, from the moment its alert fires</td>
+</tr>
+<tr>
+<td>Resolution</td>
+<td>One label per contract per fetch</td>
+<td>One label per level-one tick</td>
+</tr>
+<tr>
+<td>Size of a step</td>
+<td><code>totalVolume</code> now − the highest <code>totalVolume</code> seen</td>
+<td><code>total_volume</code> now − the highest seen on the stream</td>
+</tr>
+<tr>
+<td>First reading</td>
+<td>See "unwatched volume" below</td>
+<td>Only seeds: books nothing</td>
+</tr>
+</tbody>
+</table>
+<p>The poll is needed because an alert fires <em>after</em> the volume that caused it has
+printed; a stream subscribed at the alert can only see what follows.</p>
+<p><strong>The invariant: bought + sold + unlabelled = the contract's volume.</strong> Volume is never
+dropped. What the service did not watch print is booked as unlabelled:</p>
+<ul>
+<li>the volume a symbol already carries at its first fetch of the process (the open, or
+  the first fetch after a restart);</li>
+<li>the volume across a gap longer than <code>flow_sides_tick.MAX_GAP_SEC</code> = <strong>450 s</strong>,
+  1.5 × the collector's slowest tier (<code>collection_tiers.MAX_TAIL_INTERVAL_MIN</code> = 5 min).
+  The hedging-flow model uses 150 s because it measures one-minute symbols only; here
+  a watchlist-only symbol's normal step must still be labelled;</li>
+<li>on the stream, the first tick of each contract after every (re)connect.</li>
+</ul>
+<p>A contract first seen with volume in a symbol that <em>was</em> fetched a step earlier stood
+at zero then, so all of its volume is new and is labelled. The stored volume is a
+high-water mark, so a glitch read of 0 books nothing and is not re-booked.</p>
+<p><strong>State and cost.</strong> The poll hook (<code>flow_sides_tick.on_chain</code>, one line in
+<code>compute.collect_gex_snapshots</code>) works in memory only — it never opens the database —
+and keeps one five-number entry per contract that has traded. Once a minute, after
+the detectors, <code>after_alerts</code> registers newly flagged contracts, writes their rows,
+and publishes. No Schwab call is added by any of it. The stream worker holds <strong>one</strong>
+SSE connection to the proxy's <code>/stream/options</code> for the day's flagged contracts,
+oldest alert first, up to <code>[sides].stream_max_contracts</code> (200; never more than
+<code>STREAM_HARD_MAX</code> = 500, since the set travels as one request line). It reconnects when
+the set changes, times out after 45 s of silence (three missed keepalives), and backs
+off 3 → 60 s on failure. It starts with the scheduler loop, so it does not run under
+the dev profile.</p>
+<p><strong>After a restart</strong> the day's flagged contracts and their tallies are read back from
+<code>flow_contract_days</code>. What had been labelled stays labelled; everything else the
+contract has traded becomes unlabelled. Contracts not yet flagged lose their labels
+for the day so far.</p>
+<p><strong>Storage — <code>flow_contract_days</code> in <code>gex_history.db</code>.</strong> One row per alert per session,
+keyed <code>(session_date, alert_id)</code>: the contract, the alert type and time, <code>oi_prev</code>
+(open interest that day, read in regular hours only — index open interest reads zero
+outside them), <code>volume</code>, the three <code>poll_*</code> and three <code>stream_*</code> figures, and once
+resolved <code>oi_next</code>, <code>oi_next_date</code>, <code>verdict</code>, <code>oi_ratio</code>. Rewritten whenever a
+figure moves. Retention is its own: <code>[followup].keep_sessions</code> (20).</p>
+<p><strong>Next-day open interest.</strong> On a later session date the collector's own chain carries
+the new open interest; yesterday's unresolved contracts are passed to the tally as a
+watch list so one that does not trade today still gets read. No Schwab call and no
+scheduler slot are added.</p>
+<p><code>oi_ratio = (oi_next − oi_prev) ÷ volume</code></p>
+<table>
+<thead>
+<tr>
+<th>Condition</th>
+<th><code>verdict</code></th>
+<th>On screen</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>contract's expiry ≤ its alert date</td>
+<td><code>expired</code></td>
+<td>Expired — no reading</td>
+</tr>
+<tr>
+<td><code>oi_ratio</code> ≥ <code>opened_ratio</code> (+0.5)</td>
+<td><code>opened</code></td>
+<td>Mostly opened</td>
+</tr>
+<tr>
+<td><code>oi_ratio</code> ≤ <code>closed_ratio</code> (−0.5)</td>
+<td><code>closed</code></td>
+<td>Mostly closed</td>
+</tr>
+<tr>
+<td>between</td>
+<td><code>mixed</code></td>
+<td>Mixed, or traded within the day</td>
+</tr>
+<tr>
+<td>any figure missing, non-finite or negative, or <code>volume</code> ≤ 0</td>
+<td><code>none</code></td>
+<td>No reading</td>
+</tr>
+<tr>
+<td>not read yet</td>
+<td><em>null</em></td>
+<td>Waiting for today's open interest</td>
+</tr>
+</tbody>
+</table>
+<p>Both bounds are inclusive. The figure is <strong>re-read on every fetch that day</strong> and the
+verdict re-derived when it moves, with an INFO line
+(<code>flow follow-up: open interest moved …</code>), because when Schwab's chain starts showing
+the new open interest has not been measured.</p>
+<p><strong>Delivery.</strong> <code>cache:options:flow_sides</code> (<code>skip_unchanged</code>, so it carries no timestamp)
+and <code>cache:options:flow_followup</code>, each with a top-level <code>public</code> flag stamped from
+<code>[sides].public</code>, which fails closed: only a literal <code>true</code> opens it. The Flow Alerts
+page and the Desk's flow panel read them through <code>flow.sides_view_shown</code>. Nothing here
+changes a phone push, a chime, the Desk's speech, or any ranking.</p>
+<p><strong>Known limitations.</strong></p>
+<ul>
+<li><strong>One label per contract per fetch</strong> on the poll: a minute's volume (up to five for a
+  watchlist-only symbol) takes the label of its latest trade.</li>
+<li><strong>Level-one conflates rapid ticks</strong>, so the stream is a finer sample, not a tape.</li>
+<li><strong>Spread legs and trades inside the quote</strong> are mislabelled or unlabelled.</li>
+<li><strong>Bought is not opening.</strong> Only the next-day reading separates the two, and a
+  same-day expiry never gets one: on 2026-10-02, 152 of 175 contract alerts (87%).</li>
+<li><strong>Unmeasured:</strong> the typical unlabelled share, how large a lean must be to mean
+  anything, the memory the per-contract entries take, and the hour at which the new
+  open interest appears.</li>
+</ul>
 <hr />
 <h1 id="rescue-tested-trades">Rescue Tested Trades</h1>
 <p><strong>Files:</strong> <code>services/options_svc/rescue.py</code> (pure engine), <code>commission.py</code>,
@@ -3686,6 +3834,16 @@ grids and arbitrary wall levels. Index gamma is only meaningful during the sessi
 <td>Flow: hedging reversal (HIRO model)</td>
 <td>running total clears zero by <strong>1.0×</strong> normal; none before 09:00 CT; cooldown 60 min; minute history kept 20 sessions</td>
 <td><code>[hiro]</code></td>
+</tr>
+<tr>
+<td>Flow: bought / sold estimate</td>
+<td>poll gap booked unlabelled past <strong>450 s</strong>; stream at most <strong>200</strong> contracts a day (hard limit 500); stream read timeout 45 s</td>
+<td><code>[sides]</code>, <code>flow_sides_tick.py</code>, <code>flow_stream.py</code></td>
+</tr>
+<tr>
+<td>Flow: opened or closed (next day)</td>
+<td>open-interest change ÷ volume ≥ <strong>+0.5</strong> opened, ≤ <strong>−0.5</strong> closed; flagged contracts kept <strong>20</strong> sessions</td>
+<td><code>[followup]</code></td>
 </tr>
 </tbody>
 </table>

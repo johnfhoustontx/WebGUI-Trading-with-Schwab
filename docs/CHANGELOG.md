@@ -4,7 +4,59 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-04 (**Two decimals on every price, strike, ratio, percentage and dollar total.**)
+**Last updated:** 2026-10-04 (**Bought or sold on flow alerts, and next-day open interest.**)
+
+- **The question.** Every flow alert said *call or put*, never *bought or sold*,
+  because Schwab publishes no trade tape. The Desk and the Flow Alerts page now
+  carry an **estimate** for the two alerts that name one contract (unusual volume,
+  outsized bet), and the next session says whether that volume opened or closed.
+  Design and plan: `docs/plans/2026-10-04-flow-alert-sides-{design,plan}.md`.
+- **Scope the operator chose.** Alert rows only (a per-symbol split on the Macro
+  Board and Opportunity Board was deferred); the minute poll plus a stream of each
+  contract after its alert; public from the start, behind `[sides].public`.
+- **Measured before building.** On 2026-10-02 prod recorded 175 contract alerts and
+  152 (87%) were same-day expiries, which can never get a next-day open-interest
+  reading. Built anyway, for the minority with days left to run.
+- **The pieces.**
+  - `schwab-proxy`: the option stream tick carries `total_volume`.
+  - `flow_alerts.detect_uoa` / `detect_big_delta` carry `osi`, the contract symbol.
+  - `services/options_svc/flow_sides.py` (pure): the tally for a fetched chain and
+    for a stream tick, and the open-interest verdict. The label rule is
+    `hiro.classify_side`, shared with the hedging-flow model.
+  - `flow_sides_tick.py`: session state, restore after a restart, the
+    `flow_contract_days` table in `gex_history.db`, the next-day resolution, and the
+    two views `cache:options:flow_sides` and `cache:options:flow_followup`. One new
+    line in `compute.py`'s poll hook; it works in memory and never opens the store.
+  - `flow_stream.py` + `services/_sse.py`: one daemon thread, one SSE connection to
+    `/stream/options` for the day's flagged contracts.
+  - `config/flow_alerts.toml` `[sides]` and `[followup]`, both in Settings →
+    Configuration, both re-read every minute.
+  - Webgui: the **Bought / sold (estimate)** column and the **Previous session**
+    panel on Flow Alerts; a second line under "What traded" on the Desk.
+- **Rules worth knowing.** Bought + sold + unlabelled always equals the contract's
+  volume: volume nobody watched print (before a restart, across a poll gap longer
+  than 450 s, the first stream tick after a connect) is unlabelled, never dropped
+  and never guessed. The two sources are shown as two figures and never blended.
+  No Schwab call was added. Pushes, chimes, Desk speech and rankings are unchanged.
+- **Where the build left the plan.** The gap limit is 450 s, not the hedging-flow
+  model's 150 s, because a watchlist-only symbol's normal step is up to five
+  minutes. Volume is tallied for the whole collection window, with only the
+  open-interest read limited to regular hours. The stream set is capped at 500
+  contracts in code (one request line).
+- **Found on the way.** Two comment lines in `detect_uoa` pushed an existing guard
+  past the silent-degrade threshold. Tests that run `scheduler.loop` started the
+  real stream thread, so the suite's conftest now replaces its start. On the page
+  harness, one long estimate line overflowed the Flow Alerts table at 1,700 px and
+  ran over the alert-type cell on the Desk; both are fixed and pinned by tests.
+- **Not yet measured, and the first live sessions will show it:** the usual
+  unlabelled share, how large a lean must be to mean anything, the memory the
+  per-contract entries take, when Schwab's chain starts showing the new open
+  interest (the service re-reads it and logs when it moves), the stream against the
+  real proxy, and whether the public process's Redis user can read the two views.
+- **Promote after the close.** A restart during a session turns the day's volume so
+  far into *unlabelled* for every contract not yet flagged.
+
+**Prior —** 2026-10-04 (**Two decimals on every price, strike, ratio, percentage and dollar total.**)
 
 - **What was wrong.** A symbol whose price was a whole number printed as `450`,
   not `450.00`. Two causes: tables put the raw number in the row and the browser

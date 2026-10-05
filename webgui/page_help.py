@@ -95,11 +95,16 @@ on · what am I holding.*
   — not just the few rows listed beneath them. So "Buy 12" over six rows is not
   a contradiction: twelve names are rated Buy, and you are looking at the
   hottest handful of all of them.
-- **Flow alerts** — the newest unusual-options events. Note these show
-  **call or put**, never *bought* or *sold*: Schwab publishes no time-and-sales
-  tape, so nobody can honestly say which side traded. The one exception is a
-  **hedging** row (surge or reversal), whose buying or selling is a **model's
-  estimate** and says so.
+- **Flow alerts** — the newest unusual-options events. The alert itself says
+  **call or put**: Schwab publishes no time-and-sales tape, so nobody *knows*
+  who started a trade. Under an **unusual volume** or **outsized bet** row there
+  may be a second line beginning **≈**: the app's **estimate** of how much of
+  that contract's volume today was **bought**, **sold**, or **unlabelled** (it
+  could not tell). It is read from where trades printed against the bid and the
+  ask, so treat it as a lean, not a fact, and when the *unlabelled* share is
+  large the estimate is thin. If the line is cut short, hover it to read it
+  whole. A **hedging** row (surge or reversal) is the other estimate on this
+  panel, and it also says so.
 - **Positions** — your open paper trades and Claude's, together, with the live
   mark and **open P&L**, and a status: **OK**, **Watch**, **At risk**,
   **Rescue**. The header totals open trades, open P&L, and how many need
@@ -839,10 +844,41 @@ phone when its push is switched on in Settings.
 - **Hedging reversal** — that running hedging total for the day changed sign:
   **now buying** or **now selling**.
 
-The first four cannot tell a **buy** from a **sell** — Schwab publishes no options
-tape — so read those rows as "something large happened here", not as a direction.
-The two hedging rows DO name a direction, but it is a **model's estimate**: each
-trade's buyer or seller is inferred from where it printed against the quote,
+The first four do not *know* a **buy** from a **sell** — Schwab publishes no options
+tape — so read the alert itself as "something large happened here", not as a
+direction.
+
+**Bought / sold (estimate)** is the app's best guess for the two rows that name
+one contract, **Unusual volume** and **Outsized bet**. Each minute it looks at the
+contract's new volume and where the latest trade printed: at the ask counts as
+**bought**, at the bid as **sold**, and anything it cannot tell is **unlabelled**.
+The three shares always add up to the contract's volume for the day.
+- The line begins **≈** because it is an estimate. A whole minute's volume gets
+  one label, so it is coarse.
+- A large **unlabelled** share means the estimate is thin. Volume that traded
+  before the app was watching (for example before a restart) is always unlabelled.
+- **Since the alert**, on the second line, is a finer reading of what has traded
+  in that contract after it was flagged. It appears once there is something to
+  show, and it is kept apart from the day's share on purpose.
+- Bought is not the same as bullish: buying a call to close a short call looks
+  the same here as buying one to open.
+
+**Previous session**, under the table, answers that last point a day late. For
+each contract flagged yesterday it shows the **open interest** before and after.
+If open interest rose by at least half of that day's volume, the volume **mostly
+opened** new positions; if it fell by as much, it **mostly closed** old ones; in
+between it was **mixed, or traded within the day**. *Waiting for today's open
+interest* means the new figure has not been read yet. A contract that **expired
+on its alert day** can never have a reading, and on a busy day that is most of
+them.
+
+Both the estimate and the Previous session table also appear on the public live
+screens while **Show the estimate on the public screens** is on in Settings →
+Configuration (it ships on). Neither changes what chimes, what is spoken on the
+Desk, or what reaches your phone.
+
+The two hedging rows also name a direction, and it too is a **model's estimate**:
+each trade's buyer or seller is inferred from where it printed against the quote,
 never observed — which is why their dollar figures carry a **≈** and their
 detail ends in **model**. They appear here, in the Desk's flow panel and on the
 Symbol page. They never chime or pop up a toast. While **Send hedging-flow

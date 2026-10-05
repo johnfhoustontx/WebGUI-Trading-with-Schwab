@@ -22,7 +22,7 @@ keys that feed it. Menu order matches the rail.
 | **Symbol** | `options_svc` (+ `sentiment_svc` for context) | `cache:options:matrix`, `:scan_funnel`, `:scan_day`, `:gex_status`, `:flow_alerts`, the four paper books, `cache:sentiment:regime`, `:bullbear`, `cache:news:feed`, `:sec`; `cache:options:dossier:<SYMBOL>` via the `dossier` command |
 | **Dealer Positioning** | `options_svc` :8211 | `cache:options:gamma`, `:gamma_hist_*`, `:gamma_symbols`, `:net_premium`, `:gamma_analyze*`, `:gamma_briefings` |
 | **Opportunity Board** | `options_svc` | `cache:options:matrix` |
-| **Flow Alerts** | `options_svc` | `cache:options:flow_alerts` |
+| **Flow Alerts** | `options_svc` | `cache:options:flow_alerts`, `:flow_sides`, `:flow_followup` |
 | **Market News** | `news_svc` :8216 | `cache:news:feed`, `:sec`, `:calendar`, `:status` (the public copy reads `:feed_public`, `:sec_public`, `:calendar_public`); also the Desk's headlines strip (`:feed`) and the Symbol page's news band (`:feed` + `:sec`) |
 | **Market Dashboard** | `market_svc` :8215 | `cache:market:dashboard`, `:summary` |
 | **Sentiment** | `sentiment_svc` :8210 | `cache:sentiment:composite`, `:regime`, `:regime_history`, `:intraday_history` |
@@ -715,6 +715,36 @@ open row for `trade_id`; the body's other fields are not trusted, and a
 
 Every 30 seconds the proxy also reconciles against the paper ledger's open trades. A skipped trade is not tried again while it stays open. A failed one is tried again after 30 seconds, then 60, 120 and so on: up to 5 minutes when Schwab did not send the chain (an error status, or a Schwab sign-in that needs renewing), and up to 30 minutes otherwise. Both limits are in `config/marketdata.toml` under `[tracker]`. `GET /stats/api_calls` reports the tracker's state as `tracker: {tracked, not_followed, failing}`.
 
+## Streaming (server-sent events)
+
+Two read-only streams fan level-one ticks out from the proxy's one Schwab
+streaming session. Each is a long-lived `GET` answering `text/event-stream`: one
+`data: {json}` event per tick, and a `: keepalive` comment after 15 seconds of
+silence. A consumer should treat about 45 seconds with nothing at all as a dead
+connection and reconnect.
+
+| Endpoint | Query | Tick |
+|----------|-------|------|
+| `/stream/quotes` | `symbols=SPY,QQQ` | `{symbol, last, net_change, bid, ask, bid_size, ask_size, last_size, total_volume}` |
+| `/stream/options` | `symbols=<contract symbol>,…` | `{symbol, last, last_size, bid, ask, total_volume}` |
+
+- Every value is a float or `null`. **A tick after the first carries only the fields
+  that changed**, so a consumer must merge ticks per symbol.
+- A contract symbol is Schwab's 21-character form and is case- and space-sensitive:
+  `SPY   261009C00770000`. A symbol Schwab does not know is accepted without an
+  error and never carries a real quote, so a typo looks subscribed.
+- `total_volume` is the day's cumulative volume. Level one merges rapid trades, so
+  `last_size` is one trade of several; the **change** in `total_volume` is the only
+  complete size.
+- The whole set travels in the query string. Keep it to a few hundred contracts
+  (`options_svc` never sends more than 500), and remember Schwab's own limit of 3,000
+  streamed option symbols, shared with paper-trade tracking.
+- A flow subscription can never drop a leg the paper-trade tracker is following.
+
+Consumers today: `portfolio_svc` and `sentiment_svc` (`/stream/quotes`),
+`sentiment_svc` and `options_svc/flow_stream.py` (`/stream/options`).
+`services/_sse.py` has the line parser and the reconnect backoff.
+
 ---
 
 # Cache Key Index
@@ -747,6 +777,8 @@ cache:options:dossier:<SYMBOL> events:options:dossier:<SYMBOL>   (TTL 900 s; the
 cache:options:matrix           events:options:matrix        (Opportunity Board)
 cache:options:flow_alerts      events:options:flow_alerts   (Flow Alerts, today only)
 cache:options:flow_alert_cooldowns  (uncapped seen-map behind the per-symbol counts)
+cache:options:flow_sides       events:options:flow_sides    (bought/sold estimate per contract alert, today)
+cache:options:flow_followup    events:options:flow_followup (previous session's flagged contracts + next-day open interest)
 cache:options:hiro             events:options:hiro          (HIRO-model hedging flow, per-symbol summary; no reader yet)
 cache:options:flow_skew        events:options:flow_skew
 cache:options:net_premium      events:options:net_premium   (Net Prem subtab, 28 symbols)
@@ -807,7 +839,30 @@ off — hidden on the public live screens and in gallery captures). A reader tha
 shows flow-alert rows must go through `webgui/pages/options/flow.alert_rows` (its
 `_shown` filter does the hiding); an alert with no `public` key is shown. The
 `hiro_*` alerts are not counted in `flow_alert_cooldowns`-derived counts (Hotness,
-`n_alerts`) while the model is unvalidated.
+`n_alerts`) while the model is unvalidated. A `uoa` or `big_delta` alert also carries
+**`osi`**, the contract's own Schwab symbol (`null` when the chain row had none).
+
+**`cache:options:flow_sides`** is `{date, public, contracts: {<alert id>: {poll,
+stream, volume}}}`. `poll` and `stream` are each `{bought, sold, unlabelled}` in
+contracts; `stream` is `null` until the contract has been streamed; `volume` is the
+contract's volume for the day and equals the sum of `poll`. It is an **estimate**
+(see the Technical Reference, *Bought / sold estimate on flow alerts*). Three rules
+for a reader:
+
+- Join it to `flow_alerts` by alert id **and check that `date` matches**: it is
+  published only once a contract is flagged, so a quiet morning still holds
+  yesterday's.
+- It is written with `skip_unchanged` and carries no timestamp of its own.
+- On the public origin show it only when `public` is exactly `true`. Go through
+  `webgui/pages/options/flow.sides_view_shown`; a missing flag is closed.
+
+**`cache:options:flow_followup`** is `{date, public, rows: [...]}`, where `date` is
+the **previous** session and each row is a `flow_contract_days` row: `session_date,
+alert_id, symbol, osi, side, strike, expiry, alert_type, fired_ts, oi_prev, volume,
+poll_bought, poll_sold, poll_unlabelled, stream_bought, stream_sold,
+stream_unlabelled, oi_next, oi_next_date, verdict, oi_ratio`. `verdict` is `opened`,
+`closed`, `mixed`, `expired`, `none`, or `null` while the next open interest has not
+been read. The same `public` rule applies.
 
 **`cache:options:hiro`** is `{date, symbols: {SYM: {ts, spot, impact, cum,
 window_impact, sigma, mult, unclassified_share}}}`, `ts` being that symbol's newest

@@ -197,6 +197,18 @@ ticker and the contract is not one.
 - **`flow.alert_rows` gained `strike`/`expiry`/`dte`** (additive; no column declares
   them) so the Desk composes off the same row the Flow Alerts page draws rather than
   becoming a second reader of the raw payload.
+- **The flow rows carry the bought / sold estimate (2026-10-04).**
+  `options:flow_sides` joined `VIEWS` (twelve now) and `_REGION_VIEWS["flow"]`, so
+  the panel repaints when the estimate moves. `flow_rows(view, sides=...)` passes it
+  to `flow.alert_rows`, filtered through `flow.sides_view_shown` INSIDE `_paint_flow`
+  (the event loop). `_flow_row` draws `flow_estimate_line(row)` as a second line
+  under "What traded" **only for a row that has one**, so the others keep their
+  one-line height. ⚠ Both stacked labels are `w-full`: inside `_stack()` a label is
+  as wide as its text, and without a bounded width `truncate` never bit — a 497 px
+  estimate ran over the alert-type cell in a 389 px track. The line carries a tooltip
+  with the whole text. The Symbol page's flow band calls `alert_rows` with no
+  estimate and is unchanged. Speech is unchanged: a moving estimate brings no new
+  alert id, so `fold_flow_arrivals` says nothing.
 - **The prewarm SHRANK to the contract-less kinds** — `voice.FLOW_CAUSES` is derived
   as `_ALL_CAUSES` minus `CONTRACT_KINDS`, 8 pairs → 4. A uoa phrase's space is the
   option chain, so warming it synthesized sentences no live alert can produce. A burst says the **newest only, plus a count**
@@ -605,6 +617,33 @@ Both kinds are excluded from the Opportunity Board's flow count and Hotness and 
 the EOD mover counts. `cache:options:hiro` (the per-symbol summary: newest minute,
 15-minute window, normal size, running total) is published beside them, but **no page
 reads it yet**; a reader must gate on its `date` and each symbol's `ts`.
+
+**Bought / sold (estimate) and the Previous session panel (2026-10-04).** Design
+[`plans/2026-10-04-flow-alert-sides-design.md`](plans/2026-10-04-flow-alert-sides-design.md).
+The page reads two more views and probes all three versions in ONE
+`bus_client.read_versions` on its 2 s timer:
+
+- **`options:flow_sides`** fills the **Bought / sold (estimate)** column for `uoa` and
+  `big_delta` rows. `flow.alert_rows(view, sides)` stamps `sides` (the session share,
+  from the minute poll) and `sides_after` (what has traded since the alert, from the
+  stream); the `body-cell-sides` slot stacks them. ⚠ Two lines on purpose: on one
+  line the cell pushed the table past the page at 1,700 px. The view changes every
+  minute while the alert list only changes when an alert fires, so the page keeps the
+  last alert payload in state and rebuilds the rows when either version moves. An
+  estimate whose `date` is not the alert list's is not shown (`_sides_contracts`):
+  the view is only published once a contract is flagged, so a quiet morning still
+  holds yesterday's.
+- **`options:flow_followup`** draws a second `kit.table` under the alerts
+  (`followup_rows`, `followup_columns`, `followup_title`), absent until the service
+  publishes it. Verdict codes map to whole words through the finite
+  `_VERDICT_WORDS`; an unknown code reads "No reading" and `null` reads "Waiting for
+  today's open interest".
+- **Public.** Both views carry a top-level `public` flag from `[sides].public`
+  (ships `true`). `flow.sides_view_shown` is the one filter, used by this page and
+  the Desk; like `_shown` it reads the capture cookie, so it runs on the event loop,
+  never inside `run.io_bound`. A missing flag is closed.
+- Percentages go through `fmt.pct` (two decimals); the unlabelled share is always
+  printed, and the text opens with `≈`.
 
 ## `/news`
 

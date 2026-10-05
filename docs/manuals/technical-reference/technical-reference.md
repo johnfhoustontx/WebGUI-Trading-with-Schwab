@@ -31,7 +31,7 @@ Use this map to get from a screen to its numbers. Menu order matches the rail.
 | **Symbol** | Composition, like the Desk. Its own arithmetic — IV vs HV and the expected move — is in *Options Scoring* → **Expected move and IV analysis**; the signal age and score trend in **Signal age and score trend**; the look-up's cost in the *Constants Appendix* |
 | **Dealer Positioning** | *GEX / Gamma* · *Black-Scholes & the Simulator* (the Greeks behind charm and vanna) |
 | **Opportunity Board** | *GEX / Gamma* (the flip and flow series) · *Options Scoring* (its signal counts) |
-| **Flow Alerts** | *GEX / Gamma* (the premium series, and **Hedging-flow model (HIRO)** for the two hedging alerts) · *Constants Appendix* (detector thresholds) |
+| **Flow Alerts** | *GEX / Gamma* (the premium series, **Hedging-flow model (HIRO)** for the two hedging alerts, and **Bought / sold estimate on flow alerts**) · *Constants Appendix* (detector thresholds) |
 | **Market Dashboard** | *Architecture Overview* — the board normalizes and colours quotes rather than deriving anything |
 | **Sentiment** | *Sentiment Calculations*, including the composite blend, the intraday trend, and the blended market regime |
 | **Sector & Industry** | *Sentiment Calculations* → **Sector Performance** |
@@ -2076,6 +2076,110 @@ session), `--force` (a weekend or holiday), `--out DIR`, `--k 2,3,4`,
 `--horizons 5,15`. It exits **1** when nothing was measured (every symbol failed, or a
 trading day with no stored minute for any symbol — a dead collector).
 
+## Bought / sold estimate on flow alerts
+
+**Files:** `services/options_svc/flow_sides.py` (pure arithmetic),
+`flow_sides_tick.py` (session state, the store, publishing), `flow_stream.py` (the
+stream worker), `options-scanner/gex_history_db.py` (the `flow_contract_days` table).
+Design: `docs/plans/2026-10-04-flow-alert-sides-design.md`.
+
+An **estimate**, for the two alert types that name one contract (`uoa`, `big_delta`).
+Schwab publishes no time-and-sales tape, so new volume is labelled by the same rule
+the hedging-flow model uses, `hiro.classify_side(last, bid, ask)`: at or through the
+ask is bought (+1), at or through the bid is sold (−1), otherwise the side of the
+midpoint the trade price sits on; exactly at the midpoint, or on a missing, locked or
+crossed quote, it is **unlabelled** (0).
+
+**Two sources, never blended.**
+
+| | Minute poll (`poll`) | Stream (`stream`) |
+|---|---|---|
+| Covers | The whole collection window, every contract with volume in every fetched chain | One contract, from the moment its alert fires |
+| Resolution | One label per contract per fetch | One label per level-one tick |
+| Size of a step | `totalVolume` now − the highest `totalVolume` seen | `total_volume` now − the highest seen on the stream |
+| First reading | See "unwatched volume" below | Only seeds: books nothing |
+
+The poll is needed because an alert fires *after* the volume that caused it has
+printed; a stream subscribed at the alert can only see what follows.
+
+**The invariant: bought + sold + unlabelled = the contract's volume.** Volume is never
+dropped. What the service did not watch print is booked as unlabelled:
+
+- the volume a symbol already carries at its first fetch of the process (the open, or
+  the first fetch after a restart);
+- the volume across a gap longer than `flow_sides_tick.MAX_GAP_SEC` = **450 s**,
+  1.5 × the collector's slowest tier (`collection_tiers.MAX_TAIL_INTERVAL_MIN` = 5 min).
+  The hedging-flow model uses 150 s because it measures one-minute symbols only; here
+  a watchlist-only symbol's normal step must still be labelled;
+- on the stream, the first tick of each contract after every (re)connect.
+
+A contract first seen with volume in a symbol that *was* fetched a step earlier stood
+at zero then, so all of its volume is new and is labelled. The stored volume is a
+high-water mark, so a glitch read of 0 books nothing and is not re-booked.
+
+**State and cost.** The poll hook (`flow_sides_tick.on_chain`, one line in
+`compute.collect_gex_snapshots`) works in memory only — it never opens the database —
+and keeps one five-number entry per contract that has traded. Once a minute, after
+the detectors, `after_alerts` registers newly flagged contracts, writes their rows,
+and publishes. No Schwab call is added by any of it. The stream worker holds **one**
+SSE connection to the proxy's `/stream/options` for the day's flagged contracts,
+oldest alert first, up to `[sides].stream_max_contracts` (200; never more than
+`STREAM_HARD_MAX` = 500, since the set travels as one request line). It reconnects when
+the set changes, times out after 45 s of silence (three missed keepalives), and backs
+off 3 → 60 s on failure. It starts with the scheduler loop, so it does not run under
+the dev profile.
+
+**After a restart** the day's flagged contracts and their tallies are read back from
+`flow_contract_days`. What had been labelled stays labelled; everything else the
+contract has traded becomes unlabelled. Contracts not yet flagged lose their labels
+for the day so far.
+
+**Storage — `flow_contract_days` in `gex_history.db`.** One row per alert per session,
+keyed `(session_date, alert_id)`: the contract, the alert type and time, `oi_prev`
+(open interest that day, read in regular hours only — index open interest reads zero
+outside them), `volume`, the three `poll_*` and three `stream_*` figures, and once
+resolved `oi_next`, `oi_next_date`, `verdict`, `oi_ratio`. Rewritten whenever a
+figure moves. Retention is its own: `[followup].keep_sessions` (20).
+
+**Next-day open interest.** On a later session date the collector's own chain carries
+the new open interest; yesterday's unresolved contracts are passed to the tally as a
+watch list so one that does not trade today still gets read. No Schwab call and no
+scheduler slot are added.
+
+`oi_ratio = (oi_next − oi_prev) ÷ volume`
+
+| Condition | `verdict` | On screen |
+|---|---|---|
+| contract's expiry ≤ its alert date | `expired` | Expired — no reading |
+| `oi_ratio` ≥ `opened_ratio` (+0.5) | `opened` | Mostly opened |
+| `oi_ratio` ≤ `closed_ratio` (−0.5) | `closed` | Mostly closed |
+| between | `mixed` | Mixed, or traded within the day |
+| any figure missing, non-finite or negative, or `volume` ≤ 0 | `none` | No reading |
+| not read yet | *null* | Waiting for today's open interest |
+
+Both bounds are inclusive. The figure is **re-read on every fetch that day** and the
+verdict re-derived when it moves, with an INFO line
+(`flow follow-up: open interest moved …`), because when Schwab's chain starts showing
+the new open interest has not been measured.
+
+**Delivery.** `cache:options:flow_sides` (`skip_unchanged`, so it carries no timestamp)
+and `cache:options:flow_followup`, each with a top-level `public` flag stamped from
+`[sides].public`, which fails closed: only a literal `true` opens it. The Flow Alerts
+page and the Desk's flow panel read them through `flow.sides_view_shown`. Nothing here
+changes a phone push, a chime, the Desk's speech, or any ranking.
+
+**Known limitations.**
+
+- **One label per contract per fetch** on the poll: a minute's volume (up to five for a
+  watchlist-only symbol) takes the label of its latest trade.
+- **Level-one conflates rapid ticks**, so the stream is a finer sample, not a tape.
+- **Spread legs and trades inside the quote** are mislabelled or unlabelled.
+- **Bought is not opening.** Only the next-day reading separates the two, and a
+  same-day expiry never gets one: on 2026-10-02, 152 of 175 contract alerts (87%).
+- **Unmeasured:** the typical unlabelled share, how large a lean must be to mean
+  anything, the memory the per-contract entries take, and the hour at which the new
+  open interest appears.
+
 ---
 
 # Rescue Tested Trades
@@ -2607,6 +2711,8 @@ A consolidated table of the load-bearing constants. The cited file governs.
 | Flow: big delta | fires at **25%** of the symbol's own gross delta-notional AND ≥ $10M; phone push at the higher **35%**; delta band 0.05–0.85 | `[big_delta]` |
 | Flow: hedging surge (HIRO model) | 15-min hedge impact ≥ **3×** normal (RMS of full windows over the 5 prior sessions) AND ≥ $25M; ≤ 50% unlabelled volume; cooldown 30 min per direction; phone push at **4×** only with `push = true` (ships `false`); `public = false`; watching `$SPX SPY QQQ IWM` | `[hiro]` |
 | Flow: hedging reversal (HIRO model) | running total clears zero by **1.0×** normal; none before 09:00 CT; cooldown 60 min; minute history kept 20 sessions | `[hiro]` |
+| Flow: bought / sold estimate | poll gap booked unlabelled past **450 s**; stream at most **200** contracts a day (hard limit 500); stream read timeout 45 s | `[sides]`, `flow_sides_tick.py`, `flow_stream.py` |
+| Flow: opened or closed (next day) | open-interest change ÷ volume ≥ **+0.5** opened, ≤ **−0.5** closed; flagged contracts kept **20** sessions | `[followup]` |
 
 > **Five detectors, and the file is the source.** `services/options_svc/flow_alerts.py`
 > carries defaults, but `config/flow_alerts.toml` overrides them and is what runs —

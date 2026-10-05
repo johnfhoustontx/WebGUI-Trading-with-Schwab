@@ -609,6 +609,12 @@ queue's slow lane; nothing that changes a paper book may be put there.
   `shared/iv_history.py`, and a clamped reading is never stored.
 - The scheduled briefings bill the subscription (`claude_cli.py`); the child
   environment strips `ANTHROPIC_API_KEY`, and the API counter counts billed calls.
+- The bought / sold figure on a flow alert is an ESTIMATE (`flow_sides.py`,
+  `flow_sides_tick.py`) and its tally must always sum to the contract's volume:
+  volume nobody watched print (before a restart, across a poll gap, a stream's
+  first tick after a connect) is booked UNLABELLED, never dropped or guessed. The
+  poll figure and the stream figure are shown apart, never blended. The poll hook
+  works in memory and must never open the store.
 
 ## Observability and performance
 

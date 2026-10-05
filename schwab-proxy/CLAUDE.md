@@ -193,7 +193,15 @@ paper-trade tracking**: the reconcile subscribes `_registry.legs_union() ∪ flo
 stream loop, and the trade-untrack orphan guard spares `_option_refcount`, so a tracked leg can NEVER
 lose its subscription; the `_on_option_message` trade-detector block is byte-identical, fan-out appended
 after). Consumed by `portfolio_svc` (equity P&L) + `sentiment_svc`'s `order_flow_consumer` (aggressor
-order-flow for the five-state classifier). Both refcounts support multiple concurrent subscribers.
+order-flow for the five-state classifier) + `options_svc/flow_stream.py` (the flagged flow-alert
+contracts, for the bought / sold estimate). Both refcounts support multiple concurrent subscribers.
+
+- The option tick is `{symbol, last, last_size, bid, ask, total_volume}`. `total_volume` (field 8,
+  added 2026-10-04) is the day's cumulative volume: level one merges rapid trades, so `last_size`
+  is one trade of several and only the CHANGE in `total_volume` is a complete size.
+- ⚠ The whole symbol set travels in the query string. `options_svc` never sends more than 500
+  contracts (`flow_sides_tick.STREAM_HARD_MAX`); a new consumer with a larger set needs a different
+  way to register it, not a longer URL.
 
 ## Logging
 

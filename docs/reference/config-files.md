@@ -274,6 +274,13 @@ thresholds** (crossover `band`/`min_premium`/`cooldown_min`; UOA `k`/`vol_floor`
 dealer gamma-regime flip alert; the `enabled` server kill-switch), loaded by
 `services/options_svc/flow_alerts.py:load_thresholds()` (defaults if the file is missing) —
 edit + restart `options_svc` to tune. See the 2026-07-18 + 2026-07-22 "Last updated" entries.
+Two later tables are re-read every minute and need **no restart**:
+**`[sides]`** (`enabled`, `public`, `stream`, `stream_max_contracts`) switches the
+bought / sold estimate on the contract-level alerts, and **`[followup]`** (`enabled`,
+`opened_ratio`, `closed_ratio`, `keep_sessions`) the next-day open-interest reading.
+Every switch in both is on only for a literal `true`, so a hand-typed `"true"` is OFF.
+`stream_max_contracts` is clamped to 500 in code (`flow_sides_tick.STREAM_HARD_MAX`):
+the stream's contract set travels to the proxy as one request line.
 
 `config/sessions.toml` is the single source of truth for **market session windows +
 the extended-hours activation date** (2026-08-02). All times are **CT** (ET and CT

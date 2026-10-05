@@ -483,7 +483,7 @@ structure · what should I act on · what am I holding.*
 | **Top strip** | Clock, two dials showing **Day / Week / Month** for sentiment and trend, then **Bias** (Long / Neutral / Cautious / Short), **Signal** (Strong Bull … Strong Bear) and the **market regime** word |
 | **Dealer Positioning** | One row each for **$SPX, SPY, QQQ, $NDX** — price, gamma flip and distance to it, call and put walls, net gamma, and a pins-or-runs chip |
 | **Opportunity Board** | The five hottest names, with implied volatility and whether it is rising or falling, and a setup tag |
-| **Live Flow Alerts** | The five newest unusual-options events |
+| **Live Flow Alerts** | The newest unusual-options events. A row that names one contract can carry a second line: the estimated share of its volume that was bought, sold, or could not be told |
 | **Positions** | Your paper trades and captured signals together, with live marks and an **OK / Watch / At risk / Rescue** flag |
 | **Headlines** | The five newest stories from Market News, one line each — time (Central), feed, and the headline, which opens the article in a new tab. **All headlines →** opens Market News. Full width |
 | **Market Summary** | Up to five highlights from the latest published market report, with which report they came from and a link to the full report, over six live chips (Sentiment, Trend, Bias, Signal, Regime, Bull/Bear) — full width, at the bottom |
@@ -539,10 +539,12 @@ as the scanner chime.
   Index option open interest reads 0 overnight, which would otherwise produce
   confident-looking walls that are pure noise. The panel is telling you it is
   showing the last reading it trusts.
-- **Flow alerts say "call" or "put", never "bought" or "sold".** Schwab publishes
-  no time-and-sales tape, so nobody — including this app — can honestly tell you
-  which side initiated. The one exception is a **hedging** row, whose buying or
-  selling is a model's estimate and says so (≈ and "model").
+- **A flow alert says "call" or "put"; anything about bought or sold is an estimate
+  and is marked ≈.** Schwab publishes no time-and-sales tape, so nobody — including
+  this app — knows which side started a trade. Two things on the panel estimate it
+  and say so: the second line under an unusual-volume or outsized-bet row (see
+  [Bought / sold (estimate)](#bought-sold-estimate)), and a **hedging** row, whose
+  detail ends in "model". If the second line is cut short, hover it.
 - **The top strip shows no prices at all.** SPX and QQQ sit in the panel directly
   below with more context; showing them twice from two separately-updating sources
   could briefly display two different prices for the same symbol. (VIX used to be
@@ -798,16 +800,79 @@ Six kinds of alert. The screen names each by what happened:
 | **Hedging surge** | The stock dealers would have to buy or sell to hedge the last 15 minutes of option trades ran several times its normal size. Side: **Dealers buying** (upward pressure, green) or **Dealers selling** (downward, red). |
 | **Hedging reversal** | The day's running hedging total changed sign: **Now buying** or **Now selling**. |
 
-Columns: **Time · Age · Symbol · Type · Side · Detail · Share · Alert**. Filter by
-symbol, or click the **Alert type** chips to switch a type off or on (**All** shows
-every type) — filtering is instant, and the types you switch off are remembered.
-**Click a symbol** (the dotted underline) to open Dealer Positioning for it.
+Columns: **Time · Age · Symbol · Alert type · Side · What traded · Bought / sold
+(estimate) · Share of flow · Summary**. Filter by symbol, or click the **Alert type**
+chips to switch a type off or on (**All** shows every type) — filtering is instant,
+and the types you switch off are remembered. **Click a symbol** (the dotted
+underline) to open Dealer Positioning for it.
 
-> The list covers **today only** and resets overnight. There is no history.
+> The alert list covers **today only** and resets overnight.
 
-> **The first four cannot tell a buy from a sell** — Schwab publishes no options
-> tape. Read those rows as "something large happened here", then use price and gamma
-> to decide direction.
+> **The first four do not know a buy from a sell** — Schwab publishes no options
+> tape. Read the alert itself as "something large happened here", then use price and
+> gamma to decide direction.
+
+### Bought / sold (estimate) {#bought-sold-estimate}
+
+For the two alerts that name one contract — **Unusual volume** and **Outsized bet** —
+the app estimates how much of that contract's volume today was bought and how much
+was sold.
+
+**How to read it.** A cell reads, for example:
+
+> ≈ bought 56.67% · sold 29.95% · unlabelled 13.38%
+> since the alert: bought 71.05% · sold 20.00% of 12,400
+
+- The **first line** covers the contract's whole day. Once a minute the app takes the
+  contract's new volume and looks at where its latest trade printed: at the ask is
+  **bought**, at the bid is **sold**. The three shares always add up to the day's
+  volume, including the volume that caused the alert.
+- **Unlabelled** is volume the app could not tell: a trade at the exact midpoint, a
+  quote it could not read, or volume that printed while the app was not watching (a
+  restart, a missed minute). When this share is large, the estimate is thin.
+- The **second line** appears once the contract has traded after its alert. From the
+  moment a contract is flagged the app follows it tick by tick, which is finer than
+  once a minute. It is shown apart from the day's share because it is a different
+  sample of a different stretch of the day; "of 12,400" is the number of contracts
+  it covers.
+
+**What it is not.** It is an estimate: a whole minute's volume takes one label, and
+the tick-by-tick stream still merges rapid trades. And **bought is not the same as
+bullish** — a call bought to close a short call looks exactly like one bought to open.
+The table below is what speaks to that.
+
+**To turn it off, or keep it off the public screens:** Settings → Configuration →
+**Flow alerts** → *Bought or sold (estimate)*. **Stream a contract after its alert**
+switches off the second line only.
+
+### Previous session: opened or closed
+
+Under the alert table, a second table lists the contracts flagged in the **previous
+session** and what their **open interest** did overnight. Open interest is the number
+of contracts still open, and it is only published once a day, which is why this
+reading arrives the morning after.
+
+| Reading | What it means |
+|---|---|
+| **Mostly opened** | Open interest rose by at least half of that day's volume. The volume mostly put new positions on. |
+| **Mostly closed** | Open interest fell by at least half of that day's volume. The volume mostly took old positions off. |
+| **Mixed, or traded within the day** | Neither. Much of the volume opened and closed inside the same session. |
+| **Waiting for today's open interest** | The new figure has not been read yet. It is read during regular hours and re-read through the session. |
+| **Expired — no reading** | The contract expired on its alert day, so there is no next-day figure. |
+| **No reading** | A figure was missing or unusable. The app does not guess. |
+
+Read it together with the estimate: *mostly bought* and *mostly opened* is new long
+exposure; *mostly sold* and *mostly opened* is new short exposure; either one with
+*mostly closed* is somebody leaving a position.
+
+> **Most rows will say "Expired — no reading".** On Friday 2 October 2026, 152 of the
+> 175 contract alerts (87%) were on contracts expiring that same day. The reading is
+> for the minority that had days left to run, which are also the ones where opened
+> versus closed matters most.
+
+The two cut-offs (half of the day's volume, in each direction) and how many sessions
+are kept are under Settings → Configuration → **Flow alerts** → *Opened or closed
+(next day)*.
 
 ### The two hedging-flow alerts
 

@@ -267,10 +267,17 @@ negative-gamma cascade.
 **Live Flow Alerts.** The five newest unusual-options events — crossover, unusual
 activity, gamma flip, large delta.
 
-These show **call or put**, never *bought* or *sold*. Schwab publishes no
-time-and-sales tape, so no one can honestly say which side initiated. Any product
-that tells you "$3.9M of calls were **bought**" is inferring it, usually from the
-bid/ask side, and that inference is often wrong.
+The alert itself says **call or put**, never *bought* or *sold*. Schwab publishes no
+time-and-sales tape, so no one knows which side initiated. Any product that tells you
+"$3.9M of calls were **bought**" is inferring it, usually from the bid/ask side, and
+that inference is often wrong.
+
+This app now makes the same inference, and labels it as one. Under a row that names
+one contract (unusual activity, large delta) a second line beginning **≈** gives the
+estimated share of that contract's volume that was bought, sold, or **unlabelled**.
+The unlabelled share is always printed, so the estimate never looks better measured
+than it was. See [Flow Alerts](#flow-alerts) for how it is made and how far to trust
+it.
 
 **Positions.** Your paper trades and your captured signals, merged, open only: source, strikes,
 days to expiration, size, entry, live mark, unrealized profit or loss, and a flag —
@@ -880,8 +887,10 @@ chime or toast.
 | Service | `options_svc` (:8211), `cache:options:flow_alerts` |
 | Detection | On the 1-minute gamma collection |
 | Thresholds | `config/flow_alerts.toml` — edit and restart `options_svc` to tune |
-| Retention | **Today only.** The list resets overnight. There is no history. |
+| Retention | **Today only** for the alert list, which resets overnight. |
 | Capacity | Up to 300 alerts per day |
+| Bought / sold estimate | `cache:options:flow_sides`, from the same 1-minute collection plus a stream of each flagged contract |
+| Previous session | `cache:options:flow_followup`, from the `flow_contract_days` table (20 sessions kept) |
 
 ### Reading the screen
 
@@ -907,10 +916,27 @@ toward the Opportunity Board. The
 **User Guide** says how to turn the push and the public
 display on; the Technical Reference has the formula.
 
-**Columns.** Time (CT) · **Age** · Symbol · Type · **Side** (call or put, or for the
-hedging types the modelled dealer direction) · **Detail** ·
-**Share** (for big-delta, the percentage of the symbol's gross exposure) · **Alert**
-(the full sentence, as it was pushed).
+**Columns.** Time (CT) · **Age** · Symbol · Alert type · **Side** (call or put, or for
+the hedging types the modelled dealer direction) · **What traded** ·
+**Bought / sold (estimate)** · **Share of flow** (for big-delta, the percentage of the
+symbol's gross exposure) · **Summary** (the full sentence, as it was pushed).
+
+**Bought / sold (estimate).** Filled for the two types that name one contract. The
+first line is the contract's whole day: each minute its new volume is labelled
+**bought** if the latest trade printed at the ask, **sold** if at the bid, and
+**unlabelled** if that cannot be told. The three always add up to the day's volume.
+Volume that traded while the app was not watching — before a restart, across a missed
+minute — is unlabelled, never guessed. The second line, **since the alert**, is a
+tick-by-tick reading that starts when the contract is flagged; the two are kept apart
+because they sample different stretches of the day at different resolutions.
+
+**Previous session.** A second table under the alerts: yesterday's flagged contracts,
+their open interest before and after, and a reading — *mostly opened* when open
+interest rose by at least half of that day's volume, *mostly closed* when it fell by as
+much, *mixed, or traded within the day* in between. This is the only part of the page
+that speaks to **opening versus closing**, and it can only arrive a day late, because
+open interest is published once a day. A contract that expired on its alert day has no
+next-day figure and reads *Expired — no reading*.
 
 The **Age** column recomputes live against the rows already on screen, so it stays
 current without the table churning.
@@ -930,11 +956,28 @@ positioning. A contract trading at 20× its open interest is, arithmetically, mo
 risk being put on. Combined with the **Side** column and the symbol's gamma regime, it
 gives you a directional hypothesis you can test on other pages.
 
-**Where it is weak, and this matters.** The app cannot tell a **buy** from a **sell**.
-Schwab publishes no time-and-sales tape for options, so a large call print may be
-someone opening a bullish bet — or an institution selling covered calls, which is
+**Where it is weak, and this matters.** The app does not *know* a **buy** from a
+**sell**. Schwab publishes no time-and-sales tape for options, so a large call print may
+be someone opening a bullish bet — or an institution selling covered calls, which is
 mildly bearish. Treat every alert as *"something large happened here"*, then use price
 action and gamma to decide direction. Do not read the Side column as a direction.
+
+The **Bought / sold** column narrows that gap without closing it:
+
+- It is an inference from where trades printed against the quote, the same inference
+  the paragraph above warns about in other products. Once a minute, a whole minute's
+  volume in a contract takes **one** label. The stream after the alert is finer, but
+  Schwab's level-one stream still merges rapid trades.
+- Spread legs and trades inside the quote are routinely mislabelled or unlabelled.
+- **Bought is not bullish.** Buying to close and buying to open look the same here.
+  Only the next day's open interest separates them, and most flagged contracts are
+  same-day expiries that never get that reading (152 of 175 on 2 October 2026).
+- A restart during the session turns everything before it into *unlabelled* for
+  contracts that had not been flagged yet.
+
+How strong a lean has to be before it means anything has **not been measured**. Until
+it has, weigh the estimate by its unlabelled share: the larger that is, the less the
+other two numbers are worth.
 
 ### When to use it
 

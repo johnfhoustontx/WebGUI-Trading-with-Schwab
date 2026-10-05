@@ -102,6 +102,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#local-market-data-store">Local market-data store</a></li>
 <li><a href="#trader-api">Trader API</a></li>
 <li><a href="#trade-stream-tracker">Trade-stream tracker</a></li>
+<li><a href="#streaming-server-sent-events">Streaming (server-sent events)</a></li>
 </ul>
 </li>
 <li><a href="#cache-key-index">Cache Key Index</a></li>
@@ -152,7 +153,7 @@ keys that feed it. Menu order matches the rail.</p>
 <tr>
 <td><strong>Flow Alerts</strong></td>
 <td><code>options_svc</code></td>
-<td><code>cache:options:flow_alerts</code></td>
+<td><code>cache:options:flow_alerts</code>, <code>:flow_sides</code>, <code>:flow_followup</code></td>
 </tr>
 <tr>
 <td><strong>Market News</strong></td>
@@ -1440,6 +1441,50 @@ open row for <code>trade_id</code>; the body's other fields are not trusted, and
 </tbody>
 </table>
 <p>Every 30 seconds the proxy also reconciles against the paper ledger's open trades. A skipped trade is not tried again while it stays open. A failed one is tried again after 30 seconds, then 60, 120 and so on: up to 5 minutes when Schwab did not send the chain (an error status, or a Schwab sign-in that needs renewing), and up to 30 minutes otherwise. Both limits are in <code>config/marketdata.toml</code> under <code>[tracker]</code>. <code>GET /stats/api_calls</code> reports the tracker's state as <code>tracker: {tracked, not_followed, failing}</code>.</p>
+<h2 id="streaming-server-sent-events">Streaming (server-sent events)</h2>
+<p>Two read-only streams fan level-one ticks out from the proxy's one Schwab
+streaming session. Each is a long-lived <code>GET</code> answering <code>text/event-stream</code>: one
+<code>data: {json}</code> event per tick, and a <code>: keepalive</code> comment after 15 seconds of
+silence. A consumer should treat about 45 seconds with nothing at all as a dead
+connection and reconnect.</p>
+<table>
+<thead>
+<tr>
+<th>Endpoint</th>
+<th>Query</th>
+<th>Tick</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>/stream/quotes</code></td>
+<td><code>symbols=SPY,QQQ</code></td>
+<td><code>{symbol, last, net_change, bid, ask, bid_size, ask_size, last_size, total_volume}</code></td>
+</tr>
+<tr>
+<td><code>/stream/options</code></td>
+<td><code>symbols=&lt;contract symbol&gt;,…</code></td>
+<td><code>{symbol, last, last_size, bid, ask, total_volume}</code></td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li>Every value is a float or <code>null</code>. <strong>A tick after the first carries only the fields
+  that changed</strong>, so a consumer must merge ticks per symbol.</li>
+<li>A contract symbol is Schwab's 21-character form and is case- and space-sensitive:
+  <code>SPY   261009C00770000</code>. A symbol Schwab does not know is accepted without an
+  error and never carries a real quote, so a typo looks subscribed.</li>
+<li><code>total_volume</code> is the day's cumulative volume. Level one merges rapid trades, so
+  <code>last_size</code> is one trade of several; the <strong>change</strong> in <code>total_volume</code> is the only
+  complete size.</li>
+<li>The whole set travels in the query string. Keep it to a few hundred contracts
+  (<code>options_svc</code> never sends more than 500), and remember Schwab's own limit of 3,000
+  streamed option symbols, shared with paper-trade tracking.</li>
+<li>A flow subscription can never drop a leg the paper-trade tracker is following.</li>
+</ul>
+<p>Consumers today: <code>portfolio_svc</code> and <code>sentiment_svc</code> (<code>/stream/quotes</code>),
+<code>sentiment_svc</code> and <code>options_svc/flow_stream.py</code> (<code>/stream/options</code>).
+<code>services/_sse.py</code> has the line parser and the reconnect backoff.</p>
 <hr />
 <h1 id="cache-key-index">Cache Key Index</h1>
 <p>Every Redis key by domain. Views without a strict contract are validated
@@ -1464,6 +1509,8 @@ cache:options:dossier:&lt;SYMBOL&gt; events:options:dossier:&lt;SYMBOL&gt;   (TT
 cache:options:matrix           events:options:matrix        (Opportunity Board)
 cache:options:flow_alerts      events:options:flow_alerts   (Flow Alerts, today only)
 cache:options:flow_alert_cooldowns  (uncapped seen-map behind the per-symbol counts)
+cache:options:flow_sides       events:options:flow_sides    (bought/sold estimate per contract alert, today)
+cache:options:flow_followup    events:options:flow_followup (previous session's flagged contracts + next-day open interest)
 cache:options:hiro             events:options:hiro          (HIRO-model hedging flow, per-symbol summary; no reader yet)
 cache:options:flow_skew        events:options:flow_skew
 cache:options:net_premium      events:options:net_premium   (Net Prem subtab, 28 symbols)
@@ -1523,7 +1570,29 @@ off — hidden on the public live screens and in gallery captures). A reader tha
 shows flow-alert rows must go through <code>webgui/pages/options/flow.alert_rows</code> (its
 <code>_shown</code> filter does the hiding); an alert with no <code>public</code> key is shown. The
 <code>hiro_*</code> alerts are not counted in <code>flow_alert_cooldowns</code>-derived counts (Hotness,
-<code>n_alerts</code>) while the model is unvalidated.</p>
+<code>n_alerts</code>) while the model is unvalidated. A <code>uoa</code> or <code>big_delta</code> alert also carries
+<strong><code>osi</code></strong>, the contract's own Schwab symbol (<code>null</code> when the chain row had none).</p>
+<p><strong><code>cache:options:flow_sides</code></strong> is <code>{date, public, contracts: {&lt;alert id&gt;: {poll,
+stream, volume}}}</code>. <code>poll</code> and <code>stream</code> are each <code>{bought, sold, unlabelled}</code> in
+contracts; <code>stream</code> is <code>null</code> until the contract has been streamed; <code>volume</code> is the
+contract's volume for the day and equals the sum of <code>poll</code>. It is an <strong>estimate</strong>
+(see the Technical Reference, <em>Bought / sold estimate on flow alerts</em>). Three rules
+for a reader:</p>
+<ul>
+<li>Join it to <code>flow_alerts</code> by alert id <strong>and check that <code>date</code> matches</strong>: it is
+  published only once a contract is flagged, so a quiet morning still holds
+  yesterday's.</li>
+<li>It is written with <code>skip_unchanged</code> and carries no timestamp of its own.</li>
+<li>On the public origin show it only when <code>public</code> is exactly <code>true</code>. Go through
+  <code>webgui/pages/options/flow.sides_view_shown</code>; a missing flag is closed.</li>
+</ul>
+<p><strong><code>cache:options:flow_followup</code></strong> is <code>{date, public, rows: [...]}</code>, where <code>date</code> is
+the <strong>previous</strong> session and each row is a <code>flow_contract_days</code> row: <code>session_date,
+alert_id, symbol, osi, side, strike, expiry, alert_type, fired_ts, oi_prev, volume,
+poll_bought, poll_sold, poll_unlabelled, stream_bought, stream_sold,
+stream_unlabelled, oi_next, oi_next_date, verdict, oi_ratio</code>. <code>verdict</code> is <code>opened</code>,
+<code>closed</code>, <code>mixed</code>, <code>expired</code>, <code>none</code>, or <code>null</code> while the next open interest has not
+been read. The same <code>public</code> rule applies.</p>
 <p><strong><code>cache:options:hiro</code></strong> is <code>{date, symbols: {SYM: {ts, spot, impact, cum,
 window_impact, sigma, mult, unclassified_share}}}</code>, <code>ts</code> being that symbol's newest
 stored minute. Gate on <code>date</code> <strong>and</strong> each symbol's <code>ts</code> against the clock — a stalled

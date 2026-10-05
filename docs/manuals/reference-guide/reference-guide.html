@@ -752,10 +752,16 @@ more useful half: it is what separates a volatility-crush setup from a
 negative-gamma cascade.</p>
 <p><strong>Live Flow Alerts.</strong> The five newest unusual-options events — crossover, unusual
 activity, gamma flip, large delta.</p>
-<p>These show <strong>call or put</strong>, never <em>bought</em> or <em>sold</em>. Schwab publishes no
-time-and-sales tape, so no one can honestly say which side initiated. Any product
-that tells you "$3.9M of calls were <strong>bought</strong>" is inferring it, usually from the
-bid/ask side, and that inference is often wrong.</p>
+<p>The alert itself says <strong>call or put</strong>, never <em>bought</em> or <em>sold</em>. Schwab publishes no
+time-and-sales tape, so no one knows which side initiated. Any product that tells you
+"$3.9M of calls were <strong>bought</strong>" is inferring it, usually from the bid/ask side, and
+that inference is often wrong.</p>
+<p>This app now makes the same inference, and labels it as one. Under a row that names
+one contract (unusual activity, large delta) a second line beginning <strong>≈</strong> gives the
+estimated share of that contract's volume that was bought, sold, or <strong>unlabelled</strong>.
+The unlabelled share is always printed, so the estimate never looks better measured
+than it was. See <a href="#flow-alerts">Flow Alerts</a> for how it is made and how far to trust
+it.</p>
 <p><strong>Positions.</strong> Your paper trades and your captured signals, merged, open only: source, strikes,
 days to expiration, size, entry, live mark, unrealized profit or loss, and a flag —
 <strong>OK</strong>, <strong>Watch</strong>, <strong>At risk</strong>, <strong>Rescue</strong>. The header totals open trades,
@@ -1538,11 +1544,19 @@ chime or toast.</p>
 </tr>
 <tr>
 <td>Retention</td>
-<td><strong>Today only.</strong> The list resets overnight. There is no history.</td>
+<td><strong>Today only</strong> for the alert list, which resets overnight.</td>
 </tr>
 <tr>
 <td>Capacity</td>
 <td>Up to 300 alerts per day</td>
+</tr>
+<tr>
+<td>Bought / sold estimate</td>
+<td><code>cache:options:flow_sides</code>, from the same 1-minute collection plus a stream of each flagged contract</td>
+</tr>
+<tr>
+<td>Previous session</td>
+<td><code>cache:options:flow_followup</code>, from the <code>flow_contract_days</code> table (20 sessions kept)</td>
 </tr>
 </tbody>
 </table>
@@ -1599,10 +1613,25 @@ phone, are not spoken on the Desk, are hidden on the public screens, and do not 
 toward the Opportunity Board. The
 <strong>User Guide</strong> says how to turn the push and the public
 display on; the Technical Reference has the formula.</p>
-<p><strong>Columns.</strong> Time (CT) · <strong>Age</strong> · Symbol · Type · <strong>Side</strong> (call or put, or for the
-hedging types the modelled dealer direction) · <strong>Detail</strong> ·
-<strong>Share</strong> (for big-delta, the percentage of the symbol's gross exposure) · <strong>Alert</strong>
-(the full sentence, as it was pushed).</p>
+<p><strong>Columns.</strong> Time (CT) · <strong>Age</strong> · Symbol · Alert type · <strong>Side</strong> (call or put, or for
+the hedging types the modelled dealer direction) · <strong>What traded</strong> ·
+<strong>Bought / sold (estimate)</strong> · <strong>Share of flow</strong> (for big-delta, the percentage of the
+symbol's gross exposure) · <strong>Summary</strong> (the full sentence, as it was pushed).</p>
+<p><strong>Bought / sold (estimate).</strong> Filled for the two types that name one contract. The
+first line is the contract's whole day: each minute its new volume is labelled
+<strong>bought</strong> if the latest trade printed at the ask, <strong>sold</strong> if at the bid, and
+<strong>unlabelled</strong> if that cannot be told. The three always add up to the day's volume.
+Volume that traded while the app was not watching — before a restart, across a missed
+minute — is unlabelled, never guessed. The second line, <strong>since the alert</strong>, is a
+tick-by-tick reading that starts when the contract is flagged; the two are kept apart
+because they sample different stretches of the day at different resolutions.</p>
+<p><strong>Previous session.</strong> A second table under the alerts: yesterday's flagged contracts,
+their open interest before and after, and a reading — <em>mostly opened</em> when open
+interest rose by at least half of that day's volume, <em>mostly closed</em> when it fell by as
+much, <em>mixed, or traded within the day</em> in between. This is the only part of the page
+that speaks to <strong>opening versus closing</strong>, and it can only arrive a day late, because
+open interest is published once a day. A contract that expired on its alert day has no
+next-day figure and reads <em>Expired — no reading</em>.</p>
 <p>The <strong>Age</strong> column recomputes live against the rows already on screen, so it stays
 current without the table churning.</p>
 <p><strong>Filters.</strong> A Symbol picker and a row of <strong>Alert type</strong> chips, each carrying
@@ -1616,11 +1645,27 @@ filters hide rows.</p>
 positioning. A contract trading at 20× its open interest is, arithmetically, mostly new
 risk being put on. Combined with the <strong>Side</strong> column and the symbol's gamma regime, it
 gives you a directional hypothesis you can test on other pages.</p>
-<p><strong>Where it is weak, and this matters.</strong> The app cannot tell a <strong>buy</strong> from a <strong>sell</strong>.
-Schwab publishes no time-and-sales tape for options, so a large call print may be
-someone opening a bullish bet — or an institution selling covered calls, which is
+<p><strong>Where it is weak, and this matters.</strong> The app does not <em>know</em> a <strong>buy</strong> from a
+<strong>sell</strong>. Schwab publishes no time-and-sales tape for options, so a large call print may
+be someone opening a bullish bet — or an institution selling covered calls, which is
 mildly bearish. Treat every alert as <em>"something large happened here"</em>, then use price
 action and gamma to decide direction. Do not read the Side column as a direction.</p>
+<p>The <strong>Bought / sold</strong> column narrows that gap without closing it:</p>
+<ul>
+<li>It is an inference from where trades printed against the quote, the same inference
+  the paragraph above warns about in other products. Once a minute, a whole minute's
+  volume in a contract takes <strong>one</strong> label. The stream after the alert is finer, but
+  Schwab's level-one stream still merges rapid trades.</li>
+<li>Spread legs and trades inside the quote are routinely mislabelled or unlabelled.</li>
+<li><strong>Bought is not bullish.</strong> Buying to close and buying to open look the same here.
+  Only the next day's open interest separates them, and most flagged contracts are
+  same-day expiries that never get that reading (152 of 175 on 2 October 2026).</li>
+<li>A restart during the session turns everything before it into <em>unlabelled</em> for
+  contracts that had not been flagged yet.</li>
+</ul>
+<p>How strong a lean has to be before it means anything has <strong>not been measured</strong>. Until
+it has, weigh the estimate by its unlabelled share: the larger that is, the less the
+other two numbers are worth.</p>
 <h3 id="when-to-use-it_2">When to use it</h3>
 <p>Scan it after the open and again mid-afternoon. Use it reactively: an alert on a symbol
 you already follow is worth more than a strong alert on a name you have never traded.</p>
