@@ -21,7 +21,7 @@ from trade_registry import TradeRegistry
 
 def _expected(symbol, **over):
     base = {"symbol": symbol, "last": None, "last_size": None,
-            "bid": None, "ask": None}
+            "bid": None, "ask": None, "total_volume": None}
     base.update(over)
     return base
 
@@ -51,6 +51,17 @@ def test_normalize_option_numeric_key_fallback():
     assert out["last"] == 2.50 and isinstance(out["last"], float)
     assert out["last_size"] == 7.0 and isinstance(out["last_size"], float)
     assert out["bid"] is None and out["ask"] is None
+
+
+def test_normalize_option_total_volume_numeric_key():
+    # 8 = TOTAL_VOLUME (LevelOneOptionFields).
+    out = _normalize_level1_option({"key": "SPXW_V", "8": 1234})
+    assert out["total_volume"] == 1234.0 and isinstance(out["total_volume"], float)
+
+
+def test_normalize_option_total_volume_by_enum_name():
+    out = _normalize_level1_option({"key": "SPXW_V", "TOTAL_VOLUME": "55"})
+    assert out["total_volume"] == 55.0
 
 
 def test_normalize_option_unparseable_is_none():

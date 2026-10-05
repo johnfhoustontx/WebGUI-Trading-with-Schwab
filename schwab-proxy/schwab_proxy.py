@@ -2028,24 +2028,28 @@ def _normalize_level1_equity(content_item: dict) -> dict:
 
 # Schwab LEVELONE_OPTIONS field map for the FLOW fan-out normalizer.
 # Numeric keys verified against schwab-py's StreamClient.LevelOneOptionFields:
-#   2 = BID_PRICE, 3 = ASK_PRICE, 4 = LAST_PRICE, 18 = LAST_SIZE.
+#   2 = BID_PRICE, 3 = ASK_PRICE, 4 = LAST_PRICE, 8 = TOTAL_VOLUME, 18 = LAST_SIZE.
 # handle_message() relabels numeric keys to the UPPERCASE enum names; we read the
 # name first and fall back to the numeric key (see _field), mirroring
 # _normalize_level1_equity. This is a WIDENED normalizer for consumers that need
 # aggressor flow (last + last_size) — the trade-detector path reads _leg_quotes
 # directly and is unaffected by this map.
+# total_volume is the day's cumulative contract volume: level-one conflates
+# rapid ticks, so last_size is one trade of several and the CHANGE in
+# total_volume is the only complete size (options_svc/flow_stream.py reads it).
 _L1_OPTION_FIELDS = {
     "last": ("LAST_PRICE", "4"),
     "last_size": ("LAST_SIZE", "18"),
     "bid": ("BID_PRICE", "2"),
     "ask": ("ASK_PRICE", "3"),
+    "total_volume": ("TOTAL_VOLUME", "8"),
 }
 
 
 def _normalize_level1_option(content_item: dict) -> dict:
     """Map a single LEVELONE_OPTIONS content item to a compact quote dict for the
-    flow fan-out: {"symbol": <key>, "last", "last_size", "bid", "ask"} — each a
-    float or None. Reads each field by its relabeled enum NAME, falling back to
+    flow fan-out: {"symbol": <key>, "last", "last_size", "bid", "ask",
+    "total_volume"} — each a float or None. Reads each field by its relabeled enum NAME, falling back to
     the raw numeric key (mirrors _field/_normalize_level1_equity). Missing or
     unparseable values become None.
 
