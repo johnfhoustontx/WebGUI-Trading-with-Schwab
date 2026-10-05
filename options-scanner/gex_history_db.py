@@ -167,9 +167,17 @@ CREATE TABLE IF NOT EXISTS flow_contract_days (
     oi_next_date      TEXT,
     verdict           TEXT,
     oi_ratio          REAL,
+    at_bought         REAL,
+    at_sold           REAL,
+    at_unlabelled     REAL,
     PRIMARY KEY (session_date, alert_id)
 );
 """
+# The poll's tally at the moment the alert was registered (2026-10-05). Added
+# after the table first shipped, so an existing table gets them by ALTER.
+# Written ONCE, with the row's first write: poll-since-the-alert is the running
+# tally minus these, which is what makes it comparable with the stream.
+_FLOW_DAY_AT_ALERT_COLS = ("at_bought", "at_sold", "at_unlabelled")
 
 
 _GRID_SIG_FIGS = 6
@@ -453,8 +461,13 @@ def purge_hiro(conn: sqlite3.Connection, keep_sessions: int = 20) -> int:
 
 # ── flow_contract_days ───────────────────────────────────────────────────────
 def init_flow_day_schema(conn: sqlite3.Connection) -> None:
-    """Idempotent schema creation for the flow_contract_days table."""
+    """Idempotent schema creation for the flow_contract_days table, including
+    the columns added after it first shipped."""
     conn.executescript(FLOW_DAY_SCHEMA_SQL)
+    existing = {r[1] for r in conn.execute("PRAGMA table_info(flow_contract_days)")}
+    for col in _FLOW_DAY_AT_ALERT_COLS:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE flow_contract_days ADD COLUMN {col} REAL")
     conn.commit()
 
 
@@ -463,12 +476,12 @@ _FLOW_DAY_WRITE_COLS = (
     "session_date", "alert_id", "symbol", "osi", "side", "strike", "expiry",
     "alert_type", "fired_ts", "oi_prev", "volume",
     "poll_bought", "poll_sold", "poll_unlabelled",
-    "stream_bought", "stream_sold", "stream_unlabelled")
+    "stream_bought", "stream_sold", "stream_unlabelled") + _FLOW_DAY_AT_ALERT_COLS
 _FLOW_DAY_COLS = _FLOW_DAY_WRITE_COLS + (
     "oi_next", "oi_next_date", "verdict", "oi_ratio")
 # Replaced by a later upsert of the same alert: the running figures. The
-# identity columns are fixed at the first write, and the four resolution
-# columns are written by resolve_flow_contract_day alone.
+# identity columns and the at-alert tally are fixed at the first write, and the
+# four resolution columns are written by resolve_flow_contract_day alone.
 _FLOW_DAY_UPDATE_COLS = (
     "oi_prev", "volume", "poll_bought", "poll_sold", "poll_unlabelled",
     "stream_bought", "stream_sold", "stream_unlabelled")
@@ -478,6 +491,11 @@ def _flow_day_params(row: dict) -> tuple:
     for key in ("poll_bought", "poll_sold", "poll_unlabelled"):
         v = float(row[key])
         if not math.isfinite(v):
+            raise ValueError(
+                f"flow_contract_days {row.get('alert_id')!r}: non-finite {key}={v!r}")
+    for key in _FLOW_DAY_AT_ALERT_COLS:
+        v = row.get(key)            # None is allowed: the tally was not known
+        if v is not None and not math.isfinite(float(v)):
             raise ValueError(
                 f"flow_contract_days {row.get('alert_id')!r}: non-finite {key}={v!r}")
     return tuple(row.get(col) for col in _FLOW_DAY_WRITE_COLS)

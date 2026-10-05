@@ -1581,9 +1581,12 @@ shows flow-alert rows must go through <code>webgui/pages/options/flow.alert_rows
 <code>n_alerts</code>) while the model is unvalidated. A <code>uoa</code> or <code>big_delta</code> alert also carries
 <strong><code>osi</code></strong>, the contract's own Schwab symbol (<code>null</code> when the chain row had none).</p>
 <p><strong><code>cache:options:flow_sides</code></strong> is <code>{date, public, contracts: {&lt;alert id&gt;: {poll,
-stream, volume}}}</code>. <code>poll</code> and <code>stream</code> are each <code>{bought, sold, unlabelled}</code> in
-contracts; <code>stream</code> is <code>null</code> until the contract has been streamed; <code>volume</code> is the
-contract's volume for the day and equals the sum of <code>poll</code>. It is an <strong>estimate</strong>
+stream, volume, at_alert}}}</code>. <code>poll</code>, <code>stream</code> and <code>at_alert</code> are each <code>{bought,
+sold, unlabelled}</code> in contracts; <code>stream</code> is <code>null</code> until the contract has been
+streamed; <code>volume</code> is the contract's volume for the day and equals the sum of
+<code>poll</code>. <code>at_alert</code> is <code>poll</code> as it stood the minute the alert fired and never
+changes; it is <code>null</code> when that is not known. <code>poll</code> minus <code>at_alert</code> is the poll's
+reading over the window <code>stream</code> covers. It is an <strong>estimate</strong>
 (see the Technical Reference, <em>Bought / sold estimate on flow alerts</em>). Three rules
 for a reader:</p>
 <ul>
@@ -1598,7 +1601,8 @@ for a reader:</p>
 the <strong>previous</strong> session and each row is a <code>flow_contract_days</code> row: <code>session_date,
 alert_id, symbol, osi, side, strike, expiry, alert_type, fired_ts, oi_prev, volume,
 poll_bought, poll_sold, poll_unlabelled, stream_bought, stream_sold,
-stream_unlabelled, oi_next, oi_next_date, verdict, oi_ratio</code>. <code>verdict</code> is <code>opened</code>,
+stream_unlabelled, at_bought, at_sold, at_unlabelled, oi_next, oi_next_date,
+verdict, oi_ratio</code>. <code>verdict</code> is <code>opened</code>,
 <code>closed</code>, <code>mixed</code>, <code>expired</code>, <code>none</code>, or <code>null</code> while the next open interest has not
 been read. The same <code>public</code> rule applies.</p>
 <p><strong><code>cache:options:hiro</code></strong> is <code>{date, symbols: {SYM: {ts, spot, impact, cum,

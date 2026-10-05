@@ -2992,6 +2992,23 @@ keyed <code>(session_date, alert_id)</code>: the contract, the alert type and ti
 outside them), <code>volume</code>, the three <code>poll_*</code> and three <code>stream_*</code> figures, and once
 resolved <code>oi_next</code>, <code>oi_next_date</code>, <code>verdict</code>, <code>oi_ratio</code>. Rewritten whenever a
 figure moves. Retention is its own: <code>[followup].keep_sessions</code> (20).</p>
+<p><strong>The tally at the alert.</strong> Each row also keeps <code>at_bought</code>, <code>at_sold</code> and
+<code>at_unlabelled</code>: the poll's tally the minute the alert was registered. They are
+written once with the row and never updated, and are <code>NULL</code> (never zeros) when the
+contract had not been booked yet or the row predates the columns (added 2026-10-05;
+an existing table gains them by <code>ALTER TABLE</code>). Poll-since-the-alert is the running
+tally minus them, which covers the same window as the stream. No screen shows them.</p>
+<p><strong>Comparing the two sources — <code>tools/flow_sides_report.py</code>.</strong> Read-only, run by hand:</p>
+<pre><code>.venv/bin/python tools/flow_sides_report.py                 # the newest stored session
+.venv/bin/python tools/flow_sides_report.py --date 2026-10-06 --min 2000
+</code></pre>
+<p>A flagged contract is compared only when it has an at-alert tally, a stream tally,
+and at least <code>--min</code> contracts (default 500) since the alert on <strong>both</strong> sources;
+every other row is counted under the reason it was left out. <em>Lean</em> is bought minus
+sold as a share of the whole tally, unlabelled included. The report prints how many
+contracts lean the same way, the median gap between the two leans, their
+correlation, and the stream's volume as a share of the poll's. A figure with nothing
+behind it prints as absent, never as zero.</p>
 <p><strong>Next-day open interest.</strong> On a later session date the collector's own chain carries
 the new open interest; yesterday's unresolved contracts are passed to the tally as a
 watch list so one that does not trade today still gets read. No Schwab call and no

@@ -852,9 +852,12 @@ shows flow-alert rows must go through `webgui/pages/options/flow.alert_rows` (it
 **`osi`**, the contract's own Schwab symbol (`null` when the chain row had none).
 
 **`cache:options:flow_sides`** is `{date, public, contracts: {<alert id>: {poll,
-stream, volume}}}`. `poll` and `stream` are each `{bought, sold, unlabelled}` in
-contracts; `stream` is `null` until the contract has been streamed; `volume` is the
-contract's volume for the day and equals the sum of `poll`. It is an **estimate**
+stream, volume, at_alert}}}`. `poll`, `stream` and `at_alert` are each `{bought,
+sold, unlabelled}` in contracts; `stream` is `null` until the contract has been
+streamed; `volume` is the contract's volume for the day and equals the sum of
+`poll`. `at_alert` is `poll` as it stood the minute the alert fired and never
+changes; it is `null` when that is not known. `poll` minus `at_alert` is the poll's
+reading over the window `stream` covers. It is an **estimate**
 (see the Technical Reference, *Bought / sold estimate on flow alerts*). Three rules
 for a reader:
 
@@ -869,7 +872,8 @@ for a reader:
 the **previous** session and each row is a `flow_contract_days` row: `session_date,
 alert_id, symbol, osi, side, strike, expiry, alert_type, fired_ts, oi_prev, volume,
 poll_bought, poll_sold, poll_unlabelled, stream_bought, stream_sold,
-stream_unlabelled, oi_next, oi_next_date, verdict, oi_ratio`. `verdict` is `opened`,
+stream_unlabelled, at_bought, at_sold, at_unlabelled, oi_next, oi_next_date,
+verdict, oi_ratio`. `verdict` is `opened`,
 `closed`, `mixed`, `expired`, `none`, or `null` while the next open interest has not
 been read. The same `public` rule applies.
 

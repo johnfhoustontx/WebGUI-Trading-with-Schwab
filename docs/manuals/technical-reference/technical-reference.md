@@ -2148,6 +2148,28 @@ outside them), `volume`, the three `poll_*` and three `stream_*` figures, and on
 resolved `oi_next`, `oi_next_date`, `verdict`, `oi_ratio`. Rewritten whenever a
 figure moves. Retention is its own: `[followup].keep_sessions` (20).
 
+**The tally at the alert.** Each row also keeps `at_bought`, `at_sold` and
+`at_unlabelled`: the poll's tally the minute the alert was registered. They are
+written once with the row and never updated, and are `NULL` (never zeros) when the
+contract had not been booked yet or the row predates the columns (added 2026-10-05;
+an existing table gains them by `ALTER TABLE`). Poll-since-the-alert is the running
+tally minus them, which covers the same window as the stream. No screen shows them.
+
+**Comparing the two sources — `tools/flow_sides_report.py`.** Read-only, run by hand:
+
+```
+.venv/bin/python tools/flow_sides_report.py                 # the newest stored session
+.venv/bin/python tools/flow_sides_report.py --date 2026-10-06 --min 2000
+```
+
+A flagged contract is compared only when it has an at-alert tally, a stream tally,
+and at least `--min` contracts (default 500) since the alert on **both** sources;
+every other row is counted under the reason it was left out. *Lean* is bought minus
+sold as a share of the whole tally, unlabelled included. The report prints how many
+contracts lean the same way, the median gap between the two leans, their
+correlation, and the stream's volume as a share of the poll's. A figure with nothing
+behind it prints as absent, never as zero.
+
 **Next-day open interest.** On a later session date the collector's own chain carries
 the new open interest; yesterday's unresolved contracts are passed to the tally as a
 watch list so one that does not trade today still gets read. No Schwab call and no

@@ -4,7 +4,45 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-04 (**Bought or sold on flow alerts, and next-day open interest.**)
+**Last updated:** 2026-10-05 (**Flow-alert estimate: the first live session, and the tally at the alert.**)
+
+- **Promoted 2026-10-05 at 05:57 CT**, before the open, at `222124d`. Checked
+  read-only at 11:36 to 11:41 CT with 73 to 74 contract alerts on 66 contracts.
+- **The mechanics all passed.** Bought + sold + unlabelled equalled the volume on
+  every contract. Every contract alert carried a contract symbol and had an
+  estimate and a stream entry. The options service was `up` with 0 degrades, 0
+  stream disconnects and 0 tracebacks; the proxy showed one flow subscriber holding
+  66 contracts and the paper tracker `failing: 0`. The public Flow Alerts page
+  showed the estimate, and the public Redis user can read both views.
+- **The stream sees what the poll sees after an alert:** streamed volume was 99% of
+  the poll's at the median, and between 91% and 103% on all 67 contracts with 500
+  or more traded since.
+- **Half the volume predates the alert.** At the median 50% of a contract's volume
+  so far had printed when it was flagged (quartiles 22% and 79%).
+- **Little is unlabelled:** 6.3% pooled on the poll, 6.5% on the stream; about 10%
+  at the median per contract, in every hour including the opening half hour.
+- **The estimate is weak on busy contracts.** Pooled, 47.7% bought against 46.0%
+  sold. The median lean is 7.7 points; 12 of 73 lean by 20 or more. Call alerts
+  were even (31 net bought, 27 net sold); put alerts leaned bought (13 of 16). The
+  day's share and the since-the-alert share leaned the same way on 34 of 66
+  contracts. The strong leans were small multi-day single-name contracts.
+- **That comparison was not fair**, since one figure covered the whole day and the
+  other only what followed the alert. So each `flow_contract_days` row now keeps
+  the poll's tally AT the alert (`at_bought`, `at_sold`, `at_unlabelled`; written
+  once; `NULL` when unknown; an existing table is migrated by `ALTER TABLE`), and
+  the `flow_sides` view carries it as `at_alert`. No screen changed.
+  `tools/flow_sides_report.py` (read-only, run by hand) compares
+  poll-since-the-alert with stream-since-the-alert over the same window.
+- **Also seen:** the alert list was at 147 of its 300 cap by 11:40 CT (2026-10-02
+  ended at 286). 88% of contract alerts expired the same day, as on 2026-10-02.
+- **Still unmeasured:** the first open-interest verdicts and when Schwab shows the
+  new figure (2026-10-06); whether a pre-open chain carries the previous day's
+  volume (no alert fired before 08:30); a memory baseline (the options service was
+  at 1,118 MB with nothing earlier to compare).
+
+---
+
+**Prior —** 2026-10-04 (**Bought or sold on flow alerts, and next-day open interest.**)
 
 - **The question.** Every flow alert said *call or put*, never *bought or sold*,
   because Schwab publishes no trade tape. The Desk and the Flow Alerts page now

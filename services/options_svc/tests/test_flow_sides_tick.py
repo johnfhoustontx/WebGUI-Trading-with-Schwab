@@ -107,7 +107,8 @@ def test_alert_reports_volume_from_before_it_fired():
     assert view["date"] == FRI
     assert view["contracts"][AID] == {
         "poll": {"bought": 400.0, "sold": 0.0, "unlabelled": 1000.0},
-        "stream": None, "volume": 1400.0}
+        "stream": None, "volume": 1400.0,
+        "at_alert": {"bought": 400.0, "sold": 0.0, "unlabelled": 1000.0}}
 
 
 def test_published_tally_sums_to_the_volume():
@@ -193,7 +194,7 @@ def test_nothing_is_booked_before_the_regular_open():
     bus = _after([_alert()], _at(FRI, 8, 10))
     c = _view(bus, tick.CACHE_SIDES)["contracts"][AID]
     assert c == {"poll": {"bought": 0.0, "sold": 0.0, "unlabelled": 0.0},
-                 "stream": None, "volume": None}
+                 "stream": None, "volume": None, "at_alert": None}
     # The first poll after the bell seeds; the next one labels.
     tick.on_chain("SPY", _chain(_c(OSI, 300)), _at(FRI, 8, 31))
     tick.on_chain("SPY", _chain(_c(OSI, 500, last=1.10)), _at(FRI, 8, 32))
@@ -215,7 +216,8 @@ def test_a_flagged_contract_is_stored_with_its_identity_and_tally():
         "volume": 1400.0, "poll_bought": 400.0, "poll_sold": 0.0,
         "poll_unlabelled": 1000.0, "stream_bought": None, "stream_sold": None,
         "stream_unlabelled": None, "oi_next": None, "oi_next_date": None,
-        "verdict": None, "oi_ratio": None}
+        "verdict": None, "oi_ratio": None,
+        "at_bought": 400.0, "at_sold": 0.0, "at_unlabelled": 1000.0}
 
 
 @pytest.mark.parametrize("alert", [
@@ -644,6 +646,61 @@ def test_a_second_alert_on_a_contract_counts_its_stream_from_its_own_alert():
     c = _view(_after([], _at(FRI, 11, 30)), tick.CACHE_SIDES)["contracts"]
     assert c[AID]["stream"]["bought"] == 3500.0
     assert c[bd]["stream"]["bought"] == 500.0
+
+
+# --- the poll's tally at the moment of the alert ------------------------------
+
+def test_the_poll_tally_at_the_alert_is_kept_and_does_not_move():
+    """The first live session (2026-10-05) could not compare the two sources
+    fairly: the poll covered the whole day and the stream only what came after
+    the alert. With the tally AT the alert kept, poll-since-the-alert is the
+    running tally minus it, over the same window the stream covers."""
+    tick.on_chain("SPY", _chain(_c(OSI, 1000)), _at(FRI, 9, 30))
+    tick.on_chain("SPY", _chain(_c(OSI, 1400, last=1.10)), _at(FRI, 9, 31))
+    _after([_alert()], _at(FRI, 9, 31))
+    tick.on_chain("SPY", _chain(_c(OSI, 1700, last=1.00)), _at(FRI, 9, 32))
+    c = _view(_after([], _at(FRI, 9, 32)), tick.CACHE_SIDES)["contracts"][AID]
+    assert c["poll"] == {"bought": 400.0, "sold": 300.0, "unlabelled": 1000.0}
+    assert c["at_alert"] == {"bought": 400.0, "sold": 0.0, "unlabelled": 1000.0}
+    (row,) = _rows(FRI)
+    assert (row["at_bought"], row["at_sold"], row["at_unlabelled"]) == (400.0, 0.0, 1000.0)
+    assert (row["poll_bought"], row["poll_sold"]) == (400.0, 300.0)
+
+
+def test_the_at_alert_tally_survives_a_restart():
+    tick.on_chain("SPY", _chain(_c(OSI, 1000)), _at(FRI, 9, 30))
+    tick.on_chain("SPY", _chain(_c(OSI, 1400, last=1.10)), _at(FRI, 9, 31))
+    _after([_alert()], _at(FRI, 9, 31))
+    tick.reset()
+    tick.on_chain("SPY", _chain(_c(OSI, 1900, last=1.10)), _at(FRI, 10, 0))
+    c = _view(_after([], _at(FRI, 10, 0)), tick.CACHE_SIDES)["contracts"][AID]
+    assert c["at_alert"] == {"bought": 400.0, "sold": 0.0, "unlabelled": 1000.0}
+    assert c["poll"] == {"bought": 400.0, "sold": 0.0, "unlabelled": 1500.0}
+    assert _rows(FRI)[0]["at_unlabelled"] == 1000.0
+
+
+def test_an_alert_with_no_tally_yet_has_no_at_alert_figure():
+    # Flagged before the contract was ever booked (before the open): unknown,
+    # stored as NULL, never as three zeros that would read as "nothing traded".
+    bus = _after([_alert()], _at(FRI, 9, 30))
+    assert _view(bus, tick.CACHE_SIDES)["contracts"][AID]["at_alert"] is None
+    (row,) = _rows(FRI)
+    assert (row["at_bought"], row["at_sold"], row["at_unlabelled"]) == (None, None, None)
+    # ...and it stays unknown: a later tally is not the tally at the alert.
+    tick.on_chain("SPY", _chain(_c(OSI, 500)), _at(FRI, 9, 31))
+    bus = _after([], _at(FRI, 9, 31))
+    assert _view(bus, tick.CACHE_SIDES)["contracts"][AID]["at_alert"] is None
+
+
+def test_a_second_alert_on_a_contract_has_its_own_at_alert_tally():
+    bd = "SPY|big_delta|call|770|2026-10-09"
+    tick.on_chain("SPY", _chain(_c(OSI, 1000)), _at(FRI, 9, 30))
+    _after([_alert()], _at(FRI, 9, 30))
+    tick.on_chain("SPY", _chain(_c(OSI, 1600, last=1.10)), _at(FRI, 9, 31))
+    c = _view(_after([_alert(aid=bd, kind="big_delta")], _at(FRI, 9, 31)),
+              tick.CACHE_SIDES)["contracts"]
+    assert c[AID]["at_alert"] == {"bought": 0.0, "sold": 0.0, "unlabelled": 1000.0}
+    assert c[bd]["at_alert"] == {"bought": 600.0, "sold": 0.0, "unlabelled": 1000.0}
 
 
 def test_old_sessions_are_purged_with_the_configured_retention(monkeypatch):

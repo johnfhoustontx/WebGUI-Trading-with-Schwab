@@ -21,7 +21,8 @@ def _row(alert_id="SPY|uoa|call|770|2026-10-09", session_date="2026-10-02", **ov
            "expiry": "2026-10-09", "alert_type": "uoa", "fired_ts": 1000,
            "oi_prev": 9985.0, "volume": 1000.0,
            "poll_bought": 400.0, "poll_sold": 100.0, "poll_unlabelled": 500.0,
-           "stream_bought": None, "stream_sold": None, "stream_unlabelled": None}
+           "stream_bought": None, "stream_sold": None, "stream_unlabelled": None,
+           "at_bought": 300.0, "at_sold": 50.0, "at_unlabelled": 450.0}
     row.update(over)
     return row
 
@@ -127,6 +128,65 @@ def test_a_verdict_with_no_reading_stores_null_figures(tmp_path):
     (got,) = gh.load_flow_contract_days(conn, "2026-10-02")
     assert (got["oi_next"], got["verdict"], got["oi_ratio"]) == (None, "expired", None)
     assert gh.load_unresolved_flow_days(conn, before="2026-10-05") == []
+
+
+# --- the tally at the moment of the alert ------------------------------------
+
+def test_the_at_alert_tally_is_written_once_and_never_overwritten(tmp_path):
+    """It is the poll's tally when the alert was registered. Every later write
+    carries the same alert, and none of them may move it: poll-since-the-alert
+    is the running tally MINUS this."""
+    conn = _conn(tmp_path)
+    gh.upsert_flow_contract_days(conn, [_row()])
+    gh.upsert_flow_contract_days(conn, [_row(
+        poll_bought=900.0, at_bought=1.0, at_sold=2.0, at_unlabelled=3.0)])
+    (got,) = gh.load_flow_contract_days(conn, "2026-10-02")
+    assert got["poll_bought"] == 900.0
+    assert (got["at_bought"], got["at_sold"], got["at_unlabelled"]) == (300.0, 50.0, 450.0)
+
+
+def test_a_row_with_no_at_alert_tally_stores_nulls(tmp_path):
+    conn = _conn(tmp_path)
+    row = _row()
+    for key in ("at_bought", "at_sold", "at_unlabelled"):
+        del row[key]
+    gh.upsert_flow_contract_days(conn, [row])
+    (got,) = gh.load_flow_contract_days(conn, "2026-10-02")
+    assert (got["at_bought"], got["at_sold"], got["at_unlabelled"]) == (None, None, None)
+
+
+@pytest.mark.parametrize("key", ["at_bought", "at_sold", "at_unlabelled"])
+@pytest.mark.parametrize("bad", [math.nan, math.inf])
+def test_a_non_finite_at_alert_tally_raises(tmp_path, key, bad):
+    conn = _conn(tmp_path)
+    with pytest.raises(ValueError):
+        gh.upsert_flow_contract_days(conn, [_row(**{key: bad})])
+    assert gh.load_flow_contract_days(conn, "2026-10-02") == []
+
+
+def test_a_table_from_before_the_at_alert_columns_is_migrated(tmp_path):
+    """Prod created the table on 2026-10-05 without these three columns."""
+    conn = sqlite3.connect(str(tmp_path / "old.db"))
+    conn.executescript("""
+        CREATE TABLE flow_contract_days (
+            session_date TEXT NOT NULL, alert_id TEXT NOT NULL, symbol TEXT NOT NULL,
+            osi TEXT NOT NULL, side TEXT, strike REAL, expiry TEXT, alert_type TEXT,
+            fired_ts INTEGER, oi_prev REAL, volume REAL,
+            poll_bought REAL NOT NULL, poll_sold REAL NOT NULL,
+            poll_unlabelled REAL NOT NULL, stream_bought REAL, stream_sold REAL,
+            stream_unlabelled REAL, oi_next REAL, oi_next_date TEXT, verdict TEXT,
+            oi_ratio REAL, PRIMARY KEY (session_date, alert_id));
+        INSERT INTO flow_contract_days (session_date, alert_id, symbol, osi,
+            poll_bought, poll_sold, poll_unlabelled)
+            VALUES ('2026-10-05', 'old', 'SPY', 'X', 1, 2, 3);
+    """)
+    gh.init_flow_day_schema(conn)
+    gh.init_flow_day_schema(conn)                    # idempotent
+    (old,) = gh.load_flow_contract_days(conn, "2026-10-05")
+    assert (old["poll_bought"], old["at_bought"], old["at_unlabelled"]) == (1.0, None, None)
+    gh.upsert_flow_contract_days(conn, [_row("new", session_date="2026-10-05")])
+    got = {r["alert_id"]: r for r in gh.load_flow_contract_days(conn, "2026-10-05")}
+    assert got["new"]["at_bought"] == 300.0
 
 
 def test_many_resolutions_are_written_in_one_call(tmp_path):

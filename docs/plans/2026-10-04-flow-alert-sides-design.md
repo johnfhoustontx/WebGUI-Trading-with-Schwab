@@ -213,6 +213,35 @@ keep_sessions = 20
   restart.
 - A missing or non-finite input is unlabelled volume or no reading, never a zero.
 
+## 8a. The tally at the alert (added 2026-10-05)
+
+The first live session (2026-10-05, 73 contract alerts by 11:36 CT) passed every
+mechanical check and showed the estimate to be weak on busy contracts: pooled
+bought 47.7% against sold 46.0%, a median lean of 7.7 points, and the two sources
+leaning the same way on 34 of 66 contracts. That last figure was not a fair test.
+The poll figure covered the contract's whole day; the stream figure covered only
+what came after the alert; and at the median half of a contract's volume had
+already printed when it was flagged.
+
+So each row now also keeps **the poll's tally at the moment the alert was
+registered** (`at_bought`, `at_sold`, `at_unlabelled`):
+
+- taken in `_register`, the same minute the alert fired, from the book as the
+  alert's own chain left it;
+- written ONCE with the row's first write and never updated, read back after a
+  restart with the row's identity;
+- `NULL`, not three zeros, when the contract had not been booked yet (an alert
+  before the open) or the row predates the columns;
+- published in `flow_sides` as `at_alert`. **No screen shows it.**
+
+Poll-since-the-alert is the running tally minus it, over the window the stream
+covers (the stream starts a few seconds later; measured coverage was 99%).
+`tools/flow_sides_report.py` makes the comparison for a stored session: how many
+contracts both sources measured, whether they lean the same way, the median gap
+between the two leans, and their correlation. It is read-only and prints; it is
+not scheduled. What it shows decides whether the estimate on a busy contract
+deserves the screen space it has.
+
 ## 9. Testing and rollout
 
 - Test-first for the pure parts: the tally, the tick merge, the verdict, the store,

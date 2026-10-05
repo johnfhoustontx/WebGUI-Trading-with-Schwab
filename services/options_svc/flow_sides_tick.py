@@ -255,8 +255,13 @@ def _stream_tallies() -> dict:
 
 
 # ── the store ────────────────────────────────────────────────────────────────
-_IDENTITY = ("symbol", "osi", "side", "strike", "expiry", "alert_type", "fired_ts")
 _TALLY_KEYS = ("bought", "sold", "unlabelled")
+# The poll's tally at the moment the alert was registered: written once with
+# the row and read back with it, like the identity. Poll-since-the-alert is the
+# running tally minus this, over the same window the stream covers.
+_AT_ALERT = tuple(f"at_{k}" for k in _TALLY_KEYS)
+_IDENTITY = ("symbol", "osi", "side", "strike", "expiry", "alert_type",
+             "fired_ts") + _AT_ALERT
 
 
 def _restore_today(gh, conn, today) -> None:
@@ -350,6 +355,11 @@ def _register(fresh, now_ts) -> None:
             "strike": _finite(a.get("strike")), "expiry": a.get("expiry"),
             "alert_type": a.get("type"),
             "fired_ts": int(_finite(a.get("ts")) or now_ts)}
+        # The tally as it stands now, the minute the alert fired. None when the
+        # contract has not been booked yet: unknown is not three zeros.
+        entry = _S["books"].get(a.get("symbol"), {}).get(osi)
+        at = flow_sides.tally(entry) if entry is not None else {}
+        _S["flagged"][aid].update({f"at_{k}": at.get(k) for k in _TALLY_KEYS})
         # Already streamed for an earlier alert on the same contract: this
         # alert's "since the alert" starts from here, not from that one.
         base = _stream_tally(osi)
@@ -369,7 +379,10 @@ def _figures(aid, meta, streams) -> dict:
     base = _S["stream_base"].get(aid)
     if stream is not None and base:
         stream = {k: max(stream[k] - base[k], 0.0) for k in _TALLY_KEYS}
-    return {"poll": poll, "stream": stream, "volume": volume, "oi_prev": oi}
+    at_alert = (None if meta.get("at_bought") is None
+                else {k: meta[f"at_{k}"] for k in _TALLY_KEYS})
+    return {"poll": poll, "stream": stream, "volume": volume, "oi_prev": oi,
+            "at_alert": at_alert}
 
 
 def _queue_resolution(row, oi_next, today, code, ratio) -> None:
@@ -531,7 +544,8 @@ def after_alerts(bus, fresh, today, now_ts) -> None:
             bus.cache_set(CACHE_SIDES, {
                 "date": today, "public": public,
                 "contracts": {aid: {"poll": f["poll"], "stream": f["stream"],
-                                    "volume": f["volume"]}
+                                    "volume": f["volume"],
+                                    "at_alert": f["at_alert"]}
                               for aid, f in figures.items()}},
                 event=EVENT_SIDES, skip_unchanged=True)
         if followup is not None:
