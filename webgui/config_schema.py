@@ -1667,8 +1667,71 @@ _COMMANDS = ConfigFile(
     ),
 )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# The Desk's Market read scorecard — config/market_read.toml
+# ─────────────────────────────────────────────────────────────────────────────
+_MARKET_READ = ConfigFile(
+    name="market_read.toml", title="Market read", icon="fact_check",
+    summary="The Desk's Market read: six readings, each marked a tailwind, a "
+            "headwind or neutral for stocks. Changes apply at the next reading.",
+    # The market service reads this file on every reading.
+    restart=(),
+    caution="Every threshold here is a starting guess. None has been measured "
+            "against what the market did next.",
+    sections=(
+        Section("Schedule", "", (
+            Field("enabled", "Market read on",
+                  "Off stops new readings. The last one stays on the Desk until "
+                  "it is two intervals old, then greys.", kind="bool"),
+            Field("public", "Show it on the public Desk",
+                  "Off = it appears in this app only.", kind="bool"),
+            Field("interval_min", "A new reading every",
+                  "On the clock, from the first one after the 08:30 Central open "
+                  "to the 15:00 close.", kind="choice", choices=(15, 30), unit="min"),
+            Field("stale_after_sec", "Ignore a source older than",
+                  "A row whose source is older than this reads No reading.",
+                  kind="int", unit="sec", min=60, max=3600, step=30),
+        )),
+        Section("Direction", "The S&P 500 and Nasdaq 100 indexes, on the day.", (
+            Field("direction.move_pct", "Both up or both down by at least", "",
+                  kind="float", unit="%", min=0, max=5, step=0.05),
+        )),
+        Section("Breadth", "Advancing and declining funds and stocks on the Market "
+                "Dashboard's equity frames.", (
+            _pct("breadth.strong_share", "Tailwind when advancing at least", ""),
+            _pct("breadth.weak_share", "Headwind when advancing at most", ""),
+        )),
+        Section("Structure", "Price against the dealer gamma flip and the ceiling.", (
+            Field("structure.symbols", "Symbols read",
+                  "They must agree for the row to lean either way.", kind="symbols"),
+            Field("structure.room_pct", "Tailwind with at least this room to the ceiling",
+                  "While price is above the flip.",
+                  kind="float", unit="%", min=0, max=5, step=0.05),
+            Field("structure.near_pct", "Headwind within this of the ceiling",
+                  "While dealers are long gamma. Below the flip is always a headwind.",
+                  kind="float", unit="%", min=0, max=5, step=0.05),
+        )),
+        Section("Volatility", "The VIX and its one-day and three-month versions.", (
+            Field("volatility.vix_move_pct", "A VIX move of at least",
+                  "Down by this, and below the three-month, is a tailwind. Up by "
+                  "this on a day stocks are up is a headwind.",
+                  kind="float", unit="%", min=0, max=20, step=0.25),
+        )),
+        Section("Flow", "The bought and sold estimate, pooled over today's flagged "
+                "contracts. An estimate.", (
+            Field("flow.lean_pts", "A lean of at least",
+                  "Bought minus sold, in points of volume. Calls leaning bought "
+                  "(and puts not) is a tailwind; the reverse is a headwind.",
+                  kind="float", unit="points", min=0, max=50, step=0.5),
+            Field("flow.min_contracts", "Needs at least this many flagged contracts",
+                  "Fewer reads No reading.", kind="int", min=1, max=200, step=1),
+        )),
+    ),
+)
+
 FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _SESSIONS, _SYMBOLS, _NEWS, _SECTORS, _MOMENTUM,
-         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _EDGE, _SWING_MODEL, _COMMISSIONS, _MARKETDATA, _PORTS, _ENVS)
+         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _EDGE, _SWING_MODEL, _COMMISSIONS, _MARKETDATA,
+         _MARKET_READ, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}
 
