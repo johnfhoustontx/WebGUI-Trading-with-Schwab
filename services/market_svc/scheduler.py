@@ -22,12 +22,14 @@ make that a no-op.
 import asyncio
 import datetime as _dt
 import logging
+import time
 from datetime import time as _time
 from zoneinfo import ZoneInfo
 
-from services import _heartbeat
-from services.market_svc import compute, handlers, report_summary
+from services import _degrade, _heartbeat
+from services.market_svc import compute, handlers, market_read, report_summary
 from shared import market_calendar as mc
+from shared import market_read_config
 
 _log = logging.getLogger("market_svc.scheduler")
 
@@ -105,10 +107,89 @@ def refresh_summary(bus, last_stamp, reports_dir=None):
     return stamp
 
 
+# ── the Desk's Market read ───────────────────────────────────────────────────
+# The four views a reading is built from. The first two are republished on a
+# clock (every poll; every minute), so an OLD one means its publisher has
+# stopped and it is judged by age. The two flow views are published only when
+# something changes, so a quiet tape leaves them legitimately old: those are
+# judged by the session DATE they carry.
+READ_INPUTS = {
+    "dashboard": handlers.CACHE,
+    "matrix": "cache:options:matrix",
+    "sides": "cache:options:flow_sides",
+    "alerts": "cache:options:flow_alerts",
+}
+_READ_BY_AGE = ("dashboard", "matrix")
+
+
+def _age_sec(stamp, wall):
+    """Seconds since an ISO ``stamp``, or None when it cannot be read."""
+    try:
+        return wall - _dt.datetime.fromisoformat(stamp).timestamp()
+    except (TypeError, ValueError):
+        return None
+
+
+def _read_inputs(bus, today, wall, stale_after_sec) -> dict:
+    """The four source views, each None when it is missing, too old, or from
+    another day: absent to the row that reads it, which then has no reading."""
+    metas = bus.cache_metas([READ_INPUTS[k] for k in _READ_BY_AGE])
+    out = {}
+    for name, key in READ_INPUTS.items():
+        env = bus.cache_get(key)
+        payload = env.payload if env else None
+        if not isinstance(payload, dict):
+            out[name] = None
+        elif name in _READ_BY_AGE:
+            stamp = (metas.get(key) or (None, None))[1] or getattr(env, "ts", None)
+            age = _age_sec(stamp, wall)
+            out[name] = payload if age is not None and age <= stale_after_sec else None
+        else:
+            out[name] = payload if payload.get("date") == today else None
+    return out
+
+
+def refresh_read(bus, state, now=None, wall=None):
+    """Publish the Market read when a clock slot is due; return the slot, or None.
+
+    ``state`` is the caller's dict and survives between calls. On its first use
+    the published view is read back, so a restart neither publishes a slot twice
+    nor loses the day's history. ``now`` is the market clock (which slot);
+    ``wall`` is unix seconds (how old a source is). Never raises: a failure
+    leaves the last reading up and the slot still owed."""
+    try:
+        cfg = market_read_config.load()
+        if cfg.get("enabled") is not True:
+            return None
+        now = (now or _dt.datetime.now(_CT)).astimezone(_CT)
+        if not state.get("restored"):
+            env = bus.cache_get(handlers.CACHE_READ)
+            state["last"] = env.payload if env and isinstance(env.payload, dict) else None
+            state["restored"] = True
+        today = now.date().isoformat()
+        last = state.get("last")
+        last_slot = last.get("slot") if last and last.get("date") == today else None
+        slot = market_read.slot_due(now, last_slot, cfg["interval_min"])
+        if slot is None:
+            return None
+        wall = time.time() if wall is None else wall
+        inputs = _read_inputs(bus, today, wall, cfg["stale_after_sec"])
+        reading = market_read.build(inputs, cfg, date=today, slot=slot,
+                                    ts=int(now.timestamp()), previous=last)
+        handlers.publish_read(bus, reading)
+        state["last"] = reading
+        return slot
+    except Exception:
+        _degrade.degraded("market.read")
+        return None
+
+
 async def loop(bus) -> None:
-    """Poll → publish → (the report summary, when the report changed) → sleep."""
+    """Poll → publish → the Market read, when a slot is due → (the report
+    summary, when the report changed) → sleep."""
     loop_ = asyncio.get_running_loop()
     report_stamp = None
+    read_state: dict = {}
     while True:
         _heartbeat.tick()
         interval = poll_interval()
@@ -119,6 +200,9 @@ async def loop(bus) -> None:
             raise
         except Exception:  # noqa: BLE001 — never let the scheduler die.
             _log.exception("market poll cycle failed")
+        # After the dashboard, so a reading taken on a slot sees this poll's
+        # tiles. refresh_read never raises and does nothing between slots.
+        await loop_.run_in_executor(None, refresh_read, bus, read_state)
         try:
             report_stamp = await loop_.run_in_executor(
                 None, refresh_summary, bus, report_stamp)

@@ -41,3 +41,29 @@ class MarketSummary(_Base):
     report_date: str = ""    # YYYY-MM-DD the report was written for
     as_of: str = ""          # the report's own time stamp, e.g. "16:20 CT"
     report_url: str = ""     # the full report on the public site
+
+
+class MarketRead(_Base):
+    """The Desk's Market read (cache:market:read).
+
+    Six rows, each a ``tailwind`` / ``headwind`` / ``neutral`` / ``none``
+    verdict for stocks with the numbers it was decided from, taken on a clock
+    slot in the regular session (``services/market_svc/market_read.py``). Like
+    the other domain contracts this validates the envelope's shape, not each
+    row's sparse ``facts``.
+
+    ``none`` is "no reading" (an input was missing or stale) and is never the
+    same thing as ``neutral``. ``public`` is true only when the operator's
+    switch is: a reader on the public origin shows the view only then.
+    """
+
+    date: str = ""                 # the CT session date, YYYY-MM-DD
+    ts: int = 0                    # unix seconds the reading was taken
+    slot: str = ""                 # "HH:MM" Central, the clock slot
+    interval_min: int = 15
+    next_slot: str | None = None   # None after the close reading
+    final: bool = False            # the reading taken at the close
+    public: bool = False
+    tally: dict = {}               # {verdict code: count}
+    rows: list[dict] = []          # [{key, verdict, facts, prev, estimate?}]
+    history: list[dict] = []       # [{slot, verdicts: {key: code}}] for the day

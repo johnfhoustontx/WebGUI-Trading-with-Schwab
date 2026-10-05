@@ -55,6 +55,11 @@ Rules that hold for every row:
   row with no flip, a view from another day, a view older than `stale_after_sec`:
   each makes its row `none`. (The NaN rule in `CLAUDE.md`: absence is not a
   reading.)
+- **Two kinds of "too old".** The dashboard and the matrix are republished on a
+  clock, so an old one means its publisher has stopped: they are judged by AGE
+  (`stale_after_sec`, from the view's `:ts` side key). The two flow views are
+  published only when something changes, so a quiet tape leaves them legitimately
+  old: they are judged by the session DATE they carry.
 - **Structure distrusts walls the dealer panel distrusts.** A net gamma of exactly
   zero is the after-hours artefact; that symbol has no reading.
 - **Structure needs both symbols to agree.** SPY one way and QQQ the other is
