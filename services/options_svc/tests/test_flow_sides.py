@@ -135,6 +135,27 @@ def test_open_interest_of_zero_is_a_reading():
     assert book["C1"][fs.OI] == 0.0
 
 
+def test_open_interest_is_not_read_when_the_caller_says_not_to():
+    # Index open interest reads zero outside the regular session: the caller
+    # passes read_oi=False there, and the last regular-hours figure survives.
+    book = {}
+    fs.advance(_chain(calls=[_c("C1", 100, oi=4200)]), book, seeded=False)
+    fs.advance(_chain(calls=[_c("C1", 150, oi=0)]), book, seeded=True, read_oi=False)
+    assert book["C1"][fs.OI] == 4200.0
+    assert book["C1"][fs.HW] == 150.0          # the volume is still booked
+
+
+def test_a_watched_contract_gets_an_entry_at_zero_volume():
+    # Yesterday's flagged contract may not trade today, and its open interest
+    # is still the reading the follow-up needs.
+    book = {}
+    chain = _chain(calls=[_c("C1", 0, oi=1700), _c("C2", 0, oi=50)])
+    assert fs.advance(chain, book, seeded=True, watch={"C1"}) == 0
+    assert list(book) == ["C1"]
+    assert book["C1"][fs.OI] == 1700.0
+    assert fs.tally(book["C1"]) == {"bought": 0.0, "sold": 0.0, "unlabelled": 0.0}
+
+
 def test_the_tally_always_sums_to_the_volume():
     book = {}
     reads = [(1000, 1.05, True, True), (1400, 1.10, True, True),
@@ -178,6 +199,19 @@ def test_the_first_tick_only_seeds():
                                                bid=1.00, ask=1.10)) is False
     assert fs.tally(book["C1"]) == {"bought": 0.0, "sold": 0.0, "unlabelled": 0.0}
     assert book["C1"][fs.HW] == 5000.0
+
+
+def test_an_entry_restored_without_a_volume_mark_seeds_and_keeps_its_tally():
+    # After a restart the stored stream tally is put back, but the volume the
+    # stream had reached is unknown: the next tick seeds it and books nothing.
+    entry = fs.new_entry()
+    entry[fs.HW], entry[fs.BOUGHT], entry[fs.SOLD] = None, 300.0, 50.0
+    book, quotes = {"C1": entry}, {}
+    assert fs.advance_tick(book, quotes, _tick(total_volume=9000, last=1.10,
+                                               bid=1.00, ask=1.10)) is False
+    assert book["C1"][fs.HW] == 9000.0
+    fs.advance_tick(book, quotes, _tick(total_volume=9100))
+    assert fs.tally(book["C1"]) == {"bought": 400.0, "sold": 50.0, "unlabelled": 0.0}
 
 
 def test_ticks_are_deltas_and_the_quote_is_merged():

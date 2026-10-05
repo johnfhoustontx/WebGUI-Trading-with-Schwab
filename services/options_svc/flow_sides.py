@@ -32,7 +32,7 @@ def _book(entry, dv, side) -> None:
     entry[BOUGHT if side > 0 else SOLD if side < 0 else UNLABELLED] += dv
 
 
-def advance(chain, book, *, seeded, label=True) -> int:
+def advance(chain, book, *, seeded, label=True, read_oi=True, watch=()) -> int:
     """Book one fetched chain's new volume into ``book`` ({contract symbol:
     entry}), IN PLACE. Returns how many contracts booked volume.
 
@@ -41,6 +41,10 @@ def advance(chain, book, *, seeded, label=True) -> int:
     Unseeded, that volume predates the watch and is unlabelled.
     ``label`` -- False after a poll gap: several minutes of volume must not
     take one minute's bid/ask label.
+    ``read_oi`` -- False outside the regular session, where index open
+    interest reads zero; the last regular-hours figure is kept.
+    ``watch`` -- contract symbols that get an entry even at zero volume, so
+    their open interest is read (yesterday's flagged contracts).
 
     The stored volume is a HIGH-WATER mark: volume never falls within a
     session, so a glitch read of 0 books nothing and cannot re-book the day."""
@@ -54,7 +58,7 @@ def advance(chain, book, *, seeded, label=True) -> int:
             continue
         entry = book.get(osi)
         if entry is None:
-            if vol <= 0:
+            if vol <= 0 and osi not in watch:
                 continue
             entry = book[osi] = new_entry()
             dv, can_label = vol, seeded and label
@@ -66,7 +70,7 @@ def advance(chain, book, *, seeded, label=True) -> int:
             _book(entry, dv, side)
             entry[HW] = vol
             booked += 1
-        oi = _finite(c.get("openInterest"))
+        oi = _finite(c.get("openInterest")) if read_oi else None
         if oi is not None and oi >= 0:
             entry[OI] = oi
     return booked
@@ -93,6 +97,9 @@ def advance_tick(book, quotes, tick, *, label=True) -> bool:
     entry = book.get(osi)
     if entry is None:
         entry = book[osi] = new_entry()
+        entry[HW] = vol
+        return False
+    if entry[HW] is None:       # restored after a restart: tally kept, mark unknown
         entry[HW] = vol
         return False
     dv = vol - entry[HW]

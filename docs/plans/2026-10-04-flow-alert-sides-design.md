@@ -52,13 +52,20 @@ only; it imports `hiro.classify_side` for the rule and nothing from `compute`).
 
 Per contract, per fetched minute:
 
-- `dv = totalVolume − previous totalVolume`. The first reading of a contract only
-  seeds. The stored reading is a high-water mark. A symbol whose last good minute is
-  older than the poll-gap limit is re-seeded, not measured. These are the
-  hedging-flow rules, for the same reasons.
+- `dv = totalVolume − previous totalVolume`. The stored reading is a high-water
+  mark, as in the hedging-flow model.
 - `dv > 0` is labelled by `classify_side` on that minute's `last`, `bid`, `ask`, and
   added to the contract's `bought`, `sold` or `unlabelled` total.
-- The tally also keeps the contract's latest `totalVolume` and `openInterest`.
+- **Volume nobody watched is unlabelled, not skipped** (see section 8): the volume
+  a symbol already carries at its first poll of the session, and the volume across
+  a poll gap. The gap limit is 1.5 × the collector's slowest tier (450 s), not the
+  hedging-flow model's 150 s: a watchlist-only symbol is fetched as rarely as every
+  five minutes by design, and that normal step must still be labelled.
+- The tally runs for the whole collection window. It also keeps the contract's
+  latest `totalVolume` and its `openInterest`, the latter read in the regular
+  session only (index open interest reads zero outside it).
+- The poll hook works in memory only. It never opens the database, so it cannot
+  slow or break a poll; the store work happens once a minute, after the detectors.
 
 State is in memory, keyed by session date, and cleared when the date changes. It is
 kept for every contract in every fetched chain, because an alert can fire on any of

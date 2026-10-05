@@ -479,7 +479,8 @@ CACHE_SIDES = "cache:options:flow_sides"
 EVENT_SIDES = "events:options:flow_sides"
 CACHE_FOLLOWUP = "cache:options:flow_followup"
 EVENT_FOLLOWUP = "events:options:flow_followup"
-MAX_GAP_SEC = 150          # follows the poll cadence, like compute.HIRO_MAX_GAP_SEC
+MAX_GAP_SEC = 450          # 1.5 x collection_tiers.MAX_TAIL_INTERVAL_MIN: the slowest
+                           # tier's normal step must still be labelled
 
 def reset() -> None                      # test helper: drop all state
 def on_chain(symbol, chain, now=None) -> None        # collector thread; never raises
@@ -497,19 +498,22 @@ def stream_tick(tick, label=True) -> None # stream thread
 **Behaviour, each line a test**
 
 `on_chain`:
-1. Does nothing when `[sides].enabled` is not literally `True`, or outside
-   `market_calendar.is_regular_hours(now)`. (Index open interest reads zero
-   off-hours; the gate keeps that out of `oi_prev` and out of the verdict.)
-2. A new CT session date clears the books, `seeded`, `last_ts`, `flagged`, the
-   stream state, and reloads `pending` and today's `flagged` from the store
-   (see "restore" below).
+1. Does nothing when `[sides].enabled` is not literally `True`, or for a chain
+   with no expiration map (an error body must not count as a first poll). It
+   books volume for the whole collection window; only the open-interest read is
+   limited to `market_calendar.is_regular_hours(now)` (index open interest reads
+   zero off-hours, and that must stay out of `oi_prev` and the verdict).
+2. A new CT session date clears the books, `seeded`, `last_ts`, `flagged` and the
+   stream state. **`on_chain` never opens the database**; the reload from the
+   store (see "restore" below) happens in `after_alerts`.
 3. `label = False` when the symbol's last good minute is more than `MAX_GAP_SEC`
    old; otherwise `True`. Calls `flow_sides.advance(chain, book, seeded=…,
    label=…)`, then marks the symbol seeded and stamps `last_ts`.
-4. For each pending contract of this symbol found in the chain with a finite
-   `openInterest`: if the row has no `oi_next`, or the figure differs from the one
-   stored, record it, derive `flow_sides.verdict(...)` from the `[followup]`
-   ratios, queue the store write, set `dirty_followup`, and log at INFO when a
+4. Pending contracts are passed to `advance` as `watch`, so one that does not
+   trade today still gets an entry and its open interest is read. The verdict is
+   derived in `after_alerts` from the book: if the row has no `oi_next`, or the
+   figure differs from the one stored, record it, derive `flow_sides.verdict(...)`
+   from the `[followup]` ratios, queue the store write, and log at INFO when a
    stored figure MOVED (that log is the measurement the design asks for).
 5. Any exception → `_degrade.degraded("options.flow_sides.on_chain", detail=symbol)`.
 
@@ -535,7 +539,7 @@ def stream_tick(tick, label=True) -> None # stream thread
 8. `"public"` is `True` only when `[sides].public` is literally `True`.
 9. Any exception → `_degrade.degraded("options.flow_sides.after_alerts")`.
 
-Restore (on the first `on_chain` of a session, or after a restart):
+Restore (on the first `after_alerts` of a session, or after a restart):
 - `load_unresolved_flow_days(before=today)`: a row whose `expiry` is on or before
   its `session_date` is resolved at once as `expired`; a row whose `expiry` is
   before today but after its session date is resolved as `none`; the rest go to

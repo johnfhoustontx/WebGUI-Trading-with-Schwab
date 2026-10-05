@@ -25,6 +25,7 @@ from services.options_svc import compute
 # Symbol Dossier (design 2026-09-17): one ticker's on-demand fetch.
 from services.options_svc import dossier
 from services.options_svc import flow_alerts
+from services.options_svc import flow_sides_tick
 from services.options_svc import gamma_public
 # HIRO-model hedging flow rules (design 2026-10-01). Pure, stdlib only.
 from services.options_svc import hiro
@@ -2519,6 +2520,11 @@ def run_flow_alerts(bus) -> None:
                 a["ts"] = now_ts
                 a["text"] = flow_alerts.alert_text(a)
                 fresh.append(a)
+
+        # Bought/sold tally + next-day open interest for the contract-level
+        # alerts (flow_sides_tick). Every tick, not only when one fired: a
+        # flagged contract's tally keeps moving. Never raises.
+        flow_sides_tick.after_alerts(bus, fresh, today, now_ts)
 
         if fresh:
             # big_delta pushes are gated SEPARATELY from firing: every fire still

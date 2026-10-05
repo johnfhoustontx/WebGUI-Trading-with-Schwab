@@ -4956,7 +4956,7 @@ def collect_gex_snapshots(capture_symbols=None, now=None) -> int:
         # imported lazily. ONE load_thresholds() call serves both detectors.
         # Per-symbol extended-trading-hours eligibility rides the SAME hook, for
         # the same reason: the boolean is a root field of a chain we already have.
-        from services.options_svc import eth
+        from services.options_svc import eth, flow_sides_tick
         from services.options_svc import flow_alerts
         clear_uoa_stash()
         clear_big_delta_stash()
@@ -5020,6 +5020,7 @@ def collect_gex_snapshots(capture_symbols=None, now=None) -> int:
             # Ungated: a pure dict read, no compute, and the map must stay complete
             # even when the UOA kill-switch is off.
             _eth_seen[sym] = eth.chain_eth_eligible(chain)
+            flow_sides_tick.on_chain(sym, chain, now)  # bought/sold tally; never raises
             if _uoa_on:
                 # Best-effort — a UOA detect failure must NEVER break collection.
                 try:
