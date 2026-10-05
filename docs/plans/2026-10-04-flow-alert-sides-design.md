@@ -102,6 +102,11 @@ interest, the date it was read, and the verdict.
   (index open interest reads zero overnight), the first fetched chain for a symbol
   carries the new open interest for its unresolved contracts. No new Schwab call, no
   new scheduler slot.
+- ⚠ **Not yet measured: when Schwab's chain starts showing the new open interest.**
+  If it lags the open, a first read would repeat yesterday's figure and read as
+  "mixed". So the row is re-read on every fetch that day, and the verdict is
+  re-derived whenever the figure moves, with a log line. The first live session
+  therefore also answers the question.
 - **Verdict** = (next open interest − that day's open interest) ÷ that day's volume.
   At or above `opened_ratio` (+0.5): mostly opened. At or below `closed_ratio`
   (−0.5): mostly closed. Between: mixed or traded within the day. A contract whose
@@ -162,9 +167,13 @@ keep_sessions = 20
 - A measurement failure never breaks collection: the hook is best-effort and counted
   through `_degrade.degraded`.
 - A dead stream leaves the poll tally intact and the stream figure absent.
-- A restart re-seeds the in-memory tally: the session share then covers the time
-  since the restart, and the row says "since HH:MM" when the tally did not start at
-  the open.
+- Volume the service did not watch print is **unlabelled**, never dropped: a
+  contract's volume from before a restart, and the volume across a poll gap. So
+  bought + sold + unlabelled always equals the contract's volume, and a tally that
+  missed part of the day says so through its unlabelled share. (Hedging flow
+  re-seeds instead, because it sums dollars and has no "unlabelled dollars".)
+- The flagged contracts and their tallies are restored from the store after a
+  restart.
 - A missing or non-finite input is unlabelled volume or no reading, never a zero.
 
 ## 9. Testing and rollout
