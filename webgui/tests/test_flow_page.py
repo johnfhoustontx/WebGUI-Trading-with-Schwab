@@ -658,7 +658,7 @@ def test_sides_text_prints_an_all_unlabelled_tally_as_it_is():
 def test_sides_text_adds_the_stream_figure_once_it_has_volume():
     text = flow.sides_text({"poll": _POLL, "stream": _STREAM})
     assert text == ("≈ bought 62.00% · sold 30.00% · unlabelled 8.00%"
-                    " · since the alert: bought 71.00% · sold 20.00% of 1,000")
+                    " · since the alert: bought 71.00% · sold 20.00% · unlabelled 9.00% of 1,000")
 
 
 def test_sides_text_leaves_out_a_stream_that_has_not_traded():
@@ -688,14 +688,14 @@ def test_alert_rows_keep_the_stream_figure_on_its_own_line():
         _VIEW, _sides({_UOA["id"]: {"poll": _POLL, "stream": _STREAM}}))
         if r["id"] == _UOA["id"]]
     assert row["sides"] == "≈ bought 62.00% · sold 30.00% · unlabelled 8.00%"
-    assert row["sides_after"] == "since the alert: bought 71.00% · sold 20.00% of 1,000"
+    assert row["sides_after"] == "since the alert: bought 71.00% · sold 20.00% · unlabelled 9.00% of 1,000"
     assert "props.row.sides_after" in flow._SIDES_SLOT
 
 
 def test_sides_parts_of_nothing_is_two_empty_strings():
     assert flow.sides_parts(None) == ("", "")
     assert flow.sides_parts({"poll": None, "stream": _STREAM}) \
-        == ("", "since the alert: bought 71.00% · sold 20.00% of 1,000")
+        == ("", "since the alert: bought 71.00% · sold 20.00% · unlabelled 9.00% of 1,000")
 
 
 def test_alert_rows_without_a_sides_view_are_unchanged_but_for_the_empty_field():

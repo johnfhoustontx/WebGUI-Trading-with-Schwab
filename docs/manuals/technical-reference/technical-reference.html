@@ -2928,7 +2928,7 @@ crossed quote, it is <strong>unlabelled</strong> (0).</p>
 <tbody>
 <tr>
 <td>Covers</td>
-<td>The whole collection window, every contract with volume in every fetched chain</td>
+<td>From the regular open (08:30 CT) to the end of collection, every contract with volume in every fetched chain</td>
 <td>One contract, from the moment its alert fires</td>
 </tr>
 <tr>
@@ -2953,13 +2953,16 @@ printed; a stream subscribed at the alert can only see what follows.</p>
 <p><strong>The invariant: bought + sold + unlabelled = the contract's volume.</strong> Volume is never
 dropped. What the service did not watch print is booked as unlabelled:</p>
 <ul>
-<li>the volume a symbol already carries at its first fetch of the process (the open, or
-  the first fetch after a restart);</li>
+<li>the volume a symbol already carries at its first fetch of the process after the
+  regular open (the first poll at or after 08:30 CT, or the first after a restart).
+  Nothing is booked before the open: until then a chain may still carry yesterday's
+  volume for a contract that has not traded yet;</li>
 <li>the volume across a gap longer than <code>flow_sides_tick.MAX_GAP_SEC</code> = <strong>450 s</strong>,
   1.5 × the collector's slowest tier (<code>collection_tiers.MAX_TAIL_INTERVAL_MIN</code> = 5 min).
   The hedging-flow model uses 150 s because it measures one-minute symbols only; here
   a watchlist-only symbol's normal step must still be labelled;</li>
-<li>on the stream, the first tick of each contract after every (re)connect.</li>
+<li>on the stream, the first volume-carrying tick of each contract after every
+  (re)connect. A quote-only tick does not use that up.</li>
 </ul>
 <p>A contract first seen with volume in a symbol that <em>was</em> fetched a step earlier stood
 at zero then, so all of its volume is new and is labelled. The stored volume is a
@@ -2974,11 +2977,15 @@ oldest alert first, up to <code>[sides].stream_max_contracts</code> (200; never 
 <code>STREAM_HARD_MAX</code> = 500, since the set travels as one request line). It reconnects when
 the set changes, times out after 45 s of silence (three missed keepalives), and backs
 off 3 → 60 s on failure. It starts with the scheduler loop, so it does not run under
-the dev profile.</p>
+the dev profile, and there is one worker per process: a loop restarted by its
+supervisor reuses the live one. A second alert on a contract that is already streamed
+counts "since the alert" from its own alert, not from the first.</p>
 <p><strong>After a restart</strong> the day's flagged contracts and their tallies are read back from
 <code>flow_contract_days</code>. What had been labelled stays labelled; everything else the
 contract has traded becomes unlabelled. Contracts not yet flagged lose their labels
-for the day so far.</p>
+for the day so far. The stream figure is the one exception to "never dropped": what
+it had labelled is kept, but volume that printed while the service was down is not
+added to "since the alert".</p>
 <p><strong>Storage — <code>flow_contract_days</code> in <code>gex_history.db</code>.</strong> One row per alert per session,
 keyed <code>(session_date, alert_id)</code>: the contract, the alert type and time, <code>oi_prev</code>
 (open interest that day, read in regular hours only — index open interest reads zero
@@ -3025,6 +3032,16 @@ scheduler slot are added.</p>
 <td>No reading</td>
 </tr>
 <tr>
+<td>the contract is not in today's chain</td>
+<td><code>none</code></td>
+<td>No reading</td>
+</tr>
+<tr>
+<td>the row is older than the previous trading day and was never read</td>
+<td><code>none</code></td>
+<td>No reading</td>
+</tr>
+<tr>
 <td>not read yet</td>
 <td><em>null</em></td>
 <td>Waiting for today's open interest</td>
@@ -3034,12 +3051,20 @@ scheduler slot are added.</p>
 <p>Both bounds are inclusive. The figure is <strong>re-read on every fetch that day</strong> and the
 verdict re-derived when it moves, with an INFO line
 (<code>flow follow-up: open interest moved …</code>), because when Schwab's chain starts showing
-the new open interest has not been measured.</p>
+the new open interest has not been measured. A restart that day reloads the rows
+already read, so the re-reading continues, and a resolution is kept in memory until
+its write succeeds. Open interest does not change within a session, so a zero never
+replaces a positive figure already read that day (index open interest reads zero
+around the edges of a session).</p>
 <p><strong>Delivery.</strong> <code>cache:options:flow_sides</code> (<code>skip_unchanged</code>, so it carries no timestamp)
 and <code>cache:options:flow_followup</code>, each with a top-level <code>public</code> flag stamped from
 <code>[sides].public</code>, which fails closed: only a literal <code>true</code> opens it. The Flow Alerts
-page and the Desk's flow panel read them through <code>flow.sides_view_shown</code>. Nothing here
-changes a phone push, a chime, the Desk's speech, or any ranking.</p>
+page and the Desk's flow panel read them through <code>flow.sides_view_shown</code>. A switch
+takes effect within a minute, in both directions: changing <code>public</code> republishes the
+follow-up view, and turning <code>[sides].enabled</code> or <code>[followup].enabled</code> off publishes an
+empty, non-public view once so no screen keeps the old figures. The tally runs last
+in the flow-alert pass, after the pushes and the alert list. Nothing here changes a
+phone push, a chime, the Desk's speech, or any ranking.</p>
 <p><strong>Known limitations.</strong></p>
 <ul>
 <li><strong>One label per contract per fetch</strong> on the poll: a minute's volume (up to five for a
@@ -3048,7 +3073,10 @@ changes a phone push, a chime, the Desk's speech, or any ranking.</p>
 <li><strong>Spread legs and trades inside the quote</strong> are mislabelled or unlabelled.</li>
 <li><strong>Bought is not opening.</strong> Only the next-day reading separates the two, and a
   same-day expiry never gets one: on 2026-10-02, 152 of 175 contract alerts (87%).</li>
-<li><strong>Unmeasured:</strong> the typical unlabelled share, how large a lean must be to mean
+<li><strong>A partial first chain.</strong> If a symbol's first usable chain is missing an expiry,
+  the next full chain books those contracts' whole volume with one minute's label.</li>
+<li><strong>Unmeasured:</strong> whether a pre-open chain carries yesterday's volume (the reason
+  nothing is booked before 08:30), the typical unlabelled share, how large a lean must be to mean
   anything, the memory the per-contract entries take, and the hour at which the new
   open interest appears.</li>
 </ul>

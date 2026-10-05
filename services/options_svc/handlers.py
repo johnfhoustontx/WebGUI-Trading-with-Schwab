@@ -2521,11 +2521,6 @@ def run_flow_alerts(bus) -> None:
                 a["text"] = flow_alerts.alert_text(a)
                 fresh.append(a)
 
-        # Bought/sold tally + next-day open interest for the contract-level
-        # alerts (flow_sides_tick). Every tick, not only when one fired: a
-        # flagged contract's tally keeps moving. Never raises.
-        flow_sides_tick.after_alerts(bus, fresh, today, now_ts)
-
         if fresh:
             # big_delta pushes are gated SEPARATELY from firing: every fire still
             # lands on the screen (cached below), but only a fire clearing
@@ -2555,6 +2550,12 @@ def run_flow_alerts(bus) -> None:
         # bump the key's version (and wake version-pollers) every minute.
         bus.cache_set(_FLOW_COOLDOWN_KEY, {"date": today, "map": cooldowns},
                       skip_unchanged=True)
+        # Bought/sold tally + next-day open interest for the contract-level
+        # alerts (flow_sides_tick). LAST: it opens the store, and a slow store
+        # must not hold back a phone push, the alert list or the cooldown map.
+        # Every tick, not only when an alert fired: a flagged contract's
+        # tally keeps moving. Never raises.
+        flow_sides_tick.after_alerts(bus, fresh, today, now_ts)
     except Exception:
         log.exception("run_flow_alerts degraded")
 

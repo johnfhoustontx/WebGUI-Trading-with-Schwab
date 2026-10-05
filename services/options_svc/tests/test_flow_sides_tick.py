@@ -172,15 +172,33 @@ def test_a_new_session_date_starts_clean():
 
 
 def test_open_interest_is_read_in_the_regular_session_only():
-    # 08:10 CT is inside the flow window and before the 08:30 open, where
-    # index open interest reads zero.
-    tick.on_chain("SPY", _chain(_c(OSI, 100, oi=0)), _at(FRI, 8, 10))
-    _after([_alert()], _at(FRI, 8, 10))
-    assert _rows(FRI)[0]["oi_prev"] is None
-    tick.on_chain("SPY", _chain(_c(OSI, 200, oi=9985)), _at(FRI, 8, 31))
-    _after([], _at(FRI, 8, 31))
-    assert _rows(FRI)[0]["oi_prev"] == 9985.0
-    assert _rows(FRI)[0]["volume"] == 200.0     # ...while volume is always booked
+    # 15:03 CT is inside the flow window and after the 15:00 close: ETF options
+    # still trade, so volume is booked, but open interest is not read there.
+    tick.on_chain("SPY", _chain(_c(OSI, 100, oi=9985)), _at(FRI, 14, 59))
+    _after([_alert()], _at(FRI, 14, 59))
+    tick.on_chain("SPY", _chain(_c(OSI, 260, last=1.10, oi=4)), _at(FRI, 15, 3))
+    _after([], _at(FRI, 15, 3))
+    (row,) = _rows(FRI)
+    assert row["oi_prev"] == 9985.0
+    assert (row["volume"], row["poll_bought"]) == (260.0, 160.0)
+
+
+def test_nothing_is_booked_before_the_regular_open():
+    """Before 08:30 CT a chain can still carry YESTERDAY's volume for a contract
+    that has not traded yet. Booked, it would stand as today's unlabelled volume
+    and (through the high-water mark) hide today's real volume until that passed
+    it. Not measured on live data; this is the conservative reading, and the one
+    the hedging-flow model already takes (code review, 2026-10-04)."""
+    tick.on_chain("SPY", _chain(_c(OSI, 50_000, oi=0)), _at(FRI, 8, 10))
+    bus = _after([_alert()], _at(FRI, 8, 10))
+    c = _view(bus, tick.CACHE_SIDES)["contracts"][AID]
+    assert c == {"poll": {"bought": 0.0, "sold": 0.0, "unlabelled": 0.0},
+                 "stream": None, "volume": None}
+    # The first poll after the bell seeds; the next one labels.
+    tick.on_chain("SPY", _chain(_c(OSI, 300)), _at(FRI, 8, 31))
+    tick.on_chain("SPY", _chain(_c(OSI, 500, last=1.10)), _at(FRI, 8, 32))
+    c = _view(_after([], _at(FRI, 8, 32)), tick.CACHE_SIDES)["contracts"][AID]
+    assert c["poll"] == {"bought": 200.0, "sold": 0.0, "unlabelled": 300.0}
 
 
 # --- registration and the store ---------------------------------------------
@@ -328,8 +346,12 @@ def test_a_disabled_switch_measures_stores_and_publishes_nothing(monkeypatch, en
     _set_cfg(monkeypatch, sides={"enabled": enabled})
     tick.on_chain("SPY", _chain(_c(OSI, 1000)), _at(FRI, 9, 30))
     bus = _after([_alert()], _at(FRI, 9, 30))
-    assert _view(bus, tick.CACHE_SIDES) is None
+    # Nothing is measured or stored. What IS published is the retraction: an
+    # empty, non-public view, so no screen keeps figures from before the switch.
+    assert _view(bus, tick.CACHE_SIDES) == {"date": FRI, "public": False,
+                                            "contracts": {}}
     assert _rows(FRI) == [] and tick.wanted_osis() == []
+    assert tick._S["books"] == {} and tick._S["flagged"] == {}
 
 
 @pytest.mark.parametrize("public,want", [(True, True), (False, False),
@@ -443,7 +465,185 @@ def test_followup_switched_off_resolves_and_publishes_nothing(monkeypatch):
     tick.on_chain("SPY", _chain(_c(OSI, 5, oi=1700)), _at(MON, 8, 32))
     bus = _after([], _at(MON, 8, 32))
     assert _rows(FRI)[0]["verdict"] is None
-    assert _view(bus, tick.CACHE_FOLLOWUP) is None
+    # Published empty, not left absent: a panel from before the switch must go.
+    assert _view(bus, tick.CACHE_FOLLOWUP) == {"date": None, "public": False,
+                                               "rows": []}
+
+
+# --- the code review of 2026-10-04 -------------------------------------------
+
+THU = "2026-10-01"
+
+
+def _alert_on(day, vol=1000, oi=1000):
+    tick.on_chain("SPY", _chain(_c(OSI, vol, oi=oi)), _at(day, 9, 30))
+    _after([_alert()], _at(day, 9, 30))
+    tick.reset()
+
+
+def test_a_restart_on_the_follow_up_day_keeps_re_reading():
+    # 08:32 reads Friday's figure again (Schwab has not updated yet) and stores
+    # "mixed". The service restarts. The real figure arrives at 09:40.
+    _friday_alert()
+    _after([], _at(MON, 8, 31))
+    tick.on_chain("SPY", _chain(_c(OSI, 5, oi=1000)), _at(MON, 8, 32))
+    _after([], _at(MON, 8, 32))
+    assert _rows(FRI)[0]["verdict"] == "mixed"
+    tick.reset()
+    _after([], _at(MON, 9, 0))
+    tick.on_chain("SPY", _chain(_c(OSI, 9, oi=1700)), _at(MON, 9, 40))
+    bus = _after([], _at(MON, 9, 40))
+    assert (_rows(FRI)[0]["verdict"], _rows(FRI)[0]["oi_next"]) == ("opened", 1700.0)
+    assert _view(bus, tick.CACHE_FOLLOWUP)["rows"][0]["verdict"] == "opened"
+
+
+def test_a_failed_resolution_write_is_retried(monkeypatch):
+    _friday_alert()
+    _after([], _at(MON, 8, 31))
+    real, calls = gh.resolve_flow_contract_days, []
+
+    def _flaky(conn, items):
+        calls.append(len(list(items)))
+        if len(calls) == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return real(conn, items)
+
+    monkeypatch.setattr(gh, "resolve_flow_contract_days", _flaky)
+    tick.on_chain("SPY", _chain(_c(OSI, 5, oi=1700)), _at(MON, 8, 32))
+    _after([], _at(MON, 8, 32))
+    assert _rows(FRI)[0]["verdict"] is None          # the write failed
+    bus = _after([], _at(MON, 8, 33))
+    assert _rows(FRI)[0]["verdict"] == "opened"      # ...and was not forgotten
+    assert _view(bus, tick.CACHE_FOLLOWUP)["rows"][0]["verdict"] == "opened"
+
+
+def test_a_row_older_than_the_previous_session_gets_no_reading():
+    # Thursday's row was never read on Friday (the service was down). Read on
+    # Monday it would be two days of open-interest change set against one day
+    # of volume, so it gets no reading at all.
+    _alert_on(THU)
+    tick.on_chain("SPY", _chain(_c(OSI, 5, oi=1700)), _at(MON, 8, 31))
+    _after([], _at(MON, 8, 31))
+    tick.on_chain("SPY", _chain(_c(OSI, 9, oi=1700)), _at(MON, 8, 32))
+    _after([], _at(MON, 8, 32))
+    (row,) = _rows(THU)
+    assert (row["verdict"], row["oi_next"], row["oi_ratio"]) == ("none", None, None)
+
+
+def test_a_contract_absent_from_the_next_days_chain_reads_none():
+    _friday_alert()
+    _after([], _at(MON, 8, 5))                       # loads and watches Friday's row
+    other = "SPY   261009C00780000"
+    tick.on_chain("SPY", _chain(_c(other, 40, oi=10)), _at(MON, 8, 31))
+    _after([], _at(MON, 8, 31))
+    assert _rows(FRI)[0]["verdict"] == "none"
+    # If it turns up in a later fetch after all, the real reading replaces it.
+    tick.on_chain("SPY", _chain(_c(OSI, 0, oi=1700)), _at(MON, 8, 32))
+    _after([], _at(MON, 8, 32))
+    assert _rows(FRI)[0]["verdict"] == "opened"
+
+
+def test_a_symbol_not_fetched_yet_is_still_waiting_not_absent():
+    _friday_alert()
+    _after([], _at(MON, 8, 5))
+    tick.on_chain("QQQ", _chain(_c("QQQ   261009C00750000", 40)), _at(MON, 8, 31))
+    _after([], _at(MON, 8, 31))
+    assert _rows(FRI)[0]["verdict"] is None
+
+
+def test_turning_public_off_republishes_the_follow_up(monkeypatch):
+    _friday_alert()
+    bus = _after([], _at(MON, 8, 31))
+    assert _view(bus, tick.CACHE_FOLLOWUP)["public"] is True
+    _set_cfg(monkeypatch, sides={"public": False})
+    bus = _after([], _at(MON, 8, 32))                # nothing else changed
+    view = _view(bus, tick.CACHE_FOLLOWUP)
+    assert view["public"] is False and len(view["rows"]) == 1
+
+
+def test_turning_the_estimate_off_retracts_both_views(monkeypatch):
+    _friday_alert()
+    tick.on_chain("SPY", _chain(_c(OSI, 10)), _at(MON, 9, 30))
+    bus = _after([_alert()], _at(MON, 9, 30))
+    assert _view(bus, tick.CACHE_SIDES)["contracts"]
+    assert _view(bus, tick.CACHE_FOLLOWUP)["rows"]
+    _set_cfg(monkeypatch, sides={"enabled": False})
+    bus = _after([], _at(MON, 9, 31))
+    assert _view(bus, tick.CACHE_SIDES) == {"date": MON, "public": False,
+                                            "contracts": {}}
+    assert _view(bus, tick.CACHE_FOLLOWUP) == {"date": None, "public": False,
+                                               "rows": []}
+    assert tick.wanted_osis() == []
+
+
+def test_turning_the_estimate_back_on_restores_both_views(monkeypatch):
+    _friday_alert()
+    tick.on_chain("SPY", _chain(_c(OSI, 10)), _at(MON, 9, 30))
+    _after([_alert()], _at(MON, 9, 30))
+    _set_cfg(monkeypatch, sides={"enabled": False})
+    _after([], _at(MON, 9, 31))
+    _set_cfg(monkeypatch)
+    bus = _after([], _at(MON, 9, 32))
+    assert AID in _view(bus, tick.CACHE_SIDES)["contracts"]
+    view = _view(bus, tick.CACHE_FOLLOWUP)
+    assert view["date"] == FRI and view["public"] is True and len(view["rows"]) == 1
+
+
+def test_turning_the_follow_up_off_retracts_its_view(monkeypatch):
+    _friday_alert()
+    bus = _after([], _at(MON, 8, 31))
+    assert _view(bus, tick.CACHE_FOLLOWUP)["rows"]
+    _set_cfg(monkeypatch, followup={"enabled": False})
+    bus = _after([], _at(MON, 8, 32))
+    assert _view(bus, tick.CACHE_FOLLOWUP) == {"date": None, "public": False,
+                                               "rows": []}
+
+
+def test_the_follow_up_turned_on_later_loads_what_is_waiting(monkeypatch):
+    _friday_alert()
+    _set_cfg(monkeypatch, followup={"enabled": False})
+    _after([], _at(MON, 8, 31))
+    _set_cfg(monkeypatch)
+    tick.on_chain("SPY", _chain(_c(OSI, 5, oi=1700)), _at(MON, 8, 32))
+    _after([], _at(MON, 8, 32))                      # loads and watches
+    tick.on_chain("SPY", _chain(_c(OSI, 9, oi=1700)), _at(MON, 8, 33))
+    bus = _after([], _at(MON, 8, 33))
+    assert _rows(FRI)[0]["verdict"] == "opened"
+    assert _view(bus, tick.CACHE_FOLLOWUP)["rows"][0]["verdict"] == "opened"
+
+
+def test_the_stream_turned_on_later_picks_up_contracts_already_flagged(monkeypatch):
+    _set_cfg(monkeypatch, sides={"stream": False})
+    _after([_alert()], _at(FRI, 9, 30))
+    assert tick.wanted_osis() == []
+    _set_cfg(monkeypatch)
+    _after([], _at(FRI, 9, 31))
+    assert tick.wanted_osis() == [OSI]
+
+
+def _stream(vol, **kw):
+    tick.stream_tick({"symbol": OSI, "total_volume": float(vol), **kw})
+
+
+def test_a_second_alert_on_a_contract_counts_its_stream_from_its_own_alert():
+    # An unusual-volume alert at 09:30, an outsized bet on the SAME contract at
+    # 11:00. The second row's "since the alert" must not include the 3,000
+    # contracts streamed before 11:00.
+    bd = "SPY|big_delta|call|770|2026-10-09"
+    tick.on_chain("SPY", _chain(_c(OSI, 1000)), _at(FRI, 9, 30))
+    _after([_alert()], _at(FRI, 9, 30))
+    _stream(1000, last=1.10, bid=1.00, ask=1.10)
+    _stream(4000)                                    # 3,000 bought since 09:30
+    _after([_alert(aid=bd, kind="big_delta")], _at(FRI, 11, 0))
+    _stream(4500)                                    # 500 more
+    c = _view(_after([], _at(FRI, 11, 1)), tick.CACHE_SIDES)["contracts"]
+    assert c[AID]["stream"] == {"bought": 3500.0, "sold": 0.0, "unlabelled": 0.0}
+    assert c[bd]["stream"] == {"bought": 500.0, "sold": 0.0, "unlabelled": 0.0}
+    # ...and both survive a restart.
+    tick.reset()
+    c = _view(_after([], _at(FRI, 11, 30)), tick.CACHE_SIDES)["contracts"]
+    assert c[AID]["stream"]["bought"] == 3500.0
+    assert c[bd]["stream"]["bought"] == 500.0
 
 
 def test_old_sessions_are_purged_with_the_configured_retention(monkeypatch):
@@ -505,7 +705,39 @@ def test_the_poll_hook_calls_on_chain():
 
 def test_run_flow_alerts_calls_after_alerts():
     from services.options_svc import handlers
-    src = inspect.getsource(handlers.run_flow_alerts)
-    assert "flow_sides_tick.after_alerts(bus, fresh, today, now_ts)" in src
-    # ...on every tick, not only when a new alert fired.
-    assert src.index("flow_sides_tick.after_alerts") < src.index("if fresh:")
+    lines = inspect.getsource(handlers.run_flow_alerts).splitlines()
+    (call,) = [i for i, ln in enumerate(lines)
+               if "flow_sides_tick.after_alerts(bus, fresh, today, now_ts)" in ln]
+    (gate,) = [i for i, ln in enumerate(lines) if ln.strip() == "if fresh:"]
+    indent = lambda ln: len(ln) - len(ln.lstrip())          # noqa: E731
+    # On every tick, not only when a new alert fired: at the gate's own depth,
+    # not inside it...
+    assert indent(lines[call]) == indent(lines[gate])
+    # ...and LAST, after the pushes and both publishes: it opens the store, and
+    # a slow store must not hold a phone push back.
+    for needle in ("send_flow_alert", "CACHE_FLOW_ALERTS", "_FLOW_COOLDOWN_KEY"):
+        assert max(i for i, ln in enumerate(lines) if needle in ln) < call, needle
+
+
+def test_a_flagged_contract_flows_from_the_detector_to_the_view(monkeypatch):
+    """End to end through ``handlers.run_flow_alerts``: the contract the poll
+    stashed comes out in ``flow_sides`` under the SAME id the alert list uses."""
+    from services.options_svc import compute, handlers
+    bus = Bus()
+    contract = {"type": "uoa", "side": "call", "symbol": "SPY", "strike": 770.0,
+                "expiry": "2026-10-09", "dte": 7, "cost": 1.85, "volume": 1400,
+                "oi": 100, "vol_oi": 14.0, "premium": 6e6, "osi": OSI}
+    monkeypatch.setattr(handlers, "_flow_alert_symbols", lambda: ["SPY"])
+    monkeypatch.setattr(handlers, "_load_flow_series_for", lambda conn, sym, limit: [])
+    monkeypatch.setattr(handlers.push_notify, "send_flow_alert", lambda a, **k: None)
+    monkeypatch.setattr(handlers, "_today_ct", lambda: FRI)
+    monkeypatch.setattr(compute, "take_uoa_stash", lambda: {"SPY": [dict(contract)]})
+    tick.on_chain("SPY", _chain(_c(OSI, 1000)), _at(FRI, 9, 30))
+    tick.on_chain("SPY", _chain(_c(OSI, 1400, last=1.10)), _at(FRI, 9, 31))
+    handlers.run_flow_alerts(bus)
+    (alert,) = _view(bus, handlers.CACHE_FLOW_ALERTS)["alerts"]
+    sides = _view(bus, tick.CACHE_SIDES)
+    assert sides["date"] == _view(bus, handlers.CACHE_FLOW_ALERTS)["date"] == FRI
+    assert sides["contracts"][alert["id"]]["poll"] == {
+        "bought": 400.0, "sold": 0.0, "unlabelled": 1000.0}
+    assert alert["osi"] == OSI

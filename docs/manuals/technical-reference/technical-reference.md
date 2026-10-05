@@ -2094,7 +2094,7 @@ crossed quote, it is **unlabelled** (0).
 
 | | Minute poll (`poll`) | Stream (`stream`) |
 |---|---|---|
-| Covers | The whole collection window, every contract with volume in every fetched chain | One contract, from the moment its alert fires |
+| Covers | From the regular open (08:30 CT) to the end of collection, every contract with volume in every fetched chain | One contract, from the moment its alert fires |
 | Resolution | One label per contract per fetch | One label per level-one tick |
 | Size of a step | `totalVolume` now − the highest `totalVolume` seen | `total_volume` now − the highest seen on the stream |
 | First reading | See "unwatched volume" below | Only seeds: books nothing |
@@ -2105,13 +2105,16 @@ printed; a stream subscribed at the alert can only see what follows.
 **The invariant: bought + sold + unlabelled = the contract's volume.** Volume is never
 dropped. What the service did not watch print is booked as unlabelled:
 
-- the volume a symbol already carries at its first fetch of the process (the open, or
-  the first fetch after a restart);
+- the volume a symbol already carries at its first fetch of the process after the
+  regular open (the first poll at or after 08:30 CT, or the first after a restart).
+  Nothing is booked before the open: until then a chain may still carry yesterday's
+  volume for a contract that has not traded yet;
 - the volume across a gap longer than `flow_sides_tick.MAX_GAP_SEC` = **450 s**,
   1.5 × the collector's slowest tier (`collection_tiers.MAX_TAIL_INTERVAL_MIN` = 5 min).
   The hedging-flow model uses 150 s because it measures one-minute symbols only; here
   a watchlist-only symbol's normal step must still be labelled;
-- on the stream, the first tick of each contract after every (re)connect.
+- on the stream, the first volume-carrying tick of each contract after every
+  (re)connect. A quote-only tick does not use that up.
 
 A contract first seen with volume in a symbol that *was* fetched a step earlier stood
 at zero then, so all of its volume is new and is labelled. The stored volume is a
@@ -2127,12 +2130,16 @@ oldest alert first, up to `[sides].stream_max_contracts` (200; never more than
 `STREAM_HARD_MAX` = 500, since the set travels as one request line). It reconnects when
 the set changes, times out after 45 s of silence (three missed keepalives), and backs
 off 3 → 60 s on failure. It starts with the scheduler loop, so it does not run under
-the dev profile.
+the dev profile, and there is one worker per process: a loop restarted by its
+supervisor reuses the live one. A second alert on a contract that is already streamed
+counts "since the alert" from its own alert, not from the first.
 
 **After a restart** the day's flagged contracts and their tallies are read back from
 `flow_contract_days`. What had been labelled stays labelled; everything else the
 contract has traded becomes unlabelled. Contracts not yet flagged lose their labels
-for the day so far.
+for the day so far. The stream figure is the one exception to "never dropped": what
+it had labelled is kept, but volume that printed while the service was down is not
+added to "since the alert".
 
 **Storage — `flow_contract_days` in `gex_history.db`.** One row per alert per session,
 keyed `(session_date, alert_id)`: the contract, the alert type and time, `oi_prev`
@@ -2155,18 +2162,28 @@ scheduler slot are added.
 | `oi_ratio` ≤ `closed_ratio` (−0.5) | `closed` | Mostly closed |
 | between | `mixed` | Mixed, or traded within the day |
 | any figure missing, non-finite or negative, or `volume` ≤ 0 | `none` | No reading |
+| the contract is not in today's chain | `none` | No reading |
+| the row is older than the previous trading day and was never read | `none` | No reading |
 | not read yet | *null* | Waiting for today's open interest |
 
 Both bounds are inclusive. The figure is **re-read on every fetch that day** and the
 verdict re-derived when it moves, with an INFO line
 (`flow follow-up: open interest moved …`), because when Schwab's chain starts showing
-the new open interest has not been measured.
+the new open interest has not been measured. A restart that day reloads the rows
+already read, so the re-reading continues, and a resolution is kept in memory until
+its write succeeds. Open interest does not change within a session, so a zero never
+replaces a positive figure already read that day (index open interest reads zero
+around the edges of a session).
 
 **Delivery.** `cache:options:flow_sides` (`skip_unchanged`, so it carries no timestamp)
 and `cache:options:flow_followup`, each with a top-level `public` flag stamped from
 `[sides].public`, which fails closed: only a literal `true` opens it. The Flow Alerts
-page and the Desk's flow panel read them through `flow.sides_view_shown`. Nothing here
-changes a phone push, a chime, the Desk's speech, or any ranking.
+page and the Desk's flow panel read them through `flow.sides_view_shown`. A switch
+takes effect within a minute, in both directions: changing `public` republishes the
+follow-up view, and turning `[sides].enabled` or `[followup].enabled` off publishes an
+empty, non-public view once so no screen keeps the old figures. The tally runs last
+in the flow-alert pass, after the pushes and the alert list. Nothing here changes a
+phone push, a chime, the Desk's speech, or any ranking.
 
 **Known limitations.**
 
@@ -2176,7 +2193,10 @@ changes a phone push, a chime, the Desk's speech, or any ranking.
 - **Spread legs and trades inside the quote** are mislabelled or unlabelled.
 - **Bought is not opening.** Only the next-day reading separates the two, and a
   same-day expiry never gets one: on 2026-10-02, 152 of 175 contract alerts (87%).
-- **Unmeasured:** the typical unlabelled share, how large a lean must be to mean
+- **A partial first chain.** If a symbol's first usable chain is missing an expiry,
+  the next full chain books those contracts' whole volume with one minute's label.
+- **Unmeasured:** whether a pre-open chain carries yesterday's volume (the reason
+  nothing is booked before 08:30), the typical unlabelled share, how large a lean must be to mean
   anything, the memory the per-contract entries take, and the hour at which the new
   open interest appears.
 

@@ -473,8 +473,11 @@ def sides_parts(entry):
                    f" · unlabelled {_share(poll['unlabelled'])}")
     stream = shares(entry.get("stream"))
     if stream is not None:
+        # The unlabelled share is printed here too: neither figure may look
+        # better measured than it was.
         after = (f"since the alert: bought {_share(stream['bought'])} · "
-                 f"sold {_share(stream['sold'])} of {stream['volume']:,.0f}")
+                 f"sold {_share(stream['sold'])} · "
+                 f"unlabelled {_share(stream['unlabelled'])} of {stream['volume']:,.0f}")
     return session, after
 
 

@@ -40,14 +40,25 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   No Schwab call was added. Pushes, chimes, Desk speech and rankings are unchanged.
 - **Where the build left the plan.** The gap limit is 450 s, not the hedging-flow
   model's 150 s, because a watchlist-only symbol's normal step is up to five
-  minutes. Volume is tallied for the whole collection window, with only the
-  open-interest read limited to regular hours. The stream set is capped at 500
-  contracts in code (one request line).
+  minutes. Volume is tallied from the 08:30 open to the end of collection (past the
+  15:00 close, since ETF options trade to 15:15), with only the open-interest read
+  limited to regular hours. The stream set is capped at 500 contracts in code (one
+  request line).
 - **Found on the way.** Two comment lines in `detect_uoa` pushed an existing guard
   past the silent-degrade threshold. Tests that run `scheduler.loop` started the
   real stream thread, so the suite's conftest now replaces its start. On the page
   harness, one long estimate line overflowed the Flow Alerts table at 1,700 px and
   ran over the alert-type cell on the Desk; both are fixed and pinned by tests.
+- **Code review before merge found six gaps, all fixed with tests.** A restart on
+  the follow-up day stopped re-reading a verdict already stored; a failed store
+  write lost its resolution; a row older than the previous trading day was read
+  against a later day's open interest; turning `public` or `enabled` off left the
+  old view in Redis; a single zero open-interest read could overwrite the day's
+  real figure; and the tally began at 08:00, where a chain may still carry
+  yesterday's volume (it now starts at the 08:30 open). Smaller ones: a quote-only
+  tick after a reconnect, a second alert on one contract inheriting the first's
+  "since the alert", a second stream worker after a scheduler restart, and the
+  tally running before the phone pushes.
 - **Not yet measured, and the first live sessions will show it:** the usual
   unlabelled share, how large a lean must be to mean anything, the memory the
   per-contract entries take, when Schwab's chain starts showing the new open

@@ -129,6 +129,33 @@ def test_a_verdict_with_no_reading_stores_null_figures(tmp_path):
     assert gh.load_unresolved_flow_days(conn, before="2026-10-05") == []
 
 
+def test_many_resolutions_are_written_in_one_call(tmp_path):
+    conn = _conn(tmp_path)
+    gh.upsert_flow_contract_days(conn, [_row("a"), _row("b"), _row("c")])
+    gh.resolve_flow_contract_days(conn, [
+        ("2026-10-02", "a", 10600.0, "2026-10-05", "opened", 0.615),
+        ("2026-10-02", "b", None, "2026-10-05", "expired", None)])
+    got = {r["alert_id"]: r for r in gh.load_flow_contract_days(conn, "2026-10-02")}
+    assert (got["a"]["verdict"], got["a"]["oi_next"]) == ("opened", 10600.0)
+    assert (got["b"]["verdict"], got["b"]["oi_next"]) == ("expired", None)
+    assert got["c"]["verdict"] is None
+    gh.resolve_flow_contract_days(conn, [])         # nothing to write is not an error
+
+
+def test_rows_whose_open_interest_was_read_on_a_date(tmp_path):
+    """What a restart must pick up again: a figure read TODAY is re-read for the
+    rest of today, because when Schwab's chain shows the new figure is unmeasured."""
+    conn = _conn(tmp_path)
+    gh.upsert_flow_contract_days(conn, [_row("read"), _row("expired"),
+                                        _row("old"), _row("waiting")])
+    gh.resolve_flow_contract_days(conn, [
+        ("2026-10-02", "read", 9985.0, "2026-10-05", "mixed", 0.0),
+        ("2026-10-02", "expired", None, "2026-10-05", "expired", None),
+        ("2026-10-02", "old", 9000.0, "2026-10-03", "closed", -0.9)])
+    got = gh.load_flow_days_read_on(conn, "2026-10-05")
+    assert [r["alert_id"] for r in got] == ["read"]
+
+
 def test_latest_session_before(tmp_path):
     conn = _conn(tmp_path)
     assert gh.latest_flow_session_before(conn, "2026-10-05") is None

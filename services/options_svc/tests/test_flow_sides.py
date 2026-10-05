@@ -135,6 +135,24 @@ def test_open_interest_of_zero_is_a_reading():
     assert book["C1"][fs.OI] == 0.0
 
 
+def test_a_zero_never_replaces_a_positive_open_interest_from_the_same_session():
+    # Open interest does not change within a session, and index open interest
+    # is known to read zero around the edges of one: a single zero at the last
+    # regular-hours poll would otherwise make tomorrow's verdict "opened" for
+    # every such row (code review, 2026-10-04).
+    book = {}
+    fs.advance(_chain(calls=[_c("C1", 100, oi=9985)]), book, seeded=False)
+    fs.advance(_chain(calls=[_c("C1", 150, oi=0)]), book, seeded=True)
+    assert book["C1"][fs.OI] == 9985.0
+
+
+def test_a_positive_open_interest_replaces_an_earlier_zero():
+    book = {}
+    fs.advance(_chain(calls=[_c("C1", 100, oi=0)]), book, seeded=False)
+    fs.advance(_chain(calls=[_c("C1", 150, oi=9985)]), book, seeded=True)
+    assert book["C1"][fs.OI] == 9985.0
+
+
 def test_open_interest_is_not_read_when_the_caller_says_not_to():
     # Index open interest reads zero outside the regular session: the caller
     # passes read_oi=False there, and the last regular-hours figure survives.

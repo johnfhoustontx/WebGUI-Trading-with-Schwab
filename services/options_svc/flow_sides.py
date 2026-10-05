@@ -71,7 +71,11 @@ def advance(chain, book, *, seeded, label=True, read_oi=True, watch=()) -> int:
             entry[HW] = vol
             booked += 1
         oi = _finite(c.get("openInterest")) if read_oi else None
-        if oi is not None and oi >= 0:
+        # Open interest does not change within a session, so a zero never
+        # replaces a positive figure already read: index open interest reads
+        # zero around the edges of a session, and one such read would turn the
+        # next day's verdict into "opened" (or "closed") for the whole row.
+        if oi is not None and (oi > 0 or (oi == 0 and not entry[OI])):
             entry[OI] = oi
     return booked
 

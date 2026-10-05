@@ -526,17 +526,39 @@ def load_unresolved_flow_days(conn: sqlite3.Connection, before: str) -> list[dic
     return _flow_day_rows(cur)
 
 
+def load_flow_days_read_on(conn: sqlite3.Connection, read_date: str) -> list[dict]:
+    """Rows whose next open interest was READ on ``read_date``. A restart on
+    that date picks them up again, so the figure keeps being re-read."""
+    cur = conn.execute(
+        f"SELECT {', '.join(_FLOW_DAY_COLS)} FROM flow_contract_days "
+        "WHERE oi_next_date = ? AND oi_next IS NOT NULL "
+        "ORDER BY session_date, fired_ts, alert_id", (read_date,))
+    return _flow_day_rows(cur)
+
+
+def resolve_flow_contract_days(conn: sqlite3.Connection, items) -> None:
+    """Record the next session's open interest and the verdict for many rows
+    in ONE commit. ``items`` is an iterable of ``(session_date, alert_id,
+    oi_next, oi_next_date, verdict, oi_ratio)``. A later call overwrites an
+    earlier one: the figure is re-read through the session, because when
+    Schwab's chain picks it up is not yet measured."""
+    params = [(oi_next, oi_next_date, verdict, oi_ratio, session_date, alert_id)
+              for session_date, alert_id, oi_next, oi_next_date, verdict, oi_ratio
+              in items]
+    if not params:
+        return
+    conn.executemany(
+        "UPDATE flow_contract_days SET oi_next = ?, oi_next_date = ?, "
+        "verdict = ?, oi_ratio = ? WHERE session_date = ? AND alert_id = ?", params)
+    conn.commit()
+
+
 def resolve_flow_contract_day(conn: sqlite3.Connection, session_date: str,
                               alert_id: str, *, oi_next, oi_next_date,
                               verdict, oi_ratio) -> None:
-    """Record the next session's open interest and the verdict for one row.
-    A second call overwrites the first: the figure is re-read through the
-    session, because when Schwab's chain picks it up is not yet measured."""
-    conn.execute(
-        "UPDATE flow_contract_days SET oi_next = ?, oi_next_date = ?, "
-        "verdict = ?, oi_ratio = ? WHERE session_date = ? AND alert_id = ?",
-        (oi_next, oi_next_date, verdict, oi_ratio, session_date, alert_id))
-    conn.commit()
+    """One row; see :func:`resolve_flow_contract_days`."""
+    resolve_flow_contract_days(
+        conn, [(session_date, alert_id, oi_next, oi_next_date, verdict, oi_ratio)])
 
 
 def latest_flow_session_before(conn: sqlite3.Connection, before: str) -> str | None:

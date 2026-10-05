@@ -61,9 +61,14 @@ Per contract, per fetched minute:
   a poll gap. The gap limit is 1.5 × the collector's slowest tier (450 s), not the
   hedging-flow model's 150 s: a watchlist-only symbol is fetched as rarely as every
   five minutes by design, and that normal step must still be labelled.
-- The tally runs for the whole collection window. It also keeps the contract's
-  latest `totalVolume` and its `openInterest`, the latter read in the regular
-  session only (index open interest reads zero outside it).
+- The tally starts at the regular open (08:30 CT) and runs to the end of
+  collection, past the 15:00 close, since ETF options trade to 15:15. It does not
+  start earlier: before the bell a chain may still carry yesterday's volume for a
+  contract that has not traded yet (unmeasured; this is the conservative reading,
+  and the hedging-flow model's). It also keeps the contract's latest `totalVolume`
+  and its `openInterest`, the latter read in the regular session only (index open
+  interest reads zero outside it), and a zero never replaces a positive figure
+  already read that session.
 - The poll hook works in memory only. It never opens the database, so it cannot
   slow or break a poll; the store work happens once a minute, after the detectors.
 
@@ -119,6 +124,14 @@ interest, the date it was read, and the verdict.
   (−0.5): mostly closed. Between: mixed or traded within the day. A contract whose
   expiry is the alert date: expired, no reading. A contract absent from the later
   chain, or with a non-positive volume: no reading. Never a guessed verdict.
+- **Only the previous trading day's rows are read.** A row left unread for a
+  session (the service was down, the follow-up was off) gets no reading: set
+  against a later day it would be several days of open-interest change divided by
+  one day's volume.
+- **A restart on the follow-up day keeps re-reading.** Rows whose figure was read
+  earlier that day are loaded again with the unread ones. A resolution is kept in
+  memory until its write has succeeded, so a locked store costs a minute, not the
+  reading.
 
 ## 4. Views
 
@@ -148,6 +161,12 @@ The alert list itself is not rewritten each minute; the page joins by alert id.
   hides the figures on the public origin through the same filter hedging flow uses.
   The public process reads Redis, so the switch is enforced at the service, not only
   on the page.
+- **A switch turned off takes effect within a minute.** Changing `public`
+  republishes the follow-up view even when no row moved. Turning `[sides].enabled`
+  or `[followup].enabled` off publishes an EMPTY, non-public view once, so no
+  screen keeps figures from before the switch. Switches turned on mid-session are
+  picked up the same way (contracts already flagged join the stream; waiting rows
+  are loaded).
 - **Phone pushes and Desk speech are unchanged.** The push fires at the alert, when
   the tally is thinnest.
 
@@ -173,7 +192,18 @@ keep_sessions = 20
 
 - A measurement failure never breaks collection: the hook is best-effort and counted
   through `_degrade.degraded`.
-- A dead stream leaves the poll tally intact and the stream figure absent.
+- A dead stream leaves the poll tally intact and the stream figure frozen at its
+  last reading. The stream figure is NOT covered by the "never dropped" rule
+  across a service restart: what it had labelled is kept, but the volume that
+  printed while the service was down is not added to "since the alert". Across a
+  reconnect within one run it is added, unlabelled.
+- A second alert on a contract already streamed counts "since the alert" from its
+  own alert, not from the first one.
+- One stream worker per process: a scheduler loop restarted by its supervisor
+  reuses the live one.
+- **Known and not handled:** if the first usable chain for a symbol is missing an
+  expiry, the next full chain books those contracts' whole volume with one
+  minute's label.
 - Volume the service did not watch print is **unlabelled**, never dropped: a
   contract's volume from before a restart, and the volume across a poll gap. So
   bought + sold + unlabelled always equals the contract's volume, and a tally that

@@ -46,6 +46,22 @@ def test_the_first_tick_of_a_contract_after_a_connect_is_unlabelled(monkeypatch)
     assert calls == [(A, False), (A, True), (B, False), (A, True)]
 
 
+def test_a_quote_only_tick_does_not_use_up_the_unlabelled_first_volume(monkeypatch):
+    # After a reconnect the first tick may carry only a bid or an ask. The
+    # volume that printed while the stream was down arrives on a LATER tick,
+    # and that one is the tick that must go unlabelled (code review, 2026-10-04).
+    calls = []
+    monkeypatch.setattr(flow_sides_tick, "stream_tick",
+                        lambda tick, label=True: calls.append(label))
+    seen = set()
+    flow_stream.handle({"symbol": A, "bid": 1.0, "ask": 1.1}, seen)
+    flow_stream.handle({"symbol": A, "total_volume": None, "last": 1.1}, seen)
+    assert seen == set()
+    flow_stream.handle({"symbol": A, "total_volume": 1500.0}, seen)
+    flow_stream.handle({"symbol": A, "total_volume": 1600.0}, seen)
+    assert calls == [False, False, False, True]
+
+
 @pytest.mark.parametrize("tick", [None, 5, {}, {"symbol": ""}, {"symbol": None}])
 def test_a_tick_with_no_contract_symbol_is_dropped(monkeypatch, tick):
     monkeypatch.setattr(flow_sides_tick, "stream_tick",
@@ -241,6 +257,31 @@ def test_start_returns_a_stop_event_and_runs_a_daemon_thread(monkeypatch):
         stop.set()
     t.join(5)
     assert not t.is_alive()
+
+
+def test_a_second_start_reuses_the_live_worker(monkeypatch):
+    # The scheduler loop is restarted by its supervisor after a crash; each
+    # restart must not add a thread and a second proxy subscription.
+    def _worker(stop):
+        stop.wait(5)
+
+    monkeypatch.setattr(flow_stream, "_worker", _worker)
+    before = set(threading.enumerate())
+    first = _REAL_START()
+    try:
+        assert _REAL_START() is first
+        new = [t for t in threading.enumerate() if t not in before]
+        assert len(new) == 1
+    finally:
+        first.set()
+    new[0].join(5)
+    # Once it has ended, a start launches a fresh one.
+    second = _REAL_START()
+    try:
+        assert second is not first
+    finally:
+        second.set()
+    flow_stream._RUNNING["thread"].join(5)
 
 
 def test_the_suite_does_not_start_the_real_worker():

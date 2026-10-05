@@ -821,7 +821,7 @@ was sold.
 **How to read it.** A cell reads, for example:
 
 > ≈ bought 56.67% · sold 29.95% · unlabelled 13.38%
-> since the alert: bought 71.05% · sold 20.00% of 12,400
+> since the alert: bought 71.05% · sold 20.00% · unlabelled 8.95% of 12,400
 
 - The **first line** covers the contract's whole day. Once a minute the app takes the
   contract's new volume and looks at where its latest trade printed: at the ask is

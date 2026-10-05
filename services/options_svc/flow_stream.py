@@ -66,7 +66,11 @@ def handle(tick, seen) -> None:
     if not osi:
         return
     flow_sides_tick.stream_tick(tick, label=osi in seen)
-    seen.add(osi)
+    # Only a tick that CARRIED a volume uses up the unlabelled first step: a
+    # quote-only tick arriving first would otherwise let the next one, which
+    # brings everything printed while the stream was down, take a label.
+    if tick.get("total_volume") is not None:
+        seen.add(osi)
 
 
 def _consume(session, osis, stop) -> bool:
@@ -126,9 +130,22 @@ def _worker(stop) -> None:
                 0, base=RECONNECT_WAIT_SEC, cap=RECONNECT_WAIT_MAX_SEC))
 
 
+_RUNNING: dict = {"thread": None, "stop": None}
+
+
 def start() -> threading.Event:
-    """Launch the worker on a daemon thread; return its ``stop`` Event."""
+    """Launch the worker on a daemon thread; return its ``stop`` Event.
+
+    ONE worker per process: the scheduler loop that calls this is restarted by
+    its supervisor after a crash, and each call would otherwise add a thread
+    and a second proxy subscription. While a worker is alive its own stop
+    event is returned."""
+    thread = _RUNNING["thread"]
+    if thread is not None and thread.is_alive():
+        return _RUNNING["stop"]
     stop = threading.Event()
-    threading.Thread(target=_worker, args=(stop,), daemon=True,
-                     name=THREAD_NAME).start()
+    thread = threading.Thread(target=_worker, args=(stop,), daemon=True,
+                              name=THREAD_NAME)
+    _RUNNING.update(thread=thread, stop=stop)
+    thread.start()
     return stop

@@ -39,6 +39,17 @@ def _no_flow_stream_thread(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _fresh_flow_sides_state():
+    """``flow_sides_tick`` keeps the session's books and flagged contracts in
+    module state, and ``run_flow_alerts`` feeds it on every call. Without a
+    reset, one handler test's flagged contracts would carry into the next."""
+    from services.options_svc import flow_sides_tick
+    flow_sides_tick.reset()
+    yield
+    flow_sides_tick.reset()
+
+
+@pytest.fixture(autouse=True)
 def _no_live_claude(monkeypatch):
     """Neutralize real Claude-client resolution across the whole options_svc suite.
 
