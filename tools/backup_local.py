@@ -159,6 +159,11 @@ DATA_TREES = (
     "shared/data",
     "services/trade_svc/data",
     "services/news_svc/data",
+    # The site Blog's source of truth: blog.db (taken by the online backup
+    # below, like every *.db) AND, as plain files, every published entry's
+    # document, every draft waiting, and the typefaces they name. The site's
+    # own blog/ folder is rebuilt from these and is not carried.
+    "services/blog_svc/data",
     "schwab-proxy/data",
     # The public site's generated state: every posted trade idea's card, and the
     # market reports the site frames. Both are gitignored, so a rebuilt box

@@ -18,6 +18,24 @@ def test_the_blog_paths_live_under_the_service_and_the_site():
     assert repo_paths.BLOG_TOML == repo_paths.REPO_ROOT / "config" / "blog.toml"
 
 
+def test_the_blog_store_is_guarded_from_the_suite():
+    """The repo-root guard refuses ``sqlite3.connect`` on a listed folder's
+    databases. Unlisted, a test that made a default ``Store()`` would open - or
+    create - the live blog.db."""
+    import conftest
+    assert repo_paths.BLOG_DATA in conftest._LIVE_DIRS
+    assert conftest.is_protected(repo_paths.BLOG_DB)
+    assert conftest.is_protected(f"file:{repo_paths.BLOG_DB}?mode=ro")
+
+
+def test_the_blog_store_is_backed_up():
+    """The data tree is swept WHOLE: the entries' documents and the typefaces
+    are plain files, which the ``*.db`` pass alone would leave behind. The site
+    folder is rebuilt from the store, so the store is the only copy."""
+    from tools import backup_local
+    assert "services/blog_svc/data" in backup_local.DATA_TREES
+
+
 def test_the_config_file_ships():
     """The loader degrades to its defaults without the file, so a missing file
     would go unnoticed: the Settings catalogue and the operator both read it."""

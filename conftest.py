@@ -52,6 +52,7 @@ _LIVE_DIRS = (
     _ROOT / "webgui" / "data",
     _ROOT / "services" / "trade_svc" / "data",
     _ROOT / "services" / "news_svc" / "data",
+    _ROOT / "services" / "blog_svc" / "data",
 )
 
 

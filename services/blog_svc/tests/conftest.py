@@ -26,6 +26,27 @@ class NetworkReached(BaseException):
 
 
 @pytest.fixture(autouse=True)
+def _blog_store_in_tmp(monkeypatch, tmp_path):
+    """Point the store's DEFAULT paths at this test's own folder.
+
+    ``store.Store()`` with no arguments reads ``repo_paths.BLOG_DATA`` and
+    ``BLOG_DB`` when it is made, so patching the two names is enough - and it
+    has to be done here, for every test, because the store keeps documents and
+    typefaces as plain FILES. The repo-root guard watches ``sqlite3.connect``;
+    it would refuse the live database and never notice a draft's document
+    landing in the live folder beside it. (The store connects before it makes
+    any folder for exactly that reason; ``test_store.py`` pins both halves.)
+
+    ⚠ This shares the test's ``monkeypatch``. A test that calls
+    ``monkeypatch.undo()`` takes this off, and the repo-root guard with it:
+    use ``with monkeypatch.context()`` for a patch that must end early."""
+    import repo_paths
+    data = tmp_path / "blog-data"
+    monkeypatch.setattr(repo_paths, "BLOG_DATA", data)
+    monkeypatch.setattr(repo_paths, "BLOG_DB", data / "blog.db")
+
+
+@pytest.fixture(autouse=True)
 def _no_real_network(monkeypatch):
     """The repo-root conftest guards SQLite but NOT the network (CLAUDE.md says
     otherwise and is wrong). The cleaner reaches no network, and fonts.py reads
