@@ -652,11 +652,16 @@ def test_no_other_text_field_is_held_to_the_user_agent_rule():
 
 
 def test_every_shipped_blog_number_sits_on_its_fields_step():
-    """The number input is given ``step`` and no ``min`` (pages/config_editor:
-    Quasar would clamp silently), so the browser's arrows walk a grid that
-    starts at 0, not at the field's lowest value. Nothing here snaps a typed
-    value to it. A shipped value off that grid would jump the first time an
-    arrow was pressed - 30 to 31, say - so each ships ON it."""
+    """A browser's arrows walk a grid of ``step``, and where that grid STARTS
+    depends on whether the input is given a lowest value: from 0 without one,
+    from the lowest value with one. Today the number input is given ``step``
+    and no ``min`` (pages/config_editor: Quasar would clamp silently), so it is
+    the first; a change there would make it the second. Nothing snaps a typed
+    value to either.
+
+    A shipped value off the grid jumps the first time an arrow is pressed - 400
+    to 401, with a step of 50 from 1. So each ships on BOTH grids, which comes
+    to this: the step divides the shipped value, and the lowest value too."""
     from shared import blog_inbox
     cfg = cs.BY_NAME["blog.toml"]
     for sec in cfg.sections:
@@ -664,7 +669,13 @@ def test_every_shipped_blog_number_sits_on_its_fields_step():
             if f.kind != "int":
                 continue
             table, key = cs.split_key(f.key)
-            assert f.step and blog_inbox.DEFAULTS[table][key] % f.step == 0, f.key
+            shipped = blog_inbox.DEFAULTS[table][key]
+            assert f.step and f.step == int(f.step) >= 1, f.key
+            assert shipped % f.step == 0, f"{f.key}: {shipped} is not a multiple of {f.step}"
+            assert (shipped - f.min) % f.step == 0, (
+                f"{f.key}: {shipped} is not reached from {f.min} in steps of {f.step}")
+            # ... and the arrows can reach the highest value the field allows.
+            assert (f.max - f.min) % f.step == 0, f.key
 
 
 def test_the_typeface_help_says_what_actually_happens():

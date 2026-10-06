@@ -57,6 +57,10 @@ max_links = 4              # typeface stylesheets followed for one entry; the re
 max_css_kb = 256           # the most one stylesheet may send back; a larger one is not read
 max_files = 24             # typeface files copied for one entry; the rest are skipped
 max_file_kb = 400          # a larger typeface file is refused rather than stored
+# All of one entry's typeface files together, in MB: they are held in memory at
+# once. Past it no more are fetched and the draft says how many were left out.
+# As shipped it is above what the two limits above allow (24 x 400 KB = 9.6 MB).
+max_total_mb = 12
 # The @font-face rules written into one entry, across all its stylesheets. Many
 # rules can name one file, so max_files does not bound this, and the rules are
 # added to the entry after its own size limit was applied. Past it the rest are

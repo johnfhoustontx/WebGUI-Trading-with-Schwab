@@ -129,6 +129,92 @@ def test_a_file_past_the_cap_is_counted_once_however_many_blocks_name_it():
     assert result.note == SOME + "2 files were past the limit of 1."
 
 
+MB = 1024 * 1024
+
+
+def _sized(seed, length) -> bytes:
+    """A typeface file of exactly ``length`` bytes."""
+    data = woff2(seed, size=length - 48)
+    assert len(data) == length
+    return data
+
+
+@pytest.mark.parametrize("last, kept", [(MB - 800 * 1024, True), (MB - 800 * 1024 + 1, False)],
+                         ids=["to the byte", "one byte over"])
+def test_the_bytes_held_reach_their_limit_exactly_and_never_pass_it(last, kept):
+    """Every file of one entry is in memory at once. ``max_total_mb`` is the
+    most they may come to: a file that fits to the byte is kept, one that
+    would make it a byte more is not - and after either, nothing more is asked
+    for."""
+    files = {G + "a.woff2": _sized("a", 400 * 1024), G + "b.woff2": _sized("b", 400 * 1024),
+             G + "c.woff2": _sized("c", last), G + "d.woff2": _sized("d", 48),
+             G + "e.woff2": _sized("e", 48)}
+    css = sheet(*[face("latin", url, weight=str(100 + 100 * n)) for n, url in enumerate(files)])
+    web = Web({LINK: css, **files})
+    result = audit(fonts.localize([LINK], fetch=web, cfg={"max_total_mb": 1}))
+    assert web.urls == [LINK] + list(files)[:3]             # d and e are never asked for
+    held = sum(len(data) for data in result.files.values())
+    assert held == (MB if kept else 800 * 1024) and held <= MB
+    assert len(result.files) == (3 if kept else 2)
+    assert result.note == SOME + (f"{2 if kept else 3} files were past the limit of 1 MB in all.")
+
+
+def test_a_file_named_again_after_the_byte_limit_is_counted_once_and_not_asked_twice():
+    files = {G + "a.woff2": _sized("a", 400 * 1024), G + "b.woff2": _sized("b", 400 * 1024),
+             G + "c.woff2": _sized("c", 400 * 1024)}
+    css = sheet(*[face("latin", url, weight=str(100 + 100 * n)) for n, url in enumerate(files)],
+                face("latin", G + "c.woff2", weight="800"), face("latin", G + "a.woff2", weight="900"))
+    web = Web({LINK: css, **files})
+    result = audit(fonts.localize([LINK], fetch=web, cfg={"max_total_mb": 1}))
+    assert web.urls == [LINK] + list(files)
+    assert weights(result.css) == ["100", "200", "900"]     # a file already held is still used
+    assert result.note == SOME + "1 file was past the limit of 1 MB in all."
+
+
+def test_a_file_refused_for_its_bytes_has_one_reason_not_two():
+    """It was asked for, weighed and not kept. When the rules later fill and
+    another block names it, that block is not "past the rule limit" as well:
+    its file already has its reason."""
+    files = {G + "a.woff2": _sized("a", 400 * 1024), G + "b.woff2": _sized("b", 400 * 1024),
+             G + "c.woff2": _sized("c", 400 * 1024)}
+    css = sheet(face("latin", G + "a.woff2", weight="100"), face("latin", G + "b.woff2", weight="200"),
+                face("latin", G + "c.woff2", weight="300"),         # weighed, and not kept
+                face("latin", G + "a.woff2", weight="400"),         # the third rule: now full
+                face("latin", G + "c.woff2", weight="500"))
+    web = Web({LINK: css, **files})
+    result = audit(fonts.localize([LINK], fetch=web, cfg={"max_total_mb": 1, "max_rules": 3}))
+    assert weights(result.css) == ["100", "200", "400"] and web.urls == [LINK] + list(files)
+    assert result.note == SOME + "1 file was past the limit of 1 MB in all."
+
+
+def test_a_file_already_held_weighs_nothing_more():
+    """The same bytes under a second address are one file in the result, so
+    they are weighed once: with 800 KB of the megabyte used, a third address
+    that turns out to be the first file again is kept, and a fourth that is
+    new and too large is not."""
+    again = _sized("a", 400 * 1024)
+    files = {G + "a.woff2": again, G + "b.woff2": _sized("b", 400 * 1024),
+             G + "mirror.woff2": bytes(again), G + "new.woff2": _sized("n", 400 * 1024)}
+    css = sheet(*[face("latin", url, weight=str(100 + 100 * n)) for n, url in enumerate(files)])
+    web = Web({LINK: css, **files})
+    result = audit(fonts.localize([LINK], fetch=web, cfg={"max_total_mb": 1}))
+    assert weights(result.css) == ["100", "200", "300"]
+    assert sum(len(data) for data in result.files.values()) == 800 * 1024
+    assert result.note == SOME + "1 file was past the limit of 1 MB in all."
+
+
+def test_as_shipped_the_byte_limit_is_above_what_the_other_two_allow():
+    """24 files of 400 KB is 9.6 MB, under the shipped 12 MB: the total binds
+    only once one of the other two is raised."""
+    shipped = blog_inbox.fonts()
+    files = {G + f"f{n}.woff2": _sized(f"f{n}", shipped["max_file_kb"] * 1024)
+             for n in range(shipped["max_files"])}
+    css = sheet(*[face("latin", url, weight=str(100 + n)) for n, url in enumerate(files)])
+    result = audit(fonts.localize([LINK], fetch=Web({LINK: css, **files})))
+    assert len(result.files) == 24 and result.note == ""
+    assert sum(len(data) for data in result.files.values()) <= shipped["max_total_mb"] * MB
+
+
 def test_a_count_is_only_ever_kept_under_a_reason():
     """The other half of ``test_every_reason_has_its_words...``: the place a
     count is MADE refuses a name that is not on the list, where it happens."""

@@ -676,10 +676,53 @@ SHIPPED_USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537
 def test_the_fonts_and_site_sections_have_the_shipped_values():
     assert bi.fonts() == {"enabled": True, "subsets": ["latin", "latin-ext"],
                           "max_links": 4, "max_css_kb": 256,
-                          "max_files": 24, "max_file_kb": 400, "max_rules": 96,
-                          "timeout_sec": 10, "total_sec": 30,
+                          "max_files": 24, "max_file_kb": 400, "max_total_mb": 12,
+                          "max_rules": 96, "timeout_sec": 10, "total_sec": 30,
                           "user_agent": SHIPPED_USER_AGENT}
     assert bi.site() == {"enabled": True, "republish_min": 30}
+
+
+def test_the_bytes_a_typeface_copy_may_hold_are_bounded():
+    """Every file of one entry is held in memory at once, until the store
+    writes them. ``max_files`` times ``max_file_kb`` was all that bounded it,
+    and at those two settings' old ceilings (200 files of 4 MB) that was 800 MB.
+
+    So: lower ceilings on both, and a total of its own. At the ceilings the
+    three now agree - 64 files of 1 MB is 64 MB, and 64 MB is the most the
+    total may be set to - and as shipped the total is above what the other two
+    allow, so it changes nothing until one of them is raised."""
+    assert bi.BOUNDS[("fonts", "max_files")] == (1, 64)
+    assert bi.BOUNDS[("fonts", "max_file_kb")] == (16, 1024)
+    assert bi.BOUNDS[("fonts", "max_total_mb")] == (1, 64)
+    shipped = bi.DEFAULTS["fonts"]
+    assert (shipped["max_files"], shipped["max_file_kb"], shipped["max_total_mb"]) == (24, 400, 12)
+    assert shipped["max_files"] * shipped["max_file_kb"] <= shipped["max_total_mb"] * 1024
+    most_files, largest_kb = bi.BOUNDS[("fonts", "max_files")][1], bi.BOUNDS[("fonts", "max_file_kb")][1]
+    assert most_files * largest_kb == bi.BOUNDS[("fonts", "max_total_mb")][1] * 1024
+
+
+@pytest.mark.parametrize("key, value", [
+    ("max_files", 65), ("max_files", 200), ("max_files", 0),
+    ("max_file_kb", 1025), ("max_file_kb", 4096), ("max_file_kb", 15), ("max_file_kb", 1),
+    ("max_total_mb", 65), ("max_total_mb", 0), ("max_total_mb", 800),
+])
+def test_a_typeface_setting_outside_its_new_bounds_reads_as_the_shipped_one(monkeypatch, key, value):
+    """A ``config/local/blog.toml`` written when the ceilings were higher may
+    still hold 200 files or 4,096 KB. It reads as the shipped value - not as
+    the new ceiling, which would be a number nobody chose."""
+    shipped = bi.fonts()
+    _cfg(monkeypatch, fonts={key: value})
+    assert bi.fonts() == shipped
+    assert bi.fonts({key: value}) == shipped
+
+
+@pytest.mark.parametrize("key, value", [
+    ("max_files", 1), ("max_files", 64), ("max_file_kb", 16), ("max_file_kb", 1024),
+    ("max_total_mb", 1), ("max_total_mb", 64),
+])
+def test_a_typeface_setting_at_either_new_bound_is_read(monkeypatch, key, value):
+    _cfg(monkeypatch, fonts={key: value})
+    assert bi.fonts()[key] == value
 
 
 def test_the_rules_written_into_an_entry_are_bounded():
@@ -769,8 +812,8 @@ def test_a_typeface_copy_is_bounded_in_every_direction():
     how large each, how many files, how large each, how long each request may
     take and how long all of them together. The cleaner caps none of it - it
     hands over every link it found - so each needs a number here, with bounds."""
-    for key in ("max_links", "max_css_kb", "max_files", "max_file_kb", "max_rules",
-                "timeout_sec", "total_sec"):
+    for key in ("max_links", "max_css_kb", "max_files", "max_file_kb", "max_total_mb",
+                "max_rules", "timeout_sec", "total_sec"):
         assert ("fonts", key) in bi.BOUNDS, key
     assert bi.BOUNDS[("fonts", "max_links")] == (1, 16)
     assert bi.BOUNDS[("fonts", "max_css_kb")] == (16, 2048)
@@ -804,14 +847,16 @@ def test_a_value_inside_its_bounds_is_read(monkeypatch):
     _cfg(monkeypatch, limits={"max_drafts": 3, "max_wait_sec": 45.0},
          fonts={"enabled": False, "subsets": ["cyrillic", "latin", "latin"],
                 "timeout_sec": 4, "max_links": 2, "max_css_kb": 64, "total_sec": 12,
-                "max_rules": 40, "user_agent": "Mozilla/5.0 (a newer browser)"},
+                "max_rules": 40, "user_agent": "Mozilla/5.0 (a newer browser)",
+                "max_total_mb": 30},
          site={"enabled": False, "republish_min": 5})
     assert bi.limits()["max_drafts"] == 3
     assert bi.limits()["max_wait_sec"] == 45 and isinstance(bi.limits()["max_wait_sec"], int)
     assert bi.limits()["title_chars"] == 140            # an unnamed key keeps its default
     assert bi.fonts() == {"enabled": False, "subsets": ["cyrillic", "latin"],
                           "max_links": 2, "max_css_kb": 64,
-                          "max_files": 24, "max_file_kb": 400, "max_rules": 40,
+                          "max_files": 24, "max_file_kb": 400, "max_total_mb": 30,
+                          "max_rules": 40,
                           "timeout_sec": 4, "total_sec": 12,
                           "user_agent": "Mozilla/5.0 (a newer browser)"}
     assert bi.site() == {"enabled": False, "republish_min": 5}
@@ -841,6 +886,7 @@ max_links = 17
 max_css_kb = 8
 max_files = 0
 max_file_kb = -400
+max_total_mb = 800
 max_rules = 1001
 timeout_sec = 100000
 total_sec = "30"

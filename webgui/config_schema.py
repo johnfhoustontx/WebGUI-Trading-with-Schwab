@@ -1414,7 +1414,7 @@ _BLOG = ConfigFile(
                   "app whenever one changes. They are also sent again this "
                   "often, so the page recovers by itself if the server's cache "
                   "is ever emptied.", kind="int", unit="min",
-                  min=1, max=1440, step=5),
+                  min=1, max=1440, step=1),
         )),
         Section("Drafts", "What is accepted as a draft, from Claude Chat or from "
                 "an upload on the Blog page.", (
@@ -1422,7 +1422,7 @@ _BLOG = ConfigFile(
                   "A document larger than this is refused before it is read. "
                   "Measured as the file arrives, before anything is removed "
                   "from it. The first entry written for the site was 35 KB.",
-                  kind="int", unit="KB", min=1, max=4096, step=64),
+                  kind="int", unit="KB", min=1, max=4096, step=1),
             Field("limits.max_drafts", "Drafts waiting at once",
                   "With this many drafts waiting, a new one is refused until "
                   "you publish or discard one.",
@@ -1435,11 +1435,11 @@ _BLOG = ConfigFile(
                   "A draft that waited longer than this before the Blog service "
                   "reached it is refused, and Claude Chat is told to send it "
                   "again. It stops a restarted service working through old "
-                  "requests.", kind="int", unit="seconds", min=1, max=3600, step=10),
+                  "requests.", kind="int", unit="seconds", min=1, max=3600, step=1),
             Field("limits.answer_keep_sec", "Keep each reply to Claude Chat for",
                   "How long the reply to one request can still be collected "
                   "before it is cleared away.",
-                  kind="int", unit="seconds", min=1, max=3600, step=10),
+                  kind="int", unit="seconds", min=1, max=3600, step=1),
             Field("limits.clean_sec", "Time to clean one document",
                   "Each document is cleaned in a separate process, stopped if it "
                   "takes longer than this; a document that times out is refused "
@@ -1458,11 +1458,11 @@ _BLOG = ConfigFile(
                 "longer address is refused.", (
             Field("limits.title_chars", "Longest title",
                   "A longer title is cut here.",
-                  kind="int", unit="characters", min=1, max=300, step=10),
+                  kind="int", unit="characters", min=1, max=300, step=1),
             Field("limits.summary_chars", "Longest summary",
                   "The summary is the line under the title in the list of "
                   "entries and in a shared link's preview. A longer one is cut "
-                  "here.", kind="int", unit="characters", min=1, max=1000, step=10),
+                  "here.", kind="int", unit="characters", min=1, max=1000, step=1),
             Field("limits.max_tags", "Most tags on one entry",
                   "Tags past this number are dropped.",
                   kind="int", unit="tags", min=1, max=24, step=1),
@@ -1505,17 +1505,25 @@ _BLOG = ConfigFile(
                   "would have styled uses a fallback font. It counts the "
                   "files asked for, so one that fails to arrive still uses "
                   "one up.",
-                  kind="int", unit="files", min=1, max=200, step=1),
+                  kind="int", unit="files", min=1, max=64, step=1),
             Field("fonts.max_file_kb", "Largest typeface file",
                   "A larger file is not stored.",
-                  kind="int", unit="KB", min=1, max=4096, step=50),
+                  kind="int", unit="KB", min=16, max=1024, step=16),
+            Field("fonts.max_total_mb", "Most typeface bytes for one entry",
+                  "All of one entry's typeface files together. They are held "
+                  "in memory at once while a draft is being filed, so this is "
+                  "what one draft can cost. Once it is reached no more are "
+                  "fetched, and the draft says how many were left out. As it "
+                  "ships it is above what the two settings before it allow, so "
+                  "it only matters once one of them is raised.",
+                  kind="int", unit="MB", min=1, max=64, step=1),
             Field("fonts.max_rules", "Most typeface rules written into one entry",
                   "Each weight and style of a typeface, in each character set, "
                   "is one rule added to the entry, and several rules can share "
                   "one file. Rules past this number are left out and the draft "
                   "says how many. It keeps what is added to an entry small: at "
                   "most about 3 KB for each rule, usually a tenth of that.",
-                  kind="int", unit="rules", min=1, max=1000, step=8),
+                  kind="int", unit="rules", min=1, max=1000, step=1),
             Field("fonts.timeout_sec", "Longest wait for Google Fonts",
                   "For each request. A typeface that does not arrive in time is "
                   "left out and the draft says so; it never holds a draft up.",
@@ -1527,7 +1535,7 @@ _BLOG = ConfigFile(
                   "Claude Chat may wait (Drafts, above): the next draft is not "
                   "read until this one's typefaces are done, and one that "
                   "waits too long behind it will expire.",
-                  kind="int", unit="seconds", min=1, max=600, step=5),
+                  kind="int", unit="seconds", min=1, max=600, step=1),
             Field("fonts.user_agent", "Browser named to Google Fonts",
                   "Google Fonts sends woff2 files, split by character set, "
                   "only to a browser it knows can read them. This is the "

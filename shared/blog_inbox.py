@@ -181,6 +181,11 @@ DEFAULTS = {
         "max_css_kb": 256,
         "max_files": 24,
         "max_file_kb": 400,
+        # The bytes of ALL of one entry's files together, in MB. They are held
+        # in memory at once until the store writes them, and the two limits
+        # above only bound that as a product. As shipped it is above what they
+        # allow (24 x 400 KB is 9.6 MB), so it binds once one of them is raised.
+        "max_total_mb": 12,
         # The @font-face rules written into one entry, across all its
         # stylesheets. ``max_files`` does not bound this: many rules can name
         # one file (a variable face asked for by weight is one rule per weight),
@@ -238,8 +243,12 @@ BOUNDS = {
     ("limits", "clean_mem_mb"): (128, 4096),
     ("fonts", "max_links"): (1, 16),
     ("fonts", "max_css_kb"): (16, 2048),
-    ("fonts", "max_files"): (1, 200),
-    ("fonts", "max_file_kb"): (1, 4096),
+    # Three bounds on one quantity: the bytes a typeface copy holds in memory.
+    # The ceilings agree - 64 files of 1,024 KB is 64 MB. (They were 200 files
+    # of 4,096 KB with no total: 800 MB.)
+    ("fonts", "max_files"): (1, 64),
+    ("fonts", "max_file_kb"): (16, 1024),
+    ("fonts", "max_total_mb"): (1, 64),
     ("fonts", "max_rules"): (1, 1000),
     ("fonts", "timeout_sec"): (1, 60),
     ("fonts", "total_sec"): (1, 600),

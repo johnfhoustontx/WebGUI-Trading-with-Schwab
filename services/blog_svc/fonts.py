@@ -35,8 +35,8 @@ because a ``Fonts`` is a plain record anything can build.
 ``https://fonts.gstatic.com/....woff2``. ``http_fetch`` checks the host again
 on the text before it connects, follows no redirect, and counts the body as it
 arrives. How many links, how large a stylesheet, how many files, how large a
-file, how long one request and how long all of them: ``config/blog.toml
-[fonts]``. None of it is capped by the cleaner.
+file, how many bytes of files in all, how long one request and how long all of
+them: ``config/blog.toml [fonts]``. None of it is capped by the cleaner.
 
 **What is written is bounded too.** Files are not rules: many blocks can name
 one file, so ``[fonts] max_rules`` caps the rules, and one rule can be no
@@ -736,6 +736,8 @@ class Reason(enum.Enum):
             "files could not be fetched or were not typefaces")
     FILE_OVER = ("file was past the limit of {max_files}",
                  "files were past the limit of {max_files}")
+    BYTES_OVER = ("file was past the limit of {max_total_mb} MB in all",
+                  "files were past the limit of {max_total_mb} MB in all")
     LATE = ("the time allowed for copying ran out",)
     FAULT = ("the Blog service hit an error",)
 
@@ -791,8 +793,11 @@ class _Copy:
         self.files = {}
         self.named = set()            # every family any stylesheet named
         self.offered = set()          # ... those with a block in a copied character set
-        self._asked = {}              # address -> its name, or _NoFile.FAILED: asked once
+        self._asked = {}              # address -> its name, or a _NoFile: asked once
         self._over = set()            # addresses a limit turned away, each counted once
+        self._held = 0                # the bytes of every file in ``files``
+        self._room = settings["max_total_mb"] * 1024 * 1024
+        self._full = False            # once True, no further file is asked for
 
     def run(self, font_links) -> Fonts:
         faces = []
@@ -938,16 +943,21 @@ class _Copy:
         one file) and whether or not it worked: the answer is remembered.
         ``max_files`` counts those requests, not the files that came of them -
         it bounds the work done for one entry, and a stylesheet whose first
-        files all fail does not get the limit again in tries."""
+        files all fail does not get the limit again in tries.
+
+        ``max_total_mb`` bounds what is HELD: every file here is in memory
+        until the store writes it. A file that would take the total past it is
+        not kept, and from then on - or from the moment the total is reached
+        exactly - nothing more is asked for. So the bytes in ``files`` never
+        pass the limit; what is in memory can, by the one file being weighed."""
         if url in self._asked:
             return self._asked[url]
         if self.late:
             return _NoFile.LATE
         if len(self._asked) >= self.settings["max_files"]:
-            if url not in self._over:
-                self._over.add(url)
-                self._miss(Reason.FILE_OVER)
-            return _NoFile.OVER
+            return self._turned_away(url, Reason.FILE_OVER)
+        if self._full:
+            return self._turned_away(url, Reason.BYTES_OVER)
         left = self._left()
         if left is None:
             return _NoFile.LATE
@@ -961,9 +971,24 @@ class _Copy:
         name = hashlib.sha256(data).hexdigest()[:_NAME_HEX] + ".woff2"
         if not blog_inbox.FONT_NAME_RE.match(name):
             raise RuntimeError("a typeface name the store would refuse")
-        self.files[name] = data
+        if name not in self.files:                  # a file already held weighs nothing more
+            if self._held + len(data) > self._room:
+                self._full = True
+                self._asked[url] = _NoFile.OVER     # asked, weighed, not kept: never again
+                return self._turned_away(url, Reason.BYTES_OVER)
+            self.files[name] = data
+            self._held += len(data)
+            self._full = self._held >= self._room
         self._asked[url] = name
         return name
+
+    def _turned_away(self, url, reason):
+        """``url`` is not being kept because of a limit: count it under
+        ``reason`` - once, however many blocks name it - and say so."""
+        if url not in self._over:
+            self._over.add(url)
+            self._miss(reason)
+        return _NoFile.OVER
 
     def _rules(self, faces) -> list:
         """The rules to write, in the order of ``faces``, each once, at most
