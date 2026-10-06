@@ -34,7 +34,7 @@ SITE = pathlib.Path(repo_paths.SITE_ROOT)
 # UNCHECKED -- no link resolution, no app-host guard, no origin guard. The
 # glossary shipped with none of them until it was added.
 PAGES = ("index.html", "gallery.html", "live.html", "glossary.html", "report.html",
-         "ideas.html")
+         "ideas.html", "blog.html")
 
 # The site calls nobody. Empty on purpose, and widening it is a decision:
 # every entry is a third party learning the IP of everyone who loads the page.
@@ -75,7 +75,12 @@ ALLOWED_OUTBOUND = (
 # pins those paths instead is test_the_report_page_frames_the_latest_report.
 # `ideas/` too: the trade idea cards are written by services/options_svc/site_ideas.py
 # after each post, and only ideas.js (never the markup) names a card.
-GENERATED_REF_PREFIXES = ("live/", "reports/", "ideas/")
+# `blog/` last: each entry's page, its framed document, the typefaces and the
+# entry sitemap are written by services/blog_svc/sitewriter.py when the operator
+# publishes, and only blog.js (never the markup) names an entry. What pins those
+# paths instead is test_the_blog_script_links_an_entry_where_the_service_writes_it
+# and test_the_blog_script_and_the_service_agree_on_what_a_slug_is.
+GENERATED_REF_PREFIXES = ("live/", "reports/", "ideas/", "blog/")
 
 
 def _regenerated_shot_refs():
@@ -485,7 +490,7 @@ MARK_LARGE = ("M20 11 L32 23 L44 11", "M20 53 L32 41 L44 53")
 MARK_SMALL = ("M22 12 L32 23.5 L42 12", "M22 52 L32 41 L42 52")
 
 MARK_LARGE_FILES = ("index.html", "gallery.html", "live.html", "report.html", "ideas.html",
-                    "assets/mark.svg")
+                    "blog.html", "assets/mark.svg")
 MARK_SMALL_FILES = ("assets/favicon.svg",)
 
 
@@ -951,7 +956,7 @@ def test_every_footer_carries_the_one_disclaimer_verbatim():
     read as a defect, not a style. report.html frames a document that carries
     its own footer, and the glossary is a reference page; the three pages that
     make the claim make it identically."""
-    for name in ("index.html", "gallery.html", "live.html", "ideas.html"):
+    for name in ("index.html", "gallery.html", "live.html", "ideas.html", "blog.html"):
         markup = " ".join(_markup(name).split())
         assert DISCLAIMER in markup, f"{name} does not carry the disclaimer verbatim"
 
@@ -1418,3 +1423,346 @@ def test_the_home_strip_states_the_record_and_it_ships_hidden():
     assert len(boxes) == 1 and re.search(r"\shidden(\s|>|=)", boxes[0])
     js = _text("assets/ideas.js")
     assert "Closed so far: " in js and "trading days" in js
+
+
+# ── Blog (blog.html + assets/blog.js; the entries themselves are generated) ──
+# The page and its script are tracked. Everything they show is not: the manifest
+# blog.json and each entry under blog/<slug>/ are written by
+# services/blog_svc/sitewriter.py on the box that serves the site, when the
+# operator publishes. So these tests pin the two halves this tree owns -- the
+# page and the script -- and the CONTRACT with that writer: the menu it lifts
+# out of blog.html, the classes it wraps a frame in, where it puts an entry and
+# what it accepts as an entry's address.
+
+# The service's own expression for the menu it copies (the plan's NAV_RE). It
+# runs over the RAW file, comments included, which is why the first test below
+# reads ``_text`` and not ``_markup``.
+SERVICE_NAV_RE = re.compile(r'<nav class="ns-nav.*?</nav>', re.S)
+
+# The classes the service writes into an entry page. They are defined HERE, in
+# site.css, and written THERE: two files that never import each other, joined
+# by strings. ``ns-blog-crumb`` is the only one that exists for the entry page
+# alone; the rest are report.html's frame, reused.
+SERVICE_CLASSES = ("ns-page-sub", "ns-live-page", "ns-live-main", "ns-report-main",
+                   "ns-live-head", "ns-report-head", "ns-eyebrow", "ns-blog-crumb",
+                   "ns-report-links", "ns-report-frame", "ns-foot", "ns-live-foot")
+
+
+def _blog_js():
+    return _text("assets/blog.js")
+
+
+def _blog_js_code():
+    """blog.js without its comments, for the checks that are about what RUNS.
+
+    Block comments and whole-line ``//`` comments only: a trailing ``//`` is left
+    alone, since telling one from the ``//`` inside a string needs a parser, and
+    the script has no need of either."""
+    code = CSS_COMMENT_RE.sub("", _blog_js())
+    return "\n".join(ln for ln in code.splitlines() if not ln.lstrip().startswith("//"))
+
+
+def test_the_blog_is_in_every_menu_between_trade_ideas_and_the_glossary():
+    """The menu item IS the feature, and its place is decided once: after Trade
+    ideas, before the Glossary, on every page."""
+    for name in PAGES:
+        nav = re.sub(r'\s+aria-current="page"', "", _nav(name))
+        assert '<a class="ns-navlink" href="blog.html">Blog</a>' in nav, (
+            f"{name}'s menu has no Blog link")
+        assert (nav.index('href="ideas.html"') < nav.index('href="blog.html"')
+                < nav.index('href="glossary.html"')), f"{name}: Blog is out of place"
+
+
+def test_the_blog_page_marks_itself_current():
+    assert '<a class="ns-navlink" href="blog.html" aria-current="page">Blog</a>' in (
+        _nav("blog.html"))
+
+
+def test_the_blog_page_draws_from_the_manifest_and_says_so_when_empty():
+    """The list ships EMPTY and the note ships HIDDEN: on a fresh deploy, or
+    before the first entry, the script unhides the note. Never an empty frame,
+    and never a sentence saying "no entries" above a list that then fills."""
+    markup = _markup("blog.html")
+    mains = re.findall(r"<main\b[^>]*>", markup)
+    assert len(mains) == 1 and "data-blog-page" in mains[0], mains
+
+    lists = re.findall(r"<div\b[^>]*data-blog-list[^>]*>", markup)
+    assert len(lists) == 1 and 'class="ns-blog-list"' in lists[0], lists
+    assert re.search(r"<div\b[^>]*data-blog-list[^>]*>\s*</div>", markup), (
+        "the list must ship empty: its rows are generated, never committed")
+
+    notes = re.findall(r"<p\b[^>]*data-blog-empty[^>]*>", markup)
+    assert len(notes) == 1, notes
+    assert re.search(r"\shidden(\s|>|=)", notes[0]), "the empty note must ship hidden"
+    assert 'class="ns-live-note"' in notes[0]
+    assert "No entries have been published yet." in markup
+
+    assert '<script src="assets/blog.js" defer></script>' in markup
+    assert markup.count("<script") == 1, "blog.html runs one script, its own"
+    assert "<iframe" not in markup, "the list page frames nothing; an entry page does"
+
+
+def test_the_blog_page_says_what_it_is_without_scripting():
+    """The heading and the lede are in the source, as on ideas.html: with
+    scripting off the page still says what the Blog is."""
+    markup = _markup("blog.html")
+    assert re.search(r'<p class="ns-eyebrow">Blog</p>', markup)
+    assert re.search(r'<h1 class="ns-live-title">[^<]+</h1>', markup)
+    lede = re.search(r'<p class="ns-live-lede">(.*?)</p>', markup, re.S)
+    assert lede and len(" ".join(lede.group(1).split())) > 80, "blog.html has no lede"
+    assert re.search(r"<title>NeuralStrike \S Blog</title>", markup)
+    assert re.search(r'<meta name="description" content="[^"]{40,}">', markup)
+
+
+def test_the_blog_page_carries_no_timestamp():
+    """Same rule as the live grid: this file is served long after anything it
+    could say. Each entry carries its own date, from the manifest."""
+    markup = _markup("blog.html")
+    assert not re.search(r"\b\d{4}-\d{2}-\d{2}\b", markup)
+    assert not re.search(r"\b(?:updated|published|as of)\b\s*[:,]?\s*\d", markup, re.I)
+
+
+def test_the_blog_script_builds_text_never_markup():
+    """The manifest is DATA. A title is whatever was typed into the private
+    Blog page, so it reaches the document through textContent and nothing that
+    parses a string as HTML -- the same rule ideas.js keeps.
+
+    Read from the RAW file, comments included, so the script cannot even quote
+    the calls it must not make."""
+    js = _blog_js()
+    for banned in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write",
+                   "DOMParser", "createContextualFragment", "srcdoc", "eval("):
+        assert banned not in js, f"blog.js names {banned}"
+    assert not re.search(r"\bnew\s+Function\b", js)
+    assert "createElement" in js and "textContent" in js
+    assert re.search(r'fetch\(\s*"blog\.json"\s*,\s*\{\s*cache:\s*"no-cache"', js), (
+        "the manifest must always be revalidated: a stale one hides a new entry "
+        "and keeps showing one that was unpublished")
+    assert 'cache: "no-cache"' in js
+
+
+def test_the_blog_script_reaches_nothing_off_origin():
+    """One request, to the manifest beside the page, and nothing kept or
+    scheduled: no other fetch, no storage, no timer. The HTML origin guard
+    cannot see inside a script, so this is where an off-origin call would hide."""
+    js = _blog_js()
+    assert "http://" not in js and "https://" not in js
+    code = _blog_js_code()
+    # With the block comments and the whole-line comments gone, a "//" left over
+    # is a protocol-relative address in a string, or a trailing comment that
+    # could hide one from this check. The script needs neither.
+    assert "//" not in code, "a protocol-relative address, or a trailing // comment"
+    assert len(re.findall(r"\bfetch\(", code)) == 1, "blog.js makes exactly one request"
+    for banned in ("XMLHttpRequest", "WebSocket", "EventSource", "sendBeacon",
+                   "localStorage", "sessionStorage", "indexedDB", "document.cookie",
+                   "setInterval", "setTimeout", "requestAnimationFrame",
+                   "importScripts", "import(", "window.open", "location.href",
+                   "location.assign", "location.replace"):
+        assert banned not in code, f"blog.js uses {banned}"
+
+
+def test_the_blog_script_and_the_service_agree_on_what_a_slug_is():
+    """A slug is a FOLDER NAME under the served root, and it exists twice: the
+    service refuses anything else when it writes (``shared.blog_inbox.SLUG_RE``)
+    and the script refuses anything else before it builds a link.
+
+    How the two are compared, exactly: the script's literal must be
+    ``var SLUG = /<source>/;`` with NO flags, and its source must end in ``$``.
+    That ``$`` is swapped for ``\\Z`` and the result must equal the Python
+    pattern string, character for character. The swap is sound because without
+    the ``m`` flag a JavaScript ``$`` matches only at the very end of the input
+    -- which is what Python spells ``\\Z``, and NOT what Python's own ``$`` means
+    (that one also matches before a final newline; see the note in
+    ``blog_inbox``)."""
+    from shared import blog_inbox
+
+    found = re.findall(r"var SLUG = /(.+)/([a-z]*);", _blog_js_code())
+    assert len(found) == 1, f"expected one SLUG literal in blog.js, found {found}"
+    source, flags = found[0]
+    assert flags == "", f"a flag changes what the pattern accepts: /{flags}"
+    assert source.endswith("$") and not source.endswith("\\$")
+    assert source[:-1] + "\\Z" == blog_inbox.SLUG_RE.pattern
+    # Non-vacuity: the pattern compared is the one the script actually applies.
+    assert re.search(r"\bSLUG\.test\(", _blog_js_code())
+
+
+def test_the_blog_script_links_an_entry_where_the_service_writes_it():
+    """``blog/<slug>/`` -- the folder whose index.html is the entry's page.
+    Relative, with no leading slash, like every other address on this site; the
+    slug in it has passed ``SLUG`` (the test above), so the address cannot leave
+    the blog folder."""
+    code = _blog_js_code()
+    hrefs = re.findall(r"\.href\s*=\s*([^;]+);", code)
+    assert len(hrefs) == 1, f"blog.js sets {len(hrefs)} addresses, expected the card's"
+    assert re.fullmatch(r'"blog/" \+ [\w.]+ \+ "/"', hrefs[0]), hrefs[0]
+    assert "target" not in code, "an entry opens in the same tab: it is this site"
+
+
+def test_the_blog_script_caps_the_tags_it_draws():
+    assert re.search(r"var MAX_TAGS = 6;", _blog_js_code())
+    assert re.search(r"\.slice\(0,\s*MAX_TAGS\)", _blog_js_code())
+
+
+def test_the_blog_script_dates_an_entry_in_central_time_or_not_at_all():
+    """The clock the site keeps (ideas.js names the same zone), and a date that
+    does not parse draws NO date: never the words a failed parse prints."""
+    js = _blog_js()
+    assert "America/Chicago" in js and '"en-US"' in js
+    assert "isNaN(" in js
+    assert "Invalid Date" not in js
+
+
+def test_every_class_the_blog_draws_with_is_defined_and_none_is_orphaned():
+    """A class written by a script, or by a service in another folder, that the
+    stylesheet does not define renders as unstyled text and reports nothing.
+
+    Both directions. ``ns-blog-*`` in site.css that nothing writes is dead CSS
+    that reads as a feature."""
+    css = _css("assets/site.css")
+    defined = set(re.findall(r"\.(ns-blog-[a-z-]+)", css))
+
+    written = set(re.findall(r'"(ns-blog-[a-z-]+)"', _blog_js_code()))
+    written |= set(re.findall(r'class="[^"]*?(ns-blog-[a-z-]+)', _markup("blog.html")))
+    assert written, "nothing parsed; this test would then assert nothing"
+    by_service = {c for c in SERVICE_CLASSES if c.startswith("ns-blog-")}
+
+    assert written | by_service <= defined, (
+        f"written but not styled: {sorted((written | by_service) - defined)}")
+    assert defined <= written | by_service, (
+        f"styled but written by nothing: {sorted(defined - written - by_service)}")
+
+
+def test_the_stylesheet_defines_every_class_the_service_wraps_an_entry_in():
+    """The entry page is generated outside this tree and styled from inside it.
+    ``ns-blog-crumb`` is the compact title (the framed document carries its own
+    large headline) and ``ns-report-frame`` is the frame."""
+    css = _css("assets/site.css") + _css("assets/nocturne.css")
+    for cls in SERVICE_CLASSES:
+        assert re.search(rf"\.{re.escape(cls)}(?![\w-])", css), (
+            f"the service writes .{cls}, which no stylesheet defines")
+    crumb = re.search(r"\.ns-blog-crumb\s*\{([^}]*)\}", _css("assets/site.css"))
+    assert crumb, "no .ns-blog-crumb rule"
+    for prop in ("white-space: nowrap", "overflow: hidden", "text-overflow: ellipsis"):
+        assert prop in crumb.group(1), f"the compact title is not held to one line: {prop}"
+
+
+# The narrowest viewport, in px, at which the menu below fits on ONE row,
+# measured in a browser (a vertical scrollbar present) for exactly the words in
+# MENU_WORDS. Not derivable here: it is the rendered width of text.
+MENU_FITS_FROM = 905
+MENU_WORDS = ["Market report", "Trade ideas", "Blog", "Glossary", "Gallery", "Community"]
+
+
+def test_the_menu_wraps_before_it_stops_fitting():
+    """A NEW WORD IN THE MENU MOVES A BREAKPOINT NOBODY THINKS TO MOVE.
+
+    The menu wrapped at 700px and nowhere above it. Adding the Blog link was
+    checked at a desktop width and at a phone width, where it looked right; at
+    800 the Live screens button was off the right edge. Measured across widths,
+    it had been off the edge from 701 to 852 since BEFORE this link (the menu
+    never fitted a 768px tablet), and the new link stretched that to 905.
+
+    A stylesheet cannot be rendered here, so this pins the two facts that were
+    measured and makes them move together: the words the measurement was taken
+    for, and the width the wrap must cover. Change the menu and the first
+    assertion fails -- which is the moment to measure again, not to edit the
+    list."""
+    words = re.findall(r'<a class="ns-navlink"[^>]*>([^<]+)</a>', _nav("index.html"))
+    assert words == MENU_WORDS, (
+        "the menu changed: measure the width one row needs again, then move "
+        "MENU_FITS_FROM and the wrap breakpoint in site.css with it")
+
+    blocks = re.findall(r"@media\s*\(max-width:\s*(\d+)px\)\s*\{(.*?)\n\}",
+                        _css("assets/site.css"), re.S)
+    wrapping = [int(w) for w, body in blocks
+                if re.search(r"\.ns-nav\s*\{[^}]*flex-wrap:\s*wrap", body)]
+    assert wrapping, "no media query wraps the menu"
+    assert max(wrapping) >= MENU_FITS_FROM, (
+        f"the menu wraps only below {max(wrapping)}px but needs {MENU_FITS_FROM}px "
+        f"to fit on one row; between the two it runs off the right edge")
+    # The break that makes it two clean rows travels with the wrap.
+    for width, body in blocks:
+        if int(width) == max(wrapping):
+            assert re.search(r"\.ns-nav \.ns-spacer\s*\{[^}]*flex:\s*0 0 100%", body), (
+                "the menu wraps without its break, so only the last item drops")
+
+
+def test_an_entry_with_no_background_of_its_own_is_readable_in_its_frame():
+    """SEEN IN A BROWSER, and invisible to everything else here. A document
+    that sets no background is transparent inside a frame, so the FRAME's
+    ground shows through it -- and ``.ns-report-frame`` is near-black, for the
+    market report, which paints its own. An entry written as plain black text
+    rendered as black on black.
+
+    The entry frame is told from the report's by its ``sandbox`` attribute
+    (the service always writes one; report.html's has none) and takes the
+    browser's own page colour, ``Canvas``: what that document would have had
+    behind it on a tab of its own.
+
+    The second half keeps the fix from restyling the report: its frame carries
+    no ``sandbox``, so the rule cannot reach it."""
+    rule = re.search(r"\.ns-report-frame\[sandbox\]\s*\{([^}]*)\}", _css("assets/site.css"))
+    assert rule, "no ground for a sandboxed (Blog entry) frame"
+    assert re.search(r"background:\s*Canvas\s*;", rule.group(1)), rule.group(1)
+
+    report_frames = re.findall(r"<iframe\b[^>]*>", _markup("report.html"))
+    assert len(report_frames) == 1 and "sandbox" not in report_frames[0], report_frames
+
+
+def test_the_service_can_lift_the_menu_out_of_the_blog_page():
+    """THE ENTRY PAGES' MENU IS THIS FILE'S MENU. The service copies the block
+    its expression finds in the RAW blog.html, byte for byte, into every entry
+    page. If a comment in this file ever quoted the opening tag, that expression
+    would start its match inside the comment and every entry would be published
+    under a menu that begins with prose."""
+    found = SERVICE_NAV_RE.findall(_text("blog.html"))
+    assert len(found) == 1, f"the service's expression finds {len(found)} menus"
+    assert found[0] == _nav("blog.html")
+    assert "<!--" not in found[0]
+
+
+def test_the_menu_survives_being_served_from_an_entry_page():
+    """An entry page lives at ``blog/<slug>/`` and sets ``<base href="/">``, so
+    every address in the copied menu is resolved from the site root. A plain
+    relative path (what the menu uses) lands where it does today. A bare
+    ``#fragment`` would point at the HOME page's fragment, and ``./`` or ``../``
+    say outright that the author was thinking of one folder."""
+    refs = _refs(_nav("blog.html"))
+    assert refs, "no addresses parsed from the menu"
+    for ref in refs:
+        assert not ref.startswith(("#", "./", "../")), (
+            f"the menu's {ref!r} would not survive <base href=\"/\">")
+
+
+def test_the_blog_is_in_the_sitemap_and_robots_names_the_entry_sitemap():
+    """The page is tracked, so it is in the tracked sitemap. The entries are
+    not, so they are in a sitemap of their own that the service rewrites, and
+    robots.txt is the one tracked file that can point a crawler at it."""
+    assert "https://neuralstrike.co/blog.html" in _text("sitemap.txt").split()
+    directives = [ln.strip() for ln in _text("robots.txt").splitlines()
+                  if ln.strip() and not ln.lstrip().startswith("#")]
+    assert "Sitemap: https://neuralstrike.co/sitemap.txt" in directives
+    assert "Sitemap: https://neuralstrike.co/blog/sitemap.txt" in directives
+
+
+def test_the_generated_blog_is_never_committed():
+    """Written on the serving box when an entry is published. Tracked, the first
+    entry would dirty prod's tree and tools/promote.sh refuses a dirty tree.
+
+    The second half is the trap the ignore rule's own comment names: the page
+    and its script sit one character away from the ignored paths and must stay
+    TRACKED, or a promote ships a menu link to a page that is not there."""
+    import subprocess
+    root = pathlib.Path(repo_paths.REPO_ROOT)
+
+    def ignored(rel):
+        return subprocess.run(["git", "check-ignore", "-q", rel], cwd=root).returncode == 0
+
+    for rel in ("deploy/site/blog.json",
+                "deploy/site/blog/nuclear-stocks-thesis/index.html",
+                "deploy/site/blog/nuclear-stocks-thesis/entry.html",
+                "deploy/site/blog/fonts/0123456789abcdef0123.woff2",
+                "deploy/site/blog/sitemap.txt"):
+        assert ignored(rel), f"{rel} is not gitignored"
+    for rel in ("deploy/site/blog.html", "deploy/site/assets/blog.js"):
+        assert not ignored(rel), f"{rel} is ignored, so it would never reach prod"

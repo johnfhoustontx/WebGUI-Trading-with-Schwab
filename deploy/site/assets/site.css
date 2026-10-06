@@ -271,10 +271,23 @@ a.ns-menu-item:hover {
  * The break is put on .ns-spacer, which already sits at exactly the right point
  * on all three pages — after the brand and any breadcrumb, before the links.
  * Given a full-width basis it becomes a zero-height row of its own, so
- * everything after it starts on the next line. One rule, no per-page markup. */
-@media (max-width: 700px) {
+ * everything after it starts on the next line. One rule, no per-page markup.
+ *
+ * ⚠ THE BREAK IS AT 960px BECAUSE THAT IS WHERE THE MENU STOPS FITTING, and it
+ * has to move whenever the menu gains a word. It sat at 700px while the menu
+ * grew: MEASURED with five links and the Tools item, the row's last item ended
+ * 837px in, so every viewport from 701 to about 852 (an iPad held upright is
+ * 768, 820 or 834) had the Live screens button off the right edge. The Blog
+ * link moved that to 887px: off the edge up to about 905. 960 leaves room for
+ * a wider scrollbar and for the fallback face before Inter arrives. Between
+ * 701 and 960 the menu is two rows (the brand, then the links) and stays
+ * pinned; the rule below un-pins it only on a phone. deploy/tests/test_site.py
+ * holds the measured width and the words it was measured for. */
+@media (max-width: 960px) {
   .ns-nav { flex-wrap: wrap; gap: 10px 14px; }
   .ns-nav .ns-spacer { flex: 0 0 100%; height: 0; }
+}
+@media (max-width: 700px) {
   /* The one site menu wraps to three rows (~140px) on a 375px phone; pinned, it
    * would hold a sixth of the screen while reading. It scrolls away instead.
    * Still a positioned box, which the Tools panel above needs. */
@@ -1277,3 +1290,120 @@ a.ns-menu-item:hover {
 .ns-ideas-record-net { font-weight: 600; color: var(--color-text); }
 .ns-ideas-record-net.is-up { color: var(--ns-up); }
 .ns-ideas-record-net.is-down { color: var(--ns-down); }
+
+/* ─── Blog ───────────────────────────────────────────────────────────────
+ *
+ * blog.html's list, drawn by assets/blog.js from the generated blog.json, and
+ * the one class an ENTRY PAGE needs that report.html does not already define.
+ *
+ * A card is text only (a title, the day it was published, a summary, a few
+ * tags) in the live grid's tile language: the same border, ground, radius and
+ * hover as .ns-live-tile and .ns-idea-card, so the three lists read as one site.
+ *
+ * ⚠ The classes below are written by two files that never import this one:
+ * blog.js (every .ns-blog-card*) and services/blog_svc/sitewriter.py
+ * (.ns-blog-crumb, on the generated entry pages, which are not in git).
+ * deploy/tests/test_site.py pins both directions, so a rename here fails there.
+ */
+.ns-blog-list {
+  display: grid;
+  /* min(), as on the ideas grid: a 320px phone has less than a column's
+   * minimum, which would overflow. Rows stretch (the default), so the cards in
+   * a row share a height however long each summary runs. */
+  grid-template-columns: repeat(auto-fill, minmax(min(340px, 100%), 1fr));
+  gap: clamp(14px, 1.6vw, 22px);
+}
+.ns-blog-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;                    /* a long unbroken word wraps instead of widening the track */
+  padding: clamp(18px, 2vw, 24px);
+  border: 1px solid var(--color-neutral-800);
+  border-radius: var(--radius-md);
+  background: var(--color-neutral-900);
+  color: var(--color-text);
+  text-decoration: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.ns-blog-card:hover,
+.ns-blog-card:focus-visible {
+  border-color: var(--color-accent);
+  box-shadow: var(--shadow-md);
+  color: var(--color-text);
+  text-decoration: none;
+}
+.ns-blog-card-title {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: clamp(18px, 1.6vw, 21px);
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.ns-blog-card:hover .ns-blog-card-title,
+.ns-blog-card:focus-visible .ns-blog-card-title { color: var(--color-accent); }
+.ns-blog-card-date {
+  font-size: 12.5px;
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+}
+.ns-blog-card-summary {
+  margin: 0;
+  font-size: 14.5px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+  color: color-mix(in srgb, var(--color-text) 78%, transparent);
+}
+.ns-blog-card-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: auto;                /* the tags sit on the card's floor in a stretched row */
+  padding-top: 4px;
+}
+.ns-blog-card-tag {
+  padding: 3px 10px;
+  border: 1px solid var(--color-neutral-800);
+  border-radius: 999px;
+  background: var(--color-bg);
+  font-size: 12px;
+  line-height: 1.4;
+  color: color-mix(in srgb, var(--color-text) 72%, transparent);
+}
+
+/* An entry page's title. Small and held to ONE line: the document in the frame
+ * below carries its own large headline, and a second one above it would push
+ * the entry under the fold, the same reasoning as .ns-report-head's shorter
+ * title. A title too long for the line ends in an ellipsis; it is whole in the
+ * framed document and in the tab's title. */
+.ns-blog-crumb {
+  margin: 0;
+  font-family: var(--font-heading);
+  font-weight: 500;
+  font-size: clamp(17px, 1.8vw, 21px);
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* With no entries the list is an empty grid, and the note below would sit a
+ * head's margin plus its own away from the lede. */
+.ns-blog-list:empty + .ns-live-note { margin-top: 0; }
+
+/* The frame around a Blog ENTRY, told apart from the market report's by its
+ * `sandbox` attribute: every entry frame carries one (it is the second of the
+ * three things that keep script out of an entry) and report.html's has none.
+ *
+ * ⚠ The ground is the browser's own page colour, not the report's dark one.
+ * MEASURED, not assumed: an entry that sets no background of its own is
+ * transparent inside a frame, so the frame's ground shows through, and such a
+ * document's text is the default black. On .ns-report-frame's near-black that
+ * was unreadable. `Canvas` is what the same document would have painted behind
+ * itself on a tab of its own, so an entry reads here as it was authored. An
+ * entry with its own background covers this entirely. */
+.ns-report-frame[sandbox] { background: Canvas; }

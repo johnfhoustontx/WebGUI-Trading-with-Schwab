@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NeuralStrike — Market report</title>
-<meta name="description" content="The latest NeuralStrike read on the market: the macro picture down to the ten largest names, with calls and the confidence behind them, rewritten five times each trading day.">
+<title>NeuralStrike — Blog</title>
+<meta name="description" content="Longer pieces on markets and options from NeuralStrike: how a setup works, what the numbers say and where a read could be wrong. Written with Claude and published after review.">
 <meta name="theme-color" content="#161826">
 <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
 <link rel="icon" href="/favicon.ico" sizes="16x16 32x32 48x48">
@@ -13,25 +13,35 @@
 <link rel="stylesheet" href="assets/site.css">
 
 <!--
-  MARKET REPORT — a frame around the latest market assessment.
+  BLOG - the list of published entries, newest first.
 
-  The report itself is reports/latest.html, which is NOT in git. The five daily
-  reports are written on the operator's workstation (outside this repo) and
-  uploaded into deploy/site/reports/ on the box that serves this file, so the
-  directory is gitignored exactly like live/*.webp: tracked, the first upload
-  would dirty prod's tree and tools/promote.sh refuses a dirty tree.
+  This page and assets/blog.js are in git. What they show is NOT:
 
-  ── WHY A FRAME ─────────────────────────────────────────────────────────────
-  The report is a self-contained document with its own stylesheet, drawn to be
-  printed as a PDF. Inlining it into this page would put two stylesheets over
-  one DOM; generating this page around it would move the site's nav into a
-  generator outside the repo, where nothing here could test it. A same-origin
-  frame keeps the nav in this tracked file and the report whole. It loads
-  nothing off-origin and runs no script — the frame scrolls on its own.
+    blog.json                 the manifest the list is drawn from
+    blog/<slug>/index.html    an entry's own page: this site's menu around a frame
+    blog/<slug>/entry.html    the entry itself, the document inside that frame
+    blog/fonts/*.woff2        the typefaces the entries use
+    blog/sitemap.txt          the entries' addresses, for crawlers
 
-  ── NO TIMESTAMP HERE, DELIBERATELY ─────────────────────────────────────────
+  All of it is written by services/blog_svc/sitewriter.py on the box that serves
+  this file, when the operator publishes an entry from the private app. So it is
+  gitignored exactly like live/*.webp: tracked, the first published entry would
+  dirty prod's tree and tools/promote.sh refuses a dirty tree.
+
+  Everything below the lede is drawn by assets/blog.js from blog.json. With no
+  manifest (a fresh deploy, or before the first entry) the page says so rather
+  than showing an empty list.
+
+  -- THE MENU BELOW IS ALSO EVERY ENTRY PAGE'S MENU ---------------------------
+  The site writer copies the nav element out of THIS file, byte for byte, into
+  each entry page, and rebuilds those pages when the service starts. An entry
+  page sets a base address of the site root, so every address in the menu must
+  stay a plain path from the root: no leading "./" or "../", and no bare
+  "#fragment". deploy/tests/test_site.py pins both.
+
+  -- NO TIMESTAMP HERE, DELIBERATELY ------------------------------------------
   Same reason as live.html: this file is served long after anything it could
-  say. The report carries its own time stamp in its header.
+  say. Each entry carries its own date.
 -->
 </head>
 
@@ -52,9 +62,9 @@
       <span class="ns-brand">Neural<span class="ns-brand-b">Strike</span></span>
     </a>
     <span class="ns-spacer"></span>
-    <a class="ns-navlink" href="report.html" aria-current="page">Market report</a>
+    <a class="ns-navlink" href="report.html">Market report</a>
     <a class="ns-navlink" href="ideas.html">Trade ideas</a>
-    <a class="ns-navlink" href="blog.html">Blog</a>
+    <a class="ns-navlink" href="blog.html" aria-current="page">Blog</a>
     <a class="ns-navlink" href="glossary.html">Glossary</a>
     <a class="ns-navlink" href="gallery.html">Gallery</a>
     <a class="ns-navlink" href="index.html#community">Community</a>
@@ -86,24 +96,26 @@
     <a class="btn btn-primary" href="live.html" style="white-space: nowrap;">Live screens</a>
   </nav>
 
-  <main class="ns-live-main ns-report-main">
-    <div class="ns-live-head ns-report-head">
-      <p class="ns-eyebrow">Market report</p>
-      <h1 class="ns-live-title">The latest read on the market.</h1>
+  <main class="ns-live-main" data-blog-page>
+    <div class="ns-live-head">
+      <p class="ns-eyebrow">Blog</p>
+      <h1 class="ns-live-title">Longer reads on markets and options.</h1>
       <p class="ns-live-lede">
-        From the macro picture down to the ten largest names, with the calls and the confidence
-        behind each. Rewritten five times a trading day — pre-market, at the open, after the first
-        hour, at lunch and at the close — and every report grades the ones before it.
-      </p>
-      <p class="ns-report-links">
-        <a href="reports/latest.html">Open the report on its own page</a>
+        The live screens show what the market is doing now. These pieces take more room: how a
+        setup works, what the numbers say about it, and where the read could be wrong. Each one is
+        written with Claude and published here after review.
       </p>
     </div>
 
-    <iframe class="ns-report-frame" src="reports/latest.html"
-            title="The latest NeuralStrike market report"></iframe>
+    <div class="ns-blog-list" data-blog-list></div>
+    <p class="ns-live-note" data-blog-empty hidden>No entries have been published yet.</p>
   </main>
 
+  <footer class="ns-foot ns-live-foot">
+    NeuralStrike — dealer flow, measured. Educational and simulation software, not investment advice. No orders are transmitted to any broker.
+  </footer>
+
 </div>
+<script src="assets/blog.js" defer></script>
 </body>
 </html>

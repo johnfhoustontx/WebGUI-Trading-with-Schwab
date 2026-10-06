@@ -12,3 +12,7 @@ Allow: /
 # describes the screens, where the screens themselves are a live trading book.
 
 Sitemap: https://neuralstrike.co/sitemap.txt
+# The Blog's entries are published from the private app, so their addresses are
+# in a sitemap of their own that the blog service rewrites
+# (services/blog_svc/sitewriter.py). It is absent until the first entry.
+Sitemap: https://neuralstrike.co/blog/sitemap.txt
