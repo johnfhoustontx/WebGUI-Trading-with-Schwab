@@ -570,3 +570,80 @@ def test_the_market_data_age_limits_stop_where_the_loader_stops():
     for table, keys in mc.AGE_CEILINGS.items():
         for key, ceiling in keys.items():
             assert fields[f"{table}.{key}"].max == ceiling, (table, key)
+
+
+# ── the site Blog — config/blog.toml ─────────────────────────────────────────
+
+def test_the_blog_numbers_are_bounded_exactly_as_the_loader_bounds_them():
+    """``shared.blog_inbox.BOUNDS`` is what the validators enforce: a value
+    outside it reads as the shipped one, with no sign on this page. So the form
+    must offer exactly that range - not a wider one (a saved value quietly not
+    used) and not a narrower one (a value the service honours, refused here).
+    The catalogue stays import-free, so the numbers are mirrored and pinned."""
+    from shared import blog_inbox
+    cfg = cs.BY_NAME["blog.toml"]
+    fields = {tuple(cs.split_key(f.key)): f
+              for sec in cfg.sections for f in sec.fields}
+    for path, (low, high) in blog_inbox.BOUNDS.items():
+        fld = fields[path]
+        assert fld.kind == "int", path
+        assert (fld.min, fld.max) == (low, high), path
+    # ...and nothing numeric is offered here that the loader does not bound.
+    numeric = {p for p, f in fields.items() if f.kind in ("int", "float", "money")}
+    assert numeric == set(blog_inbox.BOUNDS)
+
+
+def test_a_blog_value_at_either_bound_is_one_the_loader_uses(monkeypatch):
+    """End to end over every number: what the form accepts at its lowest and
+    its highest is what the service then reads back - never the shipped value
+    in its place."""
+    from shared import blog_inbox
+    cfg = cs.BY_NAME["blog.toml"]
+    read = {"site": blog_inbox.site, "limits": blog_inbox.limits,
+            "fonts": blog_inbox.fonts}
+    for (table, key), bounds in blog_inbox.BOUNDS.items():
+        _sec, fld = cs.locate(cfg, (table, key))
+        for edge in bounds:
+            saved = cs.parse(fld, edge, shipped=blog_inbox.DEFAULTS[table][key])
+            monkeypatch.setattr(blog_inbox, "load",
+                                lambda t=table, k=key, v=saved: {t: {k: v}})
+            assert read[table]()[key] == edge, (table, key, edge)
+        for outside in (bounds[0] - 1, bounds[1] + 1):
+            with pytest.raises(ValueError):
+                cs.parse(fld, outside)
+
+
+def test_the_blog_file_restarts_the_blog_service_and_nothing_else():
+    cfg = cs.BY_NAME["blog.toml"]
+    assert cs.BLOG == "blog_svc"
+    assert cs.RESTART_LABELS[cs.BLOG] == "Blog service"
+    assert cfg.editable and cfg in cs.EDITABLE
+    for sec in cfg.sections:
+        for f in sec.fields:
+            assert tuple(cs.restart_for(cfg, sec, f)) == (cs.BLOG,), f.key
+    assert "blog.toml" not in cs.NOT_HERE
+
+
+def test_the_blog_typeface_subsets_keep_their_lower_case(monkeypatch):
+    """Google names a subset in lower case ("latin-ext") and the loader keeps
+    only names spelled that way. Typed as tickers they would be upper-cased on
+    save, every one refused, and the shipped list used with no sign of it."""
+    from shared import blog_inbox
+    cfg = cs.BY_NAME["blog.toml"]
+    _sec, fld = cs.locate(cfg, ("fonts", "subsets"))
+    saved = cs.parse(fld, "cyrillic, latin-ext")
+    assert saved == ["cyrillic", "latin-ext"]
+    assert cs.parse(fld, ["latin", "latin-ext"]) == ["latin", "latin-ext"]
+    monkeypatch.setattr(blog_inbox, "load", lambda: {"fonts": {"subsets": saved}})
+    assert blog_inbox.fonts()["subsets"] == saved
+
+
+def test_the_blog_page_calls_an_address_an_address():
+    """Labels are written from the reader's side: the operator sees "Address"
+    on the Blog page, never the developer's word for it."""
+    cfg = cs.BY_NAME["blog.toml"]
+    for sec in cfg.sections:
+        for f in sec.fields:
+            assert "slug" not in f.label.lower(), f.key
+            assert "slug" not in f.help.lower(), f.key
+            assert f.help, f"{f.key} has no help"

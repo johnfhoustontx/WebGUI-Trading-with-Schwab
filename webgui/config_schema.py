@@ -39,6 +39,7 @@ OPTIONS = "options_svc"
 SENTIMENT = "sentiment_svc"
 MARKET = "market_svc"
 NEWS = "news_svc"
+BLOG = "blog_svc"
 TRADE = "trade_svc"
 WEBGUI = "webgui"
 TIMERS = "timers"
@@ -48,6 +49,7 @@ RESTART_LABELS = {
     SENTIMENT: "Sentiment service",
     MARKET: "Market service",
     NEWS: "News service",
+    BLOG: "Blog service",
     TRADE: "Trade service",
     WEBGUI: "Web app (this page reloads)",
     TIMERS: "Scheduled timers (regenerated, no restart)",
@@ -1381,6 +1383,108 @@ _NEWS = ConfigFile(
     ),
 )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# The site Blog — config/blog.toml
+# ─────────────────────────────────────────────────────────────────────────────
+# Every min / max below mirrors shared.blog_inbox.BOUNDS, which is what the
+# loader enforces: outside it a value reads as the shipped one with no sign on
+# this page. Pinned equal, both ways, by tests/test_config_schema.py; this
+# module stays import-free.
+_BLOG = ConfigFile(
+    name="blog.toml", title="Site blog", icon="article",
+    summary="What the Blog accepts as a draft, how large a document and its "
+            "details may be, and whether its typefaces are copied onto this server.",
+    restart=(BLOG,),
+    caution="Nothing here publishes anything: an entry reaches the public site "
+            "only when you press Publish on the Blog page.",
+    sections=(
+        Section("The public site", "", (
+            Field("site.enabled", "Write entries to the site",
+                  "Off, drafts still arrive and can be previewed, but Publish "
+                  "and Unpublish change nothing on the public site and the list "
+                  "of entries there stays as it is.", kind="bool"),
+            Field("site.republish_min", "Refresh the Blog page's lists every",
+                  "The lists of drafts and published entries are sent to this "
+                  "app whenever one changes. They are also sent again this "
+                  "often, so the page recovers by itself if the server's cache "
+                  "is ever emptied.", kind="int", unit="min",
+                  min=1, max=1440, step=5),
+        )),
+        Section("Drafts", "What is accepted as a draft, from Claude Chat or from "
+                "an upload on the Blog page.", (
+            Field("limits.max_html_kb", "Largest document",
+                  "A document larger than this is refused before it is read. "
+                  "Measured as the file arrives, before anything is removed "
+                  "from it. The first entry written for the site was 35 KB.",
+                  kind="int", unit="KB", min=1, max=4096, step=64),
+            Field("limits.max_drafts", "Drafts waiting at once",
+                  "With this many drafts waiting, a new one is refused until "
+                  "you publish or discard one.",
+                  kind="int", unit="drafts", min=1, max=200, step=1),
+            Field("limits.submissions_per_hour", "Drafts from Claude Chat an hour",
+                  "More than this in one hour and the next is refused. Your own "
+                  "uploads on the Blog page are not counted.",
+                  kind="int", unit="drafts", min=1, max=600, step=1),
+            Field("limits.max_wait_sec", "Longest a draft from Claude Chat may wait",
+                  "A draft that waited longer than this before the Blog service "
+                  "reached it is refused, and Claude Chat is told to send it "
+                  "again. It stops a restarted service working through old "
+                  "requests.", kind="int", unit="seconds", min=1, max=3600, step=10),
+            Field("limits.answer_keep_sec", "Keep each reply to Claude Chat for",
+                  "How long the reply to one request can still be collected "
+                  "before it is cleared away.",
+                  kind="int", unit="seconds", min=1, max=3600, step=10),
+        )),
+        Section("An entry's details", "The title, summary, tags and address shown "
+                "with an entry. A longer title, summary or tag is cut to fit; a "
+                "longer address is refused.", (
+            Field("limits.title_chars", "Longest title",
+                  "A longer title is cut here.",
+                  kind="int", unit="characters", min=1, max=300, step=10),
+            Field("limits.summary_chars", "Longest summary",
+                  "The summary is the line under the title in the list of "
+                  "entries and in a shared link's preview. A longer one is cut "
+                  "here.", kind="int", unit="characters", min=1, max=1000, step=10),
+            Field("limits.max_tags", "Most tags on one entry",
+                  "Tags past this number are dropped.",
+                  kind="int", unit="tags", min=1, max=24, step=1),
+            Field("limits.tag_chars", "Longest tag",
+                  "A longer tag is cut here.",
+                  kind="int", unit="characters", min=1, max=64, step=1),
+            Field("limits.slug_chars", "Longest address",
+                  "The address is the last part of an entry's link: lower-case "
+                  "letters, digits and hyphens. A longer one is refused, not "
+                  "cut, because half an address is a different address.",
+                  kind="int", unit="characters", min=16, max=120, step=1),
+        )),
+        Section("Typefaces", "An entry written in Claude Chat asks Google Fonts "
+                "for its typefaces. The public site loads nothing from another "
+                "website, so they are copied onto this server when the draft "
+                "arrives.", (
+            Field("fonts.enabled", "Copy an entry's typefaces",
+                  "Off, nothing is fetched and an entry is shown in the "
+                  "fallback fonts its own design names.", kind="bool"),
+            Field("fonts.subsets", "Character sets copied",
+                  "Google's names for them, in lower case: latin, latin-ext, "
+                  "cyrillic, greek, vietnamese. Each one is another file for "
+                  "every weight of every typeface. A name that is not one of "
+                  "Google's is ignored; with none usable, latin and latin-ext "
+                  "are copied.", kind="phrases"),
+            Field("fonts.max_files", "Most typeface files for one entry",
+                  "Files past this number are not copied, and the text they "
+                  "would have styled uses a fallback font.",
+                  kind="int", unit="files", min=1, max=200, step=1),
+            Field("fonts.max_file_kb", "Largest typeface file",
+                  "A larger file is not stored.",
+                  kind="int", unit="KB", min=1, max=4096, step=50),
+            Field("fonts.timeout_sec", "Longest wait for Google Fonts",
+                  "For each request. A typeface that does not arrive in time is "
+                  "left out and the draft says so; it never holds a draft up.",
+                  kind="int", unit="seconds", min=1, max=60, step=1),
+        )),
+    ),
+)
+
 # The push categories' plain-English names (config/notify.toml [channels.*]),
 # shared by the Configuration editor's row labels and Settings -> General's grid.
 NOTIFY_CATEGORY_NAMES = {
@@ -1745,7 +1849,7 @@ _MARKET_READ = ConfigFile(
     ),
 )
 
-FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _SESSIONS, _SYMBOLS, _NEWS, _SECTORS, _MOMENTUM,
+FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _SECTORS, _MOMENTUM,
          _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _EDGE, _SWING_MODEL, _COMMISSIONS, _MARKETDATA,
          _MARKET_READ, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
