@@ -83,6 +83,7 @@ from tinycss2 import ast as css_ast
 from tinycss2.serializer import serialize_identifier, serialize_string_value
 
 from services import _degrade
+from services.blog_svc import _trace
 from shared import blog_inbox
 
 log = logging.getLogger("blog_svc.clean")
@@ -254,7 +255,8 @@ CSS_DROPPED_PROPERTIES = frozenset({"behavior", "-ms-behavior", "-moz-binding"})
 # digits and ``: ; , @ + & = . _ % -``. The address leaves this module for a
 # fetch and may later be shown on a page, so it carries no quote, bracket,
 # space or slash.
-_FONT_LINK_RE = re.compile(r"^https://fonts\.googleapis\.com/css2\?[A-Za-z0-9:;,@+&=._%-]+\Z")
+FONT_LINK_RE = re.compile(r"^https://fonts\.googleapis\.com/css2\?[A-Za-z0-9:;,@+&=._%-]+\Z")
+_FONT_LINK_RE = FONT_LINK_RE        # the older private name; kept for existing callers
 
 # What the parser lower-cased, back to the spelling a reader expects. A browser
 # repairs ``viewbox`` and ``lineargradient`` by itself; this just keeps the
@@ -1217,6 +1219,38 @@ def _document(title, styles, body, html_attrs=' lang="en"', body_attrs="") -> st
             f"{sheets}</head><body{body_attrs}>{body}</body></html>")
 
 
+# The head ``_document`` writes, up to and including the ``<style>`` that opens
+# the font slot: fixed but for ``<html>``'s attributes and the title's text
+# (which holds no ``<`` - ``_text`` escapes it - and no raw mark - ``_unmark``
+# respells it). Matched to find the slot WITHOUT re-typing this string in
+# another module.
+_SLOT_HEAD_RE = re.compile(
+    r'<!doctype html><html(?: [a-z][a-z0-9:._-]*="[^"]*")*><head>'
+    r'<meta charset="utf-8">'
+    r'<meta name="viewport" content="width=device-width, initial-scale=1">'
+    r"<title>[^<]*</title><style>")
+
+
+def font_slot(html) -> tuple[int, int] | None:
+    """The ``(start, end)`` of ``FONT_CSS_MARK`` inside the ONE font slot the
+    shell writes - the ``<style>`` right after the title - or ``None``.
+
+    ``None`` unless the document opens with exactly the head ``_document``
+    writes, that slot is there holding the mark, and the mark appears NOWHERE
+    else (so the span returned is unambiguous). ``fonts.py`` fills the slot by
+    this span instead of re-typing the head as its own pattern."""
+    if not isinstance(html, str) or html.count(FONT_CSS_MARK) != 1:
+        return None
+    head = _SLOT_HEAD_RE.match(html)
+    if head is None:
+        return None
+    start = head.end()
+    end = start + len(FONT_CSS_MARK)
+    if html[start:end] != FONT_CSS_MARK or not html.startswith("</style>", end):
+        return None
+    return start, end
+
+
 # ── refusing ─────────────────────────────────────────────────────────────────
 
 # Why a document was refused, as ``Cleaned.reason``. Every refusal is the same
@@ -1408,6 +1442,8 @@ def clean(html: str) -> Cleaned:
         return _settle(html)
     except _Refuse as refuse:
         return _refused(refuse.reason)
-    except Exception:
-        _degrade.degraded("blog.clean")
+    except Exception as exc:
+        # A document-free note, not the default full traceback: a traceback can
+        # quote a fragment of the document (an attribute name in a KeyError).
+        _degrade.degraded("blog.clean", detail=_trace.where("cleaning", exc), exc_info=False)
         return _refused("internal")

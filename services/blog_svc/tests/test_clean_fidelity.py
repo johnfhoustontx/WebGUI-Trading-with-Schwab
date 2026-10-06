@@ -763,11 +763,21 @@ def test_the_log_only_tells_too_deep_from_cut_off_never_whether_to_refuse():
         return parser
     sloppy = parser_after("<p>a<p>b</i></foo><bar baz><table><td>x</b></table>&bogus; <a href=x y='1' y='2'>t</a>")
     assert not clean._said_too_deep(sloppy)
-    # an unterminated attribute FINISHES the document (2.11 logs FATAL anyway),
-    # so it is kept-or-refused by the marker and, if refused, is cut_off not too_deep
-    unquoted = parser_after("<p>x</p><p title=never-finished")
-    assert any(entry.level_name == "FATAL" for entry in unquoted.error_log)
+    # an unterminated attribute is a document that ends mid-tag: refused as
+    # cut_off (the end marker is missing), never too_deep
     assert clean.clean("<p title=\"never finished").reason == "cut_off"
+
+
+def test_a_really_deep_document_is_refused_with_a_sensible_code():
+    """A document nested past the parser's depth limit does not come back half
+    read: it is refused, with ``too_deep`` or ``cut_off`` (which one depends on
+    what this libxml2 logs; both are honest)."""
+    deep = "<h1>T</h1>" + "<div>" * 50_000 + "INNER" + "</div>" * 50_000 + "<p>AFTER</p>"
+    result = clean.clean(deep)
+    if "unparseable" in result.removed:
+        assert result.reason in ("too_deep", "cut_off") and result.body == ""
+    else:
+        assert all(word in result.body for word in ("INNER", "AFTER"))
 
 
 def test_the_three_bounds_are_the_ones_the_comments_argue_for():

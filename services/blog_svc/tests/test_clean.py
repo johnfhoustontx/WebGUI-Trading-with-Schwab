@@ -782,6 +782,7 @@ def test_a_bug_inside_the_cleaner_is_a_refusal_with_a_trace(monkeypatch):
     "<pre>\n\nkept blank lines</pre>",
     "  <p> spaced </p>  ",
     "<dl><dt>a<dd>b<custom><dt>c</custom></dl>",
+    "<p>a<p>b",      # the parser closes the first <p> at the second: settles, idempotent
 ])
 def test_a_document_the_parser_re_nests_still_settles(document):
     assert cleaned(document).body != ""
@@ -1131,6 +1132,56 @@ def test_the_font_mark_appears_exactly_once_whatever_the_document_says():
                 f"<style>q::after{{content:'{mark[:-1]}{mark}'}}</style>")
     assert c.html.count(mark) == 1
     assert html_lib.unescape(c.body).count(mark[:-1] + mark) == 2
+
+
+# ── the font slot ``fonts.py`` fills ─────────────────────────────────────────
+
+def test_font_slot_points_at_the_mark_in_the_shell_slot():
+    """``font_slot`` finds the one slot the shell writes, in every document the
+    cleaner can produce, and nowhere else."""
+    mark = clean.FONT_CSS_MARK
+    for document in ("<title>T</title><p>x</p>",                         # a plain shell
+                     "<html data-theme='dark'><body class='w'>x",        # shell attributes
+                     "<p>no title here</p>",                             # empty title
+                     f"<title>{mark}</title><p>x</p>",                   # the mark's text as a title
+                     "<svg><title>tip</title><rect/></svg><h1>H</h1>"):  # a drawing title, not the slot
+        html = clean.clean(document).html
+        span = clean.font_slot(html)
+        assert span is not None, document
+        start, end = span
+        assert html[start:end] == mark
+        assert html[:start].endswith("</title><style>")
+        assert html[end:].startswith("</style>")
+        # exactly the one slot: filling it by the span leaves no mark behind
+        assert (html[:start] + "FILLED" + html[end:]).count(mark) == 0
+
+
+@pytest.mark.parametrize("html", [
+    "",                                                                  # not even a document
+    "<p>x</p>",                                                          # not the shell's head
+    "<!doctype html><html><head><title>t</title></head><body>x</body></html>",  # no slot
+    # the mark somewhere other than the slot, so the slot is not unambiguous
+    EMPTY_SHELL.replace("<body>", "<body data-x='/*blog-fonts*/'>"),
+    EMPTY_SHELL.replace("<body></body>", "<body><p>/*blog-fonts*/</p></body>"),
+    EMPTY_SHELL.replace("<body></body>", "<body><!--/*blog-fonts*/--></body>"),
+    EMPTY_SHELL.replace("<body></body>", "<body><textarea>/*blog-fonts*/</textarea></body>"),
+    # two slots
+    EMPTY_SHELL.replace("</head>", "<style>/*blog-fonts*/</style></head>"),
+    # a different head (wrong meta order)
+    ('<!doctype html><html lang="en"><head>'
+     '<meta name="viewport" content="width=device-width, initial-scale=1">'
+     '<meta charset="utf-8"><title>T</title><style>/*blog-fonts*/</style></head><body>x</body></html>'),
+])
+def test_font_slot_is_none_unless_the_slot_is_the_shells_own(html):
+    assert clean.font_slot(html) is None
+
+
+def test_font_slot_rejects_a_non_string():
+    assert clean.font_slot(None) is None and clean.font_slot(5) is None
+
+
+def test_the_public_font_link_pattern_is_the_private_one():
+    assert clean.FONT_LINK_RE is clean._FONT_LINK_RE
 
 
 # ── two seeded storms ────────────────────────────────────────────────────────

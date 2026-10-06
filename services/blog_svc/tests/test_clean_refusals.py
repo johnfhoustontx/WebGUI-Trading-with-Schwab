@@ -104,6 +104,24 @@ def test_a_bug_in_the_markup_code_is_internal_and_counted(monkeypatch):
     assert degrades("blog.clean") == before + 1
 
 
+def test_an_internal_bug_logs_a_trace_but_never_the_document(caplog):
+    """The internal degrade used to log the default full traceback, which can
+    quote a fragment of the document (an attribute name in a KeyError). It now
+    logs a document-free trace: the exception type and the frames, nothing of
+    ``str(exc)`` and nothing of the input."""
+    secret = "attr-that-must-not-be-logged"
+
+    def boom(*_args, **_kwargs):
+        raise KeyError(secret)
+    with caplog.at_level(logging.WARNING, logger="services.degrade"):
+        with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(clean, "_href", boom)
+            refusal(f"<a href='https://example.com/' data-{secret}='x'>y</a>", "internal")
+    text = caplog.text
+    assert "blog.clean" in text and "KeyError" in text        # the type is named
+    assert secret not in text                                  # the document is not
+
+
 def test_a_bug_in_the_css_code_is_internal_and_counted_too(monkeypatch):
     """The CSS filter guards ONE known failure, a stylesheet nested past the
     interpreter's depth. Anything else raised in there is a bug, and used to be
