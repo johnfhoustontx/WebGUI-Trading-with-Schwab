@@ -792,6 +792,19 @@ def test_a_queue_cap_needs_no_restart_and_the_rest_of_the_file_still_does():
     assert tuple(cs.restart_for(cfg, sec, fld)) == tuple(cfg.restart) != ()
 
 
+def test_the_services_file_offers_a_restart_of_the_blog_service_too():
+    """blog_svc reads its queue through the same scaffold as the other
+    services, so the age limits, the dead-letter cap and the health settings in
+    this file are cached by it at import as well. Left out, a change here would
+    be offered with a restart list that silently skips one of its readers."""
+    cfg = cs.BY_NAME["services.toml"]
+    assert cs.BLOG in cfg.restart
+    assert set(cfg.restart) == {cs.OPTIONS, cs.SENTIMENT, cs.TRADE, cs.MARKET,
+                                cs.NEWS, cs.BLOG}
+    sec, fld = cs.locate(cfg, ("dead_letters", "keep"))
+    assert cs.BLOG in cs.restart_for(cfg, sec, fld)
+
+
 def test_the_document_queues_say_why_they_are_small():
     cfg = cs.BY_NAME["services.toml"]
     for name in ("cmd:blog", "cmd:blog_inbox"):

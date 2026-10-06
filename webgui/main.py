@@ -546,6 +546,55 @@ def _serve_manual(name: str):
     return HTMLResponse(path.read_text(encoding="utf-8"))
 
 
+# The Blog page's preview. A draft's document says ``../fonts/<name>`` for its
+# typefaces, which from ``/blog/preview/<id>/entry.html`` resolves to
+# ``/blog/preview/fonts/<name>`` - that is why the two routes have exactly these
+# paths. Both are thin wrappers: ``pages.blog`` validates the id or the name
+# BEFORE anything on disk is touched, and both sit behind the login like every
+# route here (``auth_middleware.AuthGate`` is default-deny). Neither exists in
+# the public process: ``live_main`` never imports this module.
+_BLOG_NOT_FOUND = "Not found"
+
+
+def _blog_not_found():
+    return Response(_BLOG_NOT_FOUND, status_code=404, media_type="text/plain",
+                    headers={"Cache-Control": "no-store"})
+
+
+# Registered FIRST: it is the more specific of the two.
+@app.get("/blog/preview/fonts/{name}")
+def _serve_blog_preview_font(name: str):
+    """A typeface a previewed draft asks for. Named by a hash of its content,
+    and served only when the file still has that content."""
+    import repo_paths
+    from pages import blog
+    data = blog.preview_font(name, repo_paths.BLOG_DATA)
+    if data is None:
+        return _blog_not_found()
+    return Response(data, media_type="font/woff2",
+                    headers={"Cache-Control": "private, max-age=3600",
+                             "X-Content-Type-Options": "nosniff"})
+
+
+@app.get("/blog/preview/{draft_id}/entry.html")
+def _serve_blog_preview(draft_id: str):
+    """A waiting draft's cleaned document, raw, under the policy the public
+    site sends with a published entry: no script runs, even opened in a tab of
+    its own. Only a draft the drafts view lists is served, and only the file
+    whose digest that view records."""
+    import repo_paths
+    from pages import blog
+    from shared import blog_inbox
+    data = blog.preview_document(draft_id, bus_client.read(blog_inbox.VIEW_DRAFTS),
+                                 repo_paths.BLOG_DATA)
+    if data is None:
+        return _blog_not_found()
+    return Response(data, media_type="text/html; charset=utf-8",
+                    headers={"Content-Security-Policy": blog_inbox.ENTRY_CSP,
+                             "Cache-Control": "no-store",
+                             "X-Content-Type-Options": "nosniff"})
+
+
 # Options scanning + auto-scan now live in services/options_svc (Tier 2): the
 # service owns the engine and the 08:00–15:15 CT schedule, writes results to the
 # Redis bus, and the GUI reads the cache + enqueues rescan commands. Sentiment
@@ -651,6 +700,7 @@ FLAT_NAV = [
 MORE_CHILDREN = [
     ("/eod", "EOD Report", "summarize"),
     ("/x", "Post to X", "campaign"),
+    ("/blog", "Blog", "article"),
 ]
 
 # Sub-menu items that used to nest under the Settings entry; Settings is now a
@@ -940,6 +990,10 @@ _TAB_COLOR = {
     "/portfolio": "#9ccc65",             # Portfolio — light green
     "/eod": "#78909c",                   # EOD Report — blue grey
     "/x": "#1d9bf0",                     # Post to X — X blue
+    # Parchment: a pale, low-saturation tan. Every other colour in this map is
+    # a saturated Material hue or a blue grey, so a paper colour is the one
+    # ground left that reads as its own tab at 16px.
+    "/blog": "#d9c7a3",                  # Blog — parchment
     "/status": "#d4e157",                # System Status — lime
     "/settings": "#90a4ae",              # Settings — blue grey light
     "/terminate": "#b71c1c",             # Stop All Services — dark red
@@ -2467,6 +2521,13 @@ def x_page() -> None:
     with _layout("/x", "Post to X"):
         from pages import x_post
         x_post.render()
+
+
+@_page("/blog")
+def blog_page() -> None:
+    with _layout("/blog", "Blog"):
+        from pages import blog
+        blog.render()
 
 
 @_page("/market")

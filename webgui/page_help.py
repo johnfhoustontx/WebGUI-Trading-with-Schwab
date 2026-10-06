@@ -1547,6 +1547,43 @@ posted there.
   hourly trade ideas and posts from this page — with a link to each one that
   went out, or the reason it did not (refused, failed, over the daily cap).
 """,
+    "/blog": """
+**Blog — the simple version**
+
+Put an entry on the public site's Blog (neuralstrike.co/blog), and take one off.
+An entry is one self-contained HTML document.
+
+- **Nothing is public until you press Publish.** Uploading a file only makes a
+  **draft**: a cleaned copy that waits on this page, where only you can see it.
+- **Add a draft** — choose an HTML file. The blog service cleans it and it
+  appears under **Drafts waiting** a moment later. The file must be UTF-8 text
+  and no larger than the size shown under the upload box.
+- **What cleaning removes** — scripts, forms, event handlers, embedded frames,
+  images, and links out to other sites' stylesheets. Each draft says what was
+  taken out. The typefaces it asks Google Fonts for are copied onto this server
+  instead, and the draft says so if one could not be. **Scripts never run** —
+  not in the preview, and not on the site.
+- **Preview** shows the cleaned document exactly as a visitor would see it.
+  Look at it before you publish: cleaning can change how a page looks.
+- **Title, Summary, Tags** are what the Blog's list of entries shows. **Address**
+  is the last part of the entry's web address; the full address is printed
+  under the box. Use letters, digits and single hyphens. Publish stays greyed
+  out while the title is empty or the address cannot be used, and the reason is
+  shown in red.
+- **Publish** asks first, then puts the entry on the public site at once.
+  **Discard** deletes the draft; nothing public changes.
+- **To replace an entry**, pick it under **Replace an existing entry** before
+  you choose the file. The draft then says which entry it replaces and keeps
+  that entry's address. The old version stays public until you publish the new
+  one.
+- **Published** lists what is on the site, newest first. **Open on the site**
+  opens the entry in a new tab. **Unpublish** removes the page from the public
+  site and its address stops working; to bring it back, upload the file again.
+- After Publish, Discard, Unpublish or an upload, the button waits for the blog
+  service's answer and a message at the bottom of the screen says how it went.
+  If the service is stopped nothing happens: the button waits, then comes back.
+  System Status shows whether the service is running.
+""",
     "/status": """
 **System Status — the simple version**
 

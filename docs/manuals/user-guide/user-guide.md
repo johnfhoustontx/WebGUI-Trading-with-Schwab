@@ -2650,6 +2650,50 @@ made there.
 > `x.hashtags.marketing`. `max_tags` caps how many hashtags any post carries, and
 > `daily_cap` limits how many posts go out in a day.
 
+## Blog
+
+**Route:** `/blog` — a tab in the **More** group, after Post to X.
+
+Put an entry on the public site's Blog (neuralstrike.co/blog), and take one off.
+An entry is one self-contained HTML document.
+
+> **Nothing is public until you press Publish.** Uploading a file only makes a
+> *draft*: a cleaned copy that waits on this page, where only you can see it.
+
+**To add an entry:**
+
+1. Under **Add a draft**, choose the HTML file. It must be UTF-8 text and no
+   larger than the size printed under the upload box.
+2. Wait a moment. The blog service cleans the document and it appears under
+   **Drafts waiting**. The draft says what cleaning removed.
+3. Press **Preview** and read it. Cleaning can change how a page looks, and the
+   preview is exactly what a visitor would see.
+4. Check the **Title**, **Summary** and **Tags** — the Blog's list of entries
+   shows them — and the **Address**, which is the last part of the entry's web
+   address. The full public address is printed under the box.
+5. Press **Publish** and confirm. The entry is on the public site at once.
+
+- **What cleaning removes:** scripts, forms, event handlers, embedded frames,
+  images, and links out to other sites' stylesheets. The typefaces the document
+  asks Google Fonts for are copied onto this server instead, and the draft says
+  so when one could not be. Scripts never run, in the preview or on the site.
+- **Publish is greyed out** while the title is empty or the address cannot be
+  used. The reason is shown in red under the address: use letters, digits and
+  single hyphens.
+- **Discard** deletes a draft. Nothing public changes.
+- **To replace an entry**, pick it under **Replace an existing entry** *before*
+  you choose the file. The draft then says which entry it replaces and keeps that
+  entry's address, which cannot be edited. The old version stays public until you
+  publish the new one.
+- **Published** lists what is on the site, newest first. **Open on the site**
+  opens the entry in a new tab. **Unpublish** asks first, then removes the page
+  from the public site; its address stops working. To bring an entry back,
+  upload its file again.
+- After an upload, Publish, Discard or Unpublish the control you pressed waits
+  for the blog service, and a message at the bottom of the screen says how it
+  went. If the blog service is stopped nothing happens: the control waits, then
+  comes back. **System Status** shows whether the service is running.
+
 ## User Manuals
 
 **Route:** `/manuals` — a tab in the **More** group, alongside EOD Report. (It used

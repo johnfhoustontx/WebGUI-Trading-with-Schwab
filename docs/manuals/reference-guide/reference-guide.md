@@ -4189,6 +4189,72 @@ that did not go out is listed with the reason, rather than simply not appearing.
 
 ---
 
+## Blog
+
+*Menu: ACCOUNT → More → Blog · Route `/blog`*
+
+### What it is
+
+The owner's side of the Blog on the public site (neuralstrike.co/blog): upload an
+entry, look at the draft made from it, publish it, and take a published entry back
+off. An entry is one self-contained HTML document.
+
+### Where the data comes from
+
+The page changes nothing itself. Each action is a command to the blog service, which
+cleans an uploaded document, keeps it as a draft, and — only on **Publish** — writes it
+into the public site's files. The page reads three things the service publishes: the
+drafts waiting, the entries published, and its answer to the last command. The
+**Preview** is the cleaned document itself, served from the service's own folder
+through the private app, behind the login.
+
+### Reading the screen
+
+**Add a draft** takes one HTML file (UTF-8, up to the size printed under the box).
+**Replace an existing entry** decides whether the file is a new entry or a new version
+of one that is already published.
+
+**Drafts waiting** has one card per draft: where it came from, its size, when it
+arrived (Central time), and what cleaning removed. A replacement names the entry it
+replaces. The four fields are what will be published with it.
+
+| Field | What it is |
+|---|---|
+| **Title**, **Summary**, **Tags** | What the Blog's list of entries shows for this entry. |
+| **Address** | The last part of the entry's web address. The full public address is printed under it. Letters, digits and single hyphens only. A replacement keeps the address of the entry it replaces. |
+
+**Preview** opens the cleaned document in a frame. **Publish** puts it on the public
+site at once; **Discard** deletes the draft. **Published** lists the entries on the
+site, newest first, each with **Open on the site** and **Unpublish**.
+
+### Why it matters
+
+A document written elsewhere can carry anything. Nothing reaches the public site
+without passing through cleaning, a draft you can look at, and your own Publish.
+
+### Caveats and gotchas
+
+- **Nothing is public until you press Publish**, and Publish takes effect at once.
+- **Cleaning removes** scripts, forms, event handlers, embedded frames, images, and
+  links out to other sites' stylesheets. The typefaces a document asks Google Fonts for
+  are copied onto this server; the draft says so when one could not be. Scripts never
+  run, in the preview or on the site.
+- **Preview before publishing.** Cleaning can change how a page looks.
+- **Unpublish removes the page**, and its address stops working. To bring an entry
+  back, upload its file again.
+- **Publish is greyed out** while the title is empty or the address cannot be used; the
+  reason is shown under the address.
+- **If the blog service is stopped**, nothing happens: the control you pressed waits,
+  then comes back. [System Status](#system-status) shows whether the service is
+  running.
+- This page exists only in the private app; the public live screens cannot reach it.
+
+### Related pages
+
+[Post to X](#post-to-x) · [System Status](#system-status) · [Settings](#settings).
+
+---
+
 ## User Manuals
 
 *Menu: ACCOUNT → More → User Manuals · Route `/manuals`*

@@ -196,6 +196,8 @@ PHASE_8_FILES = ["status.py", "settings.py", "terminate.py", "manuals.py",
                  "config_editor.py",
                  # Post to X.
                  "x_post.py",
+                 # The site Blog's page: upload, preview, publish.
+                 "blog.py",
                  # Market News - the pure facts module, and its page.
                  "news_view.py", "news.py",
                  # ... and its public screen (2026-09-26).
