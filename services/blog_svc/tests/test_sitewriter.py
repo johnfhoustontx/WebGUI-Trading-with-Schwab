@@ -135,6 +135,17 @@ def link_folder(target, at) -> None:
 
 # ── the tracked page's pieces ────────────────────────────────────────────────
 
+def test_the_menu_expression_is_the_one_the_site_tests_pin():
+    """deploy/tests/test_site.py holds the same expression as SERVICE_NAV_RE
+    and checks it finds exactly the menu in the tracked page. Two files that
+    never import each other, joined by this string."""
+    assert sw.NAV_RE.pattern == r'<nav class="ns-nav.*?</nav>'
+    assert sw.NAV_RE.flags & re.S
+    site_tests = (REAL_SITE.parent / "tests" / "test_site.py").read_text(encoding="utf-8")
+    assert "SERVICE_NAV_RE = re.compile(r'<nav class=\"ns-nav.*?</nav>', re.S)" in site_tests
+    for name in CLASSES:
+        assert f'"{name}"' in site_tests, name
+
 def test_the_parts_are_read_from_the_tracked_page(parts):
     raw = (REAL_SITE / "blog.html").read_bytes().decode("utf-8")
     navs = re.findall(r'<nav class="ns-nav.*?</nav>', raw, re.S)
