@@ -1,5 +1,6 @@
 # services/blog_svc/tests/conftest.py
 import pathlib
+import shutil
 import sys
 import threading
 
@@ -83,6 +84,25 @@ def _blog_store_in_tmp(monkeypatch, tmp_path):
     data = tmp_path / "blog-data"
     monkeypatch.setattr(repo_paths, "BLOG_DATA", data)
     monkeypatch.setattr(repo_paths, "BLOG_DB", data / "blog.db")
+
+
+@pytest.fixture(autouse=True)
+def _blog_site_in_tmp(monkeypatch, tmp_path):
+    """Point the site writer at this test's own folder, never at ``deploy/site``.
+
+    ``sitewriter.SITE_ROOT`` is the served root of the public site. A test that
+    published an entry would otherwise write ``blog.json`` and ``blog/<slug>/``
+    into this checkout (the options_svc conftest does the same for
+    ``site_ideas``). The folder gets a COPY of the tracked ``blog.html``,
+    because the writer lifts the menu out of that file and writes nothing
+    without it; a test about a checkout that lacks the page deletes the copy.
+
+    ⚠ This shares the test's ``monkeypatch``, like the store fixture above."""
+    from services.blog_svc import sitewriter
+    site = tmp_path / "site"
+    site.mkdir()
+    shutil.copyfile(_REPO_ROOT / "deploy" / "site" / "blog.html", site / "blog.html")
+    monkeypatch.setattr(sitewriter, "SITE_ROOT", site)
 
 
 @pytest.fixture(autouse=True)
