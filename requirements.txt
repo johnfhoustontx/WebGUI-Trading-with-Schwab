@@ -36,6 +36,14 @@ httpx==0.28.1             # pinned (was unpinned) — async HTTP client used by 
 feedparser==6.0.11        # news_svc: parses the free public RSS/Atom feeds it polls
 sgmllib3k==1.0.0          # feedparser's only dependency - pinned so the lock stays complete
 
+# --- Site blog (blog_svc) ---
+# Both were already installed, and locked, as dependencies of nicegui. They are
+# named here because blog_svc/clean.py now imports them itself: a later nicegui
+# that drops one must not take the blog's cleaner with it.
+lxml==6.1.1               # blog_svc: parses a submitted entry (the document cleaner)
+tinycss2==1.5.1           # blog_svc: tokenizes an entry's CSS, so an escaped url() is still a url()
+webencodings==0.5.1       # tinycss2's only dependency - pinned so the lock stays complete
+
 # --- Schwab API SDK (P, O, S) ---
 schwab-py==1.5.1          # pinned (was unpinned) — provides the `schwab` package (auth, streaming)
 
