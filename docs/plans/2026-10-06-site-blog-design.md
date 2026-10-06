@@ -179,6 +179,26 @@ makes the preview honest: what is staged is what will be served.
   back to the first paragraph, cut to `[limits] summary_chars`.
 - The draft records what was removed ("2 scripts", "1 form"), shown beside it.
 
+### The cleaner runs in a worker process with a time limit
+
+The HTML parser's cost is not linear in the input: one tag with tens of
+thousands of attributes takes minutes at the 512 KB limit (measured: 216 s on
+libxml2 2.11.9). A quick scan before parsing was tried as the bound and failed
+review three times, each time on a shape where the scan and the parser read
+the same bytes differently. A scan that trusts quotes can be fooled through
+them; one that does not refuses an honest chart, whose path data is thousands
+of tokens inside one quoted attribute.
+
+So the bound does not predict the parser. `blog_svc` runs each clean in a
+**separate worker process** and kills it at `[limits] clean_sec`. An overrun
+is a refusal (`too_slow`), counted, and the service thread is free again. That
+holds for every slow shape, known or not, on any parser version, and it also
+contains a crash or a memory blow-up inside the parser. The cost is a process
+start per document, at a rate of a dozen an hour.
+
+The scan stays, as a fast first refusal of the obvious cases. It is documented
+as best-effort and nothing depends on it being complete.
+
 ## Typefaces (`blog_svc/fonts.py`)
 
 - Only a `<link rel="stylesheet">` to `fonts.googleapis.com/css2` is followed.
