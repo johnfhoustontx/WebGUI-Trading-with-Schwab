@@ -621,6 +621,28 @@ def test_a_blank_ok_empty_value_reads_as_empty_not_blank():
     assert ce.display_value("Mozilla/5.0", "", ua) == "Mozilla/5.0"
 
 
+def test_the_queue_caps_expand_to_one_row_each_and_a_hand_named_queue_joins_them():
+    """services.toml [stream_keep]: the shipped rows carry their own labels,
+    once each (the wildcard must not repeat them), and a queue the operator
+    named in config/local appears under its own name - the stream's, as it is
+    written in the file, not a tidied-up "Cmd:options"."""
+    cfg = cs.BY_NAME["services.toml"]
+    sec = next(s for s in cfg.sections
+               if any(f.key.startswith("stream_keep.") for f in s.fields))
+    rows = _rows("services.toml", sec.title)
+    assert [p for p, _f, _l in rows] == [("stream_keep", "default"),
+                                         ("stream_keep", "cmd:blog"),
+                                         ("stream_keep", "cmd:blog_inbox")]
+    assert all(label and "cmd:" not in label for _p, _f, label in rows)
+
+    with_named = ce.expand_fields(cfg, sec, {}, {("stream_keep", "cmd:options"): 300})
+    path, fld, label = next(r for r in with_named if r[0][-1] == "cmd:options")
+    assert ce._group_label({}, fld, path, label) == "cmd:options"
+    # the shipped rows are untouched by the rule that names a hand-written one
+    for path, fld, label in rows:
+        assert ce._group_label({}, fld, path, label) == label
+
+
 def test_a_push_channel_row_is_named_after_its_category():
     from pages import config_editor as ce
     fld = cs.BY_NAME["notify.toml"].sections[0].fields[1]      # channels.*.telegram

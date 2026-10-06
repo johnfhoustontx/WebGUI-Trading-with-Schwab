@@ -159,8 +159,9 @@ def _group_label(f, fld, path, label):
     keyed by the feed's name), a news feed's field ("MarketWatch — Feed URL",
     an array item, so named by its ``name`` value), an impact keyword tier
     ("Tier 1 — Words"), a feed's or form's impact points (the name itself), a
-    calendar source ("BLS — User-Agent") or an indicator ("CPI — Tile", by its
-    ``label`` value)."""
+    calendar source ("BLS — User-Agent"), an indicator ("CPI — Tile", by its
+    ``label`` value) or a command queue someone gave its own cap by hand (the
+    stream's name as the file spells it, "cmd:options")."""
     if fld.key.startswith("netprem_groups.*."):
         group = f["labels"].get(path[1], path[1])
         return f"{group} — {'tab name' if path[-1] == 'label' else 'symbols'}"
@@ -175,6 +176,8 @@ def _group_label(f, fld, path, label):
         return f"{_tier_name(path[2])} — {label}"
     if fld.key in ("impact.source_points.*", "impact.filings.*"):
         return path[-1]          # a feed name / an SEC form type, verbatim
+    if fld.key == "stream_keep.*":
+        return path[-1]          # a stream's name, verbatim: it is what the file says
     if fld.key.startswith("calendar.sources.*."):
         return f"{cs.CALENDAR_SOURCE_NAMES.get(path[2], path[2])} — {label}"
     if fld.key.startswith("calendar.indicators.*."):

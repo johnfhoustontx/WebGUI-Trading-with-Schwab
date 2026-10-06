@@ -638,6 +638,85 @@ def test_the_blog_typeface_subsets_keep_their_lower_case(monkeypatch):
     assert blog_inbox.fonts()["subsets"] == saved
 
 
+# ── how much of each command queue is kept — config/services.toml ────────────
+
+def test_the_queue_caps_are_catalogued_and_bounded_as_the_loader_bounds_them():
+    """``shared.service_limits.stream_keep`` reads a cap outside 1..100000 as
+    the shipped one, so the form must offer that range and no other."""
+    from shared import service_limits as sl
+    cfg = cs.BY_NAME["services.toml"]
+    shipped = _shipped("services.toml")["stream_keep"]
+    assert shipped == sl.DEFAULTS["stream_keep"]
+    for name in shipped:
+        _sec, fld = cs.locate(cfg, ("stream_keep", name))
+        assert fld is not None and "*" not in fld.key, name    # its OWN entry
+        assert fld.label and fld.help, name
+        assert fld.kind == "int"
+        assert (fld.min, fld.max) == (sl.STREAM_KEEP_MIN, sl.STREAM_KEEP_MAX), name
+        with pytest.raises(ValueError):
+            cs.parse(fld, sl.STREAM_KEEP_MIN - 1)
+        with pytest.raises(ValueError):
+            cs.parse(fld, sl.STREAM_KEEP_MAX + 1)
+
+
+def test_a_queue_someone_names_by_hand_is_still_shown_and_bounded():
+    """Any stream may be given a cap in config/local. One with no catalogue
+    entry would be a setting in force that this page never shows."""
+    from shared import service_limits as sl
+    cfg = cs.BY_NAME["services.toml"]
+    sec, fld = cs.locate(cfg, ("stream_keep", "cmd:options"))
+    assert fld is not None and fld.key == "stream_keep.*"
+    assert fld.kind == "int"
+    assert (fld.min, fld.max) == (sl.STREAM_KEEP_MIN, sl.STREAM_KEEP_MAX)
+    assert cs.parse(fld, 250) == 250
+    # ...and the shipped names keep their own entries, with their own words.
+    _s, default = cs.locate(cfg, ("stream_keep", "default"))
+    _s, blog = cs.locate(cfg, ("stream_keep", "cmd:blog"))
+    _s, inbox = cs.locate(cfg, ("stream_keep", "cmd:blog_inbox"))
+    assert len({default.key, blog.key, inbox.key, fld.key}) == 4
+
+
+def test_a_queue_cap_needs_no_restart_and_the_rest_of_the_file_still_does():
+    """The cap is read at every enqueue (shared/bus/tests pins that), by
+    whichever process is sending. Offering a restart here would bounce every
+    service for a change that had already taken effect."""
+    cfg = cs.BY_NAME["services.toml"]
+    for name in ("default", "cmd:blog", "cmd:blog_inbox", "cmd:options"):
+        sec, fld = cs.locate(cfg, ("stream_keep", name))
+        assert tuple(cs.restart_for(cfg, sec, fld)) == (), name
+    sec, fld = cs.locate(cfg, ("dead_letters", "keep"))
+    assert tuple(cs.restart_for(cfg, sec, fld)) == tuple(cfg.restart) != ()
+
+
+def test_the_document_queues_say_why_they_are_small():
+    cfg = cs.BY_NAME["services.toml"]
+    for name in ("cmd:blog", "cmd:blog_inbox"):
+        _sec, fld = cs.locate(cfg, ("stream_keep", name))
+        assert "document" in fld.help, name
+        assert "cmd:" not in fld.label, "a label is words, not a stream name"
+
+
+def test_a_queue_cap_override_round_trips_through_the_writer(tmp_path):
+    """The key has a colon in it, so the writer must quote it. What is written
+    is what the loader reads back, and only the changed cap is written."""
+    from shared import service_limits as sl
+    from shared.config_toml import toml_loader
+    shipped = _shipped("services.toml")
+    values = store.flatten(shipped)
+    values[("stream_keep", "cmd:blog")] = 20
+    values[("stream_keep", "cmd:options")] = 300          # named by hand
+    over = store.build_overrides(shipped, values)
+    assert over == {"stream_keep": {"cmd:blog": 20, "cmd:options": 300}}
+    text = config_toml.dumps(over)
+    assert '"cmd:blog" = 20' in text
+    (tmp_path / "services.toml").write_text(
+        config_toml.dumps(store.effective(shipped, over)), encoding="utf-8")
+    load, _reset = toml_loader(tmp_path / "services.toml", sl.DEFAULTS)
+    table = load()["stream_keep"]
+    assert (table["cmd:blog"], table["cmd:options"], table["cmd:blog_inbox"],
+            table["default"]) == (20, 300, 50, 1000)
+
+
 def test_the_blog_page_calls_an_address_an_address():
     """Labels are written from the reader's side: the operator sees "Address"
     on the Blog page, never the developer's word for it."""

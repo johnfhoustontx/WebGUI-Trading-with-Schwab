@@ -1722,7 +1722,8 @@ _MARKETDATA = ConfigFile(
 _COMMANDS = ConfigFile(
     name="services.toml", title="Services", icon="hourglass_bottom",
     summary="How long a click may wait in a service's queue before the service "
-            "refuses to act on it, and when a service reports itself unhealthy.",
+            "refuses to act on it, how much of each queue is kept, and when a "
+            "service reports itself unhealthy.",
     restart=(OPTIONS, SENTIMENT, TRADE, MARKET, NEWS),
     caution="These stop a restarted service from re-running its queue's history. "
             "Longer limits let stale clicks through; shorter ones drop a click "
@@ -1749,6 +1750,38 @@ _COMMANDS = ConfigFile(
                   "queue keeps the newest this-many.",
                   kind="int", unit="commands", min=1, max=100000, step=10),
         )),
+        # Bounds mirror shared.service_limits.STREAM_KEEP_MIN / _MAX (pinned by
+        # tests/test_config_schema.py). No restart: the bus reads the cap at
+        # every enqueue through the mtime-cached loader, in whichever process is
+        # sending. The two named queues have entries of their own so they can
+        # say why they are small; the wildcard catches any other stream given a
+        # cap by hand in config/local, which would otherwise be in force and
+        # shown nowhere.
+        Section("How much of each queue is kept",
+                "A queue keeps its newest commands after they have been run, so "
+                "you can look back at what was asked. Each new command trims the "
+                "queue to about this many. A change applies to the next command.", (
+            Field("stream_keep.default", "Every queue not named below",
+                  "Commands are small, so a thousand of them is little memory. "
+                  "A queue of small commands can run up to about a hundred "
+                  "over this number before it is trimmed.",
+                  kind="int", unit="commands", min=1, max=100000, step=50),
+            Field("stream_keep.cmd:blog", "The Blog page's uploads and Publish",
+                  "Kept small on purpose: an upload carries a whole document, "
+                  "up to the largest one the Site blog settings allow. At 50 "
+                  "that is about 25 MB of the server's memory; at 1000 it would "
+                  "be about 500 MB.",
+                  kind="int", unit="commands", min=1, max=100000, step=10),
+            Field("stream_keep.cmd:blog_inbox", "Drafts arriving from Claude Chat",
+                  "Kept small on purpose: every one of these carries a whole "
+                  "document. At 50 that is about 25 MB of the server's memory; "
+                  "at 1000 it would be about 500 MB.",
+                  kind="int", unit="commands", min=1, max=100000, step=10),
+            Field("stream_keep.*", "",
+                  "A queue given its own number by hand in the settings file, "
+                  "shown under the queue's own name.",
+                  kind="int", unit="commands", min=1, max=100000, step=10),
+        ), restart=()),
         Section("Threads", "", (
             Field("pool.workers", "Threads for scheduled work",
                   "How many scheduled jobs (scans, the one-minute collection, "

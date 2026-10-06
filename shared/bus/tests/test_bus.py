@@ -194,17 +194,98 @@ def test_consume_twice_exercises_busygroup_branch():
 
 
 def test_enqueue_bounds_stream_length():
-    """XADD is capped so cmd:* streams cannot grow without bound."""
-    from shared.bus import client
+    """XADD is capped so cmd:* streams cannot grow without bound.
 
+    The cap was the module constant ``client._XADD_MAXLEN`` (1000) until it
+    became per-stream config; this stream is configured nowhere, so it is on
+    the default, and the number is written out so the default cannot move
+    without this failing."""
+    cap = 1000
     b = Bus(fake=True)
-    n = client._XADD_MAXLEN + 200
+    n = cap + 200
     for i in range(n):
         b.enqueue_command("cmd:cap", {"type": "x", "args": {"i": i}})
     length = b._r.xlen("cmd:cap")
     # approximate trimming keeps roughly maxlen (never unbounded, never > enqueued).
     assert length <= n
-    assert length <= client._XADD_MAXLEN + 50  # fakeredis trims exactly to maxlen
+    assert length <= cap + 50  # fakeredis trims exactly to maxlen
+
+
+# --- the cap is per stream (config/services.toml [stream_keep]) ---------------
+# One cap of 1000 for every stream was sized for commands of a few hundred
+# bytes. A blog command carries a whole document, so its two streams keep 50.
+
+def _xadd_spy(bus, monkeypatch):
+    """Record what ``enqueue_command`` asks Redis for. The MAXLEN argument is
+    the contract; how closely a server honours an approximate trim is its own."""
+    calls = []
+    real = bus._r.xadd
+
+    def spy(name, fields, *args, **kwargs):
+        calls.append({"stream": name, **kwargs})
+        return real(name, fields, *args, **kwargs)
+
+    monkeypatch.setattr(bus._r, "xadd", spy)
+    return calls
+
+
+def test_a_stream_nobody_configured_is_still_capped_at_a_thousand(monkeypatch):
+    b = Bus(fake=True)
+    calls = _xadd_spy(b, monkeypatch)
+    for stream in ("cmd:options", "cmd:finder_public", "cmd:cap2"):
+        b.enqueue_command(stream, {"type": "x"})
+    assert [c["maxlen"] for c in calls] == [1000, 1000, 1000]
+    assert all(c["approximate"] is True for c in calls)
+
+
+def test_a_stream_that_carries_documents_is_capped_at_its_own_small_number(
+        monkeypatch):
+    b = Bus(fake=True)
+    calls = _xadd_spy(b, monkeypatch)
+    for stream in ("cmd:blog", "cmd:blog_inbox"):
+        b.enqueue_command(stream, {"type": "draft_submit", "args": {"html": "<p>"}})
+    assert [(c["stream"], c["maxlen"]) for c in calls] == [
+        ("cmd:blog", 50), ("cmd:blog_inbox", 50)]
+    assert all(c["approximate"] is True for c in calls)
+
+
+def test_a_small_cap_bounds_what_the_stream_holds_and_keeps_the_newest():
+    b = Bus(fake=True)
+    for i in range(200):
+        b.enqueue_command("cmd:blog_inbox", {"type": "draft_submit", "args": {"i": i}})
+        b.enqueue_command("cmd:keepx", {"type": "x", "args": {"i": i}})
+    # fakeredis trims exactly to maxlen, approximate or not (see the test above).
+    assert b._r.xlen("cmd:blog_inbox") == 50
+    kept = [json.loads(fields["data"])["args"]["i"]
+            for _id, fields in b._r.xrange("cmd:blog_inbox")]
+    assert kept == list(range(150, 200))
+    # A neighbour on the default cap lost nothing.
+    assert b._r.xlen("cmd:keepx") == 200
+
+
+def test_the_cap_is_read_at_every_enqueue_so_a_change_needs_no_restart(monkeypatch):
+    from shared import service_limits
+    b = Bus(fake=True)
+    calls = _xadd_spy(b, monkeypatch)
+    b.enqueue_command("cmd:livex", {"type": "x"})
+    monkeypatch.setattr(service_limits, "load", lambda: {"stream_keep": {
+        "default": 1000, "cmd:livex": 7}})
+    b.enqueue_command("cmd:livex", {"type": "x"})
+    assert [c["maxlen"] for c in calls] == [1000, 7]
+
+
+def test_an_unusable_cap_in_the_file_never_reaches_redis(monkeypatch):
+    """XADD with a MAXLEN of 0 empties the stream as it writes; a string or a
+    bool is an error from the server. Neither may be what a typo does."""
+    from shared import service_limits
+    monkeypatch.setattr(service_limits, "load", lambda: {"stream_keep": {
+        "default": 0, "cmd:blog": "many", "cmd:badx": True}})
+    b = Bus(fake=True)
+    calls = _xadd_spy(b, monkeypatch)
+    for stream in ("cmd:options", "cmd:blog", "cmd:badx"):
+        b.enqueue_command(stream, {"type": "x"})
+    assert [c["maxlen"] for c in calls] == [1000, 50, 1000]
+    assert all(b._r.xlen(s) == 1 for s in ("cmd:options", "cmd:blog", "cmd:badx"))
 
 
 def test_dead_letter_pushes_raw_and_records_reason():

@@ -5,9 +5,11 @@
 #            a service a command through a queue. If the service was down, or
 #            its queue is replayed after a restart, old commands arrive late.
 #   [health] when a service reports itself as not healthy.
+#   [stream_keep] how many commands each queue keeps after they have been run.
 #
 #   Edit a value here (or in Settings -> Configuration), then restart the
-#   services.
+#   services. [stream_keep] is the exception: it is read each time a command is
+#   sent, so a change there applies to the next command with no restart.
 #   Anything you delete falls back to the default in shared/service_limits.py.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -31,6 +33,26 @@ replay_max_sec = 900
 # that list until 2026-10-04. Each queue now keeps the newest this-many; the
 # count shows on the service's System Status card.
 keep = 200
+
+[stream_keep]
+# A queue keeps its newest commands after they have been run, so a person can
+# look back at what was asked. Each time a command is added the queue is cut
+# back to about this many (Redis trims in blocks of up to 100 commands, so a
+# queue of small commands can run up to about a hundred over). Until 2026-10-06
+# this was 1000 for every queue, fixed in code. 1 to 100000.
+default = 1000
+
+# A queue named here keeps its own number instead of the default. The name is
+# the Redis stream's, in quotes because of the colon.
+#
+# These two are small because each of their commands carries a WHOLE blog
+# document, up to [limits] max_html_kb in config/blog.toml (512 KB as shipped):
+# cmd:blog is the Blog page's uploads and its Publish, cmd:blog_inbox is drafts
+# arriving from Claude Chat. A thousand documents would be about 500 MB of the
+# server's memory in each queue; fifty is about 25 MB. A value here that cannot
+# be read falls back to 50, not to the default above.
+"cmd:blog" = 50
+"cmd:blog_inbox" = 50
 
 [pool]
 # Threads each service keeps for its scheduled work (scans, the one-minute

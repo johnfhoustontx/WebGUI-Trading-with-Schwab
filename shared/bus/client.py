@@ -35,12 +35,6 @@ if str(_REPO_ROOT) not in sys.path:
 from repo_paths import MEMURAI_URL  # noqa: E402
 from shared import service_limits as _service_limits  # noqa: E402
 
-# Cap the command streams (``cmd:*``) so they cannot grow without bound. XADD
-# trims (approximately, for speed) to roughly this many entries. A single-user
-# stack issues at most a few commands/second, so ~1000 is a generous window for
-# inspection/replay while guaranteeing bounded memory.
-_XADD_MAXLEN = 1000
-
 
 log = logging.getLogger(__name__)
 
@@ -362,10 +356,27 @@ class Bus:
 
     def enqueue_command(self, stream: str, command: dict) -> str:
         cmd = Command(**command)
-        # maxlen caps the stream so cmd:* can't grow forever; approximate=True lets
-        # Redis trim in efficient ~macro-node batches (a small overshoot is fine).
+        # maxlen caps the stream so cmd:* can't grow forever. A single-user stack
+        # issues at most a few commands a second, so the default of ~1000 is a
+        # generous window for inspection/replay while guaranteeing bounded memory.
+        #
+        # The cap is PER STREAM (config/services.toml [stream_keep], read here on
+        # every enqueue through shared.service_limits). It was one constant, sized
+        # for commands of a few hundred bytes. A blog command carries a whole
+        # document - up to config/blog.toml [limits] max_html_kb, shipped 512 KB -
+        # so at 1000 entries cmd:blog and cmd:blog_inbox could each hold ~500 MB.
+        # They ship at 50.
+        #
+        # approximate=True lets Redis trim in whole macro nodes, which is cheap,
+        # and means the stream may run OVER the cap by up to one node's worth:
+        # 100 entries or 4096 bytes, whichever closes the node first (the server's
+        # stream-node-max-entries / -bytes, at their defaults). Small commands
+        # can overshoot by up to about a hundred; a document is far past 4096
+        # bytes, so a node holds one or two of them and, exactly where the cap
+        # matters, the overshoot is an entry or two.
         return cast(str, self._r.xadd(          # decode_responses=True -> str
-            stream, {"data": cmd.to_json()}, maxlen=_XADD_MAXLEN, approximate=True
+            stream, {"data": cmd.to_json()},
+            maxlen=_service_limits.stream_keep(stream), approximate=True
         ))
 
     def dead_letter(self, stream: str, raw_fields: dict, reason: str) -> None:

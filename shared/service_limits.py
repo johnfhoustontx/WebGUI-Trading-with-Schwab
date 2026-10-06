@@ -16,6 +16,10 @@ Two limits, from ``config/services.toml``:
 A command with no readable enqueue stamp has no age and is never refused: that
 is a command serialized before the stamp existed.
 
+STREAM LENGTH. How many entries a command stream keeps (``stream_keep``). One
+number for every stream was sized for commands of a few hundred bytes; a stream
+whose entries each carry a whole document needs a much smaller one.
+
 Stdlib and the config loader only, so every tier may read it.
 """
 import datetime as _dt
@@ -37,8 +41,19 @@ DEFAULTS = {
     # else handed to the event loop's default executor. Each command queue has
     # a thread of its own outside this pool.
     "pool": {"workers": 16},
+    # How many entries each command stream keeps: ``default`` for every stream,
+    # and a number of its own for a stream named here. The two named ones carry
+    # a whole blog document in each entry (up to config/blog.toml [limits]
+    # max_html_kb), so a thousand of them is hundreds of megabytes of Redis.
+    # ⚠ Keyed by stream NAME. shared/tests/test_service_limits.py pins these two
+    # against shared.blog_inbox, so a renamed stream cannot quietly lose its cap.
+    "stream_keep": {"default": 1000, "cmd:blog": 50, "cmd:blog_inbox": 50},
 }
 MAX_SEC = 7 * 24 * 3600        # past a week a "limit" is a typo
+# What a stream cap may be. The floor is 1 because XADD with MAXLEN 0 empties
+# the stream as it writes: the command just queued would be gone before its
+# service read it.
+STREAM_KEEP_MIN, STREAM_KEEP_MAX = 1, 100000
 
 load, reset_cache = toml_loader(SERVICES_TOML, DEFAULTS, label="services.toml")
 
@@ -63,6 +78,41 @@ def dead_letter_keep() -> int:
     if isinstance(raw, bool) or not isinstance(raw, int) or not 1 <= raw <= 100000:
         return DEFAULTS["dead_letters"]["keep"]
     return raw
+
+
+def _keep(raw):
+    """``raw`` when it is a usable stream cap, else None. A bool is refused
+    (``True`` is an int and would read as 1), and so is any float: a cap is a
+    count."""
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        return None
+    return raw if STREAM_KEEP_MIN <= raw <= STREAM_KEEP_MAX else None
+
+
+def stream_keep(stream) -> int:
+    """How many entries the command stream ``stream`` keeps (``cmd:blog``).
+
+    ``Bus.enqueue_command`` trims the stream to this on every write, so it is
+    the most Redis ever holds of that stream's history. Read at every enqueue:
+    a change applies to the next command with no restart.
+
+    In order: the stream's own number in ``[stream_keep]``; else the number the
+    stream SHIPS with, if it has one; else the table's ``default``; else 1000.
+    The second step is the point. A typo in ``"cmd:blog" = 50`` reads as 50 and
+    not as the default, because falling back to "keep a thousand documents" is
+    the failure this table exists to prevent. Never raises; a stream this table
+    has never heard of, or a name that is not a string, gets the default."""
+    sec = load().get("stream_keep")
+    table = sec if isinstance(sec, dict) else {}
+    shipped = DEFAULTS["stream_keep"]
+    if isinstance(stream, str) and stream != "default":
+        own = _keep(table.get(stream))
+        if own is not None:
+            return own
+        if stream in shipped:
+            return shipped[stream]
+    default = _keep(table.get("default"))
+    return shipped["default"] if default is None else default
 
 
 def pool_workers() -> int:

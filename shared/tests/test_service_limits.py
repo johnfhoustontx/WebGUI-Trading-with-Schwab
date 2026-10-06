@@ -68,3 +68,121 @@ def test_an_unusable_pool_size_reads_as_the_shipped_one(monkeypatch, bad):
 def test_a_usable_pool_size_is_used(monkeypatch):
     monkeypatch.setattr(cl, "load", lambda: {"pool": {"workers": 24}})
     assert cl.pool_workers() == 24
+
+
+# ---- how many entries each command stream keeps ------------------------------
+# Every stream was trimmed to 1000. A blog command carries a whole document (up
+# to config/blog.toml [limits] max_html_kb, shipped 512 KB), so at 1000 entries
+# cmd:blog and cmd:blog_inbox could each hold about 500 MB of Redis memory.
+
+EVERY_OTHER_STREAM = ("cmd:options", "cmd:sentiment", "cmd:portfolio", "cmd:trade",
+                      "cmd:market", "cmd:news", "cmd:finder_public",
+                      "cmd:rescue_public", "cmd:tools_public",
+                      "cmd:tools_public_math", "cmd:gamma_public", "cmd:anything")
+
+
+def test_every_existing_stream_keeps_the_thousand_it_always_kept():
+    for stream in EVERY_OTHER_STREAM:
+        assert cl.stream_keep(stream) == 1000, stream
+
+
+def test_the_two_streams_that_carry_a_document_keep_fifty():
+    assert cl.stream_keep("cmd:blog") == 50
+    assert cl.stream_keep("cmd:blog_inbox") == 50
+
+
+def test_the_document_streams_are_named_as_the_blog_names_them():
+    """The cap is keyed by stream NAME, so a renamed stream would silently go
+    back to 1000 whole documents. This is the join between the two modules."""
+    from shared import blog_inbox
+    small = {s for s, n in cl.DEFAULTS["stream_keep"].items() if s != "default"}
+    assert small == {blog_inbox.INBOX_STREAM, f"cmd:{blog_inbox.OWNER_DOMAIN}"}
+
+
+def test_the_shipped_file_says_what_the_defaults_say():
+    """The TOML only overrides; shipped equal, so a missing file - or a missing
+    table in it - changes nothing."""
+    import tomllib
+    from repo_paths import SERVICES_TOML
+    shipped = tomllib.loads(SERVICES_TOML.read_text(encoding="utf-8"))
+    assert shipped["stream_keep"] == cl.DEFAULTS["stream_keep"]
+
+
+def test_a_configured_cap_is_used_and_the_rest_follow_the_default(monkeypatch):
+    monkeypatch.setattr(cl, "load", lambda: {"stream_keep": {
+        "default": 400, "cmd:options": 250, "cmd:blog": 10}})
+    assert cl.stream_keep("cmd:options") == 250
+    assert cl.stream_keep("cmd:blog") == 10
+    assert cl.stream_keep("cmd:market") == 400
+    # Named in neither the file nor the shipped table: the file's default.
+    assert cl.stream_keep("cmd:never_heard_of_it") == 400
+
+
+def test_the_bounds_are_one_to_a_hundred_thousand(monkeypatch):
+    assert (cl.STREAM_KEEP_MIN, cl.STREAM_KEEP_MAX) == (1, 100000)
+    for ok in (1, 100000):
+        monkeypatch.setattr(cl, "load", lambda v=ok: {"stream_keep": {
+            "default": v, "cmd:blog": v}})
+        assert cl.stream_keep("cmd:options") == ok
+        assert cl.stream_keep("cmd:blog") == ok
+
+
+BAD_CAPS = [0, -1, 100001, True, False, "50", 50.0, 2.5, float("nan"),
+            float("inf"), None, [50], {"n": 50}]
+
+
+@pytest.mark.parametrize("bad", BAD_CAPS)
+def test_an_unusable_default_reads_as_the_shipped_thousand(monkeypatch, bad):
+    monkeypatch.setattr(cl, "load", lambda: {"stream_keep": {"default": bad}})
+    assert cl.stream_keep("cmd:options") == 1000
+
+
+@pytest.mark.parametrize("bad", BAD_CAPS)
+def test_an_unusable_cap_on_a_document_stream_reads_as_its_shipped_fifty(
+        monkeypatch, bad):
+    """NOT as the default. A typo in the one line that keeps documents out of
+    Redis must not be read as "keep a thousand of them"."""
+    monkeypatch.setattr(cl, "load", lambda: {"stream_keep": {
+        "default": 1000, "cmd:blog": bad, "cmd:blog_inbox": bad}})
+    assert cl.stream_keep("cmd:blog") == 50
+    assert cl.stream_keep("cmd:blog_inbox") == 50
+
+
+@pytest.mark.parametrize("bad", BAD_CAPS)
+def test_an_unusable_cap_on_any_other_stream_reads_as_the_default(monkeypatch, bad):
+    monkeypatch.setattr(cl, "load", lambda: {"stream_keep": {
+        "default": 300, "cmd:options": bad}})
+    assert cl.stream_keep("cmd:options") == 300
+
+
+@pytest.mark.parametrize("table", [None, 5, "x", [1], True])
+def test_a_table_that_is_not_a_table_reads_as_the_shipped_caps(monkeypatch, table):
+    monkeypatch.setattr(cl, "load", lambda: {"stream_keep": table})
+    assert cl.stream_keep("cmd:options") == 1000
+    assert cl.stream_keep("cmd:blog") == 50
+
+
+def test_a_missing_table_reads_as_the_shipped_caps(monkeypatch):
+    monkeypatch.setattr(cl, "load", lambda: {})
+    assert cl.stream_keep("cmd:options") == 1000
+    assert cl.stream_keep("cmd:blog_inbox") == 50
+
+
+@pytest.mark.parametrize("stream", [None, 7, "", ["cmd:blog"], {"a": 1}, b"cmd:blog",
+                                    "default"])
+def test_a_stream_name_that_is_not_one_never_raises(stream):
+    """``default`` is the table's own key, not a stream: asking for a stream
+    called that gets the default like any other unknown name."""
+    assert cl.stream_keep(stream) == 1000
+
+
+def test_the_cap_is_read_through_the_real_loader_from_a_file(tmp_path, monkeypatch):
+    from shared.config_toml import toml_loader
+    path = tmp_path / "services.toml"
+    path.write_text('[stream_keep]\ndefault = 700\n"cmd:blog" = 5\n'
+                    '"cmd:blog_inbox" = "many"\n', encoding="utf-8")
+    load, _reset = toml_loader(path, cl.DEFAULTS, label="services.toml")
+    monkeypatch.setattr(cl, "load", load)
+    assert cl.stream_keep("cmd:options") == 700
+    assert cl.stream_keep("cmd:blog") == 5
+    assert cl.stream_keep("cmd:blog_inbox") == 50
