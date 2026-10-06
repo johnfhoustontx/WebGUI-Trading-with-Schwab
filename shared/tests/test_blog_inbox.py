@@ -1,0 +1,546 @@
+"""shared.blog_inbox: the blog's requests, its validators, the frame policy and
+its config - the one module the service, the connector gate and Tier 1 share."""
+import pathlib
+import subprocess
+import sys
+
+import pytest
+
+from shared import blog_inbox as bi
+from shared.config_toml import toml_loader
+
+REPO = pathlib.Path(__file__).resolve().parents[2]
+
+DOC = "<!doctype html><title>T</title><h1>Nuclear Stocks Thesis</h1><p>Body.</p>"
+
+
+def _cfg(monkeypatch, **sections):
+    """Stand a config in for the file. ``limits()`` and friends read ``load``
+    at CALL time, so this is what proves a value is read and not a literal."""
+    monkeypatch.setattr(bi, "load", lambda: sections)
+
+
+# ── the streams and the views ───────────────────────────────────────────────
+
+def test_the_inbox_stream_is_its_own_and_never_the_owner_stream():
+    """The gate's Redis user may XADD on exactly this key (phase 2). cmd:blog
+    carries publish, discard and unpublish."""
+    assert bi.INBOX_STREAM == "cmd:blog_inbox"
+    assert bi.INBOX_STREAM != f"cmd:{bi.OWNER_DOMAIN}"
+    assert bi.OWNER_DOMAIN == "blog"
+
+
+def test_the_views_are_the_blogs_own():
+    assert (bi.VIEW_DRAFTS, bi.VIEW_POSTS, bi.VIEW_RESULT) == (
+        "blog:drafts", "blog:posts", "blog:result")
+    assert len({bi.VIEW_DRAFTS, bi.VIEW_POSTS, bi.VIEW_RESULT}) == 3
+
+
+def test_an_answer_view_is_per_request():
+    rid = bi.new_id()
+    assert bi.answer_view(rid) == f"blog:answer:{rid}"
+    assert bi.answer_view(rid) != bi.answer_view(bi.new_id())
+
+
+@pytest.mark.parametrize("raw", ["", None, 7, "x", "../drafts", "blog:drafts",
+                                 "0123456789ABCDEF", "0123456789abcde",
+                                 "0123456789abcdef0", "0123456789abcdef\n",
+                                 " 0123456789abcdef", "0123456789abcde*"])
+def test_a_bad_id_names_no_answer_view(raw):
+    """The id becomes part of a Redis KEY NAME. A caller's string that is not an
+    id this module made must never be spliced into one."""
+    assert bi.is_id(raw) is False
+    with pytest.raises(ValueError):
+        bi.answer_view(raw)
+
+
+def test_a_new_id_is_sixteen_hex_and_not_repeated():
+    ids = {bi.new_id() for _ in range(200)}
+    assert len(ids) == 200
+    assert all(bi.is_id(i) and bi.ID_RE.match(i) for i in ids)
+
+
+def test_no_pattern_accepts_a_trailing_newline():
+    """``$`` matches before a final newline, so ``^...$`` with ``.match`` lets
+    "abc\\n" through - and a slug is a folder name, an id a key name, a font
+    name a file name. The patterns end in ``\\Z`` so every caller is safe,
+    whichever of match / fullmatch it uses."""
+    assert bi.ID_RE.match("0123456789abcdef\n") is None
+    assert bi.SLUG_RE.match("abc\n") is None
+    assert bi.FONT_NAME_RE.match("0123456789abcdef0123.woff2\n") is None
+    assert bi.ID_RE.match("0123456789abcdef")
+    assert bi.SLUG_RE.match("abc")
+    assert bi.FONT_NAME_RE.match("0123456789abcdef0123.woff2")
+
+
+@pytest.mark.parametrize("raw", ["", "a.woff2", "0123456789abcdef0123.woff",
+                                 "0123456789ABCDEF0123.woff2",
+                                 "../0123456789abcdef0123.woff2",
+                                 "0123456789abcdef0123.woff2.html",
+                                 "0123456789abcdef01234.woff2"])
+def test_a_font_name_is_twenty_hex_and_woff2_and_nothing_else(raw):
+    assert bi.FONT_NAME_RE.match(raw) is None
+
+
+# ── slugs ───────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("raw", ["", None, "Fonts", "fonts", "../x", "a--b", "-a",
+                                 "a_b", "a b", "a/b", "x" * 200, "ü"])
+def test_a_slug_that_could_escape_or_collide_is_refused(raw):
+    assert bi.clean_slug(raw) is None
+
+
+@pytest.mark.parametrize("raw", [7, 7.5, True, ["a"], {"a": 1}, b"abc", "a-",
+                                 "a.b", "a\\b", ".", "..", "a\nb", "a\x00b",
+                                 "%2e%2e", "a:b", "a?b", "a#b", "a-é"])
+def test_a_slug_is_text_of_the_allowed_characters_only(raw):
+    assert bi.clean_slug(raw) is None
+
+
+@pytest.mark.parametrize("raw, want", [
+    ("nuclear-stocks-thesis", "nuclear-stocks-thesis"),
+    ("A-B", "a-b"),
+    ("  a1  ", "a1"),
+    ("2026", "2026"),
+])
+def test_a_usable_slug_is_returned_lowered_and_trimmed(raw, want):
+    assert bi.clean_slug(raw) == want
+
+
+def test_the_slug_length_limit_is_the_configured_one(monkeypatch):
+    cap = bi.limits()["slug_chars"]
+    assert bi.clean_slug("x" * cap) == "x" * cap
+    assert bi.clean_slug("x" * (cap + 1)) is None
+    _cfg(monkeypatch, limits={"slug_chars": 20})
+    assert bi.clean_slug("x" * 20) == "x" * 20
+    assert bi.clean_slug("x" * 21) is None
+
+
+def test_every_reserved_slug_is_refused():
+    """blog/fonts/ is the typeface folder: an entry with that address would be
+    written over it."""
+    assert "fonts" in bi.RESERVED_SLUGS
+    for slug in bi.RESERVED_SLUGS:
+        assert bi.SLUG_RE.match(slug), "a reserved word the pattern refuses anyway"
+        assert bi.clean_slug(slug) is None
+        assert bi.clean_slug(slug.upper()) is None
+
+
+def test_slugify_always_returns_a_usable_slug():
+    for title in ("Nuclear Stocks Thesis", "  ", "¿Qué?", "a/b\\c", "x" * 500, None,
+                  "Fonts", "fonts", "---", "../..", 7, "中文", "a" * 79 + " b c",
+                  "\ud800", "a\nb"):
+        slug = bi.slugify(title)
+        assert bi.clean_slug(slug) == slug, repr(title)
+
+
+@pytest.mark.parametrize("title, want", [
+    ("Nuclear Stocks Thesis", "nuclear-stocks-thesis"),
+    ("¿Qué?", "que"),
+    ("a/b\\c", "a-b-c"),
+    ("  Hello,   World!  ", "hello-world"),
+    ("  ", "entry"),
+    (None, "entry"),
+    ("中文", "entry"),
+])
+def test_slugify_folds_to_ascii_words_joined_by_hyphens(title, want):
+    assert bi.slugify(title) == want
+
+
+def test_slugify_cuts_to_the_limit_without_a_trailing_hyphen(monkeypatch):
+    _cfg(monkeypatch, limits={"slug_chars": 20})
+    # 10 + "-" + 8 = 19 characters, so the 20th - where the cut lands - is a "-".
+    assert bi.slugify("abcdefghij klmnopqr stuvwxyz") == "abcdefghij-klmnopqr"
+    assert len(bi.slugify("x" * 500)) == 20
+
+
+def test_slugify_never_returns_a_reserved_slug():
+    for word in bi.RESERVED_SLUGS:
+        slug = bi.slugify(word.title())
+        assert slug not in bi.RESERVED_SLUGS and bi.clean_slug(slug) == slug
+
+
+# ── fields ──────────────────────────────────────────────────────────────────
+
+def test_fields_are_strings_cut_to_the_limits_and_nothing_else_survives():
+    f = bi.clean_fields({"title": " T " * 200, "summary": 7, "tags": ["a", 3, "b" * 99] * 9,
+                         "slug": "../etc", "html": "<x>", "extra": 1})
+    assert set(f) == {"title", "summary", "tags", "slug"}
+    assert len(f["title"]) <= bi.limits()["title_chars"] and f["summary"] == ""
+    assert len(f["tags"]) <= bi.limits()["max_tags"] and f["slug"] == ""
+
+
+def test_usable_fields_come_back_trimmed():
+    f = bi.clean_fields({"title": "  Nuclear   Stocks\n Thesis ", "summary": " Why. ",
+                         "tags": [" energy ", "Energy", "", "  ", "uranium"],
+                         "slug": " Nuclear-Stocks "})
+    assert f == {"title": "Nuclear Stocks Thesis", "summary": "Why.",
+                 "tags": ["energy", "uranium"], "slug": "nuclear-stocks"}
+
+
+def test_each_field_is_cut_to_its_own_limit(monkeypatch):
+    _cfg(monkeypatch, limits={"title_chars": 5, "summary_chars": 7, "max_tags": 2,
+                              "tag_chars": 3})
+    f = bi.clean_fields({"title": "abcdefghij", "summary": "abcdefghij",
+                         "tags": ["abcdef", "ghijkl", "mnopqr"]})
+    assert f["title"] == "abcde" and f["summary"] == "abcdefg"
+    assert f["tags"] == ["abc", "ghi"]
+
+
+def test_a_cut_never_leaves_trailing_space():
+    f = bi.clean_fields({"title": "a" * (bi.limits()["title_chars"] - 1) + " bcd"})
+    assert f["title"] == "a" * (bi.limits()["title_chars"] - 1)
+
+
+def test_control_characters_never_reach_a_field():
+    """A title is written into a manifest and a page head. A NUL, an escape or
+    a lone surrogate (which cannot be encoded, so it would raise at the write)
+    is not text."""
+    f = bi.clean_fields({"title": "a\x00b\x1b[31mc\x7f", "summary": "x\ud800y\r\nz",
+                         "tags": ["t\x00ag", "\ud800"]})
+    assert f["title"] == "a b [31mc" and f["summary"] == "xy z"
+    assert f["tags"] == ["t ag"]
+    for value in (f["title"], f["summary"], *f["tags"]):
+        value.encode("utf-8")                        # raises on a surrogate
+
+
+@pytest.mark.parametrize("raw", [None, "", "title", 7, ["title"], {"tags": "a,b"},
+                                 {"tags": {"a": 1}}, {"title": ["x"]},
+                                 {"title": b"x", "summary": None, "slug": 9}])
+def test_unusable_fields_are_empty_and_never_raise(raw):
+    assert bi.clean_fields(raw) == {"title": "", "summary": "", "tags": [], "slug": ""}
+
+
+def test_clean_fields_is_stable_on_its_own_output():
+    """The gate cleans, then the service cleans what it reads: twice must be
+    once."""
+    once = bi.clean_fields({"title": " T " * 200, "summary": "s " * 400,
+                            "tags": ["a", "b" * 99, "A"], "slug": "My-Slug"})
+    assert bi.clean_fields(once) == once
+
+
+# ── the document ────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("html", ["", "   \n\t", None, 7, b"<p>x</p>", ["<p>"]])
+def test_a_document_is_non_empty_text(html):
+    assert bi.html_ok(html) is False
+
+
+def test_the_size_limit_counts_utf8_bytes_not_characters(monkeypatch):
+    _cfg(monkeypatch, limits={"max_html_kb": 1})
+    assert bi.html_ok("x" * 1024) is True
+    assert bi.html_ok("x" * 1025) is False
+    assert bi.html_ok("é" * 512) is True          # 2 bytes each: 1024
+    assert bi.html_ok("é" * 513) is False         # 513 characters, 1026 bytes
+
+
+def test_a_document_that_cannot_be_encoded_is_refused_not_raised():
+    """JSON may carry a lone surrogate; writing it to disk or to Redis raises."""
+    assert bi.html_ok("<p>\ud800</p>") is False
+
+
+def test_a_document_over_the_limit_builds_no_command(monkeypatch):
+    big = "x" * (bi.limits()["max_html_kb"] * 1024 + 1)
+    assert bi.submit_command(big, {}, source="upload", request_id=bi.new_id()) is None
+    assert bi.revise_command(bi.new_id(), big, {}, request_id=bi.new_id()) is None
+    _cfg(monkeypatch, limits={"max_html_kb": 1})
+    assert bi.submit_command("x" * 1025, {}, source="upload",
+                             request_id=bi.new_id()) is None
+    assert bi.submit_command("x" * 1024, {}, source="upload",
+                             request_id=bi.new_id()) is not None
+
+
+# ── the commands ────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("source", ["chat", "upload"])
+def test_a_submit_command_carries_the_document_and_cleaned_fields(source):
+    rid = bi.new_id()
+    cmd = bi.submit_command(DOC, {"title": "  A  title ", "slug": "../etc",
+                                  "tags": ["x", 3], "junk": 1},
+                            source=source, request_id=rid)
+    assert cmd == {"type": bi.SUBMIT_TYPE, "args": {
+        "request_id": rid, "source": source, "html": DOC,
+        "fields": {"title": "A title", "summary": "", "tags": ["x"], "slug": ""}}}
+    assert bi.SUBMIT_TYPE == "draft_submit"
+
+
+def test_a_submit_command_without_fields_still_carries_all_four():
+    for fields in (None, {}, "junk"):
+        cmd = bi.submit_command(DOC, fields, source="upload", request_id=bi.new_id())
+        assert cmd["args"]["fields"] == {"title": "", "summary": "", "tags": [], "slug": ""}
+
+
+def test_an_unknown_source_or_a_bad_request_id_builds_no_command():
+    rid = bi.new_id()
+    for source in ("", None, "Chat", "email", "upload ", 1):
+        assert bi.submit_command(DOC, {}, source=source, request_id=rid) is None
+    for bad in ("", None, "x", rid.upper(), rid + "0", rid + "\n", 7):
+        assert bi.submit_command(DOC, {}, source="chat", request_id=bad) is None
+        assert bi.revise_command(bi.new_id(), DOC, {}, request_id=bad) is None
+        assert bi.owner_command("discard", bad, draft_id=bi.new_id()) is None
+    assert set(bi.SOURCES) == {"chat", "upload"}
+
+
+def test_a_revise_command_names_the_draft_it_replaces():
+    rid, draft = bi.new_id(), bi.new_id()
+    cmd = bi.revise_command(draft, DOC, {"summary": " S "}, request_id=rid)
+    assert cmd == {"type": bi.REVISE_TYPE, "args": {
+        "request_id": rid, "draft_id": draft, "html": DOC,
+        "fields": {"title": "", "summary": "S", "tags": [], "slug": ""}}}
+    assert bi.REVISE_TYPE == "draft_revise"
+    for bad in ("", None, "../x", draft.upper(), 7):
+        assert bi.revise_command(bad, DOC, {}, request_id=rid) is None
+    assert bi.revise_command(draft, "", {}, request_id=rid) is None
+
+
+def test_there_is_no_publish_command_for_the_inbox():
+    """owner_command builds publish/discard/unpublish; nothing here puts one on
+    INBOX_STREAM. The service enforces it; this pins the builder."""
+    assert bi.owner_command("publish", bi.new_id(), draft_id=bi.new_id())["type"] == "publish"
+    assert bi.owner_command("delete_everything", bi.new_id()) is None
+    assert set(bi.OWNER_KINDS) == {"publish", "discard", "unpublish"}
+    assert set(bi.INBOX_TYPES) == {bi.SUBMIT_TYPE, bi.REVISE_TYPE}
+    assert not set(bi.INBOX_TYPES) & set(bi.OWNER_KINDS)
+    # The two builders the gate calls can produce nothing but an inbox type...
+    for cmd in (bi.submit_command(DOC, {}, source="chat", request_id=bi.new_id()),
+                bi.revise_command(bi.new_id(), DOC, {}, request_id=bi.new_id())):
+        assert cmd["type"] in bi.INBOX_TYPES
+    # ...and the owner builder refuses to build one of those.
+    for kind in bi.INBOX_TYPES:
+        assert bi.owner_command(kind, bi.new_id(), draft_id=bi.new_id()) is None
+
+
+def test_publish_names_a_draft_and_carries_the_operators_edits():
+    rid, draft = bi.new_id(), bi.new_id()
+    assert bi.owner_command("publish", rid, draft_id=draft) == {
+        "type": "publish", "args": {
+            "request_id": rid, "draft_id": draft,
+            "fields": {"title": "", "summary": "", "tags": [], "slug": ""}}}
+    cmd = bi.owner_command("publish", rid, draft_id=draft,
+                           fields={"title": " Edited ", "slug": "Edited-Address",
+                                   "tags": ["a"], "html": "<x>"})
+    assert cmd["args"]["fields"] == {"title": "Edited", "summary": "",
+                                     "tags": ["a"], "slug": "edited-address"}
+
+
+def test_discard_names_a_draft_and_unpublish_names_an_entry():
+    rid, draft = bi.new_id(), bi.new_id()
+    assert bi.owner_command("discard", rid, draft_id=draft) == {
+        "type": "discard", "args": {"request_id": rid, "draft_id": draft}}
+    assert bi.owner_command("unpublish", rid, slug=" Nuclear-Stocks ") == {
+        "type": "unpublish", "args": {"request_id": rid, "slug": "nuclear-stocks"}}
+
+
+def test_an_owner_command_missing_or_misnaming_its_target_is_not_built():
+    rid, draft = bi.new_id(), bi.new_id()
+    for kind in ("publish", "discard"):
+        assert bi.owner_command(kind, rid) is None
+        for bad in ("", None, "../x", draft.upper(), 7):
+            assert bi.owner_command(kind, rid, draft_id=bad) is None
+    assert bi.owner_command("unpublish", rid) is None
+    for bad in ("", None, "../x", "fonts", "a b", 7):
+        assert bi.owner_command("unpublish", rid, slug=bad) is None
+    # A target another kind takes, or a name this module does not know, is a
+    # caller's mistake: refused whole, never built with the stray part dropped.
+    assert bi.owner_command("discard", rid, draft_id=draft, slug="a") is None
+    assert bi.owner_command("discard", rid, draft_id=draft, fields={}) is None
+    assert bi.owner_command("unpublish", rid, slug="a", draft_id=draft) is None
+    assert bi.owner_command("publish", rid, draft_id=draft, html=DOC) is None
+    for kind in (None, 7, "", "Publish", ["publish"]):
+        assert bi.owner_command(kind, rid, draft_id=draft) is None
+
+
+# ── the frame ───────────────────────────────────────────────────────────────
+
+def test_the_sandbox_never_allows_scripts():
+    assert "allow-scripts" not in bi.ENTRY_SANDBOX and "allow-forms" not in bi.ENTRY_SANDBOX
+    assert "sandbox " + bi.ENTRY_SANDBOX in bi.ENTRY_CSP and "default-src 'none'" in bi.ENTRY_CSP
+
+
+def test_the_policy_is_the_designs_word_for_word():
+    """Three places send or apply this (the frame the service writes, the edge's
+    header, the private preview). The design states it once; so does this."""
+    assert bi.ENTRY_SANDBOX == ("allow-same-origin allow-popups "
+                                "allow-popups-to-escape-sandbox")
+    assert bi.ENTRY_CSP == (
+        "default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; "
+        "img-src 'self' data:; base-uri 'none'; form-action 'none'; "
+        "frame-ancestors 'self'; "
+        "sandbox allow-same-origin allow-popups allow-popups-to-escape-sandbox")
+
+
+def test_the_policy_loads_nothing_from_another_origin_and_runs_nothing():
+    directives = dict(d.strip().split(" ", 1) for d in bi.ENTRY_CSP.split(";"))
+    assert directives["default-src"] == "'none'"
+    assert "script-src" not in directives               # so default-src 'none' governs it
+    for name, value in directives.items():
+        assert "http" not in value and "*" not in value, name
+        assert "unsafe-eval" not in value, name
+    assert directives["style-src"] == "'unsafe-inline'"
+    # A header value: one line, and a quote would end the attribute Caddy and
+    # the private preview write it into.
+    assert "\n" not in bi.ENTRY_CSP and '"' not in bi.ENTRY_CSP
+    assert '"' not in bi.ENTRY_SANDBOX
+
+
+# ── the config ──────────────────────────────────────────────────────────────
+
+def test_the_limits_have_the_shipped_values():
+    assert bi.limits() == {
+        "max_html_kb": 512, "max_drafts": 20, "submissions_per_hour": 12,
+        "title_chars": 140, "summary_chars": 300, "max_tags": 6, "tag_chars": 24,
+        "slug_chars": 80, "max_wait_sec": 120, "answer_keep_sec": 120}
+
+
+def test_the_fonts_and_site_sections_have_the_shipped_values():
+    assert bi.fonts() == {"enabled": True, "subsets": ["latin", "latin-ext"],
+                          "max_files": 24, "max_file_kb": 400, "timeout_sec": 10}
+    assert bi.site() == {"enabled": True, "republish_min": 30}
+
+
+def test_the_shipped_file_matches_the_defaults():
+    """The TOML overrides defaults; shipped equal, so a missing file changes
+    nothing. Whole-file equality, so a key added to one and not the other
+    fails here."""
+    import tomllib
+    shipped = tomllib.loads((REPO / "config" / "blog.toml").read_text(encoding="utf-8"))
+    assert shipped == bi.DEFAULTS
+
+
+def test_every_number_has_bounds_and_ships_inside_them():
+    """BOUNDS is what the validators enforce and what the Settings catalogue
+    must offer. A number without bounds would be accepted at any size."""
+    numbers = {(section, key) for section, values in bi.DEFAULTS.items()
+               for key, value in values.items()
+               if isinstance(value, (int, float)) and not isinstance(value, bool)}
+    assert set(bi.BOUNDS) == numbers
+    for (section, key), (low, high) in bi.BOUNDS.items():
+        assert low <= bi.DEFAULTS[section][key] <= high, (section, key)
+
+
+def test_a_value_inside_its_bounds_is_read(monkeypatch):
+    _cfg(monkeypatch, limits={"max_drafts": 3, "max_wait_sec": 45.0},
+         fonts={"enabled": False, "subsets": ["cyrillic", "latin", "latin"],
+                "timeout_sec": 4},
+         site={"enabled": False, "republish_min": 5})
+    assert bi.limits()["max_drafts"] == 3
+    assert bi.limits()["max_wait_sec"] == 45 and isinstance(bi.limits()["max_wait_sec"], int)
+    assert bi.limits()["title_chars"] == 140            # an unnamed key keeps its default
+    assert bi.fonts() == {"enabled": False, "subsets": ["cyrillic", "latin"],
+                          "max_files": 24, "max_file_kb": 400, "timeout_sec": 4}
+    assert bi.site() == {"enabled": False, "republish_min": 5}
+
+
+BAD_TOML = """
+[site]
+enabled = "yes"
+republish_min = 0
+
+[limits]
+max_html_kb = 99999999
+max_drafts = -1
+submissions_per_hour = "many"
+title_chars = true
+summary_chars = nan
+max_tags = inf
+tag_chars = 0
+slug_chars = 4
+max_wait_sec = [120]
+answer_keep_sec = 0.2
+
+[fonts]
+enabled = 1
+subsets = "latin"
+max_files = 0
+max_file_kb = -400
+timeout_sec = 100000
+"""
+
+
+def test_bad_config_values_read_as_the_shipped_ones(tmp_path, monkeypatch):
+    """Through the REAL loader and its merge, from a file on disk: every key
+    carries a value of the wrong type or outside its bounds."""
+    shipped = (bi.limits(), bi.fonts(), bi.site())
+    path = tmp_path / "blog.toml"
+    path.write_text(BAD_TOML, encoding="utf-8")
+    load, _reset = toml_loader(path, bi.DEFAULTS, label="blog.toml")
+    monkeypatch.setattr(bi, "load", load)
+    assert load()["limits"]["max_drafts"] == -1          # the bad file IS what is read
+    assert (bi.limits(), bi.fonts(), bi.site()) == shipped
+
+
+@pytest.mark.parametrize("text", [
+    "this is not toml [",
+    "limits = 5\nfonts = 'x'\nsite = [1, 2]\n",          # a table replaced by a scalar
+    "",
+])
+def test_a_malformed_file_reads_as_the_shipped_values(tmp_path, monkeypatch, text):
+    shipped = (bi.limits(), bi.fonts(), bi.site())
+    path = tmp_path / "blog.toml"
+    path.write_text(text, encoding="utf-8")
+    load, _reset = toml_loader(path, bi.DEFAULTS, label="blog.toml")
+    monkeypatch.setattr(bi, "load", load)
+    assert (bi.limits(), bi.fonts(), bi.site()) == shipped
+
+
+@pytest.mark.parametrize("subsets", [[], ["LATIN!"], [7, None], "latin", None,
+                                     ["../x"], ["a" * 40]])
+def test_a_subset_list_with_nothing_usable_is_the_shipped_list(monkeypatch, subsets):
+    _cfg(monkeypatch, fonts={"subsets": subsets})
+    assert bi.fonts()["subsets"] == ["latin", "latin-ext"]
+
+
+def test_a_bad_subset_is_dropped_and_the_rest_kept(monkeypatch):
+    """A subset name is matched against Google's stylesheet comments; it is
+    never a path, but it is still held to the characters a name has."""
+    _cfg(monkeypatch, fonts={"subsets": ["greek", "../x", 7, "Latin", "greek"]})
+    assert bi.fonts()["subsets"] == ["greek"]
+
+
+def test_the_accessors_never_hand_out_the_cached_mapping():
+    """``load()`` returns the loader's CACHED dict. A caller that edited what
+    limits() or fonts() returned would otherwise edit everyone's config."""
+    bi.limits()["max_drafts"] = 0
+    bi.fonts()["subsets"].append("x")
+    bi.site()["enabled"] = False
+    assert bi.limits()["max_drafts"] == 20
+    assert bi.fonts()["subsets"] == ["latin", "latin-ext"]
+    assert bi.site()["enabled"] is True
+    assert bi.DEFAULTS["fonts"]["subsets"] == ["latin", "latin-ext"]
+
+
+# ── Tier 1 may import it ────────────────────────────────────────────────────
+
+# The project and third-party modules importing it may load. Stdlib is free;
+# anything else - an engine, the bus, redis, requests, lxml, a service - fails
+# here. tzdata is zoneinfo's data package on hosts without a system tz database
+# (Windows); repo_paths reads the clock's zone at import.
+EXPECTED = {"repo_paths", "shared", "shared.config_toml", "shared.blog_inbox",
+            "tzdata"}
+
+PROBE = r"""
+import sys
+sys.path.insert(0, r"%s")
+before = set(sys.modules)
+import shared.blog_inbox
+new = set(sys.modules) - before
+print("NEW:" + ",".join(sorted(m for m in new
+                              if m.split(".")[0] not in sys.stdlib_module_names
+                              # CPython generates this one per platform at build time, so it is
+                              # not in stdlib_module_names: on Linux, zoneinfo pulls in
+                              # _sysconfigdata__linux_x86_64-linux-gnu.
+                              and not m.startswith("_sysconfigdata"))))
+""" % REPO
+
+
+def test_the_module_imports_nothing_but_stdlib_config_and_paths():
+    """On the Tier-1 allow-list: no engine, no bus, no service. Run in a FRESH
+    interpreter so a transitive import cannot hide behind a module an earlier
+    test already loaded."""
+    r = subprocess.run([sys.executable, "-c", PROBE], cwd=REPO,
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    new = set(filter(None, r.stdout.strip()[len("NEW:"):].split(",")))
+    stray = {m for m in new if m not in EXPECTED and m.split(".")[0] != "tzdata"}
+    assert not stray, sorted(stray)
+    assert {"shared.blog_inbox", "shared.config_toml", "repo_paths"} <= new
