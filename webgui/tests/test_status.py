@@ -204,6 +204,11 @@ def test_restart_spec_news_service():
     assert spec == {"kind": "unit", "title": "news_svc :8216", "name": "news_svc"}
 
 
+def test_restart_spec_blog_service():
+    spec = status.restart_spec(_target("blog", "service"))
+    assert spec == {"kind": "unit", "title": "blog_svc :8217", "name": "blog_svc"}
+
+
 def test_restart_spec_redis_is_never_restartable(monkeypatch):
     """Redis is a SYSTEM unit; `systemctl --user` cannot reach it, and one server
     serves both environments. Read-only in prod as well as dev now -- previously
@@ -289,12 +294,13 @@ def test_everything_else_stays_restartable_in_prod(monkeypatch):
     restartable = {t["key"] for t in status.component_targets()
                    if status.restart_spec(t) is not None}
     assert restartable == {"proxy", "sentiment", "options", "portfolio",
-                           "trade", "market", "news", "webgui", "webgui_live"}
+                           "trade", "market", "news", "blog", "webgui",
+                           "webgui_live"}
     assert "driver" not in {t["key"] for t in status.component_targets()}
 
 
 def test_dev_can_still_restart_everything_it_owns(monkeypatch):
-    # The guards must not over-fire. Dev owns its six services (offset ports)
+    # The guards must not over-fire. Dev owns its seven services (offset ports)
     # and its own web GUI; leaving an operator unable to restart ANYTHING would
     # be a worse outcome than the cross-environment hazard being fixed.
     monkeypatch.setattr(status, "IS_DEV", True)
@@ -307,7 +313,7 @@ def test_dev_can_still_restart_everything_it_owns(monkeypatch):
     # screens share nothing: dev binds its own offset port and runs its own
     # process, so this button reaches only this checkout.
     assert restartable == {"sentiment", "options", "portfolio", "trade",
-                           "market", "news", "webgui", "webgui_live"}
+                           "market", "news", "blog", "webgui", "webgui_live"}
 
 
 # --- restart_command ----------------------------------------------------------
@@ -1017,7 +1023,7 @@ def test_the_card_row_can_wrap_so_it_fits_a_phone(monkeypatch):
 
 
 # ── Phase 6, Task 7: Restart gets a confirm ──────────────────────────────────
-# Nine of eleven components are restartable — the six services, the proxy only
+# Ten of twelve components are restartable — the seven services, the proxy only
 # when this checkout owns it, this web app and the public live screens — and
 # every one of them bounces a live process. ⚠ ``restart_spec``'s ten tests and
 # ``restart_command``'s five are PURE and untouched: if one of them breaks,

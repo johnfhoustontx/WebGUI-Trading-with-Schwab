@@ -1,0 +1,48 @@
+# The site Blog — what blog_svc accepts as a draft, and what it writes to the site.
+# Read through shared/blog_inbox.py (built-in defaults ← this file ← config/local/blog.toml).
+# Edit + restart blog_svc and the web GUI. A missing key or a bad value reads as
+# the shipped value below, never as an error.
+# Design: docs/plans/2026-10-06-site-blog-design.md.
+
+[site]
+# Off = drafts still arrive and can be previewed; nothing is written under
+# deploy/site/blog/ and the manifest is left as it is.
+enabled = true
+# How often, in minutes, the drafts and entries views are published again. They
+# are published on every change; this heals a flushed Redis.
+republish_min = 30
+
+[limits]
+# The largest document accepted, in KB of UTF-8, measured BEFORE cleaning. The
+# example entry is 35 KB.
+max_html_kb = 512
+# Drafts waiting at once. Past this a new one is refused until the operator
+# publishes or discards one.
+max_drafts = 20
+# Drafts the connector may file in an hour. An upload from the private page is
+# the operator's own and is not counted.
+submissions_per_hour = 12
+# The longest title, summary, tag and address (slug) kept, in characters. A
+# longer title, summary or tag is cut; a longer address is refused.
+title_chars = 140
+summary_chars = 300
+max_tags = 6               # tags kept on one entry; the rest are dropped
+tag_chars = 24
+slug_chars = 80            # the address becomes a folder name under the served root
+# A connector request older than this many seconds is answered "expired" and
+# not processed: it covers a replayed backlog and a queue that has fallen behind.
+max_wait_sec = 120
+# How long, in seconds, the answer to one connector request stays readable.
+# Every answer key must expire or their count grows without limit.
+answer_keep_sec = 120
+
+[fonts]
+# Copy the typefaces an entry asks Google Fonts for onto this box, at draft
+# time. Off = the entry falls back to the fonts its own stylesheet names. The
+# site never loads a typeface from another origin either way.
+enabled = true
+# The character sets copied. Each one is a separate file per weight.
+subsets = ["latin", "latin-ext"]
+max_files = 24             # typeface files copied for one entry; the rest are skipped
+max_file_kb = 400          # a larger typeface file is refused rather than stored
+timeout_sec = 10           # each request to Google Fonts; a failed one never blocks a draft

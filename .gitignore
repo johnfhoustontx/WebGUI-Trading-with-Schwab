@@ -123,6 +123,16 @@ deploy/site/reports/
 deploy/site/ideas/
 deploy/site/ideas.json
 
+# The site Blog. blog_svc keeps its drafts, entries and staged previews under
+# its own data folder, and on Publish writes each entry's pages and typefaces
+# under blog/ and the manifest blog.js draws beside them, on the box that
+# serves the site. Same reason as live/*.webp: tracked, the first published
+# entry would dirty prod's tree and tools/promote.sh refuses a dirty tree.
+# ⚠ The trailing slash matters: blog.html and assets/blog.js are TRACKED pages.
+services/blog_svc/data/
+deploy/site/blog/
+deploy/site/blog.json
+
 # The marketing gallery's screenshots, re-photographed from the PRIVATE app by
 # tools/capture_gallery_shots.py on the box that serves the site. Same reason as
 # deploy/site/live/*.webp above: committed, a capture run would dirty prod's

@@ -123,6 +123,7 @@ def component_targets():
         "trade": "trade_svc (on-demand analysis)",
         "market": "market_svc (macro-ticker dashboard)",
         "news": "news_svc (public news feeds)",
+        "blog": "blog_svc (site blog drafts + entries)",
     }
     for domain, label in svc_labels.items():
         url = SERVICE_URLS.get(domain)
@@ -350,9 +351,9 @@ def _do_restart(target):
 
 
 # ── the restart confirm ──────────────────────────────────────────────────────
-# Nine of the eleven cards carry a Restart, and every one of them bounces a live
-# process on this box: the six services, the proxy when this checkout owns it,
-# the PUBLIC live screens, and this web app itself. Two of those nine cost more
+# Ten of the twelve cards carry a Restart, and every one of them bounces a live
+# process on this box: the seven services, the proxy when this checkout owns it,
+# the PUBLIC live screens, and this web app itself. Two of those ten cost more
 # than the component they name, so the dialog says which one you are about to
 # pay. The sentences are module constants rather than literals inside render()
 # so a test can pin them without copying prose.
@@ -755,7 +756,7 @@ def render():
         ui.timer(_RESTART_RESWEEP_SEC, _refresh, once=True)
 
     # Built ONCE, at render()'s own level, and deliberately not ephemeral: the
-    # same dialog serves all nine restartable cards, retitled per click. AFTER
+    # same dialog serves all ten restartable cards, retitled per click. AFTER
     # ``_restart_confirmed``, so the name is bound when the kit calls it.
     restart_dlg = kit.confirm("Restart?", "", confirm_text=RESTART_CONFIRM,
                               danger=True, on_confirm=_restart_confirmed)

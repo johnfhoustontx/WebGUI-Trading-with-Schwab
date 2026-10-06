@@ -108,6 +108,10 @@ TOOLS_PUBLIC_TOML = REPO_ROOT / "config" / "tools_public.toml"
 # deploy/caddy/generate_caddyfile.py only; a change needs the Caddyfile
 # regenerated and Caddy reloaded, as root.
 EDGE_TOML = REPO_ROOT / "config" / "edge.toml"
+# The site Blog: whether the site is written, the size and count limits on a
+# draft, and the typeface copy. Read by shared/blog_inbox.py from blog_svc (the
+# worker) and the private app. Edit + restart both.
+BLOG_TOML = REPO_ROOT / "config" / "blog.toml"
 # The swing model refit's ship gate (trade-analyzer/fit_swing_model.py).
 SWING_MODEL_TOML = REPO_ROOT / "config" / "swing_model.toml"
 # The proxy's local market-data store and the collector cadence built on it.
@@ -201,6 +205,13 @@ DIVIDENDS_DB = TRADE_SVC_DATA / "dividends.db"
 # news_svc: the public-feed collector's own store (gitignored data/).
 NEWS_SVC_DATA = REPO_ROOT / "services" / "news_svc" / "data"
 NEWS_DB = NEWS_SVC_DATA / "news.db"
+
+# blog_svc: the site Blog's drafts and entries (gitignored data/). The folder
+# also holds the cleaned drafts waiting for the operator (staging/), which
+# nothing serves but the private preview; what the PUBLIC site serves is written
+# under SITE_ROOT / "blog" and nowhere in here.
+BLOG_DATA = REPO_ROOT / "services" / "blog_svc" / "data"
+BLOG_DB = BLOG_DATA / "blog.db"
 
 # ------------------------------------------------------------------ environment
 # Which environment this CHECKOUT is (dev or prod), and the behavior flags that
