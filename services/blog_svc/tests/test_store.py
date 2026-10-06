@@ -140,6 +140,39 @@ def run_sql(root, sql, *args) -> None:
         con.close()
 
 
+@contextlib.contextmanager
+def refused(code):
+    """The call inside is REFUSED with exactly this code, and the refusal says
+    nothing else: its text is the code, never a name, an address or content.
+    It is still a ``ValueError``, which is what the first version raised."""
+    with pytest.raises(store.StoreRefusal) as caught:
+        yield caught
+    assert caught.value.code == code, caught.value.code
+    assert str(caught.value) == code and caught.value.args == (code,)
+    assert isinstance(caught.value, ValueError) and code in store.REFUSAL_CODES
+
+
+def sha(data) -> str:
+    return hashlib.sha256(data if isinstance(data, bytes) else data.encode("utf-8")).hexdigest()
+
+
+def link_to(link, target) -> None:
+    """Make ``link`` a link to the folder ``target``, or skip the test.
+
+    A symbolic link where the box allows one; on Windows without that right, a
+    junction, which needs none and is what a stray link there usually is."""
+    try:
+        os.symlink(target, link, target_is_directory=True)
+        return
+    except (OSError, NotImplementedError):
+        pass
+    try:
+        import _winapi
+        _winapi.CreateJunction(str(target), str(link))
+    except (ImportError, AttributeError, OSError):
+        pytest.skip("this box makes neither symbolic links nor junctions")
+
+
 @pytest.fixture
 def root(tmp_path):
     return tmp_path / "blog"
@@ -165,7 +198,8 @@ def test_a_draft_round_trips_with_its_document(st, root):
 
     got = st.draft(ID_A)
     assert got == {
-        "id": ID_A, "source": "upload", "revises": None, "slug": "first-entry",
+        "id": ID_A, "source": "upload", "revises": None, "revises_published_at": None,
+        "slug": "first-entry",
         "title": "First entry", "summary": "What it says.", "tags": ["one", "two"],
         "removed": {"script": 2, "form": 1}, "fonts": [name], "font_links": [LINK],
         "font_note": "", "bytes": len(doc("Hello").encode("utf-8")),
@@ -331,8 +365,9 @@ def test_publish_moves_the_document_and_removes_the_draft(st, root):
     assert leftovers(root) == []
 
 
-def test_publishing_a_draft_that_is_not_there_is_none(st, root):
-    assert st.publish(ID_A, fields(), at(1)) is None
+def test_publishing_a_draft_that_is_not_there_is_refused(st, root):
+    with refused("no_draft"):
+        st.publish(ID_A, fields(), at(1))
     assert st.entries() == [] and not (root / "published").exists()
 
 
@@ -363,7 +398,8 @@ def test_a_revision_cannot_rename_its_entry(st, root):
     st.add_draft(a_draft(ID_B, revises="first-entry"), doc("second"), {})
     before = tree(root)
 
-    assert st.publish(ID_B, fields(slug="another-address"), at(20)) is None
+    with refused("slug_changed"):
+        st.publish(ID_B, fields(slug="another-address"), at(20))
 
     assert tree(root) == before
     assert [e["slug"] for e in st.entries()] == ["first-entry"]
@@ -379,7 +415,8 @@ def test_publishing_a_new_draft_onto_a_taken_slug_is_refused(st, root):
     st.add_draft(a_draft(ID_B), doc("second"), {})
     before = tree(root)
 
-    assert st.publish(ID_B, fields(), at(20)) is None
+    with refused("slug_taken"):
+        st.publish(ID_B, fields(), at(20))
 
     assert tree(root) == before
     assert st.entries() == [first] and st.entry_html("first-entry") == doc("first")
@@ -403,7 +440,8 @@ def test_a_revision_of_an_entry_since_unpublished_is_a_new_entry(st):
 def test_an_entry_without_a_title_is_refused(st, root, title):
     st.add_draft(a_draft(), doc(), {})
     before = tree(root)
-    assert st.publish(ID_A, fields(title=title), at(1)) is None
+    with refused("no_title"):
+        st.publish(ID_A, fields(title=title), at(1))
     assert tree(root) == before
     assert st.entries() == [] and st.draft(ID_A) is not None
 
@@ -418,15 +456,18 @@ def test_an_entry_without_a_title_is_refused(st, root, title):
 def test_publish_refuses_fields_of_the_wrong_shape(st, root, bad):
     st.add_draft(a_draft(), doc(), {})
     before = tree(root)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError) as caught:
         st.publish(ID_A, bad, at(1))
+    # No address at all is a bad NAME; anything else unusable is bad INPUT.
+    no_slug = isinstance(bad, dict) and "slug" not in bad
+    assert caught.value.code == ("bad_name" if no_slug else "bad_input")
     assert tree(root) == before
 
 
 def test_publish_refuses_a_time_without_a_timezone(st, root):
     st.add_draft(a_draft(), doc(), {})
     before = tree(root)
-    with pytest.raises(ValueError):
+    with refused("bad_input"):
         st.publish(ID_A, fields(), "2026-10-06T12:00:00")
     assert tree(root) == before
 
@@ -627,18 +668,23 @@ BAD_IDS = ["../x", "a/b", "", "fonts", "A", "0" * 15, "0" * 17, "A" * 16, "g" * 
 @pytest.mark.parametrize("bad", BAD_IDS)
 def test_no_path_is_built_from_an_unvalidated_name(st, root, bad):
     """A draft id becomes a folder name. Anything ``blog_inbox.new_id`` could
-    not have made raises before the disk is touched - not even a folder."""
+    not have made is refused before the disk is touched - not even a folder.
+
+    A WRITE raises (``bad_name``). A lookup answers as it would for a name
+    that simply is not there: a double-clicked Discard, or a page asking after
+    an id it was handed, is not an error to report."""
     st.add_draft(a_draft(ID_B), doc(), {})
     before = tree(root)
     for call in (lambda: st.add_draft(a_draft(bad), doc(), {}),
                  lambda: st.replace_draft(bad, a_draft(), doc(), {}),
-                 lambda: st.draft(bad),
-                 lambda: st.draft_html(bad),
-                 lambda: st.discard(bad),
                  lambda: st.publish(bad, fields(), at(1))):
-        with pytest.raises(ValueError):
+        with refused("bad_name"):
             call()
+    assert st.draft(bad) is None
+    assert st.draft_html(bad) is None
+    assert st.discard(bad) is False
     assert tree(root) == before
+    assert [d["id"] for d in st.drafts()] == [ID_B] and st.draft_html(ID_B) == doc()
 
 
 BAD_SLUGS = ["../x", "a/b", "a\\b", "", "fonts", "A", "First-Entry", "a--b", "-a", "a-",
@@ -659,17 +705,18 @@ def test_no_path_is_built_from_an_unvalidated_slug(st, root, bad):
     st.publish(ID_A, fields(), at(1))
     st.add_draft(a_draft(ID_B, slug="waiting"), doc(), {})
     before = tree(root)
-    calls = [lambda: st.entry(bad),
-             lambda: st.entry_html(bad),
-             lambda: st.unpublish(bad),
-             lambda: st.publish(ID_B, fields(slug=bad), at(2)),
+    calls = [lambda: st.publish(ID_B, fields(slug=bad), at(2)),
              lambda: st.add_draft(a_draft(ID_C, slug=bad), doc(), {}),
              lambda: st.replace_draft(ID_B, a_draft(ID_B, slug=bad), doc(), {})]
     if bad is not None:                     # ``revises=None`` is "not a revision"
         calls.append(lambda: st.add_draft(a_draft(ID_C, revises=bad), doc(), {}))
     for call in calls:
-        with pytest.raises(ValueError):
+        with refused("bad_name"):
             call()
+    # The lookups answer "not there" (see the ids above).
+    assert st.entry(bad) is None
+    assert st.entry_html(bad) is None
+    assert st.unpublish(bad) is False
     assert tree(root) == before
     assert [e["slug"] for e in st.entries()] == ["first-entry"]
     assert st.draft(ID_B)["slug"] == "waiting"
@@ -684,10 +731,9 @@ BAD_FONT_NAMES = ["../x", "a/b", "", "fonts", "A", "0" * 15, "0" * 20, "0" * 20 
 @pytest.mark.parametrize("bad", BAD_FONT_NAMES)
 def test_no_path_is_built_from_an_unvalidated_font_name(st, root, bad):
     before = tree(root)
-    with pytest.raises(ValueError):
+    with refused("bad_name"):
         st.add_draft(a_draft(), doc(), {bad: b"wOF2 data"})
-    with pytest.raises(ValueError):
-        st.font_bytes(bad)
+    assert st.font_bytes(bad) is None
     assert tree(root) == before
     assert st.drafts() == []
 
@@ -701,24 +747,51 @@ def test_an_address_that_is_a_windows_device_is_refused(st, root, name):
     not folders: opening one opens the console or discards what is written.
     Prod is Linux, where they would work - which is exactly how an entry
     nobody can restore on a Windows box would get published. Refused on every
-    platform, by the store itself and not by the shape of an address."""
+    platform - by ``blog_inbox``'s reserved words, so that ``slugify`` never
+    hands the service one, and by the store again whatever the gate says."""
     assert blog_inbox.SLUG_RE.match(name), "the shape alone does not refuse it"
     st.add_draft(a_draft(ID_A), doc(), {})
     before = tree(root)
     for call in (lambda: st.add_draft(a_draft(ID_B, slug=name), doc(), {}),
                  lambda: st.add_draft(a_draft(ID_B, revises=name), doc(), {}),
                  lambda: st.replace_draft(ID_A, a_draft(slug=name), doc(), {}),
-                 lambda: st.publish(ID_A, fields(slug=name), at(1)),
-                 lambda: st.entry(name),
-                 lambda: st.entry_html(name),
-                 lambda: st.unpublish(name)):
-        with pytest.raises(ValueError):
+                 lambda: st.publish(ID_A, fields(slug=name), at(1))):
+        with refused("bad_name"):
             call()
+    assert st.entry(name) is None and st.entry_html(name) is None
+    assert st.unpublish(name) is False
     assert tree(root) == before
     assert st.entries() == []
 
 
-@pytest.mark.parametrize("name", ["console", "nulls", "com10", "lpt", "con-artists", "aux-in"])
+@pytest.mark.parametrize("name", DEVICE_NAMES + ["fonts"])
+def test_a_reserved_word_is_refused_even_if_the_gate_lets_it_through(st, root, monkeypatch, name):
+    """The store's own check, with ``blog_inbox``'s gates switched off."""
+    st.add_draft(a_draft(ID_A), doc(), {})
+    monkeypatch.setattr(blog_inbox, "existing_slug", lambda raw: raw)
+    monkeypatch.setattr(blog_inbox, "clean_slug", lambda raw: raw)
+    before = tree(root)
+    for call in (lambda: st.add_draft(a_draft(ID_B, slug=name), doc(), {}),
+                 lambda: st.publish(ID_A, fields(slug=name), at(1))):
+        with refused("bad_name"):
+            call()
+    assert st.entry_html(name) is None and st.unpublish(name) is False
+    assert tree(root) == before
+
+
+def test_what_the_title_maker_returns_is_always_an_address_the_store_takes(st):
+    """``slugify`` and the store must agree, or a title would file a draft the
+    store then refuses. ``Con`` was that title."""
+    for n, title in enumerate(["Con", "NUL", "com1", "LPT9", "Fonts", "Aux", "prn"]):
+        slug = blog_inbox.slugify(title)
+        draft_id = f"{n:016x}"
+        st.add_draft(a_draft(draft_id, slug=slug), doc(title), {})
+        assert st.publish(draft_id, fields(slug=slug), at(n))["slug"] == slug
+        assert st.entry_html(slug) == doc(title)
+
+
+@pytest.mark.parametrize("name", ["console", "nulls", "com10", "com0", "lpt", "lpt0",
+                                  "con-artists", "aux-in"])
 def test_an_address_that_only_looks_like_a_device_is_fine(st, name):
     st.add_draft(a_draft(slug=name), doc(), {})
     assert st.publish(ID_A, fields(slug=name), at(1))["slug"] == name
@@ -738,8 +811,13 @@ def test_no_break_space_is_one_character():
 
 def test_a_validator_that_let_a_path_through_is_still_stopped(st, root, monkeypatch):
     """Defence in depth. With every validator replaced by one that accepts
-    anything, a name that climbs out of its folder is still refused, because
-    the finished path's parent is not the folder it was built in."""
+    anything, a name that climbs out of its folder is still refused: a path is
+    built only from ONE path component - no separator, no drive, no dot name.
+
+    (The first version resolved the finished path and compared its parent.
+    Resolving a folder another thread is deleting misfires on Windows - see
+    ``test_a_lookup_is_never_refused_because_its_folder_is_going`` - so the
+    NAME is checked instead, and nothing that may be mid-delete is resolved.)"""
     st.add_draft(a_draft(ID_A), doc(), {})
     outside = root.parent / "outside"
     outside.mkdir()
@@ -749,15 +827,17 @@ def test_a_validator_that_let_a_path_through_is_still_stopped(st, root, monkeypa
     monkeypatch.setattr(blog_inbox, "clean_slug", lambda raw: raw)
     before = tree(root.parent)
 
-    for call in (lambda: st.draft_html("../../outside"),
-                 lambda: st.discard("../../outside"),
-                 lambda: st.add_draft(a_draft("../../outside"), doc(), {}),
-                 lambda: st.entry_html("../../outside"),
-                 lambda: st.unpublish("../../outside"),
-                 lambda: st.publish(ID_A, fields(slug="../../outside"), at(1)),
-                 lambda: st.publish(ID_A, fields(slug="a/b"), at(1))):
-        with pytest.raises(ValueError):
-            call()
+    climbers = ["../../outside", "..", ".", "a/b", "a\\b", "c:outside", "outside/", ""]
+    for name in climbers:
+        for call in (lambda: st.add_draft(a_draft(name), doc(), {}),
+                     lambda: st.replace_draft(name, a_draft(), doc(), {}),
+                     lambda: st.publish(name, fields(), at(1)),
+                     lambda: st.publish(ID_A, fields(slug=name), at(1))):
+            with refused("bad_name"):
+                call()
+        assert st.draft_html(name) is None and st.entry_html(name) is None
+        assert st.discard(name) is False and st.unpublish(name) is False
+        assert st.font_bytes(name) is None
 
     assert tree(root.parent) == before
     assert (outside / "entry.html").read_bytes() == b"not the store's"
@@ -831,7 +911,8 @@ def test_the_tables_are_the_ones_the_design_names(st, root):
                for name in ("drafts", "entries", "submissions", "kv")}
     assert columns == {
         "drafts": ["id", "source", "revises", "slug", "title", "summary", "tags", "removed",
-                   "fonts", "font_links", "font_note", "bytes", "digest", "received_at"],
+                   "fonts", "font_links", "font_note", "bytes", "digest", "received_at",
+                   "revises_published_at"],
         "entries": ["slug", "title", "summary", "tags", "fonts", "font_links", "digest",
                     "published_at", "updated_at"],
         "submissions": ["at"],
@@ -974,8 +1055,14 @@ def test_a_crash_after_a_revisions_rows_and_before_its_file_moves(root, monkeypa
     assert (published / "entry.html").read_bytes() == doc("old words").encode("utf-8")
 
     with reopened(root) as after:
-        assert after.entry("first-entry")["title"] == "Reworded"
-        assert after.entry_html("first-entry") == doc("new words")   # before any repair
+        entry = after.entry("first-entry")
+        assert entry["title"] == "Reworded"
+        # Before any repair - and through the reader everything outside the
+        # store uses, which changes nothing on disk. (``entry_html`` would
+        # finish the rename itself; that has a test of its own below.)
+        assert blog_inbox.read_document(published, entry["digest"]) == \
+            doc("new words").encode("utf-8")
+        assert (published / "entry.html").read_bytes() == doc("old words").encode("utf-8")
         report = after.repair()
         assert report["settled"] == 1 and report["entries_missing"] == []
         assert report["staging_removed"] == [ID_B]
@@ -1019,9 +1106,13 @@ def test_a_crash_after_a_replacements_row_and_before_its_file_moves(root, monkey
     first.close()
 
     with reopened(root) as after:
-        assert after.draft(ID_A)["title"] == "After"
-        assert after.draft_html(ID_A) == doc("after")                # before any repair
+        row = after.draft(ID_A)
+        assert row["title"] == "After"
+        # Before any repair, through the shared reader (see the entry above).
+        assert blog_inbox.read_document(root / "staging" / ID_A, row["digest"]) == \
+            doc("after").encode("utf-8")
         assert after.repair()["settled"] == 1
+        assert after.draft_html(ID_A) == doc("after")
         staged = root / "staging" / ID_A / "entry.html"
         assert staged.read_bytes() == doc("after").encode("utf-8")
         assert after.draft(ID_A)["fonts"] == [new_font[0]]
@@ -1272,7 +1363,7 @@ def test_repair_reports_a_typeface_that_is_named_and_not_there(st, root):
 def test_repair_on_a_store_with_nothing_in_it(st, root):
     assert st.repair() == {
         "ok": True, "staging_removed": [], "drafts_removed": [], "published_removed": [],
-        "entries_missing": [], "fonts_missing": [], "left_alone": [],
+        "entries_missing": [], "fonts_missing": [], "left_alone": [], "failed": [],
         "settled": 0, "temp_removed": 0}
     assert sorted(p.name for p in root.iterdir() if "blog.db" not in p.name) == []
 
@@ -1288,7 +1379,7 @@ def test_repair_on_a_healthy_store_changes_nothing(st, root):
 
     assert report == {
         "ok": True, "staging_removed": [], "drafts_removed": [], "published_removed": [],
-        "entries_missing": [], "fonts_missing": [], "left_alone": [],
+        "entries_missing": [], "fonts_missing": [], "left_alone": [], "failed": [],
         "settled": 0, "temp_removed": 0}
     assert tree(root) == before
 
@@ -1322,7 +1413,9 @@ def test_a_document_changed_on_disk_is_not_served(st, root):
     (root / "staging" / ID_A / "entry.html").write_bytes(
         doc("<script>edited on disk</script>").encode("utf-8"))
     assert st.draft_html(ID_A) is None
-    assert st.publish(ID_A, fields(), at(1)) is None
+    with refused("document_missing"):
+        st.publish(ID_A, fields(), at(1))
+    assert st.draft(ID_A) is not None, "the draft is still there to be replaced"
     assert st.entries() == [] and not (root / "published" / "first-entry").exists()
 
 
@@ -1410,6 +1503,13 @@ def _race(first, second, rounds, root):
             try:
                 gate.wait(10)
                 results[draft_id] = which.publish(draft_id, fields(slug=slug), at(n % 60))
+            except store.StoreRefusal as refusal:
+                # The loser. ``None`` below stands for exactly this refusal and
+                # no other: any other code is an error.
+                if refusal.code == "slug_taken":
+                    results[draft_id] = None
+                else:
+                    errors.append(refusal)
             except BaseException as exc:             # noqa: BLE001 - reported below
                 errors.append(exc)
 
@@ -1513,13 +1613,13 @@ def test_an_entry_keeps_its_address_when_the_limit_is_lowered(st, root, monkeypa
 
     # Nothing new at that length: not a draft's own address, not a publish.
     before = tree(root)
-    with pytest.raises(ValueError):
+    with refused("bad_name"):
         st.add_draft(a_draft(ID_B, slug=long_slug), doc(), {})
     assert tree(root) == before
     st.add_draft(a_draft(ID_B, slug="short"), doc("b"), {})
-    with pytest.raises(ValueError):
+    with refused("bad_name"):
         st.publish(ID_B, fields(slug="b" * ceiling), at(2))
-    with pytest.raises(ValueError):
+    with refused("bad_name"):
         st.replace_draft(ID_B, a_draft(ID_B, slug="b" * ceiling), doc("b"), {})
     assert st.draft(ID_B)["slug"] == "short" and len(st.entries()) == 1
 
@@ -1539,11 +1639,701 @@ def test_one_past_the_ceiling_is_never_an_address(st, root, monkeypatch):
                         lambda: {"limits": {"slug_chars": blog_inbox.SLUG_CHARS_CEILING}})
     too_long = "a" * (blog_inbox.SLUG_CHARS_CEILING + 1)
     before = tree(root)
-    for call in (lambda: st.entry(too_long), lambda: st.unpublish(too_long),
-                 lambda: st.add_draft(a_draft(slug=too_long), doc(), {})):
-        with pytest.raises(ValueError):
+    with refused("bad_name"):
+        st.add_draft(a_draft(slug=too_long), doc(), {})
+    assert st.entry(too_long) is None and st.entry_html(too_long) is None
+    assert st.unpublish(too_long) is False
+    assert tree(root) == before
+
+
+# ── a refusal says why, in one word ──────────────────────────────────────────
+
+def test_the_refusal_codes_are_the_contract():
+    """The service turns each code into the operator's sentence, so the set is
+    a contract: a code added here without one there is an unexplained error."""
+    assert store.REFUSAL_CODES == ("no_draft", "no_title", "slug_taken", "slug_changed",
+                                   "document_missing", "bad_name", "bad_input", "busy")
+    assert issubclass(store.StoreRefusal, ValueError)
+    for code in store.REFUSAL_CODES:
+        refusal = store.StoreRefusal(code)
+        assert refusal.code == code and str(refusal) == code and refusal.args == (code,)
+
+
+@pytest.mark.parametrize("bad", ["", "nope", "SLUG_TAKEN", None, 7, "SECRET-MARK <p>content</p>"])
+def test_a_refusal_cannot_carry_anything_but_a_code(bad):
+    """Its text is what a log line and an answer are built from. Anything that
+    is not one of the codes is this module's own mistake, and says so without
+    repeating what it was handed."""
+    refusal = store.StoreRefusal(bad)
+    assert refusal.code == "bad_input" and str(refusal) == "bad_input"
+    assert "SECRET-MARK" not in repr(refusal)
+
+
+def test_each_kind_of_bad_argument_has_its_code(st, root):
+    name, data = font(b"x")
+    st.add_draft(a_draft(ID_A), doc(), {})
+    before = tree(root)
+    for code, call in [
+        ("bad_input", lambda: st.add_draft(a_draft(ID_A), doc(), {})),            # an id already stored
+        ("bad_input", lambda: st.add_draft(None, doc(), {})),
+        ("bad_input", lambda: st.add_draft(a_draft(ID_B, source="email"), doc(), {})),
+        ("bad_input", lambda: st.add_draft(a_draft(ID_B, title=None), doc(), {})),
+        ("bad_input", lambda: st.add_draft(a_draft(ID_B, received_at="noon"), doc(), {})),
+        ("bad_input", lambda: st.add_draft(a_draft(ID_B), None, {})),
+        ("bad_input", lambda: st.add_draft(a_draft(ID_B), doc(LONE_SURROGATE), {})),
+        ("bad_input", lambda: st.add_draft(a_draft(ID_B), doc(), None)),
+        ("bad_input", lambda: st.add_draft(a_draft(ID_B), doc(), {name: data + b"!"})),
+        ("bad_input", lambda: st.add_draft(a_draft(ID_B), doc(), {name: "text"})),
+        ("bad_name", lambda: st.add_draft(a_draft(ID_B), doc(), {"x.woff2": data})),
+        ("bad_name", lambda: st.add_draft(a_draft("nope"), doc(), {})),
+        ("bad_name", lambda: st.add_draft(a_draft(ID_B, slug="No Good"), doc(), {})),
+        ("bad_name", lambda: st.add_draft(a_draft(ID_B, revises="No Good"), doc(), {})),
+        ("bad_name", lambda: st.replace_draft("nope", a_draft(), doc(), {})),
+        ("bad_name", lambda: st.replace_draft(ID_A, a_draft(slug="No Good"), doc(), {})),
+        ("bad_input", lambda: st.replace_draft(ID_A, a_draft(tags="one"), doc(), {})),
+        ("bad_input", lambda: st.replace_draft(ID_A, a_draft(), 7, {})),
+        ("bad_name", lambda: st.publish("nope", fields(), at(1))),
+        ("bad_name", lambda: st.publish(ID_A, fields(slug="No Good"), at(1))),
+        ("bad_input", lambda: st.publish(ID_A, "fields", at(1))),
+        ("bad_input", lambda: st.publish(ID_A, fields(), "noon")),
+        ("bad_input", lambda: st.note_submission("noon")),
+        ("bad_input", lambda: st.count_submissions_since(None)),
+        ("bad_name", lambda: st.set_kv("Not A Key", 1)),
+        ("bad_name", lambda: st.get_kv("Not A Key")),
+        ("bad_input", lambda: st.set_kv("key", {1, 2})),
+    ]:
+        with refused(code):
             call()
     assert tree(root) == before
+
+
+def test_a_malformed_name_comes_before_everything_else_that_is_wrong(st, root):
+    """Which code, when several things are wrong at once: the name first (it
+    decides whether there is anything to talk about), then the rest of the
+    input, then - only with usable input - what the rows say."""
+    with refused("bad_name"):
+        st.publish("nope", None, "noon")
+    with refused("bad_input"):
+        st.publish(ID_A, None, "noon")
+    with refused("bad_name"):
+        st.publish(ID_A, fields(slug="No Good", title=""), "noon")
+    with refused("bad_input"):
+        st.publish(ID_A, fields(title=""), "noon")
+    with refused("no_title"):
+        st.publish(ID_A, fields(title=""), at(1))          # and there is no such draft
+    with refused("no_draft"):
+        st.publish(ID_A, fields(), at(1))
+
+
+# ── a revision replaces the entry it was written against, and no other ──────
+
+def test_a_draft_records_which_entry_it_revises(st):
+    st.add_draft(a_draft(ID_A), doc("first"), {})
+    st.publish(ID_A, fields(), at(10))
+
+    st.add_draft(a_draft(ID_B, revises="first-entry"), doc("second"), {})
+    st.add_draft(a_draft(ID_C, slug="other", revises="not-published-yet"), doc("third"), {})
+
+    assert st.draft(ID_B)["revises_published_at"] == stored(10)
+    assert st.draft(ID_C)["revises"] == "not-published-yet"
+    assert st.draft(ID_C)["revises_published_at"] is None
+    # A replacement keeps both, whatever it is handed.
+    st.replace_draft(ID_B, a_draft(revises=None, revises_published_at=stored(59)), doc("x"), {})
+    assert st.draft(ID_B)["revises"] == "first-entry"
+    assert st.draft(ID_B)["revises_published_at"] == stored(10)
+
+
+def test_what_a_caller_says_a_draft_revises_at_is_not_believed(st):
+    st.add_draft(a_draft(ID_A), doc("first"), {})
+    st.publish(ID_A, fields(), at(10))
+    st.add_draft(a_draft(ID_B, revises="first-entry", revises_published_at=stored(59)),
+                 doc("second"), {})
+    assert st.draft(ID_B)["revises_published_at"] == stored(10)
+
+
+def test_a_stale_revision_does_not_replace_another_entry_at_the_address(st, root):
+    """The draft was written against an entry that has since been unpublished,
+    and something ELSE now lives at that address. Publishing the draft must not
+    overwrite it as if it were a revision of it."""
+    st.add_draft(a_draft(ID_A), doc("the original"), {})
+    st.publish(ID_A, fields(), at(10))
+    st.add_draft(a_draft(ID_B, revises="first-entry"), doc("a revision of the original"), {})
+    st.unpublish("first-entry")
+    st.add_draft(a_draft(ID_C), doc("something else entirely"), {})
+    other = st.publish(ID_C, fields(title="Something else"), at(30))
+    before = tree(root)
+
+    with refused("slug_taken"):
+        st.publish(ID_B, fields(), at(40))
+
+    assert tree(root) == before
+    assert st.entries() == [other]
+    assert st.entry_html("first-entry") == doc("something else entirely")
+    assert st.draft_html(ID_B) == doc("a revision of the original")
+    # At a free address it is what it now is: a new entry.
+    entry = st.publish(ID_B, fields(slug="the-original-again"), at(41))
+    assert entry["published_at"] == stored(41) == entry["updated_at"]
+    assert st.entry_html("first-entry") == doc("something else entirely")
+
+
+def test_a_draft_filed_before_its_entry_existed_does_not_replace_what_came_later(st, root):
+    st.add_draft(a_draft(ID_A, revises="first-entry"), doc("claims to revise"), {})
+    st.add_draft(a_draft(ID_B), doc("the real entry"), {})
+    real = st.publish(ID_B, fields(), at(20))
+
+    with refused("slug_taken"):
+        st.publish(ID_A, fields(), at(30))
+
+    assert st.entries() == [real] and st.entry_html("first-entry") == doc("the real entry")
+
+
+def test_two_revisions_of_one_entry_are_published_in_turn(st):
+    """A revision does not change ``published_at``, so a second draft written
+    against the same entry is still a revision of it."""
+    st.add_draft(a_draft(ID_A), doc("v1"), {})
+    st.publish(ID_A, fields(), at(10))
+    st.add_draft(a_draft(ID_B, revises="first-entry"), doc("v2"), {})
+    st.add_draft(a_draft(ID_C, revises="first-entry"), doc("v3"), {})
+
+    assert st.publish(ID_B, fields(), at(20))["updated_at"] == stored(20)
+    entry = st.publish(ID_C, fields(), at(30))
+
+    assert entry["published_at"] == stored(10) and entry["updated_at"] == stored(30)
+    assert st.entry_html("first-entry") == doc("v3") and st.drafts() == []
+
+
+def test_a_database_made_before_the_column_gains_it(root):
+    """The first version's ``drafts`` table had no ``revises_published_at``.
+    Opening such a database adds it; a draft already waiting reads as recorded
+    against nothing, which is the safe reading (it can never replace an entry)."""
+    root.mkdir()
+    con = sqlite3.connect(str(root / "blog.db"))
+    con.execute(
+        "CREATE TABLE drafts (id TEXT PRIMARY KEY, source TEXT NOT NULL, revises TEXT, "
+        "slug TEXT NOT NULL, title TEXT NOT NULL, summary TEXT NOT NULL, tags TEXT NOT NULL, "
+        "removed TEXT NOT NULL, fonts TEXT NOT NULL, font_links TEXT NOT NULL, "
+        "font_note TEXT NOT NULL, bytes INTEGER NOT NULL, digest TEXT NOT NULL, "
+        "received_at TEXT NOT NULL)")
+    con.execute("INSERT INTO drafts VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (ID_A, "upload", "first-entry", "first-entry", "T", "", "[]", "{}", "[]", "[]",
+                 "", len(doc().encode("utf-8")), sha(doc()), stored(0)))
+    con.commit()
+    con.close()
+    (root / "staging" / ID_A).mkdir(parents=True)
+    (root / "staging" / ID_A / "entry.html").write_bytes(doc().encode("utf-8"))
+
+    with store.Store(data_dir=root) as st, store.Store(data_dir=root) as again:
+        assert [r[1] for r in rows(root, "PRAGMA table_info(drafts)")][-1] == "revises_published_at"
+        assert st.draft(ID_A)["revises_published_at"] is None
+        assert again.draft_html(ID_A) == doc()
+        st.add_draft(a_draft(ID_B), doc("the entry"), {})
+        st.publish(ID_B, fields(), at(5))
+        with refused("slug_taken"):
+            st.publish(ID_A, fields(), at(6))
+
+
+# ── a rename that is still waiting when the next write arrives ──────────────
+#
+# After the commit of a replacement, the rename over ``entry.html`` can be
+# refused (on Windows, by anyone holding the file open). The store carries on:
+# the row names the new document, which sits under ``entry.html.next``. These
+# tests start from that state. The first version then wrote the NEXT
+# replacement's ``.next`` straight over it - the only copy of the current
+# document - and, if that write failed, deleted it.
+
+FAILURES = ["temp", "write", "fsync", "rename", "commit"]
+
+
+class _BrokenWrite:
+    """A file that takes half of what it is given and then fails."""
+
+    def __init__(self, handle):
+        self._handle = handle
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self._handle.close()
+        return False
+
+    def write(self, data):
+        self._handle.write(data[: len(data) // 2])
+        raise OSError(28, "no space left on device")
+
+    def flush(self):
+        self._handle.flush()
+
+    def fileno(self):
+        return self._handle.fileno()
+
+
+@contextlib.contextmanager
+def failing_at(monkeypatch, target, where, *, final_rename_refused):
+    """Inside the block, a document write fails at ``where`` (one of
+    ``FAILURES``, or ``None`` for no failure), and the rename onto
+    ``entry.html`` is refused or not."""
+    real_replace, real_open = os.replace, open
+
+    def replace(src, dst, *a, **k):
+        name = pathlib.Path(dst).name
+        if name == "entry.html" and final_rename_refused:
+            raise PermissionError(13, "in use")
+        if name == "entry.html.next" and where == "rename":
+            raise OSError(5, "the rename failed")
+        return real_replace(src, dst, *a, **k)
+
+    def opener(path, mode="r", *a, **k):
+        if where == "temp":
+            raise OSError(28, "no space left on device")
+        handle = real_open(path, mode, *a, **k)
+        return _BrokenWrite(handle) if where == "write" else handle
+
+    def fsync(_fd):
+        raise OSError(5, "the flush failed")
+
+    def commit():
+        raise sqlite3.OperationalError("disk I/O error")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", replace)
+        patch.setattr(store, "open", opener, raising=False)
+        if where == "fsync":
+            patch.setattr(os, "fsync", fsync)
+        if where == "commit":
+            patch.setattr(target, "_commit", commit)
+        yield
+
+
+def a_draft_with_a_rename_waiting(st, root, monkeypatch):
+    """Draft ID_A: its row names ``doc("two")``, which is under ``.next``;
+    ``entry.html`` still holds ``doc("one")``. Returns the folder."""
+    folder = root / "staging" / ID_A
+    st.add_draft(a_draft(), doc("one"), {})
+    with failing_at(monkeypatch, st, None, final_rename_refused=True):
+        assert st.replace_draft(ID_A, a_draft(title="Two"), doc("two"), {}) is True
+    assert (folder / "entry.html").read_bytes() == doc("one").encode("utf-8")
+    assert (folder / "entry.html.next").read_bytes() == doc("two").encode("utf-8")
+    assert rows(root, "SELECT digest, title FROM drafts") == [(sha(doc("two")), "Two")]
+    return folder
+
+
+def an_entry_with_a_rename_waiting(st, root, monkeypatch):
+    """Entry ``first-entry``: its row names ``doc("two")``, under ``.next``;
+    ``entry.html`` still holds ``doc("one")``. Returns the folder."""
+    folder = root / "published" / "first-entry"
+    st.add_draft(a_draft(ID_A), doc("one"), {})
+    st.publish(ID_A, fields(), at(1))
+    st.add_draft(a_draft(ID_B, revises="first-entry"), doc("two"), {})
+    with failing_at(monkeypatch, st, None, final_rename_refused=True):
+        assert st.publish(ID_B, fields(title="Two"), at(2))["title"] == "Two"
+    assert (folder / "entry.html").read_bytes() == doc("one").encode("utf-8")
+    assert (folder / "entry.html.next").read_bytes() == doc("two").encode("utf-8")
+    assert rows(root, "SELECT digest, title FROM entries") == [(sha(doc("two")), "Two")]
+    return folder
+
+
+def test_a_read_while_a_rename_waits_returns_the_document_the_row_names(st, root, monkeypatch):
+    folder = a_draft_with_a_rename_waiting(st, root, monkeypatch)
+    # Through the shared reader, which changes nothing...
+    assert blog_inbox.read_document(folder, st.draft(ID_A)["digest"]) == doc("two").encode("utf-8")
+    assert (folder / "entry.html.next").exists()
+    # ...and through the store while the rename is STILL refused...
+    with failing_at(monkeypatch, st, None, final_rename_refused=True):
+        assert st.draft_html(ID_A) == doc("two")
+    assert (folder / "entry.html").read_bytes() == doc("one").encode("utf-8")
+    # ...and through the store once it is not: the read finishes the rename.
+    assert st.draft_html(ID_A) == doc("two")
+    assert (folder / "entry.html").read_bytes() == doc("two").encode("utf-8")
+    assert leftovers(root) == []
+    report = st.repair()
+    assert report["ok"] is True and report["settled"] == 0, "the read had already finished it"
+
+
+def test_an_entry_read_while_a_rename_waits(st, root, monkeypatch):
+    folder = an_entry_with_a_rename_waiting(st, root, monkeypatch)
+    digest = st.entry("first-entry")["digest"]
+    assert blog_inbox.read_document(folder, digest) == doc("two").encode("utf-8")
+    with failing_at(monkeypatch, st, None, final_rename_refused=True):
+        assert st.entry_html("first-entry") == doc("two")
+    assert st.entry_html("first-entry") == doc("two")
+    assert (folder / "entry.html").read_bytes() == doc("two").encode("utf-8")
+    assert leftovers(root) == []
+
+
+@pytest.mark.parametrize("where", FAILURES)
+def test_a_failed_replacement_does_not_cost_a_draft_its_waiting_document(
+        st, root, monkeypatch, where):
+    """The rename can now go through. The second replacement finishes it FIRST,
+    then fails at ``where`` - and the draft is exactly the one that was
+    committed before: its row, and its document under the final name."""
+    folder = a_draft_with_a_rename_waiting(st, root, monkeypatch)
+    was = st.draft(ID_A)
+
+    with failing_at(monkeypatch, st, where, final_rename_refused=False):
+        with pytest.raises((OSError, sqlite3.OperationalError)) as caught:
+            st.replace_draft(ID_A, a_draft(title="Three"), doc("three"), {})
+    assert not isinstance(caught.value, store.StoreRefusal)
+
+    assert st.draft(ID_A) == was and st.draft_html(ID_A) == doc("two")
+    assert (folder / "entry.html").read_bytes() == doc("two").encode("utf-8")
+    assert leftovers(root) == []
+    report = st.repair()
+    assert report["ok"] is True and report["drafts_removed"] == []
+    assert st.draft_html(ID_A) == doc("two")
+
+
+@pytest.mark.parametrize("where", FAILURES + [None])
+def test_a_replacement_waits_for_a_rename_it_cannot_finish(st, root, monkeypatch, where):
+    """The rename is STILL refused. Writing the next ``.next`` would destroy
+    the only copy of the current document, so the replacement is refused
+    (``busy``) before it writes anything - whatever would have gone wrong after."""
+    folder = a_draft_with_a_rename_waiting(st, root, monkeypatch)
+    was, before = st.draft(ID_A), tree(root)
+
+    with failing_at(monkeypatch, st, where, final_rename_refused=True):
+        with refused("busy"):
+            st.replace_draft(ID_A, a_draft(title="Three"), doc("three"), {})
+
+    assert tree(root) == before
+    assert st.draft(ID_A) == was
+    assert blog_inbox.read_document(folder, was["digest"]) == doc("two").encode("utf-8")
+    # Once the rename can go through, the same replacement simply works.
+    assert st.replace_draft(ID_A, a_draft(title="Three"), doc("three"), {}) is True
+    assert st.draft_html(ID_A) == doc("three") and leftovers(root) == []
+    assert (folder / "entry.html").read_bytes() == doc("three").encode("utf-8")
+
+
+@pytest.mark.parametrize("where", FAILURES)
+def test_a_failed_revision_does_not_cost_an_entry_its_live_document(
+        st, root, monkeypatch, where):
+    """The same, for a PUBLISHED entry: the document a failed second revision
+    must not lose is the one the public is being served."""
+    folder = an_entry_with_a_rename_waiting(st, root, monkeypatch)
+    was = st.entry("first-entry")
+    st.add_draft(a_draft(ID_C, revises="first-entry"), doc("three"), {})
+
+    with failing_at(monkeypatch, st, where, final_rename_refused=False):
+        with pytest.raises((OSError, sqlite3.OperationalError)) as caught:
+            st.publish(ID_C, fields(title="Three"), at(3))
+    assert not isinstance(caught.value, store.StoreRefusal)
+
+    assert st.entry("first-entry") == was and st.entry_html("first-entry") == doc("two")
+    assert (folder / "entry.html").read_bytes() == doc("two").encode("utf-8")
+    assert st.draft_html(ID_C) == doc("three"), "the revision is still waiting, whole"
+    assert leftovers(root) == []
+    report = st.repair()
+    assert report["ok"] is True and report["entries_missing"] == []
+    # ...and then it publishes.
+    assert st.publish(ID_C, fields(title="Three"), at(4))["updated_at"] == stored(4)
+    assert st.entry_html("first-entry") == doc("three")
+
+
+@pytest.mark.parametrize("where", FAILURES + [None])
+def test_a_revision_waits_for_a_rename_it_cannot_finish(st, root, monkeypatch, where):
+    folder = an_entry_with_a_rename_waiting(st, root, monkeypatch)
+    was = st.entry("first-entry")
+    st.add_draft(a_draft(ID_C, revises="first-entry"), doc("three"), {})
+    before = tree(root)
+
+    with failing_at(monkeypatch, st, where, final_rename_refused=True):
+        with refused("busy"):
+            st.publish(ID_C, fields(title="Three"), at(3))
+        assert st.entry_html("first-entry") == doc("two")
+
+    assert tree(root) == before
+    assert st.entry("first-entry") == was and st.draft_html(ID_C) == doc("three")
+    assert blog_inbox.read_document(folder, was["digest"]) == doc("two").encode("utf-8")
+    with failing_at(monkeypatch, st, None, final_rename_refused=True):
+        report = st.repair()
+    assert report["entries_missing"] == [] and report["failed"] == ["rename"]
+
+
+def test_a_draft_with_a_rename_waiting_publishes_the_document_its_row_names(
+        st, root, monkeypatch):
+    """What is published is what the row describes - the document under
+    ``.next`` - and not the older one a plain look at ``entry.html`` shows."""
+    a_draft_with_a_rename_waiting(st, root, monkeypatch)
+    with failing_at(monkeypatch, st, None, final_rename_refused=False):
+        entry = st.publish(ID_A, fields(), at(5))
+    assert entry["digest"] == sha(doc("two"))
+    assert st.entry_html("first-entry") == doc("two")
+    assert (root / "published" / "first-entry" / "entry.html").read_bytes() == \
+        doc("two").encode("utf-8")
+
+
+@pytest.mark.parametrize("where", ["temp", "write", "fsync", "rename"])
+def test_a_replacement_that_wrote_nothing_removes_nothing(st, root, monkeypatch, where):
+    """A ``.next`` this call did not write is not this call's to delete. Here
+    one is left over from an interrupted write (it matches no row); the
+    replacement fails before writing its own, and the leftover is untouched -
+    the undo takes back what was done, not what was found."""
+    st.add_draft(a_draft(), doc("one"), {})
+    waiting = root / "staging" / ID_A / "entry.html.next"
+    waiting.write_bytes(b"left by something else")
+    before = tree(root)
+
+    with failing_at(monkeypatch, st, where, final_rename_refused=False):
+        with pytest.raises(OSError):
+            st.replace_draft(ID_A, a_draft(), doc("two"), {})
+
+    assert tree(root) == before
+    assert waiting.read_bytes() == b"left by something else"
+    assert st.draft_html(ID_A) == doc("one")
+
+
+# ── a lookup while its folder is being removed ──────────────────────────────
+
+def test_a_lookup_is_never_refused_because_its_folder_is_going(st, root):
+    """One thread makes and removes ``staging/<id>`` (a Discard); another asks
+    after that id. The first version resolved the folder's path on every call,
+    which on Windows fails for a folder in the middle of being deleted: four
+    lookups in ten were refused as "outside the data folder", and a
+    double-clicked Discard was answered with an error instead of False."""
+    st.add_draft(a_draft(ID_B), doc(), {})
+    st.publish(ID_B, fields(), at(1))
+    staged, published = root / "staging" / ID_A, root / "published" / "going"
+    stop, errors = threading.Event(), []
+
+    def churn():
+        while not stop.is_set():
+            for folder in (staged, published):
+                with contextlib.suppress(OSError):
+                    folder.mkdir()
+                with contextlib.suppress(OSError):
+                    folder.rmdir()
+
+    worker = threading.Thread(target=churn)
+    worker.start()
+    try:
+        for _ in range(5000):
+            try:
+                assert st.draft(ID_A) is None and st.draft_html(ID_A) is None
+                assert st.discard(ID_A) is False
+                assert st.entry("going") is None and st.entry_html("going") is None
+                assert st.unpublish("going") is False
+            except Exception as exc:                 # noqa: BLE001 - counted below
+                errors.append(repr(exc))
+    finally:
+        stop.set()
+        worker.join(30)
+    assert errors == []
+    assert st.entry_html("first-entry") == doc()
+
+
+# ── repair goes on past what it cannot mend ─────────────────────────────────
+
+def test_repair_goes_on_past_a_rename_that_is_still_refused(st, root, monkeypatch):
+    """One document that cannot be moved yet must not stop the orphans from
+    being cleared - and must not be reported as missing: it is all there."""
+    folder = a_draft_with_a_rename_waiting(st, root, monkeypatch)
+    st.add_draft(a_draft(ID_B, slug="orphan"), doc("orphan"), {})
+    run_sql(root, "DELETE FROM drafts WHERE id=?", ID_B)
+    stray = root / "published" / "nobody-published-this"
+    stray.mkdir(parents=True)
+    (stray / "entry.html").write_bytes(b"<p>stray</p>")
+    counted = _degrade.counts().get("blog.store", 0)
+
+    with failing_at(monkeypatch, st, None, final_rename_refused=True):
+        report = st.repair()
+
+    assert report["ok"] is False and report["failed"] == ["rename"]
+    assert report["staging_removed"] == [ID_B] and not (root / "staging" / ID_B).exists()
+    assert report["published_removed"] == ["nobody-published-this"] and not stray.exists()
+    assert report["drafts_removed"] == [] and report["settled"] == 0
+    assert _degrade.counts().get("blog.store", 0) == counted + 1
+    assert blog_inbox.read_document(folder, st.draft(ID_A)["digest"]) == doc("two").encode("utf-8")
+
+    report = st.repair()
+    assert report["ok"] is True and report["failed"] == [] and report["settled"] == 1
+    assert (folder / "entry.html").read_bytes() == doc("two").encode("utf-8")
+
+
+def test_the_report_says_what_is_true_afterwards(st, root, monkeypatch):
+    """A draft with no document is removed in a transaction of its OWN. A step
+    that fails later cannot roll it back - so "removed" in the report is a row
+    that is really gone, even when the run as a whole did not finish clean."""
+    an_entry_with_a_rename_waiting(st, root, monkeypatch)
+    st.add_draft(a_draft(ID_C, slug="gone"), doc("gone"), {})
+    (root / "staging" / ID_C / "entry.html").unlink()
+
+    with failing_at(monkeypatch, st, None, final_rename_refused=True):
+        report = st.repair()
+
+    assert report["ok"] is False and report["failed"] == ["rename"]
+    assert report["drafts_removed"] == [ID_C]
+    assert st.draft(ID_C) is None and rows(root, "SELECT id FROM drafts") == []
+    assert report["entries_missing"] == [] and st.entry_html("first-entry") == doc("two")
+
+
+def test_a_draft_that_could_not_be_removed_is_not_reported_removed(st, root, monkeypatch):
+    """The other direction: the delete itself fails. The row is still there, so
+    the report must not list it, its folder must not be swept as an orphan,
+    and the rest of the run still happens."""
+    st.add_draft(a_draft(ID_A, slug="gone"), doc("gone"), {})
+    (root / "staging" / ID_A / "entry.html").unlink()
+    st.add_draft(a_draft(ID_B, slug="orphan"), doc("orphan"), {})
+    run_sql(root, "DELETE FROM drafts WHERE id=?", ID_B)
+
+    with failing_commit(monkeypatch, st):
+        report = st.repair()
+
+    assert report["ok"] is False and report["failed"] == ["draft"]
+    assert report["drafts_removed"] == []
+    assert rows(root, "SELECT id FROM drafts") == [(ID_A,)]
+    assert (root / "staging" / ID_A).is_dir(), "a folder whose row exists is not an orphan"
+    assert report["staging_removed"] == [ID_B] and not (root / "staging" / ID_B).exists()
+    # ...and the next run, with a database that takes the delete, finishes it.
+    report = st.repair()
+    assert report["ok"] is True and report["drafts_removed"] == [ID_A]
+
+
+def test_a_document_that_cannot_be_read_is_not_taken_for_one_that_is_gone(st, root, monkeypatch):
+    """Repair DELETES a draft whose document is not there. A file it merely
+    could not open this time (locked, a disk hiccup) is not "not there"."""
+    st.add_draft(a_draft(), doc("kept"), {})
+    target = root / "staging" / ID_A / "entry.html"
+    real = pathlib.Path.read_bytes
+
+    def locked(self):
+        # Only the document itself. Its ``.next`` is simply absent, so nothing
+        # but the refusal to call a locked file "gone" saves the draft.
+        if self.name == "entry.html" and self.parent.name == ID_A:
+            raise PermissionError(13, "locked")
+        return real(self)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(pathlib.Path, "read_bytes", locked)
+        report = st.repair()
+
+    assert report["ok"] is False and report["failed"] == ["draft"]
+    assert report["drafts_removed"] == [] and target.exists()
+    assert st.draft_html(ID_A) == doc("kept")
+
+
+def test_a_link_named_like_an_id_does_not_stop_repair(st, root):
+    """A symbolic link or a junction under ``staging/`` whose name happens to
+    be an id. It is not this module's; it is listed and left - the link AND
+    what it points at - and everything else is still put right."""
+    outside = root.parent / "outside"
+    outside.mkdir()
+    (outside / "entry.html").write_bytes(b"not the store's")
+    st.add_draft(a_draft(ID_A), doc("kept"), {})
+    st.add_draft(a_draft(ID_B, slug="orphan"), doc("orphan"), {})
+    run_sql(root, "DELETE FROM drafts WHERE id=?", ID_B)
+    (root / "published").mkdir()
+    link_to(root / "staging" / ID_C, outside)
+    link_to(root / "published" / "linked-away", outside)
+
+    report = st.repair()
+
+    assert report["ok"] is True and report["failed"] == []
+    assert report["left_alone"] == ["published/linked-away", f"staging/{ID_C}"]
+    assert report["staging_removed"] == [ID_B] and report["published_removed"] == []
+    assert (outside / "entry.html").read_bytes() == b"not the store's"
+    assert os.path.lexists(root / "staging" / ID_C)
+    assert os.path.lexists(root / "published" / "linked-away")
+    assert st.draft_html(ID_A) == doc("kept")
+
+
+def test_a_link_named_like_a_typeface_is_skipped_by_a_prune(st, root):
+    outside = root.parent / "outside"
+    outside.mkdir()
+    (outside / "kept.txt").write_bytes(b"not the store's")
+    gone = font(b"gone")
+    st.add_draft(a_draft(), doc(), dict([gone]))
+    st.discard(ID_A)
+    linked = font(b"a name nothing uses")[0]
+    link_to(root / "fonts" / linked, outside)
+
+    assert st.prune_fonts() == 1
+
+    assert os.path.lexists(root / "fonts" / linked)
+    assert (outside / "kept.txt").read_bytes() == b"not the store's"
+    assert st.font_bytes(linked) is None
+    assert st.repair()["ok"] is True
+
+
+def test_nothing_is_written_through_a_link(st, root):
+    """A staged or published folder that has become a link is not followed by
+    a replacement: the document would land outside the data folder."""
+    outside = root.parent / "outside"
+    outside.mkdir()
+    st.add_draft(a_draft(ID_A), doc("one"), {})
+    folder = root / "staging" / ID_A
+    (folder / "entry.html").rename(outside / "entry.html")
+    folder.rmdir()
+    link_to(folder, outside)
+    before = tree(outside)
+
+    with refused("busy"):
+        st.replace_draft(ID_A, a_draft(), doc("two"), {})
+
+    assert tree(outside) == before
+    assert rows(root, "SELECT digest FROM drafts") == [(sha(doc("one")),)]
+
+
+def test_a_new_draft_replaces_a_link_left_under_its_name(st, root):
+    """...and a NEW folder is made in place of a link, never inside what the
+    link points at."""
+    outside = root.parent / "outside"
+    outside.mkdir()
+    (outside / "kept.txt").write_bytes(b"not the store's")
+    (root / "staging").mkdir()
+    link_to(root / "staging" / ID_A, outside)
+
+    st.add_draft(a_draft(ID_A), doc("mine"), {})
+
+    assert sorted(p.name for p in outside.iterdir()) == ["kept.txt"]
+    assert (root / "staging" / ID_A / "entry.html").read_bytes() == doc("mine").encode("utf-8")
+    assert st.draft_html(ID_A) == doc("mine")
+
+
+# ── a typeface is what its name says, or it is not there ────────────────────
+
+def test_a_typeface_changed_on_disk_is_not_served(st, root):
+    name, data = font(b"honest")
+    st.add_draft(a_draft(), doc(), {name: data})
+    assert st.font_bytes(name) == data == blog_inbox.read_font(root / "fonts", name)
+
+    (root / "fonts" / name).write_bytes(data + b" and something else")
+
+    assert st.font_bytes(name) is None
+    assert blog_inbox.read_font(root / "fonts", name) is None
+    # ...and the next draft that brings the real bytes puts it right.
+    st.add_draft(a_draft(ID_B), doc("b"), {name: data})
+    assert st.font_bytes(name) == data
+
+
+def test_a_typeface_of_the_right_size_and_the_wrong_bytes_is_written_again(st, root):
+    """The first version compared sizes. A file of the same length with other
+    content is still not the file its name promises."""
+    name, data = font(b"exactly these bytes")
+    st.add_draft(a_draft(ID_A), doc("a"), {name: data})
+    (root / "fonts" / name).write_bytes(bytes(len(data)))
+    assert (root / "fonts" / name).stat().st_size == len(data)
+
+    st.add_draft(a_draft(ID_B), doc("b"), {name: data})
+
+    assert (root / "fonts" / name).read_bytes() == data
+
+
+def test_the_store_and_the_shared_readers_agree_on_the_layout(st, root):
+    """The private preview reads with ``blog_inbox`` alone. What it is told the
+    layout is has to be where the store really puts things."""
+    name, data = font(b"x")
+    st.add_draft(a_draft(ID_A), doc("published"), {name: data})
+    entry = st.publish(ID_A, fields(), at(1))
+    st.add_draft(a_draft(ID_B, slug="waiting"), doc("waiting"), {})
+    assert blog_inbox.read_document(
+        root / blog_inbox.PUBLISHED_DIR / "first-entry", entry["digest"]) == \
+        doc("published").encode("utf-8")
+    assert blog_inbox.read_document(
+        root / blog_inbox.STAGING_DIR / ID_B, st.draft(ID_B)["digest"]) == \
+        doc("waiting").encode("utf-8")
+    assert blog_inbox.read_font(root / blog_inbox.FONTS_DIR, name) == data
+    assert blog_inbox.font_name_for(data) == name
+    assert (store.DOC, store.NEXT) == (blog_inbox.DOC_NAME, blog_inbox.NEXT_NAME)
 
 
 # ── the submission log ───────────────────────────────────────────────────────
