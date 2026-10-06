@@ -104,11 +104,13 @@ client and market data through `http://127.0.0.1:8100`.
 The monorepo was re-tiered (strangler-fig) into three **physically separate** tiers over a
 **Redis backbone**. **All five domains are migrated** — sentiment, options,
 portfolio, trade, market — and every page reads Redis (the autonomous driver,
-once a sixth, was removed 2026-09-22). The sixth service today, **`news_svc`**
-(2026-09-26), was born in the tiers rather than migrated: it polls free public
+once a sixth, was removed 2026-09-22). The sixth and seventh services were born
+in the tiers rather than migrated. **`news_svc`** (2026-09-26) polls free public
 feeds and calls neither the proxy nor Claude, and reads one optional credential,
 `FRED_API_KEY` (from the stack `.env`, never `.env.live` or config; without it the
-calendar's values come from FRED's key-free CSV). The shape:
+calendar's values come from FRED's key-free CSV). **`blog_svc`** (2026-10-06)
+keeps the public site's Blog; it calls neither Schwab, the proxy nor Claude, and
+its one outside request is a typeface copy from Google Fonts. The shape:
 
 **The Tier-1 import allow-list, stated exactly** (audited 2026-08-21 across all
 153 non-test `webgui/**/*.py`, extended 2026-08-21, and again 2026-08-25, and 2026-09-15):
@@ -153,6 +155,10 @@ so the `/x` page's live count is the service's own computation) ·
 `shared.news_config` (since 2026-09-26; `config/news.toml`'s loader - stdlib +
 `shared.config_toml` + `shared.symbols` + `repo_paths` only; Tier 1 reads just
 the ticker set and `[trending] window_h` from it) ·
+`shared.blog_inbox` (since 2026-10-06; the Blog's command builders, validators,
+view names, the frame's `sandbox` and policy strings, and the two file readers
+behind the preview routes - stdlib + `repo_paths` + `shared.config_toml` only,
+pinned by `shared/tests/test_blog_inbox.py`) ·
 `repo_paths` · `requests` — **only** for the
 `/health` fan-out the shell and Status page run · `fastapi.responses` for the
 report routes · the lazy `edge_tts` in `voice.py` · and, since 2026-09-06, the
@@ -201,7 +207,7 @@ TIER 3 STORE+COMM  Redis (:6379): cache:{domain}:{view} (replaces _CACHE/_LAST_R
                    payloads = the API) + shared/bus/ (redis-py wrapper, fakeredis under pytest).
                    On-disk DBs unchanged. sentiment_bridge.json kept as dual-write shim.
         ▲ publish                          │ consume
-TIER 2 PROCESSING  services/{domain}_svc FastAPI (options/sentiment/trade/portfolio/market/news):
+TIER 2 PROCESSING  services/{domain}_svc FastAPI (options/sentiment/trade/portfolio/market/news/blog):
                    each imports ONLY its engines, owns its scheduler/auto-scan + command
                    consumer, validates+caches+publishes. Separate processes ⇒ the scoring/
                    notifier sys.path collision class CANNOT occur (options_scoring() guard is
@@ -209,7 +215,7 @@ TIER 2 PROCESSING  services/{domain}_svc FastAPI (options/sentiment/trade/portfo
 ```
 
 **Unit order: Redis → proxy → services → webgui**, expressed as `Requires=`/`After=`.** Ports: `memurai=6379` plus one
-per service (8210–8213, 8215, 8216; 8214 was the removed driver's). One shim survives by decision — `sentiment_bridge.json` is still
+per service (8210–8213, 8215–8217; 8214 was the removed driver's). One shim survives by decision — `sentiment_bridge.json` is still
 dual-written for `regime_filter`; retiring it (making `regime_filter` read Redis) is the last
 open migration item. Full design:
 [3-tier design doc](docs/plans/2026-06-15-three-tier-architecture-design.md).
@@ -223,7 +229,7 @@ open migration item. Full design:
 | `sentiment-dashboard/` | Market sentiment `scoring/` + `history_backfill` + `live_composite.py` (live intraday composite + bridge payload) + `publish_bridge.py` (headless bridge writer) + bridge + `sectors_ref.py`. **Its `market_calendar.py` was absorbed into `shared/market_calendar.py` and DELETED (2026-08-02)** — same module name and same three function names, but *inclusive* `prev/next_trading_day` vs the shared module's *exclusive*, an invisible one-day trap. | ported to NiceGUI `/sentiment` |
 | `trade-analyzer/`      | `src/analysis` — fundamentals, recommendation, scoring, sector. | engines only (Tk UI dropped) |
 | `portfolio-analyzer/`  | `src/` — sector breakdown, vs-sector perf, live streaming.  | engines only (Tk UI dropped) |
-| `services/`            | The six Tier-2 services — `sentiment`/`options`/`portfolio`/`trade`/`market`/`news` `_svc` (:8210–8213, 8215, 8216) — plus `_scaffold`/`_degrade`/`_heartbeat`. **`news_svc`** is the one with no copied engine: RSS/EDGAR and economic-calendar adapters → `services/news_svc/data/news.db` → eight views, no Schwab or Claude call. **`trade_svc` runs a scheduler** (since 2026-09-26) with one job, the daily watchlist dividend pull through the proxy into `shared/dividends.py`'s store; `news_svc` opens that store read-only and never calls the proxy. | backend          |
+| `services/`            | The seven Tier-2 services — `sentiment`/`options`/`portfolio`/`trade`/`market`/`news`/`blog` `_svc` (:8210–8213, 8215–8217) — plus `_scaffold`/`_degrade`/`_heartbeat`. **`news_svc`** and **`blog_svc`** are the two with no copied engine and no Schwab or Claude call: `news_svc` is RSS/EDGAR and economic-calendar adapters → `services/news_svc/data/news.db` → eight views; `blog_svc` cleans an uploaded document into `services/blog_svc/data/` and is the only writer of the site's blog files. **`trade_svc` runs a scheduler** (since 2026-09-26) with one job, the daily watchlist dividend pull through the proxy into `shared/dividends.py`'s store; `news_svc` opens that store read-only and never calls the proxy. | backend          |
 | `shared/`              | `analysis_lib/` (technical · sector_analysis · config) + secret templates/values. | library          |
 | `tools/`               | `check_env.py`, `db_admin.py` maintenance utilities.        | CLI              |
 | `webgui/`              | **NEW** NiceGUI multi-page front-end. Shell + Options section built. | the new UI, :8500 |
@@ -318,6 +324,10 @@ is data in `webgui/live_screens.py`.
   public view or the `flow._shown` filter; the ACL is no layer for those.
 - The unit loads `.env.live`, never the stack's `.env`. Never bind it to `0.0.0.0`.
 
+**The site's Blog.** `deploy/site/blog/` and `deploy/site/blog.json` are generated,
+gitignored state like `ideas/` and `reports/`: only `blog_svc` writes them, from
+its own store ([the site blog](docs/reference/blog.md)).
+
 ## Sentiment and regime scoring
 
 Detail: [development notes](docs/reference/webgui-dev-notes.md) (the NaN section, ADX, the two RRG engines, the regime names).
@@ -385,7 +395,7 @@ maps, and anything whose change needs code to follow it.
   `scanner` (selection floors and, since 2026-10-04, `[selection]` strike rules),
   `trade_mgmt`, `paper`, `symbols`, `sectors`, `marketdata`, `services`,
   `flow_alerts`, `notify`, `commissions`, `theme`, `news`, `edge`, `market_read`,
-  and the public
+  `blog`, and the public
   tools' files.
 - `shared/market_calendar.py` is the single source for the NYSE calendar and the
   session/window predicates. Add no holiday literal or window constant elsewhere.
@@ -418,7 +428,7 @@ Detail: [running and environments](docs/reference/running-and-environments.md) �
 The stack is `systemd --user` units behind `trading-<env>.target`, GENERATED by
 `deploy/systemd/generate_units.py --install` from `repo_paths` (no `.service` file
 is in git; `--install` also arms the timers). Start order: Redis (a system unit)
-→ proxy `:8100` → the six services (8210–8213, 8215, 8216) → `webgui` `:8500`;
+→ proxy `:8100` → the seven services (8210–8213, 8215–8217) → `webgui` `:8500`;
 `webgui_live` `:8501` needs only Redis. Logs are the journal.
 
 - ⚠ **This box runs ONE checkout, at `/home/administrator/dev`, and it is PROD.**
@@ -489,8 +499,10 @@ a worktree needs its absolute path.
   skipped SET, never the count: `pytest` defaults to `-rf`.
 - The fake bus is ONE Redis per running test, as in prod. A test that needs an
   empty cache says so (`reset_fake_bus()`).
-- The suite cannot open a live SQLite store or reach the network: the repo-root
-  `conftest.py` guards `sqlite3.connect` and both HTTP stacks. Prefer
+- The suite cannot open a live SQLite store: the repo-root `conftest.py` guards
+  `sqlite3.connect`, and only that. ⚠ Nothing stops a suite reaching the network
+  except the blog service's own request guard
+  (`services/blog_svc/tests/conftest.py`), so fake every fetch. Prefer
   `db_path=None` resolved at call time in a new store; a default bound at `def`
   time cannot be redirected.
 - CI runs every suite as blocking, with a `typecheck` job;
@@ -637,6 +649,11 @@ Detail: [observability and performance](docs/reference/observability-and-perform
 - **Threads.** Each command stream has a thread of its own (read and handler);
   scheduler branches share a bounded pool (`config/services.toml [pool]`). A due
   scheduler branch is a keyed background task and can only delay itself.
+- **A command stream's length is per stream** (`config/services.toml
+  [stream_keep]`, 1000 by default). Past the cap the OLDEST commands are dropped
+  whether or not they ran; the two blog streams ship at 50 because one command
+  there carries a whole document. A dead letter's fields are cut to
+  `[dead_letters] max_field_kb`.
 - **Every service shares the proxy's 5 requests a second.** A scheduled chain
   burst stays off the quarter hours (the autoscan owns :00/:15/:30/:45); read the
   proxy's access log before scheduling a new fan-out. The one-minute poll's
