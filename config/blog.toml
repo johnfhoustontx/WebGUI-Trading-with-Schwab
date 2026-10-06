@@ -44,6 +44,12 @@ answer_keep_sec = 120
 enabled = true
 # The character sets copied. Each one is a separate file per weight.
 subsets = ["latin", "latin-ext"]
+max_links = 4              # typeface stylesheets followed for one entry; the rest are skipped
+max_css_kb = 256           # the most one stylesheet may send back; a larger one is not read
 max_files = 24             # typeface files copied for one entry; the rest are skipped
 max_file_kb = 400          # a larger typeface file is refused rather than stored
 timeout_sec = 10           # each request to Google Fonts; a failed one never blocks a draft
+# All of one entry's requests together, in seconds. Past it, what has not been
+# copied yet is left out and the draft says so. Keep it under [limits]
+# max_wait_sec: the service copies typefaces before it reads its next request.
+total_sec = 30

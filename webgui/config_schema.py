@@ -1476,6 +1476,14 @@ _BLOG = ConfigFile(
                   "every weight of every typeface. A name that is not one of "
                   "Google's is ignored; with none usable, latin and latin-ext "
                   "are copied.", kind="phrases"),
+            Field("fonts.max_links", "Most typeface stylesheets for one entry",
+                  "An entry names its typefaces in one or more links to Google "
+                  "Fonts. Links past this number are not followed.",
+                  kind="int", unit="links", min=1, max=16, step=1),
+            Field("fonts.max_css_kb", "Largest typeface stylesheet",
+                  "What Google Fonts sends back for one link is the list of "
+                  "files to copy. A larger list than this is not read.",
+                  kind="int", unit="KB", min=16, max=2048, step=16),
             Field("fonts.max_files", "Most typeface files for one entry",
                   "Files past this number are not copied, and the text they "
                   "would have styled uses a fallback font.",
@@ -1487,6 +1495,13 @@ _BLOG = ConfigFile(
                   "For each request. A typeface that does not arrive in time is "
                   "left out and the draft says so; it never holds a draft up.",
                   kind="int", unit="seconds", min=1, max=60, step=1),
+            Field("fonts.total_sec", "Longest spent copying one entry's typefaces",
+                  "For all of one entry's requests together. Once it has "
+                  "passed, the typefaces not copied yet are left out and the "
+                  "draft says so. Keep it shorter than the longest a draft from "
+                  "Claude Chat may wait: the next draft is not read until this "
+                  "one's typefaces are done.",
+                  kind="int", unit="seconds", min=1, max=600, step=5),
         )),
     ),
 )

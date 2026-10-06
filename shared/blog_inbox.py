@@ -162,9 +162,19 @@ DEFAULTS = {
         "enabled": True,
         # The character sets copied; each is a separate file per weight.
         "subsets": ["latin", "latin-ext"],
+        # The typeface stylesheets followed for one entry, and the most one may
+        # send back, in KB. The cleaner hands over EVERY link it found, so this
+        # is where their number is held.
+        "max_links": 4,
+        "max_css_kb": 256,
         "max_files": 24,
         "max_file_kb": 400,
+        # Seconds one request may take, and seconds ALL of an entry's requests
+        # may take together. The second is the one that protects the queue: 24
+        # files timing out one after another at 10 s each would hold the
+        # service for four minutes, twice ``[limits] max_wait_sec``.
         "timeout_sec": 10,
+        "total_sec": 30,
     },
 }
 
@@ -198,9 +208,12 @@ BOUNDS = {
     ("limits", "slug_chars"): (16, 120),
     ("limits", "max_wait_sec"): (1, 3600),
     ("limits", "answer_keep_sec"): (1, 3600),
+    ("fonts", "max_links"): (1, 16),
+    ("fonts", "max_css_kb"): (16, 2048),
     ("fonts", "max_files"): (1, 200),
     ("fonts", "max_file_kb"): (1, 4096),
     ("fonts", "timeout_sec"): (1, 60),
+    ("fonts", "total_sec"): (1, 600),
 }
 
 # A subset as Google's stylesheet names one ("latin-ext", "cyrillic"). Never a
@@ -272,9 +285,12 @@ def fonts() -> dict:
             break
     return {"enabled": _flag("fonts", "enabled"),
             "subsets": subsets or list(DEFAULTS["fonts"]["subsets"]),
+            "max_links": _bounded("fonts", "max_links"),
+            "max_css_kb": _bounded("fonts", "max_css_kb"),
             "max_files": _bounded("fonts", "max_files"),
             "max_file_kb": _bounded("fonts", "max_file_kb"),
-            "timeout_sec": _bounded("fonts", "timeout_sec")}
+            "timeout_sec": _bounded("fonts", "timeout_sec"),
+            "total_sec": _bounded("fonts", "total_sec")}
 
 
 # ── validation ───────────────────────────────────────────────────────────────

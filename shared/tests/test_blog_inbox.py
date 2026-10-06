@@ -619,8 +619,26 @@ def test_the_limits_have_the_shipped_values():
 
 def test_the_fonts_and_site_sections_have_the_shipped_values():
     assert bi.fonts() == {"enabled": True, "subsets": ["latin", "latin-ext"],
-                          "max_files": 24, "max_file_kb": 400, "timeout_sec": 10}
+                          "max_links": 4, "max_css_kb": 256,
+                          "max_files": 24, "max_file_kb": 400,
+                          "timeout_sec": 10, "total_sec": 30}
     assert bi.site() == {"enabled": True, "republish_min": 30}
+
+
+def test_a_typeface_copy_is_bounded_in_every_direction():
+    """What one entry can make this box ask Google for: how many stylesheets,
+    how large each, how many files, how large each, how long each request may
+    take and how long all of them together. The cleaner caps none of it - it
+    hands over every link it found - so each needs a number here, with bounds."""
+    for key in ("max_links", "max_css_kb", "max_files", "max_file_kb",
+                "timeout_sec", "total_sec"):
+        assert ("fonts", key) in bi.BOUNDS, key
+    assert bi.BOUNDS[("fonts", "max_links")] == (1, 16)
+    assert bi.BOUNDS[("fonts", "max_css_kb")] == (16, 2048)
+    assert bi.BOUNDS[("fonts", "total_sec")] == (1, 600)
+    # All of an entry's requests together get less than a draft from Claude
+    # Chat may wait: one slow copy must not expire the request behind it.
+    assert bi.DEFAULTS["fonts"]["total_sec"] < bi.DEFAULTS["limits"]["max_wait_sec"]
 
 
 def test_the_shipped_file_matches_the_defaults():
@@ -646,13 +664,15 @@ def test_every_number_has_bounds_and_ships_inside_them():
 def test_a_value_inside_its_bounds_is_read(monkeypatch):
     _cfg(monkeypatch, limits={"max_drafts": 3, "max_wait_sec": 45.0},
          fonts={"enabled": False, "subsets": ["cyrillic", "latin", "latin"],
-                "timeout_sec": 4},
+                "timeout_sec": 4, "max_links": 2, "max_css_kb": 64, "total_sec": 12},
          site={"enabled": False, "republish_min": 5})
     assert bi.limits()["max_drafts"] == 3
     assert bi.limits()["max_wait_sec"] == 45 and isinstance(bi.limits()["max_wait_sec"], int)
     assert bi.limits()["title_chars"] == 140            # an unnamed key keeps its default
     assert bi.fonts() == {"enabled": False, "subsets": ["cyrillic", "latin"],
-                          "max_files": 24, "max_file_kb": 400, "timeout_sec": 4}
+                          "max_links": 2, "max_css_kb": 64,
+                          "max_files": 24, "max_file_kb": 400,
+                          "timeout_sec": 4, "total_sec": 12}
     assert bi.site() == {"enabled": False, "republish_min": 5}
 
 
@@ -676,9 +696,12 @@ answer_keep_sec = 0.2
 [fonts]
 enabled = 1
 subsets = "latin"
+max_links = 17
+max_css_kb = 8
 max_files = 0
 max_file_kb = -400
 timeout_sec = 100000
+total_sec = "30"
 """
 
 
