@@ -177,7 +177,8 @@ draws); the payload envelope's own `ts` means "last changed".
 off the quarter hours (2026-09-16).** The 1-min GEX poll fetches ~92 chains in
 ~30 s on a quiet minute, and anything else fetching chains in the same minute
 slows it; past 60 s, `launch_branches` skips the next slot and the heatmap loses
-that minute. The options autoscan owns :00/:15/:30/:45 (~3 min of fetches
+that minute. The options autoscan starts `windows.scan.offset_min` minutes after
+each quarter hour (2 as shipped: :02/:17/:32/:47, about two minutes of fetches
 each), so sentiment's hourly sector P/C burst runs at **:38**
 (`sentiment_svc.scheduler.SECTORS_MINUTE`) and the Income board at **08:52**.
 Before scheduling a new chain fan-out, read the proxy's access log
@@ -186,6 +187,18 @@ Before scheduling a new chain fan-out, read the proxy's access log
 options_svc's own log. With `config/marketdata.toml` `scan.wide_fetch` on (it
 ships off) the autoscan makes ONE chain request per symbol in place of three,
 for every symbol not listed in `scan.wide_fetch_exclude`.
+
+**No burst in the first minute after the hour or half hour (2026-10-06).** Schwab
+answers "429 Too Many Requests" there and almost never at :15 or :45, whatever
+this app sends. Measured: on 2026-10-02 the scan's first two minutes held 4,944
+requests across the twelve hour/half-hour scans and 5,051 across the twelve
+quarter scans, and all 41 refusals fell in the first group; 2026-10-05 and
+10-06 repeat the pattern (60 and 70+). On 2026-10-06 the proxy's true send rate
+was sampled once a second: the 10:45 scan held exactly 5 a second for over a
+minute (247 in 60 s) with no refusal, while 11:00 drew nine. A refusal hits
+every endpoint for 10-30 seconds and costs the collector its chains for that
+minute. That is why the scan has a start offset. The refusals are counted by
+`journalctl --user -u trading-prod-proxy | grep 'Too Many Requests'`.
 
 **The one-minute poll's requests go FIRST (2026-10-04).** The collector marks
 its chain and price requests (`X-Priority`, passed only to a client whose

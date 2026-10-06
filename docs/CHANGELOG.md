@@ -4,7 +4,28 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-06 (**Flow Alerts: the bought / sold estimate is a bar.**)
+**Last updated:** 2026-10-06 (**The quarter-hour scan starts two minutes late, out of the minute where Schwab refuses calls.**)
+
+- **What was wrong.** Schwab answered "429 Too Many Requests" in bursts of 10-30
+  seconds: 41 on 2026-10-02, 60 on 10-05 and 70+ by 11:00 on 10-06 (the first day
+  with 135 watchlist symbols). Each burst refuses every endpoint, so the
+  one-minute collector lost chains for that minute, the scan fell back to three
+  fetches for the symbols it lost, and open positions failed to reprice.
+- **What the measurements showed.** The refusals follow the clock, not this
+  app's rate. On 10-02 the scan's first two minutes held 4,944 requests across
+  the twelve hour/half-hour scans and 5,051 across the twelve quarter scans, and
+  all 41 refusals were in the first group. On 10-06 the proxy's true send rate
+  was sampled each second: the 10:45 scan held exactly 5 a second for over a
+  minute (247 in 60 s) and drew none; 11:00 drew nine.
+- **The change.** `[windows.scan] offset_min` in `config/sessions.toml` (2 as
+  shipped, 0-10, in Settings -> Configuration): each quarter-hour scan starts
+  that many minutes late (09:02, 09:17, 09:32, 09:47). `scheduler.autoscan_due`
+  reads the clock that many minutes back, so the slots, their keys and the
+  count of scans in a day (30) are unchanged. Read at call time: no restart.
+- **Not measured yet.** Whether the refusals stop. The one-minute collector still
+  sends its own pass in that first minute.
+
+**Prior — 2026-10-06** (**Flow Alerts: the bought / sold estimate is a bar.**)
 
 - **What changed.** The estimate was two lines of text ("≈ bought 47.92% · sold
   34.31% · unlabelled 17.76%"). It is now one bar per figure, split in proportion:

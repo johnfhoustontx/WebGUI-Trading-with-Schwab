@@ -637,8 +637,11 @@ Detail: [observability and performance](docs/reference/observability-and-perform
 - **Threads.** Each command stream has a thread of its own (read and handler);
   scheduler branches share a bounded pool (`config/services.toml [pool]`). A due
   scheduler branch is a keyed background task and can only delay itself.
-- **Every service shares the proxy's 5 requests a second.** A scheduled chain
-  burst stays off the quarter hours (the autoscan owns :00/:15/:30/:45); read the
+- **Every service shares the proxy's 5 requests a second.** The autoscan starts
+  `windows.scan.offset_min` (2) minutes after each quarter hour and fetches for
+  about two minutes, so a scheduled chain burst stays out of :02-:05, :17-:20,
+  :32-:35 and :47-:50, and out of the first minute after the hour and half
+  hour, where Schwab refuses calls (429) whatever the rate; read the
   proxy's access log before scheduling a new fan-out. The one-minute poll's
   requests go first (`X-Priority`, a header, never a parameter); that lane is the
   poll's alone.

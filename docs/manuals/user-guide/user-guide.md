@@ -1613,7 +1613,8 @@ as it last read* and stops judging it. Click another row to start again.
 - **Expected Move** — open the Expected Move chart for this trade in a new tab.
 
 The list re-scans itself every 15 minutes between 08:00 and 15:15 CT on trading
-days; you rarely need to press **Run scan**.
+days, starting two minutes after each quarter hour (9:02, 9:17, 9:32, 9:47); you
+rarely need to press **Run scan**.
 
 > **The table shows the whole day's signals, not just the current scan.** A signal
 > that has stopped qualifying stays visible but is **dimmed and frozen**, stamped

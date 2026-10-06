@@ -33,6 +33,14 @@ end   = "15:15"   # 16:15 ET
 # options_svc auto-scan operating window (includes premarket by design).
 start = "08:00"
 end   = "15:15"
+# Each quarter-hour scan starts this many minutes late: 2 = 09:02, 09:17, 09:32,
+# 09:47. 0 = on the quarter hour. A whole number from 0 to 10. The same scans
+# run either way (30 a day), each one later.
+# Why: Schwab refuses calls ("429 Too Many Requests") in the first minute after
+# the hour and half hour and almost never at :15 or :45, although the scan's
+# burst is the same at every quarter hour (measured 2026-10-02, 10-05, 10-06).
+# A refusal there costs the one-minute collector its chains for that minute.
+offset_min = 2
 
 [windows.collection]
 # GEX history collection. `start` is the full-universe start; `eth_start`
