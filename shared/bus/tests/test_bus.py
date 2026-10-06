@@ -265,15 +265,37 @@ def test_a_small_cap_bounds_what_the_stream_holds_and_keeps_the_newest():
     assert b._r.xlen("cmd:keepx") == 200
 
 
+def test_a_full_stream_loses_its_oldest_commands_whether_or_not_they_ran():
+    """What the cap COSTS. XADD MAXLEN drops the oldest entries with no regard
+    for whether a consumer has read them: it is a limit on the stream, not on
+    its history. Sixty drafts queued while nothing is consuming, on a stream
+    that keeps fifty, and the first ten are gone - never delivered, never
+    dead-lettered, and nothing says so. The newest fifty arrive in order."""
+    from shared import service_limits
+    cap = service_limits.stream_keep("cmd:blog")
+    assert cap == 50
+    b = Bus(fake=True)
+    b.consume_commands("cmd:blog", group="g", consumer="c1", block_ms=10)   # group exists
+    for i in range(cap + 10):
+        b.enqueue_command("cmd:blog", {"type": "draft_submit", "args": {"i": i}})
+    got = b.consume_commands("cmd:blog", group="g", consumer="c1", block_ms=10,
+                             count=1000)
+    assert [c.args["i"] for _id, c in got] == list(range(10, cap + 10))
+    assert b.dead_letter_len("cmd:blog") == 0
+    # nothing more is waiting: the ten are not late, they are lost
+    assert b.consume_commands("cmd:blog", group="g", consumer="c1", block_ms=10,
+                              count=1000) == []
+
+
 def test_the_cap_is_read_at_every_enqueue_so_a_change_needs_no_restart(monkeypatch):
     from shared import service_limits
     b = Bus(fake=True)
     calls = _xadd_spy(b, monkeypatch)
     b.enqueue_command("cmd:livex", {"type": "x"})
     monkeypatch.setattr(service_limits, "load", lambda: {"stream_keep": {
-        "default": 1000, "cmd:livex": 7}})
+        "default": 1000, "cmd:livex": 12}})
     b.enqueue_command("cmd:livex", {"type": "x"})
-    assert [c["maxlen"] for c in calls] == [1000, 7]
+    assert [c["maxlen"] for c in calls] == [1000, 12]
 
 
 def test_an_unusable_cap_in_the_file_never_reaches_redis(monkeypatch):
@@ -527,6 +549,73 @@ def test_text_that_cannot_be_encoded_is_still_dead_lettered(monkeypatch):
     [(_raw, rec)] = _dead(b, "cmd:dlsur")
     assert rec["truncated"] is True
     assert rec["fields"]["data"].endswith("bytes total]")
+
+
+def test_a_fault_while_cutting_never_reaches_the_consumer_loop(monkeypatch):
+    """``dead_letter`` is called from inside the loop that reads a service's
+    commands, with nothing around it. "Never take down the loop" must hold by
+    construction, not because two helpers happen to be total today."""
+    from shared import service_limits
+    from shared.bus import client
+
+    def boom(*_a, **_k):
+        raise RuntimeError("cut failed")
+
+    b = Bus(fake=True)
+    monkeypatch.setattr(client, "_head_of_fields", boom)
+    assert b.dead_letter("cmd:dlfault", {"data": "x"}, "handler raised") is None
+    monkeypatch.undo()
+    monkeypatch.setattr(service_limits, "dead_letter_field_kb", boom)
+    assert b.dead_letter("cmd:dlfault", {"data": "x"}, "handler raised") is None
+    monkeypatch.undo()
+    # and with nothing broken the very same call is recorded
+    b.dead_letter("cmd:dlfault", {"data": "x"}, "handler raised")
+    assert b.dead_letter_len("cmd:dlfault") == 1
+
+
+def test_a_dead_letter_that_could_not_be_recorded_leaves_a_trace(monkeypatch, caplog):
+    """Swallowed, so the loop survives - but not silently. A command that failed
+    AND could not be dead-lettered is otherwise gone without a word anywhere.
+    The log line names the stream and never carries the command."""
+    import logging
+    b = Bus(fake=True)
+
+    def down(*_a, **_k):
+        raise ConnectionError("redis is down")
+
+    monkeypatch.setattr(b._r, "rpush", down)
+    secret = "DOCUMENT-BODY-" * 50
+    with caplog.at_level(logging.WARNING, logger="shared.bus.client"):
+        assert b.dead_letter("cmd:dlquiet", {"data": secret}, "handler raised") is None
+    lines = [r for r in caplog.records if r.name == "shared.bus.client"]
+    assert len(lines) == 1 and lines[0].levelno == logging.WARNING
+    assert "cmd:dlquiet" in lines[0].getMessage()
+    assert lines[0].exc_info is not None                  # with its traceback
+    assert "DOCUMENT-BODY" not in caplog.text
+
+
+def test_a_long_reason_is_cut_too():
+    """The reason carries an exception's repr on the decode path, and an
+    exception can quote the whole of what it choked on."""
+    b = Bus(fake=True)
+    long_reason = "decode failed: " + "y" * 5000
+    b.dead_letter("cmd:dlwhy", {"data": "x"}, long_reason)
+    [(_raw, rec)] = _dead(b, "cmd:dlwhy")
+    assert rec["reason"] == (long_reason[:2048]
+                             + f"...[truncated, {len(long_reason)} characters total]")
+    # the flag is about the FIELDS (is the command still whole?), so not set here
+    assert "truncated" not in rec and rec["fields"] == {"data": "x"}
+
+
+@pytest.mark.parametrize("reason", ["handler raised", "", "r" * 2048,
+                                    "stranded in PEL (1700000000000-0)"])
+def test_a_reason_within_the_limit_is_stored_unchanged(reason):
+    b = Bus(fake=True)
+    b.dead_letter("cmd:dlwhyok", {"data": "x"}, reason)
+    [(raw, rec)] = _dead(b, "cmd:dlwhyok")
+    assert rec["reason"] == reason
+    assert raw == json.dumps({"ts": rec["ts"], "reason": reason,
+                              "fields": {"data": "x"}}, default=str)
 
 
 def test_a_stranded_document_is_dead_lettered_small_and_reported_whole():

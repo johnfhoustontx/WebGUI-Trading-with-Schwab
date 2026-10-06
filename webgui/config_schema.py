@@ -1767,37 +1767,48 @@ _COMMANDS = ConfigFile(
                   "command that is kept.",
                   kind="int", unit="KB", min=1, max=4096, step=16, restart=()),
         )),
-        # Bounds mirror shared.service_limits.STREAM_KEEP_MIN / _MAX (pinned by
-        # tests/test_config_schema.py). No restart: the bus reads the cap at
-        # every enqueue through the mtime-cached loader, in whichever process is
-        # sending. The two named queues have entries of their own so they can
-        # say why they are small; the wildcard catches any other stream given a
-        # cap by hand in config/local, which would otherwise be in force and
-        # shown nowhere.
-        Section("How much of each queue is kept",
-                "A queue keeps its newest commands after they have been run, so "
-                "you can look back at what was asked. Each new command trims the "
-                "queue to about this many. A change applies to the next command.", (
+        # Bounds mirror shared.service_limits.stream_keep_bounds(<stream>):
+        # 10..100000, and 10..500 for the two queues whose commands carry a
+        # document (pinned per stream by tests/test_config_schema.py). No
+        # restart: the bus reads the cap at every enqueue through the
+        # mtime-cached loader, in whichever process is sending. The two named
+        # queues have entries of their own so they can say why they are small;
+        # the wildcard catches any other stream given a cap by hand in
+        # config/local, which would otherwise be in force and shown nowhere.
+        Section("How many commands each queue holds",
+                "A queue holds its newest commands, whether or not they have "
+                "been run. Each new command trims the queue to about this many, "
+                "oldest first. So this is how far back you can look at what was "
+                "asked, and also the most a service can fall behind: if a "
+                "service is stopped or busy while more than this many commands "
+                "arrive, the oldest ones still waiting are lost. They are never "
+                "run and nothing reports it. A change applies to the next "
+                "command.", (
             Field("stream_keep.default", "Every queue not named below",
                   "Commands are small, so a thousand of them is little memory. "
                   "A queue of small commands can run up to about a hundred "
-                  "over this number before it is trimmed.",
-                  kind="int", unit="commands", min=1, max=100000, step=50),
+                  "over this number before it is trimmed. Keep it well above "
+                  "the number of commands that could arrive while a service "
+                  "restarts.",
+                  kind="int", unit="commands", min=10, max=100000, step=50),
             Field("stream_keep.cmd:blog", "The Blog page's uploads and Publish",
                   "Kept small on purpose: an upload carries a whole document, "
                   "up to the largest one the Site blog settings allow. At 50 "
-                  "that is about 25 MB of the server's memory; at 1000 it would "
-                  "be about 500 MB.",
-                  kind="int", unit="commands", min=1, max=100000, step=10),
+                  "that is about 25 MB of the server's memory; at 500, the "
+                  "most allowed here, about 250 MB. More than this many sent "
+                  "while the blog service is stopped, and the oldest are lost.",
+                  kind="int", unit="commands", min=10, max=500, step=10),
             Field("stream_keep.cmd:blog_inbox", "Drafts arriving from Claude Chat",
                   "Kept small on purpose: every one of these carries a whole "
                   "document. At 50 that is about 25 MB of the server's memory; "
-                  "at 1000 it would be about 500 MB.",
-                  kind="int", unit="commands", min=1, max=100000, step=10),
+                  "at 500, the most allowed here, about 250 MB. More than this "
+                  "many drafts sent while the blog service is stopped, and the "
+                  "oldest are lost.",
+                  kind="int", unit="commands", min=10, max=500, step=10),
             Field("stream_keep.*", "",
                   "A queue given its own number by hand in the settings file, "
                   "shown under the queue's own name.",
-                  kind="int", unit="commands", min=1, max=100000, step=10),
+                  kind="int", unit="commands", min=10, max=100000, step=10),
         ), restart=()),
         Section("Threads", "", (
             Field("pool.workers", "Threads for scheduled work",

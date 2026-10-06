@@ -641,8 +641,11 @@ def test_the_blog_typeface_subsets_keep_their_lower_case(monkeypatch):
 # ── how much of each command queue is kept — config/services.toml ────────────
 
 def test_the_queue_caps_are_catalogued_and_bounded_as_the_loader_bounds_them():
-    """``shared.service_limits.stream_keep`` reads a cap outside 1..100000 as
-    the shipped one, so the form must offer that range and no other."""
+    """``shared.service_limits.stream_keep`` reads a cap outside the stream's
+    own bounds as the fallback, so the form must offer that range and no other:
+    10..100000 for a queue of ordinary commands, 10..500 for the two whose
+    commands carry a whole document. Catalogue and loader are pinned against
+    each other, per stream, and then run end to end."""
     from shared import service_limits as sl
     cfg = cs.BY_NAME["services.toml"]
     shipped = _shipped("services.toml")["stream_keep"]
@@ -652,11 +655,30 @@ def test_the_queue_caps_are_catalogued_and_bounded_as_the_loader_bounds_them():
         assert fld is not None and "*" not in fld.key, name    # its OWN entry
         assert fld.label and fld.help, name
         assert fld.kind == "int"
-        assert (fld.min, fld.max) == (sl.STREAM_KEEP_MIN, sl.STREAM_KEEP_MAX), name
-        with pytest.raises(ValueError):
-            cs.parse(fld, sl.STREAM_KEEP_MIN - 1)
-        with pytest.raises(ValueError):
-            cs.parse(fld, sl.STREAM_KEEP_MAX + 1)
+        low, high = sl.stream_keep_bounds(name)
+        assert (fld.min, fld.max) == (low, high), name
+        for outside in (low - 1, high + 1):
+            with pytest.raises(ValueError):
+                cs.parse(fld, outside)
+    assert sl.stream_keep_bounds("default") == (10, 100000)
+    assert sl.stream_keep_bounds("cmd:blog") == (10, 500)
+    assert sl.stream_keep_bounds("cmd:blog_inbox") == (10, 500)
+
+
+def test_a_queue_cap_at_either_bound_is_one_the_loader_uses(monkeypatch):
+    """What the form accepts at its lowest and highest for each queue is what
+    the bus then asks Redis for - never the fallback in its place."""
+    from shared import service_limits as sl
+    cfg = cs.BY_NAME["services.toml"]
+    for name, stream in (("default", "cmd:options"), ("cmd:blog", "cmd:blog"),
+                         ("cmd:blog_inbox", "cmd:blog_inbox"),
+                         ("cmd:options", "cmd:options")):
+        _sec, fld = cs.locate(cfg, ("stream_keep", name))
+        for edge in (fld.min, fld.max):
+            saved = cs.parse(fld, edge, shipped=1000)
+            monkeypatch.setattr(sl, "load",
+                                lambda n=name, v=saved: {"stream_keep": {n: v}})
+            assert sl.stream_keep(stream) == edge, (name, edge)
 
 
 def test_a_queue_someone_names_by_hand_is_still_shown_and_bounded():

@@ -3,6 +3,7 @@ its config - the one module the service, the connector gate and Tier 1 share."""
 import pathlib
 import subprocess
 import sys
+import unicodedata
 
 import pytest
 
@@ -12,6 +13,34 @@ from shared.config_toml import toml_loader
 REPO = pathlib.Path(__file__).resolve().parents[2]
 
 DOC = "<!doctype html><title>T</title><h1>Nuclear Stocks Thesis</h1><p>Body.</p>"
+
+# ⚠ Every invisible character below is written as a CODE POINT and built with
+# chr(), never typed and never spelled as a backslash escape. A zero-width
+# space in source reads as "" to a person, and anything that tidies text (an
+# editor, a formatter, a tool decoding an escape on the way to disk and another
+# stripping what it produced) can remove it. The test then runs on an empty
+# string and passes while asserting nothing: with ch = "" the format-character
+# test below was green. test_these_files_hold_no_invisible_character keeps it so.
+ZWSP, ZWJ, WORD_JOINER, RLO, SOFT_HYPHEN, NBSP, LINE_SEP, KELVIN, FDFA = (
+    chr(p) for p in (0x200B, 0x200D, 0x2060, 0x202E, 0x00AD, 0x00A0, 0x2028,
+                     0x212A, 0xFDFA))
+
+# Unicode category Cf, "format": they draw nothing and sit inside words.
+FORMAT_POINTS = (
+    0x200B, 0x200C, 0x200D,                    # zero-width space, non-joiner, joiner
+    0x2060, 0x00AD, 0xFEFF,                    # word joiner, soft hyphen, byte-order mark
+    0x202A, 0x202B, 0x202C, 0x202D, 0x202E,    # bidi embeddings and overrides
+    0x2066, 0x2067, 0x2068, 0x2069,            # bidi isolates
+    0x200E, 0x200F, 0x061C,                    # left-to-right, right-to-left, Arabic letter mark
+)
+# NOT category Cf, and blank all the same: the "filler" letters (Hangul fillers
+# and the halfwidth one are letters, category Lo; the Braille blank is a symbol)
+# and the variation selectors (marks, category Mn).
+BLANK_POINTS = (0x3164, 0x115F, 0x1160, 0xFFA0, 0x2800) + tuple(range(0xFE00, 0xFE10))
+
+
+def _point(p):
+    return f"U+{p:04X}"
 
 
 def _cfg(monkeypatch, **sections):
@@ -33,7 +62,6 @@ def test_the_inbox_stream_is_its_own_and_never_the_owner_stream():
 def test_the_views_are_the_blogs_own():
     assert (bi.VIEW_DRAFTS, bi.VIEW_POSTS, bi.VIEW_RESULT) == (
         "blog:drafts", "blog:posts", "blog:result")
-    assert len({bi.VIEW_DRAFTS, bi.VIEW_POSTS, bi.VIEW_RESULT}) == 3
 
 
 def test_an_answer_view_is_per_request():
@@ -57,7 +85,7 @@ def test_a_bad_id_names_no_answer_view(raw):
 def test_a_new_id_is_sixteen_hex_and_not_repeated():
     ids = {bi.new_id() for _ in range(200)}
     assert len(ids) == 200
-    assert all(bi.is_id(i) and bi.ID_RE.match(i) for i in ids)
+    assert all(bi.is_id(i) for i in ids)
 
 
 def test_no_pattern_accepts_a_trailing_newline():
@@ -154,29 +182,58 @@ def test_slugify_cuts_to_the_limit_without_a_trailing_hyphen(monkeypatch):
     assert len(bi.slugify("x" * 500)) == 20
 
 
-def test_slugify_bounds_its_work_before_it_folds_the_title():
+def test_slugify_bounds_its_work_before_it_folds_the_title(monkeypatch):
     """U+FDFA is one character that NFKD expands to eighteen. Folding a whole
     hostile title first took 4.4 s on 170,000 of them; the title is cut to a
-    small multiple of the address limit BEFORE anything else looks at it."""
-    import time
-    title = "ﷺ" * 200_000
-    start = time.perf_counter()
-    slug = bi.slugify(title)
-    took = time.perf_counter() - start
+    small multiple of the address limit BEFORE anything else looks at it.
+
+    Measured as what the fold is HANDED, not by a clock: a wall-clock bound
+    passes or fails with the machine's load."""
+    assert len(FDFA) == 1 and len(unicodedata.normalize("NFKD", FDFA)) == 18
+    folded = []
+    real = unicodedata.normalize
+
+    def spy(form, text):
+        folded.append(len(text))
+        return real(form, text)
+
+    monkeypatch.setattr(bi.unicodedata, "normalize", spy)
+    slug = bi.slugify(FDFA * 200_000)
     assert bi.clean_slug(slug) == slug
-    assert took < 1.0, f"slugify took {took:.2f}s"
+    assert folded and max(folded) < 1000, folded
     # Real words at the front of a very long title still make the address.
-    assert bi.slugify("Nuclear Stocks " + "ﷺ" * 200_000) == "nuclear-stocks"
+    assert bi.slugify("Nuclear Stocks " + FDFA * 200_000) == "nuclear-stocks"
+    assert max(folded) < 1000, folded
 
 
 @pytest.mark.parametrize("raw", ["abc\n", "abc\r\n", "\nabc", "abc\t", "abc\x0b",
-                                 "abc ", "abc "])
+                                 "abc" + NBSP, "abc" + LINE_SEP],
+                         ids=["LF", "CRLF", "leading-LF", "TAB", "VT", "NBSP",
+                              "LINE-SEPARATOR"])
 def test_only_plain_spaces_are_trimmed_from_a_slug(raw):
     """A typed address may carry a stray space at either end. A newline, a tab
     or any other whitespace is not something a text field produces: it is
     refused, never quietly removed."""
+    # the case really does carry whitespace that str.strip() would have taken
+    assert raw != "abc" and raw.strip() == "abc" and " " not in raw
     assert bi.clean_slug(raw) is None
     assert bi.existing_slug(raw) is None
+
+
+def test_a_letter_that_only_lower_cases_to_ascii_is_not_an_address():
+    """U+212A, the Kelvin sign, lower-cases to a plain "k". Lower-casing first
+    turned an address typed with it into a different, valid one - a silent
+    repair, which ``clean_slug`` never does. ``slugify`` is the function that
+    repairs, and it still folds it."""
+    assert len(KELVIN) == 1 and not KELVIN.isascii() and KELVIN.lower() == "k"
+    typed = KELVIN + "elvin"
+    assert bi.clean_slug(typed) is None
+    assert bi.existing_slug(typed) is None
+    assert bi.clean_fields({"slug": typed})["slug"] == ""
+    assert bi.owner_command("unpublish", bi.new_id(), slug=typed) is None
+    assert bi.slugify(typed) == "kelvin"
+    # plain capitals are still lowered, as before
+    assert bi.clean_slug("Kelvin") == "kelvin"
 
 
 # ── the address of an entry that already exists ─────────────────────────────
@@ -275,26 +332,101 @@ def test_a_field_made_only_of_invisible_characters_is_empty():
     soft hyphen, the byte-order mark, the bidi overrides and isolates) draw
     nothing. A title of them is a blank row in the list of entries that reads
     as "has a title"; a bidi override in a summary reorders the text after it."""
-    f = bi.clean_fields({"title": "​​", "summary": "a‮b",
-                         "tags": ["​", "⁠", "\xad", "ok"]})
+    title, summary = ZWSP * 2, "a" + RLO + "b"
+    tags = [ZWSP, WORD_JOINER, SOFT_HYPHEN, "ok"]
+    assert len(title) == 2 and len(summary) == 3            # nothing was stripped
+    assert [len(t) for t in tags] == [1, 1, 1, 2]
+    f = bi.clean_fields({"title": title, "summary": summary, "tags": tags})
     assert f["title"] == ""
-    assert "‮" not in f["summary"] and f["summary"] == "ab"
+    assert RLO not in f["summary"] and f["summary"] == "ab"
     assert f["tags"] == ["ok"]
 
 
-@pytest.mark.parametrize("ch", ["​", "‌", "‍", "⁠", "\xad",
-                                "﻿", "‪", "‫", "‬", "‭",
-                                "‮", "⁦", "⁧", "⁨", "⁩",
-                                "‎", "‏", "؜"])
-def test_no_format_character_survives_in_any_field(ch):
+@pytest.mark.parametrize("point", FORMAT_POINTS, ids=_point)
+def test_no_format_character_survives_in_any_field(point):
+    ch = chr(point)
+    assert len(ch) == 1
+    assert unicodedata.category(ch) == "Cf"
     f = bi.clean_fields({"title": f"{ch}Ti{ch}tle{ch}", "summary": ch * 5,
                          "tags": [ch, f"t{ch}ag", f"{ch} {ch}"]})
     assert f == {"title": "Title", "summary": "", "tags": ["tag"], "slug": ""}
 
 
+@pytest.mark.parametrize("point", BLANK_POINTS, ids=_point)
+def test_no_blank_letter_or_variation_selector_survives_in_any_field(point):
+    """These draw nothing and are NOT format characters, so the category rule
+    alone lets them through: a title of Hangul fillers is a blank row."""
+    ch = chr(point)
+    assert len(ch) == 1
+    assert unicodedata.category(ch) != "Cf"
+    assert point in bi.BLANK_POINTS
+    f = bi.clean_fields({"title": f"{ch}Ti{ch}tle{ch}", "summary": ch * 5,
+                         "tags": [ch, f"t{ch}ag", f"{ch} {ch}"]})
+    assert f == {"title": "Title", "summary": "", "tags": ["tag"], "slug": ""}
+
+
+def test_the_blank_characters_removed_are_exactly_the_listed_ones():
+    """The module's list and this file's are written out separately, so a
+    character dropped from one is noticed."""
+    assert set(bi.BLANK_POINTS) == set(BLANK_POINTS)
+
+
 def test_two_tags_that_differ_only_by_an_invisible_character_are_one_tag():
-    f = bi.clean_fields({"tags": ["energy", "ener​gy", "ENERGY⁠"]})
+    second, third = "ener" + ZWSP + "gy", "ENERGY" + WORD_JOINER
+    assert (len(second), len(third)) == (7, 7)
+    f = bi.clean_fields({"tags": ["energy", second, third]})
     assert f["tags"] == ["energy"]
+
+
+def test_invisible_characters_in_front_cannot_blank_a_real_title():
+    """The field is cut for size before it is cleaned of whitespace. Cut BEFORE
+    the invisible characters were removed, 700 zero-width spaces in front used
+    up the whole cut and the title behind them came back empty."""
+    padding = ZWSP * 700
+    assert len(padding) == 700
+    f = bi.clean_fields({"title": padding + "Real title",
+                         "summary": padding + "Real summary",
+                         "tags": [padding + "tag"]})
+    assert f == {"title": "Real title", "summary": "Real summary",
+                 "tags": ["tag"], "slug": ""}
+
+
+def test_the_search_for_a_title_is_still_bounded():
+    """Removing first must not mean reading a megabyte character by character:
+    past ``_SCAN_CHARS`` the field is not looked at, so a title buried deeper
+    than that is not found. That is the price of the bound, stated."""
+    assert bi._SCAN_CHARS >= 4096
+    deep = ZWSP * (bi._SCAN_CHARS + 1) + "Real title"
+    assert bi.clean_fields({"title": deep})["title"] == ""
+    edge = ZWSP * (bi._SCAN_CHARS - len("Real title")) + "Real title"
+    assert bi.clean_fields({"title": edge})["title"] == "Real title"
+
+
+def test_a_compound_emoji_is_split_and_that_is_known():
+    """Removing the zero-width joiner has a cost, and it is this one: a family
+    or a flag built with it comes apart into its members. Accepted for a title,
+    a summary and a tag; the entry's own body is never passed through here."""
+    woman, girl = chr(0x1F469), chr(0x1F467)
+    family = woman + ZWJ + girl
+    assert len(family) == 3
+    assert bi.clean_fields({"title": family})["title"] == woman + girl
+
+
+def test_these_files_hold_no_invisible_character():
+    """This file and the module it tests, read as text: no format character,
+    no line or paragraph separator, no no-break space, no blank letter. See the
+    note at the top of this file for what one costs."""
+    blank = set(BLANK_POINTS)
+    for path in (pathlib.Path(__file__), REPO / "shared" / "blog_inbox.py"):
+        text = path.read_text(encoding="utf-8")
+        assert text.strip()
+        # split("\n"), not splitlines(): that one breaks lines ON U+2028 and
+        # U+2029 and would swallow the very characters this is looking for.
+        found = [(n, _point(ord(ch)))
+                 for n, line in enumerate(text.split("\n"), 1) for ch in line
+                 if unicodedata.category(ch) in ("Cf", "Zl", "Zp", "Cs", "Co")
+                 or ord(ch) == 0x00A0 or ord(ch) in blank]
+        assert not found, f"{path.name}: {found[:10]}"
 
 
 @pytest.mark.parametrize("raw", [None, "", "title", 7, ["title"], {"tags": "a,b"},
@@ -590,6 +722,17 @@ def test_a_bad_subset_is_dropped_and_the_rest_kept(monkeypatch):
     assert bi.fonts()["subsets"] == ["greek"]
 
 
+def test_the_loader_reset_is_named_as_every_other_config_module_names_it():
+    """``reset_cache``, as shared.public_scan, service_limits and the rest call
+    theirs: a test or a tool that resets "every config cache" finds it by name."""
+    from shared import public_scan, service_limits
+    assert callable(bi.reset_cache)
+    assert callable(public_scan.reset_cache) and callable(service_limits.reset_cache)
+    assert not hasattr(bi, "reset")
+    bi.reset_cache()
+    assert bi.limits()["max_drafts"] == 20          # and it still reads after one
+
+
 def test_the_accessors_never_hand_out_the_cached_mapping():
     """``load()`` returns the loader's CACHED dict. A caller that edited what
     limits() or fonts() returned would otherwise edit everyone's config."""
@@ -606,10 +749,10 @@ def test_the_accessors_never_hand_out_the_cached_mapping():
 
 # The project and third-party modules importing it may load. Stdlib is free;
 # anything else - an engine, the bus, redis, requests, lxml, a service - fails
-# here. tzdata is zoneinfo's data package on hosts without a system tz database
-# (Windows); repo_paths reads the clock's zone at import.
-EXPECTED = {"repo_paths", "shared", "shared.config_toml", "shared.blog_inbox",
-            "tzdata"}
+# here. tzdata (zoneinfo's data package on hosts without a system tz database,
+# i.e. Windows; repo_paths reads the clock's zone at import) is allowed by
+# PREFIX in the test below, which is what covers its submodules too.
+EXPECTED = {"repo_paths", "shared", "shared.config_toml", "shared.blog_inbox"}
 
 PROBE = r"""
 import sys

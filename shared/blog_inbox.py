@@ -174,12 +174,18 @@ DEFAULTS = {
 # offer exactly the range that is enforced here.
 #
 # The ceilings are not decoration. A document travels inside ONE stream entry,
-# and the two blog streams keep the newest ``[stream_keep]`` entries each
-# (config/services.toml, shipped 50), so ``max_html_kb`` times that is what a
-# stream can hold of Redis memory: about 25 MB as shipped, about 200 MB at this
-# ceiling. ``slug_chars`` has a FLOOR because ``slugify`` must always have room
-# for its fallback, and its CEILING is what an entry that already exists is
-# held to (``existing_slug``).
+# and each of the two blog streams keeps its newest ``[stream_keep]`` entries
+# (config/services.toml: shipped 50, at most 500 for these two streams -
+# ``shared.service_limits.STREAM_KEEP_CEILINGS``). ``max_html_kb`` times that
+# number is what one stream can hold of Redis memory:
+#     512 KB x  50   about  25 MB   as shipped
+#    4096 KB x  50   about 200 MB   this limit at its ceiling
+#     512 KB x 500   about 250 MB   the stream's at its ceiling
+#    4096 KB x 500   about   2 GB   both at once
+# The last line is why each has a ceiling, and it is still a number to stay
+# away from. ``slug_chars`` has a FLOOR because ``slugify`` must always have
+# room for its fallback, and its CEILING is what an entry that already exists
+# is held to (``existing_slug``).
 BOUNDS = {
     ("site", "republish_min"): (1, 1440),
     ("limits", "max_html_kb"): (1, 4096),
@@ -198,12 +204,15 @@ BOUNDS = {
 }
 
 # A subset as Google's stylesheet names one ("latin-ext", "cyrillic"). Never a
-# path, but still held to the characters a name has.
-_SUBSET_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*\Z")
+# path, but still held to the characters a name has - which is the shape of an
+# address exactly (lower-case words joined by single hyphens), so it is the one
+# pattern and not a second copy of it to keep in step.
+_SUBSET_RE = SLUG_RE
 _SUBSET_CHARS = 32
 _MAX_SUBSETS = 16
 
-load, reset = toml_loader(BLOG_TOML, DEFAULTS, label="blog.toml")
+# ``reset_cache``, as every other config module here names its own.
+load, reset_cache = toml_loader(BLOG_TOML, DEFAULTS, label="blog.toml")
 
 
 def _section(name) -> dict:
@@ -281,7 +290,11 @@ def _slug(raw, longest) -> str | None:
     Only plain SPACES are trimmed: a typed address may carry one at either end.
     A newline, a tab or any other whitespace is not something a text field
     produces, so it is refused by the pattern rather than quietly removed."""
-    if not isinstance(raw, str):
+    if not isinstance(raw, str) or not raw.isascii():
+        # ASCII is checked BEFORE lower-casing. ``str.lower`` is Unicode-aware:
+        # U+212A, the Kelvin sign, lowers to a plain "k", so lower-casing first
+        # turned one address into a different, valid one. This function
+        # refuses; ``slugify`` is the one that repairs.
         return None
     slug = raw.strip(" ").lower()
     if len(slug) > longest or not SLUG_RE.match(slug):
@@ -339,8 +352,22 @@ def slugify(title) -> str:
     return slug if clean_slug(slug) == slug else FALLBACK_SLUG
 
 
-# Unicode categories ``_text`` removes: surrogates and format characters.
-_INVISIBLE = frozenset({"Cs", "Cf"})
+# What ``_text`` removes outright, and it is a LIST, not a promise.
+#
+# By Unicode category: lone surrogates (Cs) and format characters (Cf).
+_REMOVED_CATEGORIES = frozenset({"Cs", "Cf"})
+# By code point, because their categories are a letter's, a symbol's and a
+# mark's, so no category rule can catch them: the "filler" letters that draw as
+# a blank (U+3164 Hangul filler, U+115F and U+1160 the two Hangul jamo fillers,
+# U+FFA0 the halfwidth one), U+2800 the blank Braille pattern, and the sixteen
+# variation selectors U+FE00..U+FE0F. Written as numbers: see the note at the
+# top of shared/tests/test_blog_inbox.py on invisible characters in source.
+BLANK_POINTS = frozenset({0x3164, 0x115F, 0x1160, 0xFFA0, 0x2800}
+                         | set(range(0xFE00, 0xFE10)))
+_BLANK = frozenset(chr(point) for point in BLANK_POINTS)
+# How far into a field ``_text`` looks for something to keep. It reads character
+# by character, so this is what bounds the work on a hostile megabyte "title".
+_SCAN_CHARS = 16384
 
 
 def _text(raw, cap) -> str:
@@ -348,30 +375,50 @@ def _text(raw, cap) -> str:
 
     Anything that is not a ``str`` is ``""``. Whitespace runs (newlines
     included) collapse to one space and control characters count as whitespace.
-    Two kinds of character are removed outright:
+    These are removed outright - not turned into a space, because they sit
+    INSIDE words:
 
     * lone surrogates (``Cs``): JSON can carry one, and it cannot be encoded,
       so it would raise at the first write to Redis or to disk;
-    * FORMAT characters (``Cf``): zero-width space and joiners, word joiner,
-      soft hyphen, the byte-order mark, the bidi overrides and isolates. They
-      draw nothing, so a title made of them is a blank row that reads as "has a
-      title", two tags can differ by one and look the same, and a bidi override
-      reorders whatever follows it on the page. Removed, not turned into a
-      space: they sit INSIDE words.
+    * FORMAT characters (``Cf``): zero-width space, non-joiner and joiner, word
+      joiner, soft hyphen, the byte-order mark, the bidi marks, embeddings,
+      overrides and isolates. A title made of them is a blank row that reads as
+      "has a title", two tags can differ by one and look the same, and a bidi
+      override reorders whatever follows it on the page;
+    * the characters in ``BLANK_POINTS``: the blank "filler" letters, the blank
+      Braille pattern and the variation selectors U+FE00..U+FE0F.
 
-    So text that shows nothing comes back ``""``, which every caller already
-    treats as "not given"."""
+    ⚠ Two costs, both accepted for a title, a summary and a tag (an entry's
+    BODY never passes through here). Removing the zero-width JOINER splits a
+    compound emoji into its members - a family into its people. Removing the
+    variation selectors can turn an emoji drawn in colour into its plain text
+    form. And Persian or Indic text that uses the non-joiner loses it.
+
+    ⚠ It is NOT a guarantee that what comes back shows something. Unicode has
+    more invisible and blank glyphs than these (other scripts' fillers and
+    variation selectors, tag characters, combining marks with nothing to
+    combine with, and whatever the next version adds), and a font can draw any
+    character as nothing. What IS removed comes back as ``""`` when nothing
+    else is left, which every caller already treats as "not given".
+
+    The removal happens BEFORE the cut for size. Cut first, 700 zero-width
+    spaces in front of a real title used up the whole cut and blanked it. The
+    work is bounded instead by ``_SCAN_CHARS`` (how far in it looks) and by
+    stopping once a few times ``cap`` has been kept: collapsing whitespace can
+    only shrink that, so nothing further in could survive the final cut."""
     if not isinstance(raw, str):
         return ""
-    # Bounds the work on a hostile megabyte "title". Cleaning can only shrink
-    # the text, so a few times the cap is all that could ever survive the cut -
-    # short of a field that is nearly all whitespace, which is not a title.
-    raw = raw[:cap * 4 + 64]
+    enough = cap * 4 + 64
     kept = []
-    for ch in raw:
+    for ch in raw[:_SCAN_CHARS]:
+        if ch in _BLANK:
+            continue
         kind = unicodedata.category(ch)
-        if kind not in _INVISIBLE:
-            kept.append(" " if kind == "Cc" else ch)
+        if kind in _REMOVED_CATEGORIES:
+            continue
+        kept.append(" " if kind == "Cc" else ch)
+        if len(kept) == enough:
+            break
     return " ".join("".join(kept).split())[:cap].rstrip()
 
 

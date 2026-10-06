@@ -53,6 +53,13 @@ def _signature(payload) -> str | None:
         return None
 
 
+# The most of a dead letter's ``reason`` that is kept, in characters. A reason
+# is a short phrase ("handler raised") except on the decode path, where it is
+# an exception's repr. Not in config: it bounds a diagnostic string, and there
+# is nothing for an operator to tune it against.
+_DEAD_REASON_CHARS = 2048
+
+
 def _head_of_fields(raw_fields, limit_bytes: int):
     """``(fields, cut)``: ``raw_fields`` with every text value longer than
     ``limit_bytes`` (UTF-8) cut to that and marked, and whether any was.
@@ -389,6 +396,13 @@ class Bus:
         # issues at most a few commands a second, so the default of ~1000 is a
         # generous window for inspection/replay while guaranteeing bounded memory.
         #
+        # ⚠ The cap is on the STREAM, not on its history. Redis drops the oldest
+        # entries past it whether or not a consumer has read them, without a
+        # dead letter and without an error: a service that is down or busy
+        # while more than N commands arrive comes back to the newest N only.
+        # test_a_full_stream_loses_its_oldest_commands_whether_or_not_they_ran
+        # shows it. That is why the floor is 10 (shared.service_limits).
+        #
         # The cap is PER STREAM (config/services.toml [stream_keep], read here on
         # every enqueue through shared.service_limits). It was one constant, sized
         # for commands of a few hundred bytes. A blog command carries a whole
@@ -430,25 +444,42 @@ class Bus:
         ⚠ A truncated record's ``data`` is no longer a command anything could
         decode. Nothing reads this list back as commands (``/health`` counts it
         and a person reads it); a replay tool would have to check ``truncated``.
+
+        ``reason`` is bounded too, at ``_DEAD_REASON_CHARS``: on the decode path
+        it carries an exception's repr, and an exception can quote the whole of
+        what it choked on. A cut reason ends ``...[truncated, N characters
+        total]`` and does NOT set ``truncated``, which is about the fields.
+
+        Never raises. EVERYTHING is inside the ``try``, the cutting included:
+        this is called from the loop that reads a service's commands with
+        nothing around it, so that promise must not rest on the two helpers
+        used here happening to be total.
         """
-        fields, cut = _head_of_fields(
-            raw_fields, _service_limits.dead_letter_field_kb() * 1024)
-        record: dict = {
-            "ts": datetime.now(timezone.utc).isoformat(),
-            "reason": reason,
-            "fields": fields,
-        }
-        if cut:
-            # Added only when something was cut: a record of a small command is
-            # byte for byte what it was before this limit existed.
-            record["truncated"] = True
         try:
+            fields, cut = _head_of_fields(
+                raw_fields, _service_limits.dead_letter_field_kb() * 1024)
+            if isinstance(reason, str) and len(reason) > _DEAD_REASON_CHARS:
+                reason = (reason[:_DEAD_REASON_CHARS]
+                          + f"...[truncated, {len(reason)} characters total]")
+            record: dict = {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "reason": reason,
+                "fields": fields,
+            }
+            if cut:
+                # Added only when something was cut: a record of a small command
+                # is byte for byte what it was before this limit existed.
+                record["truncated"] = True
             key = self.dead_letter_key(stream)
             self._r.rpush(key, json.dumps(record, default=str))
             # Bounded: nothing read or trimmed this list, so it only ever grew.
             self._r.ltrim(key, -_service_limits.dead_letter_keep(), -1)
         except Exception:  # never let dead-lettering itself take down the loop.
-            pass
+            # Swallowed, not silent: a command that failed AND could not be
+            # recorded would otherwise be gone without a word anywhere. Names
+            # the stream only - never the fields, which can be a whole document.
+            log.warning("could not record a dead letter for %s", stream,
+                        exc_info=True)
 
     def persistence(self) -> str:
         """What Redis is configured to keep across a restart: ``snapshots``,

@@ -155,16 +155,51 @@ def test_a_configured_cap_is_used_and_the_rest_follow_the_default(monkeypatch):
     assert cl.stream_keep("cmd:never_heard_of_it") == 400
 
 
-def test_the_bounds_are_one_to_a_hundred_thousand(monkeypatch):
-    assert (cl.STREAM_KEEP_MIN, cl.STREAM_KEEP_MAX) == (1, 100000)
-    for ok in (1, 100000):
+def test_the_bounds_are_ten_to_a_hundred_thousand(monkeypatch):
+    """The floor is 10, not 1. The cap is not only a memory limit: a stream
+    drops its OLDEST entries past it whether or not a service has read them, so
+    a cap of 1 means a second click loses the first one still waiting."""
+    assert (cl.STREAM_KEEP_MIN, cl.STREAM_KEEP_MAX) == (10, 100000)
+    for ok in (10, 100000):
         monkeypatch.setattr(cl, "load", lambda v=ok: {"stream_keep": {
-            "default": v, "cmd:blog": v}})
+            "default": v, "cmd:options": v}})
+        assert cl.stream_keep("cmd:market") == ok
         assert cl.stream_keep("cmd:options") == ok
-        assert cl.stream_keep("cmd:blog") == ok
 
 
-BAD_CAPS = [0, -1, 100001, True, False, "50", 50.0, 2.5, float("nan"),
+def test_a_document_stream_has_a_ceiling_of_its_own(monkeypatch):
+    """100000 commands of a few hundred bytes is tens of megabytes; 100000
+    documents is not a number to offer. The two streams whose entries carry a
+    document stop at 500, and past it a value reads as their shipped 50."""
+    assert cl.STREAM_KEEP_CEILINGS == {"cmd:blog": 500, "cmd:blog_inbox": 500}
+    # every stream that ships with a number of its own has a ceiling of its own
+    named = {s for s in cl.DEFAULTS["stream_keep"] if s != "default"}
+    assert set(cl.STREAM_KEEP_CEILINGS) == named
+    for stream, ceiling in cl.STREAM_KEEP_CEILINGS.items():
+        assert cl.STREAM_KEEP_MIN <= cl.DEFAULTS["stream_keep"][stream] <= ceiling
+        for ok in (cl.STREAM_KEEP_MIN, ceiling):
+            monkeypatch.setattr(cl, "load", lambda s=stream, v=ok: {
+                "stream_keep": {"default": 1000, s: v}})
+            assert cl.stream_keep(stream) == ok
+        for over in (ceiling + 1, 1000, 100000):
+            monkeypatch.setattr(cl, "load", lambda s=stream, v=over: {
+                "stream_keep": {"default": 1000, s: v}})
+            assert cl.stream_keep(stream) == 50, (stream, over)
+    # the ceiling is theirs alone: any other stream may still go that high
+    monkeypatch.setattr(cl, "load", lambda: {"stream_keep": {"cmd:options": 501}})
+    assert cl.stream_keep("cmd:options") == 501
+
+
+def test_the_bounds_of_a_stream_are_one_call(monkeypatch):
+    """What the Settings catalogue mirrors, per stream."""
+    assert cl.stream_keep_bounds("cmd:options") == (10, 100000)
+    assert cl.stream_keep_bounds("default") == (10, 100000)
+    assert cl.stream_keep_bounds("cmd:blog") == (10, 500)
+    assert cl.stream_keep_bounds("cmd:blog_inbox") == (10, 500)
+    assert cl.stream_keep_bounds(None) == (10, 100000)
+
+
+BAD_CAPS = [0, -1, 1, 9, 100001, True, False, "50", 50.0, 2.5, float("nan"),
             float("inf"), None, [50], {"n": 50}]
 
 
@@ -216,10 +251,12 @@ def test_a_stream_name_that_is_not_one_never_raises(stream):
 def test_the_cap_is_read_through_the_real_loader_from_a_file(tmp_path, monkeypatch):
     from shared.config_toml import toml_loader
     path = tmp_path / "services.toml"
-    path.write_text('[stream_keep]\ndefault = 700\n"cmd:blog" = 5\n'
-                    '"cmd:blog_inbox" = "many"\n', encoding="utf-8")
+    path.write_text('[stream_keep]\ndefault = 700\n"cmd:blog" = 20\n'
+                    '"cmd:blog_inbox" = "many"\n"cmd:market" = 5\n',
+                    encoding="utf-8")
     load, _reset = toml_loader(path, cl.DEFAULTS, label="services.toml")
     monkeypatch.setattr(cl, "load", load)
     assert cl.stream_keep("cmd:options") == 700
-    assert cl.stream_keep("cmd:blog") == 5
+    assert cl.stream_keep("cmd:blog") == 20
     assert cl.stream_keep("cmd:blog_inbox") == 50
+    assert cl.stream_keep("cmd:market") == 700       # 5 is under the floor

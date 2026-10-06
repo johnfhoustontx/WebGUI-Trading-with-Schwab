@@ -5,12 +5,14 @@
 #            a service a command through a queue. If the service was down, or
 #            its queue is replayed after a restart, old commands arrive late.
 #   [health] when a service reports itself as not healthy.
-#   [stream_keep] how many commands each queue keeps after they have been run.
+#   [stream_keep] how many commands each queue holds: its newest N, run or not.
 #
-#   Edit a value here (or in Settings -> Configuration), then restart the
-#   services. Two are exceptions, read each time they are used, so a change
-#   applies to the next command with no restart: [stream_keep], and
-#   [dead_letters] max_field_kb.
+#   Edit a value here (or in Settings -> Configuration). Most of this file is
+#   read each time it is used, so a change applies with no restart:
+#     [age] replay_max_sec, [dead_letters], [stream_keep], [health].
+#   Two values are read once, when a service starts, and need a restart:
+#     [age] side_effect_max_sec   (options_svc reads it as it starts)
+#     [pool] workers              (every service builds its pool at start)
 #   Anything you delete falls back to the default in shared/service_limits.py.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -45,22 +47,34 @@ keep = 200
 max_field_kb = 64
 
 [stream_keep]
-# A queue keeps its newest commands after they have been run, so a person can
-# look back at what was asked. Each time a command is added the queue is cut
-# back to about this many (Redis trims in blocks of up to 100 commands, so a
-# queue of small commands can run up to about a hundred over). Until 2026-10-06
-# this was 1000 for every queue, fixed in code. 1 to 100000.
+# How many commands a queue holds: its newest N, WHETHER OR NOT THEY HAVE BEEN
+# RUN. Each time a command is added the queue is cut back to about this many,
+# oldest first (Redis trims in blocks of up to 100 commands, so a queue of small
+# commands can run up to about a hundred over).
+#
+# So this is two things. It is how far back a person can look at what was
+# asked. And it is the most a service can fall behind: if a service is stopped
+# or busy while more than N commands arrive, the oldest ones still waiting are
+# dropped. They are never run, they do not appear among the commands that were
+# never run, and nothing reports it. Keep it well above the number of commands
+# that could pile up while a service restarts.
+#
+# Until 2026-10-06 this was 1000 for every queue, fixed in code. 10 to 100000;
+# a value outside that reads as 1000.
 default = 1000
 
-# A queue named here keeps its own number instead of the default. The name is
+# A queue named here holds its own number instead of the default. The name is
 # the Redis stream's, in quotes because of the colon.
 #
 # These two are small because each of their commands carries a WHOLE blog
 # document, up to [limits] max_html_kb in config/blog.toml (512 KB as shipped):
 # cmd:blog is the Blog page's uploads and its Publish, cmd:blog_inbox is drafts
 # arriving from Claude Chat. A thousand documents would be about 500 MB of the
-# server's memory in each queue; fifty is about 25 MB. A value here that cannot
-# be read falls back to 50, not to the default above.
+# server's memory in each queue; fifty is about 25 MB. The price is the one
+# above: more than fifty drafts sent while the blog service is stopped, and the
+# oldest are lost.
+# 10 to 500 for these two (500 is about 250 MB each). A value outside that, or
+# one that cannot be read, falls back to 50, not to the default above.
 "cmd:blog" = 50
 "cmd:blog_inbox" = 50
 
