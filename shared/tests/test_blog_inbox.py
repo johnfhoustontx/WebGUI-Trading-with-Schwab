@@ -661,12 +661,101 @@ def test_the_limits_have_the_shipped_values():
         "slug_chars": 80, "max_wait_sec": 120, "answer_keep_sec": 120}
 
 
+# Typed out here, so a change to the shipped string is a change someone made
+# twice on purpose.
+SHIPPED_USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                      "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")
+
+
 def test_the_fonts_and_site_sections_have_the_shipped_values():
     assert bi.fonts() == {"enabled": True, "subsets": ["latin", "latin-ext"],
                           "max_links": 4, "max_css_kb": 256,
-                          "max_files": 24, "max_file_kb": 400,
-                          "timeout_sec": 10, "total_sec": 30}
+                          "max_files": 24, "max_file_kb": 400, "max_rules": 96,
+                          "timeout_sec": 10, "total_sec": 30,
+                          "user_agent": SHIPPED_USER_AGENT}
     assert bi.site() == {"enabled": True, "republish_min": 30}
+
+
+def test_the_rules_written_into_an_entry_are_bounded():
+    """``max_files`` bounds files, not rules: many rules can name one file.
+    The rules are pasted into the entry AFTER its own size limit was applied,
+    so their number needs a limit of its own."""
+    assert bi.DEFAULTS["fonts"]["max_rules"] == 96
+    assert bi.BOUNDS[("fonts", "max_rules")] == (1, 1000)
+
+
+GOOD_USER_AGENTS = [
+    SHIPPED_USER_AGENT,
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/160.0.0.0 Safari/537.36",
+    "x" * 20, "x" * 300,
+]
+DEL = chr(0x7F)
+NO_BREAK_SPACE = chr(0xA0)
+E_ACUTE = chr(0xE9)
+for _ch in (DEL, NO_BREAK_SPACE, E_ACUTE):
+    assert len(_ch) == 1
+BAD_USER_AGENTS = [
+    "", "   ", "x" * 19, "x" * 301, None, 7, True, ["Mozilla/5.0"],
+    "Mozilla/5.0 (Windows NT 10.0)\r\nX-Injected: 1",       # a header of its own
+    "Mozilla/5.0 (Windows NT 10.0)\nChrome", "Mozilla/5.0 (Windows NT 10.0)\tChrome",
+    "Mozilla/5.0 (Windows NT 10.0)" + chr(0) + "Chrome",
+    "Mozilla/5.0 (Windows NT 10.0)" + DEL + "Chrome",
+    "Mozilla/5.0 (Windows NT 10.0) Caf" + E_ACUTE,          # a header is ASCII
+    "Mozilla/5.0 (Windows NT 10.0)" + NO_BREAK_SPACE + "Chrome",
+    " Mozilla/5.0 (Windows NT 10.0) Chrome",                # requests refuses a leading space
+    "Mozilla/5.0 (Windows NT 10.0) Chrome ",
+]
+
+
+@pytest.mark.parametrize("value", GOOD_USER_AGENTS)
+def test_a_usable_user_agent_is_read(monkeypatch, value):
+    _cfg(monkeypatch, fonts={"user_agent": value})
+    assert bi.fonts()["user_agent"] == value
+
+
+@pytest.mark.parametrize("value", BAD_USER_AGENTS, ids=repr)
+def test_a_user_agent_that_could_not_be_a_header_reads_as_the_shipped_one(monkeypatch, value):
+    """It is sent as a request header: printable ASCII only, so no line break
+    can start a second header, and 20 to 300 characters."""
+    _cfg(monkeypatch, fonts={"user_agent": value})
+    assert bi.fonts()["user_agent"] == SHIPPED_USER_AGENT
+    assert bi.USER_AGENT_CHARS == (20, 300)
+
+
+def test_a_caller_and_the_file_are_held_to_one_rule(monkeypatch):
+    """``fonts(over)`` lays a caller's table over the file's. It is the SAME
+    reading, key by key, so a value is usable from one exactly when it is from
+    the other - a float that the file may hold is a float a caller may pass."""
+    cases = [("timeout_sec", 59.5, 59), ("timeout_sec", 60, 60), ("timeout_sec", 61, None),
+             ("timeout_sec", 0.5, None), ("timeout_sec", "9", None), ("timeout_sec", True, None),
+             ("timeout_sec", float("nan"), None), ("timeout_sec", float("inf"), None),
+             ("max_rules", 1, 1), ("max_rules", 1000, 1000), ("max_rules", 1001, None),
+             ("max_files", 3.0, 3), ("enabled", False, False), ("enabled", 0, None),
+             ("subsets", ["greek", "greek", "../x", 7], ["greek"]),
+             ("subsets", ("greek", "fallback"), ["greek", "fallback"]),
+             ("subsets", "greek", None), ("subsets", [], None), ("subsets", ["Klingon!"], None),
+             ("user_agent", "y" * 40, "y" * 40), ("user_agent", "short", None)]
+    shipped = bi.fonts()
+    for key, raw, expected in cases:
+        expected = shipped[key] if expected is None else expected
+        assert bi.fonts({key: raw})[key] == expected, (key, raw)
+        monkeypatch.setattr(bi, "load", lambda k=key, r=raw: {"fonts": {k: r}})
+        assert bi.fonts()[key] == expected, (key, raw)
+        monkeypatch.undo()
+        other = {k: v for k, v in bi.fonts({key: raw}).items() if k != key}
+        assert other == {k: v for k, v in shipped.items() if k != key}, key
+
+
+def test_what_a_caller_leaves_out_or_gets_wrong_is_the_files_not_the_built_in(monkeypatch):
+    """Laid over the FILE's settings: the operator's limits still hold for a
+    caller who names one key, or names it badly."""
+    _cfg(monkeypatch, fonts={"max_files": 5, "timeout_sec": 3, "subsets": ["greek"]})
+    assert bi.fonts({"max_links": 2}) == {**bi.fonts(), "max_links": 2}
+    assert bi.fonts({"max_files": 10 ** 9, "subsets": [], "timeout_sec": None}) == bi.fonts()
+    assert bi.fonts()["max_files"] == 5 and bi.fonts()["subsets"] == ["greek"]
+    for not_a_table in (None, 7, "x", [], [("max_files", 1)]):
+        assert bi.fonts(not_a_table) == bi.fonts()
 
 
 def test_a_typeface_copy_is_bounded_in_every_direction():
@@ -674,7 +763,7 @@ def test_a_typeface_copy_is_bounded_in_every_direction():
     how large each, how many files, how large each, how long each request may
     take and how long all of them together. The cleaner caps none of it - it
     hands over every link it found - so each needs a number here, with bounds."""
-    for key in ("max_links", "max_css_kb", "max_files", "max_file_kb",
+    for key in ("max_links", "max_css_kb", "max_files", "max_file_kb", "max_rules",
                 "timeout_sec", "total_sec"):
         assert ("fonts", key) in bi.BOUNDS, key
     assert bi.BOUNDS[("fonts", "max_links")] == (1, 16)
@@ -708,15 +797,17 @@ def test_every_number_has_bounds_and_ships_inside_them():
 def test_a_value_inside_its_bounds_is_read(monkeypatch):
     _cfg(monkeypatch, limits={"max_drafts": 3, "max_wait_sec": 45.0},
          fonts={"enabled": False, "subsets": ["cyrillic", "latin", "latin"],
-                "timeout_sec": 4, "max_links": 2, "max_css_kb": 64, "total_sec": 12},
+                "timeout_sec": 4, "max_links": 2, "max_css_kb": 64, "total_sec": 12,
+                "max_rules": 40, "user_agent": "Mozilla/5.0 (a newer browser)"},
          site={"enabled": False, "republish_min": 5})
     assert bi.limits()["max_drafts"] == 3
     assert bi.limits()["max_wait_sec"] == 45 and isinstance(bi.limits()["max_wait_sec"], int)
     assert bi.limits()["title_chars"] == 140            # an unnamed key keeps its default
     assert bi.fonts() == {"enabled": False, "subsets": ["cyrillic", "latin"],
                           "max_links": 2, "max_css_kb": 64,
-                          "max_files": 24, "max_file_kb": 400,
-                          "timeout_sec": 4, "total_sec": 12}
+                          "max_files": 24, "max_file_kb": 400, "max_rules": 40,
+                          "timeout_sec": 4, "total_sec": 12,
+                          "user_agent": "Mozilla/5.0 (a newer browser)"}
     assert bi.site() == {"enabled": False, "republish_min": 5}
 
 
@@ -744,8 +835,10 @@ max_links = 17
 max_css_kb = 8
 max_files = 0
 max_file_kb = -400
+max_rules = 1001
 timeout_sec = 100000
 total_sec = "30"
+user_agent = "curl"
 """
 
 

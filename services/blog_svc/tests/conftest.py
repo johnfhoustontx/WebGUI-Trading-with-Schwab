@@ -13,6 +13,18 @@ if str(_REPO_ROOT) not in sys.path:
 pytest.register_assert_rewrite("services.blog_svc.tests._audit")
 
 
+class NetworkReached(BaseException):
+    """A test in this suite tried to send a real request.
+
+    ⚠ A ``BaseException`` on purpose, not an ``Exception``. ``fonts.localize``
+    promises never to raise and keeps the promise by catching ``Exception``
+    around every fetch - so a ``RuntimeError`` raised here was caught there,
+    turned into "1 stylesheet could not be fetched", and the test that forgot
+    its ``fetch=`` PASSED. Nothing in the service catches ``BaseException``
+    (a shutdown must get through), so this gets through too.
+    ``test_fonts_review.py`` pins it."""
+
+
 @pytest.fixture(autouse=True)
 def _no_real_network(monkeypatch):
     """The repo-root conftest guards SQLite but NOT the network (CLAUDE.md says
@@ -23,5 +35,5 @@ def _no_real_network(monkeypatch):
     ``fonts.http_fetch``'s own tests monkeypatch ``requests.get`` on top of
     this; that replacement wins, so they are unaffected."""
     def refuse(*_args, **_kwargs):
-        raise RuntimeError("blog_svc tests must not reach the network")
+        raise NetworkReached("blog_svc tests must not reach the network")
     monkeypatch.setattr("requests.sessions.Session.send", refuse)

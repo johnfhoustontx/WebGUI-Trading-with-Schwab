@@ -1473,9 +1473,13 @@ _BLOG = ConfigFile(
             Field("fonts.subsets", "Character sets copied",
                   "Google's names for them, in lower case: latin, latin-ext, "
                   "cyrillic, greek, vietnamese. Each one is another file for "
-                  "every weight of every typeface. A name that is not one of "
-                  "Google's is ignored; with none usable, latin and latin-ext "
-                  "are copied.", kind="phrases"),
+                  "every weight of every typeface. Icon fonts are filed under "
+                  "a name of their own, fallback: add it to copy them. A name "
+                  "is lower-case letters, digits and hyphens; one not written "
+                  "that way is dropped, and with none left latin and latin-ext "
+                  "are copied. A name written that way which Google does not "
+                  "use is kept and matches nothing, so nothing is copied for "
+                  "it: check the spelling.", kind="phrases"),
             Field("fonts.max_links", "Most typeface stylesheets for one entry",
                   "An entry names its typefaces in one or more links to Google "
                   "Fonts. Links past this number are not followed.",
@@ -1486,11 +1490,20 @@ _BLOG = ConfigFile(
                   kind="int", unit="KB", min=16, max=2048, step=16),
             Field("fonts.max_files", "Most typeface files for one entry",
                   "Files past this number are not copied, and the text they "
-                  "would have styled uses a fallback font.",
+                  "would have styled uses a fallback font. It counts the "
+                  "files asked for, so one that fails to arrive still uses "
+                  "one up.",
                   kind="int", unit="files", min=1, max=200, step=1),
             Field("fonts.max_file_kb", "Largest typeface file",
                   "A larger file is not stored.",
                   kind="int", unit="KB", min=1, max=4096, step=50),
+            Field("fonts.max_rules", "Most typeface rules written into one entry",
+                  "Each weight and style of a typeface, in each character set, "
+                  "is one rule added to the entry, and several rules can share "
+                  "one file. Rules past this number are left out and the draft "
+                  "says how many. It keeps what is added to an entry small: at "
+                  "most about 3 KB for each rule, usually a tenth of that.",
+                  kind="int", unit="rules", min=1, max=1000, step=8),
             Field("fonts.timeout_sec", "Longest wait for Google Fonts",
                   "For each request. A typeface that does not arrive in time is "
                   "left out and the draft says so; it never holds a draft up.",
@@ -1498,10 +1511,20 @@ _BLOG = ConfigFile(
             Field("fonts.total_sec", "Longest spent copying one entry's typefaces",
                   "For all of one entry's requests together. Once it has "
                   "passed, the typefaces not copied yet are left out and the "
-                  "draft says so. Keep it shorter than the longest a draft from "
-                  "Claude Chat may wait: the next draft is not read until this "
-                  "one's typefaces are done.",
+                  "draft says so. Keep it well under the longest a draft from "
+                  "Claude Chat may wait (Drafts, above): the next draft is not "
+                  "read until this one's typefaces are done, and one that "
+                  "waits too long behind it will expire.",
                   kind="int", unit="seconds", min=1, max=600, step=5),
+            Field("fonts.user_agent", "Browser named to Google Fonts",
+                  "Google Fonts sends woff2 files, split by character set, "
+                  "only to a browser it knows can read them. This is the "
+                  "browser the Blog service says it is. Change it when drafts "
+                  "start saying their typeface rules were not usable while "
+                  "Google Fonts itself is working: that is Google no longer "
+                  "answering this one with woff2. Paste the User-Agent of a "
+                  "current desktop Chrome. Plain letters, digits and "
+                  "punctuation only, 20 to 300 characters.", kind="text"),
         )),
     ),
 )
@@ -2045,6 +2068,23 @@ def _refuse_api_key(fld, text):
                          "in the stack .env, never in this file")
 
 
+# Mirrors shared.blog_inbox.USER_AGENT_CHARS and its printable-ASCII rule (this
+# module stays import-free; tests/test_config_schema.py pins the two together).
+_BLOG_USER_AGENT_CHARS = (20, 300)
+
+
+def _refuse_unusable_user_agent(fld, text):
+    """The blog service reads a User-Agent that could not be a request header
+    as the shipped one, with no sign on this page. Refused here instead."""
+    if fld.key != "fonts.user_agent":
+        return
+    low, high = _BLOG_USER_AGENT_CHARS
+    if not low <= len(text) <= high:
+        raise ValueError(f"must be {low} to {high} characters")
+    if not all(" " <= ch <= "~" for ch in text):
+        raise ValueError("plain letters, digits and punctuation only, on one line")
+
+
 def parse(fld: Field, raw, *, shipped=None):
     """Editor value -> the value stored in TOML, or ``ValueError`` with a
     sentence the page shows beside the field. ``shipped`` keeps an int an int."""
@@ -2093,6 +2133,7 @@ def parse(fld: Field, raw, *, shipped=None):
         if not s:
             raise ValueError("a value is required")
         _refuse_api_key(fld, s)
+        _refuse_unusable_user_agent(fld, s)
         return s
     if k in ("choice", "sector"):
         if raw not in fld.choices:

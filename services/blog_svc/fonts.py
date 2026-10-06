@@ -37,11 +37,17 @@ arrives. How many links, how large a stylesheet, how many files, how large a
 file, how long one request and how long all of them: ``config/blog.toml
 [fonts]``. None of it is capped by the cleaner.
 
-**It never blocks a draft.** ``localize`` never raises. A link or a file that
-fails costs only itself; the entry falls back to the fonts its own stylesheet
-names, and ``Fonts.note`` says so in one sentence made of this module's own
-words and counts - never an exception's text, an address or a family name,
-all of which belong to someone else.
+**What is written is bounded too.** Files are not rules: many blocks can name
+one file, so ``[fonts] max_rules`` caps the rules, and one rule can be no
+longer than ``RULE_CHARS_CEILING``. Their product is the most ``apply`` can add
+to an entry, whose own size limit was applied before any of this.
+
+**It never blocks a draft.** ``localize`` raises nothing ordinary (see its
+docstring for the two things it lets through). A link or a file that fails
+costs only itself; the entry falls back to the fonts its own stylesheet names,
+and ``Fonts.note`` says so in one sentence made of this module's own words and
+counts - never an exception's text, an address or a family name, all of which
+belong to someone else. The log is held to the same rule.
 
 ⚠ **Never fetched for real while this was written.** The suite cannot reach the
 network and the build did not either, so the parser was written against the
@@ -49,8 +55,10 @@ SHAPE the css2 endpoint is known to send a desktop Chrome, not against an
 answer. On the first live run, look at the draft's note and check:
 
 1. The answer still labels each block with a ``/* subset */`` comment directly
-   before ``@font-face``. An unlabelled block is dropped ("offered nothing in
-   the character sets copied here").
+   before ``@font-face``. An unlabelled block is dropped ("typefaces were not
+   copied because they are not offered in the character sets copied here" -
+   which is also, correctly, what an icon font says: its blocks are labelled
+   ``fallback``, and that name has to be on ``[fonts] subsets`` to copy one).
 2. ``src`` is still exactly ``url(https://fonts.gstatic.com/....woff2)
    format('woff2')``. Anything else in it - a ``local()``, a second source,
    another format hint - drops the block ("typeface rules were not usable").
@@ -59,15 +67,18 @@ answer. On the first live run, look at the draft's note and check:
    size. A browser's decoder refuses a file where it does not, so this should
    hold - but it is a belief about Google's files, not a measurement.
 5. Google answers with a plain 200 and no redirect.
-6. ``USER_AGENT`` is still one Google answers with woff2.
+6. ``[fonts] user_agent`` is still one Google answers with woff2. If it is
+   not, every block fails check 2; the cure is a setting, not a code change.
 
 Design: docs/plans/2026-10-06-site-blog-design.md ("Typefaces", "How an entry
 is isolated").
 """
 import hashlib
 import logging
+import os
 import re
 import struct
+import traceback
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass
@@ -76,6 +87,7 @@ from urllib.parse import urlsplit
 
 import requests
 import tinycss2
+import urllib3
 
 from services import _degrade
 from services.blog_svc import clean
@@ -90,18 +102,19 @@ log = logging.getLogger("blog_svc.fonts")
 CSS_HOST, FILE_HOST = "fonts.googleapis.com", "fonts.gstatic.com"
 _HOSTS = frozenset({CSS_HOST, FILE_HOST})
 
-# Sent on every request, and it is here for one reason: Google chooses what to
-# send by who is asking. A client it does not recognise (``python-requests``)
-# is sent TrueType with no ``unicode-range`` - one large file per weight
-# instead of one small woff2 per character set - and every block would fail the
-# checks below. A desktop Chrome is sent woff2. The version only has to be one
-# Google still takes for a browser that reads woff2; this one is a late-2025
-# release, picked without the network, and ⚠ it WILL AGE: if every draft starts
-# saying its typeface rules were not usable, raise the number before looking
-# anywhere else. A constant and not a config key because nothing but that
-# would ever be a reason to change it.
-USER_AGENT = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-              "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36")
+# The SHIPPED User-Agent. What is sent is ``[fonts] user_agent``, which ships as
+# this; the constant is here so the reason sits beside the code that needs it.
+#
+# Google chooses what to send by who is asking. A client it does not recognise
+# (``python-requests``) is sent TrueType with no ``unicode-range`` - one large
+# file per weight instead of one small woff2 per character set - and every
+# block would fail the checks below. A desktop Chrome is sent woff2. The
+# version only has to be one Google still takes for a browser that reads woff2;
+# this one is a late-2025 release, picked without the network, and ⚠ it WILL
+# AGE. When every draft starts saying its typeface rules were not usable, the
+# cure is a newer string in Settings -> Configuration -> Site blog: a setting,
+# so that it does not take a code change and a promote.
+USER_AGENT = blog_inbox.DEFAULTS["fonts"]["user_agent"]
 
 # A stylesheet link, exactly as the cleaner matches one (``clean._FONT_LINK_RE``):
 # checked again here because what this module is handed becomes a request, and
@@ -128,6 +141,13 @@ _FAMILY_CHARS = 100
 # naming one is dropped rather than escaped - no stylesheet an entry carries
 # could be asking for that family by name.
 _NOT_IN_A_NAME = frozenset({"Cc", "Cf", "Cs", "Zl", "Zp"})
+
+# The most ranges ONE rule's ``unicode-range`` may list; a block with more is
+# not usable. The lists Google sends for a named character set are a few dozen
+# entries, and without a limit one block turned a 256 KB stylesheet into 448 KB
+# of rule. Not a config key: with ``_FAMILY_CHARS`` it fixes the longest rule
+# there can be (``RULE_CHARS_CEILING``), which ``[fonts] max_rules`` multiplies.
+MAX_RANGES = 128
 
 # A WOFF2 file starts with a 48-byte header: the signature, a flavor, the
 # file's own total length, the number of tables, and eight more fields.
@@ -273,6 +293,7 @@ def http_fetch(url, *, headers, timeout, max_bytes) -> bytes:
 # build ``_RULE_RE`` below, so what a reader accepts is what the pattern allows.
 _N = r"[0-9]{1,4}(?:\.[0-9]{1,3})?"
 _ANGLE = r"-?[0-9]{1,2}(?:\.[0-9]{1,3})?"
+_N_CHARS, _ANGLE_CHARS = len("0000.000"), len("-00.000")      # the longest each can be
 _NUMBER_RE = re.compile(_N + r"\Z")
 _ANGLE_RE = re.compile(_ANGLE + r"\Z")
 _STYLES = ("normal", "italic", "oblique")
@@ -358,7 +379,9 @@ def _read_weight(tokens):
 
 
 def _read_stretch(tokens):
-    return _keyword(tokens, _STRETCHES) or _numbers(tokens, "percentage", 0, 1000, "%")
+    """A keyword, or one or two percentages from 1% to 1000% - the range a
+    weight's numbers have. CSS allows 0%; no typeface is nothing wide."""
+    return _keyword(tokens, _STRETCHES) or _numbers(tokens, "percentage", 1, 1000, "%")
 
 
 def _read_display(tokens):
@@ -368,8 +391,8 @@ def _read_display(tokens):
 def _read_range(tokens):
     """A comma-separated list of ranges, each written again from its two ends.
     Nothing but ranges and the commas between them, every range forwards and
-    inside Unicode."""
-    if not tokens or len(tokens) % 2 == 0:
+    inside Unicode, and at most ``MAX_RANGES`` of them."""
+    if not tokens or len(tokens) % 2 == 0 or len(tokens) > 2 * MAX_RANGES - 1:
         return None
     written = []
     for at, token in enumerate(tokens):
@@ -463,62 +486,79 @@ class _Face:
         return f'@font-face{{{self.head};src:url(../fonts/{name}) format("woff2"){self.tail}}}'
 
 
-def _face(rule):
-    """``rule`` (an ``@font-face`` node) as a ``_Face``, or ``None``.
+def _block(rule) -> tuple:
+    """``(family, face)`` for ``rule``, an ``@font-face`` node.
 
-    ``None`` unless: nothing stands between ``@font-face`` and its block; the
-    block holds declarations only (no nested rule, nothing unparseable, no
-    ``!important``); no listed descriptor is given twice; every listed one
-    reads; there is a family and a ``src``; and the WHOLE block holds exactly
-    one ``url()`` - so an address in a descriptor this module does not copy
-    still costs the block."""
+    ``family`` is the family the block names, as it would be written, or
+    ``None`` when it names none that reads. It is wanted even for a block that
+    will not be copied: it is how a typeface that is offered in none of the
+    copied character sets gets counted.
+
+    ``face`` is the block as a ``_Face``, or ``None`` unless: nothing stands
+    between ``@font-face`` and its block; the block holds declarations only (no
+    nested rule, nothing unparseable, no ``!important``); no listed descriptor
+    is given twice; every listed one reads; there is a family and a ``src``;
+    and the WHOLE block holds exactly one ``url()`` - so an address in a
+    descriptor this module does not copy still costs the block."""
     if rule.content is None or any(token.type != "whitespace" for token in rule.prelude):
-        return None
-    read, urls = {}, 0
+        return None, None
+    read, urls, sound = {}, 0, True
     for item in tinycss2.parse_blocks_contents(rule.content, skip_comments=True,
                                                skip_whitespace=True):
         if item.type != "declaration" or item.important:
-            return None
+            sound = False
+            continue
         urls += _urls(item.value)
         reader = _READERS.get(item.lower_name)
         if reader is None:
             continue
-        if item.lower_name in read:
-            return None
         value = reader([t for t in item.value if t.type not in ("whitespace", "comment")])
-        if value is None:
-            return None
+        if value is None or item.lower_name in read:
+            sound = False               # read on: the family may still be wanted
+            continue
         read[item.lower_name] = value
-    if urls != 1 or "font-family" not in read or "src" not in read:
-        return None
+    family = read.get("font-family")
+    if not sound or urls != 1 or family is None or "src" not in read:
+        return family, None
     head = ";".join(f"{name}:{read[name]}" for name in _BEFORE_SRC if name in read)
     tail = f";unicode-range:{read['unicode-range']}" if "unicode-range" in read else ""
-    return _Face(read["src"], head, tail)
+    return family, _Face(read["src"], head, tail)
 
 
 def _faces(text, subsets) -> tuple:
-    """``(faces, unusable)`` from one stylesheet: the blocks labelled with one
-    of ``subsets`` that read, in order, and how many so labelled did not.
+    """``(faces, unusable, named, offered)`` from one stylesheet.
+
+    ``faces`` are the blocks labelled with one of ``subsets`` that read, in
+    order; ``unusable`` is how many so labelled did not. ``named`` is every
+    family any block names, and ``offered`` those with a block labelled with
+    one of ``subsets`` - usable or not, because a block that was offered here
+    and could not be used has a reason of its own.
 
     A block's label is the comment DIRECTLY before it, used once. Any other
     rule in between, a second comment, or no comment at all leaves the block
     unlabelled, and an unlabelled block is not copied: the subset list is the
     operator's, and "probably latin" is not on it. Only the top level is read;
     a block inside ``@media`` or ``@supports`` is not one Google sends."""
-    faces, unusable, label = [], 0, None
+    faces, unusable, named, offered, label = [], 0, set(), set(), None
     for node in tinycss2.parse_stylesheet(text, skip_comments=False, skip_whitespace=True):
         if node.type == "comment":
             label = node.value.strip()
             continue
         mine, label = label, None
-        if node.type != "at-rule" or node.lower_at_keyword != "font-face" or mine not in subsets:
+        if node.type != "at-rule" or node.lower_at_keyword != "font-face":
             continue
-        face = _face(node)
+        family, face = _block(node)
+        if family is not None:
+            named.add(family)
+        if mine not in subsets:
+            continue
+        if family is not None:
+            offered.add(family)
         if face is None:
             unusable += 1
         else:
             faces.append(face)
-    return faces, unusable
+    return faces, unusable, named, offered
 
 
 # ── what leaves this module ──────────────────────────────────────────────────
@@ -540,6 +580,27 @@ _RULE_RE = re.compile(
     r';src:url\(\.\./fonts/[0-9a-f]{20}\.woff2\) format\("woff2"\)'
     rf"(?:;unicode-range:U\+{_HEX}(?:-{_HEX})?(?:,U\+{_HEX}(?:-{_HEX})?)*)?"
     r"\}")
+
+# The longest ONE rule can be, in characters (all ASCII, so bytes too): every
+# descriptor present and each as long as its reader allows. With ``[fonts]
+# max_rules`` it is what bounds ``Fonts.css``, and so what ``apply`` can add to
+# an entry whose own size limit was applied before any of this:
+#
+#     len(Fonts.css) <= max_rules * RULE_CHARS_CEILING + (max_rules - 1)
+#
+# 3,075 characters; 96 rules as shipped is under 300 KB at the very worst. A
+# real rule is about a tenth of it (a family name is not a hundred characters
+# that each need eight to write). tests/test_fonts_review.py works the figure
+# out a second time from the shape of a rule, and builds rules that reach it.
+RULE_CHARS_CEILING = (
+    len('@font-face{font-family:""') + _FAMILY_CHARS * len("\\10ffff ")
+    + len(";font-style:oblique") + 2 * (len(" deg") + _ANGLE_CHARS)
+    + len(";font-weight:") + 2 * _N_CHARS + len(" ")
+    + len(";font-stretch:") + 2 * (_N_CHARS + len("%")) + len(" ")
+    + len(";font-display:") + max(len(word) for word in _DISPLAYS)
+    + len(';src:url(../fonts/.woff2) format("woff2")') + 20
+    + len(";unicode-range:") + MAX_RANGES * len("U+10FFFF-10FFFF") + (MAX_RANGES - 1)
+    + len("}"))
 
 
 def _written_here(css) -> bool:
@@ -564,32 +625,38 @@ def _is_woff2(data) -> bool:
     return length == len(data) and tables > 0
 
 
-def _settings(cfg) -> dict:
-    """The ``[fonts]`` settings a copy runs under.
+# ── saying what went wrong ───────────────────────────────────────────────────
+#
+# A failure here is one of three kinds, and they must not be mistaken for each
+# other, because only one of them is this service's to fix:
+#
+# * the NETWORK's - Google was unreachable, slow, or answered something other
+#   than 200. Expected on a bad day. Logged, never counted for /health.
+# * the OTHER END's bytes - a stylesheet that is not text, a file that is not a
+#   typeface. Logged, never counted.
+# * OURS - the reader, or whatever did the fetching, raised something a network
+#   does not raise. Counted (``blog.fonts``), so that a fault in this file does
+#   not pass for Google being away.
+#
+# And one rule for all three: the LOG and the NOTE carry what kind of thing
+# failed, never what it said. An exception's text is whatever the other end, or
+# a library quoting the other end, put in it - an address with its query, a
+# piece of a response body.
 
-    ``cfg`` is laid over the shipped settings, key by key, and held to the same
-    bounds the config file is (``blog_inbox.BOUNDS``). A value that is not
-    usable reads as the shipped one - a caller cannot switch a limit off by
-    handing in a bad number. ``None`` is the shipped settings."""
-    settings = blog_inbox.fonts()
-    if not isinstance(cfg, dict):
-        return settings
-    for key in settings:
-        raw = cfg.get(key)
-        if key == "enabled":
-            usable = isinstance(raw, bool)
-        elif key == "subsets":
-            # Only ever COMPARED with a stylesheet's labels, so any text will
-            # do: a name Google does not use simply matches nothing.
-            listed = raw if isinstance(raw, (list, tuple)) else ()
-            raw = [name for name in listed if isinstance(name, str)]
-            usable = bool(raw)
-        else:
-            low, high = blog_inbox.BOUNDS[("fonts", key)]
-            usable = isinstance(raw, int) and not isinstance(raw, bool) and low <= raw <= high
-        if usable:
-            settings[key] = raw
-    return settings
+# What a network raises. ``requests``' own exceptions are ``OSError``s, and so
+# are the standard library's timeouts, resets and TLS failures; urllib3's are
+# listed because one can escape ``requests`` while a body is being streamed.
+_NETWORK = (FetchError, OSError, requests.RequestException, urllib3.exceptions.HTTPError)
+
+
+def _where(doing, exc) -> str:
+    """For the log: what was being done, the exception's TYPE, and the last few
+    frames it came through, as ``file:line function``. Enough to find a fault;
+    never ``str(exc)``."""
+    frames = traceback.extract_tb(exc.__traceback__)[-4:]
+    trail = " < ".join(f"{os.path.basename(frame.filename)}:{frame.lineno} {frame.name}"
+                       for frame in reversed(frames))
+    return f"{doing}: {type(exc).__name__} at {trail or 'no frame'}"
 
 
 def _counted(count, one, many) -> str:
@@ -600,7 +667,8 @@ def _note(missed, copied, settings) -> str:
     """One sentence for the operator's screen, or ``""`` when nothing was lost.
 
     Every word is this module's and every number is a count or a setting.
-    Nothing here is ever taken from an exception, an address or a stylesheet."""
+    Nothing here is ever taken from an exception, an address or a stylesheet -
+    a typeface that was not copied is counted, never named."""
     reasons = []
     for key, one, many in (
             ("link", "link was not a Google Fonts stylesheet",
@@ -608,9 +676,17 @@ def _note(missed, copied, settings) -> str:
             ("link_over", "stylesheet was past the limit of {max_links}",
              "stylesheets were past the limit of {max_links}"),
             ("sheet", "stylesheet could not be fetched", "stylesheets could not be fetched"),
-            ("empty", "stylesheet offered nothing in the character sets copied here",
-             "stylesheets offered nothing in the character sets copied here"),
+            ("garbled", "stylesheet was not readable text",
+             "stylesheets were not readable text"),
+            ("reader", "stylesheet made the reader fail", "stylesheets made the reader fail"),
+            ("empty", "stylesheet held no typefaces", "stylesheets held no typefaces"),
+            ("family", "typeface was not copied because it is not offered in the character "
+                       "sets copied here",
+             "typefaces were not copied because they are not offered in the character sets "
+             "copied here"),
             ("rule", "typeface rule was not usable", "typeface rules were not usable"),
+            ("rule_over", "typeface rule was past the limit of {max_rules}",
+             "typeface rules were past the limit of {max_rules}"),
             ("file", "file could not be fetched or was not a typeface",
              "files could not be fetched or were not typefaces"),
             ("file_over", "file was past the limit of {max_files}",
@@ -645,11 +721,19 @@ class _Copy:
         self.deadline = clock() + settings["total_sec"]
         self.missed = Counter()
         self.files = {}
+        self.named = set()            # every family any stylesheet named
+        self.offered = set()          # ... those with a block in a copied character set
 
     def run(self, font_links) -> Fonts:
         faces = []
         for link in self._links(font_links):
             faces += self._sheet(link)
+        # A family with NO block in a copied character set: an icon font is the
+        # common one (its blocks are labelled "fallback"). Counted across all
+        # the stylesheets, by name, so a family two of them ask for is one. A
+        # family that keeps its latin blocks and loses its cyrillic ones is the
+        # ordinary case and is not here.
+        self.missed["family"] = len(self.named - self.offered)
         css = "\n".join(self._rules(faces))
         if not _written_here(css):
             # A reader wrote something the pattern does not describe. That is a
@@ -680,22 +764,32 @@ class _Copy:
         """The bytes at ``url``, ``None`` when they could not be had, ``_LATE``
         when the copy's time ran out before the request was made.
 
-        Whatever ``fetch`` raises is caught: it is injected, and "the network
-        failed" has more spellings than any list of exception types. Whatever
-        it returns is measured: a ``fetch`` that ignored ``max_bytes`` does not
-        get to hand over more than that."""
+        What ``fetch`` raises is sorted, not just caught (see "saying what went
+        wrong"): a network's failure is logged; anything else is a fault in
+        whatever did the fetching and is counted as well. Either way the
+        answer is ``None`` - to the operator the file was not fetched.
+        ``MemoryError`` is neither, and goes on up.
+
+        What ``fetch`` returns is measured: one that ignored ``max_bytes`` does
+        not get to hand over more than that."""
         left = self.deadline - self.clock()
         if left <= 0:
             self.missed["time"] = 1
             return _LATE
         try:
-            data = self.fetch(url, headers={"User-Agent": USER_AGENT},
+            data = self.fetch(url, headers={"User-Agent": self.settings["user_agent"]},
                               timeout=min(self.settings["timeout_sec"], left),
                               max_bytes=max_bytes)
-        except Exception as exc:
+        except MemoryError:
+            raise
+        except _NETWORK as exc:
             # The type always; the text only when it is this module's own.
             said = exc if isinstance(exc, FetchError) else type(exc).__name__
             log.warning("typeface %s not fetched: %s", what, said)
+            return None
+        except Exception as exc:
+            _degrade.degraded("blog.fonts", detail=_where(f"fetching a {what}", exc),
+                              exc_info=False)
             return None
         if not isinstance(data, (bytes, bytearray)) or len(data) > max_bytes:
             log.warning("typeface %s not usable: not bytes, or over its size limit", what)
@@ -703,24 +797,40 @@ class _Copy:
         return bytes(data)
 
     def _sheet(self, link) -> list:
-        """The usable faces of one stylesheet; ``[]`` when it failed."""
+        """The usable faces of one stylesheet; ``[]`` when there are none, for
+        whichever of four reasons - each with its own count."""
         data = self._get(link, self.settings["max_css_kb"] * 1024, "stylesheet")
         if data is _LATE:
             return []
         if data is None:
-            self.missed["sheet"] += 1
+            self.missed["sheet"] += 1               # not fetched
             return []
         try:
             # "utf-8-sig": a byte-order mark left in is a character CSS reads
             # as the start of a name, and the first block would be swallowed.
-            faces, unusable = _faces(data.decode("utf-8-sig"), self.subsets)
-        except Exception as exc:        # not UTF-8, or nested past what the parser takes
-            log.warning("typeface stylesheet not readable: %s", type(exc).__name__)
-            self.missed["sheet"] += 1
+            text = data.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            log.warning("typeface stylesheet not usable: not UTF-8 text")
+            self.missed["garbled"] += 1             # fetched, and not text
+            return []
+        try:
+            faces, unusable, named, offered = _faces(text, self.subsets)
+        except MemoryError:
+            raise
+        except Exception as exc:
+            # The READER failed: a fault here, not a failure out there. Measured:
+            # a number 4,301 digits long makes tinycss2 raise ValueError (Python
+            # will not turn that many digits into an int), and the tokenizer
+            # reads the whole stylesheet before any block can be looked at.
+            _degrade.degraded("blog.fonts", detail=_where("reading a stylesheet", exc),
+                              exc_info=False)
+            self.missed["reader"] += 1
             return []
         self.missed["rule"] += unusable
-        if not faces and not unusable:
-            self.missed["empty"] += 1
+        self.named |= named
+        self.offered |= offered
+        if not named and not unusable:
+            self.missed["empty"] += 1               # read, and no typeface in it
         return faces
 
     def _file(self, url):
@@ -741,16 +851,28 @@ class _Copy:
         return name
 
     def _rules(self, faces) -> list:
-        """The rules to write, in the order of ``faces``, each once.
+        """The rules to write, in the order of ``faces``, each once, at most
+        ``max_rules`` of them.
 
         Each address is asked for ONCE, however many blocks name it (a variable
         face asked for by weight comes back as one block per weight, all naming
         one file) and whether or not it worked. ``max_files`` counts those
         requests, not the files that came of them: it bounds the work done for
         one entry, and a stylesheet whose first files all fail does not get the
-        limit again in tries."""
-        names, over, rules = {}, set(), []
+        limit again in tries.
+
+        ``max_rules`` is the other bound, and ``max_files`` cannot stand in for
+        it: 5,088 blocks naming one file were 5,088 rules. Once the rules are
+        full, a block whose file has not been asked for costs no request."""
+        names, over, rules, past = {}, set(), {}, 0
         for face in faces:
+            name = names.get(face.url)
+            if len(rules) >= self.settings["max_rules"]:
+                # Past the limit unless it is a rule already written (two
+                # stylesheets asking for one face) or its file had failed.
+                if face.url not in names or (name and face.rule(name) not in rules):
+                    past += 1
+                continue
             if face.url not in names:
                 if self.missed["time"]:
                     continue
@@ -761,51 +883,84 @@ class _Copy:
                 if name is _LATE:
                     continue
                 names[face.url] = name
-            if names[face.url]:
-                rules.append(face.rule(names[face.url]))
+            if name:
+                rules[face.rule(name)] = None       # a dict as an ordered set
         self.missed["file_over"] = len(over)
-        return list(dict.fromkeys(rules))
+        self.missed["rule_over"] = past
+        return list(rules)
 
 
 def localize(font_links, *, fetch=http_fetch, cfg=None, clock=None) -> Fonts:
-    """The typefaces ``font_links`` ask for, copied. NEVER raises.
+    """The typefaces ``font_links`` ask for, copied.
+
+    **It never raises an ordinary exception** - nothing that is an
+    ``Exception``, with one exception named below. A link or a file that fails
+    costs only itself. A fault in here costs the whole copy - the entry keeps
+    its fallback fonts - and is counted for ``/health`` (``blog.fonts``),
+    because a crash should not look like a slow network.
+
+    What DOES get out, on purpose:
+
+    * ``KeyboardInterrupt``, ``SystemExit`` and every other ``BaseException``
+      that is not an ``Exception``: a shutdown must not be turned into "one
+      stylesheet could not be fetched" and the service carry on.
+    * ``MemoryError``, which is an ``Exception`` and is let through anyway: a
+      process that is out of memory is not one whose next step can be trusted.
+
+    ``RecursionError`` is NOT let through: it means the reader ran out of
+    stack on one stylesheet, which costs that stylesheet and is counted.
 
     ``font_links`` is ``Cleaned.font_links``. ``fetch`` is called as
     ``fetch(url, headers=..., timeout=..., max_bytes=...)`` and returns bytes;
-    it is a parameter because the suite cannot reach the network. ``cfg`` is
-    laid over ``blog_inbox.fonts()`` (see ``_settings``); ``clock`` is
-    ``time.monotonic``.
+    it is a parameter because the suite cannot reach the network. ``cfg`` is a
+    table laid over the file's ``[fonts]`` settings and read by the same rules
+    (``blog_inbox.fonts(cfg)``); ``clock`` is ``time.monotonic``.
 
     The result is deterministic: the same links and the same bytes give the
     same rules, byte for byte, in the links' order and then each stylesheet's
     own. ``Fonts.files`` is what the store writes under ``blog/fonts/``;
-    ``Fonts.css`` goes to ``apply``; ``Fonts.note`` goes on the draft.
-
-    A link or a file that fails costs only itself. A bug in here costs the
-    whole copy - the entry keeps its fallback fonts - and is counted for
-    ``/health`` (``blog.fonts``), because a crash should not look like a slow
-    network."""
+    ``Fonts.css`` goes to ``apply``; ``Fonts.note`` goes on the draft."""
     try:
-        settings = _settings(cfg)
+        settings = blog_inbox.fonts(cfg)
         if not settings["enabled"]:
             return Fonts("", {}, "")
         return _Copy(fetch, settings, clock or monotonic).run(font_links)
-    except Exception:
-        _degrade.degraded("blog.fonts")
+    except MemoryError:
+        raise
+    except Exception as exc:
+        _degrade.degraded("blog.fonts", detail=_where("copying typefaces", exc), exc_info=False)
         return Fonts("", {}, _note(Counter(error=1), {}, {}))
 
 
-# The mark exactly as the cleaner writes it: the whole text of a ``<style>``.
+# The slot, exactly as the cleaner writes it: the whole text of a ``<style>``.
 _SLOT = f"<style>{clean.FONT_CSS_MARK}</style>"
+# ... and where the cleaner writes it: straight after the title, in the head
+# every cleaned document opens with (``clean._document``). An attribute value
+# there holds no ``"``, ``<`` or ``>`` and a title no ``<`` or ``>`` - the
+# cleaner escapes them - so between the first character and the slot there is
+# nowhere for a comment, an attribute or another element to be hiding.
+_OPENING_RE = re.compile(
+    r'<!doctype html><html(?: [a-z][a-z0-9._-]*="[^"<>]*")*><head><meta charset="utf-8">'
+    r'<meta name="viewport" content="width=device-width, initial-scale=1">'
+    r"<title>[^<>]*</title>")
 
 
 def apply(html, fonts: Fonts) -> str:
-    """``html`` with its font mark replaced by ``fonts.css``.
+    """``html`` with its font slot filled with ``fonts.css``.
 
-    The mark is in a cleaned document exactly once, as the whole text of a
-    ``<style>``. A document where that is not so - no mark, two, or one that is
-    somewhere else - is not one ``clean`` wrote, and comes back UNCHANGED: this
-    does not guess where rules might go.
+    The slot is where ``clean`` puts it and nowhere else: ``html`` must open
+    with the cleaner's own head (``_OPENING_RE``), the marked ``<style>`` must
+    come straight after the title, and the mark must be nowhere else in the
+    document. Anything else comes back UNCHANGED - no slot, two, or text that
+    only looks like one in an attribute, a comment, a ``<textarea>`` or the
+    body, where a paste would be read as something other than a stylesheet.
+    This does not guess where rules might go, and a document it will not fill
+    is not one ``clean`` wrote.
+
+    ⚠ So this is tied to the cleaner's shell. If ``clean._document`` changes
+    what it writes before the slot, every document comes back unfilled, which
+    looks just like an entry that asked for no typefaces.
+    ``test_every_document_the_cleaner_writes_is_filled`` is what would say so.
 
     ``fonts.css`` is checked again here (``_written_here``). Rules that are not
     of this module's own shape go in as nothing, and that is counted: nothing
@@ -813,10 +968,14 @@ def apply(html, fonts: Fonts) -> str:
 
     ⚠ Do not ``clean`` the result. The cleaner drops every ``@font-face`` it
     meets, these included."""
-    if not isinstance(html, str) or html.count(clean.FONT_CSS_MARK) != 1 or _SLOT not in html:
+    if not isinstance(html, str) or html.count(clean.FONT_CSS_MARK) != 1:
+        return html
+    opening = _OPENING_RE.match(html)
+    if opening is None or not html.startswith(_SLOT, opening.end()):
         return html
     css = fonts.css if isinstance(fonts, Fonts) else None
     if not _written_here(css):
         _degrade.degraded("blog.fonts", detail="rules refused at apply", exc_info=False)
         css = ""
-    return html.replace(clean.FONT_CSS_MARK, css)
+    at = opening.end()
+    return f"{html[:at]}<style>{css}</style>{html[at + len(_SLOT):]}"

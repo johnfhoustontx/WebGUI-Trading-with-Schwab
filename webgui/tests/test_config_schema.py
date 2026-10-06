@@ -613,6 +613,77 @@ def test_a_blog_value_at_either_bound_is_one_the_loader_uses(monkeypatch):
                 cs.parse(fld, outside)
 
 
+def test_the_blog_user_agent_is_refused_here_exactly_when_the_loader_would_ignore_it(monkeypatch):
+    """A text field has no bounds in the catalogue, and ``shared.blog_inbox``
+    reads a User-Agent that could not be a request header as the shipped one,
+    with no sign on this page. So the form must refuse what the loader would
+    ignore, and what the form accepts must be what the service then sends."""
+    from shared import blog_inbox
+    cfg = cs.BY_NAME["blog.toml"]
+    _sec, fld = cs.locate(cfg, ("fonts", "user_agent"))
+    assert fld.kind == "text" and not fld.optional and not fld.blank_ok
+    assert "woff2" in fld.help                      # says WHEN to change it
+    low, high = blog_inbox.USER_AGENT_CHARS
+    newer = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+             "(KHTML, like Gecko) Chrome/160.0.0.0 Safari/537.36")
+    for good in (blog_inbox.DEFAULTS["fonts"]["user_agent"], newer, "x" * low, "x" * high,
+                 "  " + newer + "  "):                 # the form trims; the loader would refuse
+        saved = cs.parse(fld, good)
+        monkeypatch.setattr(blog_inbox, "load", lambda v=saved: {"fonts": {"user_agent": v}})
+        assert blog_inbox.fonts()["user_agent"] == saved == good.strip()
+    line_break, e_acute, delete = chr(0x0A), chr(0xE9), chr(0x7F)
+    for ch in (line_break, e_acute, delete):
+        assert len(ch) == 1
+    for bad in ("", "curl", "x" * (low - 1), "x" * (high + 1), newer + e_acute,
+                "Mozilla/5.0 (Windows NT 10.0)" + line_break + "X-Injected: 1",
+                "Mozilla/5.0 (Windows NT 10.0)" + delete + "Chrome"):
+        with pytest.raises(ValueError):
+            cs.parse(fld, bad)
+        monkeypatch.setattr(blog_inbox, "load", lambda v=bad: {"fonts": {"user_agent": v}})
+        assert blog_inbox.fonts()["user_agent"] == blog_inbox.DEFAULTS["fonts"]["user_agent"]
+
+
+def test_no_other_text_field_is_held_to_the_user_agent_rule():
+    """The refusal is keyed on the blog file's one field, as the API-key
+    refusal is keyed on the calendar's: a feed's name is two words."""
+    news = cs.BY_NAME["news.toml"]
+    _sec, fld = cs.locate(news, ("collector", "feed_user_agent"))
+    assert cs.parse(fld, "curl") == "curl"
+
+
+def test_every_shipped_blog_number_sits_on_its_fields_step():
+    """The number input is given ``step`` and no ``min`` (pages/config_editor:
+    Quasar would clamp silently), so the browser's arrows walk a grid that
+    starts at 0, not at the field's lowest value. Nothing here snaps a typed
+    value to it. A shipped value off that grid would jump the first time an
+    arrow was pressed - 30 to 31, say - so each ships ON it."""
+    from shared import blog_inbox
+    cfg = cs.BY_NAME["blog.toml"]
+    for sec in cfg.sections:
+        for f in sec.fields:
+            if f.kind != "int":
+                continue
+            table, key = cs.split_key(f.key)
+            assert f.step and blog_inbox.DEFAULTS[table][key] % f.step == 0, f.key
+
+
+def test_the_typeface_help_says_what_actually_happens():
+    """Three sentences that were not true, or not said, when this was first
+    written (found by review)."""
+    cfg = cs.BY_NAME["blog.toml"]
+    help_of = {f.key: f.help for sec in cfg.sections for f in sec.fields}
+    # A name Google does not use is KEPT and matches nothing; only a name that
+    # is not shaped like one is ignored. And icon fonts have a label of their own.
+    assert "not one of Google's is ignored" not in help_of["fonts.subsets"]
+    assert "matches nothing" in help_of["fonts.subsets"]
+    assert "fallback" in help_of["fonts.subsets"]
+    # The limit counts requests, so a file that fails still uses one up.
+    assert "fail" in help_of["fonts.max_files"]
+    # The copy holds the queue: a request waiting behind it can expire.
+    assert "expire" in help_of["fonts.total_sec"]
+    assert "rules" in help_of["fonts.max_rules"]
+
+
 def test_the_blog_file_restarts_the_blog_service_and_nothing_else():
     cfg = cs.BY_NAME["blog.toml"]
     assert cs.BLOG == "blog_svc"

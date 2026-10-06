@@ -169,12 +169,26 @@ DEFAULTS = {
         "max_css_kb": 256,
         "max_files": 24,
         "max_file_kb": 400,
+        # The @font-face rules written into one entry, across all its
+        # stylesheets. ``max_files`` does not bound this: many rules can name
+        # one file (a variable face asked for by weight is one rule per weight),
+        # and the rules are pasted into the entry AFTER its own size limit was
+        # applied. 96 is three families in four weights, upright and italic, in
+        # four character sets.
+        "max_rules": 96,
         # Seconds one request may take, and seconds ALL of an entry's requests
         # may take together. The second is the one that protects the queue: 24
         # files timing out one after another at 10 s each would hold the
         # service for four minutes, twice ``[limits] max_wait_sec``.
         "timeout_sec": 10,
         "total_sec": 30,
+        # Who the service says it is when it asks Google Fonts. Google chooses
+        # what to send by who is asking: a client it does not know is sent
+        # TrueType with no character-set split, a desktop Chrome is sent woff2.
+        # It ages. If drafts start saying their typeface rules were not usable,
+        # put a current Chrome's User-Agent here; that needs no code change.
+        "user_agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                       "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"),
     },
 }
 
@@ -212,6 +226,7 @@ BOUNDS = {
     ("fonts", "max_css_kb"): (16, 2048),
     ("fonts", "max_files"): (1, 200),
     ("fonts", "max_file_kb"): (1, 4096),
+    ("fonts", "max_rules"): (1, 1000),
     ("fonts", "timeout_sec"): (1, 60),
     ("fonts", "total_sec"): (1, 600),
 }
@@ -223,6 +238,13 @@ BOUNDS = {
 _SUBSET_RE = SLUG_RE
 _SUBSET_CHARS = 32
 _MAX_SUBSETS = 16
+
+# ``(shortest, longest)`` a User-Agent may be, in characters. It is sent as a
+# request header, so beyond its length it must be printable ASCII (no line
+# break can start a second header) with no space at either end (``requests``
+# refuses a header value that starts with one). The Settings catalogue refuses
+# the same things, and a test pins the two to each other.
+USER_AGENT_CHARS = (20, 300)
 
 # ``reset_cache``, as every other config module here names its own.
 load, reset_cache = toml_loader(BLOG_TOML, DEFAULTS, label="blog.toml")
@@ -236,19 +258,24 @@ def _section(name) -> dict:
     return table if isinstance(table, dict) else {}
 
 
-def _bounded(section, key):
-    """A config number of the default's own type inside its ``BOUNDS``, or the
-    default. A bool is refused (``True`` is an int and would read as 1), and so
-    are nan and inf, which TOML accepts and ``int()`` raises on."""
-    default = DEFAULTS[section][key]
+def _number(raw, section, key, otherwise):
+    """``raw`` as a number of the default's own type inside its ``BOUNDS``, or
+    ``otherwise``. A bool is refused (``True`` is an int and would read as 1),
+    and so are nan and inf, which TOML accepts and ``int()`` raises on. A float
+    for a whole-number setting is cut to one (59.5 seconds is 59)."""
     low, high = BOUNDS[(section, key)]
-    raw = _section(section).get(key, default)
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-        return default
+        return otherwise
     if not math.isfinite(raw):
-        return default
-    value = type(default)(raw)
-    return value if low <= value <= high else default
+        return otherwise
+    value = type(DEFAULTS[section][key])(raw)
+    return value if low <= value <= high else otherwise
+
+
+def _bounded(section, key):
+    """The file's number for ``key``, or the shipped one (see ``_number``)."""
+    default = DEFAULTS[section][key]
+    return _number(_section(section).get(key, default), section, key, default)
 
 
 def _flag(section, key) -> bool:
@@ -268,29 +295,61 @@ def site() -> dict:
             "republish_min": _bounded("site", "republish_min")}
 
 
-def fonts() -> dict:
-    """The validated ``[fonts]`` table.
+def _subsets(raw) -> list:
+    """The usable names in ``raw``, each once, in order; ``[]`` when there are
+    none. Usable is the SHAPE of a name (lower-case words joined by single
+    hyphens). Whether Google uses it is not asked: there is no list of its
+    names to ask, and one it does not use simply matches no stylesheet."""
+    kept = []
+    for item in raw if isinstance(raw, (list, tuple)) else ():
+        if (isinstance(item, str) and len(item) <= _SUBSET_CHARS
+                and _SUBSET_RE.match(item) and item not in kept):
+            kept.append(item)
+        if len(kept) == _MAX_SUBSETS:
+            break
+    return kept
+
+
+def _is_user_agent(raw) -> bool:
+    """Whether ``raw`` can be sent as a User-Agent header (``USER_AGENT_CHARS``)."""
+    low, high = USER_AGENT_CHARS
+    return (isinstance(raw, str) and low <= len(raw) <= high
+            and all(" " <= ch <= "~" for ch in raw) and raw == raw.strip(" "))
+
+
+def _fonts_from(table, otherwise) -> dict:
+    """``table`` read as a ``[fonts]`` table, key by key. A key that is absent
+    or not usable reads as ``otherwise[key]``. The ONE reading of these
+    settings: the file's and a caller's both come through here."""
+    out = {}
+    for key in DEFAULTS["fonts"]:
+        raw, fallback = table.get(key), otherwise[key]
+        if key == "enabled":
+            out[key] = raw if isinstance(raw, bool) else fallback
+        elif key == "subsets":
+            out[key] = _subsets(raw) or list(fallback)
+        elif key == "user_agent":
+            out[key] = raw if _is_user_agent(raw) else fallback
+        else:
+            out[key] = _number(raw, "fonts", key, fallback)
+    return out
+
+
+def fonts(over=None) -> dict:
+    """The validated ``[fonts]`` table. A fresh dict on every call.
 
     ``subsets`` keeps each usable name once, in the file's order, and drops the
     rest. A list with NOTHING usable in it - empty included - reads as the
     shipped list: copying no typefaces is what ``enabled = false`` is for, and
-    it says so on the page."""
-    raw = _section("fonts").get("subsets")
-    subsets = []
-    for item in raw if isinstance(raw, list) else ():
-        if (isinstance(item, str) and len(item) <= _SUBSET_CHARS
-                and _SUBSET_RE.match(item) and item not in subsets):
-            subsets.append(item)
-        if len(subsets) == _MAX_SUBSETS:
-            break
-    return {"enabled": _flag("fonts", "enabled"),
-            "subsets": subsets or list(DEFAULTS["fonts"]["subsets"]),
-            "max_links": _bounded("fonts", "max_links"),
-            "max_css_kb": _bounded("fonts", "max_css_kb"),
-            "max_files": _bounded("fonts", "max_files"),
-            "max_file_kb": _bounded("fonts", "max_file_kb"),
-            "timeout_sec": _bounded("fonts", "timeout_sec"),
-            "total_sec": _bounded("fonts", "total_sec")}
+    it says so on the page.
+
+    ``over`` is a caller's own table (``blog_svc.fonts.localize(cfg=...)``),
+    laid over the FILE's settings and read by the same rules: a key it leaves
+    out, or gives a value the file could not have held, keeps the file's. So a
+    caller cannot switch one of the operator's limits off by handing in a bad
+    number, and the two can never disagree about what a usable value is."""
+    read = _fonts_from(_section("fonts"), DEFAULTS["fonts"])
+    return _fonts_from(over, read) if isinstance(over, dict) else read
 
 
 # ── validation ───────────────────────────────────────────────────────────────

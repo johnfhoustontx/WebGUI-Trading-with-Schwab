@@ -30,7 +30,9 @@ import time
 from urllib.parse import urlsplit
 
 import pytest
+import requests
 import tinycss2
+import urllib3
 from tinycss2.serializer import serialize_string_value
 
 from services import _degrade
@@ -108,7 +110,9 @@ def sheet(*blocks) -> bytes:
 class Web:
     """The fake ``fetch``: a dict of address -> what to hand back. An exception
     is raised, anything else is returned AS IT IS (so a test can hand back a
-    string, a number or ``None``); an address not in the dict raises."""
+    string, a number or ``None``). An address not in the dict fails the way a
+    network does (``OSError``): a failure of the other end, which is not
+    counted as a fault of this service's - a ``KeyError`` would be."""
 
     def __init__(self, pages):
         self.pages = dict(pages)
@@ -117,6 +121,8 @@ class Web:
     def __call__(self, url, *, headers, timeout, max_bytes):
         self.calls.append({"url": url, "headers": headers, "timeout": timeout,
                            "max_bytes": max_bytes})
+        if url not in self.pages:
+            raise OSError("no such page")
         answer = self.pages[url]
         if isinstance(answer, BaseException):
             raise answer
@@ -416,8 +422,9 @@ def test_a_stylesheet_with_nothing_in_the_copied_character_sets_says_so():
     web = Web({LINK: sheet(face("cyrillic", G + "c.woff2"), face("greek", G + "g.woff2"))})
     result = audit(fonts.localize([LINK], fetch=web))
     assert result.css == "" and result.files == {} and web.urls == [LINK]
-    assert result.note.startswith("No typefaces were copied")
-    assert "1 stylesheet offered nothing in the character sets copied here" in result.note
+    assert result.note == ("No typefaces were copied, so the entry is shown in its fallback "
+                           "fonts: 1 typeface was not copied because it is not offered in the "
+                           "character sets copied here.")
 
 
 def test_a_block_with_a_second_url_is_dropped():
@@ -833,10 +840,27 @@ class Loud(Exception):
         return "SECRET https://evil.test/?token=abc <script>"
 
 
-FAILURES = [OSError("connection refused"), TimeoutError(), ValueError("bad"), Loud(),
-            RuntimeError("x"), KeyError("y"), MemoryError(), RecursionError(),
-            UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad"), fonts.FetchError("HTTP 500"),
-            ZeroDivisionError()]
+# What a network does. The other end's failure, so NOT counted for /health: a
+# day when Google is unreachable must not look like a fault in this service.
+NETWORK_FAILURES = [
+    OSError("connection refused"), TimeoutError(), ConnectionResetError(),
+    fonts.FetchError("HTTP 500"), requests.exceptions.ConnectionError("x"),
+    requests.exceptions.ReadTimeout(), requests.exceptions.ChunkedEncodingError(),
+    requests.exceptions.SSLError(), urllib3.exceptions.ProtocolError("x")]
+# What a network does not do: a fault in whatever did the fetching. The
+# operator's sentence is the same - the stylesheet was not fetched - and each
+# one IS counted. (``MemoryError`` is in neither list: it is not swallowed at
+# all, see ``test_what_must_stop_the_process_is_never_swallowed``.)
+FAULTS = [ValueError("bad"), Loud(), RuntimeError("x"), KeyError("y"), RecursionError(),
+          UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad"), ZeroDivisionError(), TypeError(),
+          AttributeError("x")]
+FAILURES = NETWORK_FAILURES + FAULTS
+
+
+def counted(failure, times=1) -> dict:
+    """What ``_degrade.counts()`` should read after ``failure`` happened
+    ``times`` times."""
+    return {"blog.fonts": times} if any(failure is fault for fault in FAULTS) else {}
 
 
 @pytest.mark.parametrize("failure", FAILURES, ids=lambda exc: type(exc).__name__)
@@ -844,9 +868,12 @@ def test_a_failed_fetch_never_raises_and_says_so(failure):
     """The stylesheet cannot be had: no typefaces, one plain sentence, and
     nothing of the exception in it."""
     web = Web({LINK: failure})
+    _degrade.reset()
     result = audit(fonts.localize([LINK], fetch=web))
     assert result == fonts.Fonts("", {}, "No typefaces were copied, so the entry is shown in "
                                  "its fallback fonts: 1 stylesheet could not be fetched.")
+    assert _degrade.counts() == counted(failure)
+    _degrade.reset()
 
 
 @pytest.mark.parametrize("answer", [
@@ -871,11 +898,14 @@ def test_a_failure_part_way_keeps_what_was_already_copied(failure):
                 face("latin", G + "d.woff2", weight="700"))
     web = Web({LINK: css, LINK_2: failure, G + "a.woff2": A, G + "b.woff2": B,
                G + "c.woff2": failure, G + "d.woff2": C})
+    _degrade.reset()
     result = audit(fonts.localize([LINK, LINK_2], fetch=web))
     assert result.css == "\n".join([rule(A), rule(B, weight="500"), rule(C, weight="700")])
     assert result.note == ("Some typefaces were not copied and are shown in a fallback font: "
                            "1 stylesheet could not be fetched, "
                            "1 file could not be fetched or was not a typeface.")
+    assert _degrade.counts() == counted(failure, times=2)
+    _degrade.reset()
 
 
 def test_the_note_never_carries_what_the_other_end_said():
