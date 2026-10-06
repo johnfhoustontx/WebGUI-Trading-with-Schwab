@@ -83,20 +83,17 @@ def test_a_crowded_tag_is_refused_without_a_process():
 
 # ── a slow document is killed ────────────────────────────────────────────────
 
-def _slow_document(n=40_000):
-    """A document whose PARSE is slow: one tag with tens of thousands of
-    attributes behind a brace, which libxml2 builds (the brace does not stop
-    it). ~128 KB parses in several seconds, well over a one-second limit. Fed
-    straight to _run_worker, which does not scan, so it stays slow whatever the
-    scan would later decide about it."""
-    return "<p { " + " ".join(f"a{i}" for i in range(n)) + ">t</p>"
+_SLEEPER = [sys.executable, "-c", "import sys,time; sys.stdin.buffer.read(); time.sleep(60)"]
 
 
-def test_the_real_worker_is_killed_on_overrun_and_leaves_no_child():
-    """The kill itself, through the real subprocess. Popen is wrapped ONLY for
-    the duration of the worker start - restored before ``_gone`` runs, since on
-    Windows ``_gone`` shells out to tasklist, which would itself go through a
-    still-installed spy."""
+def test_the_real_worker_is_killed_on_overrun_and_leaves_no_child(monkeypatch):
+    """The kill itself, through a real subprocess. The worker is replaced with a
+    process that reads stdin then sleeps - a worker that does not finish - so
+    the test does not depend on finding a document slow to PARSE (the scan now
+    refuses the obvious slow shapes before the worker ever runs). Popen is
+    wrapped only for the worker start; ``_gone`` on Windows shells out to
+    tasklist, which would otherwise go through a still-installed spy."""
+    monkeypatch.setattr(clean_bound, "_WORKER", tuple(_SLEEPER))
     pids = []
     real_popen = clean_bound.subprocess.Popen
 
@@ -108,7 +105,7 @@ def test_the_real_worker_is_killed_on_overrun_and_leaves_no_child():
     started = time.perf_counter()
     clean_bound.subprocess.Popen = spy
     try:
-        ran = clean_bound._run_worker(_slow_document().encode("utf-8"), timeout=1)
+        ran = clean_bound._run_worker(b"<p>never finishes</p>", timeout=1)
     finally:
         clean_bound.subprocess.Popen = real_popen
     elapsed = time.perf_counter() - started

@@ -32,7 +32,7 @@ def refusal(document, reason):
 
 def test_the_codes_are_a_fixed_short_list():
     assert clean.REFUSALS == ("empty", "not_text", "crowded_tag", "cut_off", "too_deep",
-                              "did_not_settle", "internal")
+                              "did_not_settle", "internal", "too_slow")
 
 
 def test_a_document_that_is_kept_has_no_reason():

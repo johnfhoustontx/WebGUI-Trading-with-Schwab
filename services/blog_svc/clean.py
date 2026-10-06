@@ -114,14 +114,14 @@ MAX_PASSES = 5
 # of an element's attributes (see ``_Pass._attrs``) - not to express a taste.
 MAX_ATTRS = 64
 
-# The most attribute names ONE tag may be written with before the document is
-# refused unread. libxml2 builds a tag's attribute list in quadratic time: one
-# tag with 85,000 distinct names - it fits in the 512 KB limit - held the parser
-# for 77 seconds, and ``MAX_ATTRS`` cannot help because the time is spent before
-# this module sees a tree. At 1,024 the worst a full-size document can cost is
-# well under a second, and that is some thirty times more attributes than any
-# honest tag has. A constant for the same reason as the other two; if it ever
-# needs moving, it belongs in ``[limits]`` beside ``max_html_kb``.
+# The most attribute names the pre-parse scan will read on ONE tag before it
+# refuses the document as an obvious crowded tag. It is NOT the cost bound -
+# the worker process's time limit is (see ``_start_tags`` and
+# ``clean_bound``) - only the threshold for the cheap first refusal. Set some
+# thirty times above any honest tag, so it refuses a blatant one (85,000
+# attributes, which parse in over a minute) without ever catching a real entry.
+# A constant for the same reason as the other two; if it ever needs moving, it
+# belongs in ``[limits]`` beside ``max_html_kb``.
 MAX_TAG_ATTRS = 1024
 
 
@@ -733,57 +733,66 @@ def _css(source, found, where) -> str:
 
 # ── the text, before it is parsed ────────────────────────────────────────────
 #
-# Two things have to be read from the TEXT of a document, because by the time
-# there is a tree it is too late for one and too lossy for the other:
+# Two things are read from the TEXT of a document, because by the time there is
+# a tree it is too late for one and too lossy for the other:
 #
-# * how many attributes each tag is written with (``MAX_TAG_ATTRS``): the cost
-#   being bounded is the parser's own;
+# * an obvious crowded tag (more than ``MAX_TAG_ATTRS`` attributes), refused
+#   before a worker process is spent on it - a FAST FIRST pass, not the bound;
 # * the attributes of every ``<html>`` and ``<body>`` tag: libxml2 2.11 throws
 #   away those of a second one, and a file saved from claude.ai IS a second
 #   one - the artifact's own document inside the download wrapper's ``<body>``.
 #
-# ``_start_tags`` is one quote-aware pass yielding ``(name, attribute pairs)``
-# for every start tag. Whatever is inside quotes is ONE value however long (an
-# svg path, a style attribute). It does not have to agree with the parser about
-# every broken tag - only never to count fewer attributes than the parser will
-# build, and never to refuse an honest document. So a ``<`` that does not begin
-# a tag (``a < b``) is text.
+# ``_start_tags`` is one pass yielding ``(name, attribute pairs, foreign)`` for
+# every start tag. It is a FAST FIRST REFUSAL, not a bound: a document it passes
+# still goes to the worker process, which ``clean_bound`` kills at a time limit
+# (the design doc, "The cleaner runs in a worker process with a time limit").
+# Three rounds of review each found a shape where this scan and the parser read
+# the same bytes differently, because a linear pass cannot reproduce a stateful
+# HTML tokenizer; so it no longer tries to predict the parser's cost. What it
+# still does, cheaply and in-process, is refuse the OBVIOUS crowded tag before a
+# process is spent. Two rules keep it from doing harm:
 #
-# TWO things the scan must get right, and they pull against each other:
-#
-# * CROWDING must never UNDERCOUNT. Whatever tag the parser builds, the scan has
-#   to have counted at least as many attributes on it, on WHATEVER libxml2 is
-#   installed. So the scan skips NOTHING for crowding - not even ``<script>`` or
-#   ``<style>``, whose content 2.11 usually treats as raw text but, in some
-#   nestings (inside ``<math>``, after a stray ``</xmp>``), parses as markup and
-#   builds the tags in. Reading everything cannot undercount.
-# * ... without refusing an HONEST stylesheet. ``@media (400px<width){…}`` has a
-#   ``<width)`` that looks like a tag opener; read naively its "attributes"
-#   would be the whole rule block. A real start tag never contains an unquoted
-#   ``{`` or ``}`` before its ``>``, so a candidate that hits one is abandoned -
-#   the ``<`` was text - and the scan resumes after it. That one rule lets the
-#   scan read inside ``<style>`` safely instead of trusting it to be raw text.
-# * SHELL ADOPTION must never take ``<html>`` / ``<body>`` attributes from a tag
+# * The CROWDING count never LOWERS itself on a doubtful byte. An unquoted
+#   ``{``/``}`` (which a real start tag never holds before its ``>``) is a
+#   SKIPPED character, not a reason to abandon the candidate - so ``<p { a b
+#   c…>`` counts a, b, c and is refused, where an earlier version abandoned at
+#   the ``{`` and let the parser build them all.
+# * It must not REFUSE an honest document. The one place a legitimate ``<`` and
+#   ``{`` crowd together is CSS (``@media (400px<width){…}``), so ``<script>``
+#   and ``<style>`` content is skipped to the first matching close tag and not
+#   read as tags. That is best-effort: an exotic nesting where the parser builds
+#   tags inside one (``</xmp><math><script>…``) slips the scan and is left to the
+#   worker's timer. Preferring the honest document here is deliberate.
+# * SHELL ADOPTION must not take ``<html>`` / ``<body>`` attributes from a tag
 #   that is not the document's own - one inside a drawing, a title, a textarea,
 #   a template. Those are marked ``foreign`` and the shell ignores them; the
-#   crowding count still sees them.
+#   crowding count still sees them (the parser builds a crowded tag inside a
+#   ``<title>``, so the scan must too).
 
 # A start tag's name; OR an end tag, declaration (``<!...``) or instruction
 # (``<?...``), which carry no attributes and run to the next ``>``; OR a comment.
 _TAG_RE = re.compile(r"<(?:(!--)|([A-Za-z_:][^\s/>]*)|([/!?]))")
-# One attribute: the closing ``>``; OR an unquoted ``{``/``}`` that proves this
-# was never a tag (group 2); OR a name with an optional value.
+# One attribute: the closing ``>``; OR an unquoted ``{``/``}`` (group 2), which
+# a real start tag never holds, so it is skipped without ending the count; OR a
+# name with an optional value. Whatever is inside quotes is ONE value however
+# long (an svg path, a style attribute).
 _TAG_ATTR_RE = re.compile(
     r"""[\s/]*(?:(>)|([{}])|([^\s/>{}][^\s/>={}]*)(?:\s*=\s*(?:"([^"]*)"?|'([^']*)'?|([^\s>]*)))?)""")
 _COMMENT_END_RE = re.compile(r"--!?>")
 _END_NAME_RE = re.compile(r"</([A-Za-z][^\s/>]*)")
+# Skipped to their first close tag: the only two whose content is reliably raw
+# text, and the one place a legitimate ``<`` and ``{`` crowd (CSS). Best-effort
+# (see the block above). A body inside one is not read either, which is also
+# correct.
+_SKIP_CONTENT = {name: re.compile(rf"</{name}", re.I) for name in ("script", "style")}
 # Elements a ``<html>`` / ``<body>`` written inside is not the document's own:
 # foreign content, and the text-content elements the shell must not adopt from.
-# Marked ``foreign`` for the shell; their inner tags are still counted. A
-# ``<plaintext>`` has no end tag, so once open it keeps everything after it.
+# Marked ``foreign`` for the shell; their inner tags are still COUNTED for
+# crowding (the parser builds them). A ``<plaintext>`` has no end tag, so once
+# open it keeps everything after it.
 _SHELL_TRANSPARENT = frozenset(
     "svg math title textarea xmp noembed noframes listing plaintext desc "
-    "template iframe noscript select option script style".split())
+    "template iframe noscript select option".split())
 
 
 def _start_tags(text):
@@ -792,9 +801,9 @@ def _start_tags(text):
     is inside content a browser does not read as the document body.
 
     ⚠ A tag with more than ``MAX_TAG_ATTRS`` attributes yields its name with
-    the list ``None`` and nothing after it: libxml2 builds a tag's attribute
-    list in quadratic time, so this one is a cost to refuse without parsing, and
-    the scan stops at it rather than reading on."""
+    the list ``None`` and nothing after it: the scan stops there, so the fast
+    refusal is returned without reading on."""
+    skipped = set()                 # skippable elements known to have no close ahead
     transparent = []                # the open shell-transparent elements, by name
     at = 0
     while True:
@@ -804,8 +813,8 @@ def _start_tags(text):
         at = tag.end()
         if tag.group(3):            # an end tag, a declaration (<!…), or an instruction (<?…)
             # Do NOT skip to the next ">": where libxml2 ends these varies by
-            # nesting, and skipping past a tag it DID build would undercount the
-            # crowding guard. Step past just the "<" and read on; a real tag the
+            # nesting, and skipping past a tag it DID build would lower the
+            # crowding count. Step past just the "<" and read on; a real tag the
             # parser builds inside gets counted. An end tag's name is read, only
             # to pop the shell-transparent stack.
             if tag.group(3) == "/":
@@ -827,26 +836,31 @@ def _start_tags(text):
             at = end.end()
             continue
         name = tag.group(2).lower()
-        pairs, count, abandoned = [], 0, False
+        pairs, crowded = [], False
         while True:
             attr = _TAG_ATTR_RE.match(text, at)
             if attr is None:        # the text ended inside the tag
                 return
             at = attr.end()
-            if attr.group(2):       # "{" or "}": no real start tag has one before its ">"
-                abandoned = True
-                break
+            if attr.group(2):       # "{" or "}": skipped, the count carries on
+                continue
             if attr.group(1):       # ">"
                 break
-            count += 1
-            if count > MAX_TAG_ATTRS:
-                yield name, None, bool(transparent)
-                return
             pairs.append((attr.group(3).lower(), attr.group(4) or attr.group(5) or attr.group(6) or ""))
-        if abandoned:               # the "<" was text; resume after the brace
-            continue
+            if len(pairs) > MAX_TAG_ATTRS:
+                crowded = True
+                break
+        if crowded:
+            yield name, None, bool(transparent)
+            return
         yield name, pairs, bool(transparent)
-        if name in _SHELL_TRANSPARENT:
+        if name in _SKIP_CONTENT and name not in skipped:
+            end = _SKIP_CONTENT[name].search(text, at)
+            if end is None:
+                skipped.add(name)   # a thousand unclosed openers are one search, not a thousand
+            else:
+                at = end.start()
+        elif name in _SHELL_TRANSPARENT:
             transparent.append(name)
 
 
