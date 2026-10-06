@@ -153,6 +153,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#portfolio">Portfolio</a></li>
 <li><a href="#eod-report">EOD Report</a></li>
 <li><a href="#post-to-x">Post to X</a></li>
+<li><a href="#blog">Blog</a></li>
 <li><a href="#user-manuals">User Manuals</a></li>
 </ul>
 </li>
@@ -279,7 +280,7 @@ just click <strong>Authorize</strong> again.</p>
 </ul>
 <h2 id="ports-the-app-uses">Ports the app uses</h2>
 <p>The app runs entirely on your own machine and needs these local ports free:
-<strong>6379</strong> (Redis), <strong>8100</strong> (Schwab gateway), <strong>8210–8213</strong>, <strong>8215</strong> and <strong>8216</strong> (the six services),
+<strong>6379</strong> (Redis), <strong>8100</strong> (Schwab gateway), <strong>8210–8213</strong> and <strong>8215–8217</strong> (the seven services),
 <strong>8500</strong> (the web app) and <strong>8501</strong> (the public live screens). If another program
 is already using one of them, the matching piece won't start.</p>
 <hr />
@@ -297,7 +298,7 @@ all together with one of the launcher scripts in the project root:</p>
 <tbody>
 <tr>
 <td><code>systemctl --user start trading-prod.target</code></td>
-<td>Starts the gateway, the six domain services, the web app and the public live screens.</td>
+<td>Starts the gateway, the seven services, the web app and the public live screens.</td>
 </tr>
 <tr>
 <td><code>systemctl --user list-units 'trading-prod*'</code></td>
@@ -445,8 +446,8 @@ rather than the moment you open the menu. The screen behind it is always live.</
 <li><strong>Schwab gateway (proxy)</strong> — handles the Schwab connection and market data.
   Everything else depends on it. <strong>It must be running first</strong> (the launcher
   handles ordering for you).</li>
-<li><strong>Six domain services</strong> — Sentiment, Options, Portfolio, Trade, Market and
-  News. Each one powers its matching page(s).</li>
+<li><strong>Seven services</strong> — Sentiment, Options, Portfolio, Trade, Market, News and
+  Blog. Each one powers its matching page(s).</li>
 <li><strong>The public live screens</strong> — a second, read-only copy of the web app serving
   <code>live.neuralstrike.co</code>. See <em>The public live screens</em> above.</li>
 <li><strong>Redis</strong> — a local data backbone the services and the web app share.</li>
@@ -464,7 +465,7 @@ launcher, or restart the specific service from the <strong>System Status</strong
 <p>Use <strong>Stop All Services</strong> at the foot of the rail — it asks for your
 authenticator code before it will do anything — or run
 <code>systemctl --user stop trading-prod.target</code>. This stops the
-gateway, the six services, the web app <strong>and the public live screens</strong> — so the
+gateway, the seven services, the web app <strong>and the public live screens</strong> — so the
 public site goes dark until you start the stack again. (Redis is intentionally
 left running — it is a <em>system</em> service the app's own units cannot reach.)</p>
 <hr />
@@ -585,7 +586,7 @@ and <strong>Symbol</strong> (one screen about one ticker).</p>
 </tr>
 <tr>
 <td><strong>More</strong> (group)</td>
-<td>EOD Report · User Manuals</td>
+<td>EOD Report · Post to X · Blog · User Manuals</td>
 </tr>
 </tbody>
 </table>
@@ -3150,6 +3151,59 @@ neuralstrike.co link) are built into the page, and it does not read
 <code>x.hashtags.marketing</code>. <code>max_tags</code> caps how many hashtags any post carries, and
 <code>daily_cap</code> limits how many posts go out in a day.</p>
 </blockquote>
+<h2 id="blog">Blog</h2>
+<p><strong>Route:</strong> <code>/blog</code> — a tab in the <strong>More</strong> group, after Post to X.</p>
+<p>Put an entry on the public site's Blog, and take one off. The Blog's list of
+entries is at <code>neuralstrike.co/blog.html</code>, reached from <strong>Blog</strong> in the site's
+menu; each entry has a page of its own at <code>neuralstrike.co/blog/&lt;address&gt;/</code>.
+An entry is one self-contained HTML document: a file that carries its own
+styles and needs nothing else to display.</p>
+<blockquote>
+<p><strong>Nothing is public until you press Publish.</strong> Uploading a file only makes a
+<em>draft</em>: a cleaned copy that waits on this page, where only you can see it.</p>
+</blockquote>
+<p><strong>To add an entry:</strong></p>
+<ol>
+<li>Under <strong>Add a draft</strong>, choose the HTML file. It must be UTF-8 text and no
+   larger than the size printed under the upload box.</li>
+<li>Wait a moment. The blog service cleans the document and it appears under
+   <strong>Drafts waiting</strong>. The draft says what cleaning removed.</li>
+<li>Press <strong>Preview</strong> and read it. Cleaning can change how a page looks, and the
+   preview is exactly what a visitor would see.</li>
+<li>Check the <strong>Title</strong>, <strong>Summary</strong> and <strong>Tags</strong> — the Blog's list of entries
+   shows them — and the <strong>Address</strong>, which is the last part of the entry's web
+   address. The full public address is printed under the box.</li>
+<li>Press <strong>Publish</strong> and confirm. The entry is on the public site at once.</li>
+</ol>
+<ul>
+<li><strong>What cleaning removes:</strong> scripts, forms, event handlers, embedded frames,
+  images, and links out to other sites' stylesheets. The typefaces the document
+  asks Google Fonts for are copied onto this server instead, and the draft says
+  so when one could not be. Scripts never run, in the preview or on the site.</li>
+<li><strong>A draft may also carry a note about its typefaces</strong> when some or all of
+  them could not be copied. The entry is then shown in the fallback fonts its
+  own stylesheet names. Preview shows exactly that.</li>
+<li><strong>Publish is greyed out</strong> while the title is empty or the address cannot be
+  used. When it is the address, the reason is shown in red under it: use
+  letters, digits and single hyphens, at most 80 characters as shipped. A few
+  addresses are reserved by the site, <code>fonts</code> among them.</li>
+<li><strong>Discard</strong> deletes a draft. Nothing public changes.</li>
+<li><strong>Twenty drafts can wait at once</strong> as shipped (the limit is under Settings →
+  Configuration → Site blog). Past that an upload is refused until you publish
+  or discard one.</li>
+<li><strong>To replace an entry</strong>, pick it under <strong>Replace an existing entry</strong> <em>before</em>
+  you choose the file. The draft then says which entry it replaces and keeps that
+  entry's address, which cannot be edited. The old version stays public until you
+  publish the new one.</li>
+<li><strong>Published</strong> lists what is on the site, newest first. <strong>Open on the site</strong>
+  opens the entry in a new tab. <strong>Unpublish</strong> asks first, then removes the page
+  from the public site; its address stops working. To bring an entry back,
+  upload its file again.</li>
+<li>After an upload, Publish, Discard or Unpublish the control you pressed waits
+  for the blog service, and a message at the bottom of the screen says how it
+  went. If the blog service is stopped nothing happens: the control waits, then
+  comes back. <strong>System Status</strong> shows whether the service is running.</li>
+</ul>
 <h2 id="user-manuals">User Manuals</h2>
 <p><strong>Route:</strong> <code>/manuals</code> — a tab in the <strong>More</strong> group, alongside EOD Report. (It used
 to be nested under Settings; it is now a peer tab.)</p>
@@ -3174,7 +3228,7 @@ in a trading workflow, which is why they sit apart.</p>
 <ul>
 <li>An <strong>overall banner</strong> — green (all up), red (naming what's down), or grey
   (checking).</li>
-<li>A <strong>component grid</strong> — Redis, the Schwab gateway, the six services, the web app
+<li>A <strong>component grid</strong> — Redis, the Schwab gateway, the seven services, the web app
   itself, and the public live screens beside it, each with Online/Offline and its
   tier. The gateway's card also shows the <strong>Schwab auth</strong> state.</li>
 <li>A <strong>Re-authorize</strong> button on the gateway card opens Schwab's OAuth login in a new
@@ -3441,7 +3495,7 @@ group, next to EOD Report.</p>
 <p>A guarded "stop the whole local stack" page. The <strong>Stop all services</strong> button — a
 red outline, matching the rail — opens a confirmation; the solid red button is the
 <strong>Stop everything</strong> inside it, which is where the decision is actually made.
-Confirming stops the gateway, the six services, the web app <strong>and the public live
+Confirming stops the gateway, the seven services, the web app <strong>and the public live
 screens</strong> — the public site goes dark with it.</p>
 <p><strong>The confirmation asks for your authenticator code.</strong> Type the current 6-digit
 code from your authenticator app into the dialog and press <strong>Stop everything</strong> — or

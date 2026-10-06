@@ -2,6 +2,16 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
+**Status (2026-10-06): built in reduced scope.** The operator cut the feature to
+"the blog page and a way to upload an HTML file". **Built:** Tasks 1 to 10 in
+reduced form, the CI row of Task 11, Task 12 in part, and Task 13. **Not
+built:** the inbox stream in Task 7 (`blog_svc` reads `cmd:blog` only), the
+Connector panel in Task 10, and all of phase 2, Tasks 14 to 23. One thing was
+built differently from the task as written: the cleaner's bound (Task 3) is a
+worker process with a time limit, not a pre-parse scan; the design has the
+section ("The cleaner runs in a worker process with a time limit"). What exists
+is described in [`../reference/blog.md`](../reference/blog.md).
+
 **Goal:** A Blog page on neuralstrike.co whose entries are self-contained HTML
 documents written in Claude Chat, received as drafts (through a custom connector
 or an upload), approved in the private app, and served sandboxed.

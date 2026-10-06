@@ -4,7 +4,108 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-06 (**Flow Alerts: the bought / sold estimate is a bar.**)
+**Last updated:** 2026-10-06 (**A Blog on neuralstrike.co: upload, preview, publish.**)
+
+- **What it is.** The public site has a Blog. The owner opens **More → Blog** in
+  the private app, uploads one self-contained HTML document (an artifact saved
+  from Claude Chat, for example), previews the cleaned draft, edits its title,
+  summary, address and tags, and presses Publish. Visitors get a **Blog** item in
+  the site menu, a list at `blog.html`, and each entry on its own page inside a
+  sandboxed frame. Nothing is public until Publish is pressed.
+  Design and plan: `docs/plans/2026-10-06-site-blog-{design,plan}.md`; the detail
+  behind the rules: `docs/reference/blog.md`.
+- **What is parked.** The design is for a larger feature: a connector, so a
+  conversation in Claude Chat could file a draft directly, with its own gate
+  process, an OAuth sign-in and a fourth hostname. The operator cut scope on the
+  day to "the blog page and a way to upload an HTML file". None of the connector
+  is built. `shared/blog_inbox.py` still names its stream (`cmd:blog_inbox`) and
+  three `config/blog.toml` keys (`submissions_per_hour`, `max_wait_sec`,
+  `answer_keep_sec`) that nothing reads yet.
+- **The pieces.**
+  - A seventh Tier-2 service, **`blog_svc`** (:8217): one command stream,
+    `cmd:blog`, with four commands (`draft_submit`, `publish`, `discard`,
+    `unpublish`); three views (`blog:drafts`, `blog:posts`, `blog:result`); one
+    background job (repair and rebuild at start, then the views every `[site]
+    republish_min`). No Schwab call and no Claude call. The one thing that
+    leaves the box is the typeface copy at upload, to Google Fonts only.
+  - **`shared/blog_inbox.py`**: the command builders, validators, limits, view
+    names, the frame's `sandbox` and the policy string, the store's folder names
+    and its two file readers. On the Tier-1 allow-list; its import set is pinned
+    by `shared/tests/test_blog_inbox.py`.
+  - **The cleaner** (`clean.py`): the submitted tree is only read, and the
+    output is built from the module's own lists of tags and attributes. Scripts,
+    forms, frames, images, event handlers, outside stylesheets and every CSS
+    fetch are removed and counted; the draft says what was taken out.
+  - **The typeface copy** (`fonts.py`): Google's stylesheet is parsed and each
+    `@font-face` rule is written again from a table of descriptors, pointing at
+    a file stored under a hash of its own content. A failed copy never blocks a
+    draft; the draft says what was left out.
+  - **The store** (`store.py`): `services/blog_svc/data/blog.db` and the
+    documents and typefaces beside it. Each row carries the SHA-256 of its
+    document, and a read returns only the file with that digest.
+  - **The site writer** (`sitewriter.py`): the only writer of
+    `deploy/site/blog/` and `deploy/site/blog.json`, both gitignored like
+    `ideas/`. Each entry page carries the tracked `blog.html`'s menu, and is
+    rebuilt at every service start.
+  - **The site**: `blog.html`, `assets/blog.js`, a Blog item in the menu of all
+    seven pages, `blog.html` in `sitemap.txt`, a second `Sitemap:` line in
+    `robots.txt`.
+  - **The edge**: Caddy sends a Content-Security-Policy on
+    `/blog/<address>/entry.html` and revalidates `/blog/<address>/`.
+  - **The private page** (`webgui/pages/blog.py`) and two preview routes in
+    `main.py`; `config/blog.toml` with a Settings → Configuration section; a
+    System Status card; a CI row for the service suite; the service's data
+    folder in the nightly backup.
+- **What review changed, before it shipped.**
+  (1) *The cleaner's bound is a worker process, not a scan.* One tag with tens of
+  thousands of attributes takes the parser minutes at the size limit (216 s
+  measured for a 512 KB document on libxml2 2.11.9). A scan of the text before
+  parsing was tried as the bound and failed review three times, each time on a
+  shape the scan and the parser read differently. Each document is now cleaned
+  in its own process, killed at `[limits] clean_sec` (20 s) and refused as too
+  slow. The scan stays as a fast first refusal and is documented as best-effort.
+  (2) *A committed document can exist only under its temporary name.* A
+  replacement is written beside the old file, then the row, then the rename;
+  the rename can be refused after the commit. The store now finishes a waiting
+  rename before it writes the next one, and refuses with "busy" if it cannot.
+  (3) *The typeface copy was bounded as a product only.* The bytes of one
+  entry's files, and the rules written into it, each have a cap of their own
+  now (`max_total_mb`, `max_rules`) beside the count and size of the files.
+  (4) *Title, summary and tag fields* drop invisible characters before the cut
+  for length, so a run of zero-width spaces cannot blank a real title.
+- **Two changes outside the blog that ride along.**
+  - **A command queue's length is per queue** (`config/services.toml
+    [stream_keep]`). It was 1000 for every queue, fixed in code. A blog command
+    carries a whole document of up to 512 KB, so `cmd:blog` and `cmd:blog_inbox`
+    ship at 50 (about 25 MB each, against about 500 MB at 1000), each with a
+    ceiling of 500. Every other queue keeps 1000. The cap is on the queue, not
+    on its history: past it the oldest commands are dropped whether or not they
+    have run, with no dead letter.
+  - **A dead letter's fields are cut** to `[dead_letters] max_field_kb` (64).
+    The list keeps the newest 200 per queue, so 200 whole blog commands were
+    about 100 MB. A cut field ends `...[truncated, N bytes total]` and the
+    record gains `"truncated": true`. A command under the limit is recorded
+    byte for byte as before. `blog_svc`'s handler also never raises, so an
+    unpublished draft is not dead-lettered in the first place.
+- **Two parser versions.** `lxml`'s Windows wheel bundles libxml2 2.11.9 and its
+  Linux wheel 2.14.6, and the newer HTML tokenizer builds different trees from
+  the same bytes. The blog service suite was run on both. The Linux run was
+  under WSL with the wheels unpacked there, on Python 3.14, which is not prod's
+  Python.
+- **Not verified.** Caddy itself (the generated Caddyfile is tested as text);
+  Safari and Firefox; the real service process against a real Redis; the first
+  live typeface copy, whose checklist is step 5 of Task 12 in the plan.
+- **One operator step after the promote**: regenerate and reload Caddy, so the
+  policy header is sent. Until then entries are still cleaned and framed with
+  the sandbox; only the header is missing. The commands are in
+  `docs/dev-prod-environments.md`, "The site blog".
+- **Found on the way.** `CLAUDE.md` said the repo-root `conftest.py` guards
+  "both HTTP stacks". It guards `sqlite3.connect` only: the network guard was
+  written on 2026-09-12 and its commits never reached `main`. The sentence is
+  corrected, and `docs/reference/testing.md` has the detail. The blog service
+  suite carries a request guard of its own.
+
+**Prior —** 2026-10-06 (**Flow Alerts: the bought / sold estimate is a bar.**)
 
 - **What changed.** The estimate was two lines of text ("≈ bought 47.92% · sold
   34.31% · unlabelled 17.76%"). It is now one bar per figure, split in proportion:

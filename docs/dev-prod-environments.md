@@ -28,7 +28,7 @@ box, along with the twelve `.bat` launchers.
 | Folder | `/home/administrator/prod` | `/home/administrator/dev` |
 | Git | pinned to `main` | feature branches |
 | schwab-proxy | **owns** it, `:8100` | **borrows** prod's — starts none |
-| sentiment / options / portfolio / trade / market / news | 8210–8213, 8215, 8216 | 9210–9213, 9215, 9216 |
+| sentiment / options / portfolio / trade / market / news / blog | 8210–8213, 8215–8217 | 9210–9213, 9215–9217 |
 | webgui | `:8500` | `:9500` |
 | webgui_live (public screens) | `:8501` | `:9501` |
 | Redis (one server, `:6379`) | **db 0** | **db 1** |
@@ -558,7 +558,7 @@ not. Without it the SQLite half completes and the Redis half dies on
 Then work at **http://127.0.0.1:9500**. The header carries a `DEV` chip and the
 browser tab reads `DEV · NeuralStrike` — that is how you tell the two tabs apart.
 
-`systemctl --user start trading-dev.target` brings up **nine** units (six
+`systemctl --user start trading-dev.target` brings up **ten** units (seven
 services + webgui + webgui_live, and no proxy — dev borrows prod's; the live
 screens are NOT withheld the way the proxy is, because nothing about them is a
 shared exclusive credential). Output goes to the
@@ -700,7 +700,7 @@ Then it records the current commit in `logs/promote_previous_commit`, stops the
 target, waits for both the units and their **listening sockets** to go
 (`is-active` clears about a second early), fast-forwards, reinstalls
 dependencies **only if `requirements.lock` moved**, regenerates the units,
-starts, and probes **every process** over HTTP — the proxy, the six services'
+starts, and probes **every process** over HTTP — the proxy, the seven services'
 `/health` and the web GUI (a dead accept loop stays bound and would pass a TCP
 connect). The public screens are probed too, but only warned about.
 
@@ -1016,3 +1016,75 @@ systemctl --user start trading-prod.target
 
 Then sign in to Schwab again on the proxy's `/auth` page if the restored token
 is more than 7 days old.
+
+## 12. The site blog
+
+The Blog (`blog_svc`, port 8217, and the **More → Blog** page) needs **one**
+operator step after the promote that carries it. Everything else arrives with
+the promote: the unit for `blog_svc` is generated from `repo_paths` like every
+other service's, and its data folder and the site's `blog/` folder are created
+when they are first written.
+
+**The step: regenerate and reload Caddy.** The Caddyfile is generated, and the
+promote does not regenerate it. Until this is done Caddy does not send the
+policy header on an entry's document. Open a session on the box (`ssh vps2`)
+and run these, one line at a time; `sudo` may ask for your password, and
+`caddy validate` failing leaves the running config untouched:
+
+```bash
+cd /home/administrator/dev && sudo .venv/bin/python -m deploy.caddy.generate_caddyfile --install
+```
+
+```bash
+sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
+```
+
+**What works before the step is done.** The Blog page, uploads, previews,
+Publish and Unpublish all work, and published entries are served. Each entry is
+still cleaned before it is stored, and its page still frames it with the
+`sandbox` attribute that grants no scripts. Two things are missing until the
+reload:
+
+- the `Content-Security-Policy` header on `/blog/<address>/entry.html`, which
+  is the one layer that still applies when a visitor opens the entry's document
+  directly, outside its frame;
+- the revalidation rule for an entry's page at `/blog/<address>/`, so a
+  returning visitor's browser may show that page from its own cache after a
+  later promote changes the site menu.
+
+**How to check it.** Publish an entry first (the header is sent on an entry's
+document, so one has to exist), then, in the same session on the box:
+
+```bash
+curl -sI https://neuralstrike.co/blog/my-entry/entry.html
+```
+
+Replace `my-entry` with the entry's address, as the Blog page prints it. The
+answer must include a `Content-Security-Policy` line (curl prints the name in
+lower case over HTTP/2) beginning
+`default-src 'none'` and ending
+`sandbox allow-same-origin allow-popups allow-popups-to-escape-sandbox`. From
+Windows PowerShell the same check is `curl.exe -sI` followed by the address:
+plain `curl` there is a different command.
+
+The entry's own page must **not** carry that header: it is the site's markup,
+and the policy would switch off its stylesheet and menu.
+
+```bash
+curl -sI https://neuralstrike.co/blog/my-entry/
+```
+
+That answer should show `cache-control: no-cache` and no
+`content-security-policy` line.
+
+**Not yet checked on a live Caddy.** The generated Caddyfile is tested as text.
+The two checks above are the first proof that Caddy sends what the file says.
+
+**Where the policy lives.** `shared/blog_inbox.py` (`ENTRY_CSP`,
+`ENTRY_SANDBOX`). The Caddyfile generator imports the string; change it there and
+regenerate, never in `/etc/caddy/Caddyfile`. Detail:
+[reference/blog.md](reference/blog.md).
+
+**The first upload also copies typefaces from Google Fonts**, which no test
+could do. What to look at on that first draft is step 5 of Task 12 in
+[the plan](plans/2026-10-06-site-blog-plan.md).

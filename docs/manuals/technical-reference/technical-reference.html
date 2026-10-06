@@ -187,6 +187,14 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#failure-policy">Failure policy</a></li>
 </ul>
 </li>
+<li><a href="#site-blog">Site Blog</a><ul>
+<li><a href="#where-the-limits-come-from">Where the limits come from</a></li>
+<li><a href="#what-cleaning-does">What cleaning does</a></li>
+<li><a href="#the-workers-time-limit">The worker's time limit</a></li>
+<li><a href="#the-typeface-copy">The typeface copy</a></li>
+<li><a href="#cadence">Cadence</a></li>
+</ul>
+</li>
 <li><a href="#known-issues">Known issues</a><ul>
 <li><a href="#the-price-sub-score-missing-inputs-and-the-daily-horizons">The PRICE sub-score: missing inputs, and the daily horizons</a></li>
 <li><a href="#carried-chains-and-what-a-study-may-read">Carried chains, and what a study may read</a></li>
@@ -308,6 +316,10 @@ would mean writing the same formulas out four times and letting the copies drift
 <td><strong>EOD Report</strong></td>
 <td>Aggregation only; it computes nothing of its own</td>
 </tr>
+<tr>
+<td><strong>Blog</strong></td>
+<td><em>Site Blog</em> — the limits, what cleaning removes, the typeface copy, the cadence</td>
+</tr>
 </tbody>
 </table>
 <hr />
@@ -385,7 +397,7 @@ regenerating the lock that way silently drops the pins and quietly reopens the g
 </tr>
 <tr>
 <td><code>fastapi==0.137.0</code>, <code>uvicorn==0.49.0</code>, <code>starlette==1.3.1</code></td>
-<td>The proxy + the six domain services.</td>
+<td>The proxy + the seven services.</td>
 </tr>
 <tr>
 <td><code>redis==8.0.0</code></td>
@@ -416,6 +428,10 @@ regenerating the lock that way silently drops the pins and quietly reopens the g
 <td><code>news_svc</code> parses the public RSS / Atom feeds it polls.</td>
 </tr>
 <tr>
+<td><code>lxml==6.1.1</code>, <code>tinycss2==1.5.1</code> (+ <code>webencodings</code>)</td>
+<td><code>blog_svc</code> parses a submitted entry and tokenizes its CSS. Both were already installed as dependencies of NiceGUI; they are named because the cleaner now imports them itself.</td>
+</tr>
+<tr>
 <td><code>anthropic==0.112.0</code></td>
 <td>Claude tool-use calls (imported lazily — the suite runs without it configured).</td>
 </tr>
@@ -442,7 +458,7 @@ Highcharts license. This is a licensing prerequisite, not a technical one.</p>
 <tbody>
 <tr>
 <td><strong>Redis running on <code>:6379</code></strong></td>
-<td><code>sudo systemctl enable --now redis-server</code>. It is the Tier-3 cache, pub/sub, and command bus — <strong>without it none of the six services can publish and every page shows a "Waiting for … service" placeholder.</strong> It is a <strong>system</strong> unit, so a <code>systemctl --user</code> stop of the stack cannot reach it: it survives a Stop All by construction, not by a filter.</td>
+<td><code>sudo systemctl enable --now redis-server</code>. It is the Tier-3 cache, pub/sub, and command bus — <strong>without it none of the seven services can publish and every page shows a "Waiting for … service" placeholder.</strong> It is a <strong>system</strong> unit, so a <code>systemctl --user</code> stop of the stack cannot reach it: it survives a Stop All by construction, not by a filter.</td>
 <td>Required</td>
 </tr>
 <tr>
@@ -595,6 +611,11 @@ automatically and start empty.</p>
 <td>Required</td>
 </tr>
 <tr>
+<td>8217</td>
+<td>blog_svc</td>
+<td>Required</td>
+</tr>
+<tr>
 <td>8500</td>
 <td>webgui (NiceGUI)</td>
 <td>Required</td>
@@ -629,9 +650,10 @@ were removed in September 2026 — nothing in the stack talks to those processes
 </tbody>
 </table>
 <h2 id="startup-order">Startup order</h2>
-<p>The dependency chain is strict: <strong>Redis → schwab-proxy → the six services → webgui.</strong>
+<p>The dependency chain is strict: <strong>Redis → schwab-proxy → the seven services → webgui.</strong>
 Services wait on the proxy because they resolve market data through it (<code>news_svc</code>
-calls no proxy — it reads public feeds — but is ordered with the others).
+and <code>blog_svc</code> call no proxy — one reads public feeds, the other a local store — but
+both are ordered with the others).
 <code>webgui_live</code> sits outside that chain: it reads Redis and nothing else — no proxy
 call, no Schwab call, no service call — so it is ordered after nothing in the target.</p>
 <table>
@@ -644,7 +666,7 @@ call, no Schwab call, no service call — so it is ordered after nothing in the 
 <tbody>
 <tr>
 <td><code>systemctl --user start trading-prod.target</code></td>
-<td>Proxy + 6 services + webgui + webgui_live. Also starts at boot.</td>
+<td>Proxy + 7 services + webgui + webgui_live. Also starts at boot.</td>
 </tr>
 <tr>
 <td><code>systemctl --user stop trading-prod.target</code></td>
@@ -672,10 +694,10 @@ Python process would re-introduce the top-level module-name collisions
 <h2 id="verifying-the-install">Verifying the install</h2>
 <ol>
 <li>Open <strong><code>http://127.0.0.1:8500/status</code></strong> — the System Status page probes Redis,
-   the proxy, Schwab authorization, all six services, the webgui and the public
+   the proxy, Schwab authorization, all seven services, the webgui and the public
    live screens, plus a data-freshness table.</li>
 <li>Or probe directly: <code>GET http://127.0.0.1:8100/health</code> and
-   <code>GET http://127.0.0.1:82{10..13}/health</code>, <code>:8215/health</code> and <code>:8216/health</code> (each returns <code>{"domain": …, "up": true}</code>).</li>
+   <code>GET http://127.0.0.1:82{10..13}/health</code>, <code>:8215/health</code>, <code>:8216/health</code> and <code>:8217/health</code> (each returns <code>{"domain": …, "up": true}</code>).</li>
 <li>Run the tests <strong>one folder at a time</strong> (never <code>pytest services</code> across all of
    them — that re-triggers the module-name collisions):</li>
 </ol>
@@ -763,6 +785,11 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 <td>Market News: polls free public RSS / Google News / Yahoo / SEC EDGAR feeds and the economic calendar (Fed, BLS, BEA, FRED, Nasdaq) into <code>news.db</code>. No Schwab, no Claude, no proxy.</td>
 </tr>
 <tr>
+<td>blog_svc</td>
+<td>8217</td>
+<td>The site Blog: cleans an uploaded HTML document, keeps drafts and entries in <code>blog.db</code> and the files beside it, and writes published entries into the served site. No Schwab, no Claude, no proxy; the one outside request is the typeface copy from Google Fonts at upload.</td>
+</tr>
+<tr>
 <td>webgui</td>
 <td>8500</td>
 <td>The web UI.</td>
@@ -777,7 +804,7 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 <p>Ports come from <code>config/ports.toml</code> via <code>repo_paths.py</code> — never hard-coded.</p>
 <blockquote>
 <p><strong>These are the <em>prod</em> profile.</strong> A <strong>dev</strong> checkout offsets the <code>[services]</code>
-ports to 9210–9213, 9215 and 9216 and the web GUI to 9500, uses Redis <strong>db 1</strong> instead of db 0,
+ports to 9210–9213 and 9215–9217 and the web GUI to 9500, uses Redis <strong>db 1</strong> instead of db 0,
 and starts <strong>no proxy of its own</strong> — it borrows prod's on 8100, because the Schwab
 OAuth refresh token is a single rotating credential that two proxies would
 invalidate for each other. Identity comes from the gitignored
@@ -1029,7 +1056,7 @@ tail. Shadow mode's counts replace the first estimate, and
 </tr>
 <tr>
 <td><code>services/</code></td>
-<td>The six Tier-2 domain services.</td>
+<td>The seven Tier-2 services.</td>
 </tr>
 <tr>
 <td><code>webgui/</code></td>
@@ -3570,8 +3597,9 @@ book the same number.</p>
 ledger is empty - so 0.50 and 21 are <strong>sourced, not fitted</strong>. That is why they
 are config.</p>
 <h1 id="market-news">Market News</h1>
-<p><code>services/news_svc</code> — the one service with no Schwab or Claude call, and the one
-that never calls the proxy. It reads one optional credential, <code>FRED_API_KEY</code>.
+<p><code>services/news_svc</code> — one of the two services with no Schwab or Claude call and no
+call to the proxy (the other is <code>blog_svc</code>, see <em>Site Blog</em>). It reads one optional
+credential, <code>FRED_API_KEY</code>.
 Designs: <code>docs/plans/2026-09-25-news-feed-design.md</code> (v1) and
 <code>docs/plans/2026-09-26-news-v2-design.md</code> (impact, the SEC panel, the calendar).</p>
 <h2 id="sources">Sources</h2>
@@ -3853,6 +3881,323 @@ dividend field names are unverified on prod; every spelling is in one table,
 items. An SEC 403, 429, 5xx, network failure or missed deadline is treated as an
 outage — that accession and every later one are retried next poll — while any other
 status is that filing's own answer and is not retried.</p>
+<h1 id="site-blog">Site Blog</h1>
+<p><code>services/blog_svc</code> (port 8217) and <code>shared/blog_inbox.py</code>. The Blog on the public
+site holds <strong>entries</strong>: each one a self-contained HTML document the owner uploads
+on the private <strong>Blog</strong> page. The service cleans the document, keeps it as a
+<strong>draft</strong> (a cleaned copy only the owner can see), and writes it into the public
+site only when the owner presses Publish. It calls neither Schwab nor Claude nor
+the proxy. Design: <code>docs/plans/2026-10-06-site-blog-design.md</code>; the reasoning
+behind each rule: <code>docs/reference/blog.md</code>.</p>
+<p>This chapter derives no market number. It records where the Blog's limits come
+from, what cleaning removes, and when the service does its work.</p>
+<h2 id="where-the-limits-come-from">Where the limits come from</h2>
+<p>Every number is a key in <code>config/blog.toml</code>, read through
+<code>shared/blog_inbox.py</code> and editable under Settings → Configuration → Site blog. A
+missing key or a value outside its range reads as the shipped value. After an
+edit, restart the blog service; the web app needs no restart.</p>
+<p><strong><code>[site]</code></strong></p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Shipped</th>
+<th>Range</th>
+<th>What it bounds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enabled</code></td>
+<td><code>true</code></td>
+<td>—</td>
+<td>Off: drafts can still be uploaded and previewed, and Publish still records the entry, but nothing is written to the public site. The answer says so.</td>
+</tr>
+<tr>
+<td><code>republish_min</code></td>
+<td>30</td>
+<td>1–1440</td>
+<td>Minutes between re-publishing the drafts and entries lists. They are published on every change; this heals a flushed Redis.</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>[limits]</code></strong></p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Shipped</th>
+<th>Range</th>
+<th>What it bounds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>max_html_kb</code></td>
+<td>512</td>
+<td>1–4096</td>
+<td>The largest document accepted, in KB of UTF-8 bytes, measured before cleaning.</td>
+</tr>
+<tr>
+<td><code>max_drafts</code></td>
+<td>20</td>
+<td>1–200</td>
+<td>Drafts waiting at once. A new one is refused past this.</td>
+</tr>
+<tr>
+<td><code>title_chars</code></td>
+<td>140</td>
+<td>1–300</td>
+<td>The longest title kept. A longer one is cut.</td>
+</tr>
+<tr>
+<td><code>summary_chars</code></td>
+<td>300</td>
+<td>1–1000</td>
+<td>The longest summary kept. A longer one is cut.</td>
+</tr>
+<tr>
+<td><code>max_tags</code></td>
+<td>6</td>
+<td>1–24</td>
+<td>Tags kept on one entry; the rest are dropped.</td>
+</tr>
+<tr>
+<td><code>tag_chars</code></td>
+<td>24</td>
+<td>1–64</td>
+<td>The longest tag kept.</td>
+</tr>
+<tr>
+<td><code>slug_chars</code></td>
+<td>80</td>
+<td>16–120</td>
+<td>The longest address a NEW entry may have. A longer one is refused, not cut: half an address is a different address. An entry that already exists is held to 120, so lowering this cannot strand it.</td>
+</tr>
+<tr>
+<td><code>clean_sec</code></td>
+<td>20</td>
+<td>2–120</td>
+<td>Seconds one document may take to clean before its worker process is killed and the upload refused.</td>
+</tr>
+<tr>
+<td><code>clean_mem_mb</code></td>
+<td>512</td>
+<td>128–4096</td>
+<td>Memory the cleaning worker may use, in MB. Linux only.</td>
+</tr>
+<tr>
+<td><code>submissions_per_hour</code>, <code>max_wait_sec</code>, <code>answer_keep_sec</code></td>
+<td>12, 120, 120</td>
+<td>—</td>
+<td><strong>Not read by this build.</strong> They belong to the connector that would let Claude Chat file a draft, which is not built.</td>
+</tr>
+</tbody>
+</table>
+<p><code>max_html_kb</code> has a ceiling because a document travels inside one command, and the
+<code>cmd:blog</code> queue keeps its newest 50 commands (<code>config/services.toml</code>
+<code>[stream_keep]</code>). The two multiply: 512 KB × 50 is about 25 MB of Redis; both at
+their ceilings (4096 KB × 500) would be about 2 GB.</p>
+<p>One limit is derived rather than set. A cleaned document, with its typeface rules
+added, is refused when it is larger than <strong>6 × <code>max_html_kb</code> + 512 KB</strong>: cleaning
+can multiply a document's size about six times (every <code>"</code> inside an attribute is
+written <code>&amp;quot;</code>), and the typeface rules come to about 300 KB at their own
+limits.</p>
+<p><strong><code>[fonts]</code></strong></p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Shipped</th>
+<th>Range</th>
+<th>What it bounds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>enabled</code></td>
+<td><code>true</code></td>
+<td>—</td>
+<td>Off: no typeface is copied and the entry is shown in the fallback fonts its own stylesheet names.</td>
+</tr>
+<tr>
+<td><code>subsets</code></td>
+<td><code>latin</code>, <code>latin-ext</code></td>
+<td>up to 16 names</td>
+<td>The character sets copied. Each is a separate file per weight.</td>
+</tr>
+<tr>
+<td><code>max_links</code></td>
+<td>4</td>
+<td>1–16</td>
+<td>Typeface stylesheets followed for one entry.</td>
+</tr>
+<tr>
+<td><code>max_css_kb</code></td>
+<td>256</td>
+<td>16–2048</td>
+<td>The most one stylesheet may send back.</td>
+</tr>
+<tr>
+<td><code>max_files</code></td>
+<td>24</td>
+<td>1–64</td>
+<td>Typeface files copied for one entry.</td>
+</tr>
+<tr>
+<td><code>max_file_kb</code></td>
+<td>400</td>
+<td>16–1024</td>
+<td>The largest single file stored.</td>
+</tr>
+<tr>
+<td><code>max_total_mb</code></td>
+<td>12</td>
+<td>1–64</td>
+<td>All of one entry's files together. They are held in memory at once until stored.</td>
+</tr>
+<tr>
+<td><code>max_rules</code></td>
+<td>96</td>
+<td>1–1000</td>
+<td><code>@font-face</code> rules written into one entry. Many rules can name one file, so <code>max_files</code> does not bound this.</td>
+</tr>
+<tr>
+<td><code>timeout_sec</code></td>
+<td>10</td>
+<td>1–60</td>
+<td>One request to Google Fonts.</td>
+</tr>
+<tr>
+<td><code>total_sec</code></td>
+<td>30</td>
+<td>1–600</td>
+<td>All of one entry's requests together.</td>
+</tr>
+<tr>
+<td><code>user_agent</code></td>
+<td>a desktop Chrome's</td>
+<td>20–300 printable characters</td>
+<td>Who the service says it is. Google sends the WOFF2 format, split by character set, only to a browser it recognises.</td>
+</tr>
+</tbody>
+</table>
+<p>One rule is at most 3,075 characters, so 96 rules add under 300 KB to an entry.</p>
+<h2 id="what-cleaning-does">What cleaning does</h2>
+<p>The submitted document is parsed (<code>lxml</code>) and only read. The stored document is
+built from the cleaner's own lists of tag and attribute names, with every value
+escaped and every stylesheet tokenised (<code>tinycss2</code>), filtered and written afresh.
+The result is cleaned again until cleaning changes nothing, at most five times.</p>
+<table>
+<thead>
+<tr>
+<th>Removed</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>script</code>, <code>noscript</code>, <code>iframe</code>, <code>frame</code>, <code>object</code>, <code>embed</code>, <code>applet</code>, <code>template</code>, <code>canvas</code>, <code>audio</code>, <code>video</code>, <code>dialog</code></td>
+<td>With their content.</td>
+</tr>
+<tr>
+<td><code>form</code> and every form control</td>
+<td>With their content.</td>
+</tr>
+<tr>
+<td><code>img</code>, <code>picture</code>, <code>map</code></td>
+<td>This version of the Blog carries no images.</td>
+</tr>
+<tr>
+<td><code>base</code>, <code>meta</code>, <code>link</code></td>
+<td>The service writes its own charset and viewport. A link to a Google Fonts stylesheet is followed by the typeface copy, then removed like the rest.</td>
+</tr>
+<tr>
+<td>Event-handler attributes (<code>onclick</code> and the like)</td>
+<td>Counted.</td>
+</tr>
+<tr>
+<td>Inside a drawing: <code>script</code>, <code>foreignObject</code>, <code>image</code>, <code>use</code>, animation elements, links, <code>mask</code>, <code>pattern</code>, <code>symbol</code>, <code>filter</code></td>
+<td></td>
+</tr>
+<tr>
+<td>A link address that is not <code>http://</code>, <code>https://</code>, <code>mailto:</code> or an in-page <code>#fragment</code></td>
+<td>The link's text stays; the address goes.</td>
+</tr>
+<tr>
+<td>In a stylesheet: <code>@import</code>, <code>@namespace</code>, <code>@font-face</code>, <code>@charset</code>; any <code>url()</code> that does not point at an id in the same document; <code>image()</code>, <code>image-set()</code>, <code>cross-fade()</code>, <code>element()</code>, <code>expression()</code></td>
+<td>A fetching function becomes <code>none</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>Kept: headings, paragraphs, lists, tables, the inline text elements, inline <code>svg</code>
+drawings, the entry's own stylesheets and <code>style</code> attributes, and at most 64
+attributes on one element. A link that leaves the page is given
+<code>target="_blank" rel="noopener noreferrer"</code>.</p>
+<p>An element on neither list is unwrapped: its text stays and nothing is counted.
+Everything else that is removed is counted, and the draft shows the counts as one
+sentence. When no title is typed, the draft takes the document's <code>&lt;title&gt;</code>, then
+its first <code>&lt;h1&gt;</code>; the summary falls back to its first paragraph.</p>
+<p>A document is <strong>refused</strong>, not partly kept, when it is empty, cannot be read to
+its end (cut off inside a tag, or nested past the parser's depth limit), has a tag
+with more than 1,024 attributes, or does not settle.</p>
+<h2 id="the-workers-time-limit">The worker's time limit</h2>
+<p>Each document is cleaned in a separate process, killed after <code>clean_sec</code> seconds
+(20 as shipped). An upload that overruns is refused with "Cleaning the file took
+too long, so it was refused." and counted on the service's health check.</p>
+<p>The reason is the parser, whose cost is not proportional to the size of its
+input: one tag with tens of thousands of attributes took <strong>216 s</strong> to parse at the
+512 KB limit (measured on libxml2 2.11.9). A check of the text before parsing
+cannot predict that cost reliably, so the limit is a clock on the work itself. On
+Linux the worker also lowers its own memory to <code>clean_mem_mb</code> and its processor
+time to <code>clean_sec + 5</code> seconds; on Windows the clock is the whole limit.</p>
+<h2 id="the-typeface-copy">The typeface copy</h2>
+<p>An entry usually asks Google Fonts for its typefaces. The public site loads
+nothing from another site, so at upload the service:</p>
+<ol>
+<li>follows each <code>&lt;link rel="stylesheet"&gt;</code> to <code>https://fonts.googleapis.com/css2?…</code>,
+   up to <code>max_links</code>;</li>
+<li>reads the stylesheet and keeps the blocks labelled with one of <code>subsets</code>;</li>
+<li>fetches each <code>.woff2</code> file those blocks name from <code>https://fonts.gstatic.com</code>,
+   checks that it is a whole WOFF2 file, and stores it under a name made from the
+   SHA-256 of its content (20 hex characters, then <code>.woff2</code>);</li>
+<li>writes its own <code>@font-face</code> rules into the entry, pointing at
+   <code>../fonts/&lt;name&gt;</code>.</li>
+</ol>
+<p>The rules are rebuilt from values the service understood, never pasted through
+from Google's stylesheet. A link or a file that fails costs only itself: the entry
+is shown in its fallback fonts and the draft says how many were left out and why.
+Typefaces are shared by every entry that uses them, and one no entry or draft
+names any more is deleted after a publish, a discard or an unpublish.</p>
+<h2 id="cadence">Cadence</h2>
+<table>
+<thead>
+<tr>
+<th>When</th>
+<th>What happens</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>At service start</td>
+<td>The store is repaired (files made to agree with the rows after an interrupted write), every entry page on the site is rebuilt, and the two lists are published. The rebuild is what carries a changed site menu into the entry pages.</td>
+</tr>
+<tr>
+<td>Every <code>republish_min</code> (30 min)</td>
+<td>The two lists are published again. The site is rebuilt again only if the last rebuild fell short.</td>
+</tr>
+<tr>
+<td>Every 30 s</td>
+<td>The loop wakes, beats the heartbeat the health check reads, and re-reads the interval.</td>
+</tr>
+<tr>
+<td>On a command</td>
+<td>Upload, Publish, Discard and Unpublish run when the Blog page sends them, one at a time.</td>
+</tr>
+</tbody>
+</table>
+<p>Times shown for an entry are Central: the Blog's list and each entry page date an
+entry by the day it was published in <code>America/Chicago</code>.</p>
 <h1 id="known-issues">Known issues</h1>
 <p>Documented defects a maintainer should know about before trusting a number. These
 are recorded rather than silently carried.</p>
@@ -4102,6 +4447,10 @@ the source; this table is a summary of them.</p>
 <tr>
 <td>news_svc</td>
 <td>Three branches, launched every <strong>30 s</strong> tick (<code>TICK_S</code>) as keyed background tasks, so a slow one delays only itself and one still running is skipped, never doubled. <strong>feeds</strong>: every feed polled every <strong>2 min</strong> 08:30–15:00 CT (<code>[collector] rth_poll_min</code>), <strong>5 min</strong> in the extended sessions 06:30–08:25 and 15:00–15:15 CT (<code>eth_poll_min</code>), <strong>30 min</strong> otherwise on a trading day (<code>offhours_poll_min</code>) and <strong>30 min</strong> at weekends and holidays (<code>weekend_poll_min</code>), counted from the END of the last poll; nothing polls faster than <strong>60 s</strong> (<code>MIN_INTERVAL_S</code>). <strong>calendar</strong>: every tick, fetching only the sources whose own <code>refresh_min</code> is due (Fed 60 min, BLS / BEA / FRED calendar 720, Nasdaq 240, values 240). <strong>watch</strong>: every tick, fetching only a series whose release just passed — every <strong>2 min</strong> for up to <strong>60 min</strong>. All in <code>config/news.toml</code>, editable in Settings. One cycle of each at a time: a Refresh during one is skipped.</td>
+</tr>
+<tr>
+<td>blog_svc</td>
+<td>The loop wakes every <strong>30 s</strong> (<code>TICK_S</code>) to beat its heartbeat and re-read the interval. <strong>At start</strong>: repair the store, rebuild every entry page on the site, publish the two list views. <strong>Then every 30 min</strong> (<code>[site] republish_min</code> in <code>config/blog.toml</code>, 1 to 1440, counted from the END of the last pass): the two views again, and the site rebuild again only while the last one fell short. A pass that fails is retried at the next wake. Everything else is on demand, when the Blog page sends a command.</td>
 </tr>
 </tbody>
 </table>

@@ -41,6 +41,7 @@ keys that feed it. Menu order matches the rail.
 | **Trade Analyzer** | `trade_svc` :8213 | `cache:trade:analysis`, `:deepdive`, `:deepdive_query` |
 | **Portfolio** | `portfolio_svc` :8212 | `cache:portfolio:positions` |
 | **EOD Report** | none — pure Tier-1 reader | aggregates the `options:*` keys |
+| **Blog** | `blog_svc` :8217 | `cache:blog:drafts`, `:posts`, `:result`; the preview reads the service's data folder through `shared.blog_inbox` |
 | **System Status** | none — probes `/health` directly | reads every domain's `:ver` / `:ts` side keys |
 
 ---
@@ -62,7 +63,10 @@ TIER 3  Redis (:6379)  ◀──cache_set + publish──  TIER 2  services
 - The GUI imports `nicegui` and `shared.bus` (never `redis` directly), plus a short
   allow-list: `shared.market_calendar`, `shared.symbols`, `shared.calibration`
   (only `bucket_key`), `repo_paths`, `requests` (only for the `/health` fan-out),
-  `fastapi.responses` (report routes) and a lazy `edge_tts` (spoken alerts). It
+  `fastapi.responses` (report routes) and a lazy `edge_tts` (spoken alerts), and
+  the shared request modules a page and its service must agree on, such as
+  `shared.blog_inbox` (the Blog page). The complete list, with the test that pins
+  each entry, is in `CLAUDE.md`. It
   does **not** import `shared.contracts` — contracts are validated service-side on
   write. It never imports an engine, never calls Schwab, and never computes domain
   results.
@@ -130,7 +134,20 @@ existed.
 message that reaches a consumer is moved aside rather than retried forever:
 
 **`dead_letter(stream, raw_fields, reason) -> None`** — records the raw message and
-why it failed under `dead_letter_key(stream)` (`dead:{domain}`).
+why it failed under `dead_letter_key(stream)` (`dead:{domain}`). The list keeps the
+newest `[dead_letters] keep` records (200) per stream. Never raises.
+
+A record is `{"ts", "reason", "fields"}`. **A text field larger than
+`[dead_letters] max_field_kb`** (`config/services.toml`; shipped 64, range 1 to
+4096, measured in UTF-8 bytes) is cut to that size and ends
+`...[truncated, N bytes total]`, and the record gains `"truncated": true`. A
+command can carry a whole document (a blog draft is up to 512 KB), and 200 of
+those kept whole were about 100 MB on one list. A command under the limit is
+recorded exactly as before, with no `truncated` key. ⚠ A truncated record's
+`data` is no longer a command anything could decode; nothing reads the list back
+as commands, and a replay tool would have to check `truncated`. `reason` is cut
+at 2,048 characters and ends `...[truncated, N characters total]`. The setting is
+read each time a command is dead-lettered, so a change needs no restart.
 
 **`drain_pending(stream, group, consumer) -> int`** — reclaims messages left
 pending by a consumer that died mid-handler, returning how many were recovered.
@@ -151,7 +168,30 @@ with bus.subscribe("events:sentiment:composite") as sub:
 ## Command streams
 
 **`enqueue_command(stream, command) -> str`** — validates `command` as a `Command`
-(`{type, args}`) and `XADD`s it to the stream; returns the message id.
+(`{type, args}`) and `XADD`s it to the stream; returns the message id. Each write
+trims the stream to its cap, `shared.service_limits.stream_keep(stream)`.
+
+**The cap is per stream** (`config/services.toml [stream_keep]`, read on every
+enqueue, so a change needs no restart):
+
+| Key | Shipped | Range | Applies to |
+|---|---|---|---|
+| `default` | 1000 | 10–100000 | every stream not named below |
+| `"cmd:blog"` | 50 | 10–500 | the Blog page's uploads and its Publish |
+| `"cmd:blog_inbox"` | 50 | 10–500 | reserved for the connector, which is not built; nothing writes it |
+
+The two blog streams are small because one of their commands carries a whole
+document, up to `config/blog.toml [limits] max_html_kb` (512 KB): a thousand
+would be about 500 MB of Redis in each, fifty is about 25 MB. A value for a named
+stream that is outside its range, or cannot be read, falls back to that stream's
+shipped number, not to `default`.
+
+⚠ **The cap is on the stream, not on its history.** Redis drops the oldest
+entries past it whether or not a consumer has read them, with no dead letter and
+no error. A service that is stopped or busy while more than N commands arrive
+comes back to the newest N. The trim is approximate (`MAXLEN ~`): a stream of
+small commands can run about a hundred over; a stream of documents, an entry or
+two.
 
 **`consume_commands(stream, group, consumer, block_ms=50, count=10) -> list[(msg_id, Command)]`**
 — reads up to `count` pending messages for a consumer group, blocking up to
@@ -571,6 +611,140 @@ too — `feed`, `sec`, `calendar` and `calendar_status` (which carries error tex
 Keeping them off `live.neuralstrike.co` is the job of the code that chooses the key
 (`pages/news_live.py`, `desk.bus_key`), not of the ACL.
 
+## Blog service — :8217
+
+**Entry:** `services/blog_svc/app.py` (`make_app("blog", scheduler=scheduler.loop,
+command_handler=handlers.handle_command, on_dropped=handlers.on_dropped)`). Owns the
+site Blog's drafts and entries and is the only writer of the blog's public files
+under `deploy/site/`. **No Schwab call, no Claude call, no proxy.** The one request
+that leaves the box is the typeface copy at upload, to `fonts.googleapis.com` and
+`fonts.gstatic.com` only. Design: `docs/plans/2026-10-06-site-blog-design.md`;
+detail: `docs/reference/blog.md`.
+
+The design also describes a connector (a second stream, `cmd:blog_inbox`, fed by a
+separate gate process). **It is not built**, and this service reads `cmd:blog` only.
+
+### Commands (`cmd:blog`)
+
+Built by `shared.blog_inbox` and sent by the private Blog page. Every command
+carries a `request_id` (16 hex characters, `blog_inbox.new_id()`); one without a
+usable id is dropped, because nothing could be told how it ended.
+
+| `type` | `args` | Effect |
+|---|---|---|
+| `draft_submit` | `request_id`, `source`, `html`, `fields` `{title, summary, tags, slug}`, and optionally `revises` (the address of the entry this replaces) | The document is cleaned, its typefaces copied, and the result stored as a draft. Never writes to the site. `source` is ignored: the service stamps `upload`. |
+| `publish` | `request_id`, `draft_id`, `fields` | The draft becomes an entry (or replaces the entry it revises), the draft is deleted, the site is rebuilt. A title is required. A new entry needs an address `clean_slug` accepts; a replacement keeps its entry's address. |
+| `discard` | `request_id`, `draft_id` | The draft and its staged document are deleted. Nothing public changes. |
+| `unpublish` | `request_id`, `slug` | The entry is removed and the site rebuilt. |
+
+`blog_inbox.submit_command(html, fields, *, source, request_id)` builds the first;
+`blog_inbox.owner_command(kind, request_id, **args)` builds the other three, and
+returns `None` for an unknown kind, a bad id, an unusable target, or an argument
+the kind does not take. The service runs every validator again on what it reads.
+
+⚠ `handle_command` never raises. The scaffold dead-letters a command whose handler
+raised, and a `draft_submit` carries a whole document.
+
+### Views
+
+`cache:blog:*` is readable by the public live process. **No view carries a
+document.**
+
+**`cache:blog:drafts`** — `{"drafts": [row, …]}`, newest first. Written
+`skip_unchanged`, so it holds no timestamp of its own.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `id` | str | The draft id, 16 hex characters |
+| `source` | str | `upload` in this build |
+| `revises` | str | The address of the entry this replaces, or `""` |
+| `slug` | str | The proposed address |
+| `title`, `summary` | str | As typed, else from the document's `<title>` / first `<h1>` and first paragraph |
+| `tags` | list[str] | At most `[limits] max_tags` |
+| `removed` | dict[str, int] | What cleaning took out, by kind: `script`, `form`, `handler`, `link`, `css`, `img`, `iframe`, `href` and any other removed element's name |
+| `font_note` | str | `""`, or one sentence saying which typefaces were not copied |
+| `bytes` | int | The staged document's size |
+| `digest` | str | SHA-256 of the staged document; the preview serves only the file that matches |
+| `received_at` | str | ISO, UTC |
+
+**`cache:blog:posts`** — `{"entries": [row, …]}`, newest first publication first (a
+revision does not move an entry up). `skip_unchanged`. Each row: `slug`, `title`,
+`summary`, `tags`, `published_at`, `updated_at`.
+
+**`cache:blog:result`** — how the last command ended. Written plainly, so the same
+answer twice is two events.
+
+```json
+{"request_id": "…", "command": "publish", "ok": true,
+ "message": "The entry is published.", "draft_id": "…", "slug": "an-entry"}
+```
+
+Always all six keys; an id or address that is not one is `""`. `message` is one of
+the service's own whole sentences (`handlers.MESSAGES`), never an exception's text.
+A reader must match `request_id` against a request it sent: the view holds the last
+answer whoever sent the command.
+
+### `shared.blog_inbox` — the shared surface
+
+Imports stdlib, `repo_paths` and `shared.config_toml` only (pinned by
+`shared/tests/test_blog_inbox.py`), so Tier 1 may import it.
+
+| Name | What it is |
+|---|---|
+| `OWNER_DOMAIN` (`"blog"`), `VIEW_DRAFTS`, `VIEW_POSTS`, `VIEW_RESULT` | The stream's domain and the three view names |
+| `new_id()`, `is_id(raw)` | A fresh request or draft id; whether a string is one |
+| `submit_command`, `owner_command`, `OWNER_KINDS` | The command builders |
+| `html_ok(html)` | A non-blank `str` of at most `max_html_kb` in UTF-8 bytes |
+| `clean_fields(raw)` | Always `{"title", "summary", "tags", "slug"}`, each cut to its limit, invisible characters removed; unusable is `""` or `[]` |
+| `clean_slug(raw)`, `existing_slug(raw)`, `slugify(title)` | A NEW address held to `slug_chars`; an EXISTING entry's, held to the limit's ceiling; an address made from a title |
+| `SLUG_RE`, `RESERVED_SLUGS`, `ID_RE`, `FONT_NAME_RE` | The patterns. Each ends in `\Z` |
+| `ENTRY_SANDBOX`, `ENTRY_CSP` | The frame's `sandbox` tokens and the policy sent on an entry document. One definition for the site writer, the Caddyfile generator and the private preview |
+| `STAGING_DIR`, `PUBLISHED_DIR`, `FONTS_DIR`, `DOC_NAME`, `NEXT_NAME` | The store's folder and file names |
+| `read_document(folder, digest)`, `read_font(fonts_folder, name)`, `font_name_for(data)` | The only two ways to read a stored file from outside the service, and the name a typeface's bytes are stored under |
+| `limits()`, `site()`, `fonts(over=None)`, `BOUNDS`, `DEFAULTS`, `reset_cache()` | `config/blog.toml`, validated |
+| `INBOX_STREAM`, `revise_command`, `answer_view`, `INBOX_TYPES`, `SOURCES` | For the connector. Defined and tested; nothing in this build uses them |
+
+### On disk
+
+```
+services/blog_svc/data/            repo_paths.BLOG_DATA (gitignored; in the nightly backup)
+  blog.db                          the rows
+  staging/<draft id>/entry.html    a draft's cleaned document
+  published/<slug>/entry.html      an entry's document
+  fonts/<20 hex>.woff2             one pool of typefaces, named by content
+
+deploy/site/                       repo_paths.SITE_ROOT (the blog paths below are gitignored)
+  blog.json                        {"updated", "entries": [{slug, title, summary, tags, published, updated}]}
+  blog/<slug>/index.html           the entry's page: the site menu around a sandboxed frame
+  blog/<slug>/entry.html           the entry document
+  blog/fonts/<20 hex>.woff2        the typefaces published entries use
+  blog/sitemap.txt                 the entries' addresses
+```
+
+The data folder is the source of truth; the site folder is rebuilt from it. While
+a replacement is being put in place, the current document can be under
+`entry.html.next`: read with `read_document`, which picks the file whose SHA-256
+is the row's, and never by opening `entry.html`.
+
+### Scheduler and health
+
+`scheduler.loop` wakes every 30 s. First pass: `store.repair()`, a full site
+rebuild, the two list views. Then every `[site] republish_min` (30): the views
+again, and the rebuild again only while the last one fell short. `/health`
+degrade areas: `blog.handlers`, `blog.clean`, `blog.clean.too_slow`,
+`blog.clean.unsettled`, `blog.fonts.fetch`, `blog.fonts.reader`,
+`blog.fonts.apply`, `blog.fonts.guard`, `blog.store`, `blog.site`, `blog.repair`,
+`blog.scheduler`.
+
+### The private preview routes (webgui)
+
+| Route | Serves |
+|---|---|
+| `GET /blog/preview/{draft_id}/entry.html` | A waiting draft's cleaned document, with `Content-Security-Policy: <ENTRY_CSP>` and `Cache-Control: no-store`. 404 unless `cache:blog:drafts` lists the id and a file with the listed digest is on disk. |
+| `GET /blog/preview/fonts/{name}` | One typeface as `font/woff2`. 404 unless the name matches `FONT_NAME_RE` and the file's content hashes to it. |
+
+Both are behind the login and exist only in the private process.
+
 ---
 
 # Schwab Proxy
@@ -936,7 +1110,10 @@ cache:news:calendar            events:news:calendar           (the economic cale
 cache:news:calendar_public     events:news:calendar_public    (dividends cut to the collection list - a live-origin key)
 cache:news:calendar_status     events:news:calendar_status    (private: per-source errors)
 cache:news:status              events:news:status
-cmd:trade   cmd:portfolio   cmd:market   cmd:news
+cache:blog:drafts              events:blog:drafts             (drafts waiting - metadata and a digest, never a document)
+cache:blog:posts               events:blog:posts              (published entries - metadata)
+cache:blog:result              events:blog:result             (how the last cmd:blog command ended)
+cmd:trade   cmd:portfolio   cmd:market   cmd:news   cmd:blog
 ```
 
 ---
@@ -1017,6 +1194,7 @@ hard-code ports or `D:\` paths.
 | trade_svc | 8213 | `SERVICE_PORTS["trade"]` |
 | market_svc | 8215 | `SERVICE_PORTS["market"]` |
 | news_svc | 8216 | `SERVICE_PORTS["news"]` |
+| blog_svc | 8217 | `SERVICE_PORTS["blog"]` |
 | webgui (NiceGUI) | 8500 | `NICEGUI_PORT` / `NICEGUI_URL` |
 | webgui_live (public screens) | 8501 | `NICEGUI_LIVE_PORT` / `NICEGUI_LIVE_URL` |
 
@@ -1030,7 +1208,7 @@ resolves the identity and every port consumer follows it with no edit of its own
 
 | | prod | dev |
 |---|---|---|
-| `[services]` ports | 8210–8213, 8215, 8216 | **9210–9213, 9215, 9216** (`port_offset`) |
+| `[services]` ports | 8210–8213, 8215–8217 | **9210–9213, 9215–9217** (`port_offset`) |
 | webgui | 8500 | **9500** |
 | webgui_live | 8501 | **9501** |
 | Redis | Redis db **0** | Redis db **1** |

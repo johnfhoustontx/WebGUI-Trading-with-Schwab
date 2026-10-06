@@ -34,12 +34,38 @@ cooldown map the previous one wrote. Call `reset_fake_bus()` and rebuild.
 at the defaults (2026-08-28).** The repo-root **`conftest.py`** carries an autouse
 fixture that refuses any connect resolving into a live data directory
 (`options-scanner/data`, `options-scanner` itself for `gex_history.db`,
-`shared/data`, `webgui/data`, `services/trade_svc/data`, `services/news_svc/data`).
+`shared/data`, `webgui/data`, `services/trade_svc/data`, `services/news_svc/data`,
+`services/blog_svc/data`).
 `tmp_path` and
 `:memory:` are unaffected; a test that genuinely must read production shape marks
 itself **`@pytest.mark.allow_live_db`**. It is verified to apply to per-app runs
 (`cd options-scanner && pytest tests`) since the repo-root `pyproject.toml` is the
 configfile, so rootdir — and therefore conftest collection — starts here.
+
+⚠ **That guard covers `sqlite3.connect` and nothing else. The suite CAN reach the
+network.** `CLAUDE.md` said until 2026-10-06 that the root conftest also guards
+"both HTTP stacks". It does not. A network guard was written on 2026-09-12
+(`602cd1c`, "the suite can no longer reach a real HTTP server, and
+trade-analyzer was outside every guard", on
+`claude/options-strategies-gaps-8636bf`, and its cherry-pick `d4ece94`, on
+`claude/app-architecture-audit-2c8f0e`), but both commits sit on side branches
+and neither is an ancestor of `main` (checked 2026-10-06). So in every suite but
+one, a test that forgets to fake its fetch makes a real request, and nothing
+fails.
+
+The one suite with a request guard is the blog service's, in
+`services/blog_svc/tests/conftest.py` (it covers `requests`, the only client that
+service uses): it stands where `requests` sends, records every call before
+refusing it, and fails the test when the test ends. Two details
+there are worth copying if the root guard is ever landed. It raises a
+`BaseException`, not an `Exception`, because the code under test promises never
+to raise and keeps that promise by catching `Exception`: a `RuntimeError` from
+the guard was caught, turned into "1 stylesheet could not be fetched", and the
+test that forgot its fake passed. And it records the refusal as well as raising
+it, because an exception raised in a worker thread or a pool never reaches the
+test. The same conftest redirects the blog store's default paths into
+`tmp_path`: the store keeps documents and typefaces as plain files, which the
+`sqlite3.connect` guard cannot see.
 
 ⚠ **The layer is the whole point, and the previous attempt proves it.**
 `options-scanner/tests/conftest.py` had carried a fixture written for exactly this
@@ -189,6 +215,7 @@ re-triggers the documented `config`/`scoring`/`notifier` module-name collisions)
 .venv/bin/python -m pytest services/trade_svc      # 77
 .venv/bin/python -m pytest services/market_svc     # 77
 .venv/bin/python -m pytest services/news_svc
+.venv/bin/python -m pytest services/blog_svc
 .venv/bin/python -m pytest shared/bus              # 25
 .venv/bin/python -m pytest shared/contracts        # 49 (no app-dir imports — safe together)
 .venv/bin/python -m pytest shared/tests            # 89

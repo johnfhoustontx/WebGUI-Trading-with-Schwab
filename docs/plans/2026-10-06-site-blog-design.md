@@ -1,6 +1,6 @@
 # A Blog on neuralstrike.co, fed from Claude Chat — design
 
-**Date:** 2026-10-06 · **Status:** approved, not built
+**Date:** 2026-10-06 · **Status:** built in reduced scope on 2026-10-06: the blog and the upload. The connector, its sign-in and the fourth hostname are parked. What exists is described in [`../reference/blog.md`](../reference/blog.md).
 
 ## Ask
 

@@ -46,6 +46,7 @@ Use this map to get from a screen to its numbers. Menu order matches the rail.
 | **Trade Analyzer** | *Trade Analyzer* · *Technical Indicators* |
 | **Portfolio** | *Portfolio Analytics* |
 | **EOD Report** | Aggregation only; it computes nothing of its own |
+| **Blog** | *Site Blog* — the limits, what cleaning removes, the typeface copy, the cadence |
 
 ---
 
@@ -94,7 +95,7 @@ Load-bearing runtime packages:
 | Package | Role |
 |---------|------|
 | `nicegui[highcharts]>=2.0.0` | The web GUI and every chart/gauge. |
-| `fastapi==0.137.0`, `uvicorn==0.49.0`, `starlette==1.3.1` | The proxy + the six domain services. |
+| `fastapi==0.137.0`, `uvicorn==0.49.0`, `starlette==1.3.1` | The proxy + the seven services. |
 | `redis==8.0.0` | Client for the Redis backbone. `fakeredis>=2.20` backs the tests (no live server needed). |
 | `pydantic>=2.0` | The typed cross-tier contracts. |
 | `schwab-py==1.5.1` | Schwab auth / market data / streaming. |
@@ -102,6 +103,7 @@ Load-bearing runtime packages:
 | `pandas>=2.0`, `numpy>=1.24`, `scipy` | Analytics; `scipy.stats.norm` powers Black-Scholes. |
 | `openpyxl` | Reads the sector/watchlist workbooks. |
 | `feedparser==6.0.11` (+ `sgmllib3k`) | `news_svc` parses the public RSS / Atom feeds it polls. |
+| `lxml==6.1.1`, `tinycss2==1.5.1` (+ `webencodings`) | `blog_svc` parses a submitted entry and tokenizes its CSS. Both were already installed as dependencies of NiceGUI; they are named because the cleaner now imports them itself. |
 | `anthropic==0.112.0` | Claude tool-use calls (imported lazily — the suite runs without it configured). |
 | `matplotlib`, `Pillow`, `yfinance` | Charts/imaging, optional fallback data. Notifications are Telegram / Discord / SMS-over-SMTP / X — all HTTP or SMTP, no OS hooks. |
 
@@ -113,7 +115,7 @@ Load-bearing runtime packages:
 
 | Requirement | Detail | Status |
 |-------------|--------|--------|
-| **Redis running on `:6379`** | `sudo systemctl enable --now redis-server`. It is the Tier-3 cache, pub/sub, and command bus — **without it none of the six services can publish and every page shows a "Waiting for … service" placeholder.** It is a **system** unit, so a `systemctl --user` stop of the stack cannot reach it: it survives a Stop All by construction, not by a filter. | Required |
+| **Redis running on `:6379`** | `sudo systemctl enable --now redis-server`. It is the Tier-3 cache, pub/sub, and command bus — **without it none of the seven services can publish and every page shows a "Waiting for … service" placeholder.** It is a **system** unit, so a `systemctl --user` stop of the stack cannot reach it: it survives a Stop All by construction, not by a filter. | Required |
 | `MEMURAI_PASSWORD` | Optional AUTH. Unset = no AUTH (the default, unchanged behavior). | Optional |
 
 ## Schwab API credentials
@@ -171,6 +173,7 @@ Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 | 8213 | trade_svc | Required |
 | 8215 | market_svc | Required |
 | 8216 | news_svc | Required |
+| 8217 | blog_svc | Required |
 | 8500 | webgui (NiceGUI) | Required |
 | 8501 | webgui_live — the PUBLIC read-only screens, a second NiceGUI process | Required |
 
@@ -187,15 +190,16 @@ were removed in September 2026 — nothing in the stack talks to those processes
 
 ## Startup order
 
-The dependency chain is strict: **Redis → schwab-proxy → the six services → webgui.**
+The dependency chain is strict: **Redis → schwab-proxy → the seven services → webgui.**
 Services wait on the proxy because they resolve market data through it (`news_svc`
-calls no proxy — it reads public feeds — but is ordered with the others).
+and `blog_svc` call no proxy — one reads public feeds, the other a local store — but
+both are ordered with the others).
 `webgui_live` sits outside that chain: it reads Redis and nothing else — no proxy
 call, no Schwab call, no service call — so it is ordered after nothing in the target.
 
 | Launcher | Behavior |
 |----------|----------|
-| `systemctl --user start trading-prod.target` | Proxy + 6 services + webgui + webgui_live. Also starts at boot. |
+| `systemctl --user start trading-prod.target` | Proxy + 7 services + webgui + webgui_live. Also starts at boot. |
 | `systemctl --user stop trading-prod.target` | Stops all ten, the public live screens included. **Redis survives** — it is a system unit this cannot reach. |
 | `systemctl --user restart trading-prod-options_svc` | One component. This is exactly what the Status page's Restart button runs. |
 | `journalctl --user -u trading-prod-webgui -f` | Logs. Replaces the `logs/*.out.log` redirection. |
@@ -208,10 +212,10 @@ call, no Schwab call, no service call — so it is ordered after nothing in the 
 ## Verifying the install
 
 1. Open **`http://127.0.0.1:8500/status`** — the System Status page probes Redis,
-   the proxy, Schwab authorization, all six services, the webgui and the public
+   the proxy, Schwab authorization, all seven services, the webgui and the public
    live screens, plus a data-freshness table.
 2. Or probe directly: `GET http://127.0.0.1:8100/health` and
-   `GET http://127.0.0.1:82{10..13}/health`, `:8215/health` and `:8216/health` (each returns `{"domain": …, "up": true}`).
+   `GET http://127.0.0.1:82{10..13}/health`, `:8215/health`, `:8216/health` and `:8217/health` (each returns `{"domain": …, "up": true}`).
 3. Run the tests **one folder at a time** (never `pytest services` across all of
    them — that re-triggers the module-name collisions):
 
@@ -268,13 +272,14 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 | trade_svc | 8213 | On-demand single-symbol analysis + deep dive; the daily watchlist dividend pull. |
 | market_svc | 8215 | Live macro-ticker Market Dashboard (~3 s RTH poll). Its /ES and /NQ tiles quote the front-month contract: quarterly (H, M, U, Z), expiring the third Friday of the month or the session before when that Friday is a closure, and switched `[futures] roll_days_before_expiry` days (8) before expiry — `shared/futures.py`. |
 | news_svc | 8216 | Market News: polls free public RSS / Google News / Yahoo / SEC EDGAR feeds and the economic calendar (Fed, BLS, BEA, FRED, Nasdaq) into `news.db`. No Schwab, no Claude, no proxy. |
+| blog_svc | 8217 | The site Blog: cleans an uploaded HTML document, keeps drafts and entries in `blog.db` and the files beside it, and writes published entries into the served site. No Schwab, no Claude, no proxy; the one outside request is the typeface copy from Google Fonts at upload. |
 | webgui | 8500 | The web UI. |
 | webgui_live | 8501 | The seventeen public screens, on their own origin. |
 
 Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 
 > **These are the *prod* profile.** A **dev** checkout offsets the `[services]`
-> ports to 9210–9213, 9215 and 9216 and the web GUI to 9500, uses Redis **db 1** instead of db 0,
+> ports to 9210–9213 and 9215–9217 and the web GUI to 9500, uses Redis **db 1** instead of db 0,
 > and starts **no proxy of its own** — it borrows prod's on 8100, because the Schwab
 > OAuth refresh token is a single rotating credential that two proxies would
 > invalidate for each other. Identity comes from the gitignored
@@ -454,7 +459,7 @@ tail. Shadow mode's counts replace the first estimate, and
 | `trade-analyzer/` | `src/analysis` — recommendation, scoring, fundamentals, sector. |
 | `portfolio-analyzer/` | `src/` — sector breakdown, comparisons, evaluation. |
 | `shared/` | `analysis_lib/` (technical, market data), `contracts/`, `bus/`. |
-| `services/` | The six Tier-2 domain services. |
+| `services/` | The seven Tier-2 services. |
 | `webgui/` | The NiceGUI front end. |
 
 ## Scoring conventions (shared idioms)
@@ -2591,8 +2596,9 @@ are config.
 
 # Market News
 
-`services/news_svc` — the one service with no Schwab or Claude call, and the one
-that never calls the proxy. It reads one optional credential, `FRED_API_KEY`.
+`services/news_svc` — one of the two services with no Schwab or Claude call and no
+call to the proxy (the other is `blog_svc`, see *Site Blog*). It reads one optional
+credential, `FRED_API_KEY`.
 Designs: `docs/plans/2026-09-25-news-feed-design.md` (v1) and
 `docs/plans/2026-09-26-news-v2-design.md` (impact, the SEC panel, the calendar).
 
@@ -2779,6 +2785,154 @@ items. An SEC 403, 429, 5xx, network failure or missed deadline is treated as an
 outage — that accession and every later one are retried next poll — while any other
 status is that filing's own answer and is not retried.
 
+# Site Blog
+
+`services/blog_svc` (port 8217) and `shared/blog_inbox.py`. The Blog on the public
+site holds **entries**: each one a self-contained HTML document the owner uploads
+on the private **Blog** page. The service cleans the document, keeps it as a
+**draft** (a cleaned copy only the owner can see), and writes it into the public
+site only when the owner presses Publish. It calls neither Schwab nor Claude nor
+the proxy. Design: `docs/plans/2026-10-06-site-blog-design.md`; the reasoning
+behind each rule: `docs/reference/blog.md`.
+
+This chapter derives no market number. It records where the Blog's limits come
+from, what cleaning removes, and when the service does its work.
+
+## Where the limits come from
+
+Every number is a key in `config/blog.toml`, read through
+`shared/blog_inbox.py` and editable under Settings → Configuration → Site blog. A
+missing key or a value outside its range reads as the shipped value. After an
+edit, restart the blog service; the web app needs no restart.
+
+**`[site]`**
+
+| Key | Shipped | Range | What it bounds |
+|---|---|---|---|
+| `enabled` | `true` | — | Off: drafts can still be uploaded and previewed, and Publish still records the entry, but nothing is written to the public site. The answer says so. |
+| `republish_min` | 30 | 1–1440 | Minutes between re-publishing the drafts and entries lists. They are published on every change; this heals a flushed Redis. |
+
+**`[limits]`**
+
+| Key | Shipped | Range | What it bounds |
+|---|---|---|---|
+| `max_html_kb` | 512 | 1–4096 | The largest document accepted, in KB of UTF-8 bytes, measured before cleaning. |
+| `max_drafts` | 20 | 1–200 | Drafts waiting at once. A new one is refused past this. |
+| `title_chars` | 140 | 1–300 | The longest title kept. A longer one is cut. |
+| `summary_chars` | 300 | 1–1000 | The longest summary kept. A longer one is cut. |
+| `max_tags` | 6 | 1–24 | Tags kept on one entry; the rest are dropped. |
+| `tag_chars` | 24 | 1–64 | The longest tag kept. |
+| `slug_chars` | 80 | 16–120 | The longest address a NEW entry may have. A longer one is refused, not cut: half an address is a different address. An entry that already exists is held to 120, so lowering this cannot strand it. |
+| `clean_sec` | 20 | 2–120 | Seconds one document may take to clean before its worker process is killed and the upload refused. |
+| `clean_mem_mb` | 512 | 128–4096 | Memory the cleaning worker may use, in MB. Linux only. |
+| `submissions_per_hour`, `max_wait_sec`, `answer_keep_sec` | 12, 120, 120 | — | **Not read by this build.** They belong to the connector that would let Claude Chat file a draft, which is not built. |
+
+`max_html_kb` has a ceiling because a document travels inside one command, and the
+`cmd:blog` queue keeps its newest 50 commands (`config/services.toml`
+`[stream_keep]`). The two multiply: 512 KB × 50 is about 25 MB of Redis; both at
+their ceilings (4096 KB × 500) would be about 2 GB.
+
+One limit is derived rather than set. A cleaned document, with its typeface rules
+added, is refused when it is larger than **6 × `max_html_kb` + 512 KB**: cleaning
+can multiply a document's size about six times (every `"` inside an attribute is
+written `&quot;`), and the typeface rules come to about 300 KB at their own
+limits.
+
+**`[fonts]`**
+
+| Key | Shipped | Range | What it bounds |
+|---|---|---|---|
+| `enabled` | `true` | — | Off: no typeface is copied and the entry is shown in the fallback fonts its own stylesheet names. |
+| `subsets` | `latin`, `latin-ext` | up to 16 names | The character sets copied. Each is a separate file per weight. |
+| `max_links` | 4 | 1–16 | Typeface stylesheets followed for one entry. |
+| `max_css_kb` | 256 | 16–2048 | The most one stylesheet may send back. |
+| `max_files` | 24 | 1–64 | Typeface files copied for one entry. |
+| `max_file_kb` | 400 | 16–1024 | The largest single file stored. |
+| `max_total_mb` | 12 | 1–64 | All of one entry's files together. They are held in memory at once until stored. |
+| `max_rules` | 96 | 1–1000 | `@font-face` rules written into one entry. Many rules can name one file, so `max_files` does not bound this. |
+| `timeout_sec` | 10 | 1–60 | One request to Google Fonts. |
+| `total_sec` | 30 | 1–600 | All of one entry's requests together. |
+| `user_agent` | a desktop Chrome's | 20–300 printable characters | Who the service says it is. Google sends the WOFF2 format, split by character set, only to a browser it recognises. |
+
+One rule is at most 3,075 characters, so 96 rules add under 300 KB to an entry.
+
+## What cleaning does
+
+The submitted document is parsed (`lxml`) and only read. The stored document is
+built from the cleaner's own lists of tag and attribute names, with every value
+escaped and every stylesheet tokenised (`tinycss2`), filtered and written afresh.
+The result is cleaned again until cleaning changes nothing, at most five times.
+
+| Removed | Notes |
+|---|---|
+| `script`, `noscript`, `iframe`, `frame`, `object`, `embed`, `applet`, `template`, `canvas`, `audio`, `video`, `dialog` | With their content. |
+| `form` and every form control | With their content. |
+| `img`, `picture`, `map` | This version of the Blog carries no images. |
+| `base`, `meta`, `link` | The service writes its own charset and viewport. A link to a Google Fonts stylesheet is followed by the typeface copy, then removed like the rest. |
+| Event-handler attributes (`onclick` and the like) | Counted. |
+| Inside a drawing: `script`, `foreignObject`, `image`, `use`, animation elements, links, `mask`, `pattern`, `symbol`, `filter` | |
+| A link address that is not `http://`, `https://`, `mailto:` or an in-page `#fragment` | The link's text stays; the address goes. |
+| In a stylesheet: `@import`, `@namespace`, `@font-face`, `@charset`; any `url()` that does not point at an id in the same document; `image()`, `image-set()`, `cross-fade()`, `element()`, `expression()` | A fetching function becomes `none`. |
+
+Kept: headings, paragraphs, lists, tables, the inline text elements, inline `svg`
+drawings, the entry's own stylesheets and `style` attributes, and at most 64
+attributes on one element. A link that leaves the page is given
+`target="_blank" rel="noopener noreferrer"`.
+
+An element on neither list is unwrapped: its text stays and nothing is counted.
+Everything else that is removed is counted, and the draft shows the counts as one
+sentence. When no title is typed, the draft takes the document's `<title>`, then
+its first `<h1>`; the summary falls back to its first paragraph.
+
+A document is **refused**, not partly kept, when it is empty, cannot be read to
+its end (cut off inside a tag, or nested past the parser's depth limit), has a tag
+with more than 1,024 attributes, or does not settle.
+
+## The worker's time limit
+
+Each document is cleaned in a separate process, killed after `clean_sec` seconds
+(20 as shipped). An upload that overruns is refused with "Cleaning the file took
+too long, so it was refused." and counted on the service's health check.
+
+The reason is the parser, whose cost is not proportional to the size of its
+input: one tag with tens of thousands of attributes took **216 s** to parse at the
+512 KB limit (measured on libxml2 2.11.9). A check of the text before parsing
+cannot predict that cost reliably, so the limit is a clock on the work itself. On
+Linux the worker also lowers its own memory to `clean_mem_mb` and its processor
+time to `clean_sec + 5` seconds; on Windows the clock is the whole limit.
+
+## The typeface copy
+
+An entry usually asks Google Fonts for its typefaces. The public site loads
+nothing from another site, so at upload the service:
+
+1. follows each `<link rel="stylesheet">` to `https://fonts.googleapis.com/css2?…`,
+   up to `max_links`;
+2. reads the stylesheet and keeps the blocks labelled with one of `subsets`;
+3. fetches each `.woff2` file those blocks name from `https://fonts.gstatic.com`,
+   checks that it is a whole WOFF2 file, and stores it under a name made from the
+   SHA-256 of its content (20 hex characters, then `.woff2`);
+4. writes its own `@font-face` rules into the entry, pointing at
+   `../fonts/<name>`.
+
+The rules are rebuilt from values the service understood, never pasted through
+from Google's stylesheet. A link or a file that fails costs only itself: the entry
+is shown in its fallback fonts and the draft says how many were left out and why.
+Typefaces are shared by every entry that uses them, and one no entry or draft
+names any more is deleted after a publish, a discard or an unpublish.
+
+## Cadence
+
+| When | What happens |
+|---|---|
+| At service start | The store is repaired (files made to agree with the rows after an interrupted write), every entry page on the site is rebuilt, and the two lists are published. The rebuild is what carries a changed site menu into the entry pages. |
+| Every `republish_min` (30 min) | The two lists are published again. The site is rebuilt again only if the last rebuild fell short. |
+| Every 30 s | The loop wakes, beats the heartbeat the health check reads, and re-reads the interval. |
+| On a command | Upload, Publish, Discard and Unpublish run when the Blog page sends them, one at a time. |
+
+Times shown for an entry are Central: the Blog's list and each entry page date an
+entry by the day it was published in `America/Chicago`.
+
 # Known issues
 
 Documented defects a maintainer should know about before trusting a number. These
@@ -2911,6 +3065,7 @@ the source; this table is a summary of them.
 | trade_svc | Analysis on demand. One scheduled job: the watchlist **dividend pull**, once a trading day at or after **06:40 CT** (`[calendar.dividends] refresh_at` in `config/news.toml`); the loop wakes every **60 s** and retries a failed pull after **15 min**. |
 | market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); report summary re-read when the published market report changes (a stat of `deploy/site/reports/latest.html` + `latest.txt` per poll) — no Claude call. |
 | news_svc | Three branches, launched every **30 s** tick (`TICK_S`) as keyed background tasks, so a slow one delays only itself and one still running is skipped, never doubled. **feeds**: every feed polled every **2 min** 08:30–15:00 CT (`[collector] rth_poll_min`), **5 min** in the extended sessions 06:30–08:25 and 15:00–15:15 CT (`eth_poll_min`), **30 min** otherwise on a trading day (`offhours_poll_min`) and **30 min** at weekends and holidays (`weekend_poll_min`), counted from the END of the last poll; nothing polls faster than **60 s** (`MIN_INTERVAL_S`). **calendar**: every tick, fetching only the sources whose own `refresh_min` is due (Fed 60 min, BLS / BEA / FRED calendar 720, Nasdaq 240, values 240). **watch**: every tick, fetching only a series whose release just passed — every **2 min** for up to **60 min**. All in `config/news.toml`, editable in Settings. One cycle of each at a time: a Refresh during one is skipped. |
+| blog_svc | The loop wakes every **30 s** (`TICK_S`) to beat its heartbeat and re-read the interval. **At start**: repair the store, rebuild every entry page on the site, publish the two list views. **Then every 30 min** (`[site] republish_min` in `config/blog.toml`, 1 to 1440, counted from the END of the last pass): the two views again, and the site rebuild again only while the last one fell short. A pass that fails is retried at the next wake. Everything else is on demand, when the Blog page sends a command. |
 
 Six scheduled jobs are **not** on any service's loop — they are systemd timers,
 generated from `config/sessions.toml` by `deploy/systemd/generate_units.py`, so moving

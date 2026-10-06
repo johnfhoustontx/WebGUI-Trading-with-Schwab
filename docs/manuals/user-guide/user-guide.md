@@ -112,7 +112,7 @@ The app reads market data and your positions from Schwab, so you need:
 ## Ports the app uses
 
 The app runs entirely on your own machine and needs these local ports free:
-**6379** (Redis), **8100** (Schwab gateway), **8210–8213**, **8215** and **8216** (the six services),
+**6379** (Redis), **8100** (Schwab gateway), **8210–8213** and **8215–8217** (the seven services),
 **8500** (the web app) and **8501** (the public live screens). If another program
 is already using one of them, the matching piece won't start.
 
@@ -127,7 +127,7 @@ all together with one of the launcher scripts in the project root:
 
 | Command | What it does |
 |----------|--------------|
-| `systemctl --user start trading-prod.target` | Starts the gateway, the six domain services, the web app and the public live screens. |
+| `systemctl --user start trading-prod.target` | Starts the gateway, the seven services, the web app and the public live screens. |
 | `systemctl --user list-units 'trading-prod*'` | Shows what is running. |
 | `journalctl --user -u trading-prod-options_svc -f` | Follows one service's log. |
 
@@ -286,8 +286,8 @@ You don't interact with these directly, but it helps to know they exist:
 - **Schwab gateway (proxy)** — handles the Schwab connection and market data.
   Everything else depends on it. **It must be running first** (the launcher
   handles ordering for you).
-- **Six domain services** — Sentiment, Options, Portfolio, Trade, Market and
-  News. Each one powers its matching page(s).
+- **Seven services** — Sentiment, Options, Portfolio, Trade, Market, News and
+  Blog. Each one powers its matching page(s).
 - **The public live screens** — a second, read-only copy of the web app serving
   `live.neuralstrike.co`. See *The public live screens* above.
 - **Redis** — a local data backbone the services and the web app share.
@@ -310,7 +310,7 @@ launcher, or restart the specific service from the **System Status** page.
 Use **Stop All Services** at the foot of the rail — it asks for your
 authenticator code before it will do anything — or run
 `systemctl --user stop trading-prod.target`. This stops the
-gateway, the six services, the web app **and the public live screens** — so the
+gateway, the seven services, the web app **and the public live screens** — so the
 public site goes dark until you start the stack again. (Redis is intentionally
 left running — it is a *system* service the app's own units cannot reach.)
 
@@ -392,7 +392,7 @@ The autonomous Claude paper trader (*Claude Trades*) was removed on 2026-09-22.
 | Rail item | Pages |
 |-----------|-------|
 | **Portfolio** (standalone) | — |
-| **More** (group) | EOD Report · User Manuals |
+| **More** (group) | EOD Report · Post to X · Blog · User Manuals |
 
 **System controls** sit at the foot of the rail, below a separator: **System
 Status**, **Settings**, a red-outlined **Stop All Services** button, and **Sign
@@ -2654,8 +2654,11 @@ made there.
 
 **Route:** `/blog` — a tab in the **More** group, after Post to X.
 
-Put an entry on the public site's Blog (neuralstrike.co/blog), and take one off.
-An entry is one self-contained HTML document.
+Put an entry on the public site's Blog, and take one off. The Blog's list of
+entries is at `neuralstrike.co/blog.html`, reached from **Blog** in the site's
+menu; each entry has a page of its own at `neuralstrike.co/blog/<address>/`.
+An entry is one self-contained HTML document: a file that carries its own
+styles and needs nothing else to display.
 
 > **Nothing is public until you press Publish.** Uploading a file only makes a
 > *draft*: a cleaned copy that waits on this page, where only you can see it.
@@ -2677,10 +2680,17 @@ An entry is one self-contained HTML document.
   images, and links out to other sites' stylesheets. The typefaces the document
   asks Google Fonts for are copied onto this server instead, and the draft says
   so when one could not be. Scripts never run, in the preview or on the site.
+- **A draft may also carry a note about its typefaces** when some or all of
+  them could not be copied. The entry is then shown in the fallback fonts its
+  own stylesheet names. Preview shows exactly that.
 - **Publish is greyed out** while the title is empty or the address cannot be
-  used. The reason is shown in red under the address: use letters, digits and
-  single hyphens.
+  used. When it is the address, the reason is shown in red under it: use
+  letters, digits and single hyphens, at most 80 characters as shipped. A few
+  addresses are reserved by the site, `fonts` among them.
 - **Discard** deletes a draft. Nothing public changes.
+- **Twenty drafts can wait at once** as shipped (the limit is under Settings →
+  Configuration → Site blog). Past that an upload is refused until you publish
+  or discard one.
 - **To replace an entry**, pick it under **Replace an existing entry** *before*
   you choose the file. The draft then says which entry it replaces and keeps that
   entry's address, which cannot be edited. The old version stays public until you
@@ -2726,7 +2736,7 @@ A health board for the whole stack.
 
 - An **overall banner** — green (all up), red (naming what's down), or grey
   (checking).
-- A **component grid** — Redis, the Schwab gateway, the six services, the web app
+- A **component grid** — Redis, the Schwab gateway, the seven services, the web app
   itself, and the public live screens beside it, each with Online/Offline and its
   tier. The gateway's card also shows the **Schwab auth** state.
 - A **Re-authorize** button on the gateway card opens Schwab's OAuth login in a new
@@ -2956,7 +2966,7 @@ group, next to EOD Report.
 A guarded "stop the whole local stack" page. The **Stop all services** button — a
 red outline, matching the rail — opens a confirmation; the solid red button is the
 **Stop everything** inside it, which is where the decision is actually made.
-Confirming stops the gateway, the six services, the web app **and the public live
+Confirming stops the gateway, the seven services, the web app **and the public live
 screens** — the public site goes dark with it.
 
 **The confirmation asks for your authenticator code.** Type the current 6-digit

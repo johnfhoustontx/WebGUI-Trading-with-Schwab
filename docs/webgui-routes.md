@@ -1282,6 +1282,120 @@ Market Dashboard — **"Macro Board" visual redesign (2026-08-15, presentation-o
 
 Post to X (2026-09-22; `webgui/pages/x_post.py`). A composer — post text, a link (default `https://neuralstrike.co`), hashtags (default `#options #trading`) and an optional PNG or JPEG of up to 5 MB — with a live weighted character count against X's 280 and a preview, over a **Recent posts** table of every X attempt from any source (market reports, hourly trade ideas, posts from here), newest first, with its status (Posted · Dry run · Refused · Failed · Unknown) and the post's link or the refusal reason. **Reads `options:x_log`** (`cache:options:x_log`, written only by `shared/notify/x_post`) through `watch_view`, and **sends one `x_post` command** on `cmd:options` behind a confirm dialog showing the fitted post; the options service fits the text, attaches the image and posts. The Post button stays busy until the log moves — a stale command dropped by the replay guard is logged "expired in the queue", so that wait always ends. ⚠ The count and preview are `shared.x_text` — the service's own weighted length and fitting — but the page **assumes `max_tags` = 4** (`x_text.DEFAULT_MAX_TAGS`): if `x.max_tags` in `shared/notifications.json` differs, the service keeps a different number of tags than the preview shows. ⚠ The default link and tags are **page literals** (`DEFAULT_LINK`, `DEFAULT_TAGS`); the page reads neither `x.link` nor `x.hashtags.marketing`, and the service adds no configured tags to a marketing post. The image travels as base64 inside the command, so it stays in `cmd:options` until the stream trims (~1000 commands). **Private only**: `bus_client.request` refuses on the public process and the route is never registered in `live_main`.
 
+## `/blog`
+
+Blog (2026-10-06; `webgui/pages/blog.py`) — a tab in the **More** group, after
+Post to X (`main.MORE_CHILDREN`). The owner's side of the Blog on
+`neuralstrike.co`: upload one HTML document, preview the cleaned draft, publish
+it, and take a published entry back off. The page asks; **`blog_svc`** (:8217)
+does. The detail behind every rule here is
+[`reference/blog.md`](reference/blog.md); design and plan are
+[`plans/2026-10-06-site-blog-design.md`](plans/2026-10-06-site-blog-design.md)
+and [`plans/2026-10-06-site-blog-plan.md`](plans/2026-10-06-site-blog-plan.md)
+(both describe a larger feature; the connector they cover is not built).
+
+**What it renders**, top to bottom:
+
+- A notice: nothing is public until Publish is pressed.
+- **Add a draft**: a file picker for one `.html` / `.htm` file of up to
+  `[limits] max_html_kb` (512 KB as shipped, printed under the box), beside a
+  **Replace an existing entry** list of the published entries, which starts at
+  "No, this is a new entry" and goes back to it after each upload.
+- **Drafts waiting**: one card per draft. The card shows where the draft came
+  from, its size, when it arrived (Central time), a "Replaces …" line for a
+  replacement, one sentence saying what cleaning removed
+  (`removed_text`), and the typeface note when one was left out. Under those:
+  **Title**, **Summary**, **Address** and **Tags** fields, the full public
+  address or the reason the address cannot be used, and **Preview**,
+  **Discard** and **Publish**.
+- **Published**: a table of the entries, newest first, each row with **Open on
+  the site** and **Unpublish**.
+
+**Views** (all three through `watch_view`; the names are
+`shared.blog_inbox`'s):
+
+| View | Holds | Drives |
+|---|---|---|
+| `blog:drafts` | `{"drafts": [...]}`, metadata and the document's SHA-256, never the document | the draft cards; the preview route reads the digest from it |
+| `blog:posts` | `{"entries": [...]}` | the Published table and the Replace list |
+| `blog:result` | `{"request_id", "command", "ok", "message", "draft_id", "slug"}` | the toast that says how a command ended |
+
+**Commands**, all on `cmd:blog` through `bus_client.request("blog", …)`:
+
+| Command | Sent by | Built with |
+|---|---|---|
+| `draft_submit` | an upload | `blog_inbox.submit_command(html, {}, source="upload", request_id=…)`; a replacement adds `args["revises"]`, the entry's address |
+| `publish` | Publish, after a confirm | `blog_inbox.owner_command("publish", …, draft_id=…, fields=…)` with the four fields as typed |
+| `discard` | Discard, after a confirm | `owner_command("discard", …, draft_id=…)` |
+| `unpublish` | Unpublish, after a confirm | `owner_command("unpublish", …, slug=…)` |
+
+The page cleans nothing: `owner_command` runs `clean_fields` on the fields and
+the service runs it again.
+
+**The two preview routes** (`main.py`, plain `@app.get` routes behind the login
+like every route there):
+
+- `/blog/preview/{draft_id}/entry.html` serves a waiting draft's cleaned
+  document under `blog_inbox.ENTRY_CSP`, with `Cache-Control: no-store`.
+- `/blog/preview/fonts/{name}` serves one typeface from the store's pool as
+  `font/woff2`.
+
+They have exactly these paths because a draft's document says
+`../fonts/<name>` for its typefaces, and from
+`/blog/preview/<id>/entry.html` that resolves to `/blog/preview/fonts/<name>`.
+The same relative address resolves to `/blog/fonts/<name>` on the public site,
+so one staged document works in both places unchanged. The font route is
+registered first because it is the more specific of the two. Both are thin
+wrappers over `blog.preview_document` and `blog.preview_font`, which validate
+the id or the name before anything on disk is touched. Neither exists in the
+public process.
+
+The preview frame carries `sandbox="allow-same-origin allow-popups
+allow-popups-to-escape-sandbox"` (`blog_inbox.ENTRY_SANDBOX`), the same string
+the public entry page uses. ⚠ `allow-scripts` must never be added to it.
+
+**Quirks.**
+
+- **An answer is matched by request id.** `blog:result` holds the last
+  command's answer whoever sent it, and whenever. The page keeps the request
+  ids it sent and toasts only an answer to one of those, so a second tab, or an
+  answer left in the cache from yesterday, raises nothing.
+- **A control waits for its own answer.** The upload box, a card's Publish or
+  Discard, and a table row's Unpublish are held from the click until the answer
+  with that request id arrives or `kit.BUSY_TIMEOUT_SEC` (30 s) passes. If the
+  service is stopped nothing happens: the control waits, then comes back. A
+  table row has no button for the kit to time, so a one-second timer redraws
+  the row once its hold has run out.
+- **Typed values survive a repaint.** The service republishes its views on a
+  timer. An unchanged drafts view rebuilds nothing, because rebuilding a card
+  takes the cursor out of the field being typed in; when the view does change,
+  each card is rebuilt with what the owner had typed (`state["edits"]`, kept
+  per draft id and dropped when the draft is gone).
+- **A stale preview folder is not served.** The preview route serves a draft
+  only when the drafts view lists its id, and only the file whose SHA-256 that
+  view records (`blog_inbox.read_document`). A folder left on disk by a
+  discarded draft, or a file altered on disk, is a 404.
+- **Publish stays disabled** while the title is empty or the address fails
+  `blog_inbox.clean_slug`, the check the service itself runs, so the page
+  cannot hold Publish over an address the service would take or offer one it
+  would refuse. A replacement's address is read-only and is held to the
+  limit's ceiling (`existing_slug`), so an older, longer address still reads as
+  usable.
+- **A replacement is checked against what is published now.** If the entry
+  chosen under Replace has gone by the time the file is uploaded, nothing is
+  sent and the page says so, rather than filing the file as a new entry.
+- **Unpublish emits the row's own address**, never the table's selection, and
+  the address is believed only when it names a row the page is showing.
+- **The upload is refused on the page** when it is not UTF-8 text (a
+  byte-order mark is tolerated, a NUL is not), is empty, or is over the size
+  limit. The service checks all of it again.
+- **The source label can read "Claude Chat"**, but every draft this build makes
+  is stamped `upload` by the service; the connector that would stamp `chat` is
+  not built.
+
+**Private only**: `bus_client.request` refuses on the public process, and
+neither the route nor the two preview routes are registered in `live_main`.
+
 ## Public live screens (`live.neuralstrike.co`) — 2026-09-07
 
 Twenty-five routes (fourteen from 2026-09-07; six more Dealer Positioning views, the public Strategy Finder, the public Rescue form, and the public Calculator and Simulator on 2026-09-21; the public Market News on 2026-09-26) served by a **second NiceGUI process**,

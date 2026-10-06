@@ -94,6 +94,15 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#trade-service-8213">Trade service — :8213</a></li>
 <li><a href="#market-service-8215">Market service — :8215</a></li>
 <li><a href="#news-service-8216">News service — :8216</a></li>
+<li><a href="#blog-service-8217">Blog service — :8217</a><ul>
+<li><a href="#commands-cmdblog">Commands (cmd:blog)</a></li>
+<li><a href="#views">Views</a></li>
+<li><a href="#sharedblog_inbox-the-shared-surface">shared.blog_inbox — the shared surface</a></li>
+<li><a href="#on-disk">On disk</a></li>
+<li><a href="#scheduler-and-health">Scheduler and health</a></li>
+<li><a href="#the-private-preview-routes-webgui">The private preview routes (webgui)</a></li>
+</ul>
+</li>
 </ul>
 </li>
 <li><a href="#schwab-proxy">Schwab Proxy</a><ul>
@@ -247,6 +256,11 @@ keys that feed it. Menu order matches the rail.</p>
 <td>aggregates the <code>options:*</code> keys</td>
 </tr>
 <tr>
+<td><strong>Blog</strong></td>
+<td><code>blog_svc</code> :8217</td>
+<td><code>cache:blog:drafts</code>, <code>:posts</code>, <code>:result</code>; the preview reads the service's data folder through <code>shared.blog_inbox</code></td>
+</tr>
+<tr>
 <td><strong>System Status</strong></td>
 <td>none — probes <code>/health</code> directly</td>
 <td>reads every domain's <code>:ver</code> / <code>:ts</code> side keys</td>
@@ -268,7 +282,10 @@ TIER 3  Redis (:6379)  ◀──cache_set + publish──  TIER 2  services
 <li>The GUI imports <code>nicegui</code> and <code>shared.bus</code> (never <code>redis</code> directly), plus a short
   allow-list: <code>shared.market_calendar</code>, <code>shared.symbols</code>, <code>shared.calibration</code>
   (only <code>bucket_key</code>), <code>repo_paths</code>, <code>requests</code> (only for the <code>/health</code> fan-out),
-  <code>fastapi.responses</code> (report routes) and a lazy <code>edge_tts</code> (spoken alerts). It
+  <code>fastapi.responses</code> (report routes) and a lazy <code>edge_tts</code> (spoken alerts), and
+  the shared request modules a page and its service must agree on, such as
+  <code>shared.blog_inbox</code> (the Blog page). The complete list, with the test that pins
+  each entry, is in <code>CLAUDE.md</code>. It
   does <strong>not</strong> import <code>shared.contracts</code> — contracts are validated service-side on
   write. It never imports an engine, never calls Schwab, and never computes domain
   results.</li>
@@ -348,7 +365,19 @@ existed.</p>
 <p><strong><code>enqueue_command</code></strong> validates before writing, but a malformed or unhandleable
 message that reaches a consumer is moved aside rather than retried forever:</p>
 <p><strong><code>dead_letter(stream, raw_fields, reason) -&gt; None</code></strong> — records the raw message and
-why it failed under <code>dead_letter_key(stream)</code> (<code>dead:{domain}</code>).</p>
+why it failed under <code>dead_letter_key(stream)</code> (<code>dead:{domain}</code>). The list keeps the
+newest <code>[dead_letters] keep</code> records (200) per stream. Never raises.</p>
+<p>A record is <code>{"ts", "reason", "fields"}</code>. <strong>A text field larger than
+<code>[dead_letters] max_field_kb</code></strong> (<code>config/services.toml</code>; shipped 64, range 1 to
+4096, measured in UTF-8 bytes) is cut to that size and ends
+<code>...[truncated, N bytes total]</code>, and the record gains <code>"truncated": true</code>. A
+command can carry a whole document (a blog draft is up to 512 KB), and 200 of
+those kept whole were about 100 MB on one list. A command under the limit is
+recorded exactly as before, with no <code>truncated</code> key. ⚠ A truncated record's
+<code>data</code> is no longer a command anything could decode; nothing reads the list back
+as commands, and a replay tool would have to check <code>truncated</code>. <code>reason</code> is cut
+at 2,048 characters and ends <code>...[truncated, N characters total]</code>. The setting is
+read each time a command is dead-lettered, so a change needs no restart.</p>
 <p><strong><code>drain_pending(stream, group, consumer) -&gt; int</code></strong> — reclaims messages left
 pending by a consumer that died mid-handler, returning how many were recovered.
 The service scaffold calls this at startup.</p>
@@ -361,7 +390,51 @@ The service scaffold calls this at startup.</p>
 </code></pre>
 <h2 id="command-streams">Command streams</h2>
 <p><strong><code>enqueue_command(stream, command) -&gt; str</code></strong> — validates <code>command</code> as a <code>Command</code>
-(<code>{type, args}</code>) and <code>XADD</code>s it to the stream; returns the message id.</p>
+(<code>{type, args}</code>) and <code>XADD</code>s it to the stream; returns the message id. Each write
+trims the stream to its cap, <code>shared.service_limits.stream_keep(stream)</code>.</p>
+<p><strong>The cap is per stream</strong> (<code>config/services.toml [stream_keep]</code>, read on every
+enqueue, so a change needs no restart):</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Shipped</th>
+<th>Range</th>
+<th>Applies to</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>default</code></td>
+<td>1000</td>
+<td>10–100000</td>
+<td>every stream not named below</td>
+</tr>
+<tr>
+<td><code>"cmd:blog"</code></td>
+<td>50</td>
+<td>10–500</td>
+<td>the Blog page's uploads and its Publish</td>
+</tr>
+<tr>
+<td><code>"cmd:blog_inbox"</code></td>
+<td>50</td>
+<td>10–500</td>
+<td>reserved for the connector, which is not built; nothing writes it</td>
+</tr>
+</tbody>
+</table>
+<p>The two blog streams are small because one of their commands carries a whole
+document, up to <code>config/blog.toml [limits] max_html_kb</code> (512 KB): a thousand
+would be about 500 MB of Redis in each, fifty is about 25 MB. A value for a named
+stream that is outside its range, or cannot be read, falls back to that stream's
+shipped number, not to <code>default</code>.</p>
+<p>⚠ <strong>The cap is on the stream, not on its history.</strong> Redis drops the oldest
+entries past it whether or not a consumer has read them, with no dead letter and
+no error. A service that is stopped or busy while more than N commands arrive
+comes back to the newest N. The trim is approximate (<code>MAXLEN ~</code>): a stream of
+small commands can run about a hundred over; a stream of documents, an entry or
+two.</p>
 <p><strong><code>consume_commands(stream, group, consumer, block_ms=50, count=10) -&gt; list[(msg_id, Command)]</code></strong>
 — reads up to <code>count</code> pending messages for a consumer group, blocking up to
 <code>block_ms</code>. The consumer group is auto-created on first call.</p>
@@ -1170,6 +1243,247 @@ payload carries FACTS only: whether an indicator is <em>released</em>, <em>await
 too — <code>feed</code>, <code>sec</code>, <code>calendar</code> and <code>calendar_status</code> (which carries error text).
 Keeping them off <code>live.neuralstrike.co</code> is the job of the code that chooses the key
 (<code>pages/news_live.py</code>, <code>desk.bus_key</code>), not of the ACL.</p>
+<h2 id="blog-service-8217">Blog service — :8217</h2>
+<p><strong>Entry:</strong> <code>services/blog_svc/app.py</code> (<code>make_app("blog", scheduler=scheduler.loop,
+command_handler=handlers.handle_command, on_dropped=handlers.on_dropped)</code>). Owns the
+site Blog's drafts and entries and is the only writer of the blog's public files
+under <code>deploy/site/</code>. <strong>No Schwab call, no Claude call, no proxy.</strong> The one request
+that leaves the box is the typeface copy at upload, to <code>fonts.googleapis.com</code> and
+<code>fonts.gstatic.com</code> only. Design: <code>docs/plans/2026-10-06-site-blog-design.md</code>;
+detail: <code>docs/reference/blog.md</code>.</p>
+<p>The design also describes a connector (a second stream, <code>cmd:blog_inbox</code>, fed by a
+separate gate process). <strong>It is not built</strong>, and this service reads <code>cmd:blog</code> only.</p>
+<h3 id="commands-cmdblog">Commands (<code>cmd:blog</code>)</h3>
+<p>Built by <code>shared.blog_inbox</code> and sent by the private Blog page. Every command
+carries a <code>request_id</code> (16 hex characters, <code>blog_inbox.new_id()</code>); one without a
+usable id is dropped, because nothing could be told how it ended.</p>
+<table>
+<thead>
+<tr>
+<th><code>type</code></th>
+<th><code>args</code></th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>draft_submit</code></td>
+<td><code>request_id</code>, <code>source</code>, <code>html</code>, <code>fields</code> <code>{title, summary, tags, slug}</code>, and optionally <code>revises</code> (the address of the entry this replaces)</td>
+<td>The document is cleaned, its typefaces copied, and the result stored as a draft. Never writes to the site. <code>source</code> is ignored: the service stamps <code>upload</code>.</td>
+</tr>
+<tr>
+<td><code>publish</code></td>
+<td><code>request_id</code>, <code>draft_id</code>, <code>fields</code></td>
+<td>The draft becomes an entry (or replaces the entry it revises), the draft is deleted, the site is rebuilt. A title is required. A new entry needs an address <code>clean_slug</code> accepts; a replacement keeps its entry's address.</td>
+</tr>
+<tr>
+<td><code>discard</code></td>
+<td><code>request_id</code>, <code>draft_id</code></td>
+<td>The draft and its staged document are deleted. Nothing public changes.</td>
+</tr>
+<tr>
+<td><code>unpublish</code></td>
+<td><code>request_id</code>, <code>slug</code></td>
+<td>The entry is removed and the site rebuilt.</td>
+</tr>
+</tbody>
+</table>
+<p><code>blog_inbox.submit_command(html, fields, *, source, request_id)</code> builds the first;
+<code>blog_inbox.owner_command(kind, request_id, **args)</code> builds the other three, and
+returns <code>None</code> for an unknown kind, a bad id, an unusable target, or an argument
+the kind does not take. The service runs every validator again on what it reads.</p>
+<p>⚠ <code>handle_command</code> never raises. The scaffold dead-letters a command whose handler
+raised, and a <code>draft_submit</code> carries a whole document.</p>
+<h3 id="views">Views</h3>
+<p><code>cache:blog:*</code> is readable by the public live process. <strong>No view carries a
+document.</strong></p>
+<p><strong><code>cache:blog:drafts</code></strong> — <code>{"drafts": [row, …]}</code>, newest first. Written
+<code>skip_unchanged</code>, so it holds no timestamp of its own.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>id</code></td>
+<td>str</td>
+<td>The draft id, 16 hex characters</td>
+</tr>
+<tr>
+<td><code>source</code></td>
+<td>str</td>
+<td><code>upload</code> in this build</td>
+</tr>
+<tr>
+<td><code>revises</code></td>
+<td>str</td>
+<td>The address of the entry this replaces, or <code>""</code></td>
+</tr>
+<tr>
+<td><code>slug</code></td>
+<td>str</td>
+<td>The proposed address</td>
+</tr>
+<tr>
+<td><code>title</code>, <code>summary</code></td>
+<td>str</td>
+<td>As typed, else from the document's <code>&lt;title&gt;</code> / first <code>&lt;h1&gt;</code> and first paragraph</td>
+</tr>
+<tr>
+<td><code>tags</code></td>
+<td>list[str]</td>
+<td>At most <code>[limits] max_tags</code></td>
+</tr>
+<tr>
+<td><code>removed</code></td>
+<td>dict[str, int]</td>
+<td>What cleaning took out, by kind: <code>script</code>, <code>form</code>, <code>handler</code>, <code>link</code>, <code>css</code>, <code>img</code>, <code>iframe</code>, <code>href</code> and any other removed element's name</td>
+</tr>
+<tr>
+<td><code>font_note</code></td>
+<td>str</td>
+<td><code>""</code>, or one sentence saying which typefaces were not copied</td>
+</tr>
+<tr>
+<td><code>bytes</code></td>
+<td>int</td>
+<td>The staged document's size</td>
+</tr>
+<tr>
+<td><code>digest</code></td>
+<td>str</td>
+<td>SHA-256 of the staged document; the preview serves only the file that matches</td>
+</tr>
+<tr>
+<td><code>received_at</code></td>
+<td>str</td>
+<td>ISO, UTC</td>
+</tr>
+</tbody>
+</table>
+<p><strong><code>cache:blog:posts</code></strong> — <code>{"entries": [row, …]}</code>, newest first publication first (a
+revision does not move an entry up). <code>skip_unchanged</code>. Each row: <code>slug</code>, <code>title</code>,
+<code>summary</code>, <code>tags</code>, <code>published_at</code>, <code>updated_at</code>.</p>
+<p><strong><code>cache:blog:result</code></strong> — how the last command ended. Written plainly, so the same
+answer twice is two events.</p>
+<pre><code class="language-json">{&quot;request_id&quot;: &quot;…&quot;, &quot;command&quot;: &quot;publish&quot;, &quot;ok&quot;: true,
+ &quot;message&quot;: &quot;The entry is published.&quot;, &quot;draft_id&quot;: &quot;…&quot;, &quot;slug&quot;: &quot;an-entry&quot;}
+</code></pre>
+<p>Always all six keys; an id or address that is not one is <code>""</code>. <code>message</code> is one of
+the service's own whole sentences (<code>handlers.MESSAGES</code>), never an exception's text.
+A reader must match <code>request_id</code> against a request it sent: the view holds the last
+answer whoever sent the command.</p>
+<h3 id="sharedblog_inbox-the-shared-surface"><code>shared.blog_inbox</code> — the shared surface</h3>
+<p>Imports stdlib, <code>repo_paths</code> and <code>shared.config_toml</code> only (pinned by
+<code>shared/tests/test_blog_inbox.py</code>), so Tier 1 may import it.</p>
+<table>
+<thead>
+<tr>
+<th>Name</th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>OWNER_DOMAIN</code> (<code>"blog"</code>), <code>VIEW_DRAFTS</code>, <code>VIEW_POSTS</code>, <code>VIEW_RESULT</code></td>
+<td>The stream's domain and the three view names</td>
+</tr>
+<tr>
+<td><code>new_id()</code>, <code>is_id(raw)</code></td>
+<td>A fresh request or draft id; whether a string is one</td>
+</tr>
+<tr>
+<td><code>submit_command</code>, <code>owner_command</code>, <code>OWNER_KINDS</code></td>
+<td>The command builders</td>
+</tr>
+<tr>
+<td><code>html_ok(html)</code></td>
+<td>A non-blank <code>str</code> of at most <code>max_html_kb</code> in UTF-8 bytes</td>
+</tr>
+<tr>
+<td><code>clean_fields(raw)</code></td>
+<td>Always <code>{"title", "summary", "tags", "slug"}</code>, each cut to its limit, invisible characters removed; unusable is <code>""</code> or <code>[]</code></td>
+</tr>
+<tr>
+<td><code>clean_slug(raw)</code>, <code>existing_slug(raw)</code>, <code>slugify(title)</code></td>
+<td>A NEW address held to <code>slug_chars</code>; an EXISTING entry's, held to the limit's ceiling; an address made from a title</td>
+</tr>
+<tr>
+<td><code>SLUG_RE</code>, <code>RESERVED_SLUGS</code>, <code>ID_RE</code>, <code>FONT_NAME_RE</code></td>
+<td>The patterns. Each ends in <code>\Z</code></td>
+</tr>
+<tr>
+<td><code>ENTRY_SANDBOX</code>, <code>ENTRY_CSP</code></td>
+<td>The frame's <code>sandbox</code> tokens and the policy sent on an entry document. One definition for the site writer, the Caddyfile generator and the private preview</td>
+</tr>
+<tr>
+<td><code>STAGING_DIR</code>, <code>PUBLISHED_DIR</code>, <code>FONTS_DIR</code>, <code>DOC_NAME</code>, <code>NEXT_NAME</code></td>
+<td>The store's folder and file names</td>
+</tr>
+<tr>
+<td><code>read_document(folder, digest)</code>, <code>read_font(fonts_folder, name)</code>, <code>font_name_for(data)</code></td>
+<td>The only two ways to read a stored file from outside the service, and the name a typeface's bytes are stored under</td>
+</tr>
+<tr>
+<td><code>limits()</code>, <code>site()</code>, <code>fonts(over=None)</code>, <code>BOUNDS</code>, <code>DEFAULTS</code>, <code>reset_cache()</code></td>
+<td><code>config/blog.toml</code>, validated</td>
+</tr>
+<tr>
+<td><code>INBOX_STREAM</code>, <code>revise_command</code>, <code>answer_view</code>, <code>INBOX_TYPES</code>, <code>SOURCES</code></td>
+<td>For the connector. Defined and tested; nothing in this build uses them</td>
+</tr>
+</tbody>
+</table>
+<h3 id="on-disk">On disk</h3>
+<pre><code>services/blog_svc/data/            repo_paths.BLOG_DATA (gitignored; in the nightly backup)
+  blog.db                          the rows
+  staging/&lt;draft id&gt;/entry.html    a draft's cleaned document
+  published/&lt;slug&gt;/entry.html      an entry's document
+  fonts/&lt;20 hex&gt;.woff2             one pool of typefaces, named by content
+
+deploy/site/                       repo_paths.SITE_ROOT (the blog paths below are gitignored)
+  blog.json                        {&quot;updated&quot;, &quot;entries&quot;: [{slug, title, summary, tags, published, updated}]}
+  blog/&lt;slug&gt;/index.html           the entry's page: the site menu around a sandboxed frame
+  blog/&lt;slug&gt;/entry.html           the entry document
+  blog/fonts/&lt;20 hex&gt;.woff2        the typefaces published entries use
+  blog/sitemap.txt                 the entries' addresses
+</code></pre>
+<p>The data folder is the source of truth; the site folder is rebuilt from it. While
+a replacement is being put in place, the current document can be under
+<code>entry.html.next</code>: read with <code>read_document</code>, which picks the file whose SHA-256
+is the row's, and never by opening <code>entry.html</code>.</p>
+<h3 id="scheduler-and-health">Scheduler and health</h3>
+<p><code>scheduler.loop</code> wakes every 30 s. First pass: <code>store.repair()</code>, a full site
+rebuild, the two list views. Then every <code>[site] republish_min</code> (30): the views
+again, and the rebuild again only while the last one fell short. <code>/health</code>
+degrade areas: <code>blog.handlers</code>, <code>blog.clean</code>, <code>blog.clean.too_slow</code>,
+<code>blog.clean.unsettled</code>, <code>blog.fonts.fetch</code>, <code>blog.fonts.reader</code>,
+<code>blog.fonts.apply</code>, <code>blog.fonts.guard</code>, <code>blog.store</code>, <code>blog.site</code>, <code>blog.repair</code>,
+<code>blog.scheduler</code>.</p>
+<h3 id="the-private-preview-routes-webgui">The private preview routes (webgui)</h3>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Serves</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /blog/preview/{draft_id}/entry.html</code></td>
+<td>A waiting draft's cleaned document, with <code>Content-Security-Policy: &lt;ENTRY_CSP&gt;</code> and <code>Cache-Control: no-store</code>. 404 unless <code>cache:blog:drafts</code> lists the id and a file with the listed digest is on disk.</td>
+</tr>
+<tr>
+<td><code>GET /blog/preview/fonts/{name}</code></td>
+<td>One typeface as <code>font/woff2</code>. 404 unless the name matches <code>FONT_NAME_RE</code> and the file's content hashes to it.</td>
+</tr>
+</tbody>
+</table>
+<p>Both are behind the login and exist only in the private process.</p>
 <hr />
 <h1 id="schwab-proxy">Schwab Proxy</h1>
 <p><strong>Entry:</strong> <code>schwab-proxy/schwab_proxy.py</code>, port <strong>8100</strong>. Central token manager +
@@ -1660,7 +1974,10 @@ cache:news:calendar            events:news:calendar           (the economic cale
 cache:news:calendar_public     events:news:calendar_public    (dividends cut to the collection list - a live-origin key)
 cache:news:calendar_status     events:news:calendar_status    (private: per-source errors)
 cache:news:status              events:news:status
-cmd:trade   cmd:portfolio   cmd:market   cmd:news
+cache:blog:drafts              events:blog:drafts             (drafts waiting - metadata and a digest, never a document)
+cache:blog:posts               events:blog:posts              (published entries - metadata)
+cache:blog:result              events:blog:result             (how the last cmd:blog command ended)
+cmd:trade   cmd:portfolio   cmd:market   cmd:news   cmd:blog
 </code></pre>
 <hr />
 <h1 id="service-scaffold">Service Scaffold</h1>
@@ -1768,6 +2085,11 @@ hard-code ports or <code>D:\</code> paths.</p>
 <td><code>SERVICE_PORTS["news"]</code></td>
 </tr>
 <tr>
+<td>blog_svc</td>
+<td>8217</td>
+<td><code>SERVICE_PORTS["blog"]</code></td>
+</tr>
+<tr>
 <td>webgui (NiceGUI)</td>
 <td>8500</td>
 <td><code>NICEGUI_PORT</code> / <code>NICEGUI_URL</code></td>
@@ -1797,8 +2119,8 @@ resolves the identity and every port consumer follows it with no edit of its own
 <tbody>
 <tr>
 <td><code>[services]</code> ports</td>
-<td>8210–8213, 8215, 8216</td>
-<td><strong>9210–9213, 9215, 9216</strong> (<code>port_offset</code>)</td>
+<td>8210–8213, 8215–8217</td>
+<td><strong>9210–9213, 9215–9217</strong> (<code>port_offset</code>)</td>
 </tr>
 <tr>
 <td>webgui</td>

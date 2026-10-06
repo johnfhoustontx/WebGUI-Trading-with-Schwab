@@ -43,7 +43,7 @@ Three layers, running as separate programs on your machine:
 | Layer | What it is | Why you care |
 |---|---|---|
 | **The gateway** | `schwab-proxy` on port 8100. Holds your Schwab login and fetches all market data. | If this is down, nothing has fresh data. Start it first. |
-| **The services** | Six background programs (ports 8210–8213, 8215 and 8216), one per subject area: sentiment, options, portfolio, trade, market, news. | They do the work — scanning, scoring, collecting — whether or not a browser is open. |
+| **The services** | Seven background programs (ports 8210–8213 and 8215–8217), one per subject area: sentiment, options, portfolio, trade, market, news, and the site's blog. | They do the work — scanning, scoring, collecting — whether or not a browser is open. |
 | **The web app** | What you look at, on port 8500. | It **only displays**. It never calculates anything itself. |
 
 Between them sits a small in-memory database (Redis).
@@ -97,7 +97,8 @@ The autonomous Claude paper trader (*Claude Trades*) was removed on 2026-09-22.
 |---|---|
 | **Portfolio** | You want your real Schwab holdings with live P&L and sector context. |
 | **More** ▸ EOD Report | You want the day's results across every book. |
-| ▸ User Manuals | You want this guide and the other three. |
+| ▸ Blog | You want to put an entry on the public site's Blog, or take one off. |
+| ▸ User Manuals | You want this guide and the other four. |
 
 At the very bottom of the menu sit the machine-level controls — **System Status**,
 **Settings**, a red-outlined **Stop All Services** button, and **Sign out** last of all. They
@@ -4195,9 +4196,12 @@ that did not go out is listed with the reason, rather than simply not appearing.
 
 ### What it is
 
-The owner's side of the Blog on the public site (neuralstrike.co/blog): upload an
-entry, look at the draft made from it, publish it, and take a published entry back
-off. An entry is one self-contained HTML document.
+The owner's side of the Blog on the public site: upload an entry, look at the draft
+made from it, publish it, and take a published entry back off. An entry is one
+self-contained HTML document: a file that carries its own styles and needs nothing
+else to display. On the site, the list of entries is at `neuralstrike.co/blog.html`
+(**Blog** in the site's menu) and each entry has a page of its own at
+`neuralstrike.co/blog/<address>/`.
 
 ### Where the data comes from
 
@@ -4216,7 +4220,9 @@ of one that is already published.
 
 **Drafts waiting** has one card per draft: where it came from, its size, when it
 arrived (Central time), and what cleaning removed. A replacement names the entry it
-replaces. The four fields are what will be published with it.
+replaces. A draft whose typefaces could not all be copied says so in one sentence.
+The four fields are what will be published with it. Up to twenty drafts wait at
+once as shipped; past that an upload is refused until one is published or discarded.
 
 | Field | What it is |
 |---|---|
@@ -4242,8 +4248,13 @@ without passing through cleaning, a draft you can look at, and your own Publish.
 - **Preview before publishing.** Cleaning can change how a page looks.
 - **Unpublish removes the page**, and its address stops working. To bring an entry
   back, upload its file again.
-- **Publish is greyed out** while the title is empty or the address cannot be used; the
-  reason is shown under the address.
+- **Publish is greyed out** while the title is empty or the address cannot be used;
+  when it is the address, the reason is shown under it.
+- **On the site an entry is shown inside a frame** that runs no scripts, under the
+  site's own menu. A link in an entry that leaves the page opens in a new tab.
+- **Every upload comes from this page.** A draft's first line reads "Uploaded file".
+  Filing a draft directly from a conversation in Claude Chat was designed and is not
+  built.
 - **If the blog service is stopped**, nothing happens: the control you pressed waits,
   then comes back. [System Status](#system-status) shows whether the service is
   running.
@@ -4301,6 +4312,7 @@ merely running but actually *publishing*.
 | trade_svc | 2 | 8213 |
 | market_svc | 2 | 8215 |
 | news_svc | 2 | 8216 |
+| blog_svc | 2 | 8217 |
 | webgui (this app) | 1 | 8500 |
 | webgui_live (public live screens) | 1 | 8501 |
 
@@ -4457,7 +4469,7 @@ number before that happens. The Claude counter does the same for money.
 
 *Menu: bottom of the rail, the red-outlined button · Route `/terminate`*
 
-A confirm-gated stop of the entire local stack — the gateway, all six services, the
+A confirm-gated stop of the entire local stack — the gateway, all seven services, the
 web app itself, and the public live screens on `live.neuralstrike.co`, which go dark
 with it. **Redis is deliberately left running**, because it is a *system* service
 this app does not own.

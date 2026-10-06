@@ -388,24 +388,33 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#related-pages_29">Related pages</a></li>
 </ul>
 </li>
-<li><a href="#user-manuals">User Manuals</a></li>
-</ul>
-</li>
-<li><a href="#system">SYSTEM</a><ul>
-<li><a href="#system-status">System Status</a><ul>
+<li><a href="#blog">Blog</a><ul>
 <li><a href="#what-it-is_31">What it is</a></li>
+<li><a href="#where-the-data-comes-from_30">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_29">Reading the screen</a></li>
 <li><a href="#why-it-matters_25">Why it matters</a></li>
 <li><a href="#caveats-and-gotchas_15">Caveats and gotchas</a></li>
 <li><a href="#related-pages_30">Related pages</a></li>
 </ul>
 </li>
-<li><a href="#settings">Settings</a><ul>
+<li><a href="#user-manuals">User Manuals</a></li>
+</ul>
+</li>
+<li><a href="#system">SYSTEM</a><ul>
+<li><a href="#system-status">System Status</a><ul>
 <li><a href="#what-it-is_32">What it is</a></li>
 <li><a href="#reading-the-screen_30">Reading the screen</a></li>
 <li><a href="#why-it-matters_26">Why it matters</a></li>
 <li><a href="#caveats-and-gotchas_16">Caveats and gotchas</a></li>
 <li><a href="#related-pages_31">Related pages</a></li>
+</ul>
+</li>
+<li><a href="#settings">Settings</a><ul>
+<li><a href="#what-it-is_33">What it is</a></li>
+<li><a href="#reading-the-screen_31">Reading the screen</a></li>
+<li><a href="#why-it-matters_27">Why it matters</a></li>
+<li><a href="#caveats-and-gotchas_17">Caveats and gotchas</a></li>
+<li><a href="#related-pages_32">Related pages</a></li>
 </ul>
 </li>
 <li><a href="#stop-all-services">Stop All Services</a></li>
@@ -464,7 +473,7 @@ explained in plain language under <a href="#dealer-positioning">Dealer Positioni
 </tr>
 <tr>
 <td><strong>The services</strong></td>
-<td>Six background programs (ports 8210–8213, 8215 and 8216), one per subject area: sentiment, options, portfolio, trade, market, news.</td>
+<td>Seven background programs (ports 8210–8213 and 8215–8217), one per subject area: sentiment, options, portfolio, trade, market, news, and the site's blog.</td>
 <td>They do the work — scanning, scoring, collecting — whether or not a browser is open.</td>
 </tr>
 <tr>
@@ -604,8 +613,12 @@ right now?</em>) and <strong>Symbol</strong> (<em>tell me everything about this 
 <td>You want the day's results across every book.</td>
 </tr>
 <tr>
+<td>▸ Blog</td>
+<td>You want to put an entry on the public site's Blog, or take one off.</td>
+</tr>
+<tr>
 <td>▸ User Manuals</td>
-<td>You want this guide and the other three.</td>
+<td>You want this guide and the other four.</td>
 </tr>
 </tbody>
 </table>
@@ -5796,6 +5809,80 @@ that did not go out is listed with the reason, rather than simply not appearing.
 <h3 id="related-pages_29">Related pages</h3>
 <p><a href="#eod-report">EOD Report</a> · <a href="#settings">Settings</a>.</p>
 <hr />
+<h2 id="blog">Blog</h2>
+<p><em>Menu: ACCOUNT → More → Blog · Route <code>/blog</code></em></p>
+<h3 id="what-it-is_31">What it is</h3>
+<p>The owner's side of the Blog on the public site: upload an entry, look at the draft
+made from it, publish it, and take a published entry back off. An entry is one
+self-contained HTML document: a file that carries its own styles and needs nothing
+else to display. On the site, the list of entries is at <code>neuralstrike.co/blog.html</code>
+(<strong>Blog</strong> in the site's menu) and each entry has a page of its own at
+<code>neuralstrike.co/blog/&lt;address&gt;/</code>.</p>
+<h3 id="where-the-data-comes-from_30">Where the data comes from</h3>
+<p>The page changes nothing itself. Each action is a command to the blog service, which
+cleans an uploaded document, keeps it as a draft, and — only on <strong>Publish</strong> — writes it
+into the public site's files. The page reads three things the service publishes: the
+drafts waiting, the entries published, and its answer to the last command. The
+<strong>Preview</strong> is the cleaned document itself, served from the service's own folder
+through the private app, behind the login.</p>
+<h3 id="reading-the-screen_29">Reading the screen</h3>
+<p><strong>Add a draft</strong> takes one HTML file (UTF-8, up to the size printed under the box).
+<strong>Replace an existing entry</strong> decides whether the file is a new entry or a new version
+of one that is already published.</p>
+<p><strong>Drafts waiting</strong> has one card per draft: where it came from, its size, when it
+arrived (Central time), and what cleaning removed. A replacement names the entry it
+replaces. A draft whose typefaces could not all be copied says so in one sentence.
+The four fields are what will be published with it. Up to twenty drafts wait at
+once as shipped; past that an upload is refused until one is published or discarded.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Title</strong>, <strong>Summary</strong>, <strong>Tags</strong></td>
+<td>What the Blog's list of entries shows for this entry.</td>
+</tr>
+<tr>
+<td><strong>Address</strong></td>
+<td>The last part of the entry's web address. The full public address is printed under it. Letters, digits and single hyphens only. A replacement keeps the address of the entry it replaces.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Preview</strong> opens the cleaned document in a frame. <strong>Publish</strong> puts it on the public
+site at once; <strong>Discard</strong> deletes the draft. <strong>Published</strong> lists the entries on the
+site, newest first, each with <strong>Open on the site</strong> and <strong>Unpublish</strong>.</p>
+<h3 id="why-it-matters_25">Why it matters</h3>
+<p>A document written elsewhere can carry anything. Nothing reaches the public site
+without passing through cleaning, a draft you can look at, and your own Publish.</p>
+<h3 id="caveats-and-gotchas_15">Caveats and gotchas</h3>
+<ul>
+<li><strong>Nothing is public until you press Publish</strong>, and Publish takes effect at once.</li>
+<li><strong>Cleaning removes</strong> scripts, forms, event handlers, embedded frames, images, and
+  links out to other sites' stylesheets. The typefaces a document asks Google Fonts for
+  are copied onto this server; the draft says so when one could not be. Scripts never
+  run, in the preview or on the site.</li>
+<li><strong>Preview before publishing.</strong> Cleaning can change how a page looks.</li>
+<li><strong>Unpublish removes the page</strong>, and its address stops working. To bring an entry
+  back, upload its file again.</li>
+<li><strong>Publish is greyed out</strong> while the title is empty or the address cannot be used;
+  when it is the address, the reason is shown under it.</li>
+<li><strong>On the site an entry is shown inside a frame</strong> that runs no scripts, under the
+  site's own menu. A link in an entry that leaves the page opens in a new tab.</li>
+<li><strong>Every upload comes from this page.</strong> A draft's first line reads "Uploaded file".
+  Filing a draft directly from a conversation in Claude Chat was designed and is not
+  built.</li>
+<li><strong>If the blog service is stopped</strong>, nothing happens: the control you pressed waits,
+  then comes back. <a href="#system-status">System Status</a> shows whether the service is
+  running.</li>
+<li>This page exists only in the private app; the public live screens cannot reach it.</li>
+</ul>
+<h3 id="related-pages_30">Related pages</h3>
+<p><a href="#post-to-x">Post to X</a> · <a href="#system-status">System Status</a> · <a href="#settings">Settings</a>.</p>
+<hr />
 <h2 id="user-manuals">User Manuals</h2>
 <p><em>Menu: ACCOUNT → More → User Manuals · Route <code>/manuals</code></em></p>
 <p>Links to the five manuals, each opening in a new tab:</p>
@@ -5836,10 +5923,10 @@ that did not go out is listed with the reason, rather than simply not appearing.
 a trading workflow, which is exactly why they are separated.</p>
 <h2 id="system-status">System Status</h2>
 <p><em>Menu: bottom of the rail · Route <code>/status</code></em></p>
-<h3 id="what-it-is_31">What it is</h3>
+<h3 id="what-it-is_32">What it is</h3>
 <p>A live health board for every part of the stack, plus a check that each service is not
 merely running but actually <em>publishing</em>.</p>
-<h3 id="reading-the-screen_29">Reading the screen</h3>
+<h3 id="reading-the-screen_30">Reading the screen</h3>
 <p><strong>Component cards</strong> — one per process:</p>
 <table>
 <thead>
@@ -5891,6 +5978,11 @@ merely running but actually <em>publishing</em>.</p>
 <td>8216</td>
 </tr>
 <tr>
+<td>blog_svc</td>
+<td>2</td>
+<td>8217</td>
+</tr>
+<tr>
 <td>webgui (this app)</td>
 <td>1</td>
 <td>8500</td>
@@ -5920,28 +6012,28 @@ scans during the session, so overnight and at weekends its age is left alone rat
 than reported as a fault. Views that publish around the clock are checked around the
 clock, with a longer allowance outside market hours.</p>
 </blockquote>
-<h3 id="why-it-matters_25">Why it matters</h3>
+<h3 id="why-it-matters_26">Why it matters</h3>
 <p>Almost every "this page is broken" symptom in this app is a service that has stopped
 publishing. Reloading the browser cannot fix that. This page turns a five-minute
 investigation into a five-second one: find the stale row, restart that service.</p>
 <p><strong>The order matters when restarting.</strong> Redis first, then the proxy, then services, then
 the web app. A service restarted while the proxy is down will start and then fail to
 fetch anything.</p>
-<h3 id="caveats-and-gotchas_15">Caveats and gotchas</h3>
+<h3 id="caveats-and-gotchas_16">Caveats and gotchas</h3>
 <ul>
 <li>The Schwab <strong>refresh</strong> token is the fatal one. <code>token_expired: true</code> on the proxy is
   routine — it auto-refreshes. A missing or expired <em>refresh</em> token needs
   <strong>Re-authorize</strong>.</li>
 </ul>
-<h3 id="related-pages_30">Related pages</h3>
+<h3 id="related-pages_31">Related pages</h3>
 <p><a href="#settings">Settings</a> (API call counts) · <a href="#stop-all-services">Stop All Services</a>.</p>
 <hr />
 <h2 id="settings">Settings</h2>
 <p><em>Menu: bottom of the rail · Route <code>/settings</code></em></p>
-<h3 id="what-it-is_32">What it is</h3>
+<h3 id="what-it-is_33">What it is</h3>
 <p>Every preference in the app, plus two things that are genuinely useful rather than
 cosmetic: <strong>API usage</strong> and <strong>Maintenance</strong>.</p>
-<h3 id="reading-the-screen_30">Reading the screen</h3>
+<h3 id="reading-the-screen_31">Reading the screen</h3>
 <p><strong>Scanner alerts.</strong> Enable the chime, pick the sound and volume, restrict alerts to
 market hours, and set a <strong>minimum score to alert</strong> — the most useful knob here, because
 it is what stops the app interrupting you for mediocre signals.</p>
@@ -6003,14 +6095,14 @@ Shadow.</p>
 an optional purge-first switch, and reports the before-and-after size. The confirm
 <strong>names whether that switch is armed</strong> — with it on, every saved GEX session but the
 last five is deleted before the compaction runs.</p>
-<h3 id="why-it-matters_26">Why it matters</h3>
+<h3 id="why-it-matters_27">Why it matters</h3>
 <p><strong>API usage is the section to actually look at.</strong> The app makes on the order of tens of
 thousands of Schwab calls per day, dominated by the 1-minute gamma collection and the
 market dashboard's ~3-second polling. Schwab rate-limits, and a stack that trips the
 limit degrades in ways that look like unrelated bugs. This page tells you the real
 number before that happens. The Claude counter does the same for money.</p>
 <p><strong>Minimum score to alert</strong> is the difference between an app that helps and one you mute.</p>
-<h3 id="caveats-and-gotchas_16">Caveats and gotchas</h3>
+<h3 id="caveats-and-gotchas_17">Caveats and gotchas</h3>
 <ul>
 <li>Counters are <strong>forward-only</strong> and start when the relevant process restarts — they are
   not historical.</li>
@@ -6018,13 +6110,13 @@ number before that happens. The Claude counter does the same for money.</p>
   the collector is active.</li>
 <li>Appearance changes need the web GUI to restart <em>and</em> a hard browser refresh.</li>
 </ul>
-<h3 id="related-pages_31">Related pages</h3>
+<h3 id="related-pages_32">Related pages</h3>
 <p><a href="#system-status">System Status</a> · <a href="#flow-alerts">Flow Alerts</a> ·
 <a href="#captured-signals">Captured Signals</a>.</p>
 <hr />
 <h2 id="stop-all-services">Stop All Services</h2>
 <p><em>Menu: bottom of the rail, the red-outlined button · Route <code>/terminate</code></em></p>
-<p>A confirm-gated stop of the entire local stack — the gateway, all six services, the
+<p>A confirm-gated stop of the entire local stack — the gateway, all seven services, the
 web app itself, and the public live screens on <code>live.neuralstrike.co</code>, which go dark
 with it. <strong>Redis is deliberately left running</strong>, because it is a <em>system</em> service
 this app does not own.</p>

@@ -34,6 +34,7 @@ portfolio = 8212
 trade     = 8213
 market    = 8215
 news      = 8216
+blog      = 8217
 ```
 
 **STANDING RULE — configurable by default (the user's instruction, 2026-09-19).**
