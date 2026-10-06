@@ -8,8 +8,9 @@
 #   [stream_keep] how many commands each queue keeps after they have been run.
 #
 #   Edit a value here (or in Settings -> Configuration), then restart the
-#   services. [stream_keep] is the exception: it is read each time a command is
-#   sent, so a change there applies to the next command with no restart.
+#   services. Two are exceptions, read each time they are used, so a change
+#   applies to the next command with no restart: [stream_keep], and
+#   [dead_letters] max_field_kb.
 #   Anything you delete falls back to the default in shared/service_limits.py.
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -33,6 +34,15 @@ replay_max_sec = 900
 # that list until 2026-10-04. Each queue now keeps the newest this-many; the
 # count shows on the service's System Status card.
 keep = 200
+
+# How much of one command is kept, in KB. The list is for a person to see what
+# was lost, not a copy to run again, and a command can carry a whole document
+# (a blog draft is up to 512 KB): kept whole, 200 of those were about 100 MB on
+# one list. Text longer than this is cut here and marked
+# "...[truncated, N bytes total]", and the entry is flagged "truncated".
+# Every other command is a few hundred bytes and is kept exactly as it was.
+# 1 to 4096. Read each time a command is kept, so a change needs no restart.
+max_field_kb = 64
 
 [stream_keep]
 # A queue keeps its newest commands after they have been run, so a person can

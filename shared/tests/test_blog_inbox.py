@@ -154,6 +154,72 @@ def test_slugify_cuts_to_the_limit_without_a_trailing_hyphen(monkeypatch):
     assert len(bi.slugify("x" * 500)) == 20
 
 
+def test_slugify_bounds_its_work_before_it_folds_the_title():
+    """U+FDFA is one character that NFKD expands to eighteen. Folding a whole
+    hostile title first took 4.4 s on 170,000 of them; the title is cut to a
+    small multiple of the address limit BEFORE anything else looks at it."""
+    import time
+    title = "ﷺ" * 200_000
+    start = time.perf_counter()
+    slug = bi.slugify(title)
+    took = time.perf_counter() - start
+    assert bi.clean_slug(slug) == slug
+    assert took < 1.0, f"slugify took {took:.2f}s"
+    # Real words at the front of a very long title still make the address.
+    assert bi.slugify("Nuclear Stocks " + "ﷺ" * 200_000) == "nuclear-stocks"
+
+
+@pytest.mark.parametrize("raw", ["abc\n", "abc\r\n", "\nabc", "abc\t", "abc\x0b",
+                                 "abc ", "abc "])
+def test_only_plain_spaces_are_trimmed_from_a_slug(raw):
+    """A typed address may carry a stray space at either end. A newline, a tab
+    or any other whitespace is not something a text field produces: it is
+    refused, never quietly removed."""
+    assert bi.clean_slug(raw) is None
+    assert bi.existing_slug(raw) is None
+
+
+# ── the address of an entry that already exists ─────────────────────────────
+
+def test_an_existing_address_outlives_a_lowered_limit(monkeypatch):
+    """``clean_slug`` holds a NEW address to the current [limits] slug_chars.
+    Applied to an entry already published, lowering that limit would leave the
+    entry with an address nothing could name - so it could never be
+    unpublished. An existing address is held to the limit's CEILING instead."""
+    slug = "a" * 60
+    _cfg(monkeypatch, limits={"slug_chars": 40})
+    assert bi.clean_slug(slug) is None                   # too long to publish now
+    assert bi.existing_slug(slug) == slug                # still nameable
+    rid = bi.new_id()
+    assert bi.owner_command("unpublish", rid, slug=slug) == {
+        "type": "unpublish", "args": {"request_id": rid, "slug": slug}}
+
+
+def test_an_existing_address_is_still_an_allow_list():
+    ceiling = bi.BOUNDS[("limits", "slug_chars")][1]
+    assert bi.SLUG_CHARS_CEILING == ceiling
+    assert bi.existing_slug("x" * ceiling) == "x" * ceiling
+    assert bi.existing_slug(" Nuclear-Stocks ") == "nuclear-stocks"
+    rid = bi.new_id()
+    for bad in ("../x", "fonts", "Fonts", "abc\n", "x" * (ceiling + 1), "", None, 7,
+                "a--b", "a b", "a/b", "a.b", "ü"):
+        assert bi.existing_slug(bad) is None, repr(bad)
+        assert bi.owner_command("unpublish", rid, slug=bad) is None, repr(bad)
+
+
+def test_publishing_and_drafting_keep_the_current_limit(monkeypatch):
+    """Only naming an entry that exists is loosened. A new address - typed on
+    the Blog page or sent by Claude Chat - is still held to today's limit."""
+    slug = "a" * 60
+    _cfg(monkeypatch, limits={"slug_chars": 40})
+    assert bi.clean_fields({"slug": slug})["slug"] == ""
+    cmd = bi.owner_command("publish", bi.new_id(), draft_id=bi.new_id(),
+                           fields={"slug": slug})
+    assert cmd["args"]["fields"]["slug"] == ""
+    sub = bi.submit_command(DOC, {"slug": slug}, source="chat", request_id=bi.new_id())
+    assert sub["args"]["fields"]["slug"] == ""
+
+
 def test_slugify_never_returns_a_reserved_slug():
     for word in bi.RESERVED_SLUGS:
         slug = bi.slugify(word.title())
@@ -202,6 +268,33 @@ def test_control_characters_never_reach_a_field():
     assert f["tags"] == ["t ag"]
     for value in (f["title"], f["summary"], *f["tags"]):
         value.encode("utf-8")                        # raises on a surrogate
+
+
+def test_a_field_made_only_of_invisible_characters_is_empty():
+    """Unicode FORMAT characters (zero-width space and joiners, word joiner,
+    soft hyphen, the byte-order mark, the bidi overrides and isolates) draw
+    nothing. A title of them is a blank row in the list of entries that reads
+    as "has a title"; a bidi override in a summary reorders the text after it."""
+    f = bi.clean_fields({"title": "​​", "summary": "a‮b",
+                         "tags": ["​", "⁠", "\xad", "ok"]})
+    assert f["title"] == ""
+    assert "‮" not in f["summary"] and f["summary"] == "ab"
+    assert f["tags"] == ["ok"]
+
+
+@pytest.mark.parametrize("ch", ["​", "‌", "‍", "⁠", "\xad",
+                                "﻿", "‪", "‫", "‬", "‭",
+                                "‮", "⁦", "⁧", "⁨", "⁩",
+                                "‎", "‏", "؜"])
+def test_no_format_character_survives_in_any_field(ch):
+    f = bi.clean_fields({"title": f"{ch}Ti{ch}tle{ch}", "summary": ch * 5,
+                         "tags": [ch, f"t{ch}ag", f"{ch} {ch}"]})
+    assert f == {"title": "Title", "summary": "", "tags": ["tag"], "slug": ""}
+
+
+def test_two_tags_that_differ_only_by_an_invisible_character_are_one_tag():
+    f = bi.clean_fields({"tags": ["energy", "ener​gy", "ENERGY⁠"]})
+    assert f["tags"] == ["energy"]
 
 
 @pytest.mark.parametrize("raw", [None, "", "title", 7, ["title"], {"tags": "a,b"},

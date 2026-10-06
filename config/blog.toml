@@ -1,7 +1,8 @@
 # The site Blog — what blog_svc accepts as a draft, and what it writes to the site.
 # Read through shared/blog_inbox.py (built-in defaults ← this file ← config/local/blog.toml).
-# Edit + restart blog_svc and the web GUI. A missing key or a bad value reads as
-# the shipped value below, never as an error.
+# Edit here (or in Settings -> Configuration), then restart blog_svc. The web GUI
+# needs no restart: it reads these each time the Blog page is opened.
+# A missing key or a bad value reads as the shipped value below, never as an error.
 # Design: docs/plans/2026-10-06-site-blog-design.md.
 
 [site]

@@ -35,8 +35,10 @@ DEFAULTS = {
     # gets its restart budget back.
     "health": {"tick_stale_sec": 600, "restart_reset_sec": 3600},
     # Commands a service could not run are kept on a list for a person to read.
-    # Only the newest this-many are kept.
-    "dead_letters": {"keep": 200},
+    # Only the newest ``keep`` are kept, and of each one only the first
+    # ``max_field_kb`` of any field: a command can carry a whole document, and a
+    # dead letter is for a person to read, not a copy to run again.
+    "dead_letters": {"keep": 200, "max_field_kb": 64},
     # Threads in each service's shared pool: scheduler branches and anything
     # else handed to the event loop's default executor. Each command queue has
     # a thread of its own outside this pool.
@@ -54,6 +56,8 @@ MAX_SEC = 7 * 24 * 3600        # past a week a "limit" is a typo
 # the stream as it writes: the command just queued would be gone before its
 # service read it.
 STREAM_KEEP_MIN, STREAM_KEEP_MAX = 1, 100000
+# How much of one field a dead letter may keep, in KB.
+DEAD_FIELD_KB_MIN, DEAD_FIELD_KB_MAX = 1, 4096
 
 load, reset_cache = toml_loader(SERVICES_TOML, DEFAULTS, label="services.toml")
 
@@ -77,6 +81,19 @@ def dead_letter_keep() -> int:
     raw = sec.get("keep") if isinstance(sec, dict) else None
     if isinstance(raw, bool) or not isinstance(raw, int) or not 1 <= raw <= 100000:
         return DEFAULTS["dead_letters"]["keep"]
+    return raw
+
+
+def dead_letter_field_kb() -> int:
+    """The most of ONE field a dead letter keeps, in KB (1 to 4096), else the
+    shipped value. ``Bus.dead_letter`` cuts a longer text field to this and
+    marks the record. Read each time a command is dead-lettered, so a change
+    applies to the next one with no restart."""
+    sec = load().get("dead_letters")
+    raw = sec.get("max_field_kb") if isinstance(sec, dict) else None
+    if (isinstance(raw, bool) or not isinstance(raw, int)
+            or not DEAD_FIELD_KB_MIN <= raw <= DEAD_FIELD_KB_MAX):
+        return DEFAULTS["dead_letters"]["max_field_kb"]
     return raw
 
 

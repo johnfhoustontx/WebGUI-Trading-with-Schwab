@@ -1390,6 +1390,12 @@ _NEWS = ConfigFile(
 # loader enforces: outside it a value reads as the shipped one with no sign on
 # this page. Pinned equal, both ways, by tests/test_config_schema.py; this
 # module stays import-free.
+#
+# Restart: the blog service only, never this app. shared.blog_inbox's accessors
+# re-read the file (mtime-cached) on every call, and a page calls them as it is
+# built, so the web GUI picks a change up on the next page load. The service is
+# restarted because that is the flow a service's settings follow here, and
+# nothing is lost by it: it holds no market data.
 _BLOG = ConfigFile(
     name="blog.toml", title="Site blog", icon="article",
     summary="What the Blog accepts as a draft, how large a document and its "
@@ -1749,6 +1755,17 @@ _COMMANDS = ConfigFile(
                   "was lost; the count shows on its System Status card. Each "
                   "queue keeps the newest this-many.",
                   kind="int", unit="commands", min=1, max=100000, step=10),
+            # Bounds mirror shared.service_limits.DEAD_FIELD_KB_MIN / _MAX
+            # (pinned by tests/test_config_schema.py). No restart: the bus reads
+            # it each time it keeps a command.
+            Field("dead_letters.max_field_kb", "How much of each one to keep",
+                  "The list is for you to see what was lost, not a copy to run "
+                  "again. Most commands are a few hundred bytes and are kept "
+                  "whole. One that carries a whole document, such as a blog "
+                  "draft, is cut at this size, ends with a note of how large it "
+                  "was, and is marked as cut. A change applies to the next "
+                  "command that is kept.",
+                  kind="int", unit="KB", min=1, max=4096, step=16, restart=()),
         )),
         # Bounds mirror shared.service_limits.STREAM_KEEP_MIN / _MAX (pinned by
         # tests/test_config_schema.py). No restart: the bus reads the cap at

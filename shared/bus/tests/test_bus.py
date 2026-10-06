@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from shared.bus import Bus
 
 
@@ -405,6 +407,144 @@ def test_the_dead_letter_list_keeps_only_the_newest_entries(monkeypatch):
 def test_an_empty_or_missing_dead_letter_list_counts_zero():
     bus = Bus(fake=True)
     assert bus.dead_letter_len("cmd:nothing") == 0
+
+
+# --- a dead letter keeps only the head of an oversized field ------------------
+# config/services.toml [dead_letters] max_field_kb. A dead letter is for a
+# person to read; it stored the command whole, and a blog command carries a
+# whole document, so 200 dead letters were up to 200 documents.
+
+def _dead(bus, stream):
+    """``[(raw string, parsed record)]`` on ``stream``'s dead-letter list."""
+    return [(raw, json.loads(raw)) for raw in bus._r.lrange(f"{stream}:dead", 0, -1)]
+
+
+def _field_kb(monkeypatch, kb):
+    from shared import service_limits
+    monkeypatch.setattr(service_limits, "dead_letter_field_kb", lambda: kb)
+
+
+def test_a_small_dead_letter_is_stored_exactly_as_it_always_was():
+    """Byte for byte, the timestamp aside: the same three keys in the same
+    order, the same serializer, and no flag that says anything was cut."""
+    b = Bus(fake=True)
+    fields = {"data": '{"type": "paper_create", "args": {"qty": 1, "note": "café"}}'}
+    b.dead_letter("cmd:dlsame", fields, "handler raised")
+    [(raw, rec)] = _dead(b, "cmd:dlsame")
+    assert list(rec) == ["ts", "reason", "fields"]
+    assert raw == json.dumps({"ts": rec["ts"], "reason": "handler raised",
+                              "fields": fields}, default=str)
+
+
+def test_an_oversized_field_is_cut_and_says_how_much_there_was(monkeypatch):
+    _field_kb(monkeypatch, 1)
+    b = Bus(fake=True)
+    fields = {"data": "x" * 5000, "note": "small"}
+    b.dead_letter("cmd:dlbig", fields, "handler raised")
+    [(_raw, rec)] = _dead(b, "cmd:dlbig")
+    assert rec["fields"]["data"] == "x" * 1024 + "...[truncated, 5000 bytes total]"
+    assert rec["fields"]["note"] == "small"
+    assert rec["truncated"] is True
+    assert list(rec) == ["ts", "reason", "fields", "truncated"]
+    assert rec["reason"] == "handler raised"
+
+
+def test_cutting_a_dead_letter_never_touches_the_callers_fields(monkeypatch):
+    """``drain_pending`` hands the SAME dict to its ``on_entry`` callback after
+    dead-lettering it, and the service decodes the command from it to tell the
+    page its request was lost. Cut in place, that decode would fail."""
+    _field_kb(monkeypatch, 1)
+    b = Bus(fake=True)
+    fields = {"data": "x" * 5000}
+    b.dead_letter("cmd:dlcopy", fields, "handler raised")
+    assert fields == {"data": "x" * 5000}
+
+
+def test_a_field_exactly_at_the_limit_is_untouched(monkeypatch):
+    _field_kb(monkeypatch, 1)
+    b = Bus(fake=True)
+    b.dead_letter("cmd:dledge", {"data": "x" * 1024}, "handler raised")
+    [(_raw, rec)] = _dead(b, "cmd:dledge")
+    assert rec["fields"] == {"data": "x" * 1024}
+    assert "truncated" not in rec
+
+
+def test_the_limit_counts_bytes_and_never_leaves_half_a_character(monkeypatch):
+    _field_kb(monkeypatch, 1)
+    b = Bus(fake=True)
+    b.dead_letter("cmd:dlutf", {"even": "é" * 600,            # 1200 bytes
+                                "odd": "a" + "é" * 600,       # 1201 bytes
+                                "fits": "é" * 512},           # 1024 bytes
+                  "handler raised")
+    [(_raw, rec)] = _dead(b, "cmd:dlutf")
+    got = rec["fields"]
+    assert got["even"] == "é" * 512 + "...[truncated, 1200 bytes total]"
+    # byte 1024 falls in the middle of a two-byte character: it is dropped whole
+    assert got["odd"] == "a" + "é" * 511 + "...[truncated, 1201 bytes total]"
+    assert got["fits"] == "é" * 512
+    assert rec["truncated"] is True
+
+
+def test_a_field_that_is_not_text_is_left_alone(monkeypatch):
+    _field_kb(monkeypatch, 1)
+    b = Bus(fake=True)
+    fields = {"n": 12345, "none": None, "list": ["x" * 5000], "flag": True}
+    b.dead_letter("cmd:dlkind", fields, "handler raised")
+    [(raw, rec)] = _dead(b, "cmd:dlkind")
+    assert rec["fields"] == fields
+    assert "truncated" not in rec
+    assert raw == json.dumps({"ts": rec["ts"], "reason": "handler raised",
+                              "fields": fields}, default=str)
+
+
+@pytest.mark.parametrize("fields", [None, "not a dict", ["x" * 5000], 7])
+def test_fields_that_are_not_a_mapping_are_recorded_as_they_were(monkeypatch, fields):
+    _field_kb(monkeypatch, 1)
+    b = Bus(fake=True)
+    b.dead_letter("cmd:dlodd", fields, "decode failed")
+    [(_raw, rec)] = _dead(b, "cmd:dlodd")
+    assert rec["fields"] == fields and "truncated" not in rec
+
+
+def test_an_unusable_limit_in_the_file_falls_back_to_the_shipped_one(monkeypatch):
+    from shared import service_limits
+    monkeypatch.setattr(service_limits, "load", lambda: {"dead_letters": {
+        "keep": 200, "max_field_kb": "lots"}})
+    b = Bus(fake=True)
+    b.dead_letter("cmd:dlcfg", {"under": "x" * 60_000, "over": "x" * 70_000},
+                  "handler raised")
+    [(_raw, rec)] = _dead(b, "cmd:dlcfg")
+    assert rec["fields"]["under"] == "x" * 60_000
+    assert rec["fields"]["over"] == "x" * 65_536 + "...[truncated, 70000 bytes total]"
+
+
+def test_text_that_cannot_be_encoded_is_still_dead_lettered(monkeypatch):
+    """Dead-lettering swallows its own faults so it can never take the consumer
+    loop down - which also means a fault here would lose the record silently."""
+    _field_kb(monkeypatch, 1)
+    b = Bus(fake=True)
+    b.dead_letter("cmd:dlsur", {"data": "\ud800" * 5000}, "handler raised")
+    [(_raw, rec)] = _dead(b, "cmd:dlsur")
+    assert rec["truncated"] is True
+    assert rec["fields"]["data"].endswith("bytes total]")
+
+
+def test_a_stranded_document_is_dead_lettered_small_and_reported_whole():
+    """The whole path, at the shipped limit: a draft stranded by a restart."""
+    html = "<p>" + "nuclear " * 25_000 + "</p>"               # ~200 KB
+    b = Bus(fake=True)
+    b.enqueue_command("cmd:blog_inbox", {"type": "draft_submit",
+                                         "args": {"html": html}})
+    b.consume_commands("cmd:blog_inbox", group="g", consumer="c1", block_ms=10)
+    seen = []
+    assert b.drain_pending("cmd:blog_inbox", "g", "c2", on_entry=seen.append) == 1
+    [(raw, rec)] = _dead(b, "cmd:blog_inbox")
+    assert rec["truncated"] is True
+    assert len(raw) < 64 * 1024 + 1024                       # was ~200 KB
+    assert rec["fields"]["data"].startswith('{"type":"draft_submit"')
+    # what the service is told about is the command as it was sent
+    from shared.contracts.envelope import Command
+    assert Command.from_json(seen[0]["data"]).args["html"] == html
 
 
 def test_draining_hands_each_stranded_command_to_the_caller():

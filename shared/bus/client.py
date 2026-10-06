@@ -53,6 +53,35 @@ def _signature(payload) -> str | None:
         return None
 
 
+def _head_of_fields(raw_fields, limit_bytes: int):
+    """``(fields, cut)``: ``raw_fields`` with every text value longer than
+    ``limit_bytes`` (UTF-8) cut to that and marked, and whether any was.
+
+    For the dead-letter list, which a person reads. Returns the ORIGINAL object
+    when nothing is over the limit, so a small command is recorded exactly as it
+    always was; otherwise a NEW dict. ⚠ Never edits ``raw_fields``:
+    ``drain_pending`` hands the same dict to its ``on_entry`` callback after
+    dead-lettering it, and the service decodes the command from it to tell the
+    page its request was lost. Anything that is not a dict, and any value that
+    is not a ``str``, is left as it is. Cannot raise: ``surrogatepass`` encodes
+    what strict UTF-8 refuses, and the cut is decoded with ``ignore``, which also
+    drops a character the cut landed in the middle of."""
+    if not isinstance(raw_fields, dict):
+        return raw_fields, False
+    out, cut = {}, False
+    for key, value in raw_fields.items():
+        # A character is at most four bytes, so a short string cannot be over
+        # and is never encoded: every ordinary command takes this branch.
+        if isinstance(value, str) and len(value) * 4 > limit_bytes:
+            data = value.encode("utf-8", "surrogatepass")
+            if len(data) > limit_bytes:
+                value = (data[:limit_bytes].decode("utf-8", "ignore")
+                         + f"...[truncated, {len(data)} bytes total]")
+                cut = True
+        out[key] = value
+    return (out, True) if cut else (raw_fields, False)
+
+
 class _Subscription:
     """Wraps a redis pubsub so callers get decoded dict payloads back.
 
@@ -386,13 +415,33 @@ class Bus:
         is routed here (rather than silently lost) so a human can inspect/replay
         it. We deliberately do NOT auto-re-execute — a stranded trade-opening
         command (e.g. ``paper_create`` / ``rescue_apply``) re-run could
-        double-open a position. Stores the raw XADD fields verbatim + why.
+        double-open a position. Stores the raw XADD fields + why.
+
+        The fields are stored verbatim unless one is larger than
+        ``[dead_letters] max_field_kb`` (config/services.toml, shipped 64). A
+        command can carry a whole document - a blog draft is up to 512 KB - and
+        this list keeps the newest 200 per stream, so stored whole a failing
+        blog handler could park about 100 MB here. An oversized text field is
+        cut to the limit and ends ``...[truncated, N bytes total]``, and the
+        record gains ``"truncated": true``. The limit is on the field's UTF-8
+        size; ``json.dumps`` below escapes non-ASCII, so the stored record can
+        be larger than the limit, by a bounded factor.
+
+        ⚠ A truncated record's ``data`` is no longer a command anything could
+        decode. Nothing reads this list back as commands (``/health`` counts it
+        and a person reads it); a replay tool would have to check ``truncated``.
         """
-        record = {
+        fields, cut = _head_of_fields(
+            raw_fields, _service_limits.dead_letter_field_kb() * 1024)
+        record: dict = {
             "ts": datetime.now(timezone.utc).isoformat(),
             "reason": reason,
-            "fields": raw_fields,
+            "fields": fields,
         }
+        if cut:
+            # Added only when something was cut: a record of a small command is
+            # byte for byte what it was before this limit existed.
+            record["truncated"] = True
         try:
             key = self.dead_letter_key(stream)
             self._r.rpush(key, json.dumps(record, default=str))

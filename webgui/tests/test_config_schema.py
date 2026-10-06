@@ -717,6 +717,24 @@ def test_a_queue_cap_override_round_trips_through_the_writer(tmp_path):
             table["default"]) == (20, 300, 50, 1000)
 
 
+def test_the_dead_letter_field_limit_is_catalogued_and_bounded_as_the_loader():
+    """``shared.service_limits.dead_letter_field_kb`` reads a value outside
+    1..4096 as the shipped one. It is read each time a command is kept, so a
+    change needs no restart and the page must not offer one."""
+    from shared import service_limits as sl
+    cfg = cs.BY_NAME["services.toml"]
+    sec, fld = cs.locate(cfg, ("dead_letters", "max_field_kb"))
+    assert fld is not None and fld.label and fld.help
+    assert fld.kind == "int" and fld.unit == "KB"
+    assert (fld.min, fld.max) == (sl.DEAD_FIELD_KB_MIN, sl.DEAD_FIELD_KB_MAX)
+    assert tuple(cs.restart_for(cfg, sec, fld)) == ()
+    assert _shipped("services.toml")["dead_letters"]["max_field_kb"] == \
+        sl.DEFAULTS["dead_letters"]["max_field_kb"] == 64
+    for outside in (sl.DEAD_FIELD_KB_MIN - 1, sl.DEAD_FIELD_KB_MAX + 1):
+        with pytest.raises(ValueError):
+            cs.parse(fld, outside)
+
+
 def test_the_blog_page_calls_an_address_an_address():
     """Labels are written from the reader's side: the operator sees "Address"
     on the Blog page, never the developer's word for it."""

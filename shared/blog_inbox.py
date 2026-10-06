@@ -173,10 +173,13 @@ DEFAULTS = {
 # through the accessors, so the Settings catalogue (webgui/config_schema.py) can
 # offer exactly the range that is enforced here.
 #
-# The ceilings are not decoration. A document travels inside ONE stream entry
-# and the command streams keep about a thousand entries, so ``max_html_kb``
-# bounds Redis memory as well as a request. ``slug_chars`` has a FLOOR because
-# ``slugify`` must always have room for its fallback.
+# The ceilings are not decoration. A document travels inside ONE stream entry,
+# and the two blog streams keep the newest ``[stream_keep]`` entries each
+# (config/services.toml, shipped 50), so ``max_html_kb`` times that is what a
+# stream can hold of Redis memory: about 25 MB as shipped, about 200 MB at this
+# ceiling. ``slug_chars`` has a FLOOR because ``slugify`` must always have room
+# for its fallback, and its CEILING is what an entry that already exists is
+# held to (``existing_slug``).
 BOUNDS = {
     ("site", "republish_min"): (1, 1440),
     ("limits", "max_html_kb"): (1, 4096),
@@ -267,19 +270,45 @@ def fonts() -> dict:
 
 # ── validation ───────────────────────────────────────────────────────────────
 
+# The longest address ANY setting of ``[limits] slug_chars`` could have allowed.
+SLUG_CHARS_CEILING = BOUNDS[("limits", "slug_chars")][1]
+
+
+def _slug(raw, longest) -> str | None:
+    """``raw`` lower-cased, if it is an address of at most ``longest``
+    characters. The one check behind ``clean_slug`` and ``existing_slug``.
+
+    Only plain SPACES are trimmed: a typed address may carry one at either end.
+    A newline, a tab or any other whitespace is not something a text field
+    produces, so it is refused by the pattern rather than quietly removed."""
+    if not isinstance(raw, str):
+        return None
+    slug = raw.strip(" ").lower()
+    if len(slug) > longest or not SLUG_RE.match(slug):
+        return None
+    return None if slug in RESERVED_SLUGS else slug
+
+
 def clean_slug(raw) -> str | None:
     """The address ``raw`` spells, lower-cased and trimmed, or ``None``.
 
+    For a NEW address: a draft's, or the one the operator types before Publish.
     ``None`` means refuse. A slug becomes a folder name under the served root,
     so this is the gate every one passes: the allow-list pattern, at most
     ``[limits] slug_chars`` long, and not a reserved word. It never repairs a
     string into something usable; ``slugify`` is what makes a new slug."""
-    if not isinstance(raw, str):
-        return None
-    slug = raw.strip().lower()
-    if len(slug) > limits()["slug_chars"] or not SLUG_RE.match(slug):
-        return None
-    return None if slug in RESERVED_SLUGS else slug
+    return _slug(raw, limits()["slug_chars"])
+
+
+def existing_slug(raw) -> str | None:
+    """The address of an entry that ALREADY exists, or ``None``.
+
+    The same allow-list as ``clean_slug``, held to the CEILING of
+    ``slug_chars`` instead of its current setting. An entry published at 60
+    characters keeps that address when the limit is later lowered to 40; held
+    to the current limit, nothing could name it again and it could never be
+    unpublished. Use this to FIND or REMOVE an entry, never to create one."""
+    return _slug(raw, SLUG_CHARS_CEILING)
 
 
 # What ``slugify`` returns when a title has nothing an address can be made of.
@@ -294,9 +323,15 @@ def slugify(title) -> str:
     digit becomes one hyphen, and the result is cut to ``[limits] slug_chars``.
     A title with nothing left ("  ", one written in a script with no ASCII
     form, something that is not text) gives ``FALLBACK_SLUG``; a reserved word
-    gets it as a prefix. Uniqueness is the store's business, not this one's."""
+    gets it as a prefix. Uniqueness is the store's business, not this one's.
+
+    ⚠ The title is cut BEFORE it is folded. One character can fold to many
+    (U+FDFA to eighteen), so folding a hostile title whole is where the time
+    went: 4.4 s on 170,000 of them. Only the head of a title can reach an
+    address of ``slug_chars`` characters anyway."""
     cap = limits()["slug_chars"]
-    text = unicodedata.normalize("NFKD", title if isinstance(title, str) else "")
+    head = title[:cap * 4 + 64] if isinstance(title, str) else ""
+    text = unicodedata.normalize("NFKD", head)
     text = text.encode("ascii", "ignore").decode("ascii").lower()
     slug = _NOT_SLUG.sub("-", text).strip("-")[:cap].strip("-")
     if slug in RESERVED_SLUGS:
@@ -304,22 +339,40 @@ def slugify(title) -> str:
     return slug if clean_slug(slug) == slug else FALLBACK_SLUG
 
 
+# Unicode categories ``_text`` removes: surrogates and format characters.
+_INVISIBLE = frozenset({"Cs", "Cf"})
+
+
 def _text(raw, cap) -> str:
     """One line of plain text, at most ``cap`` characters, or ``""``.
 
     Anything that is not a ``str`` is ``""``. Whitespace runs (newlines
-    included) collapse to one space, control characters count as whitespace,
-    and lone surrogates are dropped: JSON can carry one, and it cannot be
-    encoded, so it would raise at the first write to Redis or to disk."""
+    included) collapse to one space and control characters count as whitespace.
+    Two kinds of character are removed outright:
+
+    * lone surrogates (``Cs``): JSON can carry one, and it cannot be encoded,
+      so it would raise at the first write to Redis or to disk;
+    * FORMAT characters (``Cf``): zero-width space and joiners, word joiner,
+      soft hyphen, the byte-order mark, the bidi overrides and isolates. They
+      draw nothing, so a title made of them is a blank row that reads as "has a
+      title", two tags can differ by one and look the same, and a bidi override
+      reorders whatever follows it on the page. Removed, not turned into a
+      space: they sit INSIDE words.
+
+    So text that shows nothing comes back ``""``, which every caller already
+    treats as "not given"."""
     if not isinstance(raw, str):
         return ""
-    # Bounds the work on a hostile megabyte "title". Collapsing can only shrink
+    # Bounds the work on a hostile megabyte "title". Cleaning can only shrink
     # the text, so a few times the cap is all that could ever survive the cut -
     # short of a field that is nearly all whitespace, which is not a title.
     raw = raw[:cap * 4 + 64]
-    kept = "".join(" " if unicodedata.category(ch) == "Cc" else ch
-                   for ch in raw if unicodedata.category(ch) != "Cs")
-    return " ".join(kept.split())[:cap].rstrip()
+    kept = []
+    for ch in raw:
+        kind = unicodedata.category(ch)
+        if kind not in _INVISIBLE:
+            kept.append(" " if kind == "Cc" else ch)
+    return " ".join("".join(kept).split())[:cap].rstrip()
 
 
 def clean_fields(raw) -> dict:
@@ -415,7 +468,8 @@ def revise_command(draft_id, html, fields, *, request_id) -> dict | None:
 # cmd:blog only; ``owner_command`` is the only thing that builds them.
 #   publish    draft_id (+ fields: the title, summary, address and tags as edited)
 #   discard    draft_id
-#   unpublish  slug
+#   unpublish  slug (an EXISTING entry's: held to the limit's ceiling, see
+#              ``existing_slug``)
 OWNER_KINDS = ("publish", "discard", "unpublish")
 _OWNER_ARGS = {"publish": {"draft_id", "fields"},
                "discard": {"draft_id"},
@@ -437,7 +491,9 @@ def owner_command(kind, request_id, **args) -> dict | None:
         return None
     out = {"request_id": request_id}
     if kind == "unpublish":
-        slug = clean_slug(args.get("slug"))
+        # ``existing_slug``, not ``clean_slug``: the entry is already out there
+        # under whatever address the limit allowed on the day it was published.
+        slug = existing_slug(args.get("slug"))
         if slug is None:
             return None
         out["slug"] = slug

@@ -110,7 +110,8 @@ TOOLS_PUBLIC_TOML = REPO_ROOT / "config" / "tools_public.toml"
 EDGE_TOML = REPO_ROOT / "config" / "edge.toml"
 # The site Blog: whether the site is written, the size and count limits on a
 # draft, and the typeface copy. Read by shared/blog_inbox.py from blog_svc (the
-# worker) and the private app. Edit + restart both.
+# worker) and the private app, through accessors that re-read the file each
+# time they are called. Edit + restart blog_svc; the private app needs none.
 BLOG_TOML = REPO_ROOT / "config" / "blog.toml"
 # The swing model refit's ship gate (trade-analyzer/fit_swing_model.py).
 SWING_MODEL_TOML = REPO_ROOT / "config" / "swing_model.toml"

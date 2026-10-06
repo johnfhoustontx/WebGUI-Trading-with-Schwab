@@ -70,6 +70,43 @@ def test_a_usable_pool_size_is_used(monkeypatch):
     assert cl.pool_workers() == 24
 
 
+# ---- how much of one un-run command a dead letter keeps ----------------------
+# A dead letter is for a person to read, and it stored the command whole. A blog
+# command carries a document, so 200 dead letters were up to 200 documents.
+
+def test_a_dead_letter_keeps_sixty_four_kb_of_a_field():
+    assert cl.dead_letter_field_kb() == 64
+    assert (cl.DEAD_FIELD_KB_MIN, cl.DEAD_FIELD_KB_MAX) == (1, 4096)
+
+
+def test_the_shipped_dead_letter_table_says_what_the_defaults_say():
+    import tomllib
+    from repo_paths import SERVICES_TOML
+    shipped = tomllib.loads(SERVICES_TOML.read_text(encoding="utf-8"))
+    assert shipped["dead_letters"] == cl.DEFAULTS["dead_letters"]
+
+
+@pytest.mark.parametrize("ok", [1, 8, 4096])
+def test_a_usable_dead_letter_field_limit_is_used(monkeypatch, ok):
+    monkeypatch.setattr(cl, "load", lambda: {"dead_letters": {"max_field_kb": ok}})
+    assert cl.dead_letter_field_kb() == ok
+
+
+@pytest.mark.parametrize("bad", [0, -1, 4097, True, False, "64", 64.0, 2.5,
+                                 float("nan"), float("inf"), None, [64]])
+def test_an_unusable_dead_letter_field_limit_reads_as_the_shipped_one(
+        monkeypatch, bad):
+    monkeypatch.setattr(cl, "load", lambda: {"dead_letters": {"max_field_kb": bad}})
+    assert cl.dead_letter_field_kb() == 64
+
+
+@pytest.mark.parametrize("table", [None, 5, "x", [1], {}])
+def test_a_dead_letter_table_that_is_not_one_reads_as_shipped(monkeypatch, table):
+    monkeypatch.setattr(cl, "load", lambda: {"dead_letters": table})
+    assert cl.dead_letter_field_kb() == 64
+    assert cl.dead_letter_keep() == 200
+
+
 # ---- how many entries each command stream keeps ------------------------------
 # Every stream was trimmed to 1000. A blog command carries a whole document (up
 # to config/blog.toml [limits] max_html_kb, shipped 512 KB), so at 1000 entries
