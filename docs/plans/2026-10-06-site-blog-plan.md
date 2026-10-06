@@ -755,6 +755,30 @@ There is no dev environment. Two substitutes, both required before a promote.
    (`E:\Users\john_\Downloads\Nuclear Stocks Thesis.html`) through the harness,
    with the real `http_fetch`, and compare the preview with the file opened
    directly. This is a local check only; the file is not committed.
+5. **First live typeface copy.** `services/blog_svc/fonts.py` was never fetched
+   for real while it was written. The suite cannot reach the network and the
+   build did not either, so the parser was written against the SHAPE the css2
+   endpoint is known to send a desktop Chrome, not against an answer. On the
+   first live run (step 4 is one), look at the draft's note and check:
+   1. The answer still labels each block with a `/* subset */` comment directly
+      before `@font-face`. An unlabelled block is dropped ("typefaces were not
+      copied because they are not offered in the character sets copied here" -
+      which is also, correctly, what an icon font says: its blocks are labelled
+      `fallback`, and that name has to be on `[fonts] subsets` to copy one).
+   2. `src` is still exactly `url(https://fonts.gstatic.com/....woff2)
+      format('woff2')`. Anything else in it - a `local()`, a second source,
+      another format hint - drops the block ("typeface rules were not usable").
+   3. The file addresses still fit `_FILE_RE` (letters, digits, `. _ ~ -`).
+   4. A fetched file passes `_is_woff2`: its header's length field equals its
+      size. A browser's decoder refuses a file where it does not, so this
+      should hold - but it is a belief about Google's files, not a measurement.
+   5. Google answers with a plain 200 and no redirect.
+   6. `[fonts] user_agent` is still one Google answers with woff2. If it is
+      not, every block fails check 2; the cure is a setting, not a code change.
+
+   `/health` on `blog_svc` should show no `blog.fonts.*` count afterwards: one
+   under `blog.fonts.fetch` or `blog.fonts.reader` is a fault of the service's
+   own, not Google being away.
 
 ### Task 13: phase 1 docs
 

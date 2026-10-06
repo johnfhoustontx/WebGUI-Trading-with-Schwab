@@ -17,7 +17,10 @@ import traceback
 def where(doing, exc) -> str:
     """``"<doing>: <ExcType> at file:line func < …"`` - enough to find a fault,
     never ``str(exc)`` (which can carry document text)."""
-    frames = traceback.extract_tb(exc.__traceback__)[-4:]
+    # ``limit=-4`` is the LAST four frames, and reads only those: slicing the
+    # whole extracted list would format every frame of a deep traceback (a
+    # RecursionError's is a thousand long) to keep four.
+    frames = traceback.extract_tb(exc.__traceback__, limit=-4)
     trail = " < ".join(f"{os.path.basename(frame.filename)}:{frame.lineno} {frame.name}"
                        for frame in reversed(frames))
     return f"{doing}: {type(exc).__name__} at {trail or 'no frame'}"

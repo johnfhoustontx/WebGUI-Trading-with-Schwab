@@ -1,6 +1,7 @@
 # services/blog_svc/tests/conftest.py
 import pathlib
 import sys
+import threading
 
 import pytest
 
@@ -8,9 +9,11 @@ _REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 if str(_REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT))
 
-# ``_audit`` is not a test module, so pytest does not rewrite its asserts by
-# itself; without this its failures would print without their messages.
-pytest.register_assert_rewrite("services.blog_svc.tests._audit")
+# ``_audit`` and ``_fonts_kit`` are not test modules, so pytest does not rewrite
+# their asserts by itself; without this their failures would print without
+# their messages.
+pytest.register_assert_rewrite("services.blog_svc.tests._audit",
+                               "services.blog_svc.tests._fonts_kit")
 
 
 class NetworkReached(BaseException):
@@ -21,8 +24,44 @@ class NetworkReached(BaseException):
     around every fetch - so a ``RuntimeError`` raised here was caught there,
     turned into "1 stylesheet could not be fetched", and the test that forgot
     its ``fetch=`` PASSED. Nothing in the service catches ``BaseException``
-    (a shutdown must get through), so this gets through too.
-    ``test_fonts_review.py`` pins it."""
+    (a shutdown must get through), so on the thread the test runs on this gets
+    through too.
+
+    ⚠ On that thread ONLY. Raised in a worker thread nobody joins and checks,
+    it ends the thread, pytest reports a warning, and the test passes; raised
+    inside a thread pool it is kept on a future and nothing is reported at all.
+    Raising is therefore half the guard. The other half is ``NetworkGuard``,
+    which records every refusal and fails the test when it ends.
+    ``test_fonts_fetch.py`` pins both halves."""
+
+
+class NetworkGuard:
+    """What stands where ``requests`` sends, for one test.
+
+    Every call is RECORDED (the name of the thread that made it) before it is
+    refused, and ``check`` - run by the fixture when the test ends - fails if
+    anything was recorded. Recorded at the point of refusal rather than caught
+    in ``threading.excepthook``, because the hook is only called for an
+    exception that ESCAPES a thread: a pool, or any worker that catches
+    ``BaseException``, never lets it get that far."""
+
+    def __init__(self):
+        self.reached = []
+
+    def refuse(self, *_args, **_kwargs):
+        self.reached.append(threading.current_thread().name)
+        raise NetworkReached("blog_svc tests must not reach the network")
+
+    def check(self) -> None:
+        assert not self.reached, (
+            "this test tried to reach the network, on thread(s) "
+            f"{', '.join(self.reached)}: give localize a fake fetch=, or replace requests.get")
+
+    def expected(self) -> list:
+        """For a test OF the guard: what was recorded, forgotten, so that the
+        test which reached it on purpose does not fail for it."""
+        seen, self.reached = self.reached, []
+        return seen
 
 
 @pytest.fixture(autouse=True)
@@ -54,7 +93,23 @@ def _no_real_network(monkeypatch):
     suite is a mistake - make one fail loudly rather than hang or escape.
 
     ``fonts.http_fetch``'s own tests monkeypatch ``requests.get`` on top of
-    this; that replacement wins, so they are unaffected."""
-    def refuse(*_args, **_kwargs):
-        raise NetworkReached("blog_svc tests must not reach the network")
-    monkeypatch.setattr("requests.sessions.Session.send", refuse)
+    this; that replacement wins, so they are unaffected.
+
+    A request is refused where it is made (``NetworkReached``) AND fails the
+    test when the test ends, whichever thread made it: see ``NetworkGuard``.
+    The guard is what a test gets by asking for this fixture.
+
+    ⚠ This shares the test's ``monkeypatch``, like the store fixture above: a
+    test that calls ``monkeypatch.undo()`` takes the guard off."""
+    yield from guard_the_network(monkeypatch)
+
+
+def guard_the_network(monkeypatch):
+    """The fixture above, as the plain generator it is: put the guard on, hand
+    it over, and when the test is done FAIL if it was reached. Separate so that
+    the last step - the one nothing else would notice missing - can be driven
+    by a test."""
+    guard = NetworkGuard()
+    monkeypatch.setattr("requests.sessions.Session.send", guard.refuse)
+    yield guard
+    guard.check()
