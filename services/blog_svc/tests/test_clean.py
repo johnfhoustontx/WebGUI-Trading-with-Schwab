@@ -27,21 +27,15 @@ import pathlib
 import random
 import re
 import time
-from html.parser import HTMLParser
 
 import pytest
 import tinycss2
 
 from services import _degrade
 from services.blog_svc import clean
+from services.blog_svc.tests._audit import (EMPTY_SHELL, FIXTURE, SHELL_OPEN, _Seen, audit,
+                                            cleaned, css_problems, page)
 from shared import blog_inbox
-
-FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "entry_like_the_example.html"
-
-SHELL_OPEN = ('<!doctype html><html lang="en"><head><meta charset="utf-8">'
-              '<meta name="viewport" content="width=device-width, initial-scale=1">'
-              '<title>')
-EMPTY_SHELL = SHELL_OPEN + "</title><style>/*blog-fonts*/</style></head><body></body></html>"
 
 
 def test_the_cleaners_two_libraries_are_pinned_where_prod_installs_from():
@@ -57,200 +51,23 @@ def test_the_cleaners_two_libraries_are_pinned_where_prod_installs_from():
                 f"{package} is not pinned in {listing}")
 
 
-# ── the audit: a second parser's view of the output ──────────────────────────
-
-_SHELL_META = {("meta", "charset"), ("meta", "name"), ("meta", "content")}
-_ALLOWED_TAGS = ({"html", "head", "meta", "title", "style", "body"}
-                 | {t.lower() for t in clean.KEPT_HTML | clean.KEPT_SVG})
-_ALLOWED_ATTRS = {a.lower() for a in clean.ATTRS}
-_PREFIXED = re.compile(r"(?:aria|data)-[a-z0-9][a-z0-9._-]*")
-_HREF_OK = re.compile(r"(?:https?://[^\s/?#\\]|mailto:\S|#)\S*")
-_CSS_VALUED = {"style", "fill", "stroke", "clip-path", "marker-start", "marker-mid", "marker-end"}
-
-# The shell: the plan's, with whatever the entry's own <html> and <body> handed
-# on. Every attribute is double-quoted, so "[^"]*" is one whole value.
-_SHELL_RE = re.compile(
-    r'<!doctype html><html lang="[^"]*"(?: [a-z][a-z0-9._-]*="[^"]*")*><head><meta charset="utf-8">'
-    r'<meta name="viewport" content="width=device-width, initial-scale=1"><title>')
-
-# ⚠ These four lists are typed out HERE, on purpose, and not read from the
-# cleaner. An audit that imported the cleaner's allow-lists would agree with
-# any mistake made in them.
-_ON_THE_SHELL = {"class", "style", "lang", "dir"}
-_AT_RULES_THAT_FETCH_NOTHING = {
-    "media", "supports", "container", "layer", "keyframes", "-webkit-keyframes", "-moz-keyframes",
-    "page", "property", "scope", "starting-style", "counter-style", "font-feature-values", "swash",
-    "styleset", "stylistic", "character-variant", "ornaments", "annotation", "font-palette-values",
-    "view-transition", "position-try"}
-_FUNCTIONS_THAT_FETCH = {
-    "url", "image", "image-set", "-webkit-image-set", "-moz-image-set", "cross-fade",
-    "-webkit-cross-fade", "element", "-moz-element", "src", "expression"}
-_PROPERTIES_THAT_RUN = {"behavior", "-ms-behavior", "-moz-binding"}
-
-
-def _declared(css, kind):
-    """The name of every declaration in ``css``, found with tinycss2's own rule
-    and declaration parsers - a different reading of the text from the flat
-    token walk the cleaner does."""
-    names = []
-    todo = [tinycss2.parse_stylesheet(css, True, True) if kind == "sheet"
-            else tinycss2.parse_blocks_contents(css, True, True)]
-    while todo:
-        for item in todo.pop():
-            if item.type == "declaration":
-                names.append(item.lower_name)
-            elif item.type in ("qualified-rule", "at-rule") and item.content is not None:
-                todo.append(tinycss2.parse_blocks_contents(item.content, True, True))
-    return names
-
-
-def css_problems(css, kind="sheet"):
-    """What should not be in a piece of cleaned CSS. ``kind`` is ``"sheet"``, a
-    ``"style"`` attribute, or a single ``"value"`` (a paint attribute).
-
-    Read from the TOKENS a CSS parser makes of the output, not by searching its
-    text: a pattern for ``url(`` cannot tell a class named ``.url\\(x\\)`` or the
-    words in a string from a request, and one that could not be fooled that way
-    would be the cleaner's own second look, checking itself."""
-    problems = []
-    if "</" in css or "<!" in css:
-        problems.append("could close its own element")
-    todo = list(tinycss2.parse_component_value_list(css))
-    while todo:
-        node = todo.pop()
-        kind_of = node.type
-        if kind_of == "url" and not re.fullmatch(r"#[A-Za-z0-9_-]+", node.value):
-            problems.append(f"url({node.value})")
-        elif kind_of == "function":
-            if node.lower_name in _FUNCTIONS_THAT_FETCH or "url" in node.lower_name:
-                problems.append(f"{node.name}()")
-            todo.extend(node.arguments)
-        elif kind_of == "at-keyword" and node.lower_value not in _AT_RULES_THAT_FETCH_NOTHING:
-            problems.append(f"@{node.value}")
-        elif kind_of == "error":
-            problems.append(f"a {node.kind} the cleaner should have mended")
-        elif kind_of == "comment" and node.value:      # "/**/" is the serialiser's own separator
-            problems.append("a comment")
-        elif kind_of == "literal" and node.value in ("<!--", "-->", "\\"):
-            problems.append(node.value)
-        elif kind_of.endswith(" block"):
-            todo.extend(node.content)
-    if kind != "value":
-        problems += [f"declares {name}" for name in _declared(css, kind)
-                     if name in _PROPERTIES_THAT_RUN]
-    return problems
 
 
 def test_the_audit_sees_what_fetches_and_nothing_that_only_says_so():
+    newline_in_string = "p{a:'x" + chr(0x0A) + "}"
+    assert len(newline_in_string) == 8 and newline_in_string[6] == "\n"
     for bad in ("p{a:url(x.png)}", "p{a:URL('x.png')}", "p{a:u\\72l(x.png)}", "p{a:image('x.png')}",
                 "p{a:cross-fade(a,b)}", "p{a:src('x')}", "p{a:element(#x)}", "p{a:image-set('x' 1x)}",
                 "p{a:texturl(x)}", "@import 'x';", "@font-face{a:b}", "@\\69mport 'x';",
                 "p{behavior:x}", "@media print{p{-moz-binding:x}}", ".a{b:c;.d{BEHAVIOR:x}}",
-                "p{a:b}}", "p{a:'x\n}", "/* c */p{a:b}", "<!-- p{a:b} -->", "p{a:b}</style", "p{a:<!x}"):
+                "p{a:b}}", newline_in_string, "/* c */p{a:b}", "<!-- p{a:b} -->", "p{a:b}</style",
+                "p{a:<!x}"):
         assert css_problems(bad), bad
-    for fine in ("p{a:url(#g)}", ".url\\(x\\){a:b}", "p{content:\"see url\\28 x) and \\40 import\"}",
+    for fine in ("p{a:url(#g)}", ".url\\(x\\){a:b}", 'p{content:"see url\\28 x) and \\40 import"}',
                  ".javascript:hover{a:b}", ".behavior:hover{a:b}", "p{scroll-behavior:smooth}",
                  "@media (width < 600px){p{a:b}}", "a/**/b{c:d}", "@supports (behavior:x){p{a:b}}"):
         assert not css_problems(fine), (fine, css_problems(fine))
     assert css_problems("behavior:x", "style") and not css_problems("behavior", "value")
-
-
-class _Seen(HTMLParser):
-    """What ``html.parser`` finds in a document: tags, attributes, the whole
-    text of every ``<style>``, and anything that is neither (comments,
-    declarations)."""
-
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.tags, self.attrs, self.other, self.css = [], [], [], []
-        self._style = None
-
-    def handle_starttag(self, tag, attrs):
-        self.tags.append(tag)
-        self.attrs.extend((tag, name, value) for name, value in attrs)
-        self._style = [] if tag == "style" else None
-
-    def handle_endtag(self, tag):
-        if tag == "style" and self._style is not None:
-            self.css.append("".join(self._style))
-            self._style = None
-
-    def handle_data(self, data):
-        if self._style is not None:
-            self._style.append(data)
-
-    def handle_comment(self, data):
-        self.other.append(("comment", data))
-
-    def handle_decl(self, decl):
-        self.other.append(("decl", decl))
-
-    def handle_pi(self, data):
-        self.other.append(("pi", data))
-
-    def unknown_decl(self, data):
-        self.other.append(("unknown", data))
-
-
-def audit(document):
-    """Assert everything the cleaner promises about ``document``; return what
-    the second parser saw."""
-    assert _SHELL_RE.match(document), document[:300]
-    assert document.endswith("</body></html>")
-    assert document.count(clean.FONT_CSS_MARK) == 1
-    seen = _Seen()
-    seen.feed(document)
-    seen.close()
-    assert seen.other == [("decl", "doctype html")], seen.other
-    assert seen.tags[:6] == ["html", "head", "meta", "meta", "title", "style"]
-    for once in ("html", "head", "body"):
-        assert seen.tags.count(once) == 1, once
-    assert seen.tags.count("meta") == 2
-    assert set(seen.tags) <= _ALLOWED_TAGS, sorted(set(seen.tags) - _ALLOWED_TAGS)
-    for tag, name, value in seen.attrs:
-        if (tag, name) in _SHELL_META:
-            continue
-        where = f"{name}={value!r} on <{tag}>"
-        assert not name.startswith("on"), where
-        if tag in ("html", "body"):
-            assert name in _ON_THE_SHELL or re.fullmatch(r"data-[a-z0-9][a-z0-9._-]*", name), where
-        elif tag == "a" and name == "href":
-            assert _HREF_OK.fullmatch(value), where
-        elif tag == "a" and name in ("target", "rel"):
-            assert value == {"target": "_blank", "rel": "noopener noreferrer"}[name], where
-        else:
-            assert name in _ALLOWED_ATTRS or _PREFIXED.fullmatch(name), where
-        if name in _CSS_VALUED:
-            problems = css_problems(value, "style" if name == "style" else "value")
-            assert not problems, (where, problems)
-    # the first stylesheet is the mark and nothing else; the rest are the entry's
-    assert seen.css[0] == clean.FONT_CSS_MARK
-    for css in seen.css[1:]:
-        assert not css_problems(css), (css_problems(css), css[:300])
-    return seen
-
-
-def cleaned(document, *, may_refuse=False):
-    """Clean, audit, and prove the result is a fixed point - and that no
-    exception was swallowed on the way. A crash inside the cleaner comes back as
-    the empty shell, which is a perfectly clean document and would pass the
-    audit; the degrade counter is the only thing that says it happened.
-
-    A REFUSAL passes the audit too, and for the same reason. So unless the test
-    says a refusal is an acceptable answer (``may_refuse``), getting one fails
-    here: a test about what survives must not go green because nothing did."""
-    crashes = _degrade.counts().get("blog.clean", 0)
-    result = clean.clean(document)
-    assert isinstance(result, clean.Cleaned)
-    audit(result.html)
-    assert clean.clean(result.html).html == result.html, "cleaning its own output changed it"
-    assert _degrade.counts().get("blog.clean", 0) == crashes, "the cleaner raised inside"
-    assert may_refuse or "unparseable" not in result.removed, "the document was refused"
-    return result
-
-
-def page(payload):
-    return f"<html><body><h1>T</h1>{payload}<p>kept</p></body></html>"
 
 
 # ── the plan's corpus ────────────────────────────────────────────────────────
@@ -322,7 +139,6 @@ MORE_HOSTILE = [
     "<svg><rect style='fill:url(https://e.com/p.svg#a)' /></svg>",
     "<svg><path clip-path='url(//e.com/c.svg#a)' marker-end='url(//e.com/m.svg#a)' /></svg>",
     "<svg><feImage href='https://e.com/x.png' /></svg>",
-    "<svg xmlns:xlink='http://www.w3.org/1999/xlink'><script xlink:href='https://e.com/x.js' /></svg>",
     "<svg><foreignObject><body onload=alert(1)><p onclick=alert(1)>x</p></body></foreignObject></svg>",
     # things that fetch
     "<img src='https://e.com/pixel.gif'>", "<IMG SRC='https://e.com/pixel.gif'>",
@@ -394,6 +210,10 @@ def test_nothing_hostile_survives_in_any_spelling(payload):
 # ── inputs two parsers read differently ──────────────────────────────────────
 
 RAW_TEXT_TRICKS = [
+    # a self-closing <script>: 2.11 honours the slash, an HTML5 tokenizer does
+    # not (the script then swallows the rest of the document). Either way no
+    # script survives; on HTML5 the document is refused as cut off.
+    "<svg xmlns:xlink='http://www.w3.org/1999/xlink'><script xlink:href='https://e.com/x.js' /></svg>",
     "<style>p{}</style><script>alert(1)</script>",
     "<style>p{color:red}</style ><script>alert(1)</script>",
     "<style><!--</style><script>alert(1)</script>--></style>",
@@ -945,15 +765,9 @@ def test_a_bug_inside_the_cleaner_is_a_refusal_with_a_trace(monkeypatch):
     assert _degrade.counts().get("blog.clean", 0) == before + 1
 
 
-def test_cleaning_is_idempotent():
-    corpus = [page(p) for p in HOSTILE + MORE_HOSTILE + RAW_TEXT_TRICKS]
-    corpus += [page(f"<style>{css}</style>") for css in HOSTILE_CSS]
-    corpus += [FIXTURE.read_text(encoding="utf-8"), "plain words", "<p>a<p>b", EMPTY_SHELL]
-    for document in corpus:
-        once = clean.clean(document)
-        twice = clean.clean(once.html)
-        assert twice.html == once.html, document[:200]
-        assert clean.clean(twice.html).html == once.html
+# (There is no separate idempotence test: ``cleaned()`` asserts the fixed point
+# - ``clean(result.html).html == result.html`` - for every document every other
+# test runs through it, which is the whole corpus.)
 
 
 @pytest.mark.parametrize("document", [
@@ -1014,7 +828,9 @@ def test_the_summary_is_the_first_paragraph_with_words_in_it():
 
 
 def test_invisible_and_control_characters_do_not_reach_the_title():
-    c = cleaned("<title>\u202eevil\u200b title\x07</title><p>x</p>")
+    bidi, zero_width, bell = chr(0x202E), chr(0x200B), chr(0x07)
+    assert len(bidi) == len(zero_width) == len(bell) == 1
+    c = cleaned(f"<title>{bidi}evil{zero_width} title{bell}</title><p>x</p>")
     assert c.title == "evil title"
 
 
@@ -1031,10 +847,21 @@ def test_an_unknown_element_is_unwrapped_and_its_text_survives():
     assert words == "hi therecustomkept navafter span office"
 
 
+# A table-internal element written on its own is foster-parented or dropped by
+# an HTML5 tokenizer but kept where it stands by libxml2 2.11; wrapping it in
+# the ancestor it belongs to makes the test about the cleaner, not the parser.
+_NEEDS_A_TABLE = {"caption": "<table>{}</table>", "colgroup": "<table>{}</table>",
+                  "col": "<table><colgroup>{}</colgroup></table>",
+                  "thead": "<table>{}</table>", "tbody": "<table>{}</table>",
+                  "tfoot": "<table>{}</table>", "tr": "<table><tbody>{}</tbody></table>",
+                  "td": "<table><tr>{}</tr></table>", "th": "<table><tr>{}</tr></table>"}
+
+
 def test_every_kept_html_element_comes_through():
     void = {"br", "hr", "col", "wbr"}
     for tag in sorted(clean.KEPT_HTML - void - {"a"}):
-        c = clean.clean(f"<{tag} class='k'>x</{tag}>")
+        element = f"<{tag} class='k'>x</{tag}>"
+        c = clean.clean(_NEEDS_A_TABLE.get(tag, "{}").format(element))
         audit(c.html)
         assert f'<{tag} class="k">' in c.html, tag
     c = cleaned("<p>a<br>b<wbr>c</p><hr><table><colgroup><col class='c'></colgroup>"
@@ -1076,7 +903,7 @@ def test_a_drawing_keeps_its_shapes_and_loses_what_can_fetch_or_run():
                   # an unknown element is unwrapped where it stands ...
                   "loose</svg>",
                   # ... and a paragraph ENDS the drawing, as it does in a browser
-                  # (review, C5; this used to be unwrapped into the svg as text)
+                  # (this used to be unwrapped into the svg as text)
                   "</svg><p>para</p>"):
         assert piece in c.html, piece
     for gone in ("linked", "example.com", "in-mask", "in-pattern", "in-symbol", "stdDeviation",
@@ -1134,7 +961,7 @@ def test_attributes_are_an_allow_list():
         "target='_blank' rel='noopener' align='center' bgcolor='red' name='n'>t</div>")
     assert _attrs_of(c.html, "div") == {
         "class": "a b", "id": "x", "title": "t", "lang": "fr", "dir": "rtl", "role": "note",
-        "aria-label": "L", "data-k": "v", "data-up": "1", "data-ok.1_2-3": "y"}
+        "aria-label": "L", "hidden": "", "data-k": "v", "data-up": "1", "data-ok.1_2-3": "y"}
 
 
 def test_the_table_list_and_disclosure_attributes_survive():
@@ -1203,7 +1030,7 @@ KEPT_HREFS = [
     ("http://example.com", "http://example.com"),
     ("HTTPS://Example.com/Path", "https://Example.com/Path"),
     ("  https://example.com/x \n", "https://example.com/x"),
-    # a plain space inside is encoded, not a reason to drop the link (review, C4)
+    # a plain space inside is encoded, not a reason to drop the link
     ("https://example.com/a b", "https://example.com/a%20b"),
     ("#a b", "#a%20b"),
     ("https://user@example.com:8443/x", "https://user@example.com:8443/x"),
@@ -1230,7 +1057,7 @@ DROPPED_HREFS = [
     "https://?x", "https://#x", "ftp://example.com/x", "file:///c:/x", "tel:+15555550100", "sms:1",
     "blob:https://example.com/x", "about:blank", "ws://example.com", "wss://example.com",
     "view-source:https://example.com", "intent://example.com#Intent;end", "chrome://settings",
-    # a tab or a line break INSIDE an address: refused whole, not repaired (review, C4)
+    # a tab or a line break INSIDE an address: refused whole, not repaired
     "https://exam\nple.com/\tx", "https://example.com/a\tb", "https://example.com/a\r\nb",
     "https://exam\u200bple.com/", "\u202ehttps://example.com/",
     "https://example.com/\u2028x", "htt\u00adps://example.com/", "mailto:", "",
@@ -1342,8 +1169,11 @@ _PIECES = [
 # storm is held to the audit instead, which reads every place a host COULD be
 # fetched from - each attribute, and every ``url()`` and ``@import`` - with a
 # second parser.
+# ``<plaintext>`` is left OUT: it has no end tag in HTML (it runs to the end of
+# the document), so _STORM_END cannot close it and a document that opens one is
+# refused as cut off. Its own test (below) allows that.
 _RAW_TEXT_PIECES = _PIECES + [
-    "<style>", "<style>", "<title>", "<xmp>", "<plaintext>", "<listing>", "<noembed>",
+    "<style>", "<style>", "<title>", "<xmp>", "<listing>", "<noembed>",
     "<noframes>", "<svg><style>", "<svg><title>", "p{background:url(//e.com/x)}",
     "<style>p{background:url(//e.com/x)}</style>", "<style>@import '//e.com/x.css';</style>",
     "<style>@font-face{font-family:x;src:url(//e.com/f.woff2)}</style>",
@@ -1356,8 +1186,20 @@ _RAW_TEXT_PIECES = _PIECES + [
 # being refused at the door. A document that ENDS inside a comment, a quote, a
 # tag or a raw-text element is refused (the parser never reached its end), and
 # random markup ends like that half the time. This closes whichever of them is
-# open and says one more word.
-_STORM_END = "'\">-->]]></style></script></textarea></title></xmp></noscript></iframe><p>the end</p>"
+# open and says one more word. Every element an HTML5 tokenizer reads as raw
+# text has its end tag here, so the storm settles the same way on either parser.
+_STORM_END = ("'\">-->]]></style></script></textarea></title></xmp></noscript></iframe>"
+              "</noembed></noframes></listing><p>the end</p>")
+
+
+def test_a_bare_plaintext_runs_to_the_end_and_is_refused_or_read():
+    """``<plaintext>`` has no end tag; everything after it is its text. So a
+    document that opens one is either read whole (the text is inert) or refused
+    as cut off - never half-served."""
+    c = clean.clean("<h1>T</h1><plaintext><script>alert(1)</script><p>kept</p>")
+    audit(c.html)
+    assert "<script" not in c.html.lower()
+    assert "unparseable" in c.removed or "kept" in c.body
 
 
 def test_a_storm_around_raw_text_elements_always_passes_the_audit():

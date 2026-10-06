@@ -26,26 +26,31 @@ three reasons:
   nothing.** The same file is served by Caddy and by the private preview.
 
 **It is an allow-list, and the output is built, never edited.** The submitted
-tree is only READ. Every byte of the result is one of: a tag name from
-``KEPT_HTML`` / ``KEPT_SVG`` (spelled from this module's constants, never from
-the input), an attribute name from ``ATTRS`` (same) or an ``aria-`` / ``data-``
-name made of ``[a-z0-9._-]`` only, an attribute value or a text run with
-``& < > "`` escaped, or CSS that was tokenised, filtered and written out again.
-No comment, processing instruction, CDATA section or doctype is ever copied.
-That is what makes it hold whatever the parser did: lxml's wheels
+tree is only READ. Every name written in the result comes from this module's
+own constants, never from the input: a tag name from ``KEPT_HTML`` /
+``KEPT_SVG``; an attribute name from ``ATTRS``, or ``href`` on an anchor with
+the ``target`` / ``rel`` the module adds, or ``class`` / ``style`` / ``lang`` /
+``dir`` / ``data-*`` on the shell; or an ``aria-`` / ``data-`` name of
+``[a-z0-9._-]``. Every value and text run is escaped (``& < > "``), and CSS is
+tokenised, filtered and serialised afresh. No comment, processing instruction,
+CDATA section or doctype is ever copied. That is what makes it hold whatever
+the parser did: lxml's wheels
 bundle libxml2 2.11.9 on Windows (measured) and 2.14 on Linux (lxml 6's release
 notes; its HTML tokenizer was rewritten to follow HTML5), so the SAME bytes can
 parse into different trees on the developer's box and on prod. A tree can be
 surprising; it cannot contain a tag this module did not choose to write.
 
-**A change it makes is right, or counted, or a refusal - never silent.** The
-operator publishes what the preview shows, and a preview cannot show what is
-missing on a screen the operator is not looking at. So: an honest construct is
-kept with its meaning (a ``<`` in a media query is a comparison; a class named
-``.javascript`` is a class); whatever is taken out of a stylesheet adds to
-``removed["css"]``; and a document the parser stopped reading part-way, or
-that would cost it minutes, comes back as ``{"unparseable": 1}`` with nothing
-in it rather than as its first half.
+**What it changes, it changes toward honesty.** The operator publishes what the
+preview shows, and a preview cannot show what is missing on a screen the
+operator is not looking at. So an honest construct is kept with its meaning (a
+``<`` in a media query is a comparison; a class named ``.javascript`` is a
+class); whatever is taken out of a stylesheet adds to ``removed["css"]``;
+anything the whole document could not survive comes back as a refusal
+(``removed == {"unparseable": 1}`` with a ``reason``) rather than as its first
+half. Two things ARE silent, by choice: an unknown element is unwrapped (its
+text stays, no count), and a disallowed non-handler attribute is dropped; a
+count per unwrap would be noise, not a signal. Scripts, handlers, links,
+images, forms, CSS edits and whole-document failures are all counted or named.
 
 **It repeats until it settles.** Unwrapping an unknown element can leave markup
 the parser nests differently the second time (``<p><x><div>`` becomes
@@ -62,12 +67,14 @@ entry carries, and they are not written here.
 Design: docs/plans/2026-10-06-site-blog-design.md ("Cleaning", "How an entry is
 isolated").
 """
+import logging
 import re
 import secrets
 import unicodedata
 from collections import Counter
 from dataclasses import dataclass
 from html import unescape
+from typing import NamedTuple
 
 import lxml.html
 import tinycss2
@@ -77,6 +84,8 @@ from tinycss2.serializer import serialize_identifier, serialize_string_value
 
 from services import _degrade
 from shared import blog_inbox
+
+log = logging.getLogger("blog_svc.clean")
 
 # The comment ``fonts.py`` replaces with the entry's ``@font-face`` rules. It is
 # in the result exactly ONCE, as the whole text of the first ``<style>``: every
@@ -136,8 +145,10 @@ DROPPED = frozenset(
 # chart it was meant to clip. Nothing kept here can use a mask, a filter or a
 # symbol (no such attribute survives, and ``<use>`` is gone); a ``fill`` that
 # names a dropped pattern paints nothing, which is the honest result.
+# Lower-cased at definition (``foreignObject`` → ``foreignobject`` …), because
+# every lookup is against a lower-cased tag name.
 DROPPED_SVG = frozenset(
-    "script foreignObject image use animate animateMotion animateTransform set a "
+    "script foreignobject image use animate animatemotion animatetransform set a "
     "mask pattern symbol filter metadata".split())
 
 # Kept, outside a drawing: text, structure and tables. Everything here has the
@@ -178,6 +189,9 @@ ATTRS = frozenset(
     "class id title lang dir role style "
     # tables, lists, <time>, <details>
     "colspan rowspan scope headers datetime open start reversed "
+    # ``hidden`` is inert, and leaving it out is not: the attribute would go and
+    # the words the author hid would come out visible
+    "hidden "
     # drawing: geometry
     "viewBox d x y x1 y1 x2 y2 cx cy r rx ry width height transform points dx dy "
     "preserveAspectRatio "
@@ -248,7 +262,6 @@ _FONT_LINK_RE = re.compile(r"^https://fonts\.googleapis\.com/css2\?[A-Za-z0-9:;,
 _HTML_NAME = {name: name for name in KEPT_HTML}
 _SVG_NAME = {name.lower(): name for name in KEPT_SVG}
 _ATTR_NAME = {name.lower(): name for name in ATTRS}
-_DROPPED_SVG = frozenset(name.lower() for name in DROPPED_SVG)
 _PREFIXED_RE = re.compile(r"^(?:aria|data)-[a-z0-9][a-z0-9._-]*\Z")
 _DATA_RE = re.compile(r"^data-[a-z0-9][a-z0-9._-]*\Z")
 _VOID = frozenset({"br", "hr", "col", "wbr"})
@@ -258,7 +271,7 @@ _VOID = frozenset({"br", "hr", "col", "wbr"})
 # arrives with the rest of the entry INSIDE the embed. Dropping one of these
 # "with its content" would take the entry with it; a browser, which knows the
 # element is empty, would have shown it.
-_DROPPED_EMPTY = frozenset(
+_DROPPED_EMPTY_HTML = frozenset(
     "area base embed frame img input link meta source track".split())
 # The same question inside a drawing, where an element is written ``<rect/>``.
 # libxml2's HTML parser has no notion of a drawing; whether it honours that
@@ -268,10 +281,10 @@ _DROPPED_EMPTY = frozenset(
 # answer: a shape keeps only its own tooltip (``title`` / ``desc``) inside it,
 # and anything else found under one is read as coming after it; the dropped
 # elements that never hold anything lose only themselves.
+_DROPPED_EMPTY_SVG = frozenset(
+    "image use animate animatemotion animatetransform set".split())
 _SVG_SHAPES = frozenset("path line rect circle ellipse polyline polygon stop".split())
 _SVG_OWN = frozenset({"title", "desc"})
-_SVG_DROPPED_EMPTY = frozenset(
-    "image use animate animatemotion animatetransform set".split())
 # The start tags that END a drawing: the HTML standard's list (its "in foreign
 # content" rules, less ``font``, which only counts with certain attributes). A
 # browser that meets ``<p>`` inside an ``<svg>`` closes the svg and carries on
@@ -281,8 +294,9 @@ _ENDS_DRAWING = frozenset(
     "b big blockquote body br center code dd div dl dt em embed h1 h2 h3 h4 h5 "
     "h6 head hr i img li listing menu meta nobr ol p pre ruby s small span "
     "strong strike sub sup table tt u ul var".split())
-# The two ``<meta>``s the shell writes itself. One in the submitted document is
-# REPLACED by the shell's, so it is not reported as something taken out.
+# The ``<meta name=...>`` whose job the shell does itself. One in the submitted
+# document is REPLACED by the shell's, so it is not reported as something taken
+# out (a charset meta is caught the same way, by its ``charset`` attribute).
 _SHELL_META_NAMES = frozenset({"viewport"})
 
 
@@ -487,31 +501,35 @@ def _css_spells_a_fetch(written) -> bool:
                for view in (bare, _css_uncommented(bare)))
 
 
-def _escaping_less_than(cls):
-    """``cls``, writing an escaped ``<`` in a NAME as ``\\3c `` instead of
-    ``\\<``. Both are the same name to CSS; only the second puts a ``<`` into
-    the text. (Exact: tinycss2 escapes every ``<`` in a name, so a backslash
-    directly before one is always that escape.)"""
-    class Written(cls):
-        __slots__ = ()
+class _Written:
+    """A stand-in for a token whose text is already settled.
 
-        def _serialize_to(self, write):
-            parts = []
-            super()._serialize_to(parts.append)
-            write("".join(parts).replace("\\<", "\\3c "))
-    return Written
+    ``tinycss2.serialize`` reads a node's ``.type`` (for the spacing it inserts
+    between tokens) and calls the node's ``_serialize_to`` to emit its text.
+    This supplies both: the real type, and text computed once at construction.
 
+    ⚠ ``_serialize_to`` is tinycss2 private API. The pin in ``requirements.txt``
+    (and the test that checks it) is what keeps this working across upgrades."""
+    __slots__ = ("type", "source_line", "source_column", "_text")
 
-_NAMED = {cls: _escaping_less_than(cls)
-          for cls in (css_ast.IdentToken, css_ast.HashToken, css_ast.DimensionToken,
-                      css_ast.FunctionBlock)}
+    def __init__(self, node, text):
+        self.type = node.type
+        self.source_line = node.source_line
+        self.source_column = node.source_column
+        self._text = text
+
+    def _serialize_to(self, write):
+        write(self._text)
 
 
 def _css_named(node, name):
-    """A token that carries a name, safe to write whatever the name holds."""
-    if "<" in name:
-        node.__class__ = _NAMED[type(node)]
-    return node
+    """``node`` made safe to write whatever its NAME holds. tinycss2 escapes a
+    ``<`` in a name as ``\\<``, which leaves a literal ``<`` in the output; the
+    same name written ``\\3c `` does not, and reads back identically. Only a
+    name with a ``<`` in it needs the fresh stand-in."""
+    if "<" not in name:
+        return node
+    return _Written(node, tinycss2.serialize([node]).replace("\\<", "\\3c "))
 
 
 def _css_none(node):
@@ -575,7 +593,8 @@ def _css_token(node, found):
         # Punctuation only. That leaves out "<!--" and "-->" (legal, useless,
         # and one would open a comment in the markup), a stray backslash
         # (written out before the NEXT token, it would escape it into something
-        # else), and any control character.
+        # else), and any control character. A literal that is none of those is a
+        # token dropped, counted below like any other.
         if node.value in _CSS_PUNCTUATION:
             return node
     elif kind in ("ident", "hash"):
@@ -593,9 +612,10 @@ def _css_token(node, found):
         return node
     elif kind == "error" and node.kind == "bad-url":
         return _css_url(node, None, found)
-    elif kind == "comment" or (kind == "error" and node.kind.startswith("eof")):
-        return None             # says nothing / already mended by closing the string
-    found.removed["css"] += 1   # punctuation that is not, a broken string, a stray bracket
+    elif kind == "error" and node.kind.startswith("eof"):
+        return None             # already mended by closing the string / block
+    # (no "comment" arm: the caller tokenises with skip_comments=True)
+    found.removed["css"] += 1   # a non-punctuation literal, a broken string, a stray bracket
     return None
 
 
@@ -701,8 +721,8 @@ def _css(source, found, where) -> str:
     try:
         nodes = tinycss2.parse_component_value_list(source, skip_comments=True)
         css = tinycss2.serialize(_css_tokens(nodes, found, where)).strip()
-    except Exception:
-        found.removed["css"] += 1
+    except RecursionError:      # and ONLY that: anything else raised in there is a fault
+        found.removed["css"] += 1  # in this module, and has to reach ``clean`` to be counted
         return ""
     css = _respell(css, _MARK_IN_CSS)
     if _css_unsafe(css):
@@ -722,82 +742,162 @@ def _css(source, found, where) -> str:
 #   away those of a second one, and a file saved from claude.ai IS a second
 #   one - the artifact's own document inside the download wrapper's ``<body>``.
 #
-# ``_scan`` is one pass, and quote-aware: whatever is inside quotes is ONE value
-# however long (an svg path, a style attribute). It does not have to agree with
-# the parser about every broken tag - only never to count fewer attributes than
-# the parser will build, and never to refuse an honest document. So a ``<`` that
-# does not begin a tag (``a < b``) is text, and the inside of ``<style>`` and
-# ``<script>`` is skipped, where ``(400px<width)`` is CSS and not a tag.
+# ``_start_tags`` is one quote-aware pass yielding ``(name, attribute pairs)``
+# for every start tag. Whatever is inside quotes is ONE value however long (an
+# svg path, a style attribute). It does not have to agree with the parser about
+# every broken tag - only never to count fewer attributes than the parser will
+# build, and never to refuse an honest document. So a ``<`` that does not begin
+# a tag (``a < b``) is text.
 #
-# ⚠ Known gap, the price of not refusing an honest stylesheet: skipping to
-# ``</style>`` trusts that the ``<style>`` tag WAS a tag. Written inside an
-# element only an HTML5 tokenizer reads as raw text (``<textarea>``,
-# ``<title>``), it is not one there, and what follows it up to the next
-# ``</style>`` goes uncounted on such a parser. The size limit, the hourly
-# limit and the consumer's own thread still bound what that can cost.
+# TWO things the scan must get right, and they pull against each other:
+#
+# * CROWDING must never UNDERCOUNT. Whatever tag the parser builds, the scan has
+#   to have counted at least as many attributes on it, on WHATEVER libxml2 is
+#   installed. So the scan skips NOTHING for crowding - not even ``<script>`` or
+#   ``<style>``, whose content 2.11 usually treats as raw text but, in some
+#   nestings (inside ``<math>``, after a stray ``</xmp>``), parses as markup and
+#   builds the tags in. Reading everything cannot undercount.
+# * ... without refusing an HONEST stylesheet. ``@media (400px<width){…}`` has a
+#   ``<width)`` that looks like a tag opener; read naively its "attributes"
+#   would be the whole rule block. A real start tag never contains an unquoted
+#   ``{`` or ``}`` before its ``>``, so a candidate that hits one is abandoned -
+#   the ``<`` was text - and the scan resumes after it. That one rule lets the
+#   scan read inside ``<style>`` safely instead of trusting it to be raw text.
+# * SHELL ADOPTION must never take ``<html>`` / ``<body>`` attributes from a tag
+#   that is not the document's own - one inside a drawing, a title, a textarea,
+#   a template. Those are marked ``foreign`` and the shell ignores them; the
+#   crowding count still sees them.
 
-_TAG_RE = re.compile(r"<(?:(!--)|([A-Za-z_:][^\s/>]*))")
+# A start tag's name; OR an end tag, declaration (``<!...``) or instruction
+# (``<?...``), which carry no attributes and run to the next ``>``; OR a comment.
+_TAG_RE = re.compile(r"<(?:(!--)|([A-Za-z_:][^\s/>]*)|([/!?]))")
+# One attribute: the closing ``>``; OR an unquoted ``{``/``}`` that proves this
+# was never a tag (group 2); OR a name with an optional value.
 _TAG_ATTR_RE = re.compile(
-    r"""[\s/]*(?:(>)|([^\s/>][^\s/>=]*)(?:\s*=\s*(?:"([^"]*)"?|'([^']*)'?|([^\s>]*)))?)""")
+    r"""[\s/]*(?:(>)|([{}])|([^\s/>{}][^\s/>={}]*)(?:\s*=\s*(?:"([^"]*)"?|'([^']*)'?|([^\s>]*)))?)""")
 _COMMENT_END_RE = re.compile(r"--!?>")
-_RAW_TEXT_END = {"script": re.compile(r"</script", re.I), "style": re.compile(r"</style", re.I)}
+_END_NAME_RE = re.compile(r"</([A-Za-z][^\s/>]*)")
+# Elements a ``<html>`` / ``<body>`` written inside is not the document's own:
+# foreign content, and the text-content elements the shell must not adopt from.
+# Marked ``foreign`` for the shell; their inner tags are still counted. A
+# ``<plaintext>`` has no end tag, so once open it keeps everything after it.
+_SHELL_TRANSPARENT = frozenset(
+    "svg math title textarea xmp noembed noframes listing plaintext desc "
+    "template iframe noscript select option script style".split())
 
 
-def _scan(text) -> dict | None:
-    """``{"html": {...}, "body": {...}}``: the attributes written on those two
-    tags, raw, the later of two winning. ``None`` when some tag is written with
-    more than ``MAX_TAG_ATTRS`` attributes."""
-    shell = {"html": {}, "body": {}}
-    unclosed = set()                # raw-text elements known to have no end tag ahead
+def _start_tags(text):
+    """Yield ``(lower-case name, [(lower-case attr, raw value), ...], foreign)``
+    for each start tag in ``text``, in order; ``foreign`` is true for a tag that
+    is inside content a browser does not read as the document body.
+
+    ⚠ A tag with more than ``MAX_TAG_ATTRS`` attributes yields its name with
+    the list ``None`` and nothing after it: libxml2 builds a tag's attribute
+    list in quadratic time, so this one is a cost to refuse without parsing, and
+    the scan stops at it rather than reading on."""
+    transparent = []                # the open shell-transparent elements, by name
     at = 0
     while True:
         tag = _TAG_RE.search(text, at)
         if tag is None:
-            return shell
+            return
         at = tag.end()
+        if tag.group(3):            # an end tag, a declaration (<!…), or an instruction (<?…)
+            # Do NOT skip to the next ">": where libxml2 ends these varies by
+            # nesting, and skipping past a tag it DID build would undercount the
+            # crowding guard. Step past just the "<" and read on; a real tag the
+            # parser builds inside gets counted. An end tag's name is read, only
+            # to pop the shell-transparent stack.
+            if tag.group(3) == "/":
+                closing = _END_NAME_RE.match(text, tag.start())
+                if closing:
+                    if transparent and closing.group(1).lower() == transparent[-1]:
+                        transparent.pop()
+                    at = closing.end()
+                    continue
+            at = tag.start() + 1
+            continue
         if tag.group(1):            # a comment: skip it, by the EARLIEST place it could end
             if text.startswith(">", at) or text.startswith("->", at):
                 at = text.index(">", at) + 1
                 continue
             end = _COMMENT_END_RE.search(text, at)
             if end is None:
-                return shell
+                return
             at = end.end()
             continue
         name = tag.group(2).lower()
-        wanted, count = shell.get(name), 0
+        pairs, count, abandoned = [], 0, False
         while True:
             attr = _TAG_ATTR_RE.match(text, at)
             if attr is None:        # the text ended inside the tag
-                return shell
+                return
             at = attr.end()
-            if attr.group(1):
+            if attr.group(2):       # "{" or "}": no real start tag has one before its ">"
+                abandoned = True
+                break
+            if attr.group(1):       # ">"
                 break
             count += 1
             if count > MAX_TAG_ATTRS:
-                return None
-            if wanted is not None:
-                value = attr.group(3) or attr.group(4) or attr.group(5) or ""
-                wanted[attr.group(2).lower()] = value
-        if name in _RAW_TEXT_END and name not in unclosed:
-            end = _RAW_TEXT_END[name].search(text, at)
-            if end is None:
-                unclosed.add(name)  # so a thousand unclosed openers are one search, not a thousand
-            else:
-                at = end.start()
+                yield name, None, bool(transparent)
+                return
+            pairs.append((attr.group(3).lower(), attr.group(4) or attr.group(5) or attr.group(6) or ""))
+        if abandoned:               # the "<" was text; resume after the brace
+            continue
+        yield name, pairs, bool(transparent)
+        if name in _SHELL_TRANSPARENT:
+            transparent.append(name)
+
+
+def _scan(text):
+    """``(shell, handlers)`` or ``None`` when a tag has more than
+    ``MAX_TAG_ATTRS`` attributes.
+
+    ``shell`` is ``{"html": {...}, "body": {...}}``: the attributes written on
+    those two tags, the FIRST spelling of a repeated one winning (as a browser
+    resolves a duplicate), and a LATER whole tag winning over an earlier one
+    (the artifact over the wrapper). A tag inside foreign content is not the
+    document's and does not count. ``handlers`` is how many ``on*`` attributes
+    those adopted tags carried: the parser discards a second ``<body>``'s whole
+    tag, so a handler on the artifact's own body is seen only here, and has to
+    be counted here or nowhere."""
+    shell = {"html": {}, "body": {}}
+    for name, pairs, foreign in _start_tags(text):
+        if pairs is None:
+            return None
+        if name in shell and not foreign:
+            one = {}
+            for attr, value in pairs:
+                one.setdefault(attr, value)         # within one tag, first wins
+            shell[name].update(one)                 # across tags, the later tag wins per key
+    handlers = sum(1 for attrs in shell.values() for attr in attrs if attr.startswith("on"))
+    return shell, handlers
 
 
 # ── one pass over one document ───────────────────────────────────────────────
 
-_NODE, _TEXT, _CLOSE = 0, 1, 2
+# The work list holds three kinds of item, each its own type so a reader never
+# has to ask what a bare tuple's third slot means this time.
+class _Node(NamedTuple):
+    el: object
+    where: str                      # one of _HTML / _SVG / _TIP
+
+
+class _Text(NamedTuple):
+    raw: str
+
+
+class _Close(NamedTuple):
+    name: str
+    returns_to: str | None = None   # an svg's own close: the ``where`` to resume in
+    capture: str | None = None      # "h1"/"p": collect this element's text as heading/opening
+
 
 # Where the walk is: in HTML, in a drawing, or in a drawing's tooltip (the
 # inside of an svg ``<title>`` or ``<desc>``, which a browser reads as HTML and
 # which therefore cannot be "broken out of").
 _HTML, _SVG, _TIP = "html", "svg", "tip"
-# The flag on an ``<svg>``'s own end tag: where the walk returns to after it.
-_RETURNS_TO = {"to-html": _HTML, "to-tip": _TIP}
-_LEAVING_FOR = {where: flag for flag, where in _RETURNS_TO.items()}
 
 
 def _handlers(el) -> int:
@@ -830,26 +930,26 @@ class _Pass:
         self._open = {}               # "h1" / "p" -> the text seen since it opened
 
     def walk(self, root) -> None:
-        todo = [(_NODE, root, _HTML)]
+        todo = [_Node(root, _HTML)]
         while todo:
-            what, item, flag = todo.pop()
-            if what == _TEXT:
-                self._say(item)
-            elif what == _CLOSE:
-                self._close(item, flag)
+            item = todo.pop()
+            if type(item) is _Text:
+                self._say(item.raw)
+            elif type(item) is _Close:
+                self._close(item)
             else:
-                self._node(item, flag, todo)
+                self._node(item.el, item.where, todo)
 
     def _say(self, raw) -> None:
         self.out.append(_text(raw))
         for heard in self._open.values():
             heard.append(raw)
 
-    def _close(self, name, flag) -> None:
-        self.out.append(f"</{name}>")
-        if flag in self._open:
-            words = _one_line("".join(self._open.pop(flag)))
-            if flag == "h1":
+    def _close(self, item) -> None:
+        self.out.append(f"</{item.name}>")
+        if item.capture in self._open:
+            words = _one_line("".join(self._open.pop(item.capture)))
+            if item.capture == "h1":
                 self.heading = self.heading or words
             else:
                 self.opening = self.opening or words
@@ -857,7 +957,7 @@ class _Pass:
     def _node(self, el, where, todo) -> None:
         # Whatever happens to the element, the text after it is its parent's.
         if el.tail:
-            todo.append((_TEXT, el.tail, None))
+            todo.append(_Text(el.tail))
         tag = el.tag
         if not isinstance(tag, str):          # a comment or a processing instruction
             return
@@ -870,17 +970,21 @@ class _Pass:
         elif tag == "title" and where is _HTML:   # the document's; a drawing's is a tooltip
             self.removed["handler"] += _handlers(el)
             self.title = self.title or _one_line("".join(el.itertext()))
-        elif tag in _DROPPED_EMPTY or (where is not _HTML and tag in _SVG_DROPPED_EMPTY):
+        elif tag in _DROPPED_EMPTY_HTML or (where is not _HTML and tag in _DROPPED_EMPTY_SVG):
             # An element that HAS no content: what the parser hung under it is
             # really what came after it, and is read as that.
             if tag == "link":
                 self._font_link(el)
             self._count(el, tag, top=True)
             self._inside(el, where, todo)
-        elif tag in DROPPED or (where is not _HTML and tag in _DROPPED_SVG):
+        elif tag in DROPPED or (where is not _HTML and tag in DROPPED_SVG):
             self._drop(el, tag)
         else:
-            self.removed["handler"] += _handlers(el)
+            # ``html`` and ``body`` carry no handler count here: ``_scan`` owns
+            # theirs, because it sees the tag the parser discarded (the
+            # artifact's own, in a claude.ai download) and the walk does not.
+            if tag not in ("html", "body"):
+                self.removed["handler"] += _handlers(el)
             self._keep_or_unwrap(el, tag, where, todo)
 
     def _leave_drawing(self, todo) -> str:
@@ -892,16 +996,16 @@ class _Pass:
         FOLLOWS the drawing rather than as part of it)."""
         where, later = _HTML, []
         while todo:
-            what, item, flag = todo.pop()
-            if what != _CLOSE:
-                later.append((what, item, flag))
+            item = todo.pop()
+            if type(item) is not _Close:
+                later.append(item)
                 continue
-            self.out.append(f"</{item}>")
-            if flag in _RETURNS_TO:
-                where = _RETURNS_TO[flag]
+            self.out.append(f"</{item.name}>")
+            if item.returns_to is not None:
+                where = item.returns_to
                 break
-        for what, item, flag in reversed(later):
-            todo.append((what, item, where if what == _NODE else flag))
+        for item in reversed(later):
+            todo.append(item._replace(where=where) if type(item) is _Node else item)
         return where
 
     def _style(self, el) -> None:
@@ -921,6 +1025,9 @@ class _Pass:
             # nothing, so that is what it becomes.
             query = _css(media, self.found, _VALUE)
             usable = query and not set(query) & set("{};")
+            # The wrap re-cleans CSS this method already cleaned, so its counts
+            # are discarded (a throwaway ``_Found``): counting them would double
+            # every change the inner ``_css`` calls above already counted.
             css = _css(f"@media {query}{{{css}}}", _Found(), _SHEET) if usable else ""
         if css:
             self.styles.append(css)
@@ -938,7 +1045,7 @@ class _Pass:
         self.removed["handler"] += _handlers(el)
         # Under a dropped element only the unambiguous names are counted: an
         # <a> inside a dropped <form> is not "a link taken out of a drawing".
-        listed = tag in DROPPED or (tag in _DROPPED_SVG and tag != "a")
+        listed = tag in DROPPED or (tag in DROPPED_SVG and tag != "a")
         if (top or listed) and not (tag == "meta" and _shell_meta(el)):
             self.removed[tag] += 1
 
@@ -958,19 +1065,19 @@ class _Pass:
             # element not on a list; their attributes were read by ``_scan``.)
             self._inside(el, where, todo)
             return
-        flag = None
+        close = _Close(name)
         if tag == "svg" and where is not _SVG:
-            flag = _LEAVING_FOR[where]        # the outermost svg of this drawing
+            close = _Close(name, returns_to=where)   # the outermost svg of this drawing
         elif not drawing and tag in ("h1", "p") and tag not in self._open:
             if not (self.heading if tag == "h1" else self.opening):
                 self._open[tag] = []
-                flag = tag
+                close = _Close(name, capture=tag)
         self.out.append(f"<{name}{self._attrs(el, tag, drawing)}>")
         if drawing and tag in _SVG_SHAPES:
-            self._shape(el, name, where, todo)
+            self._shape(el, close, where, todo)
             return
         if tag not in _VOID:
-            todo.append((_CLOSE, name, flag))
+            todo.append(close)
         if not drawing:
             self._inside(el, _HTML, todo)
         else:
@@ -980,12 +1087,12 @@ class _Pass:
     def _inside(el, where, todo) -> None:
         """Queue ``el``'s text and children, to be read in document order."""
         for child in reversed(el):
-            todo.append((_NODE, child, where))
+            todo.append(_Node(child, where))
         if el.text:
-            todo.append((_TEXT, el.text, None))
+            todo.append(_Text(el.text))
 
     @staticmethod
-    def _shape(el, name, where, todo) -> None:
+    def _shape(el, close, where, todo) -> None:
         """Queue a shape's content: its tooltip inside it, the rest after it
         (see ``_SVG_SHAPES``). Queued last-first, as the stack reads it."""
         own, rest = [], []
@@ -993,12 +1100,12 @@ class _Pass:
             mine = isinstance(child.tag, str) and child.tag.lower() in _SVG_OWN
             (own if mine else rest).append(child)
         for child in reversed(rest):
-            todo.append((_NODE, child, where))
+            todo.append(_Node(child, where))
         if el.text:
-            todo.append((_TEXT, el.text, None))
-        todo.append((_CLOSE, name, None))
+            todo.append(_Text(el.text))
+        todo.append(close)
         for child in reversed(own):
-            todo.append((_NODE, child, _SVG))
+            todo.append(_Node(child, _SVG))
 
     def _attrs(self, el, tag, drawing) -> str:
         kept, outbound, read = [], False, 0
@@ -1023,9 +1130,9 @@ class _Pass:
                     self.removed["href"] += 1
                     continue
                 outbound = not value.startswith("#")
-            elif name in CSS_ATTRS:
-                value = _css(value, self.found, _BODY if name == "style" else _VALUE)
-                if not value:
+            else:
+                value = _kept_value(name, value, self.found)
+                if value is None:
                     continue
             kept.append((spelled, value))
         if outbound:
@@ -1036,17 +1143,28 @@ class _Pass:
         return "".join(f' {name}="{_attr(value)}"' for name, value in kept)
 
 
+def _kept_value(name, value, found):
+    """An allow-listed attribute's value, cleaned, or ``None`` to drop it.
+
+    The one place both an element's attributes and the shell's go through: a
+    ``style`` or an SVG paint attribute is filtered as CSS (and dropped when
+    nothing usable is left); every other allow-listed attribute is kept as
+    written."""
+    if name not in CSS_ATTRS:
+        return value
+    return _css(value, found, _BODY if name == "style" else _VALUE) or None
+
+
 def _shell_attrs(written, found, kept) -> str:
     """The attributes of the shell's ``<html>`` or ``<body>``: ``kept`` (what
     the shell says by itself), then what the entry's own tag was ``written``
-    with - through the same filter as any element's, and a shorter list."""
+    with - through the same filter (``_kept_value``) as any element's, and a
+    shorter allow-list."""
     for name, raw in written.items():
         if name not in SHELL_ATTRS and not _DATA_RE.match(name):
             continue
-        value = _CONTROL_RE.sub("", unescape(raw))
-        if name == "style":
-            value = _css(value, found, _BODY)
-        if not value.strip() and name in ("style", "lang"):
+        value = _kept_value(name, _CONTROL_RE.sub("", unescape(raw)), found)
+        if value is None or (not value.strip() and name == "lang"):
             continue                # an empty language is no language: the shell's stands
         if name in kept or len(kept) < MAX_ATTRS:
             kept[name] = value
@@ -1062,6 +1180,7 @@ class Cleaned:
     summary: str         # first <p> text, cut to limits()["summary_chars"]
     removed: dict        # {"script": 2, "form": 1, "handler": 3, "link": 3, ...}
     font_links: tuple    # the fonts.googleapis.com/css2 hrefs found, in order
+    reason: str = ""     # "" for a document that was kept; else a code from REFUSALS
 
     @property
     def body(self) -> str:
@@ -1084,30 +1203,53 @@ def _document(title, styles, body, html_attrs=' lang="en"', body_attrs="") -> st
             f"{sheets}</head><body{body_attrs}>{body}</body></html>")
 
 
-def _refused() -> Cleaned:
-    """The answer for something that is not a readable document."""
-    return Cleaned(_document("", (), ""), "", "", {"unparseable": 1}, ())
+# ── refusing ─────────────────────────────────────────────────────────────────
+
+# Why a document was refused, as ``Cleaned.reason``. Every refusal is the same
+# empty shell and the same ``removed == {"unparseable": 1}``, because that is
+# what the rest of the service reads; the code is what tells seven different
+# things apart. Codes, not sentences: the handler owns the operator's wording.
+#
+#   empty           nothing in it to read (blank, or no document the parser found)
+#   not_text        not a string at all
+#   crowded_tag     some tag is written with more than MAX_TAG_ATTRS attributes
+#   cut_off         the parser did not reach the end: the document ends inside a
+#                   tag, quote, comment, <script> or <style>, or has content
+#                   after </html> that the parser discarded
+#   too_deep        as cut_off, and the parser said it stopped at its depth limit
+#   did_not_settle  cleaning its own output kept changing it (a fault HERE)
+#   internal        an exception inside this module (a fault HERE)
+REFUSALS = ("empty", "not_text", "crowded_tag", "cut_off", "too_deep", "did_not_settle",
+            "internal")
 
 
-# What the parser says when it STOPPED rather than recovered. An HTML parser
-# forgives almost anything and logs it as an error; these are the entries that
-# mean the tree ends where it gave up. Judged by level and kind - the wording is
-# only the last resort, for a libxml2 that files the same stop differently.
-# A second witness, not the proof: see ``_parse`` for why the log alone misses
-# a stop that comes after a hundred ordinary errors.
-_STOPPED_KINDS = frozenset({"ERR_INTERNAL_ERROR", "ERR_NO_MEMORY", "ERR_RESOURCE_LIMIT"})
-_STOPPED_WORDS = ("excessive depth", "resource limit")
+class _Refuse(Exception):
+    """Raised anywhere below ``clean`` to refuse the document, with a code from
+    ``REFUSALS``. An exception, because the decision is made several calls deep
+    and nothing between there and ``clean`` has anything to add to it."""
+
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
 
 
-def _stopped_early(parser) -> bool:
-    """Whether the parser gave up part-way (a document nested past its depth
-    limit, a text run past its size limit) and handed back what it had."""
-    for entry in parser.error_log:
-        if entry.level >= etree.ErrorLevels.FATAL or entry.type_name in _STOPPED_KINDS:
-            return True
-        if any(words in (entry.message or "").lower() for words in _STOPPED_WORDS):
-            return True
-    return False
+def _refused(reason) -> Cleaned:
+    """The answer for something that is not a readable document. Logged by its
+    code alone: the document is the submitter's, and never goes in a log."""
+    log.info("refused: %s", reason)
+    return Cleaned(_document("", (), ""), "", "", {"unparseable": 1}, (), reason)
+
+
+# Whether the parser's log says it stopped at its DEPTH limit. Asked only after
+# the end marker has been found missing, and only to choose between two codes
+# (``too_deep`` or ``cut_off``). It is never a reason to refuse by itself, and
+# could not be one: lxml keeps the first hundred log entries and the stop is the
+# last thing a parser says; and what a parser files as fatal is its own affair
+# (libxml2 2.11 logs "Memory allocation failed", FATAL, for an attribute left
+# unquoted at the end of a document). So this reads for the one thing it is
+# asked about, by its wording.
+def _said_too_deep(parser) -> bool:
+    return any("depth" in (entry.message or "").lower() for entry in parser.error_log)
 
 
 _CLOSING_TAG_RE = re.compile(r"</(?:body|html)\s*>\Z", re.I)
@@ -1128,15 +1270,19 @@ def _content_end(text) -> int:
         if closing is not None:
             end = closing.start()
             continue
-        start = text.rfind("<!--", 0, end - 3) if text.endswith("-->", 0, end) else -1
-        inside = text[start + 4:end - 3] if start >= 0 else "-->"
+        if not text.endswith("-->", 0, end):
+            return end
+        start = text.rfind("<!--", 0, end - 3)
+        if start < 0:
+            return end              # a stray "-->": not a comment at all
+        inside = text[start + 4:end - 3]
         if "-->" in inside or "--!>" in inside or inside.startswith((">", "->")):
-            return end              # not one whole comment: leave it where it is
+            return end              # not ONE whole comment: leave it where it is
         end = start
 
 
 def _parse(text):
-    """``text`` as a tree, or ``None`` when it cannot be read to its end.
+    """``text`` as a tree. Raises ``_Refuse`` when it cannot be read to its end.
 
     Handed over as UTF-8 bytes with the encoding stated, so a ``<meta charset>``
     or an XML declaration inside the document cannot have it re-read as
@@ -1147,11 +1293,8 @@ def _parse(text):
     ⚠ ``recover=True`` means the parser returns a tree even when it stopped
     half-way: 256 nested elements deep, libxml2 2.11 hands back everything
     before that point. A tree with its end missing is not this document, so it
-    is refused - and the proof that the end was reached is an element of our
-    own, appended after the last character and looked for in the tree. The
-    parser's error log is read as well, but cannot be the proof: lxml keeps its
-    first 100 entries, 2.11 logs one for every ``<svg>`` and ``<path>`` it does
-    not know, and the entry that matters is the last.
+    is refused - and the ONE proof that the end was reached is an element of
+    our own, placed after the content and looked for in the tree.
 
     The same check refuses a document that ENDS inside something - an unclosed
     tag, comment, ``<script>`` or ``<style>`` - since whatever swallowed its
@@ -1168,24 +1311,26 @@ def _parse(text):
                                   no_network=True, recover=True)
     try:
         root = lxml.html.document_fromstring(marked.encode("utf-8", "replace"), parser=parser)
-    except Exception:           # lxml's "Document is empty" and its syntax errors
-        return None
-    if _stopped_early(parser) or next(root.iter(end), None) is None:
-        return None
+    except etree.LxmlError:     # "Document is empty", a syntax error: the parser's own verdict.
+        raise _Refuse("empty") from None    # (Anything else raised there is a fault, and counted.)
+    if next(root.iter(end), None) is None:
+        raise _Refuse("too_deep" if _said_too_deep(parser) else "cut_off")
     return root
 
 
-def _once(source) -> Cleaned | None:
-    """One pass: scan, parse, read, rebuild. ``None`` when the document cannot
-    be read - nothing in it, a tag too crowded to parse, a parser that stopped."""
+def _once(source) -> Cleaned:
+    """One pass: scan, parse, read, rebuild. Raises ``_Refuse`` when the
+    document cannot be read."""
     text = _CONTROL_RE.sub("", source)
     if not text.strip():
-        return None
-    shell = _scan(text)
-    root = _parse(text) if shell is not None else None
-    if root is None:
-        return None
+        raise _Refuse("empty")
+    scanned = _scan(text)
+    if scanned is None:
+        raise _Refuse("crowded_tag")
+    shell, handlers = scanned
+    root = _parse(text)
     found = _Found()
+    found.removed["handler"] += handlers        # a discarded <html>/<body>'s own
     seen = _Pass(found)
     seen.walk(root)
     # ``clean_fields`` is what the service runs on a title and a summary anyway:
@@ -1202,19 +1347,20 @@ def _once(source) -> Cleaned | None:
 
 
 def _settle(source) -> Cleaned:
-    """Clean until cleaning changes nothing, or refuse."""
+    """Clean until cleaning changes nothing. Raises ``_Refuse`` otherwise."""
     removed, font_links = Counter(), None
     for _ in range(MAX_PASSES):
         result = _once(source)
-        if result is None:
-            return _refused()
         removed.update(result.removed)
         if font_links is None:              # only the first pass still has the links
             font_links = result.font_links
         if result.html == source:
             return Cleaned(result.html, result.title, result.summary, dict(removed), font_links)
         source = result.html
-    return _refused()
+    # Not the document's fault: each pass is this module reading its OWN output,
+    # and a result it cannot reproduce is one it cannot vouch for.
+    _degrade.degraded("blog.clean.unsettled", exc_info=False)
+    raise _Refuse("did_not_settle")
 
 
 def clean(html: str) -> Cleaned:
@@ -1222,17 +1368,20 @@ def clean(html: str) -> Cleaned:
 
     Anything that is not text, text with nothing in it, text the parser cannot
     read to its end and a document that will not settle all come back as an
-    empty shell with ``removed == {"unparseable": 1}``. So does a bug in here -
-    and that one is counted for ``/health`` (``blog.clean``), because a refusal
-    that is really a crash should not look like a bad upload.
+    empty shell with ``removed == {"unparseable": 1}`` and a ``reason`` from
+    ``REFUSALS``. So does a bug in here - and that one is counted for
+    ``/health`` (``blog.clean``), because a refusal that is really a crash
+    should not look like a bad upload.
 
     The size of ``html`` is the caller's to bound (``blog_inbox.html_ok``), and
     so is the size of the result, which can be up to six times the input
     (every ``"`` in an attribute is written ``&quot;``)."""
     if not isinstance(html, str):
-        return _refused()
+        return _refused("not_text")
     try:
         return _settle(html)
+    except _Refuse as refuse:
+        return _refused(refuse.reason)
     except Exception:
         _degrade.degraded("blog.clean")
-        return _refused()
+        return _refused("internal")

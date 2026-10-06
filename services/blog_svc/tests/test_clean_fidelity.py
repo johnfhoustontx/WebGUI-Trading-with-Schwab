@@ -18,8 +18,7 @@ import pytest
 import tinycss2
 
 from services.blog_svc import clean
-from services.blog_svc.tests.test_clean import (EMPTY_SHELL, FIXTURE, audit,
-                                                cleaned, page)
+from services.blog_svc.tests._audit import EMPTY_SHELL, FIXTURE, audit, cleaned, page
 
 ZERO_WIDTH_SPACE = chr(0x200B)
 RIGHT_TO_LEFT_OVERRIDE = chr(0x202E)
@@ -48,7 +47,7 @@ def refused(result) -> bool:
     return result.removed == {"unparseable": 1}
 
 
-# ── A1: a "<" is a comparison ────────────────────────────────────────────────
+# ── CSS: a "<" is a comparison ────────────────────────────────────────────────
 
 RANGE_QUERIES = [
     ("@media (width < 600px){p{color:red}}", "@media (width < 600px){p{color:red}}"),
@@ -96,7 +95,7 @@ def test_no_stylesheet_can_close_its_own_element(css):
         assert "</" not in sheet and "<!" not in sheet, sheet
 
 
-# ── A2: a class named after a language is a class ────────────────────────────
+# ── CSS: a class named after a language is a class ────────────────────────────
 
 @pytest.mark.parametrize("css", [
     'pre code.language-javascript::before{content:"JS"}h1{color:red}',
@@ -109,7 +108,7 @@ def test_a_selector_that_names_a_script_language_is_only_a_selector(css):
     assert f"<style>{css}</style>" in c.html and c.removed == {}
 
 
-# ── A3: a property is dropped as a declaration, whole ────────────────────────
+# ── CSS: a property is dropped as a declaration, whole ────────────────────────
 
 @pytest.mark.parametrize("css", [
     "p{color:red}.behavior:hover{color:red}h1{color:blue}",
@@ -147,7 +146,7 @@ def test_a_dropped_declaration_goes_whole_hack_prefix_and_all(css, written):
     assert '<p style="color:blue">t</p>' in c.html and c.removed == {"css": 1}
 
 
-# ── A4: every change is counted ──────────────────────────────────────────────
+# ── CSS: every change is counted ──────────────────────────────────────────────
 
 @pytest.mark.parametrize("css,count", [
     ("p{color:red}", 0),
@@ -203,7 +202,7 @@ def test_the_second_look_costs_one_token_not_the_stylesheet():
     assert c.removed == {"css": 1}
 
 
-# ── A5: an escaped "<" in a name ─────────────────────────────────────────────
+# ── CSS: an escaped "<" in a name ─────────────────────────────────────────────
 
 def test_an_escaped_angle_bracket_in_a_name_is_still_that_name():
     c = cleaned(page("<style>.a\\<b{color:red}#c\\<\\/d{color:blue}p{margin:1e\\<x}</style>"))
@@ -213,7 +212,7 @@ def test_an_escaped_angle_bracket_in_a_name_is_still_that_name():
     assert "<" not in sheet and c.removed == {}
 
 
-# ── A6: at-rules that fetch nothing ──────────────────────────────────────────
+# ── CSS: at-rules that fetch nothing ──────────────────────────────────────────
 
 @pytest.mark.parametrize("css", [
     '@counter-style thumbs{system:cyclic;symbols:"*";suffix:" "}',
@@ -233,7 +232,7 @@ def test_a_counter_style_cannot_fetch_its_symbols():
     assert "e.com" not in c.html and c.removed == {"css": 1}
 
 
-# ── B1: a document the parser stops reading is refused ───────────────────────
+# ── a document the parser stops reading is refused ───────────────────────
 
 def kept_or_refused(document, *words):
     """The only two honest outcomes for a document that strains the parser:
@@ -316,7 +315,9 @@ def test_the_end_marker_goes_before_the_closing_tags_and_after_everything_else(e
     One with CONTENT after ``</html>`` is kept only if the parser kept that
     content: libxml2 2.11 drops it when there is a doctype, and that is a
     refusal, not a document with its last paragraph gone."""
-    assert kept_or_refused(ending, "x", *words) or words
+    kept = kept_or_refused(ending, "x", *words)
+    if not words:
+        assert kept, "a document that merely ends must be kept, not refused"
 
 
 def test_the_parsers_stop_is_seen_behind_thousands_of_ordinary_errors():
@@ -331,7 +332,7 @@ def test_the_parsers_stop_is_seen_behind_thousands_of_ordinary_errors():
         "ordinary errors alone are not a reason to refuse")
 
 
-# ── B2: a tag with too many attributes never reaches the parser ──────────────
+# ── a tag with too many attributes never reaches the parser ──────────────
 
 @pytest.fixture
 def parses(monkeypatch):
@@ -358,6 +359,18 @@ CROWDED_TAGS = {
     "inside a drawing": lambda n: "<svg><rect " + " ".join(f"a{i}=1" for i in range(n)) + "/></svg>",
     "after a comment": lambda n: "<!-- c --><p " + " ".join(f"a{i}" for i in range(n)) + ">t</p>",
     "a prefixed tag": lambda n: "<o:p " + " ".join(f"a{i}" for i in range(n)) + ">t</o:p>",
+    # the scan-bypass shapes: on 2.11.9 the end tag / declaration / instruction
+    # the crowded <style> or <script> hides behind runs only to its first ">",
+    # so the parser builds the crowded tag that follows. A scan that took the
+    # <style> for a real opener would skip to </style> and never see it.
+    "a style behind an end tag": lambda n: (
+        "<p>x</p></x <style><p " + " ".join(f"a{i}" for i in range(n)) + ">t</p></style>"),
+    "a style behind a bang": lambda n: (
+        "<p>x</p><!<style><p " + " ".join(f"a{i}" for i in range(n)) + ">t</p></style>"),
+    "a style behind a doctype": lambda n: (
+        "<!DOCTYPE <style><p " + " ".join(f"a{i}" for i in range(n)) + ">t</p></style>"),
+    "a script behind an end tag": lambda n: (
+        "<p>x</p></x <script><p " + " ".join(f"a{i}" for i in range(n)) + ">t</p></script>"),
 }
 
 
@@ -370,6 +383,67 @@ def test_a_tag_with_too_many_attributes_never_reaches_the_parser(shape, parses):
     c = clean.clean(document)
     assert refused(c) and c.html == EMPTY_SHELL
     assert parses == []
+
+
+def _tree_max(text):
+    """The largest ``len(el.attrib)`` anywhere in the tree the parser builds -
+    whatever parser that is. Nothing to parse means no tag, so zero."""
+    parser = clean.lxml.html.HTMLParser(encoding="utf-8", recover=True)
+    try:
+        root = clean.lxml.html.document_fromstring(text.encode("utf-8", "replace"), parser=parser)
+    except clean.etree.LxmlError:
+        return 0
+    return max((len(el.attrib) for el in root.iter() if isinstance(el.tag, str)), default=0)
+
+
+def test_no_tag_the_parser_builds_in_a_kept_document_is_crowded():
+    """The crowding guard exists to stop libxml2 building a tag with so many
+    attributes that parsing it is a quadratic cost. What matters, then, and what
+    this pins on WHATEVER libxml2 is installed, is the COST property: in any
+    document the cleaner did NOT refuse, no tag the parser built has more than
+    ``MAX_TAG_ATTRS`` attributes.
+
+    (The scan does not try to match libxml2's attribute count tag-for-tag - a
+    linear pre-scan cannot replicate a stateful tokenizer's handling of
+    comments, foreign content and malformed end tags, and does not need to. It
+    needs only to refuse before the parser runs when the parser would build a
+    crowded tag, which the attack-scale shapes below exercise directly.)"""
+    import random
+    from services.blog_svc.tests.test_clean import _PIECES, _RAW_TEXT_PIECES
+    documents = []
+    rng = random.Random(4321)
+    for vocab in (_PIECES, _RAW_TEXT_PIECES):
+        for _ in range(1_000):
+            documents.append("".join(rng.choice(vocab) for _ in range(rng.randint(1, 50))))
+    for build in CROWDED_TAGS.values():
+        for n in (3, 50, clean.MAX_TAG_ATTRS - 1, clean.MAX_TAG_ATTRS, clean.MAX_TAG_ATTRS + 1):
+            documents.append(build(n))
+    for document in documents:
+        if "unparseable" in clean.clean(document).removed:
+            continue                        # refused before the parser ran
+        assert _tree_max(document) <= clean.MAX_TAG_ATTRS, repr(document[:120])
+
+
+@pytest.mark.parametrize("hide", [
+    "<x{{}}><p {attrs}>t</p>",                      # a crowded tag after a brace-abandoned "<"
+    "</x <{opener}><p {attrs}>t</p>",               # behind a malformed end tag
+    "<!DOCTYPE <{opener}><p {attrs}>t</p>",         # behind a doctype
+    "<?pi <{opener}><p {attrs}>t</p>",              # behind a processing instruction
+    "<svg><{opener}><p {attrs}>t</p></svg>",        # inside foreign content
+    "<title><{opener}><p {attrs}></title>",         # inside a title
+    "<math><script><p {attrs}>t</p></script></math>",   # in a script the parser DID build
+    "</xmp>t<script><math><script><p {attrs}>t</p></script>",   # the exact nesting the review found
+])
+@pytest.mark.parametrize("opener", ["script", "style", "div"])
+def test_a_crowded_tag_hidden_behind_a_quirk_is_still_refused(hide, opener):
+    """Each of these put a crowded tag somewhere a naive scan might skip. At
+    attack scale the only honest outcomes are a refusal, or a parse that built
+    no crowded tag; never a crowded tag that slipped through to a quadratic
+    parse."""
+    attrs = " ".join(f"a{i}" for i in range(clean.MAX_TAG_ATTRS + 200))
+    document = "<p>before</p>" + hide.format(opener=opener, attrs=attrs)
+    result = clean.clean(document)
+    assert "unparseable" in result.removed or _tree_max(document) <= clean.MAX_TAG_ATTRS
 
 
 @pytest.mark.parametrize("shape", sorted(CROWDED_TAGS))
@@ -412,7 +486,7 @@ def test_an_honest_document_is_not_mistaken_for_a_crowded_tag(name):
     assert "END" in c.body or name == "the fixture"
 
 
-# ── C1 / C2: typefaces asked for with @import, and what a font link may hold ─
+# ── typefaces asked for with @import, and what a font link may hold ─
 
 FONT = "https://fonts.googleapis.com/css2?family="
 
@@ -479,7 +553,7 @@ def test_an_alternate_stylesheet_is_not_the_entrys_typeface():
     assert c.font_links == (FONT + "Mono",)
 
 
-# ── C3: what the entry put on <html> and <body> ──────────────────────────────
+# ── what the entry put on <html> and <body> ──────────────────────────────
 
 def shell_tags(document):
     seen = audit(document)
@@ -550,7 +624,7 @@ def test_shell_attributes_are_escaped_and_bounded():
     assert len(on_body) == clean.MAX_ATTRS
 
 
-# ── C4: a space inside an address ────────────────────────────────────────────
+# ── a space inside an address ────────────────────────────────────────────
 
 @pytest.mark.parametrize("raw,kept", [
     ("mailto:a@b.test?subject=Hello there", "mailto:a@b.test?subject=Hello%20there"),
@@ -578,7 +652,7 @@ def test_anything_else_odd_inside_an_address_still_drops_it(raw):
     assert c.body == '<p><a class="k">words</a></p>' and c.removed == {"href": 1}
 
 
-# ── C5: an <svg> that is never closed ────────────────────────────────────────
+# ── an <svg> that is never closed ────────────────────────────────────────
 
 def test_an_unclosed_drawing_does_not_swallow_the_article():
     """A browser leaves a drawing the moment it meets ``<p>``; libxml2 does
@@ -618,7 +692,7 @@ def test_a_drawing_inside_a_drawings_tooltip_ends_on_its_own():
                       '<circle r="1"></circle></svg>')
 
 
-# ── B3: how much bigger, and how much slower ─────────────────────────────────
+# ── how much bigger, and how much slower ─────────────────────────────────
 
 def test_cleaning_cannot_multiply_a_document_past_a_known_factor():
     """The handler bounds what it stores; this is the number it needs. The worst
@@ -638,20 +712,22 @@ def test_cleaning_cannot_multiply_a_document_past_a_known_factor():
         assert len(c.html) <= 6 * len(document) + 400, name
 
 
-def test_the_parsers_own_log_is_a_second_witness():
-    """``_stopped_early`` reads the parser's error log. It is not how a cut-off
-    document is caught (the end marker is; the log holds only the first hundred
-    entries), but when the log does say the parser gave up, that is believed -
-    and the ordinary errors of sloppy markup are not mistaken for it."""
+def test_the_log_only_tells_too_deep_from_cut_off_never_whether_to_refuse():
+    """The end marker is the sole authority for "read to the end"; the log is
+    read only to choose the word once the marker is already missing. So sloppy
+    markup - which logs plenty - is not taken for a depth stop, and a document
+    the parser FINISHED is kept however loudly its log complains."""
     def parser_after(document):
         parser = clean.lxml.html.HTMLParser(encoding="utf-8", recover=True)
         clean.lxml.html.document_fromstring(document.encode("utf-8"), parser=parser)
         return parser
     sloppy = parser_after("<p>a<p>b</i></foo><bar baz><table><td>x</b></table>&bogus; <a href=x y='1' y='2'>t</a>")
-    assert len(sloppy.error_log) > 0 and not clean._stopped_early(sloppy)
-    deep = parser_after("<div>" * 5_000 + "x")
-    if any(entry.level_name == "FATAL" for entry in deep.error_log):
-        assert clean._stopped_early(deep)
+    assert not clean._said_too_deep(sloppy)
+    # an unterminated attribute FINISHES the document (2.11 logs FATAL anyway),
+    # so it is kept-or-refused by the marker and, if refused, is cut_off not too_deep
+    unquoted = parser_after("<p>x</p><p title=never-finished")
+    assert any(entry.level_name == "FATAL" for entry in unquoted.error_log)
+    assert clean.clean("<p title=\"never finished").reason == "cut_off"
 
 
 def test_the_three_bounds_are_the_ones_the_comments_argue_for():
