@@ -56,6 +56,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
 from repo_paths import (APP_HOST, EDGE_TOML, ENV_NAME, LIVE_HOST,  # noqa: E402
                         NICEGUI_LIVE_PORT, NICEGUI_PORT, SITE_HOST, SITE_ROOT)
+from shared.blog_inbox import ENTRY_CSP  # noqa: E402
 from shared.config_toml import toml_loader  # noqa: E402
 
 EDGE_DEFAULTS = {"live_rate_limit": {"enabled": False, "events": 30,
@@ -92,6 +93,27 @@ FONT_MAX_AGE = 2592000          # 30 days
 # The trade idea cards under /ideas/<day>/ (services/options_svc/site_ideas.py).
 # Each is named for its day and minute, so it never changes under its name.
 IDEAS_MAX_AGE = 86400           # 1 day
+
+# A Blog entry's framed document, and nothing beside it: /blog/<slug>/entry.html
+# (services/blog_svc/sitewriter.py writes it). The entry's own page is
+# index.html in the same folder and must NOT match: the policy this selects
+# carries `sandbox` and `default-src 'none'`, which on that page would switch
+# off the site's stylesheet and menu.
+#
+# Anchored at both ends; unanchored, a path_regexp matches anywhere in the path.
+# The class is looser than shared.blog_inbox.SLUG_RE on purpose (it admits a
+# doubled hyphen, which can only name a 404) and must never be tighter: a
+# missed entry is served with no policy. Go's RE2 reads this exactly as Python
+# does; the tests compile it. It is emitted as an UNQUOTED Caddyfile token, so
+# it may hold no whitespace, quote or brace.
+BLOG_ENTRY_PATH = r"^/blog/[a-z0-9-]+/entry\.html$"
+
+# A Blog entry's PAGE as it is linked: /blog/<slug>/, a folder address. It ends
+# in no extension, so the *.html revalidation rule does not see it and it would
+# be left to heuristic caching: a returning visitor could be shown an entry page
+# from before a promote changed the menu. A Caddy `path` glob, not a regexp:
+# the `*` matches one folder name and never crosses a slash.
+BLOG_PAGE_PATH = "/blog/*/"
 
 # Where Caddy reads its config on Debian/Ubuntu when installed from the official
 # repository. Named here rather than buried in main() so the tests can assert
@@ -193,6 +215,15 @@ def _public_block():
     Nothing in this block may name the app: no proxy, no loopback address, no
     port. Not a security control on its own -- the subdomain is in Certificate
     Transparency regardless -- but the public face should not point at the door.
+
+    **One Content-Security-Policy, on one kind of file.** Everything else here
+    is the site's own markup and is sent with no policy. A Blog entry is a
+    document written elsewhere, so ``@blog_entries`` sends
+    ``shared.blog_inbox.ENTRY_CSP`` on it: the third of three layers (cleaning,
+    the frame's sandbox, this header) and the only one that still applies when
+    the document is opened outside its frame. The string is imported, never
+    retyped: the service writes the same tokens into the frame and the private
+    preview sends the same header, and three copies would drift.
     """
     return f"""{SITE_HOST}, www.{SITE_HOST} {{
     encode zstd gzip
@@ -221,7 +252,14 @@ def _public_block():
     # `no-cache` does NOT mean "do not cache" -- it means "cache, but always
     # revalidate", which with the ETag already being sent makes the common case
     # a 304 carrying no body rather than a re-download.
-    @revalidate path / *.html *.css *.js *.json
+    #
+    # `/` and `/blog/*/` are here because a page asked for by its FOLDER does
+    # not end in .html: the matcher sees the address as requested, not the
+    # index.html the file server answers with. `/` is the home page; the second
+    # is a Blog entry's page, which is linked, shared and listed in its sitemap
+    # as /blog/<slug>/. A `*` in the middle of a path is a glob that stops at a
+    # slash, so it names that one folder level and nothing under it.
+    @revalidate path / *.html *.css *.js *.json {BLOG_PAGE_PATH}
     header @revalidate Cache-Control "no-cache"
 
     # The thumbnails are rewritten under the SAME filenames every 15 minutes.
@@ -238,6 +276,28 @@ def _public_block():
     # must-revalidate after a day rather than a longer lifetime.
     @ideas path /ideas/*
     header @ideas Cache-Control "max-age={IDEAS_MAX_AGE}, must-revalidate"
+
+    # -- Blog entries -------------------------------------------------------
+    # An entry is an HTML document written outside this repo. Three layers keep
+    # script out of it, and any one of them is enough:
+    #   1. the blog service cleans the document before it stores it;
+    #   2. the entry's page frames it with a sandbox attribute that grants no
+    #      script and no forms;
+    #   3. this header, sent on the document itself, so the same holds when a
+    #      visitor opens it directly, outside its frame.
+    # The value is shared.blog_inbox.ENTRY_CSP: one definition, read by this
+    # generator, by the service that writes the frame and by the private
+    # preview, so the three cannot drift. This file is generated; change the
+    # policy there, never here.
+    #
+    # Only the framed document is named. The entry's own page is index.html in
+    # the same folder: this site's markup, which a sandbox would break. The
+    # typefaces under /blog/fonts/ need no rule of their own either. Each is
+    # named by a hash of its content, and the *.woff2 rule below covers them.
+    # Freshness is the revalidation rule above: entry.html by its extension,
+    # the manifest as *.json, and the entry's page by its folder address.
+    @blog_entries path_regexp {BLOG_ENTRY_PATH}
+    header @blog_entries Content-Security-Policy "{ENTRY_CSP}"
 
     # Two self-hosted faces, byte-stable for the life of the brand, and the
     # largest repeated download on the site. The only thing here allowed to

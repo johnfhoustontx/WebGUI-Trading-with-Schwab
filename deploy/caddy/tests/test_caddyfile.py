@@ -491,6 +491,249 @@ def test_the_generated_config_is_pure_ascii(cfg):
                     for i, line in offenders))
 
 
+# --- the Blog's entry documents ----------------------------------------------
+#
+# An entry on the public site is an HTML document somebody else's tool wrote.
+# Three layers keep script out of it, any one of which is enough: the service
+# cleans it, the entry page frames it in a sandbox, and the edge sends a policy
+# on the document itself -- which is the only one of the three still standing
+# when a visitor opens ``/blog/<slug>/entry.html`` directly, outside its frame.
+#
+# The policy is ONE string, ``shared.blog_inbox.ENTRY_CSP``, read here, by the
+# service and by the private preview. These tests assert the edge sends exactly
+# that string, on exactly those documents, from exactly one block.
+
+def _blog_path_pattern(cfg):
+    """The ``@blog_entries`` expression as Caddy will read it: one unquoted
+    token, taken from the RENDERED config and not from the generator's
+    constant, so what is asserted is what would be installed."""
+    public = _block(cfg, repo_paths.SITE_HOST)
+    found = re.findall(r"^[ \t]*@blog_entries path_regexp (.*)$", public, re.M)
+    assert len(found) == 1, f"expected one @blog_entries matcher, found {found}"
+    return found[0]
+
+
+def test_a_blog_entry_is_served_under_the_shared_policy(cfg):
+    from shared import blog_inbox
+
+    public = _block(cfg, repo_paths.SITE_HOST)
+    assert "@blog_entries path_regexp" in public
+    assert (f'header @blog_entries Content-Security-Policy "{blog_inbox.ENTRY_CSP}"'
+            in public)
+    # Declared before it is used, and used exactly once.
+    assert public.index("@blog_entries path_regexp") < public.index("header @blog_entries")
+    assert public.count("header @blog_entries") == 1
+
+
+def test_the_blog_policy_names_only_entry_documents(cfg):
+    """The header carries ``sandbox`` and ``default-src 'none'``. Sent on the
+    entry's PAGE it would switch off the site's own stylesheet and menu; sent on
+    a typeface it is noise. So the expression names the framed document and
+    nothing beside it.
+
+    Compiled with Python's ``re`` and applied with ``fullmatch``. Caddy uses
+    Go's RE2, where an unflagged ``$`` is the end of the text; Python's ``$``
+    also matches before a final newline, and ``fullmatch`` removes exactly that
+    difference. The expression uses nothing the two engines read differently:
+    a literal path, one character class, one escaped dot."""
+    pattern = _blog_path_pattern(cfg)
+    assert pattern == r"^/blog/[a-z0-9-]+/entry\.html$"
+    assert pattern == caddy.BLOG_ENTRY_PATH
+    assert pattern.startswith("^") and pattern.endswith("$"), (
+        "unanchored, a path_regexp matches anywhere in the path")
+    rx = re.compile(pattern)
+
+    for path in ("/blog/a-b/entry.html", "/blog/a/entry.html",
+                 "/blog/nuclear-stocks-thesis/entry.html", "/blog/2026-q3/entry.html"):
+        assert rx.fullmatch(path), f"{path} would be served with no policy"
+
+    for path in ("/blog/a/index.html",          # the entry's page: the site's own markup
+                 "/blog/a/",                    # the same page, as it is linked
+                 "/blog/fonts/x.woff2",         # a typeface
+                 "/blog/sitemap.txt",
+                 "/blog/A/entry.html",          # a slug is lower-case; so is the folder
+                 "/blog/a/b/entry.html",        # one folder deep, never two
+                 "/blog/entry.html",            # no slug at all
+                 "/blog//entry.html",
+                 "/blog/a/entry.html/",
+                 "/blog/a/entry.html.bak",
+                 "/blog/a/entryxhtml",          # the dot is a dot, not "any character"
+                 "/x/blog/a/entry.html",
+                 "/blog.html", "/blog.json", "/reports/latest.html", "/"):
+        assert not rx.fullmatch(path), f"{path} must not carry the entry policy"
+
+
+def test_every_address_the_service_can_write_is_covered(cfg):
+    """The other direction. The expression's slug class is deliberately looser
+    than ``SLUG_RE`` (it admits a doubled hyphen, which only ever names a 404),
+    but it must never be TIGHTER: an entry whose address it missed would be
+    served outside its frame with no policy at all."""
+    from shared import blog_inbox
+
+    rx = re.compile(_blog_path_pattern(cfg))
+    slugs = ("a", "z9", "a-b", "nuclear-stocks-thesis", "2026-q3-review", "0", "a-1-b-2")
+    for slug in slugs:
+        assert blog_inbox.SLUG_RE.match(slug), f"{slug!r} is not a slug; fix this test"
+        assert rx.fullmatch(f"/blog/{slug}/entry.html"), slug
+    # The slug alphabet, read from the pattern rather than restated: every
+    # character SLUG_RE can accept is one the edge's class accepts.
+    for ch in "abcdefghijklmnopqrstuvwxyz0123456789":
+        assert blog_inbox.SLUG_RE.match(ch) and rx.fullmatch(f"/blog/{ch}/entry.html"), ch
+
+
+def test_the_blog_policy_allows_no_script_and_no_form(cfg):
+    """Read from the header the edge would SEND, directive by directive, so a
+    widened policy fails here even though the string still equals the shared
+    constant (which only proves the two were widened together)."""
+    public = _block(cfg, repo_paths.SITE_HOST)
+    m = re.search(r'header @blog_entries Content-Security-Policy "([^"]*)"', public)
+    assert m, "no policy on blog entries"
+    policy = {}
+    for part in m.group(1).split(";"):
+        words = part.split()
+        assert words, f"an empty directive in {m.group(1)!r}"
+        assert words[0] not in policy, f"{words[0]} is declared twice; the second is ignored"
+        policy[words[0]] = words[1:]
+
+    assert policy["default-src"] == ["'none'"]
+    # No script-src at all, so default-src 'none' governs script. Any script-src
+    # is a widening: it could only ALLOW something.
+    for name in ("script-src", "script-src-elem", "script-src-attr", "worker-src",
+                 "connect-src", "frame-src", "child-src", "object-src"):
+        assert name not in policy, f"{name} widens default-src 'none'"
+    assert policy["form-action"] == ["'none'"]
+    assert policy["base-uri"] == ["'none'"]
+    assert policy["frame-ancestors"] == ["'self'"]
+
+    sandbox = policy["sandbox"]
+    for flag in ("allow-scripts", "allow-forms", "allow-top-navigation",
+                 "allow-top-navigation-by-user-activation", "allow-modals",
+                 "allow-downloads", "allow-pointer-lock"):
+        assert flag not in sandbox, f"the entry sandbox grants {flag}"
+    for words in policy.values():
+        for word in words:
+            assert word not in ("*", "'unsafe-eval'", "https:", "http:"), word
+    # 'unsafe-inline' is for the document's own <style>, and only there.
+    assert [k for k, v in policy.items() if "'unsafe-inline'" in v] == ["style-src"]
+
+
+def test_the_blog_policy_is_sent_by_the_public_site_only(cfg):
+    """The app and the live screens are proxies with policies of their own (the
+    app's forbids framing; the live block deliberately sends none). A
+    ``sandbox`` directive on either would stop every script NiceGUI runs."""
+    from shared import blog_inbox
+
+    assert cfg.count(blog_inbox.ENTRY_CSP) == 1
+    assert cfg.count("@blog_entries path_regexp") == 1
+    assert blog_inbox.ENTRY_CSP in _block(cfg, repo_paths.SITE_HOST)
+    for host in (repo_paths.APP_HOST, repo_paths.LIVE_HOST):
+        block = _block(cfg, host)
+        assert "@blog_entries" not in block, host
+        assert "sandbox" not in block, host
+        assert blog_inbox.ENTRY_CSP not in block, host
+    assert "Content-Security-Policy" not in _block(cfg, repo_paths.LIVE_HOST)
+
+
+def test_the_blog_policy_survives_caddys_quoting(cfg):
+    """The policy is full of single quotes and sits inside a double-quoted
+    Caddyfile token. That holds as long as the value has no double quote (which
+    would end the token early and turn the rest into arguments), no backslash
+    (the one escape character inside quotes), no backtick (the other quote
+    character), no brace (a placeholder, which Caddy would try to expand) and no
+    line break. The expression is an UNQUOTED token, so it also may not contain
+    whitespace.
+
+    ⚠ Like everything in this file, a statement about the STRING. ``caddy
+    validate`` on the box is still the only proof that Caddy parses it."""
+    from shared import blog_inbox
+
+    for ch in ('"', "\\", "`", "{", "}", "\n", "\r", "\t"):
+        assert ch not in blog_inbox.ENTRY_CSP, f"ENTRY_CSP contains {ch!r}"
+    assert blog_inbox.ENTRY_CSP.isascii() and blog_inbox.ENTRY_CSP.isprintable()
+
+    pattern = _blog_path_pattern(cfg)
+    for ch in ('"', "`", "{", "}", " ", "\t"):
+        assert ch not in pattern, f"the entry expression contains {ch!r}"
+    assert pattern.isascii() and pattern.isprintable()
+    # The line is exactly: header, matcher, field, ONE quoted value.
+    public = _block(cfg, repo_paths.SITE_HOST)
+    line = next(ln for ln in public.splitlines() if "header @blog_entries" in ln)
+    assert line.count('"') == 2 and line.rstrip().endswith('"'), line
+
+
+def test_every_matcher_any_header_names_is_declared(cfg):
+    """``test_every_matcher_the_cache_rules_name_is_defined`` reads the
+    Cache-Control rules and the ``path`` declarations, which was every rule
+    there was. The entry policy is a different header behind a different kind of
+    matcher, so this is the same check over EVERY ``header @name`` in the file
+    and every way a named matcher is declared. The failure is the same one: an
+    undeclared matcher is a parse error, and one bad file stops Caddy loading."""
+    used = set(re.findall(r"^[ \t]*header\s+(@\w+)\s", cfg, re.M))
+    declared = set(re.findall(r"^[ \t]*(@\w+)\s+(?:path|path_regexp)\s", cfg, re.M))
+    declared |= set(re.findall(r"^[ \t]*(@\w+)\s*\{", cfg, re.M))
+    assert "@blog_entries" in used and "@revalidate" in used, "nothing parsed"
+    assert used <= declared, f"undeclared matchers: {sorted(used - declared)}"
+
+
+def test_the_blog_typefaces_take_the_rule_the_site_faces_already_have(cfg):
+    """A typeface under ``/blog/fonts/`` is named by a hash of its content, so
+    it is byte-stable under its name exactly as the two site faces are, and the
+    existing ``*.woff2`` rule already matches it at any depth. Pinned so nobody
+    adds a second, competing rule for the folder."""
+    public = _block(cfg, repo_paths.SITE_HOST)
+    assert re.search(r"^[ \t]*@fonts path \*\.woff2$", public, re.M)
+    declared = re.findall(r"^[ \t]*(@\w+)\s+(?:path|path_regexp)\s+(.*)$", public, re.M)
+    woff2_rules = [name for name, what in declared if "woff2" in what]
+    assert woff2_rules == ["@fonts"], woff2_rules
+    assert not [name for name, what in declared if "/blog/fonts" in what]
+    # And neither Blog matcher reaches into the folder.
+    font = "/blog/fonts/0123456789abcdef0123.woff2"
+    assert not re.compile(_blog_path_pattern(cfg)).fullmatch(font)
+    assert not _go_glob(caddy.BLOG_PAGE_PATH).fullmatch(font)
+
+
+def _go_glob(pattern):
+    """A Caddy ``path`` pattern with a ``*`` in the MIDDLE, as a Python regex.
+
+    Caddy special-cases a leading or trailing ``*`` (suffix and prefix matches)
+    and hands everything else to Go's ``path.Match``, where ``*`` is any run of
+    characters that are not a slash. This translates that one rule and refuses
+    a pattern it would get wrong, rather than quietly testing something else."""
+    assert not pattern.startswith("*") and not pattern.endswith("*"), (
+        f"{pattern!r} is a prefix or suffix match in Caddy, not a glob")
+    for ch in "?[]\\":
+        assert ch not in pattern, f"{pattern!r} uses {ch!r}, which this does not translate"
+    return re.compile("[^/]*".join(re.escape(part) for part in pattern.split("*")))
+
+
+def test_a_blog_entrys_page_revalidates_at_the_address_it_is_linked_by(cfg):
+    """THE ENTRY PAGE IS ASKED FOR AS A FOLDER, and ``*.html`` cannot see one.
+
+    The list, the entry's own canonical address and its sitemap all say
+    ``/blog/<slug>/``. The matcher is applied to the address as REQUESTED, not
+    to the ``index.html`` the file server answers with -- which is the reason
+    ``/`` has always been listed beside ``*.html`` for the home page. Left out,
+    an entry page falls to heuristic caching: the failure this whole section
+    exists for, where a returning visitor holds a page from before a promote.
+
+    The page carries the site's menu, so it takes the pages' policy."""
+    public = _block(cfg, repo_paths.SITE_HOST)
+    m = re.search(r"^[ \t]*@revalidate\s+path\s+([^\n]+)$", public, re.M)
+    assert m, "no revalidation rule"
+    patterns = m.group(1).split()
+    assert caddy.BLOG_PAGE_PATH in patterns
+    assert "/" in patterns, "the home page's folder address fell out of the rule"
+
+    glob = _go_glob(caddy.BLOG_PAGE_PATH)
+    for path in ("/blog/a-b/", "/blog/nuclear-stocks-thesis/", "/blog/a/"):
+        assert glob.fullmatch(path), f"{path} would be cached heuristically"
+    for path in ("/blog/", "/blog/a", "/blog/a/b/", "/blog/fonts/x.woff2",
+                 "/ideas/2026-09-29/", "/blog/a/entry.html", "/"):
+        assert not glob.fullmatch(path), path
+    # entry.html is not the glob's business: the extension rule has it.
+    assert "*.html" in patterns
+
+
 # --- the public host's rate limit (config/edge.toml) -------------------------
 
 def _blocks(text):
