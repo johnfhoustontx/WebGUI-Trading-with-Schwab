@@ -98,12 +98,14 @@ on · what am I holding.*
 - **Flow alerts** — the newest unusual-options events. The alert itself says
   **call or put**: Schwab publishes no time-and-sales tape, so nobody *knows*
   who started a trade. Under an **unusual volume** or **outsized bet** row there
-  may be a second line beginning **≈**: the app's **estimate** of how much of
-  that contract's volume today was **bought**, **sold**, or **unlabelled** (it
-  could not tell). It is read from where trades printed against the bid and the
-  ask, so treat it as a lean, not a fact, and when the *unlabelled* share is
-  large the estimate is thin. If the line is cut short, hover it to read it
-  whole. A **hedging** row (surge or reversal) is the other estimate on this
+  may be a bar marked **≈ Session**: the app's **estimate** of how much of
+  that contract's volume today was **bought** (green), **sold** (red), or
+  **unknown** (grey: it could not tell). It is read from where trades printed
+  against the bid and the ask, so treat it as a lean, not a fact, and when the
+  grey share is large the estimate is thin. Hover the bar to read all three
+  shares in words, with what has traded since the alert; where the panel is
+  wide enough that second figure is drawn as a bar of its own. A **hedging**
+  row (surge or reversal) is the other estimate on this
   panel, and it also says so.
 - **Positions** — your open paper trades and Claude's, together, with the live
   mark and **open P&L**, and a status: **OK**, **Watch**, **At risk**,
@@ -870,15 +872,23 @@ direction.
 **Bought / sold (estimate)** is the app's best guess for the two rows that name
 one contract, **Unusual volume** and **Outsized bet**. Each minute it looks at the
 contract's new volume and where the latest trade printed: at the ask counts as
-**bought**, at the bid as **sold**, and anything it cannot tell is **unlabelled**.
+**bought**, at the bid as **sold**, and anything it cannot tell is **unknown**.
 The three shares always add up to the contract's volume for the day.
-- The line begins **≈** because it is an estimate. A whole minute's volume gets
-  one label, so it is coarse.
-- A large **unlabelled** share means the estimate is thin. Volume that traded
-  before the app was watching (for example before a restart) is always unlabelled.
-- **Since the alert**, on the second line, is a finer reading of what has traded
-  in that contract after it was flagged. It appears once there is something to
-  show, and it is kept apart from the day's share on purpose.
+- It is drawn as one bar, split in proportion: **green** is bought (**Buy**),
+  **red** is sold (**Sell**), **grey** is **Unknown**. A segment wide enough
+  prints its word and its share, a narrower one only the share, and a sliver's
+  share is printed just after the bar. Hover the bar to read all three in words.
+- Green and red mean bought and sold, not bullish and bearish: a put that was
+  mostly bought is a red **Put** beside a green bar.
+- Each bar is marked **≈** because it is an estimate. A whole minute's volume
+  gets one label, so it is coarse.
+- A large **Unknown** share means the estimate is thin. Volume that traded
+  before the app was watching (for example before a restart) is always unknown.
+- **≈ Since alert**, the second bar, is a finer reading of what has traded in
+  that contract after it was flagged, and **of 1,016** after it is how many
+  contracts that covers. It appears once there is something to show, and it is
+  kept apart from the day's share on purpose.
+- Click the column heading to sort by the bought share.
 - Bought is not the same as bullish: buying a call to close a short call looks
   the same here as buying one to open.
 

@@ -647,18 +647,18 @@ def test_sides_text_names_all_three_shares():
     # The unlabelled share is always printed: a reading must never look
     # better measured than it was.
     assert flow.sides_text({"poll": _POLL, "stream": None}) \
-        == "≈ bought 62.00% · sold 30.00% · unlabelled 8.00%"
+        == "≈ bought 62.00% · sold 30.00% · unknown 8.00%"
 
 
 def test_sides_text_prints_an_all_unlabelled_tally_as_it_is():
     t = {"poll": {"bought": 0, "sold": 0, "unlabelled": 500}, "stream": None}
-    assert flow.sides_text(t) == "≈ bought 0.00% · sold 0.00% · unlabelled 100.00%"
+    assert flow.sides_text(t) == "≈ bought 0.00% · sold 0.00% · unknown 100.00%"
 
 
 def test_sides_text_adds_the_stream_figure_once_it_has_volume():
     text = flow.sides_text({"poll": _POLL, "stream": _STREAM})
-    assert text == ("≈ bought 62.00% · sold 30.00% · unlabelled 8.00%"
-                    " · since the alert: bought 71.00% · sold 20.00% · unlabelled 9.00% of 1,000")
+    assert text == ("≈ bought 62.00% · sold 30.00% · unknown 8.00%"
+                    " · since the alert: bought 71.00% · sold 20.00% · unknown 9.00% of 1,000")
 
 
 def test_sides_text_leaves_out_a_stream_that_has_not_traded():
@@ -676,7 +676,7 @@ def test_sides_text_is_empty_without_a_usable_tally(entry):
 def test_alert_rows_carry_the_estimate_for_a_contract_alert():
     rows = {r["id"]: r for r in flow.alert_rows(
         _VIEW, _sides({_UOA["id"]: {"poll": _POLL, "stream": None, "volume": 1000.0}}))}
-    assert rows[_UOA["id"]]["sides"] == "≈ bought 62.00% · sold 30.00% · unlabelled 8.00%"
+    assert rows[_UOA["id"]]["sides"] == "≈ bought 62.00% · sold 30.00% · unknown 8.00%"
     assert rows[_XO["id"]]["sides"] == ""        # no contract, no estimate
     assert rows[_GF["id"]]["sides"] == ""
 
@@ -687,15 +687,133 @@ def test_alert_rows_keep_the_stream_figure_on_its_own_line():
     (row,) = [r for r in flow.alert_rows(
         _VIEW, _sides({_UOA["id"]: {"poll": _POLL, "stream": _STREAM}}))
         if r["id"] == _UOA["id"]]
-    assert row["sides"] == "≈ bought 62.00% · sold 30.00% · unlabelled 8.00%"
-    assert row["sides_after"] == "since the alert: bought 71.00% · sold 20.00% · unlabelled 9.00% of 1,000"
+    assert row["sides"] == "≈ bought 62.00% · sold 30.00% · unknown 8.00%"
+    assert row["sides_after"] == "since the alert: bought 71.00% · sold 20.00% · unknown 9.00% of 1,000"
     assert "props.row.sides_after" in flow._SIDES_SLOT
 
 
 def test_sides_parts_of_nothing_is_two_empty_strings():
     assert flow.sides_parts(None) == ("", "")
     assert flow.sides_parts({"poll": None, "stream": _STREAM}) \
-        == ("", "since the alert: bought 71.00% · sold 20.00% · unlabelled 9.00% of 1,000")
+        == ("", "since the alert: bought 71.00% · sold 20.00% · unknown 9.00% of 1,000")
+
+
+# ── the bought / sold bar ────────────────────────────────────────────────────
+def _bar_texts(bar):
+    return [(s["key"], s["text"]) for s in bar["segs"]]
+
+
+def test_the_bar_prints_word_and_figure_where_the_segment_is_wide_enough():
+    bar = flow.sides_bar(flow.shares(
+        {"bought": 4792, "sold": 3431, "unlabelled": 1777}))
+    assert _bar_texts(bar) == [("bought", "Buy 47.92%"), ("sold", "Sell 34.31%"),
+                               ("unlabelled", "17.77%")]
+    assert bar["beside"] == ""
+
+
+def test_a_sliver_prints_its_figure_beside_the_bar_never_nowhere():
+    # The unknown share is always printed: a reading must never look better
+    # measured than it was. Too narrow for text inside, it moves beside.
+    bar = flow.sides_bar(flow.shares(_POLL))
+    assert _bar_texts(bar) == [("bought", "Buy 62.00%"), ("sold", "Sell 30.00%"),
+                               ("unlabelled", "")]
+    assert bar["beside"] == "Unknown 8.00%"
+    lopsided = flow.sides_bar(flow.shares(
+        {"bought": 9120, "sold": 630, "unlabelled": 250}))
+    assert lopsided["beside"] == "Sell 6.30% · Unknown 2.50%"
+
+
+def test_every_share_that_traded_is_printed_inside_or_beside():
+    for tally in (_POLL, _STREAM, {"bought": 1, "sold": 1, "unlabelled": 998},
+                  {"bought": 333, "sold": 333, "unlabelled": 334},
+                  {"bought": 5, "sold": 990, "unlabelled": 5}):
+        share = flow.shares(tally)
+        for chars in (flow.BAR_CHARS, 32, 10):
+            bar = flow.sides_bar(share, chars=chars)
+            printed = " ".join(s["text"] for s in bar["segs"]) + " " + bar["beside"]
+            for key in ("bought", "sold", "unlabelled"):
+                assert flow._share(share[key]) in printed
+
+
+def test_the_since_alert_bar_says_how_many_contracts_it_covers():
+    bar = flow.sides_bar(flow.shares(_STREAM), volume=True)
+    assert _bar_texts(bar) == [("bought", "Buy 71.00%"), ("sold", "20.00%"),
+                               ("unlabelled", "")]
+    assert bar["beside"] == "Unknown 9.00% · of 1,000"
+
+
+def test_a_part_with_no_volume_has_no_segment():
+    bar = flow.sides_bar(flow.shares({"bought": 0, "sold": 0, "unlabelled": 500}))
+    assert _bar_texts(bar) == [("unlabelled", "Unknown 100.00%")]
+    assert bar["beside"] == ""
+
+
+def test_a_narrower_bar_fits_less_text():
+    wide = flow.sides_bar(flow.shares(_POLL))
+    narrow = flow.sides_bar(flow.shares(_POLL), chars=32)
+    assert dict(_bar_texts(wide))["sold"] == "Sell 30.00%"
+    assert dict(_bar_texts(narrow))["sold"] == "30.00%"
+
+
+def test_segment_widths_are_the_shares_and_tones_are_fixed_classes():
+    bar = flow.sides_bar(flow.shares(_POLL))
+    cls = {s["key"]: s["cls"] for s in bar["segs"]}
+    assert cls["bought"].endswith("w-[62.00%]") and "emerald" in cls["bought"]
+    assert cls["sold"].endswith("w-[30.00%]") and "rose" in cls["sold"]
+    assert cls["unlabelled"].endswith("w-[8.00%]") and "slate" in cls["unlabelled"]
+    tones = {c.rsplit(" ", 1)[0] for c in cls.values()}
+    assert tones == {tone for _key, _word, tone in flow._BAR_PARTS}
+
+
+def test_no_tally_no_bar():
+    assert flow.sides_bar(None) is None
+    assert flow.sides_bar(flow.shares({"bought": 0, "sold": 0, "unlabelled": 0})) is None
+
+
+def test_alert_rows_carry_the_bars_the_shares_and_a_number_to_sort_by():
+    rows = {r["id"]: r for r in flow.alert_rows(
+        _VIEW, _sides({_UOA["id"]: {"poll": _POLL, "stream": _STREAM}}))}
+    row = rows[_UOA["id"]]
+    assert row["sides_bar"] == flow.sides_bar(flow.shares(_POLL))
+    assert row["sides_after_bar"] == flow.sides_bar(flow.shares(_STREAM), volume=True)
+    assert row["sides_shares"] == flow.shares(_POLL)
+    assert row["sides_after_shares"] == flow.shares(_STREAM)
+    assert row["sides_bought"] == 62.0
+    # No estimate is None, never a zero: 0.00% bought is a real reading.
+    for key in ("sides_bar", "sides_after_bar", "sides_shares",
+                "sides_after_shares", "sides_bought"):
+        assert rows[_XO["id"]][key] is None
+
+
+def test_the_help_names_the_bar_in_the_words_on_the_bar():
+    """Present-and-absent: the bar says Buy / Sell / Unknown, so the hover
+    guides must, and must not still describe the text line it replaced."""
+    import page_help
+    text = page_help.HELP_MD["/options/flow"]
+    for _key, word, _tone in flow._BAR_PARTS:
+        assert f"**{word}**" in text, word
+    assert f"**{flow.AFTER_LABEL}**" in text
+    for page in ("/options/flow", "/desk"):
+        for gone in ("unlabelled", "second line", "cut short"):
+            assert gone not in page_help.HELP_MD[page], (page, gone)
+
+
+def test_the_cell_draws_both_bars_and_keeps_the_words_as_the_hover():
+    slot = flow._SIDES_SLOT
+    assert 'v-if="props.row.sides_bar"' in slot
+    assert 'v-if="props.row.sides_after_bar"' in slot
+    assert "{{ props.row.sides }}" in slot and "{{ props.row.sides_after }}" in slot
+    assert flow.SESSION_LABEL in slot and flow.AFTER_LABEL in slot
+    assert flow.SESSION_LABEL.startswith("≈") and flow.AFTER_LABEL.startswith("≈")
+    for s in (slot, flow._FOLLOWUP_SIDES_SLOT):
+        assert ':class="s.cls"' in s and "style=" not in s
+    assert "≈" in flow._FOLLOWUP_SIDES_SLOT
+
+
+def test_the_sides_columns_sort_by_the_bought_share():
+    for cols in (flow.flow_columns(), flow.followup_columns()):
+        col = next(c for c in cols if c["name"] == "sides")
+        assert col["field"] == "sides_bought" and col["sortable"]
 
 
 def test_alert_rows_without_a_sides_view_are_unchanged_but_for_the_empty_field():
@@ -761,7 +879,9 @@ def test_followup_row_reads_in_whole_words():
         "contract": "10/09 770.00C",
         "kind": "Unusual volume",
         "volume": 1000.0,
-        "sides": "≈ bought 62.00% · sold 30.00% · unlabelled 8.00%",
+        "sides": "≈ bought 62.00% · sold 30.00% · unknown 8.00%",
+        "sides_bar": flow.sides_bar(flow.shares(_POLL)),
+        "sides_bought": 62.0,
         "oi": "9,985 → 10,600",
         "change": "+61.50% of volume",
         "reading": "Mostly opened",
@@ -802,6 +922,7 @@ def test_followup_rows_survive_malformed_input():
     (row,) = flow.followup_rows(_followup([{"alert_id": "x"}]))
     assert row["reading"] == "Waiting for today's open interest"
     assert row["oi"] == "— → —" and row["sides"] == "" and row["contract"] == ""
+    assert row["sides_bar"] is None and row["sides_bought"] is None
 
 
 def test_followup_fields_cover_every_column():

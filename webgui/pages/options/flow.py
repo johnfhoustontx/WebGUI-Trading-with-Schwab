@@ -146,15 +146,66 @@ _SHARE_SLOT = r'''
 '''
 
 
-# Bought / sold cell: the session's share, and under it what has traded since
-# the alert (only once the stream has volume). Two lines rather than one long
-# one: on one line the stream figure pushed the table past the page.
-_SIDES_SLOT = r'''
-  <q-td :props="props">
-    <div>{{ props.value }}</div>
-    <div v-if="props.row.sides_after" class="text-grey-6">{{ props.row.sides_after }}</div>
-  </q-td>
-'''
+# Bought / sold cell: one segmented bar for the session's share, and under it a
+# second for what has traded since the alert (only once the stream has volume).
+# Two lines rather than one long one: on one line the stream figure pushed the
+# table past the page. The bar is ``sides_bar``'s segments; the row's own text
+# (``sides`` / ``sides_after``) is the hover, so all three shares can always be
+# read in words. Sizes are fixed classes; only a segment's width and tone are
+# data, and both arrive as classes stamped on the row.
+#
+# ⚠ Two nested rows, and the nesting is the point. The outer one never wraps,
+# so the label stays left of its bar. The inner one holds the bar and the text
+# printed beside it and DOES wrap, onto a line under the bar's own left edge
+# rather than under the label. ``flex-nowrap`` is explicit because Quasar's own
+# ``.flex`` wraps.
+#
+# The inner row's floor (460px = the bar, the gap and 152px) is what decides
+# WHEN it wraps. With real summaries this table is wider than the page and
+# scrolls sideways (measured on the harness at 1,700px), and a table that
+# overflows gives a wrappable cell only its minimum. With no floor that
+# minimum is the bar alone, so every text beside a bar dropped a line and a
+# row with two bars stood four lines tall. 152px holds the usual text ("Unknown
+# 10.00% · of 12,400"); the rare longer one (two slivers and a volume) wraps.
+_BAR_ROW = "flex flex-nowrap items-start gap-2 py-[2px]"
+_BAR_GROUP = "flex flex-wrap items-center gap-x-2 gap-y-[2px] min-w-[460px]"
+_BAR_LABEL = "shrink-0 whitespace-nowrap text-[11px] leading-5 text-grey-6"
+_BAR_TRACK = "flex flex-nowrap h-5 w-[300px] shrink-0 overflow-hidden rounded"
+_BAR_SEG = ("h-full min-w-0 overflow-hidden whitespace-nowrap text-center "
+            "text-[11px] font-medium leading-5 tabular-nums")
+_BAR_BESIDE = "whitespace-nowrap text-[11px] leading-5 text-grey-6"
+# The label column is as wide as the longer of the two labels, so the two bars
+# of one cell start on the same pixel.
+_BAR_LABEL_WIDE = f"{_BAR_LABEL} w-[78px]"
+SESSION_LABEL = "≈ Session"
+AFTER_LABEL = "≈ Since alert"
+
+
+def _bar_line(bar, tip, label, label_class=_BAR_LABEL):
+    """One labelled bar of a table cell, as a Vue fragment. ``bar`` and ``tip``
+    are ROW FIELD names: the bar's segments and the words behind them. PURE."""
+    return (
+        f'<div v-if="props.row.{bar}" class="{_BAR_ROW}">'
+        f'<span class="{label_class}">{label}</span>'
+        f'<div class="{_BAR_GROUP}">'
+        f'<div class="{_BAR_TRACK}">'
+        f'<div v-for="s in props.row.{bar}.segs" :key="s.key" '
+        f'class="{_BAR_SEG}" :class="s.cls">{{{{ s.text }}}}</div>'
+        f'<q-tooltip>{{{{ props.row.{tip} }}}}</q-tooltip></div>'
+        f'<span v-if="props.row.{bar}.beside" class="{_BAR_BESIDE}">'
+        f'{{{{ props.row.{bar}.beside }}}}</span>'
+        '</div></div>')
+
+
+_SIDES_SLOT = (
+    '<q-td :props="props">'
+    + _bar_line("sides_bar", "sides", SESSION_LABEL, _BAR_LABEL_WIDE)
+    + _bar_line("sides_after_bar", "sides_after", AFTER_LABEL, _BAR_LABEL_WIDE)
+    + '</q-td>')
+# The Previous session panel has one figure per row, so its bar carries the
+# estimate mark and nothing else.
+_FOLLOWUP_SIDES_SLOT = (
+    '<q-td :props="props">' + _bar_line("sides_bar", "sides", "≈") + '</q-td>')
 
 
 def alert_kind_label(a):
@@ -380,7 +431,9 @@ def alert_rows(view, sides=None):
     for a in _shown(alerts):
         if not isinstance(a, dict):
             continue
-        sides, sides_after = sides_parts(estimates.get(a.get("id")))
+        entry = estimates.get(a.get("id"))
+        sides, sides_after = sides_parts(entry)
+        poll, stream = _entry_shares(entry)
         ts = a.get("ts")
         ts = ts if isinstance(ts, (int, float)) and not isinstance(ts, bool) else None
         rows.append({
@@ -411,6 +464,15 @@ def alert_rows(view, sides=None):
             # above; "" for an alert that names no contract or has no tally.
             "sides": sides,
             "sides_after": sides_after,
+            # The same two figures as bars (the cell), as raw shares (the Desk
+            # draws its own, narrower bar from them), and the bought share as a
+            # number, which is what the column sorts by. None, never a zero,
+            # where there is no estimate.
+            "sides_bar": sides_bar(poll),
+            "sides_after_bar": sides_bar(stream, volume=True),
+            "sides_shares": poll,
+            "sides_after_shares": stream,
+            "sides_bought": _bought_pct(poll),
             "share_pct": _share_pct(a),     # numeric % for the sortable Share column
             "text": a.get("text", ""),
             "_tone_class": tone_class(a),
@@ -428,8 +490,9 @@ def alert_rows(view, sides=None):
 # options service labelled bought, sold or unlabelled: from the minute poll for
 # the whole session, and from a stream of the contract after its alert. Schwab
 # publishes no trade tape, so every figure here is an ESTIMATE and the screen
-# says so: the text opens with "≈" and always prints the unlabelled share, so a
-# reading never looks better measured than it was.
+# says so: every figure is marked "≈" and the share nobody could label is always
+# shown (the screen's word for it is "unknown"; the service's is ``unlabelled``),
+# so a reading never looks better measured than it was.
 # Design: docs/plans/2026-10-04-flow-alert-sides-design.md.
 SIDES_VIEW = "options:flow_sides"
 FOLLOWUP_VIEW = "options:flow_followup"
@@ -464,26 +527,86 @@ def sides_parts(entry):
     ``session`` is the whole day from the minute poll; ``since_alert`` is the
     stream, once it has volume. The two are never blended: they are different
     samples of different stretches of the day."""
-    if not isinstance(entry, dict):
-        return "", ""
     session = after = ""
-    poll = shares(entry.get("poll"))
+    poll, stream = _entry_shares(entry)
     if poll is not None:
         session = (f"≈ bought {_share(poll['bought'])} · sold {_share(poll['sold'])}"
-                   f" · unlabelled {_share(poll['unlabelled'])}")
-    stream = shares(entry.get("stream"))
+                   f" · unknown {_share(poll['unlabelled'])}")
     if stream is not None:
-        # The unlabelled share is printed here too: neither figure may look
+        # The unknown share is printed here too: neither figure may look
         # better measured than it was.
         after = (f"since the alert: bought {_share(stream['bought'])} · "
                  f"sold {_share(stream['sold'])} · "
-                 f"unlabelled {_share(stream['unlabelled'])} of {stream['volume']:,.0f}")
+                 f"unknown {_share(stream['unlabelled'])} of {stream['volume']:,.0f}")
     return session, after
 
 
 def sides_text(entry):
     """:func:`sides_parts` on ONE line, for a reader with no room for two."""
     return " · ".join(p for p in sides_parts(entry) if p)
+
+
+def _entry_shares(entry):
+    """``(session, since_alert)`` shares of one ``contracts`` entry; either is
+    None without a usable tally. PURE."""
+    if not isinstance(entry, dict):
+        return None, None
+    return shares(entry.get("poll")), shares(entry.get("stream"))
+
+
+def _bought_pct(share):
+    return None if share is None else round(share["bought"] * 100, 2)
+
+
+# ── the bought / sold bar ────────────────────────────────────────────────────
+# One bar per figure, split in proportion: bought, sold, unknown. The tone is a
+# FIXED class per part (a finite map); the width is the documented
+# continuous-value exception, one arbitrary class built from the share.
+# ⚠ Green and red here mean BOUGHT and SOLD, never bullish and bearish: a put
+# that was mostly bought is a red "Put" beside a green bar. That is why these
+# are filled blocks while the Side column's call / put tone is coloured text.
+_BAR_PARTS = (("bought", "Buy", "bg-emerald-700 text-emerald-50"),
+              ("sold", "Sell", "bg-rose-700 text-rose-50"),
+              ("unlabelled", "Unknown", "bg-slate-600 text-slate-100"))
+# How many characters of the bar's own font fit across the WHOLE bar, and the
+# breathing room a segment's text needs. They follow the bar's pixel width and
+# font size (``_BAR_TRACK`` / ``_BAR_SEG``), so they move only with those
+# classes. A narrower bar passes its own count (the Desk does). Measured on the
+# page harness: at 11px a figure is 40px and "Unknown 33.36%" 90px, so 46 is
+# the largest count that still leaves a few pixels either side of every text.
+BAR_CHARS = 46
+_BAR_PAD_CHARS = 1
+
+
+def sides_bar(share, *, chars=BAR_CHARS, volume=False):
+    """One figure as a segmented bar: ``{"segs": [...], "beside": text}``, or
+    None when ``share`` is (``share`` is :func:`shares`' result).
+
+    Each segment is ``{"key", "cls", "text"}`` in the fixed order bought, sold,
+    unknown; a part with no volume has no segment. A segment prints its word
+    and figure ("Buy 47.92%") when that fits its width, the figure alone when
+    only that fits, and nothing when it is a sliver. A sliver's figure moves to
+    ``beside``, the text after the bar, so no share that traded is ever left
+    unprinted. ``volume`` appends the contracts the figure covers ("of 1,016").
+    PURE."""
+    if share is None:
+        return None
+    segs, beside = [], []
+    for key, word, tone in _BAR_PARTS:
+        part = share[key]
+        if part <= 0:
+            continue
+        figure = _share(part)
+        full = f"{word} {figure}"
+        room = part * chars - _BAR_PAD_CHARS
+        text = full if len(full) <= room else figure if len(figure) <= room else ""
+        if not text:
+            beside.append(full)
+        segs.append({"key": key, "text": text,
+                     "cls": f"{tone} w-[{part * 100:.2f}%]"})
+    if volume:
+        beside.append(f"of {share['volume']:,.0f}")
+    return {"segs": segs, "beside": " · ".join(beside)}
 
 
 def _sides_contracts(sides, date):
@@ -554,6 +677,10 @@ def followup_rows(view):
             continue
         verdict = r.get("verdict")
         ratio = _fmt.num(r.get("oi_ratio"))
+        entry = {"poll": {
+            "bought": r.get("poll_bought"), "sold": r.get("poll_sold"),
+            "unlabelled": r.get("poll_unlabelled")}}
+        poll, _ = _entry_shares(entry)
         out.append({
             "id": r.get("alert_id") or f"row|{len(out)}",
             "symbol": r.get("symbol", ""),
@@ -561,9 +688,9 @@ def followup_rows(view):
             "kind": (alert_kind_label({"type": r.get("alert_type")})
                      if r.get("alert_type") else ""),
             "volume": _fmt.num(r.get("volume")),
-            "sides": sides_text({"poll": {
-                "bought": r.get("poll_bought"), "sold": r.get("poll_sold"),
-                "unlabelled": r.get("poll_unlabelled")}}),
+            "sides": sides_text(entry),
+            "sides_bar": sides_bar(poll),
+            "sides_bought": _bought_pct(poll),
             "oi": f"{_count(r.get('oi_prev'))} → {_count(r.get('oi_next'))}",
             "change": ("" if ratio is None
                        else f"{_fmt.pct(ratio * 100, signed=True)} of volume"),
@@ -587,6 +714,8 @@ def followup_columns():
     cols = [{"name": f, "label": l, "field": f, "sortable": True, "align": "left"}
             for f, l in spec]
     next(c for c in cols if c["name"] == "volume")[":format"] = _COUNT_FORMAT
+    # Drawn as a bar (``_FOLLOWUP_SIDES_SLOT``), sorted by the bought share.
+    next(c for c in cols if c["name"] == "sides")["field"] = "sides_bought"
     return cols
 
 
@@ -730,8 +859,10 @@ def flow_columns():
                     "field": "share_pct", "sortable": True, "align": "right"})
     # Beside "What traded": the bought / sold estimate for the same contract.
     # "(estimate)" is in the header because Schwab publishes no trade tape.
+    # The cell is a bar (``_SIDES_SLOT``); the column sorts by the bought
+    # share, a number, where the text it replaced sorted as a string.
     cols.insert(6, {"name": "sides", "label": "Bought / sold (estimate)",
-                    "field": "sides", "sortable": True, "align": "left"})
+                    "field": "sides_bought", "sortable": True, "align": "left"})
     return cols
 
 
@@ -859,7 +990,8 @@ def render():
         with follow_box:
             kit.section_title(followup_title(view))
             kit.status_line(FOLLOWUP_CAPTION)
-            kit.table(followup_columns(), rows, numeric=("volume",))
+            kit.table(followup_columns(), rows, numeric=("volume",)) \
+                .add_slot("body-cell-sides", _FOLLOWUP_SIDES_SLOT)
 
     def _paint(payload):
         state["payload"] = payload

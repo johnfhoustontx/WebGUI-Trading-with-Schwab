@@ -381,14 +381,50 @@ def test_flow_rows_carry_the_estimate_in_the_flow_pages_own_words():
 
 def test_the_only_bought_or_sold_claim_on_a_row_is_the_marked_estimate():
     """Everything else on the row stays as it was: which side traded, never
-    who initiated. The estimate is the one exception, and it says "≈"."""
+    who initiated. The estimate is the one exception, and it says "≈": in its
+    words, and on the label of each bar drawn from it."""
+    from pages.options import flow
     view = {"date": "2026-10-05", "alerts": [_SIDES_ALERT]}
     row = d.flow_rows(view, sides=_SIDES_VIEW)[0]
-    rest = " ".join(str(v) for k, v in row.items()
-                    if k not in ("sides", "sides_after")).lower()
+    # The estimate's own fields: the words, the bars, the shares behind them.
+    estimate = {"sides", "sides_after", "sides_bar", "sides_after_bar",
+                "sides_shares", "sides_after_shares", "sides_bought"}
+    assert estimate <= set(row)
+    rest = " ".join(str(v) for k, v in row.items() if k not in estimate).lower()
     assert "bought" not in rest and "sold" not in rest
     assert "buy" not in rest and "sell" not in rest
     assert row["sides"].startswith("≈")
+    labels = [label for label, _bar in d.flow_estimate_bars(row)]
+    assert labels == [flow.SESSION_LABEL, flow.AFTER_LABEL]
+    assert all(label.startswith("≈") for label in labels)
+
+
+def test_the_desk_draws_the_flow_pages_bar_at_its_own_width():
+    """The segments are the Flow Alerts page's; only the size is the Desk's,
+    so a segment that holds a word there may hold only its figure here."""
+    from pages.options import flow
+    view = {"date": "2026-10-05", "alerts": [_SIDES_ALERT]}
+    row = d.flow_rows(view, sides=_SIDES_VIEW)[0]
+    (_, session), (_, after) = d.flow_estimate_bars(row)
+    assert session == flow.sides_bar(row["sides_shares"], chars=d.FLOW_BAR_CHARS)
+    assert after == flow.sides_bar(row["sides_after_shares"],
+                                   chars=d.FLOW_BAR_CHARS, volume=True)
+    assert [s["text"] for s in session["segs"]] == ["Buy 62.00%", "30.00%", ""]
+    assert session["beside"] == "Unknown 8.00%"
+    assert after["beside"].endswith("of 1,000")
+    assert d.FLOW_BAR_CHARS < flow.BAR_CHARS
+
+
+def test_a_row_with_no_estimate_has_no_bars():
+    assert d.flow_estimate_bars({}) == []
+    assert d.flow_estimate_bars({"sides_shares": None,
+                                 "sides_after_shares": None}) == []
+    # A session figure with nothing traded since: one bar, not an empty second.
+    view = {"date": "2026-10-05", "alerts": [_SIDES_ALERT]}
+    only_poll = {**_SIDES_VIEW, "contracts": {"a": {
+        "poll": _SIDES_VIEW["contracts"]["a"]["poll"], "stream": None}}}
+    row = d.flow_rows(view, sides=only_poll)[0]
+    assert len(d.flow_estimate_bars(row)) == 1
 
 
 def test_flow_rows_limit_still_applies_with_an_estimate():
@@ -430,18 +466,33 @@ def test_a_flow_row_with_no_estimate_is_built_exactly_as_before():
     stacked = src[src.index("if estimate:"):]
     assert "_stack()" in stacked[:stacked.index("else:")]
     assert "_stack()" not in stacked[stacked.index("else:"):]
+    # The bars are drawn only in the stacked branch, with the words as the hover.
+    assert "flow_estimate_bars(row)" in stacked[:stacked.index("else:")]
+    assert "ui.tooltip(estimate)" in stacked[:stacked.index("else:")]
+    assert "flow_estimate_bars" not in stacked[stacked.index("else:"):]
 
 
 def test_the_estimate_line_is_bounded_so_it_can_ellipse():
     """Inside the stack a label is as wide as its text. Without ``w-full`` the
     ``truncate`` never bites, and a long estimate ran over the alert-type cell
-    (measured on the page harness: a 497 px line in a 389 px track)."""
+    (measured on the page harness: a 497 px line in a 389 px track). The
+    estimate is a row of bars now, and the same bound holds for it: the row is
+    as wide as the cell and clips, and each bar may shrink inside it."""
     src = inspect.getsource(d._flow_row)
     stacked = src[src.index("with _stack():"):src.index("else:")]
     classes = [line for line in stacked.splitlines() if "truncate" in line]
-    assert len(classes) == 2, classes
+    assert len(classes) == 1, classes           # the detail line
     assert all("w-full" in c and "min-w-0" in c for c in classes), classes
+    bars = stacked[stacked.index("flex flex-wrap"):]
+    bars = bars[:bars.index("):")]
+    assert "w-full min-w-0 overflow-hidden" in bars
+    # One bar tall, wrapping, and hiding what wrapped: a row with an estimate
+    # stays two lines however much the estimate holds.
+    assert "flex-wrap" in bars and "h-4" in bars and "h-4" in d.FLOW_BAR_TRACK
     assert "ui.tooltip(estimate)" in stacked
+    # A bar gives way before it pushes the track wider than the panel.
+    assert "min-w-0" in d.FLOW_BAR_TRACK and "shrink-0" not in d.FLOW_BAR_TRACK
+    assert "min-w-0" in inspect.getsource(d._flow_bar)
 
 
 def test_flow_rows_is_empty_for_a_missing_view():

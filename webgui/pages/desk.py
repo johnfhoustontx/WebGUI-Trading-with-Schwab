@@ -367,6 +367,31 @@ def flow_estimate_line(row):
     return " · ".join(p for p in (row.get("sides"), row.get("sides_after")) if p)
 
 
+# The Desk's own, narrower drawing of the Flow Alerts page's bought / sold bar.
+# Which segments there are, their order, tone, width and what text fits are all
+# ``flow.sides_bar``'s; only the size is the Desk's, and the character count is
+# what that size holds (it moves only with these two classes).
+# ``min-w-0`` and no ``shrink-0``: in a track narrower than the bar, the bar
+# gives way (its segments clip their own text) rather than widening the panel.
+FLOW_BAR_TRACK = "flex h-4 w-[190px] min-w-0 overflow-hidden rounded-[2px]"
+FLOW_BAR_SEG = ("h-full min-w-0 overflow-hidden whitespace-nowrap text-center "
+                "text-[10px] font-medium leading-4 tabular-nums")
+FLOW_BAR_CHARS = 32
+
+
+def flow_estimate_bars(row):
+    """``[(label, bar)]`` for the row's estimate: the session's share, then
+    what has traded since the alert, each only when the row has it. The labels
+    are the Flow Alerts page's own. PURE."""
+    out = []
+    for label, key, volume in ((_flow.SESSION_LABEL, "sides_shares", False),
+                               (_flow.AFTER_LABEL, "sides_after_shares", True)):
+        bar = _flow.sides_bar(row.get(key), chars=FLOW_BAR_CHARS, volume=volume)
+        if bar is not None:
+            out.append((label, bar))
+    return out
+
+
 # ── the headlines strip (news feed) ─────────────────────────────────────────
 # The newest few items of ``cache:news:feed``, one line each: when · source ·
 # the headline, which opens the ORIGINAL article in a new tab. Every fact comes
@@ -3721,6 +3746,25 @@ def _board_row(row, glow):
     el.on("click", lambda _e: _shell.navigate_to(MATRIX_ROUTE))
 
 
+def _flow_bar(label, bar):
+    """One labelled bought / sold bar (``flow_estimate_bars``)."""
+    # Two items of the one-line row in ``_flow_row``: the labelled bar, then the
+    # text printed beside it. Apart, so that where the bar fits and its text
+    # does not, only the text is left off.
+    with ui.element("div").classes(
+            "flex flex-nowrap items-center gap-[6px] h-4 min-w-0 max-w-full"):
+        ui.label(label).classes(
+            f"text-[10px] leading-4 whitespace-nowrap shrink-0 {MUTED}")
+        with ui.element("div").classes(FLOW_BAR_TRACK):
+            for seg in bar["segs"]:
+                # ``seg['cls']`` is the tone (a fixed class per part) and the
+                # width, the documented continuous-value exception.
+                ui.label(seg["text"]).classes(f"{FLOW_BAR_SEG} {seg['cls']}")
+    if bar["beside"]:
+        ui.label(bar["beside"]).classes(
+            f"text-[10px] leading-4 h-4 whitespace-nowrap {MUTED}")
+
+
 def _flow_row(row, glow):
     # The glow class is applied at BUILD time and never touched again on a
     # live element. Changing ``animation-delay`` on a running animation
@@ -3744,20 +3788,31 @@ def _flow_row(row, glow):
         # minimum is its content, so without it a long detail line widens
         # the track past the panel instead of ellipsing inside it.
         detail = row["detail"] or row["text"] or _DASH
-        # The bought/sold ESTIMATE rides under the detail, in the Flow Alerts
-        # page's own words. Only a row that HAS one is stacked: the rest keep
+        # The bought/sold ESTIMATE rides under the detail, as the Flow Alerts
+        # page's own bar. Only a row that HAS one is stacked: the rest keep
         # their one-line height, which is what lets this panel carry so many.
         estimate = flow_estimate_line(row)
         if estimate:
             # ``w-full`` on both: inside the stack a label is as wide as its
             # text, so without a bounded width ``truncate`` never bites and a
-            # long estimate runs over the alert-type cell (seen on the harness).
+            # long detail runs over the alert-type cell (seen on the harness).
             with _stack():
                 ui.label(detail).classes(
                     f"text-[11px] w-full min-w-0 truncate {MUTED}")
-                with ui.label(estimate).classes(
-                        f"text-[10px] w-full min-w-0 truncate {MUTED}"):
-                    ui.tooltip(estimate)    # the whole line, when it ellipses
+                # ONE line, whatever the row holds: the row is one bar tall,
+                # it wraps, and it hides what wrapped. So a piece that does
+                # not fit is left off WHOLE (first the text beside a bar, then
+                # the since-alert bar) instead of being cut mid-figure, and a
+                # row with an estimate is two lines tall as it always was.
+                # Stacking the bars instead made a row five lines tall
+                # (measured on the harness), on the panel whose point is how
+                # many rows it carries. The hover has every figure in words.
+                with ui.element("div").classes(
+                        "flex flex-wrap content-start items-center gap-x-[10px] "
+                        "h-4 w-full min-w-0 overflow-hidden"):
+                    for label, bar in flow_estimate_bars(row):
+                        _flow_bar(label, bar)
+                    ui.tooltip(estimate)    # all three shares, in words
         else:
             ui.label(detail).classes(f"text-[11px] min-w-0 truncate {MUTED}")
         # ``_tone_class`` is stamped by the Flow Alerts page from its own

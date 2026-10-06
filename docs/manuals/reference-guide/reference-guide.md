@@ -273,10 +273,10 @@ time-and-sales tape, so no one knows which side initiated. Any product that tell
 that inference is often wrong.
 
 This app now makes the same inference, and labels it as one. Under a row that names
-one contract (unusual activity, large delta) a second line beginning **≈** gives the
-estimated share of that contract's volume that was bought, sold, or **unlabelled**.
-The unlabelled share is always printed, so the estimate never looks better measured
-than it was. See [Flow Alerts](#flow-alerts) for how it is made and how far to trust
+one contract (unusual activity, large delta) a bar marked **≈** gives the estimated
+share of that contract's volume that was bought (green), sold (red), or **unknown**
+(grey; the service's word for it is *unlabelled*). The unknown share is always
+shown, so the estimate never looks better measured than it was. See [Flow Alerts](#flow-alerts) for how it is made and how far to trust
 it.
 
 **Positions.** Your paper trades and your captured signals, merged, open only: source, strikes,
@@ -925,14 +925,19 @@ the hedging types the modelled dealer direction) · **What traded** ·
 **Bought / sold (estimate)** · **Share of flow** (for big-delta, the percentage of the
 symbol's gross exposure) · **Summary** (the full sentence, as it was pushed).
 
-**Bought / sold (estimate).** Filled for the two types that name one contract. The
-first line is the contract's whole day: each minute its new volume is labelled
-**bought** if the latest trade printed at the ask, **sold** if at the bid, and
-**unlabelled** if that cannot be told. The three always add up to the day's volume.
-Volume that traded while the app was not watching — before a restart, across a missed
-minute — is unlabelled, never guessed. The second line, **since the alert**, is a
-tick-by-tick reading that starts when the contract is flagged; the two are kept apart
-because they sample different stretches of the day at different resolutions.
+**Bought / sold (estimate).** Filled for the two types that name one contract, and
+drawn as a bar split in proportion: green **Buy**, red **Sell**, grey **Unknown**
+(green and red mean bought and sold, not bullish and bearish). A segment prints its
+word and share where it is wide enough, the share alone where it is narrower, and a
+sliver's share is written after the bar; hovering a bar gives all three in words. The
+column sorts by the bought share. The **≈ Session** bar is the contract's whole day:
+each minute its new volume is labelled **bought** if the latest trade printed at the
+ask, **sold** if at the bid, and **unknown** (*unlabelled*) if that cannot be told. The three always
+add up to the day's volume. Volume that traded while the app was not watching — before
+a restart, across a missed minute — is unlabelled, never guessed. The second bar,
+**≈ Since alert**, is a tick-by-tick reading that starts when the contract is flagged;
+the two are kept apart because they sample different stretches of the day at different
+resolutions.
 
 **Previous session.** A second table under the alerts: yesterday's flagged contracts,
 their open interest before and after, and a reading — *mostly opened* when open

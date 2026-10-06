@@ -685,7 +685,7 @@ structure · what should I act on · what am I holding.</em></p>
 </tr>
 <tr>
 <td><strong>Live Flow Alerts</strong></td>
-<td>The newest unusual-options events. A row that names one contract can carry a second line: the estimated share of its volume that was bought, sold, or could not be told</td>
+<td>The newest unusual-options events. A row that names one contract can carry a bar under it: the estimated share of its volume that was bought (green), sold (red), or could not be told (grey)</td>
 </tr>
 <tr>
 <td><strong>Positions</strong></td>
@@ -1191,24 +1191,37 @@ gamma to decide direction.</p>
 <p>For the two alerts that name one contract — <strong>Unusual volume</strong> and <strong>Outsized bet</strong> —
 the app estimates how much of that contract's volume today was bought and how much
 was sold.</p>
-<p><strong>How to read it.</strong> A cell reads, for example:</p>
+<p><strong>How to read it.</strong> A cell holds one or two bars, each split in proportion into three
+colours. <strong>Green</strong> is bought, <strong>red</strong> is sold, <strong>grey</strong> is unknown. For example:</p>
 <blockquote>
-<p>≈ bought 56.67% · sold 29.95% · unlabelled 13.38%
-since the alert: bought 71.05% · sold 20.00% · unlabelled 8.95% of 12,400</p>
+<p>≈ Session — <strong>Buy 56.67%</strong> (green) · <strong>Sell 29.95%</strong> (red) · <strong>13.38%</strong> (grey)
+≈ Since alert — <strong>Buy 71.05%</strong> (green) · <strong>20.00%</strong> (red) · a grey sliver, then
+<em>Unknown 8.95% · of 12,400</em> printed after the bar</p>
 </blockquote>
 <ul>
-<li>The <strong>first line</strong> covers the contract's whole day. Once a minute the app takes the
-  contract's new volume and looks at where its latest trade printed: at the ask is
+<li>A segment wide enough prints its word and its share; a narrower one prints only the
+  share, and its colour says which it is; a sliver prints nothing inside, and its
+  share is written just after the bar. No share that traded is ever left off. Hover a
+  bar to read all three shares in words.</li>
+<li><strong>Green and red mean bought and sold, not bullish and bearish.</strong> A put that was
+  mostly bought shows a red <strong>Put</strong> in the Side column beside a mostly green bar.</li>
+<li>The <strong>≈ Session</strong> bar covers the contract's whole day. Once a minute the app takes
+  the contract's new volume and looks at where its latest trade printed: at the ask is
   <strong>bought</strong>, at the bid is <strong>sold</strong>. The three shares always add up to the day's
   volume, including the volume that caused the alert.</li>
-<li><strong>Unlabelled</strong> is volume the app could not tell: a trade at the exact midpoint, a
-  quote it could not read, or volume that printed while the app was not watching (a
-  restart, a missed minute). When this share is large, the estimate is thin.</li>
-<li>The <strong>second line</strong> appears once the contract has traded after its alert. From the
-  moment a contract is flagged the app follows it tick by tick, which is finer than
+<li><strong>Unknown</strong> is volume the app could not tell (the technical manuals call it
+  <em>unlabelled</em>): a trade at the exact midpoint, a quote it could not read, or volume
+  that printed while the app was not watching (a restart, a missed minute). When the
+  grey share is large, the estimate is thin.</li>
+<li>The <strong>≈ Since alert</strong> bar appears once the contract has traded after its alert. From
+  the moment a contract is flagged the app follows it tick by tick, which is finer than
   once a minute. It is shown apart from the day's share because it is a different
   sample of a different stretch of the day; "of 12,400" is the number of contracts
   it covers.</li>
+<li>Click the column heading to sort the table by the bought share.</li>
+<li>On the <strong>Desk</strong>, the same bar sits under the alert's detail line, a little shorter.
+  The Desk keeps each row to two lines, so the text after a bar and the since-alert
+  bar are drawn only where the panel is wide enough; hovering shows every figure.</li>
 </ul>
 <p><strong>What it is not.</strong> It is an estimate: a whole minute's volume takes one label, and
 the tick-by-tick stream still merges rapid trades. And <strong>bought is not the same as

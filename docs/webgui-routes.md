@@ -646,8 +646,24 @@ The page reads two more views and probes all three versions in ONE
 - **`options:flow_sides`** fills the **Bought / sold (estimate)** column for `uoa` and
   `big_delta` rows. `flow.alert_rows(view, sides)` stamps `sides` (the session share,
   from the minute poll) and `sides_after` (what has traded since the alert, from the
-  stream); the `body-cell-sides` slot stacks them. ⚠ Two lines on purpose: on one
-  line the cell pushed the table past the page at 1,700 px. The view changes every
+  stream) as words, and since 2026-10-06 the same two figures as bars
+  (`sides_bar`, `sides_after_bar`), as raw shares (`sides_shares`,
+  `sides_after_shares`, from which the Desk draws its own narrower bar) and
+  `sides_bought`, the number the column sorts by. The `body-cell-sides` slot stacks
+  the two bars and keeps the words as the hover. ⚠ Two lines on purpose: on one
+  line the cell pushed the table past the page at 1,700 px.
+  **The bar** (`flow.sides_bar`, design
+  [`plans/2026-10-06-flow-sides-bar-design.md`](plans/2026-10-06-flow-sides-bar-design.md)):
+  three segments in the fixed order bought, sold, unknown; the tone is a fixed class
+  per part and the width one arbitrary class built from the share. A segment prints
+  word and figure, the figure alone, or nothing, by a character count that follows the
+  bar's pixel width and font (`BAR_CHARS`; the Desk passes its own); a sliver's figure
+  goes to `beside`, printed after the bar, so no share that traded goes unprinted.
+  ⚠ The screen's word is **Unknown**; the payload key and the service's word stay
+  `unlabelled`. ⚠ The bar and its side text sit in a wrapping row with a 460 px
+  floor: this table is wider than the page with real summaries, an overflowing table
+  gives a wrappable cell only its minimum, and without the floor every side text
+  dropped a line. The view changes every
   minute while the alert list only changes when an alert fires, so the page keeps the
   last alert payload in state and rebuilds the rows when either version moves. An
   estimate whose `date` is not the alert list's is not shown (`_sides_contracts`):
@@ -662,8 +678,9 @@ The page reads two more views and probes all three versions in ONE
   (ships `true`). `flow.sides_view_shown` is the one filter, used by this page and
   the Desk; like `_shown` it reads the capture cookie, so it runs on the event loop,
   never inside `run.io_bound`. A missing flag is closed.
-- Percentages go through `fmt.pct` (two decimals); the unlabelled share is always
-  printed, and the text opens with `≈`.
+- Percentages go through `fmt.pct` (two decimals); the unknown share is always
+  printed (inside its segment or beside the bar), and every bar's label and the
+  hover text open with `≈`.
 
 ## `/news`
 

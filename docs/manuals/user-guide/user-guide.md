@@ -483,7 +483,7 @@ structure · what should I act on · what am I holding.*
 | **Top strip** | Clock, two dials showing **Day / Week / Month** for sentiment and trend, then **Bias** (Long / Neutral / Cautious / Short), **Signal** (Strong Bull … Strong Bear) and the **market regime** word |
 | **Dealer Positioning** | One row each for **$SPX, SPY, QQQ, $NDX** — price, gamma flip and distance to it, call and put walls, net gamma, and a pins-or-runs chip |
 | **Opportunity Board** | The five hottest names, with implied volatility and whether it is rising or falling, and a setup tag |
-| **Live Flow Alerts** | The newest unusual-options events. A row that names one contract can carry a second line: the estimated share of its volume that was bought, sold, or could not be told |
+| **Live Flow Alerts** | The newest unusual-options events. A row that names one contract can carry a bar under it: the estimated share of its volume that was bought (green), sold (red), or could not be told (grey) |
 | **Positions** | Your paper trades and captured signals together, with live marks and an **OK / Watch / At risk / Rescue** flag |
 | **Headlines** | The five newest stories from Market News, one line each — time (Central), feed, and the headline, which opens the article in a new tab. **All headlines →** opens Market News. Full width |
 | **Market read** (button, top right) | Opens a popup of six readings, each marked Tailwind, Headwind or Neutral for stocks, retaken every 15 minutes in the session. The time and the count sit beside the button. See [The Market read](#the-market-read) |
@@ -873,23 +873,36 @@ For the two alerts that name one contract — **Unusual volume** and **Outsized 
 the app estimates how much of that contract's volume today was bought and how much
 was sold.
 
-**How to read it.** A cell reads, for example:
+**How to read it.** A cell holds one or two bars, each split in proportion into three
+colours. **Green** is bought, **red** is sold, **grey** is unknown. For example:
 
-> ≈ bought 56.67% · sold 29.95% · unlabelled 13.38%
-> since the alert: bought 71.05% · sold 20.00% · unlabelled 8.95% of 12,400
+> ≈ Session — **Buy 56.67%** (green) · **Sell 29.95%** (red) · **13.38%** (grey)
+> ≈ Since alert — **Buy 71.05%** (green) · **20.00%** (red) · a grey sliver, then
+> *Unknown 8.95% · of 12,400* printed after the bar
 
-- The **first line** covers the contract's whole day. Once a minute the app takes the
-  contract's new volume and looks at where its latest trade printed: at the ask is
+- A segment wide enough prints its word and its share; a narrower one prints only the
+  share, and its colour says which it is; a sliver prints nothing inside, and its
+  share is written just after the bar. No share that traded is ever left off. Hover a
+  bar to read all three shares in words.
+- **Green and red mean bought and sold, not bullish and bearish.** A put that was
+  mostly bought shows a red **Put** in the Side column beside a mostly green bar.
+- The **≈ Session** bar covers the contract's whole day. Once a minute the app takes
+  the contract's new volume and looks at where its latest trade printed: at the ask is
   **bought**, at the bid is **sold**. The three shares always add up to the day's
   volume, including the volume that caused the alert.
-- **Unlabelled** is volume the app could not tell: a trade at the exact midpoint, a
-  quote it could not read, or volume that printed while the app was not watching (a
-  restart, a missed minute). When this share is large, the estimate is thin.
-- The **second line** appears once the contract has traded after its alert. From the
-  moment a contract is flagged the app follows it tick by tick, which is finer than
+- **Unknown** is volume the app could not tell (the technical manuals call it
+  *unlabelled*): a trade at the exact midpoint, a quote it could not read, or volume
+  that printed while the app was not watching (a restart, a missed minute). When the
+  grey share is large, the estimate is thin.
+- The **≈ Since alert** bar appears once the contract has traded after its alert. From
+  the moment a contract is flagged the app follows it tick by tick, which is finer than
   once a minute. It is shown apart from the day's share because it is a different
   sample of a different stretch of the day; "of 12,400" is the number of contracts
   it covers.
+- Click the column heading to sort the table by the bought share.
+- On the **Desk**, the same bar sits under the alert's detail line, a little shorter.
+  The Desk keeps each row to two lines, so the text after a bar and the since-alert
+  bar are drawn only where the panel is wide enough; hovering shows every figure.
 
 **What it is not.** It is an estimate: a whole minute's volume takes one label, and
 the tick-by-tick stream still merges rapid trades. And **bought is not the same as

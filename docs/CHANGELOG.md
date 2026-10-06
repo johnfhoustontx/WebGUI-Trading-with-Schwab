@@ -4,7 +4,39 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-06 (**The Desk: the Market read and the Market report open as popups.**)
+**Last updated:** 2026-10-06 (**Flow Alerts: the bought / sold estimate is a bar.**)
+
+- **What changed.** The estimate was two lines of text ("≈ bought 47.92% · sold
+  34.31% · unlabelled 17.76%"). It is now one bar per figure, split in proportion:
+  green **Buy**, red **Sell**, grey **Unknown**, with the share printed inside each
+  segment. On the Flow Alerts table (two bars: `≈ Session`, `≈ Since alert`), the
+  Previous session panel (one), and the Desk's flow panel (a shorter one under the
+  detail line). Design and plan: `docs/plans/2026-10-06-flow-sides-bar-{design,plan}.md`.
+- **Decisions the operator made**, from three rounds of mockups: a wide bar with the
+  text inside rather than coloured boxes; then the bar slightly smaller with a
+  proportionally smaller font. "Unknown" is the operator's word for the grey share;
+  the service and the technical manuals keep `unlabelled`.
+- **What a narrow segment does.** Word and share where they fit, the share alone
+  where only that fits, and a sliver's share is printed after the bar: the share
+  nobody could label is still always shown. Hovering a bar gives the old sentence.
+- **Also.** The column now sorts by the bought share (it sorted as text).
+- **The pieces.** `flow.sides_bar` (the one builder, pure), `_bar_line` (both table
+  slots), new row fields `sides_bar`, `sides_after_bar`, `sides_shares`,
+  `sides_after_shares`, `sides_bought`; on the Desk `flow_estimate_bars` and
+  `_flow_bar`. No service, view or config change.
+- **What the harness changed.** Three things were set by measuring the real page,
+  not by the mockup: the character count that decides what fits in a segment (46 on
+  the Flow bar, 32 on the Desk's); a 460 px floor on the bar-and-text row, without
+  which every side text dropped a line because this table overflows the page; and
+  the Desk's estimate as ONE line that hides what does not fit, after stacking the
+  bars made a row five lines tall.
+- **On the Desk** the since-alert bar and the text beside a bar are drawn only where
+  the panel is wide enough; at its usual width the row shows the session bar, which
+  is what the truncated text line showed before. The hover has every figure.
+- **Verified on the page harness** (fake bus, seeded views): both pages render, no
+  segment clips its text, the hover works, no console errors. Not yet seen on prod.
+
+**Prior —** 2026-10-06 (**The Desk: the Market read and the Market report open as popups.**)
 
 - **What changed.** The Market read card and the MARKET SUMMARY frame left the
   foot of the Desk. Two buttons in the page header open them as in-page dialogs:
