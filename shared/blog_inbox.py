@@ -411,21 +411,29 @@ def _text(raw, cap) -> str:
     form. And Persian or Indic text that uses the non-joiner loses it.
 
     ⚠ It is NOT a guarantee that what comes back shows something. Unicode has
-    more invisible and blank glyphs than these (other scripts' fillers and
-    variation selectors, tag characters, combining marks with nothing to
-    combine with, and whatever the next version adds), and a font can draw any
-    character as nothing. What IS removed comes back as ``""`` when nothing
-    else is left, which every caller already treats as "not given".
+    more invisible and blank glyphs than these (other scripts' fillers, combining
+    marks with nothing to combine with, and whatever the next version adds), and
+    a font can draw any character as nothing. (Tag characters U+E00xx are
+    category Cf, so the ``Cf`` rule already removes them.) What IS removed comes
+    back as ``""`` when nothing else is left, which every caller already treats
+    as "not given".
 
     The removal happens BEFORE the cut for size. Cut first, 700 zero-width
     spaces in front of a real title used up the whole cut and blanked it. The
     work is bounded instead by ``_SCAN_CHARS`` (how far in it looks) and by
     stopping once a few times ``cap`` has been kept: collapsing whitespace can
-    only shrink that, so nothing further in could survive the final cut."""
+    only shrink that, so nothing further in could survive the final cut.
+
+    ⚠ But when the window runs out INSIDE the field - more than ``_SCAN_CHARS``
+    characters in and not yet enough kept to be past the final cut - what was
+    kept is a PREFIX of a longer field, and half a title is worse than none
+    (16,380 zero-width spaces then "Real title" would otherwise come back
+    "Real"). That is answered ``""``, not the fragment. A real title is a few
+    hundred characters; only a hostile one reaches the window at all."""
     if not isinstance(raw, str):
         return ""
     enough = cap * 4 + 64
-    kept = []
+    kept, reached_enough = [], False
     for ch in raw[:_SCAN_CHARS]:
         if ch in _BLANK:
             continue
@@ -434,7 +442,10 @@ def _text(raw, cap) -> str:
             continue
         kept.append(" " if kind == "Cc" else ch)
         if len(kept) == enough:
+            reached_enough = True
             break
+    if len(raw) > _SCAN_CHARS and not reached_enough:
+        return ""                   # the window ended inside the field: a prefix, not the field
     return " ".join("".join(kept).split())[:cap].rstrip()
 
 
@@ -456,7 +467,12 @@ def clean_fields(raw) -> dict:
     src = raw if isinstance(raw, dict) else {}
     tags, seen = [], set()
     listed = src.get("tags")
-    for item in listed if isinstance(listed, list) else ():
+    # Only as many as could be kept are even EXAMINED: past max_tags distinct
+    # usable ones there is nothing to add, and cleaning each costs work, so a
+    # list of a million tags must not be a million calls to ``_text``. Four per
+    # kept tag leaves room for blanks and duplicates among them.
+    candidates = listed[: lim["max_tags"] * 4] if isinstance(listed, list) else ()
+    for item in candidates:
         if len(tags) == lim["max_tags"]:
             break
         tag = _text(item, lim["tag_chars"])

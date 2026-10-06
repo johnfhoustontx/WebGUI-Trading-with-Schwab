@@ -391,15 +391,59 @@ def test_invisible_characters_in_front_cannot_blank_a_real_title():
                  "tags": ["tag"], "slug": ""}
 
 
+def test_a_huge_tag_list_is_not_a_huge_amount_of_work(monkeypatch):
+    """Only as many tags as could be kept are examined, so the work does not
+    follow the payload's size: a million-entry list cleans the first few, not
+    all of them."""
+    calls = []
+    real = bi._text
+    monkeypatch.setattr(bi, "_text", lambda raw, cap: calls.append(raw) or real(raw, cap))
+    f = bi.clean_fields({"tags": [f"tag{i}" for i in range(1_000_000)]})
+    assert len(f["tags"]) == bi.limits()["max_tags"]
+    assert len(calls) <= bi.limits()["max_tags"] * 4
+
+
+def test_only_so_many_tag_candidates_are_examined():
+    """The cap on candidates can swallow usable tags that sit past it - the
+    price of the bound. Duplicates and blanks among the first few can crowd out
+    a real tag deeper in; a submitter who wants all six kept sends at most a few
+    times six."""
+    lim = bi.limits()
+    blanks = [""] * (lim["max_tags"] * 4)
+    assert bi.clean_fields({"tags": blanks + ["real"]})["tags"] == []
+    near = ["" ] * (lim["max_tags"] * 4 - 1) + ["kept", "lost"]
+    assert bi.clean_fields({"tags": near})["tags"] == ["kept"]
+
+
 def test_the_search_for_a_title_is_still_bounded():
     """Removing first must not mean reading a megabyte character by character:
-    past ``_SCAN_CHARS`` the field is not looked at, so a title buried deeper
-    than that is not found. That is the price of the bound, stated."""
+    past ``_SCAN_CHARS`` the field is not looked at. A title whose real text
+    the window does not reach whole is answered ``""`` - a prefix of a title is
+    worse than none - not the fragment it managed to keep.
+
+    Pinned across the boundary, not only at its ends: as the padding grows the
+    window reaches less and less of "Real title", and every one of those is
+    "", never "Real" or "R"."""
     assert bi._SCAN_CHARS >= 4096
-    deep = ZWSP * (bi._SCAN_CHARS + 1) + "Real title"
-    assert bi.clean_fields({"title": deep})["title"] == ""
-    edge = ZWSP * (bi._SCAN_CHARS - len("Real title")) + "Real title"
-    assert bi.clean_fields({"title": edge})["title"] == "Real title"
+    real = "Real title"
+    # the whole field fits in the window: kept whole
+    assert bi.clean_fields({"title": ZWSP * 50 + real})["title"] == real
+    # the field ends exactly at the window: still whole
+    edge = ZWSP * (bi._SCAN_CHARS - len(real)) + real
+    assert len(edge) == bi._SCAN_CHARS
+    assert bi.clean_fields({"title": edge})["title"] == real
+    # the real text straddles the window boundary - its head is kept, its tail is
+    # not - so the whole field is refused, whatever the padding
+    for padding in (bi._SCAN_CHARS - len(real) + 1, bi._SCAN_CHARS - 4,
+                    bi._SCAN_CHARS - 1, bi._SCAN_CHARS + 1):
+        buried = ZWSP * padding + real
+        assert len(buried) > bi._SCAN_CHARS
+        assert bi.clean_fields({"title": buried})["title"] == ""
+    # a genuinely long field of REAL text reaches "enough" well inside the
+    # window, so it is kept (cut to the limit), not refused: the refusal is only
+    # for a field the window could not get through to real content.
+    long_title = bi.clean_fields({"title": "word " * bi._SCAN_CHARS})["title"]
+    assert long_title and len(long_title) <= bi.limits()["title_chars"]
 
 
 def test_a_compound_emoji_is_split_and_that_is_known():

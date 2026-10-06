@@ -270,7 +270,13 @@ def test_a_full_stream_loses_its_oldest_commands_whether_or_not_they_ran():
     for whether a consumer has read them: it is a limit on the stream, not on
     its history. Sixty drafts queued while nothing is consuming, on a stream
     that keeps fifty, and the first ten are gone - never delivered, never
-    dead-lettered, and nothing says so. The newest fifty arrive in order."""
+    dead-lettered, and nothing says so. The newest fifty arrive in order.
+
+    ⚠ fakeredis trims EXACTLY to maxlen; real Redis with ``approximate=True``
+    (how the Bus XADDs) trims per macro node, so sixty TINY commands can all
+    survive on the box and seem to disprove this. They do not: a blog document
+    is up to half a megabyte, one entry fills a node, and the cap then bites at
+    the count shown here. Do not "correct" this test against a live Redis."""
     from shared import service_limits
     cap = service_limits.stream_keep("cmd:blog")
     assert cap == 50
