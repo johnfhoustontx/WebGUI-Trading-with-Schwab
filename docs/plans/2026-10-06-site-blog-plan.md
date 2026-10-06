@@ -545,8 +545,9 @@ def test_a_failed_site_write_is_reported_and_degrades(bus, store, monkeypatch): 
 def test_the_app_reads_both_streams(): ...                 # /health lists cmd:blog and cmd:blog_inbox
 ```
 
-Run `$PY -m pytest services/blog_svc -q` and `$PY -m pytest tests -q`
-(`test_no_silent_degrades.py` now walks this service). Commit
+Run `$PY -m pytest services/blog_svc -q`, `$PY -m pytest tests -q` and
+`$PY -m pytest services/tests/test_no_silent_degrades.py -q` (it now walks
+this service). Commit
 `feat(blog): the blog service - commands, views and its two streams`.
 
 ### Task 8: the site — `blog.html`, `blog.js`, the menu, the sitemap
