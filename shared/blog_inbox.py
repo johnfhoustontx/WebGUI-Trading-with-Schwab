@@ -37,7 +37,9 @@ parses HTML. ``shared/tests/test_blog_inbox.py`` pins the import set.
 
 Missing file / bad TOML / bad value -> the built-in defaults, never a raise.
 """
+import hashlib
 import math
+import pathlib
 import re
 import secrets
 import unicodedata
@@ -70,11 +72,105 @@ ID_RE = re.compile(r"^[0-9a-f]{16}\Z")
 # public file server's root: lower-case words joined by single hyphens, so no
 # dot, no slash, no leading or doubled hyphen can be spelled at all.
 SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*\Z")
-# ``blog/fonts/`` is the typeface folder. An entry with that address would be
-# written over it, and unpublishing the entry would delete every typeface.
-RESERVED_SLUGS = frozenset({"fonts"})
-# A typeface on disk is named by a hash of its content (``blog_svc/fonts.py``).
+# Words that have the shape of an address and may never be one.
+#
+# * ``fonts``: ``blog/fonts/`` is the typeface folder. An entry with that
+#   address would be written over it, and unpublishing the entry would delete
+#   every typeface.
+# * The names Windows gives to devices. A folder called ``con`` or ``nul``
+#   cannot be made there, and opening one opens the console or discards what
+#   is written. Prod is Linux, where one would simply work - which is how an
+#   entry no Windows box can restore (or test) would get published. Refused on
+#   every platform, HERE, so the page, the service and the store agree and
+#   ``slugify`` turns a title "Con" into ``entry-con`` like any reserved word.
+_WINDOWS_DEVICES = frozenset({"con", "prn", "aux", "nul"}
+                             | {f"com{n}" for n in range(1, 10)}
+                             | {f"lpt{n}" for n in range(1, 10)})
+RESERVED_SLUGS = frozenset({"fonts"}) | _WINDOWS_DEVICES
+# A typeface on disk is named by a hash of its content (``font_name_for``).
 FONT_NAME_RE = re.compile(r"^[0-9a-f]{20}\.woff2\Z")
+
+# ── where the store keeps things, and how anything reads them ───────────────
+#
+# ``blog_svc`` is the only WRITER of the blog data folder
+# (``repo_paths.BLOG_DATA``). Two other things read it without importing the
+# service - the private preview route in Tier 1, and the site writer through
+# the store - so the layout and the two reads live here, once:
+#
+#     <data>/staging/<draft id>/entry.html     a draft's document
+#     <data>/published/<slug>/entry.html       an entry's document
+#     <data>/fonts/<20 hex>.woff2              one pool of typefaces
+#
+# ⚠ Read a document with ``read_document`` and a typeface with ``read_font``,
+# never by opening the file. A row carries the SHA-256 of its document, and
+# while a replacement is being put in place the document that row describes is
+# under ``NEXT_NAME``, not ``DOC_NAME``: opening ``entry.html`` directly can
+# show the PREVIOUS document. The digest is what says which file is the row's.
+STAGING_DIR, PUBLISHED_DIR, FONTS_DIR = "staging", "published", "fonts"
+DOC_NAME, NEXT_NAME = "entry.html", "entry.html.next"
+
+# A SHA-256 as this project writes one: lower-case hex, and only that spelling.
+_DIGEST_RE = re.compile(r"^[0-9a-f]{64}\Z")
+
+
+def font_name_for(data) -> str:
+    """The name a typeface with these bytes is stored under: twenty hex
+    characters of its SHA-256, then ``.woff2``. Always matches ``FONT_NAME_RE``.
+
+    Named by content so the same file under two addresses is one file on disk,
+    and so a reader can tell a file that is not what its name says."""
+    return hashlib.sha256(data).hexdigest()[:20] + ".woff2"
+
+
+def _file_bytes(path):
+    """The bytes at ``path``, or ``None``. Never raises: ``ValueError`` covers a
+    path with a NUL in it, ``TypeError`` one that is not a path at all."""
+    try:
+        return pathlib.Path(path).read_bytes()
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def read_document(folder, digest):
+    """The bytes of the document in ``folder`` that ``digest`` names, or ``None``.
+
+    ``folder`` is ``<data>/staging/<id>`` or ``<data>/published/<slug>`` and
+    ``digest`` is the row's. ``DOC_NAME`` is tried, then ``NEXT_NAME``; whichever
+    has that SHA-256 is the document. ``None`` when neither does - a file
+    altered on disk reads as missing, so what is previewed is what was cleaned
+    and what is served is what was previewed - when ``digest`` is not 64
+    lower-case hex characters, when the folder is not there, and on any error
+    reading. **Never raises.**
+
+    Bytes, not text: nothing is decoded and no newline is translated."""
+    if not isinstance(digest, str) or not _DIGEST_RE.match(digest):
+        return None
+    try:
+        base = pathlib.Path(folder)
+    except TypeError:
+        return None
+    for name in (DOC_NAME, NEXT_NAME):
+        data = _file_bytes(base / name)
+        if data is not None and hashlib.sha256(data).hexdigest() == digest:
+            return data
+    return None
+
+
+def read_font(fonts_folder, name):
+    """The bytes of the typeface ``name`` in ``fonts_folder``, or ``None``.
+
+    Only for a ``name`` matching ``FONT_NAME_RE`` - checked BEFORE it is joined
+    to a path, so nothing outside the folder can be asked for - and only when
+    the file's content is what the name says (``font_name_for``): a typeface
+    altered on disk is not served. **Never raises.**"""
+    if not isinstance(name, str) or not FONT_NAME_RE.match(name):
+        return None
+    try:
+        path = pathlib.Path(fonts_folder) / name
+    except TypeError:
+        return None
+    data = _file_bytes(path)
+    return data if data is not None and font_name_for(data) == name else None
 
 
 def is_id(raw) -> bool:

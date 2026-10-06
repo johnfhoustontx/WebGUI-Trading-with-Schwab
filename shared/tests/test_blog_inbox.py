@@ -957,6 +957,173 @@ def test_the_accessors_never_hand_out_the_cached_mapping():
     assert bi.DEFAULTS["fonts"]["subsets"] == ["latin", "latin-ext"]
 
 
+# ── the store's layout, and the two readers everything shares ───────────────
+
+WINDOWS_DEVICES = (["con", "prn", "aux", "nul"]
+                   + [f"com{n}" for n in range(1, 10)] + [f"lpt{n}" for n in range(1, 10)])
+
+
+def _sha(data) -> str:
+    import hashlib
+    return hashlib.sha256(data).hexdigest()
+
+
+def test_the_layout_names_are_the_ones_on_disk():
+    """The service writes under these names; the private preview and the site
+    writer read under them. One definition, so they cannot drift."""
+    assert (bi.STAGING_DIR, bi.PUBLISHED_DIR, bi.FONTS_DIR) == ("staging", "published", "fonts")
+    assert (bi.DOC_NAME, bi.NEXT_NAME) == ("entry.html", "entry.html.next")
+    # The typeface folder's name is the reserved address, and for that reason.
+    assert bi.FONTS_DIR in bi.RESERVED_SLUGS
+
+
+@pytest.mark.parametrize("name", WINDOWS_DEVICES)
+def test_a_windows_device_name_is_not_an_address(name):
+    """``con`` and ``nul`` have the shape of an address, and on Windows they
+    are not folders: opening one opens the console or discards what is
+    written. Prod is Linux, where one would simply work - which is how an
+    entry no Windows box can restore would get published."""
+    assert bi.SLUG_RE.match(name), "the shape alone does not refuse it"
+    assert name in bi.RESERVED_SLUGS
+    assert bi.clean_slug(name) is None and bi.clean_slug(name.upper()) is None
+    assert bi.existing_slug(name) is None and bi.existing_slug(f" {name} ") is None
+    assert bi.clean_fields({"slug": name})["slug"] == ""
+    assert bi.owner_command("unpublish", bi.new_id(), slug=name) is None
+
+
+@pytest.mark.parametrize("name", WINDOWS_DEVICES)
+def test_a_title_that_is_a_device_name_still_gets_an_address(name):
+    for title in (name, name.upper(), name.title(), f"  {name}!  "):
+        slug = bi.slugify(title)
+        assert slug == f"{bi.FALLBACK_SLUG}-{name}", title
+        assert bi.clean_slug(slug) == slug
+
+
+@pytest.mark.parametrize("name", ["console", "nulls", "com10", "com0", "lpt", "lpt0",
+                                  "con-artists", "aux-in", "a-con", "com", "prn1"])
+def test_an_address_that_only_looks_like_a_device_is_fine(name):
+    assert bi.clean_slug(name) == name and bi.slugify(name) == name
+
+
+def test_a_typeface_is_named_by_its_content():
+    data = b"wOF2 some bytes"
+    name = bi.font_name_for(data)
+    assert name == _sha(data)[:20] + ".woff2"
+    assert bi.FONT_NAME_RE.match(name)
+    assert bi.font_name_for(bytearray(data)) == name
+    assert bi.font_name_for(b"") == _sha(b"")[:20] + ".woff2"
+    assert bi.font_name_for(data + b"!") != name
+
+
+def test_read_document_returns_the_document_the_digest_names(tmp_path):
+    one, two = b"<p>one</p>", b"<p>two</p>"
+    (tmp_path / bi.DOC_NAME).write_bytes(one)
+    assert bi.read_document(tmp_path, _sha(one)) == one
+    assert bi.read_document(str(tmp_path), _sha(one)) == one          # a str path too
+    assert bi.read_document(tmp_path, _sha(two)) is None
+
+    # A replacement whose rename has not happened yet: the digest picks it.
+    (tmp_path / bi.NEXT_NAME).write_bytes(two)
+    assert bi.read_document(tmp_path, _sha(two)) == two
+    assert bi.read_document(tmp_path, _sha(one)) == one
+    assert bi.read_document(tmp_path, _sha(b"neither")) is None
+
+    # ...and with no entry.html at all.
+    (tmp_path / bi.DOC_NAME).unlink()
+    assert bi.read_document(tmp_path, _sha(two)) == two
+    assert bi.read_document(tmp_path, _sha(one)) is None
+
+
+def test_read_document_is_byte_for_byte(tmp_path):
+    """No newline is translated and nothing is decoded on the way."""
+    data = ("caf" + chr(0xE9) + " " + chr(0x1F600) + "\r\nline\rline\n").encode("utf-8") + bytes([0xFF, 0x00])
+    (tmp_path / bi.DOC_NAME).write_bytes(data)
+    assert bi.read_document(tmp_path, _sha(data)) == data
+
+
+def test_read_document_never_raises(tmp_path):
+    data = b"<p>kept</p>"
+    digest = _sha(data)
+    assert bi.read_document(tmp_path / "missing", digest) is None
+    assert bi.read_document(tmp_path / "a" / "b" / "c", digest) is None
+    assert bi.read_document(tmp_path, digest) is None                 # an empty folder
+
+    # A directory where the file should be - for either name.
+    (tmp_path / bi.DOC_NAME).mkdir()
+    assert bi.read_document(tmp_path, digest) is None
+    (tmp_path / bi.NEXT_NAME).write_bytes(data)
+    assert bi.read_document(tmp_path, digest) == data, "the other name is still tried"
+    (tmp_path / bi.NEXT_NAME).unlink()
+    (tmp_path / bi.NEXT_NAME).mkdir()
+    assert bi.read_document(tmp_path, digest) is None
+
+    # The folder is a FILE.
+    plain = tmp_path / "plain"
+    plain.write_bytes(data)
+    assert bi.read_document(plain, digest) is None
+    for folder in (None, 7, b"bytes", ["x"], "", chr(0)):
+        assert bi.read_document(folder, digest) is None, repr(folder)
+
+
+@pytest.mark.parametrize("bad", ["", "abc", "0" * 63, "0" * 65, None, 7, b"0" * 64,
+                                 ["0" * 64], "g" * 64, " " + "0" * 63, "0" * 64 + "\n"])
+def test_read_document_takes_only_a_whole_lower_case_digest(tmp_path, bad):
+    (tmp_path / bi.DOC_NAME).write_bytes(b"<p>x</p>")
+    assert bi.read_document(tmp_path, bad) is None
+
+
+def test_read_document_refuses_an_upper_case_digest(tmp_path):
+    """One spelling of a digest. Upper-case is the same number and would also
+    have to be the same row; refusing it means two rows cannot name one file
+    in two spellings."""
+    data = b"<p>x</p>"
+    (tmp_path / bi.DOC_NAME).write_bytes(data)
+    assert _sha(data) != _sha(data).upper()
+    assert bi.read_document(tmp_path, _sha(data).upper()) is None
+    assert bi.read_document(tmp_path, _sha(data)) == data
+
+
+def test_read_font_returns_a_file_that_is_what_its_name_says(tmp_path):
+    data = b"wOF2 the real thing"
+    name = bi.font_name_for(data)
+    (tmp_path / name).write_bytes(data)
+    assert bi.read_font(tmp_path, name) == data
+    assert bi.read_font(str(tmp_path), name) == data
+
+    # Altered on disk: the name no longer describes it.
+    (tmp_path / name).write_bytes(data + b"!")
+    assert bi.read_font(tmp_path, name) is None
+    (tmp_path / name).write_bytes(b"")
+    assert bi.read_font(tmp_path, name) is None
+
+
+@pytest.mark.parametrize("bad", ["", "fonts", "../x", "0" * 20, "0" * 20 + ".woff",
+                                 "A" * 20 + ".woff2", "0" * 19 + ".woff2", "0" * 21 + ".woff2",
+                                 "0" * 20 + ".woff2\n", "../" + "0" * 20 + ".woff2",
+                                 "x/" + "0" * 20 + ".woff2", None, 7, b"0" * 20 + b".woff2"])
+def test_read_font_opens_nothing_that_is_not_named_like_a_typeface(tmp_path, bad):
+    """The name is checked BEFORE it is joined to a path: a file is planted
+    where each bad name would lead, and it must not come back."""
+    (tmp_path / "pool").mkdir()
+    (tmp_path / "x").write_bytes(b"outside the pool")
+    (tmp_path / "pool" / "fonts").write_bytes(b"not a typeface")
+    assert bi.read_font(tmp_path / "pool", bad) is None
+
+
+def test_read_font_never_raises(tmp_path):
+    data = b"wOF2"
+    name = bi.font_name_for(data)
+    assert bi.read_font(tmp_path / "missing", name) is None
+    assert bi.read_font(tmp_path, name) is None                       # not there
+    (tmp_path / name).mkdir()                                         # a directory of that name
+    assert bi.read_font(tmp_path, name) is None
+    plain = tmp_path / "plain"
+    plain.write_bytes(data)
+    assert bi.read_font(plain, name) is None                          # the folder is a file
+    for folder in (None, 7, b"bytes", ["x"], chr(0)):
+        assert bi.read_font(folder, name) is None, repr(folder)
+
+
 # ── Tier 1 may import it ────────────────────────────────────────────────────
 
 # The project and third-party modules importing it may load. Stdlib is free;
