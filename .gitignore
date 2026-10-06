@@ -132,6 +132,11 @@ deploy/site/ideas.json
 services/blog_svc/data/
 deploy/site/blog/
 deploy/site/blog.json
+# The two manifests are written to a temporary name beside themselves and renamed.
+# A kill between the two would leave one behind, untracked, and tools/promote.sh
+# refuses a dirty tree. Each writer sweeps its own at the next start.
+deploy/site/.blog.json.*.tmp
+deploy/site/.ideas.json.*
 
 # The marketing gallery's screenshots, re-photographed from the PRIVATE app by
 # tools/capture_gallery_shots.py on the box that serves the site. Same reason as
