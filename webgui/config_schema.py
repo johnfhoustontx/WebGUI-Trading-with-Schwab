@@ -1440,6 +1440,18 @@ _BLOG = ConfigFile(
                   "How long the reply to one request can still be collected "
                   "before it is cleared away.",
                   kind="int", unit="seconds", min=1, max=3600, step=10),
+            Field("limits.clean_sec", "Time to clean one document",
+                  "Each document is cleaned in a separate process, stopped if it "
+                  "takes longer than this; a document that times out is refused "
+                  "and the Blog service moves on. A badly built document can take "
+                  "minutes to parse, so this is the guard. Keep it well under the "
+                  "wait limit above so a timeout is reported before the request "
+                  "itself expires.", kind="int", unit="seconds", min=2, max=120, step=1),
+            Field("limits.clean_mem_mb", "Memory for cleaning one document",
+                  "The memory that cleaning process may use before it is stopped "
+                  "(Linux only; on Windows the time limit above is the whole "
+                  "guard). It stops a malformed document exhausting memory.",
+                  kind="int", unit="MB", min=128, max=4096, step=64),
         )),
         Section("An entry's details", "The title, summary, tags and address shown "
                 "with an entry. A longer title, summary or tag is cut to fit; a "

@@ -36,6 +36,15 @@ max_wait_sec = 120
 # How long, in seconds, the answer to one connector request stays readable.
 # Every answer key must expire or their count grows without limit.
 answer_keep_sec = 120
+# Each document is cleaned in a separate worker process, killed after this many
+# seconds; an overrun is refused. This, not a pre-parse scan, is what bounds a
+# pathological document (one tag with tens of thousands of attributes parses in
+# minutes). Keep it well under max_wait_sec so an overrun is answered before the
+# request expires.
+clean_sec = 20
+# The memory, in MB, that clean worker may use (POSIX only; on Windows the
+# time limit is the whole bound). Contains a parser memory blow-up.
+clean_mem_mb = 512
 
 [fonts]
 # Copy the typefaces an entry asks Google Fonts for onto this box, at draft

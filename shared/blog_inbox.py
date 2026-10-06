@@ -156,6 +156,18 @@ DEFAULTS = {
         # How long a connector answer key lives. Every one must expire or their
         # count grows without limit.
         "answer_keep_sec": 120,
+        # Each document is cleaned in a WORKER PROCESS killed after this many
+        # seconds; an overrun is refused ("too_slow"). The HTML parser's cost is
+        # not linear in the input (one tag with tens of thousands of attributes
+        # takes minutes at the size limit), and this - not a pre-parse scan - is
+        # what bounds it. Must stay well under max_wait_sec, so an overrun is
+        # answered before the request itself expires.
+        "clean_sec": 20,
+        # The address space the clean worker may use, in MB, lowered with
+        # setrlimit on POSIX (on Windows only the wall-clock kill applies). It
+        # contains a memory blow-up inside the parser as the time limit contains
+        # a slow one.
+        "clean_mem_mb": 512,
     },
     "fonts": {
         # Copy the typefaces an entry asks Google Fonts for onto this box.
@@ -222,6 +234,8 @@ BOUNDS = {
     ("limits", "slug_chars"): (16, 120),
     ("limits", "max_wait_sec"): (1, 3600),
     ("limits", "answer_keep_sec"): (1, 3600),
+    ("limits", "clean_sec"): (2, 120),
+    ("limits", "clean_mem_mb"): (128, 4096),
     ("fonts", "max_links"): (1, 16),
     ("fonts", "max_css_kb"): (16, 2048),
     ("fonts", "max_files"): (1, 200),

@@ -1219,8 +1219,11 @@ def _document(title, styles, body, html_attrs=' lang="en"', body_attrs="") -> st
 #   too_deep        as cut_off, and the parser said it stopped at its depth limit
 #   did_not_settle  cleaning its own output kept changing it (a fault HERE)
 #   internal        an exception inside this module (a fault HERE)
+#   too_slow        cleaning took longer than the time allowed (set by
+#                   clean_bounded, which runs clean() in a worker process; never
+#                   set by clean() itself)
 REFUSALS = ("empty", "not_text", "crowded_tag", "cut_off", "too_deep", "did_not_settle",
-            "internal")
+            "internal", "too_slow")
 
 
 class _Refuse(Exception):
@@ -1233,11 +1236,20 @@ class _Refuse(Exception):
         self.reason = reason
 
 
-def _refused(reason) -> Cleaned:
-    """The answer for something that is not a readable document. Logged by its
-    code alone: the document is the submitter's, and never goes in a log."""
-    log.info("refused: %s", reason)
+def refusal(reason) -> Cleaned:
+    """The empty-shell ``Cleaned`` for a refusal ``reason`` (a ``REFUSALS``
+    code). Public so ``clean_bound`` can return ``crowded_tag`` / ``too_slow`` /
+    ``internal`` without re-parsing a document in-process. It does NOT log or
+    count - the caller owns that - so that the worker path's own logging and
+    degrade counters are not duplicated here."""
     return Cleaned(_document("", (), ""), "", "", {"unparseable": 1}, (), reason)
+
+
+def _refused(reason) -> Cleaned:
+    """A refusal from inside ``clean()``: logged by its code alone, since the
+    document is the submitter's and never goes in a log."""
+    log.info("refused: %s", reason)
+    return refusal(reason)
 
 
 # Whether the parser's log says it stopped at its DEPTH limit. Asked only after

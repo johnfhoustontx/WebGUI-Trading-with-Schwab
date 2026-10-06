@@ -658,7 +658,13 @@ def test_the_limits_have_the_shipped_values():
     assert bi.limits() == {
         "max_html_kb": 512, "max_drafts": 20, "submissions_per_hour": 12,
         "title_chars": 140, "summary_chars": 300, "max_tags": 6, "tag_chars": 24,
-        "slug_chars": 80, "max_wait_sec": 120, "answer_keep_sec": 120}
+        "slug_chars": 80, "max_wait_sec": 120, "answer_keep_sec": 120,
+        "clean_sec": 20, "clean_mem_mb": 512}
+
+
+def test_the_clean_time_limit_stays_under_the_wait_limit():
+    """An overrun must be answered before the request itself expires."""
+    assert bi.DEFAULTS["limits"]["clean_sec"] < bi.DEFAULTS["limits"]["max_wait_sec"]
 
 
 # Typed out here, so a change to the shipped string is a change someone made
