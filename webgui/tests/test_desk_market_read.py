@@ -1,5 +1,6 @@
-"""The Desk's Market read panel: six readings, each marked a tailwind, a
-headwind or neutral for stocks, from ``cache:market:read``.
+"""The Desk's Market read: six readings, each marked a tailwind, a headwind or
+neutral for stocks, from ``cache:market:read``. Since 2026-10-06 it is a dialog
+opened from the page header, with a one-line status beside its button.
 
 The service decides each verdict code; this page turns the code into a word and
 a fixed colour, and the numbers into a sentence. It computes no verdict itself.
@@ -366,21 +367,21 @@ def test_nothing_published_yet_is_not_hidden(monkeypatch, view, public):
 # --- drawn --------------------------------------------------------------------------
 
 def _draw(monkeypatch, view):
-    """Render the whole Desk with ``view`` on the bus; return the Market read
-    card's (visible, texts)."""
+    """Render the whole Desk with ``view`` on the bus. Returns ``(visible,
+    status, texts)``: whether the Market read button is on the page, the line
+    beside it, and every text in its dialog."""
     import test_desk as td
-    from nicegui import ui
     data = td._full_payloads()
     if view is not None:
         data[d.READ_VIEW] = view
     td._seed_bus(monkeypatch, data)
-    before = set(ui.context.client.elements)
+    made, real = [], d.build_popups
+    monkeypatch.setattr(d, "build_popups", lambda actions: made.append(real(actions)) or made[0])
     d.render()
-    new = [e for k, e in ui.context.client.elements.items() if k not in before]
-    title = next(e for e in new if getattr(e, "text", None) == "Market read")
-    card = next(a for a in title.ancestors() if set(d.CARD.split()) <= set(a._classes))
-    inside = [getattr(e, "text", None) for e in new if card in e.ancestors()]
-    return card.visible, [t for t in inside if t]
+    (popup,) = made
+    inside = [getattr(e, "text", None) for holder in (popup.read_head, popup.read_body)
+              for e in holder.descendants()]
+    return popup.read_group.visible, popup.read_status.text, [t for t in inside if t]
 
 
 def _now_view(**over):
@@ -388,8 +389,8 @@ def _now_view(**over):
     return _view(date=now.date().isoformat(), ts=int(now.timestamp()), **over)
 
 
-def test_the_panel_draws_a_seeded_reading(monkeypatch):
-    visible, texts = _draw(monkeypatch, _now_view())
+def test_the_dialog_draws_a_seeded_reading(monkeypatch):
+    visible, status, texts = _draw(monkeypatch, _now_view())
     assert visible is True
     assert "$SPX +0.69% · $NDX +0.79%" in texts
     assert [t for t in texts if t in ("TAILWIND", "HEADWIND", "NEUTRAL", "NO READING")] \
@@ -398,36 +399,78 @@ def test_the_panel_draws_a_seeded_reading(monkeypatch):
     assert "2 tailwinds · 2 headwinds · 1 neutral · 1 no reading" in texts
 
 
-def test_the_panel_with_no_reading_says_so(monkeypatch):
-    visible, texts = _draw(monkeypatch, None)
-    assert visible is True and d.READ_WAITING in texts
+def test_the_status_beside_the_button_is_the_time_and_the_count(monkeypatch):
+    """With the dialog closed the page still says when the reading was taken
+    and how it counts."""
+    _visible, status, _texts = _draw(monkeypatch, _now_view())
+    assert status == ("12:45 CT · next 13:00 · "
+                      "2 tailwinds · 2 headwinds · 1 neutral · 1 no reading")
 
 
-def test_the_public_desk_does_not_draw_a_reading_marked_not_public(monkeypatch):
+def test_read_status_leaves_out_what_is_blank():
+    assert d.read_status({"text": "12:45 CT", "tally": ""}) == "12:45 CT"
+    assert d.read_status({"text": "", "tally": ""}) == ""
+
+
+def test_with_no_reading_the_button_stays_and_the_dialog_says_so(monkeypatch):
+    visible, status, texts = _draw(monkeypatch, None)
+    assert visible is True and status == ""
+    assert d.READ_WAITING in texts
+
+
+def test_the_public_desk_has_no_button_for_a_reading_marked_not_public(monkeypatch):
     _public(monkeypatch)
-    visible, texts = _draw(monkeypatch, _now_view(public=False))
-    assert visible is False
+    visible, status, texts = _draw(monkeypatch, _now_view(public=False))
+    assert visible is False and status == ""
     # Not "No market read yet": that would be a false statement about a
     # reading the operator has chosen not to show.
-    assert d.READ_WAITING not in texts
-    assert not any("SPX" in t or t == "TAILWIND" for t in texts)
+    assert texts == []
 
 
-def test_a_switched_off_market_read_is_not_drawn(monkeypatch):
+def test_a_switched_off_market_read_has_no_button(monkeypatch):
     off = {"enabled": False, "date": MON, "ts": _ts(12, 47), "public": False,
            "slot": "", "rows": [], "tally": {}, "history": []}
-    visible, texts = _draw(monkeypatch, off)
-    assert visible is False and d.READ_WAITING not in texts
+    visible, status, texts = _draw(monkeypatch, off)
+    assert visible is False and status == "" and texts == []
 
 
-def test_the_public_desk_draws_the_flow_row_as_not_shown(monkeypatch):
+def test_the_public_dialog_draws_the_flow_row_as_not_shown(monkeypatch):
     _public(monkeypatch)
     view = _with_flow(False)
     now = datetime.datetime.now(CT)
     view.update(date=now.date().isoformat(), ts=int(now.timestamp()))
-    visible, texts = _draw(monkeypatch, view)
+    visible, status, texts = _draw(monkeypatch, view)
     assert visible is True and d.READ_NOT_SHOWN in texts
     assert not any("points bought over sold" in t for t in texts)
+    # The count beside the button is of the rows as drawn.
+    assert status.endswith("2 tailwinds · 2 headwinds · 2 no reading")
+
+
+def test_a_stale_reading_greys_its_status(monkeypatch):
+    import test_desk as td
+    td._seed_bus(monkeypatch, {**td._full_payloads(), d.READ_VIEW: _view(
+        date="2026-10-02", slot="15:00", ts=_ts(15, 0, "2026-10-02"),
+        next_slot=None, final=True)})
+    made, real = [], d.build_popups
+    monkeypatch.setattr(d, "build_popups", lambda actions: made.append(real(actions)) or made[0])
+    d.render()
+    assert "opacity-50" in made[0].read_status._classes
+    assert made[0].read_status.text.startswith("Fri 2 Oct · 15:00 CT · previous session")
+
+
+def test_a_reading_withdrawn_while_the_dialog_is_open_closes_it(monkeypatch):
+    import test_desk as td
+    td._seed_bus(monkeypatch, {**td._full_payloads(), d.READ_VIEW: _now_view()})
+    made, real = [], d.build_popups
+    monkeypatch.setattr(d, "build_popups", lambda actions: made.append(real(actions)) or made[0])
+    d.render()
+    popup = made[0]
+    popup.read_dialog.open()
+    assert popup.read_dialog.dialog.value is True
+    off = {"enabled": False, "date": MON, "ts": _ts(12, 47), "public": False, "rows": []}
+    d.paint_read(popup, off, {})
+    assert popup.read_dialog.dialog.value is False
+    assert popup.read_group.visible is False
 
 
 # --- wiring ------------------------------------------------------------------------
@@ -438,12 +481,14 @@ def test_the_view_is_polled_and_has_its_own_region():
     assert d._REGION_VIEWS["read"] == (d.READ_VIEW,)
 
 
-def test_the_panel_sits_between_the_headlines_and_the_market_summary():
+def test_the_two_panels_are_gone_and_the_header_holds_their_buttons():
+    """2026-10-06, by request: the Market read card and the MARKET SUMMARY
+    frame left the page for two dialogs opened from the header."""
     src = inspect.getsource(d.render)
-    news = src.index('PANEL_HEADS["news"]')
-    read = src.index('PANEL_HEADS["read"]')
-    summary = src.index('ui.label("MARKET SUMMARY")')
-    assert news < read < summary
+    assert "build_popups(kit.header(" in src
+    assert 'ui.label("MARKET SUMMARY")' not in src
+    assert 'PANEL_HEADS["read"]' not in src and "read" not in d.PANEL_HEADS
+    assert "_paint_summary" not in src
 
 
 def test_the_painter_is_module_level_and_wired_without_a_new_nested_function():
@@ -456,7 +501,7 @@ def test_the_painter_is_module_level_and_wired_without_a_new_nested_function():
     assert "paint_read(" in tick and "force=False" in tick
 
 
-def test_the_panel_head_says_what_it_is_and_what_it_is_not():
-    title, use_line = d.PANEL_HEADS["read"]
+def test_the_dialog_says_what_it_is_and_what_it_is_not():
+    title, use_line = d.READ_TITLE, d.READ_USE_LINE
     assert title == "Market read"
     assert "for stocks" in use_line and "not a forecast" in use_line

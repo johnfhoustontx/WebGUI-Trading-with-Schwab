@@ -27,7 +27,7 @@ Use this map to get from a screen to its numbers. Menu order matches the rail.
 
 | Menu page | Chapters that derive its numbers |
 |---|---|
-| **Desk** | Composition only — every figure is produced by the same function that produces it on the page it summarises, so follow that page's row. The one exception is the **Market read** panel, whose verdicts are decided in the market service: see *Market read*. Its own two constants (the arrival glow, the voice cache) are in the *Constants Appendix* |
+| **Desk** | Composition only — every figure is produced by the same function that produces it on the page it summarises, so follow that page's row. The one exception is the **Market read** popup, whose verdicts are decided in the market service: see *Market read*. Its own two constants (the arrival glow, the voice cache) are in the *Constants Appendix* |
 | **Symbol** | Composition, like the Desk. Its own arithmetic — IV vs HV and the expected move — is in *Options Scoring* → **Expected move and IV analysis**; the signal age and score trend in **Signal age and score trend**; the look-up's cost in the *Constants Appendix* |
 | **Dealer Positioning** | *GEX / Gamma* · *Black-Scholes & the Simulator* (the Greeks behind charm and vanna) |
 | **Opportunity Board** | *GEX / Gamma* (the flip and flow series) · *Options Scoring* (its signal counts) |
@@ -2163,7 +2163,9 @@ same row, or `null`. The `flow` row also carries `estimate: true` and its own
 `public`, copied from `options:flow_sides` (Flow Alerts' `[sides] public`). `history`
 is the day's `{slot, verdicts}` list.
 
-**The Desk panel.** The page maps each code to a word and a fixed chip class
+**The Desk dialog.** Since 2026-10-06 the reading is a dialog opened from a button
+in the page header (`build_popups`, `paint_read`), with the head and the tally
+repeated beside the button (`read_status`). The page maps each code to a word and a fixed chip class
 (`READ_WORDS`, `READ_CHIPS`); an unknown code is "No reading". It formats the facts
 itself and computes no verdict. *Since last* is "was …" when the code changed, else the
 change in the row's main number (SPX percent, advancing count, VIX level, call lean),
@@ -2172,11 +2174,19 @@ reading from another day, or one older than two of its own intervals while the s
 is open. The one-second clock re-checks that, so a reading that stops arriving greys
 without a new one.
 
-**Hidden is not "no reading yet".** A retraction hides the whole card on every origin.
-On the public origin a reading whose `public` is not `true` hides it too, and a row
+**Hidden is not "no reading yet".** A retraction hides the button and its status on
+every origin, and closes the dialog if it is open. On the public origin a reading
+whose `public` is not `true` hides them too, and a row
 whose own `public` is not `true` (the Flow row) is drawn as "No reading · Not shown on
 this screen" with no figures and no "was", and the tally in the head is recounted from
 the rows as drawn (`read_hidden`, `read_view_shown`).
+
+**The Market report dialog** is the same header's second button. It frames
+`frame_url` from `cache:market:summary` (`https://<site>/reports/latest.html?v=<report
+date>-<slot>`; the version is what reloads an open dialog when a new report lands) and
+links `report_url`. Both are drawn only when `https://`; a payload with no
+`frame_url` frames `report_url`. A dialog's content is not in the browser's document
+while it is closed, so the report is fetched only when it is opened.
 
 **Known limitations.**
 

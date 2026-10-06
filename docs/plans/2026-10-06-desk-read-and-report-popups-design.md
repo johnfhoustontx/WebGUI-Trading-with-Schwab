@@ -37,9 +37,11 @@ Both are `kit.info_dialog`: a title, a close button, no footer.
   and keeps doing so while it is open, on the same view and the same one-second
   clock, so a reading that stops arriving still greys.
 - **Market report.** Which report it is, an "Open in a new tab" link, and the
-  report itself in an `<iframe>`. The frame's address is set when the dialog
-  opens and cleared when it closes, so a Desk nobody opens the report on never
-  fetches it.
+  report itself in an `<iframe>`. A dialog's content is not in the browser's
+  document while it is closed (checked on the page harness: no `iframe` element
+  until the button is pressed), so a Desk nobody opens the report on never
+  fetches it, and every open fetches it afresh. Nothing has to set or clear the
+  address on open and close.
 
 ## What is lost, on purpose
 

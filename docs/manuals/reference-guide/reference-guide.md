@@ -292,7 +292,8 @@ click-through the way the panels above are). **All headlines →** opens Market 
 where the filters and Trending live. On the public live Desk the strip shows only
 the feeds marked public.
 
-**Market read.** Full width, above the Market Summary. Six readings — direction,
+**Market read.** A button at the top right of the page, with the time of the
+reading and its count beside it; it opens the reading as a popup. Six readings — direction,
 breadth, structure, volatility, flow and cross-asset — each marked **Tailwind**,
 **Headwind** or **Neutral** *for stocks*, retaken on the clock every 15 minutes while
 the market is open. Each one is a reading that already exists on another page; this
@@ -300,7 +301,7 @@ panel only says which way it points and what changed since the last reading. It 
 closest the app comes to reading the Desk, the [Market Dashboard](#market-dashboard) and
 [Flow Alerts](#flow-alerts) together, and it does it by fixed rule, with no generated
 text. A row whose data is missing or out of date reads **No reading**, which is not
-Neutral; when the panel is switched off in Settings it leaves the page.
+Neutral; when the Market read is switched off in Settings the button leaves the page.
 
 Use it to see **whether the layers agree**. A rising tape with structure and volatility
 both reading Headwind is a different day from one where all six agree. **No reading** is
@@ -308,35 +309,22 @@ not Neutral: it means that row had nothing to go on. And it is **not a forecast*
 thresholds are starting guesses, and nobody has measured whether the tally predicts
 anything.
 
-**Market Summary.** Full width, across the bottom. The highlights of the latest
+**Market report.** The second button at the top right. It opens the latest
 published **NeuralStrike market report** — the same report the website publishes
 five times a trading day (pre-market, the open, the first hour, midday and the
-close). Up to **five bullet points**, which are the report's own section
-headlines in the order the report gives them, under a provenance line naming
-which report they came from — for example **"Market close report · 14 Sep ·
-16:20 CT"** — and a **Read the full report** link that opens the whole report on
-the website in a new tab. No Claude call is made to fill this frame: the
-highlights are quoted from the report, not rewritten.
+close) — in a popup, in full. The line beside the button names the report, for
+example **"Market close report · 14 Sep · 16:20 CT"**, and **Open in a new tab**
+inside the popup opens it on the website.
 
 It changes **when a new report is published, not on a clock**: `market_svc`
-checks on every poll whether the published report has been replaced, and reads it
-again only when it has. So the bullets sit unchanged between reports, and the
-provenance line tells you how old they are. A report that cannot be read leaves
-the previous highlights up.
+checks on every poll whether the published report has been replaced. A popup left
+open across a new report reloads to the new one. The report is fetched only when
+the popup is opened. Before any report has been published there is no button.
 
-Underneath the highlights sit **six live chips** — SENTIMENT, TREND, BIAS, SIGNAL,
-REGIME, BULL/BEAR — reading off the same views the top strip and the Bull/Bear
-strip already poll, so they are current even while the report above them is
-hours old. Hovering a chip opens the same hover its counterpart uses elsewhere on
-the page; the Sentiment chip's own hover reads "The sentiment composite, 0–10. A
-higher score means calmer, more supportive conditions (quieter volatility, more
-call buying, broader gains); a lower score means stress." and the Bull/Bear chip's hover lists every quadrant's count and
-which horizon (today or the quarter) it was counted on.
-
-Before any report has been published, the frame reads **"No market report
-published yet."**
-
-The same frame renders on the **public live Desk** (`live.neuralstrike.co`).
+Until 6 October 2026 this was a **Market Summary** frame across the bottom of the
+page (five highlights from the report over six chips that repeated the top
+strip). The same buttons and popups are on the **public live Desk**
+(`live.neuralstrike.co`).
 
 ### Spoken arrivals
 
@@ -4326,7 +4314,7 @@ default) keeps the plain take-profit at +50%.
 
 **Show the ticker.** The scrolling marquee at the bottom of every page, led by the
 latest published market report's headline. **Turning it off only hides the
-marquee** — the report summary behind it also feeds the Desk's Market Summary frame,
+marquee** — the report summary behind it also feeds the Desk's Market report button,
 so `market_svc` keeps reading it whenever a new report is published, whether or not
 the marquee is showing.
 

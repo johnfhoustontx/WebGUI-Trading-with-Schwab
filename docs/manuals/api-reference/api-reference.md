@@ -24,7 +24,7 @@ keys that feed it. Menu order matches the rail.
 | **Opportunity Board** | `options_svc` | `cache:options:matrix` |
 | **Flow Alerts** | `options_svc` | `cache:options:flow_alerts`, `:flow_sides`, `:flow_followup` |
 | **Market News** | `news_svc` :8216 | `cache:news:feed`, `:sec`, `:calendar`, `:status` (the public copy reads `:feed_public`, `:sec_public`, `:calendar_public`); also the Desk's headlines strip (`:feed`) and the Symbol page's news band (`:feed` + `:sec`) |
-| **Market Dashboard** | `market_svc` :8215 | `cache:market:dashboard`, `:summary`, `:read` (the Desk's Market read panel) |
+| **Market Dashboard** | `market_svc` :8215 | `cache:market:dashboard`, `:summary`, `:read` (the Desk's Market read) |
 | **Sentiment** | `sentiment_svc` :8210 | `cache:sentiment:composite`, `:regime`, `:regime_history`, `:intraday_history` |
 | **Sector & Industry** | `sentiment_svc` | `cache:sentiment:sectors` |
 | **Sector Rotation** · **RRG** | `sentiment_svc` | `cache:sentiment:rotation` |
@@ -184,7 +184,7 @@ a contract (listed in *Cache Key Index*).
 | `TradeAnalysis` | `trade.py` | `cache:trade:analysis` | `symbol`, `description`, `price`, `volume`, `bias`, `ema_alignment{}`, `momentum{}`, `volume_profile{}`, `sector{}`, `position_verdict{}`, `investor_verdict{}`, `fundamentals{}`, `fundamentals_available`, `markov{}` (optional), `swing_model{}` (optional), `timestamp`, `errors[]` |
 | `PortfolioModel` | `portfolio.py` | `cache:portfolio:positions` | `holdings_rows[]`, `sector_rows[]`, `performance_rows[]`, `suggestions{}`, `proxy_up`, `streaming`, `errors[]`, `timestamp` |
 | `MarketDashboard` | `market.py` | `cache:market:dashboard` | `categories[]` (ordered frames of display-ready tiles), `proxy_up`, `errors[]` |
-| `MarketSummary` | `market.py` | `cache:market:summary` | `headline` (the latest published market report's verdict title), `highlights` (its section headlines in report order, at most 5; the headline alone when the report has no sections), `slot` (`premarket` / `open` / `first_hour` / `midday` / `close`), `slot_label` (the report's own name for the slot, e.g. "Market close"), `report_date` (`YYYY-MM-DD`), `as_of` (the report's own time stamp, e.g. "16:20 CT"), `report_url` (`https://<SITE_HOST>/report.html`). Empty until a report has been published. |
+| `MarketSummary` | `market.py` | `cache:market:summary` | `headline` (the latest published market report's verdict title), `highlights` (its section headlines in report order, at most 5; the headline alone when the report has no sections), `slot` (`premarket` / `open` / `first_hour` / `midday` / `close`), `slot_label` (the report's own name for the slot, e.g. "Market close"), `report_date` (`YYYY-MM-DD`), `as_of` (the report's own time stamp, e.g. "16:20 CT"), `report_url` (`https://<SITE_HOST>/report.html`, the site's page for the report), `frame_url` (`https://<SITE_HOST>/reports/latest.html?v=<report_date>-<slot>`, the report itself, which the Desk frames in a dialog; the version changes with the report and is omitted when the stamp is unknown). Empty until a report has been published. |
 | `CompositeSnapshot` | `sentiment.py` | (validation only) | `total: float`, `bias: str`, `components{}` |
 | `RescueAdvisory` | `options.py` | `cache:options:rescue:<position_id>` | `position_id`, `symbol`, `strategy`, `state`, `heat`, `mark`, `context[]`, `candidates[]`, `error` |
 | `RescueCandidate` | `options.py` | (embedded in `RescueAdvisory.candidates`) | `action`, `label`, `apply_kind` (`execute`\|`advisory`), `gross_cash`, `commission`, `net_cash`, `new_max_loss`, `breakeven`, `short_delta`, `width`, `expiry`, `dte_after`, `est_fill_legs[]`, `rationale[]`, `context[]`, `warnings[]`, `score` |
@@ -432,7 +432,7 @@ Re-running the fit (e.g. after a regime shift) is the supported maintenance path
 
 **Entry:** `services/market_svc/app.py`. Publishes the macro-ticker board that backs
 `/market` and the market summary that feeds both the bottom ticker and the Desk's
-MARKET SUMMARY frame.
+Market report button and dialog.
 
 **Scheduler cadence** (`services/market_svc/scheduler.py`):
 

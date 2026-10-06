@@ -109,8 +109,10 @@ on · what am I holding.*
   mark and **open P&L**, and a status: **OK**, **Watch**, **At risk**,
   **Rescue**. The header totals open trades, open P&L, and how many need
   attention.
-- **Market read** — six readings, each marked **Tailwind**, **Headwind** or
-  **Neutral** under the heading **For stocks**. A new reading is taken every 15
+- **Market read** (button, top right) — opens a popup of six readings, each
+  marked **Tailwind**, **Headwind** or **Neutral** under the heading **For
+  stocks**. The line beside the button is the time of the reading and its
+  count, so you can read it without opening anything. A new reading is taken every 15
   minutes while the market is open, on the clock (12:45, 13:00…), and the last
   one of the day is the close. Each row is something already on another page:
   **Direction** (the S&P 500 and Nasdaq 100 on the day), **Breadth** (how many
@@ -127,13 +129,12 @@ on · what am I holding.*
   behind. If the
   rows turn grey and the head says *not updating*, the readings have stopped
   arriving and you are looking at the last one.
-- **Market Summary** — the **highlights of the latest market report**: up to
-  five points, each one of the report's own section headlines, with which report
-  they came from (for example *Market close report · 14 Sep · 16:20 CT*) and a
-  **Read the full report** link that opens it on the website. It changes when a
-  new report is published (five a trading day), not on a clock. The six chips
-  underneath are **live** — they update on every poll — and hovering any chip
-  explains that word, the same hover as the strip above.
+- **Market report** (button, top right) — opens the **latest market report**
+  in a popup, in full. The line beside the button says which report it is (for
+  example *Market close report · 14 Sep · 16:20 CT*); it changes when a new
+  report is published (five a trading day), not on a clock. **Open in a new
+  tab** inside the popup opens the same report on the website. The button is
+  absent until a report has been published.
 
 **Click any row** to open the page it came from, already set to that symbol.
 Nothing on this page places or changes a trade.

@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-05</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-06</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -234,7 +234,7 @@ would mean writing the same formulas out four times and letting the copies drift
 <tbody>
 <tr>
 <td><strong>Desk</strong></td>
-<td>Composition only — every figure is produced by the same function that produces it on the page it summarises, so follow that page's row. The one exception is the <strong>Market read</strong> panel, whose verdicts are decided in the market service: see <em>Market read</em>. Its own two constants (the arrival glow, the voice cache) are in the <em>Constants Appendix</em></td>
+<td>Composition only — every figure is produced by the same function that produces it on the page it summarises, so follow that page's row. The one exception is the <strong>Market read</strong> popup, whose verdicts are decided in the market service: see <em>Market read</em>. Its own two constants (the arrival glow, the voice cache) are in the <em>Constants Appendix</em></td>
 </tr>
 <tr>
 <td><strong>Symbol</strong></td>
@@ -3026,7 +3026,9 @@ up, unchanged but for the flag; that reaches yesterday's reading before the open
 same row, or <code>null</code>. The <code>flow</code> row also carries <code>estimate: true</code> and its own
 <code>public</code>, copied from <code>options:flow_sides</code> (Flow Alerts' <code>[sides] public</code>). <code>history</code>
 is the day's <code>{slot, verdicts}</code> list.</p>
-<p><strong>The Desk panel.</strong> The page maps each code to a word and a fixed chip class
+<p><strong>The Desk dialog.</strong> Since 2026-10-06 the reading is a dialog opened from a button
+in the page header (<code>build_popups</code>, <code>paint_read</code>), with the head and the tally
+repeated beside the button (<code>read_status</code>). The page maps each code to a word and a fixed chip class
 (<code>READ_WORDS</code>, <code>READ_CHIPS</code>); an unknown code is "No reading". It formats the facts
 itself and computes no verdict. <em>Since last</em> is "was …" when the code changed, else the
 change in the row's main number (SPX percent, advancing count, VIX level, call lean),
@@ -3034,11 +3036,18 @@ else "unchanged". The head is <code>live</code>, <code>close</code>, <code>stale
 reading from another day, or one older than two of its own intervals while the session
 is open. The one-second clock re-checks that, so a reading that stops arriving greys
 without a new one.</p>
-<p><strong>Hidden is not "no reading yet".</strong> A retraction hides the whole card on every origin.
-On the public origin a reading whose <code>public</code> is not <code>true</code> hides it too, and a row
+<p><strong>Hidden is not "no reading yet".</strong> A retraction hides the button and its status on
+every origin, and closes the dialog if it is open. On the public origin a reading
+whose <code>public</code> is not <code>true</code> hides them too, and a row
 whose own <code>public</code> is not <code>true</code> (the Flow row) is drawn as "No reading · Not shown on
 this screen" with no figures and no "was", and the tally in the head is recounted from
 the rows as drawn (<code>read_hidden</code>, <code>read_view_shown</code>).</p>
+<p><strong>The Market report dialog</strong> is the same header's second button. It frames
+<code>frame_url</code> from <code>cache:market:summary</code> (<code>https://&lt;site&gt;/reports/latest.html?v=&lt;report
+date&gt;-&lt;slot&gt;</code>; the version is what reloads an open dialog when a new report lands) and
+links <code>report_url</code>. Both are drawn only when <code>https://</code>; a payload with no
+<code>frame_url</code> frames <code>report_url</code>. A dialog's content is not in the browser's document
+while it is closed, so the report is fetched only when it is opened.</p>
 <p><strong>Known limitations.</strong></p>
 <ul>
 <li><strong>Every threshold is a starting guess.</strong> None has been measured against outcomes,

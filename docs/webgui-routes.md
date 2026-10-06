@@ -36,8 +36,8 @@ spot + day %, gamma flip + signed distance, a positioned-div **structure bar**, 
 and put walls, net GEX, and a pins-or-runs chip) → **Opportunity Board** (top 5 by
 hotness, with ATM IV **and its direction**, and a setup tag) → **Live Flow Alerts**
 (newest 5) → **Positions** (paper and captured merged, with `rescue_state` flags and an
-`OPEN n · UNREALIZED $x · AT RISK m` header) → **Headlines** → **Market read** (full width, six rule-decided readings; see its bullet below) → **MARKET SUMMARY** (full width,
-below the grid — see its own subsection below). Panels sit in a **2×2 grid**
+`OPEN n · UNREALIZED $x · AT RISK m` header) → **Headlines**. The page HEADER carries two buttons, **Market read** and **Market report**, each opening a dialog
+(see their subsection below); until 2026-10-06 both were full-width panels under Headlines. Panels sit in a **2×2 grid**
 (`lg:grid-cols-2` — **not `xl`**, which is 1280px and silently collapses a 1265px
 window to one column). Read-only + **click-through**: every row opens its owning page
 already set to that symbol, reusing the one-shot `handoff.send_to_gamma` stash.
@@ -138,16 +138,13 @@ into one reading.
   canonical property order** (`border-left-color` follows `border-color`), not on
   DOM class order; `pages/options/leg_editor.py`'s accents depend on the same
   thing.
-- **One clock per paint — now shared with the MARKET SUMMARY frame below.**
-  `_paint_bullbear` takes a single `now` for the chips and the headline, and
-  `_paint_summary` (→ `summary_facts`) is handed the SAME `now` rather than
-  taking a fresh `datetime.now()` of its own. Two clocks would let one region
-  say "on the quarter" while the other has already flipped to "on today's
-  moves", at the opening bell — the one-word ambiguity `/sentiment/bullbear`
-  exists to remove, reintroduced between two regions of one page.
-  `bullbear_distribution` (the Bull/Bear chip's hover) does not mint a clock
-  either: it renders the `counts`/`live` pair `summary_facts` already derived,
-  rather than deciding its own horizon. `test_one_paint_decides_the_horizon_once`
+- **One clock per paint.**
+  `_paint_bullbear` takes a single `now` for the chips and the headline. Two
+  clocks would let the headline say "on the quarter" over chips already drawn
+  on today's axes, at the opening bell — the one-word ambiguity
+  `/sentiment/bullbear` exists to remove. (Until 2026-10-06 the MARKET SUMMARY
+  frame was a second region deciding the horizon, through `summary_facts`; it
+  is gone.) `test_one_paint_decides_the_horizon_once`
   pins the call sites, by identity rather than equality — two `now()` calls
   microseconds apart compare unequal only sometimes, and a guard that fails
   only sometimes is not a guard.
@@ -197,22 +194,22 @@ ticker and the contract is not one.
 - **`flow.alert_rows` gained `strike`/`expiry`/`dte`** (additive; no column declares
   them) so the Desk composes off the same row the Flow Alerts page draws rather than
   becoming a second reader of the raw payload.
-- **The Market read panel (2026-10-05).** Design
+- **The Market read (2026-10-05; a dialog since 2026-10-06).** Design
   [`plans/2026-10-05-market-read-scorecard-design.md`](plans/2026-10-05-market-read-scorecard-design.md).
   Reads `market:read` (in `VIEWS`, thirteen now; region `read`), published by
   `market_svc` on each clock slot. The SERVICE decides each row's verdict code; the
   page maps the code to a word and a fixed chip (`READ_WORDS`, `READ_CHIPS`: an
   unknown code is "No reading", never Neutral) and formats the facts (`read_reading`,
-  `read_since`, `read_header`). ⚠ `render` is at 787 of 790 lines with 22 of 22
-  nested functions, so the painter is the module-level `paint_read` and the wiring is
+  `read_since`, `read_header`). ⚠ `render` is at its size ceiling, so the builder
+  (`build_popups`) and the painter (`paint_read`) are module-level and the wiring is
   a `lambda` in `painters` plus one call in `_tick_clock` (`force=False`): the
   one-second clock repaints only when the head would read differently, which is how
   a reading that stops arriving greys without a new one. The rows use `READ_COLS`,
-  whose text tracks have no floor: on a narrow screen they wrap, so this panel needs
-  no scroll shell and no pin. `read_hidden` decides whether the card is drawn at all
-  (a retraction, `enabled: false`, on every origin; a reading not marked public on
-  the public one) and `paint_read` then hides the CARD, `body.parent_slot.parent`,
-  rather than leave a title over nothing. `read_view_shown` is the public filter: it
+  whose text tracks have no floor: on a narrow screen they wrap, so the dialog needs
+  no scroll shell and no pin. `read_hidden` decides whether the button is on the page
+  at all (a retraction, `enabled: false`, on every origin; a reading not marked public
+  on the public one) and `paint_read` then hides the button with its status and
+  closes the dialog. `read_view_shown` is the public filter: it
   also swaps a row that carries its own `public` flag (Flow) for an empty "No
   reading" row and recounts the tally, in a NEW dict, because the view is the shared
   parse every tab holds. Both run on the event loop. ⚠ The volatility fact is `vix_level`, not `vix`: a source guard
@@ -264,35 +261,38 @@ backlog or light every row.
 Design: [`2026-08-18-desk-home-dashboard-design.md`](plans/2026-08-18-desk-home-dashboard-design.md)
 · [`2026-08-21-desk-voice-alerts-design.md`](plans/2026-08-21-desk-voice-alerts-design.md).
 
-**The MARKET SUMMARY frame + the Regime popup (2026-09-10; the summary quotes the market report since 2026-09-16).** Full width, below
-the four panels; the public live Desk renders it too.
+**The header's two popups + the Regime popup.** Design:
+[`plans/2026-10-06-desk-read-and-report-popups-design.md`](plans/2026-10-06-desk-read-and-report-popups-design.md).
+The public live Desk renders them too.
 
-- **The latest market report's highlights (since 2026-09-16).** Up to five
-  points — the report's own section headlines, in report order — over the
-  report's provenance ("Market close report · 14 Sep · 16:20 CT") and a **Read
-  the full report** link (`report_url`, `https://<SITE_HOST>/report.html`, drawn
-  only when it is https). `market_svc/report_summary.py` parses
-  `deploy/site/reports/latest.html` (+ `latest.txt`) whenever its stamp changes
-  — a `stat` per poll — and publishes `cache:market:summary` (`MarketSummary`:
-  `headline`, `highlights`, `slot`, `slot_label`, `report_date`, `as_of`,
-  `report_url`). **No Claude call**: the change-driven Claude sentence
-  (`summary_facts`/`generate_summary`, the fingerprint gate, the 30/day cap) was
-  retired the same day. A report that does not parse publishes nothing, so the
-  last good highlights stay. ⚠ The markup is a contract with the report
-  renderer outside this repo: `div.slotchip`, `h1`, one `h2` per section.
-- **A `summary` region on the Desk's existing batched poll** —
-  `cache:market:summary` is in `VIEWS`. `summary_facts(summary_view,
-  composite_view, history_view, regime_view, bullbear_view, now)` builds
-  everything the frame draws: `points`, `source`, `url` and the six chips (each
-  reusing the strip's own derivation, so the frame and the strip can never name
-  one reading two ways). The point rows are a fixed set of five filled in place.
-- **Six live chips** — SENTIMENT, TREND, BIAS, SIGNAL, REGIME, BULL/BEAR — read
-  off the views the page already polls. Each carries the same hover its
-  counterpart uses elsewhere on the page, plus **Sentiment**
-  (`desk.SENTIMENT_TIP`) and **Bull/Bear** (`bullbear_distribution(counts,
-  live)`, the four-quadrant distribution and its horizon).
-- **Empty state** (`desk.SUMMARY_EMPTY`) — "No market report published yet." An
-  unpublished reading behind a live chip shows a dash, never "Neutral".
+- **Two buttons in `kit.header`'s action row** (`build_popups(header.actions)`),
+  each with a one-line status label to its left, each opening a
+  `kit.info_dialog`. The action row is switched from `no-wrap` to `flex-wrap`
+  so a phone gets the status above its button instead of a header pushed off
+  the screen.
+- **Market read** is described in its own bullet above.
+- **Market report** frames the report itself. `market_svc/report_summary.py`
+  parses `deploy/site/reports/latest.html` (+ `latest.txt`) whenever its stamp
+  changes — a `stat` per poll — and publishes `cache:market:summary`
+  (`MarketSummary`), which carries `report_url` (the site's page) and, since
+  2026-10-06, `frame_url` (`…/reports/latest.html?v=<report date>-<slot>`).
+  `report_facts(view)` hands the page `source`, `url` and `frame_url`, each
+  `""` unless a report is published and the address is `https://`; a payload
+  with no `frame_url` frames `url`. ⚠ Tier 1 hard-codes no host.
+  `paint_report` writes the frame's `src` only when it CHANGES: the versioned
+  address is what reloads a dialog left open across a new report, and
+  re-sending an unchanged one must not reload the reader's page.
+  ⚠ A dialog's content is not in the browser's document while it is closed
+  (checked: zero `iframe` elements until the button is pressed), so the report
+  is fetched only on open, and afresh each time.
+  ⚠ The frame's height is `calc(100vh - 200px)`: with a `vh` height the dialog
+  grew a second scrollbar around the frame on a short window.
+- **What left the page on 2026-10-06, by request:** the five highlight points
+  and the six chips under them (`summary_facts`, `SENTIMENT_TIP`,
+  `bullbear_distribution`). The chips repeated the strip. The ticker still
+  reads the highlights from the same view. ⚠ The markup of the report is a
+  contract with the report renderer outside this repo: `div.slotchip`, `h1`,
+  one `h2` per section.
 - **The Regime popup.** Hovering the Market Regime word — here and on
   `/sentiment`'s regime dial — shows one sentence per word from
   `regime_mix.REGIME_PICTURE`, keyed by the DISPLAYED word (11 entries: Balanced,

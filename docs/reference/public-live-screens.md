@@ -251,7 +251,7 @@ from the operator's workstation by tooling that lives outside this repo
 (`D:\NeuralStrike Reports\tools\publish.py`, which refuses to upload until prod ignores
 the directory). ⚠ The frame's `reports/latest.html` name is the contract with that tool.
 ⚠ **So is its MARKUP, since 2026-09-16**: `market_svc/report_summary.py` reads that
-file to publish `cache:market:summary` — the Desk's MARKET SUMMARY highlights and the
+file to publish `cache:market:summary` — which report the Desk's Market report dialog frames (the file's NAME is that dialog's `frame_url` too, since 2026-10-06) and the
 WHOLE bottom ticker (since 2026-09-21 it shows nothing else) — from `div.slotchip`, the `h1` and each section `h2`. A renderer change
 that renames those publishes nothing (the last good summary stays, with one WARNING),
 so the Desk and the ticker go quietly stale rather than wrong. No Claude call sits behind the

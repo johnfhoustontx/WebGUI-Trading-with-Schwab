@@ -37,6 +37,7 @@ import json
 import logging
 import time
 from datetime import datetime
+from types import SimpleNamespace
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo
 
@@ -1026,51 +1027,21 @@ def regime_tone(reg):
     return LABEL
 
 
-# ── the MARKET SUMMARY frame ─────────────────────────────────────────────────
-# The highlights of the latest published market report (market_svc reads them
-# off the report page, cache:market:summary — at most five, no Claude call of
-# its own) and a link to the full report, over six LIVE chips read off the views
-# this page already polls. Designs: docs/plans/2026-09-10-desk-market-summary-
-# design.md (the chips) and 2026-09-16-desk-summary-from-market-report-design.md.
-SUMMARY_EMPTY = "No market report published yet."
-SUMMARY_LINK = "Read the full report"
-SUMMARY_MAX_POINTS = 5
-SENTIMENT_TIP = ("The sentiment composite, 0–10. A higher score means calmer, "
-                 "more supportive conditions (quieter volatility, more call "
-                 "buying, broader gains); a lower score means stress.")
-
-# The six chip labels, in ``summary_facts``' own order — used ONLY to build the
-# frame's COLD placeholders (every value starts ``_DASH``, exactly like the
-# strip's own cold tiles). Calling ``summary_facts`` itself at build time would
-# reach ``bullbear_headline`` before the page's first real paint, which is both
-# needless (the first paint runs unconditionally, see ``_paint(seed)``) and a
-# second, premature caller a wiring test pins the count of.
-_SUMMARY_CHIP_LABELS = (("sentiment", "SENTIMENT"), ("trend", "TREND"),
-                        ("bias", "BIAS"), ("signal", "SIGNAL"),
-                        ("regime", "REGIME"), ("bullbear", "BULL / BEAR"))
-
-
-def _word_or_none(v):
-    v = "" if v is None else str(v).strip()
-    return None if v in ("", _DASH) else v
-
-
-def bullbear_distribution(counts, live):
-    """The Bull/Bear chip's hover: every quadrant's count and the horizon.
-    Takes the quadrant counts and the live/quarter flag the caller already
-    derived (``summary_facts``' own ``live`` — the paint's one wall clock) —
-    it decides neither, only renders them."""
-    if not sum(counts.values()):
-        return ""
-    parts = [f"{_bb.quadrant_label(q)} {counts[q]}"
-             for q in _bb.QUADRANTS if counts[q]]
-    horizon = "on today's moves" if live else "on the quarter"
-    return f"{' · '.join(parts)} — counted {horizon}."
+# ── the Market report (cache:market:summary) ─────────────────────────────────
+# market_svc reads the latest published market report off its page and
+# publishes which report it is and where it lives (no Claude call of its own).
+# The Desk opens that report in a dialog. Until 2026-10-06 this view fed a
+# MARKET SUMMARY frame at the foot of the page: five highlights over six chips
+# that restated the strip. The operator replaced it with the full report in a
+# popup. Design: docs/plans/2026-10-06-desk-read-and-report-popups-design.md.
+REPORT_TITLE = "Market report"
+REPORT_OPEN = "Open in a new tab"
+REPORT_FRAME_TITLE = "The latest NeuralStrike market report"
 
 
 def report_provenance(summ):
-    """"Market close report · 14 Sep · 16:20 CT" — which report the highlights
-    came from, in the report's own words. Blank pieces are left out."""
+    """"Market close report · 14 Sep · 16:20 CT" — which report it is, in the
+    report's own words. Blank pieces are left out."""
     label = str(summ.get("slot_label") or "").strip()
     try:
         written = datetime.strptime(str(summ.get("report_date")), "%Y-%m-%d")
@@ -1082,60 +1053,29 @@ def report_provenance(summ):
     return " · ".join(p for p in parts if p)
 
 
-def summary_facts(summary_view, composite_view, history_view, regime_view,
-                  bullbear_view, now=None):
-    """Everything the MARKET SUMMARY frame draws, as plain data:
-    ``{"points", "source", "url", "chips": [six {key,label,value,cls,tip}]}``.
+def _https(value):
+    """``value`` as an address this page may draw, else ``""``. It becomes a
+    link's ``href`` and a frame's ``src``, so only ``https://`` passes."""
+    url = str(value or "").strip()
+    return url if url.startswith("https://") else ""
 
-    ``points`` are the latest market report's highlights (at most
-    ``SUMMARY_MAX_POINTS``), ``source`` names that report and ``url`` links the
-    full one — ``""`` unless it is an https URL, since it is drawn as a link.
-    Every chip reuses the strip's own derivation (the pill composite, the band
-    facts, ``regime_display``, the map's headline), so the frame and the strip
-    cannot name one reading two ways."""
-    now = now or datetime.now().astimezone()
+
+def report_facts(summary_view):
+    """What the Market report button and dialog draw, as plain data:
+    ``{"source", "url", "frame_url"}``.
+
+    ``source`` names the report, ``url`` is the site's page for it (the "open
+    in a new tab" link) and ``frame_url`` the report itself, which the dialog
+    frames. All three are ``""`` until a report is published: a payload with no
+    highlights is not a report (the cache can still hold a retired shape). A
+    payload from before ``frame_url`` existed frames the site's page instead."""
     summ = summary_view if isinstance(summary_view, dict) else {}
-    comp = composite_view if isinstance(composite_view, dict) else {}
-    hist = history_view if isinstance(history_view, dict) else {}
-    derived = comp.get("derived") if isinstance(comp.get("derived"), dict) else {}
-    snaps = hist.get("snaps") if isinstance(hist.get("snaps"), list) else []
-
-    total = _finite(_pill_composite(comp.get("live"), snaps).get("total_score"))
-    trend_word = _word_or_none(trend_pill_text(derived).title())
-    band = {f["key"]: f for f in signal_band_facts(derived)}
-    reg = regime_display(regime_view)
-    live = strip_is_live(bullbear_view, now)
-    counts = _bb.quadrant_counts(_bullbear_rows(bullbear_view, live=live),
-                                 live=live)
-    bb_line = bullbear_headline(bullbear_view, now)
-
-    def _chip(key, label, value, cls, tip):
-        return {"key": key, "label": label, "value": value or _DASH,
-                "cls": cls if value else MUTED,
-                "tip": tip if value else ""}
-
-    chips = [
-        _chip("sentiment", "SENTIMENT",
-              None if total is None else f"{total:.2f}", LABEL, SENTIMENT_TIP),
-        _chip("trend", "TREND", trend_word, LABEL, trend_pill_tooltip(derived)),
-        _chip("bias", "BIAS", _word_or_none(band["bias"]["value"]),
-              band["bias"]["cls"], band["bias"]["tip"]),
-        _chip("signal", "SIGNAL", _word_or_none(band["signal"]["value"]),
-              band["signal"]["cls"], band["signal"]["tip"]),
-        {"key": "regime", "label": "REGIME", "value": reg["word"],
-         "cls": regime_tone(reg), "tip": reg["tip"]},
-        _chip("bullbear", "BULL / BEAR", bb_line or None, LABEL,
-              bullbear_distribution(counts, live)),
-    ]
-
     raw = summ.get("highlights") if isinstance(summ.get("highlights"), list) else []
-    points = [t for t in (" ".join(str(h).split()) for h in raw) if t]
-    points = points[:SUMMARY_MAX_POINTS]
-    url = str(summ.get("report_url") or "").strip() if points else ""
-    return {"points": points,
-            "source": report_provenance(summ) if points else "",
-            "url": url if url.startswith("https://") else "",
-            "chips": chips}
+    if not any(str(h).strip() for h in raw):
+        return {"source": "", "url": "", "frame_url": ""}
+    url = _https(summ.get("report_url"))
+    return {"source": report_provenance(summ), "url": url,
+            "frame_url": _https(summ.get("frame_url")) or url}
 
 
 # ── the Sentiment / Trend hero pills ─────────────────────────────────────────
@@ -1644,6 +1584,11 @@ def signed_class(v):
 # own, for the reason at the top of this file.
 # Design: docs/plans/2026-10-05-market-read-scorecard-design.md.
 READ_VIEW = "market:read"
+READ_TITLE = "Market read"
+# Not a forecast, and the dialog says so: each chip restates a reading that is
+# already on a page, decided by rule.
+READ_USE_LINE = ("Six readings, each a tailwind or a headwind for stocks. "
+                 "By rule, not a forecast.")
 
 # The four codes, as whole words. An unknown code is "No reading": a missing
 # reading must never be shown as Neutral.
@@ -1897,16 +1842,72 @@ def read_header(view, now):
             "tally": tally}
 
 
-def paint_read(body, head, view, memo, force=True):
-    """Draw the Market read panel. Module-level, like the row builders, because
-    ``render`` is at its size ceiling. ``memo`` is the page's dict for this
-    panel: with ``force=False`` (the one-second clock) it redraws only when the
-    head would read differently, which is how a reading that stops updating
-    greys without a new one arriving.
+def read_status(header):
+    """The one line beside the Market read button: when the reading was taken
+    and its count, so the page says something with the dialog closed."""
+    return " · ".join(p for p in (header["text"], header["tally"]) if p)
 
-    A hidden reading (``read_hidden``) takes the whole CARD off the page, title
-    and all: a titled card holding nothing invites the question of what is
-    missing."""
+
+def build_popups(actions):
+    """The Desk's two popups: a button and a one-line status for each in the
+    header's action row, and the dialog each opens. Module-level, like the row
+    builders, because ``render`` is at its size ceiling.
+
+    Returns the handles ``paint_read`` and ``paint_report`` draw into. A
+    dialog's content is not in the browser's document while it is closed, so
+    the report's frame costs nothing until someone opens it and is fetched
+    afresh on every open."""
+    # Two groups side by side on a wide screen; each may drop to its own line,
+    # and a status under its button, rather than push the header off a phone.
+    actions.classes(remove="no-wrap", add="flex-wrap justify-end gap-x-4 gap-y-1")
+    group = "items-center justify-end gap-2 flex-wrap"
+    status = f"text-[11px] tabular-nums min-w-0 {MUTED}"
+    with actions:
+        with ui.row().classes(group) as read_group:
+            read_status_lbl = ui.label("").classes(status)
+            read_btn = kit.button(READ_TITLE, icon="fact_check")
+        with ui.row().classes(group) as report_group:
+            report_status = ui.label("").classes(status)
+            report_btn = kit.button(REPORT_TITLE, icon="article")
+    read_dlg = kit.info_dialog(READ_TITLE, width="w-[1040px]")
+    with read_dlg.content:
+        with ui.row().classes("items-baseline justify-between w-full gap-4 flex-wrap"):
+            ui.label(READ_USE_LINE).classes(f"text-[11px] leading-snug {MUTED}")
+            read_head = ui.row().classes("items-center gap-2 whitespace-nowrap")
+        read_body = ui.column().classes("w-full gap-0")
+    report_dlg = kit.info_dialog(REPORT_TITLE, width="w-[1100px]")
+    with report_dlg.content:
+        with ui.row().classes("items-baseline justify-between w-full gap-4 flex-wrap"):
+            report_source = ui.label("").classes(f"text-[12px] {MUTED}")
+            report_link = ui.link(REPORT_OPEN, "#", new_tab=True).classes(
+                f"text-[12px] underline {MUTED}")
+        # The report is a page of its own, with its own styling and its own
+        # scroll. The height is the window less the dialog's own margin, head
+        # and padding, so the dialog never grows a second scrollbar around it.
+        report_frame = ui.element("iframe").classes(
+            "w-full h-[calc(100vh-200px)] min-h-[240px] border-0 rounded").props(
+            f'title="{REPORT_FRAME_TITLE}" referrerpolicy="no-referrer"')
+    read_btn.on_click(guard(read_dlg.open))
+    report_btn.on_click(guard(report_dlg.open))
+    return SimpleNamespace(
+        read_group=read_group, read_status=read_status_lbl, read_dialog=read_dlg,
+        read_head=read_head, read_body=read_body,
+        report_group=report_group, report_status=report_status,
+        report_dialog=report_dlg, report_source=report_source,
+        report_link=report_link, report_frame=report_frame)
+
+
+def paint_read(popup, view, memo, force=True):
+    """Draw the Market read: the status beside its button, and the dialog.
+    Module-level, like the row builders, because ``render`` is at its size
+    ceiling. ``memo`` is the page's dict for this region: with ``force=False``
+    (the one-second clock) it redraws only when the head would read
+    differently, which is how a reading that stops updating greys without a
+    new one arriving.
+
+    A hidden reading (``read_hidden``) takes the button and its status off the
+    page, and closes the dialog if it was open: the reading has been withdrawn,
+    which is not "no reading yet"."""
     hidden = read_hidden(view)
     shown = None if hidden else read_view_shown(view)
     header = read_header(shown, datetime.now(_CT))
@@ -1915,16 +1916,19 @@ def paint_read(body, head, view, memo, force=True):
     if not force and memo.get("key") == key:
         return
     memo["key"] = key
-    head.clear()
-    body.clear()
-    # The card ``_panel`` built around this body.
-    body.parent_slot.parent.set_visibility(not hidden)
+    stale = header["state"] == "stale"
+    popup.read_group.set_visibility(not hidden)
+    popup.read_status.text = read_status(header)
+    popup.read_status.classes(remove="opacity-50", add="opacity-50" if stale else "")
+    popup.read_head.clear()
+    popup.read_body.clear()
     if hidden:
+        popup.read_dialog.close()
         return
-    with head:
+    with popup.read_head:
         if header["text"]:
             ui.label(header["text"]).classes(f"text-[11px] tabular-nums {MUTED}")
-    with body:
+    with popup.read_body:
         if header["state"] == "waiting":
             kit.empty(READ_WAITING)
             return
@@ -1934,7 +1938,7 @@ def paint_read(body, head, view, memo, force=True):
             for text in READ_HEADS:
                 ui.label(text).classes(_HEAD)
         # A stale reading is greyed, not hidden: it is still the last thing known.
-        dim = " opacity-50" if header["state"] == "stale" else ""
+        dim = " opacity-50" if stale else ""
         with ui.column().classes(f"w-full gap-0{dim}"):
             for row in read_rows(shown):
                 with ui.element("div").classes(f"{READ_COLS} {_ROW_STATIC}"):
@@ -1945,6 +1949,25 @@ def paint_read(body, head, view, memo, force=True):
                         f"text-[11px] min-w-0 break-words {MUTED}")
                     ui.label(row["verdict_word"].upper()).classes(
                         f"{row['chip_class']} justify-self-start")
+
+
+def paint_report(popup, view):
+    """Draw the Market report: which report it is beside its button and in the
+    dialog, the link to it, and the frame's address. The address changes when
+    the report does, so a dialog left open across a new report reloads rather
+    than showing the old one under the new one's name."""
+    f = report_facts(view)
+    popup.report_group.set_visibility(bool(f["frame_url"]))
+    popup.report_status.text = f["source"]
+    popup.report_source.text = f["source"]
+    for el, prop, value in ((popup.report_link, "href", f["url"] or "#"),
+                            (popup.report_frame, "src", f["frame_url"] or "about:blank")):
+        if el._props.get(prop) != value:
+            el._props[prop] = value
+            el.update()
+    popup.report_link.set_visibility(bool(f["url"]))
+    if not f["frame_url"]:
+        popup.report_dialog.close()
 
 
 # ── the page ─────────────────────────────────────────────────────────────────
@@ -1983,11 +2006,9 @@ _REGION_VIEWS = {
     "news": (NEWS_VIEW,),
     # The market read - one view, replaced on a clock slot by market_svc.
     "read": (READ_VIEW,),
-    # The sentence (market_svc, on change) and the five views its live chips
-    # read. Chips and sentence update IN PLACE, so a repaint here costs nothing
-    # visible when only a day-move ticked.
-    "summary": ("market:summary", "sentiment:composite", "sentiment:history",
-                "sentiment:regime", "sentiment:bullbear"),
+    # Which market report is the latest and where it lives (market_svc, when a
+    # report is published): the Market report button, its status and its dialog.
+    "summary": ("market:summary",),
 }
 
 # What the header's Updated stamp reads. The WIDEST-REACH view on the page —
@@ -1999,7 +2020,7 @@ _REGION_VIEWS = {
 # view's age ("Live · 41s ago") beside the countdown, and a header stamp on it
 # would say the same thing twice. ⚠ Deliberately NOT ``market:summary``: it
 # publishes a handful of times a day and already carries its own provenance
-# line under MARKET SUMMARY.
+# line beside the Market report button.
 HEADER_VIEW = "options:matrix"
 
 POLL_SEC = 2.0
@@ -3394,11 +3415,6 @@ PANEL_HEADS = {
              f"who initiated; ≈ marks an estimate."),
     "positions": ("Positions",
                   "What you are holding, and what needs a decision."),
-    # Not a forecast, and the head says so: each chip restates a reading that
-    # is already on a page, and says which way it points for stocks.
-    "read": ("Market read",
-             "Six readings, each a tailwind or a headwind for stocks. By rule, "
-             "not a forecast."),
     # A headline opens the ORIGINAL article; the strip itself is not a verdict.
     "news": ("Headlines",
              f"The {NEWS_ROWS_N} newest stories. Each opens the original "
@@ -3855,17 +3871,18 @@ def render():
     # ``glow_now`` is the ONE clock a paint runs on — set by ``_paint`` before it
     # calls a painter, so detection, pruning and drawing cannot disagree.
     # ``wall_now`` is its wall-clock sibling: the ONE instant every region that
-    # decides the Bull/Bear horizon (the strip, the MARKET SUMMARY frame) reads,
-    # so they cannot land on opposite sides of the opening bell in one paint.
+    # decides the Bull/Bear horizon reads, so no two can land on opposite sides
+    # of the opening bell in one paint.
     state = {"versions": {}, "data": {}, "glow_now": 0.0, "wall_now": None,
              **arrival_state()}
 
     with kit.page():
         # The page's ONE header line: the name, and the Updated stamp for
         # ``HEADER_VIEW`` (see that constant for why it is the matrix and not
-        # the freshness view the strip already prints). No page ACTIONS: the
-        # Desk commands nothing — it reads thirteen views on one batched poll.
-        kit.header("Desk", view=HEADER_VIEW, stale=True)
+        # the freshness view the strip already prints). Its two actions open
+        # the Market read and the Market report as dialogs; the Desk still
+        # commands nothing — it reads thirteen views on one batched poll.
+        popups = build_popups(kit.header("Desk", view=HEADER_VIEW, stale=True).actions)
 
         # ── the autoplay unlock ──────────────────────────────────────────────
         # Browsers refuse audio until the document has been interacted with, and
@@ -4092,44 +4109,6 @@ def render():
         # far more than it needs a column of its own, and a fifth cell in the
         # 2x2 grid would leave a hole beside it.
         news_body, _ = _panel(*PANEL_HEADS["news"])
-        # The market read: full width, above the summary it leads into.
-        read_body, read_head = _panel(*PANEL_HEADS["read"])
-
-        # ── the market summary ───────────────────────────────────────────────
-        # At the BOTTOM, full width: the four panels above are per-symbol, and
-        # this is the page's conclusion — the latest market report's highlights
-        # over every reading on the strip, said once.
-        with ui.column().classes(f"{_TILE} w-full gap-[8px]"):
-            with ui.row().classes("items-baseline w-full gap-4"):
-                ui.label("MARKET SUMMARY").classes(_STRIP_EYEBROW)
-                sum_asof = ui.label("").classes(
-                    f"text-[11px] leading-none {MUTED}")
-            sum_empty = ui.label(SUMMARY_EMPTY).classes(
-                f"text-[15px] leading-[1.5] {MUTED}")
-            # A fixed set of point rows, filled in place — never rebuilt, so a
-            # repaint of the chips beside them costs no DOM churn.
-            sum_points = []
-            with ui.column().classes("w-full gap-[4px]"):
-                for _ in range(SUMMARY_MAX_POINTS):
-                    with ui.row().classes(
-                            "items-baseline w-full gap-2 no-wrap") as _row:
-                        ui.label("•").classes(f"text-[15px] {MUTED}")
-                        _pt = ui.label("").classes(
-                            f"text-[15px] leading-[1.5] {LABEL}")
-                    _row.set_visibility(False)
-                    sum_points.append((_row, _pt))
-            sum_link = ui.link(SUMMARY_LINK, "#", new_tab=True).classes(
-                f"text-[12px] underline {MUTED}")
-            sum_link.set_visibility(False)
-            sum_chips = []
-            with ui.row().classes("items-baseline w-full gap-x-6 gap-y-1 flex-wrap"):
-                for _key, _label in _SUMMARY_CHIP_LABELS:
-                    with ui.row().classes("items-baseline gap-2"):
-                        ui.label(_label).classes(_STRIP_EYEBROW)
-                        sum_chips.append(ui.label(_DASH).classes(
-                            f"text-[14px] {MUTED}"))
-        # The hover each chip currently carries — "" at build (cold chips).
-        sum_tips = ["" for _ in sum_chips]
 
     # ── painters ─────────────────────────────────────────────────────────────
     def _view(name):
@@ -4219,29 +4198,6 @@ def render():
                                           _arc_value(t_arcs, 2), "MONTH"),
                           pill_tip=trend_pill_tooltip(derived))
 
-    def _paint_summary():
-        f = summary_facts(_view("market:summary"), _view("sentiment:composite"),
-                          _view("sentiment:history"), _view("sentiment:regime"),
-                          _view("sentiment:bullbear"), now=state["wall_now"])
-        sum_empty.set_visibility(not f["points"])
-        for i, (row, lbl) in enumerate(sum_points):
-            text = f["points"][i] if i < len(f["points"]) else ""
-            lbl.text = text
-            row.set_visibility(bool(text))
-        sum_asof.text = f["source"]
-        if sum_link._props.get("href") != (f["url"] or "#"):
-            sum_link._props["href"] = f["url"] or "#"
-            sum_link.update()
-        sum_link.set_visibility(bool(f["url"]))
-        for i, (lbl, chip) in enumerate(zip(sum_chips, f["chips"])):
-            lbl.text = chip["value"]
-            lbl.classes(remove=_ALL_STATE_TEXT, add=chip["cls"])
-            # In place: swap a hover only when its sentence changes.
-            if chip["tip"] != sum_tips[i]:
-                lbl.clear()
-                _CC.pill_tooltip(lbl, chip["tip"])
-                sum_tips[i] = chip["tip"]
-
     # The seat order the strip last drew, fed back into ``by_day_move`` so its
     # hysteresis has something to hold: the sorter is a pure function of
     # (rows, previous), so without this the margin buys nothing and the strip
@@ -4252,9 +4208,7 @@ def render():
     def _paint_bullbear():
         view = _view("sentiment:bullbear")
         # The paint's OWN wall clock, not a fresh one: two would let the
-        # headline name a horizon the chips were not drawn on, and — since the
-        # MARKET SUMMARY frame reads the Bull/Bear view too — a horizon the
-        # frame was not drawn on either.
+        # headline name a horizon the chips were not drawn on.
         now = state["wall_now"]
         chips = bullbear_chips(view, now=now, previous=bb_seats["order"])
         bb_seats["order"] = [c["symbol"] for c in chips]
@@ -4422,8 +4376,9 @@ def render():
     painters = {"strip": _paint_strip, "bullbear": _paint_bullbear,
                 "dealer": _paint_dealer, "board": _paint_board,
                 "flow": _paint_flow, "positions": _paint_positions,
-                "news": _paint_news, "summary": _paint_summary,
-                "read": lambda: paint_read(read_body, read_head, _view(READ_VIEW),
+                "news": _paint_news,
+                "summary": lambda: paint_report(popups, _view("market:summary")),
+                "read": lambda: paint_read(popups, _view(READ_VIEW),
                                            state.setdefault("read", {}))}
 
     # ── arrival detection ────────────────────────────────────────────────────
@@ -4456,8 +4411,7 @@ def render():
         now = time.monotonic()
         state["glow_now"] = now
         # The ONE wall clock for this paint, so every region that decides the
-        # Bull/Bear horizon (the strip and the summary frame) decides it on the
-        # same instant.
+        # Bull/Bear horizon decides it on the same instant.
         state["wall_now"] = datetime.now().astimezone()
         # Detection FIRST: the painters read ``state["glow"]``, so a row has to
         # be marked before the paint that is supposed to draw it lit.
@@ -4557,8 +4511,8 @@ def render():
         facts = countdown_facts(datetime.now(_CT))
         clock_cap.text = facts["label"]
         clock_lbl.text = facts["text"]
-        paint_read(read_body, read_head, _view(READ_VIEW),
-                   state.setdefault("read", {}), force=False)
+        paint_read(popups, _view(READ_VIEW), state.setdefault("read", {}),
+                   force=False)
 
     @guard_async
     async def _poll():

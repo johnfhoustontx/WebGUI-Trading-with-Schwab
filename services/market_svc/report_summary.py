@@ -1,11 +1,13 @@
-"""The Desk's MARKET SUMMARY, read off the latest published market report.
+"""The market summary, read off the latest published market report: the
+ticker's text, and which report the Desk's Market report dialog opens.
 
 The five daily NeuralStrike market reports are written outside this repo and
 uploaded into ``deploy/site/reports/`` (see CLAUDE.md, "The public live
 screens"): ``latest.html`` is the rendered report and ``latest.txt`` is
 ``"<day> <n> <slot> <as_of>"``. This module turns that page into the summary
 payload (``cache:market:summary``) — the report's verdict headline, its section
-headlines as up to ``MAX_HIGHLIGHTS`` highlights, and a link to the full report.
+headlines as up to ``MAX_HIGHLIGHTS`` highlights, a link to the full report, and
+the address of the report itself for the Desk to frame.
 
 It makes NO Claude call. Until 2026-09-16 market_svc wrote its own sentence with
 a change-driven Claude call; the report already says it, at more depth, so the
@@ -17,6 +19,7 @@ the verdict, each ``<section class="sec">`` one ``<h2>`` headline. A report that
 does not parse publishes nothing, so the last good summary stays.
 """
 import logging
+import re
 from html.parser import HTMLParser
 
 from repo_paths import SITE_HOST, SITE_ROOT
@@ -26,6 +29,22 @@ log = logging.getLogger("market_svc.report_summary")
 REPORTS_DIR = SITE_ROOT / "reports"
 MAX_HIGHLIGHTS = 5
 REPORT_URL = f"https://{SITE_HOST}/report.html"
+# The report ITSELF. ``report.html`` is the site's page around it, and is a
+# frame around this file; the Desk's Market report dialog frames this directly.
+FRAME_URL = f"https://{SITE_HOST}/reports/latest.html"
+_VERSION_PART = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def frame_url(day, slot):
+    """``FRAME_URL`` carrying the report's own stamp as a version.
+
+    The file name never changes, so a dialog left open across a new report
+    would otherwise go on showing the old one under the new report's name: a
+    changed address is what reloads the frame. The stamp comes off a file, so
+    it joins the address only when both parts are plain tokens."""
+    if _VERSION_PART.fullmatch(day or "") and _VERSION_PART.fullmatch(slot or ""):
+        return f"{FRAME_URL}?v={day}-{slot}"
+    return FRAME_URL
 
 
 def _squash(text):
@@ -103,7 +122,8 @@ def parse_report(html_text, latest_txt=""):
     highlights = p.sections[:MAX_HIGHLIGHTS] or [p.headline]
     return {"headline": p.headline, "highlights": highlights,
             "slot": slot, "slot_label": label.strip(), "report_date": day,
-            "as_of": as_of.strip(), "report_url": REPORT_URL}
+            "as_of": as_of.strip(), "report_url": REPORT_URL,
+            "frame_url": frame_url(day, slot)}
 
 
 def report_stamp(reports_dir=REPORTS_DIR):

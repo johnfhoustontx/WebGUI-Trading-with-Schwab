@@ -486,8 +486,8 @@ structure · what should I act on · what am I holding.*
 | **Live Flow Alerts** | The newest unusual-options events. A row that names one contract can carry a second line: the estimated share of its volume that was bought, sold, or could not be told |
 | **Positions** | Your paper trades and captured signals together, with live marks and an **OK / Watch / At risk / Rescue** flag |
 | **Headlines** | The five newest stories from Market News, one line each — time (Central), feed, and the headline, which opens the article in a new tab. **All headlines →** opens Market News. Full width |
-| **Market read** | Six readings, each marked Tailwind, Headwind or Neutral for stocks, retaken every 15 minutes in the session. See [The Market read](#the-market-read). Full width |
-| **Market Summary** | Up to five highlights from the latest published market report, with which report they came from and a link to the full report, over six live chips (Sentiment, Trend, Bias, Signal, Regime, Bull/Bear) — full width, at the bottom |
+| **Market read** (button, top right) | Opens a popup of six readings, each marked Tailwind, Headwind or Neutral for stocks, retaken every 15 minutes in the session. The time and the count sit beside the button. See [The Market read](#the-market-read) |
+| **Market report** (button, top right) | Opens the latest published market report, in full, in a popup. Which report it is sits beside the button |
 
 **Hover Bias, Signal or the market regime word** and a sentence explains what it
 means and, for Bias, what position size it implies.
@@ -559,29 +559,31 @@ as the scanner chime.
   the app telling you it was blocked. One click unlocks sound for the session; any
   other click on the page unlocks it too, the button just says so.
 
-**Market Summary** is the frame across the bottom. It shows the highlights of the
+**Market report** is the second button at the top right of the page. It opens the
 latest published **NeuralStrike market report** — the report the website publishes
-five times a trading day — as up to five bullet points, each one of the report's
-own section headlines in report order. Above them a line names the report, for
-example "Market close report · 14 Sep · 16:20 CT", and **Read the full report**
-opens the whole report on the website in a new tab. The highlights are quoted from
-the report as written; no AI rewrites them. Three things about the frame are easy
-to misread:
+five times a trading day — in a popup, in full, so you can read it without leaving
+the Desk. The line beside the button names the report, for example "Market close
+report · 14 Sep · 16:20 CT", and **Open in a new tab** inside the popup opens the
+same report on the website. Three things are easy to misread:
 
-- **It changes when a new report is published, not on a schedule.** Between
-  reports the bullets stay put, so check the report line for their age. The six
-  chips underneath are **live** regardless: SENTIMENT, TREND, BIAS, SIGNAL, REGIME
-  and BULL/BEAR update on every poll even while the report above them is hours
-  old, and hovering any of them explains that word — the same hover as the top
-  strip.
-- **If a new report can't be read, the previous highlights stay up** rather than
-  the frame going blank.
-- **Before any report has been published** the frame reads "No market report
-  published yet." instead of a blank space.
+- **It changes when a new report is published, not on a schedule.** Check the
+  line beside the button for the report's age.
+- **A popup left open across a new report reloads to the new one.**
+- **Before any report has been published there is no Market report button.**
+
+Until 6 October 2026 this was a **Market Summary** frame across the bottom of the
+page: five highlight points from the report over six chips (Sentiment, Trend,
+Bias, Signal, Regime, Bull/Bear). The full report replaced the highlights, and all
+six readings are still on the strip at the top of the page.
 
 ---
 
 ### The Market read {#the-market-read}
+
+**To open it:** the **Market read** button at the top right of the Desk. The line
+beside the button shows when the reading was taken and how it counts, for example
+"12:45 CT · next 13:00 · 2 tailwinds · 2 headwinds", so the page says something
+with the popup closed.
 
 The Desk, the Market Dashboard and Flow Alerts each show part of what the market
 is doing. The Market read lines six of those readings up and says, for each, which
@@ -613,7 +615,7 @@ Anything in between is **Neutral**.
   15:00 reading is the close and stays on screen after hours. Before the first
   reading of a day you see the previous session's, greyed.
 - **Grey rows and "not updating"** mean readings have stopped arriving. What you
-  see is the last one.
+  see is the last one. The line beside the button greys at the same moment.
 
 **What it is not**
 
@@ -629,7 +631,7 @@ Anything in between is **Neutral**.
 the table is there, along with 15 or 30 minutes between readings, and the switch
 that keeps it off the public Desk. A threshold applies at the next reading. The
 two switches apply within a few seconds: turning the Market read off takes the
-panel off the Desk, and turning the public switch off takes it off the public
+button off the Desk, and turning the public switch off takes it off the public
 Desk. The Flow row follows Flow Alerts' own public switch for the estimate as
 well: with that off, the public Desk shows the row as *Not shown on this screen*.
 
@@ -2881,7 +2883,7 @@ Discord and Telegram posts.
 
 > **Turning the ticker off only hides the scrolling bar.** The bar leads with the
 > headline of the latest published market report, and that same report also feeds
-> the Desk's **Market Summary** frame, so it keeps being picked up — whenever a new
+> the Desk's **Market report** button, so it keeps being picked up — whenever a new
 > report is published — whether or not the marquee is showing.
 
 > **Run Vacuum after hours.** It locks the database for minutes, and the tool

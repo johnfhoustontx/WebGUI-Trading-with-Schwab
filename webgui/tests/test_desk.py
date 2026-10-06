@@ -1650,8 +1650,16 @@ def test_render_hangs_the_bias_words_hover_on_the_sentiment_pill(monkeypatch):
     assert S.band_word_picture("bias", "Long") in texts
 
 
-# ── the MARKET SUMMARY frame ─────────────────────────────────────────────────
+# ── the Market report ────────────────────────────────────────────────────────
+# Until 2026-10-06 ``market:summary`` fed a MARKET SUMMARY frame at the foot of
+# the page: five highlights over six chips. The operator replaced it with the
+# full report in a dialog (docs/plans/2026-10-06-desk-read-and-report-popups-
+# design.md). The tests of the highlights and the chips went with the frame;
+# the rules that still apply (which report, https only, an older payload is not
+# a report) are kept here against ``report_facts``. The page as drawn is in
+# test_desk_popups.py.
 _REPORT_URL = "https://neuralstrike.co/report.html"
+_FRAME_URL = "https://neuralstrike.co/reports/latest.html?v=2026-09-14-close"
 
 
 def _summary(highlights=("Chips broke; software ripped",
@@ -1659,140 +1667,63 @@ def _summary(highlights=("Chips broke; software ripped",
     base = {"headline": "A rotation, not a rout",
             "highlights": list(highlights), "slot": "close",
             "slot_label": "Market close", "report_date": "2026-09-14",
-            "as_of": "16:20 CT", "report_url": _REPORT_URL}
+            "as_of": "16:20 CT", "report_url": _REPORT_URL,
+            "frame_url": _FRAME_URL}
     base.update(over)
     return base
 
 
-def _summary_views(**over):
-    views = {
-        "summary": _summary(),
-        "composite": {"live": {"composite": {"total_score": 3.98,
-                                             "bias": "Cautious"}},
-                      "derived": {"size": "0.85x", "bias": "Cautious",
-                                  "signal": "Bearish",
-                                  "trend": {"state": "lack_of_bearishness"}}},
-        "history": {"snaps": []},
-        "regime": {"label": "Rallying", "committed_label": "trending",
-                   "confidence": 0.7, "direction": 1},
-        "bullbear": _live_bullbear_payload(),
-    }
-    views.update(over)
-    return views
+def test_report_facts_name_the_report_and_carry_both_addresses():
+    assert d.report_facts(_summary()) == {
+        "source": "Market close report · 14 Sep · 16:20 CT",
+        "url": _REPORT_URL, "frame_url": _FRAME_URL}
 
 
-def _facts(monkeypatch, live=True, **over):
-    _live_now(monkeypatch, live=live)
-    v = _summary_views(**over)
-    return d.summary_facts(v["summary"], v["composite"], v["history"],
-                           v["regime"], v["bullbear"])
+def test_only_an_https_address_is_drawn():
+    """One becomes a link's href and the other a frame's src."""
+    for bad in ("javascript:alert(1)", "http://neuralstrike.co/report.html", "",
+                None, 5, "//neuralstrike.co/report.html"):
+        f = d.report_facts(_summary(report_url=bad))
+        assert f["url"] == "", bad
+        assert f["frame_url"] == _FRAME_URL
+        f = d.report_facts(_summary(frame_url=bad))
+        # ...and a frame address that cannot be drawn falls back to the link's.
+        assert f["frame_url"] == _REPORT_URL, bad
+    both = d.report_facts(_summary(report_url="http://x", frame_url="javascript:1"))
+    assert both["url"] == "" and both["frame_url"] == ""
 
 
-def test_summary_facts_carry_the_reports_highlights_and_link(monkeypatch):
-    f = _facts(monkeypatch)
-    assert f["points"] == ["Chips broke; software ripped",
-                           "SPX stalled one tick under its flip"]
-    assert f["source"] == "Market close report · 14 Sep · 16:20 CT"
-    assert f["url"] == _REPORT_URL
+def test_a_payload_from_before_the_frame_address_frames_the_sites_page():
+    """market_svc restarts on a promote and republishes only when the next
+    report lands, so the cache can hold the older shape for hours."""
+    old = _summary()
+    del old["frame_url"]
+    assert d.report_facts(old)["frame_url"] == _REPORT_URL
 
 
-def test_the_summary_never_shows_more_than_five_points(monkeypatch):
-    many = _summary(highlights=[f"Point {i}" for i in range(1, 9)])
-    f = _facts(monkeypatch, summary=many)
-    assert f["points"] == [f"Point {i}" for i in range(1, 6)]
-    assert d.SUMMARY_MAX_POINTS == 5
-
-
-def test_only_an_https_report_link_is_drawn(monkeypatch):
-    for bad in ("javascript:alert(1)", "http://neuralstrike.co/report.html", ""):
-        assert _facts(monkeypatch, summary=_summary(report_url=bad))["url"] == ""
-
-
-def test_an_older_claude_summary_payload_draws_no_points(monkeypatch):
+def test_an_older_claude_summary_payload_is_not_a_report():
     """The cache can still hold the retired Claude sentence until market_svc's
     first report publish replaces it."""
     old = {"narrative": "Fear builds.", "inputs": {}, "as_of": "2026-09-10T15:42:00+00:00"}
-    f = _facts(monkeypatch, summary=old)
-    assert f["points"] == [] and f["source"] == "" and f["url"] == ""
+    assert d.report_facts(old) == {"source": "", "url": "", "frame_url": ""}
 
 
-def test_summary_chips_are_the_six_readings_in_order(monkeypatch):
-    f = _facts(monkeypatch)
-    assert [c["key"] for c in f["chips"]] == [
-        "sentiment", "trend", "bias", "signal", "regime", "bullbear"]
-    vals = {c["key"]: c["value"] for c in f["chips"]}
-    assert vals["sentiment"] == "3.98" and vals["trend"] == "Gliding"
-    assert vals["bias"] == "Cautious" and vals["signal"] == "Bearish"
-    assert vals["regime"] == "Rallying"
-    assert vals["bullbear"].endswith("today")
+@pytest.mark.parametrize("view", [None, {}, 5, {"highlights": []},
+                                  {"highlights": "x"}])
+def test_no_report_reads_as_no_report(view):
+    assert d.report_facts(view) == {"source": "", "url": "", "frame_url": ""}
 
 
-def test_every_summary_chip_carries_its_own_hover(monkeypatch):
-    from pages import regime_mix as RM
-    from pages import sentiment as S
-    tips = {c["key"]: c["tip"] for c in _facts(monkeypatch)["chips"]}
-    assert tips["sentiment"] == d.SENTIMENT_TIP
-    assert tips["trend"] == S.trend_picture("lack_of_bearishness")
-    assert tips["bias"] == S.band_word_picture("bias", "Cautious")
-    assert tips["signal"] == S.band_word_picture("signal", "Bearish")
-    assert tips["regime"] == RM.regime_picture("Rallying")
-    assert "Rising · Leading" in tips["bullbear"]
-    assert "today" in tips["bullbear"]
-
-
-def test_the_sentiment_chip_hover_states_the_scales_real_direction():
-    """High = calm and supportive (sentiment-dashboard test_scale_direction.py
-    pins it). Until 2026-09-11 this hover called the scale contrarian."""
-    tip = d.SENTIMENT_TIP.lower()
-    assert "calm" in tip and "stress" in tip
-    for banned in ("contrarian", "fear", "greed", "complacen"):
-        assert banned not in tip, banned
-
-
-def test_no_report_reads_as_no_report(monkeypatch):
-    f = _facts(monkeypatch, summary={"highlights": []})
-    assert f["points"] == [] and f["source"] == "" and f["url"] == ""
-    assert _facts(monkeypatch, summary=None)["points"] == []
+def test_blank_highlights_are_not_a_report():
     blanks = _summary(highlights=["", "   "])
-    assert _facts(monkeypatch, summary=blanks)["points"] == []
-
-
-def test_cold_readings_dash_and_carry_no_hover(monkeypatch):
-    f = _facts(monkeypatch, composite={}, regime=None, bullbear=None,
-               summary=None)
-    by = {c["key"]: c for c in f["chips"]}
-    for key in ("sentiment", "trend", "bias", "signal", "bullbear"):
-        assert by[key]["value"] == d._DASH, key
-        assert by[key]["tip"] == "", key
-        assert by[key]["cls"] == d.MUTED, key
-    assert by["regime"]["value"] == "Unclear"      # the console's own cold word
+    assert d.report_facts(blanks) == {"source": "", "url": "", "frame_url": ""}
 
 
 def test_the_desk_reads_the_market_summary_on_its_one_poll():
     assert "market:summary" in d.VIEWS
-    assert d._REGION_VIEWS["summary"] == (
-        "market:summary", "sentiment:composite", "sentiment:history",
-        "sentiment:regime", "sentiment:bullbear")
-
-
-def test_render_mounts_the_market_summary_frame(monkeypatch):
-    from pages import sentiment as S
-    payloads = _full_payloads()
-    payloads["market:summary"] = _summary()
-    _seed_bus(monkeypatch, payloads)
-    texts = [t for t in _rendered_texts() if t]
-    assert "MARKET SUMMARY" in texts
-    for point in _summary()["highlights"]:
-        assert point in texts
-    assert d.SUMMARY_LINK in texts
-    assert "Market close report · 14 Sep · 16:20 CT" in texts
-    assert S.band_word_picture("signal", "Bearish") in texts
-
-
-def test_render_says_no_summary_yet_when_none_is_published(monkeypatch):
-    _seed_bus(monkeypatch, _full_payloads())
-    texts = [t for t in _rendered_texts() if t]
-    assert d.SUMMARY_EMPTY in texts
+    # One view now: the six chips that also read the sentiment views went with
+    # the frame, so a sentiment tick no longer repaints this region.
+    assert d._REGION_VIEWS["summary"] == ("market:summary",)
 
 
 def test_the_desk_band_words_match_the_console_tiles_for_one_payload():
@@ -2418,9 +2349,9 @@ def test_the_strip_feeds_its_own_seat_order_into_the_next_paint(monkeypatch):
 
 
 def test_one_paint_decides_the_horizon_once(monkeypatch):
-    """One paint, ONE clock — threaded into every region that decides the
-    Bull/Bear horizon: the strip (``_paint_bullbear``) AND the MARKET SUMMARY
-    frame (``_paint_summary`` -> ``summary_facts``).
+    """One paint, ONE clock — threaded into every caller that decides the
+    Bull/Bear horizon: the strip's chips and the strip's headline
+    (``_paint_bullbear``).
 
     Each caller decides its own horizon from a ``strip_is_live`` call of its
     own (``bullbear_headline``'s docstring says why that is safe), so they
@@ -2428,8 +2359,7 @@ def test_one_paint_decides_the_horizon_once(monkeypatch):
     each and a paint straddling the opening bell renders a headline saying
     "on the quarter" over chips already drawn on today's axes — precisely
     the one-word ambiguity ``/sentiment/bullbear`` exists to remove, and
-    precisely what a reader of the strip (or the frame beneath it) cannot
-    detect.
+    precisely what a reader of the strip cannot detect.
 
     Nothing in any SIGNATURE prevents it: taking a second ``datetime.now()``
     anywhere in this chain leaves the whole suite green. Hence this test, and
@@ -2437,17 +2367,10 @@ def test_one_paint_decides_the_horizon_once(monkeypatch):
     apart compare unequal only sometimes, and a guard that fails only
     sometimes is not a guard.
 
-    The invariant now spans TWO regions, not one: the strip's own
-    ``bullbear_chips``/``bullbear_headline`` pair, and the frame's
-    ``strip_is_live``/``bullbear_headline`` pair reached through
-    ``summary_facts``. ``bullbear_distribution`` no longer takes a ``now`` of
-    its own — it renders the counts/live ``summary_facts`` already derived on
-    this same clock, so it dropped out of the spy list along with its ability
-    to mint a second one. A test that only watched the strip's pair (as this
-    one briefly did) cannot see the frame mint its own clock — which is
-    exactly the regression: ``summary_facts`` defaults ``now`` to a fresh
-    ``datetime.now()`` when its caller omits it, and until ``_paint`` hands it
-    the shared instant, omitting it is exactly what ``_paint_summary`` did.
+    Until 2026-10-06 a second region decided the horizon too: the MARKET
+    SUMMARY frame, through ``summary_facts``. That frame is gone (the report
+    opens in a dialog now), so this pins the strip's pair alone — and that no
+    OTHER region on the page has started deciding the horizon for itself.
     """
     seen = []
     monkeypatch.setattr(
@@ -2464,32 +2387,12 @@ def test_one_paint_decides_the_horizon_once(monkeypatch):
     from pages import desk
     desk.render()
 
-    # The strip paints before the frame (region order), so its chips/headline
-    # pair comes first; the frame's own strip_is_live/headline pair follows,
-    # from inside summary_facts.
-    assert [where for where, _ in seen] == [
-        "chips", "headline", "live", "headline"]
+    # The strip's chips/headline pair, and nothing else: ``strip_is_live`` is
+    # reached only from inside the two functions spied on above.
+    assert [where for where, _ in seen] == ["chips", "headline"]
     # A real instant, not any side quietly falling back to its own default.
     assert seen[0][1] is not None
     assert all(now is seen[0][1] for _, now in seen)
-
-
-def test_bullbear_distribution_renders_the_counts_it_is_handed():
-    """``bullbear_distribution`` no longer derives anything — it renders the
-    ``counts``/``live`` pair its caller (``summary_facts``) already computed on
-    the paint's one clock. A zero-count dict (nothing counted) renders empty
-    regardless of ``live``."""
-    counts = {"rising_leading": 2, "rising_lagging": 0,
-              "falling_leading": 0, "falling_lagging": 1, "unknown": 0}
-    text = d.bullbear_distribution(counts, True)
-    assert "Rising · Leading 2" in text
-    assert "Falling · Lagging 1" in text
-    assert "on today's moves" in text
-    for zero_label in ("Rising · Lagging", "Falling · Leading", "No reading"):
-        assert zero_label not in text
-
-    zero_counts = {q: 0 for q in d._bb.QUADRANTS}
-    assert d.bullbear_distribution(zero_counts, False) == ""
 
 
 def test_a_measured_zero_mid_session_is_a_known_false_bearish_reading():
@@ -3769,9 +3672,10 @@ def test_panel_heads_carry_every_panel_and_the_caps_stay_interpolated():
     """
     heads = d.PANEL_HEADS
     # "news" joined 2026-09-26 with the headlines strip (the news feed plan,
-    # Task 14) and "read" on 2026-10-05 with the Market read panel; the set is
-    # still asserted EXACTLY.
-    assert set(heads) == {"dealer", "board", "flow", "positions", "news", "read"}
+    # Task 14). "read" joined on 2026-10-05 with the Market read panel and left
+    # on 2026-10-06, when that panel became a dialog; the set is still asserted
+    # EXACTLY.
+    assert set(heads) == {"dealer", "board", "flow", "positions", "news"}
     for key, (title, use_line) in heads.items():
         assert title == title.capitalize(), key
         assert use_line, key

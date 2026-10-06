@@ -39,6 +39,37 @@ def test_headline_highlights_and_provenance():
     assert p["report_url"].endswith("/report.html")
 
 
+def test_the_frame_address_is_the_report_itself_versioned_by_the_report():
+    """The Desk frames the report in a dialog. ``report.html`` is itself a
+    frame around ``reports/latest.html``, so the dialog takes the report
+    directly. The file name never changes, so the address carries the report's
+    own stamp: a dialog left open across a new report must reload, not show the
+    old one under the new report's name."""
+    close = rs.parse_report(_page("Chips broke"), "2026-09-14 5 close 16:20CT\n")
+    assert close["frame_url"] == (
+        f"https://{rs.SITE_HOST}/reports/latest.html?v=2026-09-14-close")
+    midday = rs.parse_report(_page("Chips broke"), "2026-09-14 4 midday 12:05CT\n")
+    assert midday["frame_url"] != close["frame_url"]
+    assert midday["frame_url"].endswith("?v=2026-09-14-midday")
+
+
+def test_the_frame_address_has_no_version_when_the_stamp_is_unknown():
+    for stamp in ("", "2026-09-14", "garbage"):
+        p = rs.parse_report(_page("Chips broke"), stamp)
+        assert p["frame_url"] == f"https://{rs.SITE_HOST}/reports/latest.html", stamp
+
+
+def test_the_version_is_built_from_safe_characters_only():
+    p = rs.parse_report(_page("Chips broke"), '2026-09-14 5 clo"se&x=1 16:20CT')
+    assert p["frame_url"] == f"https://{rs.SITE_HOST}/reports/latest.html"
+
+
+def test_the_published_payload_fits_its_contract():
+    from shared.contracts.market import MarketSummary
+    p = rs.parse_report(_page("Chips broke"), "2026-09-14 5 close 16:20CT\n")
+    assert MarketSummary(**p).frame_url == p["frame_url"]
+
+
 def test_at_most_five_highlights_in_report_order():
     titles = [f"Point {i}" for i in range(1, 7)]
     assert rs.parse_report(_page(*titles))["highlights"] == titles[:5]

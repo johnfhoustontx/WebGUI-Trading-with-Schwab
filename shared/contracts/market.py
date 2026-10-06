@@ -27,7 +27,8 @@ class MarketSummary(_Base):
     The highlights of the latest published NeuralStrike market report, which
     market_svc reads off ``deploy/site/reports/latest.html`` whenever the
     report is replaced (``services/market_svc/report_summary.py``) — no Claude
-    call of its own. It feeds the Desk's MARKET SUMMARY frame and is the whole
+    call of its own. It feeds the Desk's Market report button and dialog (which
+    report it is, and where it lives) and is the whole
     of the webgui ticker (headline, highlights, then the report's stamp). Defensive: no report yet means an empty
     payload, and both surfaces stay quiet rather than inventing a line.
     """
@@ -41,6 +42,9 @@ class MarketSummary(_Base):
     report_date: str = ""    # YYYY-MM-DD the report was written for
     as_of: str = ""          # the report's own time stamp, e.g. "16:20 CT"
     report_url: str = ""     # the full report on the public site
+    # The report page itself, versioned by its own stamp: what the Desk's
+    # Market report dialog frames.
+    frame_url: str = ""
 
 
 class MarketRead(_Base):

@@ -4,7 +4,44 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-05 (**The Market read: a rule-decided scorecard on the Desk.**)
+**Last updated:** 2026-10-06 (**The Desk: the Market read and the Market report open as popups.**)
+
+- **What changed.** The Market read card and the MARKET SUMMARY frame left the
+  foot of the Desk. Two buttons in the page header open them as in-page dialogs:
+  **Market read** (the six rows, unchanged) and **Market report** (the latest
+  report, in full, framed from the website). Each button has a one-line status
+  beside it: the reading's time and count, and which report it is.
+  Design and plan: `docs/plans/2026-10-06-desk-read-and-report-popups-{design,plan}.md`.
+- **Decisions the operator made.** The Desk, not the Market Dashboard; the full
+  report, not the five highlights; an in-page dialog, not a second browser
+  window; buttons at the top with a status line.
+- **What left the page.** The five highlight points and the six chips under them
+  (Sentiment, Trend, Bias, Signal, Regime, Bull/Bear). Every chip repeated the
+  strip at the top. `summary_facts`, `SENTIMENT_TIP` and `bullbear_distribution`
+  went with the frame, and so did the tests of the highlights and the chips.
+  The tests of what still applies (which report, https only, an older payload is
+  not a report) now run against `report_facts`.
+- **The pieces.** `market_svc` publishes one more field on `cache:market:summary`,
+  `frame_url` (the report itself, versioned by its own stamp so an open dialog
+  reloads on a new report). On the page: `report_facts`, `build_popups`,
+  `paint_read` (now draws into the dialog and the status), `paint_report`.
+  `desk.render` shrank; its ceilings were lowered to match.
+- **Verified on the page harness** with a reading built by the service's own code
+  and the live site's report: both buttons and status lines in the header, both
+  panels gone, both dialogs opened, the full report rendering in its frame, no
+  frame in the document until the button is pressed, and no sideways scroll at
+  phone width (the status moves above its button).
+- **Found on the way.** A frame sized in `vh` gave the dialog a second scrollbar on
+  a short window; it is sized from the window less the dialog's own head now. An
+  existing test fires every click handler the Desk wires, so it opens both
+  dialogs too; it still passes.
+- **Not checked in a browser:** the public origin (it is covered by tests that
+  render the Desk as the public origin), and a report changing while the dialog
+  is open (covered by a test of the address changing).
+
+---
+
+**Prior —** 2026-10-05 (**The Market read: a rule-decided scorecard on the Desk.**)
 
 - **What it is.** A full-width panel above the Market Summary. Six rows — direction,
   breadth, structure, volatility, flow, cross-asset — each marked Tailwind, Headwind,
