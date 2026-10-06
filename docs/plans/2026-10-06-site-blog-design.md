@@ -90,6 +90,8 @@ runs in the gate and again in the service.
   value, `REDIS_BLOG_URL`.
 - Its Redis ACL user may `XADD` to `cmd:blog_inbox` and read `cache:blog:*`.
   No `@write`, no `+publish`, no other stream.
+- `get_entry` reads the stored document from the blog data folder on disk
+  (the units share one unix user), so no document is ever put in Redis for it.
 - Prod refuses to serve without that user and proves at start that a `SET` on
   a cache key and an `XADD` on `cmd:blog` are both refused (the
   `live_main.require_read_only` pattern).
@@ -116,8 +118,10 @@ Rules:
 - **The code is typed, not clicked.** A connection someone else started shows
   its code only in their browser, so the operator cannot approve it by mistake.
   This is the device-flow user-code pattern.
-- The code never appears in a cache view: `cache:*` is readable by the public
-  live process. It travels on the stream and is stored hashed.
+- Neither the code nor the request id appears in a cache view: `cache:*` is
+  readable by the public live process, and the request id is what opens the
+  gate's page that shows the code. Both travel on the stream; the code is
+  stored hashed and the view names an approval by a hash of its request id.
 - A pending request expires (`[connect] code_ttl_min`) and is void after
   `[connect] code_tries` wrong codes.
 - **Registration is refused** unless every redirect URI is in
@@ -194,18 +198,22 @@ makes the preview honest: what is staged is what will be served.
 Three layers, any one of which stops script:
 
 1. **Cleaning** removes it.
-2. **The frame is sandboxed**: `sandbox="allow-popups
-   allow-popups-to-escape-sandbox"`. No script, no forms, an opaque origin.
+2. **The frame is sandboxed**: `sandbox="allow-same-origin allow-popups
+   allow-popups-to-escape-sandbox"`. No script and no forms.
 3. **The edge sends a policy on `/blog/*/entry.html`**, so the same holds when
    the document is opened outside its frame:
    `default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src
    'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self';
-   sandbox allow-popups allow-popups-to-escape-sandbox`.
+   sandbox allow-same-origin allow-popups allow-popups-to-escape-sandbox`.
 
-⚠ A sandboxed document has an opaque origin, so its font requests are
-cross-origin and need `Access-Control-Allow-Origin` on `/blog/fonts/*`. Whether
-`font-src 'self'` matches there is browser behaviour to **verify in a browser**,
-not to assume.
+⚠ **`allow-same-origin` is there for the typefaces, and `allow-scripts` must
+never join it.** Without it the document has an opaque origin and its font
+requests are cross-origin: the site would need CORS headers on `/blog/fonts/`,
+and the private preview's font requests would carry no session cookie and be
+refused by the login. With it and no `allow-scripts`, nothing runs, so the
+shared origin gives the document nothing to use. The two together would let a
+framed document remove its own sandbox. Typefaces inside the frame are still
+behaviour to **verify in a browser**, not to assume.
 
 The private preview serves the staged file with the same header and the same
 `sandbox` attribute.
