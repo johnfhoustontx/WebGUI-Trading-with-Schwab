@@ -201,7 +201,45 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   mark and the Paper gate were exercised in a browser. Not yet promoted; the first
   live scan's duration and funnel are the checks still owed.
 
-**Prior —** 2026-10-06 (**A Blog on neuralstrike.co: upload, preview, publish.**)
+**Prior —** 2026-10-06 (**One schwab-proxy test failed at random and had turned six of nine CI runs on `main` red. The gateway was right; the test asserted one of four legal orders.**)
+
+- **The test.** `test_requests_waiting_on_one_failed_week_fetch_each_get_their_own_answer`
+  in `schwab-proxy/tests/test_market_gateway.py` (audit AR-100, added 2026-10-04).
+  Three requests for different windows (to 10-09, 10-08, 10-07) wait on the one
+  week fetch; it fails; the test expected each to then call Schwab once.
+- **What actually happens, measured over 3,000 runs.** Every request always got an
+  answer and the week was always fetched exactly once. But once the week has
+  failed the three race for the store, and a narrower request is answered from a
+  wider one's own answer if that got there first, making no call of its own. The
+  asserted order came up 2,771 times; in 229 a narrower request was served from a
+  wider one. With small random delays injected it came up 52 times in 400, and a
+  fourth order appeared. On CI's Linux runners it lost often enough to fail the
+  `schwab-proxy` job in six of the nine runs since the test was added, on every
+  commit regardless of what the commit touched.
+- **Not a gateway defect.** Serving a narrower window from a fresh wider chain is
+  what the chain store is for (`ChainStore.lookup`'s `subset`), and it saves a
+  Schwab call. `market_store.py` is unchanged.
+- **The fix holds the order in the test.** Two tests now, each pinning one order:
+  - all three fall back together (a `threading.Barrier` keeps every as-asked
+    answer upstream until all three have asked): each is fetched once, as asked;
+  - the widest answer lands first (the narrower two wait at their own request
+    lock until it is stored): one failed week fetch and ONE call answer all
+    three, the narrower two cut from the fresh answer and never from the stale
+    week.
+  The helper's docstring said the outcome "no longer depends on which thread runs
+  next"; that is true only when every request is the same, and it now says so.
+- **Checked.** Both tests: 3,000 of 3,000 runs each, and 600 of 600 with the same
+  random delays that break the old one. Three deliberate breaks of the gateway
+  (waiters re-calling the failed week; the as-asked path not looking at the store;
+  the week's error raised to the waiter) are each caught by one or both. The other
+  eleven thread-driven tests in the file: 400 runs each, no failure. Not yet run
+  on CI's Linux runners.
+- **For the next thread test.** A helper that lines requests up behind one lock
+  fixes the order only up to the moment that lock is released. If the requests are
+  not identical, what they do next can depend on each other; hold that order with
+  a barrier or an event, and write one test per order.
+
+**Prior — 2026-10-06** (**A Blog on neuralstrike.co: upload, preview, publish.**)
 
 - **What it is.** The public site has a Blog. The owner opens **More → Blog** in
   the private app, uploads one self-contained HTML document (an artifact saved

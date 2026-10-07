@@ -1,4 +1,5 @@
 """The gateway: per request, a stored answer or a call to Schwab."""
+import contextlib
 import datetime as dt
 import json
 import pathlib
@@ -113,7 +114,12 @@ def all_at_once(h, slow, first, others):
     Returns every answer, ``first``'s first; a request that raised hands back
     its exception.
 
-    From that point the outcome no longer depends on which thread runs next."""
+    From that point the outcome no longer depends on which thread runs next
+    WHEN EVERY REQUEST IS THE SAME. Requests for different windows still race
+    once the call finishes: a narrower one is answered from a wider answer if
+    that reaches the store first, and makes its own call if it does not. A
+    test of such requests has to hold that order itself, as the two
+    failed-week tests do."""
     queued, asked = threading.Event(), []
     out = [None] * (1 + len(others))
     real = h.gw._locks.holding
@@ -2590,9 +2596,11 @@ def test_a_week_fetch_that_cannot_be_reached_is_followed_by_the_request_as_asked
     assert got.kind == "miss" and len(h.calls) == 3 and h.gw.degrades == {}
 
 
-def test_requests_waiting_on_one_failed_week_fetch_each_get_their_own_answer():
+def failed_week(responses):
+    """The collector's week is held and 50 seconds old, and Schwab now fails
+    it: the state three narrower requests are about to arrive in."""
     state = {"fail": None}
-    slow = Slow(week_fails(state))
+    slow = Slow(responses(state))
     h = Harness(responses=slow)
     slow.gate.set()
     h.gw.chains(P(), "collector")
@@ -2600,14 +2608,88 @@ def test_requests_waiting_on_one_failed_week_fetch_each_get_their_own_answer():
     state["fail"] = ms.UpstreamError(503, "unavailable")
     slow.gate.clear()
     slow.started.clear()
-    answers = all_at_once(
+    return h, slow
+
+
+def three_narrower_requests(h, slow):
+    return all_at_once(
         h, slow, lambda: h.gw.chains(P(to="2026-10-09"), "a"),
         [lambda: h.gw.chains(P(to="2026-10-08"), "b"),
          lambda: h.gw.chains(P(to="2026-10-07"), "c")])
+
+
+# Three requests for DIFFERENT windows wait on the one failed week fetch. What
+# happens next depends on whose own answer reaches the store first, and both
+# orders are right. Each test below holds one of them in place. Left to race,
+# the three took the first order more than nine times in ten on a desktop and
+# less often on CI, where a test that asserted only the first order failed six
+# runs of nine.
+
+def test_requests_waiting_on_one_failed_week_fetch_each_get_their_own_answer():
+    # Order one: all three fall back together, so no answer is in the store
+    # when the others look, and each is fetched once, exactly as it was asked.
+    together = threading.Barrier(3)
+
+    def responses(state):
+        schwab = week_fails(state)
+
+        def respond(endpoint, params):
+            if params["toDate"] != "2026-10-12":
+                together.wait(5)    # no answer comes back until all three asked
+            return schwab(endpoint, params)
+        return respond
+
+    h, slow = failed_week(responses)
+    answers = three_narrower_requests(h, slow)
     assert [type(a).__name__ for a in answers] == ["Served"] * 3
-    asked = sorted(c[1]["toDate"] for c in h.calls[1:])
+    assert [a.kind for a in answers] == ["miss"] * 3
+    asked = sorted(call[1]["toDate"] for call in h.calls[1:])
     # ONE failed week fetch, then each request once, as it was asked.
     assert asked == ["2026-10-07", "2026-10-08", "2026-10-09", "2026-10-12"]
+    assert h.gw.degrades == {}
+
+
+def test_a_request_waiting_on_a_failed_week_fetch_is_answered_from_a_wider_one_that_landed():
+    # Order two: all three are handed the week's failure, and the widest
+    # request's own answer is in the store before the narrower two take their
+    # look. It covers both and is seconds old, so neither calls Schwab: one
+    # failed week fetch and ONE call answer all three.
+    h, slow = failed_week(week_fails)
+    widest = ("chains", ms.ChainKey.from_params(P(to="2026-10-09")))
+    narrower = {("chains", ms.ChainKey.from_params(P(to=to)))
+                for to in ("2026-10-08", "2026-10-07")}
+    fell_back, landed = threading.Semaphore(0), threading.Event()
+    real = h.gw._locks.holding
+
+    @contextlib.contextmanager
+    def holding(key):
+        if key in narrower:
+            fell_back.release()     # past the failed week, about to look again
+            assert landed.wait(5)   # ...and that look waits for the wider answer
+        if key == widest:
+            for _ in narrower:      # the widest fetch starts once both are there
+                assert fell_back.acquire(timeout=5)
+        with real(key):
+            yield
+        if key == widest:
+            landed.set()            # stored: the put happens inside that lock
+
+    h.gw._locks.holding = holding
+    answers = three_narrower_requests(h, slow)
+    assert [type(a).__name__ for a in answers] == ["Served"] * 3
+    assert [a.kind for a in answers] == ["miss", "coalesced", "coalesced"]
+    asked = sorted(call[1]["toDate"] for call in h.calls[1:])
+    assert asked == ["2026-10-09", "2026-10-12"]
+    by_caller = {who: [r[2] for r in h.records if r[1] == who] for who in "abc"}
+    assert by_caller == {"a": ["wide_failed", "upstream"],
+                         "b": ["wide_failed", "coalesced"],
+                         "c": ["wide_failed", "coalesced"]}
+    for got in answers[1:]:
+        # Cut from the answer fetched a moment ago (spot 101), never from the
+        # stale week (spot 100), and to its own window: 10-09 is outside both.
+        assert body(got)["underlyingPrice"] == 101.0
+        assert set(body(got)["callExpDateMap"]) == {"2026-10-05:0", "2026-10-07:2"}
+    assert h.gw.degrades == {}
 
 
 @pytest.mark.parametrize("status", [401, 429])
