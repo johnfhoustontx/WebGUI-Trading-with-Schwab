@@ -695,13 +695,18 @@ def _short_target(band):
     return (band[0] + band[1]) / 2.0 if band else _SHORT_DELTA
 
 
-def _front_pair(chain, dte_min, dte_max):
+def _front_pair(chain, dte_min, dte_max, min_front_dte=None):
     """(exp, call_strikes, put_strikes) for the nearest expiry both maps list at
     least ``_MIN_FRONT_DTE`` (7) days out - the floor is applied HERE, so every
     caller (straddles/strangles, butterflies/condors, share structures) gets it
     and none can forget it. A window whose ``dte_min`` is already higher keeps it.
+
+    ``min_front_dte`` replaces the 7 for a caller that names its own floor: the
+    Market Scanner's 0-DTE window (DTE 0..4) passes its window minimum. The
+    Strategy Finder passes nothing and keeps 7 (operator decision 2026-09-13,
+    left standing 2026-10-06).
     """
-    floor = max(dte_min, _MIN_FRONT_DTE)
+    floor = max(dte_min, _MIN_FRONT_DTE if min_front_dte is None else min_front_dte)
     calls = extract_options(chain, "call", floor, dte_max)
     puts = extract_options(chain, "put", floor, dte_max)
     common = sorted(set(calls) & set(puts), key=lambda e: calls[e]["dte"])
@@ -731,9 +736,10 @@ _LONG_STRANGLE_DELTA = 0.30
 
 
 def build_straddles_strangles(chain, symbol, spot, atm_iv, dte_min, dte_max,
-                              put_band=None, call_band=None):
+                              put_band=None, call_band=None, min_front_dte=None):
     """Long/short straddle (ATM) and long/short strangle, on the nearest expiry at
-    least ``_MIN_FRONT_DTE`` (7) days out (see ``_front_pair``).
+    least ``_MIN_FRONT_DTE`` (7) days out, or ``min_front_dte`` when the caller
+    names its own floor (see ``_front_pair``).
 
     The short strangle sells the out-of-the-money strikes nearest the short-delta
     bands' midpoints, and those bands' CEILING binds it alone - a straddle's shorts
@@ -743,7 +749,7 @@ def build_straddles_strangles(chain, symbol, spot, atm_iv, dte_min, dte_max,
     the short strangle's ~0.15-delta strikes gave a PoP that never cleared
     the LONG profile's 30 bar. The two rows may sit on different strikes.
     """
-    fp = _front_pair(chain, dte_min, dte_max)
+    fp = _front_pair(chain, dte_min, dte_max, min_front_dte)
     if not fp:
         return []
     exp, cs, ps = fp
@@ -817,9 +823,11 @@ def _priced_inside(sig, key, wing):
             and 0 < v < wing * _CONTRACT_MULT)
 
 
-def build_butterflies_condors(chain, symbol, spot, atm_iv, dte_min, dte_max):
+def build_butterflies_condors(chain, symbol, spot, atm_iv, dte_min, dte_max,
+                              min_front_dte=None):
     """Call/put butterfly, iron butterfly (ATM body) and call/put condor, on the
-    nearest expiry at least ``_MIN_FRONT_DTE`` (7) days out (see ``_front_pair``).
+    nearest expiry at least ``_MIN_FRONT_DTE`` (7) days out, or ``min_front_dte``
+    when the caller names its own floor (see ``_front_pair``).
 
     Wings sit at the listed SYMMETRIC distance nearest half the 1-sigma expected
     move to the front expiry; a condor's shorts sit one wing either side of ATM and
@@ -831,7 +839,7 @@ def build_butterflies_condors(chain, symbol, spot, atm_iv, dte_min, dte_max):
     So is one priced inside that range whose round-trip commission still leaves no
     positive max profit (``_can_profit``) - a fly bought just under its wing.
     """
-    fp = _front_pair(chain, dte_min, dte_max)
+    fp = _front_pair(chain, dte_min, dte_max, min_front_dte)
     if not fp:
         return []
     exp, cs, ps = fp

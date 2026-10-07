@@ -1808,3 +1808,46 @@ def test_payoff_curve_draws_nothing_for_a_malformed_leg():
     assert ss.payoff_curve([no_mark], spot=100.0, atm_iv=0.28, dte=30) is None
     bad_strike = [_leg("put", "short", 95.0, 1.0), _leg("put", "long", "x", 0.5)]
     assert ss.payoff_curve(bad_strike, spot=100.0, atm_iv=0.28, dte=30) is None
+
+
+# ---- Market Scanner: the front-DTE floor is a parameter (2026-10-06) ----
+# The Strategy Finder keeps the 7-day floor by passing nothing; the Market
+# Scanner's 0-DTE window passes its own minimum.
+from tests._bs_chain import bs_chain  # noqa: E402
+
+
+def _no_stamp(rows):
+    return [{k: v for k, v in r.items() if k != "timestamp"} for r in rows]
+
+
+def test_the_seven_day_floor_is_still_the_default():
+    chain = bs_chain(days=(2, 9))
+    out = ss.build_straddles_strangles(chain, "T", 100.0, 0.28, 0, 30)
+    assert out and {s["dte"] for s in out} == {9}
+    flies = ss.build_butterflies_condors(chain, "T", 100.0, 0.28, 0, 30)
+    assert flies and {s["dte"] for s in flies} == {9}
+
+
+def test_a_caller_can_lower_the_front_floor():
+    chain = bs_chain(days=(2, 9))
+    out = ss.build_straddles_strangles(chain, "T", 100.0, 0.28, 0, 30,
+                                       min_front_dte=0)
+    assert out and {s["dte"] for s in out} == {2}
+    flies = ss.build_butterflies_condors(chain, "T", 100.0, 0.28, 0, 30,
+                                         min_front_dte=0)
+    assert flies and {s["dte"] for s in flies} == {2}
+
+
+def test_a_window_minimum_above_the_callers_floor_still_wins():
+    chain = bs_chain(days=(2, 9))
+    out = ss.build_straddles_strangles(chain, "T", 100.0, 0.28, 5, 30,
+                                       min_front_dte=0)
+    assert out and {s["dte"] for s in out} == {9}
+
+
+def test_the_default_floor_output_is_unchanged_by_the_parameter():
+    chain = bs_chain(days=(9, 37))
+    for build in (ss.build_straddles_strangles, ss.build_butterflies_condors):
+        plain = build(chain, "T", 100.0, 0.28, 0, 60)
+        explicit = build(chain, "T", 100.0, 0.28, 0, 60, min_front_dte=7)
+        assert plain and _no_stamp(plain) == _no_stamp(explicit)
