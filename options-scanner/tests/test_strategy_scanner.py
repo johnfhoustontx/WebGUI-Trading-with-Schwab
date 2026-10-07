@@ -2033,3 +2033,26 @@ def test_build_groups_looks_the_builder_up_when_called(monkeypatch):
     chain = bs_chain(days=(9, 37))
     assert ss.build_groups(chain, "T", 100.0, 0.28, 0, 60, {"CALENDAR"}) == [
         ("CALENDAR", ["patched"])]
+
+
+def test_finish_backspread_is_what_the_builder_applies():
+    """One function sets the two fields ``_assemble`` cannot, so a backspread
+    rated from the Calculator reads the same as one the scanner built."""
+    built = _backs()["CALL_BACKSPREAD"]
+    bare = ss._assemble("CALL_BACKSPREAD", "VOLATILITY", "Call Backspread", "bullish",
+                        [dict(l) for l in built["legs"]], "T", 100.0, 0.28)
+    assert bare["capital"] != bare["max_loss"] and "target_breakeven" not in bare
+    done = ss.finish_backspread(bare)
+    assert done is bare
+    assert done["capital"] == built["capital"] == done["max_loss"]
+    assert done["target_breakeven"] == built["target_breakeven"]
+    assert ss.BACKSPREAD_TYPES == ("CALL_BACKSPREAD", "PUT_BACKSPREAD")
+
+
+def test_finish_backspread_leaves_what_it_cannot_judge():
+    # No breakevens: no target. Unbounded loss: the capital is not the max loss.
+    sig = {"legs": [{"kind": "call", "side": "short", "strike": 100.0}],
+           "breakevens": [], "max_loss": 500.0, "capital": 2000.0,
+           "unbounded_loss": True}
+    out = ss.finish_backspread(sig)
+    assert out["capital"] == 2000.0 and "target_breakeven" not in out

@@ -1091,6 +1091,34 @@ _BACK_SHORT_DELTA, _BACK_LONG_DELTA = 0.50, 0.30
 _BACK_MAX_DEBIT_FRAC = 0.25
 
 
+BACKSPREAD_TYPES = ("CALL_BACKSPREAD", "PUT_BACKSPREAD")
+
+
+def finish_backspread(sig):
+    """Set the two fields a backspread row needs that ``_assemble`` cannot know.
+    In place; returns ``sig``. ``build_backspreads`` applies it, and so does
+    anything else that assembles a backspread from legs (the Calculator's Rate
+    my trade), so the same trade reads the same wherever it was built.
+
+    * ``capital`` becomes the max loss. ``payoff_metrics`` gives any row it
+      flags unbounded a margin proxy, and a call backspread is flagged - for
+      its PROFIT. Its loss is bounded on both sides. Left alone on a row whose
+      loss really is unbounded.
+    * ``target_breakeven`` is the FAR breakeven, past the long strike: the one
+      the trade is for. Taken for a credit there is a second, beside the short
+      strike, and that one is where the LOSS zone begins - see
+      ``strategy_scoring.q_breakeven_vs_em``, which would otherwise reward the
+      trade for sitting next to its own loss.
+    """
+    if not sig.get("unbounded_loss"):
+        sig["capital"] = sig.get("max_loss")
+    bes = sig.get("breakevens") or []
+    kinds = {l.get("kind") for l in _option_legs(sig.get("legs") or [])}
+    if bes and len(kinds) == 1:
+        sig["target_breakeven"] = max(bes) if kinds == {"call"} else min(bes)
+    return sig
+
+
 def _backspread_priced(sig, width, max_debit_frac):
     """True when a 1x2 backspread's net is a credit under its strike distance, a
     debit no more than ``max_debit_frac`` of it, or even money.
@@ -1125,18 +1153,9 @@ def build_backspreads(chain, symbol, spot, atm_iv, dte_min, dte_max,
 
     Not built when the chain lists no strike beyond the short, or when the net
     is not priced as a backspread can be (``_backspread_priced``;
-    ``max_debit_frac`` defaults to ``_BACK_MAX_DEBIT_FRAC``).
-
-    Two fields ``_assemble`` cannot know:
-
-    * ``capital`` is the max loss. ``payoff_metrics`` gives any row it flags
-      unbounded a margin proxy, and a call backspread is flagged - for its
-      PROFIT. Its loss is bounded on both sides.
-    * ``target_breakeven`` is the FAR breakeven, past the long strike: the one
-      the trade is for. Taken for a credit there is a second, beside the short
-      strike, and that one is where the LOSS zone begins - see
-      ``strategy_scoring.q_breakeven_vs_em``, which would otherwise reward the
-      trade for sitting next to its own loss.
+    ``max_debit_frac`` defaults to ``_BACK_MAX_DEBIT_FRAC``). Each row is
+    finished by :func:`finish_backspread` (its capital and the breakeven it is
+    scored on).
     """
     cap = _BACK_MAX_DEBIT_FRAC if max_debit_frac is None else max_debit_frac
     out = []
@@ -1162,11 +1181,7 @@ def build_backspreads(chain, symbol, spot, atm_iv, dte_min, dte_max,
         sig = _assemble(stype, "VOLATILITY", label, bias, legs, symbol, spot, atm_iv)
         if not _backspread_priced(sig, width, cap):
             continue
-        sig["capital"] = sig["max_loss"]
-        bes = sig.get("breakevens") or []
-        if bes:
-            sig["target_breakeven"] = max(bes) if kind == "call" else min(bes)
-        out.append(sig)
+        out.append(finish_backspread(sig))
     return out
 
 

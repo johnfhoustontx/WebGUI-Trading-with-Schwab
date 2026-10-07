@@ -62,6 +62,10 @@ CALC_TO_SCORER = {
     "COVERED_CALL": ("COVERED_CALL", "DIRECTIONAL", "Covered Call", "bullish"),
     "PROTECTIVE_PUT": ("PROTECTIVE_PUT", "DIRECTIONAL", "Protective Put", "bullish"),
     "COLLAR": ("COLLAR", "DIRECTIONAL", "Collar", "bullish"),
+    # ``build_backspreads``. A rated one is also finished the way that builder
+    # finishes its own (``ssn.finish_backspread``, in ``_score``).
+    "CALL_BACKSPREAD": ("CALL_BACKSPREAD", "VOLATILITY", "Call Backspread", "bullish"),
+    "PUT_BACKSPREAD": ("PUT_BACKSPREAD", "VOLATILITY", "Put Backspread", "bearish"),
 }
 
 #: |net delta| inside this reads as neutral for a structure no template names.
@@ -200,6 +204,8 @@ def _score(symbol, structure, finder, page_legs, cc, spot, market_state):
     net_delta = ssn.payoff_metrics(finder, spot, symbol).get("net_delta")
     stype, family, label, bias, known = structure_meta(structure, net_delta)
     row = ssn._assemble(stype, family, label, bias, finder, symbol, spot, atm_iv)
+    if stype in ssn.BACKSPREAD_TYPES:
+        ssn.finish_backspread(row)
     em_1sd = (dem or 0.0) * math.sqrt(max(row.get("dte") or 0, 1))
     ssc.score_all([row], view, atm_iv, em_1sd, market_state=market_state, daily_move=dem)
 

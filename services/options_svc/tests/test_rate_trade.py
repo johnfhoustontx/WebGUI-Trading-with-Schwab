@@ -198,3 +198,35 @@ def test_a_failure_inside_scoring_is_a_sentence_not_a_raise(monkeypatch):
     monkeypatch.setattr(RT.ssc, "score_all", lambda *a, **k: 1 / 0)
     out = RT.rate("XYZ", "PCS", PCS, CC)
     assert out["row"] is None and "ZeroDivisionError" in out["error"]
+
+
+# ── ratio backspreads (2026-10-07) ──────────────────────────────────────────
+
+def test_a_rated_backspread_reads_the_same_as_a_scanned_one(monkeypatch):
+    """The Calculator's Rate my trade assembles its own row. Without the
+    builder's two fix-ups it would be scored on the breakeven beside its own
+    loss zone, with a margin estimate for its capital."""
+    _stub(monkeypatch)
+    chain = {"callExpDateMap": {f"{EXP}:30": {"100.0": _c(2.1, .50),
+                                              "103.0": _c(0.85, .30)}},
+             "putExpDateMap": {}}
+    legs = [{"option_type": "call", "side": "short", "strike": 100.0, "expiry": EXP,
+             "qty": 1, "premium": None},
+            {"option_type": "call", "side": "long", "strike": 103.0, "expiry": EXP,
+             "qty": 2, "premium": None}]
+    out = RT.rate("XYZ", "CALL_BACKSPREAD", legs,
+                  {"symbol": "XYZ", "chain": chain, "price": 100.0})
+    assert out["error"] is None
+    row = out["row"]
+    assert row["type"] == "CALL_BACKSPREAD" and row["structure_known"] is True
+    assert row["family"] == "VOLATILITY" and row["bias"] == "bullish"
+    assert row["capital"] == row["max_loss"]
+    assert row["target_breakeven"] == max(row["breakevens"]) > 103.0
+    assert ssc.gate_profile(row) == "LONG"
+
+
+def test_both_backspreads_are_in_the_rating_map():
+    assert RT.CALC_TO_SCORER["CALL_BACKSPREAD"] == (
+        "CALL_BACKSPREAD", "VOLATILITY", "Call Backspread", "bullish")
+    assert RT.CALC_TO_SCORER["PUT_BACKSPREAD"] == (
+        "PUT_BACKSPREAD", "VOLATILITY", "Put Backspread", "bearish")
