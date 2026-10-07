@@ -243,3 +243,41 @@ class TestTheNightlyCacheInheritsTheFilter:
         second.mkdir()
         db2 = TestLoadRows._db(second, first_seen_ts="2026-06-16T10:14:02.101010-05:00")
         assert load_and_build(db2, min_n=1)["rows"] == 1
+
+
+class TestTrackedRowsStayOut:
+    """The scanner's tracked structures share ``signals.db``. A debit is stored
+    as a negative credit there, so one in a credit-spread bucket would move a
+    number the Trade detail panel shows."""
+
+    @staticmethod
+    def _db(tmp_path):
+        p = TestLoadRows._db(tmp_path)
+        conn = sqlite3.connect(p)
+        for sid, kind, strat in (("t0", "0DTE_STRUCT", "LONG_STRADDLE"),
+                                 ("t1", "SWING_STRUCT", "CALENDAR_PUT")):
+            conn.execute(
+                "INSERT INTO signals VALUES (?, 'Good', 63.1, -5.4, 5.4, NULL, 40.0, "
+                "NULL, 9, ?, ?, 'SPY', '2026-06-14', ?)",
+                (sid, kind, strat, TestLoadRows.RTH_TS))
+            conn.execute("INSERT INTO signal_outcomes VALUES (?, 270.0, 'TARGET_HIT', "
+                         "'2026-06-18')", (sid,))
+        conn.commit()
+        conn.close()
+        return p
+
+    def test_load_rows_leaves_them_out(self, tmp_path):
+        rows = C.load_rows(self._db(tmp_path))
+        assert [r["scanner_type"] for r in rows] == ["0DTE"]
+
+    def test_they_are_reachable_on_request(self, tmp_path):
+        rows = C.load_rows(self._db(tmp_path), tracked=True)
+        assert sorted(r["scanner_type"] for r in rows) == [
+            "0DTE", "0DTE_STRUCT", "SWING_STRUCT"]
+
+    def test_the_published_calibration_holds_no_tracked_bucket(self, tmp_path):
+        from services.options_svc import calibration
+        out = calibration.load_and_build(self._db(tmp_path), min_n=1)
+        assert out["rows"] == 1
+        assert all(not k.startswith(("0DTE_STRUCT", "SWING_STRUCT"))
+                   for k in out["buckets"])

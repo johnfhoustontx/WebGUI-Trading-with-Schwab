@@ -45,6 +45,7 @@ from repo_paths import OPTIONS_SCANNER  # noqa: E402
 sys.path.insert(0, str(OPTIONS_SCANNER))
 
 from shared import calibration  # noqa: E402
+from shared import structures as _structures  # noqa: E402
 from services.options_svc import commission  # noqa: E402
 
 MIN_BUCKET_N = 5     # below this a bucket mean is noise, not a reading
@@ -71,7 +72,9 @@ def _outcomes(db_path):
             "SELECT s.scanner_type, s.strategy, s.symbol, s.entry_score,"
             "       s.entry_max_loss, o.realized_pnl"
             "  FROM signal_outcomes o JOIN signals s ON s.signal_id = o.signal_id"
-            " WHERE o.realized_pnl IS NOT NULL AND s.entry_max_loss IS NOT NULL")]
+            " WHERE o.realized_pnl IS NOT NULL AND s.entry_max_loss IS NOT NULL"
+            # Credit spreads only: a tracked structure is not what this measures.
+            "   AND " + _structures.not_tracked_sql("s."))]
     finally:
         conn.close()
 

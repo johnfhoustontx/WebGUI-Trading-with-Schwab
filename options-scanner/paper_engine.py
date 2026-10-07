@@ -105,7 +105,7 @@ ELIGIBLE_RECS = (None, "", "HOLD")
 # Directional tab's single legs): recorded so their outcomes can be measured,
 # never traded here. The structure allow-list in run_entry_cycle is the second,
 # independent guard on the same door.
-_NO_AUTO_ENTRY_TYPES = ("INCOME", "0DTE_STRUCT", "SWING_STRUCT")
+_NO_AUTO_ENTRY_TYPES = ("INCOME",) + _structures.TRACKED_SCANNER_TYPES
 
 
 #############################################

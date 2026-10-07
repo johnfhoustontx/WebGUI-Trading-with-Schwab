@@ -37,6 +37,7 @@ from shared.calibration import (  # noqa: E402,F401  (re-exported for callers)
     bucket_stats, breakeven_win_rate, calibrate, priced_win_rate, r_multiple,
     score_bin, split_calibrate)
 from shared import market_calendar as _mc  # noqa: E402
+from shared import structures as _structures  # noqa: E402
 
 DEFAULT_DB = OPTIONS_SCANNER / "data" / "signals.db"
 
@@ -145,8 +146,17 @@ def captured_in_regular_session(ts) -> bool:
     return _mc.is_regular_hours(when)
 
 
-def load_rows(db_path=DEFAULT_DB, where=None, params=(), regular_hours_only=True):
+def load_rows(db_path=DEFAULT_DB, where=None, params=(), regular_hours_only=True,
+              tracked=False):
     """Every closed signal joined to its outcome, as dicts. Read-only.
+
+    The TRACKED structures (``shared.structures.TRACKED_SCANNER_TYPES``) are left
+    out unless ``tracked=True``, which returns them as well. They are the
+    scanner's debit spreads, straddles, calendars and the rest, recorded to be
+    measured: a debit is stored as a negative ``entry_credit`` and a row can
+    close with no P&L at all, so one in a credit-spread bucket would move a
+    number every Trade detail panel shows. Their own results are
+    ``services/options_svc/tracked.stats``.
 
     Captures from outside the regular cash session are dropped by default. They
     are not merely mistimed but MISPRICED: Schwab pins a chain's
@@ -174,6 +184,9 @@ def load_rows(db_path=DEFAULT_DB, where=None, params=(), regular_hours_only=True
         rows = [dict(r) for r in conn.execute(sql, params)]
     finally:
         conn.close()
+    if not tracked:
+        rows = [r for r in rows
+                if not _structures.is_tracked_type(r.get("scanner_type"))]
     if regular_hours_only:
         rows = [r for r in rows if captured_in_regular_session(r.get("first_seen_ts"))]
     return rows

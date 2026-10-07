@@ -236,3 +236,31 @@ def test_the_account_opens_only_the_three_credit_structures():
     "COVERED_CALL", "IRON_CONDOR", "", None, 5])
 def test_nothing_else_is_auto_entered(name):
     assert structures.is_account_auto_entry(name) is False
+
+
+# ── tracked scanner types (2026-10-07) ──────────────────────────────────────
+
+def test_the_tracked_scanner_types_and_their_one_predicate():
+    assert structures.TRACKED_SCANNER_TYPES == ("0DTE_STRUCT", "SWING_STRUCT")
+    for kind in ("0DTE_STRUCT", "swing_struct", " SWING_STRUCT "):
+        assert structures.is_tracked_type(kind) is True
+    for kind in ("0DTE", "SWING", "INCOME", "DIRECTIONAL", "", None, 5):
+        assert structures.is_tracked_type(kind) is False
+
+
+def test_the_not_tracked_clause_keeps_a_row_with_no_type():
+    """``NULL NOT IN (...)`` is NULL: without the IS NULL arm every row from
+    before the column was filled would vanish from its reader."""
+    import sqlite3
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE s (id TEXT, scanner_type TEXT)")
+    conn.executemany("INSERT INTO s VALUES (?, ?)", [
+        ("old", None), ("zero", "0DTE"), ("swing", "SWING"),
+        ("t0", "0DTE_STRUCT"), ("t1", "SWING_STRUCT")])
+    kept = [r[0] for r in conn.execute(
+        "SELECT id FROM s WHERE " + structures.not_tracked_sql() + " ORDER BY id")]
+    assert kept == ["old", "swing", "zero"]
+    aliased = [r[0] for r in conn.execute(
+        "SELECT x.id FROM s x WHERE " + structures.not_tracked_sql("x.")
+        + " ORDER BY x.id")]
+    assert aliased == kept

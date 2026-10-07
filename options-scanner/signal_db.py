@@ -2,6 +2,8 @@
 import sqlite3
 from pathlib import Path
 
+from shared import structures as _structures
+
 DEFAULT_DB_PATH = Path(__file__).parent / "data" / "signals.db"
 
 # Scanner types that are TRACKED, not traded: the Market Scanner's structures
@@ -15,7 +17,7 @@ DEFAULT_DB_PATH = Path(__file__).parent / "data" / "signals.db"
 # Captured Signals page and its score, the paper Account's entry feed, the phone
 # push, Rescue, the manage cycle - and a default that hid nothing would hand
 # each of them a row it would misread. ``tracked=True`` returns ONLY these rows.
-TRACKED_TYPES = ("0DTE_STRUCT", "SWING_STRUCT")
+TRACKED_TYPES = _structures.TRACKED_SCANNER_TYPES
 
 
 def is_tracked(row) -> bool:
@@ -29,10 +31,8 @@ def _tracked_list():
 
 
 def _not_tracked_sql(prefix=""):
-    """SQL for "not a tracked row". ``IS NULL OR`` because ``NULL NOT IN (...)``
-    is NULL, which would silently drop every row from before the column existed."""
-    col = f"{prefix}scanner_type"
-    return f"({col} IS NULL OR {col} NOT IN ({_tracked_list()}))"
+    """SQL for "not a tracked row" (``shared.structures.not_tracked_sql``)."""
+    return _structures.not_tracked_sql(prefix)
 
 
 def _tracked_sql(prefix="", tracked=False):

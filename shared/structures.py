@@ -76,6 +76,29 @@ LEDGER_CREDIT = ("PCS", "CCS", "IC", "IRON_CONDOR")
 # Finder's spelling, and nothing captured carries it.
 ACCOUNT_AUTO_ENTRY = ("PCS", "CCS", "IC")
 
+# The ``scanner_type`` of a row in ``signals.db`` that is TRACKED, not traded:
+# a structure the Market Scanner records so its outcome can be measured. Such a
+# row shares the credit spreads' tables with a different shape (a signed
+# ``entry_credit``, a ``legs_json`` blob, no strike columns), so every reader of
+# that store written for a credit spread must leave it out. The one list:
+# ``signal_db``, the paper Account and the calibration tools all read it here.
+TRACKED_SCANNER_TYPES = ("0DTE_STRUCT", "SWING_STRUCT")
+
+
+def is_tracked_type(scanner_type) -> bool:
+    """Is this ``scanner_type`` one of the tracked ones?"""
+    return normalise(scanner_type) in TRACKED_SCANNER_TYPES
+
+
+def not_tracked_sql(prefix="") -> str:
+    """SQL for "not a tracked row", for a reader that writes its own query.
+
+    ``IS NULL OR`` because ``NULL NOT IN (...)`` is NULL, which would silently
+    drop every row from before the column was filled."""
+    col = f"{prefix}scanner_type"
+    listed = ",".join(f"'{t}'" for t in TRACKED_SCANNER_TYPES)
+    return f"({col} IS NULL OR {col} NOT IN ({listed}))"
+
 
 def normalise(strategy) -> str:
     """A structure name in canonical form; ``""`` for anything absent."""

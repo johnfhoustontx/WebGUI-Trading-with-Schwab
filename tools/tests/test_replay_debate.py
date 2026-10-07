@@ -264,3 +264,42 @@ def test_render_report_refuses_to_headline_a_thin_or_degenerate_run():
                       "by_grade": {}},
         })
         assert "NOT A RESULT" in text.upper()
+
+
+# ── tracked structures stay out (2026-10-07) ────────────────────────────────
+
+@pytest.fixture
+def with_tracked(signals_db):
+    """The same book plus two tracked rows: one closed, one OPEN since May."""
+    c = sqlite3.connect(signals_db)
+    c.executemany("INSERT INTO signals VALUES (" + ",".join("?" * 19) + ")", [
+        ("t-closed", "SWING_STRUCT", "SPY", "LONG_STRADDLE", None, None, None,
+         "2026-07-18", 30, -5.4, 5.4, 60.0, "Good", None, 40.0, 500.0,
+         "2026-06-18", "closed", "TRACKED"),
+        ("t-open", "SWING_STRUCT", "IWM", "CALENDAR_PUT", None, None, None,
+         "2026-07-18", 40, -3.8, 3.8, 60.0, "Good", None, 40.0, 200.0,
+         "2026-05-01", "open", "TRACKED"),
+    ])
+    c.execute("INSERT INTO signal_outcomes VALUES ('t-closed', '2026-07-01', 270.0, "
+              "'TARGET_HIT')")
+    c.commit()
+    c.close()
+    return signals_db
+
+
+def test_a_tracked_row_is_never_a_debate_case(with_tracked):
+    conn = RD.open_signals(with_tracked)
+    ids = sorted(c["signal_id"] for c in RD.load_cases(conn, include_unsettled=True))
+    assert ids == ["0043e544", "00535765"]
+
+
+def test_an_open_tracked_row_does_not_move_the_settlement_cutoff(with_tracked):
+    """A calendar can sit open for 45 days. Counted, it would pull the cutoff
+    back to its own date and empty the sample."""
+    conn = RD.open_signals(with_tracked)
+    assert RD.settlement_cutoff(conn) == "2026-07-07"       # the open MSFT spread
+
+
+def test_the_base_rate_counts_credit_spreads_only(with_tracked):
+    conn = RD.open_signals(with_tracked)
+    assert RD.population_base_rate(conn, include_unsettled=True) == pytest.approx(0.5)

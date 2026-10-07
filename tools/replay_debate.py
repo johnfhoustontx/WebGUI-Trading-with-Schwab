@@ -46,6 +46,12 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from repo_paths import OPTIONS_SCANNER, TRADE_SVC_DATA         # noqa: E402
 from tools import replay_scoring as RS                          # noqa: E402
+from shared import structures as _structures                   # noqa: E402
+
+# Every query below reads CREDIT-SPREAD signals. The scanner's tracked
+# structures share the table and are left out of all four: an open calendar can
+# sit 45 days and would otherwise drag the settlement cutoff back to its date.
+_NOT_TRACKED = " AND " + _structures.not_tracked_sql("s.")
 
 log = logging.getLogger(__name__)
 
@@ -130,7 +136,7 @@ def settlement_cutoff(conn):
     row = conn.execute(
         "SELECT MIN(s.first_seen_date) AS d FROM signals s "
         "LEFT JOIN signal_outcomes o USING(signal_id) "
-        "WHERE o.signal_id IS NULL").fetchone()
+        "WHERE o.signal_id IS NULL" + _NOT_TRACKED).fetchone()
     return row["d"] if row and row["d"] else None
 
 
@@ -141,7 +147,7 @@ def population_base_rate(conn, scanner=None, include_unsettled=False):
     output rather than reading as a market regime."""
     sql = ("SELECT COUNT(*) n, SUM(CASE WHEN o.realized_pnl > 0 THEN 1 ELSE 0 END) w "
            "FROM signals s JOIN signal_outcomes o USING(signal_id) "
-           "WHERE o.realized_pnl IS NOT NULL")
+           "WHERE o.realized_pnl IS NOT NULL" + _NOT_TRACKED)
     args = []
     if scanner and scanner.lower() != "all":
         sql += " AND s.scanner_type = ?"
@@ -163,7 +169,7 @@ def grade_spread(conn, scanner=None, include_unsettled=False):
     sql = ("SELECT s.entry_grade g, COUNT(*) n, "
            "SUM(CASE WHEN o.realized_pnl > 0 THEN 1 ELSE 0 END) w "
            "FROM signals s JOIN signal_outcomes o USING(signal_id) "
-           "WHERE o.realized_pnl IS NOT NULL")
+           "WHERE o.realized_pnl IS NOT NULL" + _NOT_TRACKED)
     args = []
     if scanner and scanner.lower() != "all":
         sql += " AND s.scanner_type = ?"
@@ -198,7 +204,7 @@ def load_cases(conn, scanner=None, limit=None, seed=DEFAULT_SEED,
     """
     sql = ("SELECT s.*, o.realized_pnl FROM signals s "
            "JOIN signal_outcomes o USING(signal_id) "
-           "WHERE o.realized_pnl IS NOT NULL")
+           "WHERE o.realized_pnl IS NOT NULL" + _NOT_TRACKED)
     args = []
     if scanner and scanner.lower() != "all":
         sql += " AND s.scanner_type = ?"
