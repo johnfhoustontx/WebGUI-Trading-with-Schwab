@@ -369,6 +369,23 @@ failing once in a full run then passing in isolation and twice more in full runs
 and the date-relative `test_expected_move` cases depend on the run date. Neither
 is an expected failure - investigate rather than accept.
 
+**Two ways a test turns CI red with nothing wrong, both measured 2026-10-07.**
+
+- **A helper that drives a coroutine handler waits on the handler's TASK, never
+  on a count of loop ticks.** A handler that crosses `run.io_bound` finishes when
+  a worker thread does, and twenty ticks are over in under a millisecond:
+  `webgui/tests/test_settings.py::_click_async` lost that race about 1 run in 15
+  on an idle desktop. NiceGUI's `run.io_bound` also returns `None` when it is
+  cancelled, so a handler cut off half-way can look like one whose work returned
+  nothing. A fake for a call that blocks should block too, or the race stays
+  hidden most of the time.
+- **A wall-clock budget goes on the code under test, not on a library call
+  around it.** The `news_svc` RSS test timed a whole parse at 50-80% of a 1.0 s
+  budget, all of it feedparser's own linear pass, and could not see the
+  backtracking pattern it existed for (feedparser repairs the markup first, and
+  `_clean` caps its input). Measure the regression and the normal case; put the
+  budget far from both, and if they are not far apart, time something narrower.
+
 
 **Compare the failing SET, not the count.** A matching total is not evidence of a
 clean run: this repo has a documented incident where two real regressions hid
