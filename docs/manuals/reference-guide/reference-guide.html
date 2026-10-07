@@ -245,6 +245,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#why-it-matters_13">Why it matters</a></li>
 <li><a href="#when-to-use-it_13">When to use it</a></li>
 <li><a href="#caveats-and-gotchas_9">Caveats and gotchas</a></li>
+<li><a href="#on-the-public-site_1">On the public site</a></li>
 <li><a href="#related-pages_14">Related pages</a></li>
 </ul>
 </li>
@@ -4010,6 +4011,28 @@ mid-morning less than half of that is left.</p>
 <li>Weekends and off-hours produce sparse or empty results.</li>
 <li>The alert chime and nav badge count <strong>credit spreads only</strong>.</li>
 </ul>
+<h3 id="on-the-public-site_1">On the public site</h3>
+<p><code>live.neuralstrike.co/signals</code> is this page, published as <strong>Option Signals</strong> and
+listed first in the site's Tools menu. It shows the same three tabs, both
+tables under 0-DTE and Swing, the Checks column, <strong>Only clear</strong>, <strong>Why no
+trade?</strong> and the Trade detail panel. What it leaves out is everything that is
+yours:</p>
+<ul>
+<li><strong>Run scan.</strong> The page only reads the scans the stack already runs.</li>
+<li><strong>Paper trade, Calculator and Expected Move.</strong> A click on a row opens the
+  detail panel and nothing else.</li>
+<li><strong>The Paper book line</strong> of the checklist. The public page never reads your
+  ledger, so the line is absent rather than grey and a row can still read Clear.</li>
+<li><strong>The "new" badges</strong>, the panel's <strong>Max contracts</strong> row, and the dollar
+  figure of the per-trade risk cap in <strong>Why no trade?</strong>.</li>
+<li><strong>The Greeks section and the Cost to trade figure</strong>, while <strong>Show per-leg bid
+  and ask</strong> is off in <strong>Settings → Configuration → Public Strategy Finder</strong>.
+  Those are read off a contract's own quote, and the public Calculator and
+  Simulator withhold them under the same switch.</li>
+</ul>
+<p>Every visitor is shown the same built rows, rebuilt when a scan lands, so the
+page costs the public process one copy of the day's signals however many
+people have it open.</p>
 <h3 id="related-pages_14">Related pages</h3>
 <p><a href="#strategy-finder">Strategy Finder</a> · <a href="#captured-signals">Captured Signals</a> ·
 <a href="#calculator">Calculator</a> · <a href="#settings">Settings</a> (alert thresholds).</p>

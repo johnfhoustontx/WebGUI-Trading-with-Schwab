@@ -274,7 +274,7 @@ TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
 | news_svc | 8216 | Market News: polls free public RSS / Google News / Yahoo / SEC EDGAR feeds and the economic calendar (Fed, BLS, BEA, FRED, Nasdaq) into `news.db`. No Schwab, no Claude, no proxy. |
 | blog_svc | 8217 | The site Blog: cleans an uploaded HTML document, keeps drafts and entries in `blog.db` and the files beside it, and writes published entries into the served site. No Schwab, no Claude, no proxy; the one outside request is the typeface copy from Google Fonts at upload. |
 | webgui | 8500 | The web UI. |
-| webgui_live | 8501 | The seventeen public screens, on their own origin. |
+| webgui_live | 8501 | The eighteen public screens, on their own origin. |
 
 Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 

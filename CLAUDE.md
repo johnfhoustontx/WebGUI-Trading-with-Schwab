@@ -322,6 +322,12 @@ is data in `webgui/live_screens.py`.
 - ⚠ Redis is readable by the public process, so a quote written there is a quote
   published. A new public reader of the news feed or of flow alerts must take the
   public view or the `flow._shown` filter; the ACL is no layer for those.
+- A published page gates on the PROCESS (`shell.is_public()`), never on a
+  `public=True` it could be published without. One that holds a large view
+  shares ONE build per process (`scanner_shared`, behind Option Signals) and
+  never stamps a shared row: per-visitor state goes on a copy of the page sent.
+- A figure read off a contract's own quote follows the one switch,
+  `public_scan.show_leg_quotes` (`checks_feed.quotes_withheld`).
 - The unit loads `.env.live`, never the stack's `.env`. Never bind it to `0.0.0.0`.
 
 **The site's Blog.** `deploy/site/blog/` and `deploy/site/blog.json` are generated,

@@ -2668,6 +2668,30 @@ Throughout the session.
 - Weekends and off-hours produce sparse or empty results.
 - The alert chime and nav badge count **credit spreads only**.
 
+### On the public site
+
+`live.neuralstrike.co/signals` is this page, published as **Option Signals** and
+listed first in the site's Tools menu. It shows the same three tabs, both
+tables under 0-DTE and Swing, the Checks column, **Only clear**, **Why no
+trade?** and the Trade detail panel. What it leaves out is everything that is
+yours:
+
+- **Run scan.** The page only reads the scans the stack already runs.
+- **Paper trade, Calculator and Expected Move.** A click on a row opens the
+  detail panel and nothing else.
+- **The Paper book line** of the checklist. The public page never reads your
+  ledger, so the line is absent rather than grey and a row can still read Clear.
+- **The "new" badges**, the panel's **Max contracts** row, and the dollar
+  figure of the per-trade risk cap in **Why no trade?**.
+- **The Greeks section and the Cost to trade figure**, while **Show per-leg bid
+  and ask** is off in **Settings → Configuration → Public Strategy Finder**.
+  Those are read off a contract's own quote, and the public Calculator and
+  Simulator withhold them under the same switch.
+
+Every visitor is shown the same built rows, rebuilt when a scan lands, so the
+page costs the public process one copy of the day's signals however many
+people have it open.
+
 ### Related pages
 
 [Strategy Finder](#strategy-finder) · [Captured Signals](#captured-signals) ·

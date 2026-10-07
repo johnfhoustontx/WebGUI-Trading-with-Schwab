@@ -9,14 +9,14 @@
 
 ## The public live screens — a SECOND Tier-1 process
 
-`webgui/live_main.py` serves **seventeen screens, unauthenticated, to
+`webgui/live_main.py` serves **eighteen screens, unauthenticated, to
 anyone** on `nicegui_live` (prod :8501, dev :9501) behind `LIVE_HOST`
 (`live.neuralstrike.co`). It renders the **real page modules the app renders**, so a
 published screen cannot drift from the private one. The published set and every pin
 are pure data in **`webgui/live_screens.py`** (`SCREENS` · `SETTINGS_PINS` ·
 `PUBLIC_PINS`), read by the route registration, `tools/capture_live_shots.py` and the
 static grid on `neuralstrike.co/live.html` alike — so **adding a `Screen` publishes a
-route**. `Screen.tile = False` (the four interactive tools and Market News) publishes the route but
+route**. `Screen.tile = False` (Option Signals, the four interactive tools and Market News) publishes the route but
 draws no grid tile and takes no capture; the site's Tools menu reaches them. `Screen.parent`
 (the four extra $SPX Gamma views) draws a small link under that parent's tile instead. Per-screen detail: [docs/webgui-routes.md](../webgui-routes.md); design +
 plan: [`docs/plans/2026-09-07-public-live-screens-{design,plan}.md`](../plans/2026-09-07-public-live-screens-design.md).
@@ -168,6 +168,54 @@ the **Desk** as well, a published screen: its headlines strip reads through
 `desk.bus_key(view)`, which swaps `news:feed` for `news:feed_public` when
 `shell.is_public()`. Any new public reader of the news feed needs the same swap.
 
+**Option Signals (`/signals`, 2026-10-07) is the Market Scanner, and it writes
+nothing.** It is `scanner.render()` itself, gated on the PROCESS's origin
+(`shell.is_public()` / `shell.may_enqueue()`) rather than on a `public=True`
+argument: a keyword can be left off a `Screen` entry, and the result would be
+the owner's page served to anyone. What it leaves out, and where each is
+enforced:
+
+- **Run scan** is not built, and `_request_scan` opens with the `_may_enqueue`
+  return `test_live_commands.py` requires of every published module.
+- **Paper trade, Calculator and Expected Move** are not built. Paper writes the
+  owner's book; the other two hand off through `handoff._pending`, ONE store
+  every visitor would share.
+- **`handoff.watch_paper_results` is not started.** `cache:options:paper_create`
+  is the answer to the owner's own Paper click, and would be toasted to every
+  visitor.
+- **The ledger caps are never read.** `checks_feed.read_context` refuses
+  `options:ledger_caps` on the public origin whatever the caller passes. It is
+  refused THERE because the Trade detail panel reads a context of its own when
+  its page holds none. `_build_populate(public=True)` also closes every row's
+  `_allow_paper`, so `checks._book` draws no line at all: absent rather than
+  grey, which is what lets a row still read Clear.
+- **No "new" badge.** `scanner._SEEN` is one set for the whole process: read
+  there, one visitor's page load would decide every other visitor's badges.
+- **No Max contracts row and no dollar figure for the per-trade cap** in "Why
+  no trade?" (`funnel_cards(public=True)` reads the entry without
+  `max_risk_dollars`). Both are the owner's risk limit.
+- **The quotes switch applies.** While `public_scan.show_leg_quotes` is off
+  (`checks_feed.quotes_withheld`), the panel is built without the per-contract
+  Greeks and the checklist is judged without `friction_pct`, so the
+  cost-to-trade line reads as not measured. That is the rule the public
+  Calculator and Simulator already keep, on the same switch.
+
+⚠ **Every visitor draws from ONE build.** The day union reaches about 4.5 MB by
+the close, and the private page gives each tab its own parse and its own five
+thousand row dicts. On this origin `_read_and_build_shared` reads through
+`bus_client.read_shared` and takes the built rows from
+`scanner_shared.get`: one slot for the process, keyed on the IDENTITY of the
+day union, the live scan, the regime and the calibration (each the same object
+until its view is republished), and rebuilt when it is
+`checks_feed.TABLE_REFRESH_SEC` old, which is what re-stamps against the
+Opportunity Board. ⚠ **What it returns is read-only, payloads and rows alike.**
+The page stamps nothing onto it: the selected row's accent goes on copies of
+the one page a visitor is sent (`scanner.page_rows`), and a re-stamp there is
+a fresh shared build rather than a per-tab copy of every row. A stamp on a
+shared row would show one visitor's click in every other visitor's tab. The
+per-tab cost this avoids is an estimate (about 20 MB by the close), not a
+measurement.
+
 **Flow alerts can carry service-stamped `quiet` / `public` flags** (since 2026-10-01,
 the HIRO-model `hiro_surge` / `hiro_flip`). `quiet: True` = no push and no Desk speech;
 `public: False` = hidden wherever `shell.hides_non_public()` is true — the public
@@ -179,7 +227,7 @@ would silently stop hiding). Tier 1 decides from the flag on the alert, never fr
 `[hiro]` config, and a missing flag means shown/spoken. As with the news feed, the ACL
 is no layer here: the `live` user can read the whole `cache:options:flow_alerts`.
 
-⚠ **The published route set is the seventeen screens, the eight 308 redirects in
+⚠ **The published route set is the eighteen screens, the eight 308 redirects in
 `live_screens.RETIRED_ROUTES` (the pinned Gamma screens retired 2026-09-22, each
 now a redirect to `/gamma`), PLUS exactly one non-page route: `/static`
 (2026-09-09).** Every screen now carries a slim header — the

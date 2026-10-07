@@ -337,12 +337,24 @@ not ask again for a while; a new browser, or a private window, always will.</p>
 <p><strong>Sitting at the machine itself?</strong> <code>http://127.0.0.1:8500</code> still works there and
 skips the sign-in, which is what the wall display uses.</p>
 <h2 id="the-public-live-screens">The public live screens</h2>
-<p>Seventeen of the app's screens are also published <strong>without any sign-in</strong> on
+<p>Eighteen of the app's screens are also published <strong>without any sign-in</strong> on
 a second address, <code>https://live.neuralstrike.co</code> — the Desk,
 Opportunity Board, Flow Alerts, Macro Board, Sentiment, Bull / Bear Map, Sector &amp;
-Industry, Sector Rotation, RRG, Momentum, Net Prem, <strong>Gamma</strong>, the <strong>Strategy
-Finder</strong>, the Rescue ad-hoc form (published as <strong>Rescue my Sh*tty trade</strong>), the
-<strong>Calculator</strong>, the <strong>Simulator</strong> and <strong>Market News</strong>.</p>
+Industry, Sector Rotation, RRG, Momentum, Net Prem, <strong>Gamma</strong>, the Market Scanner
+(published as <strong>Option Signals</strong>), the <strong>Strategy Finder</strong>, the Rescue ad-hoc
+form (published as <strong>Rescue my Sh*tty trade</strong>), the <strong>Calculator</strong>, the
+<strong>Simulator</strong> and <strong>Market News</strong>.</p>
+<p><strong>Option Signals</strong> (<code>/signals</code>, first in the site's Tools menu) is your Market
+Scanner with nothing of yours on it. A visitor sees the 0-DTE, Swing and
+Directional tabs, the Credit spreads / Other structures switch, the Checks
+column, <strong>Only clear</strong>, <strong>Why no trade?</strong> and the Trade detail panel. They do
+not get <strong>Run scan</strong>, the <strong>Paper trade</strong>, <strong>Calculator</strong> or <strong>Expected Move</strong>
+buttons, the "new" badges, the checklist's <strong>Paper book</strong> line, the panel's
+<strong>Max contracts</strong> row, or the dollar figure of your per-trade risk cap. While
+<strong>Show per-leg bid and ask</strong> is off (Settings → Configuration → Public Strategy
+Finder) the panel also leaves out its Greeks section and the checklist's
+<strong>Cost to trade</strong> line reads <em>Bid-ask not measured</em>. The page spends no Schwab
+call: it shows the scans your stack already runs every 15 minutes.</p>
 <p>The public <strong>Gamma</strong> page is Dealer Positioning with its symbol dropdown: a
 visitor picks any symbol your collector gathers (the <code>symbols.toml</code> lists plus
 your Top 20 list) and switches between Gamma, Charm, Delta, Vanna and Flow.

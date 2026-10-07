@@ -23,9 +23,19 @@ detail panel. The Run scan button does not move.
 | Realized results ("Signals like this", Track record) | Published |
 
 Three choices were made without a question and accepted with the design:
-"Why no trade?" stays (a pure read of the last scan's funnel); net credit, max
-loss and Greeks are shown and per-leg bid/ask is not (what the public Finder
-and the trade-idea cards already publish); the route is `/signals`.
+"Why no trade?" stays (a pure read of the last scan's funnel); net credit and
+max loss are shown and per-leg bid/ask is not (what the public Finder and the
+trade-idea cards already publish); the route is `/signals`.
+
+**Changed while building, and not what was approved.** The design as approved
+said the panel's Greeks would be shown. The browser check showed the checklist
+printing the bid-ask round trip as a share of the credit, and the existing
+public Calculator and Simulator turned out to withhold delta, theta and that
+cost line while the site's quotes switch (`public_scan.show_leg_quotes`, off
+pending Schwab's redistribution terms, roadmap decision D2) is off. Option
+Signals now follows the same switch: off, the panel draws no Greeks section and
+the cost-to-trade line reads as not measured; on, both come back. It publishes
+less than was approved, and the owner's existing switch reverses it.
 
 ## Approach
 
@@ -71,6 +81,8 @@ no Schwab call.
 | Paper book check line | It reads `options:ledger_caps`, the owner's ledger | `checks_feed.read_context` never reads caps on the public origin, whatever the caller passes; every public row's `_allow_paper` is closed, so `checks._book` returns no line at all (absent, not grey) |
 | "new" badges | `scanner._SEEN` is one set per process: one visitor's page load would clear every other visitor's badges | The seen-set is neither read nor written; no row is stamped `_new` |
 | "Max contracts" in the panel | It is sized from the owner's per-trade risk limit | `detail._build_cards` does not draw the row when `shell.is_public()` |
+| The cap's dollar figure in "Why no trade?" | The same limit; `funnel_view` prints it whenever an entry carries `max_risk_dollars` (no publisher stamps it today) | `scanner.funnel_cards(public=True)` reads the entry without that key |
+| The Greeks section and the cost-to-trade figure, while the quotes switch is off | Read off a contract's own quote | `checks_feed.quotes_withheld`; `detail._build_cards` and `checks_feed.checks_for` each judge a copy without those fields |
 
 The caps refusal sits in `checks_feed.read_context` rather than at each caller
 because the Trade detail panel reads a context of its own when the page holds
@@ -87,13 +99,15 @@ anonymous traffic, so a per-tab copy is a cost a stranger controls.
 
 On the public origin the page takes its rows from a process-wide build:
 
-- `scanner_shared.build()` returns the same built dict to every caller until a
-  scan view's version or a checklist view's version moves, or the build is
-  older than `checks_feed.TABLE_REFRESH_SEC` (the Opportunity Board moves every
-  minute and feeds the checks; the private page re-stamps on that same
-  five-minute cadence).
-- It reads the two scan views through `bus_client.read_shared`, so the parse is
-  shared too.
+- `scanner_shared.get(parts, build, max_age=...)` returns the same built dict
+  to every caller whose inputs are the same OBJECTS as the last build's, until
+  the build is `checks_feed.TABLE_REFRESH_SEC` old (the Opportunity Board moves
+  every minute and feeds the checks; the private page re-stamps on that same
+  five-minute cadence). The inputs are the day union, the live scan, the regime
+  and the calibration.
+- Identity, not a version probe: `bus_client.read_shared` and the checklist's
+  gated reads hand back the same object until a view is republished, so there
+  is no probe to race the payload it describes. The parse is shared too.
 - One lock: visitors arriving together at a new scan wait on one build.
 - What it returns is READ-ONLY. The page never stamps a shared row. The
   selected-row accent is stamped on a copy of the one page of rows the visitor

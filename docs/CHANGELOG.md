@@ -4,7 +4,46 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-07 (**The collector stops asking every minute for symbols with nothing listed this week.**)
+**Last updated:** 2026-10-07 (**The Market Scanner is on the public site, as Option Signals.**)
+
+- **What shipped.** `live.neuralstrike.co/signals`, titled Option Signals and
+  first in the site's Tools menu on all seven pages. It is the Market Scanner's
+  own page: the 0-DTE, Swing and Directional tabs, the Credit spreads / Other
+  structures switch with its family checkboxes, the Checks column, Only clear,
+  "Why no trade?" and the Trade detail panel. The public origin now publishes
+  eighteen screens.
+- **What a visitor does not get.** Run scan; the Paper trade, Calculator and
+  Expected Move buttons; the paper-result toasts; the "new" badges; the
+  checklist's Paper book line; the panel's Max contracts row; the dollar figure
+  of the per-trade risk cap in "Why no trade?".
+- **The quotes switch applies.** While `show_leg_quotes` is off
+  (`config/finder_public.toml [display]`, off pending Schwab's redistribution
+  terms) the panel draws no Greeks section and the checklist's cost-to-trade
+  line reads "Bid-ask not measured", as on the public Calculator and Simulator.
+  This was not in the design as approved; it was found in the browser check and
+  follows the switch the other public tools already keep.
+- **How.** `scanner.render()` reads which origin it is from the process
+  (`shell.is_public()`), so the `Screen` entry carries no `public=True` that
+  could be left off. `checks_feed.read_context` refuses the ledger caps on the
+  public origin whatever the caller asks for. On that origin every visitor
+  draws from one build of the day's rows (`pages/options/scanner_shared.py`),
+  rebuilt when a scan or a checklist view is republished or the build is five
+  minutes old; the rows are read-only and the selected row's accent goes on a
+  copy of the page sent.
+- **No server change.** No new Redis permission, no Caddy change, no Schwab
+  call: the page reads views `options_svc` already publishes.
+- **Not measured.** The memory a per-tab copy would have cost (about 20 MB a
+  tab by the close) is an estimate from the payload's size.
+- **Verified** in `tools/ui_harness.py --public` (new) on a fake bus with a
+  synthetic day of signals: the three tabs and both tables, a row click, the
+  funnel dialog, and one tab's selection not appearing in a second tab. Not yet
+  seen against prod's real day union; check `/signals` after the promote.
+- **Tests.** `webgui/tests/test_scanner_public.py`, `test_scanner_shared.py`,
+  `test_checks_feed_public.py`; the site's menu order and counts in
+  `deploy/tests/test_site.py`. Design and plan:
+  `docs/plans/2026-10-07-public-option-signals-{design,plan}.md`.
+
+**Prior — 2026-10-07** (**The collector stops asking every minute for symbols with nothing listed this week.**)
 
 - **What was wrong.** A name with monthly options only has no expiration inside
   the collector's seven-day window for most of the month. Schwab answers 200,

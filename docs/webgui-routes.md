@@ -557,6 +557,22 @@ scale.
 
 ## `/options/scanner`
 
+**Published as Option Signals (2026-10-07).** The public origin serves this
+module at `/signals`. `render()` reads which origin it is from the process
+(`shell.is_public()` / `shell.may_enqueue()`), never from an argument, and on
+the public origin: builds no Run scan (`_request_scan` opens with the
+`_may_enqueue` return), no footer buttons (`detail.render(actions=False)`), no
+`handoff.watch_paper_results`, no `_new` stamp (`_SEEN` is neither read nor
+written), and loads through `_read_and_build_shared` → `scanner_shared.get`, one
+build for the whole process keyed on the identity of the day union, the live
+scan, the regime and the calibration, and rebuilt when it is
+`checks_feed.TABLE_REFRESH_SEC` old. Those rows are shared and read-only: the
+selected row's accent goes on copies of the one page sent (`page_rows`), and a
+re-stamp there is a fresh shared build. `_build_populate(public=True)` closes
+every row's `_allow_paper` before the checks are stamped. Tests:
+`tests/test_scanner_public.py`, `tests/test_scanner_shared.py`,
+`tests/test_checks_feed_public.py`.
+
 **Other structures on the 0-DTE and Swing tabs (2026-10-06).** Each of those two
 tabs holds TWO tables behind a two-way `ui.toggle` (`scanner_structures.view_options`
 labels it *Credit spreads · N* / *Other structures · N*): the credit table,
@@ -1432,7 +1448,7 @@ neither the route nor the two preview routes are registered in `live_main`.
 
 ## Public live screens (`live.neuralstrike.co`) — 2026-09-07
 
-Twenty-five routes (fourteen from 2026-09-07; six more Dealer Positioning views, the public Strategy Finder, the public Rescue form, and the public Calculator and Simulator on 2026-09-21; the public Market News on 2026-09-26) served by a **second NiceGUI process**,
+Twenty-six routes: the eighteen screens below and the eight 308 redirects in `live_screens.RETIRED_ROUTES` (fourteen screens from 2026-09-07; six more Dealer Positioning views, the public Strategy Finder, the public Rescue form, and the public Calculator and Simulator on 2026-09-21; one Gamma page in place of nine pinned ones on 2026-09-22; the public Market News on 2026-09-26; Option Signals on 2026-10-07) served by a **second NiceGUI process**,
 `webgui/live_main.py` on `nicegui_live` (prod :8501, dev :9501), unauthenticated to
 anyone. **They render the same page modules the private routes render** — each pin is
 an optional keyword on the real `render()` — the precedent is
@@ -1459,6 +1475,7 @@ in [`plans/2026-09-07-public-live-screens-design.md`](plans/2026-09-07-public-li
 | `/momentum` | `sentiment_momentum.render(level="industry")` (`/sentiment/momentum`) | Sub-industries |
 | `/gamma` | `options.gamma.render(public=True)` (`/options/gamma`) | ⚠ **writes**: the dropdown (the published list, `cache:options:gamma_pub_symbols`) and the GEX · Charm · DEX · Vanna · Flow subtabs, over `options:gamma_pub:<SYM>` for the symbol on screen. A pick puts that symbol on `cmd:gamma_public` (no Schwab call: options_svc keeps it live on the minute tick while leased). No Term, no Net Prem |
 | `/net-premium` | `options.gamma.render(view="Net Prem")` (`/options/gamma`) | group `indices`, symbols `SPY QQQ BIG10`, mode `dollars` (settings pins) |
+| `/signals` | `options.scanner.render()` (`/options/scanner`) | **writes nothing**. Titled "Option Signals"; no grid tile, first in the site's Tools menu. The page reads `shell.is_public()` itself (no `public=True` to forget) and builds no Run scan, no Paper trade / Calculator / Expected Move footer, no paper-result watcher and no "new" badge; every row's Paper gate is closed, so the checklist has no Paper book line, and `checks_feed.read_context` never reads `options:ledger_caps` there. No Max contracts row and no dollar figure for the per-trade cap in "Why no trade?". While `public_scan.show_leg_quotes` is off: no Greeks section, and the cost-to-trade line is not measured. Every visitor draws from one build (`scanner_shared`) |
 | `/finder` | `options.swing.render(public=True)` → `options.finder_live` (`/options/swing`) | ⚠ **writes**: a visitor's Scan puts one symbol on `cmd:finder_public`; filters pinned in `config/finder_public.toml` |
 | `/rescue` | `options.rescue.render(public=True)` → `options.rescue_live` (`/options/rescue`) | ⚠ **writes**: Load and Compute put a validated strikes request or trade on `cmd:rescue_public`. The ad-hoc form only - never the owner's at-risk board. Titled "Rescue my Sh*tty trade" |
 | `/calculator` | `options.calculator.render(public=True)` → `options.calc_live` (`/options/calculator`) | ⚠ **writes**: Load, an extra expiration and Rate my trade go on `cmd:tools_public`; every price edit and the implied-volatility estimate on `cmd:tools_public_math`. While the quotes switch is off: no chain grid, no price source, no delta, and the checklist's cost-to-trade line greys out. Open in Simulator hands the position over through tab storage |
