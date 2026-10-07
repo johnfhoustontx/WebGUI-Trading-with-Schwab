@@ -3455,6 +3455,51 @@ never be confused.</p>
 </tr>
 </tbody>
 </table>
+<p><strong>Two tables on 0-DTE and Swing.</strong> A switch at the top of each of those tabs
+chooses between <strong>Credit spreads</strong> and <strong>Other structures</strong>: debit spreads,
+straddles and strangles, butterflies and condors on both tabs, and calendars and
+diagonals on Swing. They are separate tables because they are scored on separate
+scales (see <em>Where it is weak</em>, below). The family boxes above the Other
+structures table show and hide one kind at a time, and at most two of a family
+are listed per symbol.</p>
+<p>What the other structures are for, in one line each:</p>
+<table>
+<thead>
+<tr>
+<th>Structure</th>
+<th>The view it expresses</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Debit spread</td>
+<td>A direction, with the cost and the gain both capped.</td>
+</tr>
+<tr>
+<td>Long straddle or strangle</td>
+<td>A large move either way, soon. You pay for it up front.</td>
+</tr>
+<tr>
+<td>Short strangle</td>
+<td>No large move. Undefined risk: shown for analysis, never booked.</td>
+</tr>
+<tr>
+<td>Butterfly, iron butterfly</td>
+<td>The price finishing near one strike. Cheap, and usually wrong by a little.</td>
+</tr>
+<tr>
+<td>Condor</td>
+<td>The price finishing inside a range.</td>
+</tr>
+<tr>
+<td>Calendar</td>
+<td>A quiet price now and richer volatility later. Two expirations.</td>
+</tr>
+</tbody>
+</table>
+<p>A row marked <strong><em>Earnings 10/29</em></strong> would still be open through that earnings
+report. Only trades that buy premium are kept through a report; trades that sell
+premium through one are dropped, as every credit spread is.</p>
 <p><strong>The columns:</strong></p>
 <table>
 <thead>
@@ -3825,6 +3870,11 @@ from it.</p>
 delta band, and mixing two passes' strike counts would make neither readable. Its
 stages are <strong>Candidates built · Past the volatility gate · Above the quality bar ·
 Kept by the per-symbol cap · Reached the board</strong>.</p>
+<p><strong>The two "other structures" cards</strong> (<em>0-DTE, other structures</em> and <em>Swing, other
+structures</em>) read the same way with one more step: <strong>Structures built · Past the
+volatility gate · Past the earnings gate · Above the quality bar · Kept by the
+per-family cap · Inside regular trading hours · Reached the board</strong>. The earnings
+step counts trades that sell premium and would be held through a report.</p>
 <p><strong>Why a binding stage is the answer, and not just the first zero.</strong> Everything
 below a zero is zero for that reason and nothing else, so reading further down the
 ladder tells you nothing about the market. The binding stage is the one place
@@ -3908,11 +3958,26 @@ simply the best of a poor set. Always sanity-check the credit against the max lo
 yourself — a 0.20 credit on a 5.00-wide spread is a bad trade whatever it scored.</p>
 <p>Note also that the <strong>Directional</strong> tab uses a <em>different</em> score (Fit + Quality) that is
 <strong>not commensurable</strong> with the credit-spread composite. Do not compare a 70 on
-Directional with a 70 on Swing.</p>
+Directional with a 70 on Swing. The <strong>Other structures</strong> tables use that same
+Fit + Quality score, so the same warning holds between the two tables of one tab.</p>
+<p>Within Other structures the score also sits in bands by family. Measured on
+fairly priced chains, debit spreads and condors score 73 to 78, butterflies 68
+to 78, the short strangle near 67, and long straddles and strangles 50 to 56,
+just over the bar of 50. A long straddle near the bottom of the table is
+ordinary, not a warning about that stock.</p>
+<p>On expiration day itself the score reads a little generous for trades that buy
+premium. It judges the breakeven against a full day of movement, and by
+mid-morning less than half of that is left.</p>
 <h3 id="when-to-use-it_13">When to use it</h3>
 <p>Throughout the session.</p>
 <h3 id="caveats-and-gotchas_9">Caveats and gotchas</h3>
 <ul>
+<li><strong>Some other structures are rarely or never listed, by design.</strong> A short
+  straddle fails the probability bar on every fairly priced chain measured.
+  Diagonals fail on reward this close to expiry. A short strangle is never listed
+  on its expiration day. Butterflies and condors come and go with the spacing of
+  the stock's strikes. <strong>Why no trade?</strong> counts each of these as below the
+  quality bar.</li>
 <li><strong>An empty Directional tab is normal.</strong> The engine only emits candidates scoring ≥ 50
   and excludes Weak grades, so empty means "nothing cleared the bar". Long <em>calls</em>
   largely vanish because of a documented scoring artifact around unbounded profit.</li>

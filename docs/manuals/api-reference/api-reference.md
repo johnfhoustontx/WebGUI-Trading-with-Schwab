@@ -333,7 +333,7 @@ critical counts) for the nav badge.
 **Candidate stamps.** Every candidate row on `cache:options:scan` (and so
 `scan_day`), `cache:options:swing` and `cache:options:income` is stamped at publish
 time by `compute.stamp_candidate` — from `rescan` (the 0-DTE, swing and Directional
-lists), `swing_scan` and the income scan. Stamping is best-effort **per row**: a row
+lists and the two `structures_*` lists), `swing_scan` and the income scan. Stamping is best-effort **per row**: a row
 whose stamping raises may be left without some stamps, the rows after it are still
 stamped, and the pass records one degrade (`options.stamp_scan` · `options.stamp_swing` ·
 `options.stamp_income`). On a scan, a symbol whose earnings lookup fails also records
@@ -350,9 +350,25 @@ date. Every stamp is `null` when unknown, never a guessed zero.
 | `iv_rank_known` | Whether the row had an IV rank to gate on |
 | `earnings_status` · `earnings_date` | The earnings coverage and next report date. Stamped on scanner and Strategy Finder rows; an income row already carries its own |
 
+**`cache:options:scan`** carries five candidate lists. `signals_0dte` and
+`signals_swing` are credit spreads and iron condors in the engine's flat shape
+(`short_strike` / `long_strike`, per-share dollars, the premium composite).
+`signals_directional`, `structures_0dte` and `structures_swing` are the
+**normalized** shape: a `legs` list, per-contract dollars, `rr` (a ratio),
+`breakevens` (a list) and the Fit + Quality score. The two `structures_*` lists
+(since 2026-10-06) hold everything else the 0-DTE and Swing windows build — debit
+spreads, straddles and strangles, butterflies and condors, and on Swing calendars
+and diagonals. Each of their rows also carries `group` (`VERTICAL` / `STRADDLE` /
+`BUTTERFLY` / `CALENDAR`, the family that built it) and, when it buys premium and
+was kept through an earnings report, `spans_earnings: true` with `earnings_date`.
+A payload cached before the two lists existed validates with both empty. They are
+not recorded, not pushed and not counted by `compute.build_matrix`. Do not assume
+one shape across the five lists, and do not rank a row of one shape against a row
+of the other.
+
 **`cache:options:scan_day`** — the day union the Market Scanner and the Symbol
 Dossier render: `{date, scan_seq, signals_0dte[], signals_swing[],
-signals_directional[], setups, truncated?}`. `date` is the **Central** trading date —
+signals_directional[], structures_0dte[], structures_swing[], setups, truncated?}`. `date` is the **Central** trading date —
 check it before trusting any row's `live`, because a failed first merge of a new day
 leaves yesterday's envelope in place. `scan_seq` is this scan's 1-based number within
 the day. Each row is the scan's row plus `live`, `stale_since` (when it dropped out;
@@ -377,11 +393,18 @@ per-symbol account of why a symbol did or did not produce a signal. Each account
 `hv_current` is 30-day realised volatility and `current_iv` the ATM implied
 volatility, both **percents**, `null` when the IV analysis did not measure them;
 `stop` is `null`, `"no_quote"` or `"no_data"`; `buckets` is keyed `0DTE` / `SWING` /
-`DIRECTIONAL`. `outside_rth` (a spread bucket's `spreads.outside_rth`, the
-`DIRECTIONAL` bucket's own `outside_rth`) counts the rows held back because the
-scan finished outside the regular 08:30–15:00 CT session; outside it all three of
-`cache:options:scan`'s signal lists are empty and `warnings` carries the reason. A
-funnel written before 2026-10-02 has no such key.
+`DIRECTIONAL` / `STRUCT_0DTE` / `STRUCT_SWING`. The two `STRUCT_*` buckets (since
+2026-10-06; a funnel written before then has neither) are flat, like
+`DIRECTIONAL`: `{built, vol_gate, earnings, score_cut, capped, outside_rth,
+emitted, build_failed}`, with `built == vol_gate + earnings + score_cut + capped
++ outside_rth + emitted` unless `build_failed`. `earnings` counts candidates that
+sell premium (or whose vega could not be read) and would be held through a report.
+A window the scan had no chain for leaves its `STRUCT_*` bucket at zero; the credit
+bucket for the same window (`chain: false`) says why. `outside_rth` (a spread
+bucket's `spreads.outside_rth`, a flat bucket's own `outside_rth`) counts the rows
+held back because the scan finished outside the regular 08:30–15:00 CT session;
+outside it all five of `cache:options:scan`'s candidate lists are empty and
+`warnings` carries the reason. A funnel written before 2026-10-02 has no such key.
 Written after every scan with `skip_unchanged`.
 
 **`cache:options:ledger_caps`** (event `events:options:ledger_caps`) — the Paper

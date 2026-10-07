@@ -4,7 +4,72 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-06 (**A Blog on neuralstrike.co: upload, preview, publish.**)
+**Last updated:** 2026-10-06 (**The Market Scanner builds more than credit spreads: debit spreads, straddles and strangles, butterflies and condors, calendars.**)
+
+- **What it is.** The 0-DTE and Swing tabs each hold two tables behind a switch:
+  **Credit spreads**, unchanged, and **Other structures** — bull call and bear put
+  spreads, long and short straddles and strangles, call and put butterflies, the
+  iron butterfly, call and put condors, and on Swing call and put calendars and
+  diagonals. A box per family shows and hides one kind. Phases 1 and 2 of
+  `docs/plans/2026-10-06-scanner-multi-structure-{design,plan}.md`; the ratio
+  backspread (phase 3) and recording these rows to `signals.db` (phase 4) are not
+  built.
+- **Why two tables.** The credit rows carry the premium-seller composite and the
+  others the Strategy Finder's Fit + Quality score. The two are not comparable, so
+  the rows are never ranked together and travel in their own lists.
+- **The pieces.**
+  - **`options-scanner/structure_scan.py`** (new, pure): `build_window` runs the
+    Finder's builders on a window's chain; `select` scores and applies four gates in
+    a fixed order — volatility, earnings, quality, cap — counting each so the funnel
+    bucket partitions. `run_full_scan` calls it once per window in its own `try`.
+    The three existing lists are byte-identical with the pass on, off or crashing.
+  - **No Schwab call is added.** Calendars read their back month from the +20 to
+    +45 day chain the scan already fetches for the volatility reading.
+  - **The 7-day floor is now a parameter.** `strategy_scanner._front_pair` takes
+    `min_front_dte`; the Finder passes nothing and its output is unchanged, the
+    Scanner passes its window's minimum (operator decision: short-dated structures
+    are allowed on the Scanner).
+  - **`config/scanner.toml [structures]`**: `enabled`, `families`, `min_score`,
+    `excluded_grades`, `max_per_family`, `short_delta_min`,
+    `earnings_long_premium`. All in Settings → Configuration.
+  - **Earnings.** A trade that buys premium and would be held through a report is
+    kept and marked (`spans_earnings`, shown as *Earnings MM/DD*); one that sells
+    premium, or whose vega cannot be read, is dropped (operator decision). The
+    credit lists keep their own rule.
+  - **Contract and views.** `ScanResult` gains `structures_0dte` /
+    `structures_swing`; both join the day union and are stamped for the checklist.
+    `cache:options:scan_funnel` gains `STRUCT_0DTE` / `STRUCT_SWING` buckets.
+  - **Page.** `webgui/pages/options/scanner_structures.py` (new, pure) builds the
+    rows, the family counts and the tab totals; `scanner.py` gains the switch, the
+    two tables and the checkboxes. **Why no trade?** has five cards. The Symbol
+    page lists the new rows under their tab's name.
+- **Measured before the page was built** (`tools/sweep_strategy_gates.py
+  --scanner`, nine fairly priced synthetic chains, clock pinned at 10:00 CT):
+  debit spreads always clear the quality bar; long straddles always do but score
+  53–56; the short straddle never does; diagonals almost never; butterflies and
+  condors pass or fail with the strike ladder; nothing short-dated was as scarce
+  as the design first predicted. No bar was moved. Two findings changed the
+  build: probability of profit reads the clock, so the sweep pins the time of day;
+  and scores sit in bands by family, so the per-symbol cap is **per family** — one
+  cap across families would have dropped every long straddle.
+- **What it costs.** About 0.1 second a symbol on a dense synthetic chain
+  (`tools/measure_structure_scan.py`).
+- **Not changed.** No credit-spread rule, score or floor. Nothing here is
+  recorded, pushed to the phone, posted, or counted on the Opportunity Board, and
+  the paper Account cannot see it. Paper is offered only for the structures the
+  Ledger already books (debit spreads, butterflies, condors).
+- **Left as it is, by decision.** On expiration day the breakeven factor and the
+  butterfly wing use a full day's expected move, so rows that buy premium score
+  somewhat high that day (long straddle 64 against 53–56). The Directional tab has
+  always been scored the same way.
+- **Verification.** No dev environment exists. The engine was driven through
+  `run_full_scan` on the suite's fake client; the page was rendered on
+  `tools/ui_harness.py` against rows built by the real builders and the real
+  day-union merge, and the switch, the family boxes, the tab counts, the earnings
+  mark and the Paper gate were exercised in a browser. Not yet promoted; the first
+  live scan's duration and funnel are the checks still owed.
+
+**Prior —** 2026-10-06 (**A Blog on neuralstrike.co: upload, preview, publish.**)
 
 - **What it is.** The public site has a Blog. The owner opens **More → Blog** in
   the private app, uploads one self-contained HTML document (an artifact saved

@@ -1535,6 +1535,8 @@ two-pane layout.
 - Three tabs: **0-DTE**, **Swing** and **Directional**. Directional lists
   single-leg long and short calls and puts, scored on a *different* scale from the
   credit-spread tabs — do not compare their numbers.
+- On **0-DTE** and **Swing**, a switch at the top of the tab: **Credit spreads**
+  and **Other structures**. Each is its own table (see *Other structures*, below).
 - A table of candidate signals. Columns include Symbol, Type, Expiration, DTE,
   Short/Long strikes, Credit, Max Loss, Risk/Reward %, Probability of Profit %,
   a color-coded **Score** chip, and a letter **Grade**.
@@ -1642,6 +1644,46 @@ from one that appeared in a single scan. Neither column filters or sorts anythin
 > failed. Index names (`$SPX`, `SPY`, `QQQ`) are also frequently absent, because
 > their implied volatility is usually too low to clear the credit floor.
 
+### Other structures
+
+The 0-DTE and Swing scans build more than credit spreads. Click **Other
+structures** at the top of either tab to see the rest:
+
+| Family | What it lists | Tabs |
+| --- | --- | --- |
+| **Debit spreads** | bull call spread, bear put spread | both |
+| **Straddles and strangles** | long and short straddle, long and short strangle | both |
+| **Butterflies and condors** | call and put butterfly, iron butterfly, call and put condor | both |
+| **Calendars** | call and put calendar, call and put diagonal | Swing |
+
+1. Click **Other structures**. The number beside each side of the switch is how
+   many rows it holds, and the tab's own count adds both.
+2. Untick a family box above the table to hide that kind; tick it to bring it
+   back. A family with nothing today is not listed.
+3. Click a row for its detail, then **Calculator**, **Expected Move** or, where
+   it is offered, **Paper trade**.
+
+Four things to know:
+
+- **The score is not the credit-spread score.** Credit spreads are scored as
+  trades that sell premium. Other structures are scored on how well they fit the
+  market's direction and volatility and how sound they are. The two are on
+  different scales, so they are in different tables, and a 75 in one is not a 75
+  in the other.
+- **At most two of a family are listed per symbol.** The limit is per family on
+  purpose: debit spreads usually score in the 70s and long straddles in the 50s,
+  so one limit across families would never show a long straddle.
+- ***Earnings 10/29* beside a strategy** means the trade would still be open
+  through that earnings report. Only trades that *buy* premium are kept through a
+  report, and they are marked. Trades that sell premium through one are left out.
+- **Paper trade is offered for debit spreads, butterflies and condors.**
+  Straddles, strangles, the iron butterfly, calendars and diagonals are for
+  analysis; send them to the Calculator.
+
+Expect some families to be thin. A short straddle almost never clears the quality
+bar, diagonals rarely do this close to expiry, and whether a butterfly or condor
+appears depends on how the stock's strikes are spaced.
+
 ### "Why was there no trade on X today?"
 
 The tables answer *what qualified*. **Why no trade?** — the small button just left
@@ -1654,8 +1696,8 @@ scan.
    *0-DTE · 1 of 4 produced nothing*, *Swing · 0 of 4 produced nothing*. That is
    the shape of the day before you look at any one name.
 3. Pick your symbol from the **Symbol** box (you can type into it).
-4. Read the three cards — one for **0-DTE**, one for **Swing**, one for
-   **Directional**.
+4. Read the cards — one for **0-DTE**, one for **Swing**, one for
+   **Directional**, then one each for the other structures on 0-DTE and on Swing.
 
 Each card opens with one sentence, and that sentence is the answer:
 
@@ -1681,6 +1723,7 @@ happened:
 | *This symbol was not in the last scan.* | The watchlist moved, or the scan has not reached it |
 | *The scan recorded no account of this window for this symbol.* | Nothing usable was recorded for that window |
 | *the single-leg build failed for this symbol; the scan logged the error* | The Directional pass crashed on this name. It is a fault, not a market condition — check the log |
+| *the other-structures build failed for this symbol; the scan logged the error* | The same, for the other structures on that tab |
 
 **Reading a spread card.** The first six steps are about the short strike (is it in
 the delta band, does it have a price, is it under the delta ceiling, is it inside

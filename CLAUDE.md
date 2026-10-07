@@ -574,6 +574,12 @@ Detail: [options engine invariants](docs/reference/options-engine-invariants.md)
   (`config_paper.MAX_RISK_PER_TRADE`); a width nothing can size is not emitted.
 - The NAKED reward gate is an annualised rate; `dte <= 0` returns `None`.
 - The scanner's strike rules are `config/scanner.toml [selection]`.
+- Everything the scan builds that is not a credit spread (`structure_scan`,
+  `[structures]`) goes in `structures_0dte` / `structures_swing`, never in the
+  credit lists: those are what `signal_recorder` records and the Account enters
+  from. Its cap is per FAMILY; through an earnings report it keeps and flags
+  LONG premium and drops short. `_front_pair`'s 7-day floor is the Finder's
+  default, and the Scanner passes its window's own minimum.
 
 **Exits and marks.**
 - Exit rules are PER STRUCTURE: `shared/trade_mgmt.structure_rules(strategy)`.

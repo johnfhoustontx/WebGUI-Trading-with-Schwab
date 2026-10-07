@@ -557,6 +557,34 @@ scale.
 
 ## `/options/scanner`
 
+**Other structures on the 0-DTE and Swing tabs (2026-10-06).** Each of those two
+tabs holds TWO tables behind a two-way `ui.toggle` (`scanner_structures.view_options`
+labels it *Credit spreads · N* / *Other structures · N*): the credit table,
+unchanged, and a table of everything else that scan builds — debit spreads,
+straddles and strangles, butterflies and condors (both tabs), calendars and
+diagonals (Swing only). Two tables, never one: the credit rows carry the premium
+composite and the others the Fit + Quality score. The rows come from the day
+union's `structures_0dte` / `structures_swing` lists (`scanner.DAY_LISTS` is five
+lists; the first three keep their positions) through
+`scanner_structures.structure_rows` — `scanner.directional_rows` plus `_group`
+(the build family), `type`, and `_earnings` (*Earnings MM/DD*, only when the row
+carries `spans_earnings`). One `ui.checkbox` per family (`scanner_structures.GROUPS`)
+is built once with the table; a repaint only sets its text (*Debit spreads · 6*)
+and hides a family with no rows, and unticking one filters the stored rows with
+no bus read. A tab's header counts both of its tables
+(`scanner_structures.tab_totals`), after the family filter. The two tables share
+the Directional table's slots and `_select_dir` (one loop, `_n`, over
+`table_dir`, `table_x0`, `table_xs`) and add `_EARNINGS_SLOT` on the strategy
+cell. Paper follows `strategy_table._PAPER_TYPES`: debit verticals, butterflies
+and condors yes; straddles, strangles, the iron butterfly, calendars and
+diagonals no. **Why no trade?** has five cards — the three windows, then
+`STRUCT_0DTE` and `STRUCT_SWING` — and a bucket no symbol reports gets no chip
+(`funnel_view.reported`). The nav badge, the chime, the phone push and the
+Opportunity Board's scan count still count credit spreads (and, for the Board,
+single legs) only. The Symbol page lists the two new lists under their tab's
+name through the normalized row builder. Design, measurement and plan:
+`docs/plans/2026-10-06-scanner-multi-structure-{design,plan}.md`.
+
 Options · Market Scanner (0-4 / 5-15 DTE, two-pane + detail panel; **THREE folder-style SUBTABS since 2026-07-16 — 0-DTE / Swing / Directional**. **Directional** renders the engine's `signals_directional` (single-leg LONG_CALL/LONG_PUT/SHORT_CALL/SHORT_PUT) via the SHARED `strategy_table` builders, scored on **Fit+Quality** (never beside a premium composite — see the Last-updated entry); naked shorts show `Max L = ∞` + an undefined-risk badge and no Paper button. **Since 2026-08-06 the ENGINE only emits non-Weak candidates scoring ≥ 50** (`scanner_engine.SINGLE_LEG_MIN_SCORE` / `SINGLE_LEG_EXCLUDED_GRADES`, cut before the per-symbol cap) — an empty Directional tab now means "nothing cleared the bar", not a failure, and long CALLS largely vanish because the documented unbounded-profit R:R artifact scores them ~14 points below long puts. **The tables read `cache:options:scan_day`** (the day union) not `cache:options:scan`, so the day's signals persist to EOD with dropped-out ones **dimmed + frozen + "Dropped HH:MM"** and **no Paper button** (frozen price + verbatim `entry_credit` = a fictional entry); the render is **gated on the envelope's CT date** and surfaces a `truncated` notice. The status bar still reads the LIVE key (the day envelope carries no timestamp/errors) and says "N live signals" so it can't be read as the day count. **"New" = unseen since you last VIEWED the page** (acknowledged only on initial paint), keyed on the engine's unique `id` — this fixed a real bug where the key collapsed to `SPY|PCS|None|None|07/17`; **a webgui restart re-marks everything New** (page-side state, deliberate). ⚠ the nav badge/chime still count credit spreads ONLY — a Fit+Quality score isn't commensurable with the premium composite the min-score alert threshold gates on;  under the main tab strip** (2026-07-11, `shell.subtab_slot()` + `.compact-subtabs`; amber/blue tab text kept) with **live signal counts** (`checks_table.filtered_tab_label`); **Run scan is right-aligned flush with the table** (`.scan-panels` drops the q-tab-panel padding); a new qualifying signal pops an **in-app toast** (`fiber_new`, blue-8 — matching the row "new" badge) alongside the chime/desktop notification; **Run scan** is the app's solid primary button (`color=None` + `.scan-btn`); the per-row **Send to Calculator** now transfers correctly — `_prefill` stashes `pending_legs` + `load_symbol()` so legs apply AFTER the chain loads, instead of being wiped by strike-coercion against an empty chain (see [[calculator-leg-transfer-needs-chain-first]]))
 
 **Paper button → Ledger caps (2026-09-15).** Send to Paper trade enqueues `paper_create`, which opens into the Paper Ledger only if the trade clears every `shared.book_caps` rung against the Ledger's own open trades ($750 per trade, plus the Account's symbol / sector / expiry / 20%-deployment caps); a refusal writes nothing. The page watches **`options:paper_create`** (`handoff.watch_paper_results`, 1 s poll, versions compared with `!=` because the 600 s TTL resets `:ver`) and toasts the answer — *Paper ledger: opened …*, or *Paper ledger: not opened — <reason>.* with *Up to N contracts fit.* when a smaller size would clear. **The dialog previews the decision (2026-09-15, Phase 3).** `handoff.send_to_paper` reads **`options:ledger_caps`** once on open and renders `handoff.paper_dialog_view` over the pure `book_fit.preview` — the same `shared.book_caps` rungs, bucketed with `sector_bucket` over the published sector table and priced with `booked_risk` over the row's `ledger_risk_basis` stamp: *Risk $X per contract*, then one line per rung (green fits / red breaks / muted not checked). A breach, a quantity that is not a whole number ≥ 1, or one above 100 disables Create (*Up to N contracts fit.* / *No quantity fits the paper ledger's limits right now.* / *The dialog opens at most 100 contracts in one trade.*); the quantity box's max is the largest fitting quantity (1 when none fits). A dialog that cannot preview (no view, no stamp) says so and leaves Create enabled — the service still checks. Create latches against a double click; an unreachable bus says *Could not reach the options service — the trade was not sent.* and re-enables. The send toast is *Sent N contracts — the paper ledger answers in a moment.*

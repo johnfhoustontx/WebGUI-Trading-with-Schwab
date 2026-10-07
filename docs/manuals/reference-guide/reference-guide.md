@@ -2337,6 +2337,29 @@ never be confused.
 | **Swing** | Multi-day credit spreads, typically 5–15 DTE. |
 | **Directional** | Single-leg long and short calls and puts. |
 
+**Two tables on 0-DTE and Swing.** A switch at the top of each of those tabs
+chooses between **Credit spreads** and **Other structures**: debit spreads,
+straddles and strangles, butterflies and condors on both tabs, and calendars and
+diagonals on Swing. They are separate tables because they are scored on separate
+scales (see *Where it is weak*, below). The family boxes above the Other
+structures table show and hide one kind at a time, and at most two of a family
+are listed per symbol.
+
+What the other structures are for, in one line each:
+
+| Structure | The view it expresses |
+|---|---|
+| Debit spread | A direction, with the cost and the gain both capped. |
+| Long straddle or strangle | A large move either way, soon. You pay for it up front. |
+| Short strangle | No large move. Undefined risk: shown for analysis, never booked. |
+| Butterfly, iron butterfly | The price finishing near one strike. Cheap, and usually wrong by a little. |
+| Condor | The price finishing inside a range. |
+| Calendar | A quiet price now and richer volatility later. Two expirations. |
+
+A row marked ***Earnings 10/29*** would still be open through that earnings
+report. Only trades that buy premium are kept through a report; trades that sell
+premium through one are dropped, as every credit spread is.
+
 **The columns:**
 
 | Column | Meaning | How to read it |
@@ -2515,6 +2538,12 @@ delta band, and mixing two passes' strike counts would make neither readable. It
 stages are **Candidates built · Past the volatility gate · Above the quality bar ·
 Kept by the per-symbol cap · Reached the board**.
 
+**The two "other structures" cards** (*0-DTE, other structures* and *Swing, other
+structures*) read the same way with one more step: **Structures built · Past the
+volatility gate · Past the earnings gate · Above the quality bar · Kept by the
+per-family cap · Inside regular trading hours · Reached the board**. The earnings
+step counts trades that sell premium and would be held through a report.
+
 **Why a binding stage is the answer, and not just the first zero.** Everything
 below a zero is zero for that reason and nothing else, so reading further down the
 ladder tells you nothing about the market. The binding stage is the one place
@@ -2585,7 +2614,18 @@ yourself — a 0.20 credit on a 5.00-wide spread is a bad trade whatever it scor
 
 Note also that the **Directional** tab uses a *different* score (Fit + Quality) that is
 **not commensurable** with the credit-spread composite. Do not compare a 70 on
-Directional with a 70 on Swing.
+Directional with a 70 on Swing. The **Other structures** tables use that same
+Fit + Quality score, so the same warning holds between the two tables of one tab.
+
+Within Other structures the score also sits in bands by family. Measured on
+fairly priced chains, debit spreads and condors score 73 to 78, butterflies 68
+to 78, the short strangle near 67, and long straddles and strangles 50 to 56,
+just over the bar of 50. A long straddle near the bottom of the table is
+ordinary, not a warning about that stock.
+
+On expiration day itself the score reads a little generous for trades that buy
+premium. It judges the breakeven against a full day of movement, and by
+mid-morning less than half of that is left.
 
 ### When to use it
 
@@ -2593,6 +2633,12 @@ Throughout the session.
 
 ### Caveats and gotchas
 
+- **Some other structures are rarely or never listed, by design.** A short
+  straddle fails the probability bar on every fairly priced chain measured.
+  Diagonals fail on reward this close to expiry. A short strangle is never listed
+  on its expiration day. Butterflies and condors come and go with the spacing of
+  the stock's strikes. **Why no trade?** counts each of these as below the
+  quality bar.
 - **An empty Directional tab is normal.** The engine only emits candidates scoring ≥ 50
   and excludes Weak grades, so empty means "nothing cleared the bar". Long *calls*
   largely vanish because of a documented scoring artifact around unbounded profit.

@@ -1099,7 +1099,8 @@ at one day — so a 30-DTE breakeven is judged against a 30-day move, not a 1-da
 The **Market Scanner's Directional tab** scores its single-leg candidates the same way
 (`run_full_scan` passes the same `daily_move`), so one candidate scores identically on
 both pages; in either, a candidate without a usable DTE falls back to one move at its
-scan window's DTE minimum. ⚠ **The Income board scores through the same `swing_scan`
+scan window's DTE minimum. The Scanner's **Other structures** tables (below) go through
+the same call. ⚠ **The Income board scores through the same `swing_scan`
 path, so its `entry_score` changed basis on 2026-09-13** — from one move at the window's
 30-DTE minimum to the move to each candidate's own 30–45 DTE expiry, a factor of
 √(DTE / 30), so at most ~1.22 on the move. Scores captured under `scanner_type = "INCOME"`
@@ -1407,6 +1408,77 @@ Four readings is one hour at the 15-minute auto-scan cadence. The deadband exist
 because the composite is recomputed from scratch on every scan, so a point or two of
 movement between scans is noise. A trend is only ever computed within one setup, so
 the credit-spread composite and the Directional tab's Fit + Quality score never meet.
+
+### Other structures on the Market Scanner
+
+Since 2026-10-06 each scan also builds, for the 0-DTE window (DTE 0–4) and the Swing
+window (DTE 5–15), every structure that is not a credit spread
+(`options-scanner/structure_scan.py`, called from `run_full_scan`):
+
+| Family | Structures | Window |
+|---|---|---|
+| `VERTICAL` | bull call spread, bear put spread | both |
+| `STRADDLE` | long and short straddle, long and short strangle | both |
+| `BUTTERFLY` | call and put butterfly, iron butterfly, call and put condor | both |
+| `CALENDAR` | call and put calendar, call and put diagonal | Swing |
+
+The builders are the Strategy Finder's, with one difference: the Finder keeps
+straddles, strangles, butterflies and condors at least seven days out, and the
+Scanner builds them at its window's own minimum. A calendar's front leg is still at
+least seven days out; its back month is read from the +20 to +45 day chain the scan
+already fetches for the volatility reading, so the pass makes no Schwab call. A short
+strangle sells between `[structures] short_delta_min` (0.15) and `[selection]
+max_entry_short_delta` (0.27).
+
+Each candidate is scored on Fit + Quality and then passes four gates, in this order:
+
+1. **Volatility.** `[iv_rank]` refuses a trade that sells premium below the window's
+   floor; `[iv_rank_ceiling]` (off) would refuse one that buys it above the ceiling.
+   An unknown rank skips the gate.
+2. **Earnings.** A trade that would be held through a report (the same test the
+   credit scan applies, read on a calendar's later expiry) is kept and marked if it
+   buys premium (`[structures] earnings_long_premium = "flag"`) and dropped if it
+   sells premium or its vega cannot be read. `"drop"` removes both.
+3. **Quality.** Score at or above `[structures] min_score` (50) and grade not in
+   `excluded_grades` (Weak).
+4. **Cap.** The best `[structures] max_per_family` (2) of each family, per symbol,
+   per window.
+
+The momentum veto, the sentiment regime filter and the dealer-gamma gate are not
+applied: they exist to stop selling premium into a trend, and Fit already scores
+each structure against the inferred direction.
+
+**What clears the bars.** Measured with `tools/sweep_strategy_gates.py --scanner` on
+nine fairly priced synthetic chains (volatility 0.20, 0.28, 0.45; strike steps of
+0.25%, 1% and 2.5% of spot; the clock pinned at 10:00 CT):
+
+| Structure | 0-DTE window | Swing window |
+|---|---|---|
+| Debit spreads | all that could be built | all |
+| Long straddle | all, scoring 53–56 | all, scoring 53–56 |
+| Short straddle | none (probability of profit 57–58 against 65) | none |
+| Long strangle | about half | most |
+| Short strangle | most; never on expiration day | all |
+| Butterflies, iron butterfly | a little over half | about four in five |
+| Condors | half; never on expiration day | about four in five |
+| Calendars | not built | put: all; call: fails with a 7-day front leg |
+| Diagonals | not built | almost none |
+
+The full tables and their parameters are in
+`docs/plans/2026-10-06-scanner-multi-structure-design.md`. Probability of profit
+reads the time actually left, so a short-dated figure depends on the time of day;
+the sweep pins it for that reason. On expiration day the expected move used for the
+breakeven factor and the butterfly wing is a full day's (`max(dte, 1)`), which by
+mid-morning is more than twice the move left; expiration-day rows that buy premium
+score higher for it (the long straddle 64 against 53–56).
+
+**Cost.** About 0.1 second per symbol on a dense synthetic chain
+(`tools/measure_structure_scan.py`), on the scan's own thread after the chains are
+fetched.
+
+The rows are published as `structures_0dte` and `structures_swing` on
+`cache:options:scan` and the day union. They are not recorded to `signals.db`, not
+pushed to the phone, and not counted on the Opportunity Board.
 
 **Seen since** reads `HH:MM · Nx` — first seen, and the number of scans the setup was
 live in. It is a dash when the age is unknown, and the time alone when the count is

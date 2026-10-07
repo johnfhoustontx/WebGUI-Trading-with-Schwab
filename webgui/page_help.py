@@ -238,13 +238,33 @@ fine; try again in a minute.
 **Market Scanner — the simple version**
 
 Finds option trades across the watchlist and scores each one **0–100** for
-quality — mostly **credit spreads** (you sell risk and collect cash up front),
-plus single-leg directional trades on their own tab.
+quality: **credit spreads** (you sell risk and collect cash up front), the
+**other structures** each scan can build (debit spreads, straddles and strangles,
+butterflies and condors, calendars), and single-leg directional trades on their
+own tab.
 
 - **0-DTE / Swing / Directional** — the small tabs at the very top (under the page
   tabs): short-dated (0-4 days, NOT only today), days-to-weeks out, and single-leg
   long/short calls and puts. Directional only lists trades that clear a quality bar,
   so an empty tab means "nothing qualified today", not a failure.
+- **Credit spreads / Other structures** — the switch at the top of the 0-DTE and
+  Swing tabs. Each side is its own table, and the number beside each name is how
+  many rows it holds. **The two tables are scored differently and their scores
+  are not comparable**: credit spreads as trades that sell premium, other
+  structures on how well they fit the market's direction and volatility and how
+  sound they are. A 75 on one is not a 75 on the other, which is why they are
+  never in one list. The tab's own count adds both.
+- **The family boxes** above the Other structures table (*Debit spreads ·
+  Straddles and strangles · Butterflies and condors · Calendars*) show and hide
+  one kind at a time; a family with nothing today is not listed. Calendars
+  appear on Swing only. At most two of a family are listed per symbol.
+- **Earnings 10/29** beside a strategy means the trade would still be open
+  through that company's earnings report. Only trades that **buy** premium are
+  kept through a report, and they are marked this way; trades that sell premium
+  through one are left out, as every credit spread is.
+- **Some other structures can be sent to the paper ledger and some cannot.**
+  Debit spreads, butterflies and condors can. Straddles, strangles, the iron
+  butterfly and calendars are for analysis: send them to the Calculator instead.
 - **All three tabs fill only during regular hours (8:30–3:00 CT).** The scanner
   also runs at 8:00, 8:15, 3:00 and 3:15, but a scan that finishes outside the
   session holds every signal back — premarket and after-close quotes are not the
@@ -283,7 +303,8 @@ plus single-leg directional trades on their own tab.
   it was. Nothing is re-scanned; it only filters what is already there.
 - **Why no trade?** (the small button left of **Run scan**) answers the opposite
   question to the tables: not what qualified, but where each symbol stopped. Pick
-  a symbol and each of the three windows gets a card — a plain sentence ("38 short
+  a symbol and each window gets a card, with two more for the other structures
+  on 0-DTE and Swing — a plain sentence ("38 short
   strikes were priced, and every one sat past the short-delta ceiling"), then the
   steps it went through with how many survived each. The step that took it to zero
   is highlighted; that is the answer. When nothing looked at all — no quote from
@@ -1745,11 +1766,14 @@ def help_md(active: str) -> str:
 
 SUBTAB_HELP: dict[str, dict[str, str]] = {
     "/options/scanner": {  # Market Scanner
-        "0-DTE": "Short-dated credit spreads — 0 to 4 days to expiration, not "
-                 "only today. Fastest decay, highest risk. Check the Exp column: "
-                 "anything past today is held overnight.",
-        "Swing": "Credit spreads days-to-weeks out — slower decay, more room to be "
-                 "right.",
+        "0-DTE": "Short-dated trades — 0 to 4 days to expiration, not only "
+                 "today. Credit spreads, and behind the switch the other "
+                 "structures (debit spreads, straddles, butterflies, condors). "
+                 "Fastest decay, highest risk. Check the Exp column: anything "
+                 "past today is held overnight.",
+        "Swing": "Trades 5 to 15 days out — slower decay, more room to be right. "
+                 "Credit spreads, and behind the switch the other structures, "
+                 "calendars among them.",
         "Directional": "Single-leg long or short calls/puts — a plain bullish or "
                        "bearish bet, scored on fit + quality (not the premium model).",
     },
