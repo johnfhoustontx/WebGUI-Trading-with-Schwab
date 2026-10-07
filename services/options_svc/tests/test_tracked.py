@@ -357,3 +357,89 @@ def test_an_unreadable_store_is_an_empty_view(monkeypatch):
                         lambda **kw: (_ for _ in ()).throw(RuntimeError("locked")))
     v = tracked.view(_at(7, 10, 30))
     assert v["open"] == [] and v["stats"] == [] and v["counts"]["open"] == 0
+
+
+# ── publishing and the schedule ─────────────────────────────────────────────
+
+def test_the_view_is_published_and_an_unchanged_one_is_not_republished(monkeypatch):
+    from services.options_svc import handlers
+    from shared.bus import Bus
+    bus = Bus(fake=True)
+    payload = {"date": "2026-10-07", "open": [{"signal_id": "a"}], "closed_today": [],
+               "stats": [], "counts": {"open": 1, "closed": 0, "closed_today": 0}}
+    monkeypatch.setattr(handlers.tracked, "view", lambda: dict(payload))
+    handlers.publish_tracked(bus)
+    env = bus.cache_get("cache:options:tracked")
+    assert env.payload == payload
+    handlers.publish_tracked(bus)
+    assert bus.cache_get("cache:options:tracked").version == env.version
+
+
+def test_the_tick_runs_the_cycle_then_publishes_and_never_pushes(monkeypatch):
+    from services.options_svc import handlers
+    from shared.bus import Bus
+    bus, order = Bus(fake=True), []
+    monkeypatch.setattr(handlers.tracked, "manage_cycle", lambda: order.append(
+        "cycle") or {"closed": [{"symbol": "SPY", "reason": "TARGET_HIT"}]})
+    monkeypatch.setattr(handlers.tracked, "view", lambda: order.append("view") or {
+        "open": [], "stats": []})
+    monkeypatch.setattr(handlers.push_notify, "notify_signals",
+                        lambda *a, **k: pytest.fail("a tracked row was pushed"))
+    handlers.run_tracked_manage_and_publish(bus)
+    assert order == ["cycle", "view"]
+    assert bus.cache_get("cache:options:tracked") is not None
+
+
+def test_reloading_the_captured_page_republishes_the_tracked_view(monkeypatch):
+    from services.options_svc import handlers
+    from shared.bus import Bus
+    from shared.contracts.envelope import Command
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers, "refresh_captured", lambda b: None)
+    monkeypatch.setattr(handlers.tracked, "view", lambda: {"open": [], "stats": []})
+    handlers.handle_command(bus, Command(type="captured_reload"))
+    assert bus.cache_get("cache:options:tracked").payload == {"open": [], "stats": []}
+
+
+def test_the_tracked_slot_fires_once_off_the_quarter_hour():
+    from services.options_svc import scheduler
+    due, slot = scheduler.tracked_manage_due(_at(7, 10, 10), None)
+    assert due is True
+    assert scheduler.tracked_manage_due(_at(7, 10, 12), slot) == (False, slot)
+    nxt, slot2 = scheduler.tracked_manage_due(_at(7, 10, 25), slot)
+    assert nxt is True and slot2 != slot
+    # On the quarter hour, where the autoscan fetches, it never fires.
+    for minute in (0, 2, 5, 15, 17, 30, 45):
+        assert scheduler.tracked_manage_due(_at(7, 10, minute), None)[0] is False
+
+
+def test_a_start_mid_slot_waits_for_the_next_slot():
+    from services.options_svc import scheduler
+    assert scheduler.tracked_manage_due(_at(7, 10, 18), None)[0] is False
+    assert scheduler.tracked_manage_due(_at(7, 10, 25), None)[0] is True
+
+
+def test_the_last_slot_of_the_day_is_after_the_settlement_hour():
+    """15:10 CT is inside the scan window and past 15:00, so expired rows settle
+    the same afternoon rather than the next morning."""
+    from services.options_svc import scheduler
+    assert scheduler.tracked_manage_due(_at(7, 15, 10), None)[0] is True
+    assert scheduler.tracked_manage_due(_at(7, 15, 25), None)[0] is False
+
+
+def test_no_tracked_slot_outside_a_trading_session():
+    from services.options_svc import scheduler
+    assert scheduler.tracked_manage_due(_at(10, 10, 10), None)[0] is False   # Saturday
+    assert scheduler.tracked_manage_due(_at(7, 7, 10), None)[0] is False     # before 08:00
+    assert scheduler.tracked_manage_due(_at(7, 0, 5), None)[0] is False
+
+
+def test_the_cadence_is_read_from_the_config(monkeypatch):
+    from services.options_svc import scheduler
+    monkeypatch.setattr(scheduler._trade_mgmt, "tracked", lambda: {
+        "mark_interval_min": 30, "mark_offset_min": 20,
+        "front_expiry_close": dt.time(14, 0)})
+    assert scheduler.tracked_manage_due(_at(7, 10, 20), None)[0] is True
+    assert scheduler.tracked_manage_due(_at(7, 10, 50), None)[0] is True
+    assert scheduler.tracked_manage_due(_at(7, 10, 10), None)[0] is False
+    assert scheduler.tracked_manage_due(_at(7, 10, 35), None)[0] is False

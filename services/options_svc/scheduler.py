@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 from services import _heartbeat
 from services.options_svc import compute, finder_public, flow_stream, handlers
 from shared import market_calendar as mc
+from shared import trade_mgmt as _trade_mgmt
 from shared.market_calendar import is_trading_day as _cal_is_trading_day
 
 log = logging.getLogger(__name__)
@@ -207,6 +208,30 @@ def captured_manage_due(now, last_slot):
     if not (_is_trading_day(now) and _is_market_hours(now)):
         return (False, last_slot)
     slot = _captured_manage_slot_key(now)
+    return (slot != last_slot, slot)
+
+
+# ── Tracked structures: the manage cadence ──────────────────────────────────
+# The structures the scanner records to be MEASURED (``tracked.py``) are marked,
+# exited and settled on a slower clock than the captured signals, offset off the
+# quarter hour so their chain fetches stay clear of the autoscan's
+# (config/trade_mgmt.toml [tracked]: every 15 minutes at :10, :25, :40, :55).
+# A slot fires only inside its first minutes: a service that starts mid-slot
+# waits for the next one rather than fetching on top of whatever is running.
+_TRACKED_GRACE_MIN = 4
+
+
+def tracked_manage_due(now, last_slot):
+    """(should_manage, slot): True at most once per tracked slot, only on a
+    trading day inside the scan window and within the slot's first minutes."""
+    if not (_is_trading_day(now) and _is_market_hours(now)):
+        return (False, last_slot)
+    cfg = _trade_mgmt.tracked()
+    interval = cfg["mark_interval_min"]
+    since = now.hour * 60 + now.minute - cfg["mark_offset_min"]
+    if since < 0 or since % interval >= min(_TRACKED_GRACE_MIN, interval):
+        return (False, last_slot)
+    slot = (now.date().isoformat(), since // interval)
     return (slot != last_slot, slot)
 
 
@@ -615,6 +640,7 @@ async def loop(bus):
         log.exception("flow stream failed to start")
     last_gex_slot = None  # 1-min GEX history-collection slot (see gex_due)
     last_captured_manage_slot = None  # 5-min captured auto-manage slot (see captured_manage_due)
+    last_tracked_slot = None  # tracked structures' manage slot (see tracked_manage_due)
     paper_ran = set()  # (date, hour) of fired hourly manual paper cycles (see paper_cycle_due)
     settle_ran = set()  # (date, slot) of fired paper expiry settlements (see paper_settle_due)
     last_periodic_slot = None  # matrix spots + gex_status throttle slot (see periodic_refresh_due)
@@ -677,6 +703,13 @@ async def loop(bus):
             None, handlers.publish_captured_performance, bus)
     except Exception:
         log.exception("startup publish_captured_closed degraded")
+    # One-shot startup publish of the tracked structures' view, so the Captured
+    # Signals page's tracked section has data before the first tracked slot.
+    # Reads signals.db only.
+    try:
+        await loop_.run_in_executor(None, handlers.publish_tracked, bus)
+    except Exception:
+        log.exception("startup publish_tracked degraded")
     # One-shot startup refresh of the Gamma snapshot ($SPX default) so the Gamma
     # page has data on first load. The page drives subsequent refreshes by
     # enqueuing ``gamma_refresh`` with the current symbol (its own 120s timer), so
@@ -837,6 +870,28 @@ async def loop(bus):
 
         if cm_due:
             branches.append(("captured_manage", _captured_manage_branch()))
+
+        # Tracked structures — settle, mark and exit the rows the scanner records
+        # to be measured. Not gated by the auto-close switch: nothing here is a
+        # position, and a row left unmanaged is a row with no outcome.
+        tm_due = False
+        try:
+            tm_due, tm_slot = tracked_manage_due(now, last_tracked_slot)
+            if tm_due:
+                last_tracked_slot = tm_slot
+        except Exception:
+            log.exception("tracked_manage_due gate degraded")
+            tm_due = False
+
+        async def _tracked_manage_branch():
+            try:
+                await loop_.run_in_executor(
+                    None, handlers.run_tracked_manage_and_publish, bus)
+            except Exception:
+                log.exception("run_tracked_manage_and_publish branch degraded")
+
+        if tm_due:
+            branches.append(("tracked_manage", _tracked_manage_branch()))
 
         # Manual Paper Portfolio hourly entry+manage — open new paper trades from
         # the current captured signals AND reprice/auto-close existing ones, once

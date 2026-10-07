@@ -35,6 +35,7 @@ from services.options_svc import push_notify
 from services.options_svc import rate_trade
 # The rescue menu's own vocabulary: what a candidate IS, for rescue_apply.
 from services.options_svc import rescue
+from services.options_svc import tracked
 # X (design 2026-09-22): the image card posted with each market report.
 from services.options_svc import report_card
 import os
@@ -291,6 +292,11 @@ CACHE_CAPTURED_CLOSED = "cache:options:captured_closed"
 EVENT_CAPTURED_CLOSED = "events:options:captured_closed"
 CACHE_CAPTURED_PERF = "cache:options:captured_perf"
 EVENT_CAPTURED_PERF = "events:options:captured_perf"
+# The TRACKED structures (services/options_svc/tracked.py): what the scanner
+# records that is not a credit spread, measured and never traded. Its own view,
+# because every reader of the captured views excludes these rows.
+CACHE_TRACKED = "cache:options:tracked"
+EVENT_TRACKED = "events:options:tracked"
 CACHE_AUTOCLOSE_ENABLED = "cache:options:autoclose_enabled"
 
 # MANUAL paper account's opt-in break-even lifecycle toggle — the INVERSE
@@ -1589,6 +1595,28 @@ def publish_captured_performance(bus) -> None:
     data = compute.captured_performance()
     version = bus.cache_set(CACHE_CAPTURED_PERF, data)
     bus.publish(EVENT_CAPTURED_PERF, {"version": version})
+
+
+def publish_tracked(bus) -> None:
+    """Publish the tracked structures' view (``cache:options:tracked``).
+
+    Reads ``signals.db`` only - no Schwab call. ``tracked.view`` is defensive,
+    and an unchanged view is a skipped write (it carries no clock of its own)."""
+    bus.cache_set(CACHE_TRACKED, tracked.view(), event=EVENT_TRACKED,
+                  skip_unchanged=True)
+
+
+def run_tracked_manage_and_publish(bus) -> None:
+    """Settle, mark and exit the open tracked structures, then republish them.
+
+    The scheduler's tracked tick. Writes outcomes to ``signals.db`` and never a
+    paper book or a broker order; nothing here pushes to a phone, since a
+    tracked row is a measurement and not a position."""
+    res = tracked.manage_cycle()
+    publish_tracked(bus)
+    for c in (res or {}).get("closed") or []:
+        log.info("tracked close: %s %s %s @ %s", c.get("symbol"),
+                 c.get("strategy"), c.get("reason"), c.get("exit_val"))
 
 
 # The two operator switches, on disk as well as in Redis. Redis was their only
@@ -3564,6 +3592,7 @@ def _cmd_paper_analyze(bus, command):
 @_command("captured_reload")
 def _cmd_captured_reload(bus, command):
     refresh_captured(bus)
+    publish_tracked(bus)
 
 
 @_command("captured_reprice")

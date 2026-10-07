@@ -71,6 +71,7 @@ _BRANCH_HANDLERS = (
     "publish_gex_status", "publish_gamma_briefing_index", "refresh_matrix_spots",
     "collect_gex_history", "refresh_gamma_current", "refresh_gamma_published",
     "run_captured_manage_and_publish",
+    "publish_tracked", "run_tracked_manage_and_publish",
     "run_paper_entry_and_manage", "run_paper_settle", "run_scheduled_gamma_analyze",
     "run_action_alert", "run_eod_summary", "run_market_snapshot", "run_trade_idea",
     "refresh_calibration", "refresh_ledger_caps",
