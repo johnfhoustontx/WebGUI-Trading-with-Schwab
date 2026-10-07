@@ -244,22 +244,22 @@ def test_a_stream_that_carries_documents_is_capped_at_its_own_small_number(
         monkeypatch):
     b = Bus(fake=True)
     calls = _xadd_spy(b, monkeypatch)
-    for stream in ("cmd:blog", "cmd:blog_inbox"):
-        b.enqueue_command(stream, {"type": "draft_submit", "args": {"html": "<p>"}})
-    assert [(c["stream"], c["maxlen"]) for c in calls] == [
-        ("cmd:blog", 50), ("cmd:blog_inbox", 50)]
+    # cmd:blog is the one stream that ships with a cap of its own. (The parked
+    # connector's cmd:blog_inbox was a second until nothing wrote it.)
+    b.enqueue_command("cmd:blog", {"type": "draft_submit", "args": {"html": "<p>"}})
+    assert [(c["stream"], c["maxlen"]) for c in calls] == [("cmd:blog", 50)]
     assert all(c["approximate"] is True for c in calls)
 
 
 def test_a_small_cap_bounds_what_the_stream_holds_and_keeps_the_newest():
     b = Bus(fake=True)
     for i in range(200):
-        b.enqueue_command("cmd:blog_inbox", {"type": "draft_submit", "args": {"i": i}})
+        b.enqueue_command("cmd:blog", {"type": "draft_submit", "args": {"i": i}})
         b.enqueue_command("cmd:keepx", {"type": "x", "args": {"i": i}})
     # fakeredis trims exactly to maxlen, approximate or not (see the test above).
-    assert b._r.xlen("cmd:blog_inbox") == 50
+    assert b._r.xlen("cmd:blog") == 50
     kept = [json.loads(fields["data"])["args"]["i"]
-            for _id, fields in b._r.xrange("cmd:blog_inbox")]
+            for _id, fields in b._r.xrange("cmd:blog")]
     assert kept == list(range(150, 200))
     # A neighbour on the default cap lost nothing.
     assert b._r.xlen("cmd:keepx") == 200
@@ -628,12 +628,12 @@ def test_a_stranded_document_is_dead_lettered_small_and_reported_whole():
     """The whole path, at the shipped limit: a draft stranded by a restart."""
     html = "<p>" + "nuclear " * 25_000 + "</p>"               # ~200 KB
     b = Bus(fake=True)
-    b.enqueue_command("cmd:blog_inbox", {"type": "draft_submit",
-                                         "args": {"html": html}})
-    b.consume_commands("cmd:blog_inbox", group="g", consumer="c1", block_ms=10)
+    b.enqueue_command("cmd:blog", {"type": "draft_submit",
+                                   "args": {"html": html}})
+    b.consume_commands("cmd:blog", group="g", consumer="c1", block_ms=10)
     seen = []
-    assert b.drain_pending("cmd:blog_inbox", "g", "c2", on_entry=seen.append) == 1
-    [(raw, rec)] = _dead(b, "cmd:blog_inbox")
+    assert b.drain_pending("cmd:blog", "g", "c2", on_entry=seen.append) == 1
+    [(raw, rec)] = _dead(b, "cmd:blog")
     assert rec["truncated"] is True
     assert len(raw) < 64 * 1024 + 1024                       # was ~200 KB
     assert rec["fields"]["data"].startswith('{"type":"draft_submit"')

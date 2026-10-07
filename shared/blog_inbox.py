@@ -3,31 +3,37 @@
 An entry on the site's Blog (its list is ``neuralstrike.co/blog.html``, which
 ``neuralstrike.co/blog`` redirects to at the edge; an entry is at
 ``/blog/<slug>/``) is a self-contained HTML document written in Claude Chat.
-It arrives as a DRAFT - through the connector gate
-(``services/blog_gate``, phase 2) or an upload on the private Blog page - and
-reaches the public site only when the operator presses Publish. Three
-processes take part, and all three import this module, so the stream names, the
-command shapes, the validators and the limits cannot drift between the one that
-asks and the one that answers:
+It arrives as a DRAFT, through an upload on the private Blog page, and reaches
+the public site only when the operator presses Publish. Two processes take
+part, and both import this module, so the stream name, the command shapes, the
+validators and the limits cannot drift between the one that asks and the one
+that answers:
 
 * ``blog_svc`` owns drafts and entries and is the only writer of the site's
   blog files. It runs every validator here AGAIN on what it reads: a command
   on a stream proves nothing about who built it.
 * the private app's ``/blog`` page enqueues on ``cmd:blog`` (``OWNER_DOMAIN``).
-* the gate, the one internet-facing piece, may append to ``INBOX_STREAM`` and
-  nowhere else.
 
-Design: docs/plans/2026-10-06-site-blog-design.md.
+Design: docs/plans/2026-10-06-site-blog-design.md; what is built:
+docs/reference/blog.md.
 
-⚠ **Nothing publishes without the operator.** ``submit_command`` and
-``revise_command`` are the only builders whose output belongs on
-``INBOX_STREAM``, and neither can produce a publish, discard or unpublish:
-those come from ``owner_command`` and travel on ``cmd:blog``. The service
-enforces the same split with two handler tables; this pins the builders.
+**PARKED: the connector.** The design has a third process, a gate that would
+let a conversation in Claude Chat file a draft directly. NONE of it is built:
+there is no gate, nothing writes ``INBOX_STREAM``, and ``blog_svc`` reads
+``cmd:blog`` only. What this module still carries for it is inert and marked
+where it stands: ``INBOX_STREAM``, ``INBOX_TYPES``, ``revise_command``,
+``answer_view`` and the ``"chat"`` source. If the connector is built:
 
-⚠ ``INBOX_STREAM`` will also be named in the gate's Redis ACL write selector
-(phase 2). Renaming it here without the ACL makes every connector call fail
-with NOPERM.
+* ``INBOX_STREAM`` carries whole documents and needs a cap of its own first
+  (``config/services.toml [stream_keep]``;
+  ``shared/tests/test_service_limits.py`` fails the day something names the
+  stream without one). It would also be named in the gate's Redis ACL write
+  selector, so renaming it here without the ACL would fail every call.
+* ``submit_command`` and ``revise_command`` are the only builders whose output
+  belongs on it, and neither can produce a publish, discard or unpublish.
+
+⚠ **Nothing publishes without the operator.** Publish, discard and unpublish
+come from ``owner_command`` alone and travel on ``cmd:blog``.
 
 ⚠ ``cache:blog:*`` is readable by the public live process. No view named here
 may ever carry a document, a connection code or a token.
@@ -51,8 +57,11 @@ from shared.config_toml import toml_loader
 
 # ── the streams and the views ────────────────────────────────────────────────
 
-# The gate's ONLY write. Deliberately not ``cmd:blog``: that stream carries the
-# operator's Publish, and the gate's Redis user must be unable to reach it.
+# PARKED (see the module docstring): nothing writes or reads this stream. As
+# designed it is the gate's ONLY write, and deliberately not ``cmd:blog``: that
+# stream carries the operator's Publish, and the gate's Redis user must be
+# unable to reach it. It has NO cap of its own in ``[stream_keep]`` while it is
+# unused; it needs one before anything writes it.
 INBOX_STREAM = "cmd:blog_inbox"
 # The private app's commands go on ``cmd:<OWNER_DOMAIN>``, the spelling
 # ``bus_client.request(domain, command)`` takes.
@@ -186,11 +195,13 @@ def new_id() -> str:
 
 
 def answer_view(request_id) -> str:
-    """The cache VIEW holding how ONE connector request ended.
+    """The cache VIEW that would hold how ONE connector request ended.
 
-    Every inbox request gets one, a refusal as much as a result, and it expires
-    (``[limits] answer_keep_sec``): the gate polls its own answer and never a
-    map of everyone's.
+    PARKED with the connector: nothing writes or reads such a view in this
+    build. As designed, every inbox request gets one, a refusal as much as a
+    result, and it expires, so the gate polls its own answer and never a map of
+    everyone's. (How long it lives was a setting, ``answer_keep_sec``; it went
+    when nothing read it and comes back with whatever writes the view.)
 
     Raises ``ValueError`` for anything that is not an id. The id becomes part of
     a Redis KEY NAME, so a string this module did not make is never spliced into
@@ -246,8 +257,6 @@ DEFAULTS = {
         "max_html_kb": 512,
         # Drafts waiting at once; a new one is refused past this.
         "max_drafts": 20,
-        # Drafts the connector may file in an hour.
-        "submissions_per_hour": 12,
         # The longest title, summary, tag and address kept, in characters, and
         # how many tags. A longer title, summary or tag is CUT; a longer address
         # is REFUSED (half an address is a different address).
@@ -256,18 +265,14 @@ DEFAULTS = {
         "max_tags": 6,
         "tag_chars": 24,
         "slug_chars": 80,
-        # A connector request older than this is answered "expired" unprocessed:
-        # it covers a replayed backlog and a queue that has fallen behind.
-        "max_wait_sec": 120,
-        # How long a connector answer key lives. Every one must expire or their
-        # count grows without limit.
-        "answer_keep_sec": 120,
         # Each document is cleaned in a WORKER PROCESS killed after this many
         # seconds; an overrun is refused ("too_slow"). The HTML parser's cost is
         # not linear in the input (one tag with tens of thousands of attributes
         # takes minutes at the size limit), and this - not a pre-parse scan - is
-        # what bounds it. Must stay well under max_wait_sec, so an overrun is
-        # answered before the request itself expires.
+        # what bounds it. The service runs one command at a time, so every
+        # other request waits behind a clean; one older than ``[age]
+        # replay_max_sec`` (config/services.toml, 900 s) when its turn comes is
+        # dropped unrun by the scaffold. Must stay well under that.
         "clean_sec": 20,
         # The address space the clean worker may use, in MB, lowered with
         # setrlimit on POSIX (on Windows only the wall-clock kill applies). It
@@ -302,7 +307,7 @@ DEFAULTS = {
         # Seconds one request may take, and seconds ALL of an entry's requests
         # may take together. The second is the one that protects the queue: 24
         # files timing out one after another at 10 s each would hold the
-        # service for four minutes, twice ``[limits] max_wait_sec``.
+        # service, and every request waiting behind this one, for four minutes.
         "timeout_sec": 10,
         "total_sec": 30,
         # Who the service says it is when it asks Google Fonts. Google chooses
@@ -321,8 +326,8 @@ DEFAULTS = {
 # offer exactly the range that is enforced here.
 #
 # The ceilings are not decoration. A document travels inside ONE stream entry,
-# and each of the two blog streams keeps its newest ``[stream_keep]`` entries
-# (config/services.toml: shipped 50, at most 500 for these two streams -
+# and ``cmd:blog`` keeps its newest ``[stream_keep]`` entries
+# (config/services.toml: shipped 50, at most 500 for this stream -
 # ``shared.service_limits.STREAM_KEEP_CEILINGS``). ``max_html_kb`` times that
 # number is what one stream can hold of Redis memory:
 #     512 KB x  50   about  25 MB   as shipped
@@ -337,14 +342,11 @@ BOUNDS = {
     ("site", "republish_min"): (1, 1440),
     ("limits", "max_html_kb"): (1, 4096),
     ("limits", "max_drafts"): (1, 200),
-    ("limits", "submissions_per_hour"): (1, 600),
     ("limits", "title_chars"): (1, 300),
     ("limits", "summary_chars"): (1, 1000),
     ("limits", "max_tags"): (1, 24),
     ("limits", "tag_chars"): (1, 64),
     ("limits", "slug_chars"): (16, 120),
-    ("limits", "max_wait_sec"): (1, 3600),
-    ("limits", "answer_keep_sec"): (1, 3600),
     ("limits", "clean_sec"): (2, 120),
     ("limits", "clean_mem_mb"): (128, 4096),
     ("fonts", "max_links"): (1, 16),
@@ -650,7 +652,7 @@ def clean_fields(raw) -> dict:
     the operator their address was refused must call ``clean_slug`` itself.
 
     Tags are compared without case, first spelling kept. Stable on its own
-    output, so the gate cleaning and the service cleaning again is one clean."""
+    output, so the page cleaning and the service cleaning again is one clean."""
     lim = limits()
     src = raw if isinstance(raw, dict) else {}
     tags, seen = [], set()
@@ -693,13 +695,16 @@ def html_ok(html) -> bool:
 
 # ── the commands ─────────────────────────────────────────────────────────────
 
-# Where a draft came from. The service does not believe it: it stamps "chat" on
-# everything read from INBOX_STREAM and "upload" on everything from cmd:blog.
+# Where a draft came from. The service does not believe it: it stamps "upload"
+# on everything it reads from cmd:blog, whatever the command says. ("chat" is
+# what the PARKED connector's drafts would be stamped; nothing stamps it today.)
 SOURCES = ("chat", "upload")
 
 SUBMIT_TYPE = "draft_submit"
+# PARKED: the service has no handler for it (its command table is the four in
+# ``blog_svc.handlers.COMMANDS``), so one sent today is answered "not understood".
 REVISE_TYPE = "draft_revise"
-# Everything that belongs on INBOX_STREAM. No member may ever change what the
+# PARKED: what would belong on INBOX_STREAM. No member may ever change what the
 # public sees.
 INBOX_TYPES = (SUBMIT_TYPE, REVISE_TYPE)
 
@@ -720,8 +725,9 @@ def submit_command(html, fields, *, source, request_id, revises=None) -> dict | 
     the mistake that refusal stops. Whether such an entry is published is the
     service's to say, not this builder's.
 
-    Valid on both streams: the gate puts it on ``INBOX_STREAM``, the private
-    page's upload on ``cmd:blog``. Either way it makes a DRAFT."""
+    The private page's upload puts it on ``cmd:blog``, and it makes a DRAFT,
+    never an entry. (The parked connector's gate would put the same command on
+    ``INBOX_STREAM``.)"""
     if source not in SOURCES or not is_id(request_id) or not html_ok(html):
         return None
     args = {"request_id": request_id, "source": source, "html": html,
@@ -735,8 +741,10 @@ def submit_command(html, fields, *, source, request_id, revises=None) -> dict | 
 
 
 def revise_command(draft_id, html, fields, *, request_id) -> dict | None:
-    """The command that replaces a draft still waiting, or ``None``. Refuses
-    what ``submit_command`` refuses, and a ``draft_id`` that is not an id."""
+    """PARKED with the connector: nothing sends this and the service has no
+    handler for it. The command that would replace a draft still waiting, or
+    ``None``. Refuses what ``submit_command`` refuses, and a ``draft_id`` that
+    is not an id."""
     if not is_id(draft_id) or not is_id(request_id) or not html_ok(html):
         return None
     return {"type": REVISE_TYPE,

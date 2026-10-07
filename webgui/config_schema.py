@@ -1420,8 +1420,8 @@ _BLOG = ConfigFile(
                   "differs is rewritten.", kind="int", unit="min",
                   min=1, max=1440, step=1),
         )),
-        Section("Drafts", "What is accepted as a draft, from Claude Chat or from "
-                "an upload on the Blog page.", (
+        Section("Drafts", "What is accepted as a draft from an upload on the "
+                "Blog page.", (
             Field("limits.max_html_kb", "Largest document",
                   "A document larger than this is refused before it is read. "
                   "Measured as the file arrives, before anything is removed "
@@ -1431,26 +1431,17 @@ _BLOG = ConfigFile(
                   "With this many drafts waiting, a new one is refused until "
                   "you publish or discard one.",
                   kind="int", unit="drafts", min=1, max=200, step=1),
-            Field("limits.submissions_per_hour", "Drafts from Claude Chat an hour",
-                  "More than this in one hour and the next is refused. Your own "
-                  "uploads on the Blog page are not counted.",
-                  kind="int", unit="drafts", min=1, max=600, step=1),
-            Field("limits.max_wait_sec", "Longest a draft from Claude Chat may wait",
-                  "A draft that waited longer than this before the Blog service "
-                  "reached it is refused, and Claude Chat is told to send it "
-                  "again. It stops a restarted service working through old "
-                  "requests.", kind="int", unit="seconds", min=1, max=3600, step=1),
-            Field("limits.answer_keep_sec", "Keep each reply to Claude Chat for",
-                  "How long the reply to one request can still be collected "
-                  "before it is cleared away.",
-                  kind="int", unit="seconds", min=1, max=3600, step=1),
             Field("limits.clean_sec", "Time to clean one document",
                   "Each document is cleaned in a separate process, stopped if it "
                   "takes longer than this; a document that times out is refused "
                   "and the Blog service moves on. A badly built document can take "
-                  "minutes to parse, so this is the guard. Keep it well under the "
-                  "wait limit above so a timeout is reported before the request "
-                  "itself expires.", kind="int", unit="seconds", min=2, max=120, step=1),
+                  "minutes to parse, so this is the guard. The Blog service does "
+                  "one thing at a time, so every other Blog request waits while "
+                  "a document is cleaned, and a request that has waited longer "
+                  "than \"Every other command\" under Services (900 seconds as "
+                  "shipped) when its turn comes is not carried out. Keep this "
+                  "well under that.",
+                  kind="int", unit="seconds", min=2, max=120, step=1),
             Field("limits.clean_mem_mb", "Memory for cleaning one document",
                   "The memory that cleaning process may use before it is stopped "
                   "(Linux only; on Windows the time limit above is the whole "
@@ -1535,10 +1526,11 @@ _BLOG = ConfigFile(
             Field("fonts.total_sec", "Longest spent copying one entry's typefaces",
                   "For all of one entry's requests together. Once it has "
                   "passed, the typefaces not copied yet are left out and the "
-                  "draft says so. Keep it well under the longest a draft from "
-                  "Claude Chat may wait (Drafts, above): the next draft is not "
-                  "read until this one's typefaces are done, and one that "
-                  "waits too long behind it will expire.",
+                  "draft says so. Keep it well under \"Every other command\" "
+                  "under Services (900 seconds as shipped): the next Blog "
+                  "request is not read until this one's typefaces are done, "
+                  "and one that has waited longer than that expires: it is "
+                  "not carried out.",
                   kind="int", unit="seconds", min=1, max=600, step=1),
             Field("fonts.user_agent", "Browser named to Google Fonts",
                   "Google Fonts sends woff2 files, split by character set, "
@@ -1830,11 +1822,11 @@ _COMMANDS = ConfigFile(
                   kind="int", unit="KB", min=1, max=4096, step=16, restart=()),
         )),
         # Bounds mirror shared.service_limits.stream_keep_bounds(<stream>):
-        # 10..100000, and 10..500 for the two queues whose commands carry a
+        # 10..100000, and 10..500 for the one queue whose commands carry a
         # document (pinned per stream by tests/test_config_schema.py). No
         # restart: the bus reads the cap at every enqueue through the
-        # mtime-cached loader, in whichever process is sending. The two named
-        # queues have entries of their own so they can say why they are small;
+        # mtime-cached loader, in whichever process is sending. The named
+        # queue has an entry of its own so it can say why it is small;
         # the wildcard catches any other stream given a cap by hand in
         # config/local, which would otherwise be in force and shown nowhere.
         Section("How many commands each queue holds",
@@ -1859,13 +1851,6 @@ _COMMANDS = ConfigFile(
                   "that is about 25 MB of the server's memory; at 500, the "
                   "most allowed here, about 250 MB. More than this many sent "
                   "while the blog service is stopped, and the oldest are lost.",
-                  kind="int", unit="commands", min=10, max=500, step=10),
-            Field("stream_keep.cmd:blog_inbox", "Drafts arriving from Claude Chat",
-                  "Kept small on purpose: every one of these carries a whole "
-                  "document. At 50 that is about 25 MB of the server's memory; "
-                  "at 500, the most allowed here, about 250 MB. More than this "
-                  "many drafts sent while the blog service is stopped, and the "
-                  "oldest are lost.",
                   kind="int", unit="commands", min=10, max=500, step=10),
             Field("stream_keep.*", "",
                   "A queue given its own number by hand in the settings file, "

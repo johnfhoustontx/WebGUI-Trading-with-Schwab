@@ -3911,13 +3911,13 @@ edit, restart the blog service; the web app needs no restart.</p>
 <td><code>enabled</code></td>
 <td><code>true</code></td>
 <td>—</td>
-<td>Off: drafts can still be uploaded and previewed, and Publish still records the entry, but nothing is written to the public site. The answer says so.</td>
+<td>Off: drafts can still be uploaded and previewed, and Publish and Unpublish still change the store, but nothing is written to or removed from the public site: an entry unpublished while it is off stays on the site. The answer says so each time. Switched back on, the site catches up at the next pass below.</td>
 </tr>
 <tr>
 <td><code>republish_min</code></td>
 <td>30</td>
 <td>1–1440</td>
-<td>Minutes between re-publishing the drafts and entries lists. They are published on every change; this heals a flushed Redis.</td>
+<td>Minutes between passes. Each pass re-publishes the drafts and entries lists and checks the site's blog files against the store, rewriting only what differs. Both also happen on every change; the pass heals a flushed Redis, retries a site write that failed, and catches the site up after <code>enabled</code> is switched back on.</td>
 </tr>
 </tbody>
 </table>
@@ -3986,14 +3986,13 @@ edit, restart the blog service; the web app needs no restart.</p>
 <td>128–4096</td>
 <td>Memory the cleaning worker may use, in MB. Linux only.</td>
 </tr>
-<tr>
-<td><code>submissions_per_hour</code>, <code>max_wait_sec</code>, <code>answer_keep_sec</code></td>
-<td>12, 120, 120</td>
-<td>—</td>
-<td><strong>Not read by this build.</strong> They belong to the connector that would let Claude Chat file a draft, which is not built.</td>
-</tr>
 </tbody>
 </table>
+<p><code>clean_sec</code> and <code>[fonts] total_sec</code> (below) are how long one upload can hold the
+service, which runs one command at a time. A command that is older than <code>[age]
+replay_max_sec</code> in <code>config/services.toml</code> (900 s as shipped) when its turn comes
+is not run, and the page is told the request waited too long. At their ceilings
+the two come to 720 s, so one upload cannot expire the request behind it.</p>
 <p><code>max_html_kb</code> has a ceiling because a document travels inside one command, and the
 <code>cmd:blog</code> queue keeps its newest 50 commands (<code>config/services.toml</code>
 <code>[stream_keep]</code>). The two multiply: 512 KB × 50 is about 25 MB of Redis; both at
@@ -4184,7 +4183,7 @@ names any more is deleted after a publish, a discard or an unpublish.</p>
 </tr>
 <tr>
 <td>Every <code>republish_min</code> (30 min)</td>
-<td>The two lists are published again. The site is rebuilt again only if the last rebuild fell short.</td>
+<td>The site's blog files are checked against the store and only what differs is rewritten, then the two lists are published again. This is what retries a site write that failed and what puts entries on the site (and takes unpublished ones off) after <code>[site] enabled</code> is switched back on.</td>
 </tr>
 <tr>
 <td>Every 30 s</td>
@@ -4450,7 +4449,7 @@ the source; this table is a summary of them.</p>
 </tr>
 <tr>
 <td>blog_svc</td>
-<td>The loop wakes every <strong>30 s</strong> (<code>TICK_S</code>) to beat its heartbeat and re-read the interval. <strong>At start</strong>: repair the store, rebuild every entry page on the site, publish the two list views. <strong>Then every 30 min</strong> (<code>[site] republish_min</code> in <code>config/blog.toml</code>, 1 to 1440, counted from the END of the last pass): the two views again, and the site rebuild again only while the last one fell short. A pass that fails is retried at the next wake. Everything else is on demand, when the Blog page sends a command.</td>
+<td>The loop wakes every <strong>30 s</strong> (<code>TICK_S</code>) to beat its heartbeat and re-read the interval. <strong>At start</strong>: repair the store, rebuild every entry page on the site, publish the two list views. <strong>Then every 30 min</strong> (<code>[site] republish_min</code> in <code>config/blog.toml</code>, 1 to 1440, counted from the END of the last pass): the site rebuild again, which rewrites only what differs from the store, and the two views again. A pass that fails is retried at the next wake. Everything else is on demand, when the Blog page sends a command.</td>
 </tr>
 </tbody>
 </table>

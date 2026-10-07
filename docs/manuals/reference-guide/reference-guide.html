@@ -5816,8 +5816,8 @@ that did not go out is listed with the reason, rather than simply not appearing.
 made from it, publish it, and take a published entry back off. An entry is one
 self-contained HTML document: a file that carries its own styles and needs nothing
 else to display. On the site, the list of entries is at <code>neuralstrike.co/blog.html</code>
-(<strong>Blog</strong> in the site's menu) and each entry has a page of its own at
-<code>neuralstrike.co/blog/&lt;address&gt;/</code>.</p>
+(<strong>Blog</strong> in the site's menu; typing <code>neuralstrike.co/blog</code> goes to the same page)
+and each entry has a page of its own at <code>neuralstrike.co/blog/&lt;address&gt;/</code>.</p>
 <h3 id="where-the-data-comes-from_30">Where the data comes from</h3>
 <p>The page changes nothing itself. Each action is a command to the blog service, which
 cleans an uploaded document, keeps it as a draft, and — only on <strong>Publish</strong> — writes it
@@ -5831,7 +5831,8 @@ through the private app, behind the login.</p>
 of one that is already published.</p>
 <p><strong>Drafts waiting</strong> has one card per draft: where it came from, its size, when it
 arrived (Central time), and what cleaning removed. A replacement names the entry it
-replaces. A draft whose typefaces could not all be copied says so in one sentence.
+replaces and starts with that entry's tags. A draft whose typefaces could not all be
+copied says so in one sentence.
 The four fields are what will be published with it. Up to twenty drafts wait at
 once as shipped; past that an upload is refused until one is published or discarded.</p>
 <table>
@@ -5868,8 +5869,11 @@ without passing through cleaning, a draft you can look at, and your own Publish.
 <li><strong>Preview before publishing.</strong> Cleaning can change how a page looks.</li>
 <li><strong>Unpublish removes the page</strong>, and its address stops working. To bring an entry
   back, upload its file again.</li>
-<li><strong>Publish is greyed out</strong> while the title is empty or the address cannot be used;
-  when it is the address, the reason is shown under it.</li>
+<li><strong>Publish is greyed out</strong> while the title is empty or the address cannot be used,
+  and the reason is shown in red under the address (the title first, if it is empty).</li>
+<li><strong>With "Write entries to the site" switched off</strong> in Settings, Publish and Unpublish
+  change nothing on the public site and the message says so: an unpublished entry
+  stays up. Switched back on, the site catches up within the refresh time set there.</li>
 <li><strong>On the site an entry is shown inside a frame</strong> that runs no scripts, under the
   site's own menu. A link in an entry that leaves the page opens in a new tab.</li>
 <li><strong>Every upload comes from this page.</strong> A draft's first line reads "Uploaded file".

@@ -631,8 +631,7 @@ def test_the_queue_caps_expand_to_one_row_each_and_a_hand_named_queue_joins_them
                if any(f.key.startswith("stream_keep.") for f in s.fields))
     rows = _rows("services.toml", sec.title)
     assert [p for p, _f, _l in rows] == [("stream_keep", "default"),
-                                         ("stream_keep", "cmd:blog"),
-                                         ("stream_keep", "cmd:blog_inbox")]
+                                         ("stream_keep", "cmd:blog")]
     assert all(label and "cmd:" not in label for _p, _f, label in rows)
 
     with_named = ce.expand_fields(cfg, sec, {}, {("stream_keep", "cmd:options"): 300})

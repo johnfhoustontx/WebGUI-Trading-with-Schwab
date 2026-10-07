@@ -23,7 +23,7 @@ One writer, any number of readers
 ---------------------------------
 **ONE process may write here: the service.** Every ``Store`` in that process,
 on one data folder, shares one lock (``_lock_for``), held around each public
-call - the file steps included - so the service's two command streams and its
+call - the file steps included - so the service's command stream and its
 scheduler branch are safe together, with one ``Store`` or one each.
 
 A second process may READ, through ``blog_inbox.read_document`` and

@@ -472,6 +472,11 @@ is in git; `--install` also arms the timers). Start order: Redis (a system unit)
   script, so the module shadows the stdlib one and the service dies on launch
   while the suite stays green. Putting several hyphenated app folders on
   `sys.path` makes same-named modules (`scoring`, `notifier`, `config`) collide.
+- A child process started with a cut-down environment must be handed `TZ`.
+  `repo_paths` refuses a clock that is not Central at import, and that guard is
+  inert under pytest in the parent but live in a child: without `TZ` the child
+  dies on any host whose own zone is not Central, and the suite on a Central
+  box stays green (the blog's clean worker, `clean_bound._SAFE_ENV`).
 - `shared/analysis_lib` is a LIBRARY of three modules (`technical`,
   `sector_analysis`, `config`); `shared/tests/test_analysis_lib_surface.py` fails
   if the old app grows back.
@@ -651,8 +656,9 @@ Detail: [observability and performance](docs/reference/observability-and-perform
   scheduler branch is a keyed background task and can only delay itself.
 - **A command stream's length is per stream** (`config/services.toml
   [stream_keep]`, 1000 by default). Past the cap the OLDEST commands are dropped
-  whether or not they ran; the two blog streams ship at 50 because one command
-  there carries a whole document. A dead letter's fields are cut to
+  whether or not they ran; `cmd:blog` ships at 50 because one command there
+  carries a whole document. A new stream whose commands carry a document needs
+  a cap of its own BEFORE anything writes it. A dead letter's fields are cut to
   `[dead_letters] max_field_kb`.
 - **Every service shares the proxy's 5 requests a second.** A scheduled chain
   burst stays off the quarter hours (the autoscan owns :00/:15/:30/:45); read the

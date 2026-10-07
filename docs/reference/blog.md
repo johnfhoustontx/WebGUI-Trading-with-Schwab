@@ -298,8 +298,24 @@ too.
 - The worker reads the document on stdin and writes one JSON object on stdout.
   The parent trusts none of it: the fields, their types, the refusal code and
   every typeface link are checked again before a `Cleaned` is built.
-- The worker inherits an allow-list of environment variables, not the
-  service's environment, which holds keys it has no use for.
+- The worker inherits an allow-list of environment variables
+  (`clean_bound._SAFE_ENV`), not the service's environment, which holds keys it
+  has no use for.
+- ⚠ **`TZ` is on that list, and has to be.** The worker imports `clean`, which
+  imports `shared.blog_inbox`, which imports `repo_paths`, and `repo_paths`
+  refuses to be imported on a clock that is not Central. That guard is inert
+  under pytest in the parent and live in the worker, which is not under pytest.
+  The systemd unit and the CI job say Central with `TZ`; the host's own zone
+  need not be. Without `TZ` the worker dies at import on any such host and
+  every upload is answered "a fault in the cleaner", while the suite on a
+  Central box stays green. Found by the final review; reproduced under WSL with
+  the namespace's `/etc/localtime` set to UTC and `TZ=America/Chicago`
+  exported (six tests failed before the fix, none after). Nothing else the
+  worker imports reads the environment: `repo_paths` reads files only, and
+  `shared.config_toml` reads one variable, and only under pytest.
+- On Windows the C runtime reads `TZ` in the POSIX spelling only: handed
+  `America/Chicago` it takes "Ame" as a zone at offset 0. So the test that
+  starts the real worker under `TZ` uses `CST6CDT` there. Prod is Linux.
 - On POSIX the worker lowers its own address space to `[limits] clean_mem_mb`
   (512 MB) and its CPU time to `clean_sec` plus 5 s, and runs in its own
   session so a timeout kills the whole process group. On Windows there is no
@@ -316,12 +332,15 @@ skips the content of `<script>` and `<style>`, the one place an honest `<` and
 one slips past it. Nothing depends on the scan being complete; the worker's
 timer is the bound.
 
-The comment beside `clean_sec` asks for it to stay well under `[limits]
-max_wait_sec`, so an overrun is answered before the request expires. That key
-belongs to the parked connector and nothing reads it today. The age that
-applies to a `cmd:blog` command is the scaffold's own: one older than `[age]
-replay_max_sec` (900 s, `config/services.toml`) is dropped unrun and answered
-`dropped`.
+**The limit `clean_sec` has to stay under.** The service runs one command at a
+time, so while a document is cleaned every other `cmd:blog` command waits. The
+age that applies to a waiting command is the scaffold's own: one older than
+`[age] replay_max_sec` (900 s, `config/services.toml`) when its turn comes is
+dropped unrun and answered `dropped`. `clean_sec` can be at most 120 and
+`[fonts] total_sec` at most 600, so one upload in front of a request cannot
+expire it even with both at their ceilings (a test pins that sum against the
+shipped age). The comments beside both keys, and their help under Settings,
+name that limit.
 
 ### Two parser versions
 
@@ -616,15 +635,30 @@ What the code still carries for it, and what that means today:
 
 - `shared.blog_inbox` names a second stream, `cmd:blog_inbox`
   (`INBOX_STREAM`), and builds `draft_revise` commands (`revise_command`) and
-  per-request answer views (`answer_view`). Nothing reads that stream:
-  `blog_svc` consumes `cmd:blog` only.
-- `config/blog.toml [limits]` has three keys the built service does not read:
-  `submissions_per_hour`, `max_wait_sec` and `answer_keep_sec`. They are
-  catalogued under Settings → Configuration and changing them changes nothing.
-- `config/services.toml [stream_keep]` caps `cmd:blog_inbox` at 50 beside
-  `cmd:blog`. The cap is harmless on a stream nothing writes.
+  per-request answer views (`answer_view`). Nothing writes or reads that
+  stream: `blog_svc` consumes `cmd:blog` only. Each is marked PARKED where it
+  stands in the module.
 - The store has a `replace_draft` method and a submission log no command
   reaches.
+
+What was removed, and has to come back with the connector:
+
+- **Three settings.** `config/blog.toml [limits]` had `submissions_per_hour`,
+  `max_wait_sec` and `answer_keep_sec`, each with a row under Settings →
+  Configuration. Nothing read them, so changing one changed nothing, and two
+  other settings told the owner to stay under one of them. They are gone from
+  the file, from `blog_inbox.DEFAULTS` and `BOUNDS`, and from the catalogue. A
+  `config/local/blog.toml` that still names one is read without error; the key
+  is ignored.
+- **The cap on `cmd:blog_inbox`.** `config/services.toml [stream_keep]` and
+  `shared/service_limits.py` capped it at 50 beside `cmd:blog`, with a row
+  under Settings ("Drafts arriving from Claude Chat"). ⚠ The stream would carry
+  whole documents exactly as `cmd:blog` does, and with no cap of its own it is
+  trimmed like any other stream, at 1000 entries. That is safe only while
+  nothing writes it. `shared/tests/test_service_limits.py`
+  (`test_the_parked_inbox_stream_has_no_cap_because_nothing_writes_it`) fails
+  the day any code outside `shared/blog_inbox.py` names the stream: restore the
+  cap, its ceiling and its Settings row **before** anything writes to it.
 - The private page can label a draft's source "Claude Chat". Every draft this
   build makes is stamped `upload`.
 

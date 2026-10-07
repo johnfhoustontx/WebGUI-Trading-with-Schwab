@@ -66,17 +66,15 @@ default = 1000
 # A queue named here holds its own number instead of the default. The name is
 # the Redis stream's, in quotes because of the colon.
 #
-# These two are small because each of their commands carries a WHOLE blog
-# document, up to [limits] max_html_kb in config/blog.toml (512 KB as shipped):
-# cmd:blog is the Blog page's uploads and its Publish, cmd:blog_inbox is drafts
-# arriving from Claude Chat. A thousand documents would be about 500 MB of the
-# server's memory in each queue; fifty is about 25 MB. The price is the one
-# above: more than fifty drafts sent while the blog service is stopped, and the
-# oldest are lost.
-# 10 to 500 for these two (500 is about 250 MB each). A value outside that, or
-# one that cannot be read, falls back to 50, not to the default above.
+# This one is small because an upload on it carries a WHOLE blog document, up
+# to [limits] max_html_kb in config/blog.toml (512 KB as shipped): cmd:blog is
+# the Blog page's uploads and its Publish. A thousand documents would be about
+# 500 MB of the server's memory; fifty is about 25 MB. The price is the one
+# above: more than fifty uploads sent while the blog service is stopped, and
+# the oldest are lost.
+# 10 to 500 for this queue (500 is about 250 MB). A value outside that, or one
+# that cannot be read, falls back to 50, not to the default above.
 "cmd:blog" = 50
-"cmd:blog_inbox" = 50
 
 [pool]
 # Threads each service keeps for its scheduled work (scans, the one-minute

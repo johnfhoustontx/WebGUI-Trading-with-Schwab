@@ -6,7 +6,8 @@ by the private app's Blog page: ``draft_submit`` (an upload becomes a draft),
 ``publish``, ``discard``, ``unpublish`` (``handlers.handle_command``). Publishes
 ``cache:blog:drafts`` / ``cache:blog:posts`` and answers every command on
 ``cache:blog:result``. One scheduler job (``scheduler.loop``): repair and
-rebuild at start, then the views again on ``[site] republish_min``.
+rebuild at start, then the rebuild and the views again on ``[site]
+republish_min``.
 
 No Schwab, no Claude. The one thing that leaves the box is the typeface copy at
 upload (``fonts.localize``, Google Fonts only).

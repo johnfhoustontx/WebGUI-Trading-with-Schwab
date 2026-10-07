@@ -593,6 +593,42 @@ def test_the_blog_numbers_are_bounded_exactly_as_the_loader_bounds_them():
     assert numeric == set(blog_inbox.BOUNDS)
 
 
+def test_the_blog_offers_no_setting_that_nothing_reads():
+    """Three settings belonged to a connector that is not built (drafts filed
+    from Claude Chat): how many an hour, how long one may wait, how long a
+    reply is kept. Changing them changed nothing, and two other settings told
+    the owner to keep under one of them."""
+    cfg = cs.BY_NAME["blog.toml"]
+    fields = {f.key: f for sec in cfg.sections for f in sec.fields}
+    assert not {"limits.submissions_per_hour", "limits.max_wait_sec",
+                "limits.answer_keep_sec"} & set(fields)
+    for sec in cfg.sections:
+        for text in (sec.title, sec.help):
+            assert "from Claude Chat" not in (text or ""), sec.title
+    for key, fld in fields.items():
+        assert "from Claude Chat" not in fld.label + fld.help, key
+        assert "reply to Claude Chat" not in fld.label + fld.help, key
+
+
+def test_the_two_blog_time_limits_name_the_limit_that_really_applies():
+    """A ``cmd:blog`` request that has waited too long is dropped by the
+    scaffold at ``[age] replay_max_sec`` (Settings, Services, "Every other
+    command"), not at a blog setting. The help text says which, by the words
+    that setting has on its own page."""
+    from shared import service_limits
+    services = cs.BY_NAME["services.toml"]
+    _sec, replay = cs.locate(services, ("age", "replay_max_sec"))
+    shipped = service_limits.DEFAULTS["age"]["replay_max_sec"]
+    cfg = cs.BY_NAME["blog.toml"]
+    fields = {f.key: f for sec in cfg.sections for f in sec.fields}
+    for key in ("limits.clean_sec", "fonts.total_sec"):
+        said = fields[key].help
+        assert "wait limit above" not in said and "may wait" not in said, key
+        assert replay.label in said and services.title in said, key
+        assert str(shipped) in said, key
+        assert fields[key].max < shipped, key
+
+
 def test_a_blog_value_at_either_bound_is_one_the_loader_uses(monkeypatch):
     """End to end over every number: what the form accepts at its lowest and
     its highest is what the service then reads back - never the shipped value
@@ -725,7 +761,7 @@ def test_the_blog_typeface_subsets_keep_their_lower_case(monkeypatch):
 def test_the_queue_caps_are_catalogued_and_bounded_as_the_loader_bounds_them():
     """``shared.service_limits.stream_keep`` reads a cap outside the stream's
     own bounds as the fallback, so the form must offer that range and no other:
-    10..100000 for a queue of ordinary commands, 10..500 for the two whose
+    10..100000 for a queue of ordinary commands, 10..500 for the one whose
     commands carry a whole document. Catalogue and loader are pinned against
     each other, per stream, and then run end to end."""
     from shared import service_limits as sl
@@ -744,7 +780,10 @@ def test_the_queue_caps_are_catalogued_and_bounded_as_the_loader_bounds_them():
                 cs.parse(fld, outside)
     assert sl.stream_keep_bounds("default") == (10, 100000)
     assert sl.stream_keep_bounds("cmd:blog") == (10, 500)
-    assert sl.stream_keep_bounds("cmd:blog_inbox") == (10, 500)
+    # Exactly these rows: the default and the Blog page's own queue. The parked
+    # connector's cmd:blog_inbox had a row ("Drafts arriving from Claude Chat")
+    # for a queue nothing writes.
+    assert set(shipped) == {"default", "cmd:blog"}
 
 
 def test_a_queue_cap_at_either_bound_is_one_the_loader_uses(monkeypatch):
@@ -753,7 +792,6 @@ def test_a_queue_cap_at_either_bound_is_one_the_loader_uses(monkeypatch):
     from shared import service_limits as sl
     cfg = cs.BY_NAME["services.toml"]
     for name, stream in (("default", "cmd:options"), ("cmd:blog", "cmd:blog"),
-                         ("cmd:blog_inbox", "cmd:blog_inbox"),
                          ("cmd:options", "cmd:options")):
         _sec, fld = cs.locate(cfg, ("stream_keep", name))
         for edge in (fld.min, fld.max):
@@ -776,8 +814,11 @@ def test_a_queue_someone_names_by_hand_is_still_shown_and_bounded():
     # ...and the shipped names keep their own entries, with their own words.
     _s, default = cs.locate(cfg, ("stream_keep", "default"))
     _s, blog = cs.locate(cfg, ("stream_keep", "cmd:blog"))
+    assert len({default.key, blog.key, fld.key}) == 3
+    # The parked connector's queue has no entry of its own any more: named by
+    # hand it is shown by the same rule as any other queue.
     _s, inbox = cs.locate(cfg, ("stream_keep", "cmd:blog_inbox"))
-    assert len({default.key, blog.key, inbox.key, fld.key}) == 4
+    assert inbox.key == fld.key == "stream_keep.*"
 
 
 def test_a_queue_cap_needs_no_restart_and_the_rest_of_the_file_still_does():
@@ -785,7 +826,7 @@ def test_a_queue_cap_needs_no_restart_and_the_rest_of_the_file_still_does():
     whichever process is sending. Offering a restart here would bounce every
     service for a change that had already taken effect."""
     cfg = cs.BY_NAME["services.toml"]
-    for name in ("default", "cmd:blog", "cmd:blog_inbox", "cmd:options"):
+    for name in ("default", "cmd:blog", "cmd:options"):
         sec, fld = cs.locate(cfg, ("stream_keep", name))
         assert tuple(cs.restart_for(cfg, sec, fld)) == (), name
     sec, fld = cs.locate(cfg, ("dead_letters", "keep"))
@@ -805,12 +846,11 @@ def test_the_services_file_offers_a_restart_of_the_blog_service_too():
     assert cs.BLOG in cs.restart_for(cfg, sec, fld)
 
 
-def test_the_document_queues_say_why_they_are_small():
+def test_the_document_queue_says_why_it_is_small():
     cfg = cs.BY_NAME["services.toml"]
-    for name in ("cmd:blog", "cmd:blog_inbox"):
-        _sec, fld = cs.locate(cfg, ("stream_keep", name))
-        assert "document" in fld.help, name
-        assert "cmd:" not in fld.label, "a label is words, not a stream name"
+    _sec, fld = cs.locate(cfg, ("stream_keep", "cmd:blog"))
+    assert "document" in fld.help
+    assert "cmd:" not in fld.label, "a label is words, not a stream name"
 
 
 def test_a_queue_cap_override_round_trips_through_the_writer(tmp_path):
@@ -830,8 +870,8 @@ def test_a_queue_cap_override_round_trips_through_the_writer(tmp_path):
         config_toml.dumps(store.effective(shipped, over)), encoding="utf-8")
     load, _reset = toml_loader(tmp_path / "services.toml", sl.DEFAULTS)
     table = load()["stream_keep"]
-    assert (table["cmd:blog"], table["cmd:options"], table["cmd:blog_inbox"],
-            table["default"]) == (20, 300, 50, 1000)
+    assert (table["cmd:blog"], table["cmd:options"], table["default"]) == (20, 300, 1000)
+    assert set(table) == {"cmd:blog", "cmd:options", "default"}
 
 
 def test_the_dead_letter_field_limit_is_catalogued_and_bounded_as_the_loader():

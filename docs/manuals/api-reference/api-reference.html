@@ -416,17 +416,14 @@ enqueue, so a change needs no restart):</p>
 <td>10–500</td>
 <td>the Blog page's uploads and its Publish</td>
 </tr>
-<tr>
-<td><code>"cmd:blog_inbox"</code></td>
-<td>50</td>
-<td>10–500</td>
-<td>reserved for the connector, which is not built; nothing writes it</td>
-</tr>
 </tbody>
 </table>
-<p>The two blog streams are small because one of their commands carries a whole
+<p>The blog stream is small because one of its commands carries a whole
 document, up to <code>config/blog.toml [limits] max_html_kb</code> (512 KB): a thousand
-would be about 500 MB of Redis in each, fifty is about 25 MB. A value for a named
+would be about 500 MB of Redis, fifty is about 25 MB. ⚠ A new stream whose
+commands carry a document needs a row of its own here before anything writes
+it. <code>cmd:blog_inbox</code>, the stream of the connector that is not built, has none:
+<code>shared/tests/test_service_limits.py</code> fails the day code names that stream. A value for a named
 stream that is outside its range, or cannot be read, falls back to that stream's
 shipped number, not to <code>default</code>.</p>
 <p>⚠ <strong>The cap is on the stream, not on its history.</strong> Redis drops the oldest
@@ -1274,7 +1271,7 @@ usable id is dropped, because nothing could be told how it ended.</p>
 <tr>
 <td><code>publish</code></td>
 <td><code>request_id</code>, <code>draft_id</code>, <code>fields</code></td>
-<td>The draft becomes an entry (or replaces the entry it revises), the draft is deleted, the site is rebuilt. A title is required. A new entry needs an address <code>clean_slug</code> accepts; a replacement keeps its entry's address.</td>
+<td>The draft becomes an entry (or replaces the entry it revises), the draft is deleted, the site is rebuilt. A title is required. A new entry needs an address <code>clean_slug</code> accepts; a replacement keeps its entry's address. With <code>[site] enabled = false</code> the entry is stored and the answer says nothing was written to the site.</td>
 </tr>
 <tr>
 <td><code>discard</code></td>
@@ -1284,12 +1281,17 @@ usable id is dropped, because nothing could be told how it ended.</p>
 <tr>
 <td><code>unpublish</code></td>
 <td><code>request_id</code>, <code>slug</code></td>
-<td>The entry is removed and the site rebuilt.</td>
+<td>The entry is removed and the site rebuilt. With <code>[site] enabled = false</code> the entry is removed from the store and the answer says its page is still on the site; it comes down at the scheduler's next pass after the site is switched back on.</td>
 </tr>
 </tbody>
 </table>
-<p><code>blog_inbox.submit_command(html, fields, *, source, request_id)</code> builds the first;
-<code>blog_inbox.owner_command(kind, request_id, **args)</code> builds the other three, and
+<p>A replacement draft (<code>draft_submit</code> with <code>revises</code>) takes its tags from the entry
+it replaces when the command's <code>fields</code> carry none; its title and summary are the
+new document's.</p>
+<p><code>blog_inbox.submit_command(html, fields, *, source, request_id, revises=None)</code>
+builds the first. <code>revises</code> is the address of the entry being replaced: left out,
+the command has no <code>revises</code> key; given, it must be an address <code>existing_slug</code>
+accepts or no command is built. <code>blog_inbox.owner_command(kind, request_id, **args)</code> builds the other three, and
 returns <code>None</code> for an unknown kind, a bad id, an unusable target, or an argument
 the kind does not take. The service runs every validator again on what it reads.</p>
 <p>⚠ <code>handle_command</code> never raises. The scaffold dead-letters a command whose handler
@@ -1418,7 +1420,7 @@ answer whoever sent the command.</p>
 </tr>
 <tr>
 <td><code>ENTRY_SANDBOX</code>, <code>ENTRY_CSP</code></td>
-<td>The frame's <code>sandbox</code> tokens and the policy sent on an entry document. One definition for the site writer, the Caddyfile generator and the private preview</td>
+<td>The frame's <code>sandbox</code> tokens and the policy sent on an entry document (<code>img-src</code> is <code>data:</code> only). One definition for the site writer, the Caddyfile generator and the private preview</td>
 </tr>
 <tr>
 <td><code>STAGING_DIR</code>, <code>PUBLISHED_DIR</code>, <code>FONTS_DIR</code>, <code>DOC_NAME</code>, <code>NEXT_NAME</code></td>
@@ -1433,8 +1435,8 @@ answer whoever sent the command.</p>
 <td><code>config/blog.toml</code>, validated</td>
 </tr>
 <tr>
-<td><code>INBOX_STREAM</code>, <code>revise_command</code>, <code>answer_view</code>, <code>INBOX_TYPES</code>, <code>SOURCES</code></td>
-<td>For the connector. Defined and tested; nothing in this build uses them</td>
+<td><code>INBOX_STREAM</code>, <code>revise_command</code>, <code>answer_view</code>, <code>INBOX_TYPES</code>, the <code>"chat"</code> member of <code>SOURCES</code></td>
+<td>Parked with the connector. Defined and tested; nothing in this build uses them, and <code>INBOX_STREAM</code> has no stream cap (see <em>the cap is per stream</em>)</td>
 </tr>
 </tbody>
 </table>
@@ -1458,8 +1460,9 @@ a replacement is being put in place, the current document can be under
 is the row's, and never by opening <code>entry.html</code>.</p>
 <h3 id="scheduler-and-health">Scheduler and health</h3>
 <p><code>scheduler.loop</code> wakes every 30 s. First pass: <code>store.repair()</code>, a full site
-rebuild, the two list views. Then every <code>[site] republish_min</code> (30): the views
-again, and the rebuild again only while the last one fell short. <code>/health</code>
+rebuild, the two list views. Then every <code>[site] republish_min</code> (30): the rebuild
+again (idempotent: it rewrites only what differs from the store, which is how a
+site switched back on catches up) and the views again. <code>/health</code>
 degrade areas: <code>blog.handlers</code>, <code>blog.clean</code>, <code>blog.clean.too_slow</code>,
 <code>blog.clean.unsettled</code>, <code>blog.fonts.fetch</code>, <code>blog.fonts.reader</code>,
 <code>blog.fonts.apply</code>, <code>blog.fonts.guard</code>, <code>blog.store</code>, <code>blog.site</code>, <code>blog.repair</code>,

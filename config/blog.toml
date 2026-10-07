@@ -23,9 +23,6 @@ max_html_kb = 512
 # Drafts waiting at once. Past this a new one is refused until the operator
 # publishes or discards one.
 max_drafts = 20
-# Drafts the connector may file in an hour. An upload from the private page is
-# the operator's own and is not counted.
-submissions_per_hour = 12
 # The longest title, summary, tag and address (slug) kept, in characters. A
 # longer title, summary or tag is cut; a longer address is refused.
 title_chars = 140
@@ -33,17 +30,14 @@ summary_chars = 300
 max_tags = 6               # tags kept on one entry; the rest are dropped
 tag_chars = 24
 slug_chars = 80            # the address becomes a folder name under the served root
-# A connector request older than this many seconds is answered "expired" and
-# not processed: it covers a replayed backlog and a queue that has fallen behind.
-max_wait_sec = 120
-# How long, in seconds, the answer to one connector request stays readable.
-# Every answer key must expire or their count grows without limit.
-answer_keep_sec = 120
 # Each document is cleaned in a separate worker process, killed after this many
 # seconds; an overrun is refused. This, not a pre-parse scan, is what bounds a
 # pathological document (one tag with tens of thousands of attributes parses in
-# minutes). Keep it well under max_wait_sec so an overrun is answered before the
-# request expires.
+# minutes). The service runs one command at a time, so every other Blog request
+# waits while a document is cleaned, and a request older than [age]
+# replay_max_sec in config/services.toml (900 s as shipped) when its turn comes
+# is dropped unrun and answered "waited too long". Keep this well under that.
+# 2 to 120.
 clean_sec = 20
 # The memory, in MB, that clean worker may use (POSIX only; on Windows the
 # time limit is the whole bound). Contains a parser memory blow-up.
@@ -71,8 +65,10 @@ max_total_mb = 12
 max_rules = 96
 timeout_sec = 10           # each request to Google Fonts; a failed one never blocks a draft
 # All of one entry's requests together, in seconds. Past it, what has not been
-# copied yet is left out and the draft says so. Keep it under [limits]
-# max_wait_sec: the service copies typefaces before it reads its next request.
+# copied yet is left out and the draft says so. Keep it well under [age]
+# replay_max_sec in config/services.toml (900 s as shipped): the service copies
+# typefaces before it reads its next request, and one that has waited longer
+# than that is dropped unrun.
 total_sec = 30
 # Who the service says it is when it asks Google Fonts. Google sends woff2,
 # split by character set, only to a browser it knows can read it. This string

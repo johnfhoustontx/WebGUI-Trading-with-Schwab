@@ -2656,7 +2656,8 @@ made there.
 
 Put an entry on the public site's Blog, and take one off. The Blog's list of
 entries is at `neuralstrike.co/blog.html`, reached from **Blog** in the site's
-menu; each entry has a page of its own at `neuralstrike.co/blog/<address>/`.
+menu or by typing `neuralstrike.co/blog`, which takes you to the same page; each
+entry has a page of its own at `neuralstrike.co/blog/<address>/`.
 An entry is one self-contained HTML document: a file that carries its own
 styles and needs nothing else to display.
 
@@ -2684,21 +2685,28 @@ styles and needs nothing else to display.
   them could not be copied. The entry is then shown in the fallback fonts its
   own stylesheet names. Preview shows exactly that.
 - **Publish is greyed out** while the title is empty or the address cannot be
-  used. When it is the address, the reason is shown in red under it: use
-  letters, digits and single hyphens, at most 80 characters as shipped. A few
-  addresses are reserved by the site, `fonts` among them.
+  used, and the reason is shown in red under the address: first the title, if
+  it is empty, then the address. An address uses letters, digits and single
+  hyphens, at most 80 characters as shipped. A few addresses are reserved by
+  the site, `fonts` among them.
 - **Discard** deletes a draft. Nothing public changes.
 - **Twenty drafts can wait at once** as shipped (the limit is under Settings →
   Configuration → Site blog). Past that an upload is refused until you publish
   or discard one.
 - **To replace an entry**, pick it under **Replace an existing entry** *before*
   you choose the file. The draft then says which entry it replaces and keeps that
-  entry's address, which cannot be edited. The old version stays public until you
-  publish the new one.
+  entry's address, which cannot be edited. It starts with that entry's tags; the
+  title and summary come from the new document. The old version stays public
+  until you publish the new one.
 - **Published** lists what is on the site, newest first. **Open on the site**
   opens the entry in a new tab. **Unpublish** asks first, then removes the page
   from the public site; its address stops working. To bring an entry back,
   upload its file again.
+- **If "Write entries to the site" is switched off** (Settings → Configuration
+  → Site blog), Publish and Unpublish still take effect on this page but change
+  nothing on the public site, and the message says so: an entry you unpublish
+  stays on the site. Switched back on, the site catches up by itself within the
+  refresh time set there (30 minutes as shipped).
 - After an upload, Publish, Discard or Unpublish the control you pressed waits
   for the blog service, and a message at the bottom of the screen says how it
   went. If the blog service is stopped nothing happens: the control waits, then

@@ -706,15 +706,49 @@ def test_the_policy_loads_nothing_from_another_origin_and_runs_nothing():
 
 def test_the_limits_have_the_shipped_values():
     assert bi.limits() == {
-        "max_html_kb": 512, "max_drafts": 20, "submissions_per_hour": 12,
+        "max_html_kb": 512, "max_drafts": 20,
         "title_chars": 140, "summary_chars": 300, "max_tags": 6, "tag_chars": 24,
-        "slug_chars": 80, "max_wait_sec": 120, "answer_keep_sec": 120,
-        "clean_sec": 20, "clean_mem_mb": 512}
+        "slug_chars": 80, "clean_sec": 20, "clean_mem_mb": 512}
 
 
-def test_the_clean_time_limit_stays_under_the_wait_limit():
-    """An overrun must be answered before the request itself expires."""
-    assert bi.DEFAULTS["limits"]["clean_sec"] < bi.DEFAULTS["limits"]["max_wait_sec"]
+# The three settings the parked connector would have read. Nothing in this
+# build reads them, so they are not settings: a number on the Settings page that
+# changes nothing is worse than no number.
+CONNECTOR_KEYS = {"submissions_per_hour", "max_wait_sec", "answer_keep_sec"}
+
+
+def test_no_setting_is_offered_that_nothing_reads():
+    assert CONNECTOR_KEYS.isdisjoint(bi.DEFAULTS["limits"])
+    assert CONNECTOR_KEYS.isdisjoint(bi.limits())
+    assert not [path for path in bi.BOUNDS if path[1] in CONNECTOR_KEYS]
+
+
+def test_a_key_this_build_does_not_have_is_ignored_not_an_error(monkeypatch):
+    """A ``config/local/blog.toml`` written while those keys existed still
+    loads: what is not a setting is simply not read."""
+    shipped = bi.limits()
+    _cfg(monkeypatch, limits={"submissions_per_hour": 99, "max_wait_sec": 5,
+                              "answer_keep_sec": "soon", "not_a_key_at_all": 1})
+    assert bi.limits() == shipped
+
+
+def test_one_upload_cannot_hold_the_queue_past_the_age_a_command_is_dropped_at():
+    """The limit that really applies to a ``cmd:blog`` command is the
+    scaffold's: one older than ``[age] replay_max_sec`` (config/services.toml)
+    when its turn comes is dropped unrun and answered "waited too long". The
+    service runs one command at a time, and the longest one upload can take is
+    its clean plus its typeface copy - so those two together must stay under
+    that age, or a single slow upload would expire the request behind it.
+
+    (This test compared ``clean_sec`` with ``[limits] max_wait_sec``, a setting
+    of the parked connector that nothing read.)"""
+    from shared import service_limits
+    replay = service_limits.DEFAULTS["age"]["replay_max_sec"]
+    assert bi.DEFAULTS["limits"]["clean_sec"] < replay
+    assert bi.DEFAULTS["limits"]["clean_sec"] + bi.DEFAULTS["fonts"]["total_sec"] < replay
+    # ...and it holds at the highest either setting can be given.
+    assert (bi.BOUNDS[("limits", "clean_sec")][1]
+            + bi.BOUNDS[("fonts", "total_sec")][1]) < replay
 
 
 # Typed out here, so a change to the shipped string is a change someone made
@@ -868,9 +902,13 @@ def test_a_typeface_copy_is_bounded_in_every_direction():
     assert bi.BOUNDS[("fonts", "max_links")] == (1, 16)
     assert bi.BOUNDS[("fonts", "max_css_kb")] == (16, 2048)
     assert bi.BOUNDS[("fonts", "total_sec")] == (1, 600)
-    # All of an entry's requests together get less than a draft from Claude
-    # Chat may wait: one slow copy must not expire the request behind it.
-    assert bi.DEFAULTS["fonts"]["total_sec"] < bi.DEFAULTS["limits"]["max_wait_sec"]
+    # All of an entry's requests together take less than the age a queued
+    # command is dropped at ([age] replay_max_sec, config/services.toml): one
+    # slow copy must not expire the request waiting behind it. (This compared
+    # with [limits] max_wait_sec, a setting nothing read.)
+    from shared import service_limits
+    assert (bi.DEFAULTS["fonts"]["total_sec"]
+            < service_limits.DEFAULTS["age"]["replay_max_sec"])
 
 
 def test_the_shipped_file_matches_the_defaults():
@@ -894,14 +932,14 @@ def test_every_number_has_bounds_and_ships_inside_them():
 
 
 def test_a_value_inside_its_bounds_is_read(monkeypatch):
-    _cfg(monkeypatch, limits={"max_drafts": 3, "max_wait_sec": 45.0},
+    _cfg(monkeypatch, limits={"max_drafts": 3, "clean_sec": 45.0},
          fonts={"enabled": False, "subsets": ["cyrillic", "latin", "latin"],
                 "timeout_sec": 4, "max_links": 2, "max_css_kb": 64, "total_sec": 12,
                 "max_rules": 40, "user_agent": "Mozilla/5.0 (a newer browser)",
                 "max_total_mb": 30},
          site={"enabled": False, "republish_min": 5})
     assert bi.limits()["max_drafts"] == 3
-    assert bi.limits()["max_wait_sec"] == 45 and isinstance(bi.limits()["max_wait_sec"], int)
+    assert bi.limits()["clean_sec"] == 45 and isinstance(bi.limits()["clean_sec"], int)
     assert bi.limits()["title_chars"] == 140            # an unnamed key keeps its default
     assert bi.fonts() == {"enabled": False, "subsets": ["cyrillic", "latin"],
                           "max_links": 2, "max_css_kb": 64,
@@ -920,14 +958,13 @@ republish_min = 0
 [limits]
 max_html_kb = 99999999
 max_drafts = -1
-submissions_per_hour = "many"
 title_chars = true
 summary_chars = nan
 max_tags = inf
 tag_chars = 0
 slug_chars = 4
-max_wait_sec = [120]
-answer_keep_sec = 0.2
+clean_sec = [20]
+clean_mem_mb = 0.2
 
 [fonts]
 enabled = 1

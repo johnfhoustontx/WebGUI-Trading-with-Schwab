@@ -4200,8 +4200,8 @@ The owner's side of the Blog on the public site: upload an entry, look at the dr
 made from it, publish it, and take a published entry back off. An entry is one
 self-contained HTML document: a file that carries its own styles and needs nothing
 else to display. On the site, the list of entries is at `neuralstrike.co/blog.html`
-(**Blog** in the site's menu) and each entry has a page of its own at
-`neuralstrike.co/blog/<address>/`.
+(**Blog** in the site's menu; typing `neuralstrike.co/blog` goes to the same page)
+and each entry has a page of its own at `neuralstrike.co/blog/<address>/`.
 
 ### Where the data comes from
 
@@ -4220,7 +4220,8 @@ of one that is already published.
 
 **Drafts waiting** has one card per draft: where it came from, its size, when it
 arrived (Central time), and what cleaning removed. A replacement names the entry it
-replaces. A draft whose typefaces could not all be copied says so in one sentence.
+replaces and starts with that entry's tags. A draft whose typefaces could not all be
+copied says so in one sentence.
 The four fields are what will be published with it. Up to twenty drafts wait at
 once as shipped; past that an upload is refused until one is published or discarded.
 
@@ -4248,8 +4249,11 @@ without passing through cleaning, a draft you can look at, and your own Publish.
 - **Preview before publishing.** Cleaning can change how a page looks.
 - **Unpublish removes the page**, and its address stops working. To bring an entry
   back, upload its file again.
-- **Publish is greyed out** while the title is empty or the address cannot be used;
-  when it is the address, the reason is shown under it.
+- **Publish is greyed out** while the title is empty or the address cannot be used,
+  and the reason is shown in red under the address (the title first, if it is empty).
+- **With "Write entries to the site" switched off** in Settings, Publish and Unpublish
+  change nothing on the public site and the message says so: an unpublished entry
+  stays up. Switched back on, the site catches up within the refresh time set there.
 - **On the site an entry is shown inside a frame** that runs no scripts, under the
   site's own menu. A link in an entry that leaves the page opens in a new tab.
 - **Every upload comes from this page.** A draft's first line reads "Uploaded file".

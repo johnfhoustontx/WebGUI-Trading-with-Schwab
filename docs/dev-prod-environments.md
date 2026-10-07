@@ -1027,7 +1027,14 @@ when they are first written.
 
 **The step: regenerate and reload Caddy.** The Caddyfile is generated, and the
 promote does not regenerate it. Until this is done Caddy does not send the
-policy header on an entry's document. Open a session on the box (`ssh vps2`)
+policy header on an entry's document.
+
+**Before the first Publish.** Do this step first. Publishing works without it,
+but until the reload an entry's document is served without its policy header,
+which is the one layer that still applies when a visitor opens the document
+outside its frame.
+
+Open a session on the box (`ssh vps2`)
 and run these, one line at a time; `sudo` may ask for your password, and
 `caddy validate` failing leaves the running config untouched:
 
@@ -1100,3 +1107,52 @@ regenerate, never in `/etc/caddy/Caddyfile`. Detail:
 **The first upload also copies typefaces from Google Fonts**, which no test
 could do. What to look at on that first draft is step 5 of Task 12 in
 [the plan](plans/2026-10-06-site-blog-plan.md).
+
+**Rolling back.** `tools/promote.sh --rollback` to a commit from BEFORE the blog
+leaves three things behind that the older commit has never heard of:
+
+- `services/blog_svc/data/` (the drafts, the entries and their typefaces);
+- `deploy/site/blog/`;
+- `deploy/site/blog.json`.
+
+At that commit they are not in `.gitignore`, so git reports them as untracked,
+the tree counts as dirty, and the next `tools/promote.sh` refuses to run. Move
+them aside first, out of the checkout, one line at a time:
+
+```bash
+mkdir -p /home/administrator/blog-aside
+```
+
+```bash
+mv /home/administrator/dev/services/blog_svc/data /home/administrator/blog-aside/data
+```
+
+```bash
+mv /home/administrator/dev/deploy/site/blog /home/administrator/dev/deploy/site/blog.json /home/administrator/blog-aside/
+```
+
+⚠ **Do not delete `services/blog_svc/data/`.** It is the only copy of the drafts
+and the published entries apart from the nightly backup. The other two are
+rebuilt from it. Until the site folder is moved aside the published entries stay
+reachable on the site, because Caddy serves the files that are there.
+
+To bring the blog back, promote a commit that has it FIRST (moving the folder
+back before the promote would dirty the tree again). The service then starts
+with an empty store of its own. Put the kept one in its place, one line at a
+time, and the service rebuilds `deploy/site/blog/` and `blog.json` as it starts:
+
+```bash
+systemctl --user stop trading-prod-blog_svc
+```
+
+```bash
+mv /home/administrator/dev/services/blog_svc/data /home/administrator/blog-aside/data-empty
+```
+
+```bash
+mv /home/administrator/blog-aside/data /home/administrator/dev/services/blog_svc/data
+```
+
+```bash
+systemctl --user start trading-prod-blog_svc
+```

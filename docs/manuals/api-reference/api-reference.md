@@ -178,11 +178,13 @@ enqueue, so a change needs no restart):
 |---|---|---|---|
 | `default` | 1000 | 10–100000 | every stream not named below |
 | `"cmd:blog"` | 50 | 10–500 | the Blog page's uploads and its Publish |
-| `"cmd:blog_inbox"` | 50 | 10–500 | reserved for the connector, which is not built; nothing writes it |
 
-The two blog streams are small because one of their commands carries a whole
+The blog stream is small because one of its commands carries a whole
 document, up to `config/blog.toml [limits] max_html_kb` (512 KB): a thousand
-would be about 500 MB of Redis in each, fifty is about 25 MB. A value for a named
+would be about 500 MB of Redis, fifty is about 25 MB. ⚠ A new stream whose
+commands carry a document needs a row of its own here before anything writes
+it. `cmd:blog_inbox`, the stream of the connector that is not built, has none:
+`shared/tests/test_service_limits.py` fails the day code names that stream. A value for a named
 stream that is outside its range, or cannot be read, falls back to that stream's
 shipped number, not to `default`.
 
@@ -633,12 +635,18 @@ usable id is dropped, because nothing could be told how it ended.
 | `type` | `args` | Effect |
 |---|---|---|
 | `draft_submit` | `request_id`, `source`, `html`, `fields` `{title, summary, tags, slug}`, and optionally `revises` (the address of the entry this replaces) | The document is cleaned, its typefaces copied, and the result stored as a draft. Never writes to the site. `source` is ignored: the service stamps `upload`. |
-| `publish` | `request_id`, `draft_id`, `fields` | The draft becomes an entry (or replaces the entry it revises), the draft is deleted, the site is rebuilt. A title is required. A new entry needs an address `clean_slug` accepts; a replacement keeps its entry's address. |
+| `publish` | `request_id`, `draft_id`, `fields` | The draft becomes an entry (or replaces the entry it revises), the draft is deleted, the site is rebuilt. A title is required. A new entry needs an address `clean_slug` accepts; a replacement keeps its entry's address. With `[site] enabled = false` the entry is stored and the answer says nothing was written to the site. |
 | `discard` | `request_id`, `draft_id` | The draft and its staged document are deleted. Nothing public changes. |
-| `unpublish` | `request_id`, `slug` | The entry is removed and the site rebuilt. |
+| `unpublish` | `request_id`, `slug` | The entry is removed and the site rebuilt. With `[site] enabled = false` the entry is removed from the store and the answer says its page is still on the site; it comes down at the scheduler's next pass after the site is switched back on. |
 
-`blog_inbox.submit_command(html, fields, *, source, request_id)` builds the first;
-`blog_inbox.owner_command(kind, request_id, **args)` builds the other three, and
+A replacement draft (`draft_submit` with `revises`) takes its tags from the entry
+it replaces when the command's `fields` carry none; its title and summary are the
+new document's.
+
+`blog_inbox.submit_command(html, fields, *, source, request_id, revises=None)`
+builds the first. `revises` is the address of the entry being replaced: left out,
+the command has no `revises` key; given, it must be an address `existing_slug`
+accepts or no command is built. `blog_inbox.owner_command(kind, request_id, **args)` builds the other three, and
 returns `None` for an unknown kind, a bad id, an unusable target, or an argument
 the kind does not take. The service runs every validator again on what it reads.
 
@@ -698,11 +706,11 @@ Imports stdlib, `repo_paths` and `shared.config_toml` only (pinned by
 | `clean_fields(raw)` | Always `{"title", "summary", "tags", "slug"}`, each cut to its limit, invisible characters removed; unusable is `""` or `[]` |
 | `clean_slug(raw)`, `existing_slug(raw)`, `slugify(title)` | A NEW address held to `slug_chars`; an EXISTING entry's, held to the limit's ceiling; an address made from a title |
 | `SLUG_RE`, `RESERVED_SLUGS`, `ID_RE`, `FONT_NAME_RE` | The patterns. Each ends in `\Z` |
-| `ENTRY_SANDBOX`, `ENTRY_CSP` | The frame's `sandbox` tokens and the policy sent on an entry document. One definition for the site writer, the Caddyfile generator and the private preview |
+| `ENTRY_SANDBOX`, `ENTRY_CSP` | The frame's `sandbox` tokens and the policy sent on an entry document (`img-src` is `data:` only). One definition for the site writer, the Caddyfile generator and the private preview |
 | `STAGING_DIR`, `PUBLISHED_DIR`, `FONTS_DIR`, `DOC_NAME`, `NEXT_NAME` | The store's folder and file names |
 | `read_document(folder, digest)`, `read_font(fonts_folder, name)`, `font_name_for(data)` | The only two ways to read a stored file from outside the service, and the name a typeface's bytes are stored under |
 | `limits()`, `site()`, `fonts(over=None)`, `BOUNDS`, `DEFAULTS`, `reset_cache()` | `config/blog.toml`, validated |
-| `INBOX_STREAM`, `revise_command`, `answer_view`, `INBOX_TYPES`, `SOURCES` | For the connector. Defined and tested; nothing in this build uses them |
+| `INBOX_STREAM`, `revise_command`, `answer_view`, `INBOX_TYPES`, the `"chat"` member of `SOURCES` | Parked with the connector. Defined and tested; nothing in this build uses them, and `INBOX_STREAM` has no stream cap (see *the cap is per stream*) |
 
 ### On disk
 
@@ -729,8 +737,9 @@ is the row's, and never by opening `entry.html`.
 ### Scheduler and health
 
 `scheduler.loop` wakes every 30 s. First pass: `store.repair()`, a full site
-rebuild, the two list views. Then every `[site] republish_min` (30): the views
-again, and the rebuild again only while the last one fell short. `/health`
+rebuild, the two list views. Then every `[site] republish_min` (30): the rebuild
+again (idempotent: it rewrites only what differs from the store, which is how a
+site switched back on catches up) and the views again. `/health`
 degrade areas: `blog.handlers`, `blog.clean`, `blog.clean.too_slow`,
 `blog.clean.unsettled`, `blog.fonts.fetch`, `blog.fonts.reader`,
 `blog.fonts.apply`, `blog.fonts.guard`, `blog.store`, `blog.site`, `blog.repair`,

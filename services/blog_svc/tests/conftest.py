@@ -107,10 +107,10 @@ def _blog_site_in_tmp(monkeypatch, tmp_path):
 
 @pytest.fixture(autouse=True)
 def _no_real_network(monkeypatch):
-    """The repo-root conftest guards SQLite but NOT the network (CLAUDE.md says
-    otherwise and is wrong). The cleaner reaches no network, and fonts.py reads
-    its typefaces through an injected ``fetch``, so a real request from this
-    suite is a mistake - make one fail loudly rather than hang or escape.
+    """The repo-root conftest guards SQLite but NOT the network. The cleaner
+    reaches no network, and fonts.py reads its typefaces through an injected
+    ``fetch``, so a real request from this suite is a mistake - make one fail
+    loudly rather than hang or escape.
 
     ``fonts.http_fetch``'s own tests monkeypatch ``requests.get`` on top of
     this; that replacement wins, so they are unaffected.

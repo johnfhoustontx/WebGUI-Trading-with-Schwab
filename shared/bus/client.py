@@ -407,8 +407,7 @@ class Bus:
         # every enqueue through shared.service_limits). It was one constant, sized
         # for commands of a few hundred bytes. A blog command carries a whole
         # document - up to config/blog.toml [limits] max_html_kb, shipped 512 KB -
-        # so at 1000 entries cmd:blog and cmd:blog_inbox could each hold ~500 MB.
-        # They ship at 50.
+        # so at 1000 entries cmd:blog could hold ~500 MB. It ships at 50.
         #
         # approximate=True lets Redis trim in whole macro nodes, which is cheap,
         # and means the stream may run OVER the cap by up to one node's worth:

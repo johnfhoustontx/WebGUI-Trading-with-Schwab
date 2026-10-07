@@ -1581,6 +1581,10 @@ of its own at neuralstrike.co/blog/ followed by its address.
 - **Published** lists what is on the site, newest first. **Open on the site**
   opens the entry in a new tab. **Unpublish** removes the page from the public
   site and its address stops working; to bring it back, upload the file again.
+- **If the site is switched off** in Settings (Configuration, Site blog, "Write
+  entries to the site"), Publish and Unpublish change nothing on the public
+  site and the message says so: an entry you unpublish stays up. Switched back
+  on, the site catches up by itself within the refresh time set there.
 - After Publish, Discard, Unpublish or an upload, the button waits for the blog
   service's answer and a message at the bottom of the screen says how it went.
   If the service is stopped nothing happens: the button waits, then comes back.
@@ -1593,7 +1597,7 @@ Shows whether each part of the app is alive. **Updated** in the corner is when
 the last check ran — the page re-checks itself every 15 seconds, and
 **Refresh** does it now.
 
-- **Green/red cards** — Redis, the Schwab gateway, your Schwab login, the six
+- **Green/red cards** — Redis, the Schwab gateway, your Schwab login, the seven
   services, this web app, and the public live screens beside it. The gateway's
   card also says which mode its market data store is in and counts its faults. The live
   screens are a separate app on their own address: if that card is red the

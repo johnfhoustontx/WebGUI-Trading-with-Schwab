@@ -110,7 +110,7 @@ def test_a_dead_letter_table_that_is_not_one_reads_as_shipped(monkeypatch, table
 # ---- how many entries each command stream keeps ------------------------------
 # Every stream was trimmed to 1000. A blog command carries a whole document (up
 # to config/blog.toml [limits] max_html_kb, shipped 512 KB), so at 1000 entries
-# cmd:blog and cmd:blog_inbox could each hold about 500 MB of Redis memory.
+# cmd:blog could hold about 500 MB of Redis memory.
 
 EVERY_OTHER_STREAM = ("cmd:options", "cmd:sentiment", "cmd:portfolio", "cmd:trade",
                       "cmd:market", "cmd:news", "cmd:finder_public",
@@ -123,17 +123,72 @@ def test_every_existing_stream_keeps_the_thousand_it_always_kept():
         assert cl.stream_keep(stream) == 1000, stream
 
 
-def test_the_two_streams_that_carry_a_document_keep_fifty():
+def test_the_stream_that_carries_a_document_keeps_fifty():
     assert cl.stream_keep("cmd:blog") == 50
-    assert cl.stream_keep("cmd:blog_inbox") == 50
 
 
-def test_the_document_streams_are_named_as_the_blog_names_them():
+def test_the_document_stream_is_named_as_the_blog_names_it():
     """The cap is keyed by stream NAME, so a renamed stream would silently go
-    back to 1000 whole documents. This is the join between the two modules."""
+    back to 1000 whole documents. This is the join between the two modules.
+
+    ONE stream, the one in use. ``blog_inbox.INBOX_STREAM`` (``cmd:blog_inbox``)
+    belongs to the connector, which is parked: nothing writes it, so it has no
+    cap of its own and no row under Settings. The test below is what says so."""
     from shared import blog_inbox
     small = {s for s, n in cl.DEFAULTS["stream_keep"].items() if s != "default"}
-    assert small == {blog_inbox.INBOX_STREAM, f"cmd:{blog_inbox.OWNER_DOMAIN}"}
+    assert small == {f"cmd:{blog_inbox.OWNER_DOMAIN}"}
+
+
+def test_the_parked_inbox_stream_has_no_cap_because_nothing_writes_it():
+    """⚠ A tripwire, not a description. ``cmd:blog_inbox`` would carry whole
+    documents exactly as ``cmd:blog`` does, and today it is trimmed like any
+    other stream (1000 entries: about 500 MB of documents). That is safe only
+    while NOTHING writes it.
+
+    The day a module starts using ``INBOX_STREAM`` this fails. Do not relax it:
+    give the stream its cap back first - ``config/services.toml [stream_keep]``,
+    ``DEFAULTS["stream_keep"]`` and ``STREAM_KEEP_CEILINGS`` here, and a row in
+    ``webgui/config_schema.py`` - then update this test to say it has one."""
+    import ast
+    import pathlib
+    from shared import blog_inbox
+    assert blog_inbox.INBOX_STREAM == "cmd:blog_inbox"
+    assert blog_inbox.INBOX_STREAM not in cl.DEFAULTS["stream_keep"]
+    assert blog_inbox.INBOX_STREAM not in cl.STREAM_KEEP_CEILINGS
+    assert cl.stream_keep(blog_inbox.INBOX_STREAM) == 1000
+    assert cl.stream_keep_bounds(blog_inbox.INBOX_STREAM) == (10, 100000)
+
+    def names_the_stream(tree) -> bool:
+        """Whether CODE names the stream: the constant by name, or its value as
+        a string of its own. A docstring or comment that mentions it does not."""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id == "INBOX_STREAM":
+                return True
+            if isinstance(node, ast.Attribute) and node.attr == "INBOX_STREAM":
+                return True
+            if isinstance(node, ast.alias) and node.name == "INBOX_STREAM":
+                return True
+            if isinstance(node, ast.Constant) and node.value == blog_inbox.INBOX_STREAM:
+                return True
+        return False
+
+    repo = pathlib.Path(__file__).resolve().parents[2]
+    users, read = [], 0
+    for top in ("services", "webgui", "shared", "deploy", "tools", "schwab-proxy"):
+        for path in sorted((repo / top).rglob("*.py")):
+            parts = path.relative_to(repo).parts
+            if "tests" in parts or ".venv" in parts or "node_modules" in parts:
+                continue
+            text = path.read_text(encoding="utf-8-sig", errors="replace")
+            if "INBOX_STREAM" not in text and blog_inbox.INBOX_STREAM not in text:
+                continue
+            read += 1
+            if names_the_stream(ast.parse(text)):
+                users.append("/".join(parts))
+    assert read >= 1, "nothing was read: the scan is looking in the wrong place"
+    assert users == ["shared/blog_inbox.py"], (
+        "code outside shared/blog_inbox.py names the inbox stream; if it "
+        f"writes it, the stream needs its cap back first: {users}")
 
 
 def test_the_shipped_file_says_what_the_defaults_say():
@@ -169,9 +224,9 @@ def test_the_bounds_are_ten_to_a_hundred_thousand(monkeypatch):
 
 def test_a_document_stream_has_a_ceiling_of_its_own(monkeypatch):
     """100000 commands of a few hundred bytes is tens of megabytes; 100000
-    documents is not a number to offer. The two streams whose entries carry a
-    document stop at 500, and past it a value reads as their shipped 50."""
-    assert cl.STREAM_KEEP_CEILINGS == {"cmd:blog": 500, "cmd:blog_inbox": 500}
+    documents is not a number to offer. The stream whose entries carry a
+    document stops at 500, and past it a value reads as its shipped 50."""
+    assert cl.STREAM_KEEP_CEILINGS == {"cmd:blog": 500}
     # every stream that ships with a number of its own has a ceiling of its own
     named = {s for s in cl.DEFAULTS["stream_keep"] if s != "default"}
     assert set(cl.STREAM_KEEP_CEILINGS) == named
@@ -195,7 +250,6 @@ def test_the_bounds_of_a_stream_are_one_call(monkeypatch):
     assert cl.stream_keep_bounds("cmd:options") == (10, 100000)
     assert cl.stream_keep_bounds("default") == (10, 100000)
     assert cl.stream_keep_bounds("cmd:blog") == (10, 500)
-    assert cl.stream_keep_bounds("cmd:blog_inbox") == (10, 500)
     assert cl.stream_keep_bounds(None) == (10, 100000)
 
 
@@ -215,9 +269,8 @@ def test_an_unusable_cap_on_a_document_stream_reads_as_its_shipped_fifty(
     """NOT as the default. A typo in the one line that keeps documents out of
     Redis must not be read as "keep a thousand of them"."""
     monkeypatch.setattr(cl, "load", lambda: {"stream_keep": {
-        "default": 1000, "cmd:blog": bad, "cmd:blog_inbox": bad}})
+        "default": 1000, "cmd:blog": bad}})
     assert cl.stream_keep("cmd:blog") == 50
-    assert cl.stream_keep("cmd:blog_inbox") == 50
 
 
 @pytest.mark.parametrize("bad", BAD_CAPS)
@@ -237,7 +290,7 @@ def test_a_table_that_is_not_a_table_reads_as_the_shipped_caps(monkeypatch, tabl
 def test_a_missing_table_reads_as_the_shipped_caps(monkeypatch):
     monkeypatch.setattr(cl, "load", lambda: {})
     assert cl.stream_keep("cmd:options") == 1000
-    assert cl.stream_keep("cmd:blog_inbox") == 50
+    assert cl.stream_keep("cmd:blog") == 50
 
 
 @pytest.mark.parametrize("stream", [None, 7, "", ["cmd:blog"], {"a": 1}, b"cmd:blog",
@@ -252,11 +305,19 @@ def test_the_cap_is_read_through_the_real_loader_from_a_file(tmp_path, monkeypat
     from shared.config_toml import toml_loader
     path = tmp_path / "services.toml"
     path.write_text('[stream_keep]\ndefault = 700\n"cmd:blog" = 20\n'
-                    '"cmd:blog_inbox" = "many"\n"cmd:market" = 5\n',
+                    '"cmd:market" = 5\n',
                     encoding="utf-8")
     load, _reset = toml_loader(path, cl.DEFAULTS, label="services.toml")
     monkeypatch.setattr(cl, "load", load)
     assert cl.stream_keep("cmd:options") == 700
     assert cl.stream_keep("cmd:blog") == 20
-    assert cl.stream_keep("cmd:blog_inbox") == 50
     assert cl.stream_keep("cmd:market") == 700       # 5 is under the floor
+    # A cap on the document stream that cannot be read is its shipped 50, never
+    # the file's default. (This was shown on cmd:blog_inbox, the parked
+    # connector's stream, which no longer has a cap of its own.)
+    bad = tmp_path / "services_bad.toml"
+    bad.write_text('[stream_keep]\ndefault = 700\n"cmd:blog" = "many"\n', encoding="utf-8")
+    load_bad, _reset = toml_loader(bad, cl.DEFAULTS, label="services.toml")
+    monkeypatch.setattr(cl, "load", load_bad)
+    assert cl.stream_keep("cmd:blog") == 50
+    assert cl.stream_keep("cmd:options") == 700

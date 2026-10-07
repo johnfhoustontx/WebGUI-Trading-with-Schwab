@@ -2809,8 +2809,8 @@ edit, restart the blog service; the web app needs no restart.
 
 | Key | Shipped | Range | What it bounds |
 |---|---|---|---|
-| `enabled` | `true` | — | Off: drafts can still be uploaded and previewed, and Publish still records the entry, but nothing is written to the public site. The answer says so. |
-| `republish_min` | 30 | 1–1440 | Minutes between re-publishing the drafts and entries lists. They are published on every change; this heals a flushed Redis. |
+| `enabled` | `true` | — | Off: drafts can still be uploaded and previewed, and Publish and Unpublish still change the store, but nothing is written to or removed from the public site: an entry unpublished while it is off stays on the site. The answer says so each time. Switched back on, the site catches up at the next pass below. |
+| `republish_min` | 30 | 1–1440 | Minutes between passes. Each pass re-publishes the drafts and entries lists and checks the site's blog files against the store, rewriting only what differs. Both also happen on every change; the pass heals a flushed Redis, retries a site write that failed, and catches the site up after `enabled` is switched back on. |
 
 **`[limits]`**
 
@@ -2825,7 +2825,12 @@ edit, restart the blog service; the web app needs no restart.
 | `slug_chars` | 80 | 16–120 | The longest address a NEW entry may have. A longer one is refused, not cut: half an address is a different address. An entry that already exists is held to 120, so lowering this cannot strand it. |
 | `clean_sec` | 20 | 2–120 | Seconds one document may take to clean before its worker process is killed and the upload refused. |
 | `clean_mem_mb` | 512 | 128–4096 | Memory the cleaning worker may use, in MB. Linux only. |
-| `submissions_per_hour`, `max_wait_sec`, `answer_keep_sec` | 12, 120, 120 | — | **Not read by this build.** They belong to the connector that would let Claude Chat file a draft, which is not built. |
+
+`clean_sec` and `[fonts] total_sec` (below) are how long one upload can hold the
+service, which runs one command at a time. A command that is older than `[age]
+replay_max_sec` in `config/services.toml` (900 s as shipped) when its turn comes
+is not run, and the page is told the request waited too long. At their ceilings
+the two come to 720 s, so one upload cannot expire the request behind it.
 
 `max_html_kb` has a ceiling because a document travels inside one command, and the
 `cmd:blog` queue keeps its newest 50 commands (`config/services.toml`
@@ -2926,7 +2931,7 @@ names any more is deleted after a publish, a discard or an unpublish.
 | When | What happens |
 |---|---|
 | At service start | The store is repaired (files made to agree with the rows after an interrupted write), every entry page on the site is rebuilt, and the two lists are published. The rebuild is what carries a changed site menu into the entry pages. |
-| Every `republish_min` (30 min) | The two lists are published again. The site is rebuilt again only if the last rebuild fell short. |
+| Every `republish_min` (30 min) | The site's blog files are checked against the store and only what differs is rewritten, then the two lists are published again. This is what retries a site write that failed and what puts entries on the site (and takes unpublished ones off) after `[site] enabled` is switched back on. |
 | Every 30 s | The loop wakes, beats the heartbeat the health check reads, and re-reads the interval. |
 | On a command | Upload, Publish, Discard and Unpublish run when the Blog page sends them, one at a time. |
 
@@ -3065,7 +3070,7 @@ the source; this table is a summary of them.
 | trade_svc | Analysis on demand. One scheduled job: the watchlist **dividend pull**, once a trading day at or after **06:40 CT** (`[calendar.dividends] refresh_at` in `config/news.toml`); the loop wakes every **60 s** and retries a failed pull after **15 min**. |
 | market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); report summary re-read when the published market report changes (a stat of `deploy/site/reports/latest.html` + `latest.txt` per poll) — no Claude call. |
 | news_svc | Three branches, launched every **30 s** tick (`TICK_S`) as keyed background tasks, so a slow one delays only itself and one still running is skipped, never doubled. **feeds**: every feed polled every **2 min** 08:30–15:00 CT (`[collector] rth_poll_min`), **5 min** in the extended sessions 06:30–08:25 and 15:00–15:15 CT (`eth_poll_min`), **30 min** otherwise on a trading day (`offhours_poll_min`) and **30 min** at weekends and holidays (`weekend_poll_min`), counted from the END of the last poll; nothing polls faster than **60 s** (`MIN_INTERVAL_S`). **calendar**: every tick, fetching only the sources whose own `refresh_min` is due (Fed 60 min, BLS / BEA / FRED calendar 720, Nasdaq 240, values 240). **watch**: every tick, fetching only a series whose release just passed — every **2 min** for up to **60 min**. All in `config/news.toml`, editable in Settings. One cycle of each at a time: a Refresh during one is skipped. |
-| blog_svc | The loop wakes every **30 s** (`TICK_S`) to beat its heartbeat and re-read the interval. **At start**: repair the store, rebuild every entry page on the site, publish the two list views. **Then every 30 min** (`[site] republish_min` in `config/blog.toml`, 1 to 1440, counted from the END of the last pass): the two views again, and the site rebuild again only while the last one fell short. A pass that fails is retried at the next wake. Everything else is on demand, when the Blog page sends a command. |
+| blog_svc | The loop wakes every **30 s** (`TICK_S`) to beat its heartbeat and re-read the interval. **At start**: repair the store, rebuild every entry page on the site, publish the two list views. **Then every 30 min** (`[site] republish_min` in `config/blog.toml`, 1 to 1440, counted from the END of the last pass): the site rebuild again, which rewrites only what differs from the store, and the two views again. A pass that fails is retried at the next wake. Everything else is on demand, when the Blog page sends a command. |
 
 Six scheduled jobs are **not** on any service's loop — they are systemd timers,
 generated from `config/sessions.toml` by `deploy/systemd/generate_units.py`, so moving

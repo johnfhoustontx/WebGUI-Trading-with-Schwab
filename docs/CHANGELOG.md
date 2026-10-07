@@ -19,14 +19,15 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   process, an OAuth sign-in and a fourth hostname. The operator cut scope on the
   day to "the blog page and a way to upload an HTML file". None of the connector
   is built. `shared/blog_inbox.py` still names its stream (`cmd:blog_inbox`) and
-  three `config/blog.toml` keys (`submissions_per_hour`, `max_wait_sec`,
-  `answer_keep_sec`) that nothing reads yet.
+  keeps its builders, each marked parked. Its three settings
+  (`submissions_per_hour`, `max_wait_sec`, `answer_keep_sec`) and the cap on its
+  stream were removed in the final review, below: nothing read them.
 - **The pieces.**
   - A seventh Tier-2 service, **`blog_svc`** (:8217): one command stream,
     `cmd:blog`, with four commands (`draft_submit`, `publish`, `discard`,
     `unpublish`); three views (`blog:drafts`, `blog:posts`, `blog:result`); one
-    background job (repair and rebuild at start, then the views every `[site]
-    republish_min`). No Schwab call and no Claude call. The one thing that
+    background job (repair and rebuild at start, then the rebuild and the views
+    again every `[site] republish_min`). No Schwab call and no Claude call. The one thing that
     leaves the box is the typeface copy at upload, to Google Fonts only.
   - **`shared/blog_inbox.py`**: the command builders, validators, limits, view
     names, the frame's `sandbox` and the policy string, the store's folder names
@@ -76,11 +77,11 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 - **Two changes outside the blog that ride along.**
   - **A command queue's length is per queue** (`config/services.toml
     [stream_keep]`). It was 1000 for every queue, fixed in code. A blog command
-    carries a whole document of up to 512 KB, so `cmd:blog` and `cmd:blog_inbox`
-    ship at 50 (about 25 MB each, against about 500 MB at 1000), each with a
-    ceiling of 500. Every other queue keeps 1000. The cap is on the queue, not
-    on its history: past it the oldest commands are dropped whether or not they
-    have run, with no dead letter.
+    carries a whole document of up to 512 KB, so `cmd:blog` ships at 50 (about
+    25 MB, against about 500 MB at 1000), with a ceiling of 500. Every other
+    queue keeps 1000. The cap is on the queue, not on its history: past it the
+    oldest commands are dropped whether or not they have run, with no dead
+    letter.
   - **A dead letter's fields are cut** to `[dead_letters] max_field_kb` (64).
     The list keeps the newest 200 per queue, so 200 whole blog commands were
     about 100 MB. A cut field ends `...[truncated, N bytes total]` and the
@@ -95,9 +96,40 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 - **Not verified.** Caddy itself (the generated Caddyfile is tested as text);
   Safari and Firefox; the real service process against a real Redis; the first
   live typeface copy, whose checklist is step 5 of Task 12 in the plan.
+- **What the final review changed.**
+  (1) *The clean worker inherits `TZ`.* The worker is started with an
+  allow-listed environment, and it imports `repo_paths`, which refuses a clock
+  that is not Central. That guard is inert under pytest in the parent and live
+  in the worker. The unit and CI say Central with `TZ`, which the allow-list
+  dropped, so on a host whose own zone is not Central every upload would have
+  been refused as a cleaner fault while the suite on a Central box stayed green.
+  (2) *Unpublish with the site switched off says the page is still up*, as
+  Publish already said nothing was written.
+  (3) *The scheduler rebuilds the site at every pass*, not only while the last
+  rebuild fell short. A rebuild with the site off is ok, so nothing was pending
+  and switching the site back on wrote nothing until a restart. The rebuild
+  rewrites only what differs.
+  (4) *A replacement keeps its entry's tags.* An upload carries none, so
+  publishing a replacement as offered cleared them.
+  (5) *`img-src data:`*, without `'self'`, in the entry policy.
+  (6) *`submit_command(..., revises=)`*: the page no longer writes into the
+  command the builder returns.
+  (7) *The Blog page says why Publish is held* when the title is blank, in the
+  same red line as an address that cannot be used.
+  (8) *`neuralstrike.co/blog` goes to the Blog page.* Caddy sends exactly
+  `/blog` and `/blog/` to `/blog.html` (308); `/blog/` is a folder with no
+  index, so the address people type was a 404.
+  (9) *Settings nothing read are gone*: the connector's three keys in
+  `config/blog.toml` and the cap on `cmd:blog_inbox`, with their rows under
+  Settings → Configuration. ⚠ That stream would carry whole documents; a test
+  fails the day code names it, and the cap must come back before anything
+  writes it. The help beside `clean_sec` and `[fonts] total_sec` now names the
+  limit that really applies, `[age] replay_max_sec` in `config/services.toml`.
 - **One operator step after the promote**: regenerate and reload Caddy, so the
-  policy header is sent. Until then entries are still cleaned and framed with
-  the sandbox; only the header is missing. The commands are in
+  policy header is sent and `neuralstrike.co/blog` redirects. Do it before the
+  first Publish: until then entries are still cleaned and framed with the
+  sandbox, but an entry's document is served without its policy header. The
+  commands, and what to do before a rollback, are in
   `docs/dev-prod-environments.md`, "The site blog".
 - **Found on the way.** `CLAUDE.md` said the repo-root `conftest.py` guards
   "both HTTP stacks". It guards `sqlite3.connect` only: the network guard was
