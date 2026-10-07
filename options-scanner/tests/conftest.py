@@ -77,3 +77,19 @@ def _scan_inside_the_regular_session(monkeypatch):
     noon = datetime(2026, 10, 1, 12, 0, tzinfo=scanner_engine.TZ)
     monkeypatch.setattr(scanner_engine, "_signal_clock", lambda: noon)
     yield
+
+
+@pytest.fixture(autouse=True)
+def _no_resting_symbols_between_tests():
+    """``gex_collector`` remembers symbols whose chain listed nothing and leaves
+    them out of later polls. That memory is module state; one test's empty chain
+    must not make another test's poll skip a symbol."""
+    try:
+        import gex_collector
+    except ImportError:          # the engine folder is not on the path yet
+        yield
+        return
+    gex_collector.reset_nothing_listed()
+    yield
+    gex_collector.reset_nothing_listed()
+

@@ -3183,6 +3183,13 @@ volume, premium and volatility are the last fetch's. Two rules keep that honest:
   the model's ratio is far larger. A cap that binds holds growth and not
   shrinkage, so the carried net exposure can change sign. That symbol is fetched
   for real in the same minute instead (at most `cap_refetch_max` symbols).
+- **A symbol with nothing listed rests.** A name with monthly options only has
+  no expiration inside the collector's seven-day window for most of the month.
+  Schwab answers with an empty chain and nothing is charted for it. The
+  collector then leaves that symbol out of its polls for `empty_retry_min`
+  minutes (60) and asks again; once the chain lists an expiration it is
+  collected every minute as usual. A failed fetch is never treated this way.
+  The symbol is still scanned every quarter hour, where the window is 45 days.
 
 ## Scanner strike rules
 

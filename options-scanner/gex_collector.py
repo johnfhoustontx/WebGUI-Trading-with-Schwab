@@ -288,6 +288,54 @@ CARRY_SLACK_SEC = 30
 # [collection] cap_refetch_max; this is its built-in value.
 CAP_REFETCH_MAX = 8
 
+# A symbol whose chain came back with NOTHING LISTED inside the collection
+# window is not asked again for this many minutes. A name with monthly options
+# only has no expiration inside seven days for most of the month; Schwab answers
+# 200 with both maps empty, nothing is written, and the proxy's store never
+# keeps an empty answer - so a watchlist-only symbol that should cost one real
+# fetch in three minutes cost one every minute (measured 2026-10-06: eight such
+# symbols, about 8 wasted calls a minute). 0 = ask every minute, as before. The
+# setting is config/marketdata.toml [collection] empty_retry_min; this is its
+# built-in value, and the ceiling keeps a typo from parking a symbol for days.
+EMPTY_RETRY_MIN = 60
+EMPTY_RETRY_MAX_MIN = 720
+
+# symbol -> the moment (epoch seconds) it may be asked again. Read and written
+# on the polling thread only. Lost on a restart, which costs one fetch a symbol.
+_NOTHING_LISTED: dict = {}
+
+
+def reset_nothing_listed() -> None:
+    """Forget every resting symbol (tests; a restart does the same)."""
+    _NOTHING_LISTED.clear()
+
+
+def resting_symbols() -> set:
+    """The symbols currently remembered as listing nothing."""
+    return set(_NOTHING_LISTED)
+
+
+def _nothing_listed(chain) -> bool:
+    """Schwab's own answer for a window holding no expiration: ``status:
+    "SUCCESS"`` with both expiration maps empty (measured 2026-10-03 on SOFI and
+    2026-10-06 on AON). Anything less certain - no answer, ``FAILED``, no status
+    at all - is not it: resting a symbol that does list would blank its rows."""
+    return (isinstance(chain, dict) and chain.get("status") == "SUCCESS"
+            and not chain.get("callExpDateMap") and not chain.get("putExpDateMap"))
+
+
+def _empty_retry_sec(tiers) -> float:
+    """How long a symbol with nothing listed rests, in seconds, from the tiers'
+    ``empty_retry_min``. Missing or unusable is the built-in hour; 0 is off."""
+    raw = None
+    try:
+        raw = tiers.get("empty_retry_min") if tiers else None
+    except Exception:  # noqa: BLE001 — a settings shape never stops a poll
+        raw = None
+    if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+        raw = EMPTY_RETRY_MIN
+    return float(min(raw, EMPTY_RETRY_MAX_MIN) * 60)
+
 
 # What has already been said at WARNING this process, so a setting that is
 # clamped every minute is reported once, not 440 times a day.
@@ -534,11 +582,25 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
     With an EMPTY tail no symbol waits, and every request still carries the
     fresh-age limit: that is what the options service hands in whenever the
     proxy's chain store is on. None keeps every request exactly as it was
-    before tiers existed (no age limit sent)."""
+    before tiers existed (no age limit sent).
+
+    A symbol whose last answer listed NOTHING inside the window is left out of
+    the poll until its wait is over (``empty_retry_min`` in the tiers, else the
+    built-in hour; see ``EMPTY_RETRY_MIN``). It is not fetched, quoted, computed
+    or handed to ``on_chain``; nothing was being written for it anyway."""
     if symbols is None:
         symbols = collection_symbols()
+    retry_sec = _empty_retry_sec(tiers)
     tiers = _usable_tiers(tiers)
     now = now if now is not None else datetime.now(TZ)
+    now_ts = now.timestamp()
+    if not retry_sec:
+        _NOTHING_LISTED.clear()
+    polled = set(symbols)
+    for symbol in [s for s, at in _NOTHING_LISTED.items()
+                   if s not in polled and now_ts >= at]:
+        del _NOTHING_LISTED[symbol]            # no longer polled, wait over
+    symbols = [s for s in symbols if now_ts >= _NOTHING_LISTED.get(s, 0.0)]
     # snap down to nearest POLL_INTERVAL_MIN boundary so all rows in one poll
     # cycle share the same ts (idempotent re-runs replace, don't duplicate).
     snapped_min = (now.minute // POLL_INTERVAL_MIN) * POLL_INTERVAL_MIN
@@ -588,6 +650,17 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
             fetched = list(ex.map(_fetch, symbols))
     else:
         fetched = [_fetch(s) for s in symbols]
+
+    # Remember the symbols with nothing listed; forget the ones that list again.
+    # A fetch that failed is neither: it is asked again next minute.
+    for symbol, chain in fetched:
+        if retry_sec and _nothing_listed(chain):
+            if symbol not in _NOTHING_LISTED:
+                log.info("%s lists no expiration in the next 7 days; not asked "
+                         "again for %d minutes", symbol, int(retry_sec // 60))
+            _NOTHING_LISTED[symbol] = now_ts + retry_sec
+        elif chain:
+            _NOTHING_LISTED.pop(symbol, None)
 
     # Outside RTH the chain's underlyingPrice is the PREVIOUS CLOSE. Fix it here,
     # before on_chain / the engine / the term poll — every one of them prices off

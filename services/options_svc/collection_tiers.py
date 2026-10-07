@@ -91,8 +91,13 @@ def collection_tiers(universe, *, base, capture=None, hiro=None, flip=None):
         store_on = mdc.mode() == "on" and mdc.store_on("chains")
         cfg = mdc.section("collection")
         if not store_on:
-            return {"tail": frozenset(), "interval_min": 1,
-                    "fresh_max_age_sec": int(cfg["fresh_max_age_sec"])}
+            out = {"tail": frozenset(), "interval_min": 1,
+                   "fresh_max_age_sec": int(cfg["fresh_max_age_sec"])}
+            # How long a symbol with nothing listed rests does not depend on
+            # the store: it applies in every mode.
+            if "empty_retry_min" in cfg:
+                out["empty_retry_min"] = cfg["empty_retry_min"]
+            return out
         interval = max(1, int(cfg["tail_interval_min"]))
         if interval > MAX_TAIL_INTERVAL_MIN:
             if ("tail_interval_min", interval) not in _TIER_WARNED:
@@ -113,7 +118,8 @@ def collection_tiers(universe, *, base, capture=None, hiro=None, flip=None):
                "fresh_max_age_sec": int(cfg["fresh_max_age_sec"])}
         # The carry's limits, when the settings name them. The collector
         # checks each and falls back to its own built-in value.
-        for key in ("max_gamma_ratio", "carry_slack_sec", "cap_refetch_max"):
+        for key in ("max_gamma_ratio", "carry_slack_sec", "cap_refetch_max",
+                    "empty_retry_min"):
             if key in cfg:
                 out[key] = cfg[key]
         return out

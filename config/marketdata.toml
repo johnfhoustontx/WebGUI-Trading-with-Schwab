@@ -91,6 +91,12 @@ cap_refetch_max = 8
 # chain (3 minutes + 30 = 210), so a chain fetched a little late in its own
 # minute is still inside the limit.
 carry_slack_sec = 30
+# Minutes before the collector asks again for a symbol whose chain came back
+# with nothing listed in the next 7 days (a name with monthly options only, for
+# most of the month). Nothing is written for such a symbol, and the store never
+# keeps an empty answer, so without this it is fetched for real every minute.
+# 0 = ask every minute. Applies in every mode. Above 720 is read as 720.
+empty_retry_min = 60
 
 [limiter]
 # Every Schwab market-data call the proxy sends is spaced 0.2 seconds apart, 5 a

@@ -266,6 +266,15 @@ what it WOULD have reused, `on` answers repeats locally. Design:
    `gex_history_db.fetched_only_clause`). When the carry's gamma cap binds on a
    symbol, that symbol is fetched for real in the same poll
    (`collection.cap_refetch_max` symbols at most) and is then a fetched row.
+   ⚠ **A symbol with NOTHING LISTED in the seven-day window is left out of the
+   poll for `collection.empty_retry_min` minutes** (60; any tier, any store
+   mode; `gex_collector._NOTHING_LISTED`, memory only). Only Schwab's own
+   answer counts: 200, `status: "SUCCESS"`, both maps empty. The store never
+   keeps an empty answer, so before 2026-10-07 such a symbol was fetched for
+   real every minute whatever its tier (measured: eight monthly-only names,
+   about 8 wasted calls a minute). A new consumer must not read "no rows
+   this minute" for a symbol as a collector fault without checking
+   `gex_collector.resting_symbols()`.
 6. **A changed store rule goes through `shadow` before `on`.** On daily bars,
    `shadow_hit_match` compares every bar EXCEPT today's during the session — the
    one bar a stored series can be stale on — so read **`shadow_moving_same` /

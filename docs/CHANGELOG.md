@@ -4,7 +4,30 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-07 (**Tracked structures: the cap is per family, and a bought call or put is listed only at Good or Strong.**)
+**Last updated:** 2026-10-07 (**The collector stops asking every minute for symbols with nothing listed this week.**)
+
+- **What was wrong.** A name with monthly options only has no expiration inside
+  the collector's seven-day window for most of the month. Schwab answers 200,
+  `status: "SUCCESS"`, both expiration maps empty. Nothing is written for it,
+  and the proxy's store never keeps an empty answer, so a watchlist-only symbol
+  that should cost one real fetch in three minutes cost one every minute.
+- **Measured on prod, 2026-10-06** (the first day with 135 watchlist symbols):
+  eight such names (AON, AZO, CMI, FANG, HCA, HONA, ILMN, LIN). AON was
+  requested 18 times in 15 minutes against ANET's 17, and two requests by hand
+  a second apart were both misses. About 8 wasted calls a minute.
+- **The fix.** `gex_collector.poll_once` remembers a symbol whose answer was
+  Schwab's own "success, nothing listed" and leaves it out of the poll for
+  `[collection] empty_retry_min` minutes (60, in `config/marketdata.toml` and
+  Settings -> Configuration; 0 = ask every minute). A failed fetch, a `FAILED`
+  status or an answer with no status is never remembered. A chain that lists
+  again is collected every minute again. Memory only: a restart costs one
+  fetch per symbol.
+- **Not changed.** Those symbols still write no heatmap rows until an
+  expiration enters the seven-day window; the quarter-hour scan (45 days)
+  covers them as before.
+- **Tests.** `options-scanner/tests/test_gex_collector_nothing_listed.py`.
+
+**Prior — 2026-10-07** (**Tracked structures: the cap is per family, and a bought call or put is listed only at Good or Strong.**)
 
 - **Why, the same day.** The first check against prod after the promote, before
   the open, read the previous session's scan data. The scan covers **119

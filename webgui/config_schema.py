@@ -1852,6 +1852,14 @@ _MARKETDATA = ConfigFile(
                   "written capped. This is the most symbols one minute "
                   "refetches that way. 0 writes the capped chain.",
                   kind="int", unit="symbols", min=0, max=40),
+            Field("collection.empty_retry_min",
+                  "Minutes before retrying a symbol with nothing listed",
+                  "A symbol with monthly options only has no expiration inside "
+                  "the collector's seven-day window for most of the month. "
+                  "Schwab answers with an empty chain, nothing is charted, and "
+                  "the collector waits this long before asking again. 0 asks "
+                  "every minute. Works whatever the mode above is.",
+                  kind="int", unit="minutes", min=0, max=720),
             Field("collection.carry_slack_sec",
                   "Slack when asking for a stored chain",
                   "Seconds added to the interval when the collector asks for a "

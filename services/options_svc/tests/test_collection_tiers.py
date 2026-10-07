@@ -180,8 +180,24 @@ def test_the_shipped_settings_carry_nothing():
     shadow: nothing is carried until the operator turns it on. The fresh-age
     limit is sent regardless (AC-102)."""
     assert mdc.section("collection")["tail_interval_min"] == 1
+    # The wait for a symbol with nothing listed rides along in every mode: it
+    # does not depend on the store (see gex_collector.EMPTY_RETRY_MIN).
     assert tiers() == {"tail": frozenset(), "interval_min": 1,
-                       "fresh_max_age_sec": mdc.section("collection")["fresh_max_age_sec"]}
+                       "fresh_max_age_sec": mdc.section("collection")["fresh_max_age_sec"],
+                       "empty_retry_min": mdc.section("collection")["empty_retry_min"]}
+    assert mdc.section("collection")["empty_retry_min"] == 60
+
+
+def test_the_wait_for_an_empty_symbol_is_handed_on_whether_or_not_the_store_is_on(monkeypatch):
+    for mode in ("off", "shadow", "on"):
+        monkeypatch.setattr(mdc, "mode", lambda m=mode: m)
+        monkeypatch.setattr(mdc, "store_on", lambda name: True)
+        monkeypatch.setattr(mdc, "section", lambda name: {
+            "tail_interval_min": 3, "fresh_max_age_sec": 20, "empty_retry_min": 45})
+        assert tiers()["empty_retry_min"] == 45, mode
+    monkeypatch.setattr(mdc, "section", lambda name: {
+        "tail_interval_min": 3, "fresh_max_age_sec": 20})
+    assert "empty_retry_min" not in tiers()        # absent stays absent: the built-in applies
 
 
 #############################################
