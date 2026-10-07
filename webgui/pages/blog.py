@@ -2,9 +2,11 @@
 
 The page asks; the blog service does. An uploaded HTML document goes to the
 service as a command on ``cmd:blog``; the service cleans it (scripts, forms and
-outside requests are taken out) and files it as a DRAFT. Nothing reaches
-neuralstrike.co/blog until the owner presses Publish here, and Unpublish takes
-an entry back off. Three cache views carry what the page shows: the drafts
+outside requests are taken out) and files it as a DRAFT. Nothing reaches the
+site's Blog until the owner presses Publish here, and Unpublish takes an entry
+back off. (On the site the list is ``neuralstrike.co/blog.html``, which
+``neuralstrike.co/blog`` redirects to at the edge, and an entry is at
+``/blog/<address>/``.) Three cache views carry what the page shows: the drafts
 waiting, the entries published, and the service's answer to the last command.
 
 Tier-1: the stream name, the command builders, the validators, the frame policy

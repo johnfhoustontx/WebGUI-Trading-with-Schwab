@@ -38,7 +38,7 @@ Both describe the larger feature; this file describes the code.
 | The background job | `services/blog_svc/scheduler.py` | Repair and rebuild at start, then the rebuild and the views again on a timer |
 | The private page | `webgui/pages/blog.py`, two routes in `webgui/main.py` | Upload, preview, publish, unpublish |
 | The public page | `deploy/site/blog.html`, `deploy/site/assets/blog.js` | The list of entries |
-| The edge | `deploy/caddy/generate_caddyfile.py` (`@blog_entries`) | The policy header on each entry document |
+| The edge | `deploy/caddy/generate_caddyfile.py` (`@blog_entries`, `BLOG_BARE_PATHS`) | The policy header on each entry document; `/blog` and `/blog/` redirected to `blog.html` |
 
 ## The data flow
 
@@ -555,6 +555,15 @@ All under `deploy/site/`, all gitignored generated state like `ideas/` and
 | `blog/sitemap.txt` | The entries' addresses |
 
 `blog.html` and `assets/blog.js` are tracked.
+
+**`neuralstrike.co/blog` is a redirect.** The list is `blog.html`; `/blog/` is
+the folder the entries live in and has no index, so the address people type was
+a 404. Caddy sends exactly `/blog` and `/blog/` to `/blog.html` with a 308
+(`BLOG_BARE_PATHS` in `deploy/caddy/generate_caddyfile.py`). Both are exact
+paths: a Caddy `path` matcher with no `*` matches that whole path only, so
+`/blog/<address>/`, an entry's document and `/blog/fonts/*` are never
+redirected. It takes effect with the same Caddy regenerate and reload the
+policy header needs.
 
 - **The menu is the tracked one.** Each entry page carries the `<nav>` of the
   tracked `blog.html`, byte for byte, with its icon links, stylesheets and

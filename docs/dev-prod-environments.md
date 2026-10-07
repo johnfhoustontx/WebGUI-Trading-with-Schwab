@@ -1042,7 +1042,7 @@ sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
 **What works before the step is done.** The Blog page, uploads, previews,
 Publish and Unpublish all work, and published entries are served. Each entry is
 still cleaned before it is stored, and its page still frames it with the
-`sandbox` attribute that grants no scripts. Two things are missing until the
+`sandbox` attribute that grants no scripts. Three things are missing until the
 reload:
 
 - the `Content-Security-Policy` header on `/blog/<address>/entry.html`, which
@@ -1050,7 +1050,10 @@ reload:
   directly, outside its frame;
 - the revalidation rule for an entry's page at `/blog/<address>/`, so a
   returning visitor's browser may show that page from its own cache after a
-  later promote changes the site menu.
+  later promote changes the site menu;
+- the redirect from `neuralstrike.co/blog` (and `/blog/`) to the Blog's list at
+  `/blog.html`. Until the reload both of those addresses are a 404; the Blog
+  item in the site menu links to `blog.html` and works either way.
 
 **How to check it.** Publish an entry first (the header is sent on an entry's
 document, so one has to exist), then, in the same session on the box:
@@ -1077,8 +1080,17 @@ curl -sI https://neuralstrike.co/blog/my-entry/
 That answer should show `cache-control: no-cache` and no
 `content-security-policy` line.
 
+The address people type must reach the list. This one needs no entry to exist:
+
+```bash
+curl -sI https://neuralstrike.co/blog
+```
+
+The answer should be a `308` with `location: /blog.html`, and the same for
+`https://neuralstrike.co/blog/`.
+
 **Not yet checked on a live Caddy.** The generated Caddyfile is tested as text.
-The two checks above are the first proof that Caddy sends what the file says.
+The three checks above are the first proof that Caddy sends what the file says.
 
 **Where the policy lives.** `shared/blog_inbox.py` (`ENTRY_CSP`,
 `ENTRY_SANDBOX`). The Caddyfile generator imports the string; change it there and

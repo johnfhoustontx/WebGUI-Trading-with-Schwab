@@ -1550,8 +1550,10 @@ posted there.
     "/blog": """
 **Blog — the simple version**
 
-Put an entry on the public site's Blog (neuralstrike.co/blog), and take one off.
-An entry is one self-contained HTML document.
+Put an entry on the public site's Blog, and take one off. The Blog's list of
+entries is at neuralstrike.co/blog.html; typing neuralstrike.co/blog takes you
+there too. An entry is one self-contained HTML document, and each has a page
+of its own at neuralstrike.co/blog/ followed by its address.
 
 - **Nothing is public until you press Publish.** Uploading a file only makes a
   **draft**: a cleaned copy that waits on this page, where only you can see it.

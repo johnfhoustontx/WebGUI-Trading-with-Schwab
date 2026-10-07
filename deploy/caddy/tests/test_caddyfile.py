@@ -661,6 +661,64 @@ def test_the_blog_policy_survives_caddys_quoting(cfg):
     assert line.count('"') == 2 and line.rstrip().endswith('"'), line
 
 
+# ── neuralstrike.co/blog ─────────────────────────────────────────────────────
+#
+# The Blog's list is ``blog.html``. ``/blog/`` is a folder of entries with no
+# index of its own, so the address people actually type was a 404.
+
+def _redirects(block):
+    """Every ``redir`` line in ``block`` as ``(matcher, to, code)``, and the
+    count of lines that START with ``redir`` at all - so a redirect written in
+    any other shape is seen rather than skipped."""
+    shaped = re.findall(r"^[ \t]*redir[ \t]+(\S+)[ \t]+(\S+)[ \t]+(\S+)[ \t]*$", block, re.M)
+    return shaped, len(re.findall(r"^[ \t]*redir\b", block, re.M))
+
+
+def _caddy_path_matches(matcher, path):
+    """Caddy's ``path`` matcher for a pattern with NO ``*``: the whole path,
+    compared without case. (A ``*`` makes it a prefix, suffix or glob match,
+    which is why the test below refuses one outright.)"""
+    assert "*" not in matcher
+    return matcher.lower() == path.lower()
+
+
+def test_the_bare_blog_address_goes_to_the_blog_page(cfg):
+    public = _block(cfg, repo_paths.SITE_HOST)
+    shaped, lines = _redirects(public)
+    assert sorted(shaped) == [("/blog", "/blog.html", "308"), ("/blog/", "/blog.html", "308")]
+    assert lines == 2, "a redirect in a shape this test does not read"
+    assert tuple(m for m, _to, _code in shaped) == caddy.BLOG_BARE_PATHS
+    assert {to for _m, to, _code in shaped} == {caddy.BLOG_LIST_PAGE}
+    # The page it sends people to is a tracked file of the site.
+    assert (pathlib.Path(repo_paths.SITE_ROOT) / caddy.BLOG_LIST_PAGE.lstrip("/")).is_file()
+
+
+def test_the_blog_redirects_cannot_reach_an_entry_a_typeface_or_the_page_itself(cfg):
+    """An exact path, never a pattern. ``redir /blog/* ...`` would send every
+    entry, its document and every typeface to the list; and a matcher that took
+    ``/blog.html`` would redirect the page to itself for ever."""
+    shaped, _lines = _redirects(_block(cfg, repo_paths.SITE_HOST))
+    assert shaped
+    for matcher, to, _code in shaped:
+        assert matcher.startswith("/") and "*" not in matcher and not matcher.startswith("@")
+        for ch in ("{", "}", '"', "`", " ", "\t"):
+            assert ch not in matcher and ch not in to
+        for path in ("/blog/a/", "/blog/a", "/blog/a/index.html", "/blog/a/entry.html",
+                     "/blog/nuclear-stocks-thesis/", "/blog/fonts/", "/blog/fonts/x.woff2",
+                     "/blog/sitemap.txt", "/blog.html", "/blog.json", "/blogs", "/blog//",
+                     "/x/blog", "/"):
+            assert not _caddy_path_matches(matcher, path), f"{matcher} would redirect {path}"
+        assert not _caddy_path_matches(matcher, to), "a redirect onto itself"
+    assert {m for m, _to, _code in shaped} == {"/blog", "/blog/"}
+
+
+def test_the_blog_redirects_are_the_public_sites_only(cfg):
+    assert len(re.findall(r"^[ \t]*redir\b", cfg, re.M)) == 2
+    for host in (repo_paths.APP_HOST, repo_paths.LIVE_HOST):
+        assert not re.search(r"^[ \t]*redir\b", _block(cfg, host), re.M), host
+    assert cfg.isascii()
+
+
 def test_every_matcher_any_header_names_is_declared(cfg):
     """``test_every_matcher_the_cache_rules_name_is_defined`` reads the
     Cache-Control rules and the ``path`` declarations, which was every rule

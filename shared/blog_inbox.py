@@ -1,7 +1,9 @@
 """The site Blog's requests, their validators, the frame policy and its config.
 
-An entry on neuralstrike.co/blog is a self-contained HTML document written in
-Claude Chat. It arrives as a DRAFT - through the connector gate
+An entry on the site's Blog (its list is ``neuralstrike.co/blog.html``, which
+``neuralstrike.co/blog`` redirects to at the edge; an entry is at
+``/blog/<slug>/``) is a self-contained HTML document written in Claude Chat.
+It arrives as a DRAFT - through the connector gate
 (``services/blog_gate``, phase 2) or an upload on the private Blog page - and
 reaches the public site only when the operator presses Publish. Three
 processes take part, and all three import this module, so the stream names, the

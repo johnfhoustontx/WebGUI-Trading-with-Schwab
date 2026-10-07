@@ -115,6 +115,18 @@ BLOG_ENTRY_PATH = r"^/blog/[a-z0-9-]+/entry\.html$"
 # the `*` matches one folder name and never crosses a slash.
 BLOG_PAGE_PATH = "/blog/*/"
 
+# The Blog's list is the tracked page blog.html. /blog/ is a folder of entries
+# with no index of its own, so the address people type - neuralstrike.co/blog -
+# was a 404 (the file server answers /blog with a redirect to /blog/, and
+# /blog/ has nothing to serve). Both spellings are sent to the page.
+#
+# EXACT paths, on purpose. A Caddy `path` matcher with no `*` in it matches
+# that whole path and nothing else, so these two can never take an entry
+# (/blog/<slug>/), its document, a typeface under /blog/fonts/ or blog.html
+# itself. Never write `/blog/*` here: it would send every entry to the list.
+BLOG_BARE_PATHS = ("/blog", "/blog/")
+BLOG_LIST_PAGE = "/blog.html"
+
 # Where Caddy reads its config on Debian/Ubuntu when installed from the official
 # repository. Named here rather than buried in main() so the tests can assert
 # the path and moving it is one edit.
@@ -224,13 +236,26 @@ def _public_block():
     the document is opened outside its frame. The string is imported, never
     retyped: the service writes the same tokens into the frame and the private
     preview sends the same header, and three copies would drift.
+
+    **Two redirects, both to one tracked page.** ``/blog`` and ``/blog/`` go to
+    ``/blog.html`` (``BLOG_BARE_PATHS``): exact paths, so no entry, document or
+    typeface under ``/blog/`` is ever redirected.
     """
+    bare_blog = "\n".join(f"    redir {path} {BLOG_LIST_PAGE} 308" for path in BLOG_BARE_PATHS)
     return f"""{SITE_HOST}, www.{SITE_HOST} {{
     encode zstd gzip
 
     # STATIC ONLY. This tree is world-readable by definition; see the docstring.
     root * "{_site_root()}"
     file_server
+
+    # neuralstrike.co/blog is what people type; the Blog's list is blog.html,
+    # and /blog/ is a folder of entries with no index, so it was a 404. Each
+    # line names ONE exact path: a `path` matcher with no `*` matches that whole
+    # path only, so an entry at /blog/<slug>/, its entry.html and the typefaces
+    # under /blog/fonts/ are never redirected. Caddy runs `redir` before
+    # `file_server` whatever the order here. 308 is a permanent redirect.
+{bare_blog}
 
     header Strict-Transport-Security "{HSTS}"
 
