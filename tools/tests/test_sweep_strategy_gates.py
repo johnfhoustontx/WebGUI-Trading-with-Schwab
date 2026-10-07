@@ -79,3 +79,52 @@ def test_the_cuts_are_a_statement_about_fairly_priced_chains():
         assert (by["SHORT_STRADDLE"]["grade"] != "Weak") is straddle_passes, rich
         assert by["COVERED_CALL"]["grade"] == "Weak", rich
         assert "PoP" in by["COVERED_CALL"]["grade_reason"], rich
+
+
+# ---- Market Scanner mode: short expiries, on a pinned clock (2026-10-06) ----
+
+SCANNER_SHORT = {"BULL_CALL", "BEAR_PUT", "LONG_STRADDLE", "SHORT_STRADDLE",
+                 "LONG_STRANGLE"}
+
+
+def test_scanner_mode_measures_a_two_day_front_on_the_front_expiry():
+    rows = list(_tool().rows(100.0, 0.28, 2, 1.0, scanner=True))
+    by = {r["type"]: r for r in rows}
+    assert SCANNER_SHORT <= set(by)
+    # The Finder's 7-day floor would have moved these to the back month.
+    assert {by[t]["dte"] for t in SCANNER_SHORT} == {2}
+    # The 0-DTE window builds no calendar: its front leg must be a week out.
+    assert not any(t.startswith(("CALENDAR", "DIAGONAL")) for t in by)
+    # No share structure: the Market Scanner holds no shares.
+    assert not {"COVERED_CALL", "PROTECTIVE_PUT", "COLLAR"} & set(by)
+
+
+def test_scanner_mode_builds_calendars_in_the_swing_window():
+    by = {r["type"]: r for r in _tool().rows(100.0, 0.28, 10, 1.0, scanner=True)}
+    assert {"CALENDAR_CALL", "CALENDAR_PUT"} <= set(by)
+    assert by["LONG_STRADDLE"]["dte"] == 10
+
+
+def test_scanner_mode_does_not_depend_on_the_time_of_day_it_is_run():
+    """Probability of profit reads the clock. An expiration-day row measured
+    after the close has no time left, so the sweep pins the session time."""
+    import datetime as dt
+    tool = _tool()
+    a = list(tool.rows(100.0, 0.28, 0, 1.0, scanner=True, at=dt.time(10, 0)))
+    b = list(tool.rows(100.0, 0.28, 0, 1.0, scanner=True, at=dt.time(10, 0)))
+    assert a and a == b
+    later = list(tool.rows(100.0, 0.28, 0, 1.0, scanner=True, at=dt.time(14, 0)))
+    assert later != a          # the pinned time is really what is read
+    # ... and the pin is released afterwards.
+    assert tool.ss._years_to_expiry.__name__ == "_years_to_expiry"
+
+
+def test_scanner_mode_refuses_a_front_outside_the_scanner_windows():
+    import pytest
+    with pytest.raises(ValueError):
+        list(_tool().rows(100.0, 0.28, 30, 1.0, scanner=True))
+
+
+def test_the_default_sweep_is_not_moved_by_scanner_mode_existing():
+    tool = _tool()
+    assert {r["type"] for r in tool.rows(100.0, 0.28, 30, 2.5)} == NEW_TYPES

@@ -32,6 +32,20 @@ absent. A Marginal 45 here is cut on the page.
     python tools/sweep_strategy_gates.py --step 5
     python tools/sweep_strategy_gates.py --iv 0.20 --days 7,14,30,45
     python tools/sweep_strategy_gates.py --rich 1.2
+    python tools/sweep_strategy_gates.py --scanner --step 0.25 --at 10:00
+
+`--scanner` measures what the MARKET SCANNER's two windows would build instead
+(docs/plans/2026-10-06-scanner-multi-structure-design.md): front DTEs inside
+0..4 or 5..15 (default 0,1,2,4,7,10,15), the debit verticals added, no share
+structures, the straddle and butterfly builders handed the window's own minimum
+in place of the Finder's 7-day floor, calendars only in the 5..15 window with a
+back month up to 45 days, and the short strangle sold between 0.15 delta and
+`[selection] max_entry_short_delta`. ⚠ Probability of profit reads the CLOCK
+(`strategy_scanner._years_to_expiry`), so a short-dated row measured after the
+close has less time left than the same row at the open, and an expiration-day
+row none at all. Scanner mode therefore PINS the time of day (`--at`, Central,
+default 10:00) for the marks, the greeks and the probability alike. The default
+mode is unchanged and still reads the real clock, which at 14+ days is noise.
 
 `--rich` marks every option at Black-Scholes on `iv * rich` while the greeks, the
 chain's `volatility` and the scorer's `atm_iv` stay at `iv` -- premium priced
@@ -98,6 +112,7 @@ sys.path.insert(0, str(OPTIONS_SCANNER))
 import options_calculator as oc      # noqa: E402
 import strategy_scanner as ss        # noqa: E402
 import strategy_scoring as sc        # noqa: E402
+from shared import scanner_config as _scfg   # noqa: E402
 
 BUILDERS = ("build_straddles_strangles", "build_butterflies_condors",
             "build_calendars", "build_stock_structures")
@@ -108,21 +123,35 @@ NEUTRAL_VIEW = {"direction": "neutral", "conviction": 0.1, "vol_regime": "mid"}
 BACK_OFFSET = 28
 SPAN = 0.40
 
+# -- Market Scanner mode ------------------------------------------------------
+SCANNER_BUILDERS = ("build_debit_verticals", "build_straddles_strangles",
+                    "build_butterflies_condors", "build_calendars")
+# The builders that take the 7-day front floor, and so the caller's own.
+FLOORED = ("build_straddles_strangles", "build_butterflies_condors")
+SCANNER_WINDOWS = ((0, 4), (5, 15))     # run_full_scan's 0-DTE and SWING buckets
+SCANNER_BACK_MAX = 45                   # the far edge of the scan's +20..+45 chain
+SCANNER_SHORT_MIN = 0.15                # [structures] short_delta_min, as designed
+SCANNER_DAYS = "0,1,2,4,7,10,15"
+SCANNER_AT = dt.time(10, 0)             # Central; 90 minutes after the open
 
-def chain(spot, iv, days, step, rich=1.0):
+
+def chain(spot, iv, days, step, rich=1.0, t_years=None):
     """A Schwab-shaped chain: one expiration per entry in `days`, strikes
     spot +/- SPAN on a `step` ladder. Marks are Black-Scholes at `iv * rich` and
     `RISK_FREE_RATE` floored at 0.01, bid/ask +/-2% of mark; greeks analytic at
     `iv`.
     Liquidity is generous on purpose -- this sweep is about the reward and PoP
     bars, and a liquidity failure would mask them.
+
+    ``t_years`` (days -> years) replaces the whole-day time to expiry; scanner
+    mode passes the time left on its pinned clock.
     """
     r = oc.RISK_FREE_RATE
     out = {"underlyingPrice": spot, "callExpDateMap": {}, "putExpDateMap": {}}
     n = int(spot * SPAN / step)
     for d in days:
         key = f"{(dt.date.today() + dt.timedelta(days=d)).isoformat()}:{d}"
-        T = max(d, 0.5) / 365.0
+        T = t_years(d) if t_years else max(d, 0.5) / 365.0
         for kind, m in (("call", "callExpDateMap"), ("put", "putExpDateMap")):
             side = {}
             for i in range(-n, n + 1):
@@ -158,8 +187,88 @@ def _legs_text(legs):
     return " ".join(parts)
 
 
-def rows(spot, iv, front_days, step, rich=1.0):
-    """One scored row per candidate the four builders emit at this front DTE."""
+def _row(sig, front_days, iv, em_fallback, daily_move):
+    profile = sc.gate_profile(sig)
+    # The PRODUCTION expression, called rather than restated.
+    reward = sc._reward_metric(dict(sig), profile)
+    scored = sc.score_all([dict(sig)], NEUTRAL_VIEW, iv, em_fallback,
+                          daily_move=daily_move)[0]
+    net = (sig["net_debit"] if sig.get("net_debit") is not None
+           else -(sig.get("net_credit") or 0.0))
+    return {
+        "front": front_days, "type": sig["type"], "dte": sig["dte"],
+        "legs": _legs_text(sig["legs"]), "net": net,
+        "max_profit": sig.get("max_profit"), "max_loss": sig.get("max_loss"),
+        "rr": sig.get("rr"), "pop": sig.get("pop_pct"),
+        "profile": profile, "reward": reward,
+        "score": scored["composite_score"], "grade": scored["grade"],
+        "grade_reason": scored["grade_reason"],
+    }
+
+
+def scanner_window(front_days):
+    """The Market Scanner window (lo, hi) a front DTE falls in."""
+    for lo, hi in SCANNER_WINDOWS:
+        if lo <= front_days <= hi:
+            return lo, hi
+    raise ValueError(f"front DTE {front_days} is in neither Market Scanner "
+                     f"window {SCANNER_WINDOWS}")
+
+
+def _scanner_signals(spot, iv, front_days, step, rich, at):
+    """The candidates the Market Scanner's pass would build at this front DTE,
+    with the time of day pinned to ``at`` (Central) while they are built."""
+    lo, hi = scanner_window(front_days)
+    today = dt.date.today()
+    now = dt.datetime.combine(today, at)      # naive means Central in this repo
+
+    def t_years(d):
+        return max(oc.expiry_time_to_years(now, today + dt.timedelta(days=d)), 1e-6)
+
+    c = chain(spot, iv, (front_days, front_days + BACK_OFFSET), step, rich,
+              t_years=t_years)
+    ceiling = _scfg.selection()["max_entry_short_delta"]
+    bands = {"put_band": (-ceiling, -SCANNER_SHORT_MIN),
+             "call_band": (SCANNER_SHORT_MIN, ceiling)}
+    real = ss._years_to_expiry
+
+    def _pinned(exp_str, now_=None):
+        return real(exp_str, now)
+
+    out = []
+    ss._years_to_expiry = _pinned
+    try:
+        for name in SCANNER_BUILDERS:
+            if name == "build_calendars":
+                # Swing only: the front leg must be a week out, and the back
+                # month comes from the scan's +20..+45 chain.
+                if lo >= 5:
+                    out += ss.build_calendars(c, "SWEEP", spot, iv, lo,
+                                              SCANNER_BACK_MAX)
+                continue
+            kw = dict(bands) if name == "build_straddles_strangles" else {}
+            if name in FLOORED:
+                kw["min_front_dte"] = lo
+            out += getattr(ss, name)(c, "SWEEP", spot, iv, lo, hi, **kw)
+    finally:
+        ss._years_to_expiry = real
+    return lo, out
+
+
+def rows(spot, iv, front_days, step, rich=1.0, scanner=False, at=None):
+    """One scored row per candidate the four builders emit at this front DTE.
+
+    ``scanner=True`` measures the Market Scanner's pass instead (see the module
+    docstring), on a clock pinned to ``at``."""
+    if scanner:
+        lo, sigs = _scanner_signals(spot, iv, front_days, step, rich,
+                                    at or SCANNER_AT)
+        daily_move = spot * iv * math.sqrt(1 / 365.0)
+        # run_full_scan's fallback: the move at the WINDOW's DTE minimum.
+        em_fallback = daily_move * math.sqrt(max(lo, 1))
+        for sig in sigs:
+            yield _row(sig, front_days, iv, em_fallback, daily_move)
+        return
     c = chain(spot, iv, (front_days, front_days + BACK_OFFSET), step, rich)
     # swing_scan's two inputs: the engine's DAILY expected move in dollars, and
     # the scalar fallback at the window's DTE min (0 here, so one day).
@@ -168,22 +277,7 @@ def rows(spot, iv, front_days, step, rich=1.0):
     for name in BUILDERS:
         kw = {"put_band": PUT_BAND, "call_band": CALL_BAND} if name in BANDED else {}
         for sig in getattr(ss, name)(c, "SWEEP", spot, iv, 0, front_days + 30, **kw):
-            profile = sc.gate_profile(sig)
-            # The PRODUCTION expression, called rather than restated.
-            reward = sc._reward_metric(dict(sig), profile)
-            scored = sc.score_all([dict(sig)], NEUTRAL_VIEW, iv, em_fallback,
-                                  daily_move=daily_move)[0]
-            net = (sig["net_debit"] if sig.get("net_debit") is not None
-                   else -(sig.get("net_credit") or 0.0))
-            yield {
-                "front": front_days, "type": sig["type"], "dte": sig["dte"],
-                "legs": _legs_text(sig["legs"]), "net": net,
-                "max_profit": sig.get("max_profit"), "max_loss": sig.get("max_loss"),
-                "rr": sig.get("rr"), "pop": sig.get("pop_pct"),
-                "profile": profile, "reward": reward,
-                "score": scored["composite_score"], "grade": scored["grade"],
-                "grade_reason": scored["grade_reason"],
-            }
+            yield _row(sig, front_days, iv, em_fallback, daily_move)
 
 
 def _num(v, fmt):
@@ -194,11 +288,20 @@ def _num(v, fmt):
     return format(v, fmt)
 
 
-def _fmt(all_rows, spot, iv, step, rich=1.0):
-    out = [f"Strategy Finder gate sweep -- spot {spot:g}, iv {iv:g}, step {step:g}, "
-           f"marks at iv x {rich:g}, "
-           f"back = front + {BACK_OFFSET}, bands put {PUT_BAND} call {CALL_BAND}",
-           ""]
+def _fmt(all_rows, spot, iv, step, rich=1.0, scanner_at=None):
+    if scanner_at is not None:
+        ceiling = _scfg.selection()["max_entry_short_delta"]
+        out = [f"Market Scanner gate sweep -- spot {spot:g}, iv {iv:g}, "
+               f"step {step:g}, marks at iv x {rich:g}, clock pinned at "
+               f"{scanner_at:%H:%M} CT, short strangle band "
+               f"{SCANNER_SHORT_MIN:g}..{ceiling:g}, calendar back = front + "
+               f"{BACK_OFFSET}",
+               ""]
+    else:
+        out = [f"Strategy Finder gate sweep -- spot {spot:g}, iv {iv:g}, step {step:g}, "
+               f"marks at iv x {rich:g}, "
+               f"back = front + {BACK_OFFSET}, bands put {PUT_BAND} call {CALL_BAND}",
+               ""]
     head = (f"{'type':<16}{'dte':>4}  {'legs':<30}{'net':>9}{'maxP':>9}{'maxL':>10}"
             f"{'EM':>7}{'R:R':>7}{'PoP':>6}  {'profile':<8}{'reward':>7}{'score':>7}  grade")
     front = None
@@ -224,15 +327,27 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--spot", type=float, default=100.0)
     ap.add_argument("--iv", type=float, default=0.28)
-    ap.add_argument("--days", default="14,30,45",
-                    help="comma-separated FRONT DTEs (default 14,30,45)")
+    ap.add_argument("--days", default=None,
+                    help="comma-separated FRONT DTEs (default 14,30,45; "
+                         f"{SCANNER_DAYS} with --scanner)")
     ap.add_argument("--step", type=float, default=2.5, help="strike ladder step")
     ap.add_argument("--rich", type=float, default=1.0,
                     help="mark options at iv * RICH (default 1.0 = fairly priced)")
+    ap.add_argument("--scanner", action="store_true",
+                    help="measure the Market Scanner's pass (see the docstring)")
+    ap.add_argument("--at", default=None,
+                    help="with --scanner: the pinned time of day, HH:MM Central "
+                         f"(default {SCANNER_AT:%H:%M})")
     a = ap.parse_args(argv)
-    fronts = [int(x) for x in a.days.split(",") if x.strip()]
-    all_rows = [r for d in fronts for r in rows(a.spot, a.iv, d, a.step, a.rich)]
-    print(_fmt(all_rows, a.spot, a.iv, a.step, a.rich))
+    days = a.days or (SCANNER_DAYS if a.scanner else "14,30,45")
+    fronts = [int(x) for x in days.split(",") if x.strip()]
+    at = None
+    if a.scanner:
+        at = dt.time.fromisoformat(a.at) if a.at else SCANNER_AT
+    all_rows = [r for d in fronts
+                for r in rows(a.spot, a.iv, d, a.step, a.rich,
+                              scanner=a.scanner, at=at)]
+    print(_fmt(all_rows, a.spot, a.iv, a.step, a.rich, scanner_at=at))
     return 0
 
 
