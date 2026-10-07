@@ -539,6 +539,45 @@ def test_a_submit_command_without_fields_still_carries_all_four():
         assert cmd["args"]["fields"] == {"title": "", "summary": "", "tags": [], "slug": ""}
 
 
+def test_a_submit_command_names_the_entry_it_replaces_only_when_told_to():
+    rid = bi.new_id()
+    plain = bi.submit_command(DOC, {}, source="upload", request_id=rid)
+    assert "revises" not in plain["args"]
+    assert "revises" not in bi.submit_command(DOC, {}, source="upload", request_id=rid,
+                                              revises=None)["args"]
+    cmd = bi.submit_command(DOC, {}, source="upload", request_id=rid,
+                            revises="an-older-entry")
+    assert cmd == {"type": bi.SUBMIT_TYPE, "args": {
+        "request_id": rid, "source": "upload", "html": DOC,
+        "fields": {"title": "", "summary": "", "tags": [], "slug": ""},
+        "revises": "an-older-entry"}}
+
+
+def test_a_submit_command_keeps_an_address_longer_than_a_new_one_may_be(monkeypatch):
+    """The entry is already out there: held to the limit's ceiling, as
+    ``existing_slug`` holds it, not to today's setting."""
+    _cfg(monkeypatch, limits={"slug_chars": 16})
+    longer = "a" * 60
+    assert bi.clean_slug(longer) is None
+    cmd = bi.submit_command(DOC, {}, source="upload", request_id=bi.new_id(), revises=longer)
+    assert cmd["args"]["revises"] == longer
+
+
+@pytest.mark.parametrize("bad", ["", "   ", "Not An Address!", "../x", "a--b", "fonts", "con",
+                                 "a" * 121, "x" + chr(0x0A), 7, ["a"], {"slug": "a"}, False,
+                                 0])
+def test_a_submit_command_naming_what_cannot_be_an_entry_is_not_built(bad):
+    """Refused, never filed as a NEW entry: a replacement that quietly became a
+    second entry is the mistake this stops."""
+    assert bi.submit_command(DOC, {}, source="upload", request_id=bi.new_id(),
+                             revises=bad) is None
+
+
+def test_the_entry_a_submit_command_replaces_is_named_by_keyword_only():
+    with pytest.raises(TypeError):
+        bi.submit_command(DOC, {}, "an-older-entry", source="upload", request_id=bi.new_id())
+
+
 def test_an_unknown_source_or_a_bad_request_id_builds_no_command():
     rid = bi.new_id()
     for source in ("", None, "Chat", "email", "upload ", 1):
@@ -633,9 +672,20 @@ def test_the_policy_is_the_designs_word_for_word():
                                 "allow-popups-to-escape-sandbox")
     assert bi.ENTRY_CSP == (
         "default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; "
-        "img-src 'self' data:; base-uri 'none'; form-action 'none'; "
+        "img-src data:; base-uri 'none'; form-action 'none'; "
         "frame-ancestors 'self'; "
         "sandbox allow-same-origin allow-popups allow-popups-to-escape-sandbox")
+
+
+def test_an_image_can_only_be_one_the_document_carries():
+    """``img-src data:`` and nothing else. The cleaner takes out every ``img``
+    and every CSS ``url()`` that leaves the document, so ``'self'`` would buy an
+    entry nothing - and on the private app's origin, where the preview is
+    served, it is the one source that would let a miss in the cleaner send a
+    GET carrying the session cookie to a route of the app's own."""
+    directives = dict(d.strip().split(" ", 1) for d in bi.ENTRY_CSP.split(";"))
+    assert directives["img-src"] == "data:"
+    assert "'self'" not in directives["img-src"]
 
 
 def test_the_policy_loads_nothing_from_another_origin_and_runs_nothing():

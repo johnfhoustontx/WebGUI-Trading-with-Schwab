@@ -1306,8 +1306,9 @@ and [`plans/2026-10-06-site-blog-plan.md`](plans/2026-10-06-site-blog-plan.md)
   replacement, one sentence saying what cleaning removed
   (`removed_text`), and the typeface note when one was left out. Under those:
   **Title**, **Summary**, **Address** and **Tags** fields, the full public
-  address or the reason the address cannot be used, and **Preview**,
-  **Discard** and **Publish**.
+  address, the reason Publish is held when it is (a blank title, or an address
+  that cannot be used), and **Preview**, **Discard** and **Publish**. A
+  replacement's card starts with the tags of the entry it replaces.
 - **Published**: a table of the entries, newest first, each row with **Open on
   the site** and **Unpublish**.
 
@@ -1324,7 +1325,7 @@ and [`plans/2026-10-06-site-blog-plan.md`](plans/2026-10-06-site-blog-plan.md)
 
 | Command | Sent by | Built with |
 |---|---|---|
-| `draft_submit` | an upload | `blog_inbox.submit_command(html, {}, source="upload", request_id=…)`; a replacement adds `args["revises"]`, the entry's address |
+| `draft_submit` | an upload | `blog_inbox.submit_command(html, {}, source="upload", request_id=…, revises=…)`; `revises` is the address of the entry a replacement replaces and `None` for a new entry (the command then has no `revises` key). The page writes nothing into the command the builder returns |
 | `publish` | Publish, after a confirm | `blog_inbox.owner_command("publish", …, draft_id=…, fields=…)` with the four fields as typed |
 | `discard` | Discard, after a confirm | `owner_command("discard", …, draft_id=…)` |
 | `unpublish` | Unpublish, after a confirm | `owner_command("unpublish", …, slug=…)` |
@@ -1378,7 +1379,10 @@ the public entry page uses. ⚠ `allow-scripts` must never be added to it.
 - **Publish stays disabled** while the title is empty or the address fails
   `blog_inbox.clean_slug`, the check the service itself runs, so the page
   cannot hold Publish over an address the service would take or offer one it
-  would refuse. A replacement's address is read-only and is held to the
+  would refuse. One function, `publish_problem`, gives both the red line on
+  the card and the button's state, so Publish is never greyed out with nothing
+  saying why; it reports the first reason only, the title before the address.
+  A replacement's address is read-only and is held to the
   limit's ceiling (`existing_slug`), so an older, longer address still reads as
   usable.
 - **A replacement is checked against what is published now.** If the entry

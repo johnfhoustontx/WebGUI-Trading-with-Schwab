@@ -20,8 +20,8 @@ three reasons:
   the operator read.
 * **The policy has holes on purpose.** ``style-src 'unsafe-inline'`` is what
   lets an entry carry its design, and CSS can fetch (``url()``, ``@import``,
-  ``image-set()``). ``img-src 'self'`` and ``font-src 'self'`` stop the request
-  leaving the site; the cleaner stops it being made at all.
+  ``image-set()``). ``img-src data:`` and ``font-src 'self'`` stop the request
+  leaving the document or the site; the cleaner stops it being made at all.
 * **A layer that depends on a header is one misconfigured edge away from
   nothing.** The same file is served by Caddy and by the private preview.
 

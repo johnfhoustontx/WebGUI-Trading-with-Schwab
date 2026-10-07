@@ -156,7 +156,7 @@ FONT_NAME_RE = re.compile(r"^[0-9a-f]{20}\.woff2$")
 # writes, the header the edge sends, the private preview.
 ENTRY_SANDBOX = "allow-same-origin allow-popups allow-popups-to-escape-sandbox"
 ENTRY_CSP = ("default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; "
-             "img-src 'self' data:; base-uri 'none'; form-action 'none'; "
+             "img-src data:; base-uri 'none'; form-action 'none'; "
              f"frame-ancestors 'self'; sandbox {ENTRY_SANDBOX}")
 
 def clean_slug(raw) -> str | None         # lower, SLUG_RE, <= slug_chars, not reserved

@@ -223,8 +223,11 @@ Three layers, any one of which stops script:
 3. **The edge sends a policy on `/blog/*/entry.html`**, so the same holds when
    the document is opened outside its frame:
    `default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src
-   'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self';
+   data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self';
    sandbox allow-same-origin allow-popups allow-popups-to-escape-sandbox`.
+   (`img-src` was `'self' data:` until the final review: `'self'` gives an
+   entry nothing, since the cleaner removes every image, and on the private
+   app's origin it is the one source that could carry the session cookie.)
 
 ⚠ **`allow-same-origin` is there for the typefaces, and `allow-scripts` must
 never join it.** Without it the document has an opaque origin and its font

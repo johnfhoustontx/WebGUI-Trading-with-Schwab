@@ -52,7 +52,8 @@ What is never deleted
 ``rebuild`` never raises. Every way it can fall short ends as ``ok: False``, is
 counted for ``/health`` (``blog.site``) with a note that says where and never
 what - an exception's text can quote a path or a document - and is retried by
-the scheduler (``pending``).
+the scheduler, which runs ``rebuild`` again at every pass whether or not the
+last one fell short.
 
 Design: docs/plans/2026-10-06-site-blog-design.md ("What lands on the site",
 "Rules that keep it safe").
@@ -119,7 +120,7 @@ _FONT_TMP = _tmp_re(r"[0-9a-f]{20}\.woff2")
 # retry are different threads of one process, and each sweeps the other's
 # temporary files.
 _LOCK = threading.Lock()
-# Whether the last rebuild fell short. Read by the scheduler (``pending``).
+# Whether the last rebuild fell short (``pending``).
 _STATE = {"ok": True}
 
 
@@ -508,7 +509,8 @@ def rebuild(root, store, now) -> dict:
     files written; entry folders and typefaces removed; the addresses of
     entries that were NOT written this time (the store had no document for
     them, or the write failed); the typefaces likewise. ``ok`` is False when
-    anything fell short - and then the scheduler runs it again (``pending``).
+    anything fell short (``pending`` then says so); the scheduler runs it again
+    at its next pass either way.
 
     With ``[site] enabled = false`` it writes nothing and is ok."""
     report = {"ok": True, "written": 0, "removed": 0, "skipped": [], "fonts_skipped": []}
@@ -524,6 +526,7 @@ def rebuild(root, store, now) -> dict:
 
 
 def pending() -> bool:
-    """Whether the last ``rebuild`` in this process fell short and should be
-    run again. False before the first one."""
+    """Whether the last ``rebuild`` in this process fell short. False before
+    the first one, and False after one that wrote nothing because the site is
+    switched off - which is why the scheduler does not wait on this to rebuild."""
     return not _STATE["ok"]

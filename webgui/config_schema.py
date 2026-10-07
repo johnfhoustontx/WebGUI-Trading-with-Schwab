@@ -1408,12 +1408,16 @@ _BLOG = ConfigFile(
             Field("site.enabled", "Write entries to the site",
                   "Off, drafts still arrive and can be previewed, but Publish "
                   "and Unpublish change nothing on the public site and the list "
-                  "of entries there stays as it is.", kind="bool"),
+                  "of entries there stays as it is: an entry you unpublish "
+                  "stays on the site. Switched back on, the site catches up at "
+                  "the next refresh below.", kind="bool"),
             Field("site.republish_min", "Refresh the Blog page's lists every",
                   "The lists of drafts and published entries are sent to this "
                   "app whenever one changes. They are also sent again this "
                   "often, so the page recovers by itself if the server's cache "
-                  "is ever emptied.", kind="int", unit="min",
+                  "is ever emptied. The public site's blog pages are checked "
+                  "against what is published on the same timer, and only what "
+                  "differs is rewritten.", kind="int", unit="min",
                   min=1, max=1440, step=1),
         )),
         Section("Drafts", "What is accepted as a draft, from Claude Chat or from "

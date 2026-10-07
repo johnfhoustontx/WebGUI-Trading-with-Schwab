@@ -8,10 +8,13 @@ At start (``first_pass``):
    the site menu changes the entry pages (they carry a copy of it);
 3. ``handlers.publish_views`` - the drafts and entries lists.
 
-Then every ``[site] republish_min`` minutes (``later_pass``): the views again,
-which heals a flushed Redis and is otherwise skipped unchanged, and the site
-rebuild again ONLY while the last one fell short (``sitewriter.pending``) - a
-publish whose site write failed is retried here.
+Then every ``[site] republish_min`` minutes (``later_pass``): the site rebuild
+again, and the views again. The rebuild rewrites nothing that already agrees
+with the store, so on a good site it changes nothing; it is what retries a
+publish whose site write failed, and what catches the site up after ``[site]
+enabled`` is switched back on (a rebuild with the site off writes nothing and
+is OK, so there is nothing "pending" to key on). The views heal a flushed Redis
+and are otherwise skipped unchanged.
 
 The loop wakes every ``TICK_S`` seconds rather than sleeping a whole interval:
 each wake beats the heartbeat ``/health`` judges the service by, and re-reads
@@ -92,11 +95,16 @@ def first_pass(bus) -> None:
 
 
 def later_pass(bus) -> None:
-    """Publish the views again; rebuild the site only if the last rebuild fell
-    short."""
+    """Rebuild the site and publish the views again, every time.
+
+    The rebuild is not held back for "only while the last one fell short": a
+    rebuild with ``[site] enabled = false`` writes nothing and is OK, so nothing
+    is pending after it, and switching the site back on would then put nothing
+    on it (and take nothing down) until a restart or the next publish.
+    ``sitewriter.rebuild`` is idempotent - it rewrites no file that already
+    agrees with the store - so on a site that is right this costs a read."""
     with handlers.open_store() as store:
-        if sitewriter.pending():
-            _rebuild(store)
+        _rebuild(store)
         handlers.publish_views(bus, store)
 
 

@@ -255,6 +255,24 @@ def address_problem(address, *, existing=False) -> str:
     return f"An address can be at most {cap} characters, and this one has {len(text)}."
 
 
+# The service says the same of a publish that reaches it with no title.
+NO_TITLE = "Give the entry a title before publishing."
+
+
+def publish_problem(title, address, *, existing=False) -> str:
+    """``""`` when a draft with this title and address can be published; else
+    the FIRST reason it cannot, as one sentence. PURE.
+
+    The one verdict behind both things a card shows: the red line, and whether
+    Publish is enabled. Two separate checks let the button be greyed out with
+    nothing on the card saying why (a blank title had no sentence). The title
+    is asked first because it is the first field on the card; ``existing`` is
+    ``address_problem``'s."""
+    if not _str(title).strip():
+        return NO_TITLE
+    return address_problem(address, existing=existing)
+
+
 def draft_rows(payload) -> list:
     """The drafts view as one normalised dict per draft, in the order it was
     published (newest first). PURE; never raises.
@@ -481,24 +499,28 @@ def render() -> None:
         if not blog_inbox.html_ok(html):
             kit.toast("warn", too_large)
             return
-        command = blog_inbox.submit_command(html, {}, source="upload",
-                                            request_id=blog_inbox.new_id())
-        if command is None:
-            kit.toast("warn", "That file could not be turned into a draft, so "
-                              "nothing was sent.")
-            return
+        revises = None
         chosen = replace.value
         if chosen not in (None, NEW_ENTRY):
             # Checked against what is published NOW: a replacement of an entry
             # that has gone must not be filed quietly as a new one.
-            slug = blog_inbox.existing_slug(chosen)
+            revises = blog_inbox.existing_slug(chosen)
             live = {r["slug"] for r in
                     post_rows(bus_client.read(blog_inbox.VIEW_POSTS), SITE_HOST)}
-            if slug is None or slug not in live:
+            if revises is None or revises not in live:
                 kit.toast("warn", "The entry you chose to replace is no longer "
                                   "published, so nothing was sent.")
                 return
-            command["args"]["revises"] = slug
+        # The builder puts the entry being replaced into the command, and
+        # refuses to build one around an address that could not be an entry's.
+        # Nothing here writes into the command it returns.
+        command = blog_inbox.submit_command(html, {}, source="upload",
+                                            request_id=blog_inbox.new_id(),
+                                            revises=revises)
+        if command is None:
+            kit.toast("warn", "That file could not be turned into a draft, so "
+                              "nothing was sent.")
+            return
         if not _send(command, ("upload",)):
             return
         replace.value = NEW_ENTRY          # one upload, one replacement
@@ -544,8 +566,9 @@ def render() -> None:
 
             title = kit.text_field("Title", value=start["title"], width="w-full")
             summary = kit.text_field("Summary", value=start["summary"], width="w-full")
-            # The two lines about the address sit UNDER the row, full width: a
-            # long public address beside the field would push Tags sideways,
+            # The public address and the reason Publish is held (a blank title
+            # or an address that cannot be used) sit UNDER the row, full width:
+            # a long public address beside the field would push Tags sideways,
             # by a different amount on every card.
             with ui.column().classes("w-full gap-1"):
                 with ui.row().classes("w-full items-start gap-x-4 gap-y-2 flex-wrap"):
@@ -570,16 +593,20 @@ def render() -> None:
 
         @guard
         def sync(_e=None):
-            why = address_problem(address.value, existing=replacing)
+            # ONE verdict for the red line and for the button, so Publish is
+            # never greyed out with nothing on the card saying why.
+            why = publish_problem(title.value, address.value, existing=replacing)
             problem.text = why
             problem.set_visibility(bool(why))
-            url = "" if why else public_url(SITE_HOST, address.value)
+            # The public address depends on the address alone: a blank title
+            # does not make a good address stop being shown.
+            bad_address = address_problem(address.value, existing=replacing)
+            url = "" if bad_address else public_url(SITE_HOST, address.value)
             where.text = f"Public address: {url}" if url else ""
             where.set_visibility(bool(url))
             held = _held(key)
             discard_btn.set_enabled(not held)
-            publish_btn.set_enabled(
-                not held and not why and bool(_str(title.value).strip()))
+            publish_btn.set_enabled(not held and not why)
 
         def track(field, name):
             def changed(e):

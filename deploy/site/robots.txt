@@ -14,5 +14,6 @@ Allow: /
 Sitemap: https://neuralstrike.co/sitemap.txt
 # The Blog's entries are published from the private app, so their addresses are
 # in a sitemap of their own that the blog service rewrites
-# (services/blog_svc/sitewriter.py). It is absent until the first entry.
+# (services/blog_svc/sitewriter.py). The service writes it when it first starts,
+# so it is there, and empty, before the first entry is published.
 Sitemap: https://neuralstrike.co/blog/sitemap.txt

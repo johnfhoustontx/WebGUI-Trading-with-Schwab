@@ -303,6 +303,31 @@ def test_an_existing_address_is_held_to_the_ceiling_not_todays_limit():
     assert page.address_problem("../x", existing=True)
 
 
+def test_publish_problem_is_empty_when_the_entry_can_be_published():
+    assert page.publish_problem("A title", "a-first-entry") == ""
+    assert page.publish_problem("  A title  ", " A-First-Entry ") == ""
+
+
+@pytest.mark.parametrize("blank", ["", "   ", None, 5, []])
+def test_publish_problem_says_a_blank_title_is_why(blank):
+    why = page.publish_problem(blank, "a-first-entry")
+    assert why == page.NO_TITLE
+    assert "title" in why.lower() and why.endswith(".") and "slug" not in why.lower()
+
+
+def test_publish_problem_is_the_address_reason_once_there_is_a_title():
+    for bad in ("", "Not an address!", "fonts", "a--b"):
+        assert page.publish_problem("A title", bad) == page.address_problem(bad) != ""
+    # The first reason only: the title is the first field on the card.
+    assert page.publish_problem("", "Not an address!") == page.NO_TITLE
+
+
+def test_publish_problem_holds_a_replacement_to_the_ceiling_like_address_problem():
+    longer = "a" * (blog_inbox.limits()["slug_chars"] + 1)
+    assert page.publish_problem("A title", longer) == page.address_problem(longer) != ""
+    assert page.publish_problem("A title", longer, existing=True) == ""
+
+
 # ── the two preview reads ────────────────────────────────────────────────────
 def _stage(tmp_path, draft_id=ID_A, data=DOC, name=None):
     folder = tmp_path / blog_inbox.STAGING_DIR / draft_id
@@ -758,6 +783,36 @@ def test_publish_is_held_while_the_title_is_blank_or_the_address_unusable(monkey
     assert publish.enabled
 
 
+def test_a_blank_title_says_why_publish_is_held_the_way_a_bad_address_does(monkeypatch):
+    """Publish greyed out with nothing on the card saying why was the fault:
+    the address had its sentence and the title had none."""
+    from nicegui import ui
+    p = _Page(monkeypatch, _views({"drafts": [_draft()]}, THREE_ENTRIES))
+    (publish,) = p.buttons("Publish")
+    title, _summary, address, _tags = p.card_fields()
+
+    def reason():
+        """The card's one red line, when it is showing."""
+        return [e.text for e in p.all(ui.label)
+                if e.visible and e.text in (page.NO_TITLE, page.address_problem(address.value))
+                and e.text]
+
+    assert publish.enabled and reason() == []
+    title.value = ""
+    assert not publish.enabled and reason() == [page.NO_TITLE]
+    # The public address is still shown: the address itself is fine.
+    assert "https://neuralstrike.co/blog/a-first-entry/" in " ".join(p.labels())
+    title.value = "A title again"
+    assert publish.enabled and reason() == []
+    # The text and the held state are one verdict, whichever field is wrong.
+    for typed_title, typed_address in (("", "a-first-entry"), ("T", "Not an address!"),
+                                       ("", "Not an address!"), ("T", "fine")):
+        title.value, address.value = typed_title, typed_address
+        why = page.publish_problem(typed_title, typed_address)
+        assert publish.enabled == (why == "")
+        assert reason() == ([why] if why else [])
+
+
 def test_publish_asks_first_and_sends_the_fields_as_edited(monkeypatch):
     p = _Page(monkeypatch, _views({"drafts": [_draft()]}, THREE_ENTRIES))
     title, summary, address, tags = p.card_fields()
@@ -996,6 +1051,42 @@ def test_an_upload_can_replace_an_entry(monkeypatch):
     ((_domain, command),) = p.sent
     assert command["args"]["revises"] == "an-older-entry"
     assert choice.value == page.NEW_ENTRY       # one upload, one replacement
+
+
+def test_the_upload_command_is_the_shared_builders_own(monkeypatch):
+    """The page hands the entry it replaces to ``submit_command`` and sends
+    what comes back, untouched: it never writes into the command's arguments
+    itself, so the builder's check of that address cannot be stepped around."""
+    from nicegui import ui
+    built = []
+    real = blog_inbox.submit_command
+
+    def spy(html, fields, **named):
+        command = real(html, fields, **named)
+        built.append((named, command, repr(command)))
+        return command
+
+    monkeypatch.setattr(blog_inbox, "submit_command", spy)
+    p = _Page(monkeypatch, _views(None, THREE_ENTRIES))
+    (choice,) = p.all(ui.select)
+
+    choice.value = "an-older-entry"
+    p.upload("entry.html", HTML.encode("utf-8"))
+    p.upload("entry.html", HTML.encode("utf-8"))        # the choice went back to "new"
+
+    (first, second) = built
+    assert first[0]["revises"] == "an-older-entry" and first[0]["source"] == "upload"
+    assert second[0].get("revises") is None
+    assert [command for _domain, command in p.sent] == [first[1], second[1]]
+    assert p.sent[0][1] is first[1] and repr(first[1]) == first[2]   # sent as built
+    assert "revises" not in second[1]["args"]
+
+
+def test_an_upload_the_builder_refuses_is_not_sent(monkeypatch):
+    monkeypatch.setattr(blog_inbox, "submit_command", lambda *a, **k: None)
+    p = _Page(monkeypatch, _views(None, THREE_ENTRIES))
+    p.upload("entry.html", HTML.encode("utf-8"))
+    assert not p.sent and [k for k, _t in p.toasts] == ["warn"]
 
 
 def test_an_upload_naming_an_entry_that_is_gone_is_refused_not_filed_as_new(monkeypatch):

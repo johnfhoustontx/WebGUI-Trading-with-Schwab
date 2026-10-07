@@ -214,8 +214,14 @@ def answer_view(request_id) -> str:
 ENTRY_SANDBOX = "allow-same-origin allow-popups allow-popups-to-escape-sandbox"
 # Sent on the entry document itself, so the same holds when it is opened outside
 # its frame. No ``script-src``: ``default-src 'none'`` governs it.
+#
+# ``img-src data:`` and NOT ``'self'``. The cleaner takes out every ``img`` and
+# every CSS ``url()`` that is not a reference to an id in the same document, so
+# ``'self'`` would buy an entry nothing. And the private preview is served on the
+# APP's origin: there ``'self'`` is the one source that would let a miss in the
+# cleaner send a GET, carrying the session cookie, to a route of the app's own.
 ENTRY_CSP = ("default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; "
-             "img-src 'self' data:; base-uri 'none'; form-action 'none'; "
+             "img-src data:; base-uri 'none'; form-action 'none'; "
              f"frame-ancestors 'self'; sandbox {ENTRY_SANDBOX}")
 
 
@@ -226,8 +232,10 @@ DEFAULTS = {
         # Off = drafts still arrive and can be previewed; nothing is written
         # under deploy/site/blog/.
         "enabled": True,
-        # Minutes between re-publishing the views. They are published on every
-        # change; this heals a flushed Redis.
+        # Minutes between re-publishing the views and re-checking the site's
+        # blog files against the store. Both happen on every change; this heals
+        # a flushed Redis, retries a failed site write, and catches the site up
+        # after ``enabled`` is switched back on.
         "republish_min": 30,
     },
     "limits": {
@@ -694,7 +702,7 @@ REVISE_TYPE = "draft_revise"
 INBOX_TYPES = (SUBMIT_TYPE, REVISE_TYPE)
 
 
-def submit_command(html, fields, *, source, request_id) -> dict | None:
+def submit_command(html, fields, *, source, request_id, revises=None) -> dict | None:
     """The command that files ``html`` as a new draft, or ``None``.
 
     ``None`` means refuse, before anything is written: a document ``html_ok``
@@ -702,13 +710,26 @@ def submit_command(html, fields, *, source, request_id) -> dict | None:
     that is not an id. ``fields`` goes through ``clean_fields``, so what is
     enqueued is never the caller's dict itself.
 
+    ``revises`` is the address of the published entry this document REPLACES.
+    Left out (``None``), the command has no ``revises`` key at all and files a
+    new entry. Given, it must be an address ``existing_slug`` accepts - held to
+    the limit's ceiling, because the entry is already out there - and anything
+    else builds NO command: a replacement that quietly became a second entry is
+    the mistake that refusal stops. Whether such an entry is published is the
+    service's to say, not this builder's.
+
     Valid on both streams: the gate puts it on ``INBOX_STREAM``, the private
     page's upload on ``cmd:blog``. Either way it makes a DRAFT."""
     if source not in SOURCES or not is_id(request_id) or not html_ok(html):
         return None
-    return {"type": SUBMIT_TYPE,
-            "args": {"request_id": request_id, "source": source, "html": html,
-                     "fields": clean_fields(fields)}}
+    args = {"request_id": request_id, "source": source, "html": html,
+            "fields": clean_fields(fields)}
+    if revises is not None:
+        slug = existing_slug(revises)
+        if slug is None:
+            return None
+        args["revises"] = slug
+    return {"type": SUBMIT_TYPE, "args": args}
 
 
 def revise_command(draft_id, html, fields, *, request_id) -> dict | None:

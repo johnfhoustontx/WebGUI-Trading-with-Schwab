@@ -128,6 +128,9 @@ MESSAGES = {
                               "It will be retried."),
     "discarded": "The draft was discarded.",
     "unpublished": "The entry was unpublished.",
+    "unpublished_site_off": ("The entry was unpublished, but the site is switched off in the "
+                             "settings, so its page is still on the site. It comes down when "
+                             "the site is switched back on."),
     "unpublished_site_failed": ("Unpublished, but the site could not be updated. "
                                 "It will be retried."),
 }
@@ -268,7 +271,7 @@ def _prune(store) -> None:
 def _write_site(store, now) -> bool:
     """Rebuild the public files, then prune. True when the site agrees with
     the store. ``sitewriter.rebuild`` never raises and counts its own
-    shortfalls (``blog.site``); the scheduler runs it again while one stands."""
+    shortfalls (``blog.site``); the scheduler runs it again at its next pass."""
     report = sitewriter.rebuild(sitewriter.SITE_ROOT, store, now)
     _prune(store)
     return bool(report.get("ok"))
@@ -321,7 +324,11 @@ def _cmd_submit(bus, store, request_id, args) -> None:
         "slug": revised["slug"] if revised else (fields["slug"] or blog_inbox.slugify(title)),
         "title": title,
         "summary": fields["summary"] or own["summary"],
-        "tags": fields["tags"],
+        # An upload carries no tags, and a document says none of itself. So a
+        # replacement is offered with its entry's: publishing it as offered
+        # must not clear them. (The title and summary above are the NEW
+        # document's - that is what a replacement is for.)
+        "tags": fields["tags"] or (list(revised["tags"]) if revised else []),
         "removed": dict(cleaned.removed),
         "font_links": list(links),
         "font_note": copied.note,
@@ -411,8 +418,14 @@ def _cmd_unpublish(bus, store, request_id, args) -> None:
     publish_views(bus, store)
     if not gone:
         code = "no_entry"
+    elif not written:
+        code = "unpublished_site_failed"
+    elif not blog_inbox.site()["enabled"]:
+        # A rebuild with the site switched off writes and REMOVES nothing, and
+        # is ok: the entry's page and its row in the list are still served.
+        code = "unpublished_site_off"
     else:
-        code = "unpublished" if written else "unpublished_site_failed"
+        code = "unpublished"
     answer(bus, request_id, UNPUBLISH, gone and written, MESSAGES[code], slug=slug)
 
 

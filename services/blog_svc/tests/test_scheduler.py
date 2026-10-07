@@ -131,12 +131,24 @@ def test_a_clean_repair_is_not_a_warning(caplog):
     assert degrades("blog.repair") == before
 
 
+def stamps() -> dict:
+    """Every site file's bytes and modification time: what a rewrite changes."""
+    site = sitewriter.SITE_ROOT
+    return {path.relative_to(site).as_posix(): (path.read_bytes(), path.stat().st_mtime_ns)
+            for path in site.rglob("*") if path.is_file()}
+
+
 def test_a_later_pass_publishes_the_views_and_leaves_a_good_site_alone(monkeypatch):
+    """A later pass runs the rebuild every time (see the next test for why), and
+    on a site that already agrees with the store the rebuild writes nothing."""
     an_entry()
     scheduler.first_pass(Bus())
     assert sitewriter.pending() is False
-    rebuilt = []
-    monkeypatch.setattr(sitewriter, "rebuild", lambda *args: rebuilt.append(args))
+    before = stamps()
+    reports = []
+    real_rebuild = sitewriter.rebuild
+    monkeypatch.setattr(sitewriter, "rebuild",
+                        lambda *args: reports.append(real_rebuild(*args)) or reports[-1])
     from shared.bus.client import reset_fake_bus
     reset_fake_bus()                               # a flushed Redis
     bus = Bus()
@@ -144,9 +156,45 @@ def test_a_later_pass_publishes_the_views_and_leaves_a_good_site_alone(monkeypat
 
     scheduler.later_pass(bus)
 
-    assert rebuilt == []
+    assert len(reports) == 1
+    assert (reports[0]["ok"], reports[0]["written"], reports[0]["removed"]) == (True, 0, 0)
+    assert stamps() == before                      # not one file rewritten
     assert [row["slug"] for row in view(bus, blog_inbox.VIEW_POSTS)["entries"]] == ["first-entry"]
     assert view(bus, blog_inbox.VIEW_DRAFTS) == {"drafts": []}
+
+
+def test_a_later_pass_catches_the_site_up_once_it_is_switched_back_on(monkeypatch):
+    """Site off, publish, site on. A rebuild with the site off writes nothing
+    and is OK, so nothing is ``pending`` - a later pass that rebuilt only while
+    something was pending left the entry off the site until the next restart
+    or the next publish."""
+    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": False, "republish_min": 30})
+    an_entry()
+    scheduler.first_pass(Bus())
+    assert site_files() == {"blog.html"} and sitewriter.pending() is False
+
+    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": True, "republish_min": 30})
+    scheduler.later_pass(Bus())
+
+    assert site_files() == {"blog.html", "blog.json", "blog/sitemap.txt",
+                            "blog/first-entry/index.html", "blog/first-entry/entry.html"}
+
+
+def test_a_later_pass_takes_down_what_was_unpublished_while_the_site_was_off(monkeypatch):
+    an_entry()
+    scheduler.first_pass(Bus())
+    assert "blog/first-entry/index.html" in site_files()
+    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": False, "republish_min": 30})
+    with store_mod.Store() as st:
+        assert st.unpublish("first-entry")
+    scheduler.later_pass(Bus())
+    assert "blog/first-entry/index.html" in site_files()      # off: nothing removed
+
+    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": True, "republish_min": 30})
+    scheduler.later_pass(Bus())
+
+    assert "blog/first-entry/index.html" not in site_files()
+    assert "blog/first-entry/entry.html" not in site_files()
 
 
 def test_a_later_pass_rebuilds_while_the_last_rebuild_fell_short(monkeypatch):
@@ -163,11 +211,10 @@ def test_a_later_pass_rebuilds_while_the_last_rebuild_fell_short(monkeypatch):
 
     assert sitewriter.pending() is False
     assert "blog/first-entry/index.html" in site_files()
-    # And it stops once the site is right.
-    rebuilt = []
-    monkeypatch.setattr(sitewriter, "rebuild", lambda *args: rebuilt.append(args))
+    # And once the site is right, the next pass rewrites nothing.
+    before = stamps()
     scheduler.later_pass(Bus())
-    assert rebuilt == []
+    assert stamps() == before and sitewriter.pending() is False
 
 
 def test_the_interval_is_the_configured_one(monkeypatch):

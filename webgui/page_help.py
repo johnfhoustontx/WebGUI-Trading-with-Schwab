@@ -1568,14 +1568,14 @@ An entry is one self-contained HTML document.
 - **Title, Summary, Tags** are what the Blog's list of entries shows. **Address**
   is the last part of the entry's web address; the full address is printed
   under the box. Use letters, digits and single hyphens. Publish stays greyed
-  out while the title is empty or the address cannot be used, and the reason is
-  shown in red.
+  out while the title is empty or the address cannot be used, and the reason
+  (one at a time, the title first) is shown in red under the address.
 - **Publish** asks first, then puts the entry on the public site at once.
   **Discard** deletes the draft; nothing public changes.
 - **To replace an entry**, pick it under **Replace an existing entry** before
-  you choose the file. The draft then says which entry it replaces and keeps
-  that entry's address. The old version stays public until you publish the new
-  one.
+  you choose the file. The draft then says which entry it replaces, keeps that
+  entry's address and starts with its tags; the title and summary come from the
+  new document. The old version stays public until you publish the new one.
 - **Published** lists what is on the site, newest first. **Open on the site**
   opens the entry in a new tab. **Unpublish** removes the page from the public
   site and its address stops working; to bring it back, upload the file again.

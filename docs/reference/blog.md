@@ -35,7 +35,7 @@ Both describe the larger feature; this file describes the code.
 | The store | `services/blog_svc/store.py` | `blog.db` and the files beside it: the source of truth |
 | The site writer | `services/blog_svc/sitewriter.py` | The only writer of the blog's public files |
 | Commands | `services/blog_svc/handlers.py` | `cmd:blog`'s four commands, the three views, the answer |
-| The background job | `services/blog_svc/scheduler.py` | Repair and rebuild at start, then the views on a timer |
+| The background job | `services/blog_svc/scheduler.py` | Repair and rebuild at start, then the rebuild and the views again on a timer |
 | The private page | `webgui/pages/blog.py`, two routes in `webgui/main.py` | Upload, preview, publish, unpublish |
 | The public page | `deploy/site/blog.html`, `deploy/site/assets/blog.js` | The list of entries |
 | The edge | `deploy/caddy/generate_caddyfile.py` (`@blog_entries`) | The policy header on each entry document |
@@ -46,8 +46,10 @@ Both describe the larger feature; this file describes the code.
    text (a byte-order mark is tolerated, a NUL is not) or is larger than
    `[limits] max_html_kb`, and builds a `draft_submit` command with
    `blog_inbox.submit_command`. If the owner chose an entry under **Replace an
-   existing entry**, the page adds that entry's address as `revises`. The
-   command goes on `cmd:blog` through `bus_client.request`.
+   existing entry**, the page hands the builder that entry's address as
+   `revises`; the builder refuses an address that could not be an entry's, and
+   leaves the key out of a command for a new entry. The command goes on
+   `cmd:blog` through `bus_client.request`.
 2. **Draft.** `blog_svc` runs every validator again on what it reads, refuses a
    new draft when `[limits] max_drafts` are already waiting, cleans the
    document in a worker process, copies its typefaces, fills the typeface rules
@@ -435,8 +437,14 @@ Any one of them stops a script.
    the same holds when a visitor opens the document outside its frame:
 
    ```
-   default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'; sandbox allow-same-origin allow-popups allow-popups-to-escape-sandbox
+   default-src 'none'; style-src 'unsafe-inline'; font-src 'self'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'self'; sandbox allow-same-origin allow-popups allow-popups-to-escape-sandbox
    ```
+
+   `img-src` is `data:` alone, not `'self'`. The cleaner removes every image
+   and every CSS `url()` that leaves the document, so `'self'` would give an
+   entry nothing; and the private preview is served on the app's origin, where
+   `'self'` is the one source that would let a miss in the cleaner send a
+   request carrying the session cookie to one of the app's own routes.
 
 Both strings are defined once, as `blog_inbox.ENTRY_SANDBOX` and
 `blog_inbox.ENTRY_CSP`, and imported by the three places that must agree: the
@@ -517,10 +525,16 @@ attribute is written `&quot;`), and the typeface rules come to about 300 KB at
 their own limits.
 
 A command that worked is answered the same way: `filed`, `published`,
-`discarded`, `unpublished`, and three that say the store changed but the site
-did not: `published_site_off` (`[site] enabled` is false),
-`published_site_failed` and `unpublished_site_failed` (the write is retried by
-the scheduler).
+`discarded`, `unpublished`, and four that say the store changed but the site
+did not: `published_site_off` and `unpublished_site_off` (`[site] enabled` is
+false; the second says the entry's page is still on the site, because a rebuild
+with the site off removes nothing), `published_site_failed` and
+`unpublished_site_failed` (the write is retried by the scheduler). The
+scheduler rebuilds the site at every pass (`[site] republish_min`), so a site
+switched back on catches up within one interval without a restart.
+
+A replacement draft is offered with the tags of the entry it replaces (an
+upload carries none); its title and summary are the new document's.
 
 **`handle_command` never raises.** The scaffold dead-letters a command whose
 handler raised, whole, and a `draft_submit` carries the entire document. A

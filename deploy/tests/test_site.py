@@ -1743,6 +1743,10 @@ def test_the_blog_is_in_the_sitemap_and_robots_names_the_entry_sitemap():
                   if ln.strip() and not ln.lstrip().startswith("#")]
     assert "Sitemap: https://neuralstrike.co/sitemap.txt" in directives
     assert "Sitemap: https://neuralstrike.co/blog/sitemap.txt" in directives
+    # It said the entry sitemap is absent until the first entry. The service
+    # writes an empty one at its first start (the site writer's own suite pins
+    # the empty file), so a crawler following this line is not sent to a 404.
+    assert "absent until the first entry" not in _text("robots.txt")
 
 
 def test_the_generated_blog_is_never_committed():

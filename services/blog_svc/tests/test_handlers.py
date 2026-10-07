@@ -572,6 +572,37 @@ def test_a_replacement_keeps_the_address_and_reuses_the_typeface_links(
     assert (site / "blog" / "fonts" / kit.name_of(kit.A)).is_file()
 
 
+def test_a_replacement_keeps_its_entrys_tags(bus):
+    """An upload carries no fields, so a replacement used to arrive with no
+    tags and publishing it as offered cleared the entry's. The draft is offered
+    with the entry's tags; the title and summary are still the new document's."""
+    slug = published(bus, tags=["Options", "spreads"])
+    assert stored()[1][0]["tags"] == ["Options", "spreads"]
+
+    filed = upload(bus, OTHER_DOC, revises=slug)
+
+    draft = stored()[0][0]
+    assert draft["tags"] == ["Options", "spreads"]
+    assert (draft["title"], draft["summary"]) == ("A second look", "Different words this time.")
+    assert view(bus, blog_inbox.VIEW_DRAFTS)["drafts"][0]["tags"] == ["Options", "spreads"]
+    # Published with exactly what the draft offered, as the page prefills it.
+    assert publish(bus, filed["draft_id"])["ok"] is True
+    entry = stored()[1][0]
+    assert entry["tags"] == ["Options", "spreads"] and entry["title"] == "A second look"
+
+
+def test_a_replacement_that_names_its_own_tags_gets_those(bus):
+    slug = published(bus, tags=["Options", "spreads"])
+    upload(bus, OTHER_DOC, fields={"tags": ["Volatility"]}, revises=slug)
+    assert stored()[0][0]["tags"] == ["Volatility"]
+
+
+def test_a_new_entry_starts_with_no_tags(bus):
+    published(bus, tags=["Options", "spreads"])
+    upload(bus, OTHER_DOC)
+    assert stored()[0][0]["tags"] == []
+
+
 def test_a_replacement_that_asks_for_its_own_typefaces_gets_those(bus, no_typefaces):
     slug = published(bus)
     del no_typefaces[:]
@@ -649,6 +680,34 @@ def test_unpublishing_what_is_not_published_says_so(bus):
     answer = send(bus, "unpublish", slug="never-published")
     assert answer["ok"] is False and answer["message"] == handlers.MESSAGES["no_entry"]
     assert answer["slug"] == "never-published"
+
+
+def test_unpublishing_with_the_site_switched_off_says_the_page_is_still_up(
+        bus, site, monkeypatch):
+    """With the site switched off a rebuild writes and removes nothing, so the
+    entry's page and its row in the list are still being served. The answer
+    must not say the entry is simply gone."""
+    slug = published(bus)
+    before = site_files(site)
+    assert f"blog/{slug}/index.html" in before
+    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": False, "republish_min": 30})
+
+    answer = send(bus, "unpublish", slug=slug)
+
+    assert answer["message"] == handlers.MESSAGES["unpublished_site_off"]
+    assert answer["message"] != handlers.MESSAGES["unpublished"]
+    assert "still on the site" in answer["message"]
+    assert answer["slug"] == slug
+    assert stored()[1] == []                       # gone from the store
+    assert site_files(site) == before              # and exactly as public as before
+    assert [row["slug"] for row in json.loads((site / "blog.json").read_bytes())["entries"]] == [
+        slug]
+
+
+def test_unpublishing_nothing_with_the_site_switched_off_is_still_no_entry(bus, monkeypatch):
+    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": False, "republish_min": 30})
+    answer = send(bus, "unpublish", slug="never-published")
+    assert answer["ok"] is False and answer["message"] == handlers.MESSAGES["no_entry"]
 
 
 def test_an_unpublish_whose_site_write_fails_is_reported(bus, site, monkeypatch):

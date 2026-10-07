@@ -9,8 +9,11 @@
 # Off = drafts still arrive and can be previewed; nothing is written under
 # deploy/site/blog/ and the manifest is left as it is.
 enabled = true
-# How often, in minutes, the drafts and entries views are published again. They
-# are published on every change; this heals a flushed Redis.
+# How often, in minutes, the drafts and entries views are published again and
+# the site's blog files are checked against the store. Both happen on every
+# change; this heals a flushed Redis, retries a site write that failed, and is
+# what catches the site up after `enabled` is switched back on. A site that
+# already agrees with the store is not rewritten.
 republish_min = 30
 
 [limits]
