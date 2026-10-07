@@ -759,9 +759,10 @@ FUNNEL_LEAD = ("The tables show what qualified. This shows where each symbol "
                "stopped in the last scan.")
 FUNNEL_LOADING = "Reading the last scan…"
 
-# The three scan windows, in the tab strip's own order. The keys are the
-# engine's own spellings (``funnel_view.BUCKET_LABELS`` carries the reader's).
-FUNNEL_BUCKETS = ("0DTE", "SWING", "DIRECTIONAL")
+# The three scan windows, in the tab strip's own order, then the structures
+# pass's bucket for each of the first two. The keys are the engine's own
+# spellings (``funnel_view.BUCKET_LABELS`` carries the reader's).
+FUNNEL_BUCKETS = ("0DTE", "SWING", "DIRECTIONAL", "STRUCT_0DTE", "STRUCT_SWING")
 
 
 def funnel_symbols(payload):
@@ -794,6 +795,10 @@ def funnel_chips(payload):
     total = len(symbols)
     out = []
     for bucket in FUNNEL_BUCKETS:
+        # A bucket NO symbol carries (a view published before that pass
+        # existed) gets no chip: "0 of N" for it is a zero nobody read.
+        if not funnel_view.reported(payload, bucket):
+            continue
         n = len(funnel_view.empty_symbols(payload, bucket))
         label = funnel_view.BUCKET_LABELS[bucket]
         out.append({"bucket": bucket, "label": label, "count": n,
@@ -802,7 +807,7 @@ def funnel_chips(payload):
 
 
 def funnel_cards(payload, symbol, scan_timestamp=None):
-    """The three window cards for one symbol, straight from ``funnel_view``.
+    """One card per bucket for one symbol, straight from ``funnel_view``.
 
     PURE. The entry is LOOKED UP here rather than handed in, so every absent
     case reaches ``bucket_card(None, …)`` — which says so in words — instead of

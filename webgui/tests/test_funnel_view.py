@@ -854,3 +854,149 @@ def _zeroed_strikes():
 
 def _prefixed(sentence):
     return f"MU · {fv.BUCKET_LABELS['SWING']}: {sentence}"
+
+
+# ── the two structure buckets (everything that is not a credit spread) ──────
+# Flat, like DIRECTIONAL, with one more door: the earnings gate.
+
+def _struct(**over):
+    b = {"built": 6, "vol_gate": 1, "earnings": 1, "score_cut": 2, "capped": 0,
+         "outside_rth": 0, "emitted": 2, "build_failed": False}
+    b.update(over)
+    return b
+
+
+def _with_struct(bucket="STRUCT_SWING", **over):
+    e = _entry()
+    e["buckets"][bucket] = _struct(**over)
+    return e
+
+
+def _struct_card(bucket="STRUCT_SWING", **over):
+    return fv.bucket_card(_with_struct(bucket, **over), bucket, symbol="MU")
+
+
+def test_a_structure_bucket_reads_as_seven_stages_in_the_engines_order():
+    card = _struct_card()
+    assert [s["remaining"] for s in card["stages"]] == [6, 5, 4, 2, 2, 2, 2]
+    assert [s["label"] for s in card["stages"]] == [
+        fv.LABELS["struct_built"], fv.LABELS["dir_vol_gate"],
+        fv.LABELS["struct_earnings"], fv.LABELS["dir_score_cut"],
+        fv.LABELS["struct_capped"], fv.LABELS["dir_outside_rth"],
+        fv.LABELS["emitted"]]
+    assert card["headline"] == (
+        f"MU · {fv.BUCKET_LABELS['STRUCT_SWING']}: 2 signals reached the board.")
+    assert not any(s["binding"] for s in card["stages"])
+
+
+def test_both_structure_buckets_have_their_own_label():
+    assert fv.BUCKET_LABELS["STRUCT_0DTE"] != fv.BUCKET_LABELS["STRUCT_SWING"]
+    for bucket in ("STRUCT_0DTE", "STRUCT_SWING"):
+        assert _struct_card(bucket)["headline"].startswith(
+            f"MU · {fv.BUCKET_LABELS[bucket]}: ")
+        assert bucket not in _struct_card(bucket)["headline"]
+
+
+STRUCT_BINDERS = {
+    "struct_built": dict(built=0, vol_gate=0, earnings=0, score_cut=0, emitted=0),
+    "dir_vol_gate": dict(built=4, vol_gate=4, earnings=0, score_cut=0, emitted=0),
+    "struct_earnings": dict(built=4, vol_gate=1, earnings=3, score_cut=0, emitted=0),
+    "dir_score_cut": dict(built=4, vol_gate=1, earnings=1, score_cut=2, emitted=0),
+    "struct_capped": dict(built=4, vol_gate=0, earnings=0, score_cut=0, capped=4,
+                          emitted=0),
+    "dir_outside_rth": dict(built=4, vol_gate=0, earnings=0, score_cut=0,
+                            outside_rth=4, emitted=0),
+}
+
+
+@pytest.mark.parametrize("stage", sorted(STRUCT_BINDERS))
+def test_each_structure_stage_binds_with_a_sentence_of_its_own(stage):
+    card = _struct_card(**STRUCT_BINDERS[stage])
+    binding = [s["label"] for s in card["stages"] if s["binding"]]
+    assert binding == [fv.LABELS[stage]]
+    sentence = card["headline"].split(": ", 1)[1]
+    assert sentence and not sentence.startswith("nothing survived")
+    # A structure is not a single-leg candidate.
+    assert "single-leg" not in sentence
+    for raw in fv.STRUCTURE_COUNTERS:
+        if "_" in raw:
+            assert raw not in sentence, raw
+
+
+def test_the_structure_sentences_are_all_different():
+    out = {k: _struct_card(**kw)["headline"] for k, kw in STRUCT_BINDERS.items()}
+    assert len(set(out.values())) == len(out)
+
+
+def test_the_earnings_sentence_names_the_report_and_the_count():
+    headline = _struct_card(**STRUCT_BINDERS["struct_earnings"])["headline"]
+    assert "3 structures" in headline and "earnings report" in headline
+
+
+def test_the_directional_sentences_did_not_move():
+    """The structure buckets reuse three DIRECTIONAL labels with sentences of
+    their own; the single-leg wording must be untouched."""
+    card = fv.bucket_card(
+        _entry(directional=_directional(built=4, vol_gate=4, score_cut=0, emitted=0)),
+        "DIRECTIONAL", symbol="MU")
+    assert "single-leg candidates were built" in card["headline"]
+
+
+def test_a_failed_structure_build_says_so_and_prints_no_zeroes():
+    card = _struct_card(build_failed=True, built=0, vol_gate=0, earnings=0,
+                        score_cut=0, emitted=0)
+    assert card["stages"] == [] and "failed" in card["headline"]
+
+
+@pytest.mark.parametrize("bucket,sibling", [("STRUCT_0DTE", "0DTE"),
+                                            ("STRUCT_SWING", "SWING")])
+def test_a_window_with_no_chain_says_no_chain_not_nothing_built(bucket, sibling):
+    """The pass skips a window it has no chain for and leaves the bucket at
+    zero. The credit bucket for the SAME window is what knows why."""
+    e = _with_struct(bucket, built=0, vol_gate=0, earnings=0, score_cut=0, emitted=0)
+    e["buckets"][sibling]["chain"] = False
+    card = fv.bucket_card(e, bucket, symbol="MU")
+    assert card["stages"] == [] and card["headline"].endswith(fv.NO_CHAIN)
+
+
+def test_a_payload_from_before_the_buckets_existed_says_so_in_words():
+    card = fv.bucket_card(_entry(), "STRUCT_SWING", symbol="MU")
+    assert card["stages"] == [] and card["headline"].endswith(fv.NO_BUCKET)
+
+
+def test_a_structure_counter_that_was_never_written_is_dropped_not_zeroed():
+    b = _struct()
+    del b["earnings"]
+    e = _entry()
+    e["buckets"]["STRUCT_SWING"] = b
+    card = fv.bucket_card(e, "STRUCT_SWING", symbol="MU")
+    # The chain of subtraction stops where the reading stops.
+    assert [s["label"] for s in card["stages"]] == [
+        fv.LABELS["struct_built"], fv.LABELS["dir_vol_gate"]]
+
+
+def test_empty_symbols_reads_a_flat_structure_bucket():
+    payload = _payload(MU=_with_struct(emitted=0), AAPL=_with_struct(),
+                       OLD=_entry())
+    assert fv.empty_symbols(payload, "STRUCT_SWING") == ["MU"]
+
+
+def test_the_structure_counters_mirror_the_engines_tuple():
+    """Read as TEXT, never imported (Tier 1 takes no path glue into the engine)."""
+    src = ENGINE.read_text(encoding="utf-8")
+    block = re.search(r"STRUCT_FUNNEL_KEYS = \((.*?)\)\n", src, re.S)
+    assert block, "the engine's STRUCT_FUNNEL_KEYS moved"
+    names = tuple(re.findall(r'"([a-z_]+)"', block.group(1)))
+    assert names + ("build_failed",) == fv.STRUCTURE_COUNTERS
+    for bucket in ("STRUCT_0DTE", "STRUCT_SWING"):
+        assert f'"{bucket}": dict.fromkeys(STRUCT_FUNNEL_KEYS, 0)' in src, bucket
+        assert bucket in fv.FLAT_BUCKETS and bucket in fv.BUCKET_LABELS
+
+
+def test_reported_is_true_only_when_some_symbol_carries_the_bucket():
+    payload = _payload(MU=_with_struct(), OLD=_entry())
+    assert fv.reported(payload, "STRUCT_SWING") is True
+    assert fv.reported(payload, "STRUCT_0DTE") is False
+    assert fv.reported(_payload(OLD=_entry()), "STRUCT_SWING") is False
+    for junk in (None, {}, {"symbols": None}, {"symbols": {"MU": "junk"}}, "junk"):
+        assert fv.reported(junk, "SWING") is False

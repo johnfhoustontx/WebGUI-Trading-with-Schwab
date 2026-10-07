@@ -61,11 +61,27 @@ DIRECTIONAL_COUNTERS = ("windows_without_candidates", "built", "vol_gate",
                         "score_cut", "capped", "outside_rth", "emitted",
                         "build_failed")
 
+# The structures pass - everything that is not a credit spread - keeps one
+# bucket per scan window. A mirror of ``scanner_engine.STRUCT_FUNNEL_KEYS`` plus
+# the failure flag, pinned by test against that file's source.
+STRUCTURE_COUNTERS = ("built", "vol_gate", "earnings", "score_cut", "capped",
+                      "outside_rth", "emitted", "build_failed")
+
+# Buckets whose counters sit FLAT on the bucket; the two credit windows keep
+# theirs under ``spreads``.
+FLAT_BUCKETS = ("DIRECTIONAL", "STRUCT_0DTE", "STRUCT_SWING")
+
+# Each structure bucket's CREDIT sibling: the same scan window, and the bucket
+# that records whether the scan had a chain for it at all.
+_STRUCT_WINDOW = {"STRUCT_0DTE": "0DTE", "STRUCT_SWING": "SWING"}
+
 # Display names. The bucket keys are the engine's own ``0DTE``/``SWING`` - the
 # spelling ``signal_recorder`` records and ``shared.calibration`` buckets on -
 # so the label is where the reader's "0-DTE" lives.
 BUCKET_LABELS = {"0DTE": "0-DTE", "SWING": "Swing",
-                 "DIRECTIONAL": "Directional"}
+                 "DIRECTIONAL": "Directional",
+                 "STRUCT_0DTE": "0-DTE, other structures",
+                 "STRUCT_SWING": "Swing, other structures"}
 
 # Stage key -> the label the page shows. Keys are this module's own; the page
 # and its tests address a stage through ``LABELS[...]`` so a wording change is
@@ -95,6 +111,12 @@ LABELS = {
     # The same words as the spread stage on purpose: STAGE_SENTENCES is keyed by
     # label, so the two share the one sentence below.
     "dir_outside_rth": "Inside regular trading hours",
+    # The structures pass. It shares the volatility-gate, quality-bar and
+    # regular-hours LABELS with the single-leg stages and has sentences of its
+    # own for them (STRUCT_SENTENCES): a structure is not a single-leg candidate.
+    "struct_built": "Structures built",
+    "struct_earnings": "Past the earnings gate",
+    "struct_capped": "Kept by the per-family cap",
     # terminal, shared by all three buckets
     "emitted": "Reached the board",
 }
@@ -339,6 +361,27 @@ STAGE_SENTENCES = {
 }
 
 
+# The structure buckets' own sentences, read BEFORE the table above for those
+# two buckets only. Three of their labels are the single-leg ones, and that
+# table is keyed by label, so without this a structure would be described as a
+# "single-leg candidate".
+STRUCT_SENTENCES = {
+    LABELS["struct_built"]:
+        "the chain for this window offered no structure to build.",
+    LABELS["dir_vol_gate"]:
+        "{n} structures were built, and the volatility gate refused every one.",
+    LABELS["struct_earnings"]:
+        "{n} structures cleared the volatility gate, and every one was dropped "
+        "because it would be held through an earnings report.",
+    LABELS["dir_score_cut"]:
+        "{n} structures cleared the earnings gate, and every one scored below "
+        "the quality bar.",
+    LABELS["struct_capped"]:
+        "{n} structures cleared the quality bar, and the per-family cap kept "
+        "none of them.",
+}
+
+
 # ── the public surface ──────────────────────────────────────────────────────
 
 def empty_symbols(payload, bucket):
@@ -358,10 +401,24 @@ def empty_symbols(payload, bucket):
         b = _bucket_of(entry, bucket)
         if b is None:
             continue
-        target = b if bucket == "DIRECTIONAL" else b.get("spreads")
+        target = b if bucket in FLAT_BUCKETS else b.get("spreads")
         if _count(target, "emitted") == 0:
             out.append(sym)
     return sorted(out)
+
+
+def reported(payload, bucket):
+    """True when at least one symbol's account carries ``bucket`` at all.
+
+    A view published before a pass existed carries no bucket for it on any
+    symbol. :func:`empty_symbols` rightly answers ``[]`` for that view, and a
+    chip built from it would read "0 of N produced nothing" - a zero nobody
+    read. The page asks this first.
+    """
+    symbols = payload.get("symbols") if isinstance(payload, dict) else None
+    if not isinstance(symbols, dict):
+        return False
+    return any(_bucket_of(entry, bucket) is not None for entry in symbols.values())
 
 
 def stale_note(payload, scan_timestamp):
@@ -414,6 +471,16 @@ def bucket_card(entry, bucket, symbol=None, note=None):
             return card("the single-leg build failed for this symbol; the "
                         "scan logged the error.")
         stages = _directional_stages(b)
+    elif bucket in _STRUCT_WINDOW:
+        if b.get("build_failed"):
+            return card("the other-structures build failed for this symbol; "
+                        "the scan logged the error.")
+        # The pass skips a window it has no chain for and leaves this bucket at
+        # zero; the credit bucket for the same window is what recorded why.
+        window = _bucket_of(entry, _STRUCT_WINDOW[bucket])
+        if window is not None and not window.get("chain"):
+            return card(NO_CHAIN)
+        stages = _structure_stages(b)
     else:
         if not b.get("chain"):
             return card(NO_CHAIN)
@@ -430,7 +497,8 @@ def bucket_card(entry, bucket, symbol=None, note=None):
            else {},
            "spreads": b.get("spreads") if isinstance(b.get("spreads"), dict)
            else {},
-           "cap": _cap_phrase(entry)}
+           "cap": _cap_phrase(entry),
+           "sentences": STRUCT_SENTENCES if bucket in _STRUCT_WINDOW else {}}
     return card(_headline(stages, ctx), stages)
 
 
@@ -570,6 +638,31 @@ def _directional_stages(d):
     return out
 
 
+def _structure_stages(d):
+    """The structures pass: built, then one door at a time. The same shape as
+    :func:`_directional_stages` with the earnings gate between the volatility
+    gate and the quality bar - a separate function rather than a parameter on
+    that one, so neither can change the other's stage list."""
+    built = _count(d, "built")
+    if built is None:
+        return []
+    out = [_stage(LABELS["struct_built"], built)]
+    remaining = built
+    for key, counter in (("dir_vol_gate", "vol_gate"),
+                         ("struct_earnings", "earnings"),
+                         ("dir_score_cut", "score_cut"),
+                         ("struct_capped", "capped"),
+                         ("dir_outside_rth", "outside_rth")):
+        remaining = _sub(remaining, _count(d, counter))
+        if remaining is None:
+            return out
+        out.append(_stage(LABELS[key], remaining))
+    emitted = _count(d, "emitted")
+    if emitted is not None:
+        out.append(_stage(LABELS["emitted"], emitted))
+    return out
+
+
 def _headline(stages, ctx):
     """The binding stage's own sentence, or what survived when none binds."""
     for i, s in enumerate(stages):
@@ -577,7 +670,8 @@ def _headline(stages, ctx):
             continue
         s["binding"] = True
         ctx["entered"] = stages[i - 1]["remaining"] if i else 0
-        sentence = STAGE_SENTENCES.get(s["label"])
+        sentence = (ctx.get("sentences") or {}).get(
+            s["label"], STAGE_SENTENCES.get(s["label"]))
         if sentence is None:                       # defensive; pinned by test
             return f"nothing survived {s['label'].lower()}."
         if callable(sentence):

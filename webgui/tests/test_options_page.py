@@ -132,9 +132,47 @@ def _funnel_entry(emitted_swing=0, **over):
                                    "emitted": emitted_swing}},
              "DIRECTIONAL": {"windows_without_candidates": 0, "built": 3,
                              "vol_gate": 0, "score_cut": 3, "capped": 0,
-                             "emitted": 0, "build_failed": False}}}
+                             "emitted": 0, "build_failed": False},
+             # The structures pass's two buckets (engine, 2026-10-06).
+             "STRUCT_0DTE": {"built": 5, "vol_gate": 0, "earnings": 0,
+                             "score_cut": 2, "capped": 0, "outside_rth": 0,
+                             "emitted": 3, "build_failed": False},
+             "STRUCT_SWING": {"built": 4, "vol_gate": 1, "earnings": 0,
+                              "score_cut": 3, "capped": 0, "outside_rth": 0,
+                              "emitted": 0, "build_failed": False}}}
     e.update(over)
     return e
+
+
+def test_the_funnel_buckets_are_the_three_windows_then_the_two_structure_ones():
+    """Appended, not interleaved: the first three keep their positions."""
+    assert options.FUNNEL_BUCKETS == ("0DTE", "SWING", "DIRECTIONAL",
+                                      "STRUCT_0DTE", "STRUCT_SWING")
+
+
+def test_the_structure_chips_count_like_the_others():
+    by_bucket = {c["bucket"]: c for c in options.funnel_chips(_funnel_payload())}
+    assert by_bucket["STRUCT_0DTE"]["count"] == 0
+    assert by_bucket["STRUCT_SWING"]["count"] == 3
+    assert by_bucket["STRUCT_SWING"]["label"] == fv.BUCKET_LABELS["STRUCT_SWING"]
+
+
+def test_a_bucket_no_symbol_reports_gets_no_chip():
+    """A view published before the structures pass existed: "0 of 3 produced
+    nothing" for a bucket nobody wrote is a zero nobody read."""
+    payload = _funnel_payload()
+    for entry in payload["symbols"].values():
+        del entry["buckets"]["STRUCT_0DTE"], entry["buckets"]["STRUCT_SWING"]
+    assert [c["bucket"] for c in options.funnel_chips(payload)] == [
+        "0DTE", "SWING", "DIRECTIONAL"]
+
+
+def test_the_structure_cards_come_from_the_funnel_view_module():
+    cards = options.funnel_cards(_funnel_payload(), "MU")
+    assert cards[3]["headline"].startswith(
+        f"MU · {fv.BUCKET_LABELS['STRUCT_0DTE']}:")
+    assert [s["label"] for s in cards[4]["stages"] if s["binding"]] == [
+        fv.LABELS["dir_score_cut"]]
 
 
 def _funnel_payload():
