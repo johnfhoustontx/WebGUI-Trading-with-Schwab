@@ -1081,6 +1081,95 @@ def build_calendars(chain, symbol, spot, atm_iv, dte_min, dte_max):
     return out
 
 
+# A ratio backspread sells ONE option near the money and buys TWO further out,
+# same expiry: long volatility with a direction. The deltas are the practitioner
+# shape (docs/plans/2026-09-11-options-strategy-playbook.md, "Backspread") - a
+# short near 0.50 funds two longs near 0.30.
+_BACK_SHORT_DELTA, _BACK_LONG_DELTA = 0.50, 0.30
+# The most a backspread may COST, as a fraction of its strike distance, when the
+# caller names no cap. It is normally entered for a credit or close to even.
+_BACK_MAX_DEBIT_FRAC = 0.25
+
+
+def _backspread_priced(sig, width, max_debit_frac):
+    """True when a 1x2 backspread's net is a credit under its strike distance, a
+    debit no more than ``max_debit_frac`` of it, or even money.
+
+    The short option is worth at most the strike distance more than ONE long, so
+    on real quotes the credit is always under the distance. A credit at or over
+    it is a bad mark, not a good trade - the reading ``_priced_inside`` refuses
+    for a butterfly, and for the same reason: outside the range the marks are
+    wrong.
+    """
+    cap = width * _CONTRACT_MULT
+    credit, debit = sig.get("net_credit"), sig.get("net_debit")
+    if credit is not None:
+        return (isinstance(credit, (int, float)) and math.isfinite(credit)
+                and 0 < credit < cap)
+    if debit is not None:
+        return (isinstance(debit, (int, float)) and math.isfinite(debit)
+                and debit <= max_debit_frac * cap)
+    return True
+
+
+def build_backspreads(chain, symbol, spot, atm_iv, dte_min, dte_max,
+                      max_debit_frac=None):
+    """Call and put ratio backspread on the nearest expiry in the window.
+
+    Short one option nearest ``_BACK_SHORT_DELTA`` (0.50), long two of the same
+    kind nearest ``_BACK_LONG_DELTA`` (0.30) among the strikes BEYOND the short
+    (higher for calls, lower for puts). The call version profits from a large
+    rise and the put version from a large fall; the worst case is the underlying
+    finishing AT the long strike, where the short option is worth the whole
+    strike distance and the two longs nothing.
+
+    Not built when the chain lists no strike beyond the short, or when the net
+    is not priced as a backspread can be (``_backspread_priced``;
+    ``max_debit_frac`` defaults to ``_BACK_MAX_DEBIT_FRAC``).
+
+    Two fields ``_assemble`` cannot know:
+
+    * ``capital`` is the max loss. ``payoff_metrics`` gives any row it flags
+      unbounded a margin proxy, and a call backspread is flagged - for its
+      PROFIT. Its loss is bounded on both sides.
+    * ``target_breakeven`` is the FAR breakeven, past the long strike: the one
+      the trade is for. Taken for a credit there is a second, beside the short
+      strike, and that one is where the LOSS zone begins - see
+      ``strategy_scoring.q_breakeven_vs_em``, which would otherwise reward the
+      trade for sitting next to its own loss.
+    """
+    cap = _BACK_MAX_DEBIT_FRAC if max_debit_frac is None else max_debit_frac
+    out = []
+    for stype, kind, bias, label in (
+            ("CALL_BACKSPREAD", "call", "bullish", "Call Backspread"),
+            ("PUT_BACKSPREAD", "put", "bearish", "Put Backspread")):
+        fe = _front_exp(extract_options(chain, kind, dte_min, dte_max))
+        if not fe:
+            continue
+        exp, data = fe
+        short = nearest_by_delta(data["strikes"], _BACK_SHORT_DELTA)
+        if not short:
+            continue
+        beyond = {k: v for k, v in data["strikes"].items()
+                  if (k > short["strike"] if kind == "call" else k < short["strike"])}
+        long_ = nearest_by_delta(beyond, _BACK_LONG_DELTA)
+        if not long_:
+            continue
+        width = abs(long_["strike"] - short["strike"])
+        bought = _leg_from(long_, kind, "long", exp)
+        bought["qty"] = 2
+        legs = [_leg_from(short, kind, "short", exp), bought]
+        sig = _assemble(stype, "VOLATILITY", label, bias, legs, symbol, spot, atm_iv)
+        if not _backspread_priced(sig, width, cap):
+            continue
+        sig["capital"] = sig["max_loss"]
+        bes = sig.get("breakevens") or []
+        if bes:
+            sig["target_breakeven"] = max(bes) if kind == "call" else min(bes)
+        out.append(sig)
+    return out
+
+
 # The protective put and collar buy a real hedge. Under 0.10 delta the "hedge" is
 # a lottery ticket and the position is bare stock; a collar selling a call under
 # 0.05 delta is a protective put with a token credit attached.

@@ -1863,3 +1863,122 @@ def test_latest_expiration_reads_the_back_month():
           "legs": [{"expiration": None}, {"expiration": "2026-11-06"}]}
     assert ss.latest_expiration(cc) == "2026-11-06"
     assert ss.latest_expiration(None) is None
+
+
+# ---- Ratio backspreads: short one near the money, long two further out ----
+
+def _backs(**kw):
+    chain = kw.pop("chain", None) or bs_chain(spot=100.0, iv=0.28, days=(9,), step=1.0)
+    return {s["type"]: s for s in ss.build_backspreads(chain, "T", 100.0, 0.28, 5, 15, **kw)}
+
+
+def _short_long(sig):
+    short = next(l for l in sig["legs"] if l["side"] == "short")
+    long_ = next(l for l in sig["legs"] if l["side"] == "long")
+    return short, long_
+
+
+def test_a_call_backspread_sells_one_and_buys_two_further_out():
+    sig = _backs()["CALL_BACKSPREAD"]
+    short, long_ = _short_long(sig)
+    assert len(sig["legs"]) == 2
+    assert (short["qty"], long_["qty"]) == (1, 2)
+    assert short["kind"] == long_["kind"] == "call"
+    assert long_["strike"] > short["strike"]
+    assert short["expiration"] == long_["expiration"] == sig["expiration"]
+    assert abs(abs(short["delta"]) - 0.50) < 0.10
+    assert abs(abs(long_["delta"]) - 0.30) < 0.10
+    assert sig["bias"] == "bullish" and sig["strategy_label"] == "Call Backspread"
+
+
+def test_a_put_backspread_mirrors_it():
+    sig = _backs()["PUT_BACKSPREAD"]
+    short, long_ = _short_long(sig)
+    assert (short["qty"], long_["qty"]) == (1, 2)
+    assert short["kind"] == long_["kind"] == "put"
+    assert long_["strike"] < short["strike"]
+    assert sig["bias"] == "bearish" and sig["strategy_label"] == "Put Backspread"
+
+
+def test_a_backspreads_worst_case_is_at_the_long_strike():
+    for sig in _backs().values():
+        short, long_ = _short_long(sig)
+        width = abs(long_["strike"] - short["strike"]) * 100
+        net = sig["net_debit"] if sig["net_debit"] is not None else -(sig["net_credit"] or 0.0)
+        # Finishing AT the long strike: the short option is worth the width, the
+        # two longs nothing. Lose the width, plus what was paid (or less what
+        # was collected), plus commission.
+        assert abs(sig["max_loss"] - (width + net + sig["commission"])) < 1.0, sig["type"]
+        assert sig["max_loss"] > 0
+
+
+def test_the_call_version_has_unbounded_profit_and_neither_has_unbounded_loss():
+    out = _backs()
+    assert out["CALL_BACKSPREAD"]["unbounded_profit"] is True
+    assert out["CALL_BACKSPREAD"]["max_profit"] is None
+    for sig in out.values():
+        assert sig["unbounded_loss"] is False, sig["type"]
+    # A put backspread's best case is the stock at zero: large, but a number.
+    assert out["PUT_BACKSPREAD"]["max_profit"] > 0
+
+
+def test_a_backspreads_capital_is_its_worst_case_not_a_margin_proxy():
+    """payoff_metrics hands ANY row it flags unbounded a margin proxy for its
+    capital, and a call backspread is flagged - for its PROFIT. Its loss is
+    bounded on both sides, so the capital at risk is the max loss."""
+    for sig in _backs().values():
+        assert sig["capital"] == sig["max_loss"], sig["type"]
+
+
+def test_a_backspread_names_the_breakeven_it_is_for():
+    out = _backs()
+    _short, long_ = _short_long(out["CALL_BACKSPREAD"])
+    assert out["CALL_BACKSPREAD"]["target_breakeven"] > long_["strike"]
+    assert out["CALL_BACKSPREAD"]["target_breakeven"] == max(out["CALL_BACKSPREAD"]["breakevens"])
+    _short, long_ = _short_long(out["PUT_BACKSPREAD"])
+    assert out["PUT_BACKSPREAD"]["target_breakeven"] < long_["strike"]
+    assert out["PUT_BACKSPREAD"]["target_breakeven"] == min(out["PUT_BACKSPREAD"]["breakevens"])
+
+
+def test_a_backspread_is_long_volatility():
+    for sig in _backs().values():
+        assert sig["family"] == "VOLATILITY" and sig["net_vega"] > 0, sig["type"]
+
+
+def test_a_backspread_that_costs_more_than_the_cap_is_not_built():
+    """``max_debit_frac`` of 0 allows a credit or even money and nothing else."""
+    for sig in _backs(max_debit_frac=0.0).values():
+        assert sig["net_debit"] is None, sig["type"]
+    generous = _backs(max_debit_frac=5.0)
+    assert {"CALL_BACKSPREAD", "PUT_BACKSPREAD"} <= set(generous)
+
+
+def test_a_credit_at_or_over_the_strike_distance_is_a_bad_mark_not_a_trade():
+    chain = bs_chain(spot=100.0, iv=0.28, days=(9,), step=1.0)
+    exp = next(iter(chain["callExpDateMap"]))
+    # Mark the at-the-money call absurdly rich: the "credit" exceeds the width.
+    chain["callExpDateMap"][exp]["100.0"][0]["mark"] = 40.0
+    out = _backs(chain=chain)
+    assert "CALL_BACKSPREAD" not in out and "PUT_BACKSPREAD" in out
+
+
+def test_no_strike_beyond_the_short_builds_no_backspread():
+    chain = bs_chain(spot=100.0, iv=0.28, days=(9,), step=1.0)
+    exp = next(iter(chain["callExpDateMap"]))
+    calls = chain["callExpDateMap"][exp]
+    for k in [k for k in calls if float(k) > 100.0]:
+        del calls[k]
+    out = _backs(chain=chain)
+    assert "CALL_BACKSPREAD" not in out
+
+
+def test_no_expiry_in_the_window_builds_no_backspread():
+    chain = bs_chain(spot=100.0, iv=0.28, days=(30,), step=1.0)
+    assert ss.build_backspreads(chain, "T", 100.0, 0.28, 5, 15) == []
+
+
+def test_a_backspread_builds_at_one_day_too():
+    chain = bs_chain(spot=100.0, iv=0.28, days=(1,), step=0.5)
+    out = {s["type"]: s for s in ss.build_backspreads(chain, "T", 100.0, 0.28, 0, 4,
+                                                      max_debit_frac=1.0)}
+    assert out and all(s["dte"] == 1 for s in out.values())
