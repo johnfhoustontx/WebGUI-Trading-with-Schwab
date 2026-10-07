@@ -73,7 +73,9 @@ to `sys.path`); the **app folders run from inside the folder** (each has its own
 `conftest.py` / `sys.path` setup). The copied **legacy engine dirs are `soft`
 (`continue-on-error`)** — they surface for review without wedging the clean-stack gate.
 
-**Runner OS: `ubuntu-latest`.** It was `windows-latest`, on the reasoning that the
+**Runner OS: `ubuntu-24.04`**, named rather than `ubuntu-latest`: that label
+follows GitHub's newest image (Ubuntu 26 from 2026-10-19), and the runner should
+change release when prod does, not before. It was `windows-latest`, on the reasoning that the
 stack imported `winotify` and touched tkinter/Memurai, so a Linux runner would
 fail at import. That reasoning expired with the 2026-08-29 migration, and was
 measured false before this changed: the full suite runs clean on Linux — webgui
