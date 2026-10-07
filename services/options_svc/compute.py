@@ -530,8 +530,8 @@ def _latest_expiration(sig):
     """The LAST expiration a candidate is exposed to. A calendar's back month can
     span a report its front leg expires ahead of, so the earnings gate must read
     this, not ``sig["expiration"]`` (the front). Single-expiry rows are unchanged."""
-    exps = [l.get("expiration") for l in sig.get("legs") or [] if l.get("expiration")]
-    return max(exps) if exps else sig.get("expiration")
+    import strategy_scanner as _ssn     # the one definition; the Scanner reads it too
+    return _ssn.latest_expiration(sig)
 
 
 # Candidate build groups. ``families=None`` builds all of these. The first three

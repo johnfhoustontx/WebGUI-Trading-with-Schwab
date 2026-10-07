@@ -146,6 +146,16 @@ def _front_expiration(legs):
     return min(exps) if exps else None
 
 
+def latest_expiration(sig):
+    """The LAST expiration a candidate is exposed to, or its ``expiration`` when
+    its legs name none. A calendar's back month can span a report its front leg
+    expires ahead of, so an earnings check reads this, not ``sig["expiration"]``
+    (the front). Single-expiry rows are unchanged."""
+    sig = sig or {}
+    exps = [l.get("expiration") for l in sig.get("legs") or [] if l.get("expiration")]
+    return max(exps) if exps else sig.get("expiration")
+
+
 def _needs_front_valuation(legs):
     """True when intrinsic-at-one-expiry is WRONG for this leg set: it holds a
     share leg, or its option legs span more than one expiration.

@@ -1851,3 +1851,15 @@ def test_the_default_floor_output_is_unchanged_by_the_parameter():
         plain = build(chain, "T", 100.0, 0.28, 0, 60)
         explicit = build(chain, "T", 100.0, 0.28, 0, 60, min_front_dte=7)
         assert plain and _no_stamp(plain) == _no_stamp(explicit)
+
+
+def test_latest_expiration_reads_the_back_month():
+    cal = {"expiration": "2026-11-06",
+           "legs": [{"expiration": "2026-11-06"}, {"expiration": "2026-12-04"}]}
+    assert ss.latest_expiration(cal) == "2026-12-04"
+    assert ss.latest_expiration({"expiration": "2026-11-06", "legs": []}) == "2026-11-06"
+    # A share leg carries no expiration and must not win or raise.
+    cc = {"expiration": "2026-11-06",
+          "legs": [{"expiration": None}, {"expiration": "2026-11-06"}]}
+    assert ss.latest_expiration(cc) == "2026-11-06"
+    assert ss.latest_expiration(None) is None
