@@ -27,6 +27,8 @@ CHECK_FIELDS = ("checks", "_checks_state", "_checks_class", "_checks_short",
 
 ONLY_CLEAR_TIP = ("Hide rows with a block, a caution, a feed that hasn't loaded, "
                   "or a paper book fit that couldn't be checked")
+# The public origin (Option Signals) checks no paper book, so its tip names none.
+ONLY_CLEAR_TIP_PUBLIC = "Hide rows with a block, a caution or a feed that hasn't loaded"
 
 
 def stamp_checks(rows, signals, ctx, build=None, memo=None):

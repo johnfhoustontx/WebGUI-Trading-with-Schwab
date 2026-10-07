@@ -57,7 +57,8 @@ from pages.ui_guard import guard, guard_async
 from . import detail, funnel_view, handoff
 from . import persistence as _persistence
 from .checks_table import (  # re-exported: the scanner's names predate the move
-    CHECKS_SLOT as _CHECKS_SLOT, ONLY_CLEAR_TIP as _ONLY_CLEAR_TIP, filtered_tab_label,
+    CHECKS_SLOT as _CHECKS_SLOT, ONLY_CLEAR_TIP as _ONLY_CLEAR_TIP,
+    ONLY_CLEAR_TIP_PUBLIC as _ONLY_CLEAR_TIP_PUBLIC, filtered_tab_label,
     only_clear, only_clear_empty_label, restamp, stamp_checks)  # noqa: F401 - restamp: see above
 from .theme import (BADGE_MUTED, BADGE_WARN, CARD, EYEBROW, LABEL, MUTED,
                     TXT_NEG, TXT_NEUTRAL, TXT_POS, TXT_WARN)
@@ -653,14 +654,31 @@ def _read_all():
     return (bus_client.read(_DAY_VIEW) or {}), (bus_client.read(_LIVE_VIEW) or {})
 
 
-def _build_populate(day_env, live, ctx=None):
+def close_paper(rows):
+    """Close every row's Paper gate, for the PUBLIC origin.
+
+    That origin offers no Paper button, and the checklist draws its Paper book
+    line only for a row whose gate is open (``checks._book``): closed, the line
+    is ABSENT rather than grey, so "Only clear" still has rows to keep. Runs
+    after ``stamp_stale`` (which settles the gate) and before ``stamp_checks``
+    (which reads it)."""
+    for r in rows:
+        r["_allow_paper"] = False
+    return rows
+
+
+def _build_populate(day_env, live, ctx=None, *, public=False):
     """PURE, heavy row construction — the ~5,238 display-row dicts + the by-id map,
     stamped with the day-union state and then the checklist chip (``ctx`` is a
     ``checks_feed.read_context()`` result; None paints every chip unchecked).
 
     Runs OFF the event loop (via _read_and_build): only the New-marker stamps + the
     UI assignment are left for the loop (see _apply_populate). Returns everything
-    _apply_populate needs."""
+    _apply_populate needs.
+
+    ``public`` builds for the public origin (Option Signals): every Paper gate
+    is closed before the checks are stamped. Such a build is SHARED by every
+    visitor (``_read_and_build_shared``), so nothing may stamp it afterwards."""
     day_env, live = day_env or {}, live or {}
     today = today_ct()
     sigs = {key: day_signals(day_env, key, today) for key in DAY_LISTS}
@@ -681,6 +699,8 @@ def _build_populate(day_env, live, ctx=None):
         # ORDER IS LOAD-BEARING: stamp_stale settles ``_allow_paper``, which the
         # checklist's Paper book line reads.
         stamp_stale(rows[key], sigs[key])
+        if public:
+            close_paper(rows[key])
         # Order-independent: this writes four keys neither of its neighbours
         # reads or writes. It sits after stamp_stale so the block reads
         # lifecycle-then-verdict. ``day_env`` is normalised to {} above, and
@@ -701,6 +721,36 @@ def _read_and_build():
     return _build_populate(day_env, live, checks_feed.read_context())
 
 
+# ONE object for "the view is absent", so a cold service still presents the
+# same inputs to ``scanner_shared`` on every call. Never written to.
+_NO_VIEW: dict = {}
+
+
+def _read_and_build_shared():
+    """The PUBLIC origin's read: one build for the whole process, the same
+    object for every visitor until a view it was built from is republished or
+    it is ``checks_feed.TABLE_REFRESH_SEC`` old. **Blocking** — go through
+    ``run.io_bound``.
+
+    ``read_shared`` hands every caller the same parse, and the checklist's
+    regime and calibration are the same objects until their views move, so
+    those four identities are the build's key (``scanner_shared.get``). The
+    Opportunity Board is not among them: it moves every minute, and the age
+    limit is what re-stamps against it, on the private page's own cadence.
+
+    ⚠ What this returns is READ-ONLY, payloads and rows alike. The page stamps
+    nothing onto it: no ``_new``, and the selected row's accent goes on a copy
+    of the one page a visitor is sent (``page_rows``)."""
+    from . import checks_feed, scanner_shared
+    day_env = bus_client.read_shared(_DAY_VIEW) or _NO_VIEW
+    live = bus_client.read_shared(_LIVE_VIEW) or _NO_VIEW
+    ctx = checks_feed.read_context()
+    return scanner_shared.get(
+        (day_env, live, ctx.get("regime"), ctx.get("calibration")),
+        lambda: _build_populate(day_env, live, ctx, public=True),
+        max_age=checks_feed.TABLE_REFRESH_SEC)
+
+
 # Quasar reads ``rowsPerPage: 0`` as INFINITE, and NiceGUI's ui.table defaults to
 # exactly that. The old page rendered one scan (~40 rows/table); the day union
 # reaches ~1,746 per list, i.e. ~5,238 rows x 13-16 columns (~75k cells, many
@@ -717,6 +767,20 @@ def table_page(rows, columns, request):
     """The one page of ``rows`` a table is sent, and its pagination. PURE - the
     page kit's pager (shared with the Strategy Finder) at this page's size."""
     return kit.page_of(rows, columns, request, page_size=PAGE_ROWS)
+
+
+def page_rows(page, selected_id, *, shared):
+    """The rows a table is SENT for one page. PURE.
+
+    ``shared`` rows belong to every visitor on the public origin, so the
+    selected row's accent goes on COPIES of this one page (at most
+    ``PAGE_ROWS`` small dicts): stamped in place, one visitor's click would
+    light a row in every other visitor's tab. The private page's rows are its
+    own and ``kit.mark_selected`` has already stamped them."""
+    if not shared:
+        return page
+    return [{**r, "_selected": selected_id is not None and r.get("id") == selected_id}
+            for r in page]
 
 # A dropped-out row is dimmed via Quasar's `table-row-class-fn`. The page's own
 # ``_ROW_CLASS_PROP`` went with the 2026-09-19 page-kit migration: ``kit.table``
@@ -871,6 +935,18 @@ def render():
     # Falls back inline if the slot is absent. tab_panels below reference the
     # element regardless of where it is mounted.
     import shell as _shell
+    # WHICH ORIGIN THIS IS. The page is published, unauthenticated, as Option
+    # Signals (``live_screens``), and there it leaves out everything that is
+    # the owner's: Run scan (a rescan spends Schwab calls), the Paper trade /
+    # Calculator / Expected Move footer (Paper writes the owner's book; the
+    # other two hand off through a store every visitor would share), the
+    # paper-result toasts, the "new" badges (one seen-set per process) and the
+    # ledger caps (``checks_feed.read_context`` refuses those itself).
+    #
+    # ⚠ Read from the PROCESS, never taken as an argument: a ``public=True``
+    # left off a Screen entry would serve the owner's page to anyone.
+    _public = _shell.is_public()
+    _may_enqueue = _shell.may_enqueue()
     _slot = _shell.subtab_slot()
 
     def _build_scan_tabs():
@@ -940,13 +1016,18 @@ def render():
             # Quiet, and left of Run scan: it explains the tables rather than
             # changing them, so it must not read as the page's action.
             why_btn = kit.button(FUNNEL_TITLE, kind="quiet", icon="help_outline")
-            scan_btn = kit.button("Run scan", kind="primary", icon="play_arrow")
+            # Not built where it cannot work (see ``shell.may_enqueue``).
+            scan_btn = (kit.button("Run scan", kind="primary", icon="play_arrow")
+                        if _may_enqueue else None)
         with ui.row().classes("w-full items-center gap-3"):
             status = kit.status_line()
             ui.space()
             clear_toggle = ui.switch("Only clear", value=False)
             with clear_toggle:
-                ui.tooltip(_ONLY_CLEAR_TIP).props("delay=350")
+                # The private tip names the paper book fit, which the public
+                # page never checks.
+                ui.tooltip(_ONLY_CLEAR_TIP_PUBLIC if _public else _ONLY_CLEAR_TIP
+                           ).props("delay=350")
         # Only when something is off: the day-union note (stale date / day cap).
         # Named for the BOX, not ``day_note`` - that is the module's function.
         day_note_box = ui.row().classes("w-full")
@@ -968,7 +1049,7 @@ def render():
                         table_dir = _table(directional_columns())
             # Narrower than the 360px default so the compacted signal table has
             # room to show all columns without horizontal scroll.
-            detail_panel = detail.render(width=290)
+            detail_panel = detail.render(width=290, actions=not _public)
 
     # Every table by the day list it shows, and each two-table tab's switch
     # with the two lists behind it.
@@ -981,7 +1062,11 @@ def render():
     by_id: dict = {}
     # Last-seen bus cache versions for the fetch-free repaint timer. (NEW-signal
     # tracking lives at module level so it persists across navigation.)
-    _probe_views = (_DAY_VIEW, _LIVE_VIEW) + tuple(checks_feed.REFRESH_VIEWS)
+    # The public origin never reads the ledger caps, so it has no use for their
+    # version either.
+    _probe_views = (_DAY_VIEW, _LIVE_VIEW) + tuple(
+        v for v in checks_feed.REFRESH_VIEWS
+        if not (_public and v == checks_feed.CAPS_VIEW))
     seen = {v: None for v in _probe_views}
     # The full stamped rows per table, so the "Only clear" switch can re-filter
     # without re-reading the bus.
@@ -1054,7 +1139,10 @@ def render():
         _t.add_slot('body-cell-score_trend', _TREND_SLOT)
 
     # Every Paper click's answer - opened, or refused and why - becomes a toast.
-    handoff.watch_paper_results()
+    # The OWNER's clicks: watched on the public origin, every visitor would be
+    # shown them.
+    if not _public:
+        handoff.watch_paper_results()
     # The three tables of NORMALIZED rows - Directional and the two Other-
     # structures tables - share one row shape, so they share one loop.
     for _n in (table_dir, table_x0, table_xs):
@@ -1094,13 +1182,21 @@ def render():
     # Built ONCE: the footer is visible only while a signal is shown, so nothing
     # here can be pressed with no selection and nothing prints "click a row
     # first". Primary last, so Paper trade sits rightmost.
-    with detail_panel.actions:
-        kit.button("Expected Move", kind="secondary", icon="show_chart",
-                   on_click=lambda: _send_em())
-        kit.button("Calculator", kind="secondary", icon="calculate",
-                   on_click=lambda: _send_calc())
-        paper_btn = kit.button("Paper trade", kind="primary", icon="request_quote",
-                               on_click=lambda: _send_paper())
+    #
+    # None of the three on the public origin: Paper trade writes the owner's
+    # book, Expected Move is not published there, and both it and the
+    # Calculator hand off through ``handoff._pending`` - ONE store, which every
+    # visitor would share.
+    paper_btn = None
+    if not _public:
+        with detail_panel.actions:
+            kit.button("Expected Move", kind="secondary", icon="show_chart",
+                       on_click=lambda: _send_em())
+            kit.button("Calculator", kind="secondary", icon="calculate",
+                       on_click=lambda: _send_calc())
+            paper_btn = kit.button("Paper trade", kind="primary",
+                                   icon="request_quote",
+                                   on_click=lambda: _send_paper())
 
     def _remember(event, sig, multi):
         """Latch the clicked row as the selection and re-stamp the accent.
@@ -1112,7 +1208,8 @@ def render():
         row = event.args[1] if isinstance(event.args, list) and len(event.args) > 1 else event.args
         sel.update(sig=sig, multi=multi, id=(row or {}).get("id"),
                    allow_paper=bool((row or {}).get("_allow_paper")))
-        paper_btn.set_visibility(sel["allow_paper"])
+        if paper_btn is not None:
+            paper_btn.set_visibility(sel["allow_paper"])
         _paint_tables()                      # re-stamps _selected
 
     @guard
@@ -1144,7 +1241,9 @@ def render():
         a repaint keeps both (the page is clamped if the list shrank)."""
         page, pagination = table_page(shown_rows[key], table.columns, request)
         paging[key] = pagination
-        table.rows = page
+        # On the public origin the rows are every visitor's: the accent goes on
+        # copies of this page, never on the rows themselves.
+        table.rows = page_rows(page, sel["id"], shared=_public)
         table.pagination = dict(pagination)
         table.update()
 
@@ -1177,7 +1276,8 @@ def render():
                 # empty-state line below speak about the families on show.
                 full = ssx.filter_groups(full, groups_on[key])
                 shown = ssx.filter_groups(shown, groups_on[key])
-            kit.mark_selected(shown, sel["id"])
+            if not _public:                  # shared rows: see ``page_rows``
+                kit.mark_selected(shown, sel["id"])
             empty = only_clear_empty_label(full, shown, filtering=filtering)
             # Written to _props directly: a props STRING would be re-parsed.
             if empty is None:
@@ -1258,10 +1358,16 @@ def render():
         by_id.clear()
         by_id.update(built["by_id"])
 
-        new_ids = new_ids_for_paint(set(by_id), today, acknowledge)
+        # No "new" badges on the public origin. ``_SEEN`` is one set for the
+        # whole process, so one visitor's page load would decide - and clear -
+        # every other visitor's; and the rows there are shared, so nothing may
+        # stamp them.
+        new_ids = (None if _public
+                   else new_ids_for_paint(set(by_id), today, acknowledge))
         for key in DAY_LISTS:
             # stamp_stale + stamp_checks already ran off the loop (_build_populate).
-            stamp_new(rows[key], new_ids)
+            if new_ids is not None:
+                stamp_new(rows[key], new_ids)
             painted[key] = rows[key]
             painted_sigs[key] = sigs[key]
         # Day counts in each tab header — no count until a day union for TODAY
@@ -1274,7 +1380,8 @@ def render():
         _refresh_detail_checks()
 
         scan.busy.hide()
-        kit.set_busy(scan_btn, False)
+        if scan_btn is not None:
+            kit.set_busy(scan_btn, False)
         status.text = status_line(live)
         day_note_box.clear()
         note = day_note(built["day_env"], today)
@@ -1369,13 +1476,16 @@ def render():
 
     @guard
     def _request_scan():
+        if not _may_enqueue:
+            return
         # No toast: the region's spinner and the button's own wait already say
         # the scan is running, which is all a toast would have repeated.
         bus_client.request("options", {"type": "rescan"})
         scan.busy.show()
         kit.set_busy(scan_btn)
 
-    scan_btn.on_click(_request_scan)
+    if scan_btn is not None:
+        scan_btn.on_click(_request_scan)
 
     @guard_async
     async def _initial_load():
@@ -1387,7 +1497,10 @@ def render():
         state["fetching"] = True
         stamped["matrix"] = bus_client.read_version(checks_feed.MATRIX_VIEW)
         try:
-            built = await run.io_bound(_read_and_build)
+            # The private page reads and builds its OWN copy; the public
+            # origin's is one build shared by every visitor.
+            built = await (run.io_bound(_read_and_build_shared) if _public
+                           else run.io_bound(_read_and_build))
         finally:
             state["fetching"] = False
         _apply_populate(built, notify=False, acknowledge=True)
@@ -1400,7 +1513,10 @@ def render():
         state["fetching"] = True
         stamped["matrix"] = bus_client.read_version(checks_feed.MATRIX_VIEW)
         try:
-            built = await run.io_bound(_read_and_build)
+            # The private page reads and builds its OWN copy; the public
+            # origin's is one build shared by every visitor.
+            built = await (run.io_bound(_read_and_build_shared) if _public
+                           else run.io_bound(_read_and_build))
         finally:
             state["fetching"] = False
         # NOT a view — the user may be away, so their New markers must survive.
@@ -1408,7 +1524,16 @@ def render():
 
     async def _restamp():
         """Re-stamp the painted rows against a fresh context, off the loop, under
-        the ``fetching`` guard - no day-union read."""
+        the ``fetching`` guard - no day-union read.
+
+        On the public origin a re-stamp is a fresh SHARED build instead: this
+        path copies every painted row per tab, which is exactly what that
+        origin's one build exists to avoid (and ``scanner_shared`` rebuilds
+        only when a view moved or the build aged out, so it is one build for
+        every visitor, not one each)."""
+        if _public:
+            await _rebuild()
+            return
         if state["fetching"]:
             return
         state["fetching"] = True

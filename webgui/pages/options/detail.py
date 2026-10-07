@@ -37,6 +37,7 @@ import re
 from nicegui import background_tasks, core, run, ui
 
 import bus_client
+import shell as _shell
 
 from .. import fmt as _fmt
 from ..fmt import num
@@ -878,7 +879,9 @@ def _build_cards(s):
     with ui.expansion("Score factors").classes("w-full"):
         if s.get("rr_pct") is not None:
             _kv("Risk / reward", _pct(s.get("rr_pct")))
-        if s.get("max_contracts") is not None:
+        # Sized from the OWNER's per-trade risk limit, so it says nothing to a
+        # visitor and is not drawn on the public origin (Option Signals).
+        if s.get("max_contracts") is not None and not _shell.is_public():
             _kv("Max contracts", str(s.get("max_contracts")))
         # `expected_pnl_10` was rendered here until 2026-08-25. It is the PRICED
         # EV in dollars — p from the short delta, b from credit/max_loss, both
@@ -1118,11 +1121,16 @@ class _Handle:
             self._paint_checks(ctx)
 
 
-def render(width: int = 360):
+def render(width: int = 360, actions: bool = True):
     """Build the collapsible detail panel; returns a handle with update()/clear().
 
     The panel owns its own column so it can collapse to a thin strip (reclaiming
     horizontal space) and expand again via the header toggle.
+
+    ``actions=False`` is for a page that offers the selected row no action at
+    all - the Market Scanner on the public origin. The footer is still built
+    (``update`` / ``clear`` / the toggle show and hide it), but bare: its rule
+    and padding would otherwise frame an empty row.
     """
     expanded_w = f"w-[{width}px]"
     # The panel is a Deep Slate CARD (navy bg + hairline border + radius + padding)
@@ -1174,7 +1182,8 @@ def render(width: int = 360):
         # buttons into it ONCE; it shows only while a row is shown and open.
         actions = ui.row().classes(
             "w-full items-center justify-end gap-2 flex-wrap pt-2 "
-            f"border-t border-[{THEME['palette']['card_border']}]")
+            f"border-t border-[{THEME['palette']['card_border']}]"
+            if actions else "w-full")
     actions.set_visibility(False)
 
     state = {"open": True, "has_signal": False}
