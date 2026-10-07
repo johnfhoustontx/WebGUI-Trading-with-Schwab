@@ -81,8 +81,15 @@ def read_context(caps=True):
     whose candidates carry ``_allow_paper`` False, so ``checks._book`` never
     reads them). Every private caller takes the default.
 
+    ⚠ On the PUBLIC origin the caps are never read, whatever the caller asks
+    for. The Market Scanner is published there (Option Signals), and its Trade
+    detail panel reads a context of its own when the page holds none yet, so
+    the refusal lives here rather than at each caller.
+
     **Blocking** (four locked Redis reads): call it through ``run.io_bound``,
     never on the event loop."""
+    import shell as _shell               # lazy: this module stays light to import
+    caps = caps and not _shell.is_public()
     return {"matrix": _index_board(_gated(MATRIX_VIEW)), "regime": _gated(REGIME_VIEW),
             "calibration": _gated(CALIBRATION_VIEW),
             "caps": _gated(CAPS_VIEW) if caps else None}
