@@ -1,4 +1,4 @@
-"""The seventeen screens published on the public live origin.
+"""The eighteen screens published on the public live origin.
 
 PURE DATA -- no NiceGUI import -- so the route registration, the thumbnail
 capture script and the static grid on neuralstrike.co all read one source and
@@ -86,6 +86,19 @@ SCREENS = (
     # the dropdown would mean nothing on it.
     Screen("net-premium", "/net-premium", "Net Prem", "options.gamma",
            "/options/gamma", kwargs={"view": "Net Prem"}, settings=_NETPREM),
+    # OPTION SIGNALS (2026-10-07): the Market Scanner, first in the site's Tools
+    # menu. A pure READER - the day's signals off cache:options:scan_day, which
+    # options_svc publishes whoever is looking - and it writes nothing.
+    # ⚠ No ``public=True`` here, deliberately: ``scanner.render`` reads the
+    # PROCESS's origin (``shell.is_public``), so there is no keyword whose
+    # absence would serve the owner's page. What it leaves out there: Run scan,
+    # the Paper trade / Calculator / Expected Move footer, the paper-result
+    # toasts, the "new" badges and the Paper book check line (the ledger caps
+    # are refused in ``checks_feed.read_context``). Every visitor draws from
+    # ONE build of the rows (``scanner_shared``).
+    # Design: docs/plans/2026-10-07-public-option-signals-design.md.
+    Screen("signals", "/signals", "Option Signals", "options.scanner",
+           "/options/scanner", tile=False),
     # ⚠ THE ONE SCREEN THAT WRITES. A visitor's Scan puts one validated symbol
     # on cmd:finder_public (bus_client.request_public_scan; the live ACL user's
     # only write selector) and options_svc answers it. ``public=True`` hands off

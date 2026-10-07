@@ -14,15 +14,36 @@ FORBIDDEN = {"/terminate", "/settings", "/status", "/driver", "/manuals",
 _LIVE_SCREENS = pathlib.Path(__file__).resolve().parents[1] / "live_screens.py"
 
 
-def test_there_are_exactly_seventeen_screens():
+def test_there_are_exactly_eighteen_screens():
     # 22 -> 24 on 2026-09-21: the public Calculator and Simulator, published
     # deliberately (each is a write surface, gated in test_live_commands.py).
     # 24 -> 16 on 2026-09-22: nine pinned Gamma screens became ONE public Gamma
     # page with a dropdown; their routes redirect (RETIRED_ROUTES).
     # 16 -> 17 on 2026-09-26: the public Market News screen (/news), a pure
     # reader of cache:news:feed_public (tests/test_news_live.py).
+    # 17 -> 18 on 2026-10-07: Option Signals (/signals), the Market Scanner
+    # less everything that is the owner's (tests/test_scanner_public.py).
     import live_screens
-    assert len(live_screens.SCREENS) == 17
+    assert len(live_screens.SCREENS) == 18
+
+
+def test_option_signals_is_the_scanner_with_no_tile_and_no_pin():
+    """The page decides what to leave out from the PROCESS's origin
+    (``shell.is_public``), so the entry carries no ``public=True`` to forget."""
+    import live_screens
+    s = next(x for x in live_screens.SCREENS if x.slug == "signals")
+    assert (s.route, s.title, s.module, s.private_route) == (
+        "/signals", "Option Signals", "options.scanner", "/options/scanner")
+    assert s.tile is False and s.parent == ""
+    assert s.kwargs == {} and s.settings == {}
+
+
+def test_option_signals_leads_the_tools():
+    """The site's Tools menu lists it first (the owner's instruction), and the
+    table keeps the same order so the two read alike."""
+    import live_screens
+    tools = [s.slug for s in live_screens.SCREENS if not s.tile and not s.parent]
+    assert tools[0] == "signals"
 
 
 def test_the_retired_routes_redirect_to_a_published_screen_and_are_not_one():
