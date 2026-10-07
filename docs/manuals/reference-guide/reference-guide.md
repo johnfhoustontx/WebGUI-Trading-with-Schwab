@@ -1992,8 +1992,8 @@ moment after you stop.
    re-pulls the same symbol. A landed chain lays the strategy on real strikes, prices
    every leg from the chain's mark, and implies the volatility from those prices.
 2. **Strategy** — a cascading menu of templates: singles, verticals (credit and
-   debit), iron condors, butterflies (long and iron), calendars, diagonals, and
-   **Stock + options** (covered call, protective put, collar). Tag chips name the
+   debit), iron condors, butterflies (long and iron), calendars, diagonals,
+   backspreads, and **Stock + options** (covered call, protective put, collar). Tag chips name the
    cash-flow direction (**credit** or **debit**), the leg count and the lean; only the
    credit/debit chip is coloured, because the rest are descriptions rather than
    opinions. A one-line thesis says what the structure is betting on.
@@ -2339,8 +2339,8 @@ never be confused.
 
 **Two tables on 0-DTE and Swing.** A switch at the top of each of those tabs
 chooses between **Credit spreads** and **Other structures**: debit spreads,
-straddles and strangles, butterflies and condors on both tabs, and calendars and
-diagonals on Swing. They are separate tables because they are scored on separate
+straddles and strangles, butterflies and condors and ratio backspreads on both
+tabs, and calendars and diagonals on Swing. They are separate tables because they are scored on separate
 scales (see *Where it is weak*, below). The family boxes above the Other
 structures table show and hide one kind at a time, and at most two of a family
 are listed per symbol.
@@ -2355,6 +2355,7 @@ What the other structures are for, in one line each:
 | Butterfly, iron butterfly | The price finishing near one strike. Cheap, and usually wrong by a little. |
 | Condor | The price finishing inside a range. |
 | Calendar | A quiet price now and richer volatility later. Two expirations. |
+| Backspread | A large move in one direction. Sell one option, buy two further out. |
 
 A row marked ***Earnings 10/29*** would still be open through that earnings
 report. Only trades that buy premium are kept through a report; trades that sell
@@ -2633,6 +2634,19 @@ Throughout the session.
 
 ### Caveats and gotchas
 
+- **A backspread's probability of profit flatters it.** Only backspreads
+  entered for a credit are listed (one entered for a cost has about a one in
+  five chance and is cut). Their probability reads 63 to 69%, and most of that
+  is the price staying on the near side of the short strike, where the trade
+  keeps a small credit and nothing more. Measured on a fairly priced chain, a
+  call backspread collected about $40 against a worst case of about $260. Judge
+  it on what the large move would pay and how likely that is, not on the
+  probability column.
+- **A put backspread scores higher than a call backspread, and that is the
+  score, not the trade.** Its best case is the stock at zero, a real but
+  enormous number, so its reward to risk reads 40 to 100 and it scores 63 to 77
+  where the call scores 55 to 70. A long put outscores a long call on the
+  Directional tab for the same reason.
 - **Some other structures are rarely or never listed, by design.** A short
   straddle fails the probability bar on every fairly priced chain measured.
   Diagonals fail on reward this close to expiry. A short strangle is never listed
@@ -3485,6 +3499,7 @@ not what is built:
 | **Butterflies & condors** | call, put and iron butterfly; call and put condor |
 | **Calendars** | call and put calendar; call and put diagonal |
 | **Stock + options** | covered call, protective put, collar — each on one 100-share lot bought at spot |
+| **Ratio spreads** | call and put backspread — short one option near the money, long two further out |
 
 A collapsed **Advanced — delta bands and credit floor** panel holds put/call **delta**
 bounds (how far out-of-the-money the sold strikes sit — a smaller absolute delta is safer

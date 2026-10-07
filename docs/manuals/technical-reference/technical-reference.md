@@ -1421,6 +1421,7 @@ window (DTE 5–15), every structure that is not a credit spread
 | `STRADDLE` | long and short straddle, long and short strangle | both |
 | `BUTTERFLY` | call and put butterfly, iron butterfly, call and put condor | both |
 | `CALENDAR` | call and put calendar, call and put diagonal | Swing |
+| `RATIO` | call and put ratio backspread (since 2026-10-07) | both |
 
 The builders are the Strategy Finder's, with one difference: the Finder keeps
 straddles, strangles, butterflies and condors at least seven days out, and the
@@ -1463,6 +1464,8 @@ nine fairly priced synthetic chains (volatility 0.20, 0.28, 0.45; strike steps o
 | Condors | half; never on expiration day | about four in five |
 | Calendars | not built | put: all; call: fails with a 7-day front leg |
 | Diagonals | not built | almost none |
+| Call backspread | 30 of 36 | 22 of 27 |
+| Put backspread | 22 of 35 | 18 of 26 |
 
 The full tables and their parameters are in
 `docs/plans/2026-10-06-scanner-multi-structure-design.md`. Probability of profit
@@ -1475,6 +1478,42 @@ score higher for it (the long straddle 64 against 53–56).
 **Cost.** About 0.1 second per symbol on a dense synthetic chain
 (`tools/measure_structure_scan.py`), on the scan's own thread after the chains are
 fetched.
+
+**Ratio backspreads.** `strategy_scanner.build_backspreads` sells one option
+nearest 0.50 delta and buys two of the same kind nearest 0.30 delta among the
+strikes beyond it, on the nearest expiration in the window. With strike distance
+*w* and net entry *n* (positive for a debit, negative for a credit, per share):
+
+```
+worst case (price at the long strike)  = (w + n) x 100 + commission
+far breakeven, call                    = long strike + (w + n)
+far breakeven, put                     = long strike - (w + n)
+near breakeven (credit entries only)   = short strike -/+ n      (call / put)
+```
+
+It is built only when the net is a credit under *w*, a debit of at most
+`[structures] backspread_max_debit_frac` (0.25) of *w*, or even money. A credit
+at or over *w* cannot occur on real quotes and is refused as a bad mark.
+
+Two scoring rules exist because of it:
+
+- **The breakeven factor reads the far breakeven.** `q_be` scores a directional
+  row on its nearest breakeven. A backspread entered for a credit has a nearer
+  one beside its short strike, where its loss zone begins, so the builder names
+  the far one (`target_breakeven`) and the factor reads that. No other structure
+  sets the field.
+- **The reward gate.** The `LONG` profile passes any trade whose profit is
+  unbounded. It used to detect one by "reward to risk undefined and a debit
+  paid"; it now also accepts `unbounded_profit`, because a call backspread
+  entered for a credit has unbounded profit and no debit.
+
+Backspreads use the `LONG` gate profile. Under `DEBIT` no call backspread is ever
+shown (0 of 63 in the measurement above) because its reward to risk is undefined.
+What the measurement showed: every backspread entered for a credit passed
+(probability of profit 63–69) and every one entered for a debit was cut (16–21,
+against a bar of 30). That 63–69 is mostly the chance of keeping the credit. The
+put version's best case is the stock at zero, so its reward to risk reads 40–100
+and it scores 63–77 against the call's 55–70.
 
 The rows are published as `structures_0dte` and `structures_swing` on
 `cache:options:scan` and the day union. They are not recorded to `signals.db`, not

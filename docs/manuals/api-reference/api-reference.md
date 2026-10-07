@@ -358,8 +358,10 @@ date. Every stamp is `null` when unknown, never a guessed zero.
 `breakevens` (a list) and the Fit + Quality score. The two `structures_*` lists
 (since 2026-10-06) hold everything else the 0-DTE and Swing windows build — debit
 spreads, straddles and strangles, butterflies and condors, and on Swing calendars
-and diagonals. Each of their rows also carries `group` (`VERTICAL` / `STRADDLE` /
-`BUTTERFLY` / `CALENDAR`, the family that built it) and, when it buys premium and
+and diagonals, and since 2026-10-07 ratio backspreads. Each of their rows also
+carries `group` (`VERTICAL` / `STRADDLE` / `BUTTERFLY` / `CALENDAR` / `RATIO`,
+the family that built it), on a backspread `target_breakeven` (the far
+breakeven, the one the score reads), and, when it buys premium and
 was kept through an earnings report, `spans_earnings: true` with `earnings_date`.
 A payload cached before the two lists existed validates with both empty. They are
 not recorded, not pushed and not counted by `compute.build_matrix`. Do not assume

@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-06</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-07</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -1651,6 +1651,7 @@ matrix) below it. It wears its own near-black palette rather than the app-wide n
 <li><strong>Strategy</strong> — a cascading menu of templates: <strong>Single</strong> (long/short call/put),
   <strong>Credit spread</strong> and <strong>Debit spread</strong> (call/put), <strong>Condor</strong> (iron, all-call,
   all-put), <strong>Butterfly</strong> (call, put, iron), <strong>Calendar</strong> and <strong>Diagonal</strong> (call/put),
+  <strong>Backspread</strong> (call/put: sell one, buy two further out),
   and <strong>Stock + options</strong> (<strong>covered call</strong>, <strong>protective put</strong>, <strong>collar</strong> — the
   three that need shares; see the note below). Tag chips beside it say whether the
   structure takes in a <strong>credit</strong> or costs a <strong>debit</strong>, how many legs it has, and
@@ -1996,6 +1997,11 @@ structures</strong> at the top of either tab to see the rest:</p>
 <td>call and put calendar, call and put diagonal</td>
 <td>Swing</td>
 </tr>
+<tr>
+<td><strong>Ratio spreads</strong></td>
+<td>call backspread, put backspread</td>
+<td>both</td>
+</tr>
 </tbody>
 </table>
 <ol>
@@ -2020,8 +2026,17 @@ structures</strong> at the top of either tab to see the rest:</p>
   through that earnings report. Only trades that <em>buy</em> premium are kept through a
   report, and they are marked. Trades that sell premium through one are left out.</li>
 <li><strong>Paper trade is offered for debit spreads, butterflies and condors.</strong>
-  Straddles, strangles, the iron butterfly, calendars and diagonals are for
-  analysis; send them to the Calculator.</li>
+  Straddles, strangles, the iron butterfly, calendars, diagonals and
+  backspreads are for analysis; send them to the Calculator.</li>
+<li><strong>A backspread sells one option near the money and buys two further out.</strong>
+  The call version pays on a large rise and the put version on a large fall.
+  The most it can lose is at the strike you bought, and that figure is the
+  <strong>Max L</strong> column. Only backspreads that can be entered for a credit are
+  listed. Read their probability of profit with care: about 65% is typical, and
+  most of that is the chance of keeping the small credit, not of the large
+  payoff. A put backspread usually scores higher than the call backspread on
+  the same stock; that comes from how the score treats a stock falling to zero
+  and does not make it the better trade.</li>
 </ul>
 <p>Expect some families to be thin. A short straddle almost never clears the quality
 bar, diagonals rarely do this close to expiry, and whether a butterfly or condor
@@ -2469,7 +2484,7 @@ Captured signals do <strong>not</strong> add to the Rescue nav badge (that count
 <p><strong>Route:</strong> <code>/options/swing</code>. Its own row on the main menu, directly under the
 Options group — it has no tab strip.</p>
 <p>A focused, on-demand scan for one symbol. It builds every strategy it can for that
-symbol — seven groups, always all of them — on <strong>every expiration</strong> in your range,
+symbol — eight groups, always all of them — on <strong>every expiration</strong> in your range,
 across the whole option chain, and ranks them on one score. The page reads top to
 bottom: the scan bar, a summary of the scan, strategy chips, up to four
 top picks, and the full ranked list.</p>
@@ -2683,7 +2698,7 @@ for $SPX.</em></p>
 <li>Click a chip to show <strong>only</strong> that group; click more chips to add them.</li>
 <li>Click a chosen chip again to remove it. Removing the last one — or clicking
   <strong>All</strong> — shows everything again.</li>
-<li>Chips <strong>filter instantly</strong>: every scan already built all seven groups, so nothing
+<li>Chips <strong>filter instantly</strong>: every scan already built all eight groups, so nothing
   is rescanned. The cards and the list both follow the chips.</li>
 <li>A new symbol starts back at <strong>All</strong>.</li>
 </ul>
@@ -2887,6 +2902,11 @@ contract.</p>
 <td><strong>Stock + options</strong></td>
 <td>covered call, protective put, collar</td>
 <td>one 100-share lot at today's price; the sold call at the middle of your call delta band, the bought put near 0.25 delta</td>
+</tr>
+<tr>
+<td><strong>Ratio spreads</strong></td>
+<td>call backspread, put backspread</td>
+<td>sell one option near 0.50 delta, buy two of the same kind near 0.30 delta further out, on the nearest expiration. Not built when it would cost more than a quarter of the distance between its strikes</td>
 </tr>
 </tbody>
 </table>

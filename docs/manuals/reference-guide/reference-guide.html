@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-06</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-07</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -3037,8 +3037,8 @@ moment after you stop.</p>
    re-pulls the same symbol. A landed chain lays the strategy on real strikes, prices
    every leg from the chain's mark, and implies the volatility from those prices.</li>
 <li><strong>Strategy</strong> — a cascading menu of templates: singles, verticals (credit and
-   debit), iron condors, butterflies (long and iron), calendars, diagonals, and
-   <strong>Stock + options</strong> (covered call, protective put, collar). Tag chips name the
+   debit), iron condors, butterflies (long and iron), calendars, diagonals,
+   backspreads, and <strong>Stock + options</strong> (covered call, protective put, collar). Tag chips name the
    cash-flow direction (<strong>credit</strong> or <strong>debit</strong>), the leg count and the lean; only the
    credit/debit chip is coloured, because the rest are descriptions rather than
    opinions. A one-line thesis says what the structure is betting on.</li>
@@ -3457,8 +3457,8 @@ never be confused.</p>
 </table>
 <p><strong>Two tables on 0-DTE and Swing.</strong> A switch at the top of each of those tabs
 chooses between <strong>Credit spreads</strong> and <strong>Other structures</strong>: debit spreads,
-straddles and strangles, butterflies and condors on both tabs, and calendars and
-diagonals on Swing. They are separate tables because they are scored on separate
+straddles and strangles, butterflies and condors and ratio backspreads on both
+tabs, and calendars and diagonals on Swing. They are separate tables because they are scored on separate
 scales (see <em>Where it is weak</em>, below). The family boxes above the Other
 structures table show and hide one kind at a time, and at most two of a family
 are listed per symbol.</p>
@@ -3494,6 +3494,10 @@ are listed per symbol.</p>
 <tr>
 <td>Calendar</td>
 <td>A quiet price now and richer volatility later. Two expirations.</td>
+</tr>
+<tr>
+<td>Backspread</td>
+<td>A large move in one direction. Sell one option, buy two further out.</td>
 </tr>
 </tbody>
 </table>
@@ -3972,6 +3976,19 @@ mid-morning less than half of that is left.</p>
 <p>Throughout the session.</p>
 <h3 id="caveats-and-gotchas_9">Caveats and gotchas</h3>
 <ul>
+<li><strong>A backspread's probability of profit flatters it.</strong> Only backspreads
+  entered for a credit are listed (one entered for a cost has about a one in
+  five chance and is cut). Their probability reads 63 to 69%, and most of that
+  is the price staying on the near side of the short strike, where the trade
+  keeps a small credit and nothing more. Measured on a fairly priced chain, a
+  call backspread collected about $40 against a worst case of about $260. Judge
+  it on what the large move would pay and how likely that is, not on the
+  probability column.</li>
+<li><strong>A put backspread scores higher than a call backspread, and that is the
+  score, not the trade.</strong> Its best case is the stock at zero, a real but
+  enormous number, so its reward to risk reads 40 to 100 and it scores 63 to 77
+  where the call scores 55 to 70. A long put outscores a long call on the
+  Directional tab for the same reason.</li>
 <li><strong>Some other structures are rarely or never listed, by design.</strong> A short
   straddle fails the probability bar on every fairly priced chain measured.
   Diagonals fail on reward this close to expiry. A short strangle is never listed
@@ -5039,6 +5056,10 @@ not what is built:</p>
 <tr>
 <td><strong>Stock + options</strong></td>
 <td>covered call, protective put, collar — each on one 100-share lot bought at spot</td>
+</tr>
+<tr>
+<td><strong>Ratio spreads</strong></td>
+<td>call and put backspread — short one option near the money, long two further out</td>
 </tr>
 </tbody>
 </table>

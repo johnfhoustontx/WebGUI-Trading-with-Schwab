@@ -240,8 +240,8 @@ fine; try again in a minute.
 Finds option trades across the watchlist and scores each one **0–100** for
 quality: **credit spreads** (you sell risk and collect cash up front), the
 **other structures** each scan can build (debit spreads, straddles and strangles,
-butterflies and condors, calendars), and single-leg directional trades on their
-own tab.
+butterflies and condors, calendars, ratio backspreads), and single-leg
+directional trades on their own tab.
 
 - **0-DTE / Swing / Directional** — the small tabs at the very top (under the page
   tabs): short-dated (0-4 days, NOT only today), days-to-weeks out, and single-leg
@@ -255,16 +255,27 @@ own tab.
   sound they are. A 75 on one is not a 75 on the other, which is why they are
   never in one list. The tab's own count adds both.
 - **The family boxes** above the Other structures table (*Debit spreads ·
-  Straddles and strangles · Butterflies and condors · Calendars*) show and hide
-  one kind at a time; a family with nothing today is not listed. Calendars
-  appear on Swing only. At most two of a family are listed per symbol.
+  Straddles and strangles · Butterflies and condors · Calendars · Ratio
+  spreads*) show and hide one kind at a time; a family with nothing today is
+  not listed. Calendars appear on Swing only. At most two of a family are listed
+  per symbol.
+- **Ratio spreads** are backspreads: sell one option near the money and buy two
+  further out. A call backspread pays on a large rise, a put backspread on a
+  large fall, and the worst case is the price finishing at the strike you
+  bought. Only the ones that can be entered for a credit are listed. Their
+  probability of profit looks high (about 65%) because most of it is the chance
+  of simply keeping that small credit; the large payoff is the unlikely part.
+  A put backspread usually scores higher than a call backspread on the same
+  stock. That is how the score treats a stock falling to zero, not a sign the
+  put side is the better trade.
 - **Earnings 10/29** beside a strategy means the trade would still be open
   through that company's earnings report. Only trades that **buy** premium are
   kept through a report, and they are marked this way; trades that sell premium
   through one are left out, as every credit spread is.
 - **Some other structures can be sent to the paper ledger and some cannot.**
   Debit spreads, butterflies and condors can. Straddles, strangles, the iron
-  butterfly and calendars are for analysis: send them to the Calculator instead.
+  butterfly, calendars and backspreads are for analysis: send them to the
+  Calculator instead.
 - **All three tabs fill only during regular hours (8:30–3:00 CT).** The scanner
   also runs at 8:00, 8:15, 3:00 and 3:15, but a scan that finishes outside the
   session holds every signal back — premarket and after-close quotes are not the
@@ -435,7 +446,7 @@ four top picks, and the full ranked list.
 - **Strategy chips** — one per group with its count, plus **All**. Click a chip
   to show only that group; click more to add them; click the last one off (or
   **All**) to see everything again. Chips filter instantly — nothing is
-  rescanned, because every scan builds all seven groups. A new symbol starts
+  rescanned, because every scan builds all eight groups. A new symbol starts
   back at All.
 - **Top picks** — up to four cards. Each group among what the chips show gets its
   best-scoring idea onto a card before any group gets a second, so four spreads
@@ -494,7 +505,7 @@ four top picks, and the full ranked list.
   arrives, check **System Status** and scan again. Results that land are always for
   the scan you asked for — same symbol, same settings.
 
-**The seven groups**
+**The eight groups**
 
 - **Directional** — long and short calls and puts. A short put is also the
   cash-secured put.
@@ -513,6 +524,10 @@ four top picks, and the full ranked list.
   money and buys a later-month strike about 0.70 delta in the money.
 - **Stock + options** — covered call, protective put and collar, each on 100
   shares bought at today's price.
+- **Ratio spreads** — the call and put backspread: sell one option near the
+  money (about 0.50 delta) and buy two further out (about 0.30 delta). Built
+  only when it can be entered for a credit or a small cost; one entered for a
+  cost rarely clears the quality bar.
 
 **What gets built, and what gets cut**
 
@@ -636,8 +651,8 @@ every change; the one button, **Rate my trade**, asks for a verdict.
   and the volatility is worked out from those prices the way ThinkorSwim does.
   **Load** re-pulls the same symbol for fresh quotes.
 - **Strategy** — pick a template (single, vertical, **iron condor**,
-  **butterfly**, **calendar/diagonal**, and under **Stock + options** the
-  **covered call**, **protective put** and **collar**). The chips say whether it
+  **butterfly**, **calendar/diagonal**, **backspread**, and under **Stock +
+  options** the **covered call**, **protective put** and **collar**). The chips say whether it
   takes in a **credit** or costs a **debit**, how many legs it has, and its lean;
   the line under the panel is the trade's thesis in one sentence.
 - **Expiry strip** — **every** expiration the symbol lists, out to the longest

@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-06</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-07</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -2224,6 +2224,11 @@ window (DTE 5–15), every structure that is not a credit spread
 <td>call and put calendar, call and put diagonal</td>
 <td>Swing</td>
 </tr>
+<tr>
+<td><code>RATIO</code></td>
+<td>call and put ratio backspread (since 2026-10-07)</td>
+<td>both</td>
+</tr>
 </tbody>
 </table>
 <p>The builders are the Strategy Finder's, with one difference: the Finder keeps
@@ -2307,6 +2312,16 @@ nine fairly priced synthetic chains (volatility 0.20, 0.28, 0.45; strike steps o
 <td>not built</td>
 <td>almost none</td>
 </tr>
+<tr>
+<td>Call backspread</td>
+<td>30 of 36</td>
+<td>22 of 27</td>
+</tr>
+<tr>
+<td>Put backspread</td>
+<td>22 of 35</td>
+<td>18 of 26</td>
+</tr>
 </tbody>
 </table>
 <p>The full tables and their parameters are in
@@ -2319,6 +2334,37 @@ score higher for it (the long straddle 64 against 53–56).</p>
 <p><strong>Cost.</strong> About 0.1 second per symbol on a dense synthetic chain
 (<code>tools/measure_structure_scan.py</code>), on the scan's own thread after the chains are
 fetched.</p>
+<p><strong>Ratio backspreads.</strong> <code>strategy_scanner.build_backspreads</code> sells one option
+nearest 0.50 delta and buys two of the same kind nearest 0.30 delta among the
+strikes beyond it, on the nearest expiration in the window. With strike distance
+<em>w</em> and net entry <em>n</em> (positive for a debit, negative for a credit, per share):</p>
+<pre><code>worst case (price at the long strike)  = (w + n) x 100 + commission
+far breakeven, call                    = long strike + (w + n)
+far breakeven, put                     = long strike - (w + n)
+near breakeven (credit entries only)   = short strike -/+ n      (call / put)
+</code></pre>
+<p>It is built only when the net is a credit under <em>w</em>, a debit of at most
+<code>[structures] backspread_max_debit_frac</code> (0.25) of <em>w</em>, or even money. A credit
+at or over <em>w</em> cannot occur on real quotes and is refused as a bad mark.</p>
+<p>Two scoring rules exist because of it:</p>
+<ul>
+<li><strong>The breakeven factor reads the far breakeven.</strong> <code>q_be</code> scores a directional
+  row on its nearest breakeven. A backspread entered for a credit has a nearer
+  one beside its short strike, where its loss zone begins, so the builder names
+  the far one (<code>target_breakeven</code>) and the factor reads that. No other structure
+  sets the field.</li>
+<li><strong>The reward gate.</strong> The <code>LONG</code> profile passes any trade whose profit is
+  unbounded. It used to detect one by "reward to risk undefined and a debit
+  paid"; it now also accepts <code>unbounded_profit</code>, because a call backspread
+  entered for a credit has unbounded profit and no debit.</li>
+</ul>
+<p>Backspreads use the <code>LONG</code> gate profile. Under <code>DEBIT</code> no call backspread is ever
+shown (0 of 63 in the measurement above) because its reward to risk is undefined.
+What the measurement showed: every backspread entered for a credit passed
+(probability of profit 63–69) and every one entered for a debit was cut (16–21,
+against a bar of 30). That 63–69 is mostly the chance of keeping the credit. The
+put version's best case is the stock at zero, so its reward to risk reads 40–100
+and it scores 63–77 against the call's 55–70.</p>
 <p>The rows are published as <code>structures_0dte</code> and <code>structures_swing</code> on
 <code>cache:options:scan</code> and the day union. They are not recorded to <code>signals.db</code>, not
 pushed to the phone, and not counted on the Opportunity Board.</p>

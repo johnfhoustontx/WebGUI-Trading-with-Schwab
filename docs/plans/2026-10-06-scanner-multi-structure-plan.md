@@ -10,11 +10,26 @@
 
 **Design:** [2026-10-06-scanner-multi-structure-design.md](2026-10-06-scanner-multi-structure-design.md). Read it first.
 
-**Status, 2026-10-06:** Phases 1 and 2 (Tasks 1 to 14) are built on branch
+**Status, 2026-10-07:** Phases 1, 2 and 3 (Tasks 1 to 20) are built on branch
 `claude/options-scanner-strategies-6033e7`. Not merged to `main`, not promoted.
-Phase 3 (the ratio backspread) and Phase 4 (capture) are not started. Three
-things were built differently from the task text below, each for a reason found
-while building:
+Phase 4 (capture) is not started. These things were built differently from the
+task text below, each for a reason found while building:
+
+- **Task 15:** nothing was added to `shared/structures.py`. Its sets describe
+  what the paper books hold, a backspread is in none of them, and every other
+  structure's name is a literal in its builder.
+- **Task 17:** a second scoring change was needed, in `_reward_metric`: the
+  LONG auto-pass keyed on a set debit, and a call backspread entered for a credit
+  has unbounded profit and none.
+- **Task 18:** the Finder's dispatch moved into `strategy_scanner.build_groups`,
+  because `compute.py` was at its line ceiling.
+- **Task 19:** the Calculator's Rate my trade and the public tools each keep a
+  list of template codes (`rate_trade.CALC_TO_SCORER`,
+  `shared.public_tools.STRUCTURE_CODES`); both gained the two backspreads, and a
+  rated backspread is finished by `strategy_scanner.finish_backspread`.
+- **Task 19, also:** the Rescue ad-hoc form shares the Strategy menu. It gates
+  unsupported templates already, but it also read a 1x2 by shape as a credit
+  spread; that is fixed with it.
 
 - **Task 2:** the sweep gained a `--scanner` mode with a pinned clock, not a
   `--min-front-dte` flag. An existing test pins the default sweep's exact output,
@@ -25,7 +40,7 @@ while building:
   Directional), not interleaved, so existing readers that index the first three
   keep their meaning.
 
-`services/options_svc/compute.py` is now exactly at its line ceiling (10,540).
+`services/options_svc/compute.py` is one line under its ceiling (10,525).
 Phase 4's service code must go in a sibling module.
 
 ---

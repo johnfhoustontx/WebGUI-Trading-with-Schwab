@@ -561,8 +561,8 @@ scale.
 tabs holds TWO tables behind a two-way `ui.toggle` (`scanner_structures.view_options`
 labels it *Credit spreads · N* / *Other structures · N*): the credit table,
 unchanged, and a table of everything else that scan builds — debit spreads,
-straddles and strangles, butterflies and condors (both tabs), calendars and
-diagonals (Swing only). Two tables, never one: the credit rows carry the premium
+straddles and strangles, butterflies and condors, and since 2026-10-07 ratio
+backspreads (both tabs), calendars and diagonals (Swing only). Two tables, never one: the credit rows carry the premium
 composite and the others the Fit + Quality score. The rows come from the day
 union's `structures_0dte` / `structures_swing` lists (`scanner.DAY_LISTS` is five
 lists; the first three keep their positions) through
@@ -576,8 +576,8 @@ no bus read. A tab's header counts both of its tables
 the Directional table's slots and `_select_dir` (one loop, `_n`, over
 `table_dir`, `table_x0`, `table_xs`) and add `_EARNINGS_SLOT` on the strategy
 cell. Paper follows `strategy_table._PAPER_TYPES`: debit verticals, butterflies
-and condors yes; straddles, strangles, the iron butterfly, calendars and
-diagonals no. **Why no trade?** has five cards — the three windows, then
+and condors yes; straddles, strangles, the iron butterfly, calendars,
+diagonals and backspreads no. **Why no trade?** has five cards — the three windows, then
 `STRUCT_0DTE` and `STRUCT_SWING` — and a bucket no symbol reports gets no chip
 (`funnel_view.reported`). The nav badge, the chime, the phone push and the
 Opportunity Board's scan count still count credit spreads (and, for the Board,

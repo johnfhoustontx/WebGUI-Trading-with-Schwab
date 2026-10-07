@@ -1340,6 +1340,7 @@ matrix) below it. It wears its own near-black palette rather than the app-wide n
 - **Strategy** — a cascading menu of templates: **Single** (long/short call/put),
   **Credit spread** and **Debit spread** (call/put), **Condor** (iron, all-call,
   all-put), **Butterfly** (call, put, iron), **Calendar** and **Diagonal** (call/put),
+  **Backspread** (call/put: sell one, buy two further out),
   and **Stock + options** (**covered call**, **protective put**, **collar** — the
   three that need shares; see the note below). Tag chips beside it say whether the
   structure takes in a **credit** or costs a **debit**, how many legs it has, and
@@ -1655,6 +1656,7 @@ structures** at the top of either tab to see the rest:
 | **Straddles and strangles** | long and short straddle, long and short strangle | both |
 | **Butterflies and condors** | call and put butterfly, iron butterfly, call and put condor | both |
 | **Calendars** | call and put calendar, call and put diagonal | Swing |
+| **Ratio spreads** | call backspread, put backspread | both |
 
 1. Click **Other structures**. The number beside each side of the switch is how
    many rows it holds, and the tab's own count adds both.
@@ -1677,8 +1679,17 @@ Four things to know:
   through that earnings report. Only trades that *buy* premium are kept through a
   report, and they are marked. Trades that sell premium through one are left out.
 - **Paper trade is offered for debit spreads, butterflies and condors.**
-  Straddles, strangles, the iron butterfly, calendars and diagonals are for
-  analysis; send them to the Calculator.
+  Straddles, strangles, the iron butterfly, calendars, diagonals and
+  backspreads are for analysis; send them to the Calculator.
+- **A backspread sells one option near the money and buys two further out.**
+  The call version pays on a large rise and the put version on a large fall.
+  The most it can lose is at the strike you bought, and that figure is the
+  **Max L** column. Only backspreads that can be entered for a credit are
+  listed. Read their probability of profit with care: about 65% is typical, and
+  most of that is the chance of keeping the small credit, not of the large
+  payoff. A put backspread usually scores higher than the call backspread on
+  the same stock; that comes from how the score treats a stock falling to zero
+  and does not make it the better trade.
 
 Expect some families to be thin. A short straddle almost never clears the quality
 bar, diagonals rarely do this close to expiry, and whether a butterfly or condor
@@ -2109,7 +2120,7 @@ log.
 Options group — it has no tab strip.
 
 A focused, on-demand scan for one symbol. It builds every strategy it can for that
-symbol — seven groups, always all of them — on **every expiration** in your range,
+symbol — eight groups, always all of them — on **every expiration** in your range,
 across the whole option chain, and ranks them on one score. The page reads top to
 bottom: the scan bar, a summary of the scan, strategy chips, up to four
 top picks, and the full ranked list.
@@ -2250,7 +2261,7 @@ One chip per strategy group, each with how many ideas it holds, plus **All**.
 - Click a chip to show **only** that group; click more chips to add them.
 - Click a chosen chip again to remove it. Removing the last one — or clicking
   **All** — shows everything again.
-- Chips **filter instantly**: every scan already built all seven groups, so nothing
+- Chips **filter instantly**: every scan already built all eight groups, so nothing
   is rescanned. The cards and the list both follow the chips.
 - A new symbol starts back at **All**.
 
@@ -2369,6 +2380,7 @@ contract.
 | **Butterflies & condors** | call butterfly, put butterfly, iron butterfly, call condor, put condor | body at the money; wings the same distance either side, the listed distance nearest half the expected move. A condor's shorts sit one wing out, its longs two |
 | **Calendars** | call and put calendar, call and put diagonal | calendar: same at-the-money strike, near month short, later month long. Diagonal: short the near month near 0.30 delta out of the money, long the later month near 0.70 delta in the money |
 | **Stock + options** | covered call, protective put, collar | one 100-share lot at today's price; the sold call at the middle of your call delta band, the bought put near 0.25 delta |
+| **Ratio spreads** | call backspread, put backspread | sell one option near 0.50 delta, buy two of the same kind near 0.30 delta further out, on the nearest expiration. Not built when it would cost more than a quarter of the distance between its strikes |
 
 Things worth knowing before you read the results:
 

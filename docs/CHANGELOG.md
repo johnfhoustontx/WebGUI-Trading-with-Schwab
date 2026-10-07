@@ -4,7 +4,62 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-06 (**The Market Scanner builds more than credit spreads: debit spreads, straddles and strangles, butterflies and condors, calendars.**)
+**Last updated:** 2026-10-07 (**Ratio backspreads on the Market Scanner, the Strategy Finder and the Calculator.**)
+
+- **What it is.** A fifth family, **Ratio spreads**, on the Scanner's Other
+  structures tables and an eighth group on the Strategy Finder: the call
+  backspread and the put backspread (sell one option near 0.50 delta, buy two of
+  the same kind near 0.30 delta further out). The Calculator and Simulator gain a
+  **Backspread** entry in the Strategy menu, so Send to Calculator opens the
+  structure under its own name. Phase 3 of
+  `docs/plans/2026-10-06-scanner-multi-structure-{design,plan}.md`. Analysis
+  only: no Paper button, and nothing is recorded.
+- **The pieces.**
+  - `strategy_scanner.build_backspreads`. Not built when the net is a credit at
+    or over the strike distance (a bad mark) or a debit over `[structures]
+    backspread_max_debit_frac` (0.25, new, in Settings → Configuration). It sets
+    two fields the shared payoff code cannot: `capital` is the max loss (it would
+    otherwise be a margin estimate, because a call backspread is flagged
+    unbounded for its profit), and `target_breakeven` is the far breakeven.
+  - **Two scoring changes, both needed for this structure and neither moving any
+    other.** `q_breakeven_vs_em` reads `target_breakeven` when a row names one:
+    a backspread entered for a credit has a nearer breakeven where its loss zone
+    begins, and scoring that one would reward the trade for sitting beside its
+    own loss. `_reward_metric`'s LONG auto-pass now recognises unbounded profit
+    entered for a credit. Both sweeps were compared before and after: every
+    existing structure's score and grade is unchanged.
+  - **Gate profile `LONG`, by measurement.** Under `DEBIT` no call backspread is
+    ever shown (0 of 63 cells); under `LONG` 52 of 63 are.
+  - `strategy_scanner.build_groups` is now the one dispatch for the build groups
+    that take the scan window as it is. `compute.swing_scan` spelled those calls
+    out twice; it reads the dispatch instead, which is how the Finder gained the
+    group while `compute.py` shrank by 16 lines (its ceiling is lowered to match).
+  - `webgui/pages/options/strategies.py`: two templates, a `Backspread` menu
+    family and a `Ratio spreads` group.
+  - **Rate my trade.** `rate_trade.CALC_TO_SCORER` and
+    `shared.public_tools.STRUCTURE_CODES` each list the Calculator's template
+    codes; `test_cross_tier_mirrors` caught both missing the new two. A rated
+    backspread goes through `strategy_scanner.finish_backspread`, the function
+    the builder uses, so it is scored on the same breakeven with the same
+    capital as a scanned one.
+- **What the measurement showed, and the reader should know.** Only backspreads
+  entered for a **credit** clear the quality bar (probability of profit 63–69);
+  every one entered for a debit is cut (16–21 against 30). That 63–69 is mostly
+  the chance of keeping a small credit, about $40 against a worst case of about
+  $260 on the measured chain. And the put version scores higher than the call
+  version (63–77 against 55–70) because its best case is the stock at zero. The
+  hover guide and both end-user manuals say both things. No bar was moved.
+- **A defect found on the way, and fixed.** The Rescue ad-hoc form reads a
+  two-leg structure by its shape. It never compared the legs' quantities, so a
+  1×2 entered there was read as a credit spread of one contract and its second
+  long ignored, although the function's own docstring said a ratio was an error.
+  It now refuses legs of unequal quantity with a sentence saying why. Butterflies
+  (1-2-1) are read before that check and are unaffected.
+- **Verification.** Unit suites; the Calculator's own compute path was run on a
+  call backspread and agreed with the scanner's builder on max loss, both
+  breakevens and probability of profit. Not promoted.
+
+**Prior —** 2026-10-06 (**The Market Scanner builds more than credit spreads: debit spreads, straddles and strangles, butterflies and condors, calendars.**)
 
 - **What it is.** The 0-DTE and Swing tabs each hold two tables behind a switch:
   **Credit spreads**, unchanged, and **Other structures** — bull call and bear put
