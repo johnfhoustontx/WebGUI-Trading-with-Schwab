@@ -10,6 +10,24 @@
 
 **Design:** [2026-10-06-scanner-multi-structure-design.md](2026-10-06-scanner-multi-structure-design.md). Read it first.
 
+**Status, 2026-10-06:** Phases 1 and 2 (Tasks 1 to 14) are built on branch
+`claude/options-scanner-strategies-6033e7`. Not merged to `main`, not promoted.
+Phase 3 (the ratio backspread) and Phase 4 (capture) are not started. Three
+things were built differently from the task text below, each for a reason found
+while building:
+
+- **Task 2:** the sweep gained a `--scanner` mode with a pinned clock, not a
+  `--min-front-dte` flag. An existing test pins the default sweep's exact output,
+  and probability of profit reads the time of day.
+- **Tasks 4, 6, 7:** the cap is `max_per_family`, per family (see the note at the
+  top of Phase 2).
+- **Task 11:** the two new funnel buckets are APPENDED to `FUNNEL_BUCKETS` (after
+  Directional), not interleaved, so existing readers that index the first three
+  keep their meaning.
+
+`services/options_svc/compute.py` is now exactly at its line ceiling (10,540).
+Phase 4's service code must go in a sibling module.
+
 ---
 
 ## Before you start
