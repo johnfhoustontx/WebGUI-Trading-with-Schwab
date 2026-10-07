@@ -800,18 +800,26 @@ def _kv(label, value, color=None):
 # the short leg's implied volatility. The underlying's ATM volatility and its
 # rank are not among them.
 _CONTRACT_GREEKS = ("short_delta", "net_theta", "net_vega", "short_iv")
+# The two the public origin never prints, whatever the quotes switch says: the
+# public Calculator's rule (``tools_public.ROW_NEVER`` in options_svc), kept
+# here so turning the switch on for a bid, an ask and a delta adds nothing more.
+_NEVER_PUBLIC = ("net_theta", "net_vega")
 
 
 def _build_cards(s):
     """Contract, then economics, then collapsed detail — reject/verify/explore.
 
-    On the public origin, while the site's quotes switch is off
-    (``checks_feed.quotes_withheld``), the panel is built from a copy of the
-    signal without its per-contract Greeks and draws no Greeks section - the
-    rule the public Calculator and Simulator already keep."""
+    On the public origin the panel is built from a COPY of the signal without
+    the figures that origin does not print: theta and vega always
+    (``_NEVER_PUBLIC``), and every per-contract Greek while the site's quotes
+    switch is off (``checks_feed.quotes_withheld``), when it draws no Greeks
+    section at all. ⚠ This is the panel the public Calculator's rating draws
+    too (``calc_live``), so the rule reaches both screens."""
     withheld = checks_feed.quotes_withheld()
     if withheld:
         s = {k: v for k, v in s.items() if k not in _CONTRACT_GREEKS}
+    elif _shell.is_public():
+        s = {k: v for k, v in s.items() if k not in _NEVER_PUBLIC}
     # 1 — THE CONTRACT. What you would actually place, as instructions. This is
     # first because a signal you cannot identify is one you cannot act on, and
     # the old panel buried the strikes in a "Strikes" key/value row.

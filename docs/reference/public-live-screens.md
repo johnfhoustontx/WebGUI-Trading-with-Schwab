@@ -194,11 +194,21 @@ enforced:
 - **No Max contracts row and no dollar figure for the per-trade cap** in "Why
   no trade?" (`funnel_cards(public=True)` reads the entry without
   `max_risk_dollars`). Both are the owner's risk limit.
-- **The quotes switch applies.** While `public_scan.show_leg_quotes` is off
-  (`checks_feed.quotes_withheld`), the panel is built without the per-contract
-  Greeks and the checklist is judged without `friction_pct`, so the
-  cost-to-trade line reads as not measured. That is the rule the public
-  Calculator and Simulator already keep, on the same switch.
+- **The quotes switch applies, to what it names.** While
+  `public_scan.show_leg_quotes` is off (`checks_feed.quotes_withheld`), the
+  panel is built without the per-contract Greeks (`detail._CONTRACT_GREEKS`)
+  and draws no Greeks section, and the checklist is judged without
+  `friction_pct`, so the cost-to-trade line reads as not measured. Theta and
+  vega are never printed on this origin, switch on or off
+  (`detail._NEVER_PUBLIC`, the Calculator's `tools_public.ROW_NEVER`).
+  `detail._build_cards` is also the public Calculator's rating panel, so both
+  rules reach that screen.
+  ⚠ **It does not withhold everything a quote feeds.** A credit spread's PoP is
+  one minus its short delta, and a single-leg row's Debit, Max loss and
+  breakeven are that option's own price. The public Finder prints the same
+  columns; Option Signals prints them for every watchlist symbol on every
+  scan, with no visitor action and no budget. Whether those follow the switch
+  is part of the open owner decision D2.
 
 ⚠ **Every visitor draws from ONE build.** The day union reaches about 4.5 MB by
 the close, and the private page gives each tab its own parse and its own five
@@ -206,9 +216,18 @@ thousand row dicts. On this origin `_read_and_build_shared` reads each scan
 view through a version-gated copy of its own (`scanner._shared_view`) and
 takes the built rows from `scanner_shared.get`: one slot for the process, keyed on the IDENTITY of the
 day union, the live scan, the regime and the calibration (each the same object
-until its view is republished), and rebuilt when it is
-`checks_feed.TABLE_REFRESH_SEC` old, which is what re-stamps against the
-Opportunity Board. ⚠ **What it returns is read-only, payloads and rows alike.**
+until its view is republished), plus a `stamp` compared by value (today's
+date, which the build gates the day union on and nothing republishes at
+midnight; and whether quote figures are withheld, which is baked into each
+row's chip), and rebuilt when it is HALF of `checks_feed.TABLE_REFRESH_SEC`
+old, which is what re-stamps against the Opportunity Board. ⚠ Half, not the
+whole: a build is stamped when it finishes, so with the limit equal to a tab's
+own tick the tab's next tick finds its build a few milliseconds under it and
+waits a second period (a review measured exactly that: ten minutes, not five).
+`scanner._shared_view` returns the object it already holds when `:ver` has
+moved ahead of the envelope (`Bus.cache_set` moves the counter first), or
+every visitor polling in that gap would build the old scan again.
+⚠ **What it returns is read-only, payloads and rows alike.**
 The page stamps nothing onto it: the selected row's accent goes on copies of
 the one page a visitor is sent (`scanner.page_rows`), and a re-stamp there is
 a fresh shared build rather than a per-tab copy of every row. A stamp on a

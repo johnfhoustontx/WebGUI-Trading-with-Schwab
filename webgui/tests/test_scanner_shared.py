@@ -147,3 +147,48 @@ def test_a_failed_rebuild_keeps_the_last_good_build_out_of_reach():
         scanner_shared.get(new, broken, max_age=300, now=clock)
     scanner_shared.get(new, build, max_age=300, now=clock)
     assert len(calls) == 2
+
+
+# ── the stamp: what identity cannot key on ───────────────────────────────────
+# Some of what a build reads is not an object the bus hands back: the date it
+# gates the day union on, and whether quote figures are withheld. Those ride in
+# ``stamp`` and are compared by VALUE.
+
+def test_an_equal_stamp_is_the_same_input():
+    build, calls = _counting()
+    parts = ({"date": "x"},)
+    clock = _Clock()
+    one = scanner_shared.get(parts, build, max_age=300, now=clock,
+                             stamp=("2026-10-07", True))
+    two = scanner_shared.get(parts, build, max_age=300, now=clock,
+                             stamp=("-".join(["2026", "10", "07"]), True))
+    assert one is two and len(calls) == 1
+
+
+def test_a_different_stamp_is_a_new_input():
+    build, calls = _counting()
+    parts = ({"date": "x"},)
+    clock = _Clock()
+    scanner_shared.get(parts, build, max_age=300, now=clock,
+                       stamp=("2026-10-07", True))
+    scanner_shared.get(parts, build, max_age=300, now=clock,
+                       stamp=("2026-10-08", True))
+    scanner_shared.get(parts, build, max_age=300, now=clock,
+                       stamp=("2026-10-08", False))
+    assert len(calls) == 3
+
+
+def test_a_tab_ticking_at_twice_the_age_limit_is_rebuilt_on_every_tick():
+    """The trap an age limit EQUAL to the tick walks into: a build is stamped
+    when it finishes, so the same tab's next tick finds it a few milliseconds
+    under the limit, is handed the old build, and waits a whole second period.
+    Callers pass half their tick."""
+    build, calls = _counting()
+    parts = ({"date": "x"},)
+    clock = _Clock()
+    tick, latency = 300.0, 0.02
+    seen = []
+    for _ in range(4):
+        seen.append(scanner_shared.get(parts, build, max_age=tick / 2, now=clock)["n"])
+        clock.t += tick - latency
+    assert seen == [1, 2, 3, 4]

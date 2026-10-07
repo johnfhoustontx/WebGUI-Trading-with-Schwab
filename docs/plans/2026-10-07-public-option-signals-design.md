@@ -34,8 +34,17 @@ public Calculator and Simulator turned out to withhold delta, theta and that
 cost line while the site's quotes switch (`public_scan.show_leg_quotes`, off
 pending Schwab's redistribution terms, roadmap decision D2) is off. Option
 Signals now follows the same switch: off, the panel draws no Greeks section and
-the cost-to-trade line reads as not measured; on, both come back. It publishes
-less than was approved, and the owner's existing switch reverses it.
+the cost-to-trade line reads as not measured; on, the cost line, delta and the
+short leg's IV come back. Theta and vega are never printed on the public
+origin, as on the public Calculator. It publishes less than was approved, and
+the owner's existing switch reverses it.
+
+**Open, and the owner's.** The switch withholds what it names, not everything
+a quote feeds: a credit spread's PoP is one minus its short delta, and a
+single-leg row's Debit, Max loss and breakeven are that option's own price.
+The public Finder prints the same columns on request; Option Signals prints
+them for every watchlist symbol on every scan. The code review raised it; it
+is part of roadmap decision D2.
 
 ## Approach
 
@@ -109,6 +118,14 @@ On the public origin the page takes its rows from a process-wide build:
   the two scan views (`scanner._shared_view`) and the checklist's gated reads
   hand back the same object until a view is republished, so there is no probe
   to race the payload it describes. The parse is shared too.
+- The age limit is HALF a tab's own tick, and the key carries a `stamp`
+  compared by value: today's date and whether quote figures are withheld. Both
+  came from the code review. With the limit equal to the tick a lone visitor's
+  board-fed checks were re-stamped every ten minutes, not five; and a build
+  made at 23:57 was served as today's at 00:01.
+- `scanner._shared_view` returns the object it already holds when the view's
+  counter has moved ahead of its envelope, so a visitor polling in that gap
+  does not trigger a rebuild of the old scan (also from the review).
 - Not `bus_client.read_shared`, which the first cut used. It keeps the 48 views
   read most recently, and the public Gamma page alone can read that many: a
   day union dropped between two visitors' reads comes back as a different

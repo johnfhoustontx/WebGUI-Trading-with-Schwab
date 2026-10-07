@@ -103,7 +103,13 @@ def quotes_withheld():
     redistribution terms are settled (roadmap decision D2). The public
     Calculator and Simulator draw no delta under it; the Market Scanner,
     published as Option Signals, follows the same switch rather than growing
-    one of its own. Always False on the private app."""
+    one of its own. Always False on the private app.
+
+    ⚠ It withholds what is NAMED here and in ``detail._CONTRACT_GREEKS``, not
+    everything a quote feeds. A credit spread's probability of profit is one
+    minus its short delta, and a single-leg row's debit is that option's own
+    price; the public Finder prints both, and so does Option Signals. Whether
+    they should follow this switch too is the owner's open decision (D2)."""
     import shell as _shell               # lazy, as in read_context
     if not _shell.is_public():
         return False

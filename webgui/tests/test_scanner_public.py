@@ -217,6 +217,68 @@ def test_the_shared_build_survives_a_busy_gamma_page(clean, published):
     assert scanner._read_and_build_shared() is first
 
 
+def test_a_counter_that_moved_ahead_of_its_payload_is_not_a_new_scan(
+        clean, published, monkeypatch):
+    """``Bus.cache_set`` moves ``:ver`` and then writes the envelope. A reader
+    in between probes N+1 and reads N: the scan it already holds. Handed a
+    fresh parse of it, the slot would build that old scan again for every
+    visitor who polled in the gap."""
+    _seed()
+    first = scanner._read_and_build_shared()
+    real = bus_client.read_version
+    monkeypatch.setattr(
+        bus_client, "read_version",
+        lambda view: (real(view) or 0) + 1 if view == "options:scan_day" else real(view))
+    assert scanner._read_and_build_shared() is first
+
+
+def test_a_build_made_before_midnight_is_not_served_as_todays(clean, published,
+                                                             monkeypatch):
+    """The build gates the day union on TODAY's date (``day_is_today``: "a
+    GATE, not decoration"). Nothing is republished at midnight, so the date has
+    to be part of what the build is keyed on."""
+    _seed()
+    first = scanner._read_and_build_shared()
+    assert first["have"] is True
+    monkeypatch.setattr(scanner, "today_ct", lambda: "2099-01-01")
+    second = scanner._read_and_build_shared()
+    assert second is not first
+    assert second["have"] is False
+    assert all(rows == [] for rows in second["rows"].values())
+
+
+def test_turning_the_quotes_switch_rebuilds_the_rows(clean, published, monkeypatch):
+    """The cost-to-trade line is baked into each row's chip and tooltip when
+    the rows are built. Withheld after the fact, it has to leave the table at
+    the next read, not when the build happens to age out."""
+    from shared import public_scan
+    monkeypatch.setattr(public_scan, "show_leg_quotes", lambda: True)
+    _seed(_day(_pcs_signal(friction_pct=18.0)))
+    shown = scanner._read_and_build_shared()
+    assert "18.00%" in shown["rows"]["signals_swing"][0]["_checks_tip"]
+    monkeypatch.setattr(public_scan, "show_leg_quotes", lambda: False)
+    withheld = scanner._read_and_build_shared()
+    assert withheld is not shown
+    assert "%" not in withheld["rows"]["signals_swing"][0]["_checks_tip"]
+
+
+def test_the_age_limit_is_half_a_tabs_own_tick(clean, published, monkeypatch):
+    """Each tab asks again every ``TABLE_REFRESH_SEC``. With the limit EQUAL to
+    that, the tab's next tick finds its own build a few milliseconds under it
+    and waits a second period (test_scanner_shared has the arithmetic)."""
+    asked = {}
+    real = scanner_shared.get
+
+    def _spy(parts, build, **kw):
+        asked.update(kw)
+        return real(parts, build, **kw)
+
+    monkeypatch.setattr(scanner_shared, "get", _spy)
+    _seed()
+    scanner._read_and_build_shared()
+    assert asked["max_age"] == checks_feed.TABLE_REFRESH_SEC / 2
+
+
 def test_a_new_scan_is_a_new_build(clean, published):
     _seed()
     first = scanner._read_and_build_shared()
@@ -393,6 +455,34 @@ def test_the_public_render_never_touches_the_seen_set(clean, published,
     _render()
     assert calls == []
     assert scanner._SEEN == before
+
+
+def _mark_selected_calls(monkeypatch):
+    calls = []
+    real = scanner.kit.mark_selected
+
+    def _spy(rows, row_id, **kw):
+        calls.append(row_id)
+        return real(rows, row_id, **kw)
+
+    monkeypatch.setattr(scanner.kit, "mark_selected", _spy)
+    return calls
+
+
+def test_the_private_render_marks_its_own_rows(clean, monkeypatch):
+    calls = _mark_selected_calls(monkeypatch)
+    _render()
+    assert calls, "the private page stopped marking its selected row"
+
+
+def test_the_public_render_never_stamps_the_rows_it_paints(clean, published,
+                                                           monkeypatch):
+    """``kit.mark_selected`` writes ``_selected`` onto the rows it is given,
+    and on the public origin those are every visitor's. The page paints at
+    build, so a call here would be a call on every repaint."""
+    calls = _mark_selected_calls(monkeypatch)
+    _render()
+    assert calls == []
 
 
 def test_the_public_render_probes_no_ledger_view(clean, published, monkeypatch):
@@ -621,3 +711,19 @@ def test_the_public_panel_draws_the_greeks_once_quotes_are_on(clean, monkeypatch
     _quotes(monkeypatch, True)
     sections, labels = _expansions(_pcs_signal(**_GREEK_SIGNAL))
     assert "Greeks" in sections and "-0.1800" in labels
+
+
+def test_the_private_panel_prints_theta_and_vega(clean, monkeypatch):
+    _quotes(monkeypatch, True)
+    _sections, labels = _expansions(_pcs_signal(**_GREEK_SIGNAL))
+    assert "0.021" in labels and "-0.040" in labels
+
+
+def test_the_public_panel_never_prints_theta_or_vega(clean, monkeypatch, published):
+    """The public Calculator never publishes them, switch on or off
+    (``tools_public.ROW_NEVER``). Turning the switch on for its bid, ask and
+    delta must not quietly add them here."""
+    _quotes(monkeypatch, True)
+    _sections, labels = _expansions(_pcs_signal(**_GREEK_SIGNAL))
+    assert "-0.1800" in labels, "the Greeks were not drawn - vacuous"
+    assert "0.021" not in labels and "-0.040" not in labels

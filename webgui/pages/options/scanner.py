@@ -749,10 +749,30 @@ def _reset_shared_reads():
 
 def _shared_view(view):
     """One scan view for the public origin, or ``_NO_VIEW`` when it is absent.
-    **Blocking** (a Redis read under the view's lock) and READ-ONLY."""
+    **Blocking** (a Redis read under the view's lock) and READ-ONLY.
+
+    ``bus_client.read_gated``'s own logic with one difference, and the
+    difference is the point. ``Bus.cache_set`` moves ``:ver`` and THEN writes
+    the envelope, so a reader in between probes N+1 and reads N. ``read_gated``
+    hands that reader a fresh parse - correct, but a different OBJECT from the
+    N this page already holds, and ``scanner_shared`` keys on identity: every
+    visitor polling in that gap would build the old scan again. Here a re-read
+    that turns out to be the version already held returns the held object.
+    Keyed on the ENVELOPE's version, never the probed one."""
+    memo = _SHARED_MEMOS[view]
     with _SHARED_LOCKS[view]:
-        payload, _changed = bus_client.read_gated(view, _SHARED_MEMOS[view])
-    return payload or _NO_VIEW
+        held = memo.get("state")
+        ver = bus_client.read_version(view)
+        if ver is not None and held is not None and held[0] == ver:
+            return held[1]
+        payload, env_ver = bus_client.read_full(view)
+        if env_ver is None or not payload:
+            memo.pop("state", None)              # an absent view is not kept
+            return _NO_VIEW
+        if held is not None and held[0] == env_ver:
+            return held[1]                       # the counter moved; the scan has not
+        memo["state"] = (env_ver, payload)
+        return payload
 
 
 def _read_and_build_shared():
@@ -765,7 +785,13 @@ def _read_and_build_shared():
     regime and calibration are the same objects until their views move, so
     those four identities are the build's key (``scanner_shared.get``). The
     Opportunity Board is not among them: it moves every minute, and the age
-    limit is what re-stamps against it, on the private page's own cadence.
+    limit is what re-stamps against it. That limit is HALF a tab's own tick
+    (see ``scanner_shared``), so a visitor's board-fed checks are rebuilt on
+    each of their ticks unless another visitor's build is under 150 s old.
+
+    Two things the build reads are not objects, and ride in the ``stamp``: the
+    date ``day_is_today`` gates on (nothing is republished at midnight) and
+    whether quote figures are withheld (baked into each row's chip).
 
     ⚠ What this returns is READ-ONLY, payloads and rows alike. The page stamps
     nothing onto it: no ``_new``, and the selected row's accent goes on a copy
@@ -777,7 +803,8 @@ def _read_and_build_shared():
     return scanner_shared.get(
         (day_env, live, ctx.get("regime"), ctx.get("calibration")),
         lambda: _build_populate(day_env, live, ctx, public=True),
-        max_age=checks_feed.TABLE_REFRESH_SEC)
+        stamp=(today_ct(), checks_feed.quotes_withheld()),
+        max_age=checks_feed.TABLE_REFRESH_SEC / 2)
 
 
 # Quasar reads ``rowsPerPage: 0`` as INFINITE, and NiceGUI's ui.table defaults to

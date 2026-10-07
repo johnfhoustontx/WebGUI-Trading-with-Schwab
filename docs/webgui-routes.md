@@ -567,7 +567,8 @@ written), and loads through `_read_and_build_shared` → `scanner_shared.get` (t
 scan views through `_shared_view`, the page's own version-gated copies, never
 `bus_client.read_shared`, whose 48-view limit the public Gamma page can fill), one
 build for the whole process keyed on the identity of the day union, the live
-scan, the regime and the calibration, and rebuilt when it is
+scan, the regime and the calibration, plus a `stamp` compared by value
+(today's date, whether quotes are withheld), and rebuilt when it is half of
 `checks_feed.TABLE_REFRESH_SEC` old. Those rows are shared and read-only: the
 selected row's accent goes on copies of the one page sent (`page_rows`), and a
 re-stamp there is a fresh shared build. `_build_populate(public=True)` closes

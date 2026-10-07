@@ -20,8 +20,22 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   (`config/finder_public.toml [display]`, off pending Schwab's redistribution
   terms) the panel draws no Greeks section and the checklist's cost-to-trade
   line reads "Bid-ask not measured", as on the public Calculator and Simulator.
-  This was not in the design as approved; it was found in the browser check and
-  follows the switch the other public tools already keep.
+  Theta and vega are never drawn there. This was not in the design as approved;
+  it was found in the browser check and follows the switch the other public
+  tools already keep. The same panel is the public Calculator's rating panel,
+  which therefore loses its (already empty) Greeks section while quotes are off.
+- **Open, and the owner's.** The switch does not cover everything a quote
+  feeds. A credit spread's PoP is one minus its short delta, and a single-leg
+  row's Debit, Max loss and breakeven are that option's own price. The public
+  Finder already prints those columns on request; this page prints them for
+  every watchlist symbol on every scan.
+- **From the code review, fixed before merge.** The shared build's age limit is
+  half a tab's tick (equal to it, a lone visitor's checks were re-stamped every
+  ten minutes, not five); the build is also keyed on today's date and on the
+  quotes switch (a build from 23:57 was served as today's at 00:01); a counter
+  that has moved ahead of its payload no longer triggers a rebuild of the old
+  scan; the scan views are read through the page's own copies, since
+  `bus_client.read_shared` drops all but the 48 views read most recently.
 - **How.** `scanner.render()` reads which origin it is from the process
   (`shell.is_public()`), so the `Screen` entry carries no `public=True` that
   could be left off. `checks_feed.read_context` refuses the ledger caps on the
