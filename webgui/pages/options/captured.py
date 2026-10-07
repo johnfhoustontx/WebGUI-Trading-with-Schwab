@@ -15,6 +15,11 @@ version changes; a second watch on ``options:captured_flags`` surfaces stop/targ
 hits as a toast when they land. The close dialog stays client-side (input
 collection only). Graceful-empty when the service is cold.
 
+Under the signals sits **Tracked structures**, read from
+``cache:options:tracked``: what the scanner recorded that is not a credit spread.
+Those rows are measured and never traded, so that section is read-only - no row
+there selects, closes or reaches the detail panel (``tracked_view.py``).
+
 Built on the page kit (``pages/ui_kit.py``, the 2026-09-19 consistency
 standard): the header line carries the Updated stamp, Refresh and Reprice now;
 the selected signal's buttons live in the detail panel's footer.
@@ -28,10 +33,10 @@ from nicegui import ui
 
 from pages.ui_guard import guard
 
-from . import detail, handoff
+from . import detail, handoff, tracked_view
 from .rescue import rescue_highlight
 from .theme import (BADGE_MUTED, BADGE_NEG, BADGE_POS, BADGE_WARN, EYEBROW,
-                    LABEL, THEME)
+                    LABEL, MUTED, THEME)
 
 # rescue_state values that mark a signal at-risk (tested/critical). Captured
 # signals are advisory-only and the manage-cycle rescue overlay only tags paper
@@ -388,6 +393,57 @@ def render():
                     f"border-t border-[{THEME['palette']['card_border']}]")
             detail_panel = detail.render()
 
+        # Tracked structures: measured, never traded. Read-only on purpose - a
+        # row here has no Close, no Paper and no detail panel.
+        kit.section_title("Tracked structures")
+        ui.label(tracked_view.EXPLAINER).classes(f"text-xs {MUTED}")
+        tracked_status = kit.status_line()
+        tracked_open = kit.table(tracked_view.open_columns(),
+                                 numeric=tracked_view.OPEN_NUMERIC)
+        tracked_open_empty = kit.empty(tracked_view.EMPTY_OPEN)
+        tracked_today = ui.column().classes("w-full gap-0.5")
+        kit.section_title("Tracked results by structure")
+        tracked_results = kit.table(tracked_view.result_columns(),
+                                    numeric=tracked_view.RESULT_NUMERIC)
+        tracked_results_empty = kit.empty(tracked_view.EMPTY_RESULTS)
+
+    _NOTES_SLOT = r'''
+      <q-td :props="props">
+        <q-badge v-for="n in props.row.notes" :key="n.text"
+                 :class="n.cls + ' mr-1'" :label="n.text"/>
+      </q-td>
+    '''
+    tracked_open.add_slot('body-cell-notes', _NOTES_SLOT)
+    tracked_results.add_slot('body-cell-notes', _NOTES_SLOT)
+    # Dollars per contract, coloured by sign; the row keeps the number to sort.
+    tracked_open.add_slot('body-cell-unrealized_pnl', r'''
+      <q-td :props="props">
+        <span :class="props.row._pnl_class + ' font-semibold'">
+          {{ props.row._pnl_text }}
+        </span>
+      </q-td>
+    ''')
+    tracked_open.add_slot('body-cell-status', r'''
+      <q-td :props="props">
+        {{ props.value }}
+        <q-tooltip v-if="props.row._reason">{{ props.row._reason }}</q-tooltip>
+      </q-td>
+    ''')
+    tracked_results.add_slot('body-cell-total_pnl', r'''
+      <q-td :props="props">
+        <span :class="props.row._pnl_class + ' font-semibold'">
+          {{ props.row._pnl_text }}
+        </span>
+      </q-td>
+    ''')
+    # The rows keep the numbers so the columns sort; the text is the builder's.
+    tracked_results.add_slot('body-cell-win_pct', r'''
+      <q-td :props="props">{{ props.row._win_text }}</q-td>
+    ''')
+    tracked_results.add_slot('body-cell-avg_r', r'''
+      <q-td :props="props">{{ props.row._r_text }}</q-td>
+    ''')
+
     # No selection checkbox: clicking a row selects it (detail panel + its action
     # footer) and the kit paints the row accent. The symbol cell keeps the
     # at-risk rescue tint (tested/critical); plain otherwise.
@@ -434,7 +490,7 @@ def render():
                             on_confirm=lambda: _confirm_close())
 
     # Last-seen bus cache versions for the fetch-free repaint/notify timers.
-    seen = {"captured": None, "flags": None}
+    seen = {"captured": None, "flags": None, "tracked": None}
 
     # One handle per footer figure; the labels come from ``footer_cells`` itself
     # so the pure builder stays the single source of the footer's wording.
@@ -483,6 +539,24 @@ def render():
         _paint_footer(cap.get("day"), sigs)
         n = len(table.rows)
         status.text = f"{n} open signal{'s' if n != 1 else ''}" if cap else ""
+
+    def _populate_tracked(payload):
+        """Paint the tracked section from ``cache:options:tracked``."""
+        tracked_status.text = tracked_view.status_text(payload)
+        tracked_open.rows = tracked_view.with_note_classes(
+            tracked_view.open_rows(payload))
+        tracked_open.update()
+        tracked_open.set_visibility(bool(tracked_open.rows))
+        tracked_open_empty.set_visibility(not tracked_open.rows)
+        tracked_results.rows = tracked_view.with_note_classes(
+            tracked_view.result_rows(payload))
+        tracked_results.update()
+        tracked_results.set_visibility(bool(tracked_results.rows))
+        tracked_results_empty.set_visibility(not tracked_results.rows)
+        tracked_today.clear()
+        with tracked_today:
+            for line in tracked_view.closed_today_lines(payload):
+                ui.label(f"Closed today: {line}").classes(f"text-xs {LABEL}")
 
     def _select(event):
         row = event.args[1] if isinstance(event.args, list) and len(event.args) > 1 else event.args
@@ -559,7 +633,9 @@ def render():
     # Initial paint from the bus cache (graceful-empty if the service is cold).
     seen["captured"] = bus_client.read_version("options:captured")
     seen["flags"] = bus_client.read_version("options:captured_flags")
+    seen["tracked"] = bus_client.read_version("options:tracked")
     _populate(bus_client.read("options:captured") or {})
+    _populate_tracked(bus_client.read("options:tracked") or {})
 
     @guard
     def _maybe_repaint():
@@ -570,6 +646,11 @@ def render():
         if version != seen["captured"]:
             seen["captured"] = version
             _populate(bus_client.read("options:captured") or {})
+
+        tv = bus_client.read_version("options:tracked")
+        if tv != seen["tracked"]:
+            seen["tracked"] = tv
+            _populate_tracked(bus_client.read("options:tracked") or {})
 
         fv = bus_client.read_version("options:captured_flags")
         if fv != seen["flags"]:
