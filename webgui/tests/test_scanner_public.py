@@ -415,3 +415,57 @@ def test_a_panel_built_without_actions_has_a_bare_footer(clean):
     assert "border-t" in full.actions._classes
     bare.update(_pcs_signal())               # still works with no buttons in it
     bare.clear()
+
+
+# ── "Why no trade?" ──────────────────────────────────────────────────────────
+
+def _funnel_payload():
+    """A Swing window where every width cost more than the per-trade cap, on an
+    entry that names the cap's figure (no publisher stamps it today; the
+    sentence gains it the day one does - ``funnel_view._cap_phrase``)."""
+    # The tally partitions, as ``screen_spreads`` promises: delta_pass ==
+    # mark_fail + delta_ceiling + em_fail + liq_fail_short + width_found
+    # + sum(width_reasons.values()).
+    strikes = {"expiration_sides_in_window": 4,
+               "expiration_sides_skipped_earnings": 0,
+               "delta_reject": 120, "delta_pass": 60,
+               "mark_fail": 2, "delta_ceiling": 5, "em_fail": 9,
+               "liq_fail_short": 6, "width_found": 0,
+               "strikes_dropped_no_delta": 0, "strikes_dropped_off_increment": 0,
+               "width_reasons": {"over_trade_cap": 38}}
+    spreads = {"built": 0, "momentum_veto": 0, "iron_condors": 0,
+               "kept_after_cap": 0, "regime_pass_added": 0, "regime_filter": 0,
+               "below_iv_floor": 0, "no_iv_history": 0, "gamma_gate": 0,
+               "outside_rth": 0, "emitted": 0}
+    entry = {"price": 178.42, "iv_rank": 41.0, "stop": None,
+             "max_risk_dollars": 750,
+             "buckets": {"SWING": {"chain": True, "strikes": strikes,
+                                   "spreads": spreads}}}
+    return {"timestamp": "2026-10-07T09:31:00-05:00", "symbols": {"MU": entry}}
+
+
+def _swing_headline(**kw):
+    cards = scanner.funnel_cards(_funnel_payload(), "MU", **kw)
+    return next(c["headline"] for c in cards if c["headline"].startswith("MU · Swing:"))
+
+
+def test_the_private_funnel_names_the_cap_figure_it_is_given():
+    assert "$750.00 per-trade risk cap" in _swing_headline()
+
+
+def test_the_public_funnel_never_names_the_owners_cap_figure():
+    """The per-trade limit is the owner's. The sentence still says a width cost
+    more than the cap; it does not say what the cap is."""
+    headline = _swing_headline(public=True)
+    assert "per-trade risk cap" in headline
+    assert "$" not in headline
+
+
+def test_the_public_funnel_does_not_change_the_payload_it_was_given():
+    payload = _funnel_payload()
+    scanner.funnel_cards(payload, "MU", public=True)
+    assert payload["symbols"]["MU"]["max_risk_dollars"] == 750
+
+
+def test_render_asks_for_the_public_funnel():
+    assert "public=_public" in inspect.getsource(scanner.render)

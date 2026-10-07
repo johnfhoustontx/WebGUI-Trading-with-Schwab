@@ -886,15 +886,23 @@ def funnel_chips(payload):
     return out
 
 
-def funnel_cards(payload, symbol, scan_timestamp=None):
+def funnel_cards(payload, symbol, scan_timestamp=None, *, public=False):
     """One card per bucket for one symbol, straight from ``funnel_view``.
 
     PURE. The entry is LOOKED UP here rather than handed in, so every absent
     case reaches ``bucket_card(None, …)`` — which says so in words — instead of
     the caller having to remember to.
+
+    ``public`` (the public origin) reads the entry without its
+    ``max_risk_dollars``: that is the owner's per-trade limit, and
+    ``funnel_view`` prints the figure whenever an entry carries one. The
+    sentence still says a width cost more than the cap. A copy - the payload is
+    the caller's.
     """
     symbols = payload.get("symbols") if isinstance(payload, dict) else None
     entry = symbols.get(symbol) if isinstance(symbols, dict) else None
+    if public and isinstance(entry, dict):
+        entry = {k: v for k, v in entry.items() if k != "max_risk_dollars"}
     note = funnel_view.stale_note(payload, scan_timestamp)
     return [funnel_view.bucket_card(entry, bucket, symbol=symbol, note=note)
             for bucket in FUNNEL_BUCKETS]
@@ -1416,7 +1424,7 @@ def render():
         funnel_box.clear()
         with funnel_box:
             for card in funnel_cards(funnel_state["payload"], funnel_sel.value,
-                                     funnel_state["scan_ts"]):
+                                     funnel_state["scan_ts"], public=_public):
                 with ui.column().classes(f"{CARD} w-full gap-1"):
                     ui.label(card["headline"]).classes(f"text-sm {LABEL}")
                     if card["note"]:
