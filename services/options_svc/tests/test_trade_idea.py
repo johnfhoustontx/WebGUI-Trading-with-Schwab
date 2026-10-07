@@ -190,9 +190,158 @@ def test_caption_names_everything_the_card_does():
         assert part in text
 
 
+# ── the Market Scanner's other structures ───────────────────────────────────
+# ``structures_0dte`` / ``structures_swing``, shaped like the rows prod's scan
+# carried on 2026-10-07: the directional row's shape (a ``legs`` list, money PER
+# CONTRACT) with more legs, and a QUANTITY on a butterfly's body and on a
+# backspread's bought side.
+def _legs(expiration, *specs):
+    return [{"kind": kind, "side": side, "strike": strike, "expiration": expiration,
+             "qty": qty} for side, qty, strike, kind in specs]
+
+
+def structure(**over):
+    """A bear put spread; ``over`` turns it into any other structure."""
+    row = {"id": "NFLX_BEAR_PUT_2026-10-09_70.0_68.0", "symbol": "NFLX",
+           "type": "BEAR_PUT", "group": "VERTICAL", "strategy_label": "Bear Put Spread",
+           "bias": "bearish", "expiration": "2026-10-09", "dte": 2,
+           "legs": _legs("2026-10-09", ("long", 1, 70.0, "put"), ("short", 1, 68.0, "put")),
+           "pop_pct": 49.4, "underlying_price": 69.08, "net_debit": 97.0,
+           "net_credit": None, "commission": 2.6, "composite_score": 78.9,
+           "grade": "Good", "earnings_date": "2026-10-20", "em_to_expiry": 2.192}
+    row.update(over)
+    return row
+
+
+def put_butterfly(**over):
+    return structure(**{
+        "id": "AAL_BUTTERFLY_PUT_2026-10-09_12.0_12.5_13.0", "symbol": "AAL",
+        "type": "BUTTERFLY_PUT", "group": "BUTTERFLY", "strategy_label": "Put Butterfly",
+        "bias": "neutral", "pop_pct": 45.3, "underlying_price": 12.745,
+        "legs": _legs("2026-10-09", ("long", 1, 12.0, "put"), ("short", 2, 12.5, "put"),
+                      ("long", 1, 13.0, "put")),
+        "net_debit": 16.0, "commission": 5.2, "composite_score": 69.4,
+        "earnings_date": "2026-10-22", **over})
+
+
+def put_backspread(**over):
+    """Entered for a $4 credit that commission all but takes: sell one, buy two."""
+    return structure(**{
+        "id": "META_PUT_BACKSPREAD_2026-10-09_725.0_720.0", "symbol": "META",
+        "type": "PUT_BACKSPREAD", "group": "RATIO", "strategy_label": "Put Backspread",
+        "pop_pct": 58.8, "underlying_price": 724.175,
+        "legs": _legs("2026-10-09", ("short", 1, 725.0, "put"), ("long", 2, 720.0, "put")),
+        "net_debit": None, "net_credit": 4.0, "commission": 3.9, "composite_score": 65.6,
+        "earnings_date": "2026-11-04", **over})
+
+
+def long_straddle(**over):
+    return structure(**{
+        "id": "PLTR_LONG_STRADDLE_2026-10-09_192.5_192.5", "symbol": "PLTR",
+        "type": "LONG_STRADDLE", "group": "STRADDLE", "strategy_label": "Long Straddle",
+        "bias": "neutral", "pop_pct": 50.7, "underlying_price": 191.575,
+        "legs": _legs("2026-10-09", ("long", 1, 192.5, "call"), ("long", 1, 192.5, "put")),
+        "net_debit": 584.0, "commission": 2.6, "composite_score": 61.0,
+        "earnings_date": "2026-11-02", **over})
+
+
+def short_strangle(**over):
+    return structure(**{
+        "id": "VZ_SHORT_STRANGLE_2026-10-09_47.0_45.0", "symbol": "VZ",
+        "type": "SHORT_STRANGLE", "group": "STRADDLE", "strategy_label": "Short Strangle",
+        "bias": "neutral", "pop_pct": 74.5, "underlying_price": 46.475,
+        "legs": _legs("2026-10-09", ("short", 1, 47.0, "call"), ("short", 1, 45.0, "put")),
+        "net_debit": None, "net_credit": 20.0, "commission": 2.6, "composite_score": 60.0,
+        **over})
+
+
+def call_calendar(**over):
+    return structure(**{
+        "id": "MRVL_CALENDAR_CALL_2026-10-16_280.0_280.0", "symbol": "MRVL",
+        "type": "CALENDAR_CALL", "group": "CALENDAR", "strategy_label": "Call Calendar",
+        "bias": "neutral", "expiration": "2026-10-16", "underlying_price": 280.91,
+        "legs": [{"kind": "call", "side": "short", "strike": 280.0,
+                  "expiration": "2026-10-16", "qty": 1},
+                 {"kind": "call", "side": "long", "strike": 280.0,
+                  "expiration": "2026-11-13", "qty": 1}],
+        "net_debit": 1020.0, "composite_score": 67.2, "earnings_date": None, **over})
+
+
+def _by_id(ideas):
+    return {i["id"]: i for i in ideas}
+
+
+def test_the_other_structures_tables_are_candidates_too():
+    scan = {"structures_0dte": [structure()], "structures_swing": [put_butterfly()],
+            "signals_directional": [long_call()]}
+    assert set(_by_id(T.candidates(scan))) == {
+        structure()["id"], put_butterfly()["id"], long_call()["id"]}
+
+
+def test_a_debit_spread_from_the_structures_table_is_per_contract():
+    idea = _by_id(T.candidates({"structures_0dte": [structure()]}))[structure()["id"]]
+    assert idea["label"] == "Bear Put Spread" and idea["bias"] == "bearish"
+    assert idea["max_loss"] == pytest.approx(99.6)          # the $97 debit + commission
+    assert idea["max_profit"] == pytest.approx(100.4)       # 2 wide x 100 - 99.60
+    assert idea["breakevens"] == [pytest.approx(69.0, abs=0.01)]
+
+
+def test_a_butterflys_body_counts_twice():
+    idea = _by_id(T.candidates({"structures_0dte": [put_butterfly()]}))[put_butterfly()["id"]]
+    assert [lg["qty"] for lg in idea["legs"]] == [1, 2, 1]
+    assert idea["max_loss"] == pytest.approx(21.2)          # the $16 debit + commission
+    assert idea["max_profit"] == pytest.approx(28.8)        # 0.50 wide x 100 - 21.20
+
+
+def test_a_backspread_is_bounded_and_a_long_straddle_keeps_its_unlimited_profit():
+    ideas = _by_id(T.candidates({"structures_swing": [put_backspread(), long_straddle()]}))
+    back = ideas[put_backspread()["id"]]
+    assert back["entry_cash"] == pytest.approx(0.1)         # $4.00 credit - $3.90
+    assert back["max_loss"] == pytest.approx(499.9)         # at the bought strike
+    straddle = ideas[long_straddle()["id"]]
+    assert straddle["max_profit"] is None
+    assert straddle["max_loss"] == pytest.approx(586.6)
+
+
+def test_an_unbounded_or_two_expiry_structure_is_never_a_candidate():
+    """A short strangle's loss has no bound and a calendar has no single expiry
+    payoff to draw: neither is posted, whatever it grades."""
+    scan = {"structures_swing": [short_strangle(grade="Strong"),
+                                 call_calendar(grade="Strong"), long_straddle()]}
+    assert set(_by_id(T.candidates(scan))) == {long_straddle()["id"]}
+
+
+def test_a_structure_held_through_a_report_is_not_posted():
+    """The scan KEEPS long premium through earnings and flags it; the post never
+    carries a trade that is open through a report."""
+    scan = {"structures_swing": [long_straddle(spans_earnings=True),
+                                 structure(earnings_date="2026-10-08")]}
+    assert T.candidates(scan) == []
+
+
+def test_the_other_structures_switch_leaves_them_out():
+    scan = {"structures_0dte": [structure()], "structures_swing": [put_butterfly()],
+            "signals_directional": [long_call()]}
+    assert set(_by_id(T.candidates(scan, other_structures=False))) == {long_call()["id"]}
+
+
+def test_the_caption_says_when_a_leg_trades_more_than_once():
+    """Without the quantity a backspread reads as a one-by-one spread."""
+    idea = _by_id(T.candidates({"structures_swing": [put_backspread()]}))[
+        put_backspread()["id"]]
+    text = T.caption(idea)
+    assert "-725P / +720P x2" in text
+    fly = T.caption(_by_id(T.candidates({"structures_0dte": [put_butterfly()]}))[
+        put_butterfly()["id"]])
+    assert "+12P / -12.5P x2 / +13P" in fly
+    assert " x" not in T.caption(T.normalize(long_call()))      # one of each: unchanged
+
+
 # ── the card ────────────────────────────────────────────────────────────────
 @pytest.mark.parametrize("row", [pcs(), long_put(), long_call(),
-                                 pcs(type="IC", call_short=775.0, call_long=780.0)])
+                                 pcs(type="IC", call_short=775.0, call_long=780.0),
+                                 structure(), put_butterfly(), put_backspread(),
+                                 long_straddle()])
 def test_the_card_renders_a_2x_16_by_9_png(row):
     Image = pytest.importorskip("PIL.Image")
     png = C.render_trade_idea_png(T.normalize(row), now=NOW)
@@ -336,6 +485,30 @@ def test_run_skips_when_nothing_is_eligible(pushes):
                                             signals_directional=[])})
     out = handlers.run_trade_idea(bus, "h1035", now=NOW)
     assert out["reason"] == "nothing eligible" and pushes == []
+
+
+def _structures_only():
+    return _scan(signals_swing=[], signals_directional=[], structures_0dte=[structure()],
+                 structures_swing=[])
+
+
+def test_run_posts_from_the_other_structures_tables(pushes):
+    bus = _Bus({"cache:options:scan": _structures_only()})
+    out = handlers.run_trade_idea(bus, "h1035", now=NOW)
+    assert out["status"] == "posted" and pushes == [structure()["id"]]
+
+
+def test_run_leaves_the_other_structures_out_when_their_switch_is_off(pushes, monkeypatch):
+    monkeypatch.setattr(push_notify, "trade_idea_config",
+                        lambda config=None: {"enabled": True, "other_structures": False})
+    bus = _Bus({"cache:options:scan": _structures_only()})
+    out = handlers.run_trade_idea(bus, "h1035", now=NOW)
+    assert out["reason"] == "nothing eligible" and pushes == []
+
+
+def test_the_other_structures_switch_ships_on():
+    from shared.notify import channels
+    assert channels._DEFAULTS["trade_idea"]["other_structures"] is True
 
 
 def test_run_does_nothing_when_disabled(monkeypatch):

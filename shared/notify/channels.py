@@ -77,6 +77,9 @@ _DEFAULTS = {
     # composite floor on top of them; `max_age_min` refuses a scan that old, since
     # a stalled scanner would otherwise post a trade priced off a moved market.
     # `min_dte` keeps a same-day expiry out of a post nobody can act on in time.
+    # `other_structures` also picks from the Market Scanner's Other structures
+    # tables (debit spreads, butterflies and condors, long straddles and
+    # strangles, backspreads); false = credit spreads and single options only.
     # `footer` is the one line of text under the card ("" for none).
     "trade_idea": {
         "enabled": True,
@@ -84,6 +87,7 @@ _DEFAULTS = {
         "min_score": 0,
         "max_age_min": 45,
         "min_dte": 1,
+        "other_structures": True,
         "footer": "neuralstrike.co",
     },
     # Per-category channel routing (see `discord_target`/`telegram_target` below).

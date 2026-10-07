@@ -13,6 +13,12 @@ two row shapes the scan carries into one:
   (``net_credit`` 0.26 means $26 a contract).
 * **directional rows** (``signals_directional``) carry a ``legs`` list and their
   money PER CONTRACT (``net_debit`` 2515.0 means $2,515).
+* **other structures** (``structures_0dte`` / ``structures_swing``: debit spreads,
+  butterflies and condors, straddles and strangles, backspreads) are the
+  directional shape with more legs, and a QUANTITY on a butterfly's body and a
+  backspread's bought side. Two of them never post: a calendar or diagonal has
+  no single expiry payoff to draw, and a short straddle or strangle has no
+  bound on its loss.
 
 ⚠ Risk, profit and breakevens are all read off ONE payoff function built from the
 legs and the net entry cash, never from the rows' own ``max_loss`` fields. The
@@ -44,6 +50,9 @@ DEFAULT_MAX_AGE_MIN = 45
 DEFAULT_MIN_DTE = 1
 
 _SCAN_LISTS = ("signals_0dte", "signals_swing", "signals_directional")
+#: The Market Scanner's "Other structures" tables. Read as well unless the
+#: ``trade_idea`` block's ``other_structures`` switch is off.
+STRUCTURE_LISTS = ("structures_0dte", "structures_swing")
 
 _CREDIT_TYPES = ("PCS", "CCS", "IC")
 
@@ -57,6 +66,15 @@ STRATEGY_LABELS = {
     "SHORT_PUT": "Short Put",
     "BULL_CALL": "Bull Call Spread",
     "BEAR_PUT": "Bear Put Spread",
+    "BUTTERFLY_CALL": "Call Butterfly",
+    "BUTTERFLY_PUT": "Put Butterfly",
+    "IRON_BUTTERFLY": "Iron Butterfly",
+    "CONDOR_CALL": "Call Condor",
+    "CONDOR_PUT": "Put Condor",
+    "LONG_STRADDLE": "Long Straddle",
+    "LONG_STRANGLE": "Long Strangle",
+    "CALL_BACKSPREAD": "Call Backspread",
+    "PUT_BACKSPREAD": "Put Backspread",
 }
 
 _CREDIT_BIAS = {"PCS": "bullish", "CCS": "bearish", "IC": "neutral"}
@@ -236,8 +254,11 @@ def days_to_expiry(expiration, today):
 
 
 def candidates(scan, *, grades=DEFAULT_GRADES, min_score=0.0, today=None,
-               min_dte=DEFAULT_MIN_DTE):
+               min_dte=DEFAULT_MIN_DTE, other_structures=True):
     """Every postable idea in the scan, unordered.
+
+    Read from the credit and Directional lists and, unless ``other_structures``
+    is off, from the two Other-structures lists.
 
     Postable = an eligible grade, at or above ``min_score``, drawable, not open
     through an earnings report, at least ``min_dte`` days to expiration (skipped
@@ -245,7 +266,7 @@ def candidates(scan, *, grades=DEFAULT_GRADES, min_score=0.0, today=None,
     A naked short's unlimited risk is a real trade but not one to publish as an
     idea with a dollar figure beside it."""
     out = []
-    for name in _SCAN_LISTS:
+    for name in _SCAN_LISTS + (STRUCTURE_LISTS if other_structures else ()):
         rows = (scan or {}).get(name) if isinstance(scan, dict) else None
         for row in rows if isinstance(rows, list) else []:
             if not isinstance(row, dict) or row.get("grade") not in grades:
@@ -329,11 +350,17 @@ def expiry_text(expiration):
     return f"{d:%b} {d.day}"
 
 
+def leg_text(leg):
+    """``+190C``, or ``-12.5P x2`` for a leg that trades more than once (a
+    butterfly's body, a backspread's bought side)."""
+    text = (f"{'+' if leg['side'] == 'long' else '-'}{strike_text(leg['strike'])}"
+            f"{leg['kind'][0].upper()}")
+    return f"{text} x{leg['qty']}" if leg["qty"] > 1 else text
+
+
 def caption(idea):
     """One plain-text line for Telegram and Discord beside the image."""
-    legs = " / ".join(
-        f"{'+' if lg['side'] == 'long' else '-'}{strike_text(lg['strike'])}{lg['kind'][0].upper()}"
-        for lg in idea["legs"])
+    legs = " / ".join(leg_text(lg) for lg in idea["legs"])
     bits = [f"{idea['symbol']} {idea['label']}", f"{expiry_text(idea['expiration'])} {legs}",
             f"Grade {idea['grade']}"]
     bits.append(f"Risk {money(idea['max_loss'])}")

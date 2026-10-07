@@ -60,6 +60,7 @@
     "min_score": 0,
     "max_age_min": 45,
     "min_dte": 1,
+    "other_structures": true,
     "footer": "neuralstrike.co"
   },
   "routes": {

@@ -98,6 +98,18 @@ def entry_facts(idea, *, approx=False, posted=None) -> dict:
 
 
 # ── The exit rules (config/trade_mgmt.toml, the same numbers the app trades) ──
+def _held_for_the_move(legs) -> bool:
+    """A structure whose profit keeps growing with the move AND that sells an
+    option to pay for it: the two backspreads. ``structure_marks.open_ended`` is
+    the one definition of the first half."""
+    import sys
+    if str(repo_paths.OPTIONS_SCANNER) not in sys.path:
+        sys.path.insert(0, str(repo_paths.OPTIONS_SCANNER))
+    import structure_marks
+    return (structure_marks.open_ended(legs)
+            and any(lg["side"] == "short" for lg in legs))
+
+
 def exit_levels(facts):
     """``(target, stop)`` in P&L dollars per contract; either may be None.
 
@@ -106,11 +118,15 @@ def exit_levels(facts):
     structure (signal_recommender._debit_target_base). Stop = ``stop_mult`` x the
     credit where the structure keeps its loss rules, or ``debit_stop_frac`` of the
     debit where one is set (it ships unset). The delta and time rules are not
-    modelled."""
+    modelled.
+
+    A backspread has NO target and is held to expiry, as the app's tracked rows
+    hold it (``structure_marks._target_base``): it is entered for a few dollars
+    either way, and half of that is not what the trade is for."""
     from shared import trade_mgmt
     rules = trade_mgmt.structure_rules(facts.get("type") or None)
     cash, legs = facts["entry_cash"], facts["legs"]
-    tp = _finite(rules.get("tp_frac"))
+    tp = None if _held_for_the_move(legs) else _finite(rules.get("tp_frac"))
     if cash >= 0:                                        # credit
         target = tp * cash if tp else None
         mult = _finite(rules.get("stop_mult"))

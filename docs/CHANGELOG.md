@@ -4,7 +4,46 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-07 (**The Market Scanner is on the public site, as Option Signals.**)
+**Last updated:** 2026-10-07 (**The hourly trade idea picks from the Scanner's Other structures too.**)
+
+- **Why.** Every one of the 36 ideas on `neuralstrike.co/ideas.html` (six posting
+  days) was a long put or a long call. The picker read the two credit-spread
+  lists and the Directional list; the credit lists are nearly empty (0 rows in
+  the 08:32 scan that day, 7 all of the day before), and it never read
+  `structures_0dte` / `structures_swing`.
+- **What changed.** `trade_idea.candidates` also reads the two Other-structures
+  lists, so a debit spread, a butterfly or condor, a long straddle or strangle
+  and a backspread can post, to X, Discord, Telegram and the site alike. The
+  rules are the ones already there: Good or Strong, at least one day to expiry,
+  not open through an earnings report, a bounded loss, one expiration. So a
+  short straddle or strangle and a calendar or diagonal still never post.
+- **The switch.** `"other_structures": true` in the `trade_idea` block of
+  `shared/notifications.json` (default on); `false` restores credit spreads and
+  single options only. It sits with the block's other selection settings
+  (`grades`, `min_score`, `min_dte`), which are not in a `config/*.toml`.
+- **The caption prints a quantity.** A leg that trades more than once reads
+  `-12.5P x2`. Without it a backspread's caption, X text and calendar title read
+  as a one-by-one spread. `tools/backfill_site_ideas.py` reads the suffix back.
+- **A backspread's result is held to expiry.** `site_ideas.exit_levels` took a
+  target of half the entry credit for anything entered for a credit: on a
+  backspread entered for $0.10 after commission that is a "win" of five cents
+  in the first minute. It now has no target and no stop, which is what the
+  tracked rows do (`structure_marks._target_base`). A new test drives every
+  other structure through both rule sets and fails if they part.
+- **Not changed.** The card renderer (it already drew a quantity per leg and up
+  to four legs), the pick order, the slots, the site page.
+- **To expect.** Debit spreads score 73 to 80 against the long options' 60s and
+  70s, and the pick prefers a structure different from the last post, so they
+  will take a good share of the hours. A put backspread's card prints a max
+  profit of the stock at zero ($71,500 on a $500 risk for META that morning),
+  as a long put's card already does.
+- **Verified** by running that morning's real prod rows (one of each structure)
+  through the picker, the caption, the X text, the card and the result model
+  locally. Not yet seen posting on prod.
+- **Tests.** `services/options_svc/tests/test_trade_idea.py`,
+  `test_site_idea_results.py`, `tools/tests/test_backfill_site_ideas.py`.
+
+**Prior —** 2026-10-07 (**The Market Scanner is on the public site, as Option Signals.**)
 
 - **What shipped.** `live.neuralstrike.co/signals`, titled Option Signals and
   first in the site's Tools menu on all seven pages. It is the Market Scanner's

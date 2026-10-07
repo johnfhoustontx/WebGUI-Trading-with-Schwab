@@ -99,6 +99,16 @@ def test_thousands_separators_and_the_new_year_rollover():
     assert f["legs"][0]["strike"] == 6600.0 and f["expiration"] == "2027-01-02"
 
 
+def test_a_caption_that_prints_a_quantity_rebuilds_it():
+    """A butterfly's body and a backspread's bought side are printed ``x2``."""
+    f = b.facts_from_caption("Trade idea: AAL Put Butterfly · Oct 9 +12P / -12.5P x2 / +13P · "
+                             "Grade Good · Risk $21 · Profit $29 · POP 45%", POST)
+    assert [(lg["side"], lg["strike"], lg["qty"]) for lg in f["legs"]] == [
+        ("long", 12.0, 1), ("short", 12.5, 2), ("long", 13.0, 1)]
+    assert f["type"] == "BUTTERFLY_PUT"
+    assert f["entry_cash"] == -21.0 and f["max_profit"] == 29.0
+
+
 def test_a_caption_whose_numbers_do_not_agree_is_not_measured():
     # a 1:2 ratio the caption cannot show: Risk disagrees with one-lot legs
     assert b.facts_from_caption("Trade idea: MU Put Credit Spread · Oct 9 -880P / +875P · "

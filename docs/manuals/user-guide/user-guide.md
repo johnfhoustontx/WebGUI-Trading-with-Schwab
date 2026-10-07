@@ -85,7 +85,14 @@ The app reads market data and your positions from Schwab, so you need:
   is silent on those channels. Once they are set, the app also posts one **trade idea**
   an hour during the regular session (08:35–14:35 CT): the best Strong or Good trade
   on the Market Scanner, drawn as an image with its legs, grade, risk, profit,
-  probability of profit and payoff chart. It skips an hour rather than post a weak,
+  probability of profit and payoff chart. It picks from every Scanner table: the
+  credit spreads, the Directional tab's single options, and the **Other structures**
+  (debit spreads, butterflies and condors, long straddles and strangles,
+  backspreads). Three kinds never post: a calendar or diagonal (two expirations,
+  so no single payoff to draw), a short straddle or strangle (no limit on the
+  loss), and anything that would be open through an earnings report. To go back to
+  credit spreads and single options only, set `"other_structures": false` in the
+  same block. It skips an hour rather than post a weak,
   stale or same-day trade. Turn it off with `"trade_idea": {"enabled": false}`.
   Which channels each kind of alert goes to is set in **Settings → General → Push
   notifications**, and the trade idea can also pop up as a **Google Calendar**

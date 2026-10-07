@@ -2883,7 +2883,8 @@ def run_trade_idea(bus, slot, now=None) -> dict:
     grades = tuple(block.get("grades") or trade_idea.DEFAULT_GRADES)
     ideas = trade_idea.candidates(
         scan, grades=grades, min_score=block.get("min_score") or 0,
-        today=now.date(), min_dte=block.get("min_dte", trade_idea.DEFAULT_MIN_DTE))
+        today=now.date(), min_dte=block.get("min_dte", trade_idea.DEFAULT_MIN_DTE),
+        other_structures=block.get("other_structures", True) is not False)
     result["candidates"] = len(ideas)
     idea = trade_idea.pick(ideas, posted, grades=grades)
     if idea is None:

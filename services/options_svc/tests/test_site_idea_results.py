@@ -92,6 +92,83 @@ def test_the_levels_follow_the_config(monkeypatch):
         pytest.approx(328.8), pytest.approx(246.6))
 
 
+# ── the Market Scanner's other structures ──────────────────────────────────
+# Figures from prod's scan of 2026-10-07, per contract with commission in.
+def _other(kind, legs, cash, max_profit, max_loss, spot):
+    return {"symbol": "X", "label": kind, "grade": "Good", "type": kind, "expiration": EXP,
+            "legs": [{"side": side, "kind": k, "strike": strike, "expiration": EXP, "qty": qty}
+                     for side, qty, strike, k in legs],
+            "entry_cash": cash, "max_loss": max_loss, "max_profit": max_profit, "spot": spot}
+
+
+_OTHER = {
+    "BEAR_PUT": _other("BEAR_PUT", (("long", 1, 70.0, "put"), ("short", 1, 68.0, "put")),
+                       -99.6, 100.4, 99.6, 69.08),
+    "BUTTERFLY_PUT": _other("BUTTERFLY_PUT", (("long", 1, 12.0, "put"), ("short", 2, 12.5, "put"),
+                                              ("long", 1, 13.0, "put")),
+                            -21.2, 28.8, 21.2, 12.745),
+    "IRON_BUTTERFLY": _other("IRON_BUTTERFLY",
+                             (("long", 1, 12.0, "put"), ("short", 1, 12.5, "put"),
+                              ("short", 1, 12.5, "call"), ("long", 1, 13.0, "call")),
+                             32.8, 32.8, 17.2, 12.745),
+    "LONG_STRADDLE": _other("LONG_STRADDLE", (("long", 1, 192.5, "call"),
+                                              ("long", 1, 192.5, "put")),
+                            -586.6, None, 586.6, 191.575),
+    "PUT_BACKSPREAD": _other("PUT_BACKSPREAD", (("short", 1, 725.0, "put"),
+                                                ("long", 2, 720.0, "put")),
+                             0.1, 71500.1, 499.9, 724.175),
+    "CALL_BACKSPREAD": _other("CALL_BACKSPREAD", (("short", 1, 725.0, "call"),
+                                                  ("long", 2, 730.0, "call")),
+                              5.1, None, 494.9, 724.175),
+    "CALL_BACKSPREAD for a debit": _other("CALL_BACKSPREAD", (("short", 1, 725.0, "call"),
+                                                              ("long", 2, 730.0, "call")),
+                                          -53.9, None, 553.9, 724.175),
+}
+
+
+@pytest.mark.parametrize("name", ["PUT_BACKSPREAD", "CALL_BACKSPREAD",
+                                  "CALL_BACKSPREAD for a debit"])
+def test_a_backspread_is_held_to_expiry(name):
+    """Half of a few dollars' credit is not what a backspread is for: closing it
+    there would book a win of cents on a trade opened for a large move."""
+    assert S.exit_levels(S.entry_facts(_OTHER[name], posted=POSTED)) == (None, None)
+
+
+def _tracked_code(idea, pnl):
+    """What the app's own tracked-row rule (``structure_marks.recommend``) does
+    with this structure at ``pnl`` dollars a contract."""
+    import sys
+
+    import repo_paths
+    if str(repo_paths.OPTIONS_SCANNER) not in sys.path:
+        sys.path.insert(0, str(repo_paths.OPTIONS_SCANNER))
+    import structure_marks
+    mp = idea["max_profit"]
+    row = {"strategy": idea["type"], "entry_credit": idea["entry_cash"] / 100.0,
+           "entry_max_profit": None if mp is None else mp / 100.0,
+           "legs_json": json.dumps(idea["legs"])}
+    return structure_marks.recommend(row, pnl)["code"]
+
+
+@pytest.mark.parametrize("name", sorted(_OTHER))
+def test_the_site_follows_the_same_levels_as_the_tracked_rows(name):
+    """The page says each idea is followed "under the app's own exit rules". For
+    the structures the app only TRACKS, those rules are ``structure_marks``'s, so
+    the two must close the same structure at the same profit and the same loss."""
+    idea = _OTHER[name]
+    target, stop = S.exit_levels(S.entry_facts(idea, posted=POSTED))
+    if target is None:
+        assert _tracked_code(idea, 1e9) == "HOLD"
+    else:
+        assert _tracked_code(idea, target + 0.01) == "TARGET_HIT"
+        assert _tracked_code(idea, target - 0.02) == "HOLD"
+    if stop is None:
+        assert _tracked_code(idea, -1e9) == "HOLD"
+    else:
+        assert _tracked_code(idea, -stop - 0.01) == "MONEY_STOP"
+        assert _tracked_code(idea, -stop + 0.02) == "HOLD"
+
+
 # ── the model ──────────────────────────────────────────────────────────────
 def test_the_entry_iv_reprices_the_entry():
     facts = S.entry_facts(_long_call(), posted=POSTED)

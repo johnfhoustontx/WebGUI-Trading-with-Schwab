@@ -54,7 +54,7 @@ def parse_caption(text):
     return symbol, label, grade.group(1) if grade else ""
 
 
-_LEG = re.compile(r"([+-])([\d,]+(?:\.\d+)?)([CP])\b")
+_LEG = re.compile(r"([+-])([\d,]+(?:\.\d+)?)([CP])\b(?: x(\d+))?")
 _MONEY = r"\$([\d,]+(?:\.\d+)?)"
 _RISK = re.compile(r"\bRisk " + _MONEY)
 _PROFIT = re.compile(r"\bProfit (?:" + _MONEY + r"|(Unlimited))")
@@ -71,11 +71,12 @@ def _money(text):
 def facts_from_caption(text, posted):
     """``site_ideas.entry_facts`` rebuilt from a ``trade_idea.caption`` line.
 
-    The caption prints each leg (``-880P / +875P``), the expiry (``Oct 9``) and the
-    whole-dollar Risk and Profit, but no quantity and no stock price. The entry cash
-    is solved from Risk; the rebuilt legs must then reproduce BOTH figures, or a leg
-    the caption could not show (a 1x2) would be measured wrong - so a disagreement
-    returns ``{}`` and the card shows no result. Marked ``approx``."""
+    The caption prints each leg (``-880P / +875P``, and ``+720P x2`` for a leg
+    that trades more than once), the expiry (``Oct 9``) and the whole-dollar Risk
+    and Profit, but no stock price. The entry cash is solved from Risk; the
+    rebuilt legs must then reproduce BOTH figures, or a leg read wrong would be
+    measured wrong - so a disagreement returns ``{}`` and the card shows no
+    result. Marked ``approx``."""
     from services.options_svc import site_ideas, trade_idea
     parts = (text or "").split(" · ")
     if len(parts) < 2 or not parts[0].startswith("Trade idea: "):
@@ -86,7 +87,8 @@ def facts_from_caption(text, posted):
     if mon not in _MONTHS or not day_text.isdigit() or not risk or not profit:
         return {}
     legs = [{"side": "long" if s == "+" else "short", "kind": "call" if k == "C" else "put",
-             "strike": _money(v), "qty": 1} for s, v, k in _LEG.findall(legs_text)]
+             "strike": _money(v), "qty": int(q or 1)}
+            for s, v, k, q in _LEG.findall(legs_text)]
     if not legs:
         return {}
     try:
