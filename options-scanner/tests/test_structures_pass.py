@@ -24,11 +24,15 @@ import scanner_engine  # noqa: E402
 import structure_scan  # noqa: E402
 
 # The scan fixture and its helpers live with the tests they were written for.
-# ``fake_client`` is a pytest fixture: importing the name is what registers it
-# here (read by pytest, not by this module).
-from tests.test_scanner_engine import (  # noqa: E402,F401
-    _AFTER_CLOSE, _FUNNEL_SYMBOLS, _PRE_OPEN, _boom, _per_symbol, _signal_ids,
-    fake_client)
+import tests.test_scanner_engine as _engine_tests  # noqa: E402
+from tests.test_scanner_engine import (  # noqa: E402
+    _AFTER_CLOSE, _FUNNEL_SYMBOLS, _PRE_OPEN, _boom, _per_symbol, _signal_ids)
+
+# ``fake_client`` is a pytest FIXTURE. Binding the name in this module is what
+# registers it here; it is read by pytest, never called from this file. An
+# assignment rather than an import, because every test below takes a parameter
+# of the same name and the lint gate reads that as redefining an import (F811).
+fake_client = _engine_tests.fake_client
 
 LISTS = (("structures_0dte", "STRUCT_0DTE"), ("structures_swing", "STRUCT_SWING"))
 OLD_LISTS = ("signals_0dte", "signals_swing", "signals_directional")
