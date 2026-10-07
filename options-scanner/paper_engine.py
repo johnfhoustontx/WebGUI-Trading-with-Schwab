@@ -99,7 +99,13 @@ ELIGIBLE_RECS = (None, "", "HOLD")
 # Scanner types this cycle must never auto-open, however eligible the signal
 # looks. They are TRACKED (marked, closed, fed to the nightly calibration) but
 # entered by hand only. See the refusal in run_entry_cycle for why.
-_NO_AUTO_ENTRY_TYPES = ("INCOME",)
+#
+# ``0DTE_STRUCT`` / ``SWING_STRUCT`` are the Market Scanner's structures that are
+# not credit spreads (straddles, butterflies, calendars, backspreads, the
+# Directional tab's single legs): recorded so their outcomes can be measured,
+# never traded here. The structure allow-list in run_entry_cycle is the second,
+# independent guard on the same door.
+_NO_AUTO_ENTRY_TYPES = ("INCOME", "0DTE_STRUCT", "SWING_STRUCT")
 
 
 #############################################
@@ -242,6 +248,14 @@ def run_entry_cycle(client, now_date, signals, broker=None, db_path=None):
         # PCS/CCS spreads that the sizer would accept without complaint. An
         # absent scanner_type still opens — that is every pre-C1 row.
         if str(sig.get("scanner_type") or "").strip().upper() in _NO_AUTO_ENTRY_TYPES:
+            continue
+        # Second guard, by STRUCTURE, and an allow-list: everything below - the
+        # sizer, the order, the fill check - is written for a credit spread or an
+        # iron condor. Anything else is not this cycle's to open, whatever type
+        # it was recorded under and however complete its fields look. Skipped
+        # WITHOUT an order row: nothing about the signal is the Account's
+        # business, and a REJECTED row would read as a trade it considered.
+        if not _structures.is_account_auto_entry(sig.get("strategy")):
             continue
         if not is_eligible(sig):
             continue

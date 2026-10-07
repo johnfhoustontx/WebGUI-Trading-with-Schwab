@@ -67,6 +67,16 @@ LEDGER_DEBIT = ("LONG_CALL", "LONG_PUT", "BULL_CALL", "BEAR_PUT",
 LEDGER_CREDIT = ("PCS", "CCS", "IC", "IRON_CONDOR")
 
 
+# The structures the paper ACCOUNT's entry cycle may open ON ITS OWN, from a
+# captured signal. An ALLOW-list on purpose: the cycle reads every open captured
+# signal, its sizer and its order are written for a credit spread or an iron
+# condor and nothing else, and the Market Scanner records other structures so
+# their outcomes can be studied. A structure added anywhere else in the app is
+# refused there by omission. ``IC`` only - ``IRON_CONDOR`` is the Strategy
+# Finder's spelling, and nothing captured carries it.
+ACCOUNT_AUTO_ENTRY = ("PCS", "CCS", "IC")
+
+
 def normalise(strategy) -> str:
     """A structure name in canonical form; ``""`` for anything absent."""
     return str(strategy or "").strip().upper()
@@ -86,6 +96,11 @@ def canonical(strategy) -> str:
     if name in COVERED_CALL:
         return COVERED_CALL[0]
     return name
+
+
+def is_account_auto_entry(strategy) -> bool:
+    """May the paper Account's entry cycle open this structure by itself?"""
+    return normalise(strategy) in ACCOUNT_AUTO_ENTRY
 
 
 def is_short_put(strategy) -> bool:

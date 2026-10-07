@@ -218,3 +218,21 @@ def test_every_ledger_debit_name_is_its_own_canonical_spelling():
     a structure the Paper button can send a table nobody reads."""
     for name in structures.LEDGER_DEBIT:
         assert structures.canonical(name) == name, name
+
+
+# ── what the paper ACCOUNT may open on its own (2026-10-07) ─────────────────
+
+def test_the_account_opens_only_the_three_credit_structures():
+    """An ALLOW-list: a structure added anywhere else in the app is refused by
+    the Account's entry cycle by omission, not by someone remembering to."""
+    assert structures.ACCOUNT_AUTO_ENTRY == ("PCS", "CCS", "IC")
+    for name in ("PCS", "ccs", " ic "):
+        assert structures.is_account_auto_entry(name), name
+
+
+@pytest.mark.parametrize("name", [
+    "LONG_STRADDLE", "SHORT_STRANGLE", "BUTTERFLY_CALL", "IRON_BUTTERFLY",
+    "CALENDAR_PUT", "CALL_BACKSPREAD", "BULL_CALL", "LONG_CALL", "SHORT_PUT",
+    "COVERED_CALL", "IRON_CONDOR", "", None, 5])
+def test_nothing_else_is_auto_entered(name):
+    assert structures.is_account_auto_entry(name) is False

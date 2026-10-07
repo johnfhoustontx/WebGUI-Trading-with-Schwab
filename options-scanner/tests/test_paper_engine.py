@@ -699,3 +699,82 @@ def test_an_equal_wing_condor_is_sized_exactly_as_before(tmp_path):
                        _FakeBroker(0.50), db)
     (pos,) = pdb.fetch_open_positions(db)
     assert (pos["quantity"], pos["max_loss_per"]) == (5, 50.0)
+
+
+# ── the Account never opens a TRACKED structure (2026-10-07) ────────────────
+# The Market Scanner records structures that are not credit spreads so their
+# outcomes can be studied. ``run_entry_cycle`` reads every open captured signal
+# with no type filter, so two independent guards stand between that record and
+# an order: the scanner TYPE, and the STRUCTURE.
+
+def _run_entry(tmp_path, sig):
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    db = str(tmp_path / "acct.db")
+    pdb.ensure_account(db, 25_000.0, "2026-06-03")
+    broker = _FakeBroker(price=0.48)
+    pe.run_entry_cycle(client=None, now_date="2026-06-03", signals=[sig],
+                       broker=broker, db_path=db)
+    return db, broker
+
+
+def _never_touched(db, broker, signal_id="s1"):
+    assert broker.calls == [], "the broker was asked to fill a tracked structure"
+    assert pdb.fetch_open_positions(db) == []
+    # No order row either: a REJECTED order would blacklist the signal id, and
+    # more to the point nothing about this signal is the Account's business.
+    assert pdb.has_order_for_signal(db, signal_id) is False
+    acct = pdb.get_account(db)
+    assert acct["buying_power_reserved"] == 0 and acct["cash"] == 25_000.0
+
+
+def test_a_plain_credit_spread_still_opens_through_both_guards(tmp_path):
+    """The control: the fixture really does open a position when nothing stops it."""
+    db, broker = _run_entry(tmp_path, _sig(scanner_type="SWING"))
+    assert len(broker.calls) == 1 and len(pdb.fetch_open_positions(db)) == 1
+
+
+@pytest.mark.parametrize("scanner_type", ["0DTE_STRUCT", "SWING_STRUCT",
+                                          "swing_struct", " 0DTE_STRUCT "])
+def test_the_type_guard_alone_refuses_a_tracked_row(tmp_path, scanner_type):
+    """Even one that LOOKS like a credit spread the sizer would accept."""
+    db, broker = _run_entry(tmp_path, _sig(scanner_type=scanner_type, strategy="PCS"))
+    _never_touched(db, broker)
+
+
+@pytest.mark.parametrize("strategy", [
+    "LONG_STRADDLE", "SHORT_STRANGLE", "BUTTERFLY_CALL", "IRON_BUTTERFLY",
+    "CONDOR_PUT", "CALENDAR_CALL", "DIAGONAL_PUT", "CALL_BACKSPREAD",
+    "BULL_CALL", "LONG_CALL", "SHORT_CALL", "IRON_CONDOR", "", None])
+def test_the_structure_guard_alone_refuses_anything_but_the_three(tmp_path, strategy):
+    """Under the ordinary scanner types, with every field the sizer reads."""
+    for scanner_type in ("SWING", "0DTE", None):
+        db, broker = _run_entry(tmp_path / str(scanner_type),
+                                _sig(scanner_type=scanner_type, strategy=strategy))
+        _never_touched(db, broker)
+
+
+def test_a_tracked_row_in_its_real_shape_is_refused_without_raising(tmp_path):
+    """No short_strike, no width, a NEGATIVE entry credit (a debit), a legs blob:
+    the shape the recorder writes. It must be skipped before anything reads it."""
+    row = {"signal_id": "x9", "symbol": "SPY", "strategy": "LONG_STRADDLE",
+           "scanner_type": "SWING_STRUCT", "short_strike": None, "long_strike": None,
+           "width": None, "expiration": "2026-06-30", "dte_at_entry": 9,
+           "entry_credit": -5.40, "entry_score": 99, "recommendation": None,
+           "legs_json": "[]"}
+    db, broker = _run_entry(tmp_path, row)
+    _never_touched(db, broker, "x9")
+
+
+def test_a_tracked_row_does_not_stop_the_credit_spread_after_it(tmp_path):
+    db = str(tmp_path / "acct.db")
+    pdb.ensure_account(db, 25_000.0, "2026-06-03")
+    broker = _FakeBroker(price=0.48)
+    tracked = _sig(signal_id="t1", scanner_type="SWING_STRUCT", strategy="BUTTERFLY_CALL")
+    pe.run_entry_cycle(client=None, now_date="2026-06-03",
+                       signals=[tracked, _sig(signal_id="c1", scanner_type="SWING")],
+                       broker=broker, db_path=db)
+    assert [o["signal_id"] for o in broker.calls] == ["c1"]
+
+
+def test_the_two_tracked_types_are_named_in_the_refusal_list():
+    assert {"INCOME", "0DTE_STRUCT", "SWING_STRUCT"} <= set(pe._NO_AUTO_ENTRY_TYPES)
