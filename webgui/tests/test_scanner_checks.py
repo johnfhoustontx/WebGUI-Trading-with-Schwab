@@ -183,10 +183,13 @@ def test_render_wires_the_switch_the_refresh_timer_the_probe_and_the_slots():
     assert "ui.timer(checks_feed.TABLE_REFRESH_SEC, _force_repaint)" in src
     assert "checks_feed.REFRESH_VIEWS" in src
     assert "bus_client.read_versions(_probe_views)" in src
-    for table in ("_t", "table_dir"):
+    for table in ("_t", "_n"):
         assert f"{table}.add_slot('body-cell-checks', _CHECKS_SLOT)" in src
-    # The loop over (table_0dte, table_swing) is where _t comes from.
+    # The loop over (table_0dte, table_swing) is where _t comes from, and the
+    # loop over the three tables of normalized rows - Directional and the two
+    # Other-structures tables (2026-10-06) - is where _n does.
     assert "for _t in (table_0dte, table_swing):" in src
+    assert "for _n in (table_dir, table_x0, table_xs):" in src
 
 
 def test_the_only_clear_tooltip_is_plain_words():

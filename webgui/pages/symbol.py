@@ -627,12 +627,17 @@ def context_band(ctx):
 
 # ── today: signals, flow ────────────────────────────────────────────────────
 _LIST_LABELS = {"signals_0dte": "0-DTE", "signals_swing": "Swing",
-                "signals_directional": "Directional"}
+                "signals_directional": "Directional",
+                # The Scanner's Other-structures lists, under the tab they sit on.
+                "structures_0dte": "0-DTE", "structures_swing": "Swing"}
+# The lists whose rows are the NORMALIZED candidate shape (a ``legs`` list),
+# which the credit-spread row builder cannot read.
+_NORMALIZED_LISTS = ("signals_directional", "structures_0dte", "structures_swing")
 
 
 def _display_rows(key, signals, setups):
     """One list's rows through the Market Scanner's own builders + stampers."""
-    if key == "signals_directional":
+    if key in _NORMALIZED_LISTS:
         rows = _scanner.directional_rows(signals)
     else:
         rows = _scanner.signal_rows(signals)

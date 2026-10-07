@@ -437,6 +437,42 @@ def test_a_dropped_signal_is_marked_stale_but_keeps_its_age():
     assert row["seen_since"] == "09:15 · 3x"
 
 
+def _structure(row_id="x1", structure="LONG_STRADDLE", label="Long Straddle"):
+    return {"id": row_id, "symbol": "MU", "type": structure, "group": "STRADDLE",
+            "family": "VOLATILITY", "strategy_label": label, "bias": "neutral",
+            "legs": [{"side": "long", "kind": "call", "strike": 170.0,
+                      "expiration": "2026-10-02"},
+                     {"side": "long", "kind": "put", "strike": 170.0,
+                      "expiration": "2026-10-02"}],
+            "expiration": "2026-10-02", "dte": 14, "composite_score": 55.0,
+            "grade": "Marginal", "net_debit": 640.0, "live": True,
+            "setup_key": "MU|LONG_STRADDLE|2026-10-02"}
+
+
+def test_the_band_lists_the_scanners_other_structures_under_their_tab():
+    """The Market Scanner's 0-DTE and Swing tabs also carry structures that are
+    not credit spreads, in two lists of their own. They are the normalized
+    shape - a ``legs`` list, no ``short_strike`` - so they must go through the
+    same builder the Directional rows do, never the credit one."""
+    env = _day_env()
+    env["structures_swing"] = [_structure()]
+    env["structures_0dte"] = [_structure("x0", "BULL_CALL", "Bull Call Spread")]
+    rows = {r["id"]: r for r in sp.signal_band("MU", env, TODAY)["rows"]}
+    assert set(rows) == {"s1", "x1", "x0"}
+    assert rows["x1"]["list"] == "Swing" and rows["x0"]["list"] == "0-DTE"
+    assert rows["x1"]["what"] == "Long Straddle"
+    # The legs, as the Scanner prints them - not a blank or a '?' strike pair.
+    assert rows["x1"]["strikes"] == "L 170.00C / L 170.00P"
+    assert rows["x1"]["score"] == 55.0
+
+
+def test_signals_for_reads_the_structure_lists():
+    env = _day_env()
+    env["structures_swing"] = [_structure()]
+    got = {s["id"]: s["list"] for s in sf.signals_for("MU", env, TODAY)}
+    assert got == {"s1": "signals_swing", "x1": "structures_swing"}
+
+
 # ── render: driven for real, with the bus faked ────────────────────────────
 # A render that raises, or that enqueues on the wrong coverage, is invisible to
 # the pure tests above. These build the page inside the test client, with

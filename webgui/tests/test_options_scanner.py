@@ -483,7 +483,8 @@ def test_read_and_build_builds_rows_off_loop(fresh_bus):
                    "signals_directional": []})
     bus.cache_set("cache:options:scan", {"timestamp": "x", "signals_0dte": []})
     built = scanner._read_and_build()
-    assert set(built["rows"]) == {"signals_0dte", "signals_swing", "signals_directional"}
+    assert set(built["rows"]) == {"signals_0dte", "signals_swing", "signals_directional",
+                                  "structures_0dte", "structures_swing"}
     assert built["live"]["timestamp"] == "x"
     assert isinstance(built["by_id"], dict)
 
@@ -846,19 +847,36 @@ def test_build_populate_dashes_the_columns_when_the_envelope_has_no_setups():
     assert row["seen_since"] == "—" and row["score_trend"] == "—"
 
 
-def test_the_trend_slot_is_registered_on_all_three_tables():
+def test_the_trend_slot_is_registered_on_all_five_tables():
     """``add_slot`` runs inside ``render()``, which no unit test reaches — so a
     table left off is invisible to every test here and surfaces only as one
     uncoloured tab in the browser. Pinned at SOURCE level, the same reflex as
     ``test_the_row_class_fn_still_binds_the_stamped_field`` uses for the kit's
     ``ROW_CLASS_FN``.
 
-    Two registrations, not three: the 0-DTE and Swing tables share one loop."""
+    Two registrations for five tables: the two credit tables share one loop
+    (``_t``) and the three tables of normalized rows - Directional and the two
+    Other-structures tables - share the other (``_n``). The loops' own table
+    lists are pinned too, or a table could drop out of one unnoticed."""
     import inspect
     src = inspect.getsource(scanner)
     assert src.count("add_slot('body-cell-score_trend', _TREND_SLOT)") == 2
     assert "_t.add_slot('body-cell-score_trend', _TREND_SLOT)" in src
-    assert "table_dir.add_slot('body-cell-score_trend', _TREND_SLOT)" in src
+    assert "_n.add_slot('body-cell-score_trend', _TREND_SLOT)" in src
+    assert "for _t in (table_0dte, table_swing):" in src
+    assert "for _n in (table_dir, table_x0, table_xs):" in src
+
+
+def test_every_table_is_wired_for_paging_and_clicks():
+    """Same reflex, for the two things a table left out of a loop silently
+    loses: its page requests and its row clicks."""
+    import inspect
+    src = inspect.getsource(scanner.render)
+    assert "for _key, _tbl in tables.items():\n        _wire_paging(_key, _tbl)" in src
+    for name in ("table_0dte", "table_swing", "table_dir", "table_x0", "table_xs"):
+        assert src.count(name) >= 2, name
+    assert '_n.on("rowClick", _select_dir)' in src
+    assert "_x.add_slot('body-cell-strategy_label', _EARNINGS_SLOT)" in src
 
 
 # ── the tables ship one page, not the day (audit PF-05) ─────────────────────
@@ -927,3 +945,82 @@ def test_the_page_keeps_its_own_pagination_and_reasserts_it_over_the_tables():
     assert "_show_page(key, table, paging[key])" in src          # the repaint
     assert "_show_page(key, table, table.pagination)" not in src
     assert "table.on_pagination_change(" in src                   # the re-assert
+
+
+# ── the Other-structures tables (structures_0dte / structures_swing) ────────
+_STRUCT_SIG = {"id": "SPY_LONG_STRADDLE_2026-11-06_500_500", "symbol": "SPY",
+               "type": "LONG_STRADDLE", "family": "VOLATILITY", "group": "STRADDLE",
+               "strategy_label": "Long Straddle", "bias": "neutral",
+               "legs": [{"side": "long", "kind": "call", "strike": 500,
+                         "expiration": "2026-11-06"},
+                        {"side": "long", "kind": "put", "strike": 500,
+                         "expiration": "2026-11-06"}],
+               "expiration": "2026-11-06", "dte": 7, "composite_score": 55,
+               "grade": "Marginal", "max_profit": None, "unbounded_profit": True,
+               "net_debit": 1080.0, "max_loss": 1082.6, "live": True}
+
+
+def test_the_day_lists_are_the_three_tabs_then_the_two_structure_lists():
+    """Appended: every reader that indexes the first three keeps its meaning."""
+    assert scanner.DAY_LISTS == ("signals_0dte", "signals_swing",
+                                 "signals_directional",
+                                 "structures_0dte", "structures_swing")
+
+
+def test_build_populate_builds_structure_rows_with_their_family():
+    day_env = {"date": scanner.today_ct(), "signals_0dte": [], "signals_swing": [],
+               "signals_directional": [],
+               "structures_0dte": [],
+               "structures_swing": [dict(_STRUCT_SIG, spans_earnings=True,
+                                         earnings_date="2026-11-04")]}
+    built = scanner._build_populate(day_env, {})
+    row = built["rows"]["structures_swing"][0]
+    assert row["symbol"] == "SPY" and row["_group"] == "STRADDLE"
+    assert row["group_label"] == "Straddles and strangles"
+    assert row["_earnings"] == "Earnings 11/04"
+    assert built["rows"]["structures_0dte"] == []
+    assert built["by_id"][_STRUCT_SIG["id"]]["type"] == "LONG_STRADDLE"
+    # The day-union and checklist stamps every other table's rows carry.
+    assert row["_stale"] is False and "seen_since" in row and "checks" in row
+
+
+def test_a_straddle_is_analysis_only_and_a_dropped_butterfly_cannot_be_booked():
+    fly = dict(_STRUCT_SIG, id="F1", type="BUTTERFLY_CALL", group="BUTTERFLY")
+    day_env = {"date": scanner.today_ct(),
+               "structures_swing": [_STRUCT_SIG, fly,
+                                    dict(fly, id="F2", live=False,
+                                         stale_since="2026-10-06T10:17:00")]}
+    rows = {r["id"]: r for r in
+            scanner._build_populate(day_env, {})["rows"]["structures_swing"]}
+    assert rows[_STRUCT_SIG["id"]]["_allow_paper"] is False   # D1: analysis only
+    assert rows["F1"]["_allow_paper"] is True
+    assert rows["F2"]["_allow_paper"] is False and rows["F2"]["_stale"] is True
+
+
+def test_a_day_union_from_before_the_lists_existed_paints_empty_tables():
+    day_env = {"date": scanner.today_ct(), "signals_0dte": [], "signals_swing": [],
+               "signals_directional": []}
+    built = scanner._build_populate(day_env, {})
+    assert built["rows"]["structures_0dte"] == []
+    assert built["rows"]["structures_swing"] == []
+
+
+def test_the_status_line_counts_the_structure_lists_as_live_signals():
+    live = {"signals_0dte": [{}], "signals_swing": [], "signals_directional": [{}],
+            "structures_0dte": [{}, {}], "structures_swing": [{}]}
+    assert scanner.status_line(live).startswith("5 live signals")
+
+
+def test_the_earnings_slot_shows_the_note_only_when_the_row_has_one():
+    assert 'v-if="props.row._earnings"' in scanner._EARNINGS_SLOT
+    assert ':label="props.row._earnings"' in scanner._EARNINGS_SLOT
+    assert "{{ props.value }}" in scanner._EARNINGS_SLOT
+    assert "style=" not in scanner._EARNINGS_SLOT
+
+
+def test_the_checklist_candidate_finds_a_structure_row():
+    day_env = {"date": scanner.today_ct(), "structures_swing": [_STRUCT_SIG]}
+    built = scanner._build_populate(day_env, {})
+    cand = scanner.checklist_candidate_for(_STRUCT_SIG["id"], built["by_id"],
+                                           built["rows"])
+    assert cand is not None

@@ -246,7 +246,7 @@ def position_rows(symbol, books):
 
 
 def signals_for(symbol, day_env, today=None):
-    """Today's signals in ``symbol`` across the day union's three lists.
+    """Today's signals in ``symbol`` across every list of the day union.
 
     Each row is a copy tagged with ``list`` (its ``scanner.DAY_LISTS`` key).
     Goes through ``scanner.day_signals``, whose date gate is load-bearing: a

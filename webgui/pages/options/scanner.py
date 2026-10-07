@@ -364,8 +364,11 @@ def stamp_new(rows, new_ids):
 # ── Day union (cache:options:scan_day) ───────────────────────────────────────
 _CT = ZoneInfo("America/Chicago")
 
-# The lists the day envelope carries, in tab order.
-DAY_LISTS = ("signals_0dte", "signals_swing", "signals_directional")
+# The lists the day envelope carries: the three tabs' own, in tab order, then
+# the 0-DTE and Swing tabs' "Other structures" lists (everything those two scans
+# build that is not a credit spread - see ``scanner_structures``).
+DAY_LISTS = ("signals_0dte", "signals_swing", "signals_directional",
+             "structures_0dte", "structures_swing")
 
 # A dropped-out signal is frozen at its last numbers and must READ as inert.
 STALE_ROW_CLASS = "opacity-50"
@@ -671,6 +674,9 @@ def _build_populate(day_env, live, ctx=None):
         "signals_swing": signal_rows(sigs["signals_swing"]),
         "signals_directional": directional_rows(sigs["signals_directional"]),
     }
+    from . import scanner_structures      # lazy: it imports this module
+    for key in scanner_structures.STRUCTURE_LISTS:
+        rows[key] = scanner_structures.structure_rows(sigs[key])
     for key in DAY_LISTS:
         # ORDER IS LOAD-BEARING: stamp_stale settles ``_allow_paper``, which the
         # checklist's Paper book line reads.
@@ -719,6 +725,16 @@ def table_page(rows, columns, request):
 
 # Composite-score chip (0-DTE / Swing only — a directional signal's Fit+Quality
 # score gets the same chip from the shared strategy columns).
+# The Other-structures tables only: a row the scan KEPT through an earnings
+# report (long premium) names the report date beside its strategy.
+_EARNINGS_SLOT = (r'''
+  <q-td :props="props">
+    {{ props.value }}
+    <q-badge v-if="props.row._earnings" :label="props.row._earnings"
+             class="q-ml-xs text-[9px] px-1 py-0 ''' + BADGE_WARN + r'''"/>
+  </q-td>
+''')
+
 _SCORE_SLOT = r'''
   <q-td :props="props">
     <q-badge :class="props.row._score_class + ' text-[#111]'" :label="props.value ?? '—'"/>
@@ -847,6 +863,7 @@ def render():
     the service is cold (no cache) the page paints empty tables + a waiting status.
     """
     from . import checks_feed
+    from . import scanner_structures as ssx   # lazy: it imports this module
     ui.add_css(SCAN_CSS)  # compact signal-table columns
     # 0-DTE / Swing / Directional as SUBTABS directly under the main tab strip
     # (like Gamma's view tabs, 2026-07-11): rendered into shell.subtab_slot(),
@@ -892,6 +909,31 @@ def render():
         t._props["rows-per-page-options"] = [PAGE_ROWS]
         return t
 
+    # Which families each Other-structures table shows, and the checkbox per
+    # family that switches it. Built ONCE with the table (never rebuilt by a
+    # repaint): a family with no rows today is hidden, not removed.
+    groups_on = {key: ssx.all_groups() for key in ssx.STRUCTURE_LISTS}
+    group_boxes = {key: {} for key in ssx.STRUCTURE_LISTS}
+
+    def _two_tables(key):
+        """One tab's pair: the credit-spread table and, behind a two-way switch,
+        the Other-structures table with its family checkboxes. Two tables, never
+        one: the two are scored on different scales and must not be ranked
+        against each other."""
+        switch = ui.toggle(ssx.view_options(0, 0, have=False),
+                           value=ssx.VIEW_CREDIT).props("dense no-caps unelevated")
+        with switch:
+            ui.tooltip(ssx.VIEW_TIP).props("delay=350 max-width=340px")
+        credit = _table(signal_columns())
+        with ui.column().classes("w-full gap-1") as other_box:
+            with ui.row().classes("gap-3 items-center flex-wrap"):
+                for group, label in ssx.GROUPS:
+                    group_boxes[key][group] = ui.checkbox(label, value=True).props(
+                        "dense")
+            other = _table(directional_columns())
+        other_box.set_visibility(False)
+        return switch, credit, other_box, other
+
     with kit.page():
         head = kit.header("Market Scanner", view="options:scan", stale=True)
         with head.actions:
@@ -917,14 +959,24 @@ def render():
                     "w-full scan-panels")
                 with scan_panels:
                     with ui.tab_panel(tab_0dte):
-                        table_0dte = _table(signal_columns())
+                        view_0dte, table_0dte, other_0dte, table_x0 = _two_tables(
+                            "structures_0dte")
                     with ui.tab_panel(tab_swing):
-                        table_swing = _table(signal_columns())
+                        view_swing, table_swing, other_swing, table_xs = _two_tables(
+                            "structures_swing")
                     with ui.tab_panel(tab_dir):
                         table_dir = _table(directional_columns())
             # Narrower than the 360px default so the compacted signal table has
             # room to show all columns without horizontal scroll.
             detail_panel = detail.render(width=290)
+
+    # Every table by the day list it shows, and each two-table tab's switch
+    # with the two lists behind it.
+    tables = {"signals_0dte": table_0dte, "signals_swing": table_swing,
+              "signals_directional": table_dir,
+              "structures_0dte": table_x0, "structures_swing": table_xs}
+    views = ((view_0dte, "signals_0dte", "structures_0dte"),
+             (view_swing, "signals_swing", "structures_swing"))
 
     by_id: dict = {}
     # Last-seen bus cache versions for the fetch-free repaint timer. (NEW-signal
@@ -1001,32 +1053,37 @@ def render():
         _t.add_slot('body-cell-checks', _CHECKS_SLOT)
         _t.add_slot('body-cell-score_trend', _TREND_SLOT)
 
-    table_dir.on("rowClick", _select_dir)
     # Every Paper click's answer - opened, or refused and why - becomes a toast.
     handoff.watch_paper_results()
-    table_dir.add_slot('body-cell-symbol', _SYMBOL_SLOT)
-    table_dir.add_slot('body-cell-composite_score', _SCORE_SLOT)
-    table_dir.add_slot('body-cell-checks', _CHECKS_SLOT)
-    table_dir.add_slot('body-cell-score_trend', _TREND_SLOT)
-    table_dir.add_slot('body-cell-bias', r'''
-      <q-td :props="props">
-        <span :class="props.row._bias_class">{{ props.value || '—' }}</span>
-      </q-td>
-    ''')
-    # A naked short's max loss is a margin proxy, not a cap — say so on the cell.
-    table_dir.add_slot('body-cell-max_loss', r'''
-      <q-td :props="props">
-        {{ props.value }}
-        <q-badge v-if="props.row._undefined_risk" label="undefined risk"
-                 class="q-ml-xs text-[9px] px-1 py-0 bg-[#b71c1c] text-white"/>
-      </q-td>
-    ''')
-    table_dir.add_slot('body-cell-grade', r'''
-      <q-td :props="props">
-        <span :class="props.row._grade_class">{{ props.value || '—' }}</span>
-        <q-tooltip v-if="props.row.grade_reason">{{ props.row.grade_reason }}</q-tooltip>
-      </q-td>
-    ''')
+    # The three tables of NORMALIZED rows - Directional and the two Other-
+    # structures tables - share one row shape, so they share one loop.
+    for _n in (table_dir, table_x0, table_xs):
+        _n.on("rowClick", _select_dir)
+        _n.add_slot('body-cell-symbol', _SYMBOL_SLOT)
+        _n.add_slot('body-cell-composite_score', _SCORE_SLOT)
+        _n.add_slot('body-cell-checks', _CHECKS_SLOT)
+        _n.add_slot('body-cell-score_trend', _TREND_SLOT)
+        _n.add_slot('body-cell-bias', r'''
+          <q-td :props="props">
+            <span :class="props.row._bias_class">{{ props.value || '—' }}</span>
+          </q-td>
+        ''')
+        # A naked short's max loss is a margin proxy, not a cap — say so on the cell.
+        _n.add_slot('body-cell-max_loss', r'''
+          <q-td :props="props">
+            {{ props.value }}
+            <q-badge v-if="props.row._undefined_risk" label="undefined risk"
+                     class="q-ml-xs text-[9px] px-1 py-0 bg-[#b71c1c] text-white"/>
+          </q-td>
+        ''')
+        _n.add_slot('body-cell-grade', r'''
+          <q-td :props="props">
+            <span :class="props.row._grade_class">{{ props.value || '—' }}</span>
+            <q-tooltip v-if="props.row.grade_reason">{{ props.row.grade_reason }}</q-tooltip>
+          </q-td>
+        ''')
+    for _x in (table_x0, table_xs):
+        _x.add_slot('body-cell-strategy_label', _EARNINGS_SLOT)
 
     # The clicked row IS the selection: it drives the detail panel and the
     # actions in its footer. ``multi`` records which tab it came from - a
@@ -1111,12 +1168,15 @@ def render():
         """Page the stored rows into the tables, filtered when "Only clear" is on,
         with the tab counts and the empty-state line following the filter."""
         filtering = bool(clear_toggle.value)
-        for key, table, tab, base in (
-                ("signals_0dte", table_0dte, tab_0dte, "0-DTE"),
-                ("signals_swing", table_swing, tab_swing, "Swing"),
-                ("signals_directional", table_dir, tab_dir, "Directional")):
+        full_by, shown_by = {}, {}
+        for key, table in tables.items():
             full = painted[key]
             shown = only_clear(painted[key]) if filtering else full
+            if key in ssx.STRUCTURE_LISTS:
+                # The family checkboxes narrow BOTH, so the tab count and the
+                # empty-state line below speak about the families on show.
+                full = ssx.filter_groups(full, groups_on[key])
+                shown = ssx.filter_groups(shown, groups_on[key])
             kit.mark_selected(shown, sel["id"])
             empty = only_clear_empty_label(full, shown, filtering=filtering)
             # Written to _props directly: a props STRING would be re-parsed.
@@ -1126,18 +1186,62 @@ def render():
                 table._props["no-data-label"] = empty
             shown_rows[key] = shown
             _show_page(key, table, paging[key])
-            label = filtered_tab_label(base, len(full), len(shown),
+            full_by[key], shown_by[key] = full, shown
+        # A tab's header counts BOTH of its tables.
+        totals = ssx.tab_totals(full_by, shown_by)
+        for base, tab in (("0-DTE", tab_0dte), ("Swing", tab_swing),
+                          ("Directional", tab_dir)):
+            n_full, n_shown = totals[base]
+            label = filtered_tab_label(base, n_full, n_shown,
                                        have=counts["have"], filtering=filtering)
             tab.props(f'label="{label}"')
             tab.update()
+        # The switch says how many rows sit behind each side, and each family's
+        # checkbox how many rows it holds; a family with none today is hidden.
+        for switch, credit_key, other_key in views:
+            switch.set_options(
+                ssx.view_options(len(shown_by[credit_key]), len(shown_by[other_key]),
+                                 have=counts["have"]),
+                value=switch.value)
+            chips = {c["group"]: c for c in ssx.chips(painted[other_key])}
+            for group, box in group_boxes[other_key].items():
+                chip = chips.get(group)
+                box.set_visibility(chip is not None)
+                if chip is not None and box.text != chip["text"]:
+                    box.text = chip["text"]
 
     @guard
     def _on_clear_toggle(_event):
         _paint_tables()             # re-filter the stored rows; no bus read
 
     clear_toggle.on_value_change(_on_clear_toggle)
-    for _key, _tbl in (("signals_0dte", table_0dte), ("signals_swing", table_swing),
-                       ("signals_directional", table_dir)):
+
+    def _wire_view(switch, credit, other_box):
+        @guard
+        def _on_view(_event):
+            other = switch.value == ssx.VIEW_OTHER
+            credit.set_visibility(not other)
+            other_box.set_visibility(other)
+
+        switch.on_value_change(_on_view)
+
+    def _wire_group(key, group, box):
+        @guard
+        def _on_group(_event):
+            on = groups_on[key]
+            if bool(box.value) != (group in on):
+                groups_on[key] = ssx.toggled(on, group)
+                _paint_tables()             # re-filter the stored rows; no bus read
+
+        box.on_value_change(_on_group)
+
+    for _switch, _credit, _box in ((view_0dte, table_0dte, other_0dte),
+                                   (view_swing, table_swing, other_swing)):
+        _wire_view(_switch, _credit, _box)
+    for _key, _boxes in group_boxes.items():
+        for _group, _cb in _boxes.items():
+            _wire_group(_key, _group, _cb)
+    for _key, _tbl in tables.items():
         _wire_paging(_key, _tbl)
 
     def _apply_populate(built, *, notify=True, acknowledge=False):
