@@ -223,7 +223,7 @@ keys that feed it. Menu order matches the rail.</p>
 <tr>
 <td><strong>Captured Signals</strong></td>
 <td><code>options_svc</code></td>
-<td><code>cache:options:captured</code>, <code>:captured_flags</code>, <code>:captured_closed</code></td>
+<td><code>cache:options:captured</code>, <code>:captured_flags</code>, <code>:captured_closed</code>, <code>:tracked</code></td>
 </tr>
 <tr>
 <td><strong>Paper Ledger</strong></td>
@@ -846,9 +846,37 @@ the family that built it), on a backspread <code>target_breakeven</code> (the fa
 breakeven, the one the score reads), and, when it buys premium and
 was kept through an earnings report, <code>spans_earnings: true</code> with <code>earnings_date</code>.
 A payload cached before the two lists existed validates with both empty. They are
-not recorded, not pushed and not counted by <code>compute.build_matrix</code>. Do not assume
-one shape across the five lists, and do not rank a row of one shape against a row
-of the other.</p>
+not pushed and not counted by <code>compute.build_matrix</code>; they are recorded as
+tracked rows (<code>cache:options:tracked</code>, below). Do not assume one shape across the
+five lists, and do not rank a row of one shape against a row of the other.</p>
+<p><strong><code>cache:options:tracked</code></strong> — the scanner's structures that are recorded to be
+measured, never traded (<code>services/options_svc/tracked.view</code>). Published at
+service start, after each tracked cycle (every 15 minutes in session) and on
+<code>captured_reload</code>; an unchanged view is not rewritten.</p>
+<pre><code>{date, counts: {open, closed, closed_today},
+ open:  [{signal_id, symbol, strategy, family, scanner_type, expiration,
+          dte_at_entry, entry_credit, entry_max_loss, entry_max_profit,
+          entry_score, entry_grade, entry_underlying, unbounded,
+          entry_spans_earnings, first_seen_ts, current_value, unrealized_pnl,
+          current_underlying, recommendation, recommendation_reason,
+          last_mark_ts, legs: [{kind, side, strike, expiration, qty, ...}]}],
+ closed_today: [{signal_id, symbol, strategy, exit_reason, exit_value,
+                 realized_pnl, close_ts, ...}],
+ stats: [{strategy, family, n, wins, win_pct, total_pnl, avg_r, unmarkable,
+          unbounded, through_earnings}]}
+</code></pre>
+<p><code>entry_credit</code>, <code>current_value</code>, <code>exit_value</code>, <code>entry_max_loss</code> and
+<code>entry_max_profit</code> are per share. <code>entry_credit</code> is signed (a debit is negative),
+and <code>current_value</code> / <code>exit_value</code> are the cost to close, so a position worth
+money carries a negative one. <code>unrealized_pnl</code> and <code>realized_pnl</code> are dollars for
+one contract. <code>realized_pnl: null</code> with <code>exit_reason: "UNMARKABLE"</code> means the row
+has no result; it is not a zero. <code>expiration</code> is the FRONT expiration; a calendar's
+back month is on its second leg.</p>
+<p><strong>Reading <code>signals.db</code> yourself.</strong> Tracked rows have <code>scanner_type</code> <code>0DTE_STRUCT</code>
+or <code>SWING_STRUCT</code> (<code>shared.structures.TRACKED_SCANNER_TYPES</code>) and no strike
+columns. Every multi-row reader in <code>signal_db</code> leaves them out unless called with
+<code>tracked=True</code>, which returns only them. A query of your own over <code>signals</code> must
+add <code>shared.structures.not_tracked_sql(prefix)</code> unless it means to read them.</p>
 <p><strong><code>cache:options:scan_day</code></strong> — the day union the Market Scanner and the Symbol
 Dossier render: <code>{date, scan_seq, signals_0dte[], signals_swing[],
 signals_directional[], structures_0dte[], structures_swing[], setups, truncated?}</code>. <code>date</code> is the <strong>Central</strong> trading date —

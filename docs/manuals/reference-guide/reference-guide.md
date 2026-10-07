@@ -2345,6 +2345,11 @@ scales (see *Where it is weak*, below). The family boxes above the Other
 structures table show and hide one kind at a time, and at most two of a family
 are listed per symbol.
 
+**Every Other structures row and every Directional row is recorded.** When a scan
+finishes during regular hours those rows are written down and followed to a
+result, under **Tracked structures** on [Captured Signals](#captured-signals).
+They are measurements, not trades: nothing opens one in the paper Account.
+
 What the other structures are for, in one line each:
 
 | Structure | The view it expresses |
@@ -2873,23 +2878,24 @@ time, re-pricing it and telling you whether it worked — without committing to 
 
 | | |
 |---|---|
-| Service | `options_svc` (:8211), `cache:options:captured` |
+| Service | `options_svc` (:8211), `cache:options:captured`; the tracked section reads `cache:options:tracked` |
 | Auto-management | Every **5 minutes** during market hours, if enabled in Settings |
+| Tracked structures | Priced every **15 minutes** during market hours, always |
 | Storage | `signals.db` |
 
 ### Reading the screen
 
 | Column | Meaning |
 |---|---|
-| **REC** | The recommendation — **HOLD**, take profit, or cut. Green take-profit, red cut, amber hold. |
-| **SYMBOL** / **STRAT** | Underlying and structure. |
-| **MODE** | What the signal was captured as (e.g. PREMIUM). |
-| **OPENED** / **EXP** / **DTE** | When captured, when it expires, days left. |
-| **CREDIT** | The credit at capture. |
-| **CUR PRICE** | What the spread costs to close **now**. |
-| **RISK** | Remaining risk. |
-| **P&L** | The paper result if you had taken it. |
-| **GRADE** | Quality at capture — **Good** or **Marginal**. |
+| **Action** | The recommendation — **HOLD**, take profit, or cut. Green take-profit, red cut, amber hold. |
+| **Symbol** / **Strategy** | Underlying and structure. |
+| **Style** | What the signal was captured as (e.g. PREMIUM). |
+| **Opened** / **Expiry** / **DTE at entry** | When captured, when it expires, and the days to expiry **at capture**. That last figure never moves; read Expiry for the time left. |
+| **Entry** | What was taken in at capture: positive for a credit, negative for a debit. |
+| **Mark** | What the spread costs to close **now**. |
+| **Max loss** | The most the trade can lose. |
+| **Open P&L** | The paper result if you had taken it. |
+| **Entry grade** | Quality at capture — **Good** or **Marginal**. It never moves. |
 
 The table opens **newest capture first**; click any column heading to re-sort it.
 
@@ -2926,16 +2932,65 @@ in **CT**, matching how the database stamps them.
 view carries no marks until a reprice runs, so on a cold page every unrealized figure
 is unknown rather than zero — reporting that as $0.00 would show a flat book where
 there is really no reading at all. An empty book still shows a true $0.00. Hover the
-figure to see how many open signals currently carry a live mark; **Refresh marks
-(live)** prices them all.
+figure to see how many open signals currently carry a live mark; **Reprice now**
+prices them all.
 
-**Refresh marks (live)** re-prices everything against current chains. **Close selected**
-records an exit — click a row first to pick it, which also loads it into the detail
-panel on the right.
+**Reprice now** re-prices everything against current chains. **Close signal**, at
+the foot of the detail panel, records an exit for the row you clicked.
 
 **Auto-management** (Settings toggle, on by default) raises the stop to break-even after
 +50%, defers delta-drift cuts on recoverable trades, and auto-closes on the exit rules or
 at expiry. Turned off, the recommendations are advisory only and you close by hand.
+
+### Tracked structures
+
+A second section under the signals, read-only. It holds what the Market Scanner
+builds that is not a credit spread (debit spreads, straddles and strangles,
+butterflies and condors, calendars, backspreads) and the Directional tab's
+single calls and puts. Each row is written down when a scan finishes during
+regular hours and followed until it closes.
+
+**What it is for.** The app has years of results for its credit spreads and none
+for these structures. This section is how it gets some: the same trade ideas you
+see on the Scanner, followed to a result, so that a year from now the app can say
+which kinds are worth your attention.
+
+**What it is not.** A book. None of these rows is in the paper Account or the
+Paper Ledger, nothing opens one automatically, and you cannot close one by hand.
+They do not count in the footer above, in the Captured score, or against the
+two-per-symbol limit (they have their own: two tracked rows per symbol).
+
+**Reading it.** Entry and Now are per share and worded by direction: *5.40 paid*
+and *5.60 to sell* is a bought position that has gained 0.20; *1.35 received*
+and *1.40 to buy back* is a sold one that has lost 0.05. **Max loss** and **Open
+result** are dollars for one contract. **Not capped** means the structure has no
+worst case.
+
+**How a row closes**, first rule met: a calendar or diagonal from 2:00 CT on the
+day its near leg expires; a loss of twice the credit, for a short straddle,
+strangle or call and for an iron butterfly; a gain of half the most it can make
+(half the debit paid, for a bought call, put, straddle or strangle); otherwise
+expiry. A backspread is always held to expiry.
+
+**Where it is weak.**
+
+- **The closing levels are borrowed.** They are the credit spreads' levels. For a
+  long straddle "half the debit" is a reasonable target and nothing more than
+  that; nobody has measured it here. Every pricing is stored so a different rule
+  can be tried on the same rows.
+- **It prices every 15 minutes**, so a target or stop is taken at the first
+  pricing after it is crossed, not at the level itself.
+- **A result is one contract at the mid price**, with no commission and no
+  allowance for the spread between bid and offer. Wide structures (condors,
+  butterflies) look better here than they would trade.
+- **Calendars can end with no result.** If a calendar has no usable price on the
+  afternoon its near leg expires it is counted under **Not valued** and left out
+  of every other figure.
+- **Return on risk is not comparable across rows marked *Loss not capped*.** Their
+  risk is a margin estimate.
+- **Few rows, for a long time.** With two per symbol and a quality bar on the
+  Scanner, a structure may close a handful of times a month. Read the Closed
+  column before reading anything beside it.
 
 ### Why it matters
 

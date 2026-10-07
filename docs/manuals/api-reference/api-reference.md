@@ -34,7 +34,7 @@ keys that feed it. Menu order matches the rail.
 | **Market Scanner** | `options_svc` | `cache:options:scan_day` (rendered), `:scan` (live counts) |
 | **Strategy Finder** | `options_svc` | `cache:options:swing` |
 | **Expected Move** | `options_svc` | `cache:options:em_chain`, `:expected_move` |
-| **Captured Signals** | `options_svc` | `cache:options:captured`, `:captured_flags`, `:captured_closed` |
+| **Captured Signals** | `options_svc` | `cache:options:captured`, `:captured_flags`, `:captured_closed`, `:tracked` |
 | **Paper Ledger** | `options_svc` | `cache:options:paper_trades`, `:paper_analyze`, `:paper_create` (the Paper button's answer, read by Market Scanner and Strategy Finder) |
 | **Paper Account** | `options_svc` | `cache:options:paper_account`, `:paper_analytics` |
 | **Rescue** | `options_svc` | `cache:options:rescue:<position_id>`, `:rescue_summary` |
@@ -364,9 +364,42 @@ the family that built it), on a backspread `target_breakeven` (the far
 breakeven, the one the score reads), and, when it buys premium and
 was kept through an earnings report, `spans_earnings: true` with `earnings_date`.
 A payload cached before the two lists existed validates with both empty. They are
-not recorded, not pushed and not counted by `compute.build_matrix`. Do not assume
-one shape across the five lists, and do not rank a row of one shape against a row
-of the other.
+not pushed and not counted by `compute.build_matrix`; they are recorded as
+tracked rows (`cache:options:tracked`, below). Do not assume one shape across the
+five lists, and do not rank a row of one shape against a row of the other.
+
+**`cache:options:tracked`** — the scanner's structures that are recorded to be
+measured, never traded (`services/options_svc/tracked.view`). Published at
+service start, after each tracked cycle (every 15 minutes in session) and on
+`captured_reload`; an unchanged view is not rewritten.
+
+```
+{date, counts: {open, closed, closed_today},
+ open:  [{signal_id, symbol, strategy, family, scanner_type, expiration,
+          dte_at_entry, entry_credit, entry_max_loss, entry_max_profit,
+          entry_score, entry_grade, entry_underlying, unbounded,
+          entry_spans_earnings, first_seen_ts, current_value, unrealized_pnl,
+          current_underlying, recommendation, recommendation_reason,
+          last_mark_ts, legs: [{kind, side, strike, expiration, qty, ...}]}],
+ closed_today: [{signal_id, symbol, strategy, exit_reason, exit_value,
+                 realized_pnl, close_ts, ...}],
+ stats: [{strategy, family, n, wins, win_pct, total_pnl, avg_r, unmarkable,
+          unbounded, through_earnings}]}
+```
+
+`entry_credit`, `current_value`, `exit_value`, `entry_max_loss` and
+`entry_max_profit` are per share. `entry_credit` is signed (a debit is negative),
+and `current_value` / `exit_value` are the cost to close, so a position worth
+money carries a negative one. `unrealized_pnl` and `realized_pnl` are dollars for
+one contract. `realized_pnl: null` with `exit_reason: "UNMARKABLE"` means the row
+has no result; it is not a zero. `expiration` is the FRONT expiration; a calendar's
+back month is on its second leg.
+
+**Reading `signals.db` yourself.** Tracked rows have `scanner_type` `0DTE_STRUCT`
+or `SWING_STRUCT` (`shared.structures.TRACKED_SCANNER_TYPES`) and no strike
+columns. Every multi-row reader in `signal_db` leaves them out unless called with
+`tracked=True`, which returns only them. A query of your own over `signals` must
+add `shared.structures.not_tracked_sql(prefix)` unless it means to read them.
 
 **`cache:options:scan_day`** — the day union the Market Scanner and the Symbol
 Dossier render: `{date, scan_seq, signals_0dte[], signals_swing[],

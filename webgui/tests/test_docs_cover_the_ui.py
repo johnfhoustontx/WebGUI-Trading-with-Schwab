@@ -155,7 +155,11 @@ SUBTABS_AND_SCREENS = [
     ("Settings", "Appearance editor", "Appearance"),
     ("Settings", "Vacuum action", "Vacuum"),
     ("Paper Account", "Reset dialog", "Reset"),
-    ("Captured Signals", "Refresh marks", "Refresh marks"),
+    # The button is "Reprice now" (captured.py). This row named "Refresh marks",
+    # its label before the 2026-09-19 page-kit migration, and so pinned both
+    # manuals to a control the page no longer has.
+    ("Captured Signals", "Reprice now button", "Reprice now"),
+    ("Captured Signals", "Tracked structures section", "Tracked structures"),
 ]
 
 

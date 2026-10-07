@@ -1516,8 +1516,85 @@ put version's best case is the stock at zero, so its reward to risk reads 40–1
 and it scores 63–77 against the call's 55–70.
 
 The rows are published as `structures_0dte` and `structures_swing` on
-`cache:options:scan` and the day union. They are not recorded to `signals.db`, not
-pushed to the phone, and not counted on the Opportunity Board.
+`cache:options:scan` and the day union. They are not pushed to the phone and not
+counted on the Opportunity Board. They are recorded to `signals.db` as
+**tracked** rows, below.
+
+### Tracked structures
+
+**Files:** `options-scanner/signal_recorder.py` (`record_tracked`),
+`options-scanner/structure_marks.py`, `services/options_svc/tracked.py`
+
+After a scan that finishes inside regular hours, the two structure lists and the
+Directional tab's rows are written to `signals.db` under scanner type
+`0DTE_STRUCT` or `SWING_STRUCT` (a Directional row goes to the first when its DTE
+is at or under the 0-DTE window's maximum). They are measured and never traded:
+every other reader of the store leaves them out, and the paper Account refuses
+them by type and by structure.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `[capture] tracked` | on | records them at all |
+| `[capture] max_open_per_symbol_tracked` | 2 | open tracked rows per symbol, its own count |
+| `[scores] capture_min_tracked` | 0 | score floor; the scan's own bar has already applied |
+| `[tracked] mark_interval_min` / `mark_offset_min` | 15 / 10 | priced at :10, :25, :40, :55 |
+| `[tracked] front_expiry_close` | 14:00 | when a calendar is closed on its front expiry day |
+
+**Stored values** are per share. `entry_credit` is signed (a debit is negative).
+
+**Mark.** Each leg at the mid of its bid and offer, on its own expiration's
+chain:
+
+```
+value = sum(short leg mid x qty) - sum(long leg mid x qty)      # cost to close, per share
+pnl   = (entry_credit - value) x 100                           # dollars, one contract
+```
+
+A bought position that is worth money therefore has a negative `value`. A leg
+with no usable quote means no mark for the row.
+
+**Exit**, first match (`structure_marks.recommend`):
+
+| Code | Condition |
+|---|---|
+| `FRONT_EXPIRY` | legs on two expirations, front expiry is today, time at or after `front_expiry_close` |
+| `MONEY_STOP` | `entry_credit > 0`, the structure's `loss_rules` is on, and `pnl <= -stop_mult x entry_credit x 100` |
+| `TARGET_HIT` | `pnl >= tp_frac x base x 100`, with `base` chosen below |
+| hold | anything else |
+
+`base` depends on whether the profit is open-ended, which is read from the legs:
+the position is net long calls or net long puts.
+
+| Structure | `base` |
+|---|---|
+| not open-ended (verticals, butterflies, condors, calendars, short straddle and strangle, iron butterfly) | `entry_max_profit` |
+| open-ended, buys options only (long call, put, straddle, strangle) | the debit paid, `-entry_credit` |
+| open-ended and sells an option (both backspreads) | none: held to expiry |
+
+The stored max profit is not used for that test. For a put it is the profit with
+the stock at zero, a finite number about a hundred times the debit.
+
+`tp_frac` and `stop_mult` are `config/trade_mgmt.toml [stops]`, the credit
+spreads' values (0.50 and 2.0 as shipped). `loss_rules` is off for a short put
+and for both backspreads.
+
+**Settlement.** At or after 15:00 CT on the expiry day, or any later day, a row
+whose legs share one expiration is valued at intrinsic against the price
+`paper_engine.settlement_underlying` returns (reason `EXPIRED`); with no usable
+price it waits for the next cycle. A row on two expirations is not valued that
+way. If it is still open then, it is closed `UNMARKABLE` with no `realized_pnl`.
+
+**Results** (`tracked.stats`), per structure over closed rows with a P&L:
+
+```
+win_pct = 100 x (rows with pnl > 0) / n
+avg_r   = mean( pnl / (entry_max_loss x 100) )
+```
+
+Rows closed `UNMARKABLE` are counted separately and enter neither. For a
+structure with no capped loss `entry_max_loss` is a margin estimate, so its
+`avg_r` is flagged and not comparable with a defined-risk one. These rows are
+not part of `cache:options:calibration`.
 
 **Seen since** reads `HH:MM · Nx` — first seen, and the number of scans the setup was
 live in. It is a dash when the age is unknown, and the time alone when the count is
@@ -2621,7 +2698,9 @@ deferred. The Account and the Ledger settle on the 15:05 CT slot
 captured signals settle on their own 5-minute cycle, which runs to 15:15 CT. A
 captured signal is valued by `signal_repricer.expiry_value` (each short leg's
 intrinsic less each long leg's), and its outcome row records the price it
-settled against in `settlement_underlying`.
+settled against in `settlement_underlying`. Tracked structures use the same
+price on their own 15-minute cycle, whose last slot is 15:10 CT
+(`structure_marks.expiry_value`; see *Tracked structures*).
 
 ## Why a separate rule set
 

@@ -10,10 +10,29 @@
 
 **Design:** [2026-10-06-scanner-multi-structure-design.md](2026-10-06-scanner-multi-structure-design.md). Read it first.
 
-**Status, 2026-10-07:** Phases 1, 2 and 3 (Tasks 1 to 20) are built on branch
+**Status, 2026-10-07:** All four phases (Tasks 1 to 32) are built on branch
 `claude/options-scanner-strategies-6033e7`. Not merged to `main`, not promoted.
-Phase 4 (capture) is not started. These things were built differently from the
-task text below, each for a reason found while building:
+Task 33, the checks after a promote, is owed. Phase 4 was built before phases 1
+to 3 had run a live session, which the phase's own note advised against; nothing
+in it depends on a number a live session would have changed, and it can be left
+off with `[capture] tracked = false`. These things were built differently from
+the task text below, each for a reason found while building:
+
+- **Phase 4, the readers:** tracked rows are hidden from every `signal_db`
+  reader by default and read by one module, instead of each reader learning the
+  new shape. See the design's "Capture and tracking".
+- **Phase 4, marks:** a new `structure_marks.py`, not an extension of
+  `signal_repricer.reprice_legs`. Decision D1's test requires that a straddle
+  has no leg layout there.
+- **Phase 4, exits:** no `[structures.*]` table per structure. The rules reuse
+  `[stops] tp_frac` and `stop_mult`; only the backspreads have a table
+  (`loss_rules = false`).
+- **Phase 4, the loop:** its own 15-minute cadence (`[tracked]`), not a branch of
+  the 5-minute captured cycle.
+- **Phase 4, calibration:** tracked rows are left OUT of the credit calibration,
+  not bucketed inside it. Their results are `tracked.stats`, by structure.
+- **Phase 4, the cap key:** `max_open_per_symbol_tracked`, not
+  `max_open_per_symbol_structures`.
 
 - **Task 15:** nothing was added to `shared/structures.py`. Its sets describe
   what the paper books hold, a backspread is in none of them, and every other
@@ -41,7 +60,8 @@ task text below, each for a reason found while building:
   keep their meaning.
 
 `services/options_svc/compute.py` is one line under its ceiling (10,525).
-Phase 4's service code must go in a sibling module.
+Phase 4's service code is in a sibling module, `tracked.py`, which imports
+nothing from it.
 
 ---
 

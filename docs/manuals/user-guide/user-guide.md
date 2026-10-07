@@ -1681,6 +1681,12 @@ Four things to know:
 - **Paper trade is offered for debit spreads, butterflies and condors.**
   Straddles, strangles, the iron butterfly, calendars, diagonals and
   backspreads are for analysis; send them to the Calculator.
+- **Every row is recorded and followed.** When a scan finishes during regular
+  hours, the rows on Other structures and on the Directional tab are written
+  down and then priced every 15 minutes until a rule closes them or they expire.
+  They appear under **Tracked structures** on Captured Signals (see that
+  section). They are measurements, not trades: nothing opens one in the paper
+  Account, and at most two are open per symbol at a time.
 - **A backspread sells one option near the money and buys two further out.**
   The call version pays on a large rise and the put version on a large fall.
   The most it can lose is at the strike you bought, and that figure is the
@@ -1867,18 +1873,70 @@ You usually reach this page through the **Expected Move** button on a signal row
 
 Signals the system has "captured" to track over time, with live re-pricing.
 
-- **Action buttons:** Reload, **Refresh marks (live)** (re-price all open
-  signals), **Close selected** (enter an exit value and reason).
-- **Table:** a color-coded **Rec** (green TAKE_PROFIT / red CUT / amber HOLD),
-  Symbol, Strat, Mode, Opened, Exp, DTE, Credit, **Cur Price** (what the spread
-  costs to close now), Risk, P&L (green/red) and Grade. It opens **newest capture
-  first**; click any column heading to re-sort it.
-- Click a row for its detail panel; the clicked row is also the one **Close
-  selected** acts on.
+- **Buttons:** **Refresh** and **Reprice now** (re-price all open signals) on the
+  header line. **Expected Move** and **Close signal** (enter an exit value and
+  reason) are at the foot of the detail panel and act on the row you clicked.
+- **Table:** a color-coded **Action** (green TAKE_PROFIT / red CUT / amber HOLD),
+  Symbol, Strategy, Style, Opened, Expiry, DTE at entry, Entry, **Mark** (what
+  the spread costs to close now), Max loss, Open P&L (green/red) and Entry grade.
+  It opens **newest capture first**; click any column heading to re-sort it.
+- Click a row for its detail panel.
 - **Footer:** opened today, closed today, P&L today (booked) and P&L today (open).
   The open figure covers every signal still running, and shows a dash rather than
-  $0.00 until you have priced them with **Refresh marks (live)**.
-- When a tracked signal hits a stop or target, the page raises a notification.
+  $0.00 until you have priced them with **Reprice now**.
+- When a captured signal hits a stop or target, the page raises a notification.
+
+### Tracked structures
+
+Under the signals is a second, read-only section. It holds the Market Scanner's
+**Other structures** and **Directional** rows: debit spreads, straddles and
+strangles, butterflies and condors, calendars, backspreads, and single calls and
+puts. The app writes each one down when a scan finishes during regular hours and
+follows it until it closes, so that you can see how each kind turns out.
+
+**They are not trades.** None is in a paper book. You cannot close one by hand,
+none counts in the footer above, and nothing opens one in the paper Account.
+
+The open table:
+
+| Column | Meaning |
+| --- | --- |
+| **Structure** / **Legs** | The kind of trade and its legs. `L` is bought, `S` is sold. A leg on a later expiry shows its date. |
+| **Recorded** / **First expiry** | When it was written down, and the date its nearest leg expires. |
+| **Entry, per share** | *5.40 paid* for a debit, *1.35 received* for a credit. |
+| **Now, per share** | What closing would do now: *5.60 to sell* for a position worth money, *1.40 to buy back* for one that costs money to close. |
+| **Max loss** | Dollars for one contract. **Not capped** for a short straddle, strangle or call. |
+| **Open result** | Dollars for one contract at the last pricing. A dash until it has been priced. |
+| **Status** | *Holding*, or the rule it has just met. |
+| **Notes** | *Loss not capped*; *Open through earnings*. |
+
+These rows are priced every 15 minutes during the session, at 10, 25, 40 and 55
+minutes past the hour. **Reprice now** does not reprice them.
+
+How one closes, first rule met:
+
+1. **A calendar or diagonal**, from 2:00 CT on the day its near leg expires, is
+   closed at its price then.
+2. **A short straddle, strangle or call, or an iron butterfly**, is closed at a
+   loss of twice the credit.
+3. **Target:** half the most it can make. For a bought call, put, straddle or
+   strangle, whose profit has no practical limit, half the debit paid.
+4. **Otherwise at expiry**, valued from where the stock closed. A backspread
+   always ends this way.
+
+These levels are the credit spreads' own. There are no results for these
+structures yet to set better ones from, and every pricing is stored so a
+different rule can be tested on the same rows later. A backspread has no stop
+and no target: until the large move it is built for, it sits in the small loss
+its Max loss column already states, and the few dollars it was entered for are
+not what it is held for.
+
+**Tracked results by structure** adds up the closed rows: how many closed, the
+share that made money, the total in dollars, and the **average return on risk**
+(each result divided by what was at risk, averaged). **Not valued** counts
+calendars that had no usable price when their near leg expired; they have no
+result and are in no other column. Where the Notes say *Loss not capped*, the
+return on risk uses a margin estimate and is not comparable with the other rows.
 
 ## Paper Ledger
 

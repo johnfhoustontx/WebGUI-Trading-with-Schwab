@@ -270,6 +270,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#what-it-is_18">What it is</a></li>
 <li><a href="#where-the-data-comes-from_17">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_16">Reading the screen</a></li>
+<li><a href="#tracked-structures">Tracked structures</a></li>
 <li><a href="#why-it-matters_16">Why it matters</a></li>
 <li><a href="#when-to-use-it_15">When to use it</a></li>
 <li><a href="#related-pages_17">Related pages</a></li>
@@ -3462,6 +3463,10 @@ tabs, and calendars and diagonals on Swing. They are separate tables because the
 scales (see <em>Where it is weak</em>, below). The family boxes above the Other
 structures table show and hide one kind at a time, and at most two of a family
 are listed per symbol.</p>
+<p><strong>Every Other structures row and every Directional row is recorded.</strong> When a scan
+finishes during regular hours those rows are written down and followed to a
+result, under <strong>Tracked structures</strong> on <a href="#captured-signals">Captured Signals</a>.
+They are measurements, not trades: nothing opens one in the paper Account.</p>
 <p>What the other structures are for, in one line each:</p>
 <table>
 <thead>
@@ -4232,11 +4237,15 @@ time, re-pricing it and telling you whether it worked — without committing to 
 <tbody>
 <tr>
 <td>Service</td>
-<td><code>options_svc</code> (:8211), <code>cache:options:captured</code></td>
+<td><code>options_svc</code> (:8211), <code>cache:options:captured</code>; the tracked section reads <code>cache:options:tracked</code></td>
 </tr>
 <tr>
 <td>Auto-management</td>
 <td>Every <strong>5 minutes</strong> during market hours, if enabled in Settings</td>
+</tr>
+<tr>
+<td>Tracked structures</td>
+<td>Priced every <strong>15 minutes</strong> during market hours, always</td>
 </tr>
 <tr>
 <td>Storage</td>
@@ -4254,40 +4263,40 @@ time, re-pricing it and telling you whether it worked — without committing to 
 </thead>
 <tbody>
 <tr>
-<td><strong>REC</strong></td>
+<td><strong>Action</strong></td>
 <td>The recommendation — <strong>HOLD</strong>, take profit, or cut. Green take-profit, red cut, amber hold.</td>
 </tr>
 <tr>
-<td><strong>SYMBOL</strong> / <strong>STRAT</strong></td>
+<td><strong>Symbol</strong> / <strong>Strategy</strong></td>
 <td>Underlying and structure.</td>
 </tr>
 <tr>
-<td><strong>MODE</strong></td>
+<td><strong>Style</strong></td>
 <td>What the signal was captured as (e.g. PREMIUM).</td>
 </tr>
 <tr>
-<td><strong>OPENED</strong> / <strong>EXP</strong> / <strong>DTE</strong></td>
-<td>When captured, when it expires, days left.</td>
+<td><strong>Opened</strong> / <strong>Expiry</strong> / <strong>DTE at entry</strong></td>
+<td>When captured, when it expires, and the days to expiry <strong>at capture</strong>. That last figure never moves; read Expiry for the time left.</td>
 </tr>
 <tr>
-<td><strong>CREDIT</strong></td>
-<td>The credit at capture.</td>
+<td><strong>Entry</strong></td>
+<td>What was taken in at capture: positive for a credit, negative for a debit.</td>
 </tr>
 <tr>
-<td><strong>CUR PRICE</strong></td>
+<td><strong>Mark</strong></td>
 <td>What the spread costs to close <strong>now</strong>.</td>
 </tr>
 <tr>
-<td><strong>RISK</strong></td>
-<td>Remaining risk.</td>
+<td><strong>Max loss</strong></td>
+<td>The most the trade can lose.</td>
 </tr>
 <tr>
-<td><strong>P&amp;L</strong></td>
+<td><strong>Open P&amp;L</strong></td>
 <td>The paper result if you had taken it.</td>
 </tr>
 <tr>
-<td><strong>GRADE</strong></td>
-<td>Quality at capture — <strong>Good</strong> or <strong>Marginal</strong>.</td>
+<td><strong>Entry grade</strong></td>
+<td>Quality at capture — <strong>Good</strong> or <strong>Marginal</strong>. It never moves.</td>
 </tr>
 </tbody>
 </table>
@@ -4322,14 +4331,57 @@ in <strong>CT</strong>, matching how the database stamps them.</p>
 view carries no marks until a reprice runs, so on a cold page every unrealized figure
 is unknown rather than zero — reporting that as $0.00 would show a flat book where
 there is really no reading at all. An empty book still shows a true $0.00. Hover the
-figure to see how many open signals currently carry a live mark; <strong>Refresh marks
-(live)</strong> prices them all.</p>
-<p><strong>Refresh marks (live)</strong> re-prices everything against current chains. <strong>Close selected</strong>
-records an exit — click a row first to pick it, which also loads it into the detail
-panel on the right.</p>
+figure to see how many open signals currently carry a live mark; <strong>Reprice now</strong>
+prices them all.</p>
+<p><strong>Reprice now</strong> re-prices everything against current chains. <strong>Close signal</strong>, at
+the foot of the detail panel, records an exit for the row you clicked.</p>
 <p><strong>Auto-management</strong> (Settings toggle, on by default) raises the stop to break-even after
 +50%, defers delta-drift cuts on recoverable trades, and auto-closes on the exit rules or
 at expiry. Turned off, the recommendations are advisory only and you close by hand.</p>
+<h3 id="tracked-structures">Tracked structures</h3>
+<p>A second section under the signals, read-only. It holds what the Market Scanner
+builds that is not a credit spread (debit spreads, straddles and strangles,
+butterflies and condors, calendars, backspreads) and the Directional tab's
+single calls and puts. Each row is written down when a scan finishes during
+regular hours and followed until it closes.</p>
+<p><strong>What it is for.</strong> The app has years of results for its credit spreads and none
+for these structures. This section is how it gets some: the same trade ideas you
+see on the Scanner, followed to a result, so that a year from now the app can say
+which kinds are worth your attention.</p>
+<p><strong>What it is not.</strong> A book. None of these rows is in the paper Account or the
+Paper Ledger, nothing opens one automatically, and you cannot close one by hand.
+They do not count in the footer above, in the Captured score, or against the
+two-per-symbol limit (they have their own: two tracked rows per symbol).</p>
+<p><strong>Reading it.</strong> Entry and Now are per share and worded by direction: <em>5.40 paid</em>
+and <em>5.60 to sell</em> is a bought position that has gained 0.20; <em>1.35 received</em>
+and <em>1.40 to buy back</em> is a sold one that has lost 0.05. <strong>Max loss</strong> and <strong>Open
+result</strong> are dollars for one contract. <strong>Not capped</strong> means the structure has no
+worst case.</p>
+<p><strong>How a row closes</strong>, first rule met: a calendar or diagonal from 2:00 CT on the
+day its near leg expires; a loss of twice the credit, for a short straddle,
+strangle or call and for an iron butterfly; a gain of half the most it can make
+(half the debit paid, for a bought call, put, straddle or strangle); otherwise
+expiry. A backspread is always held to expiry.</p>
+<p><strong>Where it is weak.</strong></p>
+<ul>
+<li><strong>The closing levels are borrowed.</strong> They are the credit spreads' levels. For a
+  long straddle "half the debit" is a reasonable target and nothing more than
+  that; nobody has measured it here. Every pricing is stored so a different rule
+  can be tried on the same rows.</li>
+<li><strong>It prices every 15 minutes</strong>, so a target or stop is taken at the first
+  pricing after it is crossed, not at the level itself.</li>
+<li><strong>A result is one contract at the mid price</strong>, with no commission and no
+  allowance for the spread between bid and offer. Wide structures (condors,
+  butterflies) look better here than they would trade.</li>
+<li><strong>Calendars can end with no result.</strong> If a calendar has no usable price on the
+  afternoon its near leg expires it is counted under <strong>Not valued</strong> and left out
+  of every other figure.</li>
+<li><strong>Return on risk is not comparable across rows marked <em>Loss not capped</em>.</strong> Their
+  risk is a margin estimate.</li>
+<li><strong>Few rows, for a long time.</strong> With two per symbol and a quality bar on the
+  Scanner, a structure may close a handful of times a month. Read the Closed
+  column before reading anything beside it.</li>
+</ul>
 <h3 id="why-it-matters_16">Why it matters</h3>
 <p>This is the app's learning loop, and it is the most valuable page for a trader who is
 still calibrating. Capturing every signal you <em>considered</em> — not just the ones you took

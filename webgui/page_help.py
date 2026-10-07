@@ -276,6 +276,12 @@ directional trades on their own tab.
   Debit spreads, butterflies and condors can. Straddles, strangles, the iron
   butterfly, calendars and backspreads are for analysis: send them to the
   Calculator instead.
+- **Every row on Other structures and on Directional is recorded and followed.**
+  When a scan finishes during regular hours its rows are written down, then
+  priced every 15 minutes until a rule closes them or they expire. You will find
+  them under **Tracked structures** on Captured Signals. They are measurements,
+  not trades: nothing opens one in the paper Account, and at most two are open
+  per symbol at a time.
 - **All three tabs fill only during regular hours (8:30–3:00 CT).** The scanner
   also runs at 8:00, 8:15, 3:00 and 3:15, but a scan that finishes outside the
   session holds every signal back — premarket and after-close quotes are not the
@@ -1114,6 +1120,32 @@ Market Scanner, and since 2026-09-11 the once-daily **Income** board too.
   together. When a scan offers more, the highest-scoring ones are kept. Once a
   symbol has 2 open, nothing new is captured for it until one closes, so the paper
   Account can't take a third position in it from here either.
+- **Tracked structures** — the section under the signals. These are the Market
+  Scanner's **Other structures** and **Directional** rows, written down so you
+  can see how each kind turns out. They are **not trades**: none is in a paper
+  book, none can be closed by hand, and none counts in the footer above or
+  against the two-signal limit (they have a limit of their own, two per symbol).
+  - **Entry** and **Now** are per share and say which way the money moves:
+    *5.40 paid* then *5.60 to sell* is a position that has gained 0.20;
+    *1.35 received* then *1.40 to buy back* is one that has lost 0.05.
+  - **Max loss** is dollars for one contract. **Not capped** means the structure
+    has no worst case (a short straddle, strangle or call).
+  - **Open result** is dollars for one contract at the last pricing. A dash means
+    it has not been priced yet. These rows are priced every 15 minutes during the
+    session; **Reprice now** does not reprice them.
+  - **How they close:** at half the most they can make (half the debit paid,
+    for a bought call, put, straddle or strangle); at a loss of twice the
+    credit, for a short straddle, strangle or call and for an iron butterfly; a
+    calendar or diagonal from 2:00 CT on the day its near leg expires;
+    everything else, including every backspread, at expiry. These levels are the
+    credit spreads' own, used here until there are results to set better ones
+    from.
+  - **Results by structure** — how many of each kind have closed, how many made
+    money, the total, and the **average return on risk** (the result as a share
+    of what was at risk). **Not valued** counts calendars that had no usable
+    price when their near leg expired; they have no result and are left out of
+    every other column. Where a row says *Loss not capped*, its return on risk
+    uses a margin estimate and is not comparable with the rest.
 """,
     "/options/portfolio": """
 **Paper Account — the simple version**

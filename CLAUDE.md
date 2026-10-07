@@ -576,10 +576,21 @@ Detail: [options engine invariants](docs/reference/options-engine-invariants.md)
 - The scanner's strike rules are `config/scanner.toml [selection]`.
 - Everything the scan builds that is not a credit spread (`structure_scan`,
   `[structures]`) goes in `structures_0dte` / `structures_swing`, never in the
-  credit lists: those are what `signal_recorder` records and the Account enters
-  from. Its cap is per FAMILY; through an earnings report it keeps and flags
-  LONG premium and drops short. `_front_pair`'s 7-day floor is the Finder's
-  default, and the Scanner passes its window's own minimum.
+  credit lists: those are what the Account enters from. Its cap is per FAMILY;
+  through an earnings report it keeps and flags LONG premium and drops short.
+  `_front_pair`'s 7-day floor is the Finder's default, and the Scanner passes
+  its window's own minimum.
+- Those rows and the Directional tab's are recorded as TRACKED rows
+  (`shared.structures.TRACKED_SCANNER_TYPES`): measured, never traded. They
+  share `signals.db` in a different shape (a signed `entry_credit`, a
+  `legs_json` blob, a cost-to-close that is NEGATIVE for a position worth
+  money), so every `signal_db` reader hides them unless called with
+  `tracked=True`, and a reader with its own SQL carries
+  `structures.not_tracked_sql`; `tests/test_tracked_rows_stay_hidden.py` names
+  who may ask. The Account's entry cycle is an ALLOW-list by structure
+  (`ACCOUNT_AUTO_ENTRY`). A two-expiry tracked row is never settled at
+  intrinsic, and a NULL outcome P&L means "not valued", never zero. Their marks
+  live in `structure_marks.py`, never in `signal_repricer._LEG_LAYOUT`.
 
 **Exits and marks.**
 - Exit rules are PER STRUCTURE: `shared/trade_mgmt.structure_rules(strategy)`.

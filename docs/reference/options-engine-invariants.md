@@ -435,6 +435,98 @@ the calibration would then measure a hold-to-expiry policy the manage cycle neve
 executes. `TARGET_HIT` stays out: on the lifecycle path +50% arms break-even and
 holds, so that code cannot arise there.
 
+## TRACKED structures share `signals.db`, and every reader hides them by default
+
+Since 2026-10-07 the Market Scanner records what it builds that is not a credit
+spread - debit spreads, straddles and strangles, butterflies and condors,
+calendars, backspreads, the Directional tab's single legs - under two scanner
+types, `0DTE_STRUCT` and `SWING_STRUCT`
+(`shared.structures.TRACKED_SCANNER_TYPES`). The purpose is the Income capture's:
+these structures had no outcome data at all.
+
+**The shape is different, in the same tables.** No strike columns; the legs are
+a JSON blob (`legs_json`). `entry_credit` is SIGNED, a debit negative.
+`current_value` and `exit_value` are the cost to close per share, so a long
+position that is worth money has a NEGATIVE one. `entry_max_loss` is per share
+and, where `unbounded = 1`, a margin estimate.
+
+**Why the default is to hide them.** More than a dozen readers of this store
+were written for a credit spread: the Captured Signals page and its score, the
+Account's entry feed, the phone push, Rescue, the 5-minute manage cycle, the day
+footer, the EOD report. Each would have misread a tracked row in its own way - a
+negative credit as a loss, a missing strike as a malformed signal, a long
+straddle as something to money-stop. Teaching each one was the first plan. The
+rule that was built instead: every multi-row reader in `signal_db` takes a
+keyword-only `tracked=False` and excludes these rows; `tracked=True` returns ONLY
+them. `tests/test_tracked_rows_stay_hidden.py` lists the modules allowed to pass
+it (`services/options_svc/tracked.py`, the recorder's cap count) and fails on a
+new one.
+
+⚠ **A reader that writes its own SQL over `signals` is not covered by that
+default.** Three tools did (`signal_calibration`, `measure_commission_convention`,
+`replay_debate`); each now carries `shared.structures.not_tracked_sql`, and the
+same test fails on a fourth. The clause is `IS NULL OR NOT IN (...)` on purpose:
+`NULL NOT IN (...)` is NULL, which would drop every row from before the column
+was filled.
+
+⚠ **`replay_debate.settlement_cutoff` was the subtle one.** It is the earliest
+capture date with no outcome. An open calendar can sit 45 days; counted, it pulls
+the cutoff back to its own date and the "settled cohort" sample goes empty with
+no error.
+
+**The Account cannot open one, three ways.** `_NO_AUTO_ENTRY_TYPES` refuses the
+two types. `shared.structures.ACCOUNT_AUTO_ENTRY` (PCS, CCS, IC) is an allow-list
+by structure, checked after it, and refuses a row WITHOUT writing an order. And
+the feed (`get_open_signals_with_latest_mark()`) no longer contains one. The
+allow-list is not redundant: it is the only one of the three that also covers a
+new structure recorded under a CREDIT scanner type.
+
+**Marking lives in its own module** (`structure_marks.py`), and that is decision
+D1, not tidiness. `test_straddle_analysis_only.py` requires that a straddle or
+strangle has no entry in `signal_repricer._LEG_LAYOUT` and no `[structures.*]`
+exit table, so that nothing able to reach a paper book can price or manage one.
+Tracking one for study must not change that.
+
+**A two-expiry row is never settled at intrinsic.** Its back month still has time
+value. From `[tracked] front_expiry_close` (14:00 CT) on the front expiry day it
+is closed on its mark (`FRONT_EXPIRY`). If it reaches the settlement hour
+unclosed - no quote all afternoon, a service that was down - it is closed
+`UNMARKABLE` with a NULL `realized_pnl` and `exit_value`. Every consumer of
+tracked outcomes must treat NULL as "no result": `tracked.stats` counts it under
+`unmarkable` and leaves it out of the win rate, the total and the mean.
+
+**The exit numbers are borrowed, not fitted.** `[stops] tp_frac` and
+`stop_mult`, the credit spreads' own. There is no outcome data to fit to, and D1
+forbids an exit table for two of the structures anyway. A backspread carries
+`loss_rules = false`: entered for a credit, it sits in a small DEFINED loss (the
+valley at its long strike) until the large move it is for, and a 2x-credit stop
+would close every one there. Every mark is stored, so another exit can be
+replayed over the same rows.
+
+⚠ **"Is the profit open-ended?" is read from the LEGS, never from
+`entry_max_profit`** (`structure_marks.open_ended`: net long calls or net long
+puts). The engine flags only the call side as unbounded and gives the put side a
+finite max profit, the stock at zero. Measured on a $500 stock: a long put's
+"max profit" is about $49,000 and a put backspread's about $48,000. A target
+that is a fraction of those is never reached, so the first version held every
+long put to expiry while closing the long call beside it at half its debit. The
+rule: bounded structures target `tp_frac` of the max profit; an open-ended one
+that only BUYS options targets `tp_frac` of the debit paid; an open-ended one
+that also SELLS an option (a backspread) has no target, because what it was
+entered for is a few dollars either way and half of a $3 debit is $1.50.
+
+**Its own cap pool.** `[capture] max_open_per_symbol_tracked`, counted with
+`tracked=True`. The credit cap (`max_open_per_symbol`) is what the Account enters
+from; a tracked butterfly holding one of those two slots would cost the Account a
+trade.
+
+**Its own clock.** Every 15 minutes at :10, :25, :40, :55
+(`config/trade_mgmt.toml [tracked]`), a slot firing only in its first four
+minutes. The offset keeps its chain fetches out of the autoscan's :02-:05 window
+and the minute after the hour and half hour. The last slot, 15:10 CT, is inside
+the scan window and past the 15:00 settlement hour, so rows settle the same
+afternoon.
+
 ## Selling premium has a volatility FLOOR, and it keys on vega, not on a name
 
 **`shared/vol_gate.blocks(iv_rank, net_vega, floor, ceiling)`** is the one

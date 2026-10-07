@@ -4,7 +4,84 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-07 (**Ratio backspreads on the Market Scanner, the Strategy Finder and the Calculator.**)
+**Last updated:** 2026-10-07 (**The Market Scanner's other structures are recorded and followed to an outcome.**)
+
+- **What it is.** Phase 4 of
+  `docs/plans/2026-10-06-scanner-multi-structure-{design,plan}.md`. Every row on
+  an Other structures table, and every row on the Directional tab, is written to
+  `signals.db` when its scan finishes inside regular hours, then marked every 15
+  minutes, closed by a rule or settled at expiry. These rows are **tracked**:
+  measured, never traded. The Captured Signals page has a new read-only section,
+  **Tracked structures**, with the open rows, today's closes and results by
+  structure.
+- **Nothing can trade one.** Three independent guards: the paper Account's entry
+  cycle refuses the two new scanner types (`0DTE_STRUCT`, `SWING_STRUCT`); it has
+  an allow-list by structure (PCS, CCS, IC) and refuses everything else; and
+  every `signal_db` reader now leaves tracked rows out unless asked, so the
+  cycle's feed does not contain one. The second guard is also a fix: before it,
+  any structure recorded under a credit scanner type would have reached the
+  sizer.
+- **The pieces.**
+  - `signal_db`: six additive columns (`legs_json`, `family`,
+    `entry_max_profit`, `entry_capital`, `unbounded`, `entry_spans_earnings`), a
+    keyword-only `tracked=False` on every multi-row reader, `get_tracked_outcomes`
+    and `close_unmarkable`.
+  - `signal_recorder.record_tracked`: per-share values, a signed `entry_credit`,
+    its own cap pool (`[capture] max_open_per_symbol_tracked`, 2), floor
+    (`[scores] capture_min_tracked`, 0) and switch (`[capture] tracked`).
+  - `options-scanner/structure_marks.py` (new): marks from the legs, each on its
+    own expiration; the exit rules; intrinsic value at expiry.
+  - `services/options_svc/tracked.py` (new, imports nothing from `compute`): the
+    manage loop and the `cache:options:tracked` view. Scheduled at :10, :25, :40
+    and :55 (`config/trade_mgmt.toml [tracked]`), clear of the quarter-hour scan.
+  - `webgui/pages/options/tracked_view.py` (new, pure) and the section on
+    `captured.py`.
+  - `shared.structures.TRACKED_SCANNER_TYPES`: the one list of the two types.
+- **Exit rules, and where the numbers come from.** A calendar or diagonal is
+  closed on its mark from 14:00 CT on its front leg's expiry day. A structure
+  entered for a credit is stopped at `[stops] stop_mult` times the credit (a
+  short straddle, strangle or call, and an iron butterfly). The target is
+  `[stops] tp_frac` of the max profit for a bounded structure, and of the debit
+  paid for a long call, put, straddle or strangle. Everything else settles at
+  intrinsic. No number is new: there is no outcome data for these structures
+  yet, so the two the credit spreads already run on are reused, and every mark is
+  stored so another exit can be replayed. The two backspreads have no stop and no
+  target and are held to expiry: one entered for a credit sits in a small,
+  defined loss until the move it is for.
+- **A flaw found while writing the manuals, and fixed.** Whether a profit is
+  open-ended was first read from the stored max profit. The engine gives the put
+  side a finite one, the stock at zero, so a long put's target was half of about
+  $49,000 on a $500 stock and could never be reached, while the long call beside
+  it closed at half its debit. And a call backspread entered for a $3 debit
+  would have closed at +$1.50. `structure_marks.open_ended` reads it from the
+  legs instead (net long calls or net long puts).
+- **A calendar with no usable quote at its front expiry has no result.** It is
+  closed `UNMARKABLE` with a NULL P&L and counted as "not valued", never as a
+  scratch. Intrinsic is wrong for it: the back month still has time value.
+- **The credit calibration does not see these rows.**
+  `tools/signal_calibration.load_rows` leaves them out (it feeds
+  `cache:options:calibration`), and so do `tools/measure_commission_convention.py`
+  and `tools/replay_debate.py`. The replay's settlement cutoff also ignores them;
+  an open calendar would otherwise pull it back to its own date and empty the
+  sample.
+- **Straddles and strangles are tracked and still analysis-only.** Decision D1
+  stands: no Paper button, no exit table, no leg layout in `signal_repricer`.
+  Tracking prices them in its own module.
+- **What it costs.** One chain per open (symbol, expiration) every 15 minutes,
+  26 times a day, through the proxy like every other fetch. With the cap at 2
+  per symbol the worst case is two expirations a symbol; a calendar adds its
+  back month.
+- **Built differently from the design**, each recorded in the plan's status
+  block: readers hide tracked rows by default (the plan had each reader learn the
+  shape); a new marks module (D1's test forbids extending the old one); no
+  per-structure exit tables; a separate 15-minute loop; calibration leaves the
+  rows out instead of bucketing them.
+- **Verification.** Unit suites. The Captured page was rendered in the local
+  harness on a view built by the real recorder, manage loop and settlement
+  against a fake chain. Not promoted; the first live session is the first time
+  any of it meets a real chain.
+
+**Prior —** 2026-10-07 (**Ratio backspreads on the Market Scanner, the Strategy Finder and the Calculator.**)
 
 - **What it is.** A fifth family, **Ratio spreads**, on the Scanner's Other
   structures tables and an eighth group on the Strategy Finder: the call

@@ -323,72 +323,127 @@ lists.
 
 ## Capture and tracking
 
+Built 2026-10-07. Rows recorded this way are called **tracked**: measured to an
+outcome, never traded.
+
 **Storage.** The same `signals` / `signal_marks` / `signal_outcomes` tables,
-with additive columns (`legs_json`, `family`, `entry_max_profit`, `unbounded`)
-and two new scanner types, `0DTE_STRUCT` and `SWING_STRUCT`. A fifth column,
-`entry_spans_earnings`, records whether the trade was opened through a report,
-so those outcomes can be read apart from the rest. A separate table
-was considered and rejected: marks, outcomes, the Captured Signals page and the
-nightly calibration are already generic over `signal_id`.
+with additive columns (`legs_json`, `family`, `entry_max_profit`,
+`entry_capital`, `unbounded`, `entry_spans_earnings`) and two new scanner types,
+`0DTE_STRUCT` and `SWING_STRUCT` (`shared.structures.TRACKED_SCANNER_TYPES`, the
+one list). `entry_spans_earnings` records whether the trade was opened through a
+report, so those outcomes can be read apart from the rest. A separate table was
+considered and rejected: marks and outcomes are already generic over
+`signal_id`.
+
+**Hidden by default, read by one module.** The first plan was to teach each
+reader of the store the new shape. Reading them showed more than a dozen, every
+one written for a credit spread: the Captured Signals page and its score, the
+paper Account's entry feed, the phone push, Rescue, the 5-minute manage cycle,
+the day footer. So the default is reversed. Every `signal_db` reader EXCLUDES
+tracked rows unless the caller passes `tracked=True`, and `tracked=True` returns
+only them. One module asks: `services/options_svc/tracked.py`.
+`tests/test_tracked_rows_stay_hidden.py` names every module allowed to ask and
+every module that queries the two tables itself.
 
 **Units.** A Finder candidate carries per-contract dollars; `signals` stores
-per-share. The recorder converts, as the Income capture does. A debit is
-stored as a negative `entry_credit`, the existing convention.
+per-share. `signal_recorder.record_tracked` converts, as the Income capture
+does. A debit is stored as a negative `entry_credit`, the existing convention,
+and a mark's value is the cost to close per share, so a long position that is
+worth money has a negative one. `pnl = (entry_credit - value) x 100`, the formula
+`close_signal_manually` already uses.
 
 **The paper Account must never open one.** `run_entry_cycle` reads every open
-captured signal with no type filter. Two guards, both required:
+captured signal with no type filter. Two guards, both built:
 
-1. The two new scanner types join `_NO_AUTO_ENTRY_TYPES`.
-2. The cycle gains an allow-list by structure (PCS, CCS, IC). Anything else is
+1. The two new scanner types are in `_NO_AUTO_ENTRY_TYPES`.
+2. The cycle has an allow-list by structure
+   (`shared.structures.ACCOUNT_AUTO_ENTRY`: PCS, CCS, IC). Anything else is
    refused by name, so a future structure cannot be traded by omission.
 
-**The capture cap gets its own pool.** `[capture] max_open_per_symbol` (2) is
-counted across every type, and the Account enters from captures. Sharing it
-would let a tracked butterfly take the slot of a credit spread the Account
-would have traded. A second key, `max_open_per_symbol_structures`, counts only
-the new types.
+The default exclusion above is a third: the cycle's feed no longer contains a
+tracked row at all.
 
-**Marks.** `reprice_legs` is extended to price each leg on its own expiry (a
-calendar needs two chains) and to carry a credit as well as a debit. A leg with
-no usable quote means no mark, never a zero.
+**The capture cap has its own pool.** `[capture] max_open_per_symbol` (2) is
+counted across the credit types, and the Account enters from those captures.
+Sharing it would let a tracked butterfly take the slot of a credit spread the
+Account would have traded. `[capture] max_open_per_symbol_tracked` (2) counts
+only tracked rows. `[capture] tracked` switches the recording off, and
+`[scores] capture_min_tracked` (0) is its floor: the scan's own quality cut has
+already filtered these rows.
 
-**Exits.** Per structure, in `config/trade_mgmt.toml [structures.*]`, sourced
-from the playbook and not fitted:
+**Marks.** `options-scanner/structure_marks.py`, from `legs_json`. Each leg is
+priced on its own expiration (a calendar reads two chains, through the
+repricer's per-(symbol, expiration) cache). A leg with no usable quote means no
+mark, never a zero. The existing `signal_repricer._LEG_LAYOUT` was not extended:
+`test_straddle_analysis_only.py` (decision D1) requires that a straddle or
+strangle has no entry there, so nothing that can reach a paper book learns to
+price one.
 
-| Structure | Rule |
-|---|---|
-| Debit verticals, long straddle and strangle, backspread | `_recommend_debit` as shipped: profit target, loss stop off, no time exit at these expiries |
-| Butterflies, condors, iron butterfly | profit target, settle at expiry (the 2026-09-13 decision) |
-| Short straddle and strangle | credit rules: profit target and the money stop |
-| Calendars and diagonals | profit target; closed on its mark on the front leg's expiry day before the close |
+**Exits.** `structure_marks.recommend`, first match:
 
-Every mark is stored, so a different exit can be replayed against the same
-rows later.
+| Rule | Applies to | Level |
+|---|---|---|
+| Front leg expiring | calendars and diagonals, on the front expiry day from `[tracked] front_expiry_close` (14:00 CT) | closed on its mark |
+| Money stop | a structure entered for a credit whose rules have `loss_rules` on (short straddle and strangle, iron butterfly, short call) | `[stops] stop_mult` x the credit |
+| Target | a bounded structure | `[stops] tp_frac` of the max profit |
+| Target | a structure that only buys options and whose profit is open-ended (long call, put, straddle, strangle) | `[stops] tp_frac` of the debit paid |
+| Hold | everything else, including both backspreads however they were entered | settles at expiry |
 
-**Settlement.** One-expiry structures settle at intrinsic through
-`legs_intrinsic_value` against `paper_engine.settlement_underlying`, the one
-rule the three books share. A calendar is never settled at intrinsic: its back
-month still has time value. If it cannot be marked on the front expiry day it
-is closed as unmarkable with no P&L and excluded from the statistics.
+"Open-ended" is read from the legs (net long calls or net long puts), not from
+the stored max profit. The engine gives the put side a finite max profit, the
+stock at zero, so a long put's target was first half of about $49,000 on a $500
+stock and could never be reached while the long call beside it closed at half
+its debit. A backspread is open-ended and also sells an option; what it was
+entered for is a few dollars either way, and half of a $3 debit is not a target.
 
-**Risk denominator.** Calibration measures in R (P&L over dollars at risk). A
-short straddle or strangle has no maximum loss, so its row carries
-`unbounded = 1` and uses the Finder's capital figure. Those rows are reported
-in their own bucket and never averaged with defined-risk ones.
+The design first called for a `[structures.*]` table per structure. Two things
+changed that. D1 forbids one for a straddle or strangle. And there is no outcome
+data for any of these yet, so a per-structure number would be invented. The
+rules above reuse the two numbers the credit spreads already run on, and the two
+backspreads carry `loss_rules = false`, because one entered for a credit sits in
+a small, defined loss until the large move it is for and the money stop would
+close every one of them there. They have no target either. Every mark is stored, so a different exit can be
+replayed against the same rows.
+
+**Settlement.** A structure whose legs all expire together settles at intrinsic
+(`structure_marks.expiry_value`) against `paper_engine.settlement_underlying`,
+the one rule the three books share, with no usable price deferring it. A
+calendar is never settled at intrinsic: its back month still has time value. One
+that reaches the settlement hour unclosed is closed `UNMARKABLE` with no P&L
+(`signal_db.close_unmarkable`), counted as that and never as a scratch.
+
+**The loop.** `tracked.manage_cycle`, every `[tracked] mark_interval_min` (15)
+minutes at `mark_offset_min` (10) past: :10, :25, :40, :55, clear of the
+quarter-hour scan's chain fetches and of the first minute after the hour and
+half hour. A slot fires only in its first four minutes, so a service that starts
+mid-slot waits for the next one. It is not gated by the auto-close switch
+(nothing here is a position) and pushes nothing to a phone. Its cost is one
+chain per open (symbol, expiration) per slot, 26 slots a day.
+
+**Risk denominator.** Results are in dollars and as P&L over dollars at risk. A
+short straddle, strangle or call has no maximum loss, so its row carries
+`unbounded = 1` and its risk is the Finder's margin estimate. `tracked.stats`
+flags those, and the page says the figure is an estimate.
 
 **The Directional tab.** Its single long and short calls and puts are the same
-normalized shape, so the same recorder path captures them, under the scanner
-type of the window each came from. They follow the rules above: the Account
-never opens one, they count against the structures cap, and a short call's row
-is `unbounded`. `[structures.LONG_CALL]` and `[structures.LONG_PUT]` already
-have exit rules; a short put uses `[structures.SHORT_PUT]`; a short call takes
-the credit rules.
+normalized shape, so the same recorder captures them, under the scanner type of
+the window each falls in (DTE at or under `zerodte_max_dte`, or above it). They
+follow the rules above.
 
-**Other readers of `signals.db`.** The Rescue assessment skips leg rows; the
-Captured Signals page shows a Legs cell for them; calibration buckets them by
-the new scanner types, so the credit baseline does not move. Each reader of
-`get_open_signals_with_latest_mark` (four call sites in `compute.py`) is
-checked against a leg row by test.
+**The credit calibration does not see them.** The design first said calibration
+would bucket tracked rows by scanner type. It leaves them out instead
+(`tools/signal_calibration.load_rows`, and the two other tools that query the
+tables themselves). A bucket keyed on scanner type would average a long straddle
+with an iron butterfly, and a debit's negative `entry_credit` breaks the
+payoff-ratio arithmetic the calibration is built on. Their results are
+`tracked.stats`, by structure. `tools/replay_debate.py`'s settlement cutoff also
+ignores them: an open calendar can sit 45 days and would otherwise pull the
+cutoff back to its own date.
+
+**Where it shows.** `cache:options:tracked` (`{date, open, closed_today, stats,
+counts}`), published at start, after every loop and on the Captured page's
+Refresh. The Captured Signals page has a read-only **Tracked structures**
+section under the signals: open rows, today's closes, results by structure.
 
 ## Phases
 
@@ -400,7 +455,7 @@ CHANGELOG in the same commits.
 | **1. Measure** | The sweep at 0, 1, 2, 4, 7, 10 and 15 days; the scan's added time on recorded chains | A table of what will and will not pass. Decides whether anything below changes |
 | **2. Show** | `min_front_dte`; chain merge for calendars; `structure_scan.py`; config; the two lists on the contract; funnel; day persistence; the page switch and chips; hand-offs | The four existing families on the Scanner |
 | **3. Backspread** | Builder, measured gate profile, taxonomy, Finder checkbox, Calculator templates | Ratio spreads on the Scanner and the Finder |
-| **4. Capture** | Schema, recorder, the two Account guards, the cap pool, marks, exits, settlement, Captured page, calibration buckets; the Directional tab's rows | Tracked outcomes for every structure |
+| **4. Capture** | Schema, recorder, the two Account guards, the cap pool, marks, exits, settlement, the manage loop, the Captured page's section; the Directional tab's rows | Tracked outcomes for every structure |
 
 ## Testing
 
