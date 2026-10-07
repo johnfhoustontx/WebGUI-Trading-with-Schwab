@@ -249,17 +249,20 @@ directional trades on their own tab.
   so an empty tab means "nothing qualified today", not a failure. A **bought**
   call or put is listed only when its grade is **Good** or **Strong**; a sold
   call or put is also listed at Marginal, because they rarely grade higher.
-- **Credit spreads / Other structures** — the switch at the top of the 0-DTE and
-  Swing tabs. Each side is its own table, and the number beside each name is how
-  many rows it holds. **The two tables are scored differently and their scores
-  are not comparable**: credit spreads as trades that sell premium, other
-  structures on how well they fit the market's direction and volatility and how
-  sound they are. A 75 on one is not a 75 on the other, which is why they are
-  never in one list. The tab's own count adds both.
-- **The family boxes** above the Other structures table (*Debit spreads ·
+- **One table on 0-DTE and on Swing** — credit spreads and the other structures
+  together, ranked by score. Every row uses the same columns, in dollars per
+  contract: a credit spread reads *+60.00 credit*, a debit spread *-180.00
+  debit*. **The two kinds are scored differently and their scores are not
+  comparable**: credit spreads as trades that sell premium, other structures on
+  how well they fit the market's direction and volatility and how sound they
+  are. The table ranks them together anyway, so a 75 above a 70 does not mean
+  the first is the better trade when one is a credit spread and the other is
+  not. Hover a score to see which scale it is on.
+- **The family boxes** above the table (*Credit spreads · Debit spreads ·
   Straddles and strangles · Butterflies and condors · Calendars · Ratio
-  spreads*) show and hide one kind at a time; a family with nothing today is
-  not listed. Calendars appear on Swing only. At most two of a family are listed
+  spreads*) show and hide one kind at a time, each with its row count; a family
+  with nothing today is not listed. Untick **Credit spreads** to rank the other
+  structures alone, or tick only it to rank the credit spreads alone. Calendars appear on Swing only. At most two of a family are listed
   per symbol.
 - **Ratio spreads** are backspreads: sell one option near the money and buy two
   further out. A call backspread pays on a large rise, a put backspread on a
@@ -1821,12 +1824,12 @@ def help_md(active: str) -> str:
 SUBTAB_HELP: dict[str, dict[str, str]] = {
     "/options/scanner": {  # Market Scanner
         "0-DTE": "Short-dated trades — 0 to 4 days to expiration, not only "
-                 "today. Credit spreads, and behind the switch the other "
-                 "structures (debit spreads, straddles, butterflies, condors). "
+                 "today. Credit spreads and the other structures (debit "
+                 "spreads, straddles, butterflies, condors) in one table. "
                  "Fastest decay, highest risk. Check the Exp column: anything "
                  "past today is held overnight.",
         "Swing": "Trades 5 to 15 days out — slower decay, more room to be right. "
-                 "Credit spreads, and behind the switch the other structures, "
+                 "Credit spreads and the other structures in one table, "
                  "calendars among them.",
         "Directional": "Single-leg long or short calls/puts — a plain bullish or "
                        "bearish bet, scored on fit + quality (not the premium model).",

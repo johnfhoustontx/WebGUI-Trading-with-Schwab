@@ -4,7 +4,33 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-07 (**The hourly trade idea picks from the Scanner's Other structures too.**)
+**Last updated:** 2026-10-07 (**The Market Scanner's 0-DTE and Swing tabs hold one table each.**)
+
+- **What changed.** Each of those tabs held two tables behind a switch, *Credit
+  spreads* and *Other structures*. They now hold one table with both, ranked by
+  score, and the switch is gone. *Credit spreads* is the first of the family
+  tick boxes above the table, so either kind can still be seen alone. The same
+  change shows on the public Option Signals page, which is this page.
+- **How a credit spread reads now.** In the table's shared columns, per
+  contract: `+60.00 credit` where it read `0.60`, Max P and Max L in dollars,
+  R:R as a ratio (0.32) where it was a percentage (31.6), its strikes as legs
+  (`S 100.00P / L 97.50P`), and Put Credit Spread / Call Credit Spread / Iron
+  Condor as the strategy. The Trade detail panel is unchanged.
+- **The two scores are still on different scales**, and the single ranking
+  compares them by the owner's choice. A note under the tick boxes says so, and
+  hovering a score names the scale it is on.
+- **Not changed.** What the service publishes; the paper Account, which still
+  enters from the credit lists alone; the hourly trade idea; the Directional
+  tab; the Symbol page's own credit table.
+- **Verified** in the local harness on a synthetic day: one table per tab, a
+  credit row and a butterfly row each opening the panel with the right buttons
+  (Paper trade on a live credit spread, none on a dropped one), and the Credit
+  spreads box hiding its rows and moving the tab count.
+- **Tests.** `webgui/tests/test_scanner_combined.py`; the tests that pinned the
+  switch and the five tables now pin three tables and one click handler.
+  `scanner_structures.view_options` and `tab_totals` are gone with the switch.
+
+**Prior — 2026-10-07** (**The hourly trade idea picks from the Scanner's Other structures too.**)
 
 - **Why.** Every one of the 36 ideas on `neuralstrike.co/ideas.html` (six posting
   days) was a long put or a long call. The picker read the two credit-spread
@@ -48,7 +74,8 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 - **What shipped.** `live.neuralstrike.co/signals`, titled Option Signals and
   first in the site's Tools menu on all seven pages. It is the Market Scanner's
   own page: the 0-DTE, Swing and Directional tabs, the Credit spreads / Other
-  structures switch with its family checkboxes, the Checks column, Only clear,
+  structures switch with its family checkboxes (one table per tab since the
+  entry above), the Checks column, Only clear,
   "Why no trade?" and the Trade detail panel. The public origin now publishes
   eighteen screens.
 - **What a visitor does not get.** Run scan; the Paper trade, Calculator and

@@ -258,7 +258,14 @@ just click <strong>Authorize</strong> again.</p>
   is silent on those channels. Once they are set, the app also posts one <strong>trade idea</strong>
   an hour during the regular session (08:35–14:35 CT): the best Strong or Good trade
   on the Market Scanner, drawn as an image with its legs, grade, risk, profit,
-  probability of profit and payoff chart. It skips an hour rather than post a weak,
+  probability of profit and payoff chart. It picks from every Scanner table: the
+  credit spreads, the Directional tab's single options, and the <strong>Other structures</strong>
+  (debit spreads, butterflies and condors, long straddles and strangles,
+  backspreads). Three kinds never post: a calendar or diagonal (two expirations,
+  so no single payoff to draw), a short straddle or strangle (no limit on the
+  loss), and anything that would be open through an earnings report. To go back to
+  credit spreads and single options only, set <code>"other_structures": false</code> in the
+  same block. It skips an hour rather than post a weak,
   stale or same-day trade. Turn it off with <code>"trade_idea": {"enabled": false}</code>.
   Which channels each kind of alert goes to is set in <strong>Settings → General → Push
   notifications</strong>, and the trade idea can also pop up as a <strong>Google Calendar</strong>
@@ -346,7 +353,7 @@ form (published as <strong>Rescue my Sh*tty trade</strong>), the <strong>Calcula
 <strong>Simulator</strong> and <strong>Market News</strong>.</p>
 <p><strong>Option Signals</strong> (<code>/signals</code>, first in the site's Tools menu) is your Market
 Scanner with nothing of yours on it. A visitor sees the 0-DTE, Swing and
-Directional tabs, the Credit spreads / Other structures switch, the Checks
+Directional tabs, the family tick boxes on 0-DTE and Swing, the Checks
 column, <strong>Only clear</strong>, <strong>Why no trade?</strong> and the Trade detail panel. They do
 not get <strong>Run scan</strong>, the <strong>Paper trade</strong>, <strong>Calculator</strong> or <strong>Expected Move</strong>
 buttons, the "new" badges, the checklist's <strong>Paper book</strong> line, the panel's
@@ -1855,8 +1862,9 @@ two-pane layout.</p>
   credit-spread tabs — do not compare their numbers. A <strong>bought</strong> call or put is
   listed only when its grade is <strong>Good</strong> or <strong>Strong</strong>. A sold call or put is
   also listed at Marginal, because they rarely grade higher.</li>
-<li>On <strong>0-DTE</strong> and <strong>Swing</strong>, a switch at the top of the tab: <strong>Credit spreads</strong>
-  and <strong>Other structures</strong>. Each is its own table (see <em>Other structures</em>, below).</li>
+<li>On <strong>0-DTE</strong> and <strong>Swing</strong>, one table holding the credit spreads and the
+  <strong>other structures</strong> together, with a tick box per family above it (see
+  <em>Other structures</em>, below).</li>
 <li>A table of candidate signals. Columns include Symbol, Type, Expiration, DTE,
   Short/Long strikes, Credit, Max Loss, Risk/Reward %, Probability of Profit %,
   a color-coded <strong>Score</strong> chip, and a letter <strong>Grade</strong>.</li>
@@ -1986,8 +1994,8 @@ failed. Index names (<code>$SPX</code>, <code>SPY</code>, <code>QQQ</code>) are 
 their implied volatility is usually too low to clear the credit floor.</p>
 </blockquote>
 <h3 id="other-structures">Other structures</h3>
-<p>The 0-DTE and Swing scans build more than credit spreads. Click <strong>Other
-structures</strong> at the top of either tab to see the rest:</p>
+<p>The 0-DTE and Swing scans build more than credit spreads. Each tab lists the
+rest in the same table as its credit spreads:</p>
 <table>
 <thead>
 <tr>
@@ -2025,10 +2033,12 @@ structures</strong> at the top of either tab to see the rest:</p>
 </tbody>
 </table>
 <ol>
-<li>Click <strong>Other structures</strong>. The number beside each side of the switch is how
-   many rows it holds, and the tab's own count adds both.</li>
+<li>Open <strong>0-DTE</strong> or <strong>Swing</strong>. The table lists every kind together, best score
+   first, and the tab's count is the number of rows on show.</li>
 <li>Untick a family box above the table to hide that kind; tick it to bring it
-   back. A family with nothing today is not listed.</li>
+   back. The number beside each box is how many rows it holds, and a family
+   with nothing today is not listed. <strong>Credit spreads</strong> is the first box:
+   untick it to see the other structures alone.</li>
 <li>Click a row for its detail, then <strong>Calculator</strong>, <strong>Expected Move</strong> or, where
    it is offered, <strong>Paper trade</strong>.</li>
 </ol>
@@ -2037,8 +2047,10 @@ structures</strong> at the top of either tab to see the rest:</p>
 <li><strong>The score is not the credit-spread score.</strong> Credit spreads are scored as
   trades that sell premium. Other structures are scored on how well they fit the
   market's direction and volatility and how sound they are. The two are on
-  different scales, so they are in different tables, and a 75 in one is not a 75
-  in the other.</li>
+  different scales, and a 75 on one is not a 75 on the other. They share one
+  table and one ranking all the same, so do not read a higher score as the
+  better trade when one row is a credit spread and the other is not. Hover a
+  score to see which scale it is on.</li>
 <li><strong>At most two of a family are listed per symbol.</strong> The limit is per family on
   purpose: debit spreads usually score in the 70s and long straddles in the 50s,
   so one limit across families would never show a long straddle.</li>

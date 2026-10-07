@@ -179,7 +179,7 @@ form (published as **Rescue my Sh\*tty trade**), the **Calculator**, the
 
 **Option Signals** (`/signals`, first in the site's Tools menu) is your Market
 Scanner with nothing of yours on it. A visitor sees the 0-DTE, Swing and
-Directional tabs, the Credit spreads / Other structures switch, the Checks
+Directional tabs, the family tick boxes on 0-DTE and Swing, the Checks
 column, **Only clear**, **Why no trade?** and the Trade detail panel. They do
 not get **Run scan**, the **Paper trade**, **Calculator** or **Expected Move**
 buttons, the "new" badges, the checklist's **Paper book** line, the panel's
@@ -1561,8 +1561,9 @@ two-pane layout.
   credit-spread tabs — do not compare their numbers. A **bought** call or put is
   listed only when its grade is **Good** or **Strong**. A sold call or put is
   also listed at Marginal, because they rarely grade higher.
-- On **0-DTE** and **Swing**, a switch at the top of the tab: **Credit spreads**
-  and **Other structures**. Each is its own table (see *Other structures*, below).
+- On **0-DTE** and **Swing**, one table holding the credit spreads and the
+  **other structures** together, with a tick box per family above it (see
+  *Other structures*, below).
 - A table of candidate signals. Columns include Symbol, Type, Expiration, DTE,
   Short/Long strikes, Credit, Max Loss, Risk/Reward %, Probability of Profit %,
   a color-coded **Score** chip, and a letter **Grade**.
@@ -1672,8 +1673,8 @@ from one that appeared in a single scan. Neither column filters or sorts anythin
 
 ### Other structures
 
-The 0-DTE and Swing scans build more than credit spreads. Click **Other
-structures** at the top of either tab to see the rest:
+The 0-DTE and Swing scans build more than credit spreads. Each tab lists the
+rest in the same table as its credit spreads:
 
 | Family | What it lists | Tabs |
 | --- | --- | --- |
@@ -1683,10 +1684,12 @@ structures** at the top of either tab to see the rest:
 | **Calendars** | call and put calendar, call and put diagonal | Swing |
 | **Ratio spreads** | call backspread, put backspread | both |
 
-1. Click **Other structures**. The number beside each side of the switch is how
-   many rows it holds, and the tab's own count adds both.
+1. Open **0-DTE** or **Swing**. The table lists every kind together, best score
+   first, and the tab's count is the number of rows on show.
 2. Untick a family box above the table to hide that kind; tick it to bring it
-   back. A family with nothing today is not listed.
+   back. The number beside each box is how many rows it holds, and a family
+   with nothing today is not listed. **Credit spreads** is the first box:
+   untick it to see the other structures alone.
 3. Click a row for its detail, then **Calculator**, **Expected Move** or, where
    it is offered, **Paper trade**.
 
@@ -1695,8 +1698,10 @@ Four things to know:
 - **The score is not the credit-spread score.** Credit spreads are scored as
   trades that sell premium. Other structures are scored on how well they fit the
   market's direction and volatility and how sound they are. The two are on
-  different scales, so they are in different tables, and a 75 in one is not a 75
-  in the other.
+  different scales, and a 75 on one is not a 75 on the other. They share one
+  table and one ranking all the same, so do not read a higher score as the
+  better trade when one row is a credit spread and the other is not. Hover a
+  score to see which scale it is on.
 - **At most two of a family are listed per symbol.** The limit is per family on
   purpose: debit spreads usually score in the 70s and long straddles in the 50s,
   so one limit across families would never show a long straddle.

@@ -175,6 +175,9 @@ argument: a keyword can be left off a `Screen` entry, and the result would be
 the owner's page served to anyone. What it leaves out, and where each is
 enforced:
 
+- (The page itself changed on 2026-10-07, on both origins: each of the 0-DTE and
+  Swing tabs holds ONE table of credit spreads and other structures together,
+  where it held two behind a switch. Nothing below depends on which.)
 - **Run scan** is not built, and `_request_scan` opens with the `_may_enqueue`
   return `test_live_commands.py` requires of every published module.
 - **Paper trade, Calculator and Expected Move** are not built. Paper writes the

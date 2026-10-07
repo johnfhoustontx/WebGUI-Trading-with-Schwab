@@ -576,13 +576,27 @@ every row's `_allow_paper` before the checks are stamped. Tests:
 `tests/test_scanner_public.py`, `tests/test_scanner_shared.py`,
 `tests/test_checks_feed_public.py`.
 
-**Other structures on the 0-DTE and Swing tabs (2026-10-06).** Each of those two
-tabs holds TWO tables behind a two-way `ui.toggle` (`scanner_structures.view_options`
-labels it *Credit spreads · N* / *Other structures · N*): the credit table,
-unchanged, and a table of everything else that scan builds — debit spreads,
+**One table per tab since 2026-10-07 (the owner's decision).** The 0-DTE and
+Swing tabs each held two tables behind a two-way `ui.toggle`; they now hold ONE
+(`_family_table`), and the page has three tables in all (`tables`, keyed by tab
+name). `scanner_structures.credit_rows` draws a credit spread in the shared
+columns: per-contract dollars (`+60.00 credit`), R:R as a ratio, its strike
+fields as legs, the engine's own strategy names, `_group = "CREDIT"`.
+`_build_populate` stamps each day list as before and then merges each tab's
+lists into one ranking (`scanner_structures.merged`; `built["tables"]` /
+`built["table_sigs"]`, the SAME row dicts as `built["rows"]`). `GROUPS` leads
+with *Credit spreads*, so the family checkboxes filter both kinds. ⚠ The credit
+rows carry the premium composite and the others the Fit + Quality score, and the
+ranking compares them by choice: `SCALE_NOTE` under the checkboxes and each
+row's `_score_tip` (a tooltip in `_SCORE_SLOT`) say so. One click handler,
+`_select`, serves both shapes and reads which from the signal (a normalized
+candidate has `legs`). The day envelope is unchanged: the paper Account still
+enters from `signals_0dte` / `signals_swing` alone.
+
+**Other structures on the 0-DTE and Swing tabs (2026-10-06).** Besides its
+credit spreads each of those two tabs lists everything else that scan builds — debit spreads,
 straddles and strangles, butterflies and condors, and since 2026-10-07 ratio
-backspreads (both tabs), calendars and diagonals (Swing only). Two tables, never one: the credit rows carry the premium
-composite and the others the Fit + Quality score. The rows come from the day
+backspreads (both tabs), calendars and diagonals (Swing only). The rows come from the day
 union's `structures_0dte` / `structures_swing` lists (`scanner.DAY_LISTS` is five
 lists; the first three keep their positions) through
 `scanner_structures.structure_rows` — `scanner.directional_rows` plus `_group`
@@ -590,11 +604,10 @@ lists; the first three keep their positions) through
 carries `spans_earnings`). One `ui.checkbox` per family (`scanner_structures.GROUPS`)
 is built once with the table; a repaint only sets its text (*Debit spreads · 6*)
 and hides a family with no rows, and unticking one filters the stored rows with
-no bus read. A tab's header counts both of its tables
-(`scanner_structures.tab_totals`), after the family filter. The two tables share
-the Directional table's slots and `_select_dir` (one loop, `_n`, over
-`table_dir`, `table_x0`, `table_xs`) and add `_EARNINGS_SLOT` on the strategy
-cell. Paper follows `strategy_table._PAPER_TYPES`: debit verticals, butterflies
+no bus read. A tab's header counts the rows its table has on show, after the
+family filter. Every table takes the same slots in one loop (`_n`, over
+`tables.values()`), and the two family tables add `_EARNINGS_SLOT` on the
+strategy cell. Paper follows `strategy_table._PAPER_TYPES`: debit verticals, butterflies
 and condors yes; straddles, strangles, the iron butterfly, calendars,
 diagonals and backspreads no. **Why no trade?** has five cards — the three windows, then
 `STRUCT_0DTE` and `STRUCT_SWING` — and a bucket no symbol reports gets no chip

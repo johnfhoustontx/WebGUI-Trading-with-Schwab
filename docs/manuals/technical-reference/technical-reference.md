@@ -1099,8 +1099,8 @@ at one day — so a 30-DTE breakeven is judged against a 30-day move, not a 1-da
 The **Market Scanner's Directional tab** scores its single-leg candidates the same way
 (`run_full_scan` passes the same `daily_move`), so one candidate scores identically on
 both pages; in either, a candidate without a usable DTE falls back to one move at its
-scan window's DTE minimum. The Scanner's **Other structures** tables (below) go through
-the same call. ⚠ **The Income board scores through the same `swing_scan`
+scan window's DTE minimum. The Scanner's **other structures** (below; listed in the same
+table as the credit spreads on 0-DTE and Swing since 2026-10-07) go through the same call. ⚠ **The Income board scores through the same `swing_scan`
 path, so its `entry_score` changed basis on 2026-09-13** — from one move at the window's
 30-DTE minimum to the move to each candidate's own 30–45 DTE expiry, a factor of
 √(DTE / 30), so at most ~1.22 on the move. Scores captured under `scanner_type = "INCOME"`

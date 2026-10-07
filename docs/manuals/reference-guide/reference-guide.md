@@ -2337,13 +2337,16 @@ never be confused.
 | **Swing** | Multi-day credit spreads, typically 5–15 DTE. |
 | **Directional** | Single-leg long and short calls and puts. A bought call or put is listed only at grade **Good** or **Strong**; a sold one is also listed at Marginal. |
 
-**Two tables on 0-DTE and Swing.** A switch at the top of each of those tabs
-chooses between **Credit spreads** and **Other structures**: debit spreads,
+**One table on 0-DTE and on Swing.** Each of those tabs lists its credit spreads
+together with the **other structures** the scan builds: debit spreads,
 straddles and strangles, butterflies and condors and ratio backspreads on both
-tabs, and calendars and diagonals on Swing. They are separate tables because they are scored on separate
-scales (see *Where it is weak*, below). The family boxes above the Other
-structures table show and hide one kind at a time, and at most two of a family
-are listed per symbol.
+tabs, and calendars and diagonals on Swing. Every row uses the same columns, in
+dollars per contract (a credit spread reads *+60.00 credit*), and the table is
+ranked by score. The family boxes above it, **Credit spreads** first, show and
+hide one kind at a time, and at most two of a family of other structures are
+listed per symbol. The two kinds are scored on separate scales (see *Where it
+is weak*, below): the note under the boxes says so, and hovering a score names
+the scale it is on. Until 2026-10-07 they were two tables behind a switch.
 
 **Every Other structures row and every Directional row is recorded.** When a scan
 finishes during regular hours those rows are written down and followed to a
@@ -2620,8 +2623,12 @@ yourself — a 0.20 credit on a 5.00-wide spread is a bad trade whatever it scor
 
 Note also that the **Directional** tab uses a *different* score (Fit + Quality) that is
 **not commensurable** with the credit-spread composite. Do not compare a 70 on
-Directional with a 70 on Swing. The **Other structures** tables use that same
-Fit + Quality score, so the same warning holds between the two tables of one tab.
+Directional with a 70 on Swing. The **other structures** on 0-DTE and Swing use
+that same Fit + Quality score, and since 2026-10-07 they share ONE table with
+the credit spreads, ranked together. So the same warning holds between rows of
+one table: a debit spread at 76 above a credit spread at 72 has not been judged
+the better trade. Untick **Credit spreads**, or tick only it, to rank one kind
+alone.
 
 Within Other structures the score also sits in bands by family. Measured on
 fairly priced chains, debit spreads and condors score 73 to 78, butterflies 68
