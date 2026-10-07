@@ -12,13 +12,20 @@ one exists for, and it takes the same lesson: stubbing the tracker per test has
 to be remembered forever, while a guard at the chokepoint covers a module added
 tomorrow. These tests pin that guard.
 
-**Two chokepoints, because there are two HTTP stacks in production code:**
+**Three chokepoints, one per HTTP stack a production call can travel:**
 
 * ``requests.adapters.HTTPAdapter.send`` — below ``requests.Session``, which
   matters: eight production modules hold a persistent ``requests.Session()``, so
   patching ``requests.post`` would have missed most of them;
 * ``urllib.request.urlopen`` — ``daily_trade_log``, ``earnings_history``,
-  ``edgar_fundamentals`` and ``tools/wait_http`` use it.
+  ``edgar_fundamentals`` and ``tools/wait_http`` use it;
+* ``httpx.HTTPTransport.handle_request`` and
+  ``httpx.AsyncHTTPTransport.handle_async_request`` — no module here imports
+  ``httpx``, but two dependencies drive it for real outbound calls: the
+  ``anthropic`` SDK (a PAID call) and ``schwab-py`` (the stream bridge's login).
+  The patch sits on the two REAL network transports and nowhere higher, because
+  FastAPI's ``TestClient`` and ``httpx.ASGITransport`` are also httpx clients
+  and must keep working: they bring their own in-process transport.
 
 ⚠ **Unlike the SQLite guard, this one raises each stack's OWN connection
 error**, and that is deliberate. A database has no "store is down" path the code
@@ -28,14 +35,60 @@ degrades — so raising the native type makes a test take exactly the path
 production takes when the proxy is unreachable. A ``RuntimeError`` would escape
 those ``except`` clauses and force a per-test stub at every site, which is the
 per-site patching the SQLite post-mortem says does not scale.
+
+⚠ **The guard is installed ONCE, when the root conftest is imported, and stays
+in place for the whole process.** The first version was a per-test monkeypatch,
+which is undone at every teardown — and a thread a test leaves running does not
+stop at a teardown. Measured 2026-10-06 on ``services/sentiment_svc``: three
+tests started the service's two daemon stream consumers, and in 3 runs out of 3
+two or three of their requests reached the proxy's port in the gap between one
+test's teardown and the next test's setup. Those tests are fixed, but the next
+leaked thread will be just as quiet, so the gap itself is closed.
 """
 import urllib.error
 import urllib.request
 
+import httpx
 import pytest
 import requests
 
-from conftest import NetworkBlockedInTest, UrllibBlockedInTest
+from conftest import HttpxBlockedInTest, NetworkBlockedInTest, UrllibBlockedInTest
+
+
+# ── captured at IMPORT: during collection, with no test and no fixture ───────
+#
+# This module is imported while pytest collects, before any test has started.
+# A guard that lives in a per-test fixture is not installed yet at that moment
+# (and not between two tests either), so these three attempts would go out.
+
+def _attempt(call, blocked):
+    try:
+        call()
+    except blocked:
+        return "blocked"
+    except Exception as exc:                      # a real attempt that failed
+        return f"went out ({type(exc).__name__})"
+    return "went out (answered)"
+
+
+_AT_COLLECTION = {
+    "requests": _attempt(
+        lambda: requests.get("http://127.0.0.1:8100/health", timeout=1.5),
+        NetworkBlockedInTest),
+    "urllib": _attempt(
+        lambda: urllib.request.urlopen("http://127.0.0.1:8100/health", timeout=1.5),
+        UrllibBlockedInTest),
+    "httpx": _attempt(
+        lambda: httpx.get("http://127.0.0.1:8100/health", timeout=1.5),
+        HttpxBlockedInTest),
+}
+
+
+def test_the_guard_is_already_in_place_OUTSIDE_any_test():
+    """The property a per-test fixture cannot have: collection time, the gap
+    between two tests, and a thread an earlier test left running."""
+    assert _AT_COLLECTION == {"requests": "blocked", "urllib": "blocked",
+                              "httpx": "blocked"}
 
 
 # ── the requests stack ────────────────────────────────────────────────────
@@ -120,6 +173,113 @@ def test_the_urllib_error_names_the_URL_and_the_way_out():
     assert "allow_network" in str(exc.value)
 
 
+# ── the httpx stack ───────────────────────────────────────────────────────
+
+def test_a_SYNC_httpx_call_is_blocked():
+    with pytest.raises(httpx.ConnectError):
+        httpx.get("http://127.0.0.1:8100/health", timeout=1.5)
+
+
+def test_a_persistent_httpx_CLIENT_is_blocked_too():
+    """schwab-py holds one for the life of the stream bridge."""
+    with httpx.Client() as client:
+        with pytest.raises(httpx.ConnectError):
+            client.post("https://api.schwabapi.com/v1/oauth/token", data={"x": "y"})
+
+
+def test_an_ASYNC_httpx_call_is_blocked():
+    """The async transport is a separate class with a separate method; a guard
+    on the sync one alone leaves every ``AsyncClient`` open."""
+    import asyncio
+
+    async def _go():
+        async with httpx.AsyncClient() as client:
+            await client.get("https://api.anthropic.com/v1/messages")
+
+    with pytest.raises(httpx.ConnectError):
+        asyncio.run(_go())
+
+
+_MODULE_LEVEL_CLIENT = httpx.Client()
+
+
+def test_a_client_built_BEFORE_the_test_is_blocked_too():
+    """A module-level client outlives any one test. The patch is on the
+    transport CLASS, so an instance created earlier is covered as well."""
+    with pytest.raises(httpx.ConnectError):
+        _MODULE_LEVEL_CLIENT.get("http://127.0.0.1:8100/health")
+
+
+def test_the_httpx_error_is_the_NATIVE_type_callers_already_catch():
+    """The anthropic SDK turns ``httpx`` transport errors into its own
+    ``APIConnectionError``; anything outside this hierarchy would escape as a
+    bare exception no call site expects."""
+    assert issubclass(HttpxBlockedInTest, httpx.ConnectError)
+    assert issubclass(HttpxBlockedInTest, httpx.TransportError)
+    assert issubclass(HttpxBlockedInTest, httpx.HTTPError)
+
+
+def test_the_httpx_error_names_the_URL_and_the_way_out():
+    with pytest.raises(HttpxBlockedInTest) as exc:
+        httpx.get("http://127.0.0.1:8211/health")
+    assert "127.0.0.1:8211" in str(exc.value)
+    assert "allow_network" in str(exc.value)
+    assert exc.value.request.url.host == "127.0.0.1"
+
+
+def test_the_anthropic_SDK_takes_its_own_connection_error_path():
+    """The paid call, end to end: a real client with a fake key reaches the
+    transport, is refused, and raises the SDK's ordinary connection error. No
+    request leaves the process and nothing is billed."""
+    anthropic = pytest.importorskip("anthropic")
+    client = anthropic.Anthropic(api_key="sk-ant-test-not-a-key", max_retries=0)
+    with pytest.raises(anthropic.APIConnectionError) as exc:
+        client.messages.create(model="claude-sonnet-5-5", max_tokens=8,
+                               messages=[{"role": "user", "content": "x"}])
+    assert isinstance(exc.value.__cause__, HttpxBlockedInTest)
+
+
+# ── httpx clients that are NOT the network must be left alone ────────────
+
+def _tiny_app():
+    from fastapi import FastAPI
+    app = FastAPI()
+
+    @app.get("/health")
+    def _health():
+        return {"ok": True}
+
+    return app
+
+
+def test_the_FastAPI_TestClient_still_works_in_process():
+    """Every service's ``test_app.py`` and the webgui auth tests depend on this.
+    ``TestClient`` IS an ``httpx.Client``; it answers through its own in-process
+    transport, which the guard must not touch."""
+    from fastapi.testclient import TestClient
+    with TestClient(_tiny_app()) as client:
+        r = client.get("/health")
+    assert r.status_code == 200 and r.json() == {"ok": True}
+
+
+def test_an_ASGI_transport_still_works_in_process():
+    import asyncio
+
+    async def _go():
+        transport = httpx.ASGITransport(app=_tiny_app())
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as client:
+            return await client.get("/health")
+
+    assert asyncio.run(_go()).status_code == 200
+
+
+def test_a_MOCK_transport_still_works():
+    """The injected fake a test should prefer over ``allow_network``."""
+    transport = httpx.MockTransport(lambda request: httpx.Response(204))
+    with httpx.Client(transport=transport) as client:
+        assert client.get("https://api.anthropic.com/").status_code == 204
+
+
 # ── the guard must not get in the way of what it should not touch ────────
 
 def test_a_test_can_still_MONKEYPATCH_urlopen_over_the_guard(monkeypatch):
@@ -136,22 +296,96 @@ def test_a_test_can_still_stub_requests_over_the_guard(monkeypatch):
     assert requests.get("http://127.0.0.1:8100/").status_code == 200
 
 
+class _OwnServer:
+    """A loopback HTTP server this test file starts itself; answers 200."""
+
+    def __enter__(self):
+        import http.server
+        import threading
+
+        class _H(http.server.BaseHTTPRequestHandler):
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header("Content-Length", "2")
+                self.end_headers()
+                self.wfile.write(b"ok")
+
+            def log_message(self, *a):
+                pass
+
+        self.srv = http.server.HTTPServer(("127.0.0.1", 0), _H)
+        self.url = f"http://127.0.0.1:{self.srv.server_port}/"
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+        return self
+
+    def __exit__(self, *exc):
+        self.srv.shutdown()
+        self.srv.server_close()
+
+
+def _no_env_proxy(monkeypatch):
+    for var in ("HTTP_PROXY", "http_proxy", "HTTPS_PROXY", "https_proxy",
+                "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(var, raising=False)
+
+
 @pytest.mark.allow_network
-def test_the_ESCAPE_HATCH_restores_the_real_adapter():
-    """The marker is for a test that starts its own server, like wait_http's."""
-    import requests.adapters
-    from conftest import _real_http_adapter_send, _real_urlopen
-    assert requests.adapters.HTTPAdapter.send is _real_http_adapter_send
-    assert urllib.request.urlopen is _real_urlopen
+def test_the_ESCAPE_HATCH_reaches_a_server_the_test_started(monkeypatch):
+    """The marker is for a test that starts its own server, like wait_http's.
+    Shown through all three stacks, against a server that really answers."""
+    _no_env_proxy(monkeypatch)
+    with _OwnServer() as srv:
+        assert requests.get(srv.url, timeout=5).status_code == 200
+        assert urllib.request.urlopen(srv.url, timeout=5).status == 200
+        assert httpx.get(srv.url, timeout=5).status_code == 200
 
 
-def test_without_the_marker_the_adapter_IS_patched():
+def test_without_the_marker_the_SAME_live_server_is_refused(monkeypatch):
     """The converse, so the escape-hatch test cannot pass on a guard that was
-    never installed."""
-    import requests.adapters
-    from conftest import _real_http_adapter_send, _real_urlopen
-    assert requests.adapters.HTTPAdapter.send is not _real_http_adapter_send
-    assert urllib.request.urlopen is not _real_urlopen
+    never installed: the server is up and would answer 200."""
+    _no_env_proxy(monkeypatch)
+    with _OwnServer() as srv:
+        with pytest.raises(NetworkBlockedInTest):
+            requests.get(srv.url, timeout=5)
+        with pytest.raises(UrllibBlockedInTest):
+            urllib.request.urlopen(srv.url, timeout=5)
+        with pytest.raises(HttpxBlockedInTest):
+            httpx.get(srv.url, timeout=5)
+
+
+@pytest.mark.allow_network
+def test_the_escape_hatch_CLOSES_again_after_the_marked_test():
+    """Half of a pair with the test below: this one only opens the guard."""
+    import conftest
+    assert conftest.network_guard().open == 1
+
+
+def test_the_guard_is_closed_in_an_unmarked_test():
+    """Runs after the marked test above in file order; either way the count is
+    zero, because a marked test must leave it as it found it."""
+    import conftest
+    assert conftest.network_guard().open == 0
+
+
+def test_a_SECOND_import_of_the_root_conftest_reuses_the_one_guard():
+    """A second layer would capture the first guard as its "real" function, and
+    the marker would then open the outer layer onto a closed inner one."""
+    import importlib.util
+    import pathlib
+
+    import conftest
+    before = (urllib.request.urlopen, requests.adapters.HTTPAdapter.send,
+              httpx.HTTPTransport.handle_request)
+    spec = importlib.util.spec_from_file_location(
+        "conftest_imported_again", pathlib.Path(conftest.__file__))
+    again = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(again)
+    assert again.network_guard() is conftest.network_guard()
+    assert again.NetworkBlockedInTest is NetworkBlockedInTest
+    assert again.UrllibBlockedInTest is UrllibBlockedInTest
+    assert again.HttpxBlockedInTest is HttpxBlockedInTest
+    assert before == (urllib.request.urlopen, requests.adapters.HTTPAdapter.send,
+                      httpx.HTTPTransport.handle_request)
 
 
 def test_the_marker_is_REGISTERED():

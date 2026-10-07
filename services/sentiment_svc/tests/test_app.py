@@ -4,6 +4,13 @@ Hermetic: ``handlers.refresh`` is monkeypatched to a no-op recorder so nothing
 touches a live proxy/compute. The app's startup runs the scheduler once (the
 no-op refresh) which is harmless and fast.
 
+Every test that drives ``scheduler.loop`` takes the ``no_stream_consumers``
+fixture. The loop starts two daemon SSE consumer threads, and stubbing
+``refresh`` alone left them real: they outlived the test and kept calling the
+proxy (``/chains``, ``/quote``, ``/stream/quotes``) during the tests that ran
+after it. Measured 2026-10-06: two or three of those calls per run landed in
+the gap between two tests.
+
 pytest-asyncio is NOT installed in this venv, so the scheduler coroutine is
 driven manually via a fresh event loop + ``run_until_complete``.
 """
@@ -14,6 +21,27 @@ from fastapi.testclient import TestClient
 
 from shared.bus import Bus
 from services.sentiment_svc import handlers, scheduler
+
+
+@pytest.fixture
+def no_stream_consumers(monkeypatch):
+    """Replace the two thread-starting consumers with fakes; returns what started.
+
+    Each fake hands back a stop Event, as the real one does, so the loop's
+    ``finally`` block still has something to set."""
+    import threading
+    started = []
+
+    def _fake(name):
+        def _start(bus):
+            started.append(name)
+            return threading.Event()
+        return _start
+
+    monkeypatch.setattr(scheduler.order_flow_consumer, "start_consumer", _fake("equity"))
+    monkeypatch.setattr(scheduler.order_flow_consumer, "start_option_consumer",
+                        _fake("option"))
+    return started
 
 
 def test_health(monkeypatch):
@@ -30,7 +58,7 @@ def test_health(monkeypatch):
         assert body["scheduler_alive"] is True
 
 
-def test_scheduler_runs_full_refresh_first(monkeypatch):
+def test_scheduler_runs_full_refresh_first(monkeypatch, no_stream_consumers):
     """First refresh must use with_sectors=True (full refresh), mirroring _bg_loop."""
     bus = Bus(fake=True)
     seen = []
@@ -39,6 +67,9 @@ def test_scheduler_runs_full_refresh_first(monkeypatch):
         seen.append(with_sectors)
 
     monkeypatch.setattr(handlers, "refresh", _rec)
+    # The one-shot rotation refresh is not this test's subject, and left real it
+    # asks the proxy for a year of history on twelve symbols.
+    monkeypatch.setattr(handlers, "refresh_rotation", lambda b: None)
 
     # Break out of the infinite loop after the first refresh by making the
     # scheduler's asyncio.sleep raise CancelledError on first await.
@@ -56,9 +87,12 @@ def test_scheduler_runs_full_refresh_first(monkeypatch):
 
     # The full refresh (with_sectors=True) must be the first recorded call.
     assert seen and seen[0] is True
+    # The loop got as far as starting both consumers (the fakes), so the
+    # assertion above is about a loop that really ran its startup.
+    assert no_stream_consumers == ["equity", "option"]
 
 
-def test_scheduler_runs_one_shot_rotation_refresh(monkeypatch):
+def test_scheduler_runs_one_shot_rotation_refresh(monkeypatch, no_stream_consumers):
     """A one-shot rotation refresh runs at startup (after the full refresh,
     before the poll loop) so the manual-refresh-only page has data on first load."""
     bus = Bus(fake=True)
@@ -85,7 +119,7 @@ def test_scheduler_runs_one_shot_rotation_refresh(monkeypatch):
     assert order[:2] == [("refresh", True), ("rotation",)]
 
 
-def test_scheduler_rotation_failure_non_fatal(monkeypatch):
+def test_scheduler_rotation_failure_non_fatal(monkeypatch, no_stream_consumers):
     """A rotation-refresh failure at startup must not kill the loop — the
     composite poll still proceeds (we trip CancelledError on the first sleep)."""
     bus = Bus(fake=True)

@@ -490,9 +490,13 @@ a worktree needs its absolute path.
 - The fake bus is ONE Redis per running test, as in prod. A test that needs an
   empty cache says so (`reset_fake_bus()`).
 - The suite cannot open a live SQLite store or reach the network: the repo-root
-  `conftest.py` guards `sqlite3.connect` and both HTTP stacks. Prefer
-  `db_path=None` resolved at call time in a new store; a default bound at `def`
-  time cannot be redirected.
+  `conftest.py` guards `sqlite3.connect` and the three HTTP stacks (`requests`,
+  `urllib`, `httpx`), the HTTP ones for the whole session. A test that starts its
+  own local server carries `@pytest.mark.allow_network`; a test expecting "down"
+  needs a partner expecting "up", or it passes on the guard alone. No sub-folder
+  may hold a pytest config: it moves rootdir and switches both guards off
+  (`tests/test_conftest_reach.py`). Prefer `db_path=None` resolved at call time
+  in a new store; a default bound at `def` time cannot be redirected.
 - CI runs every suite as blocking, with a `typecheck` job;
   `tests/test_ci_covers_every_suite.py` fails when a suite loses its row. A new
   test folder needs a row.

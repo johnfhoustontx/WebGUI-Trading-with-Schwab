@@ -37,9 +37,21 @@ fixture that refuses any connect resolving into a live data directory
 `shared/data`, `webgui/data`, `services/trade_svc/data`, `services/news_svc/data`).
 `tmp_path` and
 `:memory:` are unaffected; a test that genuinely must read production shape marks
-itself **`@pytest.mark.allow_live_db`**. It is verified to apply to per-app runs
-(`cd options-scanner && pytest tests`) since the repo-root `pyproject.toml` is the
+itself **`@pytest.mark.allow_live_db`**. It applies to per-app runs
+(`cd options-scanner && pytest tests`) because the repo-root `pyproject.toml` is the
 configfile, so rootdir — and therefore conftest collection — starts here.
+
+⚠ **That was checked on `options-scanner` only, and one suite was outside it until
+2026-10-06.** `trade-analyzer/pytest.ini`, a day-one copy, moved rootdir into that
+folder, and pytest loads conftests only from rootdir down — so in that suite
+`sqlite3.connect` was the REAL function (measured on `main` that day), for the
+whole life of the repo. The file is gone; removing it changed the collected set by
+nothing (442 node IDs before and after, compared as a set). Nothing had leaked
+there, which is why it needed a test and not a memory:
+**`tests/test_conftest_reach.py` fails on any sub-folder `pytest.ini`, or a
+`pyproject.toml` / `tox.ini` / `setup.cfg` carrying a pytest section.** Put a
+setting in the root `pyproject.toml`, or in a sub-folder `conftest.py`, which does
+not move rootdir.
 
 ⚠ **The layer is the whole point, and the previous attempt proves it.**
 `options-scanner/tests/conftest.py` had carried a fixture written for exactly this
@@ -57,6 +69,76 @@ without anyone remembering to cover it. **Do not "simplify" it back to patching
 paths.** Note `paper_account_db` resolves correctly (`db_path=None` → look up
 `DEFAULT_DB_PATH` at CALL time) and `signal_db` does not — prefer the former shape
 in new stores.
+
+**The suite CANNOT reach a real HTTP server — refused at the transport, for the
+whole session (on `main` since 2026-10-06).** The same root `conftest.py` patches
+one chokepoint per HTTP stack a production call can travel:
+
+| stack | chokepoint | who uses it for real calls | raises |
+|---|---|---|---|
+| `requests` | `requests.adapters.HTTPAdapter.send` | the proxy client, the stream tracker, the stream consumers, `news_svc.fetch` | `NetworkBlockedInTest` (a `requests` `ConnectionError`) |
+| `urllib` | `urllib.request.urlopen` | `daily_trade_log`, `earnings_history`, `edgar_fundamentals`, `tools/wait_http`, `tools/token_watch` | `UrllibBlockedInTest` (a `URLError`) |
+| `httpx` | `httpx.HTTPTransport.handle_request` and `httpx.AsyncHTTPTransport.handle_async_request` | no module here imports it, but the `anthropic` SDK (a PAID call) and `schwab-py` (the stream bridge's OAuth client) run on it | `HttpxBlockedInTest` (an `httpx.ConnectError`) |
+
+- **Below the convenience layer, on purpose.** `HTTPAdapter.send` sits under
+  `requests.Session`, and eight modules hold a persistent Session that a
+  `requests.post` patch would miss. The `httpx` patch sits on the two REAL network
+  transports and nowhere higher: FastAPI's `TestClient` is itself an
+  `httpx.Client`, and it, `httpx.ASGITransport` and `httpx.MockTransport` each bring
+  their own in-process transport, so every `test_app.py` keeps working.
+- ⚠ **It raises each stack's NATIVE connection error, unlike the SQLite guard's
+  `RuntimeError`.** A database has no "store is down" path the code handles; an HTTP
+  server does, and every call site already catches `RequestException` / `URLError`
+  and degrades. So a test takes exactly the path production takes with the proxy
+  unreachable, with no stub needed at each site.
+- ⚠ **It is installed ONCE, when the conftest is imported, and never removed.** The
+  first version was a per-test `monkeypatch`, which is undone at every teardown —
+  and a thread a test leaves running does not stop at a teardown. Measured
+  2026-10-06 on `services/sentiment_svc`: three tests drove the real
+  `scheduler.loop`, which starts two daemon stream consumers, and in 3 runs out of
+  3 two or three of their requests (`/chains`, `/quote`) reached the proxy's port
+  in the gap between one test's teardown and the next test's setup. On the prod
+  box those are real Schwab calls. Those tests now take fake consumers, but the
+  next leaked thread will be just as quiet, so the gap itself is closed. It also
+  covers collection (a module that makes a request at import) and the end of the
+  session. A test's own `monkeypatch.setattr(urllib.request, "urlopen", fake)`
+  still wins over it.
+- **The way out is `@pytest.mark.allow_network`, for a test that starts its OWN
+  local server.** It opens the guard for the length of that one test — for every
+  thread, a leaked one included, so it is not a substitute for a fake. Eight tests
+  carry it: two in `tools/tests/test_wait_http.py`, four in
+  `services/news_svc/tests/test_fetch.py` (the deadline watchdog cuts a real
+  socket, which no fake has), two in the guard's own tests. Prefer an injected
+  fake, or `httpx.MockTransport`.
+- ⚠ **The converse hazard: a test asserting "reads as DOWN" passes VACUOUSLY under
+  the guard**, because the guard — not the thing under test — is what said down.
+  `wait_http`'s bound-but-never-accepting socket test is the known case: without
+  the marker it stays green while testing nothing. Its "power check" partner (a
+  server that DOES accept must read UP) is what fails, both carry the marker, and
+  `tests/test_network_isolation.py` pins that by AST and demonstrates the hazard
+  against a live server answering 200. When a test's expected result is "down",
+  "unreachable" or "degraded", give it a partner that expects "up".
+- **Not covered, deliberately:** `aiohttp` (only `edge_tts`, whose tests stub
+  `voice._synthesize`); anything that is not HTTP (`smtplib`, the Schwab
+  websocket), which the tests that touch them replace by hand; a bare
+  `http.client` connection (one test, to its own server); and a SUBPROCESS a test
+  spawns, which is a different interpreter.
+
+**What it was measured against.** A recorder plugin logged every outbound attempt
+across the 21 CI suites on `main` at `4a50feb`, before the guard: **45 attempts, 39
+of them to the proxy's port** — 15 WRITES (`/track`, `/untrack`, from nine
+`options-scanner` tests that call `paper_trader.add_trade` unstubbed) and 24
+market-data READS (21 from `sentiment_svc`, 3 from one `tools` test) — plus 6 to
+servers the tests start themselves. None through `httpx` or `aiohttp`, none to an
+outside host. Under the guard the nine `options-scanner` tests are still refused
+15 times and pass on the tracker's proxy-down path, which is what they did on any
+machine without a proxy. Apart from them, the guard's own tests and the eight
+marked tests, no suite makes an outbound attempt at all.
+
+⚠ **This guard was written on 2026-09-12 and did not reach `main` until
+2026-10-06.** It sat on two side branches, and from 2026-10-04 `CLAUDE.md` said the
+suite could not reach the network. A sentence in a rules file is not a guard: check
+that the fixture is in the file (`git grep allow_network`) before relying on it.
 
 **`pyrightconfig.json` is a DELIBERATELY NARROW type check** — `shared/bus`,
 `shared/contracts`, `shared/config_toml.py`, `webgui/bus_client.py`. That is the

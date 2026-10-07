@@ -13,23 +13,46 @@ backend on day one of this repo, made ``rootdir`` = ``trade-analyzer/``. Measure
 the REAL functions — the SQLite guard, which CLAUDE.md documented as covering
 per-app runs, had never covered it. Removing the file changed the collected set
 by nothing (406 node IDs before and after, compared by set, not by count); it
-only moved ``rootdir`` back and switched both guards on.
+only moved ``rootdir`` back and switched both guards on. That fix sat on two
+side branches and never merged, so it was all still true when it was
+re-measured on ``main`` on 2026-10-06: the same real functions, and 442 node IDs
+before and after the removal.
 
 Nothing was leaking there — an inventory of every outbound request across all 18
 suites found none from trade-analyzer — which is exactly why this has to be a
 test rather than a memory: the next such file will be just as quiet.
 """
 import configparser
+import os
 import pathlib
 import sys
 import tomllib
 
 _ROOT = pathlib.Path(__file__).resolve().parents[1]
 
-# Never a suite of ours. ``.claude`` holds nested git worktrees in a main
-# checkout, each a full copy of the repo with its own configs.
-_SKIP = {".venv", ".git", "node_modules", "__pycache__", ".claude",
+# Never a suite of ours.
+_SKIP = {".venv", ".git", "node_modules", "__pycache__",
          ".pytest_cache", ".ruff_cache", "site-packages"}
+_CONFIG_NAMES = {"pytest.ini", "pyproject.toml", "tox.ini", "setup.cfg"}
+
+
+def _candidate_files():
+    """Config-named files below the root, never descending into another checkout.
+
+    A main checkout holds nested git worktrees (``.claude/worktrees/*``), each a
+    full copy of the repo with its own configs. They are recognised by their own
+    ``.git`` entry, NOT by skipping ``.claude`` wholesale: ``.claude/hooks/tests``
+    is one of the CI suites, and a config dropped there must be caught.
+    """
+    for dirpath, dirnames, filenames in os.walk(_ROOT):
+        here = pathlib.Path(dirpath)
+        dirnames[:] = [d for d in dirnames
+                       if d not in _SKIP and not (here / d / ".git").exists()]
+        if here == _ROOT:                        # the root's own config is THE config
+            continue
+        for name in filenames:
+            if name in _CONFIG_NAMES:
+                yield here / name
 
 
 def _walk_configs():
@@ -41,14 +64,8 @@ def _walk_configs():
     ``conftest.py`` does NOT move ``rootdir`` and is fine.
     """
     found = []
-    for path in _ROOT.rglob("*"):
-        if not path.is_file():
-            continue
+    for path in _candidate_files():
         rel = path.relative_to(_ROOT)
-        if len(rel.parts) == 1:                  # the root's own config is THE config
-            continue
-        if _SKIP.intersection(rel.parts):
-            continue
         name = path.name
         if name == "pytest.ini":
             found.append(rel)
@@ -110,6 +127,20 @@ def test_the_detector_IGNORES_a_pyproject_with_no_pytest_section(tmp_path, monke
     (app / "conftest.py").write_text("", encoding="utf-8")
     monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
     assert _walk_configs() == []
+
+
+def test_the_detector_reaches_the_hooks_suite_but_not_a_nested_checkout(tmp_path, monkeypatch):
+    """``.claude/hooks/tests`` is a CI suite; ``.claude/worktrees/<name>`` is a
+    whole other checkout whose configs are that checkout's own business."""
+    hooks = tmp_path / ".claude" / "hooks"
+    hooks.mkdir(parents=True)
+    (hooks / "pytest.ini").write_text("", encoding="utf-8")
+    nested = tmp_path / ".claude" / "worktrees" / "some-branch"
+    (nested / "trade-analyzer").mkdir(parents=True)
+    (nested / ".git").write_text("gitdir: elsewhere\n", encoding="utf-8")
+    (nested / "trade-analyzer" / "pytest.ini").write_text("", encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
+    assert [str(p) for p in _walk_configs()] == [str(pathlib.Path(".claude/hooks/pytest.ini"))]
 
 
 def test_the_root_config_is_NOT_itself_flagged(tmp_path, monkeypatch):
