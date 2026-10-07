@@ -908,7 +908,7 @@ def test_the_grid_carries_no_timestamp():
     assert not re.search(r"\b\d{4}-\d{2}-\d{2}\b", markup)
 
 
-_WORDS = {5: "five", 12: "twelve", 17: "seventeen"}
+_WORDS = {6: "six", 12: "twelve", 18: "eighteen"}
 
 
 def test_the_live_page_states_the_published_counts_in_words():
@@ -916,7 +916,8 @@ def test_the_live_page_states_the_published_counts_in_words():
     twin of the gallery test above. live.html said "Twenty-four screens ...
     twenty read-only ... four tools" from 2026-09-21 until 2026-09-26, while the
     table published seventeen (twelve tiles and five tools), because the tiles
-    are pinned against ``live_screens.SCREENS`` and the prose never was.
+    are pinned against ``live_screens.SCREENS`` and the prose never was. (It is
+    eighteen and six since Option Signals joined the tools on 2026-10-07.)
 
     Derived from the same table the route registration reads, so the words
     cannot be right by luck. ``_WORDS`` is deliberately narrow: a count it does
@@ -1276,8 +1277,11 @@ def test_the_report_is_in_the_sitemap():
 # otherwise -- never a link to a route that does not exist yet.
 
 # ("simulator", "Simulator") joined on 2026-09-21 with its public screen, and
-# ("news", "Market News") on 2026-09-26 with its.
-TOOLS = (("finder", "Strategy Finder"), ("rescue", "Rescue my Sh*tty trade"),
+# ("news", "Market News") on 2026-09-26 with its. ("signals", "Option Signals")
+# joined on 2026-10-07 and LEADS the menu, at the owner's instruction: this
+# tuple's order is the menu's order (test_the_tools_menu_lists_the_tools_in_order).
+TOOLS = (("signals", "Option Signals"),
+         ("finder", "Strategy Finder"), ("rescue", "Rescue my Sh*tty trade"),
          ("calculator", "Calculator"), ("simulator", "Simulator"),
          ("news", "Market News"))
 
@@ -1326,6 +1330,16 @@ def test_a_tool_is_a_link_exactly_when_it_is_published():
                                  rf'>\s*<span class="ns-menu-title">{re.escape(title)}</span>'
                                  rf'.*?Coming soon', menu, re.S)
                 assert item, f"{name}: unpublished {title} is not a 'Coming soon' entry"
+
+
+def test_the_tools_menu_lists_the_tools_in_order():
+    """Option Signals first (the owner's instruction, 2026-10-07), then the
+    rest as they were. Read off every page, though the one-menu test below
+    already makes them identical: this is the test that says what the order IS."""
+    for name in TOOLS_PAGES:
+        titles = re.findall(r'<span class="ns-menu-title">(.*?)</span>',
+                            _tools_menu(name))
+        assert titles == [title for _, title in TOOLS], f"{name}: {titles}"
 
 
 def test_the_tools_menu_needs_no_script():
