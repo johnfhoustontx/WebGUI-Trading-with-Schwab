@@ -847,24 +847,26 @@ def test_build_populate_dashes_the_columns_when_the_envelope_has_no_setups():
     assert row["seen_since"] == "—" and row["score_trend"] == "—"
 
 
-def test_the_trend_slot_is_registered_on_all_five_tables():
+def test_the_trend_slot_is_registered_on_every_table():
     """``add_slot`` runs inside ``render()``, which no unit test reaches — so a
     table left off is invisible to every test here and surfaces only as one
     uncoloured tab in the browser. Pinned at SOURCE level, the same reflex as
     ``test_the_row_class_fn_still_binds_the_stamped_field`` uses for the kit's
     ``ROW_CLASS_FN``.
 
-    Two registrations for five tables: the two credit tables share one loop
-    (``_t``) and the three tables of normalized rows - Directional and the two
-    Other-structures tables - share the other (``_n``). The loops' own table
-    lists are pinned too, or a table could drop out of one unnoticed."""
+    One registration for three tables since 2026-10-07, when each of the 0-DTE
+    and Swing tabs went from two tables to one: every table draws the same row
+    shape, so one loop over ``tables`` wires them all. The dict the loop walks
+    is pinned too, or a table could drop out of it unnoticed. (It was two
+    registrations for five tables: a loop for the two credit tables and one for
+    the three tables of normalized rows.)"""
     import inspect
     src = inspect.getsource(scanner)
-    assert src.count("add_slot('body-cell-score_trend', _TREND_SLOT)") == 2
-    assert "_t.add_slot('body-cell-score_trend', _TREND_SLOT)" in src
+    assert src.count("add_slot('body-cell-score_trend', _TREND_SLOT)") == 1
     assert "_n.add_slot('body-cell-score_trend', _TREND_SLOT)" in src
-    assert "for _t in (table_0dte, table_swing):" in src
-    assert "for _n in (table_dir, table_x0, table_xs):" in src
+    assert "for _n in tables.values():" in src
+    assert ('tables = {"0-DTE": table_0dte, "Swing": table_swing, '
+            '"Directional": table_dir}') in src
 
 
 def test_every_table_is_wired_for_paging_and_clicks():
@@ -873,9 +875,11 @@ def test_every_table_is_wired_for_paging_and_clicks():
     import inspect
     src = inspect.getsource(scanner.render)
     assert "for _key, _tbl in tables.items():\n        _wire_paging(_key, _tbl)" in src
-    for name in ("table_0dte", "table_swing", "table_dir", "table_x0", "table_xs"):
+    for name in ("table_0dte", "table_swing", "table_dir"):
         assert src.count(name) >= 2, name
-    assert '_n.on("rowClick", _select_dir)' in src
+    # ONE click handler since the tabs' tables were combined: a table holds
+    # both row shapes, and the handler reads which from the signal.
+    assert '_n.on("rowClick", _select)' in src
     assert "_x.add_slot('body-cell-strategy_label', _EARNINGS_SLOT)" in src
 
 

@@ -130,34 +130,22 @@ def test_toggling_a_group_returns_a_new_set():
     assert ssx.toggled(off, "STRADDLE") == on
 
 
-# ── the tab header and the two-way switch ───────────────────────────────────
-
-def test_a_tab_counts_both_of_its_tables():
-    full = {"signals_0dte": [1, 2, 3], "structures_0dte": [1, 2],
-            "signals_swing": [1], "structures_swing": [],
-            "signals_directional": [1, 2, 3, 4]}
-    shown = {"signals_0dte": [1, 2], "structures_0dte": [1],
-             "signals_swing": [1], "structures_swing": [],
-             "signals_directional": [1]}
-    assert ssx.tab_totals(full, shown) == {
-        "0-DTE": (5, 3), "Swing": (1, 1), "Directional": (4, 1)}
-
-
-def test_tab_totals_tolerate_a_missing_list():
-    assert ssx.tab_totals({}, {}) == {"0-DTE": (0, 0), "Swing": (0, 0),
-                                      "Directional": (0, 0)}
-
+# ── which lists a tab holds ─────────────────────────────────────────────────
+# The two-way switch (``view_options``) and the per-list totals behind it
+# (``tab_totals``) went on 2026-10-07, when each tab's two tables became one:
+# a tab's count is now the length of its one list. test_scanner_combined.py
+# covers the merge.
 
 def test_every_day_list_belongs_to_exactly_one_tab():
     from pages.options import scanner
     owned = [key for keys in ssx.TAB_LISTS.values() for key in keys]
     assert sorted(owned) == sorted(scanner.DAY_LISTS)
     assert set(ssx.STRUCTURE_LISTS) == {"structures_0dte", "structures_swing"}
+    assert set(ssx.CREDIT_LISTS) == {"signals_0dte", "signals_swing"}
 
 
-def test_the_switch_shows_where_the_rows_are():
-    assert ssx.view_options(12, 7, have=True) == {
-        "credit": "Credit spreads · 12", "other": "Other structures · 7"}
-    # No count before today's first scan: a "0" there is a zero nobody read.
-    assert ssx.view_options(0, 0, have=False) == {
-        "credit": "Credit spreads", "other": "Other structures"}
+def test_a_tabs_credit_list_is_merged_first():
+    """``merged`` is stable, so on a tie the earlier list's row leads."""
+    for tab in ssx.FILTERED_TABS:
+        assert ssx.TAB_LISTS[tab][0] in ssx.CREDIT_LISTS
+        assert ssx.TAB_LISTS[tab][1] in ssx.STRUCTURE_LISTS

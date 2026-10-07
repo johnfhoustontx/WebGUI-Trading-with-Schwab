@@ -183,13 +183,11 @@ def test_render_wires_the_switch_the_refresh_timer_the_probe_and_the_slots():
     assert "ui.timer(checks_feed.TABLE_REFRESH_SEC, _force_repaint)" in src
     assert "checks_feed.REFRESH_VIEWS" in src
     assert "bus_client.read_versions(_probe_views)" in src
-    for table in ("_t", "_n"):
-        assert f"{table}.add_slot('body-cell-checks', _CHECKS_SLOT)" in src
-    # The loop over (table_0dte, table_swing) is where _t comes from, and the
-    # loop over the three tables of normalized rows - Directional and the two
-    # Other-structures tables (2026-10-06) - is where _n does.
-    assert "for _t in (table_0dte, table_swing):" in src
-    assert "for _n in (table_dir, table_x0, table_xs):" in src
+    assert "_n.add_slot('body-cell-checks', _CHECKS_SLOT)" in src
+    # One loop over every table is where _n comes from. Until 2026-10-07 there
+    # were two - the two credit tables, and the three tables of normalized rows
+    # - and each of the 0-DTE and Swing tabs has held ONE table since.
+    assert "for _n in tables.values():" in src
 
 
 def test_the_only_clear_tooltip_is_plain_words():
@@ -415,7 +413,10 @@ def test_read_and_restamp_can_hand_back_the_context_it_read(monkeypatch):
 
 def test_render_hands_the_detail_panel_a_candidate_and_refreshes_it():
     src = inspect.getsource(scanner.render)
-    assert src.count("candidate=") >= 2          # the signal and directional clicks
+    # One click handler serves both row shapes since the tabs' tables were
+    # combined (2026-10-07); it was one per shape.
+    assert src.count("candidate=") >= 1
+    assert "candidate=_candidate(sig)" in src
     assert "checklist_candidate_for(" in src
     assert "detail_panel.refresh_checks(" in src
     assert "checks_feed.read_context()" not in src

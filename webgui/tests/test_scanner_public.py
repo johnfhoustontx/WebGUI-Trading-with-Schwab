@@ -385,8 +385,8 @@ def _tab_names(elements):
 
 @pytest.mark.parametrize("public", [False, True])
 def test_the_tabs_and_everything_under_them_are_built(clean, public):
-    """What moved: the three tabs, each two-table tab's switch, and one
-    checkbox per structure family per switch."""
+    """What moved: the three tabs, one table each, and one checkbox per
+    family on the two tabs that mix families."""
     import live_screens
     import shell
 
@@ -398,9 +398,11 @@ def test_the_tabs_and_everything_under_them_are_built(clean, public):
     finally:
         shell.unpublish()
     assert _tab_names(elements) == ["0-DTE", "Swing", "Directional"]
-    assert sum(type(e).__name__ == "Toggle" for e in elements) == 2
+    # No switch and one table a tab since 2026-10-07 (it was a two-way switch
+    # over two tables on each of 0-DTE and Swing).
+    assert sum(type(e).__name__ == "Toggle" for e in elements) == 0
     assert sum(type(e).__name__ == "Checkbox" for e in elements) == 2 * len(ssx.GROUPS)
-    assert sum(type(e).__name__ == "Table" for e in elements) == 5
+    assert sum(type(e).__name__ == "Table" for e in elements) == 3
     assert sum(type(e).__name__ == "Switch" for e in elements) == 1      # Only clear
 
 

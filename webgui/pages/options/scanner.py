@@ -698,12 +698,12 @@ def _build_populate(day_env, live, ctx=None, *, public=False,
         for s in signals:
             if s.get("id"):
                 by_id[s["id"]] = s
-    rows = {
-        "signals_0dte": signal_rows(sigs["signals_0dte"]),
-        "signals_swing": signal_rows(sigs["signals_swing"]),
-        "signals_directional": directional_rows(sigs["signals_directional"]),
-    }
     from . import scanner_structures      # lazy: it imports this module
+    rows = {"signals_directional": directional_rows(sigs["signals_directional"])}
+    # A credit spread is drawn in the SAME columns as every other structure on
+    # its tab (``credit_rows``): the two share one table since 2026-10-07.
+    for key in scanner_structures.CREDIT_LISTS:
+        rows[key] = scanner_structures.credit_rows(sigs[key])
     for key in scanner_structures.STRUCTURE_LISTS:
         rows[key] = scanner_structures.structure_rows(sigs[key])
     for key in DAY_LISTS:
@@ -718,7 +718,16 @@ def _build_populate(day_env, live, ctx=None, *, public=False,
         # stamp_persistence guards a non-dict ``setups`` inside the envelope.
         stamp_persistence(rows[key], sigs[key], day_env.get("setups"))
         stamp_checks(rows[key], sigs[key], ctx)
+    # One list per TAB, ranked by score across the lists it holds. The rows are
+    # the SAME dicts as in ``rows`` (every stamp above was written per list and
+    # has to show), and ``table_sigs`` is what a re-stamp joins them back to.
+    tabs = scanner_structures.TAB_LISTS
+    tables = {tab: scanner_structures.merged(*(rows[key] for key in keys))
+              for tab, keys in tabs.items()}
+    table_sigs = {tab: [s for key in keys for s in sigs[key]]
+                  for tab, keys in tabs.items()}
     return {"today": today, "sigs": sigs, "by_id": by_id, "rows": rows,
+            "tables": tables, "table_sigs": table_sigs,
             "have": day_is_today(day_env, today), "day_env": day_env, "live": live,
             "ctx": ctx}
 
@@ -867,9 +876,12 @@ _EARNINGS_SLOT = (r'''
   </q-td>
 ''')
 
+# ``_score_tip`` is stamped on the 0-DTE and Swing rows, where one table ranks
+# two kinds of trade scored on different scales: the hover says which this is.
 _SCORE_SLOT = r'''
   <q-td :props="props">
     <q-badge :class="props.row._score_class + ' text-[#111]'" :label="props.value ?? '—'"/>
+    <q-tooltip v-if="props.row._score_tip">{{ props.row._score_tip }}</q-tooltip>
   </q-td>
 '''
 
@@ -1061,30 +1073,27 @@ def render():
         t._props["rows-per-page-options"] = [PAGE_ROWS]
         return t
 
-    # Which families each Other-structures table shows, and the checkbox per
+    # Which families each of the two mixed tabs shows, and the checkbox per
     # family that switches it. Built ONCE with the table (never rebuilt by a
     # repaint): a family with no rows today is hidden, not removed.
-    groups_on = {key: ssx.all_groups() for key in ssx.STRUCTURE_LISTS}
-    group_boxes = {key: {} for key in ssx.STRUCTURE_LISTS}
+    groups_on = {tab: ssx.all_groups() for tab in ssx.FILTERED_TABS}
+    group_boxes = {tab: {} for tab in ssx.FILTERED_TABS}
 
-    def _two_tables(key):
-        """One tab's pair: the credit-spread table and, behind a two-way switch,
-        the Other-structures table with its family checkboxes. Two tables, never
-        one: the two are scored on different scales and must not be ranked
-        against each other."""
-        switch = ui.toggle(ssx.view_options(0, 0, have=False),
-                           value=ssx.VIEW_CREDIT).props("dense no-caps unelevated")
-        with switch:
-            ui.tooltip(ssx.VIEW_TIP).props("delay=350 max-width=340px")
-        credit = _table(signal_columns())
-        with ui.column().classes("w-full gap-1") as other_box:
+    def _family_table(tab):
+        """One tab's ONE table: its credit spreads and every other structure the
+        scan built, ranked together, under a checkbox per family.
+
+        Until 2026-10-07 these were two tables behind a switch, because the two
+        kinds are scored on different scales. The owner combined them knowing
+        that, so the note under the checkboxes says it, and each score's hover
+        names the scale it is on (``_SCORE_SLOT``)."""
+        with ui.column().classes("w-full gap-1"):
             with ui.row().classes("gap-3 items-center flex-wrap"):
                 for group, label in ssx.GROUPS:
-                    group_boxes[key][group] = ui.checkbox(label, value=True).props(
+                    group_boxes[tab][group] = ui.checkbox(label, value=True).props(
                         "dense")
-            other = _table(directional_columns())
-        other_box.set_visibility(False)
-        return switch, credit, other_box, other
+            ui.label(ssx.SCALE_NOTE).classes(f"text-xs {MUTED}")
+            return _table(directional_columns())
 
     with kit.page():
         head = kit.header("Market Scanner", view="options:scan", stale=True)
@@ -1116,24 +1125,18 @@ def render():
                     "w-full scan-panels")
                 with scan_panels:
                     with ui.tab_panel(tab_0dte):
-                        view_0dte, table_0dte, other_0dte, table_x0 = _two_tables(
-                            "structures_0dte")
+                        table_0dte = _family_table("0-DTE")
                     with ui.tab_panel(tab_swing):
-                        view_swing, table_swing, other_swing, table_xs = _two_tables(
-                            "structures_swing")
+                        table_swing = _family_table("Swing")
                     with ui.tab_panel(tab_dir):
                         table_dir = _table(directional_columns())
             # Narrower than the 360px default so the compacted signal table has
             # room to show all columns without horizontal scroll.
             detail_panel = detail.render(width=290, actions=not _public)
 
-    # Every table by the day list it shows, and each two-table tab's switch
-    # with the two lists behind it.
-    tables = {"signals_0dte": table_0dte, "signals_swing": table_swing,
-              "signals_directional": table_dir,
-              "structures_0dte": table_x0, "structures_swing": table_xs}
-    views = ((view_0dte, "signals_0dte", "structures_0dte"),
-             (view_swing, "signals_swing", "structures_swing"))
+    # One table per tab, by the tab's name (the keys of ``ssx.TAB_LISTS`` and
+    # of the build's ``tables``).
+    tables = {"0-DTE": table_0dte, "Swing": table_swing, "Directional": table_dir}
 
     by_id: dict = {}
     # Last-seen bus cache versions for the fetch-free repaint timer. (NEW-signal
@@ -1146,18 +1149,18 @@ def render():
     seen = {v: None for v in _probe_views}
     # The full stamped rows per table, so the "Only clear" switch can re-filter
     # without re-reading the bus.
-    painted = {key: [] for key in DAY_LISTS}
+    painted = {tab: [] for tab in tables}
     # The signals those rows were built from (a re-stamp needs them) and whether
     # today's day union exists (the tab counts need it).
-    painted_sigs = {key: [] for key in DAY_LISTS}
+    painted_sigs = {tab: [] for tab in tables}
     # What each table is paging THROUGH: the painted rows after the "Only clear"
     # filter. The browser holds one page of it at a time.
-    shown_rows = {key: [] for key in DAY_LISTS}
+    shown_rows = {tab: [] for tab in tables}
     # The pagination this page last SENT each table (sort, page, total). Kept
     # here and never read back from the table: a table announces its own
     # pagination when it mounts (rowsNumber 0) and NiceGUI writes that over the
     # element's, after this page's first paint has already set the real one.
-    paging = {key: None for key in DAY_LISTS}
+    paging = {tab: None for tab in tables}
     counts = {"have": False}
     # The Opportunity Board version the rows were last stamped against, so the
     # 5-minute timer re-stamps only when the board has actually moved.
@@ -1178,22 +1181,22 @@ def render():
         return checklist_candidate_for(sig.get("id"), by_id, painted)
 
     def _select(event):
-        sig = _clicked(event)
-        if sig:
-            detail_panel.update(sig, candidate=_candidate(sig), ctx=checks_ctx["ctx"])
-            _remember(event, sig, False)
-
-    def _select_dir(event):
-        # The normalized multi-leg shape needs the shared adapter (net_credit →
-        # credit, breakevens[0] → breakeven) the Swing page uses.
+        """A row click, on any of the three tables. One table now holds both
+        shapes, so the SIGNAL says which it is: a normalized candidate carries a
+        ``legs`` list, a scanner credit spread names its strikes in fields."""
         from . import strategy_table
         sig = _clicked(event)
-        if sig:
-            detail_panel.update(strategy_table.detail_signal(sig),
-                                candidate=_candidate(sig), ctx=checks_ctx["ctx"])
-            # The RAW signal, not the adapted one: the legs-aware Calculator and
-            # Paper paths read ``legs``, which the adapter does not carry.
-            _remember(event, sig, True)
+        if not sig:
+            return
+        multi = bool(sig.get("legs"))
+        # The normalized shape needs the shared adapter (net_credit → credit,
+        # breakevens → breakeven) the Swing page uses; a credit spread is
+        # already in the panel's shape.
+        shown = strategy_table.detail_signal(sig) if multi else sig
+        detail_panel.update(shown, candidate=_candidate(sig), ctx=checks_ctx["ctx"])
+        # The RAW signal, not the adapted one: the legs-aware Calculator and
+        # Paper paths read ``legs``, which the adapter does not carry.
+        _remember(event, sig, multi)
 
     # The panel asks this for the open row on every refresh: the gate as the rows
     # now carry it, or None once a rebuild dropped the row (cap eviction, a new
@@ -1207,22 +1210,15 @@ def render():
         context (a no-op when no checklist shows)."""
         detail_panel.refresh_checks(checks_ctx["ctx"])
 
-    for _t in (table_0dte, table_swing):
-        _t.on("rowClick", _select)
-        _t.add_slot('body-cell-composite_score', _SCORE_SLOT)
-        _t.add_slot('body-cell-symbol', _SYMBOL_SLOT)
-        _t.add_slot('body-cell-checks', _CHECKS_SLOT)
-        _t.add_slot('body-cell-score_trend', _TREND_SLOT)
-
     # Every Paper click's answer - opened, or refused and why - becomes a toast.
     # The OWNER's clicks: watched on the public origin, every visitor would be
     # shown them.
     if not _public:
         handoff.watch_paper_results()
-    # The three tables of NORMALIZED rows - Directional and the two Other-
-    # structures tables - share one row shape, so they share one loop.
-    for _n in (table_dir, table_x0, table_xs):
-        _n.on("rowClick", _select_dir)
+    # All three tables draw one row shape (a credit spread is built into it by
+    # ``scanner_structures.credit_rows``), so they share one loop.
+    for _n in tables.values():
+        _n.on("rowClick", _select)
         _n.add_slot('body-cell-symbol', _SYMBOL_SLOT)
         _n.add_slot('body-cell-composite_score', _SCORE_SLOT)
         _n.add_slot('body-cell-checks', _CHECKS_SLOT)
@@ -1246,13 +1242,14 @@ def render():
             <q-tooltip v-if="props.row.grade_reason">{{ props.row.grade_reason }}</q-tooltip>
           </q-td>
         ''')
-    for _x in (table_x0, table_xs):
+    for _x in (table_0dte, table_swing):
         _x.add_slot('body-cell-strategy_label', _EARNINGS_SLOT)
 
     # The clicked row IS the selection: it drives the detail panel and the
-    # actions in its footer. ``multi`` records which tab it came from - a
-    # directional row is a normalized multi-leg signal and takes the legs-aware
-    # Calculator path; ``allow_paper`` is the gate ``stamp_stale`` settled.
+    # actions in its footer. ``multi`` records which SHAPE it is - a normalized
+    # candidate (a ``legs`` list) takes the legs-aware Calculator path, a
+    # scanner credit spread the strike-field one; ``allow_paper`` is the gate
+    # ``stamp_stale`` settled.
     sel = {"sig": None, "multi": False, "allow_paper": False, "id": None}
 
     # Built ONCE: the footer is visible only while a signal is shown, so nothing
@@ -1347,7 +1344,7 @@ def render():
         for key, table in tables.items():
             full = painted[key]
             shown = only_clear(painted[key]) if filtering else full
-            if key in ssx.STRUCTURE_LISTS:
+            if key in groups_on:
                 # The family checkboxes narrow BOTH, so the tab count and the
                 # empty-state line below speak about the families on show.
                 full = ssx.filter_groups(full, groups_on[key])
@@ -1363,24 +1360,18 @@ def render():
             shown_rows[key] = shown
             _show_page(key, table, paging[key])
             full_by[key], shown_by[key] = full, shown
-        # A tab's header counts BOTH of its tables.
-        totals = ssx.tab_totals(full_by, shown_by)
+        # A tab's header counts the rows its table has on show.
         for base, tab in (("0-DTE", tab_0dte), ("Swing", tab_swing),
                           ("Directional", tab_dir)):
-            n_full, n_shown = totals[base]
-            label = filtered_tab_label(base, n_full, n_shown,
+            label = filtered_tab_label(base, len(full_by[base]), len(shown_by[base]),
                                        have=counts["have"], filtering=filtering)
             tab.props(f'label="{label}"')
             tab.update()
-        # The switch says how many rows sit behind each side, and each family's
-        # checkbox how many rows it holds; a family with none today is hidden.
-        for switch, credit_key, other_key in views:
-            switch.set_options(
-                ssx.view_options(len(shown_by[credit_key]), len(shown_by[other_key]),
-                                 have=counts["have"]),
-                value=switch.value)
-            chips = {c["group"]: c for c in ssx.chips(painted[other_key])}
-            for group, box in group_boxes[other_key].items():
+        # Each family's checkbox says how many rows it holds; a family with none
+        # today is hidden.
+        for key, boxes in group_boxes.items():
+            chips = {c["group"]: c for c in ssx.chips(painted[key])}
+            for group, box in boxes.items():
                 chip = chips.get(group)
                 box.set_visibility(chip is not None)
                 if chip is not None and box.text != chip["text"]:
@@ -1392,15 +1383,6 @@ def render():
 
     clear_toggle.on_value_change(_on_clear_toggle)
 
-    def _wire_view(switch, credit, other_box):
-        @guard
-        def _on_view(_event):
-            other = switch.value == ssx.VIEW_OTHER
-            credit.set_visibility(not other)
-            other_box.set_visibility(other)
-
-        switch.on_value_change(_on_view)
-
     def _wire_group(key, group, box):
         @guard
         def _on_group(_event):
@@ -1411,9 +1393,6 @@ def render():
 
         box.on_value_change(_on_group)
 
-    for _switch, _credit, _box in ((view_0dte, table_0dte, other_0dte),
-                                   (view_swing, table_swing, other_swing)):
-        _wire_view(_switch, _credit, _box)
     for _key, _boxes in group_boxes.items():
         for _group, _cb in _boxes.items():
             _wire_group(_key, _group, _cb)
@@ -1428,7 +1407,7 @@ def render():
         ``acknowledge`` — True only when the user is actually VIEWING the page (the
         initial paint), so a background repaint never clears their New markers.
         """
-        today, rows, sigs = built["today"], built["rows"], built["sigs"]
+        today, rows = built["today"], built["rows"]
         live = built["live"]
 
         by_id.clear()
@@ -1444,8 +1423,10 @@ def render():
             # stamp_stale + stamp_checks already ran off the loop (_build_populate).
             if new_ids is not None:
                 stamp_new(rows[key], new_ids)
-            painted[key] = rows[key]
-            painted_sigs[key] = sigs[key]
+        # Each table takes its tab's ONE list - the same row dicts just stamped.
+        for tab in tables:
+            painted[tab] = built["tables"][tab]
+            painted_sigs[tab] = built["table_sigs"][tab]
         # Day counts in each tab header — no count until a day union for TODAY
         # exists, so the tabs don't show a misleading "(0)" before the first scan
         # or while a stale-dated envelope is gated out. _paint_tables writes them.
