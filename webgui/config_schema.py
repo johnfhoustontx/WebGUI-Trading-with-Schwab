@@ -314,6 +314,8 @@ _STRUCT_LABELS = {
     "SHORT_PUT": "Cash-secured put", "COVERED_CALL": "Covered call",
     "LONG_CALL": "Long call", "LONG_PUT": "Long put",
     "BULL_CALL": "Bull call (debit) spread", "BEAR_PUT": "Bear put (debit) spread",
+    "CALL_BACKSPREAD": "Call backspread (tracked)",
+    "PUT_BACKSPREAD": "Put backspread (tracked)",
 }
 
 _TRADE_MGMT = ConfigFile(
@@ -387,6 +389,21 @@ _TRADE_MGMT = ConfigFile(
                      "Overrides the global take-profit for this structure.",
                      lo=5, hi=100, step=5, optional=True),
             ))),
+        Section("Tracked structures",
+                "The Market Scanner's structures that are not credit spreads are "
+                "recorded to be measured, never traded. This is how often they "
+                "are marked.", (
+            Field("tracked.mark_interval_min", "Minutes between marks",
+                  "Each mark fetches one chain per open symbol and expiration.",
+                  kind="int", unit="minutes", min=1, max=60, step=1),
+            Field("tracked.mark_offset_min", "Minutes after each boundary",
+                  "10 with an interval of 15 marks at :10, :25, :40 and :55, clear "
+                  "of the quarter-hour scan.", kind="int", unit="minutes", min=0,
+                  max=59, step=1),
+            Field("tracked.front_expiry_close", "Close calendars from",
+                  "Central time on a calendar's front expiry day from which it is "
+                  "closed on its mark.", kind="time"),
+        )),
         Section("Rescue board warnings",
                 "When an open position is flagged at risk. These only colour the "
                 "board; they close nothing.", (

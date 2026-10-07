@@ -268,3 +268,44 @@ def test_rescue_actually_READS_it_rather_than_agreeing_by_luck(monkeypatch):
     finally:
         monkeypatch.undo()
         importlib.reload(rescue)
+
+
+# ── tracked structures (2026-10-07) ─────────────────────────────────────────
+
+def test_a_backspread_carries_no_loss_side_rule():
+    """Entered for a credit it sits in a small, defined loss until the move it
+    is for; the 2x-credit stop would close every one of them there."""
+    for name in ("CALL_BACKSPREAD", "PUT_BACKSPREAD", "call_backspread"):
+        rules = trade_mgmt.structure_rules(name)
+        assert rules["loss_rules"] is False, name
+        assert rules["tp_frac"] == trade_mgmt.stops()["tp_frac"]
+
+
+def test_the_tracked_loop_settings_as_shipped():
+    import datetime as dt
+    assert trade_mgmt.tracked() == {"mark_interval_min": 15, "mark_offset_min": 10,
+                                    "front_expiry_close": dt.time(14, 0)}
+
+
+def test_the_tracked_loop_settings_are_read(monkeypatch):
+    import datetime as dt
+    monkeypatch.setattr(trade_mgmt, "load", lambda: {"tracked": {
+        "mark_interval_min": 30, "mark_offset_min": 5, "front_expiry_close": "13:30"}})
+    assert trade_mgmt.tracked() == {"mark_interval_min": 30, "mark_offset_min": 5,
+                                    "front_expiry_close": dt.time(13, 30)}
+
+
+def test_unusable_tracked_settings_are_the_shipped_ones(monkeypatch):
+    import datetime as dt
+    monkeypatch.setattr(trade_mgmt, "load", lambda: {"tracked": {
+        "mark_interval_min": 0, "mark_offset_min": -3, "front_expiry_close": "2pm"}})
+    assert trade_mgmt.tracked() == {"mark_interval_min": 15, "mark_offset_min": 10,
+                                    "front_expiry_close": dt.time(14, 0)}
+    monkeypatch.setattr(trade_mgmt, "load", lambda: {"tracked": "junk"})
+    assert trade_mgmt.tracked()["mark_interval_min"] == 15
+
+
+def test_an_offset_past_the_interval_wraps_so_the_loop_always_runs(monkeypatch):
+    monkeypatch.setattr(trade_mgmt, "load", lambda: {"tracked": {
+        "mark_interval_min": 5, "mark_offset_min": 12}})
+    assert trade_mgmt.tracked()["mark_offset_min"] == 2

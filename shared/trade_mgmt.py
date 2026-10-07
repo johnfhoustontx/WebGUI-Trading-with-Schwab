@@ -97,6 +97,19 @@ DEFAULTS = {
         # every 22-30 DTE entry flat. They keep the tp_frac target on max profit
         # and settle at expiry. See config/trade_mgmt.toml. No straddle/strangle
         # either - analysis only (D1).
+        #
+        # Tracked only (structure_marks). A backspread entered for a credit
+        # sits in a small, DEFINED loss until the large move it is for, so the
+        # 2x-credit money stop would close every one of them in that valley.
+        "CALL_BACKSPREAD": {"loss_rules": False},
+        "PUT_BACKSPREAD": {"loss_rules": False},
+    },
+    # The TRACKED structures' manage loop (services/options_svc/tracked.py):
+    # rows recorded to be measured, never traded. See config/trade_mgmt.toml.
+    "tracked": {
+        "mark_interval_min": 15,
+        "mark_offset_min": 10,
+        "front_expiry_close": "14:00",
     },
 }
 
@@ -185,6 +198,40 @@ def default_trail_ladder():
 
 def ratchet_trail_ladder():
     return _ladder("ratchet_ladder")
+
+
+def tracked() -> dict:
+    """``{"mark_interval_min", "mark_offset_min", "front_expiry_close"}`` for the
+    tracked structures' manage loop; ``front_expiry_close`` is a
+    ``datetime.time`` (Central).
+
+    Closed over the defaults: an unusable value is the shipped one. The interval
+    is 1..60 minutes and the offset is taken modulo it, so no setting can make
+    the loop never run.
+    """
+    import datetime as _dt
+    d = DEFAULTS["tracked"]
+    sec = load().get("tracked")
+    sec = sec if isinstance(sec, dict) else {}
+
+    def _int(key, lo, hi):
+        v = sec.get(key, d[key])
+        ok = isinstance(v, int) and not isinstance(v, bool) and lo <= v <= hi
+        return v if ok else d[key]
+
+    interval = _int("mark_interval_min", 1, 60)
+    offset = _int("mark_offset_min", 0, 59) % interval
+
+    def _time(text):
+        try:
+            hh, mm = str(text).split(":")
+            return _dt.time(int(hh), int(mm))
+        except (ValueError, TypeError):
+            return None
+
+    close = _time(sec.get("front_expiry_close", d["front_expiry_close"]))
+    return {"mark_interval_min": interval, "mark_offset_min": offset,
+            "front_expiry_close": close or _time(d["front_expiry_close"])}
 
 
 def structure_rules(strategy) -> dict:

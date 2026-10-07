@@ -193,6 +193,50 @@ exit_dte = 21
 # here with exit_dte reverses that decision. No straddle/strangle table either:
 # those are analysis only (D1), pinned by test_straddle_analysis_only.
 
+# ─── THE RATIO BACKSPREADS (tracked only) ──────────────────────────────────
+#
+#   The Market Scanner records backspreads so their outcomes can be measured;
+#   no paper book holds one. A backspread entered for a credit sits in a small,
+#   DEFINED loss - the valley at its long strike - until the large move it is
+#   for. The 2x-credit money stop would close every one of them there, so the
+#   loss-side rules are off. It has no profit target either when its profit is
+#   uncapped (the call version): it is held to expiry.
+[structures.CALL_BACKSPREAD]
+loss_rules = false
+
+[structures.PUT_BACKSPREAD]
+loss_rules = false
+
+[tracked]
+# ─── TRACKED STRUCTURES: the manage loop ────────────────────────────────────
+#
+#   The Market Scanner's structures that are not credit spreads are recorded so
+#   each gets a mark series and an outcome (config/scanner.toml [capture]
+#   tracked). They are MEASURED, never traded. This loop marks them, applies
+#   the exit rules above to the mark, and settles them at expiry.
+#
+#   Exits, first match: a calendar or diagonal on its front leg's expiry day is
+#   closed on its mark; a structure entered for a CREDIT is stopped at
+#   [stops] stop_mult x the credit unless its table says loss_rules = false; a
+#   target of [stops] tp_frac of the max profit, or of the debit paid when the
+#   profit is uncapped; everything else settles at intrinsic. None of this is
+#   fitted - there is no outcome data for these structures yet - and every mark
+#   is stored, so another exit can be replayed over the same rows.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Minutes between marks. Each mark fetches one chain per open symbol and
+# expiration, and every service shares the proxy's 5 requests a second, so this
+# is slower than the captured signals' 5 minutes on purpose.
+mark_interval_min = 15
+# Minutes after each interval boundary. 10 = :10, :25, :40, :55 - clear of the
+# quarter-hour scan's chain fetches (:02 to :05) and of the first minute after
+# the hour and half hour, when Schwab refuses calls.
+mark_offset_min = 10
+# Central time, on a calendar's or diagonal's FRONT expiry day, from which it is
+# closed on its mark. It is never settled at intrinsic: the back month still
+# has time value. After the 15:00 settlement hour the front leg stops quoting.
+front_expiry_close = "14:00"
+
 [rescue]
 # Escalation bands the at-risk board owns ALONE. The four it shares with [stops]
 # (delta_critical, delta_drift, money_tested_mult, dte_urgent) are deliberately
