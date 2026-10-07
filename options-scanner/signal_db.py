@@ -4,6 +4,43 @@ from pathlib import Path
 
 DEFAULT_DB_PATH = Path(__file__).parent / "data" / "signals.db"
 
+# Scanner types that are TRACKED, not traded: the Market Scanner's structures
+# that are not credit spreads (straddles, butterflies, calendars, backspreads,
+# the Directional tab's single legs), recorded so their outcomes can be
+# measured. They share these tables and their shape is different - a ``legs_json``
+# blob, a SIGNED ``entry_credit`` (a debit is negative), no strike columns.
+#
+# ⚠ Every reader below EXCLUDES them unless the caller passes ``tracked=True``.
+# More than a dozen readers of this store were written for a credit spread - the
+# Captured Signals page and its score, the paper Account's entry feed, the phone
+# push, Rescue, the manage cycle - and a default that hid nothing would hand
+# each of them a row it would misread. ``tracked=True`` returns ONLY these rows.
+TRACKED_TYPES = ("0DTE_STRUCT", "SWING_STRUCT")
+
+
+def is_tracked(row) -> bool:
+    """Is this ``signals`` row one of the tracked structures?"""
+    kind = (row or {}).get("scanner_type")
+    return isinstance(kind, str) and kind.strip().upper() in TRACKED_TYPES
+
+
+def _tracked_list():
+    return ",".join(f"'{t}'" for t in TRACKED_TYPES)
+
+
+def _not_tracked_sql(prefix=""):
+    """SQL for "not a tracked row". ``IS NULL OR`` because ``NULL NOT IN (...)``
+    is NULL, which would silently drop every row from before the column existed."""
+    col = f"{prefix}scanner_type"
+    return f"({col} IS NULL OR {col} NOT IN ({_tracked_list()}))"
+
+
+def _tracked_sql(prefix="", tracked=False):
+    """The WHERE clause for one side of the split."""
+    if tracked:
+        return f"{prefix}scanner_type IN ({_tracked_list()})"
+    return _not_tracked_sql(prefix)
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS signals (
     signal_id TEXT PRIMARY KEY,
@@ -34,7 +71,13 @@ CREATE TABLE IF NOT EXISTS signals (
     dedup_key TEXT UNIQUE,
     status TEXT DEFAULT 'OPEN',
     mode TEXT,
-    be_armed INTEGER DEFAULT 0
+    be_armed INTEGER DEFAULT 0,
+    legs_json TEXT,
+    family TEXT,
+    entry_max_profit REAL,
+    entry_capital REAL,
+    unbounded INTEGER DEFAULT 0,
+    entry_spans_earnings INTEGER DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_signals_first_seen_date ON signals(first_seen_date);
 CREATE INDEX IF NOT EXISTS idx_signals_status ON signals(status);
@@ -127,6 +170,20 @@ def _migrate_signals_table(conn):
     # trade first reaches +50% credit; drives the raised break-even stop.
     if "be_armed" not in existing_cols:
         _add_column_if_missing(conn, "be_armed", "INTEGER DEFAULT 0")
+    # Tracked structures (2026-10-07) - see TRACKED_TYPES. All NULL / 0 on every
+    # row written before them and on every credit-spread row since.
+    #   legs_json             the legs: kind, side, strike, expiration, qty
+    #   family                the build family (VERTICAL, STRADDLE, ...)
+    #   entry_max_profit      per share; NULL = unbounded
+    #   entry_capital         per share; the risk denominator when unbounded
+    #   unbounded             1 = the LOSS is unbounded (a short straddle)
+    #   entry_spans_earnings  1 = opened through an earnings report
+    for col, coltype in (("legs_json", "TEXT"), ("family", "TEXT"),
+                         ("entry_max_profit", "REAL"), ("entry_capital", "REAL"),
+                         ("unbounded", "INTEGER DEFAULT 0"),
+                         ("entry_spans_earnings", "INTEGER DEFAULT 0")):
+        if col not in existing_cols:
+            _add_column_if_missing(conn, col, coltype)
     # Older legacy DBs may also be missing these — keep executescript happy.
     legacy_backfill = {
         "scanner_type": "TEXT",
@@ -182,7 +239,9 @@ INSERT OR IGNORE INTO signals (
     entry_net_delta_position, entry_net_theta_position,
     entry_spread_bid, entry_spread_ask,
     entry_iv_rank, entry_underlying,
-    first_seen_ts, first_seen_date, dedup_key, status, mode
+    first_seen_ts, first_seen_date, dedup_key, status, mode,
+    legs_json, family, entry_max_profit, entry_capital, unbounded,
+    entry_spans_earnings
 ) VALUES (
     :signal_id, :scanner_type, :symbol, :strategy, :short_strike, :long_strike,
     :call_short, :call_long, :width, :expiration, :dte_at_entry,
@@ -191,7 +250,9 @@ INSERT OR IGNORE INTO signals (
     :entry_net_delta_position, :entry_net_theta_position,
     :entry_spread_bid, :entry_spread_ask,
     :entry_iv_rank, :entry_underlying,
-    :first_seen_ts, :first_seen_date, :dedup_key, :status, :mode
+    :first_seen_ts, :first_seen_date, :dedup_key, :status, :mode,
+    :legs_json, :family, :entry_max_profit, :entry_capital, :unbounded,
+    :entry_spans_earnings
 )
 """
 
@@ -202,6 +263,13 @@ _INSERT_DEFAULTS = {
     "entry_spread_bid": 0.0,
     "entry_spread_ask": 0.0,
     "mode": None,   # NEW: NULL by default; readers treat NULL as PREMIUM
+    # The tracked-structure columns: absent on every credit-spread row.
+    "legs_json": None,
+    "family": None,
+    "entry_max_profit": None,
+    "entry_capital": None,
+    "unbounded": 0,
+    "entry_spans_earnings": 0,
 }
 
 
@@ -233,7 +301,9 @@ def get_signal(signal_id, db_path=DEFAULT_DB_PATH):
         conn.close()
 
 
-def get_open_signals(scanner_type=None, db_path=DEFAULT_DB_PATH):
+def get_open_signals(scanner_type=None, db_path=DEFAULT_DB_PATH, *, tracked=False):
+    """OPEN signals. A named ``scanner_type`` returns exactly that type; with
+    none, the tracked structures are excluded (``tracked=True``: only them)."""
     conn = connect(db_path)
     try:
         if scanner_type is not None:
@@ -242,19 +312,23 @@ def get_open_signals(scanner_type=None, db_path=DEFAULT_DB_PATH):
                 (scanner_type,),
             )
         else:
-            cur = conn.execute("SELECT * FROM signals WHERE status='OPEN'")
+            cur = conn.execute("SELECT * FROM signals WHERE status='OPEN' AND "
+                               + _tracked_sql(tracked=tracked))
         return [dict(r) for r in cur.fetchall()]
     finally:
         conn.close()
 
 
-def count_open_by_symbol(db_path=DEFAULT_DB_PATH):
-    """``{symbol: n}`` of OPEN signals across every scanner type — the book the
-    recorder's per-symbol capture cap counts against."""
+def count_open_by_symbol(db_path=DEFAULT_DB_PATH, *, tracked=False):
+    """``{symbol: n}`` of OPEN signals across every TRADED scanner type — the book
+    the recorder's per-symbol capture cap counts against. The tracked structures
+    are their own pool (``tracked=True``), so one of them can never take a slot a
+    credit spread, which the paper Account can trade, would need."""
     conn = connect(db_path)
     try:
         cur = conn.execute(
-            "SELECT symbol, COUNT(*) FROM signals WHERE status='OPEN' GROUP BY symbol")
+            "SELECT symbol, COUNT(*) FROM signals WHERE status='OPEN' AND "
+            + _tracked_sql(tracked=tracked) + " GROUP BY symbol")
         return {sym: n for sym, n in cur.fetchall()}
     finally:
         conn.close()
@@ -366,12 +440,14 @@ def insert_outcome(outcome_row, new_status, db_path=DEFAULT_DB_PATH):
         conn.close()
 
 
-def get_open_signals_with_latest_mark(db_path=DEFAULT_DB_PATH):
+def get_open_signals_with_latest_mark(db_path=DEFAULT_DB_PATH, *, tracked=False):
     """OPEN signals left-joined to their newest signal_marks row.
 
     Mark fields (unrealized_pnl, current_score, score_drift, recommendation,
     recommendation_reason, last_mark_ts) are None when no mark exists yet.
     Sorted by first_seen_ts DESC (newest captured first).
+
+    The tracked structures are excluded; ``tracked=True`` returns only them.
     """
     conn = connect(db_path)
     try:
@@ -391,7 +467,7 @@ def get_open_signals_with_latest_mark(db_path=DEFAULT_DB_PATH):
                 WHERE signal_id = s.signal_id
                 ORDER BY mark_ts DESC LIMIT 1
             )
-            WHERE s.status = 'OPEN'
+            WHERE s.status = 'OPEN' AND """ + _tracked_sql("s.", tracked) + """
             ORDER BY s.first_seen_ts DESC
         """)
         return [dict(r) for r in cur.fetchall()]
@@ -451,24 +527,26 @@ def set_be_armed(signal_id, db_path=DEFAULT_DB_PATH):
         conn.close()
 
 
-def count_opened_on(date_iso, db_path=DEFAULT_DB_PATH):
+def count_opened_on(date_iso, db_path=DEFAULT_DB_PATH, *, tracked=False):
     """How many signals were CAPTURED on ``date_iso`` (YYYY-MM-DD).
 
     Counts by ``first_seen_date`` (indexed), so a signal captured and closed in
     the same session still counts — this is a count of captures, not of
     positions still open. Feeds the Captured Signals footer's "Opened today"
-    alongside ``get_outcomes_for_date`` for the closed side.
+    alongside ``get_outcomes_for_date`` for the closed side. Tracked structures
+    are excluded; ``tracked=True`` counts only them.
     """
     conn = connect(db_path)
     try:
         cur = conn.execute(
-            "SELECT COUNT(*) FROM signals WHERE first_seen_date = ?", (date_iso,))
+            "SELECT COUNT(*) FROM signals WHERE first_seen_date = ? AND "
+            + _tracked_sql(tracked=tracked), (date_iso,))
         return int(cur.fetchone()[0])
     finally:
         conn.close()
 
 
-def get_outcomes_in_range(lo_iso, hi_iso, db_path=DEFAULT_DB_PATH):
+def get_outcomes_in_range(lo_iso, hi_iso, db_path=DEFAULT_DB_PATH, *, tracked=False):
     """Closed-signal outcomes with ``lo_iso <= close_date <= hi_iso``, OLDEST first.
 
     The range sibling of ``get_outcomes_for_date``, feeding the captured score's
@@ -482,6 +560,9 @@ def get_outcomes_in_range(lo_iso, hi_iso, db_path=DEFAULT_DB_PATH):
 
     Both ends are INCLUSIVE. A half-open range would drop the newest day, which
     is precisely the day the Daily row is made of.
+
+    Tracked structures are excluded - the captured score is the traded types' -
+    and ``tracked=True`` returns only them.
     """
     conn = connect(db_path)
     try:
@@ -500,6 +581,7 @@ def get_outcomes_in_range(lo_iso, hi_iso, db_path=DEFAULT_DB_PATH):
             FROM signal_outcomes o
             JOIN signals s ON s.signal_id = o.signal_id
             WHERE o.close_date >= ? AND o.close_date <= ?
+              AND """ + _tracked_sql("s.", tracked) + """
             ORDER BY o.close_ts ASC
         """, (str(lo_iso), str(hi_iso)))
         return [dict(r) for r in cur.fetchall()]
@@ -507,12 +589,13 @@ def get_outcomes_in_range(lo_iso, hi_iso, db_path=DEFAULT_DB_PATH):
         conn.close()
 
 
-def get_outcomes_for_date(date_iso, db_path=DEFAULT_DB_PATH):
+def get_outcomes_for_date(date_iso, db_path=DEFAULT_DB_PATH, *, tracked=False):
     """Closed-signal outcomes for a given ``close_date`` (YYYY-MM-DD), newest first.
 
     Joins ``signal_outcomes`` to ``signals`` → display rows for the EOD
     "Captured — closed today" view: ``{signal_id, symbol, strategy, entry_credit,
-    exit_value, realized_pnl, exit_reason, close_ts}``, ordered by ``close_ts`` DESC."""
+    exit_value, realized_pnl, exit_reason, close_ts}``, ordered by ``close_ts`` DESC.
+    Tracked structures are excluded; ``tracked=True`` returns only them."""
     conn = connect(db_path)
     try:
         cur = conn.execute("""
@@ -526,7 +609,7 @@ def get_outcomes_for_date(date_iso, db_path=DEFAULT_DB_PATH):
                    o.close_ts        AS close_ts
             FROM signal_outcomes o
             JOIN signals s ON s.signal_id = o.signal_id
-            WHERE o.close_date = ?
+            WHERE o.close_date = ? AND """ + _tracked_sql("s.", tracked) + """
             ORDER BY o.close_ts DESC
         """, (date_iso,))
         return [dict(r) for r in cur.fetchall()]
