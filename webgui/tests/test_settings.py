@@ -198,13 +198,19 @@ def _click(host, text):
 
 
 def _click_async(btn):
-    """Press a button whose handler is a COROUTINE.
+    """Press a button whose handler is a COROUTINE, and wait for it to FINISH.
 
     nicegui hands an awaitable handler to ``background_tasks.create_or_defer``,
     which without ``core.loop`` set only DEFERS it to app startup - so the
     handler never runs and the test asserts nothing. Pointing ``core.loop`` at
-    the loop this helper runs under makes it a real task; the ticks then let it
-    finish, since the page's own awaits are short."""
+    the loop this helper runs under makes it a real task.
+
+    The wait is on that TASK, never on a count of loop ticks. The handler's
+    work crosses ``run.io_bound``, so it finishes when a worker THREAD does,
+    and twenty ticks are over in well under a millisecond. When the thread
+    lost that race ``asyncio.run`` cancelled the handler on its way out, the
+    queued work never ran, and the test failed on a spinner nobody had looked
+    at: about 1 run in 15 on an idle machine, and it turned CI red."""
     import asyncio
 
     import pytest as _pytest
@@ -213,9 +219,12 @@ def _click_async(btn):
 
     async def _drive():
         mp.setattr(core, "loop", asyncio.get_running_loop())
+        before = asyncio.all_tasks()
         _fire(btn, "click")
-        for _ in range(20):
-            await asyncio.sleep(0)
+        started = asyncio.all_tasks() - before
+        assert started, "the click started no task: is the handler a coroutine?"
+        _done, pending = await asyncio.wait(started, timeout=30)
+        assert not pending, "the handler was still running after 30 seconds"
 
     try:
         asyncio.run(_drive())
@@ -386,12 +395,17 @@ def test_test_voice_holds_its_button_and_reports_a_dead_voice_as_a_toast(
     """``voice.ensure`` BLOCKS for 0.9-2.4 s on a cache miss and the button said
     nothing while it did. The spinner is released in a ``finally``, so a failure
     does not leave it spinning."""
+    import time
     host = _render(monkeypatch, tmp_path)
     said = _said(monkeypatch)
     btn = [b for b in _buttons(host) if b.text == "Test voice"][-1]
     seen = {}
 
     def _ensure(_phrase, _name):
+        # It BLOCKS, as the real one does, and reads the spinner at the END of
+        # the wait. A fake that returns at once lets a helper that never waits
+        # for this thread pass most of the time (see ``_click_async``).
+        time.sleep(0.05)
         seen["busy"] = btn._props.get("loading")
         return None                      # no network / no edge-tts
 

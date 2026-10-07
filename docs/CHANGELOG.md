@@ -36,6 +36,63 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   expirations a symbol") was true and misleading; it left out how many symbols.
 - **Verification.** Unit suites. Not promoted.
 
+**Prior —** 2026-10-07 (**What GitHub was reporting on `main`: a webgui test that failed at random, eight known vulnerabilities in five pinned packages, and a warning and a notice on every job.**)
+
+- **The red run.** `test_test_voice_holds_its_button_and_reports_a_dead_voice_as_a_toast`
+  (`webgui/tests/test_settings.py`) failed the `webgui` job on two pushes to
+  `main` (10-06 and 10-07) with "the button never showed its own spinner". The
+  Settings page was right. The test's helper, `_click_async`, gave the click
+  handler twenty event-loop ticks to finish, and the handler's work crosses
+  `run.io_bound` to a worker thread; twenty ticks are over in under a
+  millisecond. When the thread lost, `asyncio.run` cancelled the handler on its
+  way out, the queued call never ran, and the assertion read a spinner nobody had
+  sampled. Measured on an idle desktop: 26 failures in 400 runs, with CI's
+  message.
+- **The fix is in the helper.** It waits on the task the click started, with a
+  30-second limit that says so if it is hit. The fake `voice.ensure` now blocks
+  for 50 ms, as the real one does, and reads the spinner at the end of the wait:
+  against the old helper that is 20 failures in 20. After: 400 of 400 idle, and
+  400 of 400 with 48 processes burning CPU. `pages/settings.py` is unchanged.
+- **A second timing test, in `news_svc`.** `test_a_long_run_of_tag_openers_parses_quickly`
+  failed once (10-06) at 1.005 s against a 1.0 s budget. Measured: the parse is
+  linear, and all of the wait is feedparser's own pass over 200 KB (0.5-0.8 s on
+  a desktop). The test could not see the backtracking it was written for:
+  feedparser repairs `<a<a` into `<a><a>` before `_clean` runs, and `_clean` caps
+  its input at 8,000 characters. With the old `[^>]+` pattern and the cap removed
+  the whole parse still took 0.7 s. The two whole-parse tests now share a 5 s
+  budget, and a new test times the pattern on its own: a millisecond as shipped,
+  7.3 s with `[^>]+`. The parametrized cases have short ids; left to pytest a
+  case was named by its 200,000-character value, which Windows refuses as an
+  environment variable, so the test errored there before it ran.
+  `adapters/rss.py` is unchanged.
+- **The `audit` job** has been red on every run; it is non-blocking, so a run
+  with nothing else wrong still showed green. `requirements.lock` moves five pins
+  to the first fixed release of each: anyio 4.13.0 → 4.14.2, multidict 6.7.1 →
+  6.9.1, oauthlib 3.3.1 → 4.0.0, urllib3 2.7.0 → 2.8.0, Werkzeug 3.1.8 → 3.1.9.
+  pip resolves the 119 pins with no conflict, and `pip-audit` on the file goes
+  from 8 findings in 5 packages (the list CI printed) to none. oauthlib is a
+  major version; its one user is the X post's OAuth 1.0a signing through
+  `requests-oauthlib`, and the three request shapes `x_post.py` sends (a JSON
+  post, a multipart upload, a GET with a query) sign byte-identically under both
+  versions with a fixed nonce and timestamp. Nothing was sent to X.
+  ⚠ **The lock moved, so the next promote reinstalls prod's venv.**
+- **The runner.** Every job carried a Node 20 deprecation warning and a notice
+  that `ubuntu-latest` moves to Ubuntu 26 from 2026-10-19. `actions/checkout` is
+  v5 and `actions/setup-python` is v6 (the first release of each on Node 24), and
+  `runs-on` names `ubuntu-24.04`: the workflow runs on Linux to match prod, so the
+  runner changes release when prod does.
+- **Not changed.** The `audit` job is still non-blocking. Its comment says to
+  flip it once the baseline is clean, which it now is; a blocking audit turns
+  `main` red on the day a new advisory is published, whatever the commit, so
+  that is the operator's call.
+- **Checked.** A CI run on the fix branch (run 37610997343, on `ubuntu-24.04`):
+  all 25 jobs green, `audit` included ("No known vulnerabilities found"), and no
+  annotation on any job where the run before it had 52. Locally, with the five
+  new versions layered over the project's packages, every suite matched its
+  failing set on the old pins; on Windows that set is three `news_svc` tests (a
+  file name NTFS refuses, and two scheduler timing tests), and all three pass on
+  CI. Not promoted.
+
 **Prior —** 2026-10-07 (**The Market Scanner's other structures are recorded and followed to an outcome.**)
 
 - **What it is.** Phase 4 of

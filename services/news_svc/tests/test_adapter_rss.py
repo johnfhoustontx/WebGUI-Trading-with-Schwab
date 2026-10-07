@@ -137,13 +137,21 @@ def test_teaser_whitespace_including_nbsp_and_newlines_is_collapsed():
     assert rss.parse(body, FEED, NOW, universe=[])[0]["teaser"] == "one two three"
 
 
+# What a whole-parse test times is FEEDPARSER's pass over 200 KB, which is
+# linear and is all of the wait: 0.5-0.8 s on a desktop, and 1.005 s on a CI
+# runner once, which failed a 1.0 s budget with nothing wrong. It cannot see our
+# own pattern at all (``test_the_tag_pattern_itself_is_linear_on_a_run_of_openers``
+# does), so the budget only has to catch a parse that has stopped being linear.
+PARSE_BUDGET_SEC = 5.0
+
+
 def test_a_long_run_of_open_angles_parses_quickly():
     junk = "<" * 200_000
     body = _one(b"<item><title>t</title><link>https://a.com/x</link><description><![CDATA["
                 + junk.encode() + b"]]></description></item>")
     t0 = time.perf_counter()
     out = rss.parse(body, FEED, NOW, universe=[])
-    assert time.perf_counter() - t0 < 1.0
+    assert time.perf_counter() - t0 < PARSE_BUDGET_SEC
     assert len(out) == 1 and len(out[0]["teaser"]) <= 400
 
 
@@ -189,14 +197,31 @@ def test_real_tags_and_comments_are_still_stripped():
     assert _title(b"<title><![CDATA[<i>a</i> <br/>b <?pi x?>c]]></title>") == "a b c"
 
 
-@pytest.mark.parametrize("junk", ["<" * 200_000, "<a" * 100_000])
+# ``ids``: left to pytest, a case is named by its 200,000-character value. That
+# name goes into PYTEST_CURRENT_TEST, which Windows refuses above 32,767
+# characters, so the test errored there before it ran, and a CI log printed the
+# whole value on every line that names the case.
+@pytest.mark.parametrize("junk", ["<" * 200_000, "<a" * 100_000],
+                         ids=["bare-openers", "letter-openers"])
 def test_a_long_run_of_tag_openers_parses_quickly(junk):
     body = _one(b"<item><title>t</title><link>https://a.com/x</link><description><![CDATA["
                 + junk.encode() + b"]]></description></item>")
     t0 = time.perf_counter()
     out = rss.parse(body, FEED, NOW, universe=[])
-    assert time.perf_counter() - t0 < 1.0
+    assert time.perf_counter() - t0 < PARSE_BUDGET_SEC
     assert len(out) == 1 and len(out[0]["teaser"]) <= 400
+
+
+def test_the_tag_pattern_itself_is_linear_on_a_run_of_openers():
+    """The backtracking the pattern's comment describes, measured where it
+    happens. Through ``parse`` it is invisible: feedparser repairs ``<a<a`` into
+    ``<a><a>`` before ``_clean`` runs, and ``_clean`` caps the text first. On
+    the pattern alone: a millisecond as shipped, 7 s with ``[^>]+`` in place of
+    ``[^<>]*``."""
+    junk = "<a" * 100_000
+    t0 = time.perf_counter()
+    assert rss._TAGS.sub("", junk) == junk
+    assert time.perf_counter() - t0 < 1.0
 
 
 def test_a_naive_now_is_read_as_utc_keeps_every_entry_and_still_clamps():
