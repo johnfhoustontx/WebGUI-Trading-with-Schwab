@@ -210,6 +210,23 @@ clear the IV rank floor (35 on the 0-DTE tab, 30 on Swing) before any of this.
 
 The standing rule holds: no bar was moved.
 
+### What the pass costs: measured 2026-10-06
+
+`tools/measure_structure_scan.py` times the real `build_window` and `select`
+for both windows on synthetic chains shaped like the three the scan holds (5, 9
+and 4 expirations). One thread, after the imports are warm:
+
+| Strikes each side, per expiration | Per symbol, mean | Per symbol, worst | 45-symbol scan |
+|---|---|---|---|
+| 60 | 63 ms | 78 ms | about 3 s |
+| 200 | 108 ms | 167 ms | 4.9 s |
+| 400 | 152 ms | 168 ms | about 7 s |
+
+The budget was one second per symbol. The pass adds a few seconds to a scan
+whose chain fetches already take about two minutes, and no Schwab call. A
+synthetic figure: the first live scan's duration is the one to read.
+
+
 ## The ratio backspread
 
 `strategy_scanner.build_backspreads`: sell one option near the money (about
