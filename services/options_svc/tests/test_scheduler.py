@@ -548,3 +548,100 @@ def test_close_slot_fires_at_1515_not_1458():
     # A Tuesday.
     assert s.analyze_slot_due(dt.datetime(2026, 7, 21, 14, 58, tzinfo=ct), set()) != "close"
     assert s.analyze_slot_due(dt.datetime(2026, 7, 21, 15, 15, tzinfo=ct), set()) == "close"
+
+
+# ── autoscan: each scan starts a set number of minutes after its quarter hour ──
+#
+# Measured on prod over three sessions (2026-10-02, 10-05, 10-06): Schwab's
+# "429 Too Many Requests" fell in the first minute after the hour and half hour
+# and almost never at :15 or :45, although the scan's own burst is the same at
+# every quarter hour (Friday: 4,944 requests in the first two minutes of the
+# twelve hour/half-hour scans, 5,051 in the twelve quarter scans, and all 41
+# refusals in the first group). So the scan waits `windows.scan.offset_min`.
+
+def _scan_at(monkeypatch, offset):
+    monkeypatch.setattr(scheduler.mc, "scan_offset_min", lambda: offset)
+
+
+def _slot_of(h, m):
+    return scheduler._slot_key(_ct(2026, 6, 15, h, m))
+
+
+def test_with_no_offset_a_scan_is_due_on_the_quarter_hour(monkeypatch):
+    _scan_at(monkeypatch, 0)
+    due, slot = scheduler.autoscan_due(_ct(2026, 6, 15, 9, 0), _slot_of(8, 45))
+    assert due is True and slot == _slot_of(9, 0)
+
+
+def test_a_scan_waits_for_its_offset(monkeypatch):
+    _scan_at(monkeypatch, 2)
+    last = _slot_of(8, 45)
+    for minute in (0, 1):
+        due, slot = scheduler.autoscan_due(_ct(2026, 6, 15, 9, minute), last)
+        assert due is False and slot == last
+    due, slot = scheduler.autoscan_due(_ct(2026, 6, 15, 9, 2), last)
+    assert due is True and slot == _slot_of(9, 0)      # still the 09:00 slot, started late
+
+
+def test_an_offset_scan_runs_once_per_slot(monkeypatch):
+    _scan_at(monkeypatch, 2)
+    _due, slot = scheduler.autoscan_due(_ct(2026, 6, 15, 9, 2), _slot_of(8, 45))
+    for minute in (3, 14, 15, 16):
+        assert scheduler.autoscan_due(_ct(2026, 6, 15, 9, minute), slot)[0] is False
+    due, nxt = scheduler.autoscan_due(_ct(2026, 6, 15, 9, 17), slot)
+    assert due is True and nxt == _slot_of(9, 15)
+
+
+def test_an_offset_keeps_the_same_scans_at_both_ends_of_the_window(monkeypatch):
+    # The window is 08:00-15:15 CT. Every slot it held still runs, each two
+    # minutes later: the first at 08:02, the last (the 15:15 slot) at 15:17.
+    _scan_at(monkeypatch, 2)
+    assert scheduler.autoscan_due(_ct(2026, 6, 15, 8, 0), None)[0] is False
+    assert scheduler.autoscan_due(_ct(2026, 6, 15, 8, 1), None)[0] is False
+    due, first = scheduler.autoscan_due(_ct(2026, 6, 15, 8, 2), None)
+    assert due is True and first == _slot_of(8, 0)
+    before_last = _slot_of(15, 0)
+    assert scheduler.autoscan_due(_ct(2026, 6, 15, 15, 16), before_last)[0] is False
+    due, last = scheduler.autoscan_due(_ct(2026, 6, 15, 15, 17), before_last)
+    assert due is True and last == _slot_of(15, 15)
+    for minute in (18, 29, 31, 32):
+        assert scheduler.autoscan_due(_ct(2026, 6, 15, 15, minute), last)[0] is False
+
+
+def test_the_number_of_scans_in_a_day_does_not_depend_on_the_offset(monkeypatch):
+    def scans(offset):
+        _scan_at(monkeypatch, offset)
+        last, ran = None, []
+        t = _ct(2026, 6, 15, 7, 30)
+        while t.hour < 16:
+            due, slot = scheduler.autoscan_due(t, last)
+            if due:
+                last = slot
+                ran.append((t.hour, t.minute))
+            t += dt.timedelta(seconds=30)
+        return ran
+    plain, shifted = scans(0), scans(2)
+    assert len(plain) == len(shifted) == 30
+    assert plain[0] == (8, 0) and shifted[0] == (8, 2)
+    assert all(m % 15 == 0 for _h, m in plain) and all(m % 15 == 2 for _h, m in shifted)
+
+
+def test_a_restart_inside_a_slot_still_scans_at_once(monkeypatch):
+    # No remembered slot: the service has just started. It scans now, as before.
+    _scan_at(monkeypatch, 2)
+    assert scheduler.autoscan_due(_ct(2026, 6, 15, 10, 7), None)[0] is True
+
+
+def test_an_offset_scan_still_skips_weekends_and_holidays(monkeypatch):
+    _scan_at(monkeypatch, 2)
+    assert scheduler.autoscan_due(_ct(2026, 6, 13, 9, 2), None)[0] is False   # Saturday
+    assert scheduler.autoscan_due(_ct(2026, 1, 1, 9, 2), None)[0] is False    # holiday
+
+
+def test_the_scan_reads_the_real_setting():
+    # Not patched: whatever config/sessions.toml ships is what the scan obeys.
+    offset = scheduler.mc.scan_offset_min()
+    last = _slot_of(8, 45)
+    assert scheduler.autoscan_due(_ct(2026, 6, 15, 9, offset), last)[0] is True
+    if offset:
+        assert scheduler.autoscan_due(_ct(2026, 6, 15, 9, offset - 1), last)[0] is False

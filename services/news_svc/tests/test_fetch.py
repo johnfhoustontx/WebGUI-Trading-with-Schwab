@@ -220,6 +220,11 @@ def test_a_304_without_validators_is_an_error_not_an_empty_poll(fake_get):
 # urllib3 fills a whole chunk before ``iter_content`` yields, and headers are
 # read before ``requests.get`` returns, so a check between chunks never runs
 # against a server that drips. Only a watchdog that cuts the socket stops it.
+#
+# The four tests below carry ``allow_network``: each talks to a loopback server
+# it starts itself, and the repo-root conftest refuses every other real request.
+# None of them can pass without the marker (three match "deadline", the fourth
+# reads the body back), so the marker cannot hide a vacuous pass here.
 
 class _DripServer:
     """One-connection loopback server: ``head`` is sent at once, then ``drip``
@@ -285,6 +290,7 @@ def _timed_fetch(url, **kw):
     return time.monotonic() - t0, err.value
 
 
+@pytest.mark.allow_network
 def test_a_content_length_body_dripped_a_byte_at_a_time_is_cut_at_the_deadline(drip_server):
     srv = drip_server(b"HTTP/1.1 200 OK\r\nContent-Length: 1000\r\n\r\n", b"x" * 1000)
     elapsed, err = _timed_fetch(srv.url, timeout=1, deadline_s=1.5)
@@ -292,6 +298,7 @@ def test_a_content_length_body_dripped_a_byte_at_a_time_is_cut_at_the_deadline(d
     assert err.status is None
 
 
+@pytest.mark.allow_network
 def test_headers_dripped_a_byte_at_a_time_are_cut_at_the_deadline(drip_server):
     srv = drip_server(b"HTTP/1.1 200 OK\r\n", b"X-Slow: " + b"a" * 1000)
     elapsed, err = _timed_fetch(srv.url, timeout=1, deadline_s=1.5)
@@ -299,6 +306,7 @@ def test_headers_dripped_a_byte_at_a_time_are_cut_at_the_deadline(drip_server):
     assert err.status is None
 
 
+@pytest.mark.allow_network
 def test_a_close_delimited_body_cut_by_the_deadline_is_an_error_not_a_short_body(drip_server):
     """Without a Content-Length the body ends at EOF - and cutting the socket IS
     an EOF, so a truncated body must not come back as a successful fetch."""
@@ -307,6 +315,7 @@ def test_a_close_delimited_body_cut_by_the_deadline_is_an_error_not_a_short_body
     assert elapsed < 2.0
 
 
+@pytest.mark.allow_network
 def test_a_fast_loopback_body_is_read_whole_and_the_watchdog_is_disarmed(drip_server):
     body = b"<rss>" + b"z" * 200 + b"</rss>"
     srv = drip_server(b"HTTP/1.1 200 OK\r\nContent-Length: %d\r\nETag: e9\r\n\r\n" % len(body)

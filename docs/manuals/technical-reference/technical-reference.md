@@ -419,6 +419,11 @@ a carried gamma.
 
 ### The autoscan's single wide fetch
 
+The auto-scan runs once per quarter hour, starting two minutes after it (09:02,
+09:17, 09:32, 09:47; `windows.scan.offset_min` in `config/sessions.toml`). The
+delay keeps its burst of chain requests out of the first minute after the hour
+and half hour, where Schwab refuses calls.
+
 Each 15-minute auto-scan reads three chain windows per symbol: today to +4 days, +5
 to +15 days, and +20 to +45 days. As shipped that is three chain requests per symbol.
 With `scan.wide_fetch = true`, `scanner_engine.scan_chains` makes one request from

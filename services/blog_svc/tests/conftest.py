@@ -24,7 +24,9 @@ class NetworkReached(BaseException):
     promises never to raise and keeps the promise by catching ``Exception``
     around every fetch - so a ``RuntimeError`` raised here was caught there,
     turned into "1 stylesheet could not be fetched", and the test that forgot
-    its ``fetch=`` PASSED. Nothing in the service catches ``BaseException``
+    its ``fetch=`` PASSED. The repo-root network guard raises a
+    ``requests`` ``ConnectionError``, which is an ``Exception`` too and is
+    swallowed the same way. Nothing in the service catches ``BaseException``
     (a shutdown must get through), so on the thread the test runs on this gets
     through too.
 
@@ -72,14 +74,16 @@ def _blog_store_in_tmp(monkeypatch, tmp_path):
     ``store.Store()`` with no arguments reads ``repo_paths.BLOG_DATA`` and
     ``BLOG_DB`` when it is made, so patching the two names is enough - and it
     has to be done here, for every test, because the store keeps documents and
-    typefaces as plain FILES. The repo-root guard watches ``sqlite3.connect``;
-    it would refuse the live database and never notice a draft's document
-    landing in the live folder beside it. (The store connects before it makes
-    any folder for exactly that reason; ``test_store.py`` pins both halves.)
+    typefaces as plain FILES. The repo-root store guard watches
+    ``sqlite3.connect``; it would refuse the live database and never notice a
+    draft's document landing in the live folder beside it. (The store connects
+    before it makes any folder for exactly that reason; ``test_store.py`` pins
+    both halves.)
 
     ⚠ This shares the test's ``monkeypatch``. A test that calls
-    ``monkeypatch.undo()`` takes this off, and the repo-root guard with it:
-    use ``with monkeypatch.context()`` for a patch that must end early."""
+    ``monkeypatch.undo()`` takes this off, and the repo-root store guard with
+    it (that one is a per-test patch on the same ``monkeypatch``): use
+    ``with monkeypatch.context()`` for a patch that must end early."""
     import repo_paths
     data = tmp_path / "blog-data"
     monkeypatch.setattr(repo_paths, "BLOG_DATA", data)
@@ -107,10 +111,25 @@ def _blog_site_in_tmp(monkeypatch, tmp_path):
 
 @pytest.fixture(autouse=True)
 def _no_real_network(monkeypatch):
-    """The repo-root conftest guards SQLite but NOT the network. The cleaner
-    reaches no network, and fonts.py reads its typefaces through an injected
-    ``fetch``, so a real request from this suite is a mistake - make one fail
-    loudly rather than hang or escape.
+    """A stricter guard than the repo-root one, standing on top of it.
+
+    The repo-root conftest already refuses every real HTTP request, in every
+    suite and for the whole session, by raising the stack's OWN connection
+    error (for ``requests``, a ``ConnectionError`` at ``HTTPAdapter.send``).
+    That is right wherever a test should take the code's "server is down"
+    path, and it is not enough here: ``fonts.localize`` catches ``Exception``
+    around every fetch, so under the root guard alone a test that forgot its
+    ``fetch=`` is refused, is told "1 stylesheet could not be fetched", and
+    PASSES. The cleaner reaches no network, and ``fonts.py`` reads its
+    typefaces through an injected ``fetch``, so a real request from this suite
+    is always a mistake - this guard makes one FAIL.
+
+    It stands at ``requests.sessions.Session.send``, one layer above the root
+    guard's ``HTTPAdapter.send``: a request is refused here first and never
+    gets as far as the root guard. ``requests`` is the only client the service
+    uses. ``urllib`` and ``httpx``, and the time between two tests, are the
+    root guard's alone; ``@pytest.mark.allow_network`` opens the root guard
+    and never this one.
 
     ``fonts.http_fetch``'s own tests monkeypatch ``requests.get`` on top of
     this; that replacement wins, so they are unaffected.
@@ -120,7 +139,9 @@ def _no_real_network(monkeypatch):
     The guard is what a test gets by asking for this fixture.
 
     ⚠ This shares the test's ``monkeypatch``, like the store fixture above: a
-    test that calls ``monkeypatch.undo()`` takes the guard off."""
+    test that calls ``monkeypatch.undo()`` takes this guard off. The root
+    network guard stays on (it is installed at import, not by a
+    ``monkeypatch``), but it is the one a forgetful test passes under."""
     yield from guard_the_network(monkeypatch)
 
 

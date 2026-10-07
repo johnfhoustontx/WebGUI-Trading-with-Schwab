@@ -504,10 +504,15 @@ a worktree needs its absolute path.
   skipped SET, never the count: `pytest` defaults to `-rf`.
 - The fake bus is ONE Redis per running test, as in prod. A test that needs an
   empty cache says so (`reset_fake_bus()`).
-- The suite cannot open a live SQLite store: the repo-root `conftest.py` guards
-  `sqlite3.connect`, and only that. ⚠ Nothing stops a suite reaching the network
-  except the blog service's own request guard
-  (`services/blog_svc/tests/conftest.py`), so fake every fetch. Prefer
+- The suite cannot open a live SQLite store or reach the network: the repo-root
+  `conftest.py` guards `sqlite3.connect` and the three HTTP stacks (`requests`,
+  `urllib`, `httpx`), the HTTP ones for the whole session. A test that starts its
+  own local server carries `@pytest.mark.allow_network`; a test expecting "down"
+  needs a partner expecting "up", or it passes on the guard alone. No sub-folder
+  may hold a pytest config: it moves rootdir and switches both guards off
+  (`tests/test_conftest_reach.py`). The blog service suite adds a stricter
+  request guard of its own (`services/blog_svc/tests/conftest.py`): code that
+  catches every `Exception` swallows the root guard's refusal. Prefer
   `db_path=None` resolved at call time in a new store; a default bound at `def`
   time cannot be redirected.
 - CI runs every suite as blocking, with a `typecheck` job;
@@ -660,8 +665,11 @@ Detail: [observability and performance](docs/reference/observability-and-perform
   carries a whole document. A new stream whose commands carry a document needs
   a cap of its own BEFORE anything writes it. A dead letter's fields are cut to
   `[dead_letters] max_field_kb`.
-- **Every service shares the proxy's 5 requests a second.** A scheduled chain
-  burst stays off the quarter hours (the autoscan owns :00/:15/:30/:45); read the
+- **Every service shares the proxy's 5 requests a second.** The autoscan starts
+  `windows.scan.offset_min` (2) minutes after each quarter hour and fetches for
+  about two minutes, so a scheduled chain burst stays out of :02-:05, :17-:20,
+  :32-:35 and :47-:50, and out of the first minute after the hour and half
+  hour, where Schwab refuses calls (429) whatever the rate; read the
   proxy's access log before scheduling a new fan-out. The one-minute poll's
   requests go first (`X-Priority`, a header, never a parameter); that lane is the
   poll's alone.

@@ -15,6 +15,7 @@ executor so the event loop stays responsive.
 """
 import asyncio
 import logging
+from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from services import _heartbeat
@@ -56,10 +57,24 @@ def _slot_key(now):
 
 def autoscan_due(now, last_slot):
     """(should_scan, slot_key): True at most once per 15-min slot, only on a
-    trading day within the 08:00–15:15 CT window."""
-    if not (_is_trading_day(now) and _is_market_hours(now)):
+    trading day within the 08:00–15:15 CT window.
+
+    A slot's scan starts ``windows.scan.offset_min`` minutes after its quarter
+    hour (config/sessions.toml; 2 as shipped, so 09:02, 09:17, ...). The slots
+    are the same ones, each started late: the clock is read ``offset`` minutes
+    back, so the window and the slot key both belong to the slot's own quarter
+    hour and the day holds the same number of scans whatever the offset.
+
+    Why: Schwab's "429 Too Many Requests" fall in the first minute after the
+    hour and half hour and almost never at :15 or :45, although the scan's
+    burst is the same at every quarter hour (measured 2026-10-02: 4,944
+    requests in the first two minutes of the twelve hour/half-hour scans, 5,051
+    in the twelve quarter scans, all 41 refusals in the first group). A refusal
+    there costs the one-minute collector its chains for that minute."""
+    nominal = now - timedelta(minutes=mc.scan_offset_min())
+    if not (_is_trading_day(nominal) and _is_market_hours(nominal)):
         return (False, last_slot)
-    slot = _slot_key(now)
+    slot = _slot_key(nominal)
     return (slot != last_slot, slot)
 
 

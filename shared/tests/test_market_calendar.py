@@ -765,3 +765,35 @@ def test_end_exclusive_survives_a_partial_user_toml(probe_window, monkeypatch,
     assert mc.window_bounds("probe") == (dt.time(9, 45), dt.time(15, 30))
     assert mc.in_window("probe", _et(2026, 8, 17, 15, 29)) is True
     assert mc.in_window("probe", _et(2026, 8, 17, 15, 30)) is False
+
+
+# ── the scan's start offset ────────────────────────────────────────────────
+
+def test_the_scan_offset_ships_as_two_minutes_and_matches_the_built_in():
+    assert mc.scan_offset_min() == 2
+    assert mc._DEFAULTS["windows"]["scan"]["offset_min"] == 2
+
+
+def test_the_scan_offset_comes_from_the_settings_file(monkeypatch, tmp_path):
+    _write_cfg(monkeypatch, tmp_path, "[windows.scan]\noffset_min = 5\n")
+    assert mc.scan_offset_min() == 5
+    assert mc.window_bounds("scan") == (dt.time(8, 0), dt.time(15, 15))   # siblings kept
+
+
+def test_a_scan_offset_of_zero_is_a_real_setting(monkeypatch, tmp_path):
+    # 0 means "on the quarter hour", not "unset".
+    _write_cfg(monkeypatch, tmp_path, "[windows.scan]\noffset_min = 0\n")
+    assert mc.scan_offset_min() == 0
+
+
+@pytest.mark.parametrize("bad", ["-1", "11", "14", "2.5", "true", '"2"', '"soon"'])
+def test_an_unusable_scan_offset_means_the_built_in(monkeypatch, tmp_path, bad):
+    # A scan takes a few minutes and must finish inside its own quarter hour,
+    # so the offset is a whole number of minutes from 0 to 10.
+    _write_cfg(monkeypatch, tmp_path, f"[windows.scan]\noffset_min = {bad}\n")
+    assert mc.scan_offset_min() == 2
+
+
+def test_the_scan_offset_survives_a_malformed_file(monkeypatch, tmp_path):
+    _write_cfg(monkeypatch, tmp_path, '[windows]\nscan = "oops"')
+    assert mc.scan_offset_min() == 2

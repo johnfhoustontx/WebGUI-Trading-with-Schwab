@@ -52,6 +52,14 @@ def test_transport_failures_are_not_alive(monkeypatch, exc):
 
 # --- the regression this exists for -----------------------------------------
 
+# ⚠ Both real-socket tests below carry ``allow_network``, and the FIRST one
+# is the subtle case. The repo-root conftest blocks every real urlopen during a
+# test, and that guard makes a probe read DOWN — so without the marker this test
+# would still PASS, but vacuously: the guard, not the non-accepting socket, would
+# be what said down, and the 2026-08-16 property it pins would go untested while
+# the suite stayed green. The power check beneath it is what would have noticed
+# (it FAILS without the marker), which is exactly the pairing it was written for.
+@pytest.mark.allow_network
 def test_a_bound_socket_that_never_accepts_reads_as_DOWN():
     """The 2026-08-16 failure, reproduced: listen() without accept().
 
@@ -75,6 +83,7 @@ def test_a_bound_socket_that_never_accepts_reads_as_DOWN():
         srv.close()
 
 
+@pytest.mark.allow_network
 def test_probe_succeeds_against_a_real_server():
     """Power check for the test above: a server that DOES accept reads as UP."""
     class _H(http.server.BaseHTTPRequestHandler):

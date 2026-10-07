@@ -131,13 +131,111 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   sandbox, but an entry's document is served without its policy header. The
   commands, and what to do before a rollback, are in
   `docs/dev-prod-environments.md`, "The site blog".
-- **Found on the way.** `CLAUDE.md` said the repo-root `conftest.py` guards
-  "both HTTP stacks". It guards `sqlite3.connect` only: the network guard was
-  written on 2026-09-12 and its commits never reached `main`. The sentence is
-  corrected, and `docs/reference/testing.md` has the detail. The blog service
-  suite carries a request guard of its own.
+- **Found on the way, and settled by the merge.** While this was built,
+  `CLAUDE.md` said the repo-root `conftest.py` guards "both HTTP stacks" and
+  `main` had no network guard at all. The guard reached `main` the same day (the
+  next entry) and this work was merged on top of it, so the root conftest now
+  refuses real HTTP for every suite, the blog service's included. That suite
+  keeps a stricter request guard of its own
+  (`services/blog_svc/tests/conftest.py`): the typeface code catches the root
+  guard's connection error and turns it into a note, so under the root guard
+  alone a test that forgot its fake fetch passes. `docs/reference/testing.md`
+  has the detail.
 
-**Prior —** 2026-10-06 (**Flow Alerts: the bought / sold estimate is a bar.**)
+**Prior — 2026-10-06** (**The test suite can no longer reach a real HTTP server. `CLAUDE.md` had said so since 2026-10-04; `main` had no such guard.**)
+
+- **What was wrong.** The network guard was written on 2026-09-12 and sat on two
+  side branches (`602cd1c`, and a pick of it, `d4ece94`); neither was ever merged.
+  On `main` at `4a50feb` the root `conftest.py` had one autouse fixture, the SQLite
+  one. It is on `main`'s line now as a cherry-pick plus one commit on top.
+- **Measured first, on `main`, with a recorder plugin over the 21 CI suites: 45
+  outbound attempts, 39 of them to the proxy's port.** 15 writes (`/track`,
+  `/untrack`, nine `options-scanner` tests), 24 market-data reads (21
+  `sentiment_svc`, 3 `tools`), and 6 to servers the tests start themselves. None
+  through `httpx` or `aiohttp`, none to an outside host. On the prod box, where the
+  proxy is up, those 39 are fake trades registered with the live stream tracker and
+  real Schwab calls.
+- **`httpx` is covered now.** The 2026-09-12 version left it out because no module
+  here imports it. Two dependencies run on it for real outbound calls: the
+  `anthropic` SDK (a paid call) and `schwab-py` (the stream bridge). The patch is on
+  `httpx.HTTPTransport.handle_request` and
+  `httpx.AsyncHTTPTransport.handle_async_request` only, so FastAPI's `TestClient`,
+  `ASGITransport` and `MockTransport` (each its own in-process transport) are
+  untouched: every `test_app.py` passes unchanged.
+- ⚠ **The guard is installed once, at import, not per test.** As written it was a
+  per-test `monkeypatch`, undone at each teardown. Measured: three `sentiment_svc`
+  tests drove the real `scheduler.loop`, which starts two daemon stream consumers,
+  and in 3 runs out of 3 two or three of their requests reached the proxy's port
+  between one test's teardown and the next test's setup. The guard would have
+  looked like protection and leaked on every run of that suite. It is now applied
+  when the conftest is imported and never removed; `@pytest.mark.allow_network`
+  opens it for one test.
+- ⚠ **`trade-analyzer/pytest.ini` was still on `main`, and that suite still had no
+  root guard at all** (`sqlite3.connect` was the real function there). Removed: 442
+  node IDs before and after, compared as a set. `tests/test_conftest_reach.py`
+  fails on any sub-folder pytest config; it now also reaches `.claude/hooks`, a CI
+  suite the first version skipped along with the nested worktrees.
+- **Failing-set comparison, all 21 suites, `main` against the branch: identical in
+  20.** The 21st, `tests`, gains the guard's own 37 tests, all passing. (On this
+  Windows box `news_svc` reads 3 failed and 4 errors on both sides, the same seven;
+  `webgui` matches once three test ids that embed a freshly signed token are
+  normalised.)
+  Under the guard the only requests that reach a real HTTP function come from the
+  eight marked tests, each to a loopback server it started.
+- **Tests changed, and why.**
+  - `services/news_svc/tests/test_fetch.py`: four tests marked `allow_network`.
+    They were the only tests the guard turned red; each starts its own loopback
+    server so the deadline watchdog has a real socket to cut. None can pass without
+    the marker.
+  - `services/sentiment_svc/tests/test_app.py`: the three scheduler tests take a
+    `no_stream_consumers` fixture (fake consumers), and the first also stubs the
+    rotation refresh. This is the thread leak above; the suite now makes no
+    outbound attempt at all. Each test still asserts what it did, and the first now
+    also asserts the loop reached the consumers.
+  - `tools/tests/test_measure_gamma_public.py`: a fake Term fetch replaces three
+    real chain requests, and the test now asserts `with_term=True` leaves the fetch
+    in place, which it did not check before.
+  - `tools/tests/test_wait_http.py` (from the cherry-pick): two markers. One of
+    them is the vacuous case: a test asserting the probe reads DOWN stays green
+    under the guard while testing nothing.
+- **Left as they are:** the nine `options-scanner` tests that call
+  `paper_trader.add_trade` unstubbed. They are refused 15 times per run and pass on
+  the tracker's proxy-down path; they assert on the ledger and on `untrack`, never
+  on the tracker's answer, so none passes because of the refusal.
+- **Not covered:** `aiohttp` (only `edge_tts`, stubbed in its tests; the recorder
+  saw no connection), `smtplib` and the Schwab websocket (not HTTP), a subprocess a
+  test spawns, and a bare `http.client` connection. The SQLite guard is still a
+  per-test patch, so a leaked thread could open a live store between two tests;
+  nothing was seen doing so.
+- Not in this change: the 2026-09-12 commit's edits to `CLAUDE.md` and this file.
+  Both files have been rewritten since, so the D4 entry it de-duplicated is still
+  here twice (2026-09-12, "Stock legs in the leg model").
+- Docs: `docs/reference/testing.md` (what is guarded, the marker, the vacuous-pass
+  hazard), and the Tests rule in `CLAUDE.md` corrected in place ("both HTTP stacks"
+  is three, for the whole session).
+
+**Prior — 2026-10-06** (**The quarter-hour scan starts two minutes late, out of the minute where Schwab refuses calls.**)
+
+- **What was wrong.** Schwab answered "429 Too Many Requests" in bursts of 10-30
+  seconds: 41 on 2026-10-02, 60 on 10-05 and 70+ by 11:00 on 10-06 (the first day
+  with 135 watchlist symbols). Each burst refuses every endpoint, so the
+  one-minute collector lost chains for that minute, the scan fell back to three
+  fetches for the symbols it lost, and open positions failed to reprice.
+- **What the measurements showed.** The refusals follow the clock, not this
+  app's rate. On 10-02 the scan's first two minutes held 4,944 requests across
+  the twelve hour/half-hour scans and 5,051 across the twelve quarter scans, and
+  all 41 refusals were in the first group. On 10-06 the proxy's true send rate
+  was sampled each second: the 10:45 scan held exactly 5 a second for over a
+  minute (247 in 60 s) and drew none; 11:00 drew nine.
+- **The change.** `[windows.scan] offset_min` in `config/sessions.toml` (2 as
+  shipped, 0-10, in Settings -> Configuration): each quarter-hour scan starts
+  that many minutes late (09:02, 09:17, 09:32, 09:47). `scheduler.autoscan_due`
+  reads the clock that many minutes back, so the slots, their keys and the
+  count of scans in a day (30) are unchanged. Read at call time: no restart.
+- **Not measured yet.** Whether the refusals stop. The one-minute collector still
+  sends its own pass in that first minute.
+
+**Prior — 2026-10-06** (**Flow Alerts: the bought / sold estimate is a bar.**)
 
 - **What changed.** The estimate was two lines of text ("≈ bought 47.92% · sold
   34.31% · unlabelled 17.76%"). It is now one bar per figure, split in proportion:

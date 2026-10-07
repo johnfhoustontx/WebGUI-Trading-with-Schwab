@@ -96,6 +96,9 @@ def test_builds_skip_term_by_default(monkeypatch):
     Term's wider chain fetch -- and must put _term_chain back afterwards."""
     from services.options_svc import compute
     seen = {}
+    # A fake stands in for the real Term fetch: left real, the with_term=True
+    # call below asked the proxy for NVDA's whole chain (three attempts).
+    monkeypatch.setattr(compute, "_term_chain", lambda symbol, chain: ("term", symbol))
     orig = compute._term_chain
 
     def fake_measure(symbol):
@@ -107,4 +110,5 @@ def test_builds_skip_term_by_default(monkeypatch):
     assert seen["term"] is None
     assert compute._term_chain is orig
     m.measure("NVDA", with_term=True)
+    assert seen["term"] == ("term", "NVDA")      # with_term leaves the fetch in place
     assert compute._term_chain is orig

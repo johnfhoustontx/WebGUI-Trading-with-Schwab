@@ -245,7 +245,7 @@ _DEFAULTS = {
         "curb": {"start": "15:00", "end": "15:15"},
     },
     "windows": {
-        "scan": {"start": "08:00", "end": "15:15"},
+        "scan": {"start": "08:00", "end": "15:15", "offset_min": 2},
         "collection": {"start": "08:00", "eth_start": "06:30", "stop": "15:20"},
         "session_flip": {"at": "08:00"},
         "market_snapshot": {"start": "08:30", "end": "15:00"},
@@ -692,6 +692,29 @@ def window_bounds(name: str):
     close_key = "end" if "end" in dflt else "stop"
     return (_parse_time(win.get("start"), dflt["start"]),
             _parse_time(win.get(close_key), dflt[close_key]))
+
+
+#: The most minutes a scan may start after its quarter hour. A scan takes a few
+#: minutes and must finish inside its own slot, and its timestamp must stay in
+#: the quarter hour the slot is named for.
+SCAN_OFFSET_MAX_MIN = 10
+
+
+def scan_offset_min() -> int:
+    """Minutes after each quarter hour that the options scan starts
+    (``[windows.scan] offset_min``). ``0`` is on the quarter hour.
+
+    A whole number from 0 to :data:`SCAN_OFFSET_MAX_MIN`; anything else (text,
+    a fraction, a bool, out of range) reads as the built-in value. Never
+    raises."""
+    dflt = _DEFAULTS["windows"]["scan"]["offset_min"]
+    try:
+        raw = _window("scan").get("offset_min")
+    except Exception:
+        return dflt
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        return dflt
+    return raw if 0 <= raw <= SCAN_OFFSET_MAX_MIN else dflt
 
 
 def in_window(name: str, now) -> bool:

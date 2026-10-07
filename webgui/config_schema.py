@@ -553,7 +553,16 @@ _SESSIONS = ConfigFile(
         )),
         _window("scan", "Auto-scan window",
                 "When the options service runs its 15-minute rescans.",
-                (OPTIONS, WEBGUI)),
+                (OPTIONS, WEBGUI), extra=(
+            Field("windows.scan.offset_min", "Minutes after the quarter hour",
+                  "Each scan starts this many minutes after its quarter hour: "
+                  "2 means 9:02, 9:17, 9:32 and 9:47. Schwab refuses calls in "
+                  "the first minute after the hour and half hour, so starting "
+                  "on the quarter hour loses data. 0 starts on the quarter "
+                  "hour. The same scans run either way. Takes effect at the "
+                  "next scan, no restart.",
+                  kind="int", unit="minutes", min=0, max=10),
+        )),
         Section("Gamma collection window",
                 "When the 1-minute GEX collector runs. Every minute costs one "
                 "chain call per symbol.", (
