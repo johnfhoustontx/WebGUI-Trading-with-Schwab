@@ -202,9 +202,9 @@ enforced:
 
 ⚠ **Every visitor draws from ONE build.** The day union reaches about 4.5 MB by
 the close, and the private page gives each tab its own parse and its own five
-thousand row dicts. On this origin `_read_and_build_shared` reads through
-`bus_client.read_shared` and takes the built rows from
-`scanner_shared.get`: one slot for the process, keyed on the IDENTITY of the
+thousand row dicts. On this origin `_read_and_build_shared` reads each scan
+view through a version-gated copy of its own (`scanner._shared_view`) and
+takes the built rows from `scanner_shared.get`: one slot for the process, keyed on the IDENTITY of the
 day union, the live scan, the regime and the calibration (each the same object
 until its view is republished), and rebuilt when it is
 `checks_feed.TABLE_REFRESH_SEC` old, which is what re-stamps against the
@@ -212,7 +212,12 @@ Opportunity Board. ⚠ **What it returns is read-only, payloads and rows alike.*
 The page stamps nothing onto it: the selected row's accent goes on copies of
 the one page a visitor is sent (`scanner.page_rows`), and a re-stamp there is
 a fresh shared build rather than a per-tab copy of every row. A stamp on a
-shared row would show one visitor's click in every other visitor's tab. The
+shared row would show one visitor's click in every other visitor's tab.
+⚠ **Not `bus_client.read_shared` for the two scan views.** That keeps the 48
+views read most recently, and the public Gamma page alone can read that many;
+a day union dropped between two visitors' reads comes back as a different
+object, and the slot would then build once per visitor
+(`test_the_shared_build_survives_a_busy_gamma_page`). The
 per-tab cost this avoids is an estimate (about 20 MB by the close), not a
 measurement.
 

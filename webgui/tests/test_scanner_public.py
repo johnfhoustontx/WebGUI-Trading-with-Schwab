@@ -76,17 +76,19 @@ def published():
     shell.unpublish()
 
 
+def _forget_everything():
+    bus_client.reset()
+    scanner_shared.reset()
+    scanner._reset_shared_reads()
+    for memo in checks_feed._memos.values():
+        memo.clear()
+
+
 @pytest.fixture
 def clean():
-    bus_client.reset()
-    scanner_shared.reset()
-    for memo in checks_feed._memos.values():
-        memo.clear()
+    _forget_everything()
     yield
-    bus_client.reset()
-    scanner_shared.reset()
-    for memo in checks_feed._memos.values():
-        memo.clear()
+    _forget_everything()
 
 
 # ── the build ────────────────────────────────────────────────────────────────
@@ -171,6 +173,48 @@ def test_every_visitor_gets_the_same_build(clean, published):
     second = scanner._read_and_build_shared()
     assert first is second
     assert [r["id"] for r in first["rows"]["signals_swing"]] == [_pcs_signal()["id"]]
+
+
+def test_a_public_build_leaves_what_it_was_built_from_untouched():
+    """The payloads are shared too, and rebuilt FROM every five minutes: a
+    builder that wrote into a signal would compound, in every visitor's tab."""
+    import copy
+    leg = {"side": "long", "kind": "call", "strike": 110.0,
+           "expiration": "2026-10-17", "qty": 1}
+    directional = {"id": "ORCL_LONG_CALL_2026-10-17_110", "symbol": "ORCL",
+                   "type": "LONG_CALL", "family": "DIRECTIONAL",
+                   "strategy_label": "Long Call", "bias": "bullish", "legs": [leg],
+                   "expiration": "2026-10-17", "dte": 12, "net_debit": 240.0,
+                   "net_credit": None, "max_profit": None, "unbounded_profit": True,
+                   "max_loss": 240.0, "breakevens": [112.4], "pop_pct": 38.0,
+                   "composite_score": 71, "grade": "Good", "live": True}
+    structure = {**directional, "id": "ORCL_BUTTERFLY_CALL_2026-10-17",
+                 "type": "BUTTERFLY_CALL", "group": "BUTTERFLY", "family": "NEUTRAL",
+                 "live": False, "stale_since": "2026-10-07T10:15:00-05:00"}
+    day = {**_day(_pcs_signal()), "signals_directional": [directional],
+           "structures_swing": [structure]}
+    live = {"timestamp": "x", "signals_swing": [_pcs_signal()]}
+    ctx = {**_ctx(), "caps": None, "calibration": {"by_bucket": {}}}
+    before = copy.deepcopy((day, live, ctx))
+    built = scanner._build_populate(day, live, ctx, public=True)
+    assert sum(len(rows) for rows in built["rows"].values()) == 3
+    assert (day, live, ctx) == before
+
+
+def test_the_shared_build_survives_a_busy_gamma_page(clean, published):
+    """``bus_client.read_shared`` keeps the 48 views read most recently and
+    drops the rest. The public Gamma page alone can read that many (eight
+    symbols, a snapshot and five histories each), so a day union read through
+    it could be dropped between two visitors' reads - a fresh parse, a
+    different object, a second build, and by the end one build per visitor:
+    exactly what the shared build exists to prevent."""
+    _seed()
+    first = scanner._read_and_build_shared()
+    bus = bus_client.bus()
+    for i in range(bus_client.SHARED_MAX_VIEWS + 2):
+        bus.cache_set(f"cache:options:gamma_pub:SYM{i}", {"i": i})
+        bus_client.read_shared(f"options:gamma_pub:SYM{i}")
+    assert scanner._read_and_build_shared() is first
 
 
 def test_a_new_scan_is_a_new_build(clean, published):

@@ -105,9 +105,15 @@ On the public origin the page takes its rows from a process-wide build:
   every minute and feeds the checks; the private page re-stamps on that same
   five-minute cadence). The inputs are the day union, the live scan, the regime
   and the calibration.
-- Identity, not a version probe: `bus_client.read_shared` and the checklist's
-  gated reads hand back the same object until a view is republished, so there
-  is no probe to race the payload it describes. The parse is shared too.
+- Identity, not a version probe: the scanner's own version-gated copies of
+  the two scan views (`scanner._shared_view`) and the checklist's gated reads
+  hand back the same object until a view is republished, so there is no probe
+  to race the payload it describes. The parse is shared too.
+- Not `bus_client.read_shared`, which the first cut used. It keeps the 48 views
+  read most recently, and the public Gamma page alone can read that many: a
+  day union dropped between two visitors' reads comes back as a different
+  object, and the slot would build once per visitor. Found in self-review and
+  reproduced by a test before it was fixed.
 - One lock: visitors arriving together at a new scan wait on one build.
 - What it returns is READ-ONLY. The page never stamps a shared row. The
   selected-row accent is stamped on a copy of the one page of rows the visitor

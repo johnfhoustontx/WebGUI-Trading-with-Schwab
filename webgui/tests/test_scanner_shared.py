@@ -1,8 +1,7 @@
 """The one-slot build every visitor on the public origin draws from.
 
-Keyed on object IDENTITY, not equality: ``bus_client.read_shared`` and the
-checklist's gated reads hand back the same object until a view's version
-moves, so "is this the same object" is exactly "has this input changed".
+Keyed on object IDENTITY, not equality: a version-gated read hands back the
+same object until a view's version moves, so "is this the same object" is exactly "has this input changed".
 """
 import threading
 

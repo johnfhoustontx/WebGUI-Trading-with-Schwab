@@ -7,8 +7,9 @@ is served to anyone, by a process with a memory cap: a copy per tab is a cost
 a stranger controls. So on that origin every tab draws from ONE build, held
 here.
 
-A single slot, keyed on object IDENTITY. ``bus_client.read_shared`` and the
-checklist's gated reads hand back the same object until a view's version
+A single slot, keyed on object IDENTITY. A version-gated read
+(``bus_client.read_gated``, which is what the scanner's ``_shared_view`` and
+the checklist's reads are) hands back the same object until a view's version
 moves, so "these are the same objects" is exactly "nothing was republished" -
 with no version probe to race the payload it describes (the trap
 ``bus_client.read_gated`` documents), and no deep compare of megabytes.

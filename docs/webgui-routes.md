@@ -563,7 +563,9 @@ module at `/signals`. `render()` reads which origin it is from the process
 the public origin: builds no Run scan (`_request_scan` opens with the
 `_may_enqueue` return), no footer buttons (`detail.render(actions=False)`), no
 `handoff.watch_paper_results`, no `_new` stamp (`_SEEN` is neither read nor
-written), and loads through `_read_and_build_shared` → `scanner_shared.get`, one
+written), and loads through `_read_and_build_shared` → `scanner_shared.get` (the two
+scan views through `_shared_view`, the page's own version-gated copies, never
+`bus_client.read_shared`, whose 48-view limit the public Gamma page can fill), one
 build for the whole process keyed on the identity of the day union, the live
 scan, the regime and the calibration, and rebuilt when it is
 `checks_feed.TABLE_REFRESH_SEC` old. Those rows are shared and read-only: the

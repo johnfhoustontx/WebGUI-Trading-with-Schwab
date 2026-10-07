@@ -66,9 +66,10 @@ Extend the docstring's `caps=False` paragraph with that sentence.
 - Create: `webgui/pages/options/scanner_shared.py`
 - Test: `webgui/tests/test_scanner_shared.py` (create)
 
-A single-slot memo keyed on object IDENTITY. `bus_client.read_shared` and
-`checks_feed._gated` hand back the same object until a view's version moves, so
-identity is an exact "has this input changed" test with no probe/payload race.
+A single-slot memo keyed on object IDENTITY. A version-gated read
+(`bus_client.read_gated`) hands back the same object until a view's version
+moves, so identity is an exact "has this input changed" test with no
+probe/payload race.
 
 ```python
 """One built scan for every visitor on the public origin. ..."""
@@ -151,8 +152,8 @@ _NO_VIEW: dict = {}     # ONE object for "absent", so identity holds across call
 
 def _read_and_build_shared():
     from . import checks_feed, scanner_shared
-    day_env = bus_client.read_shared(_DAY_VIEW) or _NO_VIEW
-    live = bus_client.read_shared(_LIVE_VIEW) or _NO_VIEW
+    day_env = _shared_view(_DAY_VIEW)     # the page's own read_gated memo;
+    live = _shared_view(_LIVE_VIEW)       # NOT read_shared - see the design
     ctx = checks_feed.read_context()
     return scanner_shared.get(
         (day_env, live, ctx.get("regime"), ctx.get("calibration")),

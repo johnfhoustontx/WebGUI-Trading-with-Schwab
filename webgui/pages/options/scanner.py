@@ -42,6 +42,7 @@ buttons live in the detail panel's footer instead of a per-row icon column.
 ``SCAN_CSS`` stays — this table's column count still needs its compact padding.
 """
 import datetime as dt
+import threading
 from zoneinfo import ZoneInfo
 
 import bus_client
@@ -725,6 +726,34 @@ def _read_and_build():
 # same inputs to ``scanner_shared`` on every call. Never written to.
 _NO_VIEW: dict = {}
 
+# The public origin's own copies of the two scan views, each the SAME object
+# until its view is republished (``bus_client.read_gated``), with a lock per
+# view so visitors arriving together wait on one parse.
+#
+# ⚠ Deliberately NOT ``bus_client.read_shared``. That keeps the
+# ``SHARED_MAX_VIEWS`` views read most recently and drops the rest, and the
+# public Gamma page alone can read that many (eight symbols, a snapshot and
+# five histories each). A day union dropped between two visitors' reads comes
+# back as a fresh parse - a different object - and ``scanner_shared`` would
+# then build again for each of them, which is the one thing it exists to stop.
+_SHARED_MEMOS = {_DAY_VIEW: {}, _LIVE_VIEW: {}}
+_SHARED_LOCKS = {view: threading.Lock() for view in _SHARED_MEMOS}
+
+
+def _reset_shared_reads():
+    """Forget the public origin's copies of the scan views (tests)."""
+    for view, memo in _SHARED_MEMOS.items():
+        with _SHARED_LOCKS[view]:
+            memo.clear()
+
+
+def _shared_view(view):
+    """One scan view for the public origin, or ``_NO_VIEW`` when it is absent.
+    **Blocking** (a Redis read under the view's lock) and READ-ONLY."""
+    with _SHARED_LOCKS[view]:
+        payload, _changed = bus_client.read_gated(view, _SHARED_MEMOS[view])
+    return payload or _NO_VIEW
+
 
 def _read_and_build_shared():
     """The PUBLIC origin's read: one build for the whole process, the same
@@ -732,7 +761,7 @@ def _read_and_build_shared():
     it is ``checks_feed.TABLE_REFRESH_SEC`` old. **Blocking** — go through
     ``run.io_bound``.
 
-    ``read_shared`` hands every caller the same parse, and the checklist's
+    ``_shared_view`` hands every caller the same parse, and the checklist's
     regime and calibration are the same objects until their views move, so
     those four identities are the build's key (``scanner_shared.get``). The
     Opportunity Board is not among them: it moves every minute, and the age
@@ -742,8 +771,8 @@ def _read_and_build_shared():
     nothing onto it: no ``_new``, and the selected row's accent goes on a copy
     of the one page a visitor is sent (``page_rows``)."""
     from . import checks_feed, scanner_shared
-    day_env = bus_client.read_shared(_DAY_VIEW) or _NO_VIEW
-    live = bus_client.read_shared(_LIVE_VIEW) or _NO_VIEW
+    day_env = _shared_view(_DAY_VIEW)
+    live = _shared_view(_LIVE_VIEW)
     ctx = checks_feed.read_context()
     return scanner_shared.get(
         (day_env, live, ctx.get("regime"), ctx.get("calibration")),
