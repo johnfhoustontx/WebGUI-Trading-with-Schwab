@@ -24,11 +24,12 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   it was found in the browser check and follows the switch the other public
   tools already keep. The same panel is the public Calculator's rating panel,
   which therefore loses its (already empty) Greeks section while quotes are off.
-- **Open, and the owner's.** The switch does not cover everything a quote
-  feeds. A credit spread's PoP is one minus its short delta, and a single-leg
-  row's Debit, Max loss and breakeven are that option's own price. The public
-  Finder already prints those columns on request; this page prints them for
-  every watchlist symbol on every scan.
+- **A single option's price is withheld too** (the owner's decision after the
+  review). While the switch is off, a one-leg row (a long call or put, a naked
+  short) shows a dash for Debit/Credit, Max P, Max L, R:R and BE, and the panel
+  says the price is not shown. PoP stays, and so does a multi-leg row's net, as
+  on the public Finder. The public Finder is unchanged: it still prints a
+  single option's price on request, and stays part of decision D2.
 - **From the code review, fixed before merge.** The shared build's age limit is
   half a tab's tick (equal to it, a lone visitor's checks were re-stamped every
   ten minutes, not five); the build is also keyed on today's date and on the

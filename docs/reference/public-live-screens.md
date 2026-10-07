@@ -203,12 +203,20 @@ enforced:
   (`detail._NEVER_PUBLIC`, the Calculator's `tools_public.ROW_NEVER`).
   `detail._build_cards` is also the public Calculator's rating panel, so both
   rules reach that screen.
-  ⚠ **It does not withhold everything a quote feeds.** A credit spread's PoP is
-  one minus its short delta, and a single-leg row's Debit, Max loss and
-  breakeven are that option's own price. The public Finder prints the same
-  columns; Option Signals prints them for every watchlist symbol on every
-  scan, with no visitor action and no budget. Whether those follow the switch
-  is part of the open owner decision D2.
+- **A single option's price follows the switch too** (the owner's decision,
+  2026-10-07). A one-leg row's Debit, Max loss and breakeven ARE that option's
+  price, and its R:R is a function of it. While quotes are withheld,
+  `_build_populate(withhold_quotes=True)` swaps every single-option candidate
+  for `strategy_table.public_signal(...)` BEFORE anything is built from it: a
+  copy with no row-level price field (`SINGLE_OPTION_PRICE_FIELDS`) and legs
+  rebuilt from an allow-list (`PUBLIC_LEG_KEYS`). The table cells read a dash,
+  the panel says *The price of a single option is not shown on this page*, and
+  the checklist has nothing to print. Which side is unbounded is written as
+  explicit flags first, so a naked short still reads as undefined risk.
+  ⚠ **Still printed, by decision:** a credit spread's PoP (one minus its short
+  delta) and a multi-leg row's net debit or credit, both as the public Finder
+  prints them. ⚠ The public Finder itself still prints a single option's price
+  on request; that page is unchanged and remains part of the open decision D2.
 
 ⚠ **Every visitor draws from ONE build.** The day union reaches about 4.5 MB by
 the close, and the private page gives each tab its own parse and its own five

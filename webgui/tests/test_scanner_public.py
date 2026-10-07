@@ -664,6 +664,183 @@ def test_withholding_does_not_change_the_signal_it_was_given(monkeypatch, publis
     assert sig["friction_pct"] == 8.0
 
 
+# ── a single option's price (the owner's decision, 2026-10-07) ───────────────
+# A one-leg row's Debit, Max loss and breakeven ARE that option's price, and its
+# R:R is a function of it. While the quotes switch is off the public page shows
+# none of them. A multi-leg row's net stays, as on the public Finder.
+
+def _leg(kind, side, strike, **quote):
+    return {"kind": kind, "side": side, "strike": strike, "expiration": "2026-10-17",
+            "qty": 1, "mark": 2.4, "bid": 2.35, "ask": 2.45, "delta": 0.42,
+            "theta": -0.05, "vega": 0.11, "gamma": 0.03, "iv": 0.31,
+            "volume": 900, "oi": 4000, "div_yield": 0.0, **quote}
+
+
+def _long_call(**over):
+    sig = {"id": "ORCL_LONG_CALL_2026-10-17_110", "symbol": "ORCL",
+           "type": "LONG_CALL", "family": "DIRECTIONAL", "strategy_label": "Long Call",
+           "bias": "bullish", "legs": [_leg("call", "long", 110.0)],
+           "expiration": "2026-10-17", "dte": 12, "pop_pct": 38.0,
+           "underlying_price": 110.0, "net_debit": 240.0, "net_credit": None,
+           "max_profit": None, "max_loss": 240.0, "capital": 240.0, "rr": None,
+           "breakevens": [112.4], "unbounded_profit": True, "unbounded_loss": False,
+           "net_delta": 0.42, "net_theta": -0.05, "net_vega": 0.11, "net_gamma": 0.03,
+           "friction_pct": 4.2, "ledger_risk_per_contract": 240.0,
+           "ledger_risk_basis": {"per_contract": 240.0}, "iv_rank": 33.0,
+           "composite_score": 71, "grade": "Good",
+           "grade_reason": "Passes all quality gates",
+           "factor_scores": {"fit_dir": 70, "fit_vol": 60, "q_rr": 55, "q_be": 64,
+                             "q_pop": 40, "q_liq": 72},
+           "live": True, "stale_since": None}
+    sig.update(over)
+    return sig
+
+
+def _debit_vertical():
+    return _long_call(id="ORCL_BULL_CALL_2026-10-17_110_115", type="BULL_CALL",
+                      strategy_label="Bull Call Spread", group="DEBIT",
+                      legs=[_leg("call", "long", 110.0), _leg("call", "short", 115.0)],
+                      net_debit=180.0, max_profit=320.0, max_loss=180.0, rr=1.78,
+                      breakevens=[111.8], unbounded_profit=False)
+
+
+_PRICE_FIELDS = ("net_debit", "net_credit", "max_profit", "max_loss", "capital",
+                 "rr", "breakevens", "friction_pct", "ledger_risk_per_contract",
+                 "ledger_risk_basis", "net_delta", "net_theta", "net_vega", "net_gamma")
+
+
+def test_a_single_option_is_one_option_leg():
+    from pages.options import strategy_table as st
+    assert st.is_single_option(_long_call())
+    assert not st.is_single_option(_debit_vertical())
+    assert not st.is_single_option(_pcs_signal())          # no legs: a spread
+    assert not st.is_single_option({"legs": "junk"})
+    assert not st.is_single_option(None)
+    # Shares beside ONE option leave the option's price one subtraction away.
+    stock = {"kind": "stock", "side": "long", "strike": None, "qty": 1}
+    assert st.is_single_option({"legs": [stock, _leg("call", "short", 115.0)]})
+
+
+def test_a_public_signal_carries_no_price():
+    from pages.options import strategy_table as st
+    sig = _long_call()
+    out = st.public_signal(sig)
+    for field in _PRICE_FIELDS:
+        assert field not in out, f"{field} survived"
+    assert out["price_withheld"] is True
+    assert out["legs"] == [{"kind": "call", "side": "long", "strike": 110.0,
+                            "expiration": "2026-10-17", "qty": 1}]
+    # What says which trade it is, and how it scored, stays.
+    for field in ("id", "symbol", "type", "strategy_label", "bias", "expiration",
+                  "dte", "pop_pct", "iv_rank", "composite_score", "grade",
+                  "grade_reason", "factor_scores", "underlying_price", "live"):
+        assert out[field] == sig[field]
+
+
+def test_a_public_signal_is_a_copy():
+    import copy
+
+    from pages.options import strategy_table as st
+    sig = _long_call()
+    before = copy.deepcopy(sig)
+    st.public_signal(sig)
+    assert sig == before
+
+
+def test_a_public_signal_keeps_which_side_is_unbounded():
+    """The cells read "∞" off flags a signal cached before those flags existed
+    does not carry: they are worked out from ``max_profit``, which is about to
+    be removed. Settled first, a naked short still reads as undefined risk."""
+    from pages.options import strategy_table as st
+    legacy_short = _long_call(type="SHORT_PUT", strategy_label="Short Put",
+                              legs=[_leg("put", "short", 100.0)], net_debit=None,
+                              net_credit=150.0, max_profit=150.0, max_loss=2000.0,
+                              unbounded=True)
+    del legacy_short["unbounded_profit"], legacy_short["unbounded_loss"]
+    row = st.strategy_rows([st.public_signal(legacy_short)])[0]
+    assert row["max_loss"] == "∞" and row["_undefined_risk"] is True
+    assert row["max_profit"] == "—" and row["debit_credit"] == "—"
+    long_row = st.strategy_rows([st.public_signal(_long_call())])[0]
+    assert long_row["max_profit"] == "∞" and long_row["max_loss"] == "—"
+
+
+def _dir_build(**kw):
+    day = {**_day(), "signals_directional": [_long_call()],
+           "structures_swing": [_debit_vertical()]}
+    ctx = {**_ctx(), "caps": None, "calibration": {"by_bucket": {}}}
+    return scanner._build_populate(day, {}, ctx, **kw)
+
+
+def test_the_private_build_prices_a_single_option():
+    built = _dir_build()
+    row = built["rows"]["signals_directional"][0]
+    assert row["debit_credit"] == "-240.00 debit" and row["breakevens"] == "112.40"
+    assert built["by_id"][_long_call()["id"]]["net_debit"] == 240.0
+
+
+def test_the_public_build_withholds_a_single_options_price():
+    built = _dir_build(public=True, withhold_quotes=True)
+    row = built["rows"]["signals_directional"][0]
+    assert (row["debit_credit"], row["max_loss"], row["rr"], row["breakevens"]) == (
+        "—", "—", "—", "—")
+    assert row["pop_pct"] == "38.00" and row["composite_score"] == 71
+    # The panel and the checklist are fed from by_id: nothing to print there either.
+    held = built["by_id"][_long_call()["id"]]
+    assert "net_debit" not in held and "mark" not in held["legs"][0]
+    assert held["price_withheld"] is True
+
+
+def test_the_public_build_keeps_a_spreads_net():
+    built = _dir_build(public=True, withhold_quotes=True)
+    row = built["rows"]["structures_swing"][0]
+    assert row["debit_credit"] == "-180.00 debit" and row["max_loss"] == "180.00"
+
+
+def test_the_public_build_prices_a_single_option_once_quotes_are_on():
+    row = _dir_build(public=True, withhold_quotes=False)["rows"][
+        "signals_directional"][0]
+    assert row["debit_credit"] == "-240.00 debit"
+
+
+def test_the_shared_build_follows_the_switch_for_single_options(
+        clean, published, monkeypatch):
+    from shared import public_scan
+    monkeypatch.setattr(public_scan, "show_leg_quotes", lambda: False)
+    _seed({**_day(), "signals_directional": [_long_call()]})
+    off = scanner._read_and_build_shared()["rows"]["signals_directional"][0]
+    assert off["debit_credit"] == "—"
+    monkeypatch.setattr(public_scan, "show_leg_quotes", lambda: True)
+    on = scanner._read_and_build_shared()["rows"]["signals_directional"][0]
+    assert on["debit_credit"] == "-240.00 debit"
+
+
+def _panel_labels(signal):
+    from nicegui import ui
+
+    from pages.options import strategy_table as st
+    with ui.column() as box:
+        detail._build_cards(st.detail_signal(signal))
+    return [str(e.text) for e in box.descendants() if isinstance(e, ui.label)]
+
+
+def test_the_panel_prices_a_single_option_privately(clean):
+    labels = _panel_labels(_long_call())
+    assert "Debit" in labels and "$240.00 per contract" in labels
+
+
+def test_the_panel_says_a_withheld_price_is_withheld(clean):
+    """Not three dashes under "Credit": a long call is not a credit, and a dash
+    reads as a figure that failed to load."""
+    from pages.options import strategy_table as st
+    labels = _panel_labels(st.public_signal(_long_call()))
+    assert detail.PRICE_WITHHELD_TEXT in labels
+    assert not [t for t in labels if "$" in t]
+    for name in ("Credit", "Debit", "Max loss", "Breakeven", "Needs"):
+        assert name not in labels
+    assert "Probability" in labels and "38.00%" in labels
+    assert "Buy 110.00 C" in labels
+
+
 def _expansions(signal):
     from nicegui import ui
     with ui.column() as box:

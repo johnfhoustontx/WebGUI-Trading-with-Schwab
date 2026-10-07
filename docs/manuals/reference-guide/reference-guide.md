@@ -2687,6 +2687,10 @@ yours:
   and ask** is off in **Settings → Configuration → Public Strategy Finder**.
   Those are read off a contract's own quote, and the public Calculator and
   Simulator withhold them under the same switch.
+- **The price of a single option**, under the same switch. A row made of one
+  option (most of the Directional tab) shows a dash for Debit/Credit, Max P,
+  Max L, R:R and BE, and its panel says the price is not shown. Its probability,
+  score and grade still show. A spread's net debit or credit is still shown.
 
 Every visitor is shown the same built rows, rebuilt when a scan lands, so the
 page costs the public process one copy of the day's signals however many

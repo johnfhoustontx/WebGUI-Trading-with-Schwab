@@ -668,7 +668,8 @@ def close_paper(rows):
     return rows
 
 
-def _build_populate(day_env, live, ctx=None, *, public=False):
+def _build_populate(day_env, live, ctx=None, *, public=False,
+                    withhold_quotes=False):
     """PURE, heavy row construction — the ~5,238 display-row dicts + the by-id map,
     stamped with the day-union state and then the checklist chip (``ctx`` is a
     ``checks_feed.read_context()`` result; None paints every chip unchecked).
@@ -679,10 +680,19 @@ def _build_populate(day_env, live, ctx=None, *, public=False):
 
     ``public`` builds for the public origin (Option Signals): every Paper gate
     is closed before the checks are stamped. Such a build is SHARED by every
-    visitor (``_read_and_build_shared``), so nothing may stamp it afterwards."""
+    visitor (``_read_and_build_shared``), so nothing may stamp it afterwards.
+
+    ``withhold_quotes`` (a public build while the site's quotes switch is off)
+    swaps every single-option candidate for a copy with no price on it
+    (``strategy_table.public_signal``) BEFORE anything is built from it, so the
+    table cells, the detail panel and the checklist - all fed from here - have
+    nothing to print."""
     day_env, live = day_env or {}, live or {}
     today = today_ct()
     sigs = {key: day_signals(day_env, key, today) for key in DAY_LISTS}
+    if public and withhold_quotes:
+        from . import strategy_table      # lazy: strategy_table imports scanner
+        sigs = {key: strategy_table.public_signals(v) for key, v in sigs.items()}
     by_id = {}
     for signals in sigs.values():
         for s in signals:
@@ -800,10 +810,12 @@ def _read_and_build_shared():
     day_env = _shared_view(_DAY_VIEW)
     live = _shared_view(_LIVE_VIEW)
     ctx = checks_feed.read_context()
+    withheld = checks_feed.quotes_withheld()
     return scanner_shared.get(
         (day_env, live, ctx.get("regime"), ctx.get("calibration")),
-        lambda: _build_populate(day_env, live, ctx, public=True),
-        stamp=(today_ct(), checks_feed.quotes_withheld()),
+        lambda: _build_populate(day_env, live, ctx, public=True,
+                                withhold_quotes=withheld),
+        stamp=(today_ct(), withheld),
         max_age=checks_feed.TABLE_REFRESH_SEC / 2)
 
 

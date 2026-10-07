@@ -178,8 +178,11 @@ not get **Run scan**, the **Paper trade**, **Calculator** or **Expected Move**
 buttons, the "new" badges, the checklist's **Paper book** line, the panel's
 **Max contracts** row, or the dollar figure of your per-trade risk cap. While
 **Show per-leg bid and ask** is off (Settings → Configuration → Public Strategy
-Finder) the panel also leaves out its Greeks section and the checklist's
-**Cost to trade** line reads *Bid-ask not measured*. The page spends no Schwab
+Finder) the panel also leaves out its Greeks section, the checklist's
+**Cost to trade** line reads *Bid-ask not measured*, and a trade made of one
+option (a long call or put, a naked short) shows no debit, credit, max profit,
+max loss, reward to risk or breakeven: those are that option's price. Its
+probability and score still show. The page spends no Schwab
 call: it shows the scans your stack already runs every 15 minutes.
 
 The public **Gamma** page is Dealer Positioning with its symbol dropdown: a

@@ -259,6 +259,69 @@ def strategy_rows(signals):
     return rows
 
 
+# ── a single option's price, on the public origin ────────────────────────────
+# A one-leg candidate's debit or credit IS that option's price, its max loss
+# and breakeven are that price again, and its R:R is a function of it. While
+# the site's quotes switch is off (``checks_feed.quotes_withheld``) the public
+# Market Scanner shows none of them (the owner's decision, 2026-10-07). A
+# multi-leg row's NET stays, as on the public Finder.
+
+# The leg fields that say WHICH contract, and nothing about what it trades at.
+# An allow-list, as ``tools_public.LEG_KEYS`` is: a leg gains quote fields more
+# easily than it loses them.
+PUBLIC_LEG_KEYS = ("kind", "side", "strike", "expiration", "qty")
+
+# What a candidate carries that is, or is computed straight from, its legs'
+# quotes. The row-level deny-list ``tools_public.public_row`` keeps, for the
+# fields this shape has.
+SINGLE_OPTION_PRICE_FIELDS = (
+    "net_debit", "net_credit", "net_cost", "credit", "max_profit", "max_loss",
+    "capital", "rr", "rr_pct", "breakeven", "breakevens", "friction_pct",
+    "ledger_risk_per_contract", "ledger_risk_basis", "expected_pnl_10",
+    "net_delta", "net_theta", "net_vega", "net_gamma", "short_delta",
+    "short_iv", "bid", "ask", "mark")
+
+
+def is_single_option(signal):
+    """True when the candidate holds exactly ONE option leg. PURE.
+
+    Share legs do not count: beside one option they leave its price a
+    subtraction from the published spot. A signal with no ``legs`` (a scanner
+    credit spread, which names its strikes in fields) is not one."""
+    legs = signal.get("legs") if isinstance(signal, dict) else None
+    if not isinstance(legs, (list, tuple)):
+        return False
+    options = [l for l in legs if isinstance(l, dict) and l.get("kind") != "stock"]
+    return len(options) == 1
+
+
+def public_signal(signal):
+    """A COPY of a single-option candidate with no price on it. PURE.
+
+    Which side is unbounded is settled FIRST and written as the explicit flags:
+    a signal cached before those flags existed works them out from
+    ``max_profit`` (see ``_profit_is_unbounded``), which is about to go, and a
+    naked short must still read as undefined risk. ``price_withheld`` tells the
+    Trade detail panel to say so rather than print dashes under "Credit"."""
+    s = signal or {}
+    # The legacy ``unbounded`` goes too: with ``max_profit`` removed it would
+    # read as an unbounded PROFIT on a naked short.
+    out = {k: v for k, v in s.items()
+           if k not in SINGLE_OPTION_PRICE_FIELDS and k != "unbounded"}
+    out["unbounded_profit"] = _profit_is_unbounded(s)
+    out["unbounded_loss"] = _loss_is_unbounded(s)
+    out["legs"] = [{k: leg[k] for k in PUBLIC_LEG_KEYS if k in leg}
+                   for leg in s.get("legs") or [] if isinstance(leg, dict)]
+    out["price_withheld"] = True
+    return out
+
+
+def public_signals(signals):
+    """``signals`` with every single-option candidate replaced by its
+    :func:`public_signal`; every other one is the SAME object. PURE."""
+    return [public_signal(s) if is_single_option(s) else s for s in signals or []]
+
+
 def detail_signal(signal):
     """Shallow copy adapted for the SHARED detail panel.
 

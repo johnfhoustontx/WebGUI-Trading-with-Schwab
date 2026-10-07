@@ -105,11 +105,14 @@ def quotes_withheld():
     published as Option Signals, follows the same switch rather than growing
     one of its own. Always False on the private app.
 
-    ⚠ It withholds what is NAMED here and in ``detail._CONTRACT_GREEKS``, not
-    everything a quote feeds. A credit spread's probability of profit is one
-    minus its short delta, and a single-leg row's debit is that option's own
-    price; the public Finder prints both, and so does Option Signals. Whether
-    they should follow this switch too is the owner's open decision (D2)."""
+    What it withholds on Option Signals: the per-contract Greeks
+    (``detail._CONTRACT_GREEKS``), the bid-ask friction (:func:`checks_for`),
+    and every price on a single-option row (``strategy_table.public_signal``,
+    the owner's decision of 2026-10-07).
+
+    ⚠ Not everything a quote feeds. A credit spread's probability of profit is
+    one minus its short delta, and it is printed, as the public Finder prints
+    it; so is a multi-leg row's net debit or credit."""
     import shell as _shell               # lazy, as in read_context
     if not _shell.is_public():
         return False

@@ -96,6 +96,10 @@ _SWING_FACTOR_LABELS = [
 
 _PLACEHOLDER = "Select a signal to view details…"
 
+# In place of the dollar rows, for a single-option trade on the public origin
+# while the quotes switch is off (``strategy_table.public_signal``).
+PRICE_WITHHELD_TEXT = "The price of a single option is not shown on this page."
+
 # The checklist's line while the context it needs is still being read - never a
 # verdict, which would claim a check that has not run.
 CHECKING_TEXT = "Checking…"
@@ -836,10 +840,15 @@ def _build_cards(s):
     # rows say "per contract" outright, so a per-share number can never be read
     # as a position total — or "per position" when shares are part of it.
     with ui.column().classes("w-full gap-1"):
-        cost_label, cost_text = cost_row(s)
-        _kv(cost_label, cost_text, GREEN if cost_label == "Credit" else NEUTRAL)
-        _kv("Max loss", money_for(s, s.get("max_loss")), RED)
-        _kv("Breakeven", breakeven_text(s.get("breakeven")))
+        if s.get("price_withheld"):
+            # Said in words: dashes under "Credit" would misname a long call
+            # and read as figures that failed to load.
+            ui.label(PRICE_WITHHELD_TEXT).classes(f"text-xs {MUTED}")
+        else:
+            cost_label, cost_text = cost_row(s)
+            _kv(cost_label, cost_text, GREEN if cost_label == "Credit" else NEUTRAL)
+            _kv("Max loss", money_for(s, s.get("max_loss")), RED)
+            _kv("Breakeven", breakeven_text(s.get("breakeven")))
         _kv("Probability", _pct(s.get("pop_pct")), pop_color(s.get("pop_pct")))
         # What the trade's own price REQUIRES, directly under what it offers, so
         # the margin between them needs no arithmetic. Structural — it survives

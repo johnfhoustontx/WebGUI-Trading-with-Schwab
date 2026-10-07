@@ -39,12 +39,16 @@ short leg's IV come back. Theta and vega are never printed on the public
 origin, as on the public Calculator. It publishes less than was approved, and
 the owner's existing switch reverses it.
 
-**Open, and the owner's.** The switch withholds what it names, not everything
-a quote feeds: a credit spread's PoP is one minus its short delta, and a
-single-leg row's Debit, Max loss and breakeven are that option's own price.
-The public Finder prints the same columns on request; Option Signals prints
-them for every watchlist symbol on every scan. The code review raised it; it
-is part of roadmap decision D2.
+**Decided by the owner after the code review (2026-10-07).** The review
+pointed out that the switch withheld what it named and not everything a quote
+feeds: a credit spread's PoP is one minus its short delta, and a single-leg
+row's Debit, Max loss and breakeven are that option's own price. The public
+Finder prints the same columns on request; Option Signals would print them for
+every watchlist symbol on every scan. The owner chose: while the switch is
+off, a single-option row carries no price (table cells and panel); PoP stays;
+a multi-leg row's net stays. `strategy_table.public_signal` does it, at the
+build, before any row, panel or check reads the signal. The public Finder is
+unchanged and stays part of roadmap decision D2.
 
 ## Approach
 
