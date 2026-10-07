@@ -147,9 +147,10 @@ def test_a_key_the_code_does_not_know_is_dropped(monkeypatch):
 # ── [structures]: the Market Scanner's non-credit pass (2026-10-06) ──────────
 
 STRUCTURES = {"enabled": True,
-              "families": ["VERTICAL", "STRADDLE", "BUTTERFLY", "CALENDAR"],
+              "families": ["VERTICAL", "STRADDLE", "BUTTERFLY", "CALENDAR", "RATIO"],
               "min_score": 50.0, "excluded_grades": ["Weak"],
               "max_per_family": 2, "short_delta_min": 0.15,
+              "backspread_max_debit_frac": 0.25,
               "earnings_long_premium": "flag"}
 
 
@@ -169,11 +170,13 @@ def test_structures_overrides_are_read(monkeypatch):
         "enabled": False, "families": ["straddle", " vertical "],
         "min_score": 62, "excluded_grades": ["weak", "marginal"],
         "max_per_family": 1, "short_delta_min": 0.2,
+        "backspread_max_debit_frac": 0.1,
         "earnings_long_premium": "drop"}})
     assert sc.structures() == {
         "enabled": False, "families": ["STRADDLE", "VERTICAL"],
         "min_score": 62.0, "excluded_grades": ["Weak", "Marginal"],
         "max_per_family": 1, "short_delta_min": 0.2,
+        "backspread_max_debit_frac": 0.1,
         "earnings_long_premium": "drop"}
 
 
@@ -206,3 +209,17 @@ def test_the_structures_dict_is_a_copy(monkeypatch):
     # must not change the next caller's.
     sc.structures()["families"].append("JUNK")
     assert sc.structures()["families"] == STRUCTURES["families"]
+
+
+@pytest.mark.parametrize("bad", [-0.1, float("nan"), float("inf"), "0.5", True, None])
+def test_an_unusable_backspread_cap_is_the_shipped_one(monkeypatch, bad):
+    monkeypatch.setattr(sc, "load", lambda: {"structures": {
+        "backspread_max_debit_frac": bad}})
+    assert sc.structures()["backspread_max_debit_frac"] == 0.25
+
+
+def test_a_backspread_cap_of_zero_is_a_real_setting(monkeypatch):
+    """Zero means "for a credit or even money only", not "unset"."""
+    monkeypatch.setattr(sc, "load", lambda: {"structures": {
+        "backspread_max_debit_frac": 0}})
+    assert sc.structures()["backspread_max_debit_frac"] == 0.0

@@ -1229,6 +1229,36 @@ def build_stock_structures(chain, symbol, spot, atm_iv, dte_min, dte_max,
     return out
 
 
+# The build groups that take the caller's DTE window as it is, in the order the
+# Strategy Finder lists them: (group, builder name, takes the short-delta bands).
+# The other three groups are built by the caller from inputs this module does not
+# hold - DIRECTIONAL and the debit half of VERTICAL from the bands alone, the
+# credit half and NEUTRAL from ``scanner_engine.screen_spreads``.
+_WINDOW_GROUPS = (("STRADDLE", "build_straddles_strangles", True),
+                  ("BUTTERFLY", "build_butterflies_condors", False),
+                  ("CALENDAR", "build_calendars", False),
+                  ("STOCK", "build_stock_structures", True),
+                  ("RATIO", "build_backspreads", False))
+WINDOW_GROUPS = tuple(group for group, _name, _banded in _WINDOW_GROUPS)
+
+
+def build_groups(chain, symbol, spot, atm_iv, dte_min, dte_max, groups, bands=None):
+    """``[(group, candidates)]`` for each window build group in ``groups``, in
+    :data:`WINDOW_GROUPS` order. A group this module does not own is ignored.
+
+    ``bands`` is ``{"put_band": ..., "call_band": ...}`` and reaches only the
+    builders that sell an out-of-the-money option. The builder is looked up by
+    name WHEN CALLED, so a test that replaces one on the module is honoured.
+    """
+    out = []
+    for group, name, banded in _WINDOW_GROUPS:
+        if group in groups:
+            kw = dict(bands or {}) if banded else {}
+            out.append((group, globals()[name](chain, symbol, spot, atm_iv,
+                                               dte_min, dte_max, **kw)))
+    return out
+
+
 def _credit_leg(kind, side, strike, mark, src, delta_key=None, carry_liq=False,
                 liq_keys=("bid", "ask", "volume")):
     """Build a normalized leg from a credit-spread source dict (greeks default 0).

@@ -2525,7 +2525,8 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
                 bucket_d["build_failed"] = True
 
         # --- Structures other than credit spreads (own lists, own scorer) ---
-        # Debit spreads, straddles and strangles, butterflies and condors on both
+        # Debit spreads, straddles and strangles, butterflies and condors, and
+        # ratio backspreads on both
         # windows; calendars and diagonals on SWING alone, their back month read
         # from the +20..+45 chain this scan already fetched for IV analysis - so
         # the pass costs no Schwab call. Built by the Strategy Finder's builders
@@ -2569,7 +2570,8 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
                     _cands = _sx.build_window(
                         _chain, symbol, price, _atm, _lo, _hi,
                         families=STRUCTURES_CFG["families"], short_band=_band,
-                        back_chain=_back, back_dte_max=_back_hi)
+                        back_chain=_back, back_dte_max=_back_hi,
+                        max_debit_frac=STRUCTURES_CFG["backspread_max_debit_frac"])
                     results[_rkey].extend(_sx.select(
                         _cands, view=_view, atm_iv=_atm, daily_em=daily_em,
                         dte_min=_lo, iv_rank=iv_data.get("iv_rank"),

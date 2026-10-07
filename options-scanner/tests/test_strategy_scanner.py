@@ -1982,3 +1982,54 @@ def test_a_backspread_builds_at_one_day_too():
     out = {s["type"]: s for s in ss.build_backspreads(chain, "T", 100.0, 0.28, 0, 4,
                                                       max_debit_frac=1.0)}
     assert out and all(s["dte"] == 1 for s in out.values())
+
+
+# ---- build_groups: the window build groups, dispatched in one place ----
+
+_GROUP_BANDS = {"put_band": (-0.20, -0.10), "call_band": (0.10, 0.20)}
+
+
+def test_build_groups_is_the_builders_called_directly():
+    """The Strategy Finder used to spell these calls out itself. Moving the
+    dispatch here must not change one row."""
+    chain = bs_chain(days=(9, 37))
+    args = (chain, "T", 100.0, 0.28, 0, 60)
+    got = dict(ss.build_groups(*args, ss.WINDOW_GROUPS, _GROUP_BANDS))
+    want = {
+        "STRADDLE": ss.build_straddles_strangles(*args, **_GROUP_BANDS),
+        "BUTTERFLY": ss.build_butterflies_condors(*args),
+        "CALENDAR": ss.build_calendars(*args),
+        "STOCK": ss.build_stock_structures(*args, **_GROUP_BANDS),
+        "RATIO": ss.build_backspreads(*args),
+    }
+    assert set(got) == set(want)
+    for group in want:
+        assert want[group], group                                  # vacuity
+        assert _no_stamp(got[group]) == _no_stamp(want[group]), group
+
+
+def test_build_groups_keeps_a_fixed_order_and_only_what_was_asked():
+    chain = bs_chain(days=(9, 37))
+    args = (chain, "T", 100.0, 0.28, 0, 60)
+    assert [g for g, _ in ss.build_groups(*args, {"RATIO", "STRADDLE", "STOCK"})] == [
+        "STRADDLE", "STOCK", "RATIO"]
+    assert ss.build_groups(*args, set()) == []
+    # Groups it does not own are the caller's to build, and are ignored here.
+    assert ss.build_groups(*args, {"DIRECTIONAL", "VERTICAL", "NEUTRAL", "TYPO"}) == []
+    assert ss.WINDOW_GROUPS == ("STRADDLE", "BUTTERFLY", "CALENDAR", "STOCK", "RATIO")
+
+
+def test_build_groups_without_bands_uses_the_builders_defaults():
+    chain = bs_chain(days=(9,))
+    args = (chain, "T", 100.0, 0.28, 0, 60)
+    got = dict(ss.build_groups(*args, {"STRADDLE"}))
+    assert _no_stamp(got["STRADDLE"]) == _no_stamp(ss.build_straddles_strangles(*args))
+
+
+def test_build_groups_looks_the_builder_up_when_called(monkeypatch):
+    """Tests (and nothing else) replace a builder on the module. A dispatch
+    table of function objects captured at import would not see that."""
+    monkeypatch.setattr(ss, "build_calendars", lambda *a, **k: ["patched"])
+    chain = bs_chain(days=(9, 37))
+    assert ss.build_groups(chain, "T", 100.0, 0.28, 0, 60, {"CALENDAR"}) == [
+        ("CALENDAR", ["patched"])]

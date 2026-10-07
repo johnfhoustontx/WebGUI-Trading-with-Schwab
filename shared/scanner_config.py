@@ -44,11 +44,12 @@ DEFAULTS = {
     # (options-scanner/structure_scan.py). See config/scanner.toml [structures].
     "structures": {
         "enabled": True,
-        "families": ["VERTICAL", "STRADDLE", "BUTTERFLY", "CALENDAR"],
+        "families": ["VERTICAL", "STRADDLE", "BUTTERFLY", "CALENDAR", "RATIO"],
         "min_score": 50.0,
         "excluded_grades": ["Weak"],
         "max_per_family": 2,
         "short_delta_min": 0.15,
+        "backspread_max_debit_frac": 0.25,
         "earnings_long_premium": "flag",
     },
     "scores": {
@@ -194,7 +195,7 @@ def structures() -> dict:
     if isinstance(grades, list):
         out["excluded_grades"] = [str(g).strip().capitalize() for g in grades
                                   if str(g).strip()]
-    for key in ("min_score", "short_delta_min"):
+    for key in ("min_score", "short_delta_min", "backspread_max_debit_frac"):
         v = sec.get(key)
         if (isinstance(v, (int, float)) and not isinstance(v, bool)
                 and math.isfinite(v) and v >= 0):

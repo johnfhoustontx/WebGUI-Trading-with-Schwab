@@ -396,3 +396,32 @@ class TestDecimalAtmIv:
         assert scanner_engine.decimal_atm_iv(1.5, 0, {"current_iv": 30.0}) == \
             pytest.approx(0.30)
         assert scanner_engine.decimal_atm_iv(1.5, 100.0, None) > 0
+
+
+class TestRatioSpreads:
+    """The backspreads ride the same pass as every other family."""
+
+    def test_the_family_is_built_into_both_lists(self, fake_client, monkeypatch):
+        _open(monkeypatch, families=["RATIO"], backspread_max_debit_frac=5.0)
+        res = _scan(fake_client)
+        for key, _bucket in LISTS:
+            types = {r["type"] for r in res[key]}
+            assert types and types <= {"CALL_BACKSPREAD", "PUT_BACKSPREAD"}, key
+            assert all(r["group"] == "RATIO" for r in res[key])
+
+    def test_the_debit_cap_is_read_from_the_config(self, fake_client, monkeypatch):
+        seen = []
+        real = structure_scan.build_window
+
+        def _spy(*a, **kw):
+            seen.append(kw.get("max_debit_frac"))
+            return real(*a, **kw)
+
+        monkeypatch.setattr(structure_scan, "build_window", _spy)
+        _open(monkeypatch, families=["RATIO"], backspread_max_debit_frac=0.37)
+        _scan(fake_client)
+        assert seen and set(seen) == {0.37}
+
+    def test_it_is_built_as_shipped(self):
+        assert "RATIO" in scanner_engine.STRUCTURES_CFG["families"]
+        assert scanner_engine.STRUCTURES_CFG["backspread_max_debit_frac"] == 0.25

@@ -109,7 +109,7 @@ def test_a_family_left_out_is_not_built():
 
 def test_an_unknown_family_builds_nothing_and_does_not_raise():
     assert sx.build_window(bs_chain(days=(9,)), "T", 100.0, 0.28, 5, 15,
-                           families=("RATIO", "TYPO"), short_band=BAND) == []
+                           families=("STOCK", "TYPO"), short_band=BAND) == []
 
 
 def test_the_short_strangle_respects_the_band_ceiling():
@@ -291,3 +291,45 @@ def test_real_builders_and_real_scoring_produce_scored_rows():
     assert all("composite_score" in r and "grade" in r for r in kept)
     scores = [r["composite_score"] for r in kept]
     assert scores == sorted(scores, reverse=True)
+
+
+# ── ratio backspreads (the RATIO family) ────────────────────────────────────
+
+def test_the_ratio_family_builds_backspreads_in_both_windows():
+    for days, lo, hi in (((2,), 0, 4), ((9,), 5, 15)):
+        rows = sx.build_window(bs_chain(days=days, step=0.5), "T", 100.0, 0.28, lo, hi,
+                               families=("RATIO",), short_band=BAND,
+                               max_debit_frac=1.0)
+        assert _types(rows) == {"CALL_BACKSPREAD", "PUT_BACKSPREAD"}, days
+        assert all(r["group"] == "RATIO" and r["dte"] == days[0] for r in rows)
+
+
+def test_the_debit_cap_reaches_the_backspread_builder():
+    chain = bs_chain(days=(9,), step=1.0)
+    capped = sx.build_window(chain, "T", 100.0, 0.28, 5, 15, families=("RATIO",),
+                             short_band=BAND, max_debit_frac=0.0)
+    assert all(r["net_debit"] is None for r in capped)
+    open_ = sx.build_window(chain, "T", 100.0, 0.28, 5, 15, families=("RATIO",),
+                            short_band=BAND, max_debit_frac=5.0)
+    assert len(open_) == 2 and len(open_) >= len(capped)
+
+
+def test_no_cap_named_is_the_builders_own_default():
+    chain = bs_chain(days=(9,), step=1.0)
+    plain = sx.build_window(chain, "T", 100.0, 0.28, 5, 15, families=("RATIO",),
+                            short_band=BAND)
+    direct = sx._ssn.build_backspreads(chain, "T", 100.0, 0.28, 5, 15)
+    assert [r["id"] for r in plain] == [r["id"] for r in direct] and plain
+
+
+def test_a_backspread_is_gated_as_long_premium():
+    """Long vega: the volatility FLOOR never touches it, and through an earnings
+    report it is kept and flagged."""
+    rows = sx.build_window(bs_chain(days=(9,), step=2.5), "T", 100.0, 0.28, 5, 15,
+                           families=("RATIO",), short_band=BAND, max_debit_frac=1.0)
+    kept = sx.select(rows, **_kw(iv_rank=1, floor=99, min_score=0.0,
+                                 excluded_grades=(), max_per_family=0,
+                                 spans_earnings=lambda s: True,
+                                 earnings_date="2099-01-02"))
+    assert len(kept) == len(rows) == 2
+    assert all(r["spans_earnings"] is True for r in kept)

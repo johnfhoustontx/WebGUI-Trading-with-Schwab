@@ -541,7 +541,7 @@ def _latest_expiration(sig):
 # straddle/strangle) or DIRECTIONAL, the vocabulary strategy_scoring reads (see
 # the design doc).
 _SWING_FAMILIES = ("DIRECTIONAL", "VERTICAL", "NEUTRAL",
-                   "STRADDLE", "BUTTERFLY", "CALENDAR", "STOCK")
+                   "STRADDLE", "BUTTERFLY", "CALENDAR", "STOCK", "RATIO")
 
 
 def _tag_group(batch, group):
@@ -624,15 +624,10 @@ def _build_every_expiry(ssn, chain, symbol, spot, atm_iv, dte_min, dte_max, fams
         if "VERTICAL" in fams:
             out += _tag_group(ssn.build_debit_verticals(one, symbol, spot, atm_iv, dte, dte),
                               "VERTICAL")
-        if "STRADDLE" in fams:
-            out += _tag_group(ssn.build_straddles_strangles(one, symbol, spot, atm_iv,
-                                                            dte, dte, **bands), "STRADDLE")
-        if "BUTTERFLY" in fams:
-            out += _tag_group(ssn.build_butterflies_condors(one, symbol, spot, atm_iv,
-                                                            dte, dte), "BUTTERFLY")
-        if "STOCK" in fams:
-            out += _tag_group(ssn.build_stock_structures(one, symbol, spot, atm_iv,
-                                                         dte, dte, **bands), "STOCK")
+        # Every window group but the calendars, which need their back month.
+        for group, rows in ssn.build_groups(one, symbol, spot, atm_iv, dte, dte,
+                                            fams - {"CALENDAR"}, bands):
+            out += _tag_group(rows, group)
         # Calendars take this expiry as the front: it must be at least a week out,
         # and the builder sees it plus only the expiries far enough out to be its
         # back month (those in between can be neither, and leaving them out keeps
@@ -1199,21 +1194,10 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
         if "NEUTRAL" in fams:
             signals += _tag_group([ssn.adapt_iron_condor(ic)
                                    for ic in se.build_iron_condors(spreads)], "NEUTRAL")
-        # The four build groups added 2026-09-13.
-        if "STRADDLE" in fams:
-            signals += _tag_group(ssn.build_straddles_strangles(chain, symbol, spot, atm_iv,
-                                                                dte_min, hi, **bands),
-                                  "STRADDLE")
-        if "BUTTERFLY" in fams:
-            signals += _tag_group(ssn.build_butterflies_condors(chain, symbol, spot, atm_iv,
-                                                                dte_min, hi), "BUTTERFLY")
-        if "CALENDAR" in fams:
-            signals += _tag_group(ssn.build_calendars(chain, symbol, spot, atm_iv,
-                                                      dte_min, hi), "CALENDAR")
-        if "STOCK" in fams:
-            signals += _tag_group(ssn.build_stock_structures(chain, symbol, spot, atm_iv,
-                                                             dte_min, hi, **bands),
-                                  "STOCK")
+        # The groups that take the window as it is (strategy_scanner.WINDOW_GROUPS).
+        for group, rows in ssn.build_groups(chain, symbol, spot, atm_iv, dte_min,
+                                            hi, fams, bands):
+            signals += _tag_group(rows, group)
 
     # Window filters, BEFORE scoring — a candidate this window does not trade is
     # not a candidate the quality bar rejected, and ``filtered_out`` below is

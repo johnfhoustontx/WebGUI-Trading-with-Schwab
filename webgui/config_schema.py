@@ -240,7 +240,8 @@ _SCANNER = ConfigFile(
             Field("structures.families", "Families built",
                   "VERTICAL (debit spreads) · STRADDLE (straddles and strangles) "
                   "· BUTTERFLY (butterflies and condors) · CALENDAR (calendars "
-                  "and diagonals, Swing tab only).", kind="symbols"),
+                  "and diagonals, Swing tab only) · RATIO (ratio backspreads).",
+                  kind="symbols"),
             Field("structures.min_score", "Minimum score",
                   "Fit + Quality score a structure needs to be shown (0–100).",
                   kind="float", min=0, max=100, step=1),
@@ -253,6 +254,12 @@ _SCANNER = ConfigFile(
                   "A short strangle sells between this delta and the highest "
                   "short delta at entry, aiming at the midpoint.",
                   kind="float", min=0.0, max=0.5, step=0.01),
+            Field("structures.backspread_max_debit_frac",
+                  "Ratio backspread — highest cost",
+                  "The most a backspread may cost, as a fraction of the distance "
+                  "between its two strikes. 0 allows only one entered for a "
+                  "credit or at even money.",
+                  kind="float", min=0.0, max=1.0, step=0.05),
             Field("structures.earnings_long_premium", "Bought premium through earnings",
                   "\"flag\" keeps a trade that buys premium and would be held "
                   "through an earnings report, and marks the row; \"drop\" removes "

@@ -189,3 +189,13 @@ def test_the_opportunity_board_does_not_count_structures():
            "structures_0dte": [{"symbol": "SPY"}, {"symbol": "QQQ"}],
            "structures_swing": [{"symbol": "IWM"}]}
     assert compute._count_scan_signals(day, "2026-10-06") == {"SPY": 1}
+
+
+# ── the Strategy Finder builds ratio spreads too (2026-10-07) ───────────────
+
+def test_ratio_is_one_of_the_finders_build_groups():
+    assert "RATIO" in compute._SWING_FAMILIES
+    # The seven it had keep their order; the new one is appended.
+    assert compute._SWING_FAMILIES[:7] == (
+        "DIRECTIONAL", "VERTICAL", "NEUTRAL", "STRADDLE", "BUTTERFLY",
+        "CALENDAR", "STOCK")

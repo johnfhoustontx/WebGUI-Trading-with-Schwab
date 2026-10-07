@@ -94,8 +94,9 @@ def test_the_default_path_builds_each_group_on_its_nearest_expiry(scan_env):
     """Pins the nearest-expiry path the Income Window relies on, as
     ``{group: {expiry DTE: rows}}`` on the fixture: directionals on the nearest
     expiry (3), the week-floor groups and calendars on the nearest at least 7 days
-    out (10), credit spreads on every expiry, and the top three iron condors
-    across the whole scan (all on 38 here)."""
+    out (10), credit spreads on every expiry, the top three iron condors
+    across the whole scan (all on 38 here), and - since 2026-10-07 - the two
+    ratio backspreads on the nearest expiry (3): they take no week floor."""
     out = compute.swing_scan("SPY", 0, None, *BANDS, payoff=False)
     assert _by_group(out, scan_env) == {
         "DIRECTIONAL": {3: 4},
@@ -105,6 +106,7 @@ def test_the_default_path_builds_each_group_on_its_nearest_expiry(scan_env):
         "BUTTERFLY": {10: 5},
         "CALENDAR": {10: 4},
         "STOCK": {10: 3},
+        "RATIO": {3: 2},
     }
 
 

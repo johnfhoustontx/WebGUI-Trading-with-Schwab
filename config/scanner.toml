@@ -134,7 +134,9 @@ excluded_grades = ["Weak"]
 # and strangles score 50-56 - just over min_score.
 enabled = true
 # Which families the scan builds. CALENDAR is built on the Swing tab only.
-families = ["VERTICAL", "STRADDLE", "BUTTERFLY", "CALENDAR"]
+# RATIO is the call and put ratio backspread (sell one option near the money,
+# buy two further out).
+families = ["VERTICAL", "STRADDLE", "BUTTERFLY", "CALENDAR", "RATIO"]
 # Fit + Quality score a structure needs to be shown (0-100), and the grades
 # removed outright. The same two rules [single_leg] applies.
 min_score = 50.0
@@ -147,6 +149,13 @@ max_per_family = 2
 # A short strangle sells between this delta and [selection]
 # max_entry_short_delta, aiming at the midpoint.
 short_delta_min = 0.15
+# The most a ratio backspread may COST, as a fraction of the distance between
+# its two strikes: 0.25 on a $4-wide backspread is a $1.00 debit ($100 a
+# contract). 0 allows only one entered for a credit or at even money. Measured,
+# a backspread entered for a debit never clears the quality bar anyway (its
+# probability of profit is 16-21 against a bar of 30), so this mostly bounds
+# what is BUILT and counted, not what is shown.
+backspread_max_debit_frac = 0.25
 # A trade that would be held through an earnings report: "flag" keeps LONG
 # premium and marks the row with the report date; "drop" removes it. SHORT
 # premium is always dropped, as every credit spread is.

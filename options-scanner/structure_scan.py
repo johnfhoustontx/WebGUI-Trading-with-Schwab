@@ -11,6 +11,7 @@ call is the Finder's too, so a candidate is the same row with the same score on
 both surfaces. What differs is the window: the Finder keeps straddles,
 strangles, butterflies and condors at least seven days out, and the Scanner
 hands those builders its own window minimum (operator decision 2026-10-06).
+Ratio backspreads (the RATIO family) take the nearest expiry on both surfaces.
 
 Design and the measurement behind the defaults:
 docs/plans/2026-10-06-scanner-multi-structure-design.md.
@@ -57,7 +58,8 @@ def _tag(batch, group):
 
 
 def build_window(chain, symbol, spot, atm_iv, dte_min, dte_max, *, families,
-                 short_band, back_chain=None, back_dte_max=None):
+                 short_band, back_chain=None, back_dte_max=None,
+                 max_debit_frac=None):
     """Every candidate one DTE window offers, unscored.
 
     ``families`` is the set of build groups to run (``config/scanner.toml``
@@ -71,6 +73,10 @@ def build_window(chain, symbol, spot, atm_iv, dte_min, dte_max, *, families,
     shorter one was cut on reward), so it belongs to the Swing window alone.
     Only the calendar builder sees the merged chain; every other structure is
     built on the window's own expiries.
+
+    ``max_debit_frac`` caps what a ratio backspread may cost, as a fraction of
+    its strike distance (``[structures] backspread_max_debit_frac``); ``None``
+    leaves the builder's own default.
     """
     fams = set(families or ())
     lo, hi = short_band
@@ -87,6 +93,10 @@ def build_window(chain, symbol, spot, atm_iv, dte_min, dte_max, *, families,
         out += _tag(_ssn.build_butterflies_condors(
             chain, symbol, spot, atm_iv, dte_min, dte_max,
             min_front_dte=dte_min), "BUTTERFLY")
+    if "RATIO" in fams:
+        out += _tag(_ssn.build_backspreads(chain, symbol, spot, atm_iv, dte_min,
+                                           dte_max, max_debit_frac=max_debit_frac),
+                    "RATIO")
     if "CALENDAR" in fams and back_chain is not None and back_dte_max:
         out += _tag(_ssn.build_calendars(merge_chains(chain, back_chain), symbol,
                                          spot, atm_iv, dte_min, back_dte_max),
