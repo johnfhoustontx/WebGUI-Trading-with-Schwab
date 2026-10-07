@@ -223,3 +223,36 @@ def test_a_backspread_cap_of_zero_is_a_real_setting(monkeypatch):
     monkeypatch.setattr(sc, "load", lambda: {"structures": {
         "backspread_max_debit_frac": 0}})
     assert sc.structures()["backspread_max_debit_frac"] == 0.0
+
+
+# ── tracked structures: the capture switch, floor and cap (2026-10-07) ──────
+
+def test_the_tracked_capture_settings_as_shipped():
+    assert sc.capture_tracked_enabled() is True
+    assert sc.capture_max_open_per_symbol_tracked() == 2
+    assert sc.scores()["capture_min_tracked"] == 0
+    # The credit cap is a separate setting and did not move.
+    assert sc.capture_max_open_per_symbol() == 2
+
+
+def test_the_tracked_capture_settings_are_read(monkeypatch):
+    monkeypatch.setattr(sc, "load", lambda: {"capture": {
+        "tracked": False, "max_open_per_symbol_tracked": 5,
+        "max_open_per_symbol": 3}})
+    assert sc.capture_tracked_enabled() is False
+    assert sc.capture_max_open_per_symbol_tracked() == 5
+    assert sc.capture_max_open_per_symbol() == 3
+
+
+@pytest.mark.parametrize("bad", [-1, 2.5, "3", True, None])
+def test_an_unusable_tracked_cap_is_the_default_never_off(monkeypatch, bad):
+    """A typo in a limit must not silently remove it."""
+    monkeypatch.setattr(sc, "load", lambda: {"capture": {
+        "max_open_per_symbol_tracked": bad}})
+    assert sc.capture_max_open_per_symbol_tracked() == 2
+
+
+@pytest.mark.parametrize("bad", ["false", 0, 1, None])
+def test_only_a_real_boolean_switches_tracking(monkeypatch, bad):
+    monkeypatch.setattr(sc, "load", lambda: {"capture": {"tracked": bad}})
+    assert sc.capture_tracked_enabled() is True

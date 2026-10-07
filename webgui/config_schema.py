@@ -276,6 +276,10 @@ _SCANNER = ConfigFile(
                   "0 records whatever the Income board offered; the board already "
                   "cuts below the Strategy Finder score.", kind="int", min=0,
                   max=100, step=1),
+            Field("scores.capture_min_tracked", "Capture score (tracked structures)",
+                  "0 records whatever the Other structures tables showed; their "
+                  "own minimum score already decided that.", kind="int", min=0,
+                  max=100, step=1),
             Field("scores.neg_gex_min", "Index score in a negative-gamma market",
                   "Index premium spreads need this higher score when dealer gamma "
                   "is mildly negative.", kind="int", min=0, max=100, step=1),
@@ -290,6 +294,15 @@ _SCANNER = ConfigFile(
             Field("capture.max_open_per_symbol", "Open captured signals per symbol",
                   "Across 0-DTE, swing and income together. 0 turns the cap off.",
                   kind="int", min=0, max=50, step=1),
+            Field("capture.tracked", "Record other structures for study",
+                  "Records the Market Scanner's debit spreads, straddles, "
+                  "butterflies, calendars, backspreads and single options so "
+                  "each gets an outcome. They are measured, never traded.",
+                  kind="bool"),
+            Field("capture.max_open_per_symbol_tracked",
+                  "Open tracked structures per symbol",
+                  "Across both tabs. A separate count from the captured signals "
+                  "above. 0 turns the cap off.", kind="int", min=0, max=50, step=1),
         )),
     ),
 )

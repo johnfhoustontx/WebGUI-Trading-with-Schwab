@@ -59,13 +59,20 @@ DEFAULTS = {
         # against capture_min 58, so sharing that floor would record NOTHING and
         # the feature would be a green no-op.
         "capture_min_income": 0,
+        # The tracked structures' own floor, 0 for the same reason: the scan's
+        # quality cut ([structures] min_score) already decided what was shown.
+        "capture_min_tracked": 0,
         "neg_gex_min": 62,
         "gex_strong_neg": -0.30,
         "swing_min": 50.0,
     },
     # At most this many OPEN captured signals per symbol, counted across every
     # scanner type. 0 = off. See config/scanner.toml [capture].
-    "capture": {"max_open_per_symbol": 2},
+    "capture": {"max_open_per_symbol": 2,
+                # Tracked structures (recorded to be measured, never traded):
+                # whether they are recorded at all, and their OWN per-symbol pool.
+                "tracked": True,
+                "max_open_per_symbol_tracked": 2},
     # Which strikes the scanner may sell. Literals in scanner_engine.py until
     # 2026-10-04 (audit CQ-10). See config/scanner.toml [selection].
     "selection": {
@@ -219,6 +226,25 @@ def capture_max_open_per_symbol() -> int:
     not silently remove it."""
     default = DEFAULTS["capture"]["max_open_per_symbol"]
     v = _section("capture").get("max_open_per_symbol", default)
+    if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+        return default
+    return v
+
+
+def capture_tracked_enabled() -> bool:
+    """Whether the Market Scanner's structures that are not credit spreads are
+    recorded for study. Anything but a real boolean is the shipped ``True``."""
+    v = _section("capture").get("tracked", DEFAULTS["capture"]["tracked"])
+    return v if isinstance(v, bool) else DEFAULTS["capture"]["tracked"]
+
+
+def capture_max_open_per_symbol_tracked() -> int:
+    """How many OPEN tracked structures one symbol may hold, across both scan
+    windows; ``0`` turns the cap off. Its OWN pool: these are never counted
+    against :func:`capture_max_open_per_symbol`, whose slots the paper Account
+    trades from. A missing, negative or non-integer value is the default."""
+    default = DEFAULTS["capture"]["max_open_per_symbol_tracked"]
+    v = _section("capture").get("max_open_per_symbol_tracked", default)
     if isinstance(v, bool) or not isinstance(v, int) or v < 0:
         return default
     return v

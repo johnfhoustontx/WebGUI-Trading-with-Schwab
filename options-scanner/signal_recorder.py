@@ -15,7 +15,9 @@ gets BOOKED as an open trade. Placing the gate at the single insert chokepoint
 also covers the manual Run-scan command, which runs at any hour and is subject
 to no window at all.
 """
+import json
 import logging
+import math
 import threading
 import uuid
 from datetime import datetime
@@ -184,6 +186,191 @@ def record_signals(signals, scanner_type, db_path=signal_db.DEFAULT_DB_PATH,
         # not a fault — but a scan that found structure and booked none of it
         # must say why.
         log.info("%s: %s at the %d-open-per-symbol capture cap", scanner_type,
+                 ", ".join(f"{s} ({n} skipped)" for s, n in sorted(capped.items())),
+                 cap)
+    return inserted
+
+
+# ── tracked structures: recorded to be MEASURED, never traded ───────────────
+# The Market Scanner's structures that are not credit spreads. They go in the
+# same store under ``signal_db.TRACKED_TYPES`` so they get a mark series and an
+# outcome, and every existing reader of that store excludes those types.
+
+_PER_CONTRACT = 100.0
+
+
+def _real(value):
+    """A finite number, or None (a bool is not a number)."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    value = float(value)
+    return value if math.isfinite(value) else None
+
+
+def _per_share(value):
+    v = _real(value)
+    return None if v is None else round(v / _PER_CONTRACT, 4)
+
+
+def _tracked_legs(sig):
+    """The legs as stored, or None when any leg cannot be marked later. Only
+    what a mark needs, plus the entry mark for audit."""
+    out = []
+    for leg in sig.get("legs") or []:
+        if not isinstance(leg, dict):
+            return None
+        kind, side = leg.get("kind"), leg.get("side")
+        strike, exp = _real(leg.get("strike")), leg.get("expiration")
+        if kind not in ("call", "put") or side not in ("long", "short"):
+            return None                      # a share leg: the scanner holds none
+        if strike is None or not exp:
+            return None
+        qty = _real(leg.get("qty"))
+        out.append({"kind": kind, "side": side, "strike": strike,
+                    "expiration": str(exp),
+                    "qty": int(qty) if qty and qty >= 1 else 1,
+                    "entry_mark": _real(leg.get("mark"))})
+    return out or None
+
+
+def tracked_dedup_key(sig, scanner_type):
+    """One key per structure, legs and window - whatever order the legs came in."""
+    legs = sorted(f"{l.get('side')}:{l.get('kind')}:{l.get('strike')}:"
+                  f"{l.get('expiration')}:{l.get('qty', 1)}"
+                  for l in sig.get("legs") or [])
+    return f"{sig.get('symbol')}|{sig.get('type')}|{'/'.join(legs)}|{scanner_type}"
+
+
+def _to_tracked_row(sig, scanner_type, now):
+    """A normalized candidate as a ``signals`` row, or None when it cannot be
+    recorded faithfully.
+
+    ⚠ UNITS AND SIGN. The candidate carries per-CONTRACT dollars; the store
+    carries per-SHARE values, as ``income_capture_row`` found out for the Income
+    board. ``entry_credit`` is SIGNED - a credit positive, a debit NEGATIVE -
+    which is what makes ``signal_db.close_signal_manually``'s
+    ``(entry_credit - exit_value) * 100`` right for both.
+
+    None rather than a guess for a row with no usable legs or no positive,
+    finite risk figure: without the risk there is no R-multiple, and the dedup
+    key is unique forever, so a bad row would hold its slot against the real one.
+    """
+    if not isinstance(sig, dict) or not sig.get("symbol") or not sig.get("type"):
+        return None
+    legs = _tracked_legs(sig)
+    max_loss = _per_share(sig.get("max_loss"))
+    if legs is None or max_loss is None or max_loss <= 0 or not sig.get("expiration"):
+        return None
+    debit, credit = sig.get("net_debit"), sig.get("net_credit")
+    if debit is not None:
+        debit = _per_share(debit)
+        if debit is None:
+            return None
+        entry = -debit
+    elif credit is not None:
+        entry = _per_share(credit)
+        if entry is None:
+            return None
+    else:
+        entry = 0.0                              # even money
+    return {
+        "signal_id": uuid.uuid4().hex[:8],
+        "scanner_type": scanner_type,
+        "symbol": sig["symbol"],
+        "strategy": sig["type"],
+        # No strike columns and no width: the legs are the structure.
+        "short_strike": None, "long_strike": None,
+        "call_short": None, "call_long": None, "width": None,
+        "expiration": sig["expiration"],          # the FRONT expiry
+        "dte_at_entry": sig.get("dte", 0),
+        "entry_credit": entry,
+        "entry_max_loss": max_loss,
+        "entry_score": sig.get("composite_score", 0),
+        "entry_grade": sig.get("grade", ""),
+        # None is "not recorded" and must never be written as 0.0.
+        "entry_short_delta": None,
+        "entry_net_theta": None,
+        "entry_net_delta_position": _real(sig.get("net_delta")) or 0.0,
+        "entry_net_theta_position": _real(sig.get("net_theta")) or 0.0,
+        "entry_spread_bid": 0.0,
+        "entry_spread_ask": 0.0,
+        "entry_iv_rank": sig.get("iv_rank"),
+        "entry_underlying": sig.get("underlying_price", 0),
+        "first_seen_ts": now.isoformat(),
+        "first_seen_date": now.date().isoformat(),
+        "dedup_key": tracked_dedup_key(sig, scanner_type),
+        "status": "OPEN",
+        "mode": "TRACKED",
+        "legs_json": json.dumps(legs),
+        "family": str(sig.get("group") or sig.get("family") or "").upper() or None,
+        "entry_max_profit": _per_share(sig.get("max_profit")),
+        "entry_capital": _per_share(sig.get("capital")),
+        "unbounded": 1 if sig.get("unbounded_loss") else 0,
+        "entry_spans_earnings": 1 if sig.get("spans_earnings") is True else 0,
+    }
+
+
+def record_tracked(signals, scanner_type, db_path=None, now=None):
+    """Record structures that are tracked for study. Returns the count inserted.
+    Never raises on a bad row or a failed write.
+
+    The same three gates ``record_signals`` applies, with settings of their own:
+    the regular session (one ``now`` for the gate and the stamp), a score floor
+    (``[scores] capture_min_tracked``), and a per-symbol cap counted across both
+    tracked types and NOTHING else (``[capture] max_open_per_symbol_tracked``).
+    ``[capture] tracked = false`` records nothing.
+
+    ``scanner_type`` must be one of ``signal_db.TRACKED_TYPES``; anything else
+    raises. That is deliberate and it is the one thing here that does: a tracked
+    row filed under ``SWING`` would be read by every credit-spread reader and
+    offered to the paper Account's entry cycle.
+    """
+    if scanner_type not in signal_db.TRACKED_TYPES:
+        raise ValueError(f"record_tracked: {scanner_type!r} is not one of "
+                         f"{signal_db.TRACKED_TYPES}")
+    if not _scfg.capture_tracked_enabled():
+        return 0
+    db_path = db_path or signal_db.DEFAULT_DB_PATH
+    now = _now() if now is None else now
+    floor = _scfg.scores().get("capture_min_tracked", 0)
+    eligible = [s for s in signals or []
+                if isinstance(s, dict)
+                and (s.get("composite_score") or 0) >= floor]
+    if not _mc.is_regular_hours(now):
+        if eligible:
+            log.info("%s: regular session closed at %s — %d structure(s) scanned, "
+                     "none recorded", scanner_type,
+                     now.isoformat(timespec="seconds"), len(eligible))
+        return 0
+    cap = _scfg.capture_max_open_per_symbol_tracked()
+    eligible.sort(key=lambda s: s.get("composite_score") or 0, reverse=True)
+    inserted = 0
+    capped = {}
+    with _CAP_LOCK:
+        open_n = {}
+        if cap:
+            try:
+                open_n = signal_db.count_open_by_symbol(db_path=db_path, tracked=True)
+            except Exception as e:
+                log.error(f"record_tracked open-count read failed, "
+                          f"recording nothing: {e}")
+                return 0
+        for sig in eligible:
+            sym = sig.get("symbol")
+            if cap and open_n.get(sym, 0) >= cap:
+                capped[sym] = capped.get(sym, 0) + 1
+                continue
+            row = _to_tracked_row(sig, scanner_type, now)
+            if row is None:
+                continue
+            try:
+                if _insert(row, db_path):
+                    inserted += 1
+                    open_n[sym] = open_n.get(sym, 0) + 1
+            except Exception as e:
+                log.error(f"record_tracked insert failed: {e}")
+    if capped:
+        log.info("%s: %s at the %d-open-per-symbol tracked cap", scanner_type,
                  ", ".join(f"{s} ({n} skipped)" for s, n in sorted(capped.items())),
                  cap)
     return inserted

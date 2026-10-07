@@ -181,6 +181,11 @@ capture_min = 58
 # there is enough outcome data to say which score band is worth keeping.
 capture_min_income = 0
 
+# The TRACKED structures' capture floor (see [capture] tracked), and 0 for the
+# same reason: [structures] min_score already decided what the scan showed, and
+# the point of recording these is to learn which of them work.
+capture_min_tracked = 0
+
 # Index premium spreads in a mildly-negative GEX (trend-prone) regime need a
 # higher bar than the capture floor. Below gex_strong_neg, index premium is
 # skipped outright.
@@ -206,3 +211,18 @@ swing_min = 50.0
 # since the paper Account enters from these captures, that can keep a 0-DTE
 # signal out of the Account too.
 max_open_per_symbol = 2
+
+# ── tracked structures ───────────────────────────────────────────────────────
+# The Market Scanner's structures that are NOT credit spreads - debit spreads,
+# straddles and strangles, butterflies and condors, calendars, backspreads, and
+# the Directional tab's single calls and puts - are recorded so each one gets a
+# mark series and an outcome. They are MEASURED, never traded: the paper Account
+# refuses them twice over (by type and by structure), and no page offers one to
+# it. Set tracked = false to stop recording new ones; open ones keep being marked
+# until they close.
+tracked = true
+# At most this many OPEN tracked structures per symbol, across both tabs. 0 turns
+# the cap off. Its own pool on purpose: counted against max_open_per_symbol, a
+# tracked straddle could take the slot of a credit spread the Account would
+# have traded.
+max_open_per_symbol_tracked = 2

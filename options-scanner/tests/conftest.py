@@ -44,6 +44,18 @@ def _isolate_production_signal_db(tmp_path, monkeypatch):
         return real_record(signals, scanner_type, db_path=db_path or test_db, **kwargs)
 
     monkeypatch.setattr(signal_recorder, "record_signals", _redirected)
+
+    # The tracked-structure recorder resolves its default path when CALLED, so
+    # the same redirect covers it: a scan under test writes to the per-test DB.
+    real_tracked = signal_recorder.record_tracked
+
+    def _redirected_tracked(signals, scanner_type, db_path=None, **kwargs):
+        return real_tracked(signals, scanner_type, db_path=db_path or test_db, **kwargs)
+
+    # The one test of the function's OWN default path reaches the real one here.
+    _redirected_tracked.__wrapped__ = real_tracked
+
+    monkeypatch.setattr(signal_recorder, "record_tracked", _redirected_tracked)
     yield
 
 

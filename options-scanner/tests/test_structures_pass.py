@@ -173,9 +173,11 @@ class TestThePassIsAdditive:
         assert all(e["buckets"]["STRUCT_SWING"]["build_failed"]
                    for e in res["funnel"].values())
 
-    def test_nothing_from_the_pass_reaches_the_recorder(self, fake_client, monkeypatch):
-        """Capture is a later phase, and it will be its own call: the paper
-        Account enters from what ``record_signals`` writes."""
+    def test_nothing_from_the_pass_reaches_the_credit_recorder(self, fake_client,
+                                                               monkeypatch):
+        """The paper Account enters from what ``record_signals`` writes. The
+        structures are recorded by a different function, under types of their own
+        (see TestTrackedCapture)."""
         import signal_recorder
 
         _open(monkeypatch)
@@ -425,3 +427,81 @@ class TestRatioSpreads:
     def test_it_is_built_as_shipped(self):
         assert "RATIO" in scanner_engine.STRUCTURES_CFG["families"]
         assert scanner_engine.STRUCTURES_CFG["backspread_max_debit_frac"] == 0.25
+
+
+class TestTrackedCapture:
+    """The scan hands its structure lists, and the Directional tab's rows, to
+    ``signal_recorder.record_tracked`` - never to ``record_signals``."""
+
+    def _spy(self, monkeypatch):
+        import signal_recorder
+        seen = []
+        monkeypatch.setattr(signal_recorder, "record_tracked",
+                            lambda sigs, kind, **kw: seen.append((kind, list(sigs))) or 0)
+        return seen
+
+    def test_each_structure_list_is_recorded_under_its_own_type(
+            self, fake_client, monkeypatch):
+        _open(monkeypatch)
+        seen = self._spy(monkeypatch)
+        res = _scan(fake_client)
+        by = {}
+        for kind, sigs in seen:
+            by.setdefault(kind, []).extend(sigs)
+        assert set(by) == {"0DTE_STRUCT", "SWING_STRUCT"}
+        ids = lambda rows: sorted(r["id"] for r in rows)
+        zero_dir = [s for s in res["signals_directional"] if s["dte"] <= 4]
+        swing_dir = [s for s in res["signals_directional"] if s["dte"] > 4]
+        assert zero_dir and swing_dir                               # vacuity
+        assert ids(by["0DTE_STRUCT"]) == ids(res["structures_0dte"] + zero_dir)
+        assert ids(by["SWING_STRUCT"]) == ids(res["structures_swing"] + swing_dir)
+
+    def test_a_credit_spread_is_never_handed_to_the_tracked_recorder(
+            self, fake_client, monkeypatch):
+        _open(monkeypatch)
+        seen = self._spy(monkeypatch)
+        _scan(fake_client)
+        types = {s["type"] for _kind, sigs in seen for s in sigs}
+        assert types and not types & {"PCS", "CCS", "IC", "IRON_CONDOR"}
+
+    def test_a_recorder_failure_costs_nothing_but_the_record(
+            self, fake_client, monkeypatch):
+        import signal_recorder
+        _open(monkeypatch)
+        base = _scan(fake_client)
+        monkeypatch.setattr(signal_recorder, "record_tracked", _boom)
+        res = _scan(fake_client)
+        for key in OLD_LISTS + tuple(k for k, _b in LISTS):
+            assert _signal_ids(res[key]) == _signal_ids(base[key]), key
+
+    def test_outside_the_session_there_is_nothing_to_record(
+            self, fake_client, monkeypatch):
+        _open(monkeypatch)
+        seen = self._spy(monkeypatch)
+        monkeypatch.setattr(scanner_engine, "_signal_clock", lambda: _PRE_OPEN)
+        _scan(fake_client)
+        assert all(sigs == [] for _kind, sigs in seen)
+
+    def test_the_rows_really_land_in_the_store_as_tracked_rows(
+            self, fake_client, monkeypatch, tmp_path):
+        """End to end through the real recorder, into the per-test store."""
+        import signal_db
+        import signal_recorder
+        from datetime import datetime
+        _open(monkeypatch)
+        db = tmp_path / "tracked.db"
+        real = signal_recorder.record_tracked
+        noon = datetime(2026, 10, 1, 12, 0, tzinfo=scanner_engine.TZ)
+        monkeypatch.setattr(signal_recorder, "record_tracked",
+                            lambda sigs, kind, **kw: real(sigs, kind, db_path=db, now=noon))
+        monkeypatch.setattr(signal_recorder._scfg,
+                            "capture_max_open_per_symbol_tracked", lambda: 0)
+        res = _scan(fake_client)
+        rows = signal_db.get_open_signals(db_path=db, tracked=True)
+        expected = (len(res["structures_0dte"]) + len(res["structures_swing"])
+                    + len(res["signals_directional"]))
+        assert len(rows) == expected > 0
+        assert {r["scanner_type"] for r in rows} == {"0DTE_STRUCT", "SWING_STRUCT"}
+        assert all(r["legs_json"] and r["mode"] == "TRACKED" for r in rows)
+        # Nothing here is visible to a reader that did not ask for tracked rows.
+        assert signal_db.get_open_signals(db_path=db) == []

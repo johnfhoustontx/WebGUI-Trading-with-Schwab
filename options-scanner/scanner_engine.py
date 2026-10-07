@@ -2899,6 +2899,25 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
     except Exception as e:
         log.error(f"signal_recorder failed: {e}")
 
+    # Record the structures that are NOT credit spreads, and the Directional
+    # tab's single legs, as TRACKED rows: measured to an outcome, never traded.
+    # Its own call and its own try - the credit record above is what the paper
+    # Account enters from, and nothing here may cost it. ``record_tracked``
+    # files them under signal_db.TRACKED_TYPES, which that Account refuses and
+    # every credit-spread reader of the store excludes. A Directional row goes
+    # to the window its DTE falls in (the same split the two tabs make).
+    try:
+        import signal_recorder
+        _dir = results["signals_directional"]
+        _dir_0 = [s for s in _dir if (s.get("dte") or 0) <= zerodte_max_dte]
+        _dir_s = [s for s in _dir if (s.get("dte") or 0) > zerodte_max_dte]
+        signal_recorder.record_tracked(results["structures_0dte"] + _dir_0,
+                                       "0DTE_STRUCT")
+        signal_recorder.record_tracked(results["structures_swing"] + _dir_s,
+                                       "SWING_STRUCT")
+    except Exception as e:
+        log.error(f"signal_recorder (tracked structures) failed: {e}")
+
     # Daily potential-trade journal (futures-options strategy): fires once per
     # day inside the ~13:00 CT entry window, no-op otherwise. Self-gating and
     # idempotent, so it is safe under both orchestrators (CLI scanner.py and the
