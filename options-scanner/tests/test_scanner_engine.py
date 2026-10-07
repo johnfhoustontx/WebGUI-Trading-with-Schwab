@@ -2788,7 +2788,10 @@ class TestScanFunnel:
         for sym, entry in res["funnel"].items():
             assert entry["price"] > 0
             assert entry["stop"] is None
-            assert sorted(entry["buckets"]) == ["0DTE", "DIRECTIONAL", "SWING"]
+            # The exact set: two credit windows, the single-leg pass, and the
+            # structures pass's two windows (added 2026-10-06).
+            assert sorted(entry["buckets"]) == [
+                "0DTE", "DIRECTIONAL", "STRUCT_0DTE", "STRUCT_SWING", "SWING"]
 
     def test_an_unquotable_symbol_reads_no_quote(self, fake_client, monkeypatch):
         """A symbol Schwab prices at 0 never reaches a chain, so every bucket

@@ -754,6 +754,41 @@ SINGLE_LEG_MAX_PER_SYMBOL = _scfg.single_leg()["max_per_symbol"]
 SINGLE_LEG_MIN_SCORE = _scfg.single_leg()["min_score"]
 SINGLE_LEG_EXCLUDED_GRADES = tuple(_scfg.single_leg()["excluded_grades"])
 
+# Structures other than credit spreads - debit spreads, straddles and strangles,
+# butterflies and condors, calendars and diagonals - built by ``structure_scan``
+# into their OWN two lists. config/scanner.toml [structures].
+STRUCTURES_CFG = _scfg.structures()
+# One counter per door a candidate can leave through, in order. A bucket
+# partitions: built == vol_gate + earnings + score_cut + capped + outside_rth
+# + emitted (see run_full_scan).
+STRUCT_FUNNEL_KEYS = ("built", "vol_gate", "earnings", "score_cut", "capped",
+                      "outside_rth", "emitted")
+# The lists whose funnel bucket keeps its counters FLAT on the bucket (the two
+# credit windows keep theirs under ``spreads``), with that bucket's name.
+FLAT_FUNNEL_LISTS = (("signals_directional", "DIRECTIONAL"),
+                     ("structures_0dte", "STRUCT_0DTE"),
+                     ("structures_swing", "STRUCT_SWING"))
+_FLAT_FUNNEL_BUCKETS = tuple(name for _key, name in FLAT_FUNNEL_LISTS)
+
+
+def decimal_atm_iv(daily_em, price, iv_data):
+    """ATM implied volatility as a DECIMAL fraction for the Fit + Quality scorer.
+
+    Derived from the engine's authoritative dollar daily expected move
+    (``dem = spot * iv * sqrt(1/365)``). ``run_iv_analysis``'s ``current_iv`` is
+    a PERCENT - the documented trap - and is only the fallback, read as a
+    percent above 1.5 and as a decimal below it; 0.20 when there is nothing.
+    One function, so the single-leg pass and the structures pass cannot read
+    the same symbol's volatility two ways.
+    """
+    atm_iv = None
+    if daily_em and price and price > 0:
+        atm_iv = (daily_em * math.sqrt(365.0)) / price
+    if not atm_iv:
+        civ = (iv_data or {}).get("current_iv")
+        atm_iv = (civ / 100.0) if (civ and civ > 1.5) else (civ or 0.20)
+    return atm_iv
+
 
 def get_min_credit_pct(regime, trade_type):
     """Return minimum credit-to-width ratio for the VIX regime and trade type."""
@@ -1926,7 +1961,8 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
          "current_iv": float|None,     # ATM implied vol, a PERCENT; None likewise
          "earnings_date": str|None,    # the date the earnings gate read
          "stop": None|"no_quote"|"no_data",
-         "buckets": {"0DTE": …, "SWING": …, "DIRECTIONAL": …}}
+         "buckets": {"0DTE": …, "SWING": …, "DIRECTIONAL": …,
+                     "STRUCT_0DTE": …, "STRUCT_SWING": …}}
 
     ⚠ The bucket keys are ``0DTE``/``SWING``, the spelling ``signal_recorder``
     records and ``shared.calibration`` buckets on — NOT the engine's own
@@ -1990,6 +2026,19 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
     and offered nothing) and ``build_failed`` itself (without the flag a crash
     reads as an honest zero).
 
+    The ``STRUCT_0DTE`` and ``STRUCT_SWING`` buckets are the structures pass
+    (``structure_scan``: everything that is not a credit spread, built into
+    ``results["structures_0dte"]`` / ``["structures_swing"]``), one per window.
+    Flat like DIRECTIONAL, keyed by ``STRUCT_FUNNEL_KEYS``, and they partition
+    the same way with one more door, the earnings gate::
+
+        built == vol_gate + earnings + score_cut + capped + outside_rth + emitted
+
+    ``earnings`` counts SHORT premium (and rows whose vega cannot be read) that
+    would be held through a report; long premium is kept and flagged instead.
+    ``build_failed`` voids the identity, as it does above. A window with no
+    chain leaves its bucket at zero; the spread bucket's ``chain`` says why.
+
     ``collect_funnel=False`` is the EQUIVALENCE LEVER: counting must never move a
     decision, and ``TestScanFunnel`` proves that by running the same scan both
     ways rather than by inspection. The key is present either way (``{}`` when
@@ -2017,6 +2066,8 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
         "signals_0dte": [],
         "signals_swing": [],
         "signals_directional": [],
+        "structures_0dte": [],
+        "structures_swing": [],
         "errors": [],
         "warnings": [],
         "funnel": {},
@@ -2179,7 +2230,11 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
                     "DIRECTIONAL": {"windows_without_candidates": 0, "built": 0,
                                     "vol_gate": 0, "score_cut": 0, "capped": 0,
                                     "outside_rth": 0, "emitted": 0,
-                                    "build_failed": False}},
+                                    "build_failed": False},
+                    "STRUCT_0DTE": dict.fromkeys(STRUCT_FUNNEL_KEYS, 0)
+                    | {"build_failed": False},
+                    "STRUCT_SWING": dict.fromkeys(STRUCT_FUNNEL_KEYS, 0)
+                    | {"build_failed": False}},
             }
 
     def _bucket(sym, name):
@@ -2351,15 +2406,9 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
             import strategy_scanner as _ssn
             import strategy_scoring as _ssc
 
-            # ATM IV as a DECIMAL fraction, derived from the engine's
-            # authoritative dollar daily EM (dem = spot*iv_dec*sqrt(1/365)).
-            # run_iv_analysis's `current_iv` is a PERCENT -- the documented trap.
-            atm_iv = None
-            if daily_em and price and price > 0:
-                atm_iv = (daily_em * math.sqrt(365.0)) / price
-            if not atm_iv:
-                civ = iv_data.get("current_iv")
-                atm_iv = (civ / 100.0) if (civ and civ > 1.5) else (civ or 0.20)
+            # ATM IV as a DECIMAL fraction (run_iv_analysis's `current_iv` is a
+            # PERCENT -- the documented trap). See decimal_atm_iv.
+            atm_iv = decimal_atm_iv(daily_em, price, iv_data)
 
             view = _ssc.infer_market_view(tech or {}, iv_data or {})
             dir_sigs = []
@@ -2474,6 +2523,73 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
             # indistinguishable from a chain that honestly offered nothing.
             if bucket_d is not None:
                 bucket_d["build_failed"] = True
+
+        # --- Structures other than credit spreads (own lists, own scorer) ---
+        # Debit spreads, straddles and strangles, butterflies and condors on both
+        # windows; calendars and diagonals on SWING alone, their back month read
+        # from the +20..+45 chain this scan already fetched for IV analysis - so
+        # the pass costs no Schwab call. Built by the Strategy Finder's builders
+        # and scored by its scorer (structure_scan), which is why a row here is
+        # the same row, with the same score, as on the Finder.
+        #
+        # Additive, like the single-leg pass above: it must never break the
+        # credit scan. ONE try per window, so a crash in one leaves the other
+        # standing, and the lazy imports sit inside it for the reason given
+        # there. A window with no chain is skipped - the spread bucket's
+        # ``chain`` already says so.
+        if STRUCTURES_CFG["enabled"]:
+            _earn = earnings_by_symbol.get(symbol)
+            _band = (STRUCTURES_CFG["short_delta_min"], MAX_ENTRY_SHORT_DELTA)
+            for _fkey, _rkey, _chain, _back, _lo, _hi, _back_hi, _wtype in (
+                ("STRUCT_0DTE", "structures_0dte", data.get("chain_0"), None,
+                 zerodte_min_dte, zerodte_max_dte, None, "0-DTE"),
+                ("STRUCT_SWING", "structures_swing", data.get("chain_s"),
+                 data.get("chain_iv"), swing_min_dte, swing_max_dte,
+                 (iv_to - today).days, "SWING"),
+            ):
+                bucket_x = _bucket(symbol, _fkey)
+                if not _chain or _chain.get("status") == "FAILED":
+                    continue
+                try:
+                    import structure_scan as _sx
+                    import strategy_scanner as _ssn
+                    import strategy_scoring as _ssc
+
+                    _atm = decimal_atm_iv(daily_em, price, iv_data)
+                    _view = _ssc.infer_market_view(tech or {}, iv_data or {})
+
+                    def _spans(sig, _t=_wtype, _e=_earn, _ssn=_ssn):
+                        # The same two questions screen_spreads asks, on the
+                        # candidate's own DTE and its LAST expiry: a calendar's
+                        # back month can span a report its front leg does not.
+                        return (bool(_e) and earnings_gate_applies(_t, sig.get("dte"))
+                                and check_earnings_conflict(
+                                    _e, _ssn.latest_expiration(sig)))
+
+                    _cands = _sx.build_window(
+                        _chain, symbol, price, _atm, _lo, _hi,
+                        families=STRUCTURES_CFG["families"], short_band=_band,
+                        back_chain=_back, back_dte_max=_back_hi)
+                    results[_rkey].extend(_sx.select(
+                        _cands, view=_view, atm_iv=_atm, daily_em=daily_em,
+                        dte_min=_lo, iv_rank=iv_data.get("iv_rank"),
+                        floor=MIN_IV_RANK.get(_wtype),
+                        ceiling=MAX_IV_RANK.get(_wtype),
+                        spans_earnings=_spans, earnings_date=_earn,
+                        keep_long_through_earnings=(
+                            STRUCTURES_CFG["earnings_long_premium"] == "flag"),
+                        min_score=STRUCTURES_CFG["min_score"],
+                        excluded_grades=tuple(STRUCTURES_CFG["excluded_grades"]),
+                        max_per_family=STRUCTURES_CFG["max_per_family"],
+                        bucket=bucket_x))
+                except Exception:  # noqa: BLE001
+                    # log.exception, and the flag: without it a crashed build is
+                    # a bucket of zeroes, the same as a chain that offered
+                    # nothing. ⚠ As with the single-leg bucket, a crash can land
+                    # between two counters, so the partition is void when set.
+                    log.exception(f"  structures pass ({_wtype}) for {symbol} failed")
+                    if bucket_x is not None:
+                        bucket_x["build_failed"] = True
 
     # --- Directional pass (regime-gated) ---
     # Evaluate the regime ONCE — both the directional pass and the late
@@ -2695,14 +2811,16 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
             held += len(results[key])
             results[key] = []
             _count_removed(bucket_name, "outside_rth", before_by_sym, {})
-        # The DIRECTIONAL bucket keeps its counters flat (no ``spreads``), so
-        # its share is counted here rather than through ``_count_removed``.
-        for sym, n in _by_symbol(results["signals_directional"]).items():
-            entry = funnel.get(sym)
-            if entry is not None:
-                entry["buckets"]["DIRECTIONAL"]["outside_rth"] += n
-        held += len(results["signals_directional"])
-        results["signals_directional"] = []
+        # The DIRECTIONAL and structure buckets keep their counters flat (no
+        # ``spreads``), so their share is counted here rather than through
+        # ``_count_removed``.
+        for key, bucket_name in FLAT_FUNNEL_LISTS:
+            for sym, n in _by_symbol(results[key]).items():
+                entry = funnel.get(sym)
+                if entry is not None:
+                    entry["buckets"][bucket_name]["outside_rth"] += n
+            held += len(results[key])
+            results[key] = []
         results["warnings"].append(OUTSIDE_RTH_WARNING)
         log.info(f"  Outside regular hours: {held} signals held")
 
@@ -2711,6 +2829,9 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
     results["signals_swing"].sort(key=lambda x: (x.get("composite_score", 0), x.get("rr_pct", 0)), reverse=True)
     results["signals_directional"].sort(
         key=lambda x: (x.get("composite_score") or 0), reverse=True)
+    for key in ("structures_0dte", "structures_swing"):
+        results[key].sort(key=lambda x: (x.get("composite_score") or 0),
+                          reverse=True)
 
     # The funnel's terminal number, read straight off the finished lists rather
     # than accumulated — every gate above has run, so this is the count the page
@@ -2718,12 +2839,11 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
     # not another thing that happened.
     if collect_funnel:
         for key, bucket_name in (("signals_0dte", "0DTE"),
-                                 ("signals_swing", "SWING"),
-                                 ("signals_directional", "DIRECTIONAL")):
+                                 ("signals_swing", "SWING")) + FLAT_FUNNEL_LISTS:
             counts = _by_symbol(results[key])
             for sym, entry in funnel.items():
                 b = entry["buckets"][bucket_name]
-                target = b if bucket_name == "DIRECTIONAL" else b["spreads"]
+                target = b if bucket_name in _FLAT_FUNNEL_BUCKETS else b["spreads"]
                 target["emitted"] = counts.get(sym, 0)
 
     # Add position sizing to all signals
@@ -2759,7 +2879,8 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
     #     may themselves be None; the reference is copied as-is (the panel
     #     already handles that shape) and every value is a plain float/int, so
     #     the signal stays JSON-serializable for the Redis cache envelope.
-    for key in ("signals_0dte", "signals_swing", "signals_directional"):
+    for key in ("signals_0dte", "signals_swing", "signals_directional",
+                "structures_0dte", "structures_swing"):
         for s in results[key]:
             iv_for_sym = results["iv_data"].get(s.get("symbol")) or {}
             s["iv_rank"] = iv_for_sym.get("iv_rank") or 0
