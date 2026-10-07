@@ -685,3 +685,52 @@ def test_an_empty_symbol_never_leaves_the_load_button_spinning():
     busy = next(i for i, ln in enumerate(lines)
                 if "kit.set_busy(adhoc_load_btn)" in ln)
     assert ret < busy, "the empty-symbol return must precede the busy"
+
+
+# ── a ratio is not a spread (2026-10-07) ────────────────────────────────────
+
+def _adhoc_leg(option_type, side, strike, qty=1, premium=1.0):
+    return {"option_type": option_type, "side": side, "strike": strike,
+            "expiry": "2026-11-06", "qty": qty, "premium": premium}
+
+
+def test_a_one_by_two_is_refused_not_read_as_a_credit_spread():
+    """The docstring has always said a ratio is an error. The code classified
+    by leg SHAPE alone, so a call backspread - short 1, long 2 further out -
+    was read as a call credit spread of one contract, its second long ignored."""
+    legs = [_adhoc_leg("call", "short", 100, qty=1, premium=2.1),
+            _adhoc_leg("call", "long", 103, qty=2, premium=0.85)]
+    spec = rescue.adhoc_spec_from_legs("SPY", legs)
+    assert "error" in spec and "strategy" not in spec
+    assert "quantity" in spec["error"]
+
+
+def test_unequal_quantities_are_refused_for_every_two_leg_and_condor_shape():
+    shapes = [
+        [_adhoc_leg("put", "short", 100, 1, 2.0), _adhoc_leg("put", "long", 95, 2, 0.5)],
+        [_adhoc_leg("call", "long", 100, 1, 2.0), _adhoc_leg("call", "short", 105, 3, 0.5)],
+        [_adhoc_leg("put", "short", 95, 1, 1.0), _adhoc_leg("put", "long", 90, 1, 0.4),
+         _adhoc_leg("call", "short", 105, 2, 1.0), _adhoc_leg("call", "long", 110, 2, 0.4)],
+    ]
+    for legs in shapes:
+        spec = rescue.adhoc_spec_from_legs("SPY", legs)
+        assert "error" in spec, legs
+
+
+def test_equal_quantities_still_map_and_carry_the_quantity():
+    legs = [_adhoc_leg("call", "short", 100, qty=3, premium=2.1),
+            _adhoc_leg("call", "long", 103, qty=3, premium=0.85)]
+    spec = rescue.adhoc_spec_from_legs("SPY", legs)
+    assert spec["strategy"] == "CCS" and spec["quantity"] == 3
+
+
+def test_a_butterflys_one_two_one_is_still_recognised():
+    """The range structures carry their own ratio and are read before the check."""
+    legs = [_adhoc_leg("call", "long", 95, 1, 6.0), _adhoc_leg("call", "short", 100, 2, 3.0),
+            _adhoc_leg("call", "long", 105, 1, 1.0)]
+    assert rescue.adhoc_spec_from_legs("SPY", legs)["strategy"] == "BUTTERFLY_CALL"
+
+
+def test_the_backspread_templates_are_not_rescue_structures():
+    assert "CALL_BACKSPREAD" not in rescue.RESCUE_ADHOC_SUPPORTED
+    assert "PUT_BACKSPREAD" not in rescue.RESCUE_ADHOC_SUPPORTED

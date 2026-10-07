@@ -362,6 +362,10 @@ def summary_line(advisory):
 _ADHOC_STRUCT_ERR = ("Rescue supports single options and credit spreads / iron "
                      "condors/flies — this structure isn't recognized.")
 
+_ADHOC_RATIO_ERR = ("Rescue reads spreads whose legs all have the same quantity. "
+                    "These legs do not, so this is a ratio, which it does not "
+                    "support.")
+
 # (option_type, side) → single-option strategy code (Phase 1).
 _SINGLE_STRAT = {
     ("call", "long"): "LONG_CALL", ("put", "long"): "LONG_PUT",
@@ -500,6 +504,13 @@ def adhoc_spec_from_legs(symbol, legs):
     range_spec = _range_spec_from_parsed(symbol, parsed, expiration)
     if range_spec is not None:
         return range_spec
+
+    # Everything below is a vertical or an iron condor, read by leg SHAPE - so
+    # every leg must carry ONE quantity. Without this a 1x2 (a ratio backspread:
+    # short one, long two further out) was read as a credit spread of one
+    # contract and its second long silently dropped.
+    if len({leg["qty"] for leg in parsed}) != 1:
+        return {"error": _ADHOC_RATIO_ERR}
 
     valid_pcs = (len(put_short) == 1 and len(put_long) == 1
                  and put_short[0]["strike"] > put_long[0]["strike"])
