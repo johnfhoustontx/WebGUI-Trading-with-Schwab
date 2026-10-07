@@ -73,7 +73,8 @@ def run_scan() -> dict:
 # its live-only semantics: it is the latest scan, and a signal that no longer
 # qualifies must not be offered from it.
 
-_DAY_LISTS = ("signals_0dte", "signals_swing", "signals_directional")
+_DAY_LISTS = ("signals_0dte", "signals_swing", "signals_directional",
+              "structures_0dte", "structures_swing")
 
 # Fields stripped from DAY entries only. `gex_walls`/`dex_walls` are attached to
 # every signal by scanner_engine but have ZERO consumers outside options-scanner's
@@ -5255,7 +5256,7 @@ def _matrix_symbols():
 def _count_scan_signals(scan_day, today):
     """``{symbol: count}`` from a ``cache:options:scan_day`` payload. Gated on
     date: a stale (``date != today``) envelope contributes nothing. Counts every
-    signal dict across the three lists by its ``symbol`` (skips missing)."""
+    signal by ``symbol`` across the three lists named here, not ``structures_*``."""
     if not scan_day or scan_day.get("date") != today:
         return {}
     counts: dict = {}

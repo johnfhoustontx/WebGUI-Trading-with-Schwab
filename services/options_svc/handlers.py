@@ -660,6 +660,10 @@ _SCAN_DEFAULTS = {
     # Single-leg directional candidates ride their own list (own scorer, own
     # signal shape) — see ScanResult's docstring.
     "signals_directional": [],
+    # Everything else the scan builds for the two windows (structure_scan):
+    # the normalized shape again, in their own lists - see ScanResult.
+    "structures_0dte": [],
+    "structures_swing": [],
     "vix_term_structure": {},
     "timestamp": None,
     "errors": [],
@@ -679,7 +683,9 @@ def _stamp_scan(result) -> None:
     iv_data = result.get("iv_data") or {}
     failed, first = 0, None
     for key, trade_type in (("signals_0dte", "0-DTE"), ("signals_swing", "SWING"),
-                            ("signals_directional", None)):
+                            ("signals_directional", None),
+                            ("structures_0dte", "0-DTE"),
+                            ("structures_swing", "SWING")):
         for row in result.get(key) or []:
             try:
                 sym = row.get("symbol")

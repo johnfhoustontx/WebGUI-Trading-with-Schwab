@@ -30,6 +30,17 @@ class ScanResult(_Base):
       per-contract dollars (×100, not per-share), ``rr`` (a ratio, not
       ``rr_pct``, a percent), and ``breakevens`` (a list, not the scalar
       ``breakeven``). Code reading these lists must not assume one shape.
+
+    ``structures_0dte`` / ``structures_swing`` are everything ELSE the scan
+    builds for those two windows - debit spreads, straddles and strangles,
+    butterflies and condors, calendars and diagonals (``structure_scan``). The
+    normalized shape and the Fit+Quality score, like ``signals_directional``,
+    and their OWN lists for the same two reasons: a row here appended to
+    ``signals_0dte`` would be ranked against the premium composites and read by
+    ten modules that assume a credit spread (the push, the trade-idea post, the
+    Opportunity Board's count). Each row also carries ``group``, the family
+    that built it, and - when it is long premium kept through an earnings
+    report - ``spans_earnings`` and ``earnings_date``.
     """
 
     signals_0dte: list[dict] = []
@@ -37,6 +48,8 @@ class ScanResult(_Base):
     # Additive with a default: payloads cached before this field existed (Redis
     # persists cache:options:scan across restarts) must still validate.
     signals_directional: list[dict] = []
+    structures_0dte: list[dict] = []
+    structures_swing: list[dict] = []
     vix_term_structure: dict = {}
     timestamp: str | None = None
     errors: list = []
