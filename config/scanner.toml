@@ -120,6 +120,38 @@ max_per_symbol = 8           # 4 structures x 2 windows (0-DTE + swing)
 min_score      = 50.0
 excluded_grades = ["Weak"]
 
+[structures]
+# Structures OTHER than credit spreads on the Market Scanner's 0-DTE and Swing
+# tabs: debit spreads, straddles and strangles, butterflies and condors,
+# calendars and diagonals. Built by the Strategy Finder's builders on the chains
+# the scan already holds (no extra Schwab call), scored on the Finder's
+# Fit + Quality model, and kept in their OWN lists: nothing here changes a
+# credit spread. Edit + restart options_svc.
+#
+# Measured before shipping (docs/plans/2026-10-06-scanner-multi-structure-
+# design.md): on fairly priced chains the short straddle never clears the
+# quality bar, diagonals almost never do at these expiries, and long straddles
+# and strangles score 50-56 - just over min_score.
+enabled = true
+# Which families the scan builds. CALENDAR is built on the Swing tab only.
+families = ["VERTICAL", "STRADDLE", "BUTTERFLY", "CALENDAR"]
+# Fit + Quality score a structure needs to be shown (0-100), and the grades
+# removed outright. The same two rules [single_leg] applies.
+min_score = 50.0
+excluded_grades = ["Weak"]
+# Most rows of ONE family one symbol may show in one tab. Per family, not per
+# tab, on purpose: scores sit in bands by family (debit spreads 73-78, long
+# straddles 50-56), so one cap across families would drop long volatility
+# every time. 0 = no cap.
+max_per_family = 2
+# A short strangle sells between this delta and [selection]
+# max_entry_short_delta, aiming at the midpoint.
+short_delta_min = 0.15
+# A trade that would be held through an earnings report: "flag" keeps LONG
+# premium and marks the row with the report date; "drop" removes it. SHORT
+# premium is always dropped, as every credit spread is.
+earnings_long_premium = "flag"
+
 [scores]
 # Capture floor: a signal must reach this to be recorded at all.
 capture_min = 58

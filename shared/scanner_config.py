@@ -40,6 +40,17 @@ DEFAULTS = {
         "min_score": 50.0,
         "excluded_grades": ["Weak"],
     },
+    # Structures other than credit spreads on the Market Scanner's two tabs
+    # (options-scanner/structure_scan.py). See config/scanner.toml [structures].
+    "structures": {
+        "enabled": True,
+        "families": ["VERTICAL", "STRADDLE", "BUTTERFLY", "CALENDAR"],
+        "min_score": 50.0,
+        "excluded_grades": ["Weak"],
+        "max_per_family": 2,
+        "short_delta_min": 0.15,
+        "earnings_long_premium": "flag",
+    },
     "scores": {
         "capture_min": 58,
         # The Income Window's own capture floor, and it is 0 ON PURPOSE - see
@@ -150,6 +161,50 @@ def directional_delta_range() -> dict:
 
 def single_leg() -> dict:
     return _section("single_leg")
+
+
+STRUCTURE_FAMILIES = ("VERTICAL", "STRADDLE", "BUTTERFLY", "CALENDAR", "RATIO")
+EARNINGS_MODES = ("flag", "drop")
+
+
+def structures() -> dict:
+    """The Market Scanner's non-credit structures pass, every key of
+    ``DEFAULTS["structures"]``.
+
+    Closed over the defaults, like :func:`selection`: a key the code does not
+    know is dropped and a value it cannot use is the shipped one, so a typo can
+    never read as a gate that is on and never gates. Returns a fresh dict (and
+    fresh lists) on every call - the loader's mapping is the cached one.
+
+    ``families`` keeps only names in :data:`STRUCTURE_FAMILIES`.
+    ``earnings_long_premium`` is ``"flag"`` (keep a long-premium trade that
+    would be held through a report, and mark it) or ``"drop"``.
+    """
+    d = DEFAULTS["structures"]
+    sec = load().get("structures")
+    sec = sec if isinstance(sec, dict) else {}
+    out = {k: (list(v) if isinstance(v, list) else v) for k, v in d.items()}
+    if isinstance(sec.get("enabled"), bool):
+        out["enabled"] = sec["enabled"]
+    fams = sec.get("families")
+    if isinstance(fams, list):
+        out["families"] = [f for f in (str(x).strip().upper() for x in fams)
+                           if f in STRUCTURE_FAMILIES]
+    grades = sec.get("excluded_grades")
+    if isinstance(grades, list):
+        out["excluded_grades"] = [str(g).strip().capitalize() for g in grades
+                                  if str(g).strip()]
+    for key in ("min_score", "short_delta_min"):
+        v = sec.get(key)
+        if (isinstance(v, (int, float)) and not isinstance(v, bool)
+                and math.isfinite(v) and v >= 0):
+            out[key] = float(v)
+    v = sec.get("max_per_family")
+    if isinstance(v, int) and not isinstance(v, bool) and v >= 0:
+        out["max_per_family"] = v
+    if sec.get("earnings_long_premium") in EARNINGS_MODES:
+        out["earnings_long_premium"] = sec["earnings_long_premium"]
+    return out
 
 
 def scores() -> dict:

@@ -230,6 +230,35 @@ _SCANNER = ConfigFile(
             Field("single_leg.excluded_grades", "Grades never shown",
                   "Grades removed from the list outright.", kind="symbols"),
         )),
+        Section("Other structures (0-DTE and Swing tabs)",
+                "Debit spreads, straddles and strangles, butterflies and condors, "
+                "calendars and diagonals. Scored separately from the credit "
+                "spreads and never ranked against them.", (
+            Field("structures.enabled", "Build other structures",
+                  "Off removes the Other structures tables' contents; the credit "
+                  "spreads are not affected.", kind="bool"),
+            Field("structures.families", "Families built",
+                  "VERTICAL (debit spreads) · STRADDLE (straddles and strangles) "
+                  "· BUTTERFLY (butterflies and condors) · CALENDAR (calendars "
+                  "and diagonals, Swing tab only).", kind="symbols"),
+            Field("structures.min_score", "Minimum score",
+                  "Fit + Quality score a structure needs to be shown (0–100).",
+                  kind="float", min=0, max=100, step=1),
+            Field("structures.excluded_grades", "Grades never shown",
+                  "Grades removed from the list outright.", kind="symbols"),
+            Field("structures.max_per_family", "Maximum per family",
+                  "Most rows of one family one symbol may show in one tab. "
+                  "0 is no limit.", kind="int", min=0, max=10, step=1),
+            Field("structures.short_delta_min", "Short strangle — lowest delta",
+                  "A short strangle sells between this delta and the highest "
+                  "short delta at entry, aiming at the midpoint.",
+                  kind="float", min=0.0, max=0.5, step=0.01),
+            Field("structures.earnings_long_premium", "Bought premium through earnings",
+                  "\"flag\" keeps a trade that buys premium and would be held "
+                  "through an earnings report, and marks the row; \"drop\" removes "
+                  "it. A trade that sells premium is always removed.",
+                  kind="choice", choices=("flag", "drop")),
+        )),
         Section("Score thresholds",
                 "Scores run 0–100. A signal must clear the capture score to be "
                 "recorded (and so to be traded by the paper account).", (
@@ -2103,6 +2132,11 @@ def _refuse_unusable_user_agent(fld, text):
         raise ValueError("plain letters, digits and punctuation only, on one line")
 
 
+# Lists of GRADES ("Weak", "Marginal") among the symbols-kind fields: a grade
+# is capitalised the way the scorer writes it, where a symbol is upper-cased.
+_GRADE_LISTS = ("single_leg.excluded_grades", "structures.excluded_grades")
+
+
 def parse(fld: Field, raw, *, shipped=None):
     """Editor value -> the value stored in TOML, or ``ValueError`` with a
     sentence the page shows beside the field. ``shipped`` keeps an int an int."""
@@ -2161,7 +2195,7 @@ def parse(fld: Field, raw, *, shipped=None):
         items = raw if isinstance(raw, (list, tuple)) else str(raw).replace(",", " ").split()
         out = []
         for it in items:
-            t = str(it).strip().upper() if fld.key != "single_leg.excluded_grades" \
+            t = str(it).strip().upper() if fld.key not in _GRADE_LISTS \
                 else str(it).strip().capitalize()
             if t and t not in out:
                 out.append(t)

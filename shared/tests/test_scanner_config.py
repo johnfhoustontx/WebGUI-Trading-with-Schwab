@@ -142,3 +142,67 @@ def test_a_key_the_code_does_not_know_is_dropped(monkeypatch):
     # A typo must be a no-op, never a phantom threshold nothing reads.
     monkeypatch.setattr(sc, "load", lambda: {"selection": {"edge_margn": 0.5}})
     assert sc.selection() == SELECTION
+
+
+# ── [structures]: the Market Scanner's non-credit pass (2026-10-06) ──────────
+
+STRUCTURES = {"enabled": True,
+              "families": ["VERTICAL", "STRADDLE", "BUTTERFLY", "CALENDAR"],
+              "min_score": 50.0, "excluded_grades": ["Weak"],
+              "max_per_family": 2, "short_delta_min": 0.15,
+              "earnings_long_premium": "flag"}
+
+
+def test_the_shipped_structures_table_is_the_designed_one():
+    assert sc.structures() == STRUCTURES
+
+
+def test_a_missing_structures_table_is_the_shipped_one(monkeypatch):
+    monkeypatch.setattr(sc, "load", lambda: {})
+    assert sc.structures() == STRUCTURES
+    monkeypatch.setattr(sc, "load", lambda: {"structures": 5})
+    assert sc.structures() == STRUCTURES
+
+
+def test_structures_overrides_are_read(monkeypatch):
+    monkeypatch.setattr(sc, "load", lambda: {"structures": {
+        "enabled": False, "families": ["straddle", " vertical "],
+        "min_score": 62, "excluded_grades": ["weak", "marginal"],
+        "max_per_family": 1, "short_delta_min": 0.2,
+        "earnings_long_premium": "drop"}})
+    assert sc.structures() == {
+        "enabled": False, "families": ["STRADDLE", "VERTICAL"],
+        "min_score": 62.0, "excluded_grades": ["Weak", "Marginal"],
+        "max_per_family": 1, "short_delta_min": 0.2,
+        "earnings_long_premium": "drop"}
+
+
+def test_structures_refuses_what_it_cannot_use(monkeypatch):
+    monkeypatch.setattr(sc, "load", lambda: {"structures": {
+        "enabled": "yes", "families": ["VERTICAL", "TYPO"],
+        "min_score": "high", "excluded_grades": "Weak",
+        "max_per_family": -1, "short_delta_min": float("nan"),
+        "earnings_long_premium": "maybe", "min_scor": 99}})
+    s = sc.structures()
+    assert s["enabled"] is True                   # not a bool: the shipped one
+    assert s["families"] == ["VERTICAL"]          # an unknown family is dropped
+    assert s["min_score"] == 50.0
+    assert s["excluded_grades"] == ["Weak"]
+    assert s["max_per_family"] == 2
+    assert s["short_delta_min"] == 0.15           # a NaN is never a threshold
+    assert s["earnings_long_premium"] == "flag"
+    assert "min_scor" not in s                    # a typo is a no-op
+
+
+def test_a_bool_is_not_a_number_for_structures(monkeypatch):
+    monkeypatch.setattr(sc, "load", lambda: {"structures": {
+        "min_score": True, "max_per_family": True}})
+    s = sc.structures()
+    assert s["min_score"] == 50.0 and s["max_per_family"] == 2
+
+
+def test_the_structures_dict_is_a_copy(monkeypatch):
+    # The loader hands out its CACHED mapping; a caller mutating the answer
+    # must not change the next caller's.
+    sc.structures()["families"].append("JUNK")
+    assert sc.structures()["families"] == STRUCTURES["families"]
