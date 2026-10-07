@@ -96,8 +96,10 @@ The new pass reuses rules that already exist; it adds none of its own.
   be read is dropped. The switch is `[structures] earnings_long_premium`
   (`"flag"` as shipped, `"drop"` to restore one rule for everything). The
   credit-spread lists are not touched.
-- **Per-symbol cap:** the best one of each structure, then the top
-  `max_per_symbol_window` by score.
+- **Per-symbol cap:** the top `max_per_symbol_window` by score. The builders
+  emit one row per structure per window, so no second rule is needed.
+- **Short strangle strikes:** sold between `[structures] short_delta_min` and
+  the Scanner's own entry ceiling, `[selection] max_entry_short_delta`.
 - **Regular-hours gate:** held outside 08:30–15:00 CT like every other list.
 - **Not applied:** the momentum veto, the sentiment regime filter and the index
   gamma gate. They exist to stop selling premium into a trend; Fit already
@@ -165,8 +167,8 @@ Each of the 0-DTE and Swing tabs gains a two-way switch: **Credit spreads**
   `built == vol_gate + earnings + score_cut + capped + outside_rth + emitted`.
 - A row kept through a report shows the report date beside its strategy name
   and in the trade detail panel.
-- Day persistence (`merge_day_signals`) covers the two new lists with a
-  leg-based setup key.
+- Day persistence (`merge_day_signals`) covers the two new lists. Its setup
+  key is already symbol, structure and front expiry, which these rows carry.
 - New page code goes in `pages/options/scanner_structures.py`; `scanner.py`
   gains wiring only.
 
@@ -285,6 +287,13 @@ The local page harness on a fake bus for the page; a Redis-driven scan against
 recorded chains for the engine; and, after promote, the first session's funnel
 and capture rows read on prod. Promote after the close, since it stops the
 whole target.
+
+## Implementation plan
+
+[2026-10-06-scanner-multi-structure-plan.md](2026-10-06-scanner-multi-structure-plan.md).
+Phases 1 to 3 are written step by step. Phase 4 is written task by task and is
+expanded once Phase 2 has run a session, apart from the Account guard, which is
+complete and ships first.
 
 ## Out of scope
 
