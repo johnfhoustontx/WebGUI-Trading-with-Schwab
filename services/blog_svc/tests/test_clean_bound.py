@@ -213,6 +213,56 @@ def test_the_child_environment_carries_no_secret(monkeypatch):
     assert env["BLOG_CLEAN_MEM_MB"] == str(clean.blog_inbox.limits()["clean_mem_mb"])
 
 
+# ── the worker keeps the parent's clock ──────────────────────────────────────
+#
+# The worker imports ``clean`` -> ``shared.blog_inbox`` -> ``repo_paths``, and
+# ``repo_paths`` refuses to be imported on a clock that is not Central
+# (``assert_central_time``). That guard is inert in THIS process, which runs
+# under pytest; the worker does not, so it is live there. The systemd unit and
+# the CI job both say Central with ``TZ`` and neither changes the host's own
+# zone, so ``TZ`` has to reach the worker.
+
+# Central, as each platform's C runtime reads ``TZ``. Windows' runtime knows
+# only the POSIX spelling: handed ``America/Chicago`` it takes "Ame" as a zone
+# name at offset 0, which is not Central at all.
+_CENTRAL = "America/Chicago" if os.name == "posix" else "CST6CDT"
+
+
+def test_the_child_environment_carries_the_parents_time_zone(monkeypatch):
+    monkeypatch.setenv("TZ", "America/Chicago")
+    assert clean_bound._child_env()["TZ"] == "America/Chicago"
+
+
+def test_the_child_environment_has_no_time_zone_when_the_parent_has_none(monkeypatch):
+    monkeypatch.delenv("TZ", raising=False)
+    assert "TZ" not in clean_bound._child_env()
+
+
+def test_the_real_worker_cleans_when_tz_is_what_says_central(monkeypatch):
+    """The real worker, started the way the service is: Central because ``TZ``
+    says so. On a box whose own clock is Central this passes with or without
+    ``TZ`` in the allow-list. On a box whose own clock is NOT Central (a CI
+    runner, a container, a server left on UTC) it is the test that fails when
+    ``TZ`` does not reach the worker: the worker dies at import and every upload
+    is answered "a fault in the cleaner". That is the fault this pins."""
+    monkeypatch.setenv("TZ", _CENTRAL)
+    before = degrades("blog.clean")
+    result = clean_bounded("<h1>T</h1><p>one</p>")
+    assert result.reason == "" and "<p>one</p>" in result.html
+    assert degrades("blog.clean") == before
+
+
+def test_the_real_worker_is_on_the_parents_clock_not_the_hosts(monkeypatch):
+    """The same fact from the other side, and the one that shows on ANY box:
+    told ``TZ=UTC`` the worker must be on UTC, so the clock guard refuses it. A
+    worker that still started would be reading the host's zone, not the one its
+    parent was given."""
+    monkeypatch.setenv("TZ", "UTC")
+    ran = clean_bound._run_worker(b"<p>x</p>", timeout=60)
+    assert not ran.timed_out and ran.returncode not in (0, None)
+    assert "America/Chicago" in ran.stderr_tail, ran.stderr_tail
+
+
 # ── interrupts kill the child and propagate ──────────────────────────────────
 
 def test_a_keyboard_interrupt_in_the_runner_kills_the_child_and_propagates(monkeypatch):

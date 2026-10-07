@@ -46,8 +46,17 @@ _WORKER = (sys.executable, "-m", "services.blog_svc.clean_worker")
 # deny-list: the service's own environment holds API keys and tokens the worker
 # has no use for, and nothing here carries a secret. The two BLOG_CLEAN_* the
 # parent adds (below) are limits, not secrets.
+#
+# ⚠ ``TZ`` is not a convenience. The worker imports ``clean`` ->
+# ``shared.blog_inbox`` -> ``repo_paths``, and ``repo_paths`` refuses to be
+# imported on a clock that is not Central (``assert_central_time``; inert under
+# pytest in the parent, live in the worker, which is not under pytest). The
+# systemd unit says ``Environment=TZ=America/Chicago`` and CI sets ``TZ`` on the
+# job; the host's own zone need not be Central at all. Without ``TZ`` here the
+# worker falls back to the host's zone, dies at import on any box where that is
+# not Central, and every upload is answered "a fault in the cleaner".
 _SAFE_ENV = ("PATH", "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "PYTHONPATH", "PYTHONHOME",
-             "VIRTUAL_ENV", "LANG", "LC_ALL", "LC_CTYPE", "TMP", "TEMP", "TMPDIR")
+             "VIRTUAL_ENV", "LANG", "LC_ALL", "LC_CTYPE", "TMP", "TEMP", "TMPDIR", "TZ")
 # How much of the worker's stderr is ever logged, ASCII-escaped. Never its
 # stdout (that is the document's cleaned form) and never the document.
 _STDERR_TAIL = 200
