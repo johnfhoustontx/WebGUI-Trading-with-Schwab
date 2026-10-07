@@ -233,3 +233,32 @@ def test_marks_and_the_peak_work_for_a_tracked_row(db):
     row = next(r for r in signal_db.get_open_signals_with_latest_mark(
         db_path=db, tracked=True) if r["signal_id"] == "t1")
     assert row["unrealized_pnl"] == -40.0 and row["current_value"] == -5.0
+
+
+# ── the tracked rows' own readers ───────────────────────────────────────────
+
+def test_tracked_outcomes_carry_what_a_study_needs_and_only_tracked_rows(db):
+    _close(db, "c1", 0.30)
+    _close(db, "t1", -8.10)
+    rows = signal_db.get_tracked_outcomes(db_path=db)
+    assert _ids(rows) == ["t1"]
+    row = rows[0]
+    assert row["strategy"] == "LONG_STRADDLE" and row["family"] == "STRADDLE"
+    assert row["entry_max_loss"] == 5.43 and row["unbounded"] == 0
+    assert row["entry_spans_earnings"] == 1
+    assert row["realized_pnl"] == pytest.approx(270.0)
+    assert row["exit_reason"] == "TARGET_HIT"
+
+
+def test_an_unmarkable_close_has_no_outcome_and_leaves_the_open_set(db):
+    signal_db.close_unmarkable("t3", db_path=db, close_ts=NOW)
+    assert "t3" not in _ids(signal_db.get_open_signals(db_path=db, tracked=True))
+    row = signal_db.get_tracked_outcomes(db_path=db)[0]
+    assert row["exit_reason"] == "UNMARKABLE"
+    assert row["realized_pnl"] is None and row["exit_value"] is None
+    assert signal_db.get_signal("t3", db_path=db)["status"] == "CLOSED"
+
+
+def test_an_unmarkable_close_of_an_unknown_id_raises(db):
+    with pytest.raises(ValueError):
+        signal_db.close_unmarkable("nope", db_path=db, close_ts=NOW)

@@ -615,3 +615,63 @@ def get_outcomes_for_date(date_iso, db_path=DEFAULT_DB_PATH, *, tracked=False):
         return [dict(r) for r in cur.fetchall()]
     finally:
         conn.close()
+
+
+def get_tracked_outcomes(db_path=DEFAULT_DB_PATH):
+    """Every closed TRACKED structure with what a study of it needs, oldest first.
+
+    The tracked rows' own reader: it carries the risk figure, the unbounded
+    flag and the earnings flag, which the captured score's readers have no use
+    for. ``realized_pnl`` is NULL on a row closed as ``UNMARKABLE`` (a calendar
+    that could not be marked on its front expiry day) - it has no outcome and
+    must not be counted as a scratch.
+    """
+    conn = connect(db_path)
+    try:
+        cur = conn.execute("""
+            SELECT s.signal_id            AS signal_id,
+                   s.symbol               AS symbol,
+                   s.strategy             AS strategy,
+                   s.family               AS family,
+                   s.scanner_type         AS scanner_type,
+                   s.first_seen_date      AS first_seen_date,
+                   s.dte_at_entry         AS dte_at_entry,
+                   s.entry_credit         AS entry_credit,
+                   s.entry_max_loss       AS entry_max_loss,
+                   s.entry_score          AS entry_score,
+                   s.unbounded            AS unbounded,
+                   s.entry_spans_earnings AS entry_spans_earnings,
+                   o.exit_value           AS exit_value,
+                   o.realized_pnl         AS realized_pnl,
+                   o.exit_reason          AS exit_reason,
+                   o.close_date           AS close_date,
+                   o.close_ts             AS close_ts
+            FROM signal_outcomes o
+            JOIN signals s ON s.signal_id = o.signal_id
+            WHERE """ + _tracked_sql("s.", True) + """
+            ORDER BY o.close_ts ASC
+        """)
+        return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
+def close_unmarkable(signal_id, db_path=DEFAULT_DB_PATH, close_ts=None):
+    """Close an OPEN signal with NO outcome: no exit value and no P&L.
+
+    For a tracked calendar that reached its front leg's settlement without a
+    mark. It cannot be valued at intrinsic (its back month still has time
+    value) and a guessed price would be a fabricated result, so it leaves the
+    open set with ``exit_reason = "UNMARKABLE"`` and a NULL P&L that every
+    statistic skips.
+    """
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    now = close_ts or datetime.now(ZoneInfo("America/Chicago"))
+    if get_signal(signal_id, db_path=db_path) is None:
+        raise ValueError(f"close_unmarkable: signal_id {signal_id!r} not found")
+    insert_outcome({"signal_id": signal_id, "close_ts": now.isoformat(),
+                    "close_date": now.date().isoformat(), "exit_value": None,
+                    "realized_pnl": None, "exit_reason": "UNMARKABLE",
+                    "settlement_underlying": None},
+                   new_status="CLOSED", db_path=db_path)
