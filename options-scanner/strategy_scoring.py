@@ -195,6 +195,20 @@ _TYPE_PROFILE = {
     "CONDOR_CALL": "DEBIT", "CONDOR_PUT": "DEBIT",
     "CALENDAR_CALL": "DEBIT", "CALENDAR_PUT": "DEBIT",
     "DIAGONAL_CALL": "DEBIT", "DIAGONAL_PUT": "DEBIT", "COLLAR": "DEBIT",
+    # Ratio backspreads (2026-10-07). LONG, by measurement
+    # (`tools/sweep_strategy_gates.py --scanner`), and for a structural reason
+    # the measurement confirmed: a CALL backspread's profit is unbounded, so its
+    # R:R is None, and LONG is the one profile that can judge that (the
+    # unbounded-profit auto-pass in _reward_metric). Under DEBIT every call
+    # backspread reads as unjudgeable and is cut whatever it costs.
+    # What the measurement showed, to be quoted WITH its parameters (spot 100,
+    # fairly priced, 10:00 CT; see the 2026-10-06 design doc's backspread table):
+    # entered for a CREDIT a backspread clears LONG's 30 PoP bar easily (the
+    # region where it simply keeps the credit counts as profit); entered for a
+    # DEBIT its PoP is 15-25 and it is cut. ⚠ The put version's best case is the
+    # stock at zero, a bounded but enormous max profit, so its R:R reads 40-90 -
+    # the long put's own artifact, not a better trade than the call version.
+    "CALL_BACKSPREAD": "LONG", "PUT_BACKSPREAD": "LONG",
 }
 
 # Lenient per-leg liquidity floors (skipped for any leg missing that field, so
@@ -508,6 +522,10 @@ def q_breakeven_vs_em(signal, em_1sd):
     (closer / inside EM = higher — the move only has to be small to win).
     Neutral families: reward a WIDE profit zone relative to EM (breakevens far
     apart = more room before either side is breached).
+    A directional row may name the breakeven it is FOR (``target_breakeven``):
+    a backspread entered for a credit has a second, nearer one beside its short
+    strike, and that one is where its LOSS zone begins. Absent or unusable, the
+    nearest is scored, as before.
     Defensive: falsy em_1sd -> 50.
     """
     em_1sd = _positive_finite(em_1sd)
@@ -531,7 +549,10 @@ def q_breakeven_vs_em(signal, em_1sd):
         return _clamp(ratio / 2.0 * 100.0)
 
     # directional: nearest breakeven distance from spot, in EM units; closer = better.
-    dist = min(abs(be - spot) for be in bes)
+    # ... unless the structure names the one it is for (see the docstring).
+    target = _real(signal.get("target_breakeven"))
+    dist = (abs(target - spot) if target is not None
+            else min(abs(be - spot) for be in bes))
     ratio = dist / em_1sd  # 0 -> at spot (100), >=1 EM away -> 0.
     return _clamp((1.0 - ratio) * 100.0)
 
@@ -653,6 +674,9 @@ def _reward_metric(signal, profile):
 
     LONG:  R:R; but None R:R with a set net_debit == unbounded profit -> AUTO-PASS
            (infinite upside clears any R:R bar), signalled by returning +inf.
+           ``unbounded_profit is True`` auto-passes too: a set debit was only
+           ever a stand-in for it, and a call backspread entered for a CREDIT
+           has unbounded profit and no debit.
     NAKED: ANNUALISED capital efficiency = (max_profit / capital) x
            (365 / max(dte, MIN_ANNUALISE_DTE)), i.e. return on committed capital
            PER YEAR over a horizon floored at MIN_ANNUALISE_DTE (R:R is
@@ -723,7 +747,9 @@ def _reward_metric(signal, profile):
         return None
 
     rr = signal.get("rr")
-    if profile == "LONG" and rr is None and signal.get("net_debit") is not None:
+    if profile == "LONG" and rr is None and (
+            signal.get("net_debit") is not None
+            or signal.get("unbounded_profit") is True):
         return float("inf")   # unbounded profit -> auto-pass
     if isinstance(rr, (int, float)) and rr > 0:
         return rr

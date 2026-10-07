@@ -38,14 +38,17 @@ absent. A Marginal 45 here is cut on the page.
 (docs/plans/2026-10-06-scanner-multi-structure-design.md): front DTEs inside
 0..4 or 5..15 (default 0,1,2,4,7,10,15), the debit verticals added, no share
 structures, the straddle and butterfly builders handed the window's own minimum
-in place of the Finder's 7-day floor, calendars only in the 5..15 window with a
-back month up to 45 days, and the short strangle sold between 0.15 delta and
-`[selection] max_entry_short_delta`. ⚠ Probability of profit reads the CLOCK
+in place of the Finder's 7-day floor, the ratio backspreads, calendars only in
+the 5..15 window with a back month up to 45 days, and the short strangle sold
+between 0.15 delta and `[selection] max_entry_short_delta`. ⚠ Probability of profit reads the CLOCK
 (`strategy_scanner._years_to_expiry`), so a short-dated row measured after the
 close has less time left than the same row at the open, and an expiration-day
 row none at all. Scanner mode therefore PINS the time of day (`--at`, Central,
 default 10:00) for the marks, the greeks and the probability alike. The default
 mode is unchanged and still reads the real clock, which at 14+ days is noise.
+(One figure is still on the real clock in scanner mode: a calendar's max profit,
+whose back month is valued at the front expiry from now. It moves by a cent
+between runs and moves no score or grade.)
 
 `--rich` marks every option at Black-Scholes on `iv * rich` while the greeks, the
 chain's `volatility` and the scorer's `atm_iv` stay at `iv` -- premium priced
@@ -125,7 +128,8 @@ SPAN = 0.40
 
 # -- Market Scanner mode ------------------------------------------------------
 SCANNER_BUILDERS = ("build_debit_verticals", "build_straddles_strangles",
-                    "build_butterflies_condors", "build_calendars")
+                    "build_butterflies_condors", "build_backspreads",
+                    "build_calendars")
 # The builders that take the 7-day front floor, and so the caller's own.
 FLOORED = ("build_straddles_strangles", "build_butterflies_condors")
 SCANNER_WINDOWS = ((0, 4), (5, 15))     # run_full_scan's 0-DTE and SWING buckets

@@ -48,7 +48,7 @@ Decided with the operator on 2026-10-06:
 | Straddles and strangles | long and short straddle, long and short strangle | yes | yes | exists, needs a front-DTE parameter |
 | Butterflies and condors | call/put butterfly, iron butterfly, call/put condor | yes | yes | exists, needs the same parameter |
 | Calendars | call/put calendar, call/put diagonal | no | yes: front in 7..15, back from the +20..+45 chain | exists, needs the two chains merged |
-| Ratio spreads | `CALL_BACKSPREAD`, `PUT_BACKSPREAD` (short 1, long 2 further out) | yes | yes | **new** |
+| Ratio spreads | `CALL_BACKSPREAD`, `PUT_BACKSPREAD` (short 1, long 2 further out) | yes | yes | built 2026-10-07 |
 
 Not built: the front ratio spread (long 1, short 2: undefined risk, and not
 what was asked for), share structures (the Scanner holds no shares), and 0-DTE
@@ -234,16 +234,67 @@ synthetic figure: the first live scan's duration is the one to read.
 version profits from a large rise and the put version from a large fall; the
 worst case is the underlying finishing at the long strike.
 
-- Emitted only when the net is a credit or a debit under a configured fraction
-  of the strike distance, and when the marks price inside the structure's
-  arbitrage bounds (the check `_priced_inside` makes for butterflies).
+- Emitted only when the net is a credit under the strike distance, a debit of at
+  most `[structures] backspread_max_debit_frac` (0.25) of it, or even money. A
+  credit at or over the distance cannot happen on real quotes and is refused as
+  a bad mark, the reading `_priced_inside` gives a butterfly.
 - `payoff_metrics` already handles a two-contract leg (the butterfly body) and
-  an unbounded tail, so the payoff path does not change.
-- Gate profile: measured with the sweep, not assumed. `LONG` is the candidate
-  (unbounded reward, PoP bar 30).
-- Names go through `shared/structures.py`. The Finder gains a "Ratio spreads"
-  family checkbox and the Calculator two templates, so Send to Calculator opens
-  the structure by name.
+  an unbounded tail, so the payoff path does not change. Two fields are set by
+  the builder because that function cannot know them: `capital` is the max loss
+  (it would otherwise be a margin estimate, because a call backspread is flagged
+  unbounded for its *profit*), and `target_breakeven` is the far breakeven.
+- The names are literals in the builder, like every other structure's.
+  `shared/structures.py` gains nothing: its sets describe what the paper books
+  hold, and a backspread is in none of them.
+- The Finder gains a "Ratio spreads" family and the Calculator two templates, so
+  Send to Calculator opens the structure by name.
+
+### Two scoring changes the backspread needed
+
+**The breakeven it is scored on.** `q_breakeven_vs_em` scores a directional row
+on its *nearest* breakeven. A backspread entered for a credit has two, and the
+nearer one sits beside its short strike, where its loss zone begins. Scored on
+that, the trade would be rewarded for sitting next to its own loss. The scorer
+now reads `target_breakeven` when a row names one. No other structure sets it.
+
+**The reward gate.** `_reward_metric` auto-passes an unbounded-profit long, and
+detected one by "R:R is None and a debit is set". A call backspread entered for
+a credit has unbounded profit and no debit, and read as unjudgeable. The test is
+now "a debit is set, or `unbounded_profit` is true". Both sweeps were compared
+before and after: no existing structure's score or grade moved.
+
+### Gate profile: measured 2026-10-07
+
+Same nine chains and pinned clock as the measurement above. `c` marks a row
+entered for a credit, `d` for a debit; shown / built.
+
+| Structure | Profile `LONG` | Profile `DEBIT` |
+|---|---|---|
+| Call backspread, 0-DTE window | 30 / 36 | 0 / 36 |
+| Call backspread, Swing window | 22 / 27 | 0 / 27 |
+| Put backspread, 0-DTE window | 22 / 35 | 22 / 35 |
+| Put backspread, Swing window | 18 / 26 | 18 / 26 |
+
+`LONG` is the profile. Under `DEBIT` a call backspread's reward cannot be judged
+at all (its R:R is None), so none is ever shown.
+
+Three things this measurement shows that a reader of the table should know:
+
+1. **Only backspreads entered for a credit are shown.** Every credit one passed
+   (probability of profit 63 to 69) and every debit one was cut (16 to 21,
+   against a bar of 30). Which side of even money a backspread lands on is
+   decided by the strike ladder, so the same symbol can show one on one scan and
+   not the next.
+2. **That 63 to 69 is mostly the chance of keeping a small credit.** The trade
+   also profits if the price stays on the near side of the short strike, where
+   it earns the credit and nothing more. On the chain above a call backspread
+   collects about $40 against a worst case of about $260. The probability bar
+   was not written with this shape in mind; it was not moved.
+3. **The put version scores higher than the call version, and that is not a
+   better trade.** A put backspread's best case is the stock at zero, a bounded
+   but very large figure, so its reward to risk reads 40 to 100 and it scores 63
+   to 77 against the call's 55 to 70. The same thing separates a long put from a
+   long call on the Directional tab.
 
 ## Page
 

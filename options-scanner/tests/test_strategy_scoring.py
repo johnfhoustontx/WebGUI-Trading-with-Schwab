@@ -956,3 +956,86 @@ def test_long_straddle_mapping_changes_the_reward_gate_outcome():
     assert sc.gate_profile(sig) == "LONG"
     assert sc._reward_metric(sig, sc.gate_profile(sig)) == float("inf")
     assert sc._reward_metric(sig, "DEBIT") is None
+
+
+# ---------------------------------------------------------------------------
+# Ratio backspreads (2026-10-07): the breakeven they are FOR, and their profile
+# ---------------------------------------------------------------------------
+
+def test_a_named_target_breakeven_is_the_one_scored():
+    """A backspread taken for a credit has TWO breakevens. The near one sits
+    beside the short strike and is where its LOSS zone begins; scoring the
+    nearest would reward the trade for sitting next to its own loss."""
+    sig = {"family": "VOLATILITY", "underlying_price": 100.0,
+           "breakevens": [100.4, 106.0], "target_breakeven": 106.0}
+    nearest = dict(sig, target_breakeven=None)
+    assert sc.q_breakeven_vs_em(nearest, 4.0) == pytest.approx(90.0)   # 0.4 away
+    assert sc.q_breakeven_vs_em(sig, 4.0) == 0.0                       # 6 away, a 4 move
+    assert sc.q_breakeven_vs_em(dict(sig, target_breakeven=102.0), 4.0) == \
+        pytest.approx(50.0)
+
+
+def test_a_row_without_the_field_scores_as_before():
+    sig = {"family": "VOLATILITY", "underlying_price": 100.0, "breakevens": [102.0]}
+    assert sc.q_breakeven_vs_em(sig, 4.0) == pytest.approx(50.0)
+    assert "target_breakeven" not in sig
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), None, "106", True])
+def test_an_unusable_target_falls_back_to_the_nearest(bad):
+    sig = {"family": "VOLATILITY", "underlying_price": 100.0,
+           "breakevens": [102.0], "target_breakeven": bad}
+    assert sc.q_breakeven_vs_em(sig, 4.0) == pytest.approx(50.0)
+
+
+def test_a_neutral_row_ignores_a_target_breakeven():
+    """NEUTRAL rewards the WIDTH of the profit zone; a target is a point."""
+    sig = {"family": "NEUTRAL", "underlying_price": 100.0,
+           "breakevens": [96.0, 104.0]}
+    assert sc.q_breakeven_vs_em(dict(sig, target_breakeven=104.0), 4.0) == \
+        sc.q_breakeven_vs_em(sig, 4.0)
+
+
+def test_the_backspreads_have_an_explicit_profile():
+    """LONG, by measurement (tools/sweep_strategy_gates.py --scanner): it is the
+    one profile under which a call backspread's reward can be judged at all,
+    whether it is entered for a debit or for a credit."""
+    assert sc._TYPE_PROFILE["CALL_BACKSPREAD"] == "LONG"
+    assert sc._TYPE_PROFILE["PUT_BACKSPREAD"] == "LONG"
+
+
+def test_unbounded_profit_auto_passes_the_reward_gate_for_a_credit_too():
+    """The auto-pass was keyed on a set ``net_debit``, as a stand-in for
+    "unbounded profit". A call backspread entered for a CREDIT has unbounded
+    profit and no debit, and read as unjudgeable."""
+    credit = {"type": "CALL_BACKSPREAD", "rr": None, "net_debit": None,
+              "net_credit": 41.0, "unbounded_profit": True}
+    assert sc._reward_metric(credit, "LONG") == float("inf")
+    debit = dict(credit, net_debit=6.0, net_credit=None)
+    assert sc._reward_metric(debit, "LONG") == float("inf")
+
+
+@pytest.mark.parametrize("flag", [False, None, 1, "True"])
+def test_a_credit_without_the_flag_is_still_unjudgeable(flag):
+    """Exactly ``True``: a truthy stand-in must not buy an auto-pass."""
+    sig = {"rr": None, "net_debit": None, "net_credit": 41.0,
+           "unbounded_profit": flag}
+    assert sc._reward_metric(sig, "LONG") is None
+
+
+def test_the_flag_buys_nothing_under_any_other_profile():
+    sig = {"rr": None, "net_debit": None, "net_credit": 41.0,
+           "unbounded_profit": True, "max_profit": None, "capital": 500.0,
+           "dte": 9}
+    for profile in ("DEBIT", "CREDIT", "NEUTRAL", "NAKED"):
+        assert sc._reward_metric(sig, profile) is None, profile
+
+
+def test_a_real_call_backspread_for_a_credit_passes_its_reward_gate():
+    """From the BUILDER, not a hand-made dict."""
+    from tests._bs_chain import bs_chain
+    rows = {r["type"]: r for r in ss.build_backspreads(
+        bs_chain(spot=100.0, iv=0.28, days=(9,), step=1.0), "T", 100.0, 0.28, 5, 15)}
+    call = rows["CALL_BACKSPREAD"]
+    assert call["net_credit"] is not None and call["rr"] is None     # vacuity
+    assert sc._reward_metric(call, sc.gate_profile(call)) == float("inf")
