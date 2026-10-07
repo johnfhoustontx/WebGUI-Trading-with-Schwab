@@ -1984,6 +1984,7 @@ def _directional_uncut(fake_client, symbols):
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(scanner_engine, "SINGLE_LEG_MIN_SCORE", 0.0)
         mp.setattr(scanner_engine, "SINGLE_LEG_EXCLUDED_GRADES", ())
+        mp.setattr(scanner_engine, "SINGLE_LEG_LONG_EXCLUDED_GRADES", ())
         return scanner_engine.run_full_scan(
             fake_client, symbols=symbols)["signals_directional"]
 
@@ -2004,6 +2005,7 @@ def unfiltered_directional(monkeypatch):
     """
     monkeypatch.setattr(scanner_engine, "SINGLE_LEG_MIN_SCORE", 0.0)
     monkeypatch.setattr(scanner_engine, "SINGLE_LEG_EXCLUDED_GRADES", ())
+    monkeypatch.setattr(scanner_engine, "SINGLE_LEG_LONG_EXCLUDED_GRADES", ())
 
 
 class TestDirectionalSignals:
@@ -2189,6 +2191,76 @@ class TestDirectionalSignals:
         assert sigs, "nothing survived — the cut is suppressing qualifying candidates"
         # Boundary: 50.0 is IN, 49.9 is OUT.
         assert {s["composite_score"] for s in sigs} == {50.0}
+
+    # --- A bought call or put: Good and Strong only (2026-10-07) -------------
+
+    @staticmethod
+    def _grades_in_turn(monkeypatch):
+        """Score every candidate 60 and hand each TYPE the four grades in turn,
+        so the only thing that can remove a row is its grade. Returns the count
+        of what was handed out, for the non-vacuity checks."""
+        import strategy_scoring
+        order = ("Strong", "Good", "Marginal", "Weak")
+        handed = {}
+
+        def _fake_score_all(signals, view, atm_iv, em_1sd, market_state=None,
+                            daily_move=None):
+            for sig in signals or []:
+                n = sum(v for (t, _g), v in handed.items() if t == sig["type"])
+                sig["composite_score"] = 60.0
+                sig["grade"] = order[n % 4]
+                handed[(sig["type"], sig["grade"])] = \
+                    handed.get((sig["type"], sig["grade"]), 0) + 1
+            return list(signals or [])
+
+        monkeypatch.setattr(strategy_scoring, "score_all", _fake_score_all)
+        return handed
+
+    def test_a_bought_call_or_put_is_listed_only_at_good_or_strong(
+            self, fake_client, monkeypatch):
+        """The operator's decision of 2026-10-07. Short calls and puts keep the
+        tab's general cut: on a measured session every one of them graded
+        Marginal, so the same rule would have emptied that half of the tab."""
+        handed = self._grades_in_turn(monkeypatch)
+        monkeypatch.setattr(scanner_engine, "SINGLE_LEG_MAX_PER_SYMBOL", 99)
+        sigs = scanner_engine.run_full_scan(
+            fake_client, symbols=self.SYMBOLS)["signals_directional"]
+        seen = {(s["type"], s["grade"]) for s in sigs}
+        for kind in ("LONG_CALL", "LONG_PUT"):
+            # Non-vacuity: a Marginal one was built, and it is not listed.
+            assert handed.get((kind, "Marginal")), f"no Marginal {kind} was built"
+            assert {g for t, g in seen if t == kind} == {"Strong", "Good"}, kind
+        for kind in ("SHORT_CALL", "SHORT_PUT"):
+            assert handed.get((kind, "Marginal")), f"no Marginal {kind} was built"
+            assert {g for t, g in seen if t == kind} == {"Strong", "Good", "Marginal"}, kind
+
+    def test_an_empty_long_list_leaves_the_general_cut_alone(
+            self, fake_client, monkeypatch):
+        self._grades_in_turn(monkeypatch)
+        monkeypatch.setattr(scanner_engine, "SINGLE_LEG_MAX_PER_SYMBOL", 99)
+        monkeypatch.setattr(scanner_engine, "SINGLE_LEG_LONG_EXCLUDED_GRADES", ())
+        sigs = scanner_engine.run_full_scan(
+            fake_client, symbols=self.SYMBOLS)["signals_directional"]
+        longs = {s["grade"] for s in sigs if s["type"] in ("LONG_CALL", "LONG_PUT")}
+        assert longs == {"Strong", "Good", "Marginal"}
+
+    def test_the_long_cut_is_keyed_on_what_the_row_does_not_on_its_name(self):
+        bought = {"type": "ANYTHING", "legs": [{"side": "long", "kind": "call"}]}
+        sold = {"type": "LONG_CALL", "legs": [{"side": "short", "kind": "put"}]}
+        general = scanner_engine.SINGLE_LEG_EXCLUDED_GRADES
+        assert scanner_engine.single_leg_excluded_grades(bought) == \
+            general + scanner_engine.SINGLE_LEG_LONG_EXCLUDED_GRADES
+        assert scanner_engine.single_leg_excluded_grades(sold) == general
+        for junk in (None, {}, {"legs": []}, {"legs": ["x"]}, {"legs": None}):
+            assert scanner_engine.single_leg_excluded_grades(junk) == general
+
+    def test_the_long_cut_is_read_from_the_config_as_a_tuple(self):
+        import pathlib
+        import sys
+        sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
+        from shared import scanner_config as sc
+        assert scanner_engine.SINGLE_LEG_LONG_EXCLUDED_GRADES == \
+            tuple(sc.single_leg_long_excluded_grades()) == ("Weak", "Marginal")
 
     def test_directional_min_score_cut_runs_before_the_per_symbol_cap(
             self, fake_client, monkeypatch):

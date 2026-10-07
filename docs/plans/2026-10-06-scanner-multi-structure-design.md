@@ -366,10 +366,26 @@ tracked row at all.
 **The capture cap has its own pool.** `[capture] max_open_per_symbol` (2) is
 counted across the credit types, and the Account enters from those captures.
 Sharing it would let a tracked butterfly take the slot of a credit spread the
-Account would have traded. `[capture] max_open_per_symbol_tracked` (2) counts
-only tracked rows. `[capture] tracked` switches the recording off, and
-`[scores] capture_min_tracked` (0) is its floor: the scan's own quality cut has
-already filtered these rows.
+Account would have traded. Tracked rows are counted on their own, by two caps:
+`[capture] max_open_per_symbol_tracked` (1) per symbol WITHIN a family, and
+`[capture] max_open_per_family_tracked` (10) per family across all symbols. The
+six families are the scan's five groups and `DIRECTIONAL` for a single option.
+`[capture] tracked` switches the recording off, and `[scores]
+capture_min_tracked` (0) is its floor: the scan's own quality cut has already
+filtered these rows.
+
+The cap first shipped as 2 per symbol across families. It was changed the same
+day, before its first session, on what prod's previous session showed: the scan
+covers 119 symbols, not the couple of dozen the cost estimate assumed, and the
+Directional tab alone would have held about 225 rows open, 195 of them scoring
+above every long straddle. That is the per-family finding of phase 1 again, in
+the recorder: the structures score in bands, so any cap filled by score alone
+is filled by the best-scoring kind. Two things follow. The caps are per family.
+And within a family a free place goes to the structure with the fewest open
+rows first, then to the best score, with both windows ordered together
+(`signal_recorder.record_tracked_scan`, one call per scan), because the same
+banding exists between a short strangle and a long straddle and between the two
+windows.
 
 **Marks.** `options-scanner/structure_marks.py`, from `legs_json`. Each leg is
 priced on its own expiration (a calendar reads two chains, through the
@@ -418,7 +434,9 @@ quarter-hour scan's chain fetches and of the first minute after the hour and
 half hour. A slot fires only in its first four minutes, so a service that starts
 mid-slot waits for the next one. It is not gated by the auto-close switch
 (nothing here is a position) and pushes nothing to a phone. Its cost is one
-chain per open (symbol, expiration) per slot, 26 slots a day.
+chain per open (symbol, expiration) per slot, 26 slots a day: at most 60 open
+rows, so about 60 to 70 chains a slot and under 2,000 a day. Under the first cap
+it would have been about 172 a slot (4,500 a day) on the measured session.
 
 **Risk denominator.** Results are in dollars and as P&L over dollars at risk. A
 short straddle, strangle or call has no maximum loss, so its row carries

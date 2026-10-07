@@ -39,6 +39,8 @@ DEFAULTS = {
         "max_per_symbol": 8,
         "min_score": 50.0,
         "excluded_grades": ["Weak"],
+        # A BOUGHT call or put is listed only when graded Good or Strong.
+        "long_excluded_grades": ["Weak", "Marginal"],
     },
     # Structures other than credit spreads on the Market Scanner's two tabs
     # (options-scanner/structure_scan.py). See config/scanner.toml [structures].
@@ -72,7 +74,9 @@ DEFAULTS = {
                 # Tracked structures (recorded to be measured, never traded):
                 # whether they are recorded at all, and their OWN per-symbol pool.
                 "tracked": True,
-                "max_open_per_symbol_tracked": 2},
+                # Per symbol WITHIN one family, and per family in all.
+                "max_open_per_symbol_tracked": 1,
+                "max_open_per_family_tracked": 10},
     # Which strikes the scanner may sell. Literals in scanner_engine.py until
     # 2026-10-04 (audit CQ-10). See config/scanner.toml [selection].
     "selection": {
@@ -171,6 +175,18 @@ def single_leg() -> dict:
     return _section("single_leg")
 
 
+def single_leg_long_excluded_grades() -> list:
+    """Grades at which a BOUGHT call or put is never listed on the Directional
+    tab. Shipped as Weak and Marginal, so only Good and Strong are shown. A
+    value that is not a list of names is the shipped one; an empty list means
+    the tab's general ``excluded_grades`` is the only cut. A fresh list."""
+    default = DEFAULTS["single_leg"]["long_excluded_grades"]
+    v = single_leg().get("long_excluded_grades", default)
+    if not isinstance(v, list) or not all(isinstance(g, str) for g in v):
+        return list(default)
+    return [g for g in v if g.strip()]
+
+
 STRUCTURE_FAMILIES = ("VERTICAL", "STRADDLE", "BUTTERFLY", "CALENDAR", "RATIO")
 EARNINGS_MODES = ("flag", "drop")
 
@@ -239,12 +255,29 @@ def capture_tracked_enabled() -> bool:
 
 
 def capture_max_open_per_symbol_tracked() -> int:
-    """How many OPEN tracked structures one symbol may hold, across both scan
-    windows; ``0`` turns the cap off. Its OWN pool: these are never counted
-    against :func:`capture_max_open_per_symbol`, whose slots the paper Account
-    trades from. A missing, negative or non-integer value is the default."""
+    """How many OPEN tracked structures one symbol may hold IN ONE FAMILY (debit
+    spreads, straddles and strangles, butterflies and condors, calendars, ratio
+    spreads, single options), across both scan windows; ``0`` turns the cap off.
+
+    Per family because the families score in bands: counted per symbol alone,
+    the two best rows are almost always single options and a straddle is never
+    recorded. Its OWN pool: never counted against
+    :func:`capture_max_open_per_symbol`, whose slots the paper Account trades
+    from. A missing, negative or non-integer value is the default."""
     default = DEFAULTS["capture"]["max_open_per_symbol_tracked"]
     v = _section("capture").get("max_open_per_symbol_tracked", default)
+    if isinstance(v, bool) or not isinstance(v, int) or v < 0:
+        return default
+    return v
+
+
+def capture_max_open_per_family_tracked() -> int:
+    """How many OPEN tracked structures one FAMILY may hold across every symbol;
+    ``0`` turns the cap off. This is what bounds the cost: every open row is
+    priced every 15 minutes, one chain per symbol and expiration. A missing,
+    negative or non-integer value is the default."""
+    default = DEFAULTS["capture"]["max_open_per_family_tracked"]
+    v = _section("capture").get("max_open_per_family_tracked", default)
     if isinstance(v, bool) or not isinstance(v, int) or v < 0:
         return default
     return v

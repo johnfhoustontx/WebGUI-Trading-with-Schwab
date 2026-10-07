@@ -2335,7 +2335,7 @@ never be confused.
 |---|---|
 | **0-DTE** | The *short-dated* bucket: **0 to 4 DTE**, not only today. Fast, high-decay, unforgiving. Read the Exp column — a 3-DTE spread in this tab is held across sessions, and can straddle an earnings report. |
 | **Swing** | Multi-day credit spreads, typically 5–15 DTE. |
-| **Directional** | Single-leg long and short calls and puts. |
+| **Directional** | Single-leg long and short calls and puts. A bought call or put is listed only at grade **Good** or **Strong**; a sold one is also listed at Marginal. |
 
 **Two tables on 0-DTE and Swing.** A switch at the top of each of those tabs
 chooses between **Credit spreads** and **Other structures**: debit spreads,
@@ -2958,7 +2958,11 @@ which kinds are worth your attention.
 **What it is not.** A book. None of these rows is in the paper Account or the
 Paper Ledger, nothing opens one automatically, and you cannot close one by hand.
 They do not count in the footer above, in the Captured score, or against the
-two-per-symbol limit (they have their own: two tracked rows per symbol).
+two-per-symbol limit. They have their own limits: one open row per symbol in
+each of six families (debit spreads, straddles and strangles, butterflies and
+condors, calendars, ratio spreads, single calls and puts), and ten open rows per
+family across all symbols. A free place goes to the kind with the fewest open
+rows first, then to the best score.
 
 **Reading it.** Entry and Now are per share and worded by direction: *5.40 paid*
 and *5.60 to sell* is a bought position that has gained 0.20; *1.35 received*
@@ -2988,9 +2992,12 @@ expiry. A backspread is always held to expiry.
   of every other figure.
 - **Return on risk is not comparable across rows marked *Loss not capped*.** Their
   risk is a margin estimate.
-- **Few rows, for a long time.** With two per symbol and a quality bar on the
-  Scanner, a structure may close a handful of times a month. Read the Closed
+- **Few rows, for a long time.** With ten open per family and a quality bar on
+  the Scanner, a structure may close a handful of times a month. Read the Closed
   column before reading anything beside it.
+- **Ten per family is a cost limit, not a statistical one.** Every open row is
+  priced every 15 minutes. Without the limit, one measured session would have
+  held about 225 rows open and fetched about 172 option chains each time.
 
 ### Why it matters
 

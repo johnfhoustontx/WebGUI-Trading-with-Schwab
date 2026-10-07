@@ -431,14 +431,27 @@ class TestRatioSpreads:
 
 class TestTrackedCapture:
     """The scan hands its structure lists, and the Directional tab's rows, to
-    ``signal_recorder.record_tracked`` - never to ``record_signals``."""
+    ``signal_recorder.record_tracked_scan`` - never to ``record_signals`` - in
+    ONE call for both windows, because the caps are shared between them."""
 
     def _spy(self, monkeypatch):
         import signal_recorder
         seen = []
-        monkeypatch.setattr(signal_recorder, "record_tracked",
-                            lambda sigs, kind, **kw: seen.append((kind, list(sigs))) or 0)
+        self.calls = calls = []
+
+        def _record(by_type, **kw):
+            calls.append(sorted(by_type))
+            seen.extend((kind, list(sigs)) for kind, sigs in by_type.items())
+            return 0
+
+        monkeypatch.setattr(signal_recorder, "record_tracked_scan", _record)
         return seen
+
+    def test_both_windows_go_to_the_recorder_in_one_call(self, fake_client, monkeypatch):
+        _open(monkeypatch)
+        self._spy(monkeypatch)
+        _scan(fake_client)
+        assert self.calls == [["0DTE_STRUCT", "SWING_STRUCT"]]
 
     def test_each_structure_list_is_recorded_under_its_own_type(
             self, fake_client, monkeypatch):
@@ -469,7 +482,7 @@ class TestTrackedCapture:
         import signal_recorder
         _open(monkeypatch)
         base = _scan(fake_client)
-        monkeypatch.setattr(signal_recorder, "record_tracked", _boom)
+        monkeypatch.setattr(signal_recorder, "record_tracked_scan", _boom)
         res = _scan(fake_client)
         for key in OLD_LISTS + tuple(k for k, _b in LISTS):
             assert _signal_ids(res[key]) == _signal_ids(base[key]), key
@@ -490,12 +503,14 @@ class TestTrackedCapture:
         from datetime import datetime
         _open(monkeypatch)
         db = tmp_path / "tracked.db"
-        real = signal_recorder.record_tracked
+        real = signal_recorder.record_tracked_scan
         noon = datetime(2026, 10, 1, 12, 0, tzinfo=scanner_engine.TZ)
-        monkeypatch.setattr(signal_recorder, "record_tracked",
-                            lambda sigs, kind, **kw: real(sigs, kind, db_path=db, now=noon))
+        monkeypatch.setattr(signal_recorder, "record_tracked_scan",
+                            lambda by_type, **kw: real(by_type, db_path=db, now=noon))
         monkeypatch.setattr(signal_recorder._scfg,
                             "capture_max_open_per_symbol_tracked", lambda: 0)
+        monkeypatch.setattr(signal_recorder._scfg,
+                            "capture_max_open_per_family_tracked", lambda: 0)
         res = _scan(fake_client)
         rows = signal_db.get_open_signals(db_path=db, tracked=True)
         expected = (len(res["structures_0dte"]) + len(res["structures_swing"])

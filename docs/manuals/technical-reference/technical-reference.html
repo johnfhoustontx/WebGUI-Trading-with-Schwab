@@ -2395,8 +2395,13 @@ them by type and by structure.</p>
 </tr>
 <tr>
 <td><code>[capture] max_open_per_symbol_tracked</code></td>
-<td>2</td>
-<td>open tracked rows per symbol, its own count</td>
+<td>1</td>
+<td>open tracked rows per symbol within one family</td>
+</tr>
+<tr>
+<td><code>[capture] max_open_per_family_tracked</code></td>
+<td>10</td>
+<td>open tracked rows per family, across all symbols</td>
 </tr>
 <tr>
 <td><code>[scores] capture_min_tracked</code></td>
@@ -2415,6 +2420,15 @@ them by type and by structure.</p>
 </tr>
 </tbody>
 </table>
+<p><strong>Which rows are recorded.</strong> The family is the scan's group (<code>VERTICAL</code>,
+<code>STRADDLE</code>, <code>BUTTERFLY</code>, <code>CALENDAR</code>, <code>RATIO</code>) or <code>DIRECTIONAL</code> for a single call
+or put. Both tabs' rows are taken together. Within a family, while it holds
+fewer than <code>max_open_per_family_tracked</code> open rows, the next row recorded is the
+one whose structure has the fewest open rows in that family, and among those the
+highest score; a row whose symbol already holds <code>max_open_per_symbol_tracked</code> in
+that family is passed over. The order is not score alone because the structures
+score in bands: on one measured session (2026-10-06) the second-best single
+option outscored every long straddle on 88 of 119 symbols.</p>
 <p><strong>Stored values</strong> are per share. <code>entry_credit</code> is signed (a debit is negative).</p>
 <p><strong>Mark.</strong> Each leg at the mid of its bid and offer, on its own expiration's
 chain:</p>

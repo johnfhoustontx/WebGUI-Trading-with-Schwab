@@ -246,7 +246,9 @@ directional trades on their own tab.
 - **0-DTE / Swing / Directional** — the small tabs at the very top (under the page
   tabs): short-dated (0-4 days, NOT only today), days-to-weeks out, and single-leg
   long/short calls and puts. Directional only lists trades that clear a quality bar,
-  so an empty tab means "nothing qualified today", not a failure.
+  so an empty tab means "nothing qualified today", not a failure. A **bought**
+  call or put is listed only when its grade is **Good** or **Strong**; a sold
+  call or put is also listed at Marginal, because they rarely grade higher.
 - **Credit spreads / Other structures** — the switch at the top of the 0-DTE and
   Swing tabs. Each side is its own table, and the number beside each name is how
   many rows it holds. **The two tables are scored differently and their scores
@@ -280,7 +282,7 @@ directional trades on their own tab.
   When a scan finishes during regular hours its rows are written down, then
   priced every 15 minutes until a rule closes them or they expire. You will find
   them under **Tracked structures** on Captured Signals. They are measurements,
-  not trades: nothing opens one in the paper Account, and at most two are open
+  not trades: nothing opens one in the paper Account, and at most one of a kind is open
   per symbol at a time.
 - **All three tabs fill only during regular hours (8:30–3:00 CT).** The scanner
   also runs at 8:00, 8:15, 3:00 and 3:15, but a scan that finishes outside the
@@ -1124,7 +1126,12 @@ Market Scanner, and since 2026-09-11 the once-daily **Income** board too.
   Scanner's **Other structures** and **Directional** rows, written down so you
   can see how each kind turns out. They are **not trades**: none is in a paper
   book, none can be closed by hand, and none counts in the footer above or
-  against the two-signal limit (they have a limit of their own, two per symbol).
+  against the two-signal limit. They have limits of their own: one open row
+  per symbol in each family, and ten open rows per family across all symbols.
+  The families are debit spreads, straddles and strangles, butterflies and
+  condors, calendars, ratio spreads, and single calls and puts. When a family
+  has a free place, the kind with the fewest open rows gets it first, so the
+  best-scoring kind cannot take them all.
   - **Entry** and **Now** are per share and say which way the money moves:
     *5.40 paid* then *5.60 to sell* is a position that has gained 0.20;
     *1.35 received* then *1.40 to buy back* is one that has lost 0.05.

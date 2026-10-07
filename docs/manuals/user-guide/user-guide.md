@@ -1535,7 +1535,9 @@ two-pane layout.
 - A **Run scan** button (forces a refresh) and a status line ("N live signals").
 - Three tabs: **0-DTE**, **Swing** and **Directional**. Directional lists
   single-leg long and short calls and puts, scored on a *different* scale from the
-  credit-spread tabs — do not compare their numbers.
+  credit-spread tabs — do not compare their numbers. A **bought** call or put is
+  listed only when its grade is **Good** or **Strong**. A sold call or put is
+  also listed at Marginal, because they rarely grade higher.
 - On **0-DTE** and **Swing**, a switch at the top of the tab: **Credit spreads**
   and **Other structures**. Each is its own table (see *Other structures*, below).
 - A table of candidate signals. Columns include Symbol, Type, Expiration, DTE,
@@ -1686,7 +1688,9 @@ Four things to know:
   down and then priced every 15 minutes until a rule closes them or they expire.
   They appear under **Tracked structures** on Captured Signals (see that
   section). They are measurements, not trades: nothing opens one in the paper
-  Account, and at most two are open per symbol at a time.
+  Account. At most one row is open per symbol in each family, and ten per
+  family across all symbols (the Directional tab's single calls and puts count
+  as one family).
 - **A backspread sells one option near the money and buys two further out.**
   The call version pays on a large rise and the put version on a large fall.
   The most it can lose is at the strike you bought, and that figure is the
@@ -1896,6 +1900,14 @@ follows it until it closes, so that you can see how each kind turns out.
 
 **They are not trades.** None is in a paper book. You cannot close one by hand,
 none counts in the footer above, and nothing opens one in the paper Account.
+
+**How many are followed.** There are six families: debit spreads, straddles and
+strangles, butterflies and condors, calendars, ratio spreads, and single calls
+and puts. A symbol has at most **one** open row in each family, and a family has
+at most **ten** open rows across all symbols, so no more than sixty are open at
+once. When a family has a free place, the kind with the fewest open rows gets it
+first (a long straddle before a third short strangle), and among those the best
+score. Both numbers are in **Settings → Configuration → Scanner**.
 
 The open table:
 

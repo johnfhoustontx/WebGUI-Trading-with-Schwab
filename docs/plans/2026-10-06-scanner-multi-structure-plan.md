@@ -31,8 +31,13 @@ the task text below, each for a reason found while building:
   the 5-minute captured cycle.
 - **Phase 4, calibration:** tracked rows are left OUT of the credit calibration,
   not bucketed inside it. Their results are `tracked.stats`, by structure.
-- **Phase 4, the cap key:** `max_open_per_symbol_tracked`, not
-  `max_open_per_symbol_structures`.
+- **Phase 4, the cap:** two keys, `max_open_per_symbol_tracked` (1, per symbol
+  within a family) and `max_open_per_family_tracked` (10), not one
+  `max_open_per_symbol_structures = 2`. Changed after the promote and before the
+  first session; the design's "Capture and tracking" has the measurement.
+- **After phase 4:** a bought call or put is listed on the Directional tab only
+  at grade Good or Strong (`[single_leg] long_excluded_grades`), by the
+  operator's decision of 2026-10-07.
 
 - **Task 15:** nothing was added to `shared/structures.py`. Its sets describe
   what the paper books hold, a backspread is in none of them, and every other

@@ -3452,7 +3452,7 @@ never be confused.</p>
 </tr>
 <tr>
 <td><strong>Directional</strong></td>
-<td>Single-leg long and short calls and puts.</td>
+<td>Single-leg long and short calls and puts. A bought call or put is listed only at grade <strong>Good</strong> or <strong>Strong</strong>; a sold one is also listed at Marginal.</td>
 </tr>
 </tbody>
 </table>
@@ -4351,7 +4351,11 @@ which kinds are worth your attention.</p>
 <p><strong>What it is not.</strong> A book. None of these rows is in the paper Account or the
 Paper Ledger, nothing opens one automatically, and you cannot close one by hand.
 They do not count in the footer above, in the Captured score, or against the
-two-per-symbol limit (they have their own: two tracked rows per symbol).</p>
+two-per-symbol limit. They have their own limits: one open row per symbol in
+each of six families (debit spreads, straddles and strangles, butterflies and
+condors, calendars, ratio spreads, single calls and puts), and ten open rows per
+family across all symbols. A free place goes to the kind with the fewest open
+rows first, then to the best score.</p>
 <p><strong>Reading it.</strong> Entry and Now are per share and worded by direction: <em>5.40 paid</em>
 and <em>5.60 to sell</em> is a bought position that has gained 0.20; <em>1.35 received</em>
 and <em>1.40 to buy back</em> is a sold one that has lost 0.05. <strong>Max loss</strong> and <strong>Open
@@ -4378,9 +4382,12 @@ expiry. A backspread is always held to expiry.</p>
   of every other figure.</li>
 <li><strong>Return on risk is not comparable across rows marked <em>Loss not capped</em>.</strong> Their
   risk is a margin estimate.</li>
-<li><strong>Few rows, for a long time.</strong> With two per symbol and a quality bar on the
-  Scanner, a structure may close a handful of times a month. Read the Closed
+<li><strong>Few rows, for a long time.</strong> With ten open per family and a quality bar on
+  the Scanner, a structure may close a handful of times a month. Read the Closed
   column before reading anything beside it.</li>
+<li><strong>Ten per family is a cost limit, not a statistical one.</strong> Every open row is
+  priced every 15 minutes. Without the limit, one measured session would have
+  held about 225 rows open and fetched about 172 option chains each time.</li>
 </ul>
 <h3 id="why-it-matters_16">Why it matters</h3>
 <p>This is the app's learning loop, and it is the most valuable page for a trader who is

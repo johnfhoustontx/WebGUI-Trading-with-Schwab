@@ -119,6 +119,12 @@ ccs_delta = [0.30, 0.55]
 max_per_symbol = 8           # 4 structures x 2 windows (0-DTE + swing)
 min_score      = 50.0
 excluded_grades = ["Weak"]
+# A BOUGHT call or put is listed only when graded Good or Strong: these grades
+# are removed for LONG_CALL and LONG_PUT on top of the list above. Short calls
+# and puts keep the list above (they rarely grade above Marginal, so this cut
+# would remove every one). Measured on one session (2026-10-06): 731 long rows
+# in the day's union, 475 of them Good, none Strong. [] = no extra cut.
+long_excluded_grades = ["Weak", "Marginal"]
 
 [structures]
 # Structures OTHER than credit spreads on the Market Scanner's 0-DTE and Swing
@@ -221,8 +227,21 @@ max_open_per_symbol = 2
 # it. Set tracked = false to stop recording new ones; open ones keep being marked
 # until they close.
 tracked = true
-# At most this many OPEN tracked structures per symbol, across both tabs. 0 turns
-# the cap off. Its own pool on purpose: counted against max_open_per_symbol, a
-# tracked straddle could take the slot of a credit spread the Account would
-# have traded.
-max_open_per_symbol_tracked = 2
+# At most this many OPEN tracked structures per symbol IN ONE FAMILY, across
+# both tabs. The families are debit spreads, straddles and strangles,
+# butterflies and condors, calendars, ratio spreads, and single options. 0 turns
+# the cap off.
+#
+# Per family because the families score in bands. Measured on one session
+# (2026-10-06): a cap of 2 per symbol across families would have gone to single
+# options on 195 of 225 slots, at scores above every long straddle's.
+#
+# Its own pool on purpose: counted against max_open_per_symbol, a tracked
+# straddle could take the slot of a credit spread the Account would have traded.
+max_open_per_symbol_tracked = 1
+# At most this many OPEN tracked structures per family, across every symbol. 0
+# turns the cap off. This bounds the cost: each open row is priced every 15
+# minutes, one chain per symbol and expiration, so 6 families x 10 is at most 60
+# rows. Within a family the slots go to the kind with the fewest open rows first
+# (a long straddle before a third short strangle), then to the best score.
+max_open_per_family_tracked = 10

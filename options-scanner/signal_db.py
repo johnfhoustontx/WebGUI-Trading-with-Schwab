@@ -334,6 +334,21 @@ def count_open_by_symbol(db_path=DEFAULT_DB_PATH, *, tracked=False):
         conn.close()
 
 
+def count_open_tracked(db_path=DEFAULT_DB_PATH):
+    """``[(family, strategy, symbol, n)]`` over the OPEN tracked rows - what the
+    tracked recorder's caps count against. ``family`` is ``""`` for a row that
+    was stored with none."""
+    conn = connect(db_path)
+    try:
+        cur = conn.execute(
+            "SELECT COALESCE(family, ''), strategy, symbol, COUNT(*) FROM signals "
+            "WHERE status='OPEN' AND " + _tracked_sql(tracked=True)
+            + " GROUP BY 1, 2, 3")
+        return [tuple(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
+
+
 def peak_unrealized(signal_id, db_path=DEFAULT_DB_PATH):
     """The best unrealized P&L this signal has ever marked, or ``None``.
 

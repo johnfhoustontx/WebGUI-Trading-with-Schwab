@@ -310,67 +310,111 @@ def _to_tracked_row(sig, scanner_type, now):
     }
 
 
+def tracked_family(sig):
+    """The family a tracked row is counted in: the scan's ``group`` for a
+    structure, ``DIRECTIONAL`` for the Directional tab's single options (which
+    carry no group). The same expression ``_to_tracked_row`` stores."""
+    return str((sig or {}).get("group") or (sig or {}).get("family") or "").upper()
+
+
 def record_tracked(signals, scanner_type, db_path=None, now=None):
+    """Record one list under one tracked type. See :func:`record_tracked_scan`,
+    which this is: the scan itself passes both windows in one call."""
+    return record_tracked_scan({scanner_type: signals}, db_path=db_path, now=now)
+
+
+def record_tracked_scan(by_type, db_path=None, now=None):
     """Record structures that are tracked for study. Returns the count inserted.
     Never raises on a bad row or a failed write.
 
-    The same three gates ``record_signals`` applies, with settings of their own:
-    the regular session (one ``now`` for the gate and the stamp), a score floor
-    (``[scores] capture_min_tracked``), and a per-symbol cap counted across both
-    tracked types and NOTHING else (``[capture] max_open_per_symbol_tracked``).
-    ``[capture] tracked = false`` records nothing.
+    ``by_type`` maps a tracked scanner type to its rows. Every key must be one
+    of ``signal_db.TRACKED_TYPES``; anything else raises. That is deliberate and
+    it is the one thing here that does: a tracked row filed under ``SWING``
+    would be read by every credit-spread reader and offered to the paper
+    Account's entry cycle.
 
-    ``scanner_type`` must be one of ``signal_db.TRACKED_TYPES``; anything else
-    raises. That is deliberate and it is the one thing here that does: a tracked
-    row filed under ``SWING`` would be read by every credit-spread reader and
-    offered to the paper Account's entry cycle.
+    The gates, with settings of their own: the regular session (one ``now`` for
+    the gate and the stamp), a score floor (``[scores] capture_min_tracked``),
+    the switch (``[capture] tracked``), and two caps counted over OPEN tracked
+    rows and nothing else:
+
+    * ``[capture] max_open_per_symbol_tracked`` - per symbol WITHIN a family;
+    * ``[capture] max_open_per_family_tracked`` - per family across all symbols.
+
+    ⚠ **Who gets a free slot.** Within a family, the structure with the fewest
+    open rows goes first, then the best score. Score alone is not a fair order:
+    the structures score in bands (a long straddle 53-56, a debit spread in the
+    70s), so the best-scoring kind would take every slot and the others would
+    never be measured, which is the whole purpose of recording them. Both
+    windows are ordered together for the same reason - recorded one after the
+    other, the first would take every slot the second could have used.
     """
-    if scanner_type not in signal_db.TRACKED_TYPES:
-        raise ValueError(f"record_tracked: {scanner_type!r} is not one of "
-                         f"{signal_db.TRACKED_TYPES}")
+    for kind in by_type or {}:
+        if kind not in signal_db.TRACKED_TYPES:
+            raise ValueError(f"record_tracked: {kind!r} is not one of "
+                             f"{signal_db.TRACKED_TYPES}")
     if not _scfg.capture_tracked_enabled():
         return 0
     db_path = db_path or signal_db.DEFAULT_DB_PATH
     now = _now() if now is None else now
     floor = _scfg.scores().get("capture_min_tracked", 0)
-    eligible = [s for s in signals or []
-                if isinstance(s, dict)
-                and (s.get("composite_score") or 0) >= floor]
+    eligible = [(sig, kind) for kind, sigs in (by_type or {}).items()
+                for sig in sigs or []
+                if isinstance(sig, dict)
+                and (sig.get("composite_score") or 0) >= floor]
     if not _mc.is_regular_hours(now):
         if eligible:
-            log.info("%s: regular session closed at %s — %d structure(s) scanned, "
-                     "none recorded", scanner_type,
+            log.info("tracked: regular session closed at %s — %d structure(s) "
+                     "scanned, none recorded",
                      now.isoformat(timespec="seconds"), len(eligible))
         return 0
-    cap = _scfg.capture_max_open_per_symbol_tracked()
-    eligible.sort(key=lambda s: s.get("composite_score") or 0, reverse=True)
+    per_symbol = _scfg.capture_max_open_per_symbol_tracked()
+    per_family = _scfg.capture_max_open_per_family_tracked()
+    by_family = {}
+    for sig, kind in eligible:
+        by_family.setdefault(tracked_family(sig), []).append((sig, kind))
     inserted = 0
-    capped = {}
+    skipped = {}
     with _CAP_LOCK:
-        open_n = {}
-        if cap:
-            try:
-                open_n = signal_db.count_open_by_symbol(db_path=db_path, tracked=True)
-            except Exception as e:
-                log.error(f"record_tracked open-count read failed, "
-                          f"recording nothing: {e}")
-                return 0
-        for sig in eligible:
-            sym = sig.get("symbol")
-            if cap and open_n.get(sym, 0) >= cap:
-                capped[sym] = capped.get(sym, 0) + 1
-                continue
-            row = _to_tracked_row(sig, scanner_type, now)
-            if row is None:
-                continue
-            try:
-                if _insert(row, db_path):
-                    inserted += 1
-                    open_n[sym] = open_n.get(sym, 0) + 1
-            except Exception as e:
-                log.error(f"record_tracked insert failed: {e}")
-    if capped:
-        log.info("%s: %s at the %d-open-per-symbol tracked cap", scanner_type,
-                 ", ".join(f"{s} ({n} skipped)" for s, n in sorted(capped.items())),
-                 cap)
+        try:
+            counts = signal_db.count_open_tracked(db_path=db_path)
+        except Exception as e:
+            log.error(f"record_tracked open-count read failed, recording nothing: {e}")
+            return 0
+        fam_total, fam_symbol, fam_type = {}, {}, {}
+        for fam, strategy, sym, n in counts:
+            fam_total[fam] = fam_total.get(fam, 0) + n
+            fam_symbol[(fam, sym)] = fam_symbol.get((fam, sym), 0) + n
+            fam_type[(fam, strategy)] = fam_type.get((fam, strategy), 0) + n
+        for fam, rows in by_family.items():
+            rows.sort(key=lambda r: r[0].get("composite_score") or 0, reverse=True)
+            while rows:
+                if per_family and fam_total.get(fam, 0) >= per_family:
+                    skipped[fam] = skipped.get(fam, 0) + len(rows)
+                    break
+                # The kind with the fewest open rows first; ``min`` is stable, so
+                # among those the best score (the list is score-sorted).
+                pick = min(range(len(rows)), key=lambda i: fam_type.get(
+                    (fam, rows[i][0].get("type")), 0))
+                sig, kind = rows.pop(pick)
+                sym = sig.get("symbol")
+                if per_symbol and fam_symbol.get((fam, sym), 0) >= per_symbol:
+                    skipped[fam] = skipped.get(fam, 0) + 1
+                    continue
+                row = _to_tracked_row(sig, kind, now)
+                if row is None:
+                    continue
+                try:
+                    if _insert(row, db_path):
+                        inserted += 1
+                        fam_total[fam] = fam_total.get(fam, 0) + 1
+                        fam_symbol[(fam, sym)] = fam_symbol.get((fam, sym), 0) + 1
+                        key = (fam, sig.get("type"))
+                        fam_type[key] = fam_type.get(key, 0) + 1
+                except Exception as e:
+                    log.error(f"record_tracked insert failed: {e}")
+    if skipped:
+        log.info("tracked: recorded %d; at a cap: %s", inserted,
+                 ", ".join(f"{f or 'no family'} ({n} skipped)"
+                           for f, n in sorted(skipped.items())))
     return inserted

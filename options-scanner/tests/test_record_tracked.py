@@ -223,17 +223,125 @@ def _credit(symbol="SPY", short=690, score=70):
             "underlying_price": 700.0}
 
 
-def test_the_tracked_cap_keeps_the_best_and_holds_across_scans(tmp_path, monkeypatch):
-    monkeypatch.setattr(rec._scfg, "capture_max_open_per_symbol_tracked", lambda: 2)
+def _caps(monkeypatch, per_symbol, per_family):
+    monkeypatch.setattr(rec._scfg, "capture_max_open_per_symbol_tracked",
+                        lambda: per_symbol)
+    monkeypatch.setattr(rec._scfg, "capture_max_open_per_family_tracked",
+                        lambda: per_family)
+
+
+def _pairs(db):
+    return {(r["symbol"], r["strategy"]) for r in _stored(db)}
+
+
+def test_the_caps_as_shipped_are_one_per_symbol_in_a_family_and_ten_per_family():
+    assert rec._scfg.capture_max_open_per_symbol_tracked() == 1
+    assert rec._scfg.capture_max_open_per_family_tracked() == 10
+
+
+def test_a_symbol_holds_one_open_row_per_family_and_it_holds_across_scans(
+        tmp_path, monkeypatch):
+    _caps(monkeypatch, 1, 10)
     db = tmp_path / "s.db"
-    sigs = [_sig("LONG_STRADDLE", score=52), _sig("BUTTERFLY_CALL", score=74),
-            _sig("BULL_CALL", score=77), _sig("LONG_STRADDLE", symbol="QQQ", score=51)]
+    sigs = [_sig("LONG_STRADDLE", score=52), _sig("SHORT_STRANGLE", score=61),
+            _sig("BULL_CALL", score=77, group="VERTICAL"),
+            _sig("BEAR_PUT", score=71, group="VERTICAL"),
+            _sig("LONG_STRADDLE", symbol="QQQ", score=51)]
     assert rec.record_tracked(sigs, "SWING_STRUCT", db_path=db, now=RTH) == 3
-    by = {(r["symbol"], r["strategy"]) for r in _stored(db)}
-    assert by == {("SPY", "BULL_CALL"), ("SPY", "BUTTERFLY_CALL"), ("QQQ", "LONG_STRADDLE")}
-    # A later scan cannot add a third SPY row, in either window.
-    assert rec.record_tracked([_sig("CONDOR_PUT", score=99)], "0DTE_STRUCT",
-                              db_path=db, now=RTH) == 0
+    assert _pairs(db) == {("SPY", "SHORT_STRANGLE"), ("SPY", "BULL_CALL"),
+                          ("QQQ", "LONG_STRADDLE")}
+    # A later scan cannot add a second SPY row to either family, in either window.
+    later = [_sig("LONG_STRANGLE", score=99), _sig("BEAR_PUT", score=99, group="VERTICAL")]
+    assert rec.record_tracked(later, "0DTE_STRUCT", db_path=db, now=RTH) == 0
+    # ... but a family SPY holds nothing in is still open to it.
+    fly = _sig("BUTTERFLY_CALL", score=40, group="BUTTERFLY")
+    assert rec.record_tracked([fly], "0DTE_STRUCT", db_path=db, now=RTH) == 1
+
+
+def test_a_family_holds_ten_open_rows_in_all_and_the_best_take_them(tmp_path, monkeypatch):
+    _caps(monkeypatch, 1, 10)
+    db = tmp_path / "s.db"
+    names = [f"S{i:02d}" for i in range(14)]
+    sigs = [_sig("LONG_STRADDLE", symbol=n, score=50 + i) for i, n in enumerate(names)]
+    assert rec.record_tracked(sigs, "SWING_STRUCT", db_path=db, now=RTH) == 10
+    assert {r["symbol"] for r in _stored(db)} == set(names[4:])      # the ten best
+    # Full: nothing more for that family, on any symbol ...
+    assert rec.record_tracked([_sig("SHORT_STRANGLE", symbol="NEW", score=99)],
+                              "SWING_STRUCT", db_path=db, now=RTH) == 0
+    # ... and another family is not touched by it.
+    assert rec.record_tracked([_sig("BULL_CALL", symbol="NEW", group="VERTICAL")],
+                              "SWING_STRUCT", db_path=db, now=RTH) == 1
+
+
+def test_within_a_family_the_kind_with_the_fewest_open_rows_goes_first(
+        tmp_path, monkeypatch):
+    """Score alone is not a fair order. A short strangle outscores every long
+    straddle, so by score it would take every slot and the straddle would never
+    be measured - which is what recording them is for."""
+    _caps(monkeypatch, 1, 4)
+    db = tmp_path / "s.db"
+    strangles = [_sig("SHORT_STRANGLE", symbol=f"A{i}", score=70 - i) for i in range(6)]
+    straddles = [_sig("LONG_STRADDLE", symbol=f"B{i}", score=53 - i) for i in range(2)]
+    assert rec.record_tracked(strangles + straddles, "SWING_STRUCT",
+                              db_path=db, now=RTH) == 4
+    assert _pairs(db) == {("A0", "SHORT_STRANGLE"), ("A1", "SHORT_STRANGLE"),
+                          ("B0", "LONG_STRADDLE"), ("B1", "LONG_STRADDLE")}
+
+
+def test_open_rows_from_earlier_scans_count_toward_that_fairness(tmp_path, monkeypatch):
+    _caps(monkeypatch, 1, 3)
+    db = tmp_path / "s.db"
+    first = [_sig("SHORT_STRANGLE", symbol="A0", score=70),
+             _sig("SHORT_STRANGLE", symbol="A1", score=69)]
+    assert rec.record_tracked(first, "SWING_STRUCT", db_path=db, now=RTH) == 2
+    # One slot left: the straddle takes it over a better-scoring third strangle.
+    later = [_sig("SHORT_STRANGLE", symbol="A2", score=90),
+             _sig("LONG_STRADDLE", symbol="B0", score=51)]
+    assert rec.record_tracked(later, "SWING_STRUCT", db_path=db, now=RTH) == 1
+    assert ("B0", "LONG_STRADDLE") in _pairs(db)
+    assert ("A2", "SHORT_STRANGLE") not in _pairs(db)
+
+
+def test_the_two_windows_share_the_caps_and_are_ordered_together(tmp_path, monkeypatch):
+    """Recorded one after the other, the first window would take every slot the
+    second could have used, on every scan."""
+    _caps(monkeypatch, 1, 1)
+    db = tmp_path / "s.db"
+    zero = _sig("LONG_STRADDLE", symbol="SPY", score=60, dte=2)
+    swing = _sig("LONG_STRADDLE", symbol="QQQ", score=80)
+    assert rec.record_tracked_scan({"0DTE_STRUCT": [zero], "SWING_STRUCT": [swing]},
+                                   db_path=db, now=RTH) == 1
+    (row,) = _stored(db)
+    assert (row["symbol"], row["scanner_type"]) == ("QQQ", "SWING_STRUCT")
+
+
+def test_each_window_keeps_its_own_scanner_type_in_one_call(tmp_path, monkeypatch):
+    _caps(monkeypatch, 0, 0)
+    db = tmp_path / "s.db"
+    zero = _sig("LONG_STRADDLE", symbol="SPY", dte=2)
+    swing = _sig("LONG_STRADDLE", symbol="QQQ")
+    assert rec.record_tracked_scan({"0DTE_STRUCT": [zero], "SWING_STRUCT": [swing]},
+                                   db_path=db, now=RTH) == 2
+    assert {(r["symbol"], r["scanner_type"]) for r in _stored(db)} == {
+        ("SPY", "0DTE_STRUCT"), ("QQQ", "SWING_STRUCT")}
+    with pytest.raises(ValueError):
+        rec.record_tracked_scan({"SWING": [swing]}, db_path=db, now=RTH)
+
+
+def test_single_options_are_one_family_of_their_own(tmp_path, monkeypatch):
+    """They carry no group. Counted with the structures they would take the
+    slots: on one measured session their second-best row outscored every long
+    straddle on 88 of 119 symbols."""
+    _caps(monkeypatch, 1, 10)
+    db = tmp_path / "s.db"
+    single = dict(group=None, family="DIRECTIONAL",
+                  legs=[_leg("put", "long", 500.0)])
+    sigs = [_sig("LONG_PUT", score=79, **single), _sig("LONG_CALL", score=70, **single),
+            _sig("LONG_STRADDLE", score=52)]
+    assert rec.tracked_family(sigs[0]) == "DIRECTIONAL"
+    assert rec.tracked_family(sigs[2]) == "STRADDLE"
+    assert rec.record_tracked(sigs, "SWING_STRUCT", db_path=db, now=RTH) == 2
+    assert _pairs(db) == {("SPY", "LONG_PUT"), ("SPY", "LONG_STRADDLE")}
 
 
 def test_a_full_tracked_pool_never_blocks_a_credit_spread(tmp_path, monkeypatch):
@@ -259,7 +367,7 @@ def test_a_full_credit_pool_never_blocks_a_tracked_structure(tmp_path, monkeypat
 
 
 def test_a_cap_of_zero_is_no_cap(tmp_path, monkeypatch):
-    monkeypatch.setattr(rec._scfg, "capture_max_open_per_symbol_tracked", lambda: 0)
+    _caps(monkeypatch, 0, 0)
     db = tmp_path / "s.db"
     sigs = [_sig(t) for t in ("LONG_STRADDLE", "BULL_CALL", "BEAR_PUT", "CONDOR_CALL")]
     assert rec.record_tracked(sigs, "SWING_STRUCT", db_path=db, now=RTH) == 4
@@ -267,10 +375,11 @@ def test_a_cap_of_zero_is_no_cap(tmp_path, monkeypatch):
 
 def test_an_unreadable_count_records_nothing(tmp_path, monkeypatch):
     """Fail closed, as the credit recorder does."""
-    monkeypatch.setattr(signal_db, "count_open_by_symbol",
+    monkeypatch.setattr(signal_db, "count_open_tracked",
                         lambda **kw: (_ for _ in ()).throw(RuntimeError("locked")))
     db = tmp_path / "s.db"
     assert rec.record_tracked([_sig()], "SWING_STRUCT", db_path=db, now=RTH) == 0
+    assert _stored(db) == []
 
 
 def test_the_switch_turns_recording_off(tmp_path, monkeypatch):
@@ -290,12 +399,14 @@ def test_a_failed_insert_is_counted_as_nothing_and_does_not_raise(tmp_path, monk
 def test_the_default_path_is_resolved_when_called(monkeypatch, tmp_path):
     """A default bound at ``def`` time cannot be redirected by a test or a tool.
 
-    The suite's conftest wraps ``record_tracked`` to hand it a per-test store,
-    so the real function is reached through ``__wrapped__``."""
-    real = rec.record_tracked.__wrapped__
+    The suite's conftest wraps ``record_tracked_scan`` (the function that
+    resolves the path) to hand it a per-test store, so the real one is reached
+    through ``__wrapped__``."""
+    real_scan = rec.record_tracked_scan.__wrapped__
+    real = lambda sigs, kind, **kw: real_scan({kind: sigs}, **kw)
     seen = {}
     monkeypatch.setattr(signal_db, "DEFAULT_DB_PATH", tmp_path / "elsewhere.db")
-    monkeypatch.setattr(signal_db, "count_open_by_symbol", lambda **kw: {})
+    monkeypatch.setattr(signal_db, "count_open_tracked", lambda **kw: [])
     monkeypatch.setattr(rec, "_insert",
                         lambda row, db_path: seen.setdefault("path", db_path) or True)
     real([_sig()], "SWING_STRUCT", now=RTH)

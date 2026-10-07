@@ -4,7 +4,39 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-07 (**The Market Scanner's other structures are recorded and followed to an outcome.**)
+**Last updated:** 2026-10-07 (**Tracked structures: the cap is per family, and a bought call or put is listed only at Good or Strong.**)
+
+- **Why, the same day.** The first check against prod after the promote, before
+  the open, read the previous session's scan data. The scan covers **119
+  symbols**; the cost estimate in the entry below assumed a couple of dozen. On
+  that session the Directional tab alone held 835 rows, and under the cap as
+  shipped (2 open per symbol across every family) it would have kept about 225
+  tracked rows open, 195 of them scoring above every long straddle, and fetched
+  about 172 option chains every 15 minutes (about 4,500 a day). Straddles,
+  butterflies and calendars would rarely have been recorded at all. Nothing had
+  been recorded yet: the change landed before the first session.
+- **The tracked cap, by the operator's decision.** One open row per symbol in
+  each family and ten open rows per family across all symbols
+  (`[capture] max_open_per_symbol_tracked = 1`, new
+  `max_open_per_family_tracked = 10`). Six families: the scan's five groups and
+  `DIRECTIONAL` for a single call or put. At most 60 rows open, about 60 to 70
+  chains a slot.
+- **Who gets a free place.** Within a family the structure with the fewest open
+  rows goes first, then the best score, and both tabs are ordered together
+  (`signal_recorder.record_tracked_scan`, one call per scan; `record_tracked`
+  is a wrapper). Score alone would hand every place in a family to its
+  best-scoring kind, and two calls would hand every place to the 0-DTE tab.
+- **The Directional tab.** A bought call or put is listed only at grade Good or
+  Strong (`[single_leg] long_excluded_grades = ["Weak", "Marginal"]`, in
+  Settings → Configuration). Sold calls and puts keep the tab's general cut: on
+  the measured session all 104 of them graded Marginal, so the same rule would
+  have removed every one. On that session this takes the long rows from 731 to
+  475. The cut is keyed on the row's legs (every leg bought), not its name.
+- **Corrected in the entry below:** its cost line ("the worst case is two
+  expirations a symbol") was true and misleading; it left out how many symbols.
+- **Verification.** Unit suites. Not promoted.
+
+**Prior —** 2026-10-07 (**The Market Scanner's other structures are recorded and followed to an outcome.**)
 
 - **What it is.** Phase 4 of
   `docs/plans/2026-10-06-scanner-multi-structure-{design,plan}.md`. Every row on
@@ -27,7 +59,8 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
     keyword-only `tracked=False` on every multi-row reader, `get_tracked_outcomes`
     and `close_unmarkable`.
   - `signal_recorder.record_tracked`: per-share values, a signed `entry_credit`,
-    its own cap pool (`[capture] max_open_per_symbol_tracked`, 2), floor
+    its own cap pool (`[capture] max_open_per_symbol_tracked`; see the entry
+    above for the cap as it now stands), floor
     (`[scores] capture_min_tracked`, 0) and switch (`[capture] tracked`).
   - `options-scanner/structure_marks.py` (new): marks from the legs, each on its
     own expiration; the exit rules; intrinsic value at expiry.
@@ -68,8 +101,9 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   stands: no Paper button, no exit table, no leg layout in `signal_repricer`.
   Tracking prices them in its own module.
 - **What it costs.** One chain per open (symbol, expiration) every 15 minutes,
-  26 times a day, through the proxy like every other fetch. With the cap at 2
-  per symbol the worst case is two expirations a symbol; a calendar adds its
+  26 times a day, through the proxy like every other fetch. The scan covers
+  about 119 symbols, so the cap first shipped here (2 per symbol) allowed about
+  172 chains a slot; the entry above replaces it. A calendar adds its
   back month.
 - **Built differently from the design**, each recorded in the plan's status
   block: readers hide tracked rows by default (the plan had each reader learn the

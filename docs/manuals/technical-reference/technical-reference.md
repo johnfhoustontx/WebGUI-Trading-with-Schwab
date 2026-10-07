@@ -1535,10 +1535,21 @@ them by type and by structure.
 | Setting | Default | Meaning |
 |---|---|---|
 | `[capture] tracked` | on | records them at all |
-| `[capture] max_open_per_symbol_tracked` | 2 | open tracked rows per symbol, its own count |
+| `[capture] max_open_per_symbol_tracked` | 1 | open tracked rows per symbol within one family |
+| `[capture] max_open_per_family_tracked` | 10 | open tracked rows per family, across all symbols |
 | `[scores] capture_min_tracked` | 0 | score floor; the scan's own bar has already applied |
 | `[tracked] mark_interval_min` / `mark_offset_min` | 15 / 10 | priced at :10, :25, :40, :55 |
 | `[tracked] front_expiry_close` | 14:00 | when a calendar is closed on its front expiry day |
+
+**Which rows are recorded.** The family is the scan's group (`VERTICAL`,
+`STRADDLE`, `BUTTERFLY`, `CALENDAR`, `RATIO`) or `DIRECTIONAL` for a single call
+or put. Both tabs' rows are taken together. Within a family, while it holds
+fewer than `max_open_per_family_tracked` open rows, the next row recorded is the
+one whose structure has the fewest open rows in that family, and among those the
+highest score; a row whose symbol already holds `max_open_per_symbol_tracked` in
+that family is passed over. The order is not score alone because the structures
+score in bands: on one measured session (2026-10-06) the second-best single
+option outscored every long straddle on 88 of 119 symbols.
 
 **Stored values** are per share. `entry_credit` is signed (a debit is negative).
 

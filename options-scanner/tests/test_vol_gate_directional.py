@@ -46,6 +46,7 @@ def uncut(monkeypatch):
     same reason ``test_scanner_engine``'s own ``unfiltered_directional`` exists."""
     monkeypatch.setattr(scanner_engine, "SINGLE_LEG_MIN_SCORE", 0.0)
     monkeypatch.setattr(scanner_engine, "SINGLE_LEG_EXCLUDED_GRADES", ())
+    monkeypatch.setattr(scanner_engine, "SINGLE_LEG_LONG_EXCLUDED_GRADES", ())
 
 
 def _floors(monkeypatch, zero_dte=35, swing=30):

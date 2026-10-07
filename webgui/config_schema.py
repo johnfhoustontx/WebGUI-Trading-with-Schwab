@@ -229,6 +229,11 @@ _SCANNER = ConfigFile(
                   kind="float", min=0, max=100, step=1),
             Field("single_leg.excluded_grades", "Grades never shown",
                   "Grades removed from the list outright.", kind="symbols"),
+            Field("single_leg.long_excluded_grades",
+                  "Grades never shown for a bought call or put",
+                  "Removed for long calls and long puts on top of the list "
+                  "above. Weak and Marginal leaves only Good and Strong.",
+                  kind="symbols"),
         )),
         Section("Other structures (0-DTE and Swing tabs)",
                 "Debit spreads, straddles and strangles, butterflies and condors, "
@@ -300,9 +305,14 @@ _SCANNER = ConfigFile(
                   "each gets an outcome. They are measured, never traded.",
                   kind="bool"),
             Field("capture.max_open_per_symbol_tracked",
-                  "Open tracked structures per symbol",
+                  "Open tracked structures per symbol, in one family",
                   "Across both tabs. A separate count from the captured signals "
                   "above. 0 turns the cap off.", kind="int", min=0, max=50, step=1),
+            Field("capture.max_open_per_family_tracked",
+                  "Open tracked structures per family, in all",
+                  "Across every symbol. Each open row is priced every 15 "
+                  "minutes, so this is what bounds the cost. 0 turns the cap "
+                  "off.", kind="int", min=0, max=500, step=1),
         )),
     ),
 )
@@ -2171,7 +2181,8 @@ def _refuse_unusable_user_agent(fld, text):
 
 # Lists of GRADES ("Weak", "Marginal") among the symbols-kind fields: a grade
 # is capitalised the way the scorer writes it, where a symbol is upper-cased.
-_GRADE_LISTS = ("single_leg.excluded_grades", "structures.excluded_grades")
+_GRADE_LISTS = ("single_leg.excluded_grades", "single_leg.long_excluded_grades",
+                "structures.excluded_grades")
 
 
 def parse(fld: Field, raw, *, shipped=None):

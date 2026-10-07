@@ -228,8 +228,11 @@ def test_a_backspread_cap_of_zero_is_a_real_setting(monkeypatch):
 # ── tracked structures: the capture switch, floor and cap (2026-10-07) ──────
 
 def test_the_tracked_capture_settings_as_shipped():
+    """One per symbol within a family, ten per family in all: the operator's
+    decision of 2026-10-07, replacing two per symbol across families."""
     assert sc.capture_tracked_enabled() is True
-    assert sc.capture_max_open_per_symbol_tracked() == 2
+    assert sc.capture_max_open_per_symbol_tracked() == 1
+    assert sc.capture_max_open_per_family_tracked() == 10
     assert sc.scores()["capture_min_tracked"] == 0
     # The credit cap is a separate setting and did not move.
     assert sc.capture_max_open_per_symbol() == 2
@@ -238,9 +241,10 @@ def test_the_tracked_capture_settings_as_shipped():
 def test_the_tracked_capture_settings_are_read(monkeypatch):
     monkeypatch.setattr(sc, "load", lambda: {"capture": {
         "tracked": False, "max_open_per_symbol_tracked": 5,
-        "max_open_per_symbol": 3}})
+        "max_open_per_family_tracked": 25, "max_open_per_symbol": 3}})
     assert sc.capture_tracked_enabled() is False
     assert sc.capture_max_open_per_symbol_tracked() == 5
+    assert sc.capture_max_open_per_family_tracked() == 25
     assert sc.capture_max_open_per_symbol() == 3
 
 
@@ -248,8 +252,45 @@ def test_the_tracked_capture_settings_are_read(monkeypatch):
 def test_an_unusable_tracked_cap_is_the_default_never_off(monkeypatch, bad):
     """A typo in a limit must not silently remove it."""
     monkeypatch.setattr(sc, "load", lambda: {"capture": {
-        "max_open_per_symbol_tracked": bad}})
-    assert sc.capture_max_open_per_symbol_tracked() == 2
+        "max_open_per_symbol_tracked": bad, "max_open_per_family_tracked": bad}})
+    assert sc.capture_max_open_per_symbol_tracked() == 1
+    assert sc.capture_max_open_per_family_tracked() == 10
+
+
+def test_zero_turns_a_tracked_cap_off(monkeypatch):
+    monkeypatch.setattr(sc, "load", lambda: {"capture": {
+        "max_open_per_symbol_tracked": 0, "max_open_per_family_tracked": 0}})
+    assert sc.capture_max_open_per_symbol_tracked() == 0
+    assert sc.capture_max_open_per_family_tracked() == 0
+
+
+# ── a bought call or put: Good and Strong only (2026-10-07) ─────────────────
+
+def test_the_long_single_leg_grades_as_shipped():
+    assert sc.single_leg_long_excluded_grades() == ["Weak", "Marginal"]
+    # The tab's general cut did not move: short calls and puts still use it.
+    assert sc.single_leg()["excluded_grades"] == ["Weak"]
+
+
+def test_the_long_single_leg_grades_are_read_and_an_empty_list_is_no_extra_cut(
+        monkeypatch):
+    monkeypatch.setattr(sc, "load", lambda: {"single_leg": {
+        "long_excluded_grades": ["Weak"]}})
+    assert sc.single_leg_long_excluded_grades() == ["Weak"]
+    monkeypatch.setattr(sc, "load", lambda: {"single_leg": {"long_excluded_grades": []}})
+    assert sc.single_leg_long_excluded_grades() == []
+
+
+@pytest.mark.parametrize("bad", ["Marginal", 5, None, ["Weak", 3], {"a": 1}])
+def test_unusable_long_grades_are_the_shipped_ones(monkeypatch, bad):
+    monkeypatch.setattr(sc, "load", lambda: {"single_leg": {"long_excluded_grades": bad}})
+    assert sc.single_leg_long_excluded_grades() == ["Weak", "Marginal"]
+
+
+def test_the_long_grades_list_is_a_fresh_one_each_call():
+    first = sc.single_leg_long_excluded_grades()
+    first.append("Good")
+    assert sc.single_leg_long_excluded_grades() == ["Weak", "Marginal"]
 
 
 @pytest.mark.parametrize("bad", ["false", 0, 1, None])

@@ -29,7 +29,6 @@ CODE_DIRS = ("services", "options-scanner", "webgui", "shared", "tools",
 # The only code that may ask for tracked rows, and why.
 MAY_ASK = {
     "services/options_svc/tracked.py",       # the manage loop and the view
-    "options-scanner/signal_recorder.py",    # the tracked rows' own per-symbol cap
     "options-scanner/signal_db.py",          # the readers pass their own flag on
 }
 
@@ -76,9 +75,10 @@ def test_only_the_named_modules_ask_for_tracked_rows():
               if "tracked=" in src and (lines := _asks_for_tracked(src))}
     assert set(askers) <= MAY_ASK, {k: v for k, v in askers.items()
                                     if k not in MAY_ASK}
-    # The two that must ask actually do, so this cannot pass on a rename.
-    assert {"services/options_svc/tracked.py",
-            "options-scanner/signal_recorder.py"} <= set(askers)
+    # The one that must ask actually does, so this cannot pass on a rename.
+    # (The recorder's caps read ``signal_db.count_open_tracked``, which returns
+    # tracked rows by name and takes no flag.)
+    assert "services/options_svc/tracked.py" in askers
 
 
 def test_every_module_with_its_own_query_carries_the_exclusion():

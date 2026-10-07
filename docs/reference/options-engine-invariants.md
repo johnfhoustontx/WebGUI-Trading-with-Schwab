@@ -515,10 +515,35 @@ that only BUYS options targets `tp_frac` of the debit paid; an open-ended one
 that also SELLS an option (a backspread) has no target, because what it was
 entered for is a few dollars either way and half of a $3 debit is $1.50.
 
-**Its own cap pool.** `[capture] max_open_per_symbol_tracked`, counted with
-`tracked=True`. The credit cap (`max_open_per_symbol`) is what the Account enters
-from; a tracked butterfly holding one of those two slots would cost the Account a
-trade.
+**Its own cap pool, and the caps are PER FAMILY.** `[capture]
+max_open_per_symbol_tracked` (1, per symbol within a family) and
+`max_open_per_family_tracked` (10, per family in all), counted over
+`signal_db.count_open_tracked`. The credit cap (`max_open_per_symbol`) is what
+the Account enters from; a tracked butterfly holding one of those two slots
+would cost the Account a trade.
+
+⚠ **A cap on tracked rows that is filled by score alone measures one kind of
+trade.** The structures score in bands (a long straddle 53-56, a debit spread in
+the 70s, a Good long put up to 79), so whatever is ranked together by score is
+won by the same kind every time. This was found twice: in phase 1 for the DISPLAY
+cap (hence `[structures] max_per_family`), and again for the recorder, where the
+first cap was 2 per symbol across families. Measured on prod's 2026-10-06
+session before that cap ever ran: 835 Directional rows over 119 symbols; the
+second-best single option outscored every long straddle on 88 of them; 195 of
+225 slots would have gone to rows scoring above 56. So three things are fixed
+together in `signal_recorder.record_tracked_scan`:
+
+- the caps are per family (`tracked_family`: the scan's group, or `DIRECTIONAL`
+  for a single option, which carries no group);
+- within a family a free place goes to the STRUCTURE with the fewest open rows
+  first and only then to the best score, or a short strangle takes every place a
+  long straddle could have had;
+- both windows are passed in ONE call and ordered together. Recorded one after
+  the other, the 0-DTE window would take every free place on every scan.
+
+The per-family total is also the COST bound: every open row is priced every 15
+minutes, one chain per symbol and expiration. The first cap would have fetched
+about 172 chains a slot on that session; sixty rows is about sixty.
 
 **Its own clock.** Every 15 minutes at :10, :25, :40, :55
 (`config/trade_mgmt.toml [tracked]`), a slot firing only in its first four

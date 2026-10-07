@@ -753,6 +753,23 @@ SINGLE_LEG_MAX_PER_SYMBOL = _scfg.single_leg()["max_per_symbol"]
 # gate-failing trades") and either constant can move independently.
 SINGLE_LEG_MIN_SCORE = _scfg.single_leg()["min_score"]
 SINGLE_LEG_EXCLUDED_GRADES = tuple(_scfg.single_leg()["excluded_grades"])
+# A BOUGHT call or put carries these on top: shipped as Weak and Marginal, so
+# the tab lists a long option only at Good or Strong (the operator's decision,
+# 2026-10-07). Short calls and puts keep the list above - they rarely grade
+# above Marginal, and the same cut would remove every one.
+SINGLE_LEG_LONG_EXCLUDED_GRADES = tuple(_scfg.single_leg_long_excluded_grades())
+
+
+def single_leg_excluded_grades(sig):
+    """The grades this single-leg candidate is never listed at.
+
+    Keyed on what the row DOES - every leg bought - never on its name."""
+    legs = (sig or {}).get("legs") or []
+    bought = bool(legs) and all(
+        isinstance(leg, dict) and leg.get("side") == "long" for leg in legs)
+    if bought:
+        return SINGLE_LEG_EXCLUDED_GRADES + SINGLE_LEG_LONG_EXCLUDED_GRADES
+    return SINGLE_LEG_EXCLUDED_GRADES
 
 # Structures other than credit spreads - debit spreads, straddles and strangles,
 # butterflies and condors, calendars and diagonals - built by ``structure_scan``
@@ -2488,7 +2505,7 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
             dir_sigs = [
                 s for s in dir_sigs
                 if (s.get("composite_score") or 0) >= SINGLE_LEG_MIN_SCORE
-                and s.get("grade") not in SINGLE_LEG_EXCLUDED_GRADES
+                and s.get("grade") not in single_leg_excluded_grades(s)
             ]
             if bucket_d is not None:
                 bucket_d["score_cut"] += _before_cut - len(dir_sigs)
@@ -2911,10 +2928,12 @@ def run_full_scan(client, symbols=None, account_size=100000, max_risk_pct=0.05,
         _dir = results["signals_directional"]
         _dir_0 = [s for s in _dir if (s.get("dte") or 0) <= zerodte_max_dte]
         _dir_s = [s for s in _dir if (s.get("dte") or 0) > zerodte_max_dte]
-        signal_recorder.record_tracked(results["structures_0dte"] + _dir_0,
-                                       "0DTE_STRUCT")
-        signal_recorder.record_tracked(results["structures_swing"] + _dir_s,
-                                       "SWING_STRUCT")
+        # ONE call for both windows: the caps are shared between them, and two
+        # calls would hand every free slot to whichever window was recorded
+        # first.
+        signal_recorder.record_tracked_scan({
+            "0DTE_STRUCT": results["structures_0dte"] + _dir_0,
+            "SWING_STRUCT": results["structures_swing"] + _dir_s})
     except Exception as e:
         log.error(f"signal_recorder (tracked structures) failed: {e}")
 

@@ -262,3 +262,28 @@ def test_an_unmarkable_close_has_no_outcome_and_leaves_the_open_set(db):
 def test_an_unmarkable_close_of_an_unknown_id_raises(db):
     with pytest.raises(ValueError):
         signal_db.close_unmarkable("nope", db_path=db, close_ts=NOW)
+
+
+# ── what the tracked recorder's caps count (2026-10-07) ─────────────────────
+
+def test_count_open_tracked_groups_by_family_structure_and_symbol(tmp_path):
+    db = tmp_path / "s.db"
+    signal_db.init_db(db)
+    conn = signal_db.connect(db)
+    rows = [("a", "SWING_STRUCT", "STRADDLE", "LONG_STRADDLE", "SPY", "OPEN"),
+            ("b", "0DTE_STRUCT", "STRADDLE", "LONG_STRADDLE", "SPY", "OPEN"),
+            ("c", "SWING_STRUCT", "STRADDLE", "SHORT_STRANGLE", "QQQ", "OPEN"),
+            ("d", "SWING_STRUCT", None, "LONG_CALL", "SPY", "OPEN"),
+            ("e", "SWING_STRUCT", "STRADDLE", "LONG_STRADDLE", "IWM", "CLOSED"),
+            ("f", "SWING", None, "PCS", "SPY", "OPEN")]            # a credit spread
+    for sid, kind, fam, strat, sym, status in rows:
+        conn.execute(
+            "INSERT INTO signals (signal_id, scanner_type, family, strategy, symbol, "
+            "status, dedup_key, expiration, first_seen_ts, first_seen_date) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, '2026-10-16', '2026-10-07T10:00:00', "
+            "'2026-10-07')", (sid, kind, fam, strat, sym, status, sid))
+    conn.commit()
+    conn.close()
+    assert sorted(signal_db.count_open_tracked(db_path=db)) == [
+        ("", "LONG_CALL", "SPY", 1), ("STRADDLE", "LONG_STRADDLE", "SPY", 2),
+        ("STRADDLE", "SHORT_STRANGLE", "QQQ", 1)]
