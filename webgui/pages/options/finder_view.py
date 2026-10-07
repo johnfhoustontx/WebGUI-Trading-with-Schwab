@@ -23,7 +23,7 @@ NO_READING = _fmt.NO_READING
 # What the summary strip says when no price was read - words, never $0.00.
 PRICE_UNAVAILABLE = "Price unavailable"
 
-# The seven build groups ``swing_scan`` stamps on each candidate as ``group``, in
+# The eight build groups ``swing_scan`` stamps on each candidate as ``group``, in
 # the order the chips render.
 GROUPS = [
     ("DIRECTIONAL", "Directional"),
@@ -33,6 +33,7 @@ GROUPS = [
     ("BUTTERFLY", "Butterflies & condors"),
     ("CALENDAR", "Calendars"),
     ("STOCK", "Stock + options"),
+    ("RATIO", "Ratio spreads"),
 ]
 _GROUP_LABEL = dict(GROUPS)
 

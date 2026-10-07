@@ -88,9 +88,11 @@ def _sig(t, g, score, **kw):
     return {"id": t, "type": t, "group": g, "composite_score": score, **kw}
 
 
-def test_groups_cover_the_seven_build_groups_in_order():
+def test_groups_cover_the_eight_build_groups_in_order():
+    """Ratio spreads (2026-10-07) is appended: the seven before it keep their place."""
     assert [c for c, _ in fv.GROUPS] == [
-        "DIRECTIONAL", "VERTICAL", "NEUTRAL", "STRADDLE", "BUTTERFLY", "CALENDAR", "STOCK"]
+        "DIRECTIONAL", "VERTICAL", "NEUTRAL", "STRADDLE", "BUTTERFLY", "CALENDAR", "STOCK",
+        "RATIO"]
 
 
 def test_chip_counts_follow_group_order_and_skip_empty():

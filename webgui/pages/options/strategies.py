@@ -92,7 +92,13 @@ STRATEGY_TEMPLATES = {
                        _leg("put", "long", 1, "otm_dn_1")],
     "COLLAR":         [_leg(STOCK, "long", 1, "atm"),
                        _leg("put", "long", 1, "otm_dn_1"),
-                       _leg("call", "short", 1, "otm_up_1")],
+                       _leg("call", "short", 1, "otm_up_1")],
+    # ratio backspreads - short ONE near the money, long TWO further out, one
+    # expiry. Analysis only (see BACKSPREAD_STRATEGIES).
+    "CALL_BACKSPREAD": [_leg("call", "short", 1, "atm"),
+                        _leg("call", "long", 2, "otm_up_2")],
+    "PUT_BACKSPREAD":  [_leg("put", "short", 1, "atm"),
+                        _leg("put", "long", 2, "otm_dn_2")],
 }
 
 #: The structures that hold SHARES. ⚠ Named once, and used for two opposite
@@ -108,6 +114,12 @@ STRATEGY_TEMPLATES = {
 #: butterfly and relabels it an iron condor on the way out.
 STOCK_STRATEGIES = ("COVERED_CALL", "PROTECTIVE_PUT", "COLLAR")
 
+#: The ratio backspreads: short one option near the money, long two further out.
+#: Analysis only - the Market Scanner and the Strategy Finder list them and the
+#: Calculator and Simulator price them, and no paper book can hold one (the
+#: Ledger books two-strike spreads of EQUAL quantity).
+BACKSPREAD_STRATEGIES = ("CALL_BACKSPREAD", "PUT_BACKSPREAD")
+
 # Display groups for the UI dropdown (label -> codes).
 STRATEGY_GROUPS = [
     ("Singles", ["LONG_CALL", "LONG_PUT", "NAKED_CALL", "NAKED_PUT"]),
@@ -118,6 +130,7 @@ STRATEGY_GROUPS = [
     ("Butterflies", ["BUTTERFLY_CALL", "BUTTERFLY_PUT", "IRON_BUTTERFLY"]),
     ("Calendars", ["CALENDAR_CALL", "CALENDAR_PUT", "DIAGONAL_CALL", "DIAGONAL_PUT"]),
     ("Stock + options", ["COVERED_CALL", "PROTECTIVE_PUT", "COLLAR"]),
+    ("Ratio spreads", list(BACKSPREAD_STRATEGIES)),
 ]
 
 # Cascading Strategy menu: (family label, [(variant label, code), …]). The display
@@ -139,6 +152,7 @@ STRATEGY_MENU = [
     ("Stock + options", [("Covered call", "COVERED_CALL"),
                          ("Protective put", "PROTECTIVE_PUT"),
                          ("Collar", "COLLAR")]),
+    ("Backspread", [("Call", "CALL_BACKSPREAD"), ("Put", "PUT_BACKSPREAD")]),
 ]
 
 
@@ -250,6 +264,22 @@ _STRATEGY_FACTS = {
     "COLLAR": ("DEBIT", ["100 SHARES", "HEDGE", "CAPPED UPSIDE"],
                "Shares, a put below and a call above: the call pays for the put, "
                "and both ends of the outcome are bounded."),
+
+    # Ratio backspreads. ⚠ DEBIT is read off the TEMPLATE's own default legs (the
+    # short at the money, the two longs two strikes out), which cost a little on
+    # a dense strike ladder. The same structure with the longs further out is
+    # entered for a CREDIT, and that is the form the scanners list - so this one
+    # chip can be wrong for a given set of legs, which the blurb says.
+    "CALL_BACKSPREAD": ("DEBIT", ["VOLATILITY", "BULLISH"],
+                        "Sell one call near the money and buy two further out. "
+                        "Pays on a large rise, with no cap. The worst case is the "
+                        "price finishing at the long strike. Entered for a small "
+                        "debit or, with the long calls further out, a credit."),
+    "PUT_BACKSPREAD": ("DEBIT", ["VOLATILITY", "BEARISH"],
+                       "Sell one put near the money and buy two further out. Pays "
+                       "on a large fall. The worst case is the price finishing at "
+                       "the long strike. Entered for a small debit or, with the "
+                       "long puts further out, a credit."),
 }
 
 

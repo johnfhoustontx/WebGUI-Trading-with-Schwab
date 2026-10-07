@@ -120,3 +120,37 @@ def test_tags_state_the_leg_count_matching_the_template():
 def test_unknown_code_degrades_and_does_not_raise():
     assert S.strategy_tags("NOPE") == []
     assert S.strategy_blurb("NOPE") == ""
+
+
+# ── ratio backspreads (2026-10-07) ──────────────────────────────────────────
+
+def test_backspread_templates_sell_one_and_buy_two_further_out():
+    strikes = [90, 95, 100, 105, 110]
+    call = S.build_default_legs("CALL_BACKSPREAD", 100, strikes, ["2026-07-17"])
+    assert [(l["option_type"], l["side"], l["qty"], l["strike"]) for l in call] == [
+        ("call", "short", 1, 100), ("call", "long", 2, 110)]
+    put = S.build_default_legs("PUT_BACKSPREAD", 100, strikes, ["2026-07-17"])
+    assert [(l["option_type"], l["side"], l["qty"], l["strike"]) for l in put] == [
+        ("put", "short", 1, 100), ("put", "long", 2, 90)]
+    assert len({l["expiry"] for l in call + put}) == 1
+
+
+def test_backspread_labels_tags_and_group():
+    assert S.strategy_label("CALL_BACKSPREAD") == "Backspread — call"
+    assert S.strategy_label("PUT_BACKSPREAD") == "Backspread — put"
+    assert dict(S.STRATEGY_GROUPS)["Ratio spreads"] == [
+        "CALL_BACKSPREAD", "PUT_BACKSPREAD"]
+    for code, lean in (("CALL_BACKSPREAD", "BULLISH"), ("PUT_BACKSPREAD", "BEARISH")):
+        tags = S.strategy_tags(code)
+        assert tags[0] in ("CREDIT", "DEBIT") and "2 LEGS" in tags
+        assert "VOLATILITY" in tags and lean in tags
+        assert "long strike" in S.strategy_blurb(code)
+    assert S.BACKSPREAD_STRATEGIES == ("CALL_BACKSPREAD", "PUT_BACKSPREAD")
+
+
+def test_a_backspread_is_never_the_analytic_summary():
+    legs = S.build_default_legs("CALL_BACKSPREAD", 100, [90, 95, 100, 105, 110],
+                                ["2026-07-17"])
+    assert S.summary_code("CALL_BACKSPREAD", legs) == "CUSTOM"
+    # ... and a 1x2 pasted under the credit-spread picker is not a credit spread.
+    assert S.summary_code("CCS", legs) == "CUSTOM"

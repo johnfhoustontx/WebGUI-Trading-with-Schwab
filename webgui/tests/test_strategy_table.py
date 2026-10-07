@@ -556,13 +556,15 @@ def test_legs_summary_share_lots_scale_with_qty():
     assert st.legs_summary(legs) == "L 200 shares"
 
 
-def test_finder_offers_the_calculators_seven_groups():
+def test_finder_offers_the_calculators_eight_groups():
     from pages.options import finder_view
     groups = dict(finder_view.GROUPS)
     assert list(groups) == [
-        "DIRECTIONAL", "VERTICAL", "NEUTRAL", "STRADDLE", "BUTTERFLY", "CALENDAR", "STOCK"]
+        "DIRECTIONAL", "VERTICAL", "NEUTRAL", "STRADDLE", "BUTTERFLY", "CALENDAR", "STOCK",
+        "RATIO"]
     assert groups["STRADDLE"] == "Straddles & strangles"
     assert groups["STOCK"] == "Stock + options"
+    assert groups["RATIO"] == "Ratio spreads"
 
 
 def test_finder_new_group_labels_are_the_calculators_group_names():
@@ -570,7 +572,7 @@ def test_finder_new_group_labels_are_the_calculators_group_names():
     from pages.options.strategies import STRATEGY_GROUPS
     groups = dict(finder_view.GROUPS)
     calc_names = {name for name, _codes in STRATEGY_GROUPS}
-    for code in ("STRADDLE", "CALENDAR", "STOCK"):
+    for code in ("STRADDLE", "CALENDAR", "STOCK", "RATIO"):
         assert groups[code] in calc_names
     # The Calculator splits the Finder's one group into two.
     assert groups["BUTTERFLY"] == "Butterflies & condors"
@@ -711,3 +713,36 @@ def test_panel_butterfly_body_uses_the_tables_quantity_marker():
     assert detail.contract_lines(s) == ["Buy 95.00 C  /  Sell 2× 100.00 C  /  Buy 105.00 C"]
     assert detail.expiry_caption(s) == "Exp 2026-10-16"
     assert detail.breakeven_text(s["breakeven"]) == "$96.30 / $103.70"
+
+
+def _backspread(kind="call"):
+    far = 103.0 if kind == "call" else 97.0
+    return {"id": f"T_{kind}", "symbol": "T", "type": f"{kind.upper()}_BACKSPREAD",
+            "family": "VOLATILITY", "group": "RATIO",
+            "strategy_label": f"{kind.title()} Backspread",
+            "bias": "bullish" if kind == "call" else "bearish",
+            "legs": [{"kind": kind, "side": "short", "strike": 100.0,
+                      "expiration": "2026-11-06", "qty": 1, "mark": 2.1},
+                     {"kind": kind, "side": "long", "strike": far,
+                      "expiration": "2026-11-06", "qty": 2, "mark": 0.85}],
+            "expiration": "2026-11-06", "dte": 9, "net_credit": 40.0,
+            "net_debit": None, "max_profit": None, "max_loss": 263.9,
+            "unbounded_profit": kind == "call", "unbounded_loss": False,
+            "breakevens": [100.4, 105.6], "pop_pct": 65.0, "rr": None,
+            "composite_score": 60.0, "grade": "Good"}
+
+
+def test_a_backspread_row_reads_its_two_for_one_legs():
+    row = st.strategy_rows([_backspread()])[0]
+    assert row["legs"] == "S 100.00C / L 2×103.00C"
+    assert row["strategy_label"] == "Call Backspread"
+    assert row["debit_credit"] == "+40.00 credit"
+
+
+def test_a_backspread_is_never_offered_to_the_paper_ledger():
+    """The Ledger's credit path books two-strike spreads of EQUAL quantity. A
+    1x2 booked there would be recorded as a plain credit spread."""
+    for kind in ("call", "put"):
+        row = st.strategy_rows([_backspread(kind)])[0]
+        assert row["_allow_paper"] is False, kind
+        assert row["_undefined_risk"] is False, kind
