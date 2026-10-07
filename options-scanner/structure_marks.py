@@ -224,18 +224,46 @@ def _hold(reason):
     return {"action": "HOLD", "reason": reason, "code": "HOLD"}
 
 
+def _net_long(legs, kind):
+    return sum(leg["qty"] if leg["side"] == "long" else -leg["qty"]
+               for leg in legs if leg["kind"] == kind)
+
+
+def open_ended(legs):
+    """Does the profit keep growing for as long as the stock keeps moving one
+    way? True when the position is net LONG calls or net long puts.
+
+    Read from the legs, not from ``entry_max_profit``: the engine gives the put
+    side a finite "max profit" - the stock at zero - and flags only the call
+    side as unbounded. On a $500 stock that figure is about $49,000 for a long
+    put, and half of it is a target no mark will ever reach."""
+    return _net_long(legs or [], "call") > 0 or _net_long(legs or [], "put") > 0
+
+
 def _target_base(row):
     """``(dollars, words)`` the profit target is a fraction of, or ``(None,
     None)`` when the row has no target.
 
-    A bounded structure targets a fraction of its MAX PROFIT. A debit with no
-    cap on its profit (a long straddle) has none, so the only denominator that
-    exists is what was paid - ``signal_recommender._debit_target_base``'s rule.
-    ⚠ A CREDIT with no cap on its profit (a call backspread) gets NO target:
-    its credit is not what the trade is for, and closing it for half of a small
-    credit would record the opposite of what it was opened to measure. It is
-    held to expiry.
+    * A BOUNDED structure (a vertical, a butterfly, a condor, a calendar, a
+      short straddle) targets a fraction of its MAX PROFIT.
+    * An OPEN-ENDED structure that only BUYS options (a long call or put, a long
+      straddle or strangle) has no max profit worth the name, so the only
+      denominator is what was paid - ``signal_recommender._debit_target_base``'s
+      rule, and the same for a put as for a call.
+    * ⚠ An open-ended structure that also SELLS one (a backspread) gets NO
+      target and is held to expiry. What it was entered for - a small credit or
+      a small debit - is not what the trade is for: half of a $3 debit is $1.50,
+      and closing there would record the opposite of what it was opened to
+      measure.
     """
+    legs = legs_of(row) or []
+    if open_ended(legs):
+        if any(leg["side"] == "short" for leg in legs):
+            return None, None
+        paid = _real(row.get("entry_credit"))
+        if paid is not None and paid < 0:
+            return -paid * MULTIPLIER, "the debit paid"
+        return None, None
     max_profit = _real(row.get("entry_max_profit"))
     if max_profit is not None and max_profit > 0:
         return max_profit * MULTIPLIER, "max profit"

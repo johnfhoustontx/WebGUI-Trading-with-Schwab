@@ -199,8 +199,8 @@ exit_dte = 21
 #   no paper book holds one. A backspread entered for a credit sits in a small,
 #   DEFINED loss - the valley at its long strike - until the large move it is
 #   for. The 2x-credit money stop would close every one of them there, so the
-#   loss-side rules are off. It has no profit target either when its profit is
-#   uncapped (the call version): it is held to expiry.
+#   loss-side rules are off. It has no profit target either, call or put, for a
+#   credit or a debit: it is held to expiry (structure_marks._target_base).
 [structures.CALL_BACKSPREAD]
 loss_rules = false
 
@@ -218,8 +218,9 @@ loss_rules = false
 #   Exits, first match: a calendar or diagonal on its front leg's expiry day is
 #   closed on its mark; a structure entered for a CREDIT is stopped at
 #   [stops] stop_mult x the credit unless its table says loss_rules = false; a
-#   target of [stops] tp_frac of the max profit, or of the debit paid when the
-#   profit is uncapped; everything else settles at intrinsic. None of this is
+#   target of [stops] tp_frac of the max profit, or of the debit paid for a
+#   structure that only buys options and has no cap on its profit (a long call,
+#   put, straddle or strangle); everything else settles at intrinsic. None of this is
 #   fitted - there is no outcome data for these structures yet - and every mark
 #   is stored, so another exit can be replayed over the same rows.
 # ─────────────────────────────────────────────────────────────────────────────

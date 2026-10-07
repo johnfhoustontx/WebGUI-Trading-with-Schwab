@@ -315,6 +315,51 @@ def test_an_uncapped_debit_targets_half_of_what_was_paid():
     assert "debit paid" in sm.recommend(straddle, 270.0)["reason"]
 
 
+def test_a_long_put_targets_half_its_debit_exactly_as_a_long_call_does():
+    """The engine gives a long put a finite max profit: the stock at zero, about
+    494 a share here. Half of that is a target no mark reaches, so the put would
+    be held to expiry while the call beside it closed at half its debit."""
+    call = _row([_leg("call", "long", 500.0)], -8.11, "LONG_CALL")
+    put = _row([_leg("put", "long", 500.0)], -10.28, "LONG_PUT",
+               entry_max_profit=494.71)
+    assert _rec(call, 405.5) == "TARGET_HIT" and _rec(call, 405.4) == "HOLD"
+    assert _rec(put, 514.0) == "TARGET_HIT" and _rec(put, 513.9) == "HOLD"
+    assert "debit paid" in sm.recommend(put, 514.0)["reason"]
+
+
+def test_open_ended_is_read_from_the_legs():
+    assert sm.open_ended(STRADDLE) is True
+    assert sm.open_ended([_leg("put", "long", 500.0)]) is True
+    assert sm.open_ended(BACKSPREAD) is True                  # -1 +2 calls
+    assert sm.open_ended(FLY) is False                        # +1 -2 +1
+    assert sm.open_ended(STRANGLE_SHORT) is False
+    assert sm.open_ended(CALENDAR) is False                   # +1 back, -1 front
+    vertical = [_leg("call", "long", 495.0), _leg("call", "short", 505.0)]
+    assert sm.open_ended(vertical) is False
+    assert sm.open_ended([]) is False and sm.open_ended(None) is False
+
+
+def test_a_backspread_has_no_target_however_it_was_entered():
+    """For a credit or for a debit, call or put: it is held to expiry. Half of a
+    3-cent debit is not a target, and the put version's "max profit" is the
+    stock at zero."""
+    legs_put = [_leg("put", "short", 500.0), _leg("put", "long", 497.0, qty=2)]
+    rows = [_row(BACKSPREAD, 0.41, "CALL_BACKSPREAD"),
+            _row(BACKSPREAD, -0.03, "CALL_BACKSPREAD"),
+            _row(legs_put, 0.37, "PUT_BACKSPREAD", entry_max_profit=480.33),
+            _row(legs_put, -0.05, "PUT_BACKSPREAD", entry_max_profit=479.9)]
+    for row in rows:
+        for pnl in (1.5, 20.0, 300.0, 5000.0, 30000.0):
+            assert _rec(row, pnl) == "HOLD", (row["strategy"], row["entry_credit"], pnl)
+
+
+def test_a_bounded_debit_still_targets_its_max_profit():
+    spread = _row([_leg("call", "long", 495.0), _leg("call", "short", 505.0)],
+                  -6.80, "BULL_CALL", entry_max_profit=8.17)
+    assert _rec(spread, 408.5) == "TARGET_HIT" and _rec(spread, 408.4) == "HOLD"
+    assert "max profit" in sm.recommend(spread, 408.5)["reason"]
+
+
 def test_an_uncapped_credit_has_no_target_and_is_held_to_expiry():
     """A call backspread entered for a credit. Half of its small credit is not
     what it was opened to measure."""
