@@ -95,10 +95,37 @@ def read_context(caps=True):
             "caps": _gated(CAPS_VIEW) if caps else None}
 
 
+def quotes_withheld():
+    """True on the PUBLIC origin while the site's quotes switch is off.
+
+    ``config/finder_public.toml [display] show_leg_quotes`` is the one switch
+    for figures read off a contract's own quote, off until Schwab's
+    redistribution terms are settled (roadmap decision D2). The public
+    Calculator and Simulator draw no delta under it; the Market Scanner,
+    published as Option Signals, follows the same switch rather than growing
+    one of its own. Always False on the private app."""
+    import shell as _shell               # lazy, as in read_context
+    if not _shell.is_public():
+        return False
+    from shared import public_scan
+    return not public_scan.show_leg_quotes()
+
+
+# What a candidate carries that is read off a contract's own bid and ask.
+_QUOTE_FIELDS = ("friction_pct",)
+
+
 def checks_for(row, ctx):
-    """The checklist for one row against a :func:`read_context` result."""
+    """The checklist for one row against a :func:`read_context` result.
+
+    While :func:`quotes_withheld`, the row is judged without its bid-ask
+    friction, so the cost-to-trade line reads as not measured: the round trip
+    as a share of the credit, printed beside the credit, is the spread's
+    bid-ask width. A copy - the row is the caller's."""
     if not isinstance(row, dict):
         return []
+    if quotes_withheld():
+        row = {k: v for k, v in row.items() if k not in _QUOTE_FIELDS}
     from . import checks
     ctx = ctx if isinstance(ctx, dict) else {}
     sym = row.get("symbol")

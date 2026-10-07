@@ -133,13 +133,28 @@ def test_a_public_row_can_still_read_clear():
     """With the book line absent "Only clear" has to keep working: a row whose
     remaining checks pass is Clear, not hidden for a line it never had."""
     sig = _pcs_signal()
-    ctx = {**_ctx(), "caps": None}
+    # As the public origin holds it: no caps, and a published calibration with
+    # no bucket for this row (cold, the track record would read as a feed that
+    # has not loaded and the chip as Partly checked).
+    ctx = {**_ctx(), "caps": None, "calibration": {"by_bucket": {}}}
     row = scanner._build_populate(_day(sig), {}, ctx, public=True)[
         "rows"]["signals_swing"][0]
-    if row["_checks_state"] == "pos":
-        assert checks_table.only_clear([row]) == [row]
-    else:                                    # a caution in the fixture, not the gate
-        assert row["_checks_state"] in ("warn", "muted")
+    assert row["_checks_state"] == "pos", row["checks"]
+    assert row["checks"].startswith("Clear")
+    assert checks_table.only_clear([row]) == [row]
+
+
+def test_a_public_row_reads_clear_with_its_cost_line_withheld(published, monkeypatch):
+    """The cost-to-trade line greys out while quotes are withheld. That must
+    not read as a feed that has not loaded: the row is still Clear."""
+    from shared import public_scan
+    monkeypatch.setattr(public_scan, "show_leg_quotes", lambda: False)
+    sig = _pcs_signal()
+    ctx = {**_ctx(), "caps": None, "calibration": {"by_bucket": {}}}
+    row = scanner._build_populate(_day(sig), {}, ctx, public=True)[
+        "rows"]["signals_swing"][0]
+    assert row["_checks_state"] == "pos", row["checks"]
+    assert checks_table.only_clear([row]) == [row]
 
 
 # ── the shared read ──────────────────────────────────────────────────────────
@@ -469,3 +484,96 @@ def test_the_public_funnel_does_not_change_the_payload_it_was_given():
 
 def test_render_asks_for_the_public_funnel():
     assert "public=_public" in inspect.getsource(scanner.render)
+
+
+# ── the quotes switch ────────────────────────────────────────────────────────
+# ``config/finder_public.toml [display] show_leg_quotes`` is the site's one
+# switch for figures read off a contract's own quote, off until Schwab's
+# redistribution terms are settled (decision D2). While it is off the public
+# Calculator draws no delta and its checklist's cost-to-trade line is not
+# measured; Option Signals follows the same switch.
+
+def _quotes(monkeypatch, on):
+    from shared import public_scan
+    monkeypatch.setattr(public_scan, "show_leg_quotes", lambda: on)
+
+
+def _cost_line(sig):
+    cand = {**sig, "_allow_paper": False}
+    return next(c for c in checks_feed.checks_for(cand, {**_ctx(), "caps": None})
+                if c["key"] == "cost")
+
+
+def test_the_private_checklist_measures_the_cost_to_trade(monkeypatch):
+    _quotes(monkeypatch, False)              # the switch is the public origin's
+    line = _cost_line(_pcs_signal())
+    assert line["tone"] == "pos" and "8.00%" in line["text"]
+
+
+def test_the_public_checklist_withholds_the_cost_to_trade(monkeypatch, published):
+    """The round trip as a share of the credit, beside the credit, is the
+    spread's bid-ask width."""
+    _quotes(monkeypatch, False)
+    line = _cost_line(_pcs_signal())
+    assert line["tone"] == "muted" and "%" not in line["text"]
+
+
+def test_the_public_checklist_measures_it_once_quotes_are_on(monkeypatch, published):
+    _quotes(monkeypatch, True)
+    assert "8.00%" in _cost_line(_pcs_signal())["text"]
+
+
+def test_withholding_does_not_change_the_signal_it_was_given(monkeypatch, published):
+    _quotes(monkeypatch, False)
+    sig = _pcs_signal()
+    _cost_line(sig)
+    assert sig["friction_pct"] == 8.0
+
+
+def _expansions(signal):
+    from nicegui import ui
+    with ui.column() as box:
+        detail._build_cards(signal)
+    found = list(box.descendants())
+    return ([str(e._props.get("label")) for e in found
+             if type(e).__name__ == "Expansion"],
+            [str(e.text) for e in found if isinstance(e, ui.label)])
+
+
+_GREEK_SIGNAL = {"short_delta": -0.18, "net_theta": 0.021, "net_vega": -0.04,
+                 "short_iv": 31.2, "current_iv": 29.8, "iv_rank": 55.0}
+
+
+def test_the_private_panel_draws_the_greeks(clean, monkeypatch):
+    _quotes(monkeypatch, False)
+    sections, labels = _expansions(_pcs_signal(**_GREEK_SIGNAL))
+    assert "Greeks" in sections and "-0.1800" in labels
+
+
+def test_the_public_panel_withholds_the_greeks(clean, monkeypatch, published):
+    """Delta, theta, vega and the short leg's own IV are per-contract figures;
+    the public Calculator and Simulator withhold them under the same switch."""
+    _quotes(monkeypatch, False)
+    sections, labels = _expansions(_pcs_signal(**_GREEK_SIGNAL))
+    assert "Score factors" in sections, "the panel built nothing - vacuous"
+    assert "Greeks" not in sections
+    assert "-0.1800" not in labels and "31.20%" not in labels
+    # The underlying's own ATM volatility is not a contract's, and stays.
+    assert "Implied volatility" in sections and "29.80%" in labels
+
+
+def test_the_public_panel_never_passes_a_contracts_iv_off_as_the_atm_iv(
+        clean, monkeypatch, published):
+    """``ATM IV`` falls back to the short leg's IV when the signal carries no
+    ``current_iv``. Withheld, it reads as not known."""
+    _quotes(monkeypatch, False)
+    sig = _pcs_signal(**{**_GREEK_SIGNAL, "current_iv": None})
+    _sections, labels = _expansions(sig)
+    assert "31.20%" not in labels
+
+
+def test_the_public_panel_draws_the_greeks_once_quotes_are_on(clean, monkeypatch,
+                                                              published):
+    _quotes(monkeypatch, True)
+    sections, labels = _expansions(_pcs_signal(**_GREEK_SIGNAL))
+    assert "Greeks" in sections and "-0.1800" in labels

@@ -9,6 +9,7 @@ entrypoints give it - but with no nav rail or header.
     python tools/ui_harness.py settings --port 9591
     python tools/ui_harness.py options.paper --seed seed.json
     python tools/ui_harness.py symbol --seed seed.json --kwargs '{"symbol": "SPY"}'
+    python tools/ui_harness.py options.scanner --seed seed.json --public
 
 Not a test and never for prod: with a fake Bus no command is executed.
 
@@ -97,6 +98,11 @@ def parse_args(argv=None):
                     help="JSON object passed to render(). Some pages take "
                          "their subject as an argument rather than reading it "
                          "from the cache: symbol takes symbol, momentum level.")
+    ap.add_argument("--public", action="store_true",
+                    help="Render as the PUBLIC live origin does: shell.publish "
+                         "with the published route map and a bus that refuses "
+                         "commands, set before the page is imported (as "
+                         "live_main does). For a page live_screens publishes.")
     args = ap.parse_args(argv)
     args.render_kwargs = {}
     if args.kwargs:
@@ -134,6 +140,13 @@ def main(argv=None):
 
     import shell
     from pages.options import theme
+
+    if args.public:
+        # Before the page module is imported, in live_main's order: a page may
+        # read which origin it is at import. The seed above is already in.
+        import live_screens
+        bus_client.set_read_only(True)
+        shell.publish(live_screens.PUBLIC_ROUTES)
 
     @ui.page("/")
     def _index():

@@ -796,8 +796,22 @@ def _kv(label, value, color=None):
             lbl.classes(add=color)
 
 
+# The figures read off a CONTRACT's own quote: its delta, theta and vega, and
+# the short leg's implied volatility. The underlying's ATM volatility and its
+# rank are not among them.
+_CONTRACT_GREEKS = ("short_delta", "net_theta", "net_vega", "short_iv")
+
+
 def _build_cards(s):
-    """Contract, then economics, then collapsed detail — reject/verify/explore."""
+    """Contract, then economics, then collapsed detail — reject/verify/explore.
+
+    On the public origin, while the site's quotes switch is off
+    (``checks_feed.quotes_withheld``), the panel is built from a copy of the
+    signal without its per-contract Greeks and draws no Greeks section - the
+    rule the public Calculator and Simulator already keep."""
+    withheld = checks_feed.quotes_withheld()
+    if withheld:
+        s = {k: v for k, v in s.items() if k not in _CONTRACT_GREEKS}
     # 1 — THE CONTRACT. What you would actually place, as instructions. This is
     # first because a signal you cannot identify is one you cannot act on, and
     # the old panel buried the strikes in a "Strikes" key/value row.
@@ -851,13 +865,14 @@ def _build_cards(s):
                     pct = f" ({p:.2f}%)" if isinstance(p, (int, float)) else ""
                     _kv(label, f"±${d:,.2f}{pct}")
 
-    with ui.expansion("Greeks").classes("w-full"):
-        with ui.grid(columns=4).classes("gap-2 w-full"):
-            _greek("Δ", s.get("short_delta"), fmt="{:+.4f}")
-            theta = s.get("net_theta")
-            _greek("Θ", theta, color=(GREEN if isinstance(theta, (int, float)) and theta > 0 else RED))
-            _greek("Vega", s.get("net_vega"), fmt="{:+.3f}")
-            _greek("IV", s.get("short_iv"), fmt="{:.2f}%")
+    if not withheld:                     # four dashes would say nothing
+        with ui.expansion("Greeks").classes("w-full"):
+            with ui.grid(columns=4).classes("gap-2 w-full"):
+                _greek("Δ", s.get("short_delta"), fmt="{:+.4f}")
+                theta = s.get("net_theta")
+                _greek("Θ", theta, color=(GREEN if isinstance(theta, (int, float)) and theta > 0 else RED))
+                _greek("Vega", s.get("net_vega"), fmt="{:+.3f}")
+                _greek("IV", s.get("short_iv"), fmt="{:.2f}%")
 
     # Implied volatility (best-effort from available keys)
     if any(s.get(k) is not None for k in ("current_iv", "iv_rank", "iv_percentile", "short_iv")):

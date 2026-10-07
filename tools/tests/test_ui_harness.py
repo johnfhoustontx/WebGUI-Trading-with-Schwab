@@ -34,6 +34,15 @@ def test_render_kwargs_reach_the_page_that_needs_them():
     assert args.render_kwargs == {"symbol": "SPY"}
 
 
+def test_a_page_is_private_unless_public_is_asked_for():
+    """``--public`` renders as the live origin does. Off by default: a harness
+    that published on its own would hide every owner control from the person
+    checking them."""
+    h = _harness()
+    assert h.parse_args(["options.scanner"]).public is False
+    assert h.parse_args(["options.scanner", "--public"]).public is True
+
+
 def test_a_kwargs_value_that_is_not_an_object_is_refused_at_the_command_line():
     """A bare string or list would fail later as ``render(**"SPY")`` - deep in a
     page build, where the traceback says nothing about the command line."""
