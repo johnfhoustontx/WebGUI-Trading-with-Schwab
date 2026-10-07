@@ -96,8 +96,9 @@ The new pass reuses rules that already exist; it adds none of its own.
   be read is dropped. The switch is `[structures] earnings_long_premium`
   (`"flag"` as shipped, `"drop"` to restore one rule for everything). The
   credit-spread lists are not touched.
-- **Per-symbol cap:** the top `max_per_symbol_window` by score. The builders
-  emit one row per structure per window, so no second rule is needed.
+- **Per-symbol cap:** per family, the best `max_per_family` by score (2 as
+  shipped). A single cap across families was measured to drop long volatility
+  every time; see the measurement below.
 - **Short strangle strikes:** sold between `[structures] short_delta_min` and
   the Scanner's own entry ceiling, `[selection] max_entry_short_delta`.
 - **Regular-hours gate:** held outside 08:30–15:00 CT like every other list.
@@ -114,23 +115,100 @@ It gains a `min_front_dte` argument defaulting to 7. The Finder passes nothing
 and is unchanged, pinned by a test that its output is byte-identical. The
 Scanner passes the window's own minimum.
 
-### Gate bars at short expiries: measured first, never loosened
+### Gate bars at short expiries: measured 2026-10-06, none moved
 
-The gate bars were measured at 14, 30 and 45 days. The Scanner's windows are
-0..4 and 5..15. `tools/sweep_strategy_gates.py` gains those expiries and is run
-before any page work, because its result decides what the tabs can show.
+The gate bars had been measured at 14, 30 and 45 days. The Scanner's windows are
+0..4 and 5..15, so `tools/sweep_strategy_gates.py --scanner` measured them there
+before any page work.
 
-What the existing measurements predict, to be confirmed:
+**How it was measured.** A fairly priced Black-Scholes chain, spot 100, flat
+volatility, generous liquidity; the real builders called the way the Scanner
+will call them; the real scorer against a neutral view. Nine chains: volatility
+0.20, 0.28 and 0.45 by strike steps of 0.25, 1 and 2.5 (0.25% of spot is an
+index ETF's ladder, 2.5% a coarse single stock's). Front expiries 0, 1, 2 and 4
+days for the 0-DTE window, 7, 10 and 15 for Swing. The clock is pinned at 10:00
+CT, because probability of profit reads the time actually left.
 
-- Butterflies fell under the 30 PoP bar at 14 days on a $2.50 ladder. Shorter
-  is unlikely to help.
-- The short straddle failed PoP (57 against 65) at every expiry measured.
-- Long straddles and strangles passed but scored 50–55, just over the cut.
-- Condors pass or fail by where the wing lands on the strike ladder.
+```
+python tools/sweep_strategy_gates.py --scanner --iv 0.28 --step 1 --at 10:00
+```
 
-So on fairly priced chains the 0-DTE tab may show few of these on most days.
-That result is reported as measured. The standing rule holds: no bar is moved
-without outcome data, and the funnel shows what was cut and why.
+**Shown** means not graded Weak and scoring 50 or more, the display cut as
+designed. Each cell is shown / built, out of the chains and expiries tried.
+
+| Structure | 0-DTE window (of 36) | Swing window (of 27) | Expiration day only (of 9) | When it fails |
+|---|---|---|---|---|
+| Bull call spread | 28 / 28 | 27 / 27 | 4 / 4 | Never. Not built when the ladder has no two strikes near 0.60 and 0.30 delta |
+| Bear put spread | 27 / 27 | 27 / 27 | 4 / 4 | As above |
+| Long straddle | 36 / 36 | 27 / 27 | 9 / 9 | Never, but it scores 53 to 56 (Marginal) on every day except expiration day |
+| Short straddle | 0 / 36 | 0 / 27 | 0 / 9 | Always: PoP 57 to 58 against 65 |
+| Long strangle | 19 / 36 | 24 / 27 | 3 / 9 | PoP, where a coarse ladder puts the wings too far out. Scores 50 to 54 when shown |
+| Short strangle | 25 / 35 | 25 / 25 | 0 / 9 | Never shown on expiration day: its reward is annualised and a zero-day horizon cannot be judged. Shown on 25 of 26 otherwise |
+| Call butterfly | 20 / 36 | 22 / 27 | 5 / 9 | PoP when the ladder's wing is narrow, reward to risk when it is wide |
+| Put butterfly | 21 / 36 | 21 / 27 | 5 / 9 | As above |
+| Iron butterfly | 20 / 36 | 21 / 27 | 5 / 9 | As the butterflies (the same payoff) |
+| Call condor | 15 / 30 | 22 / 27 | 0 / 4 | Reward to risk; never passes on expiration day |
+| Put condor | 15 / 30 | 22 / 27 | 0 / 4 | As above |
+| Call calendar | not built | 18 / 27 | | Reward to risk with a 7-day front, on all nine chains |
+| Put calendar | not built | 27 / 27 | | Never |
+| Call diagonal | not built | 2 / 27 | | Reward to risk |
+| Put diagonal | not built | 0 / 27 | | Reward to risk |
+
+One chain in full (volatility 0.28, step 1). Letter is the grade, number the
+score, `*` shown, `-` not built:
+
+```
+structure             0      1      2      4      7     10     15
+BULL_CALL          -    G  75* G  77* G  75* G  76* G  74* G  75*
+BEAR_PUT           -    G  75* G  77* G  78* G  77* G  76* G  77*
+LONG_STRADDLE    G  64* M  55* M  54* M  55* M  54* M  53* M  53*
+SHORT_STRADDLE   W  39  W  39  W  39  W  39  W  39  W  39  W  39
+LONG_STRANGLE    W  39  M  50  M  53* M  54* M  51* M  52* M  50*
+SHORT_STRANGLE   W  39    -    G  68* G  67* G  67* G  68* G  68*
+BUTTERFLY_CALL   G  69* G  72* W  39  W  39  G  69* W  39  G  69*
+BUTTERFLY_PUT    G  69* G  73* W  39  W  39  G  69* W  39  G  70*
+IRON_BUTTERFLY   G  70* G  74* W  39  W  39  G  69* W  39  G  69*
+CONDOR_CALL        -    W  39  G  74* G  73* G  74* G  77* G  74*
+CONDOR_PUT         -    W  39  G  74* G  74* G  74* G  77* G  74*
+CALENDAR_CALL      -      -      -      -    W  39  G  71* G  74*
+CALENDAR_PUT       -      -      -      -    G  71* G  74* G  77*
+DIAGONAL_CALL      -      -      -      -    W  39  W  39  W  39
+DIAGONAL_PUT       -      -      -      -    W  39  W  39  W  39
+```
+
+**What it showed against what this document first predicted.** The first draft
+expected the 0-DTE tab to show few of these. That was wrong: debit spreads, long
+straddles, butterflies and condors all pass there on most chains. Three
+predictions held. The short straddle never passes. Long straddles and strangles
+sit just over the cut. Butterflies and condors pass or fail by where the strike
+ladder puts the wing.
+
+**What the measurement does not include.** No skew, no real bid-ask spreads, no
+volatility gate, no earnings gate, no market-state tilt, and one neutral view.
+A real chain will cut more, most of all on the wings of a same-day structure,
+where the liquidity bar is hardest to clear. The short strangle also has to
+clear the IV rank floor (35 on the 0-DTE tab, 30 on Swing) before any of this.
+
+**Three things the measurement raised.**
+
+1. *The per-symbol cap would drop long volatility every time.* Up to ten
+   structures pass in one window, and their scores sit in bands by family:
+   debit spreads and condors 73 to 78, butterflies 68 to 78, the short strangle
+   near 67, long straddles and strangles 50 to 56. A cap of 6 by score keeps the
+   first three families and never the last. The cap is therefore **per family**
+   (the best `max_per_family` of each, 2 as shipped), not across them.
+2. *An expiration-day row is judged against a full day of movement.* The scorer
+   uses `max(dte, 1)` days for the expected move and the butterfly wing, while
+   at 10:00 CT about five hours remain, which is less than half that move. This
+   is why the long straddle scores 64 on expiration day and 53 to 56 on every
+   other. The single-leg Directional tab has always been scored this way. It is
+   left alone here and listed as a decision, because changing it moves the
+   Directional tab's scores too.
+3. *Diagonals do not pass at these expiries.* 2 of 54. They are still built
+   (the calendar builder emits them together) and counted in the funnel as below
+   the quality bar.
+
+The standing rule holds: no bar was moved.
 
 ## The ratio backspread
 

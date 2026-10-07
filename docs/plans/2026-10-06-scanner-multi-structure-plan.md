@@ -222,6 +222,15 @@ Commit: `docs(scanner): measured gate results at 0 to 15 days`.
 
 # Phase 2 — Show
 
+> **Changed by Phase 1's measurement (2026-10-06).** The cap is per FAMILY, not
+> one number per window: the config key is `max_per_family = 2` in place of
+> `max_per_symbol_window = 6`, and `structure_scan.select` keeps the best
+> `max_per_family` rows of each `group` (its `capped` counter and the partition
+> identity are unchanged). Tasks 4, 6 and 7 below still show the single cap;
+> apply this change when executing them. The sweep also gained a `--scanner`
+> mode with a pinned clock in place of the `--min-front-dte` flag Task 2
+> describes; Task 17's backspread measurement uses `--scanner`.
+
 ### Task 4: Configuration
 
 **Files:**
