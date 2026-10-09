@@ -948,7 +948,7 @@ def track_points(values):
 def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                    walls=None, spot=None, flip=None, levels=None,
                    show_tracks=False, spot_style="line", spot_interval=5,
-                   projected_flip=None, mode="net", balanced=()):
+                   projected_flip=None, mode="net", balanced=(), legend=None):
     """Intraday strike×time Highcharts heatmap (dark, cell separators, concise
     hover) with the underlying spot-price line overlaid on the same (linear)
     strike axis. ``yrange`` (when given) sets the Strike axis range so it aligns
@@ -958,7 +958,9 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     DATA inside the one heatmap series: the series count and the colour axis are
     the same in every mode. The projection grid is net only, and whether to pass
     one is the CALLER's decision (``heat_keeps_projection``), because the hedge
-    panel under this chart is built on the same category list.
+    panel under this chart is built on the same category list. ``balanced`` are
+    strikes to mark on the axis. ``legend`` (a dict, when given) receives the
+    scale this paint used, for the strip beside the controls.
 
     ``projection`` (GEX only) appends a forward band: extra time columns of
     projected net-per-mark cells on the SAME heatmap series/colorAxis, a 'now'
@@ -1133,6 +1135,8 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                                           balanced)}
     if yrange is not None:
         yaxis["min"], yaxis["max"] = yrange[0], yrange[1]
+    if legend is not None:
+        legend.update(zmax=zmax, mode=mode)
     fig = _base_chart("heatmap", height)
     fig["chart"]["backgroundColor"] = "transparent"     # same as the candlestick graph
     _apply_wash(fig)     # blue→magenta wash behind the cells; quiet strikes stay lit

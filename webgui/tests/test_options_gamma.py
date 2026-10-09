@@ -3142,6 +3142,19 @@ def test_no_marks_means_no_balanced_lines():
     assert not _balanced_lines(heat["yAxis"]["plotLines"])
 
 
+def test_heatmap_reports_its_scale_to_the_legend():
+    legend = {}
+    fig = gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0],
+                               mode="size", legend=legend)
+    assert legend["zmax"] == fig["colorAxis"]["max"] > 0
+    assert legend["mode"] == "size"
+
+
+def test_the_legend_sink_is_optional_and_changes_nothing():
+    assert (gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0], legend={})
+            == gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0]))
+
+
 def test_a_mark_that_is_not_a_number_is_skipped_on_the_heatmap():
     heat = gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0],
                                 balanced=[None, "x", True, 100.0])

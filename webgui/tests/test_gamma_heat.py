@@ -4,6 +4,7 @@ Design: docs/plans/2026-10-09-gamma-heatmap-value-scale-frame-design.md
 """
 import ast
 import pathlib
+import re
 
 import pytest
 
@@ -122,3 +123,66 @@ def test_balanced_marks_of_nothing():
     assert gh.balanced_marks({}, [], **KW) == []
     assert gh.balanced_marks(None, [100.0], **KW) == []
     assert gh.balanced_marks({100.0: 5.0}, [100.0], **KW) == []
+
+
+# ── the legend strip ─────────────────────────────────────────────────────────
+
+STOPS = [[0.0, "rgba(255,186,220,0.98)"], [0.5, "rgba(0,0,0,0.0)"],
+         [1.0, "rgba(190,248,255,0.98)"]]
+
+
+def _dompurify_allowlist():
+    """The names DOMPurify keeps, read from the copy NiceGUI ships. Mirrors
+    test_flow_panels.py; runs containing ``script`` are deny lists and skipped."""
+    from nicegui import ui
+    src = (pathlib.Path(ui.__file__).parent / "static" / "dompurify.mjs") \
+        .read_text(encoding="utf-8", errors="replace")
+    names = set()
+    for run in re.findall(r'(?:"[a-z][a-z0-9-]*",){19,}"[a-z][a-z0-9-]*"', src):
+        tokens = set(re.findall(r'"([a-z][a-z0-9-]*)"', run))
+        if "script" not in tokens:
+            names |= tokens
+    assert len(names) > 300, "allowlist extraction found too little"
+    return names
+
+
+def test_legend_prints_both_ends_the_unit_and_the_caption():
+    svg = gh.legend_svg(1_200_000_000.0, "adapts to what is visible", STOPS,
+                        unit="$ gamma per 1% move")
+    assert "-$1.20B" in svg and "+$1.20B" in svg
+    assert "$ gamma per 1% move · adapts to what is visible" in svg
+
+
+def test_legend_without_a_dollar_unit_prints_the_bare_number():
+    svg = gh.legend_svg(4_500_000.0, "adapts to what is visible", STOPS, unit="")
+    assert "-4.50M" in svg and "+4.50M" in svg and "$" not in svg
+    assert ">adapts to what is visible<" in svg       # no stray separator
+
+
+@pytest.mark.parametrize("zmax", [None, 0, 0.0, float("nan"), "big", True])
+def test_legend_of_no_scale_is_empty(zmax):
+    assert gh.legend_svg(zmax, "x", STOPS, unit="") == ""
+
+
+def test_legend_runs_put_side_to_call_side_with_every_stop():
+    svg = gh.legend_svg(10.0, "x", STOPS, unit="")
+    assert svg.count("<stop ") == len(STOPS)
+    assert svg.index("rgb(255,186,220)") < svg.index("rgb(190,248,255)")
+    assert 'stop-opacity="0.00"' in svg               # the transparent zero stop
+
+
+def test_legend_survives_the_sanitizer():
+    """ui.html runs DOMPurify; a stripped tag or attribute fails silently."""
+    allow = _dompurify_allowlist()
+    svg = gh.legend_svg(10.0, "held since 09:30", STOPS, unit="$ delta")
+    names = (set(re.findall(r"<([a-zA-Z][\w-]*)", svg))
+             | set(re.findall(r'([a-zA-Z][\w-]*)="', svg)))
+    stripped = sorted(n for n in names if n.lower() not in allow)
+    assert not stripped, f"DOMPurify would strip: {stripped}"
+    assert {"svg", "linearGradient", "stop", "rect", "text"} <= names
+    assert "dominant-baseline" not in svg and "data-" not in svg
+
+
+def test_legend_units_name_the_two_dollar_views():
+    assert gh.UNITS["GEX"].startswith("$") and gh.UNITS["DEX"].startswith("$")
+    assert "Charm" not in gh.UNITS and "Vanna" not in gh.UNITS
