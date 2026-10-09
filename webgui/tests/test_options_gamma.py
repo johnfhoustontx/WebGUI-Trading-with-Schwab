@@ -3447,7 +3447,10 @@ def test_bars_in_the_spot_frame_sit_at_their_distance_from_spot():
     assert xs == [-1.0, 0.0, 1.0, 2.0]                      # strikes 99..102 less spot 100
     assert fig["xAxis"]["min"] == -3.5 and fig["xAxis"]["max"] == 3.5
     assert fig["xAxis"]["title"]["text"] == "From spot"
-    assert fig["xAxis"]["labels"]["format"] == "{value:+.2f}"
+    # No "+" flag: Highcharts' format strings ignore it (seen in the browser).
+    assert fig["xAxis"]["labels"]["format"] == "{value:.2f}"
+    assert "+" not in gamma.heatmap_figure(
+        _frame_rows(), "GEX", yrange=_FRAME_YR, **_FRAME)["series"][0]["tooltip"]["pointFormat"]
     lines = {pl["label"]["text"]: pl["value"] for pl in fig["xAxis"]["plotLines"]}
     assert lines == {"Spot 100.00": 0.0, "Gamma flip 99.00": -1.0,
                      "Call wall 101.00": 1.0, "Balanced 100.00": 0.0}

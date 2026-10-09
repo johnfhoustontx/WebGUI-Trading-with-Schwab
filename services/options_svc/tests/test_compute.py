@@ -2164,7 +2164,9 @@ def test_the_history_crop_keeps_the_spot_window_around_the_sessions_low(monkeypa
     assert min(off) == 5340.0                  # the rule as it was: the path, no more
     monkeypatch.setattr(compute._heat_cfg, "spot_side", lambda: 10)
     on = compute.gamma_snapshot("$SPX")["views"]["GEX"]["history"][0][6]
-    assert min(on) == 5330.0 and max(on) == max(off) == 5420.0
+    # Ten strikes below the low, and the eleventh that brackets the frame's
+    # bottom row (gamma_window.crop_keep).
+    assert min(on) == 5329.0 and max(on) == max(off) == 5420.0
 
 
 def test_the_scale_lock_uses_the_same_display_window(monkeypatch):

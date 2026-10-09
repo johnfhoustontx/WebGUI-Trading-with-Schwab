@@ -949,8 +949,8 @@ _GAMMA_HEAT = ConfigFile(
             Field("window.spot_side", "Each side of the price, measured from spot",
                   "For the From spot frame. The service keeps this many extra "
                   "strikes around the day's low and high, in every view, every "
-                  "minute: 10 costs about a tenth more history on a wide day, "
-                  "20 about a third. 0 keeps none.",
+                  "minute: 10 costs about an eighth more history on a wide "
+                  "day, 20 about two fifths. 0 keeps none.",
                   kind="int", unit="strikes", min=0, max=60, step=1),
         )),
     ),

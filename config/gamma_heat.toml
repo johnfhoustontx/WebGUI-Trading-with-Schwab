@@ -34,8 +34,8 @@ n_side = 20
 # service keeps the same number each side of the session's LOW and HIGH in the
 # published history, so that frame is never short of data on a trending day.
 # Every strike here is paid for in each view's history, every minute: measured on
-# stored sessions with tools/measure_gamma_crop.py, 10 added about 10% to $SPX's
-# history on its widest stored day and nothing on a quiet one; 20 added about
-# 36%. Never more than n_side. 0 keeps no extra strikes, and the frame then
-# shows gaps where a column has none.
+# stored sessions with tools/measure_gamma_crop.py, 10 added about 12% to $SPX's
+# history on its widest stored day (a 1.1% range) and nothing on a quiet one; 20
+# added about 40%. Never more than n_side. 0 keeps no extra strikes, and the
+# frame then shows gaps where a column has none.
 spot_side = 10

@@ -664,10 +664,11 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=None, heigh
         "xAxis": {**_dark_axis("From spot" if from_spot else "Strike"),
                   "min": yr[0], "max": yr[1],
                   "reversed": False, "startOnTick": False, "endOnTick": False,
-                  # A strike prints two places: 450.00, never 450. A distance
-                  # from spot carries its sign: +5.00, -12.50.
-                  "labels": {"style": {"color": FONT},
-                             "format": "{value:+.2f}" if from_spot else "{value:.2f}"},
+                  # A strike prints two places: 450.00, never 450. So does a
+                  # distance from spot (20.00, -12.50). ⚠ Highcharts' format
+                  # strings ignore a ``+`` flag (seen in the browser: it printed
+                  # 20.00), so none is written; the axis title says what it is.
+                  "labels": {"style": {"color": FONT}, "format": "{value:.2f}"},
                   "plotLines": plotlines},
         "yAxis": {**_dark_axis(label),
                   # ALWAYS emitted, None when not locked: the chart is updated in
@@ -1074,7 +1075,7 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                "colsize": 1, "rowsize": rowsize,
                "interpolation": True, "borderWidth": 0, "states": no_fade,
                "tooltip": {"headerFormat": "",
-                           "pointFormat": ("{point.y:+.2f} from spot · " if from_spot
+                           "pointFormat": ("{point.y:.2f} from spot · " if from_spot
                                            else "Strike {point.y:.2f} · ")
                                           + _heat.VALUES[mode].lower()
                                           + (" {point.value:.1f}% of column"

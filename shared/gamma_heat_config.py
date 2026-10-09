@@ -35,8 +35,8 @@ DEFAULTS = {
         # Strikes drawn each side of price in the heatmap's "From spot" frame,
         # and kept each side of the session's LOW and HIGH in the published
         # history so that frame is never short of data. Every strike here is
-        # paid for in each view's history, every minute: 10 measured about +10%
-        # on $SPX's widest stored day and 20 about +36%
+        # paid for in each view's history, every minute: 10 measured about +12%
+        # on $SPX's widest stored day and 20 about +40%
         # (tools/measure_gamma_crop.py). 0 keeps no extra strikes.
         "spot_side": 10,
     },

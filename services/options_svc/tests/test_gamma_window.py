@@ -47,14 +47,30 @@ def test_the_crop_keeps_a_full_window_around_the_sessions_low_and_high():
     assert {95.0, 100.0, 105.0} <= keep          # a window around the low
     assert {145.0, 150.0, 155.0} <= keep         # and around now
     assert {float(k) for k in range(100, 151)} <= keep     # and the path between
-    assert 94.0 not in keep and 156.0 not in keep
-    assert min(keep) == 95.0 and max(keep) == 155.0
+    # Five strikes each side of the low and the high, plus the one that brackets
+    # the frame's outermost row (see the bracket test below).
+    assert 93.0 not in keep and 157.0 not in keep
+    assert min(keep) == 94.0 and max(keep) == 156.0
 
 
 def test_the_crop_keeps_a_window_around_a_high_above_the_current_spot():
     """Price ran up and came back: the columns at the high need strikes above it."""
     keep = gw.crop_keep(_LADDER, 100.0, [100.0, 160.0, 100.0], 5, 5)
-    assert max(keep) == 165.0 and min(keep) == 95.0
+    assert max(keep) == 166.0 and min(keep) == 94.0
+
+
+def test_the_crop_brackets_the_frames_outermost_row():
+    """The frame's bottom row sits ``edge`` ladder steps below price. With price
+    between two strikes that point is between the edge-th strike below and the
+    next one, and interpolating it needs BOTH. Found on a trending seed, where
+    six columns each came up one cell short."""
+    ladder = [float(k) for k in range(0, 205, 5)]          # 5-wide
+    low, edge, step = 102.5, 2, 5.0
+    keep = gw.crop_keep(ladder, 150.0, [low, 150.0], 4, edge)
+    bottom_row = low - edge * step                         # 92.5
+    assert max(k for k in keep if k <= bottom_row) == 90.0
+    assert min(k for k in keep if k >= bottom_row) == 95.0
+    assert 85.0 not in keep
 
 
 def test_the_crop_without_a_path_is_the_window_around_spot():
@@ -63,8 +79,11 @@ def test_the_crop_without_a_path_is_the_window_around_spot():
 
 
 def test_the_crop_falls_back_to_the_path_when_there_is_no_current_spot():
-    """An off-hours snapshot: no live spot, but the stored session has one."""
-    assert gw.crop_keep(_LADDER, None, [100.0], 5, 5) == gw.window_around(_LADDER, 100.0, 5)
+    """An off-hours snapshot: no live spot, but the stored session has one. The
+    path's one spot is its low and its high, so the edge window (five, and the
+    bracketing strike) applies around it."""
+    assert gw.crop_keep(_LADDER, None, [100.0], 5, 0) == gw.window_around(_LADDER, 100.0, 5)
+    assert gw.crop_keep(_LADDER, None, [100.0], 5, 5) == gw.window_around(_LADDER, 100.0, 6)
 
 
 def test_the_crop_without_any_spot_keeps_everything():
@@ -86,9 +105,10 @@ def test_an_edge_of_zero_is_the_rule_as_it_was():
 
 
 def test_the_edge_window_is_its_own_size():
-    """Three strikes each side of the low and the high, whatever n_side is."""
+    """Three strikes each side of the low and the high (and the bracketing one),
+    whatever n_side is."""
     keep = gw.crop_keep(_LADDER, 130.0, [100.0, 160.0], 5, 3)
-    assert min(keep) == 97.0 and max(keep) == 163.0
+    assert min(keep) == 96.0 and max(keep) == 164.0
 
 
 def test_the_crop_never_drops_a_strike_the_old_rule_kept():

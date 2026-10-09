@@ -36,11 +36,17 @@ def crop_keep(strikes, spot, path, n_side, edge_side=0):
     below it, on exactly the trending days a spot-centred chart is for. The page
     draws its spot frame ``edge_side`` strikes tall for that reason.
 
+    ONE MORE strike than ``edge_side`` is kept each side. The frame's outermost
+    row sits ``edge_side`` ladder steps from price, and price is rarely exactly
+    on a strike, so that row falls BETWEEN the ``edge_side``-th strike and the
+    next one: interpolating it needs both. Without the extra strike the columns
+    at the day's low and high each lose their outermost cell.
+
     ``edge_side=0`` is the rule as it was before the spot frame, exactly. Any
     larger value only ever adds strikes, and each one is paid for in every
     view's history, every minute: measured on stored sessions with
-    ``tools/measure_gamma_crop.py``, 20 added 36% to $SPX's history on a 1.1%
-    day. It is ``config/gamma_heat.toml [window] spot_side``.
+    ``tools/measure_gamma_crop.py``, 20 added about 40% to $SPX's history on a
+    1.1% day. It is ``config/gamma_heat.toml [window] spot_side``.
 
     None when there is no usable spot at all, current or stored: the grids are
     then left uncropped, because there is nothing to window around."""
@@ -54,8 +60,8 @@ def crop_keep(strikes, spot, path, n_side, edge_side=0):
         keep |= {k for k in strikes if isinstance(k, (int, float))
                  and not isinstance(k, bool) and lo <= k <= hi}
         if edge_side > 0:
-            keep |= (window_around(strikes, lo, edge_side)
-                     | window_around(strikes, hi, edge_side))
+            keep |= (window_around(strikes, lo, edge_side + 1)
+                     | window_around(strikes, hi, edge_side + 1))
     return keep
 
 
