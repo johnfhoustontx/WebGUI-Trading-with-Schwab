@@ -44,6 +44,29 @@ def test_a_missing_section_is_the_defaults(monkeypatch):
     assert cfg.lock() == cfg.DEFAULTS["lock"]
 
 
+def test_window_defaults():
+    assert cfg.n_side() == 20 and cfg.spot_side() == 10
+    assert isinstance(cfg.n_side(), int) and isinstance(cfg.spot_side(), int)
+
+
+def test_the_spot_window_is_never_wider_than_the_display_window(monkeypatch):
+    """The spot frame cannot show strikes the display window does not hold."""
+    monkeypatch.setattr(cfg, "load", lambda: {"window": {"n_side": 12, "spot_side": 30}})
+    assert cfg.n_side() == 12 and cfg.spot_side() == 12
+
+
+def test_a_spot_window_of_zero_is_allowed_and_means_off(monkeypatch):
+    monkeypatch.setattr(cfg, "load", lambda: {"window": {"spot_side": 0}})
+    assert cfg.spot_side() == 0
+
+
+def test_bad_window_values_fall_back(monkeypatch):
+    monkeypatch.setattr(cfg, "load", lambda: {"window": {"n_side": 1, "spot_side": -3}})
+    assert cfg.n_side() == 20 and cfg.spot_side() == 10
+    monkeypatch.setattr(cfg, "load", lambda: {"window": {"n_side": True, "spot_side": "x"}})
+    assert cfg.n_side() == 20 and cfg.spot_side() == 10
+
+
 def test_lock_defaults():
     assert cfg.lock() == {"minutes": 60, "quantile": 0.95, "headroom": 1.5}
     assert isinstance(cfg.lock()["minutes"], int)

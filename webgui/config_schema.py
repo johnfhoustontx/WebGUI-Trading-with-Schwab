@@ -940,6 +940,19 @@ _GAMMA_HEAT = ConfigFile(
                   "Room above the first minutes' largest cells.",
                   kind="float", min=1, max=5, step=0.1),
         )),
+        Section("Strikes shown",
+                "Read by the page and the options service each time they draw "
+                "or publish, so no restart is needed.", (
+            Field("window.n_side", "Each side of the price",
+                  "On the bars and the heat map.",
+                  kind="int", unit="strikes", min=4, max=60, step=1),
+            Field("window.spot_side", "Each side of the price, measured from spot",
+                  "For the From spot frame. The service keeps this many extra "
+                  "strikes around the day's low and high, in every view, every "
+                  "minute: 10 costs about a tenth more history on a wide day, "
+                  "20 about a third. 0 keeps none.",
+                  kind="int", unit="strikes", min=0, max=60, step=1),
+        )),
     ),
 )
 

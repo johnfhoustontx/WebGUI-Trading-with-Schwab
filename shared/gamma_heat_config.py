@@ -27,6 +27,19 @@ DEFAULTS = {
         # the top of the scale.
         "headroom": 1.5,
     },
+    "window": {
+        # Strikes shown each side of spot on the bars and the heatmap, and kept
+        # each side of the current spot in the published history. One number
+        # for both tiers (it was a literal 20 in each until 2026-10-09).
+        "n_side": 20,
+        # Strikes drawn each side of price in the heatmap's "From spot" frame,
+        # and kept each side of the session's LOW and HIGH in the published
+        # history so that frame is never short of data. Every strike here is
+        # paid for in each view's history, every minute: 10 measured about +10%
+        # on $SPX's widest stored day and 20 about +36%
+        # (tools/measure_gamma_crop.py). 0 keeps no extra strikes.
+        "spot_side": 10,
+    },
 }
 
 load, reset_cache = toml_loader(GAMMA_HEAT_TOML, DEFAULTS, label="gamma_heat.toml")
@@ -53,6 +66,20 @@ def balanced() -> dict:
             "min_size_quantile": _setting("balanced", "min_size_quantile",
                                           minimum=0.0, maximum=1.0),
             "max_marks": _setting("balanced", "max_marks", minimum=0)}
+
+
+def n_side() -> int:
+    """Strikes each side of spot in the display window. Read at CALL time by the
+    page and by options_svc, so the two tiers agree within a minute of a change
+    and neither needs a restart."""
+    return _setting("window", "n_side", minimum=4, maximum=60)
+
+
+def spot_side() -> int:
+    """Strikes each side of price in the "From spot" frame, and each side of the
+    session's low and high in the published history. Never more than
+    ``n_side``. 0 turns the wider history crop off."""
+    return min(_setting("window", "spot_side", minimum=0, maximum=60), n_side())
 
 
 def lock() -> dict:

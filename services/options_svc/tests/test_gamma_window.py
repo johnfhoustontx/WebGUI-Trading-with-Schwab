@@ -37,6 +37,71 @@ def test_the_module_imports_nothing_from_compute():
     assert "import compute" not in src and "from services.options_svc" not in src
 
 
+# ── the history crop ─────────────────────────────────────────────────────────
+
+_LADDER = [float(k) for k in range(0, 201)]
+
+
+def test_the_crop_keeps_a_full_window_around_the_sessions_low_and_high():
+    keep = gw.crop_keep(_LADDER, 150.0, [100.0, 150.0], 5, 5)
+    assert {95.0, 100.0, 105.0} <= keep          # a window around the low
+    assert {145.0, 150.0, 155.0} <= keep         # and around now
+    assert {float(k) for k in range(100, 151)} <= keep     # and the path between
+    assert 94.0 not in keep and 156.0 not in keep
+    assert min(keep) == 95.0 and max(keep) == 155.0
+
+
+def test_the_crop_keeps_a_window_around_a_high_above_the_current_spot():
+    """Price ran up and came back: the columns at the high need strikes above it."""
+    keep = gw.crop_keep(_LADDER, 100.0, [100.0, 160.0, 100.0], 5, 5)
+    assert max(keep) == 165.0 and min(keep) == 95.0
+
+
+def test_the_crop_without_a_path_is_the_window_around_spot():
+    assert gw.crop_keep(_LADDER, 150.0, [], 5, 5) == gw.window_around(_LADDER, 150.0, 5)
+    assert gw.crop_keep(_LADDER, 150.0, None, 5, 5) == gw.window_around(_LADDER, 150.0, 5)
+
+
+def test_the_crop_falls_back_to_the_path_when_there_is_no_current_spot():
+    """An off-hours snapshot: no live spot, but the stored session has one."""
+    assert gw.crop_keep(_LADDER, None, [100.0], 5, 5) == gw.window_around(_LADDER, 100.0, 5)
+
+
+def test_the_crop_without_any_spot_keeps_everything():
+    assert gw.crop_keep([1.0, 2.0], None, [], 5) is None
+    assert gw.crop_keep([1.0, 2.0], None, [None, "x"], 5) is None
+
+
+def test_an_edge_of_zero_is_the_rule_as_it_was():
+    """Exactly the window around the anchor plus the strikes the path crossed:
+    the wider crop is something an operator turns on, never a side effect."""
+    for spot, path in ((150.0, [100.0, 150.0]), (100.0, [100.0, 160.0, 100.0]),
+                       (80.0, []), (None, [100.0, 120.0])):
+        anchor = spot if spot is not None else path[0]
+        old = gw.window_around(_LADDER, anchor, 5)
+        if path:
+            old |= {k for k in _LADDER if min(path) <= k <= max(path)}
+        assert gw.crop_keep(_LADDER, spot, path, 5) == old
+        assert gw.crop_keep(_LADDER, spot, path, 5, 0) == old
+
+
+def test_the_edge_window_is_its_own_size():
+    """Three strikes each side of the low and the high, whatever n_side is."""
+    keep = gw.crop_keep(_LADDER, 130.0, [100.0, 160.0], 5, 3)
+    assert min(keep) == 97.0 and max(keep) == 163.0
+
+
+def test_the_crop_never_drops_a_strike_the_old_rule_kept():
+    """The old rule: the window around the anchor plus the strikes the path
+    crossed. The new one only ever adds to it."""
+    for spot, path in ((150.0, [100.0, 150.0]), (100.0, [100.0, 160.0]), (80.0, [])):
+        old = gw.window_around(_LADDER, spot, 5)
+        if path:
+            old |= {k for k in _LADDER if min(path) <= k <= max(path)}
+        for edge in (0, 3, 5):
+            assert old <= gw.crop_keep(_LADDER, spot, path, 5, edge)
+
+
 # ── the scale lock ───────────────────────────────────────────────────────────
 
 def _rows(minutes, scale=1.0, spot=100.0):

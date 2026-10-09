@@ -25,6 +25,40 @@ def window_around(strikes, spot, n_side):
     return set(below + [x for x in s if x == spot] + above)
 
 
+def crop_keep(strikes, spot, path, n_side, edge_side=0):
+    """The strikes a view's history keeps, or None for "keep everything".
+
+    The display window (``n_side`` each side) around the current spot, or the
+    first spot on the path when there is no current one; every strike the
+    session's path crossed; and ``edge_side`` strikes each side of the session's
+    LOW and of its HIGH. That last part is what lets the page centre each column
+    on its own spot: without it a column at the day's low has almost nothing
+    below it, on exactly the trending days a spot-centred chart is for. The page
+    draws its spot frame ``edge_side`` strikes tall for that reason.
+
+    ``edge_side=0`` is the rule as it was before the spot frame, exactly. Any
+    larger value only ever adds strikes, and each one is paid for in every
+    view's history, every minute: measured on stored sessions with
+    ``tools/measure_gamma_crop.py``, 20 added 36% to $SPX's history on a 1.1%
+    day. It is ``config/gamma_heat.toml [window] spot_side``.
+
+    None when there is no usable spot at all, current or stored: the grids are
+    then left uncropped, because there is nothing to window around."""
+    path = [p for p in path or () if finite(p) is not None]
+    anchor = spot if finite(spot) is not None else (path[0] if path else None)
+    if anchor is None:
+        return None
+    keep = window_around(strikes, anchor, n_side)
+    if path:
+        lo, hi = min(path), max(path)
+        keep |= {k for k in strikes if isinstance(k, (int, float))
+                 and not isinstance(k, bool) and lo <= k <= hi}
+        if edge_side > 0:
+            keep |= (window_around(strikes, lo, edge_side)
+                     | window_around(strikes, hi, edge_side))
+    return keep
+
+
 # ── the heatmap's locked colour scale ────────────────────────────────────────
 _LOCK_VALUES = ("net", "call", "put", "size")
 

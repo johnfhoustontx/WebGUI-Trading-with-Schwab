@@ -4041,12 +4041,9 @@ def _level_track(rows, vname):
 # JSON parse on the GUI event loop every 120 s. We crop each per-strike grid to
 # the display window SERVER-SIDE before caching — same key, same structure, far
 # fewer strikes. flip/walls are computed on the FULL grid FIRST (they're separate
-# fields), so cropping can't change them.
-GAMMA_N_SIDE = 20
-
-
-# The window itself lives in gamma_window.py (moved 2026-10-09; this file has a
-# line ceiling). Both callers below pass ``n_side`` explicitly.
+# fields), so cropping can't change them. The window's size is config, read when a
+# snapshot is built (config/gamma_heat.toml [window]; the page reads the same key),
+# and the window and crop rules live in gamma_window.py (this file has a ceiling).
 _window_around = _gw.window_around
 
 
@@ -4060,20 +4057,23 @@ def _crop_grid(grid, keep):
     return {k: v for k, v in grid.items() if k in keep}
 
 
-def _crop_gamma_views(views, spot, n_side=GAMMA_N_SIDE):
+def _crop_gamma_views(views, spot, n_side=None):
     """Crop each view's current per-strike ``data`` grid AND its history-row grids
     (tuple index 6) to the display window: the ±``n_side`` band around the CURRENT
-    spot, widened to span the intraday spot PATH (min→max of history-row spots).
+    spot, widened to span the intraday spot PATH (min→max of history-row spots),
+    plus the spot frame's window around that path's low and high
+    (``gamma_window.crop_keep``, which states the whole rule and its cost).
 
-    This exactly mirrors the page's y-range (``bar_yrange(±n_side)`` then
-    ``union_range(spot_path)``) — the heatmap is cropped to that same [lo, hi]
-    band client-side, so keeping only strikes in that band is behavior-preserving
-    while dropping the ~250-strike full chain down to the visible window.
+    The first two parts mirror the page's strike-frame y-range
+    (``bar_yrange(±n_side)`` then ``union_range(spot_path)``); the heatmap crops
+    to that band client-side, so a strike outside it is never drawn there.
 
     Mutates ``views`` in place (the entries are freshly built dicts). flip/walls
     live in separate fields already computed on the FULL grid, so they're untouched.
     Returns ``views``.
     """
+    n_side = _heat_cfg.n_side() if n_side is None else n_side
+    edge = _heat_cfg.spot_side()
     for entry in (views or {}).values():
         data = entry.get("data") or {}
         grid = data.get("gex") or {}
@@ -4085,17 +4085,9 @@ def _crop_gamma_views(views, spot, n_side=GAMMA_N_SIDE):
                 all_strikes.update(r[6].keys())
         path_spots = [r[1] for r in rows
                       if len(r) > 1 and isinstance(r[1], (int, float))]
-        if not isinstance(spot, (int, float)) and not path_spots:
+        keep = _gw.crop_keep(all_strikes, spot, path_spots, n_side, edge)
+        if keep is None:
             continue  # no usable spot → leave grids untouched (can't window safely)
-        # ±n_side band around the current spot (falls back to the path when the
-        # current spot is missing — e.g. an off-hours snapshot).
-        anchor = spot if isinstance(spot, (int, float)) else path_spots[0]
-        keep = _window_around(all_strikes, anchor, n_side)
-        # Widen to span the intraday spot path (so the overlaid price line — and any
-        # strike between two drifted spots — isn't clipped), matching union_range.
-        if path_spots:
-            lo, hi = min(path_spots), max(path_spots)
-            keep |= {k for k in all_strikes if lo <= k <= hi}
         # Crop the current per-strike grid used for the bars.
         if grid:
             data["gex"] = _crop_grid(grid, keep)
@@ -4586,7 +4578,7 @@ def gamma_snapshot(symbol: str, chain=None, with_term: bool = True) -> dict | No
                 "levels": _level_track(_rows, vname),
                 # The heatmap's locked colour maximum, from the UNCROPPED rows
                 # like the tracks above (the crop follows the current spot).
-                "scale_lock": _gw.scale_lock(_rows, n_side=GAMMA_N_SIDE,
+                "scale_lock": _gw.scale_lock(_rows, n_side=_heat_cfg.n_side(),
                                              **_heat_cfg.lock()),
             }
             if vname == "DEX":

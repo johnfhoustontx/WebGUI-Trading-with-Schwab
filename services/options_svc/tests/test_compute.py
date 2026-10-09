@@ -2092,7 +2092,7 @@ class _WideEngine(_FakeEngine):
 
 
 def test_gamma_snapshot_crops_grids_to_window(monkeypatch):
-    """Each view's current grid + history grids are cropped to ±GAMMA_N_SIDE
+    """Each view's current grid + history grids are cropped to ±n_side (config)
     strikes around spot, while flip/walls (full-grid fields) are unchanged."""
     # A wide history-row grid at the same spot (5340..5460); should crop to window.
     hist_grid = {float(5400 + i): {"net": 1.0} for i in range(-60, 61)}
@@ -2130,6 +2130,52 @@ def test_gamma_snapshot_crop_widens_for_history_spot_drift(monkeypatch):
     gexv = snap["views"]["GEX"]
     # 5300 is within ±20 of the earlier spot 5300 → kept in the union window.
     assert 5300.0 in gexv["history"][0][6]
+
+
+def _wide_history(*spots):
+    """One row per spot, each with a 1-wide ladder 5200..5600."""
+    grid = {float(k): {"net": 1.0} for k in range(5200, 5601)}
+    return [(1 + i, s, 3, 4, 5, 6, grid) for i, s in enumerate(spots)]
+
+
+def test_the_history_crop_reads_the_display_window_from_config(monkeypatch):
+    """Proven by patching the accessor: the window is read when the snapshot is
+    built, so a saved change needs no restart (config/gamma_heat.toml [window])."""
+    _patch_gamma(monkeypatch, history=_wide_history(5400.0))
+    import sys as _sys
+    _sys.modules["gamma_tool"].GammaEngine = _WideEngine
+    monkeypatch.setattr(compute._heat_cfg, "n_side", lambda: 7)
+    monkeypatch.setattr(compute._heat_cfg, "spot_side", lambda: 0)
+    gexv = compute.gamma_snapshot("$SPX")["views"]["GEX"]
+    want = [float(5400 + i) for i in range(-7, 8)]
+    assert sorted(gexv["history"][0][6]) == want
+    assert sorted(gexv["data"]["gex"]) == want
+
+
+def test_the_history_crop_keeps_the_spot_window_around_the_sessions_low(monkeypatch):
+    """The page's From spot frame centres each column on its own spot, so the
+    column at the day's low needs strikes BELOW that low."""
+    _patch_gamma(monkeypatch, history=_wide_history(5340.0, 5400.0))
+    import sys as _sys
+    _sys.modules["gamma_tool"].GammaEngine = _WideEngine
+    monkeypatch.setattr(compute._heat_cfg, "n_side", lambda: 20)
+    monkeypatch.setattr(compute._heat_cfg, "spot_side", lambda: 0)
+    off = compute.gamma_snapshot("$SPX")["views"]["GEX"]["history"][0][6]
+    assert min(off) == 5340.0                  # the rule as it was: the path, no more
+    monkeypatch.setattr(compute._heat_cfg, "spot_side", lambda: 10)
+    on = compute.gamma_snapshot("$SPX")["views"]["GEX"]["history"][0][6]
+    assert min(on) == 5330.0 and max(on) == max(off) == 5420.0
+
+
+def test_the_scale_lock_uses_the_same_display_window(monkeypatch):
+    _patch_gamma(monkeypatch, history=_lock_history(70))
+    monkeypatch.setattr(compute._heat_cfg, "lock",
+                        lambda: {"minutes": 60, "quantile": 1.0, "headroom": 1.0})
+    # The huge strike sits 60 above spot: outside a window of 20, inside one of 60.
+    monkeypatch.setattr(compute._heat_cfg, "n_side", lambda: 20)
+    assert compute.gamma_snapshot("$SPX")["views"]["GEX"]["scale_lock"]["net"] == 2.0
+    monkeypatch.setattr(compute._heat_cfg, "n_side", lambda: 60)
+    assert compute.gamma_snapshot("$SPX")["views"]["GEX"]["scale_lock"]["net"] == 9e9
 
 
 def _lock_history(minutes):
