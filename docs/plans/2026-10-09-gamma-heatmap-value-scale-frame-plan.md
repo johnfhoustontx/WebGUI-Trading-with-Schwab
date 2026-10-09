@@ -1312,6 +1312,40 @@ git commit -m "docs(gamma): the heatmap's Value picker, balanced markers and leg
 
 ---
 
+## Phases 0 and 1 as built (2026-10-09)
+
+Both are done and committed on this branch. Five things were built differently from
+the tasks above. **Phase 2 onward must start from these, not from the task text.**
+
+1. **`HeatControls.read(grid, rows, strikes)` replaced `args()` and `marks()`.** It
+   returns one dict, `{"mode": …, "balanced": […]}`, that `_render_view` passes to
+   BOTH builders as `**_hk`. It also sets whether the session has sides and clears
+   the legend. When Phase 2 adds `scale` and `lock`, add them to that dict (both
+   builders must then accept them) and give `read` the view's `entry`.
+2. **`bars_from_gex` kept its return shape.** An existing test pins the exact keys of
+   its empty return, so it gained no `calls` / `puts` lists. In Size, `bar_figure`
+   reads each strike's two sides from `data["gex"]` itself.
+3. **Two builders moved out of `render` to pay for the new lines:** `refloat_rows`
+   and `projection_arg`, both module-level and tested. `render` is **1,469 lines and
+   59 nested functions**, which is exactly the ceiling Task 0.2 set. It has no
+   slack: every line a later phase adds to `render` needs a line moved out.
+4. **A session with no sided cells leaves the picker's value alone.** The plan had
+   `set_sides` write "net" into the picker; that would fire the change handler from
+   inside a paint. The paint falls back to net and the picker is disabled.
+5. **The legend is 520 px wide**, not 420, so the unit and the caption fit.
+
+Also found while verifying, and not caused by this work: loading the page while the
+Browser pane is hidden logs `<rect> height -1` and `scale(NaN NaN)` errors, because
+the charts mount at near-zero width. A view switch and a value change log none.
+`test_live_screens.py`'s comment on the `gamma_*` settings was reworded to count
+`gamma_heat_value`; no assertion changed.
+
+Not done from Task 1.8: the checks were made on a synthetic session. Nothing has been
+seen on prod data, and the public render was checked for building with the picker,
+not with a live symbol.
+
+---
+
 ## Phase 2 — The locked scale, and Share of column
 
 ### Task 2.1: Buy room in `compute.py`
