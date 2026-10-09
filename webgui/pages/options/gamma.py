@@ -53,6 +53,10 @@ PRICE_LINE = "#f5f5f5"          # off-white — spot track overlaid on the dark 
 # are the two the plasma ramp never reaches — pinned by a test.
 FLIP_COLOR = "#b39ddb"
 PROJ_FLIP_COLOR = "#ffb74d"   # projected EOD delta-flip (0-DTE charm drift)
+# A strike whose calls and puts nearly cancel (gamma_heat.balanced_marks). A cool
+# grey: amber is the projected flip's, lavender the flip's, and both ramp colours
+# are the walls'. A test pins it distinct from every other level's colour.
+BALANCED_COLOR = "#9fb3c8"
 PANEL_BORDER = "rgba(120,140,160,0.16)"   # hairline framing the washed plot area
 
 # Dark theme for all charts (matches the app's dark shell).
@@ -307,12 +311,13 @@ def glow(hexc, width=GLOW_WIDTH):
     return {"color": hexc, "width": width, "offsetX": 0, "offsetY": 0, "opacity": 1}
 
 
-def line_annotations(spot, flip, walls):
+def line_annotations(spot, flip, walls, balanced=()):
     """Reference-line labels (Spot / Gamma flip / walls) as ``{value, text, color}``.
 
     Walls are labeled by side: ``Call wall`` (strike ≥ spot, resistance) or
     ``Put wall`` (strike < spot, support). Consumed by ``bar_figure`` to build the
-    strike-axis plotLine labels."""
+    strike-axis plotLine labels. ``balanced`` adds a ``Balanced`` label per strike
+    whose calls and puts nearly cancel."""
     anns = []
     if spot is not None:
         anns.append({"value": spot, "text": f"Spot {_fmt.price(spot)}", "color": SPOT_COLOR})
@@ -322,6 +327,10 @@ def line_annotations(spot, flip, walls):
         call = spot is None or w >= spot
         anns.append({"value": w, "text": f"{'Call' if call else 'Put'} wall {_fmt.price(w)}",
                      "color": CALL_WALL_COLOR if call else PUT_WALL_COLOR})
+    for k in balanced or ():
+        if _is_level(k):
+            anns.append({"value": k, "text": f"Balanced {_fmt.price(k)}",
+                         "color": BALANCED_COLOR})
     return anns
 
 
@@ -337,7 +346,7 @@ def _is_level(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
-def wall_plot_lines(spot, walls, flip=None, projected_flip=None):
+def wall_plot_lines(spot, walls, flip=None, projected_flip=None, balanced=()):
     """Gamma-flip + Call/Put wall (+ projected EOD flip) levels as yAxis plotLines —
     horizontal, so they run ACROSS the heatmap's full time axis.
 
@@ -366,6 +375,11 @@ def wall_plot_lines(spot, walls, flip=None, projected_flip=None):
         call = spot is None or w >= spot
         out.append(_level_plot_line(w, f"{'Call' if call else 'Put'} wall {_fmt.price(w)}",
                                     CALL_WALL_COLOR if call else PUT_WALL_COLOR))
+    # Strikes whose calls and puts nearly cancel: empty in a net heatmap, so they
+    # are named here, across both panels, like any other level.
+    for k in balanced or ():
+        if _is_level(k):
+            out.append(_level_plot_line(k, f"Balanced {_fmt.price(k)}", BALANCED_COLOR))
     return out
 
 
@@ -559,7 +573,7 @@ _INIT_FLEX = flex_class(0.5)
 
 
 def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, height=680,
-               yrange=None, mode="net"):
+               yrange=None, mode="net", balanced=()):
     """Highcharts horizontal-bar options for one view (dark, beveled, labeled).
 
     In a Highcharts ``bar`` chart the category axis (``xAxis``) is vertical, so the
@@ -600,7 +614,7 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, hei
                                   "Solid" if a["text"].startswith("Spot") else
                                   ("Dash" if "flip" in a["text"] else "Dot"),
                                   a["text"])
-                 for a in line_annotations(spot, flip, walls)]
+                 for a in line_annotations(spot, flip, walls, balanced)]
     fig = _base_chart("bar", height)
     # Transparent so the page background shows through — matches the heatmap panel
     # (and the candlestick graph) instead of the lighter DARK_BG box.
@@ -934,7 +948,7 @@ def track_points(values):
 def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                    walls=None, spot=None, flip=None, levels=None,
                    show_tracks=False, spot_style="line", spot_interval=5,
-                   projected_flip=None, mode="net"):
+                   projected_flip=None, mode="net", balanced=()):
     """Intraday strike×time Highcharts heatmap (dark, cell separators, concise
     hover) with the underlying spot-price line overlaid on the same (linear)
     strike axis. ``yrange`` (when given) sets the Strike axis range so it aligns
@@ -1115,7 +1129,8 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
              # ALWAYS emit the key (empty when there are no levels): in-place
              # chart.update() MERGES options, so omitting it would leave the
              # previous view's flip/wall lines painted over the new view.
-             "plotLines": wall_plot_lines(spot, walls, flip, projected_flip)}
+             "plotLines": wall_plot_lines(spot, walls, flip, projected_flip,
+                                          balanced)}
     if yrange is not None:
         yaxis["min"], yaxis["max"] = yrange[0], yrange[1]
     fig = _base_chart("heatmap", height)

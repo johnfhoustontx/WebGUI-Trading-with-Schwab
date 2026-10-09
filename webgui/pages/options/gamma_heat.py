@@ -54,3 +54,27 @@ def has_sides(grids):
                     and _fmt.num(cell.get("put")) is not None):
                 return True
     return False
+
+
+def balanced_marks(grid, strikes, *, max_polarity, min_size_quantile, max_marks):
+    """The strikes in ``strikes`` that hold a lot and lean little, largest first.
+
+    A strike qualifies when ``abs(net) / size`` is at or under ``max_polarity``
+    and its size is at or above the ``min_size_quantile`` rank of the strikes
+    given. These are the strikes ``net`` draws as empty, and ``size`` draws in a
+    hue that a small change of net can flip, so they are named on the axis.
+    The three thresholds are ``config/gamma_heat.toml [balanced]``."""
+    sized = []
+    for strike in strikes or ():
+        cell = (grid or {}).get(strike)
+        size, net = cell_value(cell, "size"), cell_value(cell, "net")
+        if not size or net is None:
+            continue
+        sized.append((abs(size), abs(net) / abs(size), strike))
+    if not sized:
+        return []
+    ranked = sorted(s for s, _, _ in sized)
+    floor = ranked[min(len(ranked) - 1, int(min_size_quantile * (len(ranked) - 1)))]
+    hits = sorted(((s, k) for s, lean, k in sized
+                   if s >= floor and lean <= max_polarity), reverse=True)
+    return [k for _, k in hits[:max(0, int(max_marks))]]

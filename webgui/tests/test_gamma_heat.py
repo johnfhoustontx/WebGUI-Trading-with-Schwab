@@ -86,3 +86,39 @@ def test_it_imports_nothing_from_gamma():
         elif isinstance(node, ast.ImportFrom):
             assert not (node.module or "").endswith("gamma")
             assert "gamma" not in {a.name for a in node.names}
+
+
+# ── balanced strikes ─────────────────────────────────────────────────────────
+
+GRID = {
+    95.0: {"call": 1.0, "put": -1.0, "net": 0.0},          # balanced but tiny
+    100.0: {"call": 500.0, "put": -480.0, "net": 20.0},    # balanced and large
+    105.0: {"call": 400.0, "put": -10.0, "net": 390.0},    # large, one-sided
+    110.0: {"call": 300.0, "put": -290.0, "net": 10.0},    # balanced and large
+    115.0: 7.0,                                            # a legacy bare number
+}
+KW = dict(max_polarity=0.15, min_size_quantile=0.5, max_marks=3)
+
+
+def test_balanced_marks_are_the_large_strikes_that_barely_lean():
+    assert gh.balanced_marks(GRID, sorted(GRID), **KW) == [100.0, 110.0]
+
+
+def test_balanced_marks_are_capped_largest_first():
+    assert gh.balanced_marks(GRID, sorted(GRID), **{**KW, "max_marks": 1}) == [100.0]
+    assert gh.balanced_marks(GRID, sorted(GRID), **{**KW, "max_marks": 0}) == []
+
+
+def test_balanced_marks_look_only_at_the_strikes_on_screen():
+    assert gh.balanced_marks(GRID, [105.0, 110.0], **KW) == [110.0]
+
+
+def test_a_one_sided_strike_is_never_marked_however_loose_the_size_rule():
+    marks = gh.balanced_marks(GRID, sorted(GRID), **{**KW, "min_size_quantile": 0.0})
+    assert marks == [100.0, 110.0, 95.0]
+
+
+def test_balanced_marks_of_nothing():
+    assert gh.balanced_marks({}, [], **KW) == []
+    assert gh.balanced_marks(None, [100.0], **KW) == []
+    assert gh.balanced_marks({100.0: 5.0}, [100.0], **KW) == []

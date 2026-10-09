@@ -3110,3 +3110,39 @@ def test_bars_do_not_write_to_the_grid():
     for mode in ("net", "call", "put", "size"):
         gamma.bar_figure(SIDED, 100.0, mode=mode)
     assert json.dumps(SIDED, sort_keys=True) == before
+
+
+def _balanced_lines(lines):
+    return [pl for pl in lines if pl["label"]["text"].startswith("Balanced")]
+
+
+def test_a_balanced_strike_is_marked_on_both_panels():
+    bars = gamma.bar_figure(SIDED, 100.0, balanced=[100.0])
+    heat = gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0],
+                                balanced=[100.0])
+    for lines in (bars["xAxis"]["plotLines"], heat["yAxis"]["plotLines"]):
+        mark = _balanced_lines(lines)
+        assert len(mark) == 1 and mark[0]["value"] == 100.0
+        assert mark[0]["color"] == gamma.BALANCED_COLOR
+        assert mark[0]["label"]["text"] == "Balanced 100.00"
+    # On the bars it is a dotted line, like a wall; never the spot's solid one.
+    assert _balanced_lines(bars["xAxis"]["plotLines"])[0]["dashStyle"] == "Dot"
+
+
+def test_the_balanced_colour_is_no_other_levels_colour():
+    taken = {gamma.POS_COLOR, gamma.NEG_COLOR, gamma.FLIP_COLOR,
+             gamma.PROJ_FLIP_COLOR, gamma.SPOT_COLOR, gamma.PRICE_LINE}
+    assert gamma.BALANCED_COLOR not in taken
+
+
+def test_no_marks_means_no_balanced_lines():
+    bars = gamma.bar_figure(SIDED, 100.0)
+    heat = gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0])
+    assert not _balanced_lines(bars["xAxis"]["plotLines"])
+    assert not _balanced_lines(heat["yAxis"]["plotLines"])
+
+
+def test_a_mark_that_is_not_a_number_is_skipped_on_the_heatmap():
+    heat = gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0],
+                                balanced=[None, "x", True, 100.0])
+    assert [pl["value"] for pl in _balanced_lines(heat["yAxis"]["plotLines"])] == [100.0]
