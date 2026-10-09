@@ -5,7 +5,10 @@
 `options-scanner/gex_history_db.py` (one more view string). No schema change, no
 new Schwab call, no new command. **Phase A stores the figure and nothing reads it.**
 Readers are Phase B and each is its own decision.
-**Status:** proposed. Nothing here is built.
+**Status:** proposed. Nothing here is built. Plan:
+[2026-10-09-traded-premium-increment-plan.md](2026-10-09-traded-premium-increment-plan.md),
+which builds Phase A with the three proposals under "Open before the plan" taken
+as written.
 **Comes from:** the gate that stopped Phase 5 of
 [the heatmap design](2026-10-09-gamma-heatmap-value-scale-frame-design.md)
 (section 7).
@@ -76,7 +79,7 @@ All measured 2026-10-09, on the backup unless said.
 |---|---|---|
 | Every fetched chain already passes through a per-chain hook on the collector's thread, and one detector there already tracks every contract's volume in memory. | `compute` `on_chain` → `flow_sides_tick.on_chain` | The new pass is one more call in that hook. It follows that module's rules for a first sighting, a gap and a new session. |
 | A carried chain (a watchlist-only symbol between real fetches) is not handed to the hook: it has no new volume. | `gex_collector.poll_once` | No row is written on a carried minute. A tail symbol has a row every `tail_interval_min` minutes, and its new volume is priced at the mark of the minute it was fetched in. |
-| The day's first reading holds almost none of the day's volume. | 0.0% at the first row (06:30 or 08:00), 0.1% to 1.4% at 08:30 | The first reading of a session only sets each contract's baseline. Nothing needs booking at an unknown price. |
+| Little of the day's volume trades before the regular open. | 0.0% at the first row (06:30 or 08:00), 0.1% to 1.4% at 08:30 | The watch begins at the regular open, the rule the bought/sold tally and the hedging-flow model already take (before it a chain's marks are frozen and may still carry yesterday's volume). What traded earlier is left out: at most 1.4% of the day here. |
 | Polls are missed a few times a session. | 3 to 10 gaps a session, usually one or two missed minutes; 2% to 9% of the day's volume crosses a gap; one 34-minute step on `$SPX`, 2026-09-24 | Volume that crosses a gap is still booked, at the later mark. It is not lost, only priced a minute or two late. The size of that share is logged each day. |
 | The per-strike premium pass over an index-sized chain is quick. | 13.8 ms for 6,400 synthetic contracts; 0.5 ms for a stock's 240 | About a tenth of a second a minute across the universe, by arithmetic. Real chain sizes are not measured; Phase A times the pass in place. |
 | The `prem` view is an eighth of the stored grid bytes. | 21.8 MB of 170.2 MB for one session of 90 symbols | A sixth view of the same shape adds about 13% to the database. Grids are kept five sessions, so it is bounded: roughly 110 MB at that universe. |
@@ -87,8 +90,10 @@ All measured 2026-10-09, on the backup unless said.
 One small state per symbol: each contract's highest volume seen this session, the
 running total per strike and side, and the time of the last good reading.
 
-1. **A contract's first reading sets its baseline and books nothing.** After a
-   restart the whole day's volume must not land in one minute.
+1. **A symbol's first reading sets each contract's baseline and books nothing,**
+   and that reading is never before the regular open. After a restart the whole
+   day's volume must not land in one minute. On a later reading, a contract with
+   no baseline stood at zero volume before, so all of its volume is new.
 2. **New volume is booked at this reading's mark,** the same mark the stored figure
    uses today (`flow_skew`'s contract mark). A contract with no usable mark books
    nothing this minute and keeps its baseline, so its volume is booked when a mark
@@ -98,8 +103,9 @@ running total per strike and side, and the time of the last good reading.
 4. **A gap does not drop volume.** Whatever traded while a poll was missed is booked
    at the next reading. The day's check line (below) says how much.
 5. **A new session date clears everything.**
-6. **A restart continues the session's total.** The first poll after a start reads
-   the symbol's last stored row for today and resumes from it. Contract baselines
+6. **A restart continues the session's total.** The first time a symbol is written
+   after a start, its last stored row for today is read and added back. Switching
+   the collection off and on again is treated the same way. Contract baselines
    are rebuilt from that poll, so the volume that traded between the last poll
    before the restart and the first one after it is not booked. Promotes are made
    after the close, so in practice this is a crash, and it costs a minute or two.
@@ -113,11 +119,11 @@ running total per strike and side, and the time of the last good reading.
 
 ```
 services/options_svc/traded_premium.py     new; imports nothing from compute
-    advance(state, chain, now_ts)          pure: books new volume, returns the grid
-    on_chain(symbol, chain, now)           the session state around it
-    take_rows()                            this poll's {symbol: (spot, grid)}
-    restore(gh, conn, today)               rule 6, once after a start
-    day_check()                            the figures for the daily log line
+    advance(state, chain, now_ts)          pure: books one chain's new volume
+    grid(state)                            the running totals as store cells
+    on_chain(symbol, chain, now)           the session state around advance
+    write_rows(gh, conn, ts_min)           rule 6, then this poll's rows, one commit
+    day_check()                            the figures for the daily log lines
 
 services/options_svc/compute.py            two lines
     on_chain(...)                          one more call beside flow_sides_tick
@@ -128,11 +134,21 @@ options-scanner/gex_history_db.py          nothing new: insert_snapshot with a
 ```
 
 `compute.py` is one line under its ceiling, so the two lines it gains are paid for
-by moving an equal amount out, as the heatmap work did.
+by moving the hedging-flow row writer out to a module of its own.
 
-**Config.** One switch, `off` / `on`, in `config/marketdata.toml [collection]`
-(that file is read per request, so it can be turned off without a restart), with
-its entry in Settings → Configuration. It ships `off`.
+A row also carries the symbol's call and put totals in the `call_prem` and
+`put_prem` columns, so a later reader of the totals need not decode a grid. Every
+reader of those columns filters on its own view, so nothing existing sees them.
+
+Strikes are keyed at three decimals. The store keeps strikes as 32-bit floats, so
+an odd strike such as 17.63 reads back as 17.6299991607666; without the rounding, a
+total resumed after a restart and the same strike's new volume would sit in two
+cells that pack to one stored strike, and one would be lost.
+
+**Config.** `config/marketdata.toml [collection]`, which is read per request, so a
+change needs no restart, each with its entry in Settings → Configuration:
+`traded_premium` (a boolean, shipped `false`) and `traded_premium_late_sec` (90),
+the step after which new volume is counted as priced late in the day's check.
 
 ## What it is, and is not
 
@@ -141,8 +157,8 @@ its entry in Settings → Configuration. It ships `off`.
   closing mid.
 - **It is unsigned.** It still says nothing about who bought and who sold. That is
   the bought/sold tally's job, for flagged contracts only.
-- **It runs a little under the true day figure** by whatever traded before the first
-  reading and across a restart.
+- **It runs a little under the true day figure** by whatever traded before the
+  regular open, before the first reading, and across a restart.
 - **It begins the day it ships.** Nothing can rebuild it for past sessions, because
   per-contract volumes were never stored.
 - **It will not match the figure stored today,** and should not. On a day when marks
@@ -154,16 +170,17 @@ Phase A ships the collection with nothing reading it. It is judged on three chec
 each computable from what it stores or logs, before any reader is built:
 
 1. **No cell ever falls.** For every symbol and session, each strike's call and put
-   totals are non-decreasing. `tools/measure_prem_remark.py` already measures this
-   for the `prem` view; given a `--view` option and pointed at the new one it must
-   report zero falls. One fall is a bug.
-2. **The volume reconciles.** Once a session, per symbol, one log line: the volume
-   booked, the day's final volume less the volume at the first reading, and the
-   share of the booked volume that crossed a gap. The first two should agree to
-   within what a restart explains.
-3. **The cost is in budget.** The pass's time per poll (median and worst, logged
-   with the line above), the batch write's time, and the database's growth over a
-   week against the 13% estimate.
+   totals are non-decreasing. `tools/check_traded_premium.py` reads every symbol's
+   stored rows for a day and must report zero falls. One fall is a bug.
+2. **The volume reconciles.** Once a session, at the first poll after the regular
+   close, one log line per symbol: the volume booked, the chain's own volume now
+   less at the first reading (summed straight off the chain, apart from the
+   booking), and the share of the booked volume first seen more than
+   `traded_premium_late_sec` after the symbol's previous reading. The first two
+   should agree to within volume that had no usable mark.
+3. **The cost is in budget.** The pass's time per poll and the batch write's time
+   (median and worst, logged with the lines above), and what the view adds to the
+   day's stored bytes against the 13% estimate, which the same tool prints.
 
 Alongside, with no extra storage, the same line reports the day's total priced two
 ways: at the mark, and at each contract's `last` price. `last` is a real trade in the
