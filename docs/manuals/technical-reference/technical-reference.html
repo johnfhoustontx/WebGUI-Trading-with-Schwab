@@ -974,6 +974,18 @@ the last fetched values. A carried chain is <strong>not</strong> handed to the d
 volume (unusual activity, big delta), because it holds no new trades. So with a
 3-minute tail, an alert on a watchlist-only symbol could arrive up to two minutes
 later than it does as shipped.</p>
+<p><strong>Traded premium, booked as it trades (optional, off as shipped).</strong> The premium
+the collector stores is each contract's volume for the day times its current
+mark, so it is re-priced every minute and falls when marks fall. With
+<code>collection.traded_premium</code> on (Settings → Configuration → Local market data →
+Collector), the options service also keeps a running total in which each
+minute's new volume is priced once, at that minute's mark, and stores it per
+strike as a sixth view. That total cannot fall. It is an estimate: it is not
+split into bought and sold, a minute's volume did not all trade at that minute's
+mid, and it leaves out what traded before the regular open and during a restart.
+No page reads it yet. It is not written for a carried minute, because a carried
+chain holds no new volume. Once a session, after the 15:00 close, the options
+service logs how much volume it booked beside how much the chain showed.</p>
 <p>Whenever the chain store is on, with or without a tail, the collector also sends
 <code>collection.fresh_max_age_sec</code> (20 s) as its age limit for every symbol due a real
 fetch, so that symbol is never answered with an older stored chain.</p>

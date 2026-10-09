@@ -4,7 +4,48 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-09 (**Dealer Positioning: the heatmap can show change.**)
+**Last updated:** 2026-10-09 (**Traded premium, booked as it trades: collected, switched off.**)
+
+- **What it is.** The options service can now store traded premium as a running
+  total per strike: each minute's new volume priced once, at that minute's mark. It
+  is a sixth view, `tprem`, in `gex_history.db`. It ships switched off and nothing
+  reads it.
+- **Why.** The premium stored until now is the day's volume at the CURRENT mark.
+  Measured on stored sessions, a symbol's day total fell in 33% to 41% of minutes,
+  and `$SPX` on 2026-09-24 peaked at $2.82B and closed at $1.98B. The heatmap's
+  Premium value failed its gate on that. Run against that session's old view,
+  `tools/check_traded_premium.py --view prem` counts 555,511 falls across 90
+  symbols.
+- **How it is judged before anything reads it.** No side of any strike ever falls
+  (`tools/check_traded_premium.py`). After the regular close the service logs, per
+  symbol, the volume it booked beside what the chain showed, the share priced
+  late, and the same volume priced at `last`. The same lines carry the pass and
+  write times, and the tool prints the bytes the view adds against the one-eighth
+  estimate.
+- **Limits.** Unsigned. Priced at the minute's mid. The watch starts at the regular
+  open. A restart, or switching it off and on, leaves the volume traded in between
+  out of the total. Nothing rebuilds past sessions.
+- **How it works.** `options_svc/traded_premium.py` rides the collector's per-chain
+  hook in memory and writes one row a symbol a poll after `poll_once`. A symbol's
+  first write after a start adds its last stored total back. Strikes are keyed at
+  three decimals so a total resumed from the store's 32-bit strikes lands in the
+  cell new volume uses.
+- **Also.** The hedging-flow row writer moved to `options_svc/hiro_store.py` to make
+  room under `compute.py`'s line ceiling, which is lowered.
+- **Configuration.** `config/marketdata.toml` `[collection] traded_premium` (false)
+  and `traded_premium_late_sec` (90). No restart.
+- **Verified** by the module's suite against a real in-memory store, with each rule
+  broken in turn to see a test fail for it, and by the collection tests with the
+  real module switched on. There is no dev environment and no stored per-contract
+  volume to replay, so it has not run against a live chain: the first session with
+  the switch on is that check.
+- **Not confirmed by the user.** Pricing at the mark, keeping no contract baselines
+  across a restart, and writing no row on a carried minute.
+- **Tests.** `test_traded_premium.py`, `test_check_traded_premium.py`, and additions
+  to `test_compute.py`, `test_compute_module_shape.py` and
+  `test_marketdata_config.py`.
+
+**Prior —** 2026-10-09 (**Dealer Positioning: the heatmap can show change.**)
 
 - **What changed.** A **Show** picker between Value and Scale: **Level** (the chart
   as it was), **Change since open**, or **Change over 30 min**. A Change view

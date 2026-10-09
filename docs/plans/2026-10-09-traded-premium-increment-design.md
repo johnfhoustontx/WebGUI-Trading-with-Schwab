@@ -5,10 +5,10 @@
 `options-scanner/gex_history_db.py` (one more view string). No schema change, no
 new Schwab call, no new command. **Phase A stores the figure and nothing reads it.**
 Readers are Phase B and each is its own decision.
-**Status:** proposed. Nothing here is built. Plan:
-[2026-10-09-traded-premium-increment-plan.md](2026-10-09-traded-premium-increment-plan.md),
-which builds Phase A with the three proposals under "Open before the plan" taken
-as written.
+**Status:** Phase A is built and ships switched off; it has not run against a live
+chain. The three proposals under "Open before the plan" were built as written and
+are not confirmed. Phase B is not started. Plan, with what was built:
+[2026-10-09-traded-premium-increment-plan.md](2026-10-09-traded-premium-increment-plan.md).
 **Comes from:** the gate that stopped Phase 5 of
 [the heatmap design](2026-10-09-gamma-heatmap-value-scale-frame-design.md)
 (section 7).

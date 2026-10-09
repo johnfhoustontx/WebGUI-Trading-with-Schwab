@@ -1870,3 +1870,33 @@ saying so: a switch that does nothing is a trap.
 **Verified.** The module's suite (41 tests) against a real in-memory store, and
 the options service, service-guard and shared suites whole, all green. It has not
 run against a live chain.
+
+---
+
+## As built: Tasks 5 to 8 (2026-10-09)
+
+Built as written, with these differences.
+
+- **One test more than the plan (Task 5).**
+  `test_collect_gex_snapshots_survives_a_traded_premium_write_failure` runs the
+  REAL module, switched on, through `collect_gex_snapshots` against the test
+  double's store, which has no snapshot writers. Collection finishes and one
+  degrade is counted. The plan's wiring test replaces both functions, so it could
+  not show that a failure inside them stays inside them.
+- **The tool was also pointed at the old view (Task 6).** On the backup's
+  2026-09-24 session, `--view prem` reports 555,511 falls across 90 symbols
+  ($SPX alone 44,588). That is the tool finding, on real data, the thing it
+  exists to find; on `tprem` that day it reports nothing stored, as it should.
+  The five views' megabytes match the design's table.
+- **Manuals.** Only the Technical Reference changed. The other manuals' rebuilt
+  files differed in their build date alone and were left out of the commit.
+- **`compute.py`** is 10,487 lines, at its lowered ceiling.
+
+**Suites, each run on its own.** Options service, service guards, shared, repo
+guards and web: no failures. Tools: one failure,
+`test_measure_chain_carry.py::test_a_chain_four_days_out_is_not_an_expiration_day`,
+the fixture that hard-codes 2026-10-09; it fails without this work and has its
+own task. Lint with the commit gate's rules: clean.
+
+**Not verified.** It has not run against a live chain. "After a promote" above is
+that check, and it starts when the switch is turned on.

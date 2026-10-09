@@ -228,7 +228,7 @@ open migration item. Full design:
 | Folder                 | Role                                                        | UI status        |
 |------------------------|------------------------------------------------------------|------------------|
 | `schwab-proxy/`        | Central Schwab API gateway / token manager, plus an in-memory store of what it has fetched (`market_store.py`; it answers from that store only when `config/marketdata.toml` `mode = "on"`). **Start FIRST.**| backend, :8100   |
-| `options-scanner/`     | GEX/options scanner engines, scoring, paper engine, simulator. **`gex_history.db` stores FIVE view strings per symbol per minute** — `gex`/`charm`/`dex`/`vanna` plus **`prem`** (2026-08-15, per-strike traded premium from `flow_skew.premium_by_strike`, feeding the Premium Divergence strike ladder). `view` is free-form and a premium cell is `{call, put, net}` floats — exactly what the columnar float32 packer gates on — so the fifth view needed **no schema change**, and costs ~**+25%** on that DB. | engines only (Dash UI dropped) |
+| `options-scanner/`     | GEX/options scanner engines, scoring, paper engine, simulator. **`gex_history.db` stores FIVE view strings per symbol per minute** — `gex`/`charm`/`dex`/`vanna` plus **`prem`** (2026-08-15, per-strike traded premium from `flow_skew.premium_by_strike`, feeding the Premium Divergence strike ladder). `view` is free-form and a premium cell is `{call, put, net}` floats — exactly what the columnar float32 packer gates on — so the fifth view needed **no schema change**, and costs ~**+25%** on that DB. A SIXTH, **`tprem`**, is written by `options_svc/traded_premium.py` (not by the collector) only while `config/marketdata.toml` `[collection] traded_premium` is on. | engines only (Dash UI dropped) |
 | `sentiment-dashboard/` | Market sentiment `scoring/` + `history_backfill` + `live_composite.py` (live intraday composite + bridge payload) + `publish_bridge.py` (headless bridge writer) + bridge + `sectors_ref.py`. **Its `market_calendar.py` was absorbed into `shared/market_calendar.py` and DELETED (2026-08-02)** — same module name and same three function names, but *inclusive* `prev/next_trading_day` vs the shared module's *exclusive*, an invisible one-day trap. | ported to NiceGUI `/sentiment` |
 | `trade-analyzer/`      | `src/analysis` — fundamentals, recommendation, scoring, sector. | engines only (Tk UI dropped) |
 | `portfolio-analyzer/`  | `src/` — sector breakdown, vs-sector perf, live streaming.  | engines only (Tk UI dropped) |
@@ -664,6 +664,11 @@ queue's slow lane; nothing that changes a paper book may be put there.
   first tick after a connect) is booked UNLABELLED, never dropped or guessed. The
   poll figure and the stream figure are shown apart, never blended. The poll hook
   works in memory and must never open the store.
+- The stored premium (`prem`, `call_prem` / `put_prem`) is the day's volume at the
+  CURRENT mark and falls when marks fall: never difference it or read a fall as
+  money leaving. `tprem` is the running total that cannot fall
+  (`options_svc/traded_premium.py`); a fall in it is a bug
+  (`tools/check_traded_premium.py`).
 
 ## Observability and performance
 
