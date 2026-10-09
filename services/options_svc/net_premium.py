@@ -4,10 +4,14 @@
 PURE — stdlib only, no I/O, no engine imports. ``compute.build_net_premium``
 does the DB reading and hands the raw rows here.
 
-Net premium = cumulative call premium ($) − cumulative put premium ($) for a
-symbol, per intraday snapshot. Because Schwab serves no time-&-sales tape the
-premium is UNSIGNED cumulative traded dollars, so this is a money-weighted
-put/call read, NOT net buying. The UI must say so.
+Net premium = call premium ($) − put premium ($) for a symbol, per intraday
+snapshot. Each side is the DAY'S volume at the CURRENT mark
+(``flow_skew.index_call_put_premium``), re-priced every minute: it is not a
+running total of what traded, it falls when marks fall, and the net follows the
+underlying's price closely (measured 2026-10-09: on the indexes it stepped with
+price in about nine minutes of ten; ``tools/measure_flow_remark.py``). It is
+UNSIGNED too (Schwab serves no time-&-sales tape), so this is a money-weighted
+put/call read, NOT net buying. The UI must say both.
 """
 from __future__ import annotations
 
@@ -121,7 +125,7 @@ def build_series(flow_by_symbol) -> dict:
     ``Σnet ÷ Σ(call+put)`` — the same dollar-weighted convention
     ``market_svc.symbol_premium_skew`` uses.
 
-    The stored values are ALREADY daily-cumulative, so nothing here accumulates
+    The stored values are ALREADY day-to-date levels, so nothing here accumulates
     over the session: every timestamp is summed independently of its neighbours.
     That invariant is what keeps plain float summation safe (~10 values per
     timestamp, worst-case relative error ~1e-15), and it is exactly what a future

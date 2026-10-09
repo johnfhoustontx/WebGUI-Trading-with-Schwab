@@ -4,7 +4,38 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-09 (**Traded premium, booked as it trades: collected, switched off.**)
+**Last updated:** 2026-10-09 (**Flow and Net Prem: what the premium measures, and the wording corrected.**)
+
+- **What was wrong.** The page guide, two manuals and the code described the
+  premium behind the Flow ribbon, Net Prem and the Premium-shift alert as cumulative
+  traded dollars. It is today's volume valued at the CURRENT option prices,
+  re-priced every minute.
+- **Measured** on five stored sessions, 90 symbols each
+  (`tools/measure_flow_remark.py`, new):
+  - Each ribbon line fell in 34% to 49% of minutes on the indexes.
+  - The net line stepped the same way as price in 88% to 97% of minutes on the
+    indexes (median symbol 76%). Its steps correlate 0.72 to 0.92 with price's; net
+    contracts, which cannot be re-priced, correlate 0.06 to 0.48.
+  - Of 527 crossover alerts the live detector would have fired, 138 (26%) would not
+    have fired had neither side fallen in that minute.
+  - The Matrix's flow acceleration had a negative 15-minute slope in 26% to 30% of
+    readings, and read "hot" for calls in 42% of readings after price rose against
+    7% after it fell.
+- **Against what traded.** In the first ten minutes of the traded-premium view on
+  prod (from 13:14 CT), `$SPX`'s stored net moved +$123.1M on $3.8M of net traded
+  premium. A sample only.
+- **Changed.** Wording: `webgui/page_help.py` (Net Prem, the Flow view's one-line
+  description, the Premium-shift alert), the User Guide, the Reference Guide, and
+  the docstrings and comments in `flow_skew.py`, `net_premium.py`, `matrix.py`,
+  `flow_panels.py`, `gamma.py`, `compute.py`, `gex_history_db.py` and
+  `options-scanner/CLAUDE.md`. One comment in `gamma.py` argued from "call plus put
+  never decreases"; its conclusion holds for a different reason and now says so.
+- **Not changed.** What any page draws, what the alert fires on, the alert's own
+  text, and the Matrix's signal. Each is a decision; the measurements and the
+  options are in the traded-premium design, "Phase B".
+- **Tests.** `test_measure_flow_remark.py`.
+
+**Prior —** 2026-10-09 (**Traded premium, booked as it trades: collected, switched off.**)
 
 - **What it is.** The options service can now store traded premium as a running
   total per strike: each minute's new volume priced once, at that minute's mark. It

@@ -5,9 +5,11 @@
 `options-scanner/gex_history_db.py` (one more view string). No schema change, no
 new Schwab call, no new command. **Phase A stores the figure and nothing reads it.**
 Readers are Phase B and each is its own decision.
-**Status:** Phase A is built and ships switched off; it has not run against a live
-chain. The three proposals under "Open before the plan" were built as written and
-are not confirmed. Phase B is not started. Plan, with what was built:
+**Status:** Phase A is built and ships switched off. In prod it was switched on at
+13:14 CT on 2026-10-09; its first full session is the next trading day. The three
+proposals under "Open before the plan" were built as written and are not
+confirmed. Phase B is not started; its three stored-premium readers are measured
+below. Plan, with what was built:
 [2026-10-09-traded-premium-increment-plan.md](2026-10-09-traded-premium-increment-plan.md).
 **Comes from:** the gate that stopped Phase 5 of
 [the heatmap design](2026-10-09-gamma-heatmap-value-scale-frame-design.md)
@@ -196,11 +198,72 @@ None of these is part of Phase A, and each changes what a page or an alert shows
 |---|---|---|---|
 | Heatmap **Premium** value | not built (failed its gate) | Level and Change both become sound; this is Phase 5 of the heatmap design, on the new view | whether the write for a fifth history key fits the minute |
 | Flow view's **strike ladder** | the `prem` view | the same ladder, on premium that does not fade | how different it looks on a decay day |
-| Flow **ribbon** and **Net Prem** lines | `call_prem` / `put_prem` | lines that only rise; a crossover that cannot come from re-marking | measured first: the open task on those two views |
-| The **crossover** flow alert | fires on the sign of `call_prem − put_prem` | would fire on traded premium | how many past alerts re-marking alone caused or hid |
+| Flow **ribbon** and **Net Prem** lines | `call_prem` / `put_prem` | lines that only rise; a crossover that cannot come from re-marking | measured below; what the pages should draw is the open decision |
+| The **crossover** flow alert | fires on the sign of `call_prem − put_prem` | would fire on traded premium | measured below; a week of both, side by side, before it moves |
+| The Matrix's **flow acceleration** (the Opportunity Board's signal) | the 15-minute slope of `call_prem` / `put_prem` | a slope of what traded | measured below; it changes a signal, so it is its own decision |
 
 Once the ladder has moved, nothing reads the `prem` view and its write can stop,
 which returns the storage this design adds.
+
+### The three stored-premium readers, measured (2026-10-09)
+
+`tools/measure_flow_remark.py`, on the five sessions of 2026-09-21 to 09-25 in
+the 2026-09-25 backup, 90 symbols a session. A traded total cannot fall, so a
+fall is re-marking beyond argument; these are floors, because a rise can hide
+re-marking too.
+
+**The ribbon's two lines.** On `$SPX`, SPY and QQQ each line fell in 34% to 49%
+of minutes, and the dollars fallen were 55% to 92% of the dollars risen. The
+median symbol's lines fell in 37% to 41% of minutes. `$SPX`'s call line on
+2026-09-24 peaked at $2,516M and closed at $1,453M.
+
+**The net line (Net Prem, and the ribbon's gap).**
+
+| | Indexes (`$SPX`, SPY, QQQ) | Median of 90 symbols |
+|---|---|---|
+| Share of the line's movement that is certainly re-marking | 38% to 47% | 32% to 34% |
+| Minutes in which it stepped the same way as price | 88% to 97% | 75% to 77% |
+| Correlation of its steps with price's | 0.72 to 0.92 | 0.44 to 0.51 |
+| The same correlation for net CONTRACTS (cannot be re-marked) | 0.06 to 0.48 | 0.02 to 0.06 |
+
+A call's mark rises and a put's falls when price rises, so a net of re-priced
+premium follows price with no trade at all. The last two rows are the measure
+of that: the dollars track price far more closely than the contracts do.
+
+**The crossover alert,** replayed through the live detector with its own band,
+floor and cooldown, over the window it runs in:
+
+| Session | Alerts | Would not have fired without a fall |
+|---|---|---|
+| 2026-09-21 | 69 | 13 (19%) |
+| 2026-09-22 | 87 | 24 (28%) |
+| 2026-09-23 | 129 | 36 (28%) |
+| 2026-09-24 | 129 | 41 (32%) |
+| 2026-09-25 | 113 | 24 (21%) |
+| All five | 527 | 138 (26%) |
+
+"Without a fall" means the same minute with a fallen side held at its previous
+value does not fire. Those 138 reported a flip that no trade made. They were
+also less durable: the net stayed on the alerted side for 62% of the next 30
+minutes on average, against 71% for the rest. Whether a fall ever HID a
+crossover that trading made cannot be read from stored lines (removing falls
+only raises both, so it never adds a crossing); only the traded view can show
+that.
+
+**The Matrix's flow acceleration** (`matrix.flow_acceleration`, read every 15
+minutes, 10,792 readings a side): the 15-minute slope was negative in 26% of call
+readings and 30% of put readings, which a traded total cannot be. The call line
+read "hot" in 42% of readings where price had risen 0.12% or more over those 15
+minutes, and in 7% where it had fallen; puts are the mirror image. The reading is
+mostly an echo of the price move it is scored beside.
+
+**Against what traded, directly.** The traded view was switched on in prod at
+13:14 CT on 2026-10-09. Over its first ten minutes, across 147 symbols, the
+stored call lines moved +$289.5M while $68.4M of calls traded, and the stored
+put lines moved −$30.7M while $35.2M of puts traded. `$SPX`'s stored net moved
++$123.1M on $3.8M of net traded premium; its steps correlated 0.96 with price,
+against 0.29 for the traded net. Ten minutes is a sample, not a measurement:
+re-run `tools/measure_flow_remark.py --traded` on a full session.
 
 ## Open before the plan
 

@@ -1090,9 +1090,17 @@ between columns matter: the smooth shading <em>across</em> a boundary is just dr
 measurement. Read the columns, not the gradient between them.</p>
 <blockquote>
 <p><strong>Premium is unsigned.</strong> Schwab publishes no options tape, so Flow and Net Prem
-show <strong>traded dollars through calls versus puts</strong> — a money-weighted put/call read,
+show <strong>dollars through calls versus puts</strong> — a money-weighted put/call read,
 <strong>not</strong> net buying. A big call number is equally consistent with someone buying
 calls and someone selling covered calls.</p>
+<p><strong>Premium is also re-priced every minute.</strong> The figure is today's volume so far
+valued at the <em>current</em> option prices, not a running total of what traded. So a
+line can fall with no trade behind it, and it usually ends the day below its
+peak as same-day options decay. Calls gain and puts lose value as a stock rises,
+so the two lines, and the gap between them, follow the stock's own price closely.
+On stored sessions the net line stepped the same way as price in about nine
+minutes out of ten on the indexes. Read a crossover with that in mind: it can
+come from a price move alone.</p>
 </blockquote>
 <p><strong>Status row:</strong> a collector status dot, last-scan and next-scan times, and a one-
 line summary (spot, strike count, net exposure).</p>
@@ -1328,7 +1336,7 @@ you can read it — whether or not it chimed or reached your phone.</p>
 <tbody>
 <tr>
 <td><strong>Premium shift</strong></td>
-<td>Call premium overtook put premium on a symbol, or the reverse.</td>
+<td>Call premium overtook put premium on a symbol, or the reverse. Premium is today's volume at current option prices, so a move in the stock can cause this with no new trading.</td>
 </tr>
 <tr>
 <td><strong>Unusual volume</strong></td>

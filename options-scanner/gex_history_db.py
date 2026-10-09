@@ -1006,9 +1006,9 @@ def load_flow_series(
 
     One row per 2-min snapshot from the ``gex`` view, chronological:
     ``(ts, spot, call_vol, put_vol, call_prem, put_prem)`` — the underlying price plus
-    the daily-cumulative call/put volume (contracts) + premium (dollars). Feeds the
-    intraday premium-flow chart; the frontend derives per-window flow + net from the
-    cumulative series. Uses the sargable ``ts >= ? AND ts < ?`` range so the ``ts``
+    the day's call/put volume so far (contracts, never falls) and that volume's
+    premium at the CURRENT mark (dollars, re-priced every minute, so it falls when
+    marks fall: never difference it). Feeds the intraday premium-flow chart. Uses the sargable ``ts >= ? AND ts < ?`` range so the ``ts``
     index applies. Passing an explicit ``d`` loads a prior session.
     """
     start, end = _local_unix_range(d)

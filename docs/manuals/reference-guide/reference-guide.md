@@ -761,12 +761,24 @@ context so you can see whether it was a decisive break or a wobble around the li
 ladder** showing where in the chain the premium is concentrated, and a readout rail
 with the numbers.
 
-> **Premium here is mid-based, unsigned and forward-only.** *Unsigned* is the
-> important word: Schwab publishes no time-and-sales tape for options, so this is
-> **traded dollars through calls versus puts** — a money-weighted put/call read, and
+> **Premium here is mid-based, unsigned and forward-only.** *Unsigned* matters:
+> Schwab publishes no time-and-sales tape for options, so this is
+> **dollars through calls versus puts** — a money-weighted put/call read, and
 > **not** net buying. A large call figure is equally consistent with someone buying
 > calls and someone selling covered calls. *Forward-only* means the series begins
 > when collection starts each morning; there is no overnight carry.
+>
+> **It is also re-priced every minute, and that matters as much.** Each figure is
+> today's volume so far valued at the *current* option prices, not a running total
+> of what traded. Measured on five stored sessions, each line fell in roughly four
+> minutes out of ten on the indexes, and `$SPX`'s call line on one day peaked at
+> $2.5 billion and closed at $1.5 billion. Calls gain and puts lose value as a stock
+> rises, so the net of the two follows the stock's own price: on the indexes it
+> stepped the same way as price in about nine minutes out of ten. A crossover can
+> therefore come from a price move with no new trading. About one crossover alert
+> in four on those sessions needed one side's figure to *fall*, which trading cannot
+> do. Treat the ribbon as a picture of where today's volume is worth the most right
+> now, and confirm a crossover against price before reading it as money moving.
 
 ### The Net Prem subtab — many symbols at once
 
@@ -988,7 +1000,7 @@ detector behind each):
 
 | Type | What triggered it | What it may mean |
 |---|---|---|
-| **Premium shift** (crossover) | Call premium overtook put premium for a symbol, or the reverse. | A shift in where the day's option money is going. Bullish flip on calls-over, bearish on puts-over. |
+| **Premium shift** (crossover) | Call premium overtook put premium for a symbol, or the reverse. | Possibly a shift in where the day's option money is going: calls over reads bullish, puts over bearish. But premium is today's volume at current option prices, so a move in the stock alone can cause it. Check it against price. |
 | **Unusual volume** (unusual activity) | One contract traded far more than its open interest (e.g. 21×). | Someone opened a large new position — the volume cannot be existing holders closing, because there were not that many to close. |
 | **Hedging flip** (gamma flip) | Spot crossed the dealer gamma flip level. | The market just switched between move-damping and move-amplifying behaviour. See [Dealer Positioning](#dealer-positioning). |
 | **Outsized bet** (big delta) | A single contract carries an outsized share of the symbol's total directional exposure. | A concentrated bet or hedge large enough to matter to that symbol's hedging flow. |

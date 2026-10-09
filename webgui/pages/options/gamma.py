@@ -1427,8 +1427,8 @@ def flow_summary_text(rows):
 
 
 # ── Net Prem view ───────────────────────────────────────────────────────────
-# Intraday net premium (cumulative call $ − cumulative put $) for any combination
-# of ~28 symbols, from ``cache:options:net_premium``.
+# Intraday net premium (call $ − put $, each the day's volume at the current
+# mark) for any combination of ~28 symbols, from ``cache:options:net_premium``.
 #
 # The group table comes from ``config/symbols.toml`` via ``shared.symbols`` - the
 # SAME file ``services/options_svc/net_premium.GROUPS`` reads. It used to be a
@@ -1572,7 +1572,7 @@ def net_prem_value(row, mode="dollars"):
     """The plotted value for one ``[ts, call_prem, put_prem]`` row.
 
     ``dollars`` → net premium in $M (call − put). ``skew`` → the signed share of
-    the session's total traded premium that the net represents, as a percent —
+    the session's total premium (as stored) that the net represents, as a percent —
     which is what makes a $30M index line comparable with a $2M sector one.
 
     Skew returns None when nothing traded either side: there is no ratio to
@@ -3178,14 +3178,14 @@ def render(symbol: str | None = None, view: str | None = None,
         rows_by = {}
         for sym in picked:
             # A point with no value in this mode is SKIPPED, and that can never
-            # hide an interior gap. The stored premiums are daily-CUMULATIVE
-            # (the service's build_series accumulates nothing downstream), so
-            # call+put is monotonic non-decreasing: once it exceeds 0 it stays
-            # there for the rest of the session. An unreportable skew point is
-            # therefore only ever possible in a LEADING run, before anything
-            # traded — skipping trims a meaningless prefix and cannot connect a
-            # line across a hole. A future "optimization" into a running total
-            # would break that invariant, and with it this reasoning.
+            # hide an interior gap. The stored premiums are the DAY'S volume at
+            # the current mark (build_series accumulates nothing downstream).
+            # They rise and FALL with marks, but day volume never falls, so once
+            # call+put exceeds 0 it stays above 0 for the rest of the session.
+            # An unreportable skew point is therefore only ever possible in a
+            # LEADING run, before anything traded — skipping trims a meaningless
+            # prefix and cannot connect a line across a hole. (All marks going
+            # unusable at once would break this; nothing else does.)
             pairs = [(ts, value) for ts, row in _np_rows(series, sym)
                      if (value := net_prem_value(row, mode)) is not None]
             if pairs:

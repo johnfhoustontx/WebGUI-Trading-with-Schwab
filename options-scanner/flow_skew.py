@@ -216,11 +216,15 @@ def _contract_mark(c):
 
 
 def _sum_premium(exp_map):
-    """Total traded PREMIUM ($) across an expiration map: Σ mark × totalVolume × 100.
+    """PREMIUM ($) across an expiration map: Σ mark × totalVolume × 100.
 
-    Uses the contract mark (mid) as the trade-price proxy (Schwab gives no time-&-
-    sales tape), so this is a **daily-cumulative** premium estimate, not a signed
-    buy/sell split. Defensive — skips contracts missing volume or a usable mark.
+    ⚠ The day's volume at the CURRENT mark, NOT a running total of what traded:
+    ``totalVolume`` is day-cumulative and ``mark`` is this minute's mid, so all of
+    the day's volume is re-priced on every call. It falls when marks fall
+    (measured: in a third or more of minutes) and must never be differenced.
+    The figure that cannot fall is ``services/options_svc/traded_premium.py``.
+    Unsigned too: Schwab gives no time-&-sales tape, so not a buy/sell split.
+    Defensive — skips contracts missing volume or a usable mark.
     """
     total = 0.0
     if not isinstance(exp_map, dict):
@@ -235,7 +239,8 @@ def _sum_premium(exp_map):
 
 
 def index_call_put_premium(chain):
-    """Total call vs put traded PREMIUM ($) across the chain (Σ mark×totalVolume×100).
+    """Call vs put PREMIUM ($) across the chain (Σ mark×totalVolume×100): the day's
+    volume at the current mark, re-priced every call (see ``_sum_premium``).
 
     Companion to ``index_call_put_volume`` — same chain, same 2-min cadence — for the
     intraday options-premium-flow chart. Returns ``{"call_prem", "put_prem"}``
@@ -282,12 +287,13 @@ def _accumulate_by_strike(exp_map, side, out):
 
 
 def premium_by_strike(chain):
-    """Traded PREMIUM ($) split call vs put, **per strike**: ``{strike: cell}``.
+    """PREMIUM ($) split call vs put, **per strike**: ``{strike: cell}``.
 
     The per-strike companion to ``index_call_put_premium`` — same inputs, same
-    ``Σ mark × totalVolume × 100`` estimate, same unsigned daily-cumulative
-    caveat (Schwab publishes no tape, so this is not a buy/sell split). It feeds
-    the Premium Divergence panel's strike ladder.
+    ``Σ mark × totalVolume × 100`` (the day's volume at the current mark, so it
+    falls when marks fall), same unsigned caveat (Schwab publishes no tape, so
+    this is not a buy/sell split). It feeds the Premium Divergence panel's
+    strike ladder.
 
     Strikes ACCUMULATE across expirations: the collector fetches today → +7d, so
     one strike legitimately appears in several expiration maps, and the ladder is

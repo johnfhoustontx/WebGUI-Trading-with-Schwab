@@ -66,10 +66,18 @@ def intraday_trend(spot_series, now_ts):
 
 
 def flow_acceleration(prem_series, now_ts, lookback_s=_ACCEL_LOOKBACK_S):
-    """prem_series = [(ts, cumulative_premium)] (monotonic).
+    """prem_series = [(ts, premium)], the stored day-volume-at-current-mark figure.
 
     Return (state, ratio) where ratio = recent-slope / day-average-slope.
     state in {hot, cool, steady, flat}. flat = no premium accrued or too few points.
+
+    ⚠ The series is NOT monotonic and this reading mostly echoes price. Measured
+    2026-10-09 on five stored sessions (10,792 readings a side): the 15-minute
+    slope was NEGATIVE in 26% to 30% of readings, and the call line read "hot" in
+    42% of readings where price had risen 0.12% or more against 7% where it had
+    fallen (puts the mirror image). A slope of traded premium needs the ``tprem``
+    view (``traded_premium.py``); moving this reader onto it is a decision, not a
+    refactor, because it changes the Opportunity Board's signal.
     """
     pts = [(t, p) for t, p in prem_series if p is not None]
     if len(pts) < 2:
@@ -438,7 +446,7 @@ def build_rows(raw, scan_counts, alert_counts, now_ts, eth_symbols=None,
                 "put_accel": p_state,
                 "pc_ratio": pc_ratio(call_prem, put_prem),
                 "net_prem_m": net_premium_m(call_prem, put_prem),
-                # Raw cumulative premium $ (forward-only → 0.0 on early snapshots),
+                # Raw premium $: day volume at the current mark (0.0 on early snapshots),
                 # exposed so a cross-service reader (the market dashboard) can show a
                 # per-symbol call/put skew + dollar-weight-aggregate a basket (BIG10).
                 "call_prem": round(call_prem, 2),

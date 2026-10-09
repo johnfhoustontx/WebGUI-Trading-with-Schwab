@@ -791,9 +791,13 @@ accelerate price.
 - **Dollars ($M) / Skew %** — the sizes are wildly apart (SPY can run hundreds of
   millions on a day DIA barely reaches one), so **Dollars** shows the real money
   and **Skew %** rescales each line to net as a share of that symbol's own
-  premium — use it to compare a big name and a small one side by side. Premium is
-  **unsigned cumulative traded dollars** (Schwab serves no time-&-sales tape), so
-  this is a **money-weighted put/call read, NOT net buying**. Group, ticks and
+  premium — use it to compare a big name and a small one side by side. Premium
+  here is **today's volume valued at the current option prices**, re-priced every
+  minute. It is **not** a running total of what traded: it falls when option
+  prices fall, and because calls gain and puts lose as a stock rises, the net
+  line follows the stock's own price closely even when little is trading. It is
+  also unsigned (Schwab serves no time-&-sales tape), so read it as a
+  **money-weighted put/call picture, NOT net buying**. Group, ticks and
   scale are remembered. Sector history starts the day this shipped, so those
   lines fill in from here on.
 - **Analyze** asks Claude to read the live $SPX / SPY / QQQ dealer positioning and
@@ -931,7 +935,9 @@ can actually read it. Some of these also chime or reach your phone; the
 phone when its push is switched on in Settings.
 
 - **Premium shift** — call premium overtook put premium on a symbol, or the
-  reverse.
+  reverse. Premium is today's volume at the current option prices, so a move
+  in the stock can cause this with no new trading: on stored sessions about one
+  alert in four needed one side's figure to fall, which only a price change does.
 - **Unusual volume** — one contract traded far more than its open interest.
 - **Hedging flip** — spot crossed the dealer gamma flip, so dealer hedging starts
   damping the move instead of amplifying it (or the reverse). The side says which
@@ -1887,8 +1893,9 @@ SUBTAB_HELP: dict[str, dict[str, str]] = {
                "Its zero-crossing is the gamma 'flip'.",
         "Vanna": "Vanna — how dealer delta shifts when volatility (IV) changes. "
                  "Matters most on big IV moves.",
-        "Flow": "Intraday options flow for this symbol — price plus cumulative call "
-                "vs put premium, and the net (call minus put).",
+        "Flow": "Intraday options flow for this symbol — price plus call vs put "
+                "premium (today's volume at current option prices), and the net "
+                "(call minus put).",
         "Net Prem": "Net options premium (call $ minus put $) for many symbols at "
                     "once — pick from 28 across indices, sectors and mega-caps.",
         "Term": "Term structure — the same exposure across the next several "

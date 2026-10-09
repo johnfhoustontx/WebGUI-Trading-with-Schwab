@@ -427,9 +427,9 @@ def align_ladder(times, ladder):
 def divergence_session(series):
     """The rail's SESSION SKEW block: closing totals + the spot range.
 
-    Totals are the LAST reading, not a sum: the stored premiums are already
-    daily-cumulative, so summing them would multiply the session by its own
-    sample count.
+    Totals are the LAST reading, not a sum: each stored premium is already the
+    whole day's volume (at that minute's mark), so summing them would multiply
+    the session by its own sample count.
     """
     call, put = series.get("call") or [], series.get("put") or []
     spots = [s for s in (series.get("spot") or []) if _num(s) is not None]
@@ -501,8 +501,8 @@ def divergence_geometry(series):
 
     prem_hi = max(max(call), max(put))
     prem_hi = prem_hi * 1.06 if prem_hi > 0 else 1.0
-    # Premium is cumulative from zero, so the axis starts at zero: a zoomed
-    # baseline would exaggerate a quiet session into a dramatic one.
+    # Premium is a day-to-date level from zero, so the axis starts at zero: a
+    # zoomed baseline would exaggerate a quiet session into a dramatic one.
     prem_lo = 0.0
 
     live = [s for s in spot if _num(s) is not None]

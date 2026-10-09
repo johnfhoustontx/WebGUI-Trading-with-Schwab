@@ -4567,8 +4567,8 @@ def gamma_snapshot(symbol: str, chain=None, with_term: bool = True) -> dict | No
                 except Exception:
                     log.debug("gamma projection attach failed", exc_info=True)
             views[vname] = entry
-        # Intraday options-flow series (spot + daily-cumulative call/put volume +
-        # premium) for the Flow view — reuses the SAME read-only connection as the
+        # Intraday options-flow series (spot + day call/put volume + that volume's
+        # premium at the current mark) for the Flow view — reuses the SAME read-only connection as the
         # view history loads (one open per snapshot). Same active-session date.
         if hist_conn is not None:
             try:

@@ -797,9 +797,18 @@ between columns matter: the smooth shading *across* a boundary is just drawing, 
 measurement. Read the columns, not the gradient between them.
 
 > **Premium is unsigned.** Schwab publishes no options tape, so Flow and Net Prem
-> show **traded dollars through calls versus puts** — a money-weighted put/call read,
+> show **dollars through calls versus puts** — a money-weighted put/call read,
 > **not** net buying. A big call number is equally consistent with someone buying
 > calls and someone selling covered calls.
+>
+> **Premium is also re-priced every minute.** The figure is today's volume so far
+> valued at the *current* option prices, not a running total of what traded. So a
+> line can fall with no trade behind it, and it usually ends the day below its
+> peak as same-day options decay. Calls gain and puts lose value as a stock rises,
+> so the two lines, and the gap between them, follow the stock's own price closely.
+> On stored sessions the net line stepped the same way as price in about nine
+> minutes out of ten on the indexes. Read a crossover with that in mind: it can
+> come from a price move alone.
 
 **Status row:** a collector status dot, last-scan and next-scan times, and a one-
 line summary (spot, strike count, net exposure).
@@ -952,7 +961,7 @@ Six kinds of alert. The screen names each by what happened:
 
 | Type on screen | What happened |
 |---|---|
-| **Premium shift** | Call premium overtook put premium on a symbol, or the reverse. |
+| **Premium shift** | Call premium overtook put premium on a symbol, or the reverse. Premium is today's volume at current option prices, so a move in the stock can cause this with no new trading. |
 | **Unusual volume** | One contract traded far above its open interest. |
 | **Hedging flip** | Spot crossed the dealer gamma flip, so dealer hedging starts damping moves instead of amplifying them, or the reverse. |
 | **Outsized bet** | One contract holds an outsized share of the symbol's directional exposure (the **Share** column). |

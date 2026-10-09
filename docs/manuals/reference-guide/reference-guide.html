@@ -1351,12 +1351,23 @@ context so you can see whether it was a decisive break or a wobble around the li
 ladder</strong> showing where in the chain the premium is concentrated, and a readout rail
 with the numbers.</p>
 <blockquote>
-<p><strong>Premium here is mid-based, unsigned and forward-only.</strong> <em>Unsigned</em> is the
-important word: Schwab publishes no time-and-sales tape for options, so this is
-<strong>traded dollars through calls versus puts</strong> — a money-weighted put/call read, and
+<p><strong>Premium here is mid-based, unsigned and forward-only.</strong> <em>Unsigned</em> matters:
+Schwab publishes no time-and-sales tape for options, so this is
+<strong>dollars through calls versus puts</strong> — a money-weighted put/call read, and
 <strong>not</strong> net buying. A large call figure is equally consistent with someone buying
 calls and someone selling covered calls. <em>Forward-only</em> means the series begins
 when collection starts each morning; there is no overnight carry.</p>
+<p><strong>It is also re-priced every minute, and that matters as much.</strong> Each figure is
+today's volume so far valued at the <em>current</em> option prices, not a running total
+of what traded. Measured on five stored sessions, each line fell in roughly four
+minutes out of ten on the indexes, and <code>$SPX</code>'s call line on one day peaked at
+$2.5 billion and closed at $1.5 billion. Calls gain and puts lose value as a stock
+rises, so the net of the two follows the stock's own price: on the indexes it
+stepped the same way as price in about nine minutes out of ten. A crossover can
+therefore come from a price move with no new trading. About one crossover alert
+in four on those sessions needed one side's figure to <em>fall</em>, which trading cannot
+do. Treat the ribbon as a picture of where today's volume is worth the most right
+now, and confirm a crossover against price before reading it as money moving.</p>
 </blockquote>
 <h3 id="the-net-prem-subtab-many-symbols-at-once">The Net Prem subtab — many symbols at once</h3>
 <p>The only view on this page that shows <strong>more than one symbol</strong>. It plots <strong>net
@@ -1667,7 +1678,7 @@ detector behind each):</p>
 <tr>
 <td><strong>Premium shift</strong> (crossover)</td>
 <td>Call premium overtook put premium for a symbol, or the reverse.</td>
-<td>A shift in where the day's option money is going. Bullish flip on calls-over, bearish on puts-over.</td>
+<td>Possibly a shift in where the day's option money is going: calls over reads bullish, puts over bearish. But premium is today's volume at current option prices, so a move in the stock alone can cause it. Check it against price.</td>
 </tr>
 <tr>
 <td><strong>Unusual volume</strong> (unusual activity)</td>

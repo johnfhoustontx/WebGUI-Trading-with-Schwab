@@ -150,9 +150,11 @@ the already-fetched $SPX/SPY/QQQ chains (no extra fetch), persisted per snapshot
 (additive `rr_25d`/`call_vol`/`put_vol` columns) → published as `cache:options:flow_skew`.
 
 > **Intraday premium-flow data (2026-07-09, Phase 1 of the flow-chart feature).** The same 2-min poll
-> now also computes **`flow_skew.index_call_put_premium(chain)`** — daily-cumulative call vs put
-> **premium ($)** = `Σ mark × totalVolume × 100` (mark = mid; Schwab has no tape, so this is an
-> UNSIGNED cumulative estimate, not a buy/sell split) — for **every** collected symbol (index base +
+> now also computes **`flow_skew.index_call_put_premium(chain)`** — call vs put
+> **premium ($)** = `Σ mark × totalVolume × 100` (mark = mid). ⚠ That is the DAY'S volume at the
+> CURRENT mark, re-priced every poll: it is NOT a running total of what traded, it falls when
+> marks fall, and it must never be differenced (the running total is the service's `tprem` view).
+> It is UNSIGNED too (Schwab has no tape, so not a buy/sell split) — for **every** collected symbol (index base +
 > `Top 20.xlsx`), stored in `gex_history_db` as additive `call_prem`/`put_prem` REAL columns (idempotent
 > ALTER migration). Read via **`gex_history_db.load_flow_series(conn, symbol, d=None)`** →
 > `(ts, spot, call_vol, put_vol, call_prem, put_prem)` per snapshot, chronological (feeds the coming
