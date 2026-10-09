@@ -3169,6 +3169,66 @@ a larger bar. In Size the bars' extent is the larger of the call and put locks.<
 <p>The strip beside the controls prints the maximum in use. The unit follows the
 formulas above: dollars of gamma per 1% move for GEX, dollars of delta for DEX. Charm
 and vanna exposures are printed as plain figures, and a share scale in percent.</p>
+<p><strong>The spot frame.</strong> With <strong>Frame</strong> set to <em>From spot</em>, each heat-map column is
+resampled onto a uniform ladder of offsets from that column's own spot
+(<code>gamma_heat.to_spot_frame</code>):</p>
+<pre><code>offsets  = -half·step … +half·step            (step = the strike ladder's step)
+cell     = linear interpolation between the two strikes around  spot + offset
+           that have a reading in that column
+gap      = when that point is outside the column's strikes, or the two strikes
+           are more than 2.5 steps apart (a hole in the ladder)
+</code></pre>
+<p>Nothing is extrapolated. The level tracks are <code>level − spot</code> per column, the level
+lines sit at <code>level − current spot</code>, and the bars are drawn at <code>strike − current
+spot</code>, so both panels share one axis.</p>
+<p><code>half</code> is <code>config/gamma_heat.toml</code> <code>[window] spot_side</code> (10). The options service
+keeps the same number of strikes, plus one, each side of the session's <strong>low</strong> and
+<strong>high</strong> in every view's published history (<code>gamma_window.crop_keep</code>), so a column at
+the day's low still has strikes below it. The extra one is needed because price is
+rarely exactly on a strike: the frame's outermost row then falls between the 10th
+strike and the 11th, and interpolating it needs both.</p>
+<p>That crop is the cost of the frame, and it was measured before it was built, on six
+stored sessions (<code>tools/measure_gamma_crop.py</code>):</p>
+<table>
+<thead>
+<tr>
+<th><code>spot_side</code></th>
+<th>$SPX, widest stored day (1.1% range)</th>
+<th>QQQ</th>
+<th>$NDX</th>
+<th>SPY, NVDA</th>
+<th>$SPX, quiet day</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>10 (shipped)</td>
+<td>+11.9% history</td>
+<td>+9.1%</td>
+<td>+8.7%</td>
+<td>0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>20</td>
+<td>+40.1%</td>
+<td>+36.8%</td>
+<td>+19.8%</td>
+<td>+23.7%, +9.5%</td>
+<td>+13.3%</td>
+</tr>
+<tr>
+<td>0</td>
+<td>the crop as it was before the frame; the frame then shows gaps</td>
+<td></td>
+<td></td>
+<td></td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>The display window itself, <code>[window] n_side</code> (20 strikes each side of spot), is read
+from the same file by the page and the service each time they draw or publish.</p>
 <h2 id="dealer-delta-exposure-dex-and-projection">Dealer delta exposure (DEX) and projection</h2>
 <p>The DEX/hedge panel sums <code>OI · delta · contract_multiplier · spot</code> across strikes
 for the current and a projected delta, surfacing net-delta-now vs projected-close

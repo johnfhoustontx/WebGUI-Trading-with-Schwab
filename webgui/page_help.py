@@ -760,6 +760,13 @@ accelerate price.
   whatever is on screen, which shows detail on a quiet chart but makes the same
   shade a different amount later in the day. **Share of column** shows each
   strike as a percentage of that minute's total, for comparing shape.
+- **Frame** — what the up-and-down axis measures. **Strike** is the usual chart:
+  price moves and the levels stand still. **From spot** turns it around: price is
+  a flat line through the middle and the flip and walls move. A wall sliding
+  toward the middle is one price is approaching, and the steeper it slides the
+  faster. It shows 10 strikes each side of price (a setting). The Spot and Level movement
+  controls hide there, because price is always the flat line and the level lines
+  are always drawn.
 - **The colour strip** beside the controls gives the two ends of the heat map's
   colours as numbers (dollars of gamma per 1% move, or dollars of delta; Charm
   and Vanna show a plain figure; percentages in Share of column) and says what

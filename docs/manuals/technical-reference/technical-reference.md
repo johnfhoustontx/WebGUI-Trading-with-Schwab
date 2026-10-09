@@ -2163,6 +2163,41 @@ The strip beside the controls prints the maximum in use. The unit follows the
 formulas above: dollars of gamma per 1% move for GEX, dollars of delta for DEX. Charm
 and vanna exposures are printed as plain figures, and a share scale in percent.
 
+**The spot frame.** With **Frame** set to *From spot*, each heat-map column is
+resampled onto a uniform ladder of offsets from that column's own spot
+(`gamma_heat.to_spot_frame`):
+
+```
+offsets  = -half·step … +half·step            (step = the strike ladder's step)
+cell     = linear interpolation between the two strikes around  spot + offset
+           that have a reading in that column
+gap      = when that point is outside the column's strikes, or the two strikes
+           are more than 2.5 steps apart (a hole in the ladder)
+```
+
+Nothing is extrapolated. The level tracks are `level − spot` per column, the level
+lines sit at `level − current spot`, and the bars are drawn at `strike − current
+spot`, so both panels share one axis.
+
+`half` is `config/gamma_heat.toml` `[window] spot_side` (10). The options service
+keeps the same number of strikes, plus one, each side of the session's **low** and
+**high** in every view's published history (`gamma_window.crop_keep`), so a column at
+the day's low still has strikes below it. The extra one is needed because price is
+rarely exactly on a strike: the frame's outermost row then falls between the 10th
+strike and the 11th, and interpolating it needs both.
+
+That crop is the cost of the frame, and it was measured before it was built, on six
+stored sessions (`tools/measure_gamma_crop.py`):
+
+| `spot_side` | $SPX, widest stored day (1.1% range) | QQQ | $NDX | SPY, NVDA | $SPX, quiet day |
+|---|---|---|---|---|---|
+| 10 (shipped) | +11.9% history | +9.1% | +8.7% | 0 | 0 |
+| 20 | +40.1% | +36.8% | +19.8% | +23.7%, +9.5% | +13.3% |
+| 0 | the crop as it was before the frame; the frame then shows gaps | | | | |
+
+The display window itself, `[window] n_side` (20 strikes each side of spot), is read
+from the same file by the page and the service each time they draw or publish.
+
 ## Dealer delta exposure (DEX) and projection
 
 The DEX/hedge panel sums `OI · delta · contract_multiplier · spot` across strikes

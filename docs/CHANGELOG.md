@@ -4,7 +4,45 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-09 (**Dealer Positioning: a locked colour scale for the heatmap.**)
+**Last updated:** 2026-10-09 (**Dealer Positioning: the heatmap measured from spot.**)
+
+- **What changed.** A **Frame** picker beside Scale. **Strike** is the chart as it
+  was. **From spot** makes the vertical axis the distance from the current price:
+  price is a flat line through the middle and the flip and the walls move. A wall
+  sliding toward the middle is one price is approaching. Both panels switch
+  together and still share one axis. It shows 10 strikes each side of price.
+- **In that frame** the Spot, Bar and Level movement controls hide (price is always
+  the flat line and the level lines are always drawn) and the forward projection
+  band is not drawn. Each level line keeps its own price in its label.
+- **The service keeps more history for it.** A column at the day's low needs strikes
+  below that low, which the published history did not hold. `gamma_window.crop_keep`
+  now keeps `[window] spot_side` strikes, plus one, each side of the session's low
+  and high.
+- **The cost was measured before building, and the design was wrong about it.** The
+  design proposed a frame the full 20 strikes tall and estimated "under a third on
+  the widest days and nothing on a quiet one". On six stored prod sessions (the
+  2026-09-25 backup; `tools/measure_gamma_crop.py`) 20 strikes added **40%** to
+  `$SPX`'s history on a 1.1% day and **13%** on the quietest. So the frame ships at
+  **10**: 12% on `$SPX`'s widest stored day, 9% on QQQ and `$NDX`, nothing on SPY,
+  NVDA or a quiet day. It is one setting, `spot_side`, read by both tiers; 0 turns
+  the wider crop off.
+- **Two things found on the page harness and fixed.** Six columns were one cell
+  short until the crop kept the strike that brackets the frame's outermost row. And
+  Highcharts ignores a `+` flag in an axis format, so none is written.
+- **The display window is config.** `[window] n_side` (20) replaces a literal in
+  each tier and is read at call time by both.
+- **Not changed.** The Strike frame, which is the default, draws the same chart.
+  `gamma.render` is still 1,469 lines; `compute.py` is down to 10,514.
+- **Verified** in the local page harness (there is no dev environment) on a trending
+  seed built with the service's own crop and lock, read from the page's DOM because
+  screenshots were not available: the frame's titles, axis, four line paths, nine
+  series, hidden controls, and no console or server error. Coverage was counted
+  with the page's own builders: 3,780 of 3,780 cells. Not yet seen on prod data.
+- **Tests.** Additions to `test_gamma_window.py`, `test_compute.py`,
+  `test_gamma_heat.py`, `test_options_gamma.py`, `test_gamma_heat_config.py`, and
+  `tools/tests/test_measure_gamma_crop.py`.
+
+**Prior —** 2026-10-09 (**Dealer Positioning: a locked colour scale for the heatmap.**)
 
 - **Why.** The heatmap's colours were refitted to whatever was on screen on every
   paint, so the same cyan was one amount at 09:00 and another at 14:00, and a row

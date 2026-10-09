@@ -2110,6 +2110,53 @@ Harness, with a seed whose spot path trends 60 points: price is a flat white lin
 
 ---
 
+## Phase 3 as built (2026-10-09)
+
+Done and committed on this branch. The tasks above were written before the
+measurement; what was built differs in substance, and **Phase 4 must start from
+this**:
+
+1. **The measurement ran on a local prod backup, not after a promote.**
+   `E:\TradingBackups\prod_2026-09-25_1737\options-scanner\gex_history.db` holds six
+   sessions. `tools/measure_gamma_crop.py SYMBOL... --date D --db PATH --edge-side N`
+   opens a copy immutably. The widest stored `$SPX` day has a 1.1% range; no real
+   trend day has been measured.
+2. **The frame is 10 strikes tall, not 20, and that height is a config key.** The
+   full window cost 40% more `$SPX` history on a 1.1% day. `[window] spot_side`
+   (10) is both the frame's `half` and the service's edge window. At 10: +11.9%
+   `$SPX`, +9.1% QQQ, +8.7% `$NDX`, nothing on SPY, NVDA or a quiet day.
+3. **`gamma_window.crop_keep(strikes, spot, path, n_side, edge_side=0)`** holds the
+   whole crop rule and keeps `edge_side + 1` strikes each side of the low and the
+   high. The extra one brackets the frame's outermost row. `edge_side=0` is the rule
+   exactly as it was.
+4. **Both window sizes are read at CALL time**, in both tiers, with no restart:
+   `gamma._window_side()` and `_heat_cfg.n_side()` / `spot_side()` in
+   `_crop_gamma_views`. `N_SIDE` and `GAMMA_N_SIDE` no longer exist. The tests prove
+   the value is read by patching the accessor; nothing is reloaded.
+5. **`_hk` now carries six keywords** (`mode`, `balanced`, `scale`, `lock`, `frame`,
+   `half`), all accepted by both builders, and `heat_keeps_projection(**_hk)` takes
+   the dict whole. `heat_yrange(strikes, spot, spot_path, frame, half)` gives both
+   panels one range. A Show control adds a seventh keyword the same way.
+6. **`HeatControls.on_change(repaint, resync)`** and **`sync(view, overlays)`**: a
+   frame change resyncs the page's controls first, and `sync` hides Level movement,
+   Spot and Bar in the spot frame.
+7. **No `+` in a Highcharts format string.** It is ignored.
+8. One existing assertion changed where it looks:
+   `test_render_view_updates_in_place_not_clear` now finds `bar_yrange` through
+   `heat_yrange`. What it requires did not change.
+9. `render` is still 1,469 lines and 59 nested functions. `compute.py` is 10,514
+   lines against a ceiling of 10,515.
+
+Not done: nothing has been seen on prod data. The harness checks were read from
+the page's DOM; screenshots were not available. The public render was not
+re-checked in a browser this phase (its unit renders pass).
+
+⚠ **Use the editor for test files and patch scripts, never a shell heredoc.** A
+heredoc turned a `\n` inside a string literal into a real line break in one of this
+phase's tests; it was caught because the file stopped compiling.
+
+---
+
 ## Phase 4 — Show: change
 
 ### Task 4.1: The difference

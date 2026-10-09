@@ -178,7 +178,7 @@ is the closing speed. It answers "what is near me, and is it getting nearer"
 without comparing a moving line against fixed rows.
 
 **Page.** Each column is resampled onto a uniform offset ladder (the strike step,
-`half_strikes` each side) by linear interpolation between that column's strikes,
+`spot_side` strikes each side) by linear interpolation between that column's strikes,
 centred on that column's own spot. An offset the column has no strikes around is
 a gap. Nothing is extrapolated. Then:
 
@@ -197,14 +197,31 @@ a gap. Nothing is extrapolated. Then:
 **Service.** The crop keeps 20 strikes each side of the current spot, plus the
 strikes between the session's low and high. A column at the session low
 therefore has almost nothing below it, and on a trending day (the day this view
-is most useful) half of the early columns would be gaps. `_crop_gamma_views`
-widens to the display window around the low and around the high as well. The
-cost is more strikes per row on wide-range days only. The plan measures it on a
-stored trending session before it ships; the estimate is under a third more on
-the widest days and nothing on a quiet one.
+is most useful) half of the early columns would be gaps. On a 1.8% trending
+seed, 88 of 180 columns came up short. So the crop also keeps `spot_side` strikes
+each side of the session's low and high, plus one: price is rarely exactly on a
+strike, so the frame's outermost row falls between the `spot_side`-th strike and
+the next, and interpolating it needs both.
 
-`N_SIDE` (page) and `GAMMA_N_SIDE` (service) are the same literal in two tiers.
-This phase touches both, so it moves them to one config key.
+**What it costs, measured.** This section first said the frame would be the full
+20 strikes tall and that the wider crop would cost "under a third more on the
+widest days and nothing on a quiet one". That was measured before building, on
+six stored prod sessions, and it was wrong: 20 strikes added 40% to `$SPX`'s
+history on a day with a 1.1% range and 13% on the quietest day. By the rule's
+arithmetic (no stored day was that wide, so this is not measured) a 2% day that
+closed mid-range would add roughly 70%. Each view's history is rewritten every
+minute, on a branch that already overruns.
+
+So the frame is **10 strikes tall**, and that height is its own config key
+(`[window] spot_side`), which both the page and the service read. At 10 the
+measured cost is 12% on `$SPX`'s widest stored day, 9% on QQQ and `$NDX`, and
+nothing on SPY, NVDA or a quiet day. `spot_side = 0` restores the crop exactly as
+it was; the frame is then the display window tall and shows gaps.
+`tools/measure_gamma_crop.py` repeats the measurement on any stored session.
+
+`N_SIDE` (page) and `GAMMA_N_SIDE` (service) were the same literal in two tiers.
+Both are gone: `[window] n_side` is read at call time by each tier, so they agree
+within a minute of a change and neither needs a restart.
 
 ## 6. Where the code goes
 
@@ -247,6 +264,7 @@ four keys join the frozen list.
 | `[balanced] min_size_quantile` | 0.80 | page |
 | `[balanced] max_marks` | 3 | page |
 | `[window] n_side` | 20 | both (replaces the two literals) |
+| `[window] spot_side` | 10 | both (the spot frame's height, and the crop for it) |
 
 ## 7. Premium
 

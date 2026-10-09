@@ -1178,6 +1178,36 @@ hour is up the chart draws on the adaptive scale and the colour strip says
 <strong>settling until 09:30</strong>; after it, <strong>held since 09:30</strong>. In Locked the bars keep the
 same extent as well, and only widen when a bar is larger than the lock, so nothing is
 ever cut off.</p>
+<p><strong>Frame</strong> (a picker beside Scale) chooses what the vertical axis measures:</p>
+<table>
+<thead>
+<tr>
+<th>Frame</th>
+<th>The vertical axis is</th>
+<th>Use it to</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Strike</strong></td>
+<td>The strike price. Price moves; the levels stand still. The default.</td>
+<td>Read where the levels are.</td>
+</tr>
+<tr>
+<td><strong>From spot</strong></td>
+<td>The distance from the current price. Price is a flat line through the middle; the flip and the walls move.</td>
+<td>See what is <strong>near price now</strong>, and whether it is getting nearer.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>To see whether price is closing on a wall, pick From spot.</strong> A wall that price is
+approaching slides toward the middle line, and the steeper the slide, the faster the
+approach. A wall that runs level is keeping its distance.</p>
+<p>From spot shows <strong>10 strikes each side of price</strong>, in both panels, so the bars still
+line up with the heat map. Three controls hide in this frame because they would do
+nothing: <strong>Spot</strong> and <strong>Bar</strong> (price is always the flat line) and <strong>Level movement</strong>
+(the level lines are always drawn). The forward projection band is not drawn either.
+Each level line keeps its own price in its label; only its position moves.</p>
 <p><strong>The colour strip</strong> at the right of the controls row gives the two ends of the heat
 map's colours as numbers, with the unit: dollars of gamma per 1% move on Gamma,
 dollars of delta on Delta, a plain figure on Charm and Vanna, percentages in Share of

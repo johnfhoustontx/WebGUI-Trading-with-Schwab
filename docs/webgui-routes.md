@@ -1037,8 +1037,39 @@ two sides from the grid itself.
 - After a promote, `tools/show_gamma_scale_lock.py` prints each view's lock from
   the live cache.
 
+**The Frame picker (2026-10-09, Phase 3).** Beside Scale: **Strike** (the default)
+or **From spot**. `heatmap_figure` and `bar_figure` take `frame=` and `half=`.
+
+- **From spot** resamples each heatmap column onto offsets from its OWN spot
+  (`gamma_heat.to_spot_frame`: linear between the strikes that have a reading, a gap
+  outside them or across a hole, nothing extrapolated). The Spot series is a flat
+  line at zero. The three level tracks are drawn whatever the Level movement switch
+  says, as `level − that column's spot`. The level lines sit at `level − current
+  spot` (`wall_plot_lines(origin=)`) and keep their own price in the label. The bars
+  are drawn at `strike − spot`. Nine heatmap series and three bar series, as ever.
+- **One range for both panels:** `heat_yrange(strikes, spot, spot_path, frame, half)`.
+  `render` reaches the old `bar_yrange` / `union_range` pair through it.
+- **`half` is `[window] spot_side`** (10), and options_svc keeps that many strikes,
+  plus one that brackets the frame's outermost row, each side of the session's low
+  and high (`gamma_window.crop_keep`). ⚠ Raise it only with
+  `tools/measure_gamma_crop.py` in hand: 20 added 40% to $SPX's history on a 1.1%
+  day. With `spot_side = 0` the service crops as it did before, the frame is the
+  display window tall, and it shows gaps on a trending day.
+- `heat_keeps_projection(**_hk)` drops the forward band in this frame too (it is
+  strike-and-flat-spot data). The hedge panel is built from the same `projection`
+  name, so its columns still match.
+- **`HeatControls.sync(view, overlays)`** hides the page's Level movement, Spot and
+  Bar controls in the spot frame, AFTER `_sync_spot_controls` has applied its own
+  rules. A frame change runs that sync, then the repaint.
+- ⚠ Highcharts' `format` strings ignore a `+` flag (`{value:+.2f}` printed `20.00` in
+  the browser), so the spot frame's axis and tooltip do not write one.
+- **The display window is config now.** `N_SIDE` is gone; `strikes_around`,
+  `bars_from_gex` and `bar_figure` default to `[window] n_side`, read at call time,
+  the same key the service crops to.
+- The choice persists as `app_settings.gamma_heat_frame`.
+
 Design and plan: [value, scale and frame](plans/2026-10-09-gamma-heatmap-value-scale-frame-design.md).
-These are Phases 1 and 2 of five; the spot frame, Change and Premium are not built.
+These are Phases 1 to 3 of five; Change and Premium are not built.
 
 **`?view=` pins one view on the PRIVATE route too (2026-09-08).** `/options/gamma?view=Flow` deep-links a single view; bare is the page exactly as it always was. Added so the marketing gallery's three gamma tiles could differ (`tools/gallery_screens.py`) — the route was parameterless, so all three would have captured the identical default GEX view. ⚠ **A pin also changes what the page draws**, through the same `shows_view_picker` / `may_enqueue` gates the public screens use: no subtab picker, and no Refresh / Explain / Analyze / Briefings / History row. `_resolve_view` is TOTAL — an unknown name falls back to GEX rather than raising — and a pin is deliberately NOT offered for `symbol`, which is interpolated into a Redis key name with no allow-list behind it.
 

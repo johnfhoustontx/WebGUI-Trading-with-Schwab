@@ -683,6 +683,25 @@ where hedging is heavy, without a lean to tell you which way it pushes.
 Before the first hour is up there is nothing to lock to yet. The chart draws on the
 adaptive scale and the colour strip says **settling**.
 
+**Frame picker.** What the vertical axis measures.
+
+- **Strike** (the default). The axis is the strike price. The spot line wanders and
+  the flip and walls are horizontal. This is the frame for asking *where* the levels
+  are.
+- **From spot.** The axis is the distance from the current price. Price becomes a flat
+  line through the middle and the levels become moving lines. This is the frame for
+  asking *what is near me, and is it getting nearer*. A call wall that slopes down
+  toward the middle is being approached; one that slopes away is being left behind;
+  one that runs level is keeping pace, which happens when the wall itself is moving
+  up with price. In the Strike frame you would have to compare a moving line against
+  fixed rows to see the same thing.
+
+From spot draws 10 strikes each side of price. That number is a setting, and it is
+smaller than the Strike frame's 20 on purpose: every extra strike the frame shows has
+to be kept in the history the service publishes each minute, around the day's low and
+high, and that has a cost (see the Technical Reference). The Spot, Bar and Level
+movement controls hide in this frame, and the forward projection band is not drawn.
+
 **The colour strip** at the right of the controls gives the heat map's colour scale in
 numbers, with its unit, and says what it is tied to: *held since 09:30*, *settling
 until 09:30*, *adapts to what is visible* or *share of each column*. In Locked the
