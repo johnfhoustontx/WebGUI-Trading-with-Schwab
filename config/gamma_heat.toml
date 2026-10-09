@@ -25,6 +25,11 @@ quantile = 0.95
 # the scale.
 headroom = 1.5
 
+[show]
+# The heatmap's "Change over N min" view: each cell less the same strike's cell
+# this many minutes earlier. Read by the page each time it draws.
+change_window_min = 30
+
 [window]
 # Strikes shown each side of spot on the bars and the heatmap, and kept each
 # side of the current spot in the history options_svc publishes. Both tiers read

@@ -258,6 +258,80 @@ def test_no_lock_and_no_time_says_the_scale_adapts():
     assert gh.scale_caption("locked", None, "net", "") == "adapts to what is visible"
 
 
+# ── level or change ──────────────────────────────────────────────────────────
+
+TS = [1000, 1060, 1120, 2800, 2860]
+
+
+def test_the_shows_in_reading_order():
+    assert list(gh.SHOWS) == ["level", "open", "window"]
+    assert gh.show_labels(30) == {"level": "Level", "open": "Change since open",
+                                  "window": "Change over 30 min"}
+    assert gh.show_suffix("level", 30) == ""
+    assert gh.show_suffix("open", 30) == "change since open"
+    assert gh.show_suffix("window", 45) == "change over 45 min"
+
+
+def test_change_since_open_subtracts_the_first_column():
+    z = [[5.0, 7.0, 4.0, 9.0, 9.5]]
+    assert gh.delta(z, TS) == [[0.0, 2.0, -1.0, 4.0, 4.5]]
+    assert z == [[5.0, 7.0, 4.0, 9.0, 9.5]]            # the input is untouched
+
+
+def test_change_over_a_window_uses_the_latest_column_at_least_that_old():
+    """28 minutes before 2800 is 1120, the third column; before 2860 it is 1180,
+    and the latest column at or before that is still the third."""
+    out = gh.delta([[5.0, 7.0, 4.0, 9.0, 9.5]], TS, window_min=28)
+    assert out == [[None, None, None, 5.0, 5.5]]
+
+
+def test_a_column_with_nothing_old_enough_behind_it_is_a_gap():
+    assert gh.delta([[1.0, 2.0, 4.0]], [0, 60, 120], window_min=1) == [[None, 1.0, 2.0]]
+    assert gh.delta([[1.0, 2.0, 4.0]], [0, 60, 120], window_min=5) == [[None, None, None]]
+
+
+def test_a_strike_absent_at_the_basis_is_a_gap_not_a_zero():
+    """Zero would claim the exposure had not moved."""
+    assert gh.delta([[None, 7.0], [3.0, None]], [1000, 1060]) == [[None, None], [0.0, None]]
+
+
+def test_change_over_a_window_needs_real_times():
+    """Rows labelled with clock text (old fixtures) cannot say how old they are."""
+    assert gh.delta([[1.0, 2.0]], ["09:30", "09:31"], window_min=1) == [[None, None]]
+    assert gh.delta([[1.0, 2.0]], ["09:30", "09:31"]) == [[0.0, 1.0]]     # since open is fine
+
+
+def test_change_of_nothing():
+    assert gh.delta([], []) == []
+    assert gh.delta([[]], []) == [[]]
+
+
+def _basis_rows():
+    return [(1000, 100.0, None, None, None, 0, {100.0: {"net": 1.0}}),
+            (1060, 100.0, None, None, None, 0, {100.0: {"net": 2.0}}),
+            (2800, 100.0, None, None, None, 0, {100.0: {"net": 3.0}}),
+            (2860, 100.0, None, None, None, 0, {100.0: {"net": 4.0}})]
+
+
+def test_the_bars_basis_is_the_row_the_last_heatmap_column_is_measured_from():
+    rows = _basis_rows()
+    assert gh.basis_grid(rows, "level", 28) is None
+    assert gh.basis_grid(rows, "open", 28) == {100.0: {"net": 1.0}}
+    # 28 minutes before the last row (2860) is 1180: the latest row by then is 1060.
+    assert gh.basis_grid(rows, "window", 28) == {100.0: {"net": 2.0}}
+    # Nothing that old yet: no basis, so no bars rather than bars against nothing.
+    assert gh.basis_grid(rows[:2], "window", 28) is None
+    assert gh.basis_grid([], "open", 28) is None and gh.basis_grid(None, "window", 28) is None
+
+
+def test_the_basis_matches_the_heatmaps_last_column():
+    """The two panels must agree about what "30 minutes ago" was."""
+    rows = _basis_rows()
+    z = [[r[6][100.0]["net"] for r in rows]]
+    last_change = gh.delta(z, [r[0] for r in rows], window_min=28)[0][-1]
+    assert last_change == 4.0 - gh.basis_grid(rows, "window", 28)[100.0]["net"]
+
+
 # ── the spot frame ───────────────────────────────────────────────────────────
 
 def test_the_frames_in_reading_order():

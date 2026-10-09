@@ -67,6 +67,15 @@ def test_bad_window_values_fall_back(monkeypatch):
     assert cfg.n_side() == 20 and cfg.spot_side() == 10
 
 
+def test_change_window_default_and_overrides(monkeypatch):
+    assert cfg.change_window_min() == 30 and isinstance(cfg.change_window_min(), int)
+    monkeypatch.setattr(cfg, "load", lambda: {"show": {"change_window_min": 15}})
+    assert cfg.change_window_min() == 15
+    for bad in (0, -5, 1000, True, "soon"):
+        monkeypatch.setattr(cfg, "load", lambda bad=bad: {"show": {"change_window_min": bad}})
+        assert cfg.change_window_min() == 30, bad
+
+
 def test_lock_defaults():
     assert cfg.lock() == {"minutes": 60, "quantile": 0.95, "headroom": 1.5}
     assert isinstance(cfg.lock()["minutes"], int)

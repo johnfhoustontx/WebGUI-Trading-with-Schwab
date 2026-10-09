@@ -940,6 +940,14 @@ _GAMMA_HEAT = ConfigFile(
                   "Room above the first minutes' largest cells.",
                   kind="float", min=1, max=5, step=0.1),
         )),
+        Section("Change view",
+                "The heat map's Show picker can draw how each strike has moved "
+                "instead of its level.", (
+            Field("show.change_window_min", "Change over",
+                  "The shorter of the two Change views looks back this far. "
+                  "The other one looks back to the open.",
+                  kind="int", unit="min", min=5, max=240, step=5),
+        )),
         Section("Strikes shown",
                 "Read by the page and the options service each time they draw "
                 "or publish, so no restart is needed.", (

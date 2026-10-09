@@ -157,6 +157,83 @@ def scale_caption(scale, lock, mode, lock_time):
     return "adapts to what is visible"
 
 
+# ── level or change ──────────────────────────────────────────────────────────
+# show key -> the control's label ({n} is [show] change_window_min).
+#   level   the value itself
+#   open    the value less the same strike's value in the session's first column
+#   window  the value less the same strike's value {n} minutes earlier
+# ⚠ What a change MEANS depends on the value. The four Greek values are weighted
+# by open interest, which updates once a day, so their change is the same
+# positions repricing as price, time and volatility move. It is not new trades.
+SHOWS = {"level": "Level", "open": "Change since open", "window": "Change over {n} min"}
+
+
+def show_labels(window_min):
+    """The Show picker's options, with the window's minutes filled in."""
+    return {key: label.format(n=window_min) for key, label in SHOWS.items()}
+
+
+def show_suffix(show, window_min):
+    """What a chart title adds for ``show``: nothing for the level."""
+    return "" if show == "level" else show_labels(window_min)[show].lower()
+
+
+def delta(z, ts, window_min=None):
+    """Each cell less the same strike's cell at a basis column. Builds new lists.
+
+    ``window_min`` None: the basis is the session's first column. Otherwise it is
+    the latest column at least that many minutes older, and a column with none
+    that old behind it is a gap. A strike with no reading at the basis is a gap
+    too, never a zero: zero would claim the exposure had not moved.
+
+    ``ts`` are the columns' epoch seconds. A window needs them; rows labelled
+    with clock text have no age and come out as gaps."""
+    n = len(ts)
+    if window_min is None:
+        basis = [0] * n
+    else:
+        basis, j = [], 0
+        for i in range(n):
+            now = _fmt.num(ts[i])
+            if now is None:
+                basis.append(None)
+                continue
+            want = now - window_min * 60
+            while j + 1 < i:                # advance to the latest column by then
+                nxt = _fmt.num(ts[j + 1])
+                if nxt is None or nxt > want:
+                    break
+                j += 1
+            then = _fmt.num(ts[j])
+            basis.append(j if j < i and then is not None and then <= want else None)
+    return [[(row[i] - row[b]) if b is not None and row[i] is not None
+             and row[b] is not None else None
+             for i, b in enumerate(basis)] for row in z]
+
+
+def basis_grid(rows, show, window_min):
+    """The grid the by-strike bars subtract in a change view, or None.
+
+    The bars draw NOW, so their basis is the row the heatmap's LAST column is
+    measured from: the session's first row, or the latest row at least
+    ``window_min`` minutes older than the last. None for the level, and when no
+    row is old enough yet (no basis means no bars, never bars against nothing)."""
+    rows = [r for r in rows or () if len(r) > 6 and isinstance(r[6], dict)]
+    if show == "level" or not rows:
+        return None
+    if show == "open":
+        return rows[0][6]
+    last = _fmt.num(rows[-1][0])
+    if last is None:
+        return None
+    want, best = last - window_min * 60, None
+    for row in rows:
+        at = _fmt.num(row[0])
+        if at is not None and at <= want:
+            best = row[6]
+    return best
+
+
 # ── the vertical frame ───────────────────────────────────────────────────────
 # frame key -> the control's label.
 #   strike  the vertical axis is strike: price moves, the levels stand still

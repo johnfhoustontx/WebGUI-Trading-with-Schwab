@@ -27,6 +27,11 @@ DEFAULTS = {
         # the top of the scale.
         "headroom": 1.5,
     },
+    "show": {
+        # The heatmap's "Change over N min" view: each cell less the same
+        # strike's cell this many minutes earlier.
+        "change_window_min": 30,
+    },
     "window": {
         # Strikes shown each side of spot on the bars and the heatmap, and kept
         # each side of the current spot in the published history. One number
@@ -66,6 +71,12 @@ def balanced() -> dict:
             "min_size_quantile": _setting("balanced", "min_size_quantile",
                                           minimum=0.0, maximum=1.0),
             "max_marks": _setting("balanced", "max_marks", minimum=0)}
+
+
+def change_window_min() -> int:
+    """Minutes the heatmap's "Change over N min" view looks back. Read by the
+    page each time it draws."""
+    return _setting("show", "change_window_min", minimum=5, maximum=240)
 
 
 def n_side() -> int:
