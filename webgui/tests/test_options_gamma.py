@@ -3403,6 +3403,20 @@ def test_heat_controls_legend_says_the_lock_is_still_settling(monkeypatch):
     assert "settling until 09:30" in heat.legend.content
 
 
+def test_the_legend_does_not_say_settling_once_the_time_has_passed(monkeypatch):
+    """No lock although the session is past the minutes it is set from (a
+    snapshot that predates the field, or rows the service could not read):
+    there is nothing left to wait for, so the scale is said to adapt."""
+    monkeypatch.setattr(gamma._heat_cfg, "lock", lambda: {"minutes": 1, "quantile": 0.95,
+                                                          "headroom": 1.5})
+    heat = _heat_controls("net", "locked")
+    rows = _epoch_rows()                       # 08:30 and 08:31: the minute has passed
+    hk = heat.read(SIDED["gex"], rows, [100.0], {"scale_lock": None})
+    heat.show_legend("GEX", {"zmax": 9.0, "mode": hk["mode"], "scale": hk["scale"]})
+    assert "adapts to what is visible" in heat.legend.content
+    assert "settling" not in heat.legend.content
+
+
 def test_heat_controls_legend_in_percent_for_a_share_scale():
     heat = _heat_controls("net", "share")
     hk = heat.read(SIDED["gex"], _epoch_rows(), [100.0], {"scale_lock": _LOCK})

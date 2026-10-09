@@ -2351,7 +2351,13 @@ class HeatControls:
         # minutes. The service's own figure when it has published one.
         minutes = (self._lock or {}).get("minutes") or _heat_cfg.lock()["minutes"]
         first = rows[0][0] if rows else None
-        self._lock_time = _fmt_ts(first + 60 * minutes) if _is_level(first) else ""
+        due = first + 60 * minutes if _is_level(first) else None
+        # No lock although its time has passed (a snapshot that predates the
+        # field, rows the service could not read): there is nothing to wait
+        # for, so no time is shown and the caption says the scale adapts.
+        overdue = (due is not None and not self._lock
+                   and _is_level(rows[-1][0]) and rows[-1][0] >= due)
+        self._lock_time = _fmt_ts(due) if due is not None and not overdue else ""
         scale = self.scale.value if self.scale.value in _heat.SCALES else "adaptive"
         out = {"mode": "net", "balanced": [], "scale": scale, "lock": self._lock}
         if self._sided and self.value.value in _heat.VALUES:
