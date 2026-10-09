@@ -106,9 +106,19 @@ Calls, of Size and of Premium all come from the same function.
 **What Change means has to be said on the page.** Open interest is fixed for the
 day, so for the four Greek values a change is the same positions repricing as
 price, time and volatility move. It is not new trades. The control's tooltip and
-the page guide say so, and point at Premium for new activity. The clearest thing
-it shows is the 0-DTE build at the money into the close, which the level view
-buries under the standing bands.
+the page guide say so. (They will point at Premium for new activity once Premium
+exists; until then they do not name a view the page does not have.) The clearest
+thing it shows is the 0-DTE build at the money into the close, which the level
+view buries under the standing bands.
+
+**The bars follow.** The by-strike panel draws the same change the heatmap's last
+column shows: each strike's value now, less its value in the row that column is
+measured from (`gamma_heat.basis_grid`). Two panels showing different quantities
+under one picker would mislead. A strike the basis does not hold gets no bar, and
+in the first minutes of "Change over 30 min", when nothing is old enough, there
+are no bars and the heatmap is empty: never the level under a title that says
+change. The forward projection band and the bars' projected-close outline are
+levels, so neither is drawn in a change view.
 
 ## 3. Scale and the legend
 

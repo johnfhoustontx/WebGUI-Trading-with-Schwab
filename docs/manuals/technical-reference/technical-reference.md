@@ -2128,6 +2128,28 @@ At most `max_marks` (3) are marked, largest first. The three numbers are
 `config/gamma_heat.toml` `[balanced]`, read on every paint, so a change in
 Settings → Configuration applies with no restart.
 
+**Level or change.** The **Show** picker draws the value, or its change
+(`gamma_heat.delta`):
+
+```
+change[strike][t] = value[strike][t] − value[strike][basis(t)]
+
+Change since open     basis(t) = the session's first column
+Change over N min     basis(t) = the latest column at least N minutes before t
+```
+
+`N` is `config/gamma_heat.toml` `[show] change_window_min` (30). A cell is left
+blank when the strike has no reading at the basis, or when no column is old enough
+yet; it is never drawn as a change from zero. The change is taken per strike, before
+the spot frame's resampling. The by-strike bars draw the same quantity for the
+latest column: the live value less the value in that column's basis row
+(`gamma_heat.basis_grid`).
+
+The Greek values are weighted by open interest (`use_volume=False` in the collector),
+and open interest is published once a day. So a change within a session comes from
+the Greeks moving (spot, time to expiry, implied volatility), not from a change in
+position size, which the feed does not report during the session.
+
 **Colour scale.** The heat map's colours are symmetric about zero. The **Scale**
 picker sets where they clamp:
 

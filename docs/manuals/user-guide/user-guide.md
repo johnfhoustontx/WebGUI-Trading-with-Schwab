@@ -833,7 +833,29 @@ A grey dotted **Balanced** line across both panels marks such a strike in every
 Value: one of the largest on screen whose calls and puts nearly cancel. At most three
 are marked.
 
-**Scale** (a picker beside Value) chooses what a colour means:
+**Show** (a picker beside Value) chooses between the level and how it has moved:
+
+| Show | Each bar and cell is | Use it to |
+|------|----------------------|-----------|
+| **Level** | The value itself. The default. | Read where the exposure is. |
+| **Change since open** | The value now, less the same strike's value at the open. | See what has built or drained over the session. |
+| **Change over 30 min** | The value now, less the same strike's value 30 minutes earlier. | See what is moving right now. |
+
+**To see where exposure is building, pick a Change.** The standing bands that sit
+still all day go dark, and only what has moved is left. Both panels switch together.
+
+> **A change is not new trades.** Open interest updates once a day, so through the
+> session these numbers move only because price, time and volatility reprice the
+> **same** positions. A strike that brightens in a Change view is one where existing
+> positions have become more sensitive, typically because price has moved toward it
+> or its options are close to expiring. It does not mean anyone bought or sold there.
+
+In the first half hour of a session **Change over 30 min** is empty, because nothing
+is yet 30 minutes old. A strike that was not in the chain at the start of the window
+is left blank, never drawn as a change from zero. The forward projection band is not
+drawn in a Change view.
+
+**Scale** (a picker beside Show) chooses what a colour means:
 
 | Scale | A colour is | Use it to |
 |-------|-------------|-----------|

@@ -1265,6 +1265,22 @@ netted off it, for example to see how far up the chain call positioning extends.
 and whose calls and puts nearly cancel. It is drawn in every Value, because Net is
 where you would otherwise miss it. Treat it like a wall with no direction: a level
 where hedging is heavy, without a lean to tell you which way it pushes.</p>
+<p><strong>Show picker.</strong> The <strong>Level</strong>, or how each strike has changed: <strong>Change since open</strong>
+or <strong>Change over 30 min</strong>.</p>
+<p>The level view is mostly horizontal bands that barely move all day, because the
+positions behind them do not change until the next morning's open-interest update. A
+Change view subtracts that standing picture and leaves what has moved. The clearest
+thing it shows is expiration-day gamma concentrating at the money: in the level view
+that is a slow brightening of rows that were already bright; in Change since open it
+is the only thing lit.</p>
+<p>Read it for what it is. <strong>A change here is repricing, not trading.</strong> The same
+positions become more or less sensitive as price moves toward or away from a strike,
+as time runs out, and as volatility shifts. A row lighting up says dealers' hedging
+need at that strike has grown. It does not say anyone opened a position there. For
+that, use the Flow view.</p>
+<p>Use <strong>Change over 30 min</strong> for what is happening now and <strong>Change since open</strong> for
+the session's net effect. In Locked scale a Change is measured against the same lock
+as its level, so a change cell as bright as a wall is as large as a wall.</p>
 <p><strong>Scale picker.</strong> What a colour on the heat map means.</p>
 <ul>
 <li><strong>Locked</strong> (the default). One colour is one amount for the whole session. The

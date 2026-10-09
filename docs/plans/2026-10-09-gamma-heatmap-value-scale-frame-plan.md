@@ -2228,6 +2228,38 @@ Tests: nine series; `show="level"` equals today's figure; the first column of "s
 
 ---
 
+## Phase 4 as built (2026-10-09)
+
+Done and committed on this branch. What differs from the tasks above, and what
+**Phase 5 must start from**:
+
+1. **The bars show the change too.** The tasks covered the heatmap only.
+   `bar_figure(show=, change_window_min=, basis=)` draws each strike's value now
+   less its value in `basis`, the row the heatmap's last column is measured from
+   (`gamma_heat.basis_grid`, through `HeatControls.basis(rows)`). No basis means no
+   bars.
+2. **`_hk` carries eight keywords**: `mode`, `balanced`, `scale`, `lock`, `frame`,
+   `half`, `show`, `change_window_min`. `basis` is the bars' alone and is passed
+   beside `**_hk` on the existing bar call line, so `render` did not grow.
+3. **`delta(z, ts, window_min=None)`** takes the columns' epoch seconds. Rows whose
+   first field is clock text have no age: a window view of them is all gaps, and
+   "since open" still works.
+4. **The tooltip is `gamma_heat.SHOW_HELP`**, a constant, so its test checks the
+   sentence and not the source's line breaks. It does not mention Premium, which
+   does not exist yet. **Phase 5 should add that pointer** to the tooltip, the page
+   guide and the manuals once Premium ships.
+5. **For Phase 5's own Change:** stored premium is day-cumulative, so "Change over
+   30 min" of Premium is the premium that moved in that window, subject to the
+   re-marking question Task 5.1 measures. `delta` and `basis_grid` need nothing
+   new for it.
+6. `render` is still 1,469 lines and 59 nested functions.
+
+Not done: nothing has been seen on prod data, and the harness checks were read
+from the page's DOM. Not checked in a browser: Change combined with the spot frame
+and with Share of column (their unit tests pass).
+
+---
+
 ## Phase 5 — Value: premium (private page)
 
 The public page does not get Premium in this version: a fifth history key per leased symbol is a write cost that has not been measured. `HeatControls` leaves it out of the picker when the page is public.

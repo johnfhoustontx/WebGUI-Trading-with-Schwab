@@ -1146,7 +1146,47 @@ of the brightest rows, and its two bars are the same length.</p>
 <p>A grey dotted <strong>Balanced</strong> line across both panels marks such a strike in every
 Value: one of the largest on screen whose calls and puts nearly cancel. At most three
 are marked.</p>
-<p><strong>Scale</strong> (a picker beside Value) chooses what a colour means:</p>
+<p><strong>Show</strong> (a picker beside Value) chooses between the level and how it has moved:</p>
+<table>
+<thead>
+<tr>
+<th>Show</th>
+<th>Each bar and cell is</th>
+<th>Use it to</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Level</strong></td>
+<td>The value itself. The default.</td>
+<td>Read where the exposure is.</td>
+</tr>
+<tr>
+<td><strong>Change since open</strong></td>
+<td>The value now, less the same strike's value at the open.</td>
+<td>See what has built or drained over the session.</td>
+</tr>
+<tr>
+<td><strong>Change over 30 min</strong></td>
+<td>The value now, less the same strike's value 30 minutes earlier.</td>
+<td>See what is moving right now.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>To see where exposure is building, pick a Change.</strong> The standing bands that sit
+still all day go dark, and only what has moved is left. Both panels switch together.</p>
+<blockquote>
+<p><strong>A change is not new trades.</strong> Open interest updates once a day, so through the
+session these numbers move only because price, time and volatility reprice the
+<strong>same</strong> positions. A strike that brightens in a Change view is one where existing
+positions have become more sensitive, typically because price has moved toward it
+or its options are close to expiring. It does not mean anyone bought or sold there.</p>
+</blockquote>
+<p>In the first half hour of a session <strong>Change over 30 min</strong> is empty, because nothing
+is yet 30 minutes old. A strike that was not in the chain at the start of the window
+is left blank, never drawn as a change from zero. The forward projection band is not
+drawn in a Change view.</p>
+<p><strong>Scale</strong> (a picker beside Show) chooses what a colour means:</p>
 <table>
 <thead>
 <tr>

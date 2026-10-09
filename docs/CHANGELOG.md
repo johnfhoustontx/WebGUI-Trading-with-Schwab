@@ -4,7 +4,36 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-09 (**Dealer Positioning: the heatmap measured from spot.**)
+**Last updated:** 2026-10-09 (**Dealer Positioning: the heatmap can show change.**)
+
+- **What changed.** A **Show** picker between Value and Scale: **Level** (the chart
+  as it was), **Change since open**, or **Change over 30 min**. A Change view
+  subtracts each strike's earlier value, so the bands that sit still all day go dark
+  and what has moved is left. It works with every Value, Scale and Frame, and both
+  panels switch together.
+- **What a change is not.** The collector weights by open interest, which is
+  published once a day. A change within a session is the same positions repricing
+  as price, time and volatility move. It is not new trades, and the picker's tooltip,
+  the page guide and the manuals each say so.
+- **Edges.** A strike that was not in the chain at the basis is left blank, never
+  drawn as a change from zero. In the first half hour "Change over 30 min" is empty.
+  The forward projection band and the bars' projected-close outline are levels, so a
+  Change view drops them.
+- **Scale.** A locked Change is measured against the value's own lock: a change cell
+  as bright as a wall is as large as a wall.
+- **Beyond the plan.** The plan covered the heatmap only. The bars show the change
+  too, because two panels showing different things under one picker would mislead.
+- **Configuration.** `config/gamma_heat.toml` `[show] change_window_min` (30).
+- **Not changed.** What the service publishes. Level is the default and draws the
+  same chart. `gamma.render` is still 1,469 lines.
+- **Verified** in the local page harness (no dev environment), read from the page's
+  DOM because screenshots were not available: both Change views retitle both panels,
+  the bars repartition, nine series, no console or server error. Not yet seen on
+  prod data.
+- **Tests.** Additions to `test_gamma_heat.py`, `test_options_gamma.py` and
+  `test_gamma_heat_config.py`.
+
+**Prior —** 2026-10-09 (**Dealer Positioning: the heatmap measured from spot.**)
 
 - **What changed.** A **Frame** picker beside Scale. **Strike** is the chart as it
   was. **From spot** makes the vertical axis the distance from the current price:

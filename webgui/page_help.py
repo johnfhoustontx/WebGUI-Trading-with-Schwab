@@ -753,6 +753,12 @@ accelerate price.
 - **Balanced** — a grey dotted line across both panels marks a strike that is
   among the largest on screen while its calls and puts nearly cancel. It is there
   in every Value, because in Net that strike would otherwise look empty.
+- **Show** — the **Level** (the default), or how each strike has changed:
+  **Change since open** or **Change over 30 min**. The standing bands go dark and
+  only what has moved is left, in both panels. Open interest updates once a day,
+  so a change here is the same positions repricing as price, time and volatility
+  move. **It is not new trades.** In the first half hour "Change over 30 min" is
+  empty, because nothing is old enough to compare with.
 - **Scale** — what a colour means. **Locked** (the default) keeps one colour
   meaning one amount for the whole session: the scale is set from the session's
   first hour and then held, so a cell that gets brighter has grown. Before that

@@ -3125,6 +3125,23 @@ size &gt;= the min_size_quantile rank of the strikes on screen (0.80)
 <p>At most <code>max_marks</code> (3) are marked, largest first. The three numbers are
 <code>config/gamma_heat.toml</code> <code>[balanced]</code>, read on every paint, so a change in
 Settings → Configuration applies with no restart.</p>
+<p><strong>Level or change.</strong> The <strong>Show</strong> picker draws the value, or its change
+(<code>gamma_heat.delta</code>):</p>
+<pre><code>change[strike][t] = value[strike][t] − value[strike][basis(t)]
+
+Change since open     basis(t) = the session's first column
+Change over N min     basis(t) = the latest column at least N minutes before t
+</code></pre>
+<p><code>N</code> is <code>config/gamma_heat.toml</code> <code>[show] change_window_min</code> (30). A cell is left
+blank when the strike has no reading at the basis, or when no column is old enough
+yet; it is never drawn as a change from zero. The change is taken per strike, before
+the spot frame's resampling. The by-strike bars draw the same quantity for the
+latest column: the live value less the value in that column's basis row
+(<code>gamma_heat.basis_grid</code>).</p>
+<p>The Greek values are weighted by open interest (<code>use_volume=False</code> in the collector),
+and open interest is published once a day. So a change within a session comes from
+the Greeks moving (spot, time to expiry, implied volatility), not from a change in
+position size, which the feed does not report during the session.</p>
 <p><strong>Colour scale.</strong> The heat map's colours are symmetric about zero. The <strong>Scale</strong>
 picker sets where they clamp:</p>
 <table>

@@ -1068,8 +1068,32 @@ or **From spot**. `heatmap_figure` and `bar_figure` take `frame=` and `half=`.
   the same key the service crops to.
 - The choice persists as `app_settings.gamma_heat_frame`.
 
+**The Show picker (2026-10-09, Phase 4).** Between Value and Scale: **Level** (the
+default), **Change since open** or **Change over 30 min**. `heatmap_figure` and
+`bar_figure` take `show=` and `change_window_min=`; `bar_figure` also takes
+`basis=`.
+
+- The heatmap applies `gamma_heat.delta` to the value matrix per STRIKE, before the
+  crop, the uniform ladder and any frame transform. A strike with no reading at the
+  basis, or a column with nothing old enough behind it, is a gap, never a zero.
+- **The bars follow**, which the plan did not ask for: each strike's value now less
+  its value in `basis`, the row the heatmap's last column is measured from
+  (`gamma_heat.basis_grid`, reached through `HeatControls.basis(rows)`). No basis
+  means no bars, never the level under a title that says change. The projected-close
+  outline is a level and is dropped.
+- A locked change uses the value's OWN lock (`scale_max` is called as before), so one
+  legend serves a level and its change.
+- `heat_keeps_projection(**_hk)` drops the forward band in a change view too.
+- The tooltip is `gamma_heat.SHOW_HELP`, a named constant a test holds to its one
+  job: saying a change is repricing, not new trades (the collector weights by open
+  interest).
+- `[show] change_window_min` (30) is read per paint. The picker's "30" is filled in
+  when the page is built, so a changed window shows in the label after a reload.
+- The choice persists as `app_settings.gamma_heat_show`. `_hk` now carries eight
+  keywords; `render` is unchanged in size.
+
 Design and plan: [value, scale and frame](plans/2026-10-09-gamma-heatmap-value-scale-frame-design.md).
-These are Phases 1 to 3 of five; Change and Premium are not built.
+These are Phases 1 to 4 of five; Premium is not built.
 
 **`?view=` pins one view on the PRIVATE route too (2026-09-08).** `/options/gamma?view=Flow` deep-links a single view; bare is the page exactly as it always was. Added so the marketing gallery's three gamma tiles could differ (`tools/gallery_screens.py`) — the route was parameterless, so all three would have captured the identical default GEX view. ⚠ **A pin also changes what the page draws**, through the same `shows_view_picker` / `may_enqueue` gates the public screens use: no subtab picker, and no Refresh / Explain / Analyze / Briefings / History row. `_resolve_view` is TOTAL — an unknown name falls back to GEX rather than raising — and a pin is deliberately NOT offered for `symbol`, which is interpolated into a Redis key name with no allow-list behind it.
 
