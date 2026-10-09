@@ -167,9 +167,15 @@ def test_the_planned_calls_are_one_chain_per_symbol_per_minute_and_one_quote_a_m
 # THE RUN, WITH A STAND-IN CLIENT
 #############################################
 
+# The one expiration ``_chain`` lists: four days after the run's own day. Derived
+# from RTH and never written out, because the engine reads a key dated its own
+# "today" as 0-DTE whatever the ``:4`` after it says.
+FOUR_OUT = f"{(RTH.date() + dt.timedelta(days=4)).isoformat()}:4"
+
+
 def _chain(symbol, spot):
     def side(pc, sign, oi):
-        return {"2026-10-09:4": {
+        return {FOUR_OUT: {
             str(k): [{"putCall": pc, "strikePrice": k, "gamma": g,
                       "delta": sign * d, "volatility": 30.0, "openInterest": oi,
                       "totalVolume": 40, "mark": 1.25}]
@@ -570,11 +576,28 @@ def test_rows_that_do_not_say_get_no_expiration_day_line():
 
 
 def _expiring(symbol, spot):
-    """The same chain, but its only expiration is the engine's 0-DTE one."""
+    """The same chain, but its only expiration is the run's own day: 0-DTE."""
     chain = _chain(symbol, spot)
     for m in ("callExpDateMap", "putExpDateMap"):
         chain[m] = {f"{RTH.date().isoformat()}:0": next(iter(chain[m].values()))}
     return chain
+
+
+def _engine_on(monkeypatch, clock):
+    """Pin the engine's wall clock to the run's own.
+
+    ``GammaEngine`` takes no clock: its "today" is ``datetime.now``, and the
+    tool hands its own clock to the carry only. In a real run the two are one
+    clock. Left alone here they are not, and the engine would judge a chain's
+    dates against the day the suite happens to run."""
+    gt = mcc._engine_modules()[1]
+
+    class _Pinned(dt.datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return clock() if tz is None else clock().astimezone(tz)
+
+    monkeypatch.setattr(gt, "datetime", _Pinned)
 
 
 def _rows_of(monkeypatch, chain_of):
@@ -583,6 +606,7 @@ def _rows_of(monkeypatch, chain_of):
     monkeypatch.setattr(mcc, "report",
                         lambda r, **kw: (rows.extend(r), real(r, **kw))[1])
     clock = _Clock()
+    _engine_on(monkeypatch, clock)
     client = _Client(clock)
     calls = []
 
