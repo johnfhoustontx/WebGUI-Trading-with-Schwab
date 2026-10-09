@@ -58,7 +58,10 @@ def test_phase3b_pages_have_no_inline_style():
 # (styles the Explain ``ui.html()`` fragment) — NOT a `.style(`/`:style=`, so it
 # passes. The Highcharts option dicts (chart colors) are out of scope. Expected-Move
 # was already inline-style-free — it only joins this guard.
-PHASE_3C_FILES = ["gamma.py", "expected_move.py"]
+# gamma_heat.py is Gamma's pure transform library (2026-10-09). Its legend is a
+# raw SVG string for ``ui.html()``, out of scope the same way; the guard is what
+# stops a widget arriving there with a `.style(` attached.
+PHASE_3C_FILES = ["gamma.py", "gamma_heat.py", "expected_move.py"]
 
 
 def test_phase3c_pages_have_no_inline_style():
