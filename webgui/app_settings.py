@@ -38,6 +38,7 @@ DEFAULTS = {
     "gamma_level_tracks": False,     # heatmap overlay: intraday flip/wall movement
     "gamma_spot_style": "line",      # heatmap spot overlay: line | candle | ohlc
     "gamma_spot_interval": 5,        # candle/OHLC bucket size in minutes (1|5|15)
+    "gamma_heat_value": "net",       # heatmap cell: net | call | put | size
     "gamma_netprem_group": "indices",          # Net Prem picker: which group tab
     "gamma_netprem_mode": "dollars",           # Net Prem y-axis: dollars | skew
     # Comparable magnitudes in Dollars mode, so the three read as one chart.

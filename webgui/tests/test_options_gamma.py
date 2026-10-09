@@ -3155,6 +3155,137 @@ def test_the_legend_sink_is_optional_and_changes_nothing():
             == gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0]))
 
 
+def test_refloat_rows_floats_each_grids_keys_and_copies_the_rows():
+    """History rows come off the bus with string strike keys, and the list is
+    shared by every open tab: the rows handed back are new objects."""
+    stored = [[1000, 100.0, None, None, None, 0, {"99.0": {"net": 1.0}}],
+              [1060, 100.5, None, None, None, 0, {"100.0": {"net": 2.0}}],
+              [1120, 101.0]]                                   # a short row
+    before = json.dumps(stored)
+    out = gamma.refloat_rows(stored)
+    assert out[0] == (1000, 100.0, None, None, None, 0, {99.0: {"net": 1.0}})
+    assert list(out[1][6]) == [100.0]
+    assert out[2] == (1120, 101.0)
+    assert json.dumps(stored) == before
+    assert gamma.refloat_rows(None) == [] and gamma.refloat_rows([]) == []
+
+
+def test_projection_arg_is_the_band_heatmap_figure_takes_or_none():
+    entry = {"projection": {"times": ["13:15"], "spot": 100.0,
+                            "grid": {"100.0": [5.0]},
+                            "cone": {"mid": [100.0], "up": [100.5], "down": [99.5]}}}
+    proj = gamma.projection_arg(entry)
+    assert proj == {"times": ["13:15"], "grid": {100.0: [5.0]},
+                    "cone": {"mid": [100.0], "up": [100.5], "down": [99.5]},
+                    "spot": 100.0}
+    fig = gamma.heatmap_figure(_proj_rows(), "GEX", yrange=[95.0, 105.0], projection=proj)
+    assert fig["xAxis"]["categories"][-1] == "13:15"
+    for empty in ({}, None, {"projection": None}, {"projection": {"times": ["13:15"]}},
+                  {"projection": {"grid": {"100.0": [1.0]}}}):
+        assert gamma.projection_arg(empty) is None
+
+
+def test_heat_setting_falls_back_on_a_value_it_does_not_know(monkeypatch):
+    monkeypatch.setattr(gamma.app_settings, "get", lambda k: "gross")
+    assert gamma._heat_setting("gamma_heat_value", gamma._heat.VALUES, "net") == "net"
+    monkeypatch.setattr(gamma.app_settings, "get", lambda k: "size")
+    assert gamma._heat_setting("gamma_heat_value", gamma._heat.VALUES, "net") == "size"
+    monkeypatch.setattr(gamma.app_settings, "get", lambda k: None)
+    assert gamma._heat_setting("gamma_heat_value", gamma._heat.VALUES, "net") == "net"
+
+
+def test_the_heat_value_is_a_stored_setting_that_defaults_to_net():
+    import app_settings
+    assert app_settings.DEFAULTS["gamma_heat_value"] == "net"
+
+
+def test_the_projection_band_is_kept_only_for_net():
+    """The forward projection is a net grid. In any other value the band is
+    dropped by the CALLER, so the hedge panel is built on the same columns."""
+    assert gamma.heat_keeps_projection("net")
+    for mode in ("call", "put", "size"):
+        assert not gamma.heat_keeps_projection(mode)
+
+
+def test_render_builds_the_heat_controls_and_feeds_both_panels():
+    src = inspect.getsource(gamma.render)
+    assert "heat = HeatControls()" in src
+    assert "heat.on_change(_render_view)" in src
+    paint = src[src.index("def _render_view("):src.index("def _request_refresh(")]
+    assert paint.count("heat.read(") == 1
+    assert paint.count("**_hk") == 2                 # bar_figure and heatmap_figure
+    assert paint.count("heat_keeps_projection(") == 1
+    assert "heat.show_legend(" in paint
+    sync = src[src.index("def _sync_spot_controls("):]
+    assert "heat.sync(" in sync[:sync.index("\n    spot_style_sel.on_value_change")]
+
+
+def test_the_hedge_panel_is_built_on_the_projection_the_heatmap_was_given():
+    """One ``projection`` name feeds both, so dropping the band for a non-net
+    value shortens the hedge panel's columns with it."""
+    src = inspect.getsource(gamma.render)
+    paint = src[src.index("def _render_view("):]
+    assert "projection=projection," in paint
+    assert "heatmap_categories(rows, projection)" in paint
+
+
+class _FakeEl:
+    """Stands in for a NiceGUI element in HeatControls."""
+    def __init__(self, value=None):
+        self.value, self.content, self.enabled, self.visible = value, None, True, True
+
+    def set_enabled(self, on):
+        self.enabled = on
+
+    def set_visibility(self, on):
+        self.visible = on
+
+
+def _heat_controls(value="size"):
+    heat = gamma.HeatControls.__new__(gamma.HeatControls)
+    heat.value, heat.legend, heat._sided = _FakeEl(value), _FakeEl(), True
+    return heat
+
+
+def test_heat_controls_read_gives_both_builders_their_keywords():
+    heat = _heat_controls("size")
+    rows = _sided_rows()
+    hk = heat.read(SIDED["gex"], rows, [99.0, 100.0, 101.0, 102.0])
+    assert hk == {"mode": "size", "balanced": [100.0]}
+    gamma.bar_figure(SIDED, 100.0, **hk)                       # both accept them
+    gamma.heatmap_figure(rows, "GEX", yrange=[95.0, 105.0], **hk)
+
+
+def test_heat_controls_fall_back_to_net_when_no_cell_has_sides():
+    heat = _heat_controls("size")
+    grid = {100.0: {"net": 5.0}}
+    rows = [("09:30", 100.0, None, None, None, 0, {100.0: 4.0})]
+    assert heat.read(grid, rows, [100.0]) == {"mode": "net", "balanced": []}
+    assert heat.value.enabled is False
+    assert heat.value.value == "size"        # the reader's choice is kept, not overwritten
+    # ...and it comes back by itself when a sided session loads.
+    assert heat.read(SIDED["gex"], _sided_rows(), [100.0])["mode"] == "size"
+    assert heat.value.enabled is True
+
+
+def test_heat_controls_show_on_the_four_greek_views_only():
+    heat = _heat_controls()
+    for view, shown in (("GEX", True), ("Vanna", True), ("Flow", False),
+                        ("Net Prem", False), ("Term", False)):
+        heat.sync(view)
+        assert heat.value.visible is shown and heat.legend.visible is shown
+
+
+def test_heat_controls_legend_carries_the_views_unit():
+    heat = _heat_controls()
+    heat.show_legend("GEX", {"zmax": 2.5e9, "mode": "size"})
+    assert "$ gamma per 1% move" in heat.legend.content and "+$2.50B" in heat.legend.content
+    heat.show_legend("Charm", {"zmax": 2.5e9, "mode": "net"})
+    assert "$" not in heat.legend.content and "+2.50B" in heat.legend.content
+    heat.show_legend("GEX", {})
+    assert heat.legend.content == ""
+
+
 def test_a_mark_that_is_not_a_number_is_skipped_on_the_heatmap():
     heat = gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0],
                                 balanced=[None, "x", True, 100.0])

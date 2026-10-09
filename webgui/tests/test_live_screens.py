@@ -173,7 +173,8 @@ PUBLIC_UNSAFE_DEFAULTS = {
 #     shows is quoted from the published market report, not a Claude call
 #     (market_svc stopped calling Claude for it on 2026-09-16);
 #   * or read by a published page purely to CHOOSE WHAT TO DRAW
-#     (``macro_skin``, the three ``gamma_*`` display knobs,
+#     (``macro_skin``, the ``gamma_*`` display knobs -- ``gamma_heat_value``,
+#     which number a heatmap cell holds, among them --
 #     ``alert_market_hours_only`` as a gate, the remaining ``voice_*`` keys
 #     which are inert once ``voice_enabled`` is off -- the three per-section
 #     switches ``voice_board``/``voice_flow``/``voice_positions`` included: each
@@ -195,7 +196,8 @@ PUBLIC_SAFE_DEFAULTS = {
     "voice_positions", "captured_autoclose_enabled",
     "manual_paper_lifecycle_enabled", "ticker_enabled", "ticker_speed",
     "nav_pinned", "gamma_level_tracks", "gamma_spot_style",
-    "gamma_spot_interval", "gamma_netprem_group", "gamma_netprem_mode",
+    "gamma_spot_interval", "gamma_heat_value", "gamma_netprem_group",
+    "gamma_netprem_mode",
     "gamma_netprem_symbols", "macro_skin", "chain_grid_columns",
     "flow_hidden_kinds",
 }

@@ -30,6 +30,7 @@ from pages import fmt as _fmt    # the ONE numeric vocabulary (pages/fmt.py)
 from pages import ui_kit as kit
 from pages.ui_guard import guard, guard_async
 from shared import market_calendar as _mc
+from shared import gamma_heat_config as _heat_cfg  # Tier-1 allow-listed: config
 from shared import public_gamma as _pg  # Tier-1 allow-listed: config + validator
 from shared import symbols as _symbols
 from . import flow_panels as _fx
@@ -2228,6 +2229,103 @@ def _visitor():
         return "unknown"
 
 
+def refloat_rows(rows):
+    """History rows with each grid's strike keys back to floats (tuple index 6).
+
+    The rows come off the bus as JSON, whose dict keys are strings, and the pure
+    builders sort and compare strikes numerically. Every row handed back is a NEW
+    tuple holding a new grid dict: the list read from the bus is shared by every
+    open tab and is never written to."""
+    out = []
+    for r in rows or []:
+        r = list(r)
+        if len(r) > 6:
+            r[6] = _refloat_keys(r[6])
+        out.append(tuple(r))
+    return out
+
+
+def projection_arg(entry):
+    """A view entry's forward band as ``heatmap_figure`` takes it, or None when
+    the snapshot carries none (off-hours, or any view but GEX)."""
+    proj = (entry or {}).get("projection") or {}
+    if not (proj.get("times") and proj.get("grid")):
+        return None
+    return {"times": proj["times"], "grid": _refloat_keys(proj["grid"]),
+            "cone": proj.get("cone") or {}, "spot": proj.get("spot")}
+
+
+def _heat_setting(key, allowed, default):
+    """A stored heatmap choice, or ``default`` when it is not one of ``allowed``
+    (an older build's value, or a hand-edited settings file)."""
+    value = app_settings.get(key)
+    return value if value in allowed else default
+
+
+def heat_keeps_projection(mode):
+    """Whether the GEX forward band is drawn. It is a NET grid, so only net keeps
+    it. The caller decides, never ``heatmap_figure``: the hedge panel under the
+    heatmap is built on the same ``projection``, and so on the same columns."""
+    return mode == "net"
+
+
+class HeatControls:
+    """The heatmap's Value picker and its legend strip.
+
+    Module-level so ``render`` holds one object and no per-control handler.
+    Built inside the symbol-scoped controls row; ``on_change`` is attached once
+    the page's repaint exists. On the public origin the choice lives in the
+    element only: settings are frozen there and the store is a no-op.
+    Design: docs/plans/2026-10-09-gamma-heatmap-value-scale-frame-design.md"""
+
+    def __init__(self):
+        from nicegui import ui
+        self.value = ui.select(
+            dict(_heat.VALUES),
+            value=_heat_setting("gamma_heat_value", _heat.VALUES, "net"),
+            label="Value").props("dense options-dense").classes("w-24")
+        self.value.tooltip(
+            "What each cell holds. Size is calls plus puts, coloured by which "
+            "way the strike leans: a strike whose calls and puts cancel is "
+            "empty in Net and bright in Size.")
+        # ml-auto: the strip sits at the right end of the controls row.
+        self.legend = ui.html("").classes("ml-auto")
+        self._sided = True
+
+    def on_change(self, repaint):
+        self.value.on_value_change(
+            overlay_handler("gamma_heat_value", str, repaint))
+
+    def sync(self, view):
+        """Shown on the four Greek views only: the other views have no cells."""
+        on = view in _VIEWS
+        self.value.set_visibility(on)
+        self.legend.set_visibility(on)
+
+    def read(self, grid, rows, strikes):
+        """This paint's keywords for BOTH figure builders: the value to draw and
+        the strikes to mark as balanced.
+
+        A session stored before cells carried a call and a put can draw net
+        only. The picker is then disabled and the paint falls back to net, but
+        the reader's choice is left in the picker (writing to it would fire the
+        change handler from inside a paint) and returns with the next sided
+        session."""
+        self._sided = _heat.has_sides([grid] + [r[6] for r in rows if len(r) > 6])
+        self.value.set_enabled(self._sided)
+        self.legend.content = ""        # refilled by show_legend when a heatmap is drawn
+        if not self._sided or self.value.value not in _heat.VALUES:
+            return {"mode": "net", "balanced": []}
+        return {"mode": self.value.value,
+                "balanced": _heat.balanced_marks(grid, strikes,
+                                                 **_heat_cfg.balanced())}
+
+    def show_legend(self, view, legend):
+        self.legend.content = _heat.legend_svg(
+            legend.get("zmax"), "adapts to what is visible", HEAT_STOPS,
+            unit=_heat.UNITS.get(view, ""))
+
+
 def overlay_handler(key, cast, after):
     """A change handler for one persisted overlay choice: store it, then repaint.
 
@@ -2482,6 +2580,7 @@ def render(symbol: str | None = None, view: str | None = None,
             spot_int_sel.tooltip("Bar size for candles / OHLC. Highs and lows are "
                                  "sampled once a minute, so wicks understate the true "
                                  "intra-minute range.")
+            heat = HeatControls()       # what a cell holds, and the legend strip
             # The public page's line about the symbol on screen: live, loading,
             # every slot taken, or outside market hours (public_status_text).
             pub_line = (ui.label("").classes(f"text-xs {MUTED}")
@@ -2966,12 +3065,7 @@ def render(symbol: str | None = None, view: str | None = None,
 
         # History rows first (index-6 grid dict needs its keys re-floated too): the
         # intraday spot path (index 1) feeds the shared y-range below.
-        rows = []
-        for r in (state.get("hist") or {}).get(view) or []:
-            r = list(r)
-            if len(r) > 6:
-                r[6] = _refloat_keys(r[6])
-            rows.append(tuple(r))
+        rows = refloat_rows((state.get("hist") or {}).get(view))
         spot_path = [r[1] for r in rows if len(r) > 1 and isinstance(r[1], (int, float))]
 
         # One shared strike range so the bar chart and the intraday heatmap line up
@@ -2979,22 +3073,22 @@ def render(symbol: str | None = None, view: str | None = None,
         # spot (consistent bar/cell count + size through the day), then widened to
         # include the intraday spot path so the heatmap's price line isn't clipped
         # when price drifted out of that window.
-        yr = bar_yrange(bars_from_gex(data, view_spot)["strikes"], view_spot)
-        yr = union_range(yr, spot_path)
-        _set_chart(bar_figure(data, view_spot, view=view, walls=walls, flip=flip, yrange=yr))
+        _strikes = bars_from_gex(data, view_spot)["strikes"]
+        yr = union_range(bar_yrange(_strikes, view_spot), spot_path)
+        # The value drawn + the balanced strikes: ONE set of keywords for both panels.
+        _hk = heat.read(data["gex"], rows, _strikes)
+        _set_chart(bar_figure(data, view_spot, view=view, walls=walls, flip=flip,
+                              yrange=yr, **_hk))
         state["chart_el"].set_visibility(True)
         _set_summary(summary_text(
             {**summary, "strike_count": data.get("strike_count")}, _view_label(view)))
 
         if rows:
-            projection = None
-            if view == "GEX":
-                proj = entry.get("projection") or {}
-                if proj.get("times") and proj.get("grid"):
-                    projection = {"times": proj["times"],
-                                  "grid": _refloat_keys(proj["grid"]),
-                                  "cone": proj.get("cone") or {},
-                                  "spot": proj.get("spot")}
+            # The forward band is GEX's, and a NET grid: any other value drops it,
+            # and the hedge panel below is built on this same ``projection``.
+            projection = (projection_arg(entry) if view == "GEX"
+                          and heat_keeps_projection(_hk["mode"]) else None)
+            _legend = {}
             _set_figure(heat_plot, heatmap_figure(rows, view, yrange=yr,
                                                   projection=projection,
                                                   walls=walls, spot=view_spot,
@@ -3003,7 +3097,9 @@ def render(symbol: str | None = None, view: str | None = None,
                                                   show_tracks=bool(tracks_sw.value),
                                                   spot_style=spot_style_sel.value,
                                                   spot_interval=spot_int_sel.value,
-                                                  projected_flip=snap.get("projected_flip")))
+                                                  projected_flip=snap.get("projected_flip"),
+                                                  legend=_legend, **_hk))
+            heat.show_legend(view, _legend)
             # The hedge panel is its own element under the heatmap, so their
             # horizontal alignment is entirely this wiring's job: SAME categories
             # (the projection band widens the GEX axis) and the heatmap rows' ts
@@ -3477,6 +3573,7 @@ def render(symbol: str | None = None, view: str | None = None,
 
     tracks_sw.on_value_change(
         overlay_handler("gamma_level_tracks", bool, _render_view))
+    heat.on_change(_render_view)
 
     def _sync_spot_controls():
         # Symbol / Refresh now / Level movement / Spot / Bar all drive the
@@ -3499,6 +3596,7 @@ def render(symbol: str | None = None, view: str | None = None,
         # that silently does nothing.
         spot_int_sel.set_visibility(
             symbol_scoped and spot_style_sel.value != "line")
+        heat.sync(view_toggle.value)
 
     spot_style_sel.on_value_change(overlay_handler(
         "gamma_spot_style", str, lambda: (_sync_spot_controls(), _render_view())))
