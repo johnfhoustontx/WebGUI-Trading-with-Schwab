@@ -421,13 +421,17 @@ def strikes_around(strikes, spot, n_side=N_SIDE):
     return below + at + above
 
 
-def bars_from_gex(data, spot, n_side=N_SIDE):
+def bars_from_gex(data, spot, n_side=N_SIDE, mode="net"):
     """Per-strike net exposure for the ``n_side``-each-side window around spot.
 
     A fixed strike COUNT (see ``strikes_around``) — not a ±% band — so the bar
     count (hence candle width) is consistent through the session. Returns empty
     bars when ``spot`` is missing (e.g. a weekend/off-hours snapshot with no
     underlying price).
+
+    ``mode`` is the heatmap's value (``gamma_heat.VALUES``): ``nets`` then holds
+    that value per strike, a strike that has none gets NO bar (never a zero
+    one), and ``projected`` is all None, the projected close being a net figure.
     """
     gex = (data or {}).get("gex") or {}
     if not isinstance(spot, (int, float)):
@@ -443,14 +447,16 @@ def bars_from_gex(data, spot, n_side=N_SIDE):
         if strike not in window:
             continue
         cell = gex[strike] or {}
-        net = cell.get("net", 0.0)
+        net = cell.get("net", 0.0) if mode == "net" else _heat.cell_value(cell, mode)
+        if net is None:
+            continue
         strikes.append(strike)
         nets.append(net)
         colors.append(POS_COLOR if net >= 0 else NEG_COLOR)
-        d = drift.get(strike)
+        d = drift.get(strike) if mode == "net" else None
         projected.append(net + d if isinstance(d, (int, float))
                          and not isinstance(d, bool) else None)
-        hovers.append(f"{_fmt.strike(strike)}: net {net:,.0f} "
+        hovers.append(f"{_fmt.strike(strike)}: {_heat.VALUES[mode].lower()} {net:,.0f} "
                       f"(C {cell.get('call', 0):,.0f} / P {cell.get('put', 0):,.0f})")
     return {"strikes": strikes, "nets": nets, "colors": colors, "hovers": hovers,
             "projected": projected}
@@ -553,26 +559,42 @@ _INIT_FLEX = flex_class(0.5)
 
 
 def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, height=680,
-               yrange=None):
+               yrange=None, mode="net"):
     """Highcharts horizontal-bar options for one view (dark, beveled, labeled).
 
     In a Highcharts ``bar`` chart the category axis (``xAxis``) is vertical, so the
     STRIKE axis is ``xAxis`` (linear, with the spot/flip/wall reference plotLines)
     and the exposure axis is ``yAxis``. ``yrange`` (when given) overrides the auto
-    near-spot window — used to align the strike axis with the intraday heatmap's."""
-    b = bars_from_gex(data, spot, n_side)
+    near-spot window — used to align the strike axis with the intraday heatmap's.
+
+    ``mode`` is the heatmap's value. Net, Calls and Puts draw one bar per strike.
+    Size draws TWO, the strike's calls and its puts, so a strike whose sides
+    cancel is two equal opposing bars. The series count is three in every mode."""
+    b = bars_from_gex(data, spot, n_side, mode)
     label = _view_label(view)
     yr = yrange if yrange is not None else bar_yrange(b["strikes"], spot)
+
+    def _pt(strike, value, colour, hover):
+        return {"x": strike, "y": value, "color": bevel_fill(colour, mirrored=True),
+                "borderColor": _darker(colour), "borderWidth": 1,
+                "custom": {"hover": hover}}
+
     # Split by SIGN into two series. Highcharts applies `shadow` (the design's glow)
     # per SERIES — a per-point shadow is silently dropped — so one glow colour per
     # series is the only way each side can glow its own colour. Each point still
     # carries its own bevelled gradient fill.
     pos_pts, neg_pts = [], []
-    for s, n, c, h in zip(b["strikes"], b["nets"], b["colors"], b["hovers"]):
-        (pos_pts if n >= 0 else neg_pts).append(
-            {"x": s, "y": n, "color": bevel_fill(c, mirrored=True),
-             "borderColor": _darker(c), "borderWidth": 1,
-             "custom": {"hover": h}})
+    if mode == "size":
+        # Calls into the first series and puts into the second, at the SAME
+        # strike. (Charm and vanna can hold both sides on one side of zero; the
+        # two bars then overlap and the tooltip carries both numbers.)
+        gex = (data or {}).get("gex") or {}
+        for s, h in zip(b["strikes"], b["hovers"]):
+            pos_pts.append(_pt(s, _heat.cell_value(gex[s], "call"), POS_COLOR, h))
+            neg_pts.append(_pt(s, _heat.cell_value(gex[s], "put"), NEG_COLOR, h))
+    else:
+        for s, n, c, h in zip(b["strikes"], b["nets"], b["colors"], b["hovers"]):
+            (pos_pts if n >= 0 else neg_pts).append(_pt(s, n, c, h))
     plotlines = [_strike_plotline(a["value"],
                                   a["color"],
                                   "Solid" if a["text"].startswith("Spot") else
@@ -587,7 +609,9 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, hei
     fig["chart"]["marginTop"] = _PLOT_MARGIN_TOP
     fig["chart"]["marginBottom"] = _PLOT_MARGIN_BOTTOM
     fig.update({
-        "title": {"text": f"{label} by strike", "style": {"color": FONT}},
+        "title": {"text": f"{label} by strike"
+                          + ("" if mode == "net" else f" · {_heat.VALUES[mode]}"),
+                  "style": {"color": FONT}},
         # A Highcharts bar chart reverses its xAxis by default (low strike at top);
         # reversed=False restores high strikes at the TOP, matching the heatmap's
         # linear strike axis so the two panels line up. startOnTick/endOnTick False

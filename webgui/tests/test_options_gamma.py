@@ -3059,3 +3059,54 @@ def test_heatmap_does_not_write_to_its_rows():
     for mode in ("net", "call", "put", "size"):
         gamma.heatmap_figure(rows, "GEX", yrange=[95.0, 105.0], mode=mode)
     assert json.dumps(rows, sort_keys=True) == before
+
+
+SIDED = {"spot": 100.0, "strike_count": 4, "gex": {
+    99.0: {"call": 2.0, "put": -8.0, "net": -6.0},
+    100.0: {"call": 50.0, "put": -50.0, "net": 0.0},
+    101.0: {"call": 9.0, "put": -1.0, "net": 8.0},
+    102.0: {"net": 4.0}}}                          # a cell with no sides stored
+
+
+def test_bars_default_is_todays_net_bars():
+    assert gamma.bars_from_gex(SIDED, 100.0) == gamma.bars_from_gex(SIDED, 100.0, mode="net")
+    assert gamma.bar_figure(SIDED, 100.0) == gamma.bar_figure(SIDED, 100.0, mode="net")
+
+
+def test_bars_draw_one_side_in_calls_and_puts():
+    calls = gamma.bars_from_gex(SIDED, 100.0, mode="call")
+    puts = gamma.bars_from_gex(SIDED, 100.0, mode="put")
+    # The strike with no sides stored has no bar: never a zero bar.
+    assert calls["strikes"] == puts["strikes"] == [99.0, 100.0, 101.0]
+    assert calls["nets"] == [2.0, 50.0, 9.0]
+    assert puts["nets"] == [-8.0, -50.0, -1.0]
+    assert calls["projected"] == [None, None, None]
+
+
+def test_size_bars_are_two_opposing_bars_per_strike():
+    fig = gamma.bar_figure(SIDED, 100.0, mode="size")
+    calls, puts, projected = fig["series"]
+    assert [p["y"] for p in calls["data"]] == [2.0, 50.0, 9.0]
+    assert [p["y"] for p in puts["data"]] == [-8.0, -50.0, -1.0]
+    assert [p["x"] for p in calls["data"]] == [p["x"] for p in puts["data"]] == [99.0, 100.0, 101.0]
+    assert projected["data"] == []          # the projected close is a net figure
+
+
+@pytest.mark.parametrize("mode", ["net", "call", "put", "size"])
+def test_bar_series_count_is_three_in_every_value(mode):
+    fig = gamma.bar_figure(SIDED, 100.0, mode=mode)
+    assert [s["name"] for s in fig["series"]] == ["Call gamma", "Put gamma",
+                                                  "Projected close"]
+
+
+def test_bar_title_names_the_value():
+    assert gamma.bar_figure(SIDED, 100.0)["title"]["text"] == "GAMMA by strike"
+    assert (gamma.bar_figure(SIDED, 100.0, mode="size")["title"]["text"]
+            == "GAMMA by strike · Size")
+
+
+def test_bars_do_not_write_to_the_grid():
+    before = json.dumps(SIDED, sort_keys=True)
+    for mode in ("net", "call", "put", "size"):
+        gamma.bar_figure(SIDED, 100.0, mode=mode)
+    assert json.dumps(SIDED, sort_keys=True) == before
