@@ -3482,6 +3482,126 @@ def test_the_projection_band_is_dropped_in_the_spot_frame():
     assert not gamma.heat_keeps_projection("net", "locked", "spot")
 
 
+def _change_rows():
+    """Four one-minute rows. Strike 100 grows, 101 is flat and nets to zero, and
+    102 first appears in the third row."""
+    def cell(call, put):
+        return {"call": call, "put": put, "net": call + put}
+    grids = [{100.0: cell(10.0, -4.0), 101.0: cell(5.0, -5.0)},
+             {100.0: cell(12.0, -4.0), 101.0: cell(5.0, -5.0)},
+             {100.0: cell(15.0, -5.0), 101.0: cell(5.0, -5.0), 102.0: cell(3.0, -1.0)},
+             {100.0: cell(20.0, -5.0), 101.0: cell(5.0, -5.0), 102.0: cell(4.0, -1.0)}]
+    return [(60 * i, 100.0, None, None, None, 0, g) for i, g in enumerate(grids)]
+
+
+def _cells(fig):
+    return {(p[0], p[1]): p[2] for p in fig["series"][0]["data"]}
+
+
+def test_the_level_is_the_chart_it_always_was():
+    rows = _change_rows()
+    assert (gamma.heatmap_figure(rows, "GEX", yrange=[95.0, 105.0])
+            == gamma.heatmap_figure(rows, "GEX", yrange=[95.0, 105.0], show="level",
+                                    change_window_min=30))
+    data = {"spot": 100.0, "gex": rows[-1][6]}
+    assert gamma.bar_figure(data, 100.0) == gamma.bar_figure(
+        data, 100.0, show="level", change_window_min=30, basis=rows[0][6])
+
+
+def test_heatmap_change_since_open():
+    fig = gamma.heatmap_figure(_change_rows(), "GEX", yrange=[95.0, 105.0], show="open")
+    # Net at 100 runs 6, 8, 10, 15. Strike 102 has no reading at the open, so its
+    # cells are gaps, never drawn as a change from zero.
+    assert _cells(fig) == {(0, 100.0): 0.0, (1, 100.0): 2.0, (2, 100.0): 4.0,
+                           (3, 100.0): 9.0}
+    assert fig["title"]["text"] == "GAMMA intraday (strike × time) · change since open"
+    assert "net change {point.value" in fig["series"][0]["tooltip"]["pointFormat"]
+    assert len(fig["series"]) == 9
+
+
+def test_heatmap_change_over_a_window():
+    fig = gamma.heatmap_figure(_change_rows(), "GEX", yrange=[95.0, 105.0],
+                               show="window", change_window_min=1)
+    # Each cell less the same strike one minute earlier; the first column has
+    # nothing behind it, and 102 has a basis only in the last column.
+    assert _cells(fig) == {(1, 100.0): 2.0, (2, 100.0): 2.0, (3, 100.0): 5.0,
+                           (3, 102.0): 1.0}
+    assert fig["title"]["text"].endswith("· change over 1 min")
+
+
+def test_heatmap_change_of_another_value_names_both():
+    fig = gamma.heatmap_figure(_change_rows(), "GEX", yrange=[95.0, 105.0],
+                               mode="call", show="open")
+    assert _cells(fig)[(3, 100.0)] == 10.0                       # calls 10 -> 20
+    assert fig["title"]["text"].endswith("· Calls · change since open")
+
+
+def test_a_change_uses_the_values_own_lock():
+    """One legend for the level and its change: a change cell as bright as a
+    wall is as large as a wall."""
+    fig = gamma.heatmap_figure(_change_rows(), "GEX", yrange=[95.0, 105.0],
+                               show="open", scale="locked", lock=_LOCK)
+    assert fig["colorAxis"]["max"] == _LOCK["net"]
+
+
+def test_a_change_in_the_spot_frame_is_taken_per_strike_first():
+    """Strike 100 gained 9 since the open; from spot (100, flat) that is offset 0."""
+    fig = gamma.heatmap_figure(_change_rows(), "GEX", yrange=[-1.5, 1.5], show="open",
+                               frame="spot", half=1)
+    assert _cells(fig)[(3, 0.0)] == 9.0
+    assert len(fig["series"]) == 9
+
+
+def test_heatmap_change_does_not_write_to_its_rows():
+    rows = _change_rows()
+    before = json.dumps(rows, sort_keys=True)
+    for show in ("open", "window"):
+        gamma.heatmap_figure(rows, "GEX", yrange=[95.0, 105.0], show=show,
+                             change_window_min=1)
+    assert json.dumps(rows, sort_keys=True) == before
+
+
+def test_bars_show_the_change_the_heatmaps_last_column_shows():
+    rows = _change_rows()
+    data = {"spot": 100.0, "gex": rows[-1][6]}
+    fig = gamma.bar_figure(data, 100.0, show="open", basis=rows[0][6])
+    pos, neg, projected = fig["series"]
+    # 100: 15 - 6 = +9. 101: 0 - 0 = 0. 102: nothing at the open, so no bar.
+    assert [(p["x"], p["y"]) for p in pos["data"]] == [(100.0, 9.0), (101.0, 0.0)]
+    assert neg["data"] == [] and projected["data"] == []
+    assert fig["title"]["text"] == "GAMMA by strike · change since open"
+    assert "change" in pos["data"][0]["custom"]["hover"]
+    heat = gamma.heatmap_figure(rows, "GEX", yrange=[95.0, 105.0], show="open")
+    assert _cells(heat)[(3, 100.0)] == pos["data"][0]["y"]
+
+
+def test_size_bars_in_a_change_are_the_change_of_each_side():
+    rows = _change_rows()
+    data = {"spot": 100.0, "gex": rows[-1][6]}
+    fig = gamma.bar_figure(data, 100.0, mode="size", show="open", basis=rows[0][6])
+    calls, puts, _ = fig["series"]
+    assert [(p["x"], p["y"]) for p in calls["data"]] == [(100.0, 10.0), (101.0, 0.0)]
+    assert [(p["x"], p["y"]) for p in puts["data"]] == [(100.0, -1.0), (101.0, 0.0)]
+    assert len(fig["series"]) == 3
+
+
+def test_bars_with_no_basis_yet_draw_nothing_rather_than_the_level():
+    """The first minutes of "change over 30 min": nothing is old enough."""
+    rows = _change_rows()
+    data = {"spot": 100.0, "gex": rows[-1][6]}
+    fig = gamma.bar_figure(data, 100.0, show="window", change_window_min=30, basis=None)
+    assert [s["data"] for s in fig["series"]] == [[], [], []]
+    assert fig["title"]["text"] == "GAMMA by strike · change over 30 min"
+
+
+def test_the_projection_band_is_dropped_in_a_change_view():
+    """The band is a projected LEVEL; beside columns of change it would be read
+    as a jump."""
+    assert gamma.heat_keeps_projection("net", "locked", "strike", "level")
+    assert not gamma.heat_keeps_projection("net", "locked", "strike", "open")
+    assert not gamma.heat_keeps_projection("net", "locked", "strike", "window")
+
+
 class _FakeEl:
     """Stands in for a NiceGUI element in HeatControls."""
     def __init__(self, value=None):
@@ -3494,17 +3614,76 @@ class _FakeEl:
         self.visible = on
 
 
-def _heat_controls(value="size", scale="locked", frame="strike"):
+def _heat_controls(value="size", scale="locked", frame="strike", show="level"):
     heat = gamma.HeatControls.__new__(gamma.HeatControls)
     heat.value, heat.scale, heat.legend = _FakeEl(value), _FakeEl(scale), _FakeEl()
-    heat.frame = _FakeEl(frame)
+    heat.frame, heat.show = _FakeEl(frame), _FakeEl(show)
     heat._sided, heat._lock, heat._lock_time = True, None, ""
     return heat
 
 
-# What read() adds for the frame when nothing about it is chosen: the strike
-# frame, and the spot frame's height from config ([window] spot_side).
-_STRIKE_FRAME = {"frame": "strike", "half": 10}
+# What read() adds when nothing about them is chosen: the strike frame with the
+# spot frame's height from config ([window] spot_side), and the level with the
+# change window from config ([show] change_window_min).
+_STRIKE_FRAME = {"frame": "strike", "half": 10, "show": "level",
+                 "change_window_min": 30}
+
+
+def test_heat_controls_read_carries_what_to_show(monkeypatch):
+    heat = _heat_controls("net", "locked", "strike", "window")
+    hk = heat.read(SIDED["gex"], _sided_rows(), [100.0], {})
+    assert hk["show"] == "window" and hk["change_window_min"] == 30
+    monkeypatch.setattr(gamma._heat_cfg, "change_window_min", lambda: 15)
+    assert heat.read(SIDED["gex"], _sided_rows(), [100.0], {})["change_window_min"] == 15
+    heat.show.value = "yesterday"
+    assert heat.read(SIDED["gex"], _sided_rows(), [100.0], {})["show"] == "level"
+
+
+def test_heat_controls_give_the_bars_their_basis(monkeypatch):
+    rows = _change_rows()
+    assert _heat_controls(show="level").basis(rows) is None
+    assert _heat_controls(show="open").basis(rows) == rows[0][6]
+    monkeypatch.setattr(gamma._heat_cfg, "change_window_min", lambda: 2)
+    # Two minutes before the last row (180 s) is 60 s: the second row.
+    assert _heat_controls(show="window").basis(rows) == rows[1][6]
+
+
+def test_both_builders_take_everything_read_returns_in_a_change_view():
+    rows = _change_rows()
+    heat = _heat_controls("net", "adaptive", "strike", "open")
+    data = {"spot": 100.0, "gex": rows[-1][6]}
+    hk = heat.read(data["gex"], rows, [100.0, 101.0, 102.0], {})
+    bars = gamma.bar_figure(data, 100.0, basis=heat.basis(rows), **hk)
+    fig = gamma.heatmap_figure(rows, "GEX", yrange=[95.0, 105.0], **hk)
+    assert bars["series"][0]["data"][0]["y"] == _cells(fig)[(3, 100.0)] == 9.0
+    assert not gamma.heat_keeps_projection(**hk)
+
+
+def test_the_show_picker_is_shown_with_the_others():
+    heat = _heat_controls()
+    heat.sync("GEX")
+    assert heat.show.visible is True
+    heat.sync("Term")
+    assert heat.show.visible is False
+
+
+def test_render_gives_the_bars_their_basis():
+    src = inspect.getsource(gamma.render)
+    paint = src[src.index("def _render_view("):src.index("def _request_refresh(")]
+    assert "basis=heat.basis(rows)" in paint
+
+
+def test_the_heat_show_is_a_stored_setting_that_defaults_to_level():
+    import app_settings
+    assert app_settings.DEFAULTS["gamma_heat_show"] == "level"
+
+
+def test_the_show_tooltip_says_what_a_change_is_not():
+    """The honest part of the feature: open interest updates once a day, so a
+    change in a Greek value is repricing, not new trades."""
+    text = gamma._heat.SHOW_HELP
+    assert "Open interest updates once a day" in text and "not new trades" in text
+    assert "self.show.tooltip(_heat.SHOW_HELP)" in inspect.getsource(gamma.HeatControls)
 
 
 def _epoch_rows():

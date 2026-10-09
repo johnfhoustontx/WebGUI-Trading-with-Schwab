@@ -587,7 +587,8 @@ _INIT_FLEX = flex_class(0.5)
 
 def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=None, height=680,
                yrange=None, mode="net", balanced=(), scale="adaptive", lock=None,
-               frame="strike", half=None):
+               frame="strike", half=None, show="level", change_window_min=30,
+               basis=None):
     """Highcharts horizontal-bar options for one view (dark, beveled, labeled).
 
     In a Highcharts ``bar`` chart the category axis (``xAxis``) is vertical, so the
@@ -607,8 +608,15 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=None, heigh
     ``frame="spot"`` measures the strike axis from ``spot``: every bar and every
     level sits at its distance from price, so the panel still shares one vertical
     axis with a heatmap drawn in the spot frame (``half`` is that frame's height
-    and is the heatmap's to use; the caller hands both panels one ``yrange``)."""
+    and is the heatmap's to use; the caller hands both panels one ``yrange``).
+
+    ``show`` other than ``"level"`` draws how each strike has CHANGED: its value
+    now less its value in ``basis``, the grid the heatmap's last column is
+    measured from (``gamma_heat.basis_grid``). A strike the basis does not hold
+    gets no bar, and with no basis at all (nothing old enough yet) there are no
+    bars: never the level under a title that says change."""
     b = bars_from_gex(data, spot, n_side, mode)
+    changed = show != "level"
     label = _view_label(view)
     held = _heat.bar_max(lock, mode) if scale == "locked" else None
     yr = yrange if yrange is not None else bar_yrange(b["strikes"], spot)
@@ -628,7 +636,31 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=None, heigh
     # series is the only way each side can glow its own colour. Each point still
     # carries its own bevelled gradient fill.
     pos_pts, neg_pts = [], []
-    if mode == "size":
+    if changed:
+        gex = (data or {}).get("gex") or {}
+
+        def _moved(strike, value):
+            """This strike's change in ``value`` since the basis, or None."""
+            now = _heat.cell_value(gex.get(strike), value)
+            was = _heat.cell_value((basis or {}).get(strike), value)
+            return None if now is None or was is None else now - was
+
+        for s in b["strikes"] if isinstance(basis, dict) else ():
+            sides = ("call", "put") if mode == "size" else (mode,)
+            moved = [_moved(s, side) for side in sides]
+            if None in moved:
+                continue
+            hover = (f"{_fmt.strike(s)}: " + " / ".join(
+                f"{_heat.VALUES[side].lower()} change {m:+,.0f}"
+                for side, m in zip(sides, moved)))
+            if mode == "size":
+                pos_pts.append(_pt(s, moved[0], POS_COLOR, hover))
+                neg_pts.append(_pt(s, moved[1], NEG_COLOR, hover))
+            else:
+                up = moved[0] >= 0
+                (pos_pts if up else neg_pts).append(
+                    _pt(s, moved[0], POS_COLOR if up else NEG_COLOR, hover))
+    elif mode == "size":
         # Calls into the first series and puts into the second, at the SAME
         # strike. (Charm and vanna can hold both sides on one side of zero; the
         # two bars then overlap and the tooltip carries both numbers.)
@@ -654,7 +686,9 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=None, heigh
     fig["chart"]["marginBottom"] = _PLOT_MARGIN_BOTTOM
     fig.update({
         "title": {"text": f"{label} by strike"
-                          + ("" if mode == "net" else f" · {_heat.VALUES[mode]}"),
+                          + ("" if mode == "net" else f" · {_heat.VALUES[mode]}")
+                          + (f" · {_heat.show_suffix(show, change_window_min)}"
+                             if changed else ""),
                   "style": {"color": FONT}},
         # A Highcharts bar chart reverses its xAxis by default (low strike at top);
         # reversed=False restores high strikes at the TOP, matching the heatmap's
@@ -706,6 +740,8 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=None, heigh
                  "custom": {"hover": f"{_fmt.strike(s_)}: projected close {pv:,.0f}"}}
                 for s_, pv in zip(b["strikes"], b.get("projected") or [])
                 if isinstance(pv, (int, float)) and not isinstance(pv, bool)]
+    if changed:
+        proj_pts = []       # the projected close is a level, not a change
     # ALWAYS emitted, empty when the symbol has no 0-DTE book. This element is
     # updated IN PLACE and Highcharts REPLACES rather than updates series when the
     # count changes — leaving stray paths and shifted colorIndexes, the same trap
@@ -987,7 +1023,8 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                    walls=None, spot=None, flip=None, levels=None,
                    show_tracks=False, spot_style="line", spot_interval=5,
                    projected_flip=None, mode="net", balanced=(), legend=None,
-                   scale="adaptive", lock=None, frame="strike", half=None):
+                   scale="adaptive", lock=None, frame="strike", half=None,
+                   show="level", change_window_min=30):
     """Intraday strike×time Highcharts heatmap (dark, cell separators, concise
     hover) with the underlying spot-price line overlaid on the same (linear)
     strike axis. ``yrange`` (when given) sets the Strike axis range so it aligns
@@ -1015,12 +1052,23 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     (``heat_yrange``). A ``projection`` is strike-and-flat-spot data and must not
     be passed in this frame; the caller's ``heat_keeps_projection`` sees to that.
 
+    ``show`` (``gamma_heat.SHOWS``) other than ``"level"`` draws how each cell has
+    CHANGED: less the same strike's cell in the session's first column
+    (``"open"``) or ``change_window_min`` minutes earlier (``"window"``). The
+    change is taken per STRIKE, before any frame transform, and a strike with no
+    reading at the basis is a gap. The scale is the value's own: a locked change
+    cell as bright as a wall is as large as a wall.
+
     ``projection`` (GEX only) appends a forward band: extra time columns of
     projected net-per-mark cells on the SAME heatmap series/colorAxis, a 'now'
     divider between the collected and future columns, the Spot line continued flat
     along the cone midline, and faint EM up/down cone overlays."""
     m = heatmap_matrix(rows, mode)
     times, strikes, z = m["x"], m["y"], m["z"]
+    changed = show != "level"
+    if changed:
+        z = _heat.delta(z, [r[0] for r in rows],
+                        None if show == "open" else change_window_min)
     # Only build cells for strikes within the visible ``yrange`` window. GEX net is
     # ~0 away from spot (heatmap_matrix already drops those), but Charm/DEX/Vanna
     # are non-zero across the WHOLE chain (~250 strikes) — emitting all of them is
@@ -1078,6 +1126,7 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                            "pointFormat": ("{point.y:.2f} from spot · " if from_spot
                                            else "Strike {point.y:.2f} · ")
                                           + _heat.VALUES[mode].lower()
+                                          + (" change" if changed else "")
                                           + (" {point.value:.1f}% of column"
                                              if scale == "share"
                                              else " {point.value:,.0f}")}}]
@@ -1239,7 +1288,9 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
         "title": {"text": f"{_view_label(view)} intraday "
                           + ("(distance from spot × time)" if from_spot
                              else "(strike × time)")
-                          + ("" if mode == "net" else f" · {_heat.VALUES[mode]}"),
+                          + ("" if mode == "net" else f" · {_heat.VALUES[mode]}")
+                          + (f" · {_heat.show_suffix(show, change_window_min)}"
+                             if changed else ""),
                   "style": {"color": FONT}},
         # No "Time" axis title — the HH:MM labels make it obvious, and the title was
         # getting clipped at the bottom edge under the rotated labels.
@@ -2347,15 +2398,18 @@ def _heat_setting(key, allowed, default):
     return value if value in allowed else default
 
 
-def heat_keeps_projection(mode, scale="adaptive", frame="strike", **_others):
+def heat_keeps_projection(mode, scale="adaptive", frame="strike", show="level",
+                          **_others):
     """Whether the GEX forward band is drawn. It is a NET grid of raw exposure in
-    strike coordinates along a flat spot, so only net keeps it, not on a share
-    scale (every cell a percentage) and not in the spot frame (an axis measured
-    from spot). The caller decides, never ``heatmap_figure``: the hedge panel
+    strike coordinates along a flat spot, and a projected LEVEL: so only net keeps
+    it, not on a share scale (every cell a percentage), not in the spot frame (an
+    axis measured from spot) and not in a change view (beside columns of change a
+    level would be read as a jump). The caller decides, never ``heatmap_figure``: the hedge panel
     under the heatmap is built on the same ``projection``, and so on the same
     columns. It takes ``HeatControls.read``'s whole dict (``**_hk``) and ignores
     the keys that are not its business."""
-    return mode == "net" and scale != "share" and frame != "spot"
+    return (mode == "net" and scale != "share" and frame != "spot"
+            and show == "level")
 
 
 def heat_yrange(strikes, spot, spot_path, frame, half):
@@ -2370,7 +2424,7 @@ def heat_yrange(strikes, spot, spot_path, frame, half):
 
 
 class HeatControls:
-    """The heatmap's Value, Scale and Frame pickers and its legend strip.
+    """The heatmap's Value, Show, Scale and Frame pickers and its legend strip.
 
     Module-level so ``render`` holds one object and no per-control handler.
     Built inside the symbol-scoped controls row; ``on_change`` is attached once
@@ -2388,6 +2442,11 @@ class HeatControls:
             "What each cell holds. Size is calls plus puts, coloured by which "
             "way the strike leans: a strike whose calls and puts cancel is "
             "empty in Net and bright in Size.")
+        self.show = ui.select(
+            _heat.show_labels(_heat_cfg.change_window_min()),
+            value=_heat_setting("gamma_heat_show", _heat.SHOWS, "level"),
+            label="Show").props("dense options-dense").classes("w-44")
+        self.show.tooltip(_heat.SHOW_HELP)
         self.scale = ui.select(
             dict(_heat.SCALES),
             value=_heat_setting("gamma_heat_scale", _heat.SCALES, "locked"),
@@ -2413,6 +2472,8 @@ class HeatControls:
         ``resync`` first: it decides which of the spot overlay's pickers show."""
         self.value.on_value_change(
             overlay_handler("gamma_heat_value", str, repaint))
+        self.show.on_value_change(
+            overlay_handler("gamma_heat_show", str, repaint))
         self.scale.on_value_change(
             overlay_handler("gamma_heat_scale", str, repaint))
         self.frame.on_value_change(overlay_handler(
@@ -2426,7 +2487,7 @@ class HeatControls:
         always drawn, so all three would be dead knobs: they are hidden there.
         Call it AFTER the page has set their visibility by its own rules."""
         on = view in _VIEWS
-        for el in (self.value, self.scale, self.frame, self.legend):
+        for el in (self.value, self.show, self.scale, self.frame, self.legend):
             el.set_visibility(on)
         if on and self.frame.value == "spot":
             for el in overlays:
@@ -2466,12 +2527,21 @@ class HeatControls:
                # the session's low and high for it, so it is never short of
                # data. With that crop turned off (0) it is the display window
                # tall and shows gaps where a column has no strikes.
-               "half": _heat_cfg.spot_side() or _heat_cfg.n_side()}
+               "half": _heat_cfg.spot_side() or _heat_cfg.n_side(),
+               "show": self.show.value if self.show.value in _heat.SHOWS
+               else "level",
+               "change_window_min": _heat_cfg.change_window_min()}
         if self._sided and self.value.value in _heat.VALUES:
             out["mode"] = self.value.value
             out["balanced"] = _heat.balanced_marks(grid, strikes,
                                                    **_heat_cfg.balanced())
         return out
+
+    def basis(self, rows):
+        """The grid the bars subtract in a change view (None for the level): the
+        row the heatmap's last column is measured from, so the two panels agree."""
+        show = self.show.value if self.show.value in _heat.SHOWS else "level"
+        return _heat.basis_grid(rows, show, _heat_cfg.change_window_min())
 
     def show_legend(self, view, legend):
         scale, mode = legend.get("scale"), legend.get("mode") or "net"
@@ -3234,7 +3304,7 @@ def render(symbol: str | None = None, view: str | None = None,
         _hk = heat.read(data["gex"], rows, _strikes, entry)
         yr = heat_yrange(_strikes, view_spot, spot_path, _hk["frame"], _hk["half"])
         _set_chart(bar_figure(data, view_spot, view=view, walls=walls, flip=flip,
-                              yrange=yr, **_hk))
+                              yrange=yr, basis=heat.basis(rows), **_hk))
         state["chart_el"].set_visibility(True)
         _set_summary(summary_text(
             {**summary, "strike_count": data.get("strike_count")}, _view_label(view)))

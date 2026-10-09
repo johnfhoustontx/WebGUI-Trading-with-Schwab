@@ -167,6 +167,12 @@ def scale_caption(scale, lock, mode, lock_time):
 # positions repricing as price, time and volatility move. It is not new trades.
 SHOWS = {"level": "Level", "open": "Change since open", "window": "Change over {n} min"}
 
+# The Show picker's tooltip. A named constant because it carries the one thing a
+# reader must not get wrong about this view, and a test holds it to that.
+SHOW_HELP = ("The level, or how each strike has changed. Open interest updates "
+             "once a day, so a change here is the same positions repricing as "
+             "price, time and volatility move. It is not new trades.")
+
 
 def show_labels(window_min):
     """The Show picker's options, with the window's minutes filled in."""
