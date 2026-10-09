@@ -833,14 +833,29 @@ A grey dotted **Balanced** line across both panels marks such a strike in every
 Value: one of the largest on screen whose calls and puts nearly cancel. At most three
 are marked.
 
+**Scale** (a picker beside Value) chooses what a colour means:
+
+| Scale | A colour is | Use it to |
+|-------|-------------|-----------|
+| **Locked** | One fixed amount for the whole session. The default. | Read **size**, and see a level grow or fade through the day. |
+| **Adaptive** | A share of the largest values on screen right now. | See detail on a quiet chart. The same shade is a different amount later in the day. |
+| **Share of column** | That strike's percentage of the minute's total. | Compare the **shape** of positioning between two times or two symbols. |
+
+The Locked scale is set from the session's **first hour** and then held. Until that
+hour is up the chart draws on the adaptive scale and the colour strip says
+**settling until 09:30**; after it, **held since 09:30**. In Locked the bars keep the
+same extent as well, and only widen when a bar is larger than the lock, so nothing is
+ever cut off.
+
 **The colour strip** at the right of the controls row gives the two ends of the heat
 map's colours as numbers, with the unit: dollars of gamma per 1% move on Gamma,
-dollars of delta on Delta, a plain figure on Charm and Vanna. The colours stretch
-over whatever is on screen, so the same shade is a different amount on another symbol
-or later in the day. Read the strip before comparing two charts.
+dollars of delta on Delta, a plain figure on Charm and Vanna, percentages in Share of
+column. It also says what the scale is tied to. Read the strip before comparing two
+charts: in Adaptive, two charts with the same colours can differ tenfold in size.
 
-The forward projection band on the Gamma heat map is drawn in **Net** only. It is a
-net figure, so the other three values leave it out.
+The forward projection band on the Gamma heat map is drawn in **Net** only, and not
+in Share of column. It is a net figure in dollars, so the other values and the
+percentage scale leave it out.
 
 **The buttons at the top right open separate screens, each in a new browser tab:**
 

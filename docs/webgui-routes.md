@@ -1006,9 +1006,39 @@ two sides from the grid itself.
 - `render` did not grow: three overlay handlers became `overlay_handler`, and
   `refloat_rows` / `projection_arg` moved out to module level.
 
+**The Scale picker (2026-10-09, Phase 2).** Beside Value: **Locked** (the default),
+**Adaptive** or **Share of column**. `heatmap_figure` and `bar_figure` take
+`scale=` and `lock=`; both default to today's adaptive chart.
+
+- **Locked** reads `views.<view>.scale_lock`, which options_svc publishes in the
+  gamma snapshot (`gamma_window.scale_lock`: `{minutes, net, call, put, size}`,
+  `None` until the session's first `minutes` have passed). `gamma_heat.scale_max`
+  takes the figure for the value drawn and falls back to the adaptive one until a
+  lock exists. ⚠ The lock is the SERVICE's on purpose: the page's rows are cropped
+  to a window that follows spot, so a page-side lock would drift.
+- **Share of column** transforms the visible grid with `gamma_heat.share_of_column`
+  before the cells are built; the tooltip and the legend print percentages.
+- **The bars** take the lock as `softMin` / `softMax`, never `min` / `max`: a bar
+  larger than the lock widens the axis and is drawn whole. ⚠ Both keys are ALWAYS
+  emitted (`None` when not locked): the chart is updated in place, and an omitted
+  key would leave the last locked extent on the axis.
+- **The legend's caption** is `gamma_heat.scale_caption`: *held since 09:30*,
+  *settling until 09:30*, *adapts to what is visible*, *share of each column*. The
+  time is the first history row plus the lock's minutes. No lock after that time
+  reads as adaptive, never as settling.
+- `heat_keeps_projection(mode, scale)` now drops the forward band on a share scale
+  too. `HeatControls.read(grid, rows, strikes, entry)` returns the four keywords
+  both builders take: `mode`, `balanced`, `scale`, `lock`.
+- The choice persists as `app_settings.gamma_heat_scale`.
+- ⚠ The page now holds TWO selects captioned "Scale": this one, and the hidden one
+  that keeps Net Prem's Dollars / Skew state. They are never visible together (this
+  one hides on Net Prem), but a test or a script that finds a control by that
+  caption must say which.
+- After a promote, `tools/show_gamma_scale_lock.py` prints each view's lock from
+  the live cache.
+
 Design and plan: [value, scale and frame](plans/2026-10-09-gamma-heatmap-value-scale-frame-design.md).
-This is Phase 1 of five; the locked scale, the spot frame, Change and Premium are
-not built.
+These are Phases 1 and 2 of five; the spot frame, Change and Premium are not built.
 
 **`?view=` pins one view on the PRIVATE route too (2026-09-08).** `/options/gamma?view=Flow` deep-links a single view; bare is the page exactly as it always was. Added so the marketing gallery's three gamma tiles could differ (`tools/gallery_screens.py`) — the route was parameterless, so all three would have captured the identical default GEX view. ⚠ **A pin also changes what the page draws**, through the same `shows_view_picker` / `may_enqueue` gates the public screens use: no subtab picker, and no Refresh / Explain / Analyze / Briefings / History row. `_resolve_view` is TOTAL — an unknown name falls back to GEX rather than raising — and a pin is deliberately NOT offered for `symbol`, which is interpolated into a Redis key name with no allow-list behind it.
 

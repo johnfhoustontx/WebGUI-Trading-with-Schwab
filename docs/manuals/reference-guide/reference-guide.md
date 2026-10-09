@@ -663,10 +663,31 @@ and whose calls and puts nearly cancel. It is drawn in every Value, because Net 
 where you would otherwise miss it. Treat it like a wall with no direction: a level
 where hedging is heavy, without a lean to tell you which way it pushes.
 
+**Scale picker.** What a colour on the heat map means.
+
+- **Locked** (the default). One colour is one amount for the whole session. The
+  scale is set from the session's first hour and then held, so when a row brightens
+  during the afternoon, the exposure there has grown. This is the scale to use
+  for the page's main question: how much pressure is at this level, and is it
+  building. Expiration-day gamma concentrates at the money into the close, so on
+  those days the middle rows saturate late in the session. That is the chart
+  telling you the truth: there is far more there than there was this morning.
+- **Adaptive.** The colours stretch over whatever is on screen at this moment. Use
+  it when Locked leaves a view looking flat, typically Charm or Vanna on a quiet
+  day. Do not compare two Adaptive charts by colour: the same shade is a different
+  amount on each.
+- **Share of column.** Each strike as a percentage of that minute's total. The
+  level is removed and only the shape remains. Use it to ask whether positioning
+  has shifted between strikes, or to compare a large symbol with a small one.
+
+Before the first hour is up there is nothing to lock to yet. The chart draws on the
+adaptive scale and the colour strip says **settling**.
+
 **The colour strip** at the right of the controls gives the heat map's colour scale in
-numbers. The scale stretches to fit what is on screen, so a colour is a share of the
-largest values visible now, not a fixed amount. Two charts with the same colours can
-differ tenfold in size. The strip is how you tell.
+numbers, with its unit, and says what it is tied to: *held since 09:30*, *settling
+until 09:30*, *adapts to what is visible* or *share of each column*. In Locked the
+by-strike bars hold the same extent, so a bar's length means the same amount all day;
+a bar larger than the lock widens the axis and is never cut off.
 
 **Spot picker.** Draw the price overlay as a **Line**, **Candles**, or **OHLC**, with a
 1/5/15-minute bar size. The candles are built from the app's own one-minute samples, so

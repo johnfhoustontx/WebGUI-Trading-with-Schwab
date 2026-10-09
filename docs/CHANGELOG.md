@@ -4,7 +4,46 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-09 (**Dealer Positioning: a Value picker, a Balanced line and a colour legend.**)
+**Last updated:** 2026-10-09 (**Dealer Positioning: a locked colour scale for the heatmap.**)
+
+- **Why.** The heatmap's colours were refitted to whatever was on screen on every
+  paint, so the same cyan was one amount at 09:00 and another at 14:00, and a row
+  that brightened had not necessarily grown.
+- **What changed.** A **Scale** picker beside Value. **Locked**, the new default,
+  keeps one colour meaning one amount for the whole session: the scale is set from
+  the session's first hour and held, and the strip beside the controls says *held
+  since 09:30*. Before that hour is up the chart draws as it used to and the strip
+  says *settling until 09:30*. **Adaptive** is the chart as it was. **Share of
+  column** draws each strike as a percentage of that minute's total. In Locked the
+  by-strike bars hold the same extent, and widen only for a bar larger than the
+  lock.
+- **Where the lock comes from.** options_svc computes it and publishes it as
+  `scale_lock` in every view of `cache:options:gamma`
+  (`services/options_svc/gamma_window.py`): the 95th percentile of the absolute
+  cell over the session's first 60 minutes, inside the display window around each
+  minute's own spot, times 1.5, for net, calls, puts and size. The page does not
+  compute it, because the rows it holds are cropped to a window that follows spot.
+  The three numbers are `config/gamma_heat.toml` `[lock]`.
+- **Behaviour change to expect.** The default chart is no longer identical to
+  yesterday's after 09:30: on an expiration day the rows at the money saturate
+  into the close, because there is far more there than in the first hour. Pick
+  Adaptive to get the old chart back; the choice is remembered.
+- **Cost.** One pass over the first hour's rows per view per snapshot build, in
+  memory, on rows already loaded. No Schwab call, no new key, no new command.
+  `compute.py` ended two lines shorter: the window helper moved to the new module.
+- **After a promote:** `tools/show_gamma_scale_lock.py` prints each view's lock
+  from the live cache (load `.env` first; it takes no arguments).
+- **Verified** in the local page harness (there is no dev environment), on a seed
+  whose lock was computed by the service's own function: Locked reads *held since
+  09:30* at the service's figure, Adaptive and Share of column each redraw with
+  nine series and no console or server error, and a seed with no lock reads
+  *settling*. Checked through the page's DOM; screenshots were not available for
+  this pass. Not yet seen on prod data.
+- **Tests.** `services/options_svc/tests/test_gamma_window.py`, three snapshot
+  tests in `test_compute.py`, `tools/tests/test_show_gamma_scale_lock.py`, and
+  additions to the two webgui gamma test files.
+
+**Prior —** 2026-10-09 (**Dealer Positioning: a Value picker, a Balanced line and a colour legend.**)
 
 - **Why.** The heatmap drew one number per cell, net, with zero transparent. A
   strike holding large calls and equally large puts therefore drew exactly like a

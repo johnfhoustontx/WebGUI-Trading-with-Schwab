@@ -1146,13 +1146,46 @@ of the brightest rows, and its two bars are the same length.</p>
 <p>A grey dotted <strong>Balanced</strong> line across both panels marks such a strike in every
 Value: one of the largest on screen whose calls and puts nearly cancel. At most three
 are marked.</p>
+<p><strong>Scale</strong> (a picker beside Value) chooses what a colour means:</p>
+<table>
+<thead>
+<tr>
+<th>Scale</th>
+<th>A colour is</th>
+<th>Use it to</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Locked</strong></td>
+<td>One fixed amount for the whole session. The default.</td>
+<td>Read <strong>size</strong>, and see a level grow or fade through the day.</td>
+</tr>
+<tr>
+<td><strong>Adaptive</strong></td>
+<td>A share of the largest values on screen right now.</td>
+<td>See detail on a quiet chart. The same shade is a different amount later in the day.</td>
+</tr>
+<tr>
+<td><strong>Share of column</strong></td>
+<td>That strike's percentage of the minute's total.</td>
+<td>Compare the <strong>shape</strong> of positioning between two times or two symbols.</td>
+</tr>
+</tbody>
+</table>
+<p>The Locked scale is set from the session's <strong>first hour</strong> and then held. Until that
+hour is up the chart draws on the adaptive scale and the colour strip says
+<strong>settling until 09:30</strong>; after it, <strong>held since 09:30</strong>. In Locked the bars keep the
+same extent as well, and only widen when a bar is larger than the lock, so nothing is
+ever cut off.</p>
 <p><strong>The colour strip</strong> at the right of the controls row gives the two ends of the heat
 map's colours as numbers, with the unit: dollars of gamma per 1% move on Gamma,
-dollars of delta on Delta, a plain figure on Charm and Vanna. The colours stretch
-over whatever is on screen, so the same shade is a different amount on another symbol
-or later in the day. Read the strip before comparing two charts.</p>
-<p>The forward projection band on the Gamma heat map is drawn in <strong>Net</strong> only. It is a
-net figure, so the other three values leave it out.</p>
+dollars of delta on Delta, a plain figure on Charm and Vanna, percentages in Share of
+column. It also says what the scale is tied to. Read the strip before comparing two
+charts: in Adaptive, two charts with the same colours can differ tenfold in size.</p>
+<p>The forward projection band on the Gamma heat map is drawn in <strong>Net</strong> only, and not
+in Share of column. It is a net figure in dollars, so the other values and the
+percentage scale leave it out.</p>
 <p><strong>The buttons at the top right open separate screens, each in a new browser tab:</strong></p>
 <table>
 <thead>

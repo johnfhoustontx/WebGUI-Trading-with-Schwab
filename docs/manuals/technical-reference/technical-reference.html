@@ -3125,11 +3125,50 @@ size &gt;= the min_size_quantile rank of the strikes on screen (0.80)
 <p>At most <code>max_marks</code> (3) are marked, largest first. The three numbers are
 <code>config/gamma_heat.toml</code> <code>[balanced]</code>, read on every paint, so a change in
 Settings → Configuration applies with no restart.</p>
-<p><strong>Colour scale.</strong> The heat map's colours are symmetric about zero and clamp at the
-95th percentile of the absolute values on screen, recomputed on every paint. The
-strip beside the controls prints that maximum. The unit follows the formulas above:
-dollars of gamma per 1% move for GEX, dollars of delta for DEX. Charm and vanna
-exposures are printed as plain figures.</p>
+<p><strong>Colour scale.</strong> The heat map's colours are symmetric about zero. The <strong>Scale</strong>
+picker sets where they clamp:</p>
+<table>
+<thead>
+<tr>
+<th>Scale</th>
+<th>Colour maximum</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Locked</td>
+<td>The view's <code>scale_lock</code> for the value drawn, once the session has one; until then, the Adaptive figure</td>
+</tr>
+<tr>
+<td>Adaptive</td>
+<td>The 95th percentile of the absolute values on screen, recomputed on every paint</td>
+</tr>
+<tr>
+<td>Share of column</td>
+<td>The same percentile, taken over cells that are each <code>100 · value / Σ abs(value)</code> of their own column, across the strikes on screen</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The lock</strong> is computed by the options service, not the page
+(<code>services/options_svc/gamma_window.py</code>, <code>scale_lock</code>), and published in every view
+of the gamma snapshot:</p>
+<pre><code>scale_lock = { minutes, net, call, put, size }
+each figure = quantile( abs(cell) over the session's first `minutes`,
+                        inside the display window around each minute's own spot )
+              · headroom
+</code></pre>
+<p><code>minutes</code> (60), <code>quantile</code> (0.95) and <code>headroom</code> (1.5) are <code>config/gamma_heat.toml</code>
+<code>[lock]</code>. The figure is <code>None</code> until those minutes have passed. It is taken from the
+uncropped history rows, which are append-only for a session, so it is identical on
+every later build while those three numbers are left alone (changing one mid-session
+moves the lock within a minute). The page could not compute it: the rows it receives are cropped to
+a window that follows spot, and a lock taken from them would drift.</p>
+<p>The by-strike bars take the lock as a <strong>soft</strong> axis extent (Highcharts
+<code>softMin</code> / <code>softMax</code>): the axis holds at the lock while the data fits and widens for
+a larger bar. In Size the bars' extent is the larger of the call and put locks.</p>
+<p>The strip beside the controls prints the maximum in use. The unit follows the
+formulas above: dollars of gamma per 1% move for GEX, dollars of delta for DEX. Charm
+and vanna exposures are printed as plain figures, and a share scale in percent.</p>
 <h2 id="dealer-delta-exposure-dex-and-projection">Dealer delta exposure (DEX) and projection</h2>
 <p>The DEX/hedge panel sums <code>OI · delta · contract_multiplier · spot</code> across strikes
 for the current and a projected delta, surfacing net-delta-now vs projected-close

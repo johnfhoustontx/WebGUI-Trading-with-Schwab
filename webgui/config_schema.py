@@ -926,9 +926,10 @@ _GAMMA_HEAT = ConfigFile(
         )),
         Section("Locked colour scale",
                 "The Locked scale keeps one colour meaning one amount all "
-                "session. The options service sets it once, from the start of "
-                "the session, and reads these each minute, so no restart is "
-                "needed. A change applies from the next session's lock.", (
+                "session. The options service sets it from the start of the "
+                "session and reads these each minute, so no restart is needed. "
+                "Changing one during a session moves that session's scale "
+                "within a minute.", (
             Field("lock.minutes", "Set it from the first",
                   "Until these have passed the scale adapts to what is on screen.",
                   kind="int", unit="min", min=5, max=390, step=5),

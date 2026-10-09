@@ -1870,6 +1870,45 @@ Expected after 09:30 CT on a session day: four lines, each a dict with five keys
 
 ---
 
+## Phase 2 as built (2026-10-09)
+
+Done and committed on this branch. What differs from the tasks above, and what
+**Phase 3 must start from**:
+
+1. **`HeatControls.read(grid, rows, strikes, entry)`** returns four keywords,
+   `mode`, `balanced`, `scale` and `lock`, and `_render_view` still passes one
+   `**_hk` to both builders. A Frame control adds a fifth the same way.
+   `show_legend(view, legend)` kept its two arguments: the lock and its clock time
+   are held on the object from the last `read`.
+2. **The bars take the lock as a soft extent** (`softMin` / `softMax`, both always
+   emitted), not a hard maximum. A hard one clips the largest bars flat. In Size
+   the extent is the larger of the call and put locks (`gamma_heat.bar_max`).
+3. **`heat_keeps_projection(mode, scale)`** drops the band on a share scale too.
+   Phase 3 adds `frame` to it.
+4. **No lock after its time has passed reads "adapts to what is visible"**, not
+   "settling". Found on the harness.
+5. **The lock is recomputed on every snapshot build**, with no memo: it is one
+   pass over the first hour's rows. So a `[lock]` config change moves the current
+   session's scale within a minute. Documented; not a bug.
+6. **`compute.py` is 10,522 lines against a ceiling of 10,523**, two shorter than
+   it started. Task 3.2 replaces nine lines of `_crop_gamma_views` with one call,
+   which buys Phase 3 its room. `render` is still 1,469 lines and 59 nested
+   functions, with no slack.
+7. **`tools/show_gamma_scale_lock.py`** exists, with tests. Redis needs its
+   password, so the command after a promote loads `.env` first:
+
+   ```bash
+   ssh vps2 'cd /home/administrator/dev && set -a && . ./.env && set +a && .venv/bin/python tools/show_gamma_scale_lock.py'
+   ```
+
+8. The page now holds two selects captioned "Scale" (this one, and the hidden one
+   that keeps Net Prem's state). Find a control by that caption with care.
+
+Not done: nothing has been seen on prod data. The harness checks for this phase
+were read from the page's DOM, because screenshots were not available.
+
+---
+
 ## Phase 3 — Frame: from spot
 
 ### Task 3.1: One display window for both tiers

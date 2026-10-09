@@ -753,10 +753,18 @@ accelerate price.
 - **Balanced** — a grey dotted line across both panels marks a strike that is
   among the largest on screen while its calls and puts nearly cancel. It is there
   in every Value, because in Net that strike would otherwise look empty.
+- **Scale** — what a colour means. **Locked** (the default) keeps one colour
+  meaning one amount for the whole session: the scale is set from the session's
+  first hour and then held, so a cell that gets brighter has grown. Before that
+  hour is up the strip says **settling**. **Adaptive** stretches the colours over
+  whatever is on screen, which shows detail on a quiet chart but makes the same
+  shade a different amount later in the day. **Share of column** shows each
+  strike as a percentage of that minute's total, for comparing shape.
 - **The colour strip** beside the controls gives the two ends of the heat map's
   colours as numbers (dollars of gamma per 1% move, or dollars of delta; Charm
-  and Vanna show a plain figure). The colours stretch over whatever is on screen,
-  so the same shade is a different amount on another symbol or later in the day.
+  and Vanna show a plain figure; percentages in Share of column) and says what
+  the scale is tied to, e.g. **held since 09:30**. In Locked the bars keep the
+  same extent too, and only widen for a bar larger than the lock.
 - Positive gamma → price tends to **stick** near the walls; negative gamma →
   moves get **amplified**. Auto-refreshes every 2 minutes.
 - After the close the **last session's** chart stays on screen until midnight

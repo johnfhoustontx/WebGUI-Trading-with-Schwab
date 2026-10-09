@@ -139,13 +139,20 @@ that moves is worse than an adaptive one that says so.
 
 Rules that follow from it:
 
-- Before the lock exists (the first hour, or a payload that predates the field)
-  the chart is adaptive and the legend says "settling until 09:30".
+- Before the lock exists (the session's first hour) the chart is adaptive and the
+  legend says "settling until 09:30". With no lock once that time has passed (a
+  payload that predates the field, or rows the service could not read) the legend
+  says the scale adapts: there is nothing left to wait for.
 - A Change of a Greek value uses that value's Level lock. A change cell as bright
   as a wall is then as large as a wall, and one legend serves both.
 - Premium does not offer Locked. Its level grows all day by construction.
-- The by-strike bars use the same maximum as the heatmap in Locked, so a bar's
-  length and a cell's colour agree.
+- The by-strike bars take the lock as a **soft** extent in Locked: the axis holds
+  at the lock, so a bar's length means the same amount all session, and widens for
+  a bar larger than the lock. A hard maximum would cut the largest bars off flat,
+  which loses exactly the strikes the reader most needs to size. In Size the bars
+  are a call bar and a put bar, so their extent is the larger of those two locks.
+- The forward projection band is raw net exposure, so it is dropped on a share
+  scale as well as for a non-net value.
 
 **The legend** is a horizontal strip in the controls row: the two ends of the
 scale in numbers through `pages/fmt.py`, the ramp between them, the unit, and one
