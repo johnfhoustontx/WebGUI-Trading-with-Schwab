@@ -2997,3 +2997,65 @@ def test_the_overlay_handlers_no_longer_live_in_render():
     src = inspect.getsource(gamma.render)
     for name in ("_on_tracks_toggle", "_on_spot_style", "_on_spot_interval"):
         assert f"def {name}(" not in src
+
+
+def _sided_rows():
+    return [("09:30", 100.0, None, None, None, 0,
+             {99.0: {"call": 2.0, "put": -8.0, "net": -6.0},
+              100.0: {"call": 50.0, "put": -50.0, "net": 0.0},
+              101.0: {"call": 9.0, "put": -1.0, "net": 8.0}}),
+            ("09:31", 100.0, None, None, None, 0,
+             {99.0: {"call": 2.0, "put": -9.0, "net": -7.0},
+              100.0: {"call": 55.0, "put": -55.0, "net": 0.0},
+              101.0: {"call": 9.0, "put": -2.0, "net": 7.0}})]
+
+
+def test_heatmap_matrix_net_is_unchanged_by_the_new_argument():
+    assert gamma.heatmap_matrix(_sided_rows()) == gamma.heatmap_matrix(_sided_rows(), "net")
+    # The balanced strike has zero net in every column, so net drops its row.
+    assert gamma.heatmap_matrix(_sided_rows())["y"] == [99.0, 101.0]
+
+
+def test_heatmap_matrix_size_keeps_the_balanced_strike():
+    m = gamma.heatmap_matrix(_sided_rows(), "size")
+    assert m["y"] == [99.0, 100.0, 101.0]
+    assert m["z"][1] == [100.0, 110.0]          # the largest row on the board
+    assert m["z"][0] == [-10.0, -11.0]          # signed by net
+
+
+def test_heatmap_matrix_calls_and_puts():
+    assert gamma.heatmap_matrix(_sided_rows(), "call")["z"][2] == [9.0, 9.0]
+    assert gamma.heatmap_matrix(_sided_rows(), "put")["z"][0] == [-8.0, -9.0]
+
+
+@pytest.mark.parametrize("mode", ["net", "call", "put", "size"])
+def test_heatmap_series_count_is_nine_in_every_value(mode):
+    fig = gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0], mode=mode)
+    assert len(fig["series"]) == 9
+    assert fig["colorAxis"]["stops"] == gamma.HEAT_STOPS
+    assert fig["colorAxis"]["max"] > 0
+
+
+def test_heatmap_title_and_tooltip_name_the_value():
+    net = gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0])
+    size = gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0], mode="size")
+    assert net["title"]["text"] == "GAMMA intraday (strike × time)"
+    assert size["title"]["text"] == "GAMMA intraday (strike × time) · Size"
+    assert "net {point.value" in net["series"][0]["tooltip"]["pointFormat"]
+    assert "size {point.value" in size["series"][0]["tooltip"]["pointFormat"]
+
+
+def test_the_heatmap_in_net_is_the_figure_it_always_was():
+    """The new argument defaults to today's chart, option for option."""
+    assert (gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0])
+            == gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0],
+                                    mode="net"))
+
+
+def test_heatmap_does_not_write_to_its_rows():
+    """The rows are shared by every open tab (bus_client.read_shared)."""
+    rows = _sided_rows()
+    before = json.dumps(rows, sort_keys=True)
+    for mode in ("net", "call", "put", "size"):
+        gamma.heatmap_figure(rows, "GEX", yrange=[95.0, 105.0], mode=mode)
+    assert json.dumps(rows, sort_keys=True) == before

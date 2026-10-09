@@ -33,6 +33,7 @@ from shared import market_calendar as _mc
 from shared import public_gamma as _pg  # Tier-1 allow-listed: config + validator
 from shared import symbols as _symbols
 from . import flow_panels as _fx
+from . import gamma_heat as _heat
 from .inputs import select_all_on_focus
 from .theme import FLOW_KEYFRAMES_CSS, MUTED
 
@@ -658,21 +659,26 @@ def _cell_net(cell):
     return cell
 
 
-def heatmap_matrix(rows):
+def heatmap_matrix(rows, mode="net"):
     """(x=times, y=strikes, z=[y][x]) of net exposure from gex_history rows.
 
     Each row is (ts, spot, flip, top_pos, top_neg, net_total, grid_dict) where
     grid_dict maps strike -> {call, put, net} (or a bare net number). Strikes
     whose net is zero across every snapshot are dropped (keeps the heatmap on the
     active strikes near spot instead of the full 3000–9800 chain).
+
+    ``mode`` picks the number a cell draws (``gamma_heat.cell_value``): calls,
+    puts or size instead of net. Net is the default and reads cells exactly as
+    it always did; the other modes drop a strike that is zero in THAT value.
     """
     if not rows:
         return {"x": [], "y": [], "z": [], "spots": []}
     x = [_fmt_ts(r[0]) for r in rows]
     spots = [r[1] if isinstance(r[1], (int, float)) else None for r in rows]
     grids = [r[6] or {} for r in rows]
-    strikes = sorted({s for g in grids for s, cell in g.items() if _cell_net(cell)})
-    z = [[_cell_net(g.get(s) or {}) for g in grids] for s in strikes]
+    val = _cell_net if mode == "net" else (lambda cell: _heat.cell_value(cell, mode))
+    strikes = sorted({s for g in grids for s, cell in g.items() if val(cell)})
+    z = [[val(g.get(s) or {}) for g in grids] for s in strikes]
     return {"x": x, "y": strikes, "z": z, "spots": spots}
 
 
@@ -904,17 +910,23 @@ def track_points(values):
 def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                    walls=None, spot=None, flip=None, levels=None,
                    show_tracks=False, spot_style="line", spot_interval=5,
-                   projected_flip=None):
+                   projected_flip=None, mode="net"):
     """Intraday strike×time Highcharts heatmap (dark, cell separators, concise
     hover) with the underlying spot-price line overlaid on the same (linear)
     strike axis. ``yrange`` (when given) sets the Strike axis range so it aligns
     with the bar chart's near-spot window.
 
+    ``mode`` is the number each cell draws (``gamma_heat.VALUES``). It swaps the
+    DATA inside the one heatmap series: the series count and the colour axis are
+    the same in every mode. The projection grid is net only, and whether to pass
+    one is the CALLER's decision (``heat_keeps_projection``), because the hedge
+    panel under this chart is built on the same category list.
+
     ``projection`` (GEX only) appends a forward band: extra time columns of
     projected net-per-mark cells on the SAME heatmap series/colorAxis, a 'now'
     divider between the collected and future columns, the Spot line continued flat
     along the cone midline, and faint EM up/down cone overlays."""
-    m = heatmap_matrix(rows)
+    m = heatmap_matrix(rows, mode)
     times, strikes, z = m["x"], m["y"], m["z"]
     # Only build cells for strikes within the visible ``yrange`` window. GEX net is
     # ~0 away from spot (heatmap_matrix already drops those), but Charm/DEX/Vanna
@@ -954,7 +966,9 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                "colsize": 1, "rowsize": rowsize,
                "interpolation": True, "borderWidth": 0, "states": no_fade,
                "tooltip": {"headerFormat": "",
-                           "pointFormat": "Strike {point.y:.2f} · net {point.value:,.0f}"}}]
+                           "pointFormat": "Strike {point.y:.2f} · "
+                                          + _heat.VALUES[mode].lower()
+                                          + " {point.value:,.0f}"}}]
     spots = m.get("spots") or []
     # Underlying price track over the session (on the shared Strike axis; a line series
     # ignores the colorAxis so it isn't recolored by net value). Built here, appended
@@ -1095,7 +1109,8 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     # mounts, so carry the load hook here too (load fires once at mount).
     fig["chart"]["events"] = {":load": _HEAT_PRESS_TOOLTIP_JS}
     fig.update({
-        "title": {"text": f"{_view_label(view)} intraday (strike × time)",
+        "title": {"text": f"{_view_label(view)} intraday (strike × time)"
+                          + ("" if mode == "net" else f" · {_heat.VALUES[mode]}"),
                   "style": {"color": FONT}},
         # No "Time" axis title — the HH:MM labels make it obvious, and the title was
         # getting clipped at the bottom edge under the rotated labels.
