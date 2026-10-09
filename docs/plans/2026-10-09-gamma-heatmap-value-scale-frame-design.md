@@ -54,7 +54,7 @@ Three facts about the current chart, each read from the code:
 | `gamma.render` sits at its size ceiling (1,484 lines, 62 nested functions) and the ceiling may only be lowered. | `webgui/tests/test_render_size.py` | The four controls and their handlers are built by a module-level function. Render must come out smaller than it went in. |
 | History rows arrive through `bus_client.read_shared`, so every tab at one version holds the same object. | `gamma._load_history` | Every transform builds new lists. None may write to a row or a grid. |
 | The service crops each history grid to 20 strikes each side of the current spot, widened to the span of the session's spot path. | `compute._crop_gamma_views` | Enough for the strike frame. Not enough for the spot frame on a trending day. See section 5. |
-| The heatmap and the hedge panel under it align only because both run zero left and right margins on the same category list. | `hedge_figure`, `heatmap_categories` | The legend is its own element beside the row. It cannot be a Highcharts legend inside the plot. |
+| The heatmap and the hedge panel under it align only because both run zero left and right margins on the same category list. | `hedge_figure`, `heatmap_categories` | The legend is its own element in the controls row. It cannot be a Highcharts legend inside the plot, or a column beside it. |
 | Stored premium is day-cumulative `Σ mark × totalVolume × 100` per strike, unsigned, mid-based. | `flow_skew.premium_by_strike` | Level is "since the open". A difference of two readings mixes new volume with the re-marking of earlier volume. See section 7. |
 | The one-minute GEX branch already overruns its minute a few times a day, and a hot public symbol costs about 4 MB of Redis writes a minute. | `config/gamma_public.toml` | Anything added to that branch is measured before it ships, and Premium is the last phase. |
 
@@ -79,7 +79,8 @@ that can change sign. Two things cover that:
 
 - **Balanced-strike markers.** A strike whose polarity `abs(net) / size` is under
   a threshold and whose size is in the top band of the visible window gets a thin
-  amber tick on the strike axis, labelled "balanced", in both panels. At most
+  grey dotted line on the strike axis, labelled "Balanced", in both panels (grey
+  because amber is the projected flip's and lavender the flip's). At most
   three, largest first. They are y-axis plot lines in the list `wall_plot_lines`
   already emits on every paint, so they need no series.
 - **Split bars.** In Size mode the by-strike panel draws calls and puts as two
@@ -146,13 +147,16 @@ Rules that follow from it:
 - The by-strike bars use the same maximum as the heatmap in Locked, so a bar's
   length and a cell's colour agree.
 
-**The legend** is a small element to the right of the heatmap column: the ramp,
-five ticks with values through `pages/fmt.py`, and one caption (`held since
-09:30`, `adapts to what is visible`, `share of column`). GEX cells are dollars of
-gamma per 1% move in the underlying (`gamma_tool.py`); the unit line for Charm,
-DEX and Vanna is read from the engine in the plan, not assumed here. It is an
-SVG fragment through `ui.html`, with its tags tested against the shipped
-allow-list, and it is hidden on Term.
+**The legend** is a horizontal strip in the controls row: the two ends of the
+scale in numbers through `pages/fmt.py`, the ramp between them, the unit, and one
+caption (`held since 09:30`, `adapts to what is visible`, `share of each
+column`). It is not a column beside the chart, because the heatmap runs flush to
+the window's right edge by design and must stay the width of the hedge panel
+under it. GEX cells are dollars of gamma per 1% move in the underlying and DEX
+cells are dollars of delta (`gamma_tool.py`), so those two print a dollar unit;
+Charm and Vanna print the bare number, as the bars' axis does today. It is an SVG
+fragment through `ui.html`, with its tags tested against the shipped allow-list,
+and it is hidden outside the four Greek views.
 
 ## 4. Frame: strike
 
@@ -231,7 +235,7 @@ four keys join the frozen list.
 | `[lock] minutes` | 60 | service |
 | `[lock] quantile` | 0.95 | service |
 | `[lock] headroom` | 1.5 | service |
-| `[show] change_windows_min` | `[30]` | page |
+| `[show] change_window_min` | 30 | page |
 | `[balanced] max_polarity` | 0.15 | page |
 | `[balanced] min_size_quantile` | 0.80 | page |
 | `[balanced] max_marks` | 3 | page |
@@ -246,8 +250,9 @@ through the same memo as the Greek views. They are cropped to the same window
 and published as a fifth history key, `cache:options:gamma_hist_prem`, written
 before the main key like the other four. The page reads it only when Value is
 Premium, through the lazy path that already loads one view's history at a time.
-On the public page it follows the existing table: `$SPX` always, a leased symbol
-while it is leased.
+The first version is the private page only. On the public page every leased
+symbol would write a fifth history key each minute, and that cost has not been
+measured, so the public picker leaves Premium out until it has.
 
 **What it shows.** Level is net premium by strike since the open. Change over 30
 minutes is the premium that moved in that window, which is the reading the rest
