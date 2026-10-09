@@ -374,7 +374,7 @@ Each phase ships on its own and leaves the page whole.
 | 2 | Scale: Locked (default) and Share of column | page + the `scale_lock` field |
 | 3 | Frame: From spot | page + the wider crop + `n_side` to config |
 | 4 | Show: Change | page |
-| 5 | Value: Premium | page + the fifth history key, behind the measurement gate |
+| 5 | Value: Premium. **Not built: it failed its measurement gate (section 7)** | none |
 
 Phase 1 alone fixes the balanced strike and puts numbers on the colour. If the
 work stops there the page is better than today.

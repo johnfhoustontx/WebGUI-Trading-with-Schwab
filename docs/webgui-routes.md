@@ -1093,7 +1093,13 @@ default), **Change since open** or **Change over 30 min**. `heatmap_figure` and
   keywords; `render` is unchanged in size.
 
 Design and plan: [value, scale and frame](plans/2026-10-09-gamma-heatmap-value-scale-frame-design.md).
-These are Phases 1 to 4 of five; Premium is not built.
+These are Phases 1 to 4 of five. ⚠ **The fifth, a Premium value, was measured and
+not built.** The stored `prem` view is the day's volume valued at the CURRENT mark,
+not a cumulative of what traded: on stored sessions it fell almost as much as it
+rose minute to minute, and the day's total fell in a third or more of minutes
+(`tools/measure_prem_remark.py`; the design's section 7 has the tables). Do not draw
+it as a heatmap over time, or difference it, without the per-minute increment that
+section describes.
 
 **`?view=` pins one view on the PRIVATE route too (2026-09-08).** `/options/gamma?view=Flow` deep-links a single view; bare is the page exactly as it always was. Added so the marketing gallery's three gamma tiles could differ (`tools/gallery_screens.py`) — the route was parameterless, so all three would have captured the identical default GEX view. ⚠ **A pin also changes what the page draws**, through the same `shows_view_picker` / `may_enqueue` gates the public screens use: no subtab picker, and no Refresh / Explain / Analyze / Briefings / History row. `_resolve_view` is TOTAL — an unknown name falls back to GEX rather than raising — and a pin is deliberately NOT offered for `symbol`, which is interpolated into a Redis key name with no allow-list behind it.
 
