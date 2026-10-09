@@ -3312,6 +3312,166 @@ def test_the_projection_band_is_dropped_for_a_share_scale():
     assert not gamma.heat_keeps_projection("size", "locked")
 
 
+def test_the_display_window_is_read_from_config_when_called(monkeypatch):
+    """Patched at the accessor, so the value is proven READ, and at call time:
+    a saved change needs no restart and matches what options_svc crops to."""
+    strikes = [float(s) for s in range(100, 201)]
+    assert len(gamma.strikes_around(strikes, 150.0)) == 41            # 20 each side
+    monkeypatch.setattr(gamma._heat_cfg, "n_side", lambda: 3)
+    assert gamma.strikes_around(strikes, 150.0) == [147.0, 148.0, 149.0, 150.0,
+                                                    151.0, 152.0, 153.0]
+    big = {"spot": 150.0, "gex": {s: {"net": 1.0} for s in strikes}}
+    assert len(gamma.bars_from_gex(big, 150.0)["strikes"]) == 7
+    assert len(gamma.bar_figure(big, 150.0)["series"][0]["data"]) == 7
+    assert len(gamma.strikes_around(strikes, 150.0, n_side=1)) == 3     # explicit wins
+
+
+def _frame_rows():
+    """Three one-minute rows on a 1-wide ladder 90..110; spot walks 100 → 102."""
+    def grid(spot):
+        return {float(k): {"call": 10.0 + k - spot, "put": -5.0,
+                           "net": 5.0 + k - spot} for k in range(90, 111)}
+    return [(i, s, None, None, None, 0, grid(s))
+            for i, s in enumerate((100.0, 101.0, 102.0))]
+
+
+_FRAME = dict(frame="spot", half=3)
+_FRAME_YR = [-3.5, 3.5]
+
+
+def test_strike_frame_is_unchanged_by_the_new_arguments():
+    a = gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0])
+    b = gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0],
+                             frame="strike", half=7)
+    assert a == b
+    assert (gamma.bar_figure(SIDED, 100.0) == gamma.bar_figure(SIDED, 100.0,
+                                                               frame="strike", half=7))
+
+
+def test_spot_frame_draws_each_column_around_its_own_spot():
+    fig = gamma.heatmap_figure(_frame_rows(), "GEX", yrange=_FRAME_YR, **_FRAME)
+    cells = {(p[0], p[1]): p[2] for p in fig["series"][0]["data"]}
+    # net = 5 + (strike - spot): the SAME at one offset in every column, which is
+    # what a chart centred on spot should show for this seed.
+    for col in range(3):
+        assert cells[(col, 0.0)] == pytest.approx(5.0)
+        assert cells[(col, 3.0)] == pytest.approx(8.0)
+        assert cells[(col, -3.0)] == pytest.approx(2.0)
+    assert sorted({p[1] for p in fig["series"][0]["data"]}) == [-3.0, -2.0, -1.0, 0.0,
+                                                                 1.0, 2.0, 3.0]
+    assert fig["yAxis"]["min"] == -3.5 and fig["yAxis"]["max"] == 3.5
+
+
+def test_spot_frame_keeps_nine_series_and_the_palette():
+    fig = gamma.heatmap_figure(_frame_rows(), "GEX", yrange=_FRAME_YR, **_FRAME)
+    assert len(fig["series"]) == 9
+    assert [s["type"] for s in fig["series"]] == [
+        "heatmap", "line", "columnrange", "errorbar"] + ["line"] * 5
+    assert fig["colorAxis"]["stops"] == gamma.HEAT_STOPS
+
+
+def test_spot_frame_draws_spot_as_a_flat_zero_line_and_no_candles():
+    fig = gamma.heatmap_figure(_frame_rows(), "GEX", yrange=_FRAME_YR,
+                               spot_style="candle", spot_interval=1, **_FRAME)
+    by_name = {s["name"]: s for s in fig["series"]}
+    assert by_name["Spot"]["data"] == [[0, 0.0], [1, 0.0], [2, 0.0]]
+    assert by_name["Spot candles"]["data"] == [] and by_name["Spot wicks"]["data"] == []
+
+
+def test_spot_frame_draws_the_level_tracks_even_when_the_switch_is_off():
+    """In this frame the tracks ARE the read: price stands still and they move."""
+    levels = {"flip": [98.0, 98.0, 98.0], "call_wall": [105.0, 105.0, 104.0],
+              "put_wall": [95.0, None, 95.0]}
+    fig = gamma.heatmap_figure(_frame_rows(), "GEX", yrange=_FRAME_YR, levels=levels,
+                               show_tracks=False, **_FRAME)
+    by_name = {s["name"]: s for s in fig["series"]}
+    # Each level minus THAT column's spot (100, 101, 102).
+    assert by_name["Flip track"]["data"] == [[0, -2.0], [1, -3.0], [2, -4.0]]
+    assert by_name["Call wall track"]["data"] == [[0, 5.0], [1, 4.0], [2, 2.0]]
+    assert by_name["Put wall track"]["data"] == [[0, -5.0], [1, None], [2, -7.0]]
+
+
+def test_strike_frame_tracks_still_follow_the_switch():
+    levels = {"flip": [98.0, 98.0, 98.0]}
+    off = gamma.heatmap_figure(_frame_rows(), "GEX", yrange=[90.0, 110.0], levels=levels)
+    on = gamma.heatmap_figure(_frame_rows(), "GEX", yrange=[90.0, 110.0], levels=levels,
+                              show_tracks=True)
+    flip = lambda fig: {s["name"]: s for s in fig["series"]}["Flip track"]["data"]  # noqa: E731
+    assert flip(off) == [] and flip(on) == [[0, 98.0], [1, 98.0], [2, 98.0]]
+
+
+def test_spot_frame_levels_sit_at_their_distance_from_the_current_spot():
+    fig = gamma.heatmap_figure(_frame_rows(), "GEX", yrange=_FRAME_YR, spot=102.0,
+                               flip=100.5, walls=[104.0, 99.0], projected_flip=101.0,
+                               balanced=[103.0], **_FRAME)
+    lines = {pl["label"]["text"]: pl["value"] for pl in fig["yAxis"]["plotLines"]}
+    # The label keeps the level's own price; only its position moves.
+    assert lines == {"Gamma flip 100.50": -1.5, "Proj. flip 101.00": -1.0,
+                     "Call wall 104.00": 2.0, "Put wall 99.00": -3.0,
+                     "Balanced 103.00": 1.0}
+
+
+def test_spot_frame_title_and_tooltip_say_what_the_axis_is():
+    fig = gamma.heatmap_figure(_frame_rows(), "GEX", yrange=_FRAME_YR, **_FRAME)
+    assert fig["title"]["text"] == "GAMMA intraday (distance from spot × time)"
+    assert "from spot" in fig["series"][0]["tooltip"]["pointFormat"]
+    assert "Strike" not in fig["series"][0]["tooltip"]["pointFormat"]
+
+
+def test_spot_frame_works_with_every_value_and_scale():
+    for mode in ("net", "call", "put", "size"):
+        for scale in ("adaptive", "locked", "share"):
+            fig = gamma.heatmap_figure(_frame_rows(), "GEX", yrange=_FRAME_YR, mode=mode,
+                                       scale=scale, lock=_LOCK, **_FRAME)
+            assert len(fig["series"]) == 9 and fig["series"][0]["data"], (mode, scale)
+
+
+def test_spot_frame_does_not_write_to_its_rows():
+    rows = _frame_rows()
+    before = json.dumps(rows, sort_keys=True)
+    gamma.heatmap_figure(rows, "GEX", yrange=_FRAME_YR, **_FRAME)
+    assert json.dumps(rows, sort_keys=True) == before
+
+
+def test_bars_in_the_spot_frame_sit_at_their_distance_from_spot():
+    fig = gamma.bar_figure(SIDED, 100.0, walls=[101.0], flip=99.0, balanced=[100.0],
+                           yrange=_FRAME_YR, **_FRAME)
+    xs = sorted(p["x"] for s in fig["series"][:2] for p in s["data"])
+    assert xs == [-1.0, 0.0, 1.0, 2.0]                      # strikes 99..102 less spot 100
+    assert fig["xAxis"]["min"] == -3.5 and fig["xAxis"]["max"] == 3.5
+    assert fig["xAxis"]["title"]["text"] == "From spot"
+    assert fig["xAxis"]["labels"]["format"] == "{value:+.2f}"
+    lines = {pl["label"]["text"]: pl["value"] for pl in fig["xAxis"]["plotLines"]}
+    assert lines == {"Spot 100.00": 0.0, "Gamma flip 99.00": -1.0,
+                     "Call wall 101.00": 1.0, "Balanced 100.00": 0.0}
+    assert len(fig["series"]) == 3
+
+
+def test_bars_in_the_strike_frame_keep_their_strike_axis():
+    fig = gamma.bar_figure(SIDED, 100.0)
+    assert fig["xAxis"]["title"]["text"] == "Strike"
+    assert fig["xAxis"]["labels"]["format"] == "{value:.2f}"
+    assert sorted(p["x"] for s in fig["series"][:2] for p in s["data"]) == [
+        99.0, 100.0, 101.0, 102.0]
+
+
+def test_heat_yrange_is_one_range_for_both_panels():
+    strikes = [float(k) for k in range(90, 111)]
+    strike = gamma.heat_yrange(strikes, 100.0, [98.0, 104.0], "strike", 3)
+    assert strike == gamma.union_range(gamma.bar_yrange(strikes, 100.0), [98.0, 104.0])
+    assert gamma.heat_yrange(strikes, 100.0, [98.0, 104.0], "spot", 3) == [-3.5, 3.5]
+    # A 5-wide ladder: the frame is three strikes tall, so 15 points and half a row.
+    wide = [float(k) for k in range(5700, 5905, 5)]
+    assert gamma.heat_yrange(wide, 5800.0, [], "spot", 3) == [-17.5, 17.5]
+
+
+def test_the_projection_band_is_dropped_in_the_spot_frame():
+    """It is drawn in strike coordinates along a flat spot; on an axis measured
+    from spot it would be drawn in the wrong place."""
+    assert gamma.heat_keeps_projection("net", "locked", "strike")
+    assert not gamma.heat_keeps_projection("net", "locked", "spot")
+
+
 class _FakeEl:
     """Stands in for a NiceGUI element in HeatControls."""
     def __init__(self, value=None):

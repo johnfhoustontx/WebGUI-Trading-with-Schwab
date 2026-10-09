@@ -347,7 +347,8 @@ def _is_level(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
-def wall_plot_lines(spot, walls, flip=None, projected_flip=None, balanced=()):
+def wall_plot_lines(spot, walls, flip=None, projected_flip=None, balanced=(),
+                    origin=None):
     """Gamma-flip + Call/Put wall (+ projected EOD flip) levels as yAxis plotLines —
     horizontal, so they run ACROSS the heatmap's full time axis.
 
@@ -362,25 +363,35 @@ def wall_plot_lines(spot, walls, flip=None, projected_flip=None, balanced=()):
     metric, so it is drawn on EVERY view as a shared reference and labeled
     "Proj. flip" in its own color — the gap between it and the actual flip IS the
     hedging drift, expressed in price. ``None`` on any symbol whose nearest expiry
-    isn't today (most of them). Non-numeric levels are skipped rather than raising."""
+    isn't today (most of them). Non-numeric levels are skipped rather than raising.
+
+    ``origin`` (the spot frame) draws each line at its distance from that price.
+    The LABEL keeps the level's own price: only where the line sits changes."""
     out = []
+
+    def _at(level):
+        return level - origin if _is_level(origin) else level
+
     if _is_level(flip):
-        out.append(_level_plot_line(flip, f"Gamma flip {_fmt.price(flip)}", FLIP_COLOR))
+        out.append(_level_plot_line(_at(flip), f"Gamma flip {_fmt.price(flip)}",
+                                    FLIP_COLOR))
     if _is_level(projected_flip):
         out.append(_level_plot_line(
-            projected_flip, f"Proj. flip {_fmt.price(projected_flip)}",
+            _at(projected_flip), f"Proj. flip {_fmt.price(projected_flip)}",
             PROJ_FLIP_COLOR))
     for w in (walls or []):
         if not _is_level(w):
             continue
         call = spot is None or w >= spot
-        out.append(_level_plot_line(w, f"{'Call' if call else 'Put'} wall {_fmt.price(w)}",
+        out.append(_level_plot_line(_at(w),
+                                    f"{'Call' if call else 'Put'} wall {_fmt.price(w)}",
                                     CALL_WALL_COLOR if call else PUT_WALL_COLOR))
     # Strikes whose calls and puts nearly cancel: empty in a net heatmap, so they
     # are named here, across both panels, like any other level.
     for k in balanced or ():
         if _is_level(k):
-            out.append(_level_plot_line(k, f"Balanced {_fmt.price(k)}", BALANCED_COLOR))
+            out.append(_level_plot_line(_at(k), f"Balanced {_fmt.price(k)}",
+                                        BALANCED_COLOR))
     return out
 
 
@@ -411,10 +422,15 @@ def _refloat_keys(d):
     return out
 
 
-N_SIDE = 20  # strikes shown on each side of spot (bars + heatmap window)
+def _window_side(n_side=None):
+    """Strikes shown each side of spot (bars + heatmap window): the caller's, else
+    ``config/gamma_heat.toml [window] n_side``. Read at CALL time, so a saved
+    change needs no restart, and it is the number options_svc crops the published
+    history to (it reads the same key)."""
+    return _heat_cfg.n_side() if n_side is None else n_side
 
 
-def strikes_around(strikes, spot, n_side=N_SIDE):
+def strikes_around(strikes, spot, n_side=None):
     """The nearest ``n_side`` strikes at/below spot + ``n_side`` strictly above.
 
     A FIXED COUNT (not a ±% band) so the bar/heatmap window holds a consistent
@@ -422,6 +438,7 @@ def strikes_around(strikes, spot, n_side=N_SIDE):
     spot drifts. Lower-priced names with fewer listed strikes naturally get a
     smaller window (slicing just returns what exists). Returns sorted floats; an
     unusable spot returns all numeric strikes sorted."""
+    n_side = _window_side(n_side)
     s = sorted(set(x for x in (strikes or []) if isinstance(x, (int, float))))
     if not isinstance(spot, (int, float)):
         return s
@@ -431,7 +448,7 @@ def strikes_around(strikes, spot, n_side=N_SIDE):
     return below + at + above
 
 
-def bars_from_gex(data, spot, n_side=N_SIDE, mode="net"):
+def bars_from_gex(data, spot, n_side=None, mode="net"):
     """Per-strike net exposure for the ``n_side``-each-side window around spot.
 
     A fixed strike COUNT (see ``strikes_around``) — not a ±% band — so the bar
@@ -568,8 +585,9 @@ def flex_class(grow, grow2=1, basis="0%"):
 _INIT_FLEX = flex_class(0.5)
 
 
-def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, height=680,
-               yrange=None, mode="net", balanced=(), scale="adaptive", lock=None):
+def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=None, height=680,
+               yrange=None, mode="net", balanced=(), scale="adaptive", lock=None,
+               frame="strike", half=None):
     """Highcharts horizontal-bar options for one view (dark, beveled, labeled).
 
     In a Highcharts ``bar`` chart the category axis (``xAxis``) is vertical, so the
@@ -584,14 +602,24 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, hei
     With ``scale="locked"`` and a ``lock`` (the snapshot's ``scale_lock``) the
     exposure axis holds at the lock's extent, so a bar's length means the same
     amount all session. It is a SOFT extent: a bar larger than the lock widens
-    the axis and is drawn whole, never clipped at the edge."""
+    the axis and is drawn whole, never clipped at the edge.
+
+    ``frame="spot"`` measures the strike axis from ``spot``: every bar and every
+    level sits at its distance from price, so the panel still shares one vertical
+    axis with a heatmap drawn in the spot frame (``half`` is that frame's height
+    and is the heatmap's to use; the caller hands both panels one ``yrange``)."""
     b = bars_from_gex(data, spot, n_side, mode)
     label = _view_label(view)
     held = _heat.bar_max(lock, mode) if scale == "locked" else None
     yr = yrange if yrange is not None else bar_yrange(b["strikes"], spot)
+    from_spot = frame == "spot" and _is_level(spot)
+
+    def _at(level):
+        """A strike or a level as this panel's axis draws it."""
+        return level - spot if from_spot else level
 
     def _pt(strike, value, colour, hover):
-        return {"x": strike, "y": value, "color": bevel_fill(colour, mirrored=True),
+        return {"x": _at(strike), "y": value, "color": bevel_fill(colour, mirrored=True),
                 "borderColor": _darker(colour), "borderWidth": 1,
                 "custom": {"hover": hover}}
 
@@ -611,7 +639,7 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, hei
     else:
         for s, n, c, h in zip(b["strikes"], b["nets"], b["colors"], b["hovers"]):
             (pos_pts if n >= 0 else neg_pts).append(_pt(s, n, c, h))
-    plotlines = [_strike_plotline(a["value"],
+    plotlines = [_strike_plotline(_at(a["value"]),
                                   a["color"],
                                   "Solid" if a["text"].startswith("Spot") else
                                   ("Dash" if "flip" in a["text"] else "Dot"),
@@ -633,10 +661,13 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, hei
         # linear strike axis so the two panels line up. startOnTick/endOnTick False
         # pins the axis to EXACTLY [yr0, yr1] (no tick-snapping) so the vertical band
         # matches the heatmap's yAxis exactly.
-        "xAxis": {**_dark_axis("Strike"), "min": yr[0], "max": yr[1],
+        "xAxis": {**_dark_axis("From spot" if from_spot else "Strike"),
+                  "min": yr[0], "max": yr[1],
                   "reversed": False, "startOnTick": False, "endOnTick": False,
-                  # A strike prints two places: 450.00, never 450.
-                  "labels": {"style": {"color": FONT}, "format": "{value:.2f}"},
+                  # A strike prints two places: 450.00, never 450. A distance
+                  # from spot carries its sign: +5.00, -12.50.
+                  "labels": {"style": {"color": FONT},
+                             "format": "{value:+.2f}" if from_spot else "{value:.2f}"},
                   "plotLines": plotlines},
         "yAxis": {**_dark_axis(label),
                   # ALWAYS emitted, None when not locked: the chart is updated in
@@ -670,7 +701,7 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, hei
     # projection EXTENDS past the current bar or pulls back INSIDE it — a filled bar
     # behind would be invisible in the pull-back case. Amber, matching the projected
     # flip line. Omitted entirely when the symbol has no 0-DTE book.
-    proj_pts = [{"x": s_, "y": pv,
+    proj_pts = [{"x": _at(s_), "y": pv,
                  "custom": {"hover": f"{_fmt.strike(s_)}: projected close {pv:,.0f}"}}
                 for s_, pv in zip(b["strikes"], b.get("projected") or [])
                 if isinstance(pv, (int, float)) and not isinstance(pv, bool)]
@@ -955,7 +986,7 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                    walls=None, spot=None, flip=None, levels=None,
                    show_tracks=False, spot_style="line", spot_interval=5,
                    projected_flip=None, mode="net", balanced=(), legend=None,
-                   scale="adaptive", lock=None):
+                   scale="adaptive", lock=None, frame="strike", half=None):
     """Intraday strike×time Highcharts heatmap (dark, cell separators, concise
     hover) with the underlying spot-price line overlaid on the same (linear)
     strike axis. ``yrange`` (when given) sets the Strike axis range so it aligns
@@ -975,6 +1006,14 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     view, so a colour is one amount all session; ``share`` draws each cell as a
     percentage of its own column.
 
+    ``frame="spot"`` (``gamma_heat.FRAMES``) measures the vertical axis from spot:
+    each column is resampled onto ``half`` strikes either side of its OWN spot, so
+    price is a flat line at zero and the levels move. The three level tracks are
+    then drawn whatever ``show_tracks`` says (they are the read), the spot overlay
+    is always the line, and ``yrange`` is the caller's range in those units
+    (``heat_yrange``). A ``projection`` is strike-and-flat-spot data and must not
+    be passed in this frame; the caller's ``heat_keeps_projection`` sees to that.
+
     ``projection`` (GEX only) appends a forward band: extra time columns of
     projected net-per-mark cells on the SAME heatmap series/colorAxis, a 'now'
     divider between the collected and future columns, the Spot line continued flat
@@ -986,10 +1025,15 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     # are non-zero across the WHOLE chain (~250 strikes) — emitting all of them is
     # ~45k points to serialize + render every repaint when only the near-spot
     # window shows. Cropping here keeps every view as light as GEX.
-    if yrange is not None:
+    from_spot = frame == "spot"
+    spots = m.get("spots") or []
+    if yrange is not None and not from_spot:
         lo, hi = yrange
         vis = [yi for yi in range(len(strikes)) if lo <= strikes[yi] <= hi]
     else:
+        # The spot frame takes every strike the rows hold: which ones a column
+        # needs depends on where ITS spot was, and the service has already cropped
+        # the history to the window around the path (gamma_window.crop_keep).
         vis = list(range(len(strikes)))
     # Fill an unevenly spaced ladder ($NDX quotes 5-wide near the money among
     # 10-wide) so the data grid matches the uniform grid `interpolation: True`
@@ -1000,6 +1044,12 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     # thousands of rows and be refused by the row cap.
     vstrikes, vz = uniform_strike_grid([strikes[yi] for yi in vis],
                                        [z[yi] for yi in vis])
+    if from_spot:
+        # Each column onto distances from its OWN spot. ``vstrikes`` are offsets
+        # from here on; a column with no strikes around an offset is a gap there.
+        vstrikes, vz = _heat.to_spot_frame(
+            vstrikes, vz, spots, step=_strike_step(vstrikes),
+            half=_window_side(half))
     if scale == "share":
         # Each cell as a percentage of its own column, over the strikes on screen.
         vz = _heat.share_of_column(vz)
@@ -1024,16 +1074,18 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                "colsize": 1, "rowsize": rowsize,
                "interpolation": True, "borderWidth": 0, "states": no_fade,
                "tooltip": {"headerFormat": "",
-                           "pointFormat": "Strike {point.y:.2f} · "
+                           "pointFormat": ("{point.y:+.2f} from spot · " if from_spot
+                                           else "Strike {point.y:.2f} · ")
                                           + _heat.VALUES[mode].lower()
                                           + (" {point.value:.1f}% of column"
                                              if scale == "share"
                                              else " {point.value:,.0f}")}}]
-    spots = m.get("spots") or []
     # Underlying price track over the session (on the shared Strike axis; a line series
     # ignores the colorAxis so it isn't recolored by net value). Built here, appended
-    # (with the two EM-cone series) AFTER the projection block below.
-    spot_pts = [[xi, sp] for xi, sp in enumerate(spots) if isinstance(sp, (int, float))]
+    # (with the two EM-cone series) AFTER the projection block below. Measured from
+    # spot it is a flat line at zero: price stands still and everything else moves.
+    spot_pts = [[xi, 0.0 if from_spot else sp] for xi, sp in enumerate(spots)
+                if isinstance(sp, (int, float))]
 
     # Forward projection band (GEX only): extend the figure with future columns,
     # a 'now' seam, the spot line continued along the cone midline, and EM cones.
@@ -1104,6 +1156,10 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     # is the same bars drawn thin, so it reads as a bar rather than a filled candle
     # (true left/right open-close ticks need the stock module, which breaks this
     # chart's in-place update — see candle_points).
+    # ...and a candle of price against itself is nothing, so the spot frame
+    # always draws the line.
+    if from_spot:
+        spot_style = "line"
     _bars = (ohlc_bars(spots, spot_interval)
              if spot_style in ("candle", "ohlc") else [])
     _body, _wick = candle_points(_bars)
@@ -1140,7 +1196,13 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     for name, key, color in (("Flip track", "flip", FLIP_COLOR),
                              ("Call wall track", "call_wall", CALL_WALL_COLOR),
                              ("Put wall track", "put_wall", PUT_WALL_COLOR)):
-        pts = track_points(lv.get(key)) if show_tracks else []
+        vals = lv.get(key) if (show_tracks or from_spot) else None
+        if from_spot and vals:
+            # Each level less THAT column's spot. In this frame the tracks are
+            # the read, so they are drawn whatever the switch says.
+            vals = [v - sp if _is_level(v) and _is_level(sp) else None
+                    for v, sp in zip(vals, spots)]
+        pts = track_points(vals)
         series.append(_line_series(name, pts, color, lineWidth=1, step="left",
                                    enableMouseTracking=False))
     # The bar chart already labels the Strike axis and the heatmap shares its EXACT
@@ -1152,7 +1214,8 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
              # chart.update() MERGES options, so omitting it would leave the
              # previous view's flip/wall lines painted over the new view.
              "plotLines": wall_plot_lines(spot, walls, flip, projected_flip,
-                                          balanced)}
+                                          balanced,
+                                          origin=spot if from_spot else None)}
     if yrange is not None:
         yaxis["min"], yaxis["max"] = yrange[0], yrange[1]
     if legend is not None:
@@ -1172,7 +1235,9 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     # mounts, so carry the load hook here too (load fires once at mount).
     fig["chart"]["events"] = {":load": _HEAT_PRESS_TOOLTIP_JS}
     fig.update({
-        "title": {"text": f"{_view_label(view)} intraday (strike × time)"
+        "title": {"text": f"{_view_label(view)} intraday "
+                          + ("(distance from spot × time)" if from_spot
+                             else "(strike × time)")
                           + ("" if mode == "net" else f" · {_heat.VALUES[mode]}"),
                   "style": {"color": FONT}},
         # No "Time" axis title — the HH:MM labels make it obvious, and the title was
@@ -2281,13 +2346,25 @@ def _heat_setting(key, allowed, default):
     return value if value in allowed else default
 
 
-def heat_keeps_projection(mode, scale="adaptive"):
-    """Whether the GEX forward band is drawn. It is a NET grid of raw exposure,
-    so only net keeps it, and not on a share scale, where every cell is a
-    percentage. The caller decides, never ``heatmap_figure``: the hedge panel
+def heat_keeps_projection(mode, scale="adaptive", frame="strike"):
+    """Whether the GEX forward band is drawn. It is a NET grid of raw exposure in
+    strike coordinates along a flat spot, so only net keeps it, not on a share
+    scale (every cell a percentage) and not in the spot frame (an axis measured
+    from spot). The caller decides, never ``heatmap_figure``: the hedge panel
     under the heatmap is built on the same ``projection``, and so on the same
     columns."""
-    return mode == "net" and scale != "share"
+    return mode == "net" and scale != "share" and frame != "spot"
+
+
+def heat_yrange(strikes, spot, spot_path, frame, half):
+    """ONE vertical range for the bars and the heatmap, so a strike lines up
+    across both panels. The strike frame spans the bars' window around spot,
+    widened to the session's spot path (so the price line is never clipped). The
+    spot frame is ``half`` strikes either side of price, in the ladder's own
+    step."""
+    if frame == "spot":
+        return _heat.spot_frame_range(_strike_step(strikes), half)
+    return union_range(bar_yrange(strikes, spot), spot_path)
 
 
 class HeatControls:
@@ -3118,7 +3195,7 @@ def render(symbol: str | None = None, view: str | None = None,
         spot_path = [r[1] for r in rows if len(r) > 1 and isinstance(r[1], (int, float))]
 
         # One shared strike range so the bar chart and the intraday heatmap line up
-        # vertically (axis alignment). Spans the FIXED ±N_SIDE-strike window around
+        # vertically (axis alignment). Spans the FIXED ±n_side-strike window around
         # spot (consistent bar/cell count + size through the day), then widened to
         # include the intraday spot path so the heatmap's price line isn't clipped
         # when price drifted out of that window.
