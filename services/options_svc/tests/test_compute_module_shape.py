@@ -20,7 +20,7 @@ COMPUTE = pathlib.Path(compute.__file__)
 # Lines in compute.py. LOWER this when code moves out; never raise it. To add
 # behaviour, write it in a sibling module under services/options_svc/ and import
 # it into compute only if compute's own code calls it.
-COMPUTE_MAX_LINES = 10515
+COMPUTE_MAX_LINES = 10487
 
 
 def test_compute_does_not_grow():
@@ -72,3 +72,13 @@ def test_time_to_expiry_lives_in_its_own_module():
     imported = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
     imported |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
     assert imported <= {"datetime", "zoneinfo"}, imported
+
+
+def test_the_hiro_row_writer_lives_in_its_own_module():
+    from services.options_svc import hiro_store
+    assert compute._write_hiro_rows is hiro_store.write_rows
+    import ast
+    tree = ast.parse(pathlib.Path(hiro_store.__file__).read_text(encoding="utf-8"))
+    imported = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+    imported |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom)}
+    assert not any(str(n).endswith("compute") for n in imported), imported
