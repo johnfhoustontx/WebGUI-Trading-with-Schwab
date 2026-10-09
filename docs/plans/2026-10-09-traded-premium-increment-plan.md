@@ -1843,3 +1843,30 @@ and age out with the other views after five sessions.
 price, whether restarts cost enough to store baselines, and which Phase B reader
 to build first (the heatmap's Premium value is the one the design was written
 for). Each reader is its own design decision and its own plan.
+
+---
+
+## As built: Tasks 1 to 4 (2026-10-09)
+
+Built as written, with these differences.
+
+- **One test more than the plan (Task 4).** Each rule was broken in turn to see
+  that a test fails for it. Fourteen were caught. One was not: removing the
+  three-decimal rounding where a chain's strike is READ. The plan's test proved
+  only that the resume side rounds. `test_a_strike_is_keyed_the_same_way_read_or_resumed`
+  now pins both to one key. No test was changed or loosened.
+- **The module was written from the prototype** that had been run before the
+  plan, not retyped from the plan's text; the state tests were copied out of the
+  plan file. So the plan and the code agree by construction.
+- **`compute.py`** is 10,485 lines and its ceiling 10,487, as expected. The two
+  spare lines are Task 5's.
+
+**Where this leaves the branch.** The switch is in Settings → Configuration and
+the module is complete, but nothing calls it: until Task 5, turning the switch on
+does nothing. Tasks 5 to 8 remain (the poll wiring, the check tool, the
+documents, the whole suites). Do not promote between Task 4 and Task 5 without
+saying so: a switch that does nothing is a trap.
+
+**Verified.** The module's suite (41 tests) against a real in-memory store, and
+the options service, service-guard and shared suites whole, all green. It has not
+run against a live chain.
