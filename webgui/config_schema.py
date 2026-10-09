@@ -1928,6 +1928,21 @@ _MARKETDATA = ConfigFile(
                   "Seconds added to the interval when the collector asks for a "
                   "stored chain, so one fetched a little late still counts.",
                   **_SEC, max=60),
+            Field("collection.traded_premium",
+                  "Record traded premium as it trades",
+                  "Stores, per strike, a running total in which each minute's "
+                  "new volume is priced once, at that minute's mark. Unlike "
+                  "the premium the Flow view shows, it cannot fall when prices "
+                  "fall. Nothing reads it yet. It adds about an eighth to the "
+                  "gamma history database. Turning it off and on again during "
+                  "a session leaves the volume traded in between out of the "
+                  "total.", kind="bool"),
+            Field("collection.traded_premium_late_sec",
+                  "Seconds after which new volume counts as priced late",
+                  "Used only by the daily check line in the options service's "
+                  "log. New volume first seen more than this long after the "
+                  "symbol's previous reading is counted as priced late.",
+                  **{**_SEC, "min": 30}, max=600),
         )),
     ),
 )

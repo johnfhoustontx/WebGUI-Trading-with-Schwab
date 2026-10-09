@@ -303,3 +303,23 @@ def test_a_clamped_limit_is_said_once(monkeypatch, caplog):
         mc.section("quotes")
     said = [r for r in caplog.records if "max_age_sec" in r.getMessage()]
     assert len(said) == 1
+
+
+# ---- traded premium -----------------------------------------------------------
+
+def test_traded_premium_ships_off_and_only_a_literal_true_switches_it_on(monkeypatch):
+    assert mc.section("collection")["traded_premium"] is False
+    _with(monkeypatch, "collection", "traded_premium", True)
+    assert mc.section("collection")["traded_premium"] is True
+    for bad in ("true", 1, None, _MISSING):
+        _with(monkeypatch, "collection", "traded_premium", bad)
+        assert mc.section("collection")["traded_premium"] is False
+
+
+def test_the_late_step_is_a_setting(monkeypatch):
+    assert mc.section("collection")["traded_premium_late_sec"] == 90
+    _with(monkeypatch, "collection", "traded_premium_late_sec", 150)
+    assert mc.section("collection")["traded_premium_late_sec"] == 150
+    for bad in ("90", True, float("nan"), -1, _MISSING):
+        _with(monkeypatch, "collection", "traded_premium_late_sec", bad)
+        assert mc.section("collection")["traded_premium_late_sec"] == 90

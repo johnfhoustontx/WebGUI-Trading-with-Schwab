@@ -97,6 +97,17 @@ carry_slack_sec = 30
 # keeps an empty answer, so without this it is fetched for real every minute.
 # 0 = ask every minute. Applies in every mode. Above 720 is read as 720.
 empty_retry_min = 60
+# Record traded premium as it trades: per strike, a running total in which each
+# minute's NEW volume is priced once, at that minute's mark. Stored as a sixth
+# view ("tprem") beside the five the collector writes; unlike "prem" (the day's
+# volume at the CURRENT mark) it cannot fall when prices fall. Nothing reads it
+# yet. Adds about an eighth to gex_history.db. Switching it off and on again
+# mid-session leaves the volume traded in between out of the total.
+traded_premium = false
+# Only for the day's check line in the options service's log: new volume first
+# seen more than this many seconds after the symbol's previous reading is
+# counted as priced late. 90 = more than one poll minute.
+traded_premium_late_sec = 90
 
 [limiter]
 # Every Schwab market-data call the proxy sends is spaced 0.2 seconds apart, 5 a
