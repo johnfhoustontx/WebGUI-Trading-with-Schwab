@@ -2170,6 +2170,20 @@ def _visitor():
         return "unknown"
 
 
+def overlay_handler(key, cast, after):
+    """A change handler for one persisted overlay choice: store it, then repaint.
+
+    Module-level so ``render`` holds no per-control handler. ``after`` is the
+    page's repaint, run from the snapshot the page already holds (no refetch).
+    The store is a no-op on the public origin, where settings are frozen and the
+    choice lives in the element."""
+    @guard
+    def _on_change(e):
+        app_settings.set(key, cast(e.value))
+        after()
+    return _on_change
+
+
 def render(symbol: str | None = None, view: str | None = None,
            public: bool = False):
     """The Dealer Positioning page.
@@ -3403,25 +3417,8 @@ def render(symbol: str | None = None, view: str | None = None,
 
     view_toggle.on_value_change(_on_view_change)
 
-    @guard
-    def _on_tracks_toggle(e):
-        # Persist the choice, then repaint from the cached snapshot — the tracks
-        # ride the snapshot the page already holds, so no refetch is needed.
-        app_settings.set("gamma_level_tracks", bool(e.value))
-        _render_view()
-
-    tracks_sw.on_value_change(_on_tracks_toggle)
-
-    @guard
-    def _on_spot_style(e):
-        app_settings.set("gamma_spot_style", e.value)
-        _sync_spot_controls()
-        _render_view()
-
-    @guard
-    def _on_spot_interval(e):
-        app_settings.set("gamma_spot_interval", e.value)
-        _render_view()
+    tracks_sw.on_value_change(
+        overlay_handler("gamma_level_tracks", bool, _render_view))
 
     def _sync_spot_controls():
         # Symbol / Refresh now / Level movement / Spot / Bar all drive the
@@ -3445,8 +3442,10 @@ def render(symbol: str | None = None, view: str | None = None,
         spot_int_sel.set_visibility(
             symbol_scoped and spot_style_sel.value != "line")
 
-    spot_style_sel.on_value_change(_on_spot_style)
-    spot_int_sel.on_value_change(_on_spot_interval)
+    spot_style_sel.on_value_change(overlay_handler(
+        "gamma_spot_style", str, lambda: (_sync_spot_controls(), _render_view())))
+    spot_int_sel.on_value_change(
+        overlay_handler("gamma_spot_interval", int, _render_view))
     _sync_spot_controls()
 
     def _sync_np_controls():

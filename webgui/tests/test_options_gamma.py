@@ -2973,3 +2973,27 @@ def test_the_pinned_screens_still_build_no_enqueueing_control_through_the_kit():
         kids = _rendered(**pins)
         assert not [e for e in kids if type(e).__name__ == "Button"
                     and str(getattr(e, "text", "")) in ENQUEUEING_CONTROLS], pins
+
+
+# ── The heatmap's value, scale and frame controls (2026-10-09) ──────────────
+# docs/plans/2026-10-09-gamma-heatmap-value-scale-frame-design.md
+
+def test_overlay_handler_persists_then_repaints(monkeypatch):
+    """One factory serves every overlay control: it stores the choice under its
+    key, cast to the setting's own type, and then runs the repaint."""
+    stored, ran = {}, []
+    monkeypatch.setattr(gamma.app_settings, "set",
+                        lambda k, v: stored.__setitem__(k, v))
+    handler = gamma.overlay_handler("gamma_spot_interval", int, lambda: ran.append(1))
+
+    class _Event:
+        value = "15"
+    handler(_Event())
+    assert stored == {"gamma_spot_interval": 15}
+    assert ran == [1]
+
+
+def test_the_overlay_handlers_no_longer_live_in_render():
+    src = inspect.getsource(gamma.render)
+    for name in ("_on_tracks_toggle", "_on_spot_style", "_on_spot_interval"):
+        assert f"def {name}(" not in src
