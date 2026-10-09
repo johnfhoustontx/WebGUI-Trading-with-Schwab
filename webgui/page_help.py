@@ -770,9 +770,10 @@ accelerate price.
   price moves and the levels stand still. **From spot** turns it around: price is
   a flat line through the middle and the flip and walls move. A wall sliding
   toward the middle is one price is approaching, and the steeper it slides the
-  faster. It shows 10 strikes each side of price (a setting). The Spot and Level movement
-  controls hide there, because price is always the flat line and the level lines
-  are always drawn.
+  faster. It shows 10 strikes each side of price (a setting). The Spot and Bar
+  controls hide there, because price is always the flat line. **Level movement**
+  still works: off shows each level as one line at its distance from price now,
+  on adds the path it took to get there.
 - **The colour strip** beside the controls gives the two ends of the heat map's
   colours as numbers (dollars of gamma per 1% move, or dollars of delta; Charm
   and Vanna show a plain figure; percentages in Share of column) and says what

@@ -1043,8 +1043,8 @@ or **From spot**. `heatmap_figure` and `bar_figure` take `frame=` and `half=`.
 - **From spot** resamples each heatmap column onto offsets from its OWN spot
   (`gamma_heat.to_spot_frame`: linear between the strikes that have a reading, a gap
   outside them or across a hole, nothing extrapolated). The Spot series is a flat
-  line at zero. The three level tracks are drawn whatever the Level movement switch
-  says, as `level − that column's spot`. The level lines sit at `level − current
+  line at zero. The three level tracks follow the Level movement switch, as in the
+  strike frame, and are drawn as `level − that column's spot`. The level lines sit at `level − current
   spot` (`wall_plot_lines(origin=)`) and keep their own price in the label. The bars
   are drawn at `strike − spot`. Nine heatmap series and three bar series, as ever.
 - **One range for both panels:** `heat_yrange(strikes, spot, spot_path, frame, half)`.
@@ -1058,8 +1058,8 @@ or **From spot**. `heatmap_figure` and `bar_figure` take `frame=` and `half=`.
 - `heat_keeps_projection(**_hk)` drops the forward band in this frame too (it is
   strike-and-flat-spot data). The hedge panel is built from the same `projection`
   name, so its columns still match.
-- **`HeatControls.sync(view, overlays)`** hides the page's Level movement, Spot and
-  Bar controls in the spot frame, AFTER `_sync_spot_controls` has applied its own
+- **`HeatControls.sync(view, overlays)`** hides the page's Spot and Bar controls
+  (never the Level movement switch) in the spot frame, AFTER `_sync_spot_controls` has applied its own
   rules. A frame change runs that sync, then the repaint.
 - ⚠ Highcharts' `format` strings ignore a `+` flag (`{value:+.2f}` printed `20.00` in
   the browser), so the spot frame's axis and tooltip do not write one.

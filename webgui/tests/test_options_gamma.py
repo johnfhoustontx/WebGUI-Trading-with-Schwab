@@ -3385,12 +3385,24 @@ def test_spot_frame_draws_spot_as_a_flat_zero_line_and_no_candles():
     assert by_name["Spot candles"]["data"] == [] and by_name["Spot wicks"]["data"] == []
 
 
-def test_spot_frame_draws_the_level_tracks_even_when_the_switch_is_off():
-    """In this frame the tracks ARE the read: price stands still and they move."""
-    levels = {"flip": [98.0, 98.0, 98.0], "call_wall": [105.0, 105.0, 104.0],
-              "put_wall": [95.0, None, 95.0]}
-    fig = gamma.heatmap_figure(_frame_rows(), "GEX", yrange=_FRAME_YR, levels=levels,
-                               show_tracks=False, **_FRAME)
+_TRACK_LEVELS = {"flip": [98.0, 98.0, 98.0], "call_wall": [105.0, 105.0, 104.0],
+                 "put_wall": [95.0, None, 95.0]}
+_TRACK_NAMES = ("Flip track", "Call wall track", "Put wall track")
+
+
+def test_spot_frame_level_tracks_follow_the_switch_like_the_strike_frame():
+    """The user's call (2026-10-09): tracks drawn with the switch off were a
+    distraction with no way to turn them off. Off means off in both frames."""
+    off = gamma.heatmap_figure(_frame_rows(), "GEX", yrange=_FRAME_YR,
+                               levels=_TRACK_LEVELS, show_tracks=False, **_FRAME)
+    by_name = {s["name"]: s for s in off["series"]}
+    assert [by_name[n]["data"] for n in _TRACK_NAMES] == [[], [], []]
+    assert len(off["series"]) == 9                    # the series count stays fixed
+
+
+def test_spot_frame_level_tracks_are_measured_from_each_columns_spot():
+    fig = gamma.heatmap_figure(_frame_rows(), "GEX", yrange=_FRAME_YR,
+                               levels=_TRACK_LEVELS, show_tracks=True, **_FRAME)
     by_name = {s["name"]: s for s in fig["series"]}
     # Each level minus THAT column's spot (100, 101, 102).
     assert by_name["Flip track"]["data"] == [[0, -2.0], [1, -3.0], [2, -4.0]]
@@ -3809,27 +3821,30 @@ def test_both_builders_take_everything_read_returns_in_the_spot_frame():
 
 
 def test_the_spot_frame_hides_the_spot_overlay_pickers():
-    """A candle of price against itself is nothing, and the tracks are always
-    drawn in this frame, so those three controls would be dead knobs."""
-    overlays = (_FakeEl(), _FakeEl(), _FakeEl())
+    """A candle of price against itself is nothing, so the Spot and Bar pickers
+    would be dead knobs in this frame."""
+    overlays = (_FakeEl(), _FakeEl())
     heat = _heat_controls("net", "locked", "spot")
     heat.sync("GEX", overlays)
-    assert [el.visible for el in overlays] == [False, False, False]
+    assert [el.visible for el in overlays] == [False, False]
     # The strike frame leaves them as the page set them.
-    shown = (_FakeEl(), _FakeEl(), _FakeEl())
+    shown = (_FakeEl(), _FakeEl())
     _heat_controls("net", "locked", "strike").sync("GEX", shown)
-    assert [el.visible for el in shown] == [True, True, True]
+    assert [el.visible for el in shown] == [True, True]
     # ...and so does a view with no heatmap, whatever the frame.
-    other = (_FakeEl(), _FakeEl(), _FakeEl())
+    other = (_FakeEl(), _FakeEl())
     heat.sync("Flow", other)
-    assert [el.visible for el in other] == [True, True, True]
+    assert [el.visible for el in other] == [True, True]
 
 
 def test_render_hands_the_overlay_pickers_to_the_heat_controls():
+    """Spot and Bar only. The Level movement switch is NOT handed over: it works
+    in the spot frame too, so that frame must never hide it."""
     src = inspect.getsource(gamma.render)
     sync = src[src.index("def _sync_spot_controls("):]
     sync = sync[:sync.index("\n    spot_style_sel.on_value_change")]
-    assert "heat.sync(view_toggle.value, (tracks_sw, spot_style_sel, spot_int_sel))" in sync
+    assert "heat.sync(view_toggle.value, (spot_style_sel, spot_int_sel))" in sync
+    assert "tracks_sw" not in sync[sync.index("heat.sync("):]
     assert "_sync_spot_controls()" in src[src.index("heat.on_change(_render_view"):][:120]
 
 

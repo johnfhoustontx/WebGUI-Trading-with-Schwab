@@ -194,9 +194,10 @@ a gap. Nothing is extrapolated. Then:
 
 - the Spot series is a line at zero, and the Spot style and Bar pickers hide,
   since a candle of price against itself is nothing;
-- the three level tracks are drawn as `level − spot` per column and are always
-  on in this frame, whatever the Level movement switch says, because they are
-  the read;
+- the three level tracks are drawn as `level − spot` per column and follow the
+  Level movement switch, as in the strike frame (as first built they were always
+  on and the switch was hidden; the user found lines that could not be put away
+  a distraction, so that was reversed the day it shipped);
 - the static flip, wall and projected-flip lines sit at their current offsets;
 - the bars are drawn at `strike − spot now`, so the two panels still share one
   axis and the crosshair still marks the same row in both;

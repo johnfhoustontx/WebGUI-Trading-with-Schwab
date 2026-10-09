@@ -709,7 +709,8 @@ adaptive scale and the colour strip says **settling**.
   the flip and walls are horizontal. This is the frame for asking *where* the levels
   are.
 - **From spot.** The axis is the distance from the current price. Price becomes a flat
-  line through the middle and the levels become moving lines. This is the frame for
+  line through the middle and, with **Level movement** switched on, the levels become
+  moving lines. This is the frame for
   asking *what is near me, and is it getting nearer*. A call wall that slopes down
   toward the middle is being approached; one that slopes away is being left behind;
   one that runs level is keeping pace, which happens when the wall itself is moving
@@ -719,8 +720,10 @@ adaptive scale and the colour strip says **settling**.
 From spot draws 10 strikes each side of price. That number is a setting, and it is
 smaller than the Strike frame's 20 on purpose: every extra strike the frame shows has
 to be kept in the history the service publishes each minute, around the day's low and
-high, and that has a cost (see the Technical Reference). The Spot, Bar and Level
-movement controls hide in this frame, and the forward projection band is not drawn.
+high, and that has a cost (see the Technical Reference). The Spot and Bar controls
+hide in this frame, and the forward projection band is not drawn. Level movement
+works as it does in the Strike frame: off leaves one line per level at its distance
+from price now, on adds the path each level took.
 
 **The colour strip** at the right of the controls gives the heat map's colour scale in
 numbers, with its unit, and says what it is tied to: *held since 09:30*, *settling

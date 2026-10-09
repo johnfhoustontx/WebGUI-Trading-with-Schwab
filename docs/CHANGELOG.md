@@ -4,7 +4,23 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-09 (**Flow and Net Prem: what the premium measures, and the wording corrected.**)
+**Last updated:** 2026-10-09 (**Dealer Positioning: From spot honours the Level movement switch.**)
+
+- **Reported by the user** within hours of the frame shipping: picking **From spot**
+  hid the Level movement switch and drew the three level tracks whatever it had been
+  set to, with no way to turn them off.
+- **Changed.** The switch stays visible in both frames and decides in both. Off: one
+  line per level at its distance from price now, and a clear heat map. On: the path
+  each level took as well. The Spot and Bar pickers still hide in From spot, since
+  price is always the flat line there.
+- **Why it was built the other way.** The design called the tracks "the read" of
+  that frame and treated the switch as a dead knob. That was my choice, not a
+  request.
+- **Not changed.** The data, the Strike frame, and the series count (nine).
+- **Tests.** Two rewritten in `test_options_gamma.py` to state the new behaviour, one
+  added for the off case.
+
+**Prior —** 2026-10-09 (**Flow and Net Prem: what the premium measures, and the wording corrected.**)
 
 - **What was wrong.** The page guide, two manuals and the code described the
   premium behind the Flow ribbon, Net Prem and the Premium-shift alert as cumulative

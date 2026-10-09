@@ -2210,9 +2210,9 @@ gap      = when that point is outside the column's strikes, or the two strikes
            are more than 2.5 steps apart (a hole in the ladder)
 ```
 
-Nothing is extrapolated. The level tracks are `level − spot` per column, the level
-lines sit at `level − current spot`, and the bars are drawn at `strike − current
-spot`, so both panels share one axis.
+Nothing is extrapolated. The level tracks, drawn when **Level movement** is on, are
+`level − spot` per column; the level lines sit at `level − current spot`; and the bars
+are drawn at `strike − current spot`, so both panels share one axis.
 
 `half` is `config/gamma_heat.toml` `[window] spot_side` (10). The options service
 keeps the same number of strikes, plus one, each side of the session's **low** and

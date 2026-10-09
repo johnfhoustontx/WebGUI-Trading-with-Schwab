@@ -885,15 +885,17 @@ ever cut off.
 | **Strike** | The strike price. Price moves; the levels stand still. The default. | Read where the levels are. |
 | **From spot** | The distance from the current price. Price is a flat line through the middle; the flip and the walls move. | See what is **near price now**, and whether it is getting nearer. |
 
-**To see whether price is closing on a wall, pick From spot.** A wall that price is
-approaching slides toward the middle line, and the steeper the slide, the faster the
-approach. A wall that runs level is keeping its distance.
+**To see whether price is closing on a wall, pick From spot and switch Level movement
+on.** A wall that price is approaching slides toward the middle line, and the steeper
+the slide, the faster the approach. A wall that runs level is keeping its distance.
+With Level movement off, each level is a single line at its distance from price right
+now, and the heat map is left clear.
 
 From spot shows **10 strikes each side of price**, in both panels, so the bars still
-line up with the heat map. Three controls hide in this frame because they would do
-nothing: **Spot** and **Bar** (price is always the flat line) and **Level movement**
-(the level lines are always drawn). The forward projection band is not drawn either.
-Each level line keeps its own price in its label; only its position moves.
+line up with the heat map. Two controls hide in this frame because they would do
+nothing: **Spot** and **Bar** (price is always the flat line). The forward projection
+band is not drawn either. Each level line keeps its own price in its label; only its
+position moves.
 
 **The colour strip** at the right of the controls row gives the two ends of the heat
 map's colours as numbers, with the unit: dollars of gamma per 1% move on Gamma,

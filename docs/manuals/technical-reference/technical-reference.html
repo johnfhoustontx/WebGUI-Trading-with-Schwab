@@ -3207,9 +3207,9 @@ cell     = linear interpolation between the two strikes around  spot + offset
 gap      = when that point is outside the column's strikes, or the two strikes
            are more than 2.5 steps apart (a hole in the ladder)
 </code></pre>
-<p>Nothing is extrapolated. The level tracks are <code>level − spot</code> per column, the level
-lines sit at <code>level − current spot</code>, and the bars are drawn at <code>strike − current
-spot</code>, so both panels share one axis.</p>
+<p>Nothing is extrapolated. The level tracks, drawn when <strong>Level movement</strong> is on, are
+<code>level − spot</code> per column; the level lines sit at <code>level − current spot</code>; and the bars
+are drawn at <code>strike − current spot</code>, so both panels share one axis.</p>
 <p><code>half</code> is <code>config/gamma_heat.toml</code> <code>[window] spot_side</code> (10). The options service
 keeps the same number of strikes, plus one, each side of the session's <strong>low</strong> and
 <strong>high</strong> in every view's published history (<code>gamma_window.crop_keep</code>), so a column at

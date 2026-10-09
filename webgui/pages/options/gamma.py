@@ -1047,7 +1047,7 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     ``frame="spot"`` (``gamma_heat.FRAMES``) measures the vertical axis from spot:
     each column is resampled onto ``half`` strikes either side of its OWN spot, so
     price is a flat line at zero and the levels move. The three level tracks are
-    then drawn whatever ``show_tracks`` says (they are the read), the spot overlay
+    measured from each column's own spot and follow ``show_tracks``, the spot overlay
     is always the line, and ``yrange`` is the caller's range in those units
     (``heat_yrange``). A ``projection`` is strike-and-flat-spot data and must not
     be passed in this frame; the caller's ``heat_keeps_projection`` sees to that.
@@ -1246,10 +1246,10 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     for name, key, color in (("Flip track", "flip", FLIP_COLOR),
                              ("Call wall track", "call_wall", CALL_WALL_COLOR),
                              ("Put wall track", "put_wall", PUT_WALL_COLOR)):
-        vals = lv.get(key) if (show_tracks or from_spot) else None
+        vals = lv.get(key) if show_tracks else None
         if from_spot and vals:
-            # Each level less THAT column's spot. In this frame the tracks are
-            # the read, so they are drawn whatever the switch says.
+            # Each level less THAT column's spot. The switch decides in this
+            # frame as in the other: drawn regardless, they could not be put away.
             vals = [v - sp if _is_level(v) and _is_level(sp) else None
                     for v, sp in zip(vals, spots)]
         pts = track_points(vals)
@@ -2482,10 +2482,10 @@ class HeatControls:
     def sync(self, view, overlays=()):
         """Shown on the four Greek views only: the other views have no cells.
 
-        ``overlays`` are the page's spot-overlay controls (Level movement, Spot,
-        Bar). Measured from spot, price is a flat line and the level tracks are
-        always drawn, so all three would be dead knobs: they are hidden there.
-        Call it AFTER the page has set their visibility by its own rules."""
+        ``overlays`` are the page's Spot and Bar pickers. Measured from spot,
+        price is always the flat line, so they would be dead knobs and are hidden
+        there. The Level movement switch is NOT one of them: it works in both
+        frames. Call it AFTER the page has set their visibility by its own rules."""
         on = view in _VIEWS
         for el in (self.value, self.show, self.scale, self.frame, self.legend):
             el.set_visibility(on)
@@ -3822,7 +3822,7 @@ def render(symbol: str | None = None, view: str | None = None,
         # that silently does nothing.
         spot_int_sel.set_visibility(
             symbol_scoped and spot_style_sel.value != "line")
-        heat.sync(view_toggle.value, (tracks_sw, spot_style_sel, spot_int_sel))
+        heat.sync(view_toggle.value, (spot_style_sel, spot_int_sel))
 
     spot_style_sel.on_value_change(overlay_handler(
         "gamma_spot_style", str, lambda: (_sync_spot_controls(), _render_view())))
