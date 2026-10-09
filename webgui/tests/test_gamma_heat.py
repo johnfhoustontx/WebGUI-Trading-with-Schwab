@@ -258,6 +258,64 @@ def test_no_lock_and_no_time_says_the_scale_adapts():
     assert gh.scale_caption("locked", None, "net", "") == "adapts to what is visible"
 
 
+# ── the spot frame ───────────────────────────────────────────────────────────
+
+def test_the_frames_in_reading_order():
+    assert list(gh.FRAMES) == ["strike", "spot"]
+
+
+def test_spot_frame_centres_each_column_on_its_own_spot():
+    strikes = [90.0, 95.0, 100.0, 105.0, 110.0]
+    z = [[1.0, 10.0], [2.0, 20.0], [3.0, 30.0], [4.0, 40.0], [5.0, 50.0]]
+    offsets, out = gh.to_spot_frame(strikes, z, [100.0, 95.0], step=5.0, half=1)
+    assert offsets == [-5.0, 0.0, 5.0]
+    assert [row[0] for row in out] == [2.0, 3.0, 4.0]      # around 100
+    assert [row[1] for row in out] == [10.0, 20.0, 30.0]   # around 95
+    assert z[0] == [1.0, 10.0]                             # the input is untouched
+
+
+def test_spot_frame_interpolates_between_strikes():
+    _, out = gh.to_spot_frame([100.0, 105.0], [[10.0], [20.0]], [102.5], step=5.0, half=0)
+    assert out == [[15.0]]
+
+
+def test_spot_frame_never_extrapolates():
+    """An offset with no strikes on one side of it is a gap."""
+    _, out = gh.to_spot_frame([100.0, 105.0], [[10.0], [20.0]], [100.0], step=5.0, half=1)
+    assert [row[0] for row in out] == [None, 10.0, 20.0]
+
+
+def test_spot_frame_does_not_bridge_a_hole_in_the_ladder():
+    _, out = gh.to_spot_frame([100.0, 105.0, 130.0], [[1.0], [2.0], [3.0]], [115.0],
+                              step=5.0, half=0)
+    assert out == [[None]]
+
+
+def test_spot_frame_skips_cells_that_have_no_reading():
+    """A strike with no value in this column is not a zero to interpolate from."""
+    strikes = [95.0, 100.0, 105.0]
+    _, out = gh.to_spot_frame(strikes, [[1.0], [None], [3.0]], [100.0], step=5.0, half=0)
+    assert out == [[2.0]]          # bridged across one missing strike (two steps)
+
+
+def test_spot_frame_of_a_column_with_no_spot_is_a_gap():
+    _, out = gh.to_spot_frame([100.0, 105.0], [[1.0, 1.0], [2.0, 2.0]],
+                              [None, 100.0], step=5.0, half=0)
+    assert out == [[None, 1.0]]
+
+
+def test_spot_frame_of_nothing():
+    assert gh.to_spot_frame([], [], [], step=5.0, half=1) == ([-5.0, 0.0, 5.0], [[], [], []])
+    assert gh.to_spot_frame([100.0], [[7.0]], [100.0], step=5.0, half=0) == ([0.0], [[7.0]])
+
+
+def test_the_spot_frames_axis_holds_every_row_whole():
+    """Half a row above the top offset and below the bottom one, as the cells
+    are centred on their offsets."""
+    assert gh.spot_frame_range(5.0, 10) == [-52.5, 52.5]
+    assert gh.spot_frame_range(1.0, 0) == [-0.5, 0.5]
+
+
 def test_bar_max_is_the_locks_extent_for_the_bars():
     assert gh.bar_max(LOCKED, "net") == 40.0
     assert gh.bar_max(LOCKED, "put") == 30.0

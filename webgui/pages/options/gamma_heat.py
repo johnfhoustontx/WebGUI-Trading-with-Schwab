@@ -157,6 +157,64 @@ def scale_caption(scale, lock, mode, lock_time):
     return "adapts to what is visible"
 
 
+# ── the vertical frame ───────────────────────────────────────────────────────
+# frame key -> the control's label.
+#   strike  the vertical axis is strike: price moves, the levels stand still
+#   spot    the vertical axis is distance from spot: price is a flat line through
+#           the middle and the flip and walls move. A wall price is approaching
+#           slides toward the centre, and the slope is the closing speed.
+FRAMES = {"strike": "Strike", "spot": "From spot"}
+
+# Two real strikes further apart than this many ladder steps are a hole in the
+# data, not neighbours to interpolate between.
+_MAX_BRIDGE_STEPS = 2.5
+
+
+def to_spot_frame(strikes, z, spots, *, step, half):
+    """Resample ``z[strike][time]`` onto offsets from each column's OWN spot.
+
+    Returns ``(offsets, z2)``: ``offsets`` is the uniform ladder
+    ``-half*step … +half*step`` and ``z2[offset][time]`` the value there, the
+    linear interpolation between the two strikes around ``spot + offset`` that
+    have a reading in that column. It is a gap when that point lies outside the
+    column's strikes, or when those two strikes are a hole apart
+    (``_MAX_BRIDGE_STEPS``): nothing is extrapolated and no hole is bridged.
+    A column with no spot is all gaps. Builds new lists.
+
+    The history the service publishes keeps ``[window] spot_side`` strikes each
+    side of the session's low and high for exactly this, so ``half`` should be
+    that number: a taller frame shows gaps on a trending day."""
+    offsets = [i * step for i in range(-half, half + 1)]
+    out = [[None] * len(spots) for _ in offsets]
+    for c, raw in enumerate(spots):
+        spot = _fmt.num(raw)
+        if spot is None:
+            continue
+        pts = [(k, z[r][c]) for r, k in enumerate(strikes) if z[r][c] is not None]
+        if not pts:
+            continue
+        j = 0
+        for oi, d in enumerate(offsets):
+            target = spot + d
+            if target < pts[0][0] or target > pts[-1][0]:
+                continue
+            while j + 2 < len(pts) and pts[j + 1][0] < target:
+                j += 1
+            (k0, v0), (k1, v1) = pts[j], pts[min(j + 1, len(pts) - 1)]
+            if k1 == k0:
+                out[oi][c] = v0 if target == k0 else None
+            elif k1 - k0 <= _MAX_BRIDGE_STEPS * step:
+                out[oi][c] = v0 + (v1 - v0) * (target - k0) / (k1 - k0)
+    return offsets, out
+
+
+def spot_frame_range(step, half):
+    """The spot frame's vertical range for BOTH panels: the offsets' span plus
+    half a row each end, because a heatmap cell is centred on its offset."""
+    edge = (half + 0.5) * step
+    return [-edge, edge]
+
+
 # ── the legend strip ─────────────────────────────────────────────────────────
 # One line of SVG beside the controls: [-max] [ramp] [+max]  unit · caption.
 # It is NOT a Highcharts legend and not a column beside the chart: the heatmap
