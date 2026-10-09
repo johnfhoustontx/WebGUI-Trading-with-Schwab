@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-07</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-09</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -1250,6 +1250,25 @@ magenta means they must <strong>sell</strong>. This is the most actionable singl
 page in the last hour of trading.</p>
 <p><strong>Level movement</strong> (switch, off by default) overlays how the flip and walls have moved
 during the session, as step lines. Useful when levels are migrating; noisy otherwise.</p>
+<p><strong>Value picker.</strong> What the bars and the heat map hold: <strong>Net</strong> (calls minus puts, the
+default), <strong>Calls</strong>, <strong>Puts</strong>, or <strong>Size</strong> (calls plus puts, coloured by which way the
+strike leans).</p>
+<p>Net answers "which side dominates here". It cannot answer "how much is here", because
+a strike with large calls and equally large puts nets to almost nothing and draws as
+empty. That strike matters: dealers are hedging a great deal there, in both
+directions. <strong>Size</strong> shows it. In Size the bars split into a call bar and a put bar
+per strike, so a balanced strike is two bars of equal length, and the heat map draws
+it as one of its brightest rows.</p>
+<p>Open <strong>Calls</strong> or <strong>Puts</strong> when you want one side's positioning without the other
+netted off it, for example to see how far up the chain call positioning extends.</p>
+<p><strong>Balanced line</strong> (grey, dotted). Marks a strike that is among the largest on screen
+and whose calls and puts nearly cancel. It is drawn in every Value, because Net is
+where you would otherwise miss it. Treat it like a wall with no direction: a level
+where hedging is heavy, without a lean to tell you which way it pushes.</p>
+<p><strong>The colour strip</strong> at the right of the controls gives the heat map's colour scale in
+numbers. The scale stretches to fit what is on screen, so a colour is a share of the
+largest values visible now, not a fixed amount. Two charts with the same colours can
+differ tenfold in size. The strip is how you tell.</p>
 <p><strong>Spot picker.</strong> Draw the price overlay as a <strong>Line</strong>, <strong>Candles</strong>, or <strong>OHLC</strong>, with a
 1/5/15-minute bar size. The candles are built from the app's own one-minute samples, so
 the <strong>wicks understate the true intra-minute range</strong> — do not read them as exact highs

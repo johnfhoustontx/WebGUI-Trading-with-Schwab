@@ -4,7 +4,41 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-07 (**The Market Scanner's 0-DTE and Swing tabs hold one table each.**)
+**Last updated:** 2026-10-09 (**Dealer Positioning: a Value picker, a Balanced line and a colour legend.**)
+
+- **Why.** The heatmap drew one number per cell, net, with zero transparent. A
+  strike holding large calls and equally large puts therefore drew exactly like a
+  strike with nothing on it. And the colours had no numbers: the scale is refitted
+  to what is on screen on every paint, and nothing on the page said what it was.
+- **What changed.** On the Gamma, Charm, Delta and Vanna views a **Value** picker
+  chooses what the bars and the heatmap hold: Net (unchanged), Calls, Puts, or
+  **Size**, which is calls plus puts coloured by which way the strike leans. In
+  Size the bars split into a call bar and a put bar per strike. A grey dotted
+  **Balanced** line marks, on both panels and in every Value, a strike that is
+  among the largest on screen while its two sides nearly cancel. A strip at the
+  right of the controls gives both ends of the colour scale as numbers, with the
+  unit.
+- **Not changed.** What the service publishes. The heatmap's nine series and its
+  one colour axis. Net, which is the default and draws the chart it always did.
+  The forward projection band, except that it is drawn in Net only (it is a net
+  figure).
+- **Configuration.** `config/gamma_heat.toml` `[balanced]`, in Settings →
+  Configuration; read on every paint, no restart.
+- **This is Phase 1 of five** in the
+  [design](plans/2026-10-09-gamma-heatmap-value-scale-frame-design.md). The legend's
+  caption says the scale "adapts to what is visible" because it still does; the
+  locked scale is Phase 2.
+- **Verified** in the local page harness on a synthetic session (there is no dev
+  environment): Net, Calls, Puts and Size on the private render, a view switch
+  with a non-net value selected, the legend surviving the sanitizer in a real
+  browser, and the public render building with the picker. Not yet seen on prod
+  data.
+- **Tests.** `webgui/tests/test_gamma_heat.py`,
+  `shared/tests/test_gamma_heat_config.py`, and additions to
+  `webgui/tests/test_options_gamma.py`. `gamma.render` is smaller than it was
+  (1,484 lines to 1,469).
+
+**Prior —** 2026-10-07 (**The Market Scanner's 0-DTE and Swing tabs hold one table each.**)
 
 - **What changed.** Each of those tabs held two tables behind a switch, *Credit
   spreads* and *Other structures*. They now hold one table with both, ranked by

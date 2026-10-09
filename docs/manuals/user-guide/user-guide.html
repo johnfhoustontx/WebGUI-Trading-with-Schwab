@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-07</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-09</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -1107,6 +1107,52 @@ line summary (spot, strike count, net exposure).</p>
   overlaid. <strong>Press and hold</strong> the left mouse button to read a cell — plain hovering
   shows nothing.</li>
 </ul>
+<p><strong>Value</strong> (a picker beside Spot, on the Gamma, Charm, Delta and Vanna views) chooses
+what both panels draw:</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Each bar and cell holds</th>
+<th>Use it to</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Net</strong></td>
+<td>Calls minus puts. The default.</td>
+<td>Read which side dominates a strike.</td>
+</tr>
+<tr>
+<td><strong>Calls</strong></td>
+<td>The call side alone.</td>
+<td>See call positioning without the puts netted off.</td>
+</tr>
+<tr>
+<td><strong>Puts</strong></td>
+<td>The put side alone.</td>
+<td>The same, for puts.</td>
+</tr>
+<tr>
+<td><strong>Size</strong></td>
+<td>Calls <strong>plus</strong> puts, coloured by which way the strike leans. The bars split into a call bar and a put bar per strike.</td>
+<td>See <strong>how much</strong> sits at a strike.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>To find a strike that Net is hiding, pick Size.</strong> A strike holding large calls and
+equally large puts is nearly empty in Net, because the two cancel. In Size it is one
+of the brightest rows, and its two bars are the same length.</p>
+<p>A grey dotted <strong>Balanced</strong> line across both panels marks such a strike in every
+Value: one of the largest on screen whose calls and puts nearly cancel. At most three
+are marked.</p>
+<p><strong>The colour strip</strong> at the right of the controls row gives the two ends of the heat
+map's colours as numbers, with the unit: dollars of gamma per 1% move on Gamma,
+dollars of delta on Delta, a plain figure on Charm and Vanna. The colours stretch
+over whatever is on screen, so the same shade is a different amount on another symbol
+or later in the day. Read the strip before comparing two charts.</p>
+<p>The forward projection band on the Gamma heat map is drawn in <strong>Net</strong> only. It is a
+net figure, so the other three values leave it out.</p>
 <p><strong>The buttons at the top right open separate screens, each in a new browser tab:</strong></p>
 <table>
 <thead>

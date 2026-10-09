@@ -745,6 +745,18 @@ accelerate price.
 - **Bars + heat map** — show ±20 strikes around spot, so the size stays steady as
   the day moves. **Press and hold** the left mouse button on the heat map to read a
   strike's value (it follows the cursor while held); plain hovering shows nothing.
+- **Value** — what each bar and each cell holds. **Net** is calls minus puts.
+  **Calls** and **Puts** show one side alone. **Size** is calls **plus** puts,
+  coloured by which way the strike leans, and the bars split into a call bar and
+  a put bar per strike. Use Size to see how much sits at a strike: a strike with
+  large calls and equally large puts is nearly empty in Net and bright in Size.
+- **Balanced** — a grey dotted line across both panels marks a strike that is
+  among the largest on screen while its calls and puts nearly cancel. It is there
+  in every Value, because in Net that strike would otherwise look empty.
+- **The colour strip** beside the controls gives the two ends of the heat map's
+  colours as numbers (dollars of gamma per 1% move, or dollars of delta; Charm
+  and Vanna show a plain figure). The colours stretch over whatever is on screen,
+  so the same shade is a different amount on another symbol or later in the day.
 - Positive gamma → price tends to **stick** near the walls; negative gamma →
   moves get **amplified**. Auto-refreshes every 2 minutes.
 - After the close the **last session's** chart stays on screen until midnight

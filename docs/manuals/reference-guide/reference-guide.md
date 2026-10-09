@@ -644,6 +644,30 @@ page in the last hour of trading.
 **Level movement** (switch, off by default) overlays how the flip and walls have moved
 during the session, as step lines. Useful when levels are migrating; noisy otherwise.
 
+**Value picker.** What the bars and the heat map hold: **Net** (calls minus puts, the
+default), **Calls**, **Puts**, or **Size** (calls plus puts, coloured by which way the
+strike leans).
+
+Net answers "which side dominates here". It cannot answer "how much is here", because
+a strike with large calls and equally large puts nets to almost nothing and draws as
+empty. That strike matters: dealers are hedging a great deal there, in both
+directions. **Size** shows it. In Size the bars split into a call bar and a put bar
+per strike, so a balanced strike is two bars of equal length, and the heat map draws
+it as one of its brightest rows.
+
+Open **Calls** or **Puts** when you want one side's positioning without the other
+netted off it, for example to see how far up the chain call positioning extends.
+
+**Balanced line** (grey, dotted). Marks a strike that is among the largest on screen
+and whose calls and puts nearly cancel. It is drawn in every Value, because Net is
+where you would otherwise miss it. Treat it like a wall with no direction: a level
+where hedging is heavy, without a lean to tell you which way it pushes.
+
+**The colour strip** at the right of the controls gives the heat map's colour scale in
+numbers. The scale stretches to fit what is on screen, so a colour is a share of the
+largest values visible now, not a fixed amount. Two charts with the same colours can
+differ tenfold in size. The strip is how you tell.
+
 **Spot picker.** Draw the price overlay as a **Line**, **Candles**, or **OHLC**, with a
 1/5/15-minute bar size. The candles are built from the app's own one-minute samples, so
 the **wicks understate the true intra-minute range** — do not read them as exact highs

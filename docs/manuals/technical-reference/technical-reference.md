@@ -2100,6 +2100,40 @@ In code (`gamma_tool.py`) the per-strike value is computed as
 display). A **Volume** variant substitutes total volume for open interest. The
 engine returns, per strike, the call, put, and net values.
 
+### What a bar or a heat-map cell draws
+
+The Dealer Positioning **Value** picker chooses one of four numbers from each
+strike's stored `{call, put, net}` (`webgui/pages/options/gamma_heat.py`,
+`cell_value`):
+
+| Value | Formula |
+|-------|---------|
+| Net | `net` (= `call + put`; puts are stored negative) |
+| Calls | `call` |
+| Puts | `put` |
+| Size | `abs(call) + abs(put)`, given the sign of `net` (positive when `net` is zero) |
+
+A cell missing either side has no Calls, Puts or Size value and is left out; it is
+never drawn as zero. A session stored before cells carried both sides can draw Net
+only, and the picker is disabled for it.
+
+**Balanced strikes.** A strike on screen is marked *Balanced* when both hold:
+
+```
+abs(net) / (abs(call) + abs(put)) <= max_polarity          (0.15)
+size >= the min_size_quantile rank of the strikes on screen (0.80)
+```
+
+At most `max_marks` (3) are marked, largest first. The three numbers are
+`config/gamma_heat.toml` `[balanced]`, read on every paint, so a change in
+Settings → Configuration applies with no restart.
+
+**Colour scale.** The heat map's colours are symmetric about zero and clamp at the
+95th percentile of the absolute values on screen, recomputed on every paint. The
+strip beside the controls prints that maximum. The unit follows the formulas above:
+dollars of gamma per 1% move for GEX, dollars of delta for DEX. Charm and vanna
+exposures are printed as plain figures.
+
 ## Dealer delta exposure (DEX) and projection
 
 The DEX/hedge panel sums `OI · delta · contract_multiplier · spot` across strikes

@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-07</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-09</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -158,7 +158,10 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#gex-gamma">GEX / Gamma</a><ul>
-<li><a href="#per-strike-gamma-exposure-gex">Per-strike gamma exposure (GEX)</a></li>
+<li><a href="#per-strike-gamma-exposure-gex">Per-strike gamma exposure (GEX)</a><ul>
+<li><a href="#what-a-bar-or-a-heat-map-cell-draws">What a bar or a heat-map cell draws</a></li>
+</ul>
+</li>
 <li><a href="#dealer-delta-exposure-dex-and-projection">Dealer delta exposure (DEX) and projection</a></li>
 <li><a href="#directional-walls">Directional walls</a></li>
 <li><a href="#intraday-collection">Intraday collection</a></li>
@@ -3082,6 +3085,51 @@ and <code>mult</code> it priced so the page never pairs new legs with the previo
 <code>gamma · OI · 100 · spot · spot · 0.01</code> (the <code>· 0.01</code> scales the result for
 display). A <strong>Volume</strong> variant substitutes total volume for open interest. The
 engine returns, per strike, the call, put, and net values.</p>
+<h3 id="what-a-bar-or-a-heat-map-cell-draws">What a bar or a heat-map cell draws</h3>
+<p>The Dealer Positioning <strong>Value</strong> picker chooses one of four numbers from each
+strike's stored <code>{call, put, net}</code> (<code>webgui/pages/options/gamma_heat.py</code>,
+<code>cell_value</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Formula</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Net</td>
+<td><code>net</code> (= <code>call + put</code>; puts are stored negative)</td>
+</tr>
+<tr>
+<td>Calls</td>
+<td><code>call</code></td>
+</tr>
+<tr>
+<td>Puts</td>
+<td><code>put</code></td>
+</tr>
+<tr>
+<td>Size</td>
+<td><code>abs(call) + abs(put)</code>, given the sign of <code>net</code> (positive when <code>net</code> is zero)</td>
+</tr>
+</tbody>
+</table>
+<p>A cell missing either side has no Calls, Puts or Size value and is left out; it is
+never drawn as zero. A session stored before cells carried both sides can draw Net
+only, and the picker is disabled for it.</p>
+<p><strong>Balanced strikes.</strong> A strike on screen is marked <em>Balanced</em> when both hold:</p>
+<pre><code>abs(net) / (abs(call) + abs(put)) &lt;= max_polarity          (0.15)
+size &gt;= the min_size_quantile rank of the strikes on screen (0.80)
+</code></pre>
+<p>At most <code>max_marks</code> (3) are marked, largest first. The three numbers are
+<code>config/gamma_heat.toml</code> <code>[balanced]</code>, read on every paint, so a change in
+Settings → Configuration applies with no restart.</p>
+<p><strong>Colour scale.</strong> The heat map's colours are symmetric about zero and clamp at the
+95th percentile of the absolute values on screen, recomputed on every paint. The
+strip beside the controls prints that maximum. The unit follows the formulas above:
+dollars of gamma per 1% move for GEX, dollars of delta for DEX. Charm and vanna
+exposures are printed as plain figures.</p>
 <h2 id="dealer-delta-exposure-dex-and-projection">Dealer delta exposure (DEX) and projection</h2>
 <p>The DEX/hedge panel sums <code>OI · delta · contract_multiplier · spot</code> across strikes
 for the current and a projected delta, surfacing net-delta-now vs projected-close

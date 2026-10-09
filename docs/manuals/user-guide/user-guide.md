@@ -815,6 +815,33 @@ line summary (spot, strike count, net exposure).
   overlaid. **Press and hold** the left mouse button to read a cell — plain hovering
   shows nothing.
 
+**Value** (a picker beside Spot, on the Gamma, Charm, Delta and Vanna views) chooses
+what both panels draw:
+
+| Value | Each bar and cell holds | Use it to |
+|-------|-------------------------|-----------|
+| **Net** | Calls minus puts. The default. | Read which side dominates a strike. |
+| **Calls** | The call side alone. | See call positioning without the puts netted off. |
+| **Puts** | The put side alone. | The same, for puts. |
+| **Size** | Calls **plus** puts, coloured by which way the strike leans. The bars split into a call bar and a put bar per strike. | See **how much** sits at a strike. |
+
+**To find a strike that Net is hiding, pick Size.** A strike holding large calls and
+equally large puts is nearly empty in Net, because the two cancel. In Size it is one
+of the brightest rows, and its two bars are the same length.
+
+A grey dotted **Balanced** line across both panels marks such a strike in every
+Value: one of the largest on screen whose calls and puts nearly cancel. At most three
+are marked.
+
+**The colour strip** at the right of the controls row gives the two ends of the heat
+map's colours as numbers, with the unit: dollars of gamma per 1% move on Gamma,
+dollars of delta on Delta, a plain figure on Charm and Vanna. The colours stretch
+over whatever is on screen, so the same shade is a different amount on another symbol
+or later in the day. Read the strip before comparing two charts.
+
+The forward projection band on the Gamma heat map is drawn in **Net** only. It is a
+net figure, so the other three values leave it out.
+
 **The buttons at the top right open separate screens, each in a new browser tab:**
 
 | Button | Opens |
