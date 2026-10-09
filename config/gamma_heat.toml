@@ -12,3 +12,15 @@ max_polarity = 0.15
 min_size_quantile = 0.8
 # At most this many markers, largest first. 0 turns the markers off.
 max_marks = 3
+
+[lock]
+# The heatmap's "Locked" colour scale is set once a session by options_svc, from
+# the session's first this-many minutes, and then held. Until they have passed
+# the scale adapts to what is on screen.
+minutes = 60
+# The quantile of the absolute cell taken over those minutes, inside the display
+# window around each minute's own spot.
+quantile = 0.95
+# Multiplied on, so the first hour's largest cells are not already at the top of
+# the scale.
+headroom = 1.5

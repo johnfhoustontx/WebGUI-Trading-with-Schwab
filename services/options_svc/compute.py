@@ -50,10 +50,12 @@ from scanner_engine import run_full_scan  # noqa: E402
 from iv_analysis import run_iv_analysis  # noqa: E402
 
 from services import _degrade  # noqa: E402
+from shared import gamma_heat_config as _heat_cfg  # noqa: E402
 from shared import scanner_config as _scanner_config  # noqa: E402
 from shared import vol_gate as _vol_gate  # noqa: E402
 from services import _proxy  # noqa: E402
 from services.options_svc import commission  # noqa: E402  (round-trip $ for the break-even floor)
+from services.options_svc import gamma_window as _gw  # noqa: E402  (the gamma display window + scale lock)
 from shared.numeric import finite as _finite  # noqa: E402 - one shared definition (audit CQ-07)
 
 
@@ -4043,17 +4045,9 @@ def _level_track(rows, vname):
 GAMMA_N_SIDE = 20
 
 
-def _window_around(strikes, spot, n_side=GAMMA_N_SIDE):
-    """The nearest ``n_side`` strikes ≤ spot + ``n_side`` strictly above — mirrors
-    the page's ``gamma.strikes_around``. Returns a set of floats; an unusable spot
-    returns ALL numeric strikes (no crop)."""
-    s = sorted({x for x in (strikes or []) if isinstance(x, (int, float))})
-    if not isinstance(spot, (int, float)):
-        return set(s)
-    below = [x for x in s if x < spot][-n_side:]
-    above = [x for x in s if x > spot][:n_side]
-    at = [x for x in s if x == spot]
-    return set(below + at + above)
+# The window itself lives in gamma_window.py (moved 2026-10-09; this file has a
+# line ceiling). Both callers below pass ``n_side`` explicitly.
+_window_around = _gw.window_around
 
 
 def _crop_grid(grid, keep):
@@ -4590,6 +4584,10 @@ def gamma_snapshot(symbol: str, chain=None, with_term: bool = True) -> dict | No
                 # Built HERE, before _crop_gamma_views, so the wall search sees each
                 # snapshot's FULL grid (a wall can sit outside the display window).
                 "levels": _level_track(_rows, vname),
+                # The heatmap's locked colour maximum, from the UNCROPPED rows
+                # like the tracks above (the crop follows the current spot).
+                "scale_lock": _gw.scale_lock(_rows, n_side=GAMMA_N_SIDE,
+                                             **_heat_cfg.lock()),
             }
             if vname == "DEX":
                 entry["hedge"] = {

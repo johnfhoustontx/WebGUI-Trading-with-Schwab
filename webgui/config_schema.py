@@ -908,7 +908,8 @@ _GAMMA_PUBLIC = ConfigFile(
 # applies with no restart.
 _GAMMA_HEAT = ConfigFile(
     name="gamma_heat.toml", title="Dealer Positioning heatmap", icon="grid_on",
-    summary="What the heatmap on Dealer Positioning marks on its strike axis.",
+    summary="What the heatmap on Dealer Positioning marks on its strike axis, "
+            "and how its locked colour scale is set.",
     restart=(),
     sections=(
         Section("Balanced strikes",
@@ -922,6 +923,21 @@ _GAMMA_HEAT = ConfigFile(
                  lo=0, hi=100, step=5),
             Field("balanced.max_marks", "Markers at most", "0 turns them off.",
                   kind="int", min=0, max=10, step=1),
+        )),
+        Section("Locked colour scale",
+                "The Locked scale keeps one colour meaning one amount all "
+                "session. The options service sets it once, from the start of "
+                "the session, and reads these each minute, so no restart is "
+                "needed. A change applies from the next session's lock.", (
+            Field("lock.minutes", "Set it from the first",
+                  "Until these have passed the scale adapts to what is on screen.",
+                  kind="int", unit="min", min=5, max=390, step=5),
+            _pct("lock.quantile", "Take this rank of the cells",
+                 "95 ignores the few largest cells, so they do not set the scale.",
+                 lo=50, hi=100, step=1),
+            Field("lock.headroom", "Multiply by",
+                  "Room above the first minutes' largest cells.",
+                  kind="float", min=1, max=5, step=0.1),
         )),
     ),
 )

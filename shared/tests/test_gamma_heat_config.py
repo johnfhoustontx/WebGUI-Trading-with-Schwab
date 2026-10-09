@@ -41,6 +41,20 @@ def test_an_override_is_read(monkeypatch):
 def test_a_missing_section_is_the_defaults(monkeypatch):
     monkeypatch.setattr(cfg, "load", lambda: {})
     assert cfg.balanced() == cfg.DEFAULTS["balanced"]
+    assert cfg.lock() == cfg.DEFAULTS["lock"]
+
+
+def test_lock_defaults():
+    assert cfg.lock() == {"minutes": 60, "quantile": 0.95, "headroom": 1.5}
+    assert isinstance(cfg.lock()["minutes"], int)
+
+
+def test_lock_overrides_are_read_and_bad_ones_fall_back(monkeypatch):
+    monkeypatch.setattr(cfg, "load", lambda: {"lock": {
+        "minutes": 30, "quantile": 0.2, "headroom": 0.5}})
+    # 30 minutes is allowed; a quantile under one half and a headroom under 1
+    # are not, and each falls back to its own default.
+    assert cfg.lock() == {"minutes": 30, "quantile": 0.95, "headroom": 1.5}
 
 
 def test_it_imports_only_the_config_loader_and_the_paths():

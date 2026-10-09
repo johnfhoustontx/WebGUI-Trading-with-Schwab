@@ -2132,6 +2132,44 @@ def test_gamma_snapshot_crop_widens_for_history_spot_drift(monkeypatch):
     assert 5300.0 in gexv["history"][0][6]
 
 
+def _lock_history(minutes):
+    """One row a minute at 5400: every strike {call 3, put -1, net 2}, except one
+    huge strike OUTSIDE the ±20 display window."""
+    grid = {float(5400 + i): {"call": 3.0, "put": -1.0, "net": 2.0}
+            for i in range(-60, 61)}
+    grid[5460.0] = {"call": 9e9, "put": -9e9, "net": 9e9}
+    return [(1 + 60 * m, 5400.0, 3, 4, 5, 6, grid) for m in range(minutes)]
+
+
+def test_gamma_snapshot_carries_a_scale_lock_once_the_first_minutes_have_passed(monkeypatch):
+    """Every view's entry gets the heatmap's locked colour maximum, taken from
+    the session's first minutes inside the display window (gamma_window)."""
+    _patch_gamma(monkeypatch, history=_lock_history(70))
+    monkeypatch.setattr(compute._heat_cfg, "lock",
+                        lambda: {"minutes": 60, "quantile": 1.0, "headroom": 2.0})
+    snap = compute.gamma_snapshot("$SPX")
+    for view in ("GEX", "Charm", "DEX", "Vanna"):
+        assert snap["views"][view]["scale_lock"] == {
+            "minutes": 60, "net": 4.0, "call": 6.0, "put": 2.0, "size": 8.0}, view
+
+
+def test_gamma_snapshot_has_no_scale_lock_in_the_sessions_first_minutes(monkeypatch):
+    _patch_gamma(monkeypatch, history=_lock_history(20))
+    monkeypatch.setattr(compute._heat_cfg, "lock",
+                        lambda: {"minutes": 60, "quantile": 1.0, "headroom": 2.0})
+    snap = compute.gamma_snapshot("$SPX")
+    assert snap["views"]["GEX"]["scale_lock"] is None
+    assert "scale_lock" in snap["views"]["Vanna"]        # the key is always there
+
+
+def test_the_scale_lock_reads_its_three_numbers_from_config(monkeypatch):
+    _patch_gamma(monkeypatch, history=_lock_history(70))
+    monkeypatch.setattr(compute._heat_cfg, "lock",
+                        lambda: {"minutes": 30, "quantile": 1.0, "headroom": 5.0})
+    lock = compute.gamma_snapshot("$SPX")["views"]["GEX"]["scale_lock"]
+    assert lock["minutes"] == 30 and lock["net"] == 10.0
+
+
 def test_tick_chain_stash_consume_once():
     """The per-tick chain stash hands the poll's chain to the SAME tick's
     gamma refresh exactly once — a second take (e.g. a page-timer refresh

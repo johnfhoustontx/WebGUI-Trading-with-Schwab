@@ -20,7 +20,7 @@ COMPUTE = pathlib.Path(compute.__file__)
 # Lines in compute.py. LOWER this when code moves out; never raise it. To add
 # behaviour, write it in a sibling module under services/options_svc/ and import
 # it into compute only if compute's own code calls it.
-COMPUTE_MAX_LINES = 10525
+COMPUTE_MAX_LINES = 10523
 
 
 def test_compute_does_not_grow():

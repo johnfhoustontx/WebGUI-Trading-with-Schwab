@@ -1,7 +1,7 @@
 """``config/gamma_heat.toml``: the Dealer Positioning heatmap's tunables.
 
-Read by the page (the balanced-strike markers). Stdlib, ``shared.config_toml``
-and ``repo_paths`` only: Tier 1 imports it, and
+Read by the page (the balanced-strike markers) and by options_svc (the scale
+lock). Stdlib, ``shared.config_toml`` and ``repo_paths`` only: Tier 1 imports it, and
 ``shared/tests/test_gamma_heat_config.py`` pins that set. Design:
 docs/plans/2026-10-09-gamma-heatmap-value-scale-frame-design.md
 """
@@ -17,6 +17,15 @@ DEFAULTS = {
         "min_size_quantile": 0.8,
         # At most this many markers, largest first. 0 turns them off.
         "max_marks": 3,
+    },
+    "lock": {
+        # The colour scale is fixed from the session's first this-many minutes.
+        "minutes": 60,
+        # The quantile of the absolute cell taken over those minutes.
+        "quantile": 0.95,
+        # Multiplied on, so the first hour's largest cells are not already at
+        # the top of the scale.
+        "headroom": 1.5,
     },
 }
 
@@ -44,3 +53,12 @@ def balanced() -> dict:
             "min_size_quantile": _setting("balanced", "min_size_quantile",
                                           minimum=0.0, maximum=1.0),
             "max_marks": _setting("balanced", "max_marks", minimum=0)}
+
+
+def lock() -> dict:
+    """``{"minutes", "quantile", "headroom"}`` for the service's scale lock
+    (``services/options_svc/gamma_window.scale_lock``): the heatmap's colour
+    maximum is set once a session from its first ``minutes``."""
+    return {"minutes": _setting("lock", "minutes", minimum=5, maximum=390),
+            "quantile": _setting("lock", "quantile", minimum=0.5, maximum=1.0),
+            "headroom": _setting("lock", "headroom", minimum=1.0, maximum=5.0)}
