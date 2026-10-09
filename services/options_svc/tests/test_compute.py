@@ -6587,6 +6587,57 @@ def test_collect_gex_snapshots_records_no_hiro_rows_outside_regular_hours(monkey
     compute.reset_hiro_memo()
 
 
+def test_collect_gex_snapshots_hands_each_chain_to_traded_premium_then_writes(
+        monkeypatch):
+    """Every fetched chain, then ONE write after the poll, on the poll's own
+    connection and minute. What the module does with them is its own suite."""
+    from services.options_svc import traded_premium
+    now = _hiro_ct(10, 0)
+    chains = {"SPY": _hchain(1000), "NVDA": _hchain(7)}
+    calls = _fake_gex_modules(monkeypatch, lock_ok=True, now=now, chains=chains)
+    monkeypatch.setattr(compute, "_publish_eth_eligibility", lambda seen: None)
+    seen = []
+    monkeypatch.setattr(
+        traded_premium, "on_chain",
+        lambda sym, chain, at=None: seen.append(("chain", sym, chain is chains[sym], at)))
+    monkeypatch.setattr(
+        traded_premium, "write_rows",
+        lambda gh, conn, ts_min=None: seen.append(("write", conn is calls["conn"], ts_min)))
+
+    compute.collect_gex_snapshots(now=now)
+
+    assert seen == [("chain", "SPY", True, now), ("chain", "NVDA", True, now),
+                    ("write", True, int(now.timestamp()) // 60 * 60)]
+
+
+def test_collect_gex_snapshots_survives_a_traded_premium_write_failure(monkeypatch):
+    """The real module, switched on, against a store that cannot take its row
+    (the fake has no snapshot writers): collection still finishes, and the
+    failure is counted."""
+    from services.options_svc import traded_premium
+    now = _hiro_ct(10, 0)
+    calls = _fake_gex_modules(monkeypatch, lock_ok=True, now=now,
+                              chains={"SPY": _hchain(1000)})
+    monkeypatch.setattr(compute, "_publish_eth_eligibility", lambda seen: None)
+    real = traded_premium._mdc.section
+    monkeypatch.setattr(traded_premium._mdc, "section",
+                        lambda name: dict(real(name), traded_premium=True))
+    seen = []
+    monkeypatch.setattr(compute._degrade, "degraded",
+                        lambda area, **kw: seen.append(area))
+    traded_premium.reset()
+    compute.reset_hiro_memo()         # a first reading: no hedging-flow row to write
+
+    compute.collect_gex_snapshots(now=now)            # must not raise
+
+    booked = dict(traded_premium._S["symbols"])
+    traded_premium.reset()
+    compute.reset_hiro_memo()
+    assert list(booked) == ["SPY"]                    # the chain did reach it
+    assert seen == ["options.traded_premium.write"]
+    assert calls["touched"] is True and calls["closed"] is True
+
+
 def test_collect_gex_snapshots_hiro_write_failure_never_breaks_collection(monkeypatch):
     import sys as _sys
     import datetime as _dtm

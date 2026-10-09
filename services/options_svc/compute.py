@@ -4902,7 +4902,7 @@ def collect_gex_snapshots(capture_symbols=None, now=None) -> int:
         # imported lazily. ONE load_thresholds() call serves both detectors.
         # Per-symbol extended-trading-hours eligibility rides the SAME hook, for
         # the same reason: the boolean is a root field of a chain we already have.
-        from services.options_svc import eth, flow_sides_tick
+        from services.options_svc import eth, flow_sides_tick, traded_premium
         from services.options_svc import flow_alerts
         clear_uoa_stash()
         clear_big_delta_stash()
@@ -4967,6 +4967,7 @@ def collect_gex_snapshots(capture_symbols=None, now=None) -> int:
             # even when the UOA kill-switch is off.
             _eth_seen[sym] = eth.chain_eth_eligible(chain)
             flow_sides_tick.on_chain(sym, chain, now)  # bought/sold tally; never raises
+            traded_premium.on_chain(sym, chain, now)   # traded premium; never raises
             if _uoa_on:
                 # Best-effort — a UOA detect failure must NEVER break collection.
                 try:
@@ -5001,6 +5002,7 @@ def collect_gex_snapshots(capture_symbols=None, now=None) -> int:
         gc.poll_once(_proxy.schwab_py_client, gt.GammaEngine(), conn,
                      symbols=symbols, on_chain=on_chain, **_poll_kw)
         _write_hiro_rows(gh, conn, _hiro_ts, _hiro_rows)   # never raises
+        traded_premium.write_rows(gh, conn, _hiro_ts)      # never raises
         gc.touch_lock(gc.LOCK_PATH, source="options_svc", owner=owner,
                       now=int(time.time()))
         try:
