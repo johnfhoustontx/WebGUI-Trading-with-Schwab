@@ -40,6 +40,7 @@ DEFAULTS = {
     "gamma_spot_interval": 5,        # candle/OHLC bucket size in minutes (1|5|15)
     "gamma_heat_value": "net",       # heatmap cell: net | call | put | size
     "gamma_heat_scale": "locked",    # heatmap colours: locked | adaptive | share
+    "gamma_heat_frame": "strike",    # heatmap vertical axis: strike | spot
     "gamma_netprem_group": "indices",          # Net Prem picker: which group tab
     "gamma_netprem_mode": "dollars",           # Net Prem y-axis: dollars | skew
     # Comparable magnitudes in Dollars mode, so the three read as one chart.

@@ -622,7 +622,12 @@ def test_render_view_updates_in_place_not_clear():
     assert "heatmap_box.clear()" not in src
     assert "_STRIKE_HEAT_SPLIT" in src   # fixed 40/60 strike/heatmap split is wired
     assert "reflow" in src               # panels reflow to fill their flex containers
-    assert "bar_yrange" in src           # fixed ±N_SIDE window y-range is wired
+    # The fixed-window y-range is wired. Since 2026-10-09 render reaches it through
+    # heat_yrange (one range for both panels, in either frame), so both links of
+    # that chain are checked: render calls heat_yrange, and heat_yrange is built
+    # on bar_yrange.
+    assert "heat_yrange(" in src
+    assert "bar_yrange" in inspect.getsource(gamma.heat_yrange)
 
 
 def test_big_gamma_snapshot_read_is_off_loop():
@@ -3210,11 +3215,13 @@ def test_the_projection_band_is_kept_only_for_net():
 def test_render_builds_the_heat_controls_and_feeds_both_panels():
     src = inspect.getsource(gamma.render)
     assert "heat = HeatControls()" in src
-    assert "heat.on_change(_render_view)" in src
+    assert "heat.on_change(_render_view" in src
     paint = src[src.index("def _render_view("):src.index("def _request_refresh(")]
     assert paint.count("heat.read(") == 1
-    assert paint.count("**_hk") == 2                 # bar_figure and heatmap_figure
-    assert paint.count("heat_keeps_projection(") == 1
+    # bar_figure, heatmap_figure, and the projection rule: all from the one dict.
+    assert paint.count("**_hk") == 3
+    assert paint.count("heat_keeps_projection(**_hk)") == 1
+    assert paint.count("heat_yrange(") == 1          # one range for both panels
     assert "heat.show_legend(" in paint
     sync = src[src.index("def _sync_spot_controls("):]
     assert "heat.sync(" in sync[:sync.index("\n    spot_style_sel.on_value_change")]
@@ -3484,11 +3491,17 @@ class _FakeEl:
         self.visible = on
 
 
-def _heat_controls(value="size", scale="locked"):
+def _heat_controls(value="size", scale="locked", frame="strike"):
     heat = gamma.HeatControls.__new__(gamma.HeatControls)
     heat.value, heat.scale, heat.legend = _FakeEl(value), _FakeEl(scale), _FakeEl()
+    heat.frame = _FakeEl(frame)
     heat._sided, heat._lock, heat._lock_time = True, None, ""
     return heat
+
+
+# What read() adds for the frame when nothing about it is chosen: the strike
+# frame, and the spot frame's height from config ([window] spot_side).
+_STRIKE_FRAME = {"frame": "strike", "half": 10}
 
 
 def _epoch_rows():
@@ -3502,7 +3515,8 @@ def test_heat_controls_read_gives_both_builders_their_keywords():
     heat = _heat_controls("size")
     rows = _sided_rows()
     hk = heat.read(SIDED["gex"], rows, [99.0, 100.0, 101.0, 102.0], {"scale_lock": _LOCK})
-    assert hk == {"mode": "size", "balanced": [100.0], "scale": "locked", "lock": _LOCK}
+    assert hk == {"mode": "size", "balanced": [100.0], "scale": "locked", "lock": _LOCK,
+                  **_STRIKE_FRAME}
     bars = gamma.bar_figure(SIDED, 100.0, **hk)                # both accept them
     heat_fig = gamma.heatmap_figure(rows, "GEX", yrange=[95.0, 105.0], **hk)
     assert heat_fig["colorAxis"]["max"] == 200.0 and bars["yAxis"]["softMax"] == 77.0
@@ -3520,7 +3534,8 @@ def test_heat_controls_fall_back_to_net_when_no_cell_has_sides():
     grid = {100.0: {"net": 5.0}}
     rows = [("09:30", 100.0, None, None, None, 0, {100.0: 4.0})]
     hk = heat.read(grid, rows, [100.0], {"scale_lock": _LOCK})
-    assert hk == {"mode": "net", "balanced": [], "scale": "locked", "lock": _LOCK}
+    assert hk == {"mode": "net", "balanced": [], "scale": "locked", "lock": _LOCK,
+                  **_STRIKE_FRAME}
     assert heat.value.enabled is False
     assert heat.value.value == "size"        # the reader's choice is kept, not overwritten
     # ...and it comes back by itself when a sided session loads.
@@ -3534,7 +3549,7 @@ def test_heat_controls_show_on_the_four_greek_views_only():
                         ("Net Prem", False), ("Term", False)):
         heat.sync(view)
         assert heat.value.visible is shown and heat.legend.visible is shown
-        assert heat.scale.visible is shown
+        assert heat.scale.visible is shown and heat.frame.visible is shown
 
 
 def test_heat_controls_legend_carries_the_views_unit():
@@ -3583,6 +3598,62 @@ def test_heat_controls_legend_in_percent_for_a_share_scale():
     heat.show_legend("GEX", {"zmax": 8.3, "mode": hk["mode"], "scale": hk["scale"]})
     assert "+8.30%" in heat.legend.content and "share of each column" in heat.legend.content
     assert "$" not in heat.legend.content
+
+
+def test_heat_controls_read_carries_the_frame_and_its_height(monkeypatch):
+    heat = _heat_controls("net", "locked", "spot")
+    hk = heat.read(SIDED["gex"], _sided_rows(), [100.0], {})
+    assert hk["frame"] == "spot" and hk["half"] == 10
+    monkeypatch.setattr(gamma._heat_cfg, "spot_side", lambda: 6)
+    assert heat.read(SIDED["gex"], _sided_rows(), [100.0], {})["half"] == 6
+    # 0 turns the service's wider crop off; the frame is then the display
+    # window tall and shows gaps where a column has no strikes.
+    monkeypatch.setattr(gamma._heat_cfg, "spot_side", lambda: 0)
+    assert heat.read(SIDED["gex"], _sided_rows(), [100.0], {})["half"] == 20
+    heat.frame.value = "sideways"
+    assert heat.read(SIDED["gex"], _sided_rows(), [100.0], {})["frame"] == "strike"
+
+
+def test_both_builders_take_everything_read_returns_in_the_spot_frame():
+    heat = _heat_controls("size", "locked", "spot")
+    hk = heat.read(SIDED["gex"], _frame_rows(), [99.0, 100.0, 101.0], {"scale_lock": _LOCK})
+    yr = gamma.heat_yrange([99.0, 100.0, 101.0], 100.0, [100.0, 102.0],
+                           hk["frame"], hk["half"])
+    bars = gamma.bar_figure(SIDED, 100.0, yrange=yr, **hk)
+    fig = gamma.heatmap_figure(_frame_rows(), "GEX", yrange=yr, **hk)
+    assert bars["xAxis"]["min"] == fig["yAxis"]["min"] == -10.5
+    assert bars["xAxis"]["max"] == fig["yAxis"]["max"] == 10.5
+    assert not gamma.heat_keeps_projection(**hk)
+
+
+def test_the_spot_frame_hides_the_spot_overlay_pickers():
+    """A candle of price against itself is nothing, and the tracks are always
+    drawn in this frame, so those three controls would be dead knobs."""
+    overlays = (_FakeEl(), _FakeEl(), _FakeEl())
+    heat = _heat_controls("net", "locked", "spot")
+    heat.sync("GEX", overlays)
+    assert [el.visible for el in overlays] == [False, False, False]
+    # The strike frame leaves them as the page set them.
+    shown = (_FakeEl(), _FakeEl(), _FakeEl())
+    _heat_controls("net", "locked", "strike").sync("GEX", shown)
+    assert [el.visible for el in shown] == [True, True, True]
+    # ...and so does a view with no heatmap, whatever the frame.
+    other = (_FakeEl(), _FakeEl(), _FakeEl())
+    heat.sync("Flow", other)
+    assert [el.visible for el in other] == [True, True, True]
+
+
+def test_render_hands_the_overlay_pickers_to_the_heat_controls():
+    src = inspect.getsource(gamma.render)
+    sync = src[src.index("def _sync_spot_controls("):]
+    sync = sync[:sync.index("\n    spot_style_sel.on_value_change")]
+    assert "heat.sync(view_toggle.value, (tracks_sw, spot_style_sel, spot_int_sel))" in sync
+    assert "_sync_spot_controls()" in src[src.index("heat.on_change(_render_view"):][:120]
+
+
+def test_the_heat_frame_is_a_stored_setting_that_defaults_to_strike():
+    import app_settings
+    assert app_settings.DEFAULTS["gamma_heat_frame"] == "strike"
 
 
 def test_the_heat_scale_is_a_stored_setting_that_defaults_to_locked():

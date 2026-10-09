@@ -2346,13 +2346,14 @@ def _heat_setting(key, allowed, default):
     return value if value in allowed else default
 
 
-def heat_keeps_projection(mode, scale="adaptive", frame="strike"):
+def heat_keeps_projection(mode, scale="adaptive", frame="strike", **_others):
     """Whether the GEX forward band is drawn. It is a NET grid of raw exposure in
     strike coordinates along a flat spot, so only net keeps it, not on a share
     scale (every cell a percentage) and not in the spot frame (an axis measured
     from spot). The caller decides, never ``heatmap_figure``: the hedge panel
     under the heatmap is built on the same ``projection``, and so on the same
-    columns."""
+    columns. It takes ``HeatControls.read``'s whole dict (``**_hk``) and ignores
+    the keys that are not its business."""
     return mode == "net" and scale != "share" and frame != "spot"
 
 
@@ -2368,7 +2369,7 @@ def heat_yrange(strikes, spot, spot_path, frame, half):
 
 
 class HeatControls:
-    """The heatmap's Value and Scale pickers and its legend strip.
+    """The heatmap's Value, Scale and Frame pickers and its legend strip.
 
     Module-level so ``render`` holds one object and no per-control handler.
     Built inside the symbol-scoped controls row; ``on_change`` is attached once
@@ -2394,25 +2395,46 @@ class HeatControls:
             "Locked keeps one colour meaning one amount all session; it is set "
             "from the session's first hour. Adaptive stretches the colours over "
             "whatever is on screen. Share of column shows each time's shape.")
+        self.frame = ui.select(
+            dict(_heat.FRAMES),
+            value=_heat_setting("gamma_heat_frame", _heat.FRAMES, "strike"),
+            label="Frame").props("dense options-dense").classes("w-28")
+        self.frame.tooltip(
+            "What the vertical axis measures. From spot puts price on a flat "
+            "line through the middle, so the flip and the walls move: a wall "
+            "sliding toward the centre is one price is approaching.")
         # ml-auto: the strip sits at the right end of the controls row.
         self.legend = ui.html("").classes("ml-auto")
         self._sided, self._lock, self._lock_time = True, None, ""
 
-    def on_change(self, repaint):
+    def on_change(self, repaint, resync):
+        """``repaint`` redraws from the snapshot held. A frame change also runs
+        ``resync`` first: it decides which of the spot overlay's pickers show."""
         self.value.on_value_change(
             overlay_handler("gamma_heat_value", str, repaint))
         self.scale.on_value_change(
             overlay_handler("gamma_heat_scale", str, repaint))
+        self.frame.on_value_change(overlay_handler(
+            "gamma_heat_frame", str, lambda: (resync(), repaint())))
 
-    def sync(self, view):
-        """Shown on the four Greek views only: the other views have no cells."""
+    def sync(self, view, overlays=()):
+        """Shown on the four Greek views only: the other views have no cells.
+
+        ``overlays`` are the page's spot-overlay controls (Level movement, Spot,
+        Bar). Measured from spot, price is a flat line and the level tracks are
+        always drawn, so all three would be dead knobs: they are hidden there.
+        Call it AFTER the page has set their visibility by its own rules."""
         on = view in _VIEWS
-        for el in (self.value, self.scale, self.legend):
+        for el in (self.value, self.scale, self.frame, self.legend):
             el.set_visibility(on)
+        if on and self.frame.value == "spot":
+            for el in overlays:
+                el.set_visibility(False)
 
     def read(self, grid, rows, strikes, entry):
         """This paint's keywords for BOTH figure builders: the value to draw, the
-        strikes to mark as balanced, the scale, and the view's scale lock.
+        strikes to mark as balanced, the scale and the view's scale lock, and the
+        vertical frame with the spot frame's height.
 
         A session stored before cells carried a call and a put can draw net
         only. The picker is then disabled and the paint falls back to net, but
@@ -2436,7 +2458,14 @@ class HeatControls:
                    and _is_level(rows[-1][0]) and rows[-1][0] >= due)
         self._lock_time = _fmt_ts(due) if due is not None and not overdue else ""
         scale = self.scale.value if self.scale.value in _heat.SCALES else "adaptive"
-        out = {"mode": "net", "balanced": [], "scale": scale, "lock": self._lock}
+        out = {"mode": "net", "balanced": [], "scale": scale, "lock": self._lock,
+               "frame": self.frame.value if self.frame.value in _heat.FRAMES
+               else "strike",
+               # The spot frame's height: the strikes the service keeps around
+               # the session's low and high for it, so it is never short of
+               # data. With that crop turned off (0) it is the display window
+               # tall and shows gaps where a column has no strikes.
+               "half": _heat_cfg.spot_side() or _heat_cfg.n_side()}
         if self._sided and self.value.value in _heat.VALUES:
             out["mode"] = self.value.value
             out["balanced"] = _heat.balanced_marks(grid, strikes,
@@ -3200,9 +3229,9 @@ def render(symbol: str | None = None, view: str | None = None,
         # include the intraday spot path so the heatmap's price line isn't clipped
         # when price drifted out of that window.
         _strikes = bars_from_gex(data, view_spot)["strikes"]
-        yr = union_range(bar_yrange(_strikes, view_spot), spot_path)
-        # The value drawn + the balanced strikes: ONE set of keywords for both panels.
+        # Value, marks, scale and frame: ONE set of keywords, ONE range, both panels.
         _hk = heat.read(data["gex"], rows, _strikes, entry)
+        yr = heat_yrange(_strikes, view_spot, spot_path, _hk["frame"], _hk["half"])
         _set_chart(bar_figure(data, view_spot, view=view, walls=walls, flip=flip,
                               yrange=yr, **_hk))
         state["chart_el"].set_visibility(True)
@@ -3213,7 +3242,7 @@ def render(symbol: str | None = None, view: str | None = None,
             # The forward band is GEX's, and a NET grid: any other value drops it,
             # and the hedge panel below is built on this same ``projection``.
             projection = (projection_arg(entry) if view == "GEX"
-                          and heat_keeps_projection(_hk["mode"], _hk["scale"]) else None)
+                          and heat_keeps_projection(**_hk) else None)
             _legend = {}
             _set_figure(heat_plot, heatmap_figure(rows, view, yrange=yr,
                                                   projection=projection,
@@ -3699,7 +3728,7 @@ def render(symbol: str | None = None, view: str | None = None,
 
     tracks_sw.on_value_change(
         overlay_handler("gamma_level_tracks", bool, _render_view))
-    heat.on_change(_render_view)
+    heat.on_change(_render_view, lambda: _sync_spot_controls())
 
     def _sync_spot_controls():
         # Symbol / Refresh now / Level movement / Spot / Bar all drive the
@@ -3722,7 +3751,7 @@ def render(symbol: str | None = None, view: str | None = None,
         # that silently does nothing.
         spot_int_sel.set_visibility(
             symbol_scoped and spot_style_sel.value != "line")
-        heat.sync(view_toggle.value)
+        heat.sync(view_toggle.value, (tracks_sw, spot_style_sel, spot_int_sel))
 
     spot_style_sel.on_value_change(overlay_handler(
         "gamma_spot_style", str, lambda: (_sync_spot_controls(), _render_view())))
