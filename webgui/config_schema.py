@@ -902,6 +902,31 @@ _GAMMA_PUBLIC = ConfigFile(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Dealer Positioning heatmap — config/gamma_heat.toml
+# ─────────────────────────────────────────────────────────────────────────────
+# Read per paint by the page through the mtime-cached loader, so a saved change
+# applies with no restart.
+_GAMMA_HEAT = ConfigFile(
+    name="gamma_heat.toml", title="Dealer Positioning heatmap", icon="grid_on",
+    summary="What the heatmap on Dealer Positioning marks on its strike axis.",
+    restart=(),
+    sections=(
+        Section("Balanced strikes",
+                "A strike holding large calls and large puts that nearly cancel. "
+                "It looks empty when the heatmap shows Net, so it is marked.", (
+            _pct("balanced.max_polarity", "Lean at most",
+                 "Net as a share of calls plus puts. Lower marks fewer strikes.",
+                 lo=0, hi=100, step=1),
+            _pct("balanced.min_size_quantile", "Larger than this share of strikes",
+                 "Only the largest strikes on screen are marked.",
+                 lo=0, hi=100, step=5),
+            Field("balanced.max_marks", "Markers at most", "0 turns them off.",
+                  kind="int", min=0, max=10, step=1),
+        )),
+    ),
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Public edge — config/edge.toml
 # ─────────────────────────────────────────────────────────────────────────────
 # Read by deploy/caddy/generate_caddyfile.py only. No service restart applies it:
@@ -2051,7 +2076,7 @@ _MARKET_READ = ConfigFile(
 )
 
 FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _SECTORS, _MOMENTUM,
-         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _EDGE, _SWING_MODEL, _COMMISSIONS, _MARKETDATA,
+         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _EDGE, _SWING_MODEL, _COMMISSIONS, _MARKETDATA,
          _MARKET_READ, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}

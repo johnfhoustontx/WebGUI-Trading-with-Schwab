@@ -94,6 +94,10 @@ FINDER_PUBLIC_TOML = REPO_ROOT / "config" / "finder_public.toml"
 # shared/public_gamma.py from both options_svc (the worker) and the public site.
 GAMMA_PUBLIC_TOML = REPO_ROOT / "config" / "gamma_public.toml"
 
+# The Dealer Positioning heatmap's controls: which strikes it marks and how its
+# colour scale is set. Read by shared/gamma_heat_config.py.
+GAMMA_HEAT_TOML = REPO_ROOT / "config" / "gamma_heat.toml"
+
 # The public Rescue form: its budgets, reuse windows and per-visitor limits.
 # Read by shared/public_rescue.py from both options_svc (the worker) and the
 # public live process. Edit + restart both.

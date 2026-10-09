@@ -1,0 +1,14 @@
+# The Dealer Positioning heatmap's controls (design:
+# docs/plans/2026-10-09-gamma-heatmap-value-scale-frame-design.md).
+# Read through shared/gamma_heat_config.py, per paint, so a saved change
+# applies with no restart.
+
+[balanced]
+# A strike is marked "Balanced" when its calls and puts nearly cancel:
+# abs(net) / (abs(calls) + abs(puts)) at or under this.
+max_polarity = 0.15
+# ...and it is among the largest strikes on screen: at or above this quantile
+# of size across the visible window.
+min_size_quantile = 0.8
+# At most this many markers, largest first. 0 turns the markers off.
+max_marks = 3

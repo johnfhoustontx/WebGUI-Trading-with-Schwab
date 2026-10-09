@@ -155,6 +155,9 @@ so the `/x` page's live count is the service's own computation) ·
 `shared.news_config` (since 2026-09-26; `config/news.toml`'s loader - stdlib +
 `shared.config_toml` + `shared.symbols` + `repo_paths` only; Tier 1 reads just
 the ticker set and `[trending] window_h` from it) ·
+`shared.gamma_heat_config` (since 2026-10-09; `config/gamma_heat.toml`'s loader -
+stdlib + `shared.config_toml` + `repo_paths` only, pinned by
+`shared/tests/test_gamma_heat_config.py`) ·
 `shared.blog_inbox` (since 2026-10-06; the Blog's command builders, validators,
 view names, the frame's `sandbox` and policy strings, and the two file readers
 behind the preview routes - stdlib + `repo_paths` + `shared.config_toml` only,
@@ -401,7 +404,7 @@ maps, and anything whose change needs code to follow it.
   `scanner` (selection floors and, since 2026-10-04, `[selection]` strike rules),
   `trade_mgmt`, `paper`, `symbols`, `sectors`, `marketdata`, `services`,
   `flow_alerts`, `notify`, `commissions`, `theme`, `news`, `edge`, `market_read`,
-  `blog`, and the public
+  `blog`, `gamma_heat`, and the public
   tools' files.
 - `shared/market_calendar.py` is the single source for the NYSE calendar and the
   session/window predicates. Add no holiday literal or window constant elsewhere.
