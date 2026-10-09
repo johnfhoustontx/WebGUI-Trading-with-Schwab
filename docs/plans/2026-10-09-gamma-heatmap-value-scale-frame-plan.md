@@ -2260,6 +2260,34 @@ and with Share of column (their unit tests pass).
 
 ---
 
+## Phase 5 stopped at its gate (2026-10-09)
+
+Task 5.1 ran. **Nothing after it was built, and nothing after it should be built
+from the tasks below.** They are kept as the record of what the gate ruled out.
+
+- **The tool exists:** `tools/measure_prem_remark.py`, with tests. It ran on the
+  local prod backup (`--db`, immutably), not after a promote.
+- **The gate failed, by a wide margin.** Minute to minute, the stored premium's falls
+  are 61% to 89% of its rises on every symbol measured. Over 30 minutes, four of
+  seven sessions are over the tenth the gate allowed, and about one comparison in six
+  is negative. The numbers are in the design, section 7.
+- **The fallback failed too.** "Level only" assumed the level was sound. It is the
+  day's volume valued at the current mark: the day's total fell in 33% to 41% of
+  minutes, and `$SPX` on 09-24 closed 30% under its own peak. As a heatmap over
+  time it would show premium fading from strikes where nothing left.
+- **So Premium is not in this build.** Tasks 5.2 to 5.4 publish and draw that same
+  quantity. An honest view needs a per-minute increment
+  (`Δvolume × mark × 100` per strike and side) stored by the collector as its own
+  view: a separate design, with its own cost measurement on the one-minute branch.
+- **Not decided here, and the user's to decide:** whether to design that collector
+  change, and what to do about the Flow ribbon and the Net Prem lines, which plot
+  the same quantity and call it cumulative.
+
+The Show picker's tooltip and the manuals still do not point at Premium "for new
+activity", because there is no Premium view. The Reference Guide points at Flow.
+
+---
+
 ## Phase 5 — Value: premium (private page)
 
 The public page does not get Premium in this version: a fifth history key per leased symbol is a write cost that has not been measured. `HeatControls` leaves it out of the picker when the page is public.

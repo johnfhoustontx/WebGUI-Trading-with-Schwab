@@ -278,6 +278,10 @@ four keys join the frozen list.
 
 ## 7. Premium
 
+**Not built. It stopped at its gate on 2026-10-09; the measurement and what it
+means are at the end of this section. The four paragraphs below are the design as
+first written, kept because the result is a verdict on them.**
+
 The only part that needs a new key, and the last phase.
 
 **Service.** The `prem` rows are already loaded every minute for the ladder,
@@ -308,6 +312,57 @@ a collector change of its own.
 **Cost.** One more key rewritten each minute on a branch that already overruns.
 The plan measures the publish before and after on a close-of-session shape, as
 the 2026-09-21 public histories were.
+
+### The gate, measured (2026-10-09)
+
+Measured on stored prod sessions (the 2026-09-25 backup) with
+`tools/measure_prem_remark.py`. A true traded total can never fall, so on each side
+of each strike every fall in the stored figure is the mark moving.
+
+| Symbol, session | Minute to minute: falls as a share of rises | Over 30 min: falls as a share of rises | 30-min comparisons that fell |
+|---|---|---|---|
+| `$SPX`, 09-21 | 73.2% | 8.4% | 16.4% |
+| `$SPX`, 09-24 | 88.6% | 54.9% | 21.7% |
+| SPY, 09-21 | 64.1% | 6.0% | 16.9% |
+| QQQ, 09-21 | 60.7% | 4.3% | 14.6% |
+| NVDA, 09-21 | 69.8% | 12.3% | 15.8% |
+| NVDA, 09-24 | 66.4% | 16.9% | 19.0% |
+| TSLA, 09-21 | 79.9% | 36.5% | 13.2% |
+
+The gate was a tenth. Nothing passes it minute to minute, and four of seven fail it
+over 30 minutes. One 30-minute comparison in six is negative, which a traded total
+cannot be. **A Change view of this premium would be largely artifact.**
+
+The fallback above ("ships with Level only") does not survive either. The stored
+figure is not a cumulative of what traded: it is the day's volume valued at the
+CURRENT mark, so it shrinks as marks decay.
+
+| Symbol, session | Day's total: peak | Day's total: close | Minutes in which the total fell | Peak dollars on strikes that closed under half their peak |
+|---|---|---|---|---|
+| `$SPX`, 09-21 | $8.13B | $5.78B | 36% | 17% |
+| `$SPX`, 09-24 | $2.82B | $1.98B | 38% | 46% |
+| SPY, 09-21 | $2.63B | $2.15B | 33% | 12% |
+| NVDA, 09-21 | $0.46B | $0.36B | 41% | 14% |
+| TSLA, 09-21 | $0.40B | $0.36B | 39% | 19% |
+
+Drawn as strike × time, that is premium appearing at a strike and then fading. A
+reader would take the fade for money leaving. Nothing left; the options got cheaper.
+
+**What an honest Premium view needs** is the increment the gate named: per contract,
+`(volume now − volume a minute ago) × mark × 100`, summed per strike and side, and
+stored as its own view. That is what traded in the minute at the price it traded
+near. Its running sum is a true cumulative (it cannot fall) and a difference of two
+readings is exactly the premium traded between them. The collector already keeps
+each contract's previous volume in memory for the flow detectors, so the inputs
+exist. It is a collector and storage change on the one-minute branch, forward-only,
+and it wants its own design and its own cost measurement. It is not part of this
+build.
+
+**A finding outside this design.** The Flow view's ribbon and the Net Prem lines
+plot the same stored quantity, summed over strikes, and describe it as cumulative
+traded dollars. By the second table it is not: it falls in a third or more of
+minutes and can end the day well under its peak. That is those pages' to weigh; it
+is recorded here because this is where it was measured.
 
 ## 8. Phases
 
