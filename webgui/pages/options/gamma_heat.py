@@ -90,6 +90,73 @@ def balanced_marks(grid, strikes, *, max_polarity, min_size_quantile, max_marks)
     return [k for _, k in hits[:max(0, int(max_marks))]]
 
 
+# ── the colour scale ─────────────────────────────────────────────────────────
+# scale key -> the control's label. The order is the picker's order.
+#   locked    one colour is one amount for the whole session: the maximum is the
+#             service's ``scale_lock`` for the view and value
+#             (services/options_svc/gamma_window.py), set from the first hour
+#   adaptive  the maximum is refitted to what is on screen on every paint
+#   share     each cell as a percentage of its own column: shape, not level
+SCALES = {"locked": "Locked", "adaptive": "Adaptive", "share": "Share of column"}
+
+
+def robust_max(z, q=0.95):
+    """Symmetric colour clamp for a z-grid: the ``q`` quantile of the absolute
+    cell, so a few extreme strikes do not wash the mid-range to transparent.
+    None when there is no non-zero cell."""
+    vals = sorted(abs(v) for row in (z or []) for v in row if v)
+    if not vals:
+        return None
+    idx = min(len(vals) - 1, int(q * (len(vals) - 1)))
+    return vals[idx] or vals[-1]
+
+
+def share_of_column(z):
+    """Each cell as a percentage of its column's total absolute size: the shape
+    of the positioning at each time, with the level taken out. A column that
+    holds nothing is a gap. Builds a new grid."""
+    if not z:
+        return []
+    totals = [sum(abs(row[c]) for row in z if row[c]) for c in range(len(z[0]))]
+    return [[(100.0 * v / totals[c]) if v is not None and totals[c] else None
+             for c, v in enumerate(row)] for row in z]
+
+
+def _held(lock, mode):
+    """The lock's figure for ``mode``, or None when it has none."""
+    return _fmt.num((lock or {}).get(mode)) or None
+
+
+def scale_max(z, scale, lock, mode):
+    """The colour axis's maximum. ``locked`` uses the service's lock for this
+    value, and falls back to the adaptive figure until one exists (the session's
+    first hour, or a snapshot that predates the field)."""
+    held = _held(lock, mode) if scale == "locked" else None
+    return held if held else robust_max(z)
+
+
+def bar_max(lock, mode):
+    """The by-strike bars' locked extent for ``mode``, or None. Size draws a call
+    bar and a put bar per strike, so its extent is the larger side's lock."""
+    if mode == "size":
+        sides = [v for v in (_held(lock, "call"), _held(lock, "put")) if v]
+        return max(sides) if sides else None
+    return _held(lock, mode)
+
+
+def scale_caption(scale, lock, mode, lock_time):
+    """What the legend says the scale is tied to. ``lock_time`` is the clock time
+    the lock is (or will be) set, ``""`` when it cannot be told."""
+    if scale == "share":
+        return "share of each column"
+    if scale == "locked":
+        if _held(lock, mode):
+            return f"held since {lock_time}" if lock_time else "held for the session"
+        if lock_time:
+            return f"settling until {lock_time}"
+    return "adapts to what is visible"
+
+
 # ── the legend strip ─────────────────────────────────────────────────────────
 # One line of SVG beside the controls: [-max] [ramp] [+max]  unit · caption.
 # It is NOT a Highcharts legend and not a column beside the chart: the heatmap
@@ -119,7 +186,9 @@ def legend_svg(zmax, caption, stops, *, unit, uid="gheat"):
     top = _fmt.num(zmax)
     if not top:
         return ""
-    if unit.startswith("$"):
+    if unit == "%":                  # a share scale: the ends ARE the unit
+        lo, hi, unit = _fmt.pct(-top), _fmt.pct(top, signed=True), ""
+    elif unit.startswith("$"):
         lo, hi = _fmt.money_short(-top), _fmt.money_short(top, signed=True)
     else:
         text, suffix = _fmt.scaled(top)

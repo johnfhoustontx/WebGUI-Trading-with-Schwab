@@ -384,16 +384,11 @@ def wall_plot_lines(spot, walls, flip=None, projected_flip=None, balanced=()):
     return out
 
 
-def _robust_zmax(z, q=0.95):
-    """Symmetric color clamp for a heatmap z-grid: the ``q`` percentile of |net|.
-
-    Using a high percentile (not the raw max) keeps a few extreme strikes from
-    washing out the mid-range colors. Returns None when there's no non-zero data."""
-    vals = sorted(abs(v) for row in (z or []) for v in row if v)
-    if not vals:
-        return None
-    idx = min(len(vals) - 1, int(q * (len(vals) - 1)))
-    return vals[idx] or vals[-1]
+# Symmetric colour clamp for a heatmap z-grid: a high percentile of the absolute
+# cell, not the raw max, so a few extreme strikes do not wash out the mid-range.
+# The function lives with the other scale rules (gamma_heat.py); the old name
+# stays because the Term heatmap and the tests use it.
+_robust_zmax = _heat.robust_max
 
 
 def _refloat_keys(d):
@@ -574,7 +569,7 @@ _INIT_FLEX = flex_class(0.5)
 
 
 def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, height=680,
-               yrange=None, mode="net", balanced=()):
+               yrange=None, mode="net", balanced=(), scale="adaptive", lock=None):
     """Highcharts horizontal-bar options for one view (dark, beveled, labeled).
 
     In a Highcharts ``bar`` chart the category axis (``xAxis``) is vertical, so the
@@ -584,9 +579,15 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, hei
 
     ``mode`` is the heatmap's value. Net, Calls and Puts draw one bar per strike.
     Size draws TWO, the strike's calls and its puts, so a strike whose sides
-    cancel is two equal opposing bars. The series count is three in every mode."""
+    cancel is two equal opposing bars. The series count is three in every mode.
+
+    With ``scale="locked"`` and a ``lock`` (the snapshot's ``scale_lock``) the
+    exposure axis holds at the lock's extent, so a bar's length means the same
+    amount all session. It is a SOFT extent: a bar larger than the lock widens
+    the axis and is drawn whole, never clipped at the edge."""
     b = bars_from_gex(data, spot, n_side, mode)
     label = _view_label(view)
+    held = _heat.bar_max(lock, mode) if scale == "locked" else None
     yr = yrange if yrange is not None else bar_yrange(b["strikes"], spot)
 
     def _pt(strike, value, colour, hover):
@@ -638,6 +639,10 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=N_SIDE, hei
                   "labels": {"style": {"color": FONT}, "format": "{value:.2f}"},
                   "plotLines": plotlines},
         "yAxis": {**_dark_axis(label),
+                  # ALWAYS emitted, None when not locked: the chart is updated in
+                  # place, and an omitted key would leave the last locked extent.
+                  "softMin": -held if held else None,
+                  "softMax": held if held else None,
                   "plotLines": [{"value": 0, "color": "#777777", "width": 1, "zIndex": 3}]},
         "tooltip": {"backgroundColor": "#222222", "borderColor": "#444444",
                     "style": {"color": FONT, "fontSize": "11px"},
@@ -949,7 +954,8 @@ def track_points(values):
 def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                    walls=None, spot=None, flip=None, levels=None,
                    show_tracks=False, spot_style="line", spot_interval=5,
-                   projected_flip=None, mode="net", balanced=(), legend=None):
+                   projected_flip=None, mode="net", balanced=(), legend=None,
+                   scale="adaptive", lock=None):
     """Intraday strike×time Highcharts heatmap (dark, cell separators, concise
     hover) with the underlying spot-price line overlaid on the same (linear)
     strike axis. ``yrange`` (when given) sets the Strike axis range so it aligns
@@ -962,6 +968,12 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     panel under this chart is built on the same category list. ``balanced`` are
     strikes to mark on the axis. ``legend`` (a dict, when given) receives the
     scale this paint used, for the strip beside the controls.
+
+    ``scale`` is how the colours are set (``gamma_heat.SCALES``): ``adaptive``
+    (the default, and what this chart always did) refits them to the visible
+    cells; ``locked`` uses ``lock``, the snapshot's ``scale_lock`` for this
+    view, so a colour is one amount all session; ``share`` draws each cell as a
+    percentage of its own column.
 
     ``projection`` (GEX only) appends a forward band: extra time columns of
     projected net-per-mark cells on the SAME heatmap series/colorAxis, a 'now'
@@ -988,6 +1000,9 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     # thousands of rows and be refused by the row cap.
     vstrikes, vz = uniform_strike_grid([strikes[yi] for yi in vis],
                                        [z[yi] for yi in vis])
+    if scale == "share":
+        # Each cell as a percentage of its own column, over the strikes on screen.
+        vz = _heat.share_of_column(vz)
     # Heatmap points [time_index, strike_value, net]: x is the time category index,
     # y is the ACTUAL strike (linear axis) so the continuous spot line overlays.
     data = [[xi, vstrikes[yi], vz[yi][xi]]
@@ -995,8 +1010,10 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
             if vz[yi][xi] is not None]
     # Symmetric color clamp from the VISIBLE cells' 95th-percentile |net| (robust —
     # same as the Term heatmap) so a few extreme strikes don't wash the mid-range
-    # colors to transparent on the flatter views (Charm / DEX / Vanna).
-    zmax = _robust_zmax(vz) or None
+    # colors to transparent on the flatter views (Charm / DEX / Vanna). A LOCKED
+    # scale replaces it with the service's fixed figure for this view and value
+    # (gamma_heat.scale_max), once the session has one.
+    zmax = _heat.scale_max(vz, scale, lock, mode) or None
     # Row height = the (now uniform) ladder's spacing, so cells tile the window
     # densely and every canvas row has a strike to fill it.
     rowsize = _strike_step(vstrikes)
@@ -1009,7 +1026,9 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                "tooltip": {"headerFormat": "",
                            "pointFormat": "Strike {point.y:.2f} · "
                                           + _heat.VALUES[mode].lower()
-                                          + " {point.value:,.0f}"}}]
+                                          + (" {point.value:.1f}% of column"
+                                             if scale == "share"
+                                             else " {point.value:,.0f}")}}]
     spots = m.get("spots") or []
     # Underlying price track over the session (on the shared Strike axis; a line series
     # ignores the colorAxis so it isn't recolored by net value). Built here, appended
@@ -1051,7 +1070,7 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                     heat_series["data"].append([base + j, sk, v])
         # Re-clamp the color axis over collected + projected visible cells (robust
         # 95th-pct so a few extreme 0-DTE ATM close cells don't wash the scale).
-        zmax = _robust_zmax(vz + proj_rows_for_zmax) or None
+        zmax = _heat.scale_max(vz + proj_rows_for_zmax, scale, lock, mode) or None
         # 'now' divider between the last collected and first future column.
         xaxis_plotlines.append({"value": base - 0.5, "color": "#8a93a3", "width": 1,
                                 "dashStyle": "Dash", "zIndex": 4,
@@ -1137,7 +1156,7 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     if yrange is not None:
         yaxis["min"], yaxis["max"] = yrange[0], yrange[1]
     if legend is not None:
-        legend.update(zmax=zmax, mode=mode)
+        legend.update(zmax=zmax, mode=mode, scale=scale)
     fig = _base_chart("heatmap", height)
     fig["chart"]["backgroundColor"] = "transparent"     # same as the candlestick graph
     _apply_wash(fig)     # blue→magenta wash behind the cells; quiet strikes stay lit
@@ -2262,20 +2281,22 @@ def _heat_setting(key, allowed, default):
     return value if value in allowed else default
 
 
-def heat_keeps_projection(mode):
-    """Whether the GEX forward band is drawn. It is a NET grid, so only net keeps
-    it. The caller decides, never ``heatmap_figure``: the hedge panel under the
-    heatmap is built on the same ``projection``, and so on the same columns."""
-    return mode == "net"
+def heat_keeps_projection(mode, scale="adaptive"):
+    """Whether the GEX forward band is drawn. It is a NET grid of raw exposure,
+    so only net keeps it, and not on a share scale, where every cell is a
+    percentage. The caller decides, never ``heatmap_figure``: the hedge panel
+    under the heatmap is built on the same ``projection``, and so on the same
+    columns."""
+    return mode == "net" and scale != "share"
 
 
 class HeatControls:
-    """The heatmap's Value picker and its legend strip.
+    """The heatmap's Value and Scale pickers and its legend strip.
 
     Module-level so ``render`` holds one object and no per-control handler.
     Built inside the symbol-scoped controls row; ``on_change`` is attached once
-    the page's repaint exists. On the public origin the choice lives in the
-    element only: settings are frozen there and the store is a no-op.
+    the page's repaint exists. On the public origin the choices live in the
+    elements only: settings are frozen there and the store is a no-op.
     Design: docs/plans/2026-10-09-gamma-heatmap-value-scale-frame-design.md"""
 
     def __init__(self):
@@ -2288,23 +2309,33 @@ class HeatControls:
             "What each cell holds. Size is calls plus puts, coloured by which "
             "way the strike leans: a strike whose calls and puts cancel is "
             "empty in Net and bright in Size.")
+        self.scale = ui.select(
+            dict(_heat.SCALES),
+            value=_heat_setting("gamma_heat_scale", _heat.SCALES, "locked"),
+            label="Scale").props("dense options-dense").classes("w-36")
+        self.scale.tooltip(
+            "Locked keeps one colour meaning one amount all session; it is set "
+            "from the session's first hour. Adaptive stretches the colours over "
+            "whatever is on screen. Share of column shows each time's shape.")
         # ml-auto: the strip sits at the right end of the controls row.
         self.legend = ui.html("").classes("ml-auto")
-        self._sided = True
+        self._sided, self._lock, self._lock_time = True, None, ""
 
     def on_change(self, repaint):
         self.value.on_value_change(
             overlay_handler("gamma_heat_value", str, repaint))
+        self.scale.on_value_change(
+            overlay_handler("gamma_heat_scale", str, repaint))
 
     def sync(self, view):
         """Shown on the four Greek views only: the other views have no cells."""
         on = view in _VIEWS
-        self.value.set_visibility(on)
-        self.legend.set_visibility(on)
+        for el in (self.value, self.scale, self.legend):
+            el.set_visibility(on)
 
-    def read(self, grid, rows, strikes):
-        """This paint's keywords for BOTH figure builders: the value to draw and
-        the strikes to mark as balanced.
+    def read(self, grid, rows, strikes, entry):
+        """This paint's keywords for BOTH figure builders: the value to draw, the
+        strikes to mark as balanced, the scale, and the view's scale lock.
 
         A session stored before cells carried a call and a put can draw net
         only. The picker is then disabled and the paint falls back to net, but
@@ -2314,16 +2345,28 @@ class HeatControls:
         self._sided = _heat.has_sides([grid] + [r[6] for r in rows if len(r) > 6])
         self.value.set_enabled(self._sided)
         self.legend.content = ""        # refilled by show_legend when a heatmap is drawn
-        if not self._sided or self.value.value not in _heat.VALUES:
-            return {"mode": "net", "balanced": []}
-        return {"mode": self.value.value,
-                "balanced": _heat.balanced_marks(grid, strikes,
-                                                 **_heat_cfg.balanced())}
+        lock = (entry or {}).get("scale_lock")
+        self._lock = lock if isinstance(lock, dict) else None
+        # When the lock was (or will be) set: the session's first row plus its
+        # minutes. The service's own figure when it has published one.
+        minutes = (self._lock or {}).get("minutes") or _heat_cfg.lock()["minutes"]
+        first = rows[0][0] if rows else None
+        self._lock_time = _fmt_ts(first + 60 * minutes) if _is_level(first) else ""
+        scale = self.scale.value if self.scale.value in _heat.SCALES else "adaptive"
+        out = {"mode": "net", "balanced": [], "scale": scale, "lock": self._lock}
+        if self._sided and self.value.value in _heat.VALUES:
+            out["mode"] = self.value.value
+            out["balanced"] = _heat.balanced_marks(grid, strikes,
+                                                   **_heat_cfg.balanced())
+        return out
 
     def show_legend(self, view, legend):
+        scale, mode = legend.get("scale"), legend.get("mode") or "net"
         self.legend.content = _heat.legend_svg(
-            legend.get("zmax"), "adapts to what is visible", HEAT_STOPS,
-            unit=_heat.UNITS.get(view, ""))
+            legend.get("zmax"),
+            _heat.scale_caption(scale, self._lock, mode, self._lock_time),
+            HEAT_STOPS,
+            unit="%" if scale == "share" else _heat.UNITS.get(view, ""))
 
 
 def overlay_handler(key, cast, after):
@@ -3076,7 +3119,7 @@ def render(symbol: str | None = None, view: str | None = None,
         _strikes = bars_from_gex(data, view_spot)["strikes"]
         yr = union_range(bar_yrange(_strikes, view_spot), spot_path)
         # The value drawn + the balanced strikes: ONE set of keywords for both panels.
-        _hk = heat.read(data["gex"], rows, _strikes)
+        _hk = heat.read(data["gex"], rows, _strikes, entry)
         _set_chart(bar_figure(data, view_spot, view=view, walls=walls, flip=flip,
                               yrange=yr, **_hk))
         state["chart_el"].set_visibility(True)
@@ -3087,7 +3130,7 @@ def render(symbol: str | None = None, view: str | None = None,
             # The forward band is GEX's, and a NET grid: any other value drops it,
             # and the hedge panel below is built on this same ``projection``.
             projection = (projection_arg(entry) if view == "GEX"
-                          and heat_keeps_projection(_hk["mode"]) else None)
+                          and heat_keeps_projection(_hk["mode"], _hk["scale"]) else None)
             _legend = {}
             _set_figure(heat_plot, heatmap_figure(rows, view, yrange=yr,
                                                   projection=projection,

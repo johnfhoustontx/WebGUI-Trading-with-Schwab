@@ -3229,6 +3229,89 @@ def test_the_hedge_panel_is_built_on_the_projection_the_heatmap_was_given():
     assert "heatmap_categories(rows, projection)" in paint
 
 
+def test_robust_zmax_is_still_reachable_under_its_old_name():
+    assert gamma._robust_zmax is gamma._heat.robust_max
+
+
+_LOCK = {"minutes": 1, "net": 123.0, "call": 77.0, "put": 55.0, "size": 200.0}
+
+
+def test_locked_heatmap_uses_the_lock_and_adaptive_does_not():
+    locked = gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0],
+                                  scale="locked", lock=_LOCK)
+    adaptive = gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0],
+                                    scale="adaptive", lock=_LOCK)
+    assert locked["colorAxis"]["max"] == 123.0 and locked["colorAxis"]["min"] == -123.0
+    assert adaptive["colorAxis"]["max"] != 123.0
+
+
+def test_the_lock_is_the_one_for_the_value_being_drawn():
+    size = gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0],
+                                mode="size", scale="locked", lock=_LOCK)
+    assert size["colorAxis"]["max"] == 200.0
+
+
+def test_locked_without_a_lock_draws_the_adaptive_chart():
+    """The session's first hour, or a snapshot that predates the field."""
+    assert (gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0],
+                                 scale="locked", lock=None)
+            == gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0],
+                                    scale="adaptive"))
+
+
+def test_the_default_scale_is_todays():
+    """A caller that passes nothing gets the adaptive scale it always got."""
+    plain = gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0])
+    adaptive = gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0],
+                                    scale="adaptive")
+    assert plain == adaptive
+
+
+def test_share_scale_draws_each_cell_as_a_percentage_of_its_column():
+    fig = gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0],
+                               mode="size", scale="share")
+    cells = {(p[0], p[1]): p[2] for p in fig["series"][0]["data"]}
+    # Column 0 holds sizes 10, 100 and 10: the middle strike is 100/120 of it.
+    assert cells[(0, 100.0)] == pytest.approx(100 * 100 / 120)
+    assert cells[(0, 99.0)] == pytest.approx(-100 * 10 / 120)
+    assert "% of column" in fig["series"][0]["tooltip"]["pointFormat"]
+    assert len(fig["series"]) == 9
+
+
+def test_the_legend_sink_reports_the_scale():
+    legend = {}
+    gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0],
+                         scale="locked", lock=_LOCK, legend=legend)
+    assert legend == {"zmax": 123.0, "mode": "net", "scale": "locked"}
+
+
+def test_locked_bars_keep_their_axis_at_the_lock_but_can_grow_past_it():
+    """softMin/softMax, not min/max: a bar larger than the lock is drawn whole,
+    never clipped at the axis edge."""
+    fig = gamma.bar_figure(SIDED, 100.0, scale="locked", lock=_LOCK)
+    assert fig["yAxis"]["softMin"] == -123.0 and fig["yAxis"]["softMax"] == 123.0
+    assert "min" not in fig["yAxis"] and "max" not in fig["yAxis"]
+    size = gamma.bar_figure(SIDED, 100.0, mode="size", scale="locked", lock=_LOCK)
+    assert size["yAxis"]["softMax"] == 77.0          # the larger of calls and puts
+
+
+def test_unlocked_bars_clear_the_soft_extent():
+    """The keys are always emitted: the chart is updated in place, and an
+    omitted key would leave the last locked extent on the axis."""
+    for kw in ({}, {"scale": "adaptive", "lock": _LOCK}, {"scale": "share", "lock": _LOCK},
+               {"scale": "locked", "lock": None}):
+        fig = gamma.bar_figure(SIDED, 100.0, **kw)
+        assert fig["yAxis"]["softMin"] is None and fig["yAxis"]["softMax"] is None, kw
+
+
+def test_the_projection_band_is_dropped_for_a_share_scale():
+    """Projected cells are raw exposure; on a percentage axis they mean nothing."""
+    assert gamma.heat_keeps_projection("net", "locked")
+    assert gamma.heat_keeps_projection("net", "adaptive")
+    assert not gamma.heat_keeps_projection("net", "share")
+    assert not gamma.heat_keeps_projection("size", "locked")
+
+
 class _FakeEl:
     """Stands in for a NiceGUI element in HeatControls."""
     def __init__(self, value=None):
@@ -3241,30 +3324,47 @@ class _FakeEl:
         self.visible = on
 
 
-def _heat_controls(value="size"):
+def _heat_controls(value="size", scale="locked"):
     heat = gamma.HeatControls.__new__(gamma.HeatControls)
-    heat.value, heat.legend, heat._sided = _FakeEl(value), _FakeEl(), True
+    heat.value, heat.scale, heat.legend = _FakeEl(value), _FakeEl(scale), _FakeEl()
+    heat._sided, heat._lock, heat._lock_time = True, None, ""
     return heat
+
+
+def _epoch_rows():
+    """The sided rows with real clock times: 08:30 and 08:31 local."""
+    import datetime as dt
+    t0 = int(dt.datetime(2026, 10, 9, 8, 30).timestamp())
+    return [(t0 + 60 * i, *r[1:]) for i, r in enumerate(_sided_rows())]
 
 
 def test_heat_controls_read_gives_both_builders_their_keywords():
     heat = _heat_controls("size")
     rows = _sided_rows()
-    hk = heat.read(SIDED["gex"], rows, [99.0, 100.0, 101.0, 102.0])
-    assert hk == {"mode": "size", "balanced": [100.0]}
-    gamma.bar_figure(SIDED, 100.0, **hk)                       # both accept them
-    gamma.heatmap_figure(rows, "GEX", yrange=[95.0, 105.0], **hk)
+    hk = heat.read(SIDED["gex"], rows, [99.0, 100.0, 101.0, 102.0], {"scale_lock": _LOCK})
+    assert hk == {"mode": "size", "balanced": [100.0], "scale": "locked", "lock": _LOCK}
+    bars = gamma.bar_figure(SIDED, 100.0, **hk)                # both accept them
+    heat_fig = gamma.heatmap_figure(rows, "GEX", yrange=[95.0, 105.0], **hk)
+    assert heat_fig["colorAxis"]["max"] == 200.0 and bars["yAxis"]["softMax"] == 77.0
+
+
+def test_heat_controls_read_without_a_lock_in_the_entry():
+    heat = _heat_controls("net", "locked")
+    for entry in ({}, None, {"scale_lock": None}):
+        hk = heat.read(SIDED["gex"], _sided_rows(), [100.0], entry)
+        assert hk["scale"] == "locked" and hk["lock"] is None
 
 
 def test_heat_controls_fall_back_to_net_when_no_cell_has_sides():
     heat = _heat_controls("size")
     grid = {100.0: {"net": 5.0}}
     rows = [("09:30", 100.0, None, None, None, 0, {100.0: 4.0})]
-    assert heat.read(grid, rows, [100.0]) == {"mode": "net", "balanced": []}
+    hk = heat.read(grid, rows, [100.0], {"scale_lock": _LOCK})
+    assert hk == {"mode": "net", "balanced": [], "scale": "locked", "lock": _LOCK}
     assert heat.value.enabled is False
     assert heat.value.value == "size"        # the reader's choice is kept, not overwritten
     # ...and it comes back by itself when a sided session loads.
-    assert heat.read(SIDED["gex"], _sided_rows(), [100.0])["mode"] == "size"
+    assert heat.read(SIDED["gex"], _sided_rows(), [100.0], {})["mode"] == "size"
     assert heat.value.enabled is True
 
 
@@ -3274,16 +3374,46 @@ def test_heat_controls_show_on_the_four_greek_views_only():
                         ("Net Prem", False), ("Term", False)):
         heat.sync(view)
         assert heat.value.visible is shown and heat.legend.visible is shown
+        assert heat.scale.visible is shown
 
 
 def test_heat_controls_legend_carries_the_views_unit():
     heat = _heat_controls()
-    heat.show_legend("GEX", {"zmax": 2.5e9, "mode": "size"})
+    heat.show_legend("GEX", {"zmax": 2.5e9, "mode": "size", "scale": "adaptive"})
     assert "$ gamma per 1% move" in heat.legend.content and "+$2.50B" in heat.legend.content
-    heat.show_legend("Charm", {"zmax": 2.5e9, "mode": "net"})
+    heat.show_legend("Charm", {"zmax": 2.5e9, "mode": "net", "scale": "adaptive"})
     assert "$" not in heat.legend.content and "+2.50B" in heat.legend.content
     heat.show_legend("GEX", {})
     assert heat.legend.content == ""
+
+
+def test_heat_controls_legend_says_when_the_lock_was_set():
+    heat = _heat_controls("net", "locked")
+    hk = heat.read(SIDED["gex"], _epoch_rows(), [100.0], {"scale_lock": _LOCK})
+    heat.show_legend("GEX", {"zmax": 123.0, "mode": hk["mode"], "scale": hk["scale"]})
+    assert "held since 08:31" in heat.legend.content        # 08:30 + the lock's 1 minute
+
+
+def test_heat_controls_legend_says_the_lock_is_still_settling(monkeypatch):
+    monkeypatch.setattr(gamma._heat_cfg, "lock", lambda: {"minutes": 60, "quantile": 0.95,
+                                                          "headroom": 1.5})
+    heat = _heat_controls("net", "locked")
+    hk = heat.read(SIDED["gex"], _epoch_rows(), [100.0], {"scale_lock": None})
+    heat.show_legend("GEX", {"zmax": 9.0, "mode": hk["mode"], "scale": hk["scale"]})
+    assert "settling until 09:30" in heat.legend.content
+
+
+def test_heat_controls_legend_in_percent_for_a_share_scale():
+    heat = _heat_controls("net", "share")
+    hk = heat.read(SIDED["gex"], _epoch_rows(), [100.0], {"scale_lock": _LOCK})
+    heat.show_legend("GEX", {"zmax": 8.3, "mode": hk["mode"], "scale": hk["scale"]})
+    assert "+8.30%" in heat.legend.content and "share of each column" in heat.legend.content
+    assert "$" not in heat.legend.content
+
+
+def test_the_heat_scale_is_a_stored_setting_that_defaults_to_locked():
+    import app_settings
+    assert app_settings.DEFAULTS["gamma_heat_scale"] == "locked"
 
 
 def test_a_mark_that_is_not_a_number_is_skipped_on_the_heatmap():

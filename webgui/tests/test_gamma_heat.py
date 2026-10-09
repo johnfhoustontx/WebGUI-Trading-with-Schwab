@@ -186,3 +186,83 @@ def test_legend_survives_the_sanitizer():
 def test_legend_units_name_the_two_dollar_views():
     assert gh.UNITS["GEX"].startswith("$") and gh.UNITS["DEX"].startswith("$")
     assert "Charm" not in gh.UNITS and "Vanna" not in gh.UNITS
+
+
+def test_legend_in_percent_for_a_share_scale():
+    svg = gh.legend_svg(8.3, "share of each column", STOPS, unit="%")
+    assert "-8.30%" in svg and "+8.30%" in svg
+    assert ">share of each column<" in svg and "$" not in svg
+
+
+# ── the colour scale ─────────────────────────────────────────────────────────
+
+Z = [[1.0, -2.0, None], [3.0, 6.0, 0.0], [-4.0, 2.0, 5.0]]
+LOCKED = {"minutes": 60, "net": 40.0, "call": 70.0, "put": 30.0, "size": 100.0}
+
+
+def test_the_scales_in_reading_order():
+    assert list(gh.SCALES) == ["locked", "adaptive", "share"]
+
+
+def test_robust_max_is_a_high_percentile_of_the_absolute_cell():
+    assert gh.robust_max(Z) == 5.0            # 0.95 of [1,2,2,3,4,5,6] by index
+    assert gh.robust_max(Z, q=1.0) == 6.0
+    assert gh.robust_max([[None], [], [0.0]]) is None
+    assert gh.robust_max(None) is None
+
+
+def test_share_of_column_is_each_cell_over_its_columns_total_size():
+    out = gh.share_of_column(Z)
+    assert out[0] == [12.5, -20.0, None]
+    assert out[1] == [37.5, 60.0, 0.0]
+    assert out[2] == [-50.0, 20.0, 100.0]
+    assert Z[0] == [1.0, -2.0, None]            # the input is untouched
+
+
+def test_share_of_an_empty_column_is_a_gap():
+    assert gh.share_of_column([[0.0], [None]]) == [[None], [None]]
+    assert gh.share_of_column([]) == []
+
+
+def test_scale_max_locked_uses_the_published_lock_for_the_value():
+    assert gh.scale_max(Z, "locked", LOCKED, "size") == 100.0
+    assert gh.scale_max(Z, "locked", LOCKED, "net") == 40.0
+
+
+@pytest.mark.parametrize("lock", [None, {}, {"net": None}, {"net": 0}, {"net": "x"},
+                                  {"net": float("nan")}, {"size": 9.0}])
+def test_scale_max_falls_back_to_adaptive_without_a_lock(lock):
+    assert gh.scale_max(Z, "locked", lock, "net") == gh.robust_max(Z)
+
+
+def test_adaptive_and_share_never_use_the_lock():
+    assert gh.scale_max(Z, "adaptive", LOCKED, "net") == gh.robust_max(Z)
+    assert gh.scale_max(Z, "share", LOCKED, "net") == gh.robust_max(Z)
+
+
+def test_scale_caption_says_what_the_scale_is_tied_to():
+    assert gh.scale_caption("adaptive", LOCKED, "net", "09:30") == "adapts to what is visible"
+    assert gh.scale_caption("share", LOCKED, "net", "09:30") == "share of each column"
+    assert gh.scale_caption("locked", LOCKED, "net", "09:30") == "held since 09:30"
+    assert gh.scale_caption("locked", None, "net", "09:30") == "settling until 09:30"
+
+
+def test_a_lock_that_lacks_this_value_is_still_settling():
+    """A session of bare-number cells locks net only."""
+    lock = {"minutes": 60, "net": 4.0, "call": None, "put": None, "size": None}
+    assert gh.scale_caption("locked", lock, "size", "09:30") == "settling until 09:30"
+
+
+def test_no_lock_and_no_time_says_the_scale_adapts():
+    """A payload that predates the lock, off-hours: nothing to wait for."""
+    assert gh.scale_caption("locked", None, "net", "") == "adapts to what is visible"
+
+
+def test_bar_max_is_the_locks_extent_for_the_bars():
+    assert gh.bar_max(LOCKED, "net") == 40.0
+    assert gh.bar_max(LOCKED, "put") == 30.0
+    # Size draws a call bar and a put bar, so its extent is the larger side's.
+    assert gh.bar_max(LOCKED, "size") == 70.0
+    assert gh.bar_max(None, "net") is None
+    assert gh.bar_max({"net": 0}, "net") is None
+    assert gh.bar_max({"call": None, "put": None}, "size") is None
