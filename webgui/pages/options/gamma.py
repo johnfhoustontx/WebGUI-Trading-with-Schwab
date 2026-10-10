@@ -2643,6 +2643,25 @@ def overlay_handler(key, cast, after):
     return _on_change
 
 
+# The panels under the charts are stacked, so a strike has to sit at the same
+# place across each of them: one left and one right margin (Highcharts sizes
+# them to each chart's own labels otherwise), and an axis that is the strike
+# window exactly, never rounded out to a tick.
+UNDER_MARGIN_LEFT = 56       # room for the ridge plot's time labels
+UNDER_MARGIN_RIGHT = 16
+
+
+def _strike_axis(fig, lo=None, hi=None):
+    """Give a panel under the charts the shared strike axis: ``lo`` … ``hi``
+    across the same plot box as the others. With no window the keys are still
+    written (as None), so an in-place update clears an old one."""
+    fig["chart"]["marginLeft"] = UNDER_MARGIN_LEFT
+    fig["chart"]["marginRight"] = UNDER_MARGIN_RIGHT
+    fig["xAxis"].update({"min": lo, "max": hi, "startOnTick": False,
+                         "endOnTick": False, "minPadding": 0, "maxPadding": 0})
+    return fig
+
+
 def _reflow_later(plot):
     """Resize a chart to its box one tick from now. A chart that mounted hidden
     measured a zero-width box, and ``chart.update()`` does not resize it."""
@@ -2735,7 +2754,8 @@ def well_figure(points, spot, flip=None, height=WELL_HEIGHT):
              "zIndex": 5},
         ],
     })
-    return fig
+    # The bars' window, as the ridge plot's axis is: the two line up.
+    return _strike_axis(fig, *((strikes[0], strikes[-1]) if strikes else ()))
 
 
 class WellPanel:
@@ -2816,7 +2836,7 @@ def ridge_model(rows, mode, lo, hi):
                           scale=cfg["height"], overlap=cfg["overlap"]), mode)
 
 
-def ridge_figure(ridges, view="GEX", mode="net", height=RIDGE_HEIGHT):
+def ridge_figure(ridges, view="GEX", mode="net", height=RIDGE_HEIGHT, window=None):
     """The ridge plot as Highcharts options: one ``arearange`` series a ridge,
     the earliest first so the latest is drawn in front, and one scatter series
     of price dots.
@@ -2825,7 +2845,11 @@ def ridge_figure(ridges, view="GEX", mode="net", height=RIDGE_HEIGHT):
     time comes, because it updates in place and its series count must not
     change. A ridge is coloured along the strike axis by the sign of its value
     (zones on x); its height is the value's size, so a negative strike is a
-    hill too. The time of each ridge is a label on its baseline."""
+    hill too. The time of each ridge is a label on its baseline.
+
+    ``window`` is ``(lowest, highest)`` strike of the bars' window. The axis is
+    that exactly, whether or not a ridge reaches its edges, so the panel lines
+    up with the gravity well above it (``_strike_axis``)."""
     cfg = _heat_cfg.ridge()
     count = _ridge.slots(cfg["every_min"])
     ridges = list(ridges)[:count]
@@ -2863,7 +2887,6 @@ def ridge_figure(ridges, view="GEX", mode="net", height=RIDGE_HEIGHT):
     value = "" if mode == "net" else " " + _heat.VALUES.get(mode, "").lower()
     fig = _base_chart("arearange", height)
     fig["chart"]["backgroundColor"] = "transparent"
-    fig["chart"]["marginLeft"] = 56             # room for the time labels
     fig.update({
         "title": {"text": f"{_view_label(view)}{value} by strike through the session"
                           f" · a profile every {cfg['every_min']} min"
@@ -2881,13 +2904,13 @@ def ridge_figure(ridges, view="GEX", mode="net", height=RIDGE_HEIGHT):
                   "plotLines": [{"value": r["baseline"], "color": "#26324a",
                                  "width": 1, "zIndex": 1,
                                  "label": {"text": _fmt_ts(r["ts"]), "align": "left",
-                                           "x": -46, "y": 4,
+                                           "x": 10 - UNDER_MARGIN_LEFT, "y": 4,
                                            "style": {"color": FONT,
                                                      "fontSize": "10px"}}}
                                 for r in ridges]},
         "series": series,
     })
-    return fig
+    return _strike_axis(fig, *(window or ()))
 
 
 class RidgePanel:
@@ -2923,19 +2946,20 @@ class RidgePanel:
         strikes are the bars' own window, so the two never show different ones."""
         on_view = view in _VIEWS
         self.switch.set_visibility(on_view)
-        ridges = []
+        ridges, span = [], None
         if on_view and self.switch.value and snap:
             data = view_data((snap.get("views") or {}).get(view))
             spot = data.get("spot") or snap.get("spot")
             window = bars_from_gex(data, spot)["strikes"]
             if window:              # no price, no window: the bars are empty too
+                span = (window[0], window[-1])
                 ridges, mode = ridge_model(refloat_rows((hist or {}).get(view)),
-                                           mode, window[0], window[-1])
+                                           mode, *span)
         shown = any(r["points"] for r in ridges)
         self.plot.set_visibility(shown)
         if not shown:
             return
-        _set_figure(self.plot, ridge_figure(ridges, view, mode))
+        _set_figure(self.plot, ridge_figure(ridges, view, mode, window=span))
         self._reflow()
 
 

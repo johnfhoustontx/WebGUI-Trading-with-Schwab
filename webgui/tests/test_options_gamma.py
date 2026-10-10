@@ -4122,6 +4122,55 @@ def test_well_figure_always_holds_three_series():
         assert by["Price"]["data"] == [] and by["Low point"]["data"] == []
 
 
+# ── one strike axis for the panels under the charts ──────────────────────────
+# Asked for by the user 2026-10-10: with the well and the ridge plot both on,
+# a price sat at a different place in each. They are stacked, so the same
+# strike must be at the same horizontal position in both.
+
+def _strike_frame(fig):
+    """Everything that decides where a strike lands across a panel."""
+    x = fig["xAxis"]
+    return (fig["chart"]["marginLeft"], fig["chart"]["marginRight"], x["min"], x["max"],
+            x["startOnTick"], x["endOnTick"], x["minPadding"], x["maxPadding"])
+
+
+def test_the_well_and_the_ridge_plot_put_a_strike_in_the_same_place():
+    points = gamma.well_points(WELL, 103.0)                  # strikes 90 … 110
+    well = gamma.well_figure(points, 103.0)
+    ridges, mode = gamma.ridge_model(_ridge_rows(), "net", 90.0, 110.0)
+    ridge = gamma.ridge_figure(ridges, "GEX", mode, window=(90.0, 110.0))
+    assert _strike_frame(well) == _strike_frame(ridge)
+    left, right, lo, hi, on_tick_lo, on_tick_hi, pad_lo, pad_hi = _strike_frame(well)
+    # The axis is the window exactly: not rounded out to a tick, not padded.
+    assert (lo, hi) == (90.0, 110.0)
+    assert (on_tick_lo, on_tick_hi, pad_lo, pad_hi) == (False, False, 0, 0)
+    assert left > 0 and right > 0                            # fixed, not automatic
+
+
+def test_the_ridge_axis_is_the_window_even_when_no_ridge_reaches_its_edges():
+    """The published history is cropped around price as it was, so a ridge can
+    stop short of the window's edge. The axis is the window all the same."""
+    ridges, mode = gamma.ridge_model(_ridge_rows(), "net", 90.0, 110.0)
+    assert {p[0] for r in ridges for p in r["points"]} == {95.0, 100.0, 105.0}
+    x = gamma.ridge_figure(ridges, "GEX", mode, window=(90.0, 110.0))["xAxis"]
+    assert (x["min"], x["max"]) == (90.0, 110.0)
+
+
+def test_a_panel_with_no_window_lets_the_axis_fit_itself():
+    """The keys are always there, so an in-place update clears an old window."""
+    for fig in (gamma.well_figure([], None), gamma.ridge_figure([])):
+        assert fig["xAxis"]["min"] is None and fig["xAxis"]["max"] is None
+    assert _strike_frame(gamma.well_figure([], None))[:2] == _strike_frame(
+        gamma.ridge_figure([]))[:2]
+
+
+def test_the_ridge_panel_hands_the_figure_the_bars_window():
+    panel = _ridge_panel(on=True)
+    panel.paint("GEX", _RIDGE_SNAP, {"GEX": _ridge_rows()}, "net")
+    x = panel.plot.options["xAxis"]
+    assert (x["min"], x["max"]) == (95.0, 105.0)             # _RIDGE_SNAP's strikes
+
+
 class _WellEl:
     """Stands in for the well's switch, chart and caption."""
     def __init__(self, value=None):

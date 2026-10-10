@@ -4,7 +4,22 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-10 (**Dealer Positioning: contour lines, the fix that held.**)
+**Last updated:** 2026-10-10 (**Dealer Positioning: the well and the ridge plot share one strike axis.**)
+
+- **Asked for by the user** on seeing the two panels together: a price was at a
+  different horizontal place in each. The well's axis was rounded out to a tick
+  (7,720 to 7,910) and started at the panel's left edge; the ridge plot's stopped at
+  its last strike (7,900) and started 56 px in, after its time labels.
+- **Now** both take `gamma._strike_axis`: the same left and right margins, and an
+  x-axis that is the bars' strike window exactly. The same strike is at the same
+  place in both, with the same ticks.
+- **Verified** in the page harness on the real `$SPX` session of 2026-10-09: 7,750,
+  7,800, 7,850 and 7,900 at the same pixel in both panels, and the well's low point
+  directly above the ridge plot's 7,810 peak.
+- **Confirmed by the user the same afternoon:** the contour lines draw correctly
+  after the second fix.
+
+**Prior —** 2026-10-10 (**Dealer Positioning: contour lines, the fix that held.**)
 
 - **The first fix was incomplete,** and the user sent back the same picture after it
   was promoted. It rebuilt a contour series when its lines CHANGED. A repaint with

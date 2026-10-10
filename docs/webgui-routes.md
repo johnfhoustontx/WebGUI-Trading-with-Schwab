@@ -1103,6 +1103,14 @@ or **From spot**. `heatmap_figure` and `bar_figure` take `frame=` and `half=`.
 - **`UnderCharts`** holds the `WellPanel` and the `RidgePanel`: built where the two
   switches go, `mount()` where the panels go, `paint(view, snap, hist, mode)` first
   in `_render_view`. A third panel under the charts goes in it, not in `render`.
+- **One strike axis under the charts (2026-10-10).** The panels are stacked, so
+  `_strike_axis(fig, lo, hi)` gives each the same plot box and x-axis: fixed
+  `marginLeft` / `marginRight` (`UNDER_MARGIN_LEFT`, `UNDER_MARGIN_RIGHT`; left
+  automatic, Highcharts sizes them to each chart's own labels), `min` / `max` = the
+  bars' window exactly, no rounding out to a tick and no padding. `well_figure`
+  takes the window from its own points; `ridge_figure` takes `window=` from
+  `RidgePanel.paint`, because a ridge can stop short of the window's edge. A new
+  panel with strike across it calls `_strike_axis` too.
 - ⚠ Highcharts' `format` strings ignore a `+` flag (`{value:+.2f}` printed `20.00` in
   the browser), so the spot frame's axis and tooltip do not write one.
 - **The display window is config now.** `N_SIDE` is gone; `strikes_around`,

@@ -797,7 +797,8 @@ accelerate price.
   strike is a hill too. It follows the Value picker. Every ridge is on one
   scale, set by the typical one, so a reading far larger than the rest (an
   expiry close pinned on a strike) stands as a tower and may run off the top;
-  hover for the real figure.
+  hover for the real figure. With the Gravity well on as well, the two panels
+  share one strike axis, so a price is in the same place in both.
 - **The colour strip** beside the controls gives the two ends of the heat map's
   colours as numbers (dollars of gamma per 1% move, or dollars of delta; Charm
   and Vanna show a plain figure; percentages in Share of column) and says what

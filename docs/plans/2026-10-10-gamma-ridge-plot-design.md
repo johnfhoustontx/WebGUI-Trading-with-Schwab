@@ -58,6 +58,12 @@ The same three as the contours and the well.
   bars never show different strikes. The published history is cropped around
   price as it was, so on a day price travelled an early ridge can stop short at
   one edge. Nothing is filled in.
+- **It lines up with the gravity well.** Asked for by the user on seeing the two
+  together: the well's axis ran 7,720 to 7,910 from the left edge and the ridge
+  plot's 7,720 to 7,900 from 56 px in, so a price sat at a different place in
+  each. Both now take `_strike_axis`: the same two margins and an axis that is
+  the bars' window exactly. Checked in the browser on the 2026-10-09 `$SPX`
+  session: 7,750, 7,800, 7,850 and 7,900 at the same pixel in both.
 - **It follows the Value picker** (Net, Calls, Puts, Size). A session stored
   before cells carried a call and a put is drawn in net, and the title then says
   net. It does not follow Show, Scale or Frame: those are about the heat map's
