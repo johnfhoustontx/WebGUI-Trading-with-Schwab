@@ -4,7 +4,30 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-10 (**Dealer Positioning: the ridge plot.**)
+**Last updated:** 2026-10-10 (**Dealer Positioning: contour lines drawn out of order.**)
+
+- **Reported by the user** the day the contours shipped: loading the page with
+  Contours on drew the lines joined by long straight strokes. Turning the switch off
+  and on drew them correctly.
+- **Cause.** The heat map updates in place. When a series' data goes from one
+  non-empty set to another, Highcharts matches old and new points by x, updates the
+  matches where they stand and appends the rest. A contour series is a scatter with
+  a line, drawn in the order of its points, so every change of the lines (the second
+  paint after a load, each minute's refresh, any picker) left them out of order.
+  Empty to non-empty is a clean build, which is all my check before shipping tried.
+- **Fix.** Each contour series carries `pointStart = gamma_heat.stamp(points)`, a
+  CRC-32 of its points. `pointStart` means nothing to points with their own x, and a
+  changed one makes Highcharts rebuild the series instead of merging into it.
+- **Verified** in the page harness by comparing each contour series' drawn points
+  with the data sent: out of order at point 56 of 279 before the fix; in order after
+  it across three changes of the lines, and on a page loaded with the switch on.
+- **Checked the rest of the page.** No other series there depends on the order of
+  its points: the candles are `columnrange` and `errorbar`, the tracks and the ridge
+  plot's profiles are sorted by x, and the remaining scatter series are markers.
+- **Recorded** as a trap in CLAUDE.md and `docs/reference/webgui-dev-notes.md`, with
+  the check to run after a NiceGUI upgrade.
+
+**Prior —** 2026-10-10 (**Dealer Positioning: the ridge plot.**)
 
 - **What is new.** A **Ridge plot** switch on the Gamma, Charm, Delta and Vanna
   views, off until turned on. It adds a panel under the charts with the by-strike

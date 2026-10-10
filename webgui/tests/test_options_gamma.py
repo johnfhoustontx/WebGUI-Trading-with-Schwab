@@ -3954,6 +3954,29 @@ def test_no_contours_without_a_colour_scale():
     assert all(s["data"] == [] for s in _contour_series(fig))
 
 
+def test_a_changed_set_of_contours_is_drawn_fresh_not_merged_into_the_old_one():
+    """Reported by the user 2026-10-10: the lines came out joined by long
+    straight strokes until the switch was turned off and on. Updated in place,
+    Highcharts matches a series' old and new points BY X and appends the rest,
+    and a contour is drawn in the order of its points. A series whose
+    ``pointStart`` changed is rebuilt instead (``Series.update``), so each
+    contour series carries a stamp of its own points there."""
+    def stamps(mode):
+        fig = gamma.heatmap_figure(_band_rows(), "GEX", yrange=[95.0, 103.0],
+                                   mode=mode, scale="locked", lock=_CONTOUR_LOCK,
+                                   contours=_CONTOUR_CFG)
+        return [(s["pointStart"], s["data"]) for s in _contour_series(fig)]
+
+    net, again, size = stamps("net"), stamps("net"), stamps("size")
+    # The same lines keep their stamp, so an unchanged repaint rebuilds nothing.
+    assert net == again
+    for (stamp, data), (other_stamp, other_data) in zip(net, size):
+        assert data != other_data and stamp != other_stamp
+    # No lines, no stamp: the switch off, or a view with no scale.
+    off = gamma.heatmap_figure(_band_rows(), "GEX", yrange=[95.0, 103.0])
+    assert [s["pointStart"] for s in _contour_series(off)] == [0, 0]
+
+
 def test_the_bars_take_the_contour_keyword_and_ignore_it():
     assert (gamma.bar_figure(SIDED, 100.0, contours=_CONTOUR_CFG)
             == gamma.bar_figure(SIDED, 100.0))

@@ -300,6 +300,30 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
   for the plasma blue→magenta wash. What must not come back is a **flat opaque**
   plot background, which would defeat the `rgba(...,0)` zero stop by putting a solid
   colour where the page used to show through.
+- **A series drawn in the ORDER of its points must not be updated in place
+  (2026-10-10, cost: the heatmap's contour lines, reported by the user the day they
+  shipped).** On `chart.update()` Highcharts does not replace a series' data. With
+  old and new data both non-empty, `Series.setData` calls `updateData`, which
+  matches each new point to an old one BY X, updates the matches where they stand,
+  removes the unmatched old points and APPENDS the unmatched new ones. A `line` or
+  `area` series is kept sorted by x, so nobody notices. A `scatter` series is not,
+  and a scatter with a `lineWidth` (used because a contour doubles back in time,
+  which a `line` series cannot draw) joins its points in whatever order they end up
+  in: the contours came out linked by long straight strokes. Empty to non-empty is
+  a clean build, which is why turning the switch off and on cured it, and why a
+  check that only turns a switch ON does not find it. **The fix:** `Series.update`
+  rebuilds a series, instead of keeping its points, when its `pointStart` (or
+  `keys`, `pointInterval`) changes. `pointStart` means nothing to points that carry
+  their own x, so each contour series sets it to `gamma_heat.stamp(points)`, a
+  CRC-32 of the points: the same lines keep it, changed lines move it. Read from the
+  bundled build (`nicegui_highcharts/dist/index-*.js`, `update(t,e)` and
+  `updateData`), and proven in the page harness by comparing each series' drawn
+  points with the data sent, across three changes of the lines. ⚠ It leans on what
+  that build does, so re-run that comparison after a NiceGUI upgrade. The
+  chart-wide switch `chart.allowMutatingData = false` turns the matching off for
+  every series and was not used: it changes how the heatmap's own cells update.
+  To check any chart: compare `getElement(id).chart.series[k].points` with
+  `getElement(id).options.series[k].data` after the data has changed TWICE.
 - **An interpolated heatmap needs a UNIFORM data grid, or it combs (2026-08-11, cost:
   a long misdiagnosis).** `interpolation:True` rasterizes onto a canvas laid out on ONE
   row height — `rowsize`, which `gamma._strike_step` derives as the MEDIAN strike gap.

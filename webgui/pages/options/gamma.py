@@ -1286,11 +1286,17 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     # Contour lines, one series a sign. ``scatter`` with a line width, not
     # ``line``: a contour doubles back in time and a line series needs its x in
     # order. Last in the list so every earlier series keeps its place.
+    # ⚠ ``pointStart`` is not a start: the points carry their own x. It is a
+    # stamp of the points, because a CHANGED ``pointStart`` makes Highcharts
+    # rebuild the series. Updated in place it matches old and new points by x
+    # and appends the rest, and a contour is drawn in the order of its points:
+    # the lines came out joined by long straight strokes (2026-10-10).
     lines = (_heat.contours(vstrikes, vz, zmax, **contours) if contours and zmax
              else {"pos": [], "neg": []})
     for name, key, color in (("Contours above zero", "pos", CONTOUR_ABOVE_COLOR),
                              ("Contours below zero", "neg", CONTOUR_BELOW_COLOR)):
         series.append({"type": "scatter", "name": name, "data": lines[key],
+                       "pointStart": _heat.stamp(lines[key]),
                        "color": color, "lineWidth": 1, "marker": {"enabled": False},
                        "colorAxis": False, "states": no_fade,
                        "enableMouseTracking": False})

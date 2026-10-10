@@ -52,6 +52,14 @@ gamma, where hedging amplifies them)?
   when the switch is off. The count goes from nine to eleven. They are `scatter`
   series with a line width, not `line`: a contour doubles back in time, and a
   line series needs its x values in order.
+- **Rebuilt, never merged.** Found by the user the day it shipped: on a page
+  loaded with the switch on, the lines were joined by long straight strokes
+  until the switch was turned off and on. Updated in place, Highcharts matches
+  a series' old and new points by x and appends the rest, and a contour is
+  drawn in the order of its points. Each contour series now carries a stamp of
+  its points in `pointStart`, and a changed `pointStart` makes Highcharts
+  rebuild the series. My check before shipping only turned the switch on from
+  off, which is the one case that was never wrong.
 - **Kept small.** Points on a straight run are dropped (within 3% of a strike
   step, so a line is never visibly bent), a line spanning fewer than
   `min_columns` minutes (3) is left out as a speck, and past `max_points` (6,000 a

@@ -503,6 +503,16 @@ def test_a_gentle_wobble_is_kept_as_drawn():
     assert [y for _x, y in line] == [0.5, 0.25, 0.5, 0.25]
 
 
+def test_a_stamp_is_the_same_for_the_same_points_and_moves_when_one_does():
+    points = [[0, 1.5], [1, 2.0], [1, None], [3, 4.25]]
+    assert gh.stamp(points) == gh.stamp([list(p) for p in points])
+    assert isinstance(gh.stamp(points), int) and gh.stamp(points) > 0
+    moved = [[0, 1.5], [1, 2.0], [1, None], [3, 4.251]]
+    reordered = [points[3], points[0], points[1], points[2]]
+    assert len({gh.stamp(points), gh.stamp(moved), gh.stamp(reordered)}) == 3
+    assert gh.stamp([]) == 0 and gh.stamp(None) == 0
+
+
 def test_contours_of_nothing_are_nothing():
     for ys, z, zmax in (([], [], 5.0), ([0.0, 1.0], [[0.0], [10.0]], 5.0),
                         ([0.0], [[1.0, 2.0]], 1.0), ([0.0, 1.0], [[0.0, 0.0], [9.0, 9.0]], None)):

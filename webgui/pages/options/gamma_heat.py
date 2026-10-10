@@ -10,6 +10,7 @@ Design: docs/plans/2026-10-09-gamma-heatmap-value-scale-frame-design.md
 """
 import html
 import re
+import zlib
 
 from pages import fmt as _fmt
 
@@ -500,6 +501,17 @@ def _flat(lines, max_points):
         out.extend([round(x, 3), round(y, 3)] for x, y in line)
         out.append([round(line[-1][0], 3), None])
     return out
+
+
+def stamp(points):
+    """A whole number that is the same for the same ``points`` and moves when
+    any of them does, or their order (CRC-32 of their text). 0 for none.
+
+    For a series that is drawn in the ORDER of its points and updated in place:
+    Highcharts matches a series' old and new points by x and appends whatever
+    did not match, which leaves a line's points out of order. A series whose
+    ``pointStart`` changed is rebuilt instead, so the page puts this there."""
+    return zlib.crc32(repr(points).encode()) if points else 0
 
 
 def contours(ys, z, zmax, *, steps, min_columns, max_points):
