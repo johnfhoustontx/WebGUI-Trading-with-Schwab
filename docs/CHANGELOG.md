@@ -4,7 +4,28 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-10 (**Dealer Positioning: contour lines drawn out of order.**)
+**Last updated:** 2026-10-10 (**Dealer Positioning: contour lines, the fix that held.**)
+
+- **The first fix was incomplete,** and the user sent back the same picture after it
+  was promoted. It rebuilt a contour series when its lines CHANGED. A repaint with
+  the same lines still sends a new array, Highcharts still matches it against the
+  old points by x, and a contour's points repeat their x, so the lines were merged
+  out of order all the same. In the harness the page builds the figure three times
+  while it loads, which is why a page loaded with the switch on showed it at once.
+- **Fix.** `pointStart` on a contour series is now a number that is new on every
+  build of the figure, so the series is rebuilt on every repaint. `gamma_heat.stamp`
+  is gone.
+- **Why the first check passed.** It changed the lines three times and never
+  repainted them unchanged. Reproduced this time by flipping Level movement with
+  Contours on: out of order after one repaint.
+- **Verified** in the page harness over sixteen repaints (the same lines, changed
+  lines, a view change, and a page loaded with the switch on): after each, the drawn
+  points matched the data sent and the drawn path had exactly as many separate
+  lines as were sent. Then again on the real published `$SPX` session of 2026-10-09
+  seeded into the harness, in both frames, including a page loaded with the switch
+  on in From spot (the user's case): 2,705 points, 37 lines sent, 37 drawn.
+
+**Prior —** 2026-10-10 (**Dealer Positioning: contour lines drawn out of order.**)
 
 - **Reported by the user** the day the contours shipped: loading the page with
   Contours on drew the lines joined by long straight strokes. Turning the switch off

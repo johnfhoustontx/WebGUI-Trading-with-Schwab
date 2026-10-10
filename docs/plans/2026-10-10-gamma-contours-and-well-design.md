@@ -56,10 +56,13 @@ gamma, where hedging amplifies them)?
   loaded with the switch on, the lines were joined by long straight strokes
   until the switch was turned off and on. Updated in place, Highcharts matches
   a series' old and new points by x and appends the rest, and a contour is
-  drawn in the order of its points. Each contour series now carries a stamp of
-  its points in `pointStart`, and a changed `pointStart` makes Highcharts
-  rebuild the series. My check before shipping only turned the switch on from
-  off, which is the one case that was never wrong.
+  drawn in the order of its points. Each contour series now carries a number
+  in `pointStart` that is new on every build of the figure, and a changed
+  `pointStart` makes Highcharts rebuild the series. My check before shipping
+  only turned the switch on from off, which is the one case that was never
+  wrong. My first fix stamped the points, so it rebuilt changed lines only; a
+  repaint with the same lines is merged just the same, and the user sent back
+  the same picture.
 - **Kept small.** Points on a straight run are dropped (within 3% of a strike
   step, so a line is never visibly bent), a line spanning fewer than
   `min_columns` minutes (3) is left out as a speck, and past `max_points` (6,000 a

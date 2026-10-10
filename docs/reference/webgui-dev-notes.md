@@ -311,19 +311,27 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
   which a `line` series cannot draw) joins its points in whatever order they end up
   in: the contours came out linked by long straight strokes. Empty to non-empty is
   a clean build, which is why turning the switch off and on cured it, and why a
-  check that only turns a switch ON does not find it. **The fix:** `Series.update`
+  check that only turns a switch ON does not find it. ⚠ **The SAME data scrambles
+  too.** Every repaint sends a new array, so `setData` runs whether or not a
+  point moved, and a contour's points repeat their x (each line break shares the
+  x before it), so some match and some are appended. **The fix:** `Series.update`
   rebuilds a series, instead of keeping its points, when its `pointStart` (or
   `keys`, `pointInterval`) changes. `pointStart` means nothing to points that carry
-  their own x, so each contour series sets it to `gamma_heat.stamp(points)`, a
-  CRC-32 of the points: the same lines keep it, changed lines move it. Read from the
-  bundled build (`nicegui_highcharts/dist/index-*.js`, `update(t,e)` and
-  `updateData`), and proven in the page harness by comparing each series' drawn
-  points with the data sent, across three changes of the lines. ⚠ It leans on what
-  that build does, so re-run that comparison after a NiceGUI upgrade. The
-  chart-wide switch `chart.allowMutatingData = false` turns the matching off for
-  every series and was not used: it changes how the heatmap's own cells update.
-  To check any chart: compare `getElement(id).chart.series[k].points` with
-  `getElement(id).options.series[k].data` after the data has changed TWICE.
+  their own x, so each contour series sets it to a number that is new on EVERY
+  build of the figure (`next(gamma._CONTOUR_BUILD)`, 0 when it has no lines). The
+  first fix, shipped the same afternoon, used a CRC-32 of the points instead: it
+  rebuilt changed lines and still merged unchanged ones, and the user sent back
+  the same picture. Read from the bundled build
+  (`nicegui_highcharts/dist/index-*.js`, `update(t,e)` and `updateData`). ⚠ It
+  leans on what that build does, so re-run the check below after a NiceGUI
+  upgrade. The chart-wide switch `chart.allowMutatingData = false` turns the
+  matching off for every series and was not used: it changes how the heatmap's
+  own cells update.
+  **To check any such chart**, repaint it several times with the SAME data (flip
+  another switch on the page) and with changed data, and after each compare
+  `getElement(id).chart.series[k].points` with
+  `getElement(id).options.series[k].data`, and the number of `M` commands in
+  `series[k].graph.element.getAttribute('d')` with the number of lines sent.
 - **An interpolated heatmap needs a UNIFORM data grid, or it combs (2026-08-11, cost:
   a long misdiagnosis).** `interpolation:True` rasterizes onto a canvas laid out on ONE
   row height — `rowsize`, which `gamma._strike_step` derives as the MEDIAN strike gap.

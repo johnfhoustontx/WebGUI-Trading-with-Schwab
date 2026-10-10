@@ -17,6 +17,7 @@ STRINGS. The pure builders (``bars_from_gex`` sorts + numeric-compares strikes;
 via ``_refloat_keys`` BEFORE feeding the builders. The builders stay unchanged.
 """
 import datetime as _dt
+import itertools
 import logging
 import math
 from zoneinfo import ZoneInfo
@@ -67,6 +68,8 @@ CONTOUR_BELOW_COLOR = "rgba(255,208,228,0.62)"
 # The gravity well's ground: each ramp end, mostly see-through, under its line.
 WELL_VALLEY_FILL = "rgba(53,200,255,0.26)"     # POS_COLOR
 WELL_HILL_FILL = "rgba(255,77,141,0.26)"       # NEG_COLOR
+# Numbers each build of a contour series (see ``heatmap_figure``).
+_CONTOUR_BUILD = itertools.count(1)
 WELL_HEIGHT = 250
 # The ridge plot's fills: a dark tint of each ramp end, nearly opaque, so a ridge
 # hides the part of the one behind it that it stands in front of.
@@ -1287,16 +1290,18 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     # ``line``: a contour doubles back in time and a line series needs its x in
     # order. Last in the list so every earlier series keeps its place.
     # ⚠ ``pointStart`` is not a start: the points carry their own x. It is a
-    # stamp of the points, because a CHANGED ``pointStart`` makes Highcharts
-    # rebuild the series. Updated in place it matches old and new points by x
-    # and appends the rest, and a contour is drawn in the order of its points:
-    # the lines came out joined by long straight strokes (2026-10-10).
+    # number that is new on EVERY build, because a CHANGED ``pointStart`` makes
+    # Highcharts rebuild the series. Updated in place it matches old and new
+    # points by x and appends the rest, and a contour is drawn in the order of
+    # its points: the lines came out joined by long straight strokes
+    # (2026-10-10). Every build, not only one whose lines changed: a repaint
+    # with the same lines is merged just the same, their x values repeating.
     lines = (_heat.contours(vstrikes, vz, zmax, **contours) if contours and zmax
              else {"pos": [], "neg": []})
     for name, key, color in (("Contours above zero", "pos", CONTOUR_ABOVE_COLOR),
                              ("Contours below zero", "neg", CONTOUR_BELOW_COLOR)):
         series.append({"type": "scatter", "name": name, "data": lines[key],
-                       "pointStart": _heat.stamp(lines[key]),
+                       "pointStart": next(_CONTOUR_BUILD) if lines[key] else 0,
                        "color": color, "lineWidth": 1, "marker": {"enabled": False},
                        "colorAxis": False, "states": no_fade,
                        "enableMouseTracking": False})

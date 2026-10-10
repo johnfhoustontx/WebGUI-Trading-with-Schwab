@@ -3954,27 +3954,36 @@ def test_no_contours_without_a_colour_scale():
     assert all(s["data"] == [] for s in _contour_series(fig))
 
 
-def test_a_changed_set_of_contours_is_drawn_fresh_not_merged_into_the_old_one():
-    """Reported by the user 2026-10-10: the lines came out joined by long
-    straight strokes until the switch was turned off and on. Updated in place,
-    Highcharts matches a series' old and new points BY X and appends the rest,
-    and a contour is drawn in the order of its points. A series whose
-    ``pointStart`` changed is rebuilt instead (``Series.update``), so each
-    contour series carries a stamp of its own points there."""
-    def stamps(mode):
+def test_contours_are_drawn_fresh_on_every_repaint_never_merged_into_the_old_ones():
+    """Reported by the user twice on 2026-10-10: the lines came out joined by
+    long straight strokes. Updated in place, Highcharts matches a series' old
+    and new points BY X and appends the rest, and a contour is drawn in the
+    order of its points. A series whose ``pointStart`` changed is rebuilt
+    instead (``Series.update``), so each contour series carries a number there
+    that is new on EVERY build of the figure.
+
+    Every build, not only a build whose lines changed: the first fix stamped
+    the points, and a repaint with the SAME lines (a new array, the same
+    stamp) was still merged, because a contour's points repeat their x."""
+    def build(mode="net"):
         fig = gamma.heatmap_figure(_band_rows(), "GEX", yrange=[95.0, 103.0],
                                    mode=mode, scale="locked", lock=_CONTOUR_LOCK,
                                    contours=_CONTOUR_CFG)
         return [(s["pointStart"], s["data"]) for s in _contour_series(fig)]
 
-    net, again, size = stamps("net"), stamps("net"), stamps("size")
-    # The same lines keep their stamp, so an unchanged repaint rebuilds nothing.
-    assert net == again
-    for (stamp, data), (other_stamp, other_data) in zip(net, size):
-        assert data != other_data and stamp != other_stamp
-    # No lines, no stamp: the switch off, or a view with no scale.
+    first, same_lines, other_lines = build(), build(), build("size")
+    seen = []
+    for (a, a_data), (b, b_data), (c, _c_data) in zip(first, same_lines, other_lines):
+        assert a_data == b_data and a_data                # the same lines...
+        assert isinstance(a, int) and 0 < a < b < c       # ...and a new number
+        seen += [a, b, c]
+    assert len(set(seen)) == len(seen)                    # never one shared by two
+    # No lines, nothing to rebuild: the switch off, a sign with no lines, or a
+    # view with no scale.
     off = gamma.heatmap_figure(_band_rows(), "GEX", yrange=[95.0, 103.0])
     assert [s["pointStart"] for s in _contour_series(off)] == [0, 0]
+    above, below = build("put")
+    assert above == (0, []) and below[0] > 0
 
 
 def test_the_bars_take_the_contour_keyword_and_ignore_it():

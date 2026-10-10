@@ -1069,9 +1069,11 @@ or **From spot**. `heatmap_figure` and `bar_figure` take `frame=` and `half=`.
   line width, "Contours above zero" and "Contours below zero", LAST in the list.
   They always exist (empty when off). `scatter`, not `line`: a contour doubles back
   in time and a line series needs its x in order. ⚠ Each carries
-  `pointStart = gamma_heat.stamp(points)`: not a start, a stamp that makes
-  Highcharts rebuild the series when its lines change. Updated in place it matches
-  points by x and the lines come out joined by straight strokes (dev notes). A cell with a gap in any corner
+  `pointStart = next(_CONTOUR_BUILD)`: not a start, a number new on every build,
+  which makes Highcharts rebuild the series on every repaint. Updated in place
+  (even with the same lines) it matches points by x and the lines come out joined
+  by straight strokes (dev notes). So a contour figure is never equal to the one
+  built before it. A cell with a gap in any corner
   is skipped, so no line crosses a gap in the spot frame. Levels are the top of the
   colour scale and `steps − 1` halvings, each side of zero.
 - **The gravity well (2026-10-10).** `WellPanel` (module level): a **Gravity well**

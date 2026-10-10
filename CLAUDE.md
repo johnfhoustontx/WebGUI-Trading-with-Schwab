@@ -297,8 +297,9 @@ event loop (`run.io_bound`).
   (it blanks the chart). `type="stockChart"` elements are a separate case.
 - An interpolated heatmap needs a uniform strike grid (`gamma.uniform_strike_grid`).
 - A series drawn in the ORDER of its points (a scatter with a line width) is
-  scrambled by an in-place update: Highcharts matches old and new points by x.
-  Give it a `pointStart` that changes with its data (`gamma_heat.stamp`).
+  scrambled by an in-place update, even one with the SAME data: Highcharts
+  matches old and new points by x. Give it a `pointStart` that is new on every
+  build (`gamma._CONTOUR_BUILD`), and check it with a repaint, not a toggle.
 - `ui.slider` keeps `min`/`max` in `_props`; assigning `slider.max` does nothing.
 - A server-paged `ui.table` announces its own pagination when it mounts and
   NiceGUI writes it over the element's. Keep the pagination the page last sent in
