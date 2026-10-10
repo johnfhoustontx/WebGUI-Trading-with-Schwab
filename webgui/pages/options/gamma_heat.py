@@ -356,3 +356,179 @@ def legend_svg(zmax, caption, stops, *, unit, uid="gheat"):
         f'<text x="{hi_x + _LABEL_W}" y="{mid}" dy="{_BASELINE_DY}" '
         f'font-size="10" fill="{_LEGEND_MUTED}">{tail}</text>'
         f'</svg>')
+
+
+# ── contour lines ────────────────────────────────────────────────────────────
+# Isolines of the drawn grid, as plain polylines the chart can overlay. Marching
+# squares over the cells between neighbouring strikes and neighbouring minutes;
+# a cell with a gap (None) in any corner is skipped, so no line is ever
+# interpolated through a value that was not measured.
+
+# A cell's four edges, and which pairs of them a line joins for each pattern of
+# corners at or above the level. Corner bits: lower-left 1, lower-right 2,
+# upper-right 4, upper-left 8 ("lower" is the lower strike).
+_BOTTOM, _RIGHT, _TOP, _LEFT = range(4)
+_CELL_LINES = {
+    1: ((_LEFT, _BOTTOM),), 2: ((_BOTTOM, _RIGHT),), 3: ((_LEFT, _RIGHT),),
+    4: ((_RIGHT, _TOP),), 5: ((_LEFT, _TOP), (_BOTTOM, _RIGHT)),
+    6: ((_BOTTOM, _TOP),), 7: ((_LEFT, _TOP),), 8: ((_LEFT, _TOP),),
+    9: ((_BOTTOM, _TOP),), 10: ((_LEFT, _BOTTOM), (_RIGHT, _TOP)),
+    11: ((_RIGHT, _TOP),), 12: ((_LEFT, _RIGHT),), 13: ((_BOTTOM, _RIGHT),),
+    14: ((_LEFT, _BOTTOM),)}
+# A point on a straight run is dropped when it sits within this share of one
+# strike step of the run. Small enough that a line is never visibly bent.
+_CONTOUR_TOLERANCE = 0.03
+# The longest run one simplifying step looks back over (it re-checks every
+# point in the run, so this bounds the work on a long flat line).
+_CONTOUR_RUN = 64
+
+
+def contour_levels(zmax, steps):
+    """The levels drawn each side of zero: the top of the colour scale and
+    ``steps - 1`` halvings below it, ascending. ``[]`` with no usable scale."""
+    if (isinstance(zmax, bool) or not isinstance(zmax, (int, float))
+            or zmax != zmax or zmax <= 0 or steps < 1):
+        return []
+    return [zmax / 2 ** k for k in range(int(steps) - 1, -1, -1)]
+
+
+def _level_lines(ys, z, levels):
+    """``{level: ([(edge, edge), …], {edge: (x, y)})}`` for every level at once.
+
+    An edge is named by its lower-left node, so the two cells that share it
+    name it alike and the pieces join exactly, with no comparing of floats."""
+    width = min(len(row) for row in z)
+    found = {level: ([], {}) for level in levels}
+    for yi in range(len(ys) - 1):
+        low, high = z[yi], z[yi + 1]
+        y0, dy = ys[yi], ys[yi + 1] - ys[yi]
+        for xi in range(width - 1):
+            a, b, c, d = low[xi], low[xi + 1], high[xi + 1], high[xi]
+            if a is None or b is None or c is None or d is None:
+                continue
+            least, most = min(a, b, c, d), max(a, b, c, d)
+            if least == most:
+                continue
+            for level in levels:
+                if not least < level <= most:
+                    continue
+                case = ((a >= level) | (b >= level) << 1
+                        | (c >= level) << 2 | (d >= level) << 3)
+                segments, points = found[level]
+                named = {}
+                for edge in {e for pair in _CELL_LINES[case] for e in pair}:
+                    if edge == _BOTTOM:
+                        key, at = ("h", xi, yi), (xi + (level - a) / (b - a), y0)
+                    elif edge == _RIGHT:
+                        key = ("v", xi + 1, yi)
+                        at = (xi + 1, y0 + dy * (level - b) / (c - b))
+                    elif edge == _TOP:
+                        key = ("h", xi, yi + 1)
+                        at = (xi + (level - d) / (c - d), y0 + dy)
+                    else:
+                        key, at = ("v", xi, yi), (xi, y0 + dy * (level - a) / (d - a))
+                    points[key] = at
+                    named[edge] = key
+                segments.extend((named[e1], named[e2]) for e1, e2 in _CELL_LINES[case])
+    return found
+
+
+def _chains(segments):
+    """Join two-edge pieces into runs of edges: open lines first, then loops (a
+    loop ends on the edge it began on)."""
+    touching = {}
+    for i, (e1, e2) in enumerate(segments):
+        touching.setdefault(e1, []).append(i)
+        touching.setdefault(e2, []).append(i)
+    used = [False] * len(segments)
+
+    def walk(edge):
+        chain = [edge]
+        while True:
+            step = next((i for i in touching[edge] if not used[i]), None)
+            if step is None:
+                return chain
+            used[step] = True
+            e1, e2 = segments[step]
+            edge = e2 if e1 == edge else e1
+            chain.append(edge)
+
+    out = [walk(edge) for edge, pieces in touching.items()
+           if len(pieces) == 1 and not used[pieces[0]]]
+    out += [walk(e1) for i, (e1, _e2) in enumerate(segments) if not used[i]]
+    return out
+
+
+def _straightened(points, tolerance):
+    """``points`` without those that sit on a straight run between their
+    neighbours (within ``tolerance`` in strike units). Ends are always kept."""
+    if len(points) < 3:
+        return list(points)
+    out, anchor, end = [points[0]], 0, 2
+    while end < len(points):
+        (ax, ay), (bx, by) = points[anchor], points[end]
+        straight = bx != ax and end - anchor < _CONTOUR_RUN
+        if straight:
+            for px, py in points[anchor + 1:end]:
+                if (not min(ax, bx) <= px <= max(ax, bx)
+                        or abs(py - (ay + (by - ay) * (px - ax) / (bx - ax))) > tolerance):
+                    straight = False
+                    break
+        if straight:
+            end += 1
+        else:
+            anchor = end - 1
+            out.append(points[anchor])
+            end = anchor + 2
+    out.append(points[-1])
+    return out
+
+
+def _span(line):
+    xs = [p[0] for p in line]
+    return max(xs) - min(xs)
+
+
+def _flat(lines, max_points):
+    """Polylines as ONE series: longest first, a ``[x, None]`` break after each,
+    stopping before the point budget is passed."""
+    out, used = [], 0
+    for line in sorted(lines, key=lambda ln: -_span(ln)):
+        if used + len(line) > max_points:
+            break
+        used += len(line)
+        out.extend([round(x, 3), round(y, 3)] for x, y in line)
+        out.append([round(line[-1][0], 3), None])
+    return out
+
+
+def contours(ys, z, zmax, *, steps, min_columns, max_points):
+    """Contour lines of the drawn grid ``z[yi][xi]`` (rows are ``ys``, ascending;
+    columns are the minutes), as ``{"pos": points, "neg": points}``.
+
+    The levels are ``contour_levels(zmax, steps)`` above zero and the same below
+    it, so a line means the same share of the colour scale in every view. Each
+    list is one chart series: ``[x, y]`` points with an ``[x, None]`` break
+    between lines, ``x`` in column units (a crossing between two minutes sits
+    between their columns). A line spanning fewer than ``min_columns`` columns
+    is a speck and is left out; past ``max_points`` the shortest are dropped.
+    Nothing is written to ``z``."""
+    out = {"pos": [], "neg": []}
+    levels = contour_levels(zmax, steps)
+    if not levels or len(ys) < 2 or len(z) < 2 or min(len(row) for row in z) < 2:
+        return out
+    gaps = [b - a for a, b in zip(ys, ys[1:]) if b > a]
+    tolerance = _CONTOUR_TOLERANCE * min(gaps) if gaps else 0.0
+    signed = {level: "pos" for level in levels}
+    signed.update({-level: "neg" for level in levels})
+    lines = {"pos": [], "neg": []}
+    for level, (segments, points) in _level_lines(ys, z, list(signed)).items():
+        for chain in _chains(segments):
+            line = _straightened([points[edge] for edge in chain], tolerance)
+            if line[0] > line[-1]:
+                line.reverse()               # one direction, so the output is stable
+            if _span(line) >= min_columns:
+                lines[signed[level]].append(line)
+    for sign in out:
+        out[sign] = _flat(lines[sign], max_points)
+    return out

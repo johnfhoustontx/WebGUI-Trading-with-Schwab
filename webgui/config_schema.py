@@ -961,6 +961,22 @@ _GAMMA_HEAT = ConfigFile(
                   "day, 20 about two fifths. 0 keeps none.",
                   kind="int", unit="strikes", min=0, max=60, step=1),
         )),
+        Section("Contour lines",
+                "The heat map's Contours switch draws lines of equal value "
+                "over the cells. Read each time the page draws.", (
+            Field("contours.steps", "Levels each side of zero",
+                  "The top of the colour scale, then each level half the one "
+                  "above. 3 draws the full scale, a half and a quarter.",
+                  kind="int", min=1, max=5, step=1),
+            Field("contours.min_columns", "Shortest line drawn",
+                  "A line spanning fewer minutes than this is a speck and is "
+                  "left out. 0 draws everything.",
+                  kind="int", unit="min", min=0, max=60, step=1),
+            Field("contours.max_points", "Most points drawn",
+                  "For each of the two signs. Past it the shortest lines are "
+                  "dropped, so a busy session cannot slow the page.",
+                  kind="int", unit="points", min=500, max=40000, step=500),
+        )),
     ),
 )
 

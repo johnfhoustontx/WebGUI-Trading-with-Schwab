@@ -45,6 +45,17 @@ DEFAULTS = {
         # (tools/measure_gamma_crop.py). 0 keeps no extra strikes.
         "spot_side": 10,
     },
+    "contours": {
+        # Contour lines each side of zero: the top of the colour scale and this
+        # many levels in all, each half the one above (3 = full, half, quarter).
+        "steps": 3,
+        # A line spanning fewer columns (minutes) than this is a speck and is
+        # not drawn. 0 draws everything.
+        "min_columns": 3,
+        # The most points one sign's lines may hold; past it the shortest lines
+        # are dropped. It bounds what each repaint sends to the browser.
+        "max_points": 6000,
+    },
 }
 
 load, reset_cache = toml_loader(GAMMA_HEAT_TOML, DEFAULTS, label="gamma_heat.toml")
@@ -91,6 +102,16 @@ def spot_side() -> int:
     session's low and high in the published history. Never more than
     ``n_side``. 0 turns the wider history crop off."""
     return min(_setting("window", "spot_side", minimum=0, maximum=60), n_side())
+
+
+def contours() -> dict:
+    """``{"steps", "min_columns", "max_points"}`` for the heatmap's contour
+    lines (``pages/options/gamma_heat.contours``). Read by the page each time it
+    draws with the Contours switch on."""
+    return {"steps": _setting("contours", "steps", minimum=1, maximum=5),
+            "min_columns": _setting("contours", "min_columns", minimum=0, maximum=60),
+            "max_points": _setting("contours", "max_points",
+                                   minimum=500, maximum=40000)}
 
 
 def lock() -> dict:

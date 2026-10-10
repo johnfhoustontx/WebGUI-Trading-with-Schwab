@@ -44,3 +44,15 @@ n_side = 20
 # added about 40%. Never more than n_side. 0 keeps no extra strikes, and the
 # frame then shows gaps where a column has none.
 spot_side = 10
+
+[contours]
+# The heatmap's Contours switch draws lines of equal value over the cells.
+# Levels each side of zero: the top of the colour scale and this many levels in
+# all, each half the one above (3 = the full scale, a half and a quarter).
+steps = 3
+# A line spanning fewer columns (minutes) than this is a speck and is not drawn.
+# 0 draws everything.
+min_columns = 3
+# The most points one sign's lines may hold. Past it the shortest lines are
+# dropped. It bounds what each repaint sends to the browser.
+max_points = 6000

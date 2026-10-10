@@ -58,6 +58,10 @@ PROJ_FLIP_COLOR = "#ffb74d"   # projected EOD delta-flip (0-DTE charm drift)
 # grey: amber is the projected flip's, lavender the flip's, and both ramp colours
 # are the walls'. A test pins it distinct from every other level's colour.
 BALANCED_COLOR = "#9fb3c8"
+# Contour lines over the heatmap: a pale tint of each ramp end, part see-through,
+# so a line reads against its own colour without hiding the cells under it.
+CONTOUR_ABOVE_COLOR = "rgba(214,241,255,0.62)"
+CONTOUR_BELOW_COLOR = "rgba(255,208,228,0.62)"
 PANEL_BORDER = "rgba(120,140,160,0.16)"   # hairline framing the washed plot area
 
 # Dark theme for all charts (matches the app's dark shell).
@@ -588,8 +592,11 @@ _INIT_FLEX = flex_class(0.5)
 def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=None, height=680,
                yrange=None, mode="net", balanced=(), scale="adaptive", lock=None,
                frame="strike", half=None, show="level", change_window_min=30,
-               basis=None):
+               basis=None, contours=None):
     """Highcharts horizontal-bar options for one view (dark, beveled, labeled).
+
+    ``contours`` is the heatmap's and is ignored here: both builders take one
+    set of keywords (``HeatControls.read``).
 
     In a Highcharts ``bar`` chart the category axis (``xAxis``) is vertical, so the
     STRIKE axis is ``xAxis`` (linear, with the spot/flip/wall reference plotLines)
@@ -1024,7 +1031,7 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                    show_tracks=False, spot_style="line", spot_interval=5,
                    projected_flip=None, mode="net", balanced=(), legend=None,
                    scale="adaptive", lock=None, frame="strike", half=None,
-                   show="level", change_window_min=30):
+                   show="level", change_window_min=30, contours=None):
     """Intraday strike×time Highcharts heatmap (dark, cell separators, concise
     hover) with the underlying spot-price line overlaid on the same (linear)
     strike axis. ``yrange`` (when given) sets the Strike axis range so it aligns
@@ -1058,6 +1065,12 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     change is taken per STRIKE, before any frame transform, and a strike with no
     reading at the basis is a gap. The scale is the value's own: a locked change
     cell as bright as a wall is as large as a wall.
+
+    ``contours`` (``gamma_heat_config.contours()``, or None for off) overlays
+    lines of equal value, taken from the grid EXACTLY as it is drawn (value,
+    change, share and frame all applied) at fixed shares of the colour scale.
+    They cover the collected columns only, never the projection band. The two
+    series exist either way, empty when off: the series count is fixed.
 
     ``projection`` (GEX only) appends a forward band: extra time columns of
     projected net-per-mark cells on the SAME heatmap series/colorAxis, a 'now'
@@ -1255,6 +1268,17 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
         pts = track_points(vals)
         series.append(_line_series(name, pts, color, lineWidth=1, step="left",
                                    enableMouseTracking=False))
+    # Contour lines, one series a sign. ``scatter`` with a line width, not
+    # ``line``: a contour doubles back in time and a line series needs its x in
+    # order. Last in the list so every earlier series keeps its place.
+    lines = (_heat.contours(vstrikes, vz, zmax, **contours) if contours and zmax
+             else {"pos": [], "neg": []})
+    for name, key, color in (("Contours above zero", "pos", CONTOUR_ABOVE_COLOR),
+                             ("Contours below zero", "neg", CONTOUR_BELOW_COLOR)):
+        series.append({"type": "scatter", "name": name, "data": lines[key],
+                       "color": color, "lineWidth": 1, "marker": {"enabled": False},
+                       "colorAxis": False, "states": no_fade,
+                       "enableMouseTracking": False})
     # The bar chart already labels the Strike axis and the heatmap shares its EXACT
     # y-range, so hide the heatmap's (duplicate) strike labels + title and drop its
     # left-axis gutter — the cells butt directly against the bars.
@@ -2463,6 +2487,13 @@ class HeatControls:
             "What the vertical axis measures. From spot puts price on a flat "
             "line through the middle, so the flip and the walls move: a wall "
             "sliding toward the centre is one price is approaching.")
+        self.contours = ui.switch(
+            "Contours", value=bool(app_settings.get("gamma_heat_contours")))
+        self.contours.props("dense").classes("text-xs")
+        self.contours.tooltip(
+            "Draw lines of equal value over the heat map, at the top of the "
+            "colour scale, half of it and a quarter. Lines packed close "
+            "together mark where the positioning changes fast across strikes.")
         # ml-auto: the strip sits at the right end of the controls row.
         self.legend = ui.html("").classes("ml-auto")
         self._sided, self._lock, self._lock_time = True, None, ""
@@ -2478,6 +2509,8 @@ class HeatControls:
             overlay_handler("gamma_heat_scale", str, repaint))
         self.frame.on_value_change(overlay_handler(
             "gamma_heat_frame", str, lambda: (resync(), repaint())))
+        self.contours.on_value_change(
+            overlay_handler("gamma_heat_contours", bool, repaint))
 
     def sync(self, view, overlays=()):
         """Shown on the four Greek views only: the other views have no cells.
@@ -2487,7 +2520,8 @@ class HeatControls:
         there. The Level movement switch is NOT one of them: it works in both
         frames. Call it AFTER the page has set their visibility by its own rules."""
         on = view in _VIEWS
-        for el in (self.value, self.show, self.scale, self.frame, self.legend):
+        for el in (self.value, self.show, self.scale, self.frame, self.contours,
+                   self.legend):
             el.set_visibility(on)
         if on and self.frame.value == "spot":
             for el in overlays:
@@ -2530,7 +2564,9 @@ class HeatControls:
                "half": _heat_cfg.spot_side() or _heat_cfg.n_side(),
                "show": self.show.value if self.show.value in _heat.SHOWS
                else "level",
-               "change_window_min": _heat_cfg.change_window_min()}
+               "change_window_min": _heat_cfg.change_window_min(),
+               # The contour settings while the switch is on, else None.
+               "contours": _heat_cfg.contours() if self.contours.value else None}
         if self._sided and self.value.value in _heat.VALUES:
             out["mode"] = self.value.value
             out["balanced"] = _heat.balanced_marks(grid, strikes,

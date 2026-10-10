@@ -398,3 +398,119 @@ def test_bar_max_is_the_locks_extent_for_the_bars():
     assert gh.bar_max(None, "net") is None
     assert gh.bar_max({"net": 0}, "net") is None
     assert gh.bar_max({"call": None, "put": None}, "size") is None
+
+
+# ── contour lines ────────────────────────────────────────────────────────────
+# ``z[yi][xi]``: rows are strikes (``ys`` ascending), columns are minutes.
+
+def _lines(points):
+    """A flat series' polylines: split at the ``[x, None]`` breaks."""
+    out, cur = [], []
+    for x, y in points:
+        if y is None:
+            if cur:
+                out.append(cur)
+            cur = []
+        else:
+            cur.append((x, y))
+    if cur:
+        out.append(cur)
+    return out
+
+
+def _contours(ys, z, zmax, **kw):
+    kw = {"steps": 1, "min_columns": 0, "max_points": 10_000, **kw}
+    return gh.contours(ys, z, zmax, **kw)
+
+
+def test_contour_levels_halve_down_from_the_top_of_the_scale():
+    assert gh.contour_levels(8.0, 3) == [2.0, 4.0, 8.0]
+    assert gh.contour_levels(8.0, 1) == [8.0]
+    for zmax, steps in ((None, 3), (0, 3), (-1.0, 3), (8.0, 0), (float("nan"), 2)):
+        assert gh.contour_levels(zmax, steps) == []
+
+
+def test_a_band_is_outlined_by_a_line_each_side_of_it():
+    """A strike that holds 10 all session between two that hold 0: the level-5
+    line runs halfway to each neighbour, and a straight run is two points."""
+    z = [[0.0] * 4, [10.0] * 4, [0.0] * 4]
+    got = _contours([100.0, 105.0, 110.0], z, 5.0)
+    assert sorted(_lines(got["pos"])) == [[(0, 102.5), (3, 102.5)],
+                                          [(0, 107.5), (3, 107.5)]]
+    assert got["neg"] == []
+
+
+def test_a_single_peak_is_a_closed_loop_around_it():
+    z = [[0.0, 0.0, 0.0], [0.0, 10.0, 0.0], [0.0, 0.0, 0.0]]
+    (loop,) = _lines(_contours([0.0, 1.0, 2.0], z, 5.0)["pos"])
+    assert loop[0] == loop[-1]                       # closed
+    assert set(loop) == {(0.5, 1.0), (1.0, 0.5), (1.5, 1.0), (1.0, 1.5)}
+
+
+def test_negative_cells_are_drawn_in_their_own_series():
+    z = [[0.0] * 3, [-10.0] * 3, [0.0] * 3]
+    got = _contours([0.0, 1.0, 2.0], z, 5.0)
+    assert got["pos"] == []
+    assert sorted(_lines(got["neg"])) == [[(0, 0.5), (2, 0.5)], [(0, 1.5), (2, 1.5)]]
+
+
+def test_the_crossing_is_interpolated_between_the_two_strikes():
+    # Level 2 between a 0 and an 8 sits a quarter of the way up.
+    z = [[0.0, 0.0], [8.0, 8.0]]
+    (line,) = _lines(_contours([100.0, 104.0], z, 2.0)["pos"])
+    assert line == [(0, 101.0), (1, 101.0)]
+
+
+def test_every_step_draws_its_own_level():
+    z = [[0.0, 0.0], [8.0, 8.0]]
+    lines = _lines(_contours([0.0, 8.0], z, 8.0, steps=3)["pos"])
+    # Levels 2, 4 and 8: the 8 line sits ON the top row.
+    assert sorted(line[0][1] for line in lines) == [2.0, 4.0, 8.0]
+
+
+def test_a_gap_in_the_grid_is_not_crossed():
+    """The spot frame leaves None where a column has no strikes: no line may be
+    interpolated through a cell that was never measured."""
+    z = [[0.0, 0.0, None, 0.0, 0.0], [10.0, 10.0, None, 10.0, 10.0]]
+    lines = sorted(_lines(_contours([0.0, 1.0], z, 5.0)["pos"]))
+    assert lines == [[(0, 0.5), (1, 0.5)], [(3, 0.5), (4, 0.5)]]
+
+
+def test_a_speck_narrower_than_the_floor_is_dropped():
+    z = [[0.0] * 6, [0.0, 10.0, 0.0, 0.0, 0.0, 0.0], [0.0] * 6,
+         [10.0] * 6, [0.0] * 6]
+    ys = [0.0, 1.0, 2.0, 3.0, 4.0]
+    assert len(_lines(_contours(ys, z, 5.0)["pos"])) == 3            # loop + two lines
+    kept = _lines(_contours(ys, z, 5.0, min_columns=3)["pos"])
+    assert sorted(kept) == [[(0, 2.5), (5, 2.5)], [(0, 3.5), (5, 3.5)]]
+
+
+def test_the_point_budget_keeps_the_longest_lines():
+    z = [[0.0] * 9, [10.0] * 9, [0.0] * 9, [0.0] * 9,
+         [0.0, 0.0, 0.0, 10.0, 10.0, 10.0, 0.0, 0.0, 0.0], [0.0] * 9]
+    ys = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0]
+    everything = _lines(_contours(ys, z, 5.0)["pos"])
+    assert len(everything) == 3                      # two long lines and a loop
+    kept = _lines(_contours(ys, z, 5.0, max_points=6)["pos"])
+    assert sorted(kept) == [[(0, 0.5), (8, 0.5)], [(0, 1.5), (8, 1.5)]]
+
+
+def test_a_gentle_wobble_is_kept_as_drawn():
+    """Simplifying may drop points ON a straight run, never bend a line."""
+    z = [[0.0, 0.0, 0.0, 0.0], [10.0, 20.0, 10.0, 20.0]]
+    (line,) = _lines(_contours([0.0, 1.0], z, 5.0)["pos"])
+    assert [x for x, _y in line] == [0, 1, 2, 3]
+    assert [y for _x, y in line] == [0.5, 0.25, 0.5, 0.25]
+
+
+def test_contours_of_nothing_are_nothing():
+    for ys, z, zmax in (([], [], 5.0), ([0.0, 1.0], [[0.0], [10.0]], 5.0),
+                        ([0.0], [[1.0, 2.0]], 1.0), ([0.0, 1.0], [[0.0, 0.0], [9.0, 9.0]], None)):
+        assert _contours(ys, z, zmax) == {"pos": [], "neg": []}
+
+
+def test_contours_do_not_write_to_the_grid():
+    z = [[0.0, 0.0], [10.0, 10.0]]
+    before = [list(r) for r in z]
+    _contours([0.0, 1.0], z, 5.0)
+    assert z == before

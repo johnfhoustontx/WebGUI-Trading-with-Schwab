@@ -798,9 +798,9 @@ def test_heatmap_series_count_constant_across_projection():
             "cone": {"mid": [100.0], "up": [100.5], "down": [99.5]}}
     with_proj = gamma.heatmap_figure(_proj_rows(), "GEX", yrange=[95.0, 105.0], projection=proj)
     no_proj = gamma.heatmap_figure(_proj_rows(), "Charm", yrange=[95.0, 105.0], projection=None)
-    assert len(with_proj["series"]) == len(no_proj["series"]) == 9
+    assert len(with_proj["series"]) == len(no_proj["series"]) == 11
     assert [s["type"] for s in no_proj["series"]] == [
-        "heatmap", "line", "columnrange", "errorbar"] + ["line"] * 5
+        "heatmap", "line", "columnrange", "errorbar"] + ["line"] * 5 + ["scatter"] * 2
 
 
 def test_strike_heat_split_constant():
@@ -2808,7 +2808,7 @@ def test_an_unknown_view_coerces_to_the_default_instead_of_raising(monkeypatch):
 # toast vocabulary and empty style. Every chart fact below it — HEAT_STOPS'
 # transparent zero stop, ``interpolation``, the colorAxis present at element
 # creation, the press-and-hold tooltip's three attachment sites, ``_set_chart``'s
-# recreate-on-kind-change, ``uniform_strike_grid``, the nine-series count and the
+# recreate-on-kind-change, ``uniform_strike_grid``, the fixed series count and the
 # 40/60 ``_INIT_FLEX`` split — is untouched, and the must-not-change guards at
 # the end of this block are green on BOTH sides of the migration by design.
 
@@ -3034,9 +3034,9 @@ def test_heatmap_matrix_calls_and_puts():
 
 
 @pytest.mark.parametrize("mode", ["net", "call", "put", "size"])
-def test_heatmap_series_count_is_nine_in_every_value(mode):
+def test_heatmap_series_count_is_eleven_in_every_value(mode):
     fig = gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0], mode=mode)
-    assert len(fig["series"]) == 9
+    assert len(fig["series"]) == 11
     assert fig["colorAxis"]["stops"] == gamma.HEAT_STOPS
     assert fig["colorAxis"]["max"] > 0
 
@@ -3282,7 +3282,7 @@ def test_share_scale_draws_each_cell_as_a_percentage_of_its_column():
     assert cells[(0, 100.0)] == pytest.approx(100 * 100 / 120)
     assert cells[(0, 99.0)] == pytest.approx(-100 * 10 / 120)
     assert "% of column" in fig["series"][0]["tooltip"]["pointFormat"]
-    assert len(fig["series"]) == 9
+    assert len(fig["series"]) == 11
 
 
 def test_the_legend_sink_reports_the_scale():
@@ -3369,11 +3369,11 @@ def test_spot_frame_draws_each_column_around_its_own_spot():
     assert fig["yAxis"]["min"] == -3.5 and fig["yAxis"]["max"] == 3.5
 
 
-def test_spot_frame_keeps_nine_series_and_the_palette():
+def test_spot_frame_keeps_the_series_count_and_the_palette():
     fig = gamma.heatmap_figure(_frame_rows(), "GEX", yrange=_FRAME_YR, **_FRAME)
-    assert len(fig["series"]) == 9
+    assert len(fig["series"]) == 11
     assert [s["type"] for s in fig["series"]] == [
-        "heatmap", "line", "columnrange", "errorbar"] + ["line"] * 5
+        "heatmap", "line", "columnrange", "errorbar"] + ["line"] * 5 + ["scatter"] * 2
     assert fig["colorAxis"]["stops"] == gamma.HEAT_STOPS
 
 
@@ -3397,7 +3397,7 @@ def test_spot_frame_level_tracks_follow_the_switch_like_the_strike_frame():
                                levels=_TRACK_LEVELS, show_tracks=False, **_FRAME)
     by_name = {s["name"]: s for s in off["series"]}
     assert [by_name[n]["data"] for n in _TRACK_NAMES] == [[], [], []]
-    assert len(off["series"]) == 9                    # the series count stays fixed
+    assert len(off["series"]) == 11                    # the series count stays fixed
 
 
 def test_spot_frame_level_tracks_are_measured_from_each_columns_spot():
@@ -3442,7 +3442,7 @@ def test_spot_frame_works_with_every_value_and_scale():
         for scale in ("adaptive", "locked", "share"):
             fig = gamma.heatmap_figure(_frame_rows(), "GEX", yrange=_FRAME_YR, mode=mode,
                                        scale=scale, lock=_LOCK, **_FRAME)
-            assert len(fig["series"]) == 9 and fig["series"][0]["data"], (mode, scale)
+            assert len(fig["series"]) == 11 and fig["series"][0]["data"], (mode, scale)
 
 
 def test_spot_frame_does_not_write_to_its_rows():
@@ -3528,7 +3528,7 @@ def test_heatmap_change_since_open():
                            (3, 100.0): 9.0}
     assert fig["title"]["text"] == "GAMMA intraday (strike × time) · change since open"
     assert "net change {point.value" in fig["series"][0]["tooltip"]["pointFormat"]
-    assert len(fig["series"]) == 9
+    assert len(fig["series"]) == 11
 
 
 def test_heatmap_change_over_a_window():
@@ -3561,7 +3561,7 @@ def test_a_change_in_the_spot_frame_is_taken_per_strike_first():
     fig = gamma.heatmap_figure(_change_rows(), "GEX", yrange=[-1.5, 1.5], show="open",
                                frame="spot", half=1)
     assert _cells(fig)[(3, 0.0)] == 9.0
-    assert len(fig["series"]) == 9
+    assert len(fig["series"]) == 11
 
 
 def test_heatmap_change_does_not_write_to_its_rows():
@@ -3630,6 +3630,7 @@ def _heat_controls(value="size", scale="locked", frame="strike", show="level"):
     heat = gamma.HeatControls.__new__(gamma.HeatControls)
     heat.value, heat.scale, heat.legend = _FakeEl(value), _FakeEl(scale), _FakeEl()
     heat.frame, heat.show = _FakeEl(frame), _FakeEl(show)
+    heat.contours = _FakeEl(False)
     heat._sided, heat._lock, heat._lock_time = True, None, ""
     return heat
 
@@ -3637,7 +3638,7 @@ def _heat_controls(value="size", scale="locked", frame="strike", show="level"):
 # What read() adds when nothing about them is chosen: the strike frame with the
 # spot frame's height from config ([window] spot_side), and the level with the
 # change window from config ([show] change_window_min).
-_STRIKE_FRAME = {"frame": "strike", "half": 10, "show": "level",
+_STRIKE_FRAME = {"frame": "strike", "half": 10, "show": "level", "contours": None,
                  "change_window_min": 30}
 
 
@@ -3862,3 +3863,120 @@ def test_a_mark_that_is_not_a_number_is_skipped_on_the_heatmap():
     heat = gamma.heatmap_figure(_sided_rows(), "GEX", yrange=[95.0, 105.0],
                                 balanced=[None, "x", True, 100.0])
     assert [pl["value"] for pl in _balanced_lines(heat["yAxis"]["plotLines"])] == [100.0]
+
+
+# ── contour lines on the heatmap ─────────────────────────────────────────────
+# Two series, always present (the series count is fixed for the in-place
+# update) and empty unless the Contours switch is on.
+
+_CONTOUR_NAMES = ("Contours above zero", "Contours below zero")
+_CONTOUR_CFG = {"steps": 2, "min_columns": 0, "max_points": 5000}
+# A locked scale of 10, so the levels are exactly 5 and 10 whatever the cells.
+_CONTOUR_LOCK = {"minutes": 1, "net": 10.0, "call": 10.0, "put": 10.0, "size": 10.0}
+
+
+def _band_rows():
+    """Four minutes: strike 100 holds +10, strike 98 holds -10, the rest 0.1."""
+    cells = {96.0: 0.1, 97.0: 0.1, 98.0: -10.0, 99.0: 0.1, 100.0: 10.0,
+             101.0: 0.1, 102.0: 0.1}
+    # Every strike holds a little of each side, so no row is all-zero in any
+    # value (an all-zero row is not drawn, and a line needs two rows).
+    grid = {k: {"call": max(v, 0.0) + 0.05, "put": min(v, 0.0) - 0.05, "net": v}
+            for k, v in cells.items()}
+    return [(60 * i, 99.0, None, None, None, 0, dict(grid)) for i in range(4)]
+
+
+def _contour_series(fig):
+    by_name = {s["name"]: s for s in fig["series"]}
+    return [by_name[n] for n in _CONTOUR_NAMES]
+
+
+def _contour_ys(series):
+    return [p[1] for p in series["data"] if p[1] is not None]
+
+
+def test_the_contour_series_exist_and_are_empty_with_the_switch_off():
+    fig = gamma.heatmap_figure(_band_rows(), "GEX", yrange=[95.0, 103.0])
+    above, below = _contour_series(fig)
+    assert above["data"] == [] and below["data"] == []
+    assert [s["name"] for s in fig["series"][-2:]] == list(_CONTOUR_NAMES)
+
+
+def test_contours_outline_the_bands_they_belong_to():
+    fig = gamma.heatmap_figure(_band_rows(), "GEX", yrange=[95.0, 103.0],
+                               scale="locked", lock=_CONTOUR_LOCK,
+                               contours=_CONTOUR_CFG)
+    above, below = _contour_series(fig)
+    # The +10 band sits on strike 100, the -10 band on strike 98.
+    assert _contour_ys(above) and all(99.0 < y < 101.0 for y in _contour_ys(above))
+    assert _contour_ys(below) and all(97.0 < y < 99.0 for y in _contour_ys(below))
+    assert any(p[1] is None for p in above["data"])            # lines are broken apart
+    assert len(fig["series"]) == 11
+
+
+def test_a_contour_series_is_a_plain_line_the_colour_scale_does_not_touch():
+    fig = gamma.heatmap_figure(_band_rows(), "GEX", yrange=[95.0, 103.0],
+                               scale="locked", lock=_CONTOUR_LOCK,
+                               contours=_CONTOUR_CFG)
+    for series, color in zip(_contour_series(fig),
+                             (gamma.CONTOUR_ABOVE_COLOR, gamma.CONTOUR_BELOW_COLOR)):
+        # scatter, not line: a contour doubles back in time, and a line series
+        # needs its x values in order.
+        assert series["type"] == "scatter" and series["lineWidth"] >= 1
+        assert series["marker"] == {"enabled": False}
+        assert series["colorAxis"] is False and series["color"] == color
+        assert series["enableMouseTracking"] is False
+
+
+def test_contours_are_drawn_from_the_grid_as_it_is_shown():
+    """Measured from spot, every column holds 5 + offset: the level-4 line is a
+    flat line one strike under price, and the level -4 line is off the frame."""
+    lock = dict(_CONTOUR_LOCK, net=4.0)
+    fig = gamma.heatmap_figure(_frame_rows(), "GEX", yrange=_FRAME_YR,
+                               scale="locked", lock=lock,
+                               contours=dict(_CONTOUR_CFG, steps=1), **_FRAME)
+    above, below = _contour_series(fig)
+    assert _contour_ys(above) and all(y == pytest.approx(-1.0) for y in _contour_ys(above))
+    assert below["data"] == []
+
+
+def test_contours_follow_the_value_being_drawn():
+    """Puts are all at or below zero, so they have no line above it."""
+    fig = gamma.heatmap_figure(_band_rows(), "GEX", yrange=[95.0, 103.0], mode="put",
+                               scale="locked", lock=_CONTOUR_LOCK,
+                               contours=_CONTOUR_CFG)
+    above, below = _contour_series(fig)
+    assert above["data"] == [] and _contour_ys(below)
+
+
+def test_no_contours_without_a_colour_scale():
+    fig = gamma.heatmap_figure([], "GEX", contours=_CONTOUR_CFG)
+    assert all(s["data"] == [] for s in _contour_series(fig))
+
+
+def test_the_bars_take_the_contour_keyword_and_ignore_it():
+    assert (gamma.bar_figure(SIDED, 100.0, contours=_CONTOUR_CFG)
+            == gamma.bar_figure(SIDED, 100.0))
+
+
+def test_heat_controls_read_hands_over_the_contour_settings_only_when_on(monkeypatch):
+    heat = _heat_controls("net")
+    args = (SIDED["gex"], _sided_rows(), [99.0, 100.0, 101.0], {})
+    assert heat.read(*args)["contours"] is None
+    heat.contours.value = True
+    assert heat.read(*args)["contours"] == gamma._heat_cfg.contours()
+    monkeypatch.setattr(gamma._heat_cfg, "contours", lambda: {"steps": 1})
+    assert heat.read(*args)["contours"] == {"steps": 1}       # the accessor is READ
+
+
+def test_the_contour_switch_shows_with_the_other_heatmap_controls():
+    heat = _heat_controls("net")
+    heat.sync("GEX")
+    assert heat.contours.visible is True
+    heat.sync("Flow")
+    assert heat.contours.visible is False
+
+
+def test_contours_are_off_until_asked_for():
+    import app_settings
+    assert app_settings.DEFAULTS["gamma_heat_contours"] is False

@@ -42,6 +42,8 @@ DEFAULTS = {
     "gamma_heat_scale": "locked",    # heatmap colours: locked | adaptive | share
     "gamma_heat_frame": "strike",    # heatmap vertical axis: strike | spot
     "gamma_heat_show": "level",      # heatmap cell: level | open | window (change)
+    "gamma_heat_contours": False,    # heatmap overlay: lines of equal value
+    "gamma_well": False,             # GEX: the gravity-well panel under the charts
     "gamma_netprem_group": "indices",          # Net Prem picker: which group tab
     "gamma_netprem_mode": "dollars",           # Net Prem y-axis: dollars | skew
     # Comparable magnitudes in Dollars mode, so the three read as one chart.

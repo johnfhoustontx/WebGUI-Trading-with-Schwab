@@ -89,6 +89,21 @@ def test_lock_overrides_are_read_and_bad_ones_fall_back(monkeypatch):
     assert cfg.lock() == {"minutes": 30, "quantile": 0.95, "headroom": 1.5}
 
 
+def test_contour_defaults():
+    assert cfg.contours() == {"steps": 3, "min_columns": 3, "max_points": 6000}
+
+
+def test_contour_overrides_are_read_and_bad_ones_fall_back(monkeypatch):
+    monkeypatch.setattr(cfg, "load", lambda: {"contours": {
+        "steps": 2, "min_columns": 0, "max_points": 50}})
+    # Two steps and no speck floor are allowed; a budget too small to draw one
+    # useful line is not.
+    assert cfg.contours() == {"steps": 2, "min_columns": 0, "max_points": 6000}
+    monkeypatch.setattr(cfg, "load", lambda: {"contours": {
+        "steps": 9, "min_columns": "3", "max_points": True}})
+    assert cfg.contours() == {"steps": 3, "min_columns": 3, "max_points": 6000}
+
+
 def test_it_imports_only_the_config_loader_and_the_paths():
     """Tier 1 imports this module, so its import set is pinned (CLAUDE.md, the
     Tier-1 allow-list): stdlib, shared.config_toml and repo_paths."""
