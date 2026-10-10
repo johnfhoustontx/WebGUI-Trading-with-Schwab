@@ -4152,6 +4152,20 @@ def test_the_well_hides_when_there_is_nothing_to_draw(snap):
     assert well.plot.visible is False and well.note.visible is False
 
 
+def test_the_well_says_so_when_there_is_no_gamma_to_draw():
+    """Seen on prod the Saturday it shipped: an index's net gamma reads zero at
+    every strike outside market hours, and the caption named a "low point"."""
+    snap = {"spot": 103.0, "views": {"GEX": {"data": {"spot": 103.0, "gex": {
+        "90.0": {"net": 0.0}, "100.0": {"net": 0.0}, "110.0": {"net": 0.0}}}}}}
+    well = _well_panel(on=True)
+    well.paint("GEX", snap)
+    assert well.plot.visible is True
+    assert well.note.text == ("Net gamma is zero at every strike shown, so there "
+                              "is no ground to draw.")
+    by = _well_series(well.plot.options)
+    assert by["Price"]["data"] == [] and by["Low point"]["data"] == []
+
+
 def test_the_well_is_off_until_asked_for():
     import app_settings
     assert app_settings.DEFAULTS["gamma_well"] is False

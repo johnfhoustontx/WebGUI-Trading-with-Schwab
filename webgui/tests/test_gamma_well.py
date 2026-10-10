@@ -106,6 +106,24 @@ def test_flat_ground_has_no_downhill():
     assert gw.read(_terrain([5.0, 5.0, 5.0, 5.0, 5.0]), 98.0)["floor"] == 100.0
 
 
+def test_level_ground_is_told_apart_from_a_low_point():
+    """Both have no downhill. A low point has higher ground beside it; level
+    ground does not, and calling it "the low point" would be a claim about a
+    shape that is not there."""
+    flat = _terrain([5.0, 5.0, 5.0, 5.0, 5.0])
+    assert gw.read(flat, 97.0)["level"] is True               # between two strikes
+    assert gw.read(flat, 100.0)["level"] is True              # on a strike
+    low = gw.read(_terrain([-4.0, 0.0, 10.0, 2.0, -6.0]), 100.0)
+    assert low["direction"] == 0 and low["level"] is False
+    assert gw.read(_terrain([-4.0, 0.0, 10.0, 2.0, -6.0]), 103.0)["level"] is False
+
+
+def test_ground_with_no_gamma_at_all_is_empty():
+    assert gw.empty(_terrain([0.0, 0.0, 0.0, 0.0, 0.0])) is True
+    assert gw.empty([]) is True
+    assert gw.empty(_terrain([0.0, 0.0, 0.1, 0.0, 0.0])) is False
+
+
 def test_price_exactly_where_net_gamma_is_zero_is_level_ground():
     r = gw.read(_terrain([-4.0, 0.0, 10.0, 2.0, -6.0]), 95.0)
     assert r["ground"] == "level" and r["net"] == 0.0
@@ -149,6 +167,20 @@ def test_the_caption_says_when_the_low_point_is_still_negative_gamma():
     text = gw.caption(gw.read(_terrain([-10.0, -2.0, -8.0, -9.0, -20.0]), 99.0), 99.0)
     assert "toward 95.00, 4.00 below" in text
     assert "That low point is still negative gamma" in text
+
+
+def test_the_caption_on_level_ground_does_not_name_a_low_point():
+    text = gw.caption(gw.read(_terrain([5.0, 5.0, 5.0, 5.0, 5.0]), 97.0), 97.0)
+    assert "The ground is level here." in text
+    assert "low point" not in text and "toward" not in text
+
+
+def test_the_caption_with_no_gamma_says_there_is_nothing_to_draw():
+    """An index's net gamma reads zero at every strike outside market hours."""
+    t = _terrain([0.0, 0.0, 0.0, 0.0, 0.0])
+    text = gw.caption(gw.read(t, 97.0), 97.0, empty=gw.empty(t))
+    assert text == ("Net gamma is zero at every strike shown, so there is no "
+                    "ground to draw.")
 
 
 def test_the_caption_at_the_floor_says_so():

@@ -97,6 +97,12 @@ gamma, where hedging amplifies them)?
   gamma" is the same on either scale.
 - **Gamma view only.** Valleys and hills are a statement about gamma. The switch
   itself hides on the other views.
+- **Ground with no shape says so.** Found on prod the Saturday it shipped: an
+  index's net gamma reads zero at every strike outside market hours (its open
+  interest is published as zero), and the caption named "the low point" on a
+  flat line. Now every-net-zero draws no ball and says there is no ground to
+  draw, and level ground (no downhill, and no higher ground beside price either)
+  is told apart from a low point.
 
 ### What the well is not
 

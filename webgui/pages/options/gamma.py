@@ -2645,7 +2645,8 @@ def well_figure(points, spot, flip=None, height=WELL_HEIGHT):
     the valley colour ran under every hill). A plain ``area``, not a spline:
     the ball's height is on the straight line between two strikes, and a curve
     would leave it floating off the ground."""
-    result = _well.read(points, spot) if points else None
+    # No ball on ground with no shape (every net zero): see gamma_well.empty.
+    result = _well.read(points, spot) if not _well.empty(points) else None
     no_fade = {"inactive": {"enabled": False}, "hover": {"enabled": False}}
     ball, low = [], []
     if result:
@@ -2762,7 +2763,8 @@ class WellPanel:
         if not shown:
             return
         _set_figure(self.plot, well_figure(points, spot, flip=entry.get("flip")))
-        self.note.set_text(_well.caption(_well.read(points, spot), spot))
+        self.note.set_text(_well.caption(_well.read(points, spot), spot,
+                                         empty=_well.empty(points)))
         self._reflow()
 
 

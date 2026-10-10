@@ -37,6 +37,11 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   after a restart), partly from the DOM because the pane stopped drawing; and by
   building the figures from the real published `$SPX` snapshot with the page's own
   builders. Not seen on the running app.
+- **Fixed the day it shipped.** Checked on the public page after the promote, on a
+  Saturday: `$SPX`'s net gamma reads zero at every strike outside market hours, and
+  on that flat line the well's caption named "the low point, 7,810.00". It now draws
+  no ball and says there is no ground to draw, and tells level ground from a low
+  point. The suite had only tried ground with a shape.
 - **Tests.** `test_gamma_well.py`, and additions to `test_gamma_heat.py`,
   `test_options_gamma.py` and `test_gamma_heat_config.py`.
 - **Design:** `docs/plans/2026-10-10-gamma-contours-and-well-design.md`.

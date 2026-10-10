@@ -84,6 +84,22 @@ def _downhill_from(points, spot):
     return left if heights[left] < heights[left + 1] else left + 1
 
 
+def empty(points):
+    """No strike holds any net gamma: there is no ground to draw. An index reads
+    this way outside market hours, when its open interest is published as zero."""
+    return not any(p[NET] for p in points)
+
+
+def _on_a_low(points, spot):
+    """Price is on a strike with higher ground on at least one side of it."""
+    strikes = [p[STRIKE] for p in points]
+    if spot not in strikes:
+        return False
+    at = strikes.index(spot)
+    return any(points[j][HEIGHT] > points[at][HEIGHT]
+               for j in (at - 1, at + 1) if 0 <= j < len(points))
+
+
 def read(points, spot):
     """Where price sits and which way the ground slopes, or None when ``spot``
     is off the terrain.
@@ -96,6 +112,9 @@ def read(points, spot):
                    reached. On level ground, the nearer strike.
     ``floor_net``  that strike's net gamma. Not always positive: between two
                    hills the low point is still negative gamma.
+    ``level``      True when there is no downhill because the ground is LEVEL
+                   here, as against price sitting on a low point. Both have
+                   direction 0; only one of them is a shape.
     """
     here = height_at(points, spot)
     if here is None:
@@ -116,7 +135,8 @@ def read(points, spot):
     return {"height": here, "net": net,
             "ground": "valley" if net > 0 else "hill" if net < 0 else "level",
             "direction": direction, "floor": points[end][STRIKE],
-            "floor_height": points[end][HEIGHT], "floor_net": points[end][NET]}
+            "floor_height": points[end][HEIGHT], "floor_net": points[end][NET],
+            "level": start is None and not _on_a_low(points, spot)}
 
 
 def arrow(result):
@@ -129,15 +149,22 @@ def arrow(result):
             else f"{floor} {_RIGHT_ARROW}")
 
 
-def caption(result, spot):
-    """The sentence under the panel. Empty with no read."""
+def caption(result, spot, empty=False):
+    """The sentence under the panel. Empty with no read. ``empty`` (see
+    :func:`empty`) says there is nothing to draw, and nothing else: a sentence
+    about where price "sits" on ground with no shape would be invented."""
+    if empty:
+        return ("Net gamma is zero at every strike shown, so there is no "
+                "ground to draw.")
     if not result:
         return ""
     where = {"valley": "Price sits in positive gamma, where dealer hedging damps moves.",
              "hill": "Price sits in negative gamma, where dealer hedging amplifies moves.",
              "level": "Price sits where net gamma is zero."}[result["ground"]]
     floor = _fmt.price(result["floor"])
-    if not result["direction"]:
+    if result["level"]:
+        slope = "The ground is level here."
+    elif not result["direction"]:
         slope = f"It is at the low point, {floor}."
     else:
         gap = _fmt.price(abs(result["floor"] - spot))
