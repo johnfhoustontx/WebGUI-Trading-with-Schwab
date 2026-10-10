@@ -56,3 +56,10 @@ min_columns = 3
 # The most points one sign's lines may hold. Past it the shortest lines are
 # dropped. It bounds what each repaint sends to the browser.
 max_points = 6000
+
+[well]
+# The gravity well (the Gamma view's "Gravity well" switch) draws net gamma by
+# strike as ground. "root" draws each strike at the signed square root of its
+# net gamma, so the one largest strike does not flatten everything else;
+# "linear" draws it in proportion. Either way a strike keeps its side of zero.
+height = "root"

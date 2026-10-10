@@ -977,6 +977,15 @@ _GAMMA_HEAT = ConfigFile(
                   "dropped, so a busy session cannot slow the page.",
                   kind="int", unit="points", min=500, max=40000, step=500),
         )),
+        Section("Gravity well",
+                "The Gamma view's Gravity well switch draws net gamma by strike "
+                "as ground, with the price as a ball on it.", (
+            Field("well.height", "Height",
+                  "Root draws each strike at the square root of its net gamma, "
+                  "so the one largest strike does not flatten the rest. Linear "
+                  "draws it in proportion. A strike keeps its side of zero "
+                  "either way.", kind="choice", choices=("root", "linear")),
+        )),
     ),
 )
 

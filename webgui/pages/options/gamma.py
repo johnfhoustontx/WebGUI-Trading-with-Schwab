@@ -35,6 +35,7 @@ from shared import public_gamma as _pg  # Tier-1 allow-listed: config + validato
 from shared import symbols as _symbols
 from . import flow_panels as _fx
 from . import gamma_heat as _heat
+from . import gamma_well as _well
 from .inputs import select_all_on_focus
 from .theme import FLOW_KEYFRAMES_CSS, MUTED
 
@@ -62,6 +63,10 @@ BALANCED_COLOR = "#9fb3c8"
 # so a line reads against its own colour without hiding the cells under it.
 CONTOUR_ABOVE_COLOR = "rgba(214,241,255,0.62)"
 CONTOUR_BELOW_COLOR = "rgba(255,208,228,0.62)"
+# The gravity well's ground: each ramp end, mostly see-through, under its line.
+WELL_VALLEY_FILL = "rgba(53,200,255,0.26)"     # POS_COLOR
+WELL_HILL_FILL = "rgba(255,77,141,0.26)"       # NEG_COLOR
+WELL_HEIGHT = 250
 PANEL_BORDER = "rgba(120,140,160,0.16)"   # hairline framing the washed plot area
 
 # Dark theme for all charts (matches the app's dark shell).
@@ -2405,6 +2410,21 @@ def refloat_rows(rows):
     return out
 
 
+def view_data(entry):
+    """One view's per-strike data as the figure builders take it.
+
+    Every view's result keys its per-strike map under ``"gex"`` (the engine
+    uses that name for charm, dex and vanna too). The maps come off the bus as
+    JSON, whose dict keys are strings, and the builders sort and compare
+    strikes numerically, so the keys are made floats again here. Junk in, the
+    empty shape out."""
+    raw = (entry or {}).get("data")
+    raw = raw if isinstance(raw, dict) else {}
+    return {"spot": raw.get("spot"), "strike_count": raw.get("strike_count"),
+            "gex": _refloat_keys(raw.get("gex")),
+            "hedge_drift_by_strike": _refloat_keys(raw.get("hedge_drift_by_strike"))}
+
+
 def projection_arg(entry):
     """A view entry's forward band as ``heatmap_figure`` takes it, or None when
     the snapshot carries none (off-hours, or any view but GEX)."""
@@ -2600,6 +2620,150 @@ def overlay_handler(key, cast, after):
         app_settings.set(key, cast(e.value))
         after()
     return _on_change
+
+
+# ── the gravity well ─────────────────────────────────────────────────────────
+def well_points(data, spot):
+    """The well's ground: the bars' own net values, in the bars' own window
+    around spot, as ``gamma_well.terrain`` points. So the two panels can never
+    disagree about what a strike holds. The height scale is
+    ``config/gamma_heat.toml [well] height``."""
+    b = bars_from_gex(data, spot)
+    return _well.terrain(b["strikes"], b["nets"], scale=_heat_cfg.well_height())
+
+
+def well_figure(points, spot, flip=None, height=WELL_HEIGHT):
+    """The gravity well as Highcharts options: net gamma by strike drawn as
+    ground (``gamma_well``), price as a ball on it, and the low point the ground
+    slopes to.
+
+    Three series ALWAYS (ground, price, low point), empty when there is nothing
+    to draw, because the panel updates in place. The ground is ONE area series
+    split by a zone at zero: below the line is positive gamma, above it
+    negative. It is shaded between the ground and the zero line ONLY, so a
+    colour always means that sign of gamma (shaded to the bottom of the plot,
+    the valley colour ran under every hill). A plain ``area``, not a spline:
+    the ball's height is on the straight line between two strikes, and a curve
+    would leave it floating off the ground."""
+    result = _well.read(points, spot) if points else None
+    no_fade = {"inactive": {"enabled": False}, "hover": {"enabled": False}}
+    ball, low = [], []
+    if result:
+        ball = [{"x": spot, "y": result["height"], "tag": _well.arrow(result)}]
+        if result["direction"]:
+            low = [[result["floor"], result["floor_height"]]]
+    strikes = [p[_well.STRIKE] for p in points]
+    on_ground = (_is_level(flip) and strikes and strikes[0] <= flip <= strikes[-1])
+    fig = _base_chart("area", height)
+    fig["chart"]["backgroundColor"] = "transparent"
+    fig.update({
+        # Says so when the height is not in proportion to the dollars.
+        "title": {"text": "GAMMA as ground · valleys damp moves, hills amplify them"
+                          + (" · square-root height"
+                             if _heat_cfg.well_height() == "root" else ""),
+                  "style": {"color": FONT, "fontSize": "13px"}},
+        "xAxis": {**_dark_axis(), "title": {"text": None},
+                  "labels": {"style": {"color": FONT}, "format": "{value:,.0f}"},
+                  "plotLines": ([_strike_plotline(flip, FLIP_COLOR, "Dash",
+                                                  f"Gamma flip {_fmt.price(flip)}")]
+                                if on_ground else [])},
+        # Height is minus net gamma: the axis carries no numbers, only the line
+        # where net gamma is zero. The dollars are in each strike's tooltip.
+        "yAxis": {**_dark_axis(), "title": {"text": None}, "gridLineWidth": 0,
+                  "labels": {"enabled": False},
+                  # Headroom, so the ball's label clears the ball at a peak.
+                  "maxPadding": 0.3, "minPadding": 0.12,
+                  "plotLines": [{"value": 0, "color": "#6b7890", "width": 1,
+                                 "dashStyle": "Dash", "zIndex": 3,
+                                 "label": {"text": "zero gamma", "align": "left",
+                                           "x": 4, "y": -4,
+                                           "style": {"color": "#8a97ad",
+                                                     "fontSize": "10px"}}}]},
+        "series": [
+            {"type": "area", "name": "Ground", "threshold": 0, "lineWidth": 1.5,
+             "data": [{"x": k, "y": h, "g": n} for k, h, n in points],
+             "marker": {"enabled": False}, "states": no_fade,
+             "zoneAxis": "y",
+             "zones": [{"value": 0, "color": POS_COLOR, "fillColor": WELL_VALLEY_FILL},
+                       {"color": NEG_COLOR, "fillColor": WELL_HILL_FILL}],
+             "tooltip": {"headerFormat": "",
+                         "pointFormat": "Strike {point.x:,.2f} · net gamma "
+                                        "{point.g:,.0f}"}},
+            {"type": "scatter", "name": "Price", "data": ball, "color": PRICE_LINE,
+             "marker": {"symbol": "circle", "radius": 7, "fillColor": PRICE_LINE,
+                        "lineColor": "#0b1020", "lineWidth": 2},
+             "states": no_fade, "zIndex": 6,
+             "dataLabels": {"enabled": True, "format": "{point.tag}", "y": -14,
+                            "crop": False, "overflow": "allow",
+                            "style": {"color": FONT, "fontSize": "11px",
+                                      "textOutline": "none"}},
+             "tooltip": {"headerFormat": "", "pointFormat": "Price {point.x:,.2f}"}},
+            {"type": "scatter", "name": "Low point", "data": low,
+             "color": BALANCED_COLOR, "enableMouseTracking": False,
+             "marker": {"symbol": "diamond", "radius": 5}, "states": no_fade,
+             "zIndex": 5},
+        ],
+    })
+    return fig
+
+
+class WellPanel:
+    """The gravity well: a switch in the controls row and a panel under the
+    charts. Gamma view only, and off until the switch is turned on.
+
+    Module-level, like ``HeatControls``, so ``render`` holds one object: it is
+    built where the switch goes, ``mount`` is called where the panel goes, and
+    ``paint`` is the first thing every repaint does, so each of that function's
+    early returns leaves the panel hidden.
+    Design: docs/plans/2026-10-10-gamma-contours-and-well-design.md"""
+
+    def __init__(self, repaint):
+        from nicegui import ui
+        self.switch = ui.switch("Gravity well",
+                                value=bool(app_settings.get("gamma_well")))
+        self.switch.props("dense").classes("text-xs")
+        self.switch.tooltip(
+            "Draw the gamma profile as ground under the charts. Valleys are "
+            "positive gamma, where dealer hedging damps moves; hills are "
+            "negative gamma, where it amplifies them. The ball is the price. "
+            "A picture of the profile as it stands, not a forecast.")
+        self.switch.on_value_change(overlay_handler("gamma_well", bool, repaint))
+        self.plot = self.note = None
+
+    def mount(self):
+        """Create the panel here, hidden. A chart that mounts hidden measures a
+        zero-width box, so ``paint`` reflows it each time it is shown."""
+        from nicegui import ui
+        self.plot = ui.highchart(well_figure([], None)).classes("w-full")
+        self.note = ui.label("").classes(f"w-full text-xs {MUTED}")
+        self.plot.set_visibility(False)
+        self.note.set_visibility(False)
+
+    def _reflow(self):
+        from nicegui import ui
+        plot_id = self.plot.id
+        ui.timer(0.05, guard(lambda: ui.run_javascript(
+            f"getElement({plot_id})?.chart?.reflow()")), once=True)
+
+    def paint(self, view, snap):
+        """Draw the well from the snapshot held, or hide it. The switch itself
+        is offered on the Gamma view only: valleys and hills are a statement
+        about gamma, and another view's numbers as ground would mean nothing."""
+        on_view = view == "GEX"
+        self.switch.set_visibility(on_view)
+        entry = ((snap or {}).get("views") or {}).get("GEX") or {}
+        data = view_data(entry)
+        spot = data.get("spot") or (snap or {}).get("spot")
+        points = (well_points(data, spot)
+                  if on_view and self.switch.value and _is_level(spot) else [])
+        shown = len(points) >= 2
+        self.plot.set_visibility(shown)
+        self.note.set_visibility(shown)
+        if not shown:
+            return
+        _set_figure(self.plot, well_figure(points, spot, flip=entry.get("flip")))
+        self.note.set_text(_well.caption(_well.read(points, spot), spot))
+        self._reflow()
 
 
 def render(symbol: str | None = None, view: str | None = None,
@@ -2842,6 +3006,7 @@ def render(symbol: str | None = None, view: str | None = None,
             spot_int_sel.tooltip("Bar size for candles / OHLC. Highs and lows are "
                                  "sampled once a minute, so wicks understate the true "
                                  "intra-minute range.")
+            well = WellPanel(lambda: _render_view())    # its switch; mounted below
             heat = HeatControls()       # what a cell holds, and the legend strip
             # The public page's line about the symbol on screen: live, loading,
             # every slot taken, or outside market hours (public_status_text).
@@ -3006,6 +3171,7 @@ def render(symbol: str | None = None, view: str | None = None,
                 hedge_lbl = ui.label("").classes("opacity-70 text-[10px] text-right w-full")
                 hedge_lbl.set_visibility(False)
                 heat_msg = kit.empty("")
+        well.mount()                    # the gravity well, full width under both
 
         # Tiny status strip BELOW the charts, right-aligned: the collector status WORD
         # (colored) + the neutral detail (last/next scan + refresh countdown + per-view
@@ -3241,6 +3407,7 @@ def render(symbol: str | None = None, view: str | None = None,
 
         The Highcharts elements persist across repaints and are updated in place
         (via _set_figure / _set_chart) so the charts don't flicker."""
+        well.paint(view_toggle.value, state["snap"])
         if view_toggle.value == "Net Prem":
             # Handled BEFORE the no-snapshot early return: this view is
             # symbol-INDEPENDENT (it reads its own cache key), so it must paint
@@ -3295,17 +3462,7 @@ def render(symbol: str | None = None, view: str | None = None,
             return
 
         entry = (snap.get("views") or {}).get(view) or {}
-        # Every view's result dict keys its per-strike map under "gex" (GammaEngine
-        # uses "gex" for charm/dex/vanna too). The figure builders read
-        # ``data["gex"]``, whose keys JSON-stringified in Redis — re-float them
-        # before the builders sort + numeric-compare strikes.
-        raw = entry.get("data") if isinstance(entry.get("data"), dict) else {}
-        data = {"spot": raw.get("spot"),
-                "strike_count": raw.get("strike_count"),
-                "gex": _refloat_keys(raw.get("gex")),
-                # Same float-key round-trip as the grid (Redis JSON stringifies them).
-                "hedge_drift_by_strike": _refloat_keys(
-                    raw.get("hedge_drift_by_strike"))}
+        data = view_data(entry)         # per-strike maps, float keys again
         view_spot = data.get("spot") or spot
         if not isinstance(view_spot, (int, float)):
             # No usable underlying price (e.g. market closed / sparse off-hours

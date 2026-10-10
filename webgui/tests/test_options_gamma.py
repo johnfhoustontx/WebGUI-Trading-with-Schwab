@@ -3980,3 +3980,188 @@ def test_the_contour_switch_shows_with_the_other_heatmap_controls():
 def test_contours_are_off_until_asked_for():
     import app_settings
     assert app_settings.DEFAULTS["gamma_heat_contours"] is False
+
+
+# ── the gravity well ─────────────────────────────────────────────────────────
+# Net gamma by strike as ground: valleys where it is positive, hills where it
+# is negative, and price as a ball. The arithmetic is gamma_well's own suite;
+# these pin the figure and the panel.
+
+WELL = {"spot": 103.0, "strike_count": 5, "gex": {
+    90.0: {"net": -4.0}, 95.0: {"net": 0.0}, 100.0: {"net": 10.0},
+    105.0: {"net": 2.0}, 110.0: {"net": -6.0}}}
+_WELL_SNAP = {"symbol": "TEST", "spot": 103.0, "views": {"GEX": {
+    "flip": 96.0, "data": {"spot": 103.0, "strike_count": 5, "gex": {
+        "90.0": {"net": -4.0}, "95.0": {"net": 0.0}, "100.0": {"net": 10.0},
+        "105.0": {"net": 2.0}, "110.0": {"net": -6.0}}}}}}
+
+
+def _well_series(fig):
+    return {s["name"]: s for s in fig["series"]}
+
+
+def test_view_data_gives_the_builders_float_strike_keys():
+    entry = {"data": {"spot": 5.0, "strike_count": 2,
+                      "gex": {"100.0": {"net": 1.0}},
+                      "hedge_drift_by_strike": {"100.0": 2.0}}}
+    assert gamma.view_data(entry) == {
+        "spot": 5.0, "strike_count": 2, "gex": {100.0: {"net": 1.0}},
+        "hedge_drift_by_strike": {100.0: 2.0}}
+    for junk in ({}, None, {"data": "x"}):
+        assert gamma.view_data(junk) == {"spot": None, "strike_count": None,
+                                         "gex": {}, "hedge_drift_by_strike": {}}
+
+
+@pytest.fixture
+def linear_well(monkeypatch):
+    """The plain height, so the figures below read as the nets they are built
+    from. The shipped scale is the square root; that is the next test."""
+    monkeypatch.setattr(gamma._heat_cfg, "well_height", lambda: "linear")
+
+
+def test_well_points_are_the_bars_net_values_as_ground(linear_well):
+    assert gamma.well_points(WELL, 103.0) == [
+        (90.0, 4.0, -4.0), (95.0, 0.0, 0.0), (100.0, -10.0, 10.0),
+        (105.0, -2.0, 2.0), (110.0, 6.0, -6.0)]
+    assert gamma.well_points(WELL, None) == [] and gamma.well_points({}, 100.0) == []
+
+
+def test_well_points_take_their_height_scale_from_config(monkeypatch):
+    monkeypatch.setattr(gamma._heat_cfg, "well_height", lambda: "root")
+    assert gamma.well_points(WELL, 103.0)[0] == (90.0, 2.0, -4.0)     # sqrt(4)
+    monkeypatch.setattr(gamma._heat_cfg, "well_height", lambda: "linear")
+    assert gamma.well_points(WELL, 103.0)[0] == (90.0, 4.0, -4.0)
+    # The title says so when the height is not in proportion.
+    monkeypatch.setattr(gamma._heat_cfg, "well_height", lambda: "root")
+    title = gamma.well_figure(gamma.well_points(WELL, 103.0), 103.0)["title"]["text"]
+    assert "square-root height" in title
+    monkeypatch.setattr(gamma._heat_cfg, "well_height", lambda: "linear")
+    title = gamma.well_figure(gamma.well_points(WELL, 103.0), 103.0)["title"]["text"]
+    assert "square-root" not in title
+
+
+def test_well_figure_draws_the_ground_the_ball_and_the_low_point(linear_well):
+    fig = gamma.well_figure(gamma.well_points(WELL, 103.0), 103.0, flip=96.0)
+    assert [s["name"] for s in fig["series"]] == ["Ground", "Price", "Low point"]
+    by = _well_series(fig)
+    assert [(p["x"], p["y"], p["g"]) for p in by["Ground"]["data"]] == [
+        (90.0, 4.0, -4.0), (95.0, 0.0, 0.0), (100.0, -10.0, 10.0),
+        (105.0, -2.0, 2.0), (110.0, 6.0, -6.0)]
+    (ball,) = by["Price"]["data"]
+    assert ball["x"] == 103.0 and ball["y"] == pytest.approx(-5.2)
+    assert ball["tag"].endswith("100.00") and ball["tag"][0] == chr(0x2190)
+    assert by["Low point"]["data"] == [[100.0, -10.0]]
+
+
+def test_the_ground_is_coloured_by_which_side_of_zero_it_is():
+    """Below the zero line is positive gamma (the valley colour), above it
+    negative: one series, split by a zone at zero."""
+    ground = _well_series(gamma.well_figure(gamma.well_points(WELL, 103.0), 103.0))["Ground"]
+    assert ground["zoneAxis"] == "y"
+    below, above = ground["zones"]
+    assert below["value"] == 0 and below["color"] == gamma.POS_COLOR
+    assert "value" not in above and above["color"] == gamma.NEG_COLOR
+    # Shaded between the ground and the zero line only: a colour is a sign.
+    assert ground["threshold"] == 0
+
+
+def test_well_figure_marks_zero_gamma_and_the_flip():
+    fig = gamma.well_figure(gamma.well_points(WELL, 103.0), 103.0, flip=96.0)
+    assert [pl["value"] for pl in fig["yAxis"]["plotLines"]] == [0]
+    assert [pl["value"] for pl in fig["xAxis"]["plotLines"]] == [96.0]
+    # A flip off the ground, or none, draws no line.
+    for flip in (None, 500.0, "x"):
+        fig = gamma.well_figure(gamma.well_points(WELL, 103.0), 103.0, flip=flip)
+        assert fig["xAxis"]["plotLines"] == []
+
+
+def test_well_figure_at_the_low_point_has_no_arrow_and_no_second_marker():
+    by = _well_series(gamma.well_figure(gamma.well_points(WELL, 100.0), 100.0))
+    assert by["Price"]["data"][0]["tag"] == ""
+    assert by["Low point"]["data"] == []
+
+
+def test_well_figure_always_holds_three_series():
+    """The panel updates in place, so the count must not change with the data."""
+    for points, spot in (([], None), (gamma.well_points(WELL, 103.0), 500.0)):
+        fig = gamma.well_figure(points, spot)
+        assert len(fig["series"]) == 3
+        by = _well_series(fig)
+        assert by["Price"]["data"] == [] and by["Low point"]["data"] == []
+
+
+class _WellEl:
+    """Stands in for the well's switch, chart and caption."""
+    def __init__(self, value=None):
+        self.value, self.visible, self.text, self.options = value, None, None, None
+
+    def set_visibility(self, on):
+        self.visible = on
+
+    def set_text(self, text):
+        self.text = text
+
+    def update(self):
+        pass
+
+
+def _well_panel(on=True):
+    well = gamma.WellPanel.__new__(gamma.WellPanel)
+    well.switch, well.plot, well.note = _WellEl(on), _WellEl(), _WellEl()
+    well.reflowed = 0
+    well._reflow = lambda: setattr(well, "reflowed", well.reflowed + 1)
+    return well
+
+
+def test_the_well_draws_on_gamma_when_its_switch_is_on():
+    well = _well_panel(on=True)
+    well.paint("GEX", _WELL_SNAP)
+    assert well.switch.visible is True and well.plot.visible is True
+    assert well.note.visible is True and well.reflowed == 1
+    assert [s["name"] for s in well.plot.options["series"]] == [
+        "Ground", "Price", "Low point"]
+    assert "positive gamma" in well.note.text and "100.00" in well.note.text
+    # The flip the service published, on the strike axis.
+    assert [pl["value"] for pl in well.plot.options["xAxis"]["plotLines"]] == [96.0]
+
+
+def test_the_well_is_hidden_until_its_switch_is_on():
+    well = _well_panel(on=False)
+    well.paint("GEX", _WELL_SNAP)
+    assert well.switch.visible is True                 # the switch is still offered
+    assert well.plot.visible is False and well.note.visible is False
+    assert well.plot.options is None and well.reflowed == 0
+
+
+@pytest.mark.parametrize("view", ["Charm", "DEX", "Vanna", "Flow", "Net Prem", "Term"])
+def test_the_well_and_its_switch_belong_to_the_gamma_view_only(view):
+    """Valleys and hills are a statement about gamma. Another view's numbers
+    drawn as ground would mean nothing."""
+    well = _well_panel(on=True)
+    well.paint(view, _WELL_SNAP)
+    assert well.switch.visible is False
+    assert well.plot.visible is False and well.note.visible is False
+
+
+@pytest.mark.parametrize("snap", [
+    None, {}, {"views": {}}, {"views": {"GEX": {}}},
+    {"views": {"GEX": {"data": {"spot": None, "gex": {"100.0": {"net": 1.0}}}}}}])
+def test_the_well_hides_when_there_is_nothing_to_draw(snap):
+    well = _well_panel(on=True)
+    well.paint("GEX", snap)
+    assert well.plot.visible is False and well.note.visible is False
+
+
+def test_the_well_is_off_until_asked_for():
+    import app_settings
+    assert app_settings.DEFAULTS["gamma_well"] is False
+
+
+def test_render_builds_mounts_and_paints_the_well():
+    src = inspect.getsource(gamma.render)
+    assert "well = WellPanel(lambda: _render_view())" in src
+    assert "well.mount()" in src
+    paint = src[src.index("def _render_view("):]
+    paint = paint[:paint.index("\n    def ", 10)]
+    # Before every early return, so each view (and no snapshot) hides it.
+    assert paint.index('well.paint(view_toggle.value, state["snap"])') < paint.index("return")

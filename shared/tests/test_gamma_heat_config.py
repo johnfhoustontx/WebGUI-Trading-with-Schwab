@@ -104,6 +104,17 @@ def test_contour_overrides_are_read_and_bad_ones_fall_back(monkeypatch):
     assert cfg.contours() == {"steps": 3, "min_columns": 3, "max_points": 6000}
 
 
+def test_the_wells_height_scale(monkeypatch):
+    assert cfg.well_height() == "root"
+    monkeypatch.setattr(cfg, "load", lambda: {"well": {"height": "linear"}})
+    assert cfg.well_height() == "linear"
+    for bad in ("log", 2, True, None):
+        monkeypatch.setattr(cfg, "load", lambda bad=bad: {"well": {"height": bad}})
+        assert cfg.well_height() == "root"
+    monkeypatch.setattr(cfg, "load", lambda: {"well": 5})
+    assert cfg.well_height() == "root"
+
+
 def test_it_imports_only_the_config_loader_and_the_paths():
     """Tier 1 imports this module, so its import set is pinned (CLAUDE.md, the
     Tier-1 allow-list): stdlib, shared.config_toml and repo_paths."""

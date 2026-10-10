@@ -56,7 +56,15 @@ DEFAULTS = {
         # are dropped. It bounds what each repaint sends to the browser.
         "max_points": 6000,
     },
+    "well": {
+        # The gravity well's height: "root" draws each strike at the signed
+        # square root of its net gamma, so the largest strike does not flatten
+        # the rest; "linear" draws it in proportion.
+        "height": "root",
+    },
 }
+
+WELL_HEIGHTS = ("root", "linear")
 
 load, reset_cache = toml_loader(GAMMA_HEAT_TOML, DEFAULTS, label="gamma_heat.toml")
 
@@ -112,6 +120,14 @@ def contours() -> dict:
             "min_columns": _setting("contours", "min_columns", minimum=0, maximum=60),
             "max_points": _setting("contours", "max_points",
                                    minimum=500, maximum=40000)}
+
+
+def well_height() -> str:
+    """How the gravity well draws height: one of ``WELL_HEIGHTS``. Anything
+    else is the default. Read by the page each time it draws."""
+    table = load().get("well")
+    value = table.get("height") if isinstance(table, dict) else None
+    return value if value in WELL_HEIGHTS else DEFAULTS["well"]["height"]
 
 
 def lock() -> dict:
