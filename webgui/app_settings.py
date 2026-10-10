@@ -44,6 +44,7 @@ DEFAULTS = {
     "gamma_heat_show": "level",      # heatmap cell: level | open | window (change)
     "gamma_heat_contours": False,    # heatmap overlay: lines of equal value
     "gamma_well": False,             # GEX: the gravity-well panel under the charts
+    "gamma_ridge": False,            # Greek views: the ridge plot under the charts
     "gamma_netprem_group": "indices",          # Net Prem picker: which group tab
     "gamma_netprem_mode": "dollars",           # Net Prem y-axis: dollars | skew
     # Comparable magnitudes in Dollars mode, so the three read as one chart.

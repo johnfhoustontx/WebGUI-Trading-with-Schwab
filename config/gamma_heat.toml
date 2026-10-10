@@ -63,3 +63,17 @@ max_points = 6000
 # net gamma, so the one largest strike does not flatten everything else;
 # "linear" draws it in proportion. Either way a strike keeps its side of zero.
 height = "root"
+
+[ridge]
+# The ridge plot (the "Ridge plot" switch on the four Greek views) draws one
+# by-strike profile every this many minutes, stacked front to back, the earliest
+# on top. The latest reading is always drawn as well.
+every_min = 30
+# How many rows the typical profile's tallest peak spans (the median across the
+# profiles drawn). Higher overlaps the ridges more. A profile several times the
+# rest, such as an expiry close pinned on one strike, is drawn in proportion and
+# rises past the others.
+overlap = 2.0
+# "root" draws the square root of each value's size, so the largest strike does
+# not flatten the rest; "linear" draws it in proportion.
+height = "root"

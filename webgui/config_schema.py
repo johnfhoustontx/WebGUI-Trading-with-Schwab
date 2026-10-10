@@ -986,6 +986,23 @@ _GAMMA_HEAT = ConfigFile(
                   "draws it in proportion. A strike keeps its side of zero "
                   "either way.", kind="choice", choices=("root", "linear")),
         )),
+        Section("Ridge plot",
+                "The Ridge plot switch draws one by-strike profile every so "
+                "many minutes, stacked front to back, the earliest on top.", (
+            Field("ridge.every_min", "A profile every",
+                  "The latest reading is always drawn as well. Reload the page "
+                  "after changing this: it changes how many profiles the chart "
+                  "holds.", kind="int", unit="min", min=5, max=120, step=5),
+            Field("ridge.overlap", "Typical peak spans",
+                  "In rows, for the middle profile of those drawn. Higher "
+                  "overlaps the profiles more. A profile several times the "
+                  "rest is drawn in proportion.", kind="float", unit="rows",
+                  min=0.5, max=8, step=0.5),
+            Field("ridge.height", "Height",
+                  "Root draws the square root of each value's size, so the "
+                  "largest strike does not flatten the rest. Linear draws it "
+                  "in proportion.", kind="choice", choices=("root", "linear")),
+        )),
     ),
 )
 

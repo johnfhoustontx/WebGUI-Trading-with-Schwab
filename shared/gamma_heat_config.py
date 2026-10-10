@@ -62,6 +62,17 @@ DEFAULTS = {
         # the rest; "linear" draws it in proportion.
         "height": "root",
     },
+    "ridge": {
+        # The ridge plot draws one by-strike profile every this many minutes.
+        "every_min": 30,
+        # How many rows the TYPICAL profile's tallest peak spans (the median
+        # across the profiles drawn). Higher overlaps the ridges more. A
+        # profile several times the rest is drawn in proportion, past them.
+        "overlap": 2.0,
+        # As the well's: "root" draws the square root of each value's size, so
+        # the largest strike does not flatten the rest; "linear" is in proportion.
+        "height": "root",
+    },
 }
 
 WELL_HEIGHTS = ("root", "linear")
@@ -73,7 +84,8 @@ def _setting(section, key, *, minimum, maximum=None):
     """A config number of the default's own type inside its range, or the
     default. A bool is refused: ``True`` is an int and would read as 1."""
     default = DEFAULTS[section][key]
-    raw = (load().get(section) or {}).get(key, default)
+    table = load().get(section)
+    raw = table.get(key, default) if isinstance(table, dict) else default
     if isinstance(raw, bool) or not isinstance(raw, (int, float)):
         return default
     value = type(default)(raw)
@@ -128,6 +140,17 @@ def well_height() -> str:
     table = load().get("well")
     value = table.get("height") if isinstance(table, dict) else None
     return value if value in WELL_HEIGHTS else DEFAULTS["well"]["height"]
+
+
+def ridge() -> dict:
+    """``{"every_min", "overlap", "height"}`` for the ridge plot
+    (``pages/options/gamma_ridge``). Read by the page each time it draws."""
+    table = load().get("ridge")
+    height = table.get("height") if isinstance(table, dict) else None
+    return {"every_min": _setting("ridge", "every_min", minimum=5, maximum=120),
+            "overlap": _setting("ridge", "overlap", minimum=0.5, maximum=8.0),
+            "height": height if height in WELL_HEIGHTS
+            else DEFAULTS["ridge"]["height"]}
 
 
 def lock() -> dict:

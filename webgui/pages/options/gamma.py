@@ -35,6 +35,7 @@ from shared import public_gamma as _pg  # Tier-1 allow-listed: config + validato
 from shared import symbols as _symbols
 from . import flow_panels as _fx
 from . import gamma_heat as _heat
+from . import gamma_ridge as _ridge
 from . import gamma_well as _well
 from .inputs import select_all_on_focus
 from .theme import FLOW_KEYFRAMES_CSS, MUTED
@@ -67,6 +68,15 @@ CONTOUR_BELOW_COLOR = "rgba(255,208,228,0.62)"
 WELL_VALLEY_FILL = "rgba(53,200,255,0.26)"     # POS_COLOR
 WELL_HILL_FILL = "rgba(255,77,141,0.26)"       # NEG_COLOR
 WELL_HEIGHT = 250
+# The ridge plot's fills: a dark tint of each ramp end, nearly opaque, so a ridge
+# hides the part of the one behind it that it stands in front of.
+RIDGE_ABOVE_FILL = "rgba(20,72,104,0.90)"      # POS_COLOR, darkened
+RIDGE_BELOW_FILL = "rgba(104,28,62,0.90)"      # NEG_COLOR, darkened
+RIDGE_HEIGHT = 440
+# The chart's top is this many typical peaks above the top row. A peak taller
+# than that runs off the top; without the limit one outlier would squeeze
+# every row into the bottom of the panel to fit itself.
+RIDGE_HEADROOM = 2.0
 PANEL_BORDER = "rgba(120,140,160,0.16)"   # hairline framing the washed plot area
 
 # Dark theme for all charts (matches the app's dark shell).
@@ -2622,6 +2632,15 @@ def overlay_handler(key, cast, after):
     return _on_change
 
 
+def _reflow_later(plot):
+    """Resize a chart to its box one tick from now. A chart that mounted hidden
+    measured a zero-width box, and ``chart.update()`` does not resize it."""
+    from nicegui import ui
+    plot_id = plot.id
+    ui.timer(0.05, guard(lambda: ui.run_javascript(
+        f"getElement({plot_id})?.chart?.reflow()")), once=True)
+
+
 # ── the gravity well ─────────────────────────────────────────────────────────
 def well_points(data, spot):
     """The well's ground: the bars' own net values, in the bars' own window
@@ -2741,10 +2760,7 @@ class WellPanel:
         self.note.set_visibility(False)
 
     def _reflow(self):
-        from nicegui import ui
-        plot_id = self.plot.id
-        ui.timer(0.05, guard(lambda: ui.run_javascript(
-            f"getElement({plot_id})?.chart?.reflow()")), once=True)
+        _reflow_later(self.plot)
 
     def paint(self, view, snap):
         """Draw the well from the snapshot held, or hide it. The switch itself
@@ -2766,6 +2782,169 @@ class WellPanel:
         self.note.set_text(_well.caption(_well.read(points, spot), spot,
                                          empty=_well.empty(points)))
         self._reflow()
+
+
+# ── the ridge plot ───────────────────────────────────────────────────────────
+def ridge_model(rows, mode, lo, hi):
+    """``(ridges, mode drawn)`` for one view's history rows: the readings
+    ``gamma_ridge.pick`` chooses, as ``gamma_ridge.ridges``, over the strikes in
+    ``[lo, hi]``, in the value the heatmap is drawing.
+
+    A session stored before cells carried a call and a put has nothing in
+    Calls, Puts or Size; it is drawn in net, and the mode handed back says so,
+    so the title cannot name a value that is not on screen."""
+    cfg = _heat_cfg.ridge()
+    mode = mode if mode in _heat.VALUES else "net"
+    m = heatmap_matrix(rows, mode)
+    if not m["y"] and mode != "net":
+        mode, m = "net", heatmap_matrix(rows, "net")
+    times = [r[0] for r in rows]
+    columns = _ridge.pick(times, cfg["every_min"],
+                          most=_ridge.slots(cfg["every_min"]))
+    return (_ridge.ridges(m["y"], m["z"], times, m["spots"], columns, lo=lo, hi=hi,
+                          scale=cfg["height"], overlap=cfg["overlap"]), mode)
+
+
+def ridge_figure(ridges, view="GEX", mode="net", height=RIDGE_HEIGHT):
+    """The ridge plot as Highcharts options: one ``arearange`` series a ridge,
+    the earliest first so the latest is drawn in front, and one scatter series
+    of price dots.
+
+    The chart ALWAYS holds ``gamma_ridge.slots`` ridge series, empty until their
+    time comes, because it updates in place and its series count must not
+    change. A ridge is coloured along the strike axis by the sign of its value
+    (zones on x); its height is the value's size, so a negative strike is a
+    hill too. The time of each ridge is a label on its baseline."""
+    cfg = _heat_cfg.ridge()
+    count = _ridge.slots(cfg["every_min"])
+    ridges = list(ridges)[:count]
+    no_fade = {"inactive": {"enabled": False}, "hover": {"enabled": False}}
+    tints = {1: (POS_COLOR, RIDGE_ABOVE_FILL), -1: (NEG_COLOR, RIDGE_BELOW_FILL)}
+    series = []
+    for i in range(count):
+        r = ridges[i] if i < len(ridges) else None
+        zones = []
+        for upto, sign in (r["zones"] if r else ()):
+            color, fill = tints[sign]
+            zones.append({"color": color, "fillColor": fill,
+                          **({} if upto is None else {"value": upto})})
+        series.append({
+            "type": "arearange", "name": _fmt_ts(r["ts"]) if r else "",
+            # Heights to four places: a row is ~30 px, and the digits past that
+            # were a third of what each repaint sent.
+            "data": [{"x": k, "low": round(low, 4), "high": round(high, 4), "v": v}
+                     for k, low, high, v in (r["points"] if r else ())],
+            "lineWidth": 1, "marker": {"enabled": False}, "states": no_fade,
+            "zoneAxis": "x", "zones": zones,
+            "tooltip": {"headerFormat": "",
+                        "pointFormat": "{series.name} · strike {point.x:,.2f} · "
+                                       "{point.v:,.0f}"}})
+    series.append({
+        "type": "scatter", "name": "Price", "color": PRICE_LINE,
+        "data": [[r["spot"], r["baseline"]] for r in ridges if r["spot"] is not None],
+        "marker": {"symbol": "circle", "radius": 3, "fillColor": PRICE_LINE,
+                   "lineColor": "#0b1020", "lineWidth": 1},
+        "enableMouseTracking": False, "states": no_fade, "zIndex": 40})
+    rows = max(len(ridges) - 1, 0)
+    top = max((high for r in ridges for _k, _low, high, _v in r["points"]),
+              default=rows + cfg["overlap"])
+    top = min(top, rows + RIDGE_HEADROOM * cfg["overlap"])
+    value = "" if mode == "net" else " " + _heat.VALUES.get(mode, "").lower()
+    fig = _base_chart("arearange", height)
+    fig["chart"]["backgroundColor"] = "transparent"
+    fig["chart"]["marginLeft"] = 56             # room for the time labels
+    fig.update({
+        "title": {"text": f"{_view_label(view)}{value} by strike through the session"
+                          f" · a profile every {cfg['every_min']} min"
+                          " · white dot = price"
+                          + (" · square-root height" if cfg["height"] == "root" else ""),
+                  "style": {"color": FONT, "fontSize": "13px"}},
+        "xAxis": {**_dark_axis(), "title": {"text": None},
+                  "labels": {"style": {"color": FONT}, "format": "{value:,.0f}"}},
+        # One row a ridge, the earliest on top. The axis carries no numbers:
+        # each baseline is labelled with its time, in the left margin.
+        "yAxis": {**_dark_axis(), "title": {"text": None}, "gridLineWidth": 0,
+                  "labels": {"enabled": False}, "startOnTick": False,
+                  "endOnTick": False, "min": -0.4,
+                  "max": top + 0.4,
+                  "plotLines": [{"value": r["baseline"], "color": "#26324a",
+                                 "width": 1, "zIndex": 1,
+                                 "label": {"text": _fmt_ts(r["ts"]), "align": "left",
+                                           "x": -46, "y": 4,
+                                           "style": {"color": FONT,
+                                                     "fontSize": "10px"}}}
+                                for r in ridges]},
+        "series": series,
+    })
+    return fig
+
+
+class RidgePanel:
+    """The ridge plot: a switch in the controls row and a panel under the
+    charts, on the four Greek views. Off until the switch is turned on.
+    Design: docs/plans/2026-10-10-gamma-ridge-plot-design.md"""
+
+    def __init__(self, repaint):
+        from nicegui import ui
+        self.switch = ui.switch("Ridge plot",
+                                value=bool(app_settings.get("gamma_ridge")))
+        self.switch.props("dense").classes("text-xs")
+        self.switch.tooltip(
+            f"Draw the by-strike profile every {_heat_cfg.ridge()['every_min']} "
+            "minutes through the session, stacked front to back with the "
+            "earliest on top and now in front. A ridge growing down the stack "
+            "is the positioning building at that strike. It follows the Value "
+            "picker.")
+        self.switch.on_value_change(overlay_handler("gamma_ridge", bool, repaint))
+        self.plot = None
+
+    def mount(self):
+        """Create the panel here, hidden; ``paint`` reflows it when shown."""
+        from nicegui import ui
+        self.plot = ui.highchart(ridge_figure([])).classes("w-full")
+        self.plot.set_visibility(False)
+
+    def _reflow(self):
+        _reflow_later(self.plot)
+
+    def paint(self, view, snap, hist, mode):
+        """Draw the ridges from the view's history rows, or hide the panel. The
+        strikes are the bars' own window, so the two never show different ones."""
+        on_view = view in _VIEWS
+        self.switch.set_visibility(on_view)
+        ridges = []
+        if on_view and self.switch.value and snap:
+            data = view_data((snap.get("views") or {}).get(view))
+            spot = data.get("spot") or snap.get("spot")
+            window = bars_from_gex(data, spot)["strikes"]
+            if window:              # no price, no window: the bars are empty too
+                ridges, mode = ridge_model(refloat_rows((hist or {}).get(view)),
+                                           mode, window[0], window[-1])
+        shown = any(r["points"] for r in ridges)
+        self.plot.set_visibility(shown)
+        if not shown:
+            return
+        _set_figure(self.plot, ridge_figure(ridges, view, mode))
+        self._reflow()
+
+
+class UnderCharts:
+    """The opt-in panels under the two charts: the gravity well and the ridge
+    plot. One object, so ``render`` holds three lines for both: it is built
+    where their switches go, ``mount`` is called where the panels go, and
+    ``paint`` is the first thing every repaint does, so each of that function's
+    early returns leaves them hidden."""
+
+    def __init__(self, repaint):
+        self.well, self.ridge = WellPanel(repaint), RidgePanel(repaint)
+
+    def mount(self):
+        self.well.mount()
+        self.ridge.mount()
+
+    def paint(self, view, snap, hist, mode):
+        self.well.paint(view, snap)
+        self.ridge.paint(view, snap, hist, mode)
 
 
 def render(symbol: str | None = None, view: str | None = None,
@@ -3008,7 +3187,7 @@ def render(symbol: str | None = None, view: str | None = None,
             spot_int_sel.tooltip("Bar size for candles / OHLC. Highs and lows are "
                                  "sampled once a minute, so wicks understate the true "
                                  "intra-minute range.")
-            well = WellPanel(lambda: _render_view())    # its switch; mounted below
+            under = UnderCharts(lambda: _render_view())  # two switches; mounted below
             heat = HeatControls()       # what a cell holds, and the legend strip
             # The public page's line about the symbol on screen: live, loading,
             # every slot taken, or outside market hours (public_status_text).
@@ -3173,7 +3352,7 @@ def render(symbol: str | None = None, view: str | None = None,
                 hedge_lbl = ui.label("").classes("opacity-70 text-[10px] text-right w-full")
                 hedge_lbl.set_visibility(False)
                 heat_msg = kit.empty("")
-        well.mount()                    # the gravity well, full width under both
+        under.mount()                   # the well and the ridge plot, full width
 
         # Tiny status strip BELOW the charts, right-aligned: the collector status WORD
         # (colored) + the neutral detail (last/next scan + refresh countdown + per-view
@@ -3409,7 +3588,7 @@ def render(symbol: str | None = None, view: str | None = None,
 
         The Highcharts elements persist across repaints and are updated in place
         (via _set_figure / _set_chart) so the charts don't flicker."""
-        well.paint(view_toggle.value, state["snap"])
+        under.paint(view_toggle.value, state["snap"], state.get("hist"), heat.value.value)
         if view_toggle.value == "Net Prem":
             # Handled BEFORE the no-snapshot early return: this view is
             # symbol-INDEPENDENT (it reads its own cache key), so it must paint

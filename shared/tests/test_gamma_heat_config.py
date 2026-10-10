@@ -115,6 +115,20 @@ def test_the_wells_height_scale(monkeypatch):
     assert cfg.well_height() == "root"
 
 
+def test_ridge_defaults_and_overrides(monkeypatch):
+    assert cfg.ridge() == {"every_min": 30, "overlap": 2.0, "height": "root"}
+    monkeypatch.setattr(cfg, "load", lambda: {"ridge": {
+        "every_min": 15, "overlap": 1.5, "height": "linear"}})
+    assert cfg.ridge() == {"every_min": 15, "overlap": 1.5, "height": "linear"}
+    # A spacing under five minutes, an overlap of nothing and an unknown scale
+    # each fall back to their own default.
+    monkeypatch.setattr(cfg, "load", lambda: {"ridge": {
+        "every_min": 1, "overlap": 0, "height": "log"}})
+    assert cfg.ridge() == {"every_min": 30, "overlap": 2.0, "height": "root"}
+    monkeypatch.setattr(cfg, "load", lambda: {"ridge": "x"})
+    assert cfg.ridge() == {"every_min": 30, "overlap": 2.0, "height": "root"}
+
+
 def test_it_imports_only_the_config_loader_and_the_paths():
     """Tier 1 imports this module, so its import set is pinned (CLAUDE.md, the
     Tier-1 allow-list): stdlib, shared.config_toml and repo_paths."""

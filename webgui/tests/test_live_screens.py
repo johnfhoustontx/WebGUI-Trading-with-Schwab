@@ -198,6 +198,7 @@ PUBLIC_SAFE_DEFAULTS = {
     "nav_pinned", "gamma_level_tracks", "gamma_spot_style",
     "gamma_spot_interval", "gamma_heat_value", "gamma_heat_scale",
     "gamma_heat_frame", "gamma_heat_show", "gamma_heat_contours", "gamma_well",
+    "gamma_ridge",
     "gamma_netprem_group",
     "gamma_netprem_mode",
     "gamma_netprem_symbols", "macro_skin", "chain_grid_columns",

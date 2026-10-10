@@ -4171,11 +4171,225 @@ def test_the_well_is_off_until_asked_for():
     assert app_settings.DEFAULTS["gamma_well"] is False
 
 
-def test_render_builds_mounts_and_paints_the_well():
+def test_render_builds_mounts_and_paints_the_panels_under_the_charts():
+    """One object for the well and the ridge plot, so render holds three lines
+    for both of them."""
     src = inspect.getsource(gamma.render)
-    assert "well = WellPanel(lambda: _render_view())" in src
-    assert "well.mount()" in src
+    assert "under = UnderCharts(lambda: _render_view())" in src
+    assert "under.mount()" in src
     paint = src[src.index("def _render_view("):]
     paint = paint[:paint.index("\n    def ", 10)]
-    # Before every early return, so each view (and no snapshot) hides it.
-    assert paint.index('well.paint(view_toggle.value, state["snap"])') < paint.index("return")
+    # Before every early return, so each view (and no snapshot) hides them.
+    call = ('under.paint(view_toggle.value, state["snap"], state.get("hist"), '
+            'heat.value.value)')
+    assert paint.index(call) < paint.index("return")
+
+
+class _Panel:
+    def __init__(self):
+        self.calls = []
+
+    def mount(self):
+        self.calls.append("mount")
+
+    def paint(self, *args):
+        self.calls.append(("paint", args))
+
+
+def test_under_charts_hands_each_panel_what_it_needs():
+    under = gamma.UnderCharts.__new__(gamma.UnderCharts)
+    under.well, under.ridge = _Panel(), _Panel()
+    under.mount()
+    under.paint("GEX", {"s": 1}, {"GEX": []}, "size")
+    assert under.well.calls == ["mount", ("paint", ("GEX", {"s": 1}))]
+    assert under.ridge.calls == ["mount", ("paint", ("GEX", {"s": 1}, {"GEX": []}, "size"))]
+
+
+# ── the ridge plot ───────────────────────────────────────────────────────────
+# One by-strike profile every so many minutes, stacked front to back. The
+# arithmetic is gamma_ridge's own suite; these pin the figure and the panel.
+
+def _ridge_rows(minutes=65, sided=True):
+    """One reading a minute from 08:30: strike 100 grows through the session
+    (+1 a minute) and strike 95 is a steady -5."""
+    import datetime as dt
+    t0 =int(dt.datetime(2026, 10, 9, 8, 30).timestamp())
+    rows = []
+    for i in range(minutes):
+        cells = {95.0: -5.0, 100.0: 10.0 + i, 105.0: 2.0}
+        grid = {k: ({"call": max(v, 0.0) + 0.5, "put": min(v, 0.0) - 0.5, "net": v}
+                    if sided else v) for k, v in cells.items()}
+        rows.append((t0 + 60 * i, 100.0 + 0.01 * i, None, None, None, 0, grid))
+    return rows
+
+
+_RIDGE_SNAP = {"symbol": "TEST", "spot": 100.5, "views": {"GEX": {"data": {
+    "spot": 100.5, "gex": {"95.0": {"net": -5.0}, "100.0": {"net": 74.0},
+                           "105.0": {"net": 2.0}}}}}}
+
+
+def _ridge_series(fig):
+    return [s for s in fig["series"] if s["type"] == "arearange"]
+
+
+def test_ridge_model_draws_a_profile_each_half_hour_and_now():
+    ridges, mode = gamma.ridge_model(_ridge_rows(), "net", 90.0, 110.0)
+    assert mode == "net"
+    assert [gamma._fmt_ts(r["ts"]) for r in ridges] == ["08:30", "09:00", "09:30", "09:34"]
+    assert [r["baseline"] for r in ridges] == [3.0, 2.0, 1.0, 0.0]
+    # Strike 100's real value is in each ridge, and it grows.
+    assert [dict((p[0], p[3]) for p in r["points"])[100.0] for r in ridges] == [
+        10.0, 40.0, 70.0, 74.0]
+
+
+def test_ridge_model_follows_the_value_being_drawn():
+    ridges, mode = gamma.ridge_model(_ridge_rows(), "put", 90.0, 110.0)
+    assert mode == "put"
+    assert all(p[3] <= 0 for r in ridges for p in r["points"])
+
+
+def test_ridge_model_falls_back_to_net_when_the_cells_have_no_sides():
+    """A session stored before cells carried a call and a put has nothing to
+    draw in Calls, and the title must then say net, not calls."""
+    ridges, mode = gamma.ridge_model(_ridge_rows(sided=False), "call", 90.0, 110.0)
+    assert mode == "net" and any(r["points"] for r in ridges)
+
+
+def test_ridge_model_reads_its_settings(monkeypatch):
+    monkeypatch.setattr(gamma._heat_cfg, "ridge", lambda: {
+        "every_min": 15, "overlap": 2.0, "height": "linear"})
+    ridges, _mode = gamma.ridge_model(_ridge_rows(), "net", 90.0, 110.0)
+    assert [gamma._fmt_ts(r["ts"]) for r in ridges] == [
+        "08:30", "08:45", "09:00", "09:15", "09:30", "09:34"]
+    # Strike 100 peaks each ridge at 10, 25, 40, 55, 70, 74: the typical one
+    # (55, at 09:15) spans the overlap and the front one is past it.
+    rise = [dict((p[0], p[2] - p[1]) for p in r["points"])[100.0] for r in ridges]
+    assert rise[3] == pytest.approx(2.0)
+    assert rise[-1] == pytest.approx(2.0 * 74 / 55)
+
+
+def test_ridge_figure_always_holds_one_series_a_slot_and_the_price_dots():
+    ridges, mode = gamma.ridge_model(_ridge_rows(), "net", 90.0, 110.0)
+    for model in (ridges, []):
+        fig = gamma.ridge_figure(model, "GEX", mode)
+        assert len(_ridge_series(fig)) == 15          # gamma_ridge.slots(30)
+        assert fig["series"][-1]["name"] == "Price"
+        assert len(fig["series"]) == 16
+    fig = gamma.ridge_figure(ridges, "GEX", mode)
+    assert [s["name"] for s in _ridge_series(fig)][:5] == [
+        "08:30", "09:00", "09:30", "09:34", ""]
+    assert all(s["data"] == [] for s in _ridge_series(fig)[4:])
+
+
+def test_a_ridge_series_carries_its_real_figures_and_its_colours():
+    ridges, mode = gamma.ridge_model(_ridge_rows(), "net", 90.0, 110.0)
+    front = _ridge_series(gamma.ridge_figure(ridges, "GEX", mode))[3]
+    assert [(p["x"], p["v"]) for p in front["data"]] == [
+        (95.0, -5.0), (100.0, 74.0), (105.0, 2.0)]
+    assert all(p["high"] >= p["low"] == 0.0 for p in front["data"])
+    # Negative up to the zero crossing, positive after it.
+    assert front["zoneAxis"] == "x"
+    below, above = front["zones"]
+    assert 95.0 < below["value"] < 100.0 and below["color"] == gamma.NEG_COLOR
+    assert "value" not in above and above["color"] == gamma.POS_COLOR
+
+
+def test_ridge_figure_labels_each_baseline_with_its_time_and_marks_price():
+    ridges, mode = gamma.ridge_model(_ridge_rows(), "net", 90.0, 110.0)
+    fig = gamma.ridge_figure(ridges, "GEX", mode)
+    lines = fig["yAxis"]["plotLines"]
+    assert [(pl["value"], pl["label"]["text"]) for pl in lines] == [
+        (3.0, "08:30"), (2.0, "09:00"), (1.0, "09:30"), (0.0, "09:34")]
+    dots = fig["series"][-1]["data"]
+    assert [d[1] for d in dots] == [3.0, 2.0, 1.0, 0.0]
+    assert dots[0][0] == 100.0 and dots[-1][0] == pytest.approx(100.64)
+
+
+def test_the_ridge_axis_fits_what_is_drawn_and_no_more():
+    """The top of the chart is the tallest thing drawn, so there is no empty
+    band under the title; a peak far past the rest runs off the top instead of
+    squeezing every row to fit it."""
+    ridges, mode = gamma.ridge_model(_ridge_rows(), "net", 90.0, 110.0)
+    top = max(p[2] for r in ridges for p in r["points"])
+    axis = gamma.ridge_figure(ridges, "GEX", mode)["yAxis"]
+    assert axis["max"] == pytest.approx(top + 0.4) and axis["min"] == -0.4
+    tower = [dict(r, points=[(k, lo, lo + 99.0, v) for k, lo, _hi, v in r["points"]])
+             for r in ridges]
+    capped = gamma.ridge_figure(tower, "GEX", mode)["yAxis"]["max"]
+    overlap = gamma._heat_cfg.ridge()["overlap"]
+    assert capped == pytest.approx(3.0 + gamma.RIDGE_HEADROOM * overlap + 0.4)
+    assert gamma.ridge_figure([], "GEX", "net")["yAxis"]["max"] > 0
+
+
+def test_ridge_figure_title_says_what_is_drawn(monkeypatch):
+    title = gamma.ridge_figure([], "GEX", "net")["title"]["text"]
+    assert "every 30 min" in title and "square-root height" in title
+    assert "calls" in gamma.ridge_figure([], "GEX", "call")["title"]["text"].lower()
+    monkeypatch.setattr(gamma._heat_cfg, "ridge", lambda: {
+        "every_min": 15, "overlap": 3.0, "height": "linear"})
+    title = gamma.ridge_figure([], "Charm", "net")["title"]["text"]
+    assert "every 15 min" in title and "square-root" not in title
+    assert title.startswith(gamma._view_label("Charm"))
+
+
+def _ridge_panel(on=True):
+    panel = gamma.RidgePanel.__new__(gamma.RidgePanel)
+    panel.switch, panel.plot = _WellEl(on), _WellEl()
+    panel.reflowed = 0
+    panel._reflow = lambda: setattr(panel, "reflowed", panel.reflowed + 1)
+    return panel
+
+
+def test_the_ridge_plot_draws_the_views_history_when_its_switch_is_on():
+    panel = _ridge_panel(on=True)
+    panel.paint("GEX", _RIDGE_SNAP, {"GEX": _ridge_rows()}, "net")
+    assert panel.switch.visible is True and panel.plot.visible is True
+    assert panel.reflowed == 1
+    filled = [s for s in _ridge_series(panel.plot.options) if s["data"]]
+    assert [s["name"] for s in filled] == ["08:30", "09:00", "09:30", "09:34"]
+
+
+def test_the_ridge_plot_is_hidden_until_its_switch_is_on():
+    panel = _ridge_panel(on=False)
+    panel.paint("GEX", _RIDGE_SNAP, {"GEX": _ridge_rows()}, "net")
+    assert panel.switch.visible is True and panel.plot.visible is False
+    assert panel.plot.options is None and panel.reflowed == 0
+
+
+@pytest.mark.parametrize("view, offered", [
+    ("GEX", True), ("Charm", True), ("DEX", True), ("Vanna", True),
+    ("Flow", False), ("Net Prem", False), ("Term", False)])
+def test_the_ridge_switch_is_offered_on_the_four_greek_views(view, offered):
+    panel = _ridge_panel(on=True)
+    panel.paint(view, _RIDGE_SNAP, {}, "net")
+    assert panel.switch.visible is offered
+    assert panel.plot.visible is False                 # no history for it here
+
+
+@pytest.mark.parametrize("snap, hist", [
+    (None, {"GEX": "rows"}), ({}, {}), (_RIDGE_SNAP, None), (_RIDGE_SNAP, {}),
+    (_RIDGE_SNAP, {"GEX": []}), (_RIDGE_SNAP, {"Charm": "other"})])
+def test_the_ridge_plot_hides_when_there_is_nothing_to_draw(snap, hist):
+    panel = _ridge_panel(on=True)
+    if hist and hist.get("GEX") == "rows":
+        hist = {"GEX": _ridge_rows()}
+    if hist and hist.get("Charm") == "other":
+        hist = {"Charm": _ridge_rows()}
+    panel.paint("GEX", snap, hist, "net")
+    assert panel.plot.visible is False
+
+
+def test_the_ridge_plot_draws_only_the_strikes_the_bars_show():
+    """The window is the bars' own, so a strike far from price is on neither."""
+    rows = _ridge_rows()
+    wide = [(r[0], r[1], None, None, None, 0, {**r[6], 500.0: {
+        "call": 9.0, "put": -1.0, "net": 8.0}}) for r in rows]
+    panel = _ridge_panel(on=True)
+    panel.paint("GEX", _RIDGE_SNAP, {"GEX": wide}, "net")
+    xs = {p["x"] for s in _ridge_series(panel.plot.options) for p in s["data"]}
+    assert xs == {95.0, 100.0, 105.0}
+
+
+def test_the_ridge_plot_is_off_until_asked_for():
+    import app_settings
+    assert app_settings.DEFAULTS["gamma_ridge"] is False
