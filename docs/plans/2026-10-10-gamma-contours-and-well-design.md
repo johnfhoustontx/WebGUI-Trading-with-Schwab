@@ -8,7 +8,7 @@ options service publishes changes.
 **Comes from:** two of the three "further out" mock-ups made on 2026-10-09 beside
 the [value, scale and frame design](2026-10-09-gamma-heatmap-value-scale-frame-design.md).
 The user picked them on 2026-10-10 after seeing the mock-ups again. The third,
-the ridge plot, is not built.
+the ridge plot, was asked for later the same day: [its design](2026-10-10-gamma-ridge-plot-design.md).
 
 ## What each one is for
 

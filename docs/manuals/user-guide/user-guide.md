@@ -916,6 +916,21 @@ nothing about order flow, time or volatility. The height is on a square-root sca
 that one very large strike does not flatten everything else, which means two valleys'
 depths are not in proportion to their dollars. Hover a strike for its real net gamma.
 
+**To see how the profile has changed through the session, switch Ridge plot on**
+(Gamma, Charm, Delta and Vanna). A panel appears under the charts with one profile
+every half hour, stacked front to back: the earliest at the top and the latest in
+front, each labelled with its time. Follow one strike down the stack. If its ridge
+gets taller, positioning has been building there; if it shrinks, it has been
+leaving. The white dot on each row is where price was at that time, so the dots
+trace the path price took across the profile.
+
+A ridge's height is the size of the value and its colour the sign, so a strike with
+negative exposure is a hill too, in the negative colour. The panel follows the
+**Value** picker: choose Puts and every ridge is redrawn in puts. All the ridges
+share one scale, set by the typical one. A reading far larger than the rest, such
+as an expiry close pinned on one strike, stands as a tower in front and can run off
+the top of the panel; hover it for the real figure.
+
 **The colour strip** at the right of the controls row gives the two ends of the heat
 map's colours as numbers, with the unit: dollars of gamma per 1% move on Gamma,
 dollars of delta on Delta, a plain figure on Charm and Vanna, percentages in Share of

@@ -4,7 +4,41 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-10 (**Dealer Positioning: contour lines and the gravity well.**)
+**Last updated:** 2026-10-10 (**Dealer Positioning: the ridge plot.**)
+
+- **What is new.** A **Ridge plot** switch on the Gamma, Charm, Delta and Vanna
+  views, off until turned on. It adds a panel under the charts with the by-strike
+  profile every half hour, stacked front to back, the earliest at the top and now in
+  front, with a white dot on each row for the price at that time. A ridge that gets
+  taller down the stack is positioning building at that strike.
+- **Why.** The third of the 2026-10-09 mock-ups; the user asked for it after the
+  contours and the well. The bars show the profile now and the heat map shows every
+  minute as colour, which is poor at showing how much a strike has grown.
+- **How it reads.** Height is the size of the value and colour its sign, so a
+  negative strike is a hill too. It follows the Value picker. Every ridge is on one
+  scale.
+- **Changed while building.** The scale was first set by the tallest ridge. On the
+  stored `$SPX` session of 2026-10-09 the 15:00 expiry-close pin was 4.5 times the
+  typical peak and every other ridge drew as a flat line. The median ridge sets the
+  scale now, and the pin stands as a tower; the chart's top is limited so an outlier
+  cannot squeeze the rows.
+- **Cost.** 10 to 30 ms and 47 KB a repaint while on, measured on that session.
+  Nothing while off. No change to what the service publishes.
+- **Structure.** `gamma_ridge.py` is new and pure. `UnderCharts` holds the well's
+  panel and the ridge plot's, so `gamma.render` is unchanged at 1,462 lines.
+- **Configuration.** `config/gamma_heat.toml` `[ridge] every_min`, `overlap`,
+  `height`. One new stored choice, `gamma_ridge`.
+- **Verified** by `test_gamma_ridge.py` and the page's suite; in the local page
+  harness (off by default; on, 16 series at full width; Charm draws its own; Flow
+  hides the panel and the switch; Puts redraws in puts); and by building the figure
+  from the real published `$SPX` snapshot with the page's own builders. Not seen on
+  the running app.
+- **Choices that were mine,** listed in the design: half-hour spacing, the median
+  as the scale, square-root height, negative strikes drawn upward, the panel's place
+  and size, and offering it on all four Greek views.
+- **Design:** `docs/plans/2026-10-10-gamma-ridge-plot-design.md`.
+
+**Prior —** 2026-10-10 (**Dealer Positioning: contour lines and the gravity well.**)
 
 - **What is new.** Two switches, both off until turned on.
   - **Contours**, beside the heat map's pickers: lines of equal value over the

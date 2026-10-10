@@ -2268,6 +2268,29 @@ strike's side of zero and the order of the strikes; it does not keep depths in
 proportion. Nothing here uses order flow, time or volatility: it is the bars redrawn,
 not a prediction.
 
+**The ridge plot.** With **Ridge plot** on (Gamma, Charm, Delta or Vanna), a panel
+draws the view's own history rows as stacked profiles (`gamma_ridge`):
+
+```
+readings   = the first reading of each clock bucket of `[ridge] every_min` (30),
+             and always the latest
+height     = |value|                      (`[ridge] height = "linear"`)
+           = sqrt(|value|)                (`"root"`, as shipped)
+one row    = [ridge] overlap (2) / the median of the ridges' tallest heights
+colour     = the sign of the value, changing where it crosses zero on the
+             straight line between two strikes
+```
+
+The value is the one the Value picker names (net, calls, puts or size), over the
+strikes in the bars' window. Every ridge is on one scale, so a ridge that is taller
+than the one above it holds more. The scale is set by the median ridge and not the
+tallest: on the stored `$SPX` session of 2026-10-09 the 15:00 reading, an expiry
+close pinned on one strike, was 4.5 times the median on the square-root scale, and
+scaled to it every other profile was under a row high. A reading like that is drawn
+in proportion; the chart's top is at most two typical peaks above the top row, and a
+peak past it runs off the top. Each row's white dot is the price at that reading.
+Measured on that session: 10 to 30 ms and 47 KB a repaint while on.
+
 ## Dealer delta exposure (DEX) and projection
 
 The DEX/hedge panel sums `OI · delta · contract_multiplier · spot` across strikes

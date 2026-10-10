@@ -788,6 +788,16 @@ accelerate price.
   same in words. It is a picture of the profile as it stands, **not a forecast**.
   Height is on a square-root scale so the largest strike does not flatten the
   rest; hover a strike for its real figure.
+- **Ridge plot** (switch, off by default, on Gamma, Charm, Delta and Vanna) adds
+  a panel under the charts with the by-strike profile every half hour, stacked
+  front to back: the earliest at the top, now in front. A ridge that gets
+  taller down the stack is positioning **building** at that strike; one that
+  shrinks is positioning leaving. The white dot on each row is the price at
+  that time. Height is the size of the value and colour its sign, so a negative
+  strike is a hill too. It follows the Value picker. Every ridge is on one
+  scale, set by the typical one, so a reading far larger than the rest (an
+  expiry close pinned on a strike) stands as a tower and may run off the top;
+  hover for the real figure.
 - **The colour strip** beside the controls gives the two ends of the heat map's
   colours as numbers (dollars of gamma per 1% move, or dollars of delta; Charm
   and Vanna show a plain figure; percentages in Share of column) and says what

@@ -1073,8 +1073,9 @@ or **From spot**. `heatmap_figure` and `bar_figure` take `frame=` and `half=`.
   colour scale and `steps − 1` halvings, each side of zero.
 - **The gravity well (2026-10-10).** `WellPanel` (module level): a **Gravity well**
   switch (`gamma_well`, off by default) built in the controls row, `mount()` under
-  the charts, and `paint(view, snap)` as the FIRST line of `_render_view`, so every
-  early return there leaves it hidden. Gamma view only; the switch itself hides on
+  the charts, and `paint(view, snap)`. `render` reaches all three through
+  `UnderCharts` (below), whose `paint` is the FIRST line of `_render_view`, so every
+  early return there leaves the panel hidden. Gamma view only; the switch itself hides on
   the others. Ground = `well_points`: the bars' own net values in the bars' own
   window (`bars_from_gex`) through `gamma_well.terrain`, height = minus net gamma,
   or minus its signed square root (`[well] height = "root"`, the shipped value).
@@ -1082,6 +1083,21 @@ or **From spot**. `heatmap_figure` and `bar_figure` take `frame=` and `half=`.
   one `area` split by a zone at zero and shaded to the zero line only. The panel
   mounts hidden, so `paint` reflows it each time it is shown. `view_data(entry)`
   is the per-view data glue both `_render_view` and the panel use.
+- **The ridge plot (2026-10-10).** `RidgePanel` (module level): a **Ridge plot**
+  switch (`gamma_ridge`, off by default), offered on the four Greek views.
+  `paint(view, snap, hist, mode)` takes the view's rows from `state["hist"]` and the
+  Value picker's mode; `ridge_model` runs them through `heatmap_matrix` and
+  `gamma_ridge.pick` / `ridges` over the bars' own strike window, and falls back to
+  net (and says so in the title) when the cells carry no sides. `ridge_figure` is
+  `gamma_ridge.slots(every_min)` `arearange` series ALWAYS (15 at half an hour,
+  empty until their time comes) plus a `Price` scatter LAST: 16 in all. A ridge is
+  coloured by zones on x; each baseline's time is a y-axis plot-line label. One
+  scale for all ridges, set by the MEDIAN ridge's peak (`[ridge] overlap` rows), so
+  an expiry-close pin is a tower and not the scale; the axis top is capped at
+  `RIDGE_HEADROOM` typical peaks above the top row.
+- **`UnderCharts`** holds the `WellPanel` and the `RidgePanel`: built where the two
+  switches go, `mount()` where the panels go, `paint(view, snap, hist, mode)` first
+  in `_render_view`. A third panel under the charts goes in it, not in `render`.
 - ⚠ Highcharts' `format` strings ignore a `+` flag (`{value:+.2f}` printed `20.00` in
   the browser), so the spot frame's axis and tooltip do not write one.
 - **The display window is config now.** `N_SIDE` is gone; `strikes_around`,

@@ -745,6 +745,18 @@ It is the same data as the bars, not a model, and **not a forecast**. Height is 
 on a square-root scale (a setting) so the largest strike does not flatten the rest; a
 strike's real figure is in its tooltip.
 
+**Ridge plot** (switch, off by default, on the four Greek views). A panel under the
+charts with the by-strike profile every half hour, stacked front to back, the
+earliest at the top and now in front. The bars show the profile now and the heat map
+shows every minute as colour; this shows how much each strike has *grown or shrunk*,
+which colour is poor at. Open it when you want to know whether a wall was there at
+the open or was built during the day, and whether price walked into it or it formed
+around price (the white dot on each row is the price at that time). Height is the
+size of the value, colour its sign, and it follows the Value picker. Every ridge is on
+one scale set by the typical ridge, so a late pin on one strike shows as a tower
+instead of flattening the rest of the day. It is a record of the session so far, not
+a projection.
+
 **The colour strip** at the right of the controls gives the heat map's colour scale in
 numbers, with its unit, and says what it is tied to: *held since 09:30*, *settling
 until 09:30*, *adapts to what is visible* or *share of each column*. In Locked the
