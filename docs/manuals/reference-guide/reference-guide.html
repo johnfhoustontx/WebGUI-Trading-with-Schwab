@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-09</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-10</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -1321,6 +1321,23 @@ high, and that has a cost (see the Technical Reference). The Spot and Bar contro
 hide in this frame, and the forward projection band is not drawn. Level movement
 works as it does in the Strike frame: off leaves one line per level at its distance
 from price now, on adds the path each level took.</p>
+<p><strong>Contours</strong> (switch, off by default). Lines of equal value drawn over the heat map,
+at the top of the colour scale, half of it and a quarter, each side of zero. Colour
+shows you how much; contours show you where it <em>changes</em>. Lines packed together mean
+the exposure steps sharply across a few strikes, the condition for a pin or for a fast
+move once price leaves. A lone outer line shows how far a band of positioning reaches.
+They are taken from the heat map exactly as it is drawn, so they work in every Value,
+Show, Scale and Frame.</p>
+<p><strong>Gravity well</strong> (switch, off by default, Gamma view only). A panel under the charts
+that redraws the by-strike bars as ground: <strong>valleys</strong> where net gamma is positive and
+dealer hedging damps moves, <strong>hills</strong> where it is negative and hedging amplifies them.
+Price is the ball; the arrow points downhill and the diamond marks the low point the
+slope leads to. It answers one question at a glance: <em>is price sitting somewhere that
+holds it, or somewhere that lets go of it?</em> The sentence underneath says so in words,
+including when the nearest low point is itself still negative gamma.</p>
+<p>It is the same data as the bars, not a model, and <strong>not a forecast</strong>. Height is drawn
+on a square-root scale (a setting) so the largest strike does not flatten the rest; a
+strike's real figure is in its tooltip.</p>
 <p><strong>The colour strip</strong> at the right of the controls gives the heat map's colour scale in
 numbers, with its unit, and says what it is tied to: <em>held since 09:30</em>, <em>settling
 until 09:30</em>, <em>adapts to what is visible</em> or <em>share of each column</em>. In Locked the

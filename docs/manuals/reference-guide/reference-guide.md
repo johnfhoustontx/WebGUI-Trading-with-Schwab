@@ -725,6 +725,26 @@ hide in this frame, and the forward projection band is not drawn. Level movement
 works as it does in the Strike frame: off leaves one line per level at its distance
 from price now, on adds the path each level took.
 
+**Contours** (switch, off by default). Lines of equal value drawn over the heat map,
+at the top of the colour scale, half of it and a quarter, each side of zero. Colour
+shows you how much; contours show you where it *changes*. Lines packed together mean
+the exposure steps sharply across a few strikes, the condition for a pin or for a fast
+move once price leaves. A lone outer line shows how far a band of positioning reaches.
+They are taken from the heat map exactly as it is drawn, so they work in every Value,
+Show, Scale and Frame.
+
+**Gravity well** (switch, off by default, Gamma view only). A panel under the charts
+that redraws the by-strike bars as ground: **valleys** where net gamma is positive and
+dealer hedging damps moves, **hills** where it is negative and hedging amplifies them.
+Price is the ball; the arrow points downhill and the diamond marks the low point the
+slope leads to. It answers one question at a glance: *is price sitting somewhere that
+holds it, or somewhere that lets go of it?* The sentence underneath says so in words,
+including when the nearest low point is itself still negative gamma.
+
+It is the same data as the bars, not a model, and **not a forecast**. Height is drawn
+on a square-root scale (a setting) so the largest strike does not flatten the rest; a
+strike's real figure is in its tooltip.
+
 **The colour strip** at the right of the controls gives the heat map's colour scale in
 numbers, with its unit, and says what it is tied to: *held since 09:30*, *settling
 until 09:30*, *adapts to what is visible* or *share of each column*. In Locked the

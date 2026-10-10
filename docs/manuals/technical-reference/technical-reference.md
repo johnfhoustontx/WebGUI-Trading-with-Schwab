@@ -2233,6 +2233,41 @@ stored sessions (`tools/measure_gamma_crop.py`):
 The display window itself, `[window] n_side` (20 strikes each side of spot), is read
 from the same file by the page and the service each time they draw or publish.
 
+**Contour lines.** With **Contours** on, the page traces lines of equal value over
+the heat map's own grid, after the Value, Show, Scale and Frame have been applied
+(`gamma_heat.contours`, marching squares):
+
+```
+levels   = zmax, zmax/2, zmax/4, …        (`[contours] steps` of them, 3 as shipped)
+           drawn above zero and, mirrored, below it
+zmax     = the top of the colour scale in use (the lock, in Locked)
+crossing = linear between two neighbouring strikes, or two neighbouring minutes
+```
+
+A cell with a gap in any corner is skipped, so no line is drawn through a value that
+was not measured. A line spanning fewer than `[contours] min_columns` minutes (3) is
+left out as a speck, and past `[contours] max_points` (6,000 a sign) the shortest
+lines are dropped. Measured on a stored `$SPX` session the lines cost about 27 ms and
+35 KB a repaint. They cover the collected minutes only, not the forward band.
+
+**The gravity well.** With **Gravity well** on (Gamma view), a panel draws the
+by-strike bars' own net values as ground (`gamma_well`):
+
+```
+height(strike) = −net gamma                       (`[well] height = "linear"`)
+               = −sign(net) · √|net|              (`"root"`, as shipped)
+ball           = price, on the straight line between the two strikes around it
+downhill       = toward the lower of those two strikes, then on to the first
+                 strike that is lower than both its neighbours (the low point)
+```
+
+Positive net gamma is below the zero line (a valley) and negative above it (a hill).
+The caption's "positive" or "negative gamma" is read from the net values, never from
+the drawn height, so it is the same on either scale. The square root keeps every
+strike's side of zero and the order of the strikes; it does not keep depths in
+proportion. Nothing here uses order flow, time or volatility: it is the bars redrawn,
+not a prediction.
+
 ## Dealer delta exposure (DEX) and projection
 
 The DEX/hedge panel sums `OI · delta · contract_multiplier · spot` across strikes

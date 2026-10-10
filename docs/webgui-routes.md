@@ -975,8 +975,8 @@ Net (today's chart, option for option), Calls, Puts, or **Size** (`abs(call) +
 abs(put)`, signed by net). The transforms are pure and live in
 `pages/options/gamma_heat.py`, which imports nothing from `gamma`; `heatmap_matrix`,
 `heatmap_figure`, `bars_from_gex` and `bar_figure` take `mode=`, defaulting to net.
-A mode swaps the DATA inside the existing series: the heatmap is still nine series
-on one colour axis, and the bars still three. In Size the two per-sign bar series
+A mode swaps the DATA inside the existing series: the heatmap keeps its fixed series
+count (eleven since the contour series were added, 2026-10-10) on one colour axis, and the bars still three. In Size the two per-sign bar series
 hold each strike's calls and its puts, so a balanced strike is two opposing bars.
 `bars_from_gex` keeps its return shape (a test pins it), so `bar_figure` reads the
 two sides from the grid itself.
@@ -1046,7 +1046,7 @@ or **From spot**. `heatmap_figure` and `bar_figure` take `frame=` and `half=`.
   line at zero. The three level tracks follow the Level movement switch, as in the
   strike frame, and are drawn as `level − that column's spot`. The level lines sit at `level − current
   spot` (`wall_plot_lines(origin=)`) and keep their own price in the label. The bars
-  are drawn at `strike − spot`. Nine heatmap series and three bar series, as ever.
+  are drawn at `strike − spot`. The series counts do not change.
 - **One range for both panels:** `heat_yrange(strikes, spot, spot_path, frame, half)`.
   `render` reaches the old `bar_yrange` / `union_range` pair through it.
 - **`half` is `[window] spot_side`** (10), and options_svc keeps that many strikes,
@@ -1061,6 +1061,27 @@ or **From spot**. `heatmap_figure` and `bar_figure` take `frame=` and `half=`.
 - **`HeatControls.sync(view, overlays)`** hides the page's Spot and Bar controls
   (never the Level movement switch) in the spot frame, AFTER `_sync_spot_controls` has applied its own
   rules. A frame change runs that sync, then the repaint.
+- **Contours (2026-10-10).** `HeatControls` holds a **Contours** switch
+  (`gamma_heat_contours`, off by default); `read()` hands `contours` to both builders:
+  `gamma_heat_config.contours()` while it is on, else None. `heatmap_figure` then
+  calls `gamma_heat.contours(vstrikes, vz, zmax, …)` on the grid EXACTLY as drawn
+  (value, change, share and frame applied) and appends two `scatter` series with a
+  line width, "Contours above zero" and "Contours below zero", LAST in the list.
+  They always exist (empty when off). `scatter`, not `line`: a contour doubles back
+  in time and a line series needs its x in order. A cell with a gap in any corner
+  is skipped, so no line crosses a gap in the spot frame. Levels are the top of the
+  colour scale and `steps − 1` halvings, each side of zero.
+- **The gravity well (2026-10-10).** `WellPanel` (module level): a **Gravity well**
+  switch (`gamma_well`, off by default) built in the controls row, `mount()` under
+  the charts, and `paint(view, snap)` as the FIRST line of `_render_view`, so every
+  early return there leaves it hidden. Gamma view only; the switch itself hides on
+  the others. Ground = `well_points`: the bars' own net values in the bars' own
+  window (`bars_from_gex`) through `gamma_well.terrain`, height = minus net gamma,
+  or minus its signed square root (`[well] height = "root"`, the shipped value).
+  `well_figure` is three series always (Ground, Price, Low point); the ground is
+  one `area` split by a zone at zero and shaded to the zero line only. The panel
+  mounts hidden, so `paint` reflows it each time it is shown. `view_data(entry)`
+  is the per-view data glue both `_render_view` and the panel use.
 - ⚠ Highcharts' `format` strings ignore a `+` flag (`{value:+.2f}` printed `20.00` in
   the browser), so the spot frame's axis and tooltip do not write one.
 - **The display window is config now.** `N_SIDE` is gone; `strikes_around`,
@@ -1150,7 +1171,7 @@ rather than promised: an AST comparison shows every module-level definition exce
 `render` byte-identical — `HEAT_STOPS`' transparent zero stop, `interpolation: True`,
 the `colorAxis` that must exist at element creation, `_HEAT_PRESS_TOOLTIP_JS`'s three
 attachment sites, `_set_chart`'s recreate-on-kind-change, `uniform_strike_grid`, the
-constant nine-series count and the 40/60 flex split. `gamma-xhair-row` survives — it is
+constant series count (nine then, eleven now) and the 40/60 flex split. `gamma-xhair-row` survives — it is
 the ONLY selector `_CROSSHAIR_JS` queries, and dropping it would kill the shared
 crosshair silently. `EXPLAIN_CSS` was **deleted**: thirteen lines injected into every
 render, reaching nothing.

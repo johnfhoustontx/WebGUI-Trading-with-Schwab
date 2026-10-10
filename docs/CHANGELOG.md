@@ -4,7 +4,44 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-09 (**Dealer Positioning: From spot honours the Level movement switch.**)
+**Last updated:** 2026-10-10 (**Dealer Positioning: contour lines and the gravity well.**)
+
+- **What is new.** Two switches, both off until turned on.
+  - **Contours**, beside the heat map's pickers: lines of equal value over the
+    cells, at the top of the colour scale, half of it and a quarter, each side of
+    zero. They follow the Value, Show, Scale and Frame in use.
+  - **Gravity well**, on the Gamma view: a panel under the charts that draws the
+    by-strike bars as ground. Valleys are positive gamma, hills negative; price is a
+    ball, with an arrow downhill and a marker on the low point, and one sentence
+    underneath.
+- **Why.** Both were mock-ups from 2026-10-09 that the user picked on seeing them
+  again. Colour shows how much; contours show where it changes. The well answers
+  whether price sits somewhere that holds it or somewhere that lets go of it.
+- **What they are not.** The well is a picture of the profile, not a forecast, and
+  says so in four places. The contours carry no zero line: the mock-up called one
+  the gamma flip, which it is not.
+- **Changed from the mock-up.** The well's height is the signed square root of net
+  gamma by default: drawn in proportion on the 2026-10-09 `$SPX` close, one $50B
+  strike left everything else flat. Its ground is shaded to the zero line only, so a
+  colour always means that sign.
+- **Cost.** Contours: about 27 ms and 35 KB a repaint while on, measured on that
+  session. Nothing while off. No change to what the service publishes.
+- **Structure.** The heat map's fixed series count goes from nine to eleven.
+  `gamma.render` is 1,462 lines (ceiling lowered from 1,469): the per-view data glue
+  moved out to `gamma.view_data`.
+- **Configuration.** `config/gamma_heat.toml` `[contours] steps`, `min_columns`,
+  `max_points`; `[well] height`. Two new stored choices, `gamma_heat_contours` and
+  `gamma_well`.
+- **Verified** by the two pure modules' suites and the page's; in the local page
+  harness (switches off by default, the panel mounting when shown, choices restored
+  after a restart), partly from the DOM because the pane stopped drawing; and by
+  building the figures from the real published `$SPX` snapshot with the page's own
+  builders. Not seen on the running app.
+- **Tests.** `test_gamma_well.py`, and additions to `test_gamma_heat.py`,
+  `test_options_gamma.py` and `test_gamma_heat_config.py`.
+- **Design:** `docs/plans/2026-10-10-gamma-contours-and-well-design.md`.
+
+**Prior —** 2026-10-09 (**Dealer Positioning: From spot honours the Level movement switch.**)
 
 - **Reported by the user** within hours of the frame shipping: picking **From spot**
   hid the Level movement switch and drew the three level tracks whatever it had been

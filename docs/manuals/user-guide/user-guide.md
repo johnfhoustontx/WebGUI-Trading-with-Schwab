@@ -897,6 +897,25 @@ nothing: **Spot** and **Bar** (price is always the flat line). The forward proje
 band is not drawn either. Each level line keeps its own price in its label; only its
 position moves.
 
+**To see where the positioning changes fast, switch Contours on.** It draws lines of
+equal value over the heat map: at the top of the colour scale, at half of it and at a
+quarter, above and below zero. Where the lines bunch together, the exposure changes a
+lot across a few strikes. Where one line runs alone, it marks how far a band reaches.
+The lines follow the Value, Show, Scale and Frame you have chosen, and the switch is
+off until you turn it on.
+
+**To see the gamma profile as a landscape, switch Gravity well on** (Gamma view only).
+A panel appears under the two charts. Strikes with positive gamma, where dealer hedging
+damps moves, are drawn as **valleys**. Strikes with negative gamma, where it amplifies
+them, are drawn as **hills**. The white ball is the price, the arrow beside it points
+downhill, and the small diamond marks the low point that slope leads to. One sentence
+under the panel says where price sits and how far the low point is.
+
+Read it as a picture of the positioning right now. It is **not a forecast**: it knows
+nothing about order flow, time or volatility. The height is on a square-root scale so
+that one very large strike does not flatten everything else, which means two valleys'
+depths are not in proportion to their dollars. Hover a strike for its real net gamma.
+
 **The colour strip** at the right of the controls row gives the two ends of the heat
 map's colours as numbers, with the unit: dollars of gamma per 1% move on Gamma,
 dollars of delta on Delta, a plain figure on Charm and Vanna, percentages in Share of

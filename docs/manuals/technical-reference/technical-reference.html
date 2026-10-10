@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-09</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-10</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -3258,6 +3258,33 @@ stored sessions (<code>tools/measure_gamma_crop.py</code>):</p>
 </table>
 <p>The display window itself, <code>[window] n_side</code> (20 strikes each side of spot), is read
 from the same file by the page and the service each time they draw or publish.</p>
+<p><strong>Contour lines.</strong> With <strong>Contours</strong> on, the page traces lines of equal value over
+the heat map's own grid, after the Value, Show, Scale and Frame have been applied
+(<code>gamma_heat.contours</code>, marching squares):</p>
+<pre><code>levels   = zmax, zmax/2, zmax/4, …        (`[contours] steps` of them, 3 as shipped)
+           drawn above zero and, mirrored, below it
+zmax     = the top of the colour scale in use (the lock, in Locked)
+crossing = linear between two neighbouring strikes, or two neighbouring minutes
+</code></pre>
+<p>A cell with a gap in any corner is skipped, so no line is drawn through a value that
+was not measured. A line spanning fewer than <code>[contours] min_columns</code> minutes (3) is
+left out as a speck, and past <code>[contours] max_points</code> (6,000 a sign) the shortest
+lines are dropped. Measured on a stored <code>$SPX</code> session the lines cost about 27 ms and
+35 KB a repaint. They cover the collected minutes only, not the forward band.</p>
+<p><strong>The gravity well.</strong> With <strong>Gravity well</strong> on (Gamma view), a panel draws the
+by-strike bars' own net values as ground (<code>gamma_well</code>):</p>
+<pre><code>height(strike) = −net gamma                       (`[well] height = &quot;linear&quot;`)
+               = −sign(net) · √|net|              (`&quot;root&quot;`, as shipped)
+ball           = price, on the straight line between the two strikes around it
+downhill       = toward the lower of those two strikes, then on to the first
+                 strike that is lower than both its neighbours (the low point)
+</code></pre>
+<p>Positive net gamma is below the zero line (a valley) and negative above it (a hill).
+The caption's "positive" or "negative gamma" is read from the net values, never from
+the drawn height, so it is the same on either scale. The square root keeps every
+strike's side of zero and the order of the strikes; it does not keep depths in
+proportion. Nothing here uses order flow, time or volatility: it is the bars redrawn,
+not a prediction.</p>
 <h2 id="dealer-delta-exposure-dex-and-projection">Dealer delta exposure (DEX) and projection</h2>
 <p>The DEX/hedge panel sums <code>OI · delta · contract_multiplier · spot</code> across strikes
 for the current and a projected delta, surfacing net-delta-now vs projected-close

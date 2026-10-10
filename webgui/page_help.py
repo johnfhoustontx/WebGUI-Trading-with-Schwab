@@ -774,6 +774,20 @@ accelerate price.
   controls hide there, because price is always the flat line. **Level movement**
   still works: off shows each level as one line at its distance from price now,
   on adds the path it took to get there.
+- **Contours** (switch, off by default) draws lines of equal value over the heat
+  map: one at the top of the colour scale, one at half of it and one at a
+  quarter, above and below zero. Lines packed close together mark where the
+  positioning changes fast from one strike to the next; a line far from the rest
+  shows how far a band reaches. They follow whatever Value, Show, Scale and Frame
+  you have chosen.
+- **Gravity well** (switch, off by default, Gamma only) adds a panel under the
+  charts that draws the gamma profile as ground. A **valley** is positive gamma,
+  where dealer hedging damps moves; a **hill** is negative gamma, where it
+  amplifies them. The ball is the price, the arrow points downhill, and the small
+  diamond is the low point the slope leads to. The sentence underneath says the
+  same in words. It is a picture of the profile as it stands, **not a forecast**.
+  Height is on a square-root scale so the largest strike does not flatten the
+  rest; hover a strike for its real figure.
 - **The colour strip** beside the controls gives the two ends of the heat map's
   colours as numbers (dollars of gamma per 1% move, or dollars of delta; Charm
   and Vanna show a plain figure; percentages in Share of column) and says what
