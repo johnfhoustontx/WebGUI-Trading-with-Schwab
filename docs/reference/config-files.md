@@ -201,7 +201,8 @@ rather than merely policed.
 
 `config/theme.toml` is the single source of truth for the **webgui styling palette**
 (surfaces/cards/text, buttons, semantic state colors, the
-Sentiment/Rotation chart palette), loaded once at webgui
+Sentiment/Rotation chart palette, and since 2026-10-11 `[gamma]`, the Dealer
+Positioning heat map's put and call colours and their grading), loaded once at webgui
 startup by `webgui/pages/options/theme.py:load_theme()` — edit + restart the webgui to
 restyle without code changes; missing keys fall back to the built-in dark-navy defaults.
 See the "App theme — dark-navy 'dashboard'" section. **ONE section is still a page-scoped language, NOT the app-wide palette and NOT

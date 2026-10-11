@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-10</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-11</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -1111,7 +1111,9 @@ line summary (spot, strike count, net exposure).</p>
   becomes a full-width expiry × strike heat map.)</li>
 <li><strong>Right</strong> — an <strong>intraday heat map</strong> of strike × time. Call-heavy (positive)
   strikes run deep blue → cyan; put-heavy (negative) run aubergine → magenta; near
-  zero fades to transparent so quiet strikes read as empty. The spot price is
+  zero fades to transparent so quiet strikes read as empty. Those are the shipped
+  colours: you can choose your own in <strong>Settings → Appearance → Dealer
+  Positioning</strong>. The spot price is
   overlaid. <strong>Press and hold</strong> the left mouse button to read a cell — plain hovering
   shows nothing.</li>
 </ul>
@@ -3835,6 +3837,15 @@ have been read.</p>
   font, grouped as surfaces, text, fields, buttons, status colours, charts, type
   and menu, with a live preview. <strong>Save changes</strong>, then <strong>Restart now</strong>, applies
   it to every screen; <strong>Reset to shipped values</strong> (confirm-gated) goes back.</li>
+<li><strong>To choose the Dealer Positioning colours</strong>, open <strong>Settings → Appearance</strong> and
+  find the <strong>Dealer Positioning</strong> group. The top row is the put side and the
+  bottom row the call side. <strong>Put</strong> and <strong>Call</strong> are the two main colours: the
+  bars, the walls, the gravity well, the ridge plot and the contour lines use
+  them. <strong>Peak</strong>, <strong>Mid</strong> and <strong>Low</strong> are the grading: the shade the heat map
+  shows for the largest, middling and smallest values on that side. Click a
+  tile to pick a colour; the strip in the preview shows the whole scale, largest
+  put on the left to largest call on the right, before you save. The Flow and
+  Net Prem tabs keep their own colours.</li>
 <li><strong>API usage</strong> — how many calls the app has made to <strong>Schwab</strong> (counted at the
   gateway) and to <strong>Claude</strong> (counted at each call site), for today, the last 7 days
   and the last 30. Under the Schwab counts, <strong>Answered locally today</strong> is the number

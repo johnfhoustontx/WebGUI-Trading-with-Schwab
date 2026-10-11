@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-10</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-11</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -1222,7 +1222,8 @@ Prem</strong> and <strong>Term</strong> are different screens with their own con
 own subsection further down.</p>
 <p><strong>Bars (top chart).</strong> Net exposure at each strike, ±20 strikes around the current
 price. The window is fixed so bar width stays constant all day. Blue/cyan is
-call-heavy, magenta is put-heavy. A tall bar is a strike where a lot of hedging
+call-heavy, magenta is put-heavy (the shipped colours; Settings → Appearance →
+Dealer Positioning changes them). A tall bar is a strike where a lot of hedging
 pressure is concentrated.</p>
 <p><strong>Heat map (below).</strong> The same thing over time — strike on the vertical axis, clock on
 the horizontal. Colour intensity is the size of the exposure; near-zero fades to
@@ -6360,8 +6361,12 @@ marquee</strong> — the report summary behind it also feeds the Desk's Market r
 so <code>market_svc</code> keeps reading it whenever a new report is published, whether or not
 the marquee is showing.</p>
 <p><strong>Appearance tab.</strong> Every colour and font in the app, grouped as surfaces, text,
-fields, buttons, status colours, charts, type and menu, with a live preview that
-shows an unsaved colour before anything else does. <strong>Save changes</strong> writes an
+fields, buttons, status colours, charts, Dealer Positioning, type and menu, with a
+live preview that shows an unsaved colour before anything else does. The <strong>Dealer
+Positioning</strong> group is the heat map's eight colours: the put and the call colour,
+which the bars, walls, gravity well, ridge plot and contour lines also use, and
+three more shades a side for the largest, middling and smallest values. The
+preview draws the resulting scale. <strong>Save changes</strong> writes an
 override in <code>config/local/theme.toml</code> (the shipped <code>config/theme.toml</code> is never
 edited) and <strong>Restart now</strong> applies it to every screen; <strong>Reset to shipped values</strong>
 (confirm-gated) removes the override.</p>
@@ -6488,7 +6493,7 @@ in the rail is the one that stops things.</p>
 </tr>
 <tr>
 <td><strong>Settings</strong></td>
-<td><strong>General</strong> · <strong>Appearance</strong> (Surfaces · Text · Fields · Buttons · Status colours · Charts · Type · Menu) · <strong>Configuration</strong></td>
+<td><strong>General</strong> · <strong>Appearance</strong> (Surfaces · Text · Fields · Buttons · Status colours · Charts · Dealer Positioning · Type · Menu) · <strong>Configuration</strong></td>
 </tr>
 </tbody>
 </table>

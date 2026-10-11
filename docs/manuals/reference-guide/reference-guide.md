@@ -613,7 +613,8 @@ own subsection further down.
 
 **Bars (top chart).** Net exposure at each strike, ±20 strikes around the current
 price. The window is fixed so bar width stays constant all day. Blue/cyan is
-call-heavy, magenta is put-heavy. A tall bar is a strike where a lot of hedging
+call-heavy, magenta is put-heavy (the shipped colours; Settings → Appearance →
+Dealer Positioning changes them). A tall bar is a strike where a lot of hedging
 pressure is concentrated.
 
 **Heat map (below).** The same thing over time — strike on the vertical axis, clock on
@@ -4695,8 +4696,12 @@ so `market_svc` keeps reading it whenever a new report is published, whether or 
 the marquee is showing.
 
 **Appearance tab.** Every colour and font in the app, grouped as surfaces, text,
-fields, buttons, status colours, charts, type and menu, with a live preview that
-shows an unsaved colour before anything else does. **Save changes** writes an
+fields, buttons, status colours, charts, Dealer Positioning, type and menu, with a
+live preview that shows an unsaved colour before anything else does. The **Dealer
+Positioning** group is the heat map's eight colours: the put and the call colour,
+which the bars, walls, gravity well, ridge plot and contour lines also use, and
+three more shades a side for the largest, middling and smallest values. The
+preview draws the resulting scale. **Save changes** writes an
 override in `config/local/theme.toml` (the shipped `config/theme.toml` is never
 edited) and **Restart now** applies it to every screen; **Reset to shipped values**
 (confirm-gated) removes the override.
@@ -4825,7 +4830,7 @@ Pages carrying their own subtab row, and what each subtab does.
 | **Portfolio** | **Holdings** · **Sectors** (weights vs S&P) · **Performance** (graded positions) |
 | **Rescue** | **At-Risk Board** · **Ad-hoc Trade** |
 | **EOD Report** | **Summary** · **Detailed** (`/eod/detail`) |
-| **Settings** | **General** · **Appearance** (Surfaces · Text · Fields · Buttons · Status colours · Charts · Type · Menu) · **Configuration** |
+| **Settings** | **General** · **Appearance** (Surfaces · Text · Fields · Buttons · Status colours · Charts · Dealer Positioning · Type · Menu) · **Configuration** |
 
 # Appendix B — Refresh cadences
 

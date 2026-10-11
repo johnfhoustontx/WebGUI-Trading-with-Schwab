@@ -263,7 +263,9 @@ fails on a raw `ui.button` / `ui.dialog` / `ui.notify` / `ui.table`.
 classes through `.classes()`. Banned: `.style(...)`, inline `style=`,
 `.props("style=…")`. A data-driven colour maps a finite state to a FIXED class;
 never a runtime-built colour class. Theme tokens are Python constants in
-`pages/options/theme.py`; `config/theme.toml` restyles without code. The one
+`pages/options/theme.py`; `config/theme.toml` restyles without code. The Dealer
+Positioning colours are the operator's (`[gamma]`, Settings → Appearance): a
+new colour on that page comes from `gamma.palette`, never a hex literal. The one
 escape hatch is `ui.add_css` for Quasar-internal or teleported DOM. Out of scope:
 raw `HTMLResponse` documents, `ui.html` fragments, Highcharts option dicts.
 ⚠ The bundled Tailwind JIT does not generate a class containing `var(...)`.

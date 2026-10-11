@@ -820,7 +820,9 @@ line summary (spot, strike count, net exposure).
   becomes a full-width expiry × strike heat map.)
 - **Right** — an **intraday heat map** of strike × time. Call-heavy (positive)
   strikes run deep blue → cyan; put-heavy (negative) run aubergine → magenta; near
-  zero fades to transparent so quiet strikes read as empty. The spot price is
+  zero fades to transparent so quiet strikes read as empty. Those are the shipped
+  colours: you can choose your own in **Settings → Appearance → Dealer
+  Positioning**. The spot price is
   overlaid. **Press and hold** the left mouse button to read a cell — plain hovering
   shows nothing.
 
@@ -3177,6 +3179,15 @@ Preferences, all saved on your machine:
   font, grouped as surfaces, text, fields, buttons, status colours, charts, type
   and menu, with a live preview. **Save changes**, then **Restart now**, applies
   it to every screen; **Reset to shipped values** (confirm-gated) goes back.
+- **To choose the Dealer Positioning colours**, open **Settings → Appearance** and
+  find the **Dealer Positioning** group. The top row is the put side and the
+  bottom row the call side. **Put** and **Call** are the two main colours: the
+  bars, the walls, the gravity well, the ridge plot and the contour lines use
+  them. **Peak**, **Mid** and **Low** are the grading: the shade the heat map
+  shows for the largest, middling and smallest values on that side. Click a
+  tile to pick a colour; the strip in the preview shows the whole scale, largest
+  put on the left to largest call on the right, before you save. The Flow and
+  Net Prem tabs keep their own colours.
 - **API usage** — how many calls the app has made to **Schwab** (counted at the
   gateway) and to **Claude** (counted at each call site), for today, the last 7 days
   and the last 30. Under the Schwab counts, **Answered locally today** is the number

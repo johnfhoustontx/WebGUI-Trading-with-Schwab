@@ -1768,7 +1768,8 @@ to your phone. The Schwab login is checked every morning at 07:30 CT.
 
 Three tabs. **General** holds the app's own preferences (below). **Appearance**
 sets every colour and font, with a live preview; a saved change shows after a
-web GUI restart. **Configuration**
+web GUI restart. Its **Dealer Positioning** group holds the put and call
+colours and the shades the heat map grades through. **Configuration**
 holds every trading setting — scanner floors, the paper books' per-trade
 caps, exit rules, flow alerts, market hours and schedules, symbols, local market
 data, the sector map and commissions — each with a plain-English explanation. Changes are saved as
@@ -1903,7 +1904,8 @@ SUBTAB_HELP: dict[str, dict[str, str]] = {
         "General": "App preferences: alert sounds, spoken alerts, which phone "
                    "alerts go to Discord and Telegram, the ticker, API usage "
                    "and maintenance.",
-        "Appearance": "Every colour and font in the app, with a live preview. "
+        "Appearance": "Every colour and font in the app, with a live preview, "
+                      "including the Dealer Positioning put and call colours. "
                       "Saved changes show after a web GUI restart.",
         "Configuration": "Every trading setting — scanner floors, per-trade caps, "
                          "exit rules, flow alerts, schedules, symbols, "

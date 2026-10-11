@@ -4,7 +4,35 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-10 (**Dealer Positioning: the well and the ridge plot share one strike axis.**)
+**Last updated:** 2026-10-11 (**Dealer Positioning: the put and call colours and their grading are chosen in Settings.**)
+
+- **Asked for by the user:** to select the put and call colours, and the grading
+  of the colours, in the settings.
+- **What is new.** **Settings → Appearance** has a **Dealer Positioning** group of
+  eight colours, the put side over the call side: Put peak, Put, Put mid, Put low,
+  Call low, Call mid, Call, Call peak. Put and Call are also the bars, the walls,
+  the gravity well, the ridge plot and the contour lines. The preview draws the
+  heat map's own gradient from the unsaved colours. Save, then restart the web GUI.
+- **Shipped as the colours the page always had,** so nothing changes until a colour
+  is chosen. The heat map's stops, the bars, the walls, the well and the wash are
+  identical to the digit. The contour lines and the ridge plot's fills, hand-picked
+  until now, are computed from the main colour and moved by at most 8 parts in 255.
+- **"Grading" is the shades,** four a side. Where each grade sits on the scale and
+  how see-through it is stay in code (`gamma_heat.RAMP`).
+- **Not done.** The Flow and Net Prem tabs keep their own colours (about twenty
+  literals in `flow_panels.py`). The picture pushed to Telegram and Discord is a
+  separate renderer. The public site picks a change up when its own unit restarts.
+- **Structure.** `config/theme.toml [gamma]`; `theme.gamma_colors`;
+  `gamma_heat.RAMP`, `ramp_stops`, `ramp_svg`, `rgba`, `mix`, `tint`, `shade`;
+  `gamma.palette`. `[gamma]` is the one page-scoped section Appearance edits.
+- **Verified** by the suites, and in the page harness: a colour picked through the
+  real picker, **Save changes** writing the override, and a freshly started heat
+  map (real `$SPX` session of 2026-10-09) drawing a full green and orange set on the
+  stops, bars, walls, legend, contours, well, ridge plot and wash. Not seen on the
+  running app.
+- **Design:** `docs/plans/2026-10-11-gamma-colours-in-appearance-design.md`.
+
+**Prior —** 2026-10-10 (**Dealer Positioning: the well and the ridge plot share one strike axis.**)
 
 - **Asked for by the user** on seeing the two panels together: a price was at a
   different horizontal place in each. The well's axis was rounded out to a tick

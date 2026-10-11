@@ -986,6 +986,17 @@ two sides from the grid itself.
   are y-axis plot lines in the list `wall_plot_lines` / `line_annotations` already
   emit on every paint, drawn in `BALANCED_COLOR` grey on both panels in every
   Value. Grey because amber is the projected flip's.
+- **The colours are the operator's (2026-10-11).** `config/theme.toml [gamma]`:
+  `put_peak`, `put`, `put_mid`, `put_low`, `call_low`, `call_mid`, `call`,
+  `call_peak`, read through `theme.gamma_colors` (hex only, shipped colour for
+  anything malformed). `gamma_heat.ramp_stops` builds `HEAT_STOPS` from them at
+  the positions and opacities in `gamma_heat.RAMP`; `gamma.palette(colours)` is
+  every other colour drawn in the call or put colour (`POS_COLOR`, `NEG_COLOR`,
+  the well's fills, the ridge plot's fills, the contour colours, the wash).
+  Resolved once at import: a web GUI restart applies a change. ⚠ A new colour on
+  this page is added to `palette`, never written as a hex literal, or it stays
+  cyan beside a heat map the operator made green. The Flow and Net Prem panels
+  do NOT follow (`flow_panels.py` holds ~20 literals of the shipped pair).
 - **The legend strip** is one line of SVG in the controls row
   (`gamma_heat.legend_svg`, built from `HEAT_STOPS` itself): both ends of the
   colour scale as numbers, the ramp, the unit and a caption. ⚠ It is NOT a
@@ -1495,9 +1506,14 @@ It ships with `mode = "shadow"`.
 
 General — the original page. Settings (GUI prefs via `app_settings`: scanner **audio alert** on/off + sound + volume, only-during-market-hours, min-score-to-alert; desktop-notification toggle + permission grant + Test sound; ticker toggle/speed (the theme editor moved out to the Appearance sub-tab on 2026-09-19); **API usage** (2026-07-13) — outbound Schwab API-call counts Today / last 7 / last 30 days, read off-thread from the proxy's `GET /stats/api_calls`, **plus an "Answered locally today" row** (`store.served_locally` — requests the proxy answered from its own market-data store, so they are NOT in the Schwab counts; zero while `config/marketdata.toml` `mode` is `shadow` or `off`; the row is drawn only when the proxy reports the field, and `settings.plan_stat_cells` builds its cell on the load that first reports it), **plus Claude (Anthropic) call counts** from the cross-tier `shared/anthropic_counter.py` store (`shared/data/anthropic_call_counts.db`, WAL — recorded immediately before every `messages.create` at each API-key call site; services need a restart to start counting) (counted per actual HTTP request at the marketdata rate-limit chokepoint + the trader loop → per-day rows in `schwab-proxy/data/api_call_counts.db`, forward-only; requires a proxy restart to start counting); **Maintenance** (2026-07-13) — a confirm-gated **Vacuum GEX history DB** button (optional purge-first switch — ⚠ since 2026-09-20 the confirm NAMES whether that switch is on, since it deletes every saved session but the last five) that runs `tools/vacuum_gex.py` as a subprocess off-thread and prints the before→after size — the tool still refuses while the collector is active)
 
-Appearance (`pages/appearance.py`, 2026-09-19) — every colour and font in **eight
+Appearance (`pages/appearance.py`, 2026-09-19) — every colour and font in **nine
 groups that follow the app's design standard, not `config/theme.toml`'s sections**:
-Surfaces · Text · Fields · Buttons · Status colours · Charts · Type · Menu. A group
+Surfaces · Text · Fields · Buttons · Status colours · Charts · Dealer Positioning ·
+Type · Menu. **Dealer Positioning (2026-10-11)** is `[gamma]`'s eight colours in two
+rows of four (`GROUP_ROW_SIZE`), with what they are under the heading (`GROUP_HELP`,
+which is NOT `GROUP_NOTES`: its ramp IS in the preview, drawn by
+`gamma_heat.ramp_svg` from the unsaved colours). It is the one page-scoped section
+on this screen, by the user's request. A group
 is a DISPLAY mapping over existing keys (`appearance.GROUPS`), so the TOML never has
 to move for the screen to make sense, and `test_appearance.py` pins that every key of
 `EDITABLE_SECTIONS` appears exactly once — a new theme key cannot ship without a place
