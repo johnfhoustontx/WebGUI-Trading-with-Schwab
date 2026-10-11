@@ -3553,17 +3553,19 @@ both have a silent failure mode behind them.
 | Constant | Value | Where |
 |----------|-------|-------|
 | Glow span / steps | **10.0 s** over **10** classes (`desk-neon-0…9`) | `webgui/pages/desk.py:GLOW_SEC`, `GLOW_STEPS` |
-| Glow hues | cyan `#22d3ee` = new row · amber `#f5b841` = flag change | `desk.py:SPOT_HEX`, `FLIP_HEX` |
+| Glow hue | cyan `#22d3ee` = a new row (the one glow kind) | `desk.py:SPOT_HEX`, `GLOW_KINDS` |
 | Default voice / rate | `en-US-AriaNeural` / `+8%` | `webgui/voice.py:DEFAULT_VOICE`, `RATE` |
 | Voice cache key | `sha1(voice \| rate \| full sentence)` → `webgui/data/voice/<hex>.mp3`, served at `/voice` | `voice.py:clip_name` |
 | Synthesis bound | **20 s** whole-call timeout; measured **~0.9–2.4 s** on a cache miss, **~110 µs** on a hit, ~22–28 KB a clip | `voice.py:SYNTH_TIMEOUT_SEC` |
 | Abandoned-temp sweep | `*.part` older than **3600 s**, swept at prewarm | `voice.py:_PART_MAX_AGE_SEC` |
+| Headlines shown | **9** newest (1–30), read at start | `config/news.toml [desk] headlines` → `shared/news_config.desk_headlines` → `desk.py:NEWS_ROWS_N` |
 | Board re-entry quiet | a symbol back on the Opportunity Board within **1800 s** of leaving glows but is not spoken | `desk.py:BOARD_REENTRY_QUIET_SEC` |
-| Section switches | `voice_board` · `voice_flow` · `voice_positions`, each under `voice_enabled`; detection still runs for a silenced section so re-enabling it announces nothing stale | `desk.py:VOICE_SECTIONS`, `detect_utterances` |
+| Section switches | `voice_board` · `voice_flow`, each under `voice_enabled`; detection still runs for a silenced section so re-enabling it announces nothing stale | `desk.py:VOICE_SECTIONS`, `detect_utterances` |
 
 > **`GLOW_SEC` and `GLOW_STEPS` must move together.** The glow is a CSS animation,
-> and the Positions panel rebuilds every row on each re-price — **a rebuilt element
-> restarts its animation from zero**, so the obvious implementation glows forever.
+> and the Flow alerts panel rebuilds every row each time the bought / sold estimate
+> moves (every minute) — **a rebuilt element restarts its animation from zero**, so
+> the obvious implementation restarts the glow on each repaint.
 > The row instead wears one of `GLOW_STEPS` fixed classes carrying a whole-second
 > *negative* `animation-delay`, which starts the animation partway through, so a
 > rebuilt row **resumes**. Raise the span without adding classes and rows land on

@@ -710,7 +710,7 @@ session actually opens with:</p>
 <li><strong>What is the market doing?</strong> — the top strip</li>
 <li><strong>Where is the structure?</strong> — Dealer Positioning</li>
 <li><strong>What should I act on?</strong> — the Opportunity Board and Flow Alerts</li>
-<li><strong>What am I holding?</strong> — Positions</li>
+<li><strong>What is being said?</strong> — Headlines</li>
 </ol>
 <p>That sequence is the whole design. It is also the admission rule: a panel earns a
 place here only if it answers one of those four <em>at a glance</em>. Screens that reward
@@ -721,8 +721,8 @@ Calculator, the Simulator — are deliberately absent, not overlooked.</p>
 page that goes deeper, and <strong>clicking any row opens that page already set to the
 symbol you clicked</strong>.</p>
 <p>It is also the screen to <strong>leave open</strong>, because it is the only one that will
-interrupt you: new flow alerts and newly-opened positions are announced out loud and
-the arriving row glows for ten seconds (see <em>Spoken arrivals</em> below).</p>
+interrupt you: new flow alerts and symbols joining the Opportunity Board are announced
+out loud and the arriving row glows for ten seconds (see <em>Spoken arrivals</em> below).</p>
 <h3 id="the-panels">The panels</h3>
 <p><strong>Top strip.</strong> The clock; two dials showing <strong>Day / Week / Month</strong> for market
 <strong>sentiment</strong> and market <strong>trend</strong>; then three verdict tiles — <strong>Bias</strong>, <strong>Signal</strong>
@@ -757,7 +757,7 @@ from price-versus-flip and nothing else. Net gamma exposure is shown beside it a
 magnitude only. The two can legitimately disagree, and when they do that is real
 information — but the screen will never print two conflicting regime claims in one
 row. See <em>Dealer Positioning</em> below for what these levels mean.</p>
-<p><strong>Opportunity Board.</strong> The five hottest names, each with a one-line reason, its
+<p><strong>Opportunity Board.</strong> The six hottest names, each with a one-line reason, its
 at-the-money implied volatility <strong>and whether that is rising or falling</strong>, signal
 strength, put/call ratio, net premium, and a setup tag when one is active.</p>
 <p>There is no "edge" column. Edge normally means implied volatility minus <em>realized</em>
@@ -765,7 +765,7 @@ volatility, and this app has no realized-volatility series — so the column wou
 decoration. Implied volatility's <strong>direction</strong> is published instead, and it is the
 more useful half: it is what separates a volatility-crush setup from a
 negative-gamma cascade.</p>
-<p><strong>Live Flow Alerts.</strong> The five newest unusual-options events — crossover, unusual
+<p><strong>Live Flow Alerts.</strong> The nine newest unusual-options events — crossover, unusual
 activity, gamma flip, large delta.</p>
 <p>The alert itself says <strong>call or put</strong>, never <em>bought</em> or <em>sold</em>. Schwab publishes no
 time-and-sales tape, so no one knows which side initiated. Any product that tells you
@@ -777,17 +777,18 @@ share of that contract's volume that was bought (green), sold (red), or <strong>
 (grey; the service's word for it is <em>unlabelled</em>). The unknown share is always
 shown, so the estimate never looks better measured than it was. See <a href="#flow-alerts">Flow Alerts</a> for how it is made and how far to trust
 it.</p>
-<p><strong>Positions.</strong> Your paper trades and your captured signals, merged, open only: source, strikes,
-days to expiration, size, entry, live mark, unrealized profit or loss, and a flag —
-<strong>OK</strong>, <strong>Watch</strong>, <strong>At risk</strong>, <strong>Rescue</strong>. The header totals open trades,
-unrealized P&amp;L, and how many need attention. <em>At risk</em> and <em>Rescue</em> are the two
-that count toward that total; <em>Watch</em> does not.</p>
-<p><strong>Headlines.</strong> Full width, under the four panels: the five newest items from
+<p><strong>Headlines.</strong> The fourth panel, beside Live Flow Alerts: the nine newest items from
 <a href="#market-news">Market News</a>, one line each — the time in Central, the feed, and the
 headline, which opens the article itself in a new tab (so the row is not a
-click-through the way the panels above are). <strong>All headlines →</strong> opens Market News,
-where the filters and Trending live. On the public live Desk the strip shows only
-the feeds marked public.</p>
+click-through the way the other panels' rows are). <strong>All headlines →</strong> opens Market
+News, where the filters and Trending live. On the public live Desk the panel shows
+only the feeds marked public. The count is a setting (<em>Settings → Configuration →
+Market news → Headlines on the Desk</em>); nine matches the alert list beside it.</p>
+<p><strong>The Desk shows no positions.</strong> Until 11 October 2026 the fourth panel was
+<em>Positions</em> — paper trades and captured signals merged, each with an OK / Watch /
+At risk / Rescue flag — and Headlines was a strip under the grid. Positions now live
+only on their own pages: <strong>Paper Account</strong>, <strong>Captured Signals</strong>, <strong>Rescue</strong> for the
+ones in trouble, and the <a href="#symbol">Symbol</a> page for one name.</p>
 <p><strong>Market read.</strong> A button at the top right of the page, with the time of the
 reading and its count beside it; it opens the reading as a popup. Six readings — direction,
 breadth, structure, volatility, flow and cross-asset — each marked <strong>Tailwind</strong>,
@@ -818,7 +819,7 @@ page (five highlights from the report over six chips that repeated the top
 strip). The same buttons and popups are on the <strong>public live Desk</strong>
 (<code>live.neuralstrike.co</code>).</p>
 <h3 id="spoken-arrivals">Spoken arrivals</h3>
-<p>A <strong>new flow alert</strong> or a <strong>newly-opened position</strong> is announced in a synthetic
+<p>A <strong>new flow alert</strong> is announced in a synthetic
 human voice and the row glows cyan for ten seconds. Tickers are always spelled
 letter by letter rather than read as words, which is squawk-box convention and also
 the only rule that survives an unbounded symbol list: "SPY" read aloud as <em>spy</em> is
@@ -828,10 +829,7 @@ Unusual activity and large delta are about one option, so the sentence carries i
 expiry, strike and side: <em>"N D X. Unusual activity, 0-D T E 7 15 Put."</em> A crossover
 is a fact about a symbol's whole premium tape and a gamma flip about the whole
 dealer book — neither has a contract to name, so both keep the short form: <em>"S P Y.
-Crossover alert, calls over."</em> A new position speaks its strikes, expiry and entry
-price, and says <strong>credit or debit</strong> explicitly, because the paper book stores a
-debit as a negative credit and a debit that sounded like a credit would be the most
-expensive sentence this feature could say.</p>
+Crossover alert, calls over."</em></p>
 <p>Numbers are spoken the way a trader hears them, not the way a computer reads them:
 leading digits one at a time and the last two as a pair, so 715 is <em>"seven
 fifteen"</em>, 21500 is <em>"two one five hundred"</em> and 207.5 is <em>"two oh seven point
@@ -847,9 +845,6 @@ that.</p>
 <p>Three more rules are worth knowing, because each is a decision rather than an
 accident:</p>
 <ul>
-<li><strong>A flag change glows amber and says nothing.</strong> A position moving OK → At risk →
-  Rescue is not an <em>arrival</em>; it was already on the screen, and the flag column
-  already prints the new word. Only genuinely new rows speak.</li>
 <li><strong>All four flow detectors speak, large-delta included</strong> — even though the scanner
   chime deliberately ignores that one. The reason the chime ignores it is that a
   <em>chime</em> carrying no information is noise at that detector's frequency. An
@@ -869,8 +864,8 @@ accident:</p>
 </li>
 </ul>
 <p>Everything about it is switchable under <em>Settings → Spoken alerts (Desk)</em> —
-including <strong>one switch per section</strong> (Opportunity Board, Live Flow Alerts,
-Positions) under the main one. A section switched off still glows; only its
+including <strong>one switch per section</strong> (Opportunity Board, Live Flow Alerts)
+under the main one. A section switched off still glows; only its
 sentence is dropped. It obeys the <strong>same</strong> market-hours restriction as the scanner
 chime — there is deliberately no second switch to fall out of step with the first.</p>
 <h3 id="what-the-numbers-are-and-are-not_1">What the numbers are, and are not</h3>
@@ -1867,7 +1862,7 @@ this, and what is scheduled?"</em> without leaving the app.</p>
 </tr>
 <tr>
 <td>Settings</td>
-<td><strong>Settings → Configuration → Market news</strong> — poll intervals, extra tickers, the Trending window, each feed's <strong>Enabled</strong> / <strong>Show on the public site</strong> switch, the <strong>Impact</strong> rules, and the <strong>Calendar</strong> (sources, Fed events, IPOs, dividends, indicators). The feed list itself is read-only there; feeds are added in <code>config/news.toml</code></td>
+<td><strong>Settings → Configuration → Market news</strong> — poll intervals, extra tickers, the Trending window, how many headlines the Desk shows, each feed's <strong>Enabled</strong> / <strong>Show on the public site</strong> switch, the <strong>Impact</strong> rules, and the <strong>Calendar</strong> (sources, Fed events, IPOs, dividends, indicators). The feed list itself is read-only there; feeds are added in <code>config/news.toml</code></td>
 </tr>
 </tbody>
 </table>
@@ -6349,8 +6344,8 @@ it is what stops the app interrupting you for mediocre signals.</p>
 <p>Browsers block audio until you interact with the page. <strong>Test sound</strong> — or <strong>Test
 voice</strong> — unlocks it.</p>
 </blockquote>
-<p><strong>Spoken alerts (Desk).</strong> Whether the Desk announces new flow alerts,
-newly-opened positions and symbols joining the Opportunity Board out loud — one
+<p><strong>Spoken alerts (Desk).</strong> Whether the Desk announces new flow alerts
+and symbols joining the Opportunity Board out loud — one
 main switch plus one per section — which of six neural voices does it, and how loud.
 <strong>Test voice</strong> speaks a sample and doubles as the audio unlock. Note what is <em>not</em>
 here: a market-hours toggle. Spoken alerts reuse the one in <strong>Scanner alerts</strong>, so

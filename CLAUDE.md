@@ -154,7 +154,7 @@ fitting a post into 280 - stdlib only, pinned by `shared/tests/test_x_text.py`,
 so the `/x` page's live count is the service's own computation) ·
 `shared.news_config` (since 2026-09-26; `config/news.toml`'s loader - stdlib +
 `shared.config_toml` + `shared.symbols` + `repo_paths` only; Tier 1 reads just
-the ticker set and `[trending] window_h` from it) ·
+the ticker set, `[trending] window_h` and `[desk] headlines` from it) ·
 `shared.gamma_heat_config` (since 2026-10-09; `config/gamma_heat.toml`'s loader -
 stdlib + `shared.config_toml` + `repo_paths` only, pinned by
 `shared/tests/test_gamma_heat_config.py`) ·

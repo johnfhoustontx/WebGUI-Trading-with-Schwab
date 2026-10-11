@@ -23,7 +23,7 @@ keys that feed it. Menu order matches the rail.
 | **Dealer Positioning** | `options_svc` :8211 | `cache:options:gamma`, `:gamma_hist_*`, `:gamma_symbols`, `:net_premium`, `:gamma_analyze*`, `:gamma_briefings` |
 | **Opportunity Board** | `options_svc` | `cache:options:matrix` |
 | **Flow Alerts** | `options_svc` | `cache:options:flow_alerts`, `:flow_sides`, `:flow_followup` |
-| **Market News** | `news_svc` :8216 | `cache:news:feed`, `:sec`, `:calendar`, `:status` (the public copy reads `:feed_public`, `:sec_public`, `:calendar_public`); also the Desk's headlines strip (`:feed`) and the Symbol page's news band (`:feed` + `:sec`) |
+| **Market News** | `news_svc` :8216 | `cache:news:feed`, `:sec`, `:calendar`, `:status` (the public copy reads `:feed_public`, `:sec_public`, `:calendar_public`); also the Desk's Headlines panel (`:feed`) and the Symbol page's news band (`:feed` + `:sec`) |
 | **Market Dashboard** | `market_svc` :8215 | `cache:market:dashboard`, `:summary`, `:read` (the Desk's Market read) |
 | **Sentiment** | `sentiment_svc` :8210 | `cache:sentiment:composite`, `:regime`, `:regime_history`, `:intraday_history` |
 | **Sector & Industry** | `sentiment_svc` | `cache:sentiment:sectors` |

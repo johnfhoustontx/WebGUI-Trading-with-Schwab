@@ -13,16 +13,18 @@ top of the rail in a **caption-less leading `NAV_SECTIONS` block** — the mirro
 the bottom-pinned `SYSTEM_RAIL` — so its breadcrumb is the bare leaf `Desk`. It
 was alone there until 2026-09-17, when `/symbol` joined it: the two entry points.
 
-⚠ **Each panel scrolls sideways INSIDE itself below ~1877px (private) / ~1809px
-(public), rather than the document scrolling** (2026-09-09). The panel BODY is
+⚠ **Each gridded panel scrolls sideways INSIDE itself below ~1809px (private) /
+~1741px (public), rather than the document scrolling** (2026-09-09; the figures
+are the Opportunity board's floors summed, and were 1877 / 1809 while the wider
+Positions panel was on the page). The panel BODY is
 the scroll container, never the card, so the heading stays put; each grid carries
 a `min-width` DERIVED from its own `minmax()` track floors
 (`pages/panel_scroll.py`), because a grid that keeps shrinking has nothing to
 scroll. ⚠ **The pinned column is the one that NAMES the row, which is not always
 the first**: dealer leads with SYMBOL and pins one cell, but Board leads with
-SCORE, Flow with TIME and Positions with BOOK, so those three pin **two** —
-pinning `:first-child` there would freeze a `PAPER` chip while the symbol scrolled
-away. `_PIN_DEPTHS` is keyed by the grid string, the one thing every painter and
+SCORE and Flow with TIME, so those two pin **two** — pinning `:first-child`
+there would freeze a score or a clock time while the symbol scrolled away.
+Headlines has no grid (one flex line per story) and never scrolls sideways. `_PIN_DEPTHS` is keyed by the grid string, the one thing every painter and
 `_grid_head` already holds. The CSS is `shell.PANEL_SCROLL_CSS`, injected by BOTH
 entrypoints so the published screen cannot diverge from the private one.
 
@@ -33,14 +35,19 @@ Market Regime word · honest freshness indicator — a **$VIX quote until
 2026-08-24**, when it gave way to the two band tiles and took `cache:options:header`
 off the page's poll batch with it, that view having had no other reader here) → **Dealer Positioning** (`$SPX`/`SPY`/`QQQ`/`$NDX`:
 spot + day %, gamma flip + signed distance, a positioned-div **structure bar**, call
-and put walls, net GEX, and a pins-or-runs chip) → **Opportunity Board** (top 5 by
-hotness, with ATM IV **and its direction**, and a setup tag) → **Live Flow Alerts**
-(newest 5) → **Positions** (paper and captured merged, with `rescue_state` flags and an
-`OPEN n · UNREALIZED $x · AT RISK m` header) → **Headlines**. The page HEADER carries two buttons, **Market read** and **Market report**, each opening a dialog
-(see their subsection below); until 2026-10-06 both were full-width panels under Headlines. Panels sit in a **2×2 grid**
-(`lg:grid-cols-2` — **not `xl`**, which is 1280px and silently collapses a 1265px
-window to one column). Read-only + **click-through**: every row opens its owning page
-already set to that symbol, reusing the one-shot `handoff.send_to_gamma` stash.
+and put walls, net GEX, and a pins-or-runs chip) → **Opportunity Board** (top
+`BOARD_ROWS_N` by hotness, with ATM IV **and its direction**, and a setup tag) →
+**Flow alerts** (newest `FLOW_ROWS_N`) → **Headlines** (newest `NEWS_ROWS_N`, which
+is `config/news.toml [desk] headlines`; each headline opens the original article and
+"All headlines" opens `/news`). Those four are a **2×2 grid at every width**
+(`grid-cols-2`). ⚠ **The Desk shows no position.** Its Positions panel (the paper
+account and captured signals merged) was removed 2026-10-11 and Headlines, until then
+a full-width strip under the grid, took its cell; the page reads neither
+`options:paper_account` nor `options:captured`. The page HEADER carries two buttons,
+**Market read** and **Market report**, each opening a dialog (see their subsection
+below). Read-only + **click-through**: every dealer, board and flow row opens its
+owning page already set to that symbol, reusing the one-shot `handoff.send_to_gamma`
+stash.
 **Hover Bias, Signal or the Market Regime word** and a sentence explains it —
 `regime_mix.REGIME_PICTURE` for the regime word (the same table `/sentiment`'s
 dial hangs its hover from), `sentiment.BAND_WORD_PICTURE` for Bias/Signal.
@@ -55,7 +62,7 @@ module.
 **Four invariants worth knowing before editing it:**
 - **Every number is produced by the pure function its owning page uses**
   (`sentiment_arcs`/`trend_arcs`, `rings.ring_svg`, `flow.alert_rows`,
-  `console_regime.regime_name`, `paper`'s DTE helper). The Desk composes; it never
+  `console_regime.regime_name`, `news_view.rows`). The Desk composes; it never
   restates arithmetic. A drift guard test pins the regime word against
   `console_regime`'s. This exists because `/sentiment/sectors` and
   `/sentiment/rotation` already print opposite verdicts for exactly that reason.
@@ -158,19 +165,18 @@ into one reading.
 
 Design: [`2026-09-05-desk-bullbear-intraday-design.md`](plans/2026-09-05-desk-bullbear-intraday-design.md).
 
-**Spoken arrival alerts + the neon glow (2026-08-21).** A new **flow alert** or a
-**newly-opened position** is announced out loud — ticker spelled squawk-style, then
-the CONTRACT where the alert names one ("N D X. Unusual activity, 0-D T E 7 15
-Put." · "S P Y. New position, put credit spread. 2 07. point 5, 2 05, 8 - 31, entry
-56 cent credit.") — and its row glows **cyan for 10 seconds**. A position whose
-**flag** moves (OK → AT RISK → RESCUE) glows **amber and stays silent**: it was
-already in the book, and the FLAG column already prints the new word. All **four**
+**Spoken arrival alerts + the neon glow (2026-08-21).** A new **flow alert**, or a
+symbol **joining the Opportunity Board**, is announced out loud — ticker spelled
+squawk-style, then the CONTRACT where the alert names one ("N D X. Unusual activity,
+0-D T E 7 15 Put.") — and its row glows **cyan for 10 seconds**. There is one glow
+kind (an arrival); the spoken "new position" sentence and the amber flag-change glow
+went with the Positions panel. All **four**
 flow kinds speak, `big_delta` included — that deliberately
 diverges from `alerts.py`'s quiet-live exclusion, because the exclusion exists to
 stop an *information-free chime* at that frequency and an announcement naming the
 ticker and the contract is not one.
-- **Per-section switches + the board voice (2026-09-18).** `voice_board` /
-  `voice_flow` / `voice_positions` sit under `voice_enabled` (Settings shows them
+- **Per-section switches + the board voice (2026-09-18).** `voice_board` and
+  `voice_flow` sit under `voice_enabled` (Settings shows them
   greyed while it is off). `desk.detect_utterances` runs every section's fold
   regardless and drops only the SENTENCE for a silenced one — skipping the fold
   would leave its seen-set stale, and re-enabling it would announce the backlog. A
@@ -186,17 +192,15 @@ ticker and the contract is not one.
   makes the degrade path and the contract path one line of code, so they cannot
   drift: an unreadable strike falls back to the short form — **shorter, never
   half**, since a sentence with a hole in it is worse than a terse one and silence
-  is worse than both. `voice.say_number`/`say_expiry`/`say_entry`/`say_strikes` are
+  is worse than both. `voice.say_number`/`say_expiry` are
   the vocabulary; `say_number`'s rule ("2 05", "4 5 hundred", "2 07. point 5") was
-  settled by a listening test and its cases are pinned. `say_entry` lets the SIGN
-  pick the word because the paper book stores a debit as a **negative**
-  `entry_credit`.
+  settled by a listening test and its cases are pinned.
 - **`flow.alert_rows` gained `strike`/`expiry`/`dte`** (additive; no column declares
   them) so the Desk composes off the same row the Flow Alerts page draws rather than
   becoming a second reader of the raw payload.
 - **The Market read (2026-10-05; a dialog since 2026-10-06).** Design
   [`plans/2026-10-05-market-read-scorecard-design.md`](plans/2026-10-05-market-read-scorecard-design.md).
-  Reads `market:read` (in `VIEWS`, thirteen now; region `read`), published by
+  Reads `market:read` (in `VIEWS`; region `read`), published by
   `market_svc` on each clock slot. The SERVICE decides each row's verdict code; the
   page maps the code to a word and a fixed chip (`READ_WORDS`, `READ_CHIPS`: an
   unknown code is "No reading", never Neutral) and formats the facts (`read_reading`,
@@ -215,7 +219,7 @@ ticker and the contract is not one.
   parse every tab holds. Both run on the event loop. ⚠ The volatility fact is `vix_level`, not `vix`: a source guard
   forbids the retired `options:header` field of that name on this page.
 - **The flow rows carry the bought / sold estimate (2026-10-04).**
-  `options:flow_sides` joined `VIEWS` (twelve now) and `_REGION_VIEWS["flow"]`, so
+  `options:flow_sides` joined `VIEWS` and `_REGION_VIEWS["flow"]`, so
   the panel repaints when the estimate moves. `flow_rows(view, sides=...)` passes it
   to `flow.alert_rows`, filtered through `flow.sides_view_shown` INSIDE `_paint_flow`
   (the event loop). `_flow_row` draws `flow_estimate_line(row)` as a second line
@@ -230,13 +234,14 @@ ticker and the contract is not one.
   as `_ALL_CAUSES` minus `CONTRACT_KINDS`, 8 pairs → 4. A uoa phrase's space is the
   option chain, so warming it synthesized sentences no live alert can produce. A burst says the **newest only, plus a count**
 ("…Plus 5 more."), **one utterance per panel per paint**, so a tick is bounded at two
-clips; detection runs over the **full** alert list, not the five rows drawn, or a
+clips; detection runs over the **full** alert list, not the rows drawn, or a
 burst's arrivals would announce themselves later when the list shortened. **First
-paint seeds all three sets silently** — navigating here must not read out the day's
+paint seeds every seen-set silently** — navigating here must not read out the day's
 backlog or light every row.
-- **The glow RESUMES across repaints, it does not restart** — `_paint_positions`
-  rebuilds every row on each re-price, and **a rebuilt element restarts its CSS
-  animation from zero**, so the naive version glows forever. The start time lives in
+- **The glow RESUMES across repaints, it does not restart** — `_paint_flow`
+  rebuilds every row whenever the bought/sold estimate moves (every minute), and
+  **a rebuilt element restarts its CSS animation from zero**, so the naive version
+  restarts the glow on each repaint. The start time lives in
   page state keyed by row id and each row wears one of ten static classes
   `desk-neon-0…9`, each carrying a whole-second **negative `animation-delay`**. Ten
   fixed classes rather than a computed delay: the finite-set rule. ⚠ `GLOW_SEC` and

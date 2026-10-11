@@ -164,7 +164,7 @@ dividends never reach it. ⚠ **The ACL is not a layer here**: the `live` user's
 `~cache:*` read covers the private `feed`, `sec`, `calendar` and
 `calendar_status` (which carries error text) too, and a wildcard cannot exclude
 one key beneath it, so the code is the only guard (`test_news_live.py`). That binds
-the **Desk** as well, a published screen: its headlines strip reads through
+the **Desk** as well, a published screen: its Headlines panel reads through
 `desk.bus_key(view)`, which swaps `news:feed` for `news:feed_public` when
 `shell.is_public()`. Any new public reader of the news feed needs the same swap.
 

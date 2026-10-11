@@ -445,11 +445,12 @@ its dividends cover only the gamma collection list, so a ticker you added to
 <code>[tickers] extras</code> never appears there. A link such as
 <code>live.neuralstrike.co/news?symbol=NVDA</code> opens it filtered to one ticker. It
 writes nothing: a visitor cannot make the service fetch anything. The public
-<strong>Desk</strong>'s headlines strip reads the same public-only list.</p>
+<strong>Desk</strong>'s Headlines panel reads the same public-only list.</p>
 <p>Three things to know:</p>
 <ul>
-<li><strong>They are not redacted.</strong> The Desk shows your open paper positions and captured signals,
-  the Opportunity Board ranks signals, and Flow Alerts carries live alerts.
+<li><strong>They are not redacted.</strong> The Opportunity Board ranks signals and Flow Alerts
+  carries live alerts. (The Desk no longer shows positions, on this address or
+  in the app.)
   Anyone with the address can read them. That is a deliberate choice — the book
   is paper only — but it is worth knowing before you show someone the link.</li>
 <li><strong>They are a separate program.</strong> Nothing anyone does there can reach your own
@@ -688,7 +689,7 @@ the whole app.</p>
 captions, with <strong>Symbol</strong> directly beneath it.</p>
 <p>One screen aggregating the most useful element of every other page, laid out as
 the four questions you ask in order: <em>what is the market doing · where is the
-structure · what should I act on · what am I holding.</em></p>
+structure · what should I act on · what is being said.</em></p>
 <p><strong>The panels, top to bottom:</strong></p>
 <table>
 <thead>
@@ -708,19 +709,15 @@ structure · what should I act on · what am I holding.</em></p>
 </tr>
 <tr>
 <td><strong>Opportunity Board</strong></td>
-<td>The five hottest names, with implied volatility and whether it is rising or falling, and a setup tag</td>
+<td>The six hottest names, with implied volatility and whether it is rising or falling, and a setup tag</td>
 </tr>
 <tr>
 <td><strong>Live Flow Alerts</strong></td>
 <td>The newest unusual-options events. A row that names one contract can carry a bar under it: the estimated share of its volume that was bought (green), sold (red), or could not be told (grey)</td>
 </tr>
 <tr>
-<td><strong>Positions</strong></td>
-<td>Your paper trades and captured signals together, with live marks and an <strong>OK / Watch / At risk / Rescue</strong> flag</td>
-</tr>
-<tr>
 <td><strong>Headlines</strong></td>
-<td>The five newest stories from Market News, one line each — time (Central), feed, and the headline, which opens the article in a new tab. <strong>All headlines →</strong> opens Market News. Full width</td>
+<td>The nine newest stories from Market News, one line each — time (Central), feed, and the headline, which opens the article in a new tab. <strong>All headlines →</strong> opens Market News. It sits beside Live Flow Alerts. How many it shows is a setting: <strong>Settings → Configuration → Market news → Headlines on the Desk</strong></td>
 </tr>
 <tr>
 <td><strong>Market read</strong> (button, top right)</td>
@@ -732,14 +729,17 @@ structure · what should I act on · what am I holding.</em></p>
 </tr>
 </tbody>
 </table>
+<p><strong>The Desk does not show your positions.</strong> It did until 11 October 2026, in the
+panel Headlines now occupies. Open paper trades are on <strong>Paper Account</strong>, captured
+signals on <strong>Captured Signals</strong>, and the <strong>Symbol</strong> page shows anything open in one
+name.</p>
 <p><strong>Hover Bias, Signal or the market regime word</strong> and a sentence explains what it
 means and, for Bias, what position size it implies.</p>
 <p><strong>Clicking any row</strong> opens the page it came from, already set to that symbol — a
-dealer row opens Dealer Positioning on that symbol, a position opens the Paper
-Ledger or Captured Signals. (A headline row is the exception: its headline opens
-the article itself.)</p>
+dealer row opens Dealer Positioning on that symbol, a flow alert opens Flow
+Alerts. (A headline row is the exception: its headline opens the article itself.)</p>
 <p><strong>Nothing on this page can place or change a trade.</strong> It reads and links only.</p>
-<p><strong>It announces arrivals out loud.</strong> When a new flow alert or a newly-opened position
+<p><strong>It announces arrivals out loud.</strong> When a new flow alert
 appears, the Desk speaks it and the row itself <strong>glows for ten seconds</strong>, so your eye
 lands where the voice pointed. Tickers are spelled letter by letter, squawk-box style.
 If several arrive together it names the newest and counts the rest ("plus 5 more")
@@ -750,22 +750,17 @@ about a specific option, so the announcement says which — <em>"N D X. Unusual 
 way a computer reads them: 715 is "seven fifteen", 4500 is "forty-five hundred", 207.5
 is "two oh seven point five". A crossover or a gamma flip is a fact about the whole
 book with no contract to name, so it stays short: <em>"S P Y. Crossover alert, calls
-over."</em> A new position adds its strikes, expiry and entry price, and says <strong>credit or
-debit</strong> out loud — <em>"S P Y. New position, put credit spread. 2 07. point 5, 2 05,
-8 - 31, entry 56 cent credit."</em></p>
+over."</em></p>
 <p>A <strong>hedging-flow</strong> alert (a hedging surge or reversal — see
 <a href="#flow-alerts">Flow Alerts</a>) glows but stays <strong>silent</strong> while its phone push is off,
 which is how it ships: it is neither named nor counted in "plus N more".</p>
-<p>A position that only changes <strong>flag</strong> — OK to At risk to Rescue — glows amber and
-stays <strong>silent</strong>. It was already in the book, and the flag column has already told
-you.</p>
 <p>A symbol that <strong>joins the Opportunity Board</strong> is announced as well — <em>"N V D A.
 Joins the Opportunity Board, buy signal."</em> One that dropped off in the last half
 hour glows when it comes back but stays silent, so two names swapping places at
 the bottom of the board do not talk on every refresh.</p>
 <p>Switch it off, change the voice or set its volume under <strong>Settings → Spoken alerts
-(Desk)</strong>. Each section — <strong>Opportunity Board</strong>, <strong>Live Flow Alerts</strong>, <strong>Positions</strong>
-— also has its own switch there, so you can keep one talking and silence another; a
+(Desk)</strong>. Each section — <strong>Opportunity Board</strong> and <strong>Live Flow Alerts</strong> —
+also has its own switch there, so you can keep one talking and silence the other; a
 silenced section still glows. It obeys the same <em>only during market hours</em> setting
 as the scanner chime.</p>
 <p><strong>Four things that will look like faults and are not:</strong></p>
@@ -1639,7 +1634,7 @@ a 24-hour clock.</p>
 <li><strong>Refresh</strong> checks every feed now instead of waiting for the next scheduled poll
   (every 5 minutes in market hours, 15 off-hours, 60 at weekends and holidays), and
   re-checks the calendar — though each calendar source still keeps its own schedule.</li>
-<li>The <strong>Desk</strong> shows the five newest headlines and each <strong>Symbol</strong> page an
+<li>The <strong>Desk</strong> shows the nine newest headlines and each <strong>Symbol</strong> page an
   <em>In the news</em> band (headlines and SEC items); the public site has its own copy of
   this page (see <em>The public live screens</em>). Every feed, its on/off switch, whether
   the public site may show it, the poll intervals, the impact rules and the
@@ -3818,8 +3813,8 @@ have been read.</p>
 <li><strong>Scanner alerts</strong> — enable the audio alert, pick the sound (chime / bell /
   ping), a <strong>Test sound</strong> button, a <strong>Volume</strong> slider, an <strong>only during market
   hours</strong> toggle, and a <strong>minimum score to alert</strong>.</li>
-<li><strong>Spoken alerts (Desk)</strong> — the Desk announcing new flow alerts, newly-opened
-  positions and symbols joining the Opportunity Board out loud. An <strong>on/off</strong>
+<li><strong>Spoken alerts (Desk)</strong> — the Desk announcing new flow alerts and symbols
+  joining the Opportunity Board out loud. An <strong>on/off</strong>
   switch, one switch <strong>per section</strong> under it (greyed out while the main switch is
   off), a <strong>Voice</strong> picker (six neural voices;
   Aria is the default), a <strong>Volume</strong> slider, and a <strong>Test voice</strong> button. There is

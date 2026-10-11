@@ -4,7 +4,47 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-11 (**Dealer Positioning: real smoothing for the heat map.**)
+**Last updated:** 2026-10-11 (**Desk: the Positions panel is gone and Headlines takes its place.**)
+
+- **Asked for by the user:** "drop the Position frame completely and replace it with
+  the news frame."
+- **What changed on the page.** The 2x2 grid is now Dealer positioning, Opportunity
+  board, Flow alerts and **Headlines**. Headlines was a full-width strip under the
+  grid; that strip is gone, so the page ends at the grid. The public Desk changes
+  the same way (it is the same module) and keeps reading the public feed.
+- **What went with the panel.** The Desk no longer reads `options:paper_account` or
+  `options:captured` (eleven views in the poll batch, from thirteen). The merged
+  position rows, the OPEN / UNREALIZED / AT RISK line, the book and flag chips on
+  the Desk and the amber flag-change glow are removed. So are the spoken "new
+  position" sentence (`voice.position_phrase`, `say_entry`, `say_strikes`) and its
+  Settings switch `voice_positions`; a saved settings file that still carries the
+  key is read without error and the key is ignored.
+- **What stays.** `position_flag`, `strikes_text`, `expiry_text`, `flag_chip_class`
+  and `_is_open` stay in `pages/desk.py` because the Symbol page uses them.
+  Positions are still on Paper Account, Captured Signals, Rescue and Symbol.
+- **Headline count.** Nine, from five, to match the nine flow alerts beside it, and
+  now a setting: `config/news.toml [desk] headlines` (1 to 30), read through
+  `shared.news_config.desk_headlines`, in Settings → Configuration → Market news.
+  The web app reads it at start.
+- **Page width.** Positions was the widest panel (839px). The Opportunity board
+  (805px) is now, so the width below which a panel scrolls inside itself drops by
+  68px, to about 1809px in the app and 1741px on the public site. Those two are
+  summed from the grid floors; only the old 839 was measured in a browser, and
+  `test_panel_scroll.py` keeps that measured grid as its anchor.
+- **Both choices beyond the request were put to the user and approved:** removing
+  the spoken alert with its switch, and nine headlines.
+- **Verified** by the suites and by rendering the page in the local harness at
+  1920px, private and public, on invented data: four equal cards, nine headlines,
+  a long headline truncating, no sideways overflow, no position text with both
+  books published. Two `news_svc` scheduler timing tests
+  (`test_a_slow_feed_poll_does_not_delay_the_release_watch`,
+  `test_a_slow_calendar_branch_is_skipped_on_the_next_tick`) fail on the Windows
+  workstation, and fail the same way on the commit before this one.
+- **Manuals:** the User Guide, Reference Guide, Technical Reference and the `/desk`
+  hover guide no longer describe a Positions panel; the hover guide gained the
+  Headlines entry it never had.
+
+**Prior —** 2026-10-11 (**Dealer Positioning: real smoothing for the heat map.**)
 
 - **Asked for by the user,** after being told the heat map's only smoothing was the
   browser blending a stretched one-pixel-a-cell picture: "I need real smoothing in

@@ -196,7 +196,7 @@ session actually opens with:
 1. **What is the market doing?** — the top strip
 2. **Where is the structure?** — Dealer Positioning
 3. **What should I act on?** — the Opportunity Board and Flow Alerts
-4. **What am I holding?** — Positions
+4. **What is being said?** — Headlines
 
 That sequence is the whole design. It is also the admission rule: a panel earns a
 place here only if it answers one of those four *at a glance*. Screens that reward
@@ -210,8 +210,8 @@ page that goes deeper, and **clicking any row opens that page already set to the
 symbol you clicked**.
 
 It is also the screen to **leave open**, because it is the only one that will
-interrupt you: new flow alerts and newly-opened positions are announced out loud and
-the arriving row glows for ten seconds (see *Spoken arrivals* below).
+interrupt you: new flow alerts and symbols joining the Opportunity Board are announced
+out loud and the arriving row glows for ten seconds (see *Spoken arrivals* below).
 
 ### The panels
 
@@ -255,7 +255,7 @@ magnitude only. The two can legitimately disagree, and when they do that is real
 information — but the screen will never print two conflicting regime claims in one
 row. See *Dealer Positioning* below for what these levels mean.
 
-**Opportunity Board.** The five hottest names, each with a one-line reason, its
+**Opportunity Board.** The six hottest names, each with a one-line reason, its
 at-the-money implied volatility **and whether that is rising or falling**, signal
 strength, put/call ratio, net premium, and a setup tag when one is active.
 
@@ -265,7 +265,7 @@ decoration. Implied volatility's **direction** is published instead, and it is t
 more useful half: it is what separates a volatility-crush setup from a
 negative-gamma cascade.
 
-**Live Flow Alerts.** The five newest unusual-options events — crossover, unusual
+**Live Flow Alerts.** The nine newest unusual-options events — crossover, unusual
 activity, gamma flip, large delta.
 
 The alert itself says **call or put**, never *bought* or *sold*. Schwab publishes no
@@ -280,18 +280,19 @@ share of that contract's volume that was bought (green), sold (red), or **unknow
 shown, so the estimate never looks better measured than it was. See [Flow Alerts](#flow-alerts) for how it is made and how far to trust
 it.
 
-**Positions.** Your paper trades and your captured signals, merged, open only: source, strikes,
-days to expiration, size, entry, live mark, unrealized profit or loss, and a flag —
-**OK**, **Watch**, **At risk**, **Rescue**. The header totals open trades,
-unrealized P&L, and how many need attention. *At risk* and *Rescue* are the two
-that count toward that total; *Watch* does not.
-
-**Headlines.** Full width, under the four panels: the five newest items from
+**Headlines.** The fourth panel, beside Live Flow Alerts: the nine newest items from
 [Market News](#market-news), one line each — the time in Central, the feed, and the
 headline, which opens the article itself in a new tab (so the row is not a
-click-through the way the panels above are). **All headlines →** opens Market News,
-where the filters and Trending live. On the public live Desk the strip shows only
-the feeds marked public.
+click-through the way the other panels' rows are). **All headlines →** opens Market
+News, where the filters and Trending live. On the public live Desk the panel shows
+only the feeds marked public. The count is a setting (*Settings → Configuration →
+Market news → Headlines on the Desk*); nine matches the alert list beside it.
+
+**The Desk shows no positions.** Until 11 October 2026 the fourth panel was
+*Positions* — paper trades and captured signals merged, each with an OK / Watch /
+At risk / Rescue flag — and Headlines was a strip under the grid. Positions now live
+only on their own pages: **Paper Account**, **Captured Signals**, **Rescue** for the
+ones in trouble, and the [Symbol](#symbol) page for one name.
 
 **Market read.** A button at the top right of the page, with the time of the
 reading and its count beside it; it opens the reading as a popup. Six readings — direction,
@@ -329,7 +330,7 @@ strip). The same buttons and popups are on the **public live Desk**
 
 ### Spoken arrivals
 
-A **new flow alert** or a **newly-opened position** is announced in a synthetic
+A **new flow alert** is announced in a synthetic
 human voice and the row glows cyan for ten seconds. Tickers are always spelled
 letter by letter rather than read as words, which is squawk-box convention and also
 the only rule that survives an unbounded symbol list: "SPY" read aloud as *spy* is
@@ -340,10 +341,7 @@ Unusual activity and large delta are about one option, so the sentence carries i
 expiry, strike and side: *"N D X. Unusual activity, 0-D T E 7 15 Put."* A crossover
 is a fact about a symbol's whole premium tape and a gamma flip about the whole
 dealer book — neither has a contract to name, so both keep the short form: *"S P Y.
-Crossover alert, calls over."* A new position speaks its strikes, expiry and entry
-price, and says **credit or debit** explicitly, because the paper book stores a
-debit as a negative credit and a debit that sounded like a credit would be the most
-expensive sentence this feature could say.
+Crossover alert, calls over."*
 
 Numbers are spoken the way a trader hears them, not the way a computer reads them:
 leading digits one at a time and the last two as a pair, so 715 is *"seven
@@ -362,9 +360,6 @@ that.
 Three more rules are worth knowing, because each is a decision rather than an
 accident:
 
-- **A flag change glows amber and says nothing.** A position moving OK → At risk →
-  Rescue is not an *arrival*; it was already on the screen, and the flag column
-  already prints the new word. Only genuinely new rows speak.
 - **All four flow detectors speak, large-delta included** — even though the scanner
   chime deliberately ignores that one. The reason the chime ignores it is that a
   *chime* carrying no information is noise at that detector's frequency. An
@@ -381,8 +376,8 @@ accident:
   at sixth would talk on every refresh.
 
 Everything about it is switchable under *Settings → Spoken alerts (Desk)* —
-including **one switch per section** (Opportunity Board, Live Flow Alerts,
-Positions) under the main one. A section switched off still glows; only its
+including **one switch per section** (Opportunity Board, Live Flow Alerts)
+under the main one. A section switched off still glows; only its
 sentence is dropped. It obeys the **same** market-hours restriction as the scanner
 chime — there is deliberately no second switch to fall out of step with the first.
 
@@ -1173,7 +1168,7 @@ this, and what is scheduled?"* without leaving the app.
 | Sources | Public RSS feeds (MarketWatch, CNBC, Benzinga, AP, the press-release wires, the White House, USTR and the SEC, investingLive, The Fly, StockStory, Techmeme, the biotech trade press and others), Yahoo Finance per-ticker headlines, and **SEC EDGAR** — Form 4 insider purchases and share-offering filings. The list is `config/news.toml [[feeds]]`. The calendar reads the **Federal Reserve**'s calendar, the **BLS** and **BEA** release schedules, **FRED** (release dates and the values), **Nasdaq**'s IPO calendar, and a dividends store the **trade service** fills once a day. |
 | Refresh | Headlines every **5 minutes** in regular hours, **15** off-hours, **60** at weekends and holidays. The calendar on its own cadence: Fed events hourly, the release schedules twice a day, IPOs every 4 hours, the values every 4 hours — and every **2 minutes** for up to an hour after a report is due |
 | Retention | The newest 300 headlines and 100 SEC items are published; the store keeps 7 days |
-| Settings | **Settings → Configuration → Market news** — poll intervals, extra tickers, the Trending window, each feed's **Enabled** / **Show on the public site** switch, the **Impact** rules, and the **Calendar** (sources, Fed events, IPOs, dividends, indicators). The feed list itself is read-only there; feeds are added in `config/news.toml` |
+| Settings | **Settings → Configuration → Market news** — poll intervals, extra tickers, the Trending window, how many headlines the Desk shows, each feed's **Enabled** / **Show on the public site** switch, the **Impact** rules, and the **Calendar** (sources, Fed events, IPOs, dividends, indicators). The feed list itself is read-only there; feeds are added in `config/news.toml` |
 
 ### Reading the screen
 
@@ -4679,8 +4674,8 @@ it is what stops the app interrupting you for mediocre signals.
 > Browsers block audio until you interact with the page. **Test sound** — or **Test
 > voice** — unlocks it.
 
-**Spoken alerts (Desk).** Whether the Desk announces new flow alerts,
-newly-opened positions and symbols joining the Opportunity Board out loud — one
+**Spoken alerts (Desk).** Whether the Desk announces new flow alerts
+and symbols joining the Opportunity Board out loud — one
 main switch plus one per section — which of six neural voices does it, and how loud.
 **Test voice** speaks a sample and doubles as the audio unlock. Note what is *not*
 here: a market-hours toggle. Spoken alerts reuse the one in **Scanner alerts**, so

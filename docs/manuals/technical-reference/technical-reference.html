@@ -5163,9 +5163,9 @@ both have a silent failure mode behind them.</p>
 <td><code>webgui/pages/desk.py:GLOW_SEC</code>, <code>GLOW_STEPS</code></td>
 </tr>
 <tr>
-<td>Glow hues</td>
-<td>cyan <code>#22d3ee</code> = new row · amber <code>#f5b841</code> = flag change</td>
-<td><code>desk.py:SPOT_HEX</code>, <code>FLIP_HEX</code></td>
+<td>Glow hue</td>
+<td>cyan <code>#22d3ee</code> = a new row (the one glow kind)</td>
+<td><code>desk.py:SPOT_HEX</code>, <code>GLOW_KINDS</code></td>
 </tr>
 <tr>
 <td>Default voice / rate</td>
@@ -5188,21 +5188,27 @@ both have a silent failure mode behind them.</p>
 <td><code>voice.py:_PART_MAX_AGE_SEC</code></td>
 </tr>
 <tr>
+<td>Headlines shown</td>
+<td><strong>9</strong> newest (1–30), read at start</td>
+<td><code>config/news.toml [desk] headlines</code> → <code>shared/news_config.desk_headlines</code> → <code>desk.py:NEWS_ROWS_N</code></td>
+</tr>
+<tr>
 <td>Board re-entry quiet</td>
 <td>a symbol back on the Opportunity Board within <strong>1800 s</strong> of leaving glows but is not spoken</td>
 <td><code>desk.py:BOARD_REENTRY_QUIET_SEC</code></td>
 </tr>
 <tr>
 <td>Section switches</td>
-<td><code>voice_board</code> · <code>voice_flow</code> · <code>voice_positions</code>, each under <code>voice_enabled</code>; detection still runs for a silenced section so re-enabling it announces nothing stale</td>
+<td><code>voice_board</code> · <code>voice_flow</code>, each under <code>voice_enabled</code>; detection still runs for a silenced section so re-enabling it announces nothing stale</td>
 <td><code>desk.py:VOICE_SECTIONS</code>, <code>detect_utterances</code></td>
 </tr>
 </tbody>
 </table>
 <blockquote>
 <p><strong><code>GLOW_SEC</code> and <code>GLOW_STEPS</code> must move together.</strong> The glow is a CSS animation,
-and the Positions panel rebuilds every row on each re-price — <strong>a rebuilt element
-restarts its animation from zero</strong>, so the obvious implementation glows forever.
+and the Flow alerts panel rebuilds every row each time the bought / sold estimate
+moves (every minute) — <strong>a rebuilt element restarts its animation from zero</strong>, so
+the obvious implementation restarts the glow on each repaint.
 The row instead wears one of <code>GLOW_STEPS</code> fixed classes carrying a whole-second
 <em>negative</em> <code>animation-delay</code>, which starts the animation partway through, so a
 rebuilt row <strong>resumes</strong>. Raise the span without adding classes and rows land on
