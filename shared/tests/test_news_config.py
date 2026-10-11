@@ -34,7 +34,28 @@ def test_defaults_match_the_shipped_file():
         shipped = tomllib.load(fh)
     assert nc.DEFAULTS["collector"] == shipped["collector"]
     assert nc.DEFAULTS["trending"] == shipped["trending"]
+    assert nc.DEFAULTS["desk"] == shipped["desk"]
     assert nc.DEFAULTS["dedupe"] == shipped["dedupe"]
+
+
+def test_desk_headlines_reads_the_shipped_file():
+    assert nc.DEFAULTS["desk"]["headlines"] == 9
+    assert nc.desk_headlines() == 9
+
+
+def test_desk_headlines_takes_a_whole_number_in_range():
+    assert nc.desk_headlines({"desk": {"headlines": 1}}) == 1
+    assert nc.desk_headlines({"desk": {"headlines": 12}}) == 12
+    assert nc.desk_headlines({"desk": {"headlines": nc.DESK_HEADLINES_MAX}}) == 30
+
+
+def test_desk_headlines_falls_back_on_anything_else():
+    default = nc.DEFAULTS["desk"]["headlines"]
+    for bad in (0, -3, 31, 10 ** 9, 4.0, 4.5, True, False, "9", None, [9],
+                float("nan")):
+        assert nc.desk_headlines({"desk": {"headlines": bad}}) == default, bad
+    for cfg in ({}, {"desk": None}, {"desk": 9}, {"desk": {}}, None, "x"):
+        assert nc.desk_headlines(cfg) == default, cfg
 
 
 def test_same_feed_merge_h_reads_the_shipped_file():

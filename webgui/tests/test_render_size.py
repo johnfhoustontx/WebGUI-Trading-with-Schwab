@@ -20,7 +20,7 @@ import pytest
 # module -> (most lines, most nested functions) for its ``render``.
 CEILINGS = {
     "pages.options.gamma": (1462, 59),
-    "pages.desk": (728, 21),
+    "pages.desk": (663, 19),
     "pages.options.calculator": (1027, 40),
 }
 
@@ -55,9 +55,9 @@ def test_a_ceiling_stays_close_to_its_function(module_name):
 
 
 # The Desk's row builders and click-throughs, moved out of render 2026-10-04.
-DESK_BUILDERS = ("_dealer_row", "_board_row", "_flow_row", "_position_row",
+DESK_BUILDERS = ("_dealer_row", "_board_row", "_flow_row",
                  "_news_row", "_bullbear_chip", "_bullbear_breadth",
-                 "_open_gamma", "_open_news", "_open_map", "_open_position")
+                 "_open_gamma", "_open_news", "_open_map")
 
 
 @pytest.mark.parametrize("name", DESK_BUILDERS)
@@ -70,6 +70,6 @@ def test_a_desk_row_builder_takes_its_glow_as_an_argument():
     """They read no page state: the glow class is computed by the painter that
     owns the state and handed in, so a builder can be called on its own."""
     from pages import desk
-    for name in ("_board_row", "_flow_row", "_position_row"):
+    for name in ("_board_row", "_flow_row"):
         assert list(inspect.signature(getattr(desk, name)).parameters) == ["row", "glow"]
         assert "state[" not in inspect.getsource(getattr(desk, name))

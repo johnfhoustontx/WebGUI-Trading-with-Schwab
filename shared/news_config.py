@@ -1,7 +1,7 @@
 """config/news.toml — the news collector's feeds, cadence and ticker extras.
 
-Tier-2 (news_svc) reads it; Tier 1 reads only ``trending.window_h`` and the
-ticker set. Stdlib + shared.config_toml + shared.symbols, nothing else —
+Tier-2 (news_svc) reads it; Tier 1 reads only ``trending.window_h``,
+``desk.headlines`` and the ticker set. Stdlib + shared.config_toml + shared.symbols, nothing else —
 ``shared/tests/test_news_config.py`` pins that import set, because the webgui
 imports this module and it therefore sits on the Tier-1 allow-list.
 
@@ -75,6 +75,8 @@ DEFAULTS = {
     },
     "tickers": {"extras": []},
     "trending": {"window_h": 6},
+    # How many headlines the Desk's Headlines panel draws (webgui, read at import).
+    "desk": {"headlines": 9},
     # One feed repeating one title within this many hours is ONE story (the
     # same WSJ piece under two Google redirect URLs). 0 = off. See store.py.
     "dedupe": {"same_feed_merge_h": 6},
@@ -407,6 +409,23 @@ def same_feed_merge_h(cfg=None) -> float:
     if not 0 <= value < float("inf"):      # NaN fails every comparison
         return default
     return min(value, SAME_FEED_MERGE_MAX_H)
+
+
+DESK_HEADLINES_MAX = 30
+
+
+def desk_headlines(cfg=None) -> int:
+    """``[desk] headlines``: how many rows the Desk's Headlines panel draws.
+    ``cfg`` is a loaded mapping (``load()`` when omitted). Anything that is not
+    a real int from 1 to ``DESK_HEADLINES_MAX`` - a bool, a float, a string, 0,
+    a missing table - is the built-in default, silently."""
+    default = DEFAULTS["desk"]["headlines"]
+    cfg = load() if cfg is None else cfg
+    table = cfg.get("desk") if isinstance(cfg, dict) else None
+    value = table.get("headlines", default) if isinstance(table, dict) else default
+    if isinstance(value, bool) or not isinstance(value, int):
+        return default
+    return value if 1 <= value <= DESK_HEADLINES_MAX else default
 
 
 def ticker_set() -> list:

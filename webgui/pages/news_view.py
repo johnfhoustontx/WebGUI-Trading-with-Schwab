@@ -1,4 +1,4 @@
-"""PURE facts for the news page, the Desk strip and the Symbol band.
+"""PURE facts for the news page, the Desk's Headlines panel and the Symbol band.
 
 Imports nothing from nicegui or bus_client; stdlib and ``shared.symbols`` only
 (the Tier-1 allow-list - pinned by ``tests/test_news_view.py``).
@@ -56,7 +56,8 @@ BAND_CLASSES = {
 BAND_LETTER = {"high": "H", "med": "M", "low": "L"}
 _BAND_RANK = {"high": 3, "med": 2, "low": 1}
 
-DESK_LIMIT = 5     # rows on the Desk's news strip
+# The Desk's own row count is config (``shared.news_config.desk_headlines``),
+# read by ``pages/desk.py``: this module imports no config.
 SYMBOL_LIMIT = 8   # rows on the Symbol dossier's news band
 
 

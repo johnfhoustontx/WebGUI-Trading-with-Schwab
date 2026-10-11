@@ -31,7 +31,6 @@ from pages.ui_guard import guard, guard_async
 VOICE_SECTION_SWITCHES = (
     ("voice_board", "Opportunity Board — a symbol joins the board"),
     ("voice_flow", "Flow Alerts — a new alert"),
-    ("voice_positions", "Positions — a newly-opened position"),
 )
 
 

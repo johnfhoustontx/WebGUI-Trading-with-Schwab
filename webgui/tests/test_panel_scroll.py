@@ -23,6 +23,16 @@ import pytest
 from pages import desk as d
 from pages import panel_scroll as ps
 
+# The Desk's old Positions grid, exactly as it stood when the numbers below were
+# measured in a browser. The panel left the Desk on 2026-10-11, so the string
+# lives here now: it is still the one grid whose arithmetic was confirmed
+# against a real page, and that confirmation is what the anchor tests hold.
+MEASURED_POS_GRID = (
+    "grid grid-cols-[64px_minmax(53px,0.8fr)_minmax(42px,0.6fr)_"
+    "minmax(144px,2fr)_minmax(53px,0.8fr)_minmax(53px,0.8fr)_"
+    "minmax(126px,1.8fr)_minmax(36px,0.5fr)_minmax(94px,1.3fr)_"
+    "minmax(60px,0.8fr)] gap-x-[8px] gap-y-0 w-full")
+
 
 # ---------------------------------------------------------------------------
 # track_floors — reading the floors back out of the Tailwind class string
@@ -41,7 +51,8 @@ def test_track_floors_takes_the_floor_of_a_minmax_never_the_ceiling():
 
 
 def test_track_floors_reads_every_desk_grid_at_its_real_track_count():
-    """The four panels have 7 / 8 / 4 / 10 tracks — measured in the DOM.
+    """The three gridded panels have 7 / 8 / 4 tracks, and the Positions
+    panel that was measured with them had 10 — measured in the DOM.
 
     ``getComputedStyle(row).gridTemplateColumns`` on the live page returned
     seven, eight, four and ten values respectively, so a parser that silently
@@ -50,7 +61,7 @@ def test_track_floors_reads_every_desk_grid_at_its_real_track_count():
     assert len(ps.track_floors(d.DEALER_GRID)) == 7
     assert len(ps.track_floors(d.BOARD_GRID)) == 8
     assert len(ps.track_floors(d.FLOW_GRID)) == 4
-    assert len(ps.track_floors(d.POS_GRID)) == 10
+    assert len(ps.track_floors(MEASURED_POS_GRID)) == 10
 
 
 def test_track_floors_refuses_a_string_with_no_template():
@@ -77,7 +88,8 @@ def test_track_floors_refuses_a_template_it_only_half_understands():
 
 
 # ---------------------------------------------------------------------------
-# The POS_GRID anchor — and the reconciliation behind the number
+# The measured anchor (the old Positions grid) — and the reconciliation
+# behind the number
 # ---------------------------------------------------------------------------
 
 def test_pos_grid_floors_sum_to_the_725_desk_states_independently():
@@ -87,7 +99,7 @@ def test_pos_grid_floors_sum_to_the_725_desk_states_independently():
     every track is on its floor, returned exactly
     ``64px 53px 42px 144px 53px 53px 126px 36px 94px 60px``.
     """
-    assert sum(ps.track_floors(d.POS_GRID)) == 725
+    assert sum(ps.track_floors(MEASURED_POS_GRID)) == 725
 
 
 def test_pos_grid_content_minimum_is_797():
@@ -96,7 +108,7 @@ def test_pos_grid_content_minimum_is_797():
     MEASURED: the live row's ten children spanned x=4 to x=801 relative to its
     border box — 797px of content, sitting inside its own 4px left padding.
     """
-    assert ps.grid_content_width_px(d.POS_GRID) == 797
+    assert ps.grid_content_width_px(MEASURED_POS_GRID) == 797
 
 
 def test_pos_grid_row_minimum_is_805_which_is_what_the_browser_reports():
@@ -117,7 +129,7 @@ def test_pos_grid_row_minimum_is_805_which_is_what_the_browser_reports():
     7+400 versus 7+400+11. Task 3 gives the panel ``overflow-x: auto``, so 805
     is the number the browser will agree with afterwards.
     """
-    assert ps.grid_min_width_px(d.POS_GRID) == 805
+    assert ps.grid_min_width_px(MEASURED_POS_GRID) == 805
 
 
 def test_pos_grid_panel_minimum_is_the_measured_839():
@@ -133,7 +145,7 @@ def test_pos_grid_panel_minimum_is_the_measured_839():
     reached **0**. The card stops overflowing precisely at 839px, so this is
     the boundary itself and not an estimate of it.
     """
-    assert ps.panel_min_width_px(d.POS_GRID) == 839
+    assert ps.panel_min_width_px(MEASURED_POS_GRID) == 839
 
 
 def test_the_gap_between_839_and_the_browser_is_fully_accounted_for():
@@ -145,11 +157,11 @@ def test_the_gap_between_839_and_the_browser_is_fully_accounted_for():
     16 (card padding-right) + 4 (row padding-right) + 2 (border) = 22.
     """
     measured_card_scroll_width = 817          # live, at a clipping width
-    assert ps.panel_min_width_px(d.POS_GRID) - measured_card_scroll_width == 22
+    assert ps.panel_min_width_px(MEASURED_POS_GRID) - measured_card_scroll_width == 22
     # And against the row's own scrolling measurement, the remainder is the
     # card's padding and border and nothing else.
-    assert (ps.panel_min_width_px(d.POS_GRID)
-            - ps.grid_min_width_px(d.POS_GRID)) == 32 + 2
+    assert (ps.panel_min_width_px(MEASURED_POS_GRID)
+            - ps.grid_min_width_px(MEASURED_POS_GRID)) == 32 + 2
 
 
 # ---------------------------------------------------------------------------
@@ -165,9 +177,9 @@ def test_the_minimum_moves_when_a_track_floor_moves():
     100px since NET PREMIUM widened). So the anchor is pinned by arithmetic
     that has to MOVE, not by a number that has to match.
     """
-    base = d.POS_GRID
-    widened = base.replace("minmax(94px,1.3fr)", "minmax(104px,1.3fr)")
-    assert widened != base, "the fixture no longer matches POS_GRID"
+    base = d.BOARD_GRID
+    widened = base.replace("minmax(116px,1.2fr)", "minmax(126px,1.2fr)")
+    assert widened != base, "the fixture no longer matches BOARD_GRID"
 
     assert ps.panel_min_width_px(widened) - ps.panel_min_width_px(base) == 10
     assert ps.grid_content_width_px(widened) - ps.grid_content_width_px(base) == 10
@@ -200,9 +212,10 @@ def test_a_fractional_floor_rounds_the_minimum_UP_never_down():
 
 
 def test_the_gap_constant_is_load_bearing_not_decorative():
-    """Nine gaps on Positions — change the constant, move the answer by nine."""
-    tracks = ps.track_floors(d.POS_GRID)
-    assert ps.grid_content_width_px(d.POS_GRID) == (
+    """Seven gaps on the Board — change the constant, move the answer by seven."""
+    tracks = ps.track_floors(d.BOARD_GRID)
+    assert len(tracks) - 1 == 7
+    assert ps.grid_content_width_px(d.BOARD_GRID) == (
         sum(tracks) + (len(tracks) - 1) * ps.COL_GAP_PX)
 
 
@@ -213,14 +226,13 @@ def test_the_gap_constant_is_load_bearing_not_decorative():
 # Measured live on the public Desk with every track on its floor:
 #   dealer  gridTemplateColumns summed to 667 over 7 tracks
 #   board                              to 707 over 8
-#   positions                          to 725 over 10
+# (and the Positions panel then on the page to 725 over 10 - see the anchor)
 # (Flow was above its floors at the width measured, which is why the floors are
 # read from the SOURCE string and never from computed style.)
 DESK_PANELS = {
     "dealer": (d.DEALER_GRID, 757),
     "board": (d.BOARD_GRID, 805),
     "flow": (d.FLOW_GRID, 508),
-    "positions": (d.POS_GRID, 839),
 }
 
 
@@ -233,16 +245,22 @@ def test_every_desk_panel_fits_the_budget_it_is_spent_from(name):
 
 @pytest.mark.parametrize("name", sorted(DESK_PANELS))
 def test_each_panel_minimum_is_the_width_desk_documents_for_it(name):
-    """The four figures ``desk.py``'s own prose quotes, held to the code."""
+    """The three figures ``desk.py``'s own prose quotes, held to the code."""
     grid, expected = DESK_PANELS[name]
     assert ps.panel_min_width_px(grid) == expected
 
 
-def test_positions_is_the_panel_that_sets_the_page_minimum():
+def test_the_board_is_the_panel_that_sets_the_page_minimum():
     """Not an aside — the comments in ``desk.py`` size every other track
-    against Positions being the widest, so a reordering must be caught."""
+    against the Board being the widest, so a reordering must be caught."""
     widest = max(DESK_PANELS, key=lambda n: ps.panel_min_width_px(DESK_PANELS[n][0]))
-    assert widest == "positions"
+    assert widest == "board"
+
+
+def test_the_desk_grids_every_panel_this_table_holds_and_no_other():
+    """A gridded panel added to the Desk without a row here would escape both
+    the budget test and the documented-width test."""
+    assert {grid for grid, _ in DESK_PANELS.values()} == set(d._PIN_DEPTHS)
 
 
 # ---------------------------------------------------------------------------

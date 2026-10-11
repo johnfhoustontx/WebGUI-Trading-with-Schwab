@@ -68,7 +68,7 @@ def test_more_tail_counts_the_rest():
 
 def test_more_tail_reads_naturally_at_one():
     # Deliberately not "1 more alerts" — and deliberately not the word "alert"
-    # at all, since positions use this same tail.
+    # at all, since board arrivals use this same tail.
     assert voice.more_tail(1) == "Plus 1 more."
 
 
@@ -137,9 +137,8 @@ def test_say_number_refuses_junk_rather_than_speaking_it():
 
 def test_say_number_says_a_negative_out_loud_rather_than_dropping_the_sign():
     # A silently absolute value is how a debit comes to sound like a credit.
-    # Nothing feeds this a negative today (strikes are positive and ``say_entry``
-    # takes its own absolute value), which is exactly why the honest answer is
-    # the cheap one to pick.
+    # Nothing feeds this a negative today (strikes are positive), which is
+    # exactly why the honest answer is the cheap one to pick.
     assert voice.say_number(-205) == "minus 2 05"
 
 
@@ -187,75 +186,6 @@ def test_say_expiry_does_not_take_a_bool_for_zero_dte():
     # ``False == 0`` is True in Python, so an unguarded ``dte == 0`` would call
     # a flag a 0DTE contract.
     assert voice.say_expiry("2026-08-28", False) == "8 - 28"
-
-
-# ── say_entry ────────────────────────────────────────────────────────────────
-def test_say_entry_names_a_credit_and_a_debit_by_their_sign():
-    """The paper book stores a DEBIT as a negative ``entry_credit``.
-
-    A debit that sounds like a credit is the most dangerous sentence this
-    feature can say, so the sign picks the word rather than being dropped.
-    """
-    assert voice.say_entry(0.56) == "entry 56 cent credit"
-    assert voice.say_entry(-1.25) == "entry 1 dollar 25 debit"
-
-
-def test_say_entry_uses_cents_below_a_dollar_and_dollars_above():
-    assert voice.say_entry(0.05) == "entry 5 cent credit"
-    assert voice.say_entry(0.99) == "entry 99 cent credit"
-    assert voice.say_entry(1.0) == "entry 1 dollar credit"
-    assert voice.say_entry(-2.0) == "entry 2 dollar debit"
-    assert voice.say_entry(12.5) == "entry 12 dollar 50 credit"
-
-
-def test_say_entry_rounds_into_the_dollar_rather_than_saying_100_cents():
-    assert voice.say_entry(0.999) == "entry 1 dollar credit"
-
-
-def test_say_entry_speaks_a_genuine_zero_rather_than_hiding_it():
-    # Absent and zero are different facts (pages/fmt.py's governing rule). A
-    # zero entry is a real reading, and swallowing it would degrade the whole
-    # sentence back to the short form over a number that was actually there.
-    assert voice.say_entry(0) == "entry 0 cent credit"
-
-
-def test_say_entry_refuses_junk():
-    for junk in (None, "", "abc", float("nan"), float("inf"), True, False):
-        assert voice.say_entry(junk) == "", junk
-
-
-def test_say_entry_survives_a_finite_number_too_big_to_scale():
-    """``_num`` passes ``1.7e308`` — it IS finite — and then ``× 100`` is not.
-
-    ``round(inf)`` raises ``OverflowError``, exactly as ``int(inf)`` does in
-    ``more_tail``, and this module's promise that nothing on its public surface
-    raises is categorical rather than "for values we expect".
-    """
-    assert voice.say_entry(1.7e308) == ""
-    assert voice.say_entry(-1.7e308) == ""
-
-
-# ── say_strikes ──────────────────────────────────────────────────────────────
-def test_say_strikes_speaks_both_legs_of_a_spread():
-    # ``desk.strikes_text`` builds this string for the panel; the spoken form
-    # reads the SAME string rather than re-deriving one from the raw fields.
-    assert voice.say_strikes("207.5/205") == "2 07. point 5, 2 05"
-    assert voice.say_strikes("600.0/595.0") == "6 hundred, 5 95"
-
-
-def test_say_strikes_handles_a_single_leg():
-    assert voice.say_strikes("100") == "1 hundred"
-
-
-def test_say_strikes_refuses_the_em_dash_and_the_unreadable():
-    # ``strikes_text`` returns "—" for a position with no strike pair at all.
-    for junk in (None, "", "—", "/", "abc/def", 7, True):
-        assert voice.say_strikes(junk) == "", junk
-
-
-def test_say_strikes_drops_only_the_unusable_half():
-    assert voice.say_strikes("100/") == "1 hundred"
-    assert voice.say_strikes("/205") == "2 05"
 
 
 # ── flow_phrase ──────────────────────────────────────────────────────────────
@@ -417,81 +347,6 @@ def test_flow_phrase_survives_a_junk_row():
     # Total over a malformed row, like every other builder the Desk reads.
     assert voice.flow_phrase(None) == "Flow alert."
     assert voice.flow_phrase({}) == "Flow alert."
-
-
-# ── position_phrase ──────────────────────────────────────────────────────────
-def test_position_phrase_names_the_ticker_and_the_strategy():
-    row = {"symbol": "SPY", "strategy": "put_credit_spread"}
-    assert voice.position_phrase(row) == "S P Y. New position, put credit spread."
-
-
-def test_position_phrase_without_a_strategy_still_announces_the_position():
-    assert voice.position_phrase({"symbol": "QQQ"}) == "Q Q Q. New position."
-
-
-def test_position_phrase_takes_the_burst_tail_too():
-    row = {"symbol": "SPY", "strategy": "iron_condor"}
-    assert voice.position_phrase(row, extra=2) == \
-        "S P Y. New position, iron condor. Plus 2 more."
-
-
-# ── position_phrase: the CONTRACT ────────────────────────────────────────────
-def _pos_row(**over):
-    """The shape ``desk.position_rows`` publishes — note ``strikes`` is the
-    already-built STRING, and ``expiration`` (not ``expiry``) the ISO date."""
-    row = {"symbol": "SPY", "strategy": "put_credit_spread",
-           "strikes": "207.5/205", "expiration": "2026-08-31", "dte": 10,
-           "entry_credit": 0.56}
-    row.update(over)
-    return row
-
-
-def test_position_phrase_speaks_the_strikes_the_expiry_and_the_entry():
-    assert voice.position_phrase(_pos_row()) == (
-        "S P Y. New position, put credit spread. "
-        "2 07. point 5, 2 05, 8 - 31, entry 56 cent credit.")
-
-
-def test_a_position_opened_for_a_debit_says_so():
-    """The book stores a debit as a NEGATIVE ``entry_credit``, and a debit
-    announced as a credit is the worst sentence this feature could say."""
-    said = voice.position_phrase(_pos_row(entry_credit=-1.25))
-    assert said.endswith("entry 1 dollar 25 debit.")
-    assert "credit spread" in said        # the STRATEGY word is untouched
-
-
-def test_a_zero_dte_position_says_so_rather_than_naming_the_date():
-    assert "0-D T E" in voice.position_phrase(_pos_row(dte=0))
-
-
-def test_a_position_contract_takes_the_burst_tail_too():
-    assert voice.position_phrase(_pos_row(), extra=3).endswith(
-        "entry 56 cent credit. Plus 3 more.")
-
-
-# ── position_phrase: the DEGRADE path ────────────────────────────────────────
-_SHORT_POS = "S P Y. New position, put credit spread."
-
-
-@pytest.mark.parametrize("over", [
-    {"strikes": "—"},               # what ``strikes_text`` returns with no pair
-    {"strikes": None},
-    {"expiration": "", "dte": None},
-    {"entry_credit": None},
-    {"entry_credit": float("nan")},
-])
-def test_a_position_missing_a_piece_falls_back_to_the_short_form(over):
-    said = voice.position_phrase(_pos_row(**over))
-    assert said == _SHORT_POS
-    assert ", ," not in said and "  " not in said
-
-
-def test_a_single_leg_position_speaks_its_one_strike():
-    """A single leg is not a malformed spread — it is a long call. Degrading it
-    to the short form would silence the one number the listener wants."""
-    assert voice.position_phrase(
-        _pos_row(strategy="long_call", strikes="600.0")) == (
-        "S P Y. New position, long call. 6 hundred, 8 - 31, entry 56 cent credit.")
 
 
 # ── cache keys ───────────────────────────────────────────────────────────────

@@ -27,7 +27,6 @@ DEFAULTS = {
     # (and the public origin's single pin keeps covering all of them).
     "voice_board": True,             # a symbol joins the Opportunity Board
     "voice_flow": True,              # a new Live Flow Alert
-    "voice_positions": True,         # a newly-opened position
     "voice_name": "en-US-AriaNeural",  # see voice.VOICES
     "voice_volume": 0.8,             # 0.0–1.0
     "captured_autoclose_enabled": True,  # auto-manage captured signals (break-even trail + auto-close)

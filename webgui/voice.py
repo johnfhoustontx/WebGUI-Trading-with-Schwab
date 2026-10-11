@@ -65,8 +65,8 @@ def spell(symbol):
 def more_tail(n):
     """``'Plus 5 more.'`` — ``''`` when nothing else arrived.
 
-    Deliberately says "more" and not "more alerts": positions share this tail,
-    and one word that is right for both beats two that drift apart.
+    Deliberately says "more" and not "more alerts": board arrivals share this
+    tail, and one word that is right for both beats two that drift apart.
 
     A ``bool`` is refused rather than counted. ``int(True)`` is 1, so a flag
     that arrived where a count belongs would announce "Plus 1 more" — the same
@@ -159,63 +159,8 @@ def say_expiry(expiry, dte):
     return f"{month} - {day}"
 
 
-def say_entry(v):
-    """``'entry 56 cent credit'`` / ``'entry 1 dollar 25 debit'``. ``''`` for junk.
-
-    THE SIGN PICKS THE WORD, and that is the whole reason this function exists
-    rather than a format string: the paper book stores a debit as a NEGATIVE
-    ``entry_credit`` (see the paper-representation note in CLAUDE.md), so a
-    phrase that dropped the sign would announce a debit as a credit — the most
-    expensive sentence this feature could say.
-
-    Under a dollar it speaks cents, at or above it speaks "N dollar NN", which
-    is how the price is said at a desk. A round dollar drops the trailing zeros
-    ("2 dollar", not "2 dollar 0"), and a value that rounds up through 99 cents
-    becomes a dollar rather than "100 cent".
-
-    A genuine ZERO is spoken, not swallowed. Absent and zero are different facts
-    (``pages/fmt.py``'s governing rule) and treating one as the other would drop
-    the whole sentence back to the short form over a number that was there.
-    """
-    f = _num(v)
-    if f is None:
-        return ""
-    word = "debit" if f < 0 else "credit"
-    try:
-        # ``_num`` passes any FINITE float, and 1.7e308 × 100 is not finite —
-        # ``round(inf)`` then raises ``OverflowError``, the same edge
-        # ``more_tail`` catches around ``int(inf)``. Nothing here may raise.
-        dollars, cents = divmod(int(round(abs(f) * 100)), 100)
-    except (OverflowError, ValueError):
-        return ""
-    if not dollars:
-        return f"entry {cents} cent {word}"
-    amount = f"{say_number(dollars)} dollar"
-    if cents:
-        amount += f" {cents}"
-    return f"entry {amount} {word}"
-
-
-def say_strikes(text):
-    """``'207.5/205'`` -> ``'2 07. point 5, 2 05'``. ``''`` when there is none.
-
-    Reads the string ``desk.strikes_text`` ALREADY built for the panel rather
-    than re-deriving a pair from the raw short/long fields — that helper has an
-    iron-condor fallback of its own, and a second derivation here would be free
-    to disagree with the row the listener is looking at.
-
-    A single leg speaks its one strike (a long call is not a malformed spread),
-    and an unusable half is dropped rather than taking the usable one with it.
-    ``strikes_text`` returns an em-dash when there is no pair at all, which
-    parses to nothing and routes the caller to the short form.
-    """
-    if not isinstance(text, str):
-        return ""
-    return ", ".join(s for s in (say_number(p) for p in text.split("/")) if s)
-
-
 def _sentence(symbol, body, extra):
-    """``'S P Y. <body>.'`` plus the burst tail. The shared shape of both phrases."""
+    """``'S P Y. <body>.'`` plus the burst tail. The shared shape of every phrase."""
     parts = []
     sym = spell(symbol)
     if sym:
@@ -266,31 +211,6 @@ def flow_phrase(row, extra=0):
     return _sentence(d.get("symbol"), body, extra)
 
 
-def position_phrase(row, extra=0):
-    """``'S P Y. New position, put credit spread. 2 07. point 5, 2 05, 8 - 31,
-    entry 56 cent credit.'``
-
-    Phrases a position as an ARRIVAL — the wording assumes the caller only
-    reaches here for a row genuinely new to the book. Choosing which rows those
-    are is the Desk's job, not this module's; the design has a flag change
-    (OK -> AT RISK -> RESCUE) glow but stay silent.
-
-    Reads ``desk.position_rows``' own fields, including the ``strikes`` STRING
-    that panel already renders — see ``say_strikes``. Same all-or-nothing rule
-    as ``flow_phrase``: a row missing any of strikes, expiry or entry falls back
-    to the short form rather than reading a sentence with a gap in it.
-    """
-    d = row if isinstance(row, dict) else {}
-    strat = str(d.get("strategy") or "").replace("_", " ").strip().lower()
-    body = f"New position, {strat}" if strat else "New position"
-    strikes = say_strikes(d.get("strikes"))
-    expiry = say_expiry(d.get("expiration"), d.get("dte"))
-    entry = say_entry(d.get("entry_credit"))
-    if strikes and expiry and entry:
-        body = f"{body}. {strikes}, {expiry}, {entry}"
-    return _sentence(d.get("symbol"), body, extra)
-
-
 # The board signals worth a clause. "neutral" is the resting state, so saying
 # it would be a word that carries nothing — the same rule the board's own
 # rationale line follows.
@@ -302,7 +222,7 @@ def board_phrase(row, extra=0):
 
     Reads ``desk.opportunity_rows``' own ``signal`` field — the word the board's
     chip prints — so the spoken and printed vocabularies cannot drift. Like the
-    other two phrases, it assumes the caller only gets here for a genuine
+    flow phrase, it assumes the caller only gets here for a genuine
     arrival; deciding which symbols those are is the Desk's job.
     """
     d = row if isinstance(row, dict) else {}
@@ -568,10 +488,8 @@ FLOW_CAUSES = tuple((kind, side) for kind, side in _ALL_CAUSES
 def prewarm_texts(symbols):
     """Every WARMABLE flow phrase the given symbols can produce.
 
-    Flow only, and only the warmable kinds (see ``FLOW_CAUSES``). A new
-    position is a thing the user just did, so they are already looking at the
-    screen and a couple of seconds of first synthesis costs nothing; a flow
-    alert arrives unbidden and is the case worth paying disk for.
+    Flow only, and only the warmable kinds (see ``FLOW_CAUSES``): a flow alert
+    arrives unbidden and is the case worth paying disk for.
 
     A non-iterable ``symbols`` degrades to ``[]`` rather than raising. It would
     be tempting to call that a caller bug and let it through — but the symbol

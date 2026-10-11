@@ -1546,6 +1546,12 @@ _NEWS = ConfigFile(
                   "The Trending chips count ticker mentions in this window.",
                   kind="int", unit="h", min=1, max=48, step=1),
         )),
+        Section("Desk", "", (
+            Field("desk.headlines", "Headlines on the Desk",
+                  "How many of the newest stories the Desk's Headlines panel "
+                  "shows. Nine matches the Flow alerts panel beside it.",
+                  kind="int", min=1, max=30, step=1),
+        ), restart=(WEBGUI,)),
         Section("Duplicates", "Two different feeds with one headline within a "
                 "day are always shown as one story.", (
             Field("dedupe.same_feed_merge_h", "One feed's repeated headline",

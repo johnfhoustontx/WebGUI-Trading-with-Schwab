@@ -439,19 +439,14 @@ def test_the_pnl_column_is_NOT_renamed_to_open_pnl():
     assert labels["pnl"] == "P&L"
 
 
-def test_the_two_labels_the_desk_cannot_fit_are_spelled_out_here():
-    """A DELIBERATE divergence, recorded so it reads as a decision.
-
-    /desk's Positions grid has measured per-string minmax() floors and those two
-    tracks are label-bound, so STRATEGY and CONTRACTS cost ~58px against 43px of
-    slack and would clip the panel at the 1920px it is read at. This is a
-    ui.table with no such limit, and the standing rule is to spell out casual
-    shortenings — so the abbreviation stays a width concession rather than
-    becoming the app's word for the concept."""
-    from pages import desk
+def test_strategy_and_contracts_are_spelled_out_here():
+    """The standing rule is to spell out casual shortenings. The Desk's old
+    Positions panel abbreviated these two (STRAT, QTY) because its grid tracks
+    were label-bound; that panel is gone and this ``ui.table`` never had the
+    limit, so the whole words are the app's only spelling."""
     labels = set(c["label"] for c in paper.paper_columns())
     assert {"Strategy", "Contracts"} <= labels
-    assert "STRAT" in desk.POS_HEADS and "QTY" in desk.POS_HEADS
+    assert not {"STRAT", "QTY", "Strat", "Qty"} & labels
 
 
 def test_the_ledger_help_calls_the_columns_what_the_screen_calls_them():

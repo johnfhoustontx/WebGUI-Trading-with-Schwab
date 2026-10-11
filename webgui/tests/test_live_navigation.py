@@ -220,8 +220,8 @@ def test_no_reachable_page_navigates_to_an_internal_route_behind_the_seam():
     uniformity is free.
 
     ⚠ Scoped by the IMPORT CLOSURE of the published screens, which
-    over-approximates what a published render can actually reach (the Desk
-    imports ``options.paper`` for one pure helper). Over-approximating is the
+    over-approximates what a published render can actually reach (a page may
+    import another for one pure helper). Over-approximating is the
     safe direction here: the cost is routing a private-only navigation through
     a no-op resolver."""
     offenders = []
@@ -239,7 +239,7 @@ def test_no_reachable_page_navigates_to_an_internal_route_behind_the_seam():
 
 
 # --- what the Desk actually wires, in both processes ------------------------
-# The Desk carries every one of the five click-throughs, so it is driven here
+# The Desk carries every one of the click-throughs, so it is driven here
 # rather than asserted from source: a handler that navigates correctly and is
 # never wired to anything looks identical in a file.
 
@@ -277,17 +277,22 @@ def _seed_desk(monkeypatch):
     A panel with a cold cache renders a placeholder and NO row, so without this
     the navigation assertions below would pass by drawing nothing at all."""
     import bus_client
-    from pages import desk
 
-    def _pos(pid, source):
-        return {"position_id": pid, "source": source, "symbol": "SPY",
-                "structure": "PUT_CREDIT", "quantity": 1, "status": "OPEN"}
-
+    headline = {"id": "n1", "title": "A headline", "tickers": [],
+                "url": "https://news.example/1", "source": "S", "sources": ["S"],
+                "published_at": "2026-09-25T15:00:00+00:00"}
     data = {
-        "options:paper_account": {"positions": [_pos("p1", desk.PAPER_SOURCE)]},
-        "options:captured": {"signals": [{"signal_id": "c1",
-                                          "source": desk.CAPTURED_SOURCE,
-                                          "symbol": "QQQ", "status": "OPEN"}]},
+        # Both keys: the private Desk reads ``news:feed`` and the published one
+        # ``news:feed_public`` (``desk.bus_key``).
+        "news:feed": {"items": [headline]},
+        "news:feed_public": {"items": [headline]},
+        # The two books the Desk used to merge. Seeded so that the tests below
+        # prove it IGNORES them, rather than passing because nothing was there.
+        "options:paper_account": {"positions": [
+            {"position_id": "p1", "symbol": "SPY", "strategy": "PCS",
+             "quantity": 1, "status": "OPEN", "rescue_state": "tested"}]},
+        "options:captured": {"signals": [{"signal_id": "c1", "symbol": "QQQ",
+                                          "status": "OPEN"}]},
         "options:matrix": {"rows": [{"symbol": "$SPX", "hotness": 50,
                                      "signal": "buy", "spot": 5000.0}]},
         "options:flow_alerts": {"alerts": [{"id": "f1", "symbol": "SPY",
@@ -304,20 +309,6 @@ def _seed_desk(monkeypatch):
                         lambda vs: {v: (1 if v in data else None) for v in vs})
 
 
-def _position_rows():
-    """The position panel's DATA rows, and not its column head — which carries
-    the same ``POS_GRID`` and is never a link in either process."""
-    from nicegui import ui
-    from pages import desk
-
-    before = set(ui.context.client.elements)
-    desk.render()
-    return [" ".join(e._classes)
-            for key, e in ui.context.client.elements.items() if key not in before
-            if desk.POS_GRID in " ".join(e._classes)
-            and "py-[11px]" in " ".join(e._classes)]
-
-
 def test_the_private_desk_navigates_exactly_where_it_always_did(monkeypatch):
     """⚠ THE ONE THAT PROTECTS THE APP. Every one of these click-throughs is
     how the Desk stays as terse as it is — a row you cannot open is a row you
@@ -329,7 +320,10 @@ def test_the_private_desk_navigates_exactly_where_it_always_did(monkeypatch):
     assert "/options/flow" in went                  # a Flow row
     assert "/sentiment/bullbear" in went            # the Bull/Bear strip
     assert "/options/gamma" in went                 # a dealer row
-    assert {"/options/paper", "/options/captured"} <= set(went)
+    assert "/news" in went                          # "All headlines"
+    # The Desk holds no position, so nothing on it opens either book's page.
+    assert not {"/options/paper", "/options/captured",
+                "/options/portfolio"} & set(went)
 
 
 def test_the_published_desk_navigates_only_where_this_origin_serves(
@@ -340,38 +334,64 @@ def test_the_published_desk_navigates_only_where_this_origin_serves(
     served = {s.route for s in live_screens.SCREENS}
     assert set(went) <= served, f"404 on the live origin: {set(went) - served}"
     # And the remap really happened rather than the page drawing nothing.
-    assert {"/opportunity", "/flow", "/bullbear", "/sentiment", "/gamma"} \
-        <= set(went)
+    assert {"/opportunity", "/flow", "/bullbear", "/sentiment", "/gamma",
+            "/news"} <= set(went)
 
 
-def test_the_published_desk_draws_no_clickable_position_row(monkeypatch,
-                                                            published):
-    """The paper ledger and the captured tape are the
-    OWNER'S positions and are deliberately unpublished, so those rows have
-    nowhere to go. They are drawn — the panel is the point — but they are not
-    dressed as a link and they wire no handler."""
+def _desk_texts():
+    from nicegui import ui
+    from pages import desk
+
+    before = set(ui.context.client.elements)
+    desk.render()
+    return [getattr(e, "text", None)
+            for key, e in ui.context.client.elements.items() if key not in before]
+
+
+def test_the_private_desk_draws_no_position_even_with_both_books_published(
+        monkeypatch):
+    """The Positions panel left the Desk. With an at-risk paper trade and a
+    captured signal both published, none of it reaches the page."""
+    _seed_desk(monkeypatch)
+    texts = [t for t in _desk_texts() if t]
+    assert "A headline" in texts                    # the seed really painted
+    assert "Positions" not in texts
+    assert "AT RISK" not in texts and "PAPER" not in texts
+    assert not any(t.startswith("OPEN ") for t in texts)
+
+
+def test_the_published_desk_draws_no_position_either(monkeypatch, published):
+    """The paper account and the captured tape are the OWNER'S positions. They
+    used to be drawn on the public Desk as rows that opened nothing; now the
+    public Desk does not read them at all."""
+    from pages import desk
+
+    _seed_desk(monkeypatch)
+    texts = [t for t in _desk_texts() if t]
+    assert "A headline" in texts
+    assert "Positions" not in texts
+    assert "AT RISK" not in texts and "PAPER" not in texts
+    polled = {desk.bus_key(v) for v in desk.VIEWS}
+    assert not {"options:paper_account", "options:captured"} & polled
+    assert "news:feed_public" in polled and "news:feed" not in polled
+
+
+def test_a_headline_row_is_never_a_click_through_on_either_origin(monkeypatch):
+    """Its headline is the link (to the article); a row click on top of it
+    would fire both. The one way on to /news is "All headlines"."""
     from nicegui import ui
     from pages import desk
 
     _seed_desk(monkeypatch)
-    _, clickable = _desk_clicks(monkeypatch)
-    assert not any(desk.POS_GRID in " ".join(el._classes) for el in clickable), \
-        "a position row is still clickable on the public origin"
-
-    # ...and the cursor does not promise a click that will not happen.
-    before = set(ui.context.client.elements)
-    desk.render()
-    rows = [" ".join(e._classes) for key, e in ui.context.client.elements.items()
-            if key not in before and desk.POS_GRID in " ".join(e._classes)]
-    assert rows, "no position row was drawn — the assertion would be vacuous"
-    assert not any("cursor-pointer" in r for r in rows)
-
-
-def test_the_private_desk_still_dresses_a_position_row_as_a_link(monkeypatch):
-    """Non-vacuity for the test above, and the private-app guarantee."""
-    _seed_desk(monkeypatch)
-    rows = _position_rows()
-    assert rows and all("cursor-pointer" in r for r in rows)
+    went, clickable = _desk_clicks(monkeypatch)
+    assert went.count("/news") == 1
+    more = [el for el in clickable if getattr(el, "text", None) == desk.NEWS_MORE]
+    assert len(more) == 1
+    links = [el for el in ui.context.client.elements.values()
+             if isinstance(el, ui.link) and el.text == "A headline"]
+    assert links and all(el.props.get("href") == "https://news.example/1"
+                         for el in links)
+    assert not any(el in clickable for el in links)
 
 
 def test_the_flow_tape_hands_off_to_the_published_gamma_screen(monkeypatch,

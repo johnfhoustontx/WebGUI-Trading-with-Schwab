@@ -176,8 +176,8 @@ PUBLIC_UNSAFE_DEFAULTS = {
 #     (``macro_skin``, the ``gamma_*`` display knobs -- ``gamma_heat_value``,
 #     which number a heatmap cell holds, among them --
 #     ``alert_market_hours_only`` as a gate, the remaining ``voice_*`` keys
-#     which are inert once ``voice_enabled`` is off -- the three per-section
-#     switches ``voice_board``/``voice_flow``/``voice_positions`` included: each
+#     which are inert once ``voice_enabled`` is off -- the two per-section
+#     switches ``voice_board``/``voice_flow`` included: each
 #     can only NARROW what ``voice_enabled`` allows, so none can turn a
 #     synthesis on);
 #   * or nav chrome this process has none of (``nav_pinned``);
@@ -193,7 +193,7 @@ PUBLIC_SAFE_DEFAULTS = {
     "alert_enabled", "alert_sound", "alert_volume", "alert_market_hours_only",
     "alert_min_score", "desktop_notifications", "flow_alerts_enabled",
     "voice_name", "voice_volume", "voice_board", "voice_flow",
-    "voice_positions", "captured_autoclose_enabled",
+    "captured_autoclose_enabled",
     "manual_paper_lifecycle_enabled", "ticker_enabled", "ticker_speed",
     "nav_pinned", "gamma_level_tracks", "gamma_spot_style",
     "gamma_spot_interval", "gamma_heat_value", "gamma_heat_scale",

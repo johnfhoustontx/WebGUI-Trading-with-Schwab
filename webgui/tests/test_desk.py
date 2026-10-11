@@ -454,7 +454,7 @@ def test_the_flow_painter_filters_the_estimate_for_the_public_origin():
     event loop (it reads the client's request): inside the painter."""
     src = inspect.getsource(d.render)
     painter = src[src.index("def _paint_flow("):]
-    painter = painter[:painter.index("def _paint_positions(")]
+    painter = painter[:painter.index("def _paint_news(")]
     assert '_flow.sides_view_shown(_view("options:flow_sides"))' in painter
 
 
@@ -501,82 +501,41 @@ def test_flow_rows_is_empty_for_a_missing_view():
     assert d.flow_rows({"alerts": "nonsense"}) == []
 
 
-# ── position_rows / positions_summary ────────────────────────────────────────
-def _pos(pid, **over):
-    p = {"position_id": pid, "symbol": "SPY", "strategy": "put_credit_spread",
-         "short_strike": 600.0, "long_strike": 595.0, "call_short": None,
-         "call_long": None, "width": 5.0, "expiration": "2026-09-19",
-         "quantity": 2, "entry_credit": 1.35, "current_value": 0.80,
-         "unrealized_pnl": 110.0, "status": "OPEN", "rescue_state": "ok",
-         "heat": 12}
-    p.update(over)
-    return p
+# ── position vocabulary (kept for the Symbol Dossier) ────────────────────────
+# The Desk draws no position since its Positions panel was removed; these are
+# the helpers ``pages/symbol.py`` and ``pages/symbol_facts.py`` still borrow.
+def test_position_flag_maps_each_rescue_state_to_its_word():
+    flags = {"ok": "OK", "watch": "WATCH", "tested": "AT RISK",
+             "critical": "RESCUE"}
+    for state, word in flags.items():
+        assert d.position_flag(state) == word, state
+    # An unknown / missing state falls back to the healthy word rather than
+    # inventing an alarm.
+    assert d.position_flag(None) == "OK"
+    assert d.position_flag("nonsense") == "OK"
 
 
-def _sig(sid, **over):
-    """A captured signal — the shape ``cache:options:captured`` really publishes.
-
-    ⚠ Note what is NOT here, because these absences are the whole point of the
-    third book: no ``quantity`` (advisory signals were never sized), no
-    ``rescue_state`` and no ``heat`` (the manage cycle's rescue overlay only
-    tags paper ACCOUNT positions), and the id key is ``signal_id``."""
-    s = {"signal_id": sid, "scanner_type": "SWING", "symbol": "UAL",
-         "strategy": "CCS", "short_strike": 130.0, "long_strike": 135.0,
-         "call_short": None, "call_long": None, "width": 5.0,
-         "expiration": "2026-08-28", "dte_at_entry": 10, "entry_credit": 1.59,
-         "current_value": 0.5, "unrealized_pnl": 109.0, "current_score": 65,
-         "recommendation": "HOLD", "status": "OPEN", "mode": "PREMIUM"}
-    s.update(over)
-    return s
+def test_is_open_treats_closed_and_expired_as_shut_and_no_status_as_open():
+    assert d._is_open({"status": "OPEN"}) is True
+    assert d._is_open({}) is True
+    assert d._is_open({"status": None}) is True
+    assert d._is_open({"status": "closed"}) is False
+    assert d._is_open({"status": "EXPIRED"}) is False
 
 
-def test_position_rows_tags_paper_rows_with_their_source_chip():
-    rows = d.position_rows({"positions": [_pos("p1"), _pos("p2")]})
-    assert [r["source"] for r in rows] == ["PAPER", "PAPER"]
-    assert [r["position_id"] for r in rows] == ["p1", "p2"]
-
-
-# ── the captured book ────────────────────────────────────────────────────────
-def test_position_rows_merges_the_captured_book_as_a_second_source():
-    rows = d.position_rows({"positions": [_pos("p1")]},
-                           {"signals": [_sig("s1")]})
-    assert sorted(r["source"] for r in rows) == ["CAPTURED", "PAPER"]
-    cap = [r for r in rows if r["source"] == "CAPTURED"][0]
-    assert cap["position_id"] == "s1"          # signal_id, not position_id
-
-
-def test_position_rows_reads_the_captured_payloads_own_list_key():
-    """``cache:options:captured`` publishes ``signals``, NOT ``positions``. A
-    shared "positions" lookup would find nothing and the book would vanish from
-    the panel with no error anywhere."""
-    assert d.position_rows(None, {"signals": [_sig("s1")]}) != []
-    assert d.position_rows(None, {"positions": [_sig("s1")]}) == []
-
-
-def test_captured_rows_have_no_quantity_rather_than_a_default_of_one():
-    """A captured signal was never sized. Printing 1 would state a position
-    size this app does not have — and would look exactly like a real
-    one-contract position, including inside any total built off the column."""
-    row = d.position_rows(None, {"signals": [_sig("s1")]})[0]
-    assert row["quantity"] is None
-    # Even if a stray quantity turns up in the payload, an unsized book must not
-    # start reporting one.
-    stray = d.position_rows(None, {"signals": [_sig("s", quantity=4)]})[0]
-    assert stray["quantity"] is None
-
-
-def test_captured_rows_flag_is_an_em_dash_not_an_assertion_of_health():
-    """The rescue overlay only tags the paper account, so a captured signal has
-    no ``rescue_state``. Falling through to the "OK" default would print a clean
-    bill of health nobody issued."""
-    row = d.position_rows(None, {"signals": [_sig("s1")]})[0]
-    assert row["flag"] == d.UNTAGGED_FLAG == "—"
-    assert row["flag"] != d._DEFAULT_FLAG
-    assert row["rescue_state"] is None and row["heat"] is None
-    # And it is not merely a lookup miss: the same missing state inside a TAGGED
-    # book still means healthy.
-    paper = d.position_rows({"positions": [_pos("p", rescue_state=None)]})[0]
-    assert paper["flag"] == "OK"
+def test_the_desk_reads_no_position_view_and_draws_no_position_panel():
+    """The Positions panel left the Desk: neither paper book is polled, no
+    region depends on one, and nothing speaks for one."""
+    for view in ("options:paper_account", "options:captured"):
+        assert view not in d.VIEWS
+        assert all(view not in deps for deps in d._REGION_VIEWS.values())
+    assert "positions" not in d.PANEL_HEADS
+    assert "positions" not in d._REGION_VIEWS
+    assert "positions" not in d.VOICE_SECTIONS
+    assert "positions" not in d.SPEAK_ORDER
+    for gone in ("position_rows", "positions_summary", "POS_GRID", "POS_HEADS",
+                 "fold_position_arrivals", "_position_row"):
+        assert not hasattr(d, gone), gone
 
 
 def test_position_flag_needs_to_be_told_which_kind_of_missing_it_is():
@@ -586,54 +545,6 @@ def test_position_flag_needs_to_be_told_which_kind_of_missing_it_is():
     assert d.position_flag("critical", rescue_tagged=False) == d.UNTAGGED_FLAG
 
 
-def test_captured_rows_carry_the_three_money_fields():
-    row = d.position_rows(None, {"signals": [_sig("s1")]})[0]
-    assert row["entry_credit"] == 1.59
-    assert row["current_value"] == 0.5
-    assert row["unrealized_pnl"] == 109.0
-    assert row["strikes"] == "130.00/135.00"
-
-
-def test_captured_rows_use_the_live_dte_not_the_entry_day_snapshot():
-    """``dte_at_entry`` is the countdown as it stood the day the signal was
-    found. Printing it would give every captured row a stale, too-large number
-    while the paper rows beside it counted down."""
-    from pages.options import paper
-    row = d.position_rows(None,
-                          {"signals": [_sig("s1", expiration="2026-09-19",
-                                            dte_at_entry=99)]})[0]
-    assert row["dte"] == paper._dte_from_expiration("2026-09-19")
-
-
-def test_captured_rows_exclude_closed_signals():
-    view = {"signals": [_sig("open"), _sig("shut", status="CLOSED"),
-                        _sig("gone", status="EXPIRED")]}
-    assert [r["position_id"] for r in d.position_rows(None, view)] == \
-        ["open"]
-
-
-def test_position_rows_still_works_without_a_captured_view():
-    """The captured argument is optional, so a caller reading the paper book
-    alone need pass nothing else."""
-    assert d.position_rows({"positions": [_pos("p")]})[0]["source"] == \
-        "PAPER"
-    assert d.position_rows(None, None) == []
-    assert d.position_rows(None, {"signals": "nonsense"}) == []
-
-
-def test_every_book_has_a_chip_and_a_page_to_open():
-    """A book with no route would strand its rows on the Desk, and a book
-    sharing another's chip would make a merged row unreadable."""
-    sources = [b["source"] for b in d.BOOKS]
-    assert sources == ["PAPER", "CAPTURED"]
-    assert set(d.POSITION_ROUTES) == set(sources)
-    assert len({d.source_chip_class(s) for s in sources}) == 2
-    # An unknown source must not borrow a real book's chip — otherwise a
-    # malformed row would render as one of the two.
-    assert d.source_chip_class("nonsense") not in \
-        {d.source_chip_class(s) for s in sources}
-
-
 def test_strikes_text_falls_back_to_the_call_side_for_an_iron_condor():
     assert d.strikes_text({"short_strike": 600.0, "long_strike": 595.0}) == \
         "600.00/595.00"
@@ -641,191 +552,6 @@ def test_strikes_text_falls_back_to_the_call_side_for_an_iron_condor():
                            "call_short": 620.0, "call_long": 625.0}) == \
         "620.00/625.00"
     assert d.strikes_text({}) == "—"
-
-
-# ── the cap, and what must survive it ────────────────────────────────────────
-def test_position_rows_sorts_the_at_risk_states_above_everything_else():
-    """The cap is only safe because of this order. A cap that hid a RESCUE row
-    while showing a healthy one would be a real defect."""
-    rows = d.position_rows({"positions": [
-        _pos("calm", rescue_state="ok", expiration="2026-08-20"),
-        _pos("watch", rescue_state="watch", expiration="2026-08-21"),
-        _pos("tested", rescue_state="tested", expiration="2026-12-31"),
-        _pos("rescue", rescue_state="critical", expiration="2026-12-31"),
-    ]})
-    assert [r["position_id"] for r in rows][:2] == ["rescue", "tested"]
-    # WATCH is a heads-up, not trouble — it does not jump the queue.
-    assert [r["position_id"] for r in rows][2:] == ["calm", "watch"]
-
-
-def test_position_rows_puts_held_trades_above_advisory_signals():
-    """Measured live before this key existed: 30 captured signals at 2 DTE
-    against 3 paper positions at 9 DTE meant every visible row was a captured
-    signal, and a panel titled POSITIONS showed no positions at all. Money at
-    risk outranks a suggestion nobody acted on."""
-    rows = d.position_rows(
-        {"positions": [_pos("held", expiration="2027-01-15")]},
-        {"signals": [_sig(f"s{i}", expiration="2026-08-20") for i in range(5)]})
-    assert rows[0]["position_id"] == "held"
-    assert all(r["source"] == "CAPTURED" for r in rows[1:])
-
-
-def test_urgency_outranks_the_held_tier():
-    """The held tier sits BELOW at-risk, never above it: a tested captured
-    signal would still lead a calm paper position. (Today that ordering is
-    unreachable from real data — see the test below — so this pins it on the
-    book that DOES carry states, where an inverted key order would show up as a
-    calm row leading a tested one.)"""
-    rows = d.position_rows(
-        {"positions": [_pos("calm", rescue_state="ok",
-                            expiration="2026-08-20"),
-                       _pos("tested", rescue_state="tested",
-                            expiration="2027-01-15")]})
-    assert [r["position_id"] for r in rows] == ["tested", "calm"]
-
-
-def test_an_untagged_book_can_never_enter_the_urgency_tier():
-    """Belt and braces on ``UNTAGGED_FLAG``: even if a rescue state somehow
-    rode along in a captured payload, the book is not one the manage cycle
-    inspects, so the state is dropped rather than acted on. A page that sorted
-    on a state it refuses to display would be arguing with itself."""
-    rows = d.position_rows(
-        {"positions": [_pos("calm", rescue_state="ok",
-                            expiration="2026-08-20")]},
-        {"signals": [_sig("stray", rescue_state="critical",
-                          expiration="2026-08-19")]})
-    assert rows[0]["position_id"] == "calm"     # held, calm tier
-    assert rows[1]["rescue_state"] is None      # still untagged
-    assert rows[1]["flag"] == d.UNTAGGED_FLAG
-
-
-def test_position_rows_breaks_ties_on_the_nearest_expiry():
-    """Nearest expiry, not largest P&L: size is not urgency. A $500 loser at 45
-    DTE has weeks to mean-revert; a spread expiring tomorrow has to be decided
-    today."""
-    rows = d.position_rows({"positions": [
-        _pos("far", expiration="2027-01-15", unrealized_pnl=-500.0),
-        _pos("near", expiration="2026-08-20", unrealized_pnl=-5.0),
-        _pos("mid", expiration="2026-10-16", unrealized_pnl=-50.0),
-    ]})
-    assert [r["position_id"] for r in rows] == ["near", "mid", "far"]
-
-
-def test_position_rows_sorts_an_unreadable_expiry_last_not_first():
-    """An expiration that will not parse is not evidence of urgency."""
-    rows = d.position_rows({"positions": [
-        _pos("junk", expiration="soon"),
-        _pos("dated", expiration="2027-01-15"),
-    ]})
-    assert [r["position_id"] for r in rows] == ["dated", "junk"]
-
-
-def test_the_cap_never_hides_a_trade_in_trouble():
-    """The whole-book test: many calm captured signals against one critical
-    paper position, and the critical one still lands inside the visible slice."""
-    captured = {"signals": [_sig(f"s{i}", expiration="2026-08-20")
-                            for i in range(30)]}
-    paper = {"positions": [_pos("hot", rescue_state="critical",
-                                expiration="2027-06-18")]}
-    rows = d.position_rows(paper, captured)
-    assert len(rows) == 31
-    visible = rows[:d.POSITION_ROWS_N]
-    assert visible[0]["position_id"] == "hot"
-
-
-def test_positions_summary_totals_the_whole_book_not_the_visible_slice():
-    """⚠ The load-bearing invariant of the cap. Unrealized P&L and the at-risk
-    count are BOOK-level facts; computing them off the drawn rows would
-    understate both — and the at-risk count is the one number on this panel
-    somebody acts on."""
-    # More at-risk positions than the panel can draw, so the cap has to swallow
-    # some of them however the list is ordered — which is exactly the day the
-    # header must not report zero.
-    n_risk = d.POSITION_ROWS_N + 4
-    paper = {"positions": [
-        _pos(f"r{i}", rescue_state="tested", expiration="2026-09-18",
-             unrealized_pnl=-100.0) for i in range(n_risk)]}
-    captured = {"signals": [_sig(f"s{i}", expiration="2026-08-20",
-                                 unrealized_pnl=10.0) for i in range(30)]}
-    rows = d.position_rows(paper, captured)
-    total = n_risk + 30
-    assert len(rows) == total > d.POSITION_ROWS_N
-
-    full = d.positions_summary(rows)
-    assert full["open"] == total
-    assert abs(full["unrealized"] - (30 * 10.0 - n_risk * 100.0)) < 1e-9
-    assert full["at_risk"] == n_risk
-
-    # What the panel would report if it summarised only what it draws — the
-    # exact bug this test exists to keep out. Every number is understated.
-    sliced = d.positions_summary(rows[:d.POSITION_ROWS_N])
-    assert sliced["open"] == d.POSITION_ROWS_N < full["open"]
-    assert sliced["at_risk"] < full["at_risk"]
-    assert sliced["unrealized"] != full["unrealized"]
-
-
-def test_position_rows_excludes_closed_positions():
-    view = {"positions": [_pos("open"), _pos("shut", status="CLOSED"),
-                          _pos("gone", status="EXPIRED")]}
-    assert [r["position_id"] for r in d.position_rows(view)] == ["open"]
-
-
-def test_position_rows_maps_the_rescue_state_to_a_flag():
-    flags = {"ok": "OK", "watch": "WATCH", "tested": "AT RISK",
-             "critical": "RESCUE"}
-    for state, word in flags.items():
-        row = d.position_rows({"positions": [_pos("p", rescue_state=state)]})[0]
-        assert row["flag"] == word, state
-    # An unknown / missing state falls back to the healthy word rather than
-    # inventing an alarm.
-    assert d.position_rows({"positions": [_pos("p", rescue_state=None)]})[0]["flag"] == "OK"
-
-
-def test_position_rows_dte_uses_the_paper_pages_own_helper():
-    """Same helper, same answer — the Desk must not carry a second calendar."""
-    from pages.options import paper
-    row = d.position_rows({"positions": [_pos("p", expiration="2026-09-19")]})[0]
-    assert row["dte"] == paper._dte_from_expiration("2026-09-19")
-
-
-def test_position_rows_dte_is_none_for_an_unparseable_expiration():
-    row = d.position_rows({"positions": [_pos("p", expiration="soon")]})[0]
-    assert row["dte"] is None
-
-
-def test_position_rows_is_empty_for_missing_views():
-    assert d.position_rows(None) == []
-    assert d.position_rows({}, {}) == []
-    assert d.position_rows({"positions": "nonsense"}) == []
-
-
-def test_positions_summary_counts_open_unrealized_and_at_risk():
-    rows = d.position_rows({"positions": [
-        _pos("a", unrealized_pnl=110.0, rescue_state="ok"),
-        _pos("b", unrealized_pnl=-40.0, rescue_state="watch"),
-        _pos("c", unrealized_pnl=25.5, rescue_state="tested"),
-        _pos("d", unrealized_pnl=-5.5, rescue_state="critical"),
-    ]})
-    s = d.positions_summary(rows)
-    assert s["open"] == 4
-    assert abs(s["unrealized"] - 90.0) < 1e-9
-    # WATCH is a heads-up, not a position in trouble; counting it would inflate
-    # the one number on this card that is supposed to prompt action.
-    assert s["at_risk"] == 2
-
-
-def test_positions_summary_of_nothing_is_zeroed_not_none():
-    assert d.positions_summary([])["open"] == 0
-    assert d.positions_summary([])["unrealized"] == 0.0
-    assert d.positions_summary(None)["at_risk"] == 0
-
-
-def test_positions_summary_skips_a_non_finite_pnl_rather_than_poisoning_the_total():
-    rows = d.position_rows({"positions": [
-        _pos("a", unrealized_pnl=50.0),
-        _pos("b", unrealized_pnl=float("nan")),
-    ]})
-    assert d.positions_summary(rows)["unrealized"] == 50.0
 
 
 # ── freshness_facts ──────────────────────────────────────────────────────────
@@ -997,32 +723,6 @@ def test_strategy_and_dte_text():
     assert d.dte_text(None) == "—"
 
 
-def test_summary_line_reads_the_three_numbers_the_header_promises():
-    line = d.summary_line({"open": 4, "unrealized": 90.0, "at_risk": 2})
-    assert line == "OPEN 4 · UNREALIZED $90.00 · AT RISK 2"
-    # An empty book still reads as a book, not as a broken one.
-    assert d.summary_line(d.positions_summary([])) == \
-        "OPEN 0 · UNREALIZED $0.00 · AT RISK 0"
-
-
-def test_summary_line_says_how_many_rows_it_is_hiding():
-    """A positions panel that silently truncates the book is dangerous — the
-    reader cannot tell "three open trades" from "three of thirty-six"."""
-    line = d.summary_line({"open": 36, "unrealized": -258.0, "at_risk": 1},
-                          shown=8)
-    assert line == "OPEN 36 · SHOWING 8 · UNREALIZED -$258.00 · AT RISK 1"
-
-
-def test_summary_line_omits_the_shown_clause_when_nothing_is_hidden():
-    """A permanent 'SHOWING 3' on a three-row book is noise, and noise is what
-    trains the eye to skip the clause on the day it means something."""
-    s = {"open": 3, "unrealized": 10.0, "at_risk": 0}
-    assert "SHOWING" not in d.summary_line(s, shown=3)
-    assert "SHOWING" not in d.summary_line(s, shown=None)
-    # Defensive: a caller that over-reports cannot produce "SHOWING 9 of 3".
-    assert "SHOWING" not in d.summary_line(s, shown=9)
-
-
 def test_expiry_text_pairs_the_date_with_its_countdown():
     assert d.expiry_text({"expiration": "2026-08-28", "dte": 10}) == \
         "2026-08-28 · 10d"
@@ -1048,8 +748,6 @@ def test_every_class_map_covers_its_whole_finite_domain_distinctly():
     assert len(set(d.regime_chip_class(w) for w in regimes)) == 2
     flags = list(d.POSITION_FLAGS.values())
     assert len(set(d.flag_chip_class(f) for f in flags)) == len(set(flags))
-    assert d.source_chip_class(d.PAPER_SOURCE) != \
-        d.source_chip_class(d.CAPTURED_SOURCE)
     ivs = ("spiking", "collapsing", "stable", "na")
     assert len(set(d.iv_state_class(s) for s in ivs)) == len(ivs)
 
@@ -2041,18 +1739,19 @@ def _full_payloads():
         "options:gex_status": _status(),
         "options:matrix": {"rows": [_mrow("$SPX")]},
         "options:flow_alerts": {"alerts": [_alert(1)]},
-        "options:paper_account": {"positions": [_pos("p1",
-                                                     rescue_state="tested")]},
+        d.NEWS_VIEW: {"items": [_news_item(1, title="Fed holds rates")]},
     }
 
 
 def test_render_gives_every_panel_its_own_placeholder_when_nothing_is_published():
     """One dead service must not blank the page — and a blank box is worse than
     a placeholder, because it looks like a rendering bug rather than a cold
-    feed. Four panels, four placeholders."""
+    feed. Four panels, four placeholders: three wait on the options service
+    and Headlines waits on the news one."""
     from pages import desk
     texts = _rendered_texts()
-    assert texts.count(desk.WAITING_OPTIONS) == 4
+    assert texts.count(desk.WAITING_OPTIONS) == 3
+    assert texts.count(desk.WAITING_NEWS) == 1
 
 
 def test_render_with_nothing_published_prints_no_reading_it_did_not_read():
@@ -2072,6 +1771,7 @@ def test_render_paints_all_four_panels_from_a_full_payload_set(monkeypatch):
     from pages import desk
     texts = [t for t in _rendered_texts() if t]
     assert desk.WAITING_OPTIONS not in texts
+    assert desk.WAITING_NEWS not in texts
     assert "$SPX" in texts                       # a dealer row AND a board row
     assert "LONG GAMMA · PINS" in texts          # the dealer regime chip
     # The flow kind, now carrying the side it fired on in the same cell — the
@@ -2081,9 +1781,11 @@ def test_render_paints_all_four_panels_from_a_full_payload_set(monkeypatch):
     # as agreement rather than as a stale literal for someone to chase.
     assert (_flow_page.alert_kind_label({"type": "uoa"}) + " · "
             + _flow_page.side_label({"side": "call"})) in texts
-    assert "AT RISK" in texts                    # the position flag
-    assert any(t.startswith("OPEN 1 ·") for t in texts)
-    assert "Rallying" in texts                   # the regime word in the strip
+    assert "Fed holds rates" in texts            # the fourth panel: a headline
+    # ...and no position panel: no flag chip, no book summary line.
+    assert "AT RISK" not in texts
+    assert not any(t.startswith("OPEN ") for t in texts)
+    assert "Rallying" in texts                  # the regime word in the strip
     # The two band tiles that replaced VIX, each with the console's descriptor.
     assert "Cautious" in texts and "Bearish" in texts
     assert "MARKET DIRECTION" in texts and "STRENGTH & MOMENTUM" in texts
@@ -2142,7 +1844,8 @@ def test_render_survives_junk_in_every_view(monkeypatch):
     # It degrades to the empty state rather than raising — but note it does NOT
     # degrade to the *waiting* state, because a malformed payload is not an
     # absent one and the page cannot tell the difference from here.
-    assert desk.EMPTY_POSITIONS in texts
+    assert desk.EMPTY_FLOW in texts
+    assert desk.WAITING_OPTIONS not in texts
 
 
 # ── the Bull / Bear sector strip, mounted ────────────────────────────────────
@@ -2611,8 +2314,10 @@ def _head_calls():
 
 def test_every_panel_grid_fits_one_panel_at_the_1920px_window():
     """The four panels are a fixed 2x2, so each gets half the window less the
-    chrome and the gutter. Over that, the row overflows its card."""
-    for name in ("DEALER_GRID", "BOARD_GRID", "FLOW_GRID", "POS_GRID"):
+    chrome and the gutter. Over that, the row overflows its card. Three of the
+    four carry a grid; Headlines is one flex line per story and has no floor."""
+    assert sorted(_grid_names()) == ["BOARD_GRID", "DEALER_GRID", "FLOW_GRID"]
+    for name in _grid_names():
         need = _panel_width_needed(getattr(d, name))
         assert need <= d.PANEL_BUDGET_PX, (
             f"{name} needs {need}px of the {d.PANEL_BUDGET_PX}px a panel gets")
@@ -2633,9 +2338,10 @@ def test_the_panel_budget_subtracts_the_scrollbar_and_is_860px():
 def test_the_minimum_supported_window_above_the_grid_is_the_real_one():
     """That arithmetic is load-bearing documentation — it is what the next
     person sizes a track against — and nothing fails when it goes stale.
-    Positions is the widest panel, so its floors ARE the minimum."""
+    The Opportunity board is the widest panel, so its floors ARE the minimum."""
     src = inspect.getsource(d.render)
-    need = _panel_width_needed(d.POS_GRID)
+    need = max(_panel_width_needed(getattr(d, n)) for n in _grid_names())
+    assert need == _panel_width_needed(d.BOARD_GRID)
     assert f"= {need}px minimum for one panel" in src
     window = need * 2 + d.PANEL_GUTTER_PX + d.DESK_CHROME_PX + 15   # + scrollbar
     assert f"{window}px of innerWidth" in src
@@ -2681,13 +2387,13 @@ def test_each_panel_paints_its_head_and_its_rows_on_one_track_string():
             for v in j.values
             if isinstance(v, ast.FormattedValue) and isinstance(v.value, ast.Name)
             and v.value.id.endswith("_GRID")}
-    assert heads == rows and len(heads) == 4
+    assert heads == rows and len(heads) == 3
 
 # ── panel scrolling: the identity column stays put ───────────────────────────
 # ``shell.PANEL_SCROLL_CSS`` contains a too-narrow panel's sideways scroll AT
 # the panel and pins its `:first-child`. That last part is only half an answer
-# here: on three of the four panels the first cell is NOT what names the row.
-# Pinning it alone would hold a SCORE, a clock time or a book badge in place
+# here: on two of the three gridded panels the first cell is NOT what names the
+# row. Pinning it alone would hold a SCORE or a clock time in place
 # while the symbol slid away under it — worse than pinning nothing, because it
 # looks deliberate. These pin the two halves the page has to supply: how deep
 # each panel pins, and the ``min-width`` without which there is nothing for the
@@ -2739,9 +2445,9 @@ def test_every_panel_grid_carries_the_row_shell_and_a_derived_min_width():
 
 
 def test_every_panel_grid_has_a_pin_decision():
-    """A fifth panel added with no entry here has to fail LOUDLY. Defaulting it
-    to the shipped one-cell pin is the failure this section is about: three of
-    the four panels already do not lead with the column that names the row."""
+    """A gridded panel added with no entry here has to fail LOUDLY. Defaulting
+    it to the shipped one-cell pin is the failure this section is about: two of
+    the three already do not lead with the column that names the row."""
     assert {getattr(d, n) for n in _grid_names()} == set(d._PIN_DEPTHS)
 
 
@@ -2799,7 +2505,7 @@ def test_the_page_only_asks_for_pin_depths_the_stylesheet_can_draw():
 # a whole - a head and the rows under it, a pin and the cell it lands on - so
 # they read ``render`` AND the builders it calls, as ONE source. Nothing else
 # about them changed; ``test_render_size.py`` pins the builders' new home.
-_ROW_BUILDERS = ("_dealer_row", "_board_row", "_flow_row", "_position_row",
+_ROW_BUILDERS = ("_dealer_row", "_board_row", "_flow_row",
                  "_news_row", "_bullbear_chip", "_bullbear_breadth")
 
 
@@ -2816,7 +2522,7 @@ def _render_tree():
 
 
 def test_every_row_painter_wears_its_panels_scroll_shell():
-    """The grid string is shared by all four panels' rows, so the per-panel
+    """The grid string is shared by a panel's head and its rows, so the per-panel
     part cannot live in the row helper — it is derived from the grid, at the
     one place the grid is named."""
     src, tree = _render_tree()
@@ -2833,17 +2539,20 @@ def test_every_row_painter_wears_its_panels_scroll_shell():
         assert any(isinstance(p, ast.Call)
                    and getattr(p.func, "id", "") == "_row_shell"
                    for p in parts), ast.get_source_segment(src, node)
-    assert seen == 4, f"{seen} row painters, not 4"
+    assert seen == 3, f"{seen} row painters, not 3"
 
 
 def test_the_deep_pin_lands_on_the_symbol_cell_and_nothing_else():
     """Non-vacuity for the depth map: a panel can declare a two-cell pin and
-    then hang the offset on the wrong child, which pins a book badge and lets
-    the symbol scroll — the exact failure the depth is there to prevent."""
+    then hang the offset on the wrong child, which pins a score or a clock time
+    and lets the symbol scroll — the exact failure the depth is there to
+    prevent."""
     src, tree = _render_tree()
+    deep = {name for name in _grid_names()
+            if d._pin_depth(getattr(d, name)) > 1}
+    assert deep == {"BOARD_GRID", "FLOW_GRID"}
     for func, grid in (("_board_row", "BOARD_GRID"),
-                       ("_flow_row", "FLOW_GRID"),
-                       ("_position_row", "POS_GRID")):
+                       ("_flow_row", "FLOW_GRID")):
         fn = next(n for n in ast.walk(tree)
                   if isinstance(n, ast.FunctionDef) and n.name == func)
         segs = [ast.get_source_segment(src, s) for s in ast.walk(fn)
@@ -2864,16 +2573,14 @@ def test_the_column_labels_pin_with_the_cells_beneath_them():
     assert "_row_shell(grid)" in src, "the head row does not scroll with its rows"
     assert "_pin_cell_class(grid," in src, "the column labels do not pin"
 def test_a_panel_level_sentence_stays_put_while_its_columns_move():
-    """Exactly two lines share a panel body with its grids, and both describe
-    the whole PANEL. The body scrolls now, so a full-width label inside it
-    carries its own first words off the left edge as soon as the rows move —
-    and the first words are the reading ("3 open · $1,204" / "walls stale
-    since ..."). Read off the statement that BUILDS each one, so a class parked
-    on the wrong label passes nothing."""
+    """One line shares a panel body with its grid, and it describes the whole
+    PANEL. The body scrolls now, so a full-width label inside it carries its
+    own first words off the left edge as soon as the rows move — and the first
+    words are the reading ("walls stale since ..."). Read off the statement
+    that BUILDS it, so a class parked on the wrong label passes nothing."""
     src, tree = _render_tree()
     assert "sticky" in d._PANEL_NOTE and "left-0" in d._PANEL_NOTE
-    for func, builder in (("_paint_dealer", "stale_walls_note("),
-                          ("_paint_positions", "summary_line(")):
+    for func, builder in (("_paint_dealer", "stale_walls_note("),):
         fn = next(n for n in ast.walk(tree)
                   if isinstance(n, ast.FunctionDef) and n.name == func)
         segs = [ast.get_source_segment(src, s) for s in ast.walk(fn)
@@ -2910,7 +2617,7 @@ def test_new_ids_skips_rows_with_no_id():
 
 
 def test_new_ids_reads_the_key_the_caller_names():
-    # Positions key on position_id, flow on id. One function, not two.
+    # The flow feed keys on ``id``; a feed with another id field names it.
     rows = [{"position_id": "p1"}]
     assert d.new_ids(rows, set(), key="position_id") == ["p1"]
 
@@ -2928,30 +2635,6 @@ def test_id_set_is_what_seen_is_replaced_with_each_paint():
     assert d.id_set(rows) == {"a", "b"}
     assert d.id_set(None) == set()
     assert d.id_set([{"position_id": "p1"}], key="position_id") == {"p1"}
-
-
-# ── flag changes ─────────────────────────────────────────────────────────────
-def test_flag_changes_reports_a_moved_flag():
-    rows = [{"position_id": "p1", "flag": "AT RISK"}]
-    assert d.flag_changes(rows, {"p1": "OK"}) == ["p1"]
-
-
-def test_flag_changes_ignores_an_unchanged_flag():
-    rows = [{"position_id": "p1", "flag": "OK"}]
-    assert d.flag_changes(rows, {"p1": "OK"}) == []
-
-
-def test_a_first_sighting_is_not_a_flag_change():
-    # It is an ARRIVAL, and new_ids already glows it. Counting it here too
-    # would give a brand-new row two overlapping glows.
-    rows = [{"position_id": "p1", "flag": "OK"}]
-    assert d.flag_changes(rows, {}) == []
-
-
-def test_flag_map_keys_positions_by_id():
-    rows = [{"position_id": "p1", "flag": "OK"}, {"position_id": None,
-                                                  "flag": "RESCUE"}]
-    assert d.flag_map(rows) == {"p1": "OK"}
 
 
 # ── the neon glow ────────────────────────────────────────────────────────────
@@ -2997,9 +2680,13 @@ def test_every_glow_step_class_has_a_rule_behind_it():
         assert f".desk-neon-{i}{{" in css
 
 
-def test_both_glow_hues_have_a_rule():
-    assert ".desk-neon-new" in d.DESK_NEON_CSS
-    assert ".desk-neon-flag" in d.DESK_NEON_CSS
+def test_every_glow_kind_has_a_rule_and_no_rule_is_left_without_a_kind():
+    """One kind today (an arrival). The amber flag-change glow went with the
+    Positions panel, and its stylesheet rule must not outlive it."""
+    assert d.GLOW_KINDS == (d.GLOW_NEW,)
+    for kind in d.GLOW_KINDS:
+        assert f".desk-neon-{kind} " in d.DESK_NEON_CSS
+    assert ".desk-neon-flag" not in d.DESK_NEON_CSS
 
 
 def test_the_animation_runs_for_the_advertised_ten_seconds():
@@ -3064,9 +2751,9 @@ def test_the_zero_step_delay_is_not_written_as_negative_zero():
 
 
 def test_the_glow_map_drops_only_expired_entries():
-    glow = {"a": ("new", 100.0), "b": ("flag", 108.0)}
-    assert d.prune_glows(glow, now=111.0) == {"b": ("flag", 108.0)}
-    assert glow == {"b": ("flag", 108.0)}       # mutates the caller's map
+    glow = {"a": ("new", 100.0), "b": ("new", 108.0)}
+    assert d.prune_glows(glow, now=111.0) == {"b": ("new", 108.0)}
+    assert glow == {"b": ("new", 108.0)}       # mutates the caller's map
 
 
 def test_glow_step_survives_a_nonsense_timestamp():
@@ -3093,8 +2780,8 @@ def test_glow_step_goes_dark_on_a_nan_instead_of_raising():
 
 def test_the_glow_map_survives_a_nan_timestamp():
     # The reason the line above matters: prune runs mid-paint over every entry.
-    glow = {"a": ("new", float("nan")), "b": ("flag", 108.0)}
-    assert d.prune_glows(glow, now=111.0) == {"b": ("flag", 108.0)}
+    glow = {"a": ("new", float("nan")), "b": ("new", 108.0)}
+    assert d.prune_glows(glow, now=111.0) == {"b": ("new", 108.0)}
 
 
 def test_glow_classes_refuses_a_hue_with_no_rule_behind_it():
@@ -3103,12 +2790,14 @@ def test_glow_classes_refuses_a_hue_with_no_rule_behind_it():
     ``desk-neon-<typo>`` leaves ``--neon`` unset, and a ``box-shadow`` naming an
     undefined custom property is invalid at computed-value time — BOTH shadow
     declarations drop. The row would flash a background and never glow, which
-    looks like a rendering quirk rather than a wiring bug. GLOW_NEW/GLOW_FLAG
-    exist precisely so there is a finite set to check against.
+    looks like a rendering quirk rather than a wiring bug. GLOW_KINDS exists
+    precisely so there is a finite set to check against.
     """
     assert d.glow_classes(("nwe", 100.0), now=103.0) == ""
     assert d.glow_classes((None, 100.0), now=103.0) == ""
-    for kind in (d.GLOW_NEW, d.GLOW_FLAG):
+    # The kind the removed Positions panel used has no rule any more.
+    assert d.glow_classes(("flag", 100.0), now=103.0) == ""
+    for kind in d.GLOW_KINDS:
         assert d.glow_classes((kind, 100.0), now=103.0) != ""
 
 
@@ -3128,11 +2817,6 @@ def _arr_flow(rid, symbol="SPY", kind="Crossover", side="Calls over"):
     return {"id": rid, "symbol": symbol, "kind": kind, "side": side}
 
 
-def _arr_pos(pid, symbol="SPY", flag="OK", strategy="put_credit_spread"):
-    return {"position_id": pid, "symbol": symbol, "flag": flag,
-            "strategy": strategy}
-
-
 def test_arrival_state_starts_silent_and_empty():
     """``first`` being True IS the silent-first-paint mechanism.
 
@@ -3143,8 +2827,10 @@ def test_arrival_state_starts_silent_and_empty():
     s = d.arrival_state()
     assert s["first"] is True
     assert s["glow"] == {} and s["speak"] == []
-    assert s["seen_flow"] == set() and s["seen_pos"] == set()
-    assert s["pos_flags"] == {}
+    assert s["seen_flow"] == set() and s["seen_board"] == set()
+    assert s["board_left"] == {}
+    # No position tracking: that panel, and its voice, left the Desk.
+    assert "seen_pos" not in s and "pos_flags" not in s
 
 
 def test_the_first_paint_announces_nothing_and_lights_nothing():
@@ -3155,13 +2841,6 @@ def test_the_first_paint_announces_nothing_and_lights_nothing():
     assert s["glow"] == {}
     # ...but the backlog IS recorded, so the next arrival is the only new one.
     assert s["seen_flow"] == {"a", "b"}
-
-
-def test_the_first_paint_is_dark_for_positions_too():
-    s = d.arrival_state()
-    assert d.fold_position_arrivals(s, [_arr_pos("p1")], now=100.0) is None
-    assert s["glow"] == {}
-    assert s["seen_pos"] == {"p1"} and s["pos_flags"] == {"p1": "OK"}
 
 
 def test_the_second_paint_glows_and_speaks_the_new_alert():
@@ -3207,14 +2886,6 @@ def test_an_alert_with_no_ticker_glows_but_is_never_announced():
     s2 = d.arrival_state()
     s2["first"] = False
     assert d.fold_flow_arrivals(s2, [_arr_flow("z", symbol="$$")], now=1.0) is None
-
-
-def test_a_new_position_glows_and_speaks():
-    s = d.arrival_state()
-    s["first"] = False
-    said = d.fold_position_arrivals(s, [_arr_pos("p1")], now=100.0)
-    assert said == "S P Y. New position, put credit spread."
-    assert s["glow"] == {"p1": (d.GLOW_NEW, 100.0)}
 
 
 # ── the spoken contract, END TO END ──────────────────────────────────────────
@@ -3282,37 +2953,6 @@ def test_a_burst_names_and_counts_only_the_speakable_alerts():
     assert set(s["glow"]) == {"loud", quiet["id"]}
 
 
-def test_a_new_position_speaks_its_contract_from_the_raw_payload():
-    """The expiration is deliberately far out so ``dte`` cannot reach 0 and turn
-    the date into "0-D T E" — ``position_rows`` computes it against today."""
-    raw = _pos("p1", expiration="2027-09-17", entry_credit=1.35)
-    s = d.arrival_state()
-    s["first"] = False
-    said = d.fold_position_arrivals(
-        s, d.position_rows({"positions": [raw]}), now=1.0)
-    assert said == ("S P Y. New position, put credit spread. "
-                    "6 hundred, 5 95, 9 - 17, entry 1 dollar 35 credit.")
-
-
-def test_a_flag_change_glows_amber_but_says_nothing():
-    """A position ALREADY in the book changing state is not an arrival."""
-    s = d.arrival_state()
-    d.fold_position_arrivals(s, [_arr_pos("p1", flag="OK")], now=100.0)
-    s["first"] = False
-    said = d.fold_position_arrivals(s, [_arr_pos("p1", flag="AT RISK")], now=200.0)
-    assert said is None
-    assert s["glow"] == {"p1": (d.GLOW_FLAG, 200.0)}
-
-
-def test_a_brand_new_position_never_takes_the_flag_glow_as_well():
-    # ``flag_changes`` already declines a first sighting; the ``setdefault`` is
-    # the second half of that, so an arrival keeps its cyan.
-    s = d.arrival_state()
-    s["first"] = False
-    d.fold_position_arrivals(s, [_arr_pos("p1", flag="AT RISK")], now=100.0)
-    assert s["glow"]["p1"][0] == d.GLOW_NEW
-
-
 def test_the_folds_survive_a_malformed_row():
     """Rows arrive off a cache read, so a non-dict must not take the paint down."""
     s = d.arrival_state()
@@ -3320,7 +2960,8 @@ def test_the_folds_survive_a_malformed_row():
     assert d.fold_flow_arrivals(s, ["junk", None, _arr_flow("a")], now=1.0)
     s2 = d.arrival_state()
     s2["first"] = False
-    assert d.fold_position_arrivals(s2, ["junk", _arr_pos("p1")], now=1.0)
+    assert d.fold_board_arrivals(
+        s2, ["junk", None, {"symbol": "NVDA", "signal": "buy"}], now=1.0)
 
 
 # ── the speak gate ───────────────────────────────────────────────────────────
@@ -3722,16 +3363,18 @@ def test_panel_heads_carry_every_panel_and_the_caps_stay_interpolated():
     dropped: a title drifting back to caps still fails here.
     """
     heads = d.PANEL_HEADS
-    # "news" joined 2026-09-26 with the headlines strip (the news feed plan,
-    # Task 14). "read" joined on 2026-10-05 with the Market read panel and left
-    # on 2026-10-06, when that panel became a dialog; the set is still asserted
+    # "news" joined 2026-09-26 as a strip under the panels (the news feed plan,
+    # Task 14) and took the fourth cell on 2026-10-11, when "positions" left the
+    # page. "read" joined on 2026-10-05 with the Market read panel and left on
+    # 2026-10-06, when that panel became a dialog; the set is still asserted
     # EXACTLY.
-    assert set(heads) == {"dealer", "board", "flow", "positions", "news"}
+    assert set(heads) == {"dealer", "board", "flow", "news"}
     for key, (title, use_line) in heads.items():
         assert title == title.capitalize(), key
         assert use_line, key
     assert str(d.BOARD_ROWS_N) in heads["board"][1]
     assert str(d.FLOW_ROWS_N) in heads["flow"][1]
+    assert str(d.NEWS_ROWS_N) in heads["news"][1]
 
 
 def test_column_headers_are_constants_one_per_grid_track():
@@ -3744,8 +3387,7 @@ def test_column_headers_are_constants_one_per_grid_track():
     """
     for name, heads, grid in (("dealer", d.DEALER_HEADS, d.DEALER_GRID),
                               ("board", d.BOARD_HEADS, d.BOARD_GRID),
-                              ("flow", d.FLOW_HEADS, d.FLOW_GRID),
-                              ("positions", d.POS_HEADS, d.POS_GRID)):
+                              ("flow", d.FLOW_HEADS, d.FLOW_GRID)):
         tracks = grid.split("grid-cols-[")[1].split("]")[0].count("_") + 1
         assert len(heads) == tracks, (name, len(heads), tracks)
 
@@ -3760,7 +3402,7 @@ def test_use_lines_say_what_the_panel_is_for():
     # rows say Call/Put rather than bought/sold: Schwab publishes no
     # time-and-sales tape to this app, so nobody here knows who initiated.
     assert "not who initiated" in heads["flow"][1]
-    assert "needs a decision" in heads["positions"][1]
+    assert "original article" in heads["news"][1]
 
 
 def test_a_use_line_fits_the_panel_it_stands_in():
@@ -3774,13 +3416,12 @@ def test_a_use_line_fits_the_panel_it_stands_in():
 
 
 def test_the_dropped_facts_are_the_columns_underneath_them():
-    """The symbol and book lists left the head because the SYMBOL and BOOK
-    columns already print them, row by row. The SORT ORDER did not — it is the
-    one fact in that slot the rows cannot show, so it survives into the
-    use-line, still interpolated from the cap."""
+    """The symbol list left the head because the SYMBOL column already prints
+    it, row by row. The SORT ORDER did not — it is the one fact in that slot
+    the rows cannot show, so it survives into the use-line, still interpolated
+    from the cap."""
     heads = d.PANEL_HEADS
     assert "$SPX" not in heads["dealer"][1]
-    assert d.PAPER_SOURCE not in heads["positions"][1]
     assert "hottest" in heads["board"][1].lower()
     assert "newest" in heads["flow"][1].lower()
 
@@ -3792,30 +3433,6 @@ def test_headers_name_the_use_not_the_mechanism():
     assert d.BOARD_HEADS == ("SCORE", "SYMBOL", "WHY IT'S HOT", "ATM IV",
                              "NET PREMIUM", "P/C", "SIGNAL", "SETUP")
     assert d.FLOW_HEADS == ("TIME", "SYMBOL", "WHAT TRADED", "ALERT TYPE")
-    assert d.POS_HEADS == ("BOOK", "SYMBOL", "STRAT", "EXPIRY", "ENTRY",
-                           "MARK", "STRIKES", "QTY", "OPEN P&L", "STATUS")
-
-
-def test_the_two_width_blocked_labels_stay_short():
-    """STRAT and QTY are the two tracks the HEAD LABEL binds rather than the
-    value (see POS_GRID's floor notes). At the 8.0px per character
-    ``test_every_column_label_fits_the_track_it_stands_over`` measures,
-    "STRATEGY" needs 64px of a 42px floor and "CONTRACTS" 72px of a 36px one;
-    widening both costs ~58px against the 43px of slack between this page's
-    minimum window and the 1920px it is read at.
-
-    So this is a deferral with arithmetic behind it, not an oversight — and it
-    gets a test because a comment saying so is the kind nobody reads before
-    "fixing" the inconsistency.
-
-    /options/paper is a ui.table with no such limit and DOES spell both out
-    (``test_the_two_labels_the_desk_cannot_fit_are_spelled_out_here``). The
-    app therefore shows one concept under two spellings, deliberately: the
-    standing rule is to spell out casual shortenings, so the abbreviation
-    stays a width concession HERE rather than becoming the app's word for
-    the concept."""
-    assert "STRAT" in d.POS_HEADS and "STRATEGY" not in d.POS_HEADS
-    assert "QTY" in d.POS_HEADS and "CONTRACTS" not in d.POS_HEADS
 
 
 def test_trader_acronyms_survive_the_reword():
@@ -3869,7 +3486,16 @@ def test_the_desk_help_calls_things_what_the_screen_calls_them():
     for gone in ("a flag:", "**flag**", "**call and put walls**",
                  "unrealised profit and loss"):
         assert gone not in text, gone
-    for want in ("ceiling", "floor", "status", "open P&L"):
+    for want in ("ceiling", "floor"):
+        assert want in text, want
+    # "status" and "open P&L" were the Positions panel's two renamed columns.
+    # The panel left the Desk, so its bullet and its spoken-alert wording must
+    # be gone from the guide too, and the panel that replaced it must be there.
+    for gone in ("- **Positions** —", "open P&L", "newly-opened position",
+                 "what am I holding"):
+        assert gone not in text, gone
+    for want in ("- **Headlines** —", "All headlines",
+                 "Your positions are not on this page"):
         assert want in text, want
 
 
@@ -4058,16 +3684,30 @@ def _detectors(calls):
             calls.append(section)
             return f"{section} said"
         return detect
-    return {sec: mk(sec) for sec in ("flow", "positions", "board")}
+    return {sec: mk(sec) for sec in ("flow", "board")}
 
 
-_ALL_VIEWS = {"options:flow_alerts", "options:paper_account", "options:matrix"}
+_ALL_VIEWS = {"options:flow_alerts", "options:matrix"}
 
 
 def test_every_section_speaks_by_default_in_speak_order():
     calls = []
     out = d.detect_utterances(_ALL_VIEWS, _detectors(calls), {}, now=1.0)
-    assert out == ["flow said", "positions said", "board said"]
+    assert out == ["flow said", "board said"]
+    assert d.SPEAK_ORDER == ("flow", "board")
+
+
+def test_a_detector_for_a_section_the_desk_no_longer_has_is_never_run():
+    """Positions left the Desk. A detector handed in under that name is not
+    called and says nothing, even when the paper account moved."""
+    calls = []
+    detectors = dict(_detectors(calls))
+    detectors["positions"] = lambda now: calls.append("positions") or "x"
+    out = d.detect_utterances(_ALL_VIEWS | {"options:paper_account"},
+                              detectors, {}, now=1.0)
+    assert out == ["flow said", "board said"]
+    assert "positions" not in calls
+    assert d.section_speaks({}, "positions") is False
 
 
 def test_a_section_switched_off_is_silent_but_still_detected():
@@ -4078,7 +3718,7 @@ def test_a_section_switched_off_is_silent_but_still_detected():
         out = d.detect_utterances(_ALL_VIEWS, _detectors(calls),
                                   {key: False}, now=1.0)
         assert f"{section} said" not in out
-        assert len(out) == 2
+        assert len(out) == len(d.VOICE_SECTIONS) - 1 == 1
         assert section in calls
 
 
@@ -4217,13 +3857,14 @@ def test_the_panel_heads_are_section_titles_in_sentence_case():
 def test_the_empty_panels_use_the_apps_one_empty_line():
     """The kit's ``empty`` CENTRES its line where ``_PLACEHOLDER`` did not - a
     real visual change on the four panels and the Bull/Bear strip, accepted
-    because it is the app's one empty style. Nine call sites, and the WORDS are
-    untouched (a cold feed and a quiet tape still read differently)."""
+    because it is the app's one empty style. Seven call sites, and the WORDS
+    are untouched (a cold feed and a quiet tape still read differently)."""
     from pages import ui_kit as kit
     assert not hasattr(d, "_PLACEHOLDER")
-    # Nine, plus the headlines strip's two (cold feed, quiet feed) since
-    # 2026-09-26 - and those two are worded differently too.
-    assert inspect.getsource(d.render).count("kit.empty(") == 11
+    # Seven, plus the headlines panel's two (cold feed, quiet feed) since
+    # 2026-09-26 - and those two are worded differently too. It was eleven
+    # until the Positions panel took its two away.
+    assert inspect.getsource(d.render).count("kit.empty(") == 9
     assert "text-center" in kit.EMPTY
 
 
@@ -4319,7 +3960,7 @@ def test_the_reactive_remove_set_covers_every_class_its_painters_apply():
     assert applied <= set(d._ALL_STATE_TEXT.split())
 
 
-# ── the headlines strip (news feed, Task 14) ─────────────────────────────────
+# ── the headlines panel (news feed, Task 14) ─────────────────────────────────
 _NEWS_NOW = datetime.datetime(2026, 9, 25, 15, 0, tzinfo=datetime.timezone.utc)
 
 
@@ -4346,14 +3987,69 @@ def test_the_news_strip_has_its_own_cold_and_quiet_lines():
     assert d.WAITING_NEWS != d.EMPTY_NEWS
 
 
-def test_news_rows_are_the_newest_five_and_none_for_a_cold_feed():
-    from pages import news_view
+def test_the_headline_count_is_read_from_config(monkeypatch):
+    """The value is READ, not merely equal: change what the config answers,
+    load the module again, and the count, the panel's use-line and the rows
+    all move. Loaded back afterwards, so the rest of the suite sees nine."""
+    import importlib
+
+    from shared import news_config
+    try:
+        monkeypatch.setattr(news_config, "desk_headlines", lambda cfg=None: 4)
+        importlib.reload(d)
+        assert d.NEWS_ROWS_N == 4
+        assert "The 4 newest stories" in d.PANEL_HEADS["news"][1]
+        view = {"items": [_news_item(i) for i in range(9)]}
+        assert len(d.news_rows(view, now=_NEWS_NOW)) == 4
+    finally:
+        monkeypatch.undo()
+        importlib.reload(d)
+    assert d.NEWS_ROWS_N == news_config.desk_headlines() == 9
+
+
+def test_headlines_and_flow_alerts_ship_at_the_same_count():
+    """They share a grid row, so a full feed and a full alert list fill it
+    together. Each is still its own setting; this pins what SHIPS."""
+    from shared import news_config
+    assert news_config.DEFAULTS["desk"]["headlines"] == d.FLOW_ROWS_N
+
+
+def test_headlines_is_the_fourth_panel_of_the_grid_and_nothing_follows_it(
+        monkeypatch):
+    """Headlines took the cell the Positions panel held, beside Flow alerts.
+    It was a full-width strip UNDER the grid before; a second copy left there
+    would draw the feed twice."""
+    from nicegui import ui
+    _seed_bus(monkeypatch, _full_payloads())
+    made = _rendered_elements()
+    grids = [e for e in made if "grid-cols-2" in e._classes]
+    assert len(grids) == 1
+    cards = list(grids[0])
+    assert len(cards) == 4
+
+    def _texts(el):
+        return [getattr(x, "text", None) for x in el.descendants()]
+
+    titles = [d.PANEL_HEADS[k][0] for k in ("dealer", "board", "flow", "news")]
+    for card, title in zip(cards, titles):
+        assert title in _texts(card), title
+    assert "Fed holds rates" in _texts(cards[3])
+    everywhere = [getattr(e, "text", None) for e in made]
+    assert everywhere.count("Headlines") == 1
+    assert "Positions" not in everywhere
+    # The grid is the last thing in the page's column: no strip under it.
+    siblings = [e for e in grids[0].parent_slot.parent
+                if not isinstance(e, ui.timer)]
+    assert siblings[-1] is grids[0], [type(e).__name__ for e in siblings]
+
+
+def test_news_rows_are_the_newest_few_and_none_for_a_cold_feed():
     assert d.news_rows(None, now=_NEWS_NOW) is None
     assert d.news_rows("nonsense", now=_NEWS_NOW) is None
     assert d.news_rows({"items": []}, now=_NEWS_NOW) == []
-    view = {"items": [_news_item(i) for i in range(9)]}
+    view = {"items": [_news_item(i) for i in range(d.NEWS_ROWS_N + 4)]}
     rows = d.news_rows(view, now=_NEWS_NOW)
-    assert len(rows) == news_view.DESK_LIMIT == 5
+    assert len(rows) == d.NEWS_ROWS_N == 9
     assert rows[0]["title"] == "headline 0"
     assert rows[0]["source"] == "S"
 
@@ -4450,10 +4146,11 @@ def _rendered_links():
 def test_render_draws_each_headline_as_an_escaping_link(monkeypatch):
     title = "<img src=x onerror=alert(1)> Fed & markets"
     _seed_bus(monkeypatch, {"news:feed": {"items": [
-        _news_item(i, title=title if i == 0 else None) for i in range(7)]}})
+        _news_item(i, title=title if i == 0 else None)
+        for i in range(d.NEWS_ROWS_N + 2)]}})
     links = [e for e in _rendered_links() if e.props.get("target") == "_blank"
              and str(e.props.get("href", "")).startswith("https://news.")]
-    assert len(links) == 5
+    assert len(links) == d.NEWS_ROWS_N
     assert links[0].text == title
     assert links[0].props["href"] == "https://news.example/0"
 

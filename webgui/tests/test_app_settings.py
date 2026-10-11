@@ -143,11 +143,13 @@ def test_unfreeze_restores_normal_behaviour(tmp_path, monkeypatch):
 
 
 def test_each_desk_voice_section_has_its_own_switch_and_ships_on():
-    """Opportunity Board, Live Flow Alerts and Positions speak by default, and
-    each can be switched off without touching the others."""
+    """Opportunity Board and Live Flow Alerts speak by default, and each can
+    be switched off without touching the other."""
     d = app_settings.DEFAULTS
-    for key in ("voice_board", "voice_flow", "voice_positions"):
+    for key in ("voice_board", "voice_flow"):
         assert d[key] is True
+    # The Positions panel left the Desk, and its switch went with it.
+    assert "voice_positions" not in d
 
 
 def test_the_desk_section_map_and_the_defaults_agree():

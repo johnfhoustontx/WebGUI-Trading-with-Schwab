@@ -242,8 +242,8 @@ _PIN_HOVER = _wash(_PIN_BG, theme.THEME["palette"]["muted"], 0.06)
 #    structure map. Measured: the scrolling numbers ran through the gap above and
 #    below the pinned symbol, which reads as corruption, exactly as feared. The
 #    pseudo takes `align-self: stretch` instead, so the backdrop is the full row
-#    height while the real cell keeps its own alignment — including the Positions
-#    chip's `self-start`, which a `stretch` on the cell would have overridden and
+#    height while the real cell keeps its own alignment — including a chip's
+#    `self-start`, which a `stretch` on the cell would have overridden and
 #    stretched the chip itself. ⚠ `grid-area: 1 / 1` on BOTH: a definitely-placed
 #    pseudo occupies that cell, and without the same placement on the first child
 #    every real cell auto-places one column to the right and the last one wraps
@@ -265,10 +265,10 @@ _PIN_HOVER = _wash(_PIN_BG, theme.THEME["palette"]["muted"], 0.06)
 #
 # ⚠ `.cursor-pointer` gates the hover, and it is the right predicate rather than
 # a convenient one: in `desk.py` `_ROW` is `_ROW_STATIC` plus that class, and the
-# hover wash rides the identical condition (`can_open`), so a row that is a link
-# and a row that lights up are the same set by construction. On the public origin
-# every Positions row is static, and an ungated rule would light the pin alone on
-# rows whose remaining nine cells do nothing.
+# hover wash is written beside it in each row painter, so a row that is a link
+# and a row that lights up are the same set by construction. A static row gets
+# neither, and an ungated rule would light the pin alone on a row whose other
+# cells do nothing.
 #
 # ⚠ TWO THINGS THE ARRIVAL GLOW (`desk.DESK_NEON_CSS`) LOSES, both accepted.
 # (a) It animates the ROW's background, and the pin's opaque backdrop sits over

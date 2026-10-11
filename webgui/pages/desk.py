@@ -1,16 +1,21 @@
 """The Desk (/desk) — one screen carrying the most decision-relevant element of
 every other page, so the morning read is a single glance rather than a tour.
 
-Tier-1 reader: it consumes ``cache:options:matrix``, ``cache:options:paper_account``,
-``cache:options:captured``,
+Tier-1 reader: it consumes ``cache:options:matrix``,
 ``cache:options:flow_alerts``, ``cache:options:gex_status``,
-``cache:sentiment:regime`` and ``cache:sentiment:bullbear`` and renders them.
+``cache:sentiment:regime``, ``cache:sentiment:bullbear`` and ``cache:news:feed``
+and renders them.
 No engine imports, no Schwab calls, no arithmetic of its own. Every one of them is polled in the SINGLE batched
 ``read_versions`` in ``_poll`` — see ``VIEWS``.
 
+It holds NO position: the paper books' open trades have pages of their own
+(Paper Account, Captured Signals) and the Desk reads neither view. The few
+position helpers still defined here (``position_flag``, ``strikes_text``,
+``expiry_text``, ``flag_chip_class``) are the Symbol Dossier's.
+
 **The load-bearing principle: the Desk composes, it never restates.** Every
 number here is produced by the same pure function its owning page uses —
-``flow.alert_rows`` for the alert feed, ``paper``'s DTE helper for expiries,
+``flow.alert_rows`` for the alert feed, ``news_view.rows`` for the headlines,
 ``console_regime``'s label derivation for the regime word. This is not tidiness.
 The app already carries a documented open bug where ``/sentiment/sectors`` and
 ``/sentiment/rotation`` print OPPOSITE regime verdicts, because each computed its
@@ -92,7 +97,6 @@ from pages.panel_scroll import (COL_GAP_PX, PANEL_PAD_PX,  # noqa: F401
                                 grid_min_width_px, track_floors)
 from pages.options import flow as _flow
 from pages.options import handoff as _handoff
-from pages.options import paper as _paper
 from pages.options.matrix import signal_class as _signal_class
 from pages.options.matrix import signal_summary as _signal_summary
 # The CHROMATIC console tokens are READINGS and survive the console's surface
@@ -118,6 +122,7 @@ from pages.sentiment import trend_arcs as _trend_arcs
 from pages.sentiment import trend_picture as _trend_picture
 from pages.ui_guard import guard, guard_async
 from shared import market_calendar as _cal
+from shared import news_config as _news_config
 
 # The four symbols the Desk watches. Deliberately short: the Desk is a glance,
 # and the Opportunity Board already exists for the full watchlist.
@@ -210,10 +215,7 @@ _ACCEL_PHRASE = {"hot": "hot", "cool": "cooling"}
 # Six, not five. The rows became ONE line each (see ``_board_row``), which took a
 # row from 71px to 50px measured, and the panel had room for one more.
 #
-# ⚠ The rule that did NOT survive measurement on the Flow panel — "size this to
-# the panel it shares a grid row with" — DOES hold here, and the difference is
-# worth writing down. Flow's neighbour is Positions, whose length is DATA (open
-# trades), so a constant can only match it by accident. This panel's neighbour is
+# This panel is sized to the one it shares a grid row with. Its neighbour is
 # Dealer Positioning, which is exactly ``len(DESK_SYMBOLS)`` rows — deterministic
 # — so the two genuinely can be squared off. Re-measured live at 1920px, on the
 # reference-scale type ladder (the panel chrome is common to both, so only the
@@ -319,16 +321,9 @@ def opportunity_rows(matrix_view, limit=BOARD_ROWS_N):
 # a row from 71px to 50px measured — so the same panel now carries nearly twice
 # the feed for the height it already had.
 #
-# ⚠ The obvious rule — "pick the count that squares the Flow panel off against
-# the Positions panel it shares a grid row with" — does not survive measurement,
-# and it is worth writing down why. Positions is DATA-length (both paper books'
-# open trades; three of them the day this was measured, for a 269px body), while
-# this is a CONSTANT. At three positions the matching count is five, i.e. no
-# increase at all, and at ten it would be fifteen. So the two can only agree by
-# accident. The panels themselves are always the same height — `items-stretch`
-# guarantees that — and the question is only which one carries the void.
-# Nine puts it in Positions, which is the right place for it: a book grows
-# through the week, where the alert feed is capped by definition.
+# The panel beside it is Headlines, whose own count is config and ships at the
+# same nine (``NEWS_ROWS_N``), so a full feed and a full alert list fill the row
+# together. `items-stretch` keeps the two cards the same height either way.
 FLOW_ROWS_N = 9
 
 
@@ -392,11 +387,14 @@ def flow_estimate_bars(row):
     return out
 
 
-# ── the headlines strip (news feed) ─────────────────────────────────────────
+# ── the headlines panel (news feed) ─────────────────────────────────────────
 # The newest few items of ``cache:news:feed``, one line each: when · source ·
 # the headline, which opens the ORIGINAL article in a new tab. Every fact comes
 # from ``pages/news_view.py``, the same builder /news and the Symbol band use.
-NEWS_ROWS_N = _news.DESK_LIMIT
+#
+# The count is ``config/news.toml [desk] headlines`` (Settings → Configuration),
+# resolved once at import like every other config constant: edit + restart.
+NEWS_ROWS_N = _news_config.desk_headlines()
 NEWS_VIEW = _news.VIEW
 NEWS_ROUTE = "/news"
 NEWS_MORE = "All headlines →"
@@ -460,16 +458,21 @@ def news_rows(news_view, *, now, limit=NEWS_ROWS_N):
     return out
 
 
-# ── open positions (both books) ─────────────────────────────────────────
-# rescue_state → the flag word the card prints. WATCH is deliberately a separate
+# ── position vocabulary (the Symbol Dossier's) ──────────────────────────────
+# The Desk itself draws no position. What is left here is what
+# ``pages/symbol.py`` borrows for its own open-positions band, kept in this
+# module so the flag words and the strike pair have one definition.
+#
+# rescue_state → the flag word the band prints. WATCH is deliberately a separate
 # word from AT RISK: it means "keep an eye on it", and folding it in would blunt
-# the only word on this card meant to make the reader do something.
+# the only word on that band meant to make the reader do something.
 POSITION_FLAGS = {"ok": "OK", "watch": "WATCH", "tested": "AT RISK",
                   "critical": "RESCUE"}
 _DEFAULT_FLAG = "OK"
 
-# The flag for a book the rescue overlay never looks at (see ``BOOKS``). It is
-# an em-dash and NOT the "OK" default, and that distinction is the whole point:
+# The flag for a book the rescue overlay never looks at: the manage cycle tags
+# the paper ACCOUNT only, so a captured signal carries no ``rescue_state``. It
+# is an em-dash and NOT the "OK" default, and that distinction is the whole point:
 # ``_DEFAULT_FLAG`` means "the manage cycle inspected this trade and found
 # nothing wrong", which is a real finding. Falling through to it for a book
 # nobody inspects would print a clean bill of health that no part of this app
@@ -477,55 +480,9 @@ _DEFAULT_FLAG = "OK"
 # as a confident extreme. ⚠ Do not "tidy" this back into the default.
 UNTAGGED_FLAG = "—"
 
-# The rescue states that genuinely mean "this trade is in trouble" — the same
-# pair ``rescue.AT_RISK_STATES`` highlights.
-AT_RISK_STATES = ("tested", "critical")
-
-# The two books the panel merges, and the chip each one's rows wear. Separate
-# ledgers with separate P&Ls, so a row that did not say which it came from would
-# be unactionable. (A third, the autonomous driver's CLAUDE book, was removed
-# 2026-09-22.)
-PAPER_SOURCE, CAPTURED_SOURCE = "PAPER", "CAPTURED"
-
-# What each book's payload looks like, as DATA rather than as three near-copies
-# of the same loop. The three differ in more than their chip word, and every one
-# of those differences is a place a shared loop would quietly paper over:
-#
-#   list_key   captured publishes ``signals``, not ``positions``. A hardcoded
-#              "positions" would simply find nothing and the book would vanish
-#              from the panel with no error anywhere.
-#   id_key     ``signal_id`` vs ``position_id``.
-#   rescue     whether the manage cycle's rescue overlay tags this book at all.
-#              It tags the paper ACCOUNT only (see the comment in
-#              ``pages/options/captured.py``), so captured rows carry no
-#              ``rescue_state`` and no ``heat`` — see ``UNTAGGED_FLAG``.
-#   held       whether these are trades somebody is actually IN. Captured
-#              signals are ADVISORY: the scanner found them, nobody bought them.
-#              That drives two things — there is no quantity to print (rendering
-#              1 would state a size this app does not have, and would look
-#              exactly like a real one-contract position), and a held trade
-#              outranks an advisory one under the cap (see ``_URGENCY_RANK``).
-BOOKS = (
-    {"source": PAPER_SOURCE, "list_key": "positions", "id_key": "position_id",
-     "rescue": True, "held": True},
-    {"source": CAPTURED_SOURCE, "list_key": "signals", "id_key": "signal_id",
-     "rescue": False, "held": False},
-)
-
-# Where a row's own page lives. Click-through is the whole reason the Desk may
-# stay this terse: every row is one click from the page that can act on it, and
-# a book with no route would strand its rows here.
-#
-# ⚠ These are the PRIVATE app's routes, and every route on this page is: a page
-# names the address it has always known and asks ``shell.route_for`` where that
-# lives in this process. The public origin publishes NEITHER — the paper ledger
-# and the captured tape are the owner's positions — so there the rows draw
-# without a click and without the pointer.
-POSITION_ROUTES = {PAPER_SOURCE: "/options/paper",
-                   CAPTURED_SOURCE: "/options/captured"}
-
-# The other four click-through targets, named for the same reason: the string
-# is a route the shell resolves, not a URL this page emits.
+# The click-through targets, named because each string is a route the shell
+# resolves (``shell.route_for``), not a URL this page emits. They are the
+# PRIVATE app's routes; the public origin serves some of them somewhere else.
 SENTIMENT_ROUTE = "/sentiment"
 MATRIX_ROUTE = "/options/matrix"
 FLOW_ROUTE = "/options/flow"
@@ -534,40 +491,6 @@ FLOW_ROUTE = "/options/flow"
 # treated as open, matching ``paper_adjust``'s own default. The captured-signals
 # store uses the same two words, so both books share one rule.
 _CLOSED_STATUSES = ("CLOSED", "EXPIRED")
-
-# How many rows the panel actually draws — see ``POSITION_ROWS_N``. The pure
-# builder returns the WHOLE book; slicing is the render layer's business,
-# because ``positions_summary`` has to total what is not on screen too.
-POSITION_ROWS_N = 8
-
-# The sort, in three keys. All three exist because the panel draws eight rows
-# out of a book that ran to thirty-five the day this was measured, so the ORDER
-# is what decides whether the cap is safe or is a defect.
-#
-# 1. URGENCY. At-risk states first, so the cap can never hide a trade in trouble
-#    behind a healthy one. An unsorted list would push every RESCUE row off the
-#    bottom the moment the captured book grew.
-_URGENCY_RANK = {"critical": 0, "tested": 1}
-_CALM = 2                       # everything else, including an untagged book
-
-# 2. HELD BEFORE ADVISORY. Measured live before this key existed: 30 captured
-#    signals at 2 DTE against 3 paper positions at 9 DTE meant every visible row
-#    was a captured signal, and a panel titled POSITIONS showed no positions at
-#    all. Money at risk outranks a suggestion nobody acted on. This sits BELOW
-#    urgency, never above it — a tested paper spread still leads the panel —
-#    and it only ever reorders the calm tier, since the
-#    advisory book carries no rescue state to be urgent with.
-_HELD_FIRST, _ADVISORY_LAST = 0, 1
-
-# 3. NEAREST EXPIRY, not largest absolute unrealized P&L. Size is not urgency: a
-#    $500 loser at 45 DTE has weeks to mean-revert, while a spread at 2 DTE has
-#    to be decided today — gamma and assignment risk both accelerate into
-#    expiry, and expiry is the one clock nobody can stop. Ranking on |unrealized|
-#    would also mix winners and losers into one order, so the biggest WINNER on
-#    the book would displace a small loser about to expire. A row whose
-#    expiration will not parse sorts LAST rather than first: an unreadable date
-#    is not evidence of urgency.
-_NO_DTE = 10 ** 6
 
 
 def position_flag(rescue_state, rescue_tagged=True):
@@ -609,43 +532,11 @@ def new_ids(rows, seen, key="id"):
 def id_set(rows, key="id"):
     """The ids present in ``rows`` — what ``seen`` is replaced with each paint.
 
-    REPLACED, not unioned: the flow list is day-scoped and rolling, and a
-    position that closes and reopens really is a new position. An ever-growing
-    set would also never shrink on a page left open for days.
+    REPLACED, not unioned: the flow list is day-scoped and rolling, and an
+    ever-growing set would never shrink on a page left open for days.
     """
     ids = (r.get(key) for r in rows or () if isinstance(r, dict))
     return {rid for rid in ids if rid is not None}
-
-
-def flag_map(rows):
-    """``{position_id: flag}`` — the previous-state map ``flag_changes`` reads.
-
-    The id field is hardcoded where ``new_ids``/``id_set`` take a ``key=``, and
-    that is the intended asymmetry: those two run over the flow feed as well,
-    which keys on ``id``, while a FLAG is a positions-only idea and there is no
-    second caller for this pair to generalise for.
-    """
-    return {r["position_id"]: r.get("flag") for r in rows or ()
-            if isinstance(r, dict) and r.get("position_id") is not None}
-
-
-def flag_changes(rows, prev):
-    """Position ids whose ``flag`` moved since ``prev``.
-
-    A FIRST SIGHTING is deliberately not a change — it is an arrival, and
-    ``new_ids`` already glows it. Counting it in both places would give a new
-    row two overlapping glows.
-    """
-    out = []
-    for r in rows or ():
-        if not isinstance(r, dict):
-            continue
-        rid = r.get("position_id")
-        if rid is None or rid not in prev:
-            continue
-        if r.get("flag") != prev[rid]:
-            out.append(rid)
-    return out
 
 
 def _is_open(p):
@@ -665,90 +556,6 @@ def strikes_text(p):
         if sk is not None:
             return f"{_fmt.strike_text(sk)}/{_fmt.strike_text(lk)}"
     return "—"
-
-
-def position_rows(paper_view, captured_view=None):
-    """Open rows from BOTH books, each tagged with its source, most actionable
-    first.
-
-    Reads the paper *account* view, not the paper ledger: the
-    ledger carries no live mark, so an unrealized P&L taken from it would be
-    entry-time arithmetic wearing a live label. Captured signals are the second
-    book — advisory rather than held, which is why they carry neither a size nor
-    a rescue verdict (see ``BOOKS``).
-
-    Returns the WHOLE merged book. The panel caps what it draws at
-    ``POSITION_ROWS_N``, but the cap must never reach the summary — unrealized
-    P&L and the at-risk count are book-level facts, and computing either off a
-    visible slice would understate both.
-    """
-    out = []
-    for view, book in zip((paper_view, captured_view), BOOKS):
-        entries = ((view or {}).get(book["list_key"])
-                   if isinstance(view, dict) else None)
-        if not isinstance(entries, list):
-            continue
-        for p in entries:
-            if not isinstance(p, dict) or not _is_open(p):
-                continue
-            out.append({
-                "source": book["source"],
-                "position_id": p.get(book["id_key"]),
-                "symbol": p.get("symbol", ""),
-                "strategy": p.get("strategy", ""),
-                "short_strike": _finite(p.get("short_strike")),
-                "long_strike": _finite(p.get("long_strike")),
-                "strikes": strikes_text(p),
-                "width": _finite(p.get("width")),
-                "expiration": p.get("expiration", ""),
-                # The paper page's own helper — one calendar for the whole app.
-                # Deliberately NOT captured's stored ``dte_at_entry``, which is
-                # the countdown as it stood on the day the signal was found and
-                # would print a stale, too-large number for every row here.
-                "dte": _paper._dte_from_expiration(p.get("expiration")),
-                # An unheld book prints an em-dash, never a 1 — see ``BOOKS``.
-                "quantity": (_finite(p.get("quantity")) if book["held"]
-                             else None),
-                "held": book["held"],
-                "entry_credit": _finite(p.get("entry_credit")),
-                "current_value": _finite(p.get("current_value")),
-                "unrealized_pnl": _finite(p.get("unrealized_pnl")),
-                "rescue_state": p.get("rescue_state") if book["rescue"] else None,
-                "heat": _finite(p.get("heat")) if book["rescue"] else None,
-                "flag": position_flag(p.get("rescue_state"),
-                                      rescue_tagged=book["rescue"]),
-            })
-    # Stable, so rows level on all three keys keep the book order they merged in.
-    out.sort(key=lambda r: (_URGENCY_RANK.get(r["rescue_state"], _CALM),
-                            _HELD_FIRST if r["held"] else _ADVISORY_LAST,
-                            _NO_DTE if r["dte"] is None else r["dte"]))
-    return out
-
-
-def positions_summary(rows):
-    """``{"open": n, "unrealized": float, "at_risk": n}`` over ``position_rows``.
-
-    ⚠ Hand this the FULL merged book, never the slice the panel draws. Both
-    numbers it produces are book-level facts, and ``at_risk`` in particular is
-    the one figure on this panel somebody acts on — computing it off eight
-    visible rows out of thirty-six would report zero trades in trouble while
-    trades were in trouble.
-
-    ``at_risk`` counts TESTED + CRITICAL only. A non-finite P&L is skipped rather
-    than summed — ``float('nan') + x`` is NaN, so one bad mark would erase the
-    whole book's total and print it as a dash.
-    """
-    rows = [r for r in (rows or []) if isinstance(r, dict)]
-    total = 0.0
-    for r in rows:
-        pnl = _finite(r.get("unrealized_pnl"))
-        if pnl is not None:
-            total += pnl
-    return {
-        "open": len(rows),
-        "unrealized": round(total, 2),
-        "at_risk": sum(1 for r in rows if r.get("rescue_state") in AT_RISK_STATES),
-    }
 
 
 # ── the Bull / Bear sector strip ─────────────────────────────────────────────
@@ -1427,11 +1234,10 @@ def expiry_text(row):
     """'2026-08-28 · 10d' — the expiration and how long is left of it.
 
     ONE cell, not two columns, because these are not two fields: the DTE is
-    computed FROM the expiration (see ``position_rows``), so a column each would
-    be the row spending width to say the same thing twice. The date is the
-    contract's identity and the countdown is its urgency, which is why both are
-    worth printing — and why the countdown, being the reading that decides
-    anything, is also the panel's sort key.
+    computed FROM the expiration, so a column each would be the row spending
+    width to say the same thing twice. The date is the contract's identity and
+    the countdown is its urgency, which is why both are worth printing. The
+    Symbol Dossier's position band is the caller.
 
     A row missing either half prints the half it has rather than a dangling
     separator, in the same shape ``flow_kind_text`` uses."""
@@ -1441,27 +1247,6 @@ def expiry_text(row):
     if not date:
         return left
     return f"{date} · {left}" if left != _DASH else date
-
-
-def summary_line(summary, shown=None):
-    """The Positions header: 'OPEN 4 · UNREALIZED $90.00 · AT RISK 2'.
-
-    ``shown`` adds a 'SHOWING n' clause when the panel is drawing fewer rows
-    than the book holds. A positions panel that silently truncates is dangerous
-    — the reader has no way to tell "three open trades" from "three of
-    thirty-six" — so the count of what is hidden rides on the one line that is
-    always visible. It is omitted when nothing is hidden, because a permanent
-    'SHOWING 3' on a three-row book would be noise that trained the eye to skip
-    the clause on the day it mattered.
-    """
-    s = summary or {}
-    total = s.get("open", 0)
-    parts = [f"OPEN {total}"]
-    if shown is not None and shown < total:
-        parts.append(f"SHOWING {shown}")
-    parts.append(f"UNREALIZED {fmt_money(s.get('unrealized'))}")
-    parts.append(f"AT RISK {s.get('at_risk', 0)}")
-    return " · ".join(parts)
 
 
 # --- chips ------------------------------------------------------------------
@@ -1489,8 +1274,7 @@ def _chip(hexv, fill=0.12, weight="", wrap=False, track=".16em",
     single unbreakable word ("RESCUE" in the narrow FLAG track) folds instead of running
     past the border it sits in.
 
-    ``track``/``pad`` exist for the two NARROW tracks the reference gives us —
-    BOOK and FLAG, the two tightest columns on the Positions panel. A chip is
+    ``track``/``pad`` exist for a chip standing in a NARROW track. A chip is
     sized by its letter-spacing far more than by its font size, so tightening
     the tracking is what buys the fit; shrinking the text back down would make
     it unreadable instead, which is the problem this page was just fixing.
@@ -1501,9 +1285,8 @@ def _chip(hexv, fill=0.12, weight="", wrap=False, track=".16em",
             f"border border-[{hexv}] {bg} text-[{hexv}] {weight}").strip()
 
 
-# The book and flag chips live in the panel's two tightest tracks, so they take the
-# compact tracking and padding; they also wrap, because "AT RISK" is two words
-# and "RESCUE" is one long one.
+# The reading chips take the compact tracking and padding; they also wrap,
+# because "AT RISK" is two words and "RESCUE" is one long one.
 _TIGHT = {"track": ".1em", "pad": "px-[5px]", "wrap": True}
 
 CHIP_POS = _chip(_C["positive"], **_TIGHT)
@@ -1516,15 +1299,12 @@ CHIP_ACCENT = _chip(_C["accent"], **_TIGHT)
 # with the rest of its ladder on 2026-09-19 — a neutral is surface
 # wherever it lives (the db39442 rule). The four chromatic chips above are
 # readings and keep their console hues. The two app steps stay distinct,
-# which the source chip below depends on.
+# which ``READ_CHIPS`` depends on.
 CHIP_MUTED = _chip(_P["muted"], **_TIGHT)
-# The third book's chip, on the palette's dimmest readable step. Deliberately
-# the QUIETEST of the three rather than a third loud hue: captured signals are
-# advisory, they usually outnumber the two real books several times over, and a
-# bright chip repeated eight times down the panel would make the advisory book
-# look like the important one. It stays distinct from ``CHIP_MUTED``, which is
-# what an UNKNOWN source falls back to — those two must not collide, or a
-# malformed row would render as a captured signal.
+# A NEUTRAL reading's chip (the Market read's "Neutral"), on the palette's
+# dimmest readable step. It stays distinct from ``CHIP_MUTED``, which is what
+# an ABSENT reading wears — those two must not collide, or "no reading" would
+# render as a neutral one.
 CHIP_LABEL = _chip(_P["icon"], **_TIGHT)
 
 # The board's setup tag. The tight tracking and padding of ``_TIGHT`` — it sits
@@ -1551,11 +1331,6 @@ _REGIME_CHIP = {"LONG GAMMA · PINS": _chip(_C["positive"], wrap=True, fill=None
 _FLAG_CHIP = {"OK": CHIP_POS, "WATCH": CHIP_WARN, "AT RISK": CHIP_NEG,
               "RESCUE": CHIP_NEG_STRONG}
 
-# The book a row came from. Two books, two P&Ls — the chip is what makes a
-# merged row actionable, and it is also what says whether the row is a HELD
-# trade or an advisory signal.
-_SOURCE_CHIP = {PAPER_SOURCE: CHIP_ACCENT, CAPTURED_SOURCE: CHIP_LABEL}
-
 # iv_state ∈ {spiking, collapsing, stable, na} (services/options_svc/matrix.py).
 # Deliberately NOT green/red: rising IV is neither good nor bad on its own — it
 # is good for a buyer and bad for a seller, and this page knows neither.
@@ -1574,10 +1349,6 @@ def regime_chip_class(word):
 
 def flag_chip_class(flag):
     return _FLAG_CHIP.get(flag, CHIP_MUTED)
-
-
-def source_chip_class(source):
-    return _SOURCE_CHIP.get(source, CHIP_MUTED)
 
 
 def iv_state_class(state):
@@ -1998,16 +1769,15 @@ def paint_report(popup, view):
 # ── the page ─────────────────────────────────────────────────────────────────
 # Every cache view the Desk reads, in ONE tuple, because they are polled as one
 # batch. This page is the landing page and stays open all day, so a per-view
-# poller would be thirteen Redis round-trips every two seconds for the life of the
-# session; ``read_versions`` reads the thirteen tiny ``{key}:ver`` counters in a
+# poller would be eleven Redis round-trips every two seconds for the life of the
+# session; ``read_versions`` reads the eleven tiny ``{key}:ver`` counters in a
 # single pipelined round-trip and only the views that MOVED get deserialized.
 # ⚠ A new view belongs HERE, joining the existing batch — never in a poller or
 # a timer of its own.
 VIEWS = ("sentiment:regime", "sentiment:composite",
          "sentiment:history", "options:gex_status", "options:matrix",
-         "options:flow_alerts", "options:flow_sides", "options:paper_account",
-         "options:captured", "sentiment:bullbear", "market:summary", NEWS_VIEW,
-         READ_VIEW)
+         "options:flow_alerts", "options:flow_sides", "sentiment:bullbear",
+         "market:summary", NEWS_VIEW, READ_VIEW)
 
 # Which views each region depends on. A repaint touches only the regions whose
 # inputs actually changed — without this, one 2 s header bump would rebuild all
@@ -2025,8 +1795,7 @@ _REGION_VIEWS = {
     # The alert list moves when an alert fires; the bought/sold estimate for
     # the contracts already listed moves every minute.
     "flow": ("options:flow_alerts", "options:flow_sides"),
-    "positions": ("options:paper_account", "options:captured"),
-    # The headlines strip - one view. On the public origin the KEY read is
+    # The headlines panel - one view. On the public origin the KEY read is
     # ``news:feed_public`` (see ``bus_key``); the view's name here is the same.
     "news": (NEWS_VIEW,),
     # The market read - one view, replaced on a clock slot by market_svc.
@@ -2077,11 +1846,11 @@ REF_TXT_SOFT = "text-[#cfdae8]"        # the gamma flip level
 REF_HEAD_TXT = _DIM
 
 # ── the 10-second neon glow ──────────────────────────────────────────────────
-# ⚠ THE NON-OBVIOUS PART. ``_paint_positions`` calls ``pos_body.clear()`` and
-# rebuilds every row, and it runs whenever the paper account re-prices — which
-# is constant during market hours. A REBUILT ELEMENT RESTARTS ITS CSS ANIMATION
-# FROM ZERO, so the naive implementation glows forever: every repaint resets the
-# decay and the row never goes dark.
+# ⚠ THE NON-OBVIOUS PART. ``_paint_flow`` calls ``flow_body.clear()`` and
+# rebuilds every row, and it runs whenever the bought/sold estimate moves —
+# which is every minute during market hours. A REBUILT ELEMENT RESTARTS ITS CSS
+# ANIMATION FROM ZERO, so the naive implementation restarts the glow on every
+# repaint inside its ten seconds and the decay is never seen to finish.
 #
 # The fix is a whole-second NEGATIVE ``animation-delay``, which starts an
 # animation partway through. The glow's START TIME lives in page state keyed by
@@ -2094,12 +1863,11 @@ REF_HEAD_TXT = _DIM
 GLOW_SEC = 10.0
 GLOW_STEPS = 10
 
-# The two things worth glowing about, and nothing else. NEW is the cyan the
-# structure map already uses for spot; FLAG is the amber it uses for the flip —
-# both already mean "look here" on this page.
+# The one thing worth glowing about: an ARRIVAL. NEW is the cyan the structure
+# map already uses for spot, which already means "look here" on this page. The
+# kinds stay a set so ``glow_classes`` can refuse one it has no rule for.
 GLOW_NEW = "new"
-GLOW_FLAG = "flag"
-GLOW_KINDS = (GLOW_NEW, GLOW_FLAG)
+GLOW_KINDS = (GLOW_NEW,)
 
 
 def glow_step(started, now, span=GLOW_SEC, steps=GLOW_STEPS):
@@ -2194,12 +1962,11 @@ def arrival_state():
     announce the day's alert backlog or light every row — and a hand-rolled copy
     in a test could not catch it being dropped.
 
-    ``seen_flow``/``seen_pos`` are REPLACED each paint (see ``id_set``);
+    ``seen_flow`` is REPLACED each paint (see ``id_set``);
     ``glow`` maps a row id to its ``(kind, started_monotonic)``; ``speak`` is
     the queue ``_paint`` fills and the poll drains.
     """
-    return {"seen_flow": set(), "seen_pos": set(), "pos_flags": {},
-            "seen_board": set(), "board_left": {},
+    return {"seen_flow": set(), "seen_board": set(), "board_left": {},
             "glow": {}, "first": True, "speak": []}
 
 
@@ -2250,37 +2017,6 @@ def fold_flow_arrivals(state, rows, now):
                       len(speakable) - 1)
 
 
-def fold_position_arrivals(state, rows, now):
-    """The same, across both books — plus the SILENT flag-change glow.
-
-    A flag moving (OK -> AT RISK -> RESCUE) glows amber but never speaks: a
-    position already in the book changing state is not something that was absent
-    a moment ago, and the panel's own FLAG column already prints the new word.
-    ``setdefault`` is what keeps an arrival cyan — ``flag_changes`` declines a
-    first sighting, and this is the other half of that.
-    """
-    ids = new_ids(rows, state["seen_pos"], key="position_id")
-    moved = flag_changes(rows, state["pos_flags"])
-    state["seen_pos"] = id_set(rows, key="position_id")
-    state["pos_flags"] = flag_map(rows)
-    if state["first"]:
-        return None
-    for rid in ids:
-        state["glow"][rid] = (GLOW_NEW, now)
-    for rid in moved:
-        state["glow"].setdefault(rid, (GLOW_FLAG, now))
-    if not ids:
-        return None
-    # NOT "newest". ``fold_flow_arrivals`` names ``ids[0]`` the newest and is
-    # entitled to: its feed arrives newest-first. ``position_rows`` sorts by
-    # URGENCY, so ``ids[0]`` here is the most urgent of the new arrivals, which
-    # happens to be the better one to name out loud — but the variable must not
-    # assert an ordering the source does not have.
-    most_urgent = next((r for r in rows if isinstance(r, dict)
-                        and r.get("position_id") == ids[0]), None)
-    return _utterance(most_urgent, _voice.position_phrase, len(ids) - 1)
-
-
 # How long a symbol that dropped OFF the Opportunity Board stays quiet if it
 # climbs back on. The board is a ranking cut at ``BOARD_ROWS_N``, so two names
 # trading places at sixth would otherwise announce themselves on every matrix
@@ -2294,7 +2030,7 @@ BOARD_REENTRY_QUIET_SEC = 30 * 60
 def board_glow_key(symbol):
     """The glow-map key for a board row.
 
-    Namespaced because the map is SHARED with the flow and position rows, and a
+    Namespaced because the map is SHARED with the flow rows, and a
     board row's only identity is its ticker — a bare symbol could in principle
     collide with another panel's row id and light the wrong row.
     """
@@ -2345,12 +2081,11 @@ def fold_board_arrivals(state, rows, now):
 # Which ``app_settings`` key lets each Desk section speak. They sit UNDER
 # ``voice_enabled`` (``should_speak``): a section switch can only narrow what
 # the master switch already allows.
-VOICE_SECTIONS = {"board": "voice_board", "flow": "voice_flow",
-                  "positions": "voice_positions"}
+VOICE_SECTIONS = {"board": "voice_board", "flow": "voice_flow"}
 
 # The order one paint's sentences are queued in. Flow first: it is the one
 # that goes stale fastest.
-SPEAK_ORDER = ("flow", "positions", "board")
+SPEAK_ORDER = ("flow", "board")
 
 
 def section_speaks(settings, section):
@@ -2441,7 +2176,7 @@ async def speak_phrases(phrases, settings, synth, now=None):
     them had none — removing ``if not should_speak(...): return`` left the whole
     suite green, so the market-hours promise the Settings card makes was
     unguarded. This is the same extraction, and for the same reason, that
-    ``fold_flow_arrivals``/``fold_position_arrivals`` already got.
+    ``fold_flow_arrivals``/``fold_board_arrivals`` already got.
 
     ``synth`` is an async ``text -> url or None``; the caller owns the off-loop
     hop and the per-call timeout budget. Returning the JS rather than running it
@@ -2707,7 +2442,6 @@ DESK_NEON_CSS = f"""
               animation-timing-function: linear;
               border-radius: 3px; }}
 .desk-neon-{GLOW_NEW} {{ --neon: {SPOT_HEX}; }}
-.desk-neon-{GLOW_FLAG} {{ --neon: {FLIP_HEX}; }}
 {_NEON_STEPS_CSS}
 """
 
@@ -2740,7 +2474,7 @@ _HEAD_RULE = f"border-[{_P['btn_border']}]"    # the brighter rule under the lab
 # head tuple and the row painter, or the labels silently slide one cell across
 # and every number on the panel starts reading as the wrong quantity.
 #
-# The widest panel (Positions) is what sets the page's MINIMUM SUPPORTED WIDTH
+# The widest panel (the Board) is what sets the page's MINIMUM SUPPORTED WIDTH
 # — see the panel wrapper in ``render``, which does that arithmetic from the
 # minmax floors below, and ``PANEL_BUDGET_PX`` for the budget they spend.
 # Every qualifier rides as a SECOND LINE inside its owner's cell rather than
@@ -2834,8 +2568,8 @@ PANEL_BUDGET_PX = (DESK_WINDOW_PX - DESK_SCROLLBAR_PX - DESK_CHROME_PX
 # is only meaningful relative to the text standing in it. But the page is read
 # at 1920px, which is the width the reference was authored for in the first
 # place, and at 1920 the scaled-up floors oversubscribed the budget above by
-# 174px on Positions, 100px on the Board and 44px on Dealer Positioning: three
-# of four panels clipped their rows. So the whole scaling was unwound — type and
+# 100px on the Board and 44px on Dealer Positioning: both clipped their rows
+# (as did the Positions panel the page then had). So the whole scaling was unwound — type and
 # floors together, at 0.8x, which lands both back within a rounding step of the
 # reference. The `fr` WEIGHTS are untouched throughout: the proportions were
 # always right, only the absolute floor moved.
@@ -2882,10 +2616,9 @@ DEALER_GRID = ("grid grid-cols-[78px_minmax(77px,1fr)_minmax(82px,1fr)_"
 # NET PREMIUM's track is 88px, not the 66px its VALUE wants, for the same
 # reason: the label binds. It was "NET PREM" at 64px until the casual
 # shortening was spelled out, and the +22px is the whole price of that word.
-# Board's floor sum goes 783 -> 805, still inside the 860px a panel gets and
-# still under Positions' 839, which is the panel that sets the page's minimum
-# window — so this widening is affordable where the same move on STRAT or QTY
-# would not be.
+# Board's floor sum goes 783 -> 805, still inside the 860px a panel gets. The
+# Board is the widest panel, so 805 is also the figure that sets the page's
+# minimum window: a track widened here moves it.
 BOARD_GRID = ("grid grid-cols-[52px_minmax(77px,1fr)_minmax(200px,5fr)_"
               "minmax(116px,1.2fr)_minmax(88px,1fr)_minmax(37px,0.8fr)_"
               f"minmax(60px,1fr)_minmax(77px,1fr)] {_GAP} w-full")
@@ -2895,69 +2628,21 @@ BOARD_GRID = ("grid grid-cols-[52px_minmax(77px,1fr)_minmax(200px,5fr)_"
 # the other three are a clock time, a ticker, and a two-word kind.
 FLOW_GRID = ("grid grid-cols-[54px_minmax(70px,1fr)_minmax(192px,4fr)_"
              f"minmax(126px,2fr)] {_GAP} w-full")
-# Ten tracks now, not nine: the position rows went flat like the board's and the
-# flow's, so STRATEGY takes a column of its own instead of riding under the
-# symbol, and the expiry rides WITH the DTE it is the source of rather than
-# under the strikes (see ``expiry_text``). Net, the panel spends one more track
-# and gets back a whole line of height per row — which is what pays for a third
-# book on the same panel.
-#
-# Every floor is a worst-case string against the RENDERED font, not an assumed
-# advance. That distinction earned its keep: a first pass sized three of these
-# tracks from arithmetic, they came out 7-17px short, and the shortfall was
-# invisible because none of the strings that overflow them was on screen the day
-# it was measured. The widths below are quoted at the current ladder (14px
-# symbol / 13px value / 11px secondary / 10px label / 9px chip); JetBrains Mono
-# advances 0.6em, so a size change moves every one of them proportionally.
-#
-#   BOOK   64px  "CAPTURED" is the widest chip on the page. The chips
-#                ``break-words`` as a backstop, and this floor is what stops
-#                that backstop ever firing: a folded chip would be the one
-#                two-line cell in a panel of one-line rows.
-#   SYMBOL  53px "GOOGL" at 14px bold on .08em tracking — 47.6px.
-#   STRAT   42px the head label "STRAT" binds, not the value: the services emit
-#                two- and three-letter codes (PCS / CCS / IC).
-#   EXPIRY 144px ⚠ "2026-08-28 · 0DTE" is 132.6px, NOT the shorter "· 10d"
-#                shape that happened to be on screen. Every credit spread
-#                reaches 0DTE on its expiration day, and "· 365d" is the same
-#                width — so the common case is narrower than the case that
-#                matters. Sizing on what was visible would have clipped this
-#                column on exactly the morning it was being read hardest.
-#   ENTRY,
-#   MARK    53px "$12.45" at 13px, 46.8px.
-#   STRIKES 126px "24000.0/23950.0" — an index strike pair, 117px. An equity
-#                pair ("1200.0/1195.0") is not the worst case.
-#   QTY     36px "125" at 13px is 23.4px; the label is the binding half.
-#   UNREAL  94px "-$12,345.00" is 85.8px. A max_loss_total can run to four
-#                figures, so five-figure P&L is a real row, not a
-#                hypothetical one.
-#   FLAG    60px "AT RISK" at chip metrics — the same no-fold rule as BOOK.
-#
-# The fr WEIGHTS are set so no track sits ON its floor at the width this page is
-# read at, which is what stops a single character of drift becoming a clipped
-# cell. This is the panel that spends the budget hardest: its ten floors plus
-# nine gaps plus ``PANEL_PAD_PX`` are what decide the page's minimum supported
-# window, so a track widened here is a track that has to come from somewhere.
-POS_GRID = ("grid grid-cols-[64px_minmax(53px,0.8fr)_minmax(42px,0.6fr)_"
-            "minmax(144px,2fr)_minmax(53px,0.8fr)_minmax(53px,0.8fr)_"
-            "minmax(126px,1.8fr)_minmax(36px,0.5fr)_minmax(94px,1.3fr)_"
-            f"minmax(60px,0.8fr)] {_GAP} w-full")
 
 # ── which leading cells of a row are its IDENTITY ────────────────────────────
 # A panel handed less width than its floors add up to scrolls ITSELF rather
 # than handing the scroll to the document (``shell.PANEL_SCROLL_CSS``). That
-# stylesheet pins the row's ``:first-child`` — and on THREE of the four grids
+# stylesheet pins the row's ``:first-child`` — and on TWO of the three grids
 # above, the first cell is not what names the row: the Board leads with SCORE,
-# the flow feed with TIME, Positions with the BOOK badge. Pinning those alone
-# would hold a rank, a clock time or a badge still while the symbol slid away
+# the flow feed with TIME. Pinning those alone
+# would hold a rank or a clock time still while the symbol slid away
 # underneath, which is WORSE than pinning nothing, because it looks deliberate.
 #
 # So each panel says how deep its identity runs, and the answer everywhere is
 # "through the symbol, and not one track further": every pinned pixel is width
 # the reader can no longer scroll out of the way. The cost is modest — 137px on
-# the Board (SCORE + gap + SYMBOL), 132px on Flow, 125px on Positions, against
-# against the 508-839px those four panels need — and it is only ever spent
-# while a panel is too narrow
+# the Board (SCORE + gap + SYMBOL) and 132px on Flow, against the 508-805px
+# those panels need — and it is only ever spent while a panel is too narrow
 # to show everything at once, which is the only case this exists for.
 #
 # ⚠ REORDERING a panel's columns is a change HERE too. The depth is a count of
@@ -2967,11 +2652,12 @@ POS_GRID = ("grid grid-cols-[64px_minmax(53px,0.8fr)_minmax(42px,0.6fr)_"
 # own head tuple, which is the only place the order is written down.
 #
 # ⚠ Keyed by the GRID STRING, because that is all the shared row helpers are
-# handed: ``_grid_head`` and all four row painters take the grid and nothing
-# else, so keying on anything they do not already hold would mean four copies
+# handed: ``_grid_head`` and the three row painters take the grid and nothing
+# else, so keying on anything they do not already hold would mean three copies
 # of the row builder. A grid with no entry RAISES rather than falling back to
-# the stylesheet's one-cell pin — see ``_pin_depth``.
-_PIN_DEPTHS = {DEALER_GRID: 1, BOARD_GRID: 2, FLOW_GRID: 2, POS_GRID: 2}
+# the stylesheet's one-cell pin — see ``_pin_depth``. (Headlines has no grid
+# and no entry: its rows are one flex line and never scroll sideways.)
+_PIN_DEPTHS = {DEALER_GRID: 1, BOARD_GRID: 2, FLOW_GRID: 2}
 
 
 def _pin_depth(grid):
@@ -3000,9 +2686,9 @@ _ROW_SHELLS = {
 # is exactly as wide as its floor and the pinned pair stays flush at any width.
 #
 # Resolved ONCE at import, which is what makes these Tailwind arbitrary values
-# rather than the data-driven-colour case the house rule bans: there are four
-# panels, the numbers are fixed by the grid strings above, and nothing here is
-# computed per render. The alternative — four static rules in
+# rather than the data-driven-colour case the house rule bans: there are three
+# gridded panels, the numbers are fixed by the grid strings above, and nothing
+# here is computed per render. The alternative — static rules in
 # ``shell.PANEL_SCROLL_CSS`` — was rejected because that file cannot see a
 # ``minmax()`` floor, so the first widened track would leave the pinned symbol
 # overlapping the cell beside it with nothing failing anywhere.
@@ -3062,12 +2748,12 @@ def _pin_cell_class(grid, index):
 # that the size difference between them is smaller — and it is also why three
 # track floors are label-bound rather than value-bound (see ``DEALER_GRID``).
 _HEAD = f"text-[10px] tracking-[.2em] {REF_HEAD_TXT}"
-# Split because ONE panel's rows are not always clickable: the three position
-# books are deliberately unpublished, so on the public origin those rows have
-# nowhere to go and must not be dressed as links (see ``_position_row``).
+# Split because not every row is a click-through: a headline row's own
+# headline is the link, so the row must not be dressed as a second one (see
+# ``_news_row``), and the Market read's rows open nothing.
 _ROW_STATIC = f"items-center px-1 py-[11px] border-b {_ROW_RULE}"
 _ROW = f"{_ROW_STATIC} cursor-pointer"
-# The headlines strip's one way on to /news - the app's link colour, as the
+# The headlines panel's one way on to /news - the app's link colour, as the
 # Symbol Dossier's band links wear it.
 _NEWS_MORE = (f"text-[12px] tracking-[.06em] cursor-pointer pt-2 self-start "
               f"text-[{_P['focus']}] hover:underline")
@@ -3076,9 +2762,9 @@ _VALUE = f"text-[13px] tabular-nums {LABEL}"
 _V_SPOT = f"text-[14px] tabular-nums {REF_TXT}"
 _V_FLIP = f"text-[14px] tabular-nums {REF_TXT_SOFT}"
 _SUB = "text-[10px] tabular-nums"          # a cell's second line
-# A panel-level SENTENCE that shares the body with the grids — there are
-# exactly two (the dealer's stale-walls warning and the Positions summary), and
-# both state a fact about the whole panel rather than about a column. The body
+# A panel-level SENTENCE that shares the body with a grid — today there is
+# one, the dealer's stale-walls warning, and it states a fact about the whole
+# panel rather than about a column. The body
 # is a scroll container (see ``_panel``), and a full-width label inside one
 # carries its own first words off the left edge the moment the rows are
 # scrolled, so they pin instead. It costs nothing at rest: a sticky element in
@@ -3099,7 +2785,7 @@ _PANEL_NOTE = "sticky left-0"
 # wrong.
 WAITING_OPTIONS = _copy.WAITING_OPTIONS
 
-# The four "the feed is fine and has nothing to say" lines, and the one warning
+# The "the feed is fine and has nothing to say" lines, and the one warning
 # that qualifies a reading rather than replacing it.
 #
 # Constants for the same reason as ``PANEL_HEADS``: these were written out at
@@ -3112,8 +2798,7 @@ EMPTY_DEALER = ("No dealer positioning yet — these levels appear once the "
                 "gamma feed publishes.")
 EMPTY_BOARD = "Nothing ranked yet — the board fills once the scanner runs."
 EMPTY_FLOW = "Nothing unusual has traded yet today."
-EMPTY_POSITIONS = "Nothing open — no paper trades running."
-# The headlines strip's pair: a cold news feed (the ONE shared sentence) and a
+# The headlines panel's pair: a cold news feed (the ONE shared sentence) and a
 # live one that has nothing in it.
 WAITING_NEWS = _copy.WAITING_NEWS
 EMPTY_NEWS = "No headlines published yet today."
@@ -3413,11 +3098,10 @@ def _compact_card(title, arcs, pill_text, delta, pill_tip=""):
 # ``/desk`` entry, one hover away — which is the wrong side of a tooltip for the
 # landing page.
 #
-# Two facts that used to stand here are gone, and one survived. ``$SPX · SPY ·
-# $NDX · QQQ`` and ``PAPER · CAPTURED`` are literally the SYMBOL and
-# BOOK columns underneath them, printed row by row. The SORT ORDER is not
-# anywhere else on the panel, so it stays — still interpolated, never written
-# down.
+# One fact that used to stand here is gone, and one survived. ``$SPX · SPY ·
+# $NDX · QQQ`` is literally the SYMBOL column underneath it, printed row by
+# row. The SORT ORDER is not anywhere else on the panel, so it stays — still
+# interpolated, never written down.
 PANEL_HEADS = {
     "dealer": ("Dealer positioning",
                "Above the flip, dealers damp moves; below it they feed them."),
@@ -3438,16 +3122,14 @@ PANEL_HEADS = {
     "flow": ("Flow alerts",
              f"The {FLOW_ROWS_N} newest unusual trades. Which side traded, not "
              f"who initiated; ≈ marks an estimate."),
-    "positions": ("Positions",
-                  "What you are holding, and what needs a decision."),
-    # A headline opens the ORIGINAL article; the strip itself is not a verdict.
+    # A headline opens the ORIGINAL article; the panel itself is not a verdict.
     "news": ("Headlines",
              f"The {NEWS_ROWS_N} newest stories. Each opens the original "
              f"article."),
 }
 
 # One label per grid track, hoisted for the same reason as the heads above: the
-# mirror carries its own copy of all four lists, and a rename that reached one
+# mirror carried its own copy of every list, and a rename that reached one
 # screen and not the other would put two different words on one number.
 #
 # Each label names what the number is FOR. ``test_every_column_label_fits_the_
@@ -3472,14 +3154,6 @@ DEALER_HEADS = ("SYMBOL", "PRICE", "FLIP LEVEL", "PRICE VS WALLS",
 BOARD_HEADS = ("SCORE", "SYMBOL", "WHY IT'S HOT", "ATM IV", "NET PREMIUM",
                "P/C", "SIGNAL", "SETUP")
 FLOW_HEADS = ("TIME", "SYMBOL", "WHAT TRADED", "ALERT TYPE")
-# ⚠ STRAT and QTY are NOT abbreviations left by accident. They are the two
-# tracks whose floor the HEAD LABEL binds (see POS_GRID's notes), and at 8.0px
-# per character "STRATEGY" needs 64px of 42 and "CONTRACTS" 72px of 36.
-# Widening both costs ~58px against the 43px of slack between this page's
-# minimum supported window and the 1920px it is read at — i.e. it would clip
-# the panel on the screen it is read on. Pinned by test.
-POS_HEADS = ("BOOK", "SYMBOL", "STRAT", "EXPIRY", "ENTRY", "MARK",
-             "STRIKES", "QTY", "OPEN P&L", "STATUS")
 
 
 def _panel(title, use_line=""):
@@ -3583,16 +3257,6 @@ def _open_map():
     inside a sector lives one click away, and none of them is on this
     page."""
     _shell.navigate_to(BULLBEAR_ROUTE)
-
-
-@guard
-def _open_position(row):
-    """Each book has its own page; the source chip is what decides which.
-
-    A no-op where this process publishes no such page — the row wires no
-    handler there either, so this is the backstop rather than the gate."""
-    _shell.navigate_to(
-        POSITION_ROUTES.get(row.get("source"), "/options/paper"))
 
 
 def _bullbear_breadth(chip):
@@ -3827,7 +3491,7 @@ def _news_row(row):
     # ⚠ ``row["title"]`` is third-party PLAIN TEXT: ``ui.link`` and
     # ``ui.label`` escape it. Never ``ui.html``.
     #
-    # The row itself is NOT a click-through (unlike the four panels above):
+    # The row itself is NOT a click-through (unlike the three row painters above):
     # its headline already opens the article, and a row click on top of it
     # would fire both. "All headlines" is the way to /news.
     with ui.row().classes(f"w-full gap-3 no-wrap {_ROW_STATIC}"):
@@ -3843,57 +3507,6 @@ def _news_row(row):
         else:
             ui.label(row["title"]).classes(
                 f"text-[13px] min-w-0 truncate {LABEL}")
-
-
-def _position_row(row, glow):
-    # Rebuild-time only, same as the flow row above — never updated in place.
-    #
-    # ⚠ The ONLY panel whose rows are not always a link. Each book's page is
-    # deliberately unpublished, so on the public origin there is nowhere to
-    # send the reader: the row keeps every number it has and loses the
-    # pointer, the hover wash and the handler. A row dressed as a link that
-    # leads nowhere reads as broken, which is worse than reading as static.
-    route = POSITION_ROUTES.get(row.get("source"), "/options/paper")
-    can_open = _shell.can_navigate(route)
-    el = ui.element("div").classes(
-        f"{POS_GRID} {_row_shell(POS_GRID)} "
-        f"{_ROW if can_open else _ROW_STATIC} "
-        + (f"hover:bg-[{_HOVER}]/[0.06] " if can_open else "")
-        + glow)
-    with el:
-        ui.label(row["source"]).classes(
-            f"self-start {source_chip_class(row['source'])}")
-        # ⚠ The BOOK badge is this row's first cell, so the stylesheet pins
-        # THAT — and a pinned PAPER/CAPTURED chip beside ten scrolling
-        # numbers names nothing. The symbol pins with it (``_PIN_DEPTHS``).
-        ui.label(row["symbol"]).classes(
-            f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG} "
-            f"{_pin_cell_class(POS_GRID, 1)}")
-        ui.label(strategy_label(row["strategy"])).classes(
-            f"text-[11px] min-w-0 truncate {MUTED}")
-        _cell(expiry_text(row))
-        # Both are per-share option prices (0.21 / 0.39), not position
-        # dollars — the same numbers the paper ledger quotes.
-        _cell(fmt_money(row["entry_credit"]))
-        _cell(fmt_money(row["current_value"]))
-        _cell(row["strikes"])
-        # An em-dash, never a 1: a captured signal was never sized, and a
-        # printed quantity would be this page inventing a position.
-        _cell(_DASH if row["quantity"] is None else _fmt.plain(row["quantity"]))
-        _cell(fmt_money(row["unrealized_pnl"]),
-              signed_class(row["unrealized_pnl"]))
-        # An untagged book gets the dash BARE, with no chip around it — the
-        # same rule the dealer row follows for an unknown regime. An
-        # outlined box holding an em-dash reads as a broken widget, and a
-        # box in the FLAG column reads as a verdict whatever is inside it.
-        if row["flag"] == UNTAGGED_FLAG:
-            ui.label(UNTAGGED_FLAG).classes(
-                f"self-start text-[11px] {MUTED}")
-        else:
-            ui.label(row["flag"]).classes(
-                f"self-start {flag_chip_class(row['flag'])}")
-    if can_open:
-        el.on("click", lambda _e, r=row: _open_position(r))
 
 
 def render():
@@ -3936,7 +3549,7 @@ def render():
         # ``HEADER_VIEW`` (see that constant for why it is the matrix and not
         # the freshness view the strip already prints). Its two actions open
         # the Market read and the Market report as dialogs; the Desk still
-        # commands nothing — it reads thirteen views on one batched poll.
+        # commands nothing — it reads eleven views on one batched poll.
         popups = build_popups(kit.header("Desk", view=HEADER_VIEW, stale=True).actions)
 
         # ── the autoplay unlock ──────────────────────────────────────────────
@@ -4074,80 +3687,61 @@ def render():
             bb_box = ui.row().classes("w-full items-stretch gap-2 flex-wrap")
 
         # The four panels sit in a 2x2 grid, reading left-to-right then down in
-        # the order the page argues: structure, then what to act on, then what is
-        # already on. `items-stretch` so the two panels of a row square off at
-        # the same height instead of leaving a stepped edge between them.
+        # the order the page argues: structure, then what to act on, then what
+        # is trading, then what is being said. `items-stretch` so the two panels
+        # of a row square off at the same height instead of leaving a stepped
+        # edge between them.
         #
-        # TWO COLUMNS AT EVERY WIDTH (2026-08-20, by request). It was
-        # `grid-cols-1 min-[2300px]:grid-cols-2`; with the breakpoint gone, that
-        # breakpoint's arithmetic became the page's MINIMUM SUPPORTED WIDTH.
-        # Positions is the panel that sets it:
+        # TWO COLUMNS AT EVERY WIDTH (2026-08-20, by request). With no
+        # breakpoint, the widest panel's floor is the page's MINIMUM SUPPORTED
+        # WIDTH. That panel is the Opportunity board (it was Positions, at
+        # 839px, until that panel was removed):
         #
-        #   725px  the TEN ``POS_GRID`` minmax floors summed
-        #   + 72   nine 8px column gaps (``_GAP``)
+        #   707px  the EIGHT ``BOARD_GRID`` minmax floors summed
+        #   + 56   seven 8px column gaps (``_GAP``)
         #   +  8   the row's own px-1, both sides (``_ROW``)
         #   + 32   the panel's px-4, both sides (``_panel``)
         #   +  2   the card's 1px border, both sides
-        #   = 839px minimum for one panel      (the last three are PANEL_PAD_PX)
-        #   x2 + 20px gutter = 1698px of panel content
-        #   + 164 of measured chrome           = 1862px of LAYOUT width
-        #   + 15 for the classic scrollbar     = 1877px of innerWidth
+        #   = 805px minimum for one panel      (the last three are PANEL_PAD_PX)
+        #   x2 + 20px gutter = 1630px of panel content
+        #   + 164 of measured chrome           = 1794px of LAYOUT width
+        #   + 15 for the classic scrollbar     = 1809px of innerWidth
         #
         # ⚠ The sum above is prose; the LIVE version of it is
         # ``panel_scroll.panel_min_width_px``, which re-derives each panel's
         # minimum from that panel's own grid string and owns ``PANEL_PAD_PX``.
         # It is pinned by a test that has to MOVE when a floor moves, so a
-        # widened track cannot leave a stale number behind here — which is what
-        # happened to the Board's figure below before it was caught.
+        # widened track cannot leave a stale number behind here.
         #
-        # **The 839 is measured, not merely summed.** Stepping the window width
-        # on the public origin, the Positions card's ``offsetWidth`` reached
-        # exactly 839 at the same width its ``scrollWidth - clientWidth`` first
-        # reached 0 — the card stops overflowing at 839px. ⚠ Its ``scrollWidth``
-        # reads 817 while it is clipping, and that is NOT evidence against the
-        # sum: ``scrollWidth`` is a padding-box measure (never the 2px border)
-        # and, on a box that does not scroll, it drops the END padding too. The
-        # missing 22 is 16 of the card's padding-right, 4 of the row's, and 2 of
-        # border. See ``panel_scroll`` for the control experiment that settled
-        # it, and for why the row reads 801 today and would read 805 if it
-        # were given an ``overflow-x`` that made it a scroll container.
+        # ⚠ **805 is SUMMED, not measured.** The same chain was checked against
+        # a browser on the old Positions panel (839 summed, 839 measured; the
+        # reconciliation with ``scrollWidth`` is in ``panel_scroll``), but
+        # nobody has stepped a window across the Board's own boundary.
+        # Re-measure before quoting it as tight.
         #
         # At the 1920px window this page is read at, ``PANEL_BUDGET_PX`` hands
-        # each panel 860px (measured: 861), so Positions clears its floor by
-        # 21px and the other three by more (Board 805px, Dealer 757px, Flow
-        # 508px). Measured live at 1920 and at 2560: no panel, and no cell in
-        # one, reports a horizontal overflow.
+        # each panel 860px, so the Board clears its floor by 55px and the
+        # others by more (Dealer 757px, Flow 508px; Headlines has no grid and
+        # no floor - a long headline truncates).
         #
-        # ⚠ **1877 is where the PANEL stops fitting, and it is the PRIVATE
-        # app's number** — see ``DESK_CHROME_PX``, whose 164 includes 68px of
-        # icon rail the public screens do not have. The public equivalent is
-        # 1809, and the card was measured at 839 with zero overflow at 1808.
-        # (1808 already measures clean; the half-pixel is the odd width being
-        # halved between two columns.) Below it the rows overflow their card
+        # ⚠ **1809 is the PRIVATE app's number** — see ``DESK_CHROME_PX``, whose
+        # 164 includes 68px of icon rail the public screens do not have. The
+        # public equivalent is 1741. Below it the rows overflow their card
         # rather than reflowing: a CSS grid will not shrink a track under its
-        # minmax() floor. At 1600 the private app's panels are 700px each —
-        # 139px SHORT of what Positions needs, 105 short for the Board and 57
-        # for Dealer Positioning; only Flow, with four tracks, still fits.
+        # minmax() floor.
         #
-        # ⚠ **A panel overflowing is not yet the page scrolling sideways**, and
-        # conflating the two reads as though the boundary above were wrong. The
+        # ⚠ **A panel overflowing is not yet the page scrolling sideways.** The
         # padding chain absorbs 16px of overflow per level, so the document
         # keeps its width well past the point the cards stop containing their
-        # rows: measured on the public origin, the panel overflows below 1809
-        # but ``documentElement`` reports 0px of overflow at 1672 and only 1px
-        # at 1670 — a boundary ~140px narrower. The defect between the two is
-        # not a sideways scrollbar at all; it is rows painting out through the
-        # card's own border, between those two widths.
+        # rows (measured on the public origin with the old panel: about 140px
+        # narrower). Between the two, rows paint out through the card's border.
         #
         # The FIRST answer is still to narrow the tracks — and the type standing
-        # in them, together (see the ladder above): a panel that fits is read
-        # without being operated. Where they cannot be narrowed further, the
-        # fallback below 1877 is ``shell.PANEL_SCROLL_CSS``, which contains the
-        # sideways scroll at the PANEL with the identity column pinned, so the
-        # heading and the symbol stay put. That reverses the refusal this note
-        # used to carry, and the reason is the paragraph directly above: refusing
-        # a panel scroll never stopped the sideways scroll, it just handed it to
-        # the document, which loses strictly more of the reader's place.
+        # in them, together: a panel that fits is read without being operated.
+        # Where they cannot be narrowed further, the fallback is
+        # ``shell.PANEL_SCROLL_CSS``, which contains the sideways scroll at the
+        # PANEL with the identity column pinned, so the heading and the symbol
+        # stay put.
         with ui.element("div").classes(
                 "grid grid-cols-2 gap-5 w-full items-stretch"):
             # All four heads come from ``PANEL_HEADS`` — one copy, with the
@@ -4157,13 +3751,9 @@ def render():
             # Buy / Neutral / Sell counts, quoted from that page's own summary.
             board_body, board_signals = _panel(*PANEL_HEADS["board"])
             flow_body, _ = _panel(*PANEL_HEADS["flow"])
-            pos_body, _ = _panel(*PANEL_HEADS["positions"])
-
-        # ── the headlines strip ──────────────────────────────────────────────
-        # Full width under the four panels: one line per story needs the width
-        # far more than it needs a column of its own, and a fifth cell in the
-        # 2x2 grid would leave a hole beside it.
-        news_body, _ = _panel(*PANEL_HEADS["news"])
+            # Headlines, beside Flow alerts: what is trading, then what is
+            # being said about it. No grid - one flex line per story.
+            news_body, _ = _panel(*PANEL_HEADS["news"])
 
     # ── painters ─────────────────────────────────────────────────────────────
     def _view(name):
@@ -4377,38 +3967,6 @@ def render():
             for row in rows:
                 _flow_row(row, _glow(row.get("id")))
 
-    def _paint_positions():
-        pos_body.clear()
-        paper_view = _view("options:paper_account")
-        captured_view = _view("options:captured")
-        with pos_body:
-            if paper_view is None and captured_view is None:
-                kit.empty(WAITING_OPTIONS)
-                return
-            rows = position_rows(paper_view, captured_view)
-            # ⚠ The summary reads the FULL book; only the DRAW is capped. Moving
-            # this line below the slice would make the panel report the P&L and
-            # the at-risk count of whatever happened to fit on screen.
-            summary = positions_summary(rows)
-            shown = rows[:POSITION_ROWS_N]
-            ui.label(summary_line(summary, len(shown))).classes(
-                f"text-[11px] tracking-[.16em] pb-2 {_PANEL_NOTE} "
-                + (CON_WARN if summary["at_risk"] else MUTED))
-            if not rows:
-                kit.empty(EMPTY_POSITIONS)
-                return
-            # Ten labels for ten tracks, ONE line per row — the same move the
-            # board and the flow feed just made, and here it is what pays for
-            # the third book: a stacked row was 71px, a flat one 50px.
-            # STRATEGY has its own column instead of riding under the symbol,
-            # and EXPIRY carries its own countdown (see ``expiry_text``) instead
-            # of riding under the strikes. ENTRY and MARK are the pair the
-            # unrealized figure is the difference of, so the row shows its own
-            # arithmetic rather than only its result.
-            _grid_head(POS_GRID, POS_HEADS)
-            for row in shown:
-                _position_row(row, _glow(row.get("position_id")))
-
     def _paint_news():
         news_body.clear()
         rows = news_rows(_view(NEWS_VIEW), now=datetime.now(_CT))
@@ -4421,7 +3979,7 @@ def render():
                 return
             for row in rows:
                 _news_row(row)
-            # The strip is a pointer, like every panel here: the full feed, its
+            # The panel is a pointer, like every panel here: the full feed, its
             # filters and its trending list live on /news. Drawn only where this
             # process serves that page.
             if _shell.can_navigate(NEWS_ROUTE):
@@ -4430,8 +3988,7 @@ def render():
 
     painters = {"strip": _paint_strip, "bullbear": _paint_bullbear,
                 "dealer": _paint_dealer, "board": _paint_board,
-                "flow": _paint_flow, "positions": _paint_positions,
-                "news": _paint_news,
+                "flow": _paint_flow, "news": _paint_news,
                 "summary": lambda: paint_report(popups, _view("market:summary")),
                 "read": lambda: paint_read(popups, _view(READ_VIEW),
                                            state.setdefault("read", {}))}
@@ -4445,11 +4002,6 @@ def render():
         # bottom unseen and announce them later, when the list shortened.
         rows = _flow.alert_rows(_view("options:flow_alerts"))
         return fold_flow_arrivals(state, rows, now)
-
-    def _detect_positions(now):
-        rows = position_rows(_view("options:paper_account"),
-                             _view("options:captured"))
-        return fold_position_arrivals(state, rows, now)
 
     def _detect_board(now):
         # The board AS DRAWN: "new" means "joined the top BOARD_ROWS_N".
@@ -4471,8 +4023,7 @@ def render():
         # Detection FIRST: the painters read ``state["glow"]``, so a row has to
         # be marked before the paint that is supposed to draw it lit.
         state["speak"] = detect_utterances(
-            changed, {"flow": _detect_flow, "positions": _detect_positions,
-                      "board": _detect_board},
+            changed, {"flow": _detect_flow, "board": _detect_board},
             app_settings.load(), now)
         prune_glows(state["glow"], now)
         for region, deps in _REGION_VIEWS.items():
@@ -4490,8 +4041,8 @@ def render():
 
         ⚠ THE TIMEOUT IS THE LOAD-BEARING ARGUMENT HERE. ``_poll`` awaits this,
         and NiceGUI's timer awaits its callback before sleeping — so every
-        second spent in here is a second the Desk fetches no quotes, no
-        positions and no flow. With ``voice``'s own 20 s budget and a paint that
+        second spent in here is a second the Desk fetches no levels, no
+        headlines and no flow. With ``voice``'s own 20 s budget and a paint that
         can queue two phrases, a hung TTS endpoint froze the landing page for
         FORTY SECONDS. ``LIVE_SYNTH_TIMEOUT_SEC`` caps the worst case at ~6 s,
         and the endpoint is only re-tried about once a minute after a failure
@@ -4573,7 +4124,7 @@ def render():
     async def _poll():
         """ONE batched version probe per tick, not one per view.
 
-        ``read_versions`` reads the thirteen tiny ``{key}:ver`` counters in a
+        ``read_versions`` reads the eleven tiny ``{key}:ver`` counters in a
         single pipelined round-trip; a full payload is deserialized only for a
         view that actually moved."""
         # Probed and read by ``bus_key``: the public origin's news KEY is

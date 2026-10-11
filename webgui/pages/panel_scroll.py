@@ -17,8 +17,11 @@ NiceGUI, no I/O, so the arithmetic is testable with no browser and no app.
 **The number is derived from the CSS, and then confirmed against the browser.**
 Both halves matter — a width constant that merely matches what the code
 currently computes is the "characterization test pins the wrong value" failure
-this repo has already paid for. What the two halves say, for the Positions
-panel (the widest, and so the one that sets the page's minimum):
+this repo has already paid for. The worked example below is the Desk's old
+Positions panel, which was the widest until it left the page on 2026-10-11. It
+is kept because it is the one panel whose sums were put in front of a browser;
+the Opportunity board (805px by the same chain) sets the page's minimum now.
+What the two halves said for that panel:
 
 ======  =========================================================
   725   the ten ``minmax()`` floors, summed
@@ -34,7 +37,7 @@ panel (the widest, and so the one that sets the page's minimum):
 ⚠ **Two of those lines cannot be seen in a ``scrollWidth`` reading, and knowing
 which is what reconciles the arithmetic with the browser.** Measured live on
 ``live.neuralstrike.co/desk`` in headless Chrome, at a width where the panel is
-clipping, the Positions row reports ``scrollWidth`` **801** and its card
+clipping, the Positions row reported ``scrollWidth`` **801** and its card
 **817** — neither of which is 805 or 839, and both of which look like evidence
 against the sums above. They are not:
 
@@ -45,7 +48,7 @@ against the sums above. They are not:
   did: one 100px box, 7px of left padding and 11px of right around a 400px
   child, reported **407** at ``overflow-x: visible`` and **418** at ``auto``
   and at ``hidden`` — i.e. ``7+400`` versus ``7+400+11``. The live Positions
-  row reproduces it exactly: flipping that one element to ``overflow-x: auto``
+  row reproduced it exactly: flipping that one element to ``overflow-x: auto``
   and reading again moved it **801 -> 805**, which is this module's
   ``grid_min_width_px``. Task 3 gives the panel ``overflow-x: auto``, so the
   browser agrees with the arithmetic once the scroll container exists.
@@ -151,8 +154,8 @@ def grid_content_width_px(grid_classes):
     """The grid's CONTENT box at its narrowest: every track on its floor.
 
     Floors plus the ``len(tracks) - 1`` gaps between them. This is the width
-    the tracks physically occupy — 797px on Positions, confirmed in the DOM by
-    the row's ten children spanning x=4 to x=801 of its border box.
+    the tracks physically occupy — 797px on the old Positions panel, confirmed
+    in the DOM by the row's ten children spanning x=4 to x=801 of its border box.
     """
     floors = track_floors(grid_classes)
     total = sum(floors) + (len(floors) - 1) * COL_GAP_PX
@@ -172,9 +175,8 @@ def grid_min_width_px(grid_classes):
     ``box-sizing: border-box`` (Tailwind's preflight), so a ``min-width`` set
     on the row has to carry that padding itself.
 
-    805px on Positions — and 805 is exactly what the live row's ``scrollWidth``
-    reports the moment it is made a scroll container, which is what Task 3 does
-    to it.
+    805px on the old Positions panel — exactly what that live row's
+    ``scrollWidth`` reported the moment it was made a scroll container.
     """
     return grid_content_width_px(grid_classes) + ROW_INSET_PX
 
@@ -183,8 +185,8 @@ def panel_min_width_px(grid_classes):
     """The narrowest the panel CARD can be drawn without its rows overflowing.
 
     The grid content plus ``PANEL_PAD_PX`` — the row's ``px-1``, the panel's
-    ``px-4`` and the card's border. 839px on Positions, which is the widest of
-    the Desk's four panels and therefore the number the page's minimum
+    ``px-4`` and the card's border. 805px on the Opportunity board, which is the
+    widest of the Desk's gridded panels and therefore the number the page's minimum
     supported window is built out of (see ``desk.PANEL_BUDGET_PX``, the budget
     this is spent against).
     """

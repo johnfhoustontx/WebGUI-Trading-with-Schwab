@@ -50,7 +50,7 @@ HELP_MD: dict[str, str] = {
 
 The **home page**. One screen answering, top to bottom, the four questions you ask
 in order: *what is the market doing · where is the structure · what should I act
-on · what am I holding.*
+on · what is being said.*
 
 - **Top strip** — the clock, two dials showing **Day / Week / Month** for market
   **sentiment** and market **trend**, then the three verdict tiles: **Bias** (how
@@ -107,10 +107,15 @@ on · what am I holding.*
   wide enough that second figure is drawn as a bar of its own. A **hedging**
   row (surge or reversal) is the other estimate on this
   panel, and it also says so.
-- **Positions** — your open paper trades and Claude's, together, with the live
-  mark and **open P&L**, and a status: **OK**, **Watch**, **At risk**,
-  **Rescue**. The header totals open trades, open P&L, and how many need
-  attention.
+- **Headlines** — the newest stories from **Market News**, one line each: the
+  time (Central), the feed, and the headline. **Click a headline** to open the
+  original article in a new tab; **All headlines →** opens Market News, where
+  the filters and the trending tickers are. The panel says how many it is
+  showing, and that number is a setting (Settings → Configuration → Market
+  news → *Headlines on the Desk*).
+- **Your positions are not on this page.** Open paper trades are on **Paper
+  Account**, captured signals on **Captured Signals**, and the **Symbol** page
+  shows anything open in one name.
 - **Market read** (button, top right) — opens a popup of six readings, each
   marked **Tailwind**, **Headwind** or **Neutral** under the heading **For
   stocks**. The line beside the button is the time of the reading and its
@@ -138,27 +143,25 @@ on · what am I holding.*
   tab** inside the popup opens the same report on the website. The button is
   absent until a report has been published.
 
-**Click any row** to open the page it came from, already set to that symbol.
-Nothing on this page places or changes a trade.
+**Click a dealer, board or flow row** to open the page it came from, already set
+to that symbol. Nothing on this page places or changes a trade.
 
-**It talks to you.** When a new flow alert or a newly-opened position appears, the
+**It talks to you.** When a new flow alert appears, the
 Desk says it out loud — and that row **glows for ten seconds**, so your eye lands
 where the voice pointed. When the alert names a **contract** it is spoken in full:
 *"N D X. Unusual volume, 0-D T E 7 15 Put."* A premium shift or a hedging flip is
 about the whole book rather than one contract, so it stays short — *"S P Y.
-Premium shift alert, calls over."* A new position adds its strikes, expiry and entry price, and
-says **credit or debit** rather than leaving you to work out the sign. If several
+Premium shift alert, calls over."* If several
 arrive at once it names the newest and counts the rest ("plus 5 more"). A
 **hedging-flow** alert (surge or reversal) glows but stays **silent** while its
 phone push is off (**Send hedging-flow pushes to the phone**, Settings →
-Configuration — it ships off); it is neither named nor counted. A position that only changes **status** — OK to At risk to Rescue — glows
-amber and stays **silent**: it was already there, and the flag column has already
-told you. A symbol that **joins the Opportunity Board** is announced too — *"N V D
+Configuration — it ships off); it is neither named nor counted. A symbol that
+**joins the Opportunity Board** is announced too — *"N V D
 A. Joins the Opportunity Board, buy signal."* — unless it only dropped off in the
 last half hour, which keeps two names swapping places at the bottom from talking
-on every refresh.
+on every refresh. A new headline is not spoken and does not glow.
 
-Each of the three — **Opportunity Board**, **Flow Alerts** and **Positions** —
+Each of the two — **Opportunity Board** and **Flow Alerts** —
 has its own switch on the **Settings** page, under the main *Enable spoken
 alerts* switch. A section switched off still glows; it just stays quiet.
 

@@ -156,8 +156,8 @@ def test_symbol_match_cleans_the_row_side_too():
     assert [r["id"] for r in nv.filter_rows(raw_rows, sources=None, symbol="NVDA")] == ["a"]
 
 
-def test_for_symbol_default_limit_and_desk_limit():
-    assert nv.DESK_LIMIT == 5 and nv.SYMBOL_LIMIT == 8
+def test_for_symbol_default_limit():
+    assert nv.SYMBOL_LIMIT == 8
     items = [_it(i, tickers=["NVDA"]) for i in range(12)]
     assert len(nv.for_symbol({"items": items}, "NVDA", now=NOW)) == nv.SYMBOL_LIMIT
     assert len(nv.for_symbol({"items": items}, "NVDA", now=NOW, limit=3)) == 3

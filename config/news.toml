@@ -28,6 +28,9 @@ extras = []
 [trending]
 window_h = 6               # the Trending chips count mentions in this window
 
+[desk]
+headlines = 9              # rows in the Desk's Headlines panel (1-30; web app restart)
+
 [dedupe]
 # One feed publishing one headline twice within this many hours is ONE story - e.g.
 # the same WSJ piece under two Google News redirect URLs minutes apart. Beyond it the
