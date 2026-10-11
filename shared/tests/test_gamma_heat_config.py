@@ -115,6 +115,21 @@ def test_the_wells_height_scale(monkeypatch):
     assert cfg.well_height() == "root"
 
 
+def test_smooth_defaults_and_overrides(monkeypatch):
+    """The widths of the Medium strength: minutes along time, strikes across."""
+    assert cfg.smooth() == {"minutes": 3.0, "strikes": 0.8}
+    monkeypatch.setattr(cfg, "load", lambda: {"smooth": {"minutes": 5, "strikes": 0}})
+    assert cfg.smooth() == {"minutes": 5.0, "strikes": 0.0}
+    # A negative width, one far past what a session holds, and a word each fall
+    # back to their own default.
+    monkeypatch.setattr(cfg, "load", lambda: {"smooth": {"minutes": -1, "strikes": 99}})
+    assert cfg.smooth() == {"minutes": 3.0, "strikes": 0.8}
+    monkeypatch.setattr(cfg, "load", lambda: {"smooth": {"minutes": "x", "strikes": True}})
+    assert cfg.smooth() == {"minutes": 3.0, "strikes": 0.8}
+    monkeypatch.setattr(cfg, "load", lambda: {"smooth": "x"})
+    assert cfg.smooth() == {"minutes": 3.0, "strikes": 0.8}
+
+
 def test_ridge_defaults_and_overrides(monkeypatch):
     assert cfg.ridge() == {"every_min": 30, "overlap": 2.0, "height": "root"}
     monkeypatch.setattr(cfg, "load", lambda: {"ridge": {

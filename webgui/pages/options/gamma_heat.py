@@ -9,6 +9,7 @@ wrote to its input would corrupt every other tab's chart.
 Design: docs/plans/2026-10-09-gamma-heatmap-value-scale-frame-design.md
 """
 import html
+import math
 import re
 
 from pages import fmt as _fmt
@@ -296,6 +297,82 @@ def spot_frame_range(step, half):
     half a row each end, because a heatmap cell is centred on its offset."""
     edge = (half + 0.5) * step
     return [-edge, edge]
+
+
+# ── smoothing ────────────────────────────────────────────────────────────────
+# The heat map's picture is blended by the browser as it is stretched to the
+# panel, but that only softens the edges between cells: a strike that reads 10,
+# 0, 10, 0 from one minute to the next still draws as stripes. This averages the
+# VALUES over neighbouring minutes and strikes before they are coloured.
+#
+# smooth key -> the control's label. The order is the picker's order.
+SMOOTHS = {"off": "Off", "light": "Light", "medium": "Medium", "strong": "Strong"}
+# Each strength as a share of the configured width (``[smooth]`` is Medium's).
+SMOOTH_STRENGTH = {"light": 0.5, "medium": 1.0, "strong": 2.0}
+SMOOTH_HELP = ("Average each cell with the minutes and strikes around it before "
+               "it is coloured, so noise from one minute to the next does not "
+               "draw as stripes. A smoothed peak is lower and wider than the "
+               "real one, and the newest minutes lag a little. The bars are "
+               "never smoothed.")
+
+
+def smooth_args(level, widths):
+    """``smooth``'s keywords for one strength, or None for no smoothing.
+    ``widths`` is ``gamma_heat_config.smooth()``, Medium's own."""
+    share = SMOOTH_STRENGTH.get(level)
+    if not share:
+        return None
+    out = {key: (_fmt.num(widths.get(key)) or 0.0) * share
+           for key in ("minutes", "strikes")}
+    return out if any(v > 0 for v in out.values()) else None
+
+
+def _weights(sigma):
+    """A bell curve's weights for offsets ``-r … r``, out to three widths."""
+    radius = max(1, math.ceil(3 * sigma))
+    return [math.exp(-(d * d) / (2.0 * sigma * sigma))
+            for d in range(-radius, radius + 1)]
+
+
+def _averaged(line, weights):
+    """One row or column, each cell replaced by the weighted average of the
+    cells around it. The weights are shared out over the cells that EXIST, so a
+    gap is neither a zero nor a value, and an edge is not dimmed. A gap stays a
+    gap."""
+    n, radius = len(line), len(weights) // 2
+    out = [None] * n
+    for i in range(n):
+        if line[i] is None:
+            continue
+        total = weight = 0.0
+        for j in range(max(0, i - radius), min(n, i + radius + 1)):
+            value = line[j]
+            if value is not None:
+                w = weights[j - i + radius]
+                total += w * value
+                weight += w
+        out[i] = total / weight
+    return out
+
+
+def smooth(z, *, minutes, strikes):
+    """The grid ``z[yi][xi]`` with each cell averaged over its neighbours: a bell
+    curve ``minutes`` columns wide along time and ``strikes`` rows wide along the
+    strike axis (each a standard deviation; 0 leaves that direction alone).
+
+    A cell that is not a number is a gap, before and after. Nothing is written
+    to ``z``; with both widths at 0 it is handed back as it came."""
+    if not z or (minutes <= 0 and strikes <= 0):
+        return z
+    grid = [[v if _fmt.num(v) is not None else None for v in row] for row in z]
+    if minutes > 0:
+        weights = _weights(minutes)
+        grid = [_averaged(row, weights) for row in grid]
+    if strikes > 0:
+        weights = _weights(strikes)
+        columns = [_averaged(list(col), weights) for col in zip(*grid)]
+        grid = [list(row) for row in zip(*columns)]
+    return grid
 
 
 # ── the colour ramp ──────────────────────────────────────────────────────────

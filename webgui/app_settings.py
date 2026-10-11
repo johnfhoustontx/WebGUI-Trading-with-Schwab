@@ -43,6 +43,8 @@ DEFAULTS = {
     "gamma_heat_frame": "strike",    # heatmap vertical axis: strike | spot
     "gamma_heat_show": "level",      # heatmap cell: level | open | window (change)
     "gamma_heat_contours": False,    # heatmap overlay: lines of equal value
+    # Medium by the user's choice (2026-10-11): they asked for real smoothing.
+    "gamma_heat_smooth": "medium",   # heatmap values averaged: off | light | medium | strong
     "gamma_well": False,             # GEX: the gravity-well panel under the charts
     "gamma_ridge": False,            # Greek views: the ridge plot under the charts
     "gamma_netprem_group": "indices",          # Net Prem picker: which group tab

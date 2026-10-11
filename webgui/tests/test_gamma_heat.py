@@ -125,6 +125,98 @@ def test_balanced_marks_of_nothing():
     assert gh.balanced_marks({100.0: 5.0}, [100.0], **KW) == []
 
 
+# ── smoothing the values themselves ──────────────────────────────────────────
+# Asked for by the user 2026-10-11 ("I need real smoothing in the heatmap"). Until
+# then the only smoothing was the browser blending the heat map's picture as it
+# stretched it. This averages the VALUES, over neighbouring minutes and strikes,
+# before they are coloured.
+
+def _grid(rows, cols, fill=0.0):
+    return [[fill] * cols for _ in range(rows)]
+
+
+def test_smoothing_off_hands_the_grid_back_untouched():
+    z = [[1.0, 5.0, None], [2.0, None, 3.0]]
+    assert gh.smooth(z, minutes=0, strikes=0) is z
+    assert gh.smooth([], minutes=2.0, strikes=1.0) == []
+
+
+def test_a_flat_field_stays_flat_right_to_the_edges():
+    """The weights are shared out again over the cells that exist, so an edge
+    or a corner is not dimmed for having fewer neighbours."""
+    out = gh.smooth(_grid(5, 9, 7.0), minutes=2.0, strikes=1.0)
+    assert all(v == pytest.approx(7.0) for row in out for v in row)
+
+
+def test_one_spike_is_spread_over_its_neighbours_and_nothing_is_lost():
+    z = _grid(9, 21)
+    z[4][10] = 100.0
+    out = gh.smooth(z, minutes=2.0, strikes=1.0)
+    assert out[4][10] < 100.0                         # the peak comes down
+    assert out[4][9] > 0 and out[3][10] > 0           # into the cells beside it
+    assert out[4][9] == pytest.approx(out[4][11])     # evenly, either side
+    assert out[4][8] < out[4][9] < out[4][10]         # and less the further away
+    assert out[0][0] == pytest.approx(0.0, abs=1e-6)  # far away, nothing arrives
+    assert sum(v for row in out for v in row) == pytest.approx(100.0, rel=0.02)
+
+
+def test_each_direction_has_its_own_width():
+    z = _grid(9, 21)
+    z[4][10] = 100.0
+    in_time = gh.smooth(z, minutes=2.0, strikes=0)
+    assert in_time[4][9] > 0 and in_time[3][10] == 0.0      # along the row only
+    in_strike = gh.smooth(z, minutes=0, strikes=1.0)
+    assert in_strike[3][10] > 0 and in_strike[4][9] == 0.0  # along the column only
+    wide = gh.smooth(z, minutes=4.0, strikes=0)
+    assert wide[4][10] < in_time[4][10]                     # wider is flatter
+
+
+def test_noise_between_neighbouring_minutes_is_averaged_out():
+    """What the user asked for: a strike that reads 10, 0, 10, 0 … minute to
+    minute draws as stripes. Smoothed, it is close to its average."""
+    z = [[10.0 if i % 2 == 0 else 0.0 for i in range(40)]]
+    out = gh.smooth(z, minutes=2.0, strikes=0)
+    middle = out[0][10:30]
+    assert max(middle) - min(middle) < 0.5
+    assert sum(middle) / len(middle) == pytest.approx(5.0, abs=0.2)
+
+
+def test_a_cell_with_no_reading_stays_empty_and_is_not_averaged_in():
+    z = [[4.0, None, 4.0, 4.0], [4.0, 4.0, None, 4.0]]
+    out = gh.smooth(z, minutes=1.0, strikes=1.0)
+    assert out[0][1] is None and out[1][2] is None
+    # The gap is neither a zero pulling its neighbours down nor a value.
+    assert all(v == pytest.approx(4.0) for row in out for v in row if v is not None)
+    junk = gh.smooth([[1.0, float("nan"), "x", True, 1.0]], minutes=1.0, strikes=0)
+    assert junk[0][1:4] == [None, None, None] and junk[0][0] == pytest.approx(1.0)
+
+
+def test_the_sign_survives_and_opposite_neighbours_cancel():
+    z = _grid(3, 11)
+    z[1][4], z[1][6] = 50.0, -50.0
+    out = gh.smooth(z, minutes=1.5, strikes=0)
+    assert out[1][3] > 0 > out[1][7]
+    assert out[1][5] == pytest.approx(0.0, abs=1e-9)
+
+
+def test_smoothing_does_not_write_to_the_grid():
+    z = [[1.0, 9.0, 1.0], [2.0, None, 2.0]]
+    before = [list(row) for row in z]
+    gh.smooth(z, minutes=1.0, strikes=1.0)
+    assert z == before
+
+
+def test_the_strengths_are_shares_of_the_configured_width():
+    assert list(gh.SMOOTHS) == ["off", "light", "medium", "strong"]
+    medium = {"minutes": 3.0, "strikes": 0.8}
+    assert gh.smooth_args("off", medium) is None
+    assert gh.smooth_args("medium", medium) == medium
+    assert gh.smooth_args("light", medium) == {"minutes": 1.5, "strikes": 0.4}
+    assert gh.smooth_args("strong", medium) == {"minutes": 6.0, "strikes": 1.6}
+    assert gh.smooth_args("nonsense", medium) is None
+    assert gh.smooth_args("medium", {"minutes": 0, "strikes": 0}) is None
+
+
 # ── the colour ramp, from the operator's eight colours ───────────────────────
 # Asked for by the user 2026-10-11: the put and call colours and their grading
 # are chosen in Settings -> Appearance. The shipped eight must build the exact

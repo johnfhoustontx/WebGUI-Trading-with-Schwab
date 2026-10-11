@@ -62,6 +62,15 @@ DEFAULTS = {
         # the rest; "linear" draws it in proportion.
         "height": "root",
     },
+    "smooth": {
+        # The heatmap's Smooth picker averages each cell with its neighbours
+        # before it is coloured. These are the widths at MEDIUM, each the
+        # standard deviation of a bell curve: Light is half of them and Strong
+        # twice. Along time, in minutes (one column a minute)...
+        "minutes": 3.0,
+        # ...and across strikes, in strikes. 0 leaves that direction alone.
+        "strikes": 0.8,
+    },
     "ridge": {
         # The ridge plot draws one by-strike profile every this many minutes.
         "every_min": 30,
@@ -140,6 +149,14 @@ def well_height() -> str:
     table = load().get("well")
     value = table.get("height") if isinstance(table, dict) else None
     return value if value in WELL_HEIGHTS else DEFAULTS["well"]["height"]
+
+
+def smooth() -> dict:
+    """``{"minutes", "strikes"}``: the widths of the heatmap's Medium smoothing
+    (``pages/options/gamma_heat.smooth``). Read by the page each time it draws
+    with a strength chosen."""
+    return {"minutes": _setting("smooth", "minutes", minimum=0.0, maximum=30.0),
+            "strikes": _setting("smooth", "strikes", minimum=0.0, maximum=5.0)}
 
 
 def ridge() -> dict:

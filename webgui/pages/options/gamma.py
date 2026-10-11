@@ -653,9 +653,11 @@ _INIT_FLEX = flex_class(0.5)
 def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=None, height=680,
                yrange=None, mode="net", balanced=(), scale="adaptive", lock=None,
                frame="strike", half=None, show="level", change_window_min=30,
-               basis=None, contours=None):
+               basis=None, contours=None, smooth=None):
     """Highcharts horizontal-bar options for one view (dark, beveled, labeled).
 
+    ``smooth`` is the heatmap's too, and ignored: the bars are the profile as
+    it stands and are never averaged.
     ``contours`` is the heatmap's and is ignored here: both builders take one
     set of keywords (``HeatControls.read``).
 
@@ -1092,7 +1094,8 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                    show_tracks=False, spot_style="line", spot_interval=5,
                    projected_flip=None, mode="net", balanced=(), legend=None,
                    scale="adaptive", lock=None, frame="strike", half=None,
-                   show="level", change_window_min=30, contours=None):
+                   show="level", change_window_min=30, contours=None,
+                   smooth=None):
     """Intraday strike×time Highcharts heatmap (dark, cell separators, concise
     hover) with the underlying spot-price line overlaid on the same (linear)
     strike axis. ``yrange`` (when given) sets the Strike axis range so it aligns
@@ -1132,6 +1135,13 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     change, share and frame all applied) at fixed shares of the colour scale.
     They cover the collected columns only, never the projection band. The two
     series exist either way, empty when off: the series count is fixed.
+
+    ``smooth`` (``gamma_heat.smooth_args``, or None for off) averages each cell
+    with the minutes and strikes around it BEFORE it is coloured: real smoothing
+    of the values, where ``interpolation`` only blends the picture. It is applied
+    to the grid in the frame being drawn and before the share is taken, so a
+    column still shares out to 100%; the contours are traced from the smoothed
+    cells; the tooltip says a cell is smoothed. The projection band is not.
 
     ``projection`` (GEX only) appends a forward band: extra time columns of
     projected net-per-mark cells on the SAME heatmap series/colorAxis, a 'now'
@@ -1173,6 +1183,10 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
         vstrikes, vz = _heat.to_spot_frame(
             vstrikes, vz, spots, step=_strike_step(vstrikes),
             half=_window_side(half))
+    if smooth:
+        # The values themselves, averaged over neighbouring minutes and strikes.
+        # Here, so it is the grid as framed, and before the share is taken.
+        vz = _heat.smooth(vz, **smooth)
     if scale == "share":
         # Each cell as a percentage of its own column, over the strikes on screen.
         vz = _heat.share_of_column(vz)
@@ -1203,7 +1217,9 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                                           + (" change" if changed else "")
                                           + (" {point.value:.1f}% of column"
                                              if scale == "share"
-                                             else " {point.value:,.0f}")}}]
+                                             else " {point.value:,.0f}")
+                                          # Not the reading that was stored.
+                                          + (" (smoothed)" if smooth else "")}}]
     # Underlying price track over the session (on the shared Strike axis; a line series
     # ignores the colorAxis so it isn't recolored by net value). Built here, appended
     # (with the two EM-cone series) AFTER the projection block below. Measured from
@@ -2571,6 +2587,11 @@ class HeatControls:
             "What the vertical axis measures. From spot puts price on a flat "
             "line through the middle, so the flip and the walls move: a wall "
             "sliding toward the centre is one price is approaching.")
+        self.smooth = ui.select(
+            dict(_heat.SMOOTHS),
+            value=_heat_setting("gamma_heat_smooth", _heat.SMOOTHS, "medium"),
+            label="Smooth").props("dense options-dense").classes("w-28")
+        self.smooth.tooltip(_heat.SMOOTH_HELP)
         self.contours = ui.switch(
             "Contours", value=bool(app_settings.get("gamma_heat_contours")))
         self.contours.props("dense").classes("text-xs")
@@ -2595,6 +2616,8 @@ class HeatControls:
             "gamma_heat_frame", str, lambda: (resync(), repaint())))
         self.contours.on_value_change(
             overlay_handler("gamma_heat_contours", bool, repaint))
+        self.smooth.on_value_change(
+            overlay_handler("gamma_heat_smooth", str, repaint))
 
     def sync(self, view, overlays=()):
         """Shown on the four Greek views only: the other views have no cells.
@@ -2605,7 +2628,7 @@ class HeatControls:
         frames. Call it AFTER the page has set their visibility by its own rules."""
         on = view in _VIEWS
         for el in (self.value, self.show, self.scale, self.frame, self.contours,
-                   self.legend):
+                   self.smooth, self.legend):
             el.set_visibility(on)
         if on and self.frame.value == "spot":
             for el in overlays:
@@ -2650,7 +2673,9 @@ class HeatControls:
                else "level",
                "change_window_min": _heat_cfg.change_window_min(),
                # The contour settings while the switch is on, else None.
-               "contours": _heat_cfg.contours() if self.contours.value else None}
+               "contours": _heat_cfg.contours() if self.contours.value else None,
+               # The smoothing widths for the strength chosen, or None for Off.
+               "smooth": _heat.smooth_args(self.smooth.value, _heat_cfg.smooth())}
         if self._sided and self.value.value in _heat.VALUES:
             out["mode"] = self.value.value
             out["balanced"] = _heat.balanced_marks(grid, strikes,

@@ -3743,6 +3743,7 @@ def _heat_controls(value="size", scale="locked", frame="strike", show="level"):
     heat.value, heat.scale, heat.legend = _FakeEl(value), _FakeEl(scale), _FakeEl()
     heat.frame, heat.show = _FakeEl(frame), _FakeEl(show)
     heat.contours = _FakeEl(False)
+    heat.smooth = _FakeEl("off")
     heat._sided, heat._lock, heat._lock_time = True, None, ""
     return heat
 
@@ -3751,7 +3752,7 @@ def _heat_controls(value="size", scale="locked", frame="strike", show="level"):
 # spot frame's height from config ([window] spot_side), and the level with the
 # change window from config ([show] change_window_min).
 _STRIKE_FRAME = {"frame": "strike", "half": 10, "show": "level", "contours": None,
-                 "change_window_min": 30}
+                 "change_window_min": 30, "smooth": None}
 
 
 def test_heat_controls_read_carries_what_to_show(monkeypatch):
@@ -4096,6 +4097,139 @@ def test_contours_are_drawn_fresh_on_every_repaint_never_merged_into_the_old_one
     assert [s["pointStart"] for s in _contour_series(off)] == [0, 0]
     above, below = build("put")
     assert above == (0, []) and below[0] > 0
+
+
+# ── smoothing the heat map's values ──────────────────────────────────────────
+# Asked for by the user 2026-10-11. The arithmetic is gamma_heat's own suite;
+# these pin where it sits in the figure and how the controls hand it over.
+
+_SMOOTH = {"minutes": 2.0, "strikes": 0.0}
+
+
+def _striped_rows(minutes=16):
+    """Strike 100 reads 12, 0, 12, 0 … from one minute to the next; 98 and 102
+    hold steady. Drawn raw, strike 100 is a row of stripes."""
+    rows = []
+    for i in range(minutes):
+        cells = {98.0: -6.0, 100.0: 12.0 if i % 2 == 0 else 0.0001, 102.0: 4.0}
+        grid = {k: {"call": max(v, 0.0) + 0.05, "put": min(v, 0.0) - 0.05, "net": v}
+                for k, v in cells.items()}
+        rows.append((60 * i, 100.0, None, None, None, 0, grid))
+    return rows
+
+
+def _heat_cells(fig, strike):
+    heat = next(s for s in fig["series"] if s["type"] == "heatmap")
+    return [v for _x, y, v in sorted(p for p in heat["data"] if p[1] == strike)]
+
+
+def test_smoothing_averages_the_cells_the_heat_map_draws():
+    raw = gamma.heatmap_figure(_striped_rows(), "GEX", yrange=[97.0, 103.0])
+    smooth = gamma.heatmap_figure(_striped_rows(), "GEX", yrange=[97.0, 103.0],
+                                  smooth=_SMOOTH)
+    stripes, evened = _heat_cells(raw, 100.0), _heat_cells(smooth, 100.0)
+    assert max(stripes) - min(stripes) > 11.0
+    middle = evened[4:12]
+    assert max(middle) - min(middle) < 1.0
+    assert sum(middle) / len(middle) == pytest.approx(6.0, abs=0.3)
+    # A steady strike is the same either way.
+    assert _heat_cells(smooth, 102.0) == pytest.approx(_heat_cells(raw, 102.0))
+    assert len(smooth["series"]) == len(raw["series"])
+
+
+def test_no_smoothing_is_the_figure_the_page_always_drew():
+    plain = gamma.heatmap_figure(_striped_rows(), "GEX", yrange=[97.0, 103.0])
+    assert gamma.heatmap_figure(_striped_rows(), "GEX", yrange=[97.0, 103.0],
+                                smooth=None) == plain
+
+
+def test_a_smoothed_cell_says_so_when_it_is_read():
+    """Press and hold gives the cell's number. Smoothed, it is not the reading
+    that was stored, and the tooltip must not pass it off as one."""
+    def tip(**kw):
+        fig = gamma.heatmap_figure(_striped_rows(), "GEX", yrange=[97.0, 103.0], **kw)
+        return next(s for s in fig["series"] if s["type"] == "heatmap")[
+            "tooltip"]["pointFormat"]
+    assert "smoothed" not in tip()
+    assert tip(smooth=_SMOOTH).endswith("(smoothed)")
+    assert tip(smooth=_SMOOTH, scale="share").endswith("(smoothed)")
+
+
+def test_the_contours_are_traced_from_the_smoothed_cells():
+    lock = {"minutes": 1, "net": 8.0, "call": 8.0, "put": 8.0, "size": 8.0}
+    cfg = {"steps": 1, "min_columns": 0, "max_points": 5000}
+
+    def above(**kw):
+        fig = gamma.heatmap_figure(_striped_rows(), "GEX", yrange=[97.0, 103.0],
+                                   scale="locked", lock=lock, contours=cfg, **kw)
+        return _contour_series(fig)[0]["data"]
+    # Raw, every other minute of strike 100 is over the level of 8: a comb of
+    # specks. Smoothed to about 6 it is under it everywhere, so no line at all.
+    assert above() and not above(smooth=_SMOOTH)
+
+
+def test_each_column_still_shares_out_to_a_whole_when_smoothed():
+    """Smoothing comes BEFORE the share is taken, so Share of column keeps its
+    meaning: the cells of one minute add up to 100%."""
+    fig = gamma.heatmap_figure(_striped_rows(), "GEX", yrange=[97.0, 103.0],
+                               scale="share", smooth={"minutes": 2.0, "strikes": 0.6})
+    heat = next(s for s in fig["series"] if s["type"] == "heatmap")
+    for xi in range(16):
+        column = [abs(v) for x, _y, v in heat["data"] if x == xi]
+        assert sum(column) == pytest.approx(100.0)
+
+
+def test_the_forward_band_is_not_smoothed():
+    """It is a projection drawn beside the session, not a reading in it."""
+    proj = {"times": ["15:05", "15:10"], "grid": {98.0: [1.0, 9.0], 100.0: [9.0, 1.0],
+                                                  102.0: [5.0, 5.0]},
+            "cone": {}, "spot": 100.0}
+    fig = gamma.heatmap_figure(_striped_rows(), "GEX", yrange=[97.0, 103.0],
+                               projection=proj, smooth={"minutes": 3.0, "strikes": 1.0})
+    heat = next(s for s in fig["series"] if s["type"] == "heatmap")
+    future = {(x, y): v for x, y, v in heat["data"] if x >= 16}
+    assert future == {(16, 98.0): 1.0, (17, 98.0): 9.0, (16, 100.0): 9.0,
+                      (17, 100.0): 1.0, (16, 102.0): 5.0, (17, 102.0): 5.0}
+
+
+def test_the_bars_take_the_smooth_keyword_and_ignore_it():
+    assert (gamma.bar_figure(SIDED, 100.0, smooth=_SMOOTH)
+            == gamma.bar_figure(SIDED, 100.0))
+
+
+def test_heat_controls_hand_over_the_smoothing_for_the_strength_chosen(monkeypatch):
+    heat = _heat_controls()
+    args = ({}, [], [], {})
+    assert heat.read(*args)["smooth"] is None                  # Off
+    monkeypatch.setattr(gamma._heat_cfg, "smooth",
+                        lambda: {"minutes": 4.0, "strikes": 1.0})
+    for level, want in (("light", {"minutes": 2.0, "strikes": 0.5}),
+                        ("medium", {"minutes": 4.0, "strikes": 1.0}),
+                        ("strong", {"minutes": 8.0, "strikes": 2.0}),
+                        ("off", None), ("nonsense", None)):
+        heat.smooth.value = level
+        assert heat.read(*args)["smooth"] == want, level
+
+
+def test_the_smooth_picker_belongs_to_the_heat_map_views():
+    heat = _heat_controls()
+    heat.sync("GEX")
+    assert heat.smooth.visible is True
+    heat.sync("Flow")
+    assert heat.smooth.visible is False
+
+
+def test_the_page_starts_at_medium_smoothing():
+    """The user's choice (2026-10-11): they asked for real smoothing, so a page
+    that has never had the picker touched draws Medium. The picker falls back
+    to the same strength when the stored value is not one it knows. The figure
+    BUILDER still smooths nothing unless it is handed the widths."""
+    import app_settings
+    assert app_settings.DEFAULTS["gamma_heat_smooth"] == "medium"
+    assert "medium" in gamma._heat.SMOOTHS
+    source = inspect.getsource(gamma.HeatControls.__init__)
+    assert '_heat_setting("gamma_heat_smooth", _heat.SMOOTHS, "medium")' in source
+    assert inspect.signature(gamma.heatmap_figure).parameters["smooth"].default is None
 
 
 def test_the_bars_take_the_contour_keyword_and_ignore_it():

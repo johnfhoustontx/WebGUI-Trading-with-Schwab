@@ -977,6 +977,20 @@ _GAMMA_HEAT = ConfigFile(
                   "dropped, so a busy session cannot slow the page.",
                   kind="int", unit="points", min=500, max=40000, step=500),
         )),
+        Section("Smoothing",
+                "The heat map's Smooth picker averages each cell with its "
+                "neighbours before it is coloured. These are the widths at "
+                "Medium; Light is half of them and Strong twice.", (
+            Field("smooth.minutes", "Along time",
+                  "How many minutes either side a cell is mostly averaged "
+                  "over. Higher is smoother and lags further behind the "
+                  "newest readings.", kind="float", unit="min",
+                  min=0, max=30, step=0.5),
+            Field("smooth.strikes", "Across strikes",
+                  "How many strikes either side. Keep it under about 1, or "
+                  "two neighbouring walls merge into one. 0 leaves strikes "
+                  "alone.", kind="float", unit="strikes", min=0, max=5, step=0.1),
+        )),
         Section("Gravity well",
                 "The Gamma view's Gravity well switch draws net gamma by strike "
                 "as ground, with the price as a ball on it.", (

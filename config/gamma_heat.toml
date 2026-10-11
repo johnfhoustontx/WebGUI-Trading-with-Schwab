@@ -57,6 +57,17 @@ min_columns = 3
 # dropped. It bounds what each repaint sends to the browser.
 max_points = 6000
 
+[smooth]
+# The heat map's Smooth picker (Off, Light, Medium, Strong) averages each cell
+# with the minutes and strikes around it BEFORE it is coloured, so noise from one
+# minute to the next does not draw as stripes. These are the widths at Medium;
+# Light uses half of them and Strong twice. Each is the standard deviation of a
+# bell curve: a cell is averaged mostly over about this far either side.
+minutes = 3.0
+# Across strikes. Keep it under about 1, or two neighbouring walls merge into
+# one. 0 leaves that direction alone.
+strikes = 0.8
+
 [well]
 # The gravity well (the Gamma view's "Gravity well" switch) draws net gamma by
 # strike as ground. "root" draws each strike at the signed square root of its
