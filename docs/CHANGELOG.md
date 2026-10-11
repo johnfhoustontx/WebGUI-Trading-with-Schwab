@@ -4,7 +4,34 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-11 (**Desk: the Positions panel is gone and Headlines takes its place.**)
+**Last updated:** 2026-10-11 (**Tests: three `news_svc` tests that failed on the Windows workstation.**)
+
+- **Asked for by the user,** after two scheduler tests were reported failing during
+  the Desk change below. Tests only: no service code changed.
+- **The two scheduler tests**
+  (`test_a_slow_feed_poll_does_not_delay_the_release_watch`,
+  `test_a_slow_calendar_branch_is_skipped_on_the_next_tick`) waited for the watch
+  branch's THREAD to record its call and then started the next pass. The scheduler
+  checks whether the branch's TASK is done, which is slightly later. A 5 ms sleep
+  hid the gap on Linux; on Windows that sleep returns in about 0.3 ms, so the next
+  pass found the watch still running, skipped it (correctly), and the count came up
+  one short on every run. A timestamped trace showed the skip.
+- **The fix** waits on the task ending and fails by name after 10 s instead of
+  moving on. The first test also now asserts that all four watches ended while the
+  feed poll was still blocked.
+- **Still guarding what they guarded:** with the scheduler deliberately broken to
+  double a running branch, or to hold the watch back behind the slow branch, each
+  test fails.
+- **A third,** `test_a_dividends_path_with_uri_metacharacters_is_still_opened_read_only`,
+  made a folder with a `?` in its name, which Windows refuses. On Windows it now
+  uses `#` and `%20` only; the old raw-URI bug still fails on that name (it creates
+  a stray file). Linux keeps the `?`.
+- **Verified** on the workstation: the scheduler file ten times in a row, then the
+  whole `news_svc` suite (703 passing, from 700). The scheduler file runs in 0.4 s,
+  from 13 to 16 s. Not run on Linux here; CI runs it there.
+- **Reference:** `docs/reference/testing.md` has the rule.
+
+**Prior —** 2026-10-11 (**Desk: the Positions panel is gone and Headlines takes its place.**)
 
 - **Asked for by the user:** "drop the Position frame completely and replace it with
   the news frame."
@@ -38,8 +65,9 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   a long headline truncating, no sideways overflow, no position text with both
   books published. Two `news_svc` scheduler timing tests
   (`test_a_slow_feed_poll_does_not_delay_the_release_watch`,
-  `test_a_slow_calendar_branch_is_skipped_on_the_next_tick`) fail on the Windows
-  workstation, and fail the same way on the commit before this one.
+  `test_a_slow_calendar_branch_is_skipped_on_the_next_tick`) failed on the Windows
+  workstation, and failed the same way on the commit before this one (fixed in the
+  entry above).
 - **Manuals:** the User Guide, Reference Guide, Technical Reference and the `/desk`
   hover guide no longer describe a Positions panel; the hover guide gained the
   Headlines entry it never had.

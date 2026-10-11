@@ -259,6 +259,21 @@ the failing SET, not the count" stops being something you have to remember to as
 for. `-rfs` was considered and rejected: the suites carry a couple of permanent
 `importorskip`s, and printing those every run trains people to ignore the summary.
 
+**A test that drives a real thread must wait on the condition the CODE checks
+(2026-10-11).** Two `news_svc` scheduler tests waited for a branch's executor
+THREAD to record its call, then started the next pass. The scheduler asks whether
+the branch's TASK is `done()`, which is later: the result still has to cross back
+to the event loop. On Linux a 5 ms `asyncio.sleep` covered the gap, so CI was
+green. ⚠ **On Windows `asyncio.sleep(0.005)` returns in about 0.3 ms**: the
+monotonic clock ticks every 15.6 ms and the event loop treats a timer inside one
+tick as already due. The next pass found the branch still running and skipped it,
+so the count came up one short, every run. The tests now count ended tasks
+(`_count_ended_branches`) and fail by name on a deadline (`_wait_until`) instead
+of moving on. Do not use a short sleep as a wait, on any platform.
+
+**Windows refuses `?` in a file name**, so a test that needs URI metacharacters in
+a path uses `#` and `%20` there (`test_econ_calendar.py`); Linux keeps the `?`.
+
 ## Tests
 
 Each app's tests run from **inside that app folder** (entrypoints add the repo

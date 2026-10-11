@@ -1,6 +1,7 @@
 import asyncio
 import datetime as dt
 import logging
+import time
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -424,6 +425,46 @@ class _Cmd:
         self.type = type
 
 
+def _count_ended_branches(monkeypatch):
+    """The names of the branches whose TASK has ended, in order.
+
+    The two end-to-end tests below must not start the next pass until this
+    pass's watch has ended, and "ended" has to mean what ``launch`` means by
+    it: the TASK is ``done()``. They used to wait for the watch THREAD to
+    record its call, which is earlier - the result still has to cross back to
+    the event loop and the task still has to take its last step. On Linux a
+    5 ms ``asyncio.sleep`` covered that gap. On Windows it does not: the clock
+    ticks every 15.6 ms, the loop treats a 5 ms timer as already due, and the
+    sleep returns in about 0.3 ms - so the next pass found the watch still
+    running, skipped it as it should, and the count came up one short.
+
+    There is no ``await`` between the append and the coroutine returning, so
+    once another task can see a name here, that branch's task is done."""
+    ended = []
+    real = scheduler._branch
+
+    async def counted(name, fn, bus, on_end=None):
+        try:
+            await real(name, fn, bus, on_end)
+        finally:
+            ended.append(name)
+
+    monkeypatch.setattr(scheduler, "_branch", counted)
+    return ended
+
+
+async def _wait_until(done, release, what, timeout_s=10.0):
+    """Yield to the event loop until ``done()``. Past the deadline it fails by
+    name, after setting ``release`` so ``asyncio.run`` is not left waiting on
+    the blocked executor thread."""
+    deadline = time.monotonic() + timeout_s
+    while not done():
+        if time.monotonic() > deadline:
+            release.set()
+            raise AssertionError(f"timed out waiting for {what}")
+        await asyncio.sleep(0.005)
+
+
 def test_a_slow_feed_poll_does_not_delay_the_release_watch(monkeypatch):
     """The feed poll blocks (on a real executor thread) for the whole run; the
     release watch still runs on EVERY tick, and the poll is never doubled."""
@@ -431,6 +472,7 @@ def test_a_slow_feed_poll_does_not_delay_the_release_watch(monkeypatch):
 
     release = threading.Event()
     polls, watches = [], []
+    ended = _count_ended_branches(monkeypatch)
 
     def slow_poll(bus):
         polls.append(1)
@@ -441,11 +483,10 @@ def test_a_slow_feed_poll_does_not_delay_the_release_watch(monkeypatch):
 
     async def fake_sleep(s):
         passes["n"] += 1
-        for _ in range(200):               # let this pass's watch thread land
-            if len(watches) >= passes["n"]:
-                break
-            await asyncio.sleep(0.005)
-        if passes["n"] >= 4:
+        n = passes["n"]                    # this pass's watch must END first
+        await _wait_until(lambda: ended.count("watch") >= n, release,
+                          f"the watch of pass {n} to end")
+        if n >= 4:
             release.set()                  # so asyncio.run's executor shutdown returns
             raise asyncio.CancelledError
 
@@ -461,6 +502,10 @@ def test_a_slow_feed_poll_does_not_delay_the_release_watch(monkeypatch):
         asyncio.run(scheduler.loop(object()))
     assert polls == [1]                    # still running: skipped, never doubled
     assert len(watches) == 4               # one per tick, none held back by the poll
+    # ...and all four ENDED while the poll was still blocked.
+    watch_ends = [i for i, name in enumerate(ended) if name == "watch"]
+    assert len(watch_ends) == 4
+    assert "poll" not in ended[:watch_ends[-1]]
 
 
 def test_a_branch_still_running_is_skipped_not_doubled():
@@ -494,6 +539,7 @@ def test_a_slow_calendar_branch_is_skipped_on_the_next_tick(monkeypatch):
 
     release = threading.Event()
     cals, watches = [], []
+    ended = _count_ended_branches(monkeypatch)
 
     def slow_cal(bus):
         cals.append(1)
@@ -504,11 +550,10 @@ def test_a_slow_calendar_branch_is_skipped_on_the_next_tick(monkeypatch):
 
     async def fake_sleep(s):
         passes["n"] += 1
-        for _ in range(200):
-            if len(watches) >= passes["n"]:
-                break
-            await asyncio.sleep(0.005)
-        if passes["n"] >= 3:
+        n = passes["n"]
+        await _wait_until(lambda: ended.count("watch") >= n, release,
+                          f"the watch of pass {n} to end")
+        if n >= 3:
             release.set()
             raise asyncio.CancelledError
 

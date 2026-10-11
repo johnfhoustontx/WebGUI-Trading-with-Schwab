@@ -5,6 +5,7 @@ import copy
 import datetime as dt
 import json
 import logging
+import os
 import pathlib
 import urllib.parse
 
@@ -428,7 +429,10 @@ def test_a_dividends_path_with_uri_metacharacters_is_still_opened_read_only(
         db, bus, cal_config, tmp_path):
     """``f"file:{path}?mode=ro"`` cut the path at a ``?`` or ``#`` and dropped
     ``mode=ro`` - SQLite then opened (and CREATED) a different file read-write."""
-    odd = tmp_path / "a?b#c%20d"
+    # Windows refuses a ``?`` in a file name outright, so a path holding one
+    # cannot exist there; ``#`` and ``%20`` cut a URI just as well and are legal
+    # on both. Linux (prod and CI) keeps the ``?``.
+    odd = tmp_path / ("a#b%20c" if os.name == "nt" else "a?b#c%20d")
     path = _dividends_store(odd, [("JPM", "2026-10-06")])
     def files():                                    # news.db's own WAL is not ours to judge
         return sorted(str(p) for p in tmp_path.rglob("*") if not p.name.startswith("news.db"))
