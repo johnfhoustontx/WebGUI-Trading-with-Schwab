@@ -233,6 +233,82 @@ def test_the_preview_shows_every_surface_colour(monkeypatch):
             f"Surfaces tile {index} ({colour}) is nowhere in the preview")
 
 
+# ── Dealer Positioning: the put and call colours and their grading ───────────
+# Asked for by the user 2026-10-11.
+
+def _gamma_group():
+    return next(g for g in appearance.GROUPS if g[0] == "Dealer Positioning")
+
+
+def test_dealer_positioning_offers_the_eight_colours_in_scale_order():
+    label, kind, keys = _gamma_group()
+    assert kind == "color"
+    assert keys == [("gamma", k) for k in theme.GAMMA_KEYS]
+    assert "gamma" in appearance.EDITABLE_SECTIONS
+    # Largest put first, largest call last: the order the legend runs in.
+    assert [theme.knob_label(k) for _s, k in keys] == [
+        "Put peak", "Put", "Put mid", "Put low",
+        "Call low", "Call mid", "Call", "Call peak"]
+
+
+def test_the_put_grades_sit_on_one_row_and_the_call_grades_on_the_next(monkeypatch):
+    """Eight tiles do not fit one row at every width, and a ragged wrap would
+    leave one call grade alone under the puts."""
+    from nicegui import ui
+    assert appearance.GROUP_ROW_SIZE["Dealer Positioning"] == 4
+    host = _render(monkeypatch)
+    heading = [e for e in host.descendants()
+               if getattr(e, "text", None) == "Dealer Positioning"][0]
+    card = heading.parent_slot.parent
+    rows = [[lbl.text for lbl in row.descendants()
+             if isinstance(lbl, ui.label) and lbl.text in (
+                 "Put peak", "Put", "Put mid", "Put low",
+                 "Call low", "Call mid", "Call", "Call peak")]
+            for row in card.descendants() if isinstance(row, ui.row)]
+    assert [r for r in rows if r] == [["Put peak", "Put", "Put mid", "Put low"],
+                                      ["Call low", "Call mid", "Call", "Call peak"]]
+
+
+def test_dealer_positioning_says_what_the_colours_are(monkeypatch):
+    host = _render(monkeypatch)
+    help_text = appearance.GROUP_HELP["Dealer Positioning"]
+    assert help_text in _texts(host)
+    for word in ("heat map", "bars", "restart"):
+        assert word in help_text
+
+
+def _ramp_html(host):
+    from nicegui import ui
+    return " ".join(e.content for e in _preview_root(host).descendants()
+                    if isinstance(e, ui.html))
+
+
+def test_the_preview_draws_the_ramp_from_the_unsaved_colours(monkeypatch):
+    """The only place a colour can be judged before the restart that applies
+    it: all eight grades as the heat map's own gradient."""
+    from nicegui import ui
+    host = _render(monkeypatch)
+    assert "rgb(53,200,255)" in _ramp_html(host)            # the shipped call
+    pickers = [e for e in host.descendants() if isinstance(e, ui.color_picker)]
+    first = len(pickers) - len(theme.GAMMA_KEYS)            # the group is last of the colours
+    order = [k for _s, k in _gamma_group()[2]]
+    for offset, colour, rgb in ((order.index("call"), "#00ff88", "rgb(0,255,136)"),
+                                (order.index("put_low"), "#402010", "rgb(64,32,16)")):
+        _pick(host, _color_index(host, first + offset), colour)
+        assert rgb in _ramp_html(host), f"{colour} is not in the preview's ramp"
+    assert "rgb(53,200,255)" not in _ramp_html(host)
+
+
+def _color_index(host, index):
+    """Guard for the test above: the picker at ``index`` is a gamma tile."""
+    keys = _keys()
+    colour_keys = [sk for label, kind, ks in appearance.GROUPS if kind == "color"
+                   for sk in ks]
+    assert colour_keys[index][0] == "gamma", colour_keys[index]
+    assert set(colour_keys) <= set(keys)
+    return index
+
+
 def test_the_footer_buttons_survive_an_edit(monkeypatch):
     """They are MUTATED, never rebuilt. A rebuild on a field's blur swallowed the
     very click that caused it: mousedown, blur, repaint, and by mouseup the

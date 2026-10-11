@@ -125,6 +125,72 @@ def test_balanced_marks_of_nothing():
     assert gh.balanced_marks({100.0: 5.0}, [100.0], **KW) == []
 
 
+# ── the colour ramp, from the operator's eight colours ───────────────────────
+# Asked for by the user 2026-10-11: the put and call colours and their grading
+# are chosen in Settings -> Appearance. The shipped eight must build the exact
+# stops the page drew when they were literals.
+
+SHIPPED_COLOURS = {
+    "put_peak": "#ffbadc", "put": "#ff4d8d", "put_mid": "#96247a", "put_low": "#7a2c5c",
+    "call_low": "#2a5f9b", "call_mid": "#2a76e0", "call": "#35c8ff", "call_peak": "#bef8ff",
+}
+SHIPPED_STOPS = [
+    [0.00, "rgba(255,186,220,0.98)"], [0.12, "rgba(255,77,141,0.92)"],
+    [0.28, "rgba(150,36,122,0.62)"], [0.48, "rgba(122,44,92,0.5)"],
+    [0.50, "rgba(0,0,0,0.0)"],
+    [0.52, "rgba(42,95,155,0.5)"], [0.72, "rgba(42,118,224,0.62)"],
+    [0.88, "rgba(53,200,255,0.92)"], [1.00, "rgba(190,248,255,0.98)"],
+]
+
+
+def test_the_shipped_colours_build_the_stops_the_page_always_drew():
+    assert gh.ramp_stops(SHIPPED_COLOURS) == SHIPPED_STOPS
+
+
+def test_a_chosen_colour_moves_its_own_stop_and_nothing_else():
+    stops = gh.ramp_stops(dict(SHIPPED_COLOURS, call="#00ff88", put_low="#402010"))
+    changed = {i for i, (a, b) in enumerate(zip(stops, SHIPPED_STOPS)) if a != b}
+    assert changed == {3, 7}
+    assert stops[7] == [0.88, "rgba(0,255,136,0.92)"]
+    assert stops[3] == [0.48, "rgba(64,32,16,0.5)"]
+    # Where each grade sits and how see-through it is are the design's, not the
+    # operator's: zero stays clear so the wash behind shows through.
+    assert [s[0] for s in stops] == [s[0] for s in SHIPPED_STOPS]
+    assert stops[4] == [0.50, "rgba(0,0,0,0.0)"]
+
+
+def test_ramp_stops_do_not_write_to_the_colours():
+    colours = dict(SHIPPED_COLOURS)
+    gh.ramp_stops(colours)
+    assert colours == SHIPPED_COLOURS
+
+
+def test_rgba_tint_and_shade():
+    assert gh.rgba("#35c8ff", 0.26) == "rgba(53,200,255,0.26)"
+    assert gh.rgba("#ff4d8d", 0.9) == "rgba(255,77,141,0.9)"
+    assert gh.tint("#35c8ff", 0.0) == "#35c8ff" and gh.tint("#35c8ff", 1.0) == "#ffffff"
+    assert gh.shade("#35c8ff", 1.0) == "#35c8ff" and gh.shade("#35c8ff", 0.0) == "#000000"
+    assert gh.tint("#000000", 0.5) == "#808080"
+    assert gh.mix("#000000", "#ffffff", 0.5) == "#808080"
+    assert gh.mix("#102030", "#ff8040", 0.0) == "#102030"
+    assert gh.mix("#102030", "#ff8040", 1.0) == "#ff8040"
+    assert gh.shade("#ff8040", 0.5) == "#804020"
+
+
+def test_the_ramp_strip_draws_every_stop_and_survives_the_sanitizer():
+    """The Appearance preview's strip: a ``ui.html`` fragment like the legend."""
+    svg = gh.ramp_svg(SHIPPED_STOPS, uid="gprev")
+    for _pos, colour in SHIPPED_STOPS:
+        r, g, b = colour[5:-1].split(",")[:3]
+        assert f"rgb({r},{g},{b})" in svg
+    assert 'id="gprev-ramp"' in svg and "url(#gprev-ramp)" in svg
+    allow = _dompurify_allowlist()
+    names = (set(re.findall(r"<([a-zA-Z][\w-]*)", svg))
+             | set(re.findall(r'([a-zA-Z][\w-]*)="', svg)))
+    stripped = sorted(n for n in names if n.lower() not in allow)
+    assert not stripped, f"DOMPurify would strip: {stripped}"
+
+
 # ── the legend strip ─────────────────────────────────────────────────────────
 
 STOPS = [[0.0, "rgba(255,186,220,0.98)"], [0.5, "rgba(0,0,0,0.0)"],

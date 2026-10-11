@@ -50,6 +50,7 @@ same reason: the one it had named an element the app no longer builds, so a
 forgotten argument would have produced a block matching nothing at all.
 """
 import pathlib
+import re
 import sys
 import tomllib
 
@@ -91,6 +92,20 @@ _DEFAULTS = {
         # Sentiment / Sector-Rotation value colors (lines, zones, table text)
         "green": "#66bb6a", "red": "#ef5350", "yellow": "#ffd54f",
         "flat": "#9e9e9e", "cyan": "#3fb6c7",
+    },
+    "gamma": {
+        # Dealer Positioning (/options/gamma): the put and the call colour, and
+        # the three other shades each side of the heat map grades through. In
+        # the order the scale reads, largest put to largest call. ``put`` and
+        # ``call`` are also the bars, the walls, the gravity well, the ridge
+        # plot and the contour lines. These are the plasma ramp's own eight
+        # colours (docs/plans/2026-08-15-gamma-plasma-palette-design.md), so
+        # nothing moves until an operator chooses. HEX ONLY: where each grade
+        # sits and how see-through it is stay with ``gamma_heat.RAMP``.
+        "put_peak": "#ffbadc", "put": "#ff4d8d",
+        "put_mid": "#96247a", "put_low": "#7a2c5c",
+        "call_low": "#2a5f9b", "call_mid": "#2a76e0",
+        "call": "#35c8ff", "call_peak": "#bef8ff",
     },
     "typography": {
         # Text categories — sizes in PIXELS ("20px", or a bare number like "20";
@@ -188,10 +203,14 @@ _DEFAULTS = {
     # The Premium Divergence + Flow Field redesign. Page-scoped like [console]
     # and [macro], and not surfaced in Settings → Appearance for the same reason.
     #
-    # The call/put pair is DELIBERATELY identical to gamma.POS_COLOR/NEG_COLOR:
-    # these panels sit behind the same subtab strip as the plasma heatmap, and a
-    # cyan that meant "call" on one tab and something else on the next would be
-    # worse than no colour coding at all. Source: the 2026-08-15 handoff spec.
+    # The call/put pair is the SHIPPED [gamma] call/put: these panels sit behind
+    # the same subtab strip as the plasma heatmap, and a cyan that meant "call"
+    # on one tab and something else on the next would be worse than no colour
+    # coding at all. Source: the 2026-08-15 handoff spec.
+    # ⚠ Since 2026-10-11 an operator can change [gamma] in Settings → Appearance
+    # and these two panels do NOT follow: their cyan and magenta are also
+    # written into ~20 literals in flow_panels.py. Until those are derived, a
+    # changed heat map and an unchanged Flow tab disagree.
     "flow": {
         "call": "#35C8FF",       # call premium — the plasma positive
         "put": "#FF4D8D",        # put premium — the plasma negative
@@ -803,6 +822,38 @@ CONSOLE_KEYFRAMES_CSS = """
 @keyframes pulseDot { 0%,100% { opacity: 1; } 50% { opacity: .25; } }
 .con-pulse { animation: pulseDot 2.4s ease-in-out infinite; }
 """
+
+
+# ── Dealer Positioning colours (/options/gamma heat map views) ───────────────
+GAMMA_KEYS = tuple(_DEFAULTS["gamma"])     # largest put … largest call
+_HEX3 = re.compile(r"^#[0-9a-fA-F]{3}$")
+_HEX6 = re.compile(r"^#[0-9a-fA-F]{6}$")
+
+
+def hex6(value):
+    """``#abc`` or ``#A1B2C3`` as ``#rrggbb`` in lower case, else ``None``.
+
+    The Appearance editor accepts both forms (``appearance.is_hex_color``); a
+    chart option needs one, and a value a hand-edited file got wrong must never
+    reach a chart."""
+    v = value.strip() if isinstance(value, str) else ""
+    if _HEX6.match(v):
+        return v.lower()
+    if _HEX3.match(v):
+        return "#" + "".join(c * 2 for c in v[1:]).lower()
+    return None
+
+
+def gamma_colors(theme):
+    """The eight Dealer Positioning colours as ``#rrggbb``, in ``GAMMA_KEYS``
+    order, the shipped one standing in for anything missing or not a hex.
+
+    Total, like ``flow_colors``: no ``[gamma]`` section, or no theme at all,
+    is the shipped ramp."""
+    section = theme.get("gamma") if isinstance(theme, dict) else None
+    section = section if isinstance(section, dict) else {}
+    return {key: hex6(section.get(key)) or _DEFAULTS["gamma"][key]
+            for key in GAMMA_KEYS}
 
 
 # ── Options Flow panels (/options/gamma Flow + Net Prem) helpers ─────────────

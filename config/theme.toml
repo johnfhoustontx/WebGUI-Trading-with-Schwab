@@ -17,9 +17,10 @@
 # are intentionally left at the stock look for this phase — see the adoption
 # plan (docs/plans/2026-07-11-deep-slate-adoption-plan.md).
 #
-# NOT covered here (deliberately): per-chart Highcharts colorscales (e.g. the
-# Gamma heatmap), the data-driven table-cell zone colors (score/heat/P&L maps),
-# and the standalone EOD/Analyze report documents.
+# NOT covered here (deliberately): the other per-chart Highcharts colorscales,
+# the data-driven table-cell zone colors (score/heat/P&L maps), and the
+# standalone EOD/Analyze report documents. The Dealer Positioning heat map IS
+# covered since 2026-10-11: see [gamma].
 # ============================================================================
 
 [palette]                      # ── surfaces + text + buttons ────────────────
@@ -56,6 +57,23 @@ red    = "#f08183"             # negative values
 yellow = "#e6b45a"             # mid-band / caution values
 flat   = "#8891ab"             # flat / no-data
 cyan   = "#6b86ff"             # the "Improving" RRG accent (Deep Slate → blue)
+
+[gamma]                        # ── Dealer Positioning heat map (/options/gamma) ─
+# The put and the call colour, and the three other shades each side grades
+# through, in the order the scale reads: largest put value to largest call
+# value. `put` and `call` are also the bars, the walls, the gravity well, the
+# ridge plot and the contour lines. Edit them in Settings → Appearance, which
+# shows the ramp before you save. "#rrggbb" only: where each grade sits on the
+# scale and how see-through it is are fixed in code. The Flow and Net Prem tabs
+# keep their own colours ([flow]).
+put_peak  = "#ffbadc"          # the largest put values (pale pink)
+put       = "#ff4d8d"          # strong puts; put bars, put wall (magenta)
+put_mid   = "#96247a"          # middling puts
+put_low   = "#7a2c5c"          # the smallest put values (aubergine)
+call_low  = "#2a5f9b"          # the smallest call values (deep blue)
+call_mid  = "#2a76e0"          # middling calls
+call      = "#35c8ff"          # strong calls; call bars, call wall (cyan)
+call_peak = "#bef8ff"          # the largest call values (ice)
 
 [typography]                   # ── text categories: font + sizes ────────────
 # Sizes are in PIXELS — a plain number works too ("15" = "15px"); a larger

@@ -39,6 +39,7 @@ from . import gamma_heat as _heat
 from . import gamma_ridge as _ridge
 from . import gamma_well as _well
 from .inputs import select_all_on_focus
+from . import theme as _theme
 from .theme import FLOW_KEYFRAMES_CSS, MUTED
 
 # "Plasma" palette (see docs/plans/2026-08-15-gamma-plasma-palette-design.md): the
@@ -46,8 +47,57 @@ from .theme import FLOW_KEYFRAMES_CSS, MUTED
 # (negative). These two are the ramp's "hot" stops, and they do double duty — the
 # by-strike bars and the sided wall lines use them, so a bar, a wall and the cells
 # around them all read as the same instrument.
-POS_COLOR = "#35c8ff"
-NEG_COLOR = "#ff4d8d"
+#
+# Since 2026-10-11 the operator chooses them: ``config/theme.toml [gamma]``, in
+# Settings → Appearance. ``palette`` is everything the page derives from those
+# eight colours, and the constants below are its output for the running theme,
+# resolved once at import like the rest of the theme (a web GUI restart applies
+# a change).
+
+
+def palette(colours):
+    """Every colour the page draws in "the call colour" or "the put colour",
+    from the eight an operator can choose (``theme.gamma_colors``). PURE.
+
+    The contour lines are a pale tint of each main colour and the ridge plot's
+    fills a dark one, so both follow a chosen colour instead of staying cyan
+    and magenta beside it."""
+    call, put = colours["call"], colours["put"]
+    return {
+        "pos": call, "neg": put,
+        "stops": _heat.ramp_stops(colours),
+        "contour_above": _heat.rgba(_heat.tint(call, 0.78), 0.62),
+        "contour_below": _heat.rgba(_heat.tint(put, 0.78), 0.62),
+        "well_valley": _heat.rgba(call, 0.26),
+        "well_hill": _heat.rgba(put, 0.26),
+        "ridge_above": _heat.rgba(_heat.shade(call, 0.4), 0.9),
+        "ridge_below": _heat.rgba(_heat.shade(put, 0.4), 0.9),
+        "wash": _wash_stops(colours),
+    }
+
+
+# The wash behind the heat map (``_wash_background``): call side at the top,
+# put side at the bottom, each a dark tint of that side's LOWEST grade over a
+# near-black ground. The shipped low grades keep the wash the plasma design
+# drew, to the digit; any other pair is mixed, with weights chosen so the two
+# rules meet (a test pins both).
+_WASH_SHIPPED = ("#15263e", "#16223a", "#241628", "#281422")
+_WASH_GROUND = "#0e1016"     # nearly neutral: a navy ground would tint every wash blue
+_WASH_MIX = ((0.00, "call_low", 0.25), (0.46, "call_low", 0.20),
+             (0.62, "put_low", 0.20), (1.00, "put_low", 0.24))
+
+
+def _wash_stops(colours):
+    shipped = _theme.gamma_colors(None)
+    if all(colours[key] == shipped[key] for key in ("call_low", "put_low")):
+        return [[pos, tone] for (pos, _k, _w), tone in zip(_WASH_MIX, _WASH_SHIPPED)]
+    return [[pos, _heat.mix(_WASH_GROUND, colours[key], weight)]
+            for pos, key, weight in _WASH_MIX]
+
+
+_PAL = palette(_theme.gamma_colors(_theme.THEME))
+POS_COLOR = _PAL["pos"]
+NEG_COLOR = _PAL["neg"]
 CALL_WALL_COLOR = POS_COLOR
 PUT_WALL_COLOR = NEG_COLOR
 SPOT_COLOR = "#ffd54f"
@@ -63,18 +113,18 @@ PROJ_FLIP_COLOR = "#ffb74d"   # projected EOD delta-flip (0-DTE charm drift)
 BALANCED_COLOR = "#9fb3c8"
 # Contour lines over the heatmap: a pale tint of each ramp end, part see-through,
 # so a line reads against its own colour without hiding the cells under it.
-CONTOUR_ABOVE_COLOR = "rgba(214,241,255,0.62)"
-CONTOUR_BELOW_COLOR = "rgba(255,208,228,0.62)"
+CONTOUR_ABOVE_COLOR = _PAL["contour_above"]
+CONTOUR_BELOW_COLOR = _PAL["contour_below"]
 # The gravity well's ground: each ramp end, mostly see-through, under its line.
-WELL_VALLEY_FILL = "rgba(53,200,255,0.26)"     # POS_COLOR
-WELL_HILL_FILL = "rgba(255,77,141,0.26)"       # NEG_COLOR
+WELL_VALLEY_FILL = _PAL["well_valley"]
+WELL_HILL_FILL = _PAL["well_hill"]
 # Numbers each build of a contour series (see ``heatmap_figure``).
 _CONTOUR_BUILD = itertools.count(1)
 WELL_HEIGHT = 250
 # The ridge plot's fills: a dark tint of each ramp end, nearly opaque, so a ridge
 # hides the part of the one behind it that it stands in front of.
-RIDGE_ABOVE_FILL = "rgba(20,72,104,0.90)"      # POS_COLOR, darkened
-RIDGE_BELOW_FILL = "rgba(104,28,62,0.90)"      # NEG_COLOR, darkened
+RIDGE_ABOVE_FILL = _PAL["ridge_above"]
+RIDGE_BELOW_FILL = _PAL["ridge_below"]
 RIDGE_HEIGHT = 440
 # The chart's top is this many typical peaks above the top row. A peak taller
 # than that runs off the top; without the limit one outlier would squeeze
@@ -115,17 +165,11 @@ _PLOT_MARGIN_BOTTOM = 64
 #    reproduces the design's `pow(a, 1.7)` colour-position shaping without needing a
 #    non-linear axis.
 # Shared by all four intraday views AND Term via ``_coloraxis``.
-HEAT_STOPS = [
-    [0.00, "rgba(255,186,220,0.98)"],  # most-negative net → pale pink
-    [0.12, "rgba(255,77,141,0.92)"],   # put "hot" (magenta)
-    [0.28, "rgba(150,36,122,0.62)"],
-    [0.48, "rgba(122,44,92,0.5)"],    # put ramp base, near-zero (lifted)
-    [0.50, "rgba(0,0,0,0.0)"],         # zero → transparent (the wash shows through)
-    [0.52, "rgba(42,95,155,0.5)"],    # call ramp base, near-zero (lifted)
-    [0.72, "rgba(42,118,224,0.62)"],
-    [0.88, "rgba(53,200,255,0.92)"],   # call "hot" (cyan)
-    [1.00, "rgba(190,248,255,0.98)"],  # most-positive net → ice
-]
+#
+# The positions and opacities are ``gamma_heat.RAMP``; the eight colours are
+# the operator's (``[gamma]``), shipped as the plasma ramp: pale pink, magenta,
+# two aubergines, clear at zero, two deep blues, cyan, ice.
+HEAT_STOPS = _PAL["stops"]
 
 # The washed plot background, blue at the top fading to magenta at the bottom.
 #
@@ -140,8 +184,7 @@ HEAT_STOPS = [
 def _wash_background():
     return {
         "linearGradient": {"x1": 0, "y1": 0, "x2": 0, "y2": 1},
-        "stops": [[0.00, "#15263e"], [0.46, "#16223a"],
-                  [0.62, "#241628"], [1.00, "#281422"]],
+        "stops": [list(stop) for stop in _PAL["wash"]],
     }
 
 

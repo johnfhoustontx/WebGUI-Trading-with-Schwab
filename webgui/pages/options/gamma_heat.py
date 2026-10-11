@@ -298,6 +298,75 @@ def spot_frame_range(step, half):
     return [-edge, edge]
 
 
+# ── the colour ramp ──────────────────────────────────────────────────────────
+# The colour axis's stops, built from the eight colours an operator can choose
+# (``theme.gamma_colors``). WHERE each grade sits and how see-through it is are
+# the design's and stay here: the axis is symmetric about zero, the bright
+# stops sit far out so most of the field stays deep, and opacity runs from
+# nothing at zero to nearly solid at the ends, which is what blends the field
+# into the wash behind it. (position, colour key or None for clear, opacity)
+RAMP = (
+    (0.00, "put_peak", 0.98), (0.12, "put", 0.92),
+    (0.28, "put_mid", 0.62), (0.48, "put_low", 0.5),
+    (0.50, None, 0.0),
+    (0.52, "call_low", 0.5), (0.72, "call_mid", 0.62),
+    (0.88, "call", 0.92), (1.00, "call_peak", 0.98),
+)
+
+
+def _rgb(colour):
+    """``#rrggbb`` -> (r, g, b)."""
+    return tuple(int(colour[i:i + 2], 16) for i in (1, 3, 5))
+
+
+def rgba(colour, alpha):
+    """``#rrggbb`` at ``alpha`` as ``rgba(r,g,b,a)``, the form a chart takes."""
+    r, g, b = _rgb(colour)
+    return f"rgba({r},{g},{b},{alpha})"
+
+
+def mix(colour, other, amount):
+    """``colour`` moved ``amount`` (0 … 1) of the way to ``other``, as ``#rrggbb``."""
+    return "#" + "".join(f"{round(a + (b - a) * amount):02x}"
+                         for a, b in zip(_rgb(colour), _rgb(other)))
+
+
+def tint(colour, amount):
+    """``colour`` moved ``amount`` (0 … 1) of the way to white."""
+    return mix(colour, "#ffffff", amount)
+
+
+def shade(colour, keep):
+    """``colour`` at ``keep`` (0 … 1) of its brightness; the rest is black."""
+    return mix(colour, "#000000", 1.0 - keep)
+
+
+def ramp_stops(colours):
+    """The colour axis's stops for ``colours`` (``theme.gamma_colors``): each
+    grade's colour at its place in ``RAMP``, and a clear stop at zero."""
+    return [[pos, rgba(colours[key], alpha) if key else "rgba(0,0,0,0.0)"]
+            for pos, key, alpha in RAMP]
+
+
+def ramp_svg(stops, *, uid, width=340, height=22):
+    """The ramp alone as an SVG strip, over the ground the legend uses: what
+    the Appearance preview draws from the unsaved colours. A ``ui.html``
+    fragment, so every tag here is one the sanitizer keeps (pinned by a test)."""
+    grad = "".join(
+        f'<stop offset="{pos:.2f}" stop-color="{rgb}" stop-opacity="{alpha:.2f}"></stop>'
+        for pos, (rgb, alpha) in ((p, _stop(c)) for p, c in stops))
+    return (
+        f'<svg width="100%" height="{height}" viewBox="0 0 {width} {height}" '
+        f'preserveAspectRatio="none">'
+        f'<defs><linearGradient id="{uid}-ramp" x1="0" y1="0" x2="1" y2="0">'
+        f'{grad}</linearGradient></defs>'
+        f'<rect x="0" y="0" width="{width}" height="{height}" '
+        f'fill="{_LEGEND_GROUND}"></rect>'
+        f'<rect x="0" y="0" width="{width}" height="{height}" '
+        f'fill="url(#{uid}-ramp)"></rect>'
+        f'</svg>')
+
+
 # ── the legend strip ─────────────────────────────────────────────────────────
 # One line of SVG beside the controls: [-max] [ramp] [+max]  unit · caption.
 # It is NOT a Highcharts legend and not a column beside the chart: the heatmap

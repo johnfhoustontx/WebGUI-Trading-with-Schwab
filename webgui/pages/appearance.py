@@ -19,6 +19,7 @@ from nicegui import ui
 
 import config_schema as _cs
 from pages import ui_kit as kit
+from pages.options import gamma_heat as _heat
 from pages.options import theme
 from pages.ui_guard import guard
 
@@ -36,12 +37,13 @@ GROUPS = [
     ("Status colours", "color", [("semantic", k) for k in (
         "positive", "warning", "negative", "neutral")]),
     ("Charts", "color", [("charts", k) for k in ("green", "red", "yellow", "flat", "cyan")]),
+    ("Dealer Positioning", "color", [("gamma", k) for k in theme.GAMMA_KEYS]),
     ("Type", "text", [("typography", k) for k in (
         "family", "font_url", "numeric", "titles", "subtitles", "sections", "body", "small")]),
     ("Menu", "menu", [("menu", k) for k in (
         "accent", "header_bg", "drawer_bg", "text", "hover_bg", "title")]),
 ]
-EDITABLE_SECTIONS = ("palette", "semantic", "charts", "typography", "menu")
+EDITABLE_SECTIONS = ("palette", "semantic", "charts", "gamma", "typography", "menu")
 
 # A note under a group whose change the preview cannot show - or cannot show in
 # FULL, which is the easier one to be misled by. Data rather than a label test
@@ -55,6 +57,21 @@ GROUP_NOTES = {
     "Type": "Only the title and caption sizes show here; the rest of this group "
             "applies after a web GUI restart.",
 }
+# What a group's colours ARE, where the labels alone do not say. Not a
+# GROUP_NOTES entry: that set is for what the preview cannot show, and this
+# group's ramp is in the preview.
+GROUP_HELP = {
+    "Dealer Positioning":
+        "The heat map's colours, four grades a side. Top row: the put side, "
+        "from its largest values to its smallest. Bottom row: the call side, "
+        "from its smallest values to its largest. Put and Call are also the "
+        "bars, the walls, the gravity well, the ridge plot and the contour "
+        "lines. The Flow and Net Prem tabs keep their own colours. Shows after "
+        "a web GUI restart.",
+}
+# Tiles to a row, where a group has a shape of its own: the four put grades over
+# the four call grades. Any other group is one wrapping row.
+GROUP_ROW_SIZE = {"Dealer Positioning": 4}
 # What a restart costs, on its own so the dialog and the warning that names the
 # unsaved edits cannot drift apart.
 RESTART_BODY = "Every open page reloads in a few seconds."
@@ -265,12 +282,15 @@ def render():
         for label, kind, keys in GROUPS:
             with ui.column().classes(f"{theme.CARD} w-full gap-2"):
                 ui.label(label).classes(f"text-subtitle2 font-semibold {theme.LABEL}")
-                if label in GROUP_NOTES:
-                    ui.label(GROUP_NOTES[label]).classes(f"text-xs {theme.MUTED}")
+                for words in (GROUP_NOTES.get(label), GROUP_HELP.get(label)):
+                    if words:
+                        ui.label(words).classes(f"text-xs {theme.MUTED}")
                 if kind == "color":
-                    with ui.row().classes("gap-2 flex-wrap"):
-                        for sec, key in keys:
-                            _tile(sec, key)
+                    size = GROUP_ROW_SIZE.get(label, len(keys))
+                    for start in range(0, len(keys), size):
+                        with ui.row().classes("gap-2 flex-wrap"):
+                            for sec, key in keys[start:start + size]:
+                                _tile(sec, key)
                     continue
                 if kind == "menu":
                     ui.label("Leave a field empty to keep the stock look.") \
@@ -335,6 +355,21 @@ def render():
                                                f"text-[{size(ty['small'])}]")
                 ui.label("Nothing to report yet").classes(
                     f"w-full text-center text-[13px] text-[{p['muted']}] py-1")
+                # Dealer Positioning: the heat map's own gradient, built by the
+                # page's own stop builder from the UNSAVED colours.
+                g = theme.gamma_colors(t)
+                with ui.column().classes(f"{tok['CARD']} w-full gap-1"):
+                    ui.label("Dealer Positioning heat map").classes(tok["EYEBROW"])
+                    ui.html(_heat.ramp_svg(_heat.ramp_stops(g), uid="gprev")) \
+                        .classes("w-full")
+                    with ui.row().classes("w-full items-center no-wrap gap-2"):
+                        ui.label("Largest put").classes(
+                            f"text-[11px] font-semibold text-[{g['put']}]")
+                        ui.space()
+                        ui.label("zero").classes(f"text-[11px] text-[{p['muted']}]")
+                        ui.space()
+                        ui.label("Largest call").classes(
+                            f"text-[11px] font-semibold text-[{g['call']}]")
 
     # ── actions, footer, restart banner ─────────────────────────────────────
     def _repaint_values():
