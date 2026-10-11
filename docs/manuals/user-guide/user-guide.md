@@ -899,6 +899,19 @@ nothing: **Spot** and **Bar** (price is always the flat line). The forward proje
 band is not drawn either. Each level line keeps its own price in its label; only its
 position moves.
 
+**The heat map is smoothed, and the Smooth picker sets how much** (Light, Medium or
+Strong; it starts at Medium, and Off is the map as collected). Each cell is averaged with the minutes
+and strikes around it before it is coloured, so a strike that flickers from one
+minute to the next stops drawing as stripes and the bands of positioning read as
+bands. Use Light to calm the noise and keep each strike distinct, Medium for the
+overall shape, Strong for the broad picture only.
+
+Smoothing costs detail, in three ways worth knowing. A smoothed wall is a little
+lower and wider than the real one. The newest few minutes show late, because the
+last column can only be averaged with what came before it. And the number you get
+by pressing and holding a cell is the smoothed one; the tooltip says "(smoothed)".
+For an exact reading use the bars, which are never smoothed, or set Smooth to Off.
+
 **To see where the positioning changes fast, switch Contours on.** It draws lines of
 equal value over the heat map: at the top of the colour scale, at half of it and at a
 quarter, above and below zero. Where the lines bunch together, the exposure changes a

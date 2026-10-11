@@ -4,7 +4,36 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-11 (**Dealer Positioning: the Flow and Net Prem tabs follow the chosen colours.**)
+**Last updated:** 2026-10-11 (**Dealer Positioning: real smoothing for the heat map.**)
+
+- **Asked for by the user,** after being told the heat map's only smoothing was the
+  browser blending a stretched one-pixel-a-cell picture: "I need real smoothing in
+  the heatmap."
+- **What is new.** A **Smooth** picker beside the heat map's others: Off, Light,
+  Medium, Strong. It starts at **Medium**, the user's choice before it shipped (it
+  was Off as first built); Off is the map as it was. A strength averages
+  each cell's VALUE with the minutes and strikes around it before it is coloured, so
+  minute-to-minute noise no longer draws as stripes.
+- **How.** A bell-curve average with its own width along time and across strikes
+  (`config/gamma_heat.toml [smooth]`: 3.0 minutes and 0.8 strikes at Medium, half at
+  Light, twice at Strong). A cell with no reading is skipped and stays empty. It is
+  applied in the frame being drawn and before Share of column is taken.
+- **What follows it.** The contour lines are traced from the smoothed cells (38
+  lines to 6 on the 2026-10-09 `$SPX` Gamma view). The forward band, the bars, the
+  ridge plot and the gravity well are not smoothed.
+- **What it costs, said on the page:** a peak is lower and wider, the newest minutes
+  lag, and the press-and-hold figure is the smoothed one and says "(smoothed)".
+- **Cost.** About 27, 37 and 59 ms a repaint at the three strengths on that session.
+  Nothing while Off; nothing more is sent. With Medium as the default, every open
+  heat map pays the 37 ms, the public page's included.
+- **Verified** by the suites, by rendering each strength from the real session, and
+  in the page harness (picker, repaint, tooltip, contours intact, the choice restored
+  after a restart). Not seen on the running app.
+- **Choices that were mine,** listed in the design: three strengths, the bell curve
+  and its widths, and smoothing the contours with the cells.
+- **Design:** `docs/plans/2026-10-11-gamma-heatmap-smoothing-design.md`.
+
+**Prior —** 2026-10-11 (**Dealer Positioning: the Flow and Net Prem tabs follow the chosen colours.**)
 
 - **Asked for by the user** after the colours became choosable: those two tabs had
   been left out and kept cyan and magenta.

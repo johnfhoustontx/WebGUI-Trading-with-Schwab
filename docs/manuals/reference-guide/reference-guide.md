@@ -726,6 +726,16 @@ hide in this frame, and the forward projection band is not drawn. Level movement
 works as it does in the Strike frame: off leaves one line per level at its distance
 from price now, on adds the path each level took.
 
+**Smooth** (Off, Light, Medium, Strong; Medium by default). Averages each cell with
+its neighbouring minutes and strikes before it is coloured. Without it the only
+smoothing is your browser blending the picture as it enlarges it, which softens the
+edges between cells and leaves minute-to-minute noise as stripes. With it the
+noise is averaged out and the structure is easier to see. It is a trade: peaks
+come out lower and wider, the newest minutes lag, and a cell's number is no longer
+the stored reading (the tooltip says so). The contour lines are traced from the
+smoothed cells, so they become fewer and cleaner. The bars, the ridge plot and the
+gravity well always show the raw values.
+
 **Contours** (switch, off by default). Lines of equal value drawn over the heat map,
 at the top of the colour scale, half of it and a quarter, each side of zero. Colour
 shows you how much; contours show you where it *changes*. Lines packed together mean

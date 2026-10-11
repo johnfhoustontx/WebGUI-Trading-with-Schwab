@@ -2250,6 +2250,27 @@ left out as a speck, and past `[contours] max_points` (6,000 a sign) the shortes
 lines are dropped. Measured on a stored `$SPX` session the lines cost about 27 ms and
 35 KB a repaint. They cover the collected minutes only, not the forward band.
 
+**Smoothing.** With a **Smooth** strength chosen, each heat-map cell is replaced
+by a weighted average of its neighbours before the colour scale is applied
+(`gamma_heat.smooth`):
+
+```
+weight(d)  = exp(−d² / 2σ²), out to 3σ          a bell curve, per direction
+smoothed   = Σ weight·value / Σ weight          over the cells that have a reading
+σ (Medium) = [smooth] minutes (3.0) along time, [smooth] strikes (0.8) across
+Light      = half of each;  Strong = twice
+```
+
+Time first, then strikes. A cell with no reading is skipped and stays empty, and
+the division by the weights actually used means an edge is not dimmed. It is
+applied to the grid in the frame being drawn and before Share of column is taken,
+so each minute still sums to 100%. The contour lines are traced from the smoothed
+cells; the forward band is not smoothed. Consequences: a peak is lower and wider,
+and the last column is a one-sided average, so new moves lag by about σ minutes.
+Measured on a stored `$SPX` session: 27, 37 and 59 ms a repaint at Light, Medium
+and Strong. Without it the only smoothing is the browser interpolating the image
+(one pixel a cell) as it scales it to the panel.
+
 **The gravity well.** With **Gravity well** on (Gamma view), a panel draws the
 by-strike bars' own net values as ground (`gamma_well`):
 

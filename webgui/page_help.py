@@ -774,6 +774,12 @@ accelerate price.
   controls hide there, because price is always the flat line. **Level movement**
   still works: off shows each level as one line at its distance from price now,
   on adds the path it took to get there.
+- **Smooth** (Off, Light, Medium, Strong; Medium unless you change it) averages each
+  cell with the minutes and strikes around it before it is coloured. It is real
+  smoothing of the numbers: noise from one minute to the next stops drawing as
+  stripes and the bands read as bands. The price: a smoothed peak is lower and
+  wider than the real one, and the newest few minutes show late. Press and hold
+  then gives the smoothed figure and says so; the bars are never smoothed.
 - **Contours** (switch, off by default) draws lines of equal value over the heat
   map: one at the top of the colour scale, one at half of it and one at a
   quarter, above and below zero. Lines packed close together mark where the

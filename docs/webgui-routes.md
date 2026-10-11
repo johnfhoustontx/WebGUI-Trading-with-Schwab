@@ -1077,6 +1077,18 @@ or **From spot**. `heatmap_figure` and `bar_figure` take `frame=` and `half=`.
 - **`HeatControls.sync(view, overlays)`** hides the page's Spot and Bar controls
   (never the Level movement switch) in the spot frame, AFTER `_sync_spot_controls` has applied its own
   rules. A frame change runs that sync, then the repaint.
+- **Smoothing (2026-10-11).** `HeatControls` holds a **Smooth** picker
+  (`gamma_heat_smooth`: off | light | medium | strong, MEDIUM by default, the user's
+  choice, and so the public page's too); `read()`
+  hands both builders `smooth` = `gamma_heat.smooth_args(level,
+  gamma_heat_config.smooth())`, or None. `heatmap_figure` runs
+  `gamma_heat.smooth(vz, minutes=, strikes=)` on the grid AFTER the frame transform
+  and BEFORE `share_of_column`: a normalised bell-curve average, time then strikes,
+  gaps skipped and kept. The contours and the adaptive scale are taken from the
+  smoothed grid; the projection band is appended raw; the tooltip gains
+  "(smoothed)". `bar_figure` takes the keyword and ignores it. Pure Python, about
+  30 to 60 ms a repaint on `$SPX` while on. ⚠ `interpolation: True` is NOT this:
+  it only scales the one-pixel-a-cell image.
 - **Contours (2026-10-10).** `HeatControls` holds a **Contours** switch
   (`gamma_heat_contours`, off by default); `read()` hands `contours` to both builders:
   `gamma_heat_config.contours()` while it is on, else None. `heatmap_figure` then
