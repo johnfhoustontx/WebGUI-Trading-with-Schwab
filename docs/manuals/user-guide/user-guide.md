@@ -3187,7 +3187,8 @@ Preferences, all saved on your machine:
   shows for the largest, middling and smallest values on that side. Click a
   tile to pick a colour; the strip in the preview shows the whole scale, largest
   put on the left to largest call on the right, before you save. The Flow and
-  Net Prem tabs keep their own colours.
+  Net Prem tabs follow the same colours: their call and put lines, the strike
+  ladder and the frame around them.
 - **API usage** — how many calls the app has made to **Schwab** (counted at the
   gateway) and to **Claude** (counted at each call site), for today, the last 7 days
   and the last 30. Under the Schwab counts, **Answered locally today** is the number

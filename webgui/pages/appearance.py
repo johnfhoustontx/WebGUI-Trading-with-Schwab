@@ -66,8 +66,8 @@ GROUP_HELP = {
         "from its largest values to its smallest. Bottom row: the call side, "
         "from its smallest values to its largest. Put and Call are also the "
         "bars, the walls, the gravity well, the ridge plot and the contour "
-        "lines. The Flow and Net Prem tabs keep their own colours. Shows after "
-        "a web GUI restart.",
+        "lines, and the Flow and Net Prem tabs follow them. Shows after a web "
+        "GUI restart.",
 }
 # Tiles to a row, where a group has a shape of its own: the four put grades over
 # the four call grades. Any other group is one wrapping row.

@@ -65,12 +65,37 @@ Nothing an operator would see, but not nothing:
   so they follow a chosen colour. At the shipped colours they moved by at most
   8 parts in 255 on one channel.
 
+## The Flow and Net Prem tabs follow
+
+Left out of the first slice and asked for by the user the same day. Those two
+panels are hand-built HTML and SVG (`flow_panels.py`) with a palette of their own,
+`[flow]`, whose call and put pair was the plasma pair by design.
+
+- **Five `[flow]` keys follow `[gamma]`** (`theme.FLOW_FOLLOWS`): `call` and `put`
+  take Call and Put, `call_deep` and `put_deep` (the far stop of each ribbon)
+  take Call mid and Put mid, and `ice` (chip rings, the cursor, the bar grounds)
+  takes Call peak. Those were already the same five colours.
+- **A chosen colour wins; the shipped one does not.** `flow_colors` replaces a
+  `[flow]` key only when its `[gamma]` colour is not the shipped one. So the
+  shipped palette is untouched to the character, and a `[flow]` value set by
+  hand in the file keeps its say until the matching colour is chosen in
+  Appearance.
+- **About twenty literal tints became one function.** `rgba(53,200,255,.12)` and
+  its like, for the call, put and ice colours, were written into the markup and
+  into the client script. They are all `flow_panels._tone(key, alpha)` now. The
+  alpha is pasted as written, so at the shipped colours every string is the one
+  it replaced (a test pins thirteen of them).
+- **The client script takes its tints from the payload.** `_SCRUB_JS` is one
+  constant string that draws the strike ladder in the browser, so the five tints
+  it needs travel in the payload's `col` (`callInk`, `callDim`, `putInk`,
+  `putDim`, `rowBg`), built on the server from the palette.
+- **A test reads the module's source** and fails on a call, put or ice colour
+  written into it again.
+- Not followed, because they are not call or put colours: the panel's dark wash,
+  the spot line, the labels, and the Net Prem tab's one colour per symbol.
+
 ## Not done
 
-- **The Flow and Net Prem tabs do not follow.** Their cyan and magenta are also
-  written into about twenty literals in `flow_panels.py` (rings, rails, hairlines).
-  A heat map in new colours beside those two tabs in the old ones disagree until
-  those are derived too. The group's own description says so.
 - **The picture pushed to Telegram and Discord** is drawn by a separate renderer
   and keeps its colours.
 - **The public site** reads the same theme file, but its process restarts on its
@@ -82,7 +107,8 @@ Nothing an operator would see, but not nothing:
 
 Reading "grading" as the shades; four grades a side; the group living in
 Appearance with the other colours instead of on the page; deriving the contours,
-ridge fills and wash instead of adding six more pickers; leaving the Flow tabs.
+ridge fills and wash instead of adding six more pickers; and, for the Flow tabs,
+letting a colour chosen in Appearance win over a `[flow]` value set by hand.
 
 ## Verified
 
@@ -95,4 +121,9 @@ ridge fills and wash instead of adding six more pickers; leaving the Flow tabs.
   A full green and orange set, saved through the same function, then drew on a
   freshly started heat map (real `$SPX` session of 2026-10-09): stops, bars,
   walls, legend, contours, well, ridge plot and wash.
+- The Flow tab, freshly started with the same green and orange set on the real
+  `$SPX` session: no cyan, magenta or ice left anywhere in the page, the strike
+  ladder (drawn by the client script) included. The Net Prem tab's frame was seen
+  the same way; its populated state has no data in the harness seed and is
+  covered by the test that renders it under a changed palette.
 - Not seen on the running app.

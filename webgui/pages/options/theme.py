@@ -207,10 +207,10 @@ _DEFAULTS = {
     # the same subtab strip as the plasma heatmap, and a cyan that meant "call"
     # on one tab and something else on the next would be worse than no colour
     # coding at all. Source: the 2026-08-15 handoff spec.
-    # ⚠ Since 2026-10-11 an operator can change [gamma] in Settings → Appearance
-    # and these two panels do NOT follow: their cyan and magenta are also
-    # written into ~20 literals in flow_panels.py. Until those are derived, a
-    # changed heat map and an unchanged Flow tab disagree.
+    # Since 2026-10-11 an operator can change [gamma] in Settings → Appearance,
+    # and five of these keys FOLLOW it (``FLOW_FOLLOWS``, in ``flow_colors``):
+    # call, put, call_deep, put_deep and ice. The values here are what they are
+    # while the matching [gamma] colour is the shipped one.
     "flow": {
         "call": "#35C8FF",       # call premium — the plasma positive
         "put": "#FF4D8D",        # put premium — the plasma negative
@@ -868,12 +868,26 @@ _FLOW_KEYS = ("call", "put", "spot", "call_line", "put_line", "call_deep",
               "title", "label", "ice", "grid")
 
 
+# The Flow keys that ARE a call or put colour, and the Dealer Positioning colour
+# each takes once an operator has chosen one (flow key -> [gamma] key). The far
+# stop of each ribbon is that side's middle grade, and "ice" (chip rings, the
+# cursor, the bar grounds) is the call side's peak, as they always were.
+FLOW_FOLLOWS = {"call": "call", "put": "put", "call_deep": "call_mid",
+                "put_deep": "put_mid", "ice": "call_peak"}
+
+
 def flow_colors(theme):
     """The Options Flow panels' raw hexes, defaults filling anything missing.
 
     Total: a malformed ``[flow]`` section (or none at all) yields the built-in
     palette rather than raising — styling must never break a page whose whole
-    job is showing where the money went."""
+    job is showing where the money went.
+
+    The call and put colours follow ``[gamma]`` (``FLOW_FOLLOWS``): a colour
+    chosen in Settings → Appearance replaces the ``[flow]`` one, so these two
+    tabs and the heat map beside them wear the same pair. While a ``[gamma]``
+    colour is the shipped one, ``[flow]`` keeps its say, which leaves the
+    shipped palette untouched to the character."""
     section = theme.get("flow") if isinstance(theme, dict) else None
     section = section if isinstance(section, dict) else {}
     out = {}
@@ -881,6 +895,10 @@ def flow_colors(theme):
         value = section.get(key)
         out[key] = value if isinstance(value, str) and value.strip() \
             else _DEFAULTS["flow"][key]
+    chosen = gamma_colors(theme)
+    for flow_key, gamma_key in FLOW_FOLLOWS.items():
+        if chosen[gamma_key] != _DEFAULTS["gamma"][gamma_key]:
+            out[flow_key] = chosen[gamma_key]
     return out
 
 

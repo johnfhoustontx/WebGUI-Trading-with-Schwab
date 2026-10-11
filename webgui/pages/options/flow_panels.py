@@ -38,7 +38,22 @@ import datetime as _dt
 import math
 from zoneinfo import ZoneInfo
 
+from pages.options import theme as _theme
 from pages.options.theme import FLOW_COLORS as C
+
+
+def _tone(key, alpha):
+    """The palette's ``key`` colour at ``alpha``, as ``rgba(r,g,b,a)``.
+
+    Every tint of the call, put and ice colours on these panels comes through
+    here, so a colour chosen in Settings → Appearance reaches all of them (they
+    were ~20 literals until 2026-10-11, and a theme could reach none). ``alpha``
+    is TEXT and is pasted as written (".12"), so the shipped palette yields the
+    very strings the panels held as literals. A colour a hand-edited file got
+    wrong falls back to the shipped one instead of breaking the page."""
+    colour = _theme.hex6(C.get(key)) or _theme.hex6(_theme._DEFAULTS["flow"][key])
+    r, g, b = (int(colour[i:i + 2], 16) for i in (1, 3, 5))
+    return f"rgba({r},{g},{b},{alpha})"
 
 _CT = ZoneInfo("America/Chicago")
 
@@ -343,7 +358,7 @@ def mode_toggle_html(uid, active):
             f'letter-spacing:.14em;cursor:pointer;user-select:none;{fill}">'
             f'{_esc(label)}</span>')
     return (f'<div style="display:flex;margin-left:auto;'
-            f'box-shadow:inset 0 0 0 1px rgba(190,248,255,.12)">'
+            f'box-shadow:inset 0 0 0 1px {_tone("ice", ".12")}">'
             f'{"".join(segments)}</div>')
 
 
@@ -799,11 +814,11 @@ def field_svg(geom, times, colors, uid, mode=DEFAULT_MODE):
 
 _PANEL_BG = (f"linear-gradient(150deg,{C['panel_from']} 0%,"
              f"{C['panel_mid']} 48%,{C['panel_to']} 100%)")
-_PANEL_SHADOW = ("0 0 0 1px rgba(53,200,255,.12),0 40px 90px -40px #000")
-_CHIP_BG = "rgba(190,248,255,.035)"
-_CHIP_RING = "inset 0 0 0 1px rgba(190,248,255,.10)"
-_HAIR = "rgba(53,200,255,.10)"
-_RAIL_BG = "linear-gradient(180deg,rgba(53,200,255,.05),transparent 38%)"
+_PANEL_SHADOW = f"0 0 0 1px {_tone('call', '.12')},0 40px 90px -40px #000"
+_CHIP_BG = _tone("ice", ".035")
+_CHIP_RING = f"inset 0 0 0 1px {_tone('ice', '.10')}"
+_HAIR = _tone("call", ".10")
+_RAIL_BG = f"linear-gradient(180deg,{_tone('call', '.05')},transparent 38%)"
 
 
 def _live_pill(text, live=True):
@@ -858,7 +873,7 @@ def _rail_cell(label, node_id, color, size=20, swatch=None, unit=""):
     suffix = (f'<span style="font-size:11px;opacity:.5"> {_esc(unit)}</span>'
               if unit else "")
     return (f'<div style="padding:13px 22px;border-bottom:1px solid '
-            f'rgba(53,200,255,.08)">'
+            f'{_tone("call", ".08")}">'
             f'<div style="display:flex;align-items:center;gap:8px;'
             f'margin-bottom:8px">{dot}'
             f'<span style="font:500 9px/1 {MONO};letter-spacing:.2em;'
@@ -872,9 +887,9 @@ def _bipolar_bar(fill_id, height=6):
     for put-led, right for call-led. The zero tick is what makes it readable as
     a direction rather than as a magnitude."""
     return (f'<div style="margin-top:12px;height:{height}px;'
-            f'background:rgba(190,248,255,.07);position:relative">'
+            f'background:{_tone("ice", ".07")};position:relative">'
             f'<div style="position:absolute;top:0;left:50%;width:1px;'
-            f'height:{height}px;background:rgba(190,248,255,.35)"></div>'
+            f'height:{height}px;background:{_tone("ice", ".35")}"></div>'
             f'<div id="{fill_id}" style="position:absolute;top:0;'
             f'height:{height}px;left:50%;width:0%"></div></div>')
 
@@ -947,11 +962,11 @@ def divergence_panel(rows, ladder, symbol, dte_label, uid):
         f'<span id="{u}-ladtime">—</span></span>'
         f'<span style="display:flex;gap:18px">'
         f'<span style="display:flex;align-items:center;gap:6px;'
-        f'font:400 9px/1 {MONO};letter-spacing:.14em;color:rgba(255,77,141,.8)">'
+        f'font:400 9px/1 {MONO};letter-spacing:.14em;color:{_tone("put", ".8")}">'
         f'<span style="width:10px;height:3px;background:{C["put"]}"></span>'
         f'PUT $M</span>'
         f'<span style="display:flex;align-items:center;gap:6px;'
-        f'font:400 9px/1 {MONO};letter-spacing:.14em;color:rgba(53,200,255,.8)">'
+        f'font:400 9px/1 {MONO};letter-spacing:.14em;color:{_tone("call", ".8")}">'
         f'<span style="width:10px;height:3px;background:{C["call"]}"></span>'
         f'CALL $M</span></span></div>'
         f'<div id="{u}-lad" style="display:flex;flex-direction:column;gap:3px">'
@@ -959,7 +974,7 @@ def divergence_panel(rows, ladder, symbol, dte_label, uid):
 
     rail = (
         f'<div style="width:300px;flex:none;display:flex;'
-        f'flex-direction:column;border-left:1px solid rgba(53,200,255,.12);'
+        f'flex-direction:column;border-left:1px solid {_tone("call", ".12")};'
         f'background:{_RAIL_BG}">'
         f'<div style="padding:20px 22px 16px;border-bottom:1px solid {_HAIR}">'
         f'<div style="font:500 9px/1 {MONO};letter-spacing:.24em;'
@@ -972,7 +987,7 @@ def divergence_panel(rows, ladder, symbol, dte_label, uid):
                      swatch=C["call"], unit="$M")
         + _rail_cell("PUT PREMIUM", f"{u}-rput", C["put"],
                      swatch=C["put"], unit="$M")
-        + f'<div style="padding:18px 22px;background:rgba(53,200,255,.05);'
+        + f'<div style="padding:18px 22px;background:{_tone("call", ".05")};'
           f'border-bottom:1px solid {_HAIR}">'
           f'<div style="font:500 9px/1 {MONO};letter-spacing:.2em;'
           f'color:rgba(174,205,232,.45);margin-bottom:10px">'
@@ -1021,8 +1036,13 @@ def divergence_panel(rows, ladder, symbol, dte_label, uid):
         "yCall": [round(y, 1) for y in geom["y_call"]],
         "yPut": [round(y, 1) for y in geom["y_put"]],
         "lad": lad if has_ladder else None,
+        # The ladder is drawn by the scrub script, which is one constant
+        # string: the tints it needs travel here, built from the palette.
         "col": {"call": C["call"], "put": C["put"], "spot": C["spot"],
-                "label": C["label"], "title": C["title"]},
+                "label": C["label"], "title": C["title"],
+                "callInk": _tone("call", ".7"), "callDim": _tone("call", ".2"),
+                "putInk": _tone("put", ".7"), "putDim": _tone("put", ".2"),
+                "rowBg": _tone("ice", ".06")},
     }
     return html, payload
 
@@ -1081,7 +1101,7 @@ def field_panel(rows_by_symbol, order, colors, mode, uid):
 
     board = "".join(
         f'<div id="{u}-row{i}" style="padding:13px 22px;'
-        f'border-bottom:1px solid rgba(53,200,255,.07)">'
+        f'border-bottom:1px solid {_tone("call", ".07")}">'
         f'<div style="display:flex;align-items:baseline;'
         f'justify-content:space-between;margin-bottom:8px">'
         f'<span style="display:flex;align-items:center;gap:9px">'
@@ -1092,17 +1112,17 @@ def field_panel(rows_by_symbol, order, colors, mode, uid):
         f'letter-spacing:.06em">{_esc(line["k"])}</span></span>'
         f'<span id="{u}-v{i}" style="font:600 17px/1 {MONO};'
         f'color:{colors.get(line["k"], C["label"])}">—</span></div>'
-        f'<div style="height:5px;background:rgba(190,248,255,.06);'
+        f'<div style="height:5px;background:{_tone("ice", ".06")};'
         f'position:relative">'
         f'<div style="position:absolute;top:0;left:50%;width:1px;height:5px;'
-        f'background:rgba(190,248,255,.3)"></div>'
+        f'background:{_tone("ice", ".3")}"></div>'
         f'<div id="{u}-b{i}" style="position:absolute;top:0;height:5px;'
         f'left:50%;width:0%"></div></div></div>'
         for i, line in enumerate(geom["lines"]))
 
     rail = (
         f'<div style="width:340px;flex:none;display:flex;flex-direction:column;'
-        f'border-left:1px solid rgba(53,200,255,.12);background:{_RAIL_BG}">'
+        f'border-left:1px solid {_tone("call", ".12")};background:{_RAIL_BG}">'
         f'<div style="padding:20px 22px 14px;border-bottom:1px solid {_HAIR}">'
         f'<div style="font:500 9px/1 {MONO};letter-spacing:.24em;'
         f'color:rgba(174,205,232,.4);margin-bottom:9px">'
@@ -1239,22 +1259,22 @@ _SCRUB_JS = r"""
       var cw=mx?c/mx*100:0, pw=mx?p/mx*100:0;
       var tag = k===ci?'CALL WALL':(k===pi?'PUT WALL':'');
       var tc  = k===ci?D.col.call:D.col.put;
-      var bg  = k===si?'rgba(190,248,255,.06)':'transparent';
+      var bg  = k===si?D.col.rowBg:'transparent';
       var kc  = k===si?D.col.title:'rgba(207,230,247,.72)';
       h += '<div style="display:flex;align-items:center;gap:10px;height:19px;'
          + 'background:'+bg+'">'
          + '<span style="width:46px;text-align:right;font:400 10px/1 '+mono
-         + ';color:rgba(255,77,141,.7)">'+num(p,dec(p))+'</span>'
+         + ';color:'+D.col.putInk+'">'+num(p,dec(p))+'</span>'
          + '<span style="flex:1;display:flex;justify-content:flex-end">'
          + '<span style="height:9px;width:'+pw.toFixed(1)+'%;background:'
-         + 'linear-gradient(90deg,rgba(255,77,141,.2),'+D.col.put+')"></span></span>'
+         + 'linear-gradient(90deg,'+D.col.putDim+','+D.col.put+')"></span></span>'
          + '<span style="width:72px;text-align:center;font:600 11px/1 '+mono
          + ';letter-spacing:.06em;color:'+kc+'">'+rows[k][0]+'</span>'
          + '<span style="flex:1;display:flex">'
          + '<span style="height:9px;width:'+cw.toFixed(1)+'%;background:'
-         + 'linear-gradient(90deg,'+D.col.call+',rgba(53,200,255,.2))"></span></span>'
+         + 'linear-gradient(90deg,'+D.col.call+','+D.col.callDim+')"></span></span>'
          + '<span style="width:46px;font:400 10px/1 '+mono
-         + ';color:rgba(53,200,255,.7)">'+num(c,dec(c))+'</span>'
+         + ';color:'+D.col.callInk+'">'+num(c,dec(c))+'</span>'
          + '<span style="width:70px;font:500 8px/1 '+mono
          + ';letter-spacing:.14em;color:'+tc+'">'+tag+'</span></div>';
     }

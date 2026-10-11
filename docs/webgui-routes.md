@@ -996,7 +996,12 @@ two sides from the grid itself.
   Resolved once at import: a web GUI restart applies a change. ⚠ A new colour on
   this page is added to `palette`, never written as a hex literal, or it stays
   cyan beside a heat map the operator made green. The Flow and Net Prem panels
-  do NOT follow (`flow_panels.py` holds ~20 literals of the shipped pair).
+  FOLLOW (2026-10-11): `theme.flow_colors` replaces five `[flow]` keys with the
+  chosen `[gamma]` colour (`FLOW_FOLLOWS`: call, put, call_deep ← call_mid,
+  put_deep ← put_mid, ice ← call_peak), only where that colour is not the shipped
+  one. Every tint of those in `flow_panels.py` is `_tone(key, alpha)`; the scrub
+  script's five come in the payload's `col`. A test reads the module's source and
+  fails on a literal call, put or ice colour.
 - **The legend strip** is one line of SVG in the controls row
   (`gamma_heat.legend_svg`, built from `HEAT_STOPS` itself): both ends of the
   colour scale as numbers, the ramp, the unit and a caption. ⚠ It is NOT a

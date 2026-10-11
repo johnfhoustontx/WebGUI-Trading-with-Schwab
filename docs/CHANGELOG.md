@@ -4,7 +4,27 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-11 (**Dealer Positioning: the put and call colours and their grading are chosen in Settings.**)
+**Last updated:** 2026-10-11 (**Dealer Positioning: the Flow and Net Prem tabs follow the chosen colours.**)
+
+- **Asked for by the user** after the colours became choosable: those two tabs had
+  been left out and kept cyan and magenta.
+- **Now** a call or put colour chosen in Settings → Appearance reaches both: the
+  call and put lines and ribbons, the chips, the strike ladder, the rails, the bar
+  grounds and the frame.
+- **How.** Five `[flow]` keys take the chosen `[gamma]` colour (`theme.FLOW_FOLLOWS`),
+  only where that colour is not the shipped one. About twenty literal tints in
+  `flow_panels.py`, some inside the client script, are one function (`_tone`) or
+  travel in the script's payload.
+- **Nothing moves at the shipped colours:** every derived string is the literal it
+  replaced, pinned by a test. A second test reads the module's source and fails on a
+  call, put or ice colour written into it again.
+- **Verified** by the suites, and in the page harness on the real `$SPX` session of
+  2026-10-09 with a green and orange set: no cyan, magenta or ice left anywhere in
+  the Flow tab, the script-drawn ladder included. The Net Prem tab's frame was seen;
+  its populated state is covered by the test. Not seen on the running app.
+- **Still separate:** the picture pushed to Telegram and Discord.
+
+**Prior —** 2026-10-11 (**Dealer Positioning: the put and call colours and their grading are chosen in Settings.**)
 
 - **Asked for by the user:** to select the put and call colours, and the grading
   of the colours, in the settings.

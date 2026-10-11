@@ -65,7 +65,8 @@ cyan   = "#6b86ff"             # the "Improving" RRG accent (Deep Slate → blue
 # ridge plot and the contour lines. Edit them in Settings → Appearance, which
 # shows the ramp before you save. "#rrggbb" only: where each grade sits on the
 # scale and how see-through it is are fixed in code. The Flow and Net Prem tabs
-# keep their own colours ([flow]).
+# follow: a colour changed here replaces [flow]'s call, put, call_deep, put_deep
+# and ice (from call, put, call_mid, put_mid and call_peak).
 put_peak  = "#ffbadc"          # the largest put values (pale pink)
 put       = "#ff4d8d"          # strong puts; put bars, put wall (magenta)
 put_mid   = "#96247a"          # middling puts
