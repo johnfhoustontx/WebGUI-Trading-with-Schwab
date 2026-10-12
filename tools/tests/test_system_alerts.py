@@ -118,7 +118,11 @@ def test_a_token_with_days_left_is_quiet():
 def test_a_token_inside_the_warning_window_is_reported_with_the_time_left():
     title, lines = token_watch.assess(_health(refresh_token_hours_left=30.4), warn_hours=48)
     assert "30 hours" in title
-    assert "/auth" in "\n".join(lines)
+    # It says where to sign in: in the app. Until 2026-10-11 it named the
+    # proxy's own /auth page, which only a device on the tailnet can open.
+    said = "\n".join(lines)
+    assert "System Status -> Authorize" in said
+    assert "/auth" not in said
 
 
 def test_the_window_is_inclusive_and_configurable():

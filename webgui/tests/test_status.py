@@ -1145,12 +1145,18 @@ def test_one_dialog_is_built_at_page_level_and_retitled_per_click(monkeypatch):
     before = {id(d) for d in _dialogs()}
     host = _render_status(monkeypatch)
     new = [d for d in _dialogs() if id(d) not in before]
-    assert len(new) == 1, f"render() built {len(new)} dialogs, expected 1"
-    dlg = new[0]
+    # Two since 2026-10-11: the restart confirm, and the Schwab sign-in. Each
+    # is built once at page level, for the same reason.
+    assert len(new) == 2, f"render() built {len(new)} dialogs, expected 2"
+    sign_in = [d for d in new
+               if any(str(e.text) == status.SIGN_IN_TITLE for e in _labels(d))]
+    assert len(sign_in) == 1
+    (dlg,) = [d for d in new if d is not sign_in[0]]
     _run_timer(host, "_refresh")
     _run_timer(host, "_refresh")          # two repaints of the card column
-    assert len([d for d in _dialogs() if id(d) not in before]) == 1, \
-        "a repaint deleted or duplicated the confirm dialog"
+    assert ({id(d) for d in _dialogs() if id(d) not in before}
+            == {id(dlg), id(sign_in[0])}), \
+        "a repaint deleted or duplicated a page-level dialog"
 
     def _title():
         found = [str(e.text) for e in _labels(dlg)
@@ -1294,3 +1300,129 @@ def test_the_proxy_card_survives_a_garbled_store_block():
 def test_a_proxy_that_is_down_keeps_its_own_detail():
     assert status.proxy_detail({"up": False, "status_code": 500}) == "HTTP 500"
     assert status.proxy_detail({"up": False}) == "unreachable"
+
+
+# --- the Sign in to Schwab dialog, driven ---------------------------------------
+async def _press_and_settle(btn, click):
+    """Fire a button's click and wait for the handler it started. NiceGUI runs
+    an async ``on_click`` as a background task, so the call returns at once."""
+    import asyncio
+
+    from nicegui import core
+    # With no running app NiceGUI DEFERS such a task to startup, which never
+    # comes in a test. Lend it this loop for the length of the click.
+    was, core.loop = core.loop, asyncio.get_running_loop()
+    try:
+        with btn.parent_slot:
+            result = click(None)
+            if inspect.isawaitable(result):
+                await result
+        pending = [task for task in asyncio.all_tasks()
+                   if task is not asyncio.current_task()]
+        if pending:
+            await asyncio.gather(*pending)
+    finally:
+        core.loop = was
+
+
+def _sign_in_dialog(monkeypatch, exchange):
+    """Render the page with the proxy stubbed, press Re-authorize, and return
+    ``(dialog, calls)``. ``exchange`` is what ``proxy.auth_exchange`` answers."""
+    import asyncio
+
+    async def inline(fn, *a, **k):          # run.io_bound, without a thread
+        return fn(*a, **k)
+
+    calls = []
+
+    def auth_exchange(pasted):
+        calls.append(pasted)
+        return exchange
+
+    monkeypatch.setattr(status.run, "io_bound", inline)
+    monkeypatch.setattr(status.proxy, "auth_info", lambda: {
+        "auth_url": "https://api.schwabapi.com/v1/oauth/authorize?client_id=k",
+        "callback_url": "https://127.0.0.1:8182"})
+    monkeypatch.setattr(status.proxy, "auth_exchange", auth_exchange)
+    host = _render_status(monkeypatch)
+    _run_timer(host, "_refresh")
+    (btn,) = [b for b in _buttons(host) if b.text == "Re-authorize"]
+    (click,) = [li.handler for li in btn._event_listeners.values()
+                if li.type == "click"]
+
+    asyncio.run(_press_and_settle(btn, click))
+    return _dialog_with("Authorize"), calls
+
+
+def _paste_box(dlg):
+    from nicegui import ui
+    (box,) = [e for e in dlg.descendants() if isinstance(e, ui.input)]
+    return box
+
+
+def test_the_sign_in_dialog_opens_with_the_three_steps_and_schwabs_link(monkeypatch):
+    dlg, calls = _sign_in_dialog(monkeypatch, (True, ""))
+    assert dlg.value is True
+    texts = [str(e.text) for e in _labels(dlg)]
+    for line in (status.SIGN_IN_TITLE, status.SIGN_IN_STEP_1, status.SIGN_IN_STEP_2,
+                 status.SIGN_IN_STEP_3, status.SIGN_IN_PASTE_LABEL):
+        assert line in texts, line
+    assert [b.text for b in _buttons(dlg)] == ["Log in to Schwab", "Cancel",
+                                               "Authorize"]
+    assert calls == []                      # opening it signs nobody in
+
+
+def test_authorize_with_an_empty_box_asks_for_the_address_and_calls_nothing(
+        monkeypatch):
+    dlg, calls = _sign_in_dialog(monkeypatch, (True, ""))
+    _confirm(dlg)
+    assert calls == []
+    assert dlg.value is True                # still open
+    assert status.SIGN_IN_PASTE_EMPTY in [str(e.text) for e in _labels(dlg)]
+
+
+def test_a_good_paste_signs_in_and_closes_the_dialog(monkeypatch):
+    said = _said(monkeypatch)
+    dlg, calls = _sign_in_dialog(monkeypatch, (True, ""))
+    box = _paste_box(dlg)
+    box.value = "  https://127.0.0.1:8182/?code=C0.abc%40&session=s  "
+    _confirm(dlg)
+    assert calls == ["https://127.0.0.1:8182/?code=C0.abc%40&session=s"]
+    assert dlg.value is False
+    assert box.value == ""                  # the one-time code is not kept
+    assert any(status.SIGN_IN_DONE in str(s) for s in said)
+
+
+def test_a_refused_paste_stays_open_and_says_why_and_what_next(monkeypatch):
+    dlg, calls = _sign_in_dialog(
+        monkeypatch, (False, "Auth code exchange failed (400): invalid_grant"))
+    _paste_box(dlg).value = "https://127.0.0.1:8182/?code=old"
+    _confirm(dlg)
+    assert calls == ["https://127.0.0.1:8182/?code=old"]
+    assert dlg.value is True
+    shown = [str(e.text) for e in _labels(dlg)]
+    assert status.sign_in_failure_text(
+        "Auth code exchange failed (400): invalid_grant") in shown
+
+
+def test_no_login_link_means_no_dialog_and_a_plain_error(monkeypatch):
+    import asyncio
+
+    async def inline(fn, *a, **k):
+        return fn(*a, **k)
+
+    said = _said(monkeypatch)
+    before = {id(d) for d in _dialogs()}
+    monkeypatch.setattr(status.run, "io_bound", inline)
+    monkeypatch.setattr(status.proxy, "auth_info", lambda: None)
+    host = _render_status(monkeypatch)
+    _run_timer(host, "_refresh")
+    (btn,) = [b for b in _buttons(host) if b.text == "Re-authorize"]
+    (click,) = [li.handler for li in btn._event_listeners.values()
+                if li.type == "click"]
+
+    asyncio.run(_press_and_settle(btn, click))
+    mine = [d for d in _dialogs() if id(d) not in before]
+    assert not any(d.value for d in mine)
+    assert any(status.SIGN_IN_NO_LINK in str(s) for s in said)
+

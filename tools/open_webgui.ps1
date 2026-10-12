@@ -26,10 +26,13 @@
   fallback must not depend on the thing that failed, which is the whole reason
   it is kept rather than deleted.
 
-  It is also still the only route for two things:
+  It is also still a route for two things:
     - the PROXY on :8100, which is deliberately NOT on the public domain. It
       holds the Schwab credentials and its market-data reads are unauthenticated,
       so it is published to the tailnet by `tailscale serve` and nowhere else.
+      (The 7-day Schwab sign-in no longer needs it: since 2026-10-11 it is
+      renewed in the app, System Status -> Authorize. This tunnel is the way to
+      the proxy's own /auth page when the app itself is unreachable.)
     - anything you want to reach without going through the login at all.
 
   Both services still bind 127.0.0.1 on the VPS. Caddy is the only thing that

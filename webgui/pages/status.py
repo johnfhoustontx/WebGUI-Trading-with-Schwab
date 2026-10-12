@@ -32,8 +32,10 @@ target/freshness layout) are unit-tested in ``webgui/tests/test_status.py``; the
 network/redis probes are thin and verified by screenshot.
 """
 import datetime as _dt
+import math
 import subprocess
 import time as _time
+from urllib.parse import parse_qs, urlparse
 
 import requests
 from nicegui import run, ui
@@ -41,6 +43,7 @@ from nicegui import run, ui
 import alerts
 import bus_client
 import proxy
+import shell as _shell
 from pages import ui_kit as kit
 from pages.options import theme
 from pages.ui_guard import guard, guard_async
@@ -64,11 +67,36 @@ from repo_paths import (
 # Service-probe timeout — short so a dead service fails fast on the status sweep.
 _HTTP_TIMEOUT = 2.5
 
-# Schwab OAuth re-login page served by the proxy (Step-1/2/3 login flow). Opened
-# in a new tab by the "Authorize" button on the Schwab Authorization card — so in
-# the VIEWER's browser, which is why it is PROXY_PUBLIC_URL (the tailnet address)
-# and not PROXY_URL, where 127.0.0.1 would mean the viewer's own device.
+# The proxy's OWN re-login page (its Step-1/2/3 form), as a BROWSER reaches it -
+# which is why it is PROXY_PUBLIC_URL (the tailnet address) and not PROXY_URL,
+# where 127.0.0.1 would mean the viewer's own device. Until 2026-10-11 the
+# Authorize button opened this and nothing else, so a viewer who could not reach
+# the tailnet could not sign in at all. The button now opens the dialog below,
+# which needs only the app; this stays as the dialog's second way in.
 AUTH_URL = f"{PROXY_PUBLIC_URL}/auth"
+
+# ── the Sign in to Schwab dialog ─────────────────────────────────────────────
+SIGN_IN_TITLE = "Sign in to Schwab"
+SIGN_IN_BODY = ("Schwab's sign-in lasts 7 days. Renewing it takes three steps, "
+                "all in this browser.")
+SIGN_IN_STEP_1 = "1. Log in at Schwab. It opens in a new tab."
+SIGN_IN_STEP_2 = ("2. After you log in, Schwab sends that tab to a page that "
+                  "will not load. That is expected. Copy the page's whole "
+                  "address from the address bar.")
+SIGN_IN_STEP_3 = ("3. Paste the address here and press Authorize. Do it "
+                  "straight away: the code in it lasts about 30 seconds.")
+SIGN_IN_PASTE_LABEL = "Address Schwab sent you to"
+SIGN_IN_PASTE_EXAMPLE = "https://127.0.0.1:8182/?code=..."
+SIGN_IN_PASTE_EMPTY = "Paste the address first."
+SIGN_IN_PASTE_NO_CODE = ("That address has no code in it. Copy the whole "
+                         "address of the page Schwab sent you to after the "
+                         "login; it contains code=.")
+SIGN_IN_RETRY = ("The code lasts about 30 seconds and works once. Log in again "
+                 "and paste the new address straight away.")
+SIGN_IN_NO_LINK = ("The proxy did not give a Schwab login link. Check that the "
+                   "proxy is up, then try again.")
+SIGN_IN_DONE = "Signed in to Schwab. The sign-in lasts 7 days."
+SIGN_IN_TAILNET = "Or open the proxy's own sign-in page (Tailscale only)"
 
 # The freshness table's row rule. The palette's own hairline, not Tailwind's
 # ``border-gray-700``: a warm grey rule on a navy page reads as a smudge, and a
@@ -274,7 +302,52 @@ def auth_status(health):
         return (False, "refresh token expired — re-authorization required")
     if health.get("token_expired"):
         return (True, "access token expired — proxy auto-refreshes")
+    left = sign_in_left_text(health.get("refresh_token_hours_left"))
+    if left is not None:
+        return (True, f"authorized — sign-in lasts another {left}")
     return (True, "authorized — token valid")
+
+
+def sign_in_left_text(hours):
+    """'6 days 22 hours' / '23 hours' / 'under an hour', or None when ``hours``
+    is not a reading (missing, text, a bool, NaN, negative). Whole hours,
+    rounded DOWN: time left must never read as more than there is."""
+    if isinstance(hours, bool) or not isinstance(hours, (int, float)):
+        return None
+    if not math.isfinite(hours) or hours < 0:
+        return None
+    whole = int(hours)
+    if whole < 1:
+        return "under an hour"
+    days, rest = divmod(whole, 24)
+    parts = []
+    if days:
+        parts.append(f"{days} day" + ("" if days == 1 else "s"))
+    if rest:
+        parts.append(f"{rest} hour" + ("" if rest == 1 else "s"))
+    return " ".join(parts)
+
+
+def sign_in_paste_problem(pasted):
+    """Why the pasted text cannot be a sign-in, or None when it can.
+
+    Checked here so an empty box or the wrong address is answered at once and
+    in the dialog, without asking the proxy (which checks again)."""
+    text = pasted.strip() if isinstance(pasted, str) else ""
+    if not text:
+        return SIGN_IN_PASTE_EMPTY
+    try:
+        codes = parse_qs(urlparse(text).query).get("code", [])
+    except ValueError:
+        codes = []
+    if not (codes and codes[0]):
+        return SIGN_IN_PASTE_NO_CODE
+    return None
+
+
+def sign_in_failure_text(error):
+    """The proxy's own words for a refused sign-in, then what to do next."""
+    return f"{error} {SIGN_IN_RETRY}"
 
 
 # ── restart (pure spec/command builders + thin spawn) ────────────────────────
@@ -679,7 +752,7 @@ def render():
                                 kit.button(
                                     "Re-authorize" if merged_auth.get("up") else "Authorize",
                                     kind="secondary", icon="login",
-                                    on_click=lambda: ui.navigate.to(AUTH_URL, new_tab=True))
+                                    on_click=_authorize_clicked)
                             if restart_spec(r) is not None:
                                 kit.button("Restart", kind="danger",
                                            icon="restart_alt",
@@ -760,6 +833,70 @@ def render():
     # ``_restart_confirmed``, so the name is bound when the kit calls it.
     restart_dlg = kit.confirm("Restart?", "", confirm_text=RESTART_CONFIRM,
                               danger=True, on_confirm=_restart_confirmed)
+
+    # ── signing in to Schwab again ───────────────────────────────────────────
+    # In the app, so it needs no tailnet and no tunnel: the browser goes to
+    # Schwab for the login, and the web app hands the redirect address to the
+    # proxy over loopback. The dialog is built ONCE at this level, like the
+    # restart one, because ``comps`` is cleared every 15 s.
+    @guard_async
+    async def _authorize_clicked(_e=None):
+        if _shell.is_public():
+            return
+        info = await run.io_bound(proxy.auth_info)
+        if not info:
+            kit.toast("error", SIGN_IN_NO_LINK)
+            return
+        state["auth_url"] = info["auth_url"]
+        paste.value = ""
+        sign_in_error.set_visibility(False)
+        sign_in_dlg.open()
+
+    @guard
+    def _open_schwab(_e=None):
+        url = state.get("auth_url")
+        if url:
+            ui.navigate.to(url, new_tab=True)
+
+    async def _sign_in_confirmed():
+        """Returning ``False`` keeps the dialog open with the reason shown."""
+        if _shell.is_public():
+            return None
+        problem = sign_in_paste_problem(paste.value)
+        if problem is None:
+            kit.set_busy(sign_in_dlg.confirm)
+            try:
+                # Blocking for as long as Schwab takes: never on the event loop.
+                answer = await run.io_bound(proxy.auth_exchange,
+                                            paste.value.strip())
+            finally:
+                kit.set_busy(sign_in_dlg.confirm, False)
+            ok, message = answer or (False, "The web app is stopping.")
+            if ok:
+                paste.value = ""
+                kit.toast("ok", SIGN_IN_DONE)
+                ui.timer(0.1, _refresh, once=True)
+                return None
+            problem = sign_in_failure_text(message)
+        sign_in_error.text = problem
+        sign_in_error.set_visibility(True)
+        return False
+
+    sign_in_dlg = kit.confirm(SIGN_IN_TITLE, SIGN_IN_BODY,
+                              confirm_text="Authorize",
+                              on_confirm=_sign_in_confirmed)
+    with sign_in_dlg.content:
+        ui.label(SIGN_IN_STEP_1).classes(f"text-sm {theme.LABEL}")
+        kit.button("Log in to Schwab", kind="secondary", icon="open_in_new",
+                   on_click=_open_schwab)
+        ui.label(SIGN_IN_STEP_2).classes(f"text-sm {theme.LABEL}")
+        ui.label(SIGN_IN_STEP_3).classes(f"text-sm {theme.LABEL}")
+        paste = kit.text_field(SIGN_IN_PASTE_LABEL, width="w-full",
+                               placeholder=SIGN_IN_PASTE_EXAMPLE)
+        sign_in_error = ui.label("").classes(f"text-sm {theme.TXT_NEG}")
+        sign_in_error.set_visibility(False)
+        ui.link(SIGN_IN_TAILNET, AUTH_URL, new_tab=True).classes(
+            f"text-xs {theme.MUTED}")
 
     @guard_async
     async def _refresh():

@@ -1,8 +1,12 @@
 """Thin proxy client for the NiceGUI webgui app.
 
-Two read-only HTTP helpers over the schwab-proxy: ``health()`` (the shell's
-proxy-down banner + the Status page) and ``api_call_stats()`` (the Settings
-"API usage" card). Neither raises.
+Four HTTP helpers over the schwab-proxy, none of which raises. Three read:
+``health()`` (the shell's proxy-down banner + the Status page),
+``api_call_stats()`` (the Settings "API usage" card) and ``auth_info()``
+(Schwab's login link, for the Status page's Authorize dialog). One writes:
+``auth_exchange()`` hands the proxy the address Schwab redirected to, which is
+how the 7-day sign-in is renewed from inside the app. Every call goes to the
+proxy on loopback; nothing here talks to Schwab.
 
 This module used to also build ``schwab_py_client`` / ``schwab_client``
 singletons out of ``schwab-proxy/proxy_client.py``, which meant Tier 1 carried
@@ -62,3 +66,49 @@ def api_call_stats(base_url: str = PROXY_URL, timeout: float = 3.0) -> dict | No
         return data if isinstance(data, dict) and "today" in data else None
     except Exception:
         return None
+
+
+def auth_info(base_url: str = PROXY_URL, timeout: float = 3.0) -> dict | None:
+    """``{"auth_url", "callback_url"}`` from the proxy's ``/auth/info``, or None
+    when the proxy is unreachable, predates the route, or names anything but an
+    https link. Never raises. ``auth_url`` is Schwab's own login page; it opens
+    in the viewer's browser."""
+    try:
+        resp = requests.get(f"{base_url}/auth/info", timeout=timeout)
+        data = resp.json() if resp.status_code == 200 else None
+    except Exception:
+        return None
+    url = data.get("auth_url") if isinstance(data, dict) else None
+    if not (isinstance(url, str) and url.startswith("https://")):
+        return None
+    return data
+
+
+# The proxy gives Schwab 30 s to answer the exchange; wait a little longer.
+SIGN_IN_TIMEOUT_SEC = 45.0
+
+
+def auth_exchange(pasted, base_url: str = PROXY_URL,
+                  timeout: float = SIGN_IN_TIMEOUT_SEC) -> tuple:
+    """Sign in to Schwab from the pasted redirect address: ``(ok, message)``.
+
+    ``(True, "")`` only when the proxy answers 200 with ``{"ok": true}``;
+    anything else is ``(False, why)``. Never raises. Blocking for as long as
+    Schwab takes - call it off the event loop. The address travels in the
+    request BODY so its one-time code stays out of the proxy's access log."""
+    try:
+        resp = requests.post(f"{base_url}/auth/exchange", json={"url": pasted},
+                             timeout=timeout)
+    except Exception:
+        return (False, "The proxy did not answer. Check it on this page, then "
+                       "try again.")
+    try:
+        body = resp.json()
+    except Exception:
+        body = None
+    if resp.status_code == 200 and isinstance(body, dict) and body.get("ok") is True:
+        return (True, "")
+    error = body.get("error") if isinstance(body, dict) else None
+    if not (isinstance(error, str) and error):
+        error = f"The proxy answered {resp.status_code}."
+    return (False, error)

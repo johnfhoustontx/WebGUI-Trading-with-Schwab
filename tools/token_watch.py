@@ -2,7 +2,7 @@
 """Warn before the Schwab sign-in runs out.
 
 Schwab's refresh token lasts 7 days and is renewed only by a person signing in
-again on the proxy's ``/auth`` page. When it lapses every market-data call
+again (System Status -> Authorize, in the app). When it lapses every market-data call
 fails. Nothing warned before that happened: the Status page shows the state,
 and only to someone looking at it (audit AR-03).
 
@@ -24,7 +24,8 @@ import pathlib
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-_HOW = "Sign in again on the proxy's /auth page (Status page -> Authorize)."
+_HOW = ("Sign in again in the app: System Status -> Authorize. It works from "
+        "any browser signed in to the app.")
 
 
 def fetch():
