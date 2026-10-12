@@ -25,6 +25,15 @@ sentiment-dashboard, and the Tier-2 services all fetch market data through it.
   alone with `systemctl --user stop trading-prod-proxy`, or with the whole stack
   (`systemctl --user stop trading-prod.target`, which is what the Stop All
   Services page runs).
+- **The sign-in:** `/auth` (the proxy's own HTML form) and `/auth/callback`,
+  plus `/auth/info` (`{auth_url, callback_url}`) and `POST /auth/exchange`
+  (`{"url": ...}` → `{"ok": true}` or `{"ok": false, "error": ...}`), which the
+  web app's Authorize dialog calls over loopback. ⚠ The sign-in lasts 7 days
+  from `exchange_auth_code`. `_refresh` renews the ACCESS token and must not
+  touch `RefreshTokenExpiresAt` (it did until 2026-10-11, so `/health` said 165
+  hours left while Schwab was rejecting the token). A successful sign-in clears
+  `refresh_rejected`. `tests/test_sign_in_expiry_and_exchange.py` holds all
+  three.
 - Key endpoints: `/health`, `/stats/api_calls` (per-day outbound Schwab API-call counts — today / last 7 / last 30 days; counted at the marketdata rate-limit chokepoint + the trader request loop into `data/api_call_counts.db`, best-effort/never-raises; feeds the webgui Settings "API usage" card), `/quote`, `/quotes`, `/chains`, `/pricehistory`,
   `/instruments` (fundamentals; `projection=fundamental` → P/E, growth, ROE,
   margins — used by trade_svc), `/passthrough` (five named market-data endpoints

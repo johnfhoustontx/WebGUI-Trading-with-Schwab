@@ -857,12 +857,14 @@ sudo systemctl restart caddy`.
   for you.
 - **Reach prod's web GUI at `https://app.neuralstrike.co`** (Caddy + a password
   and TOTP login, since 2026-09-06). `tools/open_webgui.ps1` is the **fallback**
-  for when the cert or Caddy breaks. The proxy's `:8100` `/auth` — needed every
-  7 days when the Schwab refresh token expires — is deliberately not on the public
-  domain: prod publishes it to the tailnet with
+  for when the cert or Caddy breaks. **The Schwab sign-in (every 7 days) is
+  renewed in the app:** System Status → **Authorize** opens a dialog, and the web
+  app hands the pasted redirect address to the proxy over loopback, so it works
+  from any browser signed in to the app. The proxy's own `:8100` `/auth` page is
+  deliberately not on the public domain: prod publishes it to the tailnet with
   `tailscale serve --bg --https=8100 http://127.0.0.1:8100`, and
-  `proxy_public_url` in `config/env.local.toml` points the System Status
-  **Authorize** button at that address. ⚠ Without that key the button opens
+  `proxy_public_url` in `config/env.local.toml` points the dialog's second link
+  at that address. ⚠ Without that key the link opens
   `http://127.0.0.1:8100/auth`, which works only through the SSH tunnel — from
   a phone or over `app.neuralstrike.co` it opens the viewer's own device. **Dev is not on the domain at
   all**; forward `:9500`, or reach it over the tailnet. ⚠ Never change either

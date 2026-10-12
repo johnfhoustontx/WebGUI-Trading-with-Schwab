@@ -4622,8 +4622,12 @@ Restart is confirm-gated**, and the dialog's wording depends on which one: resta
 **Schwab gateway during market hours** takes market data away from the whole stack for
 those seconds — every other card gets the plain "back in about fifteen seconds"
 wording. Redis carries no Restart at all: it is a *system* unit a user-scoped
-`systemctl` cannot reach. The proxy card additionally shows **Schwab auth** status with
-a **Re-authorize** button.
+`systemctl` cannot reach. The proxy card additionally shows **Schwab auth** status,
+including how long the 7-day sign-in has left, with a **Re-authorize** button. The
+button opens a dialog in the app: log in at Schwab in a new tab, copy the address of
+the page Schwab then sends you to (it does not load), paste it and press **Authorize**.
+The web app hands that address to the gateway itself, so renewing the sign-in works
+from any browser signed in to the app and needs no Tailscale.
 
 **Published data freshness** is the more informative half. It lists each domain's latest
 cache write with a version number and an age. **A service can be "online" and still not

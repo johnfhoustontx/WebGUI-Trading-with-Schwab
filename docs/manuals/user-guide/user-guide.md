@@ -65,9 +65,10 @@ The app reads market data and your positions from Schwab, so you need:
   `shared/appsettings.example.json` and fill in your keys).
 - A **one-time Schwab login**: after starting the app, open **System Status → Schwab
   Authorization → Authorize** and sign in. This creates your token file. The
-  button opens the proxy's login page, which is on your private Tailscale network
-  rather than the public site — so the device you click it from must be signed in
-  to Tailscale.
+  button opens a dialog in the app with three steps: log in at Schwab (a new
+  tab), copy the address of the page Schwab then sends you to (it will not
+  load, which is expected), and paste it into the dialog. It works from any
+  browser signed in to the app; Tailscale is not needed.
 
 > **Good to know:** the app refreshes your Schwab login automatically most of the
 > time. If live data stops and **System Status** shows the Schwab login expired,
@@ -3044,8 +3045,19 @@ A health board for the whole stack.
 - A **component grid** — Redis, the Schwab gateway, the seven services, the web app
   itself, and the public live screens beside it, each with Online/Offline and its
   tier. The gateway's card also shows the **Schwab auth** state.
-- A **Re-authorize** button on the gateway card opens Schwab's OAuth login in a new
-  browser tab. Use it when the auth line says the login has expired.
+- The gateway card's auth line says how long the Schwab sign-in has left
+  ("authorized — sign-in lasts another 6 days 22 hours"). The sign-in lasts 7
+  days from the day you signed in.
+- A **Re-authorize** button on the gateway card (**Authorize** when the sign-in
+  has lapsed) opens the **Sign in to Schwab** dialog:
+  1. **Log in to Schwab** opens Schwab's own login in a new tab.
+  2. After you log in, Schwab sends that tab to a page that will not load. That
+     is expected. Copy the whole address from the address bar.
+  3. Paste it into the dialog and press **Authorize**. Do it straight away: the
+     code in the address lasts about 30 seconds and works once.
+  If Schwab refuses it, the dialog stays open and says why; log in again and
+  paste the new address. Nothing here needs Tailscale. The dialog's small link
+  to the proxy's own sign-in page does, and is only a second way in.
 - A service whose scheduler has **stopped**, or has not run for ten minutes, shows
   as unhealthy with the reason, even though the process is still answering. A card
   also says when a service holds **commands it could not run** (they are kept for
@@ -3343,8 +3355,9 @@ A scheduled view hasn't updated recently — usually because its service stopped
 Restart that service. On-demand views (Trade) are never flagged stale.
 
 **Schwab Authorization shows as not authorized / expired.**
-Open **System Status → Schwab Authorization → Authorize** to re-run the OAuth
-login in a new tab.
+Open **System Status → Schwab Authorization → Authorize** and follow the three
+steps in the dialog (log in at Schwab, copy the address of the page that fails
+to load, paste it).
 
 **My live portfolio P&L isn't moving.**
 Check the Portfolio status bar: if the live-stream indicator is off or the proxy is

@@ -4,7 +4,45 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-11 (**Tests: three `news_svc` tests that failed on the Windows workstation.**)
+**Last updated:** 2026-10-11 (**Schwab sign-in: renewed inside the app, and a countdown that counts down.**)
+
+- **Reported by the user:** "Once the schwab Proxy auth expires I don't have any way
+  to reauthorize." Asked which of two fixes to make, they said both.
+- **What happened that day.** The sign-in of 4 October (15:56 CT) ended seven days
+  later: Schwab rejected the refresh token at 16:15 CT and market data stopped until
+  a new sign-in at 19:05 CT. Three separate faults showed.
+- **1. No way to sign in.** The Authorize button opened only the proxy's own `/auth`
+  page at its Tailscale address. The one PC on the tailnet could not open a TCP
+  connection to any tailnet address: Windows refused each with "access forbidden by
+  its access permissions" while ProtonVPN was connected (pings still passed), and
+  the phone had been off the tailnet for 25 days. Not confirmed by switching the
+  VPN off. That evening's sign-in went through a temporary SSH tunnel.
+  **Now** the button opens a **Sign in to Schwab** dialog in the app: log in at
+  Schwab in a new tab, copy the address of the page that fails to load, paste it,
+  press Authorize. The link comes from the proxy's new `GET /auth/info`; the web
+  app sends the pasted address to the proxy's new `POST /auth/exchange` over
+  loopback (`webgui/proxy.auth_exchange`). It works from any browser signed in to
+  the app. The proxy is still not on the public domain, and its own `/auth` page is
+  kept as the dialog's second link.
+- **2. No warning.** Every 25-minute token refresh re-stamped the sign-in's expiry
+  to "now + 7 days", so `/health` said 165 hours were left at the moment it died
+  and the daily 48-hour warning could never fire. **Now** only a sign-in stamps it.
+  The Status page's auth line also says how long is left.
+- **3. A good sign-in still read "rejected".** Only a refresh cleared the proxy's
+  "rejected by Schwab" flag, so the Status page kept saying it for up to 25 minutes
+  after a successful sign-in. That evening the proxy was restarted to clear it.
+  **Now** a sign-in clears it.
+- **This week's countdown starts a little late.** The token minted at 19:05 was
+  re-stamped by the old code at each refresh until this was promoted, so until the
+  next sign-in the app thinks it expires that much later than it does. Signing in
+  once through the new dialog makes it exact.
+- **Verified** by the proxy, web-app and tools suites; the dialog in the page
+  harness against a fake proxy (a refused paste stays open and says why, an
+  accepted one closes with a confirmation). The real exchange with Schwab through
+  the new route needs a person to log in and has not been run.
+- **Reference:** `docs/reference/running-and-environments.md`.
+
+**Prior —** 2026-10-11 (**Tests: three `news_svc` tests that failed on the Windows workstation.**)
 
 - **Asked for by the user,** after two scheduler tests were reported failing during
   the Desk change below. Tests only: no service code changed.

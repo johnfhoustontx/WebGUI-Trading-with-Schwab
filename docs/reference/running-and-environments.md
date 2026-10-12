@@ -165,11 +165,35 @@ third Caddy host block reverse-proxying to `webgui/live_main.py` on `:8501`, whi
 `tools/open_webgui.ps1` survives as the **fallback**: if the cert or Caddy breaks,
 the way in must not depend on the thing that broke. The proxy on `:8100` is
 **never** on the public domain — it is published on the tailnet by
-`tailscale serve`, which is also how the Schwab refresh token gets re-minted at
-`/auth` every 7 days. ⚠ A link a BROWSER opens must use `PROXY_PUBLIC_URL`
+`tailscale serve`. ⚠ A link a BROWSER opens must use `PROXY_PUBLIC_URL`
 (`proxy_public_url` in `env.local.toml`), never `PROXY_URL` — that is where the
 server reaches the proxy, and in the viewer's browser 127.0.0.1 is their own
 device. The Status page's Authorize button shipped that way and was dead.
+
+**The Schwab sign-in is renewed inside the app (2026-10-11).** It lasts 7 days
+from the SIGN-IN. The Status page's Authorize button opens a dialog: the browser
+goes to Schwab's own login (the link comes from the proxy's `GET /auth/info`),
+and the address Schwab redirects to is pasted back and handed by the web app to
+the proxy's `POST /auth/exchange` over loopback (`webgui/proxy.auth_exchange`).
+So renewing needs the app's login and nothing else.
+- ⚠ **Why it moved.** The button used to open only the proxy's `/auth` page at
+  its tailnet address. On 2026-10-11 the sign-in lapsed while the one PC on the
+  tailnet could not open a TCP connection to ANY tailnet address (Windows
+  refused each with "access forbidden by its access permissions" while a VPN
+  was connected; pings still passed) and the phone had been off the tailnet for
+  25 days. The only way left was the SSH tunnel (`tools/open_webgui.ps1`). The
+  recovery path must not depend on a network the operator may not be on.
+- ⚠ **A refresh does not extend the sign-in.** `_refresh` used to re-stamp
+  `RefreshTokenExpiresAt` to now + 7 days every 25 minutes, so `/health` said
+  165 hours were left at the moment Schwab rejected the token, and the daily
+  warning (`tools/token_watch.py`, 48 hours ahead) could never fire. Only
+  `exchange_auth_code` stamps it now.
+- ⚠ **A sign-in clears the rejection.** Only a refresh used to, so `/health`
+  went on saying "rejected" for up to 25 minutes after a good sign-in, which
+  reads as a failed one and invites a restart.
+- The proxy's own `/auth` page and the tailnet address still work and are the
+  dialog's second link. `/auth/exchange` is a POST with the address in the body
+  so the one-time code is not written to the access log.
 
 ⚠ **The proxy's account routes fail CLOSED, and it has no order route
 (2026-10-03).** `/accounts*`, `/positions`, `/transactions` and `/passthrough`

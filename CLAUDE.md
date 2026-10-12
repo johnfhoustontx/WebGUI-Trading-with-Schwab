@@ -163,7 +163,9 @@ view names, the frame's `sandbox` and policy strings, and the two file readers
 behind the preview routes - stdlib + `repo_paths` + `shared.config_toml` only,
 pinned by `shared/tests/test_blog_inbox.py`) ·
 `repo_paths` · `requests` — **only** for the
-`/health` fan-out the shell and Status page run · `fastapi.responses` for the
+`/health` fan-out the shell and Status page run and the proxy helper's calls
+(`webgui/proxy.py`: API-usage counts, and the Schwab sign-in's link and
+exchange, all to the proxy on loopback) · `fastapi.responses` for the
 report routes · the lazy `edge_tts` in `voice.py` · and, since 2026-09-06, the
 three **credential primitives** the login uses — `argon2` (password hashing),
 `pyotp` (the TOTP second factor) and `itsdangerous` (the signed session and
@@ -473,6 +475,10 @@ is in git; `--install` also arms the timers). Start order: Redis (a system unit)
 - The apps bind `127.0.0.1` and Caddy fronts them (`app.` behind password + TOTP,
   `live.` with no login). **Never change a bind to `0.0.0.0`.** The proxy is
   never on the public domain; a link a browser opens uses `PROXY_PUBLIC_URL`.
+- The Schwab sign-in lasts 7 days from the SIGN-IN and is renewed in the app
+  (Status → Authorize → `proxy.auth_exchange` → the proxy's `/auth/exchange`).
+  A token refresh must never move `RefreshTokenExpiresAt`, and the recovery
+  path must not need the tailnet.
 - The proxy's account routes fail CLOSED without `PROXY_SHARED_SECRET`
   (`X-Proxy-Secret`), so do `/track` and `/untrack`, and it has no order route:
   `trader_request` is GET-only. This app is paper-only.

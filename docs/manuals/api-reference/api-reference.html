@@ -1566,7 +1566,7 @@ rate is unchanged. A request answered from the local store never waits.</p>
 <tr>
 <td><code>/health</code></td>
 <td>GET</td>
-<td><code>{status, has_token, token_expired, refresh_token_expired, refresh_token_rejected, refresh_token_expires_at, refresh_token_hours_left, account_routes, token_file, timestamp}</code>. <code>refresh_token_hours_left</code> is what the daily sign-in check reads (null when unknown). <code>account_routes</code> is <code>locked_no_secret</code> (every caller refused) or <code>secret_required</code></td>
+<td><code>{status, has_token, token_expired, refresh_token_expired, refresh_token_rejected, refresh_token_expires_at, refresh_token_hours_left, account_routes, token_file, timestamp}</code>. <code>refresh_token_hours_left</code> is what the daily sign-in check reads (null when unknown); it counts down from 168 at the sign-in and a token refresh does not reset it. <code>account_routes</code> is <code>locked_no_secret</code> (every caller refused) or <code>secret_required</code></td>
 </tr>
 <tr>
 <td><code>/auth</code></td>
@@ -1577,6 +1577,16 @@ rate is unchanged. A request answered from the local store never waits.</p>
 <td><code>/auth/callback</code></td>
 <td>GET</td>
 <td>Exchanges the OAuth <code>code</code>/<code>url</code> for tokens</td>
+</tr>
+<tr>
+<td><code>/auth/info</code></td>
+<td>GET</td>
+<td><code>{auth_url, callback_url}</code> — Schwab's login link for this app, for the web app's Authorize dialog. Carries the app key (a public client id), never the secret</td>
+</tr>
+<tr>
+<td><code>/auth/exchange</code></td>
+<td>POST</td>
+<td>Body <code>{"url": "&lt;the address Schwab redirected to&gt;"}</code>. Signs in and answers <code>{"ok": true}</code>; <code>{"ok": false, "error": ...}</code> with 400 when the address holds no code, 502 when Schwab refuses it. A POST so the one-time code is not in the access log</td>
 </tr>
 <tr>
 <td><code>/stats/api_calls</code></td>

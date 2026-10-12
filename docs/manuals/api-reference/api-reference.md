@@ -834,9 +834,11 @@ rate is unchanged. A request answered from the local store never waits.
 
 | Endpoint | Method | Returns |
 |----------|--------|---------|
-| `/health` | GET | `{status, has_token, token_expired, refresh_token_expired, refresh_token_rejected, refresh_token_expires_at, refresh_token_hours_left, account_routes, token_file, timestamp}`. `refresh_token_hours_left` is what the daily sign-in check reads (null when unknown). `account_routes` is `locked_no_secret` (every caller refused) or `secret_required` |
+| `/health` | GET | `{status, has_token, token_expired, refresh_token_expired, refresh_token_rejected, refresh_token_expires_at, refresh_token_hours_left, account_routes, token_file, timestamp}`. `refresh_token_hours_left` is what the daily sign-in check reads (null when unknown); it counts down from 168 at the sign-in and a token refresh does not reset it. `account_routes` is `locked_no_secret` (every caller refused) or `secret_required` |
 | `/auth` | GET | HTML OAuth login page |
 | `/auth/callback` | GET | Exchanges the OAuth `code`/`url` for tokens |
+| `/auth/info` | GET | `{auth_url, callback_url}` — Schwab's login link for this app, for the web app's Authorize dialog. Carries the app key (a public client id), never the secret |
+| `/auth/exchange` | POST | Body `{"url": "<the address Schwab redirected to>"}`. Signs in and answers `{"ok": true}`; `{"ok": false, "error": ...}` with 400 when the address holds no code, 502 when Schwab refuses it. A POST so the one-time code is not in the access log |
 | `/stats/api_calls` | GET | `{today, last_7_days, last_30_days, since, store, store_degrades}` — calls sent to Schwab per day, plus today's request breakdown (see *Local market-data store* below) |
 
 ## Market data
