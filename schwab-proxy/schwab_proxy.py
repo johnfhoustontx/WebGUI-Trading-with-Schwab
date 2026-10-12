@@ -56,7 +56,7 @@ from urllib.parse import urlparse, parse_qs
 
 from fastapi import FastAPI, HTTPException, Query, Header, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from trade_registry import (FETCH_RETRY_CAP_SEC, RETRY_CAP_SEC, TrackAttempts,
                             TradeRegistry, resolve_legs, track_refusal,
@@ -351,8 +351,12 @@ class TokenManager:
         self.tokens["ExpiresAt"] = (now + timedelta(seconds=expires_in)).isoformat() + "Z"
         if "refresh_token" in data:
             self.tokens["RefreshToken"] = data["refresh_token"]
-            rt_exp = data.get("refresh_token_expires_in", 604800)
-            self.tokens["RefreshTokenExpiresAt"] = (now + timedelta(seconds=rt_exp)).isoformat() + "Z"
+        # ⚠ ``RefreshTokenExpiresAt`` is NOT touched here. A refresh renews the
+        # access token; the sign-in still ends seven days after the SIGN-IN
+        # (``exchange_auth_code``). This used to re-stamp it to now + 7 days on
+        # every refresh, so the countdown never ran down: on 2026-10-11 Schwab
+        # rejected the token seven days after the sign-in while /health said
+        # 165 hours were left, and the daily warning never fired.
         self._save_tokens()
         logger.info("Token refreshed successfully")
 
@@ -378,6 +382,11 @@ class TokenManager:
         data = resp.json()
         with self._lock:
             self.tokens = self._normalize(data)
+            # Schwab has just accepted a sign-in, so its last refusal is over.
+            # Only a refresh cleared this before, which left /health saying
+            # "rejected" for up to 25 minutes after a good sign-in.
+            self.refresh_rejected = False
+            self.refresh_error = None
             self._save_tokens()
         logger.info("OAuth authorization code exchanged — tokens saved")
 
@@ -726,13 +735,67 @@ CALLBACK_ERROR_HTML = """<!DOCTYPE html>
 </body></html>"""
 
 
+def schwab_login_url() -> str:
+    """Schwab's own login page for this app. It carries the app KEY (a public
+    client id, visible in the address bar) and never the app secret."""
+    return (f"{SCHWAB_AUTH_URL}"
+            f"?client_id={token_mgr.app_key}"
+            f"&redirect_uri={token_mgr.callback_url}")
+
+
+def code_from_pasted(pasted) -> Optional[str]:
+    """The one-time code in the address Schwab redirected to, or None.
+
+    The address is the page that fails to load after the login
+    (``https://127.0.0.1:8182/?code=...&session=...``), pasted whole."""
+    if not isinstance(pasted, str):
+        return None
+    try:
+        codes = parse_qs(urlparse(pasted.strip()).query).get("code", [])
+    except Exception:
+        return None
+    return codes[0] if codes and codes[0] else None
+
+
+@app.get("/auth/info")
+def auth_info():
+    """What the web app's Authorize dialog needs to send a browser to Schwab."""
+    return {"auth_url": schwab_login_url(), "callback_url": token_mgr.callback_url}
+
+
+@app.post("/auth/exchange")
+async def auth_exchange(request: Request):
+    """Sign in from the pasted redirect address: ``{"url": "..."}``.
+
+    The web app's Authorize dialog calls this over loopback, so signing in
+    again needs no tailnet and no tunnel. A POST with the address in the BODY,
+    so the one-time code is not written to the access log (``/auth/callback``
+    carries it in the request line). Answers ``{"ok": true}``, or
+    ``{"ok": false, "error": "..."}`` with 400 (nothing to exchange) or 502
+    (Schwab refused it)."""
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    code = code_from_pasted(body.get("url") if isinstance(body, dict) else None)
+    if not code:
+        return JSONResponse(
+            {"ok": False, "error": "No authorization code in that address. Paste "
+                                   "the whole address of the page Schwab sent "
+                                   "you to; it contains code=."},
+            status_code=400)
+    try:
+        # Blocking (a requests.post to Schwab): off the event loop.
+        await asyncio.to_thread(token_mgr.exchange_auth_code, code)
+    except Exception as exc:
+        logger.warning("Sign-in from the web app was refused: %s", exc)
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=502)
+    return {"ok": True}
+
+
 @app.get("/auth", response_class=HTMLResponse)
 def auth_start():
-    auth_url = (
-        f"{SCHWAB_AUTH_URL}"
-        f"?client_id={token_mgr.app_key}"
-        f"&redirect_uri={token_mgr.callback_url}"
-    )
+    auth_url = schwab_login_url()
     refresh_expired = token_mgr._is_refresh_expired()
     status_class = "expired" if refresh_expired else "ok"
     status_msg = ("Refresh token is expired — re-authentication required."
