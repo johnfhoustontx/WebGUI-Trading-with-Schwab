@@ -58,6 +58,7 @@ from src.analysis.recommendation import (  # noqa: E402
 from src.analysis.sector_strength import (  # noqa: E402
     SectorStrength, compute_sector_strength)
 from services import _degrade  # noqa: E402
+from services.trade_svc import listed_stocks as _listed  # noqa: E402
 
 # Symbol → (sector name, sector ETF). A small built-in map for common large caps
 # in lieu of the legacy finviz scrape; unknown symbols fall back to a neutral
@@ -1751,6 +1752,11 @@ def analyze(symbol):
         "direction_clearance": _direction_clearance(spy),
         "dealer_context": _dealer_context(symbol),
         "peers": _peers,
+        # Sector, industry, sub-industry and the industry's top-ranked stocks,
+        # from the listed-stocks file. None for a symbol the file does not
+        # list. NOT the ``sector`` above: that one is the built-in map's, and
+        # it is what the sector-strength factor was scored against.
+        "classification": _listed.classification(symbol),
         "earnings_coverage": earnings_coverage(symbol),
         "fundamentals": _fundamentals_dict(fundamentals),
         "fundamentals_available": fundamentals.is_sufficient(),

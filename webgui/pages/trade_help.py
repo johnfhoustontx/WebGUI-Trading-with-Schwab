@@ -634,13 +634,21 @@ _GENERAL = {
         "is mechanically obliged to buy or sell, which is why price so often "
         "reacts at them. The whole panel is withheld when the data is missing "
         "or stale, because a stale wall is worse than no wall."),
-    "peers_panel": (
-        "The same model's score for other stocks in this one's sector, so you "
-        "can see whether the reading is about the company or about its "
-        "neighbourhood.\n\n"
-        "A name scoring in the top band while every peer scores near the "
-        "bottom is a genuinely different signal from one where the whole "
-        "sector is being lifted together."),
+    "industry_leaders": (
+        "The biggest and most actively traded stocks in this one's industry, "
+        "with their market value. The stock on screen is highlighted when it "
+        "is one of them, and the line on the right gives its own place.\n\n"
+        "The rank is popularity: average dollar volume and market value, "
+        "blended, refreshed every Saturday. It is not the model's opinion of "
+        "any of these stocks. For how the model ranks names against each "
+        "other, open the Rank Board."),
+    "classification": (
+        "Where this stock is filed in the list of US listed stocks: its "
+        "sector, its industry within that sector, and its sub-industry.\n\n"
+        "The industry and the sub-industry come from two different "
+        "classification systems, so one is not always a finer cut of the "
+        "other. A dash means the list has nothing for this symbol, which is "
+        "normal for a fund or an index."),
     "mtf_bias": (
         "The direction agreed by several timeframes at once, from the "
         "shortest to the longest.\n\n"

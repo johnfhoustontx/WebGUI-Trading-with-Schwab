@@ -634,6 +634,34 @@ def test_dealer_context_survives_a_bus_outage(monkeypatch):
     assert res["dealer_context"]["collected"] is False
 
 
+# ── sector / industry / sub-industry + the industry's leaders ────────────────
+
+def test_analyze_carries_the_symbols_classification(monkeypatch):
+    """The block is the listed-stocks reader's, asked for the analysed symbol."""
+    _patch(monkeypatch, FakeClient())
+    asked = []
+
+    def _lookup(symbol):
+        asked.append(symbol)
+        return {"sector": "Technology", "industry": "Computer Manufacturing",
+                "sub_industry": "Electronic Computers", "industry_rank": 1,
+                "industry_count": 10, "leaders": []}
+
+    monkeypatch.setattr(compute._listed, "classification", _lookup)
+    res = compute.analyze("aapl")
+    assert asked == ["AAPL"]
+    assert res["classification"]["industry"] == "Computer Manufacturing"
+
+
+def test_analyze_has_no_classification_for_a_symbol_the_file_lacks(monkeypatch):
+    """Under pytest the reader never opens the live file, so this is also what
+    every other analyze test in this module gets."""
+    _patch(monkeypatch, FakeClient())
+    res = compute.analyze("AAPL")
+    assert res["errors"] == []
+    assert res["classification"] is None
+
+
 # ── per-symbol snapshot + sector peers (Phase 2, task 2.4) ───────────────────
 
 def test_the_universe_snapshot_keeps_symbol_identity(monkeypatch):

@@ -1086,12 +1086,20 @@ _SWING_MODEL = ConfigFile(
 # ─────────────────────────────────────────────────────────────────────────────
 # Listed-stocks re-rank — config/listed_stocks.toml
 # ─────────────────────────────────────────────────────────────────────────────
-# Read by tools/rank_listed_stocks.py at run time: nothing to restart.
+# Read by tools/rank_listed_stocks.py at run time, and [display] by
+# services/trade_svc/listed_stocks.py on every analysis: nothing to restart.
 _LISTED_STOCKS = ConfigFile(
     name="listed_stocks.toml", title="Listed-stocks re-rank", icon="leaderboard",
-    summary="How the weekly re-rank scores the listed-stocks classification file.",
+    summary="How the weekly re-rank scores the listed-stocks classification "
+            "file, and how much of it the Trade Analyzer shows.",
     restart=(),
     sections=(
+        Section("Trade Analyzer", "The Overview lists the top-ranked stocks of "
+                "the industry the symbol on screen belongs to.", (
+            Field("display.industry_top", "Stocks listed per industry",
+                  "The next analysis after a change uses the new count.",
+                  kind="int", min=1, max=20, step=1),
+        )),
         Section("Popularity score", "Each stock's average dollar volume and its "
                 "market cap are each turned into a percentile across the whole "
                 "file, then blended.", (

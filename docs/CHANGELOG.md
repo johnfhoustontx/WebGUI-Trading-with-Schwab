@@ -4,7 +4,47 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-13 (**Listed-stocks classification file: a popularity rank, refreshed every Saturday.**)
+**Last updated:** 2026-10-13 (**Trade Analyzer: sector, industry and sub-industry beside the symbol, and the industry's top five in place of the peers panel.**)
+
+- **Asked for by the user:** show the Sector, Industry and Sub Industry near the
+  Symbol, and replace "Where it sits among its peers" with the top 5 stocks in the
+  industry.
+- **The source is the listed-stocks classification file** ranked in the entry
+  below. `services/trade_svc/listed_stocks.py` looks the symbol up in it and
+  `analyze` adds a `classification` block to `cache:trade:analysis`: `name`,
+  `sector`, `industry`, `sub_industry`, the symbol's own `industry_rank` /
+  `industry_count`, and `leaders[]` (the industry's top `Industry_Rank` rows, each
+  with a trimmed company name and a market cap). `None` for a symbol the file does
+  not list. The file is re-read when its modification time changes, so the
+  Saturday run reaches a running service.
+- **The command bar** (shared by all four screens) gains three labelled fields
+  after Company. The Company field is now the name alone: it used to append the
+  built-in map's sector and fund ("Financials · XLF"), which would sit beside the
+  file's sector ("Finance") in a different vocabulary. The model's `sector{}`
+  block is unchanged and still what the sector-strength factor scores against.
+- **The Overview's last panel** is "Top 5 in <industry>": rank, symbol, market cap
+  and company name per card, the analysed symbol highlighted and marked "THIS
+  SYMBOL", and its own place on the heading line ("COIN ranks 4 of 173 · by dollar
+  volume and market cap"). It reads "All N stocks in ..." when the industry is no
+  larger than the list, and hides for a symbol with no industry or an industry
+  nobody has ranked. The service still computes `peers`; nothing on the page reads
+  it now.
+- **The count is a setting:** `[display] industry_top` in
+  `config/listed_stocks.toml` (Settings → Configuration), read on every analysis.
+  That file now has two readers, so its defaults moved to
+  `shared/listed_stocks_config.py`, which both import.
+- **Company names are trimmed** of the file's share-class wording ("Apple Inc.
+  Common Stock" → "Apple Inc.", "Boeing Company (The) Common Stock" → "The Boeing
+  Company"). The pattern was fitted to the 715 names that are in some industry's
+  top five; a name it does not recognise is shown whole.
+- **Verified** by the trade service, shared, tools, root and webgui suites; by
+  running the reader over all 5,920 symbols of the server's file (every one
+  classified, no gap in any industry's ranks, 28 with no industry); and in the
+  local page harness on that file. Measured there: at phone width a 62-character
+  industry name ran out of the bar until the three fields were allowed to wrap.
+  Not yet run on prod.
+
+**Prior —** 2026-10-13 (**Listed-stocks classification file: a popularity rank, refreshed every Saturday.**)
 
 - **Asked for by the user**, in steps: store a classification file of US listed
   stocks on the server, clean it, rank each stock's popularity inside its industry

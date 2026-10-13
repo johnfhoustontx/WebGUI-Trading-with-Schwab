@@ -77,6 +77,7 @@ _FIELDS = {
     "direction_clearance": None,
     "dealer_context": None,
     "peers": None,
+    "classification": None,
     "earnings_coverage": None,
     "trade_plan": None,
     "live_ic": None,

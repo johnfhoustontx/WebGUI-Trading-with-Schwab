@@ -150,7 +150,9 @@ day — a systemd timer that warns before the Schwab sign-in lapses), and
 **`stock_rank`** (Saturday 08:00 CT — a systemd timer that re-ranks the
 listed-stocks classification file; its scoring and its coverage floor are
 `config/listed_stocks.toml`, read at run time by
-`tools/rank_listed_stocks.py`). They
+`tools/rank_listed_stocks.py`; the same file's `[display] industry_top` is how
+many of an industry's top-ranked stocks the Trade Analyzer lists, read by
+`services/trade_svc/listed_stocks.py` on every analysis). They
 are named clock marks, the same thing `[windows]` already models, and **each
 `analyze` slot is a paid Claude call** while `income` is the largest scheduled
 Schwab spend on that table, so it is the direct control on both.

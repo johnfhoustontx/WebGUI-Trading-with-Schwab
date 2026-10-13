@@ -147,6 +147,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#fundamental-primitives">Fundamental primitives</a></li>
 <li><a href="#fundamentals-parsing">Fundamentals parsing</a></li>
 <li><a href="#validated-swing-model-position-18-wk">Validated swing model (Position, 1–8 wk)</a></li>
+<li><a href="#sector-industry-sub-industry-and-the-industrys-leaders">Sector, industry, sub-industry and the industry's leaders</a></li>
 <li><a href="#markov-20-forecast-position">Markov 2.0 forecast (Position)</a></li>
 </ul>
 </li>
@@ -2817,6 +2818,58 @@ caveats apply; the model leans on low_vol's inverted sign, which could flip. Val
 reduces self-deception; it does not guarantee forward performance — which is why
 it is <strong>refit monthly</strong>, and why a refit ships only past the gate. Regime-conditional weighting is the planned next
 step (same harness, new regime keys).</p>
+<h2 id="sector-industry-sub-industry-and-the-industrys-leaders">Sector, industry, sub-industry and the industry's leaders</h2>
+<p><strong>File:</strong> <code>services/trade_svc/listed_stocks.py</code>, reading
+<code>options-scanner/data/us_listed_stocks_classification.csv</code>
+(<code>repo_paths.LISTED_STOCKS_CSV</code>). <code>analyze</code> adds a <code>classification</code> block to the
+analysis; nothing here is fetched from Schwab.</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>sector</code>, <code>industry</code>, <code>sub_industry</code></td>
+<td>The file's <code>Sector</code>, <code>Industry</code> and <code>Sub_Industry</code> columns for the symbol, as written</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td>The file's <code>Name</code> with the share-class wording dropped ("Apple Inc. Common Stock" -&gt; "Apple Inc."); shown only when Schwab returns no name</td>
+</tr>
+<tr>
+<td><code>industry_rank</code>, <code>industry_count</code></td>
+<td>The file's <code>Industry_Rank</code> and <code>Industry_Count</code> for the symbol</td>
+</tr>
+<tr>
+<td><code>leaders[]</code></td>
+<td>The rows sharing the symbol's <code>Industry</code> that carry an <code>Industry_Rank</code>, in rank order, cut to <code>[display] industry_top</code> (5); each <code>{rank, symbol, name, market_cap}</code></td>
+</tr>
+<tr>
+<td><code>leaders[].market_cap</code></td>
+<td><code>Market_Cap_Used_USD</code> (the cap the rank was computed on), else the file's own <code>Market_Cap_USD</code>, else absent</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>The rank is not computed here.</strong> <code>Industry_Rank</code> is written by the Saturday
+  re-rank (<code>tools/rank_listed_stocks.py</code>): a blend of two percentiles across the
+  whole file, average dollar volume and market cap. It is popularity, not the swing
+  model's score.</li>
+<li><strong>An industry with no ranks has no leaders.</strong> Before the first re-rank the rank
+  columns are empty; the block then carries the three names and an empty list, and
+  the Overview hides the panel. File order is never presented as a ranking.</li>
+<li><strong>A symbol the file does not list has no block</strong> (<code>classification</code> is <code>None</code>): the
+  three fields in the command bar read as dashes.</li>
+<li><strong>This is not <code>sector{}</code>.</strong> That block is the built-in map of about 60 large caps
+  and its sector fund, which is what the sector-strength factor is scored against.
+  The two use different sector vocabularies and are never mixed on screen.</li>
+<li>The file is re-read when its modification time changes, so the Saturday run is
+  picked up by a running service. <code>[display] industry_top</code> is read on every
+  analysis.</li>
+</ul>
 <h2 id="markov-20-forecast-position">Markov 2.0 forecast (Position)</h2>
 <p><strong>Files:</strong> <code>trade-analyzer/src/analysis/markov.py</code> (pure math) +
 <code>services/trade_svc/compute.py</code> (reconstruction, prior, wiring). A probabilistic

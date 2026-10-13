@@ -37,8 +37,7 @@ class TestTheCommandBar:
     def test_the_company_line_comes_from_the_payload(self):
         bar = tt.command_bar({"symbol": "AAPL", "description": "Apple Inc",
                               "sector": {"name": "Technology", "etf": "XLK"}})
-        assert "Apple Inc" in bar["name"]
-        assert "Technology" in bar["name"]
+        assert bar["name"] == "Apple Inc"
 
     def test_a_symbol_with_no_analysis_says_it_is_not_in_the_cross_section(self):
         bar = tt.command_bar({"symbol": "ZZZZ"})
@@ -340,10 +339,10 @@ class TestTheCommandBarReadsTheRealPayloadShape:
 
     def test_a_description_that_merely_repeats_the_ticker_is_dropped(self):
         """Schwab's quote has no company name — `description` is the SYMBOL. It
-        must not render as 'MU · MU · Technology'."""
+        must not render as the company's name."""
         bar = tt.command_bar({"symbol": "MU", "description": "MU",
                               "sector": {"name": "Technology", "etf": "XLK"}})
-        assert bar["name"] == "Technology · XLK"
+        assert bar["name"] == "—"
 
     def test_a_real_description_is_kept(self):
         bar = tt.command_bar({"symbol": "AAPL", "description": "Apple Inc",
@@ -401,24 +400,138 @@ class TestOneSignedFormatterForTheWholeDesk:
 
 
 class TestTheCompanyNameIsShown:
-    def test_a_real_company_name_leads_the_line(self):
+    def test_the_company_field_is_the_name_alone(self):
+        """The sector has a field of its own beside it, from the listed-stocks
+        file. The built-in map's sector and fund used to trail the name, and
+        would now sit beside a second sector that can disagree with them."""
         bar = tt.command_bar({"symbol": "MU", "company_name": "Micron Technology",
                               "description": "MU",
                               "sector": {"name": "Technology", "etf": "XLK"}})
-        assert bar["name"] == "Micron Technology · Technology · XLK"
+        assert bar["name"] == "Micron Technology"
 
     def test_it_beats_the_ticker_masquerading_as_a_description(self):
         bar = tt.command_bar({"symbol": "MU", "company_name": "Micron Technology",
                               "description": "MU"})
         assert bar["name"] == "Micron Technology"
 
-    def test_no_company_name_falls_back_to_the_sector_line(self):
+    def test_no_schwab_name_falls_back_to_the_listed_stocks_files(self):
+        bar = tt.command_bar({"symbol": "MU", "description": "MU",
+                              "classification": {"name": "Micron Technology Inc."}})
+        assert bar["name"] == "Micron Technology Inc."
+
+    def test_schwabs_name_beats_the_files(self):
+        bar = tt.command_bar({"symbol": "MU", "company_name": "Micron Technology",
+                              "classification": {"name": "Micron Technology Inc."}})
+        assert bar["name"] == "Micron Technology"
+
+    def test_no_name_for_a_symbol_the_model_knows_is_a_dash(self):
         bar = tt.command_bar({"symbol": "MU", "description": "MU",
                               "sector": {"name": "Technology", "etf": "XLK"}})
-        assert bar["name"] == "Technology · XLK"
+        assert bar["name"] == "—"
 
     def test_nothing_at_all_still_says_it_is_not_in_the_cross_section(self):
         assert "cross-section" in tt.command_bar({"symbol": "ZZZZ"})["name"]
+
+
+_NVDA = {"symbol": "NVDA", "classification": {
+    "name": "NVIDIA Corporation", "sector": "Technology",
+    "industry": "Semiconductors",
+    "sub_industry": "Semiconductors & Related Devices",
+    "industry_rank": 1, "industry_count": 100,
+    "leaders": [
+        {"rank": 1, "symbol": "NVDA", "name": "NVIDIA Corporation",
+         "market_cap": 5525648000000.0},
+        {"rank": 2, "symbol": "MU", "name": "Micron Technology Inc.",
+         "market_cap": 900000000000.0},
+        {"rank": 3, "symbol": "AVGO", "name": "Broadcom Inc.",
+         "market_cap": None},
+    ]}}
+
+
+class TestSectorIndustryAndSubIndustry:
+    def test_the_bar_carries_all_three(self):
+        bar = tt.command_bar(_NVDA)
+        assert bar["sector"] == "Technology"
+        assert bar["industry"] == "Semiconductors"
+        assert bar["sub_industry"] == "Semiconductors & Related Devices"
+
+    def test_a_symbol_the_file_does_not_list_is_three_dashes(self):
+        for analysis in ({"symbol": "SPY"}, {"symbol": "SPY", "classification": None},
+                         None):
+            bar = tt.command_bar(analysis)
+            assert (bar["sector"], bar["industry"], bar["sub_industry"]) == \
+                ("—", "—", "—")
+
+    def test_one_blank_column_is_one_dash(self):
+        bar = tt.command_bar({"symbol": "X", "classification": {
+            "sector": "Miscellaneous", "industry": "", "sub_industry": None}})
+        assert (bar["sector"], bar["industry"], bar["sub_industry"]) == \
+            ("Miscellaneous", "—", "—")
+
+    def test_they_never_come_from_the_models_own_sector_map(self):
+        """The built-in map names ~60 symbols in a different vocabulary
+        ("Financials", where the file says "Finance"). Mixing the two would
+        show one stock under two sector names depending on the day."""
+        bar = tt.command_bar({"symbol": "JPM",
+                              "sector": {"name": "Financials", "etf": "XLF"}})
+        assert bar["sector"] == "—"
+
+
+class TestTheIndustryLeaders:
+    def test_one_card_per_leader_in_the_order_given(self):
+        panel = tt.industry_leaders(_NVDA)
+        assert [c["symbol"] for c in panel["cards"]] == ["NVDA", "MU", "AVGO"]
+        assert [c["rank"] for c in panel["cards"]] == ["RANK 1", "RANK 2", "RANK 3"]
+
+    def test_the_title_names_the_count_and_the_industry(self):
+        assert tt.industry_leaders(_NVDA)["title"] == "Top 3 in Semiconductors"
+
+    def test_the_analysed_symbol_is_marked_and_no_other(self):
+        cards = tt.industry_leaders(_NVDA)["cards"]
+        assert [c["is_self"] for c in cards] == [True, False, False]
+
+    def test_the_symbols_own_place_is_stated_with_what_the_rank_is(self):
+        place = tt.industry_leaders(_NVDA)["place"]
+        assert place.startswith("NVDA ranks 1 of 100")
+        assert "dollar volume and market cap" in place
+
+    def test_a_symbol_outside_the_leaders_still_gets_its_place(self):
+        a = {"symbol": "ADI", "classification": dict(
+            _NVDA["classification"], industry_rank=12)}
+        panel = tt.industry_leaders(a)
+        assert panel["place"].startswith("ADI ranks 12 of 100")
+        assert not any(c["is_self"] for c in panel["cards"])
+
+    def test_an_unranked_symbol_says_so_rather_than_ranking_zero(self):
+        a = {"symbol": "NEW", "classification": dict(
+            _NVDA["classification"], industry_rank=None)}
+        assert tt.industry_leaders(a)["place"].startswith("NEW is not ranked")
+
+    def test_a_market_cap_is_abbreviated_and_an_absent_one_is_a_dash(self):
+        caps = [c["market_cap"] for c in tt.industry_leaders(_NVDA)["cards"]]
+        assert caps == ["$5.53T", "$900.00B", "—"]
+
+    def test_an_industry_shown_whole_does_not_claim_a_top(self):
+        """With two stocks in the industry and both on screen, "Top 2" claims a
+        cut that was never made."""
+        c = dict(_NVDA["classification"], industry="Aluminum", industry_count=2,
+                 leaders=_NVDA["classification"]["leaders"][:2])
+        assert tt.industry_leaders({"symbol": "AA", "classification": c})["title"] \
+            == "All 2 stocks in Aluminum"
+        c = dict(c, industry_count=1, leaders=c["leaders"][:1])
+        assert tt.industry_leaders({"symbol": "AA", "classification": c})["title"] \
+            == "The only stock in Aluminum"
+
+    @pytest.mark.parametrize("analysis", [
+        None, {}, {"symbol": "SPY"}, {"symbol": "SPY", "classification": None},
+        {"symbol": "X", "classification": {"industry": "Oil", "leaders": []}},
+        {"symbol": "X", "classification": {"industry": "", "leaders": [
+            {"rank": 1, "symbol": "Y"}]}},
+    ])
+    def test_nothing_to_draw_is_no_cards(self, analysis):
+        panel = tt.industry_leaders(analysis)
+        assert panel["cards"] == []
+        assert panel["title"] and panel["place"] == ""
 
 
 def test_the_command_bars_change_uses_the_desk_wide_minus():

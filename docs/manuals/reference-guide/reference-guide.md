@@ -4010,7 +4010,8 @@ symbol, and any time you have a directional opinion and want the best way to exp
 ### What it is
 
 The Signal desk's landing screen: market state, both verdicts, dealer positioning and
-peer placement for one symbol, under a command bar shared by all four tabs.
+the leading stocks of the symbol's industry, under a command bar shared by all four
+tabs.
 
 ### Where the data comes from
 
@@ -4022,10 +4023,18 @@ peer placement for one symbol, under a command bar shared by all four tabs.
 
 ### Reading the screen
 
-**The command bar** carries a draft/committed distinction: the symbol box outlines
-indigo while your typing differs from what is on screen, and an emptied box reverts
-rather than clearing. The company and sector line, and every panel below, follow the
-committed symbol.
+**The command bar** carries a draft/committed distinction: the symbol box is ringed
+in amber while your typing differs from what is on screen, and an emptied box reverts
+rather than clearing. The company name, the **Sector**, **Industry** and
+**Sub-industry** beside it, and every panel below, follow the committed symbol. Those
+three come from the server's list of US listed stocks, not from the model: a dash
+means the list has nothing for the symbol (a fund, an index).
+
+**The last panel** names the symbol's industry and lists its top-ranked stocks, five
+by default, with the symbol's own place on the heading line. Use it to see who else
+is in the industry before settling on one name. The rank is popularity (dollar
+volume and market value, refreshed on Saturdays); the model's ranking of names
+against each other is the Rank Board.
 
 **Deep Dive** and **AI Query** sit in the command bar. Each enqueues its report for the
 committed symbol and opens the result in a new tab when it lands; the cache version is

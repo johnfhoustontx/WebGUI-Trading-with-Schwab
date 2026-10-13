@@ -61,6 +61,12 @@ class TradeAnalysis(_Base):
     direction_clearance: dict | None = None
     dealer_context: dict | None = None
     peers: dict | None = None
+    # ``classification`` — the symbol's sector, industry and sub-industry from
+    # the listed-stocks file, its own popularity rank inside its industry, and
+    # that industry's top-ranked stocks (``trade_svc.listed_stocks``). None for
+    # a symbol the file does not list. ⚠ Not ``sector`` above: that is the
+    # built-in map's sector and ETF, which the sector-strength factor scores.
+    classification: dict | None = None
     # "upcoming" / "none_scheduled" / "not_listed". Kept separate from
     # fundamentals.days_to_earnings because the last two BOTH leave that
     # None, and conflating them lets the earnings gate fail open silently.

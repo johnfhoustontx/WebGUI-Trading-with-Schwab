@@ -2699,10 +2699,16 @@ which collapses a calendar.
 **Route:** `/trade`. The first tab of the Trade Analyzer group, and the screen the
 **Signal desk** command bar sits above on all four tabs.
 
-The command bar is persistent: the model stamp, a **Symbol** box, the last price and
-its change, and the multi-timeframe bias. Type a ticker and press **Enter** (or tab
-out) to commit it - the box outline turns indigo while your typing differs from the
-committed symbol, so a half-typed ticker never looks like the thing on screen.
+The command bar is persistent: a **Symbol** box, the company's name, its
+**Sector**, **Industry** and **Sub-industry**, the last price and its change, and the
+multi-timeframe bias. Type a ticker and press **Enter** (or tab out) to commit it -
+the box is ringed in amber while your typing differs from the committed symbol, so a
+half-typed ticker never looks like the thing on screen.
+
+Sector, Industry and Sub-industry come from the list of US listed stocks kept on the
+server. A dash in any of them means the list has nothing for that symbol, which is
+normal for a fund or an index. The industry and the sub-industry come from two
+different classification systems, so one is not always a finer cut of the other.
 Clearing the box and leaving it reverts to the last good symbol rather than blanking
 the desk.
 
@@ -2736,8 +2742,16 @@ The screen itself reads top to bottom:
   ladder, over the volatility stats. The ladder is **absent entirely** when the
   data is not collected or is stale, because a drawn ladder is a much stronger
   claim than a missing one.
-- **Where it sits among its peers** - the same model run across its sector, with
-  this symbol highlighted.
+- **Top 5 in *the symbol's industry*** - the five biggest and most actively traded
+  stocks in that industry, each with its rank, company name and market value. The
+  symbol on screen is highlighted when it is one of the five, and the line on the
+  right of the heading gives its own place ("COIN ranks 4 of 173"). The rank is
+  popularity - average dollar volume blended with market value, refreshed every
+  Saturday - and is **not** the model's opinion of those stocks; for the model's
+  ranking open the **Rank Board**. The heading reads "All 3 stocks in ..." when the
+  industry is smaller than the list, and the panel is absent for a symbol with no
+  industry. The number listed is a setting (*Settings -> Configuration ->
+  Listed-stocks re-rank*).
 
 ---
 

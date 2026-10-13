@@ -80,7 +80,6 @@ TOOLTIP = ("max-w-[340px] whitespace-pre-line text-[11.5px] leading-[1.6] "
 # nowhere else — and which Task 1 had just retired from the Symbol field.
 _FOCUS_RGB = _t.hex_rgb(_P["focus"], (107, 134, 255))
 SELECTED_TEXT = f"text-[{_P['focus']}]"
-SELECTED_BAR = f"bg-[{_P['focus']}]"
 SELECTED_BOX = (f"border-[{_P['focus']}] bg-[rgba({_FOCUS_RGB[0]},"
                 f"{_FOCUS_RGB[1]},{_FOCUS_RGB[2]},0.08)]")
 
@@ -108,6 +107,12 @@ DRAFT_RING = (f"ring-2 ring-[{_t.THEME['semantic']['warning']}]/60 "
 _REPORTS = (("Deep Dive", "deepdive", "trade:deepdive", "/trade/deepdive"),
             ("AI Query", "deepdive_query", "trade:deepdive_query",
              "/trade/deepdive-query"))
+
+# Where the listed-stocks file files the symbol: the ``command_bar`` key and
+# the field's label, in the order they sit after Company. Three fields rather
+# than one joined line, so each has its label and a blank one is one dash.
+_FILED_UNDER = (("sector", "Sector"), ("industry", "Industry"),
+                ("sub_industry", "Sub-industry"))
 
 
 def analyzing_label(symbol, seconds, typical=TYPICAL_ANALYZE_SEC):
@@ -231,6 +236,17 @@ def _command_bar(state, painters, head):
         with kit.field("Company"):
             name = ui.label("").classes(
                 f"text-[12px] {_t.MUTED} whitespace-nowrap")
+        filed = {}
+        for key, label in _FILED_UNDER:
+            with kit.field(label):
+                # NOT ``whitespace-nowrap``, unlike its neighbours: an industry
+                # name runs to 62 characters, and on a phone a line that long
+                # that cannot wrap runs out of the bar (measured). With room
+                # it still sits on one line.
+                filed[key] = ui.label("").classes(
+                    f"text-[12px] leading-[1.35] {_t.MUTED}")
+                with filed[key]:
+                    tip(th.help_for("classification"))
         with kit.field("Last"):
             with ui.row().classes("items-baseline gap-2 no-wrap"):
                 price = ui.label("").classes(
@@ -281,6 +297,8 @@ def _command_bar(state, painters, head):
         vals = tt.command_bar(a)
         model.text = vals["model_stamp"]
         name.text = vals["name"]
+        for key, lbl in filed.items():
+            lbl.text = vals[key]
         price.text = vals["price"]
         change.text = vals["change"]
         change.classes(remove=T.STATE_TEXT, add=vals["change_class"])
@@ -350,17 +368,28 @@ def panel(title=None, stamp=None, classes="", help=None):
     col = ui.column().classes(f"{_t.CARD} w-full gap-4 {classes}")
     if title:
         with col:
-            with ui.row().classes("w-full items-baseline justify-between "
-                                  "gap-3 flex-wrap"):
-                # The app's one panel heading, so a Signal Desk panel reads
-                # like a panel anywhere else. It was the terminal theme's own
-                # panel-title face, a step larger and bolder than every other
-                # heading in the app.
-                with kit.section_title(title):
-                    tip(help)
-                if stamp:
-                    ui.label(stamp).classes(SUBTLE)
+            panel_head(title, stamp or None, help)
     return col
+
+
+def panel_head(title, stamp=None, help=None):
+    """A panel's heading row, for the panel being built: the title on the left
+    and, when ``stamp`` is not None, a quiet line on the right.
+
+    Returns ``(title label, stamp label or None)``. ``panel`` draws one for a
+    heading that never changes; a screen whose heading follows the data (the
+    Overview's industry panel names the industry) calls this inside a bare
+    ``panel()`` and repaints the two labels."""
+    with ui.row().classes("w-full items-baseline justify-between "
+                          "gap-3 flex-wrap"):
+        # The app's one panel heading, so a Signal Desk panel reads like a
+        # panel anywhere else. It was the terminal theme's own panel-title
+        # face, a step larger and bolder than every other heading in the app.
+        head = kit.section_title(title)
+        with head:
+            tip(help)
+        note = None if stamp is None else ui.label(stamp).classes(SUBTLE)
+    return head, note
 
 
 def centred_bar(left_pct, width_pct, bar_class, height="h-[7px]"):

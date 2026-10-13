@@ -1856,6 +1856,37 @@ reduces self-deception; it does not guarantee forward performance — which is w
 it is **refit monthly**, and why a refit ships only past the gate. Regime-conditional weighting is the planned next
 step (same harness, new regime keys).
 
+## Sector, industry, sub-industry and the industry's leaders
+
+**File:** `services/trade_svc/listed_stocks.py`, reading
+`options-scanner/data/us_listed_stocks_classification.csv`
+(`repo_paths.LISTED_STOCKS_CSV`). `analyze` adds a `classification` block to the
+analysis; nothing here is fetched from Schwab.
+
+| Field | Source |
+|-------|--------|
+| `sector`, `industry`, `sub_industry` | The file's `Sector`, `Industry` and `Sub_Industry` columns for the symbol, as written |
+| `name` | The file's `Name` with the share-class wording dropped ("Apple Inc. Common Stock" -> "Apple Inc."); shown only when Schwab returns no name |
+| `industry_rank`, `industry_count` | The file's `Industry_Rank` and `Industry_Count` for the symbol |
+| `leaders[]` | The rows sharing the symbol's `Industry` that carry an `Industry_Rank`, in rank order, cut to `[display] industry_top` (5); each `{rank, symbol, name, market_cap}` |
+| `leaders[].market_cap` | `Market_Cap_Used_USD` (the cap the rank was computed on), else the file's own `Market_Cap_USD`, else absent |
+
+- **The rank is not computed here.** `Industry_Rank` is written by the Saturday
+  re-rank (`tools/rank_listed_stocks.py`): a blend of two percentiles across the
+  whole file, average dollar volume and market cap. It is popularity, not the swing
+  model's score.
+- **An industry with no ranks has no leaders.** Before the first re-rank the rank
+  columns are empty; the block then carries the three names and an empty list, and
+  the Overview hides the panel. File order is never presented as a ranking.
+- **A symbol the file does not list has no block** (`classification` is `None`): the
+  three fields in the command bar read as dashes.
+- **This is not `sector{}`.** That block is the built-in map of about 60 large caps
+  and its sector fund, which is what the sector-strength factor is scored against.
+  The two use different sector vocabularies and are never mixed on screen.
+- The file is re-read when its modification time changes, so the Saturday run is
+  picked up by a running service. `[display] industry_top` is read on every
+  analysis.
+
 ## Markov 2.0 forecast (Position)
 
 **Files:** `trade-analyzer/src/analysis/markov.py` (pure math) +

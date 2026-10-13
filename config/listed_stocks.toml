@@ -1,6 +1,7 @@
 # The weekly popularity re-rank of the listed-stocks classification file
 # (options-scanner/data/us_listed_stocks_classification.csv) - read by
-# tools/rank_listed_stocks.py.
+# tools/rank_listed_stocks.py - and what the Trade Analyzer shows from that
+# file ([display], read by services/trade_svc/listed_stocks.py).
 #
 # The run (trading-<env>-stock-rank.timer, [slots.stock_rank] in sessions.toml,
 # Saturday) gives every row a 0-100 popularity score and its rank inside its
@@ -8,6 +9,12 @@
 # never adds, drops or reorders a row.
 #
 # Read at run time: a change here needs no restart.
+
+[display]
+# How many of an industry's top-ranked stocks the Trade Analyzer lists for the
+# symbol on screen (services/trade_svc/listed_stocks.py). The next analysis
+# after a change uses the new count.
+industry_top = 5
 
 [blend]
 # The score is a blend of two percentiles taken across the whole file: average

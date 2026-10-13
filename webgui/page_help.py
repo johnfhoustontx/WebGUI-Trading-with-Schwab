@@ -1531,6 +1531,13 @@ press Enter.
   recent quarter the weakest. That history comes from Alpha Vantage; Schwab's
   feed carries none, which is why the row scored zero for every stock until that
   source was added.
+- **Sector, Industry and Sub-industry** sit beside the company's name on all four
+  screens. They come from the server's list of US listed stocks; a dash means the
+  list has nothing for that symbol, which is normal for a fund or an index.
+- **The last panel lists the top stocks in the symbol's industry** — five by
+  default — with each one's market value, and says where the symbol itself ranks.
+  That rank is popularity (dollar volume and market value, refreshed every
+  Saturday), **not** the model's opinion. The model's ranking is the Rank Board.
 - **Hover anything you do not recognise.** Every tile explains itself.
 - **Evidence** shows each factor's pull and the model's own track record;
   **Rank Board** ranks the whole universe with its safety checks showing;

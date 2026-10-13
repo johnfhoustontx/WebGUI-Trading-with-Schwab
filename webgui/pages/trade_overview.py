@@ -2,7 +2,8 @@
 
 Market state and its gate chips, the Position rank on a decile rail with a
 per-side gate card each, the Long Term verdict over centred factor bars, the
-dealer ladder with its volatility stats, and where the name sits among peers.
+dealer ladder with its volatility stats, and the top-ranked stocks of the
+symbol's industry.
 
 Widgets only: values come from ``trade_terminal``, classes from
 ``terminal_theme``. The four screens share `trade_shell.page`, so this module
@@ -26,8 +27,8 @@ _P = theme.THEME["palette"]
 # reading, ``theme.MUTED`` for what qualifies it, and ``_FAINT`` for the
 # dimmest captions - the colour ``kit.EYEBROW`` wears.
 # ``_FRAME_EDGE`` / ``_TRACK`` are chart FURNITURE, not data: the market-state
-# strip's hairline, the dealer ladder's axis and a peer bar's trough each draw
-# a frame, so they take the app's card border.
+# strip's hairline, the dealer ladder's axis and an industry card's edge each
+# draw a frame, so they take the app's card border.
 _FAINT = f"text-[{_P['icon']}]"
 _FRAME_EDGE = f"border-[{_P['card_border']}]"
 _TRACK = f"bg-[{_P['card_border']}]"
@@ -154,11 +155,16 @@ def _build(state, refs):
             "[grid-template-columns:repeat(auto-fit,minmax(160px,1fr))]")
     dealer_empty = ui.label("").classes(f"{sh.NOTE} px-5 pb-4")
 
-    # ── peers ───────────────────────────────────────────────────────────────
-    peer_panel = sh.panel("Where it sits among its peers",
-                          help=th.help_for("peers_panel"))
-    with peer_panel:
-        peer_wrap = ui.element("div").classes(
+    # ── the industry's top-ranked stocks ────────────────────────────────────
+    # The heading names the industry, so it is repainted with the cards rather
+    # than fixed here. These are the listed-stocks file's popularity ranks and
+    # NOT the model's: the model's own ranking is the Rank Board.
+    leader_panel = sh.panel()
+    with leader_panel:
+        leader_title, leader_place = sh.panel_head(
+            tt.industry_leaders(None)["title"], "",
+            help=th.help_for("industry_leaders"))
+        leader_wrap = ui.element("div").classes(
             "w-full grid gap-3 "
             "[grid-template-columns:repeat(auto-fit,minmax(168px,1fr))]")
 
@@ -296,13 +302,14 @@ def _build(state, refs):
                     ui.label(str(row.get("value", "—"))).classes(
                         f"text-[16px] font-bold {theme.LABEL}")
 
-        peers = a.get("peers") or {}
-        ranked = peers.get("ranked") or []
-        peer_panel.set_visibility(bool(ranked))
-        peer_wrap.clear()
-        with peer_wrap:
-            for p in ranked[:8]:
-                _peer_card(p, a.get("symbol"))
+        leaders = tt.industry_leaders(a)
+        leader_panel.set_visibility(bool(leaders["cards"]))
+        leader_title.text = leaders["title"]
+        leader_place.text = leaders["place"]
+        leader_wrap.clear()
+        with leader_wrap:
+            for card in leaders["cards"]:
+                _leader_card(card)
 
     paint.append(_paint)
 
@@ -362,28 +369,28 @@ def _side_card(side, clearance, gates):
         ui.label(detail).classes(sh.NOTE)
 
 
-def _peer_card(p, symbol):
-    sym = (p.get("symbol") or "").upper()
-    is_self = sym == (symbol or "").upper()
-    pct = fmt.num(p.get("percentile"))
+def _leader_card(card):
+    """One of the industry's top-ranked stocks: rank, symbol, market cap, name.
+
+    ``card`` is a row of ``trade_terminal.industry_leaders``."""
+    is_self = card["is_self"]
     # "This is the one you are looking at" is a SELECTION, not a datum, and
     # the app has one colour for it - the one ``ui_kit.table``'s own selected
     # row wears. It was an indigo the app speaks nowhere else.
     border = sh.SELECTED_BOX if is_self \
         else f"{_FRAME_EDGE} bg-[{_P['card_bg']}]"
-    with ui.column().classes(f"gap-[9px] rounded-[10px] border px-[14px] "
-                             f"py-[13px] {border}"):
-        ui.label("THIS SYMBOL" if is_self else "PEER").classes(
+    with ui.column().classes(f"gap-[7px] min-w-0 rounded-[10px] border "
+                             f"px-[14px] py-[13px] {border}"):
+        # The colour alone would say "this one" only to a reader who can see it.
+        ui.label(f"{card['rank']} · THIS SYMBOL" if is_self
+                 else card["rank"]).classes(
             f"{sh.EYEBROW} " + (sh.SELECTED_TEXT if is_self else ""))
-        with ui.row().classes("items-baseline gap-[9px]"):
-            ui.label(sym).classes(
+        with ui.row().classes("w-full items-baseline justify-between "
+                              "gap-[9px] no-wrap"):
+            ui.label(card["symbol"]).classes(
                 "text-[15px] font-bold "
                 + (sh.SELECTED_TEXT if is_self else theme.LABEL))
-            ui.label(f"{int(pct)}th" if pct is not None else "—").classes(
-                f"text-[12px] {theme.MUTED}")
-        with ui.element("div").classes(
-                f"h-[3px] w-full rounded-[2px] {_TRACK}"):
-            ui.element("div").classes(
-                "h-[3px] rounded-[2px] "
-                + (sh.SELECTED_BAR if is_self else T.BAR_DIM)
-                + f" w-[{(pct if pct is not None else 0):.0f}%]")
+            ui.label(card["market_cap"]).classes(
+                f"text-[12px] {theme.MUTED} whitespace-nowrap")
+        ui.label(card["name"]).classes(
+            f"text-[11.5px] leading-[1.35] {theme.MUTED}")

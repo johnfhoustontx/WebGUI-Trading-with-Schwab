@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-11</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-13</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -3305,10 +3305,15 @@ which collapses a calendar.</p>
 <h2 id="overview">Overview</h2>
 <p><strong>Route:</strong> <code>/trade</code>. The first tab of the Trade Analyzer group, and the screen the
 <strong>Signal desk</strong> command bar sits above on all four tabs.</p>
-<p>The command bar is persistent: the model stamp, a <strong>Symbol</strong> box, the last price and
-its change, and the multi-timeframe bias. Type a ticker and press <strong>Enter</strong> (or tab
-out) to commit it - the box outline turns indigo while your typing differs from the
-committed symbol, so a half-typed ticker never looks like the thing on screen.
+<p>The command bar is persistent: a <strong>Symbol</strong> box, the company's name, its
+<strong>Sector</strong>, <strong>Industry</strong> and <strong>Sub-industry</strong>, the last price and its change, and the
+multi-timeframe bias. Type a ticker and press <strong>Enter</strong> (or tab out) to commit it -
+the box is ringed in amber while your typing differs from the committed symbol, so a
+half-typed ticker never looks like the thing on screen.</p>
+<p>Sector, Industry and Sub-industry come from the list of US listed stocks kept on the
+server. A dash in any of them means the list has nothing for that symbol, which is
+normal for a fund or an index. The industry and the sub-industry come from two
+different classification systems, so one is not always a finer cut of the other.
 Clearing the box and leaving it reverts to the last good symbol rather than blanking
 the desk.</p>
 <p>Two report buttons sit in the command bar beside the bias, and each opens a separate
@@ -3352,8 +3357,16 @@ ticker.</p>
   ladder, over the volatility stats. The ladder is <strong>absent entirely</strong> when the
   data is not collected or is stale, because a drawn ladder is a much stronger
   claim than a missing one.</li>
-<li><strong>Where it sits among its peers</strong> - the same model run across its sector, with
-  this symbol highlighted.</li>
+<li><strong>Top 5 in <em>the symbol's industry</em></strong> - the five biggest and most actively traded
+  stocks in that industry, each with its rank, company name and market value. The
+  symbol on screen is highlighted when it is one of the five, and the line on the
+  right of the heading gives its own place ("COIN ranks 4 of 173"). The rank is
+  popularity - average dollar volume blended with market value, refreshed every
+  Saturday - and is <strong>not</strong> the model's opinion of those stocks; for the model's
+  ranking open the <strong>Rank Board</strong>. The heading reads "All 3 stocks in ..." when the
+  industry is smaller than the list, and the panel is absent for a symbol with no
+  industry. The number listed is a setting (<em>Settings -&gt; Configuration -&gt;
+  Listed-stocks re-rank</em>).</li>
 </ul>
 <hr />
 <h2 id="evidence">Evidence</h2>

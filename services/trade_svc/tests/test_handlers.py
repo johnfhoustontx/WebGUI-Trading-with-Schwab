@@ -71,6 +71,30 @@ def test_analyze_caches_and_publishes(monkeypatch):
     assert msg is not None and "version" in msg
 
 
+def test_the_classification_block_reaches_the_cache(monkeypatch):
+    """The handler projects the compute result onto ``_FIELDS`` before caching,
+    so a block ``_FIELDS`` does not name is dropped on the floor and the page
+    shows a dash for a symbol the file lists."""
+    bus = Bus(fake=True)
+    block = {"sector": "Technology", "industry": "Semiconductors",
+             "sub_industry": "Semiconductors & Related Devices",
+             "industry_rank": 1, "industry_count": 100,
+             "leaders": [{"rank": 1, "symbol": "NVDA",
+                          "name": "NVIDIA Corporation", "market_cap": 5.5e12}]}
+    monkeypatch.setattr(handlers.compute, "analyze",
+                        lambda sym: dict(_fake_result(sym), classification=block))
+    handlers.analyze(bus, {"symbol": "NVDA"})
+    assert bus.cache_get("cache:trade:analysis").payload["classification"] == block
+
+
+def test_a_result_with_no_classification_caches_none(monkeypatch):
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "analyze",
+                        lambda sym: _fake_result(sym))
+    handlers.analyze(bus, {"symbol": "SPY"})
+    assert bus.cache_get("cache:trade:analysis").payload["classification"] is None
+
+
 def test_analyze_passes_symbol_through(monkeypatch):
     bus = Bus(fake=True)
     seen = {}

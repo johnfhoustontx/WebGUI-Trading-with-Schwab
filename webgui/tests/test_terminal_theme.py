@@ -267,10 +267,9 @@ class TestTheSelectionAccentIsTheApps:
 
     def test_the_shell_s_selection_tokens_are_the_app_s_focus_colour(self):
         assert sh.SELECTED_TEXT == f"text-[{_P['focus']}]"
-        assert sh.SELECTED_BAR == f"bg-[{_P['focus']}]"
         assert _P["focus"] in sh.SELECTED_BOX
         # The kit's own selected row is an accent EDGE over an 8% wash; the
-        # peer card and the key row are built the same way rather than in a
+        # industry card and the key row are built the same way rather than in a
         # second dialect of the same idea.
         assert ",0.08)]" in sh.SELECTED_BOX
 

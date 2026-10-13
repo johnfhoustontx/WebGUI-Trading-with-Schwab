@@ -43,8 +43,9 @@ import time
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-from repo_paths import LISTED_STOCKS_CSV, LISTED_STOCKS_TOML, PROXY_URL  # noqa: E402
-from shared.config_toml import toml_loader                              # noqa: E402
+from repo_paths import LISTED_STOCKS_CSV, PROXY_URL                     # noqa: E402
+# DEFAULTS is not used in this file: the tests read the tool's settings off it.
+from shared.listed_stocks_config import DEFAULTS, load_config          # noqa: E402,F401
 from shared.numeric import parsed_finite                                # noqa: E402
 
 # The columns this tool owns, in the order they are written after the file's own.
@@ -52,16 +53,6 @@ RANK_COLUMNS = ("Avg_Volume", "Avg_Volume_Basis", "Price_USD", "Avg_Dollar_Volum
                 "Market_Cap_Used_USD", "Popularity_Score",
                 "Industry_Rank", "Industry_Count",
                 "Sub_Industry_Rank", "Sub_Industry_Count")
-
-# config/listed_stocks.toml's built-in defaults - the file only overrides.
-DEFAULTS = {
-    "blend": {"dollar_volume_weight": 0.5},
-    "inputs": {"market_cap": "schwab"},
-    "fetch": {"fundamentals_batch": 100, "quotes_batch": 150, "pause_sec": 2.0},
-    "safety": {"min_coverage": 0.90},
-}
-load_config, reset_config = toml_loader(LISTED_STOCKS_TOML, DEFAULTS,
-                                        label="listed_stocks.toml")
 
 CALLER = "rank_listed_stocks"
 

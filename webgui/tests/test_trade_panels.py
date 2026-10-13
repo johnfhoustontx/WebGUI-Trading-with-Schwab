@@ -63,7 +63,7 @@ class TestEveryPanelHeadIsTheKitsSectionTitle:
     def test_the_overview_s_four_panel_heads(self):
         els = _render("trade_overview")
         for head in ("Short Term", "Long Term", "Dealer positioning & volatility",
-                     "Where it sits among its peers"):
+                     "Top stocks in the industry"):
             assert _headed(els, head) is not None, head
 
     def test_the_evidence_s_three_panel_heads(self):
@@ -76,6 +76,125 @@ class TestEveryPanelHeadIsTheKitsSectionTitle:
     # in ``test_trade_recommendation.TestTheRenameIsComplete``, beside the
     # prose check it belongs with, and was re-aimed at ``kit.section_title``
     # when these two heads stopped being literal ``ui.label``s.
+
+
+_COIN = {"symbol": "COIN", "price": 180.39, "classification": {
+    "name": "Coinbase Global Inc.", "sector": "Finance",
+    "industry": "Finance: Consumer Services", "sub_industry": "Finance Services",
+    "industry_rank": 4, "industry_count": 173,
+    "leaders": [
+        {"rank": 1, "symbol": "AXP", "name": "American Express Company",
+         "market_cap": 2.1e11},
+        {"rank": 2, "symbol": "SOFI", "name": "SoFi Technologies Inc.",
+         "market_cap": 3.0e10},
+        {"rank": 3, "symbol": "COF", "name": "Capital One Financial Corporation",
+         "market_cap": 1.4e11},
+        {"rank": 4, "symbol": "COIN", "name": "Coinbase Global Inc.",
+         "market_cap": 4.7e10},
+        {"rank": 5, "symbol": "SYF", "name": "Synchrony Financial",
+         "market_cap": 2.6e10},
+    ]}}
+
+
+def _texts(els):
+    return [e.text for e in els if isinstance(e, ui.label)]
+
+
+def _panel_of(label):
+    """The card a heading sits in: the nearest ancestor wearing the app's card."""
+    node = label
+    while node is not None:
+        if isinstance(node, ui.column) and _t.CARD.split()[0] in node.classes:
+            return node
+        slot = getattr(node, "parent_slot", None)
+        node = slot.parent if slot is not None else None
+    return None
+
+
+class TestTheIndustryPanel:
+    """It replaced "Where it sits among its peers" (the model's percentile for
+    the ~60 names of its built-in sector map) on 2026-10-13, at the user's
+    request: the top-ranked stocks of the symbol's industry instead."""
+
+    def _render(self, monkeypatch, analysis):
+        from pages import trade_shell as sh
+        monkeypatch.setattr(sh, "read_analysis", lambda: analysis)
+        return _render("trade_overview")
+
+    def test_the_heading_names_the_industry(self, monkeypatch):
+        els = self._render(monkeypatch, _COIN)
+        assert _headed(els, "Top 5 in Finance: Consumer Services") is not None
+
+    def test_one_card_per_leader_with_its_name_and_market_cap(self, monkeypatch):
+        texts = _texts(self._render(monkeypatch, _COIN))
+        for symbol, name in (("AXP", "American Express Company"),
+                             ("SOFI", "SoFi Technologies Inc."),
+                             ("SYF", "Synchrony Financial")):
+            assert symbol in texts and name in texts, symbol
+        assert "$210.00B" in texts
+        assert "RANK 1" in texts and "RANK 5" in texts
+
+    def test_the_analysed_symbol_is_marked_in_words_and_in_colour(self, monkeypatch):
+        from pages import trade_shell as sh
+        els = self._render(monkeypatch, _COIN)
+        mine = [e for e in els if isinstance(e, ui.label)
+                and e.text == "RANK 4 · THIS SYMBOL"]
+        assert len(mine) == 1
+        assert sh.SELECTED_TEXT in " ".join(mine[0].classes)
+        assert "RANK 4" not in _texts(els)
+
+    def test_the_symbols_own_place_is_on_the_heading_line(self, monkeypatch):
+        texts = _texts(self._render(monkeypatch, _COIN))
+        assert any(t.startswith("COIN ranks 4 of 173") for t in texts)
+
+    def test_the_panel_hides_for_a_symbol_with_no_industry(self, monkeypatch):
+        els = self._render(monkeypatch, {"symbol": "SPY", "price": 500.0})
+        panel = _panel_of(_headed(els, "Top stocks in the industry"))
+        assert panel is not None and panel.visible is False
+
+    def test_the_panel_shows_when_there_are_leaders(self, monkeypatch):
+        els = self._render(monkeypatch, _COIN)
+        panel = _panel_of(_headed(els, "Top 5 in Finance: Consumer Services"))
+        assert panel is not None and panel.visible is True
+
+    def test_the_old_peers_panel_is_gone(self, monkeypatch):
+        analysis = dict(_COIN, peers={"sector": "Financials", "ranked": [
+            {"symbol": "JPM", "score": 80}, {"symbol": "COIN", "score": 40}]})
+        texts = _texts(self._render(monkeypatch, analysis))
+        assert "Where it sits among its peers" not in texts
+        assert "PEER" not in texts and "JPM" not in texts
+        assert "peers" not in _src("trade_overview")
+
+
+class TestTheBarSaysWhereTheSymbolIsFiled:
+    """Sector, Industry and Sub-industry sit in the shell's bar, so all four
+    screens carry them; the Overview is simply the one rendered here."""
+
+    _FIELDS = ["Symbol", "Company", "Sector", "Industry", "Sub-industry",
+               "Last", "MTF bias"]
+
+    def _render(self, monkeypatch, analysis):
+        from pages import trade_shell as sh
+        monkeypatch.setattr(sh, "read_analysis", lambda: analysis)
+        return _render("trade_overview")
+
+    def test_the_three_fields_follow_the_company(self, monkeypatch):
+        texts = _texts(self._render(monkeypatch, _COIN))
+        assert [t for t in texts if t in self._FIELDS] == self._FIELDS
+
+    def test_they_carry_the_files_values(self, monkeypatch):
+        texts = _texts(self._render(monkeypatch, _COIN))
+        for value in ("Finance", "Finance: Consumer Services", "Finance Services"):
+            assert value in texts, value
+
+    def test_a_symbol_the_file_does_not_list_reads_as_dashes(self, monkeypatch):
+        """Painted, not left empty: an empty label under "Sector" reads as a
+        page that failed to load."""
+        els = self._render(monkeypatch, {"symbol": "SPY", "price": 500.0})
+        labels = [e for e in els if isinstance(e, ui.label)]
+        for field in ("Sector", "Industry", "Sub-industry"):
+            i = next(n for n, e in enumerate(labels) if e.text == field)
+            assert labels[i + 1].text == "—", field
 
 
 class TestNeitherScreenDrawsASecondTitle:
@@ -97,7 +216,7 @@ class TestTheNeutralLadderIsTheApps:
     ``rotation_view.NEUTRAL`` retired. A neutral is SURFACE wherever it lives."""
 
     # Frames and grounds as well as text: a panel hairline, the dealer ladder's
-    # axis and a peer bar's trough all draw a frame, not a value.
+    # axis and an industry card's edge all draw a frame, not a value.
     _GONE = ("#cfdaee", "#e6edf7", "#6b7b9c", "#7d8db0", "#56678a",
              "#22304c", "#1c2740", "#17223a", "#0e1626", "#0b1220")
 

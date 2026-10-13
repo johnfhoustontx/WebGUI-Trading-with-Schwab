@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-11</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-13</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -5591,7 +5591,8 @@ symbol, and any time you have a directional opinion and want the best way to exp
 <p><em>Menu: STRATEGY -&gt; Trade Analyzer -&gt; Overview · Route <code>/trade</code></em></p>
 <h3 id="what-it-is_24">What it is</h3>
 <p>The Signal desk's landing screen: market state, both verdicts, dealer positioning and
-peer placement for one symbol, under a command bar shared by all four tabs.</p>
+the leading stocks of the symbol's industry, under a command bar shared by all four
+tabs.</p>
 <h3 id="where-the-data-comes-from_23">Where the data comes from</h3>
 <table>
 <thead>
@@ -5616,10 +5617,17 @@ peer placement for one symbol, under a command bar shared by all four tabs.</p>
 </tbody>
 </table>
 <h3 id="reading-the-screen_22">Reading the screen</h3>
-<p><strong>The command bar</strong> carries a draft/committed distinction: the symbol box outlines
-indigo while your typing differs from what is on screen, and an emptied box reverts
-rather than clearing. The company and sector line, and every panel below, follow the
-committed symbol.</p>
+<p><strong>The command bar</strong> carries a draft/committed distinction: the symbol box is ringed
+in amber while your typing differs from what is on screen, and an emptied box reverts
+rather than clearing. The company name, the <strong>Sector</strong>, <strong>Industry</strong> and
+<strong>Sub-industry</strong> beside it, and every panel below, follow the committed symbol. Those
+three come from the server's list of US listed stocks, not from the model: a dash
+means the list has nothing for the symbol (a fund, an index).</p>
+<p><strong>The last panel</strong> names the symbol's industry and lists its top-ranked stocks, five
+by default, with the symbol's own place on the heading line. Use it to see who else
+is in the industry before settling on one name. The rank is popularity (dollar
+volume and market value, refreshed on Saturdays); the model's ranking of names
+against each other is the Rank Board.</p>
 <p><strong>Deep Dive</strong> and <strong>AI Query</strong> sit in the command bar. Each enqueues its report for the
 committed symbol and opens the result in a new tab when it lands; the cache version is
 baselined at click time, so a stale report from an earlier run never opens a tab.</p>

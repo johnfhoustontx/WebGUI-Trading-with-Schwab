@@ -67,22 +67,33 @@ def command_bar(analysis):
 
     # `company_name` comes from Schwab's symbol-search projection and is the
     # real name; `description` is the TICKER (the fundamental projection carries
-    # no name at all), so it is dropped when it merely repeats the symbol rather
-    # than rendered as "MU · MU · Technology".
+    # no name at all), so it is dropped when it merely repeats the symbol. The
+    # listed-stocks file's name is the last resort.
     desc = (a.get("company_name") or "").strip()
     if not desc:
         desc = (a.get("description") or "").strip()
         if desc.upper() == sym:
             desc = ""
-    sect = a.get("sector") or {}
-    bits = [b for b in (desc, sect.get("name"), sect.get("etf")) if b]
-    name = " · ".join(bits) if bits else "not in today's cross-section"
+    if not desc:
+        desc = str((a.get("classification") or {}).get("name") or "").strip()
+    # The name ALONE: the sector has a field of its own beside this one
+    # (`classification_fields`), from the listed-stocks file. This line used to
+    # append the built-in map's sector and its fund, which would now sit
+    # beside the file's and can disagree with it ("Financials" / "Finance").
+    # The map covers the model's own universe, so a symbol with neither a name
+    # nor a place in the map is one the model has never seen.
+    in_universe = bool((a.get("sector") or {}).get("name"))
+    name = desc or ("—" if in_universe else "not in today's cross-section")
+    fields = classification_fields(a)
 
     bias = (a.get("bias") or "").strip().upper()
     version = sm.get("model_version")
     return {
         "symbol": sym,
         "name": name,
+        "sector": fields["sector"],
+        "industry": fields["industry"],
+        "sub_industry": fields["sub_industry"],
         "price": f"{price:.2f}" if price is not None else "—",
         # `chg` is already a percentage figure, not a fraction, so this is
         # `signed` plus a unit rather than `signed_pct`.
@@ -93,6 +104,86 @@ def command_bar(analysis):
         "model_stamp": (f"MODEL {version}" if version
                         else "MODEL — no artifact loaded"),
     }
+
+
+def classification_fields(analysis):
+    """Sector, industry and sub-industry for the command bar, each a dash when
+    the listed-stocks file has nothing for the symbol (an ETF, an index, a
+    symbol it does not list, or a row with that column blank)."""
+    c = (analysis or {}).get("classification") or {}
+    return {key: str(c.get(key) or "").strip() or "—"
+            for key in ("sector", "industry", "sub_industry")}
+
+
+_LEADERS_TITLE = "Top stocks in the industry"
+# What the rank IS, said where the reader meets it: "top" would otherwise read
+# as the model's opinion, on a page where everything else is the model's.
+_LEADERS_BASIS = "by dollar volume and market cap"
+
+
+def _whole(value):
+    n = fmt.num(value)
+    return int(n) if n is not None and n >= 1 else None
+
+
+def _market_cap(value):
+    """``$4.91T`` / ``$885.15B`` / a dash. Trillions get their own unit here:
+    the app's shared abbreviation stops at billions, and four of the first five
+    names anyone types are past it."""
+    n = fmt.num(value)
+    if n is None or n <= 0:
+        return "—"
+    if n >= 1e12:
+        return f"${n / 1e12:.{fmt.DECIMALS}f}T"
+    return fmt.money_short(n)
+
+
+def industry_leaders(analysis):
+    """The Overview's industry panel: its title, the symbol's own place, and
+    one card per leader.
+
+    The leaders are the industry's top-ranked stocks in the listed-stocks file
+    (popularity: average dollar volume blended with market cap, re-ranked every
+    Saturday) and are NOT the swing model's ranking; that is the Rank board.
+    ``cards`` is empty when there is nothing to draw, and the panel hides."""
+    a = analysis or {}
+    c = a.get("classification") or {}
+    sym = str(a.get("symbol") or "").strip().upper()
+    industry = str(c.get("industry") or "").strip()
+    cards = []
+    for row in c.get("leaders") or []:
+        symbol = str((row or {}).get("symbol") or "").strip().upper()
+        if not symbol:
+            continue
+        rank = _whole(row.get("rank"))
+        cards.append({
+            "symbol": symbol,
+            "rank": f"RANK {rank}" if rank is not None else "UNRANKED",
+            "name": str(row.get("name") or "").strip(),
+            "market_cap": _market_cap(row.get("market_cap")),
+            "is_self": symbol == sym,
+        })
+    if not industry or not cards:
+        return {"title": _LEADERS_TITLE, "place": "", "cards": []}
+
+    n, count = len(cards), _whole(c.get("industry_count"))
+    if count is not None and count <= n:
+        # Every stock the file puts in this industry is on screen, so "top"
+        # would claim a cut that was never made.
+        title = (f"The only stock in {industry}" if n == 1
+                 else f"All {n} stocks in {industry}")
+    else:
+        title = f"Top {n} in {industry}"
+
+    rank = _whole(c.get("industry_rank"))
+    if rank is None:
+        place = f"{sym} is not ranked"
+    elif count is None:
+        place = f"{sym} ranks {rank}"
+    else:
+        place = f"{sym} ranks {rank} of {count}"
+    return {"title": title, "place": f"{place} · {_LEADERS_BASIS}",
+            "cards": cards}
 
 
 def should_commit(draft, committed, explicit):
