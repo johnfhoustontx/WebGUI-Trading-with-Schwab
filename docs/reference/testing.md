@@ -84,7 +84,7 @@ one chokepoint per HTTP stack a production call can travel:
 | stack | chokepoint | who uses it for real calls | raises |
 |---|---|---|---|
 | `requests` | `requests.adapters.HTTPAdapter.send` | the proxy client, the stream tracker, the stream consumers, `news_svc.fetch` | `NetworkBlockedInTest` (a `requests` `ConnectionError`) |
-| `urllib` | `urllib.request.urlopen` | `daily_trade_log`, `earnings_history`, `edgar_fundamentals`, `tools/wait_http`, `tools/token_watch` | `UrllibBlockedInTest` (a `URLError`) |
+| `urllib` | `urllib.request.urlopen` | `daily_trade_log`, `earnings_history`, `edgar_fundamentals`, `tools/wait_http`, `tools/token_watch`, `tools/rank_listed_stocks` | `UrllibBlockedInTest` (a `URLError`) |
 | `httpx` | `httpx.HTTPTransport.handle_request` and `httpx.AsyncHTTPTransport.handle_async_request` | no module here imports it, but the `anthropic` SDK (a PAID call) and `schwab-py` (the stream bridge's OAuth client) run on it | `HttpxBlockedInTest` (an `httpx.ConnectError`) |
 
 - **Below the convenience layer, on purpose.** `HTTPAdapter.send` sits under

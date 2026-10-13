@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-11</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-13</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -5024,12 +5024,12 @@ the source; this table is a summary of them.</p>
 </tr>
 </tbody>
 </table>
-<p>Six scheduled jobs are <strong>not</strong> on any service's loop — they are systemd timers,
+<p>Some scheduled jobs are <strong>not</strong> on any service's loop — they are systemd timers,
 generated from <code>config/sessions.toml</code> by <code>deploy/systemd/generate_units.py</code>, so moving
 one needs <code>generate_units --install</code> plus a <code>daemon-reload</code> rather than a service
 restart. The EOD report, gallery capture and flow-delta gate on the market calendar in
-their own scripts, so their timers only exclude weekends; the labeler and the refit
-read history and have no session to gate on. The HIRO report's timer also excludes
+their own scripts, so their timers only exclude weekends; the labeler, the refit and
+the listed-stocks re-rank read history and have no session to gate on. The HIRO report's timer also excludes
 weekends only: with no <code>--date</code> it reports the newest closed session, so a holiday
 firing just rewrites the previous trading day's report from the same stored minutes.</p>
 <table>
@@ -5075,6 +5075,11 @@ firing just rewrites the previous trading day's report from the same stored minu
 <td>Trade Analyzer outcome labelling</td>
 <td><strong>18:30</strong> (<code>[slots.label_journal]</code>)</td>
 <td><code>tools/label_journal.py</code>: writes the realized 5/10/20-day forward returns (raw, beta-adjusted, and SPY's) onto recommendations whose horizon has passed. One daily-bar fetch per symbol through the proxy; labels everything outstanding, so a missed night catches up.</td>
+</tr>
+<tr>
+<td>Listed-stocks popularity re-rank</td>
+<td><strong>Saturday, 08:00</strong> (<code>[slots.stock_rank]</code>)</td>
+<td><code>tools/rank_listed_stocks.py</code> via <code>trading-&lt;env&gt;-stock-rank.timer</code> (<code>Persistent=true</code>): re-ranks <code>options-scanner/data/us_listed_stocks_classification.csv</code>. Each row's score (0–100) is a blend of two percentiles taken across the whole file — average <strong>dollar</strong> volume (Schwab's 3-month average share volume, the 10-day where there is none, times the previous close) and market cap (Schwab's, the file's own column where Schwab has none) — weighted by <code>config/listed_stocks.toml</code> <code>[blend] dollar_volume_weight</code> (0.5). A missing figure scores 0 for its half. Rank 1 is the highest score inside the row's <code>Industry</code> and, separately, inside its <code>Sub_Industry</code>. About 100 proxy calls two seconds apart. It rewrites only its own ten columns and never adds, drops or reorders a row; if Schwab answers for under <code>[safety] min_coverage</code> (90%) of the symbols it changes nothing and exits 1.</td>
 </tr>
 <tr>
 <td>Swing model refit</td>

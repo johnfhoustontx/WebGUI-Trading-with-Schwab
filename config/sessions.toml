@@ -238,6 +238,17 @@ at = "19:00"
 # moving it needs `generate_units --install` + `daemon-reload`.
 at = "07:30"
 
+[slots.stock_rank]
+# The weekly popularity re-rank of the listed-stocks classification file
+# (tools/rank_listed_stocks.py -> options-scanner/data/
+# us_listed_stocks_classification.csv), on SATURDAY at this time. Only the TIME
+# is set here; the day is fixed by the timer. About 100 paced Schwab calls and a
+# few minutes, on a morning when nothing else is using the proxy. A run short of
+# data changes nothing (config/listed_stocks.toml [safety]). A systemd timer,
+# like [slots.flow_delta]: moving it needs `generate_units --install` +
+# `daemon-reload`.
+at = "08:00"
+
 [slots.trade_idea]
 # The hourly trade idea: ONE graded trade off the live Market Scanner, drawn as a
 # branded image and posted to Discord + Telegram (gate + channel +

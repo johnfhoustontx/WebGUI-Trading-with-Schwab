@@ -1,0 +1,39 @@
+# The weekly popularity re-rank of the listed-stocks classification file
+# (options-scanner/data/us_listed_stocks_classification.csv) - read by
+# tools/rank_listed_stocks.py.
+#
+# The run (trading-<env>-stock-rank.timer, [slots.stock_rank] in sessions.toml,
+# Saturday) gives every row a 0-100 popularity score and its rank inside its
+# Industry and inside its Sub_Industry. It rewrites only the columns it owns and
+# never adds, drops or reorders a row.
+#
+# Read at run time: a change here needs no restart.
+
+[blend]
+# The score is a blend of two percentiles taken across the whole file: average
+# dollar volume and market cap. This is dollar volume's share; market cap gets
+# the rest. 0.5 is an even blend, 1.0 ranks on dollar volume alone.
+dollar_volume_weight = 0.5
+
+[inputs]
+# Where the market cap comes from. "schwab" uses Schwab's current figure and
+# falls back to the file's own Market_Cap_USD column where Schwab has none.
+# "file" puts the file's column first and falls back to Schwab. The file's
+# column is whatever it was when the file was made, so "file" freezes half the
+# score.
+market_cap = "schwab"
+
+[fetch]
+# Symbols per proxy call. ~5,900 symbols at these sizes is about 100 calls.
+fundamentals_batch = 100
+quotes_batch = 150
+# Seconds between calls. Every service shares the proxy's 5 requests a second;
+# at 2.0 this run uses a tenth of it.
+pause_sec = 2.0
+
+[safety]
+# The share of the file's symbols Schwab must answer for, on fundamentals AND on
+# prices. Below it the run changes nothing, last week's ranks stand, and the run
+# exits 1 so it shows in `systemctl --user --failed`. This is what stops a
+# stumbling proxy or a lapsed Schwab sign-in from blanking the rankings.
+min_coverage = 0.90

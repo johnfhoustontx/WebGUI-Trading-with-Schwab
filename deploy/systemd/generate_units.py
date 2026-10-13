@@ -146,6 +146,12 @@ LABEL_JOURNAL_TIMEOUT_SEC = 900
 # partway must never be what decides whether a model ships.
 SWING_REFIT_TIMEOUT_SEC = 7200
 
+# The listed-stocks re-rank makes about 100 proxy calls two seconds apart:
+# ~5 minutes MEASURED 2026-10-13 on vps2 for 5,920 symbols. Half an hour covers
+# a file several times that size or a slow Schwab. A SIGTERM partway cannot
+# corrupt the file (it is replaced in one step at the end) but skips the week.
+STOCK_RANK_TIMEOUT_SEC = 1800
+
 # ── The public process's memory cap ──────────────────────────────────────────
 # ⚠ ONLY the public unit carries these, and that is deliberate. The other eight
 # are not internet-facing and a wrong value there kills the trading stack.
@@ -1091,6 +1097,70 @@ WantedBy=timers.target
             f"trading-{ENV_NAME}-swing-refit.timer": tmr}
 
 
+def _stock_rank_units():
+    """The weekly re-rank of the listed-stocks classification file: a oneshot
+    plus its timer.
+
+    tools/rank_listed_stocks.py gives every row of
+    options-scanner/data/us_listed_stocks_classification.csv a popularity score
+    (average dollar volume blended with market cap) and its rank inside its
+    industry and its sub-industry. Built 2026-10-13.
+
+    **Saturday, from [slots.stock_rank].** Nothing it reads moves while the
+    market is shut, and the proxy's shared 5 requests a second are idle then.
+
+    **The tool gates its own output** (`config/listed_stocks.toml` [safety]): a
+    run that Schwab answered too little of exits 1, lands in
+    `systemctl --user --failed`, and leaves the file as it was.
+
+    **ExecStartPre waits for the proxy.** Persistent=true means a boot after a
+    missed Saturday fires at once, before the proxy answers; every call would
+    then fail, the tool would refuse (correctly), and the week would be lost.
+
+    **No Restart=**: a refused run is a verdict. A retry loop would spend the
+    budget every other service shares on a Schwab that is not answering.
+    """
+    at = slot_times("stock_rank")["at"]
+
+    svc = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - weekly listed-stocks popularity re-rank
+# No PartOf and no [Install]: the timer owns this.
+# NOTE: these belong in [Unit]; systemd moved them there in v229
+# and silently ignores them in [Service].
+StartLimitIntervalSec={START_LIMIT_INTERVAL_SEC}
+StartLimitBurst={START_LIMIT_BURST}
+
+[Service]
+Type=oneshot
+WorkingDirectory={_workdir()}
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=America/Chicago
+# The stack .env, like every unit here: nothing inline, and a proxy that later
+# requires its shared secret on market data needs no second edit.
+EnvironmentFile={_env_file()}
+ExecStartPre={_python()} tools/wait_http.py --port {PROXY_PORT} --timeout {PROXY_WAIT_TIMEOUT_SEC} --label 'the proxy'
+TimeoutStartSec={STOCK_RANK_TIMEOUT_SEC}
+ExecStart={_python()} -X utf8 tools/rank_listed_stocks.py
+"""
+
+    tmr = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - weekly listed-stocks popularity re-rank timer
+
+[Timer]
+# Saturday at [slots.stock_rank] in config/sessions.toml. A holiday does not
+# matter: it reads averages and the last close, not a live session.
+OnCalendar=Sat *-*-* {at.hour:02d}:{at.minute:02d}:00
+# Persistent=true: a re-rank a day or two late is as good as one on time.
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target
+"""
+    return {f"trading-{ENV_NAME}-stock-rank.service": svc,
+            f"trading-{ENV_NAME}-stock-rank.timer": tmr}
+
+
 def notifier_name():
     """The failure notifier's TEMPLATE unit (instantiated per failed unit)."""
     return f"trading-{ENV_NAME}-notify-failure@.service"
@@ -1214,6 +1284,7 @@ def render_all():
     out.update(_label_journal_units())
     out.update(_swing_refit_units())
     out.update(_token_watch_units())
+    out.update(_stock_rank_units())
     out.update(_notifier_unit())
     return {name: _with_failure_alert(name, text) for name, text in out.items()}
 

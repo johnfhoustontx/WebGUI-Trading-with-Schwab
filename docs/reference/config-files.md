@@ -146,7 +146,11 @@ cost; since 2026-09-14 that is more than one call per symbol — each adds an
 expiration-list call, and a symbol listing daily expiries needs several fetch
 runs), and **`paper_settle`** (15:05 CT — the paper books' expiry settlement;
 see "Expiry settlement has ONE rule"), and **`token_watch`** (07:30 CT, every
-day — a systemd timer that warns before the Schwab sign-in lapses). They
+day — a systemd timer that warns before the Schwab sign-in lapses), and
+**`stock_rank`** (Saturday 08:00 CT — a systemd timer that re-ranks the
+listed-stocks classification file; its scoring and its coverage floor are
+`config/listed_stocks.toml`, read at run time by
+`tools/rank_listed_stocks.py`). They
 are named clock marks, the same thing `[windows]` already models, and **each
 `analyze` slot is a paid Claude call** while `income` is the largest scheduled
 Schwab spend on that table, so it is the direct control on both.

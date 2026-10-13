@@ -730,6 +730,10 @@ _SESSIONS = ConfigFile(
                   "Refits the Short Term model. It replaces the live model only "
                   "if it passes the checks under Swing model refit.",
                   kind="time", restart=(TIMERS,)),
+            Field("slots.stock_rank.at", "Listed-stocks popularity re-rank (Saturday)",
+                  "Refreshes the ranks in the listed-stocks classification file. "
+                  "Only the time is set here; the day is always Saturday.",
+                  kind="time", restart=(TIMERS,)),
             Field("slots.momentum.at", "Momentum recompute",
                   "Earlier than ~80 minutes after the close scores stale bars.",
                   kind="time", restart=(SENTIMENT, TRADE, WEBGUI)),
@@ -1075,6 +1079,47 @@ _SWING_MODEL = ConfigFile(
                   "How well the new fit ranked stocks on data it was not fitted "
                   "on (information coefficient). 0 means any real edge at all.",
                   kind="float", min=-0.1, max=0.2, step=0.005),
+        )),
+    ),
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Listed-stocks re-rank — config/listed_stocks.toml
+# ─────────────────────────────────────────────────────────────────────────────
+# Read by tools/rank_listed_stocks.py at run time: nothing to restart.
+_LISTED_STOCKS = ConfigFile(
+    name="listed_stocks.toml", title="Listed-stocks re-rank", icon="leaderboard",
+    summary="How the weekly re-rank scores the listed-stocks classification file.",
+    restart=(),
+    sections=(
+        Section("Popularity score", "Each stock's average dollar volume and its "
+                "market cap are each turned into a percentile across the whole "
+                "file, then blended.", (
+            Field("blend.dollar_volume_weight", "Dollar volume's share of the score",
+                  "Market cap gets the rest. 50% is an even blend; 100% ranks on "
+                  "dollar volume alone.", kind="fraction", min=0, max=100, step=5),
+            Field("inputs.market_cap", "Market cap comes from",
+                  "schwab: Schwab's current figure, with the file's own column "
+                  "where Schwab has none. file: the file's column first, which "
+                  "never changes from week to week.",
+                  kind="choice", choices=("schwab", "file")),
+        )),
+        Section("Schwab calls", "The run asks for every symbol in the file, in "
+                "batches, through the proxy every service shares.", (
+            Field("fetch.fundamentals_batch", "Symbols per volume and market cap call",
+                  "", kind="int", min=1, max=300, step=1),
+            Field("fetch.quotes_batch", "Symbols per price call", "", kind="int",
+                  min=1, max=300, step=1),
+            Field("fetch.pause_sec", "Wait between calls",
+                  "The proxy allows 5 calls a second across everything; 2 seconds "
+                  "uses a tenth of it.", kind="float", unit="s", min=0.2, max=30,
+                  step=0.1),
+        )),
+        Section("Keep last week's ranks if", "", (
+            Field("safety.min_coverage", "Schwab answered for fewer than",
+                  "Of the file's symbols, on volume and on price. Below this the "
+                  "run changes nothing and reports a failure.",
+                  kind="fraction", min=50, max=100, step=1),
         )),
     ),
 )
@@ -2191,7 +2236,7 @@ _MARKET_READ = ConfigFile(
 )
 
 FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _SECTORS, _MOMENTUM,
-         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _EDGE, _SWING_MODEL, _COMMISSIONS, _MARKETDATA,
+         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
          _MARKET_READ, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}

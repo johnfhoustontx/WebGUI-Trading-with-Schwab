@@ -1519,6 +1519,88 @@ def test_the_token_watch_is_a_oneshot_running_the_script(rendered):
     assert "PartOf" not in rendered[TOKEN_SVC]["Unit"]
 
 
+# --- the weekly re-rank of the listed-stocks classification file -------------
+#
+# tools/rank_listed_stocks.py refreshes the popularity ranks in
+# options-scanner/data/us_listed_stocks_classification.csv from Schwab's current
+# average volume, price and market cap. A weekend job: nothing it reads moves
+# while the market is shut, and the proxy's budget is idle.
+RANK_SVC = f"trading-{ENV_NAME}-stock-rank.service"
+RANK_TMR = f"trading-{ENV_NAME}-stock-rank.timer"
+
+
+def test_the_stock_rank_units_are_generated_and_armed():
+    assert {RANK_SVC, RANK_TMR} <= set(units.render_all())
+    assert RANK_TMR in units.timer_units()
+
+
+def test_the_stock_rank_fires_on_saturday_at_the_configured_slot():
+    from shared import market_calendar as mc
+    at = mc.slot_times("stock_rank")["at"]
+    text = units.render_all()[RANK_TMR]
+    assert _directives(text, "OnCalendar") == [
+        f"Sat *-*-* {at.hour:02d}:{at.minute:02d}:00"]
+
+
+def test_the_stock_rank_schedule_follows_the_slot_rather_than_a_literal(monkeypatch):
+    import datetime as _dt
+
+    monkeypatch.setattr(units, "slot_times", lambda name: {"at": _dt.time(21, 3)})
+    text = units.render_all()[RANK_TMR]
+    assert _directives(text, "OnCalendar") == ["Sat *-*-* 21:03:00"]
+
+
+def test_the_stock_rank_catches_up_after_downtime(rendered):
+    """A re-rank on Sunday or Monday is as good as one on Saturday; a week
+    skipped because the box was down that morning is not."""
+    tmr = rendered[RANK_TMR]
+    assert tmr["Timer"]["Persistent"].lower() == "true"
+    assert tmr["Install"]["WantedBy"] == "timers.target"
+
+
+def test_the_stock_rank_waits_for_the_proxy(rendered):
+    """A catch-up run at boot can fire before the proxy answers. The tool would
+    then refuse (every call fails its coverage floor) and the week is lost."""
+    pre = rendered[RANK_SVC]["Service"]["ExecStartPre"]
+    assert "tools/wait_http.py" in pre and f"--port {PROXY_PORT}" in pre
+
+
+def test_the_stock_rank_is_a_oneshot_that_does_not_retry(rendered):
+    """A run short of data exits 1 on purpose and leaves the file as it was; a
+    Restart= would hammer the proxy's shared budget until Schwab answered."""
+    svc = rendered[RANK_SVC]
+    assert svc["Service"]["Type"] == "oneshot"
+    assert "Restart" not in svc["Service"]
+    assert int(svc["Unit"]["StartLimitBurst"]) > 0
+    assert "StartLimitBurst" not in svc["Service"]
+
+
+def test_the_stock_rank_is_not_a_member_of_the_fleet(rendered):
+    svc = rendered[RANK_SVC]
+    assert "PartOf" not in svc["Unit"]
+    assert "Install" not in svc
+    assert RANK_SVC not in stack_services()
+
+
+def test_the_stock_rank_has_room_over_its_measured_runtime(rendered):
+    """About 100 proxy calls two seconds apart: ~5 minutes measured on vps2
+    (2026-10-13). A SIGTERM partway cannot corrupt the file (it is replaced in
+    one step at the end), but it would skip the week."""
+    measured = 300
+    assert int(rendered[RANK_SVC]["Service"]["TimeoutStartSec"]) >= 3 * measured
+
+
+def test_the_stock_rank_runs_the_tool_directly(rendered):
+    exec_start = rendered[RANK_SVC]["Service"]["ExecStart"]
+    assert exec_start.endswith("tools/rank_listed_stocks.py")
+    assert ".sh" not in exec_start
+
+
+def test_the_stock_rank_loads_the_stack_env():
+    text = units.render_all()[RANK_SVC]
+    assert _environment_files(text) == [str(POSIX_ROOT / ".env")]
+
+
 # --- SE-09: what a user unit CAN do to contain the public process ------------
 # Measured on the server, 2026-10-04: in a `systemd --user` unit on this host
 # InaccessiblePaths= and ProtectHome= are silently not applied (unprivileged

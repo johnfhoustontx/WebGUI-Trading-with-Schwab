@@ -119,6 +119,11 @@ EDGE_TOML = REPO_ROOT / "config" / "edge.toml"
 BLOG_TOML = REPO_ROOT / "config" / "blog.toml"
 # The swing model refit's ship gate (trade-analyzer/fit_swing_model.py).
 SWING_MODEL_TOML = REPO_ROOT / "config" / "swing_model.toml"
+# The listed-stocks classification file and its weekly popularity re-rank
+# (tools/rank_listed_stocks.py). The CSV is a hand-curated roster: the tool
+# rewrites only its own rank columns.
+LISTED_STOCKS_CSV = OPTIONS_SCANNER / "data" / "us_listed_stocks_classification.csv"
+LISTED_STOCKS_TOML = REPO_ROOT / "config" / "listed_stocks.toml"
 # The proxy's local market-data store and the collector cadence built on it.
 MARKETDATA_TOML = REPO_ROOT / "config" / "marketdata.toml"
 MARKET_READ_TOML = REPO_ROOT / "config" / "market_read.toml"

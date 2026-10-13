@@ -4,7 +4,50 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-11 (**Schwab sign-in: renewed inside the app, and a countdown that counts down.**)
+**Last updated:** 2026-10-13 (**Listed-stocks classification file: a popularity rank, refreshed every Saturday.**)
+
+- **Asked for by the user**, in steps: store a classification file of US listed
+  stocks on the server, clean it, rank each stock's popularity inside its industry
+  and its sub-industry on a blend of average volume and market cap, and re-rank it
+  every weekend.
+- **The file** is `options-scanner/data/us_listed_stocks_classification.csv`
+  (`repo_paths.LISTED_STOCKS_CSV`), gitignored like everything in that folder, so
+  it is in the nightly backup and is not carried by a promote. It was cleaned by
+  hand that day: symbols containing `^` removed, class shares respelled `BRK/B` →
+  `BRK.B` (the app's spelling), warrants, notes, rights, units and preferreds
+  removed, 45 rows put back that the file's `Security_Type` column mislabels
+  (partnership common units, four foreign depositary shares, `PFBC`, and closed-end
+  funds with "Preferred" in their name), and two symbols Schwab rejects deleted.
+  5,920 rows.
+- **`tools/rank_listed_stocks.py`** fills ten columns it owns (`RANK_COLUMNS`) and
+  touches nothing else: the row set, the row order and every other column are the
+  user's. The score is a blend of two percentiles across the whole file: average
+  dollar volume (3-month average share volume, 10-day where there is none, times
+  the previous close) and market cap. Ranks are within `Industry` and, separately,
+  within `Sub_Industry`: the file's two classifications do not nest.
+- **Share volume was tried first and replaced the same day**, at the user's
+  request: it put ITUB and BBD above JPM in Major Banks.
+- **Market cap is Schwab's first, the file's own column second.** The file's
+  column is whatever it was when the file was made, so ranking on it would freeze
+  half the score from week to week. `[inputs] market_cap = "file"` reverses it.
+  Against the hand-built file (file first), Schwab first moved 1,733 industry
+  ranks, 116 of them by five places or more, and changed two of 152 industry
+  leaders.
+- **A run short of data changes nothing.** Below `[safety] min_coverage` (90%) on
+  fundamentals or on prices the file is left as it was and the run exits 1, which
+  sends the failure alert. Without it a lapsed Schwab sign-in on a Saturday would
+  blank every rank.
+- **A class share is asked for alone.** The proxy's `/instruments` rewrites
+  `BRK.B` to Schwab's `BRK/B` only when it is the whole `symbol` parameter; in a
+  comma list all twelve came back missing. `/quotes` handles them in a list.
+- **`trading-<env>-stock-rank.{service,timer}`** from `[slots.stock_rank]`
+  (Saturday 08:00 CT, `Persistent=true`, waits for the proxy). Settings:
+  `config/listed_stocks.toml`, in Settings → Configuration.
+- **Verified** by the tools, systemd and configuration-catalogue tests, and by
+  running the tool over the day's real Schwab data: with the file put first it
+  reproduced the hand-built file byte for byte. Not yet run by its timer.
+
+**Prior —** 2026-10-11 (**Schwab sign-in: renewed inside the app, and a countdown that counts down.**)
 
 - **Reported by the user:** "Once the schwab Proxy auth expires I don't have any way
   to reauthorize." Asked which of two fixes to make, they said both.
