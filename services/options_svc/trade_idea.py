@@ -292,10 +292,14 @@ def pick(ideas, posted=None, *, grades=DEFAULT_GRADES):
 
     ``posted`` is today's state (``{"ids": [...], "symbols": [...], "last_type"}``).
     A trade already posted today is never posted again. Among the rest, in order:
-    a symbol not yet posted today, then the better grade, then a structure
-    different from the last post, then the higher score. Grade outranks variety on
-    purpose -- a feed that alternates into weaker trades to look varied is the
-    wrong trade."""
+    a symbol not yet posted today, then the higher score, then the better grade,
+    then a structure different from the last post.
+
+    Score outranks grade because the two are not the same ordering: a debit
+    spread or single option is Strong only when it is excellent on every quality
+    gate, so a Good can outscore a Strong. Variety is last, so it only splits
+    equal scores -- a feed that alternates into weaker trades to look varied is
+    the wrong trade (the operator's order, 2026-10-14)."""
     posted = posted or {}
     ids, symbols = set(posted.get("ids") or ()), set(posted.get("symbols") or ())
     last_type = posted.get("last_type")
@@ -305,9 +309,9 @@ def pick(ideas, posted=None, *, grades=DEFAULT_GRADES):
         return None
     return min(pool, key=lambda i: (
         i["symbol"] in symbols,
+        -(i["score"] or 0.0),
         rank.get(i["grade"], len(rank)),
         i["type"] == last_type,
-        -(i["score"] or 0.0),
         str(i["id"]),
     ))
 

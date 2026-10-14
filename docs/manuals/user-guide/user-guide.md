@@ -93,7 +93,9 @@ The app reads market data and your positions from Schwab, so you need:
   so no single payoff to draw), a short straddle or strangle (no limit on the
   loss), and anything that would be open through an earnings report. To go back to
   credit spreads and single options only, set `"other_structures": false` in the
-  same block. It skips an hour rather than post a weak,
+  same block. Among the eligible trades it prefers, in order: a symbol it has
+  not posted today, the higher score, the better grade, and only then a
+  different kind of trade from the last post. It skips an hour rather than post a weak,
   stale or same-day trade. Turn it off with `"trade_idea": {"enabled": false}`.
   Which channels each kind of alert goes to is set in **Settings → General → Push
   notifications**, and the trade idea can also pop up as a **Google Calendar**

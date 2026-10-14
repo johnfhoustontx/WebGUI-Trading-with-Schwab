@@ -143,26 +143,39 @@ def test_min_score_is_a_floor_on_top_of_the_grade():
     assert T.candidates(scan, min_score=65) == []
 
 
-def test_pick_prefers_grade_over_score_and_never_repeats_a_trade():
-    strong = T.normalize(pcs(id="S", symbol="IWM", grade="Strong", composite_score=60))
-    good = T.normalize(long_call(composite_score=90))
+def test_pick_prefers_score_over_grade_and_never_repeats_a_trade():
+    # A Good can outscore a Strong (a debit row is Strong only when excellent on
+    # every quality gate), and the higher score posts.
+    strong = T.normalize(pcs(id="S", symbol="IWM", grade="Strong", composite_score=78))
+    good = T.normalize(long_call(composite_score=79))
+    assert T.pick([strong, good])["id"] == good["id"]
+    assert T.pick([strong, good], {"ids": [good["id"]]})["id"] == "S"
+    assert T.pick([good], {"ids": [good["id"]]}) is None
+
+
+def test_pick_breaks_a_score_tie_toward_the_better_grade():
+    strong = T.normalize(pcs(id="S", symbol="IWM", grade="Strong", composite_score=80))
+    good = T.normalize(long_call(composite_score=80))
     assert T.pick([good, strong])["id"] == "S"
-    assert T.pick([good, strong], {"ids": ["S"]})["id"] == good["id"]
-    assert T.pick([strong], {"ids": ["S"]}) is None
 
 
-def test_pick_prefers_a_symbol_not_yet_posted_today_even_at_a_lower_grade():
-    spy_strong = T.normalize(pcs(id="S", grade="Strong"))
-    nvda_good = T.normalize(long_call())
+def test_pick_prefers_a_symbol_not_yet_posted_today_even_at_a_lower_score_and_grade():
+    spy_strong = T.normalize(pcs(id="S", grade="Strong", composite_score=95))
+    nvda_good = T.normalize(long_call(composite_score=60))
     assert T.pick([spy_strong, nvda_good], {"symbols": ["SPY"]})["id"] == nvda_good["id"]
     # ...but a posted symbol still beats posting nothing.
     assert T.pick([spy_strong], {"symbols": ["SPY"]})["id"] == "S"
 
 
-def test_pick_breaks_a_grade_tie_toward_a_different_structure():
+def test_variety_only_splits_an_equal_score_and_grade():
+    # The structure posted last hour does not hand the slot to a weaker trade...
     a = T.normalize(pcs(id="A", symbol="IWM", composite_score=90))
     b = T.normalize(long_call(composite_score=70))
-    assert T.pick([a, b], {"last_type": "PCS"})["id"] == b["id"]
+    assert T.pick([a, b], {"last_type": "PCS"})["id"] == "A"
+    # ...it only decides between trades that tie on score and grade.
+    c = T.normalize(long_call(composite_score=90))
+    assert T.pick([a, c], {"last_type": "PCS"})["id"] == c["id"]
+    assert T.pick([a, c], {"last_type": "LONG_CALL"})["id"] == "A"
 
 
 def test_posted_state_accumulates_within_a_day_and_resets_the_next():

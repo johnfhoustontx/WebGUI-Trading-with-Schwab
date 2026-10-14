@@ -4,7 +4,27 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-14 (**Dealer Positioning heatmap: the colours now sit where the axis, the contour lines and the bars say they do.**)
+**Last updated:** 2026-10-14 (**Hourly trade idea: the pick order is now symbol, score, grade, structure.**)
+
+- **Asked for by the user:** the trade idea should prefer a symbol not posted
+  today, then the higher score, then the better grade, then a structure different
+  from the last post. It was symbol, grade, structure, score.
+- **Why it changes the posts.** For a debit spread or single option the grade is
+  not a function of the score (Strong needs score ≥ 78 AND excellent on every
+  quality gate), so a Good can outscore a Strong. And with variety ahead of score,
+  the old order handed the slot to the best trade of the OTHER structure: the
+  type changed in 33 of the 35 consecutive posts of 2026-10-07 … 10-14, almost all
+  Bull Call ↔ Bear Put.
+- **Measured on prod's 13:47 scan** (read-only, today's real posted state, 289
+  candidates, none Strong among unposted symbols): the old order picked XOM Bull
+  Call Spread (Good, 77.1) because the last post was a Bear Put; the new order
+  picks HOOD Bear Put Spread (Good, 78.8). Past slots cannot be replayed: no
+  slot's scan is kept.
+- **The pieces.** `trade_idea.pick`'s sort key; three tests in
+  `services/options_svc/tests/test_trade_idea.py` rewritten to the new order plus
+  a score-tie test; the design doc's decision row and the User Guide's paragraph.
+
+**Prior —** 2026-10-14 (**Dealer Positioning heatmap: the colours now sit where the axis, the contour lines and the bars say they do.**)
 
 - **Asked for by the user:** recheck that the contour lines are calculated and
   displayed accurately over the heatmap.
