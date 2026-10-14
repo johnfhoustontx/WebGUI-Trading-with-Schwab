@@ -3,6 +3,7 @@
 Design: docs/plans/2026-10-09-gamma-heatmap-value-scale-frame-design.md
 """
 import ast
+import math
 import pathlib
 import re
 
@@ -541,11 +542,110 @@ def test_spot_frame_of_nothing():
     assert gh.to_spot_frame([100.0], [[7.0]], [100.0], step=5.0, half=0) == ([0.0], [[7.0]])
 
 
-def test_the_spot_frames_axis_holds_every_row_whole():
-    """Half a row above the top offset and below the bottom one, as the cells
-    are centred on their offsets."""
-    assert gh.spot_frame_range(5.0, 10) == [-52.5, 52.5]
-    assert gh.spot_frame_range(1.0, 0) == [-0.5, 0.5]
+def test_the_spot_frames_axis_is_the_offsets_own_span():
+    """The axis pads itself half a row each end for the heatmap's rowsize, so the
+    outer cells are whole without widening the range; the top is nudged by a
+    sliver of a row (``raster_range``)."""
+    lo, hi = gh.spot_frame_range(5.0, 10)
+    assert lo == -50.0
+    assert hi == pytest.approx(50.0) and hi > 50.0
+
+
+# ── where the picture lands ──────────────────────────────────────────────────
+# The bundled Highcharts heatmap's ``interpolation`` raster, line for line
+# (nicegui_highcharts dist/heatmap-*.js, drawPoints): with D = max - min,
+# C = round(D / rowsize / 8 * 8), a point goes to canvas row
+# floor(C - C / D * (y - min)); with X = max - min of the time axis,
+# v = round(X / colsize / 8 * 8), to column ceil(v / X * (x - min)). The canvas
+# is stretched over the plot, and the axis pads itself half a cell each end.
+# Python floats are the browser's doubles, so the floors below are the browser's.
+
+def _hc_row(y, lo, hi, rowsize):
+    d = hi - lo
+    c = round(d / rowsize / 8 * 8)
+    return math.floor(c - c / d * (y - lo)), c
+
+
+def _hc_row_centre(row, c, lo, hi, rowsize):
+    """The axis value at the middle of canvas row ``row``."""
+    return hi + rowsize / 2 - (row + 0.5) * (hi - lo + rowsize) / (c + 1)
+
+
+def _hc_col(x, lo, hi):
+    span = hi - lo
+    v = round(span / 1 / 8 * 8)
+    return math.ceil(v / span * (x - lo)), v
+
+
+def _hc_col_centre(col, v, lo, hi):
+    return lo - 0.5 + (col + 0.5) * (hi - lo + 1) / (v + 1)
+
+
+def _picture_errors(strikes, lo, hi, rowsize):
+    """Each strike's picture centre less its axis place, in rows, and whether
+    two strikes share a canvas row (one is then never drawn)."""
+    rows, errs = {}, []
+    for y in strikes:
+        row, c = _hc_row(y, lo, hi, rowsize)
+        rows.setdefault(row, []).append(y)
+        errs.append((_hc_row_centre(row, c, lo, hi, rowsize) - y) / rowsize)
+    return errs, any(len(v) > 1 for v in rows.values())
+
+
+_SPX = [5900.0 + 5 * k for k in range(31)]
+
+
+def test_the_old_off_ladder_range_drew_strikes_away_from_the_axis():
+    """The measured case (2026-10-14): the range a 4% pad leaves, off the ladder.
+    5970 floored into 5975's row and was never drawn; 5900 drew 0.83 row high."""
+    errs, collided = _picture_errors(_SPX, 5894.0, 6056.0, 5.0)
+    assert collided
+    assert max(abs(e) for e in errs) > 0.8
+
+
+@pytest.mark.parametrize("strikes, step, lo, hi", [
+    (_SPX, 5.0, 5894.0, 6056.0),
+    ([560.0 + k for k in range(41)], 1.0, 558.4, 601.6),
+    ([412.5 + 2.5 * k for k in range(60)], 2.5, 400.1, 560.3),
+    ([18000.0 + 10 * k for k in range(80)], 10.0, 17964.0, 18850.0),
+    ([12.0 + 0.5 * k for k in range(40)], 0.5, 11.7, 31.9),
+])
+def test_on_the_ladder_every_strike_is_drawn_on_its_own_place(strikes, step, lo, hi):
+    lo, hi = gh.raster_range(lo, hi, strikes[0], step)
+    shown = [s for s in strikes if lo <= s <= hi]
+    errs, collided = _picture_errors(shown, lo, hi, step)
+    assert not collided
+    assert max(abs(e) for e in errs) < 1e-4
+
+
+@pytest.mark.parametrize("step, half", [(5.0, 20), (1.0, 20), (2.5, 7), (10.0, 60)])
+def test_the_spot_frames_offsets_are_drawn_on_their_own_place(step, half):
+    lo, hi = gh.spot_frame_range(step, half)
+    offsets, _ = gh.to_spot_frame([], [], [], step=step, half=half)
+    errs, collided = _picture_errors(offsets, lo, hi, step)
+    assert not collided
+    assert max(abs(e) for e in errs) < 1e-4
+
+
+def test_the_range_only_ever_widens_to_the_ladder():
+    assert gh.raster_range(5894.0, 6056.0, 5900.0, 5.0)[0] == 5890.0
+    assert gh.raster_range(5894.0, 6056.0, 5900.0, 5.0)[1] == pytest.approx(6060.0)
+    # Already on it: unchanged but for the nudge.
+    lo, hi = gh.raster_range(5900.0, 6050.0, 5900.0, 5.0)
+    assert lo == 5900.0 and hi == pytest.approx(6050.0) and hi > 6050.0
+    # No ladder: as given.
+    assert gh.raster_range(1.0, 2.0, 0.0, 0.0) == [1.0, 2.0]
+    assert gh.raster_range(1.0, 2.0, None, 1.0) == [1.0, 2.0]
+
+
+@pytest.mark.parametrize("n", [2, 30, 391, 417])
+def test_a_time_axis_pinned_on_its_columns_draws_each_minute_in_place(n):
+    for x in range(n):
+        col, v = _hc_col(x, 0, n - 1)
+        assert _hc_col_centre(col, v, 0, n - 1) == pytest.approx(x)
+    # The old pin, -0.5 … n-0.5, drew every minute half a column right.
+    col, v = _hc_col(0, -0.5, n - 0.5)
+    assert _hc_col_centre(col, v, -0.5, n - 0.5) == pytest.approx(0.5)
 
 
 def test_bar_max_is_the_locks_extent_for_the_bars():

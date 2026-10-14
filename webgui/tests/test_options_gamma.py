@@ -2092,7 +2092,8 @@ def test_both_panels_pin_their_time_axis_to_the_category_count():
     not enough: a hedge series that starts at 09:47 (no 0-DTE book before then) or
     stops short of the projection band would auto-scale its axis to its own points
     and stretch those bars across the full panel width. Both axes are therefore
-    pinned to the same -0.5 … n-0.5 band, which is exactly n column slots."""
+    pinned to the same 0 … n-1 band (each pads half a column each end), which is
+    exactly n column slots and the heatmap picture's own columns."""
     cats = gamma.heatmap_categories(_ALIGN_ROWS, _ALIGN_PROJ)     # 4 collected + 2 future
     heat = gamma.heatmap_figure(_ALIGN_ROWS, "GEX", yrange=[95.0, 105.0],
                                 projection=_ALIGN_PROJ)
@@ -2100,8 +2101,14 @@ def test_both_panels_pin_their_time_axis_to_the_category_count():
     # range at all to derive.
     hedge = gamma.hedge_figure([{"ts": 40, "hedge_pressure": 1e9}], cats,
                                col_ts=[r[0] for r in _ALIGN_ROWS])
-    assert (heat["xAxis"]["min"], heat["xAxis"]["max"]) == (-0.5, len(cats) - 0.5)
-    assert (hedge["xAxis"]["min"], hedge["xAxis"]["max"]) == (-0.5, len(cats) - 0.5)
+    assert (heat["xAxis"]["min"], heat["xAxis"]["max"]) == (0, len(cats) - 1)
+    assert (hedge["xAxis"]["min"], hedge["xAxis"]["max"]) == (0, len(cats) - 1)
+
+
+def test_a_single_column_keeps_a_whole_slot():
+    """0 … 0 is a zero-width range, with no picture at all."""
+    fig = gamma.hedge_figure([], ["09:30"])
+    assert (fig["xAxis"]["min"], fig["xAxis"]["max"]) == (-0.5, 0.5)
 
 
 def test_empty_panels_do_not_pin_a_degenerate_axis():
@@ -3591,12 +3598,61 @@ def test_bars_in_the_strike_frame_keep_their_strike_axis():
 
 def test_heat_yrange_is_one_range_for_both_panels():
     strikes = [float(k) for k in range(90, 111)]
-    strike = gamma.heat_yrange(strikes, 100.0, [98.0, 104.0], "strike", 3)
-    assert strike == gamma.union_range(gamma.bar_yrange(strikes, 100.0), [98.0, 104.0])
-    assert gamma.heat_yrange(strikes, 100.0, [98.0, 104.0], "spot", 3) == [-3.5, 3.5]
-    # A 5-wide ladder: the frame is three strikes tall, so 15 points and half a row.
+    # The bars' window (padded 4%), with the spot path (padded 1%):
+    # 88.98 … 111.02, widened to the strike ladder.
+    lo, hi = gamma.heat_yrange(strikes, 100.0, [98.0, 104.0], "strike", 3)
+    assert lo == 88.0 and hi == pytest.approx(112.0)
+    # The spot frame: three strikes each side; the axis pads the half row itself.
+    lo, hi = gamma.heat_yrange(strikes, 100.0, [98.0, 104.0], "spot", 3)
+    assert lo == -3.0 and hi == pytest.approx(3.0)
+    # A 5-wide ladder: three strikes tall is 15 points.
     wide = [float(k) for k in range(5700, 5905, 5)]
-    assert gamma.heat_yrange(wide, 5800.0, [], "spot", 3) == [-17.5, 17.5]
+    lo, hi = gamma.heat_yrange(wide, 5800.0, [], "spot", 3)
+    assert lo == -15.0 and hi == pytest.approx(15.0)
+
+
+def test_heat_yrange_sits_on_the_ladder_the_heatmap_draws():
+    """Off the strike ladder the heatmap's picture draws a strike up to a row
+    from its place on the axis, and can drop one entirely (2026-10-14). The
+    range follows the price path and the 4% pad, then snaps to the finest gap."""
+    strikes = [5900.0 + 5 * k for k in range(31)]
+    lo, hi = gamma.heat_yrange(strikes, 5975.0, [5968.3, 6061.7], "strike", 20)
+    assert (lo - 5900.0) % 5.0 == 0.0
+    assert round(hi - 5900.0, 3) % 5.0 == 0.0
+    assert lo <= 5894.0 and hi >= 6061.7
+    # A mixed ladder ($NDX: 5-wide by the money among 10-wide) snaps to the 5s,
+    # the step uniform_strike_grid fills the heatmap's rows to.
+    ndx = [20000.0, 20010.0, 20015.0, 20020.0, 20030.0]
+    lo, hi = gamma.heat_yrange(ndx, 20015.0, [], "strike", 20)
+    assert lo % 5.0 == 0.0 and round(hi, 3) % 5.0 == 0.0
+
+
+def test_every_heatmap_cell_is_painted_in_its_own_place():
+    """End to end: the page's range into the figure, then the bundled
+    Highcharts raster's own arithmetic (test_gamma_heat mirrors it line for
+    line) over every point the figure emits. Each lands in its own canvas pixel,
+    no two share one, and the pixel's middle is the point's place on the axes,
+    which is where the contour lines are drawn."""
+    import math
+    strikes = [5900.0 + 5 * k for k in range(31)]
+    rows = [(f"09:{c:02d}", 5975.0, None, None, None, 0,
+             {s: {"net": (s - 5975.0) * (c + 1)} for s in strikes}) for c in range(40)]
+    yr = gamma.heat_yrange(strikes, 5975.0, [5968.3, 6012.4], "strike", 20)
+    fig = gamma.heatmap_figure(rows, "GEX", yrange=yr)
+    lo, hi = fig["yAxis"]["min"], fig["yAxis"]["max"]
+    x0, x1 = fig["xAxis"]["min"], fig["xAxis"]["max"]
+    heat = fig["series"][0]
+    rowsize = heat["rowsize"]
+    d, span = hi - lo, x1 - x0
+    c, v = round(d / rowsize / 8 * 8), round(span / 1 / 8 * 8)
+    seen = set()
+    for x, y, _value in heat["data"]:
+        row = math.floor(c - c / d * (y - lo))
+        col = math.ceil(v / span * (x - x0))
+        assert (row, col) not in seen
+        seen.add((row, col))
+        assert hi + rowsize / 2 - (row + 0.5) * (d + rowsize) / (c + 1) == pytest.approx(y)
+        assert x0 - 0.5 + (col + 0.5) * (span + 1) / (v + 1) == pytest.approx(x)
 
 
 def test_the_projection_band_is_dropped_in_the_spot_frame():
@@ -3929,8 +3985,8 @@ def test_both_builders_take_everything_read_returns_in_the_spot_frame():
                            hk["frame"], hk["half"])
     bars = gamma.bar_figure(SIDED, 100.0, yrange=yr, **hk)
     fig = gamma.heatmap_figure(_frame_rows(), "GEX", yrange=yr, **hk)
-    assert bars["xAxis"]["min"] == fig["yAxis"]["min"] == -10.5
-    assert bars["xAxis"]["max"] == fig["yAxis"]["max"] == 10.5
+    assert bars["xAxis"]["min"] == fig["yAxis"]["min"] == -10.0
+    assert bars["xAxis"]["max"] == fig["yAxis"]["max"] == pytest.approx(10.0)
     assert not gamma.heat_keeps_projection(**hk)
 
 

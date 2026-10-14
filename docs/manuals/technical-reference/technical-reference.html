@@ -66,7 +66,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-13</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-14</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -3324,6 +3324,14 @@ was not measured. A line spanning fewer than <code>[contours] min_columns</code>
 left out as a speck, and past <code>[contours] max_points</code> (6,000 a sign) the shortest
 lines are dropped. Measured on a stored <code>$SPX</code> session the lines cost about 27 ms and
 35 KB a repaint. They cover the collected minutes only, not the forward band.</p>
+<p>The lines and the colours share one geometry. The chart paints the heat map as one
+picture with a pixel per cell, and that picture puts a strike on its own place on the
+axis only when the axis ends on a strike. So the strike range both panels share is
+widened to the strike ladder (<code>gamma_heat.raster_range</code>: down to the strike at or below
+its bottom, up to the one at or above its top), the spot frame runs exactly <code>n_side</code>
+steps each side, and the time axis runs from the first minute's column to the last.
+Before 2026-10-14 neither was so, and a colour could sit up to a strike above its
+strike while its contour line sat where the value is.</p>
 <p><strong>Smoothing.</strong> With a <strong>Smooth</strong> strength chosen, each heat-map cell is replaced
 by a weighted average of its neighbours before the colour scale is applied
 (<code>gamma_heat.smooth</code>):</p>

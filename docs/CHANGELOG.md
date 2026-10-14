@@ -4,7 +4,42 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-13 (**Trade Analyzer: sector, industry and sub-industry beside the symbol, and the industry's top five in place of the peers panel.**)
+**Last updated:** 2026-10-14 (**Dealer Positioning heatmap: the colours now sit where the axis, the contour lines and the bars say they do.**)
+
+- **Asked for by the user:** recheck that the contour lines are calculated and
+  displayed accurately over the heatmap.
+- **The contour lines were right; the picture under them was not.** The marching
+  squares in `gamma_heat.contours` (case table, edge interpolation, joining,
+  straightening within 3% of a strike step, levels) checked out, and the lines are
+  drawn on the chart's axes. The heatmap is not: `interpolation: True` paints one
+  canvas pixel per cell and stretches the canvas over the plot, and the bundled
+  Highcharts code only lands a pixel on its own axis place when the axis ends sit
+  on the data grid. Ours did not on either axis.
+- **Measured in the browser** (a scratch page drawing `heatmap_figure`, the series
+  image decoded back into a canvas, each lit row compared with `yAxis.toPixels`):
+  an `$SPX` strike at 5970 was not drawn at all (floating-point rounding floored it
+  into 5975's row) while its contour still drew; 5900 was drawn 12 px (0.83 of a
+  strike) high; every minute was drawn half a column right. After the fix both
+  strikes and the minute land on their axis place to the hundredth of a pixel, and
+  the hedge panel's columns still sit under the heatmap's.
+- **The fix.** `heat_yrange` widens the range both panels share to the strike
+  ladder (`gamma_heat.raster_range`, the finest gap, the top nudged up by a
+  millionth of a row so rounding cannot tip a strike into the next row); the spot
+  frame runs exactly `n_side` steps each side (the axis already adds the half row
+  that holds the outer cells whole); `_pin_time_axis` pins 0 … n−1 rather than
+  −0.5 … n−0.5 on both the heatmap and the hedge panel. The bars' strike axis can
+  therefore reach up to one strike further each end than before. The Term heatmap
+  needed nothing (categorical, unpinned axes).
+- **Tests:** `test_gamma_heat.py` mirrors the bundled raster arithmetic line for
+  line and checks five ladders, the spot frame and the time axis;
+  `test_options_gamma.py::test_every_heatmap_cell_is_painted_in_its_own_place`
+  runs the page's range through `heatmap_figure` and checks every emitted point
+  (it fails on the old geometry). Detail: dev notes, "An interpolated heatmap's
+  picture lands on its axis ONLY when…".
+
+---
+
+**Prior —** 2026-10-13 (**Trade Analyzer: sector, industry and sub-industry beside the symbol, and the industry's top five in place of the peers panel.**)
 
 - **Asked for by the user:** show the Sector, Industry and Sub Industry near the
   Symbol, and replace "Where it sits among its peers" with the top 5 stocks in the

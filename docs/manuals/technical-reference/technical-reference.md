@@ -2281,6 +2281,15 @@ left out as a speck, and past `[contours] max_points` (6,000 a sign) the shortes
 lines are dropped. Measured on a stored `$SPX` session the lines cost about 27 ms and
 35 KB a repaint. They cover the collected minutes only, not the forward band.
 
+The lines and the colours share one geometry. The chart paints the heat map as one
+picture with a pixel per cell, and that picture puts a strike on its own place on the
+axis only when the axis ends on a strike. So the strike range both panels share is
+widened to the strike ladder (`gamma_heat.raster_range`: down to the strike at or below
+its bottom, up to the one at or above its top), the spot frame runs exactly `n_side`
+steps each side, and the time axis runs from the first minute's column to the last.
+Before 2026-10-14 neither was so, and a colour could sit up to a strike above its
+strike while its contour line sat where the value is.
+
 **Smoothing.** With a **Smooth** strength chosen, each heat-map cell is replaced
 by a weighted average of its neighbours before the colour scale is applied
 (`gamma_heat.smooth`):

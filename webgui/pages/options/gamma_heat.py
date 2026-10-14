@@ -292,11 +292,49 @@ def to_spot_frame(strikes, z, spots, *, step, half):
     return offsets, out
 
 
+# ── where the picture lands ──────────────────────────────────────────────────
+# ``interpolation: True`` does not draw cells: Highcharts paints ONE pixel per
+# point onto a canvas of round(D / rowsize) + 1 rows (D = max - min of the strike
+# axis), putting a point in row floor(C - C / D * (y - min)), and stretches that
+# canvas over the plot. The axis pads itself half a row each end for the same
+# rowsize, so the picture's rows are centred on max, max - rowsize, … — and a
+# strike is drawn on its own place on the axis ONLY when max and min sit on the
+# strike ladder. Off it (the bars' 4% pad, the spot path's 1%) the canvas rows
+# fall between strikes and every colour is drawn up to a strike HIGHER than its
+# strike; and a product such as 0.2 * 15 = 3.0000000000000004 floors two strikes
+# into one row, so one of them is not drawn at all. Measured in the browser
+# 2026-10-14: an $SPX strike at 5970 vanished, 5900 drew 0.83 of a strike high,
+# while the contour lines, drawn on the axis, sat where the values are.
+#
+# On the ladder that floor lands exactly ON a whole number, where rounding can
+# tip it either way. So the top of the range is nudged up by this share of a
+# row: every strike's row is then a whole number plus a sliver, and floors the
+# same in any arithmetic. The picture moves by the same sliver, nothing visible.
+_RASTER_NUDGE = 1e-6
+
+
+def raster_range(lo, hi, anchor, step):
+    """``[lo, hi]`` widened to the strike ladder ``anchor + k * step`` (``hi``
+    then nudged up by ``_RASTER_NUDGE`` of a row), so the heatmap's picture puts
+    every strike on its own place on the axis. Both panels take the result: the
+    bars must share the heatmap's axis exactly. Unchanged when there is no
+    ladder to snap to."""
+    nums = [_fmt.num(v) for v in (lo, hi, anchor, step)]
+    if None in nums or nums[3] <= 0 or nums[0] > nums[1]:
+        return [lo, hi]
+    lo, hi, anchor, step = nums
+    below = math.floor((lo - anchor) / step + 1e-9)
+    above = max(math.ceil((hi - anchor) / step - 1e-9), below + 1)
+    return [anchor + below * step, anchor + above * step + step * _RASTER_NUDGE]
+
+
 def spot_frame_range(step, half):
-    """The spot frame's vertical range for BOTH panels: the offsets' span plus
-    half a row each end, because a heatmap cell is centred on its offset."""
-    edge = (half + 0.5) * step
-    return [-edge, edge]
+    """The spot frame's vertical range for BOTH panels: the offsets' own span.
+    The axis adds the half row each end that holds the outer cells whole (it
+    pads itself for the heatmap's rowsize), and on the offsets' ladder the
+    picture lands on the axis (``raster_range``)."""
+    edge = half * step
+    return raster_range(-edge, edge, 0.0, step)
 
 
 # ── smoothing ────────────────────────────────────────────────────────────────

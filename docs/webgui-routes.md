@@ -1108,7 +1108,11 @@ or **From spot**. `heatmap_figure` and `bar_figure` take `frame=` and `half=`.
   by straight strokes (dev notes). So a contour figure is never equal to the one
   built before it. A cell with a gap in any corner
   is skipped, so no line crosses a gap in the spot frame. Levels are the top of the
-  colour scale and `steps − 1` halvings, each side of zero.
+  colour scale and `steps − 1` halvings, each side of zero. The lines are drawn on
+  the axes and the colours by the interpolation raster, which agree only because
+  `heat_yrange` puts the strike range on the strike ladder (`gamma_heat.raster_range`)
+  and `_pin_time_axis` pins 0 … n−1 (2026-10-14; before it a colour sat up to a
+  strike high and half a minute right, and a strike could vanish; dev notes).
 - **The gravity well (2026-10-10).** `WellPanel` (module level): a **Gravity well**
   switch (`gamma_well`, off by default) built in the controls row, `mount()` under
   the charts, and `paint(view, snap)`. `render` reaches all three through

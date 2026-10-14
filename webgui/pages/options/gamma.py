@@ -888,11 +888,21 @@ def _pin_time_axis(axis, categories):
     minute with a 0-DTE book and stops at the last collected column, while the
     heatmap runs the whole session plus its projection band. Unpinned, those bars
     stretch across the full width and land nowhere near the cells above them.
-    Both panels pin the same -0.5 … n-0.5 band instead (xAxis start/endOnTick
-    default False, so the values are honoured exactly). No categories → no pin: an
-    empty range renders as a broken plot band."""
-    if categories:
-        axis["min"], axis["max"] = -0.5, len(categories) - 0.5
+    Both panels pin the same 0 … n-1 band instead (xAxis start/endOnTick
+    default False, so the values are honoured exactly); each pads itself half a
+    column each end for its columns, so the band is exactly n column slots.
+
+    The first and last COLUMN, not their outer edges: the heatmap's picture is
+    one canvas pixel per minute over round(max - min) + 1 pixels, so pinned at
+    -0.5 … n-0.5 it held n + 1 pixels for n minutes and drew every minute half a
+    column right of its place on the axis (measured 2026-10-14). On 0 … n-1 the
+    pixels are the columns. One category keeps -0.5 … 0.5: a zero-width range
+    has no picture at all. No categories → no pin: an empty range renders as a
+    broken plot band."""
+    if len(categories or ()) > 1:
+        axis["min"], axis["max"] = 0, len(categories) - 1
+    elif categories:
+        axis["min"], axis["max"] = -0.5, 0.5
     return axis
 
 
@@ -2541,10 +2551,20 @@ def heat_yrange(strikes, spot, spot_path, frame, half):
     across both panels. The strike frame spans the bars' window around spot,
     widened to the session's spot path (so the price line is never clipped). The
     spot frame is ``half`` strikes either side of price, in the ladder's own
-    step."""
+    step.
+
+    Either way the ends sit on the strike ladder (``gamma_heat.raster_range``):
+    off it the heatmap's picture draws each strike up to a row away from its
+    place on the axis, and the contour lines, which are drawn on the axis, part
+    from the colours they trace. The strike frame's ladder is the finest gap,
+    the step ``uniform_strike_grid`` fills the heatmap's rows to."""
     if frame == "spot":
         return _heat.spot_frame_range(_strike_step(strikes), half)
-    return union_range(bar_yrange(strikes, spot), spot_path)
+    lo, hi = union_range(bar_yrange(strikes, spot), spot_path)
+    gaps = [b - a for a, b in zip(strikes, strikes[1:]) if b > a]
+    if not gaps:
+        return [lo, hi]
+    return _heat.raster_range(lo, hi, strikes[0], min(gaps))
 
 
 class HeatControls:

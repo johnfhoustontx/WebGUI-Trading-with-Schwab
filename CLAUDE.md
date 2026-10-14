@@ -299,7 +299,10 @@ event loop (`run.io_bound`).
   it an explicit height and reflow it when shown.
 - A PLAIN chart that updates in place must not load the Highcharts `stock` module
   (it blanks the chart). `type="stockChart"` elements are a separate case.
-- An interpolated heatmap needs a uniform strike grid (`gamma.uniform_strike_grid`).
+- An interpolated heatmap needs a uniform strike grid (`gamma.uniform_strike_grid`),
+  and its picture lands on its axis only when the axis ENDS sit on that grid
+  (`gamma_heat.raster_range`, `_pin_time_axis` at 0 … n−1); off it, colours part
+  from the contours, bars and walls by up to a row and a strike can vanish.
 - A series drawn in the ORDER of its points (a scatter with a line width) is
   scrambled by an in-place update, even one with the SAME data: Highcharts
   matches old and new points by x. Give it a `pointStart` that is new on every

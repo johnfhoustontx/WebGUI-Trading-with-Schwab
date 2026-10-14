@@ -332,6 +332,28 @@ module-level functions (TDD them with sample dicts); keep `render()` thin
   `getElement(id).chart.series[k].points` with
   `getElement(id).options.series[k].data`, and the number of `M` commands in
   `series[k].graph.element.getAttribute('d')` with the number of lines sent.
+- **An interpolated heatmap's picture lands on its axis ONLY when the axis ends sit on
+  the data grid (2026-10-14).** `interpolation:True` paints one canvas pixel per point
+  and stretches the canvas over the plot; it never draws a cell at its own coordinates.
+  The bundled `heatmap` module (`drawPoints`) makes the canvas `round(D/rowsize)+1` rows
+  by `round(X/colsize)+1` columns (`D`, `X` = the axis max − min) and puts a point in row
+  `floor(C − C/D·(y − min))`, column `ceil(v/X·(x − min))`; the axis meanwhile pads
+  itself half a cell each end. So the picture is exact only when `min`/`max` are grid
+  points. Off the grid it is not: the strike range (the bars' 4% pad, the spot path's
+  1%) drew every colour up to a strike HIGHER than its strike, and `0.2·15 =
+  3.0000000000000004` floored `$SPX` 5970 into 5975's row so it was never drawn; the time
+  axis pinned at −0.5 … n−0.5 gave n+1 pixels to n minutes and drew each minute half a
+  column right. The contour lines are a plain series on the axis, so they sat where the
+  values are and visibly parted from the colours. Measured in the browser by decoding
+  the series image's `href` into a canvas and comparing each lit row's middle with
+  `yAxis.toPixels`. Fix: `heat_yrange` → `gamma_heat.raster_range` widens the range to
+  the strike ladder and nudges the top up by 1e-6 of a row (on the grid the floor's
+  argument is an exact whole number and rounding could tip it), the spot frame is
+  ±`half` steps (no extra half row: the axis adds it), and `_pin_time_axis` pins
+  0 … n−1 on BOTH the heatmap and the hedge panel. `test_gamma_heat.py` mirrors the
+  module's arithmetic line for line (Python floats are the browser's doubles, so its
+  floors are the browser's). The Term heatmap needed nothing: its axes are categorical
+  and unpinned, so its extremes are already the first and last index.
 - **An interpolated heatmap needs a UNIFORM data grid, or it combs (2026-08-11, cost:
   a long misdiagnosis).** `interpolation:True` rasterizes onto a canvas laid out on ONE
   row height — `rowsize`, which `gamma._strike_step` derives as the MEDIAN strike gap.
