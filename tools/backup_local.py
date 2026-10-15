@@ -183,10 +183,25 @@ SWEEP_EXCLUDE = (
 )
 
 
+# SQLite stores that are never backed up, each for a stated reason.
+DB_EXCLUDE = (
+    # The raw chain store (shared/raw_store.py, repo_paths.RAW_DIR): ~1 GB of
+    # raw option chains a session, kept five sessions. It is re-collected, never
+    # restored -- what is derived from it lives in gex_history.db, which IS
+    # backed up. Design: docs/plans/2026-10-14-raw-feed-and-catch-up-design.md.
+    "services/feed_svc/data/raw",
+)
+
+
 def db_paths(root):
-    """Every non-empty SQLite store in the checkout."""
+    """Every non-empty SQLite store in the checkout, but those in ``DB_EXCLUDE``."""
+    def _excluded(p):
+        rel = p.relative_to(root).as_posix()
+        return any(rel == x or rel.startswith(x + "/") for x in DB_EXCLUDE)
+
     return sorted(p for p in root.rglob("*.db")
-                  if ".git" not in p.parts and p.is_file() and p.stat().st_size > 0)
+                  if ".git" not in p.parts and p.is_file() and p.stat().st_size > 0
+                  and not _excluded(p))
 
 
 def backup_db(src, dst):

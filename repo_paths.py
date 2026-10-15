@@ -140,6 +140,10 @@ GAMMA_BRIEFING_DB = OPTIONS_SCANNER / "data" / "gamma_briefings.db"
 # "NeuralStrike social pull" task copies them into D:\NeuralStrike Reports.
 # Gitignored with the rest of options-scanner/data/.
 TRADE_IDEAS_DIR = OPTIONS_SCANNER / "data" / "trade_ideas"
+# The raw chain store: one SQLite file per session of every chain the one-minute
+# collection fetched (shared/raw_store.py). ~1 GB a session; gitignored and
+# never backed up (tools/backup_local.db_paths skips it).
+RAW_DIR = REPO_ROOT / "services" / "feed_svc" / "data" / "raw"
 # The two operator switches options_svc keeps (auto-close, the manual book's
 # break-even lifecycle), on disk so a Redis flush cannot put them back to default.
 OPTIONS_TOGGLES = OPTIONS_SCANNER / "data" / "operator_toggles.json"

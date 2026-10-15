@@ -375,3 +375,16 @@ def test_the_offsite_keeps_a_weekly_archive_too():
                                             "2026-10-01", "2026-10-02")]
     drop = bl.remote_to_delete(names, keep=3, keep_weekly=1)
     assert drop == ["prod_2026-09-29_2000.tar.age"]
+
+
+def test_the_raw_feed_store_is_never_backed_up(tmp_path):
+    """~1 GB a session of raw chains, re-collected rather than restored
+    (docs/plans/2026-10-14-raw-feed-and-catch-up-design.md §4). The sweep takes
+    every *.db, so the exclusion has to be explicit."""
+    raw = tmp_path / "services" / "feed_svc" / "data" / "raw"
+    raw.mkdir(parents=True)
+    (raw / "2026-10-14.db").write_bytes(b"x" * 10)
+    keep = tmp_path / "options-scanner" / "data"
+    keep.mkdir(parents=True)
+    (keep / "signals.db").write_bytes(b"x" * 10)
+    assert [p.name for p in bl.db_paths(tmp_path)] == ["signals.db"]
