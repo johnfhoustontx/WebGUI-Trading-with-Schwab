@@ -901,3 +901,13 @@ def test_the_blog_page_calls_an_address_an_address():
             assert "slug" not in f.label.lower(), f.key
             assert "slug" not in f.help.lower(), f.key
             assert f.help, f"{f.key} has no help"
+
+
+def test_settings_offers_only_the_feed_modes_that_exist():
+    # "on" needs feed_svc (not built yet); offering it would promise
+    # gap-free promotes the app cannot keep.
+    from config_schema import FILES
+    feed = next(f for f in FILES if f.name == "feed.toml")
+    fields = {fl.key: fl for sec in feed.sections for fl in sec.fields}
+    assert tuple(fields["feed.mode"].choices) == ("off", "tee")
+    assert set(fields) == {"feed.mode", "feed.keep_sessions", "feed.zlib_level"}

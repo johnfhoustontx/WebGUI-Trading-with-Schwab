@@ -8,20 +8,14 @@
 # off = today: the options service fetches and derives each minute, nothing raw is kept.
 # tee = as off, and each collected minute is also written to the raw store, with a
 #       shadow check that re-derives it from there and compares (no extra Schwab call).
-# on  = feed_svc fetches into the raw store and the options service derives from it.
+# (on, where feed_svc fetches and the options service derives, is not built yet;
+#  until it is, "on" runs as off and says so in the log.)
 mode = "off"
 # Raw sessions kept on disk (about 1 GB each). Never backed up.
 keep_sessions = 5
 # zlib level for the stored chains: 1 is fastest, 9 smallest. The write runs on
 # the collection's own thread every minute, so a lower level costs collection less.
 zlib_level = 6
-# feed_svc's health goes down after this many minutes with no complete minute,
-# inside the collection window.
-stale_alarm_min = 2
-
-[catchup]
-# An alert from a caught-up minute older than this is recorded but not pushed.
-push_max_age_min = 3
-# The options service's health goes down when derivation is this many minutes
-# behind, inside the collection window.
-lag_alarm_min = 5
+# The alarms and the push age for caught-up alerts (feed_svc's and the deriver's)
+# join this file with those features; until then their defaults live in
+# shared/feed_config.py and nothing reads them.

@@ -7,12 +7,21 @@ never raises; an unrecognised ``mode`` reads as ``"off"``, the behaviour of the
 app before the feed existed. Stdlib, ``shared.config_toml`` and ``repo_paths``
 only.
 """
+import logging
 import math
 
 from repo_paths import FEED_TOML
 from shared.config_toml import toml_loader
 
 MODES = ("off", "tee", "on")
+#: The modes that exist today. "on" hands the fetching to feed_svc, which is
+#: not built yet (Phases 3-4 of the plan): until it is, "on" reads as "off"
+#: with a warning, rather than stopping the tee while promising gap-free
+#: promotes. Add "on" here with the service.
+BUILT_MODES = ("off", "tee")
+
+log = logging.getLogger(__name__)
+_WARNED: set = set()
 
 DEFAULTS = {
     "feed": {"mode": "off", "keep_sessions": 5, "stale_alarm_min": 2, "zlib_level": 6},
@@ -39,10 +48,16 @@ def _count(section, key) -> int:
 
 
 def mode() -> str:
-    """``"off"``, ``"tee"`` or ``"on"``; anything else is ``"off"``."""
+    """``"off"`` or ``"tee"`` (``BUILT_MODES``); anything else is ``"off"``.
+    A mode that is planned but not built yet is warned about, once."""
     raw = _section("feed").get("mode")
     value = raw.strip().lower() if isinstance(raw, str) else None
-    return value if value in MODES else "off"
+    if value in BUILT_MODES:
+        return value
+    if value in MODES and value not in _WARNED:
+        _WARNED.add(value)
+        log.warning("config/feed.toml mode %r is not built yet; running as off", value)
+    return "off"
 
 
 def shadow_enabled() -> bool:

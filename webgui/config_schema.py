@@ -1031,19 +1031,18 @@ _GAMMA_HEAT = ConfigFile(
 # saved change applies with no restart.
 _FEED = ConfigFile(
     name="feed.toml", title="Raw feed and catch-up", icon="storage",
-    summary="Whether each minute's option chains are kept on disk, so the "
-            "options service can catch up after a restart with no gap in the "
-            "day's data.",
+    summary="Whether each minute's option chains are kept on disk and checked: "
+            "the first step towards catching up after a restart with no gap "
+            "in the day's data.",
     restart=(),
     sections=(
         Section("Raw feed",
                 "Off is how the app ran before the feed: nothing is kept. Tee "
                 "keeps each minute and checks that working from the kept copy "
-                "gives the same numbers, with no extra Schwab calls. On hands "
-                "the fetching to the feed service.", (
+                "gives the same numbers, with no extra Schwab calls.", (
             Field("feed.mode", "Mode",
-                  "Off, tee (keep and check) or on (the feed service fetches).",
-                  kind="choice", choices=("off", "tee", "on")),
+                  "Off, or tee (keep each minute and check it).",
+                  kind="choice", choices=("off", "tee")),
             Field("feed.keep_sessions", "Sessions kept",
                   "About 1 GB each. They are never backed up.",
                   kind="int", min=1, max=30, step=1),
@@ -1051,22 +1050,6 @@ _FEED = ConfigFile(
                   "1 is fastest, 9 is smallest. Saving runs during collection "
                   "every minute, so a lower number delays collection less.",
                   kind="int", min=1, max=9, step=1),
-            Field("feed.stale_alarm_min", "Feed alarm after",
-                  "The feed service reports down after this long with no "
-                  "complete minute, during collection hours.",
-                  kind="int", unit="min", min=1, max=30, step=1),
-        )),
-        Section("Catch-up",
-                "After a restart the options service works through the minutes "
-                "it missed, oldest first.", (
-            Field("catchup.push_max_age_min", "Push alerts no older than",
-                  "An alert from an older minute is recorded but does not go "
-                  "to your phone.",
-                  kind="int", unit="min", min=1, max=60, step=1),
-            Field("catchup.lag_alarm_min", "Lag alarm after",
-                  "The options service reports down when it is this far "
-                  "behind, during collection hours.",
-                  kind="int", unit="min", min=1, max=60, step=1),
         )),
     ),
 )
