@@ -23,7 +23,7 @@ class _Engine:
         self._last_dte = 0
         self.seen = []
 
-    def calc_all_from_chain(self, chain, use_volume=False):
+    def calc_all_from_chain(self, chain, use_volume=False, now=None):
         self.seen.append((chain["symbol"], chain.get("underlyingPrice")))
         return (None, None, None, None)
 
@@ -73,7 +73,7 @@ def test_on_minute_sees_the_fetched_minute_before_it_is_derived():
     engine = _Engine()
     real_calc = engine.calc_all_from_chain
 
-    def _calc(chain, use_volume=False):
+    def _calc(chain, use_volume=False, now=None):
         order.append("derive")
         return real_calc(chain, use_volume)
 

@@ -763,6 +763,7 @@ def derive_minute(engine, conn, minute: RawMinute, on_chain=None) -> None:
     ``on_chain`` as on ``poll_once``: called for every chain that is not
     carried, before its rows are written; a raising callback is logged."""
     ts_boundary = minute.ts
+    minute_dt = datetime.fromtimestamp(ts_boundary, TZ)
     carried = minute.carried
     for symbol, chain in minute.chains:
         if not chain:
@@ -814,7 +815,10 @@ def derive_minute(engine, conn, minute: RawMinute, on_chain=None) -> None:
             skew_fields["carried_age_sec"] = (minute.carried_age.get(symbol)
                                               if symbol in carried else None)
             # Single pass yields GEX, Charm, DEX, Vanna — all persisted below.
-            gex, charm, dex, vanna = engine.calc_all_from_chain(chain, use_volume=False)
+            # Priced AT the minute, not at the wall clock: a minute derived later
+            # (the raw feed) must price exactly as it did live.
+            gex, charm, dex, vanna = engine.calc_all_from_chain(
+                chain, use_volume=False, now=minute_dt)
             dte = engine._last_dte
             if gex:
                 gex_summary = GammaEngine.snapshot_summary(gex)

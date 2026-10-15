@@ -758,13 +758,20 @@ class GammaEngine:
             "cells": cells,
         }
 
-    def calc_all_from_chain(self, chain, use_volume=False):
+    def calc_all_from_chain(self, chain, use_volume=False, now=None):
         """Compute GEX, Charm, DEX, and Vanna in a single pass over the option chain.
 
         Equivalent to calling calc_from_chain, calc_charm_from_chain,
         calc_dex_from_chain, and calc_vanna_from_chain in sequence, but
         iterates the call/put maps once instead of four times and resolves
         the expiration key + T once.
+
+        ``now`` -- the CT instant the chain is priced AT: it picks the nearest
+        expiration and sets the time left to the close, which charm, delta and
+        vanna move with. None reads the wall clock (as every caller did before
+        2026-10-14). The GEX collector passes the minute the chain was fetched
+        for, so a minute derived later -- the raw feed's shadow check, catch-up
+        after a restart -- prices exactly as it did live.
 
         Returns (gex_result, charm_result, dex_result, vanna_result). Each
         element matches the corresponding individual calc_* method's shape,
@@ -783,7 +790,8 @@ class GammaEngine:
 
         call_map = chain.get("callExpDateMap", {})
         put_map = chain.get("putExpDateMap", {})
-        today = datetime.now(TZ).strftime("%Y-%m-%d")
+        now = datetime.now(TZ) if now is None else now.astimezone(TZ)
+        today = now.strftime("%Y-%m-%d")
 
         call_exp_key, call_dte = self._find_nearest_exp_key(call_map, today)
         put_exp_key, put_dte = self._find_nearest_exp_key(put_map, today)
@@ -795,7 +803,6 @@ class GammaEngine:
         dte = min(dtes) if dtes else 0
         self._last_dte = dte
 
-        now = datetime.now(TZ)
         hours_left_trading = max(
             0.0, (CLOSE_HOUR_CT - now.hour) + (CLOSE_MIN_CT - now.minute) / 60.0,
         )
