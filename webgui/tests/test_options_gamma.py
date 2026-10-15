@@ -2208,7 +2208,12 @@ def test_both_pins_are_actually_consumed_by_render():
     public screen and look plausible. Assert they reach the two things they
     steer: the subtab value, and the symbol dropdown's seed."""
     src = inspect.getsource(gamma.render)
-    assert "_resolve_view(view)" in src, "the view pin never reaches the subtabs"
+    # Through first_view since 2026-10-15 (it also reads ``?tab=``); a pin
+    # still resolves through _resolve_view there, ahead of any tab.
+    assert "_pinned_view = first_view(view, tab, public)" in src, (
+        "the view pin never reaches the subtabs")
+    assert "return _resolve_view(view)" in inspect.getsource(gamma.first_view)
+    assert gamma.first_view("Flow", "term") == "Flow"
     assert "ui.tabs(value=_pinned_view)" in src
     assert "_set_symbol(symbol or " in src, "the symbol pin never reaches the dropdown"
 
@@ -2859,7 +2864,7 @@ def test_fastapi_binds_the_view_pin_from_the_QUERY_STRING():
              if getattr(r, "path", "") in ("/options/gamma", "/sentiment/momentum")
              and hasattr(r, "dependant")}
     assert bound.get("/sentiment/momentum") == {"level"}, "the precedent moved"
-    assert bound.get("/options/gamma") == {"view"}
+    assert bound.get("/options/gamma") == {"view", "tab"}
 
 
 def test_the_view_query_is_handed_to_the_render(monkeypatch):
@@ -2869,7 +2874,7 @@ def test_the_view_query_is_handed_to_the_render(monkeypatch):
     monkeypatch.setattr(main, "_layout", lambda *a, **k: _no_chrome())
     monkeypatch.setattr(gamma, "render", lambda **kw: got.update(kw))
     main.options_gamma_page(view="Flow")
-    assert got == {"view": "Flow"}
+    assert got == {"view": "Flow", "tab": None}
 
 
 def test_the_bare_route_hands_the_render_no_pin_at_all(monkeypatch):
@@ -2881,7 +2886,7 @@ def test_the_bare_route_hands_the_render_no_pin_at_all(monkeypatch):
     monkeypatch.setattr(main, "_layout", lambda *a, **k: _no_chrome())
     monkeypatch.setattr(gamma, "render", lambda **kw: got.update(kw))
     main.options_gamma_page()
-    assert got == {"view": None}
+    assert got == {"view": None, "tab": None}
 
 
 def test_the_bare_route_still_builds_the_whole_view_picker(monkeypatch):
@@ -2920,6 +2925,95 @@ def test_an_unknown_view_coerces_to_the_default_instead_of_raising(monkeypatch):
     # really does render a different page. Without this, the assertion above
     # would also pass against a route that ignored the parameter entirely.
     assert shape(junk) != shape(netprem)
+
+
+# ── the ``?tab=`` ROUTE parameter (2026-10-15) ──────────────────────────────
+# One address per subtab on the PRIVATE page: ``/options/gamma?tab=flow``. Not
+# the ``?view=`` pin above — that one is a public screen (no picker, no
+# commands); ``tab`` only chooses which subtab opens, and the page rewrites it
+# as the reader clicks.
+
+def _picker(kids):
+    """The view-picker ``ui.tabs`` element, or None when none was built."""
+    for e in kids:
+        if type(e).__name__ == "Tabs":
+            names = {t.props.get("name") for t in e.descendants()
+                     if type(t).__name__ == "Tab"}
+            if names and names <= set(gamma._VIEW_ORDER):
+                return e
+    return None
+
+
+def test_every_subtab_has_its_own_slug_and_the_slug_opens_it():
+    slugs = [gamma.tab_slug(v) for v in gamma._VIEW_ORDER]
+    assert slugs == ["gamma", "charm", "delta", "vanna", "flow", "net-prem",
+                     "term"]
+    for v in gamma._VIEW_ORDER:
+        assert gamma.view_for_tab(gamma.tab_slug(v)) == v
+
+
+def test_a_tab_value_is_matched_loosely_and_refused_totally():
+    """The slug or the engine key, any case. Anything else is None, never an
+    exception: it is a stranger's string."""
+    assert gamma.view_for_tab("FLOW") == "Flow"
+    assert gamma.view_for_tab("gex") == "GEX"
+    assert gamma.view_for_tab("Net Prem") == "Net Prem"
+    for junk in (None, "", "nonsense", "net_prem", 7, "<script>"):
+        assert gamma.view_for_tab(junk) is None
+    # The public strip has no Net Prem, so its tab cannot name one.
+    assert gamma.view_for_tab("net-prem", public=True) is None
+
+
+def test_the_route_opens_the_page_on_the_tab_it_names(monkeypatch):
+    """End to end through ``main.options_gamma_page``: the picker is still
+    whole (it is not a pin), and it opens on the named subtab."""
+    kids = _route_rendered(monkeypatch, tab="flow")
+    assert _view_tab_names(kids) == set(gamma._VIEW_ORDER)
+    assert _picker(kids).value == "Flow"
+    assert _picker(_route_rendered(monkeypatch, tab="net-prem")).value == "Net Prem"
+
+
+def test_an_unknown_or_absent_tab_opens_the_default(monkeypatch):
+    assert _picker(_route_rendered(monkeypatch)).value == "GEX"
+    assert _picker(_route_rendered(monkeypatch, tab="nonsense")).value == "GEX"
+
+
+def test_a_pin_outranks_a_tab():
+    """``?view=`` is a public screen of one view; a ``tab`` cannot move it."""
+    assert gamma.first_view("Flow", "term") == "Flow"
+    assert gamma.first_view(None, "term") == "Term"
+    assert gamma.first_view(None, None) == "GEX"
+
+
+def test_the_address_bar_follows_the_subtab(monkeypatch):
+    """Clicking a subtab rewrites ``?tab=`` in place (replaceState: nothing
+    listens for Back, so a pushed entry would desync address and page)."""
+    from nicegui import ui
+    sent = []
+    monkeypatch.setattr(ui, "run_javascript", lambda js, **k: sent.append(js))
+    with ui.card():
+        tabs = ui.tabs(value="GEX")
+        gamma.wire_view_tabs(tabs, lambda e: None, None)
+    tabs.value = "Net Prem"
+    assert len(sent) == 1
+    assert "searchParams.set('tab', \"net-prem\")" in sent[0]
+    assert "replaceState" in sent[0] and "pushState" not in sent[0]
+
+
+@pytest.mark.parametrize("pin", [{"view": "Flow"}, {"public": True}])
+def test_only_the_private_picker_rewrites_the_address(monkeypatch, pin):
+    """A pinned render has no picker; the public /gamma route takes no
+    ``tab``, so writing one into its address would promise a link that does
+    nothing. The page's own handler is still wired in both."""
+    from nicegui import ui
+    sent, changed = [], []
+    monkeypatch.setattr(ui, "run_javascript", lambda js, **k: sent.append(js))
+    with ui.card():
+        tabs = ui.tabs(value="GEX")
+        gamma.wire_view_tabs(tabs, changed.append, pin.get("view"),
+                             pin.get("public", False))
+    tabs.value = "Flow"
+    assert sent == [] and len(changed) == 1
 
 
 # ── the page kit frame (2026-09-20) ────────────────────────────────────────

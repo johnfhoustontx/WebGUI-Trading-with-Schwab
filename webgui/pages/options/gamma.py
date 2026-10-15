@@ -18,6 +18,7 @@ via ``_refloat_keys`` BEFORE feeding the builders. The builders stay unchanged.
 """
 import datetime as _dt
 import itertools
+import json
 import logging
 import math
 from zoneinfo import ZoneInfo
@@ -2070,6 +2071,72 @@ def _resolve_view(view):
     return view if view in _VIEW_ORDER else "GEX"
 
 
+# ── one address per subtab (``/options/gamma?tab=flow``) ────────────────────
+# NOT the ``?view=`` pin: a pin is a public screen (no picker, no commands),
+# while ``?tab=`` only picks which subtab the PRIVATE page opens on, and the
+# page rewrites it as the reader clicks so the address bar always names the
+# subtab on screen. The slug is the strip's own word, so the URL reads what the
+# tab reads: GEX is ``gamma``, DEX is ``delta``, Net Prem is ``net-prem``.
+
+def tab_slug(view) -> str:
+    """The ``?tab=`` value that opens ``view``."""
+    return _view_label(view).lower().replace(" ", "-")
+
+
+def view_for_tab(tab, public=False):
+    """The view a ``?tab=`` value names, or ``None`` for an absent or unknown one.
+
+    Total, like ``_resolve_view``: the value is a stranger's string, and it
+    reaches nothing but this lookup. The slug and the engine key both match,
+    case-insensitively (``flow``, ``Flow``, ``gex``, ``gamma``)."""
+    if not isinstance(tab, str):
+        return None
+    want = tab.strip().lower()
+    for v in view_order(public):
+        if want in (tab_slug(v), v.lower()):
+            return v
+    return None
+
+
+def tab_url_js(view) -> str:
+    """The script that names ``view`` in the address bar without a reload.
+
+    ``replaceState``, not ``pushState``: nothing here listens for Back, so a
+    pushed entry would leave the address and the subtab on screen disagreeing
+    after one press. Every other query parameter is kept."""
+    return ("(() => { const u = new URL(window.location.href); "
+            f"u.searchParams.set('tab', {json.dumps(tab_slug(view))}); "
+            "window.history.replaceState(window.history.state, '', u); })()")
+
+
+def first_view(view, tab, public=False) -> str:
+    """The subtab a render opens on: the pin if there is one, else what
+    ``?tab=`` names, else the default. ``tab`` is NOT a pin -- a pinned render
+    has no picker, so it ignores ``tab``."""
+    if not shows_view_picker(view):
+        return _resolve_view(view)
+    return view_for_tab(tab, public) or _resolve_view(None)
+
+
+def wire_view_tabs(tabs, on_change, view, public=False) -> None:
+    """Register the page's view-change handler, then keep the address bar
+    naming the subtab on screen (``/options/gamma?tab=flow``), so a copied or
+    bookmarked URL reopens that subtab.
+
+    The address follows on the private page only: the public /gamma route
+    takes no ``tab``, and a pinned render has no picker to follow."""
+    from nicegui import ui
+    tabs.on_value_change(on_change)
+    if public or not shows_view_picker(view):
+        return
+
+    @guard
+    def _name_tab_in_url(_e):
+        ui.run_javascript(tab_url_js(tabs.value))
+
+    tabs.on_value_change(_name_tab_in_url)
+
+
 def shows_view_picker(view) -> bool:
     """Whether to BUILD the view-picker subtabs.
 
@@ -3071,7 +3138,7 @@ class UnderCharts:
 
 
 def render(symbol: str | None = None, view: str | None = None,
-           public: bool = False):
+           public: bool = False, tab: str | None = None):
     """The Dealer Positioning page.
 
     ``symbol`` and ``view`` are PINS used by the public live screens (Gamma is
@@ -3084,7 +3151,7 @@ def render(symbol: str | None = None, view: str | None = None,
 
     ``public=True`` is the public Gamma page: the dropdown and the subtabs, over
     the published keys of whichever symbol a visitor picks, and no command. See
-    ``PUBLIC_VIEW_ORDER`` and :func:`public_status_text`."""
+    ``PUBLIC_VIEW_ORDER`` and :func:`public_status_text`. ``tab``: :func:`first_view`."""
     import bus_client
     from nicegui import ui, run
 
@@ -3118,7 +3185,7 @@ def render(symbol: str | None = None, view: str | None = None,
     # Same value/on_value_change API as the old toggle, so the wiring is unchanged.
     import shell as _shell
 
-    _pinned_view = _resolve_view(view)
+    _pinned_view = first_view(view, tab, public)   # ?tab= opens a subtab
     # WHERE this page reads from. Bare = the private page's shared slot, exactly
     # as before; pinned = that symbol's own published key, because the shared slot
     # holds whatever the app last looked at (see snapshot_view). One renderer, two
@@ -4292,7 +4359,7 @@ def render(symbol: str | None = None, view: str | None = None,
         await _load_history(view_toggle.value)
         _render_view()
 
-    view_toggle.on_value_change(_on_view_change)
+    wire_view_tabs(view_toggle, _on_view_change, view, _public)
 
     tracks_sw.on_value_change(
         overlay_handler("gamma_level_tracks", bool, _render_view))

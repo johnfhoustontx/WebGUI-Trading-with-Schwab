@@ -1190,6 +1190,8 @@ section describes.
 
 **`?view=` pins one view on the PRIVATE route too (2026-09-08).** `/options/gamma?view=Flow` deep-links a single view; bare is the page exactly as it always was. Added so the marketing gallery's three gamma tiles could differ (`tools/gallery_screens.py`) — the route was parameterless, so all three would have captured the identical default GEX view. ⚠ **A pin also changes what the page draws**, through the same `shows_view_picker` / `may_enqueue` gates the public screens use: no subtab picker, and no Refresh / Explain / Analyze / Briefings / History row. `_resolve_view` is TOTAL — an unknown name falls back to GEX rather than raising — and a pin is deliberately NOT offered for `symbol`, which is interpolated into a Redis key name with no allow-list behind it.
 
+**`?tab=` gives every subtab its own address (2026-10-15).** `/options/gamma?tab=flow` opens the PRIVATE page on that subtab with the picker and every command intact — it is NOT a pin. The slugs are the strip's own words: `gamma`, `charm`, `delta`, `vanna`, `flow`, `net-prem`, `term` (the engine keys `gex`/`dex` and any case also match; `gamma.view_for_tab` is total, so an unknown value opens the default). Clicking a subtab rewrites `?tab=` with `history.replaceState` (`gamma.wire_view_tabs`), so the address bar always names the subtab on screen and a copied or bookmarked URL reopens it. `replaceState`, not `pushState`: nothing listens for Back, so a pushed entry would leave the address and the page disagreeing. A `?view=` pin outranks `?tab=` (`gamma.first_view`), and the public `/gamma` route takes no `tab`, so its address is never rewritten.
+
 
 ## `/options/simulator`
 

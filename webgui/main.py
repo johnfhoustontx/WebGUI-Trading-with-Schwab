@@ -2363,11 +2363,16 @@ def options_income_page() -> None:
 
 
 @_page("/options/gamma")
-def options_gamma_page(view: str | None = None) -> None:
-    # ?view=Flow deep-links one view of this page; bare (view=None) is the
-    # private page exactly as it has always been -- the picker, and the four
-    # commands may_enqueue gates. render() coerces anything unknown back to GEX
+def options_gamma_page(view: str | None = None, tab: str | None = None) -> None:
+    # ?view=Flow PINS one view of this page (the gallery's and the public
+    # screens' form: no picker, no commands); bare (view=None) is the private
+    # page exactly as it has always been -- the picker, and the four commands
+    # may_enqueue gates. render() coerces anything unknown back to GEX
     # (_resolve_view is total), so a stranger's string cannot 500 the page.
+    #
+    # ?tab=flow is the private page's own address for each subtab: it only
+    # picks which subtab opens, and the page rewrites it as the reader clicks.
+    # Its one destination is gamma.view_for_tab, total like _resolve_view.
     #
     # ⚠ A @ui.page function's signature IS its query-parameter surface, which is
     # how live_main's late-binding ``_s`` became settable (see _register there).
@@ -2378,7 +2383,7 @@ def options_gamma_page(view: str | None = None) -> None:
     # allow-list behind it, and nothing asks for it.
     with _layout("/options/gamma", "Dealer Positioning"):
         from pages.options import gamma
-        gamma.render(view=view)
+        gamma.render(view=view, tab=tab)
 
 
 @_page("/options/simulator")

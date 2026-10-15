@@ -4,7 +4,23 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-15 (**Architecture diagrams in the Technical and API References.**)
+**Last updated:** 2026-10-15 (**Dealer Positioning: one address per subtab.**)
+
+- **Asked for by the user:** distinct URLs for each subtab of
+  `app.neuralstrike.co/options/gamma` (Flow and the rest).
+- `/options/gamma?tab=<slug>` opens the private page on that subtab; slugs are the
+  strip's words (`gamma`, `charm`, `delta`, `vanna`, `flow`, `net-prem`, `term`).
+  Clicking a subtab rewrites `?tab=` in place (`history.replaceState`), so the
+  address always names the subtab on screen.
+- Kept apart from `?view=`, which PINS one view (no picker, no commands) for the
+  gallery and the public screens. A pin outranks a tab; the public `/gamma` route
+  takes no `tab`.
+- Pieces in `pages/options/gamma.py`: `tab_slug`, `view_for_tab` (total),
+  `first_view`, `tab_url_js`, `wire_view_tabs`. `gamma.render` stays within its
+  size ceiling.
+- Docs: `docs/webgui-routes.md`, User Guide → Dealer Positioning.
+
+**Prior —** 2026-10-15 (**Architecture diagrams in the Technical and API References.**)
 
 - **Asked for by the user:** put the I/O architecture picture into the manuals, plus
   any other architecture diagrams that help.

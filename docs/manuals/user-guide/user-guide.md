@@ -774,6 +774,12 @@ last three are different screens with their own controls.
 | **Net Prem** | Net premium (call dollars − put dollars) for **many symbols at once**. | Comparing where money is going across names. |
 | **Term** | The same exposure across the **next five expirations**. | Choosing which expiry to trade. |
 
+**Each view has its own address.** The address bar follows the sub-tab you are on —
+`/options/gamma?tab=flow`, `?tab=net-prem`, `?tab=term` and so on (`gamma`,
+`charm`, `delta`, `vanna`, `flow`, `net-prem`, `term`) — so a bookmark or a copied
+link reopens the page on that view. Opening the bare `/options/gamma` starts on
+**Gamma**, as it always has, and an address naming no known view does the same.
+
 **Flow** — the **crossover** is the read: the moment call dollars overtake put
 dollars, or the reverse. That is the same event the **Flow Alerts** page logs, shown
 here in context so you can tell a decisive break from a wobble. A strike ladder shows
