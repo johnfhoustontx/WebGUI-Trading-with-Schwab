@@ -78,3 +78,35 @@ def test_derive_minute_prices_at_the_minute(monkeypatch):
     _wall_clock(monkeypatch, datetime(2026, 10, 14, 13, 5, tzinfo=TZ))
     gc.derive_minute(GammaEngine(), MagicMock(), minute)
     assert live and written == live
+
+
+class _CountingConn:
+    """A real SQLite connection that counts commits (sqlite3.Connection's own
+    attributes cannot be patched)."""
+
+    def __init__(self):
+        import sqlite3
+        self._conn = sqlite3.connect(":memory:")
+        db.init_schema(self._conn)
+        db.init_term_schema(self._conn)
+        self.commits = 0
+
+    def commit(self):
+        self.commits += 1
+        self._conn.commit()
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
+def test_derive_minute_never_commits_even_on_a_term_minute():
+    # The raw feed's deriver writes a minute's rows and its cursor in ONE
+    # transaction, so derive_minute must leave the commit to its caller -- on
+    # the term minutes (every 5th) as well.
+    conn = _CountingConn()
+    minute = RawMinute(ts=int(AS_OF.timestamp()), chains=[("SPY", _chain())],
+                       term=dict(_chain(), symbol="$SPX"), symbols=["SPY"])
+    gc.derive_minute(GammaEngine(), conn, minute)
+    assert conn.execute("SELECT COUNT(*) FROM gex_term_snapshots").fetchone()[0] > 0
+    assert conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0] > 0
+    assert conn.commits == 0

@@ -607,10 +607,14 @@ def purge_flow_contract_days(conn: sqlite3.Connection, keep_sessions: int = 20) 
 def insert_term_snapshot_rows(
     conn: sqlite3.Connection,
     rows: Iterable[Tuple[str, str, str, float, float, float, float, float]],
+    commit: bool = True,
 ) -> None:
     """rows: iterable of 8-tuples
         (timestamp_ct, symbol, expiration_date, strike,
-         call_gex_usd, put_gex_usd, net_gex_usd, underlying_price)."""
+         call_gex_usd, put_gex_usd, net_gex_usd, underlying_price).
+
+    ``commit=False`` leaves the commit to the caller: the GEX collector's
+    ``derive_minute`` writes a whole minute in one transaction."""
     conn.executemany(
         "INSERT OR REPLACE INTO gex_term_snapshots "
         "(timestamp_ct, symbol, expiration_date, strike, call_gex_usd, "
@@ -618,7 +622,8 @@ def insert_term_snapshot_rows(
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         rows,
     )
-    conn.commit()
+    if commit:
+        conn.commit()
 
 
 _ROW_COLUMNS = ("spot", "flip", "top_pos_strike", "top_neg_strike", "net_total", "dte",

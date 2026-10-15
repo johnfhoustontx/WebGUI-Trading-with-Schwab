@@ -923,6 +923,7 @@ def poll_term_once(client, engine, conn, ts_iso: str = None, lock=None) -> None:
     chain = fetch_term_chain(client, datetime.now(TZ).date(), lock=lock, ts_iso=ts_iso)
     if chain:
         derive_term(engine, conn, chain, ts_iso)
+        conn.commit()
 
 
 def fetch_term_chain(client, today, lock=None, ts_iso=None):
@@ -983,7 +984,7 @@ def derive_term(engine, conn, chain, ts_iso: str) -> None:
                 ))
                 total_abs_net += abs(cell["net_gex_usd"])
         if rows:
-            db.insert_term_snapshot_rows(conn, rows)
+            db.insert_term_snapshot_rows(conn, rows, commit=False)
         # Heuristic: if EVERY cell across 5 expirations is zero, Schwab is
         # almost certainly returning OI=0 (their feed wipes/withholds OI
         # outside trading hours). Loud warning so a blank heatmap doesn't
