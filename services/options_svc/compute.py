@@ -4835,6 +4835,46 @@ from services.options_svc.collection_tiers import (  # noqa: E402,F401
 )
 
 
+def _market_clock():
+    """The CT market clock the collection reads when no ``now`` is given (the
+    scheduler's, so tests that pin it pin this)."""
+    from services.options_svc import scheduler as _sched
+    return _sched._market_now()
+
+
+class _CollectHooks:
+    """This module's stash helpers, as ``collect_derive.build_context`` takes
+    them. Looked up at CALL time, so a test that patches ``compute.stash_uoa``
+    (or any of the others) is honoured."""
+
+    @staticmethod
+    def clear_stashes():
+        clear_uoa_stash()
+        clear_big_delta_stash()
+        # Bounded: only the capture set is stashed, and last tick's entries are
+        # dropped here rather than lingering when the capture set changes.
+        reset_tick_chain()
+
+    @staticmethod
+    def stash_tick_chain(sym, chain):
+        _stash_tick_chain(sym, chain)
+
+    @staticmethod
+    def stash_uoa(sym, hits):
+        stash_uoa(sym, hits)
+
+    @staticmethod
+    def stash_big_delta(sym, hits):
+        stash_big_delta(sym, hits)
+
+    @staticmethod
+    def hiro_tick_row(sym, chain, date_iso, ts):
+        return hiro_tick_row(sym, chain, date_iso, ts)
+
+
+_COLLECT_HOOKS = _CollectHooks()
+
+
 def collect_gex_snapshots(capture_symbols=None, now=None) -> int:
     """Fetch + persist one snapshot round (GEX/Charm/DEX/Vanna + term) for the
     tracked symbols. Returns the number of symbols polled — normally
@@ -4896,95 +4936,20 @@ def collect_gex_snapshots(capture_symbols=None, now=None) -> int:
         # Once-per-day retention at collection start (keeps growth bounded).
         _maybe_purge_gex(gh, conn)
         gc.log.info("Polling GEX history (options_svc)")
-        # Contract-level UOA + big_delta both ride the poll's on_chain hook (reusing
-        # each fetched chain — no re-fetch); results are stashed per symbol and
-        # consumed once by run_flow_alerts. flow_alerts is PURE (stdlib + repo_paths),
-        # imported lazily. ONE load_thresholds() call serves both detectors.
-        # Per-symbol extended-trading-hours eligibility rides the SAME hook, for
-        # the same reason: the boolean is a root field of a chain we already have.
-        from services.options_svc import eth, flow_sides_tick, traded_premium
-        from services.options_svc import flow_alerts
-        clear_uoa_stash()
-        clear_big_delta_stash()
-        # Bounded: only the capture set is stashed, and last tick's entries are
-        # dropped here rather than lingering when the capture set changes.
-        reset_tick_chain()
-        _uoa_cfg = flow_alerts.load_thresholds()
-        # Kill-switch: when the feature is disabled, skip the per-symbol UOA compute
-        # entirely (nothing computed/published). The chain-capture stash stays on.
-        _uoa_on = _uoa_cfg.get("enabled", True)
-        # big_delta has its OWN enabled flag (independent of the top-level UOA
-        # switch above) — the whole detector is inert when [big_delta].enabled=false.
-        # Read through flow_alerts.section and required to be literally True: a
-        # scalar `big_delta = 5` in config/local used to raise HERE, before
-        # poll_once, stopping all GEX collection; a hand-typed "false" switched
-        # the detector ON. Both now fail safe.
-        _big_delta_on = flow_alerts.section(_uoa_cfg, "big_delta").get("enabled") is True
-        # HIRO model (docs/plans/2026-10-01-hiro-alert-design.md): REGULAR
-        # session only -- off-hours the chain's underlyingPrice can be stale and
-        # index OI reads zero. Measured in on_chain (no extra fetch); the rows
-        # are written AFTER poll_once, on this write connection.
-        # Safe defaults FIRST, derived inside a guard: flow_alerts._merge lets a
-        # scalar override replace the [hiro] table (hiro = 5, symbols = 5 in
-        # config/local), and a setup error here must never stop GEX collection.
-        _hiro_on = False
-        _hiro_syms: set = set()
-        _hiro_date = None
-        _hiro_ts = None
-        _hiro_rows: dict = {}
-        try:
-            from services.options_svc import scheduler as _sched
-            from shared import market_calendar as _mc
-            _hiro_cfg = _uoa_cfg.get("hiro", {})
-            if not isinstance(_hiro_cfg, dict):
-                _hiro_cfg = {}
-            _raw_syms = _hiro_cfg.get("symbols")
-            if isinstance(_raw_syms, str):
-                _raw_syms = [_raw_syms]
-            if isinstance(_raw_syms, (list, tuple)):
-                _hiro_syms = {s for s in _raw_syms if isinstance(s, str)}
-            # Same clock _gth_symbols reads, so the two gates agree; a naive
-            # ``now`` is CT (the project convention), made explicit before
-            # .timestamp().
-            _hiro_now = now if now is not None else _sched._market_now()
-            if _hiro_now.tzinfo is None:
-                _hiro_now = _hiro_now.replace(tzinfo=ZoneInfo("America/Chicago"))
-            _hiro_date = _hiro_now.astimezone(
-                ZoneInfo("America/Chicago")).date().isoformat()
-            _hiro_ts = int(_hiro_now.timestamp()) // 60 * 60
-            _hiro_on = (_hiro_cfg.get("enabled") is True and bool(_hiro_syms)
-                        and _mc.is_regular_hours(_hiro_now))
-        except Exception:
-            _degrade.degraded("options.hiro_setup")
-            _hiro_on = False
+        # The per-chain hooks (gamma stash, ETH eligibility, bought/sold tally,
+        # traded premium, UOA / big_delta, HIRO) run in a context built for THIS
+        # minute, on its clock: see collect_derive. The stash helpers are this
+        # module's, passed in so collect_derive imports nothing from here.
+        from services.options_svc import collect_derive, traded_premium
+        _now = now if now is not None else _market_clock()
+        if _now.tzinfo is None:                  # a naive datetime is CT
+            _now = _now.replace(tzinfo=ZoneInfo("America/Chicago"))
+        _ctx = collect_derive.build_context(
+            int(_now.timestamp()), capture_symbols, _COLLECT_HOOKS)
+        on_chain = _ctx.on_chain
+        _uoa_cfg, _hiro_syms = _ctx.uoa_cfg, _ctx.hiro_syms
+        _hiro_ts, _hiro_rows, _eth_seen = _ctx.minute_ts, _ctx.hiro_rows, _ctx.eth_seen
         wanted = set(capture_symbols) if capture_symbols else set()
-        _eth_seen: dict = {}
-
-        def on_chain(sym, chain):  # noqa: F811 — the callback poll_once calls
-            if sym in wanted:
-                _stash_tick_chain(sym, chain)
-            # Ungated: a pure dict read, no compute, and the map must stay complete
-            # even when the UOA kill-switch is off.
-            _eth_seen[sym] = eth.chain_eth_eligible(chain)
-            flow_sides_tick.on_chain(sym, chain, now)  # bought/sold tally; never raises
-            traded_premium.on_chain(sym, chain, now)   # traded premium; never raises
-            if _uoa_on:
-                # Best-effort — a UOA detect failure must NEVER break collection.
-                try:
-                    stash_uoa(sym, flow_alerts.detect_uoa(sym, chain, _uoa_cfg))
-                except Exception:
-                    gc.log.debug("UOA detect failed for %s", sym, exc_info=True)
-            if _big_delta_on:
-                # Best-effort — a big_delta detect failure must NEVER break collection.
-                try:
-                    stash_big_delta(sym, flow_alerts.detect_big_delta(sym, chain, _uoa_cfg))
-                except Exception:
-                    gc.log.debug("big_delta detect failed for %s", sym, exc_info=True)
-            if _hiro_on and sym in _hiro_syms:
-                # hiro_tick_row never raises; a None row (unusable spot) is skipped.
-                _r = hiro_tick_row(sym, chain, _hiro_date, _hiro_ts)
-                if _r is not None:
-                    _hiro_rows[sym] = _r
 
         # Decided HERE, after the capture set and the hedging-flow symbols are
         # known: both stay on the one-minute tier.

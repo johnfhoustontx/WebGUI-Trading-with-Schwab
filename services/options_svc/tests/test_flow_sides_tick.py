@@ -754,12 +754,19 @@ def test_on_chain_never_opens_the_database(monkeypatch):
 # --- wiring ------------------------------------------------------------------
 
 def test_the_poll_hook_calls_on_chain():
-    """A refactor of compute's on_chain must not silently drop the tally."""
-    from services.options_svc import compute
-    src = inspect.getsource(compute.collect_gex_snapshots)
+    """A refactor of the poll's on_chain must not silently drop the tally.
+
+    The hook lives in ``collect_derive.build_context`` since 2026-10-14 (it runs
+    on the minute's clock); the collection must still hand THAT hook to the
+    poll."""
+    from services.options_svc import collect_derive, compute
+    src = inspect.getsource(collect_derive.build_context)
     hook = src[src.index("def on_chain("):]
-    hook = hook[:hook.index("# Decided HERE")]
-    assert "flow_sides_tick.on_chain(sym, chain, now)" in hook
+    hook = hook[:hook.index("ctx.on_chain = on_chain")]
+    assert "flow_sides_tick.on_chain(sym, chain, minute_dt)" in hook
+    collect = inspect.getsource(compute.collect_gex_snapshots)
+    assert "on_chain = _ctx.on_chain" in collect
+    assert "on_chain=on_chain" in collect
 
 
 def test_run_flow_alerts_calls_after_alerts():
