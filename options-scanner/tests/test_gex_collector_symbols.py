@@ -40,7 +40,7 @@ def test_poll_once_defaults_to_collection_symbols(monkeypatch):
 
     monkeypatch.setattr(gc, "collection_symbols",
                         lambda: ["$SPX", "NVDA", "TSLA"])
-    monkeypatch.setattr(gc, "poll_term_once", lambda *a, **k: None)
+    monkeypatch.setattr(gc, "fetch_term_chain", lambda *a, **k: None)
 
     class _Conn:
         def commit(self):
@@ -66,7 +66,7 @@ def test_poll_once_honors_explicit_symbols(monkeypatch):
                     return None
             return _R()
 
-    monkeypatch.setattr(gc, "poll_term_once", lambda *a, **k: None)
+    monkeypatch.setattr(gc, "fetch_term_chain", lambda *a, **k: None)
     monkeypatch.setattr(gc, "collection_symbols",
                         lambda: (_ for _ in ()).throw(AssertionError("should not be called")))
 

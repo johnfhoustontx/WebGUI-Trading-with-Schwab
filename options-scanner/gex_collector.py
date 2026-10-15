@@ -29,6 +29,7 @@ import gex_history_db as db
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
 from shared import symbols as _symbols  # noqa: E402
+from shared.raw_minute import RawMinute  # noqa: E402
 import iv_analysis
 
 TZ = ZoneInfo("America/Chicago")
@@ -587,7 +588,26 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
     A symbol whose last answer listed NOTHING inside the window is left out of
     the poll until its wait is over (``empty_retry_min`` in the tiers, else the
     built-in hour; see ``EMPTY_RETRY_MIN``). It is not fetched, quoted, computed
-    or handed to ``on_chain``; nothing was being written for it anyway."""
+    or handed to ``on_chain``; nothing was being written for it anyway.
+
+    Since 2026-10-14 it is two halves, so a fetched minute can be stored and
+    derived later (docs/plans/2026-10-14-raw-feed-and-catch-up-design.md):
+    ``fetch_minute`` returns a ``RawMinute`` and ``derive_minute`` writes its
+    rows. This function is exactly the two, then one commit."""
+    minute = fetch_minute(client, symbols=symbols, now=now, tiers=tiers,
+                          lock=lock, poll_term=poll_term)
+    derive_minute(engine, conn, minute, on_chain=on_chain)
+    conn.commit()
+
+
+def fetch_minute(client, symbols=None, now=None, tiers=None, lock=None,
+                 poll_term=None) -> RawMinute:
+    """The FETCH half of ``poll_once``: every chain of this minute, re-anchored
+    on the live quote off-hours and carried where the tiers say so, plus the
+    ``$SPX`` term chain on its cadence. Computes nothing and writes nothing.
+
+    The arguments mean what they mean on ``poll_once``. Per-symbol failures are
+    logged and leave that symbol out of ``chains``; it stays in ``symbols``."""
     if symbols is None:
         symbols = collection_symbols()
     retry_sec = _empty_retry_sec(tiers)
@@ -701,7 +721,41 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
                      "(%d left capped)", cap.get("refetched", 0),
                      cap.get("left_capped", 0))
 
-    for symbol, chain in fetched:
+    # Term-structure chain for SPXW, every TERM cadence rather than every 1-min
+    # slot (the widest SPX fetch in the system; Schwab has 502'd on it).
+    # ``poll_term=None`` derives the gate from the snapped minute; an explicit
+    # bool forces it (tests / manual runs).
+    do_term = (snapped_min % TERM_POLL_INTERVAL_MIN == 0) if poll_term is None else poll_term
+    term = None
+    if do_term:
+        term = fetch_term_chain(
+            client, datetime.now(TZ).date(), lock=lock,
+            ts_iso=datetime.fromtimestamp(ts_boundary, TZ).isoformat())
+
+    return RawMinute(
+        ts=ts_boundary,
+        chains=[(s, c) for s, c in fetched if c],
+        carried=set(carried),
+        carried_age={s: ages.get(s) for s in carried},
+        # Before the carry, a carried symbol's chain as the proxy held it. A
+        # symbol that was not carried reads its own chain, so it is not kept.
+        stored={s: as_stored[s] for s in carried if s in as_stored},
+        term=term,
+        symbols=list(symbols),
+    )
+
+
+def derive_minute(engine, conn, minute: RawMinute, on_chain=None) -> None:
+    """The DERIVE half of ``poll_once``: the five views per symbol and the term
+    rows for one fetched minute, written on ``conn``. Does NOT commit: the
+    caller commits, so a minute's rows can share a transaction with whatever
+    the caller writes beside them.
+
+    ``on_chain`` as on ``poll_once``: called for every chain that is not
+    carried, before its rows are written; a raising callback is logged."""
+    ts_boundary = minute.ts
+    carried = minute.carried
+    for symbol, chain in minute.chains:
         if not chain:
             continue
         try:
@@ -725,7 +779,7 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
             # carried minutes. A carried minute repeats the last fetched values
             # exactly; only the four Greek views below come from the carried chain.
             # For a chain that was not carried this is the same object.
-            skew_chain = as_stored.get(symbol, chain)
+            skew_chain = minute.stored.get(symbol, chain)
             try:
                 rr = flow_skew.risk_reversal_25d(skew_chain)
                 vol = flow_skew.index_call_put_volume(skew_chain)
@@ -748,7 +802,7 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
             # Every view of a carried minute says so, with the age of the chain
             # it came from: its Greeks are modelled and its volume and premium
             # repeat the last fetch. None for a chain fetched this minute.
-            skew_fields["carried_age_sec"] = (ages.get(symbol)
+            skew_fields["carried_age_sec"] = (minute.carried_age.get(symbol)
                                               if symbol in carried else None)
             # Single pass yields GEX, Charm, DEX, Vanna — all persisted below.
             gex, charm, dex, vanna = engine.calc_all_from_chain(chain, use_volume=False)
@@ -820,19 +874,10 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
                 log.debug("premium_by_strike failed for %s", symbol, exc_info=True)
         except Exception as e:
             log.error("Poll failed for %s: %s", symbol, e)
-    # Term-structure snapshot for SPXW (additive; per-symbol failures isolated).
-    # The term chain is the widest SPX fetch in the system (Schwab has 502'd on
-    # it) and the display shows only 5 expirations — poll it every TERM cadence,
-    # not every 1-min slot. ``poll_term=None`` derives the gate from the snapped
-    # minute; an explicit bool forces it (tests / manual runs).
-    do_term = (snapped_min % TERM_POLL_INTERVAL_MIN == 0) if poll_term is None else poll_term
-    if do_term:
-        poll_term_once(
-            client, engine, conn,
-            ts_iso=datetime.fromtimestamp(ts_boundary, TZ).isoformat(),
-            lock=lock,
-        )
-    conn.commit()
+    # Term-structure snapshot for SPXW (additive; a failure is isolated).
+    if minute.term is not None:
+        derive_term(engine, conn, minute.term,
+                    ts_iso=datetime.fromtimestamp(ts_boundary, TZ).isoformat())
 
 
 # SPX weeklies (SPXW root) come back inside the regular $SPX chain — the
@@ -857,11 +902,21 @@ def poll_term_once(client, engine, conn, ts_iso: str = None, lock=None) -> None:
 
     On HTTP error or empty grid: log + return (does not raise).
     Per design: never let a term-collection failure break the main 0-DTE poll.
+
+    ``fetch_term_chain`` then ``derive_term`` (2026-10-14, the raw feed).
     """
     if ts_iso is None:
         ts_iso = datetime.now(TZ).replace(second=0, microsecond=0).isoformat()
+    chain = fetch_term_chain(client, datetime.now(TZ).date(), lock=lock, ts_iso=ts_iso)
+    if chain:
+        derive_term(engine, conn, chain, ts_iso)
+
+
+def fetch_term_chain(client, today, lock=None, ts_iso=None):
+    """The ``$SPX`` term chain (``today`` .. +``TERM_DTE_HORIZON_DAYS``), or None
+    on an HTTP error, an empty answer or any exception (logged, never raised).
+    ``ts_iso`` only names the minute in the log line."""
     try:
-        today = datetime.now(TZ).date()
         with _maybe_lock(lock):
             r = client.get_option_chain(
                 TERM_SYMBOL,
@@ -877,7 +932,18 @@ def poll_term_once(client, engine, conn, ts_iso: str = None, lock=None) -> None:
                 "No chain for %s at %s (status=%s)",
                 TERM_SYMBOL, ts_iso, status,
             )
-            return
+            return None
+        return chain
+    except Exception as e:
+        log.error("Term poll failed for %s: %s", TERM_SYMBOL, e)
+        return None
+
+
+def derive_term(engine, conn, chain, ts_iso: str) -> None:
+    """Compute the term grid from a fetched ``$SPX`` chain and write the nearest
+    ``TERM_TOP_N`` expirations' rows on ``conn`` (no commit). Logs, never raises."""
+    status = 200
+    try:
         # Diagnostic: how many expirations did we get back?
         n_call_exps = len(chain.get("callExpDateMap", {}))
         n_put_exps = len(chain.get("putExpDateMap", {}))

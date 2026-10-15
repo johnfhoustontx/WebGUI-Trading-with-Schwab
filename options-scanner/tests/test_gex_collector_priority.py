@@ -65,7 +65,7 @@ class _PlainClient:
 
 
 def _poll(client, monkeypatch, symbols=("SPY", "QQQ")):
-    monkeypatch.setattr(gc, "poll_term_once", lambda *a, **k: None)
+    monkeypatch.setattr(gc, "fetch_term_chain", lambda *a, **k: None)
     gc.poll_once(client, object(), _Conn(), symbols=list(symbols))
 
 

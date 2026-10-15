@@ -163,7 +163,7 @@ def test_poll_once_gates_term_to_5min_cadence(tmp_path, monkeypatch):
                             "top_neg_strike": r["top_neg_strike"],
                             "net_total": r["net_total"]}))
     calls = {"n": 0}
-    monkeypatch.setattr(gc, "poll_term_once",
+    monkeypatch.setattr(gc, "fetch_term_chain",
                         lambda *a, **k: calls.__setitem__("n", calls["n"] + 1))
     client = _make_client({s: {"sym": s} for s in gc.SYMBOLS})
     engine = _make_engine()
@@ -478,7 +478,7 @@ def test_poll_once_acquires_client_lock_around_fetch(tmp_path, monkeypatch):
         def __exit__(self, *a): events.append("release")
 
     # Patch the term poll to a no-op so we only measure poll_once's own calls
-    monkeypatch.setattr(gc, "poll_term_once", lambda *a, **k: None)
+    monkeypatch.setattr(gc, "fetch_term_chain", lambda *a, **k: None)
     # Pin the universe to the index base so the count is deterministic
     # (poll_once now defaults to the dynamic collection_symbols() watchlist).
     gc.poll_once(client, engine, conn, lock=TrackLock(), symbols=gc.SYMBOLS)
@@ -615,7 +615,7 @@ def test_poll_once_computes_and_stores_skew(tmp_path, monkeypatch):
     conn = db.connect()
     db.init_schema(conn)
     _patch_snapshot_summary(monkeypatch)
-    monkeypatch.setattr(gc, "poll_term_once", lambda *a, **k: None)
+    monkeypatch.setattr(gc, "fetch_term_chain", lambda *a, **k: None)
 
     captured = []
     monkeypatch.setattr(
@@ -650,7 +650,7 @@ def test_poll_once_skew_none_when_no_skew(tmp_path, monkeypatch):
     conn = db.connect()
     db.init_schema(conn)
     _patch_snapshot_summary(monkeypatch)
-    monkeypatch.setattr(gc, "poll_term_once", lambda *a, **k: None)
+    monkeypatch.setattr(gc, "fetch_term_chain", lambda *a, **k: None)
 
     captured = []
     monkeypatch.setattr(
@@ -679,7 +679,7 @@ def test_poll_once_stores_atm_iv(tmp_path, monkeypatch):
     conn = db.connect()
     db.init_schema(conn)
     _patch_snapshot_summary(monkeypatch)
-    monkeypatch.setattr(gc, "poll_term_once", lambda *a, **k: None)
+    monkeypatch.setattr(gc, "fetch_term_chain", lambda *a, **k: None)
     monkeypatch.setattr(iv_analysis, "extract_atm_iv", lambda chain: 21.5)
 
     captured = []
@@ -702,7 +702,7 @@ def test_poll_once_atm_iv_none_when_unavailable(tmp_path, monkeypatch):
     conn = db.connect()
     db.init_schema(conn)
     _patch_snapshot_summary(monkeypatch)
-    monkeypatch.setattr(gc, "poll_term_once", lambda *a, **k: None)
+    monkeypatch.setattr(gc, "fetch_term_chain", lambda *a, **k: None)
     monkeypatch.setattr(iv_analysis, "extract_atm_iv", lambda chain: None)
 
     captured = []
