@@ -660,6 +660,12 @@ the scans, the briefings, the rating, the Symbol lookup, X posts) run on the
 queue's slow lane; nothing that changes a paper book may be put there.
 
 **Other standing facts.**
+- The one-minute GEX poll is `fetch_minute` → `derive_minute`, and a collected
+  minute is derived AT its minute: `calc_all_from_chain(now=)`, and the
+  `on_chain` hooks run on `collect_derive`'s minute clock. `derive_minute` never
+  commits. The raw feed re-derives stored minutes later, in one transaction with
+  a cursor; a wall-clock read or a commit there breaks replay
+  ([raw feed design](docs/plans/2026-10-14-raw-feed-and-catch-up-design.md)).
 - A STOCK leg counts 100-share LOTS; go through `leg_editor.legs_ready`; only the
   Calculator offers the stock structures; a Finder covered call must never gain a
   Paper button.

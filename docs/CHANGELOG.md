@@ -4,7 +4,49 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-14 (**Hourly trade idea: the pick order is now symbol, score, grade, structure.**)
+**Last updated:** 2026-10-14 (**Raw feed, Phases 1–2: the collector can keep each minute's chains and prove a re-derived minute matches; ships off.**)
+
+- **Asked for by the user:** the Schwab data should land in a raw store written by
+  an independent process, GEX and the rest should be derived from it, and a stack
+  that was down should catch up with no intraday gap; and a market-hours promote
+  must not restart the GEX collector. Design and plan:
+  `docs/plans/2026-10-14-raw-feed-and-catch-up-{design,plan}.md`. This entry is
+  Phases 1–2 (Tasks 1–6) of six; Phase 3 (catch-up) waits on a `tee` session.
+- **The pieces.**
+  - `gex_collector.poll_once` is `fetch_minute` (returns `shared/raw_minute.RawMinute`)
+    then `derive_minute` (no commit); the term chain splits the same way.
+  - The `on_chain` hooks are built per minute by `options_svc/collect_derive.py`
+    and run on the minute's clock, not the wall clock.
+  - **A fix the plan missed:** `GammaEngine.calc_all_from_chain` read the wall clock
+    for the time left to the close and the nearest expiry. The same minute
+    derived at 13:05 instead of 10:00 came out ~9% different in charm. It now
+    takes `now=`, and `derive_minute` passes the minute.
+  - `shared/raw_store.py`: one SQLite file per session under
+    `services/feed_svc/data/raw/`, one transaction per minute, recorded gaps,
+    five sessions kept, never backed up (`backup_local.DB_EXCLUDE`).
+  - `config/feed.toml [feed] mode` (Settings → Configuration → Raw feed and
+    catch-up): `off` (shipped) or `tee`. `on` is not built and reads as `off`.
+  - In `tee` the collector also writes each fetched minute to the raw store
+    (`raw_tee`, no extra Schwab call), and a shadow check (`raw_shadow`, its own
+    thread, skips when busy) re-derives it and compares every view and term row
+    with the live ones. It times the derive, the hooks, the flow alerts and the
+    tee write, and publishes `cache:feed:shadow`.
+- **API calls:** none added. `tee` keeps the chains the poll already fetched.
+- **Review:** a fresh whole-branch review found no critical issue. Fixed before
+  merge: a term minute committed inside `derive_minute`; the gate measured the
+  derive alone; the tee write was untimed; Settings offered the unbuilt `on`; a
+  NaN cell would have read as a difference every minute.
+- **The tee session (the operator's next step), after promoting outside 06:30–15:20 CT:**
+  1. Settings → Configuration → Raw feed and catch-up → Mode `tee` (applies
+     within a minute, no restart).
+  2. After one full session, read `cache:feed:shadow`. **The gate for Phase 3:**
+     `minutes_with_diffs` is 0, and `gate_p95_ms` (derive + hooks + alerts) is
+     under 2000.
+  3. Also note `tee_p95_ms`, the write's cost to collection each minute (lower
+     `zlib_level` if it is large), and the options service's memory.
+  4. Mode `off` undoes everything but the files already written.
+
+**Prior —** 2026-10-14 (**Hourly trade idea: the pick order is now symbol, score, grade, structure.**)
 
 - **Asked for by the user:** the trade idea should prefer a symbol not posted
   today, then the higher score, then the better grade, then a structure different
