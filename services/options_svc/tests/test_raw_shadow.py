@@ -206,3 +206,11 @@ def test_the_handler_times_the_flow_alerts_in_tee(monkeypatch):
 
     handlers.collect_gex_history(_Bus())
     assert raw_shadow.stats()["alerts_p95_ms"] is not None
+
+
+def test_two_nans_are_the_same_reading():
+    # The float32 grid keeps NaN (summary columns would be NULL); a cell that
+    # is NaN on both sides is the same reading, not a difference every minute.
+    assert raw_shadow._same(float("nan"), float("nan"))
+    assert not raw_shadow._same(float("nan"), 1.0)
+    assert not raw_shadow._same(1.0, float("nan"))

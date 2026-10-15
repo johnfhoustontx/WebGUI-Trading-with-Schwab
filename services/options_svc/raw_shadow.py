@@ -88,6 +88,9 @@ def _same(a, b) -> bool:
     if a is None or b is None:
         return a is None and b is None
     if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        if math.isnan(a) or math.isnan(b):
+            # A grid cell can hold NaN; NaN on both sides is the same reading.
+            return math.isnan(a) and math.isnan(b)
         return math.isclose(a, b, rel_tol=_REL_TOL, abs_tol=_ABS_TOL)
     return a == b
 
