@@ -1025,6 +1025,49 @@ _GAMMA_HEAT = ConfigFile(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Raw feed and catch-up — config/feed.toml
+# ─────────────────────────────────────────────────────────────────────────────
+# Read per call through the mtime-cached loader (shared/feed_config.py), so a
+# saved change applies with no restart.
+_FEED = ConfigFile(
+    name="feed.toml", title="Raw feed and catch-up", icon="storage",
+    summary="Whether each minute's option chains are kept on disk, so the "
+            "options service can catch up after a restart with no gap in the "
+            "day's data.",
+    restart=(),
+    sections=(
+        Section("Raw feed",
+                "Off is how the app ran before the feed: nothing is kept. Tee "
+                "keeps each minute and checks that working from the kept copy "
+                "gives the same numbers, with no extra Schwab calls. On hands "
+                "the fetching to the feed service.", (
+            Field("feed.mode", "Mode",
+                  "Off, tee (keep and check) or on (the feed service fetches).",
+                  kind="choice", choices=("off", "tee", "on")),
+            Field("feed.keep_sessions", "Sessions kept",
+                  "About 1 GB each. They are never backed up.",
+                  kind="int", min=1, max=30, step=1),
+            Field("feed.stale_alarm_min", "Feed alarm after",
+                  "The feed service reports down after this long with no "
+                  "complete minute, during collection hours.",
+                  kind="int", unit="min", min=1, max=30, step=1),
+        )),
+        Section("Catch-up",
+                "After a restart the options service works through the minutes "
+                "it missed, oldest first.", (
+            Field("catchup.push_max_age_min", "Push alerts no older than",
+                  "An alert from an older minute is recorded but does not go "
+                  "to your phone.",
+                  kind="int", unit="min", min=1, max=60, step=1),
+            Field("catchup.lag_alarm_min", "Lag alarm after",
+                  "The options service reports down when it is this far "
+                  "behind, during collection hours.",
+                  kind="int", unit="min", min=1, max=60, step=1),
+        )),
+    ),
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Public edge — config/edge.toml
 # ─────────────────────────────────────────────────────────────────────────────
 # Read by deploy/caddy/generate_caddyfile.py only. No service restart applies it:
@@ -2244,7 +2287,7 @@ _MARKET_READ = ConfigFile(
 )
 
 FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _SECTORS, _MOMENTUM,
-         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
+         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _FEED, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
          _MARKET_READ, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}

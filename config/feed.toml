@@ -1,0 +1,24 @@
+# The raw feed and catch-up (docs/plans/2026-10-14-raw-feed-and-catch-up-design.md).
+#
+# Every value is read per call through an mtime-cached loader, so a saved change
+# applies with no restart. The operator's changes go in config/local/feed.toml
+# (Settings -> Configuration), never here.
+
+[feed]
+# off = today: the options service fetches and derives each minute, nothing raw is kept.
+# tee = as off, and each collected minute is also written to the raw store, with a
+#       shadow check that re-derives it from there and compares (no extra Schwab call).
+# on  = feed_svc fetches into the raw store and the options service derives from it.
+mode = "off"
+# Raw sessions kept on disk (about 1 GB each). Never backed up.
+keep_sessions = 5
+# feed_svc's health goes down after this many minutes with no complete minute,
+# inside the collection window.
+stale_alarm_min = 2
+
+[catchup]
+# An alert from a caught-up minute older than this is recorded but not pushed.
+push_max_age_min = 3
+# The options service's health goes down when derivation is this many minutes
+# behind, inside the collection window.
+lag_alarm_min = 5
