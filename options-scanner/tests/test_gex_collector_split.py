@@ -66,3 +66,31 @@ def test_derive_minute_does_not_commit():
     m = gc.fetch_minute(_client(), symbols=["SPY"], now=RTH, poll_term=False)
     gc.derive_minute(_Engine(), conn, m)
     conn.commit.assert_not_called()
+
+
+def test_on_minute_sees_the_fetched_minute_before_it_is_derived():
+    order = []
+    engine = _Engine()
+    real_calc = engine.calc_all_from_chain
+
+    def _calc(chain, use_volume=False):
+        order.append("derive")
+        return real_calc(chain, use_volume)
+
+    engine.calc_all_from_chain = _calc
+    got = []
+    gc.poll_once(_client(), engine, MagicMock(), symbols=["SPY"], poll_term=False, now=RTH,
+                 on_minute=lambda m: (order.append("minute"), got.append(m)))
+    assert order == ["minute", "derive"]
+    assert got[0].ts == int(RTH.timestamp()) and [s for s, _ in got[0].chains] == ["SPY"]
+
+
+def test_a_raising_on_minute_never_stops_the_poll():
+    engine = _Engine()
+
+    def _boom(minute):
+        raise OSError("disk full")
+
+    gc.poll_once(_client(), engine, MagicMock(), symbols=["SPY"], poll_term=False, now=RTH,
+                 on_minute=_boom)
+    assert engine.seen == [("SPY", 100.0)]

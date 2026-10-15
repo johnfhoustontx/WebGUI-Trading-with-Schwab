@@ -4964,6 +4964,12 @@ def collect_gex_snapshots(capture_symbols=None, now=None) -> int:
                                   hiro=_hiro_syms, flip=_flip)
         # Passed only when set: test doubles for poll_once predate the argument.
         _poll_kw = {"tiers": _tiers} if _tiers else {}
+        # The raw feed's tee keeps the fetched minute (config/feed.toml). Passed
+        # only in tee, for the same reason as tiers.
+        from services.options_svc import raw_tee
+        from shared import feed_config
+        if feed_config.mode() == "tee":
+            _poll_kw["on_minute"] = raw_tee.maybe_write
         gc.poll_once(_proxy.schwab_py_client, gt.GammaEngine(), conn,
                      symbols=symbols, on_chain=on_chain, **_poll_kw)
         _write_hiro_rows(gh, conn, _hiro_ts, _hiro_rows)   # never raises

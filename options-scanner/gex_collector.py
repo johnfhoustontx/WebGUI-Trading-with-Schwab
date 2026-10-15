@@ -553,7 +553,7 @@ def _carry_forward(client, fetched, ages, tiers, now, spots=None, refetch=None,
 
 
 def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
-              poll_term=None, now=None, tiers=None) -> None:
+              poll_term=None, now=None, tiers=None, on_minute=None) -> None:
     """Fetch + store one snapshot per symbol. Per-symbol exceptions are logged,
     not propagated, so one bad symbol doesn't kill the whole poll.
 
@@ -593,9 +593,18 @@ def poll_once(client, engine, conn, lock=None, symbols=None, on_chain=None,
     Since 2026-10-14 it is two halves, so a fetched minute can be stored and
     derived later (docs/plans/2026-10-14-raw-feed-and-catch-up-design.md):
     ``fetch_minute`` returns a ``RawMinute`` and ``derive_minute`` writes its
-    rows. This function is exactly the two, then one commit."""
+    rows. This function is exactly the two, then one commit.
+
+    ``on_minute(minute)`` -- optional, called with the fetched ``RawMinute``
+    before anything is derived from it (the raw feed's ``tee`` keeps it). A
+    raising callback is logged and the poll continues."""
     minute = fetch_minute(client, symbols=symbols, now=now, tiers=tiers,
                           lock=lock, poll_term=poll_term)
+    if on_minute is not None:
+        try:
+            on_minute(minute)
+        except Exception:
+            log.warning("on_minute callback failed", exc_info=True)
     derive_minute(engine, conn, minute, on_chain=on_chain)
     conn.commit()
 
