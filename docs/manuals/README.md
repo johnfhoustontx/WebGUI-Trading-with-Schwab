@@ -35,6 +35,23 @@ python build_docs.py user-guide      # build just one
 template) and HTML → .docx (via a BeautifulSoup walk into python-docx). No pandoc
 or LibreOffice required.
 
+### Architecture diagrams
+
+The diagrams live in `diagrams/`, each drawn once by `diagrams/make_diagrams.py`
+(matplotlib), which writes `<name>.svg` and `<name>.png`. A manual places one with a
+paragraph of its own:
+
+```text
+{{diagram: system-overview | The processes and how they talk}}
+```
+
+The HTML build inlines the SVG, so each manual stays one self-contained file (the
+app serves no other path). The `.docx` build embeds the PNG. An unknown name fails
+the build, and `tests/test_manual_diagrams.py` checks that every placed diagram
+exists in both formats and that every drawn diagram is placed. To change one, edit
+`make_diagrams.py`, run it, look at the PNG, then rebuild the manuals that place it.
+Draw what runs; draw anything not built yet dashed and labelled "planned".
+
 ### Dependencies
 
 `markdown`, `beautifulsoup4`, `lxml`, and `python-docx` (all already in the project

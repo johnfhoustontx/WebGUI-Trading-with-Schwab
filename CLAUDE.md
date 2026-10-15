@@ -770,7 +770,10 @@ in Markdown and built by `build_docs.py` into HTML + `.docx`. They are surfaced
 in-app at **More → User Manuals** via `webgui/pages/manuals.py:MANUALS` — **a new
 manual must be added in BOTH places** (`build_docs.py:MANUALS` to build it,
 `pages/manuals.py:MANUALS` to serve it; the latter is also the path whitelist, so an
-unlisted file is refused rather than served).
+unlisted file is refused rather than served). Architecture diagrams are drawn in
+`docs/manuals/diagrams/make_diagrams.py` and placed with
+`{{diagram: <name> | Caption}}`; a diagram is a manual too, so a moved port,
+process or flow is redrawn in the same commit.
 
 | Manual | Answers |
 |---|---|

@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"
+  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg xmlns:xlink="http://www.w3.org/1999/xlink" width="720pt" height="288pt" viewBox="0 0 720 288" xmlns="http://www.w3.org/2000/svg" version="1.1">
+ <metadata>
+  <rdf:RDF xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">
+   <cc:Work>
+    <dc:type rdf:resource="http://purl.org/dc/dcmitype/StillImage"/>
+    <dc:format>image/svg+xml</dc:format>
+    <dc:creator>
+     <cc:Agent>
+      <dc:title>Matplotlib v3.11.0, https://matplotlib.org/</dc:title>
+     </cc:Agent>
+    </dc:creator>
+   </cc:Work>
+  </rdf:RDF>
+ </metadata>
+ <defs>
+  <style type="text/css">*{stroke-linejoin: round; stroke-linecap: butt}</style>
+ </defs>
+ <g id="figure_1">
+  <g id="patch_1">
+   <path d="M 0 288 
+L 720 288 
+L 720 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="axes_1">
+   <g id="patch_2">
+    <path d="M 27.36 86.4 
+L 138.24 86.4 
+Q 144 86.4 144 92.16 
+L 144 126.72 
+Q 144 132.48 138.24 132.48 
+L 27.36 132.48 
+Q 21.6 132.48 21.6 126.72 
+L 21.6 92.16 
+Q 21.6 86.4 27.36 86.4 
+z
+" clip-path="url(#pa5500473ba)" style="fill: #faeeda; stroke: #854f0b; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_3">
+    <path d="M 182.88 28.8 
+L 688.32 28.8 
+Q 698.4 28.8 698.4 38.88 
+L 698.4 198.72 
+Q 698.4 208.8 688.32 208.8 
+L 182.88 208.8 
+Q 172.8 208.8 172.8 198.72 
+L 172.8 38.88 
+Q 172.8 28.8 182.88 28.8 
+L 182.88 28.8 
+z
+" clip-path="url(#pa5500473ba)" style="fill: none; stroke-dasharray: 5,4; stroke-dashoffset: 0; stroke: #534ab7; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_4">
+    <path d="M 200.16 57.6 
+L 318.24 57.6 
+Q 324 57.6 324 63.36 
+L 324 97.92 
+Q 324 103.68 318.24 103.68 
+L 200.16 103.68 
+Q 194.4 103.68 194.4 97.92 
+L 194.4 63.36 
+Q 194.4 57.6 200.16 57.6 
+z
+" clip-path="url(#pa5500473ba)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_5">
+    <path d="M 358.56 57.6 
+L 491.04 57.6 
+Q 496.8 57.6 496.8 63.36 
+L 496.8 97.92 
+Q 496.8 103.68 491.04 103.68 
+L 358.56 103.68 
+Q 352.8 103.68 352.8 97.92 
+L 352.8 63.36 
+Q 352.8 57.6 358.56 57.6 
+z
+" clip-path="url(#pa5500473ba)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_6">
+    <path d="M 531.36 57.6 
+L 671.04 57.6 
+Q 676.8 57.6 676.8 63.36 
+L 676.8 97.92 
+Q 676.8 103.68 671.04 103.68 
+L 531.36 103.68 
+Q 525.6 103.68 525.6 97.92 
+L 525.6 63.36 
+Q 525.6 57.6 531.36 57.6 
+z
+" clip-path="url(#pa5500473ba)" style="fill: #eeedfe; stroke: #534ab7; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_7">
+    <path d="M 531.36 136.8 
+L 671.04 136.8 
+Q 676.8 136.8 676.8 142.56 
+L 676.8 177.12 
+Q 676.8 182.88 671.04 182.88 
+L 531.36 182.88 
+Q 525.6 182.88 525.6 177.12 
+L 525.6 142.56 
+Q 525.6 136.8 531.36 136.8 
+z
+" clip-path="url(#pa5500473ba)" style="fill: #eeedfe; stroke: #534ab7; stroke-linejoin: miter"/>
+   </g>
+   <g id="patch_8">
+    <path d="M 178.56 226.8 
+L 498.24 226.8 
+Q 504 226.8 504 232.56 
+L 504 264.24 
+Q 504 270 498.24 270 
+L 178.56 270 
+Q 172.8 270 172.8 264.24 
+L 172.8 232.56 
+Q 172.8 226.8 178.56 226.8 
+z
+" clip-path="url(#pa5500473ba)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="line2d_1">
+    <path d="M 82.8 132.48 
+L 82.8 159.84 
+L 82.8 159.84 
+" clip-path="url(#pa5500473ba)" style="fill: none; stroke: #5f5e5a; stroke-linecap: square"/>
+   </g>
+   <g id="text_1">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #633806" x="82.8" y="105.097852" transform="rotate(-0 82.8 105.097852)">Redis :6379</text>
+   </g>
+   <g id="text_2">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #854f0b" x="82.8" y="119.698242" transform="rotate(-0 82.8 119.698242)">A system unit</text>
+   </g>
+   <g id="text_3">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #534ab7" x="184.32" y="44.228145" transform="rotate(-0 184.32 44.228145)">trading-prod.target: a promote stops and starts all of it</text>
+   </g>
+   <g id="text_4">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="259.2" y="76.297852" transform="rotate(-0 259.2 76.297852)">schwab-proxy</text>
+   </g>
+   <g id="text_5">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="259.2" y="90.898242" transform="rotate(-0 259.2 90.898242)">:8100, starts first</text>
+   </g>
+   <g id="text_6">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="424.8" y="76.297852" transform="rotate(-0 424.8 76.297852)">Seven services</text>
+   </g>
+   <g id="text_7">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="424.8" y="90.897891" transform="rotate(-0 424.8 90.897891)">:8210 to :8217</text>
+   </g>
+   <g id="text_8">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #3c3489" x="601.2" y="76.297852" transform="rotate(-0 601.2 76.297852)">webgui :8500</text>
+   </g>
+   <g id="text_9">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #534ab7" x="601.2" y="90.898242" transform="rotate(-0 601.2 90.898242)">Ordered after the proxy</text>
+   </g>
+   <g id="text_10">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #3c3489" x="601.2" y="155.497852" transform="rotate(-0 601.2 155.497852)">webgui_live :8501</text>
+   </g>
+   <g id="text_11">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #534ab7" x="601.2" y="170.098242" transform="rotate(-0 601.2 170.098242)">Needs only Redis</text>
+   </g>
+   <g id="patch_9">
+    <path d="M 144 100.8 
+Q 168.48 90.72 191.926178 81.065691 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 187.019945 80.706699 
+L 191.926178 81.065691 
+L 188.695244 84.775282 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="patch_10">
+    <path d="M 324 80.64 
+Q 337.68 80.64 350.241966 80.64 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 345.841966 78.44 
+L 350.241966 80.64 
+L 345.841966 82.84 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="patch_11">
+    <path d="M 496.8 80.64 
+Q 510.48 80.64 523.041966 80.64 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 518.641966 78.44 
+L 523.041966 80.64 
+L 518.641966 82.84 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="patch_12">
+    <path d="M 82.8 159.84 
+Q 303.48 159.84 523.041966 159.84 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 518.641966 157.64 
+L 523.041966 159.84 
+L 518.641966 162.04 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="text_12">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="338.4" y="244.057852" transform="rotate(-0 338.4 244.057852)">Timers</text>
+   </g>
+   <g id="text_13">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="338.4" y="258.658242" transform="rotate(-0 338.4 258.658242)">Backup, reports, captures: outside the target</text>
+   </g>
+   <g id="text_14">
+    <text style="font-style: italic; font-size: 8.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #5f5e5a" x="518.4" y="250.60834" transform="rotate(-0 518.4 250.60834)">Arrows: start order (After=)</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="pa5500473ba">
+   <rect x="0" y="0" width="720" height="288"/>
+  </clipPath>
+ </defs>
+</svg>

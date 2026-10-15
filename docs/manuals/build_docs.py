@@ -34,6 +34,52 @@ from docx.shared import Pt, RGBColor, Inches
 HERE = Path(__file__).resolve().parent
 
 # ---------------------------------------------------------------------------
+# Architecture diagrams
+#
+# A manual places one with a paragraph of its own:
+#
+#     {{diagram: system-overview | The processes and how they talk}}
+#
+# Each is drawn once by diagrams/make_diagrams.py, which writes <name>.svg and
+# <name>.png. The HTML build INLINES the SVG: the in-app manuals are single
+# self-contained files and the serving route (webgui/pages/manuals.py) refuses
+# every other path, so a linked image would never load. The Word build embeds
+# the PNG (python-docx takes no SVG). An unknown name fails the build.
+DIAGRAM_DIR = HERE / "diagrams"
+_DIAGRAM_P = re.compile(r"<p>\{\{diagram:\s*([a-z0-9-]+)\s*\|\s*(.+?)\}\}</p>")
+
+
+def _inline_svg(name: str) -> str:
+    """The diagram's SVG, made safe to inline: no XML prologue or metadata, no
+    <style> (matplotlib's ``*{...}`` would restyle the whole page; its two
+    properties move onto the root, where they inherit), no fixed size (it
+    scales with the column), and every id prefixed with the diagram's name so
+    two diagrams on one page cannot clash."""
+    path = DIAGRAM_DIR / f"{name}.svg"
+    if not path.is_file():
+        raise ValueError(f"unknown diagram {name!r}: no {path.name} in {DIAGRAM_DIR}")
+    svg = path.read_text(encoding="utf-8")
+    svg = svg[svg.index("<svg"):]
+    svg = re.sub(r"<metadata>.*?</metadata>\s*", "", svg, flags=re.S)
+    svg = re.sub(r"<style[^>]*>.*?</style>\s*", "", svg, flags=re.S)
+    svg = re.sub(r"<defs>\s*</defs>\s*", "", svg)
+    svg = re.sub(r'\bid="([^"]+)"', lambda m: f'id="{name}-{m.group(1)}"', svg)
+    svg = re.sub(r"url\(#([^)]+)\)", lambda m: f"url(#{name}-{m.group(1)})", svg)
+    svg = re.sub(r'href="#([^"]+)"', lambda m: f'href="#{name}-{m.group(1)}"', svg)
+    root = re.match(r"<svg[^>]*>", svg).group(0)
+    clean = re.sub(r'\s(width|height)="[^"]*"', "", root)
+    clean = clean[:-1] + (' role="img" stroke-linejoin="round" stroke-linecap="butt"'
+                          ' style="width:100%;height:auto">')
+    return clean + svg[len(root):]
+
+
+def _expand_diagrams(body: str) -> str:
+    return _DIAGRAM_P.sub(
+        lambda m: (f'<figure class="diagram" data-diagram="{m.group(1)}">'
+                   f"{_inline_svg(m.group(1))}<figcaption>{m.group(2)}</figcaption></figure>"),
+        body)
+
+# ---------------------------------------------------------------------------
 # Brand
 #
 # These documents stay LIGHT even though the product is dark: a reference you
@@ -127,6 +173,11 @@ tr:nth-child(even) td { background: var(--soft); }
 blockquote { margin: 1em 0; padding: 6px 16px; border-left: 4px solid var(--accent);
              background: var(--accent-soft); color: #2a3a52; border-radius: 0 6px 6px 0; }
 blockquote p { margin: 0.3em 0; }
+figure.diagram { margin: 1.4em 0; padding: 14px; border: 1px solid var(--line);
+  border-radius: 8px; background: #fff; }
+figure.diagram svg { display: block; max-width: 100%; height: auto; }
+figure.diagram figcaption { margin-top: 8px; text-align: center; font-size: 0.85rem;
+  color: var(--muted); font-style: italic; }
 hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 .toc { background: #fff; border: 1px solid var(--line); border-radius: 10px;
        padding: 12px 22px; margin: 22px 0 8px; }
@@ -168,7 +219,7 @@ def build_html(md_text: str, title: str, subtitle: str, meta: str, out_path: Pat
     md = markdown.Markdown(extensions=MD_EXTENSIONS, extension_configs={
         "toc": {"title": "Contents", "permalink": False},
     })
-    body = md.convert(md_text)
+    body = _expand_diagrams(md.convert(md_text))
     # markdown's [TOC] marker -> a .toc div is produced by the toc extension's
     # placeholder; we rely on a literal "[TOC]" in source being replaced.
     css = (HTML_CSS.replace("ACCENT_HEX", BRAND_ACCENT)
@@ -453,6 +504,10 @@ def build_docx(body_html: str, title: str, subtitle: str, meta: str, out_path: P
             doc.add_paragraph().add_run().add_break()
         elif name == "div" and "toc" in (node.get("class") or []):
             continue  # we use the native Word TOC field instead
+        elif name == "figure" and "diagram" in (node.get("class") or []):
+            cap = node.find("figcaption")
+            _add_screenshot(doc, DIAGRAM_DIR / f"{node.get('data-diagram')}.png",
+                            cap.get_text().strip() if cap else "")
         else:
             p = doc.add_paragraph()
             _inline_runs(p, node)

@@ -4,7 +4,33 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-14 (**Raw feed, Phases 1–2: the collector can keep each minute's chains and prove a re-derived minute matches; ships off.**)
+**Last updated:** 2026-10-15 (**Architecture diagrams in the Technical and API References.**)
+
+- **Asked for by the user:** put the I/O architecture picture into the manuals, plus
+  any other architecture diagrams that help.
+- **Five diagrams**, drawn once in `docs/manuals/diagrams/make_diagrams.py`
+  (matplotlib, which writes SVG and PNG):
+  - `system-overview`: the processes, the three tiers, Caddy, and the outside services.
+  - `request-flow`: one command from click to repaint.
+  - `deploy-units`: systemd start order, and what a promote stops.
+  - `minute-collection`: the one-minute GEX poll today, with `tee` beside it.
+  - `raw-feed-target`: the planned raw feed, with unbuilt parts dashed.
+- **Where they sit:**
+  - Technical Reference: "The three tiers" (replacing an ASCII picture that listed
+    five services of seven), "Data flow", "Startup order", and a new section, *The
+    one-minute GEX collection and the raw feed*, which also documents `tee` and
+    `cache:feed:shadow`.
+  - API Reference: the 3-tier overview (also replacing ASCII), the flow example, and
+    the Options service. `cache:feed:shadow` joins the key index.
+- **How a manual places one:** `{{diagram: <name> | Caption}}`. `build_docs.py`
+  inlines the SVG into the HTML (the app serves each manual as one file) and embeds
+  the PNG in the `.docx`.
+  - The inlined SVG drops matplotlib's `<style>*{…}</style>`, which would have
+    restyled the whole manual, and prefixes every id per diagram.
+  - `tests/test_manual_diagrams.py` pins all of that.
+  - A heredoc turned one regex's `\b` into a raw backspace byte; the test caught it.
+
+**Prior —** 2026-10-14 (**Raw feed, Phases 1–2: the collector can keep each minute's chains and prove a re-derived minute matches; ships off.**)
 
 - **Asked for by the user:** the Schwab data should land in a raw store written by
   an independent process, GEX and the rest should be derived from it, and a stack

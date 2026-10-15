@@ -48,15 +48,7 @@ keys that feed it. Menu order matches the rail.
 
 # 3-Tier Overview
 
-```
-TIER 1  GUI (webgui, :8500)  ──enqueue command──▶  cmd:{domain}  (Redis Stream)
-        ▲                                                  │
-        │  read cache / subscribe events                   ▼
-TIER 3  Redis (:6379)  ◀──cache_set + publish──  TIER 2  services
-        ▲                                                  │
-        │                                                  ▼  market data
-        └──────────────  schwab-proxy (:8100)  ◀───────────┘
-```
+{{diagram: system-overview | The processes, the three tiers and what each one talks to}}
 
 **Rules of the model:**
 
@@ -285,6 +277,17 @@ ETH-eligible symbols), Paper Portfolio entry + manage (hourly at the top of the
 hour, 09:00–14:00 CT, no 15:00 run — also refreshes the Paper Ledger), captured-signal auto-manage (5-min
 slots, 08:00–15:15 CT, when auto-close is on), header tick (each 30 s,
 skip-unchanged).
+
+**GEX collection and the raw feed.** Each one-minute poll is
+`gex_collector.fetch_minute` (the chains, through the proxy) then `derive_minute`
+(the rows in `gex_history.db`, priced at the minute). In `config/feed.toml`
+`[feed] mode = "tee"` the fetched minute is also written to the raw chain store
+(`shared/raw_store.py`: one SQLite file per session, tables `chains`, `minutes`,
+`gaps`), and a shadow check re-derives it and publishes its counts and timings to
+`cache:feed:shadow`. It adds no Schwab call. The Technical Reference's *The
+one-minute GEX collection and the raw feed* has the diagrams and fields.
+
+{{diagram: minute-collection | The one-minute collection today, and what tee adds beside it}}
 
 **Commands (`cmd:options`):**
 
@@ -1088,6 +1091,7 @@ cache:options:gamma_analyze_premarket | _midday | _close    (per-slot auto brief
 cache:options:gamma_regime_state
 cache:options:market_snapshot  events:options:market_snapshot
 cache:options:trade_idea                                    (hourly post: last result + today's posted set)
+cache:feed:shadow                                           (config/feed.toml mode "tee" only: the shadow check's counts and timings)
 cache:options:x_log                                         (every X post attempt, newest first, last 100)
 cache:options:x_count                                       (X posts made today, CT day - the daily cap)
 cache:options:x_reports                                     (market reports already posted to X)
@@ -1217,6 +1221,8 @@ The scaffold provides:
 ---
 
 # End-to-End Flow Example
+
+{{diagram: request-flow | One request, from a click to the repaint}}
 
 **User clicks "Analyze SPY" on the Trade page:**
 

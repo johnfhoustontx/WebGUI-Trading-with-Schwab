@@ -197,6 +197,14 @@ both are ordered with the others).
 `webgui_live` sits outside that chain: it reads Redis and nothing else — no proxy
 call, no Schwab call, no service call — so it is ordered after nothing in the target.
 
+{{diagram: deploy-units | The systemd units, their start order, and what a promote stops}}
+
+Today one target holds every process, so `tools/promote.sh` stops and starts all of
+them: during the GEX collection window (06:30–15:20 CT on a trading day) that costs
+the minutes it takes. Splitting the proxy and the raw feed into a target of their
+own, which a market-hours promote leaves running, is planned (see *The one-minute
+GEX collection and the raw feed* below).
+
 | Launcher | Behavior |
 |----------|----------|
 | `systemctl --user start trading-prod.target` | Proxy + 7 services + webgui + webgui_live. Also starts at boot. |
@@ -241,24 +249,29 @@ cd webgui ; ..\.venv/bin/python -m pytest -q
 ## The three tiers
 
 The stack is split into three physically separate tiers communicating over a local
-Redis (Redis) backbone. No two Tier-2 services talk to each other directly.
+Redis backbone. No two Tier-2 services talk to each other directly.
 
-```
-TIER 1  GUI         webgui/ NiceGUI app (:8500). Renders pages, reads Redis cache,
-                    subscribes to events, enqueues commands. No engine imports.
-                    webgui/live_main.py (:8501) is a SECOND Tier-1 process: the
-                    same page modules, published read-only and unauthenticated.
-                    It reads and subscribes; it enqueues nothing.
-   ▲ cache read / subscribe                │ commands
-TIER 3  STORE+COMM  Redis (:6379): cache:{domain}:{view}, events:{domain}:{view}
-                    pub/sub, cmd:{domain} command streams. shared/contracts (typed
-                    payloads) + shared/bus (redis wrapper).
-   ▲ publish                               │ consume
-TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
-                    trade/market). Each imports only its engines, owns its
-                    scheduler + command consumer, validates + caches + publishes.
-                    Calls schwab-proxy (:8100) for market data.
-```
+{{diagram: system-overview | The processes, the three tiers and what each one talks to}}
+
+- **Tier 1, web.** `webgui/main.py` (:8500) renders the private app behind the
+  sign-in: it reads Redis cache views, subscribes to their events and enqueues
+  commands. It imports no engine and makes no Schwab call. `webgui/live_main.py`
+  (:8501) is a second Tier-1 process: the same page modules, published read-only
+  and unauthenticated. It reads and subscribes, and writes only through its three
+  public request paths (the Strategy Finder, Rescue, and the Calculator and
+  Simulator), each an append-only stream. Caddy fronts
+  both: `app.` with password and TOTP, `live.` with no login.
+- **Tier 3, store and communication.** Redis (:6379) holds `cache:{domain}:{view}`,
+  the `events:{domain}:{view}` pub/sub channels and the `cmd:{domain}` command
+  streams. `shared/bus` wraps it; `shared/contracts` holds the typed payloads that
+  some views are validated against on write.
+- **Tier 2, services.** Seven FastAPI services, `services/{domain}_svc`: sentiment,
+  options, portfolio, trade, market, news and blog. Each imports only its own
+  engines, owns its scheduler and command consumer, and validates, caches and
+  publishes its results. Five of them fetch market data through `schwab-proxy`
+  (:8100), the only process that talks to Schwab. `news_svc` reads public feeds
+  and `blog_svc` its own store; neither calls the proxy. The scheduled briefings
+  call Claude.
 
 ## Process map and ports
 
@@ -287,6 +300,8 @@ Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 > `docs/dev-prod-environments.md`.
 
 ## Data flow (one request)
+
+{{diagram: request-flow | One request, from a click to the repaint}}
 
 1. The GUI enqueues a command on `cmd:{domain}` (a Redis Stream).
 2. The owning service's consumer loop drains the stream and dispatches to a handler.
@@ -466,6 +481,85 @@ are meant to be switched on one at a time, each after the one before it has been
 read: shadow → daily bars → chains → quotes → the wide scan fetch → the 3-minute
 tail. Shadow mode's counts replace the first estimate, and
 `tools/measure_chain_carry.py` is the gate for the last step.
+
+## The one-minute GEX collection and the raw feed
+
+**Files:** `options-scanner/gex_collector.py` (`fetch_minute`, `derive_minute`),
+`shared/raw_minute.py`, `services/options_svc/collect_derive.py` (the per-chain
+hooks), `shared/raw_store.py`, `services/options_svc/raw_tee.py` and `raw_shadow.py`.
+**Settings:** `config/feed.toml`, in **Settings → Configuration → Raw feed and
+catch-up**; read when used, no restart. Design and plan:
+`docs/plans/2026-10-14-raw-feed-and-catch-up-design.md` and `-plan.md`.
+
+### What runs every minute
+
+{{diagram: minute-collection | The one-minute collection today, and what tee adds beside it}}
+
+Inside the collection window the options service polls once a minute, in two halves:
+
+1. **`fetch_minute`** asks the proxy for the 7-day chain of every collected symbol
+   (the `[collection]` base in `config/symbols.toml` and the watchlist), six
+   requests at a time, on the proxy's priority lane. It moves an
+   off-hours chain's stale underlying price onto the live quote, and on the
+   proxy's carry rules it can hand back a stored chain moved to the live price.
+   It also fetches the 10-day `$SPX` term chain every fifth minute. It computes
+   nothing.
+2. **`derive_minute`** turns that minute into rows: gamma, charm, delta and vanna
+   by strike plus the premium grid (five views) and the term rows, all in
+   `gex_history.db`. Before a chain's rows are written, the `on_chain` hooks read
+   it: the gamma page's chain stash, extended-hours eligibility, the bought/sold
+   tally, traded premium, the unusual-activity and big-delta detectors, and HIRO.
+3. After the poll, the flow alerts, the Options Matrix, Net Premium and flow skew
+   are rebuilt from those rows and published to Redis.
+
+**A minute is derived at its own minute, never at the wall clock.** The Greeks
+are priced with the time left to the close as of that minute
+(`GammaEngine.calc_all_from_chain(now=...)`), and every hook is given the
+minute's time. A minute derived again later therefore produces exactly the rows it
+produced live. `derive_minute` never commits; its caller does.
+
+### Keeping each minute: `tee`
+
+`[feed] mode` ships **`off`**: nothing is kept, as before. In **`tee`** the
+collector also writes each fetched minute to the **raw chain store**: one SQLite
+file per session under `services/feed_svc/data/raw/`, each minute's chains and its
+completion row in one transaction, a minute it could not collect recorded as a gap
+with its reason. `keep_sessions` (5) sessions are kept, at about 1 GB each, and the
+store is never backed up. `zlib_level` (6) trades disk size against the time the
+write takes on the collection thread. **`tee` adds no Schwab call**: it keeps the
+chains the poll already fetched.
+
+In `tee`, a **shadow check** re-derives each kept minute from the store, on a
+thread of its own and without the hooks, and compares every view and term row with
+the live ones. A minute that arrives while the last is still being compared is
+skipped and counted. It publishes `cache:feed:shadow`:
+
+| Field | Meaning |
+|---|---|
+| `minutes`, `minutes_with_diffs`, `last_diff` | Minutes compared, how many differed, the first difference seen |
+| `skipped`, `missing_raw` | Minutes not compared because the last was still running, or not found in the store |
+| `p50_ms`, `p95_ms` | Reading and deriving one minute |
+| `hooks_p95_ms`, `alerts_p95_ms` | The hooks and the flow alerts for one minute |
+| `tee_p95_ms` | The write to the store, on the collection thread |
+| `gate_p95_ms` | Derive + hooks + alerts at the 95th percentile: what catch-up will spend per minute |
+
+**The gate for catch-up:** after a full session in `tee`, `minutes_with_diffs` is 0
+and `gate_p95_ms` is under 2000. `mode = "on"` is not built yet: set by hand it
+runs as `off` and logs a warning.
+
+### Where this is going: catch-up with no gap
+
+{{diagram: raw-feed-target | The planned raw feed: what a market-hours promote leaves running, and what catches up}}
+
+Schwab serves no past option chain, so a minute nobody saved is lost for good. The
+plan keeps the saving process running and lets everything downstream catch up.
+`feed_svc` (:8218) will fetch into the raw store. The options service will derive
+from the store behind a per-session cursor, oldest minute first, after any stop.
+Alerts from a caught-up minute will be recorded but pushed only when fresh. The
+proxy and `feed_svc` will form a systemd target of their own, which a market-hours
+promote leaves running. Dashed boxes are not built yet. A crash of the proxy or
+`feed_svc`, or a reboot, will still leave a gap, recorded and shown, never
+silent.
 
 ## Folder map
 

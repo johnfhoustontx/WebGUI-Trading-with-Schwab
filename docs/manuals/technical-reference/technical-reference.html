@@ -46,6 +46,11 @@ tr:nth-child(even) td { background: var(--soft); }
 blockquote { margin: 1em 0; padding: 6px 16px; border-left: 4px solid var(--accent);
              background: var(--accent-soft); color: #2a3a52; border-radius: 0 6px 6px 0; }
 blockquote p { margin: 0.3em 0; }
+figure.diagram { margin: 1.4em 0; padding: 14px; border: 1px solid var(--line);
+  border-radius: 8px; background: #fff; }
+figure.diagram svg { display: block; max-width: 100%; height: auto; }
+figure.diagram figcaption { margin-top: 8px; text-align: center; font-size: 0.85rem;
+  color: var(--muted); font-style: italic; }
 hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 .toc { background: #fff; border: 1px solid var(--line); border-radius: 10px;
        padding: 12px 22px; margin: 22px 0 8px; }
@@ -66,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-14</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-15</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -96,6 +101,12 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#the-collectors-two-tiers-and-what-carried-forward-means">The collector's two tiers, and what "carried forward" means</a></li>
 <li><a href="#the-autoscans-single-wide-fetch">The autoscan's single wide fetch</a></li>
 <li><a href="#measured-baseline-and-the-estimates">Measured baseline, and the estimates</a></li>
+</ul>
+</li>
+<li><a href="#the-one-minute-gex-collection-and-the-raw-feed">The one-minute GEX collection and the raw feed</a><ul>
+<li><a href="#what-runs-every-minute">What runs every minute</a></li>
+<li><a href="#keeping-each-minute-tee">Keeping each minute: tee</a></li>
+<li><a href="#where-this-is-going-catch-up-with-no-gap">Where this is going: catch-up with no gap</a></li>
 </ul>
 </li>
 <li><a href="#folder-map">Folder map</a></li>
@@ -664,6 +675,211 @@ and <code>blog_svc</code> call no proxy — one reads public feeds, the other a 
 both are ordered with the others).
 <code>webgui_live</code> sits outside that chain: it reads Redis and nothing else — no proxy
 call, no Schwab call, no service call — so it is ordered after nothing in the target.</p>
+<figure class="diagram" data-diagram="deploy-units"><svg xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 720 288" xmlns="http://www.w3.org/2000/svg" version="1.1" role="img" stroke-linejoin="round" stroke-linecap="butt" style="width:100%;height:auto">
+ <g id="deploy-units-figure_1">
+  <g id="deploy-units-patch_1">
+   <path d="M 0 288 
+L 720 288 
+L 720 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="deploy-units-axes_1">
+   <g id="deploy-units-patch_2">
+    <path d="M 27.36 86.4 
+L 138.24 86.4 
+Q 144 86.4 144 92.16 
+L 144 126.72 
+Q 144 132.48 138.24 132.48 
+L 27.36 132.48 
+Q 21.6 132.48 21.6 126.72 
+L 21.6 92.16 
+Q 21.6 86.4 27.36 86.4 
+z
+" clip-path="url(#deploy-units-pa5500473ba)" style="fill: #faeeda; stroke: #854f0b; stroke-linejoin: miter"/>
+   </g>
+   <g id="deploy-units-patch_3">
+    <path d="M 182.88 28.8 
+L 688.32 28.8 
+Q 698.4 28.8 698.4 38.88 
+L 698.4 198.72 
+Q 698.4 208.8 688.32 208.8 
+L 182.88 208.8 
+Q 172.8 208.8 172.8 198.72 
+L 172.8 38.88 
+Q 172.8 28.8 182.88 28.8 
+L 182.88 28.8 
+z
+" clip-path="url(#deploy-units-pa5500473ba)" style="fill: none; stroke-dasharray: 5,4; stroke-dashoffset: 0; stroke: #534ab7; stroke-linejoin: miter"/>
+   </g>
+   <g id="deploy-units-patch_4">
+    <path d="M 200.16 57.6 
+L 318.24 57.6 
+Q 324 57.6 324 63.36 
+L 324 97.92 
+Q 324 103.68 318.24 103.68 
+L 200.16 103.68 
+Q 194.4 103.68 194.4 97.92 
+L 194.4 63.36 
+Q 194.4 57.6 200.16 57.6 
+z
+" clip-path="url(#deploy-units-pa5500473ba)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="deploy-units-patch_5">
+    <path d="M 358.56 57.6 
+L 491.04 57.6 
+Q 496.8 57.6 496.8 63.36 
+L 496.8 97.92 
+Q 496.8 103.68 491.04 103.68 
+L 358.56 103.68 
+Q 352.8 103.68 352.8 97.92 
+L 352.8 63.36 
+Q 352.8 57.6 358.56 57.6 
+z
+" clip-path="url(#deploy-units-pa5500473ba)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="deploy-units-patch_6">
+    <path d="M 531.36 57.6 
+L 671.04 57.6 
+Q 676.8 57.6 676.8 63.36 
+L 676.8 97.92 
+Q 676.8 103.68 671.04 103.68 
+L 531.36 103.68 
+Q 525.6 103.68 525.6 97.92 
+L 525.6 63.36 
+Q 525.6 57.6 531.36 57.6 
+z
+" clip-path="url(#deploy-units-pa5500473ba)" style="fill: #eeedfe; stroke: #534ab7; stroke-linejoin: miter"/>
+   </g>
+   <g id="deploy-units-patch_7">
+    <path d="M 531.36 136.8 
+L 671.04 136.8 
+Q 676.8 136.8 676.8 142.56 
+L 676.8 177.12 
+Q 676.8 182.88 671.04 182.88 
+L 531.36 182.88 
+Q 525.6 182.88 525.6 177.12 
+L 525.6 142.56 
+Q 525.6 136.8 531.36 136.8 
+z
+" clip-path="url(#deploy-units-pa5500473ba)" style="fill: #eeedfe; stroke: #534ab7; stroke-linejoin: miter"/>
+   </g>
+   <g id="deploy-units-patch_8">
+    <path d="M 178.56 226.8 
+L 498.24 226.8 
+Q 504 226.8 504 232.56 
+L 504 264.24 
+Q 504 270 498.24 270 
+L 178.56 270 
+Q 172.8 270 172.8 264.24 
+L 172.8 232.56 
+Q 172.8 226.8 178.56 226.8 
+z
+" clip-path="url(#deploy-units-pa5500473ba)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="deploy-units-line2d_1">
+    <path d="M 82.8 132.48 
+L 82.8 159.84 
+L 82.8 159.84 
+" clip-path="url(#deploy-units-pa5500473ba)" style="fill: none; stroke: #5f5e5a; stroke-linecap: square"/>
+   </g>
+   <g id="deploy-units-text_1">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #633806" x="82.8" y="105.097852" transform="rotate(-0 82.8 105.097852)">Redis :6379</text>
+   </g>
+   <g id="deploy-units-text_2">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #854f0b" x="82.8" y="119.698242" transform="rotate(-0 82.8 119.698242)">A system unit</text>
+   </g>
+   <g id="deploy-units-text_3">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #534ab7" x="184.32" y="44.228145" transform="rotate(-0 184.32 44.228145)">trading-prod.target: a promote stops and starts all of it</text>
+   </g>
+   <g id="deploy-units-text_4">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="259.2" y="76.297852" transform="rotate(-0 259.2 76.297852)">schwab-proxy</text>
+   </g>
+   <g id="deploy-units-text_5">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="259.2" y="90.898242" transform="rotate(-0 259.2 90.898242)">:8100, starts first</text>
+   </g>
+   <g id="deploy-units-text_6">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="424.8" y="76.297852" transform="rotate(-0 424.8 76.297852)">Seven services</text>
+   </g>
+   <g id="deploy-units-text_7">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="424.8" y="90.897891" transform="rotate(-0 424.8 90.897891)">:8210 to :8217</text>
+   </g>
+   <g id="deploy-units-text_8">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #3c3489" x="601.2" y="76.297852" transform="rotate(-0 601.2 76.297852)">webgui :8500</text>
+   </g>
+   <g id="deploy-units-text_9">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #534ab7" x="601.2" y="90.898242" transform="rotate(-0 601.2 90.898242)">Ordered after the proxy</text>
+   </g>
+   <g id="deploy-units-text_10">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #3c3489" x="601.2" y="155.497852" transform="rotate(-0 601.2 155.497852)">webgui_live :8501</text>
+   </g>
+   <g id="deploy-units-text_11">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #534ab7" x="601.2" y="170.098242" transform="rotate(-0 601.2 170.098242)">Needs only Redis</text>
+   </g>
+   <g id="deploy-units-patch_9">
+    <path d="M 144 100.8 
+Q 168.48 90.72 191.926178 81.065691 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 187.019945 80.706699 
+L 191.926178 81.065691 
+L 188.695244 84.775282 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="deploy-units-patch_10">
+    <path d="M 324 80.64 
+Q 337.68 80.64 350.241966 80.64 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 345.841966 78.44 
+L 350.241966 80.64 
+L 345.841966 82.84 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="deploy-units-patch_11">
+    <path d="M 496.8 80.64 
+Q 510.48 80.64 523.041966 80.64 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 518.641966 78.44 
+L 523.041966 80.64 
+L 518.641966 82.84 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="deploy-units-patch_12">
+    <path d="M 82.8 159.84 
+Q 303.48 159.84 523.041966 159.84 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 518.641966 157.64 
+L 523.041966 159.84 
+L 518.641966 162.04 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="deploy-units-text_12">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="338.4" y="244.057852" transform="rotate(-0 338.4 244.057852)">Timers</text>
+   </g>
+   <g id="deploy-units-text_13">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="338.4" y="258.658242" transform="rotate(-0 338.4 258.658242)">Backup, reports, captures: outside the target</text>
+   </g>
+   <g id="deploy-units-text_14">
+    <text style="font-style: italic; font-size: 8.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #5f5e5a" x="518.4" y="250.60834" transform="rotate(-0 518.4 250.60834)">Arrows: start order (After=)</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="deploy-units-pa5500473ba">
+   <rect x="0" y="0" width="720" height="288"/>
+  </clipPath>
+ </defs>
+</svg>
+<figcaption>The systemd units, their start order, and what a promote stops</figcaption></figure>
+<p>Today one target holds every process, so <code>tools/promote.sh</code> stops and starts all of
+them: during the GEX collection window (06:30–15:20 CT on a trading day) that costs
+the minutes it takes. Splitting the proxy and the raw feed into a target of their
+own, which a market-hours promote leaves running, is planned (see <em>The one-minute
+GEX collection and the raw feed</em> below).</p>
 <table>
 <thead>
 <tr>
@@ -726,22 +942,533 @@ cd webgui ; ..\.venv/bin/python -m pytest -q
 <h1 id="architecture-overview">Architecture Overview</h1>
 <h2 id="the-three-tiers">The three tiers</h2>
 <p>The stack is split into three physically separate tiers communicating over a local
-Redis (Redis) backbone. No two Tier-2 services talk to each other directly.</p>
-<pre><code>TIER 1  GUI         webgui/ NiceGUI app (:8500). Renders pages, reads Redis cache,
-                    subscribes to events, enqueues commands. No engine imports.
-                    webgui/live_main.py (:8501) is a SECOND Tier-1 process: the
-                    same page modules, published read-only and unauthenticated.
-                    It reads and subscribes; it enqueues nothing.
-   ▲ cache read / subscribe                │ commands
-TIER 3  STORE+COMM  Redis (:6379): cache:{domain}:{view}, events:{domain}:{view}
-                    pub/sub, cmd:{domain} command streams. shared/contracts (typed
-                    payloads) + shared/bus (redis wrapper).
-   ▲ publish                               │ consume
-TIER 2  SERVICES    services/{domain}_svc FastAPI (sentiment/options/portfolio/
-                    trade/market). Each imports only its engines, owns its
-                    scheduler + command consumer, validates + caches + publishes.
-                    Calls schwab-proxy (:8100) for market data.
-</code></pre>
+Redis backbone. No two Tier-2 services talk to each other directly.</p>
+<figure class="diagram" data-diagram="system-overview"><svg xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 720 525.6" xmlns="http://www.w3.org/2000/svg" version="1.1" role="img" stroke-linejoin="round" stroke-linecap="butt" style="width:100%;height:auto">
+ <g id="system-overview-figure_1">
+  <g id="system-overview-patch_1">
+   <path d="M 0 525.6 
+L 720 525.6 
+L 720 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="system-overview-axes_1">
+   <g id="system-overview-patch_2">
+    <path d="M 142.56 14.4 
+L 289.44 14.4 
+Q 295.2 14.4 295.2 20.16 
+L 295.2 40.32 
+Q 295.2 46.08 289.44 46.08 
+L 142.56 46.08 
+Q 136.8 46.08 136.8 40.32 
+L 136.8 20.16 
+Q 136.8 14.4 142.56 14.4 
+z
+" clip-path="url(#system-overview-pae42fd94f3)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="system-overview-patch_3">
+    <path d="M 430.56 14.4 
+L 577.44 14.4 
+Q 583.2 14.4 583.2 20.16 
+L 583.2 40.32 
+Q 583.2 46.08 577.44 46.08 
+L 430.56 46.08 
+Q 424.8 46.08 424.8 40.32 
+L 424.8 20.16 
+Q 424.8 14.4 430.56 14.4 
+z
+" clip-path="url(#system-overview-pae42fd94f3)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="system-overview-patch_4">
+    <path d="M 113.76 72 
+L 606.24 72 
+Q 612 72 612 77.76 
+L 612 106.56 
+Q 612 112.32 606.24 112.32 
+L 113.76 112.32 
+Q 108 112.32 108 106.56 
+L 108 77.76 
+Q 108 72 113.76 72 
+z
+" clip-path="url(#system-overview-pae42fd94f3)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="system-overview-patch_5">
+    <path d="M 38.88 133.2 
+L 681.12 133.2 
+Q 691.2 133.2 691.2 143.28 
+L 691.2 205.92 
+Q 691.2 216 681.12 216 
+L 38.88 216 
+Q 28.8 216 28.8 205.92 
+L 28.8 143.28 
+Q 28.8 133.2 38.88 133.2 
+L 38.88 133.2 
+z
+" clip-path="url(#system-overview-pae42fd94f3)" style="fill: none; stroke-dasharray: 5,4; stroke-dashoffset: 0; stroke: #534ab7; stroke-linejoin: miter"/>
+   </g>
+   <g id="system-overview-patch_6">
+    <path d="M 113.76 156.96 
+L 318.24 156.96 
+Q 324 156.96 324 162.72 
+L 324 194.4 
+Q 324 200.16 318.24 200.16 
+L 113.76 200.16 
+Q 108 200.16 108 194.4 
+L 108 162.72 
+Q 108 156.96 113.76 156.96 
+z
+" clip-path="url(#system-overview-pae42fd94f3)" style="fill: #eeedfe; stroke: #534ab7; stroke-linejoin: miter"/>
+   </g>
+   <g id="system-overview-patch_7">
+    <path d="M 401.76 156.96 
+L 606.24 156.96 
+Q 612 156.96 612 162.72 
+L 612 194.4 
+Q 612 200.16 606.24 200.16 
+L 401.76 200.16 
+Q 396 200.16 396 194.4 
+L 396 162.72 
+Q 396 156.96 401.76 156.96 
+z
+" clip-path="url(#system-overview-pae42fd94f3)" style="fill: #eeedfe; stroke: #534ab7; stroke-linejoin: miter"/>
+   </g>
+   <g id="system-overview-patch_8">
+    <path d="M 185.76 248.4 
+L 534.24 248.4 
+Q 540 248.4 540 254.16 
+L 540 285.84 
+Q 540 291.6 534.24 291.6 
+L 185.76 291.6 
+Q 180 291.6 180 285.84 
+L 180 254.16 
+Q 180 248.4 185.76 248.4 
+z
+" clip-path="url(#system-overview-pae42fd94f3)" style="fill: #faeeda; stroke: #854f0b; stroke-linejoin: miter"/>
+   </g>
+   <g id="system-overview-patch_9">
+    <path d="M 38.88 316.8 
+L 681.12 316.8 
+Q 691.2 316.8 691.2 326.88 
+L 691.2 414.72 
+Q 691.2 424.8 681.12 424.8 
+L 38.88 424.8 
+Q 28.8 424.8 28.8 414.72 
+L 28.8 326.88 
+Q 28.8 316.8 38.88 316.8 
+L 38.88 316.8 
+z
+" clip-path="url(#system-overview-pae42fd94f3)" style="fill: none; stroke-dasharray: 5,4; stroke-dashoffset: 0; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="system-overview-patch_10">
+    <path d="M 51.12 344.16 
+L 124.56 344.16 
+Q 130.32 344.16 130.32 349.92 
+L 130.32 381.6 
+Q 130.32 387.36 124.56 387.36 
+L 51.12 387.36 
+Q 45.36 387.36 45.36 381.6 
+L 45.36 349.92 
+Q 45.36 344.16 51.12 344.16 
+z
+" clip-path="url(#system-overview-pae42fd94f3)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="system-overview-patch_11">
+    <path d="M 141.84 344.16 
+L 215.28 344.16 
+Q 221.04 344.16 221.04 349.92 
+L 221.04 381.6 
+Q 221.04 387.36 215.28 387.36 
+L 141.84 387.36 
+Q 136.08 387.36 136.08 381.6 
+L 136.08 349.92 
+Q 136.08 344.16 141.84 344.16 
+z
+" clip-path="url(#system-overview-pae42fd94f3)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="system-overview-patch_12">
+    <path d="M 232.56 344.16 
+L 306 344.16 
+Q 311.76 344.16 311.76 349.92 
+L 311.76 381.6 
+Q 311.76 387.36 306 387.36 
+L 232.56 387.36 
+Q 226.8 387.36 226.8 381.6 
+L 226.8 349.92 
+Q 226.8 344.16 232.56 344.16 
+z
+" clip-path="url(#system-overview-pae42fd94f3)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="system-overview-patch_13">
+    <path d="M 323.28 344.16 
+L 396.72 344.16 
+Q 402.48 344.16 402.48 349.92 
+L 402.48 381.6 
+Q 402.48 387.36 396.72 387.36 
+L 323.28 387.36 
+Q 317.52 387.36 317.52 381.6 
+L 317.52 349.92 
+Q 317.52 344.16 323.28 344.16 
+z
+" clip-path="url(#system-overview-pae42fd94f3)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="system-overview-patch_14">
+    <path d="M 414 344.16 
+L 487.44 344.16 
+Q 493.2 344.16 493.2 349.92 
+L 493.2 381.6 
+Q 493.2 387.36 487.44 387.36 
+L 414 387.36 
+Q 408.24 387.36 408.24 381.6 
+L 408.24 349.92 
+Q 408.24 344.16 414 344.16 
+z
+" clip-path="url(#system-overview-pae42fd94f3)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="system-overview-patch_15">
+    <path d="M 504.72 344.16 
+L 578.16 344.16 
+Q 583.92 344.16 583.92 349.92 
+L 583.92 381.6 
+Q 583.92 387.36 578.16 387.36 
+L 504.72 387.36 
+Q 498.96 387.36 498.96 381.6 
+L 498.96 349.92 
+Q 498.96 344.16 504.72 344.16 
+z
+" clip-path="url(#system-overview-pae42fd94f3)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="system-overview-patch_16">
+    <path d="M 595.44 344.16 
+L 668.88 344.16 
+Q 674.64 344.16 674.64 349.92 
+L 674.64 381.6 
+Q 674.64 387.36 668.88 387.36 
+L 595.44 387.36 
+Q 589.68 387.36 589.68 381.6 
+L 589.68 349.92 
+Q 589.68 344.16 595.44 344.16 
+z
+" clip-path="url(#system-overview-pae42fd94f3)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="system-overview-patch_17">
+    <path d="M 48.96 460.8 
+L 224.64 460.8 
+Q 230.4 460.8 230.4 466.56 
+L 230.4 498.24 
+Q 230.4 504 224.64 504 
+L 48.96 504 
+Q 43.2 504 43.2 498.24 
+L 43.2 466.56 
+Q 43.2 460.8 48.96 460.8 
+z
+" clip-path="url(#system-overview-pae42fd94f3)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="system-overview-patch_18">
+    <path d="M 279.36 460.8 
+L 411.84 460.8 
+Q 417.6 460.8 417.6 466.56 
+L 417.6 498.24 
+Q 417.6 504 411.84 504 
+L 279.36 504 
+Q 273.6 504 273.6 498.24 
+L 273.6 466.56 
+Q 273.6 460.8 279.36 460.8 
+z
+" clip-path="url(#system-overview-pae42fd94f3)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="system-overview-patch_19">
+    <path d="M 466.56 460.8 
+L 563.04 460.8 
+Q 568.8 460.8 568.8 466.56 
+L 568.8 498.24 
+Q 568.8 504 563.04 504 
+L 466.56 504 
+Q 460.8 504 460.8 498.24 
+L 460.8 466.56 
+Q 460.8 460.8 466.56 460.8 
+z
+" clip-path="url(#system-overview-pae42fd94f3)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="system-overview-patch_20">
+    <path d="M 596.16 460.8 
+L 685.44 460.8 
+Q 691.2 460.8 691.2 466.56 
+L 691.2 498.24 
+Q 691.2 504 685.44 504 
+L 596.16 504 
+Q 590.4 504 590.4 498.24 
+L 590.4 466.56 
+Q 590.4 460.8 596.16 460.8 
+z
+" clip-path="url(#system-overview-pae42fd94f3)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="system-overview-text_1">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="216" y="33.097852" transform="rotate(-0 216 33.097852)">You, in a browser</text>
+   </g>
+   <g id="system-overview-text_2">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="504" y="33.097852" transform="rotate(-0 504 33.097852)">Public visitors</text>
+   </g>
+   <g id="system-overview-text_3">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="360" y="87.817852" transform="rotate(-0 360 87.817852)">Caddy (HTTPS)</text>
+   </g>
+   <g id="system-overview-text_4">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="360" y="102.418242" transform="rotate(-0 360 102.418242)">app. needs password + TOTP  ·  live. has no login</text>
+   </g>
+   <g id="system-overview-patch_21">
+    <path d="M 216 46.08 
+Q 216 58.32 216 69.441966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 218.2 65.041966 
+L 216 69.441966 
+L 213.8 65.041966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="system-overview-patch_22">
+    <path d="M 504 46.08 
+Q 504 58.32 504 69.441966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 506.2 65.041966 
+L 504 69.441966 
+L 501.8 65.041966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="system-overview-text_5">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #534ab7" x="248.4" y="148.628145" transform="rotate(-0 248.4 148.628145)">Tier 1 · web: renders pages, imports no engine</text>
+   </g>
+   <g id="system-overview-text_6">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #3c3489" x="216" y="174.217852" transform="rotate(-0 216 174.217852)">webgui :8500</text>
+   </g>
+   <g id="system-overview-text_7">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #534ab7" x="216" y="188.818242" transform="rotate(-0 216 188.818242)">The private app</text>
+   </g>
+   <g id="system-overview-text_8">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #3c3489" x="504" y="174.217852" transform="rotate(-0 504 174.217852)">webgui_live :8501</text>
+   </g>
+   <g id="system-overview-text_9">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #534ab7" x="504" y="188.818242" transform="rotate(-0 504 188.818242)">Public screens, read-only</text>
+   </g>
+   <g id="system-overview-patch_23">
+    <path d="M 216 112.32 
+Q 216 133.92 216 154.401966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 218.2 150.001966 
+L 216 154.401966 
+L 213.8 150.001966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="system-overview-patch_24">
+    <path d="M 504 112.32 
+Q 504 133.92 504 154.401966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 506.2 150.001966 
+L 504 154.401966 
+L 501.8 150.001966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="system-overview-text_10">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #633806" x="360" y="265.657852" transform="rotate(-0 360 265.657852)">Redis :6379</text>
+   </g>
+   <g id="system-overview-text_11">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #854f0b" x="360" y="280.258242" transform="rotate(-0 360 280.258242)">Cache views  ·  events  ·  command streams</text>
+   </g>
+   <g id="system-overview-patch_25">
+    <path d="M 216 201.278034 
+Q 216 223.56 216 245.841966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 213.8 205.678034 
+L 216 201.278034 
+L 218.2 205.678034 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 218.2 241.441966 
+L 216 245.841966 
+L 213.8 241.441966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="system-overview-patch_26">
+    <path d="M 504 201.278034 
+Q 504 223.56 504 245.841966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 501.8 205.678034 
+L 504 201.278034 
+L 506.2 205.678034 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 506.2 241.441966 
+L 504 245.841966 
+L 501.8 241.441966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="system-overview-text_12">
+    <text style="font-style: italic; font-size: 8.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #5f5e5a" x="223.2" y="234.04834" transform="rotate(-0 223.2 234.04834)">reads, subscribes, sends commands</text>
+   </g>
+   <g id="system-overview-text_13">
+    <text style="font-style: italic; font-size: 8.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #5f5e5a" x="511.2" y="234.04834" transform="rotate(-0 511.2 234.04834)">reads; three public request paths</text>
+   </g>
+   <g id="system-overview-text_14">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0f6e56" x="40.32" y="332.228145" transform="rotate(-0 40.32 332.228145)">Tier 2 · services: each owns its scheduler, commands and engines</text>
+   </g>
+   <g id="system-overview-text_15">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="87.84" y="361.417852" transform="rotate(-0 87.84 361.417852)">sentiment</text>
+   </g>
+   <g id="system-overview-text_16">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="87.84" y="376.017891" transform="rotate(-0 87.84 376.017891)">:8210</text>
+   </g>
+   <g id="system-overview-text_17">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="178.56" y="361.417852" transform="rotate(-0 178.56 361.417852)">options</text>
+   </g>
+   <g id="system-overview-text_18">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="178.56" y="376.017891" transform="rotate(-0 178.56 376.017891)">:8211</text>
+   </g>
+   <g id="system-overview-text_19">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="269.28" y="361.417852" transform="rotate(-0 269.28 361.417852)">portfolio</text>
+   </g>
+   <g id="system-overview-text_20">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="269.28" y="376.017891" transform="rotate(-0 269.28 376.017891)">:8212</text>
+   </g>
+   <g id="system-overview-text_21">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="360" y="361.417852" transform="rotate(-0 360 361.417852)">trade</text>
+   </g>
+   <g id="system-overview-text_22">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="360" y="376.017891" transform="rotate(-0 360 376.017891)">:8213</text>
+   </g>
+   <g id="system-overview-text_23">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="450.72" y="361.417852" transform="rotate(-0 450.72 361.417852)">market</text>
+   </g>
+   <g id="system-overview-text_24">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="450.72" y="376.017891" transform="rotate(-0 450.72 376.017891)">:8215</text>
+   </g>
+   <g id="system-overview-text_25">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="541.44" y="361.417422" transform="rotate(-0 541.44 361.417422)">news</text>
+   </g>
+   <g id="system-overview-text_26">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="541.44" y="376.017891" transform="rotate(-0 541.44 376.017891)">:8216</text>
+   </g>
+   <g id="system-overview-text_27">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="632.16" y="361.417852" transform="rotate(-0 632.16 361.417852)">blog</text>
+   </g>
+   <g id="system-overview-text_28">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="632.16" y="376.017891" transform="rotate(-0 632.16 376.017891)">:8217</text>
+   </g>
+   <g id="system-overview-text_29">
+    <text style="font-style: italic; font-size: 8.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="360" y="409.00834" transform="rotate(-0 360 409.00834)">publish views and events to Redis  ·  consume their own cmd:{domain}</text>
+   </g>
+   <g id="system-overview-patch_27">
+    <path d="M 360 292.718034 
+Q 360 303.48 360 314.241966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 357.8 297.118034 
+L 360 292.718034 
+L 362.2 297.118034 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 362.2 309.841966 
+L 360 314.241966 
+L 357.8 309.841966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="system-overview-text_30">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="136.8" y="478.057852" transform="rotate(-0 136.8 478.057852)">schwab-proxy :8100</text>
+   </g>
+   <g id="system-overview-text_31">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="136.8" y="492.658242" transform="rotate(-0 136.8 492.658242)">The only Schwab client</text>
+   </g>
+   <g id="system-overview-text_32">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="345.6" y="478.057852" transform="rotate(-0 345.6 478.057852)">Schwab API</text>
+   </g>
+   <g id="system-overview-text_33">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="345.6" y="492.658242" transform="rotate(-0 345.6 492.658242)">Chains, quotes, accounts</text>
+   </g>
+   <g id="system-overview-text_34">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="514.8" y="478.057852" transform="rotate(-0 514.8 478.057852)">Public feeds</text>
+   </g>
+   <g id="system-overview-text_35">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="514.8" y="492.657891" transform="rotate(-0 514.8 492.657891)">RSS, EDGAR, FRED</text>
+   </g>
+   <g id="system-overview-text_36">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="640.8" y="478.057852" transform="rotate(-0 640.8 478.057852)">Claude API</text>
+   </g>
+   <g id="system-overview-text_37">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="640.8" y="492.658242" transform="rotate(-0 640.8 492.658242)">Briefings</text>
+   </g>
+   <g id="system-overview-patch_28">
+    <path d="M 136.8 424.8 
+Q 136.8 442.08 136.8 458.241966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 139 453.841966 
+L 136.8 458.241966 
+L 134.6 453.841966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="system-overview-patch_29">
+    <path d="M 230.4 482.4 
+Q 251.28 482.4 271.041966 482.4 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 266.641966 480.2 
+L 271.041966 482.4 
+L 266.641966 484.6 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="system-overview-patch_30">
+    <path d="M 541.44 424.8 
+Q 528.12 442.08 515.482569 458.474506 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 519.911226 456.332778 
+L 515.482569 458.474506 
+L 516.426381 453.646544 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="system-overview-patch_31">
+    <path d="M 637.2 424.8 
+Q 637.2 442.08 637.2 458.241966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 639.4 453.841966 
+L 637.2 458.241966 
+L 635 453.841966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="system-overview-pae42fd94f3">
+   <rect x="0" y="0" width="720" height="525.6"/>
+  </clipPath>
+ </defs>
+</svg>
+<figcaption>The processes, the three tiers and what each one talks to</figcaption></figure>
+<ul>
+<li><strong>Tier 1, web.</strong> <code>webgui/main.py</code> (:8500) renders the private app behind the
+  sign-in: it reads Redis cache views, subscribes to their events and enqueues
+  commands. It imports no engine and makes no Schwab call. <code>webgui/live_main.py</code>
+  (:8501) is a second Tier-1 process: the same page modules, published read-only
+  and unauthenticated. It reads and subscribes, and writes only through its three
+  public request paths (the Strategy Finder, Rescue, and the Calculator and
+  Simulator), each an append-only stream. Caddy fronts
+  both: <code>app.</code> with password and TOTP, <code>live.</code> with no login.</li>
+<li><strong>Tier 3, store and communication.</strong> Redis (:6379) holds <code>cache:{domain}:{view}</code>,
+  the <code>events:{domain}:{view}</code> pub/sub channels and the <code>cmd:{domain}</code> command
+  streams. <code>shared/bus</code> wraps it; <code>shared/contracts</code> holds the typed payloads that
+  some views are validated against on write.</li>
+<li><strong>Tier 2, services.</strong> Seven FastAPI services, <code>services/{domain}_svc</code>: sentiment,
+  options, portfolio, trade, market, news and blog. Each imports only its own
+  engines, owns its scheduler and command consumer, and validates, caches and
+  publishes its results. Five of them fetch market data through <code>schwab-proxy</code>
+  (:8100), the only process that talks to Schwab. <code>news_svc</code> reads public feeds
+  and <code>blog_svc</code> its own store; neither calls the proxy. The scheduled briefings
+  call Claude.</li>
+</ul>
 <h2 id="process-map-and-ports">Process map and ports</h2>
 <table>
 <thead>
@@ -820,6 +1547,181 @@ invalidate for each other. Identity comes from the gitignored
 <code>docs/dev-prod-environments.md</code>.</p>
 </blockquote>
 <h2 id="data-flow-one-request">Data flow (one request)</h2>
+<figure class="diagram" data-diagram="request-flow"><svg xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 720 187.2" xmlns="http://www.w3.org/2000/svg" version="1.1" role="img" stroke-linejoin="round" stroke-linecap="butt" style="width:100%;height:auto">
+ <g id="request-flow-figure_1">
+  <g id="request-flow-patch_1">
+   <path d="M 0 187.2 
+L 720 187.2 
+L 720 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="request-flow-axes_1">
+   <g id="request-flow-patch_2">
+    <path d="M 23.76 36 
+L 131.04 36 
+Q 136.8 36 136.8 41.76 
+L 136.8 80.64 
+Q 136.8 86.4 131.04 86.4 
+L 23.76 86.4 
+Q 18 86.4 18 80.64 
+L 18 41.76 
+Q 18 36 23.76 36 
+z
+" clip-path="url(#request-flow-p17b16e9030)" style="fill: #eeedfe; stroke: #534ab7; stroke-linejoin: miter"/>
+   </g>
+   <g id="request-flow-patch_3">
+    <path d="M 166.32 36 
+L 273.6 36 
+Q 279.36 36 279.36 41.76 
+L 279.36 80.64 
+Q 279.36 86.4 273.6 86.4 
+L 166.32 86.4 
+Q 160.56 86.4 160.56 80.64 
+L 160.56 41.76 
+Q 160.56 36 166.32 36 
+z
+" clip-path="url(#request-flow-p17b16e9030)" style="fill: #faeeda; stroke: #854f0b; stroke-linejoin: miter"/>
+   </g>
+   <g id="request-flow-patch_4">
+    <path d="M 308.88 36 
+L 416.16 36 
+Q 421.92 36 421.92 41.76 
+L 421.92 80.64 
+Q 421.92 86.4 416.16 86.4 
+L 308.88 86.4 
+Q 303.12 86.4 303.12 80.64 
+L 303.12 41.76 
+Q 303.12 36 308.88 36 
+z
+" clip-path="url(#request-flow-p17b16e9030)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="request-flow-patch_5">
+    <path d="M 451.44 36 
+L 558.72 36 
+Q 564.48 36 564.48 41.76 
+L 564.48 80.64 
+Q 564.48 86.4 558.72 86.4 
+L 451.44 86.4 
+Q 445.68 86.4 445.68 80.64 
+L 445.68 41.76 
+Q 445.68 36 451.44 36 
+z
+" clip-path="url(#request-flow-p17b16e9030)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="request-flow-patch_6">
+    <path d="M 594 36 
+L 701.28 36 
+Q 707.04 36 707.04 41.76 
+L 707.04 80.64 
+Q 707.04 86.4 701.28 86.4 
+L 594 86.4 
+Q 588.24 86.4 588.24 80.64 
+L 588.24 41.76 
+Q 588.24 36 594 36 
+z
+" clip-path="url(#request-flow-p17b16e9030)" style="fill: #faeeda; stroke: #854f0b; stroke-linejoin: miter"/>
+   </g>
+   <g id="request-flow-line2d_1">
+    <path d="M 647.64 86.4 
+L 647.64 136.8 
+L 77.4 136.8 
+L 77.4 136.8 
+" clip-path="url(#request-flow-p17b16e9030)" style="fill: none; stroke: #5f5e5a; stroke-linecap: square"/>
+   </g>
+   <g id="request-flow-text_1">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #3c3489" x="77.4" y="56.857422" transform="rotate(-0 77.4 56.857422)">1  Page</text>
+   </g>
+   <g id="request-flow-text_2">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #534ab7" x="77.4" y="71.458242" transform="rotate(-0 77.4 71.458242)">Sends a command</text>
+   </g>
+   <g id="request-flow-text_3">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #633806" x="219.96" y="56.857852" transform="rotate(-0 219.96 56.857852)">2  cmd:{domain}</text>
+   </g>
+   <g id="request-flow-text_4">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #854f0b" x="219.96" y="71.458242" transform="rotate(-0 219.96 71.458242)">A Redis stream</text>
+   </g>
+   <g id="request-flow-patch_7">
+    <path d="M 136.8 61.2 
+Q 147.96 61.2 158.001966 61.2 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 153.601966 59 
+L 158.001966 61.2 
+L 153.601966 63.4 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="request-flow-text_5">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="362.52" y="56.857852" transform="rotate(-0 362.52 56.857852)">3  Service</text>
+   </g>
+   <g id="request-flow-text_6">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="362.52" y="71.458242" transform="rotate(-0 362.52 71.458242)">Consumes, dispatches</text>
+   </g>
+   <g id="request-flow-patch_8">
+    <path d="M 279.36 61.2 
+Q 290.52 61.2 300.561966 61.2 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 296.161966 59 
+L 300.561966 61.2 
+L 296.161966 63.4 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="request-flow-text_7">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="505.08" y="56.857422" transform="rotate(-0 505.08 56.857422)">4  Compute</text>
+   </g>
+   <g id="request-flow-text_8">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="505.08" y="71.458242" transform="rotate(-0 505.08 71.458242)">Engines; proxy for data</text>
+   </g>
+   <g id="request-flow-patch_9">
+    <path d="M 421.92 61.2 
+Q 433.08 61.2 443.121966 61.2 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 438.721966 59 
+L 443.121966 61.2 
+L 438.721966 63.4 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="request-flow-text_9">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #633806" x="647.64" y="56.857852" transform="rotate(-0 647.64 56.857852)">5  Cache view</text>
+   </g>
+   <g id="request-flow-text_10">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #854f0b" x="647.64" y="71.458242" transform="rotate(-0 647.64 71.458242)">Write, bump :ver, event</text>
+   </g>
+   <g id="request-flow-patch_10">
+    <path d="M 564.48 61.2 
+Q 575.64 61.2 585.681966 61.2 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 581.281966 59 
+L 585.681966 61.2 
+L 581.281966 63.4 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="request-flow-patch_11">
+    <path d="M 77.4 136.8 
+Q 77.4 112.32 77.4 88.958034 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 75.2 93.358034 
+L 77.4 88.958034 
+L 79.6 93.358034 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="request-flow-text_11">
+    <text style="font-style: italic; font-size: 8.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="362.16" y="151.96834" transform="rotate(-0 362.16 151.96834)">The page's poll sees the new version, reads the view and repaints</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="request-flow-p17b16e9030">
+   <rect x="0" y="0" width="720" height="187.2"/>
+  </clipPath>
+ </defs>
+</svg>
+<figcaption>One request, from a click to the repaint</figcaption></figure>
 <ol>
 <li>The GUI enqueues a command on <code>cmd:{domain}</code> (a Redis Stream).</li>
 <li>The owning service's consumer loop drains the stream and dispatches to a handler.</li>
@@ -1045,6 +1947,819 @@ are meant to be switched on one at a time, each after the one before it has been
 read: shadow → daily bars → chains → quotes → the wide scan fetch → the 3-minute
 tail. Shadow mode's counts replace the first estimate, and
 <code>tools/measure_chain_carry.py</code> is the gate for the last step.</p>
+<h2 id="the-one-minute-gex-collection-and-the-raw-feed">The one-minute GEX collection and the raw feed</h2>
+<p><strong>Files:</strong> <code>options-scanner/gex_collector.py</code> (<code>fetch_minute</code>, <code>derive_minute</code>),
+<code>shared/raw_minute.py</code>, <code>services/options_svc/collect_derive.py</code> (the per-chain
+hooks), <code>shared/raw_store.py</code>, <code>services/options_svc/raw_tee.py</code> and <code>raw_shadow.py</code>.
+<strong>Settings:</strong> <code>config/feed.toml</code>, in <strong>Settings → Configuration → Raw feed and
+catch-up</strong>; read when used, no restart. Design and plan:
+<code>docs/plans/2026-10-14-raw-feed-and-catch-up-design.md</code> and <code>-plan.md</code>.</p>
+<h3 id="what-runs-every-minute">What runs every minute</h3>
+<figure class="diagram" data-diagram="minute-collection"><svg xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 720 360" xmlns="http://www.w3.org/2000/svg" version="1.1" role="img" stroke-linejoin="round" stroke-linecap="butt" style="width:100%;height:auto">
+ <g id="minute-collection-figure_1">
+  <g id="minute-collection-patch_1">
+   <path d="M 0 360 
+L 720 360 
+L 720 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="minute-collection-axes_1">
+   <g id="minute-collection-patch_2">
+    <path d="M 279.36 14.4 
+L 440.64 14.4 
+Q 446.4 14.4 446.4 20.16 
+L 446.4 48.96 
+Q 446.4 54.72 440.64 54.72 
+L 279.36 54.72 
+Q 273.6 54.72 273.6 48.96 
+L 273.6 20.16 
+Q 273.6 14.4 279.36 14.4 
+z
+" clip-path="url(#minute-collection-pe16e871a64)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="minute-collection-patch_3">
+    <path d="M 279.36 79.2 
+L 440.64 79.2 
+Q 446.4 79.2 446.4 84.96 
+L 446.4 113.76 
+Q 446.4 119.52 440.64 119.52 
+L 279.36 119.52 
+Q 273.6 119.52 273.6 113.76 
+L 273.6 84.96 
+Q 273.6 79.2 279.36 79.2 
+z
+" clip-path="url(#minute-collection-pe16e871a64)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="minute-collection-patch_4">
+    <path d="M 48.96 79.2 
+L 210.24 79.2 
+Q 216 79.2 216 84.96 
+L 216 113.76 
+Q 216 119.52 210.24 119.52 
+L 48.96 119.52 
+Q 43.2 119.52 43.2 113.76 
+L 43.2 84.96 
+Q 43.2 79.2 48.96 79.2 
+z
+" clip-path="url(#minute-collection-pe16e871a64)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="minute-collection-patch_5">
+    <path d="M 279.36 151.2 
+L 440.64 151.2 
+Q 446.4 151.2 446.4 156.96 
+L 446.4 185.76 
+Q 446.4 191.52 440.64 191.52 
+L 279.36 191.52 
+Q 273.6 191.52 273.6 185.76 
+L 273.6 156.96 
+Q 273.6 151.2 279.36 151.2 
+z
+" clip-path="url(#minute-collection-pe16e871a64)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="minute-collection-patch_6">
+    <path d="M 48.96 151.2 
+L 210.24 151.2 
+Q 216 151.2 216 156.96 
+L 216 185.76 
+Q 216 191.52 210.24 191.52 
+L 48.96 191.52 
+Q 43.2 191.52 43.2 185.76 
+L 43.2 156.96 
+Q 43.2 151.2 48.96 151.2 
+z
+" clip-path="url(#minute-collection-pe16e871a64)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="minute-collection-patch_7">
+    <path d="M 279.36 223.2 
+L 440.64 223.2 
+Q 446.4 223.2 446.4 228.96 
+L 446.4 257.76 
+Q 446.4 263.52 440.64 263.52 
+L 279.36 263.52 
+Q 273.6 263.52 273.6 257.76 
+L 273.6 228.96 
+Q 273.6 223.2 279.36 223.2 
+z
+" clip-path="url(#minute-collection-pe16e871a64)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="minute-collection-patch_8">
+    <path d="M 279.36 295.2 
+L 440.64 295.2 
+Q 446.4 295.2 446.4 300.96 
+L 446.4 329.76 
+Q 446.4 335.52 440.64 335.52 
+L 279.36 335.52 
+Q 273.6 335.52 273.6 329.76 
+L 273.6 300.96 
+Q 273.6 295.2 279.36 295.2 
+z
+" clip-path="url(#minute-collection-pe16e871a64)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="minute-collection-patch_9">
+    <path d="M 48.96 295.2 
+L 210.24 295.2 
+Q 216 295.2 216 300.96 
+L 216 329.76 
+Q 216 335.52 210.24 335.52 
+L 48.96 335.52 
+Q 43.2 335.52 43.2 329.76 
+L 43.2 300.96 
+Q 43.2 295.2 48.96 295.2 
+z
+" clip-path="url(#minute-collection-pe16e871a64)" style="fill: #faeeda; stroke: #854f0b; stroke-linejoin: miter"/>
+   </g>
+   <g id="minute-collection-patch_10">
+    <path d="M 499.68 129.6 
+L 688.32 129.6 
+Q 698.4 129.6 698.4 139.68 
+L 698.4 335.52 
+Q 698.4 345.6 688.32 345.6 
+L 499.68 345.6 
+Q 489.6 345.6 489.6 335.52 
+L 489.6 139.68 
+Q 489.6 129.6 499.68 129.6 
+L 499.68 129.6 
+z
+" clip-path="url(#minute-collection-pe16e871a64)" style="fill: none; stroke-dasharray: 5,4; stroke-dashoffset: 0; stroke: #854f0b; stroke-linejoin: miter"/>
+   </g>
+   <g id="minute-collection-patch_11">
+    <path d="M 513.36 154.8 
+L 674.64 154.8 
+Q 680.4 154.8 680.4 160.56 
+L 680.4 189.36 
+Q 680.4 195.12 674.64 195.12 
+L 513.36 195.12 
+Q 507.6 195.12 507.6 189.36 
+L 507.6 160.56 
+Q 507.6 154.8 513.36 154.8 
+z
+" clip-path="url(#minute-collection-pe16e871a64)" style="fill: #faeeda; stroke: #854f0b; stroke-linejoin: miter"/>
+   </g>
+   <g id="minute-collection-patch_12">
+    <path d="M 513.36 219.6 
+L 674.64 219.6 
+Q 680.4 219.6 680.4 225.36 
+L 680.4 254.16 
+Q 680.4 259.92 674.64 259.92 
+L 513.36 259.92 
+Q 507.6 259.92 507.6 254.16 
+L 507.6 225.36 
+Q 507.6 219.6 513.36 219.6 
+z
+" clip-path="url(#minute-collection-pe16e871a64)" style="fill: #faeeda; stroke: #854f0b; stroke-linejoin: miter"/>
+   </g>
+   <g id="minute-collection-patch_13">
+    <path d="M 513.36 284.4 
+L 674.64 284.4 
+Q 680.4 284.4 680.4 290.16 
+L 680.4 318.96 
+Q 680.4 324.72 674.64 324.72 
+L 513.36 324.72 
+Q 507.6 324.72 507.6 318.96 
+L 507.6 290.16 
+Q 507.6 284.4 513.36 284.4 
+z
+" clip-path="url(#minute-collection-pe16e871a64)" style="fill: #faeeda; stroke: #854f0b; stroke-linejoin: miter"/>
+   </g>
+   <g id="minute-collection-line2d_1">
+    <path d="M 446.4 99.36 
+L 594 99.36 
+L 594 99.36 
+" clip-path="url(#minute-collection-pe16e871a64)" style="fill: none; stroke: #5f5e5a; stroke-linecap: square"/>
+   </g>
+   <g id="minute-collection-text_1">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="360" y="30.217852" transform="rotate(-0 360 30.217852)">Scheduler</text>
+   </g>
+   <g id="minute-collection-text_2">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="360" y="44.818242" transform="rotate(-0 360 44.818242)">Every minute, in the window</text>
+   </g>
+   <g id="minute-collection-text_3">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="360" y="95.017852" transform="rotate(-0 360 95.017852)">fetch_minute</text>
+   </g>
+   <g id="minute-collection-text_4">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="360" y="109.618242" transform="rotate(-0 360 109.618242)">A chain per symbol, 6 at a time</text>
+   </g>
+   <g id="minute-collection-text_5">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="129.6" y="95.017852" transform="rotate(-0 129.6 95.017852)">schwab-proxy</text>
+   </g>
+   <g id="minute-collection-text_6">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="129.6" y="109.618242" transform="rotate(-0 129.6 109.618242)">Priority lane</text>
+   </g>
+   <g id="minute-collection-patch_14">
+    <path d="M 360 54.72 
+Q 360 66.24 360 76.641966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 362.2 72.241966 
+L 360 76.641966 
+L 357.8 72.241966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="minute-collection-patch_15">
+    <path d="M 271.041966 99.36 
+Q 244.8 99.36 218.558034 99.36 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 266.641966 97.16 
+L 271.041966 99.36 
+L 266.641966 101.56 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 222.958034 101.56 
+L 218.558034 99.36 
+L 222.958034 97.16 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="minute-collection-text_7">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="360" y="167.017852" transform="rotate(-0 360 167.017852)">derive_minute</text>
+   </g>
+   <g id="minute-collection-text_8">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="360" y="181.618242" transform="rotate(-0 360 181.618242)">Priced at the minute</text>
+   </g>
+   <g id="minute-collection-text_9">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="129.6" y="167.017852" transform="rotate(-0 129.6 167.017852)">on_chain hooks</text>
+   </g>
+   <g id="minute-collection-text_10">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="129.6" y="181.618242" transform="rotate(-0 129.6 181.618242)">Tally, tprem, UOA, HIRO</text>
+   </g>
+   <g id="minute-collection-patch_16">
+    <path d="M 360 119.52 
+Q 360 134.64 360 148.641966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 362.2 144.241966 
+L 360 148.641966 
+L 357.8 144.241966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="minute-collection-patch_17">
+    <path d="M 272.16 171.36 
+Q 244.8 171.36 218.558034 171.36 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 222.958034 173.56 
+L 218.558034 171.36 
+L 222.958034 169.16 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="minute-collection-text_11">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="360" y="239.017852" transform="rotate(-0 360 239.017852)">gex_history.db</text>
+   </g>
+   <g id="minute-collection-text_12">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="360" y="253.618242" transform="rotate(-0 360 253.618242)">Five views + term rows</text>
+   </g>
+   <g id="minute-collection-patch_18">
+    <path d="M 360 191.52 
+Q 360 206.64 360 220.641966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 362.2 216.241966 
+L 360 220.641966 
+L 357.8 216.241966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="minute-collection-text_13">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="360" y="311.017852" transform="rotate(-0 360 311.017852)">After the poll</text>
+   </g>
+   <g id="minute-collection-text_14">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="360" y="325.618242" transform="rotate(-0 360 325.618242)">Alerts, matrix, net premium</text>
+   </g>
+   <g id="minute-collection-patch_19">
+    <path d="M 360 263.52 
+Q 360 278.64 360 292.641966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 362.2 288.241966 
+L 360 292.641966 
+L 357.8 288.241966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="minute-collection-text_15">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #633806" x="129.6" y="311.017852" transform="rotate(-0 129.6 311.017852)">Redis views</text>
+   </g>
+   <g id="minute-collection-text_16">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #854f0b" x="129.6" y="325.618242" transform="rotate(-0 129.6 325.618242)">Pages repaint from here</text>
+   </g>
+   <g id="minute-collection-patch_20">
+    <path d="M 272.16 315.36 
+Q 244.8 315.36 218.558034 315.36 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 222.958034 317.56 
+L 218.558034 315.36 
+L 222.958034 313.16 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="minute-collection-text_17">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #854f0b" x="501.12" y="336.548145" transform="rotate(-0 501.12 336.548145)">Only in tee (config/feed.toml)</text>
+   </g>
+   <g id="minute-collection-text_18">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #633806" x="594" y="170.617852" transform="rotate(-0 594 170.617852)">Raw chain store</text>
+   </g>
+   <g id="minute-collection-text_19">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #854f0b" x="594" y="185.218242" transform="rotate(-0 594 185.218242)">One file per session</text>
+   </g>
+   <g id="minute-collection-text_20">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #633806" x="594" y="235.417852" transform="rotate(-0 594 235.417852)">Shadow check</text>
+   </g>
+   <g id="minute-collection-text_21">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #854f0b" x="594" y="250.018242" transform="rotate(-0 594 250.018242)">Re-derive and compare</text>
+   </g>
+   <g id="minute-collection-text_22">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #633806" x="594" y="300.217852" transform="rotate(-0 594 300.217852)">cache:feed:shadow</text>
+   </g>
+   <g id="minute-collection-text_23">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #854f0b" x="594" y="314.818242" transform="rotate(-0 594 314.818242)">Differences, timings</text>
+   </g>
+   <g id="minute-collection-patch_21">
+    <path d="M 594 99.36 
+Q 594 126.36 594 152.241966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 596.2 147.841966 
+L 594 152.241966 
+L 591.8 147.841966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="minute-collection-text_24">
+    <text style="font-style: italic; font-size: 8.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #5f5e5a" x="455.04" y="92.92834" transform="rotate(-0 455.04 92.92834)">the same minute, before deriving</text>
+   </g>
+   <g id="minute-collection-patch_22">
+    <path d="M 594 195.12 
+Q 594 206.64 594 217.041966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 596.2 212.641966 
+L 594 217.041966 
+L 591.8 212.641966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="minute-collection-patch_23">
+    <path d="M 594 259.92 
+Q 594 271.44 594 281.841966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 596.2 277.441966 
+L 594 281.841966 
+L 591.8 277.441966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="minute-collection-patch_24">
+    <path d="M 447.84 243.36 
+Q 477 241.56 505.04409 239.828883 
+" style="fill: none; stroke-dasharray: 3.7,1.6; stroke-dashoffset: 0; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 500.516905 237.904152 
+L 505.04409 239.828883 
+L 500.787993 242.295793 
+z
+" style="fill: #5f5e5a; stroke-dasharray: 3.7,1.6; stroke-dashoffset: 0; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="minute-collection-pe16e871a64">
+   <rect x="0" y="0" width="720" height="360"/>
+  </clipPath>
+ </defs>
+</svg>
+<figcaption>The one-minute collection today, and what tee adds beside it</figcaption></figure>
+<p>Inside the collection window the options service polls once a minute, in two halves:</p>
+<ol>
+<li><strong><code>fetch_minute</code></strong> asks the proxy for the 7-day chain of every collected symbol
+   (the <code>[collection]</code> base in <code>config/symbols.toml</code> and the watchlist), six
+   requests at a time, on the proxy's priority lane. It moves an
+   off-hours chain's stale underlying price onto the live quote, and on the
+   proxy's carry rules it can hand back a stored chain moved to the live price.
+   It also fetches the 10-day <code>$SPX</code> term chain every fifth minute. It computes
+   nothing.</li>
+<li><strong><code>derive_minute</code></strong> turns that minute into rows: gamma, charm, delta and vanna
+   by strike plus the premium grid (five views) and the term rows, all in
+   <code>gex_history.db</code>. Before a chain's rows are written, the <code>on_chain</code> hooks read
+   it: the gamma page's chain stash, extended-hours eligibility, the bought/sold
+   tally, traded premium, the unusual-activity and big-delta detectors, and HIRO.</li>
+<li>After the poll, the flow alerts, the Options Matrix, Net Premium and flow skew
+   are rebuilt from those rows and published to Redis.</li>
+</ol>
+<p><strong>A minute is derived at its own minute, never at the wall clock.</strong> The Greeks
+are priced with the time left to the close as of that minute
+(<code>GammaEngine.calc_all_from_chain(now=...)</code>), and every hook is given the
+minute's time. A minute derived again later therefore produces exactly the rows it
+produced live. <code>derive_minute</code> never commits; its caller does.</p>
+<h3 id="keeping-each-minute-tee">Keeping each minute: <code>tee</code></h3>
+<p><code>[feed] mode</code> ships <strong><code>off</code></strong>: nothing is kept, as before. In <strong><code>tee</code></strong> the
+collector also writes each fetched minute to the <strong>raw chain store</strong>: one SQLite
+file per session under <code>services/feed_svc/data/raw/</code>, each minute's chains and its
+completion row in one transaction, a minute it could not collect recorded as a gap
+with its reason. <code>keep_sessions</code> (5) sessions are kept, at about 1 GB each, and the
+store is never backed up. <code>zlib_level</code> (6) trades disk size against the time the
+write takes on the collection thread. <strong><code>tee</code> adds no Schwab call</strong>: it keeps the
+chains the poll already fetched.</p>
+<p>In <code>tee</code>, a <strong>shadow check</strong> re-derives each kept minute from the store, on a
+thread of its own and without the hooks, and compares every view and term row with
+the live ones. A minute that arrives while the last is still being compared is
+skipped and counted. It publishes <code>cache:feed:shadow</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>minutes</code>, <code>minutes_with_diffs</code>, <code>last_diff</code></td>
+<td>Minutes compared, how many differed, the first difference seen</td>
+</tr>
+<tr>
+<td><code>skipped</code>, <code>missing_raw</code></td>
+<td>Minutes not compared because the last was still running, or not found in the store</td>
+</tr>
+<tr>
+<td><code>p50_ms</code>, <code>p95_ms</code></td>
+<td>Reading and deriving one minute</td>
+</tr>
+<tr>
+<td><code>hooks_p95_ms</code>, <code>alerts_p95_ms</code></td>
+<td>The hooks and the flow alerts for one minute</td>
+</tr>
+<tr>
+<td><code>tee_p95_ms</code></td>
+<td>The write to the store, on the collection thread</td>
+</tr>
+<tr>
+<td><code>gate_p95_ms</code></td>
+<td>Derive + hooks + alerts at the 95th percentile: what catch-up will spend per minute</td>
+</tr>
+</tbody>
+</table>
+<p><strong>The gate for catch-up:</strong> after a full session in <code>tee</code>, <code>minutes_with_diffs</code> is 0
+and <code>gate_p95_ms</code> is under 2000. <code>mode = "on"</code> is not built yet: set by hand it
+runs as <code>off</code> and logs a warning.</p>
+<h3 id="where-this-is-going-catch-up-with-no-gap">Where this is going: catch-up with no gap</h3>
+<figure class="diagram" data-diagram="raw-feed-target"><svg xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 720 561.6" xmlns="http://www.w3.org/2000/svg" version="1.1" role="img" stroke-linejoin="round" stroke-linecap="butt" style="width:100%;height:auto">
+ <g id="raw-feed-target-figure_1">
+  <g id="raw-feed-target-patch_1">
+   <path d="M 0 561.6 
+L 720 561.6 
+L 720 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="raw-feed-target-axes_1">
+   <g id="raw-feed-target-patch_2">
+    <path d="M 128.16 14.4 
+L 275.04 14.4 
+Q 280.8 14.4 280.8 20.16 
+L 280.8 43.2 
+Q 280.8 48.96 275.04 48.96 
+L 128.16 48.96 
+Q 122.4 48.96 122.4 43.2 
+L 122.4 20.16 
+Q 122.4 14.4 128.16 14.4 
+z
+" clip-path="url(#raw-feed-target-p8898e0756f)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="raw-feed-target-patch_3">
+    <path d="M 38.88 72 
+L 681.12 72 
+Q 691.2 72 691.2 82.08 
+L 691.2 155.52 
+Q 691.2 165.6 681.12 165.6 
+L 38.88 165.6 
+Q 28.8 165.6 28.8 155.52 
+L 28.8 82.08 
+Q 28.8 72 38.88 72 
+L 38.88 72 
+z
+" clip-path="url(#raw-feed-target-p8898e0756f)" style="fill: none; stroke-dasharray: 5,4; stroke-dashoffset: 0; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="raw-feed-target-patch_4">
+    <path d="M 92.16 97.2 
+L 311.04 97.2 
+Q 316.8 97.2 316.8 102.96 
+L 316.8 137.52 
+Q 316.8 143.28 311.04 143.28 
+L 92.16 143.28 
+Q 86.4 143.28 86.4 137.52 
+L 86.4 102.96 
+Q 86.4 97.2 92.16 97.2 
+z
+" clip-path="url(#raw-feed-target-p8898e0756f)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="raw-feed-target-patch_5">
+    <path d="M 408.96 97.2 
+L 627.84 97.2 
+Q 633.6 97.2 633.6 102.96 
+L 633.6 137.52 
+Q 633.6 143.28 627.84 143.28 
+L 408.96 143.28 
+Q 403.2 143.28 403.2 137.52 
+L 403.2 102.96 
+Q 403.2 97.2 408.96 97.2 
+z
+" clip-path="url(#raw-feed-target-p8898e0756f)" style="fill: #e1f5ee; stroke-dasharray: 5,4; stroke-dashoffset: 0; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="raw-feed-target-patch_6">
+    <path d="M 408.96 194.4 
+L 627.84 194.4 
+Q 633.6 194.4 633.6 200.16 
+L 633.6 234.72 
+Q 633.6 240.48 627.84 240.48 
+L 408.96 240.48 
+Q 403.2 240.48 403.2 234.72 
+L 403.2 200.16 
+Q 403.2 194.4 408.96 194.4 
+z
+" clip-path="url(#raw-feed-target-p8898e0756f)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="raw-feed-target-patch_7">
+    <path d="M 38.88 266.4 
+L 681.12 266.4 
+Q 691.2 266.4 691.2 276.48 
+L 691.2 493.92 
+Q 691.2 504 681.12 504 
+L 38.88 504 
+Q 28.8 504 28.8 493.92 
+L 28.8 276.48 
+Q 28.8 266.4 38.88 266.4 
+L 38.88 266.4 
+z
+" clip-path="url(#raw-feed-target-p8898e0756f)" style="fill: none; stroke-dasharray: 5,4; stroke-dashoffset: 0; stroke: #534ab7; stroke-linejoin: miter"/>
+   </g>
+   <g id="raw-feed-target-patch_8">
+    <path d="M 408.96 295.2 
+L 627.84 295.2 
+Q 633.6 295.2 633.6 300.96 
+L 633.6 335.52 
+Q 633.6 341.28 627.84 341.28 
+L 408.96 341.28 
+Q 403.2 341.28 403.2 335.52 
+L 403.2 300.96 
+Q 403.2 295.2 408.96 295.2 
+z
+" clip-path="url(#raw-feed-target-p8898e0756f)" style="fill: #eeedfe; stroke-dasharray: 5,4; stroke-dashoffset: 0; stroke: #534ab7; stroke-linejoin: miter"/>
+   </g>
+   <g id="raw-feed-target-patch_9">
+    <path d="M 92.16 295.2 
+L 311.04 295.2 
+Q 316.8 295.2 316.8 300.96 
+L 316.8 335.52 
+Q 316.8 341.28 311.04 341.28 
+L 92.16 341.28 
+Q 86.4 341.28 86.4 335.52 
+L 86.4 300.96 
+Q 86.4 295.2 92.16 295.2 
+z
+" clip-path="url(#raw-feed-target-p8898e0756f)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="raw-feed-target-patch_10">
+    <path d="M 408.96 367.2 
+L 627.84 367.2 
+Q 633.6 367.2 633.6 372.96 
+L 633.6 407.52 
+Q 633.6 413.28 627.84 413.28 
+L 408.96 413.28 
+Q 403.2 413.28 403.2 407.52 
+L 403.2 372.96 
+Q 403.2 367.2 408.96 367.2 
+z
+" clip-path="url(#raw-feed-target-p8898e0756f)" style="fill: #faeeda; stroke: #854f0b; stroke-linejoin: miter"/>
+   </g>
+   <g id="raw-feed-target-patch_11">
+    <path d="M 92.16 367.2 
+L 311.04 367.2 
+Q 316.8 367.2 316.8 372.96 
+L 316.8 407.52 
+Q 316.8 413.28 311.04 413.28 
+L 92.16 413.28 
+Q 86.4 413.28 86.4 407.52 
+L 86.4 372.96 
+Q 86.4 367.2 92.16 367.2 
+z
+" clip-path="url(#raw-feed-target-p8898e0756f)" style="fill: #eeedfe; stroke: #534ab7; stroke-linejoin: miter"/>
+   </g>
+   <g id="raw-feed-target-patch_12">
+    <path d="M 408.96 439.2 
+L 627.84 439.2 
+Q 633.6 439.2 633.6 444.96 
+L 633.6 473.76 
+Q 633.6 479.52 627.84 479.52 
+L 408.96 479.52 
+Q 403.2 479.52 403.2 473.76 
+L 403.2 444.96 
+Q 403.2 439.2 408.96 439.2 
+z
+" clip-path="url(#raw-feed-target-p8898e0756f)" style="fill: #eeedfe; stroke: #534ab7; stroke-linejoin: miter"/>
+   </g>
+   <g id="raw-feed-target-patch_13">
+    <path d="M 30.96 527.76 
+L 42.48 527.76 
+Q 44.64 527.76 44.64 529.92 
+L 44.64 535.68 
+Q 44.64 537.84 42.48 537.84 
+L 30.96 537.84 
+Q 28.8 537.84 28.8 535.68 
+L 28.8 529.92 
+Q 28.8 527.76 30.96 527.76 
+L 30.96 527.76 
+z
+" clip-path="url(#raw-feed-target-p8898e0756f)" style="fill: none; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="raw-feed-target-patch_14">
+    <path d="M 85.68 527.76 
+L 97.2 527.76 
+Q 99.36 527.76 99.36 529.92 
+L 99.36 535.68 
+Q 99.36 537.84 97.2 537.84 
+L 85.68 537.84 
+Q 83.52 537.84 83.52 535.68 
+L 83.52 529.92 
+Q 83.52 527.76 85.68 527.76 
+L 85.68 527.76 
+z
+" clip-path="url(#raw-feed-target-p8898e0756f)" style="fill: none; stroke-dasharray: 5,4; stroke-dashoffset: 0; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="raw-feed-target-line2d_1">
+    <path d="M 86.4 390.24 
+L 57.6 390.24 
+L 57.6 120.24 
+L 57.6 120.24 
+" clip-path="url(#raw-feed-target-p8898e0756f)" style="fill: none; stroke: #5f5e5a; stroke-linecap: square"/>
+   </g>
+   <g id="raw-feed-target-text_1">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="201.6" y="34.537852" transform="rotate(-0 201.6 34.537852)">Schwab API</text>
+   </g>
+   <g id="raw-feed-target-patch_15">
+    <path d="M 201.6 48.96 
+Q 201.6 72.36 201.6 94.641966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 203.8 90.241966 
+L 201.6 94.641966 
+L 199.4 90.241966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="raw-feed-target-text_2">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0f6e56" x="230.4" y="87.428145" transform="rotate(-0 230.4 87.428145)">Feed target: left running by a market-hours promote (planned)</text>
+   </g>
+   <g id="raw-feed-target-text_3">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="201.6" y="115.897852" transform="rotate(-0 201.6 115.897852)">schwab-proxy :8100</text>
+   </g>
+   <g id="raw-feed-target-text_4">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="201.6" y="130.498242" transform="rotate(-0 201.6 130.498242)">Sign-in, 5 calls a second</text>
+   </g>
+   <g id="raw-feed-target-text_5">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="518.4" y="115.897852" transform="rotate(-0 518.4 115.897852)">feed_svc :8218</text>
+   </g>
+   <g id="raw-feed-target-text_6">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="518.4" y="130.498242" transform="rotate(-0 518.4 130.498242)">Fetches every minute (planned)</text>
+   </g>
+   <g id="raw-feed-target-patch_16">
+    <path d="M 318.24 120.24 
+Q 360 120.24 400.641966 120.24 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 396.241966 118.04 
+L 400.641966 120.24 
+L 396.241966 122.44 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="raw-feed-target-text_7">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="518.4" y="213.097852" transform="rotate(-0 518.4 213.097852)">Raw chain store</text>
+   </g>
+   <g id="raw-feed-target-text_8">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="518.4" y="227.698242" transform="rotate(-0 518.4 227.698242)">One SQLite file per session</text>
+   </g>
+   <g id="raw-feed-target-patch_17">
+    <path d="M 518.4 143.28 
+Q 518.4 168.12 518.4 191.841966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 520.6 187.441966 
+L 518.4 191.841966 
+L 516.2 187.441966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="raw-feed-target-patch_18">
+    <path d="M 518.4 240.48 
+Q 518.4 267.12 518.4 292.641966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 520.6 288.241966 
+L 518.4 292.641966 
+L 516.2 288.241966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="raw-feed-target-text_9">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #534ab7" x="72" y="281.828145" transform="rotate(-0 72 281.828145)">App target: restarted by a promote, then catches up</text>
+   </g>
+   <g id="raw-feed-target-text_10">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #3c3489" x="518.4" y="313.897852" transform="rotate(-0 518.4 313.897852)">options_svc deriver</text>
+   </g>
+   <g id="raw-feed-target-text_11">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #534ab7" x="518.4" y="328.498242" transform="rotate(-0 518.4 328.498242)">Behind a cursor (planned)</text>
+   </g>
+   <g id="raw-feed-target-text_12">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="201.6" y="313.897852" transform="rotate(-0 201.6 313.897852)">gex_history.db</text>
+   </g>
+   <g id="raw-feed-target-text_13">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="201.6" y="328.498242" transform="rotate(-0 201.6 328.498242)">GEX, flow and HIRO rows</text>
+   </g>
+   <g id="raw-feed-target-patch_19">
+    <path d="M 401.76 318.24 
+Q 360 318.24 319.358034 318.24 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 323.758034 320.44 
+L 319.358034 318.24 
+L 323.758034 316.04 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="raw-feed-target-text_14">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #633806" x="518.4" y="385.897852" transform="rotate(-0 518.4 385.897852)">Redis :6379</text>
+   </g>
+   <g id="raw-feed-target-text_15">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #854f0b" x="518.4" y="400.498242" transform="rotate(-0 518.4 400.498242)">Cache views, events</text>
+   </g>
+   <g id="raw-feed-target-patch_20">
+    <path d="M 518.4 341.28 
+Q 518.4 353.52 518.4 364.641966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 520.6 360.241966 
+L 518.4 364.641966 
+L 516.2 360.241966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="raw-feed-target-text_16">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #3c3489" x="201.6" y="385.897852" transform="rotate(-0 201.6 385.897852)">Other services</text>
+   </g>
+   <g id="raw-feed-target-text_17">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #534ab7" x="201.6" y="400.498242" transform="rotate(-0 201.6 400.498242)">Scans, sentiment, trade, market</text>
+   </g>
+   <g id="raw-feed-target-patch_21">
+    <path d="M 318.24 390.24 
+Q 360 390.24 400.641966 390.24 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 396.241966 388.04 
+L 400.641966 390.24 
+L 396.241966 392.44 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="raw-feed-target-patch_22">
+    <path d="M 57.6 120.24 
+Q 71.28 120.24 83.841966 120.24 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 79.441966 118.04 
+L 83.841966 120.24 
+L 79.441966 122.44 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="raw-feed-target-text_18">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #3c3489" x="518.4" y="455.017852" transform="rotate(-0 518.4 455.017852)">Web apps :8500, :8501</text>
+   </g>
+   <g id="raw-feed-target-text_19">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #534ab7" x="518.4" y="469.618242" transform="rotate(-0 518.4 469.618242)">Read Redis only</text>
+   </g>
+   <g id="raw-feed-target-patch_23">
+    <path d="M 518.4 413.28 
+Q 518.4 425.52 518.4 436.641966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 520.6 432.241966 
+L 518.4 436.641966 
+L 516.2 432.241966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="raw-feed-target-text_20">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #5f5e5a" x="50.4" y="535.138242" transform="rotate(-0 50.4 535.138242)">Built</text>
+   </g>
+   <g id="raw-feed-target-text_21">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #5f5e5a" x="105.12" y="535.138242" transform="rotate(-0 105.12 535.138242)">Planned (Phases 3 to 5)</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="raw-feed-target-p8898e0756f">
+   <rect x="0" y="0" width="720" height="561.6"/>
+  </clipPath>
+ </defs>
+</svg>
+<figcaption>The planned raw feed: what a market-hours promote leaves running, and what catches up</figcaption></figure>
+<p>Schwab serves no past option chain, so a minute nobody saved is lost for good. The
+plan keeps the saving process running and lets everything downstream catch up.
+<code>feed_svc</code> (:8218) will fetch into the raw store. The options service will derive
+from the store behind a per-session cursor, oldest minute first, after any stop.
+Alerts from a caught-up minute will be recorded but pushed only when fresh. The
+proxy and <code>feed_svc</code> will form a systemd target of their own, which a market-hours
+promote leaves running. Dashed boxes are not built yet. A crash of the proxy or
+<code>feed_svc</code>, or a reboot, will still leave a gap, recorded and shown, never
+silent.</p>
 <h2 id="folder-map">Folder map</h2>
 <table>
 <thead>
