@@ -15,7 +15,7 @@ from shared.config_toml import toml_loader
 MODES = ("off", "tee", "on")
 
 DEFAULTS = {
-    "feed": {"mode": "off", "keep_sessions": 5, "stale_alarm_min": 2},
+    "feed": {"mode": "off", "keep_sessions": 5, "stale_alarm_min": 2, "zlib_level": 6},
     "catchup": {"push_max_age_min": 3, "lag_alarm_min": 5},
 }
 
@@ -48,6 +48,14 @@ def mode() -> str:
 def shadow_enabled() -> bool:
     """The shadow check runs in ``tee`` only."""
     return mode() == "tee"
+
+
+def zlib_level() -> int:
+    """The raw store's zlib level, 1 (fastest) .. 9 (smallest); else 6."""
+    raw = _section("feed").get("zlib_level")
+    if isinstance(raw, bool) or not isinstance(raw, int) or not 1 <= raw <= 9:
+        return DEFAULTS["feed"]["zlib_level"]
+    return raw
 
 
 def keep_sessions() -> int:

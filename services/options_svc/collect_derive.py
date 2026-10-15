@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import logging
+import time
 from dataclasses import dataclass, field
 from typing import Callable
 from zoneinfo import ZoneInfo
@@ -46,6 +47,9 @@ class DeriveContext:
     hiro_date: str | None = None
     #: Extended-hours eligibility seen this minute, per symbol.
     eth_seen: dict = field(default_factory=dict)
+    #: Milliseconds spent inside ``on_chain`` this minute: part of what one
+    #: minute costs to derive (the raw feed's "on" gate).
+    hooks_ms: float = 0.0
 
 
 def minute_of(ts) -> int:
@@ -109,6 +113,13 @@ def build_context(minute_ts, capture, hooks) -> DeriveContext:
                         hiro_date=minute_dt.date().isoformat())
 
     def on_chain(sym, chain):
+        started = time.perf_counter()
+        try:
+            _on_chain(sym, chain)
+        finally:
+            ctx.hooks_ms += (time.perf_counter() - started) * 1000.0
+
+    def _on_chain(sym, chain):
         if sym in wanted:
             hooks.stash_tick_chain(sym, chain)
         # Ungated: a pure dict read, no compute, and the map must stay complete

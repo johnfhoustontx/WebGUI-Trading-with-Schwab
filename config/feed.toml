@@ -12,6 +12,9 @@
 mode = "off"
 # Raw sessions kept on disk (about 1 GB each). Never backed up.
 keep_sessions = 5
+# zlib level for the stored chains: 1 is fastest, 9 smallest. The write runs on
+# the collection's own thread every minute, so a lower level costs collection less.
+zlib_level = 6
 # feed_svc's health goes down after this many minutes with no complete minute,
 # inside the collection window.
 stale_alarm_min = 2

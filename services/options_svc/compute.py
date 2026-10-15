@@ -4973,6 +4973,9 @@ def collect_gex_snapshots(capture_symbols=None, now=None) -> int:
         gc.poll_once(_proxy.schwab_py_client, gt.GammaEngine(), conn,
                      symbols=symbols, on_chain=on_chain, **_poll_kw)
         _write_hiro_rows(gh, conn, _hiro_ts, _hiro_rows)   # never raises
+        if _poll_kw.get("on_minute") is not None:          # tee: time the hooks too
+            from services.options_svc import raw_shadow
+            raw_shadow.record_cost("hooks", _ctx.hooks_ms)
         traded_premium.write_rows(gh, conn, _hiro_ts)      # never raises
         gc.touch_lock(gc.LOCK_PATH, source="options_svc", owner=owner,
                       now=int(time.time()))

@@ -48,6 +48,10 @@ _REL_TOL, _ABS_TOL = 1e-9, 1e-12
 _TERM_SYMBOL = "SPX"            # the symbol derive_term writes its rows under
 _MS_KEEP = 2000                 # per-minute timings kept for the percentiles
 _LOG_EVERY = 15                 # minutes between INFO summaries
+#: The other per-minute costs timed beside the derive. hooks + alerts are what
+#: the deriver adds to the derive for every minute it works through; tee is the
+#: write the collector makes on its own thread, reported apart.
+COSTS = ("hooks", "alerts", "tee")
 
 _EXEC = ThreadPoolExecutor(max_workers=1, thread_name_prefix="raw-shadow")
 _LOCK = threading.Lock()
@@ -60,7 +64,8 @@ def reset_stats() -> None:
         _STATE.clear()
         _STATE.update(future=None, last=None, minutes=0, minutes_with_diffs=0,
                       skipped=0, missing_raw=0, last_diff=None,
-                      ms=collections.deque(maxlen=_MS_KEEP))
+                      ms=collections.deque(maxlen=_MS_KEEP),
+                      costs={k: collections.deque(maxlen=_MS_KEEP) for k in COSTS})
 
 
 reset_stats()
@@ -191,16 +196,38 @@ def record(out: dict) -> None:
         log.info("raw shadow: %s", stats())
 
 
+def record_cost(kind: str, ms) -> None:
+    """Fold one minute's ``kind`` cost (one of ``COSTS``) into the counters."""
+    if kind not in COSTS:
+        return
+    with _LOCK:
+        _STATE["costs"][kind].append(float(ms))
+
+
 def stats() -> dict:
     """``{"minutes", "minutes_with_diffs", "skipped", "missing_raw", "p50_ms",
-    "p95_ms", "last_diff"}`` since the process started."""
+    "p95_ms", "<cost>_p50_ms", "<cost>_p95_ms" for each of ``COSTS``,
+    "gate_p95_ms", "last_diff"}`` since the process started.
+
+    ``p50_ms`` / ``p95_ms`` are the derive alone (reading the raw minute and
+    deriving it). ``gate_p95_ms`` is derive + hooks + alerts at the 95th
+    percentile each -- an upper bound on what the deriver spends per minute,
+    and the figure the "on" gate (under 2000 ms) is read against."""
     with _LOCK:
         ordered = sorted(_STATE["ms"])
-        return {"minutes": _STATE["minutes"],
-                "minutes_with_diffs": _STATE["minutes_with_diffs"],
-                "skipped": _STATE["skipped"], "missing_raw": _STATE["missing_raw"],
-                "p50_ms": _percentile(ordered, 0.50), "p95_ms": _percentile(ordered, 0.95),
-                "last_diff": _STATE["last_diff"]}
+        out = {"minutes": _STATE["minutes"],
+               "minutes_with_diffs": _STATE["minutes_with_diffs"],
+               "skipped": _STATE["skipped"], "missing_raw": _STATE["missing_raw"],
+               "p50_ms": _percentile(ordered, 0.50), "p95_ms": _percentile(ordered, 0.95),
+               "last_diff": _STATE["last_diff"]}
+        for kind in COSTS:
+            cost = sorted(_STATE["costs"][kind])
+            out[f"{kind}_p50_ms"] = _percentile(cost, 0.50)
+            out[f"{kind}_p95_ms"] = _percentile(cost, 0.95)
+    parts = (out["p95_ms"], out["hooks_p95_ms"], out["alerts_p95_ms"])
+    out["gate_p95_ms"] = (None if out["p95_ms"] is None
+                          else sum(p for p in parts if p is not None))
+    return out
 
 
 def _busy() -> bool:

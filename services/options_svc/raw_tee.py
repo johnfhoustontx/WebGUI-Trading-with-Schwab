@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import logging
+import time
 from zoneinfo import ZoneInfo
 
 from services import _degrade
@@ -49,9 +50,14 @@ def maybe_write(minute, root=None) -> bool:
     if feed_config.mode() != "tee":
         return False
     try:
+        started = time.perf_counter()
         date_iso = session_of(minute.ts)
         raw_store.write_minute(date_iso, minute, root=root)
         _LAST = (date_iso, int(minute.ts))
+        # The write runs on the collection's own thread: time it, so the tee
+        # session reports what it costs collection (lazy: raw_shadow imports us).
+        from services.options_svc import raw_shadow
+        raw_shadow.record_cost("tee", (time.perf_counter() - started) * 1000.0)
         if date_iso not in _PRUNED:
             _PRUNED.add(date_iso)
             gone = raw_store.prune(feed_config.keep_sessions(), root=root)

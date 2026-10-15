@@ -2001,7 +2001,9 @@ def collect_gex_history(bus=None) -> None:
         except Exception:
             log.exception("publish_flow_skew after collect degraded")
         try:
+            _started = time.perf_counter()
             run_flow_alerts(bus)
+            _time_alerts(_started)
         except Exception:
             log.exception("run_flow_alerts after collect degraded")
         try:
@@ -2015,6 +2017,15 @@ def collect_gex_history(bus=None) -> None:
 
 
 CACHE_FEED_SHADOW = "cache:feed:shadow"
+
+
+def _time_alerts(started) -> None:
+    """In the raw feed's ``tee``, record what the flow alerts cost this minute:
+    the deriver runs them for every minute it works through."""
+    from shared import feed_config
+    if feed_config.mode() == "tee":
+        from services.options_svc import raw_shadow
+        raw_shadow.record_cost("alerts", (time.perf_counter() - started) * 1000.0)
 
 
 def _shadow_check(bus) -> None:

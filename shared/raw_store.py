@@ -28,6 +28,7 @@ import sqlite3
 import time
 import zlib
 
+from shared import feed_config
 from shared.raw_minute import RawMinute
 
 _SCHEMA = """
@@ -54,7 +55,6 @@ CREATE TABLE IF NOT EXISTS gaps (
 """
 
 _DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_ZLIB_LEVEL = 6
 # The term chain is not a per-symbol chain of the minute; it is keyed apart so
 # it can never collide with a collected symbol's row.
 _TERM_KEY = "$SPX"
@@ -74,9 +74,8 @@ def session_path(date_iso: str, root=None) -> pathlib.Path:
     return _root(root) / f"{date_iso}.db"
 
 
-def _pack(obj) -> bytes:
-    return zlib.compress(json.dumps(obj, separators=(",", ":")).encode("utf-8"),
-                         _ZLIB_LEVEL)
+def _pack(obj, level) -> bytes:
+    return zlib.compress(json.dumps(obj, separators=(",", ":")).encode("utf-8"), level)
 
 
 def _unpack(blob):
@@ -108,7 +107,8 @@ def _insert_minute_row(conn, minute: RawMinute) -> None:
 def write_minute(date_iso: str, minute: RawMinute, root=None) -> None:
     """Store one minute, replacing any earlier copy of it, in ONE transaction:
     its chains first, its ``minutes`` row last. Raises on failure, having rolled
-    the whole minute back."""
+    the whole minute back. Compressed at ``config/feed.toml [feed] zlib_level``."""
+    level = feed_config.zlib_level()
     conn = _write_conn(date_iso, root)
     try:
         conn.execute("BEGIN IMMEDIATE")
@@ -120,11 +120,11 @@ def write_minute(date_iso: str, minute: RawMinute, root=None) -> None:
                 carried = symbol in minute.carried
                 rows.append((ts, symbol, "chain", int(carried),
                              minute.carried_age.get(symbol) if carried else None,
-                             seq, _pack(chain)))
+                             seq, _pack(chain, level)))
             for seq, (symbol, chain) in enumerate(minute.stored.items()):
-                rows.append((ts, symbol, "stored", 1, None, seq, _pack(chain)))
+                rows.append((ts, symbol, "stored", 1, None, seq, _pack(chain, level)))
             if minute.term is not None:
-                rows.append((ts, _TERM_KEY, "term", 0, None, 0, _pack(minute.term)))
+                rows.append((ts, _TERM_KEY, "term", 0, None, 0, _pack(minute.term, level)))
             conn.executemany(
                 "INSERT INTO chains (ts, symbol, kind, carried, carried_age_sec, seq, body)"
                 " VALUES (?, ?, ?, ?, ?, ?, ?)", rows)

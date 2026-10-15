@@ -160,3 +160,49 @@ def test_the_handler_runs_the_shadow_only_in_tee(monkeypatch):
     monkeypatch.setattr(feed_config, "mode", lambda: "tee")
     handlers.collect_gex_history(None)
     assert calls == [1]
+
+
+def test_the_gate_figure_is_the_whole_per_minute_cost():
+    raw_shadow.reset_stats()
+    raw_shadow.record({"ts": TS, "rows": 8, "diffs": [], "ms": 900.0, "missing_raw": False})
+    raw_shadow.record_cost("hooks", 300.0)
+    raw_shadow.record_cost("alerts", 150.0)
+    raw_shadow.record_cost("tee", 400.0)
+    s = raw_shadow.stats()
+    assert (s["hooks_p95_ms"], s["alerts_p95_ms"], s["tee_p95_ms"]) == (300.0, 150.0, 400.0)
+    # derive + hooks + alerts: what the deriver will spend on one minute. The
+    # tee write is the collector's own cost and is reported apart.
+    assert s["gate_p95_ms"] == 1350.0
+
+
+def test_an_unknown_cost_is_ignored():
+    raw_shadow.reset_stats()
+    raw_shadow.record_cost("nonsense", 5.0)
+    assert "nonsense_p95_ms" not in raw_shadow.stats()
+
+
+def test_the_tee_write_is_timed(tmp_path, monkeypatch):
+    raw_shadow.reset_stats()
+    monkeypatch.setattr(feed_config, "mode", lambda: "tee")
+    raw_tee.maybe_write(RawMinute(ts=TS, chains=[("SPY", _chain())], symbols=["SPY"]),
+                        root=tmp_path)
+    assert raw_shadow.stats()["tee_p95_ms"] is not None
+
+
+def test_the_handler_times_the_flow_alerts_in_tee(monkeypatch):
+    from services.options_svc import compute, handlers
+    raw_shadow.reset_stats()
+    monkeypatch.setattr(compute, "collect_gex_snapshots", lambda capture_symbols=None: 0)
+    monkeypatch.setattr(raw_shadow, "submit_latest", lambda: False)
+    for name in ("publish_flow_skew", "publish_matrix", "publish_net_premium", "run_flow_alerts"):
+        monkeypatch.setattr(handlers, name, lambda bus: None)
+    monkeypatch.setattr(handlers.gamma_public, "begin_tick", lambda bus: [])
+    monkeypatch.setattr(handlers, "_current_gamma_symbol", lambda bus: "SPY")
+    monkeypatch.setattr(feed_config, "mode", lambda: "tee")
+
+    class _Bus:
+        def cache_set(self, *a, **k):
+            return 1
+
+    handlers.collect_gex_history(_Bus())
+    assert raw_shadow.stats()["alerts_p95_ms"] is not None

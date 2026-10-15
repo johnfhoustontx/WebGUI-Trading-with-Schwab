@@ -65,3 +65,15 @@ def test_only_captured_symbols_are_stashed_for_the_gamma_refresh():
     ctx.on_chain("QQQ", dict(CHAIN, symbol="QQQ"))
     assert ("tick", "QQQ") in rec and ("tick", "SPY") not in rec
     assert rec[0] == "clear"
+
+
+def test_the_context_times_the_hooks(monkeypatch):
+    # The raw feed's "on" gate is the WHOLE per-minute cost, and the hooks are
+    # part of it (docs/plans/2026-10-14-raw-feed-and-catch-up-design.md §5).
+    import time as _time
+    monkeypatch.setattr(flow_sides_tick, "on_chain", lambda s, c, now: _time.sleep(0.02))
+    ctx = collect_derive.build_context(MINUTE, capture=set(), hooks=_hooks([]))
+    assert ctx.hooks_ms == 0.0
+    ctx.on_chain("SPY", CHAIN)
+    ctx.on_chain("QQQ", dict(CHAIN, symbol="QQQ"))
+    assert ctx.hooks_ms >= 40.0

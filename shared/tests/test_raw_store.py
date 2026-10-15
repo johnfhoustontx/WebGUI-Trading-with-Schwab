@@ -102,3 +102,15 @@ def test_the_default_root_is_resolved_at_call_time(tmp_path, monkeypatch):
     import repo_paths
     monkeypatch.setattr(repo_paths, "RAW_DIR", tmp_path)
     assert rs.session_path(D) == tmp_path / f"{D}.db"
+
+
+def test_the_compression_level_comes_from_config(tmp_path, monkeypatch):
+    import zlib as _zlib
+    from shared import feed_config
+    levels = []
+    real = _zlib.compress
+    monkeypatch.setattr(feed_config, "zlib_level", lambda: 1)
+    monkeypatch.setattr(rs.zlib, "compress", lambda data, level=-1: levels.append(level) or real(data, level))
+    rs.write_minute(D, _m(60), root=tmp_path)
+    assert levels and set(levels) == {1}
+    assert rs.read_minute(D, 60, root=tmp_path).chains[0][1]["symbol"] == "SPY"

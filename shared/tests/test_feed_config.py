@@ -48,3 +48,9 @@ def test_a_good_count_is_read(monkeypatch):
 def test_a_missing_section_is_the_defaults(monkeypatch):
     monkeypatch.setattr(fc, "load", lambda: {"feed": 5})
     assert (fc.mode(), fc.keep_sessions(), fc.lag_alarm_min()) == ("off", 5, 5)
+
+
+@pytest.mark.parametrize("raw, want", [(1, 1), (9, 9), (0, 6), (10, 6), ("1", 6), (None, 6)])
+def test_the_zlib_level_is_one_to_nine_else_six(monkeypatch, raw, want):
+    monkeypatch.setattr(fc, "load", lambda: {"feed": {"zlib_level": raw}, "catchup": {}})
+    assert fc.zlib_level() == want

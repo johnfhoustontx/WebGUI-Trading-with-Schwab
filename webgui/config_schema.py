@@ -1047,6 +1047,10 @@ _FEED = ConfigFile(
             Field("feed.keep_sessions", "Sessions kept",
                   "About 1 GB each. They are never backed up.",
                   kind="int", min=1, max=30, step=1),
+            Field("feed.zlib_level", "Compression",
+                  "1 is fastest, 9 is smallest. Saving runs during collection "
+                  "every minute, so a lower number delays collection less.",
+                  kind="int", min=1, max=9, step=1),
             Field("feed.stale_alarm_min", "Feed alarm after",
                   "The feed service reports down after this long with no "
                   "complete minute, during collection hours.",
