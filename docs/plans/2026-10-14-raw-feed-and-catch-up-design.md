@@ -83,14 +83,16 @@ resolved at call time (testable).
 CREATE TABLE chains (
     ts          INTEGER NOT NULL,   -- minute-floored unix seconds
     symbol      TEXT    NOT NULL,
-    kind        TEXT    NOT NULL,   -- 'chain' | 'term' | 'spot'
-    fetched_at  REAL    NOT NULL,
-    carried_age_sec REAL,           -- NULL = fetched this minute
-    body        BLOB    NOT NULL,   -- zlib(JSON) of the proxy's response
+    kind        TEXT    NOT NULL,   -- 'chain' (after spot re-anchor and carry) | 'stored' (a carried
+                                    -- symbol's chain as the proxy held it) | 'term'
+    carried     INTEGER NOT NULL DEFAULT 0,
+    carried_age_sec REAL,           -- a carried chain's age; may be unknown
+    seq         INTEGER NOT NULL,   -- fetch order
+    body        BLOB    NOT NULL,   -- zlib(JSON) of the chain
     PRIMARY KEY (ts, symbol, kind)
 );
 CREATE TABLE minutes (              -- written LAST, in the same transaction
-    ts INTEGER PRIMARY KEY, symbols INTEGER, written_at REAL
+    ts INTEGER PRIMARY KEY, symbols TEXT, written_at REAL   -- symbols: the universe asked (JSON)
 );
 CREATE TABLE gaps (
     ts INTEGER PRIMARY KEY, reason TEXT, noted_at REAL
