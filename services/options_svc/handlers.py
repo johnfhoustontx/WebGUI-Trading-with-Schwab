@@ -1994,6 +1994,7 @@ def collect_gex_history(bus=None) -> None:
         capture = ({_current_gamma_symbol(bus)} | set(PUBLISHED_GAMMA_SYMBOLS)
                    | hot)
     compute.collect_gex_snapshots(capture_symbols=capture)
+    _shadow_check(bus)
     if bus is not None:
         try:
             publish_flow_skew(bus)
@@ -2011,6 +2012,26 @@ def collect_gex_history(bus=None) -> None:
             publish_net_premium(bus)
         except Exception:
             log.exception("publish_net_premium after collect degraded")
+
+
+CACHE_FEED_SHADOW = "cache:feed:shadow"
+
+
+def _shadow_check(bus) -> None:
+    """In the raw feed's ``tee``, compare the minute just collected with a
+    re-derivation from the raw store (on the shadow's own thread), and publish
+    the running counters to ``cache:feed:shadow``. Never raises; costs nothing
+    outside ``tee``."""
+    from services.options_svc import raw_shadow
+    from shared import feed_config
+    if feed_config.mode() != "tee":
+        return
+    try:
+        raw_shadow.submit_latest()
+        if bus is not None:
+            bus.cache_set(CACHE_FEED_SHADOW, raw_shadow.stats())
+    except Exception:
+        log.exception("raw shadow check degraded")
 
 
 def _alert_now():

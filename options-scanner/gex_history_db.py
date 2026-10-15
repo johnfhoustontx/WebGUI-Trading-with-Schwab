@@ -621,6 +621,29 @@ def insert_term_snapshot_rows(
     conn.commit()
 
 
+_ROW_COLUMNS = ("spot", "flip", "top_pos_strike", "top_neg_strike", "net_total", "dte",
+                "net_delta_0dte", "projected_net_delta_close", "hedge_pressure",
+                "rr_25d", "call_vol", "put_vol", "call_prem", "put_prem", "atm_iv",
+                "projected_flip", "carried_age_sec")
+
+
+def rows_at(conn: sqlite3.Connection, ts: int, views=None) -> dict:
+    """Every snapshot row of minute ``ts`` as ``{(symbol, view): {column: value,
+    ..., "grid": decoded grid}}``, optionally only ``views``. The raw feed's
+    shadow check compares two of these."""
+    sql = f"SELECT symbol, view, {', '.join(_ROW_COLUMNS)}, gex_json FROM snapshots WHERE ts = ?"
+    args: list = [int(ts)]
+    if views:
+        sql += f" AND view IN ({', '.join('?' for _ in views)})"
+        args += list(views)
+    out = {}
+    for row in conn.execute(sql, args):
+        values = dict(zip(_ROW_COLUMNS, row[2:-1]))
+        values["grid"] = _decode_grid(row[-1])
+        out[(row[0], row[1])] = values
+    return out
+
+
 def load_term_snapshot(
     conn: sqlite3.Connection,
     timestamp_ct: str,

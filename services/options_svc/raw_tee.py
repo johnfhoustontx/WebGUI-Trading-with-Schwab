@@ -27,6 +27,14 @@ CT = ZoneInfo("America/Chicago")
 
 # Session dates already pruned by this process: retention runs once per session.
 _PRUNED: set = set()
+# ``(session date, ts)`` of the last minute this process wrote, for the shadow
+# check to pick up. None until the first write.
+_LAST = None
+
+
+def last_written():
+    """``(session date, ts)`` of the last minute written, or None."""
+    return _LAST
 
 
 def session_of(ts) -> str:
@@ -37,11 +45,13 @@ def session_of(ts) -> str:
 def maybe_write(minute, root=None) -> bool:
     """Write ``minute`` (a ``RawMinute``) to the raw store when the mode is
     ``tee``. Returns whether it wrote. Never raises."""
+    global _LAST
     if feed_config.mode() != "tee":
         return False
     try:
         date_iso = session_of(minute.ts)
         raw_store.write_minute(date_iso, minute, root=root)
+        _LAST = (date_iso, int(minute.ts))
         if date_iso not in _PRUNED:
             _PRUNED.add(date_iso)
             gone = raw_store.prune(feed_config.keep_sessions(), root=root)
