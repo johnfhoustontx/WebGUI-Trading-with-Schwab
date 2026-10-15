@@ -1317,7 +1317,9 @@ updates on its own about every two minutes whether or not the page is open; pres
   **Trending**, **Breakout**, **Whipsaw**, **Stressed**), a confidence figure,
   diagnostic tags, and a table ranking all five by share with their change since
   the open. Trending and Breakout also carry a direction word (*Rallying*,
-  *Retreating*, *Breakdown* and so on). **Hover the regime word on the dial** and
+  *Retreating*, *Breakdown* and so on); the four Trending words show an arrow
+  (▲ up, ▼ down), and a plain *Trending* says *mixed* when the two direction
+  reads disagree. **Hover the regime word on the dial** and
   a sentence explains what it means and what tends to work in it — the same
   hover the Desk's regime tile uses.
 - **Components** and **Trend Detail** — press and hold either for a full breakdown.

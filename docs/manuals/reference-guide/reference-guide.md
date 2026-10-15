@@ -1527,6 +1527,12 @@ appears **only when the tape's own slope and the Market Trend gauge agree**. Whe
 disagree, the plain regime name shows instead, so this panel can never contradict the
 gauge above it. Balanced, Whipsaw and Stressed have no direction by nature.
 
+The four direction words also carry an arrow — **▲** for Rallying and Firming, **▼**
+for Retreating and Softening — on the dial, the Desk's regime tile and the Symbol
+page. A plain **Trending** says **mixed** beside it instead: the tape is trending,
+but the two direction reads don't agree on which way. It never gets an arrow, because
+an arrow would have to pick one of the two reads that disagree.
+
 **Hover the regime word on the dial** and a sentence explains what it means and what
 tends to work in it — every word the console can print, including the direction
 adornments and *Unclear*:

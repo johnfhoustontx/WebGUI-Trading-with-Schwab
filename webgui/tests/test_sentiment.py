@@ -361,6 +361,18 @@ def test_console_svgs_mount_with_sanitizing_on():
         assert s._props["sanitize"] is True
 
 
+def test_the_dial_marks_a_direction_word_and_a_bare_trending():
+    for label, mark in (("Softening", "▼"), ("Rallying", "▲"),
+                        ("Trending", "MIXED")):
+        bus_client.reset()
+        _seed_cache()                    # the console paints only with a composite
+        bus_client.bus().cache_set("cache:sentiment:regime", {
+            "label": label, "committed_label": "trending", "confidence": 0.6})
+        svg = _dial(_render_card()).content
+        assert f">{mark}<" in svg, label
+        assert f">{label.upper()}<" in svg, label
+
+
 def test_render_with_an_empty_cache_shows_the_waiting_state():
     """The cold-start read: no fabricated numbers anywhere — the dial dashes and
     the console says it is waiting rather than rendering an empty frame."""

@@ -118,3 +118,35 @@ def test_the_directional_pictures_name_their_direction():
     assert "lower" in rm.regime_picture("Retreating")
     assert "decline" in rm.regime_picture("Softening")
     assert "downside" in rm.regime_picture("Breakdown")
+
+
+# ── the direction mark beside the Regime word ────────────────────────────────
+def test_the_four_direction_words_carry_their_arrow():
+    assert rm.regime_arrow("Rallying") == rm.ARROW_UP == "▲"
+    assert rm.regime_arrow("Firming") == rm.ARROW_UP
+    assert rm.regime_arrow("Retreating") == rm.ARROW_DOWN == "▼"
+    assert rm.regime_arrow("Softening") == rm.ARROW_DOWN
+
+
+def test_no_other_word_carries_an_arrow():
+    """Bare Trending above all: an arrow there would pick a side between two
+    direction reads that disagree, which is the one thing it must not do."""
+    others = [w for w in _REGIME_WORDS
+              if w not in ("Rallying", "Firming", "Retreating", "Softening")]
+    for word in others + ["", None, "rallying", "▲ Rallying"]:
+        assert rm.regime_arrow(word) == "", word
+
+
+def test_only_bare_trending_reads_mixed():
+    assert rm.regime_mixed("Trending") is True
+    for word in [w for w in _REGIME_WORDS if w != "Trending"] + ["", None, "trending"]:
+        assert rm.regime_mixed(word) is False, word
+
+
+def test_regime_text_puts_the_mark_on_the_word():
+    assert rm.regime_text("Rallying") == "▲ Rallying"
+    assert rm.regime_text("Softening") == "▼ Softening"
+    assert rm.regime_text("Trending") == "Trending · mixed"
+    assert rm.regime_text("Balanced") == "Balanced"
+    assert rm.regime_text("Breakdown") == "Breakdown"
+    assert rm.regime_text(None) == ""

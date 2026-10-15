@@ -304,6 +304,12 @@ The public live Desk renders them too.
   Trending, Rallying, Firming, Retreating, Softening, Breakout, Breakdown,
   Whipsaw, Stressed, Unclear). `shared/tests/test_cross_tier_mirrors.py` pins that
   every word the sentiment service can print has one.
+- **The regime word's mark** (2026-10-15). ▲ / ▼ beside the four trending
+  direction words and "mixed" beside a bare Trending, on this tile (arrow before
+  the word at 16px, "mixed" after it at 11px, so RETREATING still fits 180px), on
+  the `/sentiment` dial (its own line above the word) and on `/symbol`
+  (`regime_mix.regime_text`). Display only: `word` is still the service's word,
+  and the hover keys off it.
 
 Design: [`2026-09-10-desk-market-summary-design.md`](plans/2026-09-10-desk-market-summary-design.md).
 

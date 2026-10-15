@@ -99,6 +99,23 @@ def test_every_regime_word_the_service_can_print_has_a_hover():
         "service can print these words.")
 
 
+def test_the_regime_arrows_follow_the_services_own_direction_words():
+    """The page draws an arrow beside a direction word. Which way it points is
+    the service's (1, ...) / (-1, ...) entry for that word, so a renamed or
+    swapped word cannot leave an arrow pointing against what the word says."""
+    trending = _const(REGIME_SOURCE, "_DIRECTIONAL")["trending"]
+    expected = {word: ("▲" if sign > 0 else "▼")
+                for (sign, _strong), word in trending.items()}
+    assert len(expected) == 4, expected
+    assert _const(REGIME_PICTURE_PAGE, "REGIME_ARROWS") == expected
+
+
+def test_the_mixed_word_is_the_services_bare_trending():
+    """'mixed' qualifies the trending word printed WITHOUT a direction."""
+    display = _const(REGIME_SOURCE, "REGIME_DISPLAY")
+    assert _const(REGIME_PICTURE_PAGE, "MIXED_WORD") == display["trending"]
+
+
 # --- the market-trend pill words --------------------------------------------
 # The short word on the Market Trend pill (Climbing / Stalling / Circling /
 # Gliding / Diving, plus the 30-day structural words) is drawn by the webgui AND

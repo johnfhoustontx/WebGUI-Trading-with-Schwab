@@ -197,6 +197,35 @@ def test_dial_never_raises(junk):
     assert out.startswith("<svg") and out.endswith("</svg>")
 
 
+def test_dial_draws_no_mark_unless_given_one():
+    svg = D.dial_svg(0.56, "Whipsaw")
+    assert svg.count("<text ") == 3                 # word, value, caption
+    assert "▲" not in svg and "▼" not in svg and "MIXED" not in svg
+
+
+def test_dial_draws_its_mark_above_the_word_and_leaves_the_word_alone():
+    """The mark sits on its own line: the widest word already uses the whole
+    clear width inside the arc, so an arrow beside it would cross the ring."""
+    from pages.options import theme
+    svg = D.dial_svg(0.56, "Retreating", mark="▼",
+                     mark_fill=theme.CONSOLE_COLORS["negative"])
+    assert svg.count("<text ") == 4
+    assert ">RETREATING<" in svg                    # the word is unchanged
+    chunk = [c for c in svg.split("<text ") if ">▼<" in c][0]
+    y = float(chunk.split('y="', 1)[1].split('"', 1)[0])
+    assert y < D.NAME_Y
+    assert theme.CONSOLE_COLORS["negative"] in chunk
+    assert ">MIXED<" in D.dial_svg(0.4, "Trending", mark="mixed")
+
+
+def test_dial_with_a_mark_emits_nothing_the_sanitizer_would_strip():
+    from test_rings import _dompurify_allowlist
+    allow = _dompurify_allowlist()
+    svg = D.dial_svg(0.56, "Rallying", mark="▲", mark_fill="#35d68a")
+    attrs = set(re.findall(r'([a-zA-Z][\w-]*)="', svg))
+    assert not sorted(n for n in attrs if n.lower() not in allow)
+
+
 def test_dial_escapes_its_name():
     assert "<script" not in D.dial_svg(0.5, "<script>x</script>")
 

@@ -3192,6 +3192,10 @@ cross-app <code>scoring</code> name collision. Keep them in step.</p>
 <p><code>trending</code> and <code>breakout</code> additionally render a direction word — <strong>Rallying</strong> /
 <strong>Firming</strong> (up), <strong>Retreating</strong> / <strong>Softening</strong> (down), <strong>Breakdown</strong>. Balanced,
 Whipsaw and Stressed are directionless by construction.</p>
+<p>The webgui adds a mark beside the word and changes nothing the service publishes:
+▲ / ▼ on the four trending direction words, and "mixed" beside a bare <code>Trending</code>
+(<code>regime_mix.REGIME_ARROWS</code> / <code>MIXED_WORD</code>, pinned to <code>_DIRECTIONAL</code> and
+<code>REGIME_DISPLAY</code> by <code>shared/tests/test_cross_tier_mirrors.py</code>).</p>
 <pre><code>DIRECTION_SLOPE_DEADBAND = EMA_TREND_LO          # 0.05, the trending ramp's own floor
 DIRECTION_TREND_DEADBAND = 3.0                   # points either side of the 50 neutral
 DIRECTION_STRONG_SLOPE   = 0.5 * (EMA_TREND_LO + EMA_TREND_HI)   # Rallying vs Firming

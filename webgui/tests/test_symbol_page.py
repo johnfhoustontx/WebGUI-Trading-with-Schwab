@@ -1360,6 +1360,14 @@ def test_a_cold_sentiment_feed_is_said_once(world):
     assert texts.count(_copy.WAITING_SENTIMENT) == 1
 
 
+def test_the_context_band_marks_the_regime_word(world):
+    data, _sent = world                       # regime label "Rallying"
+    assert "▲ Rallying" in _texts(_render_page("MU"))
+    data["sentiment:regime"] = {"label": "Trending", "committed_label": "trending",
+                                "confidence": 0.6, "direction": 0}
+    assert "Trending · mixed" in _texts(_render_page("MU"))
+
+
 def test_the_page_uses_no_raw_tailwind_white():
     assert "text-white" not in _SRC
 

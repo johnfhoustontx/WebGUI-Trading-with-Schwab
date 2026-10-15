@@ -999,6 +999,11 @@ cross-app `scoring` name collision. Keep them in step.
 **Firming** (up), **Retreating** / **Softening** (down), **Breakdown**. Balanced,
 Whipsaw and Stressed are directionless by construction.
 
+The webgui adds a mark beside the word and changes nothing the service publishes:
+▲ / ▼ on the four trending direction words, and "mixed" beside a bare `Trending`
+(`regime_mix.REGIME_ARROWS` / `MIXED_WORD`, pinned to `_DIRECTIONAL` and
+`REGIME_DISPLAY` by `shared/tests/test_cross_tier_mirrors.py`).
+
 ```
 DIRECTION_SLOPE_DEADBAND = EMA_TREND_LO          # 0.05, the trending ramp's own floor
 DIRECTION_TREND_DEADBAND = 3.0                   # points either side of the 50 neutral

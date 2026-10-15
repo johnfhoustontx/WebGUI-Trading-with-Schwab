@@ -1107,7 +1107,7 @@ def render(symbol=None):
                 # two separate faults.
                 waiting = False
                 if reg:
-                    ui.label(reg["word"]).classes(
+                    ui.label(reg["line"]).classes(
                         f"{_LINE} font-semibold {_desk.regime_tone(reg)}"
                     ).tooltip(reg.get("tip") or "")
                 else:

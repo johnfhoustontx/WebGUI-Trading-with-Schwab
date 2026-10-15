@@ -63,6 +63,17 @@ def regime_name(regime):
             or "Unclear")
 
 
+def regime_mark(name):
+    """``(mark, fill)`` for the dial: the word's ▲ in the console's positive
+    colour, ▼ in its negative, "mixed" muted, or ``("", None)``."""
+    arrow = RM.regime_arrow(name)
+    if arrow:
+        return arrow, _C["positive" if arrow == RM.ARROW_UP else "negative"]
+    if RM.regime_mixed(name):
+        return RM.MIXED, K._ABSENT
+    return "", None
+
+
 def regime_hex(key, share):
     """A regime's colour, muted when it holds nothing.
 
@@ -124,13 +135,15 @@ def render_dial_card(regime, points):
     rows = RM.rank_rows(points)
     _key, margin, tightest = RM.lead_margin(points)
     name = regime_name(r)
+    mark, mark_fill = regime_mark(name)
     runner = rows[1]["label"] if len(rows) > 1 else "—"
     with ui.column().classes(f"{_CARD} gap-4"):
         ui.label("REGIME IDENTIFIED").classes(
             f"text-[10px] tracking-[.26em] {K.DIM}")
         dial = ui.html(console_dial.dial_svg(
             None if r.get("unclear") else r.get("confidence"), name,
-            uid="regime")).classes("w-full max-w-[244px] self-center")
+            uid="regime", mark=mark, mark_fill=mark_fill)).classes(
+                "w-full max-w-[244px] self-center")
         # The dial's centre IS the regime word, so hovering it explains the word.
         # No swap-only-when-changed logic needed here (unlike the Desk): the
         # console rebuilds this whole regime block from scratch on every

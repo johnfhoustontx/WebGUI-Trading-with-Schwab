@@ -660,6 +660,21 @@ def test_desk_regime_display_carries_the_supporting_reads():
     assert r["unclear"] is False
 
 
+def test_desk_regime_display_carries_the_direction_mark():
+    """``word`` stays the service's word (the hover and every other reader key
+    off it); the mark rides beside it."""
+    r = d.regime_display({"label": "Retreating", "committed_label": "trending",
+                          "direction": -1, "direction_strong": True})
+    assert (r["word"], r["arrow"], r["mixed"]) == ("Retreating", "▼", False)
+    assert r["line"] == "▼ Retreating"
+    r = d.regime_display({"label": "Trending", "committed_label": "trending"})
+    assert (r["word"], r["arrow"], r["mixed"]) == ("Trending", "", True)
+    assert r["line"] == "Trending · mixed"
+    for sample in ({"committed_label": "choppy"}, None):
+        r = d.regime_display(sample)
+        assert (r["arrow"], r["mixed"], r["line"]) == ("", False, r["word"])
+
+
 def test_desk_regime_display_withholds_a_non_finite_confidence():
     """A NaN confidence must read as absent, not as a maximal one — the same
     trap that made an all-NaN price read score 92.5 at confidence 1.0."""
@@ -1377,6 +1392,23 @@ def test_render_hangs_the_regime_words_hover_on_the_strip(monkeypatch):
     assert RM.regime_picture("Rallying") in texts
 
 
+def test_render_puts_the_arrow_beside_the_regime_word(monkeypatch):
+    _seed_bus(monkeypatch, _full_payloads())          # regime label "Rallying"
+    texts = [t for t in _rendered_texts() if t]
+    assert "▲" in texts and "Rallying" in texts
+    assert "▼" not in texts and "mixed" not in texts
+
+
+def test_render_says_mixed_beside_a_bare_trending(monkeypatch):
+    data = _full_payloads()
+    data["sentiment:regime"] = {"label": "Trending", "committed_label": "trending",
+                                "confidence": 0.6, "direction": 0}
+    _seed_bus(monkeypatch, data)
+    texts = [t for t in _rendered_texts() if t]
+    assert "Trending" in texts and "mixed" in texts
+    assert "▲" not in texts and "▼" not in texts
+
+
 def test_render_hangs_each_band_words_hover_on_the_strip(monkeypatch):
     from pages import sentiment as S
     _seed_bus(monkeypatch, _full_payloads())
@@ -1565,6 +1597,25 @@ def test_the_verdict_tile_fits_the_longest_word_either_vocabulary_can_print():
     assert needed <= width - _TILE_PAD_PX, (
         f"{longest!r} needs {needed:.0f}px at {size}px; the tile offers "
         f"{width - _TILE_PAD_PX}px")
+
+
+def test_the_regime_tile_fits_each_word_with_its_mark():
+    """The arrow (before) and "mixed" (after) share the tile's one line with
+    the word, at their own smaller sizes, so the longest word plus its mark
+    must still fit — RETREATING with its arrow is the binding case."""
+    from pages import regime_mix as RM
+    size = _cls_px(d._STRIP_WORD, "text")
+    width = _cls_px(d._STRIP_VERDICT_W, "w")
+    gap = _cls_px(d._STRIP_WORD_ROW, "gap")
+    arrow = _cls_px(d._STRIP_ARROW, "text")
+    qual = _cls_px(d._STRIP_QUALIFIER, "text")
+    for word in _REGIME_WORDS:
+        needed = _MONO_ADVANCE * size * len(word)
+        if RM.regime_arrow(word):
+            needed += _MONO_ADVANCE * arrow + gap
+        if RM.regime_mixed(word):
+            needed += _MONO_ADVANCE * qual * len(RM.MIXED) + gap
+        assert needed <= width - _TILE_PAD_PX, (word, needed)
 
 
 def test_the_strip_still_fits_one_row_at_the_pages_documented_minimum():

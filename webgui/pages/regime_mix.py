@@ -105,6 +105,42 @@ def regime_picture(word):
     return REGIME_PICTURE.get(str(word or "").strip(), "")
 
 
+# The mark drawn beside the Market Regime word. The four direction words already
+# say which way; the arrow repeats it for a glance, so it can never disagree with
+# the word. A bare "Trending" is the service declining to name a direction (the
+# two direction reads did not agree), and says "mixed" on the label rather than
+# only in its hover. Never an arrow on bare Trending: that would pick a side the
+# service refused to pick. Keyed by the DISPLAYED word, like REGIME_PICTURE;
+# shared/tests/test_cross_tier_mirrors.py pins both to the service's tables.
+# The service's word itself is untouched — the hover, the Trade filter's
+# reasons and every test key off it.
+ARROW_UP, ARROW_DOWN = "▲", "▼"
+REGIME_ARROWS = {"Rallying": "▲", "Firming": "▲",
+                 "Retreating": "▼", "Softening": "▼"}
+MIXED_WORD = "Trending"
+MIXED = "mixed"
+
+
+def regime_arrow(word):
+    """▲ / ▼ for a direction word, or "" for anything else."""
+    return REGIME_ARROWS.get(str(word or "").strip(), "")
+
+
+def regime_mixed(word):
+    """True for the trending word printed WITHOUT a direction."""
+    return str(word or "").strip() == MIXED_WORD
+
+
+def regime_text(word):
+    """The word with its mark, on one line: "▲ Rallying", "Trending · mixed"."""
+    w = str(word or "").strip()
+    if regime_arrow(w):
+        return f"{regime_arrow(w)} {w}"
+    if regime_mixed(w):
+        return f"{w} · {MIXED}"
+    return w
+
+
 # A session boundary. Same constant as ``sentiment._INTRADAY_GAP_MS`` (4h), and
 # the same reason: deltas must be measured from THIS session's open, not from
 # whatever the previous session happened to end on. The published history is

@@ -67,6 +67,7 @@ from pages import bullbear as _bb
 from pages import console as _K
 from pages import console_cards as _CC
 from pages import console_regime as _CR
+from pages import regime_mix as _RM
 from pages.regime_mix import regime_picture as _regime_picture
 # The map page, for its ONE sentence. ``headline_line`` is the count line
 # /sentiment/bullbear prints, pluralisation and empty-payload rule included —
@@ -833,11 +834,17 @@ def regime_display(regime_view):
 
     ``tip`` is the word's hover sentence, off ``regime_mix.regime_picture`` — the
     same table the Market Regime Console's dial hangs its own hover from.
+
+    ``word`` stays the service's word; ``arrow`` (▲ / ▼) and ``mixed`` are the
+    mark drawn beside it, and ``line`` is the two together on one line.
     """
     r = regime_view if isinstance(regime_view, dict) else {}
     word = _CR.regime_name(r)
     return {
         "word": word,
+        "arrow": _RM.regime_arrow(word),
+        "mixed": _RM.regime_mixed(word),
+        "line": _RM.regime_text(word),
         "tip": _regime_picture(word),
         "committed_label": r.get("committed_label") or "",
         "confidence": _finite(r.get("confidence")),
@@ -2965,6 +2972,30 @@ _STRIP_VALUE = f"text-[28px] leading-none tabular-nums {LABEL}"
 # countdown is a number and not a verdict.
 _STRIP_WORD = "text-[24px] leading-none font-semibold whitespace-nowrap"
 _STRIP_VERDICT_W = "w-[180px]"
+# The regime word's mark shares its line: the arrow before it, "mixed" after
+# it, each smaller than the word so RETREATING with its arrow still fits the
+# tile (pinned by test_desk's width test).
+_STRIP_WORD_ROW = "items-baseline gap-[4px] flex-nowrap"
+_STRIP_ARROW = "text-[16px] leading-none shrink-0"
+_STRIP_QUALIFIER = f"text-[11px] leading-none whitespace-nowrap {MUTED}"
+
+
+def _regime_word_row():
+    """The regime tile's word line: ``(arrow, word, mixed)`` labels."""
+    with ui.row().classes(_STRIP_WORD_ROW):
+        arrow = ui.label("").classes(f"{_STRIP_ARROW} {LABEL}")
+        word = ui.label(_DASH).classes(f"{_STRIP_WORD} {LABEL}")
+        mixed = ui.label("").classes(_STRIP_QUALIFIER)
+    return arrow, word, mixed
+
+
+def _paint_regime_mark(arrow, mixed, reg):
+    """The arrow takes the word's own colour; "mixed" stays muted."""
+    arrow.text = reg["arrow"]
+    arrow.classes(remove=_ALL_STATE_TEXT, add=regime_tone(reg))
+    arrow.set_visibility(bool(reg["arrow"]))
+    mixed.text = _RM.MIXED if reg["mixed"] else ""
+    mixed.set_visibility(reg["mixed"])
 # One footer size across the three as well, so their three lines sit on three
 # shared baselines. 11px carries "STRENGTH & MOMENTUM" in 143px of a 160px box.
 _STRIP_FOOT = f"text-[11px] leading-none mt-auto {MUTED}"
@@ -3659,8 +3690,7 @@ def render():
             with ui.column().classes(
                     f"{_TILE} {_STRIP_VERDICT_W} shrink-0"):
                 ui.label("MARKET REGIME").classes(_STRIP_EYEBROW)
-                regime_lbl = ui.label(_DASH).classes(
-                    f"{_STRIP_WORD} {LABEL}")
+                regime_arrow, regime_lbl, regime_mixed = _regime_word_row()
                 regime_sub = ui.label("").classes(_STRIP_FOOT)
                 # The hover the regime word currently carries — "" at build.
                 regime_tip = {"text": ""}
@@ -3780,6 +3810,7 @@ def render():
         reg = regime_display(_view("sentiment:regime"))
         regime_lbl.text = reg["word"]
         regime_lbl.classes(remove=_ALL_STATE_TEXT, add=regime_tone(reg))
+        _paint_regime_mark(regime_arrow, regime_mixed, reg)
         # Updated in place, so the hover is swapped only when its sentence
         # changes — clearing an unchanged one would close it under the cursor.
         if reg["tip"] != regime_tip["text"]:

@@ -1337,8 +1337,11 @@ pulls it *down*.
   **Rallying** or **Firming** up, **Retreating** or **Softening** down, and
   **Breakdown** for a break to the downside. That word appears only when the
   tape's own slope and the Market Trend gauge agree — when they don't it stays
-  the plain name, so this panel can never contradict the gauge above it.
-  Balanced, Whipsaw and Stressed have no direction by nature. Recomputes every
+  the plain name, so this panel can never contradict the gauge above it. The
+  four direction words carry an arrow too (**▲** up, **▼** down), and a plain
+  Trending says **mixed** beside it: the tape is trending, but the two reads
+  don't agree on which way. Balanced, Whipsaw and Stressed have no direction by
+  nature. Recomputes every
   5 minutes during market hours; outside them it holds the last read. Says
   "Unclear" when the evidence is genuinely weak rather than guessing.
 - **Daily Sentiment & Trend** — the two color-coded intraday graphs (last 5 days).

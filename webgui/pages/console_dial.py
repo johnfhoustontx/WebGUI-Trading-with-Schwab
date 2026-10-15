@@ -62,6 +62,10 @@ FULL_CIRCLE_EPS = 0.999
 # than one that is simply smaller.
 NAME_TRACK = 2
 NAME_Y, NAME_SIZE = 99.0, 21
+# The direction mark (▲ / ▼ / MIXED) gets its OWN line above the word, for the
+# reason above: RETREATING alone already uses the clear width, so an arrow
+# beside it would cross the arc. At y=74 the inner ring leaves ~108px of chord.
+MARK_Y, MARK_SIZE, MARK_TRACK = 74.0, 13, 2
 VALUE_Y, VALUE_SIZE = 127.0, 26
 CAPTION_Y, CAPTION_SIZE = 149.0, 9.5
 
@@ -94,12 +98,14 @@ def _ring(r, stroke, width, opacity=None):
             f'stroke="{stroke}" stroke-width="{width}"{op}/>')
 
 
-def dial_svg(confidence, name, uid="regime", accent=None, display_font=None):
+def dial_svg(confidence, name, uid="regime", accent=None, display_font=None,
+             mark="", mark_fill=None):
     """The confidence dial as one inline SVG string. Never raises.
 
     ``confidence`` is 0..1; ``name`` is the committed regime's display word. A
     missing/junk confidence draws the track and an em-dash rather than a zero —
-    "no reading" and "zero confidence" are different statements.
+    "no reading" and "zero confidence" are different statements. ``mark`` (the
+    word's ▲ / ▼, or "mixed") is drawn above the word; "" draws nothing.
     """
     conf = _safe_confidence(confidence)
     accent = accent or _C["accent"]
@@ -129,6 +135,10 @@ def dial_svg(confidence, name, uid="regime", accent=None, display_font=None):
                 parts.append(f'<path d="{d}" fill="none" stroke="{accent}" '
                              f'stroke-width="{STROKE}"/>')
     parts.append(_ring(R_INNER, _hairline(0.12), 1))
+    if isinstance(mark, str) and mark:
+        parts.append(_text(CX, MARK_Y, _esc(mark.upper()), MARK_SIZE,
+                           mark_fill or _P["muted"], weight=700,
+                           spacing=MARK_TRACK))
     parts.append(_text(CX, NAME_Y, _esc(str(name or "").upper()), NAME_SIZE,
                        _P["title"], weight=700, spacing=NAME_TRACK,
                        family=fam or None))

@@ -4,7 +4,27 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-15 (**Dealer Positioning: one address per subtab.**)
+**Last updated:** 2026-10-15 (**Market Regime: an arrow on the direction words, "mixed" on a bare Trending.**)
+
+- **Asked for by the user:** a direction mark beside the Market Regime word.
+- ▲ beside Rallying and Firming, ▼ beside Retreating and Softening. A bare
+  Trending (the two direction reads disagree, or one is neutral, missing or still
+  building its two-read streak) says "mixed" and never gets an arrow: an arrow
+  there would pick one of two reads that disagree.
+- Display only, in the webgui. The service's word is unchanged, so the hover, the
+  Trade filter's reasons and the pushed snapshot (`options_svc/market_console.py`,
+  a separate renderer) are untouched.
+- Pieces: `regime_mix.REGIME_ARROWS` / `MIXED_WORD` / `regime_arrow` /
+  `regime_mixed` / `regime_text`; the dial draws the mark on its own line above
+  the word (`console_dial.MARK_Y`); the Desk's regime tile puts the arrow before
+  the word and "mixed" after it at smaller sizes (`desk._regime_word_row`), and a
+  width test covers RETREATING with its arrow; `/symbol` prints `regime_text`.
+  `shared/tests/test_cross_tier_mirrors.py` pins the arrows to `_DIRECTIONAL`'s
+  signs and "mixed" to `REGIME_DISPLAY["trending"]`.
+- Docs: `page_help.py`, Reference Guide, User Guide, Technical Reference,
+  `docs/webgui-routes.md`.
+
+**Prior —** 2026-10-15 (**Dealer Positioning: one address per subtab.**)
 
 - **Asked for by the user:** distinct URLs for each subtab of
   `app.neuralstrike.co/options/gamma` (Flow and the rest).
