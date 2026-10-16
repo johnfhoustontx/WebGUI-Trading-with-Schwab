@@ -295,7 +295,8 @@ only on their own pages: **Paper Account**, **Captured Signals**, **Rescue** for
 ones in trouble, and the [Symbol](#symbol) page for one name.
 
 **Market read.** A button at the top right of the page, with the time of the
-reading and its count beside it; it opens the reading as a popup. Six readings — direction,
+reading and its count as its second line; it opens the reading as a popup, and it
+glows for five minutes after a new reading. Six readings — direction,
 breadth, structure, volatility, flow and cross-asset — each marked **Tailwind**,
 **Headwind** or **Neutral** *for stocks*, retaken on the clock every 15 minutes while
 the market is open. Each one is a reading that already exists on another page; this
@@ -314,9 +315,10 @@ anything.
 **Market report.** The second button at the top right. It opens the latest
 published **NeuralStrike market report** — the same report the website publishes
 five times a trading day (pre-market, the open, the first hour, midday and the
-close) — in a popup, in full. The line beside the button names the report, for
+close) — in a popup, in full. The button's second line names the report, for
 example **"Market close report · 14 Sep · 16:20 CT"**, and **Open in a new tab**
-inside the popup opens it on the website.
+inside the popup opens it on the website. The button glows for five minutes after
+a new report is published.
 
 It changes **when a new report is published, not on a clock**: `market_svc`
 checks on every poll whether the published report has been replaced. A popup left

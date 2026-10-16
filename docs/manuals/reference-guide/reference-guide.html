@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-15</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-16</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -795,7 +795,8 @@ At risk / Rescue flag — and Headlines was a strip under the grid. Positions no
 only on their own pages: <strong>Paper Account</strong>, <strong>Captured Signals</strong>, <strong>Rescue</strong> for the
 ones in trouble, and the <a href="#symbol">Symbol</a> page for one name.</p>
 <p><strong>Market read.</strong> A button at the top right of the page, with the time of the
-reading and its count beside it; it opens the reading as a popup. Six readings — direction,
+reading and its count as its second line; it opens the reading as a popup, and it
+glows for five minutes after a new reading. Six readings — direction,
 breadth, structure, volatility, flow and cross-asset — each marked <strong>Tailwind</strong>,
 <strong>Headwind</strong> or <strong>Neutral</strong> <em>for stocks</em>, retaken on the clock every 15 minutes while
 the market is open. Each one is a reading that already exists on another page; this
@@ -812,9 +813,10 @@ anything.</p>
 <p><strong>Market report.</strong> The second button at the top right. It opens the latest
 published <strong>NeuralStrike market report</strong> — the same report the website publishes
 five times a trading day (pre-market, the open, the first hour, midday and the
-close) — in a popup, in full. The line beside the button names the report, for
+close) — in a popup, in full. The button's second line names the report, for
 example <strong>"Market close report · 14 Sep · 16:20 CT"</strong>, and <strong>Open in a new tab</strong>
-inside the popup opens it on the website.</p>
+inside the popup opens it on the website. The button glows for five minutes after
+a new report is published.</p>
 <p>It changes <strong>when a new report is published, not on a clock</strong>: <code>market_svc</code>
 checks on every poll whether the published report has been replaced. A popup left
 open across a new report reloads to the new one. The report is fetched only when

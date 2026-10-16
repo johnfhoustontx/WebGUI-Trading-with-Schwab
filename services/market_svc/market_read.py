@@ -384,7 +384,7 @@ def build(inputs, cfg, *, date, slot, ts, previous=None) -> dict:
     interval = cfg["interval_min"]
     return {
         "enabled": True, "date": date, "ts": ts, "slot": slot,
-        "interval_min": interval,
+        "interval_min": interval, "glow_min": cfg.get("glow_min", 5),
         "next_slot": next_slot(date, slot, interval), "final": is_final(date, slot),
         "public": cfg["public"] is True, "tally": tally(rows), "rows": rows,
         "history": history,

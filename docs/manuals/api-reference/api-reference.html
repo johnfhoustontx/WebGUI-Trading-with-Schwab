@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-15</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-16</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -1003,7 +1003,7 @@ a contract (listed in <em>Cache Key Index</em>).</p>
 <td><code>MarketSummary</code></td>
 <td><code>market.py</code></td>
 <td><code>cache:market:summary</code></td>
-<td><code>headline</code> (the latest published market report's verdict title), <code>highlights</code> (its section headlines in report order, at most 5; the headline alone when the report has no sections), <code>slot</code> (<code>premarket</code> / <code>open</code> / <code>first_hour</code> / <code>midday</code> / <code>close</code>), <code>slot_label</code> (the report's own name for the slot, e.g. "Market close"), <code>report_date</code> (<code>YYYY-MM-DD</code>), <code>as_of</code> (the report's own time stamp, e.g. "16:20 CT"), <code>report_url</code> (<code>https://&lt;SITE_HOST&gt;/report.html</code>, the site's page for the report), <code>frame_url</code> (<code>https://&lt;SITE_HOST&gt;/reports/latest.html?v=&lt;report_date&gt;-&lt;slot&gt;</code>, the report itself, which the Desk frames in a dialog; the version changes with the report and is omitted when the stamp is unknown). Empty until a report has been published.</td>
+<td><code>headline</code> (the latest published market report's verdict title), <code>highlights</code> (its section headlines in report order, at most 5; the headline alone when the report has no sections), <code>slot</code> (<code>premarket</code> / <code>open</code> / <code>first_hour</code> / <code>midday</code> / <code>close</code>), <code>slot_label</code> (the report's own name for the slot, e.g. "Market close"), <code>report_date</code> (<code>YYYY-MM-DD</code>), <code>as_of</code> (the report's own time stamp, e.g. "16:20 CT"), <code>report_url</code> (<code>https://&lt;SITE_HOST&gt;/report.html</code>, the site's page for the report), <code>frame_url</code> (<code>https://&lt;SITE_HOST&gt;/reports/latest.html?v=&lt;report_date&gt;-&lt;slot&gt;</code>, the report itself, which the Desk frames in a dialog; the version changes with the report and is omitted when the stamp is unknown), <code>published_ts</code> (unix seconds <code>latest.html</code> was written, so a restart republishing the same report keeps its time; <code>0</code> = unknown). Empty until a report has been published.</td>
 </tr>
 <tr>
 <td><code>CompositeSnapshot</code></td>
@@ -2757,7 +2757,7 @@ connection and reconnect.</p>
 <h2 id="the-market-read-view">The Market read view</h2>
 <p><strong><code>cache:market:read</code></strong> is one reading of the Desk's scorecard, replaced on each clock
 slot in the regular session:</p>
-<pre><code>{enabled, date, ts, slot, interval_min, next_slot, final, public, tally, rows, history}
+<pre><code>{enabled, date, ts, slot, interval_min, glow_min, next_slot, final, public, tally, rows, history}
 </code></pre>
 <ul>
 <li>
@@ -2768,6 +2768,8 @@ slot in the regular session:</p>
 <p><code>slot</code> and <code>next_slot</code> are <code>"HH:MM"</code> Central; <code>next_slot</code> is <code>null</code> after the close
   reading, which has <code>final: true</code>.</p>
 </li>
+<li><code>glow_min</code> is how many minutes the Desk's two header buttons glow after a new
+  reading or report (<code>config/market_read.toml</code>); <code>0</code> = never.</li>
 <li><code>tally</code> is <code>{tailwind, headwind, neutral, none}</code> counts.</li>
 <li><code>rows</code> is six objects in a fixed order — <code>direction</code>, <code>breadth</code>, <code>structure</code>,
   <code>volatility</code>, <code>flow</code>, <code>cross_asset</code> — each <code>{key, verdict, facts, prev}</code>. <code>verdict</code>

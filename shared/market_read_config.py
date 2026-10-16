@@ -1,8 +1,8 @@
 """The Market read scorecard's settings, from ``config/market_read.toml``.
 
 Read by ``services/market_svc`` on every poll, so a saved override (a switch
-above all) applies within seconds and without a restart. Tier 1 does not read it: what the Desk needs (the interval)
-rides in the published view.
+above all) applies within seconds and without a restart. Tier 1 does not read it: what the Desk needs (the interval,
+and how long its two header buttons glow after an update) rides in the published view.
 
 Missing file / bad TOML / missing key / unusable value -> the built-in default
 for that key, never a raise. ``load()`` returns a fresh, cleaned mapping.
@@ -24,6 +24,9 @@ DEFAULTS = {
     "stale_after_sec": 300,
     "dashboard_stale_after_sec": 60,
     "retry_sec": 30,
+    # Minutes the Desk's Market read and Market report buttons glow after a
+    # new reading or report. 0 = never.
+    "glow_min": 5,
     "direction": {"move_pct": 0.25},
     "breadth": {"strong_share": 0.60, "weak_share": 0.40, "min_tiles": 10},
     # ``stale_after_sec`` mirrors the Desk's dealer panel (desk.STALE_AFTER_SEC,
@@ -63,6 +66,8 @@ def load() -> dict:
     for key in ("stale_after_sec", "dashboard_stale_after_sec", "retry_sec"):
         secs = finite(raw.get(key))
         out[key] = secs if secs is not None and secs > 0 else DEFAULTS[key]
+
+    out["glow_min"] = _at_least(raw.get("glow_min"), DEFAULTS["glow_min"])
 
     d = DEFAULTS
     out["direction"] = {"move_pct": _at_least(

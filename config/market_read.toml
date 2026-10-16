@@ -14,6 +14,8 @@ stale_after_sec = 300    # an input view older than this makes its rows "No read
 dashboard_stale_after_sec = 60   # the same, for the Market Dashboard's tiles: they are
                          # republished every 3 seconds, so a minute old means the poll stopped
 retry_sec = 30           # after a reading that failed to build, wait this long before retrying
+glow_min = 5             # the Desk's Market read and Market report buttons glow for this many
+                         # minutes after a new reading or report. 0 = never. Next reading.
 
 [direction]
 move_pct = 0.25          # $SPX and $NDX both up (or both down) by at least this, in percent

@@ -128,10 +128,27 @@ def button_classes(kind, tokens=None):
 
 
 def button(text, *, kind="secondary", icon=None, on_click=None, tooltip=None,
-           tokens=None):
-    """A labelled button: sentence case, verb first, one of the four kinds."""
-    b = ui.button(text, icon=icon, color=None, on_click=on_click) \
-        .props("no-caps unelevated").classes(button_classes(kind, tokens))
+           tokens=None, caption=None):
+    """A labelled button: sentence case, verb first, one of the four kinds.
+
+    ``caption`` puts a second, smaller line UNDER the label, inside the
+    button. The label and the caption are then labels of their own,
+    ``b.title_label`` and ``b.caption_label`` (``b.text`` stays empty), so a
+    painter can rewrite the caption without rebuilding the button."""
+    if caption is None:
+        b = ui.button(text, icon=icon, color=None, on_click=on_click) \
+            .props("no-caps unelevated").classes(button_classes(kind, tokens))
+    else:
+        b = ui.button(color=None, on_click=on_click) \
+            .props("no-caps unelevated").classes(button_classes(kind, tokens))
+        with b, ui.row().classes("items-center gap-2 flex-nowrap"):
+            if icon:
+                ui.icon(icon).classes("text-[20px]")
+            with ui.column().classes("items-start gap-0"):
+                b.title_label = ui.label(text).classes("leading-tight")
+                b.caption_label = ui.label(caption).classes(
+                    f"text-[11px] leading-tight tabular-nums whitespace-nowrap "
+                    f"{_t.MUTED}")
     if tooltip:
         with b:
             # The width is a CLASS: as a prop it becomes an inline style, which

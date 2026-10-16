@@ -663,6 +663,17 @@ def test_the_market_read_refuses_dealer_levels_at_the_age_the_dealer_panel_greys
         "from webgui/pages/desk.py:STALE_AFTER_SEC.")
 
 
+# --- how long the Desk's header buttons glow ------------------------------------
+# The window rides on the read view; the Desk's constant is only the fallback
+# until a reading carrying it arrives, and must not glow for a different time.
+def test_the_desk_glow_fallback_is_the_market_read_default():
+    page = _const("webgui/pages/desk.py", "GLOW_FRESH_MIN")
+    service = _const("shared/market_read_config.py", "DEFAULTS")["glow_min"]
+    assert page and service == page, (
+        "shared/market_read_config.py glow_min has drifted from "
+        "webgui/pages/desk.py:GLOW_FRESH_MIN.")
+
+
 def test_the_breadth_pin_is_the_same_payload_in_both_tiers():
     """Each tier counts BREADTH_PIN in its own suite and expects (3, 2). That
     proves nothing unless the two payloads are one payload."""

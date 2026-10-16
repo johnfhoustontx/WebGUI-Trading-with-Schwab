@@ -498,7 +498,9 @@ def test_the_painter_is_module_level_and_wired_without_a_new_nested_function():
     # ...and the one-second clock re-checks it, so a reading that stops
     # updating greys without waiting for a new one to arrive.
     tick = src[src.index("def _tick_clock("):src.index("async def _poll(")]
-    assert "paint_read(" in tick and "force=False" in tick
+    assert "tick_popups(" in tick
+    clock = inspect.getsource(d.tick_popups)
+    assert "paint_read(" in clock and "force=False" in clock
 
 
 def test_the_dialog_says_what_it_is_and_what_it_is_not():

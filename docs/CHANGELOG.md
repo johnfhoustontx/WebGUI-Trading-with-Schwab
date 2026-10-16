@@ -4,7 +4,29 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-15 (**Market Regime: an arrow on the direction words, "mixed" on a bare Trending.**)
+**Last updated:** 2026-10-16 (**Desk: the header buttons carry their status and glow while new; Dealer Positioning columns reordered.**)
+
+- **Asked for by the user:** the line beside the Market read and Market report
+  buttons moved inside them, and a neon glow on either button whose latest update
+  is within 5 minutes.
+- `kit.button(..., caption=)` draws a second, smaller line inside the button
+  (`title_label` / `caption_label`); the Desk's two statuses are those captions.
+- The glow: `desk.is_fresh` against the read's `ts` and the report's new
+  `published_ts` (latest.html's mtime, set by `report_summary.read_report`, so a
+  `market_svc` restart republishing the same report does not glow). A pulsing
+  cyan box-shadow (`.q-btn.desk-fresh` in `DESK_NEON_CSS`), static under reduced
+  motion. The one-second clock takes it off (`desk.tick_popups`).
+- The window is `config/market_read.toml glow_min` (5; 0 = never), carried on
+  `cache:market:read` because Tier 1 reads no service config; `GLOW_FRESH_MIN` is
+  the fallback, pinned to the default by `test_cross_tier_mirrors`. Contracts:
+  `MarketRead.glow_min`, `MarketSummary.published_ts`.
+- Same day, also asked for: the Dealer Positioning columns now run Symbol, Price,
+  Ceiling, Price vs Walls, Floor, Flip Level, Dealer Mode — the walls flank the map
+  that draws price between them. Each grid track moved with its label.
+- Docs: `page_help.py`, User Guide, Reference Guide, Technical Reference, API
+  Reference.
+
+**Prior —** 2026-10-15 (**Market Regime: an arrow on the direction words, "mixed" on a bare Trending.**)
 
 - **Asked for by the user:** a direction mark beside the Market Regime word.
 - ▲ beside Rallying and Firming, ▼ beside Retreating and Softening. A bare

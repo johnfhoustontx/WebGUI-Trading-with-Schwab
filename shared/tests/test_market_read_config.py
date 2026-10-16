@@ -162,3 +162,10 @@ def test_a_scalar_where_a_table_belongs_falls_back_to_that_table(monkeypatch):
     cfg = mr.load()
     assert cfg["flow"] == mr.DEFAULTS["flow"]
     assert cfg["direction"] == mr.DEFAULTS["direction"]
+
+
+@pytest.mark.parametrize("value,want", [(5, 5), (0, 0), (12.5, 12.5), (-1, 5),
+                                        (math.nan, 5), ("5", 5), (True, 5), (None, 5)])
+def test_the_desk_glow_is_a_non_negative_number_of_minutes(monkeypatch, value, want):
+    _with(monkeypatch, glow_min=value)
+    assert mr.load()["glow_min"] == want

@@ -218,7 +218,7 @@ a contract (listed in *Cache Key Index*).
 | `TradeAnalysis` | `trade.py` | `cache:trade:analysis` | `symbol`, `description`, `price`, `volume`, `bias`, `ema_alignment{}`, `momentum{}`, `volume_profile{}`, `sector{}`, `position_verdict{}`, `investor_verdict{}`, `fundamentals{}`, `fundamentals_available`, `markov{}` (optional), `swing_model{}` (optional), `classification{}` (optional: `name`, `sector`, `industry`, `sub_industry`, `industry_rank`, `industry_count`, `leaders[]` of `{rank, symbol, name, market_cap}`; `null` for a symbol the listed-stocks file does not list), `timestamp`, `errors[]` |
 | `PortfolioModel` | `portfolio.py` | `cache:portfolio:positions` | `holdings_rows[]`, `sector_rows[]`, `performance_rows[]`, `suggestions{}`, `proxy_up`, `streaming`, `errors[]`, `timestamp` |
 | `MarketDashboard` | `market.py` | `cache:market:dashboard` | `categories[]` (ordered frames of display-ready tiles), `proxy_up`, `errors[]` |
-| `MarketSummary` | `market.py` | `cache:market:summary` | `headline` (the latest published market report's verdict title), `highlights` (its section headlines in report order, at most 5; the headline alone when the report has no sections), `slot` (`premarket` / `open` / `first_hour` / `midday` / `close`), `slot_label` (the report's own name for the slot, e.g. "Market close"), `report_date` (`YYYY-MM-DD`), `as_of` (the report's own time stamp, e.g. "16:20 CT"), `report_url` (`https://<SITE_HOST>/report.html`, the site's page for the report), `frame_url` (`https://<SITE_HOST>/reports/latest.html?v=<report_date>-<slot>`, the report itself, which the Desk frames in a dialog; the version changes with the report and is omitted when the stamp is unknown). Empty until a report has been published. |
+| `MarketSummary` | `market.py` | `cache:market:summary` | `headline` (the latest published market report's verdict title), `highlights` (its section headlines in report order, at most 5; the headline alone when the report has no sections), `slot` (`premarket` / `open` / `first_hour` / `midday` / `close`), `slot_label` (the report's own name for the slot, e.g. "Market close"), `report_date` (`YYYY-MM-DD`), `as_of` (the report's own time stamp, e.g. "16:20 CT"), `report_url` (`https://<SITE_HOST>/report.html`, the site's page for the report), `frame_url` (`https://<SITE_HOST>/reports/latest.html?v=<report_date>-<slot>`, the report itself, which the Desk frames in a dialog; the version changes with the report and is omitted when the stamp is unknown), `published_ts` (unix seconds `latest.html` was written, so a restart republishing the same report keeps its time; `0` = unknown). Empty until a report has been published. |
 | `CompositeSnapshot` | `sentiment.py` | (validation only) | `total: float`, `bias: str`, `components{}` |
 | `RescueAdvisory` | `options.py` | `cache:options:rescue:<position_id>` | `position_id`, `symbol`, `strategy`, `state`, `heat`, `mark`, `context[]`, `candidates[]`, `error` |
 | `RescueCandidate` | `options.py` | (embedded in `RescueAdvisory.candidates`) | `action`, `label`, `apply_kind` (`execute`\|`advisory`), `gross_cash`, `commission`, `net_cash`, `new_max_loss`, `breakeven`, `short_delta`, `width`, `expiry`, `dte_after`, `est_fill_legs[]`, `rationale[]`, `context[]`, `warnings[]`, `score` |
@@ -1008,7 +1008,7 @@ Consumers today: `portfolio_svc` and `sentiment_svc` (`/stream/quotes`),
 slot in the regular session:
 
 ```
-{enabled, date, ts, slot, interval_min, next_slot, final, public, tally, rows, history}
+{enabled, date, ts, slot, interval_min, glow_min, next_slot, final, public, tally, rows, history}
 ```
 
 - `enabled: false` is a **retraction**: the operator switched the Market read off. It
@@ -1016,6 +1016,8 @@ slot in the regular session:
 
 - `slot` and `next_slot` are `"HH:MM"` Central; `next_slot` is `null` after the close
   reading, which has `final: true`.
+- `glow_min` is how many minutes the Desk's two header buttons glow after a new
+  reading or report (`config/market_read.toml`); `0` = never.
 - `tally` is `{tailwind, headwind, neutral, none}` counts.
 - `rows` is six objects in a fixed order — `direction`, `breadth`, `structure`,
   `volatility`, `flow`, `cross_asset` — each `{key, verdict, facts, prev}`. `verdict`

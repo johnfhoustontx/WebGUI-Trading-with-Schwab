@@ -1646,32 +1646,74 @@ def read_header(view, now):
 
 
 def read_status(header):
-    """The one line beside the Market read button: when the reading was taken
+    """The caption inside the Market read button: when the reading was taken
     and its count, so the page says something with the dialog closed."""
     return " · ".join(p for p in (header["text"], header["tally"]) if p)
 
 
+# How long the two header buttons glow after a new reading or report. The
+# operator's value is ``config/market_read.toml`` ``glow_min``, which market_svc
+# publishes on the read view (Tier 1 reads no service config); this is the
+# fallback until a reading carrying it arrives, and mirrors that file's default
+# (pinned by test_cross_tier_mirrors).
+GLOW_FRESH_MIN = 5
+# A publish stamped slightly AHEAD of this page's clock is still new: the
+# service and the page are separate processes, and a second or two of drift
+# must not cost the glow.
+_GLOW_SKEW_SEC = 60
+FRESH_CLASS = "desk-fresh"
+
+
+def glow_window_min(read_view):
+    """The glow window, in minutes, off the read view; the fallback when the
+    view does not carry a usable one. 0 means never glow."""
+    got = _finite(read_view.get("glow_min")) if isinstance(read_view, dict) else None
+    return got if got is not None and got >= 0 else GLOW_FRESH_MIN
+
+
+def is_fresh(ts, now_ts, window_min):
+    """Whether something published at unix ``ts`` is within ``window_min``
+    minutes of ``now_ts``. No time (0 or missing) is never fresh: a payload
+    from before the stamp existed must not glow for ever."""
+    ts, now_ts, window = _finite(ts), _finite(now_ts), _finite(window_min)
+    if not ts or now_ts is None or not window or window <= 0:
+        return False
+    age = now_ts - ts
+    return -_GLOW_SKEW_SEC <= age < window * 60
+
+
+def _set_glow(btn, on):
+    """Put the glow on or take it off, touching the element only on a change:
+    the one-second clock calls this, and an unchanged button sends nothing."""
+    on = bool(on)
+    if getattr(btn, "_desk_glow", None) is on:
+        return
+    btn._desk_glow = on
+    if on:
+        btn.classes(add=FRESH_CLASS)
+    else:
+        btn.classes(remove=FRESH_CLASS)
+
+
 def build_popups(actions):
-    """The Desk's two popups: a button and a one-line status for each in the
-    header's action row, and the dialog each opens. Module-level, like the row
+    """The Desk's two popups: a button for each in the header's action row,
+    its one-line status INSIDE it as a caption, and the dialog each opens. Module-level, like the row
     builders, because ``render`` is at its size ceiling.
 
     Returns the handles ``paint_read`` and ``paint_report`` draw into. A
     dialog's content is not in the browser's document while it is closed, so
     the report's frame costs nothing until someone opens it and is fetched
     afresh on every open."""
-    # Two groups side by side on a wide screen; each may drop to its own line,
-    # and a status under its button, rather than push the header off a phone.
+    # Two groups side by side on a wide screen; each may drop to its own line
+    # rather than push the header off a phone.
     actions.classes(remove="no-wrap", add="flex-wrap justify-end gap-x-4 gap-y-1")
     group = "items-center justify-end gap-2 flex-wrap"
-    status = f"text-[11px] tabular-nums min-w-0 {MUTED}"
     with actions:
         with ui.row().classes(group) as read_group:
-            read_status_lbl = ui.label("").classes(status)
-            read_btn = kit.button(READ_TITLE, icon="fact_check")
+            read_btn = kit.button(READ_TITLE, icon="fact_check", caption="")
         with ui.row().classes(group) as report_group:
-            report_status = ui.label("").classes(status)
-            report_btn = kit.button(REPORT_TITLE, icon="article")
+            report_btn = kit.button(REPORT_TITLE, icon="article", caption="")
+    read_status_lbl, report_status = read_btn.caption_label, report_btn.caption_label
     read_dlg = kit.info_dialog(READ_TITLE, width="w-[1040px]")
     with read_dlg.content:
         with ui.row().classes("items-baseline justify-between w-full gap-4 flex-wrap"):
@@ -1693,6 +1735,7 @@ def build_popups(actions):
     read_btn.on_click(guard(read_dlg.open))
     report_btn.on_click(guard(report_dlg.open))
     return SimpleNamespace(
+        read_btn=read_btn, report_btn=report_btn, glow_min=GLOW_FRESH_MIN,
         read_group=read_group, read_status=read_status_lbl, read_dialog=read_dlg,
         read_head=read_head, read_body=read_body,
         report_group=report_group, report_status=report_status,
@@ -1713,7 +1756,11 @@ def paint_read(popup, view, memo, force=True):
     which is not "no reading yet"."""
     hidden = read_hidden(view)
     shown = None if hidden else read_view_shown(view)
-    header = read_header(shown, datetime.now(_CT))
+    now = datetime.now(_CT)
+    header = read_header(shown, now)
+    popup.glow_min = glow_window_min(view)
+    _set_glow(popup.read_btn, header["state"] != "waiting" and isinstance(shown, dict)
+              and is_fresh(shown.get("ts"), now.timestamp(), popup.glow_min))
     key = (hidden, header["state"], header["text"], header["tally"],
            shown.get("ts") if isinstance(shown, dict) else None)
     if not force and memo.get("key") == key:
@@ -1722,6 +1769,7 @@ def paint_read(popup, view, memo, force=True):
     stale = header["state"] == "stale"
     popup.read_group.set_visibility(not hidden)
     popup.read_status.text = read_status(header)
+    popup.read_status.set_visibility(bool(popup.read_status.text))
     popup.read_status.classes(remove="opacity-50", add="opacity-50" if stale else "")
     popup.read_head.clear()
     popup.read_body.clear()
@@ -1761,7 +1809,9 @@ def paint_report(popup, view):
     than showing the old one under the new one's name."""
     f = report_facts(view)
     popup.report_group.set_visibility(bool(f["frame_url"]))
+    _glow_report(popup, view)
     popup.report_status.text = f["source"]
+    popup.report_status.set_visibility(bool(f["source"]))
     popup.report_source.text = f["source"]
     for el, prop, value in ((popup.report_link, "href", f["url"] or "#"),
                             (popup.report_frame, "src", f["frame_url"] or "about:blank")):
@@ -1771,6 +1821,22 @@ def paint_report(popup, view):
     popup.report_link.set_visibility(bool(f["url"]))
     if not f["frame_url"]:
         popup.report_dialog.close()
+
+
+def _glow_report(popup, view):
+    """The Market report button glows while the report is new: published
+    (latest.html written) within the read view's glow window."""
+    published = view.get("published_ts") if isinstance(view, dict) else None
+    _set_glow(popup.report_btn, bool(report_facts(view)["frame_url"])
+              and is_fresh(published, time.time(), popup.glow_min))
+
+
+def tick_popups(popup, read_view, summary_view, memo):
+    """The one-second clock's share of the two buttons: the read's caption
+    greys when it stops updating, and each glow goes out when its window
+    ends. Neither waits for a new view to arrive."""
+    paint_read(popup, read_view, memo, force=False)
+    _glow_report(popup, summary_view)
 
 
 # ── the page ─────────────────────────────────────────────────────────────────
@@ -2450,6 +2516,15 @@ DESK_NEON_CSS = f"""
               border-radius: 3px; }}
 .desk-neon-{GLOW_NEW} {{ --neon: {SPOT_HEX}; }}
 {_NEON_STEPS_CSS}
+@keyframes deskFresh {{
+  0%, 100% {{ box-shadow: 0 0 0 1px {SPOT_HEX}, 0 0 8px 0 {SPOT_HEX}99; }}
+  50%      {{ box-shadow: 0 0 0 1px {SPOT_HEX}, 0 0 18px 3px {SPOT_HEX}; }}
+}}
+.q-btn.{FRESH_CLASS} {{ animation: deskFresh 2.4s ease-in-out infinite; }}
+@media (prefers-reduced-motion: reduce) {{
+  .q-btn.{FRESH_CLASS} {{ animation: none;
+                       box-shadow: 0 0 0 1px {SPOT_HEX}, 0 0 14px 2px {SPOT_HEX}; }}
+}}
 """
 
 # ⚠ THE PAGE LOADED TWO FACES OF ITS OWN AND NOW LOADS NONE (2026-09-19). The
@@ -4153,8 +4228,8 @@ def render():
         facts = countdown_facts(datetime.now(_CT))
         clock_cap.text = facts["label"]
         clock_lbl.text = facts["text"]
-        paint_read(popups, _view(READ_VIEW), state.setdefault("read", {}),
-                   force=False)
+        tick_popups(popups, _view(READ_VIEW), _view("market:summary"),
+                    state.setdefault("read", {}))
 
     @guard_async
     async def _poll():

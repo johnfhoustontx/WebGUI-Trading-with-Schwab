@@ -45,6 +45,9 @@ class MarketSummary(_Base):
     # The report page itself, versioned by its own stamp: what the Desk's
     # Market report dialog frames.
     frame_url: str = ""
+    # Unix seconds latest.html was written: when the report was PUBLISHED, which
+    # the Desk's button glows on. 0 = not known (a payload from before this).
+    published_ts: int = 0
 
 
 class MarketRead(_Base):
@@ -68,6 +71,8 @@ class MarketRead(_Base):
     ts: int = 0                    # unix seconds the reading was taken
     slot: str = ""                 # "HH:MM" Central, the clock slot
     interval_min: int = 15
+    # Minutes the Desk's two header buttons glow after an update; 0 = never.
+    glow_min: float = 5
     next_slot: str | None = None   # None after the close reading
     final: bool = False            # the reading taken at the close
     public: bool = False

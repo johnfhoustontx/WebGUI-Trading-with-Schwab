@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-15</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-16</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -6976,6 +6976,11 @@ both have a silent failure mode behind them.</p>
 <td>Headlines shown</td>
 <td><strong>9</strong> newest (1–30), read at start</td>
 <td><code>config/news.toml [desk] headlines</code> → <code>shared/news_config.desk_headlines</code> → <code>desk.py:NEWS_ROWS_N</code></td>
+</tr>
+<tr>
+<td>Header buttons glow</td>
+<td>the Market read / Market report button glows while its reading's <code>ts</code> / the report's <code>published_ts</code> (latest.html's mtime) is under <strong>5 min</strong> old, up to 60 s ahead of the page's clock; 0 = never. A pulsing box-shadow, static under reduced motion</td>
+<td><code>config/market_read.toml glow_min</code>, carried on <code>cache:market:read</code> → <code>desk.py:glow_window_min</code>, <code>is_fresh</code>, <code>FRESH_CLASS</code></td>
 </tr>
 <tr>
 <td>Board re-entry quiet</td>

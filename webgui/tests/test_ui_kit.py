@@ -125,6 +125,17 @@ def test_button_is_sentence_case_and_not_quasar_blue():
     assert set(theme.BTN_PRIMARY.split()) <= set(b.classes)
 
 
+def test_a_caption_is_a_second_line_inside_the_button():
+    with ui.card():
+        b = kit.button("Market read", icon="fact_check", caption="15:00 CT")
+    assert b._props.get("no-caps") is True
+    assert b.title_label.text == "Market read"
+    assert b.caption_label.text == "15:00 CT"
+    inside = list(b.descendants())
+    assert b.title_label in inside and b.caption_label in inside
+    assert any(e.tag == "q-icon" for e in inside)
+
+
 def test_an_icon_button_must_say_what_it_does():
     with pytest.raises(TypeError):
         kit.icon_button("delete")          # tooltip is required

@@ -118,8 +118,8 @@ on · what is being said.*
   shows anything open in one name.
 - **Market read** (button, top right) — opens a popup of six readings, each
   marked **Tailwind**, **Headwind** or **Neutral** under the heading **For
-  stocks**. The line beside the button is the time of the reading and its
-  count, so you can read it without opening anything. A new reading is taken every 15
+  stocks**. The smaller text under its name, inside the button, is the time of
+  the reading and its count, so you can read it without opening anything. A new reading is taken every 15
   minutes while the market is open, on the clock (12:45, 13:00…), and the last
   one of the day is the close. Each row is something already on another page:
   **Direction** (the S&P 500 and Nasdaq 100 on the day), **Breadth** (how many
@@ -137,11 +137,15 @@ on · what is being said.*
   rows turn grey and the head says *not updating*, the readings have stopped
   arriving and you are looking at the last one.
 - **Market report** (button, top right) — opens the **latest market report**
-  in a popup, in full. The line beside the button says which report it is (for
-  example *Market close report · 14 Sep · 16:20 CT*); it changes when a new
-  report is published (five a trading day), not on a clock. **Open in a new
+  in a popup, in full. The smaller text under its name, inside the button, says
+  which report it is (for example *Market close report · 14 Sep · 16:20 CT*); it changes when a
+  new report is published (five a trading day), not on a clock. **Open in a new
   tab** inside the popup opens the same report on the website. The button is
   absent until a report has been published.
+  **Either button glows** for five minutes after a new reading or a new
+  report, so you can see at a glance that something has just changed (the
+  time is *Glow the Desk's buttons for* under Settings → Configuration →
+  Market read).
 
 **Click a dealer, board or flow row** to open the page it came from, already set
 to that symbol. Nothing on this page places or changes a trade.

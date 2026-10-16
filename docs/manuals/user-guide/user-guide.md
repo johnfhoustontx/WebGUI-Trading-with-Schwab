@@ -512,8 +512,8 @@ structure · what should I act on · what is being said.*
 | **Opportunity Board** | The six hottest names, with implied volatility and whether it is rising or falling, and a setup tag |
 | **Live Flow Alerts** | The newest unusual-options events. A row that names one contract can carry a bar under it: the estimated share of its volume that was bought (green), sold (red), or could not be told (grey) |
 | **Headlines** | The nine newest stories from Market News, one line each — time (Central), feed, and the headline, which opens the article in a new tab. **All headlines →** opens Market News. It sits beside Live Flow Alerts. How many it shows is a setting: **Settings → Configuration → Market news → Headlines on the Desk** |
-| **Market read** (button, top right) | Opens a popup of six readings, each marked Tailwind, Headwind or Neutral for stocks, retaken every 15 minutes in the session. The time and the count sit beside the button. See [The Market read](#the-market-read) |
-| **Market report** (button, top right) | Opens the latest published market report, in full, in a popup. Which report it is sits beside the button |
+| **Market read** (button, top right) | Opens a popup of six readings, each marked Tailwind, Headwind or Neutral for stocks, retaken every 15 minutes in the session. The time and the count are the button's second line, and the button glows for five minutes after a new reading. See [The Market read](#the-market-read) |
+| **Market report** (button, top right) | Opens the latest published market report, in full, in a popup. Which report it is is the button's second line, and the button glows for five minutes after a new report |
 
 **The Desk does not show your positions.** It did until 11 October 2026, in the
 panel Headlines now occupies. Open paper trades are on **Paper Account**, captured
@@ -586,12 +586,13 @@ as the scanner chime.
 **Market report** is the second button at the top right of the page. It opens the
 latest published **NeuralStrike market report** — the report the website publishes
 five times a trading day — in a popup, in full, so you can read it without leaving
-the Desk. The line beside the button names the report, for example "Market close
+the Desk. The button's second line names the report, for example "Market close
 report · 14 Sep · 16:20 CT", and **Open in a new tab** inside the popup opens the
 same report on the website. Three things are easy to misread:
 
 - **It changes when a new report is published, not on a schedule.** Check the
-  line beside the button for the report's age.
+  button's second line for the report's age; the button glows for five minutes
+  after a new one.
 - **A popup left open across a new report reloads to the new one.**
 - **Before any report has been published there is no Market report button.**
 
@@ -604,10 +605,10 @@ six readings are still on the strip at the top of the page.
 
 ### The Market read {#the-market-read}
 
-**To open it:** the **Market read** button at the top right of the Desk. The line
-beside the button shows when the reading was taken and how it counts, for example
+**To open it:** the **Market read** button at the top right of the Desk. The
+button's second line shows when the reading was taken and how it counts, for example
 "12:45 CT · next 13:00 · 2 tailwinds · 2 headwinds", so the page says something
-with the popup closed.
+with the popup closed. **Either button glows** for five minutes after a new reading or a new report (Settings → Configuration → Market read → *Glow the Desk's buttons for*; 0 turns it off).
 
 The Desk, the Market Dashboard and Flow Alerts each show part of what the market
 is doing. The Market read lines six of those readings up and says, for each, which

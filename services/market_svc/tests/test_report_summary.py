@@ -103,3 +103,14 @@ def test_read_report_off_disk(tmp_path):
 def test_the_report_lives_under_the_served_site_root():
     from repo_paths import SITE_ROOT
     assert rs.REPORTS_DIR == SITE_ROOT / "reports"
+
+
+def test_read_report_carries_the_files_own_publish_time(tmp_path):
+    """The Desk glows on this, so it is the FILE's time: a restart that
+    republishes the same report must not make it read as new."""
+    import os
+    page = tmp_path / "latest.html"
+    page.write_text(_page("Chips broke"), encoding="utf-8")
+    os.utime(page, (1_760_000_000, 1_760_000_000))
+    assert rs.read_report(tmp_path)["published_ts"] == 1_760_000_000
+    assert rs.read_report(tmp_path)["published_ts"] == 1_760_000_000

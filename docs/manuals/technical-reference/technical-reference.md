@@ -3699,6 +3699,7 @@ both have a silent failure mode behind them.
 | Synthesis bound | **20 s** whole-call timeout; measured **~0.9–2.4 s** on a cache miss, **~110 µs** on a hit, ~22–28 KB a clip | `voice.py:SYNTH_TIMEOUT_SEC` |
 | Abandoned-temp sweep | `*.part` older than **3600 s**, swept at prewarm | `voice.py:_PART_MAX_AGE_SEC` |
 | Headlines shown | **9** newest (1–30), read at start | `config/news.toml [desk] headlines` → `shared/news_config.desk_headlines` → `desk.py:NEWS_ROWS_N` |
+| Header buttons glow | the Market read / Market report button glows while its reading's `ts` / the report's `published_ts` (latest.html's mtime) is under **5 min** old, up to 60 s ahead of the page's clock; 0 = never. A pulsing box-shadow, static under reduced motion | `config/market_read.toml glow_min`, carried on `cache:market:read` → `desk.py:glow_window_min`, `is_fresh`, `FRESH_CLASS` |
 | Board re-entry quiet | a symbol back on the Opportunity Board within **1800 s** of leaving glows but is not spoken | `desk.py:BOARD_REENTRY_QUIET_SEC` |
 | Section switches | `voice_board` · `voice_flow`, each under `voice_enabled`; detection still runs for a silenced section so re-enabling it announces nothing stale | `desk.py:VOICE_SECTIONS`, `detect_utterances` |
 

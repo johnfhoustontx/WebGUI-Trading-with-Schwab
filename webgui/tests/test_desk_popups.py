@@ -69,7 +69,16 @@ def test_both_buttons_sit_in_the_page_header(monkeypatch):
         assert "min-h-[38px]" in header._classes    # kit.header's own row
     buttons = [e for e in popup.read_group.descendants() if e.tag == "q-btn"] + \
         [e for e in popup.report_group.descendants() if e.tag == "q-btn"]
-    assert [b.text for b in buttons] == [d.READ_TITLE, d.REPORT_TITLE]
+    assert [b.title_label.text for b in buttons] == [d.READ_TITLE, d.REPORT_TITLE]
+
+
+def test_each_status_is_a_caption_inside_its_button(monkeypatch):
+    """The line that sat beside each button is now the button's second line."""
+    popup, _new = _render(monkeypatch, **{"market:summary": _summary()})
+    assert popup.report_status is popup.report_btn.caption_label
+    assert popup.read_status is popup.read_btn.caption_label
+    assert popup.report_status in list(popup.report_btn.descendants())
+    assert popup.report_btn.caption_label.text == "Market close report · 14 Sep · 16:20 CT"
 
 
 def test_each_button_opens_its_own_dialog(monkeypatch):
@@ -189,3 +198,68 @@ def test_the_popups_use_the_page_kit_not_raw_dialogs_or_buttons():
     assert "kit.info_dialog(" in src and "kit.button(" in src
     assert "ui.dialog(" not in src and "ui.button(" not in src
     assert ".style(" not in src and "style=" not in src
+
+
+# --- the glow while new --------------------------------------------------------
+
+def _read(ts, **over):
+    from datetime import datetime
+    today = datetime.now(d._CT).date().isoformat()
+    base = {"enabled": True, "public": True, "date": today, "ts": ts, "slot": "15:00",
+            "interval_min": 15, "final": True, "glow_min": 5,
+            "tally": {"headwind": 1},
+            "rows": [{"key": "direction", "verdict": "headwind", "facts": {}}]}
+    base.update(over)
+    return base
+
+
+@pytest.mark.parametrize("age_sec,want", [(0, True), (299, True), (300, False),
+                                          (3600, False), (-30, True), (-120, False)])
+def test_fresh_is_inside_the_window(age_sec, want):
+    assert d.is_fresh(1_000_000 - age_sec, 1_000_000, 5) is want
+
+
+@pytest.mark.parametrize("ts,window", [(0, 5), (None, 5), ("x", 5), (float("nan"), 5),
+                                       (999_990, 0), (999_990, None)])
+def test_no_time_or_no_window_never_glows(ts, window):
+    assert d.is_fresh(ts, 1_000_000, window) is False
+
+
+def test_the_window_comes_off_the_read_view():
+    assert d.glow_window_min({"glow_min": 2}) == 2
+    assert d.glow_window_min({"glow_min": 0}) == 0
+    for bad in (None, {}, {"glow_min": -1}, {"glow_min": "5"}):
+        assert d.glow_window_min(bad) == d.GLOW_FRESH_MIN
+
+
+def test_a_new_reading_glows_and_an_old_one_does_not(monkeypatch):
+    import time as _time
+    popup, _new = _render(monkeypatch, **{"market:summary": _summary()})
+    d.paint_read(popup, _read(int(_time.time()) - 60), {})
+    assert d.FRESH_CLASS in popup.read_btn._classes
+    d.paint_read(popup, _read(int(_time.time()) - 600), {})
+    assert d.FRESH_CLASS not in popup.read_btn._classes
+    # The operator's window rides on the view: 0 turns it off.
+    d.paint_read(popup, _read(int(_time.time()) - 10, glow_min=0), {})
+    assert d.FRESH_CLASS not in popup.read_btn._classes
+
+
+def test_a_new_report_glows_until_its_window_ends(monkeypatch):
+    import time as _time
+    now = _time.time()
+    popup, _new = _render(monkeypatch, **{"market:summary": _summary()})
+    # A payload from before published_ts existed never glows.
+    assert d.FRESH_CLASS not in popup.report_btn._classes
+    new = _summary(published_ts=int(now) - 120)
+    d.paint_report(popup, new)
+    assert d.FRESH_CLASS in popup.report_btn._classes
+    # The clock takes it off with no new view arriving.
+    monkeypatch.setattr(d.time, "time", lambda: now + 600)
+    d.tick_popups(popup, None, new, {})
+    assert d.FRESH_CLASS not in popup.report_btn._classes
+
+
+def test_the_glow_is_a_real_rule_in_the_pages_stylesheet():
+    css = d.DESK_NEON_CSS
+    assert f".q-btn.{d.FRESH_CLASS}" in css and "@keyframes deskFresh" in css
+    assert "prefers-reduced-motion" in css

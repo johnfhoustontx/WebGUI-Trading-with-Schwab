@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-15</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-16</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -729,11 +729,11 @@ structure · what should I act on · what is being said.</em></p>
 </tr>
 <tr>
 <td><strong>Market read</strong> (button, top right)</td>
-<td>Opens a popup of six readings, each marked Tailwind, Headwind or Neutral for stocks, retaken every 15 minutes in the session. The time and the count sit beside the button. See <a href="#the-market-read">The Market read</a></td>
+<td>Opens a popup of six readings, each marked Tailwind, Headwind or Neutral for stocks, retaken every 15 minutes in the session. The time and the count are the button's second line, and the button glows for five minutes after a new reading. See <a href="#the-market-read">The Market read</a></td>
 </tr>
 <tr>
 <td><strong>Market report</strong> (button, top right)</td>
-<td>Opens the latest published market report, in full, in a popup. Which report it is sits beside the button</td>
+<td>Opens the latest published market report, in full, in a popup. Which report it is is the button's second line, and the button glows for five minutes after a new report</td>
 </tr>
 </tbody>
 </table>
@@ -799,12 +799,13 @@ as the scanner chime.</p>
 <p><strong>Market report</strong> is the second button at the top right of the page. It opens the
 latest published <strong>NeuralStrike market report</strong> — the report the website publishes
 five times a trading day — in a popup, in full, so you can read it without leaving
-the Desk. The line beside the button names the report, for example "Market close
+the Desk. The button's second line names the report, for example "Market close
 report · 14 Sep · 16:20 CT", and <strong>Open in a new tab</strong> inside the popup opens the
 same report on the website. Three things are easy to misread:</p>
 <ul>
 <li><strong>It changes when a new report is published, not on a schedule.</strong> Check the
-  line beside the button for the report's age.</li>
+  button's second line for the report's age; the button glows for five minutes
+  after a new one.</li>
 <li><strong>A popup left open across a new report reloads to the new one.</strong></li>
 <li><strong>Before any report has been published there is no Market report button.</strong></li>
 </ul>
@@ -814,10 +815,10 @@ Bias, Signal, Regime, Bull/Bear). The full report replaced the highlights, and a
 six readings are still on the strip at the top of the page.</p>
 <hr />
 <h3 id="the-market-read">The Market read</h3>
-<p><strong>To open it:</strong> the <strong>Market read</strong> button at the top right of the Desk. The line
-beside the button shows when the reading was taken and how it counts, for example
+<p><strong>To open it:</strong> the <strong>Market read</strong> button at the top right of the Desk. The
+button's second line shows when the reading was taken and how it counts, for example
 "12:45 CT · next 13:00 · 2 tailwinds · 2 headwinds", so the page says something
-with the popup closed.</p>
+with the popup closed. <strong>Either button glows</strong> for five minutes after a new reading or a new report (Settings → Configuration → Market read → <em>Glow the Desk's buttons for</em>; 0 turns it off).</p>
 <p>The Desk, the Market Dashboard and Flow Alerts each show part of what the market
 is doing. The Market read lines six of those readings up and says, for each, which
 way it points <strong>for stocks</strong>.</p>

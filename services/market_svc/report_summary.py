@@ -156,4 +156,11 @@ def read_report(reports_dir=REPORTS_DIR):
     payload = parse_report(html_text, latest_txt)
     if payload is None:
         log.warning("latest market report did not parse - summary left as it was")
+        return None
+    # The file's own time, so a service restart republishing the same report
+    # does not make it read as new (the Desk glows on this).
+    try:
+        payload["published_ts"] = int((reports_dir / "latest.html").stat().st_mtime)
+    except OSError:
+        payload["published_ts"] = 0
     return payload

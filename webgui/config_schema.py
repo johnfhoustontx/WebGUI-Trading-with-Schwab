@@ -2227,6 +2227,10 @@ _MARKET_READ = ConfigFile(
                   kind="int", unit="sec", min=10, max=3600, step=10),
             Field("retry_sec", "After a failed reading, retry after", "",
                   kind="int", unit="sec", min=5, max=600, step=5),
+            Field("glow_min", "Glow the Desk's buttons for",
+                  "The Market read and Market report buttons glow for this long "
+                  "after a new reading or report. 0 = never. Applies at the next "
+                  "reading.", kind="int", unit="min", min=0, max=60, step=1),
         )),
         Section("Direction", "The S&P 500 and Nasdaq 100 indexes, on the day.", (
             Field("direction.move_pct", "Both up or both down by at least", "",
