@@ -3478,8 +3478,8 @@ def test_the_dropped_facts_are_the_columns_underneath_them():
 
 
 def test_headers_name_the_use_not_the_mechanism():
-    assert d.DEALER_HEADS == ("SYMBOL", "PRICE", "FLIP LEVEL",
-                              "PRICE VS WALLS", "CEILING", "FLOOR",
+    assert d.DEALER_HEADS == ("SYMBOL", "PRICE", "CEILING",
+                              "PRICE VS WALLS", "FLOOR", "FLIP LEVEL",
                               "DEALER MODE")
     assert d.BOARD_HEADS == ("SCORE", "SYMBOL", "WHY IT'S HOT", "ATM IV",
                              "NET PREMIUM", "P/C", "SIGNAL", "SETUP")

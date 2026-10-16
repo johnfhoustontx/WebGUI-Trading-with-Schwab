@@ -2594,8 +2594,12 @@ PANEL_BUDGET_PX = (DESK_WINDOW_PX - DESK_SCROLLBAR_PX - DESK_CHROME_PX
 # the other two, which reads as a rendering fault rather than as a long word.
 # Chip ``wrap=True`` stays the genuine narrow-case backstop; it should not be
 # what happens at the width the page is read at.
-DEALER_GRID = ("grid grid-cols-[78px_minmax(77px,1fr)_minmax(82px,1fr)_"
-               "minmax(136px,2fr)_minmax(75px,1fr)_minmax(75px,1fr)_"
+# Track order (since 2026-10-16, the operator's): SYMBOL, PRICE, CEILING, the
+# map, FLOOR, FLIP LEVEL, DEALER MODE. The two walls stand on either side of
+# the map that draws price between them. Each track moved WITH its label, so
+# every floor below is still the one its label was measured against.
+DEALER_GRID = ("grid grid-cols-[78px_minmax(77px,1fr)_minmax(75px,1fr)_"
+               "minmax(136px,2fr)_minmax(75px,1fr)_minmax(82px,1fr)_"
                f"minmax(144px,1.5fr)] {_GAP} w-full")
 # Eight tracks now, not six: the board rows went flat (one line per symbol), so
 # WHY and SETUP take columns of their own instead of riding under the symbol and
@@ -3175,8 +3179,8 @@ PANEL_HEADS = {
 # level was derived from. The one thing lost is that a call wall is only a
 # ceiling while price sits BELOW it — which is exactly what the structure map
 # in the next column shows.
-DEALER_HEADS = ("SYMBOL", "PRICE", "FLIP LEVEL", "PRICE VS WALLS",
-                "CEILING", "FLOOR", "DEALER MODE")
+DEALER_HEADS = ("SYMBOL", "PRICE", "CEILING", "PRICE VS WALLS",
+                "FLOOR", "FLIP LEVEL", "DEALER MODE")
 # NET PREMIUM is the one expansion that cost width: 88px against a 66px floor,
 # so BOARD_GRID's fifth track was widened to 88 (panel floor 783 -> 805, still
 # inside the 860px a panel gets). ATM IV and P/C stay — the standing rule is to
@@ -3339,8 +3343,8 @@ def _bullbear_chip(chip):
 
 
 def _dealer_row(row):
-    # ONE grid line. The structure map is the flexible 4th cell, so it sits
-    # beside the symbol it describes rather than on a tier of its own.
+    # ONE grid line. The structure map is the flexible 4th cell, between the
+    # ceiling and floor it draws, rather than on a tier of its own.
     #
     # The symbol carries no second line: the reference shows a venue under
     # it ("CBOE · INDEX") and this app publishes no venue for a matrix row.
@@ -3356,12 +3360,12 @@ def _dealer_row(row):
             ui.label(fmt_price(row["spot"])).classes(_V_SPOT)
             ui.label(fmt_signed_pct(row["day_pct"])).classes(
                 f"{_SUB} {signed_class(row['day_pct'])}")
-        with _stack():
-            ui.label(fmt_price(row["flip"])).classes(_V_FLIP)
-            # Empty string, not an em-dash: the level above it already
-            # carries the dash when there is no flip to report.
-            ui.label(flip_sub_text(row)).classes(
-                f"{_SUB} {flip_side_class(row['flip_side'])}")
+        # Each wall in the same hue as its marker on the map, so the number
+        # and the tick standing for it are visibly one thing. The reference
+        # puts an open-interest figure under each; this app publishes no
+        # per-strike OI on a matrix row, so the second line is left out.
+        # The walls flank the map: ceiling before it, floor after it.
+        _cell(fmt_price(row["call_wall"]), f"text-[14px] text-[{CALL_HEX}]")
         if row["structure"] is None:
             # No walls (or no placeable spot) is a missing READING, so it
             # gets the same em-dash every other cell uses. An empty framed
@@ -3369,12 +3373,13 @@ def _dealer_row(row):
             _cell(_DASH, MUTED)
         else:
             _structure_map(row["structure"])
-        # Each wall in the same hue as its marker on the map, so the number
-        # and the tick standing for it are visibly one thing. The reference
-        # puts an open-interest figure under each; this app publishes no
-        # per-strike OI on a matrix row, so the second line is left out.
-        _cell(fmt_price(row["call_wall"]), f"text-[14px] text-[{CALL_HEX}]")
         _cell(fmt_price(row["put_wall"]), f"text-[14px] text-[{PUT_HEX}]")
+        with _stack():
+            ui.label(fmt_price(row["flip"])).classes(_V_FLIP)
+            # Empty string, not an em-dash: the level above it already
+            # carries the dash when there is no flip to report.
+            ui.label(flip_sub_text(row)).classes(
+                f"{_SUB} {flip_side_class(row['flip_side'])}")
         with _stack():
             ui.label(fmt_gex(row["net_gex"])).classes(
                 f"text-[13px] font-medium tabular-nums "
