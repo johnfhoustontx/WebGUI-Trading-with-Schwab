@@ -219,6 +219,14 @@ def issue_form_token(*, now: float | None = None) -> str | None:
     return _issue(FORM_TOKEN_KIND, now=now)
 
 
+def form_token_ok(token: str | None, *, now: float | None = None) -> bool:
+    """Whether ``token`` is a live form token against the CURRENT store. For a
+    form other than the sign-in itself (the approve page's), which has no
+    ``attempt`` to check it."""
+    creds = _load_credentials()
+    return creds is not None and verify_form_token(token, creds, now=now)
+
+
 def issue_session_token(*, now: float | None = None) -> str | None:
     """The session cookie's value after a successful ``attempt``, or None."""
     return _issue(auth.KIND_SESSION, now=now)

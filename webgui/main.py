@@ -33,12 +33,13 @@ import auth  # noqa: E402
 import auth_middleware  # noqa: E402
 import bus_client  # noqa: E402
 import login_page  # noqa: E402
+import login_push  # noqa: E402
 import page_help  # noqa: E402
 import proxy  # noqa: E402
 from pages.options import theme  # noqa: E402  (config/theme.toml typography + menu)
 from pages.ui_guard import guard_async  # noqa: E402
 from pages.ui_guard import install_deleted_slot_log_filter  # noqa: E402
-from repo_paths import IS_DEV, NICEGUI_PORT, SERVICE_URLS  # noqa: E402
+from repo_paths import APP_HOST, IS_DEV, NICEGUI_PORT, SERVICE_URLS  # noqa: E402
 
 # The page-to-shell seam now lives in shell.py so a page never imports main --
 # see that module's docstring. Re-exported here because pages and tests have
@@ -298,13 +299,98 @@ def _login_response(*, next_path: str, error: str | None) -> HTMLResponse:
     """
     return HTMLResponse(
         login_page.render_form(next_path=next_path, error=error,
-                               form_token=login_page.issue_form_token()),
+                               form_token=login_page.issue_form_token(),
+                               push=login_push.configured()),
         headers={"cache-control": "no-store"})
 
 
+# ── approving a sign-in from the phone (login_push) ──────────────────────────
+# The waiting browser holds only the PENDING id, in this cookie; the push holds
+# only the APPROVAL id. The waiting page lives under /login (open), the approve
+# page at APPROVE_ROUTE behind the gate, so the gate's open list is unchanged.
+PENDING_COOKIE = "ns_pending"
+APPROVE_ROUTE = login_push.APPROVE_PATH
+PUSH_REFUSED = "Not approved. Sign in again, or use your authenticator code."
+PUSH_NOT_SENT = "The push could not be sent; use your authenticator code."
+_APPROVE_ENDED = "This sign-in request has ended."
+_WAIT_REFRESH_SEC = 2
+
+
+def _signed_in_response(target: str, *, keep: bool) -> Response:
+    """303 to ``target`` carrying a fresh session (and, with ``keep``, the
+    30-day kind plus the remember cookie), or the form again when the store
+    cannot mint one. The one place a session cookie is set after a sign-in,
+    whether the second factor was the code or the phone."""
+    # Only when asked. An unchecked box submits no field at all, so presence is
+    # the test -- and a device already trusted does NOT silently renew: the user
+    # ticks the box again, which is the one moment they are choosing to leave a
+    # 30-day credential on this machine. Ticked, the SESSION itself lasts the 30
+    # days too (the owner's ask, 2026-10-17: "keep me signed in" must mean no
+    # password for 30 days), and the remember cookie still waives the code.
+    if keep:
+        session = login_page.issue_trusted_session_token()
+        session_age = auth.TRUSTED_SESSION_MAX_AGE_SEC
+    else:
+        session = login_page.issue_session_token()
+        session_age = auth.SESSION_MAX_AGE_SEC
+    if not session:
+        # The store went unreadable between the attempt and here. Refuse rather
+        # than redirect to a page the gate will bounce straight back.
+        return _login_response(next_path=target, error=login_page.GENERIC_FAILURE)
+
+    response = RedirectResponse(url=target, status_code=303)
+    _set_auth_cookie(response, auth_middleware.SESSION_COOKIE, session,
+                     session_age)
+    if keep:
+        remember = login_page.issue_remember_token()
+        if remember:
+            _set_auth_cookie(response, auth_middleware.REMEMBER_COOKIE, remember,
+                             auth.REMEMBER_MAX_AGE_SEC)
+    return response
+
+
+def _waiting_page(p) -> HTMLResponse:
+    body = (f'    <p class="number">{p.number}</p>\n'
+            '    <p class="note">Your phone has a sign-in request. Tap this '
+            'number there, then Approve. This page signs in by itself.</p>\n'
+            f'    <p class="note"><a href="{login_page.ROUTE}?cancel=1">'
+            'Type the authenticator code instead</a></p>')
+    return HTMLResponse(
+        login_page.render_card(title="Approve on your phone",
+                               eyebrow="Waiting for your phone", body_html=body,
+                               refresh_sec=_WAIT_REFRESH_SEC),
+        headers={"cache-control": "no-store"})
+
+
+def _without_pending(response: Response) -> Response:
+    _clear_auth_cookie(response, PENDING_COOKIE)
+    return response
+
+
 @app.get(login_page.ROUTE)
-def _login_form(next: str | None = None):   # noqa: A002 - the query param's name
-    return _login_response(next_path=login_target(next), error=None)
+def _login_form(request: Request, next: str | None = None,   # noqa: A002 - the query param's name
+                cancel: str | None = None):
+    """The form; or, for a browser waiting on the phone, the waiting page, the
+    collected session, or the reason it ended."""
+    pending_id = request.cookies.get(PENDING_COOKIE)
+    if not pending_id:
+        return _login_response(next_path=login_target(next), error=None)
+    if cancel is not None:
+        login_push.STORE.drop(pending_id)
+        return _without_pending(_login_response(next_path=login_target(next),
+                                                error=None))
+    approved = login_push.STORE.collect(pending_id)
+    if approved is not None:
+        login_page.record_success(approved.client)
+        logging.getLogger(__name__).info(
+            "Sign-in accepted for %s, approved on the phone", approved.client)
+        return _without_pending(_signed_in_response(approved.next_path,
+                                                    keep=approved.keep))
+    waiting = login_push.STORE.by_pending(pending_id)
+    if waiting is not None:
+        return _waiting_page(waiting)
+    return _without_pending(_login_response(next_path=login_target(next),
+                                            error=PUSH_REFUSED))
 
 
 @app.post(login_page.ROUTE)
@@ -340,40 +426,93 @@ async def _login_submit(request: Request):
         # keep skipping the code without re-ticking it every time.
         remember_token=request.cookies.get(auth_middleware.REMEMBER_COOKIE),
     )
+    keep = form.get(login_page.FIELD_REMEMBER) is not None
+    if result.pending:
+        # The password verified and no code was typed: the phone approves.
+        pending = login_push.STORE.create(client=_client_ip(request), keep=keep,
+                                          next_path=target)
+        sent = await run.io_bound(login_push.publish, pending,
+                                  app_url=f"https://{APP_HOST}")
+        if not sent:
+            login_push.STORE.drop(pending.pending_id)
+            return _login_response(next_path=target, error=PUSH_NOT_SENT)
+        response = RedirectResponse(url=login_page.ROUTE, status_code=303)
+        _set_auth_cookie(response, PENDING_COOKIE, pending.pending_id,
+                         login_push.ttl_sec())
+        return response
     if not result.ok:
         # 200, not 401. RFC 9110 requires a 401 to carry WWW-Authenticate, and
         # sending one would put a browser's own credential dialog in front of
         # this form. The page IS the answer.
         return _login_response(next_path=target, error=result.message)
+    return _signed_in_response(target, keep=keep)
 
-    # Only when asked. An unchecked box submits no field at all, so presence is
-    # the test -- and a device already trusted does NOT silently renew: the user
-    # ticks the box again, which is the one moment they are choosing to leave a
-    # 30-day credential on this machine. Ticked, the SESSION itself lasts the 30
-    # days too (the owner's ask, 2026-10-17: "keep me signed in" must mean no
-    # password for 30 days), and the remember cookie still waives the code.
-    keep = form.get(login_page.FIELD_REMEMBER) is not None
-    if keep:
-        session = login_page.issue_trusted_session_token()
-        session_age = auth.TRUSTED_SESSION_MAX_AGE_SEC
-    else:
-        session = login_page.issue_session_token()
-        session_age = auth.SESSION_MAX_AGE_SEC
-    if not session:
-        # The store went unreadable between the attempt and here. Refuse rather
-        # than redirect to a page the gate will bounce straight back.
-        return _login_response(next_path=target, error=login_page.GENERIC_FAILURE)
 
-    response = RedirectResponse(url=target, status_code=303)
-    _set_auth_cookie(response, auth_middleware.SESSION_COOKIE, session,
-                     session_age)
+def _approve_card(body: str) -> HTMLResponse:
+    return HTMLResponse(
+        login_page.render_card(title="Sign-in request",
+                               eyebrow="Approve from this phone", body_html=body),
+        headers={"cache-control": "no-store"})
 
-    if keep:
-        remember = login_page.issue_remember_token()
-        if remember:
-            _set_auth_cookie(response, auth_middleware.REMEMBER_COOKIE, remember,
-                             auth.REMEMBER_MAX_AGE_SEC)
-    return response
+
+def _ended_card() -> HTMLResponse:
+    return _approve_card(f'    <p class="note">{_APPROVE_ENDED}</p>')
+
+
+def _approval_number(raw) -> int | None:
+    try:
+        n = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return None
+    return n if 10 <= n <= 99 else None
+
+
+@app.get(APPROVE_ROUTE)
+def _approve_form(a: str | None = None, n: str | None = None):
+    """The page a push's number opens on the owner's phone. GATED: a browser
+    without a signed-in session is sent to /login by the gate, so a push read
+    by someone else approves nothing."""
+    p = login_push.STORE.by_approval(a)
+    number = _approval_number(n)
+    if p is None or number is None:
+        return _ended_card()
+    esc = html.escape
+    body = (f'    <p class="note">A sign-in from {esc(p.client, quote=True)} is '
+            'waiting. Approve the one showing</p>\n'
+            f'    <p class="number">{number}</p>\n'
+            f'    <form method="post" action="{APPROVE_ROUTE}">\n'
+            f'      <input type="hidden" name="a" value="{esc(p.approval_id, quote=True)}">\n'
+            f'      <input type="hidden" name="n" value="{number}">\n'
+            f'      <input type="hidden" name="{login_page.FIELD_FORM_TOKEN}" '
+            f'value="{esc(login_page.issue_form_token() or "", quote=True)}">\n'
+            '      <button type="submit" name="decision" value="approve">Approve</button>\n'
+            '      <button type="submit" name="decision" value="deny" '
+            'class="secondary">Not me</button>\n'
+            '    </form>')
+    return _approve_card(body)
+
+
+@app.post(APPROVE_ROUTE)
+async def _approve_submit(request: Request):
+    """Approve or refuse from the signed-in phone. Not counted by the sign-in
+    lockout: only a signed-in session reaches it."""
+    form = {}
+    if login_page.body_within_limit(request.headers):
+        try:
+            form = await request.form()
+        except Exception:   # noqa: BLE001 - any malformed body is just "no fields"
+            form = {}
+    if not login_page.form_token_ok(form.get(login_page.FIELD_FORM_TOKEN)):
+        return _ended_card()
+    outcome = login_push.STORE.answer(form.get("a"), _approval_number(form.get("n")),
+                                      form.get("decision") == "approve")
+    if outcome == "approved":
+        return _approve_card('    <p class="note">Approved. The other screen '
+                             'signs in within a few seconds.</p>')
+    if outcome == "refused":
+        return _approve_card('    <p class="note">Not approved. That sign-in has '
+                             'been stopped.</p>')
+    return _ended_card()
 
 
 @app.get(login_page.LOGOUT_ROUTE)
