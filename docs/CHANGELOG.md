@@ -4,7 +4,26 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-17 (**The Schwab sign-in can be renewed from a phone.**)
+**Last updated:** 2026-10-17 (**"Keep me signed in" lasts 30 days; the Schwab sign-in from a phone.**)
+
+- **Asked for by the user:** the trust box at sign-in said 30 days, yet the
+  password came back every 12 hours (the box waived only the code). Ticked, it
+  now keeps the browser signed in for 30 days from that sign-in, no password
+  and no code; unticked, a sign-in still lasts 12 hours. A push-to-approve
+  login through the ntfy app was discussed first and dropped for this.
+- A new token kind, `auth.KIND_TRUSTED_SESSION`, in the SAME session cookie;
+  `auth.SESSION_KINDS` pairs each session kind with its lifetime and the gate
+  admits either against its own. A 12-hour cookie is never read as a 30-day
+  one, the remember cookie is still never admitted by the gate, and an epoch
+  bump ends a trusted session like any other. The lifetimes stay in code, not
+  config: how long a sign-in lasts changes by commit, never from inside the app.
+- The box reads "Keep me signed in on this device for 30 days". Browsers trusted
+  before this ask for the password once more; ticking the box then starts the
+  30 days.
+- Docs: `page_help.py` (Sign out), User Guide, Reference Guide. The User Guide's
+  claim that `127.0.0.1:8500` skips the sign-in was wrong and is corrected.
+
+**Prior —** 2026-10-17 (**The Schwab sign-in can be renewed from a phone.**)
 
 - **Asked for by the user:** renewing the 7-day Schwab sign-in on an Android
   phone. Automating the renewal was asked first and declined: Schwab only

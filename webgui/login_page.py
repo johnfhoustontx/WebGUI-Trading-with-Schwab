@@ -223,6 +223,12 @@ def issue_session_token(*, now: float | None = None) -> str | None:
     return _issue(auth.KIND_SESSION, now=now)
 
 
+def issue_trusted_session_token(*, now: float | None = None) -> str | None:
+    """The 30-day session cookie's value after a successful ``attempt`` with
+    "keep me signed in" ticked, or None."""
+    return _issue(auth.KIND_TRUSTED_SESSION, now=now)
+
+
 def issue_remember_token(*, now: float | None = None) -> str | None:
     """The remember-device cookie's value, or None. Only when asked for."""
     return _issue(auth.KIND_REMEMBER, now=now)
@@ -561,7 +567,7 @@ def render_form(*, next_path: str, error: str | None,
       <label class="trust" for="{FIELD_REMEMBER}">
         <input type="checkbox" id="{FIELD_REMEMBER}" name="{FIELD_REMEMBER}"
                value="{REMEMBER_ON}">
-        Trust this device for 30 days (skip the code, never the password)
+        Keep me signed in on this device for 30 days
       </label>
       <button type="submit">Sign in</button>
     </form>

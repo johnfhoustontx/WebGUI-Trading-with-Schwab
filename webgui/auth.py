@@ -204,9 +204,23 @@ def verify_totp(secret: str, code: str | None, *, now: float | None = None,
 
 KIND_SESSION = "session"
 KIND_REMEMBER = "remember"
+# A session minted at a sign-in where "Keep me signed in on this device" was
+# ticked. It rides in the SAME cookie as a plain session and the gate admits it
+# for 30 days rather than 12 hours. Its own kind, not a longer-lived plain
+# session, so a 12-hour cookie can never be read as a 30-day one. Like any
+# session it is minted only after the password (and code, or a trusted device)
+# was checked; the remember-device cookie is still never admitted by the gate.
+# Fixed in code, not in config: how long a sign-in lasts is changed by a
+# reviewed commit, never from a page inside the app it protects.
+KIND_TRUSTED_SESSION = "trusted_session"
 
 SESSION_MAX_AGE_SEC = 12 * 3600
 REMEMBER_MAX_AGE_SEC = 30 * 24 * 3600
+TRUSTED_SESSION_MAX_AGE_SEC = REMEMBER_MAX_AGE_SEC
+
+# Every kind the session cookie may hold, paired with how long it is admitted.
+SESSION_KINDS = ((KIND_SESSION, SESSION_MAX_AGE_SEC),
+                 (KIND_TRUSTED_SESSION, TRUSTED_SESSION_MAX_AGE_SEC))
 
 # Mixed into the HMAC key derivation, so changing it invalidates every
 # outstanding token exactly as an epoch bump does. Version it; never edit it.
@@ -220,7 +234,7 @@ def _serializer(key: str) -> itsdangerous.URLSafeSerializer:
 def mint_token(key: str, *, kind: str, epoch: int, now: float | None = None) -> str:
     """A stateless bearer token naming its kind and the epoch it was issued under.
 
-    ``kind`` is ``KIND_SESSION`` or ``KIND_REMEMBER`` and is what stops the
+    ``kind`` is a session kind (``SESSION_KINDS``) or ``KIND_REMEMBER`` and is what stops the
     long-lived remember-device cookie being replayed as a session -- see the
     section comment above.
 

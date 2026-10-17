@@ -346,7 +346,19 @@ async def _login_submit(request: Request):
         # this form. The page IS the answer.
         return _login_response(next_path=target, error=result.message)
 
-    session = login_page.issue_session_token()
+    # Only when asked. An unchecked box submits no field at all, so presence is
+    # the test -- and a device already trusted does NOT silently renew: the user
+    # ticks the box again, which is the one moment they are choosing to leave a
+    # 30-day credential on this machine. Ticked, the SESSION itself lasts the 30
+    # days too (the owner's ask, 2026-10-17: "keep me signed in" must mean no
+    # password for 30 days), and the remember cookie still waives the code.
+    keep = form.get(login_page.FIELD_REMEMBER) is not None
+    if keep:
+        session = login_page.issue_trusted_session_token()
+        session_age = auth.TRUSTED_SESSION_MAX_AGE_SEC
+    else:
+        session = login_page.issue_session_token()
+        session_age = auth.SESSION_MAX_AGE_SEC
     if not session:
         # The store went unreadable between the attempt and here. Refuse rather
         # than redirect to a page the gate will bounce straight back.
@@ -354,13 +366,9 @@ async def _login_submit(request: Request):
 
     response = RedirectResponse(url=target, status_code=303)
     _set_auth_cookie(response, auth_middleware.SESSION_COOKIE, session,
-                     auth.SESSION_MAX_AGE_SEC)
+                     session_age)
 
-    # Only when asked. An unchecked box submits no field at all, so presence is
-    # the test -- and a device already trusted does NOT silently renew: the user
-    # ticks the box again, which is the one moment they are choosing to leave a
-    # 30-day credential on this machine.
-    if form.get(login_page.FIELD_REMEMBER) is not None:
+    if keep:
         remember = login_page.issue_remember_token()
         if remember:
             _set_auth_cookie(response, auth_middleware.REMEMBER_COOKIE, remember,

@@ -1879,8 +1879,9 @@ A big red stop button for the whole local stack.
 
 Ends this browser's session and returns you to the sign-in page.
 
-- It also forgets a **trusted device**, so the next sign-in asks for your
-  authenticator code again — which is the point on a borrowed or shared machine.
+- It also ends **Keep me signed in for 30 days** on this browser, so the next
+  sign-in asks for your password and authenticator code again — which is the
+  point on a borrowed or shared machine.
 - It signs out THIS browser only. Other devices stay signed in.
 - Nothing running is affected: the services and the collectors all carry on. Signing out is not stopping anything.
 """,

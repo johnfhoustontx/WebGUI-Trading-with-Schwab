@@ -156,8 +156,11 @@ terminates the certificate and passes the request through — the app is never
 exposed to the network directly.
 
 **You will be asked to sign in**: your password, then the current 6-digit code
-from your authenticator app. Tick **Remember this device** and that browser will
-not ask again for a while; a new browser, or a private window, always will.
+from your authenticator app. Without anything ticked, a sign-in lasts 12 hours.
+Tick **Keep me signed in on this device for 30 days** and that browser stays
+signed in for 30 days from that sign-in, with no password and no code; using the
+app does not extend it, so once a month it asks again. A new browser, or a
+private window, always asks. **Sign out** on that browser ends it at once.
 
 Two things worth knowing when it refuses you:
 
@@ -167,8 +170,8 @@ Two things worth knowing when it refuses you:
   hit something that asks for a code again — stopping the stack does — wait for
   your authenticator to roll to the next one.
 
-**Sitting at the machine itself?** `http://127.0.0.1:8500` still works there and
-skips the sign-in, which is what the wall display uses.
+**Sitting at the machine itself?** `http://127.0.0.1:8500` asks for the same
+sign-in; there is no exception for the machine's own browser.
 
 ## The public live screens
 

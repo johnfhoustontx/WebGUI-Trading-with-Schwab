@@ -339,8 +339,11 @@ makes that address reachable is a small web server on the same machine which
 terminates the certificate and passes the request through — the app is never
 exposed to the network directly.</p>
 <p><strong>You will be asked to sign in</strong>: your password, then the current 6-digit code
-from your authenticator app. Tick <strong>Remember this device</strong> and that browser will
-not ask again for a while; a new browser, or a private window, always will.</p>
+from your authenticator app. Without anything ticked, a sign-in lasts 12 hours.
+Tick <strong>Keep me signed in on this device for 30 days</strong> and that browser stays
+signed in for 30 days from that sign-in, with no password and no code; using the
+app does not extend it, so once a month it asks again. A new browser, or a
+private window, always asks. <strong>Sign out</strong> on that browser ends it at once.</p>
 <p>Two things worth knowing when it refuses you:</p>
 <ul>
 <li>The message is deliberately the same for a wrong password, a wrong code and
@@ -349,8 +352,8 @@ not ask again for a while; a new browser, or a private window, always will.</p>
   hit something that asks for a code again — stopping the stack does — wait for
   your authenticator to roll to the next one.</li>
 </ul>
-<p><strong>Sitting at the machine itself?</strong> <code>http://127.0.0.1:8500</code> still works there and
-skips the sign-in, which is what the wall display uses.</p>
+<p><strong>Sitting at the machine itself?</strong> <code>http://127.0.0.1:8500</code> asks for the same
+sign-in; there is no exception for the machine's own browser.</p>
 <h2 id="the-public-live-screens">The public live screens</h2>
 <p>Eighteen of the app's screens are also published <strong>without any sign-in</strong> on
 a second address, <code>https://live.neuralstrike.co</code> — the Desk,

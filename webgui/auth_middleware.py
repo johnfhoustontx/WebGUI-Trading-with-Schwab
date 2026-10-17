@@ -222,16 +222,19 @@ class AuthGate:
     def _has_session(scope, key: str, epoch: int) -> bool:
         """A valid session cookie -- not a remember cookie, not a form token.
 
-        The kind is passed explicitly on every call. ``auth.verify_token``
-        refuses a payload whose kind differs, so a remember-device token pasted
-        into the session slot fails here even though it is perfectly signed.
+        The session cookie holds a plain session (12 hours) or a trusted one (30
+        days, from a sign-in with "keep me signed in" ticked); each is checked
+        against its OWN lifetime from ``auth.SESSION_KINDS``. The kind is passed
+        explicitly on every call. ``auth.verify_token`` refuses a payload whose
+        kind differs, so a remember-device token pasted into the session slot
+        fails here even though it is perfectly signed.
         """
         token = _cookie(scope, SESSION_COOKIE)
         if not token:
             return False
-        return auth.verify_token(token, key, kind=auth.KIND_SESSION,
-                                 epoch=epoch,
-                                 max_age_sec=auth.SESSION_MAX_AGE_SEC)
+        return any(auth.verify_token(token, key, kind=kind, epoch=epoch,
+                                     max_age_sec=max_age)
+                   for kind, max_age in auth.SESSION_KINDS)
 
     # -- the refusal ------------------------------------------------------
     @staticmethod

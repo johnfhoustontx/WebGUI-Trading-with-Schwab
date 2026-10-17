@@ -4831,10 +4831,11 @@ and an overshoot costs a re-login rather than a trading day.
 *Menu: the last row of the rail · Route `/logout`*
 
 Ends this browser's session and returns you to the sign-in form. It clears **both**
-credentials the app issues: the session, and the *trusted device* token — so the next
-sign-in on this machine asks for the authenticator code again. That second half is
-the reason to use it on a borrowed or shared browser; clearing only the session would
-leave a device that still skips the second factor.
+credentials the app issues: the session (12 hours, or 30 days when **Keep me signed in
+on this device for 30 days** was ticked at sign-in), and the *trusted device* token —
+so the next sign-in on this machine asks for the password and the authenticator code
+again. That is the reason to use it on a borrowed or shared browser: a 30-day session
+left there is the app, for a month, to whoever sits down next.
 
 It signs out this browser only. The tokens are stateless by design, so there is no
 "sign out everywhere" button here — other devices stay signed in until their own

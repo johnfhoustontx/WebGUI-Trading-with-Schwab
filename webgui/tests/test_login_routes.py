@@ -303,6 +303,75 @@ def test_a_remember_cookie_alone_admits_nothing_at_the_gate(client):
     assert r.status_code == 303
 
 
+# --- "keep me signed in": the 30-day session --------------------------------
+
+def _session_cookie_header(r):
+    (raw,) = [c for c in r.headers.get_list("set-cookie")
+              if c.startswith(f"{auth_middleware.SESSION_COOKIE}=")]
+    return raw.lower()
+
+
+def _kind_of(token):
+    import itsdangerous
+    return itsdangerous.URLSafeSerializer(KEY, salt=auth._SALT).loads(token)["kind"]
+
+
+def test_ticking_the_box_makes_the_session_itself_last_30_days(client):
+    """The owner's ask (2026-10-17): the box must mean no password for 30 days,
+    not only no code."""
+    r = _post(client, remember=True)
+    assert r.status_code == 303
+    assert f"max-age={auth.TRUSTED_SESSION_MAX_AGE_SEC}" in _session_cookie_header(r)
+    assert _kind_of(client.cookies.get(auth_middleware.SESSION_COOKIE)) == \
+        auth.KIND_TRUSTED_SESSION
+
+
+def test_without_the_box_the_session_is_still_12_hours(client):
+    r = _post(client, remember=False)
+    assert f"max-age={auth.SESSION_MAX_AGE_SEC}" in _session_cookie_header(r)
+    assert _kind_of(client.cookies.get(auth_middleware.SESSION_COOKIE)) == \
+        auth.KIND_SESSION
+
+
+def _gated(client):
+    return client.get("/manuals/file?name=__no_such_manual__",
+                      follow_redirects=False)
+
+
+def test_a_trusted_session_is_admitted_after_12_hours_and_refused_after_30_days(client):
+    import time
+    day = 24 * 3600
+    for age, admitted in ((13 * 3600, True), (29 * day, True), (30 * day + 60, False)):
+        token = auth.mint_token(KEY, kind=auth.KIND_TRUSTED_SESSION, epoch=EPOCH,
+                                now=time.time() - age)
+        client.cookies.set(auth_middleware.SESSION_COOKIE, token)
+        assert (_gated(client).status_code != 303) is admitted, age
+
+
+def test_a_plain_session_still_ends_at_12_hours(client):
+    """The trusted kind is its own kind: a 12-hour cookie is never read with the
+    30-day lifetime."""
+    import time
+    token = auth.mint_token(KEY, kind=auth.KIND_SESSION, epoch=EPOCH,
+                            now=time.time() - 13 * 3600)
+    client.cookies.set(auth_middleware.SESSION_COOKIE, token)
+    assert _gated(client).status_code == 303
+
+
+def test_a_trusted_session_dies_with_the_epoch(client):
+    """Sign out everywhere still ends a 30-day session at once."""
+    client.cookies.set(auth_middleware.SESSION_COOKIE,
+                       auth.mint_token(KEY, kind=auth.KIND_TRUSTED_SESSION,
+                                       epoch=EPOCH + 1))
+    assert _gated(client).status_code == 303
+
+
+def test_the_form_says_what_the_box_now_does(client):
+    text = client.get(login_page.ROUTE).text
+    assert "Keep me signed in on this device for 30 days" in text
+    assert "never the password" not in text
+
+
 # --- GET /logout -------------------------------------------------------------
 
 def test_logout_clears_both_cookies_and_returns_to_the_form(client):
