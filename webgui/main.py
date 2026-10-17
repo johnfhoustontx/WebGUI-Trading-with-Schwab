@@ -483,6 +483,7 @@ def _approve_form(a: str | None = None, n: str | None = None):
             f'    <form method="post" action="{APPROVE_ROUTE}">\n'
             f'      <input type="hidden" name="a" value="{esc(p.approval_id, quote=True)}">\n'
             f'      <input type="hidden" name="n" value="{number}">\n'
+            f'      <input type="hidden" name="c" value="{esc(p.confirm_id, quote=True)}">\n'
             f'      <input type="hidden" name="{login_page.FIELD_FORM_TOKEN}" '
             f'value="{esc(login_page.issue_form_token() or "", quote=True)}">\n'
             '      <button type="submit" name="decision" value="approve">Approve</button>\n'
@@ -504,12 +505,20 @@ async def _approve_submit(request: Request):
             form = {}
     if not login_page.form_token_ok(form.get(login_page.FIELD_FORM_TOKEN)):
         return _ended_card()
+    waiting = login_push.STORE.by_approval(form.get("a"))
     outcome = login_push.STORE.answer(form.get("a"), _approval_number(form.get("n")),
-                                      form.get("decision") == "approve")
+                                      form.get("decision") == "approve",
+                                      confirm_id=form.get("c"))
     if outcome == "approved":
         return _approve_card('    <p class="note">Approved. The other screen '
                              'signs in within a few seconds.</p>')
     if outcome == "refused":
+        # Only a correct password creates an approval: a refusal from the
+        # owner's phone means someone else knows the password.
+        logging.getLogger(__name__).warning(
+            "A sign-in from %s with the correct password was refused on the "
+            "phone (Not me or a wrong number): the password may be known to "
+            "someone else", waiting.client if waiting else "an unknown address")
         return _approve_card('    <p class="note">Not approved. That sign-in has '
                              'been stopped.</p>')
     return _ended_card()

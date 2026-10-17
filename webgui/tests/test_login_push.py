@@ -46,7 +46,7 @@ def test_create_offers_three_distinct_two_digit_numbers_including_the_right_one(
 
 def test_answer_right_number_approves_and_collect_consumes():
     p = _new()
-    assert login_push.STORE.answer(p.approval_id, p.number, True, now=1) == "approved"
+    assert login_push.STORE.answer(p.approval_id, p.number, True, confirm_id=p.confirm_id, now=1) == "approved"
     got = login_push.STORE.collect(p.pending_id, now=2)
     assert got is not None and got.pending_id == p.pending_id
     assert login_push.STORE.collect(p.pending_id, now=3) is None
@@ -61,42 +61,54 @@ def test_collect_returns_nothing_while_waiting():
 def test_answer_wrong_number_or_deny_refuses():
     p = _new()
     wrong = next(n for n in p.offered if n != p.number)
-    assert login_push.STORE.answer(p.approval_id, wrong, True, now=1) == "refused"
+    assert login_push.STORE.answer(p.approval_id, wrong, True, confirm_id=p.confirm_id, now=1) == "refused"
     assert login_push.STORE.collect(p.pending_id, now=1) is None
     q = _new()
-    assert login_push.STORE.answer(q.approval_id, q.number, False, now=1) == "refused"
+    assert login_push.STORE.answer(q.approval_id, q.number, False, confirm_id=q.confirm_id, now=1) == "refused"
     assert login_push.STORE.collect(q.pending_id, now=1) is None
 
 
 def test_a_refused_approval_reads_as_absent_to_the_waiting_browser():
     p = _new()
-    login_push.STORE.answer(p.approval_id, p.number, False, now=1)
+    login_push.STORE.answer(p.approval_id, p.number, False, confirm_id=p.confirm_id, now=1)
     assert login_push.STORE.by_pending(p.pending_id, now=1) is None
 
 
 def test_a_second_answer_has_ended():
     p = _new()
-    login_push.STORE.answer(p.approval_id, p.number, True, now=1)
-    assert login_push.STORE.answer(p.approval_id, p.number, True, now=2) == "ended"
+    login_push.STORE.answer(p.approval_id, p.number, True, confirm_id=p.confirm_id, now=1)
+    assert login_push.STORE.answer(p.approval_id, p.number, True, confirm_id=p.confirm_id, now=2) == "ended"
     q = _new()
-    login_push.STORE.answer(q.approval_id, q.number, False, now=1)
-    assert login_push.STORE.answer(q.approval_id, q.number, True, now=2) == "ended"
+    login_push.STORE.answer(q.approval_id, q.number, False, confirm_id=q.confirm_id, now=1)
+    assert login_push.STORE.answer(q.approval_id, q.number, True, confirm_id=q.confirm_id, now=2) == "ended"
+
+
+def test_answer_needs_the_confirm_id_the_approve_page_showed():
+    """The approve page's own value: a forged POST from another page on the
+    same site cannot know it, so it settles nothing."""
+    p = _new()
+    assert p.confirm_id not in (p.approval_id, p.pending_id)
+    assert login_push.STORE.answer(p.approval_id, p.number, True,
+                                   confirm_id="forged", now=1) == "ended"
+    assert login_push.STORE.answer(p.approval_id, p.number, True,
+                                   confirm_id=None, now=1) == "ended"
+    assert login_push.STORE.by_pending(p.pending_id, now=1).state == "waiting"
 
 
 def test_an_unknown_approval_id_has_ended():
-    assert login_push.STORE.answer("nope", 42, True) == "ended"
+    assert login_push.STORE.answer("nope", 42, True, confirm_id="x") == "ended"
     assert login_push.STORE.by_approval("nope") is None
 
 
 def test_expired_approval_reads_as_absent():
     p = _new(now=0)
     assert login_push.STORE.by_pending(p.pending_id, now=121) is None
-    assert login_push.STORE.answer(p.approval_id, p.number, True, now=121) == "ended"
+    assert login_push.STORE.answer(p.approval_id, p.number, True, confirm_id=p.confirm_id, now=121) == "ended"
 
 
 def test_an_approved_but_uncollected_approval_also_expires():
     p = _new(now=0)
-    login_push.STORE.answer(p.approval_id, p.number, True, now=1)
+    login_push.STORE.answer(p.approval_id, p.number, True, confirm_id=p.confirm_id, now=1)
     assert login_push.STORE.collect(p.pending_id, now=121) is None
 
 
@@ -114,7 +126,7 @@ def test_drop_and_refuse():
     assert login_push.STORE.by_pending(p.pending_id) is None
     q = _new()
     login_push.STORE.refuse(q.pending_id)
-    assert login_push.STORE.answer(q.approval_id, q.number, True) == "ended"
+    assert login_push.STORE.answer(q.approval_id, q.number, True, confirm_id=q.confirm_id) == "ended"
 
 
 # ── configuration ────────────────────────────────────────────────────────────
@@ -192,6 +204,9 @@ def test_message_has_three_view_actions_and_no_pending_id():
         picked.add(n)
     assert picked == set(p.offered)
     assert p.pending_id not in json.dumps(msg)
+    assert p.confirm_id not in json.dumps(msg)
+    # A correct password is what triggers it: the push says so.
+    assert "password was just used" in msg["message"]
 
 
 class _Resp:

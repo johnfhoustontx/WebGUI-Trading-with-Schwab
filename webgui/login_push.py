@@ -114,6 +114,12 @@ class Pending:
     keep: bool
     next_path: str
     created: float
+    # Shown ONLY by the gated approve page and required back with Approve.
+    # The form token alone proves nothing (anyone can scrape one from /login),
+    # and SameSite=Lax treats every *.neuralstrike.co page as the same site, so
+    # a page elsewhere on the site could make the signed-in phone POST an
+    # approval. It cannot READ the approve page, so it cannot know this.
+    confirm_id: str = ""
     state: str = "waiting"        # "waiting" | "approved" | "refused"
 
 
@@ -146,7 +152,8 @@ class PendingStore:
                     approval_id=secrets.token_urlsafe(32),
                     number=secrets.choice(offered), offered=offered,
                     client=str(client), keep=bool(keep),
-                    next_path=str(next_path), created=at)
+                    next_path=str(next_path), created=at,
+                    confirm_id=secrets.token_urlsafe(32))
         with self._lock:
             self._prune(at)
             self._by_pending[p.pending_id] = p
@@ -173,14 +180,19 @@ class PendingStore:
                 return p
         return None
 
-    def answer(self, approval_id, number, approve, now=None) -> str:
+    def answer(self, approval_id, number, approve, *, confirm_id, now=None) -> str:
         """Settle an approval from the signed-in phone: ``"approved"`` for
         Approve on the right number, ``"refused"`` for a wrong number or Not
-        me, ``"ended"`` when nothing is waiting under that id."""
+        me, ``"ended"`` when nothing is waiting under that id - or when
+        ``confirm_id`` is not the one the approve page showed, which leaves the
+        approval waiting untouched (see ``Pending.confirm_id``)."""
         with self._lock:
             self._prune(self._now(now))
             p = self._find_waiting(approval_id)
             if p is None:
+                return "ended"
+            if not (isinstance(confirm_id, str) and confirm_id
+                    and secrets.compare_digest(p.confirm_id, confirm_id)):
                 return "ended"
             p.state = "approved" if approve and number == p.number else "refused"
             return p.state
@@ -225,9 +237,12 @@ def build_message(p: Pending, *, topic: str, app_url: str) -> dict:
     return {
         "topic": topic,
         "title": TITLE,
-        "message": ("A sign-in is waiting. Tap the number shown on that screen, "
-                    "then Approve. If you did not just sign in, ignore this. "
-                    f"From {p.client}."),
+        # Only a correct password gets this far, so the push says so: a
+        # sign-in the owner did not start means the password is known.
+        "message": ("Your NeuralStrike password was just used to sign in from "
+                    f"{p.client}. If that was you, tap the number shown on that "
+                    "screen, then Approve. If not, press Not me and change "
+                    "your password."),
         "priority": priority(),
         "tags": ["key"],
         "actions": [{"action": "view", "label": str(n), "clear": True,

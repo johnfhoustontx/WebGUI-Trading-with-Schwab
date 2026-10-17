@@ -7,6 +7,8 @@ stubbed; everything else is the shipped routes. Same conventions as
 header, a real credentials file. Design:
 docs/plans/2026-10-17-login-push-approval-design.md.
 """
+import re
+
 import itsdangerous
 import pytest
 from starlette.testclient import TestClient
@@ -98,7 +100,9 @@ def _approve(phone, p, number=None, decision="approve", token=None):
     page = phone.get(f"/approve-sign-in?a={p.approval_id}&n={n}",
                      follow_redirects=False)
     assert page.status_code == 200, page.status_code
+    confirm = re.search(r'name="c" value="([^"]*)"', page.text)
     data = {"a": p.approval_id, "n": str(n), "decision": decision,
+            "c": confirm.group(1) if confirm else "",
             login_page.FIELD_FORM_TOKEN: (login_page.issue_form_token()
                                           if token is None else token)}
     return phone.post("/approve-sign-in", data=data, follow_redirects=False)
@@ -292,3 +296,34 @@ def test_without_a_topic_an_empty_code_fails_as_before(browser, pushes, monkeypa
     r = _sign_in(browser)
     assert r.status_code == 200 and login_page.GENERIC_FAILURE in r.text
     assert pushes == []
+
+
+# ── the final review's findings ──────────────────────────────────────────────
+def test_a_forged_approve_without_the_page_approves_nothing(browser, phone, pushes):
+    """A page elsewhere on the same site can make the signed-in phone POST, with
+    a form token anyone can scrape from /login, the approval id and the number
+    read off a leaked push. It cannot read the approve page, so it lacks the
+    page's confirm value, and the POST settles nothing."""
+    _sign_in(browser)
+    p = _waiting(pushes)
+    r = phone.post("/approve-sign-in", follow_redirects=False, data={
+        "a": p.approval_id, "n": str(p.number), "decision": "approve",
+        login_page.FIELD_FORM_TOKEN: login_page.issue_form_token()})
+    assert "Approved" not in r.text
+    assert login_push.STORE.by_pending(p.pending_id).state == "waiting"
+    assert browser.get(login_page.ROUTE, follow_redirects=False).status_code == 200
+
+
+@pytest.mark.parametrize("how", ["wrong number", "not me"])
+def test_a_refusal_on_the_phone_logs_a_warning(browser, phone, pushes, caplog, how):
+    import logging
+    caplog.set_level(logging.WARNING)
+    _sign_in(browser)
+    p = _waiting(pushes)
+    if how == "wrong number":
+        _approve(phone, p, number=next(n for n in p.offered if n != p.number))
+    else:
+        _approve(phone, p, decision="deny")
+    warned = [r for r in caplog.records if r.levelno == logging.WARNING
+              and "password" in r.getMessage().lower()]
+    assert warned and "198.51.100.7" in warned[0].getMessage()
