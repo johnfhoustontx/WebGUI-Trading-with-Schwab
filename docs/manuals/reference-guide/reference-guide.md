@@ -4642,9 +4642,11 @@ wording. Redis carries no Restart at all: it is a *system* unit a user-scoped
 `systemctl` cannot reach. The proxy card additionally shows **Schwab auth** status,
 including how long the 7-day sign-in has left, with a **Re-authorize** button. The
 button opens a dialog in the app: log in at Schwab in a new tab, copy the address of
-the page Schwab then sends you to (it does not load), paste it and press **Authorize**.
-The web app hands that address to the gateway itself, so renewing the sign-in works
-from any browser signed in to the app and needs no Tailscale.
+the page Schwab then sends you to (it does not load), come back and press **Paste and
+sign in**. The web app hands that address to the gateway itself, so renewing the
+sign-in works from any browser signed in to the app, a phone's included, and needs no
+Tailscale. `/status?signin=1` opens the page with the dialog already open; it is the
+link the daily sign-in warning carries.
 
 **Published data freshness** is the more informative half. It lists each domain's latest
 cache write with a version number and an age. **A service can be "online" and still not

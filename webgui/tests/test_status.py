@@ -1367,9 +1367,39 @@ def test_the_sign_in_dialog_opens_with_the_three_steps_and_schwabs_link(monkeypa
     for line in (status.SIGN_IN_TITLE, status.SIGN_IN_STEP_1, status.SIGN_IN_STEP_2,
                  status.SIGN_IN_STEP_3, status.SIGN_IN_PASTE_LABEL):
         assert line in texts, line
-    assert [b.text for b in _buttons(dlg)] == ["Log in to Schwab", "Cancel",
-                                               "Authorize"]
+    assert [b.text for b in _buttons(dlg)] == ["Log in to Schwab",
+                                               status.SIGN_IN_PASTE_BUTTON,
+                                               "Cancel", "Authorize"]
     assert calls == []                      # opening it signs nobody in
+
+
+def _press_paste(dlg, args):
+    """Press Paste and sign in as the browser would: its js_handler has read
+    the clipboard and emits ``args``."""
+    import asyncio
+    from types import SimpleNamespace
+    (btn,) = [b for b in _buttons(dlg) if b.text == status.SIGN_IN_PASTE_BUTTON]
+    (click,) = [li.handler for li in btn._event_listeners.values()
+                if li.type == "click"]
+    asyncio.run(_press_and_settle(btn, lambda _e: click(SimpleNamespace(args=args))))
+
+
+def test_paste_and_sign_in_signs_in_with_what_was_copied(monkeypatch):
+    said = _said(monkeypatch)
+    dlg, calls = _sign_in_dialog(monkeypatch, (True, ""))
+    _press_paste(dlg, {"text": "https://127.0.0.1:8182/?code=C0.abc%40&session=s"})
+    assert calls == ["https://127.0.0.1:8182/?code=C0.abc%40&session=s"]
+    assert dlg.value is False
+    assert _paste_box(dlg).value == ""
+    assert any(status.SIGN_IN_DONE in str(s) for s in said)
+
+
+def test_a_refused_clipboard_says_how_to_paste_by_hand(monkeypatch):
+    dlg, calls = _sign_in_dialog(monkeypatch, (True, ""))
+    _press_paste(dlg, {"text": None})
+    assert calls == []
+    assert dlg.value is True
+    assert status.SIGN_IN_CLIPBOARD_REFUSED in [str(e.text) for e in _labels(dlg)]
 
 
 def test_authorize_with_an_empty_box_asks_for_the_address_and_calls_nothing(

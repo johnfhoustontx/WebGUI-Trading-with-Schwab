@@ -4,7 +4,35 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-16 (**Desk: the header buttons carry their status and glow while new; Dealer Positioning columns reordered.**)
+**Last updated:** 2026-10-17 (**The Schwab sign-in can be renewed from a phone.**)
+
+- **Asked for by the user:** renewing the 7-day Schwab sign-in on an Android
+  phone. Automating the renewal was asked first and declined: Schwab only
+  issues a new sign-in to a person at its own login page, behind two-factor,
+  and scripting that means keeping the brokerage password and second factor on
+  the server and getting past Schwab's bot checks.
+- **Paste and sign in** (Status → Sign in to Schwab) reads the clipboard IN THE
+  BROWSER (`status._PASTE_JS`, inside the tap) and signs in at once. A browser
+  that refuses the clipboard gets `SIGN_IN_CLIPBOARD_REFUSED`, which says to
+  paste into the box by hand. A whole address pasted into the box also signs in
+  without pressing Authorize (`status.looks_pasted`: a jump of 20 or more
+  characters that carries a code), because the code's ~30 seconds are already
+  running. Typing never triggers it.
+- `/status?signin=1` opens the dialog as the page loads (`status.wants_sign_in`,
+  read from `ui.context.client.request`). The dialog writes that address into
+  the bar while it is open and strips it on close, so a phone that drops the
+  page while you are at Schwab reloads straight back into the dialog.
+- The daily sign-in warning (`tools/token_watch.py`) now ends with
+  `Open: https://<APP_HOST>/status?signin=1`, and leaves the link off rather
+  than guessing it when the host cannot be read. A test in
+  `test_schwab_sign_in.py` pins the push's link to what the page answers.
+- Checked in the page harness at 375 px with the proxy stubbed: the deep link
+  opened the dialog, a refused clipboard showed the fallback with no exchange,
+  and a paste into the box exchanged once, closed the dialog and cleared the
+  address bar. Not checked on a real phone.
+- Docs: `page_help.py`, User Guide, Reference Guide.
+
+**Prior —** 2026-10-16 (**Desk: the header buttons carry their status and glow while new; Dealer Positioning columns reordered.**)
 
 - **Asked for by the user:** the line beside the Market read and Market report
   buttons moved inside them, and a neon glow on either button whose latest update

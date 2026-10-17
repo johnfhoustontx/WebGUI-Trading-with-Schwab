@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-16</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-17</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -3687,12 +3687,20 @@ in a trading workflow, which is why they sit apart.</p>
   has lapsed) opens the <strong>Sign in to Schwab</strong> dialog:
   1. <strong>Log in to Schwab</strong> opens Schwab's own login in a new tab.
   2. After you log in, Schwab sends that tab to a page that will not load. That
-     is expected. Copy the whole address from the address bar.
-  3. Paste it into the dialog and press <strong>Authorize</strong>. Do it straight away: the
-     code in the address lasts about 30 seconds and works once.
+     is expected. Copy the whole address from the address bar (on a phone, tap
+     the address bar, then its copy button).
+  3. Come back to the app's tab and press <strong>Paste and sign in</strong>. Do it straight
+     away: the code in the address lasts about 30 seconds and works once. If
+     the browser will not let the app read what you copied, press and hold the
+     box under the button and choose Paste: a whole address pasted there signs
+     in at once, without pressing <strong>Authorize</strong>.
   If Schwab refuses it, the dialog stays open and says why; log in again and
   paste the new address. Nothing here needs Tailscale. The dialog's small link
   to the proxy's own sign-in page does, and is only a second way in.</li>
+<li><strong>On a phone</strong>, the address <code>/status?signin=1</code> opens the page with the dialog
+  already open, and the sign-in warning push carries that link. While the
+  dialog is open the address bar holds it too, so if the phone drops the page
+  while you are away at Schwab, it comes back with the dialog open.</li>
 <li>A service whose scheduler has <strong>stopped</strong>, or has not run for ten minutes, shows
   as unhealthy with the reason, even though the process is still answering. A card
   also says when a service holds <strong>commands it could not run</strong> (they are kept for
@@ -3745,7 +3753,9 @@ notifications (Discord and Telegram, both ticked as shipped):</p>
 </tbody>
 </table>
 <p>The Schwab sign-in lasts 7 days and only you can renew it (<strong>Re-authorize</strong> on
-the gateway card). When it lapses all market data stops, so the warning repeats
+the gateway card). The warning ends with a link that opens the sign-in dialog,
+so you can renew from the phone the push arrives on. When it lapses all market
+data stops, so the warning repeats
 each morning until you sign in again. A part that stays down is reported again
 every 6 hours. Both numbers, and the time of the daily check, are under
 Settings → Configuration (<em>Push notifications</em> → <em>Server alerts</em>, and <em>Market

@@ -212,6 +212,82 @@ def test_the_authorize_button_opens_the_dialog_and_not_a_tailnet_tab():
     assert "run.io_bound(proxy.auth_info" in src
 
 
+# ── on a phone ───────────────────────────────────────────────────────────────
+@pytest.mark.parametrize("query, wanted", [
+    ({"signin": "1"}, True),
+    ({"signin": "true"}, True),
+    ({"signin": " YES "}, True),
+    ({"signin": "0"}, False),
+    ({"signin": ""}, False),
+    ({}, False),
+    ({"other": "1"}, False),
+    (None, False),
+    ("signin=1", False),
+])
+def test_the_address_opens_the_dialog_only_when_it_asks(query, wanted):
+    assert status.wants_sign_in(query) is wanted
+
+
+def test_the_push_link_is_the_address_the_page_answers():
+    """The sign-in warning's link must open the dialog. Both ends are pinned
+    here so a rename on either side fails."""
+    import pathlib
+    import sys
+    from urllib.parse import parse_qs, urlparse
+    sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2] / "tools"))
+    import token_watch
+    link = urlparse(token_watch.sign_in_link())
+    assert link.scheme == "https" and link.path == "/status"
+    query = {k: v[0] for k, v in parse_qs(link.query).items()}
+    assert status.wants_sign_in(query)
+    # And the address the dialog writes into the bar while it is open.
+    assert f"?{status.SIGN_IN_QUERY}=1" in status._URL_WITH_SIGN_IN_JS
+
+
+@pytest.mark.parametrize("args, text", [
+    ({"text": "https://127.0.0.1:8182/?code=x"}, "https://127.0.0.1:8182/?code=x"),
+    ({"text": None}, None),             # the browser refused the clipboard
+    ({"text": "   "}, None),
+    ({"text": 7}, None),
+    ({}, None),
+    (None, None),
+    ("https://x/?code=1", None),        # not the handler's shape
+])
+def test_the_paste_button_reads_only_what_the_browser_sent(args, text):
+    assert status.clipboard_text(args) == text
+
+
+_ADDRESS = "https://127.0.0.1:8182/?code=C0.abcdefghijklmnop%40&session=s"
+
+
+@pytest.mark.parametrize("before, after, signs_in", [
+    ("", _ADDRESS, True),                     # pasted into an empty box
+    (None, _ADDRESS, True),
+    ("", "C0.abcdefghijklmnopqrstuvwxyz@", False),   # a bare code, no address
+    (_ADDRESS[:-1], _ADDRESS, False),         # typing the last character
+    (_ADDRESS, _ADDRESS + "x", False),        # editing an address already there
+    ("", "https://127.0.0.1:8182/?session=s&x=" + "y" * 30, False),   # no code
+    ("", None, False),
+])
+def test_a_paste_signs_in_and_typing_never_does(before, after, signs_in):
+    assert status.looks_pasted(before, after) is signs_in
+
+
+def test_the_paste_button_reads_the_clipboard_in_the_browser():
+    src = inspect.getsource(status.render)
+    assert "js_handler=_PASTE_JS" in src
+    assert "navigator.clipboard" in status._PASTE_JS
+    # A refusal comes back as a null text, so the page can say what to do.
+    assert "emit({text: null})" in status._PASTE_JS
+    # The box signs in on a paste, and the deep link opens the dialog.
+    assert "on_change=_paste_changed" in src
+    assert "wants_sign_in(_page_query())" in src
+
+
+def test_the_page_query_is_empty_with_no_request():
+    assert status._page_query() == {}
+
+
 def test_the_sign_in_is_refused_in_the_public_process():
     """The Status page is not published, and this is the second lock: the
     handlers read the process, not a flag a caller could leave out."""

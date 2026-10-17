@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-16</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-17</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -6327,9 +6327,11 @@ wording. Redis carries no Restart at all: it is a <em>system</em> unit a user-sc
 <code>systemctl</code> cannot reach. The proxy card additionally shows <strong>Schwab auth</strong> status,
 including how long the 7-day sign-in has left, with a <strong>Re-authorize</strong> button. The
 button opens a dialog in the app: log in at Schwab in a new tab, copy the address of
-the page Schwab then sends you to (it does not load), paste it and press <strong>Authorize</strong>.
-The web app hands that address to the gateway itself, so renewing the sign-in works
-from any browser signed in to the app and needs no Tailscale.</p>
+the page Schwab then sends you to (it does not load), come back and press <strong>Paste and
+sign in</strong>. The web app hands that address to the gateway itself, so renewing the
+sign-in works from any browser signed in to the app, a phone's included, and needs no
+Tailscale. <code>/status?signin=1</code> opens the page with the dialog already open; it is the
+link the daily sign-in warning carries.</p>
 <p><strong>Published data freshness</strong> is the more informative half. It lists each domain's latest
 cache write with a version number and an age. <strong>A service can be "online" and still not
 be publishing</strong> — this table is what catches that.</p>

@@ -125,6 +125,32 @@ def test_a_token_inside_the_warning_window_is_reported_with_the_time_left():
     assert "/auth" not in said
 
 
+@pytest.mark.parametrize("health", [
+    _health(refresh_token_hours_left=30.4),
+    _health(status="reauth_required", refresh_token_expired=True,
+            refresh_token_hours_left=0.0),
+    _health(status="reauth_required", refresh_token_rejected=True),
+    {"status": "reauth_required", "has_token": False},
+    _health(refresh_token_hours_left=None),
+])
+def test_every_sign_in_warning_ends_with_the_link_to_the_dialog(health):
+    """One tap from the push on a phone to the sign-in dialog."""
+    sys.path.insert(0, str(ROOT))
+    from repo_paths import APP_HOST
+    _, lines = token_watch.assess(health, warn_hours=48)
+    assert lines[-1] == f"Open: https://{APP_HOST}/status?signin=1"
+
+
+def test_the_link_is_left_off_rather_than_guessed(monkeypatch):
+    def boom():
+        raise RuntimeError("no host")
+
+    monkeypatch.setattr(token_watch, "sign_in_link", boom)
+    _, lines = token_watch.assess(_health(refresh_token_hours_left=10.0), warn_hours=48)
+    assert not any("http" in line for line in lines)
+    assert "System Status -> Authorize" in lines[-1]
+
+
 def test_the_window_is_inclusive_and_configurable():
     assert token_watch.assess(_health(refresh_token_hours_left=48.0), warn_hours=48)
     assert token_watch.assess(_health(refresh_token_hours_left=48.1), warn_hours=48) is None

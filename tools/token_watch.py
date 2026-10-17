@@ -25,7 +25,26 @@ import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 _HOW = ("Sign in again in the app: System Status -> Authorize. It works from "
-        "any browser signed in to the app.")
+        "any browser signed in to the app, a phone's included.")
+# The Status page opens its sign-in dialog for this address
+# (``pages/status.py:wants_sign_in``), so the push is one tap from the dialog.
+SIGN_IN_PATH = "/status?signin=1"
+
+
+def sign_in_link():
+    """The address that opens the app's sign-in dialog, on the app's host."""
+    sys.path.insert(0, str(ROOT))
+    from repo_paths import APP_HOST
+    return f"https://{APP_HOST}{SIGN_IN_PATH}"
+
+
+def _how():
+    """What to do, ending with the link. The link is left off, never guessed,
+    when the app's host cannot be read."""
+    try:
+        return [_HOW, f"Open: {sign_in_link()}"]
+    except Exception:  # noqa: BLE001
+        return [_HOW]
 
 
 def fetch():
@@ -49,23 +68,23 @@ def assess(health, *, warn_hours):
                  "state of the Schwab sign-in is unknown.",
                  "Check the Status page."])
     if not health.get("has_token"):
-        return ("No Schwab sign-in on the proxy", [_HOW])
+        return ("No Schwab sign-in on the proxy", _how())
     if health.get("refresh_token_rejected"):
         return ("Schwab rejected the sign-in",
-                ["Market data has stopped.", _HOW])
+                ["Market data has stopped.", *_how()])
     if health.get("refresh_token_expired"):
         return ("The Schwab sign-in has expired",
-                ["Market data has stopped.", _HOW])
+                ["Market data has stopped.", *_how()])
     left = health.get("refresh_token_hours_left")
     if (isinstance(left, bool) or not isinstance(left, (int, float))
             or not math.isfinite(left)):
         return ("The Schwab sign-in's remaining time cannot be read",
                 ["The proxy did not say how long the sign-in has left.",
-                 "It lasts 7 days from the last sign-in. " + _HOW])
+                 "It lasts 7 days from the last sign-in.", *_how()])
     if left <= warn_hours:
         hours = int(left)
         return (f"The Schwab sign-in expires in {hours} hours",
-                ["Market data stops when it does.", _HOW])
+                ["Market data stops when it does.", *_how()])
     return None
 
 

@@ -3077,12 +3077,20 @@ A health board for the whole stack.
   has lapsed) opens the **Sign in to Schwab** dialog:
   1. **Log in to Schwab** opens Schwab's own login in a new tab.
   2. After you log in, Schwab sends that tab to a page that will not load. That
-     is expected. Copy the whole address from the address bar.
-  3. Paste it into the dialog and press **Authorize**. Do it straight away: the
-     code in the address lasts about 30 seconds and works once.
+     is expected. Copy the whole address from the address bar (on a phone, tap
+     the address bar, then its copy button).
+  3. Come back to the app's tab and press **Paste and sign in**. Do it straight
+     away: the code in the address lasts about 30 seconds and works once. If
+     the browser will not let the app read what you copied, press and hold the
+     box under the button and choose Paste: a whole address pasted there signs
+     in at once, without pressing **Authorize**.
   If Schwab refuses it, the dialog stays open and says why; log in again and
   paste the new address. Nothing here needs Tailscale. The dialog's small link
   to the proxy's own sign-in page does, and is only a second way in.
+- **On a phone**, the address `/status?signin=1` opens the page with the dialog
+  already open, and the sign-in warning push carries that link. While the
+  dialog is open the address bar holds it too, so if the phone drops the page
+  while you are away at Schwab, it comes back with the dialog open.
 - A service whose scheduler has **stopped**, or has not run for ten minutes, shows
   as unhealthy with the reason, even though the process is still answering. A card
   also says when a service holds **commands it could not run** (they are kept for
@@ -3121,7 +3129,9 @@ notifications (Discord and Telegram, both ticked as shipped):
 | **The Schwab sign-in is about to run out** | Checked every day at 07:30 CT, weekends included. Sent when 48 hours or fewer are left, when it has already expired or been rejected, and when the check cannot read the answer. |
 
 The Schwab sign-in lasts 7 days and only you can renew it (**Re-authorize** on
-the gateway card). When it lapses all market data stops, so the warning repeats
+the gateway card). The warning ends with a link that opens the sign-in dialog,
+so you can renew from the phone the push arrives on. When it lapses all market
+data stops, so the warning repeats
 each morning until you sign in again. A part that stays down is reported again
 every 6 hours. Both numbers, and the time of the daily check, are under
 Settings → Configuration (*Push notifications* → *Server alerts*, and *Market

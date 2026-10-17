@@ -1782,9 +1782,10 @@ the last check ran — the page re-checks itself every 15 seconds, and
 - **Authorize** (or **Re-authorize**) renews the Schwab login, which lasts **7
   days**; the line beside it says how long is left. It opens a dialog with
   three steps: log in at Schwab in a new tab, copy the address of the page
-  Schwab then sends you to (it will not load — that is expected), and paste it
-  into the dialog. Paste it straight away: the code in it lasts about 30
-  seconds. It works from any browser signed in to this app.
+  Schwab then sends you to (it will not load — that is expected), then come
+  back and press **Paste and sign in**. Do it straight away: the code in it
+  lasts about 30 seconds. It works from any browser signed in to this app, a
+  phone's included, and the sign-in warning push links straight to this dialog.
 
 You do not have to keep this page open to find out something broke. A part that
 goes down and stays down, a scheduled job that fails (the nightly backup, for

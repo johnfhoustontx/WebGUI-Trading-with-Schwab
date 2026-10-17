@@ -78,16 +78,41 @@ AUTH_URL = f"{PROXY_PUBLIC_URL}/auth"
 # ── the Sign in to Schwab dialog ─────────────────────────────────────────────
 SIGN_IN_TITLE = "Sign in to Schwab"
 SIGN_IN_BODY = ("Schwab's sign-in lasts 7 days. Renewing it takes three steps, "
-                "all in this browser.")
+                "all in this browser, and works on a phone.")
 SIGN_IN_STEP_1 = "1. Log in at Schwab. It opens in a new tab."
 SIGN_IN_STEP_2 = ("2. After you log in, Schwab sends that tab to a page that "
                   "will not load. That is expected. Copy the page's whole "
-                  "address from the address bar.")
-SIGN_IN_STEP_3 = ("3. Paste the address here and press Authorize. Do it "
-                  "straight away: the code in it lasts about 30 seconds.")
-SIGN_IN_PASTE_LABEL = "Address Schwab sent you to"
+                  "address: on a phone, tap the address bar, then its copy "
+                  "button.")
+SIGN_IN_STEP_3 = ("3. Come back to this tab and press Paste and sign in. Do it "
+                  "straight away: the code in the address lasts about 30 "
+                  "seconds.")
+SIGN_IN_PASTE_BUTTON = "Paste and sign in"
+SIGN_IN_PASTE_LABEL = "Or paste the address here and press Authorize"
 SIGN_IN_PASTE_EXAMPLE = "https://127.0.0.1:8182/?code=..."
 SIGN_IN_PASTE_EMPTY = "Paste the address first."
+SIGN_IN_CLIPBOARD_REFUSED = ("This browser would not let the app read what you "
+                             "copied. Press and hold the box below, choose "
+                             "Paste, and it signs in.")
+# ``/status?signin=1`` opens the dialog as the page loads. It is the link the
+# sign-in warning push carries (tools/token_watch.py), and the dialog writes it
+# into the address bar while it is open: a phone that drops the app's
+# connection while you are away logging in at Schwab reloads the page when you
+# come back, and the reload lands in the dialog rather than on a bare board.
+SIGN_IN_QUERY = "signin"
+# A paste puts the whole address in at once; typing adds a character at a time.
+# A jump of at least this many characters with a code in it signs in without
+# waiting for Authorize, because the code's 30 seconds are already running.
+_PASTE_JUMP_CHARS = 20
+# Reads the clipboard IN THE BROWSER, inside the tap, which is what lets a phone
+# allow it; the server only ever sees the text the browser hands back.
+_PASTE_JS = ("() => { const c = navigator.clipboard; "
+             "if (!c || !c.readText) { emit({text: null}); return; } "
+             "c.readText().then((t) => emit({text: t}), "
+             "() => emit({text: null})); }")
+_URL_WITH_SIGN_IN_JS = (f"history.replaceState(null, '', location.pathname + "
+                        f"'?{SIGN_IN_QUERY}=1')")
+_URL_WITHOUT_SIGN_IN_JS = "history.replaceState(null, '', location.pathname)"
 SIGN_IN_PASTE_NO_CODE = ("That address has no code in it. Copy the whole "
                          "address of the page Schwab sent you to after the "
                          "login; it contains code=.")
@@ -348,6 +373,49 @@ def sign_in_paste_problem(pasted):
 def sign_in_failure_text(error):
     """The proxy's own words for a refused sign-in, then what to do next."""
     return f"{error} {SIGN_IN_RETRY}"
+
+
+def wants_sign_in(query):
+    """Whether the page's address asks for the sign-in dialog (``?signin=1``).
+
+    ``query`` is the request's query parameters, any mapping; anything else is
+    no. Only the key's presence with a true-looking value counts, so a stray
+    ``?signin=0`` does not open it."""
+    try:
+        value = query.get(SIGN_IN_QUERY)
+    except Exception:  # noqa: BLE001 - not a mapping: not a request for it
+        return False
+    return isinstance(value, str) and value.strip().lower() in ("1", "true", "yes")
+
+
+def clipboard_text(args):
+    """The text the Paste button's browser handler sent, or None when the
+    browser refused to read the clipboard (or sent nothing usable)."""
+    text = args.get("text") if isinstance(args, dict) else None
+    return text if isinstance(text, str) and text.strip() else None
+
+
+def looks_pasted(before, after):
+    """Whether the box just received a whole sign-in address in one go.
+
+    True for a jump of :data:`_PASTE_JUMP_CHARS` or more that leaves an address
+    with a code in it - a paste, which signs in at once. Typing, and editing an
+    address already there, never does."""
+    before = before if isinstance(before, str) else ""
+    if not isinstance(after, str):
+        return False
+    return (len(after) - len(before) >= _PASTE_JUMP_CHARS
+            and sign_in_paste_problem(after) is None)
+
+
+def _page_query():
+    """This page's query parameters, or ``{}`` where there is no request (the
+    page harness, a test). Never raises."""
+    try:
+        request = ui.context.client.request
+        return request.query_params if request is not None else {}
+    except Exception:  # noqa: BLE001 - no request is no deep link
+        return {}
 
 
 # ── restart (pure spec/command builders + thin spawn) ────────────────────────
@@ -848,15 +916,42 @@ def render():
             kit.toast("error", SIGN_IN_NO_LINK)
             return
         state["auth_url"] = info["auth_url"]
+        state["pasted"] = ""
         paste.value = ""
         sign_in_error.set_visibility(False)
         sign_in_dlg.open()
+        ui.run_javascript(_URL_WITH_SIGN_IN_JS)
+
+    @guard
+    def _sign_in_toggled(e):
+        if not e.value:
+            ui.run_javascript(_URL_WITHOUT_SIGN_IN_JS)
 
     @guard
     def _open_schwab(_e=None):
         url = state.get("auth_url")
         if url:
             ui.navigate.to(url, new_tab=True)
+
+    def _show_sign_in_problem(text):
+        sign_in_error.text = text
+        sign_in_error.set_visibility(True)
+
+    @guard_async
+    async def _paste_clicked(e):
+        text = clipboard_text(getattr(e, "args", None))
+        if text is None:
+            _show_sign_in_problem(SIGN_IN_CLIPBOARD_REFUSED)
+            return
+        state["pasted"] = text
+        paste.value = text
+        await sign_in_dlg.run()
+
+    @guard_async
+    async def _paste_changed(e):
+        before, state["pasted"] = state.get("pasted", ""), e.value
+        if looks_pasted(before, e.value):
+            await sign_in_dlg.run()
 
     async def _sign_in_confirmed():
         """Returning ``False`` keeps the dialog open with the reason shown."""
@@ -873,26 +968,30 @@ def render():
                 kit.set_busy(sign_in_dlg.confirm, False)
             ok, message = answer or (False, "The web app is stopping.")
             if ok:
+                state["pasted"] = ""
                 paste.value = ""
                 kit.toast("ok", SIGN_IN_DONE)
                 ui.timer(0.1, _refresh, once=True)
                 return None
             problem = sign_in_failure_text(message)
-        sign_in_error.text = problem
-        sign_in_error.set_visibility(True)
+        _show_sign_in_problem(problem)
         return False
 
     sign_in_dlg = kit.confirm(SIGN_IN_TITLE, SIGN_IN_BODY,
                               confirm_text="Authorize",
                               on_confirm=_sign_in_confirmed)
+    sign_in_dlg.dialog.on_value_change(_sign_in_toggled)
     with sign_in_dlg.content:
         ui.label(SIGN_IN_STEP_1).classes(f"text-sm {theme.LABEL}")
         kit.button("Log in to Schwab", kind="secondary", icon="open_in_new",
                    on_click=_open_schwab)
         ui.label(SIGN_IN_STEP_2).classes(f"text-sm {theme.LABEL}")
         ui.label(SIGN_IN_STEP_3).classes(f"text-sm {theme.LABEL}")
+        kit.button(SIGN_IN_PASTE_BUTTON, kind="primary", icon="content_paste") \
+            .on("click", _paste_clicked, js_handler=_PASTE_JS)
         paste = kit.text_field(SIGN_IN_PASTE_LABEL, width="w-full",
-                               placeholder=SIGN_IN_PASTE_EXAMPLE)
+                               placeholder=SIGN_IN_PASTE_EXAMPLE,
+                               on_change=_paste_changed)
         sign_in_error = ui.label("").classes(f"text-sm {theme.TXT_NEG}")
         sign_in_error.set_visibility(False)
         ui.link(SIGN_IN_TAILNET, AUTH_URL, new_tab=True).classes(
@@ -931,3 +1030,6 @@ def render():
     fresh.busy.show()
     ui.timer(_FIRST_SWEEP_SEC, _refresh, once=True)
     ui.timer(_AUTO_REFRESH_SEC, _refresh)
+    # The push's link, and a phone's reload mid-sign-in: open the dialog.
+    if wants_sign_in(_page_query()):
+        ui.timer(_FIRST_SWEEP_SEC, _authorize_clicked, once=True)
