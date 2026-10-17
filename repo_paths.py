@@ -54,6 +54,10 @@ SESSIONS_TOML = REPO_ROOT / "config" / "sessions.toml"
 # config_paper.py. Edit + restart options_svc.
 PAPER_TOML = REPO_ROOT / "config" / "paper.toml"
 
+# Approving a sign-in from the phone (webgui/login_push.py): the ntfy server,
+# how long an approval waits, how many may wait at once.
+LOGIN_PUSH_TOML = REPO_ROOT / "config" / "login_push.toml"
+
 # The momentum cascade's GICS sub-industry baskets and the Bull / Bear Map's live
 # quote batching. Read by services/sentiment_svc/momentum_config.py. Edit +
 # restart sentiment_svc.

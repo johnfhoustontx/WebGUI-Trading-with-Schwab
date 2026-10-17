@@ -1,0 +1,18 @@
+# Approving a sign-in from the phone (webgui/login_push.py).
+#
+# Password typed and the code box left empty: the sign-in page shows a
+# two-digit number and the phone gets an ntfy push with three numbers. Picking
+# the right one opens the app on the phone (which must already be signed in),
+# and Approve there finishes the sign-in on the waiting page.
+#
+# The ntfy topic is a SECRET and lives in the stack .env, not here:
+#   NTFY_TOPIC=<long random name>     required; unset = this is all off
+#   NTFY_TOKEN=<access token>         optional, for a private server or topic
+# Read when a sign-in is attempted; restart the web app after editing.
+
+enabled = true                 # off = the code box is required, exactly as before
+server = "https://ntfy.sh"     # the ntfy server the push is published to (https only)
+ttl_sec = 120                  # how long an approval waits before it lapses
+max_pending = 5                # approvals waiting at once; more are refused
+publish_timeout_sec = 5        # how long the publish to ntfy may take
+priority = 4                   # ntfy priority, 1 (min) to 5 (max); 4 = high

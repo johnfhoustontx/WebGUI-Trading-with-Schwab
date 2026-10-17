@@ -2277,7 +2277,40 @@ _MARKET_READ = ConfigFile(
     ),
 )
 
-FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _SECTORS, _MOMENTUM,
+# ─────────────────────────────────────────────────────────────────────────────
+# Approve a sign-in from the phone — config/login_push.toml
+# ─────────────────────────────────────────────────────────────────────────────
+_LOGIN_PUSH = ConfigFile(
+    name="login_push.toml", title="Sign-in from the phone", icon="phonelink_lock",
+    summary="Leave the code empty at sign-in and approve it on your phone "
+            "instead, through the ntfy app. Needs NTFY_TOPIC in the server's "
+            ".env; without it the code is required as before.",
+    restart=(WEBGUI,),
+    sections=(
+        Section("Approval push", "The push goes to the ntfy topic named by "
+                "NTFY_TOPIC. Approving happens in the app on a phone that is "
+                "already signed in.", (
+            Field("enabled", "Approve sign-ins from the phone",
+                  "Off makes the authenticator code required again.", kind="bool"),
+            Field("server", "ntfy server",
+                  "Where the push is published. https only.", kind="text"),
+            Field("ttl_sec", "Approval waits for",
+                  "After this the waiting sign-in lapses and must be started "
+                  "again.", kind="int", unit="s", min=10, max=3600, step=10),
+            Field("max_pending", "Approvals waiting at once",
+                  "A sign-in past this many is refused, so a password holder "
+                  "cannot flood your phone.", kind="int", min=1, max=50, step=1),
+            Field("publish_timeout_sec", "Push send timeout",
+                  "How long the app waits for ntfy before falling back to the "
+                  "code.", kind="float", unit="s", min=0.5, max=30, step=0.5),
+            Field("priority", "Push priority",
+                  "ntfy priority, 1 (lowest) to 5 (highest). 4 makes the phone "
+                  "sound and show it at the top.", kind="int", min=1, max=5, step=1),
+        )),
+    ),
+)
+
+FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _LOGIN_PUSH, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _SECTORS, _MOMENTUM,
          _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _FEED, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
          _MARKET_READ, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
