@@ -765,3 +765,105 @@ def test_a_remembered_device_does_not_pass_its_own_backoff(creds):
     r = login_page.attempt(password=PASSWORD, code=None, client="9.9.9.9",
                            form_token=_token(creds), remember_token=remember, now=T0 + 1)
     assert not r.ok
+
+
+# ---------------------------------------------------------------------------
+# An empty code box can wait for the phone (login_push). The design:
+# docs/plans/2026-10-17-login-push-approval-design.md.
+
+@pytest.fixture
+def push_on(monkeypatch):
+    import login_push
+    monkeypatch.setattr(login_push, "configured", lambda: True)
+    monkeypatch.setattr(login_push.STORE, "has_room", lambda now=None: True)
+    return login_push
+
+
+def _failures(client):
+    return len(login_page.lockout_state()._per_client.get(client, ()))
+
+
+def test_empty_code_with_push_configured_is_pending_only_after_the_password(
+        creds, push_on):
+    r = _attempt(password=PASSWORD, code="", client="c1",
+                 form_token=_token(creds), now=T0)
+    assert r.pending is True and r.ok is False
+    bad = _attempt(password="wrong", code="", client="c2",
+                   form_token=_token(creds), now=T0)
+    assert bad.pending is False and bad.ok is False
+    assert _failures("c2") == 1
+
+
+def test_blank_whitespace_code_also_waits(creds, push_on):
+    r = _attempt(password=PASSWORD, code="   ", client="c1",
+                 form_token=_token(creds), now=T0)
+    assert r.pending is True
+
+
+def test_empty_code_without_push_is_refused_as_today(creds, monkeypatch):
+    import login_push
+    monkeypatch.setattr(login_push, "configured", lambda: False)
+    r = _attempt(password=PASSWORD, code="", client="c1",
+                 form_token=_token(creds), now=T0)
+    assert r.ok is False and r.pending is False
+    assert _failures("c1") == 1
+
+
+def test_a_typed_code_still_uses_totp_with_push_configured(creds, push_on):
+    r = _attempt(password=PASSWORD, code=_good_code(creds), client="c1",
+                 form_token=_token(creds), now=T0)
+    assert r.ok is True and r.pending is False
+
+
+def test_a_trusted_device_never_goes_pending(creds, push_on):
+    remember = login_page.mint_remember_token(KEY, epoch=1, now=T0)
+    r = login_page.attempt(password=PASSWORD, code="", client="c1",
+                           form_token=_token(creds), remember_token=remember,
+                           now=T0)
+    assert r.ok is True and r.pending is False
+
+
+def test_no_room_refuses_and_counts(creds, push_on, monkeypatch):
+    monkeypatch.setattr(push_on.STORE, "has_room", lambda now=None: False)
+    r = _attempt(password=PASSWORD, code="", client="c1",
+                 form_token=_token(creds), now=T0)
+    assert r.ok is False and r.pending is False
+    assert _failures("c1") == 1
+
+
+def test_pending_records_no_success(creds, push_on):
+    _attempt(password="wrong", code="", client="c1", form_token=_token(creds), now=T0)
+    assert _failures("c1") == 1
+    _attempt(password=PASSWORD, code="", client="c1", form_token=_token(creds), now=T0)
+    assert _failures("c1") == 1, "a pending approval must not clear the backoff"
+    login_page.record_success("c1")
+    assert _failures("c1") == 0
+
+
+def _code_input(page):
+    start = page.index(f'id="{login_page.FIELD_CODE}"')
+    return page[page.rindex("<input", 0, start):page.index(">", start)]
+
+
+def test_form_with_push_drops_required_and_shows_the_hint():
+    page = login_page.render_form(next_path="/desk", error=None, form_token="t",
+                                  push=True)
+    assert "required" not in _code_input(page)
+    assert "Leave empty to approve on your phone" in page
+
+
+def test_form_without_push_is_unchanged():
+    page = login_page.render_form(next_path="/desk", error=None, form_token="t")
+    assert "required" in _code_input(page)
+    assert "approve on your phone" not in page
+
+
+def test_render_card_adds_refresh_only_when_asked():
+    page = login_page.render_card(title="Waiting", eyebrow="Approve on your phone",
+                                  body_html="<p>47</p>")
+    assert "<p>47</p>" in page and "<title>Waiting</title>" in page
+    assert "http-equiv" not in page
+    assert "_nicegui" not in page and "<script" not in page
+    page = login_page.render_card(title="Waiting", eyebrow="x", body_html="",
+                                  refresh_sec=2)
+    assert '<meta http-equiv="refresh" content="2">' in page

@@ -48,6 +48,7 @@ import time
 
 import auth
 import auth_store
+import login_push
 
 # A child of the "webgui" logger, which is where ``logging_setup`` attaches the
 # rotating file handler and where an operator already looks. The suffix keeps
@@ -277,10 +278,20 @@ class AttemptResult:
     """
     ok: bool
     message: str
+    # The password verified, no code was typed, and the phone is to approve
+    # (login_push). Neither a success nor a failure: the route creates the
+    # pending approval and the lockout's success is recorded on collection.
+    pending: bool = False
 
 
 _SUCCESS = AttemptResult(True, "")
 _FAILURE = AttemptResult(False, GENERIC_FAILURE)
+_PENDING = AttemptResult(False, "", pending=True)
+
+
+def record_success(client: str) -> None:
+    """Clear ``client``'s backoff: an approval from the phone was collected."""
+    _lockout.record_success(client)
 
 
 def _load_credentials() -> auth_store.Credentials | None:
@@ -394,6 +405,15 @@ def attempt(*, password: str, code: str | None, client: str,
         # the one accepted-sign-in shape an operator might want to account for.
         log.info("Sign-in accepted for %s on a remembered device (no code)",
                  client)
+    elif not (code or "").strip() and login_push.configured():
+        # 4b. No code typed: the phone approves instead (login_push). Reached
+        #     only past the password, so a waiting approval always means the
+        #     right password was typed. A full queue is a refusal like any
+        #     other, so a password holder cannot flood the phone.
+        if not login_push.STORE.has_room(now=at):
+            return _refuse(client, "too many waiting approvals", now=at, hashed=True)
+        log.info("Sign-in for %s is waiting for approval on the phone", client)
+        return _PENDING
     else:
         ok, counter = auth.verify_totp(
             creds.totp_secret, code, now=at,
@@ -511,11 +531,22 @@ _CSS = """
     background: rgba(248, 113, 113, .10); border: 1px solid #7f3341;
     color: #f2b8bf; font-size: 13px;
   }
+  /* Approving from the phone (login_push): the hint under the code box, the
+     number on the waiting page, and the approve page's two buttons. */
+  .hint { margin: -10px 0 14px; font-size: 12px; color: #7f8db0; }
+  .number {
+    margin: 6px 0 18px; text-align: center; font-size: 56px; font-weight: 700;
+    letter-spacing: .08em; color: #eaf0fb; font-variant-numeric: tabular-nums;
+  }
+  .note { margin: 0 0 16px; font-size: 14px; line-height: 1.5; }
+  a { color: #8fb0ff; }
+  button.secondary { background: #1a2742; color: #cdd8ee; margin-top: 10px; }
+  button.secondary:hover { background: #22324f; }
 """
 
 
 def render_form(*, next_path: str, error: str | None,
-                form_token: str | None) -> str:
+                form_token: str | None, push: bool = False) -> str:
     """The complete ``/login`` document.
 
     Every interpolated value is attacker-influenced (``next`` off the query
@@ -536,11 +567,17 @@ def render_form(*, next_path: str, error: str | None,
     and either attribute would silently truncate or block exactly that paste --
     handing the user a generic "Sign-in failed" for a code that was correct, on
     the one screen where that is least affordable.
+
+    ``push`` (approving from the phone is configured, ``login_push``): the code
+    box is no longer required, and a hint says an empty one waits for the phone.
     """
     esc_next = html.escape(next_path, quote=True)
     esc_token = html.escape(form_token or "", quote=True)
     banner = (f'    <p class="error">{html.escape(error, quote=True)}</p>\n'
               if error else "")
+    code_required = "" if push else " required"
+    code_hint = ('\n      <p class="hint">Leave empty to approve on your phone</p>'
+                 if push else "")
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -562,8 +599,8 @@ def render_form(*, next_path: str, error: str | None,
       <input type="password" id="{FIELD_PASSWORD}" name="{FIELD_PASSWORD}"
              required autofocus autocomplete="current-password">
       <label for="{FIELD_CODE}">Authenticator code</label>
-      <input type="text" id="{FIELD_CODE}" name="{FIELD_CODE}" required
-             inputmode="numeric" autocomplete="one-time-code">
+      <input type="text" id="{FIELD_CODE}" name="{FIELD_CODE}"{code_required}
+             inputmode="numeric" autocomplete="one-time-code">{code_hint}
       <label class="trust" for="{FIELD_REMEMBER}">
         <input type="checkbox" id="{FIELD_REMEMBER}" name="{FIELD_REMEMBER}"
                value="{REMEMBER_ON}">
@@ -571,6 +608,36 @@ def render_form(*, next_path: str, error: str | None,
       </label>
       <button type="submit">Sign in</button>
     </form>
+  </main>
+</body>
+</html>
+"""
+
+
+def render_card(*, title: str, eyebrow: str, body_html: str,
+                refresh_sec: int | None = None) -> str:
+    """A page in the login form's look around ``body_html`` (the waiting page,
+    the approve page). ``body_html`` is inserted AS IS: the caller escapes every
+    value it puts there. ``title`` and ``eyebrow`` are escaped here. With
+    ``refresh_sec`` the page reloads itself - the waiting page's poll, with no
+    script."""
+    refresh = (f'\n  <meta http-equiv="refresh" content="{int(refresh_sec)}">'
+               if refresh_sec else "")
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">{refresh}
+  <title>{html.escape(title, quote=True)}</title>
+  {_FAVICON_TAG}
+  <style>{_CSS}  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>{html.escape(title, quote=True)}</h1>
+    <p class="eyebrow">{html.escape(eyebrow, quote=True)}</p>
+{body_html}
   </main>
 </body>
 </html>
