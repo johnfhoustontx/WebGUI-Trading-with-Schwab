@@ -4,7 +4,31 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-17 (**"Keep me signed in" lasts 30 days; the Schwab sign-in from a phone.**)
+**Last updated:** 2026-10-17 (**Approve a sign-in from the phone; "keep me signed in" lasts 30 days; the Schwab sign-in from a phone.**)
+
+- **Asked for by the user:** the 6-digit code at sign-in replaced by a
+  two-digit number match on their Android phone, through the ntfy app. Design
+  and plan: `docs/plans/2026-10-17-login-push-approval-{design,plan}.md`.
+- Password typed, code box empty: `login_page.attempt` answers pending (only
+  past the password), the route makes a `login_push.Pending` and publishes an
+  ntfy push whose three numbers are LINKS to the gated `/approve-sign-in`. The
+  waiting page (under `/login`, `<meta refresh>` every 2 s, no script) holds
+  only the pending id in `ns_pending`; Approve on the right number lets it
+  collect the session (30-day kind when "keep" was ticked). Wrong number, Not
+  me, 2 minutes, or a failed publish end it; the code always still works.
+- **Changed by review before building:** approving straight from the
+  notification was dropped. A public ntfy topic is readable by whoever learns
+  its name, so password + topic would have been enough to approve one's own
+  sign-in. Approval needs a signed-in session on the phone, so answers are not
+  counted by the lockout (nobody can lock the owner out through the push).
+- `config/login_push.toml` (enabled, server, ttl_sec 120, max_pending 5,
+  publish_timeout_sec 5, priority 4) with a Settings → Configuration entry;
+  `NTFY_TOPIC` / `NTFY_TOKEN` in the stack `.env`. No topic = off.
+- Tier-1 `requests` allow-list gains `login_push.publish` (lazy import).
+- Not yet set up on the server: the topic is the owner's to create (User
+  Guide). Not checked on a real phone.
+
+**Prior —** 2026-10-17 (**"Keep me signed in" lasts 30 days; the Schwab sign-in from a phone.**)
 
 - **Asked for by the user:** the trust box at sign-in said 30 days, yet the
   password came back every 12 hours (the box waived only the code). Ticked, it

@@ -162,6 +162,33 @@ signed in for 30 days from that sign-in, with no password and no code; using the
 app does not extend it, so once a month it asks again. A new browser, or a
 private window, always asks. **Sign out** on that browser ends it at once.
 
+**Approving from your phone instead of typing the code.** Once it is set up,
+leave the code box empty and press Sign in. The page shows a two-digit number
+and your phone gets an ntfy notification with three numbers. Tap the one the
+page shows; the app opens on your phone asking "Approve the one showing 47?";
+press **Approve** and the waiting page signs itself in within a few seconds.
+**Not me**, a wrong number, or two minutes with no answer stop that sign-in.
+The page's "Type the authenticator code instead" link always works, so a phone
+out of reach never locks you out.
+
+The approval happens inside the app on your phone, which must itself be signed
+in (tick **Keep me signed in** there once). That is deliberate: anyone who
+learns the ntfy channel name can read the notifications, so tapping a number
+in the notification approves nothing by itself.
+
+Setting it up, once:
+
+1. Make a channel name nobody can guess. On the server:
+   `python -c "import secrets; print(secrets.token_urlsafe(24))"`
+2. Add `NTFY_TOPIC=<that name>` to the server's `.env` and restart the web app.
+3. In the ntfy app on each phone: **Subscribe to topic**, enter the name, server
+   `ntfy.sh`.
+4. On each phone, sign in to the app once in its browser with **Keep me signed
+   in** ticked.
+
+The settings (how long an approval waits, the ntfy server, the notification's
+priority) are under Settings → Configuration → *Sign-in from the phone*.
+
 Two things worth knowing when it refuses you:
 
 - The message is deliberately the same for a wrong password, a wrong code and

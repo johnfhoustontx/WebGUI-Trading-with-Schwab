@@ -4837,6 +4837,11 @@ so the next sign-in on this machine asks for the password and the authenticator 
 again. That is the reason to use it on a borrowed or shared browser: a 30-day session
 left there is the app, for a month, to whoever sits down next.
 
+The sign-in's second step can also be a tap on your phone instead of the code: leave
+the code empty, and approve the number the page shows from the ntfy notification,
+inside the app on a phone that is already signed in. Setting it up is in the User
+Guide's sign-in section.
+
 It signs out this browser only. The tokens are stateless by design, so there is no
 "sign out everywhere" button here — other devices stay signed in until their own
 tokens expire.

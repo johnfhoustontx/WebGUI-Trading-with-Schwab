@@ -163,9 +163,10 @@ view names, the frame's `sandbox` and policy strings, and the two file readers
 behind the preview routes - stdlib + `repo_paths` + `shared.config_toml` only,
 pinned by `shared/tests/test_blog_inbox.py`) ·
 `repo_paths` · `requests` — **only** for the
-`/health` fan-out the shell and Status page run and the proxy helper's calls
+`/health` fan-out the shell and Status page run, the proxy helper's calls
 (`webgui/proxy.py`: API-usage counts, and the Schwab sign-in's link and
-exchange, all to the proxy on loopback) · `fastapi.responses` for the
+exchange, all to the proxy on loopback), and `login_push.publish` (the
+sign-in approval push to ntfy; a lazy import) · `fastapi.responses` for the
 report routes · the lazy `edge_tts` in `voice.py` · and, since 2026-09-06, the
 three **credential primitives** the login uses — `argon2` (password hashing),
 `pyotp` (the TOTP second factor) and `itsdangerous` (the signed session and
@@ -344,6 +345,12 @@ is data in `webgui/live_screens.py`.
   `public_scan.show_leg_quotes` (`checks_feed.quotes_withheld`).
 - The unit loads `.env.live`, never the stack's `.env`. Never bind it to `0.0.0.0`.
 
+**Approving a sign-in from the phone** (`login_push.py`, ntfy). The push
+carries only LINKS to `/approve-sign-in`, a gated page: never put an approve
+action in the push itself, because a public ntfy topic is readable by whoever
+learns its name. The waiting browser holds a different id (`ns_pending`)
+than the push, and the gate's open list stays `/login` + `/favicon.ico`.
+
 **The site's Blog.** `deploy/site/blog/` and `deploy/site/blog.json` are generated,
 gitignored state like `ideas/` and `reports/`: only `blog_svc` writes them, from
 its own store ([the site blog](docs/reference/blog.md)).
@@ -415,7 +422,7 @@ maps, and anything whose change needs code to follow it.
   `scanner` (selection floors and, since 2026-10-04, `[selection]` strike rules),
   `trade_mgmt`, `paper`, `symbols`, `sectors`, `marketdata`, `services`,
   `flow_alerts`, `notify`, `commissions`, `theme`, `news`, `edge`, `market_read`,
-  `blog`, `gamma_heat`, `listed_stocks`, and the public
+  `blog`, `gamma_heat`, `listed_stocks`, `login_push`, and the public
   tools' files.
 - `shared/market_calendar.py` is the single source for the NYSE calendar and the
   session/window predicates. Add no holiday literal or window constant elsewhere.
