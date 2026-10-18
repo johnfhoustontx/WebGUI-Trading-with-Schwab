@@ -937,6 +937,20 @@ def test_the_per_symbol_tables_locate_by_wildcard_and_quoted_symbol():
     assert cs.split_key('width."$SPX"') == ["width", "$SPX"]
 
 
+def test_a_blank_futures_or_volatility_input_can_be_saved_and_reads_as_absent(monkeypatch):
+    """The section says a blank input is left out of the call: the editor must
+    accept a blank, and the loader must read it as absent, never as a symbol."""
+    from shared import scalp_config as sc
+    for name in ("futures", "vol"):
+        _sec, fld = cs.locate(SCALP, ("inputs", "SPY", name))
+        assert fld.blank_ok, name
+        value = cs.parse(fld, "  ")
+        assert value == ""
+        monkeypatch.setattr(sc, "load", lambda n=name, v=value: {
+            "inputs": {"SPY": {n: v, "etfs": ["XLK"]}}})
+        assert sc.inputs_for("SPY")[name] is None, name
+
+
 def test_every_scalp_field_has_a_label_and_help():
     for sec in SCALP.sections:
         for fld in sec.fields:

@@ -96,17 +96,19 @@ def _short(day, db_path) -> bool:
     return scalp_sim.short_session(got)
 
 
-def _needed(interval) -> int:
+def _needed(interval, time_stop_min=None) -> int:
     """Bars a complete path holds: every bar starting in [entry, entry + stop)."""
-    return math.ceil(scalp_config.time_stop_min() / interval)
+    stop = scalp_config.time_stop_min() if time_stop_min is None else time_stop_min
+    return math.ceil(stop / interval)
 
 
-def _path(symbol, interval, entry_ts, db_path):
-    """The trade window's bars, or ``None`` when any of them is missing."""
-    got = scalp_store.bars(symbol, interval, entry_ts,
-                           entry_ts + scalp_config.time_stop_min() * 60,
+def _path(symbol, interval, entry_ts, db_path, time_stop_min=None):
+    """The trade window's bars, or ``None`` when any of them is missing. The time
+    stop is the configured one unless given (grading passes a call's frozen one)."""
+    stop = scalp_config.time_stop_min() if time_stop_min is None else time_stop_min
+    got = scalp_store.bars(symbol, interval, entry_ts, entry_ts + stop * 60,
                            db_path=db_path)
-    return got if len(got) >= _needed(interval) else None
+    return got if len(got) >= _needed(interval, stop) else None
 
 
 def _has_one_minute_open(symbol, day, db_path) -> bool:
@@ -279,8 +281,8 @@ def current_rates(symbol, bucket, db_path=None) -> dict:
     ``p``/``lo``/``hi`` are ``None`` when the bucket has no labelled morning (and
     always for ``bucket=None``, an unknown alignment); ``p_base`` is ``None`` when
     the role has none at all. ``edge`` is the stored verdict's (every study
-    scale). Whether ``n`` is enough to SHOW ``p`` is the page's call
-    (``min_samples``)."""
+    scale). ``min_samples`` gates only that verdict (``scalp_model.verdict``):
+    ``p`` is shown beside its ``n`` and interval whatever ``n`` is."""
     scale = _scale_key(scalp_config.iv_scale())
     conn = scalp_store.connect(db_path)
     try:

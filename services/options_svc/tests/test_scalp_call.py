@@ -16,6 +16,8 @@ import ast
 import datetime as dt
 import json
 import pathlib
+import threading
+import time
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -272,6 +274,41 @@ def test_no_first_call_after_the_window(db, bus):
     assert client.calls == []
 
 
+def test_a_missed_call_still_carries_its_morning(db, bus):
+    # A morning that HAD a direction but was never called: MISSED, no roles, and
+    # its reading (direction, inputs) is shown, not wiped.
+    _seeded(db)
+    ten = dt.datetime(2026, 10, 19, 10, 0, tzinfo=CT)
+    spy = scalp_call.build(DAY, ten, db_path=db, client=FakeClient())["symbols"]["SPY"]
+    assert spy["note"] == scalp_call.MISSED and spy["roles"] == {}
+    assert spy["direction"] == 1 and spy["inputs"] and spy["highlight"] is None
+    assert spy["chain"] is None and "rules" not in spy and "made_at" not in spy
+
+
+def test_a_flat_open_is_still_flat_after_the_window(db, bus):
+    # A flat open at 08:36 is not a call (nothing frozen); at 10:00 it must still
+    # read as a flat open with its inputs, never as "missed the call window".
+    seed_morning(db, flat=("QQQ",), symbols=("$SPX", "QQQ"))
+    for sym in PRICES:
+        seed_study(db, sym, EVEN)
+    scalp_call.run(bus, now=NOW, db_path=db, client=FakeClient())
+    first = bus.cache_get(scalp_call.VIEW).payload["symbols"]
+    assert first["QQQ"]["note"] == scalp_call.FLAT_OPEN
+    assert first["SPY"]["note"] == scalp_call.NO_OPEN_BAR
+    client = FakeClient()
+    ten = dt.datetime(2026, 10, 19, 10, 0, tzinfo=CT)
+    scalp_call.run(bus, now=ten, db_path=db, client=client)
+    view = bus.cache_get(scalp_call.VIEW).payload["symbols"]
+    assert view["QQQ"]["note"] == scalp_call.FLAT_OPEN
+    assert view["QQQ"]["roles"] == {} and view["QQQ"]["direction"] is None
+    assert view["QQQ"]["inputs"] == first["QQQ"]["inputs"] and view["QQQ"]["inputs"]
+    assert view["SPY"]["note"] == scalp_call.NO_OPEN_BAR and view["SPY"]["roles"] == {}
+    assert "inputs" in view["SPY"]
+    assert view["$SPX"] == first["$SPX"]                 # the frozen call, whole
+    assert client.calls == []                            # nothing fetched late
+    assert set(scalp_store.calls_on("2026-10-19", db_path=db)) == {"$SPX"}
+
+
 def test_the_window_ends_at_entry_plus_the_time_stop(db, bus):
     _seeded(db)
     just_in = dt.datetime(2026, 10, 19, 9, 34, tzinfo=CT)
@@ -445,6 +482,30 @@ def test_run_before_0835_does_not_fetch(db, bus, monkeypatch):
     assert bus.cache_get(scalp_call.VIEW).payload["state"] == "waiting"
 
 
+def test_a_refresh_between_entry_and_the_slot_waits(db, bus, monkeypatch):
+    # 08:35:30 is past the 08:35 entry but before the 08:36 slot: the call is
+    # not built a minute early by a refresh.
+    _seeded(db)
+    _no_fetch(monkeypatch)
+    client = FakeClient()
+    scalp_call.run(bus, now=dt.datetime(2026, 10, 19, 8, 35, 30, tzinfo=CT),
+                   db_path=db, client=client)
+    view = bus.cache_get(scalp_call.VIEW).payload
+    assert view["state"] == "waiting"
+    assert view["next_call"].startswith("2026-10-19T08:36")
+    assert client.calls == []
+    assert scalp_store.calls_on("2026-10-19", db_path=db) == {}
+
+
+def test_the_call_time_is_the_later_of_entry_and_the_slot(monkeypatch):
+    assert scalp_call._call_time(DAY) == dt.datetime(2026, 10, 19, 8, 36, tzinfo=CT)
+    monkeypatch.setattr(scalp_call._mc, "slot_times",
+                        lambda name: {"open": dt.time(8, 20)})
+    assert scalp_call._call_time(DAY) == scalp_call._entry_time(DAY)    # 08:35
+    monkeypatch.setattr(scalp_call._mc, "slot_times", lambda name: {})
+    assert scalp_call._call_time(DAY) == scalp_call._entry_time(DAY)
+
+
 def test_closed_on_holiday(db, bus, monkeypatch):
     kept = {"direction": -1, "roles": {}}
     scalp_store.save_call("2026-11-25", "QQQ", kept, db_path=db)
@@ -503,6 +564,96 @@ def test_invalid_payload_not_published(db, bus, monkeypatch):
     assert bus.cache_get(scalp_call.VIEW) is None
     assert _degrade.counts().get("options.scalp_view") == 1
     assert scalp_store.calls_on("2026-10-19", db_path=db) == {}
+
+
+class _SlowClient(FakeClient):
+    """The first chain request blocks until released, so a second run started
+    meanwhile would (without the lock) build and fetch beside the first."""
+
+    def __init__(self):
+        super().__init__()
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def get_option_chain(self, symbol, **kw):
+        if not self.entered.is_set():
+            self.entered.set()
+            self.release.wait(5)
+        return super().get_option_chain(symbol, **kw)
+
+
+def test_two_runs_at_once_build_once(db, bus):
+    # The 08:36 slot (the scheduler's executor) and a refresh (the slow lane)
+    # landing together: the second waits for the first, then reuses its calls.
+    _seeded(db)
+    client = _SlowClient()
+    slot = threading.Thread(target=scalp_call.run, args=(bus,),
+                            kwargs={"now": NOW, "db_path": db, "client": client})
+    refresh = threading.Thread(
+        target=scalp_call.run, args=(bus,),
+        kwargs={"now": NOW + dt.timedelta(seconds=20), "db_path": db, "client": client})
+    slot.start()
+    assert client.entered.wait(5)
+    refresh.start()
+    time.sleep(0.3)             # time enough for an unlocked second run to fetch
+    client.release.set()
+    slot.join(10)
+    refresh.join(10)
+    assert not slot.is_alive() and not refresh.is_alive()
+    chains = [s for kind, s in client.calls if kind == "chain"]
+    assert sorted(chains) == sorted(PRICES)              # once per symbol, in total
+    assert sum(1 for kind, _ in client.calls if kind == "bars") == \
+        len(scalp_config.bar_symbols()) * len(scalp_fetch.INTERVALS)   # one top-up
+    published = bus.cache_get(scalp_call.VIEW).payload["symbols"]
+    saved = scalp_store.calls_on("2026-10-19", db_path=db)
+    assert set(saved) == set(PRICES)
+    for sym in PRICES:
+        assert saved[sym] == json.loads(json.dumps(published[sym]))
+        assert saved[sym]["made_at"] == NOW.isoformat()
+
+
+def test_republish_puts_the_evenings_scorecard_into_the_current_view(db, bus):
+    _seeded(db)
+    scalp_call.run(bus, now=NOW, db_path=db, client=FakeClient())
+    before = bus.cache_get(scalp_call.VIEW).payload
+    assert before["scorecard"] == {}
+    conn = scalp_store.connect(db)
+    try:
+        with conn:          # the evening's grading writes today's grades
+            for role in ROLES:
+                conn.execute(
+                    "INSERT INTO grades (day, symbol, role, structure, model_result, "
+                    "chain_result, highlighted, avoided, p_base) "
+                    "VALUES (?, 'SPY', ?, 'long_call', ?, NULL, 0, 0, 0.5)",
+                    ("2026-10-19", role, "win" if role == "long_with" else "loss"))
+    finally:
+        conn.close()
+    assert scalp_call.republish_scorecard(bus, db_path=db) is True
+    after = bus.cache_get(scalp_call.VIEW).payload
+    card = after["scorecard"]
+    assert card["days"] == 1 and set(card["symbols"]) == {"SPY"}
+    assert card["symbols"]["SPY"]["roles"]["long_with"]["win"] == 1
+    # Only the scorecard moved: the frozen symbols are byte for byte the same.
+    assert json.dumps(after["symbols"], sort_keys=True) == \
+        json.dumps(before["symbols"], sort_keys=True)
+    assert {k: v for k, v in after.items() if k != "scorecard"} == \
+        {k: v for k, v in before.items() if k != "scorecard"}
+    ScalpView(**after)
+
+
+def test_republish_never_builds_or_fetches(db, bus, monkeypatch):
+    _no_fetch(monkeypatch)
+    assert scalp_call.republish_scorecard(bus, db_path=db) is False     # no view yet
+    assert bus.cache_get(scalp_call.VIEW) is None
+    bus.cache_set(scalp_call.VIEW, {"state": "waiting", "day": "2026-10-19",
+                                    "symbols": {"SPY": {"direction": 1}}})
+
+    def broken(**k):
+        raise RuntimeError("store locked")
+    monkeypatch.setattr(scalp_call.scalp_score, "scorecard", broken)
+    assert scalp_call.republish_scorecard(bus, db_path=db) is False     # never raises
+    assert _degrade.counts().get("options.scalp_scorecard") == 1
+    assert bus.cache_get(scalp_call.VIEW).payload["symbols"] == {"SPY": {"direction": 1}}
 
 
 def test_a_call_the_bus_refused_is_not_frozen(db, bus, monkeypatch):

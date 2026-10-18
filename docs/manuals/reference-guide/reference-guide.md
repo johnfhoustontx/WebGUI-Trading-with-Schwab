@@ -1220,8 +1220,10 @@ on these symbols are shown for context only; none of them was measured or fed in
 the rates.
 
 **Scorecard.** The last card is the graded record, per symbol, over the last 20
-graded days (`scorecard_days`). Grading uses only the call **as published** — its
-strikes, entry and highlight/avoid marks are frozen at 08:36 — and walks every one of
+graded days (`scorecard_days`), republished into the view as soon as the night's
+grading is done. Grading uses only the call **as published** — its strikes, entry,
+highlight/avoid marks and its rules (target, stop, time stop, minimum premium and
+volatility multiplier) are frozen at 08:36 — and walks every one of
 the four trades along that day's five-minute bars, the highlighted or not. A trade that
 has not had all of its 60 minutes of bars is left for the next night. Three parts:
 
@@ -1243,9 +1245,12 @@ grading also records, per day, the chain's at-the-money volatility against the m
 volatility reading; the study report (`tools/scalp_study_report.py`) prints the median
 of that ratio per symbol as its **Volatility calibration**.
 
-**Walk-forward tested** means each past day was scored only from the days before it,
-so the rate shown is what the method would have said at the time, not a fit to the
-whole history.
+**Walk-forward tested** is the edge test, not the rates on screen. The usual rate and
+the bucket's rate are counted over every stored morning. Whether a bucket **beats** its
+usual rate is decided walk-forward: each past day is scored only from the days before
+it, so a **Measured edge** or a **Caution** is what the method would have said at the
+time, not a fit to the whole history. A bucket needs at least `[study] min_samples`
+(20) scored mornings before it can be marked either way.
 
 ---
 

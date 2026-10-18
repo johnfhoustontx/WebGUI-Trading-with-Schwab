@@ -200,14 +200,33 @@ def test_backfill_writes_the_rows_it_reports(tmp_path, one_symbol):
     assert len(st.bars("SPY", 5, 0, 10**12, db_path=db)) == 1
 
 
-def test_top_up_starts_at_latest_ts(tmp_path, one_symbol):
+def test_top_up_starts_one_interval_before_latest_ts(tmp_path, one_symbol):
+    # The latest bar AND the one before it are fetched again: a bar fetched
+    # seconds after its close may have been a partial.
     db = tmp_path / "s.db"
     st.upsert_bars([("SPY", 1, 1_700_000_000, 1, 1, 1, 1, 1),
                     ("SPY", 5, 1_700_000_300, 1, 1, 1, 1, 1)], db_path=db)
     client = FakeClient(lambda i, q: EMPTY)
     sf.top_up(db_path=db, client=client, today=dt.date(2023, 11, 15))
     starts = {q["frequency"]: int(q["startDate"]) for _, _, q, _ in client.calls}
-    assert starts == {"1": 1_700_000_000_000, "5": 1_700_000_300_000}
+    assert starts == {"1": (1_700_000_000 - 60) * 1000,
+                      "5": (1_700_000_300 - 300) * 1000}
+
+
+def test_top_up_replaces_the_bar_before_the_latest(tmp_path, one_symbol):
+    db = tmp_path / "s.db"
+    latest = 1_700_000_000
+    st.upsert_bars([("SPY", 1, latest - 60, 1, 1, 1, 1, 1),        # a partial
+                    ("SPY", 1, latest, 1, 1, 1, 1, 1)], db_path=db)
+
+    def corrected(i, q):
+        if q["frequency"] != "1":
+            return EMPTY
+        return {"candles": [dict(_candle((latest - 60) * 1000), close=9.0)]}
+
+    sf.top_up(db_path=db, client=FakeClient(corrected), today=dt.date(2023, 11, 15))
+    got = st.bars("SPY", 1, latest - 60, latest - 59, db_path=db)
+    assert [b.close for b in got] == [9.0]
 
 
 def test_top_up_without_history_goes_three_trading_days_back(tmp_path, one_symbol):
@@ -312,7 +331,7 @@ def test_top_up_pages_a_long_gap_in_contiguous_windows(tmp_path, one_symbol):
     wins = [(int(q["startDate"]), int(q["endDate"]))
             for _, _, q, _ in client.calls if q["frequency"] == "1"]
     assert len(wins) > 3                                # > 10 days back: paged
-    assert wins[0][0] == latest * 1000
+    assert wins[0][0] == (latest - 60) * 1000            # one interval back
     for (s0, e0), (s1, _e1) in zip(wins, wins[1:]):
         assert s1 == e0                                 # contiguous, no overlap
     assert all(e - s <= 10 * DAY_MS for s, e in wins)

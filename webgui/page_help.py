@@ -1078,8 +1078,10 @@ buttons, and you decide.
   the **Underlying move** distances are worked at.
 - **Usual win rate** is how often that trade won over **all** past mornings. **This
   morning's rate** is how often it won on past mornings in the **same agreement
-  bucket**, with its **interval** (95%) and the number of **samples**. The rates
-  are **walk-forward tested**: each past day is scored only from days before it.
+  bucket**, with its **interval** (95%) and the number of **samples**. Both rates
+  are over **every** stored morning. Whether the bucket **beats** its usual rate
+  is what is **walk-forward tested**: each past day is scored only from days
+  before it.
 - **Underlying move** is how many points the underlying has to travel to
   take the trade to +50% (the target) or −50% (the stop), from the strikes
   shown.
@@ -1092,16 +1094,18 @@ measured to lose more often than usual — a reason to stay out, never a signal 
 take the other side.
 
 A call stays as published all day; **Refresh** only fills in a symbol that has
-no call yet, and no new call is built after **09:35 CT**. Before 08:36, on a
-closed day, or after a failed refresh the page keeps the last call on screen and
-labels the day it belongs to.
+no call yet, and no new call is built after **09:35 CT** (a morning that had a
+direction then reads *missed the call window*; a flat open still says so).
+Before 08:36, on a closed day, or after a failed refresh the page keeps the last
+call on screen and labels the day it belongs to.
 
 **Not in the probability** (headlines, flow alerts and the report link) is shown
 for context only. None of it was measured or fed into the rates.
 
 **Scorecard** is how the published calls actually did. Each evening the app grades
-every trade it showed that morning, from the call as published. Per symbol, over the
-last 20 graded days: **Edge calls** (how often the highlighted trade won, beside its
+every trade it showed that morning, from the call as published and under the
+target, stop and time stop it was made with, and the scorecard updates that
+evening. Per symbol, over the last 20 graded days: **Edge calls** (how often the highlighted trade won, beside its
 usual rate; most symbols have none), **Cautions** (how often a trade marked to avoid
 still won, beside its usual rate: lower is the caution working) and a table of all four
 trades. Win rates are given twice: by the **model** (priced from the volatility index)

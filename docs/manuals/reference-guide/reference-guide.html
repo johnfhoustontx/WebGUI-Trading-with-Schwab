@@ -1922,8 +1922,10 @@ or high bucket.</p>
 on these symbols are shown for context only; none of them was measured or fed into
 the rates.</p>
 <p><strong>Scorecard.</strong> The last card is the graded record, per symbol, over the last 20
-graded days (<code>scorecard_days</code>). Grading uses only the call <strong>as published</strong> — its
-strikes, entry and highlight/avoid marks are frozen at 08:36 — and walks every one of
+graded days (<code>scorecard_days</code>), republished into the view as soon as the night's
+grading is done. Grading uses only the call <strong>as published</strong> — its strikes, entry,
+highlight/avoid marks and its rules (target, stop, time stop, minimum premium and
+volatility multiplier) are frozen at 08:36 — and walks every one of
 the four trades along that day's five-minute bars, the highlighted or not. A trade that
 has not had all of its 60 minutes of bars is left for the next night. Three parts:</p>
 <ul>
@@ -1944,9 +1946,12 @@ be wrong there. A grade is written once and never recomputed. The nightly
 grading also records, per day, the chain's at-the-money volatility against the morning's
 volatility reading; the study report (<code>tools/scalp_study_report.py</code>) prints the median
 of that ratio per symbol as its <strong>Volatility calibration</strong>.</p>
-<p><strong>Walk-forward tested</strong> means each past day was scored only from the days before it,
-so the rate shown is what the method would have said at the time, not a fit to the
-whole history.</p>
+<p><strong>Walk-forward tested</strong> is the edge test, not the rates on screen. The usual rate and
+the bucket's rate are counted over every stored morning. Whether a bucket <strong>beats</strong> its
+usual rate is decided walk-forward: each past day is scored only from the days before
+it, so a <strong>Measured edge</strong> or a <strong>Caution</strong> is what the method would have said at the
+time, not a fit to the whole history. A bucket needs at least <code>[study] min_samples</code>
+(20) scored mornings before it can be marked either way.</p>
 <hr />
 <h2 id="market-news">Market News</h2>
 <p><em>Menu: MARKETS → Market News · Route <code>/news</code></em></p>

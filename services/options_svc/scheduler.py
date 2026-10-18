@@ -1131,6 +1131,14 @@ async def loop(bus):
                          graded["days"], graded["rows"])
             except Exception:
                 log.exception("scalp grading degraded")
+            # Then the current view is republished with the fresh scorecard
+            # (only that field: no build, no fetch), so tonight's grades show
+            # tonight. Guarded on its own: a failed grading still republishes
+            # what is graded.
+            try:
+                await loop_.run_in_executor(None, scalp_call.republish_scorecard, bus)
+            except Exception:
+                log.exception("scalp scorecard republish degraded")
 
         if bars_slot:
             branches.append(("scalp_bars", _scalp_bars_branch()))

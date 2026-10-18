@@ -5859,10 +5859,18 @@ role's all-mornings base rate. The study's first verdict: no usable edge (one ce
    at all a symbol keeps its rates but gets no strikes or points.</li>
 <li><strong>A published call is frozen.</strong> It is saved in <code>calls</code> only after it has passed the
    <code>ScalpView</code> model and reached the bus, and a later build the same day reuses it
-   whole: nothing re-priced, no second chain fetch. A symbol with no call by
-   entry + <code>time_stop_min</code> (09:35 CT) is refused ("missed the call window").</li>
-<li>Before 08:35, or on a closed day, the view is <code>waiting</code> / <code>closed</code> and carries the
-   last published call; an unexpected failure publishes <code>error</code> the same way.</li>
+   whole: nothing re-priced, no second chain fetch. Each called symbol's entry
+   carries <code>rules</code> (<code>target_pct</code>, <code>stop_pct</code>, <code>time_stop_min</code>, <code>min_premium</code>,
+   <code>iv_scale</code> as they were at the call), which grading uses.</li>
+<li><strong>No new call after entry + <code>time_stop_min</code></strong> (09:35 CT). Past it a symbol with no
+   call gets no roles and nothing is fetched: a morning that had a direction reads
+   "missed the call window"; a flat open or a missing opening bar is still read
+   (the morning uses nothing after 08:35) and keeps its own note and inputs.</li>
+<li>Before the <strong>call time</strong> — the later of the 08:35 entry and the <code>[slots.scalp]</code>
+   time, so 08:36 — or on a closed day, the view is <code>waiting</code> / <code>closed</code> and carries
+   the last published call; an unexpected failure publishes <code>error</code> the same way.</li>
+<li><strong>One run at a time.</strong> The 08:36 slot and a refresh hold one lock: a second
+   caller waits, then finds the calls frozen and fetches nothing.</li>
 </ol>
 <h2 id="grading-and-the-scorecard">Grading and the scorecard</h2>
 <p>Grading answers what the study cannot: how did what the operator was <em>shown</em> do? It
@@ -5871,6 +5879,10 @@ no selection bias), and writes <code>grades</code> once per day, symbol and role
 <ul>
 <li><code>model_result</code>: the trade simulated on that day's 5-minute bars at the morning's
   volatility reading x <code>iv_scale</code>, the study's own method. This is the win rate.</li>
+<li><strong>The call's own rules.</strong> The target, stop, time stop, minimum premium and
+  <code>iv_scale</code> are the ones frozen in the call's <code>rules</code>, never the evening's config:
+  a setting changed after 08:36 does not regrade the morning. An entry saved before
+  rules were frozen with it falls back to the config, key by key.</li>
 <li><code>chain_result</code>: the same walk at the volatility implied by the saved chain's mid for
   the contract the role is long (or short, for a spread), solved at the spot the chain
   was quoted against. <code>None</code> with no chain, quote or solution. Shown beside the model
@@ -5885,7 +5897,10 @@ no selection bias), and writes <code>grades</code> once per day, symbol and role
 parts per symbol: the <strong>edge calls</strong> (how often a highlighted role won, beside the mean
 base rate it was published with), the <strong>cautions</strong> (how often a role marked to avoid
 still won, beside its published base rate; the caution is working when the first is
-the lower), and all four roles' won / lost / timed-out counts and win rates.</p>
+the lower), and all four roles' won / lost / timed-out counts and win rates. After the
+night's grading <code>scalp_call.republish_scorecard</code> puts a fresh scorecard into the
+current view and changes nothing else (no build, no fetch), so the grades show that
+evening.</p>
 <h2 id="cadences">Cadences</h2>
 <table>
 <thead>
@@ -5904,7 +5919,7 @@ the lower), and all four roles' won / lost / timed-out counts and win rates.</p>
 <tr>
 <td>Nightly pass</td>
 <td><strong>16:20 CT</strong> (<code>[slots.scalp_bars]</code>, grace 120 min)</td>
-<td>In order: <strong>bar top-up</strong> (13 symbols x 2 intervals, from the store's latest bar; a missed night is caught up by the next), the <strong>study rebuild</strong> (one transaction, so a reader sees the old study or the new, never half of each), then <strong>grading</strong>. After the 16:00 flow-delta report so it never competes for the proxy's 5 requests a second.</td>
+<td>In order: <strong>bar top-up</strong> (13 symbols x 2 intervals, from one bar before the store's latest, so a bar stored as a partial is replaced; a missed night is caught up by the next), the <strong>study rebuild</strong> (one transaction, so a reader sees the old study or the new, never half of each), <strong>grading</strong>, then the <strong>scorecard republish</strong>. After the 16:00 flow-delta report so it never competes for the proxy's 5 requests a second.</td>
 </tr>
 <tr>
 <td>Refresh</td>

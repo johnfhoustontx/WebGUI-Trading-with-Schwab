@@ -1107,13 +1107,14 @@ _SCALP = ConfigFile(
                 "it, and the volatility index. A blank one is left out of the "
                 "call, never counted as flat.", (
             Field("inputs.*.futures", "Futures",
-                  "The overnight futures contract.", kind="text"),
+                  "The overnight futures contract. Blank leaves it out.",
+                  kind="text", blank_ok=True),
             Field("inputs.*.etfs", "Sector funds",
                   "Funds whose opening move votes on the direction.",
                   kind="symbols"),
             Field("inputs.*.vol", "Volatility index",
-                  "The index whose overnight move votes against a rise.",
-                  kind="text"),
+                  "The index whose overnight move votes against a rise. Blank "
+                  "leaves it out.", kind="text", blank_ok=True),
         )),
         Section("The scalp",
                 "How the long option is picked and when it is closed.", (
@@ -1163,7 +1164,9 @@ _SCALP = ConfigFile(
                   "much the answer leans on the volatility assumption.",
                   kind="numbers", min=0.1, max=5),
             Field("study.min_samples", "Smallest sample",
-                  "A group with fewer trades than this shows no hit rate.",
+                  "The fewest scored mornings a group needs before it can be "
+                  "marked as an edge. It gates only that verdict: every group's "
+                  "rate is still shown, with its count.",
                   kind="int", min=1, max=1000, step=1),
             Field("study.scorecard_days", "Scorecard window",
                   "Trading days the scorecard looks back over.",

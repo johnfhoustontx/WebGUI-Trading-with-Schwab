@@ -12,13 +12,19 @@ as published - and never the view, the study's rates or a recomputation:
   ``highlighted`` / ``avoided``, with the frozen ``p_base`` it was shown beside so
   the scorecard can average it;
 * ``model_result`` is ``scalp_sim.simulate`` on the day's 5-minute bars at the
-  morning's volatility reading x ``iv_scale()`` - the study's own method;
+  morning's volatility reading x ``iv_scale`` - the study's own method;
+* every rule a grade depends on (``target_pct``, ``stop_pct``, ``time_stop_min``,
+  ``min_premium``, ``iv_scale``) is the one FROZEN with the call
+  (``entry["rules"]``), never the evening's config: a setting changed after
+  08:36 must not regrade the morning's call. Only an entry saved before the rules
+  were frozen with it falls back to the configured value, key by key;
 * ``chain_result`` is the same walk at the volatility IMPLIED by the saved 08:36
   chain's mid for the contract the role is long (a long option) or SHORT (a
   spread), read through ``scalp_call``'s own root-matching helpers. No slice, no
   quote, or no implied volatility: ``None``;
-* a path with fewer bars than ``time_stop_min`` / 5 is not graded yet (nothing is
-  written; the next nightly run tries again), and a short session is not graded
+* a path with fewer bars than the call's ``time_stop_min`` / 5 is not graded
+  yet (nothing is written; the next nightly run tries again), and a short
+  session is not graded
   at all, for the reason the study skips it (the model settles at 15:00 CT);
 * grading is write-once per day, symbol and role: a role already graded is never
   recomputed (a later night's ``iv_scale`` or bars must not rewrite it), so
@@ -47,10 +53,27 @@ def _date(day) -> _dt.date:
     return day if isinstance(day, _dt.date) else _dt.date.fromisoformat(str(day))
 
 
-def _modelled_sigma(entry):
-    """The morning's volatility reading x ``iv_scale()``, or None without one."""
+#: The rules a grade depends on, each a ``scalp_config`` accessor of that name.
+RULE_KEYS = ("target_pct", "stop_pct", "time_stop_min", "min_premium", "iv_scale")
+
+
+def call_rules(entry) -> dict:
+    """The rules ``entry`` was published under (``entry["rules"]``), key by key;
+    a key the entry lacks (one saved before rules were frozen) is read from the
+    config."""
+    frozen = entry.get("rules") if isinstance(entry.get("rules"), dict) else {}
+    out = {}
+    for key in RULE_KEYS:
+        v = _finite(frozen.get(key))
+        out[key] = getattr(scalp_config, key)() if v is None else v
+    out["time_stop_min"] = int(out["time_stop_min"])
+    return out
+
+
+def _modelled_sigma(entry, rules):
+    """The morning's volatility reading x the call's ``iv_scale``, or None."""
     vol = _finite(entry.get("vol_at_entry"))
-    return None if vol is None or vol <= 0 else vol * scalp_config.iv_scale()
+    return None if vol is None or vol <= 0 else vol * rules["iv_scale"]
 
 
 def _chain_sigma(slice_, day, structure, strikes, when):
@@ -77,11 +100,15 @@ def _chain_sigma(slice_, day, structure, strikes, when):
     return _finite(sigma)
 
 
-def _result(structure, spot, strikes, when, day, sigma, path):
+def _result(structure, spot, strikes, when, day, sigma, path, rules):
     if sigma is None:
         return None
     return scalp_sim.simulate(structure, spot, strikes, when, day, sigma, path,
-                              scalp_study.VERDICT_INTERVAL).result
+                              scalp_study.VERDICT_INTERVAL,
+                              target_pct=rules["target_pct"],
+                              stop_pct=rules["stop_pct"],
+                              time_stop_min=rules["time_stop_min"],
+                              min_premium=rules["min_premium"]).result
 
 
 def _calibration(day, symbol, entry):
@@ -99,7 +126,8 @@ def _grade_rows(day, symbol, entry, path, slice_, done=frozenset()) -> list:
     spot = _finite(entry.get("entry_spot"))
     stamp = _finite(entry.get("entry_ts"))
     when = scalp_fetch.ct(int(stamp))
-    model_sigma = _modelled_sigma(entry)
+    rules = call_rules(entry)
+    model_sigma = _modelled_sigma(entry, rules)
     avoid = entry.get("avoid") or []
     rows = []
     for role, body in entry["roles"].items():
@@ -110,10 +138,11 @@ def _grade_rows(day, symbol, entry, path, slice_, done=frozenset()) -> list:
         model = chain = None
         if structure and isinstance(raw, list) and raw:
             strikes = (float(raw[0]), float(raw[1]) if len(raw) > 1 else None)
-            model = _result(structure, spot, strikes, when, day, model_sigma, path)
+            model = _result(structure, spot, strikes, when, day, model_sigma, path,
+                            rules)
             chain = _result(structure, spot, strikes, when, day,
                             _chain_sigma(slice_, day, structure, strikes, when),
-                            path)
+                            path, rules)
         rows.append((day.isoformat(), symbol, role, structure or "", model, chain,
                      int(entry.get("highlight") == role), int(role in avoid),
                      _finite(body.get("p_base"))))
@@ -159,7 +188,8 @@ def grade_day(day, db_path=None) -> int:
             if cal is not None:
                 calibration.append(cal)
             path = scalp_study._path(symbol, scalp_study.VERDICT_INTERVAL, int(stamp),
-                                     db_path)
+                                     db_path,
+                                     time_stop_min=call_rules(entry)["time_stop_min"])
             if path is None:
                 continue
             grade_rows += _grade_rows(day, symbol, entry, path,
@@ -219,4 +249,4 @@ def grade_pending(db_path=None) -> dict:
     return {"days": tried, "rows": rows}
 
 
-__all__ = ["grade_day", "grade_pending", "pending_days"]
+__all__ = ["RULE_KEYS", "call_rules", "grade_day", "grade_pending", "pending_days"]

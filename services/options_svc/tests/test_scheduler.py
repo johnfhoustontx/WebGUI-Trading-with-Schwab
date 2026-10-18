@@ -692,6 +692,23 @@ def test_scalp_bars_branch_grades_after_the_rebuild_independently():
     assert "run_in_executor(None, scalp_grade.grade_pending)" in seg
 
 
+def test_scalp_bars_branch_republishes_the_scorecard_after_grading_independently():
+    import inspect
+
+    src = inspect.getsource(scheduler.loop)
+    seg = src.split("async def _scalp_bars_branch", 1)[1].split("if bars_slot:", 1)[0]
+    # grade -> republish the view's scorecard, in its OWN try: a failed grading
+    # still republishes what is graded, and a failed republish hides nothing.
+    assert (seg.index("scalp_grade.grade_pending")
+            < seg.index("scalp_call.republish_scorecard"))
+    between = seg.split("scalp_grade.grade_pending", 1)[1].split(
+        "scalp_call.republish_scorecard", 1)[0]
+    assert "except Exception" in between and "try:" in between
+    assert "run_in_executor(None, scalp_call.republish_scorecard, bus)" in seg
+    tail = seg.split("scalp_call.republish_scorecard", 1)[1]
+    assert "except Exception" in tail
+
+
 def test_scalp_bars_slot_comes_after_the_flow_delta_report_and_collection_stop():
     # The slot is configured in sessions.toml; pin the ordering its comment argues.
     (name, t), = scheduler.mc.slot_times("scalp_bars").items()

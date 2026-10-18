@@ -1614,13 +1614,18 @@ past mornings that looked like this one. <strong>It does not place trades</stron
 <li><strong>Refresh</strong> asks the service to rebuild the call. A call already shown today stays as
   published; Refresh only fills in a symbol that has none yet, and no new call is built
   after <strong>09:35 CT</strong>, an hour after the 08:35 entry, because the trade it would describe
-  is over by then.</li>
-<li>Before 08:36, on a closed day, or after a failed refresh the page shows the <strong>last
-  call</strong>, labelled with its day, under a line saying when the next call is due.</li>
+  is over by then. A symbol whose morning had a direction but was never called reads
+  <strong>missed the call window</strong>; one that opened flat or had no opening bar still says so,
+  with its inputs.</li>
+<li>Before 08:36 (a Refresh pressed at 08:35 waits for the 08:36 call too), on a closed
+  day, or after a failed refresh the page shows the <strong>last call</strong>, labelled with its
+  day, under a line saying when the next call is due.</li>
 <li><strong>Not in the probability</strong> (the report link, headlines, flow alerts) is context only.</li>
 <li><strong>Scorecard</strong> (the last card) is the record of how the published calls actually did.
   Each evening, once the day's bars are in, the app <strong>grades</strong> every trade it showed that
-  morning, from the call as published (never from a later rebuild). Per symbol, over the
+  morning, from the call as published (never from a later rebuild), under the target,
+  stop and time stop that call was made with (a setting changed later does not regrade
+  it), and the scorecard shows that evening's grades straight away. Per symbol, over the
   last 20 graded days, it shows: <strong>Edge calls</strong>, how often the one highlighted trade won
   beside the rate it usually wins (most symbols have none, and the line says so);
   <strong>Cautions</strong>, how often a trade marked to avoid still won, beside its usual rate (the
@@ -1634,8 +1639,10 @@ past mornings that looked like this one. <strong>It does not place trades</stron
   handful of days says very little; read it as a record, not a verdict.</li>
 </ul>
 <blockquote>
-<p>The win rates are <strong>walk-forward tested</strong> on stored data and the premiums are modelled,
-so read them as how often a method like this has worked, not as a promise of fills.</p>
+<p>The win rates are counted over <strong>every</strong> stored morning, and the premiums are
+modelled, so read them as how often a method like this has worked, not as a promise
+of fills. What is <strong>walk-forward tested</strong> is whether a bucket beats its usual rate:
+that test is what marks a <strong>Measured edge</strong> or a <strong>Caution</strong>.</p>
 </blockquote>
 <h2 id="market-news">Market News</h2>
 <p><strong>Route:</strong> <code>/news</code>. A rail item under <strong>MARKETS</strong>, directly below Flow Alerts.</p>

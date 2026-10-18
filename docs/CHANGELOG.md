@@ -42,6 +42,17 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
      against.
 - Unrelated fix on the same branch: `d8b5e11` (`fix(public)`: the request-key
   tests pinned to their fixed day).
+- Final whole-branch review fixes: after 09:35 a flat open or a missing opening
+  bar keeps its own note and inputs ("missed the call window" is only for a
+  morning that had a direction); one lock around `scalp_call.run` so the 08:36
+  slot and a Refresh never build and fetch side by side; the scorecard is
+  republished into the view right after the nightly grading (only that field);
+  no call is built before the 08:36 slot (a Refresh at 08:35 waits); each call
+  freezes its `rules` and grading walks it under them, not the evening's
+  config; the nightly top-up starts one bar before the store's latest; the
+  `min_samples` and "walk-forward tested" wording now says what the code does
+  (it gates the edge verdict; the rates shown are over every stored morning);
+  a blank futures or volatility input can be saved in Settings.
 - The page reads "today" from the Central clock (a fix after review): without
   it, Friday's call read "Today's call" on Monday morning, since the service
   publishes `waiting` / `closed` only when the 08:36 slot runs.

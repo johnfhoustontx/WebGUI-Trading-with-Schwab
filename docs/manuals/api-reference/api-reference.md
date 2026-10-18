@@ -278,7 +278,8 @@ ETH-eligible symbols), Paper Portfolio entry + manage (hourly at the top of the
 hour, 09:00–14:00 CT, no 15:00 run — also refreshes the Paper Ledger), captured-signal auto-manage (5-min
 slots, 08:00–15:15 CT, when auto-close is on), header tick (each 30 s,
 skip-unchanged), the Opening Scalp's morning call (08:36 CT, `[slots.scalp]`) and its
-nightly pass (16:20 CT, `[slots.scalp_bars]`: bar top-up, study rebuild, grading).
+nightly pass (16:20 CT, `[slots.scalp_bars]`: bar top-up, study rebuild, grading,
+then the scorecard republished into `cache:options:scalp`).
 
 **GEX collection and the raw feed.** Each one-minute poll is
 `gex_collector.fetch_minute` (the chains, through the proxy) then `derive_minute`
@@ -309,7 +310,7 @@ one-minute GEX collection and the raw feed* has the diagrams and fields.
 | `paper_analyze` | `{trade_id}` | `cache:options:paper_analyze` |
 | `x_post` | `{text, tags[], link, image_b64?}` — an ad-hoc marketing post from the `/x` page. The image is refused over 5 MB or when it does not decode (logged, nothing posted). Replay-guarded | `cache:options:x_log` |
 | `x_post_report` | `{report, mtime}` — enqueued by market_svc when the published market report changes; `report` is the `cache:market:summary` payload, `mtime` the epoch seconds of `latest.html`. Posted once per report (`report_date`, `slot`, `as_of`, `headline`); a report older than `x.report_max_age_min` (45), or of unknown age, is skipped. Replay-guarded | `cache:options:x_log` + `cache:options:x_reports` |
-| `scalp_refresh` | — | `cache:options:scalp` — runs the Opening Scalp's `scalp_call.run` now: before 08:35 CT or on a closed day it republishes the last call under a `waiting` / `closed` state and fetches nothing. A call already published today is reused whole, so it only fills in a symbol with none, and no new call is built after entry + `time_stop_min` (09:35 CT). Replay-guarded and on the slow lane (it can fetch bars and three chains, about 30 Schwab calls) |
+| `scalp_refresh` | — | `cache:options:scalp` — runs the Opening Scalp's `scalp_call.run` now: before the 08:36 CT call time or on a closed day it republishes the last call under a `waiting` / `closed` state and fetches nothing. A call already published today is reused whole, so it only fills in a symbol with none, and no new call is built after entry + `time_stop_min` (09:35 CT). Replay-guarded and on the slow lane (it can fetch bars and three chains, about 30 Schwab calls) |
 | `captured_reload` | — | `cache:options:captured` |
 | `captured_reprice` | — | `cache:options:captured` + `cache:options:captured_flags` |
 | `captured_close` | `{signal_id, exit_val, reason}` | `cache:options:captured` |
@@ -471,11 +472,14 @@ own publish raises, and once at service start. A failure is a degrade
 only view. Validated on write by `shared.contracts.options.ScalpView`; one that fails is
 not published and is counted as a degrade (`options.scalp_view`). Published at 08:36 CT,
 on a `scalp_refresh`, and (as `waiting` / `closed` / `error`, carrying the last call) by
-every other run.
+every other run. After the nightly grading it is republished with only `scorecard`
+replaced (`scalp_call.republish_scorecard`: no build, no fetch, `symbols` unchanged).
+`scalp_call.run` and that republish hold one lock, so two builds never run at once.
 
 Top level: `{day, call_day, generated_at, state, symbols, rules, context, scorecard,
 next_call}`.
-- `state` is `call` (a call was built), `waiting` (a trading day before 08:35 CT),
+- `state` is `call` (a call was built), `waiting` (a trading day before the call
+  time: the later of the 08:35 entry and the `[slots.scalp]` time, so 08:36 CT),
   `closed` (not a trading day) or `error` (an unexpected failure). In the last three,
   `symbols` is the **last published call** and `call_day` says which day's it is:
   compare it with `day` before reading a call as today's. `rules` (the target, stop,
@@ -505,7 +509,8 @@ next_call}`.
 | `sigma`, `sigma_source` | the volatility the strikes and points were priced at, and `chain` or `model` |
 | `roles` | keyed `long_with`, `long_against`, `credit_with`, `credit_against`; see below. Empty when the symbol has no call |
 | `highlight`, `avoid` | the role with an edge **above** its base rate (or `null`), and the roles with an edge **below** it |
-| `note`, `points_note`, `made_at` | why there is no call or no edge (`no measured edge`, `no opening bar yet`, `opened flat — no direction`, `missed the call window`, `the call could not be built`), why there are no points, and when the call was made |
+| `note`, `points_note`, `made_at` | why there is no call or no edge (`no measured edge`, `no opening bar yet`, `opened flat — no direction`, `missed the call window`, `the call could not be built`), why there are no points, and when the call was made. `missed the call window` is only for a morning that had a direction; after the window a flat open or a missing bar keeps its own note, with its inputs, and no `made_at` |
+| `rules` | on a called symbol only (one with roles): `{target_pct, stop_pct, time_stop_min, min_premium, iv_scale}` as they were when the call was made. Grading walks the trade under these, never the evening's config |
 
 A role is `{structure, p, lo, hi, n, p_base, n_base, edge, strikes, entry_value,
 entry_source, win_points, loss_points}`: `structure` is that morning's contract

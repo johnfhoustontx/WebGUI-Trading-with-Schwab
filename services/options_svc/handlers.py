@@ -3983,8 +3983,9 @@ def handle_command(bus, command) -> None:
     with its image card, once per report and only while fresh (replay-guarded);
     ``x_post`` (args text/link/tags/image_b64) → one ad-hoc marketing post to X
     (replay-guarded); ``scalp_refresh`` → rebuild the Opening Scalp's morning call
-    and publish ``cache:options:scalp`` (replay-guarded; before 08:35 or on a
-    closed day it republishes the last call and fetches nothing); else no-op.
+    and publish ``cache:options:scalp`` (replay-guarded; before the 08:36 call
+    time or on a closed day it republishes the last call and fetches nothing;
+    one run at a time with the 08:36 slot); else no-op.
 
     ⚠ This list IS the API the GUI codes against, and prose drifts:
     ``gamma_history``/``rescue_adhoc``/``sim_replay`` were implemented and missing

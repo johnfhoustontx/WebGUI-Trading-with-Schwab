@@ -3,8 +3,9 @@
 At 08:36 CT (``[slots.scalp]``) and on the page's refresh (``scalp_refresh``)
 ``run`` publishes ``cache:options:scalp``, the ONLY view the Opening Scalp page
 reads. For each scalp symbol it carries the morning (direction, inputs, which
-agreed, the alignment bucket), each role's walk-forward-tested win rate over the
-stored study (``scalp_study.current_rates``), and that morning's strikes, entry
+agreed, the alignment bucket), each role's win rate over every stored morning
+(``scalp_study.current_rates``) with the study's walk-forward-tested verdict on
+whether the bucket beats its base rate, and that morning's strikes, entry
 premium and the underlying points to the target and the stop.
 
 Rules that keep the number honest, each from the design or a review ruling:
@@ -15,9 +16,16 @@ Rules that keep the number honest, each from the design or a review ruling:
   reuses that entry WHOLE: nothing re-priced, its chain not fetched again (so
   its saved slice is never replaced). Grading reads ``calls``.
 * **No late first call.** A symbol with no published call by entry +
-  ``time_stop_min`` (09:35 CT at the defaults) is refused (``"missed the call
-  window"``): its trade is over, and after the 16:20 rebuild the study's rates
-  hold the day's own outcome.
+  ``time_stop_min`` (09:35 CT at the defaults) gets no roles: its trade is over,
+  and after the 16:20 rebuild the study's rates hold the day's own outcome. A
+  morning that had a direction is refused (``"missed the call window"``); one
+  with no opening bar or a flat open still says so, with its inputs (the morning
+  reads nothing after 08:35, so it leaks no outcome).
+* **A call keeps its rules.** Each called symbol's entry carries ``rules``
+  (target, stop, time stop, minimum premium, ``iv_scale``) as they were when it
+  was made; the evening's grading walks the trade under those.
+* **One run at a time.** ``run`` and ``republish_scorecard`` hold one lock: the
+  08:36 slot and a page refresh never build (and fetch) side by side.
 * **No edge is said plainly.** The stored verdict is two-sided. ``highlight`` is
   the role with an edge AND a rate above its base rate (the highest rate of
   those); a role with an edge BELOW its base rate is listed in ``avoid``. With
@@ -41,11 +49,14 @@ Rules that keep the number honest, each from the design or a review ruling:
 ``scorecard`` (every payload, whatever its state) is the graded record
 ``scalp_score`` builds from ``grades``: how the highlighted calls and the cautions
 actually did over the last ``scorecard_days`` graded days, beside the base rates
-they were published with. ``scalp_grade`` writes it each night.
+they were published with. ``scalp_grade`` writes it each night, and
+``republish_scorecard`` then puts the fresh record into the current view (the
+symbols untouched), so a day's grades show that evening.
 
-Before 08:35 on a trading day the view is ``"waiting"``, on a closed day
-``"closed"``; both keep the last published call under ``symbols`` (``call_day`` says
-which day) and fetch NOTHING. An unexpected failure publishes ``"error"`` the
+Before the call time on a trading day (the later of the 08:35 entry and the
+``[slots.scalp]`` time: 08:36 at the defaults) the view is ``"waiting"``, on a
+closed day ``"closed"``; both keep the last published call under ``symbols``
+(``call_day`` says which day) and fetch NOTHING. An unexpected failure publishes ``"error"`` the
 same way, counted as a degrade. Every payload is checked against
 ``shared.contracts.options.ScalpView`` first; one that fails is not published.
 
@@ -57,6 +68,7 @@ the private app. Imports nothing from ``compute``.
 import datetime as _dt
 import logging
 import re
+import threading
 from zoneinfo import ZoneInfo
 
 from services import _degrade
@@ -93,6 +105,13 @@ _CALLS = ("long_call", "ccs")       # structures priced off the call map
 _WEEKLY_ROOT = "SPXW"
 _ROOT_RE = re.compile(r"[A-Z]+")
 
+#: ONE run (and one scorecard republish) at a time. The 08:36 slot runs on the
+#: scheduler's executor and a ``scalp_refresh`` on the slow lane's thread; two
+#: builds at once would both see no frozen call, both fetch (~58 requests in one
+#: minute) and could publish one run's entry beside the other's saved slice. The
+#: second caller waits, then finds the calls frozen and fetches nothing.
+_RUN_LOCK = threading.Lock()
+
 
 # ── small helpers ────────────────────────────────────────────────────────────
 def _ct_now(now):
@@ -103,6 +122,18 @@ def _ct_now(now):
 
 def _entry_time(day) -> _dt.datetime:
     return _mc.regular_open_on(day) + _dt.timedelta(minutes=_ENTRY_AFTER_MIN)
+
+
+def _call_time(day) -> _dt.datetime:
+    """The earliest a call is BUILT: the later of the 08:35 entry and the first
+    ``[slots.scalp]`` time (08:36 at the defaults). Before it the view is
+    ``"waiting"`` - a refresh at 08:35:30 must not fire the call a minute early,
+    before the 08:30 bar has settled and while the slot is about to run."""
+    entry = _entry_time(day)
+    slots = sorted(_mc.slot_times("scalp").values())
+    if not slots:
+        return entry
+    return max(entry, _dt.datetime.combine(day, slots[0], tzinfo=_CT))
 
 
 def _window_end(day) -> _dt.datetime:
@@ -123,11 +154,20 @@ def _int(v):
 
 
 def _rules() -> dict:
-    """The trade rules the numbers were made under, frozen with the call."""
+    """The trade rules the numbers were made under, shown with the call."""
     return {"target_pct": scalp_config.target_pct(), "stop_pct": scalp_config.stop_pct(),
             "time_stop_min": scalp_config.time_stop_min(),
             "otm_steps": scalp_config.otm_steps(), "iv_scale": scalp_config.iv_scale(),
             "min_samples": scalp_config.min_samples()}
+
+
+def _call_rules() -> dict:
+    """The rules a GRADE depends on, frozen into each called symbol's entry (so
+    saved with it): the evening's grading walks the trade under these, never
+    under a config changed after the call (``scalp_grade.call_rules``)."""
+    return {"target_pct": scalp_config.target_pct(), "stop_pct": scalp_config.stop_pct(),
+            "time_stop_min": scalp_config.time_stop_min(),
+            "min_premium": scalp_config.min_premium(), "iv_scale": scalp_config.iv_scale()}
 
 
 def _next_call(day, state):
@@ -268,8 +308,13 @@ def _price(symbol, structure, spot, entry, day, sigma, slice_) -> dict:
             "win_points": _finite(win), "loss_points": _finite(loss)}
 
 
-def _symbol_call(symbol, day, slice_, db_path) -> dict:
-    """A fresh call for ``symbol`` from the store, the study and ``slice_``."""
+def _symbol_call(symbol, day, slice_, db_path, late=False) -> dict:
+    """A fresh call for ``symbol`` from the store, the study and ``slice_``.
+
+    ``late`` (past the call window) still reads the morning - ``morning`` is pure
+    and reads nothing after 08:35, so it holds no later outcome - and keeps a no
+    opening bar or a flat open as what it is, with its inputs. Only a morning that
+    HAS a direction is ``MISSED``. No roles are ever made late."""
     m = scalp_inputs.morning(symbol, day, 5, db_path=db_path)
     align = scalp_inputs.alignment(m)
     reading = _reading(m, align, scalp_model.bucket_of(align, scalp_config.buckets()))
@@ -289,7 +334,11 @@ def _symbol_call(symbol, day, slice_, db_path) -> dict:
     if reading["direction"] not in (1, -1):
         entry["note"] = FLAT_OPEN
         return entry
+    if late:
+        entry["note"] = MISSED
+        return entry
 
+    entry["rules"] = _call_rules()
     vol = reading["vol_at_entry"]
     if iv is not None:
         sigma, entry["sigma_source"] = iv, "chain"
@@ -347,9 +396,11 @@ def build(day: _dt.date, now: _dt.datetime, db_path=None, client=None) -> dict:
     A symbol whose call was already PUBLISHED today is reused whole from
     ``calls``: nothing re-priced, its chain not fetched again. A symbol with no
     published call gets a fresh one, unless the call window (entry +
-    ``time_stop_min``) has passed: then it is refused (``MISSED``), because the
-    trade has ended and the study may already hold its outcome. Bars are topped
-    up and chains captured only when some symbol gets a fresh call, and only
+    ``time_stop_min``) has passed: then a morning with a direction is refused
+    (``MISSED``), because the trade has ended and the study may already hold its
+    outcome, while a morning with no opening bar or a flat one still says so,
+    with its inputs (no roles either way). Bars are topped up and chains
+    captured only when some symbol gets a fresh call inside the window, and only
     that symbol's chain. Nothing is saved here: ``run`` saves what it actually
     published. One symbol failing never stops the others."""
     iso = day.isoformat()
@@ -377,17 +428,14 @@ def build(day: _dt.date, now: _dt.datetime, db_path=None, client=None) -> dict:
         if symbol in frozen:
             symbols[symbol] = frozen[symbol]
             continue
-        if late:
-            symbols[symbol] = {"direction": None, "roles": {}, "chain": None,
-                               "highlight": None, "avoid": [], "note": MISSED}
-            continue
         try:
-            entry = _symbol_call(symbol, day, slices.get(symbol), db_path)
+            entry = _symbol_call(symbol, day, slices.get(symbol), db_path, late=late)
         except Exception:
             _degrade.degraded("options.scalp_symbol", detail=symbol)
             entry = {"direction": None, "roles": {}, "chain": None, "highlight": None,
                      "avoid": [], "note": FAILED}
-        entry["made_at"] = now.isoformat()
+        if not late:
+            entry["made_at"] = now.isoformat()
         symbols[symbol] = entry
     return {"day": iso, "call_day": iso, "generated_at": now.isoformat(),
             "state": "call", "symbols": symbols, "rules": _rules(), "context": {},
@@ -446,15 +494,22 @@ def _valid(payload) -> bool:
 
 def run(bus, now=None, db_path=None, client=None) -> None:
     """Publish the view for ``now`` (default: now, CT): ``"closed"`` on a
-    non-trading day, ``"waiting"`` before 08:35, else a freshly built
-    ``"call"``. Never raises."""
+    non-trading day, ``"waiting"`` before the call time (``_call_time``: 08:36 at
+    the defaults), else a freshly built ``"call"``. One run at a time
+    (``_RUN_LOCK``): a second caller waits for the first and then reuses its
+    frozen calls. Never raises."""
+    with _RUN_LOCK:
+        _run(bus, now, db_path, client)
+
+
+def _run(bus, now, db_path, client) -> None:
     now = _ct_now(now)
     day = now.date()
     built = False
     try:
         if not _mc.is_trading_day(day):
             payload = _held("closed", bus, day, now, db_path)
-        elif now < _entry_time(day):
+        elif now < _call_time(day):
             payload = _held("waiting", bus, day, now, db_path)
         else:
             payload = build(day, now, db_path=db_path, client=client)
@@ -474,6 +529,34 @@ def run(bus, now=None, db_path=None, client=None) -> None:
     if built:
         # Only now is it what the page was shown: freeze it.
         _save_published(payload, db_path)
+
+
+def republish_scorecard(bus, db_path=None) -> bool:
+    """After the evening's grading: republish the CURRENT view with a fresh
+    ``scalp_score.scorecard()`` in place of its ``scorecard`` and nothing else
+    changed - no build, no fetch, the frozen symbols byte for byte - so the day's
+    grades show that evening, not at the next morning's publish. Holds the run
+    lock. No view yet, an unreadable record or an invalid payload publishes
+    nothing (counted as a degrade where it is a failure). Returns True when it
+    published. Never raises."""
+    with _RUN_LOCK:
+        view = _payload(bus, VIEW)
+        if view is None:
+            return False
+        try:
+            card = scalp_score.scorecard(db_path=db_path)
+        except Exception:
+            _degrade.degraded("options.scalp_scorecard")
+            return False
+        payload = dict(view, scorecard=card)
+        if not _valid(payload):
+            return False
+        try:
+            bus.cache_set(VIEW, payload, event=EVENT)
+        except Exception:
+            _degrade.degraded("options.scalp_publish")
+            return False
+        return True
 
 
 # ── context: shown beside the call, NOT in the probability ──────────────────
@@ -533,4 +616,4 @@ def context(bus, day) -> dict:
             "flow": _flow(bus, day)}
 
 
-__all__ = ["VIEW", "EVENT", "NO_EDGE", "build", "run", "context"]
+__all__ = ["VIEW", "EVENT", "NO_EDGE", "build", "run", "republish_scorecard", "context"]

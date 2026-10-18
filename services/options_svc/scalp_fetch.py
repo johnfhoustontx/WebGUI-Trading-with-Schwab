@@ -175,10 +175,11 @@ def _fallback_start_ms(today: _dt.date) -> int:
 
 
 def top_up(db_path=None, client=None, today=None) -> dict:
-    """Fetch what the store lacks, per symbol and interval: from its latest bar
-    (that bar is fetched again and replaced, it may have been a partial) to now,
-    or from three trading days back when it holds none. Returns the rows written
-    per ``"SYMBOL/interval"``.
+    """Fetch what the store lacks, per symbol and interval: from ONE interval
+    before its latest bar to now, or from three trading days back when it holds
+    none. The latest bar and the one before it are fetched again and replaced: a
+    bar fetched seconds after its close (or still forming) may have been a
+    partial. Returns the rows written per ``"SYMBOL/interval"``.
 
     A FAILED window stops that key's walk AT the failed window and reports the key
     as ``FAILED`` (-1): nothing after the hole is written, so ``latest_ts`` cannot
@@ -192,7 +193,8 @@ def top_up(db_path=None, client=None, today=None) -> dict:
             key = f"{symbol}/{interval}"
             out[key] = 0
             latest = scalp_store.latest_ts(symbol, interval, db_path=db_path)
-            start = latest * 1000 if latest is not None else _fallback_start_ms(day)
+            start = ((latest - interval * 60) * 1000 if latest is not None
+                     else _fallback_start_ms(day))
             step = _span(WINDOW_DAYS[interval])
             while start < end_all:
                 stop = min(start + step, end_all)

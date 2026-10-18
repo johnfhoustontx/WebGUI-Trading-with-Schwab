@@ -1114,7 +1114,8 @@ ETH-eligible symbols), Paper Portfolio entry + manage (hourly at the top of the
 hour, 09:00–14:00 CT, no 15:00 run — also refreshes the Paper Ledger), captured-signal auto-manage (5-min
 slots, 08:00–15:15 CT, when auto-close is on), header tick (each 30 s,
 skip-unchanged), the Opening Scalp's morning call (08:36 CT, <code>[slots.scalp]</code>) and its
-nightly pass (16:20 CT, <code>[slots.scalp_bars]</code>: bar top-up, study rebuild, grading).</p>
+nightly pass (16:20 CT, <code>[slots.scalp_bars]</code>: bar top-up, study rebuild, grading,
+then the scorecard republished into <code>cache:options:scalp</code>).</p>
 <p><strong>GEX collection and the raw feed.</strong> Each one-minute poll is
 <code>gex_collector.fetch_minute</code> (the chains, through the proxy) then <code>derive_minute</code>
 (the rows in <code>gex_history.db</code>, priced at the minute). In <code>config/feed.toml</code>
@@ -1576,7 +1577,7 @@ z
 <tr>
 <td><code>scalp_refresh</code></td>
 <td>—</td>
-<td><code>cache:options:scalp</code> — runs the Opening Scalp's <code>scalp_call.run</code> now: before 08:35 CT or on a closed day it republishes the last call under a <code>waiting</code> / <code>closed</code> state and fetches nothing. A call already published today is reused whole, so it only fills in a symbol with none, and no new call is built after entry + <code>time_stop_min</code> (09:35 CT). Replay-guarded and on the slow lane (it can fetch bars and three chains, about 30 Schwab calls)</td>
+<td><code>cache:options:scalp</code> — runs the Opening Scalp's <code>scalp_call.run</code> now: before the 08:36 CT call time or on a closed day it republishes the last call under a <code>waiting</code> / <code>closed</code> state and fetches nothing. A call already published today is reused whole, so it only fills in a symbol with none, and no new call is built after entry + <code>time_stop_min</code> (09:35 CT). Replay-guarded and on the slow lane (it can fetch bars and three chains, about 30 Schwab calls)</td>
 </tr>
 <tr>
 <td><code>captured_reload</code></td>
@@ -1829,10 +1830,13 @@ own publish raises, and once at service start. A failure is a degrade
 only view. Validated on write by <code>shared.contracts.options.ScalpView</code>; one that fails is
 not published and is counted as a degrade (<code>options.scalp_view</code>). Published at 08:36 CT,
 on a <code>scalp_refresh</code>, and (as <code>waiting</code> / <code>closed</code> / <code>error</code>, carrying the last call) by
-every other run.</p>
+every other run. After the nightly grading it is republished with only <code>scorecard</code>
+replaced (<code>scalp_call.republish_scorecard</code>: no build, no fetch, <code>symbols</code> unchanged).
+<code>scalp_call.run</code> and that republish hold one lock, so two builds never run at once.</p>
 <p>Top level: <code>{day, call_day, generated_at, state, symbols, rules, context, scorecard,
 next_call}</code>.
-- <code>state</code> is <code>call</code> (a call was built), <code>waiting</code> (a trading day before 08:35 CT),
+- <code>state</code> is <code>call</code> (a call was built), <code>waiting</code> (a trading day before the call
+  time: the later of the 08:35 entry and the <code>[slots.scalp]</code> time, so 08:36 CT),
   <code>closed</code> (not a trading day) or <code>error</code> (an unexpected failure). In the last three,
   <code>symbols</code> is the <strong>last published call</strong> and <code>call_day</code> says which day's it is:
   compare it with <code>day</code> before reading a call as today's. <code>rules</code> (the target, stop,
@@ -1895,7 +1899,11 @@ next_call}</code>.
 </tr>
 <tr>
 <td><code>note</code>, <code>points_note</code>, <code>made_at</code></td>
-<td>why there is no call or no edge (<code>no measured edge</code>, <code>no opening bar yet</code>, <code>opened flat — no direction</code>, <code>missed the call window</code>, <code>the call could not be built</code>), why there are no points, and when the call was made</td>
+<td>why there is no call or no edge (<code>no measured edge</code>, <code>no opening bar yet</code>, <code>opened flat — no direction</code>, <code>missed the call window</code>, <code>the call could not be built</code>), why there are no points, and when the call was made. <code>missed the call window</code> is only for a morning that had a direction; after the window a flat open or a missing bar keeps its own note, with its inputs, and no <code>made_at</code></td>
+</tr>
+<tr>
+<td><code>rules</code></td>
+<td>on a called symbol only (one with roles): <code>{target_pct, stop_pct, time_stop_min, min_premium, iv_scale}</code> as they were when the call was made. Grading walks the trade under these, never the evening's config</td>
 </tr>
 </tbody>
 </table>

@@ -256,6 +256,71 @@ def test_a_finished_grade_is_never_rewritten_but_a_new_symbol_still_is_graded(
     assert scalp_grade.pending_days(db_path=db) == []
 
 
+def test_grading_uses_the_rules_frozen_with_the_call(db, bus, monkeypatch):
+    publish(db, bus)
+    seed_path(db)
+    entry = scalp_store.calls_on(ISO, db_path=db)["SPY"]
+    rules = entry["rules"]
+    assert rules == {"target_pct": scalp_config.target_pct(),
+                     "stop_pct": scalp_config.stop_pct(),
+                     "time_stop_min": scalp_config.time_stop_min(),
+                     "min_premium": scalp_config.min_premium(),
+                     "iv_scale": scalp_config.iv_scale()}
+    # The evening's config moved after the 08:36 call: none of it may reach a grade.
+    monkeypatch.setattr(scalp_config, "target_pct", lambda: 10_000.0)
+    monkeypatch.setattr(scalp_config, "iv_scale", lambda: 3.0)
+    monkeypatch.setattr(scalp_config, "time_stop_min", lambda: 5)
+    monkeypatch.setattr(scalp_config, "min_premium", lambda: 1_000.0)
+    walks = []
+    real = scalp_sim.simulate
+    monkeypatch.setattr(scalp_sim, "simulate",
+                        lambda *a, **k: walks.append((a[5], len(a[6]), k)) or real(*a, **k))
+    scalp_grade.grade_day(ISO, db_path=db)
+    spy = by_role(grades(db), "SPY")
+    # +1% at once clears the call's 50% target, not the evening's 10,000%.
+    assert spy["long_with"]["model_result"] == "win"
+    assert spy["credit_with"]["model_result"] == "win"
+    assert walks
+    for _sigma, bars, kw in walks:
+        assert kw == {k: rules[k] for k in ("target_pct", "stop_pct", "time_stop_min",
+                                            "min_premium")}
+        assert bars == 12                       # the call's 60-minute path, not 5 minutes
+    model_sigma = entry["vol_at_entry"] * rules["iv_scale"]
+    assert any(s == pytest.approx(model_sigma) for s, _b, _k in walks)
+    assert not any(s == pytest.approx(entry["vol_at_entry"] * 3.0) for s, _b, _k in walks)
+
+
+def test_an_entry_saved_before_rules_were_frozen_falls_back_to_the_config(monkeypatch):
+    monkeypatch.setattr(scalp_config, "target_pct", lambda: 70.0)
+    assert scalp_grade.call_rules({}) == {
+        "target_pct": 70.0, "stop_pct": scalp_config.stop_pct(),
+        "time_stop_min": scalp_config.time_stop_min(),
+        "min_premium": scalp_config.min_premium(), "iv_scale": scalp_config.iv_scale()}
+    # Key by key: a frozen value wins, a missing or unusable one is the config's.
+    got = scalp_grade.call_rules({"rules": {"target_pct": 40.0, "stop_pct": None,
+                                            "time_stop_min": 30.0}})
+    assert got["target_pct"] == 40.0 and got["stop_pct"] == scalp_config.stop_pct()
+    assert got["time_stop_min"] == 30 and isinstance(got["time_stop_min"], int)
+
+
+def test_simulate_without_rules_reads_the_config(monkeypatch):
+    # The study passes no rules: simulate must read the config exactly as before.
+    when = dt.datetime(2026, 10, 19, 8, 35)
+    path = [scalp_store.Bar(ts(DAY, 8, 35) + 300 * i, 500.0, 500.0, 500.0, 500.0, 0.0)
+            for i in range(12)]
+    args = ("long_call", 500.0, (501.0, None), when, DAY, 0.2, path, 5)
+    base = scalp_sim.simulate(*args)
+    same = scalp_sim.simulate(*args, target_pct=scalp_config.target_pct(),
+                              stop_pct=scalp_config.stop_pct(),
+                              time_stop_min=scalp_config.time_stop_min(),
+                              min_premium=scalp_config.min_premium())
+    assert base == same and base.result == "timeout"
+    floor = scalp_config.min_premium()
+    monkeypatch.setattr(scalp_config, "min_premium", lambda: 1_000.0)
+    assert scalp_sim.simulate(*args).result == "skip"
+    assert scalp_sim.simulate(*args, min_premium=floor) == base
+
+
 def test_chain_vol_is_solved_at_the_slices_own_spot(db, bus):
     publish(db, bus)
     entry = scalp_store.calls_on(ISO, db_path=db)["SPY"]

@@ -2,9 +2,10 @@
 
 Every trading morning at 08:36 CT the options service publishes
 ``cache:options:scalp`` - for $SPX, SPY and QQQ, the premarket inputs and, for
-four same-day (0DTE) scalps entered after the first five minutes, the
-walk-forward-tested rate at which each reached +50% before -50% inside 60
-minutes. The operator reads it and decides; the page has no trade control.
+four same-day (0DTE) scalps entered after the first five minutes, the rate at
+which each reached +50% before -50% inside 60 minutes over every stored morning
+(whether a bucket beats its usual rate is the walk-forward-tested part). The
+operator reads it and decides; the page has no trade control.
 
 The study almost never finds a measured edge, so the page's COMMON message is
 "No measured edge", and it is drawn as a plain, ordinary answer - not a warning

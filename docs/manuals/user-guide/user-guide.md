@@ -1218,13 +1218,18 @@ past mornings that looked like this one. **It does not place trades** — you de
 - **Refresh** asks the service to rebuild the call. A call already shown today stays as
   published; Refresh only fills in a symbol that has none yet, and no new call is built
   after **09:35 CT**, an hour after the 08:35 entry, because the trade it would describe
-  is over by then.
-- Before 08:36, on a closed day, or after a failed refresh the page shows the **last
-  call**, labelled with its day, under a line saying when the next call is due.
+  is over by then. A symbol whose morning had a direction but was never called reads
+  **missed the call window**; one that opened flat or had no opening bar still says so,
+  with its inputs.
+- Before 08:36 (a Refresh pressed at 08:35 waits for the 08:36 call too), on a closed
+  day, or after a failed refresh the page shows the **last call**, labelled with its
+  day, under a line saying when the next call is due.
 - **Not in the probability** (the report link, headlines, flow alerts) is context only.
 - **Scorecard** (the last card) is the record of how the published calls actually did.
   Each evening, once the day's bars are in, the app **grades** every trade it showed that
-  morning, from the call as published (never from a later rebuild). Per symbol, over the
+  morning, from the call as published (never from a later rebuild), under the target,
+  stop and time stop that call was made with (a setting changed later does not regrade
+  it), and the scorecard shows that evening's grades straight away. Per symbol, over the
   last 20 graded days, it shows: **Edge calls**, how often the one highlighted trade won
   beside the rate it usually wins (most symbols have none, and the line says so);
   **Cautions**, how often a trade marked to avoid still won, beside its usual rate (the
@@ -1237,8 +1242,10 @@ past mornings that looked like this one. **It does not place trades** — you de
   model's settlement time would be wrong. A grade is written once and never recomputed. A
   handful of days says very little; read it as a record, not a verdict.
 
-> The win rates are **walk-forward tested** on stored data and the premiums are modelled,
-> so read them as how often a method like this has worked, not as a promise of fills.
+> The win rates are counted over **every** stored morning, and the premiums are
+> modelled, so read them as how often a method like this has worked, not as a promise
+> of fills. What is **walk-forward tested** is whether a bucket beats its usual rate:
+> that test is what marks a **Measured edge** or a **Caution**.
 
 ## Market News
 

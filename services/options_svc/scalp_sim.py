@@ -134,11 +134,11 @@ def value(structure, spot, strikes, when, day, sigma):
     raise ValueError(f"unknown structure {structure!r}")
 
 
-def _levels(structure, entry_value):
+def _levels(structure, entry_value, target_pct=None, stop_pct=None):
     """``(win_value, loss_value)``: the structure's value at which the trade wins
-    and at which it loses."""
-    t = scalp_config.target_pct() / 100.0
-    s = scalp_config.stop_pct() / 100.0
+    and at which it loses (the configured percentages unless given)."""
+    t = (scalp_config.target_pct() if target_pct is None else target_pct) / 100.0
+    s = (scalp_config.stop_pct() if stop_pct is None else stop_pct) / 100.0
     if structure in _LONG:
         return entry_value * (1 + t), entry_value * (1 - s)
     return entry_value * (1 - t), entry_value * (1 + s)
@@ -154,7 +154,8 @@ def _aware(moment):
 
 
 def simulate(structure, spot0, strikes, entry, day, sigma, path: list[Bar],
-             interval: int) -> Outcome:
+             interval: int, *, target_pct=None, stop_pct=None, time_stop_min=None,
+             min_premium=None) -> Outcome:
     """Run one trade along ``path`` (bars, ``interval`` minutes each) from ``entry``.
 
     Returns an ``Outcome``. ``"skip"`` (no minutes, no P&L) when the entry value is
@@ -166,23 +167,30 @@ def simulate(structure, spot0, strikes, entry, day, sigma, path: list[Bar],
     loss it is the LEVEL's P&L (``+target_pct`` / ``-stop_pct``: the exit is assumed
     to fill at the level, not at a bar's overshoot); for a timeout it is the
     structure marked at the last bar's close and END time.
+
+    The four keyword rules default to the configured ones (read per call), which
+    is what the study uses; grading passes the rules FROZEN with a published call,
+    so a later config change never regrades a call under rules it was not made
+    under.
     """
+    tgt = scalp_config.target_pct() if target_pct is None else target_pct
+    stp = scalp_config.stop_pct() if stop_pct is None else stop_pct
+    stop_min = scalp_config.time_stop_min() if time_stop_min is None else time_stop_min
+    floor = scalp_config.min_premium() if min_premium is None else min_premium
     entry = _aware(entry)
     entry_value = value(structure, spot0, strikes, entry, day, sigma)
-    if not math.isfinite(entry_value) or entry_value < scalp_config.min_premium():
+    if not math.isfinite(entry_value) or entry_value < floor:
         return Outcome("skip", None, entry_value, None, False)
 
     t0 = int(entry.timestamp())
-    t1 = t0 + scalp_config.time_stop_min() * 60
+    t1 = t0 + stop_min * 60
     bars = sorted((b for b in path if t0 <= b.ts < t1), key=lambda b: b.ts)
     if not bars:
         return Outcome("skip", None, entry_value, None, False)
 
-    win_v, loss_v = _levels(structure, entry_value)
+    win_v, loss_v = _levels(structure, entry_value, tgt, stp)
     long_side = structure in _LONG
     rises = _rises_with_spot(structure)
-    tgt = scalp_config.target_pct()
-    stp = scalp_config.stop_pct()
     step = _dt.timedelta(minutes=interval)
 
     for bar in bars:

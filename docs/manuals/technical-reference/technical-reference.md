@@ -3072,10 +3072,18 @@ role's all-mornings base rate. The study's first verdict: no usable edge (one ce
    at all a symbol keeps its rates but gets no strikes or points.
 4. **A published call is frozen.** It is saved in `calls` only after it has passed the
    `ScalpView` model and reached the bus, and a later build the same day reuses it
-   whole: nothing re-priced, no second chain fetch. A symbol with no call by
-   entry + `time_stop_min` (09:35 CT) is refused ("missed the call window").
-5. Before 08:35, or on a closed day, the view is `waiting` / `closed` and carries the
-   last published call; an unexpected failure publishes `error` the same way.
+   whole: nothing re-priced, no second chain fetch. Each called symbol's entry
+   carries `rules` (`target_pct`, `stop_pct`, `time_stop_min`, `min_premium`,
+   `iv_scale` as they were at the call), which grading uses.
+5. **No new call after entry + `time_stop_min`** (09:35 CT). Past it a symbol with no
+   call gets no roles and nothing is fetched: a morning that had a direction reads
+   "missed the call window"; a flat open or a missing opening bar is still read
+   (the morning uses nothing after 08:35) and keeps its own note and inputs.
+6. Before the **call time** — the later of the 08:35 entry and the `[slots.scalp]`
+   time, so 08:36 — or on a closed day, the view is `waiting` / `closed` and carries
+   the last published call; an unexpected failure publishes `error` the same way.
+7. **One run at a time.** The 08:36 slot and a refresh hold one lock: a second
+   caller waits, then finds the calls frozen and fetches nothing.
 
 ## Grading and the scorecard
 
@@ -3085,6 +3093,10 @@ no selection bias), and writes `grades` once per day, symbol and role.
 
 - `model_result`: the trade simulated on that day's 5-minute bars at the morning's
   volatility reading x `iv_scale`, the study's own method. This is the win rate.
+- **The call's own rules.** The target, stop, time stop, minimum premium and
+  `iv_scale` are the ones frozen in the call's `rules`, never the evening's config:
+  a setting changed after 08:36 does not regrade the morning. An entry saved before
+  rules were frozen with it falls back to the config, key by key.
 - `chain_result`: the same walk at the volatility implied by the saved chain's mid for
   the contract the role is long (or short, for a spread), solved at the spot the chain
   was quoted against. `None` with no chain, quote or solution. Shown beside the model
@@ -3099,14 +3111,17 @@ The **scorecard** (over the last `[study] scorecard_days`, 20, graded days) has 
 parts per symbol: the **edge calls** (how often a highlighted role won, beside the mean
 base rate it was published with), the **cautions** (how often a role marked to avoid
 still won, beside its published base rate; the caution is working when the first is
-the lower), and all four roles' won / lost / timed-out counts and win rates.
+the lower), and all four roles' won / lost / timed-out counts and win rates. After the
+night's grading `scalp_call.republish_scorecard` puts a fresh scorecard into the
+current view and changes nothing else (no build, no fetch), so the grades show that
+evening.
 
 ## Cadences
 
 | Job | When | What |
 |---|---|---|
 | Morning call | **08:36 CT** (`[slots.scalp]`, grace 20 min) | Today's bars topped up, three chains captured, the call built and published. 08:36 and not 08:35: the autoscan fetches 08:32-08:35 and Schwab refuses the first minute after the half hour. |
-| Nightly pass | **16:20 CT** (`[slots.scalp_bars]`, grace 120 min) | In order: **bar top-up** (13 symbols x 2 intervals, from the store's latest bar; a missed night is caught up by the next), the **study rebuild** (one transaction, so a reader sees the old study or the new, never half of each), then **grading**. After the 16:00 flow-delta report so it never competes for the proxy's 5 requests a second. |
+| Nightly pass | **16:20 CT** (`[slots.scalp_bars]`, grace 120 min) | In order: **bar top-up** (13 symbols x 2 intervals, from one bar before the store's latest, so a bar stored as a partial is replaced; a missed night is caught up by the next), the **study rebuild** (one transaction, so a reader sees the old study or the new, never half of each), **grading**, then the **scorecard republish**. After the 16:00 flow-delta report so it never competes for the proxy's 5 requests a second. |
 | Refresh | on demand (`scalp_refresh`) | The same `scalp_call.run`; slow lane, replay-guarded. |
 
 `scalp.db` (`services/options_svc/data/`) is kept forever and is in the nightly

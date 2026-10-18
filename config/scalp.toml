@@ -83,7 +83,8 @@ buckets = [0.4, 0.7]
 # The IV multipliers the study tries, to show how much the answer leans on the
 # volatility assumption. Positive numbers.
 iv_scales = [0.8, 1.0, 1.25, 1.5]
-# A bucket with fewer trades than this shows no hit rate.
+# The fewest scored mornings a bucket needs before it can be marked as an edge.
+# It gates only that verdict: the page shows every bucket's rate with its count.
 min_samples = 20
 # Trading days the scorecard looks back over.
 scorecard_days = 20
