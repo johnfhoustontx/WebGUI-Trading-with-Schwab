@@ -138,6 +138,33 @@ def test_atm_iv_refuses_minus_999():
     assert sc.atm_iv({}, 571.3) is None
 
 
+def test_atm_iv_reads_the_spxw_contract_when_a_strike_lists_two_roots():
+    # A $SPX chain can list the monthly SPX and the weekly SPXW under one strike;
+    # the scalp trades SPXW, so its volatility is the one read, whichever is first.
+    chain = _chain(spot=5000.0, strikes=range(4990, 5011, 5), iv=20.0, symbol="$SPX")
+    exp = f"{DAY}:0"
+    for name, side in (("callExpDateMap", "C"), ("putExpDateMap", "P")):
+        weekly = dict(chain[name][exp]["5000.0"][0], volatility=30.0,
+                      symbol=f"SPXW  261019{side}05000000")
+        monthly = dict(chain[name][exp]["5000.0"][0], volatility=12.0,
+                       symbol=f"SPX   261019{side}05000000")
+        chain[name][exp]["5000.0"] = [monthly, weekly]
+    assert abs(sc.atm_iv(chain, 5000.0) - 0.30) < 1e-9
+    # A weekly whose volatility is not computed falls back to a usable contract.
+    for name in ("callExpDateMap", "putExpDateMap"):
+        chain[name][exp]["5000.0"][1]["volatility"] = -999.0
+    assert abs(sc.atm_iv(chain, 5000.0) - 0.12) < 1e-9
+
+
+def test_preferred_contract_takes_spxw_then_the_first_usable():
+    a = {"symbol": "SPX   261019C05000000", "bid": None}
+    b = {"symbol": "SPXW  261019C05000000", "bid": 1.0}
+    assert sc.preferred_contract([a, b]) is b
+    assert sc.preferred_contract([a, b], ok=lambda c: c["bid"] is None) is a
+    assert sc.preferred_contract([{"symbol": "SPY"}, "junk"])["symbol"] == "SPY"
+    assert sc.preferred_contract([]) is None and sc.preferred_contract(None) is None
+
+
 def test_scalp_call_due_fires_at_0836_not_0835():
     ran = set()
     mon = lambda h, m: dt.datetime(2026, 6, 15, h, m, tzinfo=_CT)

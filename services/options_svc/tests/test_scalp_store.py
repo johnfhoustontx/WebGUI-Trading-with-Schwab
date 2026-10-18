@@ -85,6 +85,28 @@ def test_a_second_chain_slice_for_the_day_replaces_the_first(tmp_path):
         conn.close()
 
 
+def test_a_call_round_trips_and_the_latest_day_is_found(tmp_path):
+    db = _db(tmp_path)
+    assert st.latest_call_day(db_path=db) is None
+    assert st.calls_on("2026-10-19", db_path=db) == {}
+    st.save_call("2026-10-16", "SPY", {"direction": 1, "roles": {}}, db_path=db)
+    st.save_call("2026-10-19", "SPY", {"direction": -1}, db_path=db)
+    st.save_call("2026-10-19", "QQQ", {"direction": None}, db_path=db)
+    st.save_call("2026-10-19", "SPY", {"direction": 1}, db_path=db)     # replaces
+    assert st.latest_call_day(db_path=db) == "2026-10-19"
+    assert st.calls_on("2026-10-19", db_path=db) == {"SPY": {"direction": 1},
+                                                     "QQQ": {"direction": None}}
+    assert st.calls_on("2026-10-16", db_path=db) == {"SPY": {"direction": 1, "roles": {}}}
+
+
+def test_a_call_with_a_nan_is_refused_not_stored(tmp_path):
+    # A NaN would be written as bare ``NaN``, which is not JSON.
+    db = _db(tmp_path)
+    with pytest.raises(ValueError):
+        st.save_call("2026-10-19", "SPY", {"p": float("nan")}, db_path=db)
+    assert st.calls_on("2026-10-19", db_path=db) == {}
+
+
 def test_the_chain_slice_is_stored_compressed(tmp_path):
     db = _db(tmp_path)
     body = {"rows": [{"strike": float(i), "bid": 1.0, "ask": 1.1} for i in range(500)]}
@@ -124,7 +146,8 @@ def test_connect_creates_the_parent_folder(tmp_path):
 
 
 @pytest.mark.parametrize("name", ["connect", "upsert_bars", "bars", "latest_ts",
-                                  "save_chain_slice", "chain_slice"])
+                                  "save_chain_slice", "chain_slice", "save_call",
+                                  "calls_on", "latest_call_day"])
 def test_no_default_path_bound_at_def(name):
     assert inspect.signature(getattr(st, name)).parameters["db_path"].default is None
 

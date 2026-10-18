@@ -140,9 +140,31 @@ def capture_all(day=None, client=None, db_path=None) -> dict:
             for s in scalp_config.symbols()}
 
 
+#: The 0DTE weekly root. A $SPX chain can list the AM-settled monthly (``SPX``)
+#: and the PM-settled weekly (``SPXW``) under ONE strike; the scalp trades SPXW.
+_WEEKLY_ROOT = "SPXW"
+
+
+def preferred_contract(contracts, ok=None):
+    """The contract a scalp reads from one strike's list: among the dicts that
+    pass ``ok`` (all of them when ``ok`` is None), the first whose ``symbol``
+    starts with ``SPXW``, else the first. None when none passes."""
+    usable = [c for c in (contracts if isinstance(contracts, list) else [])
+              if isinstance(c, dict) and (ok is None or ok(c))]
+    for c in usable:
+        if str(c.get("symbol") or "").strip().upper().startswith(_WEEKLY_ROOT):
+            return c
+    return usable[0] if usable else None
+
+
+def _usable_vol(contract):
+    vol = _greeks.usable(contract.get("volatility"))
+    return vol if vol is not None and vol > 0 else None
+
+
 def _atm_volatility(by_strike: dict, spot: float):
     """The usable ``volatility`` (percent) of the contract at the strike nearest
-    ``spot`` in one map's expiry, or None."""
+    ``spot`` in one map's expiry (``preferred_contract``: SPXW first), or None."""
     best = None
     for key, contracts in by_strike.items():
         strike = _strike_of(key)
@@ -152,14 +174,16 @@ def _atm_volatility(by_strike: dict, spot: float):
             best = (strike, contracts)
     if best is None:
         return None
-    vol = _greeks.usable(best[1][0].get("volatility")) if isinstance(best[1][0], dict) else None
-    return vol if vol is not None and vol > 0 else None
+    chosen = preferred_contract(best[1], ok=lambda c: _usable_vol(c) is not None)
+    return None if chosen is None else _usable_vol(chosen)
 
 
 def atm_iv(slice_: dict, spot: float):
     """The at-the-money implied volatility as a fraction: the mean of the call's
     and the put's ``volatility`` / 100 at the strike nearest ``spot``. ``None``
-    when either is missing or unusable (Schwab's ``-999`` is "not computed")."""
+    when either is missing or unusable (Schwab's ``-999`` is "not computed").
+    Where a strike lists more than one root, the SPXW contract is read, else the
+    first with a usable volatility."""
     try:
         legs = []
         for name in _MAPS:

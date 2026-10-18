@@ -184,9 +184,9 @@ grace_min = 20
 morning = "08:52"     # 09:52 ET
 
 [slots.scalp]
-# The Opening Scalp's morning chain capture (scalp_chain.capture_all): each scalp
-# symbol's 0DTE chain, cut to the strikes near the money, kept in scalp.db to
-# calibrate the volatility the study assumes.
+# The Opening Scalp's morning call (scalp_call.run): today's bars topped up, each
+# scalp symbol's 0DTE chain cut to the strikes near the money and kept in scalp.db,
+# then the call built and published to cache:options:scalp.
 # 08:36, not 08:35 - the autoscan fetches :32-:35 and Schwab refuses the first
 # minute after the half hour. Check the proxy access log before moving it.
 grace_min = 20

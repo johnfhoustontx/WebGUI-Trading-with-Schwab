@@ -5,7 +5,8 @@ like every ``*.db`` and the nightly backup sweeps it with no list to edit.
 Later tasks add their own tables through ``connect`` (the schema is
 ``CREATE TABLE IF NOT EXISTS``, run on every connection): the study's
 ``outcomes``, ``mornings`` and ``verdicts`` are written only by
-``scalp_study.rebuild``.
+``scalp_study.rebuild``; ``calls`` (each published morning call, frozen as shown)
+only by ``scalp_call``, and ``rebuild`` never touches it.
 
 Pure: ``sqlite3``, ``zlib``, ``json`` and ``repo_paths`` only; it imports nothing
 from ``compute`` and calls no network. Every function takes ``db_path=None`` and
@@ -68,6 +69,12 @@ CREATE TABLE IF NOT EXISTS verdicts (
     bucket TEXT NOT NULL,
     json   TEXT NOT NULL,
     PRIMARY KEY (symbol, role, bucket)
+);
+CREATE TABLE IF NOT EXISTS calls (
+    day    TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    json   TEXT NOT NULL,
+    PRIMARY KEY (day, symbol)
 );
 """
 
@@ -166,3 +173,37 @@ def chain_slice(day, symbol, db_path=None):
     if row is None:
         return None
     return json.loads(zlib.decompress(row[0]).decode("utf-8"))
+
+
+def save_call(day, symbol, body, db_path=None) -> None:
+    """Keep ``symbol``'s published call for ``day`` (a JSON-able dict), replacing
+    the day's earlier one."""
+    conn = connect(db_path)
+    try:
+        with conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO calls (day, symbol, json) VALUES (?, ?, ?)",
+                (day, symbol, json.dumps(body, sort_keys=True, separators=(",", ":"),
+                                         allow_nan=False)))
+    finally:
+        conn.close()
+
+
+def calls_on(day, db_path=None) -> dict:
+    """``{symbol: call}`` saved for ``day`` (empty when none)."""
+    conn = connect(db_path)
+    try:
+        rows = conn.execute("SELECT symbol, json FROM calls WHERE day = ?",
+                            (day,)).fetchall()
+    finally:
+        conn.close()
+    return {sym: json.loads(body) for sym, body in rows}
+
+
+def latest_call_day(db_path=None):
+    """The most recent ``day`` with a saved call, or ``None``."""
+    conn = connect(db_path)
+    try:
+        return conn.execute("SELECT MAX(day) FROM calls").fetchone()[0]
+    finally:
+        conn.close()

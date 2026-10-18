@@ -37,6 +37,7 @@ DEFAULTS = {
                   "open_dead_zone_pct": 0.03, "buckets": _BUCKETS},
     "study": {"iv_scales": _IV_SCALES, "min_samples": 20, "scorecard_days": 20},
     "news": {"items": 5},
+    "context": {"report_url": "https://neuralstrike.co/report.html"},
 }
 
 load, reset_cache = toml_loader(SCALP_TOML, DEFAULTS, label="scalp.toml")
@@ -214,3 +215,12 @@ def scorecard_days() -> int:
 
 def news_items() -> int:
     return _count("news", "items", minimum=0)
+
+
+def report_url() -> str:
+    """The reports link shown beside the call: an ``http(s)://`` address, else the
+    default."""
+    raw = _section("context").get("report_url")
+    if isinstance(raw, str) and raw.strip().lower().startswith(("https://", "http://")):
+        return raw.strip()
+    return DEFAULTS["context"]["report_url"]

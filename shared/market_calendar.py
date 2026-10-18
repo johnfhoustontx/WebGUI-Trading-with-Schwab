@@ -293,7 +293,7 @@ _DEFAULTS = {
         # is ever wanted, is then one line rather than a reshaped table.
         "income": {"grace_min": 20, "morning": "08:52"},
         "finder_public": {"grace_min": 20, "warm": "09:08"},
-        # The Opening Scalp's morning chain capture (options_svc/scalp_chain):
+        # The Opening Scalp's morning call (options_svc/scalp_call):
         # 08:36, not 08:35 - the autoscan fetches :32-:35 and Schwab refuses the
         # first minute after the half hour.
         "scalp": {"grace_min": 20, "call": "08:36"},

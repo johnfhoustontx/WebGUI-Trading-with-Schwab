@@ -91,3 +91,8 @@ scorecard_days = 20
 [news]
 # Headlines shown beside each morning call.
 items = 5
+
+[context]
+# Shown beside each morning call and labelled as NOT in the probability: the
+# link to the premarket and prior-close reports.
+report_url = "https://neuralstrike.co/report.html"

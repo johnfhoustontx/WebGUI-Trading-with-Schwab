@@ -35,6 +35,7 @@ from services.options_svc import push_notify
 from services.options_svc import rate_trade
 # The rescue menu's own vocabulary: what a candidate IS, for rescue_apply.
 from services.options_svc import rescue
+from services.options_svc import scalp_call
 from services.options_svc import tracked
 # X (design 2026-09-22): the image card posted with each market report.
 from services.options_svc import report_card
@@ -141,6 +142,8 @@ def _is_stale_open(command) -> bool:
 #                   since moved on.
 # ``x_post`` / ``x_post_report`` -> a PUBLIC post on X: a replayed stream must
 #                   never re-post (the report dedup covers reports only).
+# ``scalp_refresh`` -> the Opening Scalp's bars and three 0DTE chains, about 30
+#                   Schwab calls, for a page that has long since moved on.
 # The paper-book and operator-state commands (audit AR-05): each one deletes
 # or overwrites something, and none was gated. A replayed ``paper_reset`` wiped
 # the account; a replayed ``set_autoclose`` put a toggle back to an old value.
@@ -149,7 +152,7 @@ def _is_stale_open(command) -> bool:
 # (``paper_create`` and ``income_open`` keep their own check, ``_is_stale_open``,
 # because they answer the page with a ``stale`` outcome.)
 _REPLAY_GUARDED = ("rescue_apply", "gamma_analyze", "calc_rate", "dossier",
-                   "x_post", "x_post_report",
+                   "x_post", "x_post_report", "scalp_refresh",
                    "paper_reset", "paper_close", "paper_delete",
                    "paper_delete_closed", "captured_close",
                    "set_autoclose", "set_manual_paper_lifecycle")
@@ -175,7 +178,7 @@ SAFE_LATE = frozenset({"refresh_paper", "paper_reload", "captured_reload",
 # writer takes ``paper_lock.BOOK_LOCK``.
 SLOW_LANE = frozenset({"rescan", "swing_scan", "gamma_analyze", "gamma_explain",
                        "gamma_history", "calc_rate", "dossier",
-                       "x_post", "x_post_report"})
+                       "x_post", "x_post_report", "scalp_refresh"})
 
 
 def _market_state(bus):
@@ -3441,6 +3444,8 @@ _STALE_WHY = {
     "calc_rate": "a replayed rating would re-spend its Schwab calls for a dialog "
                  "nobody has open",
     "dossier": "a replayed lookup must not re-spend its Schwab calls",
+    "scalp_refresh": "a replayed refresh must not re-fetch the scalp's bars and "
+                     "chains",
     "x_post": "a replayed command must not re-post to X",
     "x_post_report": "a replayed command must not re-post to X",
     "paper_reset": "a replayed reset would wipe the paper account",
@@ -3847,6 +3852,15 @@ def _cmd_dossier(bus, command):
                   event=dossier_event(symbol), ttl=DOSSIER_TTL_SEC)
 
 
+@_command("scalp_refresh")
+def _cmd_scalp_refresh(bus, command):
+    # The Opening Scalp page's refresh: rebuild and republish cache:options:scalp.
+    # Replay-guarded (see _REPLAY_GUARDED): a build re-fetches bars and chains.
+    # Slow lane: tens of seconds of fetches, and it touches no paper book. A
+    # probability already shown today is not recomputed (scalp_call freezes it).
+    scalp_call.run(bus)
+
+
 @_command("x_post")
 def _cmd_x_post(bus, command):
     # A public post on X. Replay-guarded (see _REPLAY_GUARDED).
@@ -3968,7 +3982,9 @@ def handle_command(bus, command) -> None:
     ``x_post_report`` (args report, mtime) → post a published market report to X
     with its image card, once per report and only while fresh (replay-guarded);
     ``x_post`` (args text/link/tags/image_b64) → one ad-hoc marketing post to X
-    (replay-guarded); else no-op.
+    (replay-guarded); ``scalp_refresh`` → rebuild the Opening Scalp's morning call
+    and publish ``cache:options:scalp`` (replay-guarded; before 08:35 or on a
+    closed day it republishes the last call and fetches nothing); else no-op.
 
     ⚠ This list IS the API the GUI codes against, and prose drifts:
     ``gamma_history``/``rescue_adhoc``/``sim_replay`` were implemented and missing
