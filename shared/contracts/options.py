@@ -1,4 +1,5 @@
 import datetime as _dt
+import math
 
 from typing import Literal
 
@@ -319,3 +320,54 @@ class PaperCreateResult(_MoneyView):
     symbol: str | None = None
     rungs: list = []
     message: str | None = None
+
+
+# ── the Opening Scalp view (cache:options:scalp) ─────────────────────────────
+# Not a money path, but the same write-side gate: the page reads a measured win
+# rate off this payload, so a rate that is not a unit number must never publish.
+
+def _finite_number(v, name: str):
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+        raise ValueError(f"{name} is not a finite number")
+    return v
+
+
+def _unit_number(v, name: str):
+    _finite_number(v, name)
+    if not 0.0 <= v <= 1.0:
+        raise ValueError(f"{name} is outside [0, 1]")
+    return v
+
+
+class ScalpView(_MoneyView):
+    """cache:options:scalp — the Opening Scalp page: each symbol's call and its
+    measured win rate per structure (roles), with the morning's inputs.
+
+    A rate that is not known is None ("not measured"), never 0.0 and never a
+    number that reads as a real one. Every field has a default, so a payload Redis
+    kept across a restart still validates."""
+    day: str | None = None
+    generated_at: str | None = None
+    state: Literal["call", "waiting", "closed", "error"] = "waiting"
+    symbols: dict[str, dict] = {}   # symbol -> direction, bucket, alignment, roles, …
+    context: dict = {}
+    scorecard: dict = {}
+
+    @field_validator("symbols", mode="after")
+    @classmethod
+    def _rates_are_unit_numbers(cls, symbols):
+        for entry in symbols.values():
+            if entry.get("alignment") is not None:
+                _finite_number(entry["alignment"], "alignment")
+            roles = entry.get("roles")
+            if roles is None:
+                continue
+            if not isinstance(roles, dict):
+                raise ValueError("roles is not a mapping")
+            for role in roles.values():
+                if not isinstance(role, dict):
+                    raise ValueError("a role is not a mapping")
+                for key in ("p", "lo", "hi", "p_base"):
+                    if role.get(key) is not None:
+                        _unit_number(role[key], key)
+        return symbols
