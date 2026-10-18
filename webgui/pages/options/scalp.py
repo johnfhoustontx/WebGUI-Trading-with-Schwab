@@ -333,7 +333,9 @@ def input_summary(rows):
     count = {v: sum(1 for r in rows if r["verdict"] == v)
              for v in (*_VERDICT.values(), ABSENT, NO_DIRECTION)}
     if count[NO_DIRECTION]:
-        parts = [f"{count[NO_DIRECTION]} readings, no opening direction to compare"]
+        n = count[NO_DIRECTION]
+        parts = [f"{n} {'reading' if n == 1 else 'readings'}, "
+                 "no opening direction to compare"]
         if count[ABSENT]:
             parts.append(f"{count[ABSENT]} absent")
         return " · ".join(parts)
@@ -492,7 +494,8 @@ def _symbol_card(view, name, sym):
         # inputs it has: they are how the operator sees WHY there is no call.
         inputs = input_rows(sym)
         if inputs:
-            with ui.expansion(f"Morning inputs · {input_summary(inputs)}", value=True)                     .classes(f"w-full {_t.LABEL}"):
+            title = f"Morning inputs · {input_summary(inputs)}"
+            with ui.expansion(title, value=True).classes(f"w-full {_t.LABEL}"):
                 grid = kit.table(input_columns(), inputs, numeric=("reading",))
                 grid.add_slot("body-cell-verdict", _VERDICT_SLOT)
 
@@ -535,7 +538,7 @@ def _scorecard_panel(scorecard):
     from pages import ui_kit as kit
 
     if _as_dict(scorecard):
-        return                                      # the graded table: Task 10
+        return   # the graded table: Task 10
     with ui.column().classes(_CARD):
         kit.section_title("Scorecard")
         ui.label(SCORECARD_EMPTY).classes(_SMALL)

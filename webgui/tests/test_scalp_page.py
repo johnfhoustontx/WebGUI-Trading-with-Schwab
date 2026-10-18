@@ -285,6 +285,20 @@ def test_the_inputs_title_does_not_count_unscored_readings_as_absent():
     assert "0 agree" not in text
 
 
+def test_the_unscored_count_is_singular_for_one_and_plural_for_more():
+    one = {"direction": None, "inputs": {"fut_asia": 0.05}, "agree": {}}
+    assert scalp.input_summary(scalp.input_rows(one)) \
+        == "1 reading, no opening direction to compare"
+    two = {"direction": None, "inputs": {"fut_asia": 0.05, "fut_gap": 0.1},
+           "agree": {}}
+    assert scalp.input_summary(scalp.input_rows(two)) \
+        == "2 readings, no opening direction to compare"
+    gap = {"direction": None, "inputs": {"fut_asia": 0.05, "fut_gap": None},
+           "agree": {}}
+    assert scalp.input_summary(scalp.input_rows(gap)) \
+        == "1 reading, no opening direction to compare · 1 absent"
+
+
 def test_a_symbol_with_a_direction_still_counts_a_missing_reading_as_absent():
     rows = scalp.input_rows(_symbol(1, inputs={"fut_asia": None},
                                     agree={"fut_asia": None}))
