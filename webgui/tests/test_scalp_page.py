@@ -405,3 +405,71 @@ def test_the_page_imports_no_engine_or_config_module():
         root = name.split(".")[0]
         assert root not in {"services", "scalp_config", "scalp_call"}, name
         assert "scalp_config" not in name and "sqlite3" not in name, name
+
+
+# ── the scorecard ────────────────────────────────────────────────────────────
+def _roles_card(**over):
+    base = {"n": 10, "win": 4, "loss": 5, "timeout": 1, "win_rate": 0.4,
+            "chain_n": 8, "chain_win_rate": 0.375}
+    return {r: dict(base, **over.get(r, {})) for r in ROLES}
+
+
+def _card(**extra):
+    card = {"days": 10,
+            "edge": {"days": 2, "wins": 1, "rate": 0.5, "p_base": 0.4125},
+            "caution": {"days": 3, "wins": 1, "rate": 1 / 3, "p_base": 0.55},
+            "roles": _roles_card()}
+    card.update(extra)
+    return card
+
+
+def _scorecard(**symbols):
+    return {"days": 10, "window": 20, "symbols": symbols or {"SPY": _card()}}
+
+
+def test_edge_line_counts_highlighted_days_beside_the_usual_rate():
+    line = scalp.edge_line(_card())
+    assert "won 1 of 2 highlighted days" in line
+    assert "(50.00%)" in line and "against 41.25% usually" in line
+
+
+def test_edge_line_with_no_highlighted_day_says_so_instead_of_a_rate():
+    line = scalp.edge_line(_card(edge={"days": 0, "wins": 0, "rate": None,
+                                       "p_base": None}))
+    assert line.startswith("Edge calls: none")
+    assert "%" not in line and "0 of 0" not in line
+    assert scalp.edge_line({}).startswith("Edge calls: none")
+
+
+def test_caution_line_sets_the_win_rate_beside_the_usual_rate():
+    line = scalp.caution_line(_card())
+    assert "marked to avoid won 1 of 3 times" in line
+    assert "(33.33%)" in line and "against 55.00% usually" in line
+    assert scalp.caution_line({}).startswith("Cautions: none")
+
+
+def test_scorecard_rows_keep_the_four_roles_in_order_with_counts_and_rates():
+    rows = scalp.scorecard_rows(_card(roles=_roles_card(
+        long_with={"chain_n": 0, "chain_win_rate": None})))
+    assert [r["id"] for r in rows] == list(ROLES)
+    first = rows[0]
+    assert (first["n"], first["win"], first["loss"], first["timeout"]) == (
+        "10", "4", "5", "1")
+    assert first["rate"] == "40.00%"
+    assert first["chain"] == fmt.NO_READING             # no chain grade: a dash, not 0%
+    assert rows[1]["chain"] == "37.50% of 8"
+    assert "with the open" in rows[0]["role"] and "against the open" in rows[1]["role"]
+
+
+def test_scorecard_symbols_and_heading_tolerate_the_empty_card():
+    assert scalp.scorecard_symbols({}) == [] and scalp.scorecard_symbols(None) == []
+    assert scalp.scorecard_symbols({"symbols": {"SPY": "junk"}}) == []
+    got = scalp.scorecard_symbols(_scorecard(SPY=_card(), QQQ=_card()))
+    assert [n for n, _ in got] == ["SPY", "QQQ"]
+    assert "10 days graded" in scalp.scorecard_heading(_scorecard())
+    assert "20 days" in scalp.scorecard_heading(_scorecard())
+
+
+def test_the_panel_keeps_the_empty_line_and_uses_the_kit_table():
+    assert "SCORECARD_EMPTY" in SRC and "No graded days yet." in SRC
+    assert "kit.table(scorecard_columns()" in SRC

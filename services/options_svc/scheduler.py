@@ -19,7 +19,7 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from services import _heartbeat
-from services.options_svc import compute, finder_public, flow_stream, handlers, scalp_call, scalp_fetch, scalp_study
+from services.options_svc import compute, finder_public, flow_stream, handlers, scalp_call, scalp_fetch, scalp_grade, scalp_study
 from shared import market_calendar as mc
 from shared import trade_mgmt as _trade_mgmt
 from shared.market_calendar import is_trading_day as _cal_is_trading_day
@@ -1091,10 +1091,10 @@ async def loop(bus):
             branches.append(("scalp", _scalp_branch()))
 
         # Opening Scalp bar top-up - the nightly price-history fetch into
-        # scalp.db, then the study rebuild over it. Latched BEFORE it runs,
-        # like income: a slow pass can only delay itself. Nothing is published;
-        # a failure leaves a degrade count and the next night starts from the
-        # store's latest bar.
+        # scalp.db, then the study rebuild over it, then the grading of each
+        # published call. Latched BEFORE it runs, like income: a slow pass can
+        # only delay itself. Nothing is published; a failure leaves a degrade
+        # count and the next night starts from the store's latest bar.
         try:
             bars_slot = scalp_bars_due(now, scalp_bars_ran)
             if bars_slot:
@@ -1122,6 +1122,15 @@ async def loop(bus):
                          counts["mornings"], counts["outcomes"], counts["seconds"])
             except Exception:
                 log.exception("scalp study rebuild degraded")
+            # Then every published call whose day's bars are now in is graded
+            # (idempotent; a day with a hole is left for the next night).
+            # Guarded on its own: a failed rebuild still grades.
+            try:
+                graded = await loop_.run_in_executor(None, scalp_grade.grade_pending)
+                log.info("scalp grading: %d day(s) tried, %d grade row(s) written",
+                         graded["days"], graded["rows"])
+            except Exception:
+                log.exception("scalp grading degraded")
 
         if bars_slot:
             branches.append(("scalp_bars", _scalp_bars_branch()))

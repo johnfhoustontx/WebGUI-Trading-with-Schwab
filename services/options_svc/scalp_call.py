@@ -38,6 +38,11 @@ Rules that keep the number honest, each from the design or a review ruling:
   distances are always the model's, at the chain's ATM volatility when it has
   one.
 
+``scorecard`` (every payload, whatever its state) is the graded record
+``scalp_score`` builds from ``grades``: how the highlighted calls and the cautions
+actually did over the last ``scorecard_days`` graded days, beside the base rates
+they were published with. ``scalp_grade`` writes it each night.
+
 Before 08:35 on a trading day the view is ``"waiting"``, on a closed day
 ``"closed"``; both keep the last published call under ``symbols`` (``call_day`` says
 which day) and fetch NOTHING. An unexpected failure publishes ``"error"`` the
@@ -61,7 +66,7 @@ from shared.contracts.options import ScalpView
 from shared.numeric import finite as _finite
 
 from services.options_svc import (scalp_chain, scalp_fetch, scalp_inputs, scalp_model,
-                                  scalp_sim, scalp_store, scalp_study)
+                                  scalp_score, scalp_sim, scalp_store, scalp_study)
 
 log = logging.getLogger("options_svc.scalp_call")
 
@@ -179,27 +184,39 @@ def _quoted(rows, strike) -> list:
     return []
 
 
-def _chain_value(slice_, day, structure, strikes):
-    """The slice's mid for the structure, or None when it lacks a strike or the
-    value is not positive. A spread is short mid - long mid with BOTH legs on
-    one root: on a third Friday a $SPX strike can list SPX and SPXW, and a pair
-    across them is two different contracts' prices, not a spread."""
+def chain_legs(slice_, day, structure, strikes):
+    """``(short, long_leg)`` contracts the slice quotes for the structure, or
+    None when it lacks a strike. ``long_leg`` is None for a long option (the
+    contract bought is ``short``, the first strike). A spread's two legs are on
+    ONE root: on a third Friday a $SPX strike can list SPX and SPXW, and a pair
+    across them is two different contracts' prices, not a spread. Grading reads
+    the same legs to imply a volatility."""
     if slice_ is None:
         return None
     rows = _expiry_rows(slice_, "callExpDateMap" if structure in _CALLS
                         else "putExpDateMap", day)
     first, second = strikes
-    v = None
     for short in _quoted(rows, first):
         if second is None:
-            v = _quote_mid(short)
-            break
+            return short, None
         long_leg = next((c for c in _quoted(rows, second)
                          if _root(c) == _root(short)), None)
         if long_leg is not None:
-            v = _quote_mid(short) - _quote_mid(long_leg)
-            break
-    return v if v is not None and v > 0 else None
+            return short, long_leg
+    return None
+
+
+def _chain_value(slice_, day, structure, strikes):
+    """The slice's mid for the structure, or None when it lacks a strike or the
+    value is not positive (a spread is short mid - long mid; see ``chain_legs``)."""
+    legs = chain_legs(slice_, day, structure, strikes)
+    if legs is None:
+        return None
+    short, long_leg = legs
+    v = _quote_mid(short)
+    if long_leg is not None:
+        v -= _quote_mid(long_leg)
+    return v if v > 0 else None
 
 
 def _chain_summary(slice_, iv, day):
@@ -313,6 +330,16 @@ def _verdict(entry) -> None:
     entry["note"] = None if better else NO_EDGE
 
 
+def _scorecard(db_path) -> dict:
+    """The graded record (``scalp_score``) every payload carries, or ``{}``: the
+    calls stay on screen when the record cannot be read."""
+    try:
+        return scalp_score.scorecard(db_path=db_path)
+    except Exception:
+        _degrade.degraded("options.scalp_scorecard")
+        return {}
+
+
 # ── build and publish ────────────────────────────────────────────────────────
 def build(day: _dt.date, now: _dt.datetime, db_path=None, client=None) -> dict:
     """The view's payload for ``day`` (``context`` is ``run``'s: it reads the bus).
@@ -364,7 +391,7 @@ def build(day: _dt.date, now: _dt.datetime, db_path=None, client=None) -> dict:
         symbols[symbol] = entry
     return {"day": iso, "call_day": iso, "generated_at": now.isoformat(),
             "state": "call", "symbols": symbols, "rules": _rules(), "context": {},
-            "scorecard": {}, "next_call": None}
+            "scorecard": _scorecard(db_path), "next_call": None}
 
 
 def _save_published(payload, db_path) -> None:
@@ -404,7 +431,8 @@ def _held(state, bus, day, now, db_path) -> dict:
         nxt = None
     return {"day": day.isoformat(), "call_day": call_day,
             "generated_at": now.isoformat(), "state": state, "symbols": symbols,
-            "context": context(bus, day), "scorecard": {}, "next_call": nxt}
+            "context": context(bus, day), "scorecard": _scorecard(db_path),
+            "next_call": nxt}
 
 
 def _valid(payload) -> bool:

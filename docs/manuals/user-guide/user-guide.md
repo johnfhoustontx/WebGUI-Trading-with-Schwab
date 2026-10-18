@@ -1218,6 +1218,18 @@ past mornings that looked like this one. **It does not place trades** — you de
 - Before 08:36, on a closed day, or after a failed refresh the page shows the **last
   call**, labelled with its day, under a line saying when the next call is due.
 - **Not in the probability** (the report link, headlines, flow alerts) is context only.
+- **Scorecard** (the last card) is the record of how the published calls actually did.
+  Each evening, once the day's bars are in, the app **grades** every trade it showed that
+  morning, from the call as published (never from a later rebuild). Per symbol, over the
+  last 20 graded days, it shows: **Edge calls**, how often the one highlighted trade won
+  beside the rate it usually wins (most symbols have none, and the line says so);
+  **Cautions**, how often a trade marked to avoid still won, beside its usual rate (the
+  caution is working when that is the lower number); and a table of all four trades with
+  their won / lost / timed-out counts and win rate. Two win rates sit side by side: the
+  **model's** (priced from the volatility index, the one the study uses) and the
+  **live chain's** (the same walk at the volatility the 08:36 chain implied; a dash when
+  no chain was captured that morning). A day whose bars are not all in yet is graded the
+  next evening. A handful of days says very little; read it as a record, not a verdict.
 
 > The win rates are **walk-forward tested** on stored data and the premiums are modelled,
 > so read them as how often a method like this has worked, not as a promise of fills.

@@ -424,6 +424,89 @@ def flow_columns():
     ]
 
 
+# ── the scorecard ────────────────────────────────────────────────────────────
+#: Role words for the scorecard: its rows span mornings of both directions, so a
+#: role cannot be named by one morning's contract.
+_ROLE_WORDS = {"long_with": "Long option, with the open",
+               "long_against": "Long option, against the open",
+               "credit_with": "Credit spread, with the open",
+               "credit_against": "Credit spread, against the open"}
+
+
+def _days_word(n):
+    f = _fmt.num(n)
+    return _fmt.NO_READING if f is None else f"{_fmt.plain(int(f))} {'day' if int(f) == 1 else 'days'}"
+
+
+def scorecard_symbols(scorecard):
+    """The scorecard's symbol cards, in the service's order, as ``[(symbol, card)]``;
+    an empty list for an empty, absent or malformed scorecard. PURE."""
+    cards = _as_dict(_as_dict(scorecard).get("symbols"))
+    return [(name, card) for name, card in cards.items() if isinstance(card, dict)]
+
+
+def scorecard_heading(scorecard):
+    """The panel's lead line: how many graded days, over how long a look-back."""
+    card = _as_dict(scorecard)
+    return (f"{_days_word(card.get('days'))} graded, looking back at most "
+            f"{_days_word(card.get('window'))} per symbol")
+
+
+def edge_line(card):
+    """The edge calls' record. PURE. With no highlighted day it says so rather than
+    printing a rate: there was nothing to be right or wrong about."""
+    edge = _as_dict(_as_dict(card).get("edge"))
+    days = _fmt.num(edge.get("days"))
+    if not days:
+        return "Edge calls: none. No role was highlighted on a graded day."
+    return (f"Edge calls: the highlighted role won {_count(edge.get('wins'))} of "
+            f"{_count(days)} highlighted {'day' if days == 1 else 'days'} "
+            f"({_rate(edge.get('rate'))}), against {_rate(edge.get('p_base'))} usually.")
+
+
+def caution_line(card):
+    """The cautions' record: how often a role we warned about still won, beside the
+    rate it usually wins. A warning is working when the first is below the second."""
+    caution = _as_dict(_as_dict(card).get("caution"))
+    days = _fmt.num(caution.get("days"))
+    if not days:
+        return "Cautions: none. No role was marked to avoid on a graded day."
+    return (f"Cautions: a role marked to avoid won {_count(caution.get('wins'))} of "
+            f"{_count(days)} {'time' if days == 1 else 'times'} "
+            f"({_rate(caution.get('rate'))}), against {_rate(caution.get('p_base'))} usually.")
+
+
+def scorecard_rows(card):
+    """One row per role, in the fixed order: the model's win / loss / timeout counts
+    and win rate, and the chain-priced win rate where the chain gave one. PURE."""
+    roles = _as_dict(_as_dict(card).get("roles"))
+    rows = []
+    for name in ROLE_ORDER:
+        role = roles.get(name)
+        if not isinstance(role, dict):
+            continue
+        chain_n = _fmt.num(role.get("chain_n"))
+        rows.append({
+            "id": name, "role": _ROLE_WORDS[name], "n": _count(role.get("n")),
+            "win": _count(role.get("win")), "loss": _count(role.get("loss")),
+            "timeout": _count(role.get("timeout")), "rate": _rate(role.get("win_rate")),
+            "chain": (_fmt.NO_READING if not chain_n else
+                      f"{_rate(role.get('chain_win_rate'))} of {_count(chain_n)}")})
+    return rows
+
+
+def scorecard_columns():
+    return [
+        {"name": "role", "label": "Trade", "field": "role", "align": "left"},
+        {"name": "n", "label": "Days", "field": "n"},
+        {"name": "win", "label": "Won", "field": "win"},
+        {"name": "loss", "label": "Lost", "field": "loss"},
+        {"name": "timeout", "label": "Timed out", "field": "timeout"},
+        {"name": "rate", "label": "Win rate (model)", "field": "rate"},
+        {"name": "chain", "label": "Win rate (live chain)", "field": "chain"},
+    ]
+
+
 # ── widgets ──────────────────────────────────────────────────────────────────
 _TRADE_SLOT = r'''
   <q-td :props="props">
@@ -531,17 +614,30 @@ def _context_panel(context):
 
 
 def _scorecard_panel(scorecard):
-    """The graded record. Empty or absent reads as one line; Task 10's table
-    arrives here once the service grades days."""
+    """The graded record: per symbol the edge calls, the cautions and every role,
+    each beside the base rate it was published with. One line when nothing has
+    been graded yet."""
     from nicegui import ui
 
     from pages import ui_kit as kit
 
-    if _as_dict(scorecard):
-        return   # the graded table: Task 10
+    cards = scorecard_symbols(scorecard)
     with ui.column().classes(_CARD):
         kit.section_title("Scorecard")
-        ui.label(SCORECARD_EMPTY).classes(_SMALL)
+        if not cards:
+            ui.label(SCORECARD_EMPTY).classes(_SMALL)
+            return
+        ui.label(scorecard_heading(scorecard)).classes(_SMALL)
+        ui.label("A win is the trade reaching its target before its stop inside the time "
+                 "limit, as modelled from the volatility index; the live-chain column "
+                 "repeats the walk at the volatility the 08:36 chain implied. Neither "
+                 "is a fill.").classes(_SMALL)
+        for name, card in cards:
+            ui.label(f"{name} · {_days_word(card.get('days'))} graded")                 .classes(f"text-base font-semibold {_t.LABEL}")
+            ui.label(edge_line(card)).classes("text-sm")
+            ui.label(caution_line(card)).classes("text-sm")
+            kit.table(scorecard_columns(), scorecard_rows(card),
+                      numeric=("n", "win", "loss", "timeout", "rate", "chain"))
 
 
 # ── the page ─────────────────────────────────────────────────────────────────

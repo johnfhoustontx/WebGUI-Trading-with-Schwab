@@ -15,6 +15,11 @@ pooled-symbol rates, each labelled DIAGNOSTIC (design §5.2: never the number
 shown); and the bias check of the 5-minute "both levels in one bar is a loss"
 rule against the same trades on 1-minute bars.
 
+A closing "Volatility calibration" section reads ``iv_calibration`` (written by
+the nightly grading, one row per published morning that had a usable chain): the
+median of the chain's at-the-money volatility over the morning's volatility
+reading, per symbol - what ``iv_scale`` is meant to approximate.
+
 Deliberately absent: any P&L average. A win or loss row stores the target or stop
 LEVEL, not a fill, so averaging it would print a number the data cannot support.
 """
@@ -22,6 +27,7 @@ import datetime as _dt
 import json
 import pathlib
 import sqlite3
+import statistics
 import sys
 from collections import Counter
 
@@ -82,6 +88,31 @@ def _load(conn):
     for r in conn.execute("SELECT symbol, role, bucket, json FROM verdicts"):
         verdicts[(r["symbol"], r["role"], r["bucket"])] = json.loads(r["json"])
     return outcomes, mornings, verdicts
+
+
+def _load_calibration(conn) -> dict:
+    """``{symbol: [ratio, ...]}`` from ``iv_calibration``; empty when the table is
+    not there yet (a store older than the grading) or has no rows."""
+    out = {}
+    try:
+        for sym, ratio in conn.execute("SELECT symbol, ratio FROM iv_calibration"):
+            out.setdefault(sym, []).append(ratio)
+    except sqlite3.OperationalError:
+        return {}
+    return out
+
+
+def _calibration_section(calibration) -> list:
+    lines = ["## Volatility calibration", ""]
+    if not calibration:
+        return lines + ["No chain captures yet.", ""]
+    lines += ["The chain's at-the-money volatility divided by the morning's volatility "
+              f"reading (the index the model prices with), against the current "
+              f"`iv_scale` of x{scalp_config.iv_scale():g}. A median above 1 means the "
+              "model prices the options cheaper than the chain did.", ""]
+    rows = [[sym, str(len(ratios)), _fixed(statistics.median(ratios))]
+            for sym, ratios in sorted(calibration.items())]
+    return lines + _table(["Symbol", "days", "median ratio"], rows) + [""]
 
 
 def _symbol_section(sym, outcomes, mornings, verdicts, current) -> list:
@@ -270,6 +301,7 @@ def render(db_path) -> str:
     conn = _open_read_only(db_path)
     try:
         outcomes, mornings, verdicts = _load(conn)
+        calibration = _load_calibration(conn)
     finally:
         conn.close()
     current = round(float(scalp_config.iv_scale()), 6)
@@ -298,6 +330,7 @@ def render(db_path) -> str:
         lines += _symbol_section(sym, outcomes, mornings, verdicts, current)
     lines += _pooled_section(outcomes, current)
     lines += _bias_section(outcomes, current)
+    lines += _calibration_section(calibration)
     return "\n".join(lines)
 
 

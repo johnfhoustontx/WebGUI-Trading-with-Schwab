@@ -1096,6 +1096,15 @@ labels the day it belongs to.
 
 **Not in the probability** (headlines, flow alerts and the report link) is shown
 for context only. None of it was measured or fed into the rates.
+
+**Scorecard** is how the published calls actually did. Each evening the app grades
+every trade it showed that morning, from the call as published. Per symbol, over the
+last 20 graded days: **Edge calls** (how often the highlighted trade won, beside its
+usual rate; most symbols have none), **Cautions** (how often a trade marked to avoid
+still won, beside its usual rate: lower is the caution working) and a table of all four
+trades. Win rates are given twice: by the **model** (priced from the volatility index)
+and by the **live chain** (the volatility the 08:36 chain implied; a dash if no chain
+was captured). A few days is a small sample.
 """,
     "/news": """
 **Market News — the simple version**

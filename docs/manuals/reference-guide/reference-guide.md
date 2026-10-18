@@ -1169,6 +1169,7 @@ There are no trade buttons: you read it and decide.
 | Cadence | Built once at **08:36 CT** (`[slots.scalp]`); the study is rebuilt at 16:20 CT (`[slots.scalp_bars]`) |
 | Tunables | `config/scalp.toml` — the target and stop, the time stop, strikes, buckets, minimum samples |
 | Refresh | The **Refresh** button enqueues `scalp_refresh` on `cmd:options` |
+| Grading | Each night after the study rebuild (16:20 CT, `[slots.scalp_bars]`) every published call is graded into `grades`; the **Scorecard** reads the last `[study] scorecard_days` (20) graded days |
 | Retention | A published call is kept for grading; the page shows the last call when the market is closed |
 
 ### Reading the screen
@@ -1214,6 +1215,28 @@ or high bucket.
 **Not in the probability.** The report link, index headlines and today's flow alerts
 on these symbols are shown for context only; none of them was measured or fed into
 the rates.
+
+**Scorecard.** The last card is the graded record, per symbol, over the last 20
+graded days (`scorecard_days`). Grading uses only the call **as published** — its
+strikes, entry and highlight/avoid marks are frozen at 08:36 — and walks every one of
+the four trades along that day's five-minute bars, the highlighted or not. A trade that
+has not had all of its 60 minutes of bars is left for the next night. Three parts:
+
+- **Edge calls** — on the days a trade was highlighted, how often it won, beside the
+  average usual rate it was shown with. With no highlighted day it says so instead of
+  printing a rate.
+- **Cautions** — each time a trade was marked to avoid, whether it still won, beside its
+  usual rate. This is the check on the one signal the study found: a caution is working
+  when the win rate is below the usual one.
+- **The table** — all four trades: days, won, lost, timed out, and win rate **by the
+  model** (priced from the volatility index, as the study does) and **by the live
+  chain** (the same walk at the volatility implied by the 08:36 chain's quote for the
+  contract bought, or the short leg of a spread; a dash where no chain was captured).
+
+Both are modelled results, not fills, and a few days is a small sample. The nightly
+grading also records, per day, the chain's at-the-money volatility against the morning's
+volatility reading; the study report (`tools/scalp_study_report.py`) prints the median
+of that ratio per symbol as its **Volatility calibration**.
 
 **Walk-forward tested** means each past day was scored only from the days before it,
 so the rate shown is what the method would have said at the time, not a fit to the

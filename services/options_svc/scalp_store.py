@@ -6,7 +6,11 @@ Later tasks add their own tables through ``connect`` (the schema is
 ``CREATE TABLE IF NOT EXISTS``, run on every connection): the study's
 ``outcomes``, ``mornings`` and ``verdicts`` are written only by
 ``scalp_study.rebuild``; ``calls`` (each published morning call, frozen as shown)
-only by ``scalp_call``, and ``rebuild`` never touches it.
+only by ``scalp_call``, and ``rebuild`` never touches it. ``grades`` (each
+published role's result, once the day's bars are in) and ``iv_calibration`` (the
+chain's at-the-money volatility over the morning's reading) are written only by
+``scalp_grade`` and, like ``calls``, are never rebuilt: they are records of what
+was shown, not part of the study.
 
 Pure: ``sqlite3``, ``zlib``, ``json`` and ``repo_paths`` only; it imports nothing
 from ``compute`` and calls no network. Every function takes ``db_path=None`` and
@@ -74,6 +78,26 @@ CREATE TABLE IF NOT EXISTS calls (
     day    TEXT NOT NULL,
     symbol TEXT NOT NULL,
     json   TEXT NOT NULL,
+    PRIMARY KEY (day, symbol)
+);
+CREATE TABLE IF NOT EXISTS grades (
+    day          TEXT    NOT NULL,
+    symbol       TEXT    NOT NULL,
+    role         TEXT    NOT NULL,
+    structure    TEXT    NOT NULL,
+    model_result TEXT,
+    chain_result TEXT,
+    highlighted  INTEGER NOT NULL,
+    avoided      INTEGER NOT NULL,
+    p_base       REAL,
+    PRIMARY KEY (day, symbol, role)
+);
+CREATE TABLE IF NOT EXISTS iv_calibration (
+    day         TEXT NOT NULL,
+    symbol      TEXT NOT NULL,
+    atm_iv      REAL NOT NULL,
+    vol_reading REAL NOT NULL,
+    ratio       REAL NOT NULL,
     PRIMARY KEY (day, symbol)
 );
 """

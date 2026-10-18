@@ -678,6 +678,20 @@ def test_scalp_bars_branch_rebuilds_the_study_after_the_top_up_independently():
     assert "run_in_executor(None, scalp_study.rebuild)" in seg
 
 
+def test_scalp_bars_branch_grades_after_the_rebuild_independently():
+    import inspect
+
+    src = inspect.getsource(scheduler.loop)
+    seg = src.split("async def _scalp_bars_branch", 1)[1].split("if bars_slot:", 1)[0]
+    # top_up -> rebuild -> grade, each in its OWN try so one failing never hides
+    # the others (a failed rebuild still grades the days whose bars are in).
+    assert (seg.index("scalp_fetch.top_up") < seg.index("scalp_study.rebuild")
+            < seg.index("scalp_grade.grade_pending"))
+    between = seg.split("scalp_study.rebuild", 1)[1].split("scalp_grade.grade_pending", 1)[0]
+    assert "except Exception" in between and "try:" in between
+    assert "run_in_executor(None, scalp_grade.grade_pending)" in seg
+
+
 def test_scalp_bars_slot_comes_after_the_flow_delta_report_and_collection_stop():
     # The slot is configured in sessions.toml; pin the ordering its comment argues.
     (name, t), = scheduler.mc.slot_times("scalp_bars").items()
