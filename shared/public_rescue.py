@@ -303,9 +303,13 @@ def compute_command(raw_spec, today=None):
     return {"type": COMPUTE_TYPE, "args": {"spec": spec}}
 
 
-def request_key(command) -> str | None:
+def request_key(command, today=None) -> str | None:
     """The answer key a command's outcome is written under, or None for a
-    command this module would not have built."""
+    command this module would not have built.
+
+    ``today`` is the date the spec is re-validated against (``clean_spec``
+    refuses a past expiry), as in ``public_tools.request_key``; None means the
+    real date. A test pins it so a fixed expiry does not expire under it."""
     if not isinstance(command, dict):
         return None
     args = command.get("args") if isinstance(command.get("args"), dict) else {}
@@ -313,7 +317,7 @@ def request_key(command) -> str | None:
         symbol = clean_symbol(args.get("symbol"))
         return None if symbol is None else ladder_key(symbol, args.get("expiry"))
     if command.get("type") == COMPUTE_TYPE:
-        spec = clean_spec(args.get("spec"))
+        spec = clean_spec(args.get("spec"), today)
         return None if spec is None else spec_key(spec)
     return None
 

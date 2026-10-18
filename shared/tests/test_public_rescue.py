@@ -194,10 +194,19 @@ def test_compute_command_carries_only_the_normalized_trade():
 
 def test_request_key_matches_what_each_side_computes():
     cmd = pr.compute_command(_pcs(), TODAY)
-    assert pr.request_key(cmd) == pr.spec_key(cmd["args"]["spec"])
+    assert pr.request_key(cmd, TODAY) == pr.spec_key(cmd["args"]["spec"])
     assert pr.request_key(pr.ladder_command("SPY")) == pr.ladder_key("SPY")
     assert pr.request_key({"type": "rescue_apply", "args": {}}) is None
     assert pr.request_key("x") is None
+
+
+def test_request_key_revalidates_against_the_day_it_is_given():
+    # The spec is re-cleaned before hashing, so an expiry past its grace by
+    # ``today`` gets no key. A fixed EXP stays valid on the pinned TODAY.
+    cmd = pr.compute_command(_pcs(), TODAY)
+    assert pr.request_key(cmd, TODAY) is not None
+    after = dt.date.fromisoformat(EXP) + dt.timedelta(days=pr._PAST_GRACE_DAYS + 1)
+    assert pr.request_key(cmd, after) is None
 
 
 def test_every_outcome_has_words():

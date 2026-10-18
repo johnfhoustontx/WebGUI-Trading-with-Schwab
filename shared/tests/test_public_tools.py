@@ -160,10 +160,10 @@ def test_a_math_kind_is_refused_by_the_tools_builder_and_vice_versa():
 
 
 def test_request_keys_are_content_addressed_and_say_nothing():
-    a = pt.request_key(pt.math_command(_price(), TODAY))
-    b = pt.request_key(pt.math_command(_price(symbol=" SPY ", junk=2), TODAY))
+    a = pt.request_key(pt.math_command(_price(), TODAY), TODAY)
+    b = pt.request_key(pt.math_command(_price(symbol=" SPY ", junk=2), TODAY), TODAY)
     assert a == b and pt.is_key(a) and "SPY" not in a.upper()
-    assert a != pt.request_key(pt.math_command(_price(iv=0.2), TODAY))
+    assert a != pt.request_key(pt.math_command(_price(iv=0.2), TODAY), TODAY)
 
 
 def test_rate_structure_key_ignores_price_and_size():
