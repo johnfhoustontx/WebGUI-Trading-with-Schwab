@@ -68,7 +68,7 @@ mornings it was not fitted to.
   the busiest window of the day for the proxy — CLAUDE.md "Every service shares
   the proxy's 5 requests a second").
 
-## 3. Trade definitions (the operator's, with Claude's reading of the spreads)
+## 3. Trade definitions (the operator's)
 
 | Structure | Contract | Win | Loss |
 |---|---|---|---|
@@ -88,10 +88,9 @@ mornings it was not fitted to.
   at or below spot. So a PCS's short put sits at or just below spot, a CCS's short
   call at or just above. `otm_steps = 0`, configurable to one step further out.
 - **Spread width (my call):** $SPX 5, SPY 1, QQQ 1 — config.
-- **The spread win/loss rule is Claude's reading** of "±50% for target and stop"
-  applied to a credit: win at half the credit kept, stop at a loss of half the
-  credit. The operator saw this in the brainstorm playback and did not object; it
-  is still worth a confirming glance.
+- **The spread win/loss rule, confirmed by the operator 2026-10-18:** win when
+  the spread can be bought back for half the credit (50% kept); stop when the
+  spread is worth 1.5× the credit (a loss of half the credit).
 
 ## 4. Data — what exists (measured 2026-10-18 on prod)
 
