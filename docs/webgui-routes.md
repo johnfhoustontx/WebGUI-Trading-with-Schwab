@@ -753,6 +753,31 @@ The page reads two more views and probes all three versions in ONE
   printed (inside its segment or beside the bar), and every bar's label and the
   hover text open with `≈`.
 
+## `/options/scalp`
+
+Opening Scalp (**NEW 2026-10-18**; design [`plans/2026-10-18-opening-scalp-design.md`](plans/2026-10-18-opening-scalp-design.md), the study's verdict [`reference/opening-scalp-study.md`](reference/opening-scalp-study.md)). A **main-menu (left-rail) item under MARKETS**, after Flow Alerts (`main.OPTIONS_RAIL` and `NAV_SECTIONS`; the page is `pages/options/scalp.py`). It is not an Options tab-strip entry and **not a public screen**: it is not in `live_screens`, and it has no trade control (this app is paper-only, and the page places nothing).
+
+**What it renders.** A morning read, once per trading day, for `$SPX`, SPY and QQQ: which way the first five-minute bar went, how many of the morning's premarket inputs agree with it, and for each of four same-day (0DTE) structures how often it reached +50% before -50% within 60 minutes on past mornings that looked like this one.
+- **One card per symbol.** A header (the symbol, **Opened up / Opened down**, and which call this is), the headline, the alignment line (the bucket and the share of inputs that took a side and agreed), a seven-column table of the four trades, a one-line statement of how it was priced (the live chain, or the model when the chain failed), and the **Morning inputs** expansion (each reading and whether it **Agrees**, **Disagrees**, sits in the dead zone, is **Absent**, or has **No opening direction** to compare with).
+- **The four trades** are named by that morning's contract: an up open is Long call, Long put, Put credit spread, Call credit spread, a down open the mirror, each marked *with* or *against* the opening move. Columns: Trade, **Usual win rate** (the base rate over every stored morning, the headline number), **This morning's rate** (the bucket's rate, its Wilson 95% interval under it), Samples (bucket / all), Strikes, Entry (a debit for a long option, a credit for a spread, with **live quote** or **modelled**), and the underlying points to the target and the stop.
+- **Not in the probability** (report link, index headlines from `cache:news:feed`, today's flow alerts on the three symbols since 08:30) and the **Scorecard** (see below) close the page. Headlines and alert text reach the page only through `ui.label` / `ui.link`; a link is followed only if it is a plain http(s) address (`news_view.safe_href`).
+- **Scorecard.** Per symbol over the last `[study] scorecard_days` graded days: **Edge calls**, **Cautions** (each beside the published base rate) and a table of all four trades with won / lost / timed-out counts, the win rate by the model and by the live chain. One line, "No graded days yet.", when `grades` is empty.
+
+**The one view it reads.** `cache:options:scalp` (`VIEW = "options:scalp"`), one `bus_client.read` per repaint through `watch_view`. No other view, no engine import, no config module of the service. The payload is validated on write by `ScalpView` (see the API Reference).
+
+**States** (`view["state"]`, with `state_line`). `call`: a call was built; no line. `waiting` (a trading day before 08:35 CT): "Next call at 08:36 CT". `closed` (a weekend or holiday): "Market closed - next call <day> at 08:36 CT". `error` (an unexpected failure while building): "The last refresh failed - showing the last call", counted as a degrade. In all three the **last published call stays on screen**, and every card says which day's it is (`call_label`): "Today's call, made 08:36 CT", or "Call of <date> - not today's call", so yesterday's call is never read as today's.
+
+**Refresh.** The header button (shown only where `shell.may_enqueue()`) enqueues `{"type": "scalp_refresh"}` on `cmd:options` and busies itself until the view moves. It is replay-guarded and runs on the slow lane. It is not a recompute: see the first two quirks.
+
+**Quirks that matter.**
+- **A published call is frozen.** `scalp_call.run` saves a symbol's call in `scalp.db` `calls` only after it has passed `ScalpView` and been written to the bus; a later build of the same day reuses it whole. A Refresh therefore only fills in a symbol that has no published call yet (a failed capture, a missing bar), and the grader reads the same frozen entry.
+- **No new call after 09:35 CT** (entry 08:35 plus `time_stop_min`): past that the trade it would describe is over, and the 16:20 rebuild already holds the day's own outcome. A symbol with no call by then reads "missed the call window".
+- **"No measured edge" is the usual answer, not an empty state.** The stored verdict is two-sided. `highlight` is the role with an edge **above** its base rate (the highest rate of those); a role with an edge **below** its base rate is in `avoid` and is marked "Caution: measured to lose more often than usual", which is a reason to stay out and never a reason to take the other side. A row with neither mark is never styled as a recommendation, and with no highlight the headline names no role.
+- **A flat open (under `open_dead_zone_pct`) or a missing opening bar** gives that symbol no direction and no roles, a note saying why, and its inputs where there are any. The other symbols are still called.
+- **A failed 08:36 chain fetch** still publishes: strikes and premiums come from the model (`$VIX` / `$VXN` times `iv_scale`), `chain` is null and the row says **modelled**.
+- **A win is a model's win.** The rates behind every row are from the study's modelled premiums; the live chain gives only the Entry column and the point distances (and the second win-rate column of the scorecard). Neither is a fill.
+- **A half day is not graded**, and a day whose bars are not all in is graded the next evening. Grades are write-once.
+
 ## `/news`
 
 **Market News (NEW 2026-09-26; v2 the same day; redesigned to the operator's mockup

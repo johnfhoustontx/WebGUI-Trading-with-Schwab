@@ -4,7 +4,56 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-17 (**Approve a sign-in from the phone; "keep me signed in" lasts 30 days; the Schwab sign-in from a phone.**)
+**Last updated:** 2026-10-18 (**Opening Scalp: a measured morning call for $SPX, SPY and QQQ, and a study that says there is no usable edge.**)
+
+- **Asked for by the user:** "an app with a basic interface that is a scalping
+  strategy for options for just $SPX, SPY, QQQ", reading the premarket and giving
+  the highest-probability direction after the first five minutes of the session.
+  Design and plan: `docs/plans/2026-10-18-opening-scalp-{design,plan}.md`. The
+  study's verdict, with its full report: `docs/reference/opening-scalp-study.md`.
+- **The verdict, in one line: no usable edge.** The opening direction carries
+  almost no information about the next hour; one cell of 36 passes at every
+  volatility multiplier and it is a negative signal (do not fade the open on a
+  low-agreement morning), not a trade. The page therefore says "No measured
+  edge" on most mornings, and that is the honest answer. Premiums in the study
+  are modelled, not observed; the sample is one regime (March to October 2026).
+- **Built in phases, smallest usable slice first** (history was rolling off
+  Schwab's servers, so the store came before everything):
+  1. *Bar store, backfill, nightly top-up, 08:36 chain capture* (`b518a64`,
+     `3f273ee`, `8880253`, `ceead84`, `16055fc`): `config/scalp.toml`,
+     `services/options_svc/data/scalp.db`, `tools/scalp_backfill.py`, and the
+     `[slots.scalp]` (08:36) / `[slots.scalp_bars]` (16:20) scheduler branches.
+     Dated history goes through the proxy's existing `/passthrough`: no proxy
+     change, so this work does not restrict a promote's timing.
+  2. *The study* (`22fa688`, `57bc84e`, `d1c6b06`, `d8b5e11`, `6a7a8fd`): a
+     Black-Scholes trade simulator along the real bars, the morning's measured
+     inputs, outcomes with a walk-forward verdict per bucket, and
+     `tools/scalp_study_report.py`. Written up before any page was built.
+  3. *The morning call* (`dcf8a07`, `a013753`, `efc4bbb`): the `ScalpView`
+     contract, `cache:options:scalp`, the `scalp_refresh` command (slow lane,
+     replay-guarded), calls frozen as published in the `calls` table.
+  4. *The page* (`1e39f84`, `9ba4fbd`, `3bfb008`): `/options/scalp`, "Opening
+     Scalp", in the MARKETS rail after Flow Alerts; a flat open names no
+     direction rather than showing absent readings.
+  5. *Grading and the scorecard* (`8f09887`, `dcadaf8`): the nightly branch now
+     runs top-up, then study rebuild, then grading; grades are write-once; the
+     chain-implied volatility is solved at the spot the chain was quoted
+     against.
+- The new `numbers` field kind (a list of numbers) in Settings → Configuration
+  carries `[study] iv_scales`.
+- Docs: User Guide, Reference Guide, Technical Reference (new *Opening Scalp*
+  chapter and the cadence rows), API Reference (the view, the command, the
+  tables), Glossary, `page_help.py`, `docs/webgui-routes.md`, and CLAUDE.md's
+  folder map (`scalp.db` is kept forever and is in the backup).
+- **Live checks still owed** (nothing here was observed on a trading morning):
+  the first 08:36 CT call on a trading morning (`cache:options:scalp` published
+  with three symbols, the chain captured for each, the page rendering it, and
+  the proxy's access log showing no refused call in 08:30 to 08:40); and the
+  first nightly run after it at 16:20 CT (top-up, rebuild, then grades written
+  for the morning's calls and `iv_calibration` rows, which the study report
+  prints as its Volatility calibration).
+
+**Prior —** 2026-10-17 (**Approve a sign-in from the phone; "keep me signed in" lasts 30 days; the Schwab sign-in from a phone.**)
 
 - **Asked for by the user:** the 6-digit code at sign-in replaced by a
   two-digit number match on their Android phone, through the ntfy app. Design

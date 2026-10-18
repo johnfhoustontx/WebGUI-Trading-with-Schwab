@@ -38,6 +38,7 @@ keys that feed it. Menu order matches the rail.
 | **Paper Ledger** | `options_svc` | `cache:options:paper_trades`, `:paper_analyze`, `:paper_create` (the Paper button's answer, read by Market Scanner and Strategy Finder) |
 | **Paper Account** | `options_svc` | `cache:options:paper_account`, `:paper_analytics` |
 | **Rescue** | `options_svc` | `cache:options:rescue:<position_id>`, `:rescue_summary` |
+| **Opening Scalp** | `options_svc` | `cache:options:scalp` |
 | **Trade Analyzer** | `trade_svc` :8213 | `cache:trade:analysis`, `:deepdive`, `:deepdive_query` |
 | **Portfolio** | `portfolio_svc` :8212 | `cache:portfolio:positions` |
 | **EOD Report** | none — pure Tier-1 reader | aggregates the `options:*` keys |
@@ -240,11 +241,11 @@ Each command stream has a thread of its own for its blocking read and its
 handler; scheduled work shares a pool of `[pool] workers` threads
 (`config/services.toml`). On `cmd:options` the long, self-contained commands
 (`rescan`, `swing_scan`, `gamma_analyze`, `gamma_explain`, `gamma_history`,
-`calc_rate`, `dossier`, `x_post`, `x_post_report`) run on a second, serial
+`calc_rate`, `dossier`, `x_post`, `x_post_report`, `scalp_refresh`) run on a second, serial
 **slow lane**, so a paper, reprice or rescue command never waits behind one.
 
 The consumer drops a command older than `[age] replay_max_sec` (900 s) unless the
-service lists it as safe to run late; the options service also refuses thirteen
+service lists it as safe to run late; the options service also refuses fourteen
 side-effect commands older than `side_effect_max_sec` (180 s). A dropped
 `paper_create` or `x_post` is answered on its result view.
 
@@ -276,7 +277,8 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 ETH-eligible symbols), Paper Portfolio entry + manage (hourly at the top of the
 hour, 09:00–14:00 CT, no 15:00 run — also refreshes the Paper Ledger), captured-signal auto-manage (5-min
 slots, 08:00–15:15 CT, when auto-close is on), header tick (each 30 s,
-skip-unchanged).
+skip-unchanged), the Opening Scalp's morning call (08:36 CT, `[slots.scalp]`) and its
+nightly pass (16:20 CT, `[slots.scalp_bars]`: bar top-up, study rebuild, grading).
 
 **GEX collection and the raw feed.** Each one-minute poll is
 `gex_collector.fetch_minute` (the chains, through the proxy) then `derive_minute`
@@ -307,6 +309,7 @@ one-minute GEX collection and the raw feed* has the diagrams and fields.
 | `paper_analyze` | `{trade_id}` | `cache:options:paper_analyze` |
 | `x_post` | `{text, tags[], link, image_b64?}` — an ad-hoc marketing post from the `/x` page. The image is refused over 5 MB or when it does not decode (logged, nothing posted). Replay-guarded | `cache:options:x_log` |
 | `x_post_report` | `{report, mtime}` — enqueued by market_svc when the published market report changes; `report` is the `cache:market:summary` payload, `mtime` the epoch seconds of `latest.html`. Posted once per report (`report_date`, `slot`, `as_of`, `headline`); a report older than `x.report_max_age_min` (45), or of unknown age, is skipped. Replay-guarded | `cache:options:x_log` + `cache:options:x_reports` |
+| `scalp_refresh` | — | `cache:options:scalp` — runs the Opening Scalp's `scalp_call.run` now: before 08:35 CT or on a closed day it republishes the last call under a `waiting` / `closed` state and fetches nothing. A call already published today is reused whole, so it only fills in a symbol with none, and no new call is built after entry + `time_stop_min` (09:35 CT). Replay-guarded and on the slow lane (it can fetch bars and three chains, about 30 Schwab calls) |
 | `captured_reload` | — | `cache:options:captured` |
 | `captured_reprice` | — | `cache:options:captured` + `cache:options:captured_flags` |
 | `captured_close` | `{signal_id, exit_val, reason}` | `cache:options:captured` |
@@ -463,6 +466,81 @@ version and fires no event), under a lock, at the end of every `refresh_paper_tr
 `cache:options:paper_analyze`) and the paper-manage cycle — even when that view's
 own publish raises, and once at service start. A failure is a degrade
 (`options.ledger_caps`), never a raise. No TTL.
+
+**`cache:options:scalp`** (event `events:options:scalp`) — the Opening Scalp page's
+only view. Validated on write by `shared.contracts.options.ScalpView`; one that fails is
+not published and is counted as a degrade (`options.scalp_view`). Published at 08:36 CT,
+on a `scalp_refresh`, and (as `waiting` / `closed` / `error`, carrying the last call) by
+every other run.
+
+Top level: `{day, call_day, generated_at, state, symbols, rules, context, scorecard,
+next_call}`.
+- `state` is `call` (a call was built), `waiting` (a trading day before 08:35 CT),
+  `closed` (not a trading day) or `error` (an unexpected failure). In the last three,
+  `symbols` is the **last published call** and `call_day` says which day's it is:
+  compare it with `day` before reading a call as today's. `rules` (the target, stop,
+  time stop, strikes, volatility multiplier and minimum sample the numbers were made
+  under) is present only on `call`.
+- `next_call` is the next scheduled call, ISO with the Central offset: today's slot while `waiting`, otherwise the next trading day's.
+- `context` is `{report_url, news[], flow[]}`: the reports link, index headlines
+  (`{title, url, source, published_at, tickers}`) and today's flow alerts on the scalp
+  symbols since 08:30 (`{ts, symbol, type, side, text}`). **Not in the probability.**
+  Both feeds are private views, so this view is read only by the private app.
+- `scorecard` is `{days, window, symbols: {SYMBOL: {days, edge, caution, roles}}}`
+  from the graded record, or `{}` when nothing has been graded. `edge` and `caution`
+  are `{days, wins, rate, p_base}` (`rate` and `p_base` are `null` with no days);
+  `roles` is keyed by role, each `{n, win, loss, timeout, win_rate, chain_n,
+  chain_win_rate}`. A win is the model's result; the chain's is beside it.
+
+`symbols` is keyed by the symbol (`$SPX`, `SPY`, `QQQ`). An entry:
+
+| Key | Meaning |
+|---|---|
+| `direction` | `1` opened up, `-1` down, `null` for none (a flat open, no opening bar, a failed build) |
+| `bucket`, `alignment` | `low` / `mid` / `high`, and the 0–1 share of inputs that took a side and agreed; `null` when nobody voted |
+| `entry_spot`, `entry_ts` | the close of the 08:30–08:35 bar and the 08:35 boundary (epoch seconds) |
+| `inputs`, `agree` | each input's reading and its verdict: `1` agrees, `-1` disagrees, `0` dead zone, `null` absent. `open_range_ratio` is in `inputs` only |
+| `vol_at_entry`, `vol_source` | the volatility index read (as a fraction) and which one |
+| `chain` | `{spot, atm_iv, expiry}` of the 08:36 chain, or `null` when it failed |
+| `sigma`, `sigma_source` | the volatility the strikes and points were priced at, and `chain` or `model` |
+| `roles` | keyed `long_with`, `long_against`, `credit_with`, `credit_against`; see below. Empty when the symbol has no call |
+| `highlight`, `avoid` | the role with an edge **above** its base rate (or `null`), and the roles with an edge **below** it |
+| `note`, `points_note`, `made_at` | why there is no call or no edge (`no measured edge`, `no opening bar yet`, `opened flat — no direction`, `missed the call window`, `the call could not be built`), why there are no points, and when the call was made |
+
+A role is `{structure, p, lo, hi, n, p_base, n_base, edge, strikes, entry_value,
+entry_source, win_points, loss_points}`: `structure` is that morning's contract
+(`long_call`, `long_put`, `pcs`, `ccs`); `p`, `lo`, `hi` the bucket's win rate and its
+Wilson 95% interval, `n` the bucket's sample, `p_base` / `n_base` the all-mornings
+rate; `edge` the study's verdict (Brier below the base rate at every multiplier); and
+`strikes` (`[strike]` or `[short, long]`), `entry_value` (a debit for a long option, a
+credit for a spread), `entry_source` (`chain` or `model`) and the underlying points to
+the target and the stop (`win_points`, `loss_points`; a put's target is negative). A
+rate that is not known is `null`, never `0.0`; `ScalpView` rejects a `p`, `lo`, `hi` or
+`p_base` outside 0..1. Every field has a default, so a payload Redis kept across a
+restart still validates.
+
+**`scalp.db`** (`services/options_svc/data/scalp.db`, `repo_paths.SCALP_DB`) is the
+Opening Scalp's store. It is **kept forever and in the nightly backup**: it holds price
+history Schwab no longer serves. All times are epoch seconds (a bar's START); a
+function takes `db_path=None`, resolved when it is called.
+
+| Table | Key | Holds | Written by |
+|---|---|---|---|
+| `bars` | `(symbol, interval, ts)` | open / high / low / close / volume, `interval` 1 or 5 | `scalp_fetch` (backfill and the nightly top-up) |
+| `chain_slices` | `(day, symbol)` | the 08:36 0DTE chain cut to the strikes near the money, a zlib JSON blob | `scalp_chain` |
+| `outcomes` | `(day, symbol, iv_scale, role, interval)` | the modelled result (`win` / `loss` / `timeout` / `skip`), minutes, entry value, `both_in_bar` | `scalp_study.rebuild` |
+| `mornings` | `(day, symbol)` | the measured morning, or the reason it was skipped | `scalp_study.rebuild` |
+| `verdicts` | `(symbol, role, bucket)` | the Brier scores per multiplier and the stored `edge` | `scalp_study.rebuild` |
+| `calls` | `(day, symbol)` | each published call, frozen as shown | `scalp_call` |
+| `grades` | `(day, symbol, role)` | `model_result`, `chain_result`, `highlighted`, `avoided`, `p_base` | `scalp_grade` |
+| `iv_calibration` | `(day, symbol)` | the chain's at-the-money volatility, the morning's reading and their ratio | `scalp_grade` |
+
+`outcomes`, `mornings` and `verdicts` are deleted and rewritten together in one
+transaction every night, so a reader sees the old study or the new one. `calls`,
+`grades` and `iv_calibration` are records of what was shown and are **never rebuilt**.
+Dated price history is fetched through the proxy's `/passthrough` (`endpoint=/pricehistory`):
+a tool that calls it by hand (`tools/scalp_backfill.py`) must have the stack's `.env`
+loaded, or every request is a 401 (`PROXY_SHARED_SECRET`).
 
 ## Portfolio service — :8212
 
@@ -1118,6 +1196,7 @@ cache:options:gex_status       events:options:gex_status
 cache:options:expected_move    events:options:expected_move
 cache:options:rescue:<position_id>   events:options:rescue:<position_id>   (RescueAdvisory contract)
 cache:options:rescue_summary   events:options:rescue_summary
+cache:options:scalp           events:options:scalp         (Opening Scalp; ScalpView contract)
 cmd:options
 ```
 

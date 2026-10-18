@@ -1166,11 +1166,11 @@ There are no trade buttons: you read it and decide.
 | | |
 |---|---|
 | Service | `options_svc` (:8211), `cache:options:scalp` |
-| Cadence | Built once at **08:36 CT** (`[slots.scalp]`); the study is rebuilt at 16:20 CT (`[slots.scalp_bars]`) |
+| Cadence | Built once at **08:36 CT** (`[slots.scalp]`); every evening at 16:20 CT (`[slots.scalp_bars]`) the day's bars are added, the study is rebuilt over them, and the day's calls are graded |
 | Tunables | `config/scalp.toml` — the target and stop, the time stop, strikes, buckets, minimum samples |
-| Refresh | The **Refresh** button enqueues `scalp_refresh` on `cmd:options` |
+| Refresh | The **Refresh** button enqueues `scalp_refresh` on `cmd:options`. A call already published today is kept as published, and no new call is built after 09:35 CT |
 | Grading | Each night after the study rebuild (16:20 CT, `[slots.scalp_bars]`) every published call is graded into `grades`; the **Scorecard** reads the last `[study] scorecard_days` (20) graded days |
-| Retention | A published call is kept for grading; the page shows the last call when the market is closed |
+| Retention | A published call is kept for grading; the page shows the last call when the market is closed. The bar store (`scalp.db`) is kept forever and backed up: it holds price history Schwab no longer serves |
 
 ### Reading the screen
 
@@ -1188,9 +1188,11 @@ often it has won over all past mornings.
 **The four trades** are named by that morning's contract. After an up open: **Long
 call** and **Put credit spread** are *with* the move, **Long put** and **Call
 credit spread** *against* it; a down open mirrors this. A **win** is the trade
-reaching +50% before −50% of its entry price inside 60 minutes, valued from the live
-chain at 08:36 where it has the strike (the row says **live quote**) and from a
-model otherwise (**modelled**).
+reaching +50% before −50% of its entry price inside 60 minutes. The win rates are
+always **modelled** (priced from the volatility index, with the target and stop
+measured along the real five-minute bars); the **Entry** column alone is taken from
+the live 08:36 chain where it quoted the strike (the row says **live quote**) and from
+the model otherwise (**modelled**).
 
 **Columns.** Trade · **Usual win rate** · **This morning's rate** (the win rate on
 past mornings in the same agreement bucket, with its 95% interval underneath) ·

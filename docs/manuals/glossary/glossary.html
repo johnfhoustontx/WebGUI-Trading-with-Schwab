@@ -46,6 +46,11 @@ tr:nth-child(even) td { background: var(--soft); }
 blockquote { margin: 1em 0; padding: 6px 16px; border-left: 4px solid var(--accent);
              background: var(--accent-soft); color: #2a3a52; border-radius: 0 6px 6px 0; }
 blockquote p { margin: 0.3em 0; }
+figure.diagram { margin: 1.4em 0; padding: 14px; border: 1px solid var(--line);
+  border-radius: 8px; background: #fff; }
+figure.diagram svg { display: block; max-width: 100%; height: auto; }
+figure.diagram figcaption { margin-top: 8px; text-align: center; font-size: 0.85rem;
+  color: var(--muted); font-style: italic; }
 hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 .toc { background: #fff; border: 1px solid var(--line); border-radius: 10px;
        padding: 12px 22px; margin: 22px 0 8px; }
@@ -66,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Options Glossary</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-04</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-18</div>
 </div>
 <h1 id="options-trading-glossary">Options Trading Glossary</h1>
 <p>Plain-English definitions of the terms you'll run into trading and analyzing options.</p>
@@ -277,6 +282,10 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <p><strong>Arbitrage-free surface</strong> — A fitted volatility surface with no butterfly arbitrage (negative implied densities across strikes) and no calendar arbitrage (vol decreasing in total variance across time). Raw interpolation of market IVs frequently violates both, which produces garbage greeks downstream.</p>
 <p><strong>Finite-difference greeks</strong> — Computing greeks by re-pricing with a small bump to an input instead of using an analytic formula. Slower, but the only option for models without closed-form derivatives, and a useful sanity check against analytic values.</p>
 <p><strong>Interest rate and dividend inputs</strong> — The quiet source of most pricing discrepancies. Wrong rate, wrong dividend assumption, or wrong day-count convention will shift your IVs and greeks enough to invalidate comparisons against vendor data.</p>
+<p><strong>Base rate</strong> — How often something happens when you know nothing else: the share of <em>all</em> past cases that won. A call is only worth showing if it beats the base rate. If a trade wins half the time overall, a "high-confidence" setup that also wins half the time has told you nothing. The Opening Scalp page shows it as the <strong>Usual win rate</strong>.</p>
+<p><strong>Walk-forward</strong> — A way of testing a rule honestly. Each past day is scored using <em>only the days before it</em>, the way the rule would have worked at the time, instead of fitting the rule to the whole history and then admiring how well it fits. A rule that looks good only when it has already seen the answer is not a rule.</p>
+<p><strong>Brier score</strong> — A score for probability forecasts: the average of the squared gap between the forecast (a number from 0 to 1) and what happened (0 or 1). Lower is better. A forecaster who always says "50%" scores 0.25; confident wrong forecasts are punished hard. The Opening Scalp study compares a bucket's Brier score with the base rate's on the same days: it counts as an edge only if it is lower.</p>
+<p><strong>Alignment</strong> — Of the morning's inputs that took a side, the share that agree with the direction the market opened. Inputs that were too small to take a side, or missing, do not vote. The Opening Scalp page sorts mornings into a low, mid or high alignment bucket.</p>
 <hr />
 <h2 id="9-quick-reference">9. Quick Reference</h2>
 <table>

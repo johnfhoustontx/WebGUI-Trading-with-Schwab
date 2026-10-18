@@ -236,6 +236,7 @@ open migration item. Full design:
 | `trade-analyzer/`      | `src/analysis` — fundamentals, recommendation, scoring, sector. | engines only (Tk UI dropped) |
 | `portfolio-analyzer/`  | `src/` — sector breakdown, vs-sector perf, live streaming.  | engines only (Tk UI dropped) |
 | `services/`            | The seven Tier-2 services — `sentiment`/`options`/`portfolio`/`trade`/`market`/`news`/`blog` `_svc` (:8210–8213, 8215–8217) — plus `_scaffold`/`_degrade`/`_heartbeat`. **`news_svc`** and **`blog_svc`** are the two with no copied engine and no Schwab or Claude call: `news_svc` is RSS/EDGAR and economic-calendar adapters → `services/news_svc/data/news.db` → eight views; `blog_svc` cleans an uploaded document into `services/blog_svc/data/` and is the only writer of the site's blog files. **`trade_svc` runs a scheduler** (since 2026-09-26) with one job, the daily watchlist dividend pull through the proxy into `shared/dividends.py`'s store; `news_svc` opens that store read-only and never calls the proxy. | backend          |
+| `services/options_svc/data/scalp.db` | The Opening Scalp's store: price bars, the 08:36 chain slices, the study, the published calls and their grades. **Kept forever and in the nightly backup**: it holds price history Schwab no longer serves (1-minute about 6 weeks, 5-minute about 7 months), so never add it to `DB_EXCLUDE`. | backend |
 | `shared/`              | `analysis_lib/` (technical · sector_analysis · config) + secret templates/values. | library          |
 | `tools/`               | `check_env.py`, `db_admin.py` maintenance utilities.        | CLI              |
 | `webgui/`              | **NEW** NiceGUI multi-page front-end. Shell + Options section built. | the new UI, :8500 |
@@ -422,7 +423,7 @@ maps, and anything whose change needs code to follow it.
   `scanner` (selection floors and, since 2026-10-04, `[selection]` strike rules),
   `trade_mgmt`, `paper`, `symbols`, `sectors`, `marketdata`, `services`,
   `flow_alerts`, `notify`, `commissions`, `theme`, `news`, `edge`, `market_read`,
-  `blog`, `gamma_heat`, `listed_stocks`, `login_push`, and the public
+  `blog`, `gamma_heat`, `listed_stocks`, `login_push`, `scalp`, and the public
   tools' files.
 - `shared/market_calendar.py` is the single source for the NYSE calendar and the
   session/window predicates. Add no holiday literal or window constant elsewhere.
@@ -515,6 +516,9 @@ is in git; `--install` also arms the timers). Start order: Redis (a system unit)
   `change_pct`, `high`, `low`, `volume`), not Schwab's envelope: reading
   `q["quote"][…]` yields `None` for every symbol with no error. A `0.00%` cell is
   not proof of a flat tape; only an omitted symbol is a real absence.
+- A tool that calls the proxy's `/passthrough` by hand (`tools/scalp_backfill.py`)
+  needs the stack's `.env` loaded (`set -a; . ./.env; set +a`): without
+  `PROXY_SHARED_SECRET` every request is a 401 and nothing is written.
 - Data flows one way: `tools/snapshot_from_prod.py`, run from dev, copies prod's
   stores and never `cmd:*` (a stream is a queue dev would execute).
 - Three suppressions and where each is enforced: notifications
@@ -568,7 +572,7 @@ a worktree needs its absolute path.
 
 ## Options, paper books and trade selection
 
-Detail: [options engine invariants](docs/reference/options-engine-invariants.md). **Read it before changing the paper engine, Rescue, the scanner's gates or settlement**: every rule below has an incident and a measurement behind it there.
+Detail: [options engine invariants](docs/reference/options-engine-invariants.md). **Read it before changing the paper engine, Rescue, the scanner's gates or settlement**: every rule below has an incident and a measurement behind it there. The Opening Scalp's measured verdict (no usable edge) is in [the study](docs/reference/opening-scalp-study.md).
 
 **The two paper books.**
 - An equity lot is cash CONVERTED, never a buying-power reservation: a lot never

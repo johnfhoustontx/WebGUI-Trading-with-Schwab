@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-17</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-18</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -115,6 +115,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#the-two-hedging-flow-alerts">The two hedging-flow alerts</a></li>
 </ul>
 </li>
+<li><a href="#opening-scalp">Opening Scalp</a></li>
 <li><a href="#market-news">Market News</a></li>
 <li><a href="#market-dashboard">Market Dashboard</a></li>
 <li><a href="#sentiment">Sentiment</a></li>
@@ -1587,6 +1588,54 @@ model)</strong>:</p>
 </ul>
 <p>Either switch applies to alerts fired <strong>after</strong> the change: each alert carries the
 setting it was fired under, so the rows already on today's list keep theirs.</p>
+<h2 id="opening-scalp">Opening Scalp</h2>
+<p><strong>Route:</strong> <code>/options/scalp</code>. A rail item under <strong>MARKETS</strong>, after Flow Alerts.</p>
+<p>A morning read for <code>$SPX</code>, SPY and QQQ, published at <strong>08:36 CT</strong> once the first
+five minutes are in. For each symbol it shows which way the market opened, how many of
+your premarket inputs agree, and how often four same-day (0DTE) scalps have worked on
+past mornings that looked like this one. <strong>It does not place trades</strong> — you decide.</p>
+<ul>
+<li><strong>Most mornings the answer is "No measured edge".</strong> That is normal, not an error: the
+  page then shows each trade's <strong>usual win rate</strong> and nothing more. Treat it as "nothing
+  here beats chance today".</li>
+<li>The four trades are named by that morning's contract (an up open: <strong>Long call</strong>, <strong>Long
+  put</strong>, <strong>Put credit spread</strong>, <strong>Call credit spread</strong>; a down open mirrors it), each
+  marked as <em>with</em> or <em>against</em> the opening move. A <strong>win</strong> means +50% before −50% within
+  60 minutes. The win rates are always <strong>modelled</strong> (priced from the volatility index);
+  the <strong>Entry</strong> column shows the live 08:36 quote where the chain had the strike and says
+  <strong>modelled</strong> where it did not.</li>
+<li><strong>Measured edge</strong> marks the single trade whose bucket rate is reliably better than
+  usual (rare). <strong>Caution: measured to lose more often than usual</strong> marks a bucket that
+  is reliably worse — a reason to stay out, not to take the other side.</li>
+<li><strong>Morning inputs</strong> lists each premarket reading and whether it <strong>agrees</strong>,
+  <strong>disagrees</strong>, sits in the <strong>dead zone</strong>, or is <strong>absent</strong>. An absent input is never a
+  disagreement.</li>
+<li><strong>Refresh</strong> asks the service to rebuild the call. A call already shown today stays as
+  published; Refresh only fills in a symbol that has none yet, and no new call is built
+  after <strong>09:35 CT</strong>, an hour after the 08:35 entry, because the trade it would describe
+  is over by then.</li>
+<li>Before 08:36, on a closed day, or after a failed refresh the page shows the <strong>last
+  call</strong>, labelled with its day, under a line saying when the next call is due.</li>
+<li><strong>Not in the probability</strong> (the report link, headlines, flow alerts) is context only.</li>
+<li><strong>Scorecard</strong> (the last card) is the record of how the published calls actually did.
+  Each evening, once the day's bars are in, the app <strong>grades</strong> every trade it showed that
+  morning, from the call as published (never from a later rebuild). Per symbol, over the
+  last 20 graded days, it shows: <strong>Edge calls</strong>, how often the one highlighted trade won
+  beside the rate it usually wins (most symbols have none, and the line says so);
+  <strong>Cautions</strong>, how often a trade marked to avoid still won, beside its usual rate (the
+  caution is working when that is the lower number); and a table of all four trades with
+  their won / lost / timed-out counts and win rate. Two win rates sit side by side: the
+  <strong>model's</strong> (priced from the volatility index, the one the study uses) and the
+  <strong>live chain's</strong> (the same walk at the volatility the 08:36 chain implied; a dash when
+  no chain was captured that morning). A day whose bars are not all in yet is graded the
+  next evening. A call made on a shortened session (a half day) is not graded, because the
+  model's settlement time would be wrong. A grade is written once and never recomputed. A
+  handful of days says very little; read it as a record, not a verdict.</li>
+</ul>
+<blockquote>
+<p>The win rates are <strong>walk-forward tested</strong> on stored data and the premiums are modelled,
+so read them as how often a method like this has worked, not as a promise of fills.</p>
+</blockquote>
 <h2 id="market-news">Market News</h2>
 <p><strong>Route:</strong> <code>/news</code>. A rail item under <strong>MARKETS</strong>, directly below Flow Alerts.</p>
 <p>Two columns: the <strong>headlines</strong> and their filters on the left (two thirds of the
@@ -3838,6 +3887,10 @@ a file on the server — in one place, grouped by what they do:</p>
 <tr>
 <td><strong>Sector map</strong></td>
 <td>Which sector each symbol counts toward for the sector cap</td>
+</tr>
+<tr>
+<td><strong>Opening Scalp</strong></td>
+<td>The symbols it calls and the bars it keeps, strike steps and spread widths, the target, stop and time stop, the volatility multipliers the study tries (a list of numbers), the cut points between low, mid and high agreement, and the scorecard window. The 08:36 call and 16:20 nightly pass times are under <em>Market hours &amp; schedules</em></td>
 </tr>
 <tr>
 <td><strong>Commissions</strong></td>

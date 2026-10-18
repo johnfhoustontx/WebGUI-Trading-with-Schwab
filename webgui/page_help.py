@@ -1072,9 +1072,9 @@ buttons, and you decide.
   **Long call** and **Put credit spread** are *with* the move, **Long put** and
   **Call credit spread** *against* it. A down open mirrors this.
 - **Win** means the trade reached **+50% before −50%** of its entry price inside
-  **60 minutes**. Premiums are **modelled** from the volatility index (or taken
-  from the live chain at 08:36, and the row says which), so a win is a model's
-  win, not a fill.
+  **60 minutes**. The win rates are **modelled** from the volatility index, so a
+  win is a model's win, not a fill; only the **Entry** column is taken from the
+  live chain at 08:36 where it quoted the strike (the row says which).
 - **Usual win rate** is how often that trade won over **all** past mornings. **This
   morning's rate** is how often it won on past mornings in the **same agreement
   bucket**, with its **interval** (95%) and the number of **samples**. The rates
@@ -1090,7 +1090,7 @@ measured to lose more often than usual — a reason to stay out, never a signal 
 take the other side.
 
 A call stays as published all day; **Refresh** only fills in a symbol that has
-no call yet, and no new call is built after the first hour. Before 08:36, on a
+no call yet, and no new call is built after **09:35 CT**. Before 08:36, on a
 closed day, or after a failed refresh the page keeps the last call on screen and
 labels the day it belongs to.
 
@@ -1106,6 +1106,7 @@ trades. Win rates are given twice: by the **model** (priced from the volatility 
 and by the **live chain** (the volatility the 08:36 chain implied; a dash if no chain
 was captured). A few days is a small sample. A call made on a shortened session
 (a half day) is not graded, because the model's settlement time would be wrong.
+A grade is written once and never recomputed.
 """,
     "/news": """
 **Market News — the simple version**

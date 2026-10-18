@@ -1205,7 +1205,9 @@ past mornings that looked like this one. **It does not place trades** — you de
 - The four trades are named by that morning's contract (an up open: **Long call**, **Long
   put**, **Put credit spread**, **Call credit spread**; a down open mirrors it), each
   marked as *with* or *against* the opening move. A **win** means +50% before −50% within
-  60 minutes, on modelled or live-chain premiums.
+  60 minutes. The win rates are always **modelled** (priced from the volatility index);
+  the **Entry** column shows the live 08:36 quote where the chain had the strike and says
+  **modelled** where it did not.
 - **Measured edge** marks the single trade whose bucket rate is reliably better than
   usual (rare). **Caution: measured to lose more often than usual** marks a bucket that
   is reliably worse — a reason to stay out, not to take the other side.
@@ -1214,7 +1216,8 @@ past mornings that looked like this one. **It does not place trades** — you de
   disagreement.
 - **Refresh** asks the service to rebuild the call. A call already shown today stays as
   published; Refresh only fills in a symbol that has none yet, and no new call is built
-  after the first hour of trading.
+  after **09:35 CT**, an hour after the 08:35 entry, because the trade it would describe
+  is over by then.
 - Before 08:36, on a closed day, or after a failed refresh the page shows the **last
   call**, labelled with its day, under a line saying when the next call is due.
 - **Not in the probability** (the report link, headlines, flow alerts) is context only.
@@ -1230,7 +1233,8 @@ past mornings that looked like this one. **It does not place trades** — you de
   **live chain's** (the same walk at the volatility the 08:36 chain implied; a dash when
   no chain was captured that morning). A day whose bars are not all in yet is graded the
   next evening. A call made on a shortened session (a half day) is not graded, because the
-  model's settlement time would be wrong. A handful of days says very little; read it as a record, not a verdict.
+  model's settlement time would be wrong. A grade is written once and never recomputed. A
+  handful of days says very little; read it as a record, not a verdict.
 
 > The win rates are **walk-forward tested** on stored data and the premiums are modelled,
 > so read them as how often a method like this has worked, not as a promise of fills.
@@ -3236,6 +3240,7 @@ a file on the server — in one place, grouped by what they do:
 | **Symbols & watchlists** | What the gamma collector polls, the BIG10 basket, the Net Prem groups |
 | **Local market data** | Whether the app may reuse market data it has already fetched from Schwab instead of asking again, how old that data may be, and how often watchlist symbols are fetched. See the note below |
 | **Sector map** | Which sector each symbol counts toward for the sector cap |
+| **Opening Scalp** | The symbols it calls and the bars it keeps, strike steps and spread widths, the target, stop and time stop, the volatility multipliers the study tries (a list of numbers), the cut points between low, mid and high agreement, and the scorecard window. The 08:36 call and 16:20 nightly pass times are under *Market hours & schedules* |
 | **Commissions** | Schwab's per-contract rates |
 | **Ports / Environments** | Shown for reference only |
 

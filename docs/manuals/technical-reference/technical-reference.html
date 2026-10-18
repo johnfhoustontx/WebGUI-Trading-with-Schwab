@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-17</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-18</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -180,6 +180,18 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#hedging-flow-model-hiro">Hedging-flow model (HIRO)</a></li>
 <li><a href="#market-read">Market read</a></li>
 <li><a href="#bought-sold-estimate-on-flow-alerts">Bought / sold estimate on flow alerts</a></li>
+</ul>
+</li>
+<li><a href="#opening-scalp">Opening Scalp</a><ul>
+<li><a href="#the-trade-being-measured">The trade being measured</a></li>
+<li><a href="#four-roles-not-four-structures">Four roles, not four structures</a></li>
+<li><a href="#the-direction-and-the-inputs">The direction and the inputs</a></li>
+<li><a href="#alignment-and-its-buckets">Alignment and its buckets</a></li>
+<li><a href="#modelled-premiums">Modelled premiums</a></li>
+<li><a href="#the-walk-forward-verdict">The walk-forward verdict</a></li>
+<li><a href="#the-morning-call">The morning call</a></li>
+<li><a href="#grading-and-the-scorecard">Grading and the scorecard</a></li>
+<li><a href="#cadences">Cadences</a></li>
 </ul>
 </li>
 <li><a href="#rescue-tested-trades">Rescue Tested Trades</a><ul>
@@ -322,6 +334,10 @@ would mean writing the same formulas out four times and letting the copies drift
 <tr>
 <td><strong>Rescue</strong></td>
 <td><em>Rescue Tested Trades</em></td>
+</tr>
+<tr>
+<td><strong>Opening Scalp</strong></td>
+<td><em>Opening Scalp</em> — the direction, the alignment buckets, the modelled outcomes, the walk-forward verdict, the 08:36 call and the grading · <em>Black-Scholes &amp; the Simulator</em> (the pricer it reuses)</td>
 </tr>
 <tr>
 <td><strong>Trade Analyzer</strong></td>
@@ -5624,6 +5640,290 @@ phone push, a chime, the Desk's speech, or any ranking.</p>
   open interest appears.</li>
 </ul>
 <hr />
+<h1 id="opening-scalp">Opening Scalp</h1>
+<p><strong>Files:</strong> <code>services/options_svc/scalp_fetch.py</code> (bars), <code>scalp_store.py</code> (<code>scalp.db</code>),
+<code>scalp_inputs.py</code> (the morning), <code>scalp_sim.py</code> (one trade), <code>scalp_model.py</code>
+(buckets and the verdict), <code>scalp_study.py</code> (the nightly rebuild), <code>scalp_chain.py</code>
+(the 08:36 chain), <code>scalp_call.py</code> (the view), <code>scalp_grade.py</code> and <code>scalp_score.py</code>
+(the record); <code>shared/scalp_config.py</code> reads <code>config/scalp.toml</code>. None imports
+<code>compute.py</code>. Design: <code>docs/plans/2026-10-18-opening-scalp-design.md</code>; the first
+verdict, with its full report: <code>docs/reference/opening-scalp-study.md</code>.</p>
+<p>The page answers one question per symbol (<code>$SPX</code>, SPY, QQQ) at 08:36 CT: <em>given how
+this morning set up, how often has a same-day (0DTE) scalp in each direction reached
++50% on its premium before -50%, within an hour?</em> It is a <strong>measured</strong> answer: a
+probability is shown as a call only if it beat the plain base rate on mornings it was
+not fitted to, and the study's first verdict was that it almost never does.</p>
+<h2 id="the-trade-being-measured">The trade being measured</h2>
+<p>Entry is the close of the 08:30-08:35 bar. The exit is the first of: the <strong>target</strong>
+(<code>[trade] target_pct</code>, 50), the <strong>stop</strong> (<code>stop_pct</code>, 50) or the <strong>time stop</strong>
+(<code>time_stop_min</code>, 60 minutes after entry). A trade that reaches neither level is a
+<strong>timeout</strong>, its own outcome, never folded into wins.</p>
+<table>
+<thead>
+<tr>
+<th>Structure</th>
+<th>Contract</th>
+<th>Wins when</th>
+<th>Loses when</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Long call / long put</td>
+<td>0DTE, the nearest strike at or beyond the money for that contract (<code>otm_steps</code> 0)</td>
+<td>its value is entry x 1.5</td>
+<td>its value is entry x 0.5</td>
+</tr>
+<tr>
+<td>Put credit spread</td>
+<td>short put at or just below spot, long put <code>[width]</code> below</td>
+<td>the cost to close falls to half the credit</td>
+<td>the cost to close rises to 1.5 x the credit</td>
+</tr>
+<tr>
+<td>Call credit spread</td>
+<td>the mirror on calls</td>
+<td>same</td>
+<td>same</td>
+</tr>
+</tbody>
+</table>
+<p>Strikes use the symbol's <code>[strike_step]</code> ($SPX 5, SPY 1, QQQ 1): a call at or above
+spot, a put at or below it, so a spot exactly on a strike uses that strike.</p>
+<h2 id="four-roles-not-four-structures">Four roles, not four structures</h2>
+<p>Whether the market opened up or down, the study pools both into one sample by naming
+each trade <strong>relative to the opening move</strong> (the first bar's direction):</p>
+<table>
+<thead>
+<tr>
+<th>Role</th>
+<th>Up morning</th>
+<th>Down morning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Long, with the open</td>
+<td>long call</td>
+<td>long put</td>
+</tr>
+<tr>
+<td>Long, against the open</td>
+<td>long put</td>
+<td>long call</td>
+</tr>
+<tr>
+<td>Credit, with the open</td>
+<td>put credit spread</td>
+<td>call credit spread</td>
+</tr>
+<tr>
+<td>Credit, against the open</td>
+<td>call credit spread</td>
+<td>put credit spread</td>
+</tr>
+</tbody>
+</table>
+<p>This doubles each sample (about 140 mornings per symbol rather than 70 per
+direction). Up-only and down-only rates are printed in the study report as a
+diagnostic and never shown on the page. The three symbols are <strong>not</strong> pooled: they
+share one tape, so pooling would triple the count without tripling the evidence.</p>
+<h2 id="the-direction-and-the-inputs">The direction and the inputs</h2>
+<p><strong>Direction.</strong> The first 5-minute bar's move, <code>(close - open) / open</code>, is up or down
+only if it is at least <code>[direction] open_dead_zone_pct</code> (0.03%). A flatter open names
+no direction, the symbol gets no call, and the others are still called. A missing
+opening bar is the same: no direction, never a guess.</p>
+<p><strong>Inputs.</strong> The operator's premarket routine, made measurable. All premarket and
+overnight inputs read 5-minute bars, in Central time.</p>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Measured as</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Asia, Europe</td>
+<td>the futures' return from the first bar after the <strong>prior trading day's</strong> 16:00 to 02:00, and from 02:00 to 08:30 (so on a Monday Asia starts on Sunday evening, not at Friday's close)</td>
+</tr>
+<tr>
+<td>Gap</td>
+<td>the futures' last overnight close against the prior day's 14:55 bar close</td>
+</tr>
+<tr>
+<td>Range position</td>
+<td>where that last close sits between the overnight low and high</td>
+</tr>
+<tr>
+<td>Sector funds</td>
+<td>each fund's premarket return from 03:00 against the prior close (QQQ: IGV, SMH, EWY, XLK; $SPX and SPY: XLE, XLK, XLV)</td>
+</tr>
+<tr>
+<td>Volatility</td>
+<td><code>$VIX</code> premarket change; a fall agrees with up (an inverted input)</td>
+</tr>
+<tr>
+<td>Opening bar</td>
+<td>where it closed inside its own range; whether it broke the premarket high or low (the index has no premarket, so $SPX reads the futures' opening bar)</td>
+</tr>
+<tr>
+<td>Opening range</td>
+<td>the bar's range against the mean of the prior 20 days' (information only; never votes)</td>
+</tr>
+</tbody>
+</table>
+<p>The futures are /ES for $SPX and SPY and /NQ for QQQ. <strong>A missing input is absent</strong>
+(<code>None</code>), never zero and never "agrees".</p>
+<h2 id="alignment-and-its-buckets">Alignment and its buckets</h2>
+<p>Each input takes a side: a move beyond <code>[direction] dead_zone_pct</code> (0.05%) is up or
+down; a position within <code>dead_zone_frac</code> (0.1) of the middle of its range is neither.
+Multiplied by the morning's direction, an input <strong>agrees</strong> (+1), <strong>disagrees</strong> (-1),
+sits in the <strong>dead zone</strong> (0), or is <strong>absent</strong>. The <strong>alignment</strong> is</p>
+<p><code>agreeing / (agreeing + disagreeing)</code></p>
+<p>over the inputs that took a side; dead-zone and absent inputs do not vote, and a
+morning where nobody voted has no alignment (so no bucket and no bucket rate). The
+<strong>buckets</strong> are cut at <code>[direction] buckets</code> (0.4, 0.7): <strong>low</strong> below 0.4, <strong>mid</strong>
+from 0.4 up to 0.7, <strong>high</strong> from 0.7. The rule was fixed before any outcome was
+read; changing it after reading the verdict is a new study.</p>
+<h2 id="modelled-premiums">Modelled premiums</h2>
+<p>Schwab serves no past option price, so every historical trade is <strong>modelled</strong>:
+Black-Scholes through <code>options_calculator</code> (its <code>RISK_FREE_RATE</code> and
+<code>expiry_time_to_years</code>, settling at 16:00 New York, never an inline time to
+expiry), at one flat volatility, repriced at each following bar of the underlying.</p>
+<ul>
+<li><strong>Volatility</strong> is the 08:30 5-minute close of <code>$VIX</code> ($SPX, SPY) or <code>$VXN</code> (QQQ;
+  <code>$VIX</code> when <code>$VXN</code> is unusable), divided by 100, times the volatility multiplier
+  (<code>[trade] iv_scale</code>, 1.0). A 30-day index only approximates a 0DTE contract's
+  own volatility, so the study runs the multipliers in <code>[study] iv_scales</code>
+  (0.8, 1.0, 1.25, 1.5).</li>
+<li><strong>Touch rule.</strong> Each bar is priced at its END time at both its high and its low;
+  the extreme that favours the trade tests the target and the other tests the stop.
+  The path is the bars that start in <code>[entry, entry + time_stop)</code>.</li>
+<li><strong>The both-in-one-bar rule.</strong> On 5-minute bars a bar can reach both levels and the
+  order inside it is unknown; the trade is scored a <strong>loss</strong>, so the study never
+  flatters itself. The verdict uses 5-minute bars on <strong>every</strong> morning, so this
+  bias is identical across the whole window and cannot pose as an edge where
+  1-minute history begins. On the days that have both, the 1-minute walk is
+  computed alongside to measure the bias: in the first run the two agreed on 315 of
+  316 trades and no 5-minute trade reached both levels.</li>
+<li><strong>A trade is not scored</strong> (the morning is stored with a skip reason, so the report
+  can count them) on a short session (the last $SPX regular bar starts before
+  14:55 CT, since the model prices to a 15:00 CT settlement), a missing opening bar,
+  no direction, no volatility reading, a path short of a full <code>time_stop_min</code> of
+  bars (a data hole must not read as a timeout), or an entry premium under
+  <code>[trade] min_premium</code> ($0.05).</li>
+<li><strong>Labels:</strong> win = 1; loss and timeout = 0.</li>
+</ul>
+<h2 id="the-walk-forward-verdict">The walk-forward verdict</h2>
+<p>For each symbol, role and volatility multiplier the labelled mornings are put in date
+order and each is <strong>predicted from the mornings on earlier days only</strong> (never the same
+day). The prediction is the bucket's win rate so far; the benchmark is the <strong>base
+rate</strong>, the win rate of all earlier mornings regardless of bucket.</p>
+<ul>
+<li><strong>Brier score.</strong> For each scored morning the squared error <code>(p - outcome)^2</code>. A
+  bucket is scored only on mornings where it already had an earlier morning, and the
+  base rate is scored on <strong>exactly those same mornings</strong>, so neither gets an easier
+  set of days. Lower is better.</li>
+<li><strong>An edge</strong> is a bucket with at least <code>[study] min_samples</code> (20) scored mornings
+  and a Brier score <strong>strictly below the base rate's</strong>.</li>
+<li><strong>At every multiplier.</strong> The edge is stored only if it holds at <strong>every</strong>
+  multiplier in <code>iv_scales</code>; an edge at one volatility assumption and not the next
+  is an artefact of the assumption, and is reported as such but not shown.</li>
+<li><strong>Two-sided.</strong> An edge says the bucket's rate predicted better than the base
+  rate, in either direction. At publish time (<code>scalp_call._verdict</code>) a role whose
+  bucket rate is <strong>above</strong> its base rate and has an edge is the <strong>highlight</strong> (the
+  highest such rate wins); one with an edge <strong>below</strong> its base rate goes in
+  <strong>avoid</strong>. With no highlight the note reads "no measured edge", and the page
+  shows usual win rates only.</li>
+</ul>
+<p>The rate shown for a role is the bucket's win rate over every stored morning at the
+current <code>iv_scale</code>, with its <strong>Wilson 95% interval</strong> and sample count, beside the
+role's all-mornings base rate. The study's first verdict: no usable edge (one cell of
+36 passed at every multiplier, and it was a negative signal); see
+<code>docs/reference/opening-scalp-study.md</code>.</p>
+<h2 id="the-morning-call">The morning call</h2>
+<p><code>scalp_call.run</code> publishes <code>cache:options:scalp</code> at 08:36 CT and on a refresh.</p>
+<ol>
+<li>For each symbol it tops up today's bars and fetches <strong>one 0DTE chain</strong>, cut to
+   <code>[trade] chain_strikes</code> (10) strikes either side of spot and kept in <code>scalp.db</code>.
+   Normal proxy lane, never the one-minute GEX poll's priority lane.</li>
+<li>It measures the morning, finds the bucket and reads the stored rates.</li>
+<li><strong>Strikes and points.</strong> The same strike rule at the entry spot. The entry premium
+   is the chain's mid <code>(bid + ask) / 2</code> (else its mark) at those strikes, a spread's
+   as short minus long with <strong>both legs on one option root</strong>; it says <code>chain</code>. Without
+   a usable quote it is the model's and says <code>model</code>. The underlying points to the
+   target and the stop are always the model's, solved by bisection, at the chain's
+   at-the-money volatility when it has one and <code>$VIX</code> / <code>$VXN</code> x <code>iv_scale</code> otherwise.
+   A failed chain fetch still publishes (<code>chain: null</code>, modelled). With no volatility
+   at all a symbol keeps its rates but gets no strikes or points.</li>
+<li><strong>A published call is frozen.</strong> It is saved in <code>calls</code> only after it has passed the
+   <code>ScalpView</code> model and reached the bus, and a later build the same day reuses it
+   whole: nothing re-priced, no second chain fetch. A symbol with no call by
+   entry + <code>time_stop_min</code> (09:35 CT) is refused ("missed the call window").</li>
+<li>Before 08:35, or on a closed day, the view is <code>waiting</code> / <code>closed</code> and carries the
+   last published call; an unexpected failure publishes <code>error</code> the same way.</li>
+</ol>
+<h2 id="grading-and-the-scorecard">Grading and the scorecard</h2>
+<p>Grading answers what the study cannot: how did what the operator was <em>shown</em> do? It
+reads only the frozen <code>calls</code>, grades <strong>all four roles every day</strong> (so the record has
+no selection bias), and writes <code>grades</code> once per day, symbol and role.</p>
+<ul>
+<li><code>model_result</code>: the trade simulated on that day's 5-minute bars at the morning's
+  volatility reading x <code>iv_scale</code>, the study's own method. This is the win rate.</li>
+<li><code>chain_result</code>: the same walk at the volatility implied by the saved chain's mid for
+  the contract the role is long (or short, for a spread), solved at the spot the chain
+  was quoted against. <code>None</code> with no chain, quote or solution. Shown beside the model
+  and never replacing it.</li>
+<li>A day whose path is short of bars is graded the next evening; a half day is never
+  graded; a finished grade is never recomputed.</li>
+<li><code>iv_calibration</code> stores the chain's at-the-money volatility over the morning's
+  reading (the ratio <code>iv_scale</code> is meant to approximate); the study report prints its
+  median per symbol.</li>
+</ul>
+<p>The <strong>scorecard</strong> (over the last <code>[study] scorecard_days</code>, 20, graded days) has three
+parts per symbol: the <strong>edge calls</strong> (how often a highlighted role won, beside the mean
+base rate it was published with), the <strong>cautions</strong> (how often a role marked to avoid
+still won, beside its published base rate; the caution is working when the first is
+the lower), and all four roles' won / lost / timed-out counts and win rates.</p>
+<h2 id="cadences">Cadences</h2>
+<table>
+<thead>
+<tr>
+<th>Job</th>
+<th>When</th>
+<th>What</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Morning call</td>
+<td><strong>08:36 CT</strong> (<code>[slots.scalp]</code>, grace 20 min)</td>
+<td>Today's bars topped up, three chains captured, the call built and published. 08:36 and not 08:35: the autoscan fetches 08:32-08:35 and Schwab refuses the first minute after the half hour.</td>
+</tr>
+<tr>
+<td>Nightly pass</td>
+<td><strong>16:20 CT</strong> (<code>[slots.scalp_bars]</code>, grace 120 min)</td>
+<td>In order: <strong>bar top-up</strong> (13 symbols x 2 intervals, from the store's latest bar; a missed night is caught up by the next), the <strong>study rebuild</strong> (one transaction, so a reader sees the old study or the new, never half of each), then <strong>grading</strong>. After the 16:00 flow-delta report so it never competes for the proxy's 5 requests a second.</td>
+</tr>
+<tr>
+<td>Refresh</td>
+<td>on demand (<code>scalp_refresh</code>)</td>
+<td>The same <code>scalp_call.run</code>; slow lane, replay-guarded.</td>
+</tr>
+</tbody>
+</table>
+<p><code>scalp.db</code> (<code>services/options_svc/data/</code>) is kept forever and is in the nightly
+backup: it holds 1-minute history (about 6 weeks at Schwab) and 5-minute history
+(about 7 months) that cannot be fetched again once it rolls off.</p>
+<p><strong>Tunables</strong> (all in <code>config/scalp.toml</code>, Settings → Configuration → Opening Scalp):
+<code>[universe]</code> / <code>[bars]</code> symbols; <code>[strike_step]</code>, <code>[width]</code>; <code>[inputs.&lt;symbol&gt;]</code>
+(futures, funds, volatility index); <code>[trade]</code> <code>otm_steps</code>, <code>target_pct</code>, <code>stop_pct</code>,
+<code>time_stop_min</code>, <code>iv_scale</code>, <code>min_premium</code>, <code>chain_strikes</code>; <code>[direction]</code>
+<code>dead_zone_pct</code>, <code>dead_zone_frac</code>, <code>open_dead_zone_pct</code>, <code>buckets</code>; <code>[study]</code>
+<code>iv_scales</code>, <code>min_samples</code>, <code>scorecard_days</code>; <code>[news] items</code>; <code>[context] report_url</code>.
+The slot times are in <code>config/sessions.toml</code>.</p>
+<hr />
 <h1 id="rescue-tested-trades">Rescue Tested Trades</h1>
 <p><strong>Files:</strong> <code>services/options_svc/rescue.py</code> (pure engine), <code>commission.py</code>,
 <code>compute.compute_rescue</code> / <code>compute.assess_open_positions</code>, and the apply primitives
@@ -6784,7 +7084,7 @@ the source; this table is a summary of them.</p>
 </tr>
 <tr>
 <td>options_svc</td>
-<td>Loop tick <strong>30 s</strong> (<code>POLL_INTERVAL_SEC</code>). Auto-scan 15-min slots, 08:00–15:15 (<code>autoscan_due</code>); <strong>GEX collection every 1 min</strong>, 08:00–15:20 (<code>_GEX_INTERVAL_MIN</code>, mirroring <code>gex_collector.POLL_INTERVAL_MIN</code>); term structure every <strong>5 min</strong> (<code>TERM_POLL_INTERVAL_MIN</code>); <strong>captured-signal</strong> management every <strong>5 min</strong> (<code>_CAPTURED_MANAGE_INTERVAL_MIN</code>); <strong>manual</strong> paper entry+manage <strong>hourly at the top of the hour, 09:00–14:00</strong> (<code>_PAPER_HOURS</code>, <code>_PAPER_GRACE_MIN</code> = 20); paper <strong>expiry settlement at 15:05</strong> — a settle-only pass over the Account and the Ledger (<code>paper_settle_due</code>, <code>[slots.paper_settle]</code>, grace 120 min); header + GEX status each tick in market hours, throttled to one per <strong>5 min</strong> off-hours (<code>periodic_refresh_due</code>, skip-unchanged).</td>
+<td>Loop tick <strong>30 s</strong> (<code>POLL_INTERVAL_SEC</code>). Auto-scan 15-min slots, 08:00–15:15 (<code>autoscan_due</code>); <strong>GEX collection every 1 min</strong>, 08:00–15:20 (<code>_GEX_INTERVAL_MIN</code>, mirroring <code>gex_collector.POLL_INTERVAL_MIN</code>); term structure every <strong>5 min</strong> (<code>TERM_POLL_INTERVAL_MIN</code>); <strong>captured-signal</strong> management every <strong>5 min</strong> (<code>_CAPTURED_MANAGE_INTERVAL_MIN</code>); <strong>manual</strong> paper entry+manage <strong>hourly at the top of the hour, 09:00–14:00</strong> (<code>_PAPER_HOURS</code>, <code>_PAPER_GRACE_MIN</code> = 20); paper <strong>expiry settlement at 15:05</strong> — a settle-only pass over the Account and the Ledger (<code>paper_settle_due</code>, <code>[slots.paper_settle]</code>, grace 120 min); header + GEX status each tick in market hours, throttled to one per <strong>5 min</strong> off-hours (<code>periodic_refresh_due</code>, skip-unchanged); <strong>Opening Scalp</strong> morning call at <strong>08:36</strong> (<code>scalp_call_due</code>, <code>[slots.scalp]</code>, grace 20 min) and, at <strong>16:20</strong>, a nightly pass of bar top-up, study rebuild and grading (<code>scalp_bars_due</code>, <code>[slots.scalp_bars]</code>, grace 120 min) — see <em>Opening Scalp</em>.</td>
 </tr>
 <tr>
 <td>portfolio_svc</td>

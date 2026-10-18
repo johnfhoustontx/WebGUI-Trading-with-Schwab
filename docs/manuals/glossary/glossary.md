@@ -416,6 +416,14 @@ Relevant if you're calculating any of this yourself rather than reading it off a
 
 **Interest rate and dividend inputs** — The quiet source of most pricing discrepancies. Wrong rate, wrong dividend assumption, or wrong day-count convention will shift your IVs and greeks enough to invalidate comparisons against vendor data.
 
+**Base rate** — How often something happens when you know nothing else: the share of *all* past cases that won. A call is only worth showing if it beats the base rate. If a trade wins half the time overall, a "high-confidence" setup that also wins half the time has told you nothing. The Opening Scalp page shows it as the **Usual win rate**.
+
+**Walk-forward** — A way of testing a rule honestly. Each past day is scored using *only the days before it*, the way the rule would have worked at the time, instead of fitting the rule to the whole history and then admiring how well it fits. A rule that looks good only when it has already seen the answer is not a rule.
+
+**Brier score** — A score for probability forecasts: the average of the squared gap between the forecast (a number from 0 to 1) and what happened (0 or 1). Lower is better. A forecaster who always says "50%" scores 0.25; confident wrong forecasts are punished hard. The Opening Scalp study compares a bucket's Brier score with the base rate's on the same days: it counts as an edge only if it is lower.
+
+**Alignment** — Of the morning's inputs that took a side, the share that agree with the direction the market opened. Inputs that were too small to take a side, or missing, do not vote. The Opening Scalp page sorts mornings into a low, mid or high alignment bucket.
+
 ---
 
 ## 9. Quick Reference
