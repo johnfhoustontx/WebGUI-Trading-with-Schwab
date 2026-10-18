@@ -19,7 +19,7 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from services import _heartbeat
-from services.options_svc import compute, finder_public, flow_stream, handlers
+from services.options_svc import compute, finder_public, flow_stream, handlers, scalp_fetch
 from shared import market_calendar as mc
 from shared import trade_mgmt as _trade_mgmt
 from shared.market_calendar import is_trading_day as _cal_is_trading_day
@@ -456,6 +456,33 @@ def income_slot_due(now, ran_slots):
     return None
 
 
+# ── Opening Scalp nightly bar top-up (see config/sessions.toml [slots.scalp_bars]) ──
+# ONE pass a day after the close, 16:20 CT: about 13 symbols x 2 intervals, one
+# price-history call each, through the proxy. Mirrors ``income_slot_due``.
+_SCALP_BARS_SLOTS = {k: (t.hour, t.minute)
+                     for k, t in mc.slot_times("scalp_bars").items()}
+_SCALP_BARS_GRACE_MIN = mc.slot_grace_min("scalp_bars")
+
+
+def scalp_bars_due(now, ran_slots):
+    """Name of the Opening Scalp bar top-up slot due now, or None.
+
+    Fires once per trading day when ``target <= now < target + grace`` and that
+    ``(date, slot)`` is not in ``ran_slots``; the caller records it. Mirrors
+    ``income_slot_due``."""
+    if not _is_trading_day(now):
+        return None
+    import datetime as _dt
+    day = now.date().isoformat()
+    for name, (h, m) in _SCALP_BARS_SLOTS.items():
+        if (day, name) in ran_slots:
+            continue
+        target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if target <= now < target + _dt.timedelta(minutes=_SCALP_BARS_GRACE_MIN):
+            return name
+    return None
+
+
 # ── Scheduled end-of-day summary cadence (~15:10 CT) ─────────────────────────
 # A once-daily push AFTER the regular-session close (15:00 CT / 4pm ET) + 0-DTE
 # settlement, summarizing the day's result for the paper account. The wide grace tolerates a late/mid-window
@@ -649,6 +676,7 @@ async def loop(bus):
     action_alert_ran = set()  # (date, slot) of fired action-alert pushes (see action_alert_due)
     income_ran = set()  # (date, slot) of fired income-window scans (see income_slot_due)
     finder_warm_ran = set()  # (date, slot) of fired public-Finder warm-ups
+    scalp_bars_ran = set()  # (date, slot) of fired Opening Scalp bar top-ups (see scalp_bars_due)
     eod_summary_ran = set()  # (date, slot) of fired EOD-summary pushes (see eod_summary_due)
     market_snapshot_ran = set()  # (date, "HH:MM") of fired market-snapshot pushes (see market_snapshot_due)
     trade_idea_ran = set()  # (date, slot) of fired hourly trade-idea posts (see trade_idea_due)
@@ -1010,6 +1038,28 @@ async def loop(bus):
 
         if inc_slot:
             branches.append(("income", _income_branch()))
+
+        # Opening Scalp bar top-up - the nightly price-history fetch into
+        # scalp.db. Latched BEFORE it runs, like income: a slow pass can only
+        # delay itself. Nothing is published; a failure leaves a degrade count
+        # and the next night starts from the store's latest bar.
+        try:
+            bars_slot = scalp_bars_due(now, scalp_bars_ran)
+            if bars_slot:
+                scalp_bars_ran.add((now.date().isoformat(), bars_slot))
+        except Exception:
+            log.exception("scalp_bars_due gate degraded")
+            bars_slot = None
+
+        async def _scalp_bars_branch():
+            try:
+                written = await loop_.run_in_executor(None, scalp_fetch.top_up)
+                log.info("scalp bar top-up wrote %d row(s)", sum(written.values()))
+            except Exception:
+                log.exception("scalp bar top-up branch degraded")
+
+        if bars_slot:
+            branches.append(("scalp_bars", _scalp_bars_branch()))
 
         # Public Strategy Finder warm-up - queues a few requests on
         # cmd:finder_public and returns; the scans themselves run on that

@@ -183,6 +183,19 @@ grace_min = 20
 # 08:52 starts after that rescan's ~3 min of fetches and ends before 09:00's.
 morning = "08:52"     # 09:52 ET
 
+[slots.scalp_bars]
+# The Opening Scalp's nightly price-bar top-up (scalp_fetch.top_up): 1- and
+# 5-minute history for every [bars] symbol in config/scalp.toml, fetched through
+# the proxy's /passthrough. Placed AFTER the other post-close work so it never
+# competes with it for the proxy's 5 requests a second:
+#   15:20  collection stops        -- chains settle
+#   16:00  flow-delta report       -- ~5 min, 91 symbols through the proxy
+#   16:20  THIS                    -- about 13 symbols x 2 intervals, one call each
+# A bar missed tonight is not lost: the next top-up starts from the store's
+# latest bar, so the grace only decides how late a restarted service may still run it.
+grace_min = 120
+close = "16:20"       # 17:20 ET
+
 [slots.flow_delta]
 # The delta-notional flow-alert instrumentation (tools/flow_delta_instrumentation.py):
 # one report per trading day under options-scanner/data/flow_delta_instrumentation/,

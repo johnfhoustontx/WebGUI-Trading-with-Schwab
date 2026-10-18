@@ -645,3 +645,28 @@ def test_the_scan_reads_the_real_setting():
     assert scheduler.autoscan_due(_ct(2026, 6, 15, 9, offset), last)[0] is True
     if offset:
         assert scheduler.autoscan_due(_ct(2026, 6, 15, 9, offset - 1), last)[0] is False
+
+
+# ── Opening Scalp nightly bar top-up ([slots.scalp_bars]) ───────────────────
+def test_scalp_bars_due_once_per_day_inside_grace():
+    ran = set()
+    assert scheduler.scalp_bars_due(_ct(2026, 6, 15, 16, 19), ran) is None   # before 16:20
+    slot = scheduler.scalp_bars_due(_ct(2026, 6, 15, 16, 20), ran)
+    assert slot == "close"
+    ran.add(("2026-06-15", slot))
+    assert scheduler.scalp_bars_due(_ct(2026, 6, 15, 16, 21), ran) is None   # latched
+    # a late start inside the 120-minute grace still runs it; past it, never
+    assert scheduler.scalp_bars_due(_ct(2026, 6, 15, 18, 19), set()) == "close"
+    assert scheduler.scalp_bars_due(_ct(2026, 6, 15, 18, 20), set()) is None
+
+
+def test_scalp_bars_due_skips_weekends_and_holidays():
+    assert scheduler.scalp_bars_due(_ct(2026, 6, 13, 16, 30), set()) is None  # Saturday
+    assert scheduler.scalp_bars_due(_ct(2026, 1, 1, 16, 30), set()) is None   # holiday
+
+
+def test_scalp_bars_slot_comes_after_the_flow_delta_report_and_collection_stop():
+    # The slot is configured in sessions.toml; pin the ordering its comment argues.
+    (name, t), = scheduler.mc.slot_times("scalp_bars").items()
+    assert (name, (t.hour, t.minute)) == ("close", (16, 20))
+    assert scheduler.mc.slot_grace_min("scalp_bars") == 120

@@ -704,6 +704,14 @@ _SESSIONS = ConfigFile(
                   kind="int", unit="min", min=1, max=120, step=1),
             Field("slots.income.*", "", "", kind="time"),
         ), restart=(OPTIONS,)),
+        Section("Opening Scalp bar top-up", "The nightly price-bar fetch the "
+                "Opening Scalp study reads. Keep it after the 16:00 flow report.", (
+            Field("slots.scalp_bars.grace_min", "Fire if late by at most",
+                  "A missed night is not lost: the next top-up starts from the "
+                  "latest stored bar.",
+                  kind="int", unit="min", min=1, max=480, step=1),
+            Field("slots.scalp_bars.*", "", "", kind="time"),
+        ), restart=(OPTIONS,)),
         Section("Hourly trade idea (Discord and Telegram)", "", (
             Field("slots.trade_idea.grace_min", "Fire if late by at most",
                   "Keep under 60 so a late post can't overlap the next hour.",
