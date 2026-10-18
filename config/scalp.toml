@@ -1,0 +1,93 @@
+# Opening Scalp (docs/plans/2026-10-18-opening-scalp-design.md).
+#
+# The page measures how often a 0DTE scalp entered after the first five minutes
+# of the regular session wins, for each symbol below. Read by shared/scalp_config.py
+# with the mtime-cached loader, so a saved change applies with no restart. The
+# operator's changes go in config/local/scalp.toml (Settings -> Configuration),
+# never here. The call and bar slot TIMES live in config/sessions.toml.
+#
+# A per-symbol table is keyed by the symbol in quotes ("$SPX" has a dollar sign).
+# A symbol with no entry reads as the SPY-like default (a 1.00 strike step and
+# width); an input with no entry is absent, never zero.
+
+[universe]
+# The symbols the page calls. Each needs entries in the tables below.
+symbols = ["$SPX", "SPY", "QQQ"]
+
+[bars]
+# Every symbol whose bars are stored: the symbols above, the inputs they read
+# (futures, sector ETFs, volatility index). Any input named under [inputs] but
+# missing here is added when the list is read, so it is always fetched.
+symbols = ["$SPX", "SPY", "QQQ", "/ES", "/NQ", "IGV", "SMH", "EWY", "XLE", "XLK", "XLV", "$VIX", "$VXN"]
+
+[strike_step]
+# The gap between listed strikes, in dollars: the scalp's strike is the nearest
+# multiple of this to the open.
+"$SPX" = 5
+SPY = 1
+QQQ = 1
+
+[width]
+# Credit-spread width in dollars (the exit rule's alternative leg).
+"$SPX" = 5
+SPY = 1
+QQQ = 1
+
+[inputs."$SPX"]
+# What the direction call reads for this symbol: the overnight futures, the
+# sector ETFs that lead it, and the volatility index.
+futures = "/ES"
+etfs = ["XLE", "XLK", "XLV"]
+vol = "$VIX"
+
+[inputs.SPY]
+futures = "/ES"
+etfs = ["XLE", "XLK", "XLV"]
+vol = "$VIX"
+
+[inputs.QQQ]
+futures = "/NQ"
+etfs = ["IGV", "SMH", "EWY", "XLK"]
+vol = "$VXN"
+
+[trade]
+# How far out of the money the long option is, in strikes (0 = at the money).
+otm_steps = 0
+# Close the scalp when the option has gained this percent of its entry price.
+target_pct = 50
+# Close it when it has lost this percent of its entry price.
+stop_pct = 50
+# Close it this many minutes after entry whatever the price is.
+time_stop_min = 60
+# Multiplies the implied volatility the model prices with (1.0 = as observed).
+iv_scale = 1.0
+# An entry premium below this many dollars per share is not tradeable and the
+# trade is skipped, not scored.
+min_premium = 0.05
+# Strikes either side of the open kept when the morning's chain is saved.
+chain_strikes = 10
+
+[direction]
+# Returns (percent) smaller than this count as flat, not up or down.
+dead_zone_pct = 0.05
+# A 0..1 position (where a reading sits in its range) within this of the middle
+# counts as neutral.
+dead_zone_frac = 0.1
+# The same flat band for the first-five-minutes move, percent.
+open_dead_zone_pct = 0.03
+# Two cut points, in order, in (0,1): the share of inputs agreeing with the call
+# that splits the confidence buckets low / medium / high.
+buckets = [0.4, 0.7]
+
+[study]
+# The IV multipliers the study tries, to show how much the answer leans on the
+# volatility assumption. Positive numbers.
+iv_scales = [0.8, 1.0, 1.25, 1.5]
+# A bucket with fewer trades than this shows no hit rate.
+min_samples = 20
+# Trading days the scorecard looks back over.
+scorecard_days = 20
+
+[news]
+# Headlines shown beside each morning call.
+items = 5

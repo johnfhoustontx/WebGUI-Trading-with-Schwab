@@ -24,6 +24,7 @@ Kinds
                     split on commas only (each list item too), deduplicated
                     ignoring case; non-string items are skipped
     pair            two numbers [low, high]
+    numbers         a list of numbers (``min``/``max`` bound each), at least one
     ladder          a list of [peak, lock] rungs (fractions, shown as percents)
     sector          one of the sector names (the sector-map editor)
 """
@@ -1050,6 +1051,109 @@ _FEED = ConfigFile(
                   "1 is fastest, 9 is smallest. Saving runs during collection "
                   "every minute, so a lower number delays collection less.",
                   kind="int", min=1, max=9, step=1),
+        )),
+    ),
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Opening Scalp — config/scalp.toml
+# ─────────────────────────────────────────────────────────────────────────────
+# Read per call through the mtime-cached loader (shared/scalp_config.py), so a
+# saved change applies with no restart. The call and bar-fetch TIMES are slots in
+# sessions.toml, not here.
+_SCALP = ConfigFile(
+    name="scalp.toml", title="Opening Scalp", icon="bolt",
+    summary="The same-day option scalp entered just after the first five minutes "
+            "of the session: which symbols it covers, how the option is chosen "
+            "and closed, and how the direction call and its study are scored.",
+    restart=(),
+    sections=(
+        Section("Symbols",
+                "The symbols the page calls and the bars that are kept for them "
+                "and for what the call reads. An input named below that is "
+                "missing from the bar list is added for you.", (
+            Field("universe.symbols", "Symbols called", "", kind="symbols"),
+            Field("bars.symbols", "Bars kept", "", kind="symbols"),
+        )),
+        Section("Sizes",
+                "Per symbol, in dollars. A symbol not listed reads as 1.00.", (
+            Field("strike_step.*", "Strike step",
+                  "The gap between listed strikes. The scalp's strike is the "
+                  "nearest multiple of this to the open.",
+                  kind="float", unit="$", min=0.01, max=100, step=0.5),
+            Field("width.*", "Spread width",
+                  "The credit-spread width the exit rule compares with.",
+                  kind="float", unit="$", min=0.01, max=100, step=0.5),
+        )),
+        Section("What the call reads",
+                "Per symbol: the overnight futures, the sector funds that lead "
+                "it, and the volatility index. A blank one is left out of the "
+                "call, never counted as flat.", (
+            Field("inputs.*.futures", "Futures",
+                  "The overnight futures contract.", kind="text"),
+            Field("inputs.*.etfs", "Sector funds",
+                  "Funds whose opening move votes on the direction.",
+                  kind="symbols"),
+            Field("inputs.*.vol", "Volatility index",
+                  "The index whose overnight move votes against a rise.",
+                  kind="text"),
+        )),
+        Section("The scalp",
+                "How the long option is picked and when it is closed.", (
+            Field("trade.otm_steps", "Strikes out of the money",
+                  "How many strikes beyond the open the long option sits. 0 is "
+                  "at the money.", kind="int", min=0, max=20, step=1),
+            Field("trade.target_pct", "Profit target",
+                  "Close when the option has gained this much of its entry price.",
+                  kind="float", unit="%", min=1, max=1000, step=5),
+            Field("trade.stop_pct", "Loss stop",
+                  "Close when the option has lost this much of its entry price.",
+                  kind="float", unit="%", min=1, max=100, step=5),
+            Field("trade.time_stop_min", "Time stop",
+                  "Close this long after entry whatever the price is.",
+                  kind="int", unit="min", min=1, max=390, step=5),
+            Field("trade.iv_scale", "Volatility multiplier",
+                  "Multiplies the implied volatility the model prices with. 1 "
+                  "uses the volatility as observed.",
+                  kind="float", min=0.1, max=5, step=0.05),
+            Field("trade.min_premium", "Smallest premium",
+                  "An option cheaper than this per share is not tradeable and the "
+                  "trade is skipped, not scored.",
+                  kind="float", unit="$", min=0, max=50, step=0.01),
+            Field("trade.chain_strikes", "Strikes saved",
+                  "Strikes either side of the open kept when the morning's chain "
+                  "is saved.", kind="int", min=1, max=100, step=1),
+        )),
+        Section("Direction",
+                "How far a move has to be before the call counts it.", (
+            Field("direction.dead_zone_pct", "Flat return band",
+                  "A return smaller than this is flat, not up or down.",
+                  kind="float", unit="%", min=0, max=5, step=0.01),
+            Field("direction.dead_zone_frac", "Neutral band",
+                  "A reading's place in its range (0 to 1) within this of the "
+                  "middle is neutral.", kind="float", min=0, max=0.5, step=0.01),
+            Field("direction.open_dead_zone_pct", "Flat opening band",
+                  "The same flat band for the first five minutes' move.",
+                  kind="float", unit="%", min=0, max=5, step=0.01),
+            Field("direction.buckets", "Confidence cut points",
+                  "Two shares of inputs agreeing with the call, low then high, "
+                  "that split it into low, medium and high confidence.",
+                  kind="pair", min=0.01, max=0.99, step=0.05),
+        )),
+        Section("Study and page", "", (
+            Field("study.iv_scales", "Volatility multipliers tried",
+                  "The study re-prices every trade at each of these, to show how "
+                  "much the answer leans on the volatility assumption.",
+                  kind="numbers", min=0.1, max=5),
+            Field("study.min_samples", "Smallest sample",
+                  "A group with fewer trades than this shows no hit rate.",
+                  kind="int", min=1, max=1000, step=1),
+            Field("study.scorecard_days", "Scorecard window",
+                  "Trading days the scorecard looks back over.",
+                  kind="int", unit="days", min=1, max=250, step=1),
+            Field("news.items", "Headlines per call",
+                  "Headlines shown beside each morning call.",
+                  kind="int", min=0, max=20, step=1),
         )),
     ),
 )
@@ -2311,7 +2415,7 @@ _LOGIN_PUSH = ConfigFile(
 )
 
 FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _LOGIN_PUSH, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _SECTORS, _MOMENTUM,
-         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _FEED, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
+         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
          _MARKET_READ, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}
@@ -2532,6 +2636,18 @@ def parse(fld: Field, raw, *, shipped=None):
                     seen.add(t.casefold())
                     out.append(t)
         return out
+    if k == "numbers":
+        items = raw if isinstance(raw, (list, tuple)) else str(raw).replace(",", " ").split()
+        vals = []
+        for x in items:
+            try:
+                v = _num(x)
+            except (TypeError, ValueError):
+                raise ValueError("enter numbers only") from None
+            vals.append(_bounded(fld, v))
+        if not vals:
+            raise ValueError("at least one number is needed")
+        return vals
     if k == "pair":
         try:
             lo, hi = (_num(x) for x in raw)

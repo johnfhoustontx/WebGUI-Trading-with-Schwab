@@ -911,3 +911,76 @@ def test_settings_offers_only_the_feed_modes_that_exist():
     fields = {fl.key: fl for sec in feed.sections for fl in sec.fields}
     assert tuple(fields["feed.mode"].choices) == ("off", "tee")
     assert set(fields) == {"feed.mode", "feed.keep_sessions", "feed.zlib_level"}
+
+
+# ── Opening Scalp (scalp.toml) ───────────────────────────────────────────────
+SCALP = cs.BY_NAME["scalp.toml"]
+
+
+def test_the_scalp_file_is_editable_and_needs_no_restart():
+    assert SCALP.editable and tuple(SCALP.restart) == ()
+    for sec in SCALP.sections:
+        assert not sec.readonly, sec.title
+        for fld in sec.fields:
+            assert tuple(cs.restart_for(SCALP, sec, fld)) == (), fld.key
+
+
+def test_the_per_symbol_tables_locate_by_wildcard_and_quoted_symbol():
+    for path, kind in ((("width", "$SPX"), "float"), (("strike_step", "QQQ"), "float"),
+                       (("inputs", "$SPX", "futures"), "text"),
+                       (("inputs", "QQQ", "etfs"), "symbols"),
+                       (("inputs", "SPY", "vol"), "text")):
+        _sec, fld = cs.locate(SCALP, path)
+        assert fld is not None and fld.kind == kind, path
+    # a symbol added by hand to a table is editable with no new catalogue entry
+    assert cs.locate(SCALP, ("width", "IWM"))[1] is not None
+    assert cs.split_key('width."$SPX"') == ["width", "$SPX"]
+
+
+def test_every_scalp_field_has_a_label_and_help():
+    for sec in SCALP.sections:
+        for fld in sec.fields:
+            if fld.key in ("universe.symbols", "bars.symbols"):
+                continue
+            assert fld.label and fld.help, fld.key
+
+
+def test_numbers_kind_parses_a_list_and_refuses_the_rest():
+    fld = next(f for s in SCALP.sections for f in s.fields if f.key == "study.iv_scales")
+    assert cs.parse(fld, ["0.8", "1", "1.25"]) == [0.8, 1.0, 1.25]
+    assert cs.parse(fld, "0.5, 2") == [0.5, 2.0]
+    with pytest.raises(ValueError, match="numbers only"):
+        cs.parse(fld, ["1", "abc"])
+    with pytest.raises(ValueError, match="at least"):
+        cs.parse(fld, 0)
+    with pytest.raises(ValueError, match="at least one"):
+        cs.parse(fld, [])
+    with pytest.raises(ValueError, match="at most"):
+        cs.parse(fld, [1, 9])
+
+
+def test_the_confidence_cut_points_cannot_be_saved_in_the_loaders_fallback_shape():
+    """The loader drops cut points that are not strictly inside (0, 1) and
+    ascending to its defaults; the editor must refuse them instead, so a saved
+    value is the value that runs."""
+    fld = next(f for s in SCALP.sections for f in s.fields if f.key == "direction.buckets")
+    assert cs.parse(fld, [0.3, 0.6]) == [0.3, 0.6]
+    for bad in ([0.6, 0.3], [0.5, 0.5], [0.0, 0.5], [0.5, 1.0]):
+        with pytest.raises(ValueError):
+            cs.parse(fld, bad)
+
+
+def test_the_scalp_editor_bounds_are_the_loaders_own(monkeypatch):
+    """What the editor accepts the loader must read back unchanged."""
+    from shared import scalp_config as sc
+    by_key = {f.key: f for s in SCALP.sections for f in s.fields}
+    reads = {"trade.target_pct": sc.target_pct, "trade.stop_pct": sc.stop_pct,
+             "trade.time_stop_min": sc.time_stop_min, "trade.otm_steps": sc.otm_steps,
+             "study.min_samples": sc.min_samples}
+    for key, raw in (("trade.target_pct", 75), ("trade.stop_pct", 30),
+                     ("trade.time_stop_min", 45), ("trade.otm_steps", 2),
+                     ("study.min_samples", 5)):
+        section, name = key.split(".")
+        value = cs.parse(by_key[key], raw)
+        monkeypatch.setattr(sc, "load", lambda s=section, n=name, v=value: {s: {n: v}})
+        assert reads[key]() == raw, key
