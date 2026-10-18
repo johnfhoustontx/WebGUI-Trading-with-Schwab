@@ -1207,7 +1207,8 @@ past mornings that looked like this one. **It does not place trades** — you de
   marked as *with* or *against* the opening move. A **win** means +50% before −50% within
   60 minutes. The win rates are always **modelled** (priced from the volatility index);
   the **Entry** column shows the live 08:36 quote where the chain had the strike and says
-  **modelled** where it did not.
+  **modelled** where it did not, and the **Underlying move** distances use the chain's
+  volatility when there is one.
 - **Measured edge** marks the single trade whose bucket rate is reliably better than
   usual (rare). **Caution: measured to lose more often than usual** marks a bucket that
   is reliably worse — a reason to stay out, not to take the other side.

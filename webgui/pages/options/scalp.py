@@ -37,6 +37,8 @@ from __future__ import annotations
 import datetime as _dt
 from zoneinfo import ZoneInfo
 
+from shared import market_calendar as _mc
+
 from pages import fmt as _fmt
 from pages import news_view as _nv   # safe_href: the one http(s)-only link rule
 from pages.options import theme as _t
@@ -347,33 +349,80 @@ def input_summary(rows):
 
 
 # ── whose call is this, and the state line ───────────────────────────────────
-def state_line(view):
-    """The line at the top of the page, or None for a live call. PURE."""
+def _clock(now=None) -> _dt.datetime:
+    """The Central clock the page reads 'today' from. Injected so a test is
+    deterministic; a naive datetime means Central."""
+    if now is None:
+        return _dt.datetime.now(_CT)
+    return now.replace(tzinfo=_CT) if now.tzinfo is None else now.astimezone(_CT)
+
+
+def _call_time() -> _dt.time:
+    """The morning call's time (``[slots.scalp]`` in sessions.toml, 08:36)."""
+    try:
+        times = sorted(_mc.slot_times("scalp").values())
+    except Exception:  # noqa: BLE001 - a bad slot table must not blank the page
+        times = []
+    return times[0] if times else _dt.time(8, 36)
+
+
+def _clock_line(now: _dt.datetime):
+    """What the CLOCK says about the next call, whatever the view says.
+
+    The service publishes ``waiting`` / ``closed`` only when the 08:36 slot runs
+    or Refresh is pressed, so overnight and over a weekend the view still holds
+    the last trading day's ``call`` payload. The page decides for itself: not a
+    trading day -> the next trading day's call; a trading day before the call
+    time -> today's. Otherwise None (the call is, or is about to be, today's)."""
+    today = now.date()
+    at = _call_time()
+    if not _mc.is_trading_day(today):
+        nxt = _dt.datetime.combine(_mc.next_trading_day(today), at, tzinfo=_CT)
+        return (f"Market closed — next call {nxt.strftime('%a %Y-%m-%d')} "
+                f"at {nxt.strftime('%H:%M CT')}")
+    if now.time() < at:
+        return "Next call at " + at.strftime("%H:%M CT")
+    return None
+
+
+def state_line(view, now=None):
+    """The line at the top of the page, or None for a live call. PURE.
+
+    The clock decides first (``_clock_line``). The view's own ``error`` line is
+    always kept; its ``waiting`` / ``closed`` line is used only when it was
+    published today, after the call time (so it is not stale)."""
     view = _as_dict(view)
+    now = _clock(now)
     state = view.get("state")
-    nxt = _ct(view.get("next_call"))
-    if state == "waiting":
-        return "Next call at " + nxt.strftime("%H:%M CT") if nxt else "Waiting for the morning call"
-    if state == "closed":
+    if state == "error":
+        return "The last refresh failed — showing the last call"
+    line = _clock_line(now)
+    if line:
+        return line
+    if state in ("waiting", "closed") and view.get("day") == now.date().isoformat():
+        nxt = _ct(view.get("next_call"))
+        if state == "waiting":
+            return ("Next call at " + nxt.strftime("%H:%M CT") if nxt
+                    else "Waiting for the morning call")
         if nxt is None:
             return "Market closed"
         return (f"Market closed — next call {nxt.strftime('%a %Y-%m-%d')} "
                 f"at {nxt.strftime('%H:%M CT')}")
-    if state == "error":
-        return "The last refresh failed — showing the last call"
     return None
 
 
-def call_label(view, symbol_payload):
-    """Which call this card shows. PURE. Today's call says so; any other day's
-    names its day and says it is not today's."""
+def call_label(view, symbol_payload, now=None):
+    """Which call this card shows. PURE. It is 'Today's call' only when the call
+    day is today's date on the Central clock; any other day's names its day and
+    says it is not today's (the view's own ``day`` is the day it was PUBLISHED
+    and goes stale overnight)."""
     view, sym = _as_dict(view), _as_dict(symbol_payload)
     made = _ct(sym.get("made_at"))
     stamp = f" · made {made.strftime('%H:%M CT')}" if made else ""
-    call_day, day = view.get("call_day"), view.get("day")
+    call_day = view.get("call_day")
     if not call_day:
         return "Last call"
-    if call_day == day:
+    if call_day == _clock(now).date().isoformat():
         return f"Today's call{stamp}"
     return f"Call of {call_day}{stamp} — not today's call"
 
@@ -540,7 +589,7 @@ _CARD = f"w-full {_t.CARD} gap-3"
 _SMALL = f"text-[12px] {_t.MUTED}"
 
 
-def _symbol_card(view, name, sym):
+def _symbol_card(view, name, sym, now=None):
     from nicegui import ui
 
     from pages import ui_kit as kit
@@ -554,7 +603,7 @@ def _symbol_card(view, name, sym):
                 ui.label(direction_words(sym.get("direction"))) \
                     .classes(f"{_t.BADGE_ACCENT} px-2 py-0.5 text-[12px]")
             ui.space()
-            ui.label(call_label(view, sym)).classes(_SMALL)
+            ui.label(call_label(view, sym, now)).classes(_SMALL)
         lead = headline(sym)
         ui.label(lead).classes(
             f"text-xl font-semibold {_t.TXT_POS if has_edge else _t.LABEL}")
@@ -680,7 +729,8 @@ def render():
 
     def _paint(view):
         body.clear()
-        line = state_line(view)
+        now = _clock()
+        line = state_line(view, now)
         notice.text = line or ""
         notice.set_visibility(bool(line))
         symbols = _as_dict(_as_dict(view).get("symbols"))
@@ -689,7 +739,7 @@ def render():
                 kit.empty(_copy.WAITING_OPTIONS)
             for name, sym in symbols.items():
                 if isinstance(sym, dict):
-                    _symbol_card(view, name, sym)
+                    _symbol_card(view, name, sym, now)
             _context_panel(_as_dict(view).get("context"))
             _scorecard_panel(_as_dict(view).get("scorecard"))
 

@@ -1190,9 +1190,10 @@ call** and **Put credit spread** are *with* the move, **Long put** and **Call
 credit spread** *against* it; a down open mirrors this. A **win** is the trade
 reaching +50% before −50% of its entry price inside 60 minutes. The win rates are
 always **modelled** (priced from the volatility index, with the target and stop
-measured along the real five-minute bars); the **Entry** column alone is taken from
-the live 08:36 chain where it quoted the strike (the row says **live quote**) and from
-the model otherwise (**modelled**).
+measured along the real five-minute bars). The 08:36 chain sets only the **Entry**
+column, from its live quote where it quoted the strike (the row says **live quote**,
+else **modelled**), and the volatility the **Underlying move** distances are worked at
+(its at-the-money volatility, else the volatility index).
 
 **Columns.** Trade · **Usual win rate** · **This morning's rate** (the win rate on
 past mornings in the same agreement bucket, with its 95% interval underneath) ·

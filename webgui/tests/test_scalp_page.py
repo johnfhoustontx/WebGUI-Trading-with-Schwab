@@ -312,36 +312,104 @@ def test_an_unlisted_input_still_shows():
 
 
 # ── the state line and whose call it is ─────────────────────────────────────
+# "Today" is the Central CLOCK's date, never the view's own ``day`` (the service
+# publishes waiting / closed only when the 08:36 slot runs or Refresh is pressed,
+# so the view keeps yesterday's ``call`` payload overnight and over a weekend).
+import datetime as _dt
+from zoneinfo import ZoneInfo
+
+_CT = ZoneInfo("America/Chicago")
+
+
+def _at(y, m, d, hh, mm=0):
+    return _dt.datetime(y, m, d, hh, mm, tzinfo=_CT)
+
+
+def _friday_view():
+    """The view as it stands after Friday 2026-10-16's 08:36 call."""
+    return {"state": "call", "day": "2026-10-16", "call_day": "2026-10-16",
+            "next_call": "2026-10-19T08:36:00-05:00"}
+
+
 def test_state_lines():
     nxt = "2026-10-20T08:36:00-05:00"
-    assert scalp.state_line({"state": "call"}) is None
-    waiting = scalp.state_line({"state": "waiting", "next_call": nxt})
-    assert waiting == "Next call at 08:36 CT"
-    closed = scalp.state_line({"state": "closed", "next_call": nxt})
+    tue_pm = _at(2026, 10, 20, 12)      # a trading day after the call time
+    assert scalp.state_line({"state": "call"}, tue_pm) is None
+    fresh = {"day": "2026-10-20", "next_call": nxt}
+    assert scalp.state_line(dict(fresh, state="waiting"), tue_pm) == "Next call at 08:36 CT"
+    closed = scalp.state_line(dict(fresh, state="closed"), tue_pm)
     assert closed.startswith("Market closed — next call ") and "08:36 CT" in closed
     assert "Tue" in closed and "2026-10-20" in closed
-    err = scalp.state_line({"state": "error", "next_call": nxt})
-    assert err == "The last refresh failed — showing the last call"
-    assert scalp.state_line({"state": "waiting", "next_call": None}) \
-        == "Waiting for the morning call"
-    assert scalp.state_line({"state": "closed", "next_call": "junk"}) \
-        == "Market closed"
+    assert scalp.state_line(dict(fresh, state="error"), tue_pm)         == "The last refresh failed — showing the last call"
+    assert scalp.state_line({"state": "waiting", "day": "2026-10-20", "next_call": None},
+                            tue_pm) == "Waiting for the morning call"
+    assert scalp.state_line({"state": "closed", "day": "2026-10-20",
+                             "next_call": "junk"}, tue_pm) == "Market closed"
+
+
+def test_a_stale_waiting_or_closed_view_is_not_believed():
+    # Published Saturday as "closed"; the page is read on a trading afternoon.
+    stale = {"state": "closed", "day": "2026-10-17",
+             "next_call": "2026-10-19T08:36:00-05:00"}
+    assert scalp.state_line(stale, _at(2026, 10, 19, 12)) is None
+
+
+def test_friday_call_read_monday_before_the_open_is_not_todays():
+    view, now = _friday_view(), _at(2026, 10, 19, 7)
+    label = scalp.call_label(view, _symbol(1), now)
+    assert label.startswith("Call of 2026-10-16") and "not today's call" in label
+    assert scalp.state_line(view, now) == "Next call at 08:36 CT"
+
+
+def test_friday_call_read_on_saturday_names_monday():
+    view, now = _friday_view(), _at(2026, 10, 17, 11)
+    assert "not today's call" in scalp.call_label(view, _symbol(1), now)
+    line = scalp.state_line(view, now)
+    assert line.startswith("Market closed — next call ")
+    assert "Mon 2026-10-19" in line and "08:36 CT" in line
+
+
+def test_the_same_view_on_friday_is_todays_call():
+    view, now = _friday_view(), _at(2026, 10, 16, 10)
+    assert scalp.call_label(view, _symbol(1), now) == "Today's call · made 08:36 CT"
+    assert scalp.state_line(view, now) is None
+
+
+def test_a_holiday_names_the_next_trading_day():
+    # Labor Day, Monday 2026-09-07: the next call is Tuesday's.
+    view = {"state": "call", "day": "2026-09-04", "call_day": "2026-09-04"}
+    line = scalp.state_line(view, _at(2026, 9, 7, 9))
+    assert "Tue 2026-09-08" in line and "08:36 CT" in line
+
+
+def test_across_the_daylight_saving_change():
+    # The clocks fall back on Sunday 2026-11-01: Friday's call, read on Sunday
+    # and on Monday morning, is still Friday's and the next call is 08:36 CT.
+    view = {"state": "call", "day": "2026-10-30", "call_day": "2026-10-30"}
+    sunday = _at(2026, 11, 1, 12)
+    assert "Mon 2026-11-02" in scalp.state_line(view, sunday)
+    monday = _at(2026, 11, 2, 7)
+    assert "not today's call" in scalp.call_label(view, _symbol(1), monday)
+    assert scalp.state_line(view, monday) == "Next call at 08:36 CT"
+    # a clock given in UTC lands on the same Central date
+    utc = _dt.datetime(2026, 11, 2, 13, 0, tzinfo=_dt.timezone.utc)   # 07:00 CST
+    assert scalp.state_line(view, utc) == "Next call at 08:36 CT"
 
 
 def test_yesterdays_call_is_never_read_as_todays():
     view = {"state": "waiting", "day": "2026-10-20", "call_day": "2026-10-19"}
-    label = scalp.call_label(view, _symbol(1))
+    label = scalp.call_label(view, _symbol(1), _at(2026, 10, 20, 7))
     assert "2026-10-19" in label and "08:36 CT" in label
     assert "not today" in label.lower()
     today = {"state": "call", "day": "2026-10-19", "call_day": "2026-10-19"}
-    assert scalp.call_label(today, _symbol(1)) == "Today's call · made 08:36 CT"
+    assert scalp.call_label(today, _symbol(1), _at(2026, 10, 19, 9))         == "Today's call · made 08:36 CT"
 
 
 def test_call_label_survives_a_missing_stamp():
     view = {"state": "call", "day": "2026-10-19", "call_day": "2026-10-19"}
-    assert scalp.call_label(view, {"direction": None}) == "Today's call"
+    assert scalp.call_label(view, {"direction": None}, _at(2026, 10, 19, 9))         == "Today's call"
     stale = {"state": "closed", "day": "2026-10-19", "call_day": None}
-    assert scalp.call_label(stale, {}) == "Last call"
+    assert scalp.call_label(stale, {}, _at(2026, 10, 19, 9)) == "Last call"
 
 
 # ── context: third-party text ───────────────────────────────────────────────

@@ -1073,14 +1073,16 @@ buttons, and you decide.
   **Call credit spread** *against* it. A down open mirrors this.
 - **Win** means the trade reached **+50% before −50%** of its entry price inside
   **60 minutes**. The win rates are **modelled** from the volatility index, so a
-  win is a model's win, not a fill; only the **Entry** column is taken from the
-  live chain at 08:36 where it quoted the strike (the row says which).
+  win is a model's win, not a fill. The chain at 08:36 sets only the **Entry**
+  column, where it quoted the strike (the row says which), and the volatility
+  the **Underlying move** distances are worked at.
 - **Usual win rate** is how often that trade won over **all** past mornings. **This
   morning's rate** is how often it won on past mornings in the **same agreement
   bucket**, with its **interval** (95%) and the number of **samples**. The rates
   are **walk-forward tested**: each past day is scored only from days before it.
-- **Move to target / stop** is how many points the underlying has to travel to
-  take the trade to +50% or −50%, from the strikes shown.
+- **Underlying move** is how many points the underlying has to travel to
+  take the trade to +50% (the target) or −50% (the stop), from the strikes
+  shown.
 
 **"No measured edge" is the usual, honest answer.** Most mornings no bucket
 beats its usual rate by more than chance, and then the page shows only the usual

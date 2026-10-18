@@ -24,8 +24,9 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
      `services/options_svc/data/scalp.db`, `tools/scalp_backfill.py`, and the
      `[slots.scalp]` (08:36) / `[slots.scalp_bars]` (16:20) scheduler branches.
      Dated history goes through the proxy's existing `/passthrough`: no proxy
-     change, so this work does not restrict a promote's timing.
-  2. *The study* (`22fa688`, `57bc84e`, `d1c6b06`, `d8b5e11`, `6a7a8fd`): a
+     change. A promote still stops the whole target, including the GEX collector
+     inside `options_svc`, so promote outside 06:30-15:20 CT on a trading day.
+  2. *The study* (`22fa688`, `57bc84e`, `d1c6b06`, `6a7a8fd`): a
      Black-Scholes trade simulator along the real bars, the morning's measured
      inputs, outcomes with a walk-forward verdict per bucket, and
      `tools/scalp_study_report.py`. Written up before any page was built.
@@ -39,6 +40,11 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
      runs top-up, then study rebuild, then grading; grades are write-once; the
      chain-implied volatility is solved at the spot the chain was quoted
      against.
+- Unrelated fix on the same branch: `d8b5e11` (`fix(public)`: the request-key
+  tests pinned to their fixed day).
+- The page reads "today" from the Central clock (a fix after review): without
+  it, Friday's call read "Today's call" on Monday morning, since the service
+  publishes `waiting` / `closed` only when the 08:36 slot runs.
 - The new `numbers` field kind (a list of numbers) in Settings → Configuration
   carries `[study] iv_scales`.
 - Docs: User Guide, Reference Guide, Technical Reference (new *Opening Scalp*
