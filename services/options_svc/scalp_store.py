@@ -3,7 +3,9 @@
 ``services/options_svc/data/scalp.db`` (``repo_paths.SCALP_DB``). It is gitignored
 like every ``*.db`` and the nightly backup sweeps it with no list to edit.
 Later tasks add their own tables through ``connect`` (the schema is
-``CREATE TABLE IF NOT EXISTS``, run on every connection).
+``CREATE TABLE IF NOT EXISTS``, run on every connection): the study's
+``outcomes``, ``mornings`` and ``verdicts`` are written only by
+``scalp_study.rebuild``.
 
 Pure: ``sqlite3``, ``zlib``, ``json`` and ``repo_paths`` only; it imports nothing
 from ``compute`` and calls no network. Every function takes ``db_path=None`` and
@@ -38,6 +40,34 @@ CREATE TABLE IF NOT EXISTS chain_slices (
     ts     INTEGER NOT NULL,
     body   BLOB    NOT NULL,
     PRIMARY KEY (day, symbol)
+);
+CREATE TABLE IF NOT EXISTS outcomes (
+    day          TEXT    NOT NULL,
+    symbol       TEXT    NOT NULL,
+    iv_scale     REAL    NOT NULL,
+    role         TEXT    NOT NULL,
+    structure    TEXT    NOT NULL,
+    bucket       TEXT,
+    result       TEXT    NOT NULL,
+    minutes      INTEGER,
+    entry_value  REAL,
+    end_pnl_pct  REAL,
+    both_in_bar  INTEGER NOT NULL,
+    interval     INTEGER NOT NULL,
+    PRIMARY KEY (day, symbol, iv_scale, role, interval)
+);
+CREATE TABLE IF NOT EXISTS mornings (
+    day    TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    json   TEXT NOT NULL,
+    PRIMARY KEY (day, symbol)
+);
+CREATE TABLE IF NOT EXISTS verdicts (
+    symbol TEXT NOT NULL,
+    role   TEXT NOT NULL,
+    bucket TEXT NOT NULL,
+    json   TEXT NOT NULL,
+    PRIMARY KEY (symbol, role, bucket)
 );
 """
 

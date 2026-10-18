@@ -19,7 +19,7 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from services import _heartbeat
-from services.options_svc import compute, finder_public, flow_stream, handlers, scalp_chain, scalp_fetch
+from services.options_svc import compute, finder_public, flow_stream, handlers, scalp_chain, scalp_fetch, scalp_study
 from shared import market_calendar as mc
 from shared import trade_mgmt as _trade_mgmt
 from shared.market_calendar import is_trading_day as _cal_is_trading_day
@@ -1093,9 +1093,10 @@ async def loop(bus):
             branches.append(("scalp", _scalp_branch()))
 
         # Opening Scalp bar top-up - the nightly price-history fetch into
-        # scalp.db. Latched BEFORE it runs, like income: a slow pass can only
-        # delay itself. Nothing is published; a failure leaves a degrade count
-        # and the next night starts from the store's latest bar.
+        # scalp.db, then the study rebuild over it. Latched BEFORE it runs,
+        # like income: a slow pass can only delay itself. Nothing is published;
+        # a failure leaves a degrade count and the next night starts from the
+        # store's latest bar.
         try:
             bars_slot = scalp_bars_due(now, scalp_bars_ran)
             if bars_slot:
@@ -1114,6 +1115,15 @@ async def loop(bus):
                     log.warning("scalp bar top-up failed for %s", ", ".join(failed))
             except Exception:
                 log.exception("scalp bar top-up branch degraded")
+            # The study replays every stored morning from the bars just topped
+            # up. Guarded on its own: a failed top-up still rebuilds from what
+            # the store holds, and a failed rebuild leaves the previous study.
+            try:
+                counts = await loop_.run_in_executor(None, scalp_study.rebuild)
+                log.info("scalp study rebuilt: %d morning(s), %d outcome row(s) in %.1fs",
+                         counts["mornings"], counts["outcomes"], counts["seconds"])
+            except Exception:
+                log.exception("scalp study rebuild degraded")
 
         if bars_slot:
             branches.append(("scalp_bars", _scalp_bars_branch()))
