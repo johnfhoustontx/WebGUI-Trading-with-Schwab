@@ -704,6 +704,14 @@ _SESSIONS = ConfigFile(
                   kind="int", unit="min", min=1, max=120, step=1),
             Field("slots.income.*", "", "", kind="time"),
         ), restart=(OPTIONS,)),
+        Section("Opening Scalp chain capture", "The 0DTE chain each scalp symbol "
+                "is saved with every morning. Not 08:35: the autoscan fetches "
+                ":32 to :35 and Schwab refuses the first minute after the half hour.", (
+            Field("slots.scalp.grace_min", "Fire if late by at most",
+                  "A capture is only worth taking near the open, so keep this short.",
+                  kind="int", unit="min", min=1, max=120, step=1),
+            Field("slots.scalp.*", "", "", kind="time"),
+        ), restart=(OPTIONS,)),
         Section("Opening Scalp bar top-up", "The nightly price-bar fetch the "
                 "Opening Scalp study reads. Keep it after the 16:00 flow report.", (
             Field("slots.scalp_bars.grace_min", "Fire if late by at most",

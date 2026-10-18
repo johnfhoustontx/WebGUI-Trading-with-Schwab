@@ -183,6 +183,15 @@ grace_min = 20
 # 08:52 starts after that rescan's ~3 min of fetches and ends before 09:00's.
 morning = "08:52"     # 09:52 ET
 
+[slots.scalp]
+# The Opening Scalp's morning chain capture (scalp_chain.capture_all): each scalp
+# symbol's 0DTE chain, cut to the strikes near the money, kept in scalp.db to
+# calibrate the volatility the study assumes.
+# 08:36, not 08:35 - the autoscan fetches :32-:35 and Schwab refuses the first
+# minute after the half hour. Check the proxy access log before moving it.
+grace_min = 20
+call = "08:36"        # 09:36 ET
+
 [slots.scalp_bars]
 # The Opening Scalp's nightly price-bar top-up (scalp_fetch.top_up): 1- and
 # 5-minute history for every [bars] symbol in config/scalp.toml, fetched through

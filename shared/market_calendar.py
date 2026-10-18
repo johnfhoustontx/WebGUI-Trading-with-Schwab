@@ -293,6 +293,10 @@ _DEFAULTS = {
         # is ever wanted, is then one line rather than a reshaped table.
         "income": {"grace_min": 20, "morning": "08:52"},
         "finder_public": {"grace_min": 20, "warm": "09:08"},
+        # The Opening Scalp's morning chain capture (options_svc/scalp_chain):
+        # 08:36, not 08:35 - the autoscan fetches :32-:35 and Schwab refuses the
+        # first minute after the half hour.
+        "scalp": {"grace_min": 20, "call": "08:36"},
         # The Opening Scalp's nightly bar top-up (options_svc/scalp_fetch):
         # after the 16:00 flow-delta report and the 15:20 collection stop.
         "scalp_bars": {"grace_min": 120, "close": "16:20"},

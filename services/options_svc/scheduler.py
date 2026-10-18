@@ -19,7 +19,7 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from services import _heartbeat
-from services.options_svc import compute, finder_public, flow_stream, handlers, scalp_fetch
+from services.options_svc import compute, finder_public, flow_stream, handlers, scalp_chain, scalp_fetch
 from shared import market_calendar as mc
 from shared import trade_mgmt as _trade_mgmt
 from shared.market_calendar import is_trading_day as _cal_is_trading_day
@@ -456,6 +456,33 @@ def income_slot_due(now, ran_slots):
     return None
 
 
+# ── Opening Scalp morning chain capture (see config/sessions.toml [slots.scalp]) ──
+# ONE pass at 08:36 CT: three symbols, one 0DTE chain each, through the proxy.
+# Mirrors ``income_slot_due``.
+_SCALP_CALL_SLOTS = {k: (t.hour, t.minute)
+                     for k, t in mc.slot_times("scalp").items()}
+_SCALP_CALL_GRACE_MIN = mc.slot_grace_min("scalp")
+
+
+def scalp_call_due(now, ran_slots):
+    """Name of the Opening Scalp capture slot due now, or None.
+
+    Fires once per trading day when ``target <= now < target + grace`` and that
+    ``(date, slot)`` is not in ``ran_slots``; the caller records it. Mirrors
+    ``income_slot_due``."""
+    if not _is_trading_day(now):
+        return None
+    import datetime as _dt
+    day = now.date().isoformat()
+    for name, (h, m) in _SCALP_CALL_SLOTS.items():
+        if (day, name) in ran_slots:
+            continue
+        target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if target <= now < target + _dt.timedelta(minutes=_SCALP_CALL_GRACE_MIN):
+            return name
+    return None
+
+
 # ── Opening Scalp nightly bar top-up (see config/sessions.toml [slots.scalp_bars]) ──
 # ONE pass a day after the close, 16:20 CT: about 13 symbols x 2 intervals, one
 # price-history call each, through the proxy. Mirrors ``income_slot_due``.
@@ -676,6 +703,7 @@ async def loop(bus):
     action_alert_ran = set()  # (date, slot) of fired action-alert pushes (see action_alert_due)
     income_ran = set()  # (date, slot) of fired income-window scans (see income_slot_due)
     finder_warm_ran = set()  # (date, slot) of fired public-Finder warm-ups
+    scalp_call_ran = set()  # (date, slot) of fired Opening Scalp chain captures (see scalp_call_due)
     scalp_bars_ran = set()  # (date, slot) of fired Opening Scalp bar top-ups (see scalp_bars_due)
     eod_summary_ran = set()  # (date, slot) of fired EOD-summary pushes (see eod_summary_due)
     market_snapshot_ran = set()  # (date, "HH:MM") of fired market-snapshot pushes (see market_snapshot_due)
@@ -1038,6 +1066,31 @@ async def loop(bus):
 
         if inc_slot:
             branches.append(("income", _income_branch()))
+
+        # Opening Scalp morning capture - the three 0DTE chains into scalp.db.
+        # Latched BEFORE it runs, like income. Phase 1 saves chains only; the
+        # call itself joins this branch later.
+        try:
+            call_slot = scalp_call_due(now, scalp_call_ran)
+            if call_slot:
+                scalp_call_ran.add((now.date().isoformat(), call_slot))
+        except Exception:
+            log.exception("scalp_call_due gate degraded")
+            call_slot = None
+
+        async def _scalp_branch():
+            try:
+                saved = await loop_.run_in_executor(None, scalp_chain.capture_all)
+                missed = sorted(s for s, v in saved.items() if v is None)
+                log.info("scalp chain capture saved %d of %d",
+                         len(saved) - len(missed), len(saved))
+                if missed:
+                    log.warning("scalp chain capture missed %s", ", ".join(missed))
+            except Exception:
+                log.exception("scalp chain capture branch degraded")
+
+        if call_slot:
+            branches.append(("scalp", _scalp_branch()))
 
         # Opening Scalp bar top-up - the nightly price-history fetch into
         # scalp.db. Latched BEFORE it runs, like income: a slow pass can only
