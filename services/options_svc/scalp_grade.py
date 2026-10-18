@@ -20,7 +20,9 @@ as published - and never the view, the study's rates or a recomputation:
 * a path with fewer bars than ``time_stop_min`` / 5 is not graded yet (nothing is
   written; the next nightly run tries again), and a short session is not graded
   at all, for the reason the study skips it (the model settles at 15:00 CT);
-* grading is idempotent (``INSERT OR REPLACE`` per day, symbol and role).
+* grading is write-once per day, symbol and role: a role already graded is never
+  recomputed (a later night's ``iv_scale`` or bars must not rewrite it), so
+  running it again is a no-op for what is finished;
 
 The calibration is stored beside it: per day and symbol, the chain's
 at-the-money volatility over the morning's volatility reading
@@ -51,10 +53,16 @@ def _modelled_sigma(entry):
     return None if vol is None or vol <= 0 else vol * scalp_config.iv_scale()
 
 
-def _chain_sigma(slice_, day, structure, strikes, spot, when):
+def _chain_sigma(slice_, day, structure, strikes, when):
     """The volatility implied by the slice's mid for the contract the role is
     long, or SHORT for a spread; None when the slice, the quote or the solver
-    gives nothing."""
+    gives nothing. The solve pairs the mid with the spot the chain itself was
+    quoted against (its ``underlyingPrice``, ~08:36), never the 08:30 bar close the
+    walk starts from: a mid and a spot a minute apart imply a different volatility.
+    Time to expiry is still the 08:35 entry's."""
+    spot = _finite(slice_.get("underlyingPrice")) if isinstance(slice_, dict) else None
+    if spot is None or spot <= 0:
+        return None
     legs = scalp_call.chain_legs(slice_, day, structure, strikes)
     if legs is None:
         return None
@@ -87,7 +95,7 @@ def _calibration(day, symbol, entry):
     return (day.isoformat(), symbol, atm, vol, atm / vol)
 
 
-def _grade_rows(day, symbol, entry, path, slice_) -> list:
+def _grade_rows(day, symbol, entry, path, slice_, done=frozenset()) -> list:
     spot = _finite(entry.get("entry_spot"))
     stamp = _finite(entry.get("entry_ts"))
     when = scalp_fetch.ct(int(stamp))
@@ -95,6 +103,8 @@ def _grade_rows(day, symbol, entry, path, slice_) -> list:
     avoid = entry.get("avoid") or []
     rows = []
     for role, body in entry["roles"].items():
+        if role in done:
+            continue            # write-once: a finished grade is never recomputed
         structure = body.get("structure")
         raw = body.get("strikes")
         model = chain = None
@@ -102,7 +112,7 @@ def _grade_rows(day, symbol, entry, path, slice_) -> list:
             strikes = (float(raw[0]), float(raw[1]) if len(raw) > 1 else None)
             model = _result(structure, spot, strikes, when, day, model_sigma, path)
             chain = _result(structure, spot, strikes, when, day,
-                            _chain_sigma(slice_, day, structure, strikes, spot, when),
+                            _chain_sigma(slice_, day, structure, strikes, when),
                             path)
         rows.append((day.isoformat(), symbol, role, structure or "", model, chain,
                      int(entry.get("highlight") == role), int(role in avoid),
@@ -110,19 +120,38 @@ def _grade_rows(day, symbol, entry, path, slice_) -> list:
     return rows
 
 
+def _graded_roles(day, db_path) -> dict:
+    """``{symbol: {role, ...}}`` already graded for ``day``."""
+    conn = scalp_store.connect(db_path)
+    try:
+        found = conn.execute("SELECT symbol, role FROM grades WHERE day = ?",
+                             (day.isoformat(),)).fetchall()
+    finally:
+        conn.close()
+    out = {}
+    for symbol, role in found:
+        out.setdefault(symbol, set()).add(role)
+    return out
+
+
 def grade_day(day, db_path=None) -> int:
     """Grade every published role of ``day`` (a date or ``YYYY-MM-DD``) whose
     five-minute path is complete; returns the grade rows written. A symbol whose
     path is short of bars is left for the next run, and one failing never stops
-    the others."""
+    the others. Grades are WRITE-ONCE: a role already graded is skipped, so a day
+    that stays pending for one symbol never rewrites the others' finished grades
+    at a later night's ``iv_scale`` or bars."""
     day = _date(day)
     calls = {s: e for s, e in scalp_store.calls_on(day.isoformat(), db_path=db_path).items()
              if scalp_call._is_call(e)}
     if not calls or scalp_study._short(day, db_path):
         return 0
+    graded = _graded_roles(day, db_path)
     grade_rows, calibration = [], []
     for symbol, entry in calls.items():
         try:
+            if set(entry["roles"]) <= graded.get(symbol, set()):
+                continue
             spot, stamp = _finite(entry.get("entry_spot")), _finite(entry.get("entry_ts"))
             if spot is None or stamp is None:
                 continue
@@ -135,7 +164,8 @@ def grade_day(day, db_path=None) -> int:
                 continue
             grade_rows += _grade_rows(day, symbol, entry, path,
                                       scalp_store.chain_slice(day.isoformat(), symbol,
-                                                              db_path=db_path))
+                                                              db_path=db_path),
+                                      graded.get(symbol, set()))
         except Exception:
             _degrade.degraded("options.scalp_grade", detail=f"{day} {symbol}")
     conn = scalp_store.connect(db_path)

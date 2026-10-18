@@ -1229,7 +1229,8 @@ past mornings that looked like this one. **It does not place trades** — you de
   **model's** (priced from the volatility index, the one the study uses) and the
   **live chain's** (the same walk at the volatility the 08:36 chain implied; a dash when
   no chain was captured that morning). A day whose bars are not all in yet is graded the
-  next evening. A handful of days says very little; read it as a record, not a verdict.
+  next evening. A call made on a shortened session (a half day) is not graded, because the
+  model's settlement time would be wrong. A handful of days says very little; read it as a record, not a verdict.
 
 > The win rates are **walk-forward tested** on stored data and the premiums are modelled,
 > so read them as how often a method like this has worked, not as a promise of fills.

@@ -1233,7 +1233,9 @@ has not had all of its 60 minutes of bars is left for the next night. Three part
   chain** (the same walk at the volatility implied by the 08:36 chain's quote for the
   contract bought, or the short leg of a spread; a dash where no chain was captured).
 
-Both are modelled results, not fills, and a few days is a small sample. The nightly
+Both are modelled results, not fills, and a few days is a small sample. A call made on a
+shortened session (a half day) is not graded, because the model's settlement time would
+be wrong there. A grade is written once and never recomputed. The nightly
 grading also records, per day, the chain's at-the-money volatility against the morning's
 volatility reading; the study report (`tools/scalp_study_report.py`) prints the median
 of that ratio per symbol as its **Volatility calibration**.

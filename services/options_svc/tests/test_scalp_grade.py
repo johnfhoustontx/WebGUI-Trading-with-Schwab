@@ -218,7 +218,7 @@ def test_a_refresh_or_a_changed_view_cannot_change_a_grade(db, bus):
     scalp_call.run(bus, now=NOW.replace(hour=17), db_path=db, client=FakeClient(later))
     bus.cache_set(scalp_call.VIEW, {"day": ISO, "state": "call", "symbols": {
         "SPY": {"direction": -1, "roles": {}}}}, event=scalp_call.EVENT)
-    assert scalp_grade.grade_day(ISO, db_path=db) == len(first)
+    assert scalp_grade.grade_day(ISO, db_path=db) == 0      # write-once: nothing to do
     assert grades(db) == first
 
 
@@ -227,8 +227,54 @@ def test_grading_is_idempotent(db, bus):
     seed_path(db)
     a = scalp_grade.grade_day(ISO, db_path=db)
     rows = grades(db)
-    assert scalp_grade.grade_day(ISO, db_path=db) == a
+    assert scalp_grade.grade_day(ISO, db_path=db) == 0
     assert grades(db) == rows and len(rows) == a
+
+
+def test_a_finished_grade_is_never_rewritten_but_a_new_symbol_still_is_graded(
+        db, bus, monkeypatch):
+    # QQQ's bars are late, so the day stays pending after $SPX and SPY are graded.
+    publish(db, bus)
+    seed_path(db, symbols=("$SPX", "SPY"))
+    assert scalp_grade.grade_day(ISO, db_path=db) == 2 * len(ROLES)
+    first = grades(db)
+    assert scalp_grade.pending_days(db_path=db) == [ISO]
+    # A later night runs at another volatility multiplier and re-walks the day:
+    # what is finished must stay exactly as it was graded.
+    monkeypatch.setattr(scalp_config, "iv_scale", lambda: 1.5)
+    walks = []
+    real = scalp_sim.simulate
+    monkeypatch.setattr(scalp_sim, "simulate",
+                        lambda *a, **k: walks.append(a[0]) or real(*a, **k))
+    assert scalp_grade.grade_day(ISO, db_path=db) == 0
+    assert walks == [] and grades(db) == first
+    seed_path(db, symbols=("QQQ",))             # QQQ's bars arrive
+    assert scalp_grade.grade_day(ISO, db_path=db) == len(ROLES)
+    after = grades(db)
+    assert [r for r in after if r["symbol"] != "QQQ"] == first
+    assert len(by_role(after, "QQQ")) == len(ROLES)
+    assert scalp_grade.pending_days(db_path=db) == []
+
+
+def test_chain_vol_is_solved_at_the_slices_own_spot(db, bus):
+    publish(db, bus)
+    entry = scalp_store.calls_on(ISO, db_path=db)["SPY"]
+    slice_ = scalp_store.chain_slice(ISO, "SPY", db_path=db)
+    quoted = entry_spot("SPY") * 1.004          # the chain was quoted four ticks higher
+    slice_["underlyingPrice"] = quoted
+    when = scalp_grade.scalp_fetch.ct(entry["entry_ts"])
+    oc = scalp_sim._calc()
+    T = oc.expiry_time_to_years(when, DAY)
+    mid = scalp_call._quote_mid(scalp_call.chain_legs(slice_, DAY, "long_call",
+                                                      (501.0, None))[0])
+    got = scalp_grade._chain_sigma(slice_, DAY, "long_call", (501.0, None), when)
+    assert got == pytest.approx(oc.implied_vol(mid, quoted, 501.0, T, oc.RISK_FREE_RATE,
+                                               "call"))
+    at_entry = oc.implied_vol(mid, entry["entry_spot"], 501.0, T, oc.RISK_FREE_RATE,
+                              "call")
+    assert at_entry is None or abs(got - at_entry) > 1e-3     # the pairing matters
+    slice_.pop("underlyingPrice")               # no spot, no solve
+    assert scalp_grade._chain_sigma(slice_, DAY, "long_call", (501.0, None), when) is None
 
 
 def test_an_incomplete_path_is_not_graded_yet(db, bus):

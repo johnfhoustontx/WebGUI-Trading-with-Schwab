@@ -1104,7 +1104,8 @@ usual rate; most symbols have none), **Cautions** (how often a trade marked to a
 still won, beside its usual rate: lower is the caution working) and a table of all four
 trades. Win rates are given twice: by the **model** (priced from the volatility index)
 and by the **live chain** (the volatility the 08:36 chain implied; a dash if no chain
-was captured). A few days is a small sample.
+was captured). A few days is a small sample. A call made on a shortened session
+(a half day) is not graded, because the model's settlement time would be wrong.
 """,
     "/news": """
 **Market News — the simple version**

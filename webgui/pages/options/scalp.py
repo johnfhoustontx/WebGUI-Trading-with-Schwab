@@ -633,7 +633,8 @@ def _scorecard_panel(scorecard):
                  "repeats the walk at the volatility the 08:36 chain implied. Neither "
                  "is a fill.").classes(_SMALL)
         for name, card in cards:
-            ui.label(f"{name} · {_days_word(card.get('days'))} graded")                 .classes(f"text-base font-semibold {_t.LABEL}")
+            ui.label(f"{name} · {_days_word(card.get('days'))} graded").classes(
+                f"text-base font-semibold {_t.LABEL}")
             ui.label(edge_line(card)).classes("text-sm")
             ui.label(caution_line(card)).classes("text-sm")
             kit.table(scorecard_columns(), scorecard_rows(card),
