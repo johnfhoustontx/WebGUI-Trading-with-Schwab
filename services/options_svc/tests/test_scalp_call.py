@@ -199,46 +199,147 @@ def test_a_morning_call_is_built_from_the_store_and_the_live_chain(db):
     json.dumps(payload, allow_nan=False)
 
 
-def test_the_call_is_frozen_in_the_store_as_built(db):
+def test_build_saves_nothing_run_saves_what_it_published(db, bus):
     _seeded(db)
-    payload = scalp_call.build(DAY, NOW, db_path=db, client=FakeClient())
+    scalp_call.build(DAY, NOW, db_path=db, client=FakeClient())
+    assert scalp_store.calls_on("2026-10-19", db_path=db) == {}
+    scalp_call.run(bus, now=NOW, db_path=db, client=FakeClient())
+    published = bus.cache_get(scalp_call.VIEW).payload["symbols"]
     saved = scalp_store.calls_on("2026-10-19", db_path=db)
     assert set(saved) == set(PRICES)
-    assert saved["SPY"] == json.loads(json.dumps(payload["symbols"]["SPY"]))
+    assert saved["SPY"] == json.loads(json.dumps(published["SPY"]))
+    assert saved["SPY"]["made_at"] == NOW.isoformat()
 
 
-def test_a_refresh_never_recomputes_the_probability_that_was_shown(db):
-    # After 16:20 the rebuild adds today's outcome to the store: a later refresh
-    # of the same day must show (and keep) the 08:36 probability.
+def _other_chains():
+    """A later, different market: every quote and volatility moved."""
+    return {s: make_chain(s, iv=30.0, spot=entry_spot(s) * 1.01) for s in PRICES}
+
+
+def test_a_refresh_reuses_the_published_call_whole(db, bus):
+    # After 16:20 the rebuild adds today's outcome to the store, and the chain
+    # has moved: a refresh must show (and keep) exactly the 08:36 call.
     _seeded(db)
-    first = scalp_call.build(DAY, NOW, db_path=db, client=FakeClient())
+    scalp_call.run(bus, now=NOW, db_path=db, client=FakeClient())
+    first = bus.cache_get(scalp_call.VIEW).payload["symbols"]
+    slices = {s: scalp_store.chain_slice("2026-10-19", s, db_path=db) for s in PRICES}
     seed_study(db, "SPY", {r: (30, 30) for r in ROLES}, edges=ROLES, start=100)
-    later = dt.datetime(2026, 10, 19, 17, 0, tzinfo=CT)
-    again = scalp_call.build(DAY, later, db_path=db, client=FakeClient())
-    for role in ROLES:
-        a, b = first["symbols"]["SPY"]["roles"][role], again["symbols"]["SPY"]["roles"][role]
-        assert (a["p"], a["n"], a["edge"]) == (b["p"], b["n"], b["edge"])
-    assert again["symbols"]["SPY"]["highlight"] is None
-    assert scalp_store.calls_on("2026-10-19", db_path=db)["SPY"]["roles"]["long_with"]["p"] == 0.5
+    client = FakeClient(_other_chains())
+    for when in (dt.datetime(2026, 10, 19, 9, 0, tzinfo=CT),
+                 dt.datetime(2026, 10, 19, 17, 0, tzinfo=CT)):
+        scalp_call.run(bus, now=when, db_path=db, client=client)
+        again = bus.cache_get(scalp_call.VIEW).payload["symbols"]
+        assert again == first
+        for sym in PRICES:
+            b, a = again[sym], first[sym]
+            assert (b["chain"], b["sigma"], b["made_at"]) == (a["chain"], a["sigma"],
+                                                              a["made_at"])
+            for role in ROLES:
+                for key in ("entry_value", "entry_source", "win_points", "loss_points",
+                            "p", "n", "edge"):
+                    assert b["roles"][role][key] == a["roles"][role][key]
+            assert scalp_store.chain_slice("2026-10-19", sym, db_path=db) == slices[sym]
+    assert client.calls == []                    # nothing fetched for a frozen call
+    assert scalp_store.calls_on("2026-10-19", db_path=db)["SPY"] == first["SPY"]
+
+
+def test_only_the_symbols_not_yet_called_are_fetched(db, bus):
+    seed_morning(db, symbols=("$SPX", "QQQ"))
+    for sym in PRICES:
+        seed_study(db, sym, EVEN)
+    scalp_call.run(bus, now=NOW, db_path=db, client=FakeClient())
+    assert set(scalp_store.calls_on("2026-10-19", db_path=db)) == {"$SPX", "QQQ"}
+    seed_morning(db, symbols=("SPY",))           # SPY's bar arrives late
+    client = FakeClient()
+    later = dt.datetime(2026, 10, 19, 8, 50, tzinfo=CT)
+    scalp_call.run(bus, now=later, db_path=db, client=client)
+    assert [s for kind, s in client.calls if kind == "chain"] == ["SPY"]
+    saved = scalp_store.calls_on("2026-10-19", db_path=db)
+    assert saved["SPY"]["made_at"] == later.isoformat()
+    assert saved["QQQ"]["made_at"] == NOW.isoformat()
+
+
+def test_no_first_call_after_the_window(db, bus):
+    _seeded(db)
+    client = FakeClient()
+    ten = dt.datetime(2026, 10, 19, 10, 0, tzinfo=CT)
+    scalp_call.run(bus, now=ten, db_path=db, client=client)
+    view = bus.cache_get(scalp_call.VIEW).payload
+    for sym in PRICES:
+        assert view["symbols"][sym]["roles"] == {}
+        assert view["symbols"][sym]["note"] == "missed the call window"
+    assert scalp_store.calls_on("2026-10-19", db_path=db) == {}
+    assert client.calls == []
+
+
+def test_the_window_ends_at_entry_plus_the_time_stop(db, bus):
+    _seeded(db)
+    just_in = dt.datetime(2026, 10, 19, 9, 34, tzinfo=CT)
+    scalp_call.run(bus, now=just_in, db_path=db, client=FakeClient())
+    assert set(scalp_store.calls_on("2026-10-19", db_path=db)) == set(PRICES)
+
+
+def test_a_stored_call_refreshed_after_the_window_is_unchanged(db, bus):
+    _seeded(db)
+    scalp_call.run(bus, now=NOW, db_path=db, client=FakeClient())
+    first = bus.cache_get(scalp_call.VIEW).payload["symbols"]
+    ten = dt.datetime(2026, 10, 19, 10, 0, tzinfo=CT)
+    scalp_call.run(bus, now=ten, db_path=db, client=FakeClient(_other_chains()))
+    again = bus.cache_get(scalp_call.VIEW).payload["symbols"]
+    assert again == first
+    assert again["SPY"]["made_at"] == NOW.isoformat()
 
 
 def test_no_edge_sets_note_and_no_highlight(db):
     _seeded(db, SPY={"long_with": (27, 30), "long_against": (3, 30),
                      "credit_with": (15, 30), "credit_against": (15, 30)})
     spy = scalp_call.build(DAY, NOW, db_path=db, client=FakeClient())["symbols"]["SPY"]
-    assert spy["highlight"] is None
+    assert spy["highlight"] is None and spy["avoid"] == []
     assert spy["note"] == "no measured edge"
     assert spy["roles"]["long_with"]["edge"] is False
 
 
-def test_the_highlight_is_the_edge_role_with_the_highest_rate(db):
-    _seeded(db, **{"SPY": {"long_with": (27, 30), "long_against": (21, 30),
-                           "credit_with": (18, 30), "credit_against": (15, 30)},
-                   "SPY:edges": ("long_against", "credit_with")})
+def _with_base(db, high, low, edges):
+    """SPY's ``high``-bucket rates (today's bucket) and ``low``-bucket rows that
+    move the base rate; ``edges`` are verdicts in the high bucket."""
+    seed_morning(db)
+    for sym in PRICES:
+        seed_study(db, sym, EVEN)
+    seed_study(db, "SPY", high, edges=edges)
+    seed_study(db, "SPY", low, bucket="low", start=200)
+
+
+def test_an_edge_below_the_base_rate_is_to_avoid_not_a_call(db):
+    # The verdict is two-sided: this bucket reliably LOSES the long put.
+    _with_base(db, {"long_against": (6, 30)}, {"long_against": (24, 30)},
+               edges=("long_against",))
+    spy = scalp_call.build(DAY, NOW, db_path=db, client=FakeClient())["symbols"]["SPY"]
+    la = spy["roles"]["long_against"]
+    assert la["edge"] is True and la["p"] < la["p_base"]
+    assert spy["highlight"] is None
+    assert spy["avoid"] == ["long_against"]
+    assert spy["note"] == "no measured edge"
+
+
+def test_a_positive_edge_is_highlighted_over_a_negative_one(db):
+    _with_base(db, {"long_with": (24, 30), "long_against": (3, 30)},
+               {"long_with": (6, 30), "long_against": (27, 30)},
+               edges=("long_with", "long_against"))
+    spy = scalp_call.build(DAY, NOW, db_path=db, client=FakeClient())["symbols"]["SPY"]
+    assert spy["highlight"] == "long_with"
+    assert spy["avoid"] == ["long_against"]
+    assert spy["note"] is None
+
+
+def test_the_highlight_is_the_highest_rate_among_edges_above_base(db):
+    _with_base(db, {"long_with": (27, 30), "long_against": (21, 30),
+                    "credit_with": (18, 30)},
+               {"long_with": (3, 30), "long_against": (9, 30), "credit_with": (6, 30)},
+               edges=("long_against", "credit_with"))
     spy = scalp_call.build(DAY, NOW, db_path=db, client=FakeClient())["symbols"]["SPY"]
     # long_with has the highest rate but no measured edge: it is never the call.
     assert spy["highlight"] == "long_against"
-    assert spy["note"] is None
+    assert spy["note"] is None and spy["avoid"] == []
 
 
 def test_missing_open_bar_symbol_has_note_others_called(db):
@@ -314,6 +415,7 @@ def _no_fetch(monkeypatch):
     def boom(*a, **k):
         raise AssertionError("fetched")
     monkeypatch.setattr(scalp_fetch, "top_up", boom)
+    monkeypatch.setattr(scalp_chain, "capture", boom)
     monkeypatch.setattr(scalp_chain, "capture_all", boom)
     monkeypatch.setattr(scalp_call, "build", boom)
 
@@ -400,6 +502,54 @@ def test_invalid_payload_not_published(db, bus, monkeypatch):
     scalp_call.run(bus, now=NOW, db_path=db, client=FakeClient())
     assert bus.cache_get(scalp_call.VIEW) is None
     assert _degrade.counts().get("options.scalp_view") == 1
+    assert scalp_store.calls_on("2026-10-19", db_path=db) == {}
+
+
+def test_a_call_the_bus_refused_is_not_frozen(db, bus, monkeypatch):
+    _seeded(db)
+
+    def refused(*a, **k):
+        raise ConnectionError("redis down")
+    monkeypatch.setattr(bus, "cache_set", refused)
+    scalp_call.run(bus, now=NOW, db_path=db, client=FakeClient())     # never raises
+    assert scalp_store.calls_on("2026-10-19", db_path=db) == {}
+    assert _degrade.counts().get("options.scalp_publish") == 1
+
+
+# ── reading the chain ─────────────────────────────────────────────────────────
+
+def _spx_rows(day=DAY):
+    def c(root, strike, mid):
+        return {"symbol": f"{root:<6}261019C0{int(strike)}000", "bid": mid - 0.05,
+                "ask": mid + 0.05, "mark": mid, "putCall": "CALL"}
+    return {"callExpDateMap": {f"{day.isoformat()}:0": {
+        "5005.0": [c("SPX", 5005, 5.0), c("SPXW", 5005, 3.0)],
+        "5010.0": [c("SPX", 5010, 1.0)]}}}
+
+
+def test_a_spread_never_pairs_spx_with_spxw(db):
+    # On a third Friday a strike can list both roots. SPXW is preferred, but its
+    # long leg is missing, so the spread is the SPX pair, never SPXW - SPX.
+    rows = _spx_rows()
+    assert scalp_call._chain_value(rows, DAY, "ccs", (5005.0, 5010.0)) == pytest.approx(4.0)
+    rows["callExpDateMap"]["2026-10-19:0"]["5010.0"].append(
+        dict(rows["callExpDateMap"]["2026-10-19:0"]["5010.0"][0],
+             symbol="SPXW  261019C05010000", bid=1.45, ask=1.55, mark=1.5))
+    assert scalp_call._chain_value(rows, DAY, "ccs", (5005.0, 5010.0)) == pytest.approx(1.5)
+    # A long option reads the SPXW contract.
+    assert scalp_call._chain_value(rows, DAY, "long_call", (5005.0, None)) == pytest.approx(3.0)
+
+
+def test_only_an_expiry_dated_today_is_read(db):
+    rows = _spx_rows(day=dt.date(2026, 10, 20))
+    assert scalp_call._expiry_rows(rows, "callExpDateMap", DAY) == {}
+    assert scalp_call._chain_value(rows, DAY, "long_call", (5005.0, None)) is None
+    _seeded(db)
+    chains = {s: make_chain(s) for s in PRICES}
+    chains["SPY"] = make_chain("SPY", day=dt.date(2026, 10, 20))
+    spy = scalp_call.build(DAY, NOW, db_path=db, client=FakeClient(chains))["symbols"]["SPY"]
+    assert spy["chain"] is None and spy["sigma_source"] == "model"
+    assert {spy["roles"][r]["entry_source"] for r in ROLES} == {"model"}
 
 
 # ── the context block ────────────────────────────────────────────────────────

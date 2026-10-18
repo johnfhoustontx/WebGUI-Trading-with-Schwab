@@ -9,15 +9,20 @@ premium and the underlying points to the target and the stop.
 
 Rules that keep the number honest, each from the design or a review ruling:
 
-* **The probability is frozen when it is shown.** ``build`` saves every symbol's
-  call in ``scalp_store``'s ``calls`` table, and a later build of the same day
-  (a refresh after 16:20, when the nightly rebuild has added today's outcome to
-  the study) reuses the stored morning and rates and only re-prices the chain
-  side. Grading reads ``calls``; nothing recomputes "what was shown".
-* **No edge is said plainly.** ``highlight`` is the role whose stored verdict has
-  an edge, highest rate first; with none it is ``None`` and the note reads
-  ``"no measured edge"``. The page then shows base rates, never a bucket rate
-  dressed as a call.
+* **A published call stays as published.** ``run`` saves a symbol's call in
+  ``scalp_store``'s ``calls`` table only once it has passed ``ScalpView`` and
+  been written to the bus, stamped ``made_at``. A later build of the same day
+  reuses that entry WHOLE: nothing re-priced, its chain not fetched again (so
+  its saved slice is never replaced). Grading reads ``calls``.
+* **No late first call.** A symbol with no published call by entry +
+  ``time_stop_min`` (09:35 CT at the defaults) is refused (``"missed the call
+  window"``): its trade is over, and after the 16:20 rebuild the study's rates
+  hold the day's own outcome.
+* **No edge is said plainly.** The stored verdict is two-sided. ``highlight`` is
+  the role with an edge AND a rate above its base rate (the highest rate of
+  those); a role with an edge BELOW its base rate is listed in ``avoid``. With
+  no highlight the note reads ``"no measured edge"`` and the page shows base
+  rates, never a bucket rate dressed as a call.
 * **Absent stays absent.** A symbol with no opening bar or a flat one gets no
   direction, a note saying why, its inputs where there are any, and no roles;
   the others are still called. A failed chain prices from the model
@@ -28,11 +33,13 @@ Rules that keep the number honest, each from the design or a review ruling:
 * **Live premium where the chain has it**: a role's ``entry_value`` is the slice's
   mid ((bid + ask) / 2, else the mark) at its strikes - short minus long for a
   spread - and ``entry_source`` says ``"chain"``; otherwise it is the model's and
-  says ``"model"``. The point distances are always the model's, at the chain's
-  ATM volatility when it has one.
+  says ``"model"``. Both legs of a spread come from ONE root (never an SPX leg
+  against an SPXW leg), and only an expiry dated today is read. The point
+  distances are always the model's, at the chain's ATM volatility when it has
+  one.
 
 Before 08:35 on a trading day the view is ``"waiting"``, on a closed day
-``"closed"``; both keep the last saved call under ``symbols`` (``call_day`` says
+``"closed"``; both keep the last published call under ``symbols`` (``call_day`` says
 which day) and fetch NOTHING. An unexpected failure publishes ``"error"`` the
 same way, counted as a degrade. Every payload is checked against
 ``shared.contracts.options.ScalpView`` first; one that fails is not published.
@@ -44,6 +51,7 @@ the private app. Imports nothing from ``compute``.
 """
 import datetime as _dt
 import logging
+import re
 from zoneinfo import ZoneInfo
 
 from services import _degrade
@@ -67,19 +75,18 @@ NO_OPEN_BAR = "no opening bar yet"
 FLAT_OPEN = "opened flat — no direction"
 NO_VOL = "no usable volatility: no strikes or points"
 FAILED = "the call could not be built"
+MISSED = "missed the call window"
 
 #: A headline counts as about the index when it carries one of these tickers.
 _INDEX_TICKERS = frozenset({"SPY", "QQQ", "SPX", "$SPX", "ES", "/ES"})
-#: The study's answer per role, frozen with the call.
-_RATE_KEYS = ("p", "lo", "hi", "n", "p_base", "n_base", "edge")
-#: The morning's reading, frozen with the call (the rates were looked up for it).
-_MORNING_KEYS = ("direction", "bucket", "alignment", "entry_spot", "entry_ts",
-                 "inputs", "agree", "vol_at_entry", "vol_source")
 #: Minutes after the open the call waits for: the first five-minute bar.
 _ENTRY_AFTER_MIN = 5
 
 _CT = ZoneInfo("America/Chicago")
 _CALLS = ("long_call", "ccs")       # structures priced off the call map
+#: The 0DTE weekly root (scalp_chain.preferred_contract reads it the same way).
+_WEEKLY_ROOT = "SPXW"
+_ROOT_RE = re.compile(r"[A-Z]+")
 
 
 # ── small helpers ────────────────────────────────────────────────────────────
@@ -91,6 +98,18 @@ def _ct_now(now):
 
 def _entry_time(day) -> _dt.datetime:
     return _mc.regular_open_on(day) + _dt.timedelta(minutes=_ENTRY_AFTER_MIN)
+
+
+def _window_end(day) -> _dt.datetime:
+    """After this a NEW call is refused: the trade it would describe has ended,
+    and by the evening the study's rates hold the day's own outcome."""
+    return _entry_time(day) + _dt.timedelta(minutes=scalp_config.time_stop_min())
+
+
+def _is_call(entry) -> bool:
+    """A stored entry that is a real call (it has roles), and so is frozen."""
+    return (isinstance(entry, dict) and isinstance(entry.get("roles"), dict)
+            and bool(entry["roles"]))
 
 
 def _int(v):
@@ -118,15 +137,16 @@ def _next_call(day, state):
 
 # ── the chain side ───────────────────────────────────────────────────────────
 def _expiry_rows(slice_, name, day) -> dict:
-    """One map's ``{strike_key: [contract, ...]}`` for ``day``'s expiry."""
+    """One map's ``{strike_key: [contract, ...]}`` for ``day``'s expiry; ``{}``
+    when the slice has no expiry dated ``day`` (a later expiry is not 0DTE and
+    must never be priced as one)."""
     maps = slice_.get(name) if isinstance(slice_, dict) else None
     if not isinstance(maps, dict):
         return {}
     for key, rows in maps.items():
         if str(key).startswith(day.isoformat()) and isinstance(rows, dict):
             return rows
-    only = [v for v in maps.values() if isinstance(v, dict)]
-    return only[0] if len(only) == 1 else {}
+    return {}
 
 
 def _quote_mid(contract):
@@ -139,31 +159,46 @@ def _quote_mid(contract):
     return mark if mark is not None and mark > 0 else None
 
 
-def _leg_mid(rows, strike):
+def _root(contract) -> str:
+    """An option symbol's root (``SPXW`` of ``"SPXW  261019C05000000"``)."""
+    m = _ROOT_RE.match(str(contract.get("symbol") or "").strip().upper())
+    return m.group(0) if m else ""
+
+
+def _quoted(rows, strike) -> list:
+    """The contracts at ``strike`` with a usable mid, SPXW first."""
     for key, contracts in rows.items():
         try:
             k = float(key)
         except (TypeError, ValueError):
             continue
-        if abs(k - strike) < 1e-6:
-            c = scalp_chain.preferred_contract(
-                contracts, ok=lambda c: _quote_mid(c) is not None)
-            return None if c is None else _quote_mid(c)
-    return None
+        if abs(k - strike) < 1e-6 and isinstance(contracts, list):
+            usable = [c for c in contracts
+                      if isinstance(c, dict) and _quote_mid(c) is not None]
+            return sorted(usable, key=lambda c: _root(c) != _WEEKLY_ROOT)
+    return []
 
 
 def _chain_value(slice_, day, structure, strikes):
-    """The slice's mid for the structure (a spread: short mid - long mid), or
-    None when it lacks a strike or the value is not positive."""
+    """The slice's mid for the structure, or None when it lacks a strike or the
+    value is not positive. A spread is short mid - long mid with BOTH legs on
+    one root: on a third Friday a $SPX strike can list SPX and SPXW, and a pair
+    across them is two different contracts' prices, not a spread."""
     if slice_ is None:
         return None
     rows = _expiry_rows(slice_, "callExpDateMap" if structure in _CALLS
                         else "putExpDateMap", day)
     first, second = strikes
-    v = _leg_mid(rows, first)
-    if v is not None and second is not None:
-        long_leg = _leg_mid(rows, second)
-        v = None if long_leg is None else v - long_leg
+    v = None
+    for short in _quoted(rows, first):
+        if second is None:
+            v = _quote_mid(short)
+            break
+        long_leg = next((c for c in _quoted(rows, second)
+                         if _root(c) == _root(short)), None)
+        if long_leg is not None:
+            v = _quote_mid(short) - _quote_mid(long_leg)
+            break
     return v if v is not None and v > 0 else None
 
 
@@ -216,24 +251,22 @@ def _price(symbol, structure, spot, entry, day, sigma, slice_) -> dict:
             "win_points": _finite(win), "loss_points": _finite(loss)}
 
 
-def _symbol_call(symbol, day, slice_, stored, db_path) -> dict:
+def _symbol_call(symbol, day, slice_, db_path) -> dict:
+    """A fresh call for ``symbol`` from the store, the study and ``slice_``."""
     m = scalp_inputs.morning(symbol, day, 5, db_path=db_path)
     align = scalp_inputs.alignment(m)
     reading = _reading(m, align, scalp_model.bucket_of(align, scalp_config.buckets()))
-    rates = None
-    if isinstance(stored, dict) and isinstance(stored.get("roles"), dict) and stored["roles"]:
-        # Already shown today: the morning and its rates stay as they were.
-        reading.update({k: stored.get(k) for k in _MORNING_KEYS})
-        rates = {r: stored["roles"].get(r) or {} for r in scalp_sim.ROLES}
-
+    if slice_ is not None and not _expiry_rows(slice_, "callExpDateMap", day):
+        slice_ = None           # no expiry dated today: nothing 0DTE to read
     spot = reading["entry_spot"]
     iv = None
     if slice_ is not None:
         ref = spot or _finite(slice_.get("underlyingPrice"))
         iv = scalp_chain.atm_iv(slice_, ref) if ref else None
     entry = dict(reading, chain=_chain_summary(slice_, iv, day), sigma=None,
-                 sigma_source=None, roles={}, highlight=None, note=None, points_note=None)
-    if m.open_bar is None and rates is None:
+                 sigma_source=None, roles={}, highlight=None, avoid=[], note=None,
+                 points_note=None)
+    if m.open_bar is None:
         entry["note"] = NO_OPEN_BAR
         return entry
     if reading["direction"] not in (1, -1):
@@ -250,63 +283,106 @@ def _symbol_call(symbol, day, slice_, stored, db_path) -> dict:
         entry["points_note"] = NO_VOL
     entry["sigma"] = _finite(sigma)
 
-    if rates is None:
-        rates = scalp_study.current_rates(symbol, reading["bucket"], db_path=db_path)
+    rates = scalp_study.current_rates(symbol, reading["bucket"], db_path=db_path)
     when = scalp_fetch.ct(reading["entry_ts"])
     for role in scalp_sim.ROLES:
         structure = scalp_sim.structure_for(role, reading["direction"])
         priced = ({} if sigma is None else
                   _price(symbol, structure, spot, when, day, sigma, slice_))
         entry["roles"][role] = _role(rates.get(role) or {}, structure, priced)
-
-    edged = [r for r in scalp_sim.ROLES
-             if entry["roles"][r]["edge"] and entry["roles"][r]["p"] is not None]
-    if edged:
-        entry["highlight"] = max(edged, key=lambda r: entry["roles"][r]["p"])
-    else:
-        entry["note"] = NO_EDGE
+    _verdict(entry)
     return entry
+
+
+def _verdict(entry) -> None:
+    """``highlight``, ``avoid`` and ``note`` from the roles. The stored edge is
+    two-sided: a bucket that reliably LOSES more often than usual has one too.
+    Only an edge ABOVE the base rate is a call (the highest such rate wins); an
+    edge below it names a role to avoid. No call -> ``"no measured edge"``."""
+    roles = entry["roles"]
+
+    def side(r):
+        p, base = roles[r]["p"], roles[r]["p_base"]
+        if not roles[r]["edge"] or p is None or base is None:
+            return 0
+        return 1 if p > base else -1 if p < base else 0
+
+    better = [r for r in scalp_sim.ROLES if side(r) > 0]
+    entry["avoid"] = [r for r in scalp_sim.ROLES if side(r) < 0]
+    entry["highlight"] = max(better, key=lambda r: roles[r]["p"]) if better else None
+    entry["note"] = None if better else NO_EDGE
 
 
 # ── build and publish ────────────────────────────────────────────────────────
 def build(day: _dt.date, now: _dt.datetime, db_path=None, client=None) -> dict:
-    """Fetch today's bars and chains, call every scalp symbol, save each call in
-    ``calls`` and return the view's payload (``context`` is ``run``'s, it reads
-    the bus). One symbol failing never stops the others."""
+    """The view's payload for ``day`` (``context`` is ``run``'s: it reads the bus).
+
+    A symbol whose call was already PUBLISHED today is reused whole from
+    ``calls``: nothing re-priced, its chain not fetched again. A symbol with no
+    published call gets a fresh one, unless the call window (entry +
+    ``time_stop_min``) has passed: then it is refused (``MISSED``), because the
+    trade has ended and the study may already hold its outcome. Bars are topped
+    up and chains captured only when some symbol gets a fresh call, and only
+    that symbol's chain. Nothing is saved here: ``run`` saves what it actually
+    published. One symbol failing never stops the others."""
     iso = day.isoformat()
-    try:
-        failed = [k for k, n in scalp_fetch.top_up(db_path=db_path, client=client,
-                                                    today=day).items()
-                  if n == scalp_fetch.FAILED]
-        if failed:
-            log.warning("scalp call: bar top-up failed for %s", ", ".join(failed))
-    except Exception:
-        _degrade.degraded("options.scalp_topup")
-    try:
-        slices = scalp_chain.capture_all(day=iso, client=client, db_path=db_path)
-    except Exception:
-        _degrade.degraded("options.scalp_capture")
-        slices = {}
-    stored = scalp_store.calls_on(iso, db_path=db_path)
+    frozen = {s: e for s, e in scalp_store.calls_on(iso, db_path=db_path).items()
+              if _is_call(e)}
+    late = now >= _window_end(day)
+    todo = [s for s in scalp_config.symbols() if s not in frozen and not late]
+    slices = {}
+    if todo:
+        try:
+            failed = [k for k, n in scalp_fetch.top_up(db_path=db_path, client=client,
+                                                        today=day).items()
+                      if n == scalp_fetch.FAILED]
+            if failed:
+                log.warning("scalp call: bar top-up failed for %s", ", ".join(failed))
+        except Exception:
+            _degrade.degraded("options.scalp_topup")
+        for symbol in todo:
+            # capture() guards itself: a failure is None (the model prices it).
+            slices[symbol] = scalp_chain.capture(symbol, iso, client=client,
+                                                 db_path=db_path)
 
     symbols = {}
     for symbol in scalp_config.symbols():
+        if symbol in frozen:
+            symbols[symbol] = frozen[symbol]
+            continue
+        if late:
+            symbols[symbol] = {"direction": None, "roles": {}, "chain": None,
+                               "highlight": None, "avoid": [], "note": MISSED}
+            continue
         try:
-            entry = _symbol_call(symbol, day, slices.get(symbol), stored.get(symbol),
-                                 db_path)
+            entry = _symbol_call(symbol, day, slices.get(symbol), db_path)
         except Exception:
             _degrade.degraded("options.scalp_symbol", detail=symbol)
             entry = {"direction": None, "roles": {}, "chain": None, "highlight": None,
-                     "note": FAILED}
+                     "avoid": [], "note": FAILED}
+        entry["made_at"] = now.isoformat()
         symbols[symbol] = entry
-        scalp_store.save_call(iso, symbol, entry, db_path=db_path)
     return {"day": iso, "call_day": iso, "generated_at": now.isoformat(),
             "state": "call", "symbols": symbols, "rules": _rules(), "context": {},
             "scorecard": {}, "next_call": None}
 
 
+def _save_published(payload, db_path) -> None:
+    """Freeze every call just published that is not stored yet (a stored one was
+    reused whole, so it is the same entry)."""
+    day = payload.get("day")
+    try:
+        stored = scalp_store.calls_on(day, db_path=db_path)
+        for symbol, entry in (payload.get("symbols") or {}).items():
+            if _is_call(entry) and symbol not in stored:
+                scalp_store.save_call(day, symbol, entry, db_path=db_path)
+    except Exception:
+        _degrade.degraded("options.scalp_save")
+
+
 def _last_call(bus, db_path):
-    """``(day, symbols)`` of the most recent saved call, else the current view's."""
+    """``(day, symbols)`` of the most recent published call (``calls`` holds only
+    those), else the current view's."""
     try:
         last = scalp_store.latest_call_day(db_path=db_path)
         if last is not None:
@@ -346,6 +422,7 @@ def run(bus, now=None, db_path=None, client=None) -> None:
     ``"call"``. Never raises."""
     now = _ct_now(now)
     day = now.date()
+    built = False
     try:
         if not _mc.is_trading_day(day):
             payload = _held("closed", bus, day, now, db_path)
@@ -355,12 +432,20 @@ def run(bus, now=None, db_path=None, client=None) -> None:
             payload = build(day, now, db_path=db_path, client=client)
             payload["context"] = context(bus, day)
             payload["next_call"] = _next_call(day, "call")
+            built = True
     except Exception:
         _degrade.degraded("options.scalp_call")
         payload = _held("error", bus, day, now, db_path)
     if not _valid(payload):
         return
-    bus.cache_set(VIEW, payload, event=EVENT)
+    try:
+        bus.cache_set(VIEW, payload, event=EVENT)
+    except Exception:
+        _degrade.degraded("options.scalp_publish")
+        return
+    if built:
+        # Only now is it what the page was shown: freeze it.
+        _save_published(payload, db_path)
 
 
 # ── context: shown beside the call, NOT in the probability ──────────────────
