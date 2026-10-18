@@ -1149,111 +1149,6 @@ you already follow is worth more than a strong alert on a name you have never tr
 
 ---
 
-## Opening Scalp
-
-*Menu: MARKETS → Opening Scalp · Route `/options/scalp`*
-
-### What it is
-
-A morning read, not a signal. At **08:36 CT** on each trading day — after the first
-five minutes of the session — the app shows, for `$SPX`, SPY and QQQ, which way the
-open went, how many of your premarket inputs agree with it, and how often each of
-four same-day (0DTE) scalps has worked on past mornings that looked like this one.
-There are no trade buttons: you read it and decide.
-
-### Where the data comes from
-
-| | |
-|---|---|
-| Service | `options_svc` (:8211), `cache:options:scalp` |
-| Cadence | Built once at **08:36 CT** (`[slots.scalp]`); every evening at 16:20 CT (`[slots.scalp_bars]`) the day's bars are added, the study is rebuilt over them, and the day's calls are graded |
-| Tunables | `config/scalp.toml` — the target and stop, the time stop, strikes, buckets, minimum samples |
-| Refresh | The **Refresh** button enqueues `scalp_refresh` on `cmd:options`. A call already published today is kept as published, and no new call is built after 09:35 CT |
-| Grading | Each night after the study rebuild (16:20 CT, `[slots.scalp_bars]`) every published call is graded into `grades`; the **Scorecard** reads the last `[study] scorecard_days` (20) graded days |
-| Retention | A published call is kept for grading; the page shows the last call when the market is closed. The bar store (`scalp.db`) is kept forever and backed up: it holds price history Schwab no longer serves |
-
-### Reading the screen
-
-**Each symbol is a card.** Its header says **Opened up** or **Opened down** (a flat
-open names no direction and gets no call) and whether it is today's call or an
-earlier day's — on a closed day or before 08:36 the page keeps the last call on
-screen and labels its day, so yesterday's call is never read as today's. A line at
-the top says when the next call is due, or that the last refresh failed.
-
-**The headline is usually "No measured edge".** That is the honest, common answer,
-not an error: the study almost never finds a bucket that beats its usual rate by
-more than chance. Then the table shows only each trade's **usual win rate** — how
-often it has won over all past mornings.
-
-**The four trades** are named by that morning's contract. After an up open: **Long
-call** and **Put credit spread** are *with* the move, **Long put** and **Call
-credit spread** *against* it; a down open mirrors this. A **win** is the trade
-reaching +50% before −50% of its entry price inside 60 minutes. The win rates are
-always **modelled** (priced from the volatility index, with the target and stop
-measured along the real five-minute bars). The 08:36 chain sets only the **Entry**
-column, from its live quote where it quoted the strike (the row says **live quote**,
-else **modelled**), and the volatility the **Underlying move** distances are worked at
-(its at-the-money volatility, else the volatility index).
-
-**Columns.** Trade · **Usual win rate** · **This morning's rate** (the win rate on
-past mornings in the same agreement bucket, with its 95% interval underneath) ·
-**Samples** (bucket / all) · **Strikes** · **Entry** (a debit for a long option, a
-credit for a spread) · **Underlying move** (the points the underlying must travel to
-reach the target and the stop).
-
-**Marks.** **Measured edge** (green) appears on at most one row, and only when that
-bucket's rate is reliably *better* than usual — its rate, interval and sample count
-are then in the headline. **Caution: measured to lose more often than usual** (amber)
-marks a bucket reliably *worse* than usual; it is a reason to stay out, never a
-reason to take the opposite side. A row with neither mark is never a recommendation.
-
-**Morning inputs.** The overnight futures (Asia, Europe, the gap, the position in
-the overnight range), the sector ETFs, the volatility index, and how the opening bar
-closed and whether it broke the premarket range. Each reads **Agrees**,
-**Disagrees**, **No side taken (dead zone)** or **Absent**; an absent input is never
-counted as a disagreement. The opening range against its usual size is shown for
-information only. The share of inputs that agreed sorts the morning into a low, mid
-or high bucket.
-
-**Not in the probability.** The report link, index headlines and today's flow alerts
-on these symbols are shown for context only; none of them was measured or fed into
-the rates.
-
-**Scorecard.** The last card is the graded record, per symbol, over the last 20
-graded days (`scorecard_days`), republished into the view as soon as the night's
-grading is done. Grading uses only the call **as published** — its strikes, entry,
-highlight/avoid marks and its rules (target, stop, time stop, minimum premium and
-volatility multiplier) are frozen at 08:36 — and walks every one of
-the four trades along that day's five-minute bars, the highlighted or not. A trade that
-has not had all of its 60 minutes of bars is left for the next night. Three parts:
-
-- **Edge calls** — on the days a trade was highlighted, how often it won, beside the
-  average usual rate it was shown with. With no highlighted day it says so instead of
-  printing a rate.
-- **Cautions** — each time a trade was marked to avoid, whether it still won, beside its
-  usual rate. This is the check on the one signal the study found: a caution is working
-  when the win rate is below the usual one.
-- **The table** — all four trades: days, won, lost, timed out, and win rate **by the
-  model** (priced from the volatility index, as the study does) and **by the live
-  chain** (the same walk at the volatility implied by the 08:36 chain's quote for the
-  contract bought, or the short leg of a spread; a dash where no chain was captured).
-
-Both are modelled results, not fills, and a few days is a small sample. A call made on a
-shortened session (a half day) is not graded, because the model's settlement time would
-be wrong there. A grade is written once and never recomputed. The nightly
-grading also records, per day, the chain's at-the-money volatility against the morning's
-volatility reading; the study report (`tools/scalp_study_report.py`) prints the median
-of that ratio per symbol as its **Volatility calibration**.
-
-**Walk-forward tested** is the edge test, not the rates on screen. The usual rate and
-the bucket's rate are counted over every stored morning. Whether a bucket **beats** its
-usual rate is decided walk-forward: each past day is scored only from the days before
-it, so a **Measured edge** or a **Caution** is what the method would have said at the
-time, not a fit to the whole history. A bucket needs at least `[study] min_samples`
-(20) scored mornings before it can be marked either way.
-
----
-
 ## Market News
 
 *Menu: MARKETS → Market News · Route `/news`*
@@ -3760,6 +3655,111 @@ in a symbol you are short premium in.
 
 [Captured Signals](#captured-signals) · [Paper Ledger](#paper-ledger) ·
 [Simulator](#simulator) (to model a repair before applying it).
+
+---
+
+## Opening Scalp
+
+*Menu: STRATEGY → Opening Scalp · Route `/options/scalp`*
+
+### What it is
+
+A morning read, not a signal. At **08:36 CT** on each trading day — after the first
+five minutes of the session — the app shows, for `$SPX`, SPY and QQQ, which way the
+open went, how many of your premarket inputs agree with it, and how often each of
+four same-day (0DTE) scalps has worked on past mornings that looked like this one.
+There are no trade buttons: you read it and decide.
+
+### Where the data comes from
+
+| | |
+|---|---|
+| Service | `options_svc` (:8211), `cache:options:scalp` |
+| Cadence | Built once at **08:36 CT** (`[slots.scalp]`); every evening at 16:20 CT (`[slots.scalp_bars]`) the day's bars are added, the study is rebuilt over them, and the day's calls are graded |
+| Tunables | `config/scalp.toml` — the target and stop, the time stop, strikes, buckets, minimum samples |
+| Refresh | The **Refresh** button enqueues `scalp_refresh` on `cmd:options`. A call already published today is kept as published, and no new call is built after 09:35 CT |
+| Grading | Each night after the study rebuild (16:20 CT, `[slots.scalp_bars]`) every published call is graded into `grades`; the **Scorecard** reads the last `[study] scorecard_days` (20) graded days |
+| Retention | A published call is kept for grading; the page shows the last call when the market is closed. The bar store (`scalp.db`) is kept forever and backed up: it holds price history Schwab no longer serves |
+
+### Reading the screen
+
+**Each symbol is a card.** Its header says **Opened up** or **Opened down** (a flat
+open names no direction and gets no call) and whether it is today's call or an
+earlier day's — on a closed day or before 08:36 the page keeps the last call on
+screen and labels its day, so yesterday's call is never read as today's. A line at
+the top says when the next call is due, or that the last refresh failed.
+
+**The headline is usually "No measured edge".** That is the honest, common answer,
+not an error: the study almost never finds a bucket that beats its usual rate by
+more than chance. Then the table shows only each trade's **usual win rate** — how
+often it has won over all past mornings.
+
+**The four trades** are named by that morning's contract. After an up open: **Long
+call** and **Put credit spread** are *with* the move, **Long put** and **Call
+credit spread** *against* it; a down open mirrors this. A **win** is the trade
+reaching +50% before −50% of its entry price inside 60 minutes. The win rates are
+always **modelled** (priced from the volatility index, with the target and stop
+measured along the real five-minute bars). The 08:36 chain sets only the **Entry**
+column, from its live quote where it quoted the strike (the row says **live quote**,
+else **modelled**), and the volatility the **Underlying move** distances are worked at
+(its at-the-money volatility, else the volatility index).
+
+**Columns.** Trade · **Usual win rate** · **This morning's rate** (the win rate on
+past mornings in the same agreement bucket, with its 95% interval underneath) ·
+**Samples** (bucket / all) · **Strikes** · **Entry** (a debit for a long option, a
+credit for a spread) · **Underlying move** (the points the underlying must travel to
+reach the target and the stop).
+
+**Marks.** **Measured edge** (green) appears on at most one row, and only when that
+bucket's rate is reliably *better* than usual — its rate, interval and sample count
+are then in the headline. **Caution: measured to lose more often than usual** (amber)
+marks a bucket reliably *worse* than usual; it is a reason to stay out, never a
+reason to take the opposite side. A row with neither mark is never a recommendation.
+
+**Morning inputs.** The overnight futures (Asia, Europe, the gap, the position in
+the overnight range), the sector ETFs, the volatility index, and how the opening bar
+closed and whether it broke the premarket range. Each reads **Agrees**,
+**Disagrees**, **No side taken (dead zone)** or **Absent**; an absent input is never
+counted as a disagreement. The opening range against its usual size is shown for
+information only. The share of inputs that agreed sorts the morning into a low, mid
+or high bucket.
+
+**Not in the probability.** The report link, index headlines and today's flow alerts
+on these symbols are shown for context only; none of them was measured or fed into
+the rates.
+
+**Scorecard.** The last card is the graded record, per symbol, over the last 20
+graded days (`scorecard_days`), republished into the view as soon as the night's
+grading is done. Grading uses only the call **as published** — its strikes, entry,
+highlight/avoid marks and its rules (target, stop, time stop, minimum premium and
+volatility multiplier) are frozen at 08:36 — and walks every one of
+the four trades along that day's five-minute bars, the highlighted or not. A trade that
+has not had all of its 60 minutes of bars is left for the next night. Three parts:
+
+- **Edge calls** — on the days a trade was highlighted, how often it won, beside the
+  average usual rate it was shown with. With no highlighted day it says so instead of
+  printing a rate.
+- **Cautions** — each time a trade was marked to avoid, whether it still won, beside its
+  usual rate. This is the check on the one signal the study found: a caution is working
+  when the win rate is below the usual one.
+- **The table** — all four trades: days, won, lost, timed out, and win rate **by the
+  model** (priced from the volatility index, as the study does) and **by the live
+  chain** (the same walk at the volatility implied by the 08:36 chain's quote for the
+  contract bought, or the short leg of a spread; a dash where no chain was captured).
+
+Both are modelled results, not fills, and a few days is a small sample. A call made on a
+shortened session (a half day) is not graded, because the model's settlement time would
+be wrong there. A grade is written once and never recomputed. The nightly
+grading also records, per day, the chain's at-the-money volatility against the morning's
+volatility reading; the study report (`tools/scalp_study_report.py`) prints the median
+of that ratio per symbol as its **Volatility calibration**.
+
+**Walk-forward tested** is the edge test, not the rates on screen. The usual rate and
+the bucket's rate are counted over every stored morning. Whether a bucket **beats** its
+usual rate is decided walk-forward: each past day is scored only from the days before
+it, so a **Measured edge** or a **Caution** is what the method would have said at the
+time, not a fit to the whole history. A bucket needs at least `[study] min_samples`
+(20) scored mornings before it can be marked either way.
 
 ---
 

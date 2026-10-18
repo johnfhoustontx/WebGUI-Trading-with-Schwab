@@ -115,7 +115,6 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#the-two-hedging-flow-alerts">The two hedging-flow alerts</a></li>
 </ul>
 </li>
-<li><a href="#opening-scalp">Opening Scalp</a></li>
 <li><a href="#market-news">Market News</a></li>
 <li><a href="#market-dashboard">Market Dashboard</a></li>
 <li><a href="#sentiment">Sentiment</a></li>
@@ -148,6 +147,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#paper-account">Paper Account</a></li>
 <li><a href="#shares">Shares</a></li>
 <li><a href="#rescue">Rescue</a></li>
+<li><a href="#opening-scalp">Opening Scalp</a></li>
 <li><a href="#strategy-finder">Strategy Finder</a></li>
 <li><a href="#overview">Overview</a></li>
 <li><a href="#evidence">Evidence</a></li>
@@ -1588,62 +1588,6 @@ model)</strong>:</p>
 </ul>
 <p>Either switch applies to alerts fired <strong>after</strong> the change: each alert carries the
 setting it was fired under, so the rows already on today's list keep theirs.</p>
-<h2 id="opening-scalp">Opening Scalp</h2>
-<p><strong>Route:</strong> <code>/options/scalp</code>. A rail item under <strong>MARKETS</strong>, after Flow Alerts.</p>
-<p>A morning read for <code>$SPX</code>, SPY and QQQ, published at <strong>08:36 CT</strong> once the first
-five minutes are in. For each symbol it shows which way the market opened, how many of
-your premarket inputs agree, and how often four same-day (0DTE) scalps have worked on
-past mornings that looked like this one. <strong>It does not place trades</strong> — you decide.</p>
-<ul>
-<li><strong>Most mornings the answer is "No measured edge".</strong> That is normal, not an error: the
-  page then shows each trade's <strong>usual win rate</strong> and nothing more. Treat it as "nothing
-  here beats chance today".</li>
-<li>The four trades are named by that morning's contract (an up open: <strong>Long call</strong>, <strong>Long
-  put</strong>, <strong>Put credit spread</strong>, <strong>Call credit spread</strong>; a down open mirrors it), each
-  marked as <em>with</em> or <em>against</em> the opening move. A <strong>win</strong> means +50% before −50% within
-  60 minutes. The win rates are always <strong>modelled</strong> (priced from the volatility index);
-  the <strong>Entry</strong> column shows the live 08:36 quote where the chain had the strike and says
-  <strong>modelled</strong> where it did not, and the <strong>Underlying move</strong> distances use the chain's
-  volatility when there is one.</li>
-<li><strong>Measured edge</strong> marks the single trade whose bucket rate is reliably better than
-  usual (rare). <strong>Caution: measured to lose more often than usual</strong> marks a bucket that
-  is reliably worse — a reason to stay out, not to take the other side.</li>
-<li><strong>Morning inputs</strong> lists each premarket reading and whether it <strong>agrees</strong>,
-  <strong>disagrees</strong>, sits in the <strong>dead zone</strong>, or is <strong>absent</strong>. An absent input is never a
-  disagreement.</li>
-<li><strong>Refresh</strong> asks the service to rebuild the call. A call already shown today stays as
-  published; Refresh only fills in a symbol that has none yet, and no new call is built
-  after <strong>09:35 CT</strong>, an hour after the 08:35 entry, because the trade it would describe
-  is over by then. A symbol whose morning had a direction but was never called reads
-  <strong>missed the call window</strong>; one that opened flat or had no opening bar still says so,
-  with its inputs.</li>
-<li>Before 08:36 (a Refresh pressed at 08:35 waits for the 08:36 call too), on a closed
-  day, or after a failed refresh the page shows the <strong>last call</strong>, labelled with its
-  day, under a line saying when the next call is due.</li>
-<li><strong>Not in the probability</strong> (the report link, headlines, flow alerts) is context only.</li>
-<li><strong>Scorecard</strong> (the last card) is the record of how the published calls actually did.
-  Each evening, once the day's bars are in, the app <strong>grades</strong> every trade it showed that
-  morning, from the call as published (never from a later rebuild), under the target,
-  stop and time stop that call was made with (a setting changed later does not regrade
-  it), and the scorecard shows that evening's grades straight away. Per symbol, over the
-  last 20 graded days, it shows: <strong>Edge calls</strong>, how often the one highlighted trade won
-  beside the rate it usually wins (most symbols have none, and the line says so);
-  <strong>Cautions</strong>, how often a trade marked to avoid still won, beside its usual rate (the
-  caution is working when that is the lower number); and a table of all four trades with
-  their won / lost / timed-out counts and win rate. Two win rates sit side by side: the
-  <strong>model's</strong> (priced from the volatility index, the one the study uses) and the
-  <strong>live chain's</strong> (the same walk at the volatility the 08:36 chain implied; a dash when
-  no chain was captured that morning). A day whose bars are not all in yet is graded the
-  next evening. A call made on a shortened session (a half day) is not graded, because the
-  model's settlement time would be wrong. A grade is written once and never recomputed. A
-  handful of days says very little; read it as a record, not a verdict.</li>
-</ul>
-<blockquote>
-<p>The win rates are counted over <strong>every</strong> stored morning, and the premiums are
-modelled, so read them as how often a method like this has worked, not as a promise
-of fills. What is <strong>walk-forward tested</strong> is whether a bucket beats its usual rate:
-that test is what marks a <strong>Measured edge</strong> or a <strong>Caution</strong>.</p>
-</blockquote>
 <h2 id="market-news">Market News</h2>
 <p><strong>Route:</strong> <code>/news</code>. A rail item under <strong>MARKETS</strong>, directly below Flow Alerts.</p>
 <p>Two columns: the <strong>headlines</strong> and their filters on the left (two thirds of the
@@ -2901,6 +2845,62 @@ example one showing a <strong>CUT</strong> recommendation (a money/delta/time st
 at-risk table and gets a full candidate menu, but it has <strong>no Apply button</strong> (there's no
 paper position to mutate). Use the menu as guidance and place the adjustment yourself.
 Captured signals do <strong>not</strong> add to the Rescue nav badge (that counts paper positions).</p>
+</blockquote>
+<h2 id="opening-scalp">Opening Scalp</h2>
+<p><strong>Route:</strong> <code>/options/scalp</code>. A rail item under <strong>STRATEGY</strong>, directly below the Options group.</p>
+<p>A morning read for <code>$SPX</code>, SPY and QQQ, published at <strong>08:36 CT</strong> once the first
+five minutes are in. For each symbol it shows which way the market opened, how many of
+your premarket inputs agree, and how often four same-day (0DTE) scalps have worked on
+past mornings that looked like this one. <strong>It does not place trades</strong> — you decide.</p>
+<ul>
+<li><strong>Most mornings the answer is "No measured edge".</strong> That is normal, not an error: the
+  page then shows each trade's <strong>usual win rate</strong> and nothing more. Treat it as "nothing
+  here beats chance today".</li>
+<li>The four trades are named by that morning's contract (an up open: <strong>Long call</strong>, <strong>Long
+  put</strong>, <strong>Put credit spread</strong>, <strong>Call credit spread</strong>; a down open mirrors it), each
+  marked as <em>with</em> or <em>against</em> the opening move. A <strong>win</strong> means +50% before −50% within
+  60 minutes. The win rates are always <strong>modelled</strong> (priced from the volatility index);
+  the <strong>Entry</strong> column shows the live 08:36 quote where the chain had the strike and says
+  <strong>modelled</strong> where it did not, and the <strong>Underlying move</strong> distances use the chain's
+  volatility when there is one.</li>
+<li><strong>Measured edge</strong> marks the single trade whose bucket rate is reliably better than
+  usual (rare). <strong>Caution: measured to lose more often than usual</strong> marks a bucket that
+  is reliably worse — a reason to stay out, not to take the other side.</li>
+<li><strong>Morning inputs</strong> lists each premarket reading and whether it <strong>agrees</strong>,
+  <strong>disagrees</strong>, sits in the <strong>dead zone</strong>, or is <strong>absent</strong>. An absent input is never a
+  disagreement.</li>
+<li><strong>Refresh</strong> asks the service to rebuild the call. A call already shown today stays as
+  published; Refresh only fills in a symbol that has none yet, and no new call is built
+  after <strong>09:35 CT</strong>, an hour after the 08:35 entry, because the trade it would describe
+  is over by then. A symbol whose morning had a direction but was never called reads
+  <strong>missed the call window</strong>; one that opened flat or had no opening bar still says so,
+  with its inputs.</li>
+<li>Before 08:36 (a Refresh pressed at 08:35 waits for the 08:36 call too), on a closed
+  day, or after a failed refresh the page shows the <strong>last call</strong>, labelled with its
+  day, under a line saying when the next call is due.</li>
+<li><strong>Not in the probability</strong> (the report link, headlines, flow alerts) is context only.</li>
+<li><strong>Scorecard</strong> (the last card) is the record of how the published calls actually did.
+  Each evening, once the day's bars are in, the app <strong>grades</strong> every trade it showed that
+  morning, from the call as published (never from a later rebuild), under the target,
+  stop and time stop that call was made with (a setting changed later does not regrade
+  it), and the scorecard shows that evening's grades straight away. Per symbol, over the
+  last 20 graded days, it shows: <strong>Edge calls</strong>, how often the one highlighted trade won
+  beside the rate it usually wins (most symbols have none, and the line says so);
+  <strong>Cautions</strong>, how often a trade marked to avoid still won, beside its usual rate (the
+  caution is working when that is the lower number); and a table of all four trades with
+  their won / lost / timed-out counts and win rate. Two win rates sit side by side: the
+  <strong>model's</strong> (priced from the volatility index, the one the study uses) and the
+  <strong>live chain's</strong> (the same walk at the volatility the 08:36 chain implied; a dash when
+  no chain was captured that morning). A day whose bars are not all in yet is graded the
+  next evening. A call made on a shortened session (a half day) is not graded, because the
+  model's settlement time would be wrong. A grade is written once and never recomputed. A
+  handful of days says very little; read it as a record, not a verdict.</li>
+</ul>
+<blockquote>
+<p>The win rates are counted over <strong>every</strong> stored morning, and the premiums are
+modelled, so read them as how often a method like this has worked, not as a promise
+of fills. What is <strong>walk-forward tested</strong> is whether a bucket beats its usual rate:
+that test is what marks a <strong>Measured edge</strong> or a <strong>Caution</strong>.</p>
 </blockquote>
 <h2 id="strategy-finder">Strategy Finder</h2>
 <p><strong>Route:</strong> <code>/options/swing</code>. Its own row on the main menu, directly under the

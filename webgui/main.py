@@ -965,13 +965,13 @@ NAV_SECTIONS = [
         _sec_page("/options/gamma"),      # Dealer Positioning
         _sec_page("/options/matrix"),     # Opportunity Board
         _sec_page("/options/flow"),       # Flow Alerts
-        _sec_page("/options/scalp"),      # Opening Scalp
         _sec_page("/news"),               # Market News
         _sec_group("Trend & Sentiment"),
     ]),
     ("STRATEGY", [
         _sec_group("Strategy Tools"),
         _sec_group("Options"),
+        _sec_page("/options/scalp"),      # Opening Scalp
         _sec_page("/options/swing"),      # Strategy Finder
         _sec_group("Trade Analyzer"),
     ]),

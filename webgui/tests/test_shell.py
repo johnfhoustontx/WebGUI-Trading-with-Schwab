@@ -456,7 +456,7 @@ def test_breadcrumb_trail_starts_at_a_section_for_every_page():
     assert main.breadcrumb_trail("/options/gamma") == ["Markets", "Dealer Positioning"]
     assert main.breadcrumb_trail("/options/matrix") == ["Markets", "Opportunity Board"]
     assert main.breadcrumb_trail("/options/flow") == ["Markets", "Flow Alerts"]
-    assert main.breadcrumb_trail("/options/scalp") == ["Markets", "Opening Scalp"]
+    assert main.breadcrumb_trail("/options/scalp") == ["Strategy", "Opening Scalp"]
     assert main.breadcrumb_trail("/trade") == [
         "Strategy", "Trade Analyzer", "Overview"]
     assert main.breadcrumb_trail("/trade/board") == [
@@ -1412,16 +1412,19 @@ def test_nav_sections_partition_the_rail_with_nothing_lost_or_doubled():
 
 def test_strategy_finder_is_a_rail_row_between_options_and_trade_analyzer():
     """Strategy Finder moved OUT of the Options tab strip onto the main menu
-    (2026-09-13), directly under the Options group and above Trade Analyzer.
+    (2026-09-13), under the Options group and above Trade Analyzer. Opening
+    Scalp took the row directly under Options on 2026-10-18 (the operator's
+    call), so Strategy Finder now sits one row below it.
 
     Both halves are needed: present in the rail AND absent from the strip, or the
     page renders in two places and highlights neither."""
     import main
     caption, entries = next(s for s in main.NAV_SECTIONS if s[0] == "STRATEGY")
     names = [e[1] if e[0] == "group" else e[2] for e in entries]
-    assert names == ["Strategy Tools", "Options", "Strategy Finder",
-                     "Trade Analyzer"]
-    assert entries[2] == main._sec_page("/options/swing")
+    assert names == ["Strategy Tools", "Options", "Opening Scalp",
+                     "Strategy Finder", "Trade Analyzer"]
+    assert entries[2] == main._sec_page("/options/scalp")
+    assert entries[3] == main._sec_page("/options/swing")
     assert not [r for r, _l, _i in main.OPTIONS_CHILDREN if r == "/options/swing"]
 
 
@@ -1438,7 +1441,7 @@ def test_nav_section_captions_and_their_derived_counts():
     import main
     assert [c for c, _e in main.NAV_SECTIONS] == [
         None, "MARKETS", "STRATEGY", "ACCOUNT"]
-    assert [len(e) for _c, e in main.NAV_SECTIONS] == [2, 6, 4, 2]
+    assert [len(e) for _c, e in main.NAV_SECTIONS] == [2, 5, 5, 2]
     # The renderer takes the count as an argument; the drawer passes len(entries).
     src = inspect.getsource(main._layout)
     assert "_nav_section_header(caption, len(entries), first=(_i == 0))" in src

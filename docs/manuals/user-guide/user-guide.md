@@ -1190,63 +1190,6 @@ model)**:
 Either switch applies to alerts fired **after** the change: each alert carries the
 setting it was fired under, so the rows already on today's list keep theirs.
 
-## Opening Scalp
-
-**Route:** `/options/scalp`. A rail item under **MARKETS**, after Flow Alerts.
-
-A morning read for `$SPX`, SPY and QQQ, published at **08:36 CT** once the first
-five minutes are in. For each symbol it shows which way the market opened, how many of
-your premarket inputs agree, and how often four same-day (0DTE) scalps have worked on
-past mornings that looked like this one. **It does not place trades** — you decide.
-
-- **Most mornings the answer is "No measured edge".** That is normal, not an error: the
-  page then shows each trade's **usual win rate** and nothing more. Treat it as "nothing
-  here beats chance today".
-- The four trades are named by that morning's contract (an up open: **Long call**, **Long
-  put**, **Put credit spread**, **Call credit spread**; a down open mirrors it), each
-  marked as *with* or *against* the opening move. A **win** means +50% before −50% within
-  60 minutes. The win rates are always **modelled** (priced from the volatility index);
-  the **Entry** column shows the live 08:36 quote where the chain had the strike and says
-  **modelled** where it did not, and the **Underlying move** distances use the chain's
-  volatility when there is one.
-- **Measured edge** marks the single trade whose bucket rate is reliably better than
-  usual (rare). **Caution: measured to lose more often than usual** marks a bucket that
-  is reliably worse — a reason to stay out, not to take the other side.
-- **Morning inputs** lists each premarket reading and whether it **agrees**,
-  **disagrees**, sits in the **dead zone**, or is **absent**. An absent input is never a
-  disagreement.
-- **Refresh** asks the service to rebuild the call. A call already shown today stays as
-  published; Refresh only fills in a symbol that has none yet, and no new call is built
-  after **09:35 CT**, an hour after the 08:35 entry, because the trade it would describe
-  is over by then. A symbol whose morning had a direction but was never called reads
-  **missed the call window**; one that opened flat or had no opening bar still says so,
-  with its inputs.
-- Before 08:36 (a Refresh pressed at 08:35 waits for the 08:36 call too), on a closed
-  day, or after a failed refresh the page shows the **last call**, labelled with its
-  day, under a line saying when the next call is due.
-- **Not in the probability** (the report link, headlines, flow alerts) is context only.
-- **Scorecard** (the last card) is the record of how the published calls actually did.
-  Each evening, once the day's bars are in, the app **grades** every trade it showed that
-  morning, from the call as published (never from a later rebuild), under the target,
-  stop and time stop that call was made with (a setting changed later does not regrade
-  it), and the scorecard shows that evening's grades straight away. Per symbol, over the
-  last 20 graded days, it shows: **Edge calls**, how often the one highlighted trade won
-  beside the rate it usually wins (most symbols have none, and the line says so);
-  **Cautions**, how often a trade marked to avoid still won, beside its usual rate (the
-  caution is working when that is the lower number); and a table of all four trades with
-  their won / lost / timed-out counts and win rate. Two win rates sit side by side: the
-  **model's** (priced from the volatility index, the one the study uses) and the
-  **live chain's** (the same walk at the volatility the 08:36 chain implied; a dash when
-  no chain was captured that morning). A day whose bars are not all in yet is graded the
-  next evening. A call made on a shortened session (a half day) is not graded, because the
-  model's settlement time would be wrong. A grade is written once and never recomputed. A
-  handful of days says very little; read it as a record, not a verdict.
-
-> The win rates are counted over **every** stored morning, and the premiums are
-> modelled, so read them as how often a method like this has worked, not as a promise
-> of fills. What is **walk-forward tested** is whether a bucket beats its usual rate:
-> that test is what marks a **Measured edge** or a **Caution**.
-
 ## Market News
 
 **Route:** `/news`. A rail item under **MARKETS**, directly below Flow Alerts.
@@ -2453,6 +2396,63 @@ log.
 > at-risk table and gets a full candidate menu, but it has **no Apply button** (there's no
 > paper position to mutate). Use the menu as guidance and place the adjustment yourself.
 > Captured signals do **not** add to the Rescue nav badge (that counts paper positions).
+
+## Opening Scalp
+
+**Route:** `/options/scalp`. A rail item under **STRATEGY**, directly below the Options group.
+
+A morning read for `$SPX`, SPY and QQQ, published at **08:36 CT** once the first
+five minutes are in. For each symbol it shows which way the market opened, how many of
+your premarket inputs agree, and how often four same-day (0DTE) scalps have worked on
+past mornings that looked like this one. **It does not place trades** — you decide.
+
+- **Most mornings the answer is "No measured edge".** That is normal, not an error: the
+  page then shows each trade's **usual win rate** and nothing more. Treat it as "nothing
+  here beats chance today".
+- The four trades are named by that morning's contract (an up open: **Long call**, **Long
+  put**, **Put credit spread**, **Call credit spread**; a down open mirrors it), each
+  marked as *with* or *against* the opening move. A **win** means +50% before −50% within
+  60 minutes. The win rates are always **modelled** (priced from the volatility index);
+  the **Entry** column shows the live 08:36 quote where the chain had the strike and says
+  **modelled** where it did not, and the **Underlying move** distances use the chain's
+  volatility when there is one.
+- **Measured edge** marks the single trade whose bucket rate is reliably better than
+  usual (rare). **Caution: measured to lose more often than usual** marks a bucket that
+  is reliably worse — a reason to stay out, not to take the other side.
+- **Morning inputs** lists each premarket reading and whether it **agrees**,
+  **disagrees**, sits in the **dead zone**, or is **absent**. An absent input is never a
+  disagreement.
+- **Refresh** asks the service to rebuild the call. A call already shown today stays as
+  published; Refresh only fills in a symbol that has none yet, and no new call is built
+  after **09:35 CT**, an hour after the 08:35 entry, because the trade it would describe
+  is over by then. A symbol whose morning had a direction but was never called reads
+  **missed the call window**; one that opened flat or had no opening bar still says so,
+  with its inputs.
+- Before 08:36 (a Refresh pressed at 08:35 waits for the 08:36 call too), on a closed
+  day, or after a failed refresh the page shows the **last call**, labelled with its
+  day, under a line saying when the next call is due.
+- **Not in the probability** (the report link, headlines, flow alerts) is context only.
+- **Scorecard** (the last card) is the record of how the published calls actually did.
+  Each evening, once the day's bars are in, the app **grades** every trade it showed that
+  morning, from the call as published (never from a later rebuild), under the target,
+  stop and time stop that call was made with (a setting changed later does not regrade
+  it), and the scorecard shows that evening's grades straight away. Per symbol, over the
+  last 20 graded days, it shows: **Edge calls**, how often the one highlighted trade won
+  beside the rate it usually wins (most symbols have none, and the line says so);
+  **Cautions**, how often a trade marked to avoid still won, beside its usual rate (the
+  caution is working when that is the lower number); and a table of all four trades with
+  their won / lost / timed-out counts and win rate. Two win rates sit side by side: the
+  **model's** (priced from the volatility index, the one the study uses) and the
+  **live chain's** (the same walk at the volatility the 08:36 chain implied; a dash when
+  no chain was captured that morning). A day whose bars are not all in yet is graded the
+  next evening. A call made on a shortened session (a half day) is not graded, because the
+  model's settlement time would be wrong. A grade is written once and never recomputed. A
+  handful of days says very little; read it as a record, not a verdict.
+
+> The win rates are counted over **every** stored morning, and the premiums are
+> modelled, so read them as how often a method like this has worked, not as a promise
+> of fills. What is **walk-forward tested** is whether a bucket beats its usual rate:
+> that test is what marks a **Measured edge** or a **Caution**.
 
 ## Strategy Finder
 
