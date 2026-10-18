@@ -909,11 +909,11 @@ def _build_control(control, fld, value, on_change, *, optional=False):
 
     if k == "numbers":
         # chips hold text; config_schema.parse turns them back into numbers
-        el = ui.input_chips(value=[f"{v:g}" for v in (shown or [])],
+        el = ui.input_chips(value=[_fmt.plain(v) for v in (shown or [])],
                             new_value_mode="add-unique", clearable=True) \
             .props("dense outlined").classes("w-full max-w-xl")
         el.on_value_change(lambda e: on_change(list(e.value or [])))
-        control["set"] = lambda v: setattr(el, "value", [f"{x:g}" for x in (v or [])])
+        control["set"] = lambda v: setattr(el, "value", [_fmt.plain(x) for x in (v or [])])
         return
 
     if k == "pair":
