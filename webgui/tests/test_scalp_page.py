@@ -122,6 +122,22 @@ def test_a_highlight_that_is_also_listed_is_still_the_edge():
     assert rows["credit_with"]["tone"] == "caution"
 
 
+def test_edge_and_caution_rows_carry_their_own_tint_and_the_kit_binds_it():
+    """``_row_class`` is what ``kit.table`` reads for each row (ROW_CLASS_FN), so
+    the edge and the caution rows are tinted by fixed palette classes, and a plain
+    row by none."""
+    from pages import ui_kit as kit
+    assert "row._row_class" in kit.ROW_CLASS_FN
+    sym = _symbol(1, highlight="long_with", avoid=["credit_with"],
+                  edges=("long_with", "credit_with"))
+    rows = _by_role(scalp.role_rows(sym))
+    edge, caution = rows["long_with"]["_row_class"], rows["credit_with"]["_row_class"]
+    assert edge.startswith("bg-[") and caution.startswith("bg-[")
+    assert edge != caution
+    assert rows["long_against"]["_row_class"] == ""
+    assert rows["credit_against"]["_row_class"] == ""
+
+
 # ── numbers ─────────────────────────────────────────────────────────────────
 def test_probabilities_print_two_decimals_via_fmt():
     sym = _symbol(1)
@@ -172,7 +188,8 @@ def test_pricing_line_says_chain_or_model():
 
 
 def test_agreement_line_is_a_share_of_the_inputs_that_took_a_side():
-    assert scalp.alignment_text(_symbol(1, alignment=0.5, bucket="mid"))         == "Agreement with the opening move: mid (50.00% of the inputs that took a side)"
+    assert scalp.alignment_text(_symbol(1, alignment=0.5, bucket="mid")) == (
+        "Agreement with the opening move: mid (50.00% of the inputs that took a side)")
     assert scalp.alignment_text({"bucket": None}) == ""
 
 
@@ -235,6 +252,43 @@ def test_input_readings_use_their_own_units():
     assert rows["open_close_loc"]["reading"] == "25.00%"
     assert "above" in rows["open_broke_pm"]["reading"]
     assert "XLK" in rows["etf:XLK"]["label"] and rows["etf:XLK"]["reading"] == "+0.50%"
+
+
+def test_a_flat_open_reads_no_opening_direction_not_absent():
+    """No direction means the service scores nothing, so every ``agree`` is None
+    beside real readings. Those are NOT absent: the reading is there."""
+    flat = {"direction": None, "roles": {}, "note": "opened flat — no direction",
+            "inputs": {"fut_asia": 0.05, "fut_europe": None, "open_close_loc": 0.5,
+                       "open_broke_pm": 0.0, "open_range_ratio": 0.8},
+            "agree": {"fut_asia": None, "fut_europe": None, "open_close_loc": None,
+                      "open_broke_pm": None}}
+    rows = {r["id"]: r for r in scalp.input_rows(flat)}
+    assert rows["fut_asia"]["verdict"] == "No opening direction"
+    assert rows["fut_asia"]["reading"] == "+0.05%"
+    assert rows["open_close_loc"]["verdict"] == "No opening direction"
+    assert rows["open_broke_pm"]["verdict"] == "No opening direction"
+    # The reading itself is missing: that, and only that, is Absent.
+    assert rows["fut_europe"]["verdict"] == "Absent"
+    assert rows["fut_europe"]["reading"] == fmt.NO_READING
+    # Unchanged: the opening range ratio has no direction by nature.
+    assert rows["open_range_ratio"]["verdict"] == "Information only"
+    # An agree map with no keys at all (nothing was scored) reads the same way.
+    bare = {"direction": None, "inputs": {"fut_gap": 0.1}, "agree": {}}
+    assert scalp.input_rows(bare)[0]["verdict"] == "No opening direction"
+
+
+def test_the_inputs_title_does_not_count_unscored_readings_as_absent():
+    flat = {"direction": None, "inputs": {"fut_asia": 0.05, "fut_europe": None},
+            "agree": {}}
+    text = scalp.input_summary(scalp.input_rows(flat))
+    assert "no opening direction" in text and "1 absent" in text
+    assert "0 agree" not in text
+
+
+def test_a_symbol_with_a_direction_still_counts_a_missing_reading_as_absent():
+    rows = scalp.input_rows(_symbol(1, inputs={"fut_asia": None},
+                                    agree={"fut_asia": None}))
+    assert rows[0]["verdict"] == "Absent"
 
 
 def test_an_unlisted_input_still_shows():

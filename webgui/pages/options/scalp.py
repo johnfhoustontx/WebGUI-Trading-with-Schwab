@@ -256,9 +256,12 @@ _POSITION_INPUTS = ("fut_range_pos", "open_close_loc")
 _VERDICT = {1: "Agrees", -1: "Disagrees", 0: "No side taken (dead zone)"}
 ABSENT = "Absent"
 INFO_ONLY = "Information only"
+#: A reading is there but nothing to compare it with: a flat open (or no opening
+#: bar) names no direction, so the service scores no input at all.
+NO_DIRECTION = "No opening direction"
 _VERDICT_CLASS = {"Agrees": _t.TXT_POS, "Disagrees": _t.TXT_NEG,
                   "No side taken (dead zone)": _t.MUTED, ABSENT: _t.MUTED,
-                  INFO_ONLY: _t.MUTED}
+                  INFO_ONLY: _t.MUTED, NO_DIRECTION: _t.MUTED}
 
 
 def _input_label(key, sym):
@@ -294,15 +297,23 @@ def _input_rank(key):
 
 def input_rows(symbol_payload):
     """One row per morning input: its reading and whether it agreed with the
-    opening move. PURE. A missing reading is ``Absent`` - never a disagreement."""
+    opening move. PURE. ``Absent`` means the READING is missing - never a
+    disagreement. A reading that is there but unscored because the morning has no
+    direction says so (``No opening direction``), not ``Absent``."""
     sym = _as_dict(symbol_payload)
     inputs, agree = _as_dict(sym.get("inputs")), _as_dict(sym.get("agree"))
     rows = []
     for key in sorted(set(inputs) | set(agree), key=_input_rank):
-        if key not in agree and key == "open_range_ratio":
-            verdict = INFO_ONLY if _fmt.num(inputs.get(key)) is not None else ABSENT
+        if _fmt.num(inputs.get(key)) is None:
+            verdict = ABSENT
+        elif key == "open_range_ratio" and key not in agree:
+            verdict = INFO_ONLY
+        elif agree.get(key) in _VERDICT:
+            verdict = _VERDICT[agree[key]]
+        elif sym.get("direction") not in (1, -1):
+            verdict = NO_DIRECTION
         else:
-            verdict = _VERDICT.get(agree.get(key), ABSENT)
+            verdict = ABSENT
         rows.append({"id": key, "label": _input_label(key, sym),
                      "reading": _input_reading(key, inputs.get(key)),
                      "verdict": verdict, "_tone_class": _VERDICT_CLASS[verdict]})
@@ -320,7 +331,12 @@ def input_columns():
 def input_summary(rows):
     """``"5 agree · 1 disagree · 3 absent"`` over the rows."""
     count = {v: sum(1 for r in rows if r["verdict"] == v)
-             for v in (*_VERDICT.values(), ABSENT)}
+             for v in (*_VERDICT.values(), ABSENT, NO_DIRECTION)}
+    if count[NO_DIRECTION]:
+        parts = [f"{count[NO_DIRECTION]} readings, no opening direction to compare"]
+        if count[ABSENT]:
+            parts.append(f"{count[ABSENT]} absent")
+        return " · ".join(parts)
     parts = [f"{count['Agrees']} agree", f"{count['Disagrees']} disagree"]
     if count["No side taken (dead zone)"]:
         parts.append(f"{count['No side taken (dead zone)']} in the dead zone")
@@ -339,7 +355,8 @@ def state_line(view):
     if state == "closed":
         if nxt is None:
             return "Market closed"
-        return f"Market closed — next call {nxt.strftime('%a %Y-%m-%d')} at {nxt.strftime('%H:%M CT')}"
+        return (f"Market closed — next call {nxt.strftime('%a %Y-%m-%d')} "
+                f"at {nxt.strftime('%H:%M CT')}")
     if state == "error":
         return "The last refresh failed — showing the last call"
     return None
