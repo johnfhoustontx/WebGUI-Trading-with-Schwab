@@ -7,8 +7,9 @@ up; the nightly ``[slots.scalp_bars]`` top-up keeps it current afterwards:
 
     .venv/bin/python tools/scalp_backfill.py
 
-Prints the rows written per ``SYMBOL/interval``. Safe to re-run: a stored bar is
-replaced by the same bar.
+Prints the rows written per ``SYMBOL/interval``, and names any key whose walk hit
+a FAILED fetch (not merely the end of history); the exit status is 1 then. Safe
+to re-run: a stored bar is replaced by the same bar.
 """
 import pathlib
 import sys
@@ -22,10 +23,17 @@ from services.options_svc import scalp_fetch  # noqa: E402
 
 def main() -> int:
     written = scalp_fetch.backfill()
+    failed = []
     for key, count in written.items():
-        print(f"{key:<12} {count:>8} rows")
-    print(f"{'total':<12} {sum(written.values()):>8} rows")
-    return 0
+        if count == scalp_fetch.FAILED:
+            failed.append(key)
+            print(f"{key:<12} FAILED (a fetch failed; history stops short, re-run)")
+        else:
+            print(f"{key:<12} {count:>8} rows")
+    print(f"{'total':<12} {sum(n for n in written.values() if n > 0):>8} rows")
+    if failed:
+        print(f"{len(failed)} key(s) FAILED: {', '.join(failed)}")
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":

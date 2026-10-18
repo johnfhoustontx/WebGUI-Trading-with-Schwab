@@ -113,20 +113,25 @@ def test_fetch_range_never_uses_priority_lane():
 
 @pytest.mark.parametrize("status,data", [(502, None), (200, "garbage"),
                                          (200, {"candles": "no"})])
-def test_fetch_range_returns_empty_on_any_failure(status, data):
+def test_fetch_range_returns_none_on_any_failure(status, data):
     class Bad:
         def _get(self, path, params=None, **kw):
             return _Resp(status, data)
 
-    assert sf.fetch_range("SPY", 1, 0, 10, client=Bad()) == []
+    assert sf.fetch_range("SPY", 1, 0, 10, client=Bad()) is None
 
 
-def test_fetch_range_returns_empty_when_the_client_raises():
+def test_fetch_range_returns_none_when_the_client_raises():
     class Boom:
         def _get(self, path, params=None, **kw):
             raise RuntimeError("proxy down")
 
-    assert sf.fetch_range("SPY", 1, 0, 10, client=Boom()) == []
+    assert sf.fetch_range("SPY", 1, 0, 10, client=Boom()) is None
+
+
+def test_fetch_range_returns_empty_list_for_a_genuine_empty_answer():
+    client = FakeClient(lambda i, q: EMPTY)
+    assert sf.fetch_range("SPY", 1, 0, 10, client=client) == []
 
 
 def test_backfill_stops_after_two_empty_windows(tmp_path, one_symbol):
@@ -234,7 +239,85 @@ def test_a_failing_symbol_does_not_stop_the_others(tmp_path, monkeypatch):
 
     out = sf.top_up(db_path=tmp_path / "s.db", client=Mixed(),
                     today=dt.date(2023, 11, 15))
-    assert out["BAD/1"] == 0 and out["SPY/1"] == 1
+    assert out["BAD/1"] == sf.FAILED and out["BAD/5"] == sf.FAILED
+    assert out["SPY/1"] == 1
+
+
+def test_backfill_failure_between_data_windows_is_not_the_end_of_history(
+        tmp_path, one_symbol):
+    db = tmp_path / "s.db"
+    seen = {}
+
+    class Flaky:
+        """1-minute: data, then HTTP 429 (twice would have meant 'empty'), data
+        that must never be fetched. 5-minute: one data window, then empties."""
+
+        def __init__(self):
+            self.calls = []
+
+        def _get(self, path, params=None, **kw):
+            q = _parse(params["params"])
+            self.calls.append(q)
+            n = seen[q["frequency"]] = seen.get(q["frequency"], 0) + 1
+            if q["frequency"] == "1":
+                if n == 2:
+                    return _Resp(429, None)
+                return _Resp(200, _one_candle_in_window(q))
+            return _Resp(200, _one_candle_in_window(q) if n == 1 else EMPTY)
+
+    client = Flaky()
+    out = sf.backfill(db_path=db, client=client, today=dt.date(2026, 10, 16))
+    one_min_calls = [q for q in client.calls if q["frequency"] == "1"]
+    assert len(one_min_calls) == 2                      # stopped AT the failure
+    assert out["SPY/1"] == sf.FAILED                    # reported, not "done"
+    assert len(st.bars("SPY", 1, 0, 10**12, db_path=db)) == 1   # first window kept
+    assert out["SPY/5"] == 1                            # the other key is unharmed
+
+
+def test_top_up_failed_middle_window_leaves_no_hole_behind_it(tmp_path, one_symbol):
+    db = tmp_path / "s.db"
+    latest = int(dt.datetime(2026, 9, 1, 12, 0, tzinfo=_UTC).timestamp())
+    st.upsert_bars([("SPY", 1, latest, 1, 1, 1, 1, 1),
+                    ("SPY", 5, latest, 1, 1, 1, 1, 1)], db_path=db)
+
+    class Flaky:
+        def __init__(self):
+            self.calls = []
+
+        def _get(self, path, params=None, **kw):
+            q = _parse(params["params"])
+            self.calls.append(q)
+            if q["frequency"] == "1" and sum(
+                    c["frequency"] == "1" for c in self.calls) == 2:
+                return _Resp(502, None)
+            return _Resp(200, _one_candle_in_window(q))
+
+    client = Flaky()
+    out = sf.top_up(db_path=db, client=client, today=dt.date(2026, 10, 16))
+    one_min = [q for q in client.calls if q["frequency"] == "1"]
+    assert len(one_min) == 2                            # nothing after the failed one
+    assert out["SPY/1"] == sf.FAILED
+    # only the first window's candle was written: latest_ts stops BEFORE the hole
+    failed_start = int(one_min[1]["startDate"]) // 1000
+    assert st.latest_ts("SPY", 1, db_path=db) < failed_start
+    assert out["SPY/5"] > 0                             # the other key carried on
+
+
+def test_top_up_pages_a_long_gap_in_contiguous_windows(tmp_path, one_symbol):
+    db = tmp_path / "s.db"
+    latest = int(dt.datetime(2026, 9, 1, 12, 0, tzinfo=_UTC).timestamp())
+    st.upsert_bars([("SPY", 1, latest, 1, 1, 1, 1, 1)], db_path=db)
+    client = FakeClient(lambda i, q: EMPTY)
+    sf.top_up(db_path=db, client=client, today=dt.date(2026, 10, 16))
+    wins = [(int(q["startDate"]), int(q["endDate"]))
+            for _, _, q, _ in client.calls if q["frequency"] == "1"]
+    assert len(wins) > 3                                # > 10 days back: paged
+    assert wins[0][0] == latest * 1000
+    for (s0, e0), (s1, _e1) in zip(wins, wins[1:]):
+        assert s1 == e0                                 # contiguous, no overlap
+    assert all(e - s <= 10 * DAY_MS for s, e in wins)
+    end_bound = dt.datetime(2026, 10, 17, tzinfo=_CT)
+    assert wins[-1][1] == int(end_bound.timestamp() * 1000)
 
 
 def test_ct_keeps_0830_across_dst():

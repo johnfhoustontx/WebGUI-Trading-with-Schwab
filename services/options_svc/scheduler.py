@@ -1054,7 +1054,11 @@ async def loop(bus):
         async def _scalp_bars_branch():
             try:
                 written = await loop_.run_in_executor(None, scalp_fetch.top_up)
-                log.info("scalp bar top-up wrote %d row(s)", sum(written.values()))
+                failed = sorted(k for k, n in written.items() if n == scalp_fetch.FAILED)
+                log.info("scalp bar top-up wrote %d row(s)",
+                         sum(n for n in written.values() if n > 0))
+                if failed:
+                    log.warning("scalp bar top-up failed for %s", ", ".join(failed))
             except Exception:
                 log.exception("scalp bar top-up branch degraded")
 

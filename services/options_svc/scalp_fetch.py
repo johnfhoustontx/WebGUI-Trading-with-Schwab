@@ -41,6 +41,9 @@ INTERVALS = (1, 5)
 WINDOW_DAYS = {1: 10, 5: 30}
 #: Consecutive empty windows that end a backfill walk (past retention, or a gap).
 EMPTY_WINDOWS_TO_STOP = 2
+#: What ``backfill`` / ``top_up`` report for a key whose walk hit a FAILED fetch
+#: (not an empty answer): rows already written for it are kept, the walk stops.
+FAILED = -1
 #: Trading days back a top-up reaches when the store holds nothing yet.
 TOP_UP_FALLBACK_TRADING_DAYS = 3
 
@@ -81,9 +84,14 @@ def _default_client():
     return _proxy.schwab_py_client
 
 
-def fetch_range(symbol, interval, start_ms, end_ms, client=None) -> list:
+def fetch_range(symbol, interval, start_ms, end_ms, client=None):
     """One ``/passthrough`` price-history call; the rows in ``[start_ms, end_ms)``
-    (as Schwab returns them). ``[]`` on any failure, which is logged."""
+    (as Schwab returns them).
+
+    ``[]`` is a genuine empty answer (200, no candles: past retention, or a closed
+    stretch). ``None`` is a FAILURE (non-200, an exception, a body that is not a
+    candle payload), logged and counted as a degrade. The two must never be read
+    alike: an empty window ends history, a failed one is a hole."""
     try:
         client = client if client is not None else _default_client()
         query = (f"symbol={symbol},frequencyType=minute,frequency={int(interval)},"
@@ -94,11 +102,15 @@ def fetch_range(symbol, interval, start_ms, end_ms, client=None) -> list:
         if getattr(resp, "status_code", None) != 200:
             log.warning("scalp bars %s/%s: HTTP %s", symbol, interval,
                         getattr(resp, "status_code", None))
-            return []
-        return candles_to_rows(symbol, int(interval), resp.json())
+            return None
+        payload = resp.json()
+        if not isinstance(payload, dict) or not isinstance(payload.get("candles"), list):
+            log.warning("scalp bars %s/%s: unexpected body", symbol, interval)
+            return None
+        return candles_to_rows(symbol, int(interval), payload)
     except Exception:
         _degrade.degraded("options.scalp_fetch", detail=f"{symbol}/{interval}")
-        return []
+        return None
 
 
 def _ms(moment: _dt.datetime) -> int:
@@ -129,8 +141,10 @@ def backfill(db_path=None, client=None, today=None) -> dict:
     """Fill the store back from ``today`` (default: today in CT), per symbol and
     interval, one window at a time, until two consecutive windows come back empty.
 
-    Returns the rows written per ``"SYMBOL/interval"``. A symbol that fails
-    returns ``0`` for its keys and never stops the others."""
+    Returns the rows written per ``"SYMBOL/interval"``. A FAILED fetch (not an
+    empty one) stops that key's walk at once, is not read as the end of history,
+    and reports the key as ``FAILED`` (-1); rows it wrote before are kept and the
+    other keys carry on. Re-running continues safely (a stored bar is replaced)."""
     out = {}
     end_all = _end_ms(today if today is not None else _today_ct())
     for symbol in scalp_config.bar_symbols():
@@ -141,6 +155,9 @@ def backfill(db_path=None, client=None, today=None) -> dict:
             while empty < EMPTY_WINDOWS_TO_STOP:
                 start = end - _span(WINDOW_DAYS[interval])
                 rows = fetch_range(symbol, interval, start, end, client=client)
+                if rows is None:
+                    out[key] = FAILED
+                    break
                 if rows:
                     empty = 0
                     out[key] += scalp_store.upsert_bars(rows, db_path=db_path)
@@ -161,7 +178,12 @@ def top_up(db_path=None, client=None, today=None) -> dict:
     """Fetch what the store lacks, per symbol and interval: from its latest bar
     (that bar is fetched again and replaced, it may have been a partial) to now,
     or from three trading days back when it holds none. Returns the rows written
-    per ``"SYMBOL/interval"``."""
+    per ``"SYMBOL/interval"``.
+
+    A FAILED window stops that key's walk AT the failed window and reports the key
+    as ``FAILED`` (-1): nothing after the hole is written, so ``latest_ts`` cannot
+    move past it and tomorrow's top-up starts from the same place. Other keys
+    carry on."""
     out = {}
     day = today if today is not None else _today_ct()
     end_all = _end_ms(today)
@@ -175,6 +197,9 @@ def top_up(db_path=None, client=None, today=None) -> dict:
             while start < end_all:
                 stop = min(start + step, end_all)
                 rows = fetch_range(symbol, interval, start, stop, client=client)
+                if rows is None:
+                    out[key] = FAILED
+                    break
                 out[key] += scalp_store.upsert_bars(rows, db_path=db_path)
                 start = stop
     return out
