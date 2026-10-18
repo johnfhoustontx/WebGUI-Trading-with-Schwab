@@ -805,6 +805,10 @@ OPTIONS_RAIL = [
     ("/options/gamma", "Dealer Positioning", "stacked_line_chart"),
     ("/options/matrix", "Opportunity Board", "grid_on"),
     ("/options/flow", "Flow Alerts", "bolt"),
+    # Opening Scalp: the 08:36 CT call on $SPX / SPY / QQQ, with the measured
+    # win rates of four 0DTE scalps. A morning read like Flow Alerts, so it sits
+    # beside it - a rail page, not a tenth tab on the Options strip.
+    ("/options/scalp", "Opening Scalp", "timer"),
     # Market News: headlines, SEC filings and insider buys, tagged by ticker
     # (news_svc). A market-wide read like the three above, so it sits beside
     # them under MARKETS.
@@ -961,6 +965,7 @@ NAV_SECTIONS = [
         _sec_page("/options/gamma"),      # Dealer Positioning
         _sec_page("/options/matrix"),     # Opportunity Board
         _sec_page("/options/flow"),       # Flow Alerts
+        _sec_page("/options/scalp"),      # Opening Scalp
         _sec_page("/news"),               # Market News
         _sec_group("Trend & Sentiment"),
     ]),
@@ -1118,6 +1123,9 @@ _TAB_COLOR = {
     "/options/scanner": "#42a5f5",        # Market Scanner — blue
     "/options/matrix": "#4dd0e1",         # Opportunity Board — cyan
     "/options/flow": "#d500f9",           # Flow Alerts — magenta
+    # Chartreuse: hue 105, the midpoint of the widest gap left in this map's hue
+    # circle (Momentum's light green at 88 and Paper Ledger's green at 123).
+    "/options/scalp": "#79d85a",          # Opening Scalp — chartreuse
     "/news": "#ff7043",                   # Market News — deep orange
     "/options/paper": "#66bb6a",          # Paper Ledger — green
     "/options/captured": "#ab47bc",       # Captured Signals — purple
@@ -2575,6 +2583,13 @@ def options_flow_page() -> None:
     with _layout("/options/flow", "Flow Alerts"):
         from pages.options import flow
         flow.render()
+
+
+@_page("/options/scalp")
+def options_scalp_page() -> None:
+    with _layout("/options/scalp", "Opening Scalp"):
+        from pages.options import scalp
+        scalp.render()
 
 
 @_page("/news")

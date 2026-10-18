@@ -1051,6 +1051,52 @@ Positioning for that symbol.
 
 Covers today only; the list resets overnight.
 """,
+    "/options/scalp": """
+**Opening Scalp — the simple version**
+
+At **08:36 CT** each trading morning, after the first five minutes of the
+session, the app shows what the opening looked like for **$SPX, SPY and QQQ** and
+how often each of four same-day (0DTE) scalps has worked on past mornings that
+looked like this one. It is a **reading, not a signal**: there are no trade
+buttons, and you decide.
+
+- **Opened up / down** is the first five-minute bar. A flat open names no
+  direction and gets no call.
+- **Morning inputs** are your premarket routine, measured: overnight futures,
+  the sector ETFs, the volatility index and how the opening bar closed. Each one
+  **agrees**, **disagrees**, sits in the **dead zone** (too small to take a side)
+  or is **absent** (not enough data — an absent input is never counted as a
+  disagreement). **Agreement** is the share of inputs that took a side and agreed;
+  it sorts the morning into a **low, mid or high** bucket.
+- **The four trades** are named by that morning's contract. After an up open:
+  **Long call** and **Put credit spread** are *with* the move, **Long put** and
+  **Call credit spread** *against* it. A down open mirrors this.
+- **Win** means the trade reached **+50% before −50%** of its entry price inside
+  **60 minutes**. Premiums are **modelled** from the volatility index (or taken
+  from the live chain at 08:36, and the row says which), so a win is a model's
+  win, not a fill.
+- **Usual win rate** is how often that trade won over **all** past mornings. **This
+  morning's rate** is how often it won on past mornings in the **same agreement
+  bucket**, with its **interval** (95%) and the number of **samples**. The rates
+  are **walk-forward tested**: each past day is scored only from days before it.
+- **Move to target / stop** is how many points the underlying has to travel to
+  take the trade to +50% or −50%, from the strikes shown.
+
+**"No measured edge" is the usual, honest answer.** Most mornings no bucket
+beats its usual rate by more than chance, and then the page shows only the usual
+win rates. A row is marked **Measured edge** only when the bucket's rate is
+reliably *better* than usual. **Caution** means the bucket is reliably *worse*:
+measured to lose more often than usual — a reason to stay out, never a signal to
+take the other side.
+
+A call stays as published all day; **Refresh** only fills in a symbol that has
+no call yet, and no new call is built after the first hour. Before 08:36, on a
+closed day, or after a failed refresh the page keeps the last call on screen and
+labels the day it belongs to.
+
+**Not in the probability** (headlines, flow alerts and the report link) is shown
+for context only. None of it was measured or fed into the rates.
+""",
     "/news": """
 **Market News — the simple version**
 

@@ -1190,6 +1190,38 @@ model)**:
 Either switch applies to alerts fired **after** the change: each alert carries the
 setting it was fired under, so the rows already on today's list keep theirs.
 
+## Opening Scalp
+
+**Route:** `/options/scalp`. A rail item under **MARKETS**, after Flow Alerts.
+
+A morning read for `$SPX`, SPY and QQQ, published at **08:36 CT** once the first
+five minutes are in. For each symbol it shows which way the market opened, how many of
+your premarket inputs agree, and how often four same-day (0DTE) scalps have worked on
+past mornings that looked like this one. **It does not place trades** — you decide.
+
+- **Most mornings the answer is "No measured edge".** That is normal, not an error: the
+  page then shows each trade's **usual win rate** and nothing more. Treat it as "nothing
+  here beats chance today".
+- The four trades are named by that morning's contract (an up open: **Long call**, **Long
+  put**, **Put credit spread**, **Call credit spread**; a down open mirrors it), each
+  marked as *with* or *against* the opening move. A **win** means +50% before −50% within
+  60 minutes, on modelled or live-chain premiums.
+- **Measured edge** marks the single trade whose bucket rate is reliably better than
+  usual (rare). **Caution: measured to lose more often than usual** marks a bucket that
+  is reliably worse — a reason to stay out, not to take the other side.
+- **Morning inputs** lists each premarket reading and whether it **agrees**,
+  **disagrees**, sits in the **dead zone**, or is **absent**. An absent input is never a
+  disagreement.
+- **Refresh** asks the service to rebuild the call. A call already shown today stays as
+  published; Refresh only fills in a symbol that has none yet, and no new call is built
+  after the first hour of trading.
+- Before 08:36, on a closed day, or after a failed refresh the page shows the **last
+  call**, labelled with its day, under a line saying when the next call is due.
+- **Not in the probability** (the report link, headlines, flow alerts) is context only.
+
+> The win rates are **walk-forward tested** on stored data and the premiums are modelled,
+> so read them as how often a method like this has worked, not as a promise of fills.
+
 ## Market News
 
 **Route:** `/news`. A rail item under **MARKETS**, directly below Flow Alerts.

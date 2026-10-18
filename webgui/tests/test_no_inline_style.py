@@ -80,7 +80,9 @@ def test_phase3c_pages_have_no_inline_style():
 # and bound through a slot's ``:class``.
 # shares.py is the same shape again: a read-only table whose one dynamic colour
 # is the unrealized sign, stamped as a fixed palette class and bound via ``:class``.
-OPTIONS_MATRIX_FILES = ["matrix.py", "flow.py", "income.py", "shares.py"]
+# scalp.py (Opening Scalp, 2026-10-18) too: the row tone, the mark and the agree /
+# disagree word are stamped fixed classes and bound through slots' ``:class``.
+OPTIONS_MATRIX_FILES = ["matrix.py", "flow.py", "income.py", "shares.py", "scalp.py"]
 
 
 def test_options_matrix_page_has_no_inline_style():
