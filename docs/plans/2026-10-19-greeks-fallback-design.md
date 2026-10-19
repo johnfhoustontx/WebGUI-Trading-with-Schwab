@@ -1,6 +1,8 @@
 # Greeks fallback for Dealer Positioning — design
 
-**Status:** draft for the user's approval, 2026-10-19. Nothing here is live.
+**Status:** **approved by the user 2026-10-19** ("Design approved as written,
+with the defaults for the three open questions"). Nothing here is live.
+Plan: [2026-10-19-greeks-fallback-plan.md](2026-10-19-greeks-fallback-plan.md).
 **Asked for by the user:** "Plan the Greeks fallback on TradeStation's
 option-chain stream first, with Massive Starter as a possible second source.
 Design first, nothing live until I approve." The user opted out of the
@@ -219,13 +221,16 @@ strike_proximity = 40   # strikes streamed each side of spot
 max_age_sec = 90        # older fallback data is not used
 sources = ["tradestation"]    # order tried; "massive" in phase 2
 public_uses_fallback = false  # see "Public screens"
+wall_window_pct = 10.0  # filled strikes must reach this far for walls to be kept
 ```
 
-The values are my call. `strike_proximity` must cover what the walls search
-(`WALL_MAX_PCT`, 10% of spot). For $SPX at 5-point strikes that is about 150
-each side; the builder measures the payload and TradeStation's maximum, and
-picks the value. Walls found outside the streamed window are ties, so the
-census rule applies: if the filled window does not reach the wall bound, clear
+The values are my call. The page's walls are searched unbounded
+(`compute.gamma_walls` passes no `max_pct`), so the fill has a reach of its
+own, `wall_window_pct` (10% of spot). For $SPX at 5-point strikes that is
+about 150 strikes each side; the builder measures the payload and
+TradeStation's maximum for `strike_proximity`. A wall picked from a window too
+short to hold it is an artifact, so the census rule applies: if the filled
+window does not reach `wall_window_pct`, clear
 the walls the same way `mark_no_greeks` does. Every key goes in
 `webgui/config_schema.py` (Settings → Configuration), and the loader goes
 through `shared/config_toml`.
@@ -327,13 +332,14 @@ website. **The user decides this**; see the open questions.
 5. The user decides whether to set `mode = "on"`.
 6. Phase 2 (Massive) only if the user asks after phase 1.
 
-## Open questions for the user
+## Open questions: answered 2026-10-19 (the defaults)
 
-1. **API key:** do you already have a TradeStation API key, or does it need requesting?
-2. **Public screens and X:** may fallback-derived positioning appear on
-   `live.neuralstrike.co` and in posts, given the data terms? Default: no.
-3. **Symbols:** is `$SPX, SPY, QQQ, $NDX` the right set, or should the private
-   page's currently selected symbol get a fifth stream?
+1. **API key:** the user requests or supplies it at rollout step 1. Nothing
+   in the build needs it: tests run on recorded streams.
+2. **Public screens and X:** **no.** Fallback-derived positioning does not
+   appear on `live.neuralstrike.co` or in posts (`public_uses_fallback = false`).
+3. **Symbols:** **`$SPX, SPY, QQQ, $NDX`**, with no fifth stream for the private
+   page's selected symbol.
 
 ## Left to the builder
 
