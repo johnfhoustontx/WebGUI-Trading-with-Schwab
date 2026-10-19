@@ -752,6 +752,9 @@ accelerate price.
 - **Bars + heat map** — show ±20 strikes around spot, so the size stays steady as
   the day moves. **Press and hold** the left mouse button on the heat map to read a
   strike's value (it follows the cursor while held); plain hovering shows nothing.
+  If Schwab sends a chain with **no Greeks** (every one marked "not computed"),
+  a sentence replaces the bars and no walls are drawn. Every value would be zero,
+  so the page says so instead of showing empty bars and made-up walls.
 - **Value** — what each bar and each cell holds. **Net** is calls minus puts.
   **Calls** and **Puts** show one side alone. **Size** is calls **plus** puts,
   coloured by which way the strike leans, and the bars split into a call bar and

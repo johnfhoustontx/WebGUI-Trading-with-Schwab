@@ -61,6 +61,31 @@ def test_project_grid_defensive_on_bad_chain():
     assert compute.project_gex_grid(gt.GammaEngine(), {}, 0, now)["grid"] == {}
 
 
+def _sentinel_chain(gamma, iv):
+    """The 2026-10-19 chain: every Greek at Schwab's -999 "not computed"."""
+    exp = "2026-07-11:0"
+    def leg(k, oi):
+        return [{"strike": k, "gamma": gamma, "openInterest": oi,
+                 "volatility": iv, "delta": -999.0, "daysToExpiration": 0}]
+    # Call and put OI differ, or a sign error would cancel itself to zero.
+    calls = {exp: {f"{k:.1f}": leg(k, 5000) for k in (95.0, 100.0, 105.0)}}
+    puts = {exp: {f"{k:.1f}": leg(k, 1500) for k in (95.0, 100.0, 105.0)}}
+    return {"underlyingPrice": 100.0, "callExpDateMap": calls, "putExpDateMap": puts}
+
+
+def test_project_grid_takes_no_reading_from_schwabs_placeholder():
+    """A -999 gamma is "not computed", never a gamma (audit AC-09). Read as one,
+    it put 5.6e13 in every $SPX projection cell on 2026-10-19 and the heatmap's
+    colour scale read +/-$216,112B."""
+    import gamma_tool as gt
+    now = dt.datetime(2026, 7, 11, 13, 0, tzinfo=CT)
+    for iv in (-999.0, 20.0):
+        proj = compute.project_gex_grid(gt.GammaEngine(), _sentinel_chain(-999.0, iv),
+                                        100.0, now)
+        assert proj["times"]                       # non-vacuous: marks were built
+        assert all(v == 0.0 for row in proj["grid"].values() for v in row), iv
+
+
 def test_em_cone_sqrt_time_fan():
     now = dt.datetime(2026, 7, 11, 13, 0, tzinfo=CT)
     marks = compute._future_marks_ct(now)

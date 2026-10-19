@@ -4,7 +4,36 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-18 (**Opening Scalp: a measured morning call for $SPX, SPY and QQQ, and a study that says there is no usable edge.**)
+**Last updated:** 2026-10-19 (**Dealer Positioning says so when Schwab sends no Greeks.**)
+
+- **What the user saw:** no strike bars on Dealer Positioning before the open.
+  **The cause was Schwab's, not the app's.** From 08:00 CT, and still after the
+  08:30 open, every contract on every symbol checked (SPY, $SPX, QQQ, NVDA,
+  AAPL, KO) came back with gamma, delta and volatility at -999 ("not
+  computed"). Bid and ask were stuck at Friday's close while last trades,
+  volume and open interest were live. This was measured through the proxy's
+  `/passthrough`, which skips the store, and no request variant changed it.
+  `gex_history.db` had non-zero GEX in every 08:00-08:29 minute from Oct 12 to
+  Oct 16, and zero in every minute that day. No outage notice was found
+  (StatusGator, Cboe system status, search).
+- **The engine was right to read -999 as no reading** (AC-09), so every cell
+  was 0.0. The page then drew zero-length bars and walls picked from ties (the
+  $SPX "put wall" was 3200 with spot at 7694).
+- **Three changes:**
+  1. `services/options_svc/greeks_census.py`: `gamma_snapshot` flags each view
+     `no_greeks` when the chain lists contracts and none has a usable gamma, and
+     clears that view's walls and flip. The page shows one sentence in place of
+     the bars (`gamma.no_greeks_text` / `show_no_greeks`); the heatmap stays.
+  2. `compute.project_gex_grid` read `c.get("gamma") or 0`, so -999 counted as a
+     gamma: every $SPX forward-projection cell was about 5.6e13, and the colour
+     scale read ±$216,112B. It now goes through `shared.greeks.gamma`.
+  3. `gamma.heatmap_figure`: a session whose every cell is zero drops every
+     strike, and an interpolated Highcharts heatmap with no points throws on
+     update. With no points it is drawn plain.
+- Paper books deliberately untouched (the user's call): the scanner and
+  Account still read the chain's frozen bid/ask on a day like this.
+
+**Prior —** 2026-10-18 (**Opening Scalp: a measured morning call for $SPX, SPY and QQQ, and a study that says there is no usable edge.**)
 
 - **Asked for by the user:** "an app with a basic interface that is a scalping
   strategy for options for just $SPX, SPY, QQQ", reading the premarket and giving

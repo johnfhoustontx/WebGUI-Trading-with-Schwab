@@ -51,11 +51,13 @@ from iv_analysis import run_iv_analysis  # noqa: E402
 
 from services import _degrade  # noqa: E402
 from shared import gamma_heat_config as _heat_cfg  # noqa: E402
+from shared import greeks as _greeks  # noqa: E402  (Schwab's -999 is not a Greek)
 from shared import scanner_config as _scanner_config  # noqa: E402
 from shared import vol_gate as _vol_gate  # noqa: E402
 from services import _proxy  # noqa: E402
 from services.options_svc import commission  # noqa: E402  (round-trip $ for the break-even floor)
 from services.options_svc import gamma_window as _gw  # noqa: E402  (the gamma display window + scale lock)
+from services.options_svc import greeks_census as _census  # noqa: E402  (a chain with no Greeks at all)
 from services.options_svc.hiro_store import write_rows as _write_hiro_rows  # noqa: E402  (one minute's hedging-flow rows)
 from shared.numeric import finite as _finite  # noqa: E402 - one shared definition (audit CQ-07)
 
@@ -4637,6 +4639,8 @@ def gamma_snapshot(symbol: str, chain=None, with_term: bool = True) -> dict | No
     # blobs reached ~1.1 MB each. They now live in their OWN keys and are stripped
     # off at publish time — see handlers._publish_gamma / gamma_history_key. This
     # function still returns them inline; the split is a publishing concern.
+    if _census.greeks_missing(chain):       # every gamma -999: say so, no tie walls
+        _census.mark_no_greeks(views)
     _crop_gamma_views(views, spot)
 
     try:
@@ -5640,7 +5644,7 @@ def project_gex_grid(eng, chain, spot, now):
                 key = str(strike)
                 for c in contracts:
                     oi = c.get("openInterest", 0) or 0
-                    gamma = c.get("gamma", 0) or 0
+                    gamma = _greeks.gamma(c.get("gamma")) or 0.0   # -999 is no reading (AC-09)
                     if oi <= 0 or gamma == 0:
                         continue
                     base = sign * gamma * oi * 100 * spot * spot * 0.01
