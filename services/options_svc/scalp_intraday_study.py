@@ -161,7 +161,9 @@ def _verdict_rows(outcome_rows, symbols, blocks, scales):
                     body = {"scales": {str(s): by_scale[s][bucket] for s in scales},
                             "edge": bool(across.get(bucket, False)),
                             "edge_scales": study_scales, "unit": "day",
-                            "min_margin": margin}
+                            # The gate the edge was judged under, so a reader
+                            # never re-reads a config changed since.
+                            "min_margin": margin, "min_samples": min_n}
                     out.append((sym, block, role, bucket, json.dumps(
                         body, sort_keys=True, separators=(",", ":"))))
     return out

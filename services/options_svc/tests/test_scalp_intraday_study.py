@@ -469,6 +469,99 @@ def test_report_says_k_of_cells(walked, monkeypatch):
         assert word not in text.lower()
 
 
+def test_rebuild_stores_the_gate_in_every_verdict(walked, monkeypatch):
+    monkeypatch.setattr(scalp_config, "min_samples", lambda: 3)
+    monkeypatch.setattr(scalp_config, "min_brier_margin", lambda: 0.002)
+    scalp_intraday_study.rebuild(db_path=walked)
+    for v in _verdicts(walked).values():
+        assert (v["min_samples"], v["min_margin"]) == (3, 0.002)
+        assert v["edge_scales"] == [float(s) for s in scalp_config.iv_scales()]
+
+
+def test_report_reads_its_gate_from_the_verdicts_not_config(walked, monkeypatch):
+    monkeypatch.setattr(scalp_config, "min_samples", lambda: 2)
+    monkeypatch.setattr(scalp_config, "min_brier_margin", lambda: 0.0)
+    scalp_intraday_study.rebuild(db_path=walked)
+    stored = _verdicts(walked)
+    k = sum(1 for v in stored.values() if v["edge"])
+    assert k > 0, "the fixture must pass some cell at this gate"
+    before = _report().render(walked)
+    # Config changes AFTER the rebuild: the report must still read the gate the
+    # verdicts were judged under, or its header, k and chance would disagree
+    # with the stored edges.
+    monkeypatch.setattr(scalp_config, "min_samples", lambda: 500)
+    monkeypatch.setattr(scalp_config, "min_brier_margin", lambda: 0.2)
+    after = _report().render(walked)
+    assert after == before
+    header = after.split("## Summary", 1)[0]
+    assert "minimum scored DAYS 2;" in header and "Brier margin 0 below" in header
+    assert re.search(rf"\b{k} of \d+ cells pass at every scale", after)
+
+
+# ── a store where a cell truly passes ────────────────────────────────────────
+_EDGE_SLOTS = (("12:36", "high", "win"), ("12:51", "high", "win"),
+               ("13:36", "low", "loss"), ("13:51", "low", "timeout"))
+
+
+def _edge_store(db, n_days=25):
+    """SPY's afternoon, written straight into the study's tables through the
+    study's own verdict code: for ``long_with`` the high bucket (12:36 and 12:51)
+    always wins and the low bucket (13:36 and 13:51) never does - a real edge,
+    and one that is also a time-of-day split. The other roles win on even days
+    and lose on odd ones whatever the bucket: no edge."""
+    scales = scalp_study._scales()
+    rows = []
+    for i, d in enumerate(trading_days(n_days)):
+        for slot, bucket, result in _EDGE_SLOTS:
+            for role in scalp_sim.ROLES:
+                res = result if role == "long_with" else ("win" if i % 2 == 0 else "loss")
+                for scale in scales:
+                    rows.append((d.isoformat(), slot, "SPY", scale, role,
+                                 scalp_sim.structure_for(role, 1), "afternoon", bucket,
+                                 res, 5, 1.0, 0))
+    verdicts = scalp_intraday_study._verdict_rows(
+        rows, ["SPY"], ["morning", "midday", "afternoon"], scales)
+    conn = scalp_store.connect(db)
+    try:
+        with conn:
+            conn.executemany(
+                f"INSERT INTO intraday_outcomes ({', '.join(scalp_intraday_study.COLUMNS)}) "
+                f"VALUES ({', '.join('?' * 12)})", rows)
+            conn.executemany("INSERT INTO intraday_verdicts VALUES (?, ?, ?, ?, ?)", verdicts)
+    finally:
+        conn.close()
+
+
+def test_report_on_a_passing_cell_shows_its_margin_and_slots(db):
+    _edge_store(db)
+    stored = _verdicts(db)
+    passing = sorted(k for k, v in stored.items() if v["edge"])
+    assert passing == [("SPY", "afternoon", "long_with", "high"),
+                       ("SPY", "afternoon", "long_with", "low")]
+    text = _report().render(db)
+    assert re.search(r"\b2 of \d+ cells pass at every scale", text)
+    assert "smallest Brier margin" in text
+    # The chance line: the mean, the maximum over the rotations and the share of
+    # rotations passing at least k cells, labelled as rough.
+    m = re.search(r"about (\d+\.\d) of (\d+) would pass \(at most (\d+) in any one "
+                  r"rotation; (\d+) of (\d+) rotations pass at least (\d+)\)", text)
+    assert m, text[:3000]
+    mean, n, most, hits, rotations, k = (float(m.group(1)), int(m.group(2)),
+                                         int(m.group(3)), int(m.group(4)),
+                                         int(m.group(5)), int(m.group(6)))
+    assert k == 2 and rotations == _report().ROTATIONS
+    assert 0 <= mean <= most <= n and 0 <= hits <= rotations
+    assert "rough" in text and "correlated" in text
+    # Each passing cell's rows per slot, beside its block's: the high bucket sits
+    # only at 12:36 and 12:51, while the block spreads over four slots.
+    section = text.split("SPY afternoon / Long, with the move / high", 1)[1]
+    section = section.split("\n- ", 1)[0]
+    assert "| Slot | cell rows | cell share | block rows | block share |" in section
+    assert "| 12:36 | 25 | 50.0% | 25 | 25.0% |" in section
+    assert "| 12:51 | 25 | 50.0% | 25 | 25.0% |" in section
+    assert "| 13:36 | 0 | 0.0% | 25 | 25.0% |" in section
+
+
 def test_report_says_no_edge_for_a_symbol_with_none(db, days):
     for i, d in enumerate(days[:3]):
         seed_day(db, d, seed=20 + i)
