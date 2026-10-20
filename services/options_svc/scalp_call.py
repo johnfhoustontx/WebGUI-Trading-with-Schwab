@@ -78,7 +78,8 @@ from shared.contracts.options import ScalpView
 from shared.numeric import finite as _finite
 
 from services.options_svc import (scalp_chain, scalp_fetch, scalp_inputs, scalp_model,
-                                  scalp_score, scalp_sim, scalp_store, scalp_study)
+                                  scalp_record, scalp_score, scalp_sim, scalp_store,
+                                  scalp_study)
 
 log = logging.getLogger("options_svc.scalp_call")
 
@@ -529,6 +530,34 @@ def _run(bus, now, db_path, client) -> None:
     if built:
         # Only now is it what the page was shown: freeze it.
         _save_published(payload, db_path)
+        _record_call_slot(bus, day, now, payload, db_path)
+
+
+def _record_call_slot(bus, day, now, payload, db_path) -> None:
+    """Record the confirmation inputs at the call's own moment (``"08:36"`` at the
+    defaults), with each called symbol's direction and the long-with-the-move
+    role's points to target, so the 08:36 row is scored like an intraday slot.
+
+    Only a run inside the slot's grace records: a page refresh at 10:00 builds
+    too (and reuses the frozen calls), but what the sources say then is not what
+    the call saw, and it must not replace the 08:36 row. A failure here never
+    touches the call: it is already published and saved, and this is counted as
+    ``options.scalp_record``."""
+    try:
+        at = _call_time(day)
+        if now >= at + _dt.timedelta(minutes=_mc.slot_grace_min("scalp")):
+            return
+        directions, win_points = {}, {}
+        for symbol, entry in (payload.get("symbols") or {}).items():
+            if _is_call(entry) and entry.get("direction") in (1, -1):
+                directions[symbol] = entry["direction"]
+                win_points[symbol] = (entry["roles"].get("long_with") or {}).get(
+                    "win_points")
+        scalp_record.record(bus, day, at.strftime("%H:%M"), now=now, db_path=db_path,
+                            directions=directions, win_points=win_points,
+                            entry_ts=int(_entry_time(day).timestamp()))
+    except Exception:
+        _degrade.degraded("options.scalp_record", detail="call")
 
 
 def republish_scorecard(bus, db_path=None) -> bool:

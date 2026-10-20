@@ -714,3 +714,41 @@ def test_scalp_bars_slot_comes_after_the_flow_delta_report_and_collection_stop()
     (name, t), = scheduler.mc.slot_times("scalp_bars").items()
     assert (name, (t.hour, t.minute)) == ("close", (16, 20))
     assert scheduler.mc.slot_grace_min("scalp_bars") == 120
+
+
+# ── Opening Scalp intraday recording ([intraday] slots) ─────────────────────
+def test_scalp_intraday_due_fires_each_slot_once():
+    from shared import scalp_config
+
+    day = _ct(2026, 6, 15, 8, 0).date()
+    slots = scalp_config.intraday_slots(day)
+    assert slots[0] == "08:51" and slots[-1] == "13:51" and len(slots) == 21
+    ran = set()
+    assert scheduler.scalp_intraday_due(_ct(2026, 6, 15, 8, 50), ran) is None
+    fired = []
+    for hh, mm in ((8, 51), (9, 6), (13, 51)):
+        slot = scheduler.scalp_intraday_due(_ct(2026, 6, 15, hh, mm), ran)
+        assert slot == f"{hh:02d}:{mm:02d}"
+        ran.add(("2026-06-15", slot))
+        fired.append(slot)
+        # latched: the same minute and the next never refire it
+        assert scheduler.scalp_intraday_due(_ct(2026, 6, 15, hh, mm + 1), ran) is None
+    # a late tick inside the 5-minute grace still fires; past it, never
+    assert scheduler.scalp_intraday_due(_ct(2026, 6, 15, 9, 10), set()) == "09:06"
+    assert scheduler.scalp_intraday_due(_ct(2026, 6, 15, 9, 11), set()) is None
+    assert scheduler.scalp_intraday_due(_ct(2026, 6, 15, 13, 57), set()) is None   # after the end
+
+
+def test_not_on_a_holiday():
+    assert scheduler.scalp_intraday_due(_ct(2026, 6, 13, 9, 6), set()) is None   # Saturday
+    assert scheduler.scalp_intraday_due(_ct(2026, 1, 1, 9, 6), set()) is None    # holiday
+
+
+def test_the_intraday_branch_records_in_its_own_try():
+    import inspect
+
+    src = inspect.getsource(scheduler.loop)
+    seg = src.split("async def _scalp_intraday_branch", 1)[1].split("if intraday_slot:", 1)[0]
+    assert "run_in_executor(None, scalp_record.record" in seg
+    assert "except Exception" in seg
+    assert 'branches.append(("scalp_intraday"' in src

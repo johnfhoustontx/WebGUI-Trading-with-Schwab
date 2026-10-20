@@ -19,8 +19,9 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from services import _heartbeat
-from services.options_svc import compute, finder_public, flow_stream, handlers, scalp_call, scalp_fetch, scalp_grade, scalp_study
+from services.options_svc import compute, finder_public, flow_stream, handlers, scalp_call, scalp_fetch, scalp_grade, scalp_record, scalp_study
 from shared import market_calendar as mc
+from shared import scalp_config
 from shared import trade_mgmt as _trade_mgmt
 from shared.market_calendar import is_trading_day as _cal_is_trading_day
 
@@ -511,6 +512,30 @@ def scalp_bars_due(now, ran_slots):
     return None
 
 
+# ── Opening Scalp intraday recording ([intraday] in config/scalp.toml) ──
+# Every 15 minutes 08:51-13:51 CT (22 slots less the 08:36 call's own, recorded
+# by scalp_call): scalp_record.record saves the confirmation reading's raw inputs
+# for the three scalp symbols. Reads the bus only; no proxy call.
+def scalp_intraday_due(now, ran_slots):
+    """Name (``"HH:MM"``) of the intraday recording slot due now, or None.
+
+    Fires each slot once per trading day when ``target <= now < target + grace``
+    (``[intraday] grace_min``) and that ``(date, slot)`` is not in ``ran_slots``;
+    the caller records it. Mirrors ``scalp_call_due``."""
+    if not _is_trading_day(now):
+        return None
+    import datetime as _dt
+    day = now.date()
+    for name in scalp_config.intraday_slots(day):
+        if (day.isoformat(), name) in ran_slots:
+            continue
+        target = scalp_config.intraday_slot_time(day, name).astimezone(now.tzinfo) \
+            if now.tzinfo else scalp_config.intraday_slot_time(day, name).replace(tzinfo=None)
+        if target <= now < target + _dt.timedelta(minutes=scalp_config.intraday_grace_min()):
+            return name
+    return None
+
+
 # ── Scheduled end-of-day summary cadence (~15:10 CT) ─────────────────────────
 # A once-daily push AFTER the regular-session close (15:00 CT / 4pm ET) + 0-DTE
 # settlement, summarizing the day's result for the paper account. The wide grace tolerates a late/mid-window
@@ -706,6 +731,7 @@ async def loop(bus):
     finder_warm_ran = set()  # (date, slot) of fired public-Finder warm-ups
     scalp_call_ran = set()  # (date, slot) of fired Opening Scalp morning calls (see scalp_call_due)
     scalp_bars_ran = set()  # (date, slot) of fired Opening Scalp bar top-ups (see scalp_bars_due)
+    scalp_intraday_ran = set()  # (date, slot) of recorded intraday slots (see scalp_intraday_due)
     eod_summary_ran = set()  # (date, slot) of fired EOD-summary pushes (see eod_summary_due)
     market_snapshot_ran = set()  # (date, "HH:MM") of fired market-snapshot pushes (see market_snapshot_due)
     trade_idea_ran = set()  # (date, slot) of fired hourly trade-idea posts (see trade_idea_due)
@@ -1089,6 +1115,29 @@ async def loop(bus):
 
         if call_slot:
             branches.append(("scalp", _scalp_branch()))
+
+        # Opening Scalp intraday recording - saves the confirmation reading's
+        # raw inputs for the three symbols (scalp_record.record). Reads the bus
+        # only, so it takes no proxy budget. Latched BEFORE it runs, like the
+        # call, in its own branch: a slow or failed recording can only delay or
+        # lose itself, never the call or another slot.
+        try:
+            intraday_slot = scalp_intraday_due(now, scalp_intraday_ran)
+            if intraday_slot:
+                scalp_intraday_ran.add((now.date().isoformat(), intraday_slot))
+        except Exception:
+            log.exception("scalp_intraday_due gate degraded")
+            intraday_slot = None
+
+        async def _scalp_intraday_branch(slot=intraday_slot, day=now.date()):
+            try:
+                n = await loop_.run_in_executor(None, scalp_record.record, bus, day, slot)
+                log.info("scalp intraday slot %s recorded %d row(s)", slot, n)
+            except Exception:
+                log.exception("scalp intraday recording degraded")
+
+        if intraday_slot:
+            branches.append(("scalp_intraday", _scalp_intraday_branch()))
 
         # Opening Scalp bar top-up - the nightly price-history fetch into
         # scalp.db, then the study rebuild over it, then the grading of each
