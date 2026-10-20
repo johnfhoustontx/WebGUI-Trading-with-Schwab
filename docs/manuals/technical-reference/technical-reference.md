@@ -43,7 +43,7 @@ Use this map to get from a screen to its numbers. Menu order matches the rail.
 | **Expected Move** | *Options Scoring* → **Expected move and IV analysis** |
 | **Captured Signals** · **Paper Ledger** · **Paper Account** | *Options Scoring* (entry quality) · *Rescue Tested Trades* (the management rules) |
 | **Rescue** | *Rescue Tested Trades* |
-| **Opening Scalp** | *Opening Scalp* — the direction, the alignment buckets, the modelled outcomes, the walk-forward verdict, the 08:36 call and the grading · *Black-Scholes & the Simulator* (the pricer it reuses) |
+| **Opening Scalp** | *Opening Scalp* — the direction, the alignment buckets, the modelled outcomes, the walk-forward verdict, the 08:36 call and the grading; *The 15-minute calls* — the slots and blocks, the price reading, the day-unit study, the confirmation reading, the recording and the intraday grading · *Black-Scholes & the Simulator* (the pricer it reuses) |
 | **Trade Analyzer** | *Trade Analyzer* · *Technical Indicators* |
 | **Portfolio** | *Portfolio Analytics* |
 | **EOD Report** | Aggregation only; it computes nothing of its own |
@@ -2929,9 +2929,13 @@ phone push, a chime, the Desk's speech, or any ranking.
 `scalp_inputs.py` (the morning), `scalp_sim.py` (one trade), `scalp_model.py`
 (buckets and the verdict), `scalp_study.py` (the nightly rebuild), `scalp_chain.py`
 (the 08:36 chain), `scalp_call.py` (the view), `scalp_grade.py` and `scalp_score.py`
-(the record); `shared/scalp_config.py` reads `config/scalp.toml`. None imports
-`compute.py`. Design: `docs/plans/2026-10-18-opening-scalp-design.md`; the first
-verdict, with its full report: `docs/reference/opening-scalp-study.md`.
+(the record); `shared/scalp_config.py` reads `config/scalp.toml`. The 15-minute calls
+add `scalp_intraday_inputs.py` (the price reading), `scalp_intraday_study.py` (the
+study), `scalp_intraday_call.py` (build, freeze, publish), `scalp_confirm.py` (the
+confirmation), `scalp_record.py` (the recorded readings) and `scalp_intraday_grade.py`
+(grading). None imports `compute.py`. Design: `docs/plans/2026-10-18-opening-scalp-design.md`
+and `docs/plans/2026-10-20-scalp-intraday-calls-design.md`; the first verdict, with its
+full report: `docs/reference/opening-scalp-study.md`.
 
 The page answers one question per symbol (`$SPX`, SPY, QQQ) at 08:36 CT: *given how
 this morning set up, how often has a same-day (0DTE) scalp in each direction reached
@@ -3131,13 +3135,230 @@ night's grading `scalp_call.republish_scorecard` puts a fresh scorecard into the
 current view and changes nothing else (no build, no fetch), so the grades show that
 evening.
 
+## The 15-minute calls
+
+Every 15 minutes from 08:51 to 13:51 CT the page makes a new, frozen 0DTE scalp call for
+each symbol (design `docs/plans/2026-10-20-scalp-intraday-calls-design.md`). The
+discipline of the 08:36 call carries over: **a number called a probability is one that
+was tested walk-forward on days it was not fitted to**. So the probability comes from
+**price alone** (seven months of 5-minute bars); flow, net premium, the walls and
+sentiment are a **confirmation reading**, shown and recorded and not in the probability.
+
+### Slots, blocks and the entry
+
+- **Slots.** `[intraday] start` (08:51), `end` (13:51), `interval_min` (15): 21 slots,
+  at :06, :21, :36 and :51, which sit after the auto-scan's :02-:05 fetch burst and
+  outside the refused first minute after the hour and half hour. A slot fires once per
+  trading day from its time up to its time plus `grace_min` (5); one missed by more is
+  skipped, never backfilled (a late call would not be the call that moment asked for).
+- **Blocks.** Slots are pooled into `morning` (08:51-09:51), `midday` (10:06-12:21) and
+  `afternoon` (12:36-13:51) so that the study's cells are few enough for the sample:
+  3 symbols x 3 blocks x 4 roles x 3 buckets = **108 cells**. A block table that is bad
+  or overlapping reads as these defaults whole.
+- **The entry convention.** The call's `entry_ts` is the slot minute **floored to the
+  5-minute boundary**: the close of the last complete bar (08:51 enters at 08:50, on the
+  bar that starts 08:45). The reading sees no bar at or after `entry_ts`, not into a
+  number and not into the cache's view of it. `entry_spot` is the close of the bar
+  starting `entry_ts - 5 min`. The live chain mid is read about a minute later;
+  accepted.
+
+### The price reading (`scalp_intraday_inputs.reading`)
+
+- **Direction.** "The last 15 minutes" is the three bars starting `entry_ts - 15`,
+  `- 10` and `- 5 minutes`: the last close over the first open, in percent. It is up or
+  down only outside `[intraday] dead_zone_pct` (0.03%); a flat move, a missing bar of
+  the three, a trio starting before 08:30, or no 08:30 bar means no direction and no call.
+- **Six inputs, each agreeing (+1), disagreeing (-1), in its dead zone (0) or absent.**
+  Moves use the 08:36 band `[direction] dead_zone_pct` (0.05%).
+
+  | Input | Measured as | Agrees with up when |
+  |---|---|---|
+  | `since_open` | `entry_spot` over the open of the 08:30 bar, % | above +0.05% |
+  | `vwap_side` | `entry_spot` over the session VWAP, % | above +0.05% |
+  | `breadth_up_share` | share of the **movers** among the big ten that moved up (0..1) | the matching share >= `breadth_agree` (0.6); <= 0.4 disagrees; between is 0 |
+  | `fut_15m` | the futures' last 15 minutes (/ES for $SPX and SPY, /NQ for QQQ) | above +0.05% |
+  | `vol_change` | $VIX's last 15 minutes, **inverted** | below -0.05% |
+  | `etf:<fund>` | each sector fund's last 15 minutes (the 08:36 mapping) | above +0.05%, each |
+
+- **VWAP over the bars present.** The session VWAP is the volume-weighted typical price
+  `(h + l + c) / 3` of the bars **present** from 08:30 to the entry bar. It is absent
+  without the entry bar, without any volume, or when more than `[intraday]
+  vwap_max_missing` (0.25) of the range's bars are missing. $SPX prints no volume, so
+  it reads SPY's spot against SPY's VWAP.
+- **Breadth among movers.** Each member of `shared.symbols.big10()` (the BIG10 basket;
+  never a second list) whose last-15-minute move is outside the dead zone is a mover. A
+  member inside the dead zone or without bars is left out of the share, not counted
+  against it: a quiet tape is absent, not disagreeing. Fewer than `[confirm]
+  breadth_min_members` (5) movers reads as absent.
+- **Alignment and buckets** are the 08:36 machinery unchanged (`[direction] buckets`).
+  The volatility is the close of the vol symbol's bar starting `entry_ts - 5 min`, over
+  100 (`$VXN` for QQQ, falling back to `$VIX`).
+
+### The intraday study (`scalp_intraday_study.rebuild`)
+
+Run nightly, last. For every stored trading day and every slot it takes each symbol's
+reading and, when it has a direction and a usable volatility, simulates the four roles
+from that slot's entry along the stored bars at every multiplier in `[study]
+iv_scales`, with the 08:36 simulator and rules (`scalp_sim.simulate`). Then it replaces
+`intraday_outcomes` and `intraday_verdicts` in **one transaction**. Rows are skipped
+(and counted by reason) for a short session, a slot in no block, no direction, no
+volatility, or a path short of a full time stop's bars. A `skip` from the simulator
+(entry premium under `min_premium`, common late in the day) is stored with
+`result = "skip"` and never labelled.
+
+- **The day is the unit.** The rows of one day share one tape over overlapping hours, so
+  they are not independent. The walk-forward stream for each (symbol, block, role,
+  multiplier) is sorted by (day, slot) and **keyed by the day**: a day's rows enter the
+  history only once the day is over, so no row ever sees another row of its own day. A
+  cell's `n` is its **distinct days**, `[study] min_samples` gates on days, and the
+  Wilson interval uses `n` = days around the mean over the cell's rows
+  (`scalp_model.wilson_days`). The page's sample labels say "days".
+- **An edge needs a margin.** It requires, at **every** multiplier in `iv_scales`, a
+  Brier score for the bucket at least `[intraday] min_brier_margin` (0.005) below the
+  base rate's, over at least `min_samples` days; the current `iv_scale` is simulated
+  too (it is the rate shown) but does not vote. The margin was set before any real
+  intraday result was read: on pure-noise bars the bare "strictly lower" rule passed 6
+  of 108 cells; with the margin none passes. 0.005 is about a 7-point win-rate
+  difference near 50%. The 08:36 study has no margin and is unchanged.
+- **The chance estimate.** `tools/scalp_intraday_report.py` prints "k of N cells pass at
+  every scale" beside how many would pass by chance: the same verdicts with each cell's
+  bucket sequence **rotated** against its outcomes (clustering kept, link to outcomes
+  cut), averaged over a fixed set of rotations. A rough estimate, not a significance
+  test: the cells are strongly correlated. Read k against it before trusting any
+  "Measured edge". Its gate (margin, minimum days, scales) is read back from the stored
+  verdicts, never from a config changed since.
+- **The rates shown are in-sample** (the bucket's rate over every stored day at the
+  current `iv_scale`); the edge flag is the walk-forward part. Each entry is labelled
+  `rates_basis`.
+
+### The intraday call (`scalp_intraday_call.run_slot`)
+
+1. **Gate.** `scheduler.scalp_intraday_due` returns a slot when `target <= now <
+   target + grace` and `(date, slot)` is not already latched; the `scalp_intraday`
+   branch latches it BEFORE running, so a slow pass delays only itself. A scheduled slot
+   found outside its window is a degrade.
+2. **One run at a time.** `run_slot` holds `scalp_call._RUN_LOCK`, the lock the 08:36
+   call and a Refresh take: the second caller waits, then finds the slot frozen.
+3. **Fetch only what a new call needs**, on the normal lane: today's 5-minute bars for the
+   23 bar symbols (one request each), then the 0DTE chain for each symbol being built
+   that has a direction: about 26 requests per slot. The confirmation reads Redis only.
+4. **Price and points** exactly as the 08:36 call (`scalp_call._price`), with the walls in
+   the path to each role's target and stop (`wall_context`).
+5. **Frozen.** A (day, slot, symbol) is saved in `intraday_calls` (and its chain slice in
+   `intraday_chain_slices`) only after the WHOLE view, with the new `intraday` section,
+   validated against `ScalpView` and reached the bus; a stored one is reused whole.
+   What freezes is a call and a flat tape; a symbol with missing bars or a failed build is
+   not frozen and a Refresh inside the window may fill it. After `entry + time_stop_min`
+   a symbol gets no roles and the note "missed the call window".
+6. **Publishing merges.** The current view is republished with only `intraday` replaced;
+   `symbols` and every other key are untouched. The 08:36 publish and the nightly
+   scorecard republish carry the `intraday` section forward (only if it validates on
+   its own; otherwise it is dropped with a degrade rather than veto the 08:36 call).
+7. **Recording** (below) runs after the publish, from the same sources the call showed.
+
+### The confirmation reading (`scalp_confirm`)
+
+Read from **five Redis views** (`sources`): `cache:options:matrix`,
+`cache:options:net_premium`, `cache:options:flow_alerts`, `cache:options:flow_sides` (the
+bought / sold estimate lives there, not on the alerts) and `cache:sentiment:composite`.
+A view with a time of its own (`matrix`, `net_premium`, sentiment) older than `[confirm]
+max_age_min` (5) is **stale** and its component is **no reading**; the flow views carry
+none, so a quiet list is a real zero and only a missing view is absent. **Absent is not
+neutral:** `None` never counts, while a source that is there and finds nothing gives 0.
+
+Each component gives +1 (agrees), -1 (disagrees), 0 (looked, no side) or none, relative
+to the call's direction, and `combine` takes the weighted mean over those with a
+reading: weights `[confirm.weights]` flow 1.0, netprem 1.0, dealer 1.0, **sentiment
+0.5**; the word is `Confirms` at or above the upper cut, `Contradicts` at or below the
+lower (`cuts` = [-0.34, 0.34]), else `Mixed`. The score is in [-1, 1], is never shown and
+is never a probability.
+
+- **Flow.** Alerts in `[entry_ts - flow_window_min, entry_ts]` (30 min) on the symbol and
+  the big ten. The net of bullish over bearish alerts, times the direction, must reach
+  `flow_margin` (2) to agree or disagree. The mapping, from the `side` each detector
+  actually writes:
+
+  | Alert type | `side` values | Bullish | Bearish |
+  |---|---|---|---|
+  | `uoa`, `big_delta` | `call` / `put` | a call **bought** or a put **sold** | a call **sold** or a put **bought** |
+  | `crossover` | `calls_over` / `puts_over` | `calls_over` | `puts_over` |
+  | `hiro_surge` | `dealers_buying` / `dealers_selling` | `dealers_buying` | `dealers_selling` |
+  | `hiro_flip` | `to_buying` / `to_selling` | `to_buying` | `to_selling` |
+  | `gamma_flip` | `to_positive` / `to_negative` | never directional | never directional |
+
+  `gamma_flip` is counted and recorded, not scored. For `uoa` and `big_delta` the lean
+  comes from that alert's entry in `flow_sides` (the **poll** tally only; the poll and
+  the stream are never blended): bought is at least `sides_majority` (0.6) of its
+  labelled volume, or sold is. With no estimate (the view absent, from another day, or
+  empty) or a closer split the alert is not directional. The flow view keeps 300 alerts;
+  a full list whose oldest alert is inside the window is marked `truncated`.
+- **Net premium.** The symbol's newest point at or before `entry_ts` in the
+  `net_premium` series, as a **level**: `frac = (call - put) / (call + put)`, times the
+  direction, against `netprem_margin` (0.1). Never a difference of two points: the stored
+  premium is volume at the current mark and falls when marks fall. A point more than
+  `max_age_min` before entry is stale.
+- **The dealer read.** *Room:* spot to the call wall (up) or the put wall (down), against
+  the long-with role's `win_points`; room at least that agrees, a wall inside the target
+  disagrees. *Breadth:* the share of the big ten whose room in percent of their own spot
+  reaches the target in percent, read only with `breadth_min_members` (5) usable
+  members: >= `breadth_agree` agrees, <= 1 minus it disagrees. The verdict is the
+  symbol's own room when breadth agrees or has no reading, **0** when they disagree, and
+  breadth alone when the symbol has no wall. The gamma flip is recorded
+  (`above_flip`), never scored.
+- **Untrusted walls.** A row is `walls_untrusted` when `net_gex` is missing or **0**: with
+  Schwab's -999 gamma refused every GEX cell is 0.0 and the wall picker still returns the
+  first strikes it finds. Those walls stay in the record but are **no reading**: not in
+  the room, the breadth or `wall_context`. A missing wall is likewise no reading, never
+  "no room".
+- **Sentiment.** `derived.trend.state` from the composite: `bullish` +1, `bearish` -1;
+  `neutral` and the two "lack of" states give no side.
+
+### Recording (`scalp_record`)
+
+At every intraday slot **and** at 08:36 (inside the call's grace), one
+`intraday_readings` row per scalp symbol per slot is saved, with or without a
+direction: the components and their **raw values** (so any later definition can be
+recomputed), each source's state and age, the spot, walls, flip, net GEX and
+`walls_untrusted` for the symbol and every big-ten member, the net premium levels for the
+symbols and the BIG10 basket, the sentiment state and score, and the flow counts (the
+whole view and the windowed, scoped reading the call saw). This is the history that does
+not otherwise exist beyond five sessions (`gex_history.db` purges walls and premium).
+
+A recorded (day, slot, symbol) is **write-once**: a second record of it (a Refresh
+re-entering the 08:36 call, a replay) writes nothing, because the later read is not
+what the slot saw. The one exception is a **one-way upgrade**: a row stored with no
+direction (the slot's call failed to publish) is replaced by a row with one when a
+Refresh inside the window publishes the call; a row with a direction is never replaced.
+A source that failed leaves its state, not a stale value.
+
+### Grading and the intraday scorecard
+
+`scalp_intraday_grade.grade_pending` (nightly) reads only the frozen `intraday_calls`
+and grades **every role of every published slot call** under that call's own frozen
+`rules`, from its `entry_ts`. `model_result` walks the day's 5-minute bars at the call's
+`vol_at_entry` x `iv_scale`; `chain_result` at the volatility implied by that slot's own
+saved chain slice. The call's confirmation **word** and its block are stored beside the
+grade. Grades are write-once (`INSERT OR IGNORE`); a path short of bars is left for the
+next night; a short session is never graded.
+
+The scorecard gains `intraday` (`scalp_score`): per symbol and per block, the last
+`scorecard_days` graded **days** of that (symbol, block); `edge` and `caution`
+(`{days, rows, wins, rate, p_base}`, `days` distinct days, `rows` slot-roles) and
+`by_word` (the long-with-the-move role's `{days, rows, wins, win_rate}` for Confirms,
+Mixed and Contradicts). The 08:36 sections count role-days in `days`; the intraday ones
+count days. The word split is an informal look until a declared promotion study (after
+`[intraday] promotion_sessions`, 40, recorded sessions) says whether the confirmation
+belongs in the probability; **that study is not built, and nothing is promoted
+automatically.**
+
 ## Cadences
 
 | Job | When | What |
 |---|---|---|
+| 15-minute call | **08:51, 09:06 ... 13:51 CT** (`[intraday]` `start` / `end` / `interval_min`, grace `grace_min` 5 min; `scalp_intraday_due`) | Under the shared run lock: today's bars topped up, up to three 0DTE chains, the slot's call built, published and frozen, then the confirmation inputs recorded. About 26 requests, normal lane. |
 | Morning call | **08:36 CT** (`[slots.scalp]`, grace 20 min) | Today's bars topped up, three chains captured, the call built and published. 08:36 and not 08:35: the autoscan fetches 08:32-08:35 and Schwab refuses the first minute after the half hour. |
-| Nightly pass | **16:20 CT** (`[slots.scalp_bars]`, grace 120 min) | In order: **bar top-up** (13 symbols x 2 intervals, from one bar before the store's latest, so a bar stored as a partial is replaced; a missed night is caught up by the next), the **study rebuild** (one transaction, so a reader sees the old study or the new, never half of each), **grading**, then the **scorecard republish**. After the 16:00 flow-delta report so it never competes for the proxy's 5 requests a second. |
-| Refresh | on demand (`scalp_refresh`) | The same `scalp_call.run`; slow lane, replay-guarded. |
+| Nightly pass | **16:20 CT** (`[slots.scalp_bars]`, grace 120 min) | In order: **bar top-up** (23 symbols - the 13 in `[bars]` plus the big ten - x 2 intervals, from one bar before the store's latest, so a bar stored as a partial is replaced; a missed night is caught up by the next), the **08:36 study rebuild** (one transaction, so a reader sees the old study or the new, never half of each), the **08:36 grading**, the **intraday grading**, the **scorecard republish**, and last the **intraday study rebuild** (minutes, not seconds, so nothing above waits on it). Each step is guarded on its own: a failed step does not stop the next. After the 16:00 flow-delta report so it never competes for the proxy's 5 requests a second. |
+| Refresh | on demand (`scalp_refresh`) | `scalp_call.run`, then `scalp_intraday_call.run_slot` for the slot whose window is open (none open: only today's published slots are put back, never an off-slot call); slow lane, replay-guarded. |
 
 `scalp.db` (`services/options_svc/data/`) is kept forever and is in the nightly
 backup: it holds 1-minute history (about 6 weeks at Schwab) and 5-minute history
@@ -3149,7 +3370,14 @@ backup: it holds 1-minute history (about 6 weeks at Schwab) and 5-minute history
 `time_stop_min`, `iv_scale`, `min_premium`, `chain_strikes`; `[direction]`
 `dead_zone_pct`, `dead_zone_frac`, `open_dead_zone_pct`, `buckets`; `[study]`
 `iv_scales`, `min_samples`, `scorecard_days`; `[news] items`; `[context] report_url`.
-The slot times are in `config/sessions.toml`.
+For the 15-minute calls: `[intraday]` `start`, `end`, `interval_min`, `grace_min`,
+`dead_zone_pct` (0.03), `breadth_agree` (0.6), `vwap_max_missing` (0.25),
+`min_brier_margin` (0.005), `promotion_sessions` (40), and `[intraday.blocks.<name>]`
+`start` / `end`; `[confirm]` `flow_window_min` (30), `flow_margin` (2), `netprem_margin`
+(0.1), `sides_majority` (0.6), `breadth_min_members` (5), `max_age_min` (5), `cuts`
+([-0.34, 0.34]) and `[confirm.weights]` `flow` / `netprem` / `dealer` (1.0) and
+`sentiment` (0.5). The 08:36 and nightly slot times are in `config/sessions.toml`; the
+15-minute slots are `[intraday]`.
 
 ---
 
@@ -3876,7 +4104,7 @@ the source; this table is a summary of them.
 | Service | Cadence |
 |---------|---------|
 | sentiment_svc | Composite refresh every **120 s** (`REFRESH_INTERVAL_SEC`), throttled to one refresh per **15 min** off-hours (`_OFFHOURS_INTERVAL_MIN`); directional trend recompute every **900 s** (`TREND_INTERVAL_SEC`); market-regime recompute every **5 min** (`REGIME_INTERVAL_MIN`); order-flow publish every **30 s** (`ORDER_FLOW_PUBLISH_SEC`); **momentum cascade once nightly at 16:20** (`momentum_due`); rotation at startup / on demand. |
-| options_svc | Loop tick **30 s** (`POLL_INTERVAL_SEC`). Auto-scan 15-min slots, 08:00–15:15 (`autoscan_due`); **GEX collection every 1 min**, 08:00–15:20 (`_GEX_INTERVAL_MIN`, mirroring `gex_collector.POLL_INTERVAL_MIN`); term structure every **5 min** (`TERM_POLL_INTERVAL_MIN`); **captured-signal** management every **5 min** (`_CAPTURED_MANAGE_INTERVAL_MIN`); **manual** paper entry+manage **hourly at the top of the hour, 09:00–14:00** (`_PAPER_HOURS`, `_PAPER_GRACE_MIN` = 20); paper **expiry settlement at 15:05** — a settle-only pass over the Account and the Ledger (`paper_settle_due`, `[slots.paper_settle]`, grace 120 min); header + GEX status each tick in market hours, throttled to one per **5 min** off-hours (`periodic_refresh_due`, skip-unchanged); **Opening Scalp** morning call at **08:36** (`scalp_call_due`, `[slots.scalp]`, grace 20 min) and, at **16:20**, a nightly pass of bar top-up, study rebuild and grading (`scalp_bars_due`, `[slots.scalp_bars]`, grace 120 min) — see *Opening Scalp*. |
+| options_svc | Loop tick **30 s** (`POLL_INTERVAL_SEC`). Auto-scan 15-min slots, 08:00–15:15 (`autoscan_due`); **GEX collection every 1 min**, 08:00–15:20 (`_GEX_INTERVAL_MIN`, mirroring `gex_collector.POLL_INTERVAL_MIN`); term structure every **5 min** (`TERM_POLL_INTERVAL_MIN`); **captured-signal** management every **5 min** (`_CAPTURED_MANAGE_INTERVAL_MIN`); **manual** paper entry+manage **hourly at the top of the hour, 09:00–14:00** (`_PAPER_HOURS`, `_PAPER_GRACE_MIN` = 20); paper **expiry settlement at 15:05** — a settle-only pass over the Account and the Ledger (`paper_settle_due`, `[slots.paper_settle]`, grace 120 min); header + GEX status each tick in market hours, throttled to one per **5 min** off-hours (`periodic_refresh_due`, skip-unchanged); **Opening Scalp** morning call at **08:36** (`scalp_call_due`, `[slots.scalp]`, grace 20 min) a new 15-minute Opening Scalp call at each of **08:51, 09:06 ... 13:51** (`scalp_intraday_due`, `[intraday]`, grace 5 min) and, at **16:20**, a nightly pass of bar top-up, both study rebuilds, both gradings and the scorecard republish (`scalp_bars_due`, `[slots.scalp_bars]`, grace 120 min) — see *Opening Scalp*. |
 | portfolio_svc | Live SSE ticks; throttled publish ≤ every **2 s** (`PUBLISH_INTERVAL_SEC`); full rebuild every **600 s** (`REBUILD_INTERVAL_SEC`), or **3600 s** off-hours (`OFFHOURS_REBUILD_INTERVAL_SEC`), or on demand. |
 | trade_svc | Analysis on demand. One scheduled job: the watchlist **dividend pull**, once a trading day at or after **06:40 CT** (`[calendar.dividends] refresh_at` in `config/news.toml`); the loop wakes every **60 s** and retries a failed pull after **15 min**. |
 | market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); report summary re-read when the published market report changes (a stat of `deploy/site/reports/latest.html` + `latest.txt` per poll) — no Claude call. |

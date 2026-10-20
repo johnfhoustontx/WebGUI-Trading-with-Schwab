@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-18</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-20</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -326,6 +326,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#what-it-is_23">What it is</a></li>
 <li><a href="#where-the-data-comes-from_22">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_21">Reading the screen</a></li>
+<li><a href="#the-15-minute-calls">The 15-minute calls</a></li>
 </ul>
 </li>
 <li><a href="#strategy-finder">Strategy Finder</a><ul>
@@ -5173,19 +5174,19 @@ There are no trade buttons: you read it and decide.</p>
 </tr>
 <tr>
 <td>Cadence</td>
-<td>Built once at <strong>08:36 CT</strong> (<code>[slots.scalp]</code>); every evening at 16:20 CT (<code>[slots.scalp_bars]</code>) the day's bars are added, the study is rebuilt over them, and the day's calls are graded</td>
+<td>The morning call is built once at <strong>08:36 CT</strong> (<code>[slots.scalp]</code>). A new 15-minute call is made at <strong>08:51, 09:06 ... 13:51 CT</strong> (21 slots, <code>[intraday]</code>; they sit at :06, :21, :36 and :51, after the auto-scan's fetch burst). Every evening at 16:20 CT (<code>[slots.scalp_bars]</code>) the day's bars are added, the studies are rebuilt over them, and both kinds of call are graded</td>
 </tr>
 <tr>
 <td>Tunables</td>
-<td><code>config/scalp.toml</code> — the target and stop, the time stop, strikes, buckets, minimum samples</td>
+<td><code>config/scalp.toml</code> — the target and stop, the time stop, strikes, buckets, minimum samples; for the 15-minute calls <code>[intraday]</code> (slots, grace, flat band, breadth, VWAP gap, the edge margin, the three blocks) and <code>[confirm]</code> (look-back, margins, cut points, per-source weights)</td>
 </tr>
 <tr>
 <td>Refresh</td>
-<td>The <strong>Refresh</strong> button enqueues <code>scalp_refresh</code> on <code>cmd:options</code>. A call already published today is kept as published, and no new call is built after 09:35 CT</td>
+<td>The <strong>Refresh</strong> button enqueues <code>scalp_refresh</code> on <code>cmd:options</code>. A call already published today is kept as published, and no new 08:36 call is built after 09:35 CT. For the 15-minute calls it fills in only the slot whose five-minute window is open, and otherwise just puts today's published slots back: it never makes an off-slot call</td>
 </tr>
 <tr>
 <td>Grading</td>
-<td>Each night after the study rebuild (16:20 CT, <code>[slots.scalp_bars]</code>) every published call is graded into <code>grades</code>; the <strong>Scorecard</strong> reads the last <code>[study] scorecard_days</code> (20) graded days</td>
+<td>Each night after the study rebuild (16:20 CT, <code>[slots.scalp_bars]</code>) every published call is graded into <code>grades</code> (the 08:36 calls) and <code>intraday_grades</code> (the 15-minute calls); the <strong>Scorecard</strong> reads the last <code>[study] scorecard_days</code> (20) graded days</td>
 </tr>
 <tr>
 <td>Retention</td>
@@ -5263,6 +5264,69 @@ usual rate is decided walk-forward: each past day is scored only from the days b
 it, so a <strong>Measured edge</strong> or a <strong>Caution</strong> is what the method would have said at the
 time, not a fit to the whole history. A bucket needs at least <code>[study] min_samples</code>
 (20) scored mornings before it can be marked either way.</p>
+<h3 id="the-15-minute-calls">The 15-minute calls</h3>
+<p><strong>What they are for.</strong> The 08:36 card answers one question about one entry. If you scalp
+all morning and into the afternoon, the same question comes up every quarter hour; from
+<strong>08:51 to 13:51 CT</strong> the page answers it again at each slot, for the same three
+symbols, as a <strong>new call for a trade entered at that moment</strong>. The last entry (13:51)
+runs out by 14:51, before the close.</p>
+<p><strong>What a call is made of.</strong>
+- <strong>The move.</strong> The direction is the symbol's own move over the <strong>last 15 minutes</strong>
+  (three 5-minute bars). A move smaller than the flat band (0.03%) is flat and gets no
+  call. The call is entered on the last bar that has fully closed (the 08:51 call enters
+  on the 08:50 price), so it never uses a price from the future.
+- <strong>Six inputs that agree or disagree</strong>, each read over the last 15 minutes except the
+  first two: the move since the open, the side of the day's VWAP (the volume-weighted
+  average price; $SPX reads SPY's, because an index prints no volume), the <strong>breadth</strong>
+  of the ten big names (how many of those that moved went the same way), the futures,
+  the volatility index (inverted: a falling $VIX agrees with up) and the symbol's sector
+  funds. A missing input is absent, never a disagreement. The share that agree sorts the
+  call into <strong>low / mid / high</strong>, as at 08:36.
+- <strong>The four trades and their rates</strong>, exactly as the morning card, but the sample is
+  <strong>days</strong>, and the rate is for the call's time <strong>block</strong>: <strong>morning</strong> (08:51 to 09:51),
+  <strong>midday</strong> (10:06 to 12:21) or <strong>afternoon</strong> (12:36 to 13:51). Rates are over every
+  stored day; the edge test is walk-forward. An intraday bucket must also beat the usual
+  rate by a <strong>margin</strong> (0.005 in the Brier score, roughly a 7-point difference in win
+  rate) at every volatility assumption. The margin was fixed before any real result was
+  read, because on random data without it a handful of buckets "win" by luck.</p>
+<p><strong>The confirmation reading: what it is and what it is not.</strong> A word (<strong>Confirms</strong>,
+<strong>Mixed</strong>, <strong>Contradicts</strong>) from four sources, each relative to the call's direction:
+- <strong>Options flow</strong> — the bullish minus bearish alerts of the last 30 minutes on the
+  symbol and the big ten. An unusual-activity or big-delta alert counts only when most of
+  its labelled volume was bought (a call) or sold (a put); the estimate is the app's own
+  and is described under Flow Alerts. Needs a lead of 2 alerts.
+- <strong>Net premium</strong> — whether call premium or put premium leads in the symbol's latest
+  Net Premium reading, as a <em>level</em> (never the change between two readings; the stored
+  premium moves with the option's price).
+- <strong>Dealer positioning</strong> — the dealer read (below).
+- <strong>Market sentiment</strong> — the sentiment dashboard's trend state; it counts for half as
+  much by design (a minor voice), and a "lack of" state or a neutral one gives no side.</p>
+<p>It is <strong>not in the probability</strong>. It does not move a rate, a highlight or a price. It
+exists because flow, net premium and walls have only about five sessions of history, too
+little to test; the app <strong>records every source at every slot</strong> so that, after about
+40 sessions, a study can ask whether the word improves on the price alone. Until then
+it is context, shown as words, with each source's verdict beside it.</p>
+<p><strong>The dealer read</strong> (walls and net premium leading) in two parts. <em>Room:</em> the
+distance from the price to the wall on the trade's side (call wall for up, put wall for
+down), against the move the long trade needs to reach its target. Room at least that big
+agrees; a wall inside the target disagrees. <em>Breadth:</em> how many of the ten big names
+have the same room in percent of their own price; most of them agrees. When the symbol's
+own room and the breadth point opposite ways the read is neutral. The gamma flip is shown
+in the record but not scored. A wall is <strong>untrusted</strong> when net GEX is zero or missing
+(Schwab sent no Greeks): that is <em>no reading</em>, never "no room".</p>
+<p><strong>When to use it.</strong> Read the latest card for the move and the usual rates; read the
+dealer line for the nearest wall; treat the confirmation word as a second opinion you
+cannot yet price. Use <strong>Today's calls</strong> to see how the morning has been flowing. Open
+<strong>Dealer Positioning</strong> for the full picture behind the wall line.</p>
+<p><strong>The Scorecard's intraday part</strong> is per symbol and per block: the highlighted calls'
+hit rate against the base rate, the cautions, and the long-with-the-move trade's win rate
+split by the confirmation word, each beside the <strong>days</strong> it rests on. A "days" count is
+distinct days, not calls (a day holds several calls over one tape), so a handful of days
+means very little. The split is an informal first look at the confirmation.</p>
+<p><strong>Freshness.</strong> A call is current until the next slot or until its own hour is up. After
+that it reads <strong>Last call ... past</strong> or <strong>... over</strong> and is drawn muted; the 13:51 call
+says it is the final call of the day; a list from an earlier day names its date. The page
+rechecks the clock every 30 seconds.</p>
 <hr />
 <h2 id="strategy-finder">Strategy Finder</h2>
 <p><em>Menu: STRATEGY → Strategy Finder · Route <code>/options/swing</code></em></p>

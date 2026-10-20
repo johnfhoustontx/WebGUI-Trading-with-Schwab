@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-18</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-20</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -147,7 +147,10 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#paper-account">Paper Account</a></li>
 <li><a href="#shares">Shares</a></li>
 <li><a href="#rescue">Rescue</a></li>
-<li><a href="#opening-scalp">Opening Scalp</a></li>
+<li><a href="#opening-scalp">Opening Scalp</a><ul>
+<li><a href="#calls-every-15-minutes">Calls every 15 minutes</a></li>
+</ul>
+</li>
 <li><a href="#strategy-finder">Strategy Finder</a></li>
 <li><a href="#overview">Overview</a></li>
 <li><a href="#evidence">Evidence</a></li>
@@ -2874,7 +2877,7 @@ past mornings that looked like this one. <strong>It does not place trades</stron
   after <strong>09:35 CT</strong>, an hour after the 08:35 entry, because the trade it would describe
   is over by then. A symbol whose morning had a direction but was never called reads
   <strong>missed the call window</strong>; one that opened flat or had no opening bar still says so,
-  with its inputs.</li>
+  with its inputs. (The 15-minute calls below follow their own rule for Refresh.)</li>
 <li>Before 08:36 (a Refresh pressed at 08:35 waits for the 08:36 call too), on a closed
   day, or after a failed refresh the page shows the <strong>last call</strong>, labelled with its
   day, under a line saying when the next call is due.</li>
@@ -2895,6 +2898,66 @@ past mornings that looked like this one. <strong>It does not place trades</stron
   next evening. A call made on a shortened session (a half day) is not graded, because the
   model's settlement time would be wrong. A grade is written once and never recomputed. A
   handful of days says very little; read it as a record, not a verdict.</li>
+</ul>
+<h3 id="calls-every-15-minutes">Calls every 15 minutes</h3>
+<p>Under the 08:36 cards the page makes <strong>a new call every 15 minutes, from 08:51 to
+13:51 CT</strong> (21 a day), for the same three symbols. Each is a scalp you would enter <em>at
+that moment</em>, with the same trade rules (+50% before −50% of the price paid, closed
+after 60 minutes at the latest). A call is frozen the moment it is shown: the next one
+is a new call, not an edit of the last.</p>
+<ul>
+<li><strong>Latest call.</strong> One card per symbol. It says which way the symbol moved over the
+  <strong>last 15 minutes</strong> (up, down, or flat; a flat or missing tape gets no call), names
+  the four trades by that move's contract, and shows the same columns as the morning
+  card. The one difference is the sample: it counts <strong>days</strong>, not calls. Several
+  calls are made on one day from the same tape, so "5 days" means five different days,
+  however many calls fell on them.</li>
+<li><strong>"No measured edge" is still the usual answer.</strong> The rates are how often a trade
+  has won over <strong>every</strong> stored day with a setup like this one at this time of day (the
+  day is split into a <strong>morning</strong>, <strong>midday</strong> and <strong>afternoon</strong> block). Whether a bucket
+  beats its usual rate is <strong>walk-forward tested</strong>, and it must beat it by a clear
+  margin, not a hair, before the card says <strong>Measured edge</strong>.</li>
+<li><strong>Confirmation: Confirms, Mixed or Contradicts.</strong> Beside each call the page asks four
+  other sources whether they agree with the move: <strong>Options flow</strong> (the bullish and
+  bearish alerts of the last 30 minutes on the symbol and the ten big names),
+  <strong>Net premium</strong> (whether the money in calls or in puts leads), <strong>Dealer positioning</strong>
+  (below) and <strong>Market sentiment</strong> (counts for half as much). Each reads <strong>Agrees</strong>,
+  <strong>Disagrees</strong>, <strong>No side</strong> (it looked and found nothing either way) or <strong>No reading</strong>
+  (missing or older than five minutes: never read as "no side"). <strong>This is not in the
+  probability.</strong> It is a word, not a chance of winning, and it has not been tested: the
+  app only records it every 15 minutes so that it <em>can</em> be tested after a few
+  months. Treat it as context.</li>
+<li><strong>The dealer read, in plain words.</strong> It asks: <em>is there room for this trade to work
+  before it hits the wall dealers are hedged around?</em> For an up call it looks at the
+  <strong>call wall</strong> above the price, for a down call the <strong>put wall</strong> below it, and compares
+  the distance with how far the underlying must move to reach the trade's target. The
+  line reads, for example, "Room up to the call wall at 5,850 (0.4%); 7 of 10 big names
+  have room", or says the wall is inside the target. The <strong>breadth</strong> part counts how
+  many of the ten big names have the same room, in percent of their own price. If the
+  data has no gamma reading (Schwab sometimes sends none), the walls are not trusted
+  and the line says "no usable wall (no gamma reading)" instead of guessing.</li>
+<li><strong>Under each trade</strong> the card names any wall that sits between the entry and its
+  target or stop ("Target is beyond the call wall at 5,850").</li>
+<li><strong>Today's calls</strong> lists every slot made today: the time, per symbol the direction, the
+  highlighted trade (or a dash), the confirmation word and any note. A call built without
+  fresh bars for some input says which.</li>
+<li><strong>When a call stops being current.</strong> A call is current until the next slot or until
+  its own hour is up, whichever comes first. After that it reads <strong>Last call ... past</strong>
+  (the next slot is overdue) or <strong>Last call ... over</strong> (its hour is up), and is drawn
+  muted. The 13:51 call says it is the <strong>final call of the day</strong> and names the next
+  session's first call. The page rechecks the clock every 30 seconds, so an open tab
+  never keeps showing a stale call as current. A list from an earlier day says whose day
+  it is and is not today's.</li>
+<li><strong>Refresh and the 15-minute calls.</strong> Refresh never makes an off-slot call. Inside a
+  slot's five-minute window it fills in any symbol that slot has not published yet;
+  outside a window it only puts today's published calls back on screen. A slot missed by
+  more than five minutes is skipped, not made up later.</li>
+<li><strong>Scorecard, intraday part.</strong> Each evening every intraday call is graded the same way as
+  the morning ones. The scorecard then shows, per symbol and per block, <strong>Edge calls</strong>
+  and <strong>Cautions</strong> as above, and the long-with-the-move trade's win rate split by the
+  confirmation word, each beside the <strong>days</strong> it rests on. That split is the first,
+  informal look at whether the confirmation helps; with a few weeks of data it says almost
+  nothing.</li>
 </ul>
 <blockquote>
 <p>The win rates are counted over <strong>every</strong> stored morning, and the premiums are
@@ -3898,7 +3961,7 @@ a file on the server — in one place, grouped by what they do:</p>
 </tr>
 <tr>
 <td><strong>Opening Scalp</strong></td>
-<td>The symbols it calls and the bars it keeps, strike steps and spread widths, the target, stop and time stop, the volatility multipliers the study tries (a list of numbers), the cut points between low, mid and high agreement, and the scorecard window. The 08:36 call and 16:20 nightly pass times are under <em>Market hours &amp; schedules</em></td>
+<td>The symbols it calls and the bars it keeps, strike steps and spread widths, the target, stop and time stop, the volatility multipliers the study tries (a list of numbers), the cut points between low, mid and high agreement, and the scorecard window; for the 15-minute calls, their first and last time, the gap, how late one may still fire, the flat band, the day's three blocks, the margin an edge must clear, and the confirmation's look-back, margins, cut points and the weight of each source. The 08:36 call and 16:20 nightly pass times are under <em>Market hours &amp; schedules</em></td>
 </tr>
 <tr>
 <td><strong>Commissions</strong></td>

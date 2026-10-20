@@ -420,9 +420,15 @@ Relevant if you're calculating any of this yourself rather than reading it off a
 
 **Walk-forward** — A way of testing a rule honestly. Each past day is scored using *only the days before it*, the way the rule would have worked at the time, instead of fitting the rule to the whole history and then admiring how well it fits. A rule that looks good only when it has already seen the answer is not a rule.
 
-**Brier score** — A score for probability forecasts: the average of the squared gap between the forecast (a number from 0 to 1) and what happened (0 or 1). Lower is better. A forecaster who always says "50%" scores 0.25; confident wrong forecasts are punished hard. The Opening Scalp study compares a bucket's Brier score with the base rate's on the same days: it counts as an edge only if it is lower.
+**Brier score** — A score for probability forecasts: the average of the squared gap between the forecast (a number from 0 to 1) and what happened (0 or 1). Lower is better. A forecaster who always says "50%" scores 0.25; confident wrong forecasts are punished hard. The Opening Scalp study compares a bucket's Brier score with the base rate's on the same days: it counts as an edge only if it is lower (the 15-minute calls also require it to be lower by a clear margin, because on random data a bare "lower" is passed by luck).
 
 **Alignment** — Of the morning's inputs that took a side, the share that agree with the direction the market opened. Inputs that were too small to take a side, or missing, do not vote. The Opening Scalp page sorts mornings into a low, mid or high alignment bucket.
+
+**Confirmation reading** — A word (Confirms, Mixed or Contradicts) saying whether a set of *other* sources agree with a call's direction. On the Opening Scalp's 15-minute calls the sources are options flow, net premium, the dealer read and market sentiment (which counts half as much). It is deliberately **not part of the win probability**: those sources have only a few sessions of history, too little to test, so the app records them every 15 minutes to test later. Read it as a second opinion, never as a chance of winning.
+
+**Dealer read** — A one-line check of whether a trade has room to work before it meets the wall dealers are hedged around. For an up call it measures the distance from the price to the **call wall**, for a down call to the **put wall**, against the move the trade needs to reach its target; it also counts how many of the ten big names have the same room. A wall from a chain with no gamma reading (net GEX of zero) is not trusted and counts as no reading.
+
+**Breadth** — How many names in a group are doing the same thing. In the Opening Scalp's price reading it is the share of the ten big stocks, among those that moved over the last 15 minutes, that moved the same way as the call; a stock that barely moved is left out rather than counted against it. High breadth means the move is broad, not one stock's.
 
 ---
 

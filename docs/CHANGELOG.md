@@ -4,7 +4,89 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-20 (**The daily HIRO report also scores the Hedging flip.**)
+**Last updated:** 2026-10-20 (**Opening Scalp: a new, frozen 0DTE call every 15 minutes, 08:51 to 13:51 CT, with a confirmation reading beside it.**)
+
+- **Asked for by the operator:** the scalp page should take in (1) flow alerts on
+  $SPX, SPY, QQQ and the big ten, (2) market trend and sentiment in a minor role,
+  (3) net premium of the three, (4) call and put walls of the three and the big ten,
+  and refresh every 15 minutes. Each refresh is a brand-new call for a trade entered
+  at that moment. Of the three options offered the operator took a measured price
+  core plus a live confirmation reading, with the dealer read (walls and net
+  premium) "also taken into consideration". Design and plan:
+  `docs/plans/2026-10-20-scalp-intraday-calls-{design,plan}.md` (`c565a9b`).
+- **The rule that shaped it:** a number called a probability is one that was tested
+  walk-forward on days it was not fitted to. Seven months of 5-minute bars exist
+  for price; for flow, net premium and the walls only about five sessions do
+  (`gex_history.db` purges them). So the **probability is price only**, and the
+  four confirmation sources are shown as a word (Confirms / Mixed / Contradicts)
+  and **recorded every slot so they can be tested later**. Nothing promotes them
+  automatically; the declared promotion study (after `[intraday] promotion_sessions`
+  = 40 recorded sessions, about mid-December 2026) is not built.
+- **Built in four phases, smallest usable slice first** (the walls and net premium
+  were being lost daily, so recording came before any call):
+  1. *Recording and the big-ten bars* (`80f7169`, `a9c8938`, `8070a0b`, `7883736`,
+     `c880d11`, `65095e5`, `5562cfd`; on `main` since `5562cfd`): `[intraday]` / `[confirm]` in `config/scalp.toml`, the slot list
+     and blocks in `shared/scalp_config.py`, the BIG10 basket added to the bar
+     store, six new `scalp.db` tables, `scalp_confirm.py` (the four components),
+     `scalp_record.py` (one `intraday_readings` row per symbol per slot, and at
+     08:36). The nightly top-up grew to about 46 requests with the big ten.
+  2. *The price reading and the intraday study* (`f431195`, `1de8bef`, `7c3b7d5`,
+     `dde6341`, `a01ad9d`): `scalp_intraday_inputs.py`, `scalp_intraday_study.py`,
+     `tools/scalp_intraday_report.py`. The day is the unit; an edge needs a Brier
+     margin over the base rate at every volatility multiplier.
+  3. *The call and its grading* (`f073a19`, `d7e222f`, `6c6bfa9`, `89b068b`,
+     `5986acd`): `ScalpView.intraday`, `scalp_intraday_call.py` (build, freeze,
+     publish, record), the `scalp_intraday` scheduler branch, the Refresh change,
+     `scalp_intraday_grade.py`, and the scorecard's intraday section.
+  4. *The page* (`4d6301f`, `99c5485`): the Latest call cards, Today's calls, the
+     confirmation panel and the intraday scorecard on `/options/scalp`, a call
+     that stops reading as current when its hour is up, and a 30-second clock
+     repaint.
+- **The noise check, declared before any real result was read.** On synthetic
+  pure-noise bars the bare walk-forward rule ("Brier strictly below the base
+  rate's at every multiplier") passed **6 of 108 cells**, which the page would have
+  shown as "Measured edge". So an intraday cell now also needs
+  `[intraday] min_brier_margin` (0.005, about a 7-point win-rate difference near
+  50%) at every multiplier: **0 of 108 cells pass** on the same noise (the report's
+  chance estimate is about 0.2 cells). The 08:36 study's rule is unchanged: its
+  verdict had already been read. A real but small edge (under about 7 points) will
+  not show until it grows.
+- **Things that are easy to get wrong** (each is a rule in the code):
+  a recorded reading is write-once except a one-way upgrade from "no direction" to
+  a direction; a wall is untrusted when net GEX is 0 or missing (Schwab's -999
+  gamma, 2026-10-19) and an untrusted wall is no reading, never "no room"; the
+  flow component reads a fifth view, `cache:options:flow_sides`, because the
+  bought / sold estimate lives there and not on the alerts (an `uoa` / `big_delta`
+  alert is directional only when one side holds at least `sides_majority` of its
+  labelled volume); a scheduled slot found outside its window is a degrade; the
+  08:36 recorder passed a down morning's dealer read "no reading" until `6c6bfa9`
+  (rows recorded on down mornings before the fix keep that component empty; their
+  raw walls are still there); the carried `intraday` section is kept through the
+  08:36 publish only if it validates on its own.
+- **The shown rates are in-sample** (the rate over every stored day, labelled on
+  each call and the timeline); only whether a bucket beats the base rate is
+  walk-forward, and the sample counts are DAYS.
+- Docs: User Guide, Reference Guide, Technical Reference (the intraday chapter and
+  the cadence rows), API Reference (the view's `intraday` section, the six tables,
+  `scalp_refresh`, the fifth view read), Glossary (confirmation reading, dealer
+  read, breadth), `docs/webgui-routes.md`, `page_help.py`, and three invariant
+  lines in CLAUDE.md.
+- **Live checks still owed** (nothing here has run on a trading day):
+  - the **big-ten backfill on prod**: `tools/scalp_backfill.py` with the stack's
+    `.env`, then confirm the ten members have 5-minute rows back to March;
+  - the **intraday study verdict on real data**: run `tools/scalp_intraday_report.py`
+    after the first rebuild on prod and read the passing-cell count against the
+    chance estimate before trusting any "Measured edge";
+  - the **first day of 21 published slots**: 08:51 through 13:51, each frozen, the
+    timeline filling, no refused call in the proxy's access log, the GEX poll and
+    autoscan unaffected, and 22 `intraday_readings` rows per symbol (21 slots plus
+    08:36);
+  - the **first night's intraday grading**: grades written write-once for the day's
+    slot calls, the scorecard's intraday section appearing, and the rebuild's
+    duration (68 s on a synthetic 150-day store).
+  Promote outside 06:30-15:20 CT.
+
+**Prior —** 2026-10-20 (**The daily HIRO report also scores the Hedging flip.**)
 
 - **Why:** the owner asked which of Hedging flip, Hedging reversal and Hedging
   surge moved price most. The nightly report already scored the reversal and the

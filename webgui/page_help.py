@@ -1100,13 +1100,17 @@ A call stays as published all day; **Refresh** only fills in a symbol that has
 no call yet, and no new call is built after **09:35 CT** (a morning that had a
 direction then reads *missed the call window*; a flat open still says so).
 Before 08:36, on a closed day, or after a failed refresh the page keeps the last
-call on screen and labels the day it belongs to.
+call on screen and labels the day it belongs to. For the 15-minute calls,
+Refresh fills in only the slot whose five-minute window is open; at any other
+time it just puts today's published calls back and never makes an off-slot call.
 
 **Not in the probability** (headlines, flow alerts and the report link) is shown
 for context only. None of it was measured or fed into the rates.
 
 **Calls every 15 minutes.** Below the 08:36 cards the page shows a new call
-every 15 minutes from **08:51 to 13:51 CT**, for the same three symbols.
+every 15 minutes from **08:51 to 13:51 CT**, for the same three symbols. Each
+is a scalp entered **at that moment** (on the last five-minute bar that has
+closed) and is frozen once shown; the next slot is a new call, not an edit.
 - **Latest call** is read from the **last 15 minutes' price move** (up, down, or
   flat, which gets no call) and names the same four trades by that move's
   contract. Its rates come from days that looked the same: the call is sorted
@@ -1114,13 +1118,15 @@ every 15 minutes from **08:51 to 13:51 CT**, for the same three symbols.
   (morning, midday, afternoon). **Days** beside a rate are **distinct days**, not
   calls. Every rate is over **every stored day**, and whether a bucket beats its
   usual rate is the **walk-forward** test: **Measured edge**, **Caution** and
-  **No measured edge** mean what they do on the morning card, and "no measured
+  **No measured edge** mean what they do on the morning card (an intraday
+  bucket must also beat the usual rate by a clear margin), and "no measured
   edge" is the usual answer. A call that was built on fewer inputs says which
   bars were missing.
 - **The dealer read** is one line: how far the nearest call or put wall in the
   trade's direction sits against the move the trade needs (and how many of the
   ten big names have room). Under each trade it also names any wall between the
-  entry and its target or stop.
+  entry and its target or stop. A wall from a chain with no gamma reading is
+  not trusted: the line says there is no usable wall instead of guessing.
 - **Today's calls** lists every slot made today: the direction, the highlighted
   trade or a dash, the confirmation word and any note; an edge rate is shown with
   its **days**. A latest call is current only until its next slot or until its
@@ -1133,11 +1139,12 @@ every 15 minutes from **08:51 to 13:51 CT**, for the same three symbols.
 - **The confirmation** (Confirms, Mixed or Contradicts) is whether options flow,
   net premium, the dealer read and market sentiment agree with the move, shown
   in whole words beside each source (agrees, disagrees, no side, no reading, or
-  stale). It is **not in the probability**: it is a word, never a chance of
+  stale; sentiment counts half as much as the others). It is **not in the probability**: it is a word, never a chance of
   winning, and it is only **being recorded to be tested**.
 
 **Scorecard** is how the published calls actually did. Each evening the app grades
-every trade it showed that morning, from the call as published and under the
+every trade it showed that morning (and, in the intraday part below, at every
+15-minute slot), from the call as published and under the
 target, stop and time stop it was made with, and the scorecard updates that
 evening. Per symbol, over the last 20 graded days: **Edge calls** (how often the highlighted trade won, beside its
 usual rate; most symbols have none), **Cautions** (how often a trade marked to avoid

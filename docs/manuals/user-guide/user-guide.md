@@ -2427,7 +2427,7 @@ past mornings that looked like this one. **It does not place trades** — you de
   after **09:35 CT**, an hour after the 08:35 entry, because the trade it would describe
   is over by then. A symbol whose morning had a direction but was never called reads
   **missed the call window**; one that opened flat or had no opening bar still says so,
-  with its inputs.
+  with its inputs. (The 15-minute calls below follow their own rule for Refresh.)
 - Before 08:36 (a Refresh pressed at 08:35 waits for the 08:36 call too), on a closed
   day, or after a failed refresh the page shows the **last call**, labelled with its
   day, under a line saying when the next call is due.
@@ -2448,6 +2448,67 @@ past mornings that looked like this one. **It does not place trades** — you de
   next evening. A call made on a shortened session (a half day) is not graded, because the
   model's settlement time would be wrong. A grade is written once and never recomputed. A
   handful of days says very little; read it as a record, not a verdict.
+
+### Calls every 15 minutes
+
+Under the 08:36 cards the page makes **a new call every 15 minutes, from 08:51 to
+13:51 CT** (21 a day), for the same three symbols. Each is a scalp you would enter *at
+that moment*, with the same trade rules (+50% before −50% of the price paid, closed
+after 60 minutes at the latest). A call is frozen the moment it is shown: the next one
+is a new call, not an edit of the last.
+
+- **Latest call.** One card per symbol. It says which way the symbol moved over the
+  **last 15 minutes** (up, down, or flat; a flat or missing tape gets no call), names
+  the four trades by that move's contract, and shows the same columns as the morning
+  card. The one difference is the sample: it counts **days**, not calls. Several
+  calls are made on one day from the same tape, so "5 days" means five different days,
+  however many calls fell on them.
+- **"No measured edge" is still the usual answer.** The rates are how often a trade
+  has won over **every** stored day with a setup like this one at this time of day (the
+  day is split into a **morning**, **midday** and **afternoon** block). Whether a bucket
+  beats its usual rate is **walk-forward tested**, and it must beat it by a clear
+  margin, not a hair, before the card says **Measured edge**.
+- **Confirmation: Confirms, Mixed or Contradicts.** Beside each call the page asks four
+  other sources whether they agree with the move: **Options flow** (the bullish and
+  bearish alerts of the last 30 minutes on the symbol and the ten big names),
+  **Net premium** (whether the money in calls or in puts leads), **Dealer positioning**
+  (below) and **Market sentiment** (counts for half as much). Each reads **Agrees**,
+  **Disagrees**, **No side** (it looked and found nothing either way) or **No reading**
+  (missing or older than five minutes: never read as "no side"). **This is not in the
+  probability.** It is a word, not a chance of winning, and it has not been tested: the
+  app only records it every 15 minutes so that it *can* be tested after a few
+  months. Treat it as context.
+- **The dealer read, in plain words.** It asks: *is there room for this trade to work
+  before it hits the wall dealers are hedged around?* For an up call it looks at the
+  **call wall** above the price, for a down call the **put wall** below it, and compares
+  the distance with how far the underlying must move to reach the trade's target. The
+  line reads, for example, "Room up to the call wall at 5,850 (0.4%); 7 of 10 big names
+  have room", or says the wall is inside the target. The **breadth** part counts how
+  many of the ten big names have the same room, in percent of their own price. If the
+  data has no gamma reading (Schwab sometimes sends none), the walls are not trusted
+  and the line says "no usable wall (no gamma reading)" instead of guessing.
+- **Under each trade** the card names any wall that sits between the entry and its
+  target or stop ("Target is beyond the call wall at 5,850").
+- **Today's calls** lists every slot made today: the time, per symbol the direction, the
+  highlighted trade (or a dash), the confirmation word and any note. A call built without
+  fresh bars for some input says which.
+- **When a call stops being current.** A call is current until the next slot or until
+  its own hour is up, whichever comes first. After that it reads **Last call ... past**
+  (the next slot is overdue) or **Last call ... over** (its hour is up), and is drawn
+  muted. The 13:51 call says it is the **final call of the day** and names the next
+  session's first call. The page rechecks the clock every 30 seconds, so an open tab
+  never keeps showing a stale call as current. A list from an earlier day says whose day
+  it is and is not today's.
+- **Refresh and the 15-minute calls.** Refresh never makes an off-slot call. Inside a
+  slot's five-minute window it fills in any symbol that slot has not published yet;
+  outside a window it only puts today's published calls back on screen. A slot missed by
+  more than five minutes is skipped, not made up later.
+- **Scorecard, intraday part.** Each evening every intraday call is graded the same way as
+  the morning ones. The scorecard then shows, per symbol and per block, **Edge calls**
+  and **Cautions** as above, and the long-with-the-move trade's win rate split by the
+  confirmation word, each beside the **days** it rests on. That split is the first,
+  informal look at whether the confirmation helps; with a few weeks of data it says almost
+  nothing.
 
 > The win rates are counted over **every** stored morning, and the premiums are
 > modelled, so read them as how often a method like this has worked, not as a promise
@@ -3248,7 +3309,7 @@ a file on the server — in one place, grouped by what they do:
 | **Symbols & watchlists** | What the gamma collector polls, the BIG10 basket, the Net Prem groups |
 | **Local market data** | Whether the app may reuse market data it has already fetched from Schwab instead of asking again, how old that data may be, and how often watchlist symbols are fetched. See the note below |
 | **Sector map** | Which sector each symbol counts toward for the sector cap |
-| **Opening Scalp** | The symbols it calls and the bars it keeps, strike steps and spread widths, the target, stop and time stop, the volatility multipliers the study tries (a list of numbers), the cut points between low, mid and high agreement, and the scorecard window. The 08:36 call and 16:20 nightly pass times are under *Market hours & schedules* |
+| **Opening Scalp** | The symbols it calls and the bars it keeps, strike steps and spread widths, the target, stop and time stop, the volatility multipliers the study tries (a list of numbers), the cut points between low, mid and high agreement, and the scorecard window; for the 15-minute calls, their first and last time, the gap, how late one may still fire, the flat band, the day's three blocks, the margin an edge must clear, and the confirmation's look-back, margins, cut points and the weight of each source. The 08:36 call and 16:20 nightly pass times are under *Market hours & schedules* |
 | **Commissions** | Schwab's per-contract rates |
 | **Ports / Environments** | Shown for reference only |
 

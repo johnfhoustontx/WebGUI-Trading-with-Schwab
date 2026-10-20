@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-18</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-20</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -1113,9 +1113,10 @@ composite-only every 120 s, trend recompute gated to 15 min, rotation at startup
 ETH-eligible symbols), Paper Portfolio entry + manage (hourly at the top of the
 hour, 09:00–14:00 CT, no 15:00 run — also refreshes the Paper Ledger), captured-signal auto-manage (5-min
 slots, 08:00–15:15 CT, when auto-close is on), header tick (each 30 s,
-skip-unchanged), the Opening Scalp's morning call (08:36 CT, <code>[slots.scalp]</code>) and its
-nightly pass (16:20 CT, <code>[slots.scalp_bars]</code>: bar top-up, study rebuild, grading,
-then the scorecard republished into <code>cache:options:scalp</code>).</p>
+skip-unchanged), the Opening Scalp's morning call (08:36 CT, <code>[slots.scalp]</code>), its 15-minute
+calls (08:51, 09:06 ... 13:51 CT, <code>[intraday]</code>) and its nightly pass (16:20 CT,
+<code>[slots.scalp_bars]</code>: bar top-up, study rebuild, grading, intraday grading, the scorecard
+republished into <code>cache:options:scalp</code>, then the intraday study rebuild).</p>
 <p><strong>GEX collection and the raw feed.</strong> Each one-minute poll is
 <code>gex_collector.fetch_minute</code> (the chains, through the proxy) then <code>derive_minute</code>
 (the rows in <code>gex_history.db</code>, priced at the minute). In <code>config/feed.toml</code>
@@ -1577,7 +1578,7 @@ z
 <tr>
 <td><code>scalp_refresh</code></td>
 <td>—</td>
-<td><code>cache:options:scalp</code> — runs the Opening Scalp's <code>scalp_call.run</code> now: before the 08:36 CT call time or on a closed day it republishes the last call under a <code>waiting</code> / <code>closed</code> state and fetches nothing. A call already published today is reused whole, so it only fills in a symbol with none, and no new call is built after entry + <code>time_stop_min</code> (09:35 CT). Replay-guarded and on the slow lane (it can fetch bars and three chains, about 30 Schwab calls)</td>
+<td><code>cache:options:scalp</code> — runs the Opening Scalp's <code>scalp_call.run</code> now: before the 08:36 CT call time or on a closed day it republishes the last call under a <code>waiting</code> / <code>closed</code> state and fetches nothing. A call already published today is reused whole, so it only fills in a symbol with none, and no new call is built after entry + <code>time_stop_min</code> (09:35 CT). It then runs <code>scalp_intraday_call.run_slot</code> for the 15-minute slot whose window is open (<code>current_slot()</code>): inside a slot's window (its time up to <code>[intraday] grace_min</code>, 5 min) it fills only the symbols that slot has not frozen; outside every window it republishes the slots already published today and makes <strong>no call</strong>, so no <code>entry_ts</code> falls between slots. Replay-guarded and on the slow lane (it can fetch bars and three chains, about 30 Schwab calls, and a slot adds about 26 more)</td>
 </tr>
 <tr>
 <td><code>captured_reload</code></td>
@@ -1834,7 +1835,8 @@ every other run. After the nightly grading it is republished with only <code>sco
 replaced (<code>scalp_call.republish_scorecard</code>: no build, no fetch, <code>symbols</code> unchanged).
 <code>scalp_call.run</code> and that republish hold one lock, so two builds never run at once.</p>
 <p>Top level: <code>{day, call_day, generated_at, state, symbols, rules, context, scorecard,
-next_call}</code>.
+next_call, intraday}</code>. <code>intraday</code> is the 15-minute calls' section, described below; the
+08:36 publish and the nightly scorecard republish carry it forward unchanged.
 - <code>state</code> is <code>call</code> (a call was built), <code>waiting</code> (a trading day before the call
   time: the later of the 08:35 entry and the <code>[slots.scalp]</code> time, so 08:36 CT),
   <code>closed</code> (not a trading day) or <code>error</code> (an unexpected failure). In the last three,
@@ -1918,6 +1920,47 @@ the target and the stop (<code>win_points</code>, <code>loss_points</code>; a pu
 rate that is not known is <code>null</code>, never <code>0.0</code>; <code>ScalpView</code> rejects a <code>p</code>, <code>lo</code>, <code>hi</code> or
 <code>p_base</code> outside 0..1. Every field has a default, so a payload Redis kept across a
 restart still validates.</p>
+<p><strong>The <code>intraday</code> section</strong> (the 15-minute calls; <code>scalp_intraday_call.run_slot</code>, validated
+as part of the same <code>ScalpView</code>; <code>{}</code> before the first slot or in a payload written
+before it existed):</p>
+<pre><code class="language-text">{day, slot, next_slot, latest, timeline}
+  day        ISO date the section belongs to; compare it with today's Central date
+  slot       the latest slot published (&quot;08:51&quot; ... &quot;13:51&quot;)
+  next_slot  when the next call is made (ISO, Central offset); the next trading day's
+             first slot after 13:51
+  latest     {symbol: entry}        the slot's call for each symbol
+  timeline   [{slot, symbols: {symbol: {direction, highlight, word,
+              edge_p, edge_p_base, n_days, note}}}]   one row per slot published today,
+              oldest first
+</code></pre>
+<p>An <code>latest</code> entry has the 08:36 entry's shape (<code>direction</code>, <code>bucket</code>, <code>alignment</code>,
+<code>entry_spot</code>, <code>entry_ts</code>, <code>inputs</code>, <code>agree</code>, <code>vol_at_entry</code>, <code>vol_source</code>, <code>chain</code>,
+<code>sigma</code>, <code>sigma_source</code>, <code>roles</code>, <code>highlight</code>, <code>avoid</code>, <code>note</code>, <code>points_note</code>, <code>rules</code>,
+<code>made_at</code>) plus: <code>slot</code>; <code>block</code> (<code>morning</code> / <code>midday</code> / <code>afternoon</code>); <code>rates_basis</code>
+(<code>"all stored days"</code>: the rates are over every stored day, only the edge flag is
+walk-forward); <code>inputs_failed</code> and <code>inputs_note</code> (the bar symbols the call was built
+without fresh bars for); <code>confirmation</code>; <code>dealer_line</code>. <code>entry_ts</code> is the slot floored to
+the 5-minute boundary. Its inputs are <code>since_open</code>, <code>vwap_side</code>, <code>fut_15m</code>, <code>vol_change</code>,
+<code>breadth_up_share</code> (a 0..1 share, never a percent) and one <code>etf:&lt;fund&gt;</code> per sector fund.
+Its roles carry <strong><code>n_days</code> / <code>n_base_days</code></strong> (distinct days) in place of <code>n</code> / <code>n_base</code>,
+and <code>wall_context</code> (a list of words naming any call or put wall between entry and the
+target or stop). <code>note</code> is <code>no measured edge</code> (the usual), <code>flat over the last 15 minutes
+— no direction</code>, <code>no bars for the last 15 minutes yet</code>, <code>missed the call window</code> (the
+slot's trade was already over when it was built) or <code>the call could not be built</code>.</p>
+<p><code>confirmation</code> is <code>{flow, netprem, dealer, sentiment, score, word, dealer_line,
+truncated}</code>. Each component is <code>{verdict, raw, stale}</code>: <code>verdict</code> is <code>1</code> agrees, <code>-1</code>
+disagrees, <code>0</code> looked and found no side, <code>null</code> no reading; <code>raw</code> holds the values it was
+made from, with a <code>state</code> (<code>ok</code>, <code>absent</code>, <code>stale</code>, <code>stale_point</code>, <code>no_reading</code>,
+<code>no_entry_ts</code>, <code>error</code>). <code>score</code> is the weighted mean in -1..1 (<code>ScalpView</code> rejects one
+outside it) and <code>word</code> is <code>Confirms</code>, <code>Mixed</code> or <code>Contradicts</code> (both <code>null</code> when no
+component had a reading). <strong>It is not in the probability</strong> and the page never prints the
+score. The dealer component's <code>raw</code> carries <code>wall_kind</code>, <code>wall</code>, <code>room</code>, <code>room_pct</code>,
+<code>win_points</code>, <code>breadth {with_room, of, share, verdict}</code>, <code>above_flip</code> and
+<code>walls_untrusted</code> (net GEX missing or 0: the walls are then no reading).</p>
+<p>The service reads <strong>five</strong> views to build the confirmation, none of them through the
+proxy: <code>cache:options:matrix</code>, <code>cache:options:net_premium</code>, <code>cache:options:flow_alerts</code>,
+<code>cache:options:flow_sides</code> (the bought / sold estimate per alert id; used only when its
+<code>date</code> equals the flow view's) and <code>cache:sentiment:composite</code>.</p>
 <p><strong><code>scalp.db</code></strong> (<code>services/options_svc/data/scalp.db</code>, <code>repo_paths.SCALP_DB</code>) is the
 Opening Scalp's store. It is <strong>kept forever and in the nightly backup</strong>: it holds price
 history Schwab no longer serves. All times are epoch seconds (a bar's START); a
@@ -1982,9 +2025,66 @@ function takes <code>db_path=None</code>, resolved when it is called.</p>
 </tr>
 </tbody>
 </table>
+<p>Six more tables hold the 15-minute calls. They were added with <code>CREATE TABLE IF NOT EXISTS</code>;
+<strong>the eight tables above are never altered</strong> (prod holds them), and the new ones are
+keyed by <code>(day, slot, symbol)</code> rather than <code>(day, symbol)</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Table</th>
+<th>Key</th>
+<th>Holds</th>
+<th>Written by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>intraday_readings</code></td>
+<td><code>(day, slot, symbol)</code></td>
+<td>the confirmation inputs recorded at the slot (<code>json</code>: <code>slot</code>, <code>entry_ts</code>, <code>recorded_at</code>, <code>direction</code>, <code>components</code> with their raw values, <code>snapshot</code> of walls, flip, net GEX, net premium levels, sentiment and flow counts for the symbol and the big ten). Written for every slot <strong>and</strong> for 08:36, with or without a direction</td>
+<td><code>scalp_record</code></td>
+</tr>
+<tr>
+<td><code>intraday_calls</code></td>
+<td><code>(day, slot, symbol)</code></td>
+<td>each published 15-minute call, frozen as shown (<code>json</code>)</td>
+<td><code>scalp_intraday_call</code></td>
+</tr>
+<tr>
+<td><code>intraday_chain_slices</code></td>
+<td><code>(day, slot, symbol)</code></td>
+<td>that slot's 0DTE chain cut to the strikes near the money, a zlib JSON blob, with its <code>ts</code></td>
+<td><code>scalp_intraday_call</code></td>
+</tr>
+<tr>
+<td><code>intraday_outcomes</code></td>
+<td><code>(day, slot, symbol, iv_scale, role)</code></td>
+<td>the modelled result (<code>win</code> / <code>loss</code> / <code>timeout</code> / <code>skip</code>), <code>structure</code>, <code>block</code>, <code>bucket</code>, minutes, entry value, <code>both_in_bar</code></td>
+<td><code>scalp_intraday_study.rebuild</code></td>
+</tr>
+<tr>
+<td><code>intraday_verdicts</code></td>
+<td><code>(symbol, block, role, bucket)</code></td>
+<td><code>json</code>: the Brier scores per multiplier, <code>edge</code>, <code>unit</code> (<code>"day"</code>), and the <code>min_margin</code> and <code>min_samples</code> the edge was judged under</td>
+<td><code>scalp_intraday_study.rebuild</code></td>
+</tr>
+<tr>
+<td><code>intraday_grades</code></td>
+<td><code>(day, slot, symbol, role)</code></td>
+<td><code>model_result</code>, <code>chain_result</code>, <code>highlighted</code>, <code>avoided</code>, <code>confirm_word</code>, <code>p_base</code>, <code>block</code></td>
+<td><code>scalp_intraday_grade</code></td>
+</tr>
+</tbody>
+</table>
 <p><code>outcomes</code>, <code>mornings</code> and <code>verdicts</code> are deleted and rewritten together in one
-transaction every night, so a reader sees the old study or the new one. <code>calls</code>,
-<code>grades</code> and <code>iv_calibration</code> are records of what was shown and are <strong>never rebuilt</strong>.
+transaction every night, so a reader sees the old study or the new one; so are
+<code>intraday_outcomes</code> and <code>intraday_verdicts</code>, together, by the intraday rebuild. <code>calls</code>,
+<code>grades</code>, <code>iv_calibration</code>, <code>intraday_readings</code>, <code>intraday_calls</code>, <code>intraday_chain_slices</code>
+and <code>intraday_grades</code> are records of what was shown or seen and are <strong>never rebuilt</strong>.
+A recorded <code>intraday_readings</code> row is <strong>write-once</strong>, with one exception: a row stored
+with no <code>direction</code> is replaced by one that has it (a one-way upgrade). <code>intraday_calls</code>
+and the grades are written once from what was published. Like <code>scalp.db</code> as a whole, they
+are <strong>kept forever and in the nightly backup</strong>.
 Dated price history is fetched through the proxy's <code>/passthrough</code> (<code>endpoint=/pricehistory</code>):
 a tool that calls it by hand (<code>tools/scalp_backfill.py</code>) must have the stack's <code>.env</code>
 loaded, or every request is a 401 (<code>PROXY_SHARED_SECRET</code>).</p>

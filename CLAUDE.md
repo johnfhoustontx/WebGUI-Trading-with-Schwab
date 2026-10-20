@@ -236,7 +236,7 @@ open migration item. Full design:
 | `trade-analyzer/`      | `src/analysis` — fundamentals, recommendation, scoring, sector. | engines only (Tk UI dropped) |
 | `portfolio-analyzer/`  | `src/` — sector breakdown, vs-sector perf, live streaming.  | engines only (Tk UI dropped) |
 | `services/`            | The seven Tier-2 services — `sentiment`/`options`/`portfolio`/`trade`/`market`/`news`/`blog` `_svc` (:8210–8213, 8215–8217) — plus `_scaffold`/`_degrade`/`_heartbeat`. **`news_svc`** and **`blog_svc`** are the two with no copied engine and no Schwab or Claude call: `news_svc` is RSS/EDGAR and economic-calendar adapters → `services/news_svc/data/news.db` → eight views; `blog_svc` cleans an uploaded document into `services/blog_svc/data/` and is the only writer of the site's blog files. **`trade_svc` runs a scheduler** (since 2026-09-26) with one job, the daily watchlist dividend pull through the proxy into `shared/dividends.py`'s store; `news_svc` opens that store read-only and never calls the proxy. | backend          |
-| `services/options_svc/data/scalp.db` | The Opening Scalp's store: price bars, the 08:36 chain slices, the study, the published calls and their grades. **Kept forever and in the nightly backup**: it holds price history Schwab no longer serves (1-minute about 6 weeks, 5-minute about 7 months), so never add it to `DB_EXCLUDE`. | backend |
+| `services/options_svc/data/scalp.db` | The Opening Scalp's store: price bars, the 08:36 chain slices, the study, the published calls and their grades, and the `intraday_*` tables of the 15-minute calls and their recorded readings. **Kept forever and in the nightly backup**: it holds price history Schwab no longer serves (1-minute about 6 weeks, 5-minute about 7 months), so never add it to `DB_EXCLUDE`. | backend |
 | `shared/`              | `analysis_lib/` (technical · sector_analysis · config) + secret templates/values. | library          |
 | `tools/`               | `check_env.py`, `db_admin.py` maintenance utilities.        | CLI              |
 | `webgui/`              | **NEW** NiceGUI multi-page front-end. Shell + Options section built. | the new UI, :8500 |
@@ -701,6 +701,13 @@ queue's slow lane; nothing that changes a paper book may be put there.
   money leaving. `tprem` is the running total that cannot fall
   (`options_svc/traded_premium.py`); a fall in it is a bug
   (`tools/check_traded_premium.py`).
+- **The Opening Scalp's 15-minute calls** ([design](docs/plans/2026-10-20-scalp-intraday-calls-design.md))
+  keep their data in NEW `intraday_*` tables in `scalp.db`: never alter the
+  original tables, which prod holds. The probability is price only; the
+  confirmation (flow, net premium, dealer read, sentiment) is a word, recorded to
+  be tested, never in it. A recorded `intraday_readings` row is write-once, save
+  the one-way upgrade from no direction to a direction. An UNTRUSTED wall (net GEX
+  of 0 or missing: Schwab sent no Greeks) is no reading, never "no room".
 
 ## Observability and performance
 
