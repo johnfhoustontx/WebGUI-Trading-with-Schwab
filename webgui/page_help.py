@@ -1122,9 +1122,14 @@ every 15 minutes from **08:51 to 13:51 CT**, for the same three symbols.
   ten big names have room). Under each trade it also names any wall between the
   entry and its target or stop.
 - **Today's calls** lists every slot made today: the direction, the highlighted
-  trade or a dash, the confirmation word and any note. A latest call whose next
-  slot has passed reads **Last call**, and a list from an earlier day says whose
-  day it is and that it is not today's.
+  trade or a dash, the confirmation word and any note; an edge rate is shown with
+  its **days**. A latest call is current only until its next slot or until its
+  own trade is over (its time stop), whichever comes first; after that it reads
+  **Last call** (**past** if the next slot is overdue, **over** once its hour is up,
+  and the day's final call says so and names the next day's first call). The page
+  rechecks the clock every 30 seconds, so an open tab does not keep showing a
+  stale call as current. A list from an earlier day says whose day it is and that
+  it is not today's, and is drawn without the edge colours.
 - **The confirmation** (Confirms, Mixed or Contradicts) is whether options flow,
   net premium, the dealer read and market sentiment agree with the move, shown
   in whole words beside each source (agrees, disagrees, no side, no reading, or

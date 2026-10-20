@@ -321,6 +321,11 @@ def test_a_highlight_is_carried_into_the_timeline(db, bus):
     assert cell["edge_p"] == spy["roles"]["long_with"]["p"]
     assert cell["edge_p_base"] == spy["roles"]["long_with"]["p_base"]
     assert cell["edge_p"] > cell["edge_p_base"]
+    # the timeline carries the day count behind the highlighted rate (days, not rows)
+    assert cell["n_days"] == spy["roles"]["long_with"]["n_days"] > 0
+    plain = section["timeline"][0]["symbols"]["QQQ"]
+    assert plain["highlight"] is None and plain["n_days"] is None
+    ScalpView(**bus.cache_get(sic.VIEW).payload)
 
 
 def test_no_new_call_after_the_slot_window(db, bus, monkeypatch):

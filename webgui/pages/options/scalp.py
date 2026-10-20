@@ -56,6 +56,9 @@ from pages.options import theme as _t
 # this is the key ``cache:options:scalp``.
 VIEW = "options:scalp"
 
+#: How often the page asks whether the clock changed what it shows (seconds).
+CLOCK_TICK_SEC = 30
+
 ROLE_ORDER = ("long_with", "long_against", "credit_with", "credit_against")
 
 _CT = ZoneInfo("America/Chicago")
@@ -580,6 +583,8 @@ INTRADAY_SCORECARD_NOTE = (
     "Days are distinct days; a win rate is over the calls made on those days (several "
     "a day), so two days can rest on more than two calls. The split by confirmation is "
     "an informal first look, and the confirmation is not in the probability.")
+TIMELINE_NOTE = ("The confirmation is a word, not in the probability. " + RATES_BASIS_TEXT
+                 + " Days are distinct days.")
 CONFIRM_WORDS = ("Confirms", "Mixed", "Contradicts")
 NO_READING_WORD = "No reading"
 _MOVE_WORDS = {1: "moving up over the last 15 minutes",
@@ -612,45 +617,94 @@ def _when(when, day):
     return when.strftime("%a %Y-%m-%d %H:%M")
 
 
+def _trade_end(section):
+    """When the latest call's trade is over: the latest ``entry_ts`` plus the
+    ``rules.time_stop_min`` it was frozen with, as a Central datetime; ``None``
+    when no entry carries both (a flat tape or a missed call has no trade)."""
+    ends = []
+    for _name, entry in latest_entries(section):
+        ts = _fmt.num(entry.get("entry_ts"))
+        stop = _fmt.num(_as_dict(entry.get("rules")).get("time_stop_min"))
+        if ts is not None and stop is not None and stop > 0:
+            ends.append(_dt.datetime.fromtimestamp(ts + stop * 60.0, _CT))
+    return max(ends) if ends else None
+
+
 def intraday_status(section, now=None):
     """What the CLOCK says about the section. PURE.
 
     ``today`` is the Central date equal to the section's own ``day``: a section of
     another day is labelled as that day's and is never read as current. Within
-    today, a latest call whose ``next_slot`` has come is ``past`` (the next call
-    is late, or did not publish), and says so. ``line`` names the slot and the
-    next call; ``title`` heads the day's list of calls."""
+    today a latest call is CURRENT only until the earlier of its ``next_slot`` and
+    the end of its own trade (``entry_ts`` plus its frozen time stop); after that it
+    is ``past`` and reads 'Last call'. ``over`` is the trade being finished;
+    ``late`` is the next slot having come on the same day without publishing;
+    ``final`` is a ``next_slot`` on another day (the day's last call). ``line``
+    names the slot and the next call; ``title`` heads the day's list of calls."""
     sec = _as_dict(section)
     now = _clock(now)
     day = sec.get("day") if isinstance(sec.get("day"), str) else ""
-    slot = sec.get("slot") if isinstance(sec.get("slot"), str) and sec.get("slot") \
-        else _fmt.NO_READING
+    slot = (sec["slot"] if isinstance(sec.get("slot"), str) and sec["slot"]
+            else _fmt.NO_READING)
     nxt = _ct(sec.get("next_slot"))
     nxt_text = _when(nxt, day) if nxt else ""
     if not day or day != now.date().isoformat():
         title = f"Calls of {day or 'an earlier day'} — not today's"
         ahead = f" · next at {nxt_text}" if nxt and nxt > now else ""
-        return {"today": False, "past": False, "title": title,
-                "latest_title": title, "line": title + ahead, "warning": ""}
-    past = bool(nxt and now >= nxt)
-    line = f"{'Last' if past else 'Latest'} call at {slot}"
+        return {"today": False, "past": False, "over": False, "final": False,
+                "late": False, "title": title, "latest_title": title,
+                "line": title + ahead, "warning": ""}
+    final = bool(nxt and nxt.date().isoformat() != day)
+    end = _trade_end(sec)
+    over = bool(end and now >= end)
+    late = bool(nxt and not final and now >= nxt)
+    past = over or late
+    head = "Last" if past else "Final" if final else "Latest"
+    line = f"{head} call{' of the day' if head == 'Final' else ''} at {slot}"
+    if over:
+        line += " · over"
+    if final and head == "Last":
+        line += " · final call of the day"
     if nxt_text:
-        line += f" · next at {nxt_text}"
-    return {"today": True, "past": past, "title": "Today's calls",
-            "latest_title": "Latest call", "line": line,
-            "warning": ("A newer slot has passed and has not published yet; this is not "
-                        "the current reading.") if past else ""}
+        line += f" · next: {nxt_text}" if final else f" · next at {nxt_text}"
+    if late:
+        warning = ("A newer slot has passed and has not published yet; this is not "
+                   "the current reading.")
+    elif over:
+        warning = ("This call's trade window is over; it is not a current reading "
+                   "(the session may simply be finished).")
+    else:
+        warning = ""
+    return {"today": True, "past": past, "over": over, "final": final, "late": late,
+            "title": "Today's calls", "latest_title": "Latest call", "line": line,
+            "warning": warning}
+
+
+def clock_signature(view, now=None):
+    """Everything on the page that the CLOCK (not a new view) can change, as one
+    comparable value: the page repaints on the timer only when it moves. PURE."""
+    view = _as_dict(view)
+    now = _clock(now)
+    status = intraday_status(intraday_section(view), now) if intraday_section(view) else None
+    return (state_line(view, now),
+            None if status is None else (status["line"], status["title"], status["past"],
+                                         status["over"], status["warning"]),
+            tuple(call_label(view, sym, now) for sym in _as_dict(view.get("symbols")).values()
+                  if isinstance(sym, dict)))
 
 
 def latest_label(section, now=None):
     """The small label on a latest-call card. PURE. Never 'Latest call' for another
-    day's section, and 'Last call ... past' once the next slot has passed."""
+    day's section; 'Last call ... past' once the next slot has come, and
+    'Last call ... over' once its trade window has ended."""
     sec = _as_dict(section)
     status = intraday_status(sec, now)
-    slot = sec.get("slot") if isinstance(sec.get("slot"), str) and sec.get("slot") \
-        else _fmt.NO_READING
+    slot = (sec["slot"] if isinstance(sec.get("slot"), str) and sec["slot"]
+            else _fmt.NO_READING)
     if not status["today"]:
         return f"Call of {sec.get('day') or 'an earlier day'} at {slot} — not today's call"
+    if status["over"]:
+        return f"Last call at {slot} · over"
     if status["past"]:
         return f"Last call at {slot} · past"
     return f"Latest call at {slot}"
@@ -693,9 +747,11 @@ def _walls(role):
     return " · ".join(w.strip() for w in items if isinstance(w, str) and w.strip())
 
 
-def intraday_role_rows(entry):
+def intraday_role_rows(entry, muted=False):
     """One table row per role, in the fixed order, named by the call's contract.
-    PURE. Counts are DAYS (``n_days`` / ``n_base_days``), unlike the 08:36 rows."""
+    PURE. Counts are DAYS (``n_days`` / ``n_base_days``), unlike the 08:36 rows.
+    ``muted`` (a call that is not current: another day's, or past) keeps every word
+    and mark but draws no edge or caution colour."""
     sym = _as_dict(entry)
     roles = _as_dict(sym.get("roles"))
     rows = []
@@ -717,8 +773,10 @@ def intraday_role_rows(entry):
             "strikes": _strikes(role.get("strikes")), "entry": _entry_text(role),
             "target": _points(role.get("win_points")),
             "stop": _points(role.get("loss_points")), "walls": _walls(role),
-            "_row_class": _ROW_CLASS[tone], "_mark_class": _MARK_CLASS[tone],
-            "_rate_class": _RATE_CLASS[tone]})
+            "_row_class": "" if muted else _ROW_CLASS[tone],
+            "_mark_class": (f"{_t.BADGE_MUTED} px-2 py-0.5" if muted and tone != "plain"
+                            else _MARK_CLASS[tone]),
+            "_rate_class": _t.MUTED if muted else _RATE_CLASS[tone]})
     return rows
 
 
@@ -812,8 +870,16 @@ def confirmation_rows(entry):
 def confirmation_columns():
     return [
         {"name": "component", "label": "Source", "field": "component", "align": "left"},
-        {"name": "verdict", "label": "Against the move", "field": "verdict"},
+        {"name": "verdict", "label": "Against the last 15 minutes' move", "field": "verdict"},
     ]
+
+
+def confirmation_lead(section, now=None):
+    """Which day the confirmation is from, when that is not today; else ''."""
+    status = intraday_status(section, now)
+    if status["today"]:
+        return ""
+    return f"From the {status['title'][0].lower()}{status['title'][1:]}"
 
 
 def confirmation_flags(entry):
@@ -855,7 +921,10 @@ def _pick_text(cell):
     name = contract_name(hl, cell.get("direction"))
     if _fmt.num(cell.get("edge_p")) is None:
         return name
-    return f"{name} · {_rate(cell.get('edge_p'))} vs {_rate(cell.get('edge_p_base'))} usually"
+    text = f"{name} · {_rate(cell.get('edge_p'))} vs {_rate(cell.get('edge_p_base'))} usually"
+    if _fmt.num(cell.get("n_days")) is not None:
+        text += f" · {_days_word(cell.get('n_days'))}"
+    return text
 
 
 def timeline_rows(section):
@@ -1071,8 +1140,13 @@ def _latest_card(section, name, entry, now=None):
 
     from pages import ui_kit as kit
 
-    rows = intraday_role_rows(entry)
-    has_edge = entry.get("highlight") in {r["id"] for r in rows}
+    status = intraday_status(section, now)
+    current = status["today"] and not status["past"]
+    rows = intraday_role_rows(entry, muted=not current)
+    highlight = entry.get("highlight")
+    # No green emphasis on a call that is not current (another day's, or past).
+    has_edge = (current and isinstance(highlight, str)
+                and highlight in {r["id"] for r in rows})
     with ui.column().classes(_CARD):
         with ui.row().classes("w-full items-center gap-3 flex-wrap"):
             ui.label(name).classes(f"text-lg font-semibold {_t.LABEL}")
@@ -1120,20 +1194,23 @@ def _timeline_panel(section, status):
         if not rows:
             ui.label("No calls published yet.").classes(_SMALL)
             return
-        ui.label(RATES_BASIS_TEXT).classes(_SMALL)
+        ui.label(TIMELINE_NOTE).classes(_SMALL)
         table = kit.table(timeline_columns(section), rows)
         for i in range(len(timeline_symbols(section))):
             table.add_slot(f"body-cell-s{i}", _TIMELINE_CELL.replace("@@", str(i)))
 
 
-def _confirmation_panel(entries):
-    """The confirmation per symbol, as words. Never a score, a gauge or a rate."""
+def _confirmation_panel(entries, lead=""):
+    """The confirmation per symbol, as words. Never a score, a gauge or a rate.
+    ``lead`` names the day when the section is not today's."""
     from nicegui import ui
 
     from pages import ui_kit as kit
 
     with ui.column().classes(_CARD):
         kit.section_title(CONFIRMATION_TITLE)
+        if lead:
+            ui.label(lead).classes(f"text-sm {_t.TXT_WARN}")
         ui.label(CONFIRMATION_NOTE).classes(_SMALL)
         shown = False
         for name, entry in entries:
@@ -1172,7 +1249,7 @@ def _intraday_panels(view, now=None):
     for name, entry in entries:
         _latest_card(section, name, entry, now)
     _timeline_panel(section, status)
-    _confirmation_panel(entries)
+    _confirmation_panel(entries, confirmation_lead(section, now))
 
 
 def _context_panel(context):
@@ -1275,7 +1352,8 @@ def render():
     from pages.ui_guard import guard, guard_async
     from pages.view_watch import watch_view
 
-    state = {"refresh": None}
+    # ``view`` is the last one read; ``sig`` what the clock said when it was painted.
+    state = {"refresh": None, "view": None, "sig": None}
 
     with kit.page():
         head = kit.header("Opening Scalp", view=VIEW)
@@ -1303,6 +1381,7 @@ def render():
     def _paint(view):
         body.clear()
         now = _clock()
+        state["view"], state["sig"] = view, clock_signature(view, now)
         line = state_line(view, now)
         notice.text = line or ""
         notice.set_visibility(bool(line))
@@ -1324,5 +1403,16 @@ def render():
         if state["refresh"] is not None:
             kit.set_busy(state["refresh"], False)
 
+    @guard
+    def _tick():
+        """Repaint from the last view when only the CLOCK moved: a latest call goes
+        past (or the day rolls) with no new view, e.g. a stalled service. Painted
+        only when the clock-derived text changed, so an open table is not rebuilt
+        every tick."""
+        if state["view"] is not None \
+                and clock_signature(state["view"], _clock()) != state["sig"]:
+            _paint(state["view"])
+
     _paint(bus_client.read(VIEW))
     watch_view(VIEW, _changed)
+    ui.timer(CLOCK_TICK_SEC, _tick)

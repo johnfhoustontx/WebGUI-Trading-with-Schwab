@@ -56,9 +56,9 @@ Rules, each from the design or a review ruling:
 
 The section: ``{"day", "slot", "latest": {symbol: entry}, "timeline": [{"slot",
 "symbols": {symbol: {"direction", "highlight", "word", "edge_p", "edge_p_base",
-"note"}}}], "next_slot"}`` - one timeline row per slot published today, oldest
-first; ``edge_p`` / ``edge_p_base`` are the highlighted role's rate and base rate
-(``None`` with no highlight); ``next_slot`` is when the next call is made (ISO,
+"n_days", "note"}}}], "next_slot"}`` - one timeline row per slot published today,
+oldest first; ``edge_p`` / ``edge_p_base`` / ``n_days`` are the highlighted role's
+rate, base rate and distinct-day count (``None`` with no highlight); ``next_slot`` is when the next call is made (ISO,
 CT). Imports nothing from ``compute``. Never raises.
 """
 import datetime as _dt
@@ -356,6 +356,7 @@ def _cell(entry) -> dict:
             "word": conf.get("word") if isinstance(conf, dict) else None,
             "edge_p": _finite(role.get("p")) if isinstance(role, dict) else None,
             "edge_p_base": _finite(role.get("p_base")) if isinstance(role, dict) else None,
+            "n_days": _finite(role.get("n_days")) if isinstance(role, dict) else None,
             "note": entry.get("note")}
 
 
