@@ -29,24 +29,29 @@ Rules the study and the live call both depend on (Central time throughout):
   direction, nor has a day whose symbol has no 08:30 bar.
 * Since-open is ``entry_spot`` over the open of the bar starting 08:30. The VWAP
   side is ``entry_spot`` over the volume-weighted typical price ``(h+l+c)/3`` of
-  every bar from 08:30 to the entry bar, in percent; an index prints no volume,
-  so $SPX reads SPY's own spot against SPY's own VWAP. A hole in those bars, or
-  no volume, leaves it ``None``.
-* Breadth is the share of the big ten (``shared.symbols.big10``) moving UP over
-  their last 15 minutes, among those with a usable move; a member inside the
-  dead zone counts in the denominator and agrees with neither side. Fewer than
-  ``[confirm] breadth_min_members`` usable members is ``None``. ``agree`` reads
-  the share of members matching the DIRECTION: at or above ``breadth_agree`` is
-  +1, at or below ``1 - breadth_agree`` is -1, between is 0.
+  the bars PRESENT from 08:30 to the entry bar, in percent; an index prints no
+  volume, so $SPX reads SPY's own spot against SPY's own VWAP. It is ``None``
+  without the entry bar (the spot), without any volume, or when more than
+  ``[intraday] vwap_max_missing`` of the range's bars are missing.
+* Breadth (``inputs["breadth_up_share"]``, 0..1 - never a percent move) is the
+  share of the big ten's MOVERS (``shared.symbols.big10`` members whose last 15
+  minutes are outside the dead zone) that moved UP: a member inside the dead zone
+  or without bars is neither for nor against and is left out of the share. Fewer
+  than ``[confirm] breadth_min_members`` movers is ``None``. ``agree`` reads the
+  share of movers matching the DIRECTION: at or above ``breadth_agree`` is +1, at
+  or below ``1 - breadth_agree`` is -1, between is 0.
 * ``vol_at_entry`` is the close of the vol symbol's bar starting
   ``entry_ts - 5 minutes`` over 100, ``None`` unless a finite positive number;
   an unusable vol symbol ($VXN for QQQ) falls back to $VIX, and the symbol read
   is ``vol_source`` (kept off ``inputs`` so that dict stays numeric).
 * Absent means absent: ``None`` in ``inputs`` and in ``agree``, never agreeing or
   disagreeing. Nothing raises for missing data.
-* ``cache`` is an optional dict a caller reuses across the slots of ONE day in
-  ONE store (the study reads ~21 slots x 3 symbols a day): it holds each
-  symbol's whole day of bars, so a cached reading equals an uncached one.
+* ``cache`` is an optional dict a caller reuses across the slots of a COMPLETED
+  day (the study reads ~21 slots x 3 symbols a day): it holds each symbol's
+  whole day of bars, keyed by (store, symbol, day), so a cached reading equals an
+  uncached one. NEVER reuse it across live slots: the first read freezes the
+  day's bars at that moment, and a later slot would not see the bars stored
+  since.
 """
 import datetime as _dt
 import math
@@ -106,7 +111,7 @@ def _session(symbol, day, entry_ts, db_path, cache) -> dict:
     if cache is None:
         got = scalp_store.bars(symbol, _INTERVAL, start, entry_ts, db_path=db_path)
     else:
-        key = (symbol, day)
+        key = (db_path, symbol, day)
         if key not in cache:
             cache[key] = scalp_store.bars(symbol, _INTERVAL, start,
                                           start + 24 * 3600, db_path=db_path)
@@ -132,20 +137,24 @@ def _spot(bars, entry_ts):
 
 
 def _vwap_side(bars, entry_ts, open_ts):
-    """The entry spot over the session VWAP, in percent; ``None`` for a hole in
-    the bars, no volume, or no spot."""
+    """The entry spot over the VWAP of the bars present, in percent; ``None``
+    without the spot, without volume, or with more than ``vwap_max_missing`` of
+    the range's bars missing."""
     spot = _spot(bars, entry_ts)
     if spot is None:
         return None
     total = weighted = 0.0
-    for start in range(open_ts, entry_ts, _FIVE):
+    slots = range(open_ts, entry_ts, _FIVE)
+    missing = 0
+    for start in slots:
         bar = bars.get(start)
         if not _bar_ok(bar):
-            return None
+            missing += 1
+            continue
         volume = _finite(bar.volume) or 0.0
         weighted += (bar.high + bar.low + bar.close) / 3.0 * volume
         total += volume
-    if total <= 0:
+    if total <= 0 or missing > scalp_config.vwap_max_missing() * len(slots):
         return None
     return _pct(spot, weighted / total)
 
@@ -161,20 +170,19 @@ def _direction(bars, entry_ts, open_ts) -> Optional[int]:
 
 
 def _breadth(day, entry_ts, open_ts, db_path, cache):
-    """``(share of usable members moving up, share moving down)``, or
-    ``(None, None)`` with too few usable members."""
-    up = down = usable = 0
+    """``(share of movers moving up, share moving down)``, or ``(None, None)``
+    with too few movers. A member with no usable move, or inside the dead zone,
+    is not a mover and is not counted."""
+    up = down = 0
     for sym in _symbols.big10():
         move = _move15(_session(sym, day, entry_ts, db_path, cache), entry_ts, open_ts)
-        if move is None:
-            continue
-        usable += 1
         sense = _move_sense(move)
         up += sense == 1
         down += sense == -1
-    if usable < scalp_config.breadth_min_members():
+    movers = up + down
+    if movers < scalp_config.breadth_min_members():
         return None, None
-    return up / usable, down / usable
+    return up / movers, down / movers
 
 
 def _breadth_agree(direction, up, down) -> Optional[int]:
@@ -228,8 +236,8 @@ def reading(symbol: str, day: _dt.date, slot: str, db_path=None,
 
     agree = _agreement(inputs, direction)
     up, down = _breadth(day, entry_ts, open_ts, db_path, cache)
-    inputs["breadth"] = up
-    agree["breadth"] = _breadth_agree(direction, up, down)
+    inputs["breadth_up_share"] = up
+    agree["breadth_up_share"] = _breadth_agree(direction, up, down)
 
     vol_at_entry, vol_source = _vol(symbol, day, entry_ts, db_path, cache)
     return Reading(day=day, slot=slot, symbol=symbol, direction=direction,

@@ -185,6 +185,12 @@ def _broke(bar, pm_bars):
 
 
 # ── agreement ────────────────────────────────────────────────────────────────
+#: Recorded in ``inputs`` but never read as a percent move: the open-range ratio
+#: has no direction, and the intraday breadth is a 0..1 share of names whose
+#: verdict the intraday reading gives itself.
+_NOT_A_MOVE = ("open_range_ratio", "breadth_up_share")
+
+
 def _move_sense(pct, inverted=False):
     """+1 up, -1 down, 0 inside the dead zone; ``None`` for no reading."""
     if pct is None:
@@ -206,7 +212,7 @@ def _agreement(inputs, direction) -> dict:
     """Each input's sense multiplied by the direction: +1 agrees, -1 disagrees."""
     senses = {}
     for key, value in inputs.items():
-        if key == "open_range_ratio":
+        if key in _NOT_A_MOVE:
             continue
         if key in ("fut_range_pos", "open_close_loc"):
             senses[key] = _position_sense(value)

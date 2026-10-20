@@ -1201,6 +1201,11 @@ _SCALP = ConfigFile(
                   "The share of the ten largest stocks that must lean one way "
                   "for the breadth to count (0 to 1).",
                   kind="float", min=0.01, max=1, step=0.05),
+            Field("intraday.vwap_max_missing", "Missing bars allowed for VWAP",
+                  "The share of the session's 5-minute bars, from the open to the "
+                  "entry bar, that may be missing before the side of VWAP is "
+                  "left out (0 up to, not including, 1).",
+                  kind="float", min=0, max=0.99, step=0.05),
             Field("intraday.promotion_sessions", "Sessions to promote",
                   "Sessions of calls a group needs before it can be promoted.",
                   kind="int", min=1, max=1000, step=1),
@@ -1240,8 +1245,10 @@ _SCALP = ConfigFile(
                   "bearish. Above 0.5, up to 1.", kind="float", min=0.51,
                   max=1, step=0.01),
             Field("confirm.breadth_min_members", "Big names needed for breadth",
-                  "How many of the ten biggest stocks must have a usable dealer "
-                  "wall before their breadth of room is read.",
+                  "How many of the ten biggest stocks must have a usable reading "
+                  "before a breadth is read: a usable dealer wall for the dealer "
+                  "read's breadth of room, and a move outside the flat band over "
+                  "their last 15 minutes for the intraday price breadth.",
                   kind="int", min=1, max=50, step=1),
             Field("confirm.max_age_min", "Oldest reading used",
                   "A confirming reading older than this is treated as absent.",

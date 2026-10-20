@@ -53,6 +53,7 @@ DEFAULTS = {
     "intraday": {
         "start": "08:51", "end": "13:51", "interval_min": 15, "grace_min": 5,
         "dead_zone_pct": 0.03, "breadth_agree": 0.6, "promotion_sessions": 40,
+        "vwap_max_missing": 0.25,
         "blocks": {"morning": {"start": "08:51", "end": "09:51"},
                    "midday": {"start": "10:06", "end": "12:21"},
                    "afternoon": {"start": "12:36", "end": "13:51"}},
@@ -365,6 +366,16 @@ def breadth_agree() -> float:
     return _fraction("intraday", "breadth_agree", allow_zero=False)
 
 
+def vwap_max_missing() -> float:
+    """The share of the session's 5-minute bars (08:30 to the entry bar) that
+    may be missing before the VWAP side is absent: at least 0 and below 1, any
+    other value reads as the default."""
+    raw = _section("intraday").get("vwap_max_missing")
+    if not _real(raw) or not (0 <= raw < 1):
+        return float(DEFAULTS["intraday"]["vwap_max_missing"])
+    return float(raw)
+
+
 def promotion_sessions() -> int:
     """Sessions an intraday group needs before it can be promoted."""
     return _count("intraday", "promotion_sessions")
@@ -394,9 +405,11 @@ def sides_majority() -> float:
 
 
 def breadth_min_members() -> int:
-    """How many of the big ten must have a usable wall before their breadth of
-    room is read at all (a share of two names is not a breadth). A whole number
-    of at least 1."""
+    """How many of the big ten must have a usable reading before a breadth is
+    read at all (a share of two names is not a breadth). It governs BOTH the
+    dealer read's wall breadth (names with a usable wall) and the intraday price
+    breadth (names moving outside the dead zone over their last 15 minutes). A
+    whole number of at least 1."""
     return _count("confirm", "breadth_min_members")
 
 

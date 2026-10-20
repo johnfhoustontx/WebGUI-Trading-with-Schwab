@@ -444,3 +444,14 @@ def test_intraday_config_hands_back_copies(monkeypatch):
     assert sc.confirm_weights()["flow"] == 1.0
     sc.intraday_slots(_DAY).append("99:99")
     assert "99:99" not in sc.intraday_slots(_DAY)
+
+
+def test_vwap_max_missing_default_and_validation(monkeypatch):
+    sc.reset_cache()
+    assert sc.vwap_max_missing() == 0.25
+    for bad in (-0.1, 1, 1.5, "x", True, None, float("nan")):
+        monkeypatch.setattr(sc, "load", lambda bad=bad: {"intraday": {"vwap_max_missing": bad}})
+        assert sc.vwap_max_missing() == 0.25
+    for good in (0, 0.4, 0.999):
+        monkeypatch.setattr(sc, "load", lambda good=good: {"intraday": {"vwap_max_missing": good}})
+        assert sc.vwap_max_missing() == good

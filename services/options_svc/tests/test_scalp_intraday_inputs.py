@@ -178,38 +178,165 @@ def test_vwap_is_absent_with_no_volume(db):
     assert r.direction == 1  # the rest of the reading stands
 
 
+LONG = [500, 501, 503, 502, 504, 505, 503, 506, 507, 508, 509]   # ten bars, 08:30-09:15
+LONG_SLOT = "09:21"                                               # entry 09:20
+
+
+def _present_vwap(prices, skip):
+    """Hand VWAP of the equal-volume bars of ``path`` except the ``skip`` indexes."""
+    typical = [(max(prices[i], prices[i + 1]) + min(prices[i], prices[i + 1])
+                + prices[i + 1]) / 3 for i in range(len(prices) - 1)
+               if i not in skip]
+    return sum(typical) / len(typical)
+
+
+def _drop(db, sym, indexes):
+    conn = scalp_store.connect(db)
+    with conn:
+        for i in indexes:
+            minute = 30 + 5 * i
+            conn.execute("DELETE FROM bars WHERE symbol = ? AND ts = ?",
+                         (sym, ts(8 + minute // 60, minute % 60)))
+    conn.close()
+
+
+def test_a_missing_midday_bar_still_gives_a_vwap_over_the_bars_present(db):
+    seed(db)
+    path(db, "SPY", LONG)
+    _drop(db, "SPY", [3])                      # 08:45: one of ten bars missing
+    r = sii.reading("SPY", DAY, LONG_SLOT, db_path=db)
+    assert r.entry_spot == 509
+    want = (509 / _present_vwap(LONG, {3}) - 1) * 100
+    assert r.inputs["vwap_side"] == pytest.approx(want)
+    assert r.agree["vwap_side"] == 1
+    assert r.direction == 1
+
+
+def test_vwap_is_absent_when_too_many_bars_are_missing(db):
+    seed(db)
+    path(db, "SPY", LONG)
+    _drop(db, "SPY", [1, 2, 3, 4])             # 40% of the range, over the 25% limit
+    r = sii.reading("SPY", DAY, LONG_SLOT, db_path=db)
+    assert r.inputs["vwap_side"] is None
+    assert r.agree["vwap_side"] is None
+    assert r.direction == 1                    # the rest of the reading stands
+
+
+def test_vwap_at_exactly_the_missing_limit_is_kept(db):
+    seed(db)
+    path(db, "SPY", LONG)
+    _drop(db, "SPY", [1, 2])                   # 2 of the 8 bars before a 09:10 entry
+    r = sii.reading("SPY", DAY, "09:11", db_path=db)   # exactly 25%: not over it
+    assert r.inputs["vwap_side"] is not None
+
+
+def test_vwap_needs_the_entry_bar(db):
+    seed(db)
+    path(db, "SPY", LONG)
+    _drop(db, "SPY", [9])                      # the 09:15 bar is the spot
+    r = sii.reading("SPY", DAY, LONG_SLOT, db_path=db)
+    assert r.entry_spot is None
+    assert r.inputs["vwap_side"] is None
+
+
+def test_the_missing_limit_is_read_from_config(db, monkeypatch):
+    from shared import scalp_config
+    seed(db)
+    path(db, "SPY", LONG)
+    _drop(db, "SPY", [1, 2, 3, 4])
+    monkeypatch.setattr(scalp_config, "vwap_max_missing", lambda: 0.5)
+    r = sii.reading("SPY", DAY, LONG_SLOT, db_path=db)
+    assert r.inputs["vwap_side"] == pytest.approx(
+        (509 / _present_vwap(LONG, {1, 2, 3, 4}) - 1) * 100)
+
+
 def test_breadth_counts_big10_members(db):
     seed(db, members_up=7)
     r = sii.reading("SPY", DAY, SLOT, db_path=db)
-    assert r.inputs["breadth"] == pytest.approx(0.7)
-    assert r.agree["breadth"] == 1
+    assert r.inputs["breadth_up_share"] == pytest.approx(0.7)
+    assert r.agree["breadth_up_share"] == 1
     # Five of ten is not a lean either way.
     seed(db, members_up=5)
     r = sii.reading("SPY", DAY, SLOT, db_path=db)
-    assert r.inputs["breadth"] == pytest.approx(0.5)
-    assert r.agree["breadth"] == 0
+    assert r.inputs["breadth_up_share"] == pytest.approx(0.5)
+    assert r.agree["breadth_up_share"] == 0
     # Three of ten up disagrees with an up call ...
     seed(db, members_up=3)
     r = sii.reading("SPY", DAY, SLOT, db_path=db)
-    assert r.agree["breadth"] == -1
+    assert r.agree["breadth_up_share"] == -1
     # ... and exactly breadth_agree (six of ten) agrees.
     seed(db, members_up=6)
-    assert sii.reading("SPY", DAY, SLOT, db_path=db).agree["breadth"] == 1
+    assert sii.reading("SPY", DAY, SLOT, db_path=db).agree["breadth_up_share"] == 1
 
 
 def test_breadth_for_a_down_call_counts_the_down_names(db):
     seed(db, spy=DOWN, members_up=3)   # seven names down
     r = sii.reading("SPY", DAY, SLOT, db_path=db)
     assert r.direction == -1
-    assert r.agree["breadth"] == 1
+    assert r.agree["breadth_up_share"] == 1
 
 
-def test_breadth_dead_zone_member_does_not_agree(db):
+FLAT = (100, 100, 100.001, 100.002, 100.003)   # inside the dead zone
+
+
+def test_breadth_dead_zone_member_is_not_a_mover(db):
+    # Changed by the movers-only rule: M1 going flat leaves 5 up of 9 MOVERS (it was
+    # 5 of 10 when a flat name stayed in the denominator).
     seed(db, members_up=6)
-    path(db, "M1", (100, 100, 100.001, 100.002, 100.003))   # flat: inside the dead zone
+    path(db, "M1", FLAT)
     r = sii.reading("SPY", DAY, SLOT, db_path=db)
-    assert r.inputs["breadth"] == pytest.approx(0.5)        # 5 up of 10 usable
-    assert r.agree["breadth"] == 0
+    assert r.inputs["breadth_up_share"] == pytest.approx(5 / 9)
+    assert r.agree["breadth_up_share"] == 0
+
+
+def members(db, up, down):
+    """``up`` names up, ``down`` names down, the rest of the ten flat."""
+    for i, sym in enumerate(MEMBERS):
+        path(db, sym, (100, 100, 100.5, 101, 101.5) if i < up
+             else (100, 100, 99.5, 99, 98.5) if i < up + down else FLAT)
+
+
+def test_breadth_is_read_among_the_movers_only(db):
+    seed(db)
+    members(db, up=3, down=3)                        # six movers, four flat
+    r = sii.reading("SPY", DAY, SLOT, db_path=db)
+    assert r.inputs["breadth_up_share"] == pytest.approx(0.5)
+    assert r.agree["breadth_up_share"] == 0
+    members(db, up=5, down=1)                        # 5 of 6 movers, four flat
+    r = sii.reading("SPY", DAY, SLOT, db_path=db)
+    assert r.inputs["breadth_up_share"] == pytest.approx(5 / 6)
+    assert r.agree["breadth_up_share"] == 1
+
+
+def test_breadth_with_too_few_movers_is_absent(db):
+    seed(db)
+    members(db, up=2, down=2)                        # four movers, six flat
+    r = sii.reading("SPY", DAY, SLOT, db_path=db)
+    assert r.inputs["breadth_up_share"] is None
+    assert r.agree["breadth_up_share"] is None
+    assert r.direction == 1
+
+
+def test_breadth_up_share_is_never_read_as_a_percent_move(up):
+    r = sii.reading("SPY", DAY, SLOT, db_path=up)
+    assert r.inputs["breadth_up_share"] == pytest.approx(0.7)
+    # The 08:36 agreement, run again over these inputs for the opposite call, would
+    # score 0.7 as a +0.7% move if it read the key: it must not give a verdict.
+    for direction in (1, -1):
+        agreed = scalp_inputs._agreement(r.inputs, direction)
+        assert "breadth_up_share" not in agreed
+        assert agreed["since_open"] == direction   # the moves still get their verdicts
+
+
+def test_a_0_04_percent_move_is_a_direction(db):
+    # The intraday zone is 0.03%, the 08:36 [direction] zone 0.05%.
+    seed(db, spy=[500, 500, 500.1, 500.15, 500.2])
+    r = sii.reading("SPY", DAY, SLOT, db_path=db)
+    assert r.inputs["since_open"] == pytest.approx(0.04)
+    assert r.direction == 1
+    assert r.agree["since_open"] == 0      # the same 0.04% is flat to an input
+    seed(db, spy=[500, 500, 499.9, 499.85, 499.8])
+    assert sii.reading("SPY", DAY, SLOT, db_path=db).direction == -1
 
 
 def test_breadth_needs_enough_members(db):
@@ -220,8 +347,8 @@ def test_breadth_needs_enough_members(db):
                      ",".join("?" * len(MEMBERS[4:])), MEMBERS[4:])
     conn.close()
     r = sii.reading("SPY", DAY, SLOT, db_path=db)
-    assert r.inputs["breadth"] is None
-    assert r.agree["breadth"] is None
+    assert r.inputs["breadth_up_share"] is None
+    assert r.agree["breadth_up_share"] is None
     assert r.direction == 1
 
 
@@ -299,6 +426,18 @@ def test_non_positive_vol_is_absent(db):
     path(db, "$VIX", (20, 20, 19, 18, 0))
     r = sii.reading("SPY", DAY, SLOT, db_path=db)
     assert r.vol_at_entry is None
+
+
+def test_caches_for_different_stores_do_not_mix(tmp_path):
+    up_db, down_db = tmp_path / "up.db", tmp_path / "down.db"
+    seed(up_db)
+    seed(down_db, spy=DOWN)
+    cache = {}
+    first = sii.reading("SPY", DAY, SLOT, db_path=up_db, cache=cache)
+    second = sii.reading("SPY", DAY, SLOT, db_path=down_db, cache=cache)
+    assert first.direction == 1 and second.direction == -1
+    assert second == sii.reading("SPY", DAY, SLOT, db_path=down_db)
+    assert first == sii.reading("SPY", DAY, SLOT, db_path=up_db)
 
 
 def test_cached_equals_uncached(db):

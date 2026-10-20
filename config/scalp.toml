@@ -112,6 +112,9 @@ grace_min = 5
 dead_zone_pct = 0.03
 # The share (0..1) of the big ten that must lean one way to count as breadth.
 breadth_agree = 0.6
+# The share (0 up to, not including, 1) of the session's 5-minute bars, 08:30 to
+# the entry bar, that may be missing before the side of VWAP is left out.
+vwap_max_missing = 0.25
 # Sessions of calls a group needs before it can be promoted.
 promotion_sessions = 40
 
@@ -140,8 +143,10 @@ netprem_margin = 0.1
 # The share of an option alert's labelled bought + sold volume that must be on
 # one side (above 0.5, up to 1) before the alert counts as directional.
 sides_majority = 0.6
-# How many of the big ten must have a usable wall before their breadth of room
-# is read; below this the dealer read goes by the symbol's own room alone.
+# How many of the big ten must have a usable reading before a breadth is read:
+# a usable wall for the dealer read's breadth of room (below this it goes by the
+# symbol's own room alone), and a move outside the dead zone for the intraday
+# price breadth.
 breadth_min_members = 5
 # A confirming reading older than this many minutes is treated as absent.
 max_age_min = 5
