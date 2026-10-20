@@ -36,6 +36,7 @@ from services.options_svc import rate_trade
 # The rescue menu's own vocabulary: what a candidate IS, for rescue_apply.
 from services.options_svc import rescue
 from services.options_svc import scalp_call
+from services.options_svc import scalp_intraday_call
 from services.options_svc import tracked
 # X (design 2026-09-22): the image card posted with each market report.
 from services.options_svc import report_card
@@ -3859,6 +3860,14 @@ def _cmd_scalp_refresh(bus, command):
     # Slow lane: tens of seconds of fetches, and it touches no paper book. A
     # probability already shown today is not recomputed (scalp_call freezes it).
     scalp_call.run(bus)
+    # Then the intraday section, which that republish leaves out: inside a slot's
+    # window its call is filled (or reused, if the slot already made it); off a
+    # window today's published slots are put back - never an off-slot call. Run
+    # after the 08:36 call, not inside it: each takes the run lock itself.
+    try:
+        scalp_intraday_call.run_slot(bus, scalp_intraday_call.current_slot())
+    except Exception:
+        log.exception("scalp_refresh: the intraday section degraded")
 
 
 @_command("x_post")
@@ -3985,7 +3994,9 @@ def handle_command(bus, command) -> None:
     (replay-guarded); ``scalp_refresh`` → rebuild the Opening Scalp's morning call
     and publish ``cache:options:scalp`` (replay-guarded; before the 08:36 call
     time or on a closed day it republishes the last call and fetches nothing;
-    one run at a time with the 08:36 slot); else no-op.
+    one run at a time with the 08:36 slot), then fill the current intraday slot
+    inside its window, or put today's published slots back off one (never an
+    off-slot call); else no-op.
 
     ⚠ This list IS the API the GUI codes against, and prose drifts:
     ``gamma_history``/``rescue_adhoc``/``sim_replay`` were implemented and missing

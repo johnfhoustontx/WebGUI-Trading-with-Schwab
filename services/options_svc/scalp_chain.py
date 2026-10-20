@@ -100,13 +100,13 @@ def near_money_slice(chain: dict, spot: float, n: int) -> dict:
     return out
 
 
-def capture(symbol, day, client=None, db_path=None):
-    """Fetch ``symbol``'s 0DTE chain for ``day`` (``YYYY-MM-DD``), keep the near-
-    the-money slice and save it with the capture's own wall-clock epoch seconds.
+def fetch_slice(symbol, day, client=None):
+    """Fetch ``symbol``'s 0DTE chain for ``day`` (``YYYY-MM-DD``) and return its
+    near-the-money slice, SAVING NOTHING (the intraday calls keep their slices in
+    their own table; ``capture`` keeps the morning's).
 
-    Returns the slice, or ``None`` when nothing was saved: a non-200, an
-    exception, or a body with no spot or no strikes. Nothing is saved on a
-    failure, and the failure is logged (and counted when it was an exception)."""
+    ``None`` on a non-200, an exception, or a body with no spot or no strikes;
+    the failure is logged (and counted when it was an exception)."""
     try:
         client = client if client is not None else _default_client()
         resp = client.get_option_chain(symbol, from_date=day, to_date=day)
@@ -123,6 +123,24 @@ def capture(symbol, day, client=None, db_path=None):
         if not (sliced["callExpDateMap"] and sliced["putExpDateMap"]):
             log.warning("scalp chain %s: no strikes near the money", symbol)
             return None
+        return sliced
+    except Exception:
+        _degrade.degraded("options.scalp_chain", detail=symbol)
+        return None
+
+
+def capture(symbol, day, client=None, db_path=None):
+    """Fetch ``symbol``'s 0DTE chain for ``day`` (``YYYY-MM-DD``), keep the near-
+    the-money slice (``fetch_slice``) and save it in the morning's
+    ``chain_slices`` with the capture's own wall-clock epoch seconds.
+
+    Returns the slice, or ``None`` when nothing was saved: a non-200, an
+    exception, or a body with no spot or no strikes. Nothing is saved on a
+    failure, and the failure is logged (and counted when it was an exception)."""
+    sliced = fetch_slice(symbol, day, client=client)
+    if sliced is None:
+        return None
+    try:
         scalp_store.save_chain_slice(day, symbol, int(time.time()), sliced,
                                      db_path=db_path)
         return sliced

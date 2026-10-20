@@ -765,10 +765,12 @@ def test_not_on_a_holiday():
 
 
 def test_the_intraday_branch_records_in_its_own_try():
+    # Task 8 of the intraday calls: the branch now runs the slot's call, which
+    # records the slot itself (after publishing, with each call's direction).
     import inspect
 
     src = inspect.getsource(scheduler.loop)
     seg = src.split("async def _scalp_intraday_branch", 1)[1].split("if intraday_slot:", 1)[0]
-    assert "run_in_executor(None, scalp_record.record" in seg
+    assert "run_in_executor(None, scalp_intraday_call.run_slot" in seg
     assert "except Exception" in seg
     assert 'branches.append(("scalp_intraday"' in src

@@ -103,6 +103,20 @@ def test_capture_failure_returns_none_and_saves_nothing(tmp_path):
     assert st.chain_slice(DAY, "SPY", db_path=db) is None
 
 
+def test_fetch_slice_returns_the_slice_and_saves_nothing(tmp_path):
+    # The intraday calls keep their own slices: fetching one must never write
+    # (or replace) the morning's chain_slices row.
+    db = str(tmp_path / "scalp.db")
+    morning = sc.capture("SPY", DAY, client=FakeClient({"SPY": _Resp(200, _chain())}),
+                         db_path=db)
+    client = FakeClient({"SPY": _Resp(200, _chain(spot=575.2))})
+    out = sc.fetch_slice("SPY", DAY, client=client)
+    assert out is not None and out["underlyingPrice"] == 575.2
+    assert st.chain_slice(DAY, "SPY", db_path=db) == morning
+    assert sc.fetch_slice("SPY", DAY, client=FakeClient({"SPY": RuntimeError("x")})) is None
+    assert not client.calls[0][1].get("priority")
+
+
 def test_capture_all_one_failure_does_not_stop_the_others(tmp_path):
     db = str(tmp_path / "scalp.db")
     client = FakeClient({"$SPX": _Resp(200, _chain(5710.0, range(5600, 5800, 5),

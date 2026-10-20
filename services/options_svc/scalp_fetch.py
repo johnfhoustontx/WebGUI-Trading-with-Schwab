@@ -205,3 +205,23 @@ def top_up(db_path=None, client=None, today=None) -> dict:
                 out[key] += scalp_store.upsert_bars(rows, db_path=db_path)
                 start = stop
     return out
+
+
+def top_up_today(symbols, interval=5, db_path=None, client=None, today=None) -> dict:
+    """Fetch TODAY's bars (``today``, default today in CT) for ``symbols`` at
+    ``interval`` minutes: ONE request per symbol, from midnight CT to the end of
+    that day (Schwab answers up to now), every bar it returns written over the
+    stored one. An intraday call needs the bars up to its slot, and a bar fetched
+    while it was still forming is replaced by the next top-up (or the nightly
+    one, which starts an interval before the latest stored bar).
+
+    Returns the rows written per ``"SYMBOL/interval"``; a failed request is
+    ``FAILED`` (-1) for its key, its other keys carry on. Never the priority lane."""
+    day = today if today is not None else _today_ct()
+    start, end = _ms(_day_start(day)), _end_ms(day)
+    out = {}
+    for symbol in dict.fromkeys(symbols or ()):
+        key = f"{symbol}/{int(interval)}"
+        rows = fetch_range(symbol, interval, start, end, client=client)
+        out[key] = FAILED if rows is None else scalp_store.upsert_bars(rows, db_path=db_path)
+    return out

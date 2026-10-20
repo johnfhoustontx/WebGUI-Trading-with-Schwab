@@ -19,7 +19,7 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from services import _heartbeat
-from services.options_svc import compute, finder_public, flow_stream, handlers, scalp_call, scalp_fetch, scalp_grade, scalp_intraday_study, scalp_record, scalp_study
+from services.options_svc import compute, finder_public, flow_stream, handlers, scalp_call, scalp_fetch, scalp_grade, scalp_intraday_call, scalp_intraday_study, scalp_study
 from shared import market_calendar as mc
 from shared import scalp_config
 from shared import trade_mgmt as _trade_mgmt
@@ -512,12 +512,12 @@ def scalp_bars_due(now, ran_slots):
     return None
 
 
-# ── Opening Scalp intraday recording ([intraday] in config/scalp.toml) ──
-# Every 15 minutes 08:51-13:51 CT (22 slots less the 08:36 call's own, recorded
-# by scalp_call): scalp_record.record saves the confirmation reading's raw inputs
-# for the three scalp symbols. Reads the bus only; no proxy call.
+# ── Opening Scalp intraday calls ([intraday] in config/scalp.toml) ──
+# Every 15 minutes 08:51-13:51 CT (21 slots; the 08:36 call records its own):
+# scalp_intraday_call.run_slot makes a new call for the three scalp symbols,
+# publishes and saves it, then records the confirmation reading's raw inputs.
 def scalp_intraday_due(now, ran_slots):
-    """Name (``"HH:MM"``) of the intraday recording slot due now, or None.
+    """Name (``"HH:MM"``) of the intraday call slot due now, or None.
 
     Fires each slot once per trading day when ``target <= now < target + grace``
     (``[intraday] grace_min``) and that ``(date, slot)`` is not in ``ran_slots``;
@@ -1116,11 +1116,15 @@ async def loop(bus):
         if call_slot:
             branches.append(("scalp", _scalp_branch()))
 
-        # Opening Scalp intraday recording - saves the confirmation reading's
-        # raw inputs for the three symbols (scalp_record.record). Reads the bus
-        # only, so it takes no proxy budget. Latched BEFORE it runs, like the
-        # call, in its own branch: a slow or failed recording can only delay or
-        # lose itself, never the call or another slot.
+        # Opening Scalp intraday call - every 15 minutes a new, frozen call for
+        # the three symbols (scalp_intraday_call.run_slot): today's bars topped
+        # up, the 0DTE chains of the symbols with a direction fetched (normal
+        # lane, about 26 requests), the call published into cache:options:scalp
+        # beside the 08:36 call and saved, then the confirmation reading's raw
+        # inputs recorded (scalp_record.record, inside run_slot). Runs under the
+        # 08:36 call's lock, so the two never fetch side by side. Latched BEFORE
+        # it runs, like the call, in its own branch: a failed slot loses only
+        # itself.
         try:
             intraday_slot = scalp_intraday_due(now, scalp_intraday_ran)
             if intraday_slot:
@@ -1129,12 +1133,13 @@ async def loop(bus):
             log.exception("scalp_intraday_due gate degraded")
             intraday_slot = None
 
-        async def _scalp_intraday_branch(slot=intraday_slot, day=now.date()):
+        async def _scalp_intraday_branch(slot=intraday_slot):
             try:
-                n = await loop_.run_in_executor(None, scalp_record.record, bus, day, slot)
-                log.info("scalp intraday slot %s recorded %d row(s)", slot, n)
+                published = await loop_.run_in_executor(None, scalp_intraday_call.run_slot, bus, slot)
+                log.info("scalp intraday slot %s %s", slot,
+                         "published" if published else "not published")
             except Exception:
-                log.exception("scalp intraday recording degraded")
+                log.exception("scalp intraday call branch degraded")
 
         if intraday_slot:
             branches.append(("scalp_intraday", _scalp_intraday_branch()))

@@ -154,6 +154,23 @@ def test_intraday_timeline_rate_outside_unit_interval_refused():
                 ScalpView(**_with_intraday(dict(INTRADAY, timeline=[row])))
 
 
+def test_intraday_timeline_nested_symbols_rates_are_checked():
+    # The shape scalp_intraday_call publishes: the cells under "symbols", the
+    # highlighted role's rate as edge_p / edge_p_base.
+    good = {"slot": "09:06", "symbols": {"SPY": {"direction": 1, "edge_p": 0.6,
+                                                 "edge_p_base": 0.5, "word": None},
+                                         "QQQ": {"direction": None, "edge_p": None}}}
+    ScalpView(**_with_intraday(dict(INTRADAY, timeline=[good])))
+    for field in ("p", "p_base", "edge_p", "edge_p_base"):
+        for bad in (1.2, -0.1, float("nan"), True):
+            row = {"slot": "09:06", "symbols": {"SPY": {field: bad}}}
+            with pytest.raises(ValidationError):
+                ScalpView(**_with_intraday(dict(INTRADAY, timeline=[row])))
+    with pytest.raises(ValidationError):
+        ScalpView(**_with_intraday(dict(INTRADAY, timeline=[{"slot": "09:06",
+                                                             "symbols": ["SPY"]}])))
+
+
 def test_intraday_confirmation_score_range():
     for good in (1, -1, 0, 0.0, 1.0, -1.0, None):
         entry = dict(INTRADAY_ENTRY, confirmation={"score": good})

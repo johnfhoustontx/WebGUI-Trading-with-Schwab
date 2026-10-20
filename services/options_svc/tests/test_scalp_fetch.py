@@ -262,6 +262,35 @@ def test_a_failing_symbol_does_not_stop_the_others(tmp_path, monkeypatch):
     assert out["SPY/1"] == 1
 
 
+def test_top_up_today_is_one_request_per_symbol_for_the_day(tmp_path):
+    # The intraday call's fetch: today's 5-minute bars only, one request each,
+    # from midnight CT to the end of the day; a failed symbol is FAILED alone.
+    db = tmp_path / "s.db"
+    day = dt.date(2026, 10, 19)
+    midnight = int(dt.datetime(2026, 10, 19, tzinfo=_CT).timestamp() * 1000)
+
+    class Mixed(FakeClient):
+        def _get(self, path, params=None, **kw):
+            if _parse(params["params"])["symbol"] == "BAD":
+                self.calls.append((path, params, _parse(params["params"]), kw))
+                raise RuntimeError("boom")
+            return super()._get(path, params, **kw)
+
+    client = Mixed(lambda i, q: {"candles": [_candle(midnight + 9 * 3_600_000),
+                                             _candle(midnight + 9 * 3_600_000 + 300_000)]})
+    out = sf.top_up_today(["SPY", "/ES", "BAD", "SPY"], db_path=db, client=client,
+                          today=day)
+    assert out == {"SPY/5": 2, "/ES/5": 2, "BAD/5": sf.FAILED}
+    assert [q["symbol"] for _, _, q, _ in client.calls] == ["SPY", "/ES", "BAD"]
+    for path, outer, q, kw in client.calls:
+        assert path == "/passthrough" and q["frequency"] == "5"
+        assert int(q["startDate"]) == midnight
+        assert int(q["endDate"]) == midnight + DAY_MS
+        assert "priority" not in kw and "priority" not in outer
+    assert len(st.bars("SPY", 5, 0, 10**12, db_path=db)) == 2
+    assert st.bars("SPY", 1, 0, 10**12, db_path=db) == []
+
+
 def test_backfill_failure_between_data_windows_is_not_the_end_of_history(
         tmp_path, one_symbol):
     db = tmp_path / "s.db"

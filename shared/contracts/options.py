@@ -347,6 +347,9 @@ def _signed_unit_number(v, name: str):
 
 
 _RATE_KEYS = ("p", "lo", "hi", "p_base")
+#: The rates a timeline cell may carry: a rate and its base, or the highlighted
+#: role's (``edge_p`` / ``edge_p_base``).
+_TIMELINE_RATE_KEYS = ("p", "p_base", "edge_p", "edge_p_base")
 
 
 def _check_roles(roles) -> None:
@@ -416,10 +419,16 @@ class ScalpView(_MoneyView):
             for row in timeline:
                 if not isinstance(row, dict):
                     raise ValueError("a timeline row is not a mapping")
-                for cell in row.values():
+                # A row holds its symbols' cells directly, or under "symbols"
+                # (the shape scalp_intraday_call publishes); both are checked.
+                nested = row.get("symbols")
+                if nested is not None and not isinstance(nested, dict):
+                    raise ValueError("a timeline row's symbols is not a mapping")
+                cells = list(row.values()) + list((nested or {}).values())
+                for cell in cells:
                     if not isinstance(cell, dict):
                         continue
-                    for key in ("p", "p_base"):
+                    for key in _TIMELINE_RATE_KEYS:
                         if cell.get(key) is not None:
                             _unit_number(cell[key], key)
         return intraday
