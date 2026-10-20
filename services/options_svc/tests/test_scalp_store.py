@@ -147,7 +147,10 @@ def test_connect_creates_the_parent_folder(tmp_path):
 
 @pytest.mark.parametrize("name", ["connect", "upsert_bars", "bars", "latest_ts",
                                   "save_chain_slice", "chain_slice", "save_call",
-                                  "calls_on", "latest_call_day"])
+                                  "calls_on", "latest_call_day", "save_reading",
+                                  "readings_on", "save_intraday_call",
+                                  "intraday_calls_on", "save_intraday_slice",
+                                  "intraday_slice"])
 def test_no_default_path_bound_at_def(name):
     assert inspect.signature(getattr(st, name)).parameters["db_path"].default is None
 
@@ -181,3 +184,252 @@ def test_sqlite_error_type_is_not_swallowed(tmp_path):
     bad.write_text("x")
     with pytest.raises((sqlite3.Error, OSError)):
         st.bars("SPY", 300, 0, 10, db_path=bad / "scalp.db")
+
+
+# The schema as it stood at HEAD, before the intraday tables. A store built from
+# it is the shape prod holds; ``connect`` must add the new tables and leave the
+# old ones exactly as they were.
+OLD_SCHEMA = """
+CREATE TABLE IF NOT EXISTS bars (
+    symbol   TEXT    NOT NULL,
+    interval INTEGER NOT NULL,
+    ts       INTEGER NOT NULL,
+    open     REAL,
+    high     REAL,
+    low      REAL,
+    close    REAL,
+    volume   REAL,
+    PRIMARY KEY (symbol, interval, ts)
+);
+CREATE TABLE IF NOT EXISTS chain_slices (
+    day    TEXT    NOT NULL,
+    symbol TEXT    NOT NULL,
+    ts     INTEGER NOT NULL,
+    body   BLOB    NOT NULL,
+    PRIMARY KEY (day, symbol)
+);
+CREATE TABLE IF NOT EXISTS outcomes (
+    day          TEXT    NOT NULL,
+    symbol       TEXT    NOT NULL,
+    iv_scale     REAL    NOT NULL,
+    role         TEXT    NOT NULL,
+    structure    TEXT    NOT NULL,
+    bucket       TEXT,
+    result       TEXT    NOT NULL,
+    minutes      INTEGER,
+    entry_value  REAL,
+    end_pnl_pct  REAL,
+    both_in_bar  INTEGER NOT NULL,
+    interval     INTEGER NOT NULL,
+    PRIMARY KEY (day, symbol, iv_scale, role, interval)
+);
+CREATE TABLE IF NOT EXISTS mornings (
+    day    TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    json   TEXT NOT NULL,
+    PRIMARY KEY (day, symbol)
+);
+CREATE TABLE IF NOT EXISTS verdicts (
+    symbol TEXT NOT NULL,
+    role   TEXT NOT NULL,
+    bucket TEXT NOT NULL,
+    json   TEXT NOT NULL,
+    PRIMARY KEY (symbol, role, bucket)
+);
+CREATE TABLE IF NOT EXISTS calls (
+    day    TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    json   TEXT NOT NULL,
+    PRIMARY KEY (day, symbol)
+);
+CREATE TABLE IF NOT EXISTS grades (
+    day          TEXT    NOT NULL,
+    symbol       TEXT    NOT NULL,
+    role         TEXT    NOT NULL,
+    structure    TEXT    NOT NULL,
+    model_result TEXT,
+    chain_result TEXT,
+    highlighted  INTEGER NOT NULL,
+    avoided      INTEGER NOT NULL,
+    p_base       REAL,
+    PRIMARY KEY (day, symbol, role)
+);
+CREATE TABLE IF NOT EXISTS iv_calibration (
+    day         TEXT NOT NULL,
+    symbol      TEXT NOT NULL,
+    atm_iv      REAL NOT NULL,
+    vol_reading REAL NOT NULL,
+    ratio       REAL NOT NULL,
+    PRIMARY KEY (day, symbol)
+);
+"""
+
+# (name, type, notnull, pk position) for every pre-existing table, as at HEAD.
+OLD_COLUMNS = {
+    "bars": [("symbol", "TEXT", True, 1), ("interval", "INTEGER", True, 2),
+             ("ts", "INTEGER", True, 3), ("open", "REAL", False, 0),
+             ("high", "REAL", False, 0), ("low", "REAL", False, 0),
+             ("close", "REAL", False, 0), ("volume", "REAL", False, 0)],
+    "chain_slices": [("day", "TEXT", True, 1), ("symbol", "TEXT", True, 2),
+                     ("ts", "INTEGER", True, 0), ("body", "BLOB", True, 0)],
+    "calls": [("day", "TEXT", True, 1), ("symbol", "TEXT", True, 2),
+              ("json", "TEXT", True, 0)],
+    "grades": [("day", "TEXT", True, 1), ("symbol", "TEXT", True, 2),
+               ("role", "TEXT", True, 3), ("structure", "TEXT", True, 0),
+               ("model_result", "TEXT", False, 0), ("chain_result", "TEXT", False, 0),
+               ("highlighted", "INTEGER", True, 0), ("avoided", "INTEGER", True, 0),
+               ("p_base", "REAL", False, 0)],
+    "outcomes": [("day", "TEXT", True, 1), ("symbol", "TEXT", True, 2),
+                 ("iv_scale", "REAL", True, 3), ("role", "TEXT", True, 4),
+                 ("structure", "TEXT", True, 0), ("bucket", "TEXT", False, 0),
+                 ("result", "TEXT", True, 0), ("minutes", "INTEGER", False, 0),
+                 ("entry_value", "REAL", False, 0), ("end_pnl_pct", "REAL", False, 0),
+                 ("both_in_bar", "INTEGER", True, 0), ("interval", "INTEGER", True, 5)],
+    "mornings": [("day", "TEXT", True, 1), ("symbol", "TEXT", True, 2),
+                 ("json", "TEXT", True, 0)],
+    "verdicts": [("symbol", "TEXT", True, 1), ("role", "TEXT", True, 2),
+                 ("bucket", "TEXT", True, 3), ("json", "TEXT", True, 0)],
+    "iv_calibration": [("day", "TEXT", True, 1), ("symbol", "TEXT", True, 2),
+                       ("atm_iv", "REAL", True, 0), ("vol_reading", "REAL", True, 0),
+                       ("ratio", "REAL", True, 0)],
+}
+
+# The new intraday tables: column names in order, and the primary key.
+NEW_COLUMNS = {
+    "intraday_readings": ["day", "slot", "symbol", "json"],
+    "intraday_calls": ["day", "slot", "symbol", "json"],
+    "intraday_chain_slices": ["day", "slot", "symbol", "ts", "body"],
+    "intraday_outcomes": ["day", "slot", "symbol", "iv_scale", "role", "structure",
+                          "block", "bucket", "result", "minutes", "entry_value",
+                          "both_in_bar"],
+    "intraday_verdicts": ["symbol", "block", "role", "bucket", "json"],
+    "intraday_grades": ["day", "slot", "symbol", "role", "structure", "model_result",
+                        "chain_result", "highlighted", "avoided", "confirm_word",
+                        "p_base", "block"],
+}
+NEW_PRIMARY_KEYS = {
+    "intraday_readings": ["day", "slot", "symbol"],
+    "intraday_calls": ["day", "slot", "symbol"],
+    "intraday_chain_slices": ["day", "slot", "symbol"],
+    "intraday_outcomes": ["day", "slot", "symbol", "iv_scale", "role"],
+    "intraday_verdicts": ["symbol", "block", "role", "bucket"],
+    "intraday_grades": ["day", "slot", "symbol", "role"],
+}
+
+
+def _columns(conn, table):
+    return [(r[1], r[2], bool(r[3]), r[5])
+            for r in conn.execute(f"pragma table_info({table})")]
+
+
+def test_existing_tables_unchanged(tmp_path):
+    conn = st.connect(_db(tmp_path))
+    try:
+        for table, expected in OLD_COLUMNS.items():
+            assert _columns(conn, table) == expected, table
+    finally:
+        conn.close()
+
+
+def test_new_tables_open_on_an_old_store(tmp_path):
+    db = _db(tmp_path)
+    old = sqlite3.connect(db)
+    old.executescript(OLD_SCHEMA)
+    old.execute("INSERT INTO bars VALUES ('SPY', 300, 100, 1, 2, 0.5, 1.5, 9)")
+    old.execute("INSERT INTO calls VALUES ('2026-10-19', 'SPY', '{\"direction\":1}')")
+    old.commit()
+    old.close()
+
+    conn = st.connect(db)
+    try:
+        names = {r[0] for r in conn.execute(
+            "select name from sqlite_master where type='table'")}
+        assert set(NEW_COLUMNS) <= names
+        assert conn.execute("select open, volume from bars").fetchone() == (1.0, 9.0)
+        assert conn.execute("select json from calls").fetchone() == ('{"direction":1}',)
+    finally:
+        conn.close()
+    assert st.calls_on("2026-10-19", db_path=db) == {"SPY": {"direction": 1}}
+    assert st.readings_on("2026-10-19", db_path=db) == {}
+
+
+def test_the_new_tables_have_the_named_columns_and_keys(tmp_path):
+    conn = st.connect(_db(tmp_path))
+    try:
+        for table, cols in NEW_COLUMNS.items():
+            assert [r[1] for r in conn.execute(f"pragma table_info({table})")] == cols, table
+        for table, keys in NEW_PRIMARY_KEYS.items():
+            pk_rows = [r for r in conn.execute(f"pragma table_info({table})") if r[5]]
+            assert [r[1] for r in sorted(pk_rows, key=lambda r: r[5])] == keys, table
+    finally:
+        conn.close()
+
+
+def test_a_reading_round_trips_keyed_by_slot_and_symbol(tmp_path):
+    db = _db(tmp_path)
+    assert st.readings_on("2026-10-19", db_path=db) == {}
+    st.save_reading("2026-10-19", "08:51", "SPY", {"score": 0.4}, db_path=db)
+    st.save_reading("2026-10-19", "09:06", "SPY", {"score": -0.2}, db_path=db)
+    st.save_reading("2026-10-19", "08:51", "QQQ", {"score": 1.0}, db_path=db)
+    st.save_reading("2026-10-19", "08:51", "SPY", {"score": 0.9}, db_path=db)  # replaces
+    st.save_reading("2026-10-20", "08:51", "SPY", {"score": 5}, db_path=db)
+    assert st.readings_on("2026-10-19", db_path=db) == {
+        ("08:51", "SPY"): {"score": 0.9},
+        ("09:06", "SPY"): {"score": -0.2},
+        ("08:51", "QQQ"): {"score": 1.0},
+    }
+
+
+def test_a_reading_with_a_nan_is_refused_not_stored(tmp_path):
+    db = _db(tmp_path)
+    with pytest.raises(ValueError):
+        st.save_reading("2026-10-19", "08:51", "SPY", {"p": float("nan")}, db_path=db)
+    assert st.readings_on("2026-10-19", db_path=db) == {}
+
+
+def test_an_intraday_call_round_trips_and_leaves_the_morning_call_alone(tmp_path):
+    db = _db(tmp_path)
+    assert st.intraday_calls_on("2026-10-19", db_path=db) == {}
+    st.save_call("2026-10-19", "SPY", {"direction": 1}, db_path=db)
+    st.save_intraday_call("2026-10-19", "08:51", "SPY", {"direction": -1}, db_path=db)
+    st.save_intraday_call("2026-10-19", "09:06", "SPY", {"direction": 1}, db_path=db)
+    st.save_intraday_call("2026-10-19", "09:06", "SPY", {"direction": 0}, db_path=db)
+    assert st.intraday_calls_on("2026-10-19", db_path=db) == {
+        ("08:51", "SPY"): {"direction": -1},
+        ("09:06", "SPY"): {"direction": 0},
+    }
+    assert st.intraday_calls_on("2026-10-20", db_path=db) == {}
+    assert st.calls_on("2026-10-19", db_path=db) == {"SPY": {"direction": 1}}
+
+
+def test_an_intraday_call_with_a_nan_is_refused_not_stored(tmp_path):
+    db = _db(tmp_path)
+    with pytest.raises(ValueError):
+        st.save_intraday_call("2026-10-19", "08:51", "SPY", {"p": float("inf")}, db_path=db)
+    assert st.intraday_calls_on("2026-10-19", db_path=db) == {}
+
+
+def test_an_intraday_slice_round_trips_and_is_kept_per_slot(tmp_path):
+    db = _db(tmp_path)
+    assert st.intraday_slice("2026-10-19", "08:51", "SPY", db_path=db) is None
+    body = {"calls": [{"strike": 500.0, "bid": 1.2, "ask": 1.3}], "note": "café", "n": None}
+    st.save_intraday_slice("2026-10-19", "08:51", "SPY", 1234, body, db_path=db)
+    st.save_intraday_slice("2026-10-19", "09:06", "SPY", 1300, {"v": 2}, db_path=db)
+    assert st.intraday_slice("2026-10-19", "08:51", "SPY", db_path=db) == body
+    assert st.intraday_slice("2026-10-19", "09:06", "SPY", db_path=db) == {"v": 2}
+    assert st.intraday_slice("2026-10-19", "09:06", "QQQ", db_path=db) is None
+    assert st.intraday_slice("2026-10-20", "08:51", "SPY", db_path=db) is None
+    assert st.chain_slice("2026-10-19", "SPY", db_path=db) is None
+
+
+def test_a_second_intraday_slice_for_the_slot_replaces_the_first(tmp_path):
+    db = _db(tmp_path)
+    st.save_intraday_slice("2026-10-19", "08:51", "SPY", 1, {"v": 1}, db_path=db)
+    st.save_intraday_slice("2026-10-19", "08:51", "SPY", 2, {"v": 2}, db_path=db)
+    assert st.intraday_slice("2026-10-19", "08:51", "SPY", db_path=db) == {"v": 2}
+    conn = st.connect(db)
+    try:
+        assert conn.execute(
+            "select count(*), max(ts) from intraday_chain_slices").fetchone() == (1, 2)
+    finally:
+        conn.close()
