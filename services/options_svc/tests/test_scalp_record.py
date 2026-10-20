@@ -213,16 +213,68 @@ def _frozen(rows):
 
 
 def test_a_recorded_slot_is_never_rewritten(db, bus):
+    # Ruling (Task 8, fix round 1): a direction-less row may be upgraded by a row
+    # WITH a direction (see the upgrade tests below); everything else is still
+    # write-once. So the later write here names a direction for SPY only, and
+    # every other row must stay byte for byte, as must a direction-less retry.
     _publish(bus)
     assert scalp_record.record(bus, DAY, SLOT, now=NOW, db_path=db) == 3
     first = _frozen(_stored(db))
-    # Different sources, a later clock, a direction: still the same rows.
+    # Different sources, a later clock, no direction: still the same rows.
     bus.cache_set(scalp_confirm.MATRIX, full_matrix(call_wall=790.0))
     bus.cache_set(scalp_confirm.SENTIMENT, sentiment("bearish"))
     later = NOW + dt.timedelta(minutes=3)
-    assert scalp_record.record(bus, DAY, SLOT, now=later, db_path=db,
-                               directions={"SPY": 1}, win_points={"SPY": 3.0}) == 0
+    assert scalp_record.record(bus, DAY, SLOT, now=later, db_path=db) == 0
     assert _frozen(_stored(db)) == first
+    before = _stored(db)
+    assert scalp_record.record(bus, DAY, SLOT, now=later, db_path=db,
+                               directions={"SPY": 1}, win_points={"SPY": 3.0}) == 1
+    after = _stored(db)
+    for sym in scalp_config.symbols():
+        if sym != "SPY":
+            assert after[(SLOT, sym)] == before[(SLOT, sym)]
+    assert after[(SLOT, "SPY")]["direction"] == 1
+
+
+def test_a_directionless_row_is_upgraded_once_and_then_frozen(db, bus):
+    _publish(bus)
+    scalp_record.record(bus, DAY, SLOT, now=NOW, db_path=db)
+    later = NOW + dt.timedelta(minutes=2)
+    assert scalp_record.record(bus, DAY, SLOT, now=later, db_path=db,
+                               directions={"SPY": 1, "QQQ": -1},
+                               win_points={"SPY": 3.0, "QQQ": 2.0}) == 2
+    upgraded = _frozen(_stored(db))
+    rows = _stored(db)
+    assert rows[(SLOT, "SPY")]["direction"] == 1
+    assert rows[(SLOT, "QQQ")]["direction"] == -1
+    assert rows[(SLOT, "SPY")]["components"]["word"] is not None
+    assert rows[(SLOT, "SPY")]["recorded_at"] == later.isoformat()
+    # A row WITH a direction is never replaced: not by the other direction, not
+    # by a direction-less write, not by new sources.
+    bus.cache_set(scalp_confirm.SENTIMENT, sentiment("bearish"))
+    for directions in ({"SPY": -1, "QQQ": 1}, {}, {"SPY": 1}):
+        assert scalp_record.record(bus, DAY, SLOT, now=later + dt.timedelta(minutes=1),
+                                   db_path=db, directions=directions) == 0
+    assert _frozen(_stored(db)) == upgraded
+
+
+def test_a_bool_is_not_a_direction_for_the_upgrade(db, bus):
+    _publish(bus)
+    scalp_record.record(bus, DAY, SLOT, now=NOW, db_path=db)
+    first = _frozen(_stored(db))
+    assert scalp_record.record(bus, DAY, SLOT, now=NOW, db_path=db,
+                               directions={"SPY": True, "QQQ": 0}) == 0
+    assert _frozen(_stored(db)) == first
+
+
+def test_record_reads_the_sources_it_is_given(db, bus):
+    # The caller's own read (the call's) is what is recorded, not a fresh one.
+    _publish(bus)
+    src = scalp_confirm.sources(bus, NOW)
+    bus.cache_set(scalp_confirm.SENTIMENT, sentiment("bearish"))
+    scalp_record.record(bus, DAY, SLOT, now=NOW, db_path=db, src=src)
+    spy = _stored(db)[(SLOT, "SPY")]
+    assert spy["components"]["sentiment"]["raw"]["state"] == "bullish"
 
 
 def test_only_the_missing_symbol_of_a_slot_is_written(db, bus):

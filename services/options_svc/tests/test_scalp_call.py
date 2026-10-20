@@ -707,6 +707,44 @@ def test_an_error_publish_keeps_the_intraday_section(db, bus, monkeypatch):
     assert view["state"] == "error" and view["intraday"] == INTRADAY
 
 
+@pytest.mark.parametrize("bad", [
+    dict(INTRADAY, latest={"SPY": {"roles": {"long_with": {"p": 1.5}}}}),
+    dict(INTRADAY, timeline="not a list"),
+    "not a section",
+])
+def test_an_invalid_carried_section_is_dropped_never_vetoes_the_call(db, bus, bad):
+    # A section that no longer passes the contract (a promote that tightened
+    # it) must not refuse the 08:36 publish: it is dropped and counted.
+    _seeded(db)
+    bus.cache_set(scalp_call.VIEW, {"state": "call", "symbols": {}, "intraday": bad})
+    scalp_call.run(bus, now=NOW, db_path=db, client=FakeClient())
+    view = bus.cache_get(scalp_call.VIEW).payload
+    assert view["state"] == "call" and set(view["symbols"]) == set(PRICES)
+    assert "intraday" not in view
+    assert _degrade.counts().get("options.scalp_intraday") == 1
+    assert set(scalp_store.calls_on("2026-10-19", db_path=db)) == set(PRICES)
+    ScalpView(**view)
+
+
+def test_a_cross_day_section_is_carried(db, bus):
+    _seeded(db)
+    yesterday = dict(INTRADAY, day="2026-10-16")
+    bus.cache_set(scalp_call.VIEW, {"state": "call", "symbols": {}, "intraday": yesterday})
+    scalp_call.run(bus, now=NOW, db_path=db, client=FakeClient())
+    assert bus.cache_get(scalp_call.VIEW).payload["intraday"] == yesterday
+    assert _degrade.counts().get("options.scalp_intraday") is None
+
+
+def test_the_scorecard_republish_drops_an_invalid_section_too(db, bus):
+    bus.cache_set(scalp_call.VIEW, {"state": "call", "symbols": {},
+                                    "intraday": {"latest": "broken"}})
+    assert scalp_call.republish_scorecard(bus, db_path=db) is True
+    assert "intraday" not in bus.cache_get(scalp_call.VIEW).payload
+    bus.cache_set(scalp_call.VIEW, {"state": "call", "symbols": {}, "intraday": INTRADAY})
+    assert scalp_call.republish_scorecard(bus, db_path=db) is True
+    assert bus.cache_get(scalp_call.VIEW).payload["intraday"] == INTRADAY
+
+
 def test_no_intraday_section_is_invented(db, bus):
     _seeded(db)
     scalp_call.run(bus, now=NOW, db_path=db, client=FakeClient())

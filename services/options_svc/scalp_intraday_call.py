@@ -69,6 +69,7 @@ from zoneinfo import ZoneInfo
 from services import _degrade
 from shared import market_calendar as _mc
 from shared import scalp_config
+from shared import symbols as _symbols
 from shared.contracts.options import ScalpView
 from shared.numeric import finite as _finite
 
@@ -255,15 +256,42 @@ def _fetch(day, symbols_needing_chains, db_path, client) -> dict:
     return out
 
 
-def _top_up(day, db_path, client) -> None:
+def _top_up(day, db_path, client):
+    """Today's bars for every bar symbol. Returns the symbols whose fetch failed
+    (a set), or ``None`` when the top-up itself failed (no symbol is known
+    fresh)."""
     try:
-        failed = [k for k, n in scalp_fetch.top_up_today(
+        failed = {k.rsplit("/", 1)[0] for k, n in scalp_fetch.top_up_today(
             scalp_config.bar_symbols(), 5, db_path=db_path, client=client,
-            today=day).items() if n == scalp_fetch.FAILED]
+            today=day).items() if n == scalp_fetch.FAILED}
         if failed:
-            log.warning("scalp intraday: bar top-up failed for %s", ", ".join(failed))
+            log.warning("scalp intraday: bar top-up failed for %s",
+                        ", ".join(sorted(failed)))
+        return failed
     except Exception:
         _degrade.degraded(_AREA, detail="top-up")
+        return None
+
+
+def _inputs_of(symbol) -> list:
+    """Every bar symbol ``symbol``'s reading reads: itself, its futures, sector
+    funds and vol index, $VIX, its VWAP stand-in and the big ten."""
+    wiring = scalp_config.inputs_for(symbol)
+    names = [symbol, wiring["futures"], *wiring["etfs"], wiring["vol"],
+             scalp_intraday_inputs._VIX,
+             scalp_intraday_inputs._VWAP_PROXY.get(symbol), *_symbols.big10()]
+    return [n for n in dict.fromkeys(names) if n]
+
+
+def _mark_inputs(entry, symbol, failed) -> None:
+    """Name the inputs this entry was built without fresh bars for
+    (``inputs_failed``, sorted; all of them when the top-up itself failed) and
+    say so in ``inputs_note``: a call made on fewer inputs says it was."""
+    wanted = _inputs_of(symbol)
+    missing = sorted(wanted if failed is None else [n for n in wanted if n in failed])
+    entry["inputs_failed"] = missing
+    entry["inputs_note"] = (f"built on fewer inputs: no fresh bars for {', '.join(missing)}"
+                            if missing else None)
 
 
 def _build(day, slot, now, db_path, client, stored, src):
@@ -272,8 +300,9 @@ def _build(day, slot, now, db_path, client, stored, src):
     late = _late(day, slot, now)
     entries, readings, fresh = {}, {}, []
     todo = [s for s in scalp_config.symbols() if (slot, s) not in stored]
+    failed = set()
     if todo and not late:
-        _top_up(day, db_path, client)
+        failed = _top_up(day, db_path, client)
     for symbol in todo:
         try:
             readings[symbol] = scalp_intraday_inputs.reading(symbol, day, slot,
@@ -298,6 +327,7 @@ def _build(day, slot, now, db_path, client, stored, src):
             _degrade.degraded(_AREA, detail=f"symbol {symbol}")
             entry = _failed_entry(slot)
         if not late:
+            _mark_inputs(entry, symbol, failed)
             entry["made_at"] = now.isoformat()
         entries[symbol] = entry
     return entries, slices, fresh
@@ -389,10 +419,12 @@ def _save(day, slot, entries, slices, fresh, db_path) -> None:
             _degrade.degraded(_AREA, detail=f"save {symbol}")
 
 
-def _record(bus, day, slot, now, entries, db_path) -> None:
-    """The slot's confirmation inputs (``scalp_record.record``, write-once), with
-    each published call's direction and its long-with role's points to target as
-    a distance. ``entries`` empty: recorded with no direction."""
+def _record(bus, day, slot, now, entries, db_path, src=None) -> None:
+    """The slot's confirmation inputs (``scalp_record.record``, write-once save
+    the upgrade to a direction), read from ``src`` - the SAME sources the
+    confirmation was built from, so the row is what the page showed - with each
+    published call's direction and its long-with role's points to target as a
+    distance. ``entries`` empty: recorded with no direction."""
     try:
         directions, win_points = {}, {}
         for symbol, entry in (entries or {}).items():
@@ -402,28 +434,36 @@ def _record(bus, day, slot, now, entries, db_path) -> None:
                 win_points[symbol] = None if win is None else abs(win)
         scalp_record.record(bus, day, slot, now=now, db_path=db_path,
                             directions=directions, win_points=win_points,
-                            entry_ts=scalp_config.intraday_entry_ts(day, slot))
+                            entry_ts=scalp_config.intraday_entry_ts(day, slot), src=src)
     except Exception:
         _degrade.degraded(_AREA, detail="record")
 
 
 # ── run ──────────────────────────────────────────────────────────────────────
-def run_slot(bus, slot, now=None, db_path=None, client=None) -> bool:
+def run_slot(bus, slot, now=None, db_path=None, client=None, scheduled=False) -> bool:
     """Make and publish ``slot``'s call when ``now`` (default: now, CT, read
     BEFORE the lock is taken, so a wait for the 08:36 call cannot push a due slot
     out of its window) is inside that slot's window; otherwise republish the
     latest slot today already published (``slot=None`` asks for just that).
-    Holds ``scalp_call._RUN_LOCK``. Returns True when it published. Never raises."""
+    ``scheduled``: the scheduler fired this slot, so finding it outside its
+    window is a fault, counted as a degrade. Holds ``scalp_call._RUN_LOCK``.
+    Returns True when it published. Never raises."""
     now = _ct_now(now)
     with scalp_call._RUN_LOCK:
         try:
-            return _run_slot(bus, slot, now, db_path, client)
+            return _run_slot(bus, slot, now, db_path, client, scheduled)
         except Exception:
             _degrade.degraded(_AREA, detail="run")
             return False
 
 
-def _run_slot(bus, slot, now, db_path, client) -> bool:
+def run_scheduled(bus, slot, now, db_path=None, client=None) -> bool:
+    """The scheduler's entry: ``run_slot`` at the scheduler's own tick time
+    ``now`` (the moment it found the slot due), flagged as scheduled."""
+    return run_slot(bus, slot, now=now, db_path=db_path, client=client, scheduled=True)
+
+
+def _run_slot(bus, slot, now, db_path, client, scheduled=False) -> bool:
     day = now.date()
     if not _mc.is_trading_day(day):
         return False
@@ -434,6 +474,8 @@ def _run_slot(bus, slot, now, db_path, client) -> bool:
         return False
 
     if slot is None or not _in_window(day, slot, now):
+        if scheduled:
+            _degrade.degraded(_AREA, detail=f"scheduled slot {slot} outside its window")
         # Off a slot's window: never a new call, only what today published.
         if not stored:
             return False
@@ -453,9 +495,9 @@ def _run_slot(bus, slot, now, db_path, client) -> bool:
             _save(day, slot, entries, slices, fresh, db_path)
     except Exception:
         _degrade.degraded(_AREA, detail=f"slot {slot}")
-    _record(bus, day, slot, now, entries if published else {}, db_path)
+    _record(bus, day, slot, now, entries if published else {}, db_path, src=src)
     return published
 
 
 __all__ = ["VIEW", "EVENT", "FLAT", "NO_BARS", "MISSED", "RATES_BASIS", "current_slot",
-           "build_slot", "run_slot"]
+           "build_slot", "run_slot", "run_scheduled"]

@@ -13,13 +13,16 @@ history in ``gex_history.db`` is kept five sessions: what is not saved now is
 gone, and the later study needs a morning's worth of every slot.
 
 A row is written with or without a direction. ``directions`` / ``win_points``
-(``{symbol: +1 | -1}`` / ``{symbol: points}``) are the 08:36 call's own; every
-other slot passes neither, so ``components`` keeps its raw values and scores
+(``{symbol: +1 | -1}`` / ``{symbol: points}``) are the call's own (the 08:36
+call's, or an intraday slot's published call); a slot with no published call
+passes neither, so ``components`` keeps its raw values and scores
 nothing (an absent verdict is never a neutral one). A recorded (day, slot, symbol)
 is WRITE-ONCE: a second record of it (a page refresh re-entering the 08:36 call,
 a restart's replay) writes nothing, because the later read is not what the slot
-saw. ``record`` returns only the rows it actually wrote; a symbol whose row is
-missing is still filled.
+saw. The one exception is an upgrade: a row stored with NO direction (the
+slot's call failed to publish) is replaced by a row that has one, when a refresh
+inside the slot's window publishes the call. ``record`` returns only the rows it
+actually wrote; a symbol whose row is missing is still filled.
 
 Design: docs/plans/2026-10-20-scalp-intraday-calls-design.md section 6.
 Imports nothing from ``compute``. Never raises.
@@ -45,14 +48,27 @@ def _day(day) -> _dt.date:
     return day if isinstance(day, _dt.date) else _dt.date.fromisoformat(str(day))
 
 
+def _has_direction(d) -> bool:
+    return not isinstance(d, bool) and d in (1, -1)
+
+
 def record(bus, day, slot, now=None, db_path=None, directions=None, win_points=None,
-           entry_ts=None) -> int:
+           entry_ts=None, src=None) -> int:
     """Save one ``intraday_readings`` row per scalp symbol for ``day``'s ``slot``;
     returns the rows written (rows already stored are skipped). ``entry_ts``
     (epoch seconds) defaults to the slot's own 5-minute bar
-    (``scalp_config.intraday_entry_ts``). One symbol failing
-    never stops the others, and nothing here raises (a failure is counted as
-    ``options.scalp_record``)."""
+    (``scalp_config.intraday_entry_ts``). ``src`` is ``scalp_confirm.sources``'
+    answer when the caller already read it (the call's own, so the row records
+    exactly what was shown); without it the views are read here. One symbol
+    failing never stops the others, and nothing here raises (a failure is
+    counted as ``options.scalp_record``).
+
+    Write-once, with ONE exception: a stored row with no direction is replaced
+    by a row that HAS one (a slot whose call failed to publish was recorded with
+    no direction; the refresh that publishes it upgrades the row). A row with a
+    direction is never replaced, and a row without one never by another without."""
+    directions = directions if isinstance(directions, dict) else {}
+    win_points = win_points if isinstance(win_points, dict) else {}
     try:
         day = _day(day)
         now = _now(now)
@@ -61,17 +77,25 @@ def record(bus, day, slot, now=None, db_path=None, directions=None, win_points=N
         symbols = list(scalp_config.symbols())
         everyone = list(dict.fromkeys(symbols + list(_symbols.big10())))
         # Write-once: a (slot, symbol) already stored is what the slot saw, and
-        # the store's INSERT OR REPLACE must not let a later read replace it.
+        # the store's INSERT OR REPLACE must not let a later read replace it -
+        # save the one-way upgrade from no direction to a direction.
         stored = scalp_store.readings_on(day.isoformat(), db_path=db_path)
-        symbols = [s for s in symbols if (slot, s) not in stored]
+
+        def wanted(s):
+            row = stored.get((slot, s))
+            if row is None:
+                return True
+            return (not _has_direction(row.get("direction"))
+                    and _has_direction(directions.get(s)))
+
+        symbols = [s for s in symbols if wanted(s)]
         if not symbols:
             return 0
-        src = scalp_confirm.sources(bus, now)
+        if src is None:
+            src = scalp_confirm.sources(bus, now)
     except Exception:
         _degrade.degraded("options.scalp_record", detail="setup")
         return 0
-    directions = directions if isinstance(directions, dict) else {}
-    win_points = win_points if isinstance(win_points, dict) else {}
     written = 0
     for symbol in symbols:
         try:

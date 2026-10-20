@@ -539,10 +539,24 @@ def _run(bus, now, db_path, client) -> None:
 def _keep_intraday(bus, payload) -> None:
     """Carry the CURRENT view's ``intraday`` section (``scalp_intraday_call``'s)
     into ``payload`` unchanged, whatever its state: this module never builds that
-    section, and a republish here must not drop it until the next slot."""
+    section, and a republish here must not drop it until the next slot.
+
+    Only a section that validates ON ITS OWN is carried: one that no longer
+    passes the contract (a promote that tightened it, say) would otherwise make
+    every payload here fail, and the 08:36 call would never publish. Such a
+    section is dropped and counted (``options.scalp_intraday``); the next slot
+    publishes a fresh one. A section of an earlier day is still carried: it
+    names its ``day``, and the page compares."""
     current = _payload(bus, VIEW)
-    if current is not None and "intraday" in current:
-        payload["intraday"] = current["intraday"]
+    if current is None or "intraday" not in current:
+        return
+    section = current["intraday"]
+    try:
+        ScalpView(intraday=section)
+    except Exception:  # noqa: BLE001 - a bad section is dropped, never raised.
+        _degrade.degraded("options.scalp_intraday", detail="carried section")
+        return
+    payload["intraday"] = section
 
 
 def _record_call_slot(bus, day, now, payload, db_path) -> None:
@@ -591,7 +605,9 @@ def republish_scorecard(bus, db_path=None) -> bool:
         except Exception:
             _degrade.degraded("options.scalp_scorecard")
             return False
-        payload = dict(view, scorecard=card)
+        payload = {k: v for k, v in view.items() if k != "intraday"}
+        payload["scorecard"] = card
+        _keep_intraday(bus, payload)     # a stale section never blocks the record
         if not _valid(payload):
             return False
         try:

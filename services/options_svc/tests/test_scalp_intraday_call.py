@@ -494,7 +494,7 @@ def test_record_called_after_publish_with_directions(db, bus, monkeypatch):
     seen = {}
 
     def record(b, day, slot, now=None, db_path=None, directions=None, win_points=None,
-               entry_ts=None):
+               entry_ts=None, src=None):
         seen.update(day=day, slot=slot, directions=directions, win_points=win_points,
                     entry_ts=entry_ts, db_path=db_path,
                     published=_intraday(b) is not None,
@@ -543,6 +543,86 @@ def test_the_record_carries_a_down_calls_points_as_a_magnitude(db, bus, monkeypa
     assert spy["confirmation"]["dealer"]["raw"].get("state") == "absent"
 
 
+def test_a_refreshed_slot_upgrades_its_directionless_record(db, bus, monkeypatch):
+    # The scheduled run could not publish (the bus refused): its rows were
+    # recorded with no direction. The refresh inside the window publishes the
+    # call, and the rows then carry each call's direction.
+    _seeded(db)
+    real_set = bus.cache_set
+
+    def refused(*a, **k):
+        raise ConnectionError("redis down")
+    monkeypatch.setattr(bus, "cache_set", refused)
+    assert sic.run_slot(bus, SLOT, now=AT, db_path=db, client=FakeClient()) is False
+    rows = scalp_store.readings_on(ISO, db_path=db)
+    assert {rows[(SLOT, s)]["direction"] for s in PRICES} == {None}
+    monkeypatch.setattr(bus, "cache_set", real_set)
+    later = AT + dt.timedelta(minutes=2)
+    assert sic.run_slot(bus, SLOT, now=later, db_path=db, client=FakeClient()) is True
+    rows = scalp_store.readings_on(ISO, db_path=db)
+    latest = _intraday(bus)["latest"]
+    for sym in PRICES:
+        assert rows[(SLOT, sym)]["direction"] == latest[sym]["direction"] == 1
+        assert rows[(SLOT, sym)]["recorded_at"] == later.isoformat()
+    # Once it has a direction, a later refresh never rewrites it.
+    first = scalp_store.readings_on(ISO, db_path=db)
+    sic.run_slot(bus, SLOT, now=later + dt.timedelta(minutes=1), db_path=db,
+                 client=FakeClient())
+    assert scalp_store.readings_on(ISO, db_path=db) == first
+
+
+def test_a_call_names_the_inputs_whose_bars_failed(db, bus):
+    _seeded(db)
+
+    class Partial(FakeClient):
+        def _get(self, path, params=None, **kw):
+            sym = dict(kv.split("=", 1) for kv in params["params"].split(","))["symbol"]
+            if sym in ("XLV", "/NQ"):
+                self.calls.append(("bars", path, params, kw))
+                return _Resp(500, None)
+            return super()._get(path, params, **kw)
+
+    sic.run_slot(bus, SLOT, now=AT, db_path=db, client=Partial())
+    latest = _intraday(bus)["latest"]
+    assert latest["SPY"]["inputs_failed"] == ["XLV"]          # SPY reads /ES, not /NQ
+    assert latest["QQQ"]["inputs_failed"] == ["/NQ"]          # QQQ reads XLK, not XLV
+    assert latest["$SPX"]["inputs_failed"] == ["XLV"]
+    for sym in PRICES:
+        assert "fewer inputs" in latest[sym]["inputs_note"]
+        assert all(n in latest[sym]["inputs_note"] for n in latest[sym]["inputs_failed"])
+    # With every fetch fine, an entry says it lacked nothing.
+    reset_fake_bus()
+    clean = Bus(fake=True)
+    sic.run_slot(clean, "09:21", now=dt.datetime(2026, 10, 19, 9, 21, tzinfo=CT),
+                 db_path=db, client=FakeClient())
+    spy = _intraday(clean)["latest"]["SPY"]
+    assert spy["inputs_failed"] == [] and spy["inputs_note"] is None
+    ScalpView(**clean.cache_get(sic.VIEW).payload)
+
+
+def test_the_record_is_read_from_the_sources_the_call_showed(db, bus, monkeypatch):
+    # A view that moves between the build and the record must not change the
+    # recorded components: the row is what the page showed.
+    _seeded(db)
+    _views(bus, "bullish", 1.05)
+    real_save = sic._save
+
+    def save_then_move(*a, **k):
+        real_save(*a, **k)
+        bus.cache_set("cache:sentiment:composite",
+                      {"composite_at": AT.isoformat(),
+                       "derived": {"trend": {"state": "bearish", "score": 1.0}}})
+    monkeypatch.setattr(sic, "_save", save_then_move)
+    sic.run_slot(bus, SLOT, now=AT, db_path=db, client=FakeClient())
+    shown = _intraday(bus)["latest"]["SPY"]["confirmation"]
+    row = scalp_store.readings_on(ISO, db_path=db)[(SLOT, "SPY")]
+    assert shown["sentiment"]["raw"]["state"] == "bullish"
+    assert row["components"]["sentiment"] == _roundtrip(shown["sentiment"])
+    assert row["components"]["score"] == pytest.approx(shown["score"])
+    assert row["components"]["word"] == shown["word"]
+    assert row["snapshot"]["sentiment"]["state"] == "bullish"
+
+
 # ── the confirmation is shown, never in the probability ─────────────────────
 
 def _views(bus, state, call_wall):
@@ -580,6 +660,42 @@ def test_confirmation_never_changes_the_probability(tmp_path):
     # The wall inside the target is named beside the role it is in the way of.
     assert any("call wall" in t for t in no["roles"]["long_with"]["wall_context"])
     assert not any("Target" in t for t in yes["roles"]["long_with"]["wall_context"])
+
+
+def test_a_highlight_and_an_avoid_never_move_with_the_confirmation(tmp_path):
+    # A real edge on each side: long_with beats its base rate (the highlight),
+    # long_against reliably loses (avoid). Opposite confirmation inputs change
+    # the reading only - never the highlight, the avoid list or the note.
+    out = {}
+    for name, state, wall in (("for", "bullish", 1.05), ("against", "bearish", 1.0005)):
+        db = tmp_path / f"{name}.db"
+        seed_bars(db)
+        bucket = bucket_of(db, "SPY")
+        other = next(b for b in scalp_model.BUCKETS if b != bucket)
+        for sym in PRICES:
+            seed_study(db, sym, EVEN, bucket=bucket)
+        seed_study(db, "SPY", {"long_with": (24, 30), "long_against": (3, 30)},
+                   edges=("long_with", "long_against"), bucket=bucket, start=100)
+        seed_study(db, "SPY", {"long_with": (6, 30), "long_against": (27, 30)},
+                   bucket=other, start=200)
+        reset_fake_bus()
+        b = Bus(fake=True)
+        _views(b, state, wall)
+        sic.run_slot(b, SLOT, now=AT, db_path=db, client=FakeClient())
+        out[name] = _intraday(b)
+    yes, no = out["for"]["latest"]["SPY"], out["against"]["latest"]["SPY"]
+    assert yes["highlight"] == "long_with" and yes["avoid"] == ["long_against"]
+    assert yes["confirmation"]["word"] == "Confirms"
+    assert no["confirmation"]["word"] == "Contradicts"
+    for key in ("highlight", "avoid", "note"):
+        assert yes[key] == no[key]
+    for role in ROLES:
+        for key in ("p", "lo", "hi", "p_base", "edge"):
+            assert yes["roles"][role][key] == no["roles"][role][key]
+    cells = [o["timeline"][0]["symbols"]["SPY"] for o in (out["for"], out["against"])]
+    assert cells[0]["highlight"] == cells[1]["highlight"] == "long_with"
+    assert cells[0]["edge_p"] == cells[1]["edge_p"]
+    assert cells[0]["word"] != cells[1]["word"]
 
 
 # ── off-slot runs, the refresh and the schedule ──────────────────────────────
@@ -629,10 +745,37 @@ def test_the_scheduler_branch_runs_the_slot():
     import inspect
     from services.options_svc import scheduler
     src = inspect.getsource(scheduler.loop)
-    seg = src.split("async def _scalp_intraday_branch", 1)[1].split("if intraday_slot:", 1)[0]
-    assert "run_in_executor(None, scalp_intraday_call.run_slot, bus, slot)" in seg
+    head, seg = src.split("async def _scalp_intraday_branch", 1)
+    seg = seg.split("if intraday_slot:", 1)[0]
+    # The tick's own time is bound when the branch is made, and passed on.
+    assert seg.startswith("(slot=intraday_slot, at=now)")
+    assert "run_in_executor(None, scalp_intraday_call.run_scheduled, bus, slot, at)" in seg
     assert "scalp_record.record" not in seg
     assert "except Exception" in seg
+
+
+def test_a_scheduled_run_outside_its_window_counts_a_degrade(db, bus):
+    _seeded(db)
+    client = FakeClient()
+    off = dt.datetime(2026, 10, 19, 9, 12, tzinfo=CT)       # past 09:06 + 5 grace
+    assert sic.run_scheduled(bus, SLOT, off, db_path=db, client=client) is False
+    assert _degrade.counts().get("options.scalp_intraday") == 1
+    assert client.calls == [] and bus.cache_get(sic.VIEW) is None
+    # A refresh off a window is normal and counts nothing.
+    _degrade.reset()
+    assert sic.run_slot(bus, SLOT, now=off, db_path=db, client=client) is False
+    assert _degrade.counts().get("options.scalp_intraday") is None
+    # Inside its window the scheduled entry builds and counts nothing.
+    assert sic.run_scheduled(bus, SLOT, AT, db_path=db, client=client) is True
+    assert _degrade.counts().get("options.scalp_intraday") is None
+
+
+def test_run_scheduled_is_run_slot_at_the_tick(monkeypatch):
+    seen = []
+    monkeypatch.setattr(sic, "run_slot", lambda b, slot, **k: seen.append((b, slot, k)))
+    sic.run_scheduled("bus", "09:06", AT)
+    assert seen == [("bus", "09:06", {"now": AT, "db_path": None, "client": None,
+                                      "scheduled": True})]
 
 
 def test_modules_do_not_import_compute():

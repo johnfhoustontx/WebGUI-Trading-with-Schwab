@@ -1133,9 +1133,12 @@ async def loop(bus):
             log.exception("scalp_intraday_due gate degraded")
             intraday_slot = None
 
-        async def _scalp_intraday_branch(slot=intraday_slot):
+        async def _scalp_intraday_branch(slot=intraday_slot, at=now):
+            # ``at`` is this tick's time, the moment the slot was found due:
+            # run_slot judges the slot's window by it, not by when the executor
+            # (or the 08:36 call's lock) let it start.
             try:
-                published = await loop_.run_in_executor(None, scalp_intraday_call.run_slot, bus, slot)
+                published = await loop_.run_in_executor(None, scalp_intraday_call.run_scheduled, bus, slot, at)
                 log.info("scalp intraday slot %s %s", slot,
                          "published" if published else "not published")
             except Exception:
