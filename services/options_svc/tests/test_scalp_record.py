@@ -94,8 +94,8 @@ def test_record_scores_a_symbol_given_a_direction(db, bus):
 
 def test_record_is_idempotent_per_slot(db, bus):
     _publish(bus)
-    scalp_record.record(bus, DAY, SLOT, now=NOW, db_path=db)
-    scalp_record.record(bus, DAY, SLOT, now=NOW, db_path=db)
+    assert scalp_record.record(bus, DAY, SLOT, now=NOW, db_path=db) == 3
+    assert scalp_record.record(bus, DAY, SLOT, now=NOW, db_path=db) == 0
     assert len(scalp_store.readings_on(DAY.isoformat(), db_path=db)) == 3
     scalp_record.record(bus, DAY, "09:21", now=NOW, db_path=db)
     assert len(scalp_store.readings_on(DAY.isoformat(), db_path=db)) == 6
@@ -122,15 +122,15 @@ def test_one_symbol_failing_never_stops_the_others(db, bus, monkeypatch):
     assert _degrade.counts().get("options.scalp_record") == 1
 
 
-def test_record_never_raises_when_the_store_fails(bus, monkeypatch):
+def test_record_never_raises_when_the_store_fails(db, bus, monkeypatch):
     _publish(bus)
 
     def boom(*a, **k):
         raise OSError("disk")
 
     monkeypatch.setattr(scalp_store, "save_reading", boom)
-    assert scalp_record.record(bus, DAY, SLOT, now=NOW, db_path=None) == 0
-    assert _degrade.counts().get("options.scalp_record", 0) >= 1
+    assert scalp_record.record(bus, DAY, SLOT, now=NOW, db_path=db) == 0
+    assert _degrade.counts().get("options.scalp_record") == 3
 
 
 def test_record_never_raises_when_the_bus_fails(db):
@@ -198,3 +198,64 @@ def test_a_call_that_did_not_publish_is_not_recorded(db, bus, monkeypatch):
     monkeypatch.setattr(bus, "cache_set", refuse)
     scalp_call.run(bus, now=call_fx.NOW, db_path=db, client=call_fx.FakeClient())
     assert scalp_store.readings_on(call_fx.DAY.isoformat(), db_path=db) == {}
+
+
+# --- write-once -----------------------------------------------------------------
+
+def _stored(db):
+    return scalp_store.readings_on(DAY.isoformat(), db_path=db)
+
+
+def _frozen(rows):
+    """The rows as one comparable string (the store's keys are tuples)."""
+    return json.dumps({f"{slot}|{sym}": body for (slot, sym), body in rows.items()},
+                      sort_keys=True)
+
+
+def test_a_recorded_slot_is_never_rewritten(db, bus):
+    _publish(bus)
+    assert scalp_record.record(bus, DAY, SLOT, now=NOW, db_path=db) == 3
+    first = _frozen(_stored(db))
+    # Different sources, a later clock, a direction: still the same rows.
+    bus.cache_set(scalp_confirm.MATRIX, full_matrix(call_wall=790.0))
+    bus.cache_set(scalp_confirm.SENTIMENT, sentiment("bearish"))
+    later = NOW + dt.timedelta(minutes=3)
+    assert scalp_record.record(bus, DAY, SLOT, now=later, db_path=db,
+                               directions={"SPY": 1}, win_points={"SPY": 3.0}) == 0
+    assert _frozen(_stored(db)) == first
+
+
+def test_only_the_missing_symbol_of_a_slot_is_written(db, bus):
+    import sqlite3
+
+    _publish(bus)
+    scalp_record.record(bus, DAY, SLOT, now=NOW, db_path=db)
+    before = _stored(db)
+    conn = sqlite3.connect(db)
+    with conn:
+        conn.execute("DELETE FROM intraday_readings WHERE slot = ? AND symbol = ?",
+                     (SLOT, "QQQ"))
+    conn.close()
+    bus.cache_set(scalp_confirm.SENTIMENT, sentiment("bearish"))
+    assert scalp_record.record(bus, DAY, SLOT, now=NOW, db_path=db) == 1
+    after = _stored(db)
+    for sym in scalp_config.symbols():
+        if sym == "QQQ":
+            assert after[(SLOT, sym)]["components"]["sentiment"]["raw"]["state"] == "bearish"
+        else:
+            assert after[(SLOT, sym)] == before[(SLOT, sym)]
+
+
+def test_a_refresh_six_minutes_after_the_call_leaves_the_0836_rows_identical(db, bus):
+    call_fx._seeded(db)
+    _call_sources(bus)
+    scalp_call.run(bus, now=call_fx.NOW, db_path=db, client=call_fx.FakeClient())
+    day = call_fx.DAY.isoformat()
+    first = _frozen(scalp_store.readings_on(day, db_path=db))
+    # Inside the call slot's grace (20 minutes), so the grace guard alone would
+    # let it record again: only write-once keeps the 08:36 rows.
+    bus.cache_set(scalp_confirm.MATRIX, full_matrix(call_wall=790.0, put_wall=750.0))
+    bus.cache_set(scalp_confirm.SENTIMENT, sentiment("bearish"))
+    scalp_call.run(bus, now=call_fx.NOW + dt.timedelta(minutes=6), db_path=db,
+                   client=call_fx.FakeClient())
+    assert _frozen(scalp_store.readings_on(day, db_path=db)) == first

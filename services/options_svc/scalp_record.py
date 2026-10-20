@@ -15,8 +15,11 @@ gone, and the later study needs a morning's worth of every slot.
 A row is written with or without a direction. ``directions`` / ``win_points``
 (``{symbol: +1 | -1}`` / ``{symbol: points}``) are the 08:36 call's own; every
 other slot passes neither, so ``components`` keeps its raw values and scores
-nothing (an absent verdict is never a neutral one). A second record of the same
-(day, slot) replaces the row: the scheduler's latch means it normally runs once.
+nothing (an absent verdict is never a neutral one). A recorded (day, slot, symbol)
+is WRITE-ONCE: a second record of it (a page refresh re-entering the 08:36 call,
+a restart's replay) writes nothing, because the later read is not what the slot
+saw. ``record`` returns only the rows it actually wrote; a symbol whose row is
+missing is still filled.
 
 Design: docs/plans/2026-10-20-scalp-intraday-calls-design.md section 6.
 Imports nothing from ``compute``. Never raises.
@@ -45,8 +48,9 @@ def _day(day) -> _dt.date:
 def record(bus, day, slot, now=None, db_path=None, directions=None, win_points=None,
            entry_ts=None) -> int:
     """Save one ``intraday_readings`` row per scalp symbol for ``day``'s ``slot``;
-    returns the rows written. ``entry_ts`` (epoch seconds) defaults to the slot's
-    own 5-minute bar (``scalp_config.intraday_entry_ts``). One symbol failing
+    returns the rows written (rows already stored are skipped). ``entry_ts``
+    (epoch seconds) defaults to the slot's own 5-minute bar
+    (``scalp_config.intraday_entry_ts``). One symbol failing
     never stops the others, and nothing here raises (a failure is counted as
     ``options.scalp_record``)."""
     try:
@@ -56,6 +60,12 @@ def record(bus, day, slot, now=None, db_path=None, directions=None, win_points=N
             entry_ts = scalp_config.intraday_entry_ts(day, slot)
         symbols = list(scalp_config.symbols())
         everyone = list(dict.fromkeys(symbols + list(_symbols.big10())))
+        # Write-once: a (slot, symbol) already stored is what the slot saw, and
+        # the store's INSERT OR REPLACE must not let a later read replace it.
+        stored = scalp_store.readings_on(day.isoformat(), db_path=db_path)
+        symbols = [s for s in symbols if (slot, s) not in stored]
+        if not symbols:
+            return 0
         src = scalp_confirm.sources(bus, now)
     except Exception:
         _degrade.degraded("options.scalp_record", detail="setup")
