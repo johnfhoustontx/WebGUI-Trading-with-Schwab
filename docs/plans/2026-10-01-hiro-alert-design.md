@@ -285,3 +285,35 @@ failed, or a trading day has no stored minute for any symbol — a dead collecto
 If hedging flow does not lead price well above its base rate over several sessions,
 the alert stays screen-only or is removed. Turning on `push` or `public` is the
 owner's call on that evidence.
+
+**Addendum 2026-10-20: the Hedging flip joins the report.** The owner asked which of
+the three hedging alerts (Hedging flip, Hedging reversal, Hedging surge) moved price
+most. Nothing had ever measured the Hedging flip (`gamma_flip`, live since before
+this design), so the report now scores it as a third row.
+
+- **Same method, same prices.** `replay_gamma_flips` runs
+  `flow_alerts.detect_gamma_flip` minute by minute over the GEX snapshots' spot and
+  flip, in the handler's order: regime state starts empty each session, and a fire
+  the cooldown suppresses keeps the prior regime. Each fire is moved onto the
+  nearest HIRO minute (within 60 s) and scored there, so its moves and its base
+  rate come from the same price series as the surges and reversals. Without that,
+  the three rows would be measured on two different spot feeds.
+- **Scored as continuation.** A cross up is a hit if spot kept rising, a cross down
+  if it kept falling, which makes it comparable with the other two rows. The
+  report says outright that this tests direction only: the flip's own claim is
+  about the size of moves either side of the level, which this table does not
+  test.
+- **Retention.** `snapshots` keeps 5 sessions (`purge_keep_sessions`) and
+  `hiro_minutes` keeps 20. Pooling over the snapshots alone would cap the flip at
+  about 5 sessions forever, so each run saves the fires it replayed in
+  `<date>/gamma_flip.json`, and the pool reads that file once a day's snapshots
+  are gone. A day with neither is reported as not measured. Changing the
+  collector's retention, or storing the flip level in `hiro_minutes`, was rejected
+  for this: both touch live collection for a measurement-only need.
+- **The pool needs no σ.** The Hedging flip has no σ, so the `excluded` rule (a σ
+  rule) does not apply to it. It pools over every session where it was measured,
+  with its own base rate summed over exactly those sessions.
+
+A one-off replay before this was built (prod, Oct 14–20, 5 sessions) found 8
+flips: 5 of 8 continued over 15 minutes against base rates of 57–67%. That is too
+few fires to show any edge, which is why the measurement now runs daily.

@@ -19,18 +19,29 @@ It REPLAYS the live rules minute by minute -- ``hiro.detect_surge`` and
 THEM at that minute) and its cooldowns -- and re-implements none of them, so the
 report cannot drift from what the Flow screen showed.
 
+THE HEDGING FLIP (``gamma_flip``, added 2026-10-20) is the third Flow alert of
+the same family: price crossing the dealer gamma flip level. It is replayed the
+same way (``flow_alerts.detect_gamma_flip`` minute by minute with the handler's
+cooldown, ``replay_gamma_flips``) from the GEX snapshots' spot and flip, and
+scored on the SAME HIRO minute prices and base rate, so its row sits beside the
+surges' and reversals' and reads the same way. The snapshots keep 5 sessions
+and the HIRO minutes 20, so each run also saves the day's flips in
+``<date>/gamma_flip.json``; later runs pool from those once the snapshots are
+gone.
+
 USAGE
 -----
     .venv/bin/python tools/hiro_report.py                     # the latest closed session
     .venv/bin/python tools/hiro_report.py --date 2026-09-30   # re-run a past day
     .venv/bin/python tools/hiro_report.py --date 2026-10-03 --force
 
-Reads ``options-scanner/gex_history.db`` read-only and nothing else (no proxy,
-no Redis, no secrets), so a missed day can be re-run later with ``--date`` for as
-long as ``[hiro].keep_sessions`` keeps its minutes. Skips with exit 0 on a
-weekend or NYSE holiday given with ``--date`` unless ``--force``. Writes
-``options-scanner/data/hiro_report/<date>/report.md`` (``--out`` replaces the
-``hiro_report`` directory). Exits 1 when nothing was measured: every symbol
+Reads ``options-scanner/gex_history.db`` read-only and its own earlier output,
+and nothing else (no proxy, no Redis, no secrets), so a missed day can be re-run
+later with ``--date`` for as long as ``[hiro].keep_sessions`` keeps its minutes.
+Skips with exit 0 on a weekend or NYSE holiday given with ``--date`` unless
+``--force``. Writes ``options-scanner/data/hiro_report/<date>/report.md``, plus
+``gamma_flip.json`` in the folder of every session whose flips it could replay
+(``--out`` replaces the ``hiro_report`` directory). Exits 1 when nothing was measured: every symbol
 failed, or a trading day has no stored minute for any symbol (a dead collector).
 
 Scheduled daily by ``trading-<env>-hiro-report.timer`` at ``[slots.hiro_report]``.
@@ -40,6 +51,7 @@ from __future__ import annotations
 import argparse
 import bisect
 import datetime as _dt
+import json
 import math
 import pathlib
 import sys
@@ -80,10 +92,20 @@ _HORIZON_SLACK_SEC = 120
 # it the bare "k of n" is the honest statement.
 MIN_N_FOR_PCT = 10
 
-_UP = {"dealers_buying": 1, "to_buying": 1}
-_DOWN = {"dealers_selling": -1, "to_selling": -1}
+_UP = {"dealers_buying": 1, "to_buying": 1, "to_positive": 1}
+_DOWN = {"dealers_selling": -1, "to_selling": -1, "to_negative": -1}
 SURGE_SIDES = ("dealers_buying", "dealers_selling")
 FLIP_SIDES = ("to_buying", "to_selling")
+# The Hedging flip (``gamma_flip``): price crossing the dealer gamma flip level.
+# to_positive is a cross UP through it, to_negative a cross DOWN, so it is
+# scored as continuation -- a hit is price carrying on the way it crossed.
+GFLIP_SIDES = ("to_positive", "to_negative")
+
+# Each run saves the day's Hedging flip fires here, beside report.md. The
+# per-minute spot and flip they are replayed from live in ``snapshots``, which
+# keeps 5 sessions (purge_keep_sessions); the HIRO minutes keep 20. Without the
+# saved fires the flip's pool could never grow past 5 sessions.
+GFLIP_FILE = "gamma_flip.json"
 
 DASH = "—"
 
@@ -107,6 +129,22 @@ def load_cfg() -> dict:
     ``hiro = 5`` in the TOML) falls back to the built-in defaults."""
     h = flow_alerts.load_thresholds().get("hiro")
     return hiro.clean_cfg(h, flow_alerts._DEFAULTS["hiro"])
+
+
+def load_gflip_cfg() -> dict:
+    """The live ``[gamma_flip]`` table through ``flow_alerts.section``, the
+    accessor the live handler (``handlers._run_gamma_flip``) reads it with."""
+    return flow_alerts.section(flow_alerts.load_thresholds(), "gamma_flip")
+
+
+def gflip_symbols(gcfg) -> list | None:
+    """The symbols the live Hedging flip watches, or None for 'every symbol'
+    (an empty list live means the whole flow universe)."""
+    raw = (gcfg or {}).get("symbols")
+    if isinstance(raw, str):
+        raw = [raw]
+    syms = [s for s in raw if isinstance(s, str)] if isinstance(raw, (list, tuple)) else []
+    return syms or None
 
 
 # --- sigma, as live had it ----------------------------------------------------
@@ -206,6 +244,58 @@ def replay_flips(rows, sigma, cfg, not_before_ts):
     return out
 
 
+def replay_gamma_flips(points, gcfg):
+    """The Hedging flips the live rule would have fired over one session's
+    ``[(ts, spot, flip)]``, ascending -- ``handlers._run_gamma_flip``'s sequence
+    minute by minute: ``flow_alerts.detect_gamma_flip`` against the regime
+    carried from the minute before (none at the session's first minute, as the
+    live state is date-scoped), and on a fire the symbol's cooldown. A fire the
+    cooldown suppresses keeps the PRIOR regime, as live does, so it can fire
+    once the cooldown ends; every other minute takes the new regime."""
+    band = _finite(gcfg.get("band_pct"))
+    band = 0.0015 if band is None else band
+    cd = _finite(gcfg.get("cooldown_min"))
+    cool = (60.0 if cd is None else cd) * 60
+    prev, cooldowns, out = None, {}, []
+    for ts, spot, flip in points:
+        alert, new = flow_alerts.detect_gamma_flip("", spot, flip, prev, band, ts)
+        if alert:
+            if flow_alerts._on_cooldown(cooldowns, "gamma_flip", ts, cool):
+                continue
+            cooldowns["gamma_flip"] = ts
+            out.append({"type": "gamma_flip", "side": alert["side"], "ts": ts,
+                        "spot": spot, "flip": flip})
+        prev = new
+    return out
+
+
+# A Hedging flip is timed off the GEX snapshot; it is scored off the HIRO minute
+# nearest it, so its forward move and the day's base rate come from ONE price
+# series. A flip with no HIRO minute this close is not scored.
+_ANCHOR_SEC = 60
+
+
+def anchor_gamma_flips(fires, rows):
+    """Each Hedging flip re-timed onto the nearest HIRO minute (within
+    ``_ANCHOR_SEC``), taking that minute's ts and spot -- the price series the
+    surges, reversals and base rate are all measured on. ``flip`` is kept for
+    the per-fire table. A flip with no minute close enough is dropped."""
+    ts_list = [r["ts"] for r in rows]
+    out = []
+    for f in fires:
+        ts = _finite(f.get("ts"))
+        if ts is None or not ts_list:
+            continue
+        j = bisect.bisect_left(ts_list, ts)
+        near = [i for i in (j - 1, j) if 0 <= i < len(rows)]
+        i = min(near, key=lambda i: abs(ts_list[i] - ts))
+        if abs(ts_list[i] - ts) > _ANCHOR_SEC:
+            continue
+        out.append({"type": "gamma_flip", "side": f["side"], "ts": ts_list[i],
+                    "spot": rows[i].get("spot"), "flip": f.get("flip")})
+    return out
+
+
 # --- forward moves --------------------------------------------------------------
 
 def _spot_move(rows, ts_list, ts, spot0, minutes):
@@ -275,11 +365,14 @@ def _unclassified(rows):
 
 def event_row(fire, rows, horizons):
     """One line of the per-fire table: time, kind, direction, size, returns."""
-    surge = fire["type"] == "hiro_surge"
-    return {"ts": fire["ts"], "side": fire["side"],
-            "kind": "Surge" if surge else "Reversal",
-            "size": (f"{fire['mult']:.1f}× normal" if surge
-                     else f"day net {_money(_finite(fire.get('cum')))}"),
+    if fire["type"] == "hiro_surge":
+        kind, size = "Surge", f"{fire['mult']:.1f}× normal"
+    elif fire["type"] == "gamma_flip":
+        flip = _finite(fire.get("flip"))
+        kind, size = "Hedging flip", (DASH if flip is None else f"flip at {flip:,.2f}")
+    else:
+        kind, size = "Reversal", f"day net {_money(_finite(fire.get('cum')))}"
+    return {"ts": fire["ts"], "side": fire["side"], "kind": kind, "size": size,
             "fwd": {h: forward_return(rows, fire, h) for h in horizons}}
 
 
@@ -288,31 +381,45 @@ def _with_fwd(fires, rows, horizons):
             for f in fires]
 
 
-def symbol_summary(rows, prior_sessions, cfg, k_grid, horizons, not_before_ts):
+def symbol_summary(rows, prior_sessions, cfg, k_grid, horizons, not_before_ts,
+                   gflip=None):
     """One symbol-day: {rows, sigma, sigma_source ('prior' | 'today' | None),
     unclassified (share of the day's volume), fires_by_k, flips, surges and
     reversals (live-k fires, each with its forward returns), base (the day's
     base rate counts), events (the per-fire table), fwd: {k_live: {h: [returns]}},
-    flip_fwd: {h: [returns]}}.
+    flip_fwd: {h: [returns]}, gflips, gflip_source}.
 
     The live ``k`` and ``push_k`` are always in the grid. With no sigma the rules
     do not run, so every count is None (not measured), never 0. A None
     ``not_before_ts`` (a malformed ``flip_not_before``) skips the reversals, as
-    the handler does."""
+    the handler does.
+
+    ``gflip`` is ``(fires, source)`` for the Hedging flip: the session's raw
+    fires and where they came from: 'stored' (replayed from the GEX snapshots),
+    'saved' (an earlier run's ``GFLIP_FILE``), or with no fires 'unwatched' (not
+    a symbol the live alert watches), 'gone' (snapshots purged and nothing
+    saved) or 'error'. None leaves it unmeasured and unmentioned. It needs no
+    sigma, so it is measured on a day the HIRO rules could not run. ``gflips``
+    is None whenever it was not measured."""
     k_live = float(cfg["k"])
     grid = sorted({float(k) for k in k_grid} | {k_live, float(cfg["push_k"])})
     horizons = [int(h) for h in horizons]
     sigma, source, headline = _sigmas(rows, prior_sessions, cfg)
+    g_raw, g_source = gflip if gflip else (None, None)
+    gflips = (None if g_raw is None
+              else _with_fwd(anchor_gamma_flips(g_raw, rows), rows, horizons))
     out = {"rows": len(rows), "sigma": headline, "sigma_source": source,
            "unclassified": _unclassified(rows), "k_live": k_live,
            "push_k": float(cfg["push_k"]), "horizons": horizons,
            "flips_skipped": not_before_ts is None,
            "flips_live": cfg.get("flip_enabled") is True,
-           "base": base_counts(rows, horizons)}
+           "base": base_counts(rows, horizons),
+           "gflips": gflips, "gflip_source": g_source}
     if sigma is None:
         out.update(fires_by_k={k: None for k in grid}, flips=None, surges=[],
-                   reversals=[], events=[], fwd={k_live: {h: [] for h in horizons}},
-                   flip_fwd={h: [] for h in horizons})
+                   reversals=[], fwd={k_live: {h: [] for h in horizons}},
+                   flip_fwd={h: [] for h in horizons},
+                   events=[event_row(f, rows, horizons) for f in (gflips or [])])
         return out
     fires = {k: replay_surges(rows, sigma, cfg, k) for k in grid}
     surges = _with_fwd(fires[k_live], rows, horizons)
@@ -322,7 +429,7 @@ def symbol_summary(rows, prior_sessions, cfg, k_grid, horizons, not_before_ts):
         flips=None if not_before_ts is None else len(flips),
         surges=surges, reversals=flips,
         events=[event_row(f, rows, horizons)
-                for f in sorted(surges + flips, key=lambda f: f["ts"])],
+                for f in sorted(surges + flips + (gflips or []), key=lambda f: f["ts"])],
         fwd={k_live: {h: [f["fwd"][h] for f in surges if f["fwd"][h] is not None]
                       for h in horizons}},
         flip_fwd={h: [f["fwd"][h] for f in flips if f["fwd"][h] is not None]
@@ -334,11 +441,14 @@ def _session_date(rows):
     return _dt.datetime.fromtimestamp(rows[0]["ts"], CT).date()
 
 
-def session_summaries(today_rows, history, cfg, k_grid, horizons, not_before_for):
+def session_summaries(today_rows, history, cfg, k_grid, horizons, not_before_for,
+                      gflip_for=None):
     """``[today, the session before, ...]`` -- up to ``keep_sessions`` in all --
     each summarised by ``symbol_summary`` with the prior sessions live had on
     THAT day (the ``baseline_sessions`` before it in ``history``, newest first).
-    ``not_before_for(rows)`` gives a session's reversal start (or None).
+    ``not_before_for(rows)`` gives a session's reversal start (or None);
+    ``gflip_for(rows)`` its Hedging flip ``(fires, source)`` (see
+    ``symbol_summary``), or None to leave the flip unmeasured.
 
     Each summary carries ``excluded``. A prior day whose own window of older
     sessions is incomplete is a FAITHFUL replay only while the history is young
@@ -349,14 +459,19 @@ def session_summaries(today_rows, history, cfg, k_grid, horizons, not_before_for
     need = int(cfg["baseline_sessions"])
     keep = max(1, int(cfg.get("keep_sessions", 1)))
     purge_limited = len(history) >= keep - 1
+
+    def gflip(rows):
+        return gflip_for(rows) if gflip_for else None
+
     out = [{**symbol_summary(today_rows, history[:need], cfg, k_grid, horizons,
-                             not_before_for(today_rows)), "excluded": False}]
+                             not_before_for(today_rows), gflip(today_rows)),
+            "excluded": False}]
     for j, rows in enumerate(history[:keep - 1]):
         if not rows:
             continue
         older = history[j + 1:j + 1 + need]
         s = symbol_summary(rows, older, cfg, [float(cfg["k"])], horizons,
-                           not_before_for(rows))
+                           not_before_for(rows), gflip(rows))
         s["excluded"] = purge_limited and len(older) < need
         out.append(s)
     return out
@@ -379,12 +494,30 @@ def pool(days):
     for d in kept:
         src = d.get("sigma_source")
         sources[src if src in sources else None] += 1
+    # The Hedging flip needs no sigma, so ``excluded`` (a sigma rule) does not
+    # apply: it pools over EVERY session it was measured on, with its own base
+    # rate summed over exactly those sessions.
+    g_days = [d for d in days if d.get("gflips") is not None]
+    g_base = {}
+    for d in g_days:
+        for h, c in d["base"].items():
+            acc = g_base.setdefault(h, {"up": 0, "down": 0, "flat": 0})
+            for key in acc:
+                acc[key] += c.get(key, 0)
+    g_src = {"stored": 0, "saved": 0}
+    for d in g_days:
+        if d.get("gflip_source") in g_src:
+            g_src[d["gflip_source"]] += 1
     return {"sessions": len(kept), "excluded": len(days) - len(kept),
             "measured": sum(1 for d in kept if d.get("sigma") is not None),
             "sources": sources,
             "surges": [f for d in kept for f in d["surges"]],
             "reversals": [f for d in kept for f in d["reversals"]],
-            "base": base}
+            "base": base,
+            "gflips": [f for d in g_days for f in d["gflips"]],
+            "gflip_base": g_base, "gflip_sessions": len(g_days),
+            "gflip_sources": g_src,
+            "gflip_missing": sum(1 for d in days if d.get("gflip_source") == "gone")}
 
 
 # --- the report --------------------------------------------------------------------
@@ -459,20 +592,46 @@ def _rev_label(s):
     return "Reversals" + ("" if s.get("flips_live") else " (off live)")
 
 
+def _gflip_label(_s):
+    return "Hedging flips"
+
+
+def _gflip_note(s):
+    """Why a symbol-day's Hedging flip row reads a dash, or None."""
+    if s.get("gflip_source") == "unwatched":
+        return ("Hedging flip: not measured. This symbol is not in the live "
+                "alert's `[gamma_flip].symbols`, so it never fires here live.")
+    if s.get("gflip_source") == "gone":
+        return ("Hedging flip: not measured. Its per-minute spot and flip are "
+                "gone (the GEX snapshots keep 5 sessions) and no earlier run "
+                f"saved this day's fires in `{GFLIP_FILE}`.")
+    if s.get("gflip_source") == "error":
+        return ("Hedging flip: not measured. Its stored spot and flip could not "
+                "be read (the reason is on the run's error output).")
+    return None
+
+
 _SIDE_WORDS = {"dealers_buying": "dealers buying", "dealers_selling": "dealers selling",
-               "to_buying": "to buying", "to_selling": "to selling"}
+               "to_buying": "to buying", "to_selling": "to selling",
+               "to_positive": "crossed up", "to_negative": "crossed down"}
 
 
 def _outcome_table(L, signals, base, horizons, measured):
-    """``signals`` = [(label, fires, sides, skipped)]; one row per signal, side
-    and horizon, each beside the base rate for the SAME direction."""
+    """``signals`` = [(label, fires, sides, skipped)], or with a fifth element
+    ``{"base": ..., "measured": ...}`` for a signal measured on its own set of
+    days (the Hedging flip); one row per signal, side and horizon, each beside
+    the base rate for the SAME direction."""
     L += ["| Signal | Direction | Horizon | Hit rate | Flat | Same-direction base rate "
           "| Chance by luck | Mean move (signed) |", "|---|---|---|---|---|---|---|---|"]
-    for label, fires, sides, skipped in signals:
+    for sig in signals:
+        label, fires, sides, skipped = sig[:4]
+        own = sig[4] if len(sig) > 4 else {}
+        sig_base = own.get("base", base)
+        sig_measured = own.get("measured", measured)
         for side in sides:
             for h in horizons:
-                bk, bn = _base_kn(base, side, h)
-                if not measured or skipped:
+                bk, bn = _base_kn(sig_base, side, h)
+                if not sig_measured or skipped:
                     cells = (DASH, DASH, DASH, DASH)
                 else:
                     t = tally(fires, side, h)
@@ -514,11 +673,21 @@ def _symbol_section(sym, s, pooled=None, keep=None, need=None):
     for k, n in s["fires_by_k"].items():
         L.append(f"| {_k_label(k, s)} | {DASH if n is None else n} |")
     L.append(f"| {_rev_label(s)} | {DASH if s['flips'] is None else s['flips']} |")
+    gflip_shown = s.get("gflip_source") not in (None, "unwatched")
+    if gflip_shown:
+        L.append(f"| {_gflip_label(s)} | "
+                 f"{DASH if s.get('gflips') is None else len(s['gflips'])} |")
     L.append("")
+    note = _gflip_note(s)
+    if note:
+        L += [note, ""]
     k_live = s["k_live"]
     rev = _rev_label(s)
     signals = [(f"Surge at {k_live:.1f} (live)", s["surges"], SURGE_SIDES, False),
                (rev, s["reversals"], FLIP_SIDES, s.get("flips_skipped"))]
+    if gflip_shown:
+        signals.append((_gflip_label(s), s.get("gflips") or [], GFLIP_SIDES, False,
+                        {"measured": s.get("gflips") is not None}))
     _outcome_table(L, signals, s["base"], s["horizons"], measured)
     if s["events"]:
         hs = s["horizons"]
@@ -550,12 +719,25 @@ def _symbol_section(sym, s, pooled=None, keep=None, need=None):
         signals = [(f"Surge at {k_live:.1f} (live)", pooled["surges"], SURGE_SIDES,
                     False),
                    (rev, pooled["reversals"], FLIP_SIDES, s.get("flips_skipped"))]
+        if gflip_shown:
+            g = pooled.get("gflip_sessions", 0)
+            src = pooled.get("gflip_sources") or {}
+            missing = pooled.get("gflip_missing", 0)
+            L += [f"Hedging flips pooled over {g} session(s): {src.get('stored', 0)} "
+                  f"replayed from the stored GEX snapshots, {src.get('saved', 0)} "
+                  f"from fires an earlier run saved"
+                  + (f", and {missing} not measured (snapshots purged before any "
+                     f"run saved them)" if missing else "")
+                  + ". Their base rate is summed over those same sessions.", ""]
+            signals.append((_gflip_label(s), pooled.get("gflips") or [], GFLIP_SIDES,
+                            False, {"base": pooled.get("gflip_base") or {},
+                                    "measured": g > 0}))
         _outcome_table(L, signals, pooled["base"], s["horizons"],
                        pooled["measured"] > 0)
     return L
 
 
-def build_report(day, per_symbol, cfg, notes=(), pooled=None):
+def build_report(day, per_symbol, cfg, notes=(), pooled=None, gcfg=None):
     """Markdown. Per symbol: rows measured, unlabelled share, sigma + source,
     fires at each k (mark the live k and push_k), reversals; for live-k surges
     and for reversals, per direction and horizon: hits as 'k of n', ties apart,
@@ -594,6 +776,25 @@ def build_report(day, per_symbol, cfg, notes=(), pooled=None):
          f"{int(cfg['flip_cooldown_min'])} minutes"
          + ("" if cfg.get("flip_enabled") is True else
             " (reversals are OFF live; measured here anyway)") + ".", ""]
+    if gcfg is not None:
+        band = _finite(gcfg.get("band_pct"))
+        cd = _finite(gcfg.get("cooldown_min"))
+        L += ["**Hedging flips** fire when price crosses the dealer gamma flip "
+              "level: up through it (dealers' hedging turns to damping moves) or "
+              "down through it (to amplifying them). They are scored the same way "
+              "as the two HIRO signals, as **continuation**: a hit is price "
+              "carrying on the way it crossed. That is not the flip's own claim, "
+              "which is about how BIG moves get either side of the level, so a hit "
+              "rate near the base rate here does not by itself say the flip level "
+              "is meaningless. Each flip is timed on the GEX snapshot and scored "
+              "on the nearest HIRO minute, so its moves and base rate come from "
+              "the same prices as the surges and reversals.", "",
+              "Hedging flip settings: "
+              + (f"dead zone {band * 100:.2f}% of the flip level" if band is not None
+                 else "dead zone —")
+              + (f", quiet {cd:.0f} minutes" if cd is not None else "")
+              + ("" if gcfg.get("enabled", True) else
+                 " (the alert is OFF live; measured here anyway)") + ".", ""]
     for n in notes:
         L += [f"**{n}**", ""]
     keep = cfg.get("keep_sessions")
@@ -663,6 +864,78 @@ def _not_before_fn(cfg):
     return not_before
 
 
+def read_saved_gflips(base, day, sym):
+    """The Hedging flip fires an earlier run saved for ``sym`` on ``day``, or
+    None when no run saved that symbol-day. A malformed entry is dropped, never
+    guessed at; a malformed file reads as not saved."""
+    try:
+        data = json.loads((base / day.isoformat() / GFLIP_FILE).read_text(encoding="utf-8"))
+        fires = data["symbols"][sym]
+    except Exception:                                       # noqa: BLE001
+        return None
+    if not isinstance(fires, list):
+        return None
+    return [{"type": "gamma_flip", "side": f["side"], "ts": _finite(f.get("ts")),
+             "spot": _finite(f.get("spot")), "flip": _finite(f.get("flip"))}
+            for f in fires
+            if isinstance(f, dict) and f.get("side") in GFLIP_SIDES
+            and _finite(f.get("ts")) is not None]
+
+
+def write_saved_gflips(base, day, by_symbol, gcfg):
+    """Save ``{symbol: [fires]}`` for ``day`` into ``GFLIP_FILE``, merged over
+    the symbols already saved there, through a temporary file so a reader never
+    sees half of one. Written whenever the fires were replayed from the stored
+    snapshots, so the file holds the replay as of the newest run that could
+    still see them."""
+    out_dir = base / day.isoformat()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    path = out_dir / GFLIP_FILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        symbols = data["symbols"] if isinstance(data.get("symbols"), dict) else {}
+    except Exception:                                       # noqa: BLE001
+        symbols = {}
+    for sym, fires in by_symbol.items():
+        symbols[sym] = [{"ts": f["ts"], "side": f["side"], "spot": f.get("spot"),
+                         "flip": f.get("flip")} for f in fires]
+    payload = {"date": day.isoformat(),
+               "settings": {"band_pct": gcfg.get("band_pct"),
+                            "cooldown_min": gcfg.get("cooldown_min")},
+               "symbols": symbols}
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload, indent=1), encoding="utf-8")
+    tmp.replace(path)
+
+
+def gflip_source(conn, sym, gcfg, base, fresh):
+    """``rows -> (fires, source)`` for one symbol's Hedging flip on the session
+    ``rows`` belong to: replayed from the stored GEX snapshots while they last
+    (and recorded in ``fresh`` to be saved), else an earlier run's saved fires,
+    else ``(None, 'gone')``. A symbol the live alert does not watch is
+    ``(None, 'unwatched')``; a read that fails is ``(None, 'error')``, never a
+    failure of the HIRO half of the report."""
+    watched = gflip_symbols(gcfg)
+
+    def source(rows):
+        if watched is not None and sym not in watched:
+            return None, "unwatched"
+        day = _session_date(rows)
+        try:
+            points = gh.load_spot_flip_day(conn, sym, day)
+            if points:
+                fires = replay_gamma_flips(points, gcfg)
+                fresh.setdefault(day, {})[sym] = fires
+                return fires, "stored"
+        except Exception as e:                              # noqa: BLE001
+            print(f"  {sym} {day}: Hedging flip not measured "
+                  f"({type(e).__name__}: {e})", file=sys.stderr)
+            return None, "error"
+        saved = read_saved_gflips(base, day, sym)
+        return (saved, "saved") if saved is not None else (None, "gone")
+    return source
+
+
 def main(argv=None):
     args = parse_args(sys.argv[1:] if argv is None else list(argv))
     day = args.date or default_day(_dt.datetime.now(CT))
@@ -672,18 +945,20 @@ def main(argv=None):
               f"(--force to report anyway).")
         return 0
     cfg = load_cfg()
+    gcfg = load_gflip_cfg()
     k_grid = args.k or list(K_GRID)
     horizons = args.horizons or list(FORWARD_MIN)
     not_before_for = _not_before_fn(cfg)
     need = int(cfg["baseline_sessions"])
     keep = max(1, int(cfg.get("keep_sessions", 1)))
+    base = pathlib.Path(args.out) if args.out else OPTIONS_SCANNER / "data" / "hiro_report"
     try:
         conn = gh.connect(read_only=True)
     except Exception as e:                                  # noqa: BLE001
         print(f"Cannot open {gh.DB_PATH} read-only: {type(e).__name__}: {e}",
               file=sys.stderr)
         return 1
-    per, pooled = {}, {}
+    per, pooled, fresh = {}, {}, {}
     try:
         for sym in _symbols(cfg):
             try:
@@ -694,7 +969,8 @@ def main(argv=None):
                 history = gh.load_hiro_prior_sessions(
                     conn, sym, keep - 1 + need, before=day)
                 days = session_summaries(rows, history, cfg, k_grid, horizons,
-                                         not_before_for)
+                                         not_before_for,
+                                         gflip_source(conn, sym, gcfg, base, fresh))
                 per[sym] = days[0]
                 pooled[sym] = pool(days)
             except Exception as e:                          # noqa: BLE001
@@ -727,13 +1003,18 @@ def main(argv=None):
         print(f"{len(errored)} of {len(symbols)} symbols failed "
               f"({', '.join(errored)}); the rest were reported.", file=sys.stderr)
 
-    base = pathlib.Path(args.out) if args.out else OPTIONS_SCANNER / "data" / "hiro_report"
     out_dir = base / day.isoformat()
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / "report.md"
-    path.write_text(build_report(day.isoformat(), per, cfg, notes, pooled),
+    path.write_text(build_report(day.isoformat(), per, cfg, notes, pooled, gcfg),
                     encoding="utf-8")
     print(f"Wrote {path}")
+    for d, by_symbol in sorted(fresh.items()):
+        try:
+            write_saved_gflips(base, d, by_symbol, gcfg)
+        except Exception as e:                              # noqa: BLE001
+            print(f"Could not save the Hedging flips for {d}: "
+                  f"{type(e).__name__}: {e}", file=sys.stderr)
     return 1 if failed else 0
 
 

@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-18</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-20</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -5290,7 +5290,20 @@ set beside that day's <strong>base rate for the same direction</strong> — the 
 measured minute after which spot simply rose (or fell) over the same horizon — never a
 coin flip. Hits print as "k of n", with a percentage from 10 decided fires. A <strong>Last N
 sessions</strong> block pools every stored session (up to <code>keep_sessions</code>) with surges and
-reversals pooled separately. It reads <code>gex_history.db</code> read-only and nothing else, so
+reversals pooled separately.</p>
+<p>The report also scores the <strong>Hedging flip</strong> (<code>gamma_flip</code>, spot crossing the dealer
+gamma flip level), a third row beside the surges and reversals. It replays
+<code>flow_alerts.detect_gamma_flip</code> minute by minute over the GEX snapshots' spot and flip
+with the handler's cooldown (a fire the cooldown suppresses keeps the prior regime),
+for the symbols in <code>[gamma_flip].symbols</code>. Each flip is moved onto the nearest HIRO
+minute (within 60 s) and scored on those prices, so it shares the day's base rate. It
+is scored as <strong>continuation</strong>: a cross up is a hit if spot kept rising, a cross down
+if it kept falling. That is a test of direction only; the flip's own claim is about
+how large moves get either side of the level. The snapshots keep 5 sessions and the
+HIRO minutes 20, so each run saves the flips it replayed in <code>&lt;date&gt;/gamma_flip.json</code>,
+and later runs pool from those files once the snapshots are gone. A session with
+neither says so rather than printing a zero.</p>
+<p>It reads <code>gex_history.db</code> read-only, plus its own earlier <code>gamma_flip.json</code> files, so
 any stored day can be re-run: <code>--date YYYY-MM-DD</code> (default: the newest <strong>closed</strong>
 session), <code>--force</code> (a weekend or holiday), <code>--out DIR</code>, <code>--k 2,3,4</code>,
 <code>--horizons 5,15</code>. It exits <strong>1</strong> when nothing was measured (every symbol failed, or a
@@ -7168,7 +7181,7 @@ firing just rewrites the previous trading day's report from the same stored minu
 <tr>
 <td>HIRO-model validation report</td>
 <td><strong>16:10</strong> (<code>[slots.hiro_report]</code>)</td>
-<td><code>tools/hiro_report.py</code> via <code>trading-&lt;env&gt;-hiro-report.timer</code> (Monday to Friday, <code>Persistent=true</code>, so a missed run catches up at boot): replays the day's <code>hiro_surge</code> / <code>hiro_flip</code> rules and scores the 5- and 15-minute price move after each fire against the same-direction base rate, into <code>options-scanner/data/hiro_report/&lt;date&gt;/report.md</code>. Reads <code>gex_history.db</code> only — no Schwab, no Redis, no Claude call. The only measurement of the <code>[hiro]</code> thresholds.</td>
+<td><code>tools/hiro_report.py</code> via <code>trading-&lt;env&gt;-hiro-report.timer</code> (Monday to Friday, <code>Persistent=true</code>, so a missed run catches up at boot): replays the day's <code>hiro_surge</code> / <code>hiro_flip</code> rules and the <code>gamma_flip</code> (Hedging flip) alert and scores the 5- and 15-minute price move after each fire against the same-direction base rate, into <code>options-scanner/data/hiro_report/&lt;date&gt;/report.md</code> (plus <code>gamma_flip.json</code>, the day's saved Hedging flips). Reads <code>gex_history.db</code> only — no Schwab, no Redis, no Claude call. The only measurement of the <code>[hiro]</code> thresholds and of the Hedging flip.</td>
 </tr>
 <tr>
 <td>Trade Analyzer outcome labelling</td>

@@ -136,6 +136,29 @@ def test_heatmap_figure_overlays_spot_line():
     assert spot["colorAxis"] is False
 
 
+def test_an_all_zero_session_draws_an_empty_heatmap_without_interpolation():
+    """2026-10-19: Schwab sent no Greeks, so every stored cell was zero and every
+    strike dropped. An INTERPOLATED Highcharts heatmap with no points throws on
+    update ("Cannot destructure property 'x'"), which can leave the open chart
+    frozen. With no points it is drawn plain; the spot line still draws."""
+    rows = [("09:30", 450.0, None, None, None, 0, {449.0: {"net": 0.0}}),
+            ("09:35", 451.5, None, None, None, 0, {449.0: {"net": 0.0}})]
+    fig = gamma.heatmap_figure(rows, "GEX")
+    heat = next(s for s in fig["series"] if s["type"] == "heatmap")
+    assert heat["data"] == []
+    assert heat["interpolation"] is False
+    spot = next(s for s in fig["series"] if s["type"] == "line")
+    assert [p[1] for p in spot["data"]] == [450.0, 451.5]
+
+
+def test_a_heatmap_with_points_keeps_interpolation():
+    rows = [("09:30", 450.0, None, None, None, 0, {449.0: {"net": 5}}),
+            ("09:35", 451.5, None, None, None, 0, {449.0: {"net": 7}})]
+    heat = next(s for s in gamma.heatmap_figure(rows, "GEX")["series"]
+                if s["type"] == "heatmap")
+    assert heat["data"] and heat["interpolation"] is True
+
+
 def test_heatmap_figure_crops_data_to_yrange():
     # Charm/DEX/Vanna are non-zero across the whole chain (~250 strikes) but the
     # panel only shows the near-spot yrange. Off-window cells must NOT be emitted
@@ -3125,6 +3148,49 @@ def test_the_no_spot_line_names_no_control_a_public_screen_lacks():
     assert "SPY" in private and "SPY" in public
     assert "Refresh" in private
     assert "Refresh" not in public, public
+
+
+def test_the_no_greeks_line_names_the_symbol_and_no_control():
+    """PURE. 2026-10-19: Schwab sent every Greek as "not computed". The line
+    says so for the symbol on screen, and names no button: waiting is all a
+    reader on either origin can do."""
+    line = gamma.no_greeks_text("SPY")
+    assert "SPY" in line and "Schwab" in line and "Greeks" in line
+    for word in ("Refresh", "Fetch"):
+        assert word not in line, line
+
+
+class _Vis:
+    def __init__(self):
+        self.visible, self.text = True, ""
+
+    def set_visibility(self, v):
+        self.visible = v
+
+
+def test_a_flagged_view_shows_the_sentence_in_place_of_the_bars():
+    chart, msg, said = _Vis(), _Vis(), []
+    msg.visible = False
+    shown = gamma.show_no_greeks({"no_greeks": True}, chart, msg, "SPY", said.append)
+    assert shown is True
+    assert chart.visible is False and msg.visible is True
+    assert msg.text == gamma.no_greeks_text("SPY")
+    assert said == [""]
+
+
+def test_an_unflagged_view_is_left_to_draw_its_bars():
+    chart, msg, said = _Vis(), _Vis(), []
+    msg.visible = False
+    for entry in ({}, {"no_greeks": False}, None):
+        assert gamma.show_no_greeks(entry, chart, msg, "SPY", said.append) is False
+    assert chart.visible is True and msg.visible is False and said == []
+
+
+def test_render_asks_before_drawing_the_bars():
+    """The bar figure is built only on the branch where the view is NOT flagged."""
+    src = inspect.getsource(gamma.render)
+    gate = src.index("if not show_no_greeks(entry,")
+    assert gate < src.index("_set_chart(bar_figure(")
 
 
 def test_the_empty_states_use_the_app_s_one_empty_style():

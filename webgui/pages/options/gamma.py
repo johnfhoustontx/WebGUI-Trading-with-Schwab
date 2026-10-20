@@ -1422,6 +1422,11 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
         "colorAxis": _coloraxis(zmax),
         "series": series,
     })
+    # An interpolated heatmap with NO points throws on update ("Cannot destructure
+    # property 'x'"), which can leave the open chart frozen. A session whose every
+    # cell is zero (Schwab sent no Greeks, 2026-10-19) drops every strike, so it is
+    # drawn plain. Set here, after the projection band has added its cells.
+    series[0]["interpolation"] = bool(series[0]["data"])
     return fig
 
 
@@ -2461,6 +2466,32 @@ def no_spot_text(symbol, can_refresh: bool) -> str:
     if can_refresh:
         return f"{base} — try Refresh during market hours."
     return f"{base}."
+
+
+def no_greeks_text(symbol) -> str:
+    """Schwab sent the chain with every Greek marked "not computed".
+
+    The service flags it (``greeks_census``, ``no_greeks`` on each view): every
+    exposure is then zero, so the bars have no length and the walls would be
+    ties. One wording on both origins: it names no control, because there is
+    nothing the reader can do but wait for Schwab."""
+    return (f"Schwab sent no Greeks for {symbol}: every contract's gamma came back "
+            "as \"not computed\", so there are no strike bars or walls to draw. "
+            "They return when Schwab's data does.")
+
+
+def show_no_greeks(entry, chart_el, msg, symbol, set_summary) -> bool:
+    """Put the no-Greeks sentence in place of the strike bars when the view is
+    flagged, and say whether it did. The heatmap is left alone: it still draws
+    the session's collected history. Outside ``render`` because that function
+    has a size ceiling (tests/test_render_size.py)."""
+    if not (entry or {}).get("no_greeks"):
+        return False
+    chart_el.set_visibility(False)
+    msg.text = no_greeks_text(symbol)
+    msg.set_visibility(True)
+    set_summary("")
+    return True
 
 
 # ── the PUBLIC mode (live.neuralstrike.co/gamma) ───────────────────────────
@@ -3849,7 +3880,7 @@ def render(symbol: str | None = None, view: str | None = None,
             chart_msg.set_visibility(True)
             _set_summary("")
             return
-        summary = entry.get("summary") or {}
+        summary = {**(entry.get("summary") or {}), "strike_count": data.get("strike_count")}
         flip = entry.get("flip")
         walls = entry.get("walls") or []
 
@@ -3867,11 +3898,11 @@ def render(symbol: str | None = None, view: str | None = None,
         # Value, marks, scale and frame: ONE set of keywords, ONE range, both panels.
         _hk = heat.read(data["gex"], rows, _strikes, entry)
         yr = heat_yrange(_strikes, view_spot, spot_path, _hk["frame"], _hk["half"])
-        _set_chart(bar_figure(data, view_spot, view=view, walls=walls, flip=flip,
-                              yrange=yr, basis=heat.basis(rows), **_hk))
-        state["chart_el"].set_visibility(True)
-        _set_summary(summary_text(
-            {**summary, "strike_count": data.get("strike_count")}, _view_label(view)))
+        if not show_no_greeks(entry, state["chart_el"], chart_msg, snap.get("symbol") or _current_symbol(), _set_summary):
+            _set_chart(bar_figure(data, view_spot, view=view, walls=walls, flip=flip,
+                                  yrange=yr, basis=heat.basis(rows), **_hk))
+            state["chart_el"].set_visibility(True)
+            _set_summary(summary_text(summary, _view_label(view)))
 
         if rows:
             # The forward band is GEX's, and a NET grid: any other value drops it,

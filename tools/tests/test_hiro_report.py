@@ -629,3 +629,186 @@ def test_the_report_carries_the_pooled_section(tmp_path, monkeypatch):
     text = (out / DAY / "report.md").read_text(encoding="utf-8")
     assert "### Last 3 sessions" in text
     assert "correlated" in text
+
+
+# --- the Hedging flip (gamma_flip) ---------------------------------------------------
+GCFG = {"enabled": True, "band_pct": 0.0015, "cooldown_min": 60,
+        "symbols": ["$SPX", "SPY", "QQQ", "IWM"]}
+
+
+def _pts(spots, flip=100.0, t0=T0):
+    return [(t0 + 60 * i, s, flip) for i, s in enumerate(spots)]
+
+
+def test_the_first_minute_of_a_session_never_fires_a_hedging_flip():
+    """Live state is date-scoped: the first minute only sets the regime."""
+    assert hr.replay_gamma_flips(_pts([99.0]), GCFG) == []
+    assert hr.replay_gamma_flips(_pts([101.0]), GCFG) == []
+
+
+def test_a_cross_inside_the_dead_zone_does_not_fire():
+    """0.15% of a 100 flip is 0.15: 99.9 has not cleared it, 99.8 has."""
+    assert hr.replay_gamma_flips(_pts([101.0, 99.9, 100.1]), GCFG) == []
+    fires = hr.replay_gamma_flips(_pts([101.0, 99.8]), GCFG)
+    assert [f["side"] for f in fires] == ["to_negative"]
+
+
+def test_a_suppressed_flip_keeps_the_prior_regime_and_fires_after_the_cooldown():
+    """The handler's sequence: a fire inside the cooldown is skipped WITHOUT
+    taking the new regime, so the same cross fires once the cooldown ends."""
+    spots = [101.0, 99.0] + [101.0] * 70
+    fires = hr.replay_gamma_flips(_pts(spots), GCFG)
+    assert [f["side"] for f in fires] == ["to_negative", "to_positive"]
+    assert fires[1]["ts"] - fires[0]["ts"] == 60 * 60
+
+
+def test_the_replay_honours_a_zero_cooldown_rather_than_the_default():
+    fires = hr.replay_gamma_flips(_pts([101.0, 99.0, 101.0, 99.0]),
+                                  {**GCFG, "cooldown_min": 0})
+    assert len(fires) == 3
+
+
+def test_an_unusable_flip_level_keeps_the_regime_and_fires_nothing():
+    pts = [(T0, 101.0, 100.0), (T0 + 60, 99.0, None), (T0 + 120, 99.0, float("nan"))]
+    assert hr.replay_gamma_flips(pts, GCFG) == []
+
+
+def test_a_hedging_flip_is_scored_on_the_nearest_hiro_minute():
+    rows = _rows([0.0] * 10, spots=[100.0 + i for i in range(10)])
+    near = {"side": "to_positive", "ts": T0 + 3 * 60 + 25, "spot": 999.0, "flip": 100.0}
+    far = {"side": "to_positive", "ts": T0 + 30 * 60, "spot": 999.0, "flip": 100.0}
+    got = hr.anchor_gamma_flips([near, far], rows)
+    assert len(got) == 1
+    assert got[0]["ts"] == T0 + 3 * 60 and got[0]["spot"] == 103.0
+
+
+def test_a_hedging_flip_scores_continuation_in_the_way_it_crossed():
+    rows = _rows([0.0] * 20, spots=[100.0 + i * 0.1 for i in range(20)])
+    up = {"type": "gamma_flip", "side": "to_positive", "ts": rows[0]["ts"], "spot": 100.0}
+    down = {**up, "side": "to_negative"}
+    assert hr.forward_return(rows, up, 5) > 0
+    assert hr.forward_return(rows, down, 5) < 0
+
+
+def test_the_hedging_flip_is_measured_on_a_day_the_hiro_rules_could_not_run():
+    """It needs no sigma, so a starved HIRO day still scores its flips."""
+    rows = _rows(_quiet(5), cls=0.0, uncl=0.0)      # under min_minutes: no sigma
+    fire = {"type": "gamma_flip", "side": "to_positive", "ts": rows[2]["ts"],
+            "spot": 100.0, "flip": 99.0}
+    s = hr.symbol_summary(rows, [], CFG, [3.0], [5], hiro.ct_ts(DAY, "09:00"),
+                          ([fire], "stored"))
+    assert s["sigma"] is None
+    assert len(s["gflips"]) == 1 and s["events"][0]["kind"] == "Hedging flip"
+
+
+def test_no_gflip_argument_leaves_the_summary_exactly_as_before():
+    s = hr.symbol_summary(_noisy(60, 3), [], CFG, [3.0], [5], hiro.ct_ts(DAY, "09:00"))
+    assert s["gflips"] is None and s["gflip_source"] is None
+    assert "Hedging flip" not in hr.build_report(DAY, {"SPY": s}, CFG)
+
+
+def test_pooling_takes_hedging_flips_from_every_measured_day_with_their_own_base():
+    """``excluded`` is a sigma rule; the flip has no sigma, so an excluded day's
+    flips still pool, and the flip's base rate covers only days it was measured."""
+    def day(gflips, source, base, excluded=False):
+        return {"surges": [], "reversals": [], "sigma": 1.0, "excluded": excluded,
+                "base": {5: base}, "gflips": gflips, "gflip_source": source}
+    f = {"side": "to_positive", "fwd": {5: 0.001}}
+    p = hr.pool([day([f], "stored", {"up": 3, "down": 1, "flat": 0}),
+                 day([f], "saved", {"up": 1, "down": 1, "flat": 0}, excluded=True),
+                 day(None, "gone", {"up": 9, "down": 9, "flat": 0})])
+    assert len(p["gflips"]) == 2 and p["gflip_sessions"] == 2
+    assert p["gflip_base"][5] == {"up": 4, "down": 2, "flat": 0}
+    assert p["gflip_sources"] == {"stored": 1, "saved": 1}
+    assert p["gflip_missing"] == 1
+
+
+def test_a_purged_day_says_why_its_hedging_flip_is_a_dash():
+    rows = _noisy(60, 3)
+    s = hr.symbol_summary(rows, [], CFG, [3.0], [5], hiro.ct_ts(DAY, "09:00"),
+                          (None, "gone"))
+    spy = hr.build_report(DAY, {"SPY": s}, CFG, gcfg=GCFG)
+    assert "Hedging flip: not measured" in spy and "5 sessions" in spy
+    assert not _ZERO_PCT.search(spy.split("## SPY", 1)[1])
+
+
+def test_an_unwatched_symbol_shows_no_hedging_flip_row():
+    s = hr.symbol_summary(_noisy(60, 3), [], CFG, [3.0], [5], hiro.ct_ts(DAY, "09:00"),
+                          (None, "unwatched"))
+    text = hr.build_report(DAY, {"DIA": s}, CFG, gcfg=GCFG).split("## DIA", 1)[1]
+    assert "| Hedging flips |" not in text
+    assert "not in the live alert" in text
+
+
+def test_the_header_explains_how_a_hedging_flip_is_scored():
+    text = hr.build_report(DAY, _summaries(), CFG, gcfg=GCFG)
+    assert "continuation" in text and "dead zone 0.15%" in text
+    assert "OFF live" not in text.split("Hedging flip settings", 1)[1].split("\n", 1)[0]
+    off = hr.build_report(DAY, _summaries(), CFG, gcfg={**GCFG, "enabled": False})
+    assert "the alert is OFF live" in off
+
+
+def _seed_flips(path, monkeypatch, day=DAY, sym="SPY"):
+    """A cross down then, past the cooldown, a cross back up, on the GEX view."""
+    conn = hr.gh.connect()
+    t0 = hiro.ct_ts(day, "08:30")
+    spots = [101.0] * 10 + [99.0] * 70 + [101.0] * 40
+    for i, s in enumerate(spots):
+        hr.gh.insert_snapshot(conn, sym, "gex", {"ts": t0 + 60 * i, "spot": s,
+                                                 "flip": 100.0}, {}, 0)
+    conn.commit()
+    conn.close()
+
+
+def test_main_reports_hedging_flips_and_saves_them_for_later_runs(
+        tmp_path, monkeypatch):
+    _seed_db(tmp_path / "gex_history.db", monkeypatch)
+    _seed_flips(tmp_path / "gex_history.db", monkeypatch)
+    monkeypatch.setattr(hr, "load_cfg", lambda: CFG)
+    monkeypatch.setattr(hr, "load_gflip_cfg", lambda: GCFG)
+    out = tmp_path / "reports"
+    assert hr.main(["--date", DAY, "--out", str(out)]) == 0
+    text = (out / DAY / "report.md").read_text(encoding="utf-8")
+    spy = text.split("## SPY", 1)[1]
+    assert "| Hedging flips | 2 |" in spy
+    assert "crossed down" in spy and "crossed up" in spy
+    import datetime as _dt
+    saved = hr.read_saved_gflips(out, _dt.date(2026, 9, 30), "SPY")
+    assert [f["side"] for f in saved] == ["to_negative", "to_positive"]
+    # $SPX had minutes but no snapshots and nothing saved: said, not zeroed.
+    assert "Hedging flip: not measured" in text.split("## $SPX", 1)[1].split("## SPY", 1)[0]
+
+
+def test_a_later_run_pools_saved_flips_once_the_snapshots_are_purged(
+        tmp_path, monkeypatch):
+    import datetime as _dt
+    _seed_db(tmp_path / "gex_history.db", monkeypatch)
+    monkeypatch.setattr(hr, "load_cfg", lambda: CFG)
+    monkeypatch.setattr(hr, "load_gflip_cfg", lambda: GCFG)
+    out = tmp_path / "reports"
+    hr.write_saved_gflips(out, _dt.date(2026, 9, 29), {"SPY": [
+        {"ts": hiro.ct_ts("2026-09-29", "09:00"), "side": "to_negative",
+         "spot": 100.0, "flip": 100.5}]}, GCFG)
+    assert hr.main(["--date", DAY, "--out", str(out)]) == 0
+    spy = (out / DAY / "report.md").read_text(encoding="utf-8").split("## SPY", 1)[1]
+    pooled = spy.split("### Last", 1)[1]
+    assert "1 from fires an earlier run saved" in pooled
+    # _seed_db's prices only rise, so a cross DOWN that carried on is a miss.
+    assert "| Hedging flips | crossed down | 5 min | 0 of 1 |" in pooled
+
+
+def test_a_saved_file_merges_symbols_and_drops_malformed_fires(tmp_path):
+    import datetime as _dt
+    d = _dt.date(2026, 9, 29)
+    hr.write_saved_gflips(tmp_path, d, {"SPY": [{"ts": T0, "side": "to_positive"}]}, GCFG)
+    hr.write_saved_gflips(tmp_path, d, {"QQQ": [{"ts": T0, "side": "to_negative"}]}, GCFG)
+    assert len(hr.read_saved_gflips(tmp_path, d, "SPY")) == 1
+    assert len(hr.read_saved_gflips(tmp_path, d, "QQQ")) == 1
+    assert hr.read_saved_gflips(tmp_path, d, "IWM") is None
+    p = tmp_path / d.isoformat() / hr.GFLIP_FILE
+    p.write_text('{"symbols": {"SPY": [{"ts": "x", "side": "to_positive"}, '
+                 '{"ts": 1, "side": "sideways"}, {"ts": 2, "side": "to_negative"}]}}',
+                 encoding="utf-8")
+    assert [f["ts"] for f in hr.read_saved_gflips(tmp_path, d, "SPY")] == [2.0]
+    p.write_text("not json", encoding="utf-8")
+    assert hr.read_saved_gflips(tmp_path, d, "SPY") is None

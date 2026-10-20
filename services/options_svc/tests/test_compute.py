@@ -2114,6 +2114,38 @@ def test_gamma_snapshot_crops_grids_to_window(monkeypatch):
     assert gexv["flip"] == 5399.5
 
 
+def _sentinel_chain(gamma):
+    return {"underlyingPrice": 5400.0,
+            "callExpDateMap": {"2026-06-18:0": {"5400.0": [{"gamma": gamma}]}},
+            "putExpDateMap": {"2026-06-18:0": {"5400.0": [{"gamma": gamma}]}}}
+
+
+def test_gamma_snapshot_names_a_chain_with_no_greeks(monkeypatch):
+    """2026-10-19: Schwab sent gamma -999 on every contract. Each view says so,
+    and its walls and flip (ties picked from an all-zero grid) are cleared."""
+    _patch_gamma(monkeypatch, chain=_sentinel_chain(-999.0),
+                 history=[(1, 5400.0, 3, 4, 5, 6, {5400.0: {"net": 1.0}})])
+    import sys as _sys
+    _sys.modules["gamma_tool"].GammaEngine = _WideEngine
+
+    snap = compute.gamma_snapshot("$SPX")
+    for vname, entry in snap["views"].items():
+        assert entry.get("no_greeks") is True, vname
+        assert entry["walls"] == [], vname
+        assert entry["flip"] is None, vname
+
+
+def test_gamma_snapshot_with_greeks_carries_no_flag(monkeypatch):
+    _patch_gamma(monkeypatch, chain=_sentinel_chain(0.01),
+                 history=[(1, 5400.0, 3, 4, 5, 6, {5400.0: {"net": 1.0}})])
+    import sys as _sys
+    _sys.modules["gamma_tool"].GammaEngine = _WideEngine
+
+    gexv = compute.gamma_snapshot("$SPX")["views"]["GEX"]
+    assert "no_greeks" not in gexv
+    assert gexv["walls"] == [5345.0, 5455.0]
+
+
 def test_gamma_snapshot_crop_widens_for_history_spot_drift(monkeypatch):
     """The crop window is the union across every history-row spot, so a strike in
     an earlier row's near-spot window is kept even if far from the current spot."""

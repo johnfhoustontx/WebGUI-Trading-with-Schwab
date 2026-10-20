@@ -1013,10 +1013,11 @@ def test_the_grid_embeds_nothing_and_runs_nothing():
     static site a runtime dependency on the app being up.
 
     Scripting is checked too: this page has no `.js` hook and needs none, so a
-    <script> here could only be something that crept in."""
+    <script> here could only be something that crept in. The one exception is
+    the market glow every page carries for its own nav button."""
     markup = _markup("live.html")
     assert "<iframe" not in markup
-    assert "<script" not in markup
+    assert _scripts_besides_the_glow(markup) == []
 
 
 # --- D. the site never points at the app ------------------------------------
@@ -1139,6 +1140,21 @@ def test_every_image_declares_its_size(pages):
 
 # --- C5. the market glow, which is decoration with a data dependency --------
 
+GLOW_SCRIPTS = ('<script src="assets/market-clock.js" defer>',
+                '<script src="assets/market-glow.js" defer>')
+
+
+def _scripts_besides_the_glow(markup):
+    """Every <script> opening tag on a page except the market glow's two.
+
+    The pages that pin "runs nothing" still pin it for everything else: the
+    glow is the one script each page carries on purpose (the nav button is on
+    every page), and the exception names its two files exactly rather than
+    excusing anything under ``assets/``."""
+    return [tag for tag in re.findall(r"<script\b[^>]*>", markup)
+            if tag not in GLOW_SCRIPTS]
+
+
 def test_the_live_link_can_be_glowed():
     """Structural: the CSS rule and the class the script toggles must agree.
 
@@ -1200,16 +1216,32 @@ def test_the_clock_data_loads_before_the_glow_logic():
     an undefined global. It degrades silently by design (a missing clock must
     never break the page), which is exactly why nothing would report the swap:
     the button would simply never light up again.
+
+    EVERY page, not only the home page: each carries the same Live screens
+    button, and until 2026-10-20 only index.html loaded the scripts, so the
+    button went dark the moment a visitor clicked anywhere else in the menu.
     """
-    markup = _markup("index.html")
-    srcs = [r for r in _refs(markup) if r.endswith(".js")]
-    assert "assets/market-clock.js" in srcs, "index.html does not load the clock data"
-    assert "assets/market-glow.js" in srcs, "index.html does not load the glow logic"
-    assert srcs.index("assets/market-clock.js") < srcs.index("assets/market-glow.js"), (
-        "market-glow.js is loaded before the data it reads")
-    for tag in re.findall(r"<script\b[^>]*>", markup):
-        if "market-" in tag:
-            assert "defer" in tag, f"{tag} is not deferred, so it runs before the nav exists"
+    for name in PAGES:
+        markup = _markup(name)
+        srcs = [r for r in _refs(markup) if r.endswith(".js")]
+        assert "assets/market-clock.js" in srcs, f"{name} does not load the clock data"
+        assert "assets/market-glow.js" in srcs, f"{name} does not load the glow logic"
+        assert srcs.index("assets/market-clock.js") < srcs.index("assets/market-glow.js"), (
+            f"{name}: market-glow.js is loaded before the data it reads")
+        for tag in re.findall(r"<script\b[^>]*>", markup):
+            if "market-" in tag:
+                assert "defer" in tag, (
+                    f"{name}: {tag} is not deferred, so it runs before the nav exists")
+
+
+def test_every_page_has_the_link_the_glow_selects():
+    """The script finds its button with ``nav a[href="live.html"]`` and says
+    nothing when there is none. A page whose menu spelled the address any other
+    way would load both scripts and still never light."""
+    for name in PAGES:
+        navs = re.findall(r"<nav\b.*?</nav>", _markup(name), re.S)
+        assert any('href="live.html"' in nav for nav in navs), (
+            f"{name}: no nav link to live.html for the glow to light")
 
 
 # --- G. the market report ----------------------------------------------------
@@ -1237,8 +1269,8 @@ def test_the_report_page_frames_the_latest_report():
 
 def test_the_report_page_runs_nothing():
     """The frame scrolls on its own. A script here could only be something that
-    crept in -- the same rule as the live grid."""
-    assert "<script" not in _markup("report.html")
+    crept in -- the same rule as the live grid, and the same one exception."""
+    assert _scripts_besides_the_glow(_markup("report.html")) == []
 
 
 def test_the_market_report_is_in_every_destination_nav():
@@ -1512,7 +1544,8 @@ def test_the_blog_page_draws_from_the_manifest_and_says_so_when_empty():
     assert "No entries have been published yet." in markup
 
     assert '<script src="assets/blog.js" defer></script>' in markup
-    assert markup.count("<script") == 1, "blog.html runs one script, its own"
+    assert _scripts_besides_the_glow(markup) == [
+        '<script src="assets/blog.js" defer>'], "blog.html runs one script, its own"
     assert "<iframe" not in markup, "the list page frames nothing; an entry page does"
 
 
