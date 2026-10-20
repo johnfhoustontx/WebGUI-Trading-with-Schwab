@@ -1179,6 +1179,81 @@ _SCALP = ConfigFile(
                   "Shown beside the call, not part of its probability.",
                   kind="text"),
         )),
+        Section("Intraday calls",
+                "A new call every few minutes through the session, Central "
+                "time. A slot is entered on the last 5-minute bar that has "
+                "closed.", (
+            Field("intraday.start", "First call",
+                  "The first slot of the day.", kind="time"),
+            Field("intraday.end", "Last call",
+                  "The last slot of the day. It must be after the first.",
+                  kind="time"),
+            Field("intraday.interval_min", "Minutes between calls",
+                  "The gap from one slot to the next.",
+                  kind="int", unit="min", min=1, max=390, step=1),
+            Field("intraday.grace_min", "Fire if late by at most",
+                  "How many minutes late a slot may still fire.",
+                  kind="int", unit="min", min=1, max=60, step=1),
+            Field("intraday.dead_zone_pct", "Flat intraday band",
+                  "A move smaller than this is flat, not up or down.",
+                  kind="float", unit="%", min=0, max=5, step=0.01),
+            Field("intraday.breadth_agree", "Breadth agreement",
+                  "The share of the ten largest stocks that must lean one way "
+                  "for the breadth to count (0 to 1).",
+                  kind="float", min=0.01, max=1, step=0.05),
+            Field("intraday.promotion_sessions", "Sessions to promote",
+                  "Sessions of calls a group needs before it can be promoted.",
+                  kind="int", min=1, max=1000, step=1),
+        )),
+        Section("Intraday blocks",
+                "The three parts of the day the study keeps apart. Every slot "
+                "belongs to one block and blocks may not overlap, or the "
+                "defaults apply to all three.", (
+            Field("intraday.blocks.morning.start", "Morning starts",
+                  "The first slot in the morning block.", kind="time"),
+            Field("intraday.blocks.morning.end", "Morning ends",
+                  "The last slot in the morning block.", kind="time"),
+            Field("intraday.blocks.midday.start", "Midday starts",
+                  "The first slot in the midday block.", kind="time"),
+            Field("intraday.blocks.midday.end", "Midday ends",
+                  "The last slot in the midday block.", kind="time"),
+            Field("intraday.blocks.afternoon.start", "Afternoon starts",
+                  "The first slot in the afternoon block.", kind="time"),
+            Field("intraday.blocks.afternoon.end", "Afternoon ends",
+                  "The last slot in the afternoon block.", kind="time"),
+        )),
+        Section("Confirmation",
+                "The check scored beside each intraday call. It never changes "
+                "the call.", (
+            Field("confirm.flow_window_min", "Flow look-back",
+                  "Minutes of flow alerts read.",
+                  kind="int", unit="min", min=1, max=390, step=5),
+            Field("confirm.flow_margin", "Flow lead needed",
+                  "How many more alerts one side needs than the other to lean.",
+                  kind="float", min=0.5, max=100, step=0.5),
+            Field("confirm.netprem_margin", "Net premium lead needed",
+                  "The share of total net premium one side must lead by to "
+                  "lean (0 to 1).", kind="float", min=0, max=1, step=0.01),
+            Field("confirm.max_age_min", "Oldest reading used",
+                  "A confirming reading older than this is treated as absent.",
+                  kind="int", unit="min", min=1, max=60, step=1),
+            Field("confirm.cuts", "Mixed band",
+                  "Contradicts at or below the low number, Confirms at or above "
+                  "the high one, Mixed between. Low must be below zero and high "
+                  "above it.", kind="pair", min=-1, max=1, step=0.01),
+            Field("confirm.weights.flow", "Weight: flow",
+                  "What flow counts for in the score. 0 leaves it out.",
+                  kind="float", min=0, max=10, step=0.1),
+            Field("confirm.weights.netprem", "Weight: net premium",
+                  "What net premium counts for in the score.",
+                  kind="float", min=0, max=10, step=0.1),
+            Field("confirm.weights.dealer", "Weight: dealer positioning",
+                  "What dealer positioning counts for in the score.",
+                  kind="float", min=0, max=10, step=0.1),
+            Field("confirm.weights.sentiment", "Weight: sentiment",
+                  "What the sentiment read counts for in the score.",
+                  kind="float", min=0, max=10, step=0.1),
+        )),
     ),
 )
 
@@ -2745,6 +2820,24 @@ def cross_check(name, values):
             # the collector would clamp the first, with no sign here
             errs.append("Collector: the oldest chain treated as new plus the "
                         "slack must not exceed 60 seconds.")
+    if name == "scalp.toml":
+        cuts = g("confirm", "cuts")
+        if (isinstance(cuts, (list, tuple)) and len(cuts) == 2
+                and all(_real(c) for c in cuts) and not cuts[0] < 0 < cuts[1]):
+            # the loader would read the defaults, with no sign here
+            errs.append("Confirmation: the low cut must be below zero and the "
+                        "high one above it.")
+        first, last = g("intraday", "start"), g("intraday", "end")
+        if isinstance(first, str) and isinstance(last, str) and first > last:
+            errs.append("Intraday calls: the first call must not be after the last.")
+        spans = [(g("intraday", "blocks", b, "start"), g("intraday", "blocks", b, "end"))
+                 for b in ("morning", "midday", "afternoon")]
+        if all(isinstance(t, str) for s in spans for t in s) and (
+                any(lo > hi for lo, hi in spans)
+                or any(a[1] >= b[0] for a, b in zip(spans, spans[1:]))):
+            errs.append("Intraday blocks: each must start before it ends, and "
+                        "morning, midday and afternoon must follow in order "
+                        "without overlapping.")
     if name == "flow_alerts.toml":
         lo, hi = g("big_delta", "delta_lo"), g("big_delta", "delta_hi")
         if None not in (lo, hi) and lo >= hi:

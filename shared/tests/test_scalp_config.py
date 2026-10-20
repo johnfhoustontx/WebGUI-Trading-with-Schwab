@@ -4,10 +4,15 @@ Every accessor must return its built-in default for a missing file, key or
 unusable value and never raise (a typo in a config file must not stop the
 morning call), and the shipped file must agree with those defaults."""
 import math
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 import pytest
 
 from shared import scalp_config as sc
+from shared import symbols as _symbols
+
+_BIG10 = list(_symbols.big10())
 
 
 def _point_at(monkeypatch, tmp_path, text=None):
@@ -48,8 +53,10 @@ def test_the_shipped_file_matches_the_defaults():
     assert (sc.iv_scales(), sc.min_samples(), sc.scorecard_days(),
             sc.news_items()) == ([0.8, 1.0, 1.25, 1.5], 20, 20, 5)
     assert sc.symbols() == ["$SPX", "SPY", "QQQ"]
+    # the big ten follow the original thirteen (intraday calls read their bars)
     assert sc.bar_symbols() == ["$SPX", "SPY", "QQQ", "/ES", "/NQ", "IGV", "SMH",
-                                "EWY", "XLE", "XLK", "XLV", "$VIX", "$VXN"]
+                                "EWY", "XLE", "XLK", "XLV", "$VIX", "$VXN",
+                                *_BIG10]
 
 
 def test_the_shipped_file_has_exactly_the_default_keys():
@@ -206,14 +213,14 @@ def test_bar_symbols_adds_an_input_the_list_forgot(monkeypatch):
         "universe": {"symbols": ["SPY"]},
         "bars": {"symbols": ["SPY", "/ES"]},
         "inputs": {"SPY": {"futures": "/ES", "etfs": ["XLE", "XLK"], "vol": "$VIX"}}})
-    assert sc.bar_symbols() == ["SPY", "/ES", "XLE", "XLK", "$VIX"]
+    assert sc.bar_symbols() == ["SPY", "/ES", "XLE", "XLK", "$VIX", *_BIG10]
 
 
 def test_bar_symbols_always_holds_the_symbols_themselves(monkeypatch):
     monkeypatch.setattr(sc, "load", lambda: {
         "universe": {"symbols": ["SPY", "QQQ"]}, "bars": {"symbols": ["QQQ"]},
         "inputs": {}})
-    assert sc.bar_symbols() == ["QQQ", "SPY"]
+    assert sc.bar_symbols() == ["QQQ", "SPY", *_BIG10]
 
 
 @pytest.mark.parametrize("raw", [-1, "x", None, True, float("nan"), float("inf")])
@@ -237,3 +244,182 @@ def test_every_float_accessor_is_finite_whatever_the_file_says(monkeypatch):
 def test_a_whole_number_float_is_read_for_an_int_setting(monkeypatch):
     monkeypatch.setattr(sc, "load", lambda: {"trade": {"time_stop_min": 45.0}})
     assert sc.time_stop_min() == 45 and isinstance(sc.time_stop_min(), int)
+
+
+# ── the intraday calls (design 2026-10-20-scalp-intraday-calls) ──────────────
+CT = ZoneInfo("America/Chicago")
+_DAY = date(2026, 10, 20)
+
+
+def test_intraday_slots_are_21_from_0851_to_1351():
+    sc.reset_cache()
+    slots = sc.intraday_slots(_DAY)
+    assert len(slots) == 21
+    assert slots[0] == "08:51" and slots[-1] == "13:51"
+    assert slots[:3] == ["08:51", "09:06", "09:21"]
+    assert slots == sorted(set(slots))
+
+
+def test_entry_ts_floors_to_the_5_minute_boundary():
+    sc.reset_cache()
+    ts = sc.intraday_entry_ts(_DAY, "08:51")
+    assert ts == int(datetime(2026, 10, 20, 8, 50, tzinfo=CT).timestamp())
+    assert ts % 300 == 0
+    # a slot already on a boundary stays put; one at :59 floors to :55
+    assert sc.intraday_entry_ts(_DAY, "09:05") == int(
+        datetime(2026, 10, 20, 9, 5, tzinfo=CT).timestamp())
+    assert sc.intraday_entry_ts(_DAY, "09:59") == int(
+        datetime(2026, 10, 20, 9, 55, tzinfo=CT).timestamp())
+
+
+def test_slot_time_is_an_aware_central_datetime():
+    got = sc.intraday_slot_time(_DAY, "13:51")
+    assert got.tzinfo is not None and got.utcoffset().total_seconds() == -5 * 3600
+    assert (got.hour, got.minute, got.second) == (13, 51, 0)
+
+
+def test_blocks_cover_every_slot_once():
+    sc.reset_cache()
+    seen = {"morning": [], "midday": [], "afternoon": []}
+    for slot in sc.intraday_slots(_DAY):
+        block = sc.intraday_block(slot)
+        assert block in seen, slot
+        seen[block].append(slot)
+    assert [len(v) for v in seen.values()] == [5, 10, 6]
+    assert seen["morning"][0] == "08:51" and seen["morning"][-1] == "09:51"
+    assert seen["midday"][0] == "10:06" and seen["midday"][-1] == "12:21"
+    assert seen["afternoon"][0] == "12:36" and seen["afternoon"][-1] == "13:51"
+
+
+def test_a_slot_outside_every_block_has_none():
+    sc.reset_cache()
+    assert sc.intraday_block("08:36") is None
+    assert sc.intraday_block("14:06") is None
+    assert sc.intraday_block("nonsense") is None
+    assert sc.intraday_block(None) is None
+
+
+def test_slots_keep_ct_across_dst():
+    # Daylight time ended on 2026-11-01: the same wall-clock slot is a different
+    # UTC instant, and still 08:51 on the Central clock both days.
+    before = sc.intraday_slot_time(date(2026, 10, 30), "08:51")
+    after = sc.intraday_slot_time(date(2026, 11, 2), "08:51")
+    assert (before.hour, before.minute) == (8, 51)
+    assert (after.hour, after.minute) == (8, 51)
+    assert before.utcoffset().total_seconds() == -5 * 3600
+    assert after.utcoffset().total_seconds() == -6 * 3600
+    for d in (date(2026, 10, 30), date(2026, 11, 2)):
+        ts = sc.intraday_entry_ts(d, "08:51")
+        back = datetime.fromtimestamp(ts, CT)
+        assert (back.hour, back.minute, back.second) == (8, 50, 0)
+
+
+def test_bar_symbols_include_the_big10():
+    sc.reset_cache()
+    out = sc.bar_symbols()
+    assert len(out) == len(set(out))
+    assert all(sym in out for sym in _BIG10)
+    # the existing list keeps its order and comes first
+    assert out[:13] == ["$SPX", "SPY", "QQQ", "/ES", "/NQ", "IGV", "SMH", "EWY",
+                        "XLE", "XLK", "XLV", "$VIX", "$VXN"]
+
+
+def test_bar_symbols_do_not_duplicate_a_big10_member_already_listed(monkeypatch):
+    monkeypatch.setattr(sc, "load", lambda: {
+        "universe": {"symbols": ["SPY"]},
+        "bars": {"symbols": ["SPY", _BIG10[0]]}, "inputs": {}})
+    out = sc.bar_symbols()
+    assert out == ["SPY", _BIG10[0], *_BIG10[1:]]
+
+
+def test_the_intraday_defaults_are_the_specs_values():
+    sc.reset_cache()
+    assert (sc.intraday_grace_min(), sc.intraday_dead_zone_pct(),
+            sc.breadth_agree()) == (5, 0.03, 0.6)
+    assert sc.confirm_weights() == {"flow": 1.0, "netprem": 1.0, "dealer": 1.0,
+                                    "sentiment": 0.5}
+    assert (sc.flow_window_min(), sc.flow_margin(), sc.netprem_margin(),
+            sc.confirm_max_age_min(), sc.promotion_sessions()) == (30, 2, 0.1, 5, 40)
+    assert sc.confirm_cuts() == (-0.34, 0.34)
+
+
+def test_bad_intraday_values_fall_back(monkeypatch):
+    monkeypatch.setattr(sc, "load", lambda: {
+        "intraday": {"start": "8:5x", "end": 7, "interval_min": 0, "grace_min": -1,
+                     "dead_zone_pct": "wide", "breadth_agree": 2,
+                     "promotion_sessions": 1.5,
+                     "blocks": {"morning": {"start": "08:51"}}},
+        "confirm": {"flow_window_min": 0, "flow_margin": True, "netprem_margin": -0.1,
+                    "max_age_min": "soon", "cuts": [0.5, 0.2],
+                    "weights": {"flow": -1, "netprem": "x", "dealer": float("nan"),
+                                "sentiment": True}}})
+    assert len(sc.intraday_slots(_DAY)) == 21
+    assert sc.intraday_slots(_DAY)[0] == "08:51"
+    assert sc.intraday_grace_min() == 5
+    assert sc.intraday_dead_zone_pct() == 0.03
+    assert sc.breadth_agree() == 0.6
+    assert sc.promotion_sessions() == 40
+    assert sc.flow_window_min() == 30
+    assert sc.flow_margin() == 2
+    assert sc.netprem_margin() == 0.1
+    assert sc.confirm_max_age_min() == 5
+    assert sc.confirm_cuts() == (-0.34, 0.34)
+    assert sc.confirm_weights() == {"flow": 1.0, "netprem": 1.0, "dealer": 1.0,
+                                    "sentiment": 0.5}
+    # the block table was half-given, so the defaults apply whole
+    assert [sc.intraday_block(s) for s in ("08:51", "10:06", "12:36")] == [
+        "morning", "midday", "afternoon"]
+
+
+def test_a_start_after_the_end_is_the_default_schedule(monkeypatch):
+    monkeypatch.setattr(sc, "load", lambda: {"intraday": {"start": "13:51", "end": "08:51"}})
+    slots = sc.intraday_slots(_DAY)
+    assert slots[0] == "08:51" and slots[-1] == "13:51" and len(slots) == 21
+
+
+def test_good_intraday_values_are_read(monkeypatch):
+    monkeypatch.setattr(sc, "load", lambda: {
+        "intraday": {"start": "09:00", "end": "10:00", "interval_min": 30,
+                     "grace_min": 3, "dead_zone_pct": 0.05, "breadth_agree": 0.7,
+                     "promotion_sessions": 60},
+        "confirm": {"flow_window_min": 20, "flow_margin": 3, "netprem_margin": 0.2,
+                    "max_age_min": 4, "cuts": [-0.5, 0.25],
+                    "weights": {"flow": 2, "netprem": 0, "dealer": 1.5, "sentiment": 0.25}}})
+    assert sc.intraday_slots(_DAY) == ["09:00", "09:30", "10:00"]
+    assert (sc.intraday_grace_min(), sc.intraday_dead_zone_pct(), sc.breadth_agree(),
+            sc.promotion_sessions()) == (3, 0.05, 0.7, 60)
+    assert (sc.flow_window_min(), sc.flow_margin(), sc.netprem_margin(),
+            sc.confirm_max_age_min()) == (20, 3, 0.2, 4)
+    assert sc.confirm_cuts() == (-0.5, 0.25)
+    assert sc.confirm_weights() == {"flow": 2.0, "netprem": 0.0, "dealer": 1.5,
+                                    "sentiment": 0.25}
+
+
+def test_all_zero_weights_are_the_default_weights(monkeypatch):
+    # a zero total would be a divide-by-zero in the scorer
+    monkeypatch.setattr(sc, "load", lambda: {"confirm": {"weights": {
+        "flow": 0, "netprem": 0, "dealer": 0, "sentiment": 0}}})
+    assert sc.confirm_weights() == {"flow": 1.0, "netprem": 1.0, "dealer": 1.0,
+                                    "sentiment": 0.5}
+
+
+def test_good_blocks_are_read_and_overlapping_ones_are_not(monkeypatch):
+    good = {"morning": {"start": "09:00", "end": "09:30"},
+            "midday": {"start": "09:45", "end": "11:00"},
+            "afternoon": {"start": "11:15", "end": "12:00"}}
+    monkeypatch.setattr(sc, "load", lambda: {"intraday": {"blocks": good}})
+    assert sc.intraday_block("09:15") == "morning"
+    assert sc.intraday_block("10:00") == "midday"
+    assert sc.intraday_block("08:51") is None
+    overlap = dict(good, midday={"start": "09:20", "end": "11:00"})
+    monkeypatch.setattr(sc, "load", lambda: {"intraday": {"blocks": overlap}})
+    assert sc.intraday_block("08:51") == "morning"      # defaults whole
+    assert sc.intraday_block("10:06") == "midday"
+
+
+def test_intraday_config_hands_back_copies(monkeypatch):
+    sc.reset_cache()
+    sc.confirm_weights()["flow"] = 99.0
+    assert sc.confirm_weights()["flow"] == 1.0
+    sc.intraday_slots(_DAY).append("99:99")
+    assert "99:99" not in sc.intraday_slots(_DAY)

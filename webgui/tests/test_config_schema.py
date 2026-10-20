@@ -998,3 +998,59 @@ def test_the_scalp_editor_bounds_are_the_loaders_own(monkeypatch):
         value = cs.parse(by_key[key], raw)
         monkeypatch.setattr(sc, "load", lambda s=section, n=name, v=value: {s: {n: v}})
         assert reads[key]() == raw, key
+
+
+def test_every_intraday_scalp_default_has_a_catalogue_entry():
+    """Each key the loader defaults for the intraday calls is editable."""
+    from shared import scalp_config as sc
+    catalogued = {f.key for s in SCALP.sections for f in s.fields}
+    wanted = set()
+    for section in ("intraday", "confirm"):
+        for key, val in sc.DEFAULTS[section].items():
+            if isinstance(val, dict) and key in ("blocks", "weights"):
+                for name, sub in val.items():
+                    if isinstance(sub, dict):
+                        wanted.update(f"{section}.{key}.{name}.{k}" for k in sub)
+                    else:
+                        wanted.add(f"{section}.{key}.{name}")
+            else:
+                wanted.add(f"{section}.{key}")
+    assert wanted <= catalogued, sorted(wanted - catalogued)
+    for path in (("intraday", "blocks", "midday", "start"), ("confirm", "weights", "dealer")):
+        assert cs.locate(SCALP, path)[1] is not None, path
+
+
+def test_the_intraday_editor_values_are_the_loaders_own(monkeypatch):
+    from datetime import date
+    from shared import scalp_config as sc
+    by_key = {f.key: f for s in SCALP.sections for f in s.fields}
+    assert cs.parse(by_key["intraday.start"], "9:05") == "09:05"
+    with pytest.raises(ValueError):
+        cs.parse(by_key["intraday.end"], "25:00")
+    cuts = cs.parse(by_key["confirm.cuts"], [-0.5, 0.25])
+    start, end = cs.parse(by_key["intraday.start"], "09:00"), cs.parse(by_key["intraday.end"], "10:00")
+    monkeypatch.setattr(sc, "load", lambda: {
+        "confirm": {"cuts": cuts,
+                    "weights": {"flow": cs.parse(by_key["confirm.weights.flow"], 2)}},
+        "intraday": {"start": start, "end": end, "interval_min": 30}})
+    assert sc.confirm_cuts() == (-0.5, 0.25)
+    assert sc.confirm_weights()["flow"] == 2.0
+    assert sc.intraday_slots(date(2026, 10, 20)) == ["09:00", "09:30", "10:00"]
+
+
+def test_the_intraday_cross_checks_name_what_the_loader_would_drop():
+    ok = {("confirm", "cuts"): [-0.34, 0.34], ("intraday", "start"): "08:51",
+          ("intraday", "end"): "13:51",
+          ("intraday", "blocks", "morning", "start"): "08:51",
+          ("intraday", "blocks", "morning", "end"): "09:51",
+          ("intraday", "blocks", "midday", "start"): "10:06",
+          ("intraday", "blocks", "midday", "end"): "12:21",
+          ("intraday", "blocks", "afternoon", "start"): "12:36",
+          ("intraday", "blocks", "afternoon", "end"): "13:51"}
+    assert not cs.cross_check("scalp.toml", ok)
+    assert cs.cross_check("scalp.toml", {**ok, ("confirm", "cuts"): [0.1, 0.4]})
+    assert cs.cross_check("scalp.toml", {**ok, ("intraday", "start"): "14:00"})
+    assert cs.cross_check("scalp.toml", {
+        **ok, ("intraday", "blocks", "midday", "start"): "09:30"})
+    assert cs.cross_check("scalp.toml", {
+        **ok, ("intraday", "blocks", "afternoon", "end"): "12:00"})
