@@ -709,6 +709,26 @@ def test_scalp_bars_branch_republishes_the_scorecard_after_grading_independently
     assert "except Exception" in tail
 
 
+def test_scalp_bars_branch_rebuilds_the_intraday_study_after_the_0836_one_independently():
+    import inspect
+
+    src = inspect.getsource(scheduler.loop)
+    seg = src.split("async def _scalp_bars_branch", 1)[1].split("if bars_slot:", 1)[0]
+    # The intraday study runs AFTER the 08:36 rebuild, in the executor, in its OWN
+    # try: a failed 08:36 rebuild must not stop it, and a failed (or slow)
+    # intraday rebuild must not hide or hold up anything before it.
+    assert "run_in_executor(None, scalp_intraday_study.rebuild)" in seg
+    assert seg.index("scalp_study.rebuild") < seg.index("scalp_intraday_study.rebuild")
+    between = seg.split("scalp_study.rebuild", 1)[1].split(
+        "scalp_intraday_study.rebuild", 1)[0]
+    assert "except Exception" in between and "try:" in between
+    tail = seg.split("scalp_intraday_study.rebuild", 1)[1]
+    assert "except Exception" in tail
+    # It runs last: the grading and the scorecard never wait on the longer study.
+    assert seg.index("scalp_call.republish_scorecard") < \
+        seg.index("scalp_intraday_study.rebuild")
+
+
 def test_scalp_bars_slot_comes_after_the_flow_delta_report_and_collection_stop():
     # The slot is configured in sessions.toml; pin the ordering its comment argues.
     (name, t), = scheduler.mc.slot_times("scalp_bars").items()

@@ -19,7 +19,7 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from services import _heartbeat
-from services.options_svc import compute, finder_public, flow_stream, handlers, scalp_call, scalp_fetch, scalp_grade, scalp_record, scalp_study
+from services.options_svc import compute, finder_public, flow_stream, handlers, scalp_call, scalp_fetch, scalp_grade, scalp_intraday_study, scalp_record, scalp_study
 from shared import market_calendar as mc
 from shared import scalp_config
 from shared import trade_mgmt as _trade_mgmt
@@ -1188,6 +1188,15 @@ async def loop(bus):
                 await loop_.run_in_executor(None, scalp_call.republish_scorecard, bus)
             except Exception:
                 log.exception("scalp scorecard republish degraded")
+            # Last, the intraday study replays every stored slot (minutes, not
+            # seconds), after the 08:36 study so nothing above waits on it.
+            # Guarded on its own: a failed rebuild leaves the previous study.
+            try:
+                counts = await loop_.run_in_executor(None, scalp_intraday_study.rebuild)
+                log.info("scalp intraday study rebuilt: %d outcome row(s) in %.1fs",
+                         counts["outcomes"], counts["seconds"])
+            except Exception:
+                log.exception("scalp intraday study rebuild degraded")
 
         if bars_slot:
             branches.append(("scalp_bars", _scalp_bars_branch()))

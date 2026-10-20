@@ -9,7 +9,8 @@ import random
 import pytest
 
 from services.options_svc.scalp_model import (
-    bucket_of, edge_across_scales, verdict, walk_forward, wilson)
+    bucket_of, edge_across_scales, verdict, verdict_by_day, walk_forward, wilson,
+    wilson_days)
 
 
 def _day(i):
@@ -187,3 +188,85 @@ def test_bucket_of_cuts():
     assert bucket_of(0.7, cuts) == "high"
     assert bucket_of(1.0, cuts) == "high"
     assert bucket_of(float("nan"), cuts) is None
+
+
+# ── the day as the unit (the intraday study) ─────────────────────────────────
+def _slots(per_day):
+    """Rows of several slots a day: ``per_day`` is a list of days, each a list of
+    ``(bucket, win)`` for that day's slots, in slot order."""
+    return [{"day": _day(i + 1), "bucket": b, "win": w}
+            for i, day in enumerate(per_day) for b, w in day]
+
+
+def test_verdict_by_day_counts_days_not_rows():
+    # Three slots a day, every slot "high": day 1 is history only, so days 2-6
+    # are scored - 15 rows but 5 days.
+    rows = _slots([[("high", 1), ("high", 1), ("high", 0)]] * 6)
+    scored = walk_forward(rows)
+    by_day = verdict_by_day(scored, rows, min_samples=1)
+    by_row = verdict(scored, rows, min_samples=1)
+    assert by_row["high"]["n_scored"] == 15
+    assert by_day["high"]["n_scored"] == 5
+    assert by_day["high"]["n_rows"] == 15
+    # The Brier scores stay means over the scored ROWS: identical to verdict's.
+    assert by_day["high"]["brier_bucket"] == pytest.approx(by_row["high"]["brier_bucket"])
+    assert by_day["high"]["brier_base"] == pytest.approx(by_row["high"]["brier_base"])
+    # A bucket never scored answers like verdict's, with no rows.
+    assert by_day["mid"] == {"brier_bucket": None, "brier_base": None,
+                             "n_scored": 0, "n_rows": 0, "edge": False}
+
+
+def test_verdict_by_day_counts_a_day_once_whatever_its_slots():
+    # Day 2 holds four scored high rows, day 3 one: two days.
+    rows = _slots([[("high", 1), ("low", 0)],
+                   [("high", 1)] * 4,
+                   [("high", 0), ("low", 0)]])
+    v = verdict_by_day(walk_forward(rows), rows, min_samples=1)
+    assert v["high"]["n_scored"] == 2 and v["high"]["n_rows"] == 5
+    assert v["low"]["n_scored"] == 1 and v["low"]["n_rows"] == 1
+
+
+def test_min_samples_gates_on_days():
+    # High always wins, low always loses, four slots of each a day: an edge in
+    # the rows, so only the DAY count decides whether it may be called one.
+    rows = _slots([[("high", 1), ("low", 0)] * 4] * 8)
+    scored = walk_forward(rows)
+    v = verdict_by_day(scored, rows, min_samples=1)["high"]
+    assert (v["n_scored"], v["n_rows"]) == (7, 28)
+    assert v["brier_bucket"] < v["brier_base"]
+    assert verdict_by_day(scored, rows, min_samples=7)["high"]["edge"] is True
+    # 28 scored rows would clear 8, 20 or 28 - the days (7) do not.
+    for need in (8, 20, 28):
+        assert verdict_by_day(scored, rows, min_samples=need)["high"]["edge"] is False
+        assert verdict(scored, rows, min_samples=need)["high"]["edge"] is True
+
+
+def test_verdict_by_day_needs_lower_brier_than_base():
+    rows = _slots([[("high", 1), ("low", 1)] * 3] * 10)
+    v = verdict_by_day(walk_forward(rows), rows, min_samples=1)
+    assert v["high"]["brier_bucket"] == pytest.approx(v["high"]["brier_base"])
+    assert v["high"]["edge"] is False
+
+
+def test_verdict_by_day_refuses_mismatched_lists():
+    rows = _slots([[("high", 1)], [("high", 0)]])
+    with pytest.raises(ValueError):
+        verdict_by_day(walk_forward(rows)[:1], rows, min_samples=1)
+
+
+def test_wilson_days_is_wider_than_rows():
+    # 30 wins in 100 rows that came from 10 days: the rate is the row mean, but
+    # the evidence is ten days, not a hundred draws.
+    lo_r, hi_r = wilson(30, 100)
+    lo_d, hi_d = wilson_days(30, 100, 10)
+    assert lo_d < 0.3 < hi_d
+    assert hi_d - lo_d > hi_r - lo_r
+    # ... and it is exactly the Wilson interval at p = 0.3 with n = 10.
+    assert (lo_d, hi_d) == pytest.approx(wilson(3, 10))
+
+
+def test_wilson_days_with_one_row_a_day_is_wilson():
+    for wins, n in ((0, 1), (3, 10), (19, 20), (0, 50)):
+        assert wilson_days(wins, n, n) == pytest.approx(wilson(wins, n))
+    assert wilson_days(0, 0, 0) == (0.0, 1.0)
+    assert wilson_days(3, 10, 0) == (0.0, 1.0)

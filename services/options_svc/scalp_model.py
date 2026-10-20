@@ -127,6 +127,61 @@ def verdict(scored, rows, min_samples):
     return out
 
 
+# ── the day as the unit (the intraday study) ─────────────────────────────────
+# The intraday study scores up to 21 slots a day, and rows of one day share one
+# tape over overlapping hours: they are not independent draws. So the evidence a
+# cell holds is counted in DAYS (design 2026-10-20-scalp-intraday-calls §4): the
+# rate and the Brier means stay over rows, but ``n``, the ``min_samples`` gate and
+# the Wilson interval's ``n`` are distinct days.
+
+def verdict_by_day(scored, rows, min_samples):
+    """``verdict`` with the DAY as the unit: per bucket ``{brier_bucket,
+    brier_base, n_scored, n_rows, edge}``.
+
+    The Brier scores are means over the scored ROWS, exactly as ``verdict``'s;
+    ``n_scored`` is the number of DISTINCT days with a scored row in the bucket
+    (``n_rows`` the rows), and ``edge`` iff ``n_scored >= min_samples`` and the
+    bucket's Brier is strictly below the base's. ``scored`` is
+    ``walk_forward(rows)``, whose rows sharing a day never see each other."""
+    if len(scored) != len(rows):
+        raise ValueError("scored and rows must be the same rows")
+    sums = {}
+    for s, r in zip(scored, rows):
+        if s["p_bucket"] is None:
+            continue
+        acc = sums.setdefault(r["bucket"], [set(), 0, 0.0, 0.0])
+        acc[0].add(r["day"])
+        acc[1] += 1
+        acc[2] += (s["p_bucket"] - r["win"]) ** 2
+        acc[3] += (s["p_base"] - r["win"]) ** 2
+    out = {}
+    for b in list(BUCKETS) + sorted(k for k in sums if k not in BUCKETS):
+        if b not in sums:
+            out[b] = {"brier_bucket": None, "brier_base": None,
+                      "n_scored": 0, "n_rows": 0, "edge": False}
+            continue
+        days, n, sb, sbase = sums[b]
+        bb, bbase = sb / n, sbase / n
+        out[b] = {"brier_bucket": bb, "brier_base": bbase, "n_scored": len(days),
+                  "n_rows": n, "edge": bool(len(days) >= min_samples and bb < bbase)}
+    return out
+
+
+def wilson_days(wins, rows_n, days_n, z=1.96):
+    """The Wilson score interval around the ROW mean ``wins / rows_n`` with ``n =
+    days_n``: as wide as the days' evidence, not the rows'. ``(0.0, 1.0)`` when
+    either count is 0 (nothing is known)."""
+    if rows_n <= 0 or days_n <= 0:
+        return 0.0, 1.0
+    p = wins / rows_n
+    n = days_n
+    z2 = z * z
+    denom = 1.0 + z2 / n
+    centre = (p + z2 / (2 * n)) / denom
+    half = z * math.sqrt(p * (1 - p) / n + z2 / (4 * n * n)) / denom
+    return max(0.0, centre - half), min(1.0, centre + half)
+
+
 def edge_across_scales(verdicts_by_scale):
     """``{bucket: bool}``: an edge only if the bucket has one at EVERY scale given
     (a bucket missing at a scale has none there)."""
@@ -141,4 +196,4 @@ def edge_across_scales(verdicts_by_scale):
 
 
 __all__ = ["BUCKETS", "bucket_of", "wilson", "walk_forward", "verdict",
-           "edge_across_scales"]
+           "verdict_by_day", "wilson_days", "edge_across_scales"]
