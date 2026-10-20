@@ -16,7 +16,7 @@ are zero-padded ``"HH:MM"`` Central strings, so string order is time order.
 """
 import math
 import re
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from repo_paths import SCALP_TOML
@@ -54,6 +54,7 @@ DEFAULTS = {
         "start": "08:51", "end": "13:51", "interval_min": 15, "grace_min": 5,
         "dead_zone_pct": 0.03, "breadth_agree": 0.6, "promotion_sessions": 40,
         "vwap_max_missing": 0.25, "min_brier_margin": 0.005,
+        "early_close_days": ["2026-11-27", "2026-12-24"], "early_close_time": "12:00",
         "blocks": {"morning": {"start": "08:51", "end": "09:51"},
                    "midday": {"start": "10:06", "end": "12:21"},
                    "afternoon": {"start": "12:36", "end": "13:51"}},
@@ -61,7 +62,7 @@ DEFAULTS = {
     "confirm": {
         "flow_window_min": 30, "flow_margin": 2, "netprem_margin": 0.1,
         "max_age_min": 5, "sides_majority": 0.6, "breadth_min_members": 5,
-        "cuts": [-0.34, 0.34],
+        "min_sources": 2, "cuts": [-0.34, 0.34],
         "weights": {"flow": 1.0, "netprem": 1.0, "dealer": 1.0, "sentiment": 0.5},
     },
 }
@@ -282,18 +283,90 @@ def _slot_edge(key):
     return got if got is not None else _minutes(DEFAULTS["intraday"][key])
 
 
+#: The 08:36 call's slot name. An intraday slot of the same name would share its
+#: recorded row (``intraday_readings`` is keyed by day, slot and symbol).
+CALL_SLOT = "08:36"
+#: The earliest first slot: the intraday reading needs the last 15 minutes of
+#: the regular session, and the 08:36 call owns the opening minutes.
+EARLIEST_START = "08:45"
+#: The regular session's close, Central. Fixed by the exchange, not tunable.
+REGULAR_CLOSE = "15:00"
+
+
+def schedule_problem(start, end, interval_min, time_stop_min):
+    """Why a slot schedule (each end as minutes after midnight) is not usable, or
+    ``None``: the first slot must not be after the last nor before
+    ``EARLIEST_START``, no slot may be named ``CALL_SLOT``, and the last slot's
+    entry + ``time_stop_min`` must not pass ``REGULAR_CLOSE``."""
+    if start is None or end is None or start > end:
+        return "the first call is after the last"
+    call = _minutes(CALL_SLOT)
+    if start <= call <= end and (call - start) % interval_min == 0:
+        return f"a call would be made at {CALL_SLOT}"
+    if start < _minutes(EARLIEST_START):
+        return f"the first call is before {EARLIEST_START}"
+    last = start + (end - start) // interval_min * interval_min
+    if last - last % 5 + time_stop_min > _minutes(REGULAR_CLOSE):
+        return f"the last call's trade would run past the {REGULAR_CLOSE} close"
+    return None
+
+
 def intraday_slots(day) -> list:
     """The call slots as ``"HH:MM"`` Central names, from ``start`` to ``end``
-    every ``interval_min`` (08:51 .. 13:51 by 15: 21 slots). A start after the
-    end is not a schedule, so both read as the defaults. ``day`` is accepted so
-    a later calendar rule has a place to hang; today every session is the same.
-    A fresh list each call."""
+    every ``interval_min`` (08:51 .. 13:51 by 15: 21 slots). A schedule that
+    ``schedule_problem`` refuses (a start after the end or before 08:45, a slot
+    at 08:36, a last trade running past 15:00) reads as the defaults whole.
+    ``day`` is accepted but every session has the same slots: an early close
+    cuts slots from the CALLS (``intraday_slot_cut``), not from the schedule. A
+    fresh list each call."""
     start, end = _slot_edge("start"), _slot_edge("end")
-    if start > end:
+    step = _count("intraday", "interval_min")
+    if schedule_problem(start, end, step, time_stop_min()) is not None:
         start, end = _minutes(DEFAULTS["intraday"]["start"]), \
             _minutes(DEFAULTS["intraday"]["end"])
-    step = _count("intraday", "interval_min")
+        step = DEFAULTS["intraday"]["interval_min"]
     return [_slot_name(m) for m in range(start, end + 1, step)]
+
+
+def early_close_days() -> set:
+    """The sessions that close early (``[intraday] early_close_days``, ISO
+    dates). A value that is not a list of ``YYYY-MM-DD`` strings reads as the
+    defaults whole; an empty list is no early closes."""
+    raw = _section("intraday").get("early_close_days")
+    try:
+        if isinstance(raw, list) and all(isinstance(d, str) and len(d) == 10 for d in raw):
+            return {date.fromisoformat(d) for d in raw}
+    except ValueError:
+        pass
+    return {date.fromisoformat(d) for d in DEFAULTS["intraday"]["early_close_days"]}
+
+
+def early_close_time() -> str:
+    """The Central time an early session closes (``"12:00"``): an ``HH:MM`` after
+    the 08:30 open and not after ``REGULAR_CLOSE``, else the default."""
+    raw = _section("intraday").get("early_close_time")
+    got = _minutes(raw)
+    if got is None or not (_minutes("08:30") < got <= _minutes(REGULAR_CLOSE)):
+        return DEFAULTS["intraday"]["early_close_time"]
+    return raw
+
+
+def early_close_on(day):
+    """The aware Central close of ``day`` when it closes early, else ``None``."""
+    if not isinstance(day, date) or day not in early_close_days():
+        return None
+    return intraday_slot_time(day, early_close_time())
+
+
+def intraday_slot_cut(day, slot, stop_min=None) -> bool:
+    """True when ``day`` closes early and ``slot``'s trade (its entry +
+    ``stop_min``, default the configured time stop) would run past that close:
+    no call is made at such a slot, and the study leaves it out."""
+    close = early_close_on(day)
+    if close is None:
+        return False
+    stop = time_stop_min() if stop_min is None else stop_min
+    return intraday_entry_ts(day, slot) + stop * 60 > close.timestamp()
 
 
 def intraday_slot_time(day, slot):
@@ -421,6 +494,15 @@ def breadth_min_members() -> int:
     breadth (names moving outside the dead zone over their last 15 minutes). A
     whole number of at least 1."""
     return _count("confirm", "breadth_min_members")
+
+
+def confirm_min_sources() -> int:
+    """How many of the four confirmation sources must give a reading (agree,
+    disagree or neutral) before the reading is put in one word: one source alone
+    is that source, not a confirmation. A whole number from 1 to 4, else the
+    default."""
+    got = _count("confirm", "min_sources")
+    return got if got <= 4 else DEFAULTS["confirm"]["min_sources"]
 
 
 def confirm_max_age_min() -> int:

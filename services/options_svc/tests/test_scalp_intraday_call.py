@@ -215,9 +215,11 @@ def _roundtrip(x):
 
 # ── the call ─────────────────────────────────────────────────────────────────
 
-def test_slot_call_published_and_frozen(db, bus):
+def test_slot_call_published_and_frozen(db, bus, monkeypatch):
     _seeded(db)
     client = FakeClient()
+    built = AT + dt.timedelta(seconds=95)          # the wall clock when it was built
+    monkeypatch.setattr(sic, "_wall_now", lambda: built)
     assert sic.run_slot(bus, SLOT, now=AT, db_path=db, client=client) is True
     view = bus.cache_get(sic.VIEW).payload
     ScalpView(**view)
@@ -240,7 +242,9 @@ def test_slot_call_published_and_frozen(db, bus):
     assert isinstance(lw["wall_context"], list)
     assert spy["sigma_source"] == "chain" and spy["sigma"] == pytest.approx(0.18)
     assert spy["note"] == "no measured edge" and spy["highlight"] is None
-    assert spy["made_at"] == AT.isoformat()
+    # Changed by the final review's M2: made_at is the wall clock at build, not
+    # the scheduler's tick (which only judges the window).
+    assert spy["made_at"] == built.isoformat()
     assert spy["rules"] == scalp_call._call_rules()
     assert set(spy["confirmation"]) >= {"flow", "netprem", "dealer", "sentiment",
                                         "score", "word"}
@@ -435,10 +439,12 @@ def test_concurrent_0836_and_slot_runs_fetch_once_each(db, bus):
         assert intraday_saved[(SLOT, sym)] == _roundtrip(view["intraday"]["latest"][sym])
 
 
-def test_two_slot_runs_at_once_build_once(db, bus):
+def test_two_slot_runs_at_once_build_once(db, bus, monkeypatch):
     # The scheduler's slot and a page refresh inside its grace, together.
     _seeded(db)
     client = _SlowClient()
+    built = AT + dt.timedelta(seconds=7)
+    monkeypatch.setattr(sic, "_wall_now", lambda: built)
     first = threading.Thread(target=sic.run_slot, args=(bus, SLOT),
                              kwargs={"now": AT, "db_path": db, "client": client})
     second = threading.Thread(target=sic.run_slot, args=(bus, SLOT),
@@ -457,7 +463,8 @@ def test_two_slot_runs_at_once_build_once(db, bus):
     saved = scalp_store.intraday_calls_on(ISO, db_path=db)
     for sym in PRICES:
         assert saved[(SLOT, sym)] == _roundtrip(latest[sym])
-        assert latest[sym]["made_at"] == AT.isoformat()
+        # built once: by the first run (M2: made_at is the build's wall clock)
+        assert latest[sym]["made_at"] == built.isoformat()
 
 
 def test_invalid_payload_not_saved(db, bus, monkeypatch):
@@ -499,9 +506,9 @@ def test_record_called_after_publish_with_directions(db, bus, monkeypatch):
     seen = {}
 
     def record(b, day, slot, now=None, db_path=None, directions=None, win_points=None,
-               entry_ts=None, src=None):
+               entry_ts=None, src=None, spots=None):
         seen.update(day=day, slot=slot, directions=directions, win_points=win_points,
-                    entry_ts=entry_ts, db_path=db_path,
+                    entry_ts=entry_ts, db_path=db_path, spots=spots,
                     published=_intraday(b) is not None,
                     saved=bool(scalp_store.intraday_calls_on(ISO, db_path=db_path)))
         raise RuntimeError("a record failure")
@@ -514,6 +521,8 @@ def test_record_called_after_publish_with_directions(db, bus, monkeypatch):
     for sym in PRICES:
         lw = latest[sym]["roles"]["long_with"]["win_points"]
         assert seen["win_points"][sym] == pytest.approx(abs(lw)) and lw > 0
+        # the dealer read's room is measured from the call's own entry price
+        assert seen["spots"][sym] == latest[sym]["entry_spot"]
     assert seen["entry_ts"] == scalp_config.intraday_entry_ts(DAY, SLOT)
     # The failure is counted and touches nothing already published or saved.
     assert _degrade.counts().get("options.scalp_intraday") == 1
@@ -626,6 +635,72 @@ def test_the_record_is_read_from_the_sources_the_call_showed(db, bus, monkeypatc
     assert row["components"]["score"] == pytest.approx(shown["score"])
     assert row["components"]["word"] == shown["word"]
     assert row["snapshot"]["sentiment"]["state"] == "bullish"
+
+
+def test_the_dealer_room_is_measured_from_the_calls_entry_spot(db, bus):
+    # The matrix is read a grace after the entry bar: its spot (1% higher here)
+    # is not the price the call was made at. The room is measured from the call's
+    # own entry_spot, in what is shown and what is recorded.
+    _seeded(db)
+    stamp = AT.isoformat()
+    bus.cache_set("cache:options:matrix", {"ts": stamp, "rows": [
+        {"symbol": s.lstrip("$"), "spot": spot_at(s) * 1.01, "call_wall": 1.02 * spot_at(s),
+         "put_wall": 0.98 * spot_at(s), "flip": 0.99 * spot_at(s), "net_gex": 1e9}
+        for s in PRICES]})
+    sic.run_slot(bus, SLOT, now=AT, db_path=db, client=FakeClient())
+    spy = _intraday(bus)["latest"]["SPY"]
+    shown = spy["confirmation"]["dealer"]["raw"]
+    assert shown["room_spot_source"] == "entry"
+    assert shown["room_spot"] == pytest.approx(spy["entry_spot"])
+    assert shown["spot"] == pytest.approx(spot_at("SPY") * 1.01)
+    assert shown["room"] == pytest.approx(0.02 * spot_at("SPY") + spot_at("SPY")
+                                          - spy["entry_spot"])
+    row = scalp_store.readings_on(ISO, db_path=db)[(SLOT, "SPY")]
+    assert row["components"]["dealer"]["raw"]["room_spot"] == pytest.approx(spy["entry_spot"])
+    assert row["components"]["dealer"]["raw"]["room_spot_source"] == "entry"
+    # every source's age is in the row
+    assert set(row["snapshot"]["sources"]) == {"matrix", "netprem", "flow", "sentiment",
+                                               "flow_sides"}
+    assert all("age_min" in v for v in row["snapshot"]["sources"].values())
+
+
+def _half_day(monkeypatch, close="10:00"):
+    monkeypatch.setattr(scalp_config, "early_close_days", lambda: {DAY})
+    monkeypatch.setattr(scalp_config, "early_close_time", lambda: close)
+
+
+def test_no_call_whose_trade_passes_an_early_close(db, bus, monkeypatch):
+    # A half day closing at 10:00: the 09:06 slot enters at 09:05 and its 60-minute
+    # trade would end at 10:05, after the close. No call; nothing fetched or frozen.
+    _seeded(db)
+    _half_day(monkeypatch)
+    client = FakeClient()
+    assert sic.run_slot(bus, SLOT, now=AT, db_path=db, client=client) is True
+    section = _intraday(bus)
+    for sym in PRICES:
+        e = section["latest"][sym]
+        assert e["note"] == sic.EARLY_CLOSE == "the market closes early today"
+        assert e["roles"] == {} and e["highlight"] is None
+        assert "made_at" not in e and "rules" not in e
+    assert client.calls == []
+    assert scalp_store.intraday_calls_on(ISO, db_path=db) == {}
+    # the next call is not today's next slot (every later one is cut too) but
+    # the next session's first
+    assert section["next_slot"] == dt.datetime(2026, 10, 20, 8, 51, tzinfo=CT).isoformat()
+    ScalpView(**bus.cache_get(sic.VIEW).payload)
+
+
+def test_an_early_close_leaves_the_slots_before_it_alone(db, bus, monkeypatch):
+    # The same half day closing at 10:10: 09:06's trade ends 10:05, inside it.
+    _seeded(db)
+    _half_day(monkeypatch, close="10:10")
+    assert sic.run_slot(bus, SLOT, now=AT, db_path=db, client=FakeClient()) is True
+    section = _intraday(bus)
+    assert set(section["latest"]["SPY"]["roles"]) == set(ROLES)
+    # 09:21 enters 09:20 and would end 10:20: skipped by next_slot
+    assert section["next_slot"] == dt.datetime(2026, 10, 20, 8, 51, tzinfo=CT).isoformat()
+    _half_day(monkeypatch, close="12:00")
+    assert sic._next_slot(DAY, AT) == dt.datetime(2026, 10, 19, 9, 21, tzinfo=CT).isoformat()
 
 
 # ── the confirmation is shown, never in the probability ─────────────────────

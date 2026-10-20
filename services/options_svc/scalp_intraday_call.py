@@ -20,8 +20,11 @@ sections 3, 5, 8 and 10). Per symbol the call carries:
 * the confirmation reading (``scalp_confirm.components``: flow, net premium, the
   dealer read, sentiment) and its ``dealer_line``. It is SHOWN and recorded and
   NEVER changes a rate, a highlight or a price: it is built after them, from
-  sources the rates never read;
-* ``made_at`` and the frozen ``rules`` its grade will be walked under.
+  sources the rates never read. The dealer read measures the symbol's room
+  from the call's own ``entry_spot``;
+* ``made_at`` (the wall clock when the entry was built; the slot's window is
+  judged by the scheduler's tick) and the frozen ``rules`` its grade will be
+  walked under.
 
 Rules, each from the design or a review ruling:
 
@@ -42,24 +45,28 @@ Rules, each from the design or a review ruling:
   refresh inside the window may still fill it.
 * **No call after its trade is over**: after the slot's entry + ``time_stop_min``
   a symbol gets no roles and the note ``MISSED``, its reading kept; nothing is
-  fetched for it.
+  fetched for it. On an early close (``[intraday] early_close_days``) a slot
+  whose entry + ``time_stop_min`` would pass the close is the same, with the
+  note ``EARLY_CLOSE``, and ``next_slot`` skips it.
 * **Fetch only what a new call needs, on the normal lane**: today's 5-minute bars
   for every bar symbol (``scalp_fetch.top_up_today``: one request each), then the
   0DTE chain of each symbol being built that HAS a direction.
 * **Publishing merges.** The current view is republished with only ``intraday``
   replaced: the 08:36 ``symbols`` and every other key stay byte for byte.
 * **Recording.** After a slot is published and saved, ``scalp_record.record``
-  saves the slot's confirmation inputs with each call's direction and the
-  long-with-the-move role's points to target (a distance: a long put's points
-  are negative). A slot that could not be published is still recorded, with no
+  saves the slot's confirmation inputs with each call's direction, entry spot
+  and the long-with-the-move role's points to target (a distance: a long put's
+  points are negative). A slot that could not be published is still recorded, with no
   direction. A record failure never touches the call.
 
 The section: ``{"day", "slot", "latest": {symbol: entry}, "timeline": [{"slot",
 "symbols": {symbol: {"direction", "highlight", "word", "edge_p", "edge_p_base",
-"n_days", "note"}}}], "next_slot"}`` - one timeline row per slot published today,
-oldest first; ``edge_p`` / ``edge_p_base`` / ``n_days`` are the highlighted role's
-rate, base rate and distinct-day count (``None`` with no highlight); ``next_slot`` is when the next call is made (ISO,
-CT). Imports nothing from ``compute``. Never raises.
+"n_days", "note"}}}], "next_slot", "time_stop_min"}`` - one timeline row per slot
+published today, oldest first; ``edge_p`` / ``edge_p_base`` / ``n_days`` are the
+highlighted role's rate, base rate and distinct-day count (``None`` with no
+highlight); ``next_slot`` is when the next call is made (ISO, CT);
+``time_stop_min`` is the configured time stop, which the page uses to end a slot
+that made no trade. Imports nothing from ``compute``. Never raises.
 """
 import datetime as _dt
 import logging
@@ -88,6 +95,7 @@ FAILED = scalp_call.FAILED
 MISSED = scalp_call.MISSED
 FLAT = "flat over the last 15 minutes — no direction"
 NO_BARS = "no bars for the last 15 minutes yet"
+EARLY_CLOSE = "the market closes early today"
 #: What the shown rates are computed over (labelled on every entry).
 RATES_BASIS = "all stored days"
 #: The degrade area every guard here counts under.
@@ -101,6 +109,13 @@ def _ct_now(now):
     if now is None:
         return _dt.datetime.now(_CT)
     return now.replace(tzinfo=_CT) if now.tzinfo is None else now.astimezone(_CT)
+
+
+def _wall_now():
+    """The wall clock, Central: when an entry was actually built (``made_at``).
+    The slot's window is judged by the scheduler's tick, which can be earlier
+    by the wait for ``_RUN_LOCK``."""
+    return _dt.datetime.now(_CT)
 
 
 def current_slot(now=None):
@@ -123,15 +138,22 @@ def _in_window(day, slot, now) -> bool:
     return at <= now < at + _dt.timedelta(minutes=scalp_config.intraday_grace_min())
 
 
+def _callable_slots(day) -> list:
+    """``day``'s slots a call can be made at: on an early close, not those whose
+    trade would run past it (``scalp_config.intraday_slot_cut``)."""
+    return [s for s in scalp_config.intraday_slots(day)
+            if not scalp_config.intraday_slot_cut(day, s)]
+
+
 def _next_slot(day, now):
-    """When the next call is made (ISO, CT): today's next slot, else the next
-    trading day's first."""
-    for slot in scalp_config.intraday_slots(day):
+    """When the next call is made (ISO, CT): today's next slot a call can be
+    made at, else the next trading day's first."""
+    for slot in _callable_slots(day):
         at = scalp_config.intraday_slot_time(day, slot)
         if at > now:
             return at.isoformat()
     nxt = _mc.next_trading_day(day)
-    slots = scalp_config.intraday_slots(nxt)
+    slots = _callable_slots(nxt)
     return scalp_config.intraday_slot_time(nxt, slots[0]).isoformat() if slots else None
 
 
@@ -178,10 +200,12 @@ def _sigma(entry, slice_, vol):
     return None
 
 
-def _symbol_call(symbol, day, slot, r, slice_, src, db_path, late=False) -> dict:
+def _symbol_call(symbol, day, slot, r, slice_, src, db_path, late=False,
+                 cut=False) -> dict:
     """A fresh entry for ``symbol`` at ``slot`` from its reading ``r``, the study
     and ``slice_`` (None: the model prices it). ``late``: the reading is kept and
-    no roles are made."""
+    no roles are made (``MISSED``). ``cut``: the session closes early before the
+    trade would end; the reading is kept, no roles, ``EARLY_CLOSE``."""
     align = scalp_intraday_inputs.alignment(r)
     bucket = scalp_model.bucket_of(align, scalp_config.buckets())
     block = scalp_config.intraday_block(slot)
@@ -195,6 +219,9 @@ def _symbol_call(symbol, day, slot, r, slice_, src, db_path, late=False) -> dict
                  rates_basis=RATES_BASIS, chain=scalp_call._chain_summary(slice_, iv, day),
                  sigma=None, sigma_source=None, roles={}, highlight=None, avoid=[],
                  note=None, points_note=None, confirmation=None, dealer_line=None)
+    if cut:
+        entry["note"] = EARLY_CLOSE
+        return entry
     if r.direction not in (1, -1):
         entry["note"] = _why_no_direction(symbol, day, r.entry_ts, db_path)
         return entry
@@ -225,7 +252,8 @@ def _symbol_call(symbol, day, slot, r, slice_, src, db_path, late=False) -> dict
     # none of them: it is shown and recorded, never in the probability.
     win = _finite(entry["roles"]["long_with"].get("win_points"))
     conf = scalp_confirm.components(src, symbol, r.direction,
-                                    None if win is None else abs(win), r.entry_ts)
+                                    None if win is None else abs(win), r.entry_ts,
+                                    spot=spot)
     entry["confirmation"] = conf
     entry["dealer_line"] = conf.get("dealer_line")
     return entry
@@ -296,12 +324,14 @@ def _mark_inputs(entry, symbol, failed) -> None:
 
 def _build(day, slot, now, db_path, client, stored, src):
     """``(entries, slices, fresh)``: every symbol's entry for the slot, the chain
-    slices fetched, and the symbols built now (not reused)."""
+    slices fetched, and the symbols built now (not reused). ``now`` is the
+    scheduler's tick (it judged the window); ``made_at`` is the wall clock."""
     late = _late(day, slot, now)
+    cut = scalp_config.intraday_slot_cut(day, slot)
     entries, readings, fresh = {}, {}, []
     todo = [s for s in scalp_config.symbols() if (slot, s) not in stored]
     failed = set()
-    if todo and not late:
+    if todo and not (late or cut):
         failed = _top_up(day, db_path, client)
     for symbol in todo:
         try:
@@ -309,7 +339,8 @@ def _build(day, slot, now, db_path, client, stored, src):
                                                              db_path=db_path)
         except Exception:
             _degrade.degraded(_AREA, detail=f"reading {symbol}")
-    chained = [] if late else [s for s, r in readings.items() if r.direction in (1, -1)]
+    chained = [] if late or cut else [s for s, r in readings.items()
+                                      if r.direction in (1, -1)]
     slices = _fetch(day, chained, db_path, client) if chained else {}
 
     for symbol in scalp_config.symbols():
@@ -322,13 +353,13 @@ def _build(day, slot, now, db_path, client, stored, src):
                 raise RuntimeError("no reading")
             entry = _symbol_call(symbol, day, slot, readings[symbol],
                                  slices.get(symbol, (None, None))[1], src, db_path,
-                                 late=late)
+                                 late=late, cut=cut)
         except Exception:
             _degrade.degraded(_AREA, detail=f"symbol {symbol}")
             entry = _failed_entry(slot)
-        if not late:
+        if not (late or cut):
             _mark_inputs(entry, symbol, failed)
-            entry["made_at"] = now.isoformat()
+            entry["made_at"] = _wall_now().isoformat()
         entries[symbol] = entry
     return entries, slices, fresh
 
@@ -372,8 +403,11 @@ def _section(day, now, slot, latest, stored) -> dict:
                       key=lambda x: (order.get(x, len(order)), x))
         timeline.append({"slot": s, "symbols": {sym: _cell(merged[(s, sym)])
                                                 for sym in syms}})
+    # time_stop_min: the page reads a slot of no trades (all flat or missing
+    # bars) as over at its entry + this, as a call's own frozen rules do.
     return {"day": day.isoformat(), "slot": slot, "latest": latest,
-            "timeline": timeline, "next_slot": _next_slot(day, now)}
+            "timeline": timeline, "next_slot": _next_slot(day, now),
+            "time_stop_min": scalp_config.time_stop_min()}
 
 
 def _valid(payload) -> bool:
@@ -427,15 +461,17 @@ def _record(bus, day, slot, now, entries, db_path, src=None) -> None:
     published call's direction and its long-with role's points to target as a
     distance. ``entries`` empty: recorded with no direction."""
     try:
-        directions, win_points = {}, {}
+        directions, win_points, spots = {}, {}, {}
         for symbol, entry in (entries or {}).items():
             if scalp_call._is_call(entry) and entry.get("direction") in (1, -1):
                 directions[symbol] = entry["direction"]
                 win = _finite((entry["roles"].get("long_with") or {}).get("win_points"))
                 win_points[symbol] = None if win is None else abs(win)
+                spots[symbol] = _finite(entry.get("entry_spot"))
         scalp_record.record(bus, day, slot, now=now, db_path=db_path,
                             directions=directions, win_points=win_points,
-                            entry_ts=scalp_config.intraday_entry_ts(day, slot), src=src)
+                            entry_ts=scalp_config.intraday_entry_ts(day, slot), src=src,
+                            spots=spots)
     except Exception:
         _degrade.degraded(_AREA, detail="record")
 
@@ -500,5 +536,5 @@ def _run_slot(bus, slot, now, db_path, client, scheduled=False) -> bool:
     return published
 
 
-__all__ = ["VIEW", "EVENT", "FLAT", "NO_BARS", "MISSED", "RATES_BASIS", "current_slot",
-           "build_slot", "run_slot", "run_scheduled"]
+__all__ = ["VIEW", "EVENT", "FLAT", "NO_BARS", "MISSED", "EARLY_CLOSE", "RATES_BASIS",
+           "current_slot", "build_slot", "run_slot", "run_scheduled"]

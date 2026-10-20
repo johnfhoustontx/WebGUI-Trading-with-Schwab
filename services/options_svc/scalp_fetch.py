@@ -174,6 +174,23 @@ def _fallback_start_ms(today: _dt.date) -> int:
     return _ms(_day_start(day))
 
 
+def _walk_forward(symbol, interval, start, end, db_path=None, client=None) -> int:
+    """Fetch ``[start, end)`` (epoch ms) in contiguous windows of
+    ``WINDOW_DAYS[interval]``, writing each window's rows; the rows written, or
+    ``FAILED`` (-1) at the first failed window. Nothing after a failed window is
+    fetched or written, so ``latest_ts`` cannot move past the hole it leaves."""
+    written = 0
+    step = _span(WINDOW_DAYS[interval])
+    while start < end:
+        stop = min(start + step, end)
+        rows = fetch_range(symbol, interval, start, stop, client=client)
+        if rows is None:
+            return FAILED
+        written += scalp_store.upsert_bars(rows, db_path=db_path)
+        start = stop
+    return written
+
+
 def top_up(db_path=None, client=None, today=None) -> dict:
     """Fetch what the store lacks, per symbol and interval: from ONE interval
     before its latest bar to now, or from three trading days back when it holds
@@ -190,20 +207,11 @@ def top_up(db_path=None, client=None, today=None) -> dict:
     end_all = _end_ms(today)
     for symbol in scalp_config.bar_symbols():
         for interval in INTERVALS:
-            key = f"{symbol}/{interval}"
-            out[key] = 0
             latest = scalp_store.latest_ts(symbol, interval, db_path=db_path)
             start = ((latest - interval * 60) * 1000 if latest is not None
                      else _fallback_start_ms(day))
-            step = _span(WINDOW_DAYS[interval])
-            while start < end_all:
-                stop = min(start + step, end_all)
-                rows = fetch_range(symbol, interval, start, stop, client=client)
-                if rows is None:
-                    out[key] = FAILED
-                    break
-                out[key] += scalp_store.upsert_bars(rows, db_path=db_path)
-                start = stop
+            out[f"{symbol}/{interval}"] = _walk_forward(
+                symbol, interval, start, end_all, db_path=db_path, client=client)
     return out
 
 
@@ -215,13 +223,24 @@ def top_up_today(symbols, interval=5, db_path=None, client=None, today=None) -> 
     while it was still forming is replaced by the next top-up (or the nightly
     one, which starts an interval before the latest stored bar).
 
+    A symbol whose latest stored bar at ``interval`` is from BEFORE today starts
+    instead one interval before that bar and walks forward exactly as ``top_up``
+    does: writing today's bars over an unfilled stretch of an earlier day would
+    move ``latest_ts`` past it, and no later top-up would ever fetch it (a
+    Friday afternoon lost for good, and for ``$SPX`` a short session never
+    graded). A failed window stops that symbol's walk there.
+
     Returns the rows written per ``"SYMBOL/interval"``; a failed request is
     ``FAILED`` (-1) for its key, its other keys carry on. Never the priority lane."""
     day = today if today is not None else _today_ct()
-    start, end = _ms(_day_start(day)), _end_ms(day)
+    interval = int(interval)
+    midnight, end = _ms(_day_start(day)), _end_ms(day)
     out = {}
     for symbol in dict.fromkeys(symbols or ()):
-        key = f"{symbol}/{int(interval)}"
-        rows = fetch_range(symbol, interval, start, end, client=client)
-        out[key] = FAILED if rows is None else scalp_store.upsert_bars(rows, db_path=db_path)
+        latest = scalp_store.latest_ts(symbol, interval, db_path=db_path)
+        start = midnight
+        if latest is not None and latest * 1000 < midnight:
+            start = (latest - interval * 60) * 1000
+        out[f"{symbol}/{interval}"] = _walk_forward(
+            symbol, interval, start, end, db_path=db_path, client=client)
     return out

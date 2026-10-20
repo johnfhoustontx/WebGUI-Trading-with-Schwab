@@ -573,7 +573,7 @@ def _record_call_slot(bus, day, now, payload, db_path) -> None:
         at = _call_time(day)
         if now >= at + _dt.timedelta(minutes=_mc.slot_grace_min("scalp")):
             return
-        directions, win_points = {}, {}
+        directions, win_points, spots = {}, {}, {}
         for symbol, entry in (payload.get("symbols") or {}).items():
             if _is_call(entry) and entry.get("direction") in (1, -1):
                 directions[symbol] = entry["direction"]
@@ -581,9 +581,11 @@ def _record_call_slot(bus, day, now, payload, db_path) -> None:
                 # and the dealer read measures room against the magnitude.
                 win = _finite((entry["roles"].get("long_with") or {}).get("win_points"))
                 win_points[symbol] = None if win is None else abs(win)
+                # ... from the call's own entry price, not the matrix's later spot
+                spots[symbol] = _finite(entry.get("entry_spot"))
         scalp_record.record(bus, day, at.strftime("%H:%M"), now=now, db_path=db_path,
                             directions=directions, win_points=win_points,
-                            entry_ts=int(_entry_time(day).timestamp()))
+                            entry_ts=int(_entry_time(day).timestamp()), spots=spots)
     except Exception:
         _degrade.degraded("options.scalp_record", detail="call")
 

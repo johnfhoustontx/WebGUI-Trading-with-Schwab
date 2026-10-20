@@ -1054,3 +1054,55 @@ def test_the_intraday_cross_checks_name_what_the_loader_would_drop():
         **ok, ("intraday", "blocks", "midday", "start"): "09:30"})
     assert cs.cross_check("scalp.toml", {
         **ok, ("intraday", "blocks", "afternoon", "end"): "12:00"})
+
+
+def test_the_intraday_schedule_cross_check_is_the_loaders_rule(monkeypatch):
+    """Each schedule the Settings check refuses, the loader reads as its
+    defaults; each one it accepts, the loader reads as given."""
+    from datetime import date
+    from shared import scalp_config as sc
+    base = {("intraday", "start"): "08:51", ("intraday", "end"): "13:51",
+            ("intraday", "interval_min"): 15, ("trade", "time_stop_min"): 60}
+    cases = [({}, True),
+             ({("intraday", "start"): "08:40"}, False),                 # before 08:45
+             ({("intraday", "start"): "08:21"}, False),                 # 08:36 is a slot
+             ({("intraday", "end"): "14:21"}, False),                   # 14:20 + 60
+             ({("trade", "time_stop_min"): 75}, False),                 # 13:50 + 75
+             ({("intraday", "start"): "08:45", ("intraday", "end"): "14:00"}, True)]
+    for change, ok in cases:
+        values = {**base, **change}
+        errs = cs.cross_check("scalp.toml", values)
+        assert (not errs) is ok, (change, errs)
+        monkeypatch.setattr(sc, "load", lambda v=values: {
+            "intraday": {"start": v[("intraday", "start")], "end": v[("intraday", "end")],
+                         "interval_min": v[("intraday", "interval_min")]},
+            "trade": {"time_stop_min": v[("trade", "time_stop_min")]}})
+        slots = sc.intraday_slots(date(2026, 10, 20))
+        given = (values[("intraday", "start")], values[("intraday", "end")])
+        if ok:
+            assert slots[0] == given[0] and slots[-1] <= given[1], change
+        else:
+            assert (slots[0], slots[-1], len(slots)) == ("08:51", "13:51", 21), change
+    assert any("08:36" in e for e in cs.cross_check(
+        "scalp.toml", {**base, ("intraday", "start"): "08:21"}))
+    assert any("15:00" in e for e in cs.cross_check(
+        "scalp.toml", {**base, ("intraday", "end"): "14:21"}))
+
+
+def test_the_early_close_fields_parse_and_check():
+    by_key = {f.key: f for s in SCALP.sections for f in s.fields}
+    days = by_key["intraday.early_close_days"]
+    assert days.kind == "dates"
+    assert cs.parse(days, ["2026-12-24", "2026-11-27", "2026-12-24"]) == [
+        "2026-11-27", "2026-12-24"]
+    assert cs.parse(days, "2027-07-02, 2027-11-26") == ["2027-07-02", "2027-11-26"]
+    assert cs.parse(days, []) == []
+    for bad in (["2026-13-01"], ["11/27/2026"], ["2026-1-2"]):
+        with pytest.raises(ValueError, match="YYYY-MM-DD"):
+            cs.parse(days, bad)
+    assert cs.parse(by_key["intraday.early_close_time"], "12:00") == "12:00"
+    for bad in ("15:30", "08:00"):
+        assert cs.cross_check("scalp.toml", {("intraday", "early_close_time"): bad})
+    assert not cs.cross_check("scalp.toml", {("intraday", "early_close_time"): "12:00"})
+    src = by_key["confirm.min_sources"]
+    assert (src.min, src.max) == (1, 4)

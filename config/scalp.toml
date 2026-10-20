@@ -102,7 +102,10 @@ report_url = "https://neuralstrike.co/report.html"
 # The intraday calls (docs/plans/2026-10-20-scalp-intraday-calls-design.md): a new
 # call every interval_min minutes from start to end, Central time. A slot is
 # named by its clock time ("08:51"). Each is entered on the last 5-minute bar
-# that has closed (08:51 enters on the 08:50 bar).
+# that has closed (08:51 enters on the 08:50 bar). The first call may not be
+# before 08:45, no call may fall at 08:36 (the morning call's own time), and the
+# last call's entry + the time stop under [trade] may not pass the 15:00 close;
+# a schedule that breaks any of these reads as these defaults whole.
 start = "08:51"
 end = "13:51"
 interval_min = 15
@@ -124,6 +127,11 @@ vwap_max_missing = 0.25
 min_brier_margin = 0.005
 # Sessions of calls a group needs before it can be promoted.
 promotion_sessions = 40
+# Sessions that close early (YYYY-MM-DD), and the time they close, Central. On
+# such a day no call is made whose entry + the time stop would pass the early
+# close, and the study leaves those slots out. Add next year's half days here.
+early_close_days = ["2026-11-27", "2026-12-24"]
+early_close_time = "12:00"
 
 [intraday.blocks.morning]
 # The three parts of the day the study keeps apart. Each slot belongs to exactly
@@ -155,6 +163,10 @@ sides_majority = 0.6
 # symbol's own room alone), and a move outside the dead zone for the intraday
 # price breadth.
 breadth_min_members = 5
+# How many of the four sources must give a reading (1 to 4) before they are put
+# in one word (Confirms / Mixed / Contradicts): one source alone is not a
+# confirmation.
+min_sources = 2
 # A confirming reading older than this many minutes is treated as absent.
 max_age_min = 5
 # Contradicts at or below the first, Confirms at or above the second, on the

@@ -974,9 +974,29 @@ def test_the_final_call_of_the_day_is_over_when_its_hour_is_up_not_all_evening()
     assert scalp.latest_label(sec, _at(2026, 10, 19, 14, 0)) == "Latest call at 13:51"
 
 
-def test_without_a_trade_window_only_the_next_slot_ends_a_call():
-    sec = _section(slot="13:51", next_slot="2026-10-20T08:51:00-05:00")
-    assert scalp.intraday_status(sec, _at(2026, 10, 19, 20, 0))["over"] is False
+def test_a_final_slot_of_no_trades_is_over_when_its_hour_is_up():
+    # Changed by the final review's M8 (this test used to pin that such a slot
+    # was never over): every latest entry flat or short of bars carries no
+    # rules, so the slot's own entry (13:51 -> the 13:50 bar) plus the section's
+    # time stop (else 60) ends it.
+    flat = _ientry(None, roles={}, note="flat over the last 15 minutes — no direction")
+    sec = _section(slot="13:51", next_slot="2026-10-20T08:51:00-05:00",
+                   latest={"SPY": flat, "QQQ": dict(flat)})
+    assert scalp.intraday_status(sec, _at(2026, 10, 19, 14, 0))["over"] is False
+    after = scalp.intraday_status(sec, _at(2026, 10, 19, 14, 50))
+    assert after["over"] is True and after["past"] is True
+    assert after["line"].startswith("Last call at 13:51 · over")
+    assert scalp.latest_label(sec, _at(2026, 10, 19, 20, 0)) == "Last call at 13:51 · over"
+    # the time stop the section carries wins over the default
+    longer = dict(sec, time_stop_min=90)
+    assert scalp.intraday_status(longer, _at(2026, 10, 19, 15, 0))["over"] is False
+    assert scalp.intraday_status(longer, _at(2026, 10, 19, 15, 20))["over"] is True
+    for bad in (0, -5, "x", None):
+        odd = dict(sec, time_stop_min=bad)
+        assert scalp.intraday_status(odd, _at(2026, 10, 19, 14, 50))["over"] is True, bad
+    # with neither a day nor a slot nothing can be said to be over
+    assert scalp._trade_end({"latest": {"SPY": flat}}) is None
+    assert scalp._trade_end({"day": "2026-10-19", "slot": "junk"}) is None
 
 
 def test_the_clock_alone_moves_the_page_from_current_to_past():
@@ -1141,3 +1161,61 @@ def test_a_non_string_highlight_does_not_raise():
     assert [r["tone"] for r in rows] == ["plain"] * 4
     assert "highlight in {r" in SRC and "isinstance(highlight, str)" in SRC
 
+
+
+# ── final review: sources count, a muted old timeline, the 08:36 card ────────
+def test_the_word_says_how_many_sources_it_rests_on():
+    conf = dict(_conf("Mixed"), n_present=3, n_sources=4, word_note=None)
+    sym = _ientry(1, confirmation=conf)
+    assert scalp.confirmation_sources(sym) == "3 of 4 sources"
+    assert scalp.confirmation_summary(sym) == "Mixed · 3 of 4 sources"
+    few = dict(_conf(None), n_present=1, n_sources=4, word_note="too few sources")
+    one = _ientry(1, confirmation=few)
+    assert scalp.confirmation_word(one) == "No reading"
+    assert scalp.confirmation_summary(one) == "No reading · 1 of 4 sources (too few sources)"
+    # an entry from before the count: the word alone
+    assert scalp.confirmation_summary(_ientry(1, word="Confirms")) == "Confirms"
+    assert scalp.confirmation_sources(_ientry(1, confirmation={})) == ""
+
+
+def test_the_latest_card_and_the_panel_show_the_sources_count(drawn):
+    conf = dict(_conf("Confirms"), n_present=2, n_sources=4, word_note=None)
+    sec = _section(latest={"SPY": _ientry(1, confirmation=conf)})
+    scalp._intraday_panels({"intraday": sec}, _at(2026, 10, 19, 10, 25))
+    texts = _texts(drawn)
+    assert "SPY · Confirms · 2 of 4 sources" in texts
+    assert any(t.startswith("Confirmation: Confirms · 2 of 4 sources") for t in texts)
+
+
+def test_another_days_timeline_draws_no_edge_colour(drawn, monkeypatch):
+    from pages import ui_kit as kit
+    from pages.options import theme
+    seen = []
+    monkeypatch.setattr(kit, "table", lambda cols, rows=None, **k: (
+        seen.append(list(rows or [])), _Rec(drawn, "table", len(list(rows or []))))[1])
+    sec = _section()
+    scalp._intraday_panels({"intraday": sec}, _at(2026, 10, 19, 10, 25))      # today
+    today = next(rows for rows in seen if rows and "s0_pick" in rows[0])
+    assert theme.TXT_POS in today[1]["s0_pick_class"]
+    seen.clear()
+    scalp._intraday_panels({"intraday": sec}, _at(2026, 10, 20, 9, 0))        # next day
+    old = next(rows for rows in seen if rows and "s0_pick" in rows[0])
+    assert old[1]["s0_pick"] == "Long put · 63.00% vs 50.00% usually"     # words kept
+    assert theme.TXT_POS not in old[1]["s0_pick_class"]
+    assert old[1]["s0_pick_class"] == theme.MUTED
+    assert scalp.timeline_rows(sec, muted=True)[1]["s0_pick_class"] == theme.MUTED
+
+
+def test_the_0836_card_survives_a_list_valued_highlight(drawn):
+    sym = _symbol(1)
+    sym["highlight"] = ["long_with"]
+    scalp._symbol_card({"state": "call", "day": "2026-10-19"}, "SPY", sym,
+                       _at(2026, 10, 19, 8, 40))
+    assert "SPY" in _texts(drawn)
+    body = SRC[SRC.index("def _symbol_card"):SRC.index("def _latest_card")]
+    assert "isinstance(highlight, str)" in body
+
+
+def test_the_first_paint_is_guarded_like_the_timer():
+    body = SRC[SRC.index("def render():"):]
+    assert "@guard\n    def _paint(view):" in body

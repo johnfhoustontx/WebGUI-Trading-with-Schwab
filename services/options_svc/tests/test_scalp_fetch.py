@@ -291,6 +291,73 @@ def test_top_up_today_is_one_request_per_symbol_for_the_day(tmp_path):
     assert st.bars("SPY", 1, 0, 10**12, db_path=db) == []
 
 
+def _ct_ts(*args):
+    return int(dt.datetime(*args, tzinfo=_CT).timestamp())
+
+
+def test_top_up_today_refetches_an_earlier_days_hole_first(tmp_path):
+    # Friday's bars end 13:50 (the nightly top-up never ran); Monday's intraday
+    # top-up starts at Friday 13:45 and fills the hole, then today's bars.
+    db = tmp_path / "s.db"
+    fri_1350 = _ct_ts(2026, 10, 16, 13, 50)
+    st.upsert_bars([("SPY", 5, fri_1350, 1, 1, 1, 1, 1)], db_path=db)
+    missing = [_ct_ts(2026, 10, 16, 13, 55) + 300 * k for k in range(14)]  # 13:55..15:00
+    monday = [_ct_ts(2026, 10, 19, 8, 30), _ct_ts(2026, 10, 19, 8, 35)]
+
+    def answer(i, q):
+        lo, hi = int(q["startDate"]) // 1000, int(q["endDate"]) // 1000
+        return {"candles": [_candle(t * 1000) for t in [fri_1350] + missing + monday
+                            if lo <= t < hi]}
+
+    client = FakeClient(answer)
+    out = sf.top_up_today(["SPY"], db_path=db, client=client,
+                          today=dt.date(2026, 10, 19))
+    q = client.calls[0][2]
+    assert int(q["startDate"]) == _ct_ts(2026, 10, 16, 13, 45) * 1000
+    assert int(q["endDate"]) == _ct_ts(2026, 10, 20, 0, 0) * 1000
+    stored = [b.ts for b in st.bars("SPY", 5, 0, 10**12, db_path=db)]
+    assert stored == [fri_1350] + missing + monday
+    assert out == {"SPY/5": 1 + len(missing) + len(monday)}
+
+
+def test_top_up_today_from_today_when_the_store_already_holds_today(tmp_path):
+    db = tmp_path / "s.db"
+    st.upsert_bars([("SPY", 5, _ct_ts(2026, 10, 19, 8, 30), 1, 1, 1, 1, 1)], db_path=db)
+    client = FakeClient(lambda i, q: EMPTY)
+    sf.top_up_today(["SPY"], db_path=db, client=client, today=dt.date(2026, 10, 19))
+    assert int(client.calls[0][2]["startDate"]) == _ct_ts(2026, 10, 19, 0, 0) * 1000
+
+
+def test_top_up_today_failure_mid_walk_keeps_latest_ts_before_the_hole(tmp_path):
+    # A long gap pages in 30-day windows; the second fails: nothing after it is
+    # fetched or written, so latest_ts stays before the hole and today's bars
+    # (which would have jumped it) are not written.
+    db = tmp_path / "s.db"
+    old = _ct_ts(2026, 9, 1, 12, 0)
+    st.upsert_bars([("SPY", 5, old, 1, 1, 1, 1, 1)], db_path=db)
+
+    class Flaky:
+        def __init__(self):
+            self.calls = []
+
+        def _get(self, path, params=None, **kw):
+            q = _parse(params["params"])
+            self.calls.append(q)
+            if len(self.calls) == 2:
+                return _Resp(502, None)
+            return _Resp(200, _one_candle_in_window(q))
+
+    client = Flaky()
+    out = sf.top_up_today(["SPY"], db_path=db, client=client,
+                          today=dt.date(2026, 10, 19))
+    assert out == {"SPY/5": sf.FAILED}
+    assert len(client.calls) == 2                       # stopped AT the failure
+    assert int(client.calls[0]["startDate"]) == (old - 300) * 1000
+    failed_start = int(client.calls[1]["startDate"]) // 1000
+    assert st.latest_ts("SPY", 5, db_path=db) < failed_start
+    assert st.latest_ts("SPY", 5, db_path=db) < _ct_ts(2026, 10, 19, 0, 0)
+
+
 def test_backfill_failure_between_data_windows_is_not_the_end_of_history(
         tmp_path, one_symbol):
     db = tmp_path / "s.db"

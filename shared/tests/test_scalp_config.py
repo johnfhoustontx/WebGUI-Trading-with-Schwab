@@ -466,3 +466,96 @@ def test_vwap_max_missing_default_and_validation(monkeypatch):
     for good in (0, 0.4, 0.999):
         monkeypatch.setattr(sc, "load", lambda good=good: {"intraday": {"vwap_max_missing": good}})
         assert sc.vwap_max_missing() == good
+
+
+# --- the slot schedule's own checks (final review M4) ---------------------------
+
+@pytest.mark.parametrize("intraday,why", [
+    ({"start": "08:31", "end": "13:51"}, "before 08:45"),         # inside the 08:36 call
+    ({"start": "08:21", "end": "13:51", "interval_min": 15}, "08:36 is a slot"),
+    ({"start": "08:51", "end": "14:21"}, "14:20 + 60 passes 15:00"),
+    ({"start": "13:51", "end": "08:51"}, "start after end"),
+])
+def test_an_unusable_schedule_is_the_default_schedule(monkeypatch, intraday, why):
+    monkeypatch.setattr(sc, "load", lambda: {"intraday": intraday})
+    assert sc.intraday_slots(_DAY) == [f"{h:02d}:{m:02d}" for h in range(8, 14)
+                                       for m in (6, 21, 36, 51)
+                                       if (8, 51) <= (h, m) <= (13, 51)], why
+
+
+def test_schedule_problem_names_each_rule():
+    m = sc._minutes
+    assert sc.schedule_problem(m("08:51"), m("13:51"), 15, 60) is None
+    assert sc.schedule_problem(m("08:45"), m("14:00"), 15, 60) is None   # 14:00+60 = 15:00
+    assert "before 08:45" in sc.schedule_problem(m("08:40"), m("13:51"), 15, 60)
+    assert "08:36" in sc.schedule_problem(m("08:36"), m("13:51"), 15, 60)
+    assert "08:36" in sc.schedule_problem(m("08:21"), m("13:51"), 15, 60)
+    assert "15:00" in sc.schedule_problem(m("08:51"), m("13:51"), 15, 90)
+    # the last slot is the last one the step reaches, not the configured end
+    assert sc.schedule_problem(m("08:51"), m("14:05"), 15, 60) is None   # last 13:51
+    assert sc.schedule_problem(m("08:51"), m("14:10"), 15, 60) is not None  # 14:06
+    assert "after the last" in sc.schedule_problem(m("10:00"), m("09:00"), 15, 60)
+
+
+def test_a_longer_time_stop_makes_the_configured_schedule_unusable(monkeypatch):
+    monkeypatch.setattr(sc, "load", lambda: {
+        "intraday": {"start": "09:00", "end": "10:00", "interval_min": 30},
+        "trade": {"time_stop_min": 330}})                  # 10:00 + 330 min = 15:30
+    assert sc.intraday_slots(_DAY)[0] == "08:51"
+
+
+# --- half days (final review M3) ------------------------------------------------
+
+def test_early_close_defaults():
+    sc.reset_cache()
+    assert sc.early_close_days() == {date(2026, 11, 27), date(2026, 12, 24)}
+    assert sc.early_close_time() == "12:00"
+    assert sc.early_close_on(date(2026, 11, 27)) == datetime(
+        2026, 11, 27, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
+    assert sc.early_close_on(_DAY) is None
+
+
+@pytest.mark.parametrize("raw", ["2026-11-27", ["2026-13-01"], ["11/27/2026"], [20261127],
+                                 None])
+def test_unusable_early_close_days_are_the_defaults(monkeypatch, raw):
+    monkeypatch.setattr(sc, "load", lambda: {"intraday": {"early_close_days": raw}})
+    assert sc.early_close_days() == {date(2026, 11, 27), date(2026, 12, 24)}
+
+
+def test_early_close_days_are_read_and_may_be_empty(monkeypatch):
+    monkeypatch.setattr(sc, "load", lambda: {"intraday": {"early_close_days": ["2027-07-02"]}})
+    assert sc.early_close_days() == {date(2027, 7, 2)}
+    monkeypatch.setattr(sc, "load", lambda: {"intraday": {"early_close_days": []}})
+    assert sc.early_close_days() == set()
+
+
+@pytest.mark.parametrize("raw", ["8:00", "08:30", "15:01", "noon", 12, None])
+def test_an_unusable_early_close_time_is_the_default(monkeypatch, raw):
+    monkeypatch.setattr(sc, "load", lambda: {"intraday": {"early_close_time": raw}})
+    assert sc.early_close_time() == "12:00"
+
+
+def test_a_slot_is_cut_only_when_its_trade_passes_the_early_close(monkeypatch):
+    sc.reset_cache()
+    half = date(2026, 11, 27)
+    # 10:51 enters on 10:50; + 60 = 11:50, inside. 11:06 enters on 11:05: 12:05.
+    assert not sc.intraday_slot_cut(half, "10:51")
+    assert sc.intraday_slot_cut(half, "11:06")
+    assert sc.intraday_slot_cut(half, "13:51")
+    assert not sc.intraday_slot_cut(_DAY, "13:51")             # a full session
+    assert not sc.intraday_slot_cut(half, "11:06", stop_min=50)  # 11:05 + 50 = 11:55
+    monkeypatch.setattr(sc, "load", lambda: {"intraday": {"early_close_time": "11:00"}})
+    assert sc.intraday_slot_cut(half, "10:06")                 # 10:05 + 60 = 11:05
+    # the schedule itself is the same every session: the cut is the caller's
+    assert sc.intraday_slots(half) == sc.intraday_slots(_DAY)
+
+
+def test_min_sources_default_and_validation(monkeypatch):
+    sc.reset_cache()
+    assert sc.confirm_min_sources() == 2
+    for bad in (0, 5, 1.5, True, "two", float("nan")):
+        monkeypatch.setattr(sc, "load", lambda bad=bad: {"confirm": {"min_sources": bad}})
+        assert sc.confirm_min_sources() == 2
+    for good in (1, 3, 4):
+        monkeypatch.setattr(sc, "load", lambda good=good: {"confirm": {"min_sources": good}})
+        assert sc.confirm_min_sources() == good

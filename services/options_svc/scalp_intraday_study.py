@@ -17,7 +17,9 @@ The measurement's rules, each one fixed before any outcome was read:
 * the entry is the reading's own ``entry_ts`` (the slot floored to the 5-minute
   boundary, the close of the last complete bar) - never a wall-clock time; the
   reading sees no bar at or after it, and the trade's path starts at it;
-* a (day, slot, symbol) has no rows when the day is a short session ($SPX's
+* a (day, slot, symbol) has no rows when the day is a configured early close
+  (``[intraday] early_close_days``) and the slot's trade would pass it (no call
+  is made there either), when the day is a short session ($SPX's
   regular bars end early: the 0DTE settlement the pricer assumes is wrong), when
   the reading has no direction, when there is no usable vol at the entry, or when
   the path holds fewer than ``time_stop_min / 5`` bars in
@@ -191,6 +193,12 @@ def rebuild(db_path=None) -> dict:
         for b in _blocks(slots):
             if b not in blocks:
                 blocks.append(b)
+        # An early close: no call is made at a slot whose trade would pass it.
+        cut = [s for s in slots if scalp_config.intraday_slot_cut(day, s, stop_min)]
+        if cut:
+            slots_seen += len(cut) * len(symbols)
+            skipped["early_close"] += len(cut) * len(symbols)
+            slots = [s for s in slots if s not in cut]
         if scalp_study._short(day, db_path):
             slots_seen += len(slots) * len(symbols)
             skipped["short_session"] += len(slots) * len(symbols)

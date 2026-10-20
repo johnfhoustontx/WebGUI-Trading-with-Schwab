@@ -594,6 +594,22 @@ def test_a_phrases_field_is_a_chip_editor_that_keeps_case():
     assert chips.value == ["tariff"]
 
 
+def test_a_dates_field_is_a_chip_editor():
+    """The Opening Scalp's early-close days: chips, each checked and sorted on
+    parse."""
+    from nicegui import ui
+    fld = ce.cs.Field("intraday.early_close_days", "Early-close days", kind="dates")
+    got = []
+    with ui.card() as host:
+        control = {}
+        ce._build_control(control, fld, ["2026-11-27", "2026-12-24"], got.append)
+    (chips,) = [e for e in host.descendants() if isinstance(e, ui.input_chips)]
+    assert chips.value == ["2026-11-27", "2026-12-24"]
+    chips.value = ["2027-07-02", "2026-11-27"]
+    assert ce.cs.parse(fld, got[-1]) == ["2026-11-27", "2027-07-02"]
+    assert ce.display_value(["2026-11-27"], [], fld) == "2026-11-27"
+
+
 def test_a_phrases_value_reads_as_a_list_in_the_changed_chip():
     fld = ce.cs.Field("w", "w", kind="phrases")
     assert ce.display_value(["rate cut", "FOMC"], [], fld) == "rate cut, FOMC"

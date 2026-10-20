@@ -92,6 +92,23 @@ def test_record_scores_a_symbol_given_a_direction(db, bus):
     assert rows[(SLOT, "QQQ")]["components"]["word"] is None
 
 
+def test_record_measures_room_from_the_calls_entry_spot_and_keeps_every_age(db, bus):
+    # The matrix says 769.44 (room 5.56 to the 775 call wall); the call entered
+    # at 773.00 (room 2.00, inside a 3-point target).
+    _publish(bus)
+    scalp_record.record(bus, DAY, SLOT, now=NOW, db_path=db, directions={"SPY": 1},
+                        win_points={"SPY": 3.0}, spots={"SPY": 773.0})
+    spy = scalp_store.readings_on(DAY.isoformat(), db_path=db)[(SLOT, "SPY")]
+    raw = spy["components"]["dealer"]["raw"]
+    assert raw["room_spot"] == 773.0 and raw["room_spot_source"] == "entry"
+    assert raw["spot"] == 769.44 and raw["own_verdict"] == -1
+    assert spy["components"]["n_present"] >= 2
+    ages = spy["snapshot"]["sources"]
+    assert {k: v["state"] for k, v in ages.items()}["sentiment"] == "ok"
+    assert ages["sentiment"]["age_min"] is not None and ages["matrix"]["age_min"] is not None
+    assert spy["snapshot"]["sentiment"]["age_min"] == ages["sentiment"]["age_min"]
+
+
 def test_record_is_idempotent_per_slot(db, bus):
     _publish(bus)
     assert scalp_record.record(bus, DAY, SLOT, now=NOW, db_path=db) == 3

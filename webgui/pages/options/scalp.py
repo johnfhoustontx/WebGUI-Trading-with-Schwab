@@ -617,17 +617,41 @@ def _when(when, day):
     return when.strftime("%a %Y-%m-%d %H:%M")
 
 
+#: The time stop a section that carries none is read with (``[trade]
+#: time_stop_min``'s shipped value; Tier 1 does not read the service's config).
+DEFAULT_TIME_STOP_MIN = 60
+
+
+def _slot_trade_end(section):
+    """The section slot's own trade end: the slot on its ``day`` floored to the
+    5-minute bar it enters on, plus the section's ``time_stop_min`` (else
+    ``DEFAULT_TIME_STOP_MIN``). ``None`` without a usable day and slot."""
+    sec = _as_dict(section)
+    day, slot = sec.get("day"), sec.get("slot")
+    try:
+        d = _dt.date.fromisoformat(day)
+        hh, mm = (int(x) for x in slot.split(":"))
+        entry = _dt.datetime(d.year, d.month, d.day, hh, mm - mm % 5, tzinfo=_CT)
+    except (TypeError, ValueError, AttributeError):
+        return None
+    stop = _fmt.num(sec.get("time_stop_min"))
+    stop = stop if stop is not None and stop > 0 else DEFAULT_TIME_STOP_MIN
+    return entry + _dt.timedelta(minutes=stop)
+
+
 def _trade_end(section):
     """When the latest call's trade is over: the latest ``entry_ts`` plus the
-    ``rules.time_stop_min`` it was frozen with, as a Central datetime; ``None``
-    when no entry carries both (a flat tape or a missed call has no trade)."""
+    ``rules.time_stop_min`` it was frozen with, as a Central datetime. When no
+    entry carries both (every symbol flat, short of bars or missed: no trade),
+    the slot's own entry plus the section's time stop, so a final slot of flat
+    tapes still reads over when its hour is up; ``None`` without even that."""
     ends = []
     for _name, entry in latest_entries(section):
         ts = _fmt.num(entry.get("entry_ts"))
         stop = _fmt.num(_as_dict(entry.get("rules")).get("time_stop_min"))
         if ts is not None and stop is not None and stop > 0:
             ends.append(_dt.datetime.fromtimestamp(ts + stop * 60.0, _CT))
-    return max(ends) if ends else None
+    return max(ends) if ends else _slot_trade_end(section)
 
 
 def intraday_status(section, now=None):
@@ -848,6 +872,30 @@ def confirmation_word(entry):
     return word if word in CONFIRM_WORDS else NO_READING_WORD
 
 
+def confirmation_sources(entry):
+    """How many sources the word rests on: ``"3 of 4 sources"``, with the
+    service's reason when there were too few for a word; '' when the payload
+    does not say (an entry recorded before the count existed). A count of
+    sources, never a score."""
+    conf = _as_dict(_as_dict(entry).get("confirmation"))
+    n = _fmt.num(conf.get("n_present"))
+    if n is None:
+        return ""
+    of = _fmt.num(conf.get("n_sources"))
+    of = int(of) if of is not None and of > 0 else len(_COMPONENTS)
+    text = f"{int(n)} of {of} {'source' if of == 1 else 'sources'}"
+    note = conf.get("word_note")
+    if isinstance(note, str) and note.strip():
+        text += f" ({note.strip()})"
+    return text
+
+
+def confirmation_summary(entry):
+    """The word and, beside it, how many sources it rests on."""
+    src = confirmation_sources(entry)
+    return confirmation_word(entry) + (f" · {src}" if src else "")
+
+
 def confirmation_rows(entry):
     """One row per component, in whole words. PURE. ``[]`` with no confirmation."""
     conf = _as_dict(_as_dict(entry).get("confirmation"))
@@ -927,10 +975,12 @@ def _pick_text(cell):
     return text
 
 
-def timeline_rows(section):
+def timeline_rows(section, muted=False):
     """One row per published slot: the time and, per symbol (``s0``, ``s1`` ...), the
     direction word, the highlight or the dash, the confirmation word and the note.
-    PURE. The usual 'no measured edge' note is the dash, so it is not repeated."""
+    PURE. The usual 'no measured edge' note is the dash, so it is not repeated.
+    ``muted`` (another day's section) keeps every highlight's words but draws no
+    edge colour: an old pick must not look actionable."""
     names = timeline_symbols(section)
     rows = []
     for item in _timeline(section):
@@ -948,7 +998,8 @@ def timeline_rows(section):
                             if cell else _fmt.NO_READING)
             row[f"s{i}_pick"] = picked
             row[f"s{i}_pick_class"] = (f"{_t.TXT_POS} font-semibold"
-                                       if picked != _fmt.NO_READING else _t.MUTED)
+                                       if picked != _fmt.NO_READING and not muted
+                                       else _t.MUTED)
             row[f"s{i}_word"] = word if word in CONFIRM_WORDS else _fmt.NO_READING
             row[f"s{i}_note"] = "" if note.lower() == NO_EDGE.lower() else note
         rows.append(row)
@@ -1096,7 +1147,10 @@ def _symbol_card(view, name, sym, now=None):
     from pages import ui_kit as kit
 
     rows = role_rows(sym)
-    has_edge = sym.get("highlight") in {r["id"] for r in rows}
+    highlight = sym.get("highlight")
+    # A non-string highlight (a list from a bad payload) is no highlight: an
+    # unhashable value in a set test would raise and blank the card.
+    has_edge = isinstance(highlight, str) and highlight in {r["id"] for r in rows}
     with ui.column().classes(_CARD):
         with ui.row().classes("w-full items-center gap-3 flex-wrap"):
             ui.label(name).classes(f"text-lg font-semibold {_t.LABEL}")
@@ -1179,7 +1233,7 @@ def _latest_card(section, name, entry, now=None):
         if dealer_line(entry):
             ui.label("Dealer read: " + dealer_line(entry)).classes("text-sm")
         if confirmation_rows(entry):
-            ui.label(f"Confirmation: {confirmation_word(entry)} (not in the "
+            ui.label(f"Confirmation: {confirmation_summary(entry)} (not in the "
                      "probability; the sources are below)").classes(_SMALL)
 
 
@@ -1188,7 +1242,7 @@ def _timeline_panel(section, status):
 
     from pages import ui_kit as kit
 
-    rows = timeline_rows(section)
+    rows = timeline_rows(section, muted=not status["today"])
     with ui.column().classes(_CARD):
         kit.section_title(status["title"])
         if not rows:
@@ -1218,7 +1272,7 @@ def _confirmation_panel(entries, lead=""):
             if not rows:
                 continue
             shown = True
-            ui.label(f"{name} · {confirmation_word(entry)}").classes(
+            ui.label(f"{name} · {confirmation_summary(entry)}").classes(
                 f"text-base font-semibold {_t.LABEL}")
             grid = kit.table(confirmation_columns(), rows)
             grid.add_slot("body-cell-verdict", _COMPONENT_SLOT)
@@ -1378,6 +1432,7 @@ def render():
                 tooltip="Rebuild the call. A call already shown today stays as published; "
                         "this fills in any symbol still waiting.")
 
+    @guard
     def _paint(view):
         body.clear()
         now = _clock()

@@ -898,8 +898,9 @@ def _build_control(control, fld, value, on_change, *, optional=False):
         control["set"] = lambda v: setattr(el, "value", v)
         return
 
-    if k in ("symbols", "phrases"):
-        # phrases are the same chips; only config_schema.parse differs (case kept)
+    if k in ("symbols", "phrases", "dates"):
+        # phrases and dates are the same chips; only config_schema.parse differs
+        # (case kept for a phrase, YYYY-MM-DD checked and sorted for a date)
         el = ui.input_chips(value=list(shown or []), new_value_mode="add-unique",
                             clearable=True).props("dense outlined") \
             .classes("w-full max-w-xl")

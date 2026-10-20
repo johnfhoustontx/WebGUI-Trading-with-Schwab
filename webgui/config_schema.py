@@ -1184,10 +1184,12 @@ _SCALP = ConfigFile(
                 "time. A slot is entered on the last 5-minute bar that has "
                 "closed.", (
             Field("intraday.start", "First call",
-                  "The first slot of the day.", kind="time"),
+                  "The first slot of the day: not before 08:45, and no slot may "
+                  "fall at 08:36, the morning call's time.", kind="time"),
             Field("intraday.end", "Last call",
-                  "The last slot of the day. It must be after the first.",
-                  kind="time"),
+                  "The last slot of the day. It must be after the first, and the "
+                  "last call's entry plus the time stop must not pass the 15:00 "
+                  "close.", kind="time"),
             Field("intraday.interval_min", "Minutes between calls",
                   "The gap from one slot to the next.",
                   kind="int", unit="min", min=1, max=390, step=1),
@@ -1215,6 +1217,14 @@ _SCALP = ConfigFile(
             Field("intraday.promotion_sessions", "Sessions to promote",
                   "Sessions of calls a group needs before it can be promoted.",
                   kind="int", min=1, max=1000, step=1),
+            Field("intraday.early_close_days", "Early-close days",
+                  "Sessions that close early (YYYY-MM-DD). On such a day no call "
+                  "is made whose entry plus the time stop would pass the early "
+                  "close, and the study leaves those slots out. Add next year's "
+                  "half days here.", kind="dates"),
+            Field("intraday.early_close_time", "Early close",
+                  "When an early-close session ends, Central time: after 08:30 "
+                  "and not after 15:00.", kind="time"),
         )),
         Section("Intraday blocks",
                 "The three parts of the day the study keeps apart. Every slot "
@@ -1256,6 +1266,11 @@ _SCALP = ConfigFile(
                   "read's breadth of room, and a move outside the flat band over "
                   "their last 15 minutes for the intraday price breadth.",
                   kind="int", min=1, max=50, step=1),
+            Field("confirm.min_sources", "Sources needed for a word",
+                  "How many of the four sources (flow, net premium, dealer "
+                  "positioning, sentiment) must give a reading before they are "
+                  "summed up as Confirms, Mixed or Contradicts. One source alone "
+                  "is not a confirmation.", kind="int", min=1, max=4, step=1),
             Field("confirm.max_age_min", "Oldest reading used",
                   "A confirming reading older than this is treated as absent.",
                   kind="int", unit="min", min=1, max=60, step=1),
@@ -2721,6 +2736,21 @@ def parse(fld: Field, raw, *, shipped=None):
         except Exception:
             raise ValueError("use YYYY-MM-DD") from None
         return s
+    if k == "dates":
+        # A list of YYYY-MM-DD, de-duplicated and in order; empty is allowed.
+        import datetime as _dt
+        items = raw if isinstance(raw, (list, tuple)) else str(raw).replace(",", " ").split()
+        out = set()
+        for it in items:
+            s = str(it).strip()
+            try:
+                if len(s) != 10:
+                    raise ValueError
+                _dt.date.fromisoformat(s)
+            except ValueError:
+                raise ValueError(f"{s!r}: use YYYY-MM-DD") from None
+            out.add(s)
+        return sorted(out)
     if k == "text":
         s = str(raw).strip()
         if not s:
@@ -2801,6 +2831,40 @@ def _real(v):
     return isinstance(v, (int, float)) and not isinstance(v, bool)
 
 
+def _hhmm(s):
+    """Minutes after midnight for ``"HH:MM"``, else None."""
+    try:
+        hh, mm = s.split(":")
+        return int(hh) * 60 + int(mm)
+    except (AttributeError, ValueError):
+        return None
+
+
+def _scalp_schedule_errors(first, last, step, time_stop):
+    """The intraday slot schedule's own rules, as ``shared.scalp_config.
+    schedule_problem`` applies them (Tier 1 does not import that module; the
+    loader would read a schedule breaking them as its defaults, with no sign
+    here): not before 08:45, no slot at 08:36, and the last slot's entry (its
+    minute floored to 5) plus the time stop not past the 15:00 close."""
+    start, end = _hhmm(first), _hhmm(last)
+    if start is None or end is None or start > end:
+        return []
+    out = []
+    step = int(step) if _real(step) and step >= 1 else None
+    if step and start <= 8 * 60 + 36 <= end and (8 * 60 + 36 - start) % step == 0:
+        out.append("Intraday calls: no call may fall at 08:36, the morning call's "
+                   "time.")
+    if start < 8 * 60 + 45:
+        out.append("Intraday calls: the first call may not be before 08:45.")
+    if step and _real(time_stop):
+        final = start + (end - start) // step * step
+        if final - final % 5 + time_stop > 15 * 60:
+            out.append("Intraday calls: the last call's entry plus the time stop "
+                       "runs past the 15:00 close. End earlier or shorten the time "
+                       "stop.")
+    return out
+
+
 # ── cross-field checks: (file, message) pairs over a flat {path-tuple: value} ─
 def cross_check(name, values):
     """Sentences for combinations that each pass alone but not together."""
@@ -2852,6 +2916,12 @@ def cross_check(name, values):
         first, last = g("intraday", "start"), g("intraday", "end")
         if isinstance(first, str) and isinstance(last, str) and first > last:
             errs.append("Intraday calls: the first call must not be after the last.")
+        errs += _scalp_schedule_errors(first, last, g("intraday", "interval_min"),
+                                       g("trade", "time_stop_min"))
+        close = g("intraday", "early_close_time")
+        if isinstance(close, str) and not "08:30" < close <= "15:00":
+            errs.append("Intraday calls: the early close must be after 08:30 and "
+                        "not after 15:00.")
         spans = [(g("intraday", "blocks", b, "start"), g("intraday", "blocks", b, "end"))
                  for b in ("morning", "midday", "afternoon")]
         if all(isinstance(t, str) for s in spans for t in s) and (

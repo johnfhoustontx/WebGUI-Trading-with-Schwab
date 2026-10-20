@@ -53,15 +53,17 @@ def _has_direction(d) -> bool:
 
 
 def record(bus, day, slot, now=None, db_path=None, directions=None, win_points=None,
-           entry_ts=None, src=None) -> int:
+           entry_ts=None, src=None, spots=None) -> int:
     """Save one ``intraday_readings`` row per scalp symbol for ``day``'s ``slot``;
     returns the rows written (rows already stored are skipped). ``entry_ts``
     (epoch seconds) defaults to the slot's own 5-minute bar
     (``scalp_config.intraday_entry_ts``). ``src`` is ``scalp_confirm.sources``'
     answer when the caller already read it (the call's own, so the row records
-    exactly what was shown); without it the views are read here. One symbol
-    failing never stops the others, and nothing here raises (a failure is
-    counted as ``options.scalp_record``).
+    exactly what was shown); without it the views are read here. ``spots``
+    (``{symbol: entry spot}``) are the calls' own entry prices, the dealer
+    read's room is measured from them. One symbol failing never stops the
+    others, and nothing here raises (a failure is counted as
+    ``options.scalp_record``).
 
     Write-once, with ONE exception: a stored row with no direction is replaced
     by a row that HAS one (a slot whose call failed to publish was recorded with
@@ -69,6 +71,7 @@ def record(bus, day, slot, now=None, db_path=None, directions=None, win_points=N
     direction is never replaced, and a row without one never by another without."""
     directions = directions if isinstance(directions, dict) else {}
     win_points = win_points if isinstance(win_points, dict) else {}
+    spots = spots if isinstance(spots, dict) else {}
     try:
         day = _day(day)
         now = _now(now)
@@ -104,7 +107,7 @@ def record(bus, day, slot, now=None, db_path=None, directions=None, win_points=N
                     "direction": directions.get(symbol),
                     "components": scalp_confirm.components(
                         src, symbol, directions.get(symbol), win_points.get(symbol),
-                        entry_ts),
+                        entry_ts, spot=spots.get(symbol)),
                     "snapshot": scalp_confirm.snapshot(
                         src, everyone, entry_ts=entry_ts, symbol=symbol)}
             scalp_store.save_reading(day.isoformat(), slot, symbol, body,

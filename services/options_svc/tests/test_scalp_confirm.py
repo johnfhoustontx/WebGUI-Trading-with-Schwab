@@ -357,7 +357,14 @@ def test_room_agrees_but_the_breadth_disagrees_is_neutral():
     assert d["raw"]["own_verdict"] == 1 and d["raw"]["breadth"]["verdict"] == -1
     assert d["verdict"] == 0                              # present, neutral
     assert "room and breadth disagree" in out["dealer_line"]
-    assert out["score"] == 0.0 and out["word"] == "Mixed"
+    # Changed by the final review's M5: the dealer read alone is ONE source, so
+    # there is no word; with a second (a balanced net premium, also neutral) the
+    # neutral dealer read scores 0, Mixed, as before.
+    assert out["score"] is None and out["word"] is None and out["n_present"] == 1
+    two = sc.components(read(mx=full_matrix(roomy=2),
+                             np=netprem({"SPY": [[ENTRY - 60, 5.0e6, 5.0e6]]})),
+                        "SPY", 1, 3.0, ENTRY)
+    assert two["score"] == 0.0 and two["word"] == "Mixed" and two["n_present"] == 2
 
 
 def test_a_wall_inside_the_target_with_roomy_breadth_is_neutral_too():
@@ -693,7 +700,8 @@ def test_snapshot_holds_every_big10_member():
                                       "ts": ENTRY - 60}
     assert snap["netprem"]["BIG10"]["call"] == 644e6           # the basket
     assert snap["netprem"]["QQQ"] is None
-    assert snap["sentiment"] == {"state": "bullish", "score": 63.5}
+    # age_min added by the final review's M1: the row records how old each read was
+    assert snap["sentiment"] == {"state": "bullish", "score": 63.5, "age_min": 0.0}
     assert snap["flow"]["by_type"]["uoa"] == {"n": 1, "bull": 1, "bear": 0}
     assert snap["flow"]["by_type"]["gamma_flip"] == {"n": 1, "bull": 0, "bear": 0}
     assert snap["flow"]["by_type"]["crossover"] == {"n": 1, "bull": 0, "bear": 1}
@@ -735,6 +743,94 @@ def test_snapshot_never_records_a_stale_or_absent_source_as_a_value():
     assert snap["matrix"] == {}
     assert snap["sources"]["netprem"]["state"] == "absent"
     assert snap["netprem"] == {} and snap["flow"] is None and snap["sentiment"] is None
+
+
+# --- final review: entry spot, too few sources, another day's flow ---------
+
+def test_the_dealer_room_is_measured_from_the_calls_entry_spot():
+    # The matrix (read a grace after entry) says 769.44: room 5.56 to the 775
+    # wall. The call entered at 773.00: room 2.00, inside a 3-point target.
+    src = read(mx=full_matrix(call_wall=775.0))
+    from_matrix = sc.components(src, "SPY", 1, 3.0, ENTRY)["dealer"]
+    assert from_matrix["raw"]["own_verdict"] == 1
+    assert from_matrix["raw"]["room_spot_source"] == "matrix"
+    got = sc.components(src, "SPY", 1, 3.0, ENTRY, spot=773.0)
+    d = got["dealer"]
+    assert d["raw"]["room"] == pytest.approx(2.0) and d["raw"]["own_verdict"] == -1
+    assert d["raw"]["spot"] == 769.44                       # the matrix's, recorded
+    assert d["raw"]["room_spot"] == 773.0 and d["raw"]["room_spot_source"] == "entry"
+    assert "inside the target" in got["dealer_line"]
+    # the big ten keep their own matrix spots: the breadth is unchanged
+    assert d["raw"]["breadth"] == from_matrix["raw"]["breadth"]
+    # an unusable entry spot falls back to the matrix's
+    for bad in (None, 0, -1.0, float("nan")):
+        again = sc.components(src, "SPY", 1, 3.0, ENTRY, spot=bad)["dealer"]
+        assert again["raw"]["room_spot_source"] == "matrix", bad
+        assert again["raw"]["own_verdict"] == 1
+
+
+def test_the_snapshot_and_sources_hold_every_age():
+    src = read(mx=full_matrix(), np=netprem({}, minutes_ago=2),
+               sent=sentiment("bullish", minutes_ago=3), fl=flow([]))
+    snap = sc.snapshot(src, ["SPY"], entry_ts=ENTRY, symbol="SPY")
+    assert snap["sources"]["sentiment"]["age_min"] == pytest.approx(3)
+    assert snap["sources"]["netprem"]["age_min"] == pytest.approx(2)
+    assert snap["sources"]["matrix"]["age_min"] == pytest.approx(0)
+    assert snap["sentiment"]["age_min"] == pytest.approx(3)
+
+
+def test_one_source_alone_is_no_word():
+    # Only the flow reads: it agrees, but one source is not a confirmation.
+    src = read(fl=flow([alert("crossover", "calls_over", "SPY", 5),
+                        alert("crossover", "calls_over", "NVDA", 6)]))
+    out = sc.components(src, "SPY", 1, 3.0, ENTRY)
+    assert out["flow"]["verdict"] == 1
+    assert out["word"] is None and out["score"] is None
+    assert out["n_present"] == 1 and out["n_sources"] == 4
+    assert out["word_note"] == "too few sources"
+    # a second source, even a neutral one, makes a word
+    two = sc.components(read(fl=flow([alert("crossover", "calls_over", "SPY", 5),
+                                      alert("crossover", "calls_over", "NVDA", 6)]),
+                             np=netprem({"SPY": [[ENTRY - 60, 5.0, 5.0]]})),
+                        "SPY", 1, 3.0, ENTRY)
+    assert two["n_present"] == 2 and two["word"] == "Confirms" and two["word_note"] is None
+    # nothing at all: no word, and no note either for a call with no direction
+    assert sc.components(read(), "SPY", None, None, ENTRY)["word_note"] is None
+    assert sc.combine({"flow": 1, "netprem": None, "dealer": None,
+                       "sentiment": None}) == (None, None)
+
+
+def test_the_source_minimum_comes_from_the_config(monkeypatch):
+    monkeypatch.setattr(scalp_config, "confirm_min_sources", lambda: 1)
+    assert sc.combine({"flow": 1, "netprem": None, "dealer": None,
+                       "sentiment": None}) == (1.0, "Confirms")
+    monkeypatch.setattr(scalp_config, "confirm_min_sources", lambda: 3)
+    assert sc.combine({"flow": 1, "netprem": 1, "dealer": None,
+                       "sentiment": None}) == (None, None)
+    # a zero-weight source does not count as present
+    monkeypatch.setattr(scalp_config, "confirm_min_sources", lambda: 2)
+    monkeypatch.setattr(scalp_config, "confirm_weights",
+                        lambda: {"flow": 1.0, "netprem": 1.0, "dealer": 1.0,
+                                 "sentiment": 0.0})
+    assert sc.present({"flow": 1, "sentiment": 1}) == 1
+    assert sc.combine({"flow": 1, "netprem": None, "dealer": None,
+                       "sentiment": 1}) == (None, None)
+
+
+def test_a_flow_view_from_another_day_is_stale_not_a_quiet_zero():
+    # Yesterday's list (the detector has not run today): no alert falls in this
+    # slot's window, which must not read as "no flow" (a real 0).
+    old = {"date": "2026-10-19", "alerts": [alert("crossover", "calls_over", "SPY", 5)]}
+    out = sc.components(read(fl=old), "SPY", 1, 3.0, ENTRY)["flow"]
+    assert out["verdict"] is None and out["stale"] is True
+    assert out["raw"] == {"state": "other_day", "date": "2026-10-19"}
+    no_date = {"alerts": []}
+    assert sc.components(read(fl=no_date), "SPY", 1, 3.0, ENTRY)["flow"]["verdict"] is None
+    # today's empty list IS a reading of zero
+    assert sc.components(read(fl=flow([])), "SPY", 1, 3.0, ENTRY)["flow"]["verdict"] == 0
+    # and the snapshot records the other day as such, with no counts
+    snap = sc.snapshot(read(fl=old), ["SPY"], entry_ts=ENTRY, symbol="SPY")
+    assert snap["flow"] == {"date": "2026-10-19", "state": "other_day"}
 
 
 # --- sources -------------------------------------------------------------

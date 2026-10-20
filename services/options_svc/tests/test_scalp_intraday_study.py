@@ -196,6 +196,25 @@ def test_rebuild_skips_short_sessions(db, days):
     assert counts["skipped"]["short_session"] == slots * 3
 
 
+def test_rebuild_skips_the_slots_an_early_close_cuts(db, days, monkeypatch):
+    # days[0] is a configured half day closing at 12:00, though its stored bars
+    # run the whole session: a slot whose hour-long trade passes 12:00 (11:06
+    # on: entry 11:05 + 60) is left out, as no call is made there.
+    seed_day(db, days[0], kind="trend")
+    seed_day(db, days[1], kind="trend")
+    monkeypatch.setattr(scalp_config, "early_close_days", lambda: {days[0]})
+    monkeypatch.setattr(scalp_config, "early_close_time", lambda: "12:00")
+    counts = scalp_intraday_study.rebuild(db_path=db)
+    slots = scalp_config.intraday_slots(days[0])
+    kept = [s for s in slots if s <= "10:51"]
+    half = {r["slot"] for r in _outcomes(db, "day = ?", (days[0].isoformat(),))}
+    assert half == set(kept)
+    full = {r["slot"] for r in _outcomes(db, "day = ?", (days[1].isoformat(),))}
+    assert full == set(slots)
+    assert counts["skipped"]["early_close"] == (len(slots) - len(kept)) * 3
+    assert counts["slots"] == len(slots) * 3 * 2
+
+
 def test_rebuild_skips_no_vol_and_a_path_with_a_hole(db, days):
     seed_day(db, days[0], kind="trend", vix=False)
     seed_day(db, days[1], kind="trend", hole=("SPY", 9, 0))

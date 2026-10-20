@@ -776,6 +776,9 @@ def test_a_down_morning_records_a_dealer_read(db, bus):
     assert dealer["verdict"] is not None
     assert dealer["raw"]["win_points"] == pytest.approx(
         -spy["roles"]["long_with"]["win_points"])
+    # the room is measured from the call's own entry price (final review M1)
+    assert dealer["raw"]["room_spot_source"] == "entry"
+    assert dealer["raw"]["room_spot"] == pytest.approx(spy["entry_spot"])
 
 
 # ── reading the chain ─────────────────────────────────────────────────────────

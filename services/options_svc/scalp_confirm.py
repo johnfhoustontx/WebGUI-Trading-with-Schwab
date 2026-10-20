@@ -26,7 +26,14 @@ Rules that keep it honest:
   ``[confirm] max_age_min``, or has no usable time is NO READING, and a wall
   that is ``None`` (Schwab sent no Greeks) is no reading for that symbol, never
   "no room". A source that IS there and says nothing is a real zero: no flow
-  alerts in the window, a premium inside the margin, a neutral lean.
+  alerts in the window, a premium inside the margin, a neutral lean. A flow
+  view whose ``date`` is not the slot's day is stale, never a quiet zero.
+* **One source is not a confirmation.** The word needs at least ``[confirm]
+  min_sources`` components with a reading (``n_present``); below it the word
+  and score are None (``word_note`` "too few sources").
+* **Room from the call's own price.** The dealer read measures the symbol's room
+  from the call's entry spot when it is given (the matrix's spot is read up to
+  a grace later); the big ten keep their matrix spots.
 * **The alert's own estimate, never a guess.** The view's alerts carry no
   bought / sold figure; ``cache:options:flow_sides`` holds it per alert id.
   An ``uoa`` / ``big_delta`` alert is directional only when one side holds at
@@ -243,6 +250,11 @@ def _estimates(src, flow_payload):
     return contracts, "ok"
 
 
+def _slot_day(entry_ts) -> str:
+    """The Central date (ISO) of an entry time in epoch seconds."""
+    return _dt.datetime.fromtimestamp(entry_ts, tz=_CT).date().isoformat()
+
+
 def _flow(src, symbol, d, entry_ts):
     payload = _payload(src, "flow")
     alerts = payload.get("alerts") if payload else None
@@ -250,6 +262,11 @@ def _flow(src, symbol, d, entry_ts):
         return {"verdict": None, "raw": {"state": "absent"}, "stale": False}
     if entry_ts is None:
         return {"verdict": None, "raw": {"state": "no_entry_ts"}, "stale": False}
+    if payload.get("date") != _slot_day(entry_ts):
+        # Another day's list (the detector has not run today): its quiet window
+        # is not today's zero.
+        return {"verdict": None, "stale": True,
+                "raw": {"state": "other_day", "date": payload.get("date")}}
     raw = _flow_scope(src, payload, symbol, entry_ts)
     verdict = None
     if d is not None:
@@ -423,12 +440,18 @@ def _breadth(rows, d, win_pct):
     return out
 
 
-def _dealer(src, symbol, d, win_points):
+def _dealer(src, symbol, d, win_points, entry_spot=None):
     """``(component, line)``. The verdict is the symbol's own room when the
     breadth of room over the big ten agrees with it or has no reading; 0
     (present, neutral) when room and breadth disagree; and the breadth's own
     verdict when the symbol has no wall. The gamma flip is recorded and never
-    scored."""
+    scored.
+
+    ``entry_spot`` (the call's own entry price): the symbol's room is measured
+    from it, not from the matrix's spot, which is read up to the slot's grace
+    after the entry bar closed and may have moved since. The matrix's spot is
+    still recorded (``spot``) beside the one measured from (``room_spot``,
+    ``room_spot_source``). The big ten keep their own matrix spots."""
     if _stale(src, "matrix"):
         return ({"verdict": None, "raw": {"state": "stale"}, "stale": True},
                 "No reading: the dealer data is stale")
@@ -436,9 +459,12 @@ def _dealer(src, symbol, d, win_points):
     if _payload(src, "matrix") is None:
         return ({"verdict": None, "raw": {"state": "absent"}, "stale": False},
                 "No reading: no dealer data")
-    view = _wall_view(rows.get(_norm(symbol)))
+    matrix_view = _wall_view(rows.get(_norm(symbol)))
+    entry_spot = _positive(entry_spot)
+    view = dict(matrix_view, spot=entry_spot) if entry_spot is not None else matrix_view
     spot, flip = view["spot"], view["flip"]
-    raw = {"state": "ok", **view,
+    raw = {"state": "ok", **matrix_view, "room_spot": spot,
+           "room_spot_source": "entry" if entry_spot is not None else "matrix",
            "above_flip": None if spot is None or flip is None else spot > flip}
     if d is None:
         return {"verdict": None, "raw": raw, "stale": False}, None
@@ -514,12 +540,28 @@ def _sentiment(src, d):
 
 # --- the reading ------------------------------------------------------------
 
+#: What ``components`` says in place of a word when too few sources read.
+TOO_FEW = "too few sources"
+
+
+def present(verdicts) -> int:
+    """How many components gave a reading (+1, -1 or a neutral 0) and count in
+    the score (a weight above zero)."""
+    weights = scalp_config.confirm_weights()
+    return sum(1 for name, v in (verdicts or {}).items()
+               if v is not None and weights.get(name, 0) > 0)
+
+
 def combine(verdicts):
     """``(score, word)`` from ``{component: +1 | -1 | 0 | None}``: the weighted
     mean over the components that gave a reading (a 0 counts, as present and
     neutral; ``None`` does not), and ``Confirms`` / ``Mixed`` / ``Contradicts``
-    from the configured cuts. ``(None, None)`` when nothing gave a reading."""
+    from the configured cuts. ``(None, None)`` when fewer than
+    ``[confirm] min_sources`` gave a reading: one source alone is that source,
+    not a confirmation."""
     weights = scalp_config.confirm_weights()
+    if present(verdicts) < scalp_config.confirm_min_sources():
+        return None, None
     total = weight = 0.0
     for name, v in (verdicts or {}).items():
         if v is None or name not in weights:
@@ -546,25 +588,36 @@ def _guarded(name, fn, *args):
         return None
 
 
-def components(src, symbol, direction, win_points, entry_ts):
-    """The four components for one call, the combined score and word, the dealer
+def components(src, symbol, direction, win_points, entry_ts, spot=None):
+    """The four components for one call, the combined score and word, how many
+    components gave a reading (``n_present``, of ``len(COMPONENTS)``), the dealer
     line and whether the flow window was cut short.
 
     ``direction`` is +1 / -1 (None: every verdict and the score are None, but the
     raw values are still filled, so a call with no direction is still recorded).
     ``win_points`` is the long-with-the-move role's points to target, a positive
-    magnitude in the underlying's points. ``entry_ts`` is epoch seconds."""
+    magnitude in the underlying's points. ``entry_ts`` is epoch seconds.
+    ``spot`` is the call's entry price: given, the dealer read measures the
+    symbol's room from it (the big ten keep the matrix's spots).
+
+    With fewer than ``[confirm] min_sources`` components reading, ``word`` and
+    ``score`` are None and ``word_note`` says ``"too few sources"``."""
     d = _dir(direction)
     ts = _finite(entry_ts)
     flow = _guarded("flow", _flow, src, symbol, d, ts)
     netprem = _guarded("netprem", _netprem, src, symbol, d, ts)
-    dealer = _guarded("dealer", _dealer, src, symbol, d, win_points)
+    dealer = _guarded("dealer", _dealer, src, symbol, d, win_points, spot)
     sentiment = _guarded("sentiment", _sentiment, src, d)
     out = {"flow": flow or _absent("flow"), "netprem": netprem or _absent("netprem"),
            "sentiment": sentiment or _absent("sentiment")}
     out["dealer"], line = dealer or (_absent("dealer"), None)
-    score, word = combine({k: out[k]["verdict"] for k in COMPONENTS})
-    out.update({"score": score, "word": word, "dealer_line": line,
+    verdicts = {k: out[k]["verdict"] for k in COMPONENTS}
+    score, word = combine(verdicts)
+    n_present = present(verdicts)
+    too_few = d is not None and n_present < scalp_config.confirm_min_sources()
+    out.update({"score": score, "word": word, "n_present": n_present,
+                "n_sources": len(COMPONENTS),
+                "word_note": TOO_FEW if too_few else None, "dealer_line": line,
                 "truncated": bool(out["flow"]["raw"].get("truncated"))})
     return out
 
@@ -643,15 +696,20 @@ def snapshot(src, symbols, entry_ts=None, symbol=None) -> dict:
                     "call": level[1], "put": level[2], "ts": int(level[0])}
         sent = _sentiment(src, 1)
         if sent["raw"].get("source") == "ok":
-            out["sentiment"] = {"state": sent["raw"]["state"], "score": sent["raw"]["score"]}
+            out["sentiment"] = {"state": sent["raw"]["state"], "score": sent["raw"]["score"],
+                                "age_min": _source(src, "sentiment")["age_min"]}
         flow = _payload(src, "flow")
-        if flow is not None and isinstance(flow.get("alerts"), list):
+        at = _finite(entry_ts)
+        if (flow is not None and isinstance(flow.get("alerts"), list) and at is not None
+                and flow.get("date") != _slot_day(at)):
+            # Another day's list: recorded as such, its counts are not this slot's.
+            out["flow"] = {"date": flow.get("date"), "state": "other_day"}
+        elif flow is not None and isinstance(flow.get("alerts"), list):
             contracts, sides_state = _estimates(src, flow)
             out["flow"] = {"date": flow.get("date"), "n": len(flow["alerts"]),
                            "sides_view": sides_state,
                            "by_type": _tally(flow["alerts"], contracts),
                            "window": None}
-            at = _finite(entry_ts)
             if symbol is not None and at is not None:
                 out["flow"]["window"] = {"symbol": symbol, "entry_ts": int(at),
                                          **_flow_scope(src, flow, symbol, at)}
