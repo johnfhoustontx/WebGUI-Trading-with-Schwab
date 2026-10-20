@@ -857,6 +857,30 @@ def test_latest_spot_flip_returns_ts_spot_flip(tmp_path, monkeypatch):
     assert db.latest_spot_flip(conn, "QQQ", "gex") is None
 
 
+def test_load_spot_flip_day_is_one_symbol_view_and_day_ascending(tmp_path, monkeypatch):
+    """The series latest_spot_flip reads the newest row of: the HIRO report
+    replays the gamma-flip alert over it minute by minute."""
+    import datetime as _dt
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "t.db")
+    conn = db.connect()
+    db.init_schema(conn)
+    day = _dt.date(2026, 9, 30)
+    start, _end = db._local_unix_range(day)
+    t = start + 9 * 3600
+
+    def summary(ts, spot, flip):
+        return {"ts": ts, "spot": spot, "flip": flip}
+
+    db.insert_snapshot(conn, "SPY", "gex", summary(t + 60, 451.0, 450.0), {}, dte=1)
+    db.insert_snapshot(conn, "SPY", "gex", summary(t, 449.0, 450.0), {}, dte=1)
+    db.insert_snapshot(conn, "SPY", "dex", summary(t, 1.0, 2.0), {}, dte=1)
+    db.insert_snapshot(conn, "QQQ", "gex", summary(t, 3.0, 4.0), {}, dte=1)
+    db.insert_snapshot(conn, "SPY", "gex", summary(t - 86400, 5.0, 6.0), {}, dte=1)
+    assert db.load_spot_flip_day(conn, "SPY", day) == [(t, 449.0, 450.0),
+                                                       (t + 60, 451.0, 450.0)]
+    assert db.load_spot_flip_day(conn, "IWM", day) == []
+
+
 # --- Hedge-pressure history (0-DTE charm drift over the session) ---
 
 def test_load_hedge_series_reads_the_dex_rows_chronologically(tmp_path, monkeypatch):

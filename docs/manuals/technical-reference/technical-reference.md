@@ -2632,7 +2632,22 @@ set beside that day's **base rate for the same direction** — the share of ever
 measured minute after which spot simply rose (or fell) over the same horizon — never a
 coin flip. Hits print as "k of n", with a percentage from 10 decided fires. A **Last N
 sessions** block pools every stored session (up to `keep_sessions`) with surges and
-reversals pooled separately. It reads `gex_history.db` read-only and nothing else, so
+reversals pooled separately.
+
+The report also scores the **Hedging flip** (`gamma_flip`, spot crossing the dealer
+gamma flip level), a third row beside the surges and reversals. It replays
+`flow_alerts.detect_gamma_flip` minute by minute over the GEX snapshots' spot and flip
+with the handler's cooldown (a fire the cooldown suppresses keeps the prior regime),
+for the symbols in `[gamma_flip].symbols`. Each flip is moved onto the nearest HIRO
+minute (within 60 s) and scored on those prices, so it shares the day's base rate. It
+is scored as **continuation**: a cross up is a hit if spot kept rising, a cross down
+if it kept falling. That is a test of direction only; the flip's own claim is about
+how large moves get either side of the level. The snapshots keep 5 sessions and the
+HIRO minutes 20, so each run saves the flips it replayed in `<date>/gamma_flip.json`,
+and later runs pool from those files once the snapshots are gone. A session with
+neither says so rather than printing a zero.
+
+It reads `gex_history.db` read-only, plus its own earlier `gamma_flip.json` files, so
 any stored day can be re-run: `--date YYYY-MM-DD` (default: the newest **closed**
 session), `--force` (a weekend or holiday), `--out DIR`, `--k 2,3,4`,
 `--horizons 5,15`. It exits **1** when nothing was measured (every symbol failed, or a
@@ -3884,7 +3899,7 @@ firing just rewrites the previous trading day's report from the same stored minu
 | EOD report archive | **15:15** (`[slots.eod_report]`) | Writes `webgui/data/eod/<date>/summary.html` + `detail.html` — the `/eod` **Generate** button, unattended. Reads Redis only: no Schwab call, no Claude call. Writes nothing if every cache read was empty. |
 | Marketing gallery recapture | **09:07** (`[slots.gallery_capture]`) | Re-photographs the private app for the public gallery. |
 | Flow-delta instrumentation | **16:00** (`[slots.flow_delta]`) | The only measurement of the `[big_delta]` / UOA thresholds. |
-| HIRO-model validation report | **16:10** (`[slots.hiro_report]`) | `tools/hiro_report.py` via `trading-<env>-hiro-report.timer` (Monday to Friday, `Persistent=true`, so a missed run catches up at boot): replays the day's `hiro_surge` / `hiro_flip` rules and scores the 5- and 15-minute price move after each fire against the same-direction base rate, into `options-scanner/data/hiro_report/<date>/report.md`. Reads `gex_history.db` only — no Schwab, no Redis, no Claude call. The only measurement of the `[hiro]` thresholds. |
+| HIRO-model validation report | **16:10** (`[slots.hiro_report]`) | `tools/hiro_report.py` via `trading-<env>-hiro-report.timer` (Monday to Friday, `Persistent=true`, so a missed run catches up at boot): replays the day's `hiro_surge` / `hiro_flip` rules and the `gamma_flip` (Hedging flip) alert and scores the 5- and 15-minute price move after each fire against the same-direction base rate, into `options-scanner/data/hiro_report/<date>/report.md` (plus `gamma_flip.json`, the day's saved Hedging flips). Reads `gex_history.db` only — no Schwab, no Redis, no Claude call. The only measurement of the `[hiro]` thresholds and of the Hedging flip. |
 | Trade Analyzer outcome labelling | **18:30** (`[slots.label_journal]`) | `tools/label_journal.py`: writes the realized 5/10/20-day forward returns (raw, beta-adjusted, and SPY's) onto recommendations whose horizon has passed. One daily-bar fetch per symbol through the proxy; labels everything outstanding, so a missed night catches up. |
 | Listed-stocks popularity re-rank | **Saturday, 08:00** (`[slots.stock_rank]`) | `tools/rank_listed_stocks.py` via `trading-<env>-stock-rank.timer` (`Persistent=true`): re-ranks `options-scanner/data/us_listed_stocks_classification.csv`. Each row's score (0–100) is a blend of two percentiles taken across the whole file — average **dollar** volume (Schwab's 3-month average share volume, the 10-day where there is none, times the previous close) and market cap (Schwab's, the file's own column where Schwab has none) — weighted by `config/listed_stocks.toml` `[blend] dollar_volume_weight` (0.5). A missing figure scores 0 for its half. Rank 1 is the highest score inside the row's `Industry` and, separately, inside its `Sub_Industry`. About 100 proxy calls two seconds apart. It rewrites only its own ten columns and never adds, drops or reorders a row; if Schwab answers for under `[safety] min_coverage` (90%) of the symbols it changes nothing and exits 1. |
 | Swing model refit | **1st of the month, 19:00** (`[slots.swing_refit]`) | `tools/refit_swing_model.sh`: archives the live `swing_model.json`, refits it on five years of history, and replaces it **only if** the fit passes `config/swing_model.toml` — at least 90% of the 78-symbol universe loaded and an out-of-sample IC above 0. A refused fit is kept as `swing_model.rejected.json` + its report, the live model is untouched, and the run shows as failed. |

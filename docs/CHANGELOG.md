@@ -4,7 +4,25 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-19 (**Dealer Positioning says so when Schwab sends no Greeks.**)
+**Last updated:** 2026-10-20 (**The daily HIRO report also scores the Hedging flip.**)
+
+- **Why:** the owner asked which of Hedging flip, Hedging reversal and Hedging
+  surge moved price most. The nightly report already scored the reversal and the
+  surge. The Hedging flip (`gamma_flip`) had never been measured.
+- **What it does:** `tools/hiro_report.py` replays `flow_alerts.detect_gamma_flip`
+  over the GEX snapshots' per-minute spot and flip, in the live handler's order and
+  with its cooldown. It moves each fire onto the nearest HIRO minute and scores it
+  there as continuation, beside the surge and reversal rows, against the same base
+  rate. New loader: `gex_history_db.load_spot_flip_day`.
+- **Retention:** snapshots keep 5 sessions and HIRO minutes 20, so each run writes
+  `<date>/gamma_flip.json` and later runs pool from it once a day's snapshots are
+  purged. The first run can reach only the 4 or 5 sessions still stored.
+- **Checked on prod** (read-only, report written to a temp folder, prod untouched):
+  the Oct 19 report pooled 4 sessions of Hedging flips ($SPX 3, SPY 2 scored, QQQ
+  and IWM none). That is far too few to show any edge. Design addendum in
+  `docs/plans/2026-10-01-hiro-alert-design.md`.
+
+**Prior —** 2026-10-19 (**Dealer Positioning says so when Schwab sends no Greeks.**)
 
 - **What the user saw:** no strike bars on Dealer Positioning before the open.
   **The cause was Schwab's, not the app's.** From 08:00 CT, and still after the

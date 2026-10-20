@@ -967,6 +967,31 @@ def latest_spot_flip(
     return (row[0], row[1], row[2]) if row else None
 
 
+def load_spot_flip_day(
+    conn: sqlite3.Connection,
+    symbol: str,
+    d,
+    view: str = "gex",
+) -> list[tuple]:
+    """Every ``(ts, spot, flip)`` for (symbol, view) on LOCAL date ``d``,
+    ascending: the series :func:`latest_spot_flip` reads the newest row of,
+    so a replay of the gamma-flip alert sees what live saw minute by minute.
+    The three summary columns only, never ``gex_json``."""
+    start, end = _local_unix_range(d)
+    cur = conn.execute(
+        """
+        SELECT ts, spot, flip
+          FROM snapshots
+         WHERE symbol = ?
+           AND view   = ?
+           AND ts >= ? AND ts < ?
+         ORDER BY ts
+        """,
+        (symbol, view, start, end),
+    )
+    return [(r[0], r[1], r[2]) for r in cur.fetchall()]
+
+
 def latest_skew_by_symbol(
     conn: sqlite3.Connection,
     symbol: str,
