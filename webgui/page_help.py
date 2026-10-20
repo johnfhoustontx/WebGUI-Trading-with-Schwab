@@ -80,8 +80,8 @@ on · what is being said.*
   so under the count. A colour you see pre-open is **not** a statement about
   today.
 - **Dealer positioning** — one row each for **$SPX, SPY, QQQ, $NDX**: price, the
-  **ceiling**, a little bar showing where price sits **between the walls**, the
-  **floor** (the call and put walls — each coloured like its marker on the bar,
+  **floor**, a little bar showing where price sits **between the walls**, the
+  **ceiling** (the put and call walls — each coloured like its marker on the bar,
   and the ceiling only caps price while price is below it), the **flip level**
   and how far price sits from it, and net gamma exposure. Under *dealer mode*,
   *Long gamma · pins* means dealer hedging tends to **hold** price near those
