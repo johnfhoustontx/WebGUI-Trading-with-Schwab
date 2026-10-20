@@ -91,3 +91,103 @@ def test_extra_keys_are_kept():
     # The service publishes the payload it validated, so a key the model does
     # not name must survive the round trip (the same rule as the money views).
     assert ScalpView(**PAYLOAD, horizon="60m").model_dump()["horizon"] == "60m"
+
+
+# ── the intraday section (every 15 minutes, cache:options:scalp) ─────────────
+
+INTRADAY_ENTRY = {"direction": 1, "bucket": "AM", "roles": {"primary": ROLE},
+                  "confirmation": {"score": 0.5, "verdict": "confirms"}}
+INTRADAY = {"slot": "09:06", "latest": {"SPY": INTRADAY_ENTRY},
+            "timeline": [{"t": "09:06", "SPY": {"direction": 1, "p": 0.6, "p_base": 0.58}}]}
+
+
+def _with_intraday(intraday):
+    return dict(PAYLOAD, intraday=intraday)
+
+
+def _with_latest_role(**fields):
+    """An intraday payload whose one latest role carries ``fields``; None drops the key."""
+    role = dict(ROLE, **fields)
+    role = {k: v for k, v in role.items() if v is not None or k not in fields}
+    entry = dict(INTRADAY_ENTRY, roles={"primary": role})
+    return _with_intraday(dict(INTRADAY, latest={"SPY": entry}))
+
+
+def test_intraday_defaults_to_empty_and_old_payload_validates():
+    # A payload written before the section existed still validates, and reads as "none".
+    assert ScalpView(**PAYLOAD).intraday == {}
+    assert ScalpView().intraday == {}
+
+
+def test_intraday_section_validates():
+    assert ScalpView(**_with_intraday(INTRADAY)).intraday["slot"] == "09:06"
+    ScalpView(**_with_intraday({"slot": "09:06", "latest": {}, "timeline": []}))
+    ScalpView(**_with_intraday({"slot": "09:06", "latest": None, "timeline": None}))
+
+
+def test_intraday_role_rate_outside_unit_interval_refused():
+    for field in ("p", "lo", "hi", "p_base"):
+        for bad in (1.2, -0.1):
+            with pytest.raises(ValidationError):
+                ScalpView(**_with_latest_role(**{field: bad}))
+
+
+def test_intraday_role_rate_nan_and_bool_refused():
+    for field in ("p", "lo", "hi", "p_base"):
+        for bad in (float("nan"), float("inf"), True, False):
+            with pytest.raises(ValidationError):
+                ScalpView(**_with_latest_role(**{field: bad}))
+
+
+def test_intraday_role_rate_on_unit_interval_or_absent_is_fine():
+    for field in ("p", "lo", "hi", "p_base"):
+        ScalpView(**_with_latest_role(**{field: 0.0}))
+        ScalpView(**_with_latest_role(**{field: 1}))
+        ScalpView(**_with_latest_role(**{field: None}))
+
+
+def test_intraday_timeline_rate_outside_unit_interval_refused():
+    for field in ("p", "p_base"):
+        for bad in (1.2, -0.1, float("nan"), True):
+            row = {"t": "09:06", "SPY": {field: bad}}
+            with pytest.raises(ValidationError):
+                ScalpView(**_with_intraday(dict(INTRADAY, timeline=[row])))
+
+
+def test_intraday_confirmation_score_range():
+    for good in (1, -1, 0, 0.0, 1.0, -1.0, None):
+        entry = dict(INTRADAY_ENTRY, confirmation={"score": good})
+        ScalpView(**_with_intraday(dict(INTRADAY, latest={"SPY": entry})))
+    for bad in (1.5, -1.5, float("nan"), float("inf"), True):
+        entry = dict(INTRADAY_ENTRY, confirmation={"score": bad})
+        with pytest.raises(ValidationError):
+            ScalpView(**_with_intraday(dict(INTRADAY, latest={"SPY": entry})))
+
+
+def test_intraday_timeline_not_a_list_refused():
+    # A wrong container type is a ValidationError, never an AttributeError.
+    for bad in ({"t": "09:06"}, "09:06", 5):
+        with pytest.raises(ValidationError):
+            ScalpView(**_with_intraday(dict(INTRADAY, timeline=bad)))
+
+
+def test_intraday_timeline_row_not_a_mapping_refused():
+    with pytest.raises(ValidationError):
+        ScalpView(**_with_intraday(dict(INTRADAY, timeline=["09:06"])))
+
+
+def test_intraday_latest_not_a_mapping_refused():
+    for bad in ([INTRADAY_ENTRY], "SPY", 5):
+        with pytest.raises(ValidationError):
+            ScalpView(**_with_intraday(dict(INTRADAY, latest=bad)))
+
+
+def test_intraday_latest_entry_not_a_mapping_refused():
+    with pytest.raises(ValidationError):
+        ScalpView(**_with_intraday(dict(INTRADAY, latest={"SPY": 5})))
+
+
+def test_intraday_confirmation_not_a_mapping_refused():
+    entry = dict(INTRADAY_ENTRY, confirmation=0.5)
+    with pytest.raises(ValidationError):
+        ScalpView(**_with_intraday(dict(INTRADAY, latest={"SPY": entry})))

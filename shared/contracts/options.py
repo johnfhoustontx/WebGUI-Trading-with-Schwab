@@ -339,19 +339,48 @@ def _unit_number(v, name: str):
     return v
 
 
+def _signed_unit_number(v, name: str):
+    _finite_number(v, name)
+    if not -1.0 <= v <= 1.0:
+        raise ValueError(f"{name} is outside [-1, 1]")
+    return v
+
+
+_RATE_KEYS = ("p", "lo", "hi", "p_base")
+
+
+def _check_roles(roles) -> None:
+    """Each rate on each role of ``roles`` is a unit number when it is present.
+    The one walk for every role mapping: the symbols and the intraday latest."""
+    if roles is None:
+        return
+    if not isinstance(roles, dict):
+        raise ValueError("roles is not a mapping")
+    for role in roles.values():
+        if not isinstance(role, dict):
+            raise ValueError("a role is not a mapping")
+        for key in _RATE_KEYS:
+            if role.get(key) is not None:
+                _unit_number(role[key], key)
+
+
 class ScalpView(_MoneyView):
     """cache:options:scalp — the Opening Scalp page: each symbol's call and its
-    measured win rate per structure (roles), with the morning's inputs.
+    measured win rate per structure (roles), with the morning's inputs, and the
+    intraday section (every 15 minutes: ``slot``, ``latest`` per symbol, and the
+    ``timeline`` rows).
 
     A rate that is not known is None ("not measured"), never 0.0 and never a
     number that reads as a real one. Every field has a default, so a payload Redis
-    kept across a restart still validates."""
+    kept across a restart still validates, and one written before ``intraday``
+    existed reads as ``{}``."""
     day: str | None = None
     generated_at: str | None = None
     state: Literal["call", "waiting", "closed", "error"] = "waiting"
     symbols: dict[str, dict] = {}   # symbol -> direction, bucket, alignment, roles, …
     context: dict = {}
     scorecard: dict = {}
+    intraday: dict = {}   # slot, latest: symbol -> entry, timeline: [row, …]
 
     @field_validator("symbols", mode="after")
     @classmethod
@@ -359,15 +388,38 @@ class ScalpView(_MoneyView):
         for entry in symbols.values():
             if entry.get("alignment") is not None:
                 _finite_number(entry["alignment"], "alignment")
-            roles = entry.get("roles")
-            if roles is None:
-                continue
-            if not isinstance(roles, dict):
-                raise ValueError("roles is not a mapping")
-            for role in roles.values():
-                if not isinstance(role, dict):
-                    raise ValueError("a role is not a mapping")
-                for key in ("p", "lo", "hi", "p_base"):
-                    if role.get(key) is not None:
-                        _unit_number(role[key], key)
+            _check_roles(entry.get("roles"))
         return symbols
+
+    @field_validator("intraday", mode="after")
+    @classmethod
+    def _intraday_is_unit_numbers(cls, intraday):
+        latest = intraday.get("latest")
+        if latest is not None:
+            if not isinstance(latest, dict):
+                raise ValueError("intraday latest is not a mapping")
+            for entry in latest.values():
+                if not isinstance(entry, dict):
+                    raise ValueError("an intraday entry is not a mapping")
+                _check_roles(entry.get("roles"))
+                confirmation = entry.get("confirmation")
+                if confirmation is None:
+                    continue
+                if not isinstance(confirmation, dict):
+                    raise ValueError("intraday confirmation is not a mapping")
+                if confirmation.get("score") is not None:
+                    _signed_unit_number(confirmation["score"], "confirmation score")
+        timeline = intraday.get("timeline")
+        if timeline is not None:
+            if not isinstance(timeline, list):
+                raise ValueError("intraday timeline is not a list")
+            for row in timeline:
+                if not isinstance(row, dict):
+                    raise ValueError("a timeline row is not a mapping")
+                for cell in row.values():
+                    if not isinstance(cell, dict):
+                        continue
+                    for key in ("p", "p_base"):
+                        if cell.get(key) is not None:
+                            _unit_number(cell[key], key)
+        return intraday
