@@ -692,6 +692,26 @@ def test_scalp_bars_branch_grades_after_the_rebuild_independently():
     assert "run_in_executor(None, scalp_grade.grade_pending)" in seg
 
 
+def test_scalp_bars_branch_grades_the_intraday_calls_after_the_0836_grading_independently():
+    import inspect
+
+    src = inspect.getsource(scheduler.loop)
+    seg = src.split("async def _scalp_bars_branch", 1)[1].split("if bars_slot:", 1)[0]
+    # 08:36 grading -> intraday grading -> scorecard republish, the intraday one in
+    # the executor and in its OWN try: a failed 08:36 grading still grades the slot
+    # calls, and a failed intraday grading still republishes the scorecard.
+    assert "run_in_executor(None, scalp_intraday_grade.grade_pending)" in seg
+    assert (seg.index("scalp_grade.grade_pending")
+            < seg.index("scalp_intraday_grade.grade_pending")
+            < seg.index("scalp_call.republish_scorecard"))
+    between = seg.split("scalp_grade.grade_pending", 1)[1].split(
+        "scalp_intraday_grade.grade_pending", 1)[0]
+    assert "except Exception" in between and "try:" in between
+    between = seg.split("scalp_intraday_grade.grade_pending", 1)[1].split(
+        "scalp_call.republish_scorecard", 1)[0]
+    assert "except Exception" in between and "try:" in between
+
+
 def test_scalp_bars_branch_republishes_the_scorecard_after_grading_independently():
     import inspect
 

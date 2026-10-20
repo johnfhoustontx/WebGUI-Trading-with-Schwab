@@ -19,7 +19,7 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from services import _heartbeat
-from services.options_svc import compute, finder_public, flow_stream, handlers, scalp_call, scalp_fetch, scalp_grade, scalp_intraday_call, scalp_intraday_study, scalp_study
+from services.options_svc import compute, finder_public, flow_stream, handlers, scalp_call, scalp_fetch, scalp_grade, scalp_intraday_call, scalp_intraday_grade, scalp_intraday_study, scalp_study
 from shared import market_calendar as mc
 from shared import scalp_config
 from shared import trade_mgmt as _trade_mgmt
@@ -1188,6 +1188,16 @@ async def loop(bus):
                          graded["days"], graded["rows"])
             except Exception:
                 log.exception("scalp grading degraded")
+            # The intraday slot calls are graded the same way, write-once, right
+            # after the 08:36 ones and before the scorecard republish that
+            # shows them. Guarded on its own: a failed 08:36 grading still
+            # grades them, and a failure here still republishes.
+            try:
+                graded = await loop_.run_in_executor(None, scalp_intraday_grade.grade_pending)
+                log.info("scalp intraday grading: %d day(s) tried, %d grade row(s) written",
+                         graded["days"], graded["rows"])
+            except Exception:
+                log.exception("scalp intraday grading degraded")
             # Then the current view is republished with the fresh scorecard
             # (only that field: no build, no fetch), so tonight's grades show
             # tonight. Guarded on its own: a failed grading still republishes
