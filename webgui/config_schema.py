@@ -1206,6 +1206,12 @@ _SCALP = ConfigFile(
                   "entry bar, that may be missing before the side of VWAP is "
                   "left out (0 up to, not including, 1).",
                   kind="float", min=0, max=0.99, step=0.05),
+            Field("intraday.min_brier_margin", "Edge margin over the base rate",
+                  "How much lower than the base rate's a bucket's Brier score must "
+                  "be, at every volatility multiplier, before an intraday call "
+                  "counts as an edge. 0.005 is about a 7-point win-rate difference "
+                  "near a 50% win rate (0 up to, not including, 0.25).",
+                  kind="float", min=0, max=0.249, step=0.001),
             Field("intraday.promotion_sessions", "Sessions to promote",
                   "Sessions of calls a group needs before it can be promoted.",
                   kind="int", min=1, max=1000, step=1),

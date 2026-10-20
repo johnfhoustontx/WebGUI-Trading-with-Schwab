@@ -347,7 +347,8 @@ def test_rebuild_verdicts_are_the_walk_forward_by_day_of_the_stored_rows(
                 for s in scalp_config.iv_scales():
                     g = groups[(sym, block, role, s)]
                     by_scale[s] = scalp_model.verdict_by_day(
-                        scalp_model.walk_forward(g), g, 2)
+                        scalp_model.walk_forward(g), g, 2,
+                        min_margin=scalp_config.min_brier_margin())
                 across = scalp_model.edge_across_scales(by_scale)
                 for b in scalp_model.BUCKETS:
                     got = stored[(sym, block, role, b)]
@@ -356,6 +357,44 @@ def test_rebuild_verdicts_are_the_walk_forward_by_day_of_the_stored_rows(
                         assert got["scales"][str(s)] == by_scale[s][b]
     # Some cell was scored over several days, so the comparison is not of empties.
     assert any(c["n_scored"] >= 2 for v in stored.values() for c in v["scales"].values())
+
+
+def _gains(v):
+    """The cell's smallest Brier gain over the base across the study scales."""
+    cells = [v["scales"][str(s)] for s in scalp_config.iv_scales()]
+    if any(c["brier_bucket"] is None for c in cells):
+        return None
+    return min(c["brier_base"] - c["brier_bucket"] for c in cells)
+
+
+def test_an_intraday_edge_needs_the_margin_at_every_scale(walked, monkeypatch):
+    monkeypatch.setattr(scalp_config, "min_samples", lambda: 1)
+    monkeypatch.setattr(scalp_config, "min_brier_margin", lambda: 0.0)
+    scalp_intraday_study.rebuild(db_path=walked)
+    plain = _verdicts(walked)
+    gains = sorted({_gains(v) for v in plain.values() if v["edge"]})
+    assert len(gains) >= 2, "the fixture must give edges of different sizes"
+    # A margin between the smallest and the largest passing gain.
+    margin = (gains[0] + gains[-1]) / 2
+    monkeypatch.setattr(scalp_config, "min_brier_margin", lambda: margin)
+    scalp_intraday_study.rebuild(db_path=walked)
+    strict = _verdicts(walked)
+    refused = kept = 0
+    for key, v in plain.items():
+        g = _gains(v)
+        # The numbers do not move; only the edge does.
+        assert strict[key]["scales"] == {
+            s: {**c, "edge": strict[key]["scales"][s]["edge"]} for s, c in v["scales"].items()}
+        if v["edge"] and g < margin:
+            assert strict[key]["edge"] is False  # a positive gain under the margin
+            refused += 1
+        elif v["edge"]:
+            assert strict[key]["edge"] is True  # over the margin at every scale
+            kept += 1
+        else:
+            assert strict[key]["edge"] is False
+        assert strict[key]["min_margin"] == margin
+    assert refused and kept
 
 
 # ── current rates ────────────────────────────────────────────────────────────
@@ -416,6 +455,8 @@ def test_report_says_k_of_cells(walked, monkeypatch):
     assert int(m.group(2)) == len(scored) > 0
     assert int(m.group(1)) == sum(1 for v in scored if v["edge"])
     assert "would pass" in text  # the chance estimate sits beside k
+    header = text.split("## Summary", 1)[0]
+    assert f"Brier margin {scalp_config.min_brier_margin():g}" in header
     if int(m.group(1)):
         assert "smallest Brier margin" in text
     for sym in PRICES:

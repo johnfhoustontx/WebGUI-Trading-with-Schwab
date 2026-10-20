@@ -446,6 +446,17 @@ def test_intraday_config_hands_back_copies(monkeypatch):
     assert "99:99" not in sc.intraday_slots(_DAY)
 
 
+def test_min_brier_margin_default_and_validation(monkeypatch):
+    sc.reset_cache()
+    assert sc.min_brier_margin() == 0.005
+    for bad in (-0.001, 0.25, 0.3, "x", True, None, float("nan"), float("inf")):
+        monkeypatch.setattr(sc, "load", lambda bad=bad: {"intraday": {"min_brier_margin": bad}})
+        assert sc.min_brier_margin() == 0.005
+    for good in (0, 0.01, 0.2499):
+        monkeypatch.setattr(sc, "load", lambda good=good: {"intraday": {"min_brier_margin": good}})
+        assert sc.min_brier_margin() == good
+
+
 def test_vwap_max_missing_default_and_validation(monkeypatch):
     sc.reset_cache()
     assert sc.vwap_max_missing() == 0.25

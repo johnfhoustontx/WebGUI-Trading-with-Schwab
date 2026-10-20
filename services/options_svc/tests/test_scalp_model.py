@@ -248,6 +248,34 @@ def test_verdict_by_day_needs_lower_brier_than_base():
     assert v["high"]["edge"] is False
 
 
+def test_verdict_by_day_margin_refuses_a_sub_margin_improvement():
+    # High wins 3 of 4 slots a day, low 1 of 4: a real improvement on the base.
+    rows = _slots([[("high", 1), ("high", 1), ("high", 1), ("high", 0),
+                    ("low", 0), ("low", 0), ("low", 0), ("low", 1)]] * 10)
+    scored = walk_forward(rows)
+    plain = verdict_by_day(scored, rows, min_samples=1)["high"]
+    gain = plain["brier_base"] - plain["brier_bucket"]
+    assert gain > 0 and plain["edge"] is True
+    # The default margin (0) is verdict_by_day's own rule ...
+    assert verdict_by_day(scored, rows, min_samples=1, min_margin=0) == \
+        verdict_by_day(scored, rows, min_samples=1)
+    # ... a margin above the improvement refuses the edge, one at or below keeps it.
+    above = verdict_by_day(scored, rows, min_samples=1, min_margin=gain + 1e-9)["high"]
+    assert above["edge"] is False
+    assert above["brier_bucket"] == plain["brier_bucket"]  # the numbers are unchanged
+    assert verdict_by_day(scored, rows, min_samples=1,
+                          min_margin=gain - 1e-9)["high"]["edge"] is True
+
+
+def test_verdict_by_day_margin_still_needs_the_days():
+    rows = _slots([[("high", 1), ("low", 0)] * 4] * 8)
+    scored = walk_forward(rows)
+    v = verdict_by_day(scored, rows, min_samples=8, min_margin=0.005)["high"]
+    assert v["brier_base"] - v["brier_bucket"] > 0.005
+    assert v["edge"] is False  # 7 days < 8
+    assert verdict_by_day(scored, rows, min_samples=7, min_margin=0.005)["high"]["edge"]
+
+
 def test_verdict_by_day_refuses_mismatched_lists():
     rows = _slots([[("high", 1)], [("high", 0)]])
     with pytest.raises(ValueError):

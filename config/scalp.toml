@@ -115,6 +115,13 @@ breadth_agree = 0.6
 # The share (0 up to, not including, 1) of the session's 5-minute bars, 08:30 to
 # the entry bar, that may be missing before the side of VWAP is left out.
 vwap_max_missing = 0.25
+# How much better (lower) than the base rate's a bucket's walk-forward Brier score
+# must be, at EVERY volatility multiplier, before an intraday cell counts as an
+# edge (0 up to, not including, 0.25). 0.005 is about a 7-point win-rate
+# difference at a win rate near 50%: below it, a "better" bucket is a near-tie
+# with the base rate. Declared before the study was read; the 08:36 study does
+# not use it.
+min_brier_margin = 0.005
 # Sessions of calls a group needs before it can be promoted.
 promotion_sessions = 40
 

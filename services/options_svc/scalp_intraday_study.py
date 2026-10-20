@@ -36,7 +36,12 @@ The measurement's rules, each one fixed before any outcome was read:
   days, and ``current_rates``' interval is Wilson with ``n`` = days around the row
   mean (``scalp_model.wilson_days``);
 * an edge only if it holds at every multiplier in ``iv_scales()``; the current
-  ``iv_scale()`` is simulated too (it is the rate the page shows) but does not vote.
+  ``iv_scale()`` is simulated too (it is the rate the page shows) but does not vote;
+* and only if, at each of those multipliers, the bucket's Brier sits at least
+  ``[intraday] min_brier_margin`` below the base's (declared before the study was
+  read): on pure-noise bars a bucket holding most of a cell's rows nearly IS the
+  base rate, and "strictly lower" alone passed such near-ties. The 08:36 study's
+  rule (``scalp_model.verdict``) has no margin and is unchanged.
 
 Imports nothing from ``compute``.
 """
@@ -139,6 +144,7 @@ def _verdict_rows(outcome_rows, symbols, blocks, scales):
     bucket."""
     streams = scored_streams(outcome_rows)
     min_n = scalp_config.min_samples()
+    margin = scalp_config.min_brier_margin()
     study_scales = [scalp_study._scale_key(s) for s in scalp_config.iv_scales()]
     out = []
     for sym in symbols:
@@ -147,13 +153,15 @@ def _verdict_rows(outcome_rows, symbols, blocks, scales):
                 by_scale = {}
                 for scale in scales:
                     rows, scored = streams.get((sym, block, role, scale), ([], []))
-                    by_scale[scale] = scalp_model.verdict_by_day(scored, rows, min_n)
+                    by_scale[scale] = scalp_model.verdict_by_day(scored, rows, min_n,
+                                                                 min_margin=margin)
                 across = scalp_model.edge_across_scales(
                     {s: by_scale[s] for s in study_scales if s in by_scale})
                 for bucket in scalp_model.BUCKETS:
                     body = {"scales": {str(s): by_scale[s][bucket] for s in scales},
                             "edge": bool(across.get(bucket, False)),
-                            "edge_scales": study_scales, "unit": "day"}
+                            "edge_scales": study_scales, "unit": "day",
+                            "min_margin": margin}
                     out.append((sym, block, role, bucket, json.dumps(
                         body, sort_keys=True, separators=(",", ":"))))
     return out

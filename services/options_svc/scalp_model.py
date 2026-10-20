@@ -134,14 +134,16 @@ def verdict(scored, rows, min_samples):
 # rate and the Brier means stay over rows, but ``n``, the ``min_samples`` gate and
 # the Wilson interval's ``n`` are distinct days.
 
-def verdict_by_day(scored, rows, min_samples):
+def verdict_by_day(scored, rows, min_samples, min_margin=0.0):
     """``verdict`` with the DAY as the unit: per bucket ``{brier_bucket,
     brier_base, n_scored, n_rows, edge}``.
 
     The Brier scores are means over the scored ROWS, exactly as ``verdict``'s;
     ``n_scored`` is the number of DISTINCT days with a scored row in the bucket
     (``n_rows`` the rows), and ``edge`` iff ``n_scored >= min_samples`` and the
-    bucket's Brier is strictly below the base's. ``scored`` is
+    bucket's Brier is strictly below the base's and, when ``min_margin`` is
+    above 0, below it by at least ``min_margin`` (the intraday study's declared
+    margin: a near-tie with the base rate is not an edge). ``scored`` is
     ``walk_forward(rows)``, whose rows sharing a day never see each other."""
     if len(scored) != len(rows):
         raise ValueError("scored and rows must be the same rows")
@@ -163,7 +165,8 @@ def verdict_by_day(scored, rows, min_samples):
         days, n, sb, sbase = sums[b]
         bb, bbase = sb / n, sbase / n
         out[b] = {"brier_bucket": bb, "brier_base": bbase, "n_scored": len(days),
-                  "n_rows": n, "edge": bool(len(days) >= min_samples and bb < bbase)}
+                  "n_rows": n, "edge": bool(len(days) >= min_samples and bb < bbase
+                                            and bbase - bb >= min_margin)}
     return out
 
 

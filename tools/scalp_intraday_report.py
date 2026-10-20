@@ -11,8 +11,9 @@ What it prints:
 
 * the headline, "k of N cells pass at every scale": a cell is one (symbol, time
   block, role, alignment bucket), N counts the cells with any scored day, and a
-  cell passes when its walk-forward Brier beats the base rate's, over at least
-  ``min_samples`` DAYS, at every multiplier in ``iv_scales``. Beside it, how many
+  cell passes when its walk-forward Brier beats the base rate's by at least
+  ``[intraday] min_brier_margin``, over at least ``min_samples`` DAYS, at every
+  multiplier in ``iv_scales``. Beside it, how many
   would pass with no edge at all: the same verdicts with each cell's bucket
   sequence ROTATED against its outcomes (the buckets' clustering kept, their link
   to the outcomes cut), averaged over a fixed set of rotations - an estimate of
@@ -109,7 +110,7 @@ def _scored(v) -> bool:
 
 
 # ── chance ───────────────────────────────────────────────────────────────────
-def _chance(outcomes, cells, study_scales, min_n) -> float:
+def _chance(outcomes, cells, study_scales, min_n, margin) -> float:
     """Mean count of ``cells`` passing at every study scale once each (symbol,
     block, role)'s bucket sequence is rotated against its outcomes."""
     groups = defaultdict(list)
@@ -140,14 +141,14 @@ def _chance(outcomes, cells, study_scales, min_n) -> float:
                      for o in rows if round(float(o["iv_scale"]), 6) == scale),
                     key=lambda r: (r["day"], r["slot"]))
                 by_scale[scale] = scalp_model.verdict_by_day(
-                    scalp_model.walk_forward(stream), stream, min_n)
+                    scalp_model.walk_forward(stream), stream, min_n, min_margin=margin)
             across = scalp_model.edge_across_scales(by_scale)
             total += sum(1 for b in buckets if across.get(b))
     return total / ROTATIONS
 
 
 # ── sections ─────────────────────────────────────────────────────────────────
-def _summary(outcomes, verdicts, study_scales) -> list:
+def _summary(outcomes, verdicts, study_scales, margin) -> list:
     cells = {k: v for k, v in verdicts.items() if _scored(v)}
     passed = sorted(k for k, v in cells.items() if v["edge"])
     across = ", ".join(f"x{s:g}" for s in study_scales)
@@ -156,7 +157,8 @@ def _summary(outcomes, verdicts, study_scales) -> list:
              f"A cell is one symbol x time block x role x alignment bucket; "
              f"{len(verdicts)} are defined and {len(cells)} have any scored day.", ""]
     if cells:
-        chance = _chance(outcomes, list(cells), study_scales, scalp_config.min_samples())
+        chance = _chance(outcomes, list(cells), study_scales, scalp_config.min_samples(),
+                         margin)
         lines += [f"With no edge anywhere, about {chance:.1f} of {len(cells)} would pass: "
                   f"the same verdicts with each cell's bucket sequence rotated against "
                   f"its outcomes, averaged over {ROTATIONS} rotations (an estimate of "
@@ -175,13 +177,13 @@ def _summary(outcomes, verdicts, study_scales) -> list:
                 cell_rows[(o["symbol"], o["block"], o["role"], o["bucket"])] += 1
         for s, b, r, k in passed:
             v = verdicts[(s, b, r, k)]
-            margin = min(c["brier_base"] - c["brier_bucket"]
-                         for sc, c in v["scales"].items()
-                         if round(float(sc), 6) in study_scales)
+            gap = min(c["brier_base"] - c["brier_bucket"]
+                      for sc, c in v["scales"].items()
+                      if round(float(sc), 6) in study_scales)
             total = role_rows[(s, b, r)]
             share = cell_rows[(s, b, r, k)] / total if total else None
             lines.append(f"- {s} {b} / {ROLE_WORDS[r]} / {k}: smallest Brier margin "
-                         f"{margin:.5f}; the bucket holds {_pct(share)} of the role's "
+                         f"{gap:.5f}; the bucket holds {_pct(share)} of the role's "
                          f"labelled rows in the block (x{current:g}).")
     else:
         lines.append("No cell passes at every scale: every call would show its base "
@@ -216,7 +218,8 @@ def _symbol_section(sym, outcomes, verdicts, blocks, scales, current) -> list:
     lines = [f"## {sym}", "", "### Walk-forward verdict (5-minute bars, the day as the unit)",
              "", "Each cell: Brier of the bucket's rate / Brier of the base rate over "
              "the same scored rows, (n) the DAYS those rows came from, and `EDGE` when "
-             "the bucket's is lower with n at least the minimum. Lower Brier is better.",
+             "the bucket's is lower by at least the margin with n at least the minimum. "
+             "Lower Brier is better.",
              ""]
     header = ["Block", "Role", "Bucket"] + [f"x{s:g}" for s in scales] \
         + ["Edge at every scale"]
@@ -291,6 +294,9 @@ def render(db_path) -> str:
         if k[0] not in symbols:
             symbols.append(k[0])
     blocks = _blocks(verdicts, outcomes)
+    # The margin the stored verdicts were judged with (config's if none says).
+    margins = {v.get("min_margin") for v in verdicts.values()} - {None}
+    margin = margins.pop() if len(margins) == 1 else scalp_config.min_brier_margin()
     scales = sorted({float(s) for v in verdicts.values() for s in v["scales"]})
     span = f"from {days[0]} to {days[-1]} ({len(days)} trading days)" if days else "none"
     lines += [
@@ -298,7 +304,8 @@ def render(db_path) -> str:
         f"{scalp_config.intraday_slots(None)[0]} to {scalp_config.intraday_slots(None)[-1]} "
         f"CT every 15 minutes in blocks {', '.join(blocks)}. Alignment cuts "
         f"{scalp_config.buckets()}; verdict multipliers {scalp_config.iv_scales()}; "
-        f"current x{current:g}; minimum scored DAYS {scalp_config.min_samples()}; target "
+        f"current x{current:g}; minimum scored DAYS {scalp_config.min_samples()}; an edge "
+        f"needs a Brier margin {margin:g} below the base at every multiplier; target "
         f"{scalp_config.target_pct():g}% / stop {scalp_config.stop_pct():g}% / time stop "
         f"{scalp_config.time_stop_min()} min.",
         "",
@@ -308,7 +315,7 @@ def render(db_path) -> str:
         "21 slots a day share one tape, so every n below counts days, and a row is "
         "predicted only from earlier days.",
         ""]
-    lines += _summary(outcomes, verdicts, study_scales)
+    lines += _summary(outcomes, verdicts, study_scales, margin)
     lines += _base_section(outcomes, symbols, blocks, current)
     for sym in symbols:
         lines += _symbol_section(sym, outcomes, verdicts, blocks, scales, current)

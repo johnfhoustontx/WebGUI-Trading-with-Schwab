@@ -53,7 +53,7 @@ DEFAULTS = {
     "intraday": {
         "start": "08:51", "end": "13:51", "interval_min": 15, "grace_min": 5,
         "dead_zone_pct": 0.03, "breadth_agree": 0.6, "promotion_sessions": 40,
-        "vwap_max_missing": 0.25,
+        "vwap_max_missing": 0.25, "min_brier_margin": 0.005,
         "blocks": {"morning": {"start": "08:51", "end": "09:51"},
                    "midday": {"start": "10:06", "end": "12:21"},
                    "afternoon": {"start": "12:36", "end": "13:51"}},
@@ -373,6 +373,16 @@ def vwap_max_missing() -> float:
     raw = _section("intraday").get("vwap_max_missing")
     if not _real(raw) or not (0 <= raw < 1):
         return float(DEFAULTS["intraday"]["vwap_max_missing"])
+    return float(raw)
+
+
+def min_brier_margin() -> float:
+    """How far below the base rate's Brier a bucket's must sit, at every study
+    scale, for an INTRADAY edge (the 08:36 study does not read it): at least 0
+    and below 0.25, any other value reads as the default."""
+    raw = _section("intraday").get("min_brier_margin")
+    if not _real(raw) or not (0 <= raw < 0.25):
+        return float(DEFAULTS["intraday"]["min_brier_margin"])
     return float(raw)
 
 
