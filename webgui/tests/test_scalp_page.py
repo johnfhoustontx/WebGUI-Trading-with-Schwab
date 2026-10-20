@@ -541,3 +541,397 @@ def test_scorecard_symbols_and_heading_tolerate_the_empty_card():
 def test_the_panel_keeps_the_empty_line_and_uses_the_kit_table():
     assert "SCORECARD_EMPTY" in SRC and "No graded days yet." in SRC
     assert "kit.table(scorecard_columns()" in SRC
+
+
+# ── the intraday calls (every 15 minutes) ────────────────────────────────────
+# The payload is ``view["intraday"]`` (services/options_svc/scalp_intraday_call):
+# ``{"day", "slot", "latest": {symbol: entry}, "timeline": [...], "next_slot"}``.
+# Its rates are over EVERY stored day, its sample counts are DAYS (``n_days``),
+# and the confirmation word is recorded to be tested - not in the probability.
+def _irole(structure, p=0.5, base=0.5, *, n_days=30, n_base_days=90, edge=False,
+           strikes=(504.0,), entry=2.95, win=0.74, loss=-1.07, walls=()):
+    return {"structure": structure, "p": p, "lo": max(0.0, p - 0.15),
+            "hi": min(1.0, p + 0.15), "p_base": base, "edge": edge,
+            "strikes": list(strikes), "entry_value": entry, "entry_source": "chain",
+            "win_points": win, "loss_points": loss, "n_days": n_days,
+            "n_base_days": n_base_days, "wall_context": list(walls)}
+
+
+def _conf(word="Mixed", *, flow=None, netprem=None, dealer=-1, sentiment=1,
+          stale=(), dealer_line="The call wall at 503.75 (0.05%) is inside the target"):
+    def comp(name, verdict):
+        return {"verdict": verdict, "raw": {"state": "ok"}, "stale": name in stale}
+    return {"flow": comp("flow", flow), "netprem": comp("netprem", netprem),
+            "dealer": comp("dealer", dealer), "sentiment": comp("sentiment", sentiment),
+            "score": -0.3333333, "word": word, "dealer_line": dealer_line,
+            "truncated": False}
+
+
+def _ientry(direction=1, *, highlight=None, avoid=(), word="Mixed", walls=(), **extra):
+    up = direction == 1
+    structures = {"long_with": "long_call" if up else "long_put",
+                  "long_against": "long_put" if up else "long_call",
+                  "credit_with": "pcs" if up else "ccs",
+                  "credit_against": "ccs" if up else "pcs"}
+    roles = {r: _irole(s, walls=walls) for r, s in structures.items()}
+    entry = {"slot": "10:21", "block": "midday", "direction": direction,
+             "bucket": "high", "alignment": 1.0, "entry_spot": 503.5,
+             "inputs": {}, "agree": {}, "rates_basis": "all stored days",
+             "chain": {"spot": 503.5, "atm_iv": 0.18, "expiry": "2026-10-19:0"},
+             "roles": roles, "highlight": highlight, "avoid": list(avoid),
+             "note": None if highlight else "no measured edge", "points_note": None,
+             "confirmation": _conf(word), "dealer_line": _conf(word)["dealer_line"],
+             "made_at": "2026-10-19T10:21:20-05:00", "inputs_failed": [],
+             "inputs_note": None}
+    entry.update(extra)
+    return entry
+
+
+def _cell(direction=1, highlight=None, word="Mixed", edge_p=None, base=None,
+          note="no measured edge"):
+    return {"direction": direction, "highlight": highlight, "word": word,
+            "edge_p": edge_p, "edge_p_base": base, "note": note}
+
+
+def _section(**over):
+    sec = {"day": "2026-10-19", "slot": "10:21",
+           "latest": {"SPY": _ientry(1)},
+           "timeline": [
+               {"slot": "09:06", "symbols": {"SPY": _cell(1), "QQQ": _cell(None, word=None,
+                    note="flat over the last 15 minutes — no direction")}},
+               {"slot": "09:21", "symbols": {"SPY": _cell(-1, "long_with", "Confirms",
+                                                            0.63, 0.5, note=None)}}],
+           "next_slot": "2026-10-19T10:36:00-05:00"}
+    sec.update(over)
+    return sec
+
+
+def test_latest_call_names_contracts_by_direction():
+    up = _by_role(scalp.intraday_role_rows(_ientry(1)))
+    assert [up[r]["trade"] for r in ROLES] == [
+        "Long call", "Long put", "Put credit spread", "Call credit spread"]
+    down = _by_role(scalp.intraday_role_rows(_ientry(-1)))
+    assert [down[r]["trade"] for r in ROLES] == [
+        "Long put", "Long call", "Call credit spread", "Put credit spread"]
+    assert [r["id"] for r in scalp.intraday_role_rows(_ientry(1))] == list(ROLES)
+    assert up["long_with"]["side"] == "with the last 15 minutes' move"
+    assert up["long_against"]["side"] == "against the last 15 minutes' move"
+    assert scalp.intraday_role_rows({"direction": None, "roles": {}}) == []
+    assert scalp.intraday_role_rows(None) == []
+
+
+def test_direction_is_said_in_words_over_the_last_15_minutes():
+    assert scalp.move_words(_ientry(1)) == "moving up over the last 15 minutes"
+    assert scalp.move_words(_ientry(-1)) == "moving down over the last 15 minutes"
+    flat = _ientry(None, roles={}, note="flat over the last 15 minutes — no direction")
+    assert scalp.move_words(flat) == "flat over the last 15 minutes — no call"
+    nobars = _ientry(None, roles={}, note="no bars for the last 15 minutes yet")
+    assert "no bars" in scalp.move_words(nobars)
+
+
+def test_the_headline_is_no_edge_with_the_base_rates_unless_a_highlight():
+    assert scalp.NO_EDGE.lower() in scalp.intraday_headline(_ientry(1)).lower()
+    sym = _ientry(1, avoid=["credit_with"])
+    assert "no measured edge" in scalp.intraday_headline(sym).lower()
+    rows = _by_role(scalp.intraday_role_rows(sym))
+    assert rows["credit_with"]["tone"] == "caution"
+    assert rows["credit_with"]["mark"] == scalp.CAUTION
+    assert all(r["usual"] == "50.00%" for r in rows.values())
+    hl = _ientry(1, highlight="long_with")
+    hl["roles"]["long_with"].update(p=0.63, lo=0.45, hi=0.78, p_base=0.5, n_days=30)
+    text = scalp.intraday_headline(hl)
+    assert text.startswith("Measured edge") and "Long call" in text
+    assert "63.00%" in text and "50.00%" in text and "30 days" in text
+    rows = _by_role(scalp.intraday_role_rows(hl))
+    assert rows["long_with"]["mark"] == scalp.EDGE and rows["long_with"]["tone"] == "edge"
+    assert rows["long_against"]["mark"] == ""
+
+
+def test_a_headline_for_a_symbol_with_no_call_is_the_services_note():
+    flat = _ientry(None, roles={}, note="flat over the last 15 minutes — no direction")
+    assert scalp.intraday_headline(flat).startswith("Flat over the last 15 minutes")
+    missed = _ientry(1, roles={}, note="missed the call window")
+    assert scalp.intraday_headline(missed) == "Missed the call window"
+
+
+def test_sample_label_says_days():
+    row = _by_role(scalp.intraday_role_rows(_ientry(1)))["long_with"]
+    assert row["days"] == "30 days" and row["days_base"] == "90 days"
+    assert row["samples"] == "30 / 90 days"
+    one = _ientry(1)
+    one["roles"]["long_with"].update(n_days=1)
+    assert _by_role(scalp.intraday_role_rows(one))["long_with"]["days"] == "1 day"
+    assert "n_days" not in {c["field"] for c in scalp.intraday_role_columns()}
+    cols = " ".join(c["label"] for c in scalp.intraday_role_columns())
+    assert "Days" in cols and "Samples" not in cols
+    assert row["interval"] == "35.00% – 65.00%"
+    missing = _ientry(1)
+    del missing["roles"]["long_with"]["n_days"]
+    assert _by_role(scalp.intraday_role_rows(missing))["long_with"]["days"] == fmt.NO_READING
+
+
+def test_the_rates_basis_is_said_in_plain_words():
+    text = scalp.RATES_BASIS_TEXT
+    assert "every stored day" in text and "walk-forward" in text
+    assert scalp.rates_basis_line(_ientry(1)) == text
+    assert scalp.rates_basis_line(_ientry(1, roles={})) == ""
+
+
+def test_dealer_line_and_wall_context_shown():
+    sym = _ientry(1, walls=["Target is beyond the call wall at 503.75"])
+    assert scalp.dealer_line(sym) == "The call wall at 503.75 (0.05%) is inside the target"
+    rows = _by_role(scalp.intraday_role_rows(sym))
+    assert rows["long_with"]["walls"] == "Target is beyond the call wall at 503.75"
+    two = _ientry(1, walls=["Target is beyond the call wall at 503.75",
+                            "Stop is beyond the put wall at 493.43"])
+    assert scalp.intraday_role_rows(two)[0]["walls"].count("wall") == 2
+    assert _by_role(scalp.intraday_role_rows(_ientry(1)))["long_with"]["walls"] == ""
+    assert scalp.dealer_line(_ientry(1, dealer_line=None, confirmation={})) == ""
+    # the confirmation's own copy is the fallback
+    assert scalp.dealer_line(_ientry(1, dealer_line=None)) == _conf()["dealer_line"]
+
+
+def test_inputs_failed_and_note_are_shown_when_present():
+    ok = _ientry(1)
+    assert scalp.inputs_line(ok) == ""
+    sym = _ientry(1, inputs_failed=["XLV", "/NQ"],
+                  inputs_note="built on fewer inputs: no fresh bars for /NQ, XLV")
+    assert scalp.inputs_line(sym) == "Built on fewer inputs: no fresh bars for /NQ, XLV"
+    only_list = _ientry(1, inputs_failed=["XLV"], inputs_note=None)
+    assert "XLV" in scalp.inputs_line(only_list)
+
+
+def test_notes_are_shown_but_the_headline_is_not_repeated():
+    missed = _ientry(1, roles={}, note="missed the call window",
+                     points_note="no usable volatility: no strikes or points")
+    notes = scalp.intraday_notes(missed, scalp.intraday_headline(missed))
+    assert notes == ["No usable volatility: no strikes or points"]
+    assert scalp.intraday_notes(_ientry(1), scalp.intraday_headline(_ientry(1))) == []
+
+
+# ── the confirmation: a word, never a probability ───────────────────────────
+def test_confirmation_never_shown_as_a_probability():
+    sym = _ientry(1, word="Confirms")
+    assert scalp.confirmation_word(sym) == "Confirms"
+    assert "Not in the probability" in scalp.CONFIRMATION_TITLE
+    assert scalp.CONFIRMATION_TITLE == \
+        "Not in the probability — being recorded to be tested"
+    rows = scalp.confirmation_rows(sym)
+    assert [r["id"] for r in rows] == ["flow", "netprem", "dealer", "sentiment"]
+    texts = [r[k] for r in rows for k in ("component", "verdict")]
+    texts += [scalp.confirmation_word(sym), scalp.CONFIRMATION_NOTE]
+    assert not any("%" in t for t in texts)
+    assert not any(ch.isdigit() for t in texts for ch in t), texts   # no score at all
+    assert "-0.33" not in " ".join(texts)
+    for word in ("Confirms", "Mixed", "Contradicts"):
+        assert scalp.confirmation_word(_ientry(1, word=word)) == word
+        assert word in {"Confirms", "Mixed", "Contradicts"}
+    # the page never prints the score or draws a gauge from it
+    assert 'get("score")' not in SRC and "['score']" not in SRC
+
+
+def test_each_component_is_a_whole_word_and_stale_is_said():
+    conf = _conf("Mixed", flow=1, netprem=-1, dealer=0, sentiment=None, stale=("netprem",))
+    conf["netprem"]["verdict"] = None
+    rows = _by_role(scalp.confirmation_rows(_ientry(1, confirmation=conf)))
+    assert rows["flow"]["verdict"] == "Agrees"
+    assert rows["dealer"]["verdict"] == "No side"
+    assert rows["sentiment"]["verdict"] == "No reading"
+    assert rows["netprem"]["verdict"] == "No reading · stale"
+    assert rows["netprem"]["stale"] is True and rows["flow"]["stale"] is False
+    disagrees = _by_role(scalp.confirmation_rows(_ientry(1, confirmation=_conf(dealer=-1))))
+    assert disagrees["dealer"]["verdict"] == "Disagrees"
+
+
+def test_a_missing_confirmation_reads_no_reading():
+    assert scalp.confirmation_rows(_ientry(1, confirmation={})) == []
+    assert scalp.confirmation_word(_ientry(1, confirmation={})) == "No reading"
+    nodir = _ientry(None, roles={}, confirmation=_conf(word=None))
+    assert scalp.confirmation_word(nodir) == "No reading"
+
+
+def test_a_truncated_flow_window_is_said():
+    conf = _conf()
+    conf["truncated"] = True
+    assert "cut short" in scalp.confirmation_flags(_ientry(1, confirmation=conf))[0]
+    assert scalp.confirmation_flags(_ientry(1)) == []
+
+
+# ── which day, and is the call still current ────────────────────────────────
+def test_the_latest_call_line_names_its_slot_and_the_next():
+    status = scalp.intraday_status(_section(), _at(2026, 10, 19, 10, 25))
+    assert status["today"] is True and status["past"] is False
+    assert status["line"] == "Latest call at 10:21 · next at 10:36"
+    assert status["title"] == "Today's calls"
+
+
+def test_a_past_slot_is_labelled_past():
+    status = scalp.intraday_status(_section(), _at(2026, 10, 19, 10, 40))
+    assert status["past"] is True
+    assert status["line"] == "Last call at 10:21 · next at 10:36"
+    assert "newer" in status["warning"].lower()
+    label = scalp.latest_label(_section(), _at(2026, 10, 19, 10, 40))
+    assert label.startswith("Last call at 10:21") and "past" in label
+    current = scalp.latest_label(_section(), _at(2026, 10, 19, 10, 25))
+    assert current == "Latest call at 10:21"
+
+
+def test_a_stale_day_section_is_labelled_as_that_days_and_never_as_current():
+    sec = _section()
+    status = scalp.intraday_status(sec, _at(2026, 10, 20, 9, 0))
+    assert status["today"] is False
+    assert status["title"] == "Calls of 2026-10-19 — not today's"
+    assert "not today's" in status["line"] and "2026-10-19" in status["line"]
+    assert "Latest call" not in status["line"]
+    label = scalp.latest_label(sec, _at(2026, 10, 20, 9, 0))
+    assert "2026-10-19" in label and "not today's" in label
+    assert "Latest call" not in label
+    # the same payload on its own day is today's
+    assert scalp.intraday_status(sec, _at(2026, 10, 19, 10, 22))["title"] == "Today's calls"
+    # no day at all is never "today"
+    assert scalp.intraday_status({"slot": "09:06"}, _at(2026, 10, 19, 10))["today"] is False
+
+
+def test_a_stale_day_names_the_next_call_only_while_it_is_ahead():
+    sec = _section(next_slot="2026-10-20T08:51:00-05:00")
+    early = scalp.intraday_status(sec, _at(2026, 10, 20, 7, 0))
+    assert "next at" in early["line"] and "08:51" in early["line"]
+    late = scalp.intraday_status(sec, _at(2026, 10, 20, 9, 30))
+    assert "next at" not in late["line"]
+
+
+def test_a_missing_section_is_empty():
+    assert scalp.intraday_section({}) == {}
+    assert scalp.intraday_section({"intraday": "junk"}) == {}
+    assert scalp.latest_entries(_section()) == [("SPY", _section()["latest"]["SPY"])]
+    assert scalp.latest_entries({"latest": {"SPY": "junk"}}) == []
+
+
+# ── today's calls ────────────────────────────────────────────────────────────
+def test_timeline_rows():
+    sec = _section()
+    assert scalp.timeline_symbols(sec) == ["SPY", "QQQ"]
+    cols = scalp.timeline_columns(sec)
+    assert [c["label"] for c in cols] == ["Time (CT)", "SPY", "QQQ"]
+    rows = scalp.timeline_rows(sec)
+    assert [r["time"] for r in rows] == ["09:06", "09:21"]
+    first, second = rows
+    assert first["s0"] == "↑ Up" and first["s0_pick"] == "—"
+    assert first["s0_word"] == "Mixed"
+    assert first["s1"] == "— No direction" and first["s1_word"] == fmt.NO_READING
+    assert "flat over the last 15 minutes" in first["s1_note"]
+    assert second["s0"] == "↓ Down"
+    assert second["s0_pick"] == "Long put · 63.00% vs 50.00% usually"
+    assert second["s0_word"] == "Confirms"
+    # a symbol not in a slot is dashes, not a crash
+    assert second["s1"] == "—" and second["s1_pick"] == "—"
+    # the usual no-edge note is the dash, not repeated on every row
+    assert first["s0_note"] == ""
+
+
+def test_timeline_survives_junk():
+    assert scalp.timeline_rows({}) == [] and scalp.timeline_rows(None) == []
+    assert scalp.timeline_rows({"timeline": ["x", {"slot": "09:06", "symbols": None}]}) == [
+        {"id": "09:06", "time": "09:06"}]
+    assert scalp.timeline_symbols({"timeline": "x"}) == []
+
+
+def test_the_timeline_says_what_its_rates_are_over():
+    assert "every stored day" in scalp.RATES_BASIS_TEXT
+
+
+# ── the intraday scorecard ──────────────────────────────────────────────────
+def _iblock(days=3, **over):
+    block = {"days": days,
+             "edge": {"days": 2, "rows": 5, "wins": 3, "rate": 0.6, "p_base": 0.5},
+             "caution": {"days": 1, "rows": 1, "wins": 0, "rate": 0.0, "p_base": 0.45},
+             "by_word": {
+                 "Confirms": {"days": 2, "rows": 3, "wins": 2, "win_rate": 2 / 3},
+                 "Mixed": {"days": 2, "rows": 2, "wins": 1, "win_rate": 0.5},
+                 "Contradicts": {"days": 1, "rows": 1, "wins": 0, "win_rate": 0.0}}}
+    block.update(over)
+    return block
+
+
+def _iscore(**blocks):
+    return {"intraday": {"days": 3, "window": 20, "symbols": {
+        "SPY": {"days": 3, "blocks": blocks or {"morning": _iblock()}}}}}
+
+
+def test_the_intraday_scorecard_counts_days_not_rows():
+    line = scalp.intraday_edge_line(_iblock())
+    assert "3 of 5 calls" in line and "2 days" in line
+    assert "60.00%" in line and "against 50.00% usually" in line
+    assert "5 days" not in line and "3 days" not in line
+    caution = scalp.intraday_caution_line(_iblock())
+    assert "0 of 1 call" in caution and "1 day" in caution
+    assert "0.00%" in caution and "against 45.00% usually" in caution
+    assert "1 days" not in caution
+
+
+def test_the_intraday_scorecard_edge_with_no_highlighted_day_says_so():
+    line = scalp.intraday_edge_line(_iblock(edge={"days": 0, "rows": 0, "wins": 0,
+                                                  "rate": None, "p_base": None}))
+    assert line.startswith("Edge calls: none") and "%" not in line
+    assert scalp.intraday_edge_line({}).startswith("Edge calls: none")
+    assert scalp.intraday_caution_line({}).startswith("Cautions: none")
+
+
+def test_the_scorecard_win_rates_by_word_carry_their_days():
+    rows = scalp.intraday_word_rows(_iblock())
+    assert [r["word"] for r in rows] == ["Confirms", "Mixed", "Contradicts"]
+    first = rows[0]
+    assert first["rate"] == "66.67%" and first["days"] == "2 days"
+    assert first["calls"] == "2 of 3"
+    assert rows[2]["days"] == "1 day" and rows[2]["rate"] == "0.00%"
+    empty = scalp.intraday_word_rows(_iblock(by_word={
+        "Confirms": {"days": 0, "rows": 0, "wins": 0, "win_rate": None}}))
+    assert empty[0]["rate"] == fmt.NO_READING and empty[0]["days"] == "0 days"
+    assert empty[0]["calls"] == fmt.NO_READING
+    assert [r["word"] for r in empty] == ["Confirms", "Mixed", "Contradicts"]
+
+
+def test_the_intraday_scorecard_blocks_in_the_services_order():
+    card = _iscore(morning=_iblock(), midday=_iblock(days=1))
+    got = scalp.intraday_scorecard_blocks(card)
+    assert [(s, [b["block"] for b in blocks]) for s, _d, blocks in got] == [
+        ("SPY", ["morning", "midday"])]
+    assert got[0][1] == 3
+    assert [b["label"] for b in got[0][2]] == ["Morning", "Midday"]
+    assert scalp.intraday_scorecard_blocks({}) == []
+    assert scalp.intraday_scorecard_blocks({"intraday": {"symbols": {"SPY": "x"}}}) == []
+    assert scalp.intraday_scorecard_blocks({"intraday": {}}) == []
+
+
+def test_the_intraday_scorecard_heading_and_basis_say_days():
+    head = scalp.intraday_scorecard_heading(_iscore())
+    assert "3 days graded" in head and "20 days" in head
+    assert "distinct days" in scalp.INTRADAY_SCORECARD_NOTE
+    assert "every stored day" in scalp.RATES_BASIS_TEXT
+
+
+def test_the_08_36_scorecard_helpers_are_unchanged_by_the_intraday_section():
+    card = dict(_scorecard(), intraday=_iscore()["intraday"])
+    assert [n for n, _ in scalp.scorecard_symbols(card)] == ["SPY"]
+    assert scalp.scorecard_symbols(_iscore()) == []         # intraday-only: no 08:36 cards
+    assert scalp.has_scorecard(_iscore()) and scalp.has_scorecard(_scorecard())
+    assert not scalp.has_scorecard({}) and not scalp.has_scorecard(None)
+
+
+# ── the page ─────────────────────────────────────────────────────────────────
+def test_the_page_help_explains_the_intraday_calls():
+    import page_help
+    text = page_help.HELP_MD["/options/scalp"]
+    for needle in ("08:51", "13:51", "last 15 minutes", "distinct days",
+                   "every stored day", "walk-forward", "not in the probability",
+                   "being recorded to be tested", "dealer read", "Last call"):
+        assert needle in text, needle
+
+
+def test_the_intraday_panels_use_the_kit_and_still_read_one_view():
+    assert "kit.table(intraday_role_columns()" in SRC
+    assert "kit.table(timeline_columns(" in SRC
+    assert "CONFIRMATION_TITLE" in SRC
+    assert scalp.VIEW == "options:scalp"
+    assert "ui.html" not in SRC and ".style(" not in SRC
+

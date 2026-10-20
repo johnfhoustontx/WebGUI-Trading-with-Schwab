@@ -1105,6 +1105,32 @@ call on screen and labels the day it belongs to.
 **Not in the probability** (headlines, flow alerts and the report link) is shown
 for context only. None of it was measured or fed into the rates.
 
+**Calls every 15 minutes.** Below the 08:36 cards the page shows a new call
+every 15 minutes from **08:51 to 13:51 CT**, for the same three symbols.
+- **Latest call** is read from the **last 15 minutes' price move** (up, down, or
+  flat, which gets no call) and names the same four trades by that move's
+  contract. Its rates come from days that looked the same: the call is sorted
+  into a **low, mid or high** agreement bucket and into a time **block**
+  (morning, midday, afternoon). **Days** beside a rate are **distinct days**, not
+  calls. Every rate is over **every stored day**, and whether a bucket beats its
+  usual rate is the **walk-forward** test: **Measured edge**, **Caution** and
+  **No measured edge** mean what they do on the morning card, and "no measured
+  edge" is the usual answer. A call that was built on fewer inputs says which
+  bars were missing.
+- **The dealer read** is one line: how far the nearest call or put wall in the
+  trade's direction sits against the move the trade needs (and how many of the
+  ten big names have room). Under each trade it also names any wall between the
+  entry and its target or stop.
+- **Today's calls** lists every slot made today: the direction, the highlighted
+  trade or a dash, the confirmation word and any note. A latest call whose next
+  slot has passed reads **Last call**, and a list from an earlier day says whose
+  day it is and that it is not today's.
+- **The confirmation** (Confirms, Mixed or Contradicts) is whether options flow,
+  net premium, the dealer read and market sentiment agree with the move, shown
+  in whole words beside each source (agrees, disagrees, no side, no reading, or
+  stale). It is **not in the probability**: it is a word, never a chance of
+  winning, and it is only **being recorded to be tested**.
+
 **Scorecard** is how the published calls actually did. Each evening the app grades
 every trade it showed that morning, from the call as published and under the
 target, stop and time stop it was made with, and the scorecard updates that
@@ -1116,6 +1142,12 @@ and by the **live chain** (the volatility the 08:36 chain implied; a dash if no 
 was captured). A few days is a small sample. A call made on a shortened session
 (a half day) is not graded, because the model's settlement time would be wrong.
 A grade is written once and never recomputed.
+
+The **intraday** part of the scorecard is per symbol and per block: the same
+**Edge calls** and **Cautions** lines, and the win rate split by the confirmation
+word, each rate beside the **days** it rests on (distinct days; several calls are
+made on one day). The split is a first, informal look at whether the confirmation
+helps; it is not in the probability.
 """,
     "/news": """
 **Market News — the simple version**
