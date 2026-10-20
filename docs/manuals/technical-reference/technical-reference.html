@@ -5941,7 +5941,15 @@ sentiment are a <strong>confirmation reading</strong>, shown and recorded and no
   at :06, :21, :36 and :51, which sit after the auto-scan's :02-:05 fetch burst and
   outside the refused first minute after the hour and half hour. A slot fires once per
   trading day from its time up to its time plus <code>grace_min</code> (5); one missed by more is
-  skipped, never backfilled (a late call would not be the call that moment asked for).</li>
+  skipped, never backfilled (a late call would not be the call that moment asked for).
+  A schedule that starts before 08:45, puts a slot at 08:36 (the morning call's own
+  row) or whose last entry plus <code>[trade] time_stop_min</code> passes the 15:00 close reads
+  as the defaults whole (<code>scalp_config.schedule_problem</code>); Settings refuses it.</li>
+<li><strong>Half days.</strong> On a date in <code>[intraday] early_close_days</code> (2026-11-27, 2026-12-24) the
+  session ends at <code>early_close_time</code> (12:00). A slot whose entry plus the time stop
+  would pass that close makes no call (note "the market closes early today", nothing
+  fetched or frozen), <code>next_slot</code> skips it, and the study leaves it out. At the
+  defaults the last call of a half day is 10:51.</li>
 <li><strong>Blocks.</strong> Slots are pooled into <code>morning</code> (08:51-09:51), <code>midday</code> (10:06-12:21) and
   <code>afternoon</code> (12:36-13:51) so that the study's cells are few enough for the sample:
   3 symbols x 3 blocks x 4 roles x 3 buckets = <strong>108 cells</strong>. A block table that is bad
@@ -6024,8 +6032,9 @@ reading and, when it has a direction and a usable volatility, simulates the four
 from that slot's entry along the stored bars at every multiplier in <code>[study]
 iv_scales</code>, with the 08:36 simulator and rules (<code>scalp_sim.simulate</code>). Then it replaces
 <code>intraday_outcomes</code> and <code>intraday_verdicts</code> in <strong>one transaction</strong>. Rows are skipped
-(and counted by reason) for a short session, a slot in no block, no direction, no
-volatility, or a path short of a full time stop's bars. A <code>skip</code> from the simulator
+(and counted by reason) for a slot an early close cuts (<code>early_close</code>), a short
+session, a slot in no block, no direction, no volatility, or a path short of a full
+time stop's bars. A <code>skip</code> from the simulator
 (entry premium under <code>min_premium</code>, common late in the day) is stored with
 <code>result = "skip"</code> and never labelled.</p>
 <ul>
@@ -6063,8 +6072,14 @@ volatility, or a path short of a full time stop's bars. A <code>skip</code> from
 <li><strong>One run at a time.</strong> <code>run_slot</code> holds <code>scalp_call._RUN_LOCK</code>, the lock the 08:36
    call and a Refresh take: the second caller waits, then finds the slot frozen.</li>
 <li><strong>Fetch only what a new call needs</strong>, on the normal lane: today's 5-minute bars for the
-   23 bar symbols (one request each), then the 0DTE chain for each symbol being built
-   that has a direction: about 26 requests per slot. The confirmation reads Redis only.</li>
+   23 bar symbols (one request each, <code>scalp_fetch.top_up_today</code>), then the 0DTE chain
+   for each symbol being built that has a direction: about 26 requests per slot. The
+   confirmation reads Redis only. <strong>No hole is skipped:</strong> a symbol whose latest stored
+   5-minute bar is from an earlier day (the nightly top-up did not run) is fetched from
+   one bar before that one, walking forward exactly as the nightly top-up does, so
+   today's bars never move the store's latest past an unfilled afternoon (which no
+   later top-up would fetch, and which for $SPX would read as a short session, never
+   graded). A failed window stops that symbol there.</li>
 <li><strong>Price and points</strong> exactly as the 08:36 call (<code>scalp_call._price</code>), with the walls in
    the path to each role's target and stop (<code>wall_context</code>).</li>
 <li><strong>Frozen.</strong> A (day, slot, symbol) is saved in <code>intraday_calls</code> (and its chain slice in
@@ -6072,7 +6087,9 @@ volatility, or a path short of a full time stop's bars. A <code>skip</code> from
    validated against <code>ScalpView</code> and reached the bus; a stored one is reused whole.
    What freezes is a call and a flat tape; a symbol with missing bars or a failed build is
    not frozen and a Refresh inside the window may fill it. After <code>entry + time_stop_min</code>
-   a symbol gets no roles and the note "missed the call window".</li>
+   a symbol gets no roles and the note "missed the call window". <code>made_at</code> is the wall
+   clock when the entry was built; whether the slot is in its window is judged by the
+   scheduler's tick, which can be earlier by the wait for the run lock.</li>
 <li><strong>Publishing merges.</strong> The current view is republished with only <code>intraday</code> replaced;
    <code>symbols</code> and every other key are untouched. The 08:36 publish and the nightly
    scorecard republish carry the <code>intraday</code> section forward (only if it validates on
@@ -6085,14 +6102,20 @@ volatility, or a path short of a full time stop's bars. A <code>skip</code> from
 bought / sold estimate lives there, not on the alerts) and <code>cache:sentiment:composite</code>.
 A view with a time of its own (<code>matrix</code>, <code>net_premium</code>, sentiment) older than <code>[confirm]
 max_age_min</code> (5) is <strong>stale</strong> and its component is <strong>no reading</strong>; the flow views carry
-none, so a quiet list is a real zero and only a missing view is absent. <strong>Absent is not
-neutral:</strong> <code>None</code> never counts, while a source that is there and finds nothing gives 0.</p>
+no time, so a quiet list of the slot's own day is a real zero; a flow list whose <code>date</code>
+is not the slot's day is stale (its window holds nothing of today), and only a missing
+view is absent. <strong>Absent is not neutral:</strong> <code>None</code> never counts, while a source that is
+there and finds nothing gives 0.</p>
 <p>Each component gives +1 (agrees), -1 (disagrees), 0 (looked, no side) or none, relative
 to the call's direction, and <code>combine</code> takes the weighted mean over those with a
 reading: weights <code>[confirm.weights]</code> flow 1.0, netprem 1.0, dealer 1.0, <strong>sentiment
 0.5</strong>; the word is <code>Confirms</code> at or above the upper cut, <code>Contradicts</code> at or below the
-lower (<code>cuts</code> = [-0.34, 0.34]), else <code>Mixed</code>. The score is in [-1, 1], is never shown and
-is never a probability.</p>
+lower (<code>cuts</code> = [-0.34, 0.34]), else <code>Mixed</code>. The word needs at least <code>[confirm]
+min_sources</code> (2) components with a reading (a weight of 0 does not count): one source
+alone is that source, not a confirmation, so the word and score are none and
+<code>word_note</code> says "too few sources". The reading carries <code>n_present</code> of <code>n_sources</code>
+(4), and the page shows "n of 4 sources" beside the word. The score is in [-1, 1], is
+never shown and is never a probability.</p>
 <ul>
 <li><strong>Flow.</strong> Alerts in <code>[entry_ts - flow_window_min, entry_ts]</code> (30 min) on the symbol and
   the big ten. The net of bullish over bearish alerts, times the direction, must reach
@@ -6152,9 +6175,12 @@ is never a probability.</p>
   direction, against <code>netprem_margin</code> (0.1). Never a difference of two points: the stored
   premium is volume at the current mark and falls when marks fall. A point more than
   <code>max_age_min</code> before entry is stale.
-- <strong>The dealer read.</strong> <em>Room:</em> spot to the call wall (up) or the put wall (down), against
-  the long-with role's <code>win_points</code>; room at least that agrees, a wall inside the target
-  disagrees. <em>Breadth:</em> the share of the big ten whose room in percent of their own spot
+- <strong>The dealer read.</strong> <em>Room:</em> the call's own <code>entry_spot</code> to the call wall (up) or the
+  put wall (down), against the long-with role's <code>win_points</code>; room at least that agrees,
+  a wall inside the target disagrees. The matrix's spot is read up to the grace after
+  the entry bar and may have moved, so it is recorded (<code>spot</code>) beside the one measured
+  from (<code>room_spot</code>, <code>room_spot_source</code> <code>entry</code>; <code>matrix</code> only when no entry spot was
+  given). The big ten keep their own matrix spots. <em>Breadth:</em> the share of the big ten whose room in percent of their own spot
   reaches the target in percent, read only with <code>breadth_min_members</code> (5) usable
   members: &gt;= <code>breadth_agree</code> agrees, &lt;= 1 minus it disagrees. The verdict is the
   symbol's own room when breadth agrees, is neutral or has no reading, <strong>0</strong> when breadth
@@ -6172,7 +6198,8 @@ is never a probability.</p>
 <p>At every intraday slot <strong>and</strong> at 08:36 (inside the call's grace), one
 <code>intraday_readings</code> row per scalp symbol per slot is saved, with or without a
 direction: the components and their <strong>raw values</strong> (so any later definition can be
-recomputed), each source's state and age, the spot, walls, flip, net GEX and
+recomputed), each source's state and age (<code>snapshot.sources</code>; sentiment's age also
+beside its state), the spot, walls, flip, net GEX and
 <code>walls_untrusted</code> for the three scalp symbols and every big-ten member (each row's
 <code>snapshot</code> holds all 13), the net premium levels for the
 symbols and the BIG10 basket, the sentiment state and score, and the flow counts (the
@@ -6244,9 +6271,11 @@ backup: it holds 1-minute history (about 6 weeks at Schwab) and 5-minute history
 <code>iv_scales</code>, <code>min_samples</code>, <code>scorecard_days</code>; <code>[news] items</code>; <code>[context] report_url</code>.
 For the 15-minute calls: <code>[intraday]</code> <code>start</code>, <code>end</code>, <code>interval_min</code>, <code>grace_min</code>,
 <code>dead_zone_pct</code> (0.03), <code>breadth_agree</code> (0.6), <code>vwap_max_missing</code> (0.25),
-<code>min_brier_margin</code> (0.005), <code>promotion_sessions</code> (40), and <code>[intraday.blocks.&lt;name&gt;]</code>
-<code>start</code> / <code>end</code>; <code>[confirm]</code> <code>flow_window_min</code> (30), <code>flow_margin</code> (2), <code>netprem_margin</code>
-(0.1), <code>sides_majority</code> (0.6), <code>breadth_min_members</code> (5), <code>max_age_min</code> (5), <code>cuts</code>
+<code>min_brier_margin</code> (0.005), <code>promotion_sessions</code> (40), <code>early_close_days</code>
+(["2026-11-27", "2026-12-24"]), <code>early_close_time</code> ("12:00"), and
+<code>[intraday.blocks.&lt;name&gt;]</code> <code>start</code> / <code>end</code>; <code>[confirm]</code> <code>flow_window_min</code> (30),
+<code>flow_margin</code> (2), <code>netprem_margin</code> (0.1), <code>sides_majority</code> (0.6),
+<code>breadth_min_members</code> (5), <code>min_sources</code> (2), <code>max_age_min</code> (5), <code>cuts</code>
 ([-0.34, 0.34]) and <code>[confirm.weights]</code> <code>flow</code> / <code>netprem</code> / <code>dealer</code> (1.0) and
 <code>sentiment</code> (0.5). The 08:36 and nightly slot times are in <code>config/sessions.toml</code>; the
 15-minute slots are <code>[intraday]</code>.</p>

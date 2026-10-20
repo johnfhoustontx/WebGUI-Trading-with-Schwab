@@ -2474,14 +2474,18 @@ is a new call, not an edit of the last.
   **Net premium** (whether the money in calls or in puts leads), **Dealer positioning**
   (below) and **Market sentiment** (counts for half as much). Each reads **Agrees**,
   **Disagrees**, **No side** (it looked and found nothing either way) or **No reading**
-  (missing or older than five minutes: never read as "no side"). **This is not in the
-  probability.** It is a word, not a chance of winning, and it has not been tested: the
-  app only records it every 15 minutes so that it *can* be tested after a few
-  months. Treat it as context.
+  (missing or older than five minutes, or a flow list from an earlier day: never read
+  as "no side"). Beside the word the page says how many of the four gave a reading
+  ("Mixed · 3 of 4 sources"); with only one there is no word at all ("No reading · 1 of
+  4 sources (too few sources)"), because one source alone is not a confirmation.
+  **This is not in the probability.** It is a word, not a chance of winning, and it has
+  not been tested: the app only records it every 15 minutes so that it *can* be tested
+  after a few months. Treat it as context.
 - **The dealer read, in plain words.** It asks: *is there room for this trade to work
   before it hits the wall dealers are hedged around?* For an up call it looks at the
   **call wall** above the price, for a down call the **put wall** below it, and compares
-  the distance with how far the underlying must move to reach the trade's target. The
+  the distance from the call's own entry price (not a price read a few minutes later)
+  with how far the underlying must move to reach the trade's target. The
   line reads, for example, "Room up to the call wall at 5,850 (0.4%); 7 of 10 big names
   have room", or says the wall is inside the target. The **breadth** part counts how
   many of the ten big names have the same room, in percent of their own price. If the
@@ -2496,9 +2500,14 @@ is a new call, not an edit of the last.
   its own hour is up, whichever comes first. After that it reads **Last call ... past**
   (the next slot is overdue) or **Last call ... over** (its hour is up), and is drawn
   muted. The 13:51 call says it is the **final call of the day** and names the next
-  session's first call. The page rechecks the clock every 30 seconds, so an open tab
-  never keeps showing a stale call as current. A list from an earlier day says whose day
-  it is and is not today's.
+  session's first call. A last slot where every symbol was flat (no trade) still reads
+  over once its own hour is up. The page rechecks the clock every 30 seconds, so an open
+  tab never keeps showing a stale call as current. A list from an earlier day says whose
+  day it is, is not today's, and draws its highlighted trades without the green.
+- **Half days.** On a day the market closes early (the day after Thanksgiving and
+  Christmas Eve, at 12:00 CT; the dates are in Settings → Configuration → Opening Scalp)
+  no call is made whose hour would run past the close: the last call is 10:51, and a
+  later slot says "The market closes early today". Add next year's half days there.
 - **Refresh and the 15-minute calls.** Refresh never makes an off-slot call. Inside a
   slot's five-minute window it fills in any symbol that slot has not published yet;
   outside a window it only puts today's published calls back on screen. A slot missed by
@@ -3309,7 +3318,7 @@ a file on the server — in one place, grouped by what they do:
 | **Symbols & watchlists** | What the gamma collector polls, the BIG10 basket, the Net Prem groups |
 | **Local market data** | Whether the app may reuse market data it has already fetched from Schwab instead of asking again, how old that data may be, and how often watchlist symbols are fetched. See the note below |
 | **Sector map** | Which sector each symbol counts toward for the sector cap |
-| **Opening Scalp** | The symbols it calls and the bars it keeps, strike steps and spread widths, the target, stop and time stop, the volatility multipliers the study tries (a list of numbers), the cut points between low, mid and high agreement, and the scorecard window; for the 15-minute calls, their first and last time, the gap, how late one may still fire, the flat band, the day's three blocks, the margin an edge must clear, and the confirmation's look-back, margins, cut points and the weight of each source. The 08:36 call and 16:20 nightly pass times are under *Market hours & schedules* |
+| **Opening Scalp** | The symbols it calls and the bars it keeps, strike steps and spread widths, the target, stop and time stop, the volatility multipliers the study tries (a list of numbers), the cut points between low, mid and high agreement, and the scorecard window; for the 15-minute calls, their first and last time (not before 08:45, and the last call's hour must end by 15:00), the gap, how late one may still fire, the flat band, the day's three blocks, the margin an edge must clear, the early-close days and time, and the confirmation's look-back, margins, cut points, the sources it needs for a word and the weight of each source. The 08:36 call and 16:20 nightly pass times are under *Market hours & schedules* |
 | **Commissions** | Schwab's per-contract rates |
 | **Ports / Environments** | Shown for reference only |
 

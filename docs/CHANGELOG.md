@@ -66,6 +66,15 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 - **The shown rates are in-sample** (the rate over every stored day, labelled on
   each call and the timeline); only whether a bucket beats the base rate is
   walk-forward, and the sample counts are DAYS.
+- **Final whole-branch review fixes:** a slot's bar fetch no longer skips an earlier
+  day's unfilled hole (it walks from one bar before the latest stored, as the nightly
+  top-up does); half days (`[intraday] early_close_days` / `early_close_time`) make no
+  call whose hour passes the early close, and the study leaves those slots out; the
+  slot schedule is validated (not before 08:45, no 08:36 slot, last trade ends by
+  15:00); the confirmation word needs `[confirm] min_sources` (2) sources and the page
+  shows "n of 4 sources"; the dealer room is measured from the call's entry spot; a
+  flow list from another day is stale; `made_at` is the build's wall clock; a final
+  slot of flat tapes reads over at its hour; another day's timeline is muted.
 - Docs: User Guide, Reference Guide, Technical Reference (the intraday chapter and
   the cadence rows), API Reference (the view's `intraday` section, the six tables,
   `scalp_refresh`, the fifth view read), Glossary (confirmation reading, dealer

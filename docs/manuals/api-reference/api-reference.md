@@ -539,11 +539,14 @@ as part of the same `ScalpView`; `{}` before the first slot or in a payload writ
 before it existed):
 
 ```text
-{day, slot, next_slot, latest, timeline}
+{day, slot, next_slot, time_stop_min, latest, timeline}
   day        ISO date the section belongs to; compare it with today's Central date
   slot       the latest slot published ("08:51" ... "13:51")
   next_slot  when the next call is made (ISO, Central offset); the next trading day's
-             first slot after 13:51
+             first slot after 13:51; on an early close, a slot whose trade would pass
+             the close is skipped
+  time_stop_min  the configured time stop: the page ends a slot that made no trade
+             (every symbol flat or short of bars) at its entry plus this (60 when absent)
   latest     {symbol: entry}        the slot's call for each symbol
   timeline   [{slot, symbols: {symbol: {direction, highlight, word,
               edge_p, edge_p_base, n_days, note}}}]   one row per slot published today,
@@ -557,26 +560,37 @@ An `latest` entry has the 08:36 entry's shape (`direction`, `bucket`, `alignment
 (`"all stored days"`: the rates are over every stored day, only the edge flag is
 walk-forward); `inputs_failed` and `inputs_note` (the bar symbols the call was built
 without fresh bars for); `confirmation`; `dealer_line`. `entry_ts` is the slot floored to
-the 5-minute boundary. Its inputs are `since_open`, `vwap_side`, `fut_15m`, `vol_change`,
+the 5-minute boundary. `made_at` is the wall clock when the entry was built (the slot's
+window is judged by the scheduler's tick, which can be earlier by the wait for the run
+lock). Its inputs are `since_open`, `vwap_side`, `fut_15m`, `vol_change`,
 `breadth_up_share` (a 0..1 share, never a percent) and one `etf:<fund>` per sector fund.
 Its roles carry **`n_days` / `n_base_days`** (distinct days) in place of `n` / `n_base`,
 and `wall_context` (a list of words naming any call or put wall between entry and the
 target or stop). `note` is `no measured edge` (the usual), `flat over the last 15 minutes
 — no direction`, `no bars for the last 15 minutes yet`, `missed the call window` (the
-slot's trade was already over when it was built) or `the call could not be built`.
+slot's trade was already over when it was built), `the market closes early today` (a
+half day in `[intraday] early_close_days`, and the slot's trade would pass the early
+close: no roles, nothing fetched or frozen) or `the call could not be built`.
 
-`confirmation` is `{flow, netprem, dealer, sentiment, score, word, dealer_line,
-truncated}`. Each component is `{verdict, raw, stale}`: `verdict` is `1` agrees, `-1`
-disagrees, `0` looked and found no side, `null` no reading; `raw` holds the values it was
-made from, with a `state` (`ok`, `absent`, `stale`, `stale_point`, `no_reading`,
-`no_entry_ts`, `error`) for flow, net premium and the dealer read. The **sentiment**
-component differs: its `raw.state` is the regime name (`bullish`, `neutral`, ... or
-`null`) and its status is in `raw.source` (`ok`, `absent` or `stale`). `score` is the weighted mean in -1..1 (`ScalpView` rejects one
-outside it) and `word` is `Confirms`, `Mixed` or `Contradicts` (both `null` when no
-component had a reading). **It is not in the probability** and the page never prints the
-score. The dealer component's `raw` carries `wall_kind`, `wall`, `room`, `room_pct`,
-`win_points`, `breadth {with_room, of, share, verdict}`, `above_flip` and
-`walls_untrusted` (net GEX missing or 0: the walls are then no reading).
+`confirmation` is `{flow, netprem, dealer, sentiment, score, word, n_present,
+n_sources, word_note, dealer_line, truncated}`. Each component is `{verdict, raw,
+stale}`: `verdict` is `1` agrees, `-1` disagrees, `0` looked and found no side, `null`
+no reading; `raw` holds the values it was made from, with a `state` (`ok`, `absent`,
+`stale`, `stale_point`, `no_reading`, `no_entry_ts`, `other_day`, `error`) for flow,
+net premium and the dealer read (flow is `other_day`, and stale, when the flow view's
+`date` is not the slot's day). The **sentiment** component differs: its `raw.state` is
+the regime name (`bullish`, `neutral`, ... or `null`) and its status is in `raw.source`
+(`ok`, `absent` or `stale`). `score` is the weighted mean in -1..1 (`ScalpView` rejects
+one outside it) and `word` is `Confirms`, `Mixed` or `Contradicts`. `n_present` is how
+many of the `n_sources` (4) components gave a reading (a zero weight does not count);
+with fewer than `[confirm] min_sources` (2) `score` and `word` are `null` and
+`word_note` is `"too few sources"` (else `null`). **It is not in the probability** and
+the page never prints the score. The dealer component's `raw` carries the matrix row's
+`spot`, walls, `flip` and `net_gex`, then `room_spot` (the price the room is measured
+from) and `room_spot_source` (`entry`: the call's own `entry_spot`; `matrix`: none was
+given), `wall_kind`, `wall`, `room`, `room_pct`, `win_points`, `own_verdict`, `breadth
+{with_room, of, share, verdict}` (the big ten at their own matrix spots), `above_flip`
+and `walls_untrusted` (net GEX missing or 0: the walls are then no reading).
 
 The service reads **five** views to build the confirmation, none of them through the
 proxy: `cache:options:matrix`, `cache:options:net_premium`, `cache:options:flow_alerts`,
@@ -590,7 +604,7 @@ function takes `db_path=None`, resolved when it is called.
 
 | Table | Key | Holds | Written by |
 |---|---|---|---|
-| `bars` | `(symbol, interval, ts)` | open / high / low / close / volume, `interval` 1 or 5 | `scalp_fetch` (backfill and the nightly top-up) |
+| `bars` | `(symbol, interval, ts)` | open / high / low / close / volume, `interval` 1 or 5 | `scalp_fetch` (backfill, the nightly top-up, and each 15-minute slot's `top_up_today`, which starts one bar before the latest stored bar when that is from an earlier day, so no hole is ever skipped) |
 | `chain_slices` | `(day, symbol)` | the 08:36 0DTE chain cut to the strikes near the money, a zlib JSON blob | `scalp_chain` |
 | `outcomes` | `(day, symbol, iv_scale, role, interval)` | the modelled result (`win` / `loss` / `timeout` / `skip`), minutes, entry value, `both_in_bar` | `scalp_study.rebuild` |
 | `mornings` | `(day, symbol)` | the measured morning, or the reason it was skipped | `scalp_study.rebuild` |
@@ -605,7 +619,7 @@ keyed by `(day, slot, symbol)` rather than `(day, symbol)`:
 
 | Table | Key | Holds | Written by |
 |---|---|---|---|
-| `intraday_readings` | `(day, slot, symbol)` | the confirmation inputs recorded at the slot (`json`: `slot`, `entry_ts`, `recorded_at`, `direction`, `components` with their raw values, `snapshot` of walls, flip, net GEX, net premium levels, sentiment and flow counts for the symbol and the big ten). Written for every slot **and** for 08:36, with or without a direction | `scalp_record` |
+| `intraday_readings` | `(day, slot, symbol)` | the confirmation inputs recorded at the slot (`json`: `slot`, `entry_ts`, `recorded_at`, `direction`, `components` with their raw values, `snapshot` of each source's `{state, age_min}` and of walls, flip, net GEX, net premium levels, sentiment (with its `age_min`) and flow counts for the symbol and the big ten; a flow list of another day is recorded as `{date, state: "other_day"}` with no counts). Written for every slot **and** for 08:36, with or without a direction | `scalp_record` |
 | `intraday_calls` | `(day, slot, symbol)` | each published 15-minute call, frozen as shown (`json`) | `scalp_intraday_call` |
 | `intraday_chain_slices` | `(day, slot, symbol)` | that slot's 0DTE chain cut to the strikes near the money, a zlib JSON blob, with its `ts` | `scalp_intraday_call` |
 | `intraday_outcomes` | `(day, slot, symbol, iv_scale, role)` | the modelled result (`win` / `loss` / `timeout` / `skip`), `structure`, `block`, `bucket`, minutes, entry value, `both_in_bar` | `scalp_intraday_study.rebuild` |

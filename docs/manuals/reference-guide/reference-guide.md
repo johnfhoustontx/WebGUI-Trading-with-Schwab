@@ -3767,7 +3767,9 @@ time, not a fit to the whole history. A bucket needs at least `[study] min_sampl
 all morning and into the afternoon, the same question comes up every quarter hour; from
 **08:51 to 13:51 CT** the page answers it again at each slot, for the same three
 symbols, as a **new call for a trade entered at that moment**. The last entry (13:51)
-runs out by 14:51, before the close.
+runs out by 14:51, before the close. On a **half day** (the day after Thanksgiving and
+Christmas Eve close at 12:00 CT; the dates are a setting) no call is made whose hour
+would pass the early close, so the last call is 10:51.
 
 **What a call is made of.**
 - **The move.** The direction is the symbol's own move over the **last 15 minutes**
@@ -3802,6 +3804,10 @@ runs out by 14:51, before the close.
 - **Market sentiment** — the sentiment dashboard's trend state; it counts for half as
   much by design (a minor voice), and a "lack of" state or a neutral one gives no side.
 
+The word needs at least **two** sources with a reading; beside it the page says how many
+gave one ("Mixed · 3 of 4 sources"). One source alone gives no word, and a flow list left
+from an earlier day is no reading, not a quiet tape.
+
 It is **not in the probability**. It does not move a rate, a highlight or a price. It
 exists because flow, net premium and walls have only about five sessions of history, too
 little to test; the app **records every source at every slot** so that, after about
@@ -3809,8 +3815,8 @@ little to test; the app **records every source at every slot** so that, after ab
 it is context, shown as words, with each source's verdict beside it.
 
 **The dealer read** (walls and net premium leading) in two parts. *Room:* the
-distance from the price to the wall on the trade's side (call wall for up, put wall for
-down), against the move the long trade needs to reach its target. Room at least that big
+distance from the call's own entry price to the wall on the trade's side (call wall for
+up, put wall for down), against the move the long trade needs to reach its target. Room at least that big
 agrees; a wall inside the target disagrees. *Breadth:* how many of the ten big names
 have the same room in percent of their own price; most of them agrees. When the symbol's
 own room and the breadth point opposite ways the read is neutral. The gamma flip is shown

@@ -1931,11 +1931,14 @@ restart still validates.</p>
 <p><strong>The <code>intraday</code> section</strong> (the 15-minute calls; <code>scalp_intraday_call.run_slot</code>, validated
 as part of the same <code>ScalpView</code>; <code>{}</code> before the first slot or in a payload written
 before it existed):</p>
-<pre><code class="language-text">{day, slot, next_slot, latest, timeline}
+<pre><code class="language-text">{day, slot, next_slot, time_stop_min, latest, timeline}
   day        ISO date the section belongs to; compare it with today's Central date
   slot       the latest slot published (&quot;08:51&quot; ... &quot;13:51&quot;)
   next_slot  when the next call is made (ISO, Central offset); the next trading day's
-             first slot after 13:51
+             first slot after 13:51; on an early close, a slot whose trade would pass
+             the close is skipped
+  time_stop_min  the configured time stop: the page ends a slot that made no trade
+             (every symbol flat or short of bars) at its entry plus this (60 when absent)
   latest     {symbol: entry}        the slot's call for each symbol
   timeline   [{slot, symbols: {symbol: {direction, highlight, word,
               edge_p, edge_p_base, n_days, note}}}]   one row per slot published today,
@@ -1948,25 +1951,36 @@ before it existed):</p>
 (<code>"all stored days"</code>: the rates are over every stored day, only the edge flag is
 walk-forward); <code>inputs_failed</code> and <code>inputs_note</code> (the bar symbols the call was built
 without fresh bars for); <code>confirmation</code>; <code>dealer_line</code>. <code>entry_ts</code> is the slot floored to
-the 5-minute boundary. Its inputs are <code>since_open</code>, <code>vwap_side</code>, <code>fut_15m</code>, <code>vol_change</code>,
+the 5-minute boundary. <code>made_at</code> is the wall clock when the entry was built (the slot's
+window is judged by the scheduler's tick, which can be earlier by the wait for the run
+lock). Its inputs are <code>since_open</code>, <code>vwap_side</code>, <code>fut_15m</code>, <code>vol_change</code>,
 <code>breadth_up_share</code> (a 0..1 share, never a percent) and one <code>etf:&lt;fund&gt;</code> per sector fund.
 Its roles carry <strong><code>n_days</code> / <code>n_base_days</code></strong> (distinct days) in place of <code>n</code> / <code>n_base</code>,
 and <code>wall_context</code> (a list of words naming any call or put wall between entry and the
 target or stop). <code>note</code> is <code>no measured edge</code> (the usual), <code>flat over the last 15 minutes
 — no direction</code>, <code>no bars for the last 15 minutes yet</code>, <code>missed the call window</code> (the
-slot's trade was already over when it was built) or <code>the call could not be built</code>.</p>
-<p><code>confirmation</code> is <code>{flow, netprem, dealer, sentiment, score, word, dealer_line,
-truncated}</code>. Each component is <code>{verdict, raw, stale}</code>: <code>verdict</code> is <code>1</code> agrees, <code>-1</code>
-disagrees, <code>0</code> looked and found no side, <code>null</code> no reading; <code>raw</code> holds the values it was
-made from, with a <code>state</code> (<code>ok</code>, <code>absent</code>, <code>stale</code>, <code>stale_point</code>, <code>no_reading</code>,
-<code>no_entry_ts</code>, <code>error</code>) for flow, net premium and the dealer read. The <strong>sentiment</strong>
-component differs: its <code>raw.state</code> is the regime name (<code>bullish</code>, <code>neutral</code>, ... or
-<code>null</code>) and its status is in <code>raw.source</code> (<code>ok</code>, <code>absent</code> or <code>stale</code>). <code>score</code> is the weighted mean in -1..1 (<code>ScalpView</code> rejects one
-outside it) and <code>word</code> is <code>Confirms</code>, <code>Mixed</code> or <code>Contradicts</code> (both <code>null</code> when no
-component had a reading). <strong>It is not in the probability</strong> and the page never prints the
-score. The dealer component's <code>raw</code> carries <code>wall_kind</code>, <code>wall</code>, <code>room</code>, <code>room_pct</code>,
-<code>win_points</code>, <code>breadth {with_room, of, share, verdict}</code>, <code>above_flip</code> and
-<code>walls_untrusted</code> (net GEX missing or 0: the walls are then no reading).</p>
+slot's trade was already over when it was built), <code>the market closes early today</code> (a
+half day in <code>[intraday] early_close_days</code>, and the slot's trade would pass the early
+close: no roles, nothing fetched or frozen) or <code>the call could not be built</code>.</p>
+<p><code>confirmation</code> is <code>{flow, netprem, dealer, sentiment, score, word, n_present,
+n_sources, word_note, dealer_line, truncated}</code>. Each component is <code>{verdict, raw,
+stale}</code>: <code>verdict</code> is <code>1</code> agrees, <code>-1</code> disagrees, <code>0</code> looked and found no side, <code>null</code>
+no reading; <code>raw</code> holds the values it was made from, with a <code>state</code> (<code>ok</code>, <code>absent</code>,
+<code>stale</code>, <code>stale_point</code>, <code>no_reading</code>, <code>no_entry_ts</code>, <code>other_day</code>, <code>error</code>) for flow,
+net premium and the dealer read (flow is <code>other_day</code>, and stale, when the flow view's
+<code>date</code> is not the slot's day). The <strong>sentiment</strong> component differs: its <code>raw.state</code> is
+the regime name (<code>bullish</code>, <code>neutral</code>, ... or <code>null</code>) and its status is in <code>raw.source</code>
+(<code>ok</code>, <code>absent</code> or <code>stale</code>). <code>score</code> is the weighted mean in -1..1 (<code>ScalpView</code> rejects
+one outside it) and <code>word</code> is <code>Confirms</code>, <code>Mixed</code> or <code>Contradicts</code>. <code>n_present</code> is how
+many of the <code>n_sources</code> (4) components gave a reading (a zero weight does not count);
+with fewer than <code>[confirm] min_sources</code> (2) <code>score</code> and <code>word</code> are <code>null</code> and
+<code>word_note</code> is <code>"too few sources"</code> (else <code>null</code>). <strong>It is not in the probability</strong> and
+the page never prints the score. The dealer component's <code>raw</code> carries the matrix row's
+<code>spot</code>, walls, <code>flip</code> and <code>net_gex</code>, then <code>room_spot</code> (the price the room is measured
+from) and <code>room_spot_source</code> (<code>entry</code>: the call's own <code>entry_spot</code>; <code>matrix</code>: none was
+given), <code>wall_kind</code>, <code>wall</code>, <code>room</code>, <code>room_pct</code>, <code>win_points</code>, <code>own_verdict</code>, <code>breadth
+{with_room, of, share, verdict}</code> (the big ten at their own matrix spots), <code>above_flip</code>
+and <code>walls_untrusted</code> (net GEX missing or 0: the walls are then no reading).</p>
 <p>The service reads <strong>five</strong> views to build the confirmation, none of them through the
 proxy: <code>cache:options:matrix</code>, <code>cache:options:net_premium</code>, <code>cache:options:flow_alerts</code>,
 <code>cache:options:flow_sides</code> (the bought / sold estimate per alert id; used only when its
@@ -1989,7 +2003,7 @@ function takes <code>db_path=None</code>, resolved when it is called.</p>
 <td><code>bars</code></td>
 <td><code>(symbol, interval, ts)</code></td>
 <td>open / high / low / close / volume, <code>interval</code> 1 or 5</td>
-<td><code>scalp_fetch</code> (backfill and the nightly top-up)</td>
+<td><code>scalp_fetch</code> (backfill, the nightly top-up, and each 15-minute slot's <code>top_up_today</code>, which starts one bar before the latest stored bar when that is from an earlier day, so no hole is ever skipped)</td>
 </tr>
 <tr>
 <td><code>chain_slices</code></td>
@@ -2051,7 +2065,7 @@ keyed by <code>(day, slot, symbol)</code> rather than <code>(day, symbol)</code>
 <tr>
 <td><code>intraday_readings</code></td>
 <td><code>(day, slot, symbol)</code></td>
-<td>the confirmation inputs recorded at the slot (<code>json</code>: <code>slot</code>, <code>entry_ts</code>, <code>recorded_at</code>, <code>direction</code>, <code>components</code> with their raw values, <code>snapshot</code> of walls, flip, net GEX, net premium levels, sentiment and flow counts for the symbol and the big ten). Written for every slot <strong>and</strong> for 08:36, with or without a direction</td>
+<td>the confirmation inputs recorded at the slot (<code>json</code>: <code>slot</code>, <code>entry_ts</code>, <code>recorded_at</code>, <code>direction</code>, <code>components</code> with their raw values, <code>snapshot</code> of each source's <code>{state, age_min}</code> and of walls, flip, net GEX, net premium levels, sentiment (with its <code>age_min</code>) and flow counts for the symbol and the big ten; a flow list of another day is recorded as <code>{date, state: "other_day"}</code> with no counts). Written for every slot <strong>and</strong> for 08:36, with or without a direction</td>
 <td><code>scalp_record</code></td>
 </tr>
 <tr>

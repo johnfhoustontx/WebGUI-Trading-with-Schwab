@@ -1123,8 +1123,8 @@ closed) and is frozen once shown; the next slot is a new call, not an edit.
   edge" is the usual answer. A call that was built on fewer inputs says which
   bars were missing.
 - **The dealer read** is one line: how far the nearest call or put wall in the
-  trade's direction sits against the move the trade needs (and how many of the
-  ten big names have room). Under each trade it also names any wall between the
+  trade's direction sits from the call's own entry price, against the move the
+  trade needs (and how many of the ten big names have room). Under each trade it also names any wall between the
   entry and its target or stop. A wall from a chain with no gamma reading is
   not trusted: the line says there is no usable wall instead of guessing.
 - **Today's calls** lists every slot made today: the direction, the highlighted
@@ -1132,15 +1132,21 @@ closed) and is frozen once shown; the next slot is a new call, not an edit.
   its **days**. A latest call is current only until its next slot or until its
   own trade is over (its time stop), whichever comes first; after that it reads
   **Last call** (**past** if the next slot is overdue, **over** once its hour is up,
-  and the day's final call says so and names the next day's first call). The page
+  and the day's final call says so and names the next day's first call; a last
+  slot where every symbol was flat is over at its hour too). The page
   rechecks the clock every 30 seconds, so an open tab does not keep showing a
   stale call as current. A list from an earlier day says whose day it is and that
   it is not today's, and is drawn without the edge colours.
+- **Half days.** When the market closes early (12:00 CT the day after
+  Thanksgiving and on Christmas Eve) no call is made whose hour would run past
+  the close; a later slot says *the market closes early today*.
 - **The confirmation** (Confirms, Mixed or Contradicts) is whether options flow,
   net premium, the dealer read and market sentiment agree with the move, shown
   in whole words beside each source (agrees, disagrees, no side, no reading, or
-  stale; sentiment counts half as much as the others). It is **not in the probability**: it is a word, never a chance of
-  winning, and it is only **being recorded to be tested**.
+  stale; sentiment counts half as much as the others). Beside the word, **n of 4
+  sources** says how many gave a reading; with only one there is no word (one
+  source is not a confirmation). It is **not in the probability**: it is a word,
+  never a chance of winning, and it is only **being recorded to be tested**.
 
 **Scorecard** is how the published calls actually did. Each evening the app grades
 every trade it showed that morning (and, in the intraday part below, at every
