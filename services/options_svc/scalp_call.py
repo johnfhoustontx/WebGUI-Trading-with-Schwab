@@ -57,7 +57,9 @@ Before the call time on a trading day (the later of the 08:35 entry and the
 ``[slots.scalp]`` time: 08:36 at the defaults) the view is ``"waiting"``, on a
 closed day ``"closed"``; both keep the last published call under ``symbols``
 (``call_day`` says which day) and fetch NOTHING. An unexpected failure publishes ``"error"`` the
-same way, counted as a degrade. Every payload is checked against
+same way, counted as a degrade. Every payload, whatever its state, carries the
+current view's ``intraday`` section forward unchanged (``scalp_intraday_call``
+builds it; this module never does). Every payload is checked against
 ``shared.contracts.options.ScalpView`` first; one that fails is not published.
 
 ``context`` (the reports link, index headlines from ``cache:news:feed``, today's
@@ -520,6 +522,7 @@ def _run(bus, now, db_path, client) -> None:
     except Exception:
         _degrade.degraded("options.scalp_call")
         payload = _held("error", bus, day, now, db_path)
+    _keep_intraday(bus, payload)
     if not _valid(payload):
         return
     try:
@@ -531,6 +534,15 @@ def _run(bus, now, db_path, client) -> None:
         # Only now is it what the page was shown: freeze it.
         _save_published(payload, db_path)
         _record_call_slot(bus, day, now, payload, db_path)
+
+
+def _keep_intraday(bus, payload) -> None:
+    """Carry the CURRENT view's ``intraday`` section (``scalp_intraday_call``'s)
+    into ``payload`` unchanged, whatever its state: this module never builds that
+    section, and a republish here must not drop it until the next slot."""
+    current = _payload(bus, VIEW)
+    if current is not None and "intraday" in current:
+        payload["intraday"] = current["intraday"]
 
 
 def _record_call_slot(bus, day, now, payload, db_path) -> None:
@@ -551,8 +563,10 @@ def _record_call_slot(bus, day, now, payload, db_path) -> None:
         for symbol, entry in (payload.get("symbols") or {}).items():
             if _is_call(entry) and entry.get("direction") in (1, -1):
                 directions[symbol] = entry["direction"]
-                win_points[symbol] = (entry["roles"].get("long_with") or {}).get(
-                    "win_points")
+                # A distance: a down morning's long put has negative points,
+                # and the dealer read measures room against the magnitude.
+                win = _finite((entry["roles"].get("long_with") or {}).get("win_points"))
+                win_points[symbol] = None if win is None else abs(win)
         scalp_record.record(bus, day, at.strftime("%H:%M"), now=now, db_path=db_path,
                             directions=directions, win_points=win_points,
                             entry_ts=int(_entry_time(day).timestamp()))

@@ -667,6 +667,79 @@ def test_a_call_the_bus_refused_is_not_frozen(db, bus, monkeypatch):
     assert _degrade.counts().get("options.scalp_publish") == 1
 
 
+# ── the intraday section and the 08:36 record ────────────────────────────────
+
+INTRADAY = {"day": "2026-10-19", "slot": "08:51",
+            "latest": {"SPY": {"direction": 1, "roles": {"long_with": {"p": 0.5}},
+                               "confirmation": {"score": 0.5}}},
+            "timeline": [{"slot": "08:51", "symbols": {"SPY": {"direction": 1,
+                                                               "edge_p": None}}}],
+            "next_slot": "2026-10-19T09:06:00-05:00"}
+
+
+@pytest.mark.parametrize("when, state", [
+    (NOW, "call"),                                               # a fresh build
+    (dt.datetime(2026, 10, 19, 10, 0, tzinfo=CT), "call"),      # a refresh
+    (dt.datetime(2026, 10, 19, 8, 20, tzinfo=CT), "waiting"),
+    (dt.datetime(2026, 10, 17, 9, 0, tzinfo=CT), "closed"),
+])
+def test_a_publish_keeps_the_current_intraday_section(db, bus, when, state):
+    # scalp_call never builds the intraday section, so its republish must carry
+    # the one in the view forward unchanged, whatever its state.
+    _seeded(db)
+    bus.cache_set(scalp_call.VIEW, {"state": "call", "day": "2026-10-19",
+                                    "symbols": {}, "intraday": INTRADAY})
+    scalp_call.run(bus, now=when, db_path=db, client=FakeClient())
+    view = bus.cache_get(scalp_call.VIEW).payload
+    assert view["state"] == state
+    assert view["intraday"] == INTRADAY
+    ScalpView(**view)
+
+
+def test_an_error_publish_keeps_the_intraday_section(db, bus, monkeypatch):
+    bus.cache_set(scalp_call.VIEW, {"state": "call", "symbols": {}, "intraday": INTRADAY})
+
+    def broken(*a, **k):
+        raise RuntimeError("bug")
+    monkeypatch.setattr(scalp_call, "build", broken)
+    scalp_call.run(bus, now=NOW, db_path=db, client=FakeClient())
+    view = bus.cache_get(scalp_call.VIEW).payload
+    assert view["state"] == "error" and view["intraday"] == INTRADAY
+
+
+def test_no_intraday_section_is_invented(db, bus):
+    _seeded(db)
+    scalp_call.run(bus, now=NOW, db_path=db, client=FakeClient())
+    assert "intraday" not in bus.cache_get(scalp_call.VIEW).payload
+
+
+def test_a_down_morning_records_a_dealer_read(db, bus):
+    # A down morning's long-with role is a long put: its win points are negative.
+    # The record must measure the dealer's room against their size, so with the
+    # walls present the 08:36 row carries a verdict, never "no reading".
+    rows = []
+    for sym, p in PRICES.items():
+        rows.append((sym, 5, ts(DAY, 8, 30), p, p * 1.0005, p * 0.998, p * 0.9985,
+                     1000.0))
+    rows.append(("$VIX", 5, ts(DAY, 8, 30), 20.0, 20.0, 20.0, 20.0, 0.0))
+    scalp_store.upsert_bars(rows, db_path=db)
+    for sym in PRICES:
+        seed_study(db, sym, EVEN)
+    stamp = NOW.isoformat()
+    bus.cache_set("cache:options:matrix", {"ts": stamp, "rows": [
+        {"symbol": s.lstrip("$"), "spot": p * 0.9985, "call_wall": p * 1.05,
+         "put_wall": p * 0.95, "flip": p, "net_gex": 1e9} for s, p in PRICES.items()]})
+    chains = {s: make_chain(s, spot=p * 0.9985) for s, p in PRICES.items()}
+    scalp_call.run(bus, now=NOW, db_path=db, client=FakeClient(chains))
+    spy = bus.cache_get(scalp_call.VIEW).payload["symbols"]["SPY"]
+    assert spy["direction"] == -1 and spy["roles"]["long_with"]["win_points"] < 0
+    rec = scalp_store.readings_on("2026-10-19", db_path=db)[("08:36", "SPY")]
+    dealer = rec["components"]["dealer"]
+    assert dealer["verdict"] is not None
+    assert dealer["raw"]["win_points"] == pytest.approx(
+        -spy["roles"]["long_with"]["win_points"])
+
+
 # ── reading the chain ─────────────────────────────────────────────────────────
 
 def _spx_rows(day=DAY):
