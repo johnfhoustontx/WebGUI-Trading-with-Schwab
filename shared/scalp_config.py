@@ -59,7 +59,7 @@ DEFAULTS = {
     },
     "confirm": {
         "flow_window_min": 30, "flow_margin": 2, "netprem_margin": 0.1,
-        "max_age_min": 5, "cuts": [-0.34, 0.34],
+        "max_age_min": 5, "sides_majority": 0.6, "cuts": [-0.34, 0.34],
         "weights": {"flow": 1.0, "netprem": 1.0, "dealer": 1.0, "sentiment": 0.5},
     },
 }
@@ -380,6 +380,16 @@ def flow_margin() -> float:
 def netprem_margin() -> float:
     """The share (0..1) of total net premium a side must lead by."""
     return _fraction("confirm", "netprem_margin", allow_zero=True)
+
+
+def sides_majority() -> float:
+    """The share of an option alert's labelled (bought + sold) volume that must
+    be on one side, above 0.5 and at most 1, for the alert to be directional;
+    any other value reads as the default."""
+    raw = _section("confirm").get("sides_majority")
+    if not _real(raw) or not (0.5 < raw <= 1):
+        return float(DEFAULTS["confirm"]["sides_majority"])
+    return float(raw)
 
 
 def confirm_max_age_min() -> int:

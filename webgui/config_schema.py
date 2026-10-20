@@ -1234,6 +1234,11 @@ _SCALP = ConfigFile(
             Field("confirm.netprem_margin", "Net premium lead needed",
                   "The share of total net premium one side must lead by to "
                   "lean (0 to 1).", kind="float", min=0, max=1, step=0.01),
+            Field("confirm.sides_majority", "Bought or sold majority needed",
+                  "The share of an option alert's labelled volume that must be "
+                  "bought (or sold) before the alert counts as bullish or "
+                  "bearish. Above 0.5, up to 1.", kind="float", min=0.51,
+                  max=1, step=0.01),
             Field("confirm.max_age_min", "Oldest reading used",
                   "A confirming reading older than this is treated as absent.",
                   kind="int", unit="min", min=1, max=60, step=1),

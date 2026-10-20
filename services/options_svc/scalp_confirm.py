@@ -29,7 +29,10 @@ Rules that keep it honest:
   alerts in the window, a premium inside the margin, a neutral lean.
 * **The alert's own estimate, never a guess.** The view's alerts carry no
   bought / sold figure; ``cache:options:flow_sides`` holds it per alert id.
-  An ``uoa`` / ``big_delta`` alert with no usable estimate is not directional.
+  An ``uoa`` / ``big_delta`` alert is directional only when one side holds at
+  least ``[confirm] sides_majority`` of its labelled volume; with no estimate
+  (the view absent, from another day, or no entry) it is not directional, and
+  the reading records which.
 * **Pure functions take the payloads.** ``sources`` is the only bus reader;
   everything else reads what it returned, so a test needs no bus.
 * **Never raises.** A malformed source degrades to absent for that component
@@ -188,8 +191,9 @@ def _newest_age(flow_payload, now):
 # --- flow -------------------------------------------------------------------
 
 def _lean(estimate):
-    """+1 when more was bought than sold, -1 when more was sold, None for a tie,
-    all unlabelled, or no usable tally. ``estimate`` is one entry of the
+    """+1 when bought is at least ``sides_majority`` of the labelled (bought +
+    sold) volume, -1 when sold is, None for anything closer, all unlabelled, or
+    no usable tally. ``estimate`` is one entry of the
     flow_sides view's ``contracts`` map (``{"poll", "stream"}``) or a bare
     ``{"bought", "sold"}`` tally. The session's poll figure only: the poll and
     the stream are different samples and are never blended."""
@@ -199,9 +203,11 @@ def _lean(estimate):
     if not isinstance(tally, dict):
         return None
     bought, sold = _finite(tally.get("bought")), _finite(tally.get("sold"))
-    if bought is None or sold is None or bought == sold:
+    if bought is None or sold is None or bought < 0 or sold < 0 or bought + sold <= 0:
         return None
-    return 1 if bought > sold else -1
+    majority = scalp_config.sides_majority() - _EPS
+    share = bought / (bought + sold)
+    return 1 if share >= majority else -1 if 1 - share >= majority else None
 
 
 def flow_sense(alert, estimate=None):
@@ -221,15 +227,29 @@ def flow_sense(alert, estimate=None):
     return _SIDE_SENSE.get((typ, side))
 
 
+def _estimates(src, flow_payload):
+    """``(contracts, state)``: the flow_sides view's ``{alert id: entry}`` map
+    and why it is or is not usable (``ok``, ``absent``, ``other_day``, ``empty``).
+    The service keeps yesterday's view on a quiet morning, so its date must be
+    the flow view's. Without a map no uoa / big_delta alert is directional."""
+    got = _source(src, "flow_sides")
+    sides = got["payload"]
+    if got["state"] == "absent" or not isinstance(sides, dict):
+        return {}, "absent"
+    if sides.get("date") != flow_payload.get("date"):
+        return {}, "other_day"
+    contracts = sides.get("contracts")
+    if not isinstance(contracts, dict) or not contracts:
+        return {}, "empty"
+    return contracts, "ok"
+
+
 def _flow(src, symbol, d, entry_ts):
     payload = _payload(src, "flow")
     alerts = payload.get("alerts") if payload else None
     if not isinstance(alerts, list):
         return {"verdict": None, "raw": {"state": "absent"}, "stale": False}
-    sides = _payload(src, "flow_sides")
-    contracts = (sides.get("contracts") if sides and sides.get("date") == payload.get("date")
-                 else None)
-    contracts = contracts if isinstance(contracts, dict) else {}
+    contracts, sides_state = _estimates(src, payload)
     window = scalp_config.flow_window_min()
     start = entry_ts - window * 60
     me = _norm(symbol)
@@ -265,7 +285,7 @@ def _flow(src, symbol, d, entry_ts):
     return {"verdict": verdict, "stale": False,
             "raw": {"state": "ok", "window_min": window, "n_alerts": n, "bull": bull,
                     "bear": bear, "net": net, "margin": margin, "by_type": by_type,
-                    "truncated": truncated, "estimates": bool(contracts)}}
+                    "truncated": truncated, "sides_view": sides_state}}
 
 
 # --- net premium -------------------------------------------------------------
@@ -371,10 +391,11 @@ def _breadth(rows, d, win_pct):
 
 
 def _dealer(src, symbol, d, win_points):
-    """``(component, line)``. The symbol's own room decides the verdict; the
-    breadth of room over the big ten is shown beside it and recorded (a breadth
-    that agrees or disagrees can only restate it). The gamma flip is recorded
-    and never scored."""
+    """``(component, line)``. The verdict is the symbol's own room when the
+    breadth of room over the big ten agrees with it or has no reading; 0
+    (present, neutral) when room and breadth disagree; and the breadth's own
+    verdict when the symbol has no wall. The gamma flip is recorded and never
+    scored."""
     if _stale(src, "matrix"):
         return ({"verdict": None, "raw": {"state": "stale"}, "stale": True},
                 "No reading: the dealer data is stale")
@@ -396,16 +417,27 @@ def _dealer(src, symbol, d, win_points):
     raw.update({"wall_kind": kind, "wall": wall, "room": room, "win_points": win,
                 "room_pct": None if room is None else room / spot * 100.0,
                 "breadth": breadth})
-    verdict = None if wall is None or win is None else (1 if room >= win else -1)
+    own = None if wall is None or win is None else (1 if room >= win else -1)
+    verdict = _dealer_verdict(own, breadth["verdict"])
+    raw["own_verdict"] = own
     return {"verdict": verdict, "raw": raw, "stale": False}, _dealer_line(
-        symbol, d, kind, wall, room, spot, win, breadth)
+        symbol, d, kind, wall, room, spot, win, breadth, own, verdict)
 
 
-def _dealer_line(symbol, d, kind, wall, room, spot, win, breadth):
+def _dealer_verdict(own, breadth):
+    """The symbol's room (``own``) and the breadth, each +1 / -1 / 0 / None.
+    Breadth decides alone when the symbol has no reading; opposite signs cancel
+    to 0; a neutral or missing breadth leaves the symbol's room standing."""
+    if own is None:
+        return breadth
+    return 0 if breadth is not None and breadth == -own else own
+
+
+def _dealer_line(symbol, d, kind, wall, room, spot, win, breadth, own, verdict):
     if win is None:
         head = "No reading: no target to measure room against"
     elif wall is None:
-        head = f"No reading: no {kind} wall for {symbol}"
+        head = f"No {kind} wall for {symbol}"
     elif room >= win:
         head = (f"Room {'up' if d > 0 else 'down'} to the {kind} wall at "
                 f"{wall:,.2f} ({room / spot * 100:.2f}%)")
@@ -414,7 +446,12 @@ def _dealer_line(symbol, d, kind, wall, room, spot, win, breadth):
                 "is inside the target")
     if breadth["verdict"] is None:
         return f"{head}; breadth not read"
-    return f"{head}; {breadth['with_room']} of {breadth['of']} big names have room"
+    line = f"{head}; {breadth['with_room']} of {breadth['of']} big names have room"
+    if own is None and verdict is not None:
+        return f"{line} (the big names alone count)"
+    if own is not None and verdict == 0:
+        return f"{line} (room and breadth disagree)"
+    return line
 
 
 # --- sentiment ---------------------------------------------------------------
@@ -565,11 +602,10 @@ def snapshot(src, symbols) -> dict:
             out["sentiment"] = {"state": sent["raw"]["state"], "score": sent["raw"]["score"]}
         flow = _payload(src, "flow")
         if flow is not None and isinstance(flow.get("alerts"), list):
-            sides = _payload(src, "flow_sides")
-            contracts = sides.get("contracts") if sides and sides.get("date") == flow.get("date") else None
-            by_type = _tally(flow["alerts"], contracts if isinstance(contracts, dict) else {})
+            contracts, sides_state = _estimates(src, flow)
             out["flow"] = {"date": flow.get("date"), "n": len(flow["alerts"]),
-                           "by_type": by_type}
+                           "sides_view": sides_state,
+                           "by_type": _tally(flow["alerts"], contracts)}
     except Exception:
         _degrade.degraded("options.scalp_confirm", detail="snapshot")
     return out

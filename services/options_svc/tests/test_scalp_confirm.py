@@ -140,6 +140,28 @@ def test_no_estimate_is_not_directional():
     assert sc.flow_sense(call, {"poll": None, "stream": None}) is None
 
 
+def test_a_side_needs_the_configured_majority():
+    call = alert("uoa", "call", "SPY")
+    assert scalp_config.sides_majority() == 0.6
+    assert sc.flow_sense(call, tally(55, 45)) is None      # 55% is not a majority
+    assert sc.flow_sense(call, tally(45, 55)) is None
+    assert sc.flow_sense(call, tally(65, 35)) == 1         # 65% bought
+    assert sc.flow_sense(call, tally(35, 65)) == -1        # 65% sold
+    assert sc.flow_sense(call, tally(60, 40)) == 1         # exactly the majority counts
+    # the unlabelled volume is not in the share: 65 / (65 + 35), not / 1000
+    assert sc.flow_sense(call, tally(65, 35, unlabelled=900)) == 1
+    put = alert("uoa", "put", "SPY")
+    assert sc.flow_sense(put, tally(35, 65)) == 1          # a put sold, 65%
+    assert sc.flow_sense(put, tally(55, 45)) is None
+
+
+def test_the_majority_comes_from_the_config(monkeypatch):
+    monkeypatch.setattr(scalp_config, "sides_majority", lambda: 0.9)
+    call = alert("uoa", "call", "SPY")
+    assert sc.flow_sense(call, tally(80, 20)) is None
+    assert sc.flow_sense(call, tally(95, 5)) == 1
+
+
 def test_flow_counts_directional_alerts_only():
     alerts = [
         alert("uoa", "call", "SPY", 5, aid="u1"),                  # bought: +1
@@ -205,6 +227,22 @@ def test_sides_view_from_another_day_gives_no_estimate():
     stale = {"date": "2026-10-19", "contracts": {"u1": tally(900, 0)}}
     out = sc.components(read(fl=flow(al), sides=stale), "SPY", 1, 3.0, ENTRY)
     assert out["flow"]["raw"]["bull"] == 0
+    assert out["flow"]["raw"]["sides_view"] == "other_day"
+
+
+def test_a_missing_or_empty_sides_view_is_recorded_and_not_directional():
+    al = [alert("uoa", "call", "SPY", 5, aid="u1")]
+    out = sc.components(read(fl=flow(al)), "SPY", 1, 3.0, ENTRY)["flow"]["raw"]
+    assert out["sides_view"] == "absent" and out["bull"] == 0 and out["bear"] == 0
+    assert out["n_alerts"] == 1                       # still counted, never directional
+    none = {"date": "2026-10-20", "contracts": {}}
+    out = sc.components(read(fl=flow(al), sides=none), "SPY", 1, 3.0, ENTRY)["flow"]["raw"]
+    assert out["sides_view"] == "empty"
+    ok = {"date": "2026-10-20", "contracts": {"u1": tally(9, 1)}}
+    out = sc.components(read(fl=flow(al), sides=ok), "SPY", 1, 3.0, ENTRY)["flow"]["raw"]
+    assert out["sides_view"] == "ok" and out["bull"] == 1
+    snap = sc.snapshot(read(fl=flow(al)), ["SPY"])
+    assert snap["flow"]["sides_view"] == "absent"
 
 
 # --- net premium ---------------------------------------------------------
@@ -267,31 +305,66 @@ def test_dealer_room_agrees_when_wall_beyond_target():
 
 
 def test_wall_inside_target_disagrees():
-    src = read(mx=full_matrix(call_wall=770.0))                # room 0.56 < 3
+    src = read(mx=full_matrix(call_wall=770.0, roomy=2))       # room 0.56 < 3
     out = sc.components(src, "SPY", 1, 3.0, ENTRY)
     assert out["dealer"]["verdict"] == -1
     assert "inside the target" in out["dealer_line"]
     assert "call wall at 770.00" in out["dealer_line"]
     # a spot already beyond the wall is also inside it
-    beyond = sc.components(read(mx=full_matrix(call_wall=765.0)), "SPY", 1, 3.0, ENTRY)
+    beyond = sc.components(read(mx=full_matrix(call_wall=765.0, roomy=2)), "SPY", 1, 3.0,
+                         ENTRY)
     assert beyond["dealer"]["verdict"] == -1
 
 
-def test_dealer_combines_the_symbol_and_the_breadth():
-    # symbol agrees, breadth disagrees (2 of 10): the symbol's own room decides
-    one = sc.components(read(mx=full_matrix(roomy=2)), "SPY", 1, 3.0, ENTRY)["dealer"]
-    assert one["raw"]["breadth"]["verdict"] == -1 and one["verdict"] == 1
-    # symbol disagrees, breadth agrees: the symbol still decides
-    two = sc.components(read(mx=full_matrix(call_wall=770.0, roomy=9)), "SPY", 1, 3.0,
-                        ENTRY)["dealer"]
-    assert two["raw"]["breadth"]["verdict"] == 1 and two["verdict"] == -1
+def test_room_and_breadth_both_agree():
+    out = sc.components(read(mx=full_matrix(roomy=8)), "SPY", 1, 3.0, ENTRY)["dealer"]
+    assert out["raw"]["own_verdict"] == 1 and out["raw"]["breadth"]["verdict"] == 1
+    assert out["verdict"] == 1
+
+
+def test_room_agrees_but_the_breadth_disagrees_is_neutral():
+    out = sc.components(read(mx=full_matrix(roomy=2)), "SPY", 1, 3.0, ENTRY)
+    d = out["dealer"]
+    assert d["raw"]["own_verdict"] == 1 and d["raw"]["breadth"]["verdict"] == -1
+    assert d["verdict"] == 0                              # present, neutral
+    assert "room and breadth disagree" in out["dealer_line"]
+    assert out["score"] == 0.0 and out["word"] == "Mixed"
+
+
+def test_a_wall_inside_the_target_with_roomy_breadth_is_neutral_too():
+    d = sc.components(read(mx=full_matrix(call_wall=770.0, roomy=9)), "SPY", 1, 3.0,
+                      ENTRY)["dealer"]
+    assert d["raw"]["own_verdict"] == -1 and d["raw"]["breadth"]["verdict"] == 1
+    assert d["verdict"] == 0
+
+
+def test_room_disagrees_and_breadth_has_no_reading_is_a_disagree():
+    # only 2 of the big ten have a wall: breadth is not read, the symbol stands
+    rows = [{**SPY_ROW, "call_wall": 770.0}] + [row(s, 200.0, 202.0, 198.0)
+                                                for s in BIG10[:2]]
+    d = sc.components(read(mx=matrix(rows)), "SPY", 1, 3.0, ENTRY)["dealer"]
+    assert d["raw"]["breadth"]["verdict"] is None and d["verdict"] == -1
     # both disagree
-    three = sc.components(read(mx=full_matrix(call_wall=770.0, roomy=2)), "SPY", 1,
-                          3.0, ENTRY)["dealer"]
-    assert three["verdict"] == -1
-    # in between (5 of 10, neither >= 0.6 nor <= 0.4) the symbol decides too
+    both = sc.components(read(mx=full_matrix(call_wall=770.0, roomy=2)), "SPY", 1,
+                         3.0, ENTRY)["dealer"]
+    assert both["verdict"] == -1
+
+
+def test_a_middling_breadth_leaves_the_symbols_room_standing():
     mid = sc.components(read(mx=full_matrix(roomy=5)), "SPY", 1, 3.0, ENTRY)["dealer"]
     assert mid["raw"]["breadth"]["verdict"] == 0 and mid["verdict"] == 1
+
+
+def test_the_breadth_alone_counts_when_the_symbol_has_no_wall():
+    rows = [{**SPY_ROW, "call_wall": None}] + big_rows(8)
+    out = sc.components(read(mx=matrix(rows)), "SPY", 1, 3.0, ENTRY)
+    assert out["dealer"]["raw"]["own_verdict"] is None
+    assert out["dealer"]["verdict"] == 1
+    assert out["dealer_line"] == ("No call wall for SPY; 8 of 10 big names have room "
+                                  "(the big names alone count)")
+    low = [{**SPY_ROW, "call_wall": None}] + big_rows(2)
+    assert sc.components(read(mx=matrix(low)), "SPY", 1, 3.0, ENTRY)["dealer"][
+        "verdict"] == -1
 
 
 def test_breadth_compares_in_percent_of_each_names_own_spot():
@@ -312,20 +385,12 @@ def test_no_greeks_walls_are_no_reading():
     assert out["dealer"]["verdict"] is None
     assert out["dealer"]["raw"]["breadth"]["of"] == 0
     assert out["score"] is None and out["word"] is None
-    assert "No reading" in out["dealer_line"]
+    assert out["dealer_line"] == "No call wall for SPY; breadth not read"
     # a zero or non-finite wall is the same absence, never a wall at zero
     for wall in (0, 0.0, float("nan"), "n/a", -5.0):
         rows[0]["call_wall"] = wall
         again = sc.components(read(mx=matrix(rows)), "SPY", 1, 3.0, ENTRY)
         assert again["dealer"]["verdict"] is None
-
-
-def test_the_symbol_with_no_wall_gets_no_verdict_even_if_breadth_reads():
-    rows = [{**SPY_ROW, "call_wall": None}] + big_rows(8)
-    out = sc.components(read(mx=matrix(rows)), "SPY", 1, 3.0, ENTRY)
-    assert out["dealer"]["verdict"] is None
-    assert out["dealer"]["raw"]["breadth"]["share"] == 0.8
-    assert "8 of 10 big names have room" in out["dealer_line"]
 
 
 def test_a_thin_breadth_sample_is_not_a_breadth():

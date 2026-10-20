@@ -341,6 +341,7 @@ def test_the_intraday_defaults_are_the_specs_values():
     assert (sc.flow_window_min(), sc.flow_margin(), sc.netprem_margin(),
             sc.confirm_max_age_min(), sc.promotion_sessions()) == (30, 2, 0.1, 5, 40)
     assert sc.confirm_cuts() == (-0.34, 0.34)
+    assert sc.sides_majority() == 0.6
 
 
 def test_bad_intraday_values_fall_back(monkeypatch):
@@ -350,7 +351,7 @@ def test_bad_intraday_values_fall_back(monkeypatch):
                      "promotion_sessions": 1.5,
                      "blocks": {"morning": {"start": "08:51"}}},
         "confirm": {"flow_window_min": 0, "flow_margin": True, "netprem_margin": -0.1,
-                    "max_age_min": "soon", "cuts": [0.5, 0.2],
+                    "max_age_min": "soon", "cuts": [0.5, 0.2], "sides_majority": 0.5,
                     "weights": {"flow": -1, "netprem": "x", "dealer": float("nan"),
                                 "sentiment": True}}})
     assert len(sc.intraday_slots(_DAY)) == 21
@@ -363,12 +364,21 @@ def test_bad_intraday_values_fall_back(monkeypatch):
     assert sc.flow_margin() == 2
     assert sc.netprem_margin() == 0.1
     assert sc.confirm_max_age_min() == 5
+    assert sc.sides_majority() == 0.6              # 0.5 is a tie, not a majority
     assert sc.confirm_cuts() == (-0.34, 0.34)
     assert sc.confirm_weights() == {"flow": 1.0, "netprem": 1.0, "dealer": 1.0,
                                     "sentiment": 0.5}
     # the block table was half-given, so the defaults apply whole
     assert [sc.intraday_block(s) for s in ("08:51", "10:06", "12:36")] == [
         "morning", "midday", "afternoon"]
+
+
+def test_sides_majority_must_be_above_a_tie(monkeypatch):
+    for bad in (0.4, 0.5, 1.2, True, "most", float("nan")):
+        monkeypatch.setattr(sc, "load", lambda bad=bad: {"confirm": {"sides_majority": bad}})
+        assert sc.sides_majority() == 0.6
+    monkeypatch.setattr(sc, "load", lambda: {"confirm": {"sides_majority": 1}})
+    assert sc.sides_majority() == 1.0
 
 
 def test_a_start_after_the_end_is_the_default_schedule(monkeypatch):
@@ -383,7 +393,7 @@ def test_good_intraday_values_are_read(monkeypatch):
                      "grace_min": 3, "dead_zone_pct": 0.05, "breadth_agree": 0.7,
                      "promotion_sessions": 60},
         "confirm": {"flow_window_min": 20, "flow_margin": 3, "netprem_margin": 0.2,
-                    "max_age_min": 4, "cuts": [-0.5, 0.25],
+                    "max_age_min": 4, "cuts": [-0.5, 0.25], "sides_majority": 0.75,
                     "weights": {"flow": 2, "netprem": 0, "dealer": 1.5, "sentiment": 0.25}}})
     assert sc.intraday_slots(_DAY) == ["09:00", "09:30", "10:00"]
     assert (sc.intraday_grace_min(), sc.intraday_dead_zone_pct(), sc.breadth_agree(),
@@ -391,6 +401,7 @@ def test_good_intraday_values_are_read(monkeypatch):
     assert (sc.flow_window_min(), sc.flow_margin(), sc.netprem_margin(),
             sc.confirm_max_age_min()) == (20, 3, 0.2, 4)
     assert sc.confirm_cuts() == (-0.5, 0.25)
+    assert sc.sides_majority() == 0.75
     assert sc.confirm_weights() == {"flow": 2.0, "netprem": 0.0, "dealer": 1.5,
                                     "sentiment": 0.25}
 

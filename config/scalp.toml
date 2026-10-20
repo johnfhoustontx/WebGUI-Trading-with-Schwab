@@ -137,6 +137,9 @@ flow_window_min = 30
 flow_margin = 2
 # The share (0..1) of total net premium one side must lead by to lean.
 netprem_margin = 0.1
+# The share of an option alert's labelled bought + sold volume that must be on
+# one side (above 0.5, up to 1) before the alert counts as directional.
+sides_majority = 0.6
 # A confirming reading older than this many minutes is treated as absent.
 max_age_min = 5
 # Contradicts at or below the first, Confirms at or above the second, on the
