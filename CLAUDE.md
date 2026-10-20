@@ -572,7 +572,7 @@ a worktree needs its absolute path.
 
 ## Options, paper books and trade selection
 
-Detail: [options engine invariants](docs/reference/options-engine-invariants.md). **Read it before changing the paper engine, Rescue, the scanner's gates or settlement**: every rule below has an incident and a measurement behind it there. The Opening Scalp's measured verdict (no usable edge) is in [the study](docs/reference/opening-scalp-study.md).
+Detail: [options engine invariants](docs/reference/options-engine-invariants.md). **Read it before changing the paper engine, Rescue, the scanner's gates or settlement**: every rule below has an incident and a measurement behind it there. The Opening Scalp's measured verdict (no usable edge) is in [the study](docs/reference/opening-scalp-study.md), and its 15-minute calls' in [the intraday study](docs/reference/scalp-intraday-study.md).
 
 **The two paper books.**
 - An equity lot is cash CONVERTED, never a buying-power reservation: a lot never
