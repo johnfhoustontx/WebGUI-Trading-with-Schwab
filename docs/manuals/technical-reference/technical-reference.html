@@ -6019,7 +6019,7 @@ sentiment are a <strong>confirmation reading</strong>, shown and recorded and no
   100 (<code>$VXN</code> for QQQ, falling back to <code>$VIX</code>).</li>
 </ul>
 <h3 id="the-intraday-study-scalp_intraday_studyrebuild">The intraday study (<code>scalp_intraday_study.rebuild</code>)</h3>
-<p>Run nightly, last. For every stored trading day and every slot it takes each symbol's
+<p>Run nightly, last (about a minute on a 150-day store). For every stored trading day and every slot it takes each symbol's
 reading and, when it has a direction and a usable volatility, simulates the four roles
 from that slot's entry along the stored bars at every multiplier in <code>[study]
 iv_scales</code>, with the 08:36 simulator and rules (<code>scalp_sim.simulate</code>). Then it replaces
@@ -6157,8 +6157,8 @@ is never a probability.</p>
   disagrees. <em>Breadth:</em> the share of the big ten whose room in percent of their own spot
   reaches the target in percent, read only with <code>breadth_min_members</code> (5) usable
   members: &gt;= <code>breadth_agree</code> agrees, &lt;= 1 minus it disagrees. The verdict is the
-  symbol's own room when breadth agrees or has no reading, <strong>0</strong> when they disagree, and
-  breadth alone when the symbol has no wall. The gamma flip is recorded
+  symbol's own room when breadth agrees, is neutral or has no reading, <strong>0</strong> when breadth
+  points the opposite way, and breadth alone when the symbol has no wall. The gamma flip is recorded
   (<code>above_flip</code>), never scored.
 - <strong>Untrusted walls.</strong> A row is <code>walls_untrusted</code> when <code>net_gex</code> is missing or <strong>0</strong>: with
   Schwab's -999 gamma refused every GEX cell is 0.0 and the wall picker still returns the
@@ -6166,13 +6166,15 @@ is never a probability.</p>
   the room, the breadth or <code>wall_context</code>. A missing wall is likewise no reading, never
   "no room".
 - <strong>Sentiment.</strong> <code>derived.trend.state</code> from the composite: <code>bullish</code> +1, <code>bearish</code> -1;
-  <code>neutral</code> and the two "lack of" states give no side.</p>
+  <code>neutral</code> and the two "lack of" states give no side. In the recorded <code>raw</code>, <code>state</code> is
+  the regime name and the source's status (<code>ok</code>, <code>absent</code>, <code>stale</code>) is <code>raw.source</code>.</p>
 <h3 id="recording-scalp_record">Recording (<code>scalp_record</code>)</h3>
 <p>At every intraday slot <strong>and</strong> at 08:36 (inside the call's grace), one
 <code>intraday_readings</code> row per scalp symbol per slot is saved, with or without a
 direction: the components and their <strong>raw values</strong> (so any later definition can be
 recomputed), each source's state and age, the spot, walls, flip, net GEX and
-<code>walls_untrusted</code> for the symbol and every big-ten member, the net premium levels for the
+<code>walls_untrusted</code> for the three scalp symbols and every big-ten member (each row's
+<code>snapshot</code> holds all 13), the net premium levels for the
 symbols and the BIG10 basket, the sentiment state and score, and the flow counts (the
 whole view and the windowed, scoped reading the call saw). This is the history that does
 not otherwise exist beyond five sessions (<code>gex_history.db</code> purges walls and premium).</p>
@@ -6222,7 +6224,7 @@ automatically.</strong></p>
 <tr>
 <td>Nightly pass</td>
 <td><strong>16:20 CT</strong> (<code>[slots.scalp_bars]</code>, grace 120 min)</td>
-<td>In order: <strong>bar top-up</strong> (23 symbols - the 13 in <code>[bars]</code> plus the big ten - x 2 intervals, from one bar before the store's latest, so a bar stored as a partial is replaced; a missed night is caught up by the next), the <strong>08:36 study rebuild</strong> (one transaction, so a reader sees the old study or the new, never half of each), the <strong>08:36 grading</strong>, the <strong>intraday grading</strong>, the <strong>scorecard republish</strong>, and last the <strong>intraday study rebuild</strong> (minutes, not seconds, so nothing above waits on it). Each step is guarded on its own: a failed step does not stop the next. After the 16:00 flow-delta report so it never competes for the proxy's 5 requests a second.</td>
+<td>In order: <strong>bar top-up</strong> (23 symbols - the 13 in <code>[bars]</code> plus the big ten - x 2 intervals, from one bar before the store's latest, so a bar stored as a partial is replaced; a missed night is caught up by the next), the <strong>08:36 study rebuild</strong> (one transaction, so a reader sees the old study or the new, never half of each), the <strong>08:36 grading</strong>, the <strong>intraday grading</strong>, the <strong>scorecard republish</strong>, and last the <strong>intraday study rebuild</strong> (about a minute: 61-68 s measured on a 150-day store, so nothing above waits on it). Each step is guarded on its own: a failed step does not stop the next. After the 16:00 flow-delta report so it never competes for the proxy's 5 requests a second.</td>
 </tr>
 <tr>
 <td>Refresh</td>
@@ -7409,7 +7411,7 @@ the source; this table is a summary of them.</p>
 </tr>
 <tr>
 <td>options_svc</td>
-<td>Loop tick <strong>30 s</strong> (<code>POLL_INTERVAL_SEC</code>). Auto-scan 15-min slots, 08:00–15:15 (<code>autoscan_due</code>); <strong>GEX collection every 1 min</strong>, 08:00–15:20 (<code>_GEX_INTERVAL_MIN</code>, mirroring <code>gex_collector.POLL_INTERVAL_MIN</code>); term structure every <strong>5 min</strong> (<code>TERM_POLL_INTERVAL_MIN</code>); <strong>captured-signal</strong> management every <strong>5 min</strong> (<code>_CAPTURED_MANAGE_INTERVAL_MIN</code>); <strong>manual</strong> paper entry+manage <strong>hourly at the top of the hour, 09:00–14:00</strong> (<code>_PAPER_HOURS</code>, <code>_PAPER_GRACE_MIN</code> = 20); paper <strong>expiry settlement at 15:05</strong> — a settle-only pass over the Account and the Ledger (<code>paper_settle_due</code>, <code>[slots.paper_settle]</code>, grace 120 min); header + GEX status each tick in market hours, throttled to one per <strong>5 min</strong> off-hours (<code>periodic_refresh_due</code>, skip-unchanged); <strong>Opening Scalp</strong> morning call at <strong>08:36</strong> (<code>scalp_call_due</code>, <code>[slots.scalp]</code>, grace 20 min) a new 15-minute Opening Scalp call at each of <strong>08:51, 09:06 ... 13:51</strong> (<code>scalp_intraday_due</code>, <code>[intraday]</code>, grace 5 min) and, at <strong>16:20</strong>, a nightly pass of bar top-up, both study rebuilds, both gradings and the scorecard republish (<code>scalp_bars_due</code>, <code>[slots.scalp_bars]</code>, grace 120 min) — see <em>Opening Scalp</em>.</td>
+<td>Loop tick <strong>30 s</strong> (<code>POLL_INTERVAL_SEC</code>). Auto-scan 15-min slots, 08:00–15:15 (<code>autoscan_due</code>); <strong>GEX collection every 1 min</strong>, 08:00–15:20 (<code>_GEX_INTERVAL_MIN</code>, mirroring <code>gex_collector.POLL_INTERVAL_MIN</code>); term structure every <strong>5 min</strong> (<code>TERM_POLL_INTERVAL_MIN</code>); <strong>captured-signal</strong> management every <strong>5 min</strong> (<code>_CAPTURED_MANAGE_INTERVAL_MIN</code>); <strong>manual</strong> paper entry+manage <strong>hourly at the top of the hour, 09:00–14:00</strong> (<code>_PAPER_HOURS</code>, <code>_PAPER_GRACE_MIN</code> = 20); paper <strong>expiry settlement at 15:05</strong> — a settle-only pass over the Account and the Ledger (<code>paper_settle_due</code>, <code>[slots.paper_settle]</code>, grace 120 min); header + GEX status each tick in market hours, throttled to one per <strong>5 min</strong> off-hours (<code>periodic_refresh_due</code>, skip-unchanged); <strong>Opening Scalp</strong> morning call at <strong>08:36</strong> (<code>scalp_call_due</code>, <code>[slots.scalp]</code>, grace 20 min), a new 15-minute Opening Scalp call at each of <strong>08:51, 09:06 ... 13:51</strong> (<code>scalp_intraday_due</code>, <code>[intraday]</code>, grace 5 min) and, at <strong>16:20</strong>, a nightly pass of bar top-up, both study rebuilds, both gradings and the scorecard republish (<code>scalp_bars_due</code>, <code>[slots.scalp_bars]</code>, grace 120 min) — see <em>Opening Scalp</em>.</td>
 </tr>
 <tr>
 <td>portfolio_svc</td>

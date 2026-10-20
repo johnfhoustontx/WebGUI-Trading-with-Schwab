@@ -1849,8 +1849,16 @@ next_call, intraday}</code>. <code>intraday</code> is the 15-minute calls' secti
   (<code>{title, url, source, published_at, tickers}</code>) and today's flow alerts on the scalp
   symbols since 08:30 (<code>{ts, symbol, type, side, text}</code>). <strong>Not in the probability.</strong>
   Both feeds are private views, so this view is read only by the private app.
-- <code>scorecard</code> is <code>{days, window, symbols: {SYMBOL: {days, edge, caution, roles}}}</code>
-  from the graded record, or <code>{}</code> when nothing has been graded. <code>edge</code> and <code>caution</code>
+- <code>scorecard</code> is <code>{days, window, symbols: {SYMBOL: {days, edge, caution, roles}},
+  intraday}</code> from the graded record, or <code>{}</code> when nothing has been graded. <code>intraday</code>
+  is present only once 15-minute calls have graded days: <code>{days, window, symbols:
+  {SYMBOL: {days, blocks: {block: {days, edge, caution, by_word}}}}}</code>. <code>days</code> is
+  distinct days throughout (the 08:36 sections count role-days). In a block, <code>edge</code>
+  and <code>caution</code> are <code>{days, rows, wins, rate, p_base}</code> (<code>rows</code> is slot-roles; <code>rate</code>
+  and <code>p_base</code> are <code>null</code> with none) and <code>by_word</code> is <code>{Confirms, Mixed, Contradicts}</code>,
+  each <code>{days, rows, wins, win_rate}</code> for the long-with-the-move role. With no 08:36
+  grades the scorecard can be <code>{"intraday": ...}</code> alone (no <code>days</code>, <code>window</code> or
+  <code>symbols</code> at the top). On an 08:36 card <code>edge</code> and <code>caution</code>
   are <code>{days, wins, rate, p_base}</code> (<code>rate</code> and <code>p_base</code> are <code>null</code> with no days);
   <code>roles</code> is keyed by role, each <code>{n, win, loss, timeout, win_rate, chain_n,
   chain_win_rate}</code>. A win is the model's result; the chain's is beside it.</p>
@@ -1951,7 +1959,9 @@ slot's trade was already over when it was built) or <code>the call could not be 
 truncated}</code>. Each component is <code>{verdict, raw, stale}</code>: <code>verdict</code> is <code>1</code> agrees, <code>-1</code>
 disagrees, <code>0</code> looked and found no side, <code>null</code> no reading; <code>raw</code> holds the values it was
 made from, with a <code>state</code> (<code>ok</code>, <code>absent</code>, <code>stale</code>, <code>stale_point</code>, <code>no_reading</code>,
-<code>no_entry_ts</code>, <code>error</code>). <code>score</code> is the weighted mean in -1..1 (<code>ScalpView</code> rejects one
+<code>no_entry_ts</code>, <code>error</code>) for flow, net premium and the dealer read. The <strong>sentiment</strong>
+component differs: its <code>raw.state</code> is the regime name (<code>bullish</code>, <code>neutral</code>, ... or
+<code>null</code>) and its status is in <code>raw.source</code> (<code>ok</code>, <code>absent</code> or <code>stale</code>). <code>score</code> is the weighted mean in -1..1 (<code>ScalpView</code> rejects one
 outside it) and <code>word</code> is <code>Confirms</code>, <code>Mixed</code> or <code>Contradicts</code> (both <code>null</code> when no
 component had a reading). <strong>It is not in the probability</strong> and the page never prints the
 score. The dealer component's <code>raw</code> carries <code>wall_kind</code>, <code>wall</code>, <code>room</code>, <code>room_pct</code>,

@@ -3196,7 +3196,7 @@ sentiment are a **confirmation reading**, shown and recorded and not in the prob
 
 ### The intraday study (`scalp_intraday_study.rebuild`)
 
-Run nightly, last. For every stored trading day and every slot it takes each symbol's
+Run nightly, last (about a minute on a 150-day store). For every stored trading day and every slot it takes each symbol's
 reading and, when it has a direction and a usable volatility, simulates the four roles
 from that slot's entry along the stored bars at every multiplier in `[study]
 iv_scales`, with the 08:36 simulator and rules (`scalp_sim.simulate`). Then it replaces
@@ -3302,8 +3302,8 @@ is never a probability.
   disagrees. *Breadth:* the share of the big ten whose room in percent of their own spot
   reaches the target in percent, read only with `breadth_min_members` (5) usable
   members: >= `breadth_agree` agrees, <= 1 minus it disagrees. The verdict is the
-  symbol's own room when breadth agrees or has no reading, **0** when they disagree, and
-  breadth alone when the symbol has no wall. The gamma flip is recorded
+  symbol's own room when breadth agrees, is neutral or has no reading, **0** when breadth
+  points the opposite way, and breadth alone when the symbol has no wall. The gamma flip is recorded
   (`above_flip`), never scored.
 - **Untrusted walls.** A row is `walls_untrusted` when `net_gex` is missing or **0**: with
   Schwab's -999 gamma refused every GEX cell is 0.0 and the wall picker still returns the
@@ -3311,7 +3311,8 @@ is never a probability.
   the room, the breadth or `wall_context`. A missing wall is likewise no reading, never
   "no room".
 - **Sentiment.** `derived.trend.state` from the composite: `bullish` +1, `bearish` -1;
-  `neutral` and the two "lack of" states give no side.
+  `neutral` and the two "lack of" states give no side. In the recorded `raw`, `state` is
+  the regime name and the source's status (`ok`, `absent`, `stale`) is `raw.source`.
 
 ### Recording (`scalp_record`)
 
@@ -3319,7 +3320,8 @@ At every intraday slot **and** at 08:36 (inside the call's grace), one
 `intraday_readings` row per scalp symbol per slot is saved, with or without a
 direction: the components and their **raw values** (so any later definition can be
 recomputed), each source's state and age, the spot, walls, flip, net GEX and
-`walls_untrusted` for the symbol and every big-ten member, the net premium levels for the
+`walls_untrusted` for the three scalp symbols and every big-ten member (each row's
+`snapshot` holds all 13), the net premium levels for the
 symbols and the BIG10 basket, the sentiment state and score, and the flow counts (the
 whole view and the windowed, scoped reading the call saw). This is the history that does
 not otherwise exist beyond five sessions (`gex_history.db` purges walls and premium).
@@ -3357,7 +3359,7 @@ automatically.**
 |---|---|---|
 | 15-minute call | **08:51, 09:06 ... 13:51 CT** (`[intraday]` `start` / `end` / `interval_min`, grace `grace_min` 5 min; `scalp_intraday_due`) | Under the shared run lock: today's bars topped up, up to three 0DTE chains, the slot's call built, published and frozen, then the confirmation inputs recorded. About 26 requests, normal lane. |
 | Morning call | **08:36 CT** (`[slots.scalp]`, grace 20 min) | Today's bars topped up, three chains captured, the call built and published. 08:36 and not 08:35: the autoscan fetches 08:32-08:35 and Schwab refuses the first minute after the half hour. |
-| Nightly pass | **16:20 CT** (`[slots.scalp_bars]`, grace 120 min) | In order: **bar top-up** (23 symbols - the 13 in `[bars]` plus the big ten - x 2 intervals, from one bar before the store's latest, so a bar stored as a partial is replaced; a missed night is caught up by the next), the **08:36 study rebuild** (one transaction, so a reader sees the old study or the new, never half of each), the **08:36 grading**, the **intraday grading**, the **scorecard republish**, and last the **intraday study rebuild** (minutes, not seconds, so nothing above waits on it). Each step is guarded on its own: a failed step does not stop the next. After the 16:00 flow-delta report so it never competes for the proxy's 5 requests a second. |
+| Nightly pass | **16:20 CT** (`[slots.scalp_bars]`, grace 120 min) | In order: **bar top-up** (23 symbols - the 13 in `[bars]` plus the big ten - x 2 intervals, from one bar before the store's latest, so a bar stored as a partial is replaced; a missed night is caught up by the next), the **08:36 study rebuild** (one transaction, so a reader sees the old study or the new, never half of each), the **08:36 grading**, the **intraday grading**, the **scorecard republish**, and last the **intraday study rebuild** (about a minute: 61-68 s measured on a 150-day store, so nothing above waits on it). Each step is guarded on its own: a failed step does not stop the next. After the 16:00 flow-delta report so it never competes for the proxy's 5 requests a second. |
 | Refresh | on demand (`scalp_refresh`) | `scalp_call.run`, then `scalp_intraday_call.run_slot` for the slot whose window is open (none open: only today's published slots are put back, never an off-slot call); slow lane, replay-guarded. |
 
 `scalp.db` (`services/options_svc/data/`) is kept forever and is in the nightly
@@ -4104,7 +4106,7 @@ the source; this table is a summary of them.
 | Service | Cadence |
 |---------|---------|
 | sentiment_svc | Composite refresh every **120 s** (`REFRESH_INTERVAL_SEC`), throttled to one refresh per **15 min** off-hours (`_OFFHOURS_INTERVAL_MIN`); directional trend recompute every **900 s** (`TREND_INTERVAL_SEC`); market-regime recompute every **5 min** (`REGIME_INTERVAL_MIN`); order-flow publish every **30 s** (`ORDER_FLOW_PUBLISH_SEC`); **momentum cascade once nightly at 16:20** (`momentum_due`); rotation at startup / on demand. |
-| options_svc | Loop tick **30 s** (`POLL_INTERVAL_SEC`). Auto-scan 15-min slots, 08:00–15:15 (`autoscan_due`); **GEX collection every 1 min**, 08:00–15:20 (`_GEX_INTERVAL_MIN`, mirroring `gex_collector.POLL_INTERVAL_MIN`); term structure every **5 min** (`TERM_POLL_INTERVAL_MIN`); **captured-signal** management every **5 min** (`_CAPTURED_MANAGE_INTERVAL_MIN`); **manual** paper entry+manage **hourly at the top of the hour, 09:00–14:00** (`_PAPER_HOURS`, `_PAPER_GRACE_MIN` = 20); paper **expiry settlement at 15:05** — a settle-only pass over the Account and the Ledger (`paper_settle_due`, `[slots.paper_settle]`, grace 120 min); header + GEX status each tick in market hours, throttled to one per **5 min** off-hours (`periodic_refresh_due`, skip-unchanged); **Opening Scalp** morning call at **08:36** (`scalp_call_due`, `[slots.scalp]`, grace 20 min) a new 15-minute Opening Scalp call at each of **08:51, 09:06 ... 13:51** (`scalp_intraday_due`, `[intraday]`, grace 5 min) and, at **16:20**, a nightly pass of bar top-up, both study rebuilds, both gradings and the scorecard republish (`scalp_bars_due`, `[slots.scalp_bars]`, grace 120 min) — see *Opening Scalp*. |
+| options_svc | Loop tick **30 s** (`POLL_INTERVAL_SEC`). Auto-scan 15-min slots, 08:00–15:15 (`autoscan_due`); **GEX collection every 1 min**, 08:00–15:20 (`_GEX_INTERVAL_MIN`, mirroring `gex_collector.POLL_INTERVAL_MIN`); term structure every **5 min** (`TERM_POLL_INTERVAL_MIN`); **captured-signal** management every **5 min** (`_CAPTURED_MANAGE_INTERVAL_MIN`); **manual** paper entry+manage **hourly at the top of the hour, 09:00–14:00** (`_PAPER_HOURS`, `_PAPER_GRACE_MIN` = 20); paper **expiry settlement at 15:05** — a settle-only pass over the Account and the Ledger (`paper_settle_due`, `[slots.paper_settle]`, grace 120 min); header + GEX status each tick in market hours, throttled to one per **5 min** off-hours (`periodic_refresh_due`, skip-unchanged); **Opening Scalp** morning call at **08:36** (`scalp_call_due`, `[slots.scalp]`, grace 20 min), a new 15-minute Opening Scalp call at each of **08:51, 09:06 ... 13:51** (`scalp_intraday_due`, `[intraday]`, grace 5 min) and, at **16:20**, a nightly pass of bar top-up, both study rebuilds, both gradings and the scorecard republish (`scalp_bars_due`, `[slots.scalp_bars]`, grace 120 min) — see *Opening Scalp*. |
 | portfolio_svc | Live SSE ticks; throttled publish ≤ every **2 s** (`PUBLISH_INTERVAL_SEC`); full rebuild every **600 s** (`REBUILD_INTERVAL_SEC`), or **3600 s** off-hours (`OFFHOURS_REBUILD_INTERVAL_SEC`), or on demand. |
 | trade_svc | Analysis on demand. One scheduled job: the watchlist **dividend pull**, once a trading day at or after **06:40 CT** (`[calendar.dividends] refresh_at` in `config/news.toml`); the loop wakes every **60 s** and retries a failed pull after **15 min**. |
 | market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); report summary re-read when the published market report changes (a stat of `deploy/site/reports/latest.html` + `latest.txt` per poll) — no Claude call. |

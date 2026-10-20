@@ -492,8 +492,16 @@ next_call, intraday}`. `intraday` is the 15-minute calls' section, described bel
   (`{title, url, source, published_at, tickers}`) and today's flow alerts on the scalp
   symbols since 08:30 (`{ts, symbol, type, side, text}`). **Not in the probability.**
   Both feeds are private views, so this view is read only by the private app.
-- `scorecard` is `{days, window, symbols: {SYMBOL: {days, edge, caution, roles}}}`
-  from the graded record, or `{}` when nothing has been graded. `edge` and `caution`
+- `scorecard` is `{days, window, symbols: {SYMBOL: {days, edge, caution, roles}},
+  intraday}` from the graded record, or `{}` when nothing has been graded. `intraday`
+  is present only once 15-minute calls have graded days: `{days, window, symbols:
+  {SYMBOL: {days, blocks: {block: {days, edge, caution, by_word}}}}}`. `days` is
+  distinct days throughout (the 08:36 sections count role-days). In a block, `edge`
+  and `caution` are `{days, rows, wins, rate, p_base}` (`rows` is slot-roles; `rate`
+  and `p_base` are `null` with none) and `by_word` is `{Confirms, Mixed, Contradicts}`,
+  each `{days, rows, wins, win_rate}` for the long-with-the-move role. With no 08:36
+  grades the scorecard can be `{"intraday": ...}` alone (no `days`, `window` or
+  `symbols` at the top). On an 08:36 card `edge` and `caution`
   are `{days, wins, rate, p_base}` (`rate` and `p_base` are `null` with no days);
   `roles` is keyed by role, each `{n, win, loss, timeout, win_rate, chain_n,
   chain_win_rate}`. A win is the model's result; the chain's is beside it.
@@ -561,7 +569,9 @@ slot's trade was already over when it was built) or `the call could not be built
 truncated}`. Each component is `{verdict, raw, stale}`: `verdict` is `1` agrees, `-1`
 disagrees, `0` looked and found no side, `null` no reading; `raw` holds the values it was
 made from, with a `state` (`ok`, `absent`, `stale`, `stale_point`, `no_reading`,
-`no_entry_ts`, `error`). `score` is the weighted mean in -1..1 (`ScalpView` rejects one
+`no_entry_ts`, `error`) for flow, net premium and the dealer read. The **sentiment**
+component differs: its `raw.state` is the regime name (`bullish`, `neutral`, ... or
+`null`) and its status is in `raw.source` (`ok`, `absent` or `stale`). `score` is the weighted mean in -1..1 (`ScalpView` rejects one
 outside it) and `word` is `Confirms`, `Mixed` or `Contradicts` (both `null` when no
 component had a reading). **It is not in the probability** and the page never prints the
 score. The dealer component's `raw` carries `wall_kind`, `wall`, `room`, `room_pct`,

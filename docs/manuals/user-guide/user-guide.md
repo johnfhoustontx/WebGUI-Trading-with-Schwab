@@ -2486,7 +2486,7 @@ is a new call, not an edit of the last.
   have room", or says the wall is inside the target. The **breadth** part counts how
   many of the ten big names have the same room, in percent of their own price. If the
   data has no gamma reading (Schwab sometimes sends none), the walls are not trusted
-  and the line says "no usable wall (no gamma reading)" instead of guessing.
+  and the line says "No usable call wall for SPY (no gamma reading)" (or put wall, for a down call) instead of guessing.
 - **Under each trade** the card names any wall that sits between the entry and its
   target or stop ("Target is beyond the call wall at 5,850").
 - **Today's calls** lists every slot made today: the time, per symbol the direction, the
