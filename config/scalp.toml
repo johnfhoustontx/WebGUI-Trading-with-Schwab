@@ -140,6 +140,9 @@ netprem_margin = 0.1
 # The share of an option alert's labelled bought + sold volume that must be on
 # one side (above 0.5, up to 1) before the alert counts as directional.
 sides_majority = 0.6
+# How many of the big ten must have a usable wall before their breadth of room
+# is read; below this the dealer read goes by the symbol's own room alone.
+breadth_min_members = 5
 # A confirming reading older than this many minutes is treated as absent.
 max_age_min = 5
 # Contradicts at or below the first, Confirms at or above the second, on the

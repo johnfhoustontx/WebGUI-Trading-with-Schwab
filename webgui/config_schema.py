@@ -1239,6 +1239,10 @@ _SCALP = ConfigFile(
                   "bought (or sold) before the alert counts as bullish or "
                   "bearish. Above 0.5, up to 1.", kind="float", min=0.51,
                   max=1, step=0.01),
+            Field("confirm.breadth_min_members", "Big names needed for breadth",
+                  "How many of the ten biggest stocks must have a usable dealer "
+                  "wall before their breadth of room is read.",
+                  kind="int", min=1, max=50, step=1),
             Field("confirm.max_age_min", "Oldest reading used",
                   "A confirming reading older than this is treated as absent.",
                   kind="int", unit="min", min=1, max=60, step=1),

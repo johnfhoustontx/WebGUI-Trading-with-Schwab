@@ -41,7 +41,6 @@ Rules that keep it honest:
 Design: docs/plans/2026-10-20-scalp-intraday-calls-design.md section 5.
 """
 import datetime as _dt
-import math
 from zoneinfo import ZoneInfo
 
 from services import _degrade
@@ -249,6 +248,23 @@ def _flow(src, symbol, d, entry_ts):
     alerts = payload.get("alerts") if payload else None
     if not isinstance(alerts, list):
         return {"verdict": None, "raw": {"state": "absent"}, "stale": False}
+    if entry_ts is None:
+        return {"verdict": None, "raw": {"state": "no_entry_ts"}, "stale": False}
+    raw = _flow_scope(src, payload, symbol, entry_ts)
+    verdict = None
+    if d is not None:
+        lean = raw["net"] * d
+        verdict = (1 if lean > 0 and lean >= raw["margin"]
+                   else -1 if lean < 0 and -lean >= raw["margin"] else 0)
+    return {"verdict": verdict, "stale": False, "raw": raw}
+
+
+def _flow_scope(src, payload, symbol, entry_ts):
+    """The flow reading's raw counts: the directional alerts in
+    ``[entry_ts - flow_window_min, entry_ts]`` on ``symbol`` and the big ten.
+    ``components`` scores it and ``snapshot`` records it, so what is recorded is
+    what the call saw."""
+    alerts = payload["alerts"]
     contracts, sides_state = _estimates(src, payload)
     window = scalp_config.flow_window_min()
     start = entry_ts - window * 60
@@ -276,22 +292,17 @@ def _flow(src, symbol, d, entry_ts):
     # alert is inside the window may have lost older ones. A short list that
     # starts late is just a quiet morning.
     truncated = len(alerts) >= FLOW_CAP and bool(stamps) and min(stamps) > start
-    net = bull - bear
-    margin = scalp_config.flow_margin()
-    verdict = None
-    if d is not None:
-        lean = net * d
-        verdict = 1 if lean > 0 and lean >= margin else -1 if lean < 0 and -lean >= margin else 0
-    return {"verdict": verdict, "stale": False,
-            "raw": {"state": "ok", "window_min": window, "n_alerts": n, "bull": bull,
-                    "bear": bear, "net": net, "margin": margin, "by_type": by_type,
-                    "truncated": truncated, "sides_view": sides_state}}
+    return {"state": "ok", "window_min": window, "n_alerts": n, "bull": bull,
+            "bear": bear, "net": bull - bear, "margin": scalp_config.flow_margin(),
+            "by_type": by_type, "truncated": truncated, "sides_view": sides_state}
 
 
 # --- net premium -------------------------------------------------------------
 
-def _latest_level(series, symbol):
-    """``(ts, call, put)`` of the symbol's newest usable point, or None."""
+def _latest_level(series, symbol, at=None):
+    """``(ts, call, put)`` of the symbol's newest usable point, or None. With
+    ``at`` (epoch seconds) only a point at or before it counts: a call is read
+    as of its own entry, never from a later point."""
     if not isinstance(series, dict):
         return None
     me = _norm(symbol)
@@ -305,22 +316,28 @@ def _latest_level(series, symbol):
             ts, call, put = _finite(p[0]), _finite(p[1]), _finite(p[2])
             if ts is None or call is None or put is None or call < 0 or put < 0:
                 continue
+            if at is not None and ts > at:
+                continue
             if best is None or ts > best[0]:
                 best = (ts, call, put)
         break
     return best
 
 
-def _netprem(src, symbol, d):
+def _netprem(src, symbol, d, entry_ts=None):
     if _stale(src, "netprem"):
         return {"verdict": None, "raw": {"state": "stale"}, "stale": True}
     payload = _payload(src, "netprem")
     if payload is None:
         return {"verdict": None, "raw": {"state": "absent"}, "stale": False}
-    level = _latest_level(payload.get("series"), symbol)
+    level = _latest_level(payload.get("series"), symbol, entry_ts)
     if level is None or level[1] + level[2] <= 0:
         return {"verdict": None, "raw": {"state": "no_reading"}, "stale": False}
     ts, call, put = level
+    if entry_ts is not None and entry_ts - ts > scalp_config.confirm_max_age_min() * 60:
+        # The view is fresh, but this symbol's newest point at entry is not.
+        return {"verdict": None, "stale": True,
+                "raw": {"state": "stale_point", "ts": int(ts), "call": call, "put": put}}
     frac = (call - put) / (call + put)
     margin = scalp_config.netprem_margin()
     verdict = None
@@ -346,20 +363,35 @@ def _rows(src):
 
 
 def _wall_view(row) -> dict:
-    """One row's spot, walls, flip and net GEX; a figure that is not a usable
-    number is None (a zero wall is a missing wall, never a wall at zero)."""
+    """One row's spot, walls, flip and net GEX, as recorded; a figure that is not
+    a usable number is None (a zero wall is a missing wall, never a wall at
+    zero).
+
+    ``walls_untrusted`` is True when ``net_gex`` is None, zero or not a number.
+    That is what a chain with no Greeks does: Schwab's -999 gamma is refused,
+    every GEX cell is 0.0, and the wall picker still returns the first strikes it
+    finds, so the row carries walls that mean nothing. They stay in the view (the
+    record keeps what happened) but ``_room`` and ``wall_context`` never use
+    them."""
     row = row if isinstance(row, dict) else {}
+    net_gex = _finite(row.get("net_gex"))
     return {"spot": _positive(row.get("spot")),
             "call_wall": _positive(row.get("call_wall")),
             "put_wall": _positive(row.get("put_wall")),
-            "flip": _positive(row.get("flip")), "net_gex": _finite(row.get("net_gex"))}
+            "flip": _positive(row.get("flip")), "net_gex": net_gex,
+            "walls_untrusted": net_gex is None or net_gex == 0}
+
+
+def _trusted_wall(view, kind):
+    """The ``call`` or ``put`` wall, or None when it is missing or untrusted."""
+    return None if view["walls_untrusted"] else view[f"{kind}_wall"]
 
 
 def _room(view, d):
     """``(wall, room)``: the wall in the trade's direction and the distance from
     spot to it (negative when spot is already beyond it); ``(None, None)`` for
-    a missing wall or spot."""
-    wall = view["call_wall"] if d > 0 else view["put_wall"]
+    a missing or untrusted wall or a missing spot."""
+    wall = _trusted_wall(view, "call" if d > 0 else "put")
     spot = view["spot"]
     if wall is None or spot is None:
         return None, None
@@ -368,7 +400,8 @@ def _room(view, d):
 
 def _breadth(rows, d, win_pct):
     """How many of the big ten have the move's room, in percent of each name's own
-    spot. Read only when at least half the basket has a wall: a share of two
+    spot. A name with a missing or untrusted wall is not counted, and the share
+    is read only when ``[confirm] breadth_min_members`` names are: a share of two
     names is not a breadth."""
     members = _symbols.big10()
     read = with_room = 0
@@ -382,7 +415,7 @@ def _breadth(rows, d, win_pct):
             with_room += 1
     out = {"with_room": with_room, "of": read,
            "share": with_room / read if read else None, "verdict": None}
-    if read and read >= math.ceil(len(members) / 2):
+    if read and read >= scalp_config.breadth_min_members():
         agree = scalp_config.breadth_agree()
         share = out["share"]
         out["verdict"] = (1 if share >= agree - _EPS
@@ -421,7 +454,8 @@ def _dealer(src, symbol, d, win_points):
     verdict = _dealer_verdict(own, breadth["verdict"])
     raw["own_verdict"] = own
     return {"verdict": verdict, "raw": raw, "stale": False}, _dealer_line(
-        symbol, d, kind, wall, room, spot, win, breadth, own, verdict)
+        symbol, d, kind, wall, room, spot, win, breadth, own, verdict,
+        view["walls_untrusted"])
 
 
 def _dealer_verdict(own, breadth):
@@ -433,11 +467,17 @@ def _dealer_verdict(own, breadth):
     return 0 if breadth is not None and breadth == -own else own
 
 
-def _dealer_line(symbol, d, kind, wall, room, spot, win, breadth, own, verdict):
+def _dealer_line(symbol, d, kind, wall, room, spot, win, breadth, own, verdict,
+                 untrusted=False):
     if win is None:
         head = "No reading: no target to measure room against"
+    elif wall is None and untrusted:
+        head = f"No usable {kind} wall for {symbol} (no gamma reading)"
     elif wall is None:
         head = f"No {kind} wall for {symbol}"
+    elif room < 0:
+        head = (f"Spot {spot:,.2f} is {'above' if d > 0 else 'below'} the {kind} "
+                f"wall at {wall:,.2f}")
     elif room >= win:
         head = (f"Room {'up' if d > 0 else 'down'} to the {kind} wall at "
                 f"{wall:,.2f} ({room / spot * 100:.2f}%)")
@@ -516,8 +556,8 @@ def components(src, symbol, direction, win_points, entry_ts):
     magnitude in the underlying's points. ``entry_ts`` is epoch seconds."""
     d = _dir(direction)
     ts = _finite(entry_ts)
-    flow = _guarded("flow", _flow, src, symbol, d, ts) if ts is not None else None
-    netprem = _guarded("netprem", _netprem, src, symbol, d)
+    flow = _guarded("flow", _flow, src, symbol, d, ts)
+    netprem = _guarded("netprem", _netprem, src, symbol, d, ts)
     dealer = _guarded("dealer", _dealer, src, symbol, d, win_points)
     sentiment = _guarded("sentiment", _sentiment, src, d)
     out = {"flow": flow or _absent("flow"), "netprem": netprem or _absent("netprem"),
@@ -534,8 +574,8 @@ def components(src, symbol, direction, win_points, entry_ts):
 def wall_context(src, symbol, spot, target_spot, stop_spot) -> list:
     """Words for any wall between entry and the target or the stop, target
     first: ``"Target is beyond the call wall at 771.00"``. A wall exactly at the
-    target is not beyond it. Empty for a missing wall, a stale matrix or a price
-    that is not usable."""
+    target is not beyond it. Empty for a missing or untrusted wall (no gamma
+    reading), a stale matrix or a price that is not usable."""
     try:
         view = _wall_view(_rows(src).get(_norm(symbol)))
         spot = _positive(spot)
@@ -547,7 +587,7 @@ def wall_context(src, symbol, spot, target_spot, stop_spot) -> list:
                 continue
             lo, hi = min(spot, end), max(spot, end)
             for kind in ("call", "put"):
-                wall = view[f"{kind}_wall"]
+                wall = _trusted_wall(view, kind)
                 if wall is not None and lo < wall < hi:
                     out.append(f"{label} is beyond the {kind} wall at {wall:,.2f}")
         return out
@@ -571,13 +611,16 @@ def _tally(alerts, contracts):
     return by_type
 
 
-def snapshot(src, symbols) -> dict:
+def snapshot(src, symbols, entry_ts=None, symbol=None) -> dict:
     """The raw values to record beside a call: each requested symbol's and each
-    big-ten member's spot, walls, flip and net GEX; the symbols' net premium
-    levels and the big-ten basket's; the sentiment state and score; the flow
-    view's per-type counts (whole view). A source that is stale or absent
-    contributes no values (its state is recorded), so a stale figure is never
-    kept as a fact. ``None`` marks a symbol asked for that had no row."""
+    big-ten member's spot, walls, flip, net GEX and ``walls_untrusted``; the
+    symbols' net premium levels as of ``entry_ts`` and the big-ten basket's;
+    the sentiment state and score; and the flow counts twice: the whole view
+    (``flow.by_type``) and, when ``symbol`` and ``entry_ts`` are given, the
+    windowed, scoped reading the call itself saw (``flow.window``, the same
+    scope ``components`` uses). A source that is stale or absent contributes no
+    values (its state is recorded), so a stale figure is never kept as a fact.
+    ``None`` marks a symbol asked for that had no row."""
     out = {"sources": {name: {"state": _source(src, name)["state"],
                               "age_min": _source(src, name)["age_min"]}
                        for name in _KEYS},
@@ -590,11 +633,12 @@ def snapshot(src, symbols) -> dict:
                 row = rows.get(_norm(name))
                 view = _wall_view(row) if row is not None else None
                 out["matrix"][name] = None if view is None else {
-                    k: view[k] for k in ("spot", "call_wall", "put_wall", "flip", "net_gex")}
+                    k: view[k] for k in ("spot", "call_wall", "put_wall", "flip", "net_gex",
+                                         "walls_untrusted")}
         np = _payload(src, "netprem")
         if np is not None:
             for name in list(dict.fromkeys(list(symbols or ()) + ["BIG10"])):
-                level = _latest_level(np.get("series"), name)
+                level = _latest_level(np.get("series"), name, _finite(entry_ts))
                 out["netprem"][name] = None if level is None else {
                     "call": level[1], "put": level[2], "ts": int(level[0])}
         sent = _sentiment(src, 1)
@@ -605,7 +649,12 @@ def snapshot(src, symbols) -> dict:
             contracts, sides_state = _estimates(src, flow)
             out["flow"] = {"date": flow.get("date"), "n": len(flow["alerts"]),
                            "sides_view": sides_state,
-                           "by_type": _tally(flow["alerts"], contracts)}
+                           "by_type": _tally(flow["alerts"], contracts),
+                           "window": None}
+            at = _finite(entry_ts)
+            if symbol is not None and at is not None:
+                out["flow"]["window"] = {"symbol": symbol, "entry_ts": int(at),
+                                         **_flow_scope(src, flow, symbol, at)}
     except Exception:
         _degrade.degraded("options.scalp_confirm", detail="snapshot")
     return out

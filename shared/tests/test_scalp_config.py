@@ -381,6 +381,16 @@ def test_sides_majority_must_be_above_a_tie(monkeypatch):
     assert sc.sides_majority() == 1.0
 
 
+def test_breadth_min_members_is_a_whole_number_of_at_least_one(monkeypatch):
+    sc.reset_cache()
+    assert sc.breadth_min_members() == 5
+    for bad in (0, -2, 2.5, True, "five", float("nan")):
+        monkeypatch.setattr(sc, "load", lambda bad=bad: {"confirm": {"breadth_min_members": bad}})
+        assert sc.breadth_min_members() == 5
+    monkeypatch.setattr(sc, "load", lambda: {"confirm": {"breadth_min_members": 3}})
+    assert sc.breadth_min_members() == 3
+
+
 def test_a_start_after_the_end_is_the_default_schedule(monkeypatch):
     monkeypatch.setattr(sc, "load", lambda: {"intraday": {"start": "13:51", "end": "08:51"}})
     slots = sc.intraday_slots(_DAY)

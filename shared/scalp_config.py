@@ -59,7 +59,8 @@ DEFAULTS = {
     },
     "confirm": {
         "flow_window_min": 30, "flow_margin": 2, "netprem_margin": 0.1,
-        "max_age_min": 5, "sides_majority": 0.6, "cuts": [-0.34, 0.34],
+        "max_age_min": 5, "sides_majority": 0.6, "breadth_min_members": 5,
+        "cuts": [-0.34, 0.34],
         "weights": {"flow": 1.0, "netprem": 1.0, "dealer": 1.0, "sentiment": 0.5},
     },
 }
@@ -390,6 +391,13 @@ def sides_majority() -> float:
     if not _real(raw) or not (0.5 < raw <= 1):
         return float(DEFAULTS["confirm"]["sides_majority"])
     return float(raw)
+
+
+def breadth_min_members() -> int:
+    """How many of the big ten must have a usable wall before their breadth of
+    room is read at all (a share of two names is not a breadth). A whole number
+    of at least 1."""
+    return _count("confirm", "breadth_min_members")
 
 
 def confirm_max_age_min() -> int:

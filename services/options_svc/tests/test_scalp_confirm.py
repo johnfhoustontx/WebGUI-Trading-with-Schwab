@@ -29,7 +29,9 @@ ENTRY = int(NOW.timestamp())
 BIG10 = list(symbols.big10())
 SVC = pathlib.Path(__file__).resolve().parents[1]
 
-# The SPY row exactly as prod served it, less the fields this module never reads.
+# The SPY row as prod served it on 2026-10-20 (spot, flip, net_gex), less the fields
+# this module never reads. The WALLS are made up: prod served 770 / 768, and the
+# tests need room (775) or a wall inside the target, so each test sets what it needs.
 SPY_ROW = {
     "symbol": "SPY", "spot": 769.44, "flip": 766.76, "call_wall": 775.0,
     "put_wall": 760.0, "net_gex": 2464351492.8659897,
@@ -264,6 +266,33 @@ def test_net_premium_reads_the_level_not_a_difference():
         "netprem"]["verdict"] == -1
 
 
+def test_net_premium_is_read_as_of_the_entry():
+    # a later point (after entry_ts) is not what the call saw
+    series = {"SPY": [[ENTRY - 60, 465.7e6, 259.4e6], [ENTRY + 60, 100e6, 900e6]]}
+    out = sc.components(read(np=netprem(series)), "SPY", 1, 3.0, ENTRY)["netprem"]
+    assert out["verdict"] == 1 and out["raw"]["ts"] == ENTRY - 60
+    # a point exactly at entry counts
+    at = {"SPY": [[ENTRY, 465.7e6, 259.4e6]]}
+    assert sc.components(read(np=netprem(at)), "SPY", 1, 3.0, ENTRY)["netprem"][
+        "verdict"] == 1
+
+
+def test_a_net_premium_point_older_than_the_limit_at_entry_is_stale():
+    # the view itself is fresh, but this symbol's newest point at entry is 6 min old
+    series = {"SPY": [[ENTRY - 6 * 60, 465.7e6, 259.4e6]]}
+    out = sc.components(read(np=netprem(series)), "SPY", 1, 3.0, ENTRY)["netprem"]
+    assert out["verdict"] is None and out["stale"] is True
+    assert out["raw"]["state"] == "stale_point"
+    # 4 minutes old still reads
+    ok = {"SPY": [[ENTRY - 4 * 60, 465.7e6, 259.4e6]]}
+    assert sc.components(read(np=netprem(ok)), "SPY", 1, 3.0, ENTRY)["netprem"][
+        "verdict"] == 1
+    # an older point is never substituted for a stale newest one
+    both = {"SPY": [[ENTRY - 3600, 1.0, 0.0], [ENTRY - 6 * 60, 465.7e6, 259.4e6]]}
+    assert sc.components(read(np=netprem(both)), "SPY", 1, 3.0, ENTRY)["netprem"][
+        "stale"] is True
+
+
 def test_net_premium_inside_the_margin_is_neutral_and_missing_is_absent():
     series = {"SPY": [[ENTRY - 60, 55.0, 45.0]]}               # exactly 0.1: not above
     out = sc.components(read(np=netprem(series)), "SPY", 1, 3.0, ENTRY)["netprem"]
@@ -385,7 +414,8 @@ def test_no_greeks_walls_are_no_reading():
     assert out["dealer"]["verdict"] is None
     assert out["dealer"]["raw"]["breadth"]["of"] == 0
     assert out["score"] is None and out["word"] is None
-    assert out["dealer_line"] == "No call wall for SPY; breadth not read"
+    assert out["dealer_line"] == ("No usable call wall for SPY (no gamma reading); "
+                                  "breadth not read")
     # a zero or non-finite wall is the same absence, never a wall at zero
     for wall in (0, 0.0, float("nan"), "n/a", -5.0):
         rows[0]["call_wall"] = wall
@@ -399,6 +429,15 @@ def test_a_thin_breadth_sample_is_not_a_breadth():
     out = sc.components(read(mx=matrix(rows)), "SPY", 1, 3.0, ENTRY)["dealer"]
     assert out["raw"]["breadth"]["verdict"] is None
     assert out["verdict"] == 1                       # the symbol's room still reads
+
+
+def test_the_breadth_minimum_comes_from_the_config(monkeypatch):
+    rows = [{**SPY_ROW}] + [row(s, 200.0, 202.0, 198.0) for s in BIG10[:3]]
+    base = sc.components(read(mx=matrix(rows)), "SPY", 1, 3.0, ENTRY)["dealer"]
+    assert base["raw"]["breadth"]["verdict"] is None          # 3 < 5 names
+    monkeypatch.setattr(scalp_config, "breadth_min_members", lambda: 3)
+    got = sc.components(read(mx=matrix(rows)), "SPY", 1, 3.0, ENTRY)["dealer"]
+    assert got["raw"]["breadth"]["verdict"] == 1
 
 
 def test_win_points_must_be_a_usable_magnitude():
@@ -502,6 +541,18 @@ def test_the_whole_reading_for_one_call():
     assert out["score"] == 1.0 and out["word"] == "Confirms"
 
 
+def test_no_entry_time_is_an_absent_flow_not_an_error():
+    src = read(fl=flow([alert("crossover", "calls_over", "SPY", 5)]))
+    for missing in (None, "x", float("nan")):
+        out = sc.components(src, "SPY", 1, 3.0, missing)["flow"]
+        assert out["verdict"] is None and out["raw"] == {"state": "no_entry_ts"}
+    # the other components still read without it
+    series = {"SPY": [[ENTRY - 60, 465.7e6, 259.4e6]]}
+    got = sc.components(read(np=netprem(series), sent=sentiment("bullish")), "SPY", 1,
+                        3.0, None)
+    assert got["netprem"]["verdict"] == 1 and got["sentiment"]["verdict"] == 1
+
+
 def test_no_direction_means_no_verdicts_but_the_raw_is_kept():
     series = {"SPY": [[ENTRY - 60, 465.7e6, 259.4e6]]}
     src = read(mx=full_matrix(), np=netprem(series), sent=sentiment("bullish"),
@@ -515,6 +566,82 @@ def test_no_direction_means_no_verdicts_but_the_raw_is_kept():
     assert out["dealer"]["raw"]["call_wall"] == 775.0
     assert out["dealer"]["raw"]["spot"] == 769.44
     assert out["sentiment"]["raw"]["state"] == "bullish"
+
+
+# --- untrusted walls (no Greeks, the 2026-10-19 shape) --------------------
+
+def no_greeks_rows():
+    """What the matrix really carried when Schwab sent gamma -999: every GEX cell
+    0.0, so net_gex is 0.0, and the wall picker still returned the first strikes
+    (here ones that would pass for room): walls that are NOT None."""
+    spy = {**SPY_ROW, "call_wall": 775.0, "put_wall": 760.0, "net_gex": 0.0}
+    return [spy] + [row(s, 200.0, 202.0, 198.0, net_gex=0.0) for s in BIG10]
+
+
+def test_walls_with_zero_net_gex_are_no_reading():
+    src = read(mx=matrix(no_greeks_rows()))
+    out = sc.components(src, "SPY", 1, 3.0, ENTRY)
+    d = out["dealer"]
+    assert d["verdict"] is None                      # 775 would have been "room"
+    assert d["raw"]["walls_untrusted"] is True
+    assert d["raw"]["call_wall"] == 775.0 and d["raw"]["net_gex"] == 0.0   # recorded
+    assert d["raw"]["wall"] is None and d["raw"]["own_verdict"] is None
+    assert d["raw"]["breadth"]["of"] == 0 and d["raw"]["breadth"]["verdict"] is None
+    assert out["dealer_line"] == ("No usable call wall for SPY (no gamma reading); "
+                                  "breadth not read")
+    assert out["score"] is None
+    # the same for a DOWN call
+    assert sc.components(src, "SPY", -1, 3.0, ENTRY)["dealer"]["verdict"] is None
+
+
+def test_an_untrusted_member_is_not_counted_in_breadth():
+    # SPY reads (net_gex real); 4 members have real walls with room, 6 have the
+    # no-Greeks shape with arbitrary walls that would also have had room.
+    rows = [{**SPY_ROW}]
+    for i, sym in enumerate(BIG10):
+        rows.append(row(sym, 200.0, 202.0, 198.0, net_gex=1.0e6 if i < 4 else 0.0))
+    d = sc.components(read(mx=matrix(rows)), "SPY", 1, 3.0, ENTRY)["dealer"]
+    assert d["raw"]["breadth"]["of"] == 4            # not 10
+    assert d["raw"]["breadth"]["with_room"] == 4
+    assert d["raw"]["breadth"]["verdict"] is None    # below the 5 names needed
+    assert d["verdict"] == 1                         # the symbol's own room stands
+    # a non-finite or missing net_gex is the same distrust
+    for bad in (None, float("nan"), "n/a"):
+        rows[1]["net_gex"] = bad
+        again = sc.components(read(mx=matrix(rows)), "SPY", 1, 3.0, ENTRY)["dealer"]
+        assert again["raw"]["breadth"]["of"] == 3
+
+
+def test_wall_context_names_no_untrusted_wall():
+    spy = {**SPY_ROW, "call_wall": 771.0, "put_wall": 767.0, "net_gex": 0.0}
+    src = read(mx=matrix([spy]))
+    assert sc.wall_context(src, "SPY", 769.44, 772.0, 766.0) == []
+    spy["net_gex"] = 5.0e8                            # the same row with Greeks
+    again = read(mx=matrix([spy]))
+    assert sc.wall_context(again, "SPY", 769.44, 772.0, 766.0) == [
+        "Target is beyond the call wall at 771.00", "Stop is beyond the put wall at 767.00"]
+
+
+def test_the_snapshot_records_untrusted_walls_as_untrusted():
+    src = read(mx=matrix(no_greeks_rows()))
+    snap = sc.snapshot(src, ["SPY"])
+    assert snap["matrix"]["SPY"]["call_wall"] == 775.0
+    assert snap["matrix"]["SPY"]["net_gex"] == 0.0
+    assert snap["matrix"]["SPY"]["walls_untrusted"] is True
+    assert snap["matrix"]["NVDA"]["walls_untrusted"] is True
+
+
+# --- the room dealer line when spot is past the wall -----------------------
+
+def test_spot_past_the_wall_is_said_plainly():
+    up = sc.components(read(mx=matrix([{**SPY_ROW, "spot": 768.20, "call_wall": 765.0}]
+                                      + big_rows(2))), "SPY", 1, 3.0, ENTRY)
+    assert up["dealer_line"].startswith("Spot 768.20 is above the call wall at 765.00;")
+    assert "%" not in up["dealer_line"].split(";")[0]
+    assert up["dealer"]["verdict"] == -1
+    down = sc.components(read(mx=matrix([{**SPY_ROW, "spot": 761.0, "put_wall": 765.0}]
+                                        + big_rows(2))), "SPY", -1, 3.0, ENTRY)
+    assert down["dealer_line"].startswith("Spot 761.00 is below the put wall at 765.00;")
 
 
 # --- wall context --------------------------------------------------------
@@ -558,7 +685,8 @@ def test_snapshot_holds_every_big10_member():
     assert set(BIG10) <= set(snap["matrix"])
     assert snap["matrix"]["SPY"] == {"spot": 769.44, "call_wall": 775.0,
                                      "put_wall": 760.0, "flip": 766.76,
-                                     "net_gex": 2464351492.8659897}
+                                     "net_gex": 2464351492.8659897,
+                                     "walls_untrusted": False}
     assert snap["matrix"]["NVDA"]["spot"] == 200.0
     assert snap["matrix"]["QQQ"] is None                       # asked for, no row
     assert snap["netprem"]["SPY"] == {"call": 465.7e6, "put": 259.4e6,
@@ -570,6 +698,34 @@ def test_snapshot_holds_every_big10_member():
     assert snap["flow"]["by_type"]["gamma_flip"] == {"n": 1, "bull": 0, "bear": 0}
     assert snap["flow"]["by_type"]["crossover"] == {"n": 1, "bull": 0, "bear": 1}
     assert snap["sources"]["matrix"]["state"] == "ok"
+
+
+def test_snapshot_records_the_windowed_scoped_flow_the_call_saw():
+    al = [alert("uoa", "call", "SPY", 5, aid="u1"),            # in scope
+          alert("crossover", "calls_over", "NVDA", 6),          # big ten, in window
+          alert("crossover", "puts_over", "QQQ", 7),            # other index: out
+          alert("crossover", "calls_over", "SPY", 45),          # before the window
+          alert("crossover", "calls_over", "SPY", -2)]          # after entry
+    sides = {"date": "2026-10-20", "contracts": {"u1": tally(9, 1)}}
+    src = read(fl=flow(al), sides=sides)
+    snap = sc.snapshot(src, ["SPY"], entry_ts=ENTRY, symbol="SPY")
+    assert snap["flow"]["by_type"]["crossover"]["n"] == 4       # the whole list
+    win = snap["flow"]["window"]
+    assert win["symbol"] == "SPY" and win["entry_ts"] == ENTRY
+    assert (win["n_alerts"], win["bull"], win["bear"]) == (2, 2, 0)
+    assert win["by_type"]["crossover"] == {"n": 1, "bull": 1, "bear": 0}
+    # it is exactly what components() scored
+    seen = sc.components(src, "SPY", 1, 3.0, ENTRY)["flow"]["raw"]
+    assert {k: win[k] for k in seen} == seen
+    # without a symbol and entry there is no window, and the whole-list counts stay
+    bare = sc.snapshot(src, ["SPY"])
+    assert bare["flow"]["window"] is None and bare["flow"]["by_type"]["crossover"]["n"] == 4
+
+
+def test_snapshot_reads_net_premium_as_of_the_entry():
+    series = {"SPY": [[ENTRY - 60, 465.7e6, 259.4e6], [ENTRY + 60, 1.0, 2.0]]}
+    snap = sc.snapshot(read(np=netprem(series)), ["SPY"], entry_ts=ENTRY, symbol="SPY")
+    assert snap["netprem"]["SPY"] == {"call": 465.7e6, "put": 259.4e6, "ts": ENTRY - 60}
 
 
 def test_snapshot_never_records_a_stale_or_absent_source_as_a_value():
