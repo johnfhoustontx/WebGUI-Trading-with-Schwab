@@ -317,25 +317,18 @@ def _plural(n: int, word: str) -> str:
     return f"{n} {word}{'' if n == 1 else 's'}"
 
 
+# The trade-level words (held time, exit reasons, the Entry/Exit headers) are
+# the EOD page's own helpers, so /eod's Trade ideas section and this report
+# word one trade the same way.
 def _held(hours) -> str:
     """In whole words: "1 day 3 hours" from a day on, "2 hours 5 minutes"
-    under it; a zero part is left out."""
-    if hours is None:
-        return "—"
-    mins = int(round(hours * 60))
-    days, rem = divmod(mins, 1440)
-    if days:
-        parts = [_plural(days, "day")]
-        parts += [_plural(rem // 60, "hour")] if rem // 60 else []
-    else:
-        parts = [_plural(rem // 60, "hour")] if rem // 60 else []
-        parts += [_plural(rem % 60, "minute")] if rem % 60 or not parts else []
-    return " ".join(parts)
+    under it; a zero part is left out (``pages.eod.held_words``)."""
+    return _eod().held_words(hours)
 
 
-# The Ledger's exit reasons in plain words.
-_REASONS = {"TARGET": "Target reached", "STOP": "Stopped out",
-            "EXPIRED": "Expired", "MANUAL": "Closed by hand"}
+def _reason(reason) -> str:
+    """The Ledger's exit reason in whole words (``pages.eod.reason_words``)."""
+    return _eod().reason_words(reason)
 
 
 def _pn(v) -> str:
@@ -379,13 +372,14 @@ def _judgment_html(judgment) -> str:
     return f"<h2>Assessment</h2>{paras}<h2>Suggestions</h2>{sugg}{note}"
 
 
-# The Ledger's own money convention: an entry is + for a credit received and -
-# for a debit paid; an exit is what closing cost a credit trade, or what closing
-# brought in for a debit trade.
-_CLOSED_COLS = ["Symbol", "Structure", "Grade", "Rating",
-                "Entry (+ credit received, − debit paid)",
-                "Exit (credit trade: paid to close; debit trade: received)",
-                "Reason", "Held", "MAE % of max loss", "P&L"]
+def _closed_cols() -> list[str]:
+    """The closed-trades headers; Entry and Exit carry the Ledger's money
+    convention in the EOD page's own words (``pages.eod.IDEA_ENTRY_COL``)."""
+    eod = _eod()
+    return ["Symbol", "Structure", "Grade", "Rating", eod.IDEA_ENTRY_COL,
+            eod.IDEA_EXIT_COL, "Reason", "Held", "MAE % of max loss", "P&L"]
+
+
 _OPEN_COLS = ["Symbol", "Structure", "Grade", "Days open", "MAE $ per contract",
               "MAE % of max loss", "Open P&L"]
 _GROUP_COLS = ["Group", "Trades", "Targets", "Stops", "Expired", "By hand",
@@ -393,18 +387,22 @@ _GROUP_COLS = ["Group", "Trades", "Targets", "Stops", "Expired", "By hand",
                "Average held", ""]
 
 
+def _structure(t: dict) -> str:
+    return t.get("structure") or t.get("strategy")
+
+
 def _closed_rows(lines) -> list[str]:
-    return ["<tr>" + _td(t["symbol"]) + _td(t["strategy"]) + _td(t["grade"])
+    return ["<tr>" + _td(t["symbol"]) + _td(_structure(t)) + _td(t["grade"])
             + _td(t["rating"]) + _td(_money(t.get("entry")))
             + _td(_money(t.get("exit")))
-            + _td(_REASONS.get(t.get("exit_reason"), t.get("exit_reason") or "—"))
+            + _td(_reason(t.get("exit_reason")))
             + _td(_held(t.get("held_h"))) + _td(_pct(t.get("mae_pct")))
             + _td(_money(t["realized_pnl"]), _pn(t["realized_pnl"])) + "</tr>"
             for t in lines]
 
 
 def _open_rows(lines) -> list[str]:
-    return ["<tr>" + _td(t["symbol"]) + _td(t["strategy"]) + _td(t["grade"])
+    return ["<tr>" + _td(t["symbol"]) + _td(_structure(t)) + _td(t["grade"])
             + _td("—" if t.get("days_open") is None else t["days_open"])
             + _td(_money(t.get("mae_pnl")), _pn(t.get("mae_pnl")))
             + _td(_pct(t.get("mae_pct")))
@@ -422,12 +420,19 @@ def _group_row(x: dict, label: str) -> str:
             + _td("few trades" if x["thin"] else "") + "</tr>")
 
 
-def _scope_html(scope: dict, title: str) -> str:
+def _scope_html(scope: dict, title: str, names: dict | None = None) -> str:
+    """One scope's tables. ``names`` maps a structure key to its display name
+    (``facts()["structure_names"]``) for the By structure table."""
+    names = names or {}
     parts = [f"<h2>{escape(title)}</h2>",
              _table(_GROUP_COLS, [_group_row(scope["total"], "All trade ideas")],
                     "No closed trades.")]
     for dim in idea_review.DIMENSIONS:
-        rows = [_group_row(x, x["id"].split(".", 2)[2]) for x in scope.get(dim) or ()]
+        rows = []
+        for x in scope.get(dim) or ():
+            value = x["id"].split(".", 2)[2]
+            rows.append(_group_row(
+                x, names.get(value, value) if dim == "strategy" else value))
         parts.append(f"<h3>{escape(_DIM_TITLES[dim])}</h3>")
         parts.append(_table(_GROUP_COLS, rows, "No closed trades."))
     return "".join(parts)
@@ -452,15 +457,15 @@ def render(f: dict, judgment: dict | None, week: str) -> str:
         + " A group marked 'few trades' holds too few to act on.</p>"
         + _judgment_html(judgment)
         + "<h2>This week's closed trades</h2>"
-        + _table(_CLOSED_COLS, _closed_rows(f.get("closed_week") or ()),
+        + _table(_closed_cols(), _closed_rows(f.get("closed_week") or ()),
                  "No trade ideas closed this week.")
         + "<h2>Open trades</h2>"
         + _table(_OPEN_COLS, _open_rows(f.get("open") or ()),
                  "No open trade ideas.")
         + (f"<h3>Ideas booked more than once this week</h3><ul>{repeats}</ul>"
            if repeats else "")
-        + _scope_html(f["week"], "This week, by group")
-        + _scope_html(f["all_time"], "All time, by group")
+        + _scope_html(f["week"], "This week, by group", f.get("structure_names"))
+        + _scope_html(f["all_time"], "All time, by group", f.get("structure_names"))
         + "</div>")
     from pages.options import theme
     return eod.wrap_document(fragment, eod.build_eod_css(theme.THEME),

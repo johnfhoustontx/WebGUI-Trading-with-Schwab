@@ -537,16 +537,51 @@ def split_ledger(trades):
     return manual, ideas
 
 
+# The trade-idea tables' words. ``tools/weekly_idea_review.py`` prints its report
+# with these same helpers and headers (it imports this module), so the /eod
+# section and the weekly review cannot word one trade two ways.
+EXIT_REASON_WORDS = {"TARGET": "Target reached", "STOP": "Stopped out",
+                     "EXPIRED": "Expired", "MANUAL": "Closed by hand"}
+# The Ledger's own money convention: an entry is + for a credit received and -
+# for a debit paid; an exit is what closing cost a credit trade, or what closing
+# brought in for a debit trade.
+IDEA_ENTRY_COL = "Entry (+ credit received, − debit paid)"
+IDEA_EXIT_COL = "Exit (credit trade: paid to close; debit trade: received)"
+
+
+def reason_words(reason) -> str:
+    """An exit reason in whole words; an unknown one as written, none as "—"."""
+    if not reason:
+        return "—"
+    return EXIT_REASON_WORDS.get(reason, str(reason))
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def held_words(hours) -> str:
+    """A holding time in whole words: "1 day 3 hours" from a day on, "2 hours 5
+    minutes" under it; a zero part is left out ("1 day", "1 hour", "0 minutes")."""
+    if hours is None:
+        return "—"
+    mins = int(round(hours * 60))
+    days, rem = divmod(mins, 1440)
+    if days:
+        parts = [_plural(days, "day")]
+        parts += [_plural(rem // 60, "hour")] if rem // 60 else []
+    else:
+        parts = [_plural(rem // 60, "hour")] if rem // 60 else []
+        parts += [_plural(rem % 60, "minute")] if rem % 60 or not parts else []
+    return " ".join(parts)
+
+
 def _held(start, end) -> str:
-    """How long a trade was held: "2h 05m" under a day, "3d 4h" from a day on."""
+    """How long a trade was held, in whole words (:func:`held_words`)."""
     a, b = _ct_naive(start), _ct_naive(end)
     if a is None or b is None or b < a:
         return "—"
-    secs = int((b - a).total_seconds())
-    days, rem = divmod(secs, 86400)
-    if days:
-        return f"{days}d {rem // 3600}h"
-    return f"{rem // 3600}h {rem % 3600 // 60:02d}m"
+    return held_words((b - a).total_seconds() / 3600.0)
 
 
 def _idea_row(t, now):
@@ -562,6 +597,9 @@ def _idea_row(t, now):
         "posted": posted.strftime("%H:%M") if posted else "—",
         "symbol": t.get("symbol"),
         "strategy": t.get("strategy"),
+        # the display name the idea card carried, stored at booking; Tier 1 has
+        # no map of its own from the structure key
+        "structure": t.get("idea_label") or t.get("strategy"),
         "grade": t.get("idea_grade"),
         "entry": _num(t.get("entry_credit_total")),
         "exit": None if is_open else _num(t.get("exit_debit_total")),
@@ -600,8 +638,8 @@ def idea_rows(trades, today, now=None) -> dict:
     return out
 
 
-_IDEA_COLS = ["Posted", "Symbol", "Structure", "Grade", "Entry", "Exit", "Reason",
-              "Held", "MAE $", "MAE % of max loss", "P&L"]
+_IDEA_COLS = ["Posted", "Symbol", "Structure", "Grade", IDEA_ENTRY_COL,
+              IDEA_EXIT_COL, "Reason", "Held", "MAE $", "MAE % of max loss", "P&L"]
 
 
 def _idea_table(rows, empty) -> str:
@@ -610,11 +648,11 @@ def _idea_table(rows, empty) -> str:
         pct = r["mae_pct"]
         body.append(
             "<tr>"
-            + _cell(r["posted"]) + _cell(r["symbol"]) + _cell(r["strategy"])
+            + _cell(r["posted"]) + _cell(r["symbol"]) + _cell(r["structure"])
             + _cell(r["grade"] or "—")
             + _cell(_money(r["entry"]))
             + _cell("open" if r["status"] == "OPEN" else _money(r["exit"]))
-            + _cell(r["reason"] or "—") + _cell(r["held"])
+            + _cell(reason_words(r["reason"])) + _cell(r["held"])
             + f'<td class="{_pn_class(r["mae"])}">{_money(r["mae"])}</td>'
             + _cell("—" if pct is None else f"{pct:.2f}%")
             + f'<td class="{_pn_class(r["pnl"])}">{_money(r["pnl"])}</td>'

@@ -236,11 +236,18 @@ def _scope(scope: str, rows: list[dict], min_n: int) -> dict:
     return out
 
 
+def _structure(t: dict) -> str:
+    """The structure's display name: the idea card's label stored at booking
+    (``idea_label``), else the structure key."""
+    return _text(t.get("idea_label"), _text(t.get("strategy"), "unknown"))
+
+
 def _closed_line(t: dict, clean: float) -> dict:
     return {
         "idea_id": t.get("idea_id"),
         "symbol": _text(t.get("symbol"), "unknown").upper(),
         "strategy": _text(t.get("strategy"), "unknown"),
+        "structure": _structure(t),
         "grade": _text(t.get("idea_grade"), "ungraded"),
         "score": t.get("idea_score"),
         "exit_reason": t.get("exit_reason"),
@@ -259,6 +266,7 @@ def _open_line(t: dict, today: date) -> dict:
         "idea_id": t.get("idea_id"),
         "symbol": _text(t.get("symbol"), "unknown").upper(),
         "strategy": _text(t.get("strategy"), "unknown"),
+        "structure": _structure(t),
         "grade": _text(t.get("idea_grade"), "ungraded"),
         "unrealized_pnl": _real(t.get("unrealized_pnl")),
         "mae_pnl": _real(t.get("mae_pnl")),
@@ -272,8 +280,10 @@ def facts(trades: list[dict], today: date, cfg: dict) -> dict:
 
     ``cfg`` carries ``clean_mae_pct`` and ``min_n`` (``paper_limits.
     idea_trades()``). Returns ``{"week": scope, "all_time": scope, "open":
-    [...], "closed_week": [...], "repeats": [...]}``, a scope being ``{"total":
-    fact, "<dim>": [fact, ...]}`` for each dimension in ``DIMENSIONS``.
+    [...], "closed_week": [...], "repeats": [...], "structure_names": {...}}``,
+    a scope being ``{"total": fact, "<dim>": [fact, ...]}`` for each dimension
+    in ``DIMENSIONS``. ``structure_names`` maps each structure key the rows hold
+    (the ``strategy`` group's value) to its display name (``_structure``).
     """
     clean = float(cfg["clean_mae_pct"])
     min_n = int(cfg["min_n"])
@@ -301,7 +311,19 @@ def facts(trades: list[dict], today: date, cfg: dict) -> dict:
         "closed_week": [_closed_line(t, clean) for t in closed_week],
         "repeats": [{"idea_id": i, "count": c}
                     for i, c in sorted(booked.items()) if c > 1],
+        "structure_names": _structure_names(rows),
     }
+
+
+def _structure_names(rows: list[dict]) -> dict[str, str]:
+    """``{structure key: display name}``; a key whose rows carry a label takes
+    the first one, a key with none keeps its own text."""
+    out: dict[str, str] = {}
+    for t in rows:
+        key = _KEYERS["strategy"](t)
+        if out.get(key, key) == key:
+            out[key] = _structure(t)
+    return out
 
 
 # ---- what Task 10 verifies against ---------------------------------------

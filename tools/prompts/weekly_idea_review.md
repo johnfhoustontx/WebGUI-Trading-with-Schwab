@@ -17,6 +17,8 @@ The message you receive is a set of facts, computed by code, as JSON:
 - `closed_week` lists the trades that closed this week, each with its rating.
 - `open` lists the trades still open, at their last mark.
 - `repeats` lists ideas that were booked more than once this week.
+- `structure_names` maps each structure key (the `strategy` group's value, such as
+  `BULL_CALL`) to its name (Bull Call Spread). Write a structure by its name.
 
 How to write:
 

@@ -440,6 +440,35 @@ def test_report_speaks_in_whole_words():
     assert "Entry (+ credit received" in html and "Exit (credit trade" in html
 
 
+def test_report_names_structures_in_words():
+    """The structure is the name the idea card carried (``idea_label``, stored at
+    booking), in the closed, open and By structure tables; a row without one
+    falls back to its key."""
+    trades = [row(idea_id="a", strategy="BULL_CALL", idea_label="Bull Call Spread"),
+              row(idea_id="o", status="OPEN", exit_reason=None, exit_time=None,
+                  realized_pnl=None, unrealized_pnl=5.0, strategy="BULL_CALL",
+                  idea_label="Bull Call Spread"),
+              row(idea_id="b", strategy="PCS")]
+    html = w.render(_facts(trades), None, "2026-W42")
+    assert "BULL_CALL" not in html
+    closed = html.split("This week's closed trades", 1)[1].split("<h2>Open", 1)[0]
+    opened = html.split("<h2>Open trades</h2>", 1)[1].split("<h2", 1)[0]
+    by_structure = html.split("By structure", 1)[1].split("<h3", 1)[0]
+    for part in (closed, opened, by_structure):
+        assert "<td>Bull Call Spread</td>" in part
+    assert "<td>PCS</td>" in closed and "<td>PCS</td>" in by_structure
+
+
+def test_report_and_eod_word_a_trade_the_same_way():
+    from pages import eod
+    assert w._held(27.0) == eod.held_words(27.0) == "1 day 3 hours"
+    html = w.render(_facts(), None, "2026-W42")
+    assert f"<th>{eod.IDEA_ENTRY_COL}</th>" in html
+    assert f"<th>{eod.IDEA_EXIT_COL}</th>" in html
+    for raw, words in eod.EXIT_REASON_WORDS.items():
+        assert w._reason(raw) == words
+
+
 def test_held_drops_a_zero_part():
     assert w._held(24.0) == "1 day"
     assert w._held(1.0) == "1 hour"

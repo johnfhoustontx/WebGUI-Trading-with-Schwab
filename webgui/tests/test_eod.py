@@ -1171,7 +1171,7 @@ def test_idea_rows_convert_a_utc_offset_to_central_before_taking_the_date():
     out = eod.idea_rows([row], _TODAY, now=_NOW)
     assert [r["symbol"] for r in out["posted_today"]] == ["LATE"]
     assert out["posted_today"][0]["posted"] == "20:30"
-    assert out["posted_today"][0]["held"] == "0h 30m"
+    assert out["posted_today"][0]["held"] == "30 minutes"
     norm = eod.normalize_trades([row], kind="ledger")[0]
     assert norm["entry_date"] == "2026-10-20" and norm["exit_date"] == "2026-10-20"
 
@@ -1181,23 +1181,53 @@ def test_idea_row_fields():
     assert r["posted"] == "09:35" and r["symbol"] == "SPY"
     assert r["strategy"] == "PCS" and r["grade"] == "A"
     assert r["entry"] == 150.0 and r["exit"] == 60.0 and r["reason"] == "TARGET"
-    assert r["held"] == "2h 05m"
+    assert r["held"] == "2 hours 5 minutes"
+    assert r["structure"] == "PCS"                  # no label stored: the key
     assert r["mae"] == -80.0                        # -40 per contract x 2
     assert r["pnl"] == 90.0
 
 
 def test_held_formats():
-    assert eod._held("2026-10-20T09:35:00", "2026-10-20T11:40:00") == "2h 05m"
-    assert eod._held("2026-10-20T09:35:00", "2026-10-20T09:47:00") == "0h 12m"
-    assert eod._held("2026-10-17T09:00:00", "2026-10-20T13:30:00") == "3d 4h"
+    """In whole words, as the weekly review words it: "1 day 3 hours" from a day
+    on, "2 hours 5 minutes" under it, a zero part left out."""
+    assert eod._held("2026-10-20T09:35:00", "2026-10-20T11:40:00") \
+        == "2 hours 5 minutes"
+    assert eod._held("2026-10-20T09:35:00", "2026-10-20T09:47:00") == "12 minutes"
+    assert eod._held("2026-10-20T09:35:00", "2026-10-20T10:35:00") == "1 hour"
+    assert eod._held("2026-10-17T09:00:00", "2026-10-20T13:30:00") == "3 days 4 hours"
+    assert eod._held("2026-10-19T09:00:00", "2026-10-20T12:00:00") == "1 day 3 hours"
     assert eod._held("2026-10-20T09:35:00-05:00",
-                     "2026-10-20T16:40:00+00:00") == "2h 05m"
+                     "2026-10-20T16:40:00+00:00") == "2 hours 5 minutes"
     assert eod._held(None, "2026-10-20T11:40:00") == "—"
     assert eod._held("2026-10-20T11:40:00", "2026-10-20T09:00:00") == "—"
     # An open row is held up to now.
     r = eod.idea_rows([_open_idea(unrealized_pnl=5.0)], _TODAY,
                       now=_NOW)["open"][0]
-    assert r["held"] == "4h 25m" and r["exit"] is None and r["pnl"] == 5.0
+    assert r["held"] == "4 hours 25 minutes" and r["exit"] is None \
+        and r["pnl"] == 5.0
+
+
+def test_idea_table_speaks_in_whole_words():
+    """Reasons, held time, the Entry/Exit headers and the structure name are
+    worded exactly as the weekly review words them."""
+    trades = [_idea(symbol="AAA", strategy="BULL_CALL", idea_label="Bull Call Spread"),
+              _idea(symbol="BBB", exit_reason="STOP"),
+              _idea(symbol="CCC", exit_reason="EXPIRED", status="EXPIRED"),
+              _idea(symbol="DDD", exit_reason="MANUAL")]
+    html = eod.idea_section({"trades": trades}, _TODAY, now=_NOW)
+    for words in ("Target reached", "Stopped out", "Expired", "Closed by hand"):
+        assert f"<td>{words}</td>" in html, words
+    for raw in ("TARGET", "STOP", "EXPIRED", "MANUAL"):
+        assert f"<td>{raw}</td>" not in html, raw
+    assert "<td>Bull Call Spread</td>" in html and "BULL_CALL" not in html
+    assert "<td>PCS</td>" in html                   # no label stored: the key
+    assert "<td>2 hours 5 minutes</td>" in html
+    assert f"<th>{eod.IDEA_ENTRY_COL}</th>" in html
+    assert f"<th>{eod.IDEA_EXIT_COL}</th>" in html
+    assert eod.IDEA_ENTRY_COL == "Entry (+ credit received, − debit paid)"
+    assert eod.IDEA_EXIT_COL == \
+        "Exit (credit trade: paid to close; debit trade: received)"
+    assert eod.reason_words(None) == "—" and eod.reason_words("ODD") == "ODD"
 
 
 def test_mae_pct_of_max_loss():
@@ -1237,7 +1267,8 @@ def test_idea_section_lists_the_three_tables():
               _open_idea(symbol="CCC")]
     html = eod.idea_section({"trades": trades}, _TODAY, now=_NOW)
     for text in ("Posted today", "Closed today, posted earlier", "Open now",
-                 "AAA", "BBB", "CCC", "TARGET", "STOP", "2h 05m", "-11.43%"):
+                 "AAA", "BBB", "CCC", "Target reached", "Stopped out",
+                 "2 hours 5 minutes", "-11.43%"):
         assert text in html, text
 
 

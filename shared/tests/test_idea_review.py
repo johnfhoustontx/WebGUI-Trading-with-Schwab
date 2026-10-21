@@ -134,6 +134,24 @@ def test_facts_groups_and_thin_flag():
     assert by_id(f["all_time"]["grade"], "all_time.grade.Strong")["n"] == 3
 
 
+def test_structures_carry_their_display_names():
+    """Groups stay keyed by the structure key (the fact ids Claude cites); each
+    line carries the idea card's name and ``structure_names`` maps key to name,
+    a key with no stored name keeping its own text."""
+    f = ir.facts([row(idea_id="a", strategy="BULL_CALL", idea_label="Bull Call Spread"),
+                  row(idea_id="b", strategy="BULL_CALL", idea_label=None),
+                  row(idea_id="c", strategy="PCS"),
+                  row(idea_id="o", strategy="LONG_CALL", idea_label="Long Call",
+                      status="OPEN", exit_reason=None, exit_time=None)],
+                 TODAY, CFG)
+    assert "week.strategy.BULL_CALL" in ir.fact_ids(f)
+    assert f["structure_names"] == {"BULL_CALL": "Bull Call Spread", "PCS": "PCS",
+                                    "LONG_CALL": "Long Call"}
+    assert [x["structure"] for x in f["closed_week"]] == [
+        "Bull Call Spread", "BULL_CALL", "PCS"]
+    assert [x["structure"] for x in f["open"]] == ["Long Call"]
+
+
 @pytest.mark.parametrize("score, band", [
     (59, "<60"), (60, "60-69"), (69.9, "60-69"), (70, "70-79"),
     (79, "70-79"), (80, "80+"), (95, "80+"), (None, "no score"),
