@@ -115,16 +115,21 @@ def rate(t: dict, clean_mae_pct: float) -> str:
     """One rating for a closed trade.
 
     A TARGET whose drawdown stayed shallower than ``clean_mae_pct`` of the max
-    loss is a clean win, a deeper one a win after drawdown; a TARGET with no
-    recorded drawdown is not called clean. EXPIRED is judged by the sign of
-    ``realized_pnl`` (zero is a loss); MANUAL, and anything else, is closed by
-    hand.
+    loss is a clean win, a deeper one a win after drawdown. When the percentage
+    cannot be taken (no max loss), a TARGET whose worst point is exactly 0.0 -
+    marked and never below zero - is still a clean win, because no drawdown
+    happened; one with no worst point recorded (``mae_pnl`` missing), or one
+    that fell by an amount that cannot be judged, is not called clean. EXPIRED
+    is judged by the sign of ``realized_pnl`` (zero is a loss); MANUAL, and
+    anything else, is closed by hand.
     """
     reason = t.get("exit_reason")
     if reason == "TARGET":
         m = mae_pct(t)
-        return ("clean win" if m is not None and m > -float(clean_mae_pct)
-                else "win after drawdown")
+        if m is None:
+            return ("clean win" if _real(t.get("mae_pnl")) == 0.0
+                    else "win after drawdown")
+        return "clean win" if m > -float(clean_mae_pct) else "win after drawdown"
     if reason == "STOP":
         return "stopped"
     if reason == "EXPIRED" or (reason is None and t.get("status") == "EXPIRED"):

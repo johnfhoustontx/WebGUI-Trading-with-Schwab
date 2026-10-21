@@ -54,9 +54,21 @@ def test_rate_a_zero_expiry_is_a_loss_and_the_clean_line_is_strict():
     assert ir.rate(row(mae_pnl=-125.0), 25.0) == "win after drawdown"
 
 
-def test_a_target_with_no_recorded_drawdown_is_not_called_clean():
+def test_a_target_with_no_drawdown_percentage_is_clean_only_if_it_never_fell():
+    # no worst point recorded at all: not called clean
     assert ir.rate(row(mae_pnl=None), 25.0) == "win after drawdown"
+    assert ir.rate(row(mae_pnl=None, max_loss_per=None), 25.0) \
+        == "win after drawdown"
+    # it fell, but with no max loss the depth cannot be judged: not clean
     assert ir.rate(row(max_loss_per=0), 25.0) == "win after drawdown"
+    assert ir.rate(row(max_loss_per=None), 25.0) == "win after drawdown"
+
+
+@pytest.mark.parametrize("max_loss", [None, 0, 0.0, 5.0])
+def test_a_target_that_never_went_below_zero_is_a_clean_win(max_loss):
+    """Marked and never negative (the booked 0.0 worst point kept): no drawdown
+    happened, so a missing max loss blocks only the percentage, not the rating."""
+    assert ir.rate(row(mae_pnl=0.0, max_loss_per=max_loss), 25.0) == "clean win"
 
 
 # ---- calendar -----------------------------------------------------------
