@@ -38,8 +38,9 @@ chain_max_age_sec = 45
 # (options_svc/idea_ledger.py), so the ideas are measured by the same books as
 # every other trade. A bad value in this table reads as the shipped default.
 #
-# Book the ideas at all. false stops new bookings; open ones are still marked and
-# settled. Must be true or false.
+# Book the ideas at all. false stops new bookings AND pauses the open ones: they
+# are neither marked nor settled until it is true again (an expiry passed in the
+# meantime then settles at its expiration day's close). Must be true or false.
 enabled = true
 # Contracts per idea (a whole number, 1 or more).
 quantity = 1

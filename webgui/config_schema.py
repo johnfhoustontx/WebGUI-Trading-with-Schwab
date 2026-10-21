@@ -1602,8 +1602,9 @@ _PAPER = ConfigFile(
                 "Paper Ledger, so it is measured like any other trade. A weekly "
                 "review reads how they did.", (
             Field("idea_trades.enabled", "Book the posted ideas",
-                  "Off stops new bookings. Ideas already booked are still "
-                  "marked and settled.", kind="bool"),
+                  "Off stops new bookings and pauses the ideas already "
+                  "booked: they are not marked or settled until it is on "
+                  "again.", kind="bool"),
             Field("idea_trades.quantity", "Contracts per idea",
                   "How many contracts each booked idea trades.",
                   kind="int", min=1, max=100, step=1),

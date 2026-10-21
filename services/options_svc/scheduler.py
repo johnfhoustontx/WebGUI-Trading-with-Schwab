@@ -21,6 +21,7 @@ from zoneinfo import ZoneInfo
 from services import _heartbeat
 from services.options_svc import compute, finder_public, flow_stream, handlers, scalp_call, scalp_fetch, scalp_grade, scalp_intraday_call, scalp_intraday_grade, scalp_intraday_study, scalp_study
 from shared import market_calendar as mc
+from shared import paper_limits as _paper_limits
 from shared import scalp_config
 from shared import trade_mgmt as _trade_mgmt
 from shared.market_calendar import is_trading_day as _cal_is_trading_day
@@ -209,6 +210,32 @@ def captured_manage_due(now, last_slot):
     if not (_is_trading_day(now) and _is_market_hours(now)):
         return (False, last_slot)
     slot = _captured_manage_slot_key(now)
+    return (slot != last_slot, slot)
+
+
+# ── The posted trade ideas' marks ([idea_trades] mark_interval_min) ─────────
+# Minutes of the hour in which the idea cycle fetches no chain. Every service
+# shares the proxy's 5 requests a second: the autoscan starts offset_min (2)
+# minutes after each quarter hour and fetches for about two minutes (:02-:05,
+# :17-:20, :32-:35, :47-:50), and Schwab refuses calls (429) in the first minute
+# after the hour and the half hour (:00, :30) whatever the rate (root CLAUDE.md,
+# "Every service shares the proxy's 5 requests a second"). This checkout carries
+# no proxy access log to set them from (prod only), so they are that list. A slot
+# that lands in one marks at its first clear minute; a slot with none is skipped
+# and the next slot catches up - a mark a minute or two late is fine.
+IDEA_MARK_FORBIDDEN_MINUTES = frozenset(
+    {0, 2, 3, 4, 5, 17, 18, 19, 20, 30, 32, 33, 34, 35, 47, 48, 49, 50})
+
+
+def idea_marks_due(now, last_slot, interval_min):
+    """(should_mark, slot): True at most once per ``interval_min``-minute slot, on a
+    trading day inside the REGULAR session (08:30-15:00 CT), never in a forbidden
+    minute. A tick that does not fire hands back ``last_slot`` unchanged, so the
+    slot is still open at its next clear minute."""
+    if not mc.is_regular_hours(now) or now.minute in IDEA_MARK_FORBIDDEN_MINUTES:
+        return (False, last_slot)
+    step = max(1, int(interval_min))
+    slot = (now.date().isoformat(), (now.hour * 60 + now.minute) // step)
     return (slot != last_slot, slot)
 
 
@@ -720,6 +747,7 @@ async def loop(bus):
         log.exception("flow stream failed to start")
     last_gex_slot = None  # 1-min GEX history-collection slot (see gex_due)
     last_captured_manage_slot = None  # 5-min captured auto-manage slot (see captured_manage_due)
+    last_idea_marks_slot = None  # the trade ideas' mark slot (see idea_marks_due)
     last_tracked_slot = None  # tracked structures' manage slot (see tracked_manage_due)
     paper_ran = set()  # (date, hour) of fired hourly manual paper cycles (see paper_cycle_due)
     settle_ran = set()  # (date, slot) of fired paper expiry settlements (see paper_settle_due)
@@ -953,6 +981,31 @@ async def loop(bus):
 
         if cm_due:
             branches.append(("captured_manage", _captured_manage_branch()))
+
+        # The posted trade ideas' rows in the Paper Ledger - settle, mark from real
+        # quotes, record the worst point, close at stop / target - every
+        # [idea_trades] mark_interval_min in the regular session. Not gated by the
+        # auto-close switch: [idea_trades] enabled gates it, inside mark_cycle.
+        im_due = False
+        try:
+            im_due, im_slot = idea_marks_due(
+                now, last_idea_marks_slot,
+                _paper_limits.idea_trades()["mark_interval_min"])
+            if im_due:
+                last_idea_marks_slot = im_slot
+        except Exception:
+            log.exception("idea_marks_due gate degraded")
+            im_due = False
+
+        async def _idea_marks_branch():
+            try:
+                await loop_.run_in_executor(
+                    None, handlers.run_idea_marks_and_publish, bus)
+            except Exception:
+                log.exception("run_idea_marks_and_publish branch degraded")
+
+        if im_due:
+            branches.append(("idea_marks", _idea_marks_branch()))
 
         # Tracked structures — settle, mark and exit the rows the scanner records
         # to be measured. Not gated by the auto-close switch: nothing here is a

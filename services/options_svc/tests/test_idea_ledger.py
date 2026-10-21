@@ -13,7 +13,8 @@ import pytest
 from services.options_svc import idea_ledger, site_ideas
 from services.options_svc import trade_idea as T
 from services.options_svc.tests.test_trade_idea import (
-    long_call, long_straddle, pcs, put_backspread)
+    _legs, long_call, long_put, long_straddle, pcs, put_backspread, put_butterfly,
+    structure)
 
 _CT = ZoneInfo("America/Chicago")
 NOW = dt.datetime(2026, 9, 17, 10, 35, tzinfo=_CT)
@@ -294,3 +295,373 @@ def test_an_idea_debit_row_tracks_like_the_ledgers_own_debit_row():
                 "long_strike", "call_short", "call_long", "target_mid", "stop_mid"):
         assert a[key] == b[key], key
     assert b["entry_credit"] < 0 and b["short_strike"] is None
+
+
+# ── the 5-minute idea cycle: marks, the worst point, target / stop / expiry ──
+def _mark_row(**over):
+    """A booked long call (entry -2.50 a share, target 125, stop 150), overridable."""
+    row = idea_ledger.build_row(LONG_CALL_IDEA, NOW, CFG)
+    row.update(over)
+    return row
+
+
+def _at(minutes):
+    return NOW + dt.timedelta(minutes=minutes)
+
+
+def test_mae_only_moves_down():
+    row = _mark_row()
+    seen = []
+    for i, pnl in enumerate((-40.0, -10.0, -80.0), start=1):
+        row, hit = idea_ledger.apply_mark(row, pnl, _at(5 * i))
+        assert hit is None
+        seen.append((row["mae_pnl"], row["mae_at"], row["last_mark_pnl"]))
+    stamp = lambda m: _at(m).isoformat(timespec="seconds")   # noqa: E731
+    assert seen == [(-40.0, stamp(5), -40.0), (-40.0, stamp(5), -10.0),
+                    (-80.0, stamp(15), -80.0)]
+    assert row["last_mark_at"] == stamp(15)
+
+
+def test_mae_stays_zero_when_never_negative():
+    row = _mark_row()
+    for i, pnl in enumerate((0.0, 30.0, 5.0), start=1):
+        row, _ = idea_ledger.apply_mark(row, pnl, _at(5 * i))
+    assert row["mae_pnl"] == 0.0 and row.get("mae_at") is None
+    assert row["last_mark_pnl"] == 5.0
+
+
+def test_apply_mark_is_pure():
+    row = _mark_row()
+    before = dict(row)
+    idea_ledger.apply_mark(row, -60.0, _at(5))
+    assert row == before
+
+
+def test_stop_checked_before_target():
+    both = _mark_row(stop_pnl=100.0, target_pnl=-150.0)     # -120 satisfies both
+    assert idea_ledger.apply_mark(both, -120.0, _at(5))[1] == "STOP"
+    edge = _mark_row(stop_pnl=100.0, target_pnl=None)
+    assert idea_ledger.apply_mark(edge, -100.0, _at(5))[1] == "STOP"   # at the line
+    assert idea_ledger.apply_mark(edge, -99.99, _at(5))[1] is None
+    tgt = _mark_row(stop_pnl=None, target_pnl=125.0)
+    assert idea_ledger.apply_mark(tgt, 125.0, _at(5))[1] == "TARGET"
+    assert idea_ledger.apply_mark(tgt, -10_000.0, _at(5))[1] is None    # no stop set
+
+
+def test_close_row_is_pure_and_books_the_value_given():
+    row = _mark_row(quantity=3)
+    before = dict(row)
+    out = idea_ledger.close_row(row, -3.10, "TARGET", _at(5))
+    assert row == before
+    assert out["status"] == "CLOSED" and out["exit_reason"] == "TARGET"
+    assert out["exit_debit"] == -3.10 and out["exit_debit_total"] == pytest.approx(-930.0)
+    assert out["realized_pnl"] == pytest.approx(180.0)       # (-2.50 + 3.10) x 100 x 3
+    assert out["exit_time"] == _at(5).isoformat(timespec="seconds")
+    assert idea_ledger.close_row(row, 0.0, "EXPIRED", _at(5))["status"] == "EXPIRED"
+
+
+@pytest.fixture
+def cycle(ledger, monkeypatch):
+    """``mark_cycle`` over a real tmp trades.db. The chain mark is scripted per trade
+    id (a cost to close per share), the settlement price is ``state['sp']``, and every
+    reprice and cache clear is recorded."""
+    import paper_engine
+    import signal_repricer
+    import structure_marks
+    state = {"values": {}, "sp": None, "repriced": [], "cleared": 0, "legs_json": []}
+
+    def fake_reprice(row, client, today=None):
+        state["repriced"].append(row["trade_id"])
+        state["legs_json"].append(row["legs_json"] == row["legs"])
+        value = state["values"].get(row["trade_id"])
+        if isinstance(value, Exception):
+            raise value
+        if value is None:
+            return {"current_value": None, "unrealized_pnl": None, "error": "no chain"}
+        return {"current_value": value,
+                "unrealized_pnl": structure_marks.pnl_of(row, value), "error": None}
+
+    def clear():
+        state["cleared"] += 1
+
+    monkeypatch.setattr(structure_marks, "reprice", fake_reprice)
+    monkeypatch.setattr(paper_engine, "settlement_underlying",
+                        lambda client, symbol, expiration, today: state["sp"])
+    monkeypatch.setattr(signal_repricer, "clear_chain_cache", clear)
+    return state
+
+
+def _only_row(ledger):
+    (row,) = ledger.get_all_trades()
+    return row
+
+
+def test_cycle_marks_and_records_the_worst_point(ledger, cycle):
+    tid = idea_ledger.book(LONG_CALL_IDEA, NOW)["trade_id"]
+    cycle["values"][tid] = -1.70                               # -0.80 a share: -80
+    out = idea_ledger.mark_cycle(_at(5), client="CLIENT")
+    assert out == {"marked": 1, "closed": 0, "settled": 0, "skipped": 0}
+    row = _only_row(ledger)
+    assert row["status"] == "OPEN"
+    assert (row["last_mark_pnl"], row["mae_pnl"]) == (-80.0, -80.0)
+    assert row["mae_at"] == row["last_mark_at"] == _at(5).isoformat(timespec="seconds")
+    assert cycle["legs_json"] == [True] and cycle["cleared"] == 1
+
+
+def test_target_closes_at_mark_value_not_level(ledger, cycle, monkeypatch):
+    from shared import paper_limits
+    monkeypatch.setattr(paper_limits, "idea_trades", lambda: {**CFG, "quantity": 2})
+    tid = idea_ledger.book(LONG_CALL_IDEA, NOW)["trade_id"]
+    assert _only_row(ledger)["target_pnl"] == 125.0
+    cycle["values"][tid] = -4.30                               # +1.80 a share: +180
+    out = idea_ledger.mark_cycle(_at(5))
+    assert out == {"marked": 1, "closed": 1, "settled": 0, "skipped": 0}
+    row = _only_row(ledger)
+    assert row["status"] == "CLOSED" and row["exit_reason"] == "TARGET"
+    assert row["exit_debit"] == -4.30
+    assert row["realized_pnl"] == pytest.approx(360.0)         # 180 x 2, not 125 x 2
+    assert row["last_mark_pnl"] == 180.0
+
+
+def test_stop_closes_at_mark_value(ledger, cycle):
+    tid = idea_ledger.book(LONG_CALL_IDEA, NOW)["trade_id"]   # stop 150
+    cycle["values"][tid] = -0.70                               # -1.80 a share: -180
+    assert idea_ledger.mark_cycle(_at(5))["closed"] == 1
+    row = _only_row(ledger)
+    assert row["exit_reason"] == "STOP" and row["realized_pnl"] == pytest.approx(-180.0)
+    assert row["mae_pnl"] == -180.0
+
+
+def test_no_mark_leaves_row_untouched(ledger, cycle):
+    idea_ledger.book(LONG_CALL_IDEA, NOW)
+    before = _only_row(ledger)
+    out = idea_ledger.mark_cycle(_at(5))
+    assert out == {"marked": 0, "closed": 0, "settled": 0, "skipped": 1}
+    assert _only_row(ledger) == before
+
+
+def test_cycle_leaves_the_users_own_rows_alone(ledger, cycle):
+    own = dict(idea_ledger.build_row(LONG_CALL_IDEA, NOW, CFG), source=None,
+               trade_id="mine")
+    ledger.add_trade(own)
+    cycle["values"]["mine"] = -4.30
+    assert idea_ledger.mark_cycle(_at(5)) == {
+        "marked": 0, "closed": 0, "settled": 0, "skipped": 0}
+    assert cycle["repriced"] == [] and _only_row(ledger)["status"] == "OPEN"
+
+
+def test_cycle_continues_after_one_row_raises(ledger, cycle):
+    from services import _degrade
+    first = idea_ledger.book(LONG_CALL_IDEA, NOW)["trade_id"]
+    second = idea_ledger.book(PCS_IDEA, NOW)["trade_id"]
+    cycle["values"][first] = RuntimeError("chain blew up")
+    cycle["values"][second] = 1.10                             # +12.40 on a 1.224 credit
+    _degrade.reset()
+    out = idea_ledger.mark_cycle(_at(5))
+    assert out == {"marked": 1, "closed": 0, "settled": 0, "skipped": 1}
+    assert sorted(cycle["repriced"]) == sorted([first, second])
+    by_id = {t["trade_id"]: t for t in ledger.get_all_trades()}
+    assert by_id[second]["last_mark_pnl"] == pytest.approx(12.4)
+    assert by_id[first]["last_mark_pnl"] is None
+    assert _degrade.counts().get("options.idea_ledger.mark_cycle") == 1
+
+
+def test_mark_cycle_disabled_marks_and_settles_nothing(ledger, cycle, monkeypatch):
+    from shared import paper_limits
+    tid = idea_ledger.book(LONG_CALL_IDEA, NOW)["trade_id"]
+    monkeypatch.setattr(paper_limits, "idea_trades", lambda: {**CFG, "enabled": False})
+    cycle["values"][tid], cycle["sp"] = -4.30, 200.0
+    late = dt.datetime(2026, 9, 28, 10, 0, tzinfo=_CT)          # past its expiry too
+    assert idea_ledger.mark_cycle(late) == {
+        "marked": 0, "closed": 0, "settled": 0, "skipped": 0}
+    assert cycle["repriced"] == [] and _only_row(ledger)["status"] == "OPEN"
+
+
+def test_mark_cycle_takes_the_book_lock():
+    import paper_lock
+    assert paper_lock.is_serialized(idea_ledger.mark_cycle)
+
+
+def test_mark_cycle_uses_the_proxy_client_by_default(ledger, cycle, monkeypatch):
+    import structure_marks
+
+    from services import _proxy
+    seen = []
+    monkeypatch.setattr(_proxy, "schwab_py_client", "PROXY", raising=False)
+    monkeypatch.setattr(structure_marks, "reprice",
+                        lambda row, client, today=None: seen.append(client) or {
+                            "current_value": None, "unrealized_pnl": None,
+                            "error": "no chain"})
+    idea_ledger.book(LONG_CALL_IDEA, NOW)
+    idea_ledger.mark_cycle(_at(5))
+    assert seen == ["PROXY"]
+
+
+def test_cycle_marks_through_the_real_leg_pricer(ledger, monkeypatch):
+    """No stubbed ``reprice``: the row's stored legs reach ``structure_marks`` as
+    ``legs_json`` and are priced off a chain at the leg's own strike."""
+    import signal_repricer
+    chain = {"underlyingPrice": 188.0, "putExpDateMap": {},
+             "callExpDateMap": {"2026-09-26:9": {"190.0": [{"bid": 3.0, "ask": 3.2}]}}}
+    monkeypatch.setattr(signal_repricer, "_fetch_chain",
+                        lambda client, symbol, exp, max_age=None: chain)
+    idea_ledger.book(LONG_CALL_IDEA, NOW)
+    assert idea_ledger.mark_cycle(_at(5), client="CLIENT")["marked"] == 1
+    assert _only_row(ledger)["last_mark_pnl"] == pytest.approx(60.0)   # 3.10 - 2.50
+
+
+# every structure the idea can post, as the scanner row the hourly slot hands over
+_E = "2026-10-09"
+
+
+def _shape(t, *specs, debit=None, credit=None):
+    return structure(id=f"XYZ_{t}", symbol="XYZ", type=t, strategy_label=t,
+                     underlying_price=100.0, legs=_legs(_E, *specs),
+                     net_debit=debit, net_credit=credit, commission=2.6)
+
+
+SHAPES = {
+    "PCS": pcs(),
+    "CCS": pcs(type="CCS", id="SPY_CCS", short_strike=780.0, long_strike=785.0),
+    "IC": pcs(type="IC", call_short=775.0, call_long=780.0, net_credit=1.42, id="SPY_IC"),
+    "LONG_CALL": long_call(),
+    "LONG_PUT": long_put(),
+    "SHORT_CALL": _shape("SHORT_CALL", ("short", 1, 105.0, "call"), credit=120.0),
+    "SHORT_PUT": _shape("SHORT_PUT", ("short", 1, 95.0, "put"), credit=110.0),
+    "BULL_CALL": _shape("BULL_CALL", ("long", 1, 100.0, "call"),
+                        ("short", 1, 105.0, "call"), debit=240.0),
+    "BEAR_PUT": structure(),
+    "BUTTERFLY_CALL": _shape("BUTTERFLY_CALL", ("long", 1, 95.0, "call"),
+                             ("short", 2, 100.0, "call"), ("long", 1, 105.0, "call"),
+                             debit=150.0),
+    "BUTTERFLY_PUT": put_butterfly(),
+    "IRON_BUTTERFLY": _shape("IRON_BUTTERFLY", ("long", 1, 90.0, "put"),
+                             ("short", 1, 100.0, "put"), ("short", 1, 100.0, "call"),
+                             ("long", 1, 110.0, "call"), credit=650.0),
+    "CONDOR_CALL": _shape("CONDOR_CALL", ("long", 1, 90.0, "call"),
+                          ("short", 1, 95.0, "call"), ("short", 1, 105.0, "call"),
+                          ("long", 1, 110.0, "call"), debit=180.0),
+    "CONDOR_PUT": _shape("CONDOR_PUT", ("long", 1, 90.0, "put"),
+                         ("short", 1, 95.0, "put"), ("short", 1, 105.0, "put"),
+                         ("long", 1, 110.0, "put"), debit=180.0),
+    "LONG_STRADDLE": long_straddle(),
+    "LONG_STRANGLE": _shape("LONG_STRANGLE", ("long", 1, 105.0, "call"),
+                            ("long", 1, 95.0, "put"), debit=300.0),
+    "CALL_BACKSPREAD": _shape("CALL_BACKSPREAD", ("short", 1, 100.0, "call"),
+                              ("long", 2, 105.0, "call"), credit=20.0),
+    "PUT_BACKSPREAD": put_backspread(),
+}
+BOUNDED = [t for t, row in SHAPES.items() if T.normalize(row)["max_loss"] is not None]
+
+
+def test_every_posted_structure_has_a_shape():
+    assert set(SHAPES) == set(T.STRATEGY_LABELS)
+    assert all(T.normalize(row)["type"] == t for t, row in SHAPES.items())
+    assert set(T.STRATEGY_LABELS) - set(BOUNDED) == {"SHORT_CALL"}   # never posted
+
+
+def _expiry_close(idea):
+    day = dt.date.fromisoformat(idea["expiration"])
+    return dt.datetime(day.year, day.month, day.day, 15, 5, tzinfo=_CT)
+
+
+@pytest.mark.parametrize("kind", BOUNDED)
+def test_expiry_settles_every_posted_structure(ledger, cycle, kind):
+    """Settled at the legs' intrinsic value, checked against the card's own payoff
+    (``trade_idea.payoff``: entry cash with commission in, plus each leg's value)."""
+    idea = T.normalize(SHAPES[kind])
+    strikes = sorted(lg["strike"] for lg in idea["legs"])
+    cycle["sp"] = sp = round((strikes[0] + strikes[-1]) / 2 + 0.37, 2)
+    idea_ledger.book(idea, NOW)
+    out = idea_ledger.mark_cycle(_expiry_close(idea))
+    assert out == {"marked": 0, "closed": 0, "settled": 1, "skipped": 0}
+    row = _only_row(ledger)
+    assert row["status"] == "EXPIRED" and row["exit_reason"] == "EXPIRED"
+    assert row["realized_pnl"] == pytest.approx(
+        T.payoff(idea["legs"], idea["entry_cash"], sp), abs=0.01)
+    assert cycle["repriced"] == []                 # an expired row is never marked
+
+
+def test_settlement_lowers_the_worst_point_when_it_is_worse(ledger, cycle):
+    idea_ledger.book(LONG_CALL_IDEA, NOW)
+    cycle["sp"] = 150.0                            # far below the 190 strike: -250
+    idea_ledger.mark_cycle(_expiry_close(LONG_CALL_IDEA))
+    row = _only_row(ledger)
+    assert row["realized_pnl"] == pytest.approx(-250.0)
+    assert row["mae_pnl"] == pytest.approx(-250.0)
+    assert row["mae_at"] == _expiry_close(LONG_CALL_IDEA).isoformat(timespec="seconds")
+
+
+def test_expiry_deferred_without_settlement_price(ledger, cycle):
+    idea_ledger.book(LONG_CALL_IDEA, NOW)
+    before = _only_row(ledger)
+    cycle["sp"] = None
+    out = idea_ledger.mark_cycle(_expiry_close(LONG_CALL_IDEA))
+    assert out == {"marked": 0, "closed": 0, "settled": 0, "skipped": 1}
+    assert _only_row(ledger) == before and cycle["repriced"] == []
+
+
+def test_settle_only_settles_and_marks_nothing(ledger, cycle):
+    due = idea_ledger.book(LONG_CALL_IDEA, NOW)["trade_id"]      # expires 2026-09-26
+    later = idea_ledger.book(T.normalize(SHAPES["BEAR_PUT"]), NOW)["trade_id"]  # 10-09
+    cycle["sp"], cycle["values"][later] = 200.0, 0.10
+    out = idea_ledger.mark_cycle(_expiry_close(LONG_CALL_IDEA), settle_only=True)
+    assert out == {"marked": 0, "closed": 0, "settled": 1, "skipped": 0}
+    by_id = {t["trade_id"]: t for t in ledger.get_all_trades()}
+    assert by_id[due]["status"] == "EXPIRED"
+    assert by_id[later]["status"] == "OPEN" and by_id[later]["last_mark_pnl"] is None
+    assert cycle["repriced"] == []
+
+
+def test_paper_settle_slot_settles_idea_rows(ledger, cycle, monkeypatch):
+    """The 15:05 ``[slots.paper_settle]`` pass: the 5-minute cycle stops at 15:00,
+    so expiry-day settlement of an idea row is this slot's."""
+    from services.options_svc import handlers
+    monkeypatch.setattr(handlers, "_now_ct", lambda: _expiry_close(LONG_CALL_IDEA))
+    monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: False)
+    monkeypatch.setattr(handlers.compute, "expire_ledger_trades", lambda: 0)
+    monkeypatch.setattr(handlers, "refresh_paper_account", lambda bus: None)
+    monkeypatch.setattr(handlers, "refresh_paper_trades", lambda bus, reprice=True: None)
+    monkeypatch.setattr(handlers, "publish_rescue_summary", lambda bus: None)
+    idea_ledger.book(LONG_CALL_IDEA, NOW)
+    cycle["sp"] = 193.0
+    handlers.run_paper_settle(object())
+    row = _only_row(ledger)
+    assert row["status"] == "EXPIRED" and row["realized_pnl"] == pytest.approx(50.0)
+    assert cycle["repriced"] == []
+
+
+# ── exit commission: what the entry cash already carries ───────────────────
+def test_exit_commission_basis():
+    """The scanner rows' ``commission`` is the ROUND TRIP (open + close), and the
+    idea's entry cash has it in, so a close adds no second commission.
+
+    Credit rows: ``scanner_engine._attach_net_economics`` sets ``commission`` and
+    ``net_credit`` (credit less it a share); ``trade_idea`` books ``net_credit``.
+    Every other structure: ``strategy_scanner.payoff_metrics`` (which the
+    ``structure_scan`` tables are built from too) sets ``commission``; ``trade_idea``
+    subtracts it from the net cash."""
+    import scanner_engine
+    import strategy_scanner
+
+    from services.options_svc import commission as fees
+    sig = {"type": "PCS", "symbol": "SPY", "credit": 1.25, "max_loss": 3.75}
+    scanner_engine._attach_net_economics(sig)
+    open_side = fees.commission_for(2, "SPY", 1)
+    assert sig["commission"] == pytest.approx(2 * open_side)        # open + close
+    assert sig["net_credit"] == round(1.25 - 2 * open_side / 100, 2)  # cents a share
+    credit_idea = T.normalize(pcs(commission=sig["commission"], net_credit=sig["net_credit"]))
+    assert credit_idea["entry_cash"] == pytest.approx(sig["net_credit"] * 100)
+
+    leg = {"kind": "call", "side": "long", "strike": 190.0, "expiration": "2026-09-26",
+           "qty": 1, "mark": 4.10, "delta": 0.4, "theta": -0.1, "vega": 0.2,
+           "gamma": 0.01}
+    m = strategy_scanner.payoff_metrics([leg], 186.4, "NVDA")
+    assert m["commission"] == pytest.approx(2 * fees.commission_for(1, "NVDA", 1))
+    debit_idea = T.normalize(long_call(net_debit=m["net_debit"], commission=m["commission"]))
+    assert debit_idea["entry_cash"] == pytest.approx(-410.0 - m["commission"])
+
+    # the close books (entry - value) x 100 x qty and nothing more
+    row = idea_ledger.build_row(debit_idea, NOW, {**CFG, "quantity": 2})
+    out = idea_ledger.close_row(row, -5.0, "TARGET", _at(5))
+    assert out["realized_pnl"] == pytest.approx((row["entry_credit"] + 5.0) * 100 * 2)

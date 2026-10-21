@@ -161,6 +161,97 @@ def test_idea_mark_shows_outside_the_session_while_manual_rows_wait(view):
     assert repriced == []
 
 
+def test_plain_view_shows_idea_marks_and_fetches_no_chain(view):
+    """The 5-minute idea publish reads the view WITHOUT a reprice; the idea marks
+    must still be on it."""
+    session, repriced = view
+    got = {t["trade_id"]: t.get("unrealized_pnl")
+           for t in compute.paper_trades_view(reprice=False)["trades"]}
+    assert got == {"m1": None, "i1": -37.5, "i2": None}
+    assert repriced == []
+
+
+# ── the 5-minute idea publish ───────────────────────────────────────────────
+@pytest.fixture
+def marks(monkeypatch):
+    """``run_idea_marks_and_publish`` with the cycle's answer scripted and each
+    Ledger publish recorded."""
+    state = {"done": {"marked": 0, "closed": 0, "settled": 0, "skipped": 0},
+             "published": [], "now": []}
+
+    def cycle(now_ct, client=None, *, settle_only=False):
+        state["now"].append((now_ct, settle_only))
+        return dict(state["done"])
+
+    monkeypatch.setattr(idea_ledger, "mark_cycle", cycle)
+    monkeypatch.setattr(handlers, "_now_ct", lambda: NOW)
+    monkeypatch.setattr(handlers, "refresh_paper_trades",
+                        lambda bus, reprice=True, keep_live_pnl=False:
+                        state["published"].append((reprice, keep_live_pnl)))
+    return state
+
+
+def test_idea_publish_never_reprices_the_users_rows(marks):
+    marks["done"]["marked"] = 2
+    handlers.run_idea_marks_and_publish(object())
+    assert marks["now"] == [(NOW, False)]
+    assert marks["published"] == [(False, True)]
+
+
+def test_idea_publish_after_a_settlement(marks):
+    marks["done"]["settled"] = 1
+    handlers.run_idea_marks_and_publish(object())
+    assert marks["published"] == [(False, True)]
+
+
+def test_idea_publish_skipped_when_nothing_was_written(marks):
+    marks["done"]["skipped"] = 3
+    handlers.run_idea_marks_and_publish(object())
+    assert marks["published"] == []
+
+
+def test_settle_slot_runs_the_idea_pass_settle_only(marks, monkeypatch):
+    monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: False)
+    monkeypatch.setattr(handlers.compute, "expire_ledger_trades", lambda: 0)
+    monkeypatch.setattr(handlers, "refresh_paper_account", lambda bus: None)
+    monkeypatch.setattr(handlers, "publish_rescue_summary", lambda bus: None)
+    handlers.run_paper_settle(object())
+    assert marks["now"] == [(NOW, True)]
+    assert marks["published"] == [(False, False)]
+
+
+def test_a_failed_idea_settle_pass_never_costs_the_publish(marks, monkeypatch):
+    def boom(now_ct, client=None, *, settle_only=False):
+        raise RuntimeError("ledger store locked")
+    monkeypatch.setattr(idea_ledger, "mark_cycle", boom)
+    monkeypatch.setattr(handlers.compute, "has_paper_account", lambda: False)
+    monkeypatch.setattr(handlers.compute, "expire_ledger_trades", lambda: 0)
+    monkeypatch.setattr(handlers, "refresh_paper_account", lambda bus: None)
+    monkeypatch.setattr(handlers, "publish_rescue_summary", lambda bus: None)
+    handlers.run_paper_settle(object())
+    assert marks["published"] == [(False, False)]
+
+
+def test_a_plain_publish_keeps_the_users_live_pnl(view):
+    """``keep_live_pnl``: the user's OPEN rows keep the P&L the cached view gave
+    them; an idea row shows its own mark, never a carried one."""
+    from shared.bus import Bus
+    from shared.bus.client import reset_fake_bus
+    reset_fake_bus()
+    bus = Bus()
+    bus.cache_set(handlers.CACHE_PAPER_TRADES, {"trades": [
+        {"trade_id": "m1", "status": "OPEN", "unrealized_pnl": 7.0},
+        {"trade_id": "i2", "status": "OPEN", "unrealized_pnl": 99.0}]})
+    handlers.refresh_paper_trades(bus, reprice=False, keep_live_pnl=True)
+    got = {t["trade_id"]: t.get("unrealized_pnl")
+           for t in bus.cache_get(handlers.CACHE_PAPER_TRADES).payload["trades"]}
+    assert got == {"m1": 7.0, "i1": -37.5, "i2": None}
+    handlers.refresh_paper_trades(bus, reprice=False)          # the flag is opt-in
+    got = {t["trade_id"]: t.get("unrealized_pnl")
+           for t in bus.cache_get(handlers.CACHE_PAPER_TRADES).payload["trades"]}
+    assert got == {"m1": None, "i1": -37.5, "i2": None}
+
+
 def test_expiring_idea_row_is_not_the_users_action_item(ledger, monkeypatch):
     monkeypatch.setattr(compute, "reprice_captured", lambda: {"signals": [], "flags": []})
     monkeypatch.setattr(compute, "_load_open_positions", lambda: [])

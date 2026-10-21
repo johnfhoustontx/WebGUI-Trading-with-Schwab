@@ -2583,7 +2583,8 @@ def paper_trades_view(reprice: bool = False) -> dict:
 
     With ``reprice=True`` (and only during market hours), each OPEN trade gets a
     live ``unrealized_pnl`` so the Paper Trades page can show running P&L instead
-    of a blank column. Defensively guarded → ``{"trades": []}`` on any failure,
+    of a blank column. An OPEN trade-idea row shows its recorded 5-minute mark
+    either way (no fetch). Defensively guarded → ``{"trades": []}`` on any failure,
     mirroring the page's per-read try/except. The GUI tier reads this cached view
     directly."""
     import paper_trader
@@ -2593,9 +2594,9 @@ def paper_trades_view(reprice: bool = False) -> dict:
     except Exception:
         log.exception("paper_trades_view read degraded → empty ledger")
         return {"trades": []}
+    for t in trades:
+        _ideas.show_mark(t)                    # a recorded mark: no fetch, any hour
     if reprice:
-        for t in trades:
-            _ideas.show_mark(t)                # a recorded mark: no fetch, any hour
         try:
             from . import scheduler
             market_open = scheduler._is_trading_day(scheduler._market_now()) \

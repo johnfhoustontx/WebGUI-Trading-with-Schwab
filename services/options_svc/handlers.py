@@ -1460,6 +1460,13 @@ def run_paper_settle(bus) -> None:
         compute.expire_ledger_trades()
     except Exception:
         log.exception("paper settle: ledger pass degraded")
+    # The posted trade ideas' rows settle in their own pass (the user's Ledger
+    # pass above skips them); their 5-minute cycle stops at 15:00.
+    try:
+        from services.options_svc import idea_ledger
+        idea_ledger.mark_cycle(_now_ct(), settle_only=True)
+    except Exception:
+        log.exception("paper settle: idea pass degraded")
     refresh_paper_account(bus)
     try:
         refresh_paper_trades(bus, reprice=False)
@@ -1471,12 +1478,54 @@ def run_paper_settle(bus) -> None:
         log.exception("paper settle: publish_rescue_summary degraded")
 
 
-def refresh_paper_trades(bus, reprice: bool = True) -> None:
+def _now_ct():
+    from zoneinfo import ZoneInfo as _ZI
+    return _dt.datetime.now(_ZI("America/Chicago"))
+
+
+def run_idea_marks_and_publish(bus) -> None:
+    """The posted trade ideas' 5-minute cycle (``idea_ledger.mark_cycle``), then the
+    Ledger view - only when the pass wrote a row.
+
+    Published WITHOUT a chain reprice: an idea row shows its own recorded mark
+    (``paper_trades_view`` puts it on with no fetch), and a 5-minute publish must
+    never chain-reprice the user's own rows, which keep the live P&L the last
+    repricing publish gave them (``keep_live_pnl``)."""
+    from services.options_svc import idea_ledger
+    done = idea_ledger.mark_cycle(_now_ct())
+    if done["marked"] or done["settled"]:
+        refresh_paper_trades(bus, reprice=False, keep_live_pnl=True)
+
+
+def _carry_live_pnl(bus, data) -> None:
+    """Put the cached view's live ``unrealized_pnl`` back on the user's OPEN rows
+    that this publish did not reprice (never on an idea row: it shows its own
+    mark). Without it a publish that does not reprice blanks the column until the
+    next one that does. Best-effort: no cached view, nothing carried."""
+    from services.options_svc import idea_ledger
+    try:
+        env = bus.cache_get(CACHE_PAPER_TRADES)
+        prev = (env.payload if env is not None else None) or {}
+        live = {t.get("trade_id"): t.get("unrealized_pnl")
+                for t in prev.get("trades") or [] if isinstance(t, dict)}
+    except Exception:  # noqa: BLE001
+        log.exception("carry live P&L: cached ledger view unreadable")
+        return
+    for t in (data or {}).get("trades") or []:
+        if ((t.get("status") or "").upper() == "OPEN" and not idea_ledger.is_idea(t)
+                and t.get("unrealized_pnl") is None
+                and live.get(t.get("trade_id")) is not None):
+            t["unrealized_pnl"] = live[t.get("trade_id")]
+
+
+def refresh_paper_trades(bus, reprice: bool = True, keep_live_pnl: bool = False) -> None:
     """Read the paper-trade ledger view and publish it to the bus.
 
     ``reprice`` (default True) attaches a live ``unrealized_pnl`` to each OPEN
     trade during market hours so the Paper Trades page shows running P&L instead
-    of a blank column (the reprice is skipped off-hours inside the view). No strict
+    of a blank column (the reprice is skipped off-hours inside the view).
+    ``keep_live_pnl`` (with ``reprice=False``) keeps the P&L the cached view's
+    user rows already carry (``_carry_live_pnl``). No strict
     contract: the view is a loosely-shaped read-only dict (``{"trades": [...]}``)
     that only the Paper Trades page consumes, and ``compute.paper_trades_view`` is
     already fully defensive.
@@ -1490,6 +1539,8 @@ def refresh_paper_trades(bus, reprice: bool = True) -> None:
     trades = None
     try:
         data = compute.paper_trades_view(reprice=reprice)
+        if keep_live_pnl and not reprice:
+            _carry_live_pnl(bus, data)
         if _valid(PaperTradesView, data, "paper_trades"):
             trades = (data or {}).get("trades") or None
             version = bus.cache_set(CACHE_PAPER_TRADES, data)
