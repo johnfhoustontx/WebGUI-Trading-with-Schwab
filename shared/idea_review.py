@@ -240,6 +240,8 @@ def _closed_line(t: dict, clean: float) -> dict:
         "score": t.get("idea_score"),
         "exit_reason": t.get("exit_reason"),
         "rating": rate(t, clean),
+        "entry": _real(t.get("entry_credit_total")),
+        "exit": _real(t.get("exit_debit_total")),
         "realized_pnl": _pnl(t),
         "mae_pct": mae_pct(t),
         "held_h": _held_h(t),
@@ -335,7 +337,8 @@ def _add(out: set, v) -> None:
 
 _FACT_KEYS = ("n", "targets", "stops", "expired", "manual", "win_rate",
               "avg_pnl", "total_pnl", "avg_mae_pct", "avg_held_h")
-_CLOSED_KEYS = ("score", "realized_pnl", "mae_pct", "held_h")
+_CLOSED_KEYS = ("score", "entry", "exit", "realized_pnl", "mae_pct",
+                "held_h")
 _OPEN_KEYS = ("unrealized_pnl", "mae_pnl", "mae_pct", "days_open")
 
 

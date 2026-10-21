@@ -159,6 +159,18 @@ def test_closed_week_trades_carry_their_rating():
     assert t["realized_pnl"] == 100.0
 
 
+def test_closed_week_trades_carry_entry_and_exit_dollars():
+    """The weekly report's closed-trade table prints them, so they are facts
+    the verifier knows too."""
+    f = ir.facts([row(entry_credit_total=-212.5, exit_debit_total=310.0)],
+                 TODAY, CFG)
+    (t,) = f["closed_week"]
+    assert (t["entry"], t["exit"]) == (-212.5, 310.0)
+    assert {"-212.50", "212.50", "310.00"} <= ir.fact_numbers(f)
+    (bare,) = ir.facts([row()], TODAY, CFG)["closed_week"]
+    assert bare["entry"] is None and bare["exit"] is None
+
+
 def test_open_trades_listed_not_graded():
     o = row(idea_id="o1", status="OPEN", exit_reason=None, exit_time=None,
             realized_pnl=None, unrealized_pnl=-40.0, mae_pnl=-100.0,
