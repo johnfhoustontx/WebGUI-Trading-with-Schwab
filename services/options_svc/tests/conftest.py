@@ -19,6 +19,19 @@ def _site_ideas_into_tmp(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _trades_db_into_tmp(monkeypatch, tmp_path):
+    """A posted trade idea is also booked into the Paper Ledger (``trades.db``) and
+    announced to the proxy's tracker. Every test that posts would otherwise reach
+    this checkout's real store (the root conftest refuses it, and the post's
+    ledger step would log a degrade instead of booking). The tracker call is
+    left real: the root conftest refuses the network and ``track`` logs and
+    returns False, which is what a down proxy does."""
+    import trades_db
+    monkeypatch.setattr(trades_db, "DEFAULT_DB_PATH", tmp_path / "trades.db")
+    monkeypatch.setattr(trades_db, "_initialised", set())
+
+
+@pytest.fixture(autouse=True)
 def _operator_toggles_into_tmp(monkeypatch, tmp_path):
     """``set_autoclose`` / ``set_manual_paper_lifecycle`` save the switch to
     ``options-scanner/data/operator_toggles.json``. A test that sends either

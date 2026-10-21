@@ -314,6 +314,22 @@ def delete_trades_by_status(conn, statuses):
     return cur.rowcount
 
 
+#: The ``source`` of a row booked from a posted trade idea. Twin of
+#: ``services.options_svc.idea_ledger.SOURCE`` (this folder cannot import services;
+#: a services test pins that the two are equal).
+IDEA_SOURCE = "trade_idea"
+
+
+def delete_closed_except_source(conn, source):
+    """Delete CLOSED / EXPIRED rows whose ``source`` is not ``source``; returns the
+    count deleted. ``IS NOT`` so a NULL source (every row but an idea) is deleted."""
+    cur = conn.execute(
+        "DELETE FROM trades WHERE status IN ('CLOSED', 'EXPIRED') AND source IS NOT ?",
+        (source,),
+    )
+    return cur.rowcount
+
+
 def fetch_all(conn):
     rows = conn.execute(
         "SELECT * FROM trades ORDER BY entry_time ASC, rowid ASC"

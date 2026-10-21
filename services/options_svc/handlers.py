@@ -2941,9 +2941,23 @@ def run_trade_idea(bus, slot, now=None) -> dict:
         result["posted"] = trade_idea.next_posted(posted, idea, today)
         result["x"] = _post_trade_idea_x(bus, idea, png, now)
         result["site"] = _publish_trade_idea_site(idea, png, now)
+        result["ledger"] = _book_trade_idea_ledger(idea, now)
     else:
         result["reason"] = "send failed"
     return _finish()
+
+
+def _book_trade_idea_ledger(idea, now) -> dict:
+    """Book a POSTED idea into the Paper Ledger (``idea_ledger.book``). Runs after
+    every other send and never raises: ``book`` can fail on a malformed idea, or
+    after its row is committed (the proxy tracker call), and neither may cost the
+    post. The answer is ``book``'s own dict, or ``{"status": "failed"}``."""
+    try:
+        from services.options_svc import idea_ledger
+        return idea_ledger.book(idea, now)
+    except Exception:  # noqa: BLE001
+        _degrade.degraded("options.run_trade_idea.ledger")
+        return {"status": "failed"}
 
 
 def _publish_trade_idea_site(idea, png, now) -> bool:

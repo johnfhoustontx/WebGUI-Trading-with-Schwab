@@ -203,6 +203,40 @@ def test_paper_trader_delete_closed_only(paper_sandbox):
     assert [t["trade_id"] for t in trades] == ["open1"]
 
 
+def test_delete_closed_spares_trade_idea_rows(paper_sandbox):
+    """Delete closed trades clears the user's book; a posted idea's result is the
+    weekly review's evidence, so its closed rows stay. The count is what was deleted."""
+    paper_trader.add_trade(_seed_trade("open1", status="OPEN"))
+    paper_trader.add_trade(_seed_trade("closed1", status="CLOSED"))
+    paper_trader.add_trade(dict(_seed_trade("idea1", status="CLOSED"), source="trade_idea"))
+    paper_trader.add_trade(dict(_seed_trade("idea2", status="EXPIRED"), source="trade_idea"))
+    assert paper_trader.delete_closed_trades() == 1
+    assert sorted(t["trade_id"] for t in paper_trader.load_trades()) == [
+        "idea1", "idea2", "open1"]
+    conn = trades_db.connect()
+    try:
+        deleted = [e["trade_id"] for e in trades_db.fetch_events(conn)
+                   if e["event"] == "DELETED"]
+    finally:
+        conn.close()
+    assert deleted == ["closed1"]
+
+
+def test_delete_closed_except_source_counts_only_what_it_deleted(paper_sandbox):
+    paper_trader.add_trade(_seed_trade("a", status="CLOSED"))
+    paper_trader.add_trade(dict(_seed_trade("b", status="CLOSED"), source="other"))
+    paper_trader.add_trade(dict(_seed_trade("c", status="CLOSED"), source="trade_idea"))
+    conn = trades_db.connect()
+    try:
+        # a NULL source is not "trade_idea": the comparison must be NULL-safe
+        n = trades_db.delete_closed_except_source(conn, trades_db.IDEA_SOURCE)
+        conn.commit()
+    finally:
+        conn.close()
+    assert n == 2
+    assert [t["trade_id"] for t in paper_trader.load_trades()] == ["c"]
+
+
 def test_paper_trader_get_open_trades(paper_sandbox):
     paper_trader.add_trade(_seed_trade("open1", status="OPEN"))
     paper_trader.add_trade(_seed_trade("closed1", status="CLOSED"))

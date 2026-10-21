@@ -58,6 +58,7 @@ from services import _proxy  # noqa: E402
 from services.options_svc import commission  # noqa: E402  (round-trip $ for the break-even floor)
 from services.options_svc import gamma_window as _gw  # noqa: E402  (the gamma display window + scale lock)
 from services.options_svc import greeks_census as _census  # noqa: E402  (a chain with no Greeks at all)
+from services.options_svc import idea_ledger as _ideas  # noqa: E402  (posted-idea rows stay out of the user's book)
 from services.options_svc.hiro_store import write_rows as _write_hiro_rows  # noqa: E402  (one minute's hedging-flow rows)
 from shared.numeric import finite as _finite  # noqa: E402 - one shared definition (audit CQ-07)
 
@@ -2557,6 +2558,10 @@ def _reprice_open_pnl(trades) -> None:
     for t in trades or []:
         if (t.get("status") or "").upper() != "OPEN":
             continue
+        if _ideas.is_idea(t):                  # shows its recorded mark, never a chain fetch
+            if t.get("last_mark_pnl") is not None:
+                t["unrealized_pnl"] = round(t["last_mark_pnl"] * int(t.get("quantity") or 1), 2)
+            continue
         try:
             # DEBIT/legs trades (long options + debit verticals) reprice generically off
             # their stored legs; credit spreads keep the tested short/long-strike path.
@@ -2626,7 +2631,7 @@ def ledger_book_state(trades=None) -> dict:
         trades = paper_trader.get_all_trades()
     open_rows, realized = [], 0.0
     for t in trades or ():
-        if not isinstance(t, dict):
+        if not isinstance(t, dict) or _ideas.is_idea(t):
             continue
         if t.get("status") == "OPEN":
             open_rows.append({"symbol": t.get("symbol"),
@@ -2984,7 +2989,7 @@ def expire_ledger_trades(now_ct=None) -> int:
 
     settled = 0
     for t in trades:
-        if (t.get("status") or "").upper() != "OPEN":
+        if (t.get("status") or "").upper() != "OPEN" or _ideas.is_idea(t):
             continue
         if not paper_engine.should_settle(t.get("expiration"), today, now_ct):
             continue
@@ -3101,7 +3106,7 @@ def manage_ledger_trades(now_ct=None) -> int:
 
     closed = 0
     for t in trades or []:
-        if (t.get("status") or "").upper() != "OPEN":
+        if (t.get("status") or "").upper() != "OPEN" or _ideas.is_idea(t):
             continue
         if (t.get("direction") or "").upper() != _LEDGER_MANAGED_DIRECTION:
             continue
