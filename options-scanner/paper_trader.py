@@ -409,7 +409,8 @@ def delete_closed_trades():
     try:
         closed = [
             t for t in trades_db.fetch_all(conn)
-            if t["status"] != "OPEN" and t.get("source") != trades_db.IDEA_SOURCE
+            if t["status"] in ("CLOSED", "EXPIRED")     # the SQL's own predicate
+            and t.get("source") != trades_db.IDEA_SOURCE
         ]
         n = trades_db.delete_closed_except_source(conn, trades_db.IDEA_SOURCE)
         for t in closed:

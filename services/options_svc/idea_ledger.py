@@ -40,6 +40,15 @@ def is_idea(trade) -> bool:
     return bool(isinstance(trade, dict) and trade.get("source") == SOURCE)
 
 
+def show_mark(trade) -> None:
+    """Put an OPEN idea row's recorded mark on it as ``unrealized_pnl`` (the mark is
+    per contract). No chain is read, so it holds outside the session too; no mark
+    recorded yet leaves it blank."""
+    mark = trade.get("last_mark_pnl")
+    if is_idea(trade) and (trade.get("status") or "").upper() == "OPEN" and mark is not None:
+        trade["unrealized_pnl"] = round(mark * int(trade.get("quantity") or 1), 2)
+
+
 def levels(idea, cfg):
     """``(target_pnl, stop_pnl)`` in dollars per contract, positive; either may be None.
 

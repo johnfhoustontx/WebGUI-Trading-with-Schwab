@@ -2558,9 +2558,7 @@ def _reprice_open_pnl(trades) -> None:
     for t in trades or []:
         if (t.get("status") or "").upper() != "OPEN":
             continue
-        if _ideas.is_idea(t):                  # shows its recorded mark, never a chain fetch
-            if t.get("last_mark_pnl") is not None:
-                t["unrealized_pnl"] = round(t["last_mark_pnl"] * int(t.get("quantity") or 1), 2)
+        if _ideas.is_idea(t):                  # shown by paper_trades_view, never a chain fetch
             continue
         try:
             # DEBIT/legs trades (long options + debit verticals) reprice generically off
@@ -2596,6 +2594,8 @@ def paper_trades_view(reprice: bool = False) -> dict:
         log.exception("paper_trades_view read degraded → empty ledger")
         return {"trades": []}
     if reprice:
+        for t in trades:
+            _ideas.show_mark(t)                # a recorded mark: no fetch, any hour
         try:
             from . import scheduler
             market_open = scheduler._is_trading_day(scheduler._market_now()) \
@@ -10421,7 +10421,8 @@ def collect_action_items(now_ct=None) -> dict:
     try:
         import paper_trader
         for t in paper_trader.get_all_trades():
-            if (t.get("status") or "").upper() == "OPEN" and str(t.get("expiration"))[:10] == today:
+            if (t.get("status") or "").upper() == "OPEN" and str(t.get("expiration"))[:10] == today \
+                    and not _ideas.is_idea(t):    # an idea settles on its own
                 out["expiring_today"].append({
                     "book": "ledger", "symbol": t.get("symbol"),
                     "strategy": t.get("strategy"), "expiration": t.get("expiration"),
