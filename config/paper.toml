@@ -32,3 +32,28 @@ zero_bid_max_ask = 0.25
 # answers from its own store (config/marketdata.toml). An entry or a close is
 # always priced from a chain fetched at that moment, whatever this says.
 chain_max_age_sec = 45
+
+[idea_trades]
+# Every hourly trade idea that is POSTED is also booked into the Paper Ledger
+# (options_svc/idea_ledger.py), so the ideas are measured by the same books as
+# every other trade. A bad value in this table reads as the shipped default.
+#
+# Book the ideas at all. false stops new bookings; open ones are still marked and
+# settled. Must be true or false.
+enabled = true
+# Contracts per idea (a whole number, 1 or more).
+quantity = 1
+# Minutes between marks of the open idea trades (1 to 60).
+mark_interval_min = 5
+# A debit idea is stopped out when it has lost this fraction of what it cost
+# (above 0, up to 1). 0.60 = a 60% loss of the debit paid.
+debit_stop_frac = 0.60
+# The weekly review calls a winner "clean" when its worst drawdown before the win
+# stayed within this percent of the risk (above 0, up to 100).
+clean_mae_pct = 25.0
+# The fewest booked ideas in a group before the weekly review will draw any
+# conclusion from it (1 or more).
+min_n = 5
+# The Claude model the weekly review's written judgment uses (a tier name, never
+# a version).
+review_model = "sonnet"

@@ -32,6 +32,17 @@ DEFAULTS = {
     # the long leg of a winning spread looks like near expiry. Above it, a zero
     # bid is a broken quote and the position is left unmarked for that cycle.
     "marks": {"zero_bid_max_ask": 0.25, "chain_max_age_sec": 45},
+    # Every posted hourly trade idea is booked into the Paper Ledger as a
+    # measurement, and a weekly review reads how they did.
+    "idea_trades": {
+        "enabled": True,
+        "quantity": 1,
+        "mark_interval_min": 5,
+        "debit_stop_frac": 0.60,
+        "clean_mae_pct": 25.0,
+        "min_n": 5,
+        "review_model": "sonnet",
+    },
 }
 
 load, reset_cache = toml_loader(PAPER_TOML, DEFAULTS, label="paper.toml")
@@ -74,6 +85,53 @@ def mark_chain_max_age_sec() -> int:
     if not (math.isfinite(val) and val >= 0):
         return DEFAULTS["marks"]["chain_max_age_sec"]
     return int(val)
+
+
+def _idea_int(raw, lo, hi, default):
+    """A whole number in ``lo..hi``; a bool, float or string is not one."""
+    if isinstance(raw, bool) or not isinstance(raw, int):
+        return default
+    return raw if lo <= raw <= hi else default
+
+
+def _idea_float(raw, lo, hi, default):
+    """A finite number in ``(lo, hi]``: ``lo`` itself is refused."""
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return default
+    val = float(raw)
+    return val if math.isfinite(val) and lo < val <= hi else default
+
+
+def idea_trades() -> dict:
+    """``[idea_trades]``: how the hourly trade ideas are booked into the Paper
+    Ledger and reviewed. Always a full dict. Each key that is missing or unusable
+    reads as its shipped default on its own - a bad ``quantity`` does not take
+    the other keys with it - and nothing here raises.
+
+    ``enabled`` must be a real boolean (a string such as ``"yes"`` is not one).
+    ``quantity`` and ``min_n`` are positive whole numbers; ``mark_interval_min``
+    is 1..60 minutes; ``debit_stop_frac`` is a fraction in (0, 1];
+    ``clean_mae_pct`` a percentage in (0, 100]; ``review_model`` a non-empty
+    string."""
+    d = DEFAULTS["idea_trades"]
+    sec = load().get("idea_trades")
+    if not isinstance(sec, dict):
+        sec = {}
+    enabled = sec.get("enabled")
+    model = sec.get("review_model")
+    return {
+        "enabled": enabled if isinstance(enabled, bool) else d["enabled"],
+        "quantity": _idea_int(sec.get("quantity"), 1, 10**6, d["quantity"]),
+        "mark_interval_min": _idea_int(sec.get("mark_interval_min"), 1, 60,
+                                       d["mark_interval_min"]),
+        "debit_stop_frac": _idea_float(sec.get("debit_stop_frac"), 0.0, 1.0,
+                                       d["debit_stop_frac"]),
+        "clean_mae_pct": _idea_float(sec.get("clean_mae_pct"), 0.0, 100.0,
+                                     d["clean_mae_pct"]),
+        "min_n": _idea_int(sec.get("min_n"), 1, 10**6, d["min_n"]),
+        "review_model": (model.strip() if isinstance(model, str) and model.strip()
+                         else d["review_model"]),
+    }
 
 
 def max_risk_per_trade() -> float:
