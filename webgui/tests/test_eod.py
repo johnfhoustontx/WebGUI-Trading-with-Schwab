@@ -1116,6 +1116,26 @@ def test_manual_book_excludes_idea_rows():
     assert b["daily"]["realized"] == 33.0 and b["daily"]["closed"] == 1
 
 
+def test_paper_trades_table_lists_only_the_users_rows():
+    """The detail's "Paper Trades" table is the user's own Ledger rows; the
+    posted ideas have their own section."""
+    cache = {"trades": [_manual(), _idea(symbol="IDEA1"), _open_idea(symbol="IDEA2")]}
+    html = eod.paper_section(cache, {"has_account": False, "snapshot": None})
+    assert "QQQ" in html
+    assert "IDEA1" not in html and "IDEA2" not in html
+    only_ideas = eod.paper_section({"trades": [_idea()]},
+                                   {"has_account": False, "snapshot": None})
+    assert "No paper trades." in only_ideas
+
+
+def test_paper_trades_tile_counts_only_the_users_rows():
+    snap = {"date": "2026-10-20", "paper_trades": {"trades": [
+        _manual(), _manual(symbol="IWM"), _idea(), _open_idea(symbol="OPN")]}}
+    html = eod.summary_fragment(snap, "/eod/detail", today=_TODAY)
+    tile = html.split("Paper trades</div>", 1)[1].split("</div>", 1)[0]
+    assert tile.endswith(">2"), tile
+
+
 def test_trade_ideas_is_third_book():
     snap = {"paper_trades": {"trades": [_manual(), _idea()]}}
     books = eod._books(snap)

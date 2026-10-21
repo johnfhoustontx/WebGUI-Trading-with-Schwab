@@ -277,7 +277,8 @@ def paper_section(trades_cache, account_cache) -> str:
 
     trades = trades_cache.get("trades", []) if isinstance(trades_cache, dict) else []
     rows = []
-    for t in trades:
+    # The user's own rows: the posted trade ideas have their own section.
+    for t in split_ledger(trades)[0]:
         rows.append(
             "<tr>"
             + _cell(t.get("symbol"))
@@ -811,7 +812,10 @@ def summary_fragment(snap: dict, detail_href: str, today=None) -> str:
     scan = snap.get("scan") or {}
     n_scan = _count(scan, "signals_0dte") + _count(scan, "signals_swing")
     n_cap = _count(snap.get("captured") or {}, "signals")
-    n_paper = _count(snap.get("paper_trades") or {}, "trades")
+    # The user's own Ledger rows; the trade ideas are their own book and tile.
+    led = snap.get("paper_trades")
+    led = led.get("trades") if isinstance(led, dict) else None
+    n_paper = len(split_ledger(led if isinstance(led, list) else None)[0])
     acct = (snap.get("paper_account") or {}).get("snapshot") or {}
     session_pnl = acct.get("session_pnl")
     idea_norm = [n for label, n, _s in _books(snap) if label == "Trade ideas"][0]
