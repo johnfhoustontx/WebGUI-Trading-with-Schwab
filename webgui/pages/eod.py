@@ -656,8 +656,10 @@ def idea_section(paper_trades_cache, today, now=None) -> str:
 
 
 TRADE_IDEAS_NOTE = (
-    "Every posted trade idea, booked on the Paper Ledger and exempt from the risk "
-    "limits. Open trades are not in these totals."
+    "Every posted trade idea, booked on the Paper Ledger and not held to its risk "
+    "limits. Realized profit and the closed count include only trades that have "
+    "closed; the Opened and Credit collected columns count every idea by the day "
+    "it was posted, open ones too."
 )
 
 

@@ -1547,7 +1547,7 @@ z
 </tr>
 <tr>
 <td><code>paper_close</code></td>
-<td><code>{trade_id, debit}</code></td>
+<td><code>{trade_id, debit}</code> — on a trade-idea row (<code>source == "trade_idea"</code>) the close is booked by <code>idea_ledger.manual_close</code>, exit reason <code>MANUAL</code>, and the typed <code>debit</code> is the stored <code>exit_debit</code> (the Ledger's convention: paid for a credit row, received for a debit row)</td>
 <td><code>cache:options:paper_trades</code></td>
 </tr>
 <tr>
@@ -1557,7 +1557,7 @@ z
 </tr>
 <tr>
 <td><code>paper_delete_closed</code></td>
-<td>—</td>
+<td>— (deletes every CLOSED / EXPIRED row <strong>except trade-idea rows</strong>, which are the weekly review's evidence; <code>paper_delete</code> of a single idea row still removes it)</td>
 <td><code>cache:options:paper_trades</code></td>
 </tr>
 <tr>
@@ -1826,7 +1826,21 @@ version and fires no event), under a lock, at the end of every <code>refresh_pap
 <code>paper_delete</code>, <code>paper_delete_closed</code>; not <code>paper_analyze</code>, which publishes only
 <code>cache:options:paper_analyze</code>) and the paper-manage cycle — even when that view's
 own publish raises, and once at service start. A failure is a degrade
-(<code>options.ledger_caps</code>), never a raise. No TTL.</p>
+(<code>options.ledger_caps</code>), never a raise. No TTL. <strong>Trade-idea rows are not in it</strong>: they
+are left out of <code>open</code> and out of <code>realized_pnl</code> (so out of <code>equity</code>), because they
+are not held to the caps.</p>
+<p><strong>Trade-idea rows on <code>cache:options:paper_trades</code>.</strong> The hourly trade idea
+(<code>handlers.run_trade_idea</code>) books each posted idea as an ordinary row of <code>trades.db</code>
+with <code>source = "trade_idea"</code> (the only marker; <code>notes</code> reads "Trade idea") through
+<code>idea_ledger.book</code>, which evaluates no cap. Beyond the Ledger's usual fields it carries
+<code>idea_id</code>, <code>idea_posted</code>, <code>idea_grade</code>, <code>idea_score</code>, <code>idea_label</code>, <code>target_pnl</code> and
+<code>stop_pnl</code> (dollars per contract, positive), <code>last_mark_pnl</code> / <code>last_mark_at</code> (the latest
+5-minute mark, per contract), <code>mae_pnl</code> / <code>mae_at</code> (the worst point, per contract, <code>0.0</code>
+until a mark goes negative), <code>exit_time</code> and <code>exit_reason</code> (<code>TARGET</code> · <code>STOP</code> · <code>EXPIRED</code> ·
+<code>MANUAL</code>), <code>exit_debit</code> and <code>exit_debit_total</code>. An OPEN idea row's <code>unrealized_pnl</code> is
+<code>last_mark_pnl x quantity</code> at any hour. The 5-minute cycle (<code>scheduler.idea_marks_due</code> →
+<code>handlers.run_idea_marks_and_publish</code>, gated by <code>[idea_trades] mark_interval_min</code>)
+republishes the view without a chain reprice, and a mark appends no <code>trade_events</code> row.</p>
 <p><strong><code>cache:options:scalp</code></strong> (event <code>events:options:scalp</code>) — the Opening Scalp page's
 only view. Validated on write by <code>shared.contracts.options.ScalpView</code>; one that fails is
 not published and is counted as a degrade (<code>options.scalp_view</code>). Published at 08:36 CT,

@@ -1271,23 +1271,26 @@ engine's positions live on **Paper Account**.
   stopping them, and you can still close any row by hand at any time.
 - **Credit spreads here are not managed** — they are tracked only. The engine's
   own book on **Paper Account** is the one that takes profit and cuts on them.
-- **Trades you send must fit this ledger's risk limits**: at most $750 of max loss
+- **New trades must fit this ledger's risk limits** (trade ideas are the one
+  exception, below): at most $750 of max loss
   per trade; 3 positions and $750 per symbol; 5 positions and $1,500 per sector;
   5 positions sharing one expiration; and open max loss at most 20% of equity
   ($25,000 plus your closed trades' realized P&L, so **Delete all closed** moves
   it). A trade that would break one is not written, and a message on the page you
   sent it from says which limit — plus *Up to N contracts fit* when a smaller size
   would clear them all.
-- **Trade ideas live here too.** Each hourly trade idea is booked into this
-  ledger as it is posted, tagged **Trade idea** beside the symbol. The buttons
-  above the table filter the list: **All**, **My trades** or **Trade ideas**, and
-  the count line shows only what is on screen. Idea rows are **not** held to the
-  risk limits below - they do not apply to them, so an idea always books, whatever
-  else is open. They are checked **every 5 minutes** for their target, their stop
-  and their expiry, and close themselves on the first one reached; a close by
-  hand is recorded as **MANUAL**. **Delete all closed** keeps trade ideas, so the
-  weekly review of ideas keeps its record; deleting an idea row yourself, from
-  its own panel, removes it from that review too.
+- **Trade ideas live here too.** While **Book the posted ideas** is on (Settings
+  -> Configuration), each hourly trade idea is booked into this ledger as it is
+  posted, tagged **Trade idea** beside the symbol. The buttons above the table
+  filter the list: **All**, **My trades** or **Trade ideas**, and the count line
+  shows only what is on screen. Idea rows are **not** held to the risk limits
+  listed above - they do not apply to them, so an idea always books, whatever else
+  is open. Turning the setting off stops new bookings only; ideas already open are
+  still checked and closed. Open ideas are checked **every 5 minutes** for their
+  target, their stop and their expiry, and close themselves on the first one
+  reached; a close by hand is recorded as **MANUAL**. **Delete all closed**
+  keeps trade ideas, so the weekly review of ideas keeps its record; deleting an
+  idea row yourself, from its own panel, removes it from that review too.
 - Use it to test ideas from the Market Scanner without risk.
 """,
     "/options/captured": """
@@ -1800,9 +1803,10 @@ An end-of-day summary of the day's options activity and paper trading.
 
 - **Summary tiles** plus per-section tables (scanner, captured, paper).
 - **Three books, each with its own Daily / Weekly / MTD table:** your **Manual
-  paper** trades, the **Captured signals**, and the **Trade ideas**. Every idea the
-  app posts is booked on the Paper Ledger and tagged, and it is counted in its own
-  book, never in Manual paper. A tile shows today's idea profit and how many closed.
+  paper** trades, the **Captured signals**, and the **Trade ideas**. While **Book the
+  posted ideas** is on (Settings -> Configuration), every idea the app posts is
+  booked on the Paper Ledger and tagged, and it is counted in its own book, never
+  in Manual paper. A tile shows today's idea profit and how many closed.
 - **Detail → Trade ideas** lists the ideas posted today (when, structure, grade,
   entry, exit, why it closed, how long it was held, the worst point it reached in
   dollars and as a share of its maximum loss, and the result), the ones closed today

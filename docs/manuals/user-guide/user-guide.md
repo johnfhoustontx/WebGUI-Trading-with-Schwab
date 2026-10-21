@@ -2169,10 +2169,13 @@ return on risk uses a margin estimate and is not comparable with the other rows.
 
 A manual paper-trading ledger. You open every row yourself; since 2026-09-12 the
 **long options and debit spreads** in it also close themselves (see below), and
-since 2026-09-13 so do butterflies and condors.
+since 2026-09-13 so do butterflies and condors. Since 2026-10-20 it also holds the
+app's own **trade ideas**, tagged and followed separately (see *Trade ideas in the
+ledger* below).
 
 - **Action buttons:** Reload, **Close selected**, **Analyze selected** (live
-  Greeks + P&L overlay), **Delete selected**, **Delete all closed**.
+  Greeks + P&L overlay), **Delete selected**, **Delete all closed**. Above the
+  table, **All**, **My trades** and **Trade ideas** choose which rows are listed.
 - ⚠ **Close selected asks for a different number depending on the trade.** For a
   credit spread it is the **debit you pay** to close; for a long option or debit
   spread it is the **credit you receive**. The dialog's label says which. Both are
@@ -2264,6 +2267,44 @@ Paper Account.
 > book's own results: no long option or debit spread has ever been recorded closed
 > in this app. They live in a config file so they can be changed once there is
 > something to measure.
+
+**Trade ideas in the ledger.** The app posts one graded trade idea an hour (Discord,
+Telegram and the public site). While **Book the posted ideas** is on (Settings →
+Configuration → *Trade ideas in the Paper Ledger*; it ships on), each idea that is
+posted is also booked here as a row tagged **Trade idea**, so the ideas are measured
+by the same books as everything else. These rows behave differently from yours:
+
+- **Booked as posted.** One contract (the *Contracts per idea* setting), at the
+  idea's own entry price, which already includes the commission for opening and
+  closing. The same post is never booked twice. Turning the switch off stops new
+  bookings only; ideas already open keep being followed until they close.
+- **Not held to the risk limits.** The per-trade, per-symbol, per-sector,
+  per-expiration and whole-ledger limits above do not apply, so an idea always
+  books, and its risk is left out of those limits and out of the ledger's equity. A
+  call that the limits would have refused is exactly the kind the weekly review needs to
+  see.
+- **Followed every 5 minutes.** During the regular session (08:30–15:00 CT) each open
+  idea is priced from real option quotes every 5 minutes (the *Minutes between
+  marks* setting), at minutes that keep clear of the busiest proxy minutes. The page
+  shows its latest mark as the row's P&L at any hour. The worst point it has reached
+  (its lowest mark, in dollars) is kept on the row. A mark that cannot be made is
+  skipped, never written as zero.
+- **Closes itself.** On the first of its **stop** (checked first), its **target**, or
+  its **expiry** (settled at intrinsic value in the 15:05 CT pass). The target and
+  stop are the same levels the public site shows for the idea; a debit idea the exit
+  rules give no stop is stopped at 60% of the debit it paid (*Debit idea stop-out*).
+  A stop or target closes at the mark that crossed it.
+- **A hand close is recorded as MANUAL.** **Close selected** works on an idea row,
+  and the weekly review counts it as *closed by hand*.
+- **Delete all closed leaves them.** The weekly review reads these rows, so **Delete
+  all closed** keeps every closed idea. Deleting one yourself, with **Delete
+  selected**, removes it and drops it out of the weekly review; the confirmation says
+  so.
+- Idea rows are also kept out of the automatic exit rules above (including the 21-day
+  time exit) and out of the *expiring today* list in the scheduled action alerts: they
+  close themselves.
+- **Counted on their own.** The EOD Report counts them as a third book, *Trade
+  ideas*, never in *Manual paper*.
 
 ## Paper Account
 
@@ -3067,7 +3108,7 @@ An end-of-day rollup of the day's Options activity.
 
 | View | Route | Contents |
 |------|-------|----------|
-| **Summary** | `/eod` | Headline tiles plus a Daily / Weekly (WTD) / MTD performance block **per book** — manual paper, captured signals (counted at one contract per signal) and trade ideas (every idea the app posts, booked on the Paper Ledger and kept out of manual paper). One tile shows today's closed trade-idea profit and the count closed. |
+| **Summary** | `/eod` | Headline tiles plus a Daily / Weekly (WTD) / MTD performance block **per book** — manual paper, captured signals (counted at one contract per signal) and trade ideas (while **Book the posted ideas** is on in Settings → Configuration, every idea the app posts is booked on the Paper Ledger and kept out of manual paper). One tile shows today's closed trade-idea profit and the count closed. |
 | **Detailed** | `/eod/detail` | The same performance plus breakdowns by **strategy** (PCS / CCS / IC), by **0-DTE vs swing**, and by **status** (open / closed / expired), then the full trade, scanner and captured tables, and a **Trade ideas** section: today's posted ideas (time posted, structure, grade, entry, exit, reason, time held, worst point in dollars and as a percent of maximum loss, result), ideas closed today that were posted earlier, and open ideas at their last mark, with closed profit for the day, week and month. Open trades' unrealized profit sits on its own line and is never added to those totals. |
 
 Both views use a jump-link table of contents, and every section is collapsible —
@@ -3097,7 +3138,46 @@ recover a day the machine was off for. Weekends and market holidays are skipped.
 
 > Realized P&L is bucketed by **exit** date, while opened trades and credit
 > collected are bucketed by **entry** date. They answer different questions and will
-> not reconcile to each other — that is correct, not a bug.
+> not reconcile to each other — that is correct, not a bug. That includes open
+> trades: realized profit and the closed count only ever include closed trades, but
+> the **Opened** and **Credit collected** columns count every trade by its entry day,
+> open ones too.
+
+### Weekly idea review
+
+**Route:** `/eod/weekly` — the **Weekly idea review** button at the top of the EOD
+Report.
+
+A once-a-week look back at the trade ideas, written for you without anything to
+press. **After the close on the week's last trading day** (Friday, or Thursday when
+Friday is a holiday), at 3:30 pm CT, a timer runs the review and saves one document
+for that week. The page lists the weeks written so far, newest first; pick one from
+the **Week** dropdown, or open it in its own tab. Before the first one is written it
+says so.
+
+What a review holds:
+
+- **Assessment and suggestions**, written by Claude. The app computes every number
+  from the Paper Ledger's trade-idea rows first; Claude may use only those numbers,
+  and every figure it writes (including one spelled out in words) is checked against
+  them before the document is saved. A paragraph or suggestion that cites a number
+  the app did not compute is **left out**, and a line says how many parts were. Each
+  suggestion shows the size of the group it rests on, and a group of fewer than
+  *Fewest ideas before a conclusion* trades (5 by default) is labelled *too few
+  trades to act on*.
+- **This week's closed trades**, each with a plain-word rating: *clean win* (target
+  reached with a worst drawdown within 25% of the maximum loss), *win after drawdown*,
+  *stopped*, *expired win*, *expired loss*, or *closed by hand*.
+- **Open trades**, ideas booked more than once in the week, and **tables for the week
+  and for all time**, grouped by grade, structure, trade type, score band, hour posted
+  and symbol.
+
+If Claude cannot be reached that week, the review is still saved with every number
+and one line saying the assessment is missing, and the job is reported as failed so
+you hear about it. It is informational: nothing in it changes a signal, a score or a
+setting. It uses your Claude subscription (the Claude Code command line), never the
+paid API key. The time is **Weekly trade-idea review** under *After-close jobs* in
+Settings → Configuration.
 
 ## Post to X
 
