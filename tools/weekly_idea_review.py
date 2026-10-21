@@ -26,9 +26,10 @@ them and adds judgment. The check proves a number is IN the facts, not that it
 is used with the right meaning or sign: "SPY lost 100.00" passes when SPY made
 100.00, so the prompt tells Claude to keep each figure's sign and subject.
 
-Exit codes: 0 written (or not the review day), 2 the bus was empty or
-unreadable (nothing written: a page of empty tables would replace a real
-week's review), 3 written without Claude's judgment.
+Exit codes: 0 written (or not the review day), 2 the bus was unreadable or the
+Ledger view was missing or held no rows at all (nothing written: a page of
+empty tables would replace a real week's review), 3 written without Claude's
+judgment.
 """
 from __future__ import annotations
 
@@ -483,7 +484,10 @@ def main(argv=None, *, client=None, read_snapshot=None, archive_root=None) -> in
         print(f"REFUSED: the bus could not be read ({type(exc).__name__}: {exc}). "
               "Nothing written.", file=sys.stderr)
         return 2
-    if not isinstance(trades, list):
+    # A list with no rows at all is refused too: the Ledger always holds the
+    # user's own trades beside the ideas, so a view with nothing in it is one
+    # that was not really answered, not a quiet week.
+    if not isinstance(trades, list) or not trades:
         print("REFUSED: the Paper Ledger view (options:paper_trades) was empty. "
               "Nothing written -- a review of empty tables would replace this "
               "week's real one. Is the stack up, and does this process have the "

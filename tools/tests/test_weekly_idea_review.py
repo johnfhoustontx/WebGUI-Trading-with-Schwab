@@ -151,6 +151,9 @@ def test_force_runs_on_a_day_that_is_not_the_review_day(tmp_path):
     lambda: {"date": FRIDAY, "paper_trades": {}},
     lambda: {"date": FRIDAY},
     lambda: (_ for _ in ()).throw(ConnectionError("bus down")),
+    # a view holding no rows at all: the Ledger always holds the user's own
+    # trades, so an empty list is a view that was not really answered
+    lambda: {"date": FRIDAY, "paper_trades": {"trades": []}},
 ])
 def test_empty_bus_writes_nothing_and_exits_2(tmp_path, reader, capsys):
     runner = _Runner({"assessment": ["x"], "suggestions": []})
@@ -163,9 +166,11 @@ def test_empty_bus_writes_nothing_and_exits_2(tmp_path, reader, capsys):
 
 
 def test_a_book_with_no_idea_rows_is_still_reviewed(tmp_path):
-    """An answered bus whose Ledger holds no idea rows is a real, empty week."""
+    """An answered bus whose Ledger holds rows, none of them ideas, is a real,
+    empty week."""
     runner = _Runner({"assessment": ["No trades this week."], "suggestions": []})
-    rc = _run(tmp_path, ["--date", FRIDAY], read_snapshot=_snapshot([]),
+    rc = _run(tmp_path, ["--date", FRIDAY],
+              read_snapshot=_snapshot([row(idea_id=None, source="manual")]),
               client=_client(tmp_path, runner))
     assert rc == 0
     assert "No trades this week." in _report(tmp_path)
