@@ -342,6 +342,16 @@ def test_position_rows_open_rows_from_all_three_books_tagged():
         ("account", 1), ("ledger", 10), ("captured", 30)]
 
 
+def test_position_rows_leaves_out_open_trade_idea_rows():
+    """A booked trade idea is a measurement, not a position the user holds."""
+    books = _books()
+    books["options:paper_trades"]["trades"].append(
+        {"trade_id": 12, "symbol": "MU", "strategy": "BULL_CALL", "status": "OPEN",
+         "source": "trade_idea"})
+    rows = sf.position_rows("MU", books)
+    assert [r.get("trade_id") for r in rows if r["book"] == "ledger"] == [10]
+
+
 def test_position_rows_drops_closed_and_expired():
     rows = sf.position_rows("MU", _books())
     assert not any(str(r.get("status", "")).upper() in ("CLOSED", "EXPIRED")

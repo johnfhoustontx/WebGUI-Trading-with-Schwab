@@ -226,8 +226,10 @@ def position_rows(symbol, books):
 
     ``books`` maps a view name (``BOOK_VIEWS``) to its payload. Open means the
     Desk's rule (``desk._is_open``: not CLOSED / EXPIRED, a missing status is
-    open) so the two pages cannot disagree about what is held. Rows are copies;
-    the payload is never mutated. Empty or missing books give ``[]``.
+    open) so the two pages cannot disagree about what is held. A posted trade
+    idea booked on the ledger (``source == "trade_idea"``) is a measurement the
+    user does not hold, so it is left out. Rows are copies; the payload is never
+    mutated. Empty or missing books give ``[]``.
     """
     sym = _sym(symbol)
     if sym is None or not isinstance(books, dict):
@@ -240,7 +242,7 @@ def position_rows(symbol, books):
             continue
         for p in entries:
             if (isinstance(p, dict) and _sym(p.get("symbol")) == sym
-                    and _desk._is_open(p)):
+                    and _desk._is_open(p) and p.get("source") != "trade_idea"):
                 out.append(dict(p, book=tag))
     return out
 
