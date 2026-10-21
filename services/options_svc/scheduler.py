@@ -984,8 +984,8 @@ async def loop(bus):
 
         # The posted trade ideas' rows in the Paper Ledger - settle, mark from real
         # quotes, record the worst point, close at stop / target - every
-        # [idea_trades] mark_interval_min in the regular session. Not gated by the
-        # auto-close switch: [idea_trades] enabled gates it, inside mark_cycle.
+        # [idea_trades] mark_interval_min in the regular session. Gated by neither
+        # the auto-close switch nor [idea_trades] enabled (that stops booking only).
         im_due = False
         try:
             im_due, im_slot = idea_marks_due(

@@ -24,6 +24,7 @@ CFG = {"enabled": True, "quantity": 1, "mark_interval_min": 5,
 
 PCS_IDEA = T.normalize(pcs())
 LONG_CALL_IDEA = T.normalize(long_call(net_debit=250.0, commission=0.0))
+LONG_PUT_IDEA = T.normalize(long_put())
 BACKSPREAD_IDEA = T.normalize(put_backspread(net_debit=50.0, net_credit=None,
                                              commission=0.0))
 STRADDLE_IDEA = T.normalize(long_straddle())
@@ -354,10 +355,28 @@ def test_close_row_is_pure_and_books_the_value_given():
     out = idea_ledger.close_row(row, -3.10, "TARGET", _at(5))
     assert row == before
     assert out["status"] == "CLOSED" and out["exit_reason"] == "TARGET"
-    assert out["exit_debit"] == -3.10 and out["exit_debit_total"] == pytest.approx(-930.0)
     assert out["realized_pnl"] == pytest.approx(180.0)       # (-2.50 + 3.10) x 100 x 3
     assert out["exit_time"] == _at(5).isoformat(timespec="seconds")
     assert idea_ledger.close_row(row, 0.0, "EXPIRED", _at(5))["status"] == "EXPIRED"
+
+
+def test_exit_debit_is_the_value_received_on_a_debit_row():
+    """The Ledger's own convention (``paper_trader.close_paper_trade``): a debit row
+    stores the POSITIVE value it was sold for, not the negative cost to close."""
+    out = idea_ledger.close_row(_mark_row(quantity=3), -3.10, "TARGET", _at(5))
+    assert out["exit_debit"] == pytest.approx(3.10)
+    assert out["exit_debit_total"] == pytest.approx(930.0)
+    assert out["realized_pnl"] == pytest.approx(180.0)
+
+
+def test_exit_debit_is_the_debit_paid_on_a_credit_row():
+    row = idea_ledger.build_row(PCS_IDEA, NOW, {**CFG, "quantity": 2})   # 1.224 credit
+    out = idea_ledger.close_row(row, 0.60, "TARGET", _at(5))
+    assert out["exit_debit"] == pytest.approx(0.60)
+    assert out["exit_debit_total"] == pytest.approx(120.0)
+    assert out["realized_pnl"] == pytest.approx(124.8)       # (1.224 - 0.60) x 100 x 2
+    assert idea_ledger.exit_debit_of(row, 0.60) == pytest.approx(0.60)
+    assert idea_ledger.exit_debit_of(_mark_row(), -3.10) == pytest.approx(3.10)
 
 
 @pytest.fixture
@@ -418,7 +437,7 @@ def test_target_closes_at_mark_value_not_level(ledger, cycle, monkeypatch):
     assert out == {"marked": 1, "closed": 1, "settled": 0, "skipped": 0}
     row = _only_row(ledger)
     assert row["status"] == "CLOSED" and row["exit_reason"] == "TARGET"
-    assert row["exit_debit"] == -4.30
+    assert row["exit_debit"] == pytest.approx(4.30)            # the value received
     assert row["realized_pnl"] == pytest.approx(360.0)         # 180 x 2, not 125 x 2
     assert row["last_mark_pnl"] == 180.0
 
@@ -466,15 +485,68 @@ def test_cycle_continues_after_one_row_raises(ledger, cycle):
     assert _degrade.counts().get("options.idea_ledger.mark_cycle") == 1
 
 
-def test_mark_cycle_disabled_marks_and_settles_nothing(ledger, cycle, monkeypatch):
+def test_booking_switched_off_still_marks_closes_and_settles(ledger, cycle, monkeypatch):
+    """``enabled = false`` stops BOOKING only: rows already booked are marked,
+    closed and settled until they close, so switching it off strands none open."""
     from shared import paper_limits
-    tid = idea_ledger.book(LONG_CALL_IDEA, NOW)["trade_id"]
+    marked = idea_ledger.book(LONG_CALL_IDEA, NOW)["trade_id"]          # 09-26
+    closing = idea_ledger.book(T.normalize(SHAPES["BEAR_PUT"]), NOW)["trade_id"]
+    settling = idea_ledger.book(LONG_PUT_IDEA, NOW)["trade_id"]         # 09-21
     monkeypatch.setattr(paper_limits, "idea_trades", lambda: {**CFG, "enabled": False})
-    cycle["values"][tid], cycle["sp"] = -4.30, 200.0
-    late = dt.datetime(2026, 9, 28, 10, 0, tzinfo=_CT)          # past its expiry too
-    assert idea_ledger.mark_cycle(late) == {
-        "marked": 0, "closed": 0, "settled": 0, "skipped": 0}
-    assert cycle["repriced"] == [] and _only_row(ledger)["status"] == "OPEN"
+    assert idea_ledger.book(PCS_IDEA, NOW)["status"] == "disabled"
+    cycle["values"][marked] = -2.60                                     # +10
+    cycle["values"][closing] = -1.95                                    # far past target
+    cycle["sp"] = 900.0
+    out = idea_ledger.mark_cycle(dt.datetime(2026, 9, 22, 10, 1, tzinfo=_CT))
+    assert out == {"marked": 2, "closed": 1, "settled": 1, "skipped": 0}
+    by_id = {t["trade_id"]: t for t in ledger.get_all_trades()}
+    assert by_id[marked]["status"] == "OPEN" and by_id[marked]["last_mark_pnl"] == 10.0
+    assert by_id[closing]["status"] == "CLOSED"
+    assert by_id[settling]["status"] == "EXPIRED"
+
+
+def _events(trade_id):
+    import trades_db
+    conn = trades_db.connect()
+    try:
+        return [e["event"] for e in trades_db.fetch_events(conn)
+                if e["trade_id"] == trade_id]
+    finally:
+        conn.close()
+
+
+def test_marks_write_no_trade_event_and_a_close_writes_one(ledger, cycle):
+    tid = idea_ledger.book(LONG_CALL_IDEA, NOW)["trade_id"]
+    for i, value in enumerate((-2.40, -2.20, -2.60), start=1):
+        cycle["values"][tid] = value
+        assert idea_ledger.mark_cycle(_at(5 * i))["marked"] == 1
+    assert _only_row(ledger)["last_mark_pnl"] == 10.0 and _only_row(ledger)["mae_pnl"] == -30.0
+    assert _events(tid) == ["OPENED"]
+    cycle["values"][tid] = -4.30
+    assert idea_ledger.mark_cycle(_at(20))["closed"] == 1
+    assert _events(tid) == ["OPENED", "CLOSED"]
+
+
+def test_an_expiry_writes_one_event(ledger, cycle):
+    tid = idea_ledger.book(LONG_CALL_IDEA, NOW)["trade_id"]
+    cycle["values"][tid] = -2.40
+    idea_ledger.mark_cycle(_at(5))
+    cycle["sp"] = 193.0
+    assert idea_ledger.mark_cycle(_expiry_close(LONG_CALL_IDEA))["settled"] == 1
+    assert _events(tid) == ["OPENED", "EXPIRED"]
+
+
+def test_only_a_close_or_expiry_untracks(ledger, cycle, monkeypatch):
+    import trade_tracker_client
+    untracked = []
+    monkeypatch.setattr(trade_tracker_client, "untrack", untracked.append)
+    tid = idea_ledger.book(LONG_CALL_IDEA, NOW)["trade_id"]
+    cycle["values"][tid] = -2.40
+    idea_ledger.mark_cycle(_at(5))
+    assert untracked == []
+    cycle["values"][tid] = -4.30
+    idea_ledger.mark_cycle(_at(10))
+    assert untracked == [tid]
 
 
 def test_mark_cycle_takes_the_book_lock():

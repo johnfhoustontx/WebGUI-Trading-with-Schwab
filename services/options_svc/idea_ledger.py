@@ -33,6 +33,7 @@ import paper_lock as _paper_lock  # noqa: E402  (the one lock for both paper boo
 import paper_trader  # noqa: E402
 import signal_repricer  # noqa: E402
 import structure_marks  # noqa: E402
+import trades_db  # noqa: E402
 
 from services import _degrade, _proxy  # noqa: E402
 from services.options_svc import site_ideas  # noqa: E402
@@ -188,9 +189,19 @@ def apply_mark(t, pnl, when):
     return row, None
 
 
+def exit_debit_of(t, value) -> float:
+    """``value`` (a cost to close a share, ``structure_marks``' convention: NEGATIVE
+    for a long position worth money) in the Ledger's own ``exit_debit`` convention:
+    the debit PAID to close a credit row, the value RECEIVED for a debit row
+    (``entry_credit < 0``), as ``paper_trader.close_paper_trade`` stores it."""
+    entry = _finite(t.get("entry_credit"))
+    return -value if entry is not None and entry < 0 else value
+
+
 def close_row(t, value, reason, when) -> dict:
-    """``t`` closed at ``value`` (the cost to close a share, ``structure_marks``'
-    convention: NEGATIVE for a long position worth money). PURE.
+    """``t`` closed at ``value`` (a cost to close a share, ``structure_marks``'
+    convention). PURE. ``exit_debit`` is stored in the Ledger's convention
+    (``exit_debit_of``); ``realized_pnl`` is ``pnl_of(t, value) x qty`` either way.
 
     EXPIRED for ``reason == "EXPIRED"``, CLOSED otherwise. No closing commission is
     taken: the idea's entry cash already carries the round trip, open and close
@@ -199,14 +210,27 @@ def close_row(t, value, reason, when) -> dict:
     pnl = structure_marks.pnl_of(t, value)
     if pnl is None:
         raise ValueError(f"no P&L for {t.get('trade_id')} at {value!r}")
+    debit = exit_debit_of(t, value)
     row = dict(t)
     row.update({
         "status": "EXPIRED" if reason == "EXPIRED" else "CLOSED",
         "exit_time": _stamp(when), "exit_reason": reason,
-        "exit_debit": value, "exit_debit_total": round(value * _MULT * qty, 2),
+        "exit_debit": debit, "exit_debit_total": round(debit * _MULT * qty, 2),
         "realized_pnl": round(pnl * qty, 2),
     })
     return row
+
+
+def _write_mark(row) -> None:
+    """Write an OPEN row's new mark without a ``trade_events`` row: a mark is not a
+    trade event, and one every 5 minutes per open idea would flood the log. A close
+    or an expiry goes through ``paper_trader.update_trade`` (event + untrack)."""
+    conn = trades_db.connect()
+    try:
+        trades_db.update_trade(conn, row["trade_id"], row)
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _settle(t, client, today, now_ct) -> str:
@@ -237,10 +261,11 @@ def _mark(t, client, now_ct):
     if pnl is None:
         return ("skipped",)
     row, hit = apply_mark(t, pnl, now_ct)
-    if hit:
-        row = close_row(row, value, hit, now_ct)
-    paper_trader.update_trade(t["trade_id"], row)
-    return ("marked", "closed") if hit else ("marked",)
+    if not hit:
+        _write_mark(row)
+        return ("marked",)
+    paper_trader.update_trade(t["trade_id"], close_row(row, value, hit, now_ct))
+    return ("marked", "closed")
 
 
 @_paper_lock.serialized
@@ -250,11 +275,10 @@ def mark_cycle(now_ct, client=None, *, settle_only=False) -> dict:
     Per row, in order: settle it when ``paper_engine.should_settle`` says it is due;
     otherwise mark it (``settle_only`` stops here: the 15:05 CT settle slot calls it
     that way, after the close, when a quote is not a market). A row that raises is
-    a degrade and counts as skipped; the pass goes on. Off (``[idea_trades]
-    enabled = false``) the idea book is left exactly as it is."""
+    a degrade and counts as skipped; the pass goes on. ``[idea_trades] enabled``
+    is NOT read here: off stops booking only, so rows already booked are still
+    marked and settled until they close and never stay stuck open."""
     counts = {"marked": 0, "closed": 0, "settled": 0, "skipped": 0}
-    if not paper_limits.idea_trades()["enabled"]:
-        return counts
     client = client if client is not None else _proxy.schwab_py_client
     today = now_ct.date().isoformat()
     rows = [t for t in paper_trader.get_all_trades()
