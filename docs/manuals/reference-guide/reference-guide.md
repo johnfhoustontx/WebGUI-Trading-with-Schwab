@@ -3367,7 +3367,8 @@ and the **All / My trades / Trade ideas** buttons above the table choose what is
 | Exits | Hourly rules on debit rows; credit rows only expire | Its own: **stop, target or expiry**, checked every 5 minutes |
 | Marks | On page load and the hourly cycle | Every 5 minutes in the regular session, from real option quotes |
 | **Delete all closed** | Removes it | **Keeps it** |
-| EOD Report | *Manual paper* book | Its own *Trade ideas* book |
+| EOD Report | *Manual paper* book, the *Paper Trades* table and the *Paper trades* tile | Its own *Trade ideas* book and section |
+| Symbol dossier | Listed as held while open | Never listed |
 
 **Why it is exempt from the limits.** The limits decide what *you* may send to paper.
 An idea is a posted call being measured, and one the limits would have refused is
@@ -3382,13 +3383,15 @@ the round-trip commission, so closing adds none. Pressing **Close** by hand is r
 as **MANUAL**.
 
 **The worst point.** Each mark that is lower than any before it is kept as the row's
-*worst point* (dollars per contract). It is what lets the weekly review tell a target
+*worst point* (dollars per contract); the closing value counts too, a hand close
+included. It is what lets the weekly review tell a target
 that was reached cleanly from one that first went most of the way to the stop.
 
 ⚠ Turning **Book the posted ideas** off stops new bookings only; ideas already open
 keep being marked and closed. Deleting one idea row by hand removes it from the weekly
-review too. Reading across pages: the [EOD Report](#eod-report) tallies these rows and
-its **Weekly idea review** summarises them.
+review too. Reading across pages: the [EOD Report](#eod-report) tallies these rows in a
+book of their own (its *Paper Trades* table and *Paper trades* tile are yours only) and
+its **Weekly idea review** summarises them; the Symbol dossier never lists one as held.
 
 ### Reading the screen
 
@@ -4624,10 +4627,12 @@ credit collected.
 > reconcile to each other. That is correct.
 
 **Detailed** (`/eod/detail`) adds breakdowns by **strategy** (PCS / CCS / IC), by
-**0-DTE versus swing**, and by **status** (open / closed / expired), plus the full trade,
-scanner and captured tables, and a **Trade ideas** section: ideas posted today, ideas
-closed today that were posted earlier, and open ideas at their last mark (time held, worst
-point in dollars and as a percent of maximum loss), then closed P&L for the day, week and
+**0-DTE versus swing**, and by **status** (open / closed / expired), plus the full trade
+table (your own Ledger rows only), the scanner and captured tables, and a **Trade ideas**
+section: ideas posted today, ideas closed today that were posted earlier, and open ideas
+at their last mark (structure by name, entry and exit with which way the money went, the
+reason in words, time held in words, worst point in dollars and as a percent of maximum
+loss), then closed P&L for the day, week and
 month, with the open trades' unrealized total on its own line, never in those totals. Both
 views use a jump-link table of contents and collapsible sections that work in the exported
 file as well as in the app.
@@ -4692,33 +4697,35 @@ first) and an *Open in a new tab* link.
 trading day of the week** — Friday, or Thursday when Friday is a holiday. Weeks sit in
 `webgui/data/idea_review/<YYYY-Www>/report.html`. The tool reads the Paper Ledger view
 from Redis, computes every figure in code, asks Claude (through the Claude Code
-subscription, never the paid API) for an assessment and suggestions that may cite only
-those figures, checks the reply, and saves the document.
+subscription, never the paid API) for an assessment and suggestions written from
+those figures, checks the reply's numbers, and saves the document.
 
 **Reading it.** An *Assessment* and *Suggestions* (each suggestion says how many trades
 its group holds, and a group under *Fewest ideas before a conclusion* — 5 by default —
 reads *too few trades to act on*); this week's closed trades with a rating; open
 trades; and group tables for the week and for all time (grade, structure, trade type,
-score band, hour posted, symbol).
+score band, hour posted, symbol). Structures are named in words and reasons, held time
+and the Entry / Exit direction are worded as on the EOD Report's Trade ideas section.
 
 | Rating | Means |
 |---|---|
-| clean win | Target reached, and the worst point stayed within 25% of the maximum loss |
+| clean win | Target reached, and the worst point stayed less than 25% of the maximum loss below zero (or never went below zero) |
 | win after drawdown | Target reached after a deeper drawdown |
 | stopped | Closed at its stop |
 | expired win / expired loss | Held to expiry; judged by the sign of the result (zero counts as a loss) |
 | closed by hand | You closed it, or any other exit |
 
 **How far to trust the words.** Every number Claude writes, digits or words, must match
-one the app computed; a paragraph or suggestion that does not is dropped and a line says
-how many were. That proves a figure is *in the facts*, not that Claude used it with the
-right meaning, so read the table beside the sentence. A group with a handful of trades
-is a note, not a finding.
+one the app computed — for a suggestion, one of the groups it cites; a paragraph or
+suggestion that does not is dropped and a line says how many were. So every figure in it
+is one the app computed, but whether Claude used it with the right subject (or sign) is
+not checked, so read the table beside the sentence. A group with a handful of trades is
+a note, not a finding.
 
 **When Claude is unavailable** the document is still written with every number and one
 line saying the assessment is missing, and the job ends as failed so the failure alert
-reaches you. **When the Ledger view is empty** (the stack is down) nothing is written,
-so an empty week never replaces a real one.
+reaches you. **When the Ledger view is missing or holds no rows at all** (the stack is
+down) nothing is written, so an empty week never replaces a real one.
 
 **When to use it.** On Fridays, to decide whether a kind of idea deserves its place; it
 changes nothing by itself.

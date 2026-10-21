@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-20</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-21</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -6667,9 +6667,11 @@ row at the proxy exactly as it tracks its own debit rows (<code>trade_tracker_cl
 <h2 id="the-5-minute-cycle">The 5-minute cycle</h2>
 <p><code>scheduler.idea_marks_due</code> fires <code>handlers.run_idea_marks_and_publish</code> once per
 <code>[idea_trades] mark_interval_min</code> (5) slot, on a trading day, inside the <strong>regular
-session (08:30-15:00 CT)</strong>, and never in a minute the proxy is busy: the autoscan's
-<code>:02-:05</code>, <code>:17-:20</code>, <code>:32-:35</code>, <code>:47-:50</code> and the first minute after the hour and half
-hour (<code>IDEA_MARK_FORBIDDEN_MINUTES</code>). A slot that lands in one marks at its next clear
+session (08:30-15:00 CT)</strong>, and never in a minute the proxy is busy
+(<code>scheduler.idea_mark_forbidden_minutes</code>): the autoscan's start minute and the three
+after it at each quarter hour, derived from <code>[windows.scan] offset_min</code> and read per tick
+as the autoscan reads it (<code>:02-:05</code>, <code>:17-:20</code>, <code>:32-:35</code>, <code>:47-:50</code> at the shipped 2),
+and the first minute after the hour and half hour. A slot that lands in one marks at its next clear
 minute, and a slot with none is skipped for the next to catch up. It is gated by neither
 the auto-close switch nor <code>[idea_trades] enabled</code>, so rows already booked are always
 followed. <code>idea_ledger.mark_cycle</code> then handles each OPEN idea row in order:</p>
@@ -6692,7 +6694,8 @@ recorded mark as the row's P&amp;L at any hour, with no chain fetch, and publish
 <code>refresh_paper_trades(reprice=False)</code> so five-minute publishes never chain-reprice the
 user's rows.</p>
 <p><strong>The worst point (MAE).</strong> <code>mae_pnl</code> is the lowest <code>pnl</code> seen, in dollars <strong>per
-contract</strong>, from <code>0.0</code> down; it only ever falls, and a settle or a close is a mark too.
+contract</strong>, from <code>0.0</code> down; it only ever falls, and a settle or a close (a hand close
+included) is a mark too.
 The percentage form is <code>mae_pct = mae_pnl / (max_loss_per x 100) x 100</code>, a number at or
 below zero, <code>None</code> when the max loss is missing or not positive. <code>webgui/pages/eod.py</code>
 keeps its own copy of that one division (Tier 1 may not import <code>shared.idea_review</code>).</p>
@@ -6702,12 +6705,15 @@ the debit <strong>paid</strong> to close a credit row and the value <strong>rece
 <code>structure_marks.pnl_of</code> x quantity, status <code>CLOSED</code> (or <code>EXPIRED</code>) with <code>exit_reason</code>
 <code>STOP</code> / <code>TARGET</code> / <code>EXPIRED</code>. <strong>No closing commission is taken</strong>: the entry cash already
 carries the round trip. A hand close from the Ledger page (<code>manual_close</code>) is <code>MANUAL</code> at
-the debit typed in; <code>delete_closed</code> leaves idea rows alone, and the per-row Delete is the
-only way to remove one.</p>
+the debit typed in, and its closing P&amp;L lowers the worst point when it is worse;
+<code>delete_closed</code> leaves idea rows alone, and the per-row Delete is the only way to remove
+one.</p>
 <p><strong>What is kept away from idea rows.</strong> The Ledger's risk caps and equity
 (<code>ledger_book_state</code>), the hourly manage pass, the user-Ledger expiry pass
-(<code>expire_ledger_trades</code>), the chain reprice, and the <em>expiring today</em> action item all
-skip them; the idea cycle is the only writer. Rescue and Analyze still read them.</p>
+(<code>expire_ledger_trades</code>), the chain reprice, the <em>expiring today</em> action item, the
+<code>/symbol</code> dossier's held positions (<code>symbol_facts.position_rows</code>), and <code>/eod</code>'s <em>Paper
+Trades</em> table and <em>Paper trades</em> tile all skip them; the idea cycle is the only writer.
+Rescue and Analyze still read them.</p>
 <h2 id="the-weekly-review">The weekly review</h2>
 <p><code>shared/idea_review.py</code> is pure: it takes the Ledger's trade rows (<code>cache:options:paper_trades</code>
 <code>trades</code>), <code>cfg</code> and <code>today</code>, and reads no config, clock, store or bus.</p>
@@ -6721,8 +6727,9 @@ skip them; the idea cycle is the only writer. Rescue and Analyze still read them
   the other days (<code>--force</code> runs anyway). The unit is not <code>Persistent</code>: a catch-up run
   would read the live cache for the wrong week.</li>
 <li><strong>Ratings</strong> (<code>rate</code>): <code>TARGET</code> with <code>mae_pct &gt; -clean_mae_pct</code> (25) is a <strong>clean win</strong>,
-  a deeper one a <strong>win after drawdown</strong> (a TARGET with no recorded drawdown is not called
-  clean, but one whose <code>mae_pnl</code> is <code>0.0</code> is); <code>STOP</code> is <strong>stopped</strong>; <code>EXPIRED</code> is an
+  a deeper one a <strong>win after drawdown</strong>. With no <code>mae_pct</code> (no max loss), a TARGET whose
+  <code>mae_pnl</code> is exactly <code>0.0</code> (never below zero) is still a clean win, and one with no
+  <code>mae_pnl</code> recorded, or one that fell, is not called clean; <code>STOP</code> is <strong>stopped</strong>; <code>EXPIRED</code> is an
   <strong>expired win</strong> if <code>realized_pnl &gt; 0</code>, else <strong>expired loss</strong>; anything else (<code>MANUAL</code>)
   is <strong>closed by hand</strong>.</li>
 <li><strong>Groups.</strong> Totals and one table per dimension - grade, strategy, trade type, score band
@@ -6736,21 +6743,28 @@ exactly as the EOD report does, computes the facts, asks Claude for an assessmen
 suggestions, <strong>verifies</strong> them and writes <code>webgui/data/idea_review/&lt;YYYY-Www&gt;/report.html</code>
 atomically (<code>webgui/data/</code> is gitignored and in the nightly backup). Claude runs on the
 subscription through <code>CliMessagesClient</code> directly - never the briefings' fallback client
-and never <code>ANTHROPIC_API_KEY</code> - with <code>[idea_trades] review_model</code> ("sonnet") and at most
-<code>review_max_tokens</code> (4000) tokens. Exit codes: <strong>0</strong> written (or not the review day),
-<strong>2</strong> the bus was unreadable or the Ledger view empty (nothing written, so an empty week
-cannot replace a real one), <strong>3</strong> written with the numbers only because Claude failed or is
+and never <code>ANTHROPIC_API_KEY</code> - with <code>[idea_trades] review_model</code> ("sonnet"). The request
+carries <code>max_tokens = MAX_TOKENS</code> (4000), a constant and not a setting: the CLI path
+(<code>claude_cli._request_shape</code>) does not pass it to <code>claude -p</code>, so it is inert there. Exit
+codes: <strong>0</strong> written (or not the review day), <strong>2</strong> the bus was unreadable or the Ledger
+view missing or holding no rows at all (nothing written, so an empty week cannot replace a
+real one; the Ledger always holds the user's own rows, so a view with none was not
+really answered), <strong>3</strong> written with the numbers only because Claude failed or is
 switched off (it fails the unit on purpose so the failure alert fires).</p>
 <p><strong>Verification</strong> (<code>verify</code>) is membership, not meaning. A suggestion is dropped when its
 <code>cites</code> is empty or names an id that is not a fact id (<code>week.total</code>, <code>all_time.total</code>,
-<code>&lt;scope&gt;.&lt;dim&gt;.&lt;value&gt;</code>). A paragraph or suggestion is dropped whole when it holds a
-number that is not within <strong>0.005</strong> of a printed fact number, after <code>$</code>, <code>,</code> and <code>%</code> are
-stripped ("62.5", "62.50" and "62.50%" are the same fact). Numbers written as words
+<code>&lt;scope&gt;.&lt;dim&gt;.&lt;value&gt;</code>), or when it holds a number that is not within <strong>0.005</strong> of a
+number of the facts it <strong>cites</strong> (<code>idea_review.numbers_of</code> on each: a group fact carries
+its own fields, not its rows). An assessment paragraph cites nothing, so it is dropped
+whole when it holds a number that is not within 0.005 of any printed fact number. <code>$</code>,
+<code>,</code> and <code>%</code> are stripped first ("62.5", "62.50" and "62.50%" are the same fact). Numbers written as words
 (zero..twenty, the tens, hundred, half, twice, double, triple, hyphenated compounds) are
 checked the same way; "one" is deliberately not read as a number. Fact ids, group names
 such as <code>60-69</code> and <code>0-DTE</code> are removed before the check because they name a group and
-state no figure. It cannot catch a flipped sign or a figure used for the wrong subject, so
-the prompt tells Claude to keep each figure's sign and subject.</p>
+state no figure. So every figure that survives is one the app computed, but whether Claude
+used it with the right subject or sign is not checked (a paragraph can still pin one
+group's figure on another); the report, the page's note and the hover guides say exactly
+that, and the prompt tells Claude to keep each figure's sign and subject.</p>
 <p><strong>A suggestion's basis.</strong> The <code>n</code> printed under a suggestion is the <strong>largest</strong> <code>n</code> among
 the facts it cites (the totals count only when they are the only cites), never a sum -
 the cited groups overlap, so a sum would invent trades. It is <code>thin</code> when that <code>n</code> is
@@ -7595,7 +7609,7 @@ the source; this table is a summary of them.</p>
 </tr>
 <tr>
 <td>options_svc</td>
-<td>Loop tick <strong>30 s</strong> (<code>POLL_INTERVAL_SEC</code>). Auto-scan 15-min slots, 08:00–15:15 (<code>autoscan_due</code>); <strong>GEX collection every 1 min</strong>, 08:00–15:20 (<code>_GEX_INTERVAL_MIN</code>, mirroring <code>gex_collector.POLL_INTERVAL_MIN</code>); term structure every <strong>5 min</strong> (<code>TERM_POLL_INTERVAL_MIN</code>); <strong>captured-signal</strong> management every <strong>5 min</strong> (<code>_CAPTURED_MANAGE_INTERVAL_MIN</code>); <strong>manual</strong> paper entry+manage <strong>hourly at the top of the hour, 09:00–14:00</strong> (<code>_PAPER_HOURS</code>, <code>_PAPER_GRACE_MIN</code> = 20); paper <strong>expiry settlement at 15:05</strong> — a settle-only pass over the Account and the Ledger, and over the posted trade ideas' Ledger rows (<code>paper_settle_due</code>, <code>[slots.paper_settle]</code>, grace 120 min); the <strong>trade ideas' Ledger rows</strong> are marked every <strong>5 min</strong> (<code>idea_marks_due</code>, <code>[idea_trades] mark_interval_min</code>) inside 08:30–15:00 CT at minutes clear of the proxy's busy ones, one slot at most per interval — see <em>Trade ideas in the Paper Ledger</em>; header + GEX status each tick in market hours, throttled to one per <strong>5 min</strong> off-hours (<code>periodic_refresh_due</code>, skip-unchanged); <strong>Opening Scalp</strong> morning call at <strong>08:36</strong> (<code>scalp_call_due</code>, <code>[slots.scalp]</code>, grace 20 min), a new 15-minute Opening Scalp call at each of <strong>08:51, 09:06 ... 13:51</strong> (<code>scalp_intraday_due</code>, <code>[intraday]</code>, grace 5 min) and, at <strong>16:20</strong>, a nightly pass of bar top-up, both study rebuilds, both gradings and the scorecard republish (<code>scalp_bars_due</code>, <code>[slots.scalp_bars]</code>, grace 120 min) — see <em>Opening Scalp</em>.</td>
+<td>Loop tick <strong>30 s</strong> (<code>POLL_INTERVAL_SEC</code>). Auto-scan 15-min slots, 08:00–15:15 (<code>autoscan_due</code>); <strong>GEX collection every 1 min</strong>, 08:00–15:20 (<code>_GEX_INTERVAL_MIN</code>, mirroring <code>gex_collector.POLL_INTERVAL_MIN</code>); term structure every <strong>5 min</strong> (<code>TERM_POLL_INTERVAL_MIN</code>); <strong>captured-signal</strong> management every <strong>5 min</strong> (<code>_CAPTURED_MANAGE_INTERVAL_MIN</code>); <strong>manual</strong> paper entry+manage <strong>hourly at the top of the hour, 09:00–14:00</strong> (<code>_PAPER_HOURS</code>, <code>_PAPER_GRACE_MIN</code> = 20); paper <strong>expiry settlement at 15:05</strong> — a settle-only pass over the Account and the Ledger, and over the posted trade ideas' Ledger rows (<code>paper_settle_due</code>, <code>[slots.paper_settle]</code>, grace 120 min); the <strong>trade ideas' Ledger rows</strong> are marked every <strong>5 min</strong> (<code>idea_marks_due</code>, <code>[idea_trades] mark_interval_min</code>) inside 08:30–15:00 CT at minutes clear of the proxy's busy ones (the scan burst follows <code>[windows.scan] offset_min</code>), one slot at most per interval — see <em>Trade ideas in the Paper Ledger</em>; header + GEX status each tick in market hours, throttled to one per <strong>5 min</strong> off-hours (<code>periodic_refresh_due</code>, skip-unchanged); <strong>Opening Scalp</strong> morning call at <strong>08:36</strong> (<code>scalp_call_due</code>, <code>[slots.scalp]</code>, grace 20 min), a new 15-minute Opening Scalp call at each of <strong>08:51, 09:06 ... 13:51</strong> (<code>scalp_intraday_due</code>, <code>[intraday]</code>, grace 5 min) and, at <strong>16:20</strong>, a nightly pass of bar top-up, both study rebuilds, both gradings and the scorecard republish (<code>scalp_bars_due</code>, <code>[slots.scalp_bars]</code>, grace 120 min) — see <em>Opening Scalp</em>.</td>
 </tr>
 <tr>
 <td>portfolio_svc</td>
@@ -7654,7 +7668,7 @@ firing just rewrites the previous trading day's report from the same stored minu
 <tr>
 <td>Weekly trade-idea review</td>
 <td><strong>15:30</strong>, Mon-Fri (<code>[slots.idea_review]</code>)</td>
-<td><code>tools/weekly_idea_review.py</code> via <code>trading-&lt;env&gt;-idea-review.timer</code> (<code>Persistent=false</code>, <code>TimeoutStartSec=900</code>): writes <code>webgui/data/idea_review/&lt;YYYY-Www&gt;/report.html</code> only on the <strong>last trading day of the ISO week</strong> (Friday, or Thursday when Friday is a holiday) and exits 0 on the other days. Reads the Paper Ledger view from Redis and makes one Claude Code CLI call (the subscription, no API key). Exit 2 = bus unreadable or Ledger view empty, nothing written; exit 3 = written without Claude's assessment, which fails the unit so the failure alert fires.</td>
+<td><code>tools/weekly_idea_review.py</code> via <code>trading-&lt;env&gt;-idea-review.timer</code> (<code>Persistent=false</code>, <code>TimeoutStartSec=900</code>): writes <code>webgui/data/idea_review/&lt;YYYY-Www&gt;/report.html</code> only on the <strong>last trading day of the ISO week</strong> (Friday, or Thursday when Friday is a holiday) and exits 0 on the other days. Reads the Paper Ledger view from Redis and makes one Claude Code CLI call (the subscription, no API key). Exit 2 = bus unreadable or Ledger view missing or holding no rows at all, nothing written; exit 3 = written without Claude's assessment, which fails the unit so the failure alert fires.</td>
 </tr>
 <tr>
 <td>Marketing gallery recapture</td>

@@ -3700,9 +3700,11 @@ row at the proxy exactly as it tracks its own debit rows (`trade_tracker_client`
 
 `scheduler.idea_marks_due` fires `handlers.run_idea_marks_and_publish` once per
 `[idea_trades] mark_interval_min` (5) slot, on a trading day, inside the **regular
-session (08:30-15:00 CT)**, and never in a minute the proxy is busy: the autoscan's
-`:02-:05`, `:17-:20`, `:32-:35`, `:47-:50` and the first minute after the hour and half
-hour (`IDEA_MARK_FORBIDDEN_MINUTES`). A slot that lands in one marks at its next clear
+session (08:30-15:00 CT)**, and never in a minute the proxy is busy
+(`scheduler.idea_mark_forbidden_minutes`): the autoscan's start minute and the three
+after it at each quarter hour, derived from `[windows.scan] offset_min` and read per tick
+as the autoscan reads it (`:02-:05`, `:17-:20`, `:32-:35`, `:47-:50` at the shipped 2),
+and the first minute after the hour and half hour. A slot that lands in one marks at its next clear
 minute, and a slot with none is skipped for the next to catch up. It is gated by neither
 the auto-close switch nor `[idea_trades] enabled`, so rows already booked are always
 followed. `idea_ledger.mark_cycle` then handles each OPEN idea row in order:
@@ -3726,7 +3728,8 @@ recorded mark as the row's P&L at any hour, with no chain fetch, and publishes w
 user's rows.
 
 **The worst point (MAE).** `mae_pnl` is the lowest `pnl` seen, in dollars **per
-contract**, from `0.0` down; it only ever falls, and a settle or a close is a mark too.
+contract**, from `0.0` down; it only ever falls, and a settle or a close (a hand close
+included) is a mark too.
 The percentage form is `mae_pct = mae_pnl / (max_loss_per x 100) x 100`, a number at or
 below zero, `None` when the max loss is missing or not positive. `webgui/pages/eod.py`
 keeps its own copy of that one division (Tier 1 may not import `shared.idea_review`).
@@ -3737,13 +3740,16 @@ the debit **paid** to close a credit row and the value **received** for a debit 
 `structure_marks.pnl_of` x quantity, status `CLOSED` (or `EXPIRED`) with `exit_reason`
 `STOP` / `TARGET` / `EXPIRED`. **No closing commission is taken**: the entry cash already
 carries the round trip. A hand close from the Ledger page (`manual_close`) is `MANUAL` at
-the debit typed in; `delete_closed` leaves idea rows alone, and the per-row Delete is the
-only way to remove one.
+the debit typed in, and its closing P&L lowers the worst point when it is worse;
+`delete_closed` leaves idea rows alone, and the per-row Delete is the only way to remove
+one.
 
 **What is kept away from idea rows.** The Ledger's risk caps and equity
 (`ledger_book_state`), the hourly manage pass, the user-Ledger expiry pass
-(`expire_ledger_trades`), the chain reprice, and the *expiring today* action item all
-skip them; the idea cycle is the only writer. Rescue and Analyze still read them.
+(`expire_ledger_trades`), the chain reprice, the *expiring today* action item, the
+`/symbol` dossier's held positions (`symbol_facts.position_rows`), and `/eod`'s *Paper
+Trades* table and *Paper trades* tile all skip them; the idea cycle is the only writer.
+Rescue and Analyze still read them.
 
 ## The weekly review
 
@@ -3759,8 +3765,9 @@ skip them; the idea cycle is the only writer. Rescue and Analyze still read them
   the other days (`--force` runs anyway). The unit is not `Persistent`: a catch-up run
   would read the live cache for the wrong week.
 - **Ratings** (`rate`): `TARGET` with `mae_pct > -clean_mae_pct` (25) is a **clean win**,
-  a deeper one a **win after drawdown** (a TARGET with no recorded drawdown is not called
-  clean, but one whose `mae_pnl` is `0.0` is); `STOP` is **stopped**; `EXPIRED` is an
+  a deeper one a **win after drawdown**. With no `mae_pct` (no max loss), a TARGET whose
+  `mae_pnl` is exactly `0.0` (never below zero) is still a clean win, and one with no
+  `mae_pnl` recorded, or one that fell, is not called clean; `STOP` is **stopped**; `EXPIRED` is an
   **expired win** if `realized_pnl > 0`, else **expired loss**; anything else (`MANUAL`)
   is **closed by hand**.
 - **Groups.** Totals and one table per dimension - grade, strategy, trade type, score band
@@ -3774,22 +3781,29 @@ exactly as the EOD report does, computes the facts, asks Claude for an assessmen
 suggestions, **verifies** them and writes `webgui/data/idea_review/<YYYY-Www>/report.html`
 atomically (`webgui/data/` is gitignored and in the nightly backup). Claude runs on the
 subscription through `CliMessagesClient` directly - never the briefings' fallback client
-and never `ANTHROPIC_API_KEY` - with `[idea_trades] review_model` ("sonnet") and at most
-`review_max_tokens` (4000) tokens. Exit codes: **0** written (or not the review day),
-**2** the bus was unreadable or the Ledger view empty (nothing written, so an empty week
-cannot replace a real one), **3** written with the numbers only because Claude failed or is
+and never `ANTHROPIC_API_KEY` - with `[idea_trades] review_model` ("sonnet"). The request
+carries `max_tokens = MAX_TOKENS` (4000), a constant and not a setting: the CLI path
+(`claude_cli._request_shape`) does not pass it to `claude -p`, so it is inert there. Exit
+codes: **0** written (or not the review day), **2** the bus was unreadable or the Ledger
+view missing or holding no rows at all (nothing written, so an empty week cannot replace a
+real one; the Ledger always holds the user's own rows, so a view with none was not
+really answered), **3** written with the numbers only because Claude failed or is
 switched off (it fails the unit on purpose so the failure alert fires).
 
 **Verification** (`verify`) is membership, not meaning. A suggestion is dropped when its
 `cites` is empty or names an id that is not a fact id (`week.total`, `all_time.total`,
-`<scope>.<dim>.<value>`). A paragraph or suggestion is dropped whole when it holds a
-number that is not within **0.005** of a printed fact number, after `$`, `,` and `%` are
-stripped ("62.5", "62.50" and "62.50%" are the same fact). Numbers written as words
+`<scope>.<dim>.<value>`), or when it holds a number that is not within **0.005** of a
+number of the facts it **cites** (`idea_review.numbers_of` on each: a group fact carries
+its own fields, not its rows). An assessment paragraph cites nothing, so it is dropped
+whole when it holds a number that is not within 0.005 of any printed fact number. `$`,
+`,` and `%` are stripped first ("62.5", "62.50" and "62.50%" are the same fact). Numbers written as words
 (zero..twenty, the tens, hundred, half, twice, double, triple, hyphenated compounds) are
 checked the same way; "one" is deliberately not read as a number. Fact ids, group names
 such as `60-69` and `0-DTE` are removed before the check because they name a group and
-state no figure. It cannot catch a flipped sign or a figure used for the wrong subject, so
-the prompt tells Claude to keep each figure's sign and subject.
+state no figure. So every figure that survives is one the app computed, but whether Claude
+used it with the right subject or sign is not checked (a paragraph can still pin one
+group's figure on another); the report, the page's note and the hover guides say exactly
+that, and the prompt tells Claude to keep each figure's sign and subject.
 
 **A suggestion's basis.** The `n` printed under a suggestion is the **largest** `n` among
 the facts it cites (the totals count only when they are the only cites), never a sum -
@@ -4274,7 +4288,7 @@ the source; this table is a summary of them.
 | Service | Cadence |
 |---------|---------|
 | sentiment_svc | Composite refresh every **120 s** (`REFRESH_INTERVAL_SEC`), throttled to one refresh per **15 min** off-hours (`_OFFHOURS_INTERVAL_MIN`); directional trend recompute every **900 s** (`TREND_INTERVAL_SEC`); market-regime recompute every **5 min** (`REGIME_INTERVAL_MIN`); order-flow publish every **30 s** (`ORDER_FLOW_PUBLISH_SEC`); **momentum cascade once nightly at 16:20** (`momentum_due`); rotation at startup / on demand. |
-| options_svc | Loop tick **30 s** (`POLL_INTERVAL_SEC`). Auto-scan 15-min slots, 08:00–15:15 (`autoscan_due`); **GEX collection every 1 min**, 08:00–15:20 (`_GEX_INTERVAL_MIN`, mirroring `gex_collector.POLL_INTERVAL_MIN`); term structure every **5 min** (`TERM_POLL_INTERVAL_MIN`); **captured-signal** management every **5 min** (`_CAPTURED_MANAGE_INTERVAL_MIN`); **manual** paper entry+manage **hourly at the top of the hour, 09:00–14:00** (`_PAPER_HOURS`, `_PAPER_GRACE_MIN` = 20); paper **expiry settlement at 15:05** — a settle-only pass over the Account and the Ledger, and over the posted trade ideas' Ledger rows (`paper_settle_due`, `[slots.paper_settle]`, grace 120 min); the **trade ideas' Ledger rows** are marked every **5 min** (`idea_marks_due`, `[idea_trades] mark_interval_min`) inside 08:30–15:00 CT at minutes clear of the proxy's busy ones, one slot at most per interval — see *Trade ideas in the Paper Ledger*; header + GEX status each tick in market hours, throttled to one per **5 min** off-hours (`periodic_refresh_due`, skip-unchanged); **Opening Scalp** morning call at **08:36** (`scalp_call_due`, `[slots.scalp]`, grace 20 min), a new 15-minute Opening Scalp call at each of **08:51, 09:06 ... 13:51** (`scalp_intraday_due`, `[intraday]`, grace 5 min) and, at **16:20**, a nightly pass of bar top-up, both study rebuilds, both gradings and the scorecard republish (`scalp_bars_due`, `[slots.scalp_bars]`, grace 120 min) — see *Opening Scalp*. |
+| options_svc | Loop tick **30 s** (`POLL_INTERVAL_SEC`). Auto-scan 15-min slots, 08:00–15:15 (`autoscan_due`); **GEX collection every 1 min**, 08:00–15:20 (`_GEX_INTERVAL_MIN`, mirroring `gex_collector.POLL_INTERVAL_MIN`); term structure every **5 min** (`TERM_POLL_INTERVAL_MIN`); **captured-signal** management every **5 min** (`_CAPTURED_MANAGE_INTERVAL_MIN`); **manual** paper entry+manage **hourly at the top of the hour, 09:00–14:00** (`_PAPER_HOURS`, `_PAPER_GRACE_MIN` = 20); paper **expiry settlement at 15:05** — a settle-only pass over the Account and the Ledger, and over the posted trade ideas' Ledger rows (`paper_settle_due`, `[slots.paper_settle]`, grace 120 min); the **trade ideas' Ledger rows** are marked every **5 min** (`idea_marks_due`, `[idea_trades] mark_interval_min`) inside 08:30–15:00 CT at minutes clear of the proxy's busy ones (the scan burst follows `[windows.scan] offset_min`), one slot at most per interval — see *Trade ideas in the Paper Ledger*; header + GEX status each tick in market hours, throttled to one per **5 min** off-hours (`periodic_refresh_due`, skip-unchanged); **Opening Scalp** morning call at **08:36** (`scalp_call_due`, `[slots.scalp]`, grace 20 min), a new 15-minute Opening Scalp call at each of **08:51, 09:06 ... 13:51** (`scalp_intraday_due`, `[intraday]`, grace 5 min) and, at **16:20**, a nightly pass of bar top-up, both study rebuilds, both gradings and the scorecard republish (`scalp_bars_due`, `[slots.scalp_bars]`, grace 120 min) — see *Opening Scalp*. |
 | portfolio_svc | Live SSE ticks; throttled publish ≤ every **2 s** (`PUBLISH_INTERVAL_SEC`); full rebuild every **600 s** (`REBUILD_INTERVAL_SEC`), or **3600 s** off-hours (`OFFHOURS_REBUILD_INTERVAL_SEC`), or on demand. |
 | trade_svc | Analysis on demand. One scheduled job: the watchlist **dividend pull**, once a trading day at or after **06:40 CT** (`[calendar.dividends] refresh_at` in `config/news.toml`); the loop wakes every **60 s** and retries a failed pull after **15 min**. |
 | market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); report summary re-read when the published market report changes (a stat of `deploy/site/reports/latest.html` + `latest.txt` per poll) — no Claude call. |
@@ -4295,7 +4309,7 @@ firing just rewrites the previous trading day's report from the same stored minu
 | Schwab sign-in check | **07:30**, every day (`[slots.token_watch]`) | `tools/token_watch.py` reads the proxy's `/health` and sends a Server alert when the sign-in has `[system] token_warn_hours` (48) or fewer left, has expired or been rejected, or cannot be read. A systemd timer. |
 | Failure alert | when a unit ends up failed | Every generated unit carries `OnFailure=`; `tools/notify_failure.py` sends a Server alert, at most once per `[system] failure_repeat_hours` (6) for a unit that stays failed. A service reaches it after its restart budget is spent; a timer job on any error exit. |
 | EOD report archive | **15:15** (`[slots.eod_report]`) | Writes `webgui/data/eod/<date>/summary.html` + `detail.html` — the `/eod` **Generate** button, unattended. Reads Redis only: no Schwab call, no Claude call. Writes nothing if every cache read was empty. |
-| Weekly trade-idea review | **15:30**, Mon-Fri (`[slots.idea_review]`) | `tools/weekly_idea_review.py` via `trading-<env>-idea-review.timer` (`Persistent=false`, `TimeoutStartSec=900`): writes `webgui/data/idea_review/<YYYY-Www>/report.html` only on the **last trading day of the ISO week** (Friday, or Thursday when Friday is a holiday) and exits 0 on the other days. Reads the Paper Ledger view from Redis and makes one Claude Code CLI call (the subscription, no API key). Exit 2 = bus unreadable or Ledger view empty, nothing written; exit 3 = written without Claude's assessment, which fails the unit so the failure alert fires. |
+| Weekly trade-idea review | **15:30**, Mon-Fri (`[slots.idea_review]`) | `tools/weekly_idea_review.py` via `trading-<env>-idea-review.timer` (`Persistent=false`, `TimeoutStartSec=900`): writes `webgui/data/idea_review/<YYYY-Www>/report.html` only on the **last trading day of the ISO week** (Friday, or Thursday when Friday is a holiday) and exits 0 on the other days. Reads the Paper Ledger view from Redis and makes one Claude Code CLI call (the subscription, no API key). Exit 2 = bus unreadable or Ledger view missing or holding no rows at all, nothing written; exit 3 = written without Claude's assessment, which fails the unit so the failure alert fires. |
 | Marketing gallery recapture | **09:07** (`[slots.gallery_capture]`) | Re-photographs the private app for the public gallery. |
 | Flow-delta instrumentation | **16:00** (`[slots.flow_delta]`) | The only measurement of the `[big_delta]` / UOA thresholds. |
 | HIRO-model validation report | **16:10** (`[slots.hiro_report]`) | `tools/hiro_report.py` via `trading-<env>-hiro-report.timer` (Monday to Friday, `Persistent=true`, so a missed run catches up at boot): replays the day's `hiro_surge` / `hiro_flip` rules and the `gamma_flip` (Hedging flip) alert and scores the 5- and 15-minute price move after each fire against the same-direction base rate, into `options-scanner/data/hiro_report/<date>/report.md` (plus `gamma_flip.json`, the day's saved Hedging flips). Reads `gex_history.db` only — no Schwab, no Redis, no Claude call. The only measurement of the `[hiro]` thresholds and of the Hedging flip. |

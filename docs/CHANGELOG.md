@@ -13,7 +13,7 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 - **What shipped, in the order it was built:**
   1. *Config and storage* (`7820a4d`, `26b346c`): `config/paper.toml [idea_trades]`
      (`enabled`, `quantity`, `mark_interval_min`, `debit_stop_frac`, `clean_mae_pct`,
-     `min_n`, `review_model`, `review_max_tokens`, read by
+     `min_n`, `review_model`, read by
      `shared/paper_limits.idea_trades()`, each with a Configuration field) and 13 new
      `trades.db` columns, added by the existing migration.
   2. *Booking* (`47d8a0a`, `5cefeb1`): `services/options_svc/idea_ledger.py`. A posted
@@ -24,17 +24,24 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   3. *Kept out of the user's book* (`20cc522`, `87fa08a`): idea rows are excluded from the
      Ledger's caps and equity (`ledger_book_state`), the hourly manage pass, the expiry
      pass, the chain reprice and the *expiring today* action item; **Delete all closed**
-     spares them.
+     spares them. The `/symbol` dossier does not list an open idea row as held.
   4. *Marks and exits* (`08e149b`, `f9f1c66`): a 5-minute cycle (`scheduler.idea_marks_due`,
-     regular session only, minutes that avoid the proxy's busy ones) settles, marks from
-     real option quotes, keeps the worst point (`mae_pnl`) and closes at the stop (checked
-     first), the target or expiry. The 15:05 CT settle pass settles idea rows too.
-  5. *Hand close and the Ledger page* (`6b904e1`, `ec4035b`): a close by hand is `MANUAL`;
-     the page tags the rows **Trade idea** and has an All / My trades / Trade ideas filter;
-     the delete confirmations say what an idea row costs.
+     regular session only, minutes that avoid the proxy's busy ones: the scan's burst,
+     derived from `windows.scan.offset_min`, and the first minute after the hour and half
+     hour) settles, marks from real option quotes, keeps the worst point (`mae_pnl`) and
+     closes at the stop (checked first), the target or expiry. The 15:05 CT settle pass
+     settles idea rows too.
+  5. *Hand close and the Ledger page* (`6b904e1`, `ec4035b`): a close by hand is `MANUAL`,
+     and lowers the worst point like any other mark; the page tags the rows **Trade idea**
+     and has an All / My trades / Trade ideas filter; the delete confirmations say what an
+     idea row costs.
   6. */eod* (`3328623`): a third book, *Trade ideas*, beside Manual paper and Captured
-     signals (Manual paper no longer counts idea rows), a tile for today's closed idea
-     profit, and a Trade ideas section on `/eod/detail`.
+     signals (Manual paper, the *Paper Trades* table and the *Paper trades* tile no longer
+     count idea rows), a tile for today's closed idea profit, and a Trade ideas section on
+     `/eod/detail`, worded as the weekly review words it: exit reasons in words (Target
+     reached, Stopped out, Expired, Closed by hand), held time in words, Entry / Exit
+     headers that say which way the money went, and the structure's name (the idea card's
+     `idea_label`, else its key).
   7. *The weekly review* (`e5f81d7`, `9cad131`, `5dbcd15`, `d990890`):
      `shared/idea_review.py` (ratings, groups, the week), `tools/weekly_idea_review.py`
      (Claude's judgment through `CliMessagesClient` only, verified against the computed
@@ -51,14 +58,18 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   `0.0` is a clean win even when the max loss is missing; the 5-minute publish uses
   `refresh_paper_trades(reprice=False)` and carries the user's cached live P&L; the weekly
   page is reached from a button on `/eod`, not the left rail.
-- **Claude's text is checked, not trusted.** A suggestion must cite fact ids that exist; a
-  paragraph or suggestion holding a number that is not (within 0.005) a printed fact is
-  dropped whole; numbers written as words ("nine", "half", "twice") are checked like digits
-  ("one" is not read as a number); a suggestion's basis is the **largest** cited group's
-  `n`, never a sum. The check proves a figure is IN the facts, not that its sign or
-  subject is right, and the prompt says so. Exit codes: 0 written (or not the review day),
-  2 the bus was empty or unreadable (nothing written), 3 written without Claude's
-  judgment (fails the unit on purpose).
+- **Claude's text is checked, not trusted.** A suggestion must cite fact ids that exist and
+  may state only the numbers of the facts it cites (`idea_review.numbers_of`: a group fact
+  carries its own figures, not its rows); a paragraph holding a number that is not
+  (within 0.005) a printed fact anywhere is dropped whole; numbers written as words
+  ("nine", "half", "twice") are checked like digits ("one" is not read as a number); a
+  suggestion's basis is the **largest** cited group's `n`, never a sum. So every figure
+  shown is one the app computed, but whether Claude used it with the right subject or sign
+  is not checked; the report, the page's note, both hover guides and the prompt say so.
+  The judgment's `max_tokens` is a constant in the tool, not a setting: the Claude Code
+  CLI path does not pass it. Exit codes: 0 written (or not the review day), 2 the bus was
+  unreadable or the Ledger view missing or holding no rows at all (nothing written), 3
+  written without Claude's judgment (fails the unit on purpose).
 - Docs: User Guide (Paper Ledger, EOD Report, Weekly idea review), Reference Guide (the
   Ledger and the review), Technical Reference (a *Trade ideas in the Paper Ledger* chapter,
   the cadence rows, the screen map), API Reference (the commands' idea-row behaviour and
@@ -67,12 +78,10 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   in CLAUDE.md. `TRADE_IDEAS_NOTE` on `/eod` was reworded: the Opened and Credit
   collected columns count open ideas by entry date, so "open trades are not in these
   totals" was only true of realized profit.
-- **Known and deferred:** Rescue, Analyze and the per-row buttons still see idea rows; the
-  old *Paper Trades* table and count tile on `/eod` list them untagged beside a Manual book
-  that excludes them; the whole-word polish of the `/eod` idea section (raw exit reasons,
-  structure keys, Entry/Exit headers) is not done; idea marks share the tracked-manage
-  minutes (:10/:25/:40/:55) so their proxy load stacks; number words miss ordinals, dozen
-  and thousand; the 5-minute publish runs outside `BOOK_LOCK`.
+- **Known and deferred:** Rescue, Analyze and the per-row buttons still see idea rows; idea
+  marks share the tracked-manage minutes (:10/:25/:40/:55) so their proxy load stacks;
+  number words miss ordinals, dozen and thousand; the 5-minute publish runs outside
+  `BOOK_LOCK`; the weekly page's week list abbreviates month names.
 - **Live checks owed after the promote** (outside 06:30-15:20 CT on a trading day: it
   restarts `options_svc`, which holds the GEX collector; then
   `python -m deploy.systemd.generate_units --install` and `systemctl --user daemon-reload`

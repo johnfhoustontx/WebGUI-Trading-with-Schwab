@@ -2285,7 +2285,9 @@ by the same books as everything else. These rows behave differently from yours:
   see.
 - **Followed every 5 minutes.** During the regular session (08:30–15:00 CT) each open
   idea is priced from real option quotes every 5 minutes (the *Minutes between
-  marks* setting), at minutes that keep clear of the busiest proxy minutes. The page
+  marks* setting), at minutes that keep clear of the busiest proxy minutes (the
+  scheduled scan's first minutes, which move with the scan's start offset, and the
+  first minute after the hour and half hour). The page
   shows its latest mark as the row's P&L at any hour. The worst point it has reached
   (its lowest mark, in dollars) is kept on the row. A mark that cannot be made is
   skipped, never written as zero.
@@ -2295,7 +2297,9 @@ by the same books as everything else. These rows behave differently from yours:
   rules give no stop is stopped at 60% of the debit it paid (*Debit idea stop-out*).
   A stop or target closes at the mark that crossed it.
 - **A hand close is recorded as MANUAL.** **Close selected** works on an idea row,
-  and the weekly review counts it as *closed by hand*.
+  and the weekly review counts it as *closed by hand*. The price you close at counts
+  as a mark too: if it is the worst point the trade reached, the row's worst point
+  moves down to it.
 - **Delete all closed leaves them.** The weekly review reads these rows, so **Delete
   all closed** keeps every closed idea. Deleting one yourself, with **Delete
   selected**, removes it and drops it out of the weekly review; the confirmation says
@@ -2304,7 +2308,8 @@ by the same books as everything else. These rows behave differently from yours:
   time exit) and out of the *expiring today* list in the scheduled action alerts: they
   close themselves.
 - **Counted on their own.** The EOD Report counts them as a third book, *Trade
-  ideas*, never in *Manual paper*.
+  ideas*, never in *Manual paper*, its *Paper Trades* table or its *Paper trades*
+  tile. The Symbol dossier does not list an open idea as a position you hold.
 
 ## Paper Account
 
@@ -3108,8 +3113,8 @@ An end-of-day rollup of the day's Options activity.
 
 | View | Route | Contents |
 |------|-------|----------|
-| **Summary** | `/eod` | Headline tiles plus a Daily / Weekly (WTD) / MTD performance block **per book** — manual paper, captured signals (counted at one contract per signal) and trade ideas (while **Book the posted ideas** is on in Settings → Configuration, every idea the app posts is booked on the Paper Ledger and kept out of manual paper). One tile shows today's closed trade-idea profit and the count closed. |
-| **Detailed** | `/eod/detail` | The same performance plus breakdowns by **strategy** (PCS / CCS / IC), by **0-DTE vs swing**, and by **status** (open / closed / expired), then the full trade, scanner and captured tables, and a **Trade ideas** section: today's posted ideas (time posted, structure, grade, entry, exit, reason, time held, worst point in dollars and as a percent of maximum loss, result), ideas closed today that were posted earlier, and open ideas at their last mark, with closed profit for the day, week and month. Open trades' unrealized profit sits on its own line and is never added to those totals. |
+| **Summary** | `/eod` | Headline tiles plus a Daily / Weekly (WTD) / MTD performance block **per book** — manual paper, captured signals (counted at one contract per signal) and trade ideas (while **Book the posted ideas** is on in Settings → Configuration, every idea the app posts is booked on the Paper Ledger and kept out of manual paper). The *Paper trades* tile counts your own Ledger trades only; another tile shows today's closed trade-idea profit and the count closed. |
+| **Detailed** | `/eod/detail` | The same performance plus breakdowns by **strategy** (PCS / CCS / IC), by **0-DTE vs swing**, and by **status** (open / closed / expired), then the full trade (your own Ledger trades), scanner and captured tables, and a **Trade ideas** section: today's posted ideas (time posted, structure by name, grade, entry and exit with which way the money went, why it closed in words — *Target reached*, *Stopped out*, *Expired*, *Closed by hand* — time held in words such as *4 hours 6 minutes*, worst point in dollars and as a percent of maximum loss, result), ideas closed today that were posted earlier, and open ideas at their last mark, with closed profit for the day, week and month. Open trades' unrealized profit sits on its own line and is never added to those totals. |
 
 Both views use a jump-link table of contents, and every section is collapsible —
 which keeps working in the exported file as well as in the app.
@@ -3158,23 +3163,29 @@ says so.
 What a review holds:
 
 - **Assessment and suggestions**, written by Claude. The app computes every number
-  from the Paper Ledger's trade-idea rows first; Claude may use only those numbers,
-  and every figure it writes (including one spelled out in words) is checked against
-  them before the document is saved. A paragraph or suggestion that cites a number
-  the app did not compute is **left out**, and a line says how many parts were. Each
-  suggestion shows the size of the group it rests on, and a group of fewer than
-  *Fewest ideas before a conclusion* trades (5 by default) is labelled *too few
-  trades to act on*.
+  from the Paper Ledger's trade-idea rows first, and Claude writes from them. Before
+  the document is saved, a paragraph holding a number the app did not compute
+  (including one spelled out in words) is **left out**, and so is a suggestion
+  holding a number that is not one of the groups it cites; a line says how many
+  parts were. So every figure you read there is one the app computed, but whether
+  Claude used it with the right subject (or sign) is **not checked**: read it against
+  the tables before acting on it. Each suggestion shows the size of the group it
+  rests on, and a group of fewer than *Fewest ideas before a conclusion* trades (5
+  by default) is labelled *too few trades to act on*.
 - **This week's closed trades**, each with a plain-word rating: *clean win* (target
-  reached with a worst drawdown within 25% of the maximum loss), *win after drawdown*,
-  *stopped*, *expired win*, *expired loss*, or *closed by hand*.
+  reached with a worst drawdown less than 25% of the maximum loss, or one that never
+  went below zero), *win after drawdown*, *stopped*, *expired win*, *expired loss*,
+  or *closed by hand*. The structure, the reason it closed and the time held are in
+  words, as on the EOD Report.
 - **Open trades**, ideas booked more than once in the week, and **tables for the week
   and for all time**, grouped by grade, structure, trade type, score band, hour posted
   and symbol.
 
 If Claude cannot be reached that week, the review is still saved with every number
 and one line saying the assessment is missing, and the job is reported as failed so
-you hear about it. It is informational: nothing in it changes a signal, a score or a
+you hear about it. If the Paper Ledger cannot be read (or reads back with no rows at
+all, as when the stack is down) nothing is written, so an empty page never replaces
+a real week. It is informational: nothing in it changes a signal, a score or a
 setting. It uses your Claude subscription (the Claude Code command line), never the
 paid API key. The time is **Weekly trade-idea review** under *After-close jobs* in
 Settings → Configuration.

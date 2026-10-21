@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-20</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-21</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -1836,7 +1836,8 @@ with <code>source = "trade_idea"</code> (the only marker; <code>notes</code> rea
 <code>idea_id</code>, <code>idea_posted</code>, <code>idea_grade</code>, <code>idea_score</code>, <code>idea_label</code>, <code>target_pnl</code> and
 <code>stop_pnl</code> (dollars per contract, positive), <code>last_mark_pnl</code> / <code>last_mark_at</code> (the latest
 5-minute mark, per contract), <code>mae_pnl</code> / <code>mae_at</code> (the worst point, per contract, <code>0.0</code>
-until a mark goes negative), <code>exit_time</code> and <code>exit_reason</code> (<code>TARGET</code> · <code>STOP</code> · <code>EXPIRED</code> ·
+until a mark goes negative; a settlement or a hand close lowers it too), <code>exit_time</code> and
+<code>exit_reason</code> (<code>TARGET</code> · <code>STOP</code> · <code>EXPIRED</code> ·
 <code>MANUAL</code>), <code>exit_debit</code> and <code>exit_debit_total</code>. An OPEN idea row's <code>unrealized_pnl</code> is
 <code>last_mark_pnl x quantity</code> at any hour. The 5-minute cycle (<code>scheduler.idea_marks_due</code> →
 <code>handlers.run_idea_marks_and_publish</code>, gated by <code>[idea_trades] mark_interval_min</code>)

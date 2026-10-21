@@ -478,7 +478,8 @@ with `source = "trade_idea"` (the only marker; `notes` reads "Trade idea") throu
 `idea_id`, `idea_posted`, `idea_grade`, `idea_score`, `idea_label`, `target_pnl` and
 `stop_pnl` (dollars per contract, positive), `last_mark_pnl` / `last_mark_at` (the latest
 5-minute mark, per contract), `mae_pnl` / `mae_at` (the worst point, per contract, `0.0`
-until a mark goes negative), `exit_time` and `exit_reason` (`TARGET` · `STOP` · `EXPIRED` ·
+until a mark goes negative; a settlement or a hand close lowers it too), `exit_time` and
+`exit_reason` (`TARGET` · `STOP` · `EXPIRED` ·
 `MANUAL`), `exit_debit` and `exit_debit_total`. An OPEN idea row's `unrealized_pnl` is
 `last_mark_pnl x quantity` at any hour. The 5-minute cycle (`scheduler.idea_marks_due` →
 `handlers.run_idea_marks_and_publish`, gated by `[idea_trades] mark_interval_min`)

@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-20</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-21</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -4834,8 +4834,13 @@ and the <strong>All / My trades / Trade ideas</strong> buttons above the table c
 </tr>
 <tr>
 <td>EOD Report</td>
-<td><em>Manual paper</em> book</td>
-<td>Its own <em>Trade ideas</em> book</td>
+<td><em>Manual paper</em> book, the <em>Paper Trades</em> table and the <em>Paper trades</em> tile</td>
+<td>Its own <em>Trade ideas</em> book and section</td>
+</tr>
+<tr>
+<td>Symbol dossier</td>
+<td>Listed as held while open</td>
+<td>Never listed</td>
 </tr>
 </tbody>
 </table>
@@ -4850,12 +4855,14 @@ closes at the value of the mark that crossed it, and the opening price already c
 the round-trip commission, so closing adds none. Pressing <strong>Close</strong> by hand is recorded
 as <strong>MANUAL</strong>.</p>
 <p><strong>The worst point.</strong> Each mark that is lower than any before it is kept as the row's
-<em>worst point</em> (dollars per contract). It is what lets the weekly review tell a target
+<em>worst point</em> (dollars per contract); the closing value counts too, a hand close
+included. It is what lets the weekly review tell a target
 that was reached cleanly from one that first went most of the way to the stop.</p>
 <p>⚠ Turning <strong>Book the posted ideas</strong> off stops new bookings only; ideas already open
 keep being marked and closed. Deleting one idea row by hand removes it from the weekly
-review too. Reading across pages: the <a href="#eod-report">EOD Report</a> tallies these rows and
-its <strong>Weekly idea review</strong> summarises them.</p>
+review too. Reading across pages: the <a href="#eod-report">EOD Report</a> tallies these rows in a
+book of their own (its <em>Paper Trades</em> table and <em>Paper trades</em> tile are yours only) and
+its <strong>Weekly idea review</strong> summarises them; the Symbol dossier never lists one as held.</p>
 <h3 id="reading-the-screen_17">Reading the screen</h3>
 <p>Columns: <strong>SYMBOL · STRAT · STRIKES · EXP · QTY · CREDIT · RISK · P&amp;L · STATUS ·
 ENTRY</strong>, newest first. P&amp;L shows realized for closed trades and live unrealized for open
@@ -6290,10 +6297,12 @@ bucketed by <em>entry</em> date.</strong> They are answering different questions
 reconcile to each other. That is correct.</p>
 </blockquote>
 <p><strong>Detailed</strong> (<code>/eod/detail</code>) adds breakdowns by <strong>strategy</strong> (PCS / CCS / IC), by
-<strong>0-DTE versus swing</strong>, and by <strong>status</strong> (open / closed / expired), plus the full trade,
-scanner and captured tables, and a <strong>Trade ideas</strong> section: ideas posted today, ideas
-closed today that were posted earlier, and open ideas at their last mark (time held, worst
-point in dollars and as a percent of maximum loss), then closed P&amp;L for the day, week and
+<strong>0-DTE versus swing</strong>, and by <strong>status</strong> (open / closed / expired), plus the full trade
+table (your own Ledger rows only), the scanner and captured tables, and a <strong>Trade ideas</strong>
+section: ideas posted today, ideas closed today that were posted earlier, and open ideas
+at their last mark (structure by name, entry and exit with which way the money went, the
+reason in words, time held in words, worst point in dollars and as a percent of maximum
+loss), then closed P&amp;L for the day, week and
 month, with the open trades' unrealized total on its own line, never in those totals. Both
 views use a jump-link table of contents and collapsible sections that work in the exported
 file as well as in the app.</p>
@@ -6348,13 +6357,14 @@ first) and an <em>Open in a new tab</em> link.</p>
 trading day of the week</strong> — Friday, or Thursday when Friday is a holiday. Weeks sit in
 <code>webgui/data/idea_review/&lt;YYYY-Www&gt;/report.html</code>. The tool reads the Paper Ledger view
 from Redis, computes every figure in code, asks Claude (through the Claude Code
-subscription, never the paid API) for an assessment and suggestions that may cite only
-those figures, checks the reply, and saves the document.</p>
+subscription, never the paid API) for an assessment and suggestions written from
+those figures, checks the reply's numbers, and saves the document.</p>
 <p><strong>Reading it.</strong> An <em>Assessment</em> and <em>Suggestions</em> (each suggestion says how many trades
 its group holds, and a group under <em>Fewest ideas before a conclusion</em> — 5 by default —
 reads <em>too few trades to act on</em>); this week's closed trades with a rating; open
 trades; and group tables for the week and for all time (grade, structure, trade type,
-score band, hour posted, symbol).</p>
+score band, hour posted, symbol). Structures are named in words and reasons, held time
+and the Entry / Exit direction are worded as on the EOD Report's Trade ideas section.</p>
 <table>
 <thead>
 <tr>
@@ -6365,7 +6375,7 @@ score band, hour posted, symbol).</p>
 <tbody>
 <tr>
 <td>clean win</td>
-<td>Target reached, and the worst point stayed within 25% of the maximum loss</td>
+<td>Target reached, and the worst point stayed less than 25% of the maximum loss below zero (or never went below zero)</td>
 </tr>
 <tr>
 <td>win after drawdown</td>
@@ -6386,14 +6396,15 @@ score band, hour posted, symbol).</p>
 </tbody>
 </table>
 <p><strong>How far to trust the words.</strong> Every number Claude writes, digits or words, must match
-one the app computed; a paragraph or suggestion that does not is dropped and a line says
-how many were. That proves a figure is <em>in the facts</em>, not that Claude used it with the
-right meaning, so read the table beside the sentence. A group with a handful of trades
-is a note, not a finding.</p>
+one the app computed — for a suggestion, one of the groups it cites; a paragraph or
+suggestion that does not is dropped and a line says how many were. So every figure in it
+is one the app computed, but whether Claude used it with the right subject (or sign) is
+not checked, so read the table beside the sentence. A group with a handful of trades is
+a note, not a finding.</p>
 <p><strong>When Claude is unavailable</strong> the document is still written with every number and one
 line saying the assessment is missing, and the job ends as failed so the failure alert
-reaches you. <strong>When the Ledger view is empty</strong> (the stack is down) nothing is written,
-so an empty week never replaces a real one.</p>
+reaches you. <strong>When the Ledger view is missing or holds no rows at all</strong> (the stack is
+down) nothing is written, so an empty week never replaces a real one.</p>
 <p><strong>When to use it.</strong> On Fridays, to decide whether a kind of idea deserves its place; it
 changes nothing by itself.</p>
 <h3 id="related-pages_28">Related pages</h3>
