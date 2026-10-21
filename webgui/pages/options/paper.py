@@ -181,6 +181,47 @@ def _strikes(t):
             if sk is not None else "—")
 
 
+# Trade-idea rows: the hourly idea's booked trade, tracked in this ledger beside
+# the operator's own. Identified by ``source`` and nothing else; the page reads
+# the field, it imports no engine to ask.
+IDEA_TAG = "Trade idea"
+# A fixed class for the tag (a finite state maps to a fixed class, never a built one).
+IDEA_TAG_CLASS = "bg-amber-400/15 text-amber-300 rounded-[6px]"
+FILTER_OPTIONS = {"all": "All", "mine": "My trades", "ideas": "Trade ideas"}
+
+DELETE_BODY = "It leaves the ledger for good."
+DELETE_IDEA_BODY = ("It leaves the ledger for good, and the trade drops out of the "
+                    "weekly review of trade ideas.")
+DELETE_CLOSED_BODY = ("Their realized P&L leaves the ledger, and the deployment cap's "
+                      "equity moves with it. Trade idea rows are kept; delete one "
+                      "from its own panel.")
+
+
+def is_idea(t):
+    """True for a trade-idea row. PURE; ``source`` is the only signal."""
+    return (t or {}).get("source") == "trade_idea"
+
+
+def delete_body(t):
+    """The per-row Delete confirm's sentence: an idea row says what it costs."""
+    return DELETE_IDEA_BODY if is_idea(t) else DELETE_BODY
+
+
+def _keeps(idea, which):
+    """Whether a row (idea or not) is shown under the filter. An unknown choice
+    shows everything: a bad value must not hide the book."""
+    if which == "mine":
+        return not idea
+    if which == "ideas":
+        return idea
+    return True
+
+
+def filter_rows(rows, which):
+    """The table rows under the All / My trades / Trade ideas choice. PURE."""
+    return [r for r in rows or [] if _keeps(r.get("tag") == IDEA_TAG, which)]
+
+
 def paper_rows(trades):
     rows = []
     for t in trades or []:
@@ -199,6 +240,8 @@ def paper_rows(trades):
             "_pnl_class": pnl_class(pnl),
             "status": t.get("status", ""),
             "_status_class": status_badge_class(t.get("status")),
+            "_tag_class": IDEA_TAG_CLASS,
+            "tag": IDEA_TAG if is_idea(t) else "",
             # Trim to seconds and show "YYYY-MM-DD HH:MM:SS" (drop the ISO 'T').
             "entry_time": (t.get("entry_time") or "")[:19].replace("T", " "),
             # At-risk rescue tint (left border on the symbol cell). Safe no-op
@@ -211,10 +254,10 @@ def paper_rows(trades):
     return rows
 
 
-def ledger_status(trades):
-    """The status line: how many trades, how many open. PURE. Blank for no
-    trades - the empty table says that."""
-    trades = trades or []
+def ledger_status(trades, which="all"):
+    """The status line: how many trades SHOWN under the filter, how many open.
+    PURE. Blank for no trades - the empty table says that."""
+    trades = [t for t in trades or [] if _keeps(is_idea(t), which)]
     if not trades:
         return ""
     n = len(trades)
@@ -364,12 +407,19 @@ def render():
     # sel_id: the clicked trade; live: {trade_id: live-analyze detail};
     # analyze_popup_for: the trade whose Analyze BUTTON result pops the dialog;
     # close_field: the exit-price field of the open Close dialog.
+    # which: the All / My trades / Trade ideas choice (this tab's, not a setting);
+    # trades: the last ledger read, so a filter change repaints without a fetch.
     state = {"sel_id": None, "live": {}, "analyze_popup_for": None,
-             "close_field": None}
+             "close_field": None, "which": "all", "trades": []}
 
     with kit.page():
         head = kit.header("Paper Ledger", view="options:paper_trades")
         with head.actions:
+            # A raw ``ui.toggle``, like the Expected Move page's put/call picker:
+            # a segmented choice over rows already loaded, and not one of the
+            # controls the kit guards.
+            ui.toggle(FILTER_OPTIONS, value="all",
+                      on_change=lambda e: _set_filter(e.value))
             kit.button("Delete all closed", kind="danger", icon="delete_sweep",
                        on_click=lambda: delete_closed_dlg.open())
             refresh_btn = kit.button("Refresh", kind="secondary", icon="refresh",
@@ -385,12 +435,15 @@ def render():
 
     # Symbol cell gets a colored left-border + faint tint when the row is
     # at-risk (rescue_state tested/critical). Plain cell otherwise.
+    # A trade-idea row also wears its tag (a fixed class: IDEA_TAG_CLASS).
     table.add_slot('body-cell-symbol', r'''
       <q-td :props="props">
         <span v-if="props.row._rescue_class" :class="props.row._rescue_class + ' pl-1.5'">
           {{ props.value }}
         </span>
         <span v-else>{{ props.value }}</span>
+        <q-badge v-if="props.row.tag" class="ml-2" :label="props.row.tag"
+                 :class="props.row._tag_class"/>
       </q-td>
     ''')
     # Credit / Risk show 2 decimals (numeric value kept for sorting).
@@ -434,13 +487,12 @@ def render():
     # inside a repainted container dies with its slot.
     close_dlg = kit.confirm("Close trade", confirm_text="Close trade",
                             on_confirm=lambda: _confirm_close())
-    delete_dlg = kit.confirm("Delete this trade?", "It leaves the ledger for good.",
+    delete_dlg = kit.confirm("Delete this trade?", DELETE_BODY,
                              confirm_text="Delete", danger=True,
                              on_confirm=lambda: _confirm_delete())
     delete_closed_dlg = kit.confirm(
         "Delete every closed trade?",
-        "Their realized P&L leaves the ledger, and the deployment cap's equity "
-        "moves with it.",
+        DELETE_CLOSED_BODY,
         confirm_text="Delete all closed", danger=True,
         on_confirm=lambda: _confirm_delete_closed())
     analyze_dlg = kit.info_dialog("Trade analysis", width="min-w-[360px] max-w-[460px]")
@@ -474,7 +526,8 @@ def render():
         for t in trades:
             if t.get("trade_id"):
                 raw_by_id[t["trade_id"]] = t
-        table.rows = paper_rows(trades)
+        state["trades"] = trades
+        table.rows = filter_rows(paper_rows(trades), state["which"])
         kit.mark_selected(table.rows, state.get("sel_id"))
         table.update()
         # Keep the open detail panel in sync with the freshly-cached trades
@@ -484,7 +537,12 @@ def render():
             _render_detail(raw_by_id[sel])
         elif sel:
             detail_panel.clear()  # selected trade no longer present
-        status.text = ledger_status(trades)
+        status.text = ledger_status(trades, state["which"])
+
+    @guard
+    def _set_filter(which):
+        state["which"] = which
+        _populate({"trades": state["trades"]})
 
     def _select(event):
         row = event.args[1] if isinstance(event.args, list) and len(event.args) > 1 else event.args
@@ -544,6 +602,7 @@ def render():
         if not t:
             return
         delete_dlg.title.text = f"Delete the {t.get('symbol', '')} {t.get('strategy', '')}?"
+        delete_dlg.body.text = delete_body(t)
         delete_dlg.open()
 
     def _confirm_delete():

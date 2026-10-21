@@ -1271,13 +1271,23 @@ engine's positions live on **Paper Account**.
   stopping them, and you can still close any row by hand at any time.
 - **Credit spreads here are not managed** — they are tracked only. The engine's
   own book on **Paper Account** is the one that takes profit and cuts on them.
-- **New trades must fit this ledger's risk limits**: at most $750 of max loss
+- **Trades you send must fit this ledger's risk limits**: at most $750 of max loss
   per trade; 3 positions and $750 per symbol; 5 positions and $1,500 per sector;
   5 positions sharing one expiration; and open max loss at most 20% of equity
   ($25,000 plus your closed trades' realized P&L, so **Delete all closed** moves
   it). A trade that would break one is not written, and a message on the page you
   sent it from says which limit — plus *Up to N contracts fit* when a smaller size
   would clear them all.
+- **Trade ideas live here too.** Each hourly trade idea is booked into this
+  ledger as it is posted, tagged **Trade idea** beside the symbol. The buttons
+  above the table filter the list: **All**, **My trades** or **Trade ideas**, and
+  the count line shows only what is on screen. Idea rows are **not** held to the
+  risk limits below - they do not apply to them, so an idea always books, whatever
+  else is open. They are checked **every 5 minutes** for their target, their stop
+  and their expiry, and close themselves on the first one reached; a close by
+  hand is recorded as **MANUAL**. **Delete all closed** keeps trade ideas, so the
+  weekly review of ideas keeps its record; deleting an idea row yourself, from
+  its own panel, removes it from that review too.
 - Use it to test ideas from the Market Scanner without risk.
 """,
     "/options/captured": """
