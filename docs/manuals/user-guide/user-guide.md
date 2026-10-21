@@ -2406,6 +2406,21 @@ five minutes are in. For each symbol it shows which way the market opened, how m
 your premarket inputs agree, and how often four same-day (0DTE) scalps have worked on
 past mornings that looked like this one. **It does not place trades** — you decide.
 
+**The top of the page is one table, a row per symbol.** Above it a line names the call
+it shows ("Latest call at 09:21 · next at 09:36"), counts down to the next one ("next
+call in 4 min") and says whether any symbol has a measured edge. Each row shows the
+symbol and its price, **Now** (↑ Up, ↓ Down or no direction, and which call that is),
+the **Confirmation** word, the **trade with the call** (the trade with a measured edge
+instead, when there is one), how often it **usually wins**, the **room to the wall**,
+and the **08:36 call**'s direction. The row reads the latest 15-minute call once the
+first one is out (08:51) and the 08:36 call before that. A call that is no longer
+current keeps its words and loses its colour.
+
+**Everything else is below it, in closed sections:** one per symbol (its 15-minute
+call, its confirmation and its 08:36 call), then **Today's calls**, **Not in the
+probability** and the **Scorecard**. Click a heading to open it; a section you opened
+stays open when a new call arrives.
+
 - **Most mornings the answer is "No measured edge".** That is normal, not an error: the
   page then shows each trade's **usual win rate** and nothing more. Treat it as "nothing
   here beats chance today".
@@ -2432,7 +2447,7 @@ past mornings that looked like this one. **It does not place trades** — you de
   day, or after a failed refresh the page shows the **last call**, labelled with its
   day, under a line saying when the next call is due.
 - **Not in the probability** (the report link, headlines, flow alerts) is context only.
-- **Scorecard** (the last card) is the record of how the published calls actually did.
+- **Scorecard** (the last section) is the record of how the published calls actually did.
   Each evening, once the day's bars are in, the app **grades** every trade it showed that
   morning, from the call as published (never from a later rebuild), under the target,
   stop and time stop that call was made with (a setting changed later does not regrade
@@ -2451,13 +2466,13 @@ past mornings that looked like this one. **It does not place trades** — you de
 
 ### Calls every 15 minutes
 
-Under the 08:36 cards the page makes **a new call every 15 minutes, from 08:51 to
+After the 08:36 call the page makes **a new call every 15 minutes, from 08:51 to
 13:51 CT** (21 a day), for the same three symbols. Each is a scalp you would enter *at
 that moment*, with the same trade rules (+50% before −50% of the price paid, closed
 after 60 minutes at the latest). A call is frozen the moment it is shown: the next one
 is a new call, not an edit of the last.
 
-- **Latest call.** One card per symbol. It says which way the symbol moved over the
+- **Latest call.** The **15-minute call** card in each symbol's section. It says which way the symbol moved over the
   **last 15 minutes** (up, down, or flat; a flat or missing tape gets no call), names
   the four trades by that move's contract, and shows the same columns as the morning
   card. The one difference is the sample: it counts **days**, not calls. Several

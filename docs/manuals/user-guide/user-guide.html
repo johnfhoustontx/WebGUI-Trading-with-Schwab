@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-20</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-21</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -2855,6 +2855,19 @@ Captured signals do <strong>not</strong> add to the Rescue nav badge (that count
 five minutes are in. For each symbol it shows which way the market opened, how many of
 your premarket inputs agree, and how often four same-day (0DTE) scalps have worked on
 past mornings that looked like this one. <strong>It does not place trades</strong> — you decide.</p>
+<p><strong>The top of the page is one table, a row per symbol.</strong> Above it a line names the call
+it shows ("Latest call at 09:21 · next at 09:36"), counts down to the next one ("next
+call in 4 min") and says whether any symbol has a measured edge. Each row shows the
+symbol and its price, <strong>Now</strong> (↑ Up, ↓ Down or no direction, and which call that is),
+the <strong>Confirmation</strong> word, the <strong>trade with the call</strong> (the trade with a measured edge
+instead, when there is one), how often it <strong>usually wins</strong>, the <strong>room to the wall</strong>,
+and the <strong>08:36 call</strong>'s direction. The row reads the latest 15-minute call once the
+first one is out (08:51) and the 08:36 call before that. A call that is no longer
+current keeps its words and loses its colour.</p>
+<p><strong>Everything else is below it, in closed sections:</strong> one per symbol (its 15-minute
+call, its confirmation and its 08:36 call), then <strong>Today's calls</strong>, <strong>Not in the
+probability</strong> and the <strong>Scorecard</strong>. Click a heading to open it; a section you opened
+stays open when a new call arrives.</p>
 <ul>
 <li><strong>Most mornings the answer is "No measured edge".</strong> That is normal, not an error: the
   page then shows each trade's <strong>usual win rate</strong> and nothing more. Treat it as "nothing
@@ -2882,7 +2895,7 @@ past mornings that looked like this one. <strong>It does not place trades</stron
   day, or after a failed refresh the page shows the <strong>last call</strong>, labelled with its
   day, under a line saying when the next call is due.</li>
 <li><strong>Not in the probability</strong> (the report link, headlines, flow alerts) is context only.</li>
-<li><strong>Scorecard</strong> (the last card) is the record of how the published calls actually did.
+<li><strong>Scorecard</strong> (the last section) is the record of how the published calls actually did.
   Each evening, once the day's bars are in, the app <strong>grades</strong> every trade it showed that
   morning, from the call as published (never from a later rebuild), under the target,
   stop and time stop that call was made with (a setting changed later does not regrade
@@ -2900,13 +2913,13 @@ past mornings that looked like this one. <strong>It does not place trades</stron
   handful of days says very little; read it as a record, not a verdict.</li>
 </ul>
 <h3 id="calls-every-15-minutes">Calls every 15 minutes</h3>
-<p>Under the 08:36 cards the page makes <strong>a new call every 15 minutes, from 08:51 to
+<p>After the 08:36 call the page makes <strong>a new call every 15 minutes, from 08:51 to
 13:51 CT</strong> (21 a day), for the same three symbols. Each is a scalp you would enter <em>at
 that moment</em>, with the same trade rules (+50% before −50% of the price paid, closed
 after 60 minutes at the latest). A call is frozen the moment it is shown: the next one
 is a new call, not an edit of the last.</p>
 <ul>
-<li><strong>Latest call.</strong> One card per symbol. It says which way the symbol moved over the
+<li><strong>Latest call.</strong> The <strong>15-minute call</strong> card in each symbol's section. It says which way the symbol moved over the
   <strong>last 15 minutes</strong> (up, down, or flat; a flat or missing tape gets no call), names
   the four trades by that move's contract, and shows the same columns as the morning
   card. The one difference is the sample: it counts <strong>days</strong>, not calls. Several

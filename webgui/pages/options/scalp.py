@@ -29,9 +29,14 @@ and not an empty state. The rules that keep it truthful:
   followed only when it is a plain http(s) address, and the page draws no raw
   HTML at all.
 
-Under the 08:36 cards sit the 15-minute calls (``view["intraday"]``, 08:51 to 13:51
-CT): a "Latest call" per symbol, "Today's calls" (one row per slot) and the
-confirmation. They keep the same truthfulness and add three of their own: the
+The page leads with a glance: one table row per symbol (the latest call's
+direction, the confirmation word, the trade with the call and its usual rate, the
+room to the wall and the 08:36 direction). Everything else sits below it in closed
+sections: one per symbol (its 15-minute call, its confirmation and its 08:36
+call), then the day's calls, the context and the scorecard.
+
+The 15-minute calls (``view["intraday"]``, 08:51 to 13:51 CT) keep the same
+truthfulness and add three rules of their own: the
 rates are over EVERY stored day, the counts beside them are DAYS (not rows), and
 the confirmation is a word recorded to be tested - never shown as a number or a
 probability. A section of another day is labelled as that day's, and a latest
@@ -1082,6 +1087,196 @@ def has_scorecard(scorecard):
     return bool(scorecard_symbols(scorecard) or intraday_scorecard_blocks(scorecard))
 
 
+# ── at a glance: one row per symbol ──────────────────────────────────────────
+# The top of the page answers "what is each symbol doing now?" in one table; the
+# cards that say why sit below it, closed. A row comes from the latest 15-minute
+# call when the intraday section is at least as recent as the 08:36 call and holds
+# that symbol, else from the 08:36 call. Its rate is the USUAL rate of the trade
+# with the move, unless the service marked an edge: then the row names that trade
+# and sets its rate against the usual one. A row that is not current (another
+# day's, or a call whose time has passed) keeps its words and loses its colour.
+GLANCE_EDGE_NONE = f"{NO_EDGE} — the rates are the usual win rates"
+_GLANCE_DIRECTION = {1: "↑ Up", -1: "↓ Down"}
+_GLANCE_DIRECTION_CLASS = {1: _t.TXT_POS, -1: _t.TXT_NEG}
+_GLANCE_WORD_CLASS = {"Confirms": _t.BADGE_POS, "Mixed": _t.BADGE_WARN,
+                      "Contradicts": _t.BADGE_NEG}
+
+
+def _direction(v):
+    """1 / -1, else None (a bool is not a direction)."""
+    return v if v in (1, -1) and not isinstance(v, bool) else None
+
+
+def glance_symbols(view):
+    """Every symbol on the page: the 08:36 call's order, then any symbol only the
+    15-minute calls carry. PURE."""
+    names = [n for n, s in _as_dict(_as_dict(view).get("symbols")).items()
+             if isinstance(s, dict)]
+    for name, _entry in latest_entries(intraday_section(view)):
+        if name not in names:
+            names.append(name)
+    return names
+
+
+def intraday_leads(view):
+    """Whether the 15-minute calls are at least as recent as the 08:36 call, so
+    they lead the glance and each symbol's details. PURE. Before the day's first
+    15-minute call the section is the previous day's and the 08:36 call leads."""
+    view = _as_dict(view)
+    day = intraday_section(view).get("day")
+    call_day = view.get("call_day")
+    if not isinstance(day, str) or not day:
+        return False
+    return not isinstance(call_day, str) or day >= call_day
+
+
+def _glance_role(entry):
+    """``(role name, role)`` the glance names: the highlighted role when the
+    service marked one, else the trade with the move; ``(None, None)`` with no
+    roles."""
+    roles = _as_dict(_as_dict(entry).get("roles"))
+    hl = entry.get("highlight")
+    name = hl if isinstance(hl, str) and isinstance(roles.get(hl), dict) else "long_with"
+    role = roles.get(name)
+    return (name, role) if isinstance(role, dict) else (None, None)
+
+
+def _glance_price(entry):
+    sym = _as_dict(entry)
+    for v in (sym.get("entry_spot"), _as_dict(sym.get("chain")).get("spot")):
+        if _fmt.num(v) is not None:
+            return _fmt.price(v)
+    return ""
+
+
+def glance_row(name, entry, kind, *, current, when, morning=None):
+    """One symbol's row. PURE. ``kind`` is ``"intraday"`` or ``"morning"``;
+    ``morning`` is the 08:36 payload, for the last column."""
+    sym = _as_dict(entry)
+    d = _direction(sym.get("direction"))
+    role_name, role = _glance_role(sym)
+    tone = _tone(sym, role_name) if role_name else "plain"
+    if role is None:
+        lead = move_words(sym) if kind == "intraday" else headline(sym)
+        trade, side = lead[0].upper() + lead[1:], ""
+    else:
+        trade = f"{contract_name(role_name, d)} {_strikes(role.get('strikes'))}"
+        side = ("with the move" if role_name.endswith("_with")
+                else "against the move")
+    if role is None:
+        rate, note = _fmt.NO_READING, ""
+    elif tone == "edge":
+        rate = f"{_rate(role.get('p'))} vs {_rate(role.get('p_base'))} usually"
+        note = EDGE
+    else:
+        rate, note = _rate(role.get("p_base")), (CAUTION if tone == "caution" else "")
+    word, sources, word_class = _fmt.NO_READING, "", ""
+    if kind == "intraday":
+        word = confirmation_word(sym)
+        sources = confirmation_sources(sym)
+        word_class = ((_GLANCE_WORD_CLASS.get(word, _t.BADGE_MUTED) if current
+                       else _t.BADGE_MUTED) if word in CONFIRM_WORDS else "")
+    room = _fmt.NO_READING
+    if kind == "intraday" and d is not None and dealer_line(sym):
+        room = dealer_line(sym).split(";")[0].strip()
+    m = _direction(_as_dict(morning).get("direction"))
+    return {
+        "id": name, "symbol": name, "price": _glance_price(sym),
+        "now": _GLANCE_DIRECTION.get(d, "No direction"), "when": when,
+        "_now_class": _GLANCE_DIRECTION_CLASS.get(d, _t.MUTED) if current else _t.MUTED,
+        "word": word, "sources": sources, "_word_class": word_class,
+        "trade": trade, "side": side, "rate": rate, "rate_note": note,
+        "edge": tone == "edge" and current,
+        "_rate_class": _RATE_CLASS[tone] if current and tone != "plain" else "",
+        "room": room,
+        "morning": (_GLANCE_DIRECTION.get(m, "No direction") if morning is not None
+                    else _fmt.NO_READING),
+        "_morning_class": _GLANCE_DIRECTION_CLASS.get(m, _t.MUTED) if current else _t.MUTED}
+
+
+def glance_rows(view, now=None):
+    """One row per symbol, in :func:`glance_symbols` order. PURE."""
+    view = _as_dict(view)
+    now = _clock(now)
+    today = now.date().isoformat()
+    section = intraday_section(view)
+    latest = dict(latest_entries(section))
+    lead = intraday_leads(view)
+    status = intraday_status(section, now) if section else None
+    morning = _as_dict(view.get("symbols"))
+    call_day = view.get("call_day")
+    rows = []
+    for name in glance_symbols(view):
+        sym = morning.get(name) if isinstance(morning.get(name), dict) else None
+        entry = latest.get(name)
+        if entry is not None and (lead or sym is None):
+            slot = section.get("slot") if isinstance(section.get("slot"), str) else ""
+            current = bool(status["today"] and not status["past"])
+            when = (f"{slot} call" + ("" if current else " · past") if status["today"]
+                    else f"{section.get('day') or 'an earlier day'} {slot} call · not today's")
+            rows.append(glance_row(name, entry, "intraday", current=current,
+                                   when=when, morning=sym))
+        elif sym is not None:
+            made = _ct(sym.get("made_at"))
+            stamp = made.strftime("%H:%M") if made else "08:36"
+            current = call_day == today
+            when = (f"{stamp} call" if current
+                    else f"{call_day or 'an earlier day'} {stamp} call · not today's")
+            rows.append(glance_row(name, sym, "morning", current=current,
+                                   when=when, morning=sym))
+    return rows
+
+
+def glance_line(view, now=None):
+    """``(line, warning)`` over the glance table. PURE: the latest 15-minute
+    call's own status line when those calls lead, else the 08:36 call's label."""
+    view = _as_dict(view)
+    section = intraday_section(view)
+    if section and intraday_leads(view) and latest_entries(section):
+        status = intraday_status(section, now)
+        return status["line"], status["warning"]
+    first = next((s for s in _as_dict(view.get("symbols")).values()
+                  if isinstance(s, dict)), None)
+    return (call_label(view, first, now) if first is not None else ""), ""
+
+
+def edge_summary(rows):
+    """The one line saying whether any symbol has a measured edge now. PURE."""
+    names = [r["symbol"] for r in rows if r.get("edge")]
+    if names:
+        return f"{EDGE} now: {', '.join(names)}"
+    return GLANCE_EDGE_NONE if any(r.get("side") for r in rows) else ""
+
+
+def countdown_text(view, now=None):
+    """``"next call in 9 min"`` while the section's next slot is later today,
+    else ''. PURE; the page refreshes it on its clock tick without a repaint."""
+    now = _clock(now)
+    nxt = _ct(intraday_section(view).get("next_slot"))
+    if nxt is None or nxt <= now or nxt.date() != now.date():
+        return ""
+    minutes = -(-int((nxt - now).total_seconds()) // 60)
+    return f"next call in {minutes} min"
+
+
+def glance_columns():
+    return [
+        {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left",
+         "sortable": False},
+        {"name": "now", "label": "Now", "field": "now", "align": "left", "sortable": False},
+        {"name": "word", "label": "Confirmation", "field": "word", "align": "left",
+         "sortable": False},
+        {"name": "trade", "label": "Trade with the call", "field": "trade",
+         "align": "left", "sortable": False},
+        {"name": "rate", "label": "Usually wins", "field": "rate", "align": "left",
+         "sortable": False},
+        {"name": "room", "label": "Room to the wall", "field": "room", "align": "left",
+         "sortable": False},
+        {"name": "morning", "label": "08:36 call", "field": "morning", "align": "left",
+         "sortable": False},
+    ]
+
+
 # ── widgets ──────────────────────────────────────────────────────────────────
 _TRADE_SLOT = r'''
   <q-td :props="props">
@@ -1141,7 +1336,9 @@ _CARD = f"w-full {_t.CARD} gap-3"
 _SMALL = f"text-[12px] {_t.MUTED}"
 
 
-def _symbol_card(view, name, sym, now=None):
+def _symbol_card(view, name, sym, now=None, title=None):
+    """One symbol's 08:36 call. ``title`` replaces the symbol as the heading when
+    the card sits inside that symbol's own section."""
     from nicegui import ui
 
     from pages import ui_kit as kit
@@ -1153,7 +1350,7 @@ def _symbol_card(view, name, sym, now=None):
     has_edge = isinstance(highlight, str) and highlight in {r["id"] for r in rows}
     with ui.column().classes(_CARD):
         with ui.row().classes("w-full items-center gap-3 flex-wrap"):
-            ui.label(name).classes(f"text-lg font-semibold {_t.LABEL}")
+            ui.label(title or name).classes(f"text-lg font-semibold {_t.LABEL}")
             if rows:
                 ui.label(direction_words(sym.get("direction"))) \
                     .classes(f"{_t.BADGE_ACCENT} px-2 py-0.5 text-[12px]")
@@ -1187,9 +1384,10 @@ def _symbol_card(view, name, sym, now=None):
                 grid.add_slot("body-cell-verdict", _VERDICT_SLOT)
 
 
-def _latest_card(section, name, entry, now=None):
+def _latest_card(section, name, entry, now=None, title=None):
     """One symbol's latest 15-minute call: the move in words, the four trades with
-    their rates (and the days under them), the dealer read and the walls."""
+    their rates (and the days under them), the dealer read and the walls.
+    ``title`` replaces the symbol as the heading inside the symbol's section."""
     from nicegui import ui
 
     from pages import ui_kit as kit
@@ -1203,7 +1401,7 @@ def _latest_card(section, name, entry, now=None):
                 and highlight in {r["id"] for r in rows})
     with ui.column().classes(_CARD):
         with ui.row().classes("w-full items-center gap-3 flex-wrap"):
-            ui.label(name).classes(f"text-lg font-semibold {_t.LABEL}")
+            ui.label(title or name).classes(f"text-lg font-semibold {_t.LABEL}")
             if rows or entry.get("direction") in (1, -1):
                 # A flat tape's headline already says so; no second badge for it.
                 ui.label(move_words(entry).capitalize()) \
@@ -1238,13 +1436,14 @@ def _latest_card(section, name, entry, now=None):
 
 
 def _timeline_panel(section, status):
+    """The day's 15-minute calls, one row per slot. Its heading is the section it
+    sits in (:func:`_details`)."""
     from nicegui import ui
 
     from pages import ui_kit as kit
 
     rows = timeline_rows(section, muted=not status["today"])
     with ui.column().classes(_CARD):
-        kit.section_title(status["title"])
         if not rows:
             ui.label("No calls published yet.").classes(_SMALL)
             return
@@ -1254,56 +1453,160 @@ def _timeline_panel(section, status):
             table.add_slot(f"body-cell-s{i}", _TIMELINE_CELL.replace("@@", str(i)))
 
 
-def _confirmation_panel(entries, lead=""):
-    """The confirmation per symbol, as words. Never a score, a gauge or a rate.
-    ``lead`` names the day when the section is not today's."""
+def _confirmation_block(entry, lead=""):
+    """One symbol's confirmation, as words. Never a score, a gauge or a rate.
+    ``lead`` names the day when the section is not today's. Nothing for a call
+    with no confirmation (a flat tape has no move to confirm)."""
     from nicegui import ui
 
     from pages import ui_kit as kit
 
+    rows = confirmation_rows(entry)
+    if not rows:
+        return
     with ui.column().classes(_CARD):
-        kit.section_title(CONFIRMATION_TITLE)
+        kit.section_title(f"Confirmation · {confirmation_summary(entry)}")
+        ui.label(CONFIRMATION_TITLE).classes(f"text-sm {_t.LABEL}")
         if lead:
             ui.label(lead).classes(f"text-sm {_t.TXT_WARN}")
         ui.label(CONFIRMATION_NOTE).classes(_SMALL)
-        shown = False
-        for name, entry in entries:
-            rows = confirmation_rows(entry)
-            if not rows:
-                continue
-            shown = True
-            ui.label(f"{name} · {confirmation_summary(entry)}").classes(
-                f"text-base font-semibold {_t.LABEL}")
-            grid = kit.table(confirmation_columns(), rows)
-            grid.add_slot("body-cell-verdict", _COMPONENT_SLOT)
-            for flag in confirmation_flags(entry):
-                ui.label(flag).classes(_SMALL)
-        if not shown:
-            ui.label("No symbol has a direction to confirm.").classes(_SMALL)
+        grid = kit.table(confirmation_columns(), rows)
+        grid.add_slot("body-cell-verdict", _COMPONENT_SLOT)
+        for flag in confirmation_flags(entry):
+            ui.label(flag).classes(_SMALL)
 
 
-def _intraday_panels(view, now=None):
-    """The 15-minute calls under the 08:36 cards: the latest call per symbol, the
-    day's list of calls and the confirmation. Nothing when the view has no
-    ``intraday`` section."""
+_GLANCE_SLOTS = {
+    "symbol": r'''
+  <q-td :props="props">
+    <div class="font-semibold">{{ props.row.symbol }}</div>
+    <div class="text-[11px] opacity-70">{{ props.row.price }}</div>
+  </q-td>
+''',
+    "now": r'''
+  <q-td :props="props">
+    <div class="font-semibold" :class="props.row._now_class">{{ props.row.now }}</div>
+    <div class="text-[11px] opacity-70">{{ props.row.when }}</div>
+  </q-td>
+''',
+    "word": r'''
+  <q-td :props="props">
+    <span v-if="props.row._word_class" class="px-2 py-0.5 text-[12px]"
+          :class="props.row._word_class">{{ props.row.word }}</span>
+    <span v-else class="opacity-70">{{ props.row.word }}</span>
+    <div v-if="props.row.sources" class="text-[11px] opacity-70">{{ props.row.sources }}</div>
+  </q-td>
+''',
+    "trade": r'''
+  <q-td :props="props">
+    <div class="max-w-[220px] whitespace-normal leading-tight">{{ props.row.trade }}</div>
+    <div v-if="props.row.side" class="text-[11px] opacity-70">{{ props.row.side }}</div>
+  </q-td>
+''',
+    "rate": r'''
+  <q-td :props="props">
+    <div class="font-semibold" :class="props.row._rate_class">{{ props.row.rate }}</div>
+    <div v-if="props.row.rate_note"
+         class="max-w-[180px] whitespace-normal leading-tight text-[11px]"
+         :class="props.row._rate_class">{{ props.row.rate_note }}</div>
+  </q-td>
+''',
+    "room": r'''
+  <q-td :props="props">
+    <div class="max-w-[240px] whitespace-normal leading-tight text-[12px]">{{ props.row.room }}</div>
+  </q-td>
+''',
+    "morning": r'''
+  <q-td :props="props"><span :class="props.row._morning_class">{{ props.row.morning }}</span></q-td>
+''',
+}
+
+
+def _glance(view, now=None):
+    """The top of the page: one line on which call is shown and when the next
+    comes, then one table row per symbol. Returns the countdown label (the clock
+    tick refreshes its text), or None when there is nothing to show."""
     from nicegui import ui
 
     from pages import ui_kit as kit
 
+    rows = glance_rows(view, now)
+    if not rows:
+        return None
+    line, warning = glance_line(view, now)
+    summary = edge_summary(rows)
+    has_edge = any(r["edge"] for r in rows)
+    with ui.column().classes(_CARD):
+        with ui.row().classes("w-full items-baseline gap-x-3 gap-y-1 flex-wrap"):
+            ui.label(line).classes(f"text-base font-semibold {_t.LABEL}")
+            countdown = ui.label(countdown_text(view, now)).classes(_SMALL)
+            ui.space()
+            if summary:
+                ui.label(summary).classes(
+                    f"text-sm font-semibold {_t.TXT_POS}" if has_edge else _SMALL)
+        if warning:
+            ui.label(warning).classes(f"text-sm {_t.TXT_WARN}")
+        table = kit.table(glance_columns(), rows)
+        for name, slot in _GLANCE_SLOTS.items():
+            table.add_slot(f"body-cell-{name}", slot)
+    return countdown
+
+
+def _fold(title, key, opened=(), on_toggle=None):
+    """A closed section of the details. It opens as the reader left it: ``opened``
+    holds the keys open before a repaint, and ``on_toggle(key, open)`` records each
+    change."""
+    from nicegui import ui
+
+    def _changed(e):
+        if on_toggle is not None:
+            on_toggle(key, bool(e.value))
+
+    return ui.expansion(title, value=key in opened, on_value_change=_changed) \
+        .classes(f"w-full {_t.LABEL}") \
+        .props('header-class="text-base font-semibold"')
+
+
+def _details(view, now=None, opened=(), on_toggle=None):
+    """Everything under the glance, each in a closed section: one per symbol (its
+    15-minute call, its confirmation and its 08:36 call, the most recent first),
+    then the day's calls, the context and the scorecard."""
+    from nicegui import ui
+
+    view = _as_dict(view)
     section = intraday_section(view)
-    if not section:
-        return
-    status = intraday_status(section, now)
-    entries = latest_entries(section)
-    with ui.column().classes("w-full gap-1"):
-        kit.section_title(status["latest_title"])
-        ui.label(status["line"]).classes("text-sm")
-        if status["warning"]:
-            ui.label(status["warning"]).classes(f"text-sm {_t.TXT_WARN}")
-    for name, entry in entries:
-        _latest_card(section, name, entry, now)
-    _timeline_panel(section, status)
-    _confirmation_panel(entries, confirmation_lead(section, now))
+    latest = dict(latest_entries(section))
+    morning = _as_dict(view.get("symbols"))
+    lead = confirmation_lead(section, now) if section else ""
+    intraday_first = intraday_leads(view)
+
+    def _intraday(name):
+        entry = latest.get(name)
+        if entry is not None:
+            _latest_card(section, name, entry, now, title="15-minute call")
+            _confirmation_block(entry, lead)
+
+    def _morning(name):
+        sym = morning.get(name)
+        if isinstance(sym, dict):
+            _symbol_card(view, name, sym, now, title="08:36 call")
+
+    with ui.column().classes("w-full gap-2"):
+        for name in glance_symbols(view):
+            with _fold(f"{name} details", f"symbol:{name}", opened, on_toggle):
+                with ui.column().classes("w-full gap-3"):
+                    for part in ((_intraday, _morning) if intraday_first
+                                 else (_morning, _intraday)):
+                        part(name)
+        if section:
+            status = intraday_status(section, now)
+            with _fold(status["title"], "timeline", opened, on_toggle):
+                _timeline_panel(section, status)
+        with _fold("Not in the probability: headlines, flow alerts and the report",
+                   "context", opened, on_toggle):
+            _context_panel(view.get("context"))
+        with _fold("Scorecard", "scorecard", opened, on_toggle):
+            _scorecard_panel(view.get("scorecard"))
 
 
 def _context_panel(context):
@@ -1312,7 +1615,6 @@ def _context_panel(context):
     from pages import ui_kit as kit
 
     with ui.column().classes(_CARD):
-        kit.section_title("Not in the probability")
         ui.label("Shown beside the call for context. None of this was measured or "
                  "fed into the win rates above.").classes(_SMALL)
         href = report_href(context)
@@ -1346,7 +1648,6 @@ def _scorecard_panel(scorecard):
 
     cards = scorecard_symbols(scorecard)
     with ui.column().classes(_CARD):
-        kit.section_title("Scorecard")
         if not has_scorecard(scorecard):
             ui.label(SCORECARD_EMPTY).classes(_SMALL)
             return
@@ -1406,8 +1707,11 @@ def render():
     from pages.ui_guard import guard, guard_async
     from pages.view_watch import watch_view
 
-    # ``view`` is the last one read; ``sig`` what the clock said when it was painted.
-    state = {"refresh": None, "view": None, "sig": None}
+    # ``view`` is the last one read; ``sig`` what the clock said when it was painted;
+    # ``open`` the detail sections the reader has open, kept across repaints;
+    # ``countdown`` the label the clock tick refreshes.
+    state = {"refresh": None, "view": None, "sig": None, "open": set(),
+             "countdown": None}
 
     with kit.page():
         head = kit.header("Opening Scalp", view=VIEW)
@@ -1433,6 +1737,10 @@ def render():
                         "this fills in any symbol still waiting.")
 
     @guard
+    def _toggle(key, is_open):
+        (state["open"].add if is_open else state["open"].discard)(key)
+
+    @guard
     def _paint(view):
         body.clear()
         now = _clock()
@@ -1440,16 +1748,11 @@ def render():
         line = state_line(view, now)
         notice.text = line or ""
         notice.set_visibility(bool(line))
-        symbols = _as_dict(_as_dict(view).get("symbols"))
         with body:
-            if not symbols:
+            state["countdown"] = _glance(view, now)
+            if state["countdown"] is None:
                 kit.empty(_copy.WAITING_OPTIONS)
-            for name, sym in symbols.items():
-                if isinstance(sym, dict):
-                    _symbol_card(view, name, sym, now)
-            _intraday_panels(view, now)
-            _context_panel(_as_dict(view).get("context"))
-            _scorecard_panel(_as_dict(view).get("scorecard"))
+            _details(view, now, state["open"], _toggle)
 
     @guard_async
     async def _changed():
@@ -1464,9 +1767,13 @@ def render():
         past (or the day rolls) with no new view, e.g. a stalled service. Painted
         only when the clock-derived text changed, so an open table is not rebuilt
         every tick."""
-        if state["view"] is not None \
-                and clock_signature(state["view"], _clock()) != state["sig"]:
+        if state["view"] is None:
+            return
+        now = _clock()
+        if clock_signature(state["view"], now) != state["sig"]:
             _paint(state["view"])
+        elif state["countdown"] is not None:
+            state["countdown"].text = countdown_text(state["view"], now)
 
     _paint(bus_client.read(VIEW))
     watch_view(VIEW, _changed)

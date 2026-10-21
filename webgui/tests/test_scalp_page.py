@@ -1078,6 +1078,9 @@ class _Rec:
     def classes(self, *a, **k):
         return self
 
+    def props(self, *a, **k):
+        return self
+
     def add_slot(self, *a, **k):
         return self
 
@@ -1088,8 +1091,10 @@ def drawn(monkeypatch):
 
     from pages import ui_kit as kit
     log = []
-    for kind in ("column", "row", "space", "expansion"):
+    for kind in ("column", "row", "space"):
         monkeypatch.setattr(ui, kind, lambda *a, _k=kind, **k: _Rec(log, _k))
+    monkeypatch.setattr(ui, "expansion",
+                        lambda text="", *a, **k: _Rec(log, "expansion", text))
     monkeypatch.setattr(ui, "label", lambda text="", *a, **k: _Rec(log, "label", text))
     monkeypatch.setattr(kit, "section_title", lambda text: _Rec(log, "title", text))
     monkeypatch.setattr(kit, "table",
@@ -1098,7 +1103,11 @@ def drawn(monkeypatch):
 
 
 def _texts(log):
-    return [t for kind, t in log if kind in ("label", "title")]
+    return [t for kind, t in log if kind in ("label", "title", "expansion")]
+
+
+def _folds(log):
+    return [t for kind, t in log if kind == "expansion"]
 
 
 @pytest.mark.parametrize("view", [
@@ -1106,44 +1115,54 @@ def _texts(log):
     {"intraday": {"day": "2026-10-19", "slot": "09:06", "latest": {"SPY": {}}}},
     {"intraday": {"day": "2026-10-19", "slot": "09:06", "timeline": "x",
                   "latest": {"SPY": "junk", "QQQ": {"direction": None, "roles": {}}}}},
+    {"symbols": {"SPY": "junk", "QQQ": {"direction": True, "roles": "x"}},
+     "intraday": {"day": "2026-10-19", "slot": "09:06", "latest": {"QQQ": []}}},
 ])
-def test_the_intraday_panels_never_raise_on_a_partial_payload(drawn, view):
-    scalp._intraday_panels(view, _at(2026, 10, 19, 9, 10))
+def test_the_glance_and_the_details_never_raise_on_a_partial_payload(drawn, view):
+    scalp._glance(view, _at(2026, 10, 19, 9, 10))
+    scalp._details(view, _at(2026, 10, 19, 9, 10))
+    scalp.glance_rows(view, _at(2026, 10, 19, 9, 10))
 
 
-def test_an_empty_section_draws_nothing(drawn):
-    scalp._intraday_panels({}, _at(2026, 10, 19, 9, 10))
-    scalp._intraday_panels({"intraday": {}}, _at(2026, 10, 19, 9, 10))
+def test_an_empty_view_draws_no_glance_and_no_symbol_section(drawn):
+    assert scalp._glance({}, _at(2026, 10, 19, 9, 10)) is None
+    assert scalp._glance({"intraday": {}}, _at(2026, 10, 19, 9, 10)) is None
     assert drawn == []
+    scalp._details({}, _at(2026, 10, 19, 9, 10))
+    scalp._details({"intraday": {}}, _at(2026, 10, 19, 9, 10))
+    folds = _folds(drawn)
+    assert not any(f.endswith("details") for f in folds)
+    assert "Today's calls" not in folds
+    assert folds.count("Scorecard") == 2
 
 
 def test_no_timeline_and_no_symbol_say_so_in_words(drawn):
-    scalp._intraday_panels({"intraday": {"day": "2026-10-19", "slot": "09:06"}},
-                           _at(2026, 10, 19, 9, 10))
+    scalp._details({"intraday": {"day": "2026-10-19", "slot": "09:06"}},
+                   _at(2026, 10, 19, 9, 10))
     texts = _texts(drawn)
-    assert "No calls published yet." in texts
-    assert "No symbol has a direction to confirm." in texts
-    assert scalp.CONFIRMATION_TITLE in texts and "Today's calls" in texts
+    assert "No calls published yet." in texts and "Today's calls" in texts
+    assert not any(t.startswith("Confirmation ·") for t in texts)
     assert not any(kind == "table" for kind, _ in drawn)
 
 
 def test_a_symbol_with_no_roles_draws_its_note_and_no_table(drawn):
     flat = _ientry(None, roles={}, note="flat over the last 15 minutes — no direction",
                    confirmation={}, dealer_line=None)
-    scalp._intraday_panels({"intraday": _section(latest={"$SPX": flat})},
-                           _at(2026, 10, 19, 10, 25))
+    scalp._details({"intraday": _section(latest={"$SPX": flat})},
+                   _at(2026, 10, 19, 10, 25))
     texts = _texts(drawn)
     assert "Flat over the last 15 minutes — no direction" in texts
-    assert "$SPX" in texts and "No symbol has a direction to confirm." in texts
+    assert "$SPX details" in _folds(drawn)
+    assert not any(t.startswith("Confirmation ·") for t in texts)
     assert not any(t.startswith("Dealer read") for t in texts)
     # the timeline still has its table; the flat card has none of its own
     assert [t for k, t in drawn if k == "table"] == [2]
 
 
 def test_a_stale_day_draws_neutral_labels_and_the_confirmation_names_the_day(drawn):
-    scalp._intraday_panels({"intraday": _section()}, _at(2026, 10, 20, 9, 0))
+    scalp._details({"intraday": _section()}, _at(2026, 10, 20, 9, 0))
     texts = _texts(drawn)
-    assert "Calls of 2026-10-19 — not today's" in texts
+    assert "Calls of 2026-10-19 — not today's" in _folds(drawn)
     assert "Latest call" not in texts
     assert any(t.startswith("From the calls of 2026-10-19") for t in texts)
 
@@ -1178,12 +1197,13 @@ def test_the_word_says_how_many_sources_it_rests_on():
     assert scalp.confirmation_sources(_ientry(1, confirmation={})) == ""
 
 
-def test_the_latest_card_and_the_panel_show_the_sources_count(drawn):
+def test_the_latest_card_and_the_confirmation_show_the_sources_count(drawn):
     conf = dict(_conf("Confirms"), n_present=2, n_sources=4, word_note=None)
     sec = _section(latest={"SPY": _ientry(1, confirmation=conf)})
-    scalp._intraday_panels({"intraday": sec}, _at(2026, 10, 19, 10, 25))
+    scalp._details({"intraday": sec}, _at(2026, 10, 19, 10, 25))
     texts = _texts(drawn)
-    assert "SPY · Confirms · 2 of 4 sources" in texts
+    assert "Confirmation · Confirms · 2 of 4 sources" in texts
+    assert scalp.CONFIRMATION_TITLE in texts
     assert any(t.startswith("Confirmation: Confirms · 2 of 4 sources") for t in texts)
 
 
@@ -1194,11 +1214,11 @@ def test_another_days_timeline_draws_no_edge_colour(drawn, monkeypatch):
     monkeypatch.setattr(kit, "table", lambda cols, rows=None, **k: (
         seen.append(list(rows or [])), _Rec(drawn, "table", len(list(rows or []))))[1])
     sec = _section()
-    scalp._intraday_panels({"intraday": sec}, _at(2026, 10, 19, 10, 25))      # today
+    scalp._details({"intraday": sec}, _at(2026, 10, 19, 10, 25))      # today
     today = next(rows for rows in seen if rows and "s0_pick" in rows[0])
     assert theme.TXT_POS in today[1]["s0_pick_class"]
     seen.clear()
-    scalp._intraday_panels({"intraday": sec}, _at(2026, 10, 20, 9, 0))        # next day
+    scalp._details({"intraday": sec}, _at(2026, 10, 20, 9, 0))        # next day
     old = next(rows for rows in seen if rows and "s0_pick" in rows[0])
     assert old[1]["s0_pick"] == "Long put · 63.00% vs 50.00% usually"     # words kept
     assert theme.TXT_POS not in old[1]["s0_pick_class"]
@@ -1219,3 +1239,178 @@ def test_the_0836_card_survives_a_list_valued_highlight(drawn):
 def test_the_first_paint_is_guarded_like_the_timer():
     body = SRC[SRC.index("def render():"):]
     assert "@guard\n    def _paint(view):" in body
+
+
+# ── the glance: one row per symbol at the top, the details below ────────────
+def _glance_view(**over):
+    view = {"state": "call", "day": "2026-10-19", "call_day": "2026-10-19",
+            "symbols": {"SPY": _symbol(-1)}, "intraday": _section()}
+    view.update(over)
+    return view
+
+
+def test_the_glance_row_reads_the_latest_15_minute_call():
+    from pages.options import theme
+    row, = scalp.glance_rows(_glance_view(), _at(2026, 10, 19, 10, 25))
+    assert row["symbol"] == "SPY" and row["price"] == fmt.price(503.5)
+    assert row["now"] == "↑ Up" and row["when"] == "10:21 call"
+    assert row["_now_class"] == theme.TXT_POS
+    assert row["word"] == "Mixed" and row["_word_class"] == theme.BADGE_WARN
+    assert row["trade"] == f"Long call {fmt.strike(504.0)}" and row["side"] == "with the move"
+    # the headline number is the USUAL rate, not the bucket's own
+    assert row["rate"] == "50.00%" and row["rate_note"] == "" and row["edge"] is False
+    assert row["room"] == "The call wall at 503.75 (0.05%) is inside the target"
+    assert row["morning"] == "↓ Down"
+
+
+def test_the_room_is_the_dealer_lines_own_first_clause():
+    entry = _ientry(1, dealer_line="Room up to the call wall at 510.00 (1.29%); "
+                                   "8 of 10 big names have room")
+    row = scalp.glance_row("SPY", entry, "intraday", current=True, when="10:21 call")
+    assert row["room"] == "Room up to the call wall at 510.00 (1.29%)"
+    flat = _ientry(None, roles={}, note="flat over the last 15 minutes — no direction")
+    row = scalp.glance_row("SPY", flat, "intraday", current=True, when="10:21 call")
+    assert row["room"] == fmt.NO_READING and row["now"] == "No direction"
+    assert row["trade"] == "Flat over the last 15 minutes — no call"
+    assert row["rate"] == fmt.NO_READING and row["side"] == ""
+
+
+def test_a_call_whose_time_has_passed_keeps_its_words_and_loses_its_colour():
+    from pages.options import theme
+    view = _glance_view()
+    view["intraday"]["latest"]["SPY"]["highlight"] = "long_against"
+    live, = scalp.glance_rows(view, _at(2026, 10, 19, 10, 25))
+    assert live["edge"] is True and live["rate_note"] == scalp.EDGE
+    assert live["trade"] == f"Long put {fmt.strike(504.0)}"
+    assert live["side"] == "against the move"
+    assert live["rate"] == "50.00% vs 50.00% usually"
+    assert theme.TXT_POS in live["_rate_class"]
+    past, = scalp.glance_rows(view, _at(2026, 10, 19, 10, 40))
+    assert past["when"] == "10:21 call · past" and past["edge"] is False
+    assert past["rate_note"] == scalp.EDGE and past["_rate_class"] == ""
+    assert past["_now_class"] == theme.MUTED and past["_word_class"] == theme.BADGE_MUTED
+    assert past["_morning_class"] == theme.MUTED
+
+
+def test_a_caution_is_said_beside_the_rate_never_as_an_edge():
+    from pages.options import theme
+    view = _glance_view()
+    view["intraday"]["latest"]["SPY"]["avoid"] = ["long_with"]
+    row, = scalp.glance_rows(view, _at(2026, 10, 19, 10, 25))
+    assert row["rate_note"] == scalp.CAUTION and row["edge"] is False
+    assert row["_rate_class"] == theme.TXT_WARN
+
+
+def test_before_the_first_15_minute_call_the_0836_call_leads():
+    view = _glance_view(day="2026-10-20", call_day="2026-10-20")
+    assert scalp.intraday_leads(view) is False
+    row, = scalp.glance_rows(view, _at(2026, 10, 20, 8, 40))
+    assert row["when"] == "08:36 call" and row["now"] == "↓ Down"
+    assert row["word"] == fmt.NO_READING and row["_word_class"] == ""
+    assert row["room"] == fmt.NO_READING
+    assert row["trade"] == f"Long put {fmt.strike(501.0)}" and row["rate"] == "40.00%"
+    assert scalp.glance_line(view, _at(2026, 10, 20, 8, 40)) == \
+        ("Today's call · made 08:36 CT", "")
+
+
+def test_yesterdays_call_is_labelled_not_todays_in_the_glance():
+    from pages.options import theme
+    row, = scalp.glance_rows(_glance_view(), _at(2026, 10, 20, 8, 0))
+    assert row["when"] == "2026-10-19 10:21 call · not today's"
+    assert row["_now_class"] == theme.MUTED and row["edge"] is False
+    morning, = scalp.glance_rows(_glance_view(intraday={}), _at(2026, 10, 20, 8, 0))
+    assert morning["when"] == "2026-10-19 08:36 call · not today's"
+
+
+def test_a_symbol_only_one_call_carries_still_has_a_row():
+    view = _glance_view(symbols={"SPY": _symbol(-1), "QQQ": _symbol(1)})
+    rows = scalp.glance_rows(view, _at(2026, 10, 19, 10, 25))
+    assert [r["symbol"] for r in rows] == ["SPY", "QQQ"]
+    assert rows[0]["when"] == "10:21 call" and rows[1]["when"] == "08:36 call"
+    only = _glance_view(symbols={})
+    assert [r["symbol"] for r in scalp.glance_rows(only, _at(2026, 10, 19, 10, 25))] == ["SPY"]
+
+
+def test_the_glance_line_and_the_edge_summary():
+    view = _glance_view()
+    assert scalp.glance_line(view, _at(2026, 10, 19, 10, 25)) == \
+        ("Latest call at 10:21 · next at 10:36", "")
+    line, warning = scalp.glance_line(view, _at(2026, 10, 19, 10, 40))
+    assert line.startswith("Last call at 10:21") and "newer slot" in warning
+    rows = scalp.glance_rows(view, _at(2026, 10, 19, 10, 25))
+    assert scalp.edge_summary(rows) == scalp.GLANCE_EDGE_NONE
+    view["intraday"]["latest"]["SPY"]["highlight"] = "long_with"
+    rows = scalp.glance_rows(view, _at(2026, 10, 19, 10, 25))
+    assert scalp.edge_summary(rows) == "Measured edge now: SPY"
+    flat = _ientry(None, roles={}, note="flat over the last 15 minutes — no direction")
+    rows = scalp.glance_rows(_glance_view(symbols={}, intraday=_section(latest={"SPY": flat})),
+                             _at(2026, 10, 19, 10, 25))
+    assert scalp.edge_summary(rows) == ""
+
+
+def test_the_countdown_runs_to_the_next_slot_today_only():
+    view = _glance_view()
+    assert scalp.countdown_text(view, _at(2026, 10, 19, 10, 25)) == "next call in 11 min"
+    almost = _dt.datetime(2026, 10, 19, 10, 35, 30, tzinfo=_CT)
+    assert scalp.countdown_text(view, almost) == "next call in 1 min"
+    assert scalp.countdown_text(view, _at(2026, 10, 19, 10, 40)) == ""
+    final = _glance_view(intraday=_section(next_slot="2026-10-20T08:51:00-05:00"))
+    assert scalp.countdown_text(final, _at(2026, 10, 19, 14, 0)) == ""
+    assert scalp.countdown_text({}, _at(2026, 10, 19, 10, 25)) == ""
+
+
+def test_the_glance_draws_one_kit_table_and_returns_its_countdown(drawn):
+    label = scalp._glance(_glance_view(symbols={"SPY": _symbol(-1), "QQQ": _symbol(1)}),
+                          _at(2026, 10, 19, 10, 25))
+    assert label is not None and label.text == "next call in 11 min"
+    assert [t for k, t in drawn if k == "table"] == [2]
+    assert "Latest call at 10:21 · next at 10:36" in _texts(drawn)
+    assert "kit.table(glance_columns(), rows)" in SRC
+    assert {c["name"] for c in scalp.glance_columns()} == set(scalp._GLANCE_SLOTS)
+
+
+def test_each_symbol_has_one_closed_section_with_its_calls(drawn):
+    view = _glance_view(symbols={"SPY": _symbol(-1), "QQQ": _symbol(1)})
+    scalp._details(view, _at(2026, 10, 19, 10, 25))
+    assert _folds(drawn) == ["SPY details", "QQQ details", "Today's calls",
+                             "Not in the probability: headlines, flow alerts and the report",
+                             "Scorecard"]
+    texts = _texts(drawn)
+    # inside SPY's section the 15-minute call comes first, then the 08:36 call
+    spy = texts[texts.index("SPY details"):texts.index("QQQ details")]
+    assert spy.index("15-minute call") < spy.index("08:36 call")
+    assert any(t.startswith("Confirmation ·") for t in spy)
+    qqq = texts[texts.index("QQQ details"):texts.index("Today's calls")]
+    assert "08:36 call" in qqq and "15-minute call" not in qqq
+
+
+def test_before_the_first_15_minute_call_the_0836_card_comes_first(drawn):
+    view = _glance_view(day="2026-10-20", call_day="2026-10-20")
+    scalp._details(view, _at(2026, 10, 20, 8, 40))
+    texts = _texts(drawn)
+    spy = texts[texts.index("SPY details"):]
+    assert spy.index("08:36 call") < spy.index("15-minute call")
+
+
+def test_an_open_section_stays_open_across_a_repaint(monkeypatch):
+    from nicegui import ui
+    made = []
+
+    def expansion(text="", *a, value=False, on_value_change=None, **k):
+        made.append((text, value, on_value_change))
+        return _Rec([], "expansion", text)
+    monkeypatch.setattr(ui, "expansion", expansion)
+    toggled = []
+    exp = scalp._fold("SPY details", "symbol:SPY", {"symbol:SPY"},
+                      lambda key, is_open: toggled.append((key, is_open)))
+    assert made[0][:2] == ("SPY details", True)
+    made[0][2](type("E", (), {"value": False})())
+    assert toggled == [("symbol:SPY", False)] and exp.text == "SPY details"
+    scalp._fold("Scorecard", "scorecard", set())
+    assert made[1][1] is False
+    body = SRC[SRC.index("def render():"):]
+    assert '"open": set()' in body
+    assert '_details(view, now, state["open"], _toggle)' in body
+    assert "@guard\n    def _toggle(" in body
+    tick = body[body.index("@guard\n    def _tick"):]
+    assert 'state["countdown"].text = countdown_text(state["view"], now)' in tick

@@ -4,7 +4,28 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-20 (**Opening Scalp: a new, frozen 0DTE call every 15 minutes, 08:51 to 13:51 CT, with a confirmation reading beside it.**)
+**Last updated:** 2026-10-21 (**Opening Scalp: the page leads with one table of all three symbols; the detail is folded below it.**)
+
+- **Asked for by the operator:** the page was "extremely difficult to read" (about
+  seven screens: three 08:36 cards, three 15-minute cards, a confirmation panel, the
+  timeline, the context and the scorecard, one symbol's facts spread over three
+  places). They wanted "an at a glance look of all 3 symbols and then the details to
+  follow below", and picked a compact table, a row per symbol, from three mockups.
+- **What changed (`webgui/pages/options/scalp.py`, page only; no service, view or
+  config change):** `_glance` draws one line (the call shown, a countdown to the next
+  call, and whether any symbol has a measured edge) and one `kit.table` row per symbol
+  (`glance_rows`): the direction now, the confirmation word, the trade with the call
+  and its usual win rate, the room to the wall (the first clause of the service's own
+  dealer line) and the 08:36 direction. Below it, closed `ui.expansion` sections: one
+  per symbol (its 15-minute call, its confirmation and its 08:36 call, the most recent
+  first), the day's calls, the context and the scorecard. Open sections are reopened
+  on every repaint; the clock tick refreshes the countdown without one.
+  `_intraday_panels` and the all-symbol `_confirmation_panel` are gone
+  (`_details`, `_confirmation_block`). Rates keep two decimals (the house rule).
+- **Docs:** the User Guide, Reference Guide, `page_help.py` and `webgui-routes.md`
+  describe the new layout. Verified in the local page harness on the live 09:21 view.
+
+**Prior —** 2026-10-20 (**Opening Scalp: a new, frozen 0DTE call every 15 minutes, 08:51 to 13:51 CT, with a confirmation reading beside it.**)
 
 - **Asked for by the operator:** the scalp page should take in (1) flow alerts on
   $SPX, SPY, QQQ and the big ten, (2) market trend and sentiment in a minor role,

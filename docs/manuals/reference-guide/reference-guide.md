@@ -3683,7 +3683,20 @@ There are no trade buttons: you read it and decide.
 
 ### Reading the screen
 
-**Each symbol is a card.** Its header says **Opened up** or **Opened down** (a flat
+**Start with the table at the top: one row per symbol.** It answers "what is each
+symbol doing now?" without scrolling: the direction of the latest call (the 15-minute
+call from 08:51, the 08:36 call before that), the confirmation word, the trade that
+goes with the call and how often it usually wins, the room to the dealers' wall, and
+the 08:36 call's direction. The line above it names the call shown, counts down to the
+next one and says whether any symbol has a measured edge. A row whose call is no longer
+current keeps its words and is drawn without colour.
+
+**The detail sits below, closed until you open it**: a section per symbol holding its
+15-minute call, its confirmation and its 08:36 call (the most recent first), then
+Today's calls, Not in the probability and the Scorecard. A section you open stays open
+when the page repaints.
+
+**The 08:36 call is a card in each symbol's section.** Its header says **Opened up** or **Opened down** (a flat
 open names no direction and gets no call) and whether it is today's call or an
 earlier day's — on a closed day or before 08:36 the page keeps the last call on
 screen and labels its day, so yesterday's call is never read as today's. A line at
@@ -3728,7 +3741,7 @@ or high bucket.
 on these symbols are shown for context only; none of them was measured or fed into
 the rates.
 
-**Scorecard.** The last card is the graded record, per symbol, over the last 20
+**Scorecard.** The last section is the graded record, per symbol, over the last 20
 graded days (`scorecard_days`), republished into the view as soon as the night's
 grading is done. Grading uses only the call **as published** — its strikes, entry,
 highlight/avoid marks and its rules (target, stop, time stop, minimum premium and

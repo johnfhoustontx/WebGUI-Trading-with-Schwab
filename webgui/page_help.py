@@ -1063,6 +1063,16 @@ how often each of four same-day (0DTE) scalps has worked on past mornings that
 looked like this one. It is a **reading, not a signal**: there are no trade
 buttons, and you decide.
 
+**Read the table at the top first.** One row per symbol: which way it is going
+**now** (the latest 15-minute call from 08:51, the 08:36 call before that), the
+**confirmation** word, the **trade with the call** and how often it **usually
+wins**, the **room to the wall**, and the **08:36 call**. The line above says which
+call this is, when the next one comes, and whether any symbol has a measured edge.
+A call that is no longer current is drawn without colour. Everything below the
+table is **closed**: open a symbol's section for its full calls, or Today's calls,
+Not in the probability and the Scorecard. A section you open stays open when a
+new call arrives.
+
 - **Opened up / down** is the first five-minute bar. A flat open names no
   direction and gets no call.
 - **Morning inputs** are your premarket routine, measured: overnight futures,
@@ -1107,7 +1117,7 @@ time it just puts today's published calls back and never makes an off-slot call.
 **Not in the probability** (headlines, flow alerts and the report link) is shown
 for context only. None of it was measured or fed into the rates.
 
-**Calls every 15 minutes.** Below the 08:36 cards the page shows a new call
+**Calls every 15 minutes.** After the 08:36 call the page shows a new call
 every 15 minutes from **08:51 to 13:51 CT**, for the same three symbols. Each
 is a scalp entered **at that moment** (on the last five-minute bar that has
 closed) and is frozen once shown; the next slot is a new call, not an edit.
