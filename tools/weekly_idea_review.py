@@ -22,7 +22,9 @@ alert fires.
 **Claude's text is checked, not trusted.** A suggestion must cite fact ids that
 exist; any paragraph or suggestion holding a number the facts do not hold is
 dropped whole (see :func:`verify`). Code states the facts; the model only joins
-them and adds judgment.
+them and adds judgment. The check proves a number is IN the facts, not that it
+is used with the right meaning or sign: "SPY lost 100.00" passes when SPY made
+100.00, so the prompt tells Claude to keep each figure's sign and subject.
 
 Exit codes: 0 written (or not the review day), 2 the bus was empty or
 unreadable (nothing written: a page of empty tables would replace a real
@@ -36,7 +38,6 @@ import os
 import pathlib
 import re
 import sys
-import tempfile
 from datetime import date, datetime
 from html import escape as _escape
 from zoneinfo import ZoneInfo
@@ -53,7 +54,6 @@ CT = ZoneInfo("America/Chicago")
 ARCHIVE_ROOT = _REPO_ROOT / "webgui" / "data" / "idea_review"
 PROMPT_FILE = pathlib.Path(__file__).resolve().parent / "prompts" / "weekly_idea_review.md"
 TOOL_NAME = "weekly_judgment"
-MAX_TOKENS = 4000
 
 JUDGMENT_SCHEMA = {
     "type": "object",
@@ -117,8 +117,22 @@ def week_label(d: date) -> str:
 # A signed number, optionally with a dollar sign, thousands commas and a
 # percent sign. A trailing period is not captured (no digit follows it).
 _NUMBER = re.compile(r"-?\$?\d[\d,]*(?:\.\d+)?%?")
-# Terms that hold a digit but state no figure.
-_VOCABULARY = ("0-DTE", "0DTE")
+# Terms that hold a digit (or a number word) but state no figure.
+_VOCABULARY = ("0-DTE", "0DTE", "zero-DTE")
+
+# A figure written in words is still a figure. "one" is left out on purpose:
+# it is far more often a pronoun ("one of the strongest groups") than a count,
+# and reading it as 1 would drop honest text. Inside a hyphenated compound
+# ("twenty-one") it is read, because there it can only be a number.
+_UNITS = {w: i for i, w in enumerate(
+    "zero one two three four five six seven eight nine ten eleven twelve "
+    "thirteen fourteen fifteen sixteen seventeen eighteen nineteen "
+    "twenty".split())}
+_TENS = {w: 10 * i for i, w in enumerate(
+    "twenty thirty forty fifty sixty seventy eighty ninety".split(), start=2)}
+_WORDS = {**{w: v for w, v in _UNITS.items() if w != "one"}, **_TENS,
+          "hundred": 100, "half": 0.5, "twice": 2, "double": 2, "triple": 3}
+_WORD = re.compile(r"[a-z]+(?:-[a-z]+)*")
 
 
 def _group_facts(f: dict):
@@ -141,17 +155,35 @@ def _labels(f: dict) -> list[str]:
     return sorted(ids | names | set(_VOCABULARY), key=len, reverse=True)
 
 
+def _word_values(text: str) -> list[float]:
+    """The figures ``text`` writes in words: each number word on its own, and
+    a hyphenated tens-and-unit compound ("twenty-five") as one value."""
+    out = []
+    for token in _WORD.findall(text.lower()):
+        parts = token.split("-")
+        if len(parts) == 2 and parts[0] in _TENS and parts[1] in _UNITS \
+                and 0 < _UNITS[parts[1]] < 10:
+            out.append(float(_TENS[parts[0]] + _UNITS[parts[1]]))
+            continue
+        out.extend(float(_WORDS[w]) for w in parts if w in _WORDS)
+    return out
+
+
 def _numbers_ok(text: str, allowed: list[float], labels: list[str]) -> bool:
     for label in labels:
-        text = text.replace(label, " ")
+        text = re.sub(re.escape(label), " ", text, flags=re.IGNORECASE)
+    values = []
     for token in _NUMBER.findall(text):
         try:
-            v = float(token.replace("$", "").replace(",", "").replace("%", ""))
+            values.append(float(token.replace("$", "").replace(",", "")
+                                .replace("%", "")))
         except ValueError:
             return False
-        if not any(abs(v - a) <= 0.005 for a in allowed):
-            return False
-    return True
+    values += _word_values(text)
+    return all(any(abs(v - a) <= 0.005 for a in allowed) for v in values)
+
+
+_TOTALS = ("week.total", "all_time.total")
 
 
 def verify(judgment: dict, f: dict, min_n: int) -> dict:
@@ -161,9 +193,16 @@ def verify(judgment: dict, f: dict, min_n: int) -> dict:
     ``fact_ids(f)``; a paragraph or suggestion is dropped whole when it holds a
     number that is not, within 0.005, one of ``fact_numbers(f)`` (``$``, ``,``
     and ``%`` stripped first, so "62.5", "62.50" and "62.50%" all match 62.50).
-    Fact ids and group names are not read as numbers. A kept suggestion carries
-    ``n``, the summed ``n`` of the facts it cites, and ``thin``, true when every
-    one of them holds fewer than ``min_n`` trades.
+    A number written in words ("nine", "twenty-five", "half", "twice") is
+    checked the same way; "one" is not read as a number (see ``_WORDS``). Fact
+    ids and group names are not read as numbers.
+
+    A kept suggestion carries ``n``, the LARGEST ``n`` among the facts it
+    cites (cited groups overlap, so a sum would count one trade several times),
+    and ``thin``, true when that ``n`` is under ``min_n``. The two totals
+    (``week.total``, ``all_time.total``) count only when nothing else is cited:
+    citing the whole book beside a thin group does not make the group's
+    pattern less thin.
 
     Raises ``ValueError`` when ``judgment`` is not the schema's shape: a reply
     that is not a judgment at all is a failed run, not an empty one.
@@ -196,13 +235,10 @@ def verify(judgment: dict, f: dict, min_n: int) -> dict:
             dropped += 1
             continue
         cites = list(dict.fromkeys(cites))
-        facts = [by_id[c] for c in cites]
-        kept.append({
-            "text": text,
-            "cites": cites,
-            "n": sum(int(x["n"]) for x in facts),
-            "thin": all(int(x["n"]) < int(min_n) for x in facts),
-        })
+        groups = [c for c in cites if c not in _TOTALS] or cites
+        n = max(int(by_id[c]["n"]) for c in groups)
+        kept.append({"text": text, "cites": cites, "n": n,
+                     "thin": n < int(min_n)})
     return {
         "assessment": kept_paragraphs,
         "suggestions": kept,
@@ -223,11 +259,11 @@ def _rounded(v):
     return v
 
 
-def ask_claude(client, f: dict, model: str) -> dict:
+def ask_claude(client, f: dict, model: str, max_tokens: int) -> dict:
     """Claude's raw judgment (a dict); raises on any failure."""
     resp = client.messages.create(
         model=model,
-        max_tokens=MAX_TOKENS,
+        max_tokens=max_tokens,
         system=PROMPT_FILE.read_text(encoding="utf-8"),
         messages=[{"role": "user", "content": json.dumps(_rounded(f))}],
         tools=[{"name": TOOL_NAME, "input_schema": JUDGMENT_SCHEMA}],
@@ -248,14 +284,29 @@ def _pct(v) -> str:
     return "—" if v is None else f"{v:.2f}%"
 
 
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
 def _held(hours) -> str:
+    """In whole words: "1 day 3 hours" from a day on, "2 hours 5 minutes"
+    under it; a zero part is left out."""
     if hours is None:
         return "—"
     mins = int(round(hours * 60))
     days, rem = divmod(mins, 1440)
     if days:
-        return f"{days}d {rem // 60}h"
-    return f"{rem // 60}h {rem % 60:02d}m"
+        parts = [_plural(days, "day")]
+        parts += [_plural(rem // 60, "hour")] if rem // 60 else []
+    else:
+        parts = [_plural(rem // 60, "hour")] if rem // 60 else []
+        parts += [_plural(rem % 60, "minute")] if rem % 60 or not parts else []
+    return " ".join(parts)
+
+
+# The Ledger's exit reasons in plain words.
+_REASONS = {"TARGET": "Target reached", "STOP": "Stopped out",
+            "EXPIRED": "Expired", "MANUAL": "Closed by hand"}
 
 
 def _pn(v) -> str:
@@ -282,7 +333,7 @@ def _judgment_html(judgment) -> str:
     items = []
     for s in judgment["suggestions"]:
         n = s["n"]
-        basis = f"based on {n} trade{'' if n == 1 else 's'}"
+        basis = f"based on a group of {_plural(n, 'trade')}"
         if s["thin"]:
             basis += f"; {THIN_LABEL}"
         items.append(f"<li>{escape(s['text'])} "
@@ -298,7 +349,12 @@ def _judgment_html(judgment) -> str:
     return f"<h2>Assessment</h2>{paras}<h2>Suggestions</h2>{sugg}{note}"
 
 
-_CLOSED_COLS = ["Symbol", "Structure", "Grade", "Rating", "Entry", "Exit",
+# The Ledger's own money convention: an entry is + for a credit received and -
+# for a debit paid; an exit is what closing cost a credit trade, or what closing
+# brought in for a debit trade.
+_CLOSED_COLS = ["Symbol", "Structure", "Grade", "Rating",
+                "Entry (+ credit received, − debit paid)",
+                "Exit (credit trade: paid to close; debit trade: received)",
                 "Reason", "Held", "MAE % of max loss", "P&L"]
 _OPEN_COLS = ["Symbol", "Structure", "Grade", "Days open", "MAE $ per contract",
               "MAE % of max loss", "Open P&L"]
@@ -310,7 +366,8 @@ _GROUP_COLS = ["Group", "Trades", "Targets", "Stops", "Expired", "By hand",
 def _closed_rows(lines) -> list[str]:
     return ["<tr>" + _td(t["symbol"]) + _td(t["strategy"]) + _td(t["grade"])
             + _td(t["rating"]) + _td(_money(t.get("entry")))
-            + _td(_money(t.get("exit"))) + _td(t.get("exit_reason") or "—")
+            + _td(_money(t.get("exit")))
+            + _td(_REASONS.get(t.get("exit_reason"), t.get("exit_reason") or "—"))
             + _td(_held(t.get("held_h"))) + _td(_pct(t.get("mae_pct")))
             + _td(_money(t["realized_pnl"]), _pn(t["realized_pnl"])) + "</tr>"
             for t in lines]
@@ -352,8 +409,8 @@ def render(f: dict, judgment: dict | None, week: str) -> str:
     year, wk = week.split("-W")
     monday = date.fromisocalendar(int(year), int(wk), 1)
     sunday = date.fromisocalendar(int(year), int(wk), 7)
-    span = (f"{monday:%a} {monday.day} {monday:%b} to "
-            f"{sunday:%a} {sunday.day} {sunday:%b %Y}")
+    span = (f"{monday:%A} {monday.day} {monday:%B} to "
+            f"{sunday:%A} {sunday.day} {sunday:%B %Y}")
     repeats = "".join(
         f"<li>{escape(str(r['idea_id']))}: booked {r['count']} times</li>"
         for r in f.get("repeats") or ())
@@ -378,24 +435,6 @@ def render(f: dict, judgment: dict | None, week: str) -> str:
     from pages.options import theme
     return eod.wrap_document(fragment, eod.build_eod_css(theme.THEME),
                              f"Weekly review {week}")
-
-
-def _atomic_write(path: pathlib.Path, text: str) -> None:
-    """Temp file in the same folder, then ``os.replace``: the app never serves
-    a half-written report."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=path.name + ".",
-                               suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(text)
-        os.replace(tmp, path)
-    except BaseException:
-        try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        raise
 
 
 # ---- the run ------------------------------------------------------------------
@@ -451,14 +490,17 @@ def main(argv=None, *, client=None, read_snapshot=None, archive_root=None) -> in
 
     judgment = None
     try:
-        raw = ask_claude(client or _default_client(), f, cfg["review_model"])
+        raw = ask_claude(client or _default_client(), f, cfg["review_model"],
+                         cfg["review_max_tokens"])
         judgment = verify(raw, f, cfg["min_n"])
     except Exception as exc:
         print(f"Claude's judgment is missing ({type(exc).__name__}: {exc}); "
               "writing the numbers only.", file=sys.stderr)
 
     out = (pathlib.Path(archive_root) if archive_root else ARCHIVE_ROOT) / week / "report.html"
-    _atomic_write(out, render(f, judgment, week))
+    doc = render(f, judgment, week)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    _eod().atomic_write_text(out, doc)   # the app never serves a half-written file
     print(f"Weekly idea review written for {week}: {out}")
     return 0 if judgment is not None else 3
 

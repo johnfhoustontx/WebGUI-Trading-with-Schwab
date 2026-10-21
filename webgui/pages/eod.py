@@ -927,7 +927,7 @@ def day_label(date: str) -> str:
     return f"{d.strftime('%a')} {d.day} {d.strftime('%b')}"
 
 
-def _atomic_write_text(path: Path, text: str) -> None:
+def atomic_write_text(path: Path, text: str) -> None:
     """Write ``text`` to ``path`` atomically.
 
     Writes to a temp file in the SAME directory (so ``os.replace`` is a rename on
@@ -935,7 +935,8 @@ def _atomic_write_text(path: Path, text: str) -> None:
     mid-write leaves the temp file, never a half-written ``path`` — so a
     concurrent reader (``/eod/file``) never serves a partial document.
     ``os.replace`` overwrites an existing target atomically, preserving the
-    same-date-overwrite behavior.
+    same-date-overwrite behavior. ``tools/weekly_idea_review.py`` writes its
+    archive through this too; the folder must already exist.
     """
     fd, tmp_name = tempfile.mkstemp(
         dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
@@ -962,8 +963,8 @@ def write_archive(root, date: str, summary_doc: str, detail_doc: str) -> dict:
     day = Path(root) / date
     day.mkdir(parents=True, exist_ok=True)
     summ, det = day / "summary.html", day / "detail.html"
-    _atomic_write_text(summ, summary_doc)
-    _atomic_write_text(det, detail_doc)
+    atomic_write_text(summ, summary_doc)
+    atomic_write_text(det, detail_doc)
     return {"summary": summ, "detail": det}
 
 

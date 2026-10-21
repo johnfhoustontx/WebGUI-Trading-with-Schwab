@@ -1626,6 +1626,10 @@ _PAPER = ConfigFile(
                   "The Claude model tier that writes the weekly judgment. Use a "
                   "tier name such as sonnet, not a version. Applies at the "
                   "next weekly run.", kind="text", restart=()),
+            Field("idea_trades.review_max_tokens", "Weekly review length limit",
+                  "The longest written judgment the weekly review asks Claude "
+                  "for, in tokens. Applies at the next weekly run.",
+                  kind="int", min=1, max=64000, step=100, restart=()),
         ), restart=(OPTIONS,)),
     ),
 )

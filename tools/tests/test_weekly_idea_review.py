@@ -104,7 +104,8 @@ def fake_cli_raises(tmp_path):
 
 @pytest.fixture(autouse=True)
 def _cfg(monkeypatch):
-    monkeypatch.setattr(w, "_cfg", lambda: dict(CFG, review_model="sonnet"))
+    monkeypatch.setattr(w, "_cfg", lambda: dict(CFG, review_model="sonnet",
+                                                review_max_tokens=4000))
 
     def _no_real_cli():
         raise AssertionError("a test reached the real Claude Code CLI client")
@@ -186,9 +187,29 @@ def test_the_request_is_the_forced_schema_on_the_configured_model(tmp_path):
     assert sent["week"]["total"]["n"] == 2   # the manual row is not in it
 
 
+def test_max_tokens_comes_from_config(tmp_path, monkeypatch):
+    seen = {}
+
+    class _Client:
+        def __init__(self):
+            self.messages = SimpleNamespace(create=self._create)
+
+        def _create(self, **kw):
+            seen.update(kw)
+            return SimpleNamespace(content=[SimpleNamespace(
+                type="tool_use", input={"assessment": [], "suggestions": []})])
+
+    monkeypatch.setattr(w, "_cfg", lambda: dict(CFG, review_model="haiku",
+                                                review_max_tokens=1234))
+    assert _run(tmp_path, ["--date", FRIDAY], client=_Client()) == 0
+    assert (seen["model"], seen["max_tokens"]) == ("haiku", 1234)
+    assert seen["tool_choice"] == {"type": "tool", "name": "weekly_judgment"}
+
+
 def test_the_prompt_file_carries_the_rules():
     text = w.PROMPT_FILE.read_text(encoding="utf-8").lower()
-    for rule in ("fact id", "too few trades", "number", "date", "time"):
+    for rule in ("fact id", "too few trades", "number", "date", "time",
+                 "in words", "sign and subject"):
         assert rule in text, rule
 
 
@@ -230,7 +251,7 @@ def test_unknown_citation_drops_suggestion():
              {"text": "Keep trading SPY.", "cites": ["week.symbol.SPY"]},
              {"text": "Trade more TSLA.", "cites": ["week.symbol.TSLA"]},
              {"text": "Something.", "cites": []},
-             {"text": "Half right.", "cites": ["week.symbol.SPY", "nope"]},
+             {"text": "Partly right.", "cites": ["week.symbol.SPY", "nope"]},
          ]}
     out = w.verify(j, f, 5)
     assert [s["text"] for s in out["suggestions"]] == ["Keep trading SPY."]
@@ -252,6 +273,30 @@ def test_judgment_numbers_must_appear_in_facts():
     assert out["dropped_paragraphs"] == 1 and out["dropped_suggestions"] == 1
 
 
+@pytest.mark.parametrize("text, kept", [
+    ("The ideas won nine of ten this week.", False),     # 9 is not a fact
+    ("Nine of the trades won.", False),
+    ("Around twenty-five percent of them won.", False),  # 25 is not a fact
+    ("SPY was one of the strongest groups.", True),      # "one" is a pronoun
+    ("Two trades closed, half of them at a profit.", False),  # 0.5 not a fact
+    ("QQQ lost twice as much.", True),                   # 2 is a count fact
+    ("Seventy-five was the score.", True),               # 75 is the score
+])
+def test_numbers_in_words_are_checked_too(text, kept):
+    f = _facts()
+    assert "25" not in idea_review.fact_numbers(f)
+    assert "9" not in idea_review.fact_numbers(f)
+    out = w.verify({"assessment": [text], "suggestions": []}, f, 5)
+    assert (out["assessment"] == [text]) is kept
+
+
+def test_twenty_five_in_words_is_kept_when_25_is_a_fact():
+    f = _facts([row(idea_id="a", realized_pnl=25.0)])
+    out = w.verify({"assessment": ["It made twenty-five dollars."],
+                    "suggestions": []}, f, 5)
+    assert out["assessment"] == ["It made twenty-five dollars."]
+
+
 def test_a_cited_fact_id_is_not_read_as_a_number():
     trades = [row(idea_id="a", idea_posted="2026-10-13T13:15:00-05:00")]
     f = _facts(trades)
@@ -269,16 +314,32 @@ def test_thin_suggestion_labelled(tmp_path):
     j = {"assessment": [],
          "suggestions": [
              {"text": "SPY looks good.", "cites": ["week.symbol.SPY"]},
-             {"text": "All ideas overall.",
-              "cites": ["week.symbol.SPY", "all_time.total"]},
+             # overlapping groups: the largest n, never the sum (1 + 2)
+             {"text": "Strong SPY ideas.",
+              "cites": ["week.symbol.SPY", "week.grade.Strong"]},
+             {"text": "All ideas overall.", "cites": ["all_time.total"]},
          ]}
     out = w.verify(j, f, 2)
-    thin, mixed = out["suggestions"]
+    thin, overlap, total = out["suggestions"]
     assert (thin["n"], thin["thin"]) == (1, True)
-    assert (mixed["n"], mixed["thin"]) == (3, False)   # all_time.total n=2 >= 2
+    assert (overlap["n"], overlap["thin"]) == (2, False)
+    assert (total["n"], total["thin"]) == (2, False)   # a total cited alone counts
     html = w.render(f, out, "2026-W42")
-    assert "based on 1 trade" in html and "based on 3 trades" in html
+    assert "based on a group of 1 trade;" in html
+    assert "based on a group of 2 trades" in html
+    assert "based on a group of 3 trades" not in html
     assert html.count("too few trades to act on") == 1
+
+
+def test_citing_a_total_does_not_unthin_a_thin_group():
+    f = _facts()
+    j = {"assessment": [],
+         "suggestions": [{"text": "SPY, and the book.",
+                          "cites": ["week.symbol.SPY", "all_time.total",
+                                    "week.total"]}]}
+    (s,) = w.verify(j, f, 2)["suggestions"]
+    assert (s["n"], s["thin"]) == (1, True)
+    assert s["cites"] == ["week.symbol.SPY", "all_time.total", "week.total"]
 
 
 # ── the document ──
@@ -310,11 +371,40 @@ def test_render_without_a_judgment_says_so_and_keeps_every_table():
         assert heading in html, heading
 
 
-def test_render_escapes_claudes_text():
-    j = {"assessment": ["<script>x</script>"], "suggestions": [],
+def test_render_escapes_claudes_text_and_the_ledgers():
+    f = _facts([row(idea_id="a", strategy="<i>Odd</i>")])
+    j = {"assessment": ["<script>x</script>"],
+         "suggestions": [{"text": "<b>bold</b> idea", "cites": ["week.total"],
+                          "n": 1, "thin": True}],
          "dropped_paragraphs": 0, "dropped_suggestions": 0}
-    html = w.render(_facts(), j, "2026-W42")
+    html = w.render(f, j, "2026-W42")
     assert "<script>x" not in html and "&lt;script&gt;" in html
+    assert "<b>bold" not in html and "&lt;b&gt;bold&lt;/b&gt; idea" in html
+    assert "<i>Odd" not in html and "<td>&lt;i&gt;Odd&lt;/i&gt;</td>" in html
+
+
+def test_report_speaks_in_whole_words():
+    trades = [row(idea_id="a"),
+              row(idea_id="b", exit_reason="STOP", realized_pnl=-50.0,
+                  idea_posted="2026-10-14T10:00:00-05:00",
+                  exit_time="2026-10-14T12:05:00-05:00"),
+              row(idea_id="c", exit_reason="MANUAL"),
+              row(idea_id="d", exit_reason="EXPIRED")]
+    html = w.render(_facts(trades), None, "2026-W42")
+    assert "Monday 12 October to Sunday 18 October 2026" in html
+    assert "1 day 3 hours" in html and "2 hours 5 minutes" in html
+    for reason in ("Target reached", "Stopped out", "Closed by hand", "Expired"):
+        assert f"<td>{reason}</td>" in html, reason
+    assert "<td>TARGET</td>" not in html
+    assert "Entry (+ credit received" in html and "Exit (credit trade" in html
+
+
+def test_held_drops_a_zero_part():
+    assert w._held(24.0) == "1 day"
+    assert w._held(1.0) == "1 hour"
+    assert w._held(5 / 60) == "5 minutes"
+    assert w._held(0.0) == "0 minutes"
+    assert w._held(None) == "—"
 
 
 def test_week_label_is_iso_year_and_week():

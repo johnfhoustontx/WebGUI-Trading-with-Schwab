@@ -59,7 +59,7 @@ def test_the_shipped_file_matches_the_defaults():
 
 _IDEA_DEFAULTS = {"enabled": True, "quantity": 1, "mark_interval_min": 5,
                   "debit_stop_frac": 0.60, "clean_mae_pct": 25.0, "min_n": 5,
-                  "review_model": "sonnet"}
+                  "review_model": "sonnet", "review_max_tokens": 4000}
 
 
 def test_idea_trades_defaults():
@@ -69,11 +69,12 @@ def test_idea_trades_defaults():
 def test_idea_trades_file_overrides_each_key(toml):
     toml("[idea_trades]\nenabled = false\nquantity = 2\nmark_interval_min = 15\n"
          "debit_stop_frac = 0.5\nclean_mae_pct = 40\nmin_n = 8\n"
-         'review_model = "haiku"\n')
+         'review_model = "haiku"\nreview_max_tokens = 6000\n')
     assert pl.idea_trades() == {"enabled": False, "quantity": 2,
                                 "mark_interval_min": 15, "debit_stop_frac": 0.5,
                                 "clean_mae_pct": 40.0, "min_n": 8,
-                                "review_model": "haiku"}
+                                "review_model": "haiku",
+                                "review_max_tokens": 6000}
 
 
 @pytest.mark.parametrize("key,bad", [
@@ -85,6 +86,8 @@ def test_idea_trades_file_overrides_each_key(toml):
     ("min_n", "x"), ("min_n", 0), ("min_n", False),
     ("enabled", "yes"), ("enabled", 1),
     ("review_model", ""), ("review_model", "  "), ("review_model", 5),
+    ("review_max_tokens", 0), ("review_max_tokens", 64001),
+    ("review_max_tokens", 4000.0), ("review_max_tokens", True),
 ])
 def test_idea_trades_bad_value_falls_back(monkeypatch, key, bad):
     monkeypatch.setattr(pl, "load", lambda: {"idea_trades": {key: bad}})

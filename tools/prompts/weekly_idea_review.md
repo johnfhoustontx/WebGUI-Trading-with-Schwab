@@ -33,7 +33,13 @@ How to write:
    (rounded to two decimals is fine). Do not add, subtract, or work out new
    percentages or ratios yourself; if you want a figure, it must already be a fact.
    A paragraph or suggestion containing any number that is not in the facts is
-   thrown away whole.
+   thrown away whole. A number written in words ("nine", "twenty-five", "half",
+   "twice") counts as a number too, so write figures in digits, copied from the
+   facts.
+   Keep each figure's sign and subject exactly as the facts give them: a loss stays
+   a loss, and a figure belongs to the group whose fact holds it. The check can
+   only prove a number is somewhere in the facts, not that you used it with the
+   right meaning, so that part is on you.
 6. Do not write dates, days of the month, clock times, or the week number. Refer
    to the hour an idea was posted only by its fact id, such as
    `week.post_hour.10`, never as a time. Refer to a group by its name or its fact
