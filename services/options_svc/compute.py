@@ -58,6 +58,7 @@ from services import _proxy  # noqa: E402
 from services.options_svc import commission  # noqa: E402  (round-trip $ for the break-even floor)
 from services.options_svc import gamma_window as _gw  # noqa: E402  (the gamma display window + scale lock)
 from services.options_svc import greeks_census as _census  # noqa: E402  (a chain with no Greeks at all)
+from services.options_svc import idea_ledger as _ideas  # noqa: E402  (posted-idea rows stay out of the user's book)
 from services.options_svc.hiro_store import write_rows as _write_hiro_rows  # noqa: E402  (one minute's hedging-flow rows)
 from shared.numeric import finite as _finite  # noqa: E402 - one shared definition (audit CQ-07)
 
@@ -2557,6 +2558,8 @@ def _reprice_open_pnl(trades) -> None:
     for t in trades or []:
         if (t.get("status") or "").upper() != "OPEN":
             continue
+        if _ideas.is_idea(t):                  # shown by paper_trades_view, never a chain fetch
+            continue
         try:
             # DEBIT/legs trades (long options + debit verticals) reprice generically off
             # their stored legs; credit spreads keep the tested short/long-strike path.
@@ -2580,7 +2583,8 @@ def paper_trades_view(reprice: bool = False) -> dict:
 
     With ``reprice=True`` (and only during market hours), each OPEN trade gets a
     live ``unrealized_pnl`` so the Paper Trades page can show running P&L instead
-    of a blank column. Defensively guarded → ``{"trades": []}`` on any failure,
+    of a blank column. An OPEN trade-idea row shows its recorded 5-minute mark
+    either way (no fetch). Defensively guarded → ``{"trades": []}`` on any failure,
     mirroring the page's per-read try/except. The GUI tier reads this cached view
     directly."""
     import paper_trader
@@ -2590,6 +2594,8 @@ def paper_trades_view(reprice: bool = False) -> dict:
     except Exception:
         log.exception("paper_trades_view read degraded → empty ledger")
         return {"trades": []}
+    for t in trades:
+        _ideas.show_mark(t)                    # a recorded mark: no fetch, any hour
     if reprice:
         try:
             from . import scheduler
@@ -2626,7 +2632,7 @@ def ledger_book_state(trades=None) -> dict:
         trades = paper_trader.get_all_trades()
     open_rows, realized = [], 0.0
     for t in trades or ():
-        if not isinstance(t, dict):
+        if not isinstance(t, dict) or _ideas.is_idea(t):
             continue
         if t.get("status") == "OPEN":
             open_rows.append({"symbol": t.get("symbol"),
@@ -2925,7 +2931,8 @@ def close_paper(trade_id, debit: float) -> None:
     # pass already closed would otherwise have its exit and realized P&L
     # overwritten by this second close (audit AR-02).
     if t and (t.get("status") or "").upper() == "OPEN":
-        closed = paper_trader.close_paper_trade(t, float(debit), "MANUAL_CLOSE")
+        closed = (_ideas.manual_close(t, float(debit)) if _ideas.is_idea(t)
+                  else paper_trader.close_paper_trade(t, float(debit), "MANUAL_CLOSE"))
         paper_trader.update_trade(trade_id, closed)
     elif t:
         log.warning("close_paper ignored: trade %s is %s, not OPEN", trade_id,
@@ -2984,7 +2991,7 @@ def expire_ledger_trades(now_ct=None) -> int:
 
     settled = 0
     for t in trades:
-        if (t.get("status") or "").upper() != "OPEN":
+        if (t.get("status") or "").upper() != "OPEN" or _ideas.is_idea(t):
             continue
         if not paper_engine.should_settle(t.get("expiration"), today, now_ct):
             continue
@@ -3101,7 +3108,7 @@ def manage_ledger_trades(now_ct=None) -> int:
 
     closed = 0
     for t in trades or []:
-        if (t.get("status") or "").upper() != "OPEN":
+        if (t.get("status") or "").upper() != "OPEN" or _ideas.is_idea(t):
             continue
         if (t.get("direction") or "").upper() != _LEDGER_MANAGED_DIRECTION:
             continue
@@ -10416,7 +10423,8 @@ def collect_action_items(now_ct=None) -> dict:
     try:
         import paper_trader
         for t in paper_trader.get_all_trades():
-            if (t.get("status") or "").upper() == "OPEN" and str(t.get("expiration"))[:10] == today:
+            if (t.get("status") or "").upper() == "OPEN" and str(t.get("expiration"))[:10] == today \
+                    and not _ideas.is_idea(t):    # an idea settles on its own
                 out["expiring_today"].append({
                     "book": "ledger", "symbol": t.get("symbol"),
                     "strategy": t.get("strategy"), "expiration": t.get("expiration"),

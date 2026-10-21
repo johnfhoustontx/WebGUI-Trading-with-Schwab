@@ -541,3 +541,57 @@ def test_the_page_is_built_from_the_kit():
     assert 'kit.header("Paper Ledger", view="options:paper_trades")' in src
     assert "PAPER_CSS" not in src
 
+
+# ── trade-idea rows: tag, filter, delete wording ─────────────────────────────
+IDEA = {**TRADE, "trade_id": "I1", "source": "trade_idea", "idea_grade": "A",
+        "entry_time": "2026-06-11T10:00:00+00:00"}
+
+
+def test_paper_rows_tags_idea_rows():
+    rows = {r["trade_id"]: r for r in paper.paper_rows([TRADE, IDEA])}
+    assert rows["I1"]["tag"] == "Trade idea"
+    assert rows["T1"]["tag"] == ""
+    # Only the source field says so: a grade or label alone does not make one.
+    only_grade = {**TRADE, "trade_id": "T2", "idea_grade": "A"}
+    assert paper.paper_rows([only_grade])[0]["tag"] == ""
+
+
+def test_filter_rows_three_ways():
+    rows = paper.paper_rows([TRADE, IDEA])
+    assert [r["trade_id"] for r in paper.filter_rows(rows, "all")] == ["I1", "T1"]
+    assert [r["trade_id"] for r in paper.filter_rows(rows, "mine")] == ["T1"]
+    assert [r["trade_id"] for r in paper.filter_rows(rows, "ideas")] == ["I1"]
+    # An unknown choice shows everything rather than hiding the book.
+    assert len(paper.filter_rows(rows, "bogus")) == 2
+
+
+def test_the_status_line_counts_only_the_shown_rows():
+    closed_idea = {**IDEA, "trade_id": "I2", "status": "CLOSED"}
+    trades = [TRADE, IDEA, closed_idea]
+    assert paper.ledger_status(trades) == "3 trades · 2 open"
+    assert paper.ledger_status(trades, "mine") == "1 trade · 1 open"
+    assert paper.ledger_status(trades, "ideas") == "2 trades · 1 open"
+    assert paper.ledger_status([TRADE], "ideas") == ""
+
+
+def test_delete_closed_confirm_mentions_trade_ideas_kept():
+    assert "trade idea" in paper.DELETE_CLOSED_BODY.lower()
+    assert "kept" in paper.DELETE_CLOSED_BODY.lower()
+    assert "DELETE_CLOSED_BODY" in inspect.getsource(paper.render)
+
+
+def test_idea_row_delete_confirm_says_it_leaves_the_weekly_review():
+    assert "weekly review" in paper.DELETE_IDEA_BODY
+    assert paper.delete_body(IDEA) == paper.DELETE_IDEA_BODY
+    assert paper.delete_body(TRADE) == paper.DELETE_BODY
+    assert "weekly review" not in paper.DELETE_BODY
+
+
+def test_page_help_describes_trade_ideas():
+    import page_help
+    text = page_help.HELP_MD["/options/paper"]
+    assert "Trade idea" in text                 # the tag
+    assert "5 minutes" in text                  # the exit check cadence
+    assert "risk limits" in text and "do not apply" in text
+    assert "Delete all closed" in text and "keeps" in text
+

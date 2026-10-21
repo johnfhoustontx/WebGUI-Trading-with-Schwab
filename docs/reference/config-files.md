@@ -157,6 +157,38 @@ are named clock marks, the same thing `[windows]` already models, and **each
 `analyze` slot is a paid Claude call** while `income` is the largest scheduled
 Schwab spend on that table, so it is the direct control on both.
 
+**`[slots.idea_review]`** (`at = "15:30"` CT, added 2026-10-20) is the weekly
+trade-idea review's time of day, and like `token_watch` and `stock_rank` it is read
+by **systemd, not by a service**: `deploy/systemd/generate_units.py` turns it into
+the `trading-<env>-idea-review.timer`'s `OnCalendar` (Mon-Fri, not `Persistent`).
+Changing it needs `python -m deploy.systemd.generate_units --install` and a
+`systemctl --user daemon-reload`; a service restart does nothing. Only the TIME is
+config: which weekday is the review day is `shared/idea_review.is_review_day` (the
+last trading day of the ISO week), because systemd has no market calendar. It sits
+after the 15:00 close and the 15:05 `paper_settle` pass so the week's settled ideas are
+in the books it reads. (`market_calendar._DEFAULTS["slots"]` carries it too, since
+`slot_times` raises on a slot with no built-in default.)
+
+**`config/paper.toml [idea_trades]`** (2026-10-20) is how the hourly trade ideas are
+booked into the Paper Ledger and followed, and how the weekly review judges them. Read
+through `shared/paper_limits.idea_trades()` (defaults for a missing file, key or bad
+value; a bad value reads as its default and never raises), edit + restart
+`options_svc`; the weekly review reads `clean_mae_pct`, `min_n` and `review_model`
+when it runs, so those three apply at its next run without a restart. All seven keys
+have a field under Settings -> Configuration -> *Trade ideas in the Paper Ledger*.
+There is no length setting for the weekly judgment: it runs on the Claude Code CLI,
+which takes no `max_tokens`, so the tool passes a constant (`MAX_TOKENS`):
+
+| key | default | meaning |
+|---|---|---|
+| `enabled` | `true` | Book each POSTED idea. `false` stops **new bookings only**: open idea rows are still marked, closed and settled, so turning it off never strands a row open. |
+| `quantity` | `1` | Contracts per booked idea (a whole number, 1 or more). |
+| `mark_interval_min` | `5` | Minutes between marks of the open idea rows (1 to 60). The cycle only runs inside the regular session and skips the proxy's busy minutes: the autoscan's start minute and the three after it at each quarter hour (from `config/sessions.toml [windows.scan] offset_min`, so they move with it) and the first minute after the hour and half hour. |
+| `debit_stop_frac` | `0.60` | The idea book's OWN stop on a debit idea the exit rules give no stop: closed when it has lost this fraction of what it cost (above 0, up to 1). Separate from `config/trade_mgmt.toml [structures.*] debit_stop_frac`, which ships unset and governs the user's Ledger. |
+| `clean_mae_pct` | `25.0` | The weekly review calls a TARGET a *clean win* when its worst drawdown stayed shallower than this percent of the maximum loss (above 0, up to 100). A TARGET that never went below zero is a clean win even when its maximum loss is missing. |
+| `min_n` | `5` | The fewest booked ideas in a group before the weekly review draws a conclusion from it; a smaller group is labelled thin. |
+| `review_model` | `"sonnet"` | The Claude model tier the weekly written judgment uses (a tier name, never a version). |
+
 **`shared/config_toml.py:toml_loader(path, defaults)` is the one loader.** It
 returns `(load, reset)` and encodes the contract every config file here follows:
 built-in defaults are the real values and the TOML only overrides · deep-merged

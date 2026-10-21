@@ -403,13 +403,16 @@ def delete_trade(trade_id):
 
 
 def delete_closed_trades():
-    """Delete all closed / expired trades. Returns count deleted."""
+    """Delete all closed / expired trades except the posted trade ideas' (they are
+    the weekly review's evidence, not the user's book). Returns count deleted."""
     conn = trades_db.connect()
     try:
         closed = [
-            t for t in trades_db.fetch_all(conn) if t["status"] != "OPEN"
+            t for t in trades_db.fetch_all(conn)
+            if t["status"] in ("CLOSED", "EXPIRED")     # the SQL's own predicate
+            and t.get("source") != trades_db.IDEA_SOURCE
         ]
-        n = trades_db.delete_trades_by_status(conn, ("CLOSED", "EXPIRED"))
+        n = trades_db.delete_closed_except_source(conn, trades_db.IDEA_SOURCE)
         for t in closed:
             _log_event(conn, t, "DELETED")
         conn.commit()

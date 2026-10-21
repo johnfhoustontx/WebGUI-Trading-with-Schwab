@@ -1281,13 +1281,26 @@ engine's positions live on **Paper Account**.
   stopping them, and you can still close any row by hand at any time.
 - **Credit spreads here are not managed** — they are tracked only. The engine's
   own book on **Paper Account** is the one that takes profit and cuts on them.
-- **New trades must fit this ledger's risk limits**: at most $750 of max loss
+- **New trades must fit this ledger's risk limits** (trade ideas are the one
+  exception, below): at most $750 of max loss
   per trade; 3 positions and $750 per symbol; 5 positions and $1,500 per sector;
   5 positions sharing one expiration; and open max loss at most 20% of equity
   ($25,000 plus your closed trades' realized P&L, so **Delete all closed** moves
   it). A trade that would break one is not written, and a message on the page you
   sent it from says which limit — plus *Up to N contracts fit* when a smaller size
   would clear them all.
+- **Trade ideas live here too.** While **Book the posted ideas** is on (Settings
+  -> Configuration), each hourly trade idea is booked into this ledger as it is
+  posted, tagged **Trade idea** beside the symbol. The buttons above the table
+  filter the list: **All**, **My trades** or **Trade ideas**, and the count line
+  shows only what is on screen. Idea rows are **not** held to the risk limits
+  listed above - they do not apply to them, so an idea always books, whatever else
+  is open. Turning the setting off stops new bookings only; ideas already open are
+  still checked and closed. Open ideas are checked **every 5 minutes** for their
+  target, their stop and their expiry, and close themselves on the first one
+  reached; a close by hand is recorded as **MANUAL**. **Delete all closed**
+  keeps trade ideas, so the weekly review of ideas keeps its record; deleting an
+  idea row yourself, from its own panel, removes it from that review too.
 - Use it to test ideas from the Market Scanner without risk.
 """,
     "/options/captured": """
@@ -1799,6 +1812,21 @@ A live grid of macro tickers, grouped into framed panels by category.
 An end-of-day summary of the day's options activity and paper trading.
 
 - **Summary tiles** plus per-section tables (scanner, captured, paper).
+- **Three books, each with its own Daily / Weekly / MTD table:** your **Manual
+  paper** trades, the **Captured signals**, and the **Trade ideas**. While **Book the
+  posted ideas** is on (Settings -> Configuration), every idea the app posts is
+  booked on the Paper Ledger and tagged, and it is counted in its own book, never
+  in Manual paper. A tile shows today's idea profit and how many closed.
+- **Detail → Trade ideas** lists the ideas posted today (when, structure, grade,
+  entry, exit, why it closed, how long it was held, the worst point it reached in
+  dollars and as a share of its maximum loss, and the result), the ones closed today
+  that were posted earlier, and the ones still open at their last mark. Closed profit
+  is totalled for the day, week and month; **open trades are shown on their own line
+  and never added to those totals.**
+- **Weekly idea review** (the button at the top) opens the weekly look back at the
+  trade ideas, written at the end of each week. Every figure in Claude's assessment
+  there is one the app computed; whether Claude used it with the right subject is
+  not checked.
 - **It saves itself at 3:15 pm CT** every trading day, a quarter of an hour after
   the close. You don't have to be here, and you don't have to press anything.
 - **Generate** saves a dated HTML snapshot you can reopen later — use it for an
@@ -2015,6 +2043,31 @@ Ends this browser's session and returns you to the sign-in page.
 
 # /eod/detail shares the EOD guide.
 HELP_MD["/eod/detail"] = HELP_MD["/eod"]
+
+HELP_MD["/eod/weekly"] = """
+**Weekly idea review — the simple version**
+
+A once-a-week look back at the trade ideas the app posted: which kinds of idea
+worked, which did not, and what the week's closed and still-open trades looked like.
+
+- **When it is written:** after the close on the **last trading day of the week**
+  (Friday, or Thursday when Friday is a holiday), at 3:30 pm CT. Pick a week from
+  the list; the newest is shown first. Before the first one is written the page
+  says so.
+- **Who writes what:** the app computes every number from the Paper Ledger's
+  trade-idea rows, and Claude writes the assessment from them. Before the report
+  is saved, a paragraph holding a number the app did not compute is dropped, and
+  so is a suggestion holding a number that is not one of the groups it cites.
+  So **every figure in it is one the app computed** — but whether Claude used it
+  with the right subject (or sign) is **not checked**. Read a figure against the
+  tables below before acting on it.
+- **Thin patterns are labelled.** A group with too few trades to mean anything is
+  marked "few trades" — read it as a note, not a finding.
+- If Claude could not be reached that week, the report still saves with all the
+  numbers and one line saying the assessment is missing.
+- **It is informational.** Nothing here changes a signal, a score or a setting on
+  its own; any change is yours to make.
+"""
 
 _DEFAULT = (
     "**Quick help**\n\n"

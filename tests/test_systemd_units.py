@@ -1024,6 +1024,51 @@ def test_the_eod_report_timer_is_armed():
     assert f"trading-{ENV_NAME}-eod-report.timer" in units.timer_units()
 
 
+# --- the weekly trade-idea review ---------------------------------------------
+IR_SVC = f"trading-{ENV_NAME}-idea-review.service"
+IR_TMR = f"trading-{ENV_NAME}-idea-review.timer"
+
+
+def test_idea_review_timer_from_slot(monkeypatch):
+    """Derived from [slots.idea_review], never typed: ONE OnCalendar, Mon..Fri
+    (the tool itself picks the last trading day of the week), no catch-up."""
+    import datetime as _dt
+
+    from shared import market_calendar as mc
+    at = mc.slot_times("idea_review")["at"]
+    text = units.render_all()[IR_TMR]
+    assert _directives(text, "OnCalendar") == [
+        f"Mon..Fri *-*-* {at.hour:02d}:{at.minute:02d}:00"]
+    tmr = _parse(text)
+    assert tmr["Timer"].get("Persistent", "false").lower() != "true"
+    assert tmr["Install"]["WantedBy"] == "timers.target"
+    assert IR_TMR in units.timer_units()
+    # ... and it follows the slot rather than a literal
+    monkeypatch.setattr(units, "slot_times", lambda name: {"at": _dt.time(21, 7)})
+    assert _directives(units.render_all()[IR_TMR], "OnCalendar") == [
+        "Mon..Fri *-*-* 21:07:00"]
+
+
+def test_idea_review_service_runs_tool_with_env_file(rendered):
+    """The bus password comes from the stack's EnvironmentFile, the clock is
+    Central, the run is a oneshot that does not retry, and it has room for the
+    CLI's own 360 s timeout. It is the timer's, not a member of the fleet."""
+    svc = rendered[IR_SVC]
+    s = svc["Service"]
+    assert s["Type"] == "oneshot"
+    assert "Restart" not in s
+    assert s["ExecStart"].endswith("tools/weekly_idea_review.py")
+    assert ".sh" not in s["ExecStart"]
+    assert s["EnvironmentFile"].endswith(".env")
+    assert "TZ=America/Chicago" in units.render_all()[IR_SVC]
+    assert int(s["TimeoutStartSec"]) >= 900
+    assert int(svc["Unit"]["StartLimitBurst"]) > 0
+    assert "StartLimitBurst" not in s
+    assert "PartOf" not in svc["Unit"]
+    assert "Install" not in svc
+    assert IR_SVC not in stack_services()
+
+
 # --- the recommendation-journal labeler, orphaned by the Linux migration ------
 #
 # `tools/label_journal.py` ran under Windows Task Scheduler. The 2026-08-29 move

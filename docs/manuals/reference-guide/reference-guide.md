@@ -3226,7 +3226,9 @@ source of "why does this number not match" in the app:
 | **Paper Ledger** | this page | **You** — you open every row. Long options and debit spreads then exit automatically |
 | **Paper Account** | [Paper Account](#paper-account) | The automated engine |
 
-They are fully isolated. Nothing crosses between them.
+They are fully isolated. Nothing crosses between them. (The ledger also holds the
+app's own tagged *trade idea* rows, which are kept out of your limits, equity and exit
+rules — see *Trade ideas in the ledger* below.)
 
 ### Where the data comes from
 
@@ -3347,6 +3349,49 @@ later, on the page you sent it from:
   limit are the same number.
 - **An old open row whose max loss cannot be read counts $0** toward the dollar
   limits, though it still counts toward the position limits.
+
+### Trade ideas in the ledger
+
+**Since 2026-10-20 the ledger also holds a third kind of row: the app's own trade
+ideas.** The hourly idea that goes to Discord, Telegram and the public site is booked
+here when it is posted (while **Book the posted ideas** is on, under Settings →
+Configuration → *Trade ideas in the Paper Ledger*), so the ideas are scored by the same
+books as every trade you place. The row carries a **Trade idea** tag beside the symbol,
+and the **All / My trades / Trade ideas** buttons above the table choose what is listed.
+
+| | A row you sent | A trade-idea row |
+|---|---|---|
+| Who opens it | You | The posting of the idea (one contract by default) |
+| Risk limits above | Checked before it is written | **Not applied** — it always books |
+| Counts toward the limits and equity | Yes | **No** |
+| Exits | Hourly rules on debit rows; credit rows only expire | Its own: **stop, target or expiry**, checked every 5 minutes |
+| Marks | On page load and the hourly cycle | Every 5 minutes in the regular session, from real option quotes |
+| **Delete all closed** | Removes it | **Keeps it** |
+| EOD Report | *Manual paper* book, the *Paper Trades* table and the *Paper trades* tile | Its own *Trade ideas* book and section |
+| Symbol dossier | Listed as held while open | Never listed |
+
+**Why it is exempt from the limits.** The limits decide what *you* may send to paper.
+An idea is a posted call being measured, and one the limits would have refused is
+exactly what a fair scorecard must still include.
+
+**What closes it.** The first of: the **stop** (checked first when one mark satisfies
+both), the **target**, or **expiry** at the legs' intrinsic value in the 15:05 CT
+settlement pass. The levels are the ones the public site shows for that idea; a debit
+idea the exit rules give no stop is stopped at 60% of the debit paid. A stop or target
+closes at the value of the mark that crossed it, and the opening price already carries
+the round-trip commission, so closing adds none. Pressing **Close** by hand is recorded
+as **MANUAL**.
+
+**The worst point.** Each mark that is lower than any before it is kept as the row's
+*worst point* (dollars per contract); the closing value counts too, a hand close
+included. It is what lets the weekly review tell a target
+that was reached cleanly from one that first went most of the way to the stop.
+
+⚠ Turning **Book the posted ideas** off stops new bookings only; ideas already open
+keep being marked and closed. Deleting one idea row by hand removes it from the weekly
+review too. Reading across pages: the [EOD Report](#eod-report) tallies these rows in a
+book of their own (its *Paper Trades* table and *Paper trades* tile are yours only) and
+its **Weekly idea review** summarises them; the Symbol dossier never lists one as held.
 
 ### Reading the screen
 
@@ -4558,7 +4603,7 @@ useful decisions are.
 
 ## EOD Report
 
-*Menu: ACCOUNT → More → EOD Report · Routes `/eod` and `/eod/detail`*
+*Menu: ACCOUNT → More → EOD Report · Routes `/eod`, `/eod/detail` and `/eod/weekly`*
 
 ### What it is
 
@@ -4572,11 +4617,14 @@ of its own and calls no external service.
 
 ### Reading the screen
 
-**Summary tiles:** paper session P&L · scanner signals · captured signals · paper trades.
+**Summary tiles:** paper session P&L · scanner signals · captured signals · paper trades ·
+trade idea P&L today (closed ideas, with the count closed).
 
-**Performance blocks, one per book** — *Manual paper* and *Captured signals*. The manual
-book leads with equity, session P&L, open unrealized and open count; the captured book
-has no account behind it, and its figures assume one contract per signal. Then a table:
+**Performance blocks, one per book** — *Manual paper*, *Captured signals* and *Trade
+ideas*. The manual book leads with equity, session P&L, open unrealized and open count and
+excludes the Ledger's trade-idea rows; the captured book has no account behind it, and its
+figures assume one contract per signal; the trade-ideas book is those idea rows alone. Then
+a table:
 
 | Period | What it covers |
 |---|---|
@@ -4592,9 +4640,15 @@ credit collected.
 > reconcile to each other. That is correct.
 
 **Detailed** (`/eod/detail`) adds breakdowns by **strategy** (PCS / CCS / IC), by
-**0-DTE versus swing**, and by **status** (open / closed / expired), plus the full trade,
-scanner and captured tables. Both views use a jump-link table of contents and
-collapsible sections that work in the exported file as well as in the app.
+**0-DTE versus swing**, and by **status** (open / closed / expired), plus the full trade
+table (your own Ledger rows only), the scanner and captured tables, and a **Trade ideas**
+section: ideas posted today, ideas closed today that were posted earlier, and open ideas
+at their last mark (structure by name, entry and exit with which way the money went, the
+reason in words, time held in words, worst point in dollars and as a percent of maximum
+loss), then closed P&L for the day, week and
+month, with the open trades' unrealized total on its own line, never in those totals. Both
+views use a jump-link table of contents and collapsible sections that work in the exported
+file as well as in the app.
 
 **Generate** snapshots the current caches into standalone `summary.html` and
 `detail.html` under `webgui/data/eod/<date>/`. It is **confirm-gated** — the dialog
@@ -4632,6 +4686,62 @@ and commissions are not in these numbers, so treat every figure as optimistic.
   until 2026-09-20, and one click against a stopped stack destroyed that day's
   report.) A day it could not run is simply a day with no archived file; the
   caches are still live, so pressing **Generate** recovers it until they reset overnight.
+- **The Trade ideas book exists only while ideas are booked.** The third book is the
+  Paper Ledger's trade-idea rows, which are there while **Book the posted ideas** is on
+  (Settings → Configuration). Turn it off and no new idea appears; the ones already open
+  keep closing and keep being counted.
+- **"Open trades are not in these totals" is about profit.** Realized profit and the
+  closed count include only closed ideas, but **Opened** and **Credit collected** count
+  every idea by the day it was posted, open ones too. For a debit idea the credit column
+  is negative, because the idea cost money.
+
+### Weekly idea review
+
+*Menu: ACCOUNT → More → EOD Report → Weekly idea review · Route `/eod/weekly`*
+
+**What it is.** The week's report card on the trade ideas: which kinds of idea reached
+their target, which were stopped, and what the open ones look like — with a short
+written assessment from Claude. It is a page of its own, reached by the button at the top
+of the EOD Report, with a **Week** dropdown that lists the reviews written so far (newest
+first) and an *Open in a new tab* link.
+
+**Where it comes from.** A timer, not a page: at 15:30 CT each weekday
+(`[slots.idea_review]`) `tools/weekly_idea_review.py` runs, and writes only on the **last
+trading day of the week** — Friday, or Thursday when Friday is a holiday. Weeks sit in
+`webgui/data/idea_review/<YYYY-Www>/report.html`. The tool reads the Paper Ledger view
+from Redis, computes every figure in code, asks Claude (through the Claude Code
+subscription, never the paid API) for an assessment and suggestions written from
+those figures, checks the reply's numbers, and saves the document.
+
+**Reading it.** An *Assessment* and *Suggestions* (each suggestion says how many trades
+its group holds, and a group under *Fewest ideas before a conclusion* — 5 by default —
+reads *too few trades to act on*); this week's closed trades with a rating; open
+trades; and group tables for the week and for all time (grade, structure, trade type,
+score band, hour posted, symbol). Structures are named in words and reasons, held time
+and the Entry / Exit direction are worded as on the EOD Report's Trade ideas section.
+
+| Rating | Means |
+|---|---|
+| clean win | Target reached, and the worst point stayed less than 25% of the maximum loss below zero (or never went below zero) |
+| win after drawdown | Target reached after a deeper drawdown |
+| stopped | Closed at its stop |
+| expired win / expired loss | Held to expiry; judged by the sign of the result (zero counts as a loss) |
+| closed by hand | You closed it, or any other exit |
+
+**How far to trust the words.** Every number Claude writes, digits or words, must match
+one the app computed — for a suggestion, one of the groups it cites; a paragraph or
+suggestion that does not is dropped and a line says how many were. So every figure in it
+is one the app computed, but whether Claude used it with the right subject (or sign) is
+not checked, so read the table beside the sentence. A group with a handful of trades is
+a note, not a finding.
+
+**When Claude is unavailable** the document is still written with every number and one
+line saying the assessment is missing, and the job ends as failed so the failure alert
+reaches you. **When the Ledger view is missing or holds no rows at all** (the stack is
+down) nothing is written, so an empty week never replaces a real one.
+
+**When to use it.** On Fridays, to decide whether a kind of idea deserves its place; it
+changes nothing by itself.
 
 ### Related pages
 
@@ -5059,7 +5169,7 @@ Pages carrying their own subtab row, and what each subtab does.
 | **Simulator** | **Price & Time** (price and time sliders) · **Volatility** (volatility multiplier) · **History** (real historical path) |
 | **Portfolio** | **Holdings** · **Sectors** (weights vs S&P) · **Performance** (graded positions) |
 | **Rescue** | **At-Risk Board** · **Ad-hoc Trade** |
-| **EOD Report** | **Summary** · **Detailed** (`/eod/detail`) |
+| **EOD Report** | **Summary** · **Detailed** (`/eod/detail`) · **Weekly idea review** (`/eod/weekly`, a button on the report) |
 | **Settings** | **General** · **Appearance** (Surfaces · Text · Fields · Buttons · Status colours · Charts · Dealer Positioning · Type · Menu) · **Configuration** |
 
 # Appendix B — Refresh cadences

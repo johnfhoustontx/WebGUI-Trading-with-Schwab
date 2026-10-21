@@ -305,9 +305,9 @@ one-minute GEX collection and the raw feed* has the diagrams and fields.
 | `paper_reset` | `{starting_balance}` | `cache:options:paper_account` |
 | `paper_create` | `{signal, qty}` — opens into the Paper **Ledger** only if every risk cap in `shared.book_caps` clears against the Ledger's own open trades ($750 per trade, plus the Account's symbol / sector / expiry / deployment caps); a refusal writes nothing | `cache:options:paper_trades` + `cache:options:paper_create` — the outcome, written on **every** answer with a 600 s TTL: `{status, symbol, type, expiration, qty, rungs[], seq, ts}` plus, by `status`: `opened` → `trade_id`; `refused` → `code` (the binding rung), `message` (a plain sentence), `max_quantity` (the largest quantity that clears every cap now; `0` when none does); `error` / `stale` → `message`. `status` is one of `opened` · `refused` · `stale` · `error`. `seq` rises on each publish, so two identical refusals are two answers; the `:ver` counter can reset to 1 when the TTL expires, so compare versions with `!=`. Each rung is `{code, kind, scope, used, after, cap, binds, skipped}` — `kind` `count` or `risk`, a skipped rung has `used`/`after`/`cap` `null` and `binds: false`; `rungs` is `[]` on `stale` and on errors raised before the caps ran. `qty` is `null` on `stale`, the as-sent value on a bad quantity, and absent when the command raised. A command that **raises** publishes an `error` (`message` *The paper ledger could not process the request.*) and is then dead-lettered |
 | `paper_reload` | — | `cache:options:paper_trades` |
-| `paper_close` | `{trade_id, debit}` | `cache:options:paper_trades` |
+| `paper_close` | `{trade_id, debit}` — on a trade-idea row (`source == "trade_idea"`) the close is booked by `idea_ledger.manual_close`, exit reason `MANUAL`, and the typed `debit` is the stored `exit_debit` (the Ledger's convention: paid for a credit row, received for a debit row) | `cache:options:paper_trades` |
 | `paper_delete` | `{trade_id}` | `cache:options:paper_trades` |
-| `paper_delete_closed` | — | `cache:options:paper_trades` |
+| `paper_delete_closed` | — (deletes every CLOSED / EXPIRED row **except trade-idea rows**, which are the weekly review's evidence; `paper_delete` of a single idea row still removes it) | `cache:options:paper_trades` |
 | `paper_analyze` | `{trade_id}` | `cache:options:paper_analyze` |
 | `x_post` | `{text, tags[], link, image_b64?}` — an ad-hoc marketing post from the `/x` page. The image is refused over 5 MB or when it does not decode (logged, nothing posted). Replay-guarded | `cache:options:x_log` |
 | `x_post_report` | `{report, mtime}` — enqueued by market_svc when the published market report changes; `report` is the `cache:market:summary` payload, `mtime` the epoch seconds of `latest.html`. Posted once per report (`report_date`, `slot`, `as_of`, `headline`); a report older than `x.report_max_age_min` (45), or of unknown age, is skipped. Replay-guarded | `cache:options:x_log` + `cache:options:x_reports` |
@@ -467,7 +467,23 @@ version and fires no event), under a lock, at the end of every `refresh_paper_tr
 `paper_delete`, `paper_delete_closed`; not `paper_analyze`, which publishes only
 `cache:options:paper_analyze`) and the paper-manage cycle — even when that view's
 own publish raises, and once at service start. A failure is a degrade
-(`options.ledger_caps`), never a raise. No TTL.
+(`options.ledger_caps`), never a raise. No TTL. **Trade-idea rows are not in it**: they
+are left out of `open` and out of `realized_pnl` (so out of `equity`), because they
+are not held to the caps.
+
+**Trade-idea rows on `cache:options:paper_trades`.** The hourly trade idea
+(`handlers.run_trade_idea`) books each posted idea as an ordinary row of `trades.db`
+with `source = "trade_idea"` (the only marker; `notes` reads "Trade idea") through
+`idea_ledger.book`, which evaluates no cap. Beyond the Ledger's usual fields it carries
+`idea_id`, `idea_posted`, `idea_grade`, `idea_score`, `idea_label`, `target_pnl` and
+`stop_pnl` (dollars per contract, positive), `last_mark_pnl` / `last_mark_at` (the latest
+5-minute mark, per contract), `mae_pnl` / `mae_at` (the worst point, per contract, `0.0`
+until a mark goes negative; a settlement or a hand close lowers it too), `exit_time` and
+`exit_reason` (`TARGET` · `STOP` · `EXPIRED` ·
+`MANUAL`), `exit_debit` and `exit_debit_total`. An OPEN idea row's `unrealized_pnl` is
+`last_mark_pnl x quantity` at any hour. The 5-minute cycle (`scheduler.idea_marks_due` →
+`handlers.run_idea_marks_and_publish`, gated by `[idea_trades] mark_interval_min`)
+republishes the view without a chain reprice, and a mark appends no `trade_events` row.
 
 **`cache:options:scalp`** (event `events:options:scalp`) — the Opening Scalp page's
 only view. Validated on write by `shared.contracts.options.ScalpView`; one that fails is

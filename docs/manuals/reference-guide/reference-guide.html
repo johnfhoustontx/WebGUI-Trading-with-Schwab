@@ -287,6 +287,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#where-the-data-comes-from_18">Where the data comes from</a></li>
 <li><a href="#automatic-exits">Automatic exits</a></li>
 <li><a href="#risk-limits-on-new-trades">Risk limits on new trades</a></li>
+<li><a href="#trade-ideas-in-the-ledger">Trade ideas in the ledger</a></li>
 <li><a href="#reading-the-screen_17">Reading the screen</a></li>
 <li><a href="#why-it-matters_17">Why it matters</a></li>
 <li><a href="#when-to-use-it_16">When to use it</a></li>
@@ -390,6 +391,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#reading-the-screen_28">Reading the screen</a></li>
 <li><a href="#why-it-matters_23">Why it matters</a></li>
 <li><a href="#caveats-and-gotchas_13">Caveats and gotchas</a></li>
+<li><a href="#weekly-idea-review">Weekly idea review</a></li>
 <li><a href="#related-pages_28">Related pages</a></li>
 </ul>
 </li>
@@ -4610,7 +4612,9 @@ source of "why does this number not match" in the app:</p>
 </tr>
 </tbody>
 </table>
-<p>They are fully isolated. Nothing crosses between them.</p>
+<p>They are fully isolated. Nothing crosses between them. (The ledger also holds the
+app's own tagged <em>trade idea</em> rows, which are kept out of your limits, equity and exit
+rules — see <em>Trade ideas in the ledger</em> below.)</p>
 <h3 id="where-the-data-comes-from_18">Where the data comes from</h3>
 <table>
 <thead>
@@ -4782,6 +4786,83 @@ later, on the page you sent it from:</p>
 <li><strong>An old open row whose max loss cannot be read counts $0</strong> toward the dollar
   limits, though it still counts toward the position limits.</li>
 </ul>
+<h3 id="trade-ideas-in-the-ledger">Trade ideas in the ledger</h3>
+<p><strong>Since 2026-10-20 the ledger also holds a third kind of row: the app's own trade
+ideas.</strong> The hourly idea that goes to Discord, Telegram and the public site is booked
+here when it is posted (while <strong>Book the posted ideas</strong> is on, under Settings →
+Configuration → <em>Trade ideas in the Paper Ledger</em>), so the ideas are scored by the same
+books as every trade you place. The row carries a <strong>Trade idea</strong> tag beside the symbol,
+and the <strong>All / My trades / Trade ideas</strong> buttons above the table choose what is listed.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>A row you sent</th>
+<th>A trade-idea row</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Who opens it</td>
+<td>You</td>
+<td>The posting of the idea (one contract by default)</td>
+</tr>
+<tr>
+<td>Risk limits above</td>
+<td>Checked before it is written</td>
+<td><strong>Not applied</strong> — it always books</td>
+</tr>
+<tr>
+<td>Counts toward the limits and equity</td>
+<td>Yes</td>
+<td><strong>No</strong></td>
+</tr>
+<tr>
+<td>Exits</td>
+<td>Hourly rules on debit rows; credit rows only expire</td>
+<td>Its own: <strong>stop, target or expiry</strong>, checked every 5 minutes</td>
+</tr>
+<tr>
+<td>Marks</td>
+<td>On page load and the hourly cycle</td>
+<td>Every 5 minutes in the regular session, from real option quotes</td>
+</tr>
+<tr>
+<td><strong>Delete all closed</strong></td>
+<td>Removes it</td>
+<td><strong>Keeps it</strong></td>
+</tr>
+<tr>
+<td>EOD Report</td>
+<td><em>Manual paper</em> book, the <em>Paper Trades</em> table and the <em>Paper trades</em> tile</td>
+<td>Its own <em>Trade ideas</em> book and section</td>
+</tr>
+<tr>
+<td>Symbol dossier</td>
+<td>Listed as held while open</td>
+<td>Never listed</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Why it is exempt from the limits.</strong> The limits decide what <em>you</em> may send to paper.
+An idea is a posted call being measured, and one the limits would have refused is
+exactly what a fair scorecard must still include.</p>
+<p><strong>What closes it.</strong> The first of: the <strong>stop</strong> (checked first when one mark satisfies
+both), the <strong>target</strong>, or <strong>expiry</strong> at the legs' intrinsic value in the 15:05 CT
+settlement pass. The levels are the ones the public site shows for that idea; a debit
+idea the exit rules give no stop is stopped at 60% of the debit paid. A stop or target
+closes at the value of the mark that crossed it, and the opening price already carries
+the round-trip commission, so closing adds none. Pressing <strong>Close</strong> by hand is recorded
+as <strong>MANUAL</strong>.</p>
+<p><strong>The worst point.</strong> Each mark that is lower than any before it is kept as the row's
+<em>worst point</em> (dollars per contract); the closing value counts too, a hand close
+included. It is what lets the weekly review tell a target
+that was reached cleanly from one that first went most of the way to the stop.</p>
+<p>⚠ Turning <strong>Book the posted ideas</strong> off stops new bookings only; ideas already open
+keep being marked and closed. Deleting one idea row by hand removes it from the weekly
+review too. Reading across pages: the <a href="#eod-report">EOD Report</a> tallies these rows in a
+book of their own (its <em>Paper Trades</em> table and <em>Paper trades</em> tile are yours only) and
+its <strong>Weekly idea review</strong> summarises them; the Symbol dossier never lists one as held.</p>
 <h3 id="reading-the-screen_17">Reading the screen</h3>
 <p>Columns: <strong>SYMBOL · STRAT · STRIKES · EXP · QTY · CREDIT · RISK · P&amp;L · STATUS ·
 ENTRY</strong>, newest first. P&amp;L shows realized for closed trades and live unrealized for open
@@ -6182,7 +6263,7 @@ useful decisions are.</p>
 <a href="#overview">Overview</a> (a verdict on any holding).</p>
 <hr />
 <h2 id="eod-report">EOD Report</h2>
-<p><em>Menu: ACCOUNT → More → EOD Report · Routes <code>/eod</code> and <code>/eod/detail</code></em></p>
+<p><em>Menu: ACCOUNT → More → EOD Report · Routes <code>/eod</code>, <code>/eod/detail</code> and <code>/eod/weekly</code></em></p>
 <h3 id="what-it-is_30">What it is</h3>
 <p>The day's scoreboard, aggregating every book in the app into one document — and archiving
 it as a standalone file you can reopen later.</p>
@@ -6190,10 +6271,13 @@ it as a standalone file you can reopen later.</p>
 <p>Purely a reader. It aggregates the <code>options:*</code> caches; it computes nothing
 of its own and calls no external service.</p>
 <h3 id="reading-the-screen_28">Reading the screen</h3>
-<p><strong>Summary tiles:</strong> paper session P&amp;L · scanner signals · captured signals · paper trades.</p>
-<p><strong>Performance blocks, one per book</strong> — <em>Manual paper</em> and <em>Captured signals</em>. The manual
-book leads with equity, session P&amp;L, open unrealized and open count; the captured book
-has no account behind it, and its figures assume one contract per signal. Then a table:</p>
+<p><strong>Summary tiles:</strong> paper session P&amp;L · scanner signals · captured signals · paper trades ·
+trade idea P&amp;L today (closed ideas, with the count closed).</p>
+<p><strong>Performance blocks, one per book</strong> — <em>Manual paper</em>, <em>Captured signals</em> and <em>Trade
+ideas</em>. The manual book leads with equity, session P&amp;L, open unrealized and open count and
+excludes the Ledger's trade-idea rows; the captured book has no account behind it, and its
+figures assume one contract per signal; the trade-ideas book is those idea rows alone. Then
+a table:</p>
 <table>
 <thead>
 <tr>
@@ -6224,9 +6308,15 @@ bucketed by <em>entry</em> date.</strong> They are answering different questions
 reconcile to each other. That is correct.</p>
 </blockquote>
 <p><strong>Detailed</strong> (<code>/eod/detail</code>) adds breakdowns by <strong>strategy</strong> (PCS / CCS / IC), by
-<strong>0-DTE versus swing</strong>, and by <strong>status</strong> (open / closed / expired), plus the full trade,
-scanner and captured tables. Both views use a jump-link table of contents and
-collapsible sections that work in the exported file as well as in the app.</p>
+<strong>0-DTE versus swing</strong>, and by <strong>status</strong> (open / closed / expired), plus the full trade
+table (your own Ledger rows only), the scanner and captured tables, and a <strong>Trade ideas</strong>
+section: ideas posted today, ideas closed today that were posted earlier, and open ideas
+at their last mark (structure by name, entry and exit with which way the money went, the
+reason in words, time held in words, worst point in dollars and as a percent of maximum
+loss), then closed P&amp;L for the day, week and
+month, with the open trades' unrealized total on its own line, never in those totals. Both
+views use a jump-link table of contents and collapsible sections that work in the exported
+file as well as in the app.</p>
 <p><strong>Generate</strong> snapshots the current caches into standalone <code>summary.html</code> and
 <code>detail.html</code> under <code>webgui/data/eod/&lt;date&gt;/</code>. It is <strong>confirm-gated</strong> — the dialog
 names the date it replaces — and it <strong>refuses a cold cache</strong>: if every options cache
@@ -6257,7 +6347,77 @@ and commissions are not in these numbers, so treat every figure as optimistic.</
   until 2026-09-20, and one click against a stopped stack destroyed that day's
   report.) A day it could not run is simply a day with no archived file; the
   caches are still live, so pressing <strong>Generate</strong> recovers it until they reset overnight.</li>
+<li><strong>The Trade ideas book exists only while ideas are booked.</strong> The third book is the
+  Paper Ledger's trade-idea rows, which are there while <strong>Book the posted ideas</strong> is on
+  (Settings → Configuration). Turn it off and no new idea appears; the ones already open
+  keep closing and keep being counted.</li>
+<li><strong>"Open trades are not in these totals" is about profit.</strong> Realized profit and the
+  closed count include only closed ideas, but <strong>Opened</strong> and <strong>Credit collected</strong> count
+  every idea by the day it was posted, open ones too. For a debit idea the credit column
+  is negative, because the idea cost money.</li>
 </ul>
+<h3 id="weekly-idea-review">Weekly idea review</h3>
+<p><em>Menu: ACCOUNT → More → EOD Report → Weekly idea review · Route <code>/eod/weekly</code></em></p>
+<p><strong>What it is.</strong> The week's report card on the trade ideas: which kinds of idea reached
+their target, which were stopped, and what the open ones look like — with a short
+written assessment from Claude. It is a page of its own, reached by the button at the top
+of the EOD Report, with a <strong>Week</strong> dropdown that lists the reviews written so far (newest
+first) and an <em>Open in a new tab</em> link.</p>
+<p><strong>Where it comes from.</strong> A timer, not a page: at 15:30 CT each weekday
+(<code>[slots.idea_review]</code>) <code>tools/weekly_idea_review.py</code> runs, and writes only on the <strong>last
+trading day of the week</strong> — Friday, or Thursday when Friday is a holiday. Weeks sit in
+<code>webgui/data/idea_review/&lt;YYYY-Www&gt;/report.html</code>. The tool reads the Paper Ledger view
+from Redis, computes every figure in code, asks Claude (through the Claude Code
+subscription, never the paid API) for an assessment and suggestions written from
+those figures, checks the reply's numbers, and saves the document.</p>
+<p><strong>Reading it.</strong> An <em>Assessment</em> and <em>Suggestions</em> (each suggestion says how many trades
+its group holds, and a group under <em>Fewest ideas before a conclusion</em> — 5 by default —
+reads <em>too few trades to act on</em>); this week's closed trades with a rating; open
+trades; and group tables for the week and for all time (grade, structure, trade type,
+score band, hour posted, symbol). Structures are named in words and reasons, held time
+and the Entry / Exit direction are worded as on the EOD Report's Trade ideas section.</p>
+<table>
+<thead>
+<tr>
+<th>Rating</th>
+<th>Means</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>clean win</td>
+<td>Target reached, and the worst point stayed less than 25% of the maximum loss below zero (or never went below zero)</td>
+</tr>
+<tr>
+<td>win after drawdown</td>
+<td>Target reached after a deeper drawdown</td>
+</tr>
+<tr>
+<td>stopped</td>
+<td>Closed at its stop</td>
+</tr>
+<tr>
+<td>expired win / expired loss</td>
+<td>Held to expiry; judged by the sign of the result (zero counts as a loss)</td>
+</tr>
+<tr>
+<td>closed by hand</td>
+<td>You closed it, or any other exit</td>
+</tr>
+</tbody>
+</table>
+<p><strong>How far to trust the words.</strong> Every number Claude writes, digits or words, must match
+one the app computed — for a suggestion, one of the groups it cites; a paragraph or
+suggestion that does not is dropped and a line says how many were. So every figure in it
+is one the app computed, but whether Claude used it with the right subject (or sign) is
+not checked, so read the table beside the sentence. A group with a handful of trades is
+a note, not a finding.</p>
+<p><strong>When Claude is unavailable</strong> the document is still written with every number and one
+line saying the assessment is missing, and the job ends as failed so the failure alert
+reaches you. <strong>When the Ledger view is missing or holds no rows at all</strong> (the stack is
+down) nothing is written, so an empty week never replaces a real one.</p>
+<p><strong>When to use it.</strong> On Fridays, to decide whether a kind of idea deserves its place; it
+changes nothing by itself.</p>
 <h3 id="related-pages_28">Related pages</h3>
 <p><a href="#paper-ledger">Paper Ledger</a> · <a href="#paper-account">Paper Account</a>.</p>
 <hr />
@@ -6724,7 +6884,7 @@ in the rail is the one that stops things.</p>
 </tr>
 <tr>
 <td><strong>EOD Report</strong></td>
-<td><strong>Summary</strong> · <strong>Detailed</strong> (<code>/eod/detail</code>)</td>
+<td><strong>Summary</strong> · <strong>Detailed</strong> (<code>/eod/detail</code>) · <strong>Weekly idea review</strong> (<code>/eod/weekly</code>, a button on the report)</td>
 </tr>
 <tr>
 <td><strong>Settings</strong></td>

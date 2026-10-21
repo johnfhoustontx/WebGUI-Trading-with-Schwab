@@ -730,6 +730,10 @@ _SESSIONS = ConfigFile(
         Section("After-close jobs", "", (
             Field("slots.eod_report.at", "End-of-day report", "", kind="time",
                   restart=(TIMERS,)),
+            Field("slots.idea_review.at", "Weekly trade-idea review",
+                  "Once a week, on the week's last trading day. Only the time is "
+                  "set here. Must be after the 15:05 settlement pass.",
+                  kind="time", restart=(TIMERS,)),
             Field("slots.token_watch.at", "Schwab sign-in check",
                   "Once a day, every day: sends a Server alert when the 7-day "
                   "Schwab sign-in is close to running out.", kind="time",
@@ -1593,6 +1597,36 @@ _PAPER = ConfigFile(
                   "at once.",
                   kind="money", min=0, max=5, step=0.05, restart=()),
         )),
+        Section("Trade ideas in the Paper Ledger",
+                "Every hourly trade idea that is posted is also booked into the "
+                "Paper Ledger, so it is measured like any other trade. A weekly "
+                "review reads how they did.", (
+            Field("idea_trades.enabled", "Book the posted ideas",
+                  "Off stops new bookings. Ideas already booked are still "
+                  "marked and settled.", kind="bool"),
+            Field("idea_trades.quantity", "Contracts per idea",
+                  "How many contracts each booked idea trades.",
+                  kind="int", min=1, max=100, step=1),
+            Field("idea_trades.mark_interval_min", "Minutes between marks",
+                  "How often the open idea trades are priced.",
+                  kind="int", unit="min", min=1, max=60, step=1),
+            Field("idea_trades.debit_stop_frac", "Debit idea stop-out",
+                  "A debit idea is closed when it has lost this fraction of what "
+                  "it cost. 0.60 is a 60% loss of the debit paid.",
+                  kind="float", min=0.05, max=1.0, step=0.05),
+            Field("idea_trades.clean_mae_pct", "Largest drawdown of a clean win",
+                  "The weekly review calls a winner clean when its worst "
+                  "drawdown before the win stayed within this percent of the "
+                  "risk.", kind="float", unit="%", min=1, max=100, step=1),
+            Field("idea_trades.min_n", "Fewest ideas before a conclusion",
+                  "The weekly review draws no conclusion from a group with "
+                  "fewer booked ideas than this.",
+                  kind="int", min=1, max=100, step=1),
+            Field("idea_trades.review_model", "Weekly review model",
+                  "The Claude model tier that writes the weekly judgment. Use a "
+                  "tier name such as sonnet, not a version. Applies at the "
+                  "next weekly run.", kind="text", restart=()),
+        ), restart=(OPTIONS,)),
     ),
 )
 

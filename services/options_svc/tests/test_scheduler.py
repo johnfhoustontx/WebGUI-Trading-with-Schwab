@@ -109,6 +109,79 @@ def test_captured_manage_due_weekend():
     assert due is False
 
 
+# ── idea_marks_due (the trade ideas' marks, every [idea_trades] mark_interval_min) ─
+def _fired(start, end, interval, day=(2026, 6, 15)):
+    """The minutes ``idea_marks_due`` fires on, ticking once a minute like the loop."""
+    fired, slot = [], None
+    t = _ct(*day, *start)
+    stop = _ct(*day, *end)
+    while t <= stop:
+        due, slot = scheduler.idea_marks_due(t, slot, interval)
+        if due:
+            fired.append((t.hour, t.minute))
+        t += dt.timedelta(minutes=1)
+    return fired
+
+
+def test_idea_marks_due_slots_and_gate():
+    # one mark per 5-minute slot, a slot whose first minutes are a burst window
+    # marking at its first clear minute instead
+    assert [m for _, m in _fired((9, 0), (9, 59), 5)] == [
+        1, 6, 10, 15, 21, 25, 31, 36, 40, 45, 51, 55]
+    assert scheduler.IDEA_MARK_FORBIDDEN_MINUTES == frozenset(
+        {0, 2, 3, 4, 5, 17, 18, 19, 20, 30, 32, 33, 34, 35, 47, 48, 49, 50})
+    # a slot that is ALL forbidden is skipped; the next slot catches up
+    assert _fired((9, 0), (9, 6), 1) == [(9, 1), (9, 6)]
+    # the regular session only: 08:30 is a burst minute, 15:00 is too, and the
+    # 5-minute cycle never runs after the close (the 15:05 settle slot does that)
+    assert _fired((8, 0), (8, 40), 5) == [(8, 31), (8, 36), (8, 40)]
+    assert _fired((14, 50), (16, 0), 5) == [(14, 51), (14, 55)]
+    # trading days only
+    assert _fired((9, 0), (15, 0), 5, day=(2026, 6, 13)) == []      # Saturday
+    assert _fired((9, 0), (15, 0), 5, day=(2026, 6, 19)) == []      # Juneteenth
+
+
+def test_idea_mark_forbidden_minutes_follow_the_scan_offset(monkeypatch):
+    """The scan-burst minutes are derived from ``windows.scan.offset_min``; the
+    first minute after the hour and the half hour is forbidden at any offset."""
+    shipped = frozenset({0, 2, 3, 4, 5, 17, 18, 19, 20, 30, 32, 33, 34, 35,
+                         47, 48, 49, 50})
+    assert scheduler.idea_mark_forbidden_minutes(2) == shipped
+    monkeypatch.setattr(scheduler.mc, "scan_offset_min", lambda: 2)
+    assert scheduler.idea_mark_forbidden_minutes() == shipped
+    moved = frozenset({0, 5, 6, 7, 8, 20, 21, 22, 23, 30, 35, 36, 37, 38,
+                       50, 51, 52, 53})
+    assert scheduler.idea_mark_forbidden_minutes(5) == moved
+    assert scheduler.idea_mark_forbidden_minutes(0) == frozenset(
+        {0, 1, 2, 3, 15, 16, 17, 18, 30, 31, 32, 33, 45, 46, 47, 48})
+    monkeypatch.setattr(scheduler.mc, "scan_offset_min", lambda: 5)
+    assert scheduler.idea_mark_forbidden_minutes() == moved
+    # and the gate follows the configured offset: 09:02 is clear, 09:05 is not
+    assert scheduler.idea_marks_due(_ct(2026, 6, 15, 9, 2), None, 5)[0] is True
+    assert scheduler.idea_marks_due(_ct(2026, 6, 15, 9, 5), None, 5)[0] is False
+    assert [m for _, m in _fired((9, 0), (9, 29), 5)] == [1, 9, 10, 15, 24, 25]
+
+
+def test_idea_marks_due_reads_the_interval_it_is_given():
+    assert [m for _, m in _fired((10, 0), (10, 59), 15)] == [1, 15, 31, 45]
+
+
+def test_idea_marks_due_holds_the_slot_on_a_skipped_tick():
+    due, slot = scheduler.idea_marks_due(_ct(2026, 6, 15, 9, 0), "LAST", 5)
+    assert (due, slot) == (False, "LAST")
+
+
+def test_the_loop_runs_the_idea_marks_without_the_autoclose_switch():
+    """The idea branch is gated by its own ``enabled`` (inside ``mark_cycle``), never
+    by the captured auto-close toggle."""
+    import inspect
+    src = inspect.getsource(scheduler.loop)
+    start = src.index("idea_marks_due(")
+    block = src[start:src.index('branches.append(("idea_marks"', start)]
+    assert "run_idea_marks_and_publish" in block
+    assert "autoclose" not in block
+
+
 # ── paper_cycle_due (manual Paper Portfolio hourly entry+manage) ────────────
 # The MANUAL Paper Portfolio runs entry + manage once at the TOP OF THE HOUR,
 # 09:00–14:00 CT (last run 14:00 / 2pm; NO 15:00 run at the regular-session

@@ -311,6 +311,19 @@ h1435 = "14:35"
 # `systemctl --user daemon-reload`; a service restart will not pick it up.
 at = "15:15"     # 16:15 ET
 
+[slots.idea_review]
+# The weekly review of the booked trade ideas (what the Paper Ledger's idea trades
+# did, and a written judgment): once a week at this time, on the week's last
+# trading day. Only the TIME is set here; the day is fixed by the timer. It sits
+# after the 15:00 CT close and the 15:05 [slots.paper_settle] pass, so the week's
+# settled ideas are in the books it reads.
+#
+# ⚠ Read by SYSTEMD, not by a service scheduler: generate_units.py turns this
+# into a timer's OnCalendar. Changing this time needs
+# `python -m deploy.systemd.generate_units --install` and a
+# `systemctl --user daemon-reload`; a service restart will not pick it up.
+at = "15:30"     # 16:30 ET
+
 [slots.calibration]
 # The nightly signal-calibration rebuild -> cache:options:calibration, the
 # realized-outcome EV the Trade detail panel shows. AFTER [windows.collection]

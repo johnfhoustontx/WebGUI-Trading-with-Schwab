@@ -277,7 +277,8 @@ def paper_section(trades_cache, account_cache) -> str:
 
     trades = trades_cache.get("trades", []) if isinstance(trades_cache, dict) else []
     rows = []
-    for t in trades:
+    # The user's own rows: the posted trade ideas have their own section.
+    for t in split_ledger(trades)[0]:
         rows.append(
             "<tr>"
             + _cell(t.get("symbol"))
@@ -312,10 +313,33 @@ def scanner_section(scan_cache) -> str:
 # ----------------------------------------------------------------------------- #
 # Trade normalization + period/breakdown aggregation (additive)
 # ----------------------------------------------------------------------------- #
+def _ct_naive(ts):
+    """A naive Central datetime from an ISO string or a datetime, or None.
+
+    A stamp that carries a UTC offset is converted to America/Chicago first; a
+    naive one is already Central by the repo's rule and is left alone."""
+    if isinstance(ts, dt.datetime):
+        d = ts
+    else:
+        try:
+            d = dt.datetime.fromisoformat(str(ts or "").strip())
+        except ValueError:
+            return None
+    if d.tzinfo is not None:
+        d = d.astimezone(_CT).replace(tzinfo=None)
+    return d
+
+
 def _date_of(ts):
-    """YYYY-MM-DD from an ISO timestamp string, or None."""
+    """YYYY-MM-DD (Central) from an ISO timestamp string, or None."""
     s = str(ts or "")
-    return s[:10] if len(s) >= 10 and s[4] == "-" and s[7] == "-" else None
+    if not (len(s) >= 10 and s[4] == "-" and s[7] == "-"):
+        return None
+    if len(s) > 19:   # may carry an offset: take the Central date, not the written one
+        d = _ct_naive(s)
+        if d is not None:
+            return d.date().isoformat()
+    return s[:10]
 
 
 def normalize_trades(raw, *, kind):
@@ -498,22 +522,208 @@ def breakdown_table_html(rows):
 
 
 # ----------------------------------------------------------------------------- #
+# Trade ideas: Ledger rows booked with source == "trade_idea"
+# ----------------------------------------------------------------------------- #
+def _is_idea(trade) -> bool:
+    return isinstance(trade, dict) and trade.get("source") == "trade_idea"
+
+
+def split_ledger(trades):
+    """(manual, ideas): the Ledger's rows split by ``source``. An idea row is
+    identified by ``source == "trade_idea"`` and nothing else."""
+    manual, ideas = [], []
+    for t in trades or []:
+        (ideas if _is_idea(t) else manual).append(t)
+    return manual, ideas
+
+
+# The trade-idea tables' words. ``tools/weekly_idea_review.py`` prints its report
+# with these same helpers and headers (it imports this module), so the /eod
+# section and the weekly review cannot word one trade two ways.
+EXIT_REASON_WORDS = {"TARGET": "Target reached", "STOP": "Stopped out",
+                     "EXPIRED": "Expired", "MANUAL": "Closed by hand"}
+# The Ledger's own money convention: an entry is + for a credit received and -
+# for a debit paid; an exit is what closing cost a credit trade, or what closing
+# brought in for a debit trade.
+IDEA_ENTRY_COL = "Entry (+ credit received, − debit paid)"
+IDEA_EXIT_COL = "Exit (credit trade: paid to close; debit trade: received)"
+
+
+def reason_words(reason) -> str:
+    """An exit reason in whole words; an unknown one as written, none as "—"."""
+    if not reason:
+        return "—"
+    return EXIT_REASON_WORDS.get(reason, str(reason))
+
+
+def _plural(n: int, word: str) -> str:
+    return f"{n} {word}{'' if n == 1 else 's'}"
+
+
+def held_words(hours) -> str:
+    """A holding time in whole words: "1 day 3 hours" from a day on, "2 hours 5
+    minutes" under it; a zero part is left out ("1 day", "1 hour", "0 minutes")."""
+    if hours is None:
+        return "—"
+    mins = int(round(hours * 60))
+    days, rem = divmod(mins, 1440)
+    if days:
+        parts = [_plural(days, "day")]
+        parts += [_plural(rem // 60, "hour")] if rem // 60 else []
+    else:
+        parts = [_plural(rem // 60, "hour")] if rem // 60 else []
+        parts += [_plural(rem % 60, "minute")] if rem % 60 or not parts else []
+    return " ".join(parts)
+
+
+def _held(start, end) -> str:
+    """How long a trade was held, in whole words (:func:`held_words`)."""
+    a, b = _ct_naive(start), _ct_naive(end)
+    if a is None or b is None or b < a:
+        return "—"
+    return held_words((b - a).total_seconds() / 3600.0)
+
+
+def _idea_row(t, now):
+    posted_ts = t.get("idea_posted") or t.get("entry_time")
+    posted = _ct_naive(posted_ts)
+    is_open = str(t.get("status") or "").upper() == "OPEN"
+    qty = _num(t.get("quantity"), 1)
+    mae_pnl = _num(t.get("mae_pnl"))
+    max_loss = _num(t.get("max_loss_per"))
+    mae_pct = (mae_pnl / (max_loss * 100) * 100
+               if mae_pnl is not None and max_loss else None)
+    return {
+        "posted": posted.strftime("%H:%M") if posted else "—",
+        "symbol": t.get("symbol"),
+        "strategy": t.get("strategy"),
+        # the display name the idea card carried, stored at booking; Tier 1 has
+        # no map of its own from the structure key
+        "structure": t.get("idea_label") or t.get("strategy"),
+        "grade": t.get("idea_grade"),
+        "entry": _num(t.get("entry_credit_total")),
+        "exit": None if is_open else _num(t.get("exit_debit_total")),
+        "reason": t.get("exit_reason"),
+        "held": _held(posted_ts, now if is_open else t.get("exit_time")),
+        "mae": mae_pnl * qty if mae_pnl is not None else None,
+        "mae_pct": mae_pct,
+        "pnl": _num(t.get("unrealized_pnl") if is_open else t.get("realized_pnl")),
+        "status": "OPEN" if is_open else "CLOSED",
+        "_posted": posted_ts,
+        "_exit": t.get("exit_time"),
+    }
+
+
+def idea_rows(trades, today, now=None) -> dict:
+    """The trade-idea Ledger rows as display dicts in three lists:
+    ``posted_today`` (any state), ``closed_today_earlier`` (closed today, posted
+    on an earlier day) and ``open`` (every open idea, at its last mark). ``now``
+    is a naive Central datetime; an open row is held up to it."""
+    now = now or dt.datetime.now(_CT).replace(tzinfo=None)
+    iso = today.isoformat()
+    out = {"posted_today": [], "closed_today_earlier": [], "open": []}
+    for t in split_ledger(trades)[1]:
+        r = _idea_row(t, now)
+        posted_d = _date_of(r["_posted"])
+        if posted_d == iso:
+            out["posted_today"].append(r)
+        if r["status"] == "OPEN":
+            out["open"].append(r)
+        elif _date_of(r["_exit"]) == iso and posted_d != iso:
+            out["closed_today_earlier"].append(r)
+    for rows, key in ((out["posted_today"], "_posted"),
+                      (out["closed_today_earlier"], "_exit"),
+                      (out["open"], "_posted")):
+        rows.sort(key=lambda r: _ct_naive(r[key]) or dt.datetime.min)
+    return out
+
+
+_IDEA_COLS = ["Posted", "Symbol", "Structure", "Grade", IDEA_ENTRY_COL,
+              IDEA_EXIT_COL, "Reason", "Held", "MAE $", "MAE % of max loss", "P&L"]
+
+
+def _idea_table(rows, empty) -> str:
+    body = []
+    for r in rows:
+        pct = r["mae_pct"]
+        body.append(
+            "<tr>"
+            + _cell(r["posted"]) + _cell(r["symbol"]) + _cell(r["structure"])
+            + _cell(r["grade"] or "—")
+            + _cell(_money(r["entry"]))
+            + _cell("open" if r["status"] == "OPEN" else _money(r["exit"]))
+            + _cell(reason_words(r["reason"])) + _cell(r["held"])
+            + f'<td class="{_pn_class(r["mae"])}">{_money(r["mae"])}</td>'
+            + _cell("—" if pct is None else f"{pct:.2f}%")
+            + f'<td class="{_pn_class(r["pnl"])}">{_money(r["pnl"])}</td>'
+            + "</tr>")
+    return _table(_IDEA_COLS, body, empty=empty)
+
+
+def idea_section(paper_trades_cache, today, now=None) -> str:
+    """The detail report's "Trade ideas" section: today's posted ideas, the ones
+    closed today from earlier days, the open ones at their last mark, then closed
+    P&L for the day / week / month. The open trades' unrealized total is its own
+    line and never enters those period totals."""
+    trades = (paper_trades_cache.get("trades")
+              if isinstance(paper_trades_cache, dict) else None)
+    ideas = split_ledger(trades)[1]
+    if not ideas:
+        return '<p class="none">No trade ideas yet.</p>'
+    rows = idea_rows(ideas, today, now=now)
+    buckets = period_buckets(normalize_trades(ideas, kind="ledger"), today)
+    totals = " · ".join(
+        f'{escape(label)} <span class="{_pn_class(b["realized"])}">'
+        f'{_money(b["realized"])}</span> ({b["closed"]} closed)'
+        for label, b in ((lbl, buckets[k]) for k, lbl in
+                         (("daily", "Day"), ("weekly", "Week"), ("mtd", "Month"))))
+    unreal = [r["pnl"] for r in rows["open"] if r["pnl"] is not None]
+    unreal_total = sum(unreal) if unreal else None
+    return (
+        "<h3>Posted today</h3>"
+        + _idea_table(rows["posted_today"], "No trade ideas posted today.")
+        + "<h3>Closed today, posted earlier</h3>"
+        + _idea_table(rows["closed_today_earlier"],
+                      "No earlier trade ideas closed today.")
+        + "<h3>Open now</h3>"
+        + _idea_table(rows["open"], "No open trade ideas.")
+        + f'<p class="summary-line">Closed P&amp;L: {totals}</p>'
+        + '<p class="summary-line">Open trades, unrealized: '
+        f'<span class="{_pn_class(unreal_total)}">{_money(unreal_total)}</span> '
+        f'({len(rows["open"])} open; not in the totals above)</p>'
+    )
+
+
+TRADE_IDEAS_NOTE = (
+    "Every posted trade idea, booked on the Paper Ledger and not held to its risk "
+    "limits. Realized profit and the closed count include only trades that have "
+    "closed; the Opened and Credit collected columns count every idea by the day "
+    "it was posted, open ones too."
+)
+
+
+# ----------------------------------------------------------------------------- #
 # Per-book performance (shared by summary + detail)
 # ----------------------------------------------------------------------------- #
 def _books(snap):
     """[(label, norm_trades, now_snapshot)] for each book.
 
-    Two of them: the manual paper book, plus the captured signals scored from
-    2026-09-01. Captured passes ``None`` for the snapshot because it has no
-    account behind it - it is a TRACKING book, and ``_book_now_line`` already
-    renders nothing for an absent snapshot rather than inventing an equity."""
+    Three of them: the manual paper book (the Ledger without its trade-idea
+    rows), the captured signals scored from 2026-09-01, and the trade ideas
+    booked on the Ledger. Captured and Trade ideas pass ``None`` for the
+    snapshot because neither has an account behind it - they are TRACKING books,
+    and ``_book_now_line`` already renders nothing for an absent snapshot rather
+    than inventing an equity."""
     snap = snap or {}
-    led = normalize_trades((snap.get("paper_trades") or {}).get("trades"), kind="ledger")
+    manual, ideas = split_ledger((snap.get("paper_trades") or {}).get("trades"))
+    led = normalize_trades(manual, kind="ledger")
+    idea_norm = normalize_trades(ideas, kind="ledger")
     cap = normalize_trades((snap.get("captured_perf") or {}).get("rows"),
                            kind="captured")
     return [
         ("Manual paper", led, (snap.get("paper_account") or {}).get("snapshot")),
         ("Captured signals", cap, None),
+        ("Trade ideas", idea_norm, None),
     ]
 
 
@@ -550,7 +760,7 @@ def _book_slug(label):
 
 
 def _performance_block(snap, today):
-    """One ``<details>`` performance section per book (manual + captured).
+    """One ``<details>`` performance section per book (manual, captured, ideas).
 
     Returns ``(toc_entries, sections_html)`` so callers can both link to and
     render the per-book performance — identical in the summary and the detail."""
@@ -562,6 +772,8 @@ def _performance_block(snap, today):
             period_buckets(norm, today))
         if label == "Captured signals":
             body += f'<p class="book-note">{escape(CAPTURED_BASIS_NOTE)}</p>'
+        elif label == "Trade ideas":
+            body += f'<p class="book-note">{escape(TRADE_IDEAS_NOTE)}</p>'
 
         sections.append(details_section(anchor, f"{label} — performance", body))
     return toc_entries, "".join(sections)
@@ -593,6 +805,7 @@ def detail_fragment(snap: dict, today=None) -> str:
         ("scanner", "Scanner"),
         ("captured", "Captured"),
         ("captured-closed", "Captured closed"),
+        ("trade-ideas", "Trade ideas"),
     ])
 
     parts = [
@@ -610,6 +823,8 @@ def detail_fragment(snap: dict, today=None) -> str:
                         captured_section(snap.get("captured"))),
         details_section("captured-closed", "Captured — closed today",
                         captured_closed_section(snap.get("captured_closed"))),
+        details_section("trade-ideas", "Trade ideas",
+                        idea_section(snap.get("paper_trades"), today)),
         "</div>",
     ]
     return "".join(parts)
@@ -635,14 +850,22 @@ def summary_fragment(snap: dict, detail_href: str, today=None) -> str:
     scan = snap.get("scan") or {}
     n_scan = _count(scan, "signals_0dte") + _count(scan, "signals_swing")
     n_cap = _count(snap.get("captured") or {}, "signals")
-    n_paper = _count(snap.get("paper_trades") or {}, "trades")
+    # The user's own Ledger rows; the trade ideas are their own book and tile.
+    led = snap.get("paper_trades")
+    led = led.get("trades") if isinstance(led, dict) else None
+    n_paper = len(split_ledger(led if isinstance(led, list) else None)[0])
     acct = (snap.get("paper_account") or {}).get("snapshot") or {}
     session_pnl = acct.get("session_pnl")
+    idea_norm = [n for label, n, _s in _books(snap) if label == "Trade ideas"][0]
+    idea_day = period_buckets(idea_norm, today)["daily"]
     tiles = "".join([
         _tile("Paper session P&L", _money(session_pnl), _pn_class(session_pnl)),
         _tile("Scanner signals", n_scan),
         _tile("Captured signals", n_cap),
         _tile("Paper trades", n_paper),
+        _tile("Trade idea P&L today",
+              f'{_money(idea_day["realized"])} · {idea_day["closed"]} closed',
+              _pn_class(idea_day["realized"])),
     ])
     perf_toc, perf_html = _performance_block(snap, today)
     nav = toc(perf_toc + [("captured-closed", "Captured closed")])
@@ -748,7 +971,7 @@ def day_label(date: str) -> str:
     return f"{d.strftime('%a')} {d.day} {d.strftime('%b')}"
 
 
-def _atomic_write_text(path: Path, text: str) -> None:
+def atomic_write_text(path: Path, text: str) -> None:
     """Write ``text`` to ``path`` atomically.
 
     Writes to a temp file in the SAME directory (so ``os.replace`` is a rename on
@@ -756,7 +979,8 @@ def _atomic_write_text(path: Path, text: str) -> None:
     mid-write leaves the temp file, never a half-written ``path`` — so a
     concurrent reader (``/eod/file``) never serves a partial document.
     ``os.replace`` overwrites an existing target atomically, preserving the
-    same-date-overwrite behavior.
+    same-date-overwrite behavior. ``tools/weekly_idea_review.py`` writes its
+    archive through this too; the folder must already exist.
     """
     fd, tmp_name = tempfile.mkstemp(
         dir=str(path.parent), prefix=path.name + ".", suffix=".tmp")
@@ -783,8 +1007,8 @@ def write_archive(root, date: str, summary_doc: str, detail_doc: str) -> dict:
     day = Path(root) / date
     day.mkdir(parents=True, exist_ok=True)
     summ, det = day / "summary.html", day / "detail.html"
-    _atomic_write_text(summ, summary_doc)
-    _atomic_write_text(det, detail_doc)
+    atomic_write_text(summ, summary_doc)
+    atomic_write_text(det, detail_doc)
     return {"summary": summ, "detail": det}
 
 
@@ -859,6 +1083,9 @@ OPEN_SUMMARY_TIP = ("Opens today's archived summary.html in a new browser tab. "
 OPEN_DETAIL_TIP = ("Opens today's archived detail.html in a new browser tab. "
                    "Generate writes it.")
 
+WEEKLY_TIP = ("The weekly review of the trade ideas, written after the close on "
+              "the last trading day of each week.")
+
 # The message over the region while the two documents are built and written.
 GENERATING_TEXT = "Generating the report…"
 READING_TEXT = "Reading the caches…"
@@ -901,6 +1128,9 @@ def render() -> None:
         # reason: this app is used from a phone.
         head.actions.classes(remove="no-wrap", add="flex-wrap justify-end")
         with head.actions:
+            kit.button("Weekly idea review", kind="secondary", icon="date_range",
+                       tooltip=WEEKLY_TIP,
+                       on_click=lambda: ui.navigate.to("/eod/weekly")).classes("shrink-0")
             kit.button("Open summary file", kind="secondary", icon="open_in_new",
                        tooltip=OPEN_SUMMARY_TIP,
                        on_click=lambda: _open_file("summary")).classes("shrink-0")
