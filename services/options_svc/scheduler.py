@@ -215,24 +215,40 @@ def captured_manage_due(now, last_slot):
 
 # ── The posted trade ideas' marks ([idea_trades] mark_interval_min) ─────────
 # Minutes of the hour in which the idea cycle fetches no chain. Every service
-# shares the proxy's 5 requests a second: the autoscan starts offset_min (2)
-# minutes after each quarter hour and fetches for about two minutes (:02-:05,
-# :17-:20, :32-:35, :47-:50), and Schwab refuses calls (429) in the first minute
-# after the hour and the half hour (:00, :30) whatever the rate (root CLAUDE.md,
-# "Every service shares the proxy's 5 requests a second"). This checkout carries
-# no proxy access log to set them from (prod only), so they are that list. A slot
-# that lands in one marks at its first clear minute; a slot with none is skipped
-# and the next slot catches up - a mark a minute or two late is fine.
-IDEA_MARK_FORBIDDEN_MINUTES = frozenset(
-    {0, 2, 3, 4, 5, 17, 18, 19, 20, 30, 32, 33, 34, 35, 47, 48, 49, 50})
+# shares the proxy's 5 requests a second: the autoscan starts offset_min (2 as
+# shipped) minutes after each quarter hour and fetches for about two minutes,
+# which the burst below covers as that minute and the three after it (:02-:05,
+# :17-:20, :32-:35, :47-:50 at the shipped offset), and Schwab refuses calls
+# (429) in the first minute after the hour and the half hour (:00, :30) whatever
+# the rate (root CLAUDE.md, "Every service shares the proxy's 5 requests a
+# second"). The burst minutes follow the configured offset, read per tick the
+# way ``autoscan_due`` reads it, so moving the scan moves them too. A slot that
+# lands in one marks at its first clear minute; a slot with none is skipped and
+# the next slot catches up - a mark a minute or two late is fine.
+_SCAN_BURST_MINUTES = 4          # the scan's start minute and the three after it
+_REFUSED_MINUTES = (0, 30)       # the first minute after the hour and half hour
+
+
+def idea_mark_forbidden_minutes(offset_min=None) -> frozenset:
+    """The minutes of the hour the idea cycle keeps clear of, for an autoscan that
+    starts ``offset_min`` minutes after each quarter hour (the configured
+    ``windows.scan.offset_min`` when not given)."""
+    offset = mc.scan_offset_min() if offset_min is None else int(offset_min)
+    burst = {(q + offset + k) % 60 for q in (0, 15, 30, 45)
+             for k in range(_SCAN_BURST_MINUTES)}
+    return frozenset(burst | set(_REFUSED_MINUTES))
+
+
+#: The set at import, for readers that want a value; the gate re-reads the offset.
+IDEA_MARK_FORBIDDEN_MINUTES = idea_mark_forbidden_minutes()
 
 
 def idea_marks_due(now, last_slot, interval_min):
     """(should_mark, slot): True at most once per ``interval_min``-minute slot, on a
     trading day inside the REGULAR session (08:30-15:00 CT), never in a forbidden
-    minute. A tick that does not fire hands back ``last_slot`` unchanged, so the
-    slot is still open at its next clear minute."""
-    if not mc.is_regular_hours(now) or now.minute in IDEA_MARK_FORBIDDEN_MINUTES:
+    minute (``idea_mark_forbidden_minutes``). A tick that does not fire hands back
+    ``last_slot`` unchanged, so the slot is still open at its next clear minute."""
+    if not mc.is_regular_hours(now) or now.minute in idea_mark_forbidden_minutes():
         return (False, last_slot)
     step = max(1, int(interval_min))
     slot = (now.date().isoformat(), (now.hour * 60 + now.minute) // step)

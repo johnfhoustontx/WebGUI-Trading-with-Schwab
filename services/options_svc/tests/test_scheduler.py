@@ -141,6 +141,27 @@ def test_idea_marks_due_slots_and_gate():
     assert _fired((9, 0), (15, 0), 5, day=(2026, 6, 19)) == []      # Juneteenth
 
 
+def test_idea_mark_forbidden_minutes_follow_the_scan_offset(monkeypatch):
+    """The scan-burst minutes are derived from ``windows.scan.offset_min``; the
+    first minute after the hour and the half hour is forbidden at any offset."""
+    shipped = frozenset({0, 2, 3, 4, 5, 17, 18, 19, 20, 30, 32, 33, 34, 35,
+                         47, 48, 49, 50})
+    assert scheduler.idea_mark_forbidden_minutes(2) == shipped
+    monkeypatch.setattr(scheduler.mc, "scan_offset_min", lambda: 2)
+    assert scheduler.idea_mark_forbidden_minutes() == shipped
+    moved = frozenset({0, 5, 6, 7, 8, 20, 21, 22, 23, 30, 35, 36, 37, 38,
+                       50, 51, 52, 53})
+    assert scheduler.idea_mark_forbidden_minutes(5) == moved
+    assert scheduler.idea_mark_forbidden_minutes(0) == frozenset(
+        {0, 1, 2, 3, 15, 16, 17, 18, 30, 31, 32, 33, 45, 46, 47, 48})
+    monkeypatch.setattr(scheduler.mc, "scan_offset_min", lambda: 5)
+    assert scheduler.idea_mark_forbidden_minutes() == moved
+    # and the gate follows the configured offset: 09:02 is clear, 09:05 is not
+    assert scheduler.idea_marks_due(_ct(2026, 6, 15, 9, 2), None, 5)[0] is True
+    assert scheduler.idea_marks_due(_ct(2026, 6, 15, 9, 5), None, 5)[0] is False
+    assert [m for _, m in _fired((9, 0), (9, 29), 5)] == [1, 9, 10, 15, 24, 25]
+
+
 def test_idea_marks_due_reads_the_interval_it_is_given():
     assert [m for _, m in _fired((10, 0), (10, 59), 15)] == [1, 15, 31, 45]
 
