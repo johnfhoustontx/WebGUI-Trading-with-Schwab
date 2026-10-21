@@ -55,6 +55,20 @@ def test_the_archive_is_the_one_the_tool_writes_to():
     assert root.parts[-3:] == ("webgui", "data", "idea_review")
 
 
+def test_the_words_claim_no_more_than_the_check_proves():
+    """The check behind Claude's assessment proves each figure is one the app
+    computed, not that it is used with the right subject: the page note and both
+    hover guides say exactly that, and none says every figure "is checked"."""
+    import page_help
+    weekly, eod = page_help.HELP_MD["/eod/weekly"], page_help.HELP_MD["/eod"]
+    for text in (idea_review.NOTE, weekly, eod):
+        flat = " ".join(text.replace("*", "").replace("(or sign) ", "").split())
+        assert "is one the app computed" in flat
+        assert "right subject is not checked" in flat
+        assert "every figure in it is checked" not in flat
+        assert "is checked against them" not in flat
+
+
 # --- the page ---------------------------------------------------------------
 def test_empty_archive_message(monkeypatch, tmp_path):
     host = _render(monkeypatch, tmp_path)

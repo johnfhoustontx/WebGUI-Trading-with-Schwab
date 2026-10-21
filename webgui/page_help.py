@@ -1814,7 +1814,9 @@ An end-of-day summary of the day's options activity and paper trading.
   is totalled for the day, week and month; **open trades are shown on their own line
   and never added to those totals.**
 - **Weekly idea review** (the button at the top) opens the weekly look back at the
-  trade ideas, written at the end of each week.
+  trade ideas, written at the end of each week. Every figure in Claude's assessment
+  there is one the app computed; whether Claude used it with the right subject is
+  not checked.
 - **It saves itself at 3:15 pm CT** every trading day, a quarter of an hour after
   the close. You don't have to be here, and you don't have to press anything.
 - **Generate** saves a dated HTML snapshot you can reopen later — use it for an
@@ -2043,9 +2045,12 @@ worked, which did not, and what the week's closed and still-open trades looked l
   the list; the newest is shown first. Before the first one is written the page
   says so.
 - **Who writes what:** the app computes every number from the Paper Ledger's
-  trade-idea rows. Claude writes the assessment **from those numbers only**, and
-  every figure in it is checked against them before the report is saved. A
-  sentence that cites a number the app did not compute is dropped, not shown.
+  trade-idea rows, and Claude writes the assessment from them. Before the report
+  is saved, a paragraph holding a number the app did not compute is dropped, and
+  so is a suggestion holding a number that is not one of the groups it cites.
+  So **every figure in it is one the app computed** — but whether Claude used it
+  with the right subject (or sign) is **not checked**. Read a figure against the
+  tables below before acting on it.
 - **Thin patterns are labelled.** A group with too few trades to mean anything is
   marked "few trades" — read it as a note, not a finding.
 - If Claude could not be reached that week, the report still saves with all the

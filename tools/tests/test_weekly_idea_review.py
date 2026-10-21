@@ -280,6 +280,33 @@ def test_judgment_numbers_must_appear_in_facts():
     assert out["dropped_paragraphs"] == 1 and out["dropped_suggestions"] == 1
 
 
+def test_a_suggestions_numbers_must_be_its_cited_facts_own():
+    """A suggestion may state only the figures of the facts it cites; a figure
+    from another group is dropped even though it is in the facts somewhere. The
+    assessment keeps the whole-facts check."""
+    f = _facts([row(idea_id="a", idea_grade="Good", realized_pnl=100.0),
+                row(idea_id="b", idea_grade="Strong", symbol="QQQ",
+                    exit_reason="STOP", realized_pnl=-250.0, mae_pnl=-300.0)])
+    assert "250.00" in idea_review.fact_numbers(f)
+    assert "250.00" not in idea_review.numbers_of(
+        next(x for x in f["week"]["grade"] if x["id"] == "week.grade.Good"))
+    j = {"assessment": ["Strong ideas lost 250.00 this week."],
+         "suggestions": [
+             {"text": "Good ideas lost 250.00; avoid them.",
+              "cites": ["week.grade.Good"]},
+             {"text": "Good ideas made $100.00 at a 100.00% win rate.",
+              "cites": ["week.grade.Good"]},
+             {"text": "Strong lost 250.00 where Good made 100.00.",
+              "cites": ["week.grade.Good", "week.grade.Strong"]},
+         ]}
+    out = w.verify(j, f, 5)
+    assert out["assessment"] == j["assessment"]
+    assert [s["text"] for s in out["suggestions"]] == [
+        "Good ideas made $100.00 at a 100.00% win rate.",
+        "Strong lost 250.00 where Good made 100.00."]
+    assert out["dropped_suggestions"] == 1
+
+
 @pytest.mark.parametrize("text, kept", [
     ("The ideas won nine of ten this week.", False),     # 9 is not a fact
     ("Nine of the trades won.", False),
@@ -368,6 +395,13 @@ def test_report_lists_closed_and_open_separately(tmp_path):
     assert html.index("Assessment") < html.index("Suggestions") < closed_at
     assert "Mind QQQ." in html and "Two closed." in html
     assert html.startswith("<!DOCTYPE html>")
+
+
+def test_the_report_claims_no_more_than_the_check_proves():
+    html = w.render(_facts(), None, "2026-W42")
+    assert "one the app computed; whether Claude used it with the right " \
+           "subject is not checked." in html
+    assert "may cite only those numbers" not in html
 
 
 def test_render_without_a_judgment_says_so_and_keeps_every_table():

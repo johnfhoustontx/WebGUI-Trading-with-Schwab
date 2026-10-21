@@ -31,9 +31,10 @@ EMPTY_TEXT = ("No weekly review yet — the first one is written after the close
 
 FRAME_TITLE = "Weekly idea review"
 FILE_ROUTE = "/eod/weekly/file"
-NOTE = ("Written after the close on the last trading day of each week. Claude "
-        "writes the assessment from numbers the app computed, and every figure "
-        "in it is checked. Informational only: nothing here changes a signal.")
+NOTE = ("Written after the close on the last trading day of each week. Every "
+        "figure in Claude's assessment is one the app computed; whether Claude "
+        "used it with the right subject is not checked. Informational only: "
+        "nothing here changes a signal.")
 
 
 def is_week(name) -> bool:

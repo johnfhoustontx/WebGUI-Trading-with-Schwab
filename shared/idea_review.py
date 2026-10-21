@@ -347,6 +347,16 @@ _CLOSED_KEYS = ("score", "entry", "exit", "realized_pnl", "mae_pct",
 _OPEN_KEYS = ("unrealized_pnl", "mae_pnl", "mae_pct", "days_open")
 
 
+def numbers_of(fact: dict) -> set[str]:
+    """The numbers of ONE group fact (a scope's total or a group row), printed
+    as :func:`fact_numbers` prints them. A suggestion that cites a fact may state
+    these and no others: a group fact carries its own figures, not its rows."""
+    out: set[str] = set()
+    for k in _FACT_KEYS:
+        _add(out, fact.get(k))
+    return out
+
+
 def fact_numbers(f: dict) -> set[str]:
     """Every number of ``f`` as the report prints it (see the module docstring).
 
@@ -356,8 +366,7 @@ def fact_numbers(f: dict) -> set[str]:
     """
     out: set[str] = set()
     for x in _tables(f):
-        for k in _FACT_KEYS:
-            _add(out, x.get(k))
+        out |= numbers_of(x)
     for x in f.get("closed_week") or ():
         for k in _CLOSED_KEYS:
             _add(out, x.get(k))

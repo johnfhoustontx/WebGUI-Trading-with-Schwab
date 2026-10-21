@@ -20,11 +20,13 @@ saying the judgment is missing, and the tool exits 3 so the unit's failure
 alert fires.
 
 **Claude's text is checked, not trusted.** A suggestion must cite fact ids that
-exist; any paragraph or suggestion holding a number the facts do not hold is
-dropped whole (see :func:`verify`). Code states the facts; the model only joins
-them and adds judgment. The check proves a number is IN the facts, not that it
-is used with the right meaning or sign: "SPY lost 100.00" passes when SPY made
-100.00, so the prompt tells Claude to keep each figure's sign and subject.
+exist and may state only the numbers of the facts it cites; a paragraph holding
+a number the facts do not hold anywhere is dropped whole (see :func:`verify`).
+Code states the facts; the model only joins them and adds judgment. So every
+figure that survives is one the app computed, but whether Claude used it with
+the right subject or sign is NOT checked: "SPY lost 100.00" passes when SPY
+made 100.00, and a paragraph may pin one group's figure on another, so the
+prompt tells Claude to keep each figure's sign and subject.
 
 Exit codes: 0 written (or not the review day), 2 the bus was unreadable or the
 Ledger view was missing or held no rows at all (nothing written: a page of
@@ -84,6 +86,9 @@ JUDGMENT_SCHEMA = {
 MISSING_LINE = ("Claude's assessment is missing this week; the numbers below "
                 "are complete.")
 THIN_LABEL = "too few trades to act on"
+# What the check behind the assessment proves, and no more (see verify).
+TRUST_LINE = ("Every figure in Claude's assessment is one the app computed; "
+              "whether Claude used it with the right subject is not checked.")
 
 _DIM_TITLES = {
     "grade": "By grade",
@@ -193,13 +198,35 @@ def _numbers_ok(text: str, allowed: list[float], labels: list[str]) -> bool:
 _TOTALS = ("week.total", "all_time.total")
 
 
+def _floats(strings) -> list[float]:
+    out = []
+    for s in strings:
+        try:
+            out.append(float(s))
+        except ValueError:
+            continue
+    return out
+
+
+def _cited_numbers(cites, by_id) -> list[float]:
+    """The figures a suggestion may state: those of the facts it cites. A group
+    fact carries its own figures and no rows, so these are its fields."""
+    out: set[str] = set()
+    for c in cites:
+        out |= idea_review.numbers_of(by_id[c])
+    return _floats(out)
+
+
 def verify(judgment: dict, f: dict, min_n: int) -> dict:
     """Keep only what the facts support.
 
     A suggestion is dropped when its ``cites`` is empty or names an id not in
-    ``fact_ids(f)``; a paragraph or suggestion is dropped whole when it holds a
-    number that is not, within 0.005, one of ``fact_numbers(f)`` (``$``, ``,``
-    and ``%`` stripped first, so "62.5", "62.50" and "62.50%" all match 62.50).
+    ``fact_ids(f)``, or when it holds a number that is not, within 0.005, one of
+    the numbers of the facts it CITES (``numbers_of`` each cited fact: a group
+    fact carries its own figures, not its rows). An assessment paragraph cites
+    nothing, so it is dropped whole when it holds a number that is not one of
+    ``fact_numbers(f)``. ``$``, ``,`` and ``%`` are stripped first, so "62.5",
+    "62.50" and "62.50%" all match 62.50.
     A number written in words ("nine", "twenty-five", "half", "twice") is
     checked the same way; "one" is not read as a number (see ``_WORDS``). Fact
     ids and group names are not read as numbers.
@@ -219,12 +246,7 @@ def verify(judgment: dict, f: dict, min_n: int) -> dict:
             or not isinstance(judgment.get("suggestions"), list):
         raise ValueError("Claude's reply is not the weekly_judgment shape")
     by_id = {x["id"]: x for x in _group_facts(f)}
-    allowed = []
-    for s in idea_review.fact_numbers(f):
-        try:
-            allowed.append(float(s))
-        except ValueError:
-            continue
+    allowed = _floats(idea_review.fact_numbers(f))
     labels = _labels(f)
 
     paragraphs = [p for p in judgment["assessment"]
@@ -238,7 +260,7 @@ def verify(judgment: dict, f: dict, min_n: int) -> dict:
         if not isinstance(text, str) or not text.strip() \
                 or not isinstance(cites, list) or not cites \
                 or not all(isinstance(c, str) and c in by_id for c in cites) \
-                or not _numbers_ok(text, allowed, labels):
+                or not _numbers_ok(text, _cited_numbers(cites, by_id), labels):
             dropped += 1
             continue
         cites = list(dict.fromkeys(cites))
@@ -351,8 +373,9 @@ def _judgment_html(judgment) -> str:
     dropped = judgment.get("dropped_paragraphs", 0) + judgment.get("dropped_suggestions", 0)
     note = (f'<p class="book-note">{dropped} part{"" if dropped == 1 else "s"} of '
             f"Claude's reply {'was' if dropped == 1 else 'were'} left out for "
-            "citing a fact, or holding a number, that the facts above do not "
-            "hold.</p>") if dropped else ""
+            "citing a fact that does not exist, or for stating a number the app "
+            "did not compute (for a suggestion: for the groups it cites).</p>") \
+        if dropped else ""
     return f"<h2>Assessment</h2>{paras}<h2>Suggestions</h2>{sugg}{note}"
 
 
@@ -425,8 +448,8 @@ def render(f: dict, judgment: dict | None, week: str) -> str:
         '<div class="eod-report">'
         f"<h1>Weekly trade-idea review, {escape(week)}</h1>"
         f'<p class="meta">{escape(span)}. Every number below is computed from '
-        "the Paper Ledger's trade-idea rows; Claude's assessment may cite only "
-        "those numbers. A group marked 'few trades' holds too few to act on.</p>"
+        "the Paper Ledger's trade-idea rows. " + escape(TRUST_LINE)
+        + " A group marked 'few trades' holds too few to act on.</p>"
         + _judgment_html(judgment)
         + "<h2>This week's closed trades</h2>"
         + _table(_CLOSED_COLS, _closed_rows(f.get("closed_week") or ()),
