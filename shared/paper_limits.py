@@ -42,7 +42,6 @@ DEFAULTS = {
         "clean_mae_pct": 25.0,
         "min_n": 5,
         "review_model": "sonnet",
-        "review_max_tokens": 4000,
     },
 }
 
@@ -113,7 +112,7 @@ def idea_trades() -> dict:
     ``quantity`` and ``min_n`` are positive whole numbers; ``mark_interval_min``
     is 1..60 minutes; ``debit_stop_frac`` is a fraction in (0, 1];
     ``clean_mae_pct`` a percentage in (0, 100]; ``review_model`` a non-empty
-    string; ``review_max_tokens`` a whole number in 1..64000."""
+    string."""
     d = DEFAULTS["idea_trades"]
     sec = load().get("idea_trades")
     if not isinstance(sec, dict):
@@ -132,8 +131,6 @@ def idea_trades() -> dict:
         "min_n": _idea_int(sec.get("min_n"), 1, 10**6, d["min_n"]),
         "review_model": (model.strip() if isinstance(model, str) and model.strip()
                          else d["review_model"]),
-        "review_max_tokens": _idea_int(sec.get("review_max_tokens"), 1, 64000,
-                                       d["review_max_tokens"]),
     }
 
 

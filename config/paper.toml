@@ -57,6 +57,3 @@ min_n = 5
 # The Claude model the weekly review's written judgment uses (a tier name, never
 # a version).
 review_model = "sonnet"
-# The longest written judgment the weekly review asks Claude for, in tokens
-# (a whole number, 1 to 64000).
-review_max_tokens = 4000

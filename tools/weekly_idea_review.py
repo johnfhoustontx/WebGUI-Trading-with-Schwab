@@ -54,6 +54,12 @@ CT = ZoneInfo("America/Chicago")
 ARCHIVE_ROOT = _REPO_ROOT / "webgui" / "data" / "idea_review"
 PROMPT_FILE = pathlib.Path(__file__).resolve().parent / "prompts" / "weekly_idea_review.md"
 TOOL_NAME = "weekly_judgment"
+# The judgment's length cap, as the Messages API shape asks for one. It is NOT a
+# setting: the review runs on the Claude Code CLI, and claude_cli._request_shape
+# does not pass max_tokens to `claude -p` (the CLI has no per-call output cap),
+# so the value is inert on that path. It matters only if this call is ever moved
+# to the API, which is a code change anyway.
+MAX_TOKENS = 4000
 
 JUDGMENT_SCHEMA = {
     "type": "object",
@@ -259,11 +265,11 @@ def _rounded(v):
     return v
 
 
-def ask_claude(client, f: dict, model: str, max_tokens: int) -> dict:
+def ask_claude(client, f: dict, model: str) -> dict:
     """Claude's raw judgment (a dict); raises on any failure."""
     resp = client.messages.create(
         model=model,
-        max_tokens=max_tokens,
+        max_tokens=MAX_TOKENS,
         system=PROMPT_FILE.read_text(encoding="utf-8"),
         messages=[{"role": "user", "content": json.dumps(_rounded(f))}],
         tools=[{"name": TOOL_NAME, "input_schema": JUDGMENT_SCHEMA}],
@@ -490,8 +496,7 @@ def main(argv=None, *, client=None, read_snapshot=None, archive_root=None) -> in
 
     judgment = None
     try:
-        raw = ask_claude(client or _default_client(), f, cfg["review_model"],
-                         cfg["review_max_tokens"])
+        raw = ask_claude(client or _default_client(), f, cfg["review_model"])
         judgment = verify(raw, f, cfg["min_n"])
     except Exception as exc:
         print(f"Claude's judgment is missing ({type(exc).__name__}: {exc}); "

@@ -104,8 +104,7 @@ def fake_cli_raises(tmp_path):
 
 @pytest.fixture(autouse=True)
 def _cfg(monkeypatch):
-    monkeypatch.setattr(w, "_cfg", lambda: dict(CFG, review_model="sonnet",
-                                                review_max_tokens=4000))
+    monkeypatch.setattr(w, "_cfg", lambda: dict(CFG, review_model="sonnet"))
 
     def _no_real_cli():
         raise AssertionError("a test reached the real Claude Code CLI client")
@@ -187,7 +186,9 @@ def test_the_request_is_the_forced_schema_on_the_configured_model(tmp_path):
     assert sent["week"]["total"]["n"] == 2   # the manual row is not in it
 
 
-def test_max_tokens_comes_from_config(tmp_path, monkeypatch):
+def test_max_tokens_is_a_constant_not_a_setting(tmp_path, monkeypatch):
+    """The model comes from config; the length cap is the module's constant (the
+    CLI path ignores it), and a stale config key does not reach the call."""
     seen = {}
 
     class _Client:
@@ -202,7 +203,8 @@ def test_max_tokens_comes_from_config(tmp_path, monkeypatch):
     monkeypatch.setattr(w, "_cfg", lambda: dict(CFG, review_model="haiku",
                                                 review_max_tokens=1234))
     assert _run(tmp_path, ["--date", FRIDAY], client=_Client()) == 0
-    assert (seen["model"], seen["max_tokens"]) == ("haiku", 1234)
+    assert w.MAX_TOKENS == 4000
+    assert (seen["model"], seen["max_tokens"]) == ("haiku", 4000)
     assert seen["tool_choice"] == {"type": "tool", "name": "weekly_judgment"}
 
 
