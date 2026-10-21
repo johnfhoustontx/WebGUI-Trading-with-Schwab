@@ -4559,11 +4559,14 @@ of its own and calls no external service.
 
 ### Reading the screen
 
-**Summary tiles:** paper session P&L · scanner signals · captured signals · paper trades.
+**Summary tiles:** paper session P&L · scanner signals · captured signals · paper trades ·
+trade idea P&L today (closed ideas, with the count closed).
 
-**Performance blocks, one per book** — *Manual paper* and *Captured signals*. The manual
-book leads with equity, session P&L, open unrealized and open count; the captured book
-has no account behind it, and its figures assume one contract per signal. Then a table:
+**Performance blocks, one per book** — *Manual paper*, *Captured signals* and *Trade
+ideas*. The manual book leads with equity, session P&L, open unrealized and open count and
+excludes the Ledger's trade-idea rows; the captured book has no account behind it, and its
+figures assume one contract per signal; the trade-ideas book is those idea rows alone. Then
+a table:
 
 | Period | What it covers |
 |---|---|
@@ -4580,8 +4583,12 @@ credit collected.
 
 **Detailed** (`/eod/detail`) adds breakdowns by **strategy** (PCS / CCS / IC), by
 **0-DTE versus swing**, and by **status** (open / closed / expired), plus the full trade,
-scanner and captured tables. Both views use a jump-link table of contents and
-collapsible sections that work in the exported file as well as in the app.
+scanner and captured tables, and a **Trade ideas** section: ideas posted today, ideas
+closed today that were posted earlier, and open ideas at their last mark (time held, worst
+point in dollars and as a percent of maximum loss), then closed P&L for the day, week and
+month, with the open trades' unrealized total on its own line, never in those totals. Both
+views use a jump-link table of contents and collapsible sections that work in the exported
+file as well as in the app.
 
 **Generate** snapshots the current caches into standalone `summary.html` and
 `detail.html` under `webgui/data/eod/<date>/`. It is **confirm-gated** — the dialog

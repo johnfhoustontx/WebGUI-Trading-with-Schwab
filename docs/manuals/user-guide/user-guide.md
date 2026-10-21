@@ -3067,8 +3067,8 @@ An end-of-day rollup of the day's Options activity.
 
 | View | Route | Contents |
 |------|-------|----------|
-| **Summary** | `/eod` | Headline tiles plus a Daily / Weekly (WTD) / MTD performance block **per book** — manual paper and captured signals (counted at one contract per signal). |
-| **Detailed** | `/eod/detail` | The same performance plus breakdowns by **strategy** (PCS / CCS / IC), by **0-DTE vs swing**, and by **status** (open / closed / expired), then the full trade, scanner and captured tables. |
+| **Summary** | `/eod` | Headline tiles plus a Daily / Weekly (WTD) / MTD performance block **per book** — manual paper, captured signals (counted at one contract per signal) and trade ideas (every idea the app posts, booked on the Paper Ledger and kept out of manual paper). One tile shows today's closed trade-idea profit and the count closed. |
+| **Detailed** | `/eod/detail` | The same performance plus breakdowns by **strategy** (PCS / CCS / IC), by **0-DTE vs swing**, and by **status** (open / closed / expired), then the full trade, scanner and captured tables, and a **Trade ideas** section: today's posted ideas (time posted, structure, grade, entry, exit, reason, time held, worst point in dollars and as a percent of maximum loss, result), ideas closed today that were posted earlier, and open ideas at their last mark, with closed profit for the day, week and month. Open trades' unrealized profit sits on its own line and is never added to those totals. |
 
 Both views use a jump-link table of contents, and every section is collapsible —
 which keeps working in the exported file as well as in the app.

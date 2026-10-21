@@ -419,9 +419,10 @@ def test_normalize_trades_reads_the_captured_shape():
 
 
 def test_captured_is_the_second_book():
+    # Trade ideas became the third book (2026-10-20); captured stays second.
     snap = {"captured_perf": {"rows": [_CAP_ROW]}}
     assert [label for label, _n, _s in eod._books(snap)] == [
-        "Manual paper", "Captured signals"]
+        "Manual paper", "Captured signals", "Trade ideas"]
 
 
 def test_the_captured_book_reuses_the_shared_period_buckets():
@@ -1054,3 +1055,175 @@ def test_a_signed_tile_value_keeps_its_profit_or_loss_colour():
                              "snapshot": {"session_pnl": -70.0}}
     html = eod.summary_fragment(snap, "/eod/detail")
     assert 'class="v neg"' in html, "the tile no longer carries both classes"
+
+
+# --- Trade ideas: the third book and its section (2026-10-20) ----------------
+_TODAY = _dt.date(2026, 10, 20)          # a Tuesday; Monday is 2026-10-19
+_NOW = _dt.datetime(2026, 10, 20, 14, 0)
+
+
+def _idea(**kw):
+    row = {"source": "trade_idea", "symbol": "SPY", "strategy": "PCS",
+           "trade_type": "0-DTE", "status": "CLOSED", "quantity": 2,
+           "idea_grade": "A", "max_loss_per": 3.5, "mae_pnl": -40.0,
+           "idea_posted": "2026-10-20T09:35:00-05:00",
+           "entry_time": "2026-10-20T09:36:00-05:00",
+           "exit_time": "2026-10-20T11:40:00-05:00", "exit_reason": "TARGET",
+           "entry_credit_total": 150.0, "exit_debit_total": 60.0,
+           "realized_pnl": 90.0, "unrealized_pnl": None}
+    row.update(kw)
+    return row
+
+
+def _manual(**kw):
+    row = {"source": "manual", "symbol": "QQQ", "strategy": "IC",
+           "trade_type": "SWING", "status": "CLOSED",
+           "entry_time": "2026-10-20T10:00:00", "exit_time": "2026-10-20T12:00:00",
+           "entry_credit_total": 80.0, "realized_pnl": 33.0}
+    row.update(kw)
+    return row
+
+
+def _open_idea(**kw):
+    row = dict(status="OPEN", exit_time=None, exit_reason=None,
+               exit_debit_total=None, realized_pnl=None, unrealized_pnl=25.0)
+    row.update(kw)
+    return _idea(**row)
+
+
+def test_split_ledger_separates_idea_rows_by_source():
+    manual, ideas = eod.split_ledger([_manual(), _idea(), {"symbol": "X"}])
+    assert [t["symbol"] for t in manual] == ["QQQ", "X"]
+    assert [t["symbol"] for t in ideas] == ["SPY"]
+    assert eod.split_ledger(None) == ([], [])
+
+
+def test_manual_book_excludes_idea_rows():
+    snap = {"paper_trades": {"trades": [_manual(), _idea(realized_pnl=999.0)]}}
+    norm = [n for label, n, _s in eod._books(snap) if label == "Manual paper"][0]
+    assert [t["symbol"] for t in norm] == ["QQQ"]
+    b = eod.period_buckets(norm, _TODAY)
+    assert b["daily"]["realized"] == 33.0 and b["daily"]["closed"] == 1
+
+
+def test_trade_ideas_is_third_book():
+    snap = {"paper_trades": {"trades": [_manual(), _idea()]}}
+    books = eod._books(snap)
+    assert [label for label, _n, _s in books] == [
+        "Manual paper", "Captured signals", "Trade ideas"]
+    label, norm, now_snap = books[2]
+    assert [t["symbol"] for t in norm] == ["SPY"] and now_snap is None
+    assert eod._book_slug("Trade ideas") == "trade"
+
+
+def test_idea_rows_buckets():
+    posted_today = _idea(symbol="AAA")
+    from_monday = _idea(symbol="BBB", idea_posted="2026-10-19T13:00:00",
+                        entry_time="2026-10-19T13:01:00",
+                        exit_time="2026-10-20T09:00:00", exit_reason="STOP",
+                        realized_pnl=-120.0, exit_debit_total=270.0)
+    still_open = _open_idea(symbol="CCC", idea_posted="2026-10-19T10:00:00",
+                            entry_time="2026-10-19T10:01:00")
+    closed_earlier = _idea(symbol="DDD", idea_posted="2026-10-14T10:00:00",
+                           exit_time="2026-10-15T10:00:00")
+    out = eod.idea_rows([posted_today, from_monday, still_open, closed_earlier,
+                         _manual()], _TODAY, now=_NOW)
+    assert [r["symbol"] for r in out["posted_today"]] == ["AAA"]
+    assert [r["symbol"] for r in out["closed_today_earlier"]] == ["BBB"]
+    assert [r["symbol"] for r in out["open"]] == ["CCC"]
+
+
+def test_idea_rows_convert_a_utc_offset_to_central_before_taking_the_date():
+    # 01:30 UTC on the 21st is 20:30 on the 20th in Central.
+    row = _idea(symbol="LATE", idea_posted="2026-10-21T01:30:00+00:00",
+                entry_time="2026-10-21T01:31:00+00:00",
+                exit_time="2026-10-21T02:00:00+00:00")
+    out = eod.idea_rows([row], _TODAY, now=_NOW)
+    assert [r["symbol"] for r in out["posted_today"]] == ["LATE"]
+    assert out["posted_today"][0]["posted"] == "20:30"
+    assert out["posted_today"][0]["held"] == "0h 30m"
+    norm = eod.normalize_trades([row], kind="ledger")[0]
+    assert norm["entry_date"] == "2026-10-20" and norm["exit_date"] == "2026-10-20"
+
+
+def test_idea_row_fields():
+    r = eod.idea_rows([_idea()], _TODAY, now=_NOW)["posted_today"][0]
+    assert r["posted"] == "09:35" and r["symbol"] == "SPY"
+    assert r["strategy"] == "PCS" and r["grade"] == "A"
+    assert r["entry"] == 150.0 and r["exit"] == 60.0 and r["reason"] == "TARGET"
+    assert r["held"] == "2h 05m"
+    assert r["mae"] == -80.0                        # -40 per contract x 2
+    assert r["pnl"] == 90.0
+
+
+def test_held_formats():
+    assert eod._held("2026-10-20T09:35:00", "2026-10-20T11:40:00") == "2h 05m"
+    assert eod._held("2026-10-20T09:35:00", "2026-10-20T09:47:00") == "0h 12m"
+    assert eod._held("2026-10-17T09:00:00", "2026-10-20T13:30:00") == "3d 4h"
+    assert eod._held("2026-10-20T09:35:00-05:00",
+                     "2026-10-20T16:40:00+00:00") == "2h 05m"
+    assert eod._held(None, "2026-10-20T11:40:00") == "—"
+    assert eod._held("2026-10-20T11:40:00", "2026-10-20T09:00:00") == "—"
+    # An open row is held up to now.
+    r = eod.idea_rows([_open_idea(unrealized_pnl=5.0)], _TODAY,
+                      now=_NOW)["open"][0]
+    assert r["held"] == "4h 25m" and r["exit"] is None and r["pnl"] == 5.0
+
+
+def test_mae_pct_of_max_loss():
+    # -40 over a 3.50 x 100 = 350 max loss -> -11.43 %
+    r = eod.idea_rows([_idea()], _TODAY, now=_NOW)["posted_today"][0]
+    assert round(r["mae_pct"], 2) == -11.43
+    for bad in (0, None, 0.0):
+        r = eod.idea_rows([_idea(max_loss_per=bad)], _TODAY,
+                          now=_NOW)["posted_today"][0]
+        assert r["mae_pct"] is None
+    html = eod.idea_section({"trades": [_idea(max_loss_per=0)]}, _TODAY, now=_NOW)
+    assert "—" in html
+
+
+def test_open_unrealized_not_in_period_totals():
+    closed = _idea(realized_pnl=90.0)
+    opened = _open_idea(symbol="OPN", unrealized_pnl=-300.0)
+    html = eod.idea_section({"trades": [closed, opened]}, _TODAY, now=_NOW)
+    assert "Open trades, unrealized" in html and "-$300.00" in html
+    day = html.split("Closed P&amp;L", 1)[1].split("Open trades", 1)[0]
+    assert "$90.00" in day and "300.00" not in day
+    norm = eod.normalize_trades([closed, opened], kind="ledger")
+    assert eod.period_buckets(norm, _TODAY)["daily"]["realized"] == 90.0
+
+
+def test_idea_section_empty_says_no_trade_ideas_yet():
+    for cache in (None, {}, {"trades": []}, {"trades": [_manual()]}):
+        html = eod.idea_section(cache, _TODAY, now=_NOW)
+        assert "No trade ideas yet." in html
+
+
+def test_idea_section_lists_the_three_tables():
+    trades = [_idea(symbol="AAA"),
+              _idea(symbol="BBB", idea_posted="2026-10-19T13:00:00",
+                    exit_time="2026-10-20T09:00:00", exit_reason="STOP",
+                    realized_pnl=-120.0),
+              _open_idea(symbol="CCC")]
+    html = eod.idea_section({"trades": trades}, _TODAY, now=_NOW)
+    for text in ("Posted today", "Closed today, posted earlier", "Open now",
+                 "AAA", "BBB", "CCC", "TARGET", "STOP", "2h 05m", "-11.43%"):
+        assert text in html, text
+
+
+def test_detail_fragment_has_the_trade_ideas_section_and_nav():
+    snap = {"date": "2026-10-20", "paper_trades": {"trades": [_idea()]}}
+    html = eod.detail_fragment(snap, today=_TODAY)
+    assert 'href="#trade-ideas"' in html and 'id="trade-ideas"' in html
+    assert "Trade ideas — performance" in html
+
+
+def test_summary_has_idea_tile():
+    snap = {"date": "2026-10-20", "paper_trades": {"trades": [
+        _idea(realized_pnl=90.0), _idea(symbol="B", realized_pnl=-20.0),
+        _open_idea(symbol="OPN", unrealized_pnl=500.0), _manual()]}}
+    html = eod.summary_fragment(snap, "/eod/detail", today=_TODAY)
+    assert "Trade idea P&amp;L today" in html
+    tile = html.split("Trade idea P&amp;L today", 1)[1].split("</div></div>", 1)[0]
+    assert "$70.00" in tile and "2 closed" in tile
+    assert "Trade ideas" in html                      # the book is labelled

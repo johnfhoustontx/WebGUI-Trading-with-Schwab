@@ -1799,6 +1799,16 @@ A live grid of macro tickers, grouped into framed panels by category.
 An end-of-day summary of the day's options activity and paper trading.
 
 - **Summary tiles** plus per-section tables (scanner, captured, paper).
+- **Three books, each with its own Daily / Weekly / MTD table:** your **Manual
+  paper** trades, the **Captured signals**, and the **Trade ideas**. Every idea the
+  app posts is booked on the Paper Ledger and tagged, and it is counted in its own
+  book, never in Manual paper. A tile shows today's idea profit and how many closed.
+- **Detail → Trade ideas** lists the ideas posted today (when, structure, grade,
+  entry, exit, why it closed, how long it was held, the worst point it reached in
+  dollars and as a share of its maximum loss, and the result), the ones closed today
+  that were posted earlier, and the ones still open at their last mark. Closed profit
+  is totalled for the day, week and month; **open trades are shown on their own line
+  and never added to those totals.**
 - **It saves itself at 3:15 pm CT** every trading day, a quarter of an hour after
   the close. You don't have to be here, and you don't have to press anything.
 - **Generate** saves a dated HTML snapshot you can reopen later — use it for an
