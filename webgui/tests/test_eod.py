@@ -609,6 +609,16 @@ def _confirm(dlg):
     asyncio.run(_drive(dlg.parent_slot))
 
 
+def test_the_header_links_to_the_weekly_idea_review(monkeypatch, tmp_path):
+    """The weekly page has no rail entry of its own: it is reached from here."""
+    _said(monkeypatch)
+    host = _render_eod(monkeypatch, tmp_path, SAMPLE)
+    visited = []
+    monkeypatch.setattr(eod.ui.navigate, "to", lambda path, **kw: visited.append(path))
+    _click(host, "Weekly idea review")
+    assert visited == ["/eod/weekly"]
+
+
 def test_generate_asks_before_it_replaces_the_days_saved_files(monkeypatch, tmp_path):
     """The archive holds ONE copy per date and ``write_archive`` overwrites it
     in place, so Generate is destructive and confirms like every other

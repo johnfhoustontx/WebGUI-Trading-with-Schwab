@@ -416,3 +416,16 @@ def test_week_label_is_iso_year_and_week():
 def test_the_archive_is_gitignored():
     lines = (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert "webgui/data/idea_review/" in lines
+
+
+def test_the_page_reads_the_folder_the_tool_writes_and_the_names_agree(tmp_path):
+    """The webgui may not import tools/, so the page resolves the archive path
+    itself. Pin that the two agree, and that a week the tool writes is a week
+    the page lists and serves."""
+    from pages import idea_review
+    assert idea_review.ARCHIVE_ROOT == w.ARCHIVE_ROOT
+    week = w.week_label(date(2026, 10, 16))
+    (tmp_path / week).mkdir()
+    (tmp_path / week / "report.html").write_text("<p>x</p>", encoding="utf-8")
+    assert idea_review.archive_weeks(tmp_path) == [week]
+    assert idea_review.report_file(week, tmp_path) is not None

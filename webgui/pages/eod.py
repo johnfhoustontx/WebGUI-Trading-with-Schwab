@@ -1039,6 +1039,9 @@ OPEN_SUMMARY_TIP = ("Opens today's archived summary.html in a new browser tab. "
 OPEN_DETAIL_TIP = ("Opens today's archived detail.html in a new browser tab. "
                    "Generate writes it.")
 
+WEEKLY_TIP = ("The weekly review of the trade ideas, written after the close on "
+              "the last trading day of each week.")
+
 # The message over the region while the two documents are built and written.
 GENERATING_TEXT = "Generating the report…"
 READING_TEXT = "Reading the caches…"
@@ -1081,6 +1084,9 @@ def render() -> None:
         # reason: this app is used from a phone.
         head.actions.classes(remove="no-wrap", add="flex-wrap justify-end")
         with head.actions:
+            kit.button("Weekly idea review", kind="secondary", icon="date_range",
+                       tooltip=WEEKLY_TIP,
+                       on_click=lambda: ui.navigate.to("/eod/weekly")).classes("shrink-0")
             kit.button("Open summary file", kind="secondary", icon="open_in_new",
                        tooltip=OPEN_SUMMARY_TIP,
                        on_click=lambda: _open_file("summary")).classes("shrink-0")

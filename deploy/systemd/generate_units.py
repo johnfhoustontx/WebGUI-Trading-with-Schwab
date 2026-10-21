@@ -797,6 +797,81 @@ WantedBy=timers.target
             f"trading-{ENV_NAME}-eod-report.timer": tmr}
 
 
+def _idea_review_units():
+    """The weekly trade-idea review: a oneshot plus its timer.
+
+    **15:30 CT, from [slots.idea_review], Mon..Fri.** The timer fires every
+    weekday and ``tools/weekly_idea_review.py`` decides: it writes only on the
+    last trading day of the ISO week and exits 0 on the others, so a holiday
+    Friday moves the review to Thursday with no calendar in systemd. Same
+    division of labour as the EOD report: ``Mon..Fri`` filters weekends, the
+    tool's own gate filters the rest. The slot sits fifteen minutes after
+    [slots.eod_report], so the day's last trades are already on the Ledger.
+
+    **Same reasoning as ``_eod_report_units`` for a timer outside the services**
+    (the report is rendered from webgui builders, which Tier 2 may not import).
+
+    **TimeoutStartSec=900.** The judgment is one call to the Claude Code CLI,
+    whose own timeout is 360 s, plus the bus reads and the write. The default
+    start timeout is 90 s on this host, which would kill a slow but healthy run.
+
+    **EnvironmentFile is load-bearing.** The host runs ``requirepass``, so the
+    bus cannot authenticate without ``MEMURAI_PASSWORD``; the tool refuses
+    (exit 2, nothing written) when the Ledger view reads empty rather than
+    replacing a real review with empty tables. Exit 3 means Claude failed and a
+    numbers-only report was written; it fails the unit on purpose so the
+    failure alert fires. ``HOME`` is the user manager's own, which is what the
+    CLI token file and the CLI binary resolve against, as for ``options_svc``.
+
+    **No Restart=:** a retry minutes later would not fix a down bus, and a
+    Claude outage must show as a failed unit.
+    """
+    at = slot_times("idea_review")["at"]
+
+    svc = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - weekly trade-idea review
+# No PartOf and no [Install]: the timer owns this. It runs once a week.
+# NOTE: these belong in [Unit]; systemd moved them there in v229
+# and silently ignores them in [Service].
+StartLimitIntervalSec={START_LIMIT_INTERVAL_SEC}
+StartLimitBurst={START_LIMIT_BURST}
+
+[Service]
+Type=oneshot
+WorkingDirectory={_workdir()}
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=America/Chicago
+# LOAD-BEARING: MEMURAI_PASSWORD lives here. Without it the bus cannot
+# authenticate and the tool refuses to write. See _idea_review_units.
+EnvironmentFile={_env_file()}
+# The Claude Code CLI call alone may take 360 s; the default start timeout is 90.
+TimeoutStartSec=900
+ExecStart={_python()} -X utf8 tools/weekly_idea_review.py
+"""
+
+    tmr = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - weekly trade-idea review timer
+
+[Timer]
+# Derived from [slots.idea_review] in config/sessions.toml -- the unit and the
+# config cannot disagree about when the review is written.
+# Mon..Fri excludes weekends only. Which weekday is the LAST TRADING day of the
+# week is the tool's call (shared.idea_review.is_review_day); on the other days
+# it exits 0 without writing, so a firing is not a run.
+OnCalendar=Mon..Fri *-*-* {at.hour:02d}:{at.minute:02d}:00
+# Deliberately NOT Persistent=true. The review is built from the Ledger's LIVE
+# cache for the week it runs in, so a catch-up run after downtime would write
+# the wrong week's report (or this week's, early) and could replace the real
+# one when the real firing came.
+Persistent=false
+
+[Install]
+WantedBy=timers.target
+"""
+    return {f"trading-{ENV_NAME}-idea-review.service": svc,
+            f"trading-{ENV_NAME}-idea-review.timer": tmr}
+
+
 def _flow_delta_units():
     """The delta-notional flow-alert instrumentation: a oneshot plus its timer.
 
@@ -1279,6 +1354,7 @@ def render_all():
     out.update(_live_capture_units())
     out.update(_gallery_capture_units())
     out.update(_eod_report_units())
+    out.update(_idea_review_units())
     out.update(_flow_delta_units())
     out.update(_hiro_report_units())
     out.update(_label_journal_units())

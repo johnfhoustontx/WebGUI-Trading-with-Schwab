@@ -1809,6 +1809,8 @@ An end-of-day summary of the day's options activity and paper trading.
   that were posted earlier, and the ones still open at their last mark. Closed profit
   is totalled for the day, week and month; **open trades are shown on their own line
   and never added to those totals.**
+- **Weekly idea review** (the button at the top) opens the weekly look back at the
+  trade ideas, written at the end of each week.
 - **It saves itself at 3:15 pm CT** every trading day, a quarter of an hour after
   the close. You don't have to be here, and you don't have to press anything.
 - **Generate** saves a dated HTML snapshot you can reopen later — use it for an
@@ -2025,6 +2027,28 @@ Ends this browser's session and returns you to the sign-in page.
 
 # /eod/detail shares the EOD guide.
 HELP_MD["/eod/detail"] = HELP_MD["/eod"]
+
+HELP_MD["/eod/weekly"] = """
+**Weekly idea review — the simple version**
+
+A once-a-week look back at the trade ideas the app posted: which kinds of idea
+worked, which did not, and what the week's closed and still-open trades looked like.
+
+- **When it is written:** after the close on the **last trading day of the week**
+  (Friday, or Thursday when Friday is a holiday), at 3:30 pm CT. Pick a week from
+  the list; the newest is shown first. Before the first one is written the page
+  says so.
+- **Who writes what:** the app computes every number from the Paper Ledger's
+  trade-idea rows. Claude writes the assessment **from those numbers only**, and
+  every figure in it is checked against them before the report is saved. A
+  sentence that cites a number the app did not compute is dropped, not shown.
+- **Thin patterns are labelled.** A group with too few trades to mean anything is
+  marked "few trades" — read it as a note, not a finding.
+- If Claude could not be reached that week, the report still saves with all the
+  numbers and one line saying the assessment is missing.
+- **It is informational.** Nothing here changes a signal, a score or a setting on
+  its own; any change is yours to make.
+"""
 
 _DEFAULT = (
     "**Quick help**\n\n"

@@ -685,6 +685,18 @@ def _serve_eod_file(date: str, which: str = "summary"):
     return HTMLResponse(path.read_text(encoding="utf-8"))
 
 
+@app.get("/eod/weekly/file")
+def _serve_weekly_file(week: str = ""):
+    """Serve an archived weekly idea review raw, so its own <style> applies.
+    ``week`` must be ``YYYY-Www``; ``pages.idea_review.report_file`` checks the
+    shape before anything on disk is touched."""
+    from pages import idea_review
+    path = idea_review.report_file(week)
+    if path is None:
+        return HTMLResponse("<h1>No review for that week.</h1>", status_code=404)
+    return HTMLResponse(path.read_text(encoding="utf-8"))
+
+
 @app.get("/manuals/file")
 def _serve_manual(name: str):
     """Serve a generated online manual (self-contained HTML) raw, so its own
@@ -2690,6 +2702,13 @@ def eod_detail_page() -> None:
     with _layout("/eod", "EOD Report — Detail"):
         from pages import eod
         eod.render_detail()
+
+
+@_page("/eod/weekly")
+def eod_weekly_page() -> None:
+    with _layout("/eod", "Weekly idea review"):
+        from pages import idea_review
+        idea_review.render()
 
 
 @_page("/x")
