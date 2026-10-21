@@ -64,7 +64,22 @@ CREATE TABLE IF NOT EXISTS trades (
     exit_debit_total REAL,
     realized_pnl REAL,
     exit_reason TEXT,
-    notes TEXT DEFAULT ''
+    notes TEXT DEFAULT '',
+    -- Trade-idea rows (source = 'trade_idea'); NULL on every other trade. The
+    -- idea's trade type and spot are the existing trade_type / underlying_at_entry.
+    source TEXT,
+    idea_id TEXT,
+    idea_posted TEXT,
+    idea_grade TEXT,
+    idea_score REAL,
+    idea_label TEXT,
+    target_pnl REAL,
+    stop_pnl REAL,
+    mae_pnl REAL,
+    mae_at TEXT,
+    last_mark_pnl REAL,
+    last_mark_at TEXT,
+    entry_source TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
@@ -98,6 +113,9 @@ _TRADE_COLUMNS = [
     "underlying_at_entry",
     "entry_time", "exit_time", "exit_debit", "exit_debit_total",
     "realized_pnl", "exit_reason", "notes",
+    "source", "idea_id", "idea_posted", "idea_grade", "idea_score",
+    "idea_label", "target_pnl", "stop_pnl", "mae_pnl", "mae_at",
+    "last_mark_pnl", "last_mark_at", "entry_source",
 ]
 
 _EVENT_COLUMNS = [
@@ -171,6 +189,11 @@ def init_db(db_path=None):
             ("direction", "TEXT"), ("legs", "TEXT"),
             ("entry_debit", "REAL"), ("entry_debit_total", "REAL"),
             ("max_profit_total", "REAL"), ("unbounded", "INTEGER"),
+            ("source", "TEXT"), ("idea_id", "TEXT"), ("idea_posted", "TEXT"),
+            ("idea_grade", "TEXT"), ("idea_score", "REAL"), ("idea_label", "TEXT"),
+            ("target_pnl", "REAL"), ("stop_pnl", "REAL"), ("mae_pnl", "REAL"),
+            ("mae_at", "TEXT"), ("last_mark_pnl", "REAL"),
+            ("last_mark_at", "TEXT"), ("entry_source", "TEXT"),
         ):
             if col not in existing_cols:
                 conn.execute(f"ALTER TABLE trades ADD COLUMN {col} {col_type}")

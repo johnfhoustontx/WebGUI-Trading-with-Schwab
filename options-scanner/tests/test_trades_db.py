@@ -415,6 +415,111 @@ def test_roundtrip_preserves_entry_greeks(sandbox):
     assert loaded["entry_gamma"] == pytest.approx(-0.002)
 
 
+# ------------------------------------------------------- trade-idea columns ---
+_IDEA_COLUMNS = {
+    "source": "trade_idea", "idea_id": "idea-2026-10-20-1",
+    "idea_posted": "2026-10-20T09:15:00-05:00", "idea_grade": "A",
+    "idea_score": 81.5, "idea_label": "Strong", "target_pnl": 120.0,
+    "stop_pnl": -80.0, "mae_pnl": -35.0, "mae_at": "2026-10-20T10:05:00-05:00",
+    "last_mark_pnl": 42.0, "last_mark_at": "2026-10-20T11:00:00-05:00",
+    "entry_source": "quote",
+}
+
+
+def test_idea_columns_round_trip(sandbox):
+    trade = _seed_trade()
+    trade.update(_IDEA_COLUMNS)
+    conn = trades_db.connect()
+    try:
+        trades_db.insert_trade(conn, trade)
+        conn.commit()
+        loaded = trades_db.fetch_one(conn, "abc123")
+    finally:
+        conn.close()
+    for key, value in _IDEA_COLUMNS.items():
+        assert loaded[key] == value, f"mismatch on {key}"
+
+
+def test_idea_columns_migrate_old_db(sandbox):
+    """A trades.db made before the idea columns gets them added; old rows read NULL."""
+    import sqlite3
+    db_path = trades_db.DEFAULT_DB_PATH
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # The trades table as it stood before the idea columns (entry Greeks, debit
+    # columns and all), written out so the test does not follow SCHEMA.
+    old_schema = """
+    CREATE TABLE trades (
+        trade_id TEXT PRIMARY KEY,
+        mode TEXT,
+        status TEXT NOT NULL,
+        symbol TEXT NOT NULL,
+        strategy TEXT NOT NULL,
+        trade_type TEXT,
+        expiration TEXT,
+        dte_at_entry INTEGER,
+        short_strike REAL,
+        long_strike REAL,
+        call_short REAL,
+        call_long REAL,
+        width REAL,
+        quantity INTEGER,
+        entry_credit REAL,
+        entry_credit_total REAL,
+        max_loss_per REAL,
+        max_loss_total REAL,
+        direction TEXT,
+        legs TEXT,
+        entry_debit REAL,
+        entry_debit_total REAL,
+        max_profit_total REAL,
+        unbounded INTEGER,
+        breakeven TEXT,
+        short_delta REAL,
+        net_theta REAL,
+        entry_delta REAL,
+        entry_theta REAL,
+        entry_vega REAL,
+        entry_gamma REAL,
+        entry_bid REAL,
+        entry_ask REAL,
+        underlying_at_entry REAL,
+        entry_time TEXT NOT NULL,
+        exit_time TEXT,
+        exit_debit REAL,
+        exit_debit_total REAL,
+        realized_pnl REAL,
+        exit_reason TEXT,
+        notes TEXT DEFAULT ''
+    );
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(old_schema)
+        conn.execute(
+            "INSERT INTO trades (trade_id, status, symbol, strategy, entry_time) "
+            "VALUES ('old1', 'OPEN', 'SPY', 'PCS', '2026-04-19T09:30:00-05:00')"
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    trades_db._initialised.clear()
+    trades_db.init_db()
+
+    conn = sqlite3.connect(db_path)
+    try:
+        cols = {r[1] for r in conn.execute("PRAGMA table_info(trades)")}
+        assert set(_IDEA_COLUMNS) <= cols
+        row = conn.execute(
+            "SELECT source, idea_id, target_pnl, last_mark_at FROM trades "
+            "WHERE trade_id='old1'"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row == (None, None, None, None)
+
+
 # --------------------------------------------------------------- connect cost ---
 # ``connect()`` used to run ``PRAGMA journal_mode=WAL`` on EVERY call. journal_mode
 # is a PERSISTENT property stored in the DB file header (init_db already sets it at
