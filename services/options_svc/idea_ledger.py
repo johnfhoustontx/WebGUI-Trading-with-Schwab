@@ -19,9 +19,11 @@ own Ledger passes never see an idea row, so nothing else ever closes one.
 
 Imports nothing from ``compute`` (the file has a line-count ceiling).
 """
+import datetime as _dt
 import logging
 import sys
 import uuid
+from zoneinfo import ZoneInfo
 
 from repo_paths import OPTIONS_SCANNER
 
@@ -44,6 +46,7 @@ log = logging.getLogger(__name__)
 
 SOURCE = "trade_idea"
 _MULT = 100.0                  # one contract = 100 shares; entry_credit is per share
+_CT = ZoneInfo("America/Chicago")
 
 
 def is_idea(trade) -> bool:
@@ -219,6 +222,20 @@ def close_row(t, value, reason, when) -> dict:
         "realized_pnl": round(pnl * qty, 2),
     })
     return row
+
+
+def manual_close(t, debit, when=None) -> dict:
+    """``t`` closed by hand at the ``debit`` the Paper Ledger page's prompt took, as
+    exit reason ``MANUAL`` (the review counts that as "closed by hand"). PURE.
+
+    ``debit`` is the page's positive price: the debit paid to close a credit row,
+    the value received for a debit row, which is ``exit_debit_of``'s inverse, so the
+    stored ``exit_debit`` is the number typed in both cases. ``when`` is now in
+    Central time unless given."""
+    entry = _finite(t.get("entry_credit"))
+    value = -debit if entry is not None and entry < 0 else debit
+    when = when if when is not None else _dt.datetime.now(_CT)
+    return close_row(t, value, "MANUAL", when)
 
 
 def _write_mark(row) -> None:

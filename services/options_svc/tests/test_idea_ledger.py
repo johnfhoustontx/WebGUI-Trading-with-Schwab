@@ -703,6 +703,92 @@ def test_paper_settle_slot_settles_idea_rows(ledger, cycle, monkeypatch):
     assert cycle["repriced"] == []
 
 
+# ── a hand close of an idea row books as MANUAL ─────────────────────────────
+def test_manual_close_credit_row():
+    """The page's typed debit is the price paid to close; the cost to close is that."""
+    row = idea_ledger.build_row(PCS_IDEA, NOW, {**CFG, "quantity": 2})   # 1.224 credit
+    before = dict(row)
+    out = idea_ledger.manual_close(row, 0.60, _at(5))
+    assert row == before
+    assert out["status"] == "CLOSED" and out["exit_reason"] == "MANUAL"
+    assert out["exit_debit"] == pytest.approx(0.60)
+    assert out["exit_debit_total"] == pytest.approx(120.0)
+    assert out["realized_pnl"] == pytest.approx(124.8)      # (1.224 - 0.60) x 100 x 2
+    assert out["exit_time"] == _at(5).isoformat(timespec="seconds")
+
+
+def test_manual_close_debit_row():
+    """A debit row's typed number is the value it is sold for; the cost to close is
+    its negative, so the sign-correct P&L is (entry - value) x 100 x qty."""
+    row = _mark_row(quantity=3)                                # entry -2.50 a share
+    out = idea_ledger.manual_close(row, 3.10, _at(5))
+    assert out["status"] == "CLOSED" and out["exit_reason"] == "MANUAL"
+    assert out["realized_pnl"] == pytest.approx((-2.50 - (-3.10)) * 100 * 3)
+    assert out["exit_debit"] == pytest.approx(3.10)            # what was typed
+    assert out["exit_debit_total"] == pytest.approx(930.0)
+    losing = idea_ledger.manual_close(row, 1.00, _at(5))
+    assert losing["realized_pnl"] == pytest.approx((-2.50 + 1.00) * 100 * 3)
+
+
+def test_manual_close_stamps_chicago_now_by_default():
+    out = idea_ledger.manual_close(_mark_row(), 3.10)
+    stamp = dt.datetime.fromisoformat(out["exit_time"])
+    assert stamp.utcoffset() == dt.datetime.now(_CT).utcoffset()
+    assert abs((dt.datetime.now(_CT) - stamp).total_seconds()) < 60
+
+
+def test_close_paper_routes_idea_rows(ledger, monkeypatch):
+    """compute.close_paper books an idea row through the idea path (MANUAL, one
+    event, untracked) and never through the Ledger's generic close."""
+    import paper_trader
+    import trade_tracker_client
+
+    from services.options_svc import compute
+
+    def refuse(*a, **k):
+        raise AssertionError("an idea row must not use close_paper_trade")
+
+    untracked = []
+    monkeypatch.setattr(trade_tracker_client, "untrack",
+                        lambda tid: untracked.append(tid) or True)
+    booked = idea_ledger.book(LONG_CALL_IDEA, NOW)
+    monkeypatch.setattr(paper_trader, "close_paper_trade", refuse)
+    compute.close_paper(booked["trade_id"], 3.10)
+    row = _only_row(ledger)
+    assert row["status"] == "CLOSED" and row["exit_reason"] == "MANUAL"
+    assert row["exit_debit"] == pytest.approx(3.10)
+    assert row["realized_pnl"] == pytest.approx(60.0)          # (-2.50 + 3.10) x 100
+    assert untracked == [booked["trade_id"]]
+    assert _events(row["trade_id"]) == ["OPENED", "CLOSED"]
+
+
+def test_close_paper_still_closes_only_an_open_idea_row(ledger, caplog):
+    from services.options_svc import compute
+    booked = idea_ledger.book(LONG_CALL_IDEA, NOW)
+    compute.close_paper(booked["trade_id"], 3.10)
+    first = _only_row(ledger)
+    with caplog.at_level("WARNING"):
+        compute.close_paper(booked["trade_id"], 9.99)
+    assert _only_row(ledger) == first
+    assert "close_paper ignored" in caplog.text
+
+
+def test_close_paper_leaves_the_users_own_rows_on_the_generic_close(ledger, monkeypatch):
+    import paper_trader
+
+    from services.options_svc import compute
+    row = idea_ledger.build_row(PCS_IDEA, NOW, CFG)
+    row["source"], row["trade_id"] = None, "mine0001"
+    paper_trader.add_trade(row)
+    calls = []
+    real = paper_trader.close_paper_trade
+    monkeypatch.setattr(paper_trader, "close_paper_trade",
+                        lambda *a, **k: calls.append(a[2]) or real(*a, **k))
+    compute.close_paper("mine0001", 0.60)
+    assert calls == ["MANUAL_CLOSE"]
+    assert _only_row(ledger)["exit_reason"] == "MANUAL_CLOSE"
+
+
 # ── exit commission: what the entry cash already carries ───────────────────
 def test_exit_commission_basis():
     """The scanner rows' ``commission`` is the ROUND TRIP (open + close), and the

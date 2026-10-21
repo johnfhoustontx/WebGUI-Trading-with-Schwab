@@ -2931,7 +2931,8 @@ def close_paper(trade_id, debit: float) -> None:
     # pass already closed would otherwise have its exit and realized P&L
     # overwritten by this second close (audit AR-02).
     if t and (t.get("status") or "").upper() == "OPEN":
-        closed = paper_trader.close_paper_trade(t, float(debit), "MANUAL_CLOSE")
+        closed = (_ideas.manual_close(t, float(debit)) if _ideas.is_idea(t)
+                  else paper_trader.close_paper_trade(t, float(debit), "MANUAL_CLOSE"))
         paper_trader.update_trade(trade_id, closed)
     elif t:
         log.warning("close_paper ignored: trade %s is %s, not OPEN", trade_id,
