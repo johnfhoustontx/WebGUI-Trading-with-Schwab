@@ -730,6 +730,20 @@ def test_manual_close_debit_row():
     assert losing["realized_pnl"] == pytest.approx((-2.50 + 1.00) * 100 * 3)
 
 
+def test_manual_close_lowers_the_worst_point_when_the_close_is_worse():
+    """A hand close is a mark too: a close below every earlier mark is the worst
+    point (per contract, like the marks), and one above it leaves it alone."""
+    row = _mark_row(quantity=3, mae_pnl=-40.0, mae_at=_at(5).isoformat(timespec="seconds"))
+    before = dict(row)
+    out = idea_ledger.manual_close(row, 1.00, _at(10))          # -150 a contract
+    assert row == before                                       # still PURE
+    assert out["mae_pnl"] == pytest.approx(-150.0)
+    assert out["mae_at"] == _at(10).isoformat(timespec="seconds")
+    kept = idea_ledger.manual_close(row, 2.30, _at(10))         # -20: not worse
+    assert kept["mae_pnl"] == pytest.approx(-40.0)
+    assert kept["mae_at"] == _at(5).isoformat(timespec="seconds")
+
+
 def test_manual_close_stamps_chicago_now_by_default():
     out = idea_ledger.manual_close(_mark_row(), 3.10)
     stamp = dt.datetime.fromisoformat(out["exit_time"])

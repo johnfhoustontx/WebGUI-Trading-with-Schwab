@@ -231,11 +231,16 @@ def manual_close(t, debit, when=None) -> dict:
     ``debit`` is the page's positive price: the debit paid to close a credit row,
     the value received for a debit row, which is ``exit_debit_of``'s inverse, so the
     stored ``exit_debit`` is the number typed in both cases. ``when`` is now in
-    Central time unless given."""
+    Central time unless given. The close is a mark too: a closing P&L below the
+    worst point so far lowers it, as a settlement does."""
     entry = _finite(t.get("entry_credit"))
     value = -debit if entry is not None and entry < 0 else debit
     when = when if when is not None else _dt.datetime.now(_CT)
-    return close_row(t, value, "MANUAL", when)
+    row = dict(t)
+    pnl = structure_marks.pnl_of(t, value)
+    if pnl is not None:
+        _lower_mae(row, pnl, _stamp(when))
+    return close_row(row, value, "MANUAL", when)
 
 
 def _write_mark(row) -> None:
