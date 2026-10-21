@@ -225,3 +225,72 @@ def test_book_takes_the_book_lock(ledger, monkeypatch):
     idea_ledger.book(PCS_IDEA, NOW)
     assert held == [True]
     assert paper_lock.is_serialized(idea_ledger.book)
+
+
+# ── the stream tracker: every idea row must survive trade_tracker_client ─────
+IC_IDEA = T.normalize(pcs(type="IC", call_short=775.0, call_long=780.0,
+                          net_credit=1.42, id="SPY_IC"))
+EVERY_SHAPE = [LONG_CALL_IDEA, BACKSPREAD_IDEA, STRADDLE_IDEA, PCS_IDEA, IC_IDEA]
+
+
+@pytest.mark.parametrize("idea", EVERY_SHAPE, ids=lambda i: i["type"])
+def test_every_idea_row_builds_the_trackers_payload(idea):
+    """``_payload`` subscripts short_strike / long_strike; a row without them raised
+    AFTER add_trade had committed it."""
+    import trade_tracker_client
+    row = idea_ledger.build_row(idea, NOW, CFG)
+    payload = trade_tracker_client._payload(row)
+    assert payload["trade_id"] == row["trade_id"]
+    assert payload["entry_credit"] == row["entry_credit"]
+
+
+@pytest.fixture
+def real_track(tmp_path, monkeypatch):
+    """The real ``track`` path; only the HTTP post inside it is stubbed."""
+    import paper_trader
+    import trade_tracker_client
+    import trades_db
+
+    from shared import paper_limits
+    posts = []
+
+    class _Resp:
+        status_code = 200
+
+    def fake_post(url, json=None, **kw):
+        posts.append((url, json))
+        return _Resp()
+
+    monkeypatch.setattr(trades_db, "DEFAULT_DB_PATH", tmp_path / "trades.db")
+    monkeypatch.setattr(trades_db, "_initialised", set())
+    monkeypatch.setattr(trade_tracker_client.requests, "post", fake_post)
+    monkeypatch.setattr(trade_tracker_client, "_headers", lambda: {})
+    monkeypatch.setattr(paper_limits, "idea_trades", lambda: dict(CFG))
+    return paper_trader, posts
+
+
+@pytest.mark.parametrize("idea", EVERY_SHAPE, ids=lambda i: i["type"])
+def test_book_goes_through_the_real_tracker_for_every_shape(real_track, idea):
+    paper_trader, posts = real_track
+    out = idea_ledger.book(idea, NOW)
+    assert out["status"] == "booked"
+    ((url, payload),) = posts
+    assert url.endswith("/track") and payload["trade_id"] == out["trade_id"]
+    assert len(paper_trader.get_all_trades()) == 1
+
+
+def test_an_idea_debit_row_tracks_like_the_ledgers_own_debit_row():
+    """Same keys, same None / negative conventions as ``_create_debit_trade``."""
+    import paper_trader
+    import trade_tracker_client
+
+    scanner_row = long_call(net_debit=250.0, commission=0.0)
+    own = paper_trader.create_paper_trade(
+        {**scanner_row, "max_loss": 250.0, "max_profit": None, "unbounded": True}, 1)
+    mine = idea_ledger.build_row(LONG_CALL_IDEA, NOW, CFG)
+    a, b = trade_tracker_client._payload(own), trade_tracker_client._payload(mine)
+    assert set(a) == set(b)
+    for key in ("strategy", "expiration", "quantity", "entry_credit", "short_strike",
+                "long_strike", "call_short", "call_long", "target_mid", "stop_mid"):
+        assert a[key] == b[key], key
+    assert b["entry_credit"] < 0 and b["short_strike"] is None

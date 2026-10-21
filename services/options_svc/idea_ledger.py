@@ -110,8 +110,9 @@ def build_row(idea, now, cfg) -> dict:
         "idea_label": idea.get("label"),
         "target_pnl": target, "stop_pnl": stop, "mae_pnl": 0.0,
         "entry_source": "card",
-        # paper_trader's event log reads this key on every row; a debit has none
-        "short_strike": None,
+        # paper_trader's event log and trade_tracker_client._payload subscript these
+        # on every row; a debit has none (as in paper_trader._create_debit_trade)
+        "short_strike": None, "long_strike": None, "width": None,
     }
     row.update(_strikes(idea["legs"], idea["type"]))
     return row
