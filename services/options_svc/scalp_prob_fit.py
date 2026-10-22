@@ -30,6 +30,11 @@ The rules, each one fixed before any weight was read:
   compared with is the trade's weighted win share for that symbol (and, for the
   15-minute calls, that block) over every EARLIER day; a row with no earlier
   day in its group is left out of both Brier sums.
+* **"Assumed" is measured, not counted.** Each weight's ``data_share`` is the
+  share of its posterior precision the data supplied (``_data_share``). A thin
+  source under the tight prior can be read on many days and still be mostly
+  its assumption; the page marks it so (``scalp_prob``, ``[prob]
+  assumed_share``).
 * **What is stored is finite.** The store refuses NaN; a fit that does not end
   finite raises, and ``refit`` then stores nothing.
 
@@ -96,7 +101,10 @@ class Model:
     """One kind's model of one trade: ``weights`` per factor and ``intercepts``
     per symbol in log-odds per scaled unit; ``scaling`` the divisor of each
     continuous factor; ``days[name]`` the distinct days that factor was read
-    (not a gap); ``n_days`` the distinct days fitted."""
+    (not a gap); ``n_days`` the distinct days fitted; ``data_share[name]`` the
+    share (0..1) of that weight's posterior precision that came from the data
+    rather than its prior (``_data_share``). A factor missing from
+    ``data_share`` is read as still its assumption."""
     role: str
     kind: str
     weights: dict = field(default_factory=dict)
@@ -104,6 +112,7 @@ class Model:
     scaling: dict = field(default_factory=dict)
     days: dict = field(default_factory=dict)
     n_days: int = 0
+    data_share: dict = field(default_factory=dict)
 
 
 # ── the training rows ────────────────────────────────────────────────────────
@@ -263,6 +272,17 @@ def _newton(x, y, w, mean, prec) -> np.ndarray:
     return theta
 
 
+def _data_share(x, w, theta, prec) -> np.ndarray:
+    """Per column, how much of the posterior precision at ``theta`` is the
+    data's: ``H_ii / (H_ii + prec_i)`` with ``H`` the weighted data Hessian
+    ``X^T W diag(p (1 - p)) X`` (the rows' own weights). Near 1 the history
+    decided the weight; under one half it is still mostly its prior. Always
+    finite and in 0..1 (``prec`` is positive)."""
+    p = _sigmoid(x @ theta)
+    h = np.square(x).T @ (w * p * (1.0 - p))
+    return h / (h + prec)
+
+
 def fit(rows, role, kind, priors, prior_sd) -> Model:
     """The MAP logistic model of ``kind``'s ``role`` over ``rows`` (others are
     ignored). ``priors`` are written for the trades with the move and signed here
@@ -299,13 +319,15 @@ def fit(rows, role, kind, priors, prior_sd) -> Model:
     prec = 1.0 / np.square(np.array(sd))
 
     theta = _newton(x, y, w, mean, prec)
+    share = _data_share(x, w, theta, prec)
     return Model(
         role=role, kind=kind,
         weights={n: float(theta[col[n]]) for n in names},
         intercepts={s: float(theta[sym_col[s]]) for s in symbols},
         scaling={n: float(v) for n, v in scaling.items()},
         days={n: len(read_on.get(n, ())) for n in names},
-        n_days=len({r.day for r in used}))
+        n_days=len({r.day for r in used}),
+        data_share={n: float(share[col[n]]) for n in names})
 
 
 def predict(model: Model, symbol, factors) -> tuple:
@@ -419,6 +441,7 @@ def _body(rows, role, kind, priors, prior_sd) -> dict:
     names = set(priors) | set(model.weights)
     return {"weights": model.weights, "intercepts": model.intercepts,
             "scaling": model.scaling, "days": model.days, "n_days": model.n_days,
+            "data_share": model.data_share,
             "rows": len(_usable(role_rows, role, kind)),
             "priors": {n: sign * float(priors.get(n, 0.0)) for n in sorted(names)},
             "prior_sd": {k: float(v) for k, v in prior_sd.items()},

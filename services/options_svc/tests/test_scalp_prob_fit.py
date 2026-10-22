@@ -18,7 +18,7 @@ import pytest
 
 from services import _degrade
 from services.options_svc import (
-    scalp_intraday_study, scalp_prob_fit, scalp_store, scalp_study)
+    scalp_intraday_study, scalp_prob, scalp_prob_fit, scalp_store, scalp_study)
 from services.options_svc.scalp_prob_fit import Row
 from shared import market_calendar as mc
 from shared import scalp_config
@@ -113,6 +113,52 @@ def test_tight_prior_holds_a_thin_source():
     assert model.weights["netprem"] == pytest.approx(0.10, abs=0.05)
     assert model.days["netprem"] == 5
     assert model.days["slope_5"] == 200
+
+
+def test_data_share_marks_a_thin_source_assumed_however_many_days():
+    # 180 days of slope_5 (wide prior) and netprem (tight prior) read on 120 of
+    # them, both with a real effect. The day count says netprem is well read;
+    # its precision is still mostly the prior's, so it is assumed. slope_5's
+    # history decides it.
+    days = trading_days(180)
+    rng = random.Random(21)
+    rows = []
+    for i, d in enumerate(days):
+        x = rng.uniform(-1.0, 1.0)
+        n = rng.uniform(-1.0, 1.0) if i >= 60 else None
+        z = 1.2 * x + (0.8 * n if n is not None else 0.0)
+        win = 1 if rng.random() < sigmoid(z) else 0
+        rows.append(row(d, {"slope_5": x, "netprem": n}, win))
+    model = scalp_prob_fit.fit(rows, "long_with", "morning", priors(), prior_sd())
+    assert model.days["netprem"] == 120 and model.days["slope_5"] == 180
+    assert model.weights["netprem"] == pytest.approx(0.10, abs=0.1)   # near its prior
+    assert model.data_share["netprem"] < 0.3
+    assert model.data_share["slope_5"] > 0.9
+    # a factor no row reads is all prior
+    assert model.days["room"] == 0 and model.data_share["room"] == 0.0
+    assert set(model.data_share) == set(model.weights)
+    assert all(math.isfinite(v) and 0.0 <= v <= 1.0 for v in model.data_share.values())
+    # ...and the page reads it that way through the stored body
+    body = {"weights": model.weights, "intercepts": model.intercepts,
+            "scaling": model.scaling, "days": model.days, "n_days": model.n_days,
+            "data_share": model.data_share}
+    m = scalp_prob._model("morning", "long_with", body)
+    p, pushes = scalp_prob_fit.predict(m, "SPY", {"slope_5": 0.5, "netprem": 0.5})
+    by = {q["factor"]: q for q in scalp_prob._pushes(m, p, pushes, {})}
+    assert by["netprem"]["assumed"] is True and by["netprem"]["days"] == 120
+    assert by["slope_5"]["assumed"] is False and by["slope_5"]["days"] == 180
+
+
+def test_data_share_is_the_data_hessian_over_the_posterior_precision():
+    rows = planted(trading_days(40), 1.0, seed=8)
+    model = scalp_prob_fit.fit(rows, "long_with", "morning", priors(), prior_sd())
+    scale = model.scaling["slope_5"]
+    h = 0.0
+    for r in rows:
+        p, _ = scalp_prob_fit.predict(model, r.symbol, r.factors)
+        h += r.weight * p * (1 - p) * (r.factors["slope_5"] / scale) ** 2
+    prec = 1.0 / prior_sd()["wide"] ** 2
+    assert model.data_share["slope_5"] == pytest.approx(h / (h + prec), rel=1e-6)
 
 
 def test_against_role_prior_is_negated():
@@ -471,7 +517,10 @@ def test_refit_stores_eight_models_under_one_version_and_keeps_old(db):
     for _v, kind, role, _f, body in stored:
         body = json.loads(body)
         assert set(body) == {"weights", "intercepts", "scaling", "days", "n_days",
-                             "rows", "priors", "prior_sd", "walk_forward"}
+                             "data_share", "rows", "priors", "prior_sd",
+                             "walk_forward"}
+        assert set(body["data_share"]) == set(body["weights"])
+        assert all(0.0 <= v <= 1.0 for v in body["data_share"].values())
         assert 1 <= body["n_days"] <= len(days) and body["rows"] > 0
         sign = -1 if role.endswith("against") else 1
         assert body["priors"]["room"] == pytest.approx(sign * 0.15)
@@ -505,3 +554,76 @@ def test_refit_failure_stores_nothing_and_counts_a_degrade(db, monkeypatch):
     assert out["version"] is None
     assert called == ["options.scalp_prob"]
     assert scalp_store.latest_prob_models(db_path=db) == {}
+
+
+# ── train / serve parity ─────────────────────────────────────────────────────
+@pytest.mark.parametrize("kind,slot", [("morning", "08:36"), ("intraday", "10:51")])
+def test_training_row_and_live_chance_agree(db, kind, slot):
+    # One stored day read both ways: the fit's training row, and the live chance
+    # from the entry fields a built call carries (scalp_call._reading, plus the
+    # slot for a 15-minute call) with the same recorded snapshot. Same factors,
+    # and through a hand-made model whose scaling is not 1 and clips, the same
+    # probability.
+    from services.options_svc import scalp_call, scalp_inputs, scalp_intraday_inputs
+    days = trading_days(4, start=dt.date(2026, 9, 1))
+    _studied(db, days)
+    day = days[-1]
+    if kind == "morning":
+        reading = scalp_inputs.morning("SPY", day, 5, db_path=db)
+    else:
+        reading = scalp_intraday_inputs.reading("SPY", day, slot, db_path=db)
+    d = reading.direction
+    assert d in (1, -1)
+    spot = reading.entry_spot
+    snap = {"matrix": {"SPY": {"spot": spot, "call_wall": spot * 1.004,
+                               "put_wall": spot * 0.996, "flip": spot * (1 - 0.002 * d),
+                               "net_gex": 1.0e9, "walls_untrusted": False}},
+            "netprem": {"SPY": {"call": 3.0, "put": 1.0, "ts": 0}},
+            "sentiment": {"state": "bullish", "score": 6.0},
+            "flow": {"date": day.isoformat(), "window": {"bull": 2, "bear": 0}}}
+    scalp_store.save_reading(day.isoformat(), slot, "SPY", {"snapshot": snap}, db_path=db)
+
+    rows = [r for r in scalp_prob_fit.training_rows(kind, db_path=db)
+            if r.day == day.isoformat() and r.slot == slot and r.symbol == "SPY"
+            and r.role == "long_with"]
+    assert len(rows) == 1
+    trained = rows[0].factors
+    for name in ("room", "flip_side", "netprem", "flow", "sentiment", "slope_5"):
+        assert trained.get(name) is not None, name
+
+    # A model with a weight on every factor: tiny scales that clip, others that don't.
+    cap = scalp_config.prob_cap()
+    weights, scaling = {}, {}
+    for i, name in enumerate(sorted(trained)):
+        weights[name] = 0.05 * (1 + i % 5) * (-1 if i % 3 == 0 else 1)
+        if name not in scalp_prob_fit.scalp_prob_features.DISCRETE:
+            scaling[name] = 1e-4 if i % 2 == 0 else 7.0
+    clipped = [n for n, v in trained.items() if n in scaling and v is not None
+               and abs(v / scaling[n]) > cap]
+    unclipped = [n for n, v in trained.items() if n in scaling and v
+                 and abs(v / scaling[n]) < cap]
+    assert clipped and unclipped
+    body = {"weights": weights, "intercepts": {"SPY": -0.3}, "scaling": scaling,
+            "days": {n: 100 for n in weights}, "data_share": {n: 0.9 for n in weights},
+            "n_days": 100, "rows": 400, "priors": {}, "prior_sd": {},
+            "walk_forward": {"beats_usual": False}}
+    stored = {"version": 1, "fitted_at": "2026-10-24T08:00:00-05:00",
+              "models": {(kind, role): body for role in
+                         ("long_with", "long_against", "credit_with", "credit_against")}}
+
+    entry = scalp_call._reading(reading, None, None)
+    if kind == "intraday":
+        entry["slot"] = slot
+    live = scalp_prob.chance(kind, "SPY", entry, snap, day, db_path=db, models=stored,
+                             trend_cache={})
+    served = {p["factor"]: p["reading"] for p in live["pushes"]}
+    assert set(served) == set(trained)
+    for name, value in trained.items():
+        if value is None:
+            assert served[name] is None, name
+        else:
+            assert served[name] == pytest.approx(value, rel=1e-12, abs=1e-12), name
+    model = scalp_prob._model(kind, "long_with", body)
+    expected, _ = scalp_prob_fit.predict(model, "SPY", trained)
+    assert live["by_role"]["long_with"] == pytest.approx(expected, rel=1e-12)
+    assert 0.0 < expected < 1.0 and expected != pytest.approx(0.5)

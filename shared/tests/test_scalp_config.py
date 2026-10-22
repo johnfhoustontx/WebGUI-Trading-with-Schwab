@@ -574,11 +574,11 @@ def _prob_defaults():
             sc.prob_room_cap(), sc.prob_flow_cap(), sc.prob_priors(),
             sc.prob_prior_sd(), sc.prob_min_train_weeks(),
             sc.prob_min_brier_margin(), sc.prob_refit_weekday(), sc.prob_show(),
-            sc.prob_assumed_days())
+            sc.prob_assumed_share())
 
 
 _PROB_DEFAULTS = (20, 3, 14, [5, 15, 60], 10, 3.0, 3.0, 3, _PROB_PRIORS,
-                  {"wide": 1.0, "tight": 0.10}, 8, 0.005, 5, True, 5)
+                  {"wide": 1.0, "tight": 0.10}, 8, 0.005, 5, True, 0.5)
 
 
 def test_prob_defaults(monkeypatch, tmp_path):
@@ -598,7 +598,7 @@ def test_prob_bad_values_read_as_defaults(monkeypatch):
            "priors": {"slope_5": "x", "room": float("inf"), "netprem": True},
            "prior_sd": {"wide": 0},
            "min_train_weeks": 0, "min_brier_margin": 0.25, "refit_weekday": 9,
-           "show": "yes", "assumed_days": 0}
+           "show": "yes", "assumed_share": 0}
     monkeypatch.setattr(sc, "load", lambda: {"prob": bad})
     assert _prob_defaults() == _PROB_DEFAULTS
 
@@ -654,12 +654,21 @@ def test_good_prob_values_are_read(monkeypatch):
         "ema_period": 9, "slope_bars": 4, "rsi_period": 7, "lookback_sessions": 3,
         "cap": 2, "room_cap": 1.5, "flow_cap": 2, "min_train_weeks": 12,
         "min_brier_margin": 0, "refit_weekday": 6, "show": False,
-        "assumed_days": 10}})
+        "assumed_share": 0.75}})
     assert (sc.prob_ema_period(), sc.prob_slope_bars(), sc.prob_rsi_period(),
             sc.prob_lookback_sessions(), sc.prob_cap(), sc.prob_room_cap(),
             sc.prob_flow_cap(), sc.prob_min_train_weeks(),
             sc.prob_min_brier_margin(), sc.prob_refit_weekday(), sc.prob_show(),
-            sc.prob_assumed_days()) == (9, 4, 7, 3, 2.0, 1.5, 2, 12, 0.0, 6, False, 10)
+            sc.prob_assumed_share()) == (9, 4, 7, 3, 2.0, 1.5, 2, 12, 0.0, 6, False, 0.75)
+
+
+def test_prob_assumed_share_is_strictly_between_zero_and_one(monkeypatch):
+    for bad in (0, 1, 1.5, -0.1, True, "0.5", float("nan"), None):
+        monkeypatch.setattr(sc, "load", lambda bad=bad: {"prob": {"assumed_share": bad}})
+        assert sc.prob_assumed_share() == 0.5
+    for good in (0.01, 0.3, 0.99):
+        monkeypatch.setattr(sc, "load", lambda good=good: {"prob": {"assumed_share": good}})
+        assert sc.prob_assumed_share() == good
 
 
 def test_prob_config_hands_back_copies(monkeypatch):

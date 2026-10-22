@@ -18,8 +18,11 @@ Rules:
   the role's chain-priced points, so "room" means the same live as in training.
 * **The pushes are ``long_with``'s.** One per factor in that model, the raw
   reading beside the push converted to percentage points of chance at the
-  predicted probability (``p (1 - p) push 100``), and whether the factor's weight
-  is still mostly the prior (read on fewer than ``prob_assumed_days`` days).
+  predicted probability (``p (1 - p) push 100``), the days it was read on (for
+  display), and whether the factor's weight is still mostly the prior: its
+  stored ``data_share`` (the share of its posterior precision the data gave) is
+  under ``prob_assumed_share``. A stored model with no ``data_share`` (fitted
+  before it was kept) reads every factor as assumed.
 * **Never raises.** Any failure is counted (``options.scalp_prob``) and answered as
   no chance: the call it belongs to is published all the same.
 
@@ -52,19 +55,23 @@ def _model(kind, role, body) -> scalp_prob_fit.Model:
         role=role, kind=kind, weights=dict(body.get("weights") or {}),
         intercepts=dict(body.get("intercepts") or {}),
         scaling=dict(body.get("scaling") or {}), days=dict(body.get("days") or {}),
-        n_days=int(body.get("n_days") or 0))
+        n_days=int(body.get("n_days") or 0),
+        data_share=dict(body.get("data_share") or {}))
 
 
 def _pushes(model, probability, pushes, factors) -> list:
     """``long_with``'s pushes in percentage points, largest first."""
-    assumed_under = scalp_config.prob_assumed_days()
+    assumed_under = scalp_config.prob_assumed_share()
     out = []
     for name in model.weights:
         days = int(model.days.get(name) or 0)
+        share = _finite(model.data_share.get(name))
         out.append({"factor": name, "reading": _finite(factors.get(name)),
                     "points": probability * (1.0 - probability)
                     * float(pushes.get(name, 0.0)) * 100.0,
-                    "days": days, "assumed": days < assumed_under})
+                    "days": days,
+                    # no stored share (an older model) is read as still assumed
+                    "assumed": share is None or share < assumed_under})
     out.sort(key=lambda p: abs(p["points"]), reverse=True)
     return out
 

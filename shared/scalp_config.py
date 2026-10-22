@@ -76,7 +76,7 @@ DEFAULTS = {
                    "netprem": 0.10, "flow": 0.10, "sentiment": 0.05},
         "prior_sd": {"wide": 1.0, "tight": 0.10},
         "min_train_weeks": 8, "min_brier_margin": 0.005, "refit_weekday": 5,
-        "show": True, "assumed_days": 5,
+        "show": True, "assumed_share": 0.5,
     },
 }
 
@@ -609,9 +609,11 @@ def prob_priors() -> dict:
 
 
 def prob_prior_sd() -> dict:
-    """How tightly each prior holds: ``wide`` (a factor with no history) and
-    ``tight`` (one the design trusts). Both must be finite and above zero, or
-    the pair is the defaults whole. A fresh dict each call."""
+    """How tightly each prior holds: ``wide`` for the factors with long history
+    (the price inputs, slopes, momentum and time of day: their ~180 days decide
+    the weight) and ``tight`` for the thin sources (dealer read, net premium,
+    flow, sentiment: they stay near their assumed value). Both must be finite
+    and above zero, or the pair is the defaults whole. A fresh dict each call."""
     default = DEFAULTS["prob"]["prior_sd"]
     raw = _section("prob").get("prior_sd")
     if (isinstance(raw, dict) and all(_real(raw.get(k)) and raw[k] > 0 for k in default)):
@@ -625,8 +627,10 @@ def prob_min_train_weeks() -> int:
 
 
 def prob_min_brier_margin() -> float:
-    """How far below the usual rate's Brier a fit must score to be used: at
-    least 0 and below 0.25, any other value reads as the default."""
+    """How far below the usual rate's Brier a fit must score for its
+    "beats the usual rate on unseen days" line to read yes (the chance is shown
+    either way): at least 0 and below 0.25, any other value reads as the
+    default."""
     raw = _section("prob").get("min_brier_margin")
     if not _real(raw) or not (0 <= raw < 0.25):
         return float(DEFAULTS["prob"]["min_brier_margin"])
@@ -649,7 +653,12 @@ def prob_show() -> bool:
     return raw if isinstance(raw, bool) else DEFAULTS["prob"]["show"]
 
 
-def prob_assumed_days() -> int:
-    """Days of history under which a factor's weight is shown as "assumed": a
-    whole number of at least 1."""
-    return _count("prob", "assumed_days")
+def prob_assumed_share() -> float:
+    """The share of a weight's posterior precision that must come from the data
+    for it to read as learned: under it, the weight still rests mostly on its
+    starting assumption and is shown as "assumed". A number strictly between 0
+    and 1, else the default (0.5)."""
+    raw = _section("prob").get("assumed_share")
+    if not _real(raw) or not (0 < raw < 1):
+        return float(DEFAULTS["prob"]["assumed_share"])
+    return float(raw)

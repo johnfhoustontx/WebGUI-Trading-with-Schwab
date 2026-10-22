@@ -1336,10 +1336,11 @@ _SCALP = ConfigFile(
             Field("prob.flow_cap", "Flow alert cap",
                   "The most flow alerts counted on one side.",
                   kind="int", min=1, max=50, step=1),
-            Field("prob.assumed_days", "Days before a weight is trusted",
-                  "A factor with fewer days of history than this has its weight "
-                  "shown as assumed.", kind="int", unit="days", min=1, max=250,
-                  step=1),
+            Field("prob.assumed_share", "Learned share before a weight is trusted",
+                  "A factor's weight is shown as assumed while less than this "
+                  "share of it was learned from data (the rest is its starting "
+                  "assumption). Between 0 and 1, not either end.",
+                  kind="float", min=0.01, max=0.99, step=0.05),
         )),
         Section("Chance of target: assumed weights",
                 "What each factor is assumed to push the chance by, before its "
@@ -1389,12 +1390,16 @@ _SCALP = ConfigFile(
                   "the call.",
                   kind="float", min=-2, max=2, step=0.01),
             Field("prob.prior_sd.wide", "Prior spread: loose",
-                  "How far a weight may move from its assumed value when its "
-                  "history is thin (the spread of the pull; smaller holds "
-                  "harder). Above 0.", kind="float", min=0.01, max=10, step=0.05),
+                  "How far a weight may move from its assumed value for the "
+                  "factors with long history (price inputs, slopes, momentum, "
+                  "time of day), so their history decides them (the spread of "
+                  "the pull; smaller holds harder). Above 0.",
+                  kind="float", min=0.01, max=10, step=0.05),
             Field("prob.prior_sd.tight", "Prior spread: firm",
-                  "The same for a factor held harder to its assumed value. "
-                  "Above 0.", kind="float", min=0.01, max=10, step=0.01),
+                  "The same for the thin sources (dealer read, net premium, "
+                  "flow, sentiment), held near their assumed value until their "
+                  "history grows. Above 0.",
+                  kind="float", min=0.01, max=10, step=0.01),
         )),
         Section("Chance of target: weekly refit",
                 "The refit's honesty check, and which day it runs. The time of "
@@ -1407,7 +1412,9 @@ _SCALP = ConfigFile(
                   "run.", kind="int", unit="weeks", min=1, max=104, step=1),
             Field("prob.min_brier_margin", "Margin over the usual rate",
                   "How far below the usual rate's Brier score a fit must land "
-                  "to be used (0 up to, not including, 0.25).",
+                  "for the \"beats the usual rate on unseen days\" line to read "
+                  "yes. It decides only that line: the chance is shown either "
+                  "way (0 up to, not including, 0.25).",
                   kind="float", min=0, max=0.249, step=0.001),
         )),
     ),

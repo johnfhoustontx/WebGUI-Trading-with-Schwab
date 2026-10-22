@@ -21,11 +21,12 @@ def sigmoid(z):
     return 1.0 / (1.0 + math.exp(-z))
 
 
-def body(weights, intercepts=None, days=None, beats=True):
+def body(weights, intercepts=None, days=None, beats=True, share=None):
     return {"weights": dict(weights),
             "intercepts": {"SPY": 0.0} if intercepts is None else dict(intercepts),
             "scaling": {n: 1.0 for n in weights if n != "flow"},
             "days": dict(days if days is not None else {n: 100 for n in weights}),
+            "data_share": dict(share if share is not None else {n: 0.9 for n in weights}),
             "n_days": 100, "rows": 400, "priors": {}, "prior_sd": {},
             "walk_forward": {"beats_usual": beats}}
 
@@ -106,13 +107,17 @@ def test_a_role_fitted_on_no_rows_has_no_chance(tmp_path):
 
 
 def test_pushes_name_assumed_factors(tmp_path):
+    # "Assumed" is the weight's data share under [prob] assumed_share (0.5), not
+    # its day count: room was read on 40 days and is still mostly its prior.
     w = {"price:gap_pct": 0.8, "slope_5": 0.5, "room": 0.0}
     days = {"price:gap_pct": 180, "slope_5": 3, "room": 40}
+    share = {"price:gap_pct": 0.95, "slope_5": 0.02, "room": 0.12}
     e = entry(gap=1.0)
-    out = call(tmp_path, e=e, m=models(long_with=body(w, days=days)))
+    out = call(tmp_path, e=e, m=models(long_with=body(w, days=days, share=share)))
     by = {p["factor"]: p for p in out["pushes"]}
     assert set(by) == set(w)
     assert by["slope_5"]["assumed"] is True and by["slope_5"]["days"] == 3
+    assert by["room"]["assumed"] is True and by["room"]["days"] == 40
     assert by["price:gap_pct"]["assumed"] is False and by["price:gap_pct"]["days"] == 180
     assert by["slope_5"]["reading"] is None          # a gap reads as None
     assert by["slope_5"]["points"] == 0.0
@@ -124,8 +129,34 @@ def test_pushes_name_assumed_factors(tmp_path):
 
 
 def test_a_factor_the_model_never_read_is_assumed_with_zero_days(tmp_path):
-    out = call(tmp_path, m=models(long_with=body({"price:gap_pct": 0.8}, days={})))
+    out = call(tmp_path, m=models(long_with=body({"price:gap_pct": 0.8}, days={},
+                                                 share={"price:gap_pct": 0.0})))
     assert out["pushes"][0]["days"] == 0 and out["pushes"][0]["assumed"] is True
+
+
+def test_the_share_line_is_the_config_and_half_is_learned(tmp_path, monkeypatch):
+    w = {"price:gap_pct": 0.8, "room": 0.1}
+    share = {"price:gap_pct": 0.5, "room": 0.7}
+    m = models(long_with=body(w, share=share))
+    by = {p["factor"]: p["assumed"] for p in call(tmp_path, m=m)["pushes"]}
+    assert by == {"price:gap_pct": False, "room": False}     # at the line is learned
+    monkeypatch.setattr(scalp_prob.scalp_config, "prob_assumed_share", lambda: 0.8)
+    by = {p["factor"]: p["assumed"] for p in call(tmp_path, m=m)["pushes"]}
+    assert by == {"price:gap_pct": True, "room": True}
+
+
+def test_a_model_stored_without_data_share_reads_every_factor_assumed(tmp_path):
+    # A body fitted before the share was kept (or a junk share) is never shown as
+    # learned, however many days it was read on.
+    w = {"price:gap_pct": 0.8, "slope_5": 0.5}
+    old = body(w, days={"price:gap_pct": 180, "slope_5": 180})
+    old.pop("data_share")
+    out = call(tmp_path, m=models(long_with=old))
+    assert [p["assumed"] for p in out["pushes"]] == [True, True]
+    assert out["by_role"]["long_with"] == pytest.approx(sigmoid(0.8))
+    junk = body(w, share={"price:gap_pct": float("nan"), "slope_5": "x"})
+    out = call(tmp_path, m=models(long_with=junk))
+    assert [p["assumed"] for p in out["pushes"]] == [True, True]
 
 
 def test_against_and_with_move_opposite_ways(tmp_path):

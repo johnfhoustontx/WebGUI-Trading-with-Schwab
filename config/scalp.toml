@@ -203,8 +203,9 @@ cap = 3.0
 room_cap = 3.0
 flow_cap = 3
 # The refit's honesty check: weeks of history before the walk-forward test is
-# run, and how far below the usual rate's Brier score a fit must land to be used
-# (0 up to, not including, 0.25).
+# run, and how far below the usual rate's Brier score a fit must land for the
+# page's "beats the usual rate on unseen days" line to read yes (0 up to, not
+# including, 0.25). It decides only that line: the chance is shown either way.
 min_train_weeks = 8
 min_brier_margin = 0.005
 # The weekday of the weekly refit, 0 Monday to 6 Sunday (5 Saturday). The time is
@@ -212,8 +213,10 @@ min_brier_margin = 0.005
 refit_weekday = 5
 # Show the fitted chance on the page.
 show = true
-# Days of history under which a factor's weight is shown as "assumed".
-assumed_days = 5
+# A factor's weight is shown as "assumed" while less than this share of it was
+# learned from data (the data's share of the weight's posterior precision;
+# the rest is the starting assumption). Strictly between 0 and 1.
+assumed_share = 0.5
 
 [prob.priors]
 # The ASSUMED weight of each factor before its history has moved it: a positive
@@ -235,7 +238,9 @@ sentiment = 0.05
 
 [prob.prior_sd]
 # How tightly a prior holds, as the standard deviation of the Gaussian the weight
-# is pulled toward (smaller holds harder). Both above 0. wide: a factor with
-# little history to move it; tight: one the design trusts more.
+# is pulled toward (smaller holds harder). Both above 0. wide: the factors with
+# ~180 days of history (the price inputs, slopes, momentum, time of day), so
+# their history decides them; tight: the thin sources (dealer read, net premium,
+# flow, sentiment), so they stay near their assumed value.
 wide = 1.0
 tight = 0.10
