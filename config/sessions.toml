@@ -205,6 +205,15 @@ call = "08:36"        # 09:36 ET
 grace_min = 120
 close = "16:20"       # 17:20 ET
 
+[slots.scalp_prob]
+# The Opening Scalp's weekly refit of the chance-of-target weights
+# (options_svc scalp_prob). Unlike every other slot it does NOT fire on trading
+# days: it fires on the weekday set by [prob] refit_weekday in config/scalp.toml
+# (Saturday by default), after Friday evening's study rebuild has graded the week.
+# A refit missed is not lost: the weights simply stay one week older.
+grace_min = 180
+refit = "08:00"       # 09:00 ET
+
 [slots.flow_delta]
 # The delta-notional flow-alert instrumentation (tools/flow_delta_instrumentation.py):
 # one report per trading day under options-scanner/data/flow_delta_instrumentation/,

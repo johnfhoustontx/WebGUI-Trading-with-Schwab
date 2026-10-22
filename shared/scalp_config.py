@@ -65,6 +65,19 @@ DEFAULTS = {
         "min_sources": 2, "cuts": [-0.34, 0.34],
         "weights": {"flow": 1.0, "netprem": 1.0, "dealer": 1.0, "sentiment": 0.5},
     },
+    # The fitted chance of target (design 2026-10-22-scalp-weighted-probability).
+    "prob": {
+        "ema_period": 20, "slope_bars": 3, "rsi_period": 14,
+        "timeframes": [5, 15, 60], "lookback_sessions": 10,
+        "cap": 3.0, "room_cap": 3.0, "flow_cap": 3,
+        "priors": {"slope_5": 0.15, "slope_15": 0.10, "slope_60": 0.05,
+                   "rsi_5": 0.10, "rsi_15": 0.07, "rsi_60": 0.04,
+                   "room": 0.15, "breadth_room": 0.05, "flip_side": 0.0,
+                   "netprem": 0.10, "flow": 0.10, "sentiment": 0.05},
+        "prior_sd": {"wide": 1.0, "tight": 0.10},
+        "min_train_weeks": 8, "min_brier_margin": 0.005, "refit_weekday": 5,
+        "show": True, "assumed_days": 5,
+    },
 }
 
 load, reset_cache = toml_loader(SCALP_TOML, DEFAULTS, label="scalp.toml")
@@ -532,3 +545,111 @@ def confirm_weights() -> dict:
     out = {key: float(raw[key]) if _real(raw.get(key)) and raw[key] >= 0 else float(dflt)
            for key, dflt in default.items()}
     return out if sum(out.values()) > 0 else {k: float(v) for k, v in default.items()}
+
+
+# ── the fitted chance of target ([prob]) ─────────────────────────────────────
+def prob_ema_period() -> int:
+    """Bars in the moving average whose slope is a factor."""
+    return _count("prob", "ema_period")
+
+
+def prob_slope_bars() -> int:
+    """Bars over which that moving average's slope is measured."""
+    return _count("prob", "slope_bars")
+
+
+def prob_rsi_period() -> int:
+    """Bars in the RSI factor."""
+    return _count("prob", "rsi_period")
+
+
+def prob_timeframes() -> list:
+    """The bar sizes, in minutes, the slope and RSI factors are read on: a
+    non-empty strictly ascending list of whole multiples of 5, else
+    ``[5, 15, 60]``. A fresh list each call."""
+    raw = _section("prob").get("timeframes")
+    if (isinstance(raw, list) and raw and all(_real(v) and v == int(v) and v >= 5
+                                             and int(v) % 5 == 0 for v in raw)):
+        out = [int(v) for v in raw]
+        if all(a < b for a, b in zip(out, out[1:])):
+            return out
+    return list(DEFAULTS["prob"]["timeframes"])
+
+
+def prob_lookback_sessions() -> int:
+    """Sessions of bars read before an entry to warm up the EMA and RSI."""
+    return _count("prob", "lookback_sessions")
+
+
+def prob_cap() -> float:
+    """The cap on a scaled factor, in scaled units (above zero)."""
+    return _number("prob", "cap")
+
+
+def prob_room_cap() -> float:
+    """The cap on room divided by the target's points (above zero)."""
+    return _number("prob", "room_cap")
+
+
+def prob_flow_cap() -> int:
+    """The cap on the flow factor's count of alerts (a whole number, at least 1)."""
+    return _count("prob", "flow_cap")
+
+
+def prob_priors() -> dict:
+    """The ASSUMED weight of each factor before its history has moved it:
+    exactly the twelve factors the defaults name (any other TOML key is kept
+    out), each any finite number, a bad one reading as its default. A factor
+    not listed has a prior of 0.0 for whoever asks. A fresh dict each call."""
+    default = DEFAULTS["prob"]["priors"]
+    raw = _section("prob").get("priors")
+    raw = raw if isinstance(raw, dict) else {}
+    return {key: float(raw[key]) if _real(raw.get(key)) else float(dflt)
+            for key, dflt in default.items()}
+
+
+def prob_prior_sd() -> dict:
+    """How tightly each prior holds: ``wide`` (a factor with no history) and
+    ``tight`` (one the design trusts). Both must be finite and above zero, or
+    the pair is the defaults whole. A fresh dict each call."""
+    default = DEFAULTS["prob"]["prior_sd"]
+    raw = _section("prob").get("prior_sd")
+    if (isinstance(raw, dict) and all(_real(raw.get(k)) and raw[k] > 0 for k in default)):
+        return {k: float(raw[k]) for k in default}
+    return {k: float(v) for k, v in default.items()}
+
+
+def prob_min_train_weeks() -> int:
+    """Weeks of history before the refit's walk-forward check is run."""
+    return _count("prob", "min_train_weeks")
+
+
+def prob_min_brier_margin() -> float:
+    """How far below the usual rate's Brier a fit must score to be used: at
+    least 0 and below 0.25, any other value reads as the default."""
+    raw = _section("prob").get("min_brier_margin")
+    if not _real(raw) or not (0 <= raw < 0.25):
+        return float(DEFAULTS["prob"]["min_brier_margin"])
+    return float(raw)
+
+
+def prob_refit_weekday() -> int:
+    """The weekday the weekly refit runs, Monday 0 to Sunday 6 (Saturday 5): a
+    whole number in that range, else the default."""
+    raw = _section("prob").get("refit_weekday")
+    if not _real(raw) or raw != int(raw) or not (0 <= raw <= 6):
+        return DEFAULTS["prob"]["refit_weekday"]
+    return int(raw)
+
+
+def prob_show() -> bool:
+    """Whether the page shows the fitted chance. Only a real ``true`` / ``false``
+    counts: anything else reads as the default (shown)."""
+    raw = _section("prob").get("show")
+    return raw if isinstance(raw, bool) else DEFAULTS["prob"]["show"]
+
+
+def prob_assumed_days() -> int:
+    """Days of history under which a factor's weight is shown as "assumed": a
+    whole number of at least 1."""
+    return _count("prob", "assumed_days")

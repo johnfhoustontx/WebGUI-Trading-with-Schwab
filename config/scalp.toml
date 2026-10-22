@@ -179,3 +179,63 @@ flow = 1.0
 netprem = 1.0
 dealer = 1.0
 sentiment = 0.5
+
+[prob]
+# The fitted chance of target shown beside every call (design
+# docs/plans/2026-10-22-scalp-weighted-probability-design.md). Each factor is
+# scaled, pushes the chance up or down by a weight, and the weights are refitted
+# weekly from the stored history. Until a factor has history its weight is the
+# ASSUMED prior below.
+# Bars in the moving average whose slope is a factor, and the bars the slope is
+# measured over.
+ema_period = 20
+slope_bars = 3
+# Bars in the RSI factor.
+rsi_period = 14
+# The bar sizes, in minutes, the slope and RSI factors are read on: whole
+# multiples of 5, ascending.
+timeframes = [5, 15, 60]
+# Sessions of bars read before an entry to warm up the EMA and RSI.
+lookback_sessions = 10
+# Caps, so one extreme reading cannot dominate: a scaled factor, the room to the
+# nearest wall divided by the target's points, and the flow alert count.
+cap = 3.0
+room_cap = 3.0
+flow_cap = 3
+# The refit's honesty check: weeks of history before the walk-forward test is
+# run, and how far below the usual rate's Brier score a fit must land to be used
+# (0 up to, not including, 0.25).
+min_train_weeks = 8
+min_brier_margin = 0.005
+# The weekday of the weekly refit, 0 Monday to 6 Sunday (5 Saturday). The time is
+# [slots.scalp_prob] in config/sessions.toml.
+refit_weekday = 5
+# Show the fitted chance on the page.
+show = true
+# Days of history under which a factor's weight is shown as "assumed".
+assumed_days = 5
+
+[prob.priors]
+# The ASSUMED weight of each factor before its history has moved it: a positive
+# number pushes the chance up when the factor agrees with the call, 0 assumes no
+# push. These are starting guesses, not measurements; the weekly refit replaces
+# them as each factor's history grows.
+slope_5 = 0.15
+slope_15 = 0.10
+slope_60 = 0.05
+rsi_5 = 0.10
+rsi_15 = 0.07
+rsi_60 = 0.04
+room = 0.15
+breadth_room = 0.05
+flip_side = 0.0
+netprem = 0.10
+flow = 0.10
+sentiment = 0.05
+
+[prob.prior_sd]
+# How tightly a prior holds, as the standard deviation of the Gaussian the weight
+# is pulled toward (smaller holds harder). Both above 0. wide: a factor with
+# little history to move it; tight: one the design trusts more.
+wide = 1.0
+tight = 0.10

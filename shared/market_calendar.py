@@ -300,6 +300,9 @@ _DEFAULTS = {
         # The Opening Scalp's nightly bar top-up (options_svc/scalp_fetch):
         # after the 16:00 flow-delta report and the 15:20 collection stop.
         "scalp_bars": {"grace_min": 120, "close": "16:20"},
+        # The Opening Scalp's weekly refit of the chance-of-target weights. It
+        # fires on [prob] refit_weekday (config/scalp.toml), not on trading days.
+        "scalp_prob": {"grace_min": 180, "refit": "08:00"},
         # The paper books' expiry settlement (options_svc): a settle-only pass
         # over the Account and the Ledger just after the 15:00 CT close. The
         # time must stay AFTER 15:00 - before it nothing is due yet and the slot

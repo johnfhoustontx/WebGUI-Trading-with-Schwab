@@ -559,3 +559,121 @@ def test_min_sources_default_and_validation(monkeypatch):
     for good in (1, 3, 4):
         monkeypatch.setattr(sc, "load", lambda good=good: {"confirm": {"min_sources": good}})
         assert sc.confirm_min_sources() == good
+
+
+# ── [prob]: the fitted chance of target (design 2026-10-22) ──────────────────
+_PROB_PRIORS = {"slope_5": 0.15, "slope_15": 0.10, "slope_60": 0.05,
+                "rsi_5": 0.10, "rsi_15": 0.07, "rsi_60": 0.04,
+                "room": 0.15, "breadth_room": 0.05, "flip_side": 0.0,
+                "netprem": 0.10, "flow": 0.10, "sentiment": 0.05}
+
+
+def _prob_defaults():
+    return (sc.prob_ema_period(), sc.prob_slope_bars(), sc.prob_rsi_period(),
+            sc.prob_timeframes(), sc.prob_lookback_sessions(), sc.prob_cap(),
+            sc.prob_room_cap(), sc.prob_flow_cap(), sc.prob_priors(),
+            sc.prob_prior_sd(), sc.prob_min_train_weeks(),
+            sc.prob_min_brier_margin(), sc.prob_refit_weekday(), sc.prob_show(),
+            sc.prob_assumed_days())
+
+
+_PROB_DEFAULTS = (20, 3, 14, [5, 15, 60], 10, 3.0, 3.0, 3, _PROB_PRIORS,
+                  {"wide": 1.0, "tight": 0.10}, 8, 0.005, 5, True, 5)
+
+
+def test_prob_defaults(monkeypatch, tmp_path):
+    _point_at(monkeypatch, tmp_path)                    # no file at all
+    assert _prob_defaults() == _PROB_DEFAULTS
+
+
+def test_the_shipped_prob_section_is_the_defaults():
+    sc.reset_cache()
+    assert _prob_defaults() == _PROB_DEFAULTS
+
+
+def test_prob_bad_values_read_as_defaults(monkeypatch):
+    bad = {"ema_period": 0, "slope_bars": 2.5, "rsi_period": True,
+           "timeframes": [7, 15], "lookback_sessions": -1, "cap": 0,
+           "room_cap": float("nan"), "flow_cap": "three",
+           "priors": {"slope_5": "x", "room": float("inf"), "netprem": True},
+           "prior_sd": {"wide": 0},
+           "min_train_weeks": 0, "min_brier_margin": 0.25, "refit_weekday": 9,
+           "show": "yes", "assumed_days": 0}
+    monkeypatch.setattr(sc, "load", lambda: {"prob": bad})
+    assert _prob_defaults() == _PROB_DEFAULTS
+
+
+def test_prob_timeframes_must_be_ascending_multiples_of_five(monkeypatch):
+    for bad in ([], [15, 5], [5, 5], [5, 12], [0, 5], [5.5], "5", [True, 15], [-5, 5]):
+        monkeypatch.setattr(sc, "load", lambda bad=bad: {"prob": {"timeframes": bad}})
+        assert sc.prob_timeframes() == [5, 15, 60]
+    monkeypatch.setattr(sc, "load", lambda: {"prob": {"timeframes": [5, 30, 120]}})
+    assert sc.prob_timeframes() == [5, 30, 120]
+    monkeypatch.setattr(sc, "load", lambda: {"prob": {"timeframes": [10.0, 20]}})
+    assert sc.prob_timeframes() == [10, 20]
+
+
+def test_prob_prior_sd_needs_both_spreads_positive(monkeypatch):
+    for bad in ({"wide": 0}, {"wide": 1.0, "tight": -1}, {"tight": 0.2},
+                {"wide": "a", "tight": 0.1}, "no", {"wide": float("nan")}):
+        monkeypatch.setattr(sc, "load", lambda bad=bad: {"prob": {"prior_sd": bad}})
+        assert sc.prob_prior_sd() == {"wide": 1.0, "tight": 0.10}
+    monkeypatch.setattr(sc, "load", lambda: {"prob": {"prior_sd": {"wide": 2, "tight": 0.2}}})
+    assert sc.prob_prior_sd() == {"wide": 2.0, "tight": 0.2}
+
+
+def test_prob_refit_weekday_is_zero_to_six(monkeypatch):
+    for bad in (-1, 7, 9, 5.5, True, "5", float("nan")):
+        monkeypatch.setattr(sc, "load", lambda bad=bad: {"prob": {"refit_weekday": bad}})
+        assert sc.prob_refit_weekday() == 5
+    for good in (0, 3, 6):
+        monkeypatch.setattr(sc, "load", lambda good=good: {"prob": {"refit_weekday": good}})
+        assert sc.prob_refit_weekday() == good
+
+
+def test_prob_priors_unknown_key_kept_out(monkeypatch, tmp_path):
+    _point_at(monkeypatch, tmp_path, "[prob.priors]\nfoo = 1\nroom = 0.3\n")
+    got = sc.prob_priors()
+    assert "foo" not in got
+    assert got == dict(_PROB_PRIORS, room=0.3)
+    assert set(got) == set(_PROB_PRIORS)
+
+
+def test_prob_priors_allow_zero_and_negative_but_not_junk(monkeypatch):
+    # a prior is an assumed push: zero means "no push assumed", a negative one is
+    # a push against the call; neither is the default's business
+    monkeypatch.setattr(sc, "load", lambda: {"prob": {"priors": {
+        "slope_5": 0, "rsi_5": -0.2, "room": "x", "flow": float("nan")}}})
+    got = sc.prob_priors()
+    assert got["slope_5"] == 0.0 and got["rsi_5"] == -0.2
+    assert got["room"] == 0.15 and got["flow"] == 0.10
+
+
+def test_good_prob_values_are_read(monkeypatch):
+    monkeypatch.setattr(sc, "load", lambda: {"prob": {
+        "ema_period": 9, "slope_bars": 4, "rsi_period": 7, "lookback_sessions": 3,
+        "cap": 2, "room_cap": 1.5, "flow_cap": 2, "min_train_weeks": 12,
+        "min_brier_margin": 0, "refit_weekday": 6, "show": False,
+        "assumed_days": 10}})
+    assert (sc.prob_ema_period(), sc.prob_slope_bars(), sc.prob_rsi_period(),
+            sc.prob_lookback_sessions(), sc.prob_cap(), sc.prob_room_cap(),
+            sc.prob_flow_cap(), sc.prob_min_train_weeks(),
+            sc.prob_min_brier_margin(), sc.prob_refit_weekday(), sc.prob_show(),
+            sc.prob_assumed_days()) == (9, 4, 7, 3, 2.0, 1.5, 2, 12, 0.0, 6, False, 10)
+
+
+def test_prob_config_hands_back_copies(monkeypatch):
+    sc.reset_cache()
+    sc.prob_priors()["room"] = 99.0
+    sc.prob_prior_sd()["wide"] = 99.0
+    sc.prob_timeframes().append(999)
+    assert sc.prob_priors()["room"] == 0.15
+    assert sc.prob_prior_sd()["wide"] == 1.0
+    assert sc.prob_timeframes() == [5, 15, 60]
+
+
+def test_the_scalp_prob_slot_is_in_the_shipped_calendar():
+    from shared import market_calendar as mc
+    assert mc.slot_grace_min("scalp_prob") == 180
+    (name, at), = mc.slot_times("scalp_prob").items()
+    assert name == "refit" and (at.hour, at.minute) == (8, 0)

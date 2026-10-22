@@ -721,6 +721,14 @@ _SESSIONS = ConfigFile(
                   kind="int", unit="min", min=1, max=480, step=1),
             Field("slots.scalp_bars.*", "", "", kind="time"),
         ), restart=(OPTIONS,)),
+        Section("Opening Scalp weekly refit", "When the chance-of-target weights "
+                "are refitted. The weekday is set under Opening Scalp, Chance of "
+                "target; this is the time of day, Central.", (
+            Field("slots.scalp_prob.grace_min", "Fire if late by at most",
+                  "A refit missed is not lost: the weights stay one week older.",
+                  kind="int", unit="min", min=1, max=480, step=1),
+            Field("slots.scalp_prob.*", "", "", kind="time"),
+        ), restart=(OPTIONS,)),
         Section("Hourly trade idea (Discord and Telegram)", "", (
             Field("slots.trade_idea.grace_min", "Fire if late by at most",
                   "Keep under 60 so a late post can't overlap the next hour.",
@@ -1294,6 +1302,113 @@ _SCALP = ConfigFile(
             Field("confirm.weights.sentiment", "Weight: sentiment",
                   "What the sentiment read counts for in the score.",
                   kind="float", min=0, max=10, step=0.1),
+        )),
+        Section("Chance of target",
+                "The fitted chance a call reaches its target: each factor is "
+                "scaled, pushes the chance by a weight, and the weights are "
+                "refitted weekly from the stored history. Until a factor has "
+                "history its weight is the assumed one below.", (
+            Field("prob.show", "Show the chance",
+                  "Show the fitted chance beside each call.", kind="bool"),
+            Field("prob.ema_period", "Moving average bars",
+                  "Bars in the moving average whose slope is a factor.",
+                  kind="int", min=2, max=200, step=1),
+            Field("prob.slope_bars", "Slope bars",
+                  "Bars the moving average's slope is measured over.",
+                  kind="int", min=1, max=50, step=1),
+            Field("prob.rsi_period", "RSI bars",
+                  "Bars in the RSI factor.", kind="int", min=2, max=100, step=1),
+            Field("prob.timeframes", "Bar sizes",
+                  "Minutes per bar the slope and RSI factors are read on. Whole "
+                  "multiples of 5, rising.", kind="numbers", unit="min",
+                  min=5, max=390),
+            Field("prob.lookback_sessions", "Warm-up sessions",
+                  "Sessions of bars read before an entry to warm up the moving "
+                  "average and RSI.", kind="int", min=1, max=60, step=1),
+            Field("prob.cap", "Factor cap",
+                  "The most one scaled factor may count, in scaled units, so one "
+                  "extreme reading cannot dominate.",
+                  kind="float", min=0.1, max=10, step=0.1),
+            Field("prob.room_cap", "Room cap",
+                  "The most the room to the nearest wall counts, as a multiple "
+                  "of the target's points.",
+                  kind="float", min=0.1, max=10, step=0.1),
+            Field("prob.flow_cap", "Flow alert cap",
+                  "The most flow alerts counted on one side.",
+                  kind="int", min=1, max=50, step=1),
+            Field("prob.assumed_days", "Days before a weight is trusted",
+                  "A factor with fewer days of history than this has its weight "
+                  "shown as assumed.", kind="int", unit="days", min=1, max=250,
+                  step=1),
+        )),
+        Section("Chance of target: assumed weights",
+                "What each factor is assumed to push the chance by, before its "
+                "own history has moved it. Starting guesses, not measurements: "
+                "the weekly refit replaces them as history grows. 0 assumes no "
+                "push.", (
+            Field("prob.priors.slope_5", "Slope, 5-minute",
+                  "Assumed push from the 5-minute moving average "
+                  "sloping with the call.",
+                  kind="float", min=-2, max=2, step=0.01),
+            Field("prob.priors.slope_15", "Slope, 15-minute",
+                  "The same on 15-minute bars.",
+                  kind="float", min=-2, max=2, step=0.01),
+            Field("prob.priors.slope_60", "Slope, 60-minute",
+                  "The same on 60-minute bars.",
+                  kind="float", min=-2, max=2, step=0.01),
+            Field("prob.priors.rsi_5", "RSI, 5-minute",
+                  "Assumed push from the 5-minute RSI reading with the "
+                  "call.",
+                  kind="float", min=-2, max=2, step=0.01),
+            Field("prob.priors.rsi_15", "RSI, 15-minute",
+                  "The same on 15-minute bars.",
+                  kind="float", min=-2, max=2, step=0.01),
+            Field("prob.priors.rsi_60", "RSI, 60-minute",
+                  "The same on 60-minute bars.",
+                  kind="float", min=-2, max=2, step=0.01),
+            Field("prob.priors.room", "Room to the nearest wall",
+                  "Assumed push from the room between the entry and the "
+                  "nearest dealer wall in the call's direction.",
+                  kind="float", min=-2, max=2, step=0.01),
+            Field("prob.priors.breadth_room", "Room across the big ten",
+                  "Assumed push from the same room across the ten "
+                  "biggest stocks.",
+                  kind="float", min=-2, max=2, step=0.01),
+            Field("prob.priors.flip_side", "Side of the gamma flip",
+                  "Assumed push from the price being on the call's side "
+                  "of the gamma flip.",
+                  kind="float", min=-2, max=2, step=0.01),
+            Field("prob.priors.netprem", "Net premium",
+                  "Assumed push from net premium leaning with the call.",
+                  kind="float", min=-2, max=2, step=0.01),
+            Field("prob.priors.flow", "Flow alerts",
+                  "Assumed push from flow alerts leaning with the call.",
+                  kind="float", min=-2, max=2, step=0.01),
+            Field("prob.priors.sentiment", "Sentiment",
+                  "Assumed push from the sentiment read agreeing with "
+                  "the call.",
+                  kind="float", min=-2, max=2, step=0.01),
+            Field("prob.prior_sd.wide", "Prior spread: loose",
+                  "How far a weight may move from its assumed value when its "
+                  "history is thin (the spread of the pull; smaller holds "
+                  "harder). Above 0.", kind="float", min=0.01, max=10, step=0.05),
+            Field("prob.prior_sd.tight", "Prior spread: firm",
+                  "The same for a factor held harder to its assumed value. "
+                  "Above 0.", kind="float", min=0.01, max=10, step=0.01),
+        )),
+        Section("Chance of target: weekly refit",
+                "The refit's honesty check, and which day it runs. The time of "
+                "day is under the schedule, Opening Scalp weekly refit.", (
+            Field("prob.refit_weekday", "Refit day",
+                  "0 is Monday, 5 is Saturday, 6 is Sunday.",
+                  kind="int", min=0, max=6, step=1),
+            Field("prob.min_train_weeks", "Weeks before the check",
+                  "Weeks of history the walk-forward check needs before it is "
+                  "run.", kind="int", unit="weeks", min=1, max=104, step=1),
+            Field("prob.min_brier_margin", "Margin over the usual rate",
+                  "How far below the usual rate's Brier score a fit must land "
+                  "to be used (0 up to, not including, 0.25).",
+                  kind="float", min=0, max=0.249, step=0.001),
         )),
     ),
 )
