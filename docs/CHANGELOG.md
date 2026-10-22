@@ -18,7 +18,7 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   1. *Configuration and storage* (`23da33a`, `25d2a43`): `config/scalp.toml [prob]`,
      `[prob.priors]`, `[prob.prior_sd]` and `config/sessions.toml [slots.scalp_prob]`, each
      with a Settings -> Configuration entry; two NEW `scalp.db` tables, `prob_sources`
-     (history of the dealer, premium, flow and sentiment sources) and `prob_models`
+     (history of the dealer, premium and flow sources; sentiment's history is the live records only) and `prob_models`
      (one fitted model per version, kind and trade, append-only). The existing tables
      are untouched.
   2. *Trend factors* (`4b04d15`, `5a0f3b3`): `scalp_trend.py`, a 20-bar EMA's slope and

@@ -3361,7 +3361,8 @@ symbols and the BIG10 basket, the sentiment state and score, and the flow counts
 whole view and the windowed, scoped reading the call saw). This is the history that does
 not otherwise exist beyond five sessions (`gex_history.db` purges walls and premium), and
 it is what the chance of target's dealer, net-premium, flow and sentiment weights are
-fitted from (older sessions come from `prob_sources`; see *The chance of target*).
+fitted from (older dealer, net-premium and flow readings come from `prob_sources`; see
+*The chance of target*).
 
 A recorded (day, slot, symbol) is **write-once**: a second record of it (a Refresh
 re-entering the 08:36 call, a replay) writes nothing, because the later read is not
@@ -3485,8 +3486,9 @@ days (the stored bars and both outcome tables). The dealer, net-premium, flow an
 sources exist only where they were recorded: the live `intraday_readings` row of the call
 first, else a `prob_sources` row loaded by `tools/scalp_prob_backfill.py` from the gamma-
 history copies (read-only, `immutable=1`; the per-minute grids exist for about 36 sessions,
-flow from 5 October, sentiment from about 14 October), else the source is a gap for that
-call. The flow in history is contract alerts only, a subset of the live window's.
+and flow from 5 October), else the source is a gap for that call. **Sentiment is never
+extracted**: its history is the live records only, from the first recorded call
+(2026-10-21). The flow in history is contract alerts only, a subset of the live window's.
 
 ### The honesty check (walk-forward by week)
 

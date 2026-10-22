@@ -1137,8 +1137,10 @@ sentiment, net premium and the dealer read are the thin ones): its push is my gu
 not something measured. A factor with no reading yet (no wall because Schwab sent no
 Greeks, a missing bar) pushes nothing; it is never counted against the call.
 
-**Context: headlines, flow alerts and the report** is shown for context only. None
-of it was measured or fed into the rates or the chance.
+**Context: headlines, flow alerts and the report** is shown for context only. The
+list of flow alerts is not itself fed into anything: the chance reads its own count of
+bullish and bearish flow in the window before the call. The headlines and the report
+link are in neither the rates nor the chance.
 
 **Calls every 15 minutes.** After the 08:36 call the page shows a new call
 every 15 minutes from **08:51 to 13:51 CT**, for the same three symbols. Each

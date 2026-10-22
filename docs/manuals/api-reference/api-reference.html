@@ -1870,7 +1870,9 @@ next_call, intraday}</code>. <code>intraday</code> is the 15-minute calls' secti
 - <code>context</code> is <code>{report_url, news[], flow[]}</code>: the reports link, index headlines
   (<code>{title, url, source, published_at, tickers}</code>) and today's flow alerts on the scalp
   symbols since 08:30 (<code>{ts, symbol, type, side, text}</code>). Shown for context: <strong>not in the
-  study's rates and not in the chance of target.</strong>
+  study's rates.</strong> The headlines and the report link are not in the chance of target
+  either; the chance's <code>flow</code> factor is its own windowed count of bullish and bearish
+  alerts, not this list.
   Both feeds are private views, so this view is read only by the private app.
 - <code>scorecard</code> is <code>{days, window, symbols: {SYMBOL: {days, edge, caution, roles}},
   intraday}</code> from the graded record, or <code>{}</code> when nothing has been graded. <code>intraday</code>
@@ -2167,7 +2169,7 @@ and friends):</p>
 <tr>
 <td><code>prob_sources</code></td>
 <td><code>(kind, day, slot, symbol)</code></td>
-<td><code>kind</code> is <code>morning</code> (the 08:36 call) or <code>intraday</code>; <code>json</code> is a <code>scalp_confirm.snapshot</code>-shaped record of the dealer, net-premium, flow and sentiment sources as they stood at that call: <strong>history only</strong>, rebuilt from old gamma-history copies. A fit reads the live <code>intraday_readings</code> row first and this table only where there is none</td>
+<td><code>kind</code> is <code>morning</code> (the 08:36 call) or <code>intraday</code>; <code>json</code> is a <code>scalp_confirm.snapshot</code>-shaped record of the dealer, net-premium and flow sources as they stood at that call (sentiment is never loaded here: its history is the live records only): <strong>history only</strong>, rebuilt from old gamma-history copies. A fit reads the live <code>intraday_readings</code> row first and this table only where there is none</td>
 <td><code>tools/scalp_prob_backfill.py load</code> (re-running replaces the rows of the files it reads)</td>
 </tr>
 <tr>

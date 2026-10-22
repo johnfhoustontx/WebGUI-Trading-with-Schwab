@@ -2493,8 +2493,10 @@ heading to open it; a section you opened stays open when a new call arrives.
 - Before 08:36 (a Refresh pressed at 08:35 waits for the 08:36 call too), on a closed
   day, or after a failed refresh the page shows the **last call**, labelled with its
   day, under a line saying when the next call is due.
-- **Context: headlines, flow alerts and the report** is context only: none of it was
-  measured, and none of it is in the usual win rates or the chance of target.
+- **Context: headlines, flow alerts and the report** is context only. The flow-alert
+  list is shown, not fed in: the chance of target reads its own count of bullish and
+  bearish flow in the window before the call. The headlines and the report link are in
+  neither the usual win rates nor the chance.
 - **Scorecard** (the last section) is the record of how the published calls actually did.
   Each evening, once the day's bars are in, the app **grades** every trade it showed that
   morning, from the call as published (never from a later rebuild), under the target,

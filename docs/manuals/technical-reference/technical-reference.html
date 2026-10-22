@@ -6228,7 +6228,8 @@ symbols and the BIG10 basket, the sentiment state and score, and the flow counts
 whole view and the windowed, scoped reading the call saw). This is the history that does
 not otherwise exist beyond five sessions (<code>gex_history.db</code> purges walls and premium), and
 it is what the chance of target's dealer, net-premium, flow and sentiment weights are
-fitted from (older sessions come from <code>prob_sources</code>; see <em>The chance of target</em>).</p>
+fitted from (older dealer, net-premium and flow readings come from <code>prob_sources</code>; see
+<em>The chance of target</em>).</p>
 <p>A recorded (day, slot, symbol) is <strong>write-once</strong>: a second record of it (a Refresh
 re-entering the 08:36 call, a replay) writes nothing, because the later read is not
 what the slot saw. The one exception is a <strong>one-way upgrade</strong>: a row stored with no
@@ -6416,8 +6417,9 @@ days (the stored bars and both outcome tables). The dealer, net-premium, flow an
 sources exist only where they were recorded: the live <code>intraday_readings</code> row of the call
 first, else a <code>prob_sources</code> row loaded by <code>tools/scalp_prob_backfill.py</code> from the gamma-
 history copies (read-only, <code>immutable=1</code>; the per-minute grids exist for about 36 sessions,
-flow from 5 October, sentiment from about 14 October), else the source is a gap for that
-call. The flow in history is contract alerts only, a subset of the live window's.</p>
+and flow from 5 October), else the source is a gap for that call. <strong>Sentiment is never
+extracted</strong>: its history is the live records only, from the first recorded call
+(2026-10-21). The flow in history is contract alerts only, a subset of the live window's.</p>
 <h3 id="the-honesty-check-walk-forward-by-week">The honesty check (walk-forward by week)</h3>
 <p>On every refit each of the eight models is scored on weeks it was not fitted on
 (<code>scalp_prob_fit.walk_forward</code>): for each ISO week after the first <code>[prob] min_train_weeks</code>

@@ -510,7 +510,9 @@ next_call, intraday}`. `intraday` is the 15-minute calls' section, described bel
 - `context` is `{report_url, news[], flow[]}`: the reports link, index headlines
   (`{title, url, source, published_at, tickers}`) and today's flow alerts on the scalp
   symbols since 08:30 (`{ts, symbol, type, side, text}`). Shown for context: **not in the
-  study's rates and not in the chance of target.**
+  study's rates.** The headlines and the report link are not in the chance of target
+  either; the chance's `flow` factor is its own windowed count of bullish and bearish
+  alerts, not this list.
   Both feeds are private views, so this view is read only by the private app.
 - `scorecard` is `{days, window, symbols: {SYMBOL: {days, edge, caution, roles}},
   intraday}` from the graded record, or `{}` when nothing has been graded. `intraday`
@@ -681,7 +683,7 @@ and friends):
 
 | Table | Key | Holds | Written by |
 |---|---|---|---|
-| `prob_sources` | `(kind, day, slot, symbol)` | `kind` is `morning` (the 08:36 call) or `intraday`; `json` is a `scalp_confirm.snapshot`-shaped record of the dealer, net-premium, flow and sentiment sources as they stood at that call: **history only**, rebuilt from old gamma-history copies. A fit reads the live `intraday_readings` row first and this table only where there is none | `tools/scalp_prob_backfill.py load` (re-running replaces the rows of the files it reads) |
+| `prob_sources` | `(kind, day, slot, symbol)` | `kind` is `morning` (the 08:36 call) or `intraday`; `json` is a `scalp_confirm.snapshot`-shaped record of the dealer, net-premium and flow sources as they stood at that call (sentiment is never loaded here: its history is the live records only): **history only**, rebuilt from old gamma-history copies. A fit reads the live `intraday_readings` row first and this table only where there is none | `tools/scalp_prob_backfill.py load` (re-running replaces the rows of the files it reads) |
 | `prob_models` | `(version, kind, role)` | one fitted model: `json` = `{weights, intercepts, scaling, days, n_days, rows, priors, prior_sd, walk_forward}` where `walk_forward` is `{weeks, brier, brier_usual, beats_usual, calibration}`; `fitted_at` is the Central ISO time of the fit. Eight rows per version (`morning` and `intraday` x the four roles), saved in one transaction | `scalp_prob_fit.refit` (the Saturday slot, or the `scalp_prob_refit` command) |
 
 `prob_models` is **append-only**: a refit takes the next version number and never touches

@@ -3785,8 +3785,10 @@ information only. The share of inputs that agreed sorts the morning into a low, 
 or high bucket.
 
 **Context: headlines, flow alerts and the report.** The report link, index headlines and
-today's flow alerts on these symbols are shown for context only; none of them was
-measured or fed into the rates or the chance of target.
+today's flow alerts on these symbols are shown for context only. The headlines and the
+report link are in neither the rates nor the chance of target; the flow-alert list is
+not fed in either, but the chance has a flow factor of its own, built from its own
+windowed count of bullish and bearish alerts before the call.
 
 **Scorecard.** The last section is the graded record, per symbol, over the last 20
 graded days (`scorecard_days`), republished into the view as soon as the night's
