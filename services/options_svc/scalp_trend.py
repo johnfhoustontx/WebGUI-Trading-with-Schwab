@@ -11,6 +11,8 @@ mostly yesterday's, which is what an hourly chart shows too.
 
 Rules (Central time throughout; a bar is stored by its START):
 
+* A half day (``scalp_config.early_close_on``) ends at its configured close: the
+  prints after it are not part of the session and are never read.
 * Nothing at or after ``entry_ts`` is ever read, into a number or into the cache.
   The store is asked for bars before the entry, and a bar whose end is after the
   entry is dropped by ``resample``.
@@ -114,7 +116,11 @@ def _open_ts(day) -> int:
 
 
 def _close_ts(day) -> int:
-    return int(_mc.regular_close_on(day).timestamp())
+    """The session's close: the configured early close on a half day, else the
+    regular close. The calendar has no half-day rule, and the store keeps
+    extended-hours bars, so a half day's after-close prints would otherwise count."""
+    early = scalp_config.early_close_on(day)
+    return int((early if early is not None else _mc.regular_close_on(day)).timestamp())
 
 
 def _today() -> _dt.date:

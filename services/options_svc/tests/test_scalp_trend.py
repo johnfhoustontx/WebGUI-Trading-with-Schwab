@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from shared import market_calendar as mc
+from shared import scalp_config
 from services.options_svc import scalp_store
 from services.options_svc import scalp_trend as st
 
@@ -223,3 +224,30 @@ def test_trend_factors_with_no_bars_at_all_are_all_none(tmp_path):
     got = st.trend_factors(SYM, DAY, ts(8, 50), db_path=str(tmp_path / "n.db"))
     assert got == {k: None for k in
                    ("slope_5", "slope_15", "slope_60", "rsi_5", "rsi_15", "rsi_60")}
+
+
+def test_half_day_drops_after_close_prints(tmp_path, monkeypatch):
+    """The store keeps extended-hours bars. On a configured half day (close 12:00)
+    the prints from 12:00 on are not the session: the next session's factors equal
+    those of a store that never had them."""
+    half = prior_days(1)[0]
+    monkeypatch.setattr(scalp_config, "early_close_days", lambda: {half})
+    assert scalp_config.early_close_on(half).hour == 12
+
+    def store(db, after_close):
+        for n, d in enumerate(prior_days(10)):
+            count = 42 if d == half else 78                  # 08:30 .. 11:55 on the half day
+            put(db, run(d, open_of(d), count, lambda i, n=n: wave(i + 7 * n)))
+        if after_close:                                      # 12:00 .. 14:55, absurd closes
+            put(db, run(half, ts(12, 0, half), 36, lambda i: 1000.0 + i))
+        put(db, run(DAY, ts(8, 30), 4, lambda i: wave(i)))
+
+    clean, tainted = str(tmp_path / "c.db"), str(tmp_path / "t.db")
+    store(clean, False)
+    store(tainted, True)
+    got = st.trend_factors(SYM, DAY, ts(8, 50), db_path=tainted)
+    assert got == st.trend_factors(SYM, DAY, ts(8, 50), db_path=clean)
+    assert all(v is not None for v in got.values())
+    # The test has teeth: were the day a full one, those prints would move the numbers.
+    monkeypatch.setattr(scalp_config, "early_close_days", lambda: set())
+    assert st.trend_factors(SYM, DAY, ts(8, 50), db_path=tainted) != got
