@@ -30,17 +30,24 @@ and not an empty state. The rules that keep it truthful:
   HTML at all.
 
 The page leads with a glance: one table row per symbol (the latest call's
-direction, the confirmation word, the trade with the call and its usual rate, the
-room to the wall and the 08:36 direction). Everything else sits below it in closed
-sections: one per symbol (its 15-minute call, its confirmation and its 08:36
-call), then the day's calls, the context and the scorecard.
+direction, the trade with the call, its fitted chance of target beside its usual
+rate, the room to the wall and the 08:36 direction). Everything else sits below it
+in closed sections: one per symbol (its 15-minute call, what moved its chance and
+its 08:36 call), then the day's calls, the context and the scorecard.
+
+The chance of target is a fitted figure for the trade a row names
+(``entry["chance"]``, ``role["chance"]``): it sits BESIDE the usual win rate, never
+in place of it, with when its weights were fitted and whether they beat the usual
+rate on days they were not fitted on. When the service has the feature switched
+off no entry carries a ``chance`` key and none of it is drawn
+(:func:`chance_enabled`). The confirmation WORD (Confirms, Mixed, Contradicts) and
+its count of sources are not on the page: they are still recorded, and the
+scorecard still splits by them.
 
 The 15-minute calls (``view["intraday"]``, 08:51 to 13:51 CT) keep the same
-truthfulness and add three rules of their own: the
-rates are over EVERY stored day, the counts beside them are DAYS (not rows), and
-the confirmation is a word recorded to be tested - never shown as a number or a
-probability. A section of another day is labelled as that day's, and a latest
-call whose next slot has come reads as past.
+truthfulness and add two rules of their own: the rates are over EVERY stored day
+and the counts beside them are DAYS (not rows). A section of another day is
+labelled as that day's, and a latest call whose next slot has come reads as past.
 
 Pure helpers (``role_rows``, ``headline``, ``input_rows``, ``state_line``,
 ``intraday_role_rows``, ``intraday_status`` ...) carry every fact; ``render`` holds widgets and wiring. Tier 1: this reads ONE
@@ -72,6 +79,16 @@ NO_EDGE = "No measured edge"
 CAUTION = "Caution: measured to lose more often than usual"
 EDGE = "Measured edge"
 SCORECARD_EMPTY = "No graded days yet."
+#: The fitted chance of target: the column's label and the block's title.
+CHANCE_LABEL = "Chance of target"
+CHANCE_TITLE = "What moved the chance"
+CHANCE_NOTE = ("How far each factor moved the chance for the trade with the call, in "
+               "percentage points, and how many days of history its weight rests on. "
+               "A factor marked assumed still has its starting weight: too little history "
+               "yet to have learned its own.")
+NOT_FITTED = "not fitted yet"
+_MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
+           "Nov", "Dec")
 
 #: The contract each role is on a morning that opened up; a down morning swaps
 #: calls for puts. ``with`` / ``against`` is the side of the opening move.
@@ -171,6 +188,125 @@ def _entry_text(role):
     return f"{_fmt.price(value)} {kind}" + (f" · {source}" if source else "")
 
 
+# ── the chance of target ─────────────────────────────────────────────────────
+def chance_text(value):
+    """A fitted chance (0..1) as a percentage, two decimals; the dash if absent."""
+    return _rate(value)
+
+
+def _chance_of(entry):
+    """The entry's ``chance`` block, or None (no roles, a bad payload, switched off)."""
+    got = _as_dict(entry).get("chance")
+    return got if isinstance(got, dict) else None
+
+
+def _role_chance(entry, name, role):
+    """The named trade's chance: its own ``role["chance"]``, else the entry's
+    ``by_role``. None when neither is a number."""
+    own = _as_dict(role).get("chance")
+    if _fmt.num(own) is not None:
+        return own
+    return _as_dict(_as_dict(_chance_of(entry)).get("by_role")).get(name)
+
+
+def chance_enabled(view):
+    """Whether the service has the chance switched on: some call in the view
+    carries a ``chance`` KEY (its value may be None: no roles, or not fitted yet).
+    When no entry does, no chance column or block is drawn. PURE."""
+    view = _as_dict(view)
+    entries = [e for e in _as_dict(view.get("symbols")).values() if isinstance(e, dict)]
+    entries += [e for _name, e in latest_entries(intraday_section(view))]
+    return any("chance" in e for e in entries)
+
+
+def chance_note(chance, role):
+    """The small line under a chance: ``fitted Oct 25 · beats the usual rate on
+    unseen days: no``; ``not fitted yet`` with no model; '' with no chance block.
+    ``role`` picks which trade's walk-forward verdict is quoted. PURE."""
+    if not isinstance(chance, dict):
+        return ""
+    if chance.get("version") is None:
+        return NOT_FITTED
+    when = _ct(chance.get("fitted_at"))
+    parts = ["fitted" + (f" {_MONTHS[when.month - 1]} {when.day}" if when else "")]
+    beats = _as_dict(chance.get("beats_usual")).get(role)
+    if isinstance(beats, bool):
+        parts.append("beats the usual rate on unseen days: " + ("yes" if beats else "no"))
+    return " · ".join(parts)
+
+
+def chance_lead(section, now=None):
+    """Which day the chance is from, when that is not today; else ''."""
+    status = intraday_status(section, now)
+    if status["today"]:
+        return ""
+    return f"From the {status['title'][0].lower()}{status['title'][1:]}"
+
+
+_PUSH_LABEL = {"room": "Room to the wall", "breadth_room": "Room to the wall, big names",
+               "flip_side": "Side of the gamma flip", "netprem": "Net premium",
+               "flow": "Options flow", "sentiment": "Market sentiment"}
+_PUSH_PRICE_LABEL = {"breadth_up_share": "Share of the big names moving up"}
+
+
+def _push_label(name):
+    """A factor's name in words."""
+    if name.startswith("price:"):
+        key = name[len("price:"):]
+        return _PUSH_PRICE_LABEL.get(key) or _input_label(key, {})
+    if name.startswith("block:"):
+        return "Time of day"
+    kind, _sep, size = name.partition("_")
+    if size.isdigit() and kind in ("slope", "rsi"):
+        head = "Moving-average slope" if kind == "slope" else "Momentum (RSI)"
+        return f"{head}, {size}-minute"
+    return _PUSH_LABEL.get(name) or name.replace("_", " ").capitalize()
+
+
+def push_rows(chance):
+    """One row per factor of ``chance["pushes"]``, largest push first: its name in
+    words, its reading signed by the call (how much it agrees with it), its push in
+    percentage points, the days its weight rests on, and ``assumed`` where the
+    weight is still the starting one. PURE. ``[]`` with none."""
+    pushes = _as_dict(chance).get("pushes")
+    pairs = []
+    for push in pushes if isinstance(pushes, list) else []:
+        if not isinstance(push, dict) or not isinstance(push.get("factor"), str) \
+                or not push["factor"]:
+            continue
+        points = _fmt.num(push.get("points"))
+        pairs.append((abs(points or 0.0), {
+            "id": push["factor"], "factor": _push_label(push["factor"]),
+            "reading": _fmt.ratio(push.get("reading")),
+            "points": _fmt.NO_READING if points is None else _points(points) + " pts",
+            "days": _days_word(push.get("days")),
+            "assumed": "assumed" if push.get("assumed") is True else ""}))
+    pairs.sort(key=lambda p: p[0], reverse=True)
+    return [row for _size, row in pairs]
+
+
+def push_columns():
+    return [
+        {"name": "factor", "label": "Factor", "field": "factor", "align": "left"},
+        {"name": "reading", "label": "Reading (for the call)", "field": "reading"},
+        {"name": "points", "label": "Moved the chance", "field": "points"},
+        {"name": "days", "label": "Days of history", "field": "days"},
+        {"name": "assumed", "label": "Starting weight", "field": "assumed"},
+    ]
+
+
+def _chance_column():
+    return {"name": "chance", "label": CHANCE_LABEL, "field": "chance"}
+
+
+def _with_chance_column(cols, chance):
+    """``cols`` with the chance column after the usual win rate, or as they are."""
+    if not chance:
+        return cols
+    at = next(i for i, c in enumerate(cols) if c["name"] == "usual") + 1
+    return cols[:at] + [_chance_column()] + cols[at:]
+
+
 def role_rows(symbol_payload):
     """One table row per role, in the fixed order, named by the morning's
     contract. PURE. An empty list when the symbol has no roles."""
@@ -186,6 +322,7 @@ def role_rows(symbol_payload):
             "id": name, "trade": contract_name(name, sym.get("direction")),
             "side": _SIDE[name], "mark": _MARK[tone], "tone": tone,
             "usual": _rate(role.get("p_base")), "rate": _rate(role.get("p")),
+            "chance": chance_text(_role_chance(sym, name, role)),
             "interval": _interval(role.get("lo"), role.get("hi")),
             "n": _count(role.get("n")), "n_base": _count(role.get("n_base")),
             "samples": f"{_count(role.get('n'))} / {_count(role.get('n_base'))}",
@@ -197,10 +334,11 @@ def role_rows(symbol_payload):
     return rows
 
 
-def role_columns():
-    """Seven columns, so the table fits a phone with little sideways scroll: the
-    mark sits under the trade's name and the interval under its rate."""
-    return [
+def role_columns(chance=True):
+    """Seven columns (eight with the chance), so the table fits a phone with little
+    sideways scroll: the mark sits under the trade's name and the interval under its
+    rate. ``chance=False`` is the service with the chance switched off."""
+    return _with_chance_column([
         {"name": "trade", "label": "Trade", "field": "trade", "align": "left"},
         {"name": "usual", "label": "Usual win rate", "field": "usual"},
         {"name": "rate", "label": "This morning's rate", "field": "rate"},
@@ -208,7 +346,7 @@ def role_columns():
         {"name": "strikes", "label": "Strikes", "field": "strikes"},
         {"name": "entry", "label": "Entry", "field": "entry"},
         {"name": "target", "label": "Underlying move", "field": "target"},
-    ]
+    ], chance)
 
 
 def headline(symbol_payload):
@@ -577,29 +715,22 @@ def scorecard_columns():
 # ``view["intraday"]`` is ``{"day", "slot", "latest": {symbol: entry},
 # "timeline": [{"slot", "symbols": {symbol: cell}}], "next_slot"}``. Three things
 # differ from the 08:36 card and are said wherever they show: the rates are over
-# EVERY stored day (the edge test is the walk-forward part), the sample counts are
-# DAYS, and the confirmation is a WORD recorded to be tested - never a probability.
+# EVERY stored day (the edge test is the walk-forward part), and the sample counts
+# are DAYS.
 RATES_BASIS_TEXT = "Rate over every stored day; the edge test is walk-forward."
-CONFIRMATION_TITLE = "Not in the probability — being recorded to be tested"
-CONFIRMATION_NOTE = ("A reading of whether four sources agree with the move. It is a word, "
-                     "not a chance of winning, and none of it is in the rates above. It is "
-                     "saved with every call so it can be tested later.")
 INTRADAY_SCORECARD_NOTE = (
     "Days are distinct days; a win rate is over the calls made on those days (several "
     "a day), so two days can rest on more than two calls. The split by confirmation is "
     "an informal first look, and the confirmation is not in the probability.")
-TIMELINE_NOTE = ("The confirmation is a word, not in the probability. " + RATES_BASIS_TEXT
-                 + " Days are distinct days.")
+TIMELINE_NOTE = RATES_BASIS_TEXT + " Days are distinct days."
+TIMELINE_CHANCE_NOTE = (" Chance is the fitted chance of target for the trade the "
+                        "call names.")
+#: The scorecard splits its win rates by the recorded confirmation word.
 CONFIRM_WORDS = ("Confirms", "Mixed", "Contradicts")
-NO_READING_WORD = "No reading"
 _MOVE_WORDS = {1: "moving up over the last 15 minutes",
                -1: "moving down over the last 15 minutes"}
 _INTRADAY_SIDE = {"with": "with the last 15 minutes' move",
                   "against": "against the last 15 minutes' move"}
-_COMPONENTS = (("flow", "Options flow"), ("netprem", "Net premium"),
-               ("dealer", "Dealer positioning"), ("sentiment", "Market sentiment"))
-_COMPONENT_VERDICT = {1: "Agrees", -1: "Disagrees", 0: "No side"}
-_COMPONENT_CLASS = {"Agrees": _t.TXT_POS, "Disagrees": _t.TXT_NEG}
 _DIRECTION_CELL = {1: "↑ Up", -1: "↓ Down"}
 _NO_DIRECTION_CELL = f"{_fmt.NO_READING} No direction"
 
@@ -794,6 +925,7 @@ def intraday_role_rows(entry, muted=False):
             "id": name, "trade": contract_name(name, sym.get("direction")),
             "side": side, "mark": _MARK[tone], "tone": tone,
             "usual": _rate(role.get("p_base")), "rate": _rate(role.get("p")),
+            "chance": chance_text(_role_chance(sym, name, role)),
             "interval": _interval(role.get("lo"), role.get("hi")),
             "days": _days_word(role.get("n_days")),
             "days_base": _days_word(role.get("n_base_days")),
@@ -809,8 +941,8 @@ def intraday_role_rows(entry, muted=False):
     return rows
 
 
-def intraday_role_columns():
-    return [
+def intraday_role_columns(chance=True):
+    return _with_chance_column([
         {"name": "trade", "label": "Trade", "field": "trade", "align": "left"},
         {"name": "usual", "label": "Usual win rate", "field": "usual"},
         {"name": "rate", "label": "Rate in this bucket", "field": "rate"},
@@ -818,7 +950,7 @@ def intraday_role_columns():
         {"name": "strikes", "label": "Strikes", "field": "strikes"},
         {"name": "entry", "label": "Entry", "field": "entry"},
         {"name": "target", "label": "Underlying move", "field": "target"},
-    ]
+    ], chance)
 
 
 def rates_basis_line(entry):
@@ -869,80 +1001,6 @@ def intraday_notes(entry, lead):
     return out
 
 
-# ── the confirmation: a word, never a probability ────────────────────────────
-def confirmation_word(entry):
-    """Confirms / Mixed / Contradicts, else 'No reading'. The score behind the word
-    is never read: a number beside the word would look like a probability."""
-    word = _as_dict(_as_dict(entry).get("confirmation")).get("word")
-    return word if word in CONFIRM_WORDS else NO_READING_WORD
-
-
-def confirmation_sources(entry):
-    """How many sources the word rests on: ``"3 of 4 sources"``, with the
-    service's reason when there were too few for a word; '' when the payload
-    does not say (an entry recorded before the count existed). A count of
-    sources, never a score."""
-    conf = _as_dict(_as_dict(entry).get("confirmation"))
-    n = _fmt.num(conf.get("n_present"))
-    if n is None:
-        return ""
-    of = _fmt.num(conf.get("n_sources"))
-    of = int(of) if of is not None and of > 0 else len(_COMPONENTS)
-    text = f"{int(n)} of {of} {'source' if of == 1 else 'sources'}"
-    note = conf.get("word_note")
-    if isinstance(note, str) and note.strip():
-        text += f" ({note.strip()})"
-    return text
-
-
-def confirmation_summary(entry):
-    """The word and, beside it, how many sources it rests on."""
-    src = confirmation_sources(entry)
-    return confirmation_word(entry) + (f" · {src}" if src else "")
-
-
-def confirmation_rows(entry):
-    """One row per component, in whole words. PURE. ``[]`` with no confirmation."""
-    conf = _as_dict(_as_dict(entry).get("confirmation"))
-    if not conf:
-        return []
-    rows = []
-    for key, label in _COMPONENTS:
-        comp = _as_dict(conf.get(key))
-        v = comp.get("verdict")
-        word = (_COMPONENT_VERDICT.get(v, NO_READING_WORD)
-                if isinstance(v, (int, float)) and not isinstance(v, bool)
-                else NO_READING_WORD)
-        stale = comp.get("stale") is True
-        rows.append({"id": key, "component": label,
-                     "verdict": word + (" · stale" if stale else ""), "stale": stale,
-                     "_tone_class": _COMPONENT_CLASS.get(word, _t.MUTED)})
-    return rows
-
-
-def confirmation_columns():
-    return [
-        {"name": "component", "label": "Source", "field": "component", "align": "left"},
-        {"name": "verdict", "label": "Against the last 15 minutes' move", "field": "verdict"},
-    ]
-
-
-def confirmation_lead(section, now=None):
-    """Which day the confirmation is from, when that is not today; else ''."""
-    status = intraday_status(section, now)
-    if status["today"]:
-        return ""
-    return f"From the {status['title'][0].lower()}{status['title'][1:]}"
-
-
-def confirmation_flags(entry):
-    conf = _as_dict(_as_dict(entry).get("confirmation"))
-    if conf.get("truncated") is True:
-        return ["The flow window reaches past the oldest alert on file, so the flow "
-                "reading may be cut short."]
-    return []
-
-
 # ── today's calls ────────────────────────────────────────────────────────────
 def _timeline(section):
     items = _as_dict(section).get("timeline")
@@ -980,12 +1038,14 @@ def _pick_text(cell):
     return text
 
 
-def timeline_rows(section, muted=False):
+def timeline_rows(section, muted=False, chance=True):
     """One row per published slot: the time and, per symbol (``s0``, ``s1`` ...), the
-    direction word, the highlight or the dash, the confirmation word and the note.
-    PURE. The usual 'no measured edge' note is the dash, so it is not repeated.
-    ``muted`` (another day's section) keeps every highlight's words but draws no
-    edge colour: an old pick must not look actionable."""
+    direction word, the highlight or the dash, the named trade's chance and the
+    note. PURE. The usual 'no measured edge' note is the dash, so it is not
+    repeated. ``muted`` (another day's section) keeps every highlight's words but
+    draws no edge colour: an old pick must not look actionable. The chance is
+    ``Chance 47.12%`` for a cell with a direction (the dash when it has no
+    reading) and '' for a flat one, or with ``chance=False`` (switched off)."""
     names = timeline_symbols(section)
     rows = []
     for item in _timeline(section):
@@ -998,14 +1058,15 @@ def timeline_rows(section, muted=False):
             picked = _pick_text(cell) if cell else _fmt.NO_READING
             note = cell.get("note") if cell else None
             note = note.strip() if isinstance(note, str) else ""
-            word = cell.get("word") if cell else None
             row[f"s{i}"] = (_DIRECTION_CELL.get(cell.get("direction"), _NO_DIRECTION_CELL)
                             if cell else _fmt.NO_READING)
             row[f"s{i}_pick"] = picked
             row[f"s{i}_pick_class"] = (f"{_t.TXT_POS} font-semibold"
                                        if picked != _fmt.NO_READING and not muted
                                        else _t.MUTED)
-            row[f"s{i}_word"] = word if word in CONFIRM_WORDS else _fmt.NO_READING
+            row[f"s{i}_chance"] = (
+                f"Chance {chance_text(cell.get('chance'))}"
+                if chance and cell and _direction(cell.get("direction")) is not None else "")
             row[f"s{i}_note"] = "" if note.lower() == NO_EDGE.lower() else note
         rows.append(row)
     return rows
@@ -1098,8 +1159,6 @@ def has_scorecard(scorecard):
 GLANCE_EDGE_NONE = f"{NO_EDGE} — the rates are the usual win rates"
 _GLANCE_DIRECTION = {1: "↑ Up", -1: "↓ Down"}
 _GLANCE_DIRECTION_CLASS = {1: _t.TXT_POS, -1: _t.TXT_NEG}
-_GLANCE_WORD_CLASS = {"Confirms": _t.BADGE_POS, "Mixed": _t.BADGE_WARN,
-                      "Contradicts": _t.BADGE_NEG}
 
 
 def _direction(v):
@@ -1170,12 +1229,13 @@ def glance_row(name, entry, kind, *, current, when, morning=None):
         note = EDGE
     else:
         rate, note = _rate(role.get("p_base")), (CAUTION if tone == "caution" else "")
-    word, sources, word_class = _fmt.NO_READING, "", ""
-    if kind == "intraday":
-        word = confirmation_word(sym)
-        sources = confirmation_sources(sym)
-        word_class = ((_GLANCE_WORD_CLASS.get(word, _t.BADGE_MUTED) if current
-                       else _t.BADGE_MUTED) if word in CONFIRM_WORDS else "")
+    # The chance is the NAMED trade's own, beside its usual rate; a row with no
+    # trade (a flat tape, no roles) has none: the dash and no note.
+    if role is None:
+        chance, chance_line = _fmt.NO_READING, ""
+    else:
+        chance = chance_text(_role_chance(sym, role_name, role))
+        chance_line = chance_note(_chance_of(sym), role_name)
     room = _fmt.NO_READING
     if kind == "intraday" and d is not None and dealer_line(sym):
         room = dealer_line(sym).split(";")[0].strip()
@@ -1184,7 +1244,8 @@ def glance_row(name, entry, kind, *, current, when, morning=None):
         "id": name, "symbol": name, "price": _glance_price(sym),
         "now": _GLANCE_DIRECTION.get(d, "No direction"), "when": when,
         "_now_class": _GLANCE_DIRECTION_CLASS.get(d, _t.MUTED) if current else _t.MUTED,
-        "word": word, "sources": sources, "_word_class": word_class,
+        "chance": chance, "chance_note": chance_line,
+        "_chance_class": "" if current else _t.MUTED,
         "trade": trade, "side": side, "rate": rate, "rate_note": note,
         "edge": tone == "edge" and current,
         "_rate_class": _RATE_CLASS[tone] if current and tone != "plain" else "",
@@ -1259,15 +1320,18 @@ def countdown_text(view, now=None):
     return f"next call in {minutes} min"
 
 
-def glance_columns():
-    return [
+def glance_columns(chance=True):
+    """The glance's columns; the chance of target sits right beside the usual win
+    rate so the two read together. ``chance=False`` is the service with the chance
+    switched off."""
+    cols = [
         {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left",
          "sortable": False},
         {"name": "now", "label": "Now", "field": "now", "align": "left", "sortable": False},
-        {"name": "word", "label": "Confirmation", "field": "word", "align": "left",
-         "sortable": False},
         {"name": "trade", "label": "Trade with the call", "field": "trade",
          "align": "left", "sortable": False},
+        {"name": "chance", "label": CHANCE_LABEL, "field": "chance", "align": "left",
+         "sortable": False},
         {"name": "rate", "label": "Usually wins", "field": "rate", "align": "left",
          "sortable": False},
         {"name": "room", "label": "Room to the wall", "field": "room", "align": "left",
@@ -1275,6 +1339,7 @@ def glance_columns():
         {"name": "morning", "label": "08:36 call", "field": "morning", "align": "left",
          "sortable": False},
     ]
+    return cols if chance else [c for c in cols if c["name"] != "chance"]
 
 
 # ── widgets ──────────────────────────────────────────────────────────────────
@@ -1321,7 +1386,7 @@ _TIMELINE_CELL = r'''
   <q-td :props="props">
     <div class="font-semibold">{{ props.row.s@@ }}</div>
     <div class="text-[12px]" :class="props.row.s@@_pick_class">{{ props.row.s@@_pick }}</div>
-    <div class="text-[11px] opacity-70">Confirmation: {{ props.row.s@@_word }}</div>
+    <div v-if="props.row.s@@_chance" class="text-[11px] opacity-70">{{ props.row.s@@_chance }}</div>
     <div v-if="props.row.s@@_note"
          class="max-w-[220px] whitespace-normal leading-tight text-[11px] opacity-70">
       {{ props.row.s@@_note }}
@@ -1336,9 +1401,10 @@ _CARD = f"w-full {_t.CARD} gap-3"
 _SMALL = f"text-[12px] {_t.MUTED}"
 
 
-def _symbol_card(view, name, sym, now=None, title=None):
+def _symbol_card(view, name, sym, now=None, title=None, chance=True):
     """One symbol's 08:36 call. ``title`` replaces the symbol as the heading when
-    the card sits inside that symbol's own section."""
+    the card sits inside that symbol's own section; ``chance`` draws the chance of
+    target column (off when the service has it switched off)."""
     from nicegui import ui
 
     from pages import ui_kit as kit
@@ -1365,11 +1431,13 @@ def _symbol_card(view, name, sym, now=None, title=None):
         if rows:
             if alignment_text(sym):
                 ui.label(alignment_text(sym)).classes(_SMALL)
-            table = kit.table(role_columns(), rows,
-                              numeric=("usual", "rate", "samples", "strikes", "entry",
-                                       "target"))
+            table = kit.table(role_columns(chance), rows,
+                              numeric=("usual", "chance", "rate", "samples", "strikes",
+                                       "entry", "target"))
             table.add_slot("body-cell-trade", _TRADE_SLOT)
             table.add_slot("body-cell-usual", _USUAL_SLOT)
+            if chance:
+                table.add_slot("body-cell-chance", _USUAL_SLOT)
             table.add_slot("body-cell-rate", _RATE_SLOT)
             table.add_slot("body-cell-target", _MOVE_SLOT)
             if pricing_line(sym):
@@ -1384,10 +1452,11 @@ def _symbol_card(view, name, sym, now=None, title=None):
                 grid.add_slot("body-cell-verdict", _VERDICT_SLOT)
 
 
-def _latest_card(section, name, entry, now=None, title=None):
+def _latest_card(section, name, entry, now=None, title=None, chance=True):
     """One symbol's latest 15-minute call: the move in words, the four trades with
     their rates (and the days under them), the dealer read and the walls.
-    ``title`` replaces the symbol as the heading inside the symbol's section."""
+    ``title`` replaces the symbol as the heading inside the symbol's section;
+    ``chance`` draws the chance of target column."""
     from nicegui import ui
 
     from pages import ui_kit as kit
@@ -1418,11 +1487,13 @@ def _latest_card(section, name, entry, now=None, title=None):
         if rows:
             if intraday_alignment_text(entry):
                 ui.label(intraday_alignment_text(entry)).classes(_SMALL)
-            table = kit.table(intraday_role_columns(), rows,
-                              numeric=("usual", "rate", "samples", "strikes", "entry",
-                                       "target"))
+            table = kit.table(intraday_role_columns(chance), rows,
+                              numeric=("usual", "chance", "rate", "samples", "strikes",
+                                       "entry", "target"))
             table.add_slot("body-cell-trade", _TRADE_SLOT)
             table.add_slot("body-cell-usual", _USUAL_SLOT)
+            if chance:
+                table.add_slot("body-cell-chance", _USUAL_SLOT)
             table.add_slot("body-cell-rate", _RATE_SLOT)
             table.add_slot("body-cell-target", _INTRADAY_MOVE_SLOT)
             ui.label(rates_basis_line(entry)).classes(_SMALL)
@@ -1430,50 +1501,54 @@ def _latest_card(section, name, entry, now=None, title=None):
                 ui.label(pricing_line(entry)).classes(_SMALL)
         if dealer_line(entry):
             ui.label("Dealer read: " + dealer_line(entry)).classes("text-sm")
-        if confirmation_rows(entry):
-            ui.label(f"Confirmation: {confirmation_summary(entry)} (not in the "
-                     "probability; the sources are below)").classes(_SMALL)
 
 
-def _timeline_panel(section, status):
+def _timeline_panel(section, status, chance=True):
     """The day's 15-minute calls, one row per slot. Its heading is the section it
     sits in (:func:`_details`)."""
     from nicegui import ui
 
     from pages import ui_kit as kit
 
-    rows = timeline_rows(section, muted=not status["today"])
+    rows = timeline_rows(section, muted=not status["today"], chance=chance)
     with ui.column().classes(_CARD):
         if not rows:
             ui.label("No calls published yet.").classes(_SMALL)
             return
-        ui.label(TIMELINE_NOTE).classes(_SMALL)
+        ui.label(TIMELINE_NOTE + (TIMELINE_CHANCE_NOTE if chance else "")).classes(_SMALL)
         table = kit.table(timeline_columns(section), rows)
         for i in range(len(timeline_symbols(section))):
             table.add_slot(f"body-cell-s{i}", _TIMELINE_CELL.replace("@@", str(i)))
 
 
-def _confirmation_block(entry, lead=""):
-    """One symbol's confirmation, as words. Never a score, a gauge or a rate.
-    ``lead`` names the day when the section is not today's. Nothing for a call
-    with no confirmation (a flat tape has no move to confirm)."""
+def _chance_block(entry, lead=""):
+    """One symbol's chance of target and what moved it, for the trade with the
+    call: a note line (when fitted, whether it beat the usual rate on unseen days)
+    and one table of the factors, the largest push first. ``lead`` names the day
+    when the section is not today's. Nothing for a call with no chance block (a
+    flat tape, or the service with it switched off)."""
     from nicegui import ui
 
     from pages import ui_kit as kit
 
-    rows = confirmation_rows(entry)
-    if not rows:
+    chance = _chance_of(entry)
+    if chance is None:
         return
+    rows = push_rows(chance)
     with ui.column().classes(_CARD):
-        kit.section_title(f"Confirmation · {confirmation_summary(entry)}")
-        ui.label(CONFIRMATION_TITLE).classes(f"text-sm {_t.LABEL}")
+        kit.section_title(CHANCE_TITLE)
         if lead:
             ui.label(lead).classes(f"text-sm {_t.TXT_WARN}")
-        ui.label(CONFIRMATION_NOTE).classes(_SMALL)
-        grid = kit.table(confirmation_columns(), rows)
-        grid.add_slot("body-cell-verdict", _COMPONENT_SLOT)
-        for flag in confirmation_flags(entry):
-            ui.label(flag).classes(_SMALL)
+        note = chance_note(chance, "long_with")
+        if note:
+            ui.label(note).classes(f"text-sm {_t.LABEL}")
+        if not rows:
+            ui.label("The weights have not been fitted yet, so there is no chance to "
+                     "explain." if note == NOT_FITTED else
+                     "No factors to show yet.").classes(_SMALL)
+            return
+        ui.label(CHANCE_NOTE).classes(_SMALL)
+        kit.table(push_columns(), rows, numeric=("reading", "points", "days"))
 
 
 _GLANCE_SLOTS = {
@@ -1489,18 +1564,17 @@ _GLANCE_SLOTS = {
     <div class="text-[11px] opacity-70">{{ props.row.when }}</div>
   </q-td>
 ''',
-    "word": r'''
-  <q-td :props="props">
-    <span v-if="props.row._word_class" class="px-2 py-0.5 text-[12px]"
-          :class="props.row._word_class">{{ props.row.word }}</span>
-    <span v-else class="opacity-70">{{ props.row.word }}</span>
-    <div v-if="props.row.sources" class="text-[11px] opacity-70">{{ props.row.sources }}</div>
-  </q-td>
-''',
     "trade": r'''
   <q-td :props="props">
     <div class="max-w-[220px] whitespace-normal leading-tight">{{ props.row.trade }}</div>
     <div v-if="props.row.side" class="text-[11px] opacity-70">{{ props.row.side }}</div>
+  </q-td>
+''',
+    "chance": r'''
+  <q-td :props="props">
+    <div class="font-semibold" :class="props.row._chance_class">{{ props.row.chance }}</div>
+    <div v-if="props.row.chance_note"
+         class="max-w-[200px] whitespace-normal leading-tight text-[11px] opacity-70">{{ props.row.chance_note }}</div>
   </q-td>
 ''',
     "rate": r'''
@@ -1525,7 +1599,8 @@ _GLANCE_SLOTS = {
 def _glance(view, now=None):
     """The top of the page: one line on which call is shown and when the next
     comes, then one table row per symbol. Returns the countdown label (the clock
-    tick refreshes its text), or None when there is nothing to show."""
+    tick refreshes its text), or None when there is nothing to show. The chance
+    column is drawn only when the service has the chance switched on."""
     from nicegui import ui
 
     from pages import ui_kit as kit
@@ -1546,9 +1621,11 @@ def _glance(view, now=None):
                     f"text-sm font-semibold {_t.TXT_POS}" if has_edge else _SMALL)
         if warning:
             ui.label(warning).classes(f"text-sm {_t.TXT_WARN}")
-        table = kit.table(glance_columns(), rows)
+        chance = chance_enabled(view)
+        table = kit.table(glance_columns(chance), rows)
         for name, slot in _GLANCE_SLOTS.items():
-            table.add_slot(f"body-cell-{name}", slot)
+            if chance or name != "chance":
+                table.add_slot(f"body-cell-{name}", slot)
     return countdown
 
 
@@ -1569,7 +1646,7 @@ def _fold(title, key, opened=(), on_toggle=None):
 
 def _details(view, now=None, opened=(), on_toggle=None):
     """Everything under the glance, each in a closed section: one per symbol (its
-    15-minute call, its confirmation and its 08:36 call, the most recent first),
+    15-minute call, what moved its chance and its 08:36 call, the most recent first),
     then the day's calls, the context and the scorecard."""
     from nicegui import ui
 
@@ -1577,19 +1654,23 @@ def _details(view, now=None, opened=(), on_toggle=None):
     section = intraday_section(view)
     latest = dict(latest_entries(section))
     morning = _as_dict(view.get("symbols"))
-    lead = confirmation_lead(section, now) if section else ""
+    lead = chance_lead(section, now) if section else ""
     intraday_first = intraday_leads(view)
+    chance = chance_enabled(view)
 
     def _intraday(name):
         entry = latest.get(name)
         if entry is not None:
-            _latest_card(section, name, entry, now, title="15-minute call")
-            _confirmation_block(entry, lead)
+            _latest_card(section, name, entry, now, title="15-minute call", chance=chance)
+            if chance:
+                _chance_block(entry, lead)
 
     def _morning(name):
         sym = morning.get(name)
         if isinstance(sym, dict):
-            _symbol_card(view, name, sym, now, title="08:36 call")
+            _symbol_card(view, name, sym, now, title="08:36 call", chance=chance)
+            if chance:
+                _chance_block(sym)
 
     with ui.column().classes("w-full gap-2"):
         for name in glance_symbols(view):
@@ -1601,7 +1682,7 @@ def _details(view, now=None, opened=(), on_toggle=None):
         if section:
             status = intraday_status(section, now)
             with _fold(status["title"], "timeline", opened, on_toggle):
-                _timeline_panel(section, status)
+                _timeline_panel(section, status, chance)
         with _fold("Not in the probability: headlines, flow alerts and the report",
                    "context", opened, on_toggle):
             _context_panel(view.get("context"))

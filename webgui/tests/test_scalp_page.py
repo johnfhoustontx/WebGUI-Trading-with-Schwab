@@ -711,54 +711,6 @@ def test_notes_are_shown_but_the_headline_is_not_repeated():
     assert scalp.intraday_notes(_ientry(1), scalp.intraday_headline(_ientry(1))) == []
 
 
-# ── the confirmation: a word, never a probability ───────────────────────────
-def test_confirmation_never_shown_as_a_probability():
-    sym = _ientry(1, word="Confirms")
-    assert scalp.confirmation_word(sym) == "Confirms"
-    assert "Not in the probability" in scalp.CONFIRMATION_TITLE
-    assert scalp.CONFIRMATION_TITLE == \
-        "Not in the probability — being recorded to be tested"
-    rows = scalp.confirmation_rows(sym)
-    assert [r["id"] for r in rows] == ["flow", "netprem", "dealer", "sentiment"]
-    texts = [r[k] for r in rows for k in ("component", "verdict")]
-    texts += [scalp.confirmation_word(sym), scalp.CONFIRMATION_NOTE]
-    assert not any("%" in t for t in texts)
-    assert not any(ch.isdigit() for t in texts for ch in t), texts   # no score at all
-    assert "-0.33" not in " ".join(texts)
-    for word in ("Confirms", "Mixed", "Contradicts"):
-        assert scalp.confirmation_word(_ientry(1, word=word)) == word
-        assert word in {"Confirms", "Mixed", "Contradicts"}
-    # the page never prints the score or draws a gauge from it
-    assert 'get("score")' not in SRC and "['score']" not in SRC
-
-
-def test_each_component_is_a_whole_word_and_stale_is_said():
-    conf = _conf("Mixed", flow=1, netprem=-1, dealer=0, sentiment=None, stale=("netprem",))
-    conf["netprem"]["verdict"] = None
-    rows = _by_role(scalp.confirmation_rows(_ientry(1, confirmation=conf)))
-    assert rows["flow"]["verdict"] == "Agrees"
-    assert rows["dealer"]["verdict"] == "No side"
-    assert rows["sentiment"]["verdict"] == "No reading"
-    assert rows["netprem"]["verdict"] == "No reading · stale"
-    assert rows["netprem"]["stale"] is True and rows["flow"]["stale"] is False
-    disagrees = _by_role(scalp.confirmation_rows(_ientry(1, confirmation=_conf(dealer=-1))))
-    assert disagrees["dealer"]["verdict"] == "Disagrees"
-
-
-def test_a_missing_confirmation_reads_no_reading():
-    assert scalp.confirmation_rows(_ientry(1, confirmation={})) == []
-    assert scalp.confirmation_word(_ientry(1, confirmation={})) == "No reading"
-    nodir = _ientry(None, roles={}, confirmation=_conf(word=None))
-    assert scalp.confirmation_word(nodir) == "No reading"
-
-
-def test_a_truncated_flow_window_is_said():
-    conf = _conf()
-    conf["truncated"] = True
-    assert "cut short" in scalp.confirmation_flags(_ientry(1, confirmation=conf))[0]
-    assert scalp.confirmation_flags(_ientry(1)) == []
-
-
 # ── which day, and is the call still current ────────────────────────────────
 def test_the_latest_call_line_names_its_slot_and_the_next():
     status = scalp.intraday_status(_section(), _at(2026, 10, 19, 10, 25))
@@ -819,12 +771,12 @@ def test_timeline_rows():
     assert [r["time"] for r in rows] == ["09:06", "09:21"]
     first, second = rows
     assert first["s0"] == "↑ Up" and first["s0_pick"] == "—"
-    assert first["s0_word"] == "Mixed"
-    assert first["s1"] == "— No direction" and first["s1_word"] == fmt.NO_READING
+    assert first["s0_chance"] == "Chance —"     # a direction, and no fitted chance
+    assert first["s1"] == "— No direction" and first["s1_chance"] == ""
     assert "flat over the last 15 minutes" in first["s1_note"]
     assert second["s0"] == "↓ Down"
     assert second["s0_pick"] == "Long put · 63.00% vs 50.00% usually"
-    assert second["s0_word"] == "Confirms"
+    assert second["s0_chance"] == "Chance —"
     # a symbol not in a slot is dashes, not a crash
     assert second["s1"] == "—" and second["s1_pick"] == "—"
     # the usual no-edge note is the dash, not repeated on every row
@@ -931,9 +883,9 @@ def test_the_page_help_explains_the_intraday_calls():
 
 
 def test_the_intraday_panels_use_the_kit_and_still_read_one_view():
-    assert "kit.table(intraday_role_columns()" in SRC
+    assert "kit.table(intraday_role_columns(chance)" in SRC
     assert "kit.table(timeline_columns(" in SRC
-    assert "CONFIRMATION_TITLE" in SRC
+    assert "CHANCE_TITLE" in SRC
     assert scalp.VIEW == "options:scalp"
     assert "ui.html" not in SRC and ".style(" not in SRC
 
@@ -1034,7 +986,7 @@ def test_a_timeline_edge_rate_carries_its_days():
     sec["timeline"][1]["symbols"]["SPY"]["n_days"] = 1
     assert scalp.timeline_rows(sec)[1]["s0_pick"].endswith("· 1 day")
     note = scalp.TIMELINE_NOTE
-    assert "not in the probability" in note and "every stored day" in note
+    assert "every stored day" in note and "confirmation" not in note.lower()
     assert "walk-forward" in note and "TIMELINE_NOTE" in SRC
 
 
@@ -1053,13 +1005,6 @@ def test_a_call_that_is_not_current_is_drawn_without_edge_colour():
     # the words and the marks stay: only the emphasis goes
     assert old["long_with"]["mark"] == scalp.EDGE and old["long_with"]["tone"] == "edge"
     assert old["credit_with"]["mark"] == scalp.CAUTION
-
-
-def test_the_confirmation_names_its_day_when_it_is_not_today():
-    assert scalp.confirmation_lead(_section(), _at(2026, 10, 19, 10, 25)) == ""
-    lead = scalp.confirmation_lead(_section(), _at(2026, 10, 20, 9))
-    assert "2026-10-19" in lead and "not today's" in lead
-    assert scalp.confirmation_columns()[1]["label"] == "Against the last 15 minutes' move"
 
 
 # ── the panel builders on partial payloads (M7) ─────────────────────────────
@@ -1159,8 +1104,9 @@ def test_a_symbol_with_no_roles_draws_its_note_and_no_table(drawn):
     assert [t for k, t in drawn if k == "table"] == [2]
 
 
-def test_a_stale_day_draws_neutral_labels_and_the_confirmation_names_the_day(drawn):
-    scalp._details({"intraday": _section()}, _at(2026, 10, 20, 9, 0))
+def test_a_stale_day_draws_neutral_labels_and_the_chance_names_the_day(drawn):
+    entry = _with_chance(_ientry(1), _chance(pushes=_PUSHES))
+    scalp._details({"intraday": _section(latest={"SPY": entry})}, _at(2026, 10, 20, 9, 0))
     texts = _texts(drawn)
     assert "Calls of 2026-10-19 — not today's" in _folds(drawn)
     assert "Latest call" not in texts
@@ -1183,30 +1129,6 @@ def test_a_non_string_highlight_does_not_raise():
 
 
 # ── final review: sources count, a muted old timeline, the 08:36 card ────────
-def test_the_word_says_how_many_sources_it_rests_on():
-    conf = dict(_conf("Mixed"), n_present=3, n_sources=4, word_note=None)
-    sym = _ientry(1, confirmation=conf)
-    assert scalp.confirmation_sources(sym) == "3 of 4 sources"
-    assert scalp.confirmation_summary(sym) == "Mixed · 3 of 4 sources"
-    few = dict(_conf(None), n_present=1, n_sources=4, word_note="too few sources")
-    one = _ientry(1, confirmation=few)
-    assert scalp.confirmation_word(one) == "No reading"
-    assert scalp.confirmation_summary(one) == "No reading · 1 of 4 sources (too few sources)"
-    # an entry from before the count: the word alone
-    assert scalp.confirmation_summary(_ientry(1, word="Confirms")) == "Confirms"
-    assert scalp.confirmation_sources(_ientry(1, confirmation={})) == ""
-
-
-def test_the_latest_card_and_the_confirmation_show_the_sources_count(drawn):
-    conf = dict(_conf("Confirms"), n_present=2, n_sources=4, word_note=None)
-    sec = _section(latest={"SPY": _ientry(1, confirmation=conf)})
-    scalp._details({"intraday": sec}, _at(2026, 10, 19, 10, 25))
-    texts = _texts(drawn)
-    assert "Confirmation · Confirms · 2 of 4 sources" in texts
-    assert scalp.CONFIRMATION_TITLE in texts
-    assert any(t.startswith("Confirmation: Confirms · 2 of 4 sources") for t in texts)
-
-
 def test_another_days_timeline_draws_no_edge_colour(drawn, monkeypatch):
     from pages import ui_kit as kit
     from pages.options import theme
@@ -1255,7 +1177,9 @@ def test_the_glance_row_reads_the_latest_15_minute_call():
     assert row["symbol"] == "SPY" and row["price"] == fmt.price(503.5)
     assert row["now"] == "↑ Up" and row["when"] == "10:21 call"
     assert row["_now_class"] == theme.TXT_POS
-    assert row["word"] == "Mixed" and row["_word_class"] == theme.BADGE_WARN
+    # no `chance` key on this payload: the dash, and nothing to say about the fit
+    assert row["chance"] == fmt.NO_READING and row["chance_note"] == ""
+    assert row["_chance_class"] == ""
     assert row["trade"] == f"Long call {fmt.strike(504.0)}" and row["side"] == "with the move"
     # the headline number is the USUAL rate, not the bucket's own
     assert row["rate"] == "50.00%" and row["rate_note"] == "" and row["edge"] is False
@@ -1288,7 +1212,7 @@ def test_a_call_whose_time_has_passed_keeps_its_words_and_loses_its_colour():
     past, = scalp.glance_rows(view, _at(2026, 10, 19, 10, 40))
     assert past["when"] == "10:21 call · past" and past["edge"] is False
     assert past["rate_note"] == scalp.EDGE and past["_rate_class"] == ""
-    assert past["_now_class"] == theme.MUTED and past["_word_class"] == theme.BADGE_MUTED
+    assert past["_now_class"] == theme.MUTED and past["_chance_class"] == theme.MUTED
     assert past["_morning_class"] == theme.MUTED
 
 
@@ -1306,7 +1230,7 @@ def test_before_the_first_15_minute_call_the_0836_call_leads():
     assert scalp.intraday_leads(view) is False
     row, = scalp.glance_rows(view, _at(2026, 10, 20, 8, 40))
     assert row["when"] == "08:36 call" and row["now"] == "↓ Down"
-    assert row["word"] == fmt.NO_READING and row["_word_class"] == ""
+    assert row["chance"] == fmt.NO_READING and row["_chance_class"] == ""
     assert row["room"] == fmt.NO_READING
     assert row["trade"] == f"Long put {fmt.strike(501.0)}" and row["rate"] == "40.00%"
     assert scalp.glance_line(view, _at(2026, 10, 20, 8, 40)) == \
@@ -1365,12 +1289,13 @@ def test_the_glance_draws_one_kit_table_and_returns_its_countdown(drawn):
     assert label is not None and label.text == "next call in 11 min"
     assert [t for k, t in drawn if k == "table"] == [2]
     assert "Latest call at 10:21 · next at 10:36" in _texts(drawn)
-    assert "kit.table(glance_columns(), rows)" in SRC
+    assert "kit.table(glance_columns(chance), rows)" in SRC
     assert {c["name"] for c in scalp.glance_columns()} == set(scalp._GLANCE_SLOTS)
 
 
 def test_each_symbol_has_one_closed_section_with_its_calls(drawn):
     view = _glance_view(symbols={"SPY": _symbol(-1), "QQQ": _symbol(1)})
+    _with_chance(view["intraday"]["latest"]["SPY"], _chance(pushes=_PUSHES))
     scalp._details(view, _at(2026, 10, 19, 10, 25))
     assert _folds(drawn) == ["SPY details", "QQQ details", "Today's calls",
                              "Not in the probability: headlines, flow alerts and the report",
@@ -1379,7 +1304,7 @@ def test_each_symbol_has_one_closed_section_with_its_calls(drawn):
     # inside SPY's section the 15-minute call comes first, then the 08:36 call
     spy = texts[texts.index("SPY details"):texts.index("QQQ details")]
     assert spy.index("15-minute call") < spy.index("08:36 call")
-    assert any(t.startswith("Confirmation ·") for t in spy)
+    assert "What moved the chance" in spy
     qqq = texts[texts.index("QQQ details"):texts.index("Today's calls")]
     assert "08:36 call" in qqq and "15-minute call" not in qqq
 
@@ -1414,3 +1339,248 @@ def test_an_open_section_stays_open_across_a_repaint(monkeypatch):
     assert "@guard\n    def _toggle(" in body
     tick = body[body.index("@guard\n    def _tick"):]
     assert 'state["countdown"].text = countdown_text(state["view"], now)' in tick
+
+
+# ── the chance of target (2026-10-22 weighted probability) ───────────────────
+def _push(factor, reading, points, days=40, assumed=False):
+    return {"factor": factor, "reading": reading, "points": points,
+            "days": days, "assumed": assumed}
+
+
+def _chance(long_with=0.4712, *, version=3, fitted="2026-10-25T07:00:00-05:00",
+            beats=False, pushes=()):
+    by_role = {"long_with": long_with, "long_against": 0.2501,
+               "credit_with": 0.6013, "credit_against": 0.3399}
+    return {"version": version, "fitted_at": fitted, "by_role": by_role,
+            "beats_usual": {r: beats for r in by_role}, "pushes": list(pushes)}
+
+
+def _with_chance(entry, chance):
+    """``entry`` carrying ``chance`` and each role its own, as the service writes it."""
+    entry["chance"] = chance
+    for role, body in (entry.get("roles") or {}).items():
+        body["chance"] = (chance or {}).get("by_role", {}).get(role)
+    return entry
+
+
+_PUSHES = [_push("room", 0.5, 1.2), _push("slope_5", -0.31, -6.789),
+           _push("price:fut_gap", 0.2, 0.1, assumed=True)]
+
+
+def test_glance_shows_the_chance_not_the_word():
+    view = _glance_view()
+    _with_chance(view["intraday"]["latest"]["SPY"], _chance())
+    row, = scalp.glance_rows(view, _at(2026, 10, 19, 10, 25))
+    assert row["chance"] == "47.12%"
+    assert row["chance_note"] == "fitted Oct 25 · beats the usual rate on unseen days: no"
+    assert "word" not in row and "sources" not in row and "_word_class" not in row
+    labels = [c["label"] for c in scalp.glance_columns()]
+    assert "Chance of target" in labels and "Confirmation" not in labels
+    names = [c["name"] for c in scalp.glance_columns()]
+    assert names.index("chance") < names.index("rate")          # beside the usual rate
+    assert row["rate"] == "50.00%"                               # the base rate stays
+
+
+def test_the_chance_is_the_named_trades_own():
+    view = _glance_view()
+    entry = _with_chance(view["intraday"]["latest"]["SPY"], _chance())
+    entry["highlight"] = "credit_with"
+    row, = scalp.glance_rows(view, _at(2026, 10, 19, 10, 25))
+    assert row["chance"] == "60.13%"
+    morning = _with_chance(_symbol(-1), _chance())
+    got = scalp.glance_row("SPY", morning, "morning", current=True, when="08:36 call")
+    assert got["chance"] == "47.12%"
+
+
+def test_chance_note_says_when_fitted_and_whether_it_beat_the_usual_rate():
+    assert scalp.chance_note(_chance(beats=True), "long_with") == \
+        "fitted Oct 25 · beats the usual rate on unseen days: yes"
+    assert scalp.chance_note(_chance(beats=False), "long_with") == \
+        "fitted Oct 25 · beats the usual rate on unseen days: no"
+    single = _chance(fitted="2026-11-03T07:00:00-06:00")
+    single["beats_usual"] = {"long_with": True, "credit_with": False}
+    assert scalp.chance_note(single, "credit_with") == \
+        "fitted Nov 3 · beats the usual rate on unseen days: no"
+    assert scalp.chance_note(None, "long_with") == ""
+    assert scalp.chance_note({"version": None, "fitted_at": None, "by_role": {},
+                              "beats_usual": {}, "pushes": []}, "long_with") == "not fitted yet"
+
+
+def test_chance_text_is_two_decimals_or_the_dash():
+    assert scalp.chance_text(0.4712) == "47.12%"
+    assert scalp.chance_text(0.5) == "50.00%"
+    assert scalp.chance_text(None) == fmt.NO_READING
+    assert scalp.chance_text("junk") == fmt.NO_READING
+
+
+def test_no_model_reads_not_fitted_yet():
+    view = _glance_view()
+    none = {"version": None, "fitted_at": None, "by_role": {r: None for r in ROLES},
+            "beats_usual": {}, "pushes": []}
+    _with_chance(view["intraday"]["latest"]["SPY"], none)
+    row, = scalp.glance_rows(view, _at(2026, 10, 19, 10, 25))
+    assert row["chance"] == fmt.NO_READING and row["chance_note"] == "not fitted yet"
+
+
+def test_flat_row_chance_is_the_dash():
+    flat = _with_chance(_ientry(None, roles={}, note="flat over the last 15 minutes"), None)
+    row = scalp.glance_row("SPY", flat, "intraday", current=True, when="10:21 call")
+    assert row["chance"] == fmt.NO_READING and row["chance_note"] == ""
+
+
+def test_push_rows_in_words_with_assumed_marked():
+    rows = scalp.push_rows(_chance(pushes=[
+        _push("slope_5", -0.31, -6.789), _push("rsi_15", 0.4, 2.0, days=12),
+        _push("room", 0.5, 1.2), _push("netprem", None, 0.0), _push("flow", 1.0, 0.5),
+        _push("sentiment", -1.0, -0.4), _push("price:fut_gap", 0.2, 0.1, assumed=True),
+        _push("block:midday", 1.0, -0.3, days=9)]))
+    assert sorted(r["factor"] for r in rows) == sorted([
+        "Moving-average slope, 5-minute", "Momentum (RSI), 15-minute", "Room to the wall",
+        "Net premium", "Options flow", "Market sentiment",
+        "Futures gap from yesterday's close", "Time of day"])
+    by = {r["factor"]: r for r in rows}
+    slope = by["Moving-average slope, 5-minute"]
+    assert slope["reading"] == "-0.31" and slope["points"] == "-6.79 pts"
+    rsi = by["Momentum (RSI), 15-minute"]
+    assert rsi["points"] == "+2.00 pts" and rsi["days"] == "12 days"
+    netprem = by["Net premium"]
+    assert netprem["reading"] == fmt.NO_READING and netprem["points"] == "0.00 pts"
+    assert [r["factor"] for r in rows if r["assumed"] == "assumed"] == [
+        "Futures gap from yesterday's close"]
+    assert all(r["assumed"] in ("", "assumed") for r in rows)
+    assert scalp.push_rows(None) == [] and scalp.push_rows({"pushes": "x"}) == []
+    assert "Reading (for the call)" in [c["label"] for c in scalp.push_columns()]
+
+
+def test_push_rows_are_sorted_by_size_not_sign():
+    rows = scalp.push_rows(_chance(pushes=[_push("room", 1.0, 0.5), _push("flow", 1.0, -9.0),
+                                          _push("netprem", 1.0, 3.0)]))
+    assert [r["points"] for r in rows] == ["-9.00 pts", "+3.00 pts", "+0.50 pts"]
+
+
+def test_each_trade_has_its_chance_column():
+    entry = _with_chance(_ientry(1), _chance())
+    rows = _by_role(scalp.intraday_role_rows(entry))
+    assert [rows[r]["chance"] for r in ROLES] == ["47.12%", "25.01%", "60.13%", "33.99%"]
+    cols = [c["label"] for c in scalp.intraday_role_columns()]
+    assert cols[cols.index("Usual win rate") + 1] == "Chance of target"
+    morning = _by_role(scalp.role_rows(_with_chance(_symbol(1), _chance())))
+    assert morning["long_with"]["chance"] == "47.12%"
+    cols = [c["label"] for c in scalp.role_columns()]
+    assert cols[cols.index("Usual win rate") + 1] == "Chance of target"
+    # a role without one is the dash, never a zero
+    assert _by_role(scalp.intraday_role_rows(_ientry(1)))["long_with"]["chance"] == fmt.NO_READING
+
+
+def test_a_timeline_cell_shows_the_named_trades_chance():
+    sec = _section()
+    sec["timeline"][0]["symbols"]["SPY"]["chance"] = 0.4712
+    sec["timeline"][1]["symbols"]["SPY"]["chance"] = None
+    first, second = scalp.timeline_rows(sec)
+    assert first["s0_chance"] == "Chance 47.12%"
+    assert second["s0_chance"] == f"Chance {fmt.NO_READING}"       # a direction, no reading
+    assert first["s1_chance"] == ""                                 # flat: nothing to name
+    assert not any("word" in key for key in first)
+    off = scalp.timeline_rows(sec, chance=False)
+    assert off[0]["s0_chance"] == ""
+    assert "Confirmation" not in scalp._TIMELINE_CELL
+
+
+def test_details_show_what_moved_the_chance(drawn):
+    entry = _with_chance(_ientry(1), _chance(pushes=_PUSHES))
+    scalp._details({"intraday": _section(latest={"SPY": entry})}, _at(2026, 10, 19, 10, 25))
+    texts = _texts(drawn)
+    assert "What moved the chance" in texts
+    assert not any(t.startswith("Confirmation ·") for t in texts)
+    assert "fitted Oct 25 · beats the usual rate on unseen days: no" in texts
+
+
+def test_the_chance_block_draws_one_kit_table_sorted_by_size(drawn, monkeypatch):
+    from pages import ui_kit as kit
+    seen = []
+    monkeypatch.setattr(kit, "table", lambda cols, rows=None, **k: (
+        seen.append((cols, list(rows or []))), _Rec(drawn, "table", len(list(rows or []))))[1])
+    scalp._chance_block(_with_chance(_ientry(1), _chance(pushes=_PUSHES)))
+    cols, rows = seen[0]
+    assert [r["points"] for r in rows] == ["-6.79 pts", "+1.20 pts", "+0.10 pts"]
+    assert "Reading (for the call)" in [c["label"] for c in cols]
+    drawn.clear()
+    scalp._chance_block(_ientry(1))                                  # no chance key: nothing
+    scalp._chance_block(_with_chance(_ientry(None, roles={}), None))
+    assert drawn == []
+
+
+def test_a_stale_day_names_the_day_above_the_chance(drawn):
+    entry = _with_chance(_ientry(1), _chance(pushes=_PUSHES))
+    scalp._details({"intraday": _section(latest={"SPY": entry})}, _at(2026, 10, 20, 9, 0))
+    assert any(t.startswith("From the calls of 2026-10-19") for t in _texts(drawn))
+    assert scalp.chance_lead(_section(), _at(2026, 10, 19, 10, 25)) == ""
+
+
+def test_switched_off_hides_the_chance(drawn, monkeypatch):
+    from pages import ui_kit as kit
+    view = {"state": "call", "day": "2026-10-19", "call_day": "2026-10-19",
+            "symbols": {"SPY": _symbol(-1)},
+            "intraday": _section(latest={"SPY": _ientry(1)})}
+    assert scalp.chance_enabled(view) is False
+    assert "chance" not in [c["name"] for c in scalp.glance_columns(chance=False)]
+    assert "chance" not in [c["name"] for c in scalp.role_columns(chance=False)]
+    assert "chance" not in [c["name"] for c in scalp.intraday_role_columns(chance=False)]
+    seen = []
+    monkeypatch.setattr(kit, "table", lambda cols, rows=None, **k: (
+        seen.append([c["name"] for c in cols]), _Rec(drawn, "table", 0))[1])
+    scalp._glance(view, _at(2026, 10, 19, 10, 25))
+    scalp._details(view, _at(2026, 10, 19, 10, 25))
+    assert seen and all("chance" not in names for names in seen)
+    assert "What moved the chance" not in _texts(drawn)
+    # one entry carrying the key is enough to switch it on, a None included
+    on = dict(view, intraday=_section(latest={"SPY": _with_chance(_ientry(1), None)}))
+    assert scalp.chance_enabled(on) is True
+    morning = {"symbols": {"SPY": _with_chance(_symbol(1), _chance())}}
+    assert scalp.chance_enabled(morning) is True
+    assert scalp.chance_enabled({}) is False and scalp.chance_enabled(None) is False
+
+
+def test_switched_on_the_glance_and_the_cards_draw_the_chance_columns(drawn, monkeypatch):
+    from pages import ui_kit as kit
+    entry = _with_chance(_ientry(1), _chance(pushes=_PUSHES))
+    view = {"state": "call", "day": "2026-10-19", "call_day": "2026-10-19",
+            "symbols": {"SPY": _with_chance(_symbol(-1), _chance())},
+            "intraday": _section(latest={"SPY": entry})}
+    seen = []
+    monkeypatch.setattr(kit, "table", lambda cols, rows=None, **k: (
+        seen.append([c["name"] for c in cols]), _Rec(drawn, "table", 0))[1])
+    scalp._glance(view, _at(2026, 10, 19, 10, 25))
+    scalp._details(view, _at(2026, 10, 19, 10, 25))
+    with_chance = [names for names in seen if "chance" in names]
+    assert len(with_chance) == 3        # the glance, the 15-minute trades, the 08:36 trades
+    # one block under each call that carries a chance (the 15-minute and the 08:36)
+    assert _texts(drawn).count("What moved the chance") == 2
+
+
+def test_the_confirmation_word_and_its_source_count_are_nowhere_on_the_page(drawn):
+    conf = dict(_conf("Confirms"), n_present=3, n_sources=4, word_note=None)
+    entry = _with_chance(_ientry(1, confirmation=conf), _chance(pushes=_PUSHES))
+    view = {"state": "call", "day": "2026-10-19", "call_day": "2026-10-19",
+            "symbols": {"SPY": _with_chance(_symbol(-1), _chance())},
+            "intraday": _section(latest={"SPY": entry})}
+    scalp._glance(view, _at(2026, 10, 19, 10, 25))
+    scalp._details(view, _at(2026, 10, 19, 10, 25))
+    for text in _texts(drawn):
+        assert "Confirm" not in str(text) and "sources" not in str(text), text
+    for slot in scalp._GLANCE_SLOTS.values():
+        assert "props.row.word" not in slot and "props.row.sources" not in slot
+    assert "Confirmation:" not in SRC and "of 4 sources" not in SRC
+    assert 'get("score")' not in SRC and "['score']" not in SRC
+
+
+def test_a_malformed_chance_never_raises(drawn):
+    for bad in ("junk", [], {"by_role": "x", "pushes": 5, "version": "x"}, {}):
+        entry = _ientry(1)
+        entry["chance"] = bad
+        view = {"intraday": _section(latest={"SPY": entry})}
+        scalp.glance_rows(view, _at(2026, 10, 19, 10, 25))
+        scalp._glance(view, _at(2026, 10, 19, 10, 25))
+        scalp._details(view, _at(2026, 10, 19, 10, 25))
+        scalp.intraday_role_rows(entry)
+    assert scalp.push_rows({"pushes": [None, "x", {"factor": 3}]}) is not None
