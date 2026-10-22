@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-21</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-22</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -1116,7 +1116,9 @@ slots, 08:00–15:15 CT, when auto-close is on), header tick (each 30 s,
 skip-unchanged), the Opening Scalp's morning call (08:36 CT, <code>[slots.scalp]</code>), its 15-minute
 calls (08:51, 09:06 ... 13:51 CT, <code>[intraday]</code>) and its nightly pass (16:20 CT,
 <code>[slots.scalp_bars]</code>: bar top-up, study rebuild, grading, intraday grading, the scorecard
-republished into <code>cache:options:scalp</code>, then the intraday study rebuild).</p>
+republished into <code>cache:options:scalp</code>, then the intraday study rebuild) and its weekly refit
+of the chance-of-target weights (Saturday 08:00 CT, <code>[slots.scalp_prob]</code>, weekday
+<code>[prob] refit_weekday</code>; fires on no trading-day gate and publishes nothing).</p>
 <p><strong>GEX collection and the raw feed.</strong> Each one-minute poll is
 <code>gex_collector.fetch_minute</code> (the chains, through the proxy) then <code>derive_minute</code>
 (the rows in <code>gex_history.db</code>, priced at the minute). In <code>config/feed.toml</code>
@@ -1581,6 +1583,11 @@ z
 <td><code>cache:options:scalp</code> — runs the Opening Scalp's <code>scalp_call.run</code> now: before the 08:36 CT call time or on a closed day it republishes the last call under a <code>waiting</code> / <code>closed</code> state and fetches nothing. A call already published today is reused whole, so it only fills in a symbol with none, and no new call is built after entry + <code>time_stop_min</code> (09:35 CT). It then runs <code>scalp_intraday_call.run_slot</code> for the 15-minute slot whose window is open (<code>current_slot()</code>): inside a slot's window (its time up to <code>[intraday] grace_min</code>, 5 min) it fills only the symbols that slot has not frozen; outside every window it republishes the slots already published today and makes <strong>no call</strong>, so no <code>entry_ts</code> falls between slots. Replay-guarded and on the slow lane (it can fetch bars and three chains, about 30 Schwab calls, and a slot adds about 26 more)</td>
 </tr>
 <tr>
+<td><code>scalp_prob_refit</code></td>
+<td>—</td>
+<td>none published: fits the Opening Scalp's eight chance-of-target models (the 08:36 call and the 15-minute calls, each x four trades) from the stored history, walk-forward checks each and stores them in <code>scalp.db</code> <code>prob_models</code> under a <strong>new version</strong> (<code>scalp_prob_fit.refit</code>; older versions are never touched). The next call reads the new weights; no published call changes. Logs the version, the rows read per kind and the seconds. A failure stores nothing and is counted as a degrade (<code>options.scalp_prob</code>). The Saturday 08:00 CT scheduler slot runs the same refit. Replay-guarded (a replay would store another version for nothing) and on the slow lane</td>
+</tr>
+<tr>
 <td><code>captured_reload</code></td>
 <td>—</td>
 <td><code>cache:options:captured</code></td>
@@ -1862,7 +1869,8 @@ next_call, intraday}</code>. <code>intraday</code> is the 15-minute calls' secti
 - <code>next_call</code> is the next scheduled call, ISO with the Central offset: today's slot while <code>waiting</code>, otherwise the next trading day's.
 - <code>context</code> is <code>{report_url, news[], flow[]}</code>: the reports link, index headlines
   (<code>{title, url, source, published_at, tickers}</code>) and today's flow alerts on the scalp
-  symbols since 08:30 (<code>{ts, symbol, type, side, text}</code>). <strong>Not in the probability.</strong>
+  symbols since 08:30 (<code>{ts, symbol, type, side, text}</code>). Shown for context: <strong>not in the
+  study's rates and not in the chance of target.</strong>
   Both feeds are private views, so this view is read only by the private app.
 - <code>scorecard</code> is <code>{days, window, symbols: {SYMBOL: {days, edge, caution, roles}},
   intraday}</code> from the graded record, or <code>{}</code> when nothing has been graded. <code>intraday</code>
@@ -1923,6 +1931,10 @@ next_call, intraday}</code>. <code>intraday</code> is the 15-minute calls' secti
 <td>the role with an edge <strong>above</strong> its base rate (or <code>null</code>), and the roles with an edge <strong>below</strong> it</td>
 </tr>
 <tr>
+<td><code>chance</code></td>
+<td>the fitted chance of target (below). <strong>Absent</strong> when <code>[prob] show</code> is off, or on a call frozen before the feature existed; <code>null</code> for a symbol with no roles (flat, missed, failed, early close); otherwise <code>{version, fitted_at, by_role, beats_usual, pushes}</code></td>
+</tr>
+<tr>
 <td><code>note</code>, <code>points_note</code>, <code>made_at</code></td>
 <td>why there is no call or no edge (<code>no measured edge</code>, <code>no opening bar yet</code>, <code>opened flat — no direction</code>, <code>missed the call window</code>, <code>the call could not be built</code>), why there are no points, and when the call was made. <code>missed the call window</code> is only for a morning that had a direction; after the window a flat open or a missing bar keeps its own note, with its inputs, and no <code>made_at</code></td>
 </tr>
@@ -1933,16 +1945,38 @@ next_call, intraday}</code>. <code>intraday</code> is the 15-minute calls' secti
 </tbody>
 </table>
 <p>A role is <code>{structure, p, lo, hi, n, p_base, n_base, edge, strikes, entry_value,
-entry_source, win_points, loss_points}</code>: <code>structure</code> is that morning's contract
+entry_source, win_points, loss_points, chance}</code>: <code>structure</code> is that morning's contract
 (<code>long_call</code>, <code>long_put</code>, <code>pcs</code>, <code>ccs</code>); <code>p</code>, <code>lo</code>, <code>hi</code> the bucket's win rate and its
 Wilson 95% interval, <code>n</code> the bucket's sample, <code>p_base</code> / <code>n_base</code> the all-mornings
 rate; <code>edge</code> the study's verdict (Brier below the base rate at every multiplier); and
 <code>strikes</code> (<code>[strike]</code> or <code>[short, long]</code>), <code>entry_value</code> (a debit for a long option, a
 credit for a spread), <code>entry_source</code> (<code>chain</code> or <code>model</code>) and the underlying points to
 the target and the stop (<code>win_points</code>, <code>loss_points</code>; a put's target is negative). A
-rate that is not known is <code>null</code>, never <code>0.0</code>; <code>ScalpView</code> rejects a <code>p</code>, <code>lo</code>, <code>hi</code> or
-<code>p_base</code> outside 0..1. Every field has a default, so a payload Redis kept across a
-restart still validates.</p>
+rate that is not known is <code>null</code>, never <code>0.0</code>; <code>ScalpView</code> rejects a <code>p</code>, <code>lo</code>, <code>hi</code>,
+<code>p_base</code> or <code>chance</code> outside 0..1. Every field has a default, so a payload Redis kept across
+a restart still validates.</p>
+<p><strong><code>chance</code></strong> (an entry's, on the 08:36 entries and the intraday <code>latest</code> entries alike;
+each role's own <code>chance</code> is that role's figure, copied from <code>by_role</code>):</p>
+<pre><code class="language-text">{version, fitted_at, by_role, beats_usual, pushes}
+  version     the prob_models version the figure was made with; null = no weights stored,
+              or the call had no direction (every figure is then null, never 0.5)
+  fitted_at   when that version was fitted (ISO, Central offset), or null
+  by_role     {long_with, long_against, credit_with, credit_against}: the chance 0..1 that
+              the trade wins, or null (a model fitted on no rows says nothing)
+  beats_usual {role: bool}: that role's model's walk-forward verdict at the fit - true only
+              when its Brier score beat the usual rate's by at least [prob] min_brier_margin
+              on weeks it was not fitted on
+  pushes      [{factor, reading, points, days, assumed}] for the long_with trade, largest
+              |points| first: the factor's key (price:&lt;input&gt;, slope_5|15|60, rsi_5|15|60,
+              room, breadth_room, flip_side, netprem, flow, sentiment, block:midday,
+              block:afternoon), its raw reading signed for the call (null for a gap),
+              its push in percentage points of chance, the distinct days its weight rests
+              on, and true while days &lt; [prob] assumed_days (5): the weight is still the
+              starting assumption
+</code></pre>
+<p>The figure is frozen with the call: a later refit never changes a published entry, and
+the grader reads the frozen one. A symbol's chance is computed after its verdict and
+changes no rate, price or highlight.</p>
 <p><strong>The <code>intraday</code> section</strong> (the 15-minute calls; <code>scalp_intraday_call.run_slot</code>, validated
 as part of the same <code>ScalpView</code>; <code>{}</code> before the first slot or in a payload written
 before it existed):</p>
@@ -1956,8 +1990,9 @@ before it existed):</p>
              (every symbol flat or short of bars) at its entry plus this (60 when absent)
   latest     {symbol: entry}        the slot's call for each symbol
   timeline   [{slot, symbols: {symbol: {direction, highlight, word,
-              edge_p, edge_p_base, n_days, note}}}]   one row per slot published today,
-              oldest first
+              edge_p, edge_p_base, n_days, chance, note}}}]   one row per slot published today,
+              oldest first; chance is the named trade's (the highlighted role's, else
+              long_with's)
 </code></pre>
 <p>An <code>latest</code> entry has the 08:36 entry's shape (<code>direction</code>, <code>bucket</code>, <code>alignment</code>,
 <code>entry_spot</code>, <code>entry_ts</code>, <code>inputs</code>, <code>agree</code>, <code>vol_at_entry</code>, <code>vol_source</code>, <code>chain</code>,
@@ -1989,8 +2024,9 @@ the regime name (<code>bullish</code>, <code>neutral</code>, ... or <code>null</
 one outside it) and <code>word</code> is <code>Confirms</code>, <code>Mixed</code> or <code>Contradicts</code>. <code>n_present</code> is how
 many of the <code>n_sources</code> (4) components gave a reading (a zero weight does not count);
 with fewer than <code>[confirm] min_sources</code> (2) <code>score</code> and <code>word</code> are <code>null</code> and
-<code>word_note</code> is <code>"too few sources"</code> (else <code>null</code>). <strong>It is not in the probability</strong> and
-the page never prints the score. The dealer component's <code>raw</code> carries the matrix row's
+<code>word_note</code> is <code>"too few sources"</code> (else <code>null</code>). <strong>It is not in the study's rates or in the chance of target</strong> (which reads the recorded
+sources, never the word); the page no longer shows the word or its count, and never
+printed the score. The dealer component's <code>raw</code> carries the matrix row's
 <code>spot</code>, walls, <code>flip</code> and <code>net_gex</code>, then <code>room_spot</code> (the price the room is measured
 from) and <code>room_spot_source</code> (<code>entry</code>: the call's own <code>entry_spot</code>; <code>matrix</code>: none was
 given), <code>wall_kind</code>, <code>wall</code>, <code>room</code>, <code>room_pct</code>, <code>win_points</code>, <code>own_verdict</code>, <code>breadth
@@ -2064,7 +2100,8 @@ function takes <code>db_path=None</code>, resolved when it is called.</p>
 </tr>
 </tbody>
 </table>
-<p>Six more tables hold the 15-minute calls. They were added with <code>CREATE TABLE IF NOT EXISTS</code>;
+<p>Six more tables hold the 15-minute calls, and two more (<code>prob_sources</code>, <code>prob_models</code>,
+below) the chance of target. They were added with <code>CREATE TABLE IF NOT EXISTS</code>;
 <strong>the eight tables above are never altered</strong> (prod holds them), and the new ones are
 keyed by <code>(day, slot, symbol)</code> rather than <code>(day, symbol)</code>:</p>
 <table>
@@ -2115,6 +2152,35 @@ keyed by <code>(day, slot, symbol)</code> rather than <code>(day, symbol)</code>
 </tr>
 </tbody>
 </table>
+<p>The chance of target's two tables (<code>scalp_store.save_prob_sources</code> / <code>latest_prob_models</code>
+and friends):</p>
+<table>
+<thead>
+<tr>
+<th>Table</th>
+<th>Key</th>
+<th>Holds</th>
+<th>Written by</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>prob_sources</code></td>
+<td><code>(kind, day, slot, symbol)</code></td>
+<td><code>kind</code> is <code>morning</code> (the 08:36 call) or <code>intraday</code>; <code>json</code> is a <code>scalp_confirm.snapshot</code>-shaped record of the dealer, net-premium, flow and sentiment sources as they stood at that call: <strong>history only</strong>, rebuilt from old gamma-history copies. A fit reads the live <code>intraday_readings</code> row first and this table only where there is none</td>
+<td><code>tools/scalp_prob_backfill.py load</code> (re-running replaces the rows of the files it reads)</td>
+</tr>
+<tr>
+<td><code>prob_models</code></td>
+<td><code>(version, kind, role)</code></td>
+<td>one fitted model: <code>json</code> = <code>{weights, intercepts, scaling, days, n_days, rows, priors, prior_sd, walk_forward}</code> where <code>walk_forward</code> is <code>{weeks, brier, brier_usual, beats_usual, calibration}</code>; <code>fitted_at</code> is the Central ISO time of the fit. Eight rows per version (<code>morning</code> and <code>intraday</code> x the four roles), saved in one transaction</td>
+<td><code>scalp_prob_fit.refit</code> (the Saturday slot, or the <code>scalp_prob_refit</code> command)</td>
+</tr>
+</tbody>
+</table>
+<p><code>prob_models</code> is <strong>append-only</strong>: a refit takes the next version number and never touches
+an older one; the live chance reads the highest version. Both tables are kept forever and
+in the nightly backup, like the rest of <code>scalp.db</code>.</p>
 <p><code>outcomes</code>, <code>mornings</code> and <code>verdicts</code> are deleted and rewritten together in one
 transaction every night, so a reader sees the old study or the new one; so are
 <code>intraday_outcomes</code> and <code>intraday_verdicts</code>, together, by the intraday rebuild. <code>calls</code>,
@@ -2124,6 +2190,13 @@ A recorded <code>intraday_readings</code> row is <strong>write-once</strong>, wi
 with no <code>direction</code> is replaced by one that has it (a one-way upgrade). <code>intraday_calls</code>
 and the grades are written once from what was published. Like <code>scalp.db</code> as a whole, they
 are <strong>kept forever and in the nightly backup</strong>.
+<code>tools/scalp_prob_backfill.py</code> (a CLI, not a service) fills <code>prob_sources</code> in two steps so
+the slow part can run on any box: <code>extract --gamma &lt;gex_history.db copies&gt; [--flow-db ...]
+--out file.jsonl</code> reads the copies read-only (<code>mode=ro&amp;immutable=1</code>), recomputes each call
+time's walls, flip, net GEX and net premium as the live matrix does, and writes one JSON
+line per <code>(kind, day, slot, symbol)</code>; <code>load --in file.jsonl [...] --db &lt;scalp.db&gt;</code> merges
+the files (the first non-null value of each field wins) and never writes a key
+<code>intraday_readings</code> already holds.
 Dated price history is fetched through the proxy's <code>/passthrough</code> (<code>endpoint=/pricehistory</code>):
 a tool that calls it by hand (<code>tools/scalp_backfill.py</code>) must have the stack's <code>.env</code>
 loaded, or every request is a 401 (<code>PROXY_SHARED_SECRET</code>).</p>

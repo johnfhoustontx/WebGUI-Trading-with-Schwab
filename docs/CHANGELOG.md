@@ -4,7 +4,68 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-21 (**Opening Scalp: the page leads with one table of all three symbols; the detail is folded below it.**)
+**Last updated:** 2026-10-22 (**Opening Scalp: every call carries a fitted, weekly-refitted chance of target, weighted from price, moving-average slope and RSI on three bar sizes, the dealer read, net premium, flow and sentiment; the confirmation word leaves the page.**)
+
+- **Asked for by the operator:** the glance table's Confirmation column ("Mixed · 3 of 4
+  sources") was a count, not something to size a trade on. They asked for **the
+  probability of reaching the profit target, weighted from every factor the app has**,
+  with the **slope of the moving average and momentum on the 5-minute (primary),
+  15-minute (secondary) and hourly (third) charts** counting too, the weights
+  **approximated now and adjusted weekly**, any useful past data used, and
+  **assumptions where there are gaps**; the 08:36 call gets the same figure. Design and
+  plan: `docs/plans/2026-10-22-scalp-weighted-probability-{design,plan}.md`.
+- **What shipped, in the order it was built** (branch `claude/options-scalping-app-291aad`):
+  1. *Configuration and storage* (`23da33a`, `25d2a43`): `config/scalp.toml [prob]`,
+     `[prob.priors]`, `[prob.prior_sd]` and `config/sessions.toml [slots.scalp_prob]`, each
+     with a Settings -> Configuration entry; two NEW `scalp.db` tables, `prob_sources`
+     (history of the dealer, premium, flow and sentiment sources) and `prob_models`
+     (one fitted model per version, kind and trade, append-only). The existing tables
+     are untouched.
+  2. *Trend factors* (`4b04d15`, `5a0f3b3`): `scalp_trend.py`, a 20-bar EMA's slope and
+     Wilder's RSI(14) on 5-minute, 15-minute and hourly bars built from the regular
+     session's 5-minute bars; complete bars only, never at or after the entry; a half day
+     ends at its configured early close.
+  3. *Factors and the fit* (`df64adf`, `de082d7`): `scalp_prob_features.py` signs every
+     factor by the call's direction and scales a continuous one by its interquartile range
+     **without centring**, so a gap is 0 and not a disagreement; `scalp_prob_fit.py` is a
+     MAP logistic regression per call kind and trade (eight models, pooled over the three
+     symbols, a per-symbol intercept), each weight pulled to its assumed prior (negated for
+     the trades against the move), a **wide** spread (1.0) for the factors with ~180 days
+     of history and a **tight** one (0.10) for the thin sources, each (day, symbol, trade)
+     counting once, and a **walk-forward check by week** against the usual rate.
+  4. *The live chance* (`e2f08df`, `71af478`): `scalp_prob.chance` reads the newest stored
+     version; `scalp_call.attach_chance` freezes it on every fresh call (`entry["chance"]`,
+     each role's `chance`) after the verdict, from the same sources the 08:36 record saves;
+     `ScalpView` validates it; the timeline cell carries it.
+  5. *History* (`65e25dc`, `34da860`): `tools/scalp_prob_backfill.py` (`extract` then
+     `load`) rebuilds the dealer, premium and flow sources of ~36 older sessions from
+     gamma-history copies, read-only; history flow leans on the tally at alert time, never
+     the end-of-day one.
+  6. *The refit* (`f31e86e`): the Saturday 08:00 CT slot (`scalp_prob_due`, not gated on a
+     trading day) and the `scalp_prob_refit` command (slow lane, replay-guarded).
+  7. *The page* (`b2510ba`, `486b85a`): the Confirmation column becomes **Chance of target**
+     (beside Usually wins, with "fitted <date> · beats the usual rate on unseen days:
+     yes/no"); the 08:36 and 15-minute cards gain a Chance of target column for all four
+     trades; "What moved the chance" replaces the confirmation block (factor, reading,
+     percentage points, days of history, **assumed**); the timeline cell shows the chance;
+     the "Not in the probability" section is now "Context: headlines, flow alerts and the
+     report". The confirmation word and "n of 4 sources" are no longer drawn; the word is
+     still computed, recorded and split in the scorecard.
+- **Docs, in this commit:** all five manuals (User Guide, Reference Guide, Technical
+  Reference, API Reference, Glossary: Chance of target, prior, moving-average slope, RSI),
+  `webgui/page_help.py`, `docs/webgui-routes.md` and the scalp bullet in `CLAUDE.md`, whose
+  claim that "the probability is price only" was corrected in place.
+- **Rollout (each step the operator approves):** after the promote, build the history
+  (`extract` on the Windows box from the E: copies and on prod from the VPS backups, then
+  `load`), enqueue `scalp_prob_refit` once, read `prob_models` version 1 (each model's
+  `n_days`, per-factor `days` and walk-forward result) and report them; the next session's
+  08:36 and 08:51 calls then carry `chance.version == 1`. Until then every figure is a dash
+  with "not fitted yet".
+- **Not claimed:** the weights are mostly assumptions where a source has under 5 days of
+  history, and nothing has yet shown the chance beats the usual rate; the page says so on
+  every figure ("beats the usual rate on unseen days: no" is a legitimate answer).
+
+**Prior —** 2026-10-21 (**Opening Scalp: the page leads with one table of all three symbols; the detail is folded below it.**)
 
 - **Asked for by the operator:** the page was "extremely difficult to read" (about
   seven screens: three 08:36 cards, three 15-minute cards, a confirmation panel, the

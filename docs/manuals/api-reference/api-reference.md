@@ -280,7 +280,9 @@ slots, 08:00–15:15 CT, when auto-close is on), header tick (each 30 s,
 skip-unchanged), the Opening Scalp's morning call (08:36 CT, `[slots.scalp]`), its 15-minute
 calls (08:51, 09:06 ... 13:51 CT, `[intraday]`) and its nightly pass (16:20 CT,
 `[slots.scalp_bars]`: bar top-up, study rebuild, grading, intraday grading, the scorecard
-republished into `cache:options:scalp`, then the intraday study rebuild).
+republished into `cache:options:scalp`, then the intraday study rebuild) and its weekly refit
+of the chance-of-target weights (Saturday 08:00 CT, `[slots.scalp_prob]`, weekday
+`[prob] refit_weekday`; fires on no trading-day gate and publishes nothing).
 
 **GEX collection and the raw feed.** Each one-minute poll is
 `gex_collector.fetch_minute` (the chains, through the proxy) then `derive_minute`
@@ -312,6 +314,7 @@ one-minute GEX collection and the raw feed* has the diagrams and fields.
 | `x_post` | `{text, tags[], link, image_b64?}` — an ad-hoc marketing post from the `/x` page. The image is refused over 5 MB or when it does not decode (logged, nothing posted). Replay-guarded | `cache:options:x_log` |
 | `x_post_report` | `{report, mtime}` — enqueued by market_svc when the published market report changes; `report` is the `cache:market:summary` payload, `mtime` the epoch seconds of `latest.html`. Posted once per report (`report_date`, `slot`, `as_of`, `headline`); a report older than `x.report_max_age_min` (45), or of unknown age, is skipped. Replay-guarded | `cache:options:x_log` + `cache:options:x_reports` |
 | `scalp_refresh` | — | `cache:options:scalp` — runs the Opening Scalp's `scalp_call.run` now: before the 08:36 CT call time or on a closed day it republishes the last call under a `waiting` / `closed` state and fetches nothing. A call already published today is reused whole, so it only fills in a symbol with none, and no new call is built after entry + `time_stop_min` (09:35 CT). It then runs `scalp_intraday_call.run_slot` for the 15-minute slot whose window is open (`current_slot()`): inside a slot's window (its time up to `[intraday] grace_min`, 5 min) it fills only the symbols that slot has not frozen; outside every window it republishes the slots already published today and makes **no call**, so no `entry_ts` falls between slots. Replay-guarded and on the slow lane (it can fetch bars and three chains, about 30 Schwab calls, and a slot adds about 26 more) |
+| `scalp_prob_refit` | — | none published: fits the Opening Scalp's eight chance-of-target models (the 08:36 call and the 15-minute calls, each x four trades) from the stored history, walk-forward checks each and stores them in `scalp.db` `prob_models` under a **new version** (`scalp_prob_fit.refit`; older versions are never touched). The next call reads the new weights; no published call changes. Logs the version, the rows read per kind and the seconds. A failure stores nothing and is counted as a degrade (`options.scalp_prob`). The Saturday 08:00 CT scheduler slot runs the same refit. Replay-guarded (a replay would store another version for nothing) and on the slow lane |
 | `captured_reload` | — | `cache:options:captured` |
 | `captured_reprice` | — | `cache:options:captured` + `cache:options:captured_flags` |
 | `captured_close` | `{signal_id, exit_val, reason}` | `cache:options:captured` |
@@ -506,7 +509,8 @@ next_call, intraday}`. `intraday` is the 15-minute calls' section, described bel
 - `next_call` is the next scheduled call, ISO with the Central offset: today's slot while `waiting`, otherwise the next trading day's.
 - `context` is `{report_url, news[], flow[]}`: the reports link, index headlines
   (`{title, url, source, published_at, tickers}`) and today's flow alerts on the scalp
-  symbols since 08:30 (`{ts, symbol, type, side, text}`). **Not in the probability.**
+  symbols since 08:30 (`{ts, symbol, type, side, text}`). Shown for context: **not in the
+  study's rates and not in the chance of target.**
   Both feeds are private views, so this view is read only by the private app.
 - `scorecard` is `{days, window, symbols: {SYMBOL: {days, edge, caution, roles}},
   intraday}` from the graded record, or `{}` when nothing has been graded. `intraday`
@@ -535,20 +539,47 @@ next_call, intraday}`. `intraday` is the 15-minute calls' section, described bel
 | `sigma`, `sigma_source` | the volatility the strikes and points were priced at, and `chain` or `model` |
 | `roles` | keyed `long_with`, `long_against`, `credit_with`, `credit_against`; see below. Empty when the symbol has no call |
 | `highlight`, `avoid` | the role with an edge **above** its base rate (or `null`), and the roles with an edge **below** it |
+| `chance` | the fitted chance of target (below). **Absent** when `[prob] show` is off, or on a call frozen before the feature existed; `null` for a symbol with no roles (flat, missed, failed, early close); otherwise `{version, fitted_at, by_role, beats_usual, pushes}` |
 | `note`, `points_note`, `made_at` | why there is no call or no edge (`no measured edge`, `no opening bar yet`, `opened flat — no direction`, `missed the call window`, `the call could not be built`), why there are no points, and when the call was made. `missed the call window` is only for a morning that had a direction; after the window a flat open or a missing bar keeps its own note, with its inputs, and no `made_at` |
 | `rules` | on a called symbol only (one with roles): `{target_pct, stop_pct, time_stop_min, min_premium, iv_scale}` as they were when the call was made. Grading walks the trade under these, never the evening's config |
 
 A role is `{structure, p, lo, hi, n, p_base, n_base, edge, strikes, entry_value,
-entry_source, win_points, loss_points}`: `structure` is that morning's contract
+entry_source, win_points, loss_points, chance}`: `structure` is that morning's contract
 (`long_call`, `long_put`, `pcs`, `ccs`); `p`, `lo`, `hi` the bucket's win rate and its
 Wilson 95% interval, `n` the bucket's sample, `p_base` / `n_base` the all-mornings
 rate; `edge` the study's verdict (Brier below the base rate at every multiplier); and
 `strikes` (`[strike]` or `[short, long]`), `entry_value` (a debit for a long option, a
 credit for a spread), `entry_source` (`chain` or `model`) and the underlying points to
 the target and the stop (`win_points`, `loss_points`; a put's target is negative). A
-rate that is not known is `null`, never `0.0`; `ScalpView` rejects a `p`, `lo`, `hi` or
-`p_base` outside 0..1. Every field has a default, so a payload Redis kept across a
-restart still validates.
+rate that is not known is `null`, never `0.0`; `ScalpView` rejects a `p`, `lo`, `hi`,
+`p_base` or `chance` outside 0..1. Every field has a default, so a payload Redis kept across
+a restart still validates.
+
+**`chance`** (an entry's, on the 08:36 entries and the intraday `latest` entries alike;
+each role's own `chance` is that role's figure, copied from `by_role`):
+
+```text
+{version, fitted_at, by_role, beats_usual, pushes}
+  version     the prob_models version the figure was made with; null = no weights stored,
+              or the call had no direction (every figure is then null, never 0.5)
+  fitted_at   when that version was fitted (ISO, Central offset), or null
+  by_role     {long_with, long_against, credit_with, credit_against}: the chance 0..1 that
+              the trade wins, or null (a model fitted on no rows says nothing)
+  beats_usual {role: bool}: that role's model's walk-forward verdict at the fit - true only
+              when its Brier score beat the usual rate's by at least [prob] min_brier_margin
+              on weeks it was not fitted on
+  pushes      [{factor, reading, points, days, assumed}] for the long_with trade, largest
+              |points| first: the factor's key (price:<input>, slope_5|15|60, rsi_5|15|60,
+              room, breadth_room, flip_side, netprem, flow, sentiment, block:midday,
+              block:afternoon), its raw reading signed for the call (null for a gap),
+              its push in percentage points of chance, the distinct days its weight rests
+              on, and true while days < [prob] assumed_days (5): the weight is still the
+              starting assumption
+```
+
+The figure is frozen with the call: a later refit never changes a published entry, and
+the grader reads the frozen one. A symbol's chance is computed after its verdict and
+changes no rate, price or highlight.
 
 **The `intraday` section** (the 15-minute calls; `scalp_intraday_call.run_slot`, validated
 as part of the same `ScalpView`; `{}` before the first slot or in a payload written
@@ -565,8 +596,9 @@ before it existed):
              (every symbol flat or short of bars) at its entry plus this (60 when absent)
   latest     {symbol: entry}        the slot's call for each symbol
   timeline   [{slot, symbols: {symbol: {direction, highlight, word,
-              edge_p, edge_p_base, n_days, note}}}]   one row per slot published today,
-              oldest first
+              edge_p, edge_p_base, n_days, chance, note}}}]   one row per slot published today,
+              oldest first; chance is the named trade's (the highlighted role's, else
+              long_with's)
 ```
 
 An `latest` entry has the 08:36 entry's shape (`direction`, `bucket`, `alignment`,
@@ -600,8 +632,9 @@ the regime name (`bullish`, `neutral`, ... or `null`) and its status is in `raw.
 one outside it) and `word` is `Confirms`, `Mixed` or `Contradicts`. `n_present` is how
 many of the `n_sources` (4) components gave a reading (a zero weight does not count);
 with fewer than `[confirm] min_sources` (2) `score` and `word` are `null` and
-`word_note` is `"too few sources"` (else `null`). **It is not in the probability** and
-the page never prints the score. The dealer component's `raw` carries the matrix row's
+`word_note` is `"too few sources"` (else `null`). **It is not in the study's rates or in the chance of target** (which reads the recorded
+sources, never the word); the page no longer shows the word or its count, and never
+printed the score. The dealer component's `raw` carries the matrix row's
 `spot`, walls, `flip` and `net_gex`, then `room_spot` (the price the room is measured
 from) and `room_spot_source` (`entry`: the call's own `entry_spot`; `matrix`: none was
 given), `wall_kind`, `wall`, `room`, `room_pct`, `win_points`, `own_verdict`, `breadth
@@ -629,7 +662,8 @@ function takes `db_path=None`, resolved when it is called.
 | `grades` | `(day, symbol, role)` | `model_result`, `chain_result`, `highlighted`, `avoided`, `p_base` | `scalp_grade` |
 | `iv_calibration` | `(day, symbol)` | the chain's at-the-money volatility, the morning's reading and their ratio | `scalp_grade` |
 
-Six more tables hold the 15-minute calls. They were added with `CREATE TABLE IF NOT EXISTS`;
+Six more tables hold the 15-minute calls, and two more (`prob_sources`, `prob_models`,
+below) the chance of target. They were added with `CREATE TABLE IF NOT EXISTS`;
 **the eight tables above are never altered** (prod holds them), and the new ones are
 keyed by `(day, slot, symbol)` rather than `(day, symbol)`:
 
@@ -642,6 +676,18 @@ keyed by `(day, slot, symbol)` rather than `(day, symbol)`:
 | `intraday_verdicts` | `(symbol, block, role, bucket)` | `json`: the Brier scores per multiplier, `edge`, `unit` (`"day"`), and the `min_margin` and `min_samples` the edge was judged under | `scalp_intraday_study.rebuild` |
 | `intraday_grades` | `(day, slot, symbol, role)` | `model_result`, `chain_result`, `highlighted`, `avoided`, `confirm_word`, `p_base`, `block` | `scalp_intraday_grade` |
 
+The chance of target's two tables (`scalp_store.save_prob_sources` / `latest_prob_models`
+and friends):
+
+| Table | Key | Holds | Written by |
+|---|---|---|---|
+| `prob_sources` | `(kind, day, slot, symbol)` | `kind` is `morning` (the 08:36 call) or `intraday`; `json` is a `scalp_confirm.snapshot`-shaped record of the dealer, net-premium, flow and sentiment sources as they stood at that call: **history only**, rebuilt from old gamma-history copies. A fit reads the live `intraday_readings` row first and this table only where there is none | `tools/scalp_prob_backfill.py load` (re-running replaces the rows of the files it reads) |
+| `prob_models` | `(version, kind, role)` | one fitted model: `json` = `{weights, intercepts, scaling, days, n_days, rows, priors, prior_sd, walk_forward}` where `walk_forward` is `{weeks, brier, brier_usual, beats_usual, calibration}`; `fitted_at` is the Central ISO time of the fit. Eight rows per version (`morning` and `intraday` x the four roles), saved in one transaction | `scalp_prob_fit.refit` (the Saturday slot, or the `scalp_prob_refit` command) |
+
+`prob_models` is **append-only**: a refit takes the next version number and never touches
+an older one; the live chance reads the highest version. Both tables are kept forever and
+in the nightly backup, like the rest of `scalp.db`.
+
 `outcomes`, `mornings` and `verdicts` are deleted and rewritten together in one
 transaction every night, so a reader sees the old study or the new one; so are
 `intraday_outcomes` and `intraday_verdicts`, together, by the intraday rebuild. `calls`,
@@ -651,6 +697,13 @@ A recorded `intraday_readings` row is **write-once**, with one exception: a row 
 with no `direction` is replaced by one that has it (a one-way upgrade). `intraday_calls`
 and the grades are written once from what was published. Like `scalp.db` as a whole, they
 are **kept forever and in the nightly backup**.
+`tools/scalp_prob_backfill.py` (a CLI, not a service) fills `prob_sources` in two steps so
+the slow part can run on any box: `extract --gamma <gex_history.db copies> [--flow-db ...]
+--out file.jsonl` reads the copies read-only (`mode=ro&immutable=1`), recomputes each call
+time's walls, flip, net GEX and net premium as the live matrix does, and writes one JSON
+line per `(kind, day, slot, symbol)`; `load --in file.jsonl [...] --db <scalp.db>` merges
+the files (the first non-null value of each field wins) and never writes a key
+`intraday_readings` already holds.
 Dated price history is fetched through the proxy's `/passthrough` (`endpoint=/pricehistory`):
 a tool that calls it by hand (`tools/scalp_backfill.py`) must have the stack's `.env`
 loaded, or every request is a 401 (`PROXY_SHARED_SECRET`).

@@ -1065,13 +1065,27 @@ buttons, and you decide.
 
 **Read the table at the top first.** One row per symbol: which way it is going
 **now** (the latest 15-minute call from 08:51, the 08:36 call before that), the
-**confirmation** word, the **trade with the call** and how often it **usually
+**trade with the call**, its **chance of target** and how often it **usually
 wins**, the **room to the wall**, and the **08:36 call**. The line above says which
 call this is, when the next one comes, and whether any symbol has a measured edge.
 A call that is no longer current is drawn without colour. Everything below the
-table is **closed**: open a symbol's section for its full calls, or Today's calls,
-Not in the probability and the Scorecard. A section you open stays open when a
-new call arrives.
+table is **closed**: open a symbol's section for its full calls and **what moved
+the chance**, or Today's calls, the Context and the Scorecard. A section you open
+stays open when a new call arrives.
+
+**Chance of target** is the fitted chance that the trade the row names wins, as
+the usual win rate counts a win: **+50% before −50%** of its entry price inside 60
+minutes. It is **weighted from every factor the app has**: the price reading,
+the **slope of a 20-bar moving average** and **momentum (RSI)** on the 5-minute,
+15-minute and hourly charts, the dealer read, net premium, options flow and market
+sentiment. Each factor has a weight; the weights are **refitted every Saturday**
+from the stored days and **frozen with each call**, so a refit never changes a call
+already shown. Under the figure a small line says **fitted <date>** and whether the
+chance **beats the usual rate on unseen days**: yes only when, tested week by week
+on days it was not fitted on, it scored better than the plain usual win rate by a
+clear margin. **no** is common and it means: do not lean on the figure more than on
+the usual rate beside it. A dash with **not fitted yet** means no weights are stored.
+A flat tape has no direction and shows a dash.
 
 - **Opened up / down** is the first five-minute bar. A flat open names no
   direction and gets no call.
@@ -1114,8 +1128,17 @@ call on screen and labels the day it belongs to. For the 15-minute calls,
 Refresh fills in only the slot whose five-minute window is open; at any other
 time it just puts today's published calls back and never makes an off-slot call.
 
-**Not in the probability** (headlines, flow alerts and the report link) is shown
-for context only. None of it was measured or fed into the rates.
+**What moved the chance** (in each symbol's section) lists every factor in the
+chance, the largest push first: its **reading** for the call, how many percentage
+points it moved the chance for the trade with the call, and **how many days of
+history its weight rests on**. A factor marked **assumed** still has its starting
+weight, because it has fewer than 5 days of history to learn from (flow, market
+sentiment, net premium and the dealer read are the thin ones): its push is my guess,
+not something measured. A factor with no reading yet (no wall because Schwab sent no
+Greeks, a missing bar) pushes nothing; it is never counted against the call.
+
+**Context: headlines, flow alerts and the report** is shown for context only. None
+of it was measured or fed into the rates or the chance.
 
 **Calls every 15 minutes.** After the 08:36 call the page shows a new call
 every 15 minutes from **08:51 to 13:51 CT**, for the same three symbols. Each
@@ -1138,7 +1161,7 @@ closed) and is frozen once shown; the next slot is a new call, not an edit.
   entry and its target or stop. A wall from a chain with no gamma reading is
   not trusted: the line says there is no usable wall instead of guessing.
 - **Today's calls** lists every slot made today: the direction, the highlighted
-  trade or a dash, the confirmation word and any note; an edge rate is shown with
+  trade or a dash, the chance of target for the trade the call names and any note; an edge rate is shown with
   its **days**. A latest call is current only until its next slot or until its
   own trade is over (its time stop), whichever comes first; after that it reads
   **Last call** (**past** if the next slot is overdue, **over** once its hour is up,
@@ -1150,13 +1173,14 @@ closed) and is frozen once shown; the next slot is a new call, not an edit.
 - **Half days.** When the market closes early (12:00 CT the day after
   Thanksgiving and on Christmas Eve) no call is made whose hour would run past
   the close; a later slot says *the market closes early today*.
-- **The confirmation** (Confirms, Mixed or Contradicts) is whether options flow,
-  net premium, the dealer read and market sentiment agree with the move, shown
-  in whole words beside each source (agrees, disagrees, no side, no reading, or
-  stale; sentiment counts half as much as the others). Beside the word, **n of 4
-  sources** says how many gave a reading; with only one there is no word (one
-  source is not a confirmation). It is **not in the probability**: it is a word,
-  never a chance of winning, and it is only **being recorded to be tested**.
+- **The chance of target on a 15-minute call** is built the same way as at 08:36,
+  from what was known at that slot, and is the same figure in every place it
+  appears: the table at the top, the trades' table in each symbol's section and
+  Today's calls. The old **confirmation word** (Confirms, Mixed or Contradicts, with
+  its **n of 4 sources**) is no longer on the page. The sources behind it (options
+  flow, net premium, the dealer read and market sentiment) are now factors in the
+  chance, each read as its own number. The word itself is **not in the probability**
+  and is still **being recorded to be tested**: the scorecard splits wins by it.
 
 **Scorecard** is how the published calls actually did. Each evening the app grades
 every trade it showed that morning (and, in the intraday part below, at every
@@ -1172,10 +1196,10 @@ was captured). A few days is a small sample. A call made on a shortened session
 A grade is written once and never recomputed.
 
 The **intraday** part of the scorecard is per symbol and per block: the same
-**Edge calls** and **Cautions** lines, and the win rate split by the confirmation
-word, each rate beside the **days** it rests on (distinct days; several calls are
-made on one day). The split is a first, informal look at whether the confirmation
-helps; it is not in the probability.
+**Edge calls** and **Cautions** lines, and the win rate split by the recorded
+confirmation word, each rate beside the **days** it rests on (distinct days; several
+calls are made on one day). The split is a first, informal look at whether the word
+helps; the word is not in the chance of target.
 """,
     "/news": """
 **Market News — the simple version**

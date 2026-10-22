@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-21</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-22</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -199,6 +199,14 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#the-confirmation-reading-scalp_confirm">The confirmation reading (scalp_confirm)</a></li>
 <li><a href="#recording-scalp_record">Recording (scalp_record)</a></li>
 <li><a href="#grading-and-the-intraday-scorecard">Grading and the intraday scorecard</a></li>
+</ul>
+</li>
+<li><a href="#the-chance-of-target">The chance of target</a><ul>
+<li><a href="#the-factors">The factors</a></li>
+<li><a href="#gaps-and-scaling">Gaps and scaling</a></li>
+<li><a href="#the-model">The model</a></li>
+<li><a href="#the-honesty-check-walk-forward-by-week">The honesty check (walk-forward by week)</a></li>
+<li><a href="#when-it-is-fitted-and-how-a-call-uses-it">When it is fitted, and how a call uses it</a></li>
 </ul>
 </li>
 <li><a href="#cadences">Cadences</a></li>
@@ -353,7 +361,7 @@ would mean writing the same formulas out four times and letting the copies drift
 </tr>
 <tr>
 <td><strong>Opening Scalp</strong></td>
-<td><em>Opening Scalp</em> — the direction, the alignment buckets, the modelled outcomes, the walk-forward verdict, the 08:36 call and the grading; <em>The 15-minute calls</em> — the slots and blocks, the price reading, the day-unit study, the confirmation reading, the recording and the intraday grading · <em>Black-Scholes &amp; the Simulator</em> (the pricer it reuses)</td>
+<td><em>Opening Scalp</em> — the direction, the alignment buckets, the modelled outcomes, the walk-forward verdict, the 08:36 call and the grading; <em>The 15-minute calls</em> — the slots and blocks, the price reading, the day-unit study, the confirmation reading, the recording and the intraday grading; <em>The chance of target</em> — the factors, the scaling, the priors, the fit, the weekly walk-forward check and the Saturday refit · <em>Black-Scholes &amp; the Simulator</em> (the pricer it reuses)</td>
 </tr>
 <tr>
 <td><strong>Trade Analyzer</strong></td>
@@ -5678,8 +5686,13 @@ phone push, a chime, the Desk's speech, or any ranking.</p>
 add <code>scalp_intraday_inputs.py</code> (the price reading), <code>scalp_intraday_study.py</code> (the
 study), <code>scalp_intraday_call.py</code> (build, freeze, publish), <code>scalp_confirm.py</code> (the
 confirmation), <code>scalp_record.py</code> (the recorded readings) and <code>scalp_intraday_grade.py</code>
-(grading). None imports <code>compute.py</code>. Design: <code>docs/plans/2026-10-18-opening-scalp-design.md</code>
-and <code>docs/plans/2026-10-20-scalp-intraday-calls-design.md</code>; the first verdict, with its
+(grading). The chance of target adds <code>scalp_trend.py</code> (moving-average slope and RSI on
+three bar sizes), <code>scalp_prob_features.py</code> (the factors and their scaling),
+<code>scalp_prob_fit.py</code> (the fit, the walk-forward check and the refit) and <code>scalp_prob.py</code>
+(the live chance); <code>tools/scalp_prob_backfill.py</code> loads history. None imports <code>compute.py</code>.
+Design: <code>docs/plans/2026-10-18-opening-scalp-design.md</code>,
+<code>docs/plans/2026-10-20-scalp-intraday-calls-design.md</code> and
+<code>docs/plans/2026-10-22-scalp-weighted-probability-design.md</code>; the first verdict, with its
 full report: <code>docs/reference/opening-scalp-study.md</code>.</p>
 <p>The page answers one question per symbol (<code>$SPX</code>, SPY, QQQ) at 08:36 CT: <em>given how
 this morning set up, how often has a same-day (0DTE) scalp in each direction reached
@@ -5938,9 +5951,12 @@ evening.</p>
 <p>Every 15 minutes from 08:51 to 13:51 CT the page makes a new, frozen 0DTE scalp call for
 each symbol (design <code>docs/plans/2026-10-20-scalp-intraday-calls-design.md</code>). The
 discipline of the 08:36 call carries over: <strong>a number called a probability is one that
-was tested walk-forward on days it was not fitted to</strong>. So the probability comes from
-<strong>price alone</strong> (seven months of 5-minute bars); flow, net premium, the walls and
-sentiment are a <strong>confirmation reading</strong>, shown and recorded and not in the probability.</p>
+was tested walk-forward on days it was not fitted to</strong>. So the study's rates (the bucket
+rate, the usual rate, the edge flag) come from <strong>price alone</strong> (seven months of 5-minute
+bars); flow, net premium, the walls and sentiment are a <strong>confirmation reading</strong>,
+recorded and no longer shown, and not in those rates. The page's <strong>chance of target</strong>
+is a separate, fitted model that does read them (<em>The chance of target</em>, below), and
+carries its own walk-forward verdict beside it.</p>
 <h3 id="slots-blocks-and-the-entry">Slots, blocks and the entry</h3>
 <ul>
 <li><strong>Slots.</strong> <code>[intraday] start</code> (08:51), <code>end</code> (13:51), <code>interval_min</code> (15): 21 slots,
@@ -6120,7 +6136,7 @@ lower (<code>cuts</code> = [-0.34, 0.34]), else <code>Mixed</code>. The word nee
 min_sources</code> (2) components with a reading (a weight of 0 does not count): one source
 alone is that source, not a confirmation, so the word and score are none and
 <code>word_note</code> says "too few sources". The reading carries <code>n_present</code> of <code>n_sources</code>
-(4), and the page shows "n of 4 sources" beside the word. The score is in [-1, 1], is
+(4), recorded with it (the page showed "n of 4 sources" beside the word until 2026-10-22 and no longer draws either). The score is in [-1, 1], is
 never shown and is never a probability.</p>
 <ul>
 <li><strong>Flow.</strong> Alerts in <code>[entry_ts - flow_window_min, entry_ts]</code> (30 min) on the symbol and
@@ -6210,7 +6226,9 @@ beside its state), the spot, walls, flip, net GEX and
 <code>snapshot</code> holds all 13), the net premium levels for the
 symbols and the BIG10 basket, the sentiment state and score, and the flow counts (the
 whole view and the windowed, scoped reading the call saw). This is the history that does
-not otherwise exist beyond five sessions (<code>gex_history.db</code> purges walls and premium).</p>
+not otherwise exist beyond five sessions (<code>gex_history.db</code> purges walls and premium), and
+it is what the chance of target's dealer, net-premium, flow and sentiment weights are
+fitted from (older sessions come from <code>prob_sources</code>; see <em>The chance of target</em>).</p>
 <p>A recorded (day, slot, symbol) is <strong>write-once</strong>: a second record of it (a Refresh
 re-entering the 08:36 call, a replay) writes nothing, because the later read is not
 what the slot saw. The one exception is a <strong>one-way upgrade</strong>: a row stored with no
@@ -6232,8 +6250,213 @@ next night; a short session is never graded.</p>
 Mixed and Contradicts). The 08:36 sections count role-days in <code>days</code>; the intraday ones
 count days. The word split is an informal look until a declared promotion study (after
 <code>[intraday] promotion_sessions</code>, 40, recorded sessions) says whether the confirmation
-belongs in the probability; <strong>that study is not built, and nothing is promoted
-automatically.</strong></p>
+<strong>word</strong> belongs in the study's rates; <strong>that study is not built, and nothing is promoted
+automatically.</strong> The chance of target does not wait for it: it reads the recorded
+sources themselves, not the word.</p>
+<h2 id="the-chance-of-target">The chance of target</h2>
+<p>Design <code>docs/plans/2026-10-22-scalp-weighted-probability-design.md</code>. Every published call
+(the 08:36 call and each 15-minute slot) carries a <strong>fitted chance that each of its four
+trades wins</strong>, the win being the study's own outcome (target before stop inside the time
+stop; a timeout counts as not a win). It sits <strong>beside</strong> the bucket rates and changes none
+of them, nor a highlight, a price or a grade. It is computed in the service and published
+in the view; the page only draws it.</p>
+<h3 id="the-factors">The factors</h3>
+<p>Each factor is measured relative to the call's direction <code>d</code> (+1 up, -1 down), so a
+positive number agrees with the call. Nothing at or after the call's <code>entry_ts</code> is read.</p>
+<table>
+<thead>
+<tr>
+<th>Factor (key)</th>
+<th>Reading</th>
+<th>Signed as</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Price (<code>price:&lt;input&gt;</code>)</td>
+<td>the call's own inputs: <code>scalp_inputs</code> at 08:36 (overnight futures, sector funds, volatility index, opening bar), <code>scalp_intraday_inputs.reading</code> at a slot (move since the open, side of VWAP, futures' and volatility index's last 15 minutes, each sector fund, big-ten breadth)</td>
+<td>a percent move x <code>d</code>; the volatility input x <code>-d</code>; a 0..1 share or position is centred and doubled, <code>(v - 0.5) x 2 x d</code>; the opening-range ratio has no direction and stays as it is</td>
+</tr>
+<tr>
+<td>Moving-average slope (<code>slope_5</code>, <code>slope_15</code>, <code>slope_60</code>)</td>
+<td>the change in percent of a 20-bar EMA over its last 3 bars, on 5-minute, 15-minute and hourly bars</td>
+<td>x <code>d</code></td>
+</tr>
+<tr>
+<td>Momentum (<code>rsi_5</code>, <code>rsi_15</code>, <code>rsi_60</code>)</td>
+<td>Wilder RSI over 14 bars on the same bars</td>
+<td><code>(RSI - 50) / 50 x d</code></td>
+</tr>
+<tr>
+<td>Room (<code>room</code>)</td>
+<td>the room from the entry spot to the wall in the call's direction (call wall up, put wall down), divided by the points the long-with trade needs to reach its target</td>
+<td>capped at <code>+-room_cap</code> (3)</td>
+</tr>
+<tr>
+<td>Big-ten room (<code>breadth_room</code>)</td>
+<td>the share of the big ten whose room in percent of their own price reaches the target in percent, minus one half; needs <code>[confirm] breadth_min_members</code> (5) usable members</td>
+<td>as is</td>
+</tr>
+<tr>
+<td>Flip side (<code>flip_side</code>)</td>
+<td>+1 when the entry spot is on the call's side of the gamma flip (above it for an up call), -1 on the other side</td>
+<td>-1 / 0 / +1, never rescaled</td>
+</tr>
+<tr>
+<td>Net premium (<code>netprem</code>)</td>
+<td>the symbol's call-minus-put over call-plus-put premium LEVEL, never a change</td>
+<td>x <code>d</code></td>
+</tr>
+<tr>
+<td>Flow (<code>flow</code>)</td>
+<td>the window's bullish minus bearish alerts, as the confirmation counts them</td>
+<td>x <code>d</code>, capped at <code>+-flow_cap</code> (3) and divided by it: -1..+1, never rescaled</td>
+</tr>
+<tr>
+<td>Sentiment (<code>sentiment</code>)</td>
+<td>the sentiment trend state, bullish +1, bearish -1, anything else no side</td>
+<td>x <code>d</code>, never rescaled</td>
+</tr>
+<tr>
+<td>Time of day (<code>block:midday</code>, <code>block:afternoon</code>)</td>
+<td>15-minute calls only: which block the slot is in; morning is the baseline (both 0)</td>
+<td>indicator 0 / 1, never rescaled</td>
+</tr>
+</tbody>
+</table>
+<p>The dealer read reuses <code>scalp_confirm</code>'s own wall view, room and state helpers, so the chance
+reads a wall exactly as the confirmation does: <strong>an untrusted wall</strong> (net GEX of 0 or
+missing, Schwab having sent no Greeks) <strong>is a gap</strong>, never "no room". The room is priced
+as the fit prices it (<code>scalp_prob_fit._win_points</code>: the long trade at <code>vol x iv_scale</code>
+through <code>scalp_sim</code>), so "room" means the same live as in training; the chain is not
+stored historically, so a live call that prices from the chain's own volatility can read a
+slightly different room.</p>
+<p><strong>Trend bars (<code>scalp_trend</code>).</strong> From the store's 5-minute bars of the REGULAR session only;
+the 15-minute and hourly bars are built from them and aligned to the day's open (08:30,
+08:45 ...; 08:30, 09:30 ...; the day's last bar may be short). Only <strong>complete</strong> bars count
+(every 5-minute part present and finite, the bar's end at or before the entry); a half day
+ends at its configured early close, so prints after it are never read. The EMA is seeded
+with the simple mean of the first 20 closes, then <code>alpha = 2 / (period + 1)</code>; both indicators
+run on across <code>[prob] lookback_sessions</code> (10) earlier sessions, so at 08:51 the hourly
+reading is mostly yesterday's, as an hourly chart would show. Too few bars is <code>None</code>.</p>
+<h3 id="gaps-and-scaling">Gaps and scaling</h3>
+<p>A factor that cannot be read is <code>None</code>, and <strong><code>None</code> becomes 0.0 after scaling</strong>: it neither
+helps nor hurts the chance, and it teaches the fit nothing that day. It is never read as
+disagreement. A continuous factor is <strong>divided by its interquartile range</strong> over the rows
+being fitted (75th minus 25th percentile, linear interpolation; 1.0 when the range is 0 or
+there are fewer than four readings) and <strong>clipped to <code>+-cap</code></strong> (3). It is <strong>never centred</strong>:
+0 must stay "no agreement either way", so a gap and a neutral reading are the same number.
+The discrete factors are not rescaled. The scaling is stored with the weights so a live call
+is scaled exactly as its history was.</p>
+<h3 id="the-model">The model</h3>
+<p>One <strong>logistic regression per call kind and trade</strong>: <code>morning</code> and <code>intraday</code> x <code>long_with</code>,
+<code>long_against</code>, <code>credit_with</code>, <code>credit_against</code>, eight models, each pooled over the three
+symbols with a per-symbol intercept. The label is the stored outcome at the current
+<code>iv_scale</code>: a win is 1, a loss or a timeout 0, a skip is left out; the 08:36 call learns
+from the 5-minute outcomes (<code>outcomes.interval = 5</code>, the study's verdict interval), the
+15-minute calls from <code>intraday_outcomes</code>. A row the studies would skip today (a short
+session, a slot an early close cuts, no direction) is left out. The probability is
+<code>sigmoid(intercept[symbol] + sum(weight x scaled factor))</code>.</p>
+<p><strong>The day is the unit.</strong> A row weighs <code>1 / (rows of its day, symbol and trade)</code>, so the 21
+slots of one tape count as one day, not twenty-one independent ones.</p>
+<p><strong>A Gaussian prior on every weight.</strong> The fit is the <strong>maximum a posteriori</strong>: the weighted
+log-loss plus <code>0.5 x sum((w - prior)^2 / sd^2)</code>, solved by Newton steps with step halving
+(the prior makes it strictly convex). The prior mean of each factor is the <strong>assumed</strong>
+value in <code>[prob.priors]</code>, written for the trades <strong>with</strong> the move and <strong>negated</strong> for the
+trades against it (long and credit share the sign of their side); the intercepts' prior is
+0. The defaults, in log-odds per scaled unit:</p>
+<table>
+<thead>
+<tr>
+<th>Factor</th>
+<th><code>slope_5</code></th>
+<th><code>slope_15</code></th>
+<th><code>slope_60</code></th>
+<th><code>rsi_5</code></th>
+<th><code>rsi_15</code></th>
+<th><code>rsi_60</code></th>
+<th><code>room</code></th>
+<th><code>breadth_room</code></th>
+<th><code>flip_side</code></th>
+<th><code>netprem</code></th>
+<th><code>flow</code></th>
+<th><code>sentiment</code></th>
+<th>price, time of day</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Assumed weight</td>
+<td>0.15</td>
+<td>0.10</td>
+<td>0.05</td>
+<td>0.10</td>
+<td>0.07</td>
+<td>0.04</td>
+<td>0.15</td>
+<td>0.05</td>
+<td>0</td>
+<td>0.10</td>
+<td>0.10</td>
+<td>0.05</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Two spreads.</strong> The factors with about 180 days of history (every <code>price:</code>, <code>slope_</code>,
+<code>rsi_</code> and <code>block:</code> factor) and the intercepts get the <strong>wide</strong> spread, <code>[prob.prior_sd] wide</code>
+(1.0): their own history decides them. The thin sources (<code>room</code>, <code>breadth_room</code>, <code>flip_side</code>,
+<code>netprem</code>, <code>flow</code>, <code>sentiment</code>) get the <strong>tight</strong> spread, <code>tight</code> (0.10): they stay near the
+assumption until their own days accumulate. A factor no row reads keeps its prior exactly.
+<code>days[factor]</code>, stored with the model, is the number of <strong>distinct days on which that factor
+had a reading</strong> (not a gap); the page marks a weight <strong>assumed</strong> when that is under
+<code>[prob] assumed_days</code> (5).</p>
+<p><strong>Where the history comes from.</strong> Price, slope, momentum and the labels exist for about 180
+days (the stored bars and both outcome tables). The dealer, net-premium, flow and sentiment
+sources exist only where they were recorded: the live <code>intraday_readings</code> row of the call
+first, else a <code>prob_sources</code> row loaded by <code>tools/scalp_prob_backfill.py</code> from the gamma-
+history copies (read-only, <code>immutable=1</code>; the per-minute grids exist for about 36 sessions,
+flow from 5 October, sentiment from about 14 October), else the source is a gap for that
+call. The flow in history is contract alerts only, a subset of the live window's.</p>
+<h3 id="the-honesty-check-walk-forward-by-week">The honesty check (walk-forward by week)</h3>
+<p>On every refit each of the eight models is scored on weeks it was not fitted on
+(<code>scalp_prob_fit.walk_forward</code>): for each ISO week after the first <code>[prob] min_train_weeks</code>
+(8), fit on the weeks before it and predict that week. The comparison is <strong>the same usual
+rate the page shows</strong>: the trade's weighted win share for that symbol (and, for the
+15-minute calls, that block) over every earlier day; a row with no earlier day in its group
+is left out of both scores. The scores are weighted Brier scores. <strong><code>beats_usual</code> is true
+only when the usual rate's Brier is at least <code>[prob] min_brier_margin</code> (0.005) above the
+model's</strong> over the scored weeks; with no scored week the Brier fields are <code>None</code> and
+<code>beats_usual</code> is false. Calibration by tenths of the predicted probability is stored with the
+result. The page quotes the verdict of the model of the trade the row names.</p>
+<h3 id="when-it-is-fitted-and-how-a-call-uses-it">When it is fitted, and how a call uses it</h3>
+<ul>
+<li><strong>Weekly refit.</strong> <code>scheduler.scalp_prob_due</code> fires once on the weekday <code>[prob]
+  refit_weekday</code> (5, Saturday) at <code>[slots.scalp_prob] refit</code> (08:00 CT), up to
+  <code>grace_min</code> (180) late. Unlike every other scalp slot it is <strong>not gated on a trading
+  day</strong>; it is latched BEFORE it runs, runs in an executor, and publishes nothing. It
+  runs after Friday evening's nightly pass has graded the week. A refit missed is not lost:
+  the weights are simply a week older.</li>
+<li><strong>On demand.</strong> The <code>scalp_prob_refit</code> command on <code>cmd:options</code> runs the same refit (slow
+  lane, replay-guarded: a replay would store another version for nothing). One refit at a
+  time (<code>_REFIT_LOCK</code>).</li>
+<li><strong>Stored as a new version.</strong> The eight models go into <code>prob_models</code> under
+  <code>next_prob_version()</code> in one transaction; <strong>older versions are never deleted or
+  altered</strong>. Any failure stores nothing, is counted as a degrade (<code>options.scalp_prob</code>)
+  and leaves the previous version in force.</li>
+<li><strong>A call freezes its chance.</strong> <code>scalp_call.attach_chance</code> runs after a FRESH call's
+  verdict, with the newest stored version (read once per build) and the same sources the
+  call and its <code>intraday_readings</code> row were made from, and writes <code>entry["chance"]</code> and each
+  role's <code>chance</code>. A call published earlier is reused whole, chance included, so <strong>a refit
+  never changes a published call</strong>, and the grader reads the frozen figure. <code>[prob] show</code>
+  off computes nothing and writes no <code>chance</code> key (the page then draws nothing); with no
+  weights stored <code>chance.version</code> is <code>null</code> (the page: "not fitted yet", never a made-up
+  0.5). It never raises: a failure is counted and the call is published without a chance.</li>
+<li><strong>What moved it.</strong> The entry's <code>chance.pushes</code> explains the <strong>long-with-the-move</strong> trade:
+  per factor its raw reading, its push in percentage points of chance at the predicted
+  probability (<code>p (1 - p) x weight x scaled value x 100</code>, a local approximation: the
+  pushes need not sum to the move from 50%), the days its weight rests on, and <code>assumed</code>.</li>
+</ul>
 <h2 id="cadences">Cadences</h2>
 <table>
 <thead>
@@ -6260,6 +6483,11 @@ automatically.</strong></p>
 <td>In order: <strong>bar top-up</strong> (23 symbols - the 13 in <code>[bars]</code> plus the big ten - x 2 intervals, from one bar before the store's latest, so a bar stored as a partial is replaced; a missed night is caught up by the next), the <strong>08:36 study rebuild</strong> (one transaction, so a reader sees the old study or the new, never half of each), the <strong>08:36 grading</strong>, the <strong>intraday grading</strong>, the <strong>scorecard republish</strong>, and last the <strong>intraday study rebuild</strong> (about a minute: 61-68 s measured on a 150-day store, so nothing above waits on it). Each step is guarded on its own: a failed step does not stop the next. After the 16:00 flow-delta report so it never competes for the proxy's 5 requests a second.</td>
 </tr>
 <tr>
+<td>Weekly refit</td>
+<td><strong>Saturday 08:00 CT</strong> (<code>[slots.scalp_prob] refit</code>, grace 180 min; the weekday is <code>[prob] refit_weekday</code>, 5; <code>scalp_prob_due</code>)</td>
+<td>Refits the eight chance-of-target models from the stored history, walk-forward checks each and stores them as a new version in <code>prob_models</code> (<code>scalp_prob_fit.refit</code>). Not gated on a trading day, nothing fetched from Schwab, nothing published. Also on demand as <code>scalp_prob_refit</code> (slow lane, replay-guarded).</td>
+</tr>
+<tr>
 <td>Refresh</td>
 <td>on demand (<code>scalp_refresh</code>)</td>
 <td><code>scalp_call.run</code>, then <code>scalp_intraday_call.run_slot</code> for the slot whose window is open (none open: only today's published slots are put back, never an off-slot call); slow lane, replay-guarded.</td>
@@ -6283,8 +6511,13 @@ For the 15-minute calls: <code>[intraday]</code> <code>start</code>, <code>end</
 <code>flow_margin</code> (2), <code>netprem_margin</code> (0.1), <code>sides_majority</code> (0.6),
 <code>breadth_min_members</code> (5), <code>min_sources</code> (2), <code>max_age_min</code> (5), <code>cuts</code>
 ([-0.34, 0.34]) and <code>[confirm.weights]</code> <code>flow</code> / <code>netprem</code> / <code>dealer</code> (1.0) and
-<code>sentiment</code> (0.5). The 08:36 and nightly slot times are in <code>config/sessions.toml</code>; the
-15-minute slots are <code>[intraday]</code>.</p>
+<code>sentiment</code> (0.5). For the chance of target, <code>[prob]</code>: <code>ema_period</code> (20), <code>slope_bars</code>
+(3), <code>rsi_period</code> (14), <code>timeframes</code> ([5, 15, 60]), <code>lookback_sessions</code> (10), <code>cap</code> (3.0),
+<code>room_cap</code> (3.0), <code>flow_cap</code> (3), <code>min_train_weeks</code> (8), <code>min_brier_margin</code> (0.005),
+<code>refit_weekday</code> (5), <code>show</code> (true) and <code>assumed_days</code> (5); <code>[prob.priors]</code> (the twelve
+assumed weights above) and <code>[prob.prior_sd]</code> <code>wide</code> (1.0) and <code>tight</code> (0.10). The 08:36,
+nightly and Saturday refit slot times are in <code>config/sessions.toml</code>; the 15-minute slots are
+<code>[intraday]</code>.</p>
 <hr />
 <h1 id="rescue-tested-trades">Rescue Tested Trades</h1>
 <p><strong>Files:</strong> <code>services/options_svc/rescue.py</code> (pure engine), <code>commission.py</code>,
@@ -7609,7 +7842,7 @@ the source; this table is a summary of them.</p>
 </tr>
 <tr>
 <td>options_svc</td>
-<td>Loop tick <strong>30 s</strong> (<code>POLL_INTERVAL_SEC</code>). Auto-scan 15-min slots, 08:00–15:15 (<code>autoscan_due</code>); <strong>GEX collection every 1 min</strong>, 08:00–15:20 (<code>_GEX_INTERVAL_MIN</code>, mirroring <code>gex_collector.POLL_INTERVAL_MIN</code>); term structure every <strong>5 min</strong> (<code>TERM_POLL_INTERVAL_MIN</code>); <strong>captured-signal</strong> management every <strong>5 min</strong> (<code>_CAPTURED_MANAGE_INTERVAL_MIN</code>); <strong>manual</strong> paper entry+manage <strong>hourly at the top of the hour, 09:00–14:00</strong> (<code>_PAPER_HOURS</code>, <code>_PAPER_GRACE_MIN</code> = 20); paper <strong>expiry settlement at 15:05</strong> — a settle-only pass over the Account and the Ledger, and over the posted trade ideas' Ledger rows (<code>paper_settle_due</code>, <code>[slots.paper_settle]</code>, grace 120 min); the <strong>trade ideas' Ledger rows</strong> are marked every <strong>5 min</strong> (<code>idea_marks_due</code>, <code>[idea_trades] mark_interval_min</code>) inside 08:30–15:00 CT at minutes clear of the proxy's busy ones (the scan burst follows <code>[windows.scan] offset_min</code>), one slot at most per interval — see <em>Trade ideas in the Paper Ledger</em>; header + GEX status each tick in market hours, throttled to one per <strong>5 min</strong> off-hours (<code>periodic_refresh_due</code>, skip-unchanged); <strong>Opening Scalp</strong> morning call at <strong>08:36</strong> (<code>scalp_call_due</code>, <code>[slots.scalp]</code>, grace 20 min), a new 15-minute Opening Scalp call at each of <strong>08:51, 09:06 ... 13:51</strong> (<code>scalp_intraday_due</code>, <code>[intraday]</code>, grace 5 min) and, at <strong>16:20</strong>, a nightly pass of bar top-up, both study rebuilds, both gradings and the scorecard republish (<code>scalp_bars_due</code>, <code>[slots.scalp_bars]</code>, grace 120 min) — see <em>Opening Scalp</em>.</td>
+<td>Loop tick <strong>30 s</strong> (<code>POLL_INTERVAL_SEC</code>). Auto-scan 15-min slots, 08:00–15:15 (<code>autoscan_due</code>); <strong>GEX collection every 1 min</strong>, 08:00–15:20 (<code>_GEX_INTERVAL_MIN</code>, mirroring <code>gex_collector.POLL_INTERVAL_MIN</code>); term structure every <strong>5 min</strong> (<code>TERM_POLL_INTERVAL_MIN</code>); <strong>captured-signal</strong> management every <strong>5 min</strong> (<code>_CAPTURED_MANAGE_INTERVAL_MIN</code>); <strong>manual</strong> paper entry+manage <strong>hourly at the top of the hour, 09:00–14:00</strong> (<code>_PAPER_HOURS</code>, <code>_PAPER_GRACE_MIN</code> = 20); paper <strong>expiry settlement at 15:05</strong> — a settle-only pass over the Account and the Ledger, and over the posted trade ideas' Ledger rows (<code>paper_settle_due</code>, <code>[slots.paper_settle]</code>, grace 120 min); the <strong>trade ideas' Ledger rows</strong> are marked every <strong>5 min</strong> (<code>idea_marks_due</code>, <code>[idea_trades] mark_interval_min</code>) inside 08:30–15:00 CT at minutes clear of the proxy's busy ones (the scan burst follows <code>[windows.scan] offset_min</code>), one slot at most per interval — see <em>Trade ideas in the Paper Ledger</em>; header + GEX status each tick in market hours, throttled to one per <strong>5 min</strong> off-hours (<code>periodic_refresh_due</code>, skip-unchanged); <strong>Opening Scalp</strong> morning call at <strong>08:36</strong> (<code>scalp_call_due</code>, <code>[slots.scalp]</code>, grace 20 min), a new 15-minute Opening Scalp call at each of <strong>08:51, 09:06 ... 13:51</strong> (<code>scalp_intraday_due</code>, <code>[intraday]</code>, grace 5 min) and, at <strong>16:20</strong>, a nightly pass of bar top-up, both study rebuilds, both gradings and the scorecard republish (<code>scalp_bars_due</code>, <code>[slots.scalp_bars]</code>, grace 120 min) and, on <strong>Saturday at 08:00</strong>, the weekly refit of the chance-of-target weights (<code>scalp_prob_due</code>, <code>[slots.scalp_prob]</code>, grace 180 min) — see <em>Opening Scalp</em>.</td>
 </tr>
 <tr>
 <td>portfolio_svc</td>

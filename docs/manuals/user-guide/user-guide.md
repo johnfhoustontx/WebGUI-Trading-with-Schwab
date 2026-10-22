@@ -2456,16 +2456,17 @@ past mornings that looked like this one. **It does not place trades** — you de
 it shows ("Latest call at 09:21 · next at 09:36"), counts down to the next one ("next
 call in 4 min") and says whether any symbol has a measured edge. Each row shows the
 symbol and its price, **Now** (↑ Up, ↓ Down or no direction, and which call that is),
-the **Confirmation** word, the **trade with the call** (the trade with a measured edge
-instead, when there is one), how often it **usually wins**, the **room to the wall**,
-and the **08:36 call**'s direction. The row reads the latest 15-minute call once the
+the **trade with the call** (the trade with a measured edge instead, when there is one),
+its **Chance of target**, how often it **usually wins**, the **room to the wall**, and
+the **08:36 call**'s direction. The row reads the latest 15-minute call once the
 first one is out (08:51) and the 08:36 call before that. A call that is no longer
-current keeps its words and loses its colour.
+current keeps its words and loses its colour. **Chance of target** is explained under
+*The chance of target*, below; read it beside **Usually wins**, never instead of it.
 
 **Everything else is below it, in closed sections:** one per symbol (its 15-minute
-call, its confirmation and its 08:36 call), then **Today's calls**, **Not in the
-probability** and the **Scorecard**. Click a heading to open it; a section you opened
-stays open when a new call arrives.
+call, **what moved its chance** and its 08:36 call), then **Today's calls**, the
+**Context** (headlines, flow alerts and the report) and the **Scorecard**. Click a
+heading to open it; a section you opened stays open when a new call arrives.
 
 - **Most mornings the answer is "No measured edge".** That is normal, not an error: the
   page then shows each trade's **usual win rate** and nothing more. Treat it as "nothing
@@ -2492,7 +2493,8 @@ stays open when a new call arrives.
 - Before 08:36 (a Refresh pressed at 08:35 waits for the 08:36 call too), on a closed
   day, or after a failed refresh the page shows the **last call**, labelled with its
   day, under a line saying when the next call is due.
-- **Not in the probability** (the report link, headlines, flow alerts) is context only.
+- **Context: headlines, flow alerts and the report** is context only: none of it was
+  measured, and none of it is in the usual win rates or the chance of target.
 - **Scorecard** (the last section) is the record of how the published calls actually did.
   Each evening, once the day's bars are in, the app **grades** every trade it showed that
   morning, from the call as published (never from a later rebuild), under the target,
@@ -2529,19 +2531,13 @@ is a new call, not an edit of the last.
   day is split into a **morning**, **midday** and **afternoon** block). Whether a bucket
   beats its usual rate is **walk-forward tested**, and it must beat it by a clear
   margin, not a hair, before the card says **Measured edge**.
-- **Confirmation: Confirms, Mixed or Contradicts.** Beside each call the page asks four
-  other sources whether they agree with the move: **Options flow** (the bullish and
-  bearish alerts of the last 30 minutes on the symbol and the ten big names),
-  **Net premium** (whether the money in calls or in puts leads), **Dealer positioning**
-  (below) and **Market sentiment** (counts for half as much). Each reads **Agrees**,
-  **Disagrees**, **No side** (it looked and found nothing either way) or **No reading**
-  (missing or older than five minutes, or a flow list from an earlier day: never read
-  as "no side"). Beside the word the page says how many of the four gave a reading
-  ("Mixed · 3 of 4 sources"); with only one there is no word at all ("No reading · 1 of
-  4 sources (too few sources)"), because one source alone is not a confirmation.
-  **This is not in the probability.** It is a word, not a chance of winning, and it has
-  not been tested: the app only records it every 15 minutes so that it *can* be tested
-  after a few months. Treat it as context.
+- **The confirmation word is gone from the page.** Each call used to carry
+  a word (Confirms, Mixed or Contradicts, with "3 of 4 sources") for whether options
+  flow, net premium, the dealer read and market sentiment agreed with the move. Those
+  four sources are now **factors in the chance of target** (below), each as its own
+  number, so the page no longer shows the word or its count of sources. The app **still
+  records it** at every slot, and the Scorecard still splits the win rate by it; it is
+  not in the chance.
 - **The dealer read, in plain words.** It asks: *is there room for this trade to work
   before it hits the wall dealers are hedged around?* For an up call it looks at the
   **call wall** above the price, for a down call the **put wall** below it, and compares
@@ -2555,8 +2551,9 @@ is a new call, not an edit of the last.
 - **Under each trade** the card names any wall that sits between the entry and its
   target or stop ("Target is beyond the call wall at 5,850").
 - **Today's calls** lists every slot made today: the time, per symbol the direction, the
-  highlighted trade (or a dash), the confirmation word and any note. A call built without
-  fresh bars for some input says which.
+  highlighted trade (or a dash), the **chance of target** for the trade the call names
+  ("Chance 47.12%") and any note. A call built without fresh bars for some input says
+  which.
 - **When a call stops being current.** A call is current until the next slot or until
   its own hour is up, whichever comes first. After that it reads **Last call ... past**
   (the next slot is overdue) or **Last call ... over** (its hour is up), and is drawn
@@ -2576,9 +2573,56 @@ is a new call, not an edit of the last.
 - **Scorecard, intraday part.** Each evening every intraday call is graded the same way as
   the morning ones. The scorecard then shows, per symbol and per block, **Edge calls**
   and **Cautions** as above, and the long-with-the-move trade's win rate split by the
-  confirmation word, each beside the **days** it rests on. That split is the first,
-  informal look at whether the confirmation helps; with a few weeks of data it says almost
-  nothing.
+  recorded confirmation word, each beside the **days** it rests on. That split is the
+  first, informal look at whether the word helps; with a few weeks of data it says almost
+  nothing. The chance of target is not graded here: the weekly check described below is
+  its test.
+
+### The chance of target
+
+Every call carries one figure for each of its four trades: **the chance that the trade
+wins**, counted the way the usual win rate counts a win (+50% before −50% of the price
+paid, inside 60 minutes; for a credit spread, keeping half the credit). The 08:36 call
+carries it too, worked from the premarket inputs. The top table shows it for the trade
+the row names; the **15-minute call** and **08:36 call** cards show all four, in a
+**Chance of target** column beside the usual win rate.
+
+- **What goes into it.** Every factor is read for the direction of the call, so a positive
+  reading means "agrees with the call": the price reading you already see (the move since
+  the open, the side of VWAP, futures, the volatility index, the sector funds, the big ten's
+  breadth); the **slope of the 20-bar moving average** and **momentum (RSI)**, each on the
+  **5-minute** chart (counts most), the **15-minute** chart and the **hourly** chart; the
+  **dealer read** (room to the wall, the big names' room, and which side of the gamma flip
+  the price is on); **net premium**; **options flow**; **market sentiment**; and, for the
+  15-minute calls, the part of the day (morning, midday or afternoon).
+- **Each factor has a weight, and the weights are learned, not set by hand.** The app
+  starts every weight at an **assumed** value (a small push the right way for a factor
+  that usually helps) and then lets the stored days move it. A factor with months of
+  history, such as the price reading, the moving-average slope and momentum, is moved a long way
+  by its own days. A factor with only a few days (flow, sentiment, net premium and the
+  dealer read are recent) stays close to its assumption until it has more. The weights are
+  **refitted every Saturday morning at 08:00 CT**, after the week has been graded, and a
+  refit never changes a call already shown: a call keeps the chance it was made with.
+- **A missing reading never counts against a call.** When a factor cannot be read (Schwab
+  sent no gamma reading so there is no wall, there is no flow list, a bar is missing), it
+  adds nothing either way.
+- **What moved the chance.** Open a symbol's section. Under its 15-minute call (and its
+  08:36 call) a table lists every factor, the largest push first: its **reading** for the
+  call, how many **percentage points** it moved the chance for the trade with the call, the
+  **days of history** its weight rests on, and **assumed** where those days are fewer than 5
+  (the weight is still the starting guess, not a measurement). Read a big push on an
+  **assumed** factor with caution: nothing has tested it yet.
+- **The line under the figure.** *fitted Oct 25 · beats the usual rate on unseen days: no.*
+  Every refit tests the chance the way the bucket study tests an edge: week by week, it is
+  fitted on the earlier weeks and scored on the next, which it has never seen, against the
+  plain usual win rate. **yes** means it did better by a clear margin over the weeks tested;
+  **no** means it did not (or there are not yet enough weeks: the test starts after 8 weeks
+  of history). **no** is an honest answer, and a common one: it says to trust the usual rate
+  beside it at least as much. A dash with *not fitted yet* means no weights are stored.
+- **It is not a signal.** The four trades, their rules, the **Measured edge** and
+  **Caution** marks and the usual win rates are unchanged; the chance is a new column beside
+  them, and a high chance on a **no** line has not been shown to be better than the usual
+  rate.
 
 > The win rates are counted over **every** stored morning, and the premiums are
 > modelled, so read them as how often a method like this has worked, not as a promise
@@ -3424,7 +3468,7 @@ a file on the server — in one place, grouped by what they do:
 | **Symbols & watchlists** | What the gamma collector polls, the BIG10 basket, the Net Prem groups |
 | **Local market data** | Whether the app may reuse market data it has already fetched from Schwab instead of asking again, how old that data may be, and how often watchlist symbols are fetched. See the note below |
 | **Sector map** | Which sector each symbol counts toward for the sector cap |
-| **Opening Scalp** | The symbols it calls and the bars it keeps, strike steps and spread widths, the target, stop and time stop, the volatility multipliers the study tries (a list of numbers), the cut points between low, mid and high agreement, and the scorecard window; for the 15-minute calls, their first and last time (not before 08:45, and the last call's hour must end by 15:00), the gap, how late one may still fire, the flat band, the day's three blocks, the margin an edge must clear, the early-close days and time, and the confirmation's look-back, margins, cut points, the sources it needs for a word and the weight of each source. The 08:36 call and 16:20 nightly pass times are under *Market hours & schedules* |
+| **Opening Scalp** | The symbols it calls and the bars it keeps, strike steps and spread widths, the target, stop and time stop, the volatility multipliers the study tries (a list of numbers), the cut points between low, mid and high agreement, and the scorecard window; for the 15-minute calls, their first and last time (not before 08:45, and the last call's hour must end by 15:00), the gap, how late one may still fire, the flat band, the day's three blocks, the margin an edge must clear, the early-close days and time, and the confirmation's look-back, margins, cut points, the sources it needs for a word and the weight of each source; for the chance of target, whether it is shown at all, the moving-average and RSI lengths, the bar sizes, each factor's assumed starting weight and how tightly it is held, the weeks of history before the honesty test, the margin the chance must beat the usual rate by, the days under which a weight reads *assumed*, and the weekday of the refit. The 08:36 call and 16:20 nightly pass times are under *Market hours & schedules* |
 | **Commissions** | Schwab's per-contract rates |
 | **Ports / Environments** | Shown for reference only |
 

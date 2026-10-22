@@ -755,8 +755,9 @@ def scorecard_columns():
 RATES_BASIS_TEXT = "Rate over every stored day; the edge test is walk-forward."
 INTRADAY_SCORECARD_NOTE = (
     "Days are distinct days; a win rate is over the calls made on those days (several "
-    "a day), so two days can rest on more than two calls. The split by confirmation is "
-    "an informal first look, and the confirmation is not in the probability.")
+    "a day), so two days can rest on more than two calls. The split by the recorded "
+    "confirmation word is an informal first look: the word is not in the chance of "
+    "target, which is fitted from the raw sources.")
 TIMELINE_NOTE = RATES_BASIS_TEXT + " Days are distinct days."
 TIMELINE_CHANCE_NOTE = (" Chance is the fitted chance of target for the trade the "
                         "call names.")

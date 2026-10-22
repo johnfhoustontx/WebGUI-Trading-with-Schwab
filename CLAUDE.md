@@ -711,11 +711,17 @@ queue's slow lane; nothing that changes a paper book may be put there.
   (`tools/check_traded_premium.py`).
 - **The Opening Scalp's 15-minute calls** ([design](docs/plans/2026-10-20-scalp-intraday-calls-design.md))
   keep their data in NEW `intraday_*` tables in `scalp.db`: never alter the
-  original tables, which prod holds. The probability is price only; the
-  confirmation (flow, net premium, dealer read, sentiment) is a word, recorded to
-  be tested, never in it. A recorded `intraday_readings` row is write-once, save
-  the one-way upgrade from no direction to a direction. An UNTRUSTED wall (net GEX
-  of 0 or missing: Schwab sent no Greeks) is no reading, never "no room".
+  original tables, which prod holds. The bucket study's rates stay price only.
+  The page's **chance of target** ([design](docs/plans/2026-10-22-scalp-weighted-probability-design.md))
+  is a separate fitted weighted model: price, moving-average slope and RSI on
+  5-minute / 15-minute / hourly bars, dealer read, net premium, flow and
+  sentiment, with assumed priors, refitted every Saturday (`scalp_prob_fit`),
+  frozen with each call. No factor is read at or after the entry, and a gap
+  scales to 0, never to disagreement. The confirmation word is still recorded
+  (`intraday_readings`) but no longer shown. A recorded `intraday_readings` row is
+  write-once, save the one-way upgrade from no direction to a direction. An
+  UNTRUSTED wall (net GEX of 0 or missing: Schwab sent no Greeks) is no reading,
+  never "no room".
 
 ## Observability and performance
 

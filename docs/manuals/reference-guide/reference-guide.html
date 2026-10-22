@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-21</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-22</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -328,6 +328,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#where-the-data-comes-from_22">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_21">Reading the screen</a></li>
 <li><a href="#the-15-minute-calls">The 15-minute calls</a></li>
+<li><a href="#the-chance-of-target">The chance of target</a></li>
 </ul>
 </li>
 <li><a href="#strategy-finder">Strategy Finder</a><ul>
@@ -5255,11 +5256,11 @@ There are no trade buttons: you read it and decide.</p>
 </tr>
 <tr>
 <td>Cadence</td>
-<td>The morning call is built once at <strong>08:36 CT</strong> (<code>[slots.scalp]</code>). A new 15-minute call is made at <strong>08:51, 09:06 ... 13:51 CT</strong> (21 slots, <code>[intraday]</code>; they sit at :06, :21, :36 and :51, after the auto-scan's fetch burst). Every evening at 16:20 CT (<code>[slots.scalp_bars]</code>) the day's bars are added, the studies are rebuilt over them, and both kinds of call are graded</td>
+<td>The morning call is built once at <strong>08:36 CT</strong> (<code>[slots.scalp]</code>). A new 15-minute call is made at <strong>08:51, 09:06 ... 13:51 CT</strong> (21 slots, <code>[intraday]</code>; they sit at :06, :21, :36 and :51, after the auto-scan's fetch burst). Every evening at 16:20 CT (<code>[slots.scalp_bars]</code>) the day's bars are added, the studies are rebuilt over them, and both kinds of call are graded. Every <strong>Saturday at 08:00 CT</strong> (<code>[slots.scalp_prob]</code>) the weights of the chance of target are refitted</td>
 </tr>
 <tr>
 <td>Tunables</td>
-<td><code>config/scalp.toml</code> — the target and stop, the time stop, strikes, buckets, minimum samples; for the 15-minute calls <code>[intraday]</code> (slots, grace, flat band, breadth, VWAP gap, the edge margin, the three blocks) and <code>[confirm]</code> (look-back, margins, cut points, per-source weights)</td>
+<td><code>config/scalp.toml</code> — the target and stop, the time stop, strikes, buckets, minimum samples; for the 15-minute calls <code>[intraday]</code> (slots, grace, flat band, breadth, VWAP gap, the edge margin, the three blocks) and <code>[confirm]</code> (look-back, margins, cut points, per-source weights) and <code>[prob]</code> / <code>[prob.priors]</code> / <code>[prob.prior_sd]</code> (the chance of target: indicator lengths, bar sizes, the assumed starting weights and how tightly each is held, the honesty test's weeks and margin, the refit weekday, whether it is shown)</td>
 </tr>
 <tr>
 <td>Refresh</td>
@@ -5278,14 +5279,15 @@ There are no trade buttons: you read it and decide.</p>
 <h3 id="reading-the-screen_21">Reading the screen</h3>
 <p><strong>Start with the table at the top: one row per symbol.</strong> It answers "what is each
 symbol doing now?" without scrolling: the direction of the latest call (the 15-minute
-call from 08:51, the 08:36 call before that), the confirmation word, the trade that
-goes with the call and how often it usually wins, the room to the dealers' wall, and
+call from 08:51, the 08:36 call before that), the trade that goes with the call, its
+<strong>chance of target</strong> and how often it usually wins, the room to the dealers' wall, and
 the 08:36 call's direction. The line above it names the call shown, counts down to the
 next one and says whether any symbol has a measured edge. A row whose call is no longer
 current keeps its words and is drawn without colour.</p>
 <p><strong>The detail sits below, closed until you open it</strong>: a section per symbol holding its
-15-minute call, its confirmation and its 08:36 call (the most recent first), then
-Today's calls, Not in the probability and the Scorecard. A section you open stays open
+15-minute call, <strong>what moved its chance</strong> and its 08:36 call (the most recent first),
+then Today's calls, the Context (headlines, flow alerts and the report) and the
+Scorecard. A section you open stays open
 when the page repaints.</p>
 <p><strong>The 08:36 call is a card in each symbol's section.</strong> Its header says <strong>Opened up</strong> or <strong>Opened down</strong> (a flat
 open names no direction and gets no call) and whether it is today's call or an
@@ -5305,7 +5307,8 @@ measured along the real five-minute bars). The 08:36 chain sets only the <strong
 column, from its live quote where it quoted the strike (the row says <strong>live quote</strong>,
 else <strong>modelled</strong>), and the volatility the <strong>Underlying move</strong> distances are worked at
 (its at-the-money volatility, else the volatility index).</p>
-<p><strong>Columns.</strong> Trade · <strong>Usual win rate</strong> · <strong>This morning's rate</strong> (the win rate on
+<p><strong>Columns.</strong> Trade · <strong>Usual win rate</strong> · <strong>Chance of target</strong> (the fitted chance, below) ·
+<strong>This morning's rate</strong> (the win rate on
 past mornings in the same agreement bucket, with its 95% interval underneath) ·
 <strong>Samples</strong> (bucket / all) · <strong>Strikes</strong> · <strong>Entry</strong> (a debit for a long option, a
 credit for a spread) · <strong>Underlying move</strong> (the points the underlying must travel to
@@ -5322,9 +5325,9 @@ closed and whether it broke the premarket range. Each reads <strong>Agrees</stro
 counted as a disagreement. The opening range against its usual size is shown for
 information only. The share of inputs that agreed sorts the morning into a low, mid
 or high bucket.</p>
-<p><strong>Not in the probability.</strong> The report link, index headlines and today's flow alerts
-on these symbols are shown for context only; none of them was measured or fed into
-the rates.</p>
+<p><strong>Context: headlines, flow alerts and the report.</strong> The report link, index headlines and
+today's flow alerts on these symbols are shown for context only; none of them was
+measured or fed into the rates or the chance of target.</p>
 <p><strong>Scorecard.</strong> The last section is the graded record, per symbol, over the last 20
 graded days (<code>scorecard_days</code>), republished into the view as soon as the night's
 grading is done. Grading uses only the call <strong>as published</strong> — its strikes, entry,
@@ -5383,7 +5386,9 @@ would pass the early close, so the last call is 10:51.</p>
   rate by a <strong>margin</strong> (0.005 in the Brier score, roughly a 7-point difference in win
   rate) at every volatility assumption. The margin was fixed before any real result was
   read, because on random data without it a handful of buckets "win" by luck.</p>
-<p><strong>The confirmation reading: what it is and what it is not.</strong> A word (<strong>Confirms</strong>,
+<p><strong>The confirmation reading: what it is and what it is not.</strong> It is no longer drawn on
+the page (the chance of target, below, reads the same four sources as numbers), but it is
+still worked out and recorded at every slot, so the history exists. A word (<strong>Confirms</strong>,
 <strong>Mixed</strong>, <strong>Contradicts</strong>) from four sources, each relative to the call's direction:
 - <strong>Options flow</strong> — the bullish minus bearish alerts of the last 30 minutes on the
   symbol and the big ten. An unusual-activity or big-delta alert counts only when most of
@@ -5395,35 +5400,81 @@ would pass the early close, so the last call is 10:51.</p>
 - <strong>Dealer positioning</strong> — the dealer read (below).
 - <strong>Market sentiment</strong> — the sentiment dashboard's trend state; it counts for half as
   much by design (a minor voice), and a "lack of" state or a neutral one gives no side.</p>
-<p>The word needs at least <strong>two</strong> sources with a reading; beside it the page says how many
-gave one ("Mixed · 3 of 4 sources"). One source alone gives no word, and a flow list left
-from an earlier day is no reading, not a quiet tape.</p>
-<p>It is <strong>not in the probability</strong>. It does not move a rate, a highlight or a price. It
-exists because flow, net premium and walls have only about five sessions of history, too
-little to test; the app <strong>records every source at every slot</strong> so that, after about
-40 sessions, a study can ask whether the word improves on the price alone. Until then
-it is context, shown as words, with each source's verdict beside it.</p>
+<p>The word needs at least <strong>two</strong> sources with a reading ("3 of 4 sources" when three gave
+one). One source alone gives no word, and a flow list left from an earlier day is no
+reading, not a quiet tape.</p>
+<p>The word <strong>does not move a rate, a highlight, a price or the chance of target</strong>. It
+exists because flow, net premium and walls have only about five sessions of history in
+the live store, too little to test on their own; the app <strong>records every source at every
+slot</strong>, and those recorded sources (not the word) are what the chance of target's
+weights are fitted from. The Scorecard still splits wins by the word, as a first look.</p>
 <p><strong>The dealer read</strong> (walls and net premium leading) in two parts. <em>Room:</em> the
 distance from the call's own entry price to the wall on the trade's side (call wall for
 up, put wall for down), against the move the long trade needs to reach its target. Room at least that big
 agrees; a wall inside the target disagrees. <em>Breadth:</em> how many of the ten big names
 have the same room in percent of their own price; most of them agrees. When the symbol's
-own room and the breadth point opposite ways the read is neutral. The gamma flip is shown
-in the record but not scored. A wall is <strong>untrusted</strong> when net GEX is zero or missing
+own room and the breadth point opposite ways the read is neutral. The confirmation word
+does not score the gamma flip (it is in the record); the chance of target does read it,
+as a factor of its own. A wall is <strong>untrusted</strong> when net GEX is zero or missing
 (Schwab sent no Greeks): that is <em>no reading</em>, never "no room".</p>
 <p><strong>When to use it.</strong> Read the latest card for the move and the usual rates; read the
-dealer line for the nearest wall; treat the confirmation word as a second opinion you
-cannot yet price. Use <strong>Today's calls</strong> to see how the morning has been flowing. Open
+dealer line for the nearest wall; read the chance of target beside the usual rate, and
+open <strong>what moved the chance</strong> to see which factors are carrying it and which are only
+assumed. Use <strong>Today's calls</strong> to see how the morning has been flowing. Open
 <strong>Dealer Positioning</strong> for the full picture behind the wall line.</p>
 <p><strong>The Scorecard's intraday part</strong> is per symbol and per block: the highlighted calls'
 hit rate against the base rate, the cautions, and the long-with-the-move trade's win rate
-split by the confirmation word, each beside the <strong>days</strong> it rests on. A "days" count is
-distinct days, not calls (a day holds several calls over one tape), so a handful of days
-means very little. The split is an informal first look at the confirmation.</p>
+split by the recorded confirmation word, each beside the <strong>days</strong> it rests on. A "days"
+count is distinct days, not calls (a day holds several calls over one tape), so a handful
+of days means very little. The split is an informal first look at the word.</p>
 <p><strong>Freshness.</strong> A call is current until the next slot or until its own hour is up. After
 that it reads <strong>Last call ... past</strong> or <strong>... over</strong> and is drawn muted; the 13:51 call
 says it is the final call of the day; a list from an earlier day names its date. The page
 rechecks the clock every 30 seconds.</p>
+<h3 id="the-chance-of-target">The chance of target</h3>
+<p><strong>What it is for.</strong> The usual win rate answers "how often has this trade won?" and the
+bucket answers "how often on mornings that looked like this?", both from price alone. The
+chance of target answers a third question for the call in front of you: <strong>given everything
+the app can read right now, how likely is this trade to win?</strong> It is one figure per trade,
+shown in a <strong>Chance of target</strong> column beside the usual win rate on the 08:36 and
+15-minute cards and in the top table for the trade the row names, and "Chance 47.12%" per
+symbol in Today's calls. It does not replace the bucket study, its <strong>Measured edge</strong> or
+<strong>Caution</strong> marks, or the usual rate.</p>
+<p><strong>What goes into it.</strong> Each factor is measured for the call's direction (positive agrees):
+- <em>Price</em>: the inputs the call already shows (the move since the open, side of VWAP,
+  futures, the volatility index, the sector funds, the big ten's breadth; the morning's own
+  inputs at 08:36).
+- <em>Moving-average slope</em>: the change over the last 3 bars of a 20-bar exponential moving
+  average, on <strong>5-minute</strong> bars (the main one), <strong>15-minute</strong> bars and <strong>hourly</strong> bars.
+- <em>Momentum</em>: RSI over 14 bars on the same three bar sizes, as the distance from 50.
+- <em>Dealer read</em>: room to the wall in the call's direction against the points the trade
+  needs, the share of the big ten with that room, and which side of the gamma flip the
+  price is on.
+- <em>Net premium</em>, <em>options flow</em> and <em>market sentiment</em>, as the confirmation reads them.
+- <em>Time of day</em>, on the 15-minute calls only: morning, midday or afternoon.</p>
+<p>The 15-minute and hourly bars are built from the 5-minute bars of the regular session,
+only complete bars count, and the averages run on across previous sessions, so an
+hourly reading at 08:51 is mostly yesterday's, as it would be on an hourly chart.</p>
+<p><strong>Weights, assumed and learned.</strong> Each factor's weight starts at an <strong>assumed</strong> value
+(config <code>[prob.priors]</code>: for a trade with the move, +0.15 for the 5-minute slope, 0.10
+15-minute, 0.05 hourly; RSI 0.10, 0.07, 0.04; room to the wall 0.15; the big ten's room
+0.05; net premium 0.10; flow 0.10; sentiment 0.05; the price inputs, the flip and time of
+day 0). A trade <em>against</em> the move uses the same numbers with the sign reversed. They are
+guesses, written down so that a factor with no history has a defined weight. A weekly
+<strong>refit</strong> then lets the stored days move each one: a factor with about 180 days (price,
+slope, momentum, time of day) is held loosely and follows its data; one with a few
+(dealer, net premium, flow, sentiment) is held tightly and stays near its assumption until
+its own days build up. <strong>What moved the chance</strong> shows the days each weight rests on and
+marks <strong>assumed</strong> where they are under 5.</p>
+<p><strong>Reading the line under it.</strong> "fitted Oct 25 · beats the usual rate on unseen days: no".
+The refit also tests itself: for each past week after the first 8, it fits on the weeks
+before and scores that week, and compares the squared-error (Brier) score with the usual
+rate's. <strong>yes</strong> only when it is lower by at least 0.005 over the weeks tested. <strong>no</strong> is a
+legitimate answer; the figure is shown either way so it can be compared at a glance, and
+the line says which.</p>
+<p><strong>What it cannot do.</strong> It is a fit to a short history of one market regime; a factor with
+few days is mostly an assumption; and a call keeps the chance it was made with, so a later
+refit never rewrites a published call. A missing reading is no push, never a vote against.</p>
 <hr />
 <h2 id="strategy-finder">Strategy Finder</h2>
 <p><em>Menu: STRATEGY → Strategy Finder · Route <code>/options/swing</code></em></p>
