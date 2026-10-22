@@ -433,3 +433,250 @@ def test_a_second_intraday_slice_for_the_slot_replaces_the_first(tmp_path):
             "select count(*), max(ts) from intraday_chain_slices").fetchone() == (1, 2)
     finally:
         conn.close()
+
+
+# The store's schema exactly as it stood at the weighted-chance plan's base commit
+# (7de9ba6), before ``prob_sources`` and ``prob_models`` were added. Production holds
+# these tables, so an edit to any of these statements is a schema change to a live
+# store: the test below fails on one.
+_BASE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS bars (
+    symbol   TEXT    NOT NULL,
+    interval INTEGER NOT NULL,
+    ts       INTEGER NOT NULL,
+    open     REAL,
+    high     REAL,
+    low      REAL,
+    close    REAL,
+    volume   REAL,
+    PRIMARY KEY (symbol, interval, ts)
+);
+CREATE TABLE IF NOT EXISTS chain_slices (
+    day    TEXT    NOT NULL,
+    symbol TEXT    NOT NULL,
+    ts     INTEGER NOT NULL,
+    body   BLOB    NOT NULL,
+    PRIMARY KEY (day, symbol)
+);
+CREATE TABLE IF NOT EXISTS outcomes (
+    day          TEXT    NOT NULL,
+    symbol       TEXT    NOT NULL,
+    iv_scale     REAL    NOT NULL,
+    role         TEXT    NOT NULL,
+    structure    TEXT    NOT NULL,
+    bucket       TEXT,
+    result       TEXT    NOT NULL,
+    minutes      INTEGER,
+    entry_value  REAL,
+    end_pnl_pct  REAL,
+    both_in_bar  INTEGER NOT NULL,
+    interval     INTEGER NOT NULL,
+    PRIMARY KEY (day, symbol, iv_scale, role, interval)
+);
+CREATE TABLE IF NOT EXISTS mornings (
+    day    TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    json   TEXT NOT NULL,
+    PRIMARY KEY (day, symbol)
+);
+CREATE TABLE IF NOT EXISTS verdicts (
+    symbol TEXT NOT NULL,
+    role   TEXT NOT NULL,
+    bucket TEXT NOT NULL,
+    json   TEXT NOT NULL,
+    PRIMARY KEY (symbol, role, bucket)
+);
+CREATE TABLE IF NOT EXISTS calls (
+    day    TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    json   TEXT NOT NULL,
+    PRIMARY KEY (day, symbol)
+);
+CREATE TABLE IF NOT EXISTS grades (
+    day          TEXT    NOT NULL,
+    symbol       TEXT    NOT NULL,
+    role         TEXT    NOT NULL,
+    structure    TEXT    NOT NULL,
+    model_result TEXT,
+    chain_result TEXT,
+    highlighted  INTEGER NOT NULL,
+    avoided      INTEGER NOT NULL,
+    p_base       REAL,
+    PRIMARY KEY (day, symbol, role)
+);
+CREATE TABLE IF NOT EXISTS iv_calibration (
+    day         TEXT NOT NULL,
+    symbol      TEXT NOT NULL,
+    atm_iv      REAL NOT NULL,
+    vol_reading REAL NOT NULL,
+    ratio       REAL NOT NULL,
+    PRIMARY KEY (day, symbol)
+);
+CREATE TABLE IF NOT EXISTS intraday_readings (
+    day    TEXT NOT NULL,
+    slot   TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    json   TEXT NOT NULL,
+    PRIMARY KEY (day, slot, symbol)
+);
+CREATE TABLE IF NOT EXISTS intraday_calls (
+    day    TEXT NOT NULL,
+    slot   TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    json   TEXT NOT NULL,
+    PRIMARY KEY (day, slot, symbol)
+);
+CREATE TABLE IF NOT EXISTS intraday_chain_slices (
+    day    TEXT    NOT NULL,
+    slot   TEXT    NOT NULL,
+    symbol TEXT    NOT NULL,
+    ts     INTEGER NOT NULL,
+    body   BLOB    NOT NULL,
+    PRIMARY KEY (day, slot, symbol)
+);
+CREATE TABLE IF NOT EXISTS intraday_outcomes (
+    day          TEXT    NOT NULL,
+    slot         TEXT    NOT NULL,
+    symbol       TEXT    NOT NULL,
+    iv_scale     REAL    NOT NULL,
+    role         TEXT    NOT NULL,
+    structure    TEXT    NOT NULL,
+    block        TEXT    NOT NULL,
+    bucket       TEXT,
+    result       TEXT    NOT NULL,
+    minutes      INTEGER,
+    entry_value  REAL,
+    both_in_bar  INTEGER NOT NULL,
+    PRIMARY KEY (day, slot, symbol, iv_scale, role)
+);
+CREATE TABLE IF NOT EXISTS intraday_verdicts (
+    symbol TEXT NOT NULL,
+    block  TEXT NOT NULL,
+    role   TEXT NOT NULL,
+    bucket TEXT NOT NULL,
+    json   TEXT NOT NULL,
+    PRIMARY KEY (symbol, block, role, bucket)
+);
+CREATE TABLE IF NOT EXISTS intraday_grades (
+    day          TEXT    NOT NULL,
+    slot         TEXT    NOT NULL,
+    symbol       TEXT    NOT NULL,
+    role         TEXT    NOT NULL,
+    structure    TEXT    NOT NULL,
+    model_result TEXT,
+    chain_result TEXT,
+    highlighted  INTEGER NOT NULL,
+    avoided      INTEGER NOT NULL,
+    confirm_word TEXT,
+    p_base       REAL,
+    block        TEXT    NOT NULL,
+    PRIMARY KEY (day, slot, symbol, role)
+);
+"""
+
+
+def _table_sql(conn) -> dict:
+    return dict(conn.execute(
+        "SELECT name, sql FROM sqlite_master WHERE type = 'table'").fetchall())
+
+
+def test_prob_tables_are_new_and_old_tables_untouched(tmp_path):
+    base = sqlite3.connect(":memory:")
+    try:
+        base.executescript(_BASE_SCHEMA)
+        before = _table_sql(base)
+    finally:
+        base.close()
+    assert {"bars", "outcomes", "intraday_readings"} <= set(before)
+    conn = st.connect(_db(tmp_path))
+    try:
+        after = _table_sql(conn)
+    finally:
+        conn.close()
+    for name, sql in before.items():
+        assert after[name] == sql, f"{name} was edited"
+    assert set(after) - set(before) == {"prob_sources", "prob_models"}
+    conn = st.connect(_db(tmp_path))
+    try:
+        assert [r[1] for r in conn.execute("PRAGMA table_info(prob_sources)")] == [
+            "kind", "day", "slot", "symbol", "json"]
+        assert [r[1] for r in conn.execute("PRAGMA table_info(prob_models)")] == [
+            "version", "kind", "role", "fitted_at", "json"]
+    finally:
+        conn.close()
+
+
+def test_prob_sources_round_trip(tmp_path):
+    db = _db(tmp_path)
+    morning = {"matrix": {"a": 1}, "netprem": None, "sentiment": 6, "flow": {"window": 60}}
+    intraday = {"matrix": {"a": 2}, "netprem": 1.5, "sentiment": 4, "flow": {"window": 30}}
+    n = st.save_prob_sources([
+        ("morning", "2026-10-19", "08:36", "SPY", morning),
+        ("intraday", "2026-10-19", "09:06", "SPY", intraday),
+        ("intraday", "2026-10-19", "09:06", "QQQ", {"matrix": {}}),
+    ], db_path=db)
+    assert n == 3
+    assert st.prob_sources_all("morning", db_path=db) == {
+        ("2026-10-19", "08:36", "SPY"): morning}
+    assert st.prob_sources_all("intraday", db_path=db) == {
+        ("2026-10-19", "09:06", "SPY"): intraday,
+        ("2026-10-19", "09:06", "QQQ"): {"matrix": {}}}
+    assert st.prob_sources_all("other", db_path=db) == {}
+    assert st.save_prob_sources([], db_path=db) == 0
+
+
+def test_save_prob_sources_replaces_same_key(tmp_path):
+    db = _db(tmp_path)
+    st.save_prob_sources([("morning", "2026-10-19", "08:36", "SPY", {"v": 1})], db_path=db)
+    st.save_prob_sources([("morning", "2026-10-19", "08:36", "SPY", {"v": 2})], db_path=db)
+    assert st.prob_sources_all("morning", db_path=db) == {
+        ("2026-10-19", "08:36", "SPY"): {"v": 2}}
+    conn = st.connect(db)
+    try:
+        assert conn.execute("select count(*) from prob_sources").fetchone() == (1,)
+    finally:
+        conn.close()
+
+
+def test_readings_all_returns_every_day(tmp_path):
+    db = _db(tmp_path)
+    st.save_reading("2026-10-19", "08:36", "SPY", {"p": 1}, db_path=db)
+    st.save_reading("2026-10-20", "09:06", "QQQ", {"p": 2}, db_path=db)
+    assert st.readings_all(db_path=db) == {
+        ("2026-10-19", "08:36", "SPY"): {"p": 1},
+        ("2026-10-20", "09:06", "QQQ"): {"p": 2}}
+    assert st.readings_all(db_path=_db(tmp_path / "empty")) == {}
+
+
+def test_latest_prob_models_is_highest_version_and_keeps_older(tmp_path):
+    db = _db(tmp_path)
+    assert st.next_prob_version(db_path=db) == 1
+    st.save_prob_models(1, "2026-10-22T10:00:00",
+                        {("morning", "target"): {"w": [1]}}, db_path=db)
+    assert st.next_prob_version(db_path=db) == 2
+    st.save_prob_models(2, "2026-10-29T10:00:00",
+                        {("morning", "target"): {"w": [2]},
+                         ("intraday", "stop"): {"w": [3]}}, db_path=db)
+    assert st.next_prob_version(db_path=db) == 3
+    got = st.latest_prob_models(db_path=db)
+    assert got == {"version": 2, "fitted_at": "2026-10-29T10:00:00",
+                   "models": {("morning", "target"): {"w": [2]},
+                              ("intraday", "stop"): {"w": [3]}}}
+    conn = st.connect(db)
+    try:
+        assert conn.execute(
+            "select count(*) from prob_models where version = 1").fetchone() == (1,)
+    finally:
+        conn.close()
+
+
+def test_latest_prob_models_empty_is_empty_dict(tmp_path):
+    assert st.latest_prob_models(db_path=_db(tmp_path)) == {}
+
+
+def test_save_prob_models_is_one_transaction(tmp_path):
+    db = _db(tmp_path)
+    bad = {("morning", "target"): {"w": 1}, ("intraday", "stop"): {"w": float("nan")}}
+    with pytest.raises(ValueError):
+        st.save_prob_models(1, "2026-10-22T10:00:00", bad, db_path=db)
+    assert st.latest_prob_models(db_path=db) == {}

@@ -162,6 +162,22 @@ CREATE TABLE IF NOT EXISTS intraday_grades (
     block        TEXT    NOT NULL,
     PRIMARY KEY (day, slot, symbol, role)
 );
+CREATE TABLE IF NOT EXISTS prob_sources (
+    kind   TEXT NOT NULL,
+    day    TEXT NOT NULL,
+    slot   TEXT NOT NULL,
+    symbol TEXT NOT NULL,
+    json   TEXT NOT NULL,
+    PRIMARY KEY (kind, day, slot, symbol)
+);
+CREATE TABLE IF NOT EXISTS prob_models (
+    version   INTEGER NOT NULL,
+    kind      TEXT    NOT NULL,
+    role      TEXT    NOT NULL,
+    fitted_at TEXT    NOT NULL,
+    json      TEXT    NOT NULL,
+    PRIMARY KEY (version, kind, role)
+);
 """
 
 
@@ -321,6 +337,18 @@ def readings_on(day, db_path=None) -> dict:
     return {(slot, sym): json.loads(body) for slot, sym, body in rows}
 
 
+def readings_all(db_path=None) -> dict:
+    """``{(day, slot, symbol): reading}`` for every recorded intraday reading (the
+    live record of all of a day's calls; slot ``"08:36"`` is the morning call)."""
+    conn = connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT day, slot, symbol, json FROM intraday_readings").fetchall()
+    finally:
+        conn.close()
+    return {(day, slot, sym): json.loads(body) for day, slot, sym, body in rows}
+
+
 def save_intraday_call(day, slot, symbol, body, db_path=None) -> None:
     """Keep ``symbol``'s intraday call for ``day``'s ``slot`` (a JSON-able dict),
     replacing the earlier write for that slot. The morning ``calls`` table is not
@@ -375,3 +403,79 @@ def intraday_slice(day, slot, symbol, db_path=None):
     if row is None:
         return None
     return json.loads(zlib.decompress(row[0]).decode("utf-8"))
+
+
+def _dumps(body) -> str:
+    return json.dumps(body, sort_keys=True, separators=(",", ":"), allow_nan=False)
+
+
+def save_prob_sources(rows, db_path=None) -> int:
+    """Upsert ``(kind, day, slot, symbol, snapshot)`` rows into ``prob_sources`` (the
+    fitted chance's inputs, each snapshot in ``scalp_confirm.snapshot``'s shape). A
+    row already stored under the same key is replaced. Returns the row count."""
+    encoded = [(kind, day, slot, sym, _dumps(body)) for kind, day, slot, sym, body in rows]
+    if not encoded:
+        return 0
+    conn = connect(db_path)
+    try:
+        with conn:
+            conn.executemany(
+                "INSERT OR REPLACE INTO prob_sources (kind, day, slot, symbol, json) "
+                "VALUES (?, ?, ?, ?, ?)", encoded)
+    finally:
+        conn.close()
+    return len(encoded)
+
+
+def prob_sources_all(kind, db_path=None) -> dict:
+    """``{(day, slot, symbol): snapshot}`` stored for ``kind`` (empty when none)."""
+    conn = connect(db_path)
+    try:
+        rows = conn.execute("SELECT day, slot, symbol, json FROM prob_sources "
+                            "WHERE kind = ?", (kind,)).fetchall()
+    finally:
+        conn.close()
+    return {(day, slot, sym): json.loads(body) for day, slot, sym, body in rows}
+
+
+def save_prob_models(version, fitted_at, models, db_path=None) -> None:
+    """Keep one fit's models, ``{(kind, role): body}``, under ``version`` in a single
+    transaction (all of them or none). Older versions are kept."""
+    conn = connect(db_path)
+    try:
+        with conn:
+            conn.executemany(
+                "INSERT OR REPLACE INTO prob_models "
+                "(version, kind, role, fitted_at, json) VALUES (?, ?, ?, ?, ?)",
+                [(version, kind, role, fitted_at, _dumps(body))
+                 for (kind, role), body in models.items()])
+    finally:
+        conn.close()
+
+
+def latest_prob_models(db_path=None) -> dict:
+    """``{"version", "fitted_at", "models": {(kind, role): body}}`` of the highest
+    stored version, or ``{}`` when no fit has been saved."""
+    conn = connect(db_path)
+    try:
+        version = conn.execute("SELECT MAX(version) FROM prob_models").fetchone()[0]
+        if version is None:
+            return {}
+        rows = conn.execute(
+            "SELECT kind, role, fitted_at, json FROM prob_models WHERE version = ?",
+            (version,)).fetchall()
+    finally:
+        conn.close()
+    return {"version": version, "fitted_at": rows[0][2],
+            "models": {(kind, role): json.loads(body) for kind, role, _, body in rows}}
+
+
+def next_prob_version(db_path=None) -> int:
+    """The version the next fit should be saved under: the highest stored plus one,
+    or 1 when none."""
+    conn = connect(db_path)
+    try:
+        top = conn.execute("SELECT MAX(version) FROM prob_models").fetchone()[0]
+    finally:
+        conn.close()
+    return 1 if top is None else top + 1
