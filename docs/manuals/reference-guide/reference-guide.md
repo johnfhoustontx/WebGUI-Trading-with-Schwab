@@ -3943,7 +3943,9 @@ guesses, written down so that a factor with no history has a defined weight. A w
 slope, momentum, time of day) is held loosely and follows its data; one with a few
 (dealer, net premium, flow, sentiment) is held tightly and stays near its assumption until
 its own days build up. **What moved the chance** shows the days each weight rests on and
-marks **assumed** where they are under 5.
+marks **assumed** where its weight still rests mostly on the starting assumption (less
+than half of it learned from data), however many days it has: a tightly held factor
+stays assumed for a long time.
 
 **Reading the line under it.** "fitted Oct 25 · beats the usual rate on unseen days: no".
 The refit also tests itself: for each past week after the first 8, it fits on the weeks

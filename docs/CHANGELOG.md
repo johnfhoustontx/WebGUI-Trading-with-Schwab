@@ -57,12 +57,15 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   claim that "the probability is price only" was corrected in place.
 - **Rollout (each step the operator approves):** after the promote, build the history
   (`extract` on the Windows box from the E: copies and on prod from the VPS backups, then
-  `load`), enqueue `scalp_prob_refit` once, read `prob_models` version 1 (each model's
-  `n_days`, per-factor `days` and walk-forward result) and report them; the next session's
+  `load` each file, in one run or several: `load` merges with the rows already stored and
+  only fills their nulls), enqueue `scalp_prob_refit` once, read `prob_models` version 1
+  (each model's `n_days`, per-factor `days` and `data_share`, and walk-forward result) and report them; the next session's
   08:36 and 08:51 calls then carry `chance.version == 1`. Until then every figure is a dash
   with "not fitted yet".
-- **Not claimed:** the weights are mostly assumptions where a source has under 5 days of
-  history, and nothing has yet shown the chance beats the usual rate; the page says so on
+- **Not claimed:** the thin sources' weights stay mostly assumptions for months (the page
+  marks **assumed** any weight that still rests mostly on the starting assumption, less
+  than half of it learned from data, by its stored `data_share`, not by its days), and
+  nothing has yet shown the chance beats the usual rate; the page says so on
   every figure ("beats the usual rate on unseen days: no" is a legitimate answer).
 
 **Prior —** 2026-10-21 (**Opening Scalp: the page leads with one table of all three symbols; the detail is folded below it.**)

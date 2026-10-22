@@ -6410,8 +6410,16 @@ trades against it (long and credit share the sign of their side); the intercepts
 <code>netprem</code>, <code>flow</code>, <code>sentiment</code>) get the <strong>tight</strong> spread, <code>tight</code> (0.10): they stay near the
 assumption until their own days accumulate. A factor no row reads keeps its prior exactly.
 <code>days[factor]</code>, stored with the model, is the number of <strong>distinct days on which that factor
-had a reading</strong> (not a gap); the page marks a weight <strong>assumed</strong> when that is under
-<code>[prob] assumed_days</code> (5).</p>
+had a reading</strong> (not a gap), shown for context. Whether a weight is <strong>assumed</strong> is not a
+day count: the fit also stores <code>data_share[factor]</code>, the share of that weight's posterior
+precision that came from the data, <code>H_ii / (H_ii + 1/sd_i²)</code>, where <code>H = Xᵀ W diag(p(1−p)) X</code>
+is the weighted data Hessian at the fitted weights (the same row weights as the fit) and
+<code>sd_i</code> the factor's prior spread. The page marks a weight <strong>assumed</strong> while its share is
+under <code>[prob] assumed_share</code> (0.5): its weight still rests mostly on the starting
+assumption (less than half of it learned from data). A thin source under the tight spread
+(precision 100) can be read on dozens of days and stay assumed; a factor with ~180 days
+under the wide spread has a share near 1. A model stored before <code>data_share</code> was kept
+reads every factor as assumed.</p>
 <p><strong>Where the history comes from.</strong> Price, slope, momentum and the labels exist for about 180
 days (the stored bars and both outcome tables). The dealer, net-premium, flow and sentiment
 sources exist only where they were recorded: the live <code>intraday_readings</code> row of the call
@@ -6516,7 +6524,7 @@ For the 15-minute calls: <code>[intraday]</code> <code>start</code>, <code>end</
 <code>sentiment</code> (0.5). For the chance of target, <code>[prob]</code>: <code>ema_period</code> (20), <code>slope_bars</code>
 (3), <code>rsi_period</code> (14), <code>timeframes</code> ([5, 15, 60]), <code>lookback_sessions</code> (10), <code>cap</code> (3.0),
 <code>room_cap</code> (3.0), <code>flow_cap</code> (3), <code>min_train_weeks</code> (8), <code>min_brier_margin</code> (0.005),
-<code>refit_weekday</code> (5), <code>show</code> (true) and <code>assumed_days</code> (5); <code>[prob.priors]</code> (the twelve
+<code>refit_weekday</code> (5), <code>show</code> (true) and <code>assumed_share</code> (0.5); <code>[prob.priors]</code> (the twelve
 assumed weights above) and <code>[prob.prior_sd]</code> <code>wide</code> (1.0) and <code>tight</code> (0.10). The 08:36,
 nightly and Saturday refit slot times are in <code>config/sessions.toml</code>; the 15-minute slots are
 <code>[intraday]</code>.</p>

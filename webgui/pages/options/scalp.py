@@ -84,8 +84,8 @@ CHANCE_LABEL = "Chance of target"
 CHANCE_TITLE = "What moved the chance"
 CHANCE_NOTE = ("How far each factor moved the chance for the trade with the call, in "
                "percentage points, and how many days of history its weight rests on. "
-               "A factor marked assumed still has its starting weight: too little history "
-               "yet to have learned its own.")
+               "A factor marked assumed still rests mostly on its starting weight: less "
+               "than half of it has been learned from data.")
 NOT_FITTED = "not fitted yet"
 _MONTHS = ("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
            "Nov", "Dec")

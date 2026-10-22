@@ -2611,8 +2611,10 @@ the row names; the **15-minute call** and **08:36 call** cards show all four, in
 - **What moved the chance.** Open a symbol's section. Under its 15-minute call (and its
   08:36 call) a table lists every factor, the largest push first: its **reading** for the
   call, how many **percentage points** it moved the chance for the trade with the call, the
-  **days of history** its weight rests on, and **assumed** where those days are fewer than 5
-  (the weight is still the starting guess, not a measurement). Read a big push on an
+  **days of history** its weight rests on, and **assumed** where its weight still rests
+  mostly on the starting assumption (less than half of it learned from data): the push is
+  still the starting guess, not a measurement. Flow, sentiment, net premium and the dealer
+  read are held close to their assumption, so they can stay assumed after many days. Read a big push on an
   **assumed** factor with caution: nothing has tested it yet.
 - **The line under the figure.** *fitted Oct 25 · beats the usual rate on unseen days: no.*
   Every refit tests the chance the way the bucket study tests an edge: week by week, it is
@@ -3470,7 +3472,7 @@ a file on the server — in one place, grouped by what they do:
 | **Symbols & watchlists** | What the gamma collector polls, the BIG10 basket, the Net Prem groups |
 | **Local market data** | Whether the app may reuse market data it has already fetched from Schwab instead of asking again, how old that data may be, and how often watchlist symbols are fetched. See the note below |
 | **Sector map** | Which sector each symbol counts toward for the sector cap |
-| **Opening Scalp** | The symbols it calls and the bars it keeps, strike steps and spread widths, the target, stop and time stop, the volatility multipliers the study tries (a list of numbers), the cut points between low, mid and high agreement, and the scorecard window; for the 15-minute calls, their first and last time (not before 08:45, and the last call's hour must end by 15:00), the gap, how late one may still fire, the flat band, the day's three blocks, the margin an edge must clear, the early-close days and time, and the confirmation's look-back, margins, cut points, the sources it needs for a word and the weight of each source; for the chance of target, whether it is shown at all, the moving-average and RSI lengths, the bar sizes, each factor's assumed starting weight and how tightly it is held, the weeks of history before the honesty test, the margin the chance must beat the usual rate by, the days under which a weight reads *assumed*, and the weekday of the refit. The 08:36 call and 16:20 nightly pass times are under *Market hours & schedules* |
+| **Opening Scalp** | The symbols it calls and the bars it keeps, strike steps and spread widths, the target, stop and time stop, the volatility multipliers the study tries (a list of numbers), the cut points between low, mid and high agreement, and the scorecard window; for the 15-minute calls, their first and last time (not before 08:45, and the last call's hour must end by 15:00), the gap, how late one may still fire, the flat band, the day's three blocks, the margin an edge must clear, the early-close days and time, and the confirmation's look-back, margins, cut points, the sources it needs for a word and the weight of each source; for the chance of target, whether it is shown at all, the moving-average and RSI lengths, the bar sizes, each factor's assumed starting weight and how tightly it is held, the weeks of history before the honesty test, the margin the chance must beat the usual rate by for its *beats the usual rate* line to read yes (the chance is shown either way), the share of a weight that must be learned from data before it stops reading *assumed*, and the weekday of the refit. The 08:36 call and 16:20 nightly pass times are under *Market hours & schedules* |
 | **Commissions** | Schwab's per-contract rates |
 | **Ports / Environments** | Shown for reference only |
 

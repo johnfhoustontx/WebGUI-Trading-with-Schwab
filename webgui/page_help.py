@@ -1131,10 +1131,11 @@ time it just puts today's published calls back and never makes an off-slot call.
 **What moved the chance** (in each symbol's section) lists every factor in the
 chance, the largest push first: its **reading** for the call, how many percentage
 points it moved the chance for the trade with the call, and **how many days of
-history its weight rests on**. A factor marked **assumed** still has its starting
-weight, because it has fewer than 5 days of history to learn from (flow, market
-sentiment, net premium and the dealer read are the thin ones): its push is my guess,
-not something measured. A factor with no reading yet (no wall because Schwab sent no
+history its weight rests on**. A factor marked **assumed** has a weight that still
+rests mostly on the starting assumption: less than half of it has been learned from
+data. Flow, market sentiment, net premium and the dealer read are held close to their
+assumption on purpose until their history grows, so they can stay assumed even after
+many days: their push is the starting guess, not something measured. A factor with no reading yet (no wall because Schwab sent no
 Greeks, a missing bar) pushes nothing; it is never counted against the call.
 
 **Context: headlines, flow alerts and the report** is shown for context only. The

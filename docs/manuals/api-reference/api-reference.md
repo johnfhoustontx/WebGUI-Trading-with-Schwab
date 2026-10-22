@@ -575,8 +575,10 @@ each role's own `chance` is that role's figure, copied from `by_role`):
               room, breadth_room, flip_side, netprem, flow, sentiment, block:midday,
               block:afternoon), its raw reading signed for the call (null for a gap),
               its push in percentage points of chance, the distinct days its weight rests
-              on, and true while days < [prob] assumed_days (5): the weight is still the
-              starting assumption
+              on (for display), and true while the model's data_share for that factor
+              is under [prob] assumed_share (0.5): its weight still rests mostly on the
+              starting assumption (less than half of it learned from data). A model
+              stored without data_share reads every factor as assumed
 ```
 
 The figure is frozen with the call: a later refit never changes a published entry, and
