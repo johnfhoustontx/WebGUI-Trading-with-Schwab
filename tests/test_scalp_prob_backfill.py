@@ -329,8 +329,8 @@ def test_load_writes_prob_sources_with_the_kind(tmp_path):
     f = write_jsonl(tmp_path / "a.jsonl", [
         rec(snap({"SPY": entry(105.0)})),
         rec(snap({"SPY": entry(106.0)}), slot="08:51", kind="intraday")])
-    assert bf.load([f], db) == {"files": 1, "keys": 2, "written": 2, "skipped_live": 0,
-                                "bad_lines": 0}
+    assert bf.load([f], db) == {"files": 1, "keys": 2, "written": 2, "merged_stored": 0,
+                                "skipped_live": 0, "bad_lines": 0}
     assert scalp_store.prob_sources_all("morning", db)[(DAY_ISO, "08:36", "SPY")][
         "matrix"]["SPY"]["call_wall"] == 105.0
     assert (DAY_ISO, "08:51", "SPY") in scalp_store.prob_sources_all("intraday", db)
@@ -353,6 +353,42 @@ def test_load_merges_without_overwriting(tmp_path):
     assert got["netprem"]["QQQ"]["put"] == 4.0
     assert got["flow"]["window"]["bull"] == 2                   # a null flow is filled
     assert got["sources"]["flow"]["state"] == "backfill"
+
+
+def test_load_in_two_runs_keeps_both_runs_values(tmp_path):
+    # The Windows box's file in one run, prod's in another, overlapping keys: the
+    # second run merges with what the first stored, filling its nulls and never
+    # overwriting a non-null value.
+    db = str(tmp_path / "scalp.db")
+    windows = write_jsonl(tmp_path / "windows.jsonl", [
+        rec(snap({"SPY": entry(105.0), "QQQ": None},
+                 {"SPY": {"call": 1.0, "put": 2.0, "ts": 5}})),
+        rec(snap({"SPY": entry(110.0)}), slot="08:51", kind="intraday")])
+    prod = write_jsonl(tmp_path / "prod.jsonl", [
+        rec(snap({"SPY": entry(999.0), "QQQ": entry(300.0)},
+                 {"SPY": {"call": 8.0, "put": 8.0, "ts": 9},
+                  "QQQ": {"call": 3.0, "put": 4.0, "ts": 9}},
+                 {"date": DAY_ISO, "window": {"bull": 2, "bear": 0}})),
+        rec(snap({"SPY": entry(120.0)}), slot="09:06", kind="intraday")])
+    first = bf.load([windows], db)
+    second = bf.load([prod], db)
+    assert first["merged_stored"] == 0 and second["merged_stored"] == 1
+    got = scalp_store.prob_sources_all("morning", db)[(DAY_ISO, "08:36", "SPY")]
+    assert got["matrix"]["SPY"]["call_wall"] == 105.0           # run 1's value stays
+    assert got["matrix"]["QQQ"]["call_wall"] == 300.0           # run 2 fills a null
+    assert got["netprem"]["SPY"]["call"] == 1.0
+    assert got["netprem"]["QQQ"]["put"] == 4.0
+    assert got["flow"]["window"]["bull"] == 2
+    assert got["sources"]["flow"]["state"] == "backfill"
+    intraday = scalp_store.prob_sources_all("intraday", db)
+    assert intraday[(DAY_ISO, "08:51", "SPY")]["matrix"]["SPY"]["call_wall"] == 110.0
+    assert intraday[(DAY_ISO, "09:06", "SPY")]["matrix"]["SPY"]["call_wall"] == 120.0
+    # ...and a key the live record holds is still never written by either run
+    scalp_store.save_reading(DAY_ISO, "09:21", "SPY", {"live": True}, db)
+    third = bf.load([write_jsonl(tmp_path / "c.jsonl", [
+        rec(snap({"SPY": entry(1.0)}), slot="09:21", kind="intraday")])], db)
+    assert third["skipped_live"] == 1 and third["written"] == 0
+    assert (DAY_ISO, "09:21", "SPY") not in scalp_store.prob_sources_all("intraday", db)
 
 
 def test_load_never_shadows_a_live_reading(tmp_path):

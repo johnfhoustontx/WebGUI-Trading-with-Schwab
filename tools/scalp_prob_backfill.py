@@ -24,9 +24,11 @@ symbol's or big-ten member's row is the newest FETCHED (not carried) ``gex`` row
 or before the entry and no older than ``[confirm] max_age_min``; otherwise that
 name is ``None``. Sentiment is never extracted: its history is the live records.
 
-Safe to re-run: ``load`` replaces a stored row with the merge of the files given
-(the first non-null value of each field wins) and never writes a key the live
-``intraday_readings`` already holds.
+Safe to re-run, and the files may be loaded in separate runs (the Windows box's
+file in one, prod's in another): ``load`` merges each key with the row ALREADY
+STORED in ``prob_sources`` first, then the files in the order given, so a value
+already stored is never overwritten and a later file only fills its nulls. It
+never writes a key the live ``intraday_readings`` already holds.
 """
 import argparse
 import datetime as _dt
@@ -342,9 +344,12 @@ def _read_records(path):
 
 
 def load(in_paths, db_path) -> dict:
-    """Merge the files (in the order given) per ``(kind, day, slot, symbol)`` and
-    save them with ``save_prob_sources``, leaving out any ``(day, slot, symbol)``
-    the live ``intraday_readings`` already records. Returns the counts."""
+    """Merge, per ``(kind, day, slot, symbol)``, the row already stored in
+    ``prob_sources`` (if any) and then the files in the order given (each fills
+    only the nulls of what came before, so a stored non-null value is never
+    overwritten), and save the result with ``save_prob_sources``, leaving out any
+    ``(day, slot, symbol)`` the live ``intraday_readings`` already records.
+    Returns the counts (``merged_stored``: keys that already had a stored row)."""
     merged, bad = {}, 0
     for path in in_paths:
         records, bad_here = _read_records(path)
@@ -352,13 +357,23 @@ def load(in_paths, db_path) -> dict:
         for key, snapshot in records:
             merged[key] = merge_snapshots(merged[key], snapshot) if key in merged \
                 else merge_snapshots({}, snapshot)
+    stored, merged_stored = {}, 0
+    for kind in sorted({key[0] for key in merged}):
+        stored[kind] = scalp_store.prob_sources_all(kind, db_path)
+    for key in merged:
+        kind, day, slot, symbol = key
+        before = stored[kind].get((day, slot, symbol))
+        if isinstance(before, dict):
+            merged[key] = merge_snapshots(before, merged[key])
+            merged_stored += 1
     live = scalp_store.readings_all(db_path)
     rows = [(kind, day, slot, symbol, snapshot)
             for (kind, day, slot, symbol), snapshot in sorted(merged.items())
             if (day, slot, symbol) not in live]
     written = scalp_store.save_prob_sources(rows, db_path)
     return {"files": len(in_paths), "keys": len(merged), "written": written,
-            "skipped_live": len(merged) - len(rows), "bad_lines": bad}
+            "merged_stored": merged_stored, "skipped_live": len(merged) - len(rows),
+            "bad_lines": bad}
 
 
 # --- command line ------------------------------------------------------------------
