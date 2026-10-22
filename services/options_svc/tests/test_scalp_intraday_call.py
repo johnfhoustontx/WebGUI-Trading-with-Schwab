@@ -877,3 +877,125 @@ def test_the_morning_chain_capture_is_still_the_only_writer_of_chain_slices():
     src = (SVC / "scalp_intraday_call.py").read_text(encoding="utf-8")
     assert "scalp_chain.capture" not in src and "save_chain_slice" not in src
     assert "scalp_chain.fetch_slice" in src
+
+
+# ── the fitted chance of target ──────────────────────────────────────────────
+
+def seed_models(db, kind="intraday", version=1):
+    """A hand-made fit: one factor's weight, an intercept per symbol, no refit."""
+    body = {"weights": {"price:gap_pct": 0.8}, "intercepts": {s: 0.1 for s in PRICES},
+            "scaling": {"price:gap_pct": 1.0}, "days": {"price:gap_pct": 100},
+            "n_days": 100, "rows": 400, "priors": {}, "prior_sd": {},
+            "walk_forward": {"beats_usual": False}}
+    scalp_store.save_prob_models(version, "2026-10-21T20:00:00-05:00",
+                                 {(kind, r): body for r in ROLES}, db_path=db)
+
+
+def test_intraday_call_carries_a_chance(db, bus):
+    _seeded(db)
+    seed_models(db, version=5)
+    sic.run_slot(bus, SLOT, now=AT, db_path=db, client=FakeClient())
+    view = bus.cache_get(sic.VIEW).payload
+    ScalpView(**view)
+    latest = view["intraday"]["latest"]
+    for sym in PRICES:
+        entry = latest[sym]
+        assert entry["chance"]["version"] == 5
+        for role in ROLES:
+            assert 0.0 < entry["roles"][role]["chance"] < 1.0
+            assert entry["roles"][role]["chance"] == entry["chance"]["by_role"][role]
+    # frozen with the call
+    saved = scalp_store.intraday_calls_on(ISO, db_path=db)[(SLOT, "SPY")]
+    assert saved["chance"] == _roundtrip(latest["SPY"]["chance"])
+
+
+def test_the_morning_models_are_not_the_intraday_calls(db, bus):
+    _seeded(db)
+    seed_models(db, kind="morning")
+    sic.run_slot(bus, SLOT, now=AT, db_path=db, client=FakeClient())
+    chance = _intraday(bus)["latest"]["SPY"]["chance"]
+    assert set(chance["by_role"].values()) == {None}
+
+
+def test_the_timeline_cell_carries_the_named_trades_chance(db, bus):
+    seed_bars(db)
+    bucket = bucket_of(db, "SPY")
+    for sym in PRICES:
+        seed_study(db, sym, EVEN, bucket=bucket)
+    other = next(b for b in scalp_model.BUCKETS if b != bucket)
+    seed_study(db, "SPY", {"long_with": (24, 30)}, edges=("long_with",), bucket=bucket,
+               start=100)
+    seed_study(db, "SPY", {"long_with": (6, 30)}, bucket=other, start=200)
+    seed_models(db)
+    sic.run_slot(bus, SLOT, now=AT, db_path=db, client=FakeClient())
+    section = _intraday(bus)
+    spy = section["latest"]["SPY"]
+    assert spy["highlight"] == "long_with"
+    cells = section["timeline"][0]["symbols"]
+    assert cells["SPY"]["chance"] == spy["chance"]["by_role"]["long_with"]
+    # no highlight: the long-with-the-move trade is the one named
+    assert cells["QQQ"]["highlight"] is None
+    assert cells["QQQ"]["chance"] == section["latest"]["QQQ"]["chance"]["by_role"]["long_with"]
+    ScalpView(**bus.cache_get(sic.VIEW).payload)
+
+
+def test_a_cell_names_the_highlighted_role_else_long_with():
+    assert sic._cell({"direction": 1})["chance"] is None
+    assert sic._cell({"chance": None})["chance"] is None
+    by_role = {"ccs": 0.3, "long_with": 0.6}
+    assert sic._cell({"highlight": "ccs", "roles": {"ccs": {}},
+                      "chance": {"by_role": by_role}})["chance"] == 0.3
+    assert sic._cell({"chance": {"by_role": by_role}})["chance"] == 0.6
+
+
+def test_an_intraday_entry_with_no_roles_has_a_none_chance(db, bus):
+    seed_bars(db, flat=("QQQ",))
+    for sym in PRICES:
+        seed_study(db, sym, EVEN, bucket="high")
+    seed_models(db)
+    sic.run_slot(bus, SLOT, now=AT, db_path=db, client=FakeClient())
+    latest = _intraday(bus)["latest"]
+    assert latest["QQQ"]["roles"] == {} and latest["QQQ"]["chance"] is None
+    assert latest["SPY"]["chance"]["version"] == 1
+
+
+def test_switched_off_there_is_no_chance_key(db, bus, monkeypatch):
+    _seeded(db)
+    seed_models(db)
+    monkeypatch.setattr(scalp_config, "prob_show", lambda: False)
+    sic.run_slot(bus, SLOT, now=AT, db_path=db, client=FakeClient())
+    spy = _intraday(bus)["latest"]["SPY"]
+    assert "chance" not in spy
+    assert all("chance" not in role for role in spy["roles"].values())
+    assert _intraday(bus)["timeline"][0]["symbols"]["SPY"]["chance"] is None
+
+
+def test_a_refit_does_not_change_a_frozen_slot(db, bus):
+    _seeded(db)
+    seed_models(db, version=1)
+    sic.run_slot(bus, SLOT, now=AT, db_path=db, client=FakeClient())
+    first = _intraday(bus)["latest"]["SPY"]["chance"]
+    seed_models(db, version=2)
+    sic.run_slot(bus, SLOT, now=AT + dt.timedelta(minutes=3), db_path=db,
+                 client=FakeClient())
+    assert _intraday(bus)["latest"]["SPY"]["chance"] == first
+    assert first["version"] == 1
+
+
+def test_the_chance_reads_the_snapshot_of_the_sources_the_call_used(db, bus, monkeypatch):
+    _seeded(db)
+    seed_models(db)
+    seen = {}
+    real = scalp_call.scalp_prob.chance
+
+    def chance(kind, symbol, entry, snapshot, day, **kw):
+        seen[symbol] = (kind, snapshot, kw.get("models"), kw.get("trend_cache"))
+        return real(kind, symbol, entry, snapshot, day, **kw)
+    monkeypatch.setattr(scalp_call.scalp_prob, "chance", chance)
+    sic.run_slot(bus, SLOT, now=AT, db_path=db, client=FakeClient())
+    assert set(seen) == set(PRICES)
+    assert {v[0] for v in seen.values()} == {"intraday"}
+    assert all(isinstance(v[1], dict) and "matrix" in v[1] for v in seen.values())
+    # one load of the weights and one trend cache shared by the three symbols
+    assert len({id(v[2]) for v in seen.values()}) == 1
+    assert len({id(v[3]) for v in seen.values()}) == 1

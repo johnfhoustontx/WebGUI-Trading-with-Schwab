@@ -13,6 +13,9 @@ Rules:
   gives the no-chance answer: every trade ``None``, ``version`` ``None``. Never a
   made-up 0.5.
 * **A model fitted on no rows says nothing.** Its trade is ``None``, not 0.5.
+* **The room is priced as the fit priced it.** The factors' win points come from
+  ``scalp_prob_fit._win_points`` (the long trade at ``vol x iv_scale``), never from
+  the role's chain-priced points, so "room" means the same live as in training.
 * **The pushes are ``long_with``'s.** One per factor in that model, the raw
   reading beside the push converted to percentage points of chance at the
   predicted probability (``p (1 - p) push 100``), and whether the factor's weight
@@ -50,15 +53,6 @@ def _model(kind, role, body) -> scalp_prob_fit.Model:
         intercepts=dict(body.get("intercepts") or {}),
         scaling=dict(body.get("scaling") or {}), days=dict(body.get("days") or {}),
         n_days=int(body.get("n_days") or 0))
-
-
-def _win_points(entry):
-    """The target's size in points: the long trade with the move's win level, or
-    ``None`` when the call has none."""
-    roles = entry.get("roles")
-    own = roles.get(_PUSH_ROLE) if isinstance(roles, dict) else None
-    win = _finite(own.get("win_points")) if isinstance(own, dict) else None
-    return abs(win) if win else None
 
 
 def _pushes(model, probability, pushes, factors) -> list:
@@ -103,7 +97,10 @@ def chance(kind: str, symbol: str, entry: dict, snapshot: dict | None, day: date
                                           db_path=db_path, cache=trend_cache)
         factors = scalp_prob_features.factors(
             kind, symbol, entry.get("slot"), d, entry.get("inputs"), trend, snapshot,
-            _win_points(entry), entry.get("entry_spot"))
+            # the fit's own pricing, so "room" means here what it meant in training
+            scalp_prob_fit._win_points(symbol, day, d, entry.get("entry_spot"),
+                                       entry.get("entry_ts"), entry.get("vol_at_entry")),
+            entry.get("entry_spot"))
 
         out = _none()
         out["version"] = stored.get("version")

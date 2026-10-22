@@ -42,7 +42,8 @@ def models(kind="morning", long_with=None, long_against=None, version=7):
 
 def entry(direction=1, gap=1.0, kind="morning"):
     return {"direction": direction, "inputs": {"gap_pct": gap}, "entry_ts": ENTRY_TS,
-            "entry_spot": 500.0, "slot": "08:36" if kind == "morning" else "10:15",
+            "entry_spot": 500.0, "vol_at_entry": 0.2,
+            "slot": "08:36" if kind == "morning" else "10:15",
             "roles": {"long_with": {"win_points": 2.0}}}
 
 
@@ -165,4 +166,36 @@ def test_reads_the_store_when_no_models_are_handed_in(tmp_path):
     out = scalp_prob.chance("morning", "SPY", entry(), None, DAY, db_path=db,
                             trend_cache={})
     assert out["version"] == 3
+    assert out["by_role"]["long_with"] == pytest.approx(sigmoid(0.8))
+
+
+def test_the_room_factor_is_priced_as_the_fit_prices_it(monkeypatch):
+    # The factors' win points are the fit's own pricing (scalp_prob_fit._win_points),
+    # never the role's chain-priced points: the room means the same live as in training.
+    seen = {}
+
+    def fake_win_points(*args):
+        seen["fit"] = args
+        return 3.5
+
+    real = scalp_prob.scalp_prob_features.factors
+
+    def spy(kind, symbol, slot, d, inputs, trend, snapshot, win_points, spot):
+        seen["factors"] = win_points
+        return real(kind, symbol, slot, d, inputs, trend, snapshot, win_points, spot)
+
+    monkeypatch.setattr(scalp_prob.scalp_prob_fit, "_win_points", fake_win_points)
+    monkeypatch.setattr(scalp_prob.scalp_prob_features, "factors", spy)
+    e = entry()
+    e["roles"]["long_with"]["win_points"] = 2.0     # the chain's figure: not used
+    scalp_prob.chance("morning", "SPY", e, None, DAY, models=models(), trend_cache={})
+    assert seen["fit"] == ("SPY", DAY, 1, 500.0, ENTRY_TS, 0.2)
+    assert seen["factors"] == 3.5
+
+
+def test_an_entry_with_no_roles_still_gets_its_chance():
+    e = entry()
+    e.pop("roles")
+    out = scalp_prob.chance("morning", "SPY", e, None, DAY, models=models(),
+                            trend_cache={})
     assert out["by_role"]["long_with"] == pytest.approx(sigmoid(0.8))

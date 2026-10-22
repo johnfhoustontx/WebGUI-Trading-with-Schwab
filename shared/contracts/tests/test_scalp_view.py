@@ -208,3 +208,65 @@ def test_intraday_confirmation_not_a_mapping_refused():
     entry = dict(INTRADAY_ENTRY, confirmation=0.5)
     with pytest.raises(ValidationError):
         ScalpView(**_with_intraday(dict(INTRADAY, latest={"SPY": entry})))
+
+
+# ── the fitted chance of target ──────────────────────────────────────────────
+CHANCE = {"version": 3, "fitted_at": "2026-10-21T20:00:00-05:00",
+          "by_role": {"long_with": 0.41, "long_against": 0.22, "credit_with": None,
+                      "credit_against": 0.0},
+          "beats_usual": {}, "pushes": []}
+
+
+def _chance_payload(chance, role_chance=0.41):
+    role = dict(ROLE, chance=role_chance)
+    return dict(PAYLOAD, symbols={"$SPX": dict(SYMBOL, roles={"primary": role},
+                                               chance=chance)})
+
+
+def test_scalpview_accepts_a_chance_or_none_or_no_key():
+    ScalpView(**_chance_payload(CHANCE))
+    ScalpView(**_chance_payload(None, role_chance=None))
+    ScalpView(**_chance_payload({"version": None, "fitted_at": None, "by_role": {}}))
+    ScalpView(**PAYLOAD)                      # absent: switched off
+
+
+def test_scalpview_rejects_a_chance_above_one():
+    for bad in (1.2, -0.1, float("nan"), True):
+        with pytest.raises(ValidationError):
+            ScalpView(**_chance_payload(CHANCE, role_chance=bad))
+        with pytest.raises(ValidationError):
+            ScalpView(**_chance_payload(dict(CHANCE, by_role={"long_with": bad})))
+
+
+def test_scalpview_rejects_a_malformed_chance():
+    for bad in (5, "x", [0.5]):
+        with pytest.raises(ValidationError):
+            ScalpView(**_chance_payload(bad, role_chance=None))
+    with pytest.raises(ValidationError):
+        ScalpView(**_chance_payload(dict(CHANCE, by_role=[0.5]), role_chance=None))
+
+
+def test_intraday_chance_is_checked_on_the_entry_and_its_roles():
+    def view(chance, role_chance=0.3):
+        role = dict(ROLE, chance=role_chance)
+        entry = dict(INTRADAY_ENTRY, roles={"primary": role}, chance=chance)
+        return _with_intraday(dict(INTRADAY, latest={"SPY": entry}))
+    ScalpView(**view(CHANCE))
+    ScalpView(**view(None, role_chance=None))
+    for bad in (1.5, -0.2, float("inf"), True):
+        with pytest.raises(ValidationError):
+            ScalpView(**view(CHANCE, role_chance=bad))
+        with pytest.raises(ValidationError):
+            ScalpView(**view(dict(CHANCE, by_role={"long_with": bad})))
+    with pytest.raises(ValidationError):
+        ScalpView(**view(7))
+
+
+def test_intraday_timeline_chance_is_a_unit_number():
+    ok = {"slot": "09:06", "symbols": {"SPY": {"direction": 1, "chance": 0.4},
+                                       "QQQ": {"direction": None, "chance": None}}}
+    ScalpView(**_with_intraday(dict(INTRADAY, timeline=[ok])))
+    for bad in (1.2, -0.1, float("nan"), True):
+        row = {"slot": "09:06", "symbols": {"SPY": {"chance": bad}}}
+        with pytest.raises(ValidationError):
+            ScalpView(**_with_intraday(dict(INTRADAY, timeline=[row])))

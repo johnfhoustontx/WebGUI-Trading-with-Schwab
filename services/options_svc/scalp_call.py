@@ -24,6 +24,13 @@ Rules that keep the number honest, each from the design or a review ruling:
 * **A call keeps its rules.** Each called symbol's entry carries ``rules``
   (target, stop, time stop, minimum premium, ``iv_scale``) as they were when it
   was made; the evening's grading walks the trade under those.
+* **Every fresh call carries its chance of target**, frozen with it. After the
+  verdict ``attach_chance`` (``scalp_prob.chance``, the newest stored weights read
+  once per build) writes ``entry["chance"]`` and each role's ``chance``; the
+  sources are the ones ``run`` read once and the 08:36 record saves. It changes no
+  rate, price or highlight. An entry with no roles has ``chance`` ``None``;
+  ``[prob] show`` off writes no ``chance`` key at all (the page's "off", against
+  ``version`` ``None``, "not fitted yet"). A refit never touches a published call.
 * **One run at a time.** ``run`` and ``republish_scorecard`` hold one lock: the
   08:36 slot and a page refresh never build (and fetch) side by side.
 * **No edge is said plainly.** The stored verdict is two-sided. ``highlight`` is
@@ -79,9 +86,9 @@ from shared import scalp_config
 from shared.contracts.options import ScalpView
 from shared.numeric import finite as _finite
 
-from services.options_svc import (scalp_chain, scalp_fetch, scalp_inputs, scalp_model,
-                                  scalp_record, scalp_score, scalp_sim, scalp_store,
-                                  scalp_study)
+from services.options_svc import (scalp_chain, scalp_confirm, scalp_fetch, scalp_inputs,
+                                  scalp_model, scalp_prob, scalp_record, scalp_score,
+                                  scalp_sim, scalp_store, scalp_study)
 
 log = logging.getLogger("options_svc.scalp_call")
 
@@ -382,6 +389,50 @@ def _verdict(entry) -> None:
     entry["note"] = None if better else NO_EDGE
 
 
+# ── the fitted chance of target ──────────────────────────────────────────────
+def chance_context(db_path):
+    """What one build shares across its symbols' chances: the newest stored
+    weights, read ONCE, and a trend-bar cache. ``None`` when the chance is
+    switched off (``[prob] show``): nothing is then computed and no ``chance``
+    key is written, which is how the page tells "off" from "not fitted yet"
+    (``chance`` with ``version`` None)."""
+    if not scalp_config.prob_show():
+        return None
+    try:
+        models = scalp_store.latest_prob_models(db_path=db_path)
+    except Exception:
+        _degrade.degraded("options.scalp_prob", detail="models")
+        models = {}
+    return {"models": models, "trend_cache": {}}
+
+
+def attach_chance(kind, symbol, entry, day, src, ctx, db_path) -> None:
+    """Give a FRESH ``entry`` its ``chance`` (``scalp_prob.chance``) and each role
+    its own, AFTER the verdict: nothing else in the entry is read back or
+    changed. An entry with no roles (flat, missed, failed, early close) gets
+    ``None``. ``src`` is ``scalp_confirm.sources``' answer, or ``None`` (every
+    source factor is then a gap); the snapshot is the one ``scalp_record.record``
+    builds for the same call. A stored entry is never passed here: it is reused
+    whole, its chance included. ``ctx`` ``None`` is "switched off". Never raises."""
+    if ctx is None:
+        return
+    try:
+        if not _is_call(entry):
+            entry["chance"] = None
+            return
+        snapshot = (scalp_confirm.snapshot(src, scalp_config.symbols(),
+                                           entry_ts=entry.get("entry_ts"), symbol=symbol)
+                    if src else None)
+        got = scalp_prob.chance(kind, symbol, entry, snapshot, day, db_path=db_path,
+                                models=ctx["models"], trend_cache=ctx["trend_cache"])
+        entry["chance"] = got
+        for role, body in entry["roles"].items():
+            body["chance"] = (got.get("by_role") or {}).get(role)
+    except Exception:
+        _degrade.degraded("options.scalp_prob", detail=f"attach {symbol}")
+        entry["chance"] = None
+
+
 def _scorecard(db_path) -> dict:
     """The graded record (``scalp_score``) every payload carries, or ``{}``: the
     calls stay on screen when the record cannot be read."""
@@ -393,7 +444,8 @@ def _scorecard(db_path) -> dict:
 
 
 # ── build and publish ────────────────────────────────────────────────────────
-def build(day: _dt.date, now: _dt.datetime, db_path=None, client=None) -> dict:
+def build(day: _dt.date, now: _dt.datetime, db_path=None, client=None,
+          src=None) -> dict:
     """The view's payload for ``day`` (``context`` is ``run``'s: it reads the bus).
 
     A symbol whose call was already PUBLISHED today is reused whole from
@@ -405,7 +457,12 @@ def build(day: _dt.date, now: _dt.datetime, db_path=None, client=None) -> dict:
     with its inputs (no roles either way). Bars are topped up and chains
     captured only when some symbol gets a fresh call inside the window, and only
     that symbol's chain. Nothing is saved here: ``run`` saves what it actually
-    published. One symbol failing never stops the others."""
+    published. One symbol failing never stops the others.
+
+    ``src`` is ``scalp_confirm.sources``' answer, read by ``run`` once (the same
+    one the 08:36 record saves). Each FRESH call's chance of target is computed
+    from it after its verdict (``attach_chance``); with ``src`` ``None`` (a test,
+    an old caller) every source factor is a gap, and this never reads the bus."""
     iso = day.isoformat()
     frozen = {s: e for s, e in scalp_store.calls_on(iso, db_path=db_path).items()
               if _is_call(e)}
@@ -427,6 +484,7 @@ def build(day: _dt.date, now: _dt.datetime, db_path=None, client=None) -> dict:
                                                  db_path=db_path)
 
     symbols = {}
+    ctx = chance_context(db_path) if len(frozen) < len(scalp_config.symbols()) else None
     for symbol in scalp_config.symbols():
         if symbol in frozen:
             symbols[symbol] = frozen[symbol]
@@ -437,6 +495,7 @@ def build(day: _dt.date, now: _dt.datetime, db_path=None, client=None) -> dict:
             _degrade.degraded("options.scalp_symbol", detail=symbol)
             entry = {"direction": None, "roles": {}, "chain": None, "highlight": None,
                      "avoid": [], "note": FAILED}
+        attach_chance("morning", symbol, entry, day, src, ctx, db_path)
         if not late:
             entry["made_at"] = now.isoformat()
         symbols[symbol] = entry
@@ -509,13 +568,15 @@ def _run(bus, now, db_path, client) -> None:
     now = _ct_now(now)
     day = now.date()
     built = False
+    src = None
     try:
         if not _mc.is_trading_day(day):
             payload = _held("closed", bus, day, now, db_path)
         elif now < _call_time(day):
             payload = _held("waiting", bus, day, now, db_path)
         else:
-            payload = build(day, now, db_path=db_path, client=client)
+            src = scalp_confirm.sources(bus, now)      # read ONCE: the call and its record
+            payload = build(day, now, db_path=db_path, client=client, src=src)
             payload["context"] = context(bus, day)
             payload["next_call"] = _next_call(day, "call")
             built = True
@@ -533,7 +594,7 @@ def _run(bus, now, db_path, client) -> None:
     if built:
         # Only now is it what the page was shown: freeze it.
         _save_published(payload, db_path)
-        _record_call_slot(bus, day, now, payload, db_path)
+        _record_call_slot(bus, day, now, payload, db_path, src=src)
 
 
 def _keep_intraday(bus, payload) -> None:
@@ -559,7 +620,7 @@ def _keep_intraday(bus, payload) -> None:
     payload["intraday"] = section
 
 
-def _record_call_slot(bus, day, now, payload, db_path) -> None:
+def _record_call_slot(bus, day, now, payload, db_path, src=None) -> None:
     """Record the confirmation inputs at the call's own moment (``"08:36"`` at the
     defaults), with each called symbol's direction and the long-with-the-move
     role's points to target, so the 08:36 row is scored like an intraday slot.
@@ -568,7 +629,8 @@ def _record_call_slot(bus, day, now, payload, db_path) -> None:
     too (and reuses the frozen calls), but what the sources say then is not what
     the call saw, and it must not replace the 08:36 row. A failure here never
     touches the call: it is already published and saved, and this is counted as
-    ``options.scalp_record``."""
+    ``options.scalp_record``. ``src`` is the sources the call (and its chance) was
+    built from, so the recorded row is exactly what they saw."""
     try:
         at = _call_time(day)
         if now >= at + _dt.timedelta(minutes=_mc.slot_grace_min("scalp")):
@@ -585,7 +647,8 @@ def _record_call_slot(bus, day, now, payload, db_path) -> None:
                 spots[symbol] = _finite(entry.get("entry_spot"))
         scalp_record.record(bus, day, at.strftime("%H:%M"), now=now, db_path=db_path,
                             directions=directions, win_points=win_points,
-                            entry_ts=int(_entry_time(day).timestamp()), spots=spots)
+                            entry_ts=int(_entry_time(day).timestamp()), spots=spots,
+                            src=src)
     except Exception:
         _degrade.degraded("options.scalp_record", detail="call")
 

@@ -346,10 +346,10 @@ def _signed_unit_number(v, name: str):
     return v
 
 
-_RATE_KEYS = ("p", "lo", "hi", "p_base")
+_RATE_KEYS = ("p", "lo", "hi", "p_base", "chance")
 #: The rates a timeline cell may carry: a rate and its base, or the highlighted
 #: role's (``edge_p`` / ``edge_p_base``).
-_TIMELINE_RATE_KEYS = ("p", "p_base", "edge_p", "edge_p_base")
+_TIMELINE_RATE_KEYS = ("p", "p_base", "edge_p", "edge_p_base", "chance")
 
 
 def _check_roles(roles) -> None:
@@ -365,6 +365,24 @@ def _check_roles(roles) -> None:
         for key in _RATE_KEYS:
             if role.get(key) is not None:
                 _unit_number(role[key], key)
+
+
+def _check_chance(entry) -> None:
+    """An entry's ``chance`` (the fitted chance of target) is absent, ``None``, or
+    a mapping whose ``by_role`` values are each a unit number or ``None``."""
+    chance = entry.get("chance")
+    if chance is None:
+        return
+    if not isinstance(chance, dict):
+        raise ValueError("chance is not a mapping")
+    by_role = chance.get("by_role")
+    if by_role is None:
+        return
+    if not isinstance(by_role, dict):
+        raise ValueError("chance by_role is not a mapping")
+    for value in by_role.values():
+        if value is not None:
+            _unit_number(value, "chance")
 
 
 class ScalpView(_MoneyView):
@@ -392,6 +410,7 @@ class ScalpView(_MoneyView):
             if entry.get("alignment") is not None:
                 _finite_number(entry["alignment"], "alignment")
             _check_roles(entry.get("roles"))
+            _check_chance(entry)
         return symbols
 
     @field_validator("intraday", mode="after")
@@ -405,6 +424,7 @@ class ScalpView(_MoneyView):
                 if not isinstance(entry, dict):
                     raise ValueError("an intraday entry is not a mapping")
                 _check_roles(entry.get("roles"))
+                _check_chance(entry)
                 confirmation = entry.get("confirmation")
                 if confirmation is None:
                     continue

@@ -330,6 +330,7 @@ def _build(day, slot, now, db_path, client, stored, src):
     cut = scalp_config.intraday_slot_cut(day, slot)
     entries, readings, fresh = {}, {}, []
     todo = [s for s in scalp_config.symbols() if (slot, s) not in stored]
+    ctx = scalp_call.chance_context(db_path) if todo else None   # one load per slot
     failed = set()
     if todo and not (late or cut):
         failed = _top_up(day, db_path, client)
@@ -357,6 +358,7 @@ def _build(day, slot, now, db_path, client, stored, src):
         except Exception:
             _degrade.degraded(_AREA, detail=f"symbol {symbol}")
             entry = _failed_entry(slot)
+        scalp_call.attach_chance("intraday", symbol, entry, day, src, ctx, db_path)
         if not (late or cut):
             _mark_inputs(entry, symbol, failed)
             entry["made_at"] = _wall_now().isoformat()
@@ -369,7 +371,9 @@ def build_slot(day, slot, now, db_path=None, client=None, stored=None, src=None)
     ``stored`` (default: the saved ``intraday_calls``) is reused whole; the others
     are built fresh, fetching bars and chains only inside the trade's window
     (``MISSED`` after it). ``src`` is ``scalp_confirm.sources``'s answer (default:
-    none, every confirmation component absent). Saves nothing."""
+    none, every confirmation component absent). Each fresh call also carries its
+    fitted chance of target (``scalp_call.attach_chance``), computed from the same
+    ``src`` after its verdict. Saves nothing."""
     now = _ct_now(now)
     if stored is None:
         stored = scalp_store.intraday_calls_on(day.isoformat(), db_path=db_path)
@@ -377,8 +381,17 @@ def build_slot(day, slot, now, db_path=None, client=None, stored=None, src=None)
 
 
 # ── the view ─────────────────────────────────────────────────────────────────
+def _cell_chance(entry, named):
+    """The named trade's fitted chance from the entry's ``chance`` (``None`` when
+    it has none)."""
+    chance = entry.get("chance")
+    by_role = chance.get("by_role") if isinstance(chance, dict) else None
+    return _finite(by_role.get(named)) if isinstance(by_role, dict) else None
+
+
 def _cell(entry) -> dict:
-    """One symbol's compact timeline cell."""
+    """One symbol's compact timeline cell. ``chance`` is the named trade's: the
+    highlighted role's when there is one, else the long-with-the-move trade's."""
     entry = entry if isinstance(entry, dict) else {}
     hl = entry.get("highlight")
     role = (entry.get("roles") or {}).get(hl) if hl else None
@@ -388,6 +401,7 @@ def _cell(entry) -> dict:
             "edge_p": _finite(role.get("p")) if isinstance(role, dict) else None,
             "edge_p_base": _finite(role.get("p_base")) if isinstance(role, dict) else None,
             "n_days": _finite(role.get("n_days")) if isinstance(role, dict) else None,
+            "chance": _cell_chance(entry, hl or "long_with"),
             "note": entry.get("note")}
 
 

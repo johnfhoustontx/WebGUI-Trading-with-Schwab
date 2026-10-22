@@ -23,7 +23,8 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from services import _degrade
-from services.options_svc import handlers, scalp_call, scalp_chain, scalp_fetch, scalp_store
+from services.options_svc import (handlers, scalp_call, scalp_chain, scalp_confirm,
+                                  scalp_fetch, scalp_store)
 from services.options_svc.scalp_sim import ROLES
 from shared import scalp_config
 from shared.bus import Bus
@@ -900,3 +901,154 @@ def test_scalp_modules_do_not_import_compute():
             assert not any(n == "compute" or n.endswith(".compute") for n in names), \
                 f"{path.name} imports compute"
 
+
+
+# ── the fitted chance of target ──────────────────────────────────────────────
+
+def seed_models(db, kind="morning", version=1):
+    """A hand-made fit: one factor's weight, an intercept per symbol, no refit."""
+    body = {"weights": {"price:gap_pct": 0.8}, "intercepts": {s: 0.1 for s in PRICES},
+            "scaling": {"price:gap_pct": 1.0}, "days": {"price:gap_pct": 100},
+            "n_days": 100, "rows": 400, "priors": {}, "prior_sd": {},
+            "walk_forward": {"beats_usual": False}}
+    scalp_store.save_prob_models(version, "2026-10-21T20:00:00-05:00",
+                                 {(kind, r): body for r in ROLES}, db_path=db)
+
+
+def test_0836_call_carries_a_chance_per_role(db):
+    _seeded(db)
+    seed_models(db, version=4)
+    payload = scalp_call.build(DAY, NOW, db_path=db, client=FakeClient(),
+                               src=scalp_confirm.sources(Bus(fake=True), NOW))
+    ScalpView(**payload)
+    for sym in PRICES:
+        entry = payload["symbols"][sym]
+        assert entry["chance"]["version"] == 4
+        assert entry["chance"]["beats_usual"] == {r: False for r in ROLES}
+        for role in ROLES:
+            c = entry["roles"][role]["chance"]
+            assert 0.0 < c < 1.0
+            assert c == entry["chance"]["by_role"][role]
+
+
+def test_the_chance_is_computed_after_the_verdict_and_changes_nothing_else(db, monkeypatch):
+    _seeded(db)
+    seed_models(db)
+    with_chance = scalp_call.build(DAY, NOW, db_path=db, client=FakeClient())
+    monkeypatch.setattr(scalp_config, "prob_show", lambda: False)
+    without = scalp_call.build(DAY, NOW, db_path=db, client=FakeClient())
+
+    def bare(entry):
+        out = {k: v for k, v in entry.items() if k != "chance"}
+        out["roles"] = {r: {k: v for k, v in role.items() if k != "chance"}
+                        for r, role in entry["roles"].items()}
+        return out
+    for sym in PRICES:
+        assert bare(with_chance["symbols"][sym]) == bare(without["symbols"][sym])
+
+
+def test_switched_off_there_is_no_chance_key_at_all(db, monkeypatch):
+    _seeded(db)
+    seed_models(db)
+    monkeypatch.setattr(scalp_config, "prob_show", lambda: False)
+
+    def boom(*a, **k):
+        raise AssertionError("no chance may be computed when it is switched off")
+    monkeypatch.setattr(scalp_call.scalp_prob, "chance", boom)
+    payload = scalp_call.build(DAY, NOW, db_path=db, client=FakeClient())
+    for entry in payload["symbols"].values():
+        assert "chance" not in entry
+        assert all("chance" not in role for role in entry["roles"].values())
+
+
+def test_no_model_publishes_with_none(db, bus):
+    _seeded(db)                                  # nothing fitted yet
+    scalp_call.run(bus, now=NOW, db_path=db, client=FakeClient())
+    view = bus.cache_get(scalp_call.VIEW).payload
+    ScalpView(**view)
+    spy = view["symbols"]["SPY"]
+    assert spy["chance"]["version"] is None          # not fitted yet, not "off"
+    assert all(role["chance"] is None for role in spy["roles"].values())
+
+
+def test_an_entry_with_no_roles_has_a_none_chance(db):
+    seed_morning(db, flat=("SPY",))
+    for sym in PRICES:
+        seed_study(db, sym, EVEN)
+    seed_models(db)
+    payload = scalp_call.build(DAY, NOW, db_path=db, client=FakeClient())
+    assert payload["symbols"]["SPY"]["roles"] == {}
+    assert payload["symbols"]["SPY"]["chance"] is None
+    assert payload["symbols"]["QQQ"]["chance"]["version"] == 1
+
+
+def test_refit_does_not_change_a_frozen_call(db, bus):
+    _seeded(db)
+    seed_models(db, version=1)
+    scalp_call.run(bus, now=NOW, db_path=db, client=FakeClient())
+    first = bus.cache_get(scalp_call.VIEW).payload["symbols"]["SPY"]["chance"]
+    assert first["version"] == 1
+    seed_models(db, version=2)                   # a refit lands between runs
+    again = scalp_call.build(DAY, dt.datetime(2026, 10, 19, 9, 0, tzinfo=CT),
+                             db_path=db, client=FakeClient({}))
+    assert again["symbols"]["SPY"]["chance"] == first
+    assert again["symbols"]["SPY"]["chance"]["version"] == 1
+
+
+def test_the_chance_sees_the_sources_the_record_saw(db, bus, monkeypatch):
+    _seeded(db)
+    seed_models(db)
+    reads = []
+    real = scalp_call.scalp_confirm.sources
+
+    def counted(b, now):
+        reads.append(now)
+        return real(b, now)
+    monkeypatch.setattr(scalp_call.scalp_confirm, "sources", counted)
+    seen = {}
+    real_record = scalp_call.scalp_record.record
+
+    def record(*a, **kw):
+        seen["src"] = kw.get("src")
+        return real_record(*a, **kw)
+    monkeypatch.setattr(scalp_call.scalp_record, "record", record)
+    chosen = {}
+    real_chance = scalp_call.scalp_prob.chance
+
+    def chance(kind, symbol, entry, snapshot, day, **kw):
+        chosen[symbol] = snapshot
+        return real_chance(kind, symbol, entry, snapshot, day, **kw)
+    monkeypatch.setattr(scalp_call.scalp_prob, "chance", chance)
+    scalp_call.run(bus, now=NOW, db_path=db, client=FakeClient())
+    assert len(reads) == 1                       # read ONCE for the whole run
+    assert seen["src"] is not None
+    assert set(chosen) == set(PRICES)
+    assert all(isinstance(v, dict) and "matrix" in v for v in chosen.values())
+
+
+def test_build_without_sources_reads_no_bus_and_gives_a_none_snapshot(db, monkeypatch):
+    _seeded(db)
+    seed_models(db)
+    chosen = {}
+    real_chance = scalp_call.scalp_prob.chance
+
+    def chance(kind, symbol, entry, snapshot, day, **kw):
+        chosen[symbol] = snapshot
+        return real_chance(kind, symbol, entry, snapshot, day, **kw)
+    monkeypatch.setattr(scalp_call.scalp_prob, "chance", chance)
+    scalp_call.build(DAY, NOW, db_path=db, client=FakeClient())
+    assert chosen == {s: None for s in PRICES}
+
+
+def test_the_models_are_loaded_once_per_build(db, monkeypatch):
+    _seeded(db)
+    seed_models(db)
+    loads = []
+    real = scalp_store.latest_prob_models
+
+    def counted(db_path=None):
+        loads.append(db_path)
+        return real(db_path=db_path)
+    monkeypatch.setattr(scalp_store, "latest_prob_models", counted)
+    scalp_call.build(DAY, NOW, db_path=db, client=FakeClient())
+    assert len(loads) == 1
