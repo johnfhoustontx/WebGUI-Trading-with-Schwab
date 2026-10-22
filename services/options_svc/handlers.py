@@ -37,6 +37,7 @@ from services.options_svc import rate_trade
 from services.options_svc import rescue
 from services.options_svc import scalp_call
 from services.options_svc import scalp_intraday_call
+from services.options_svc import scalp_prob_fit
 from services.options_svc import tracked
 # X (design 2026-09-22): the image card posted with each market report.
 from services.options_svc import report_card
@@ -145,6 +146,8 @@ def _is_stale_open(command) -> bool:
 #                   never re-post (the report dedup covers reports only).
 # ``scalp_refresh`` -> the Opening Scalp's bars and three 0DTE chains, about 30
 #                   Schwab calls, for a page that has long since moved on.
+# ``scalp_prob_refit`` -> a fit of the chance's weights stored as a NEW version:
+#                   a replayed command would store another one for nothing.
 # The paper-book and operator-state commands (audit AR-05): each one deletes
 # or overwrites something, and none was gated. A replayed ``paper_reset`` wiped
 # the account; a replayed ``set_autoclose`` put a toggle back to an old value.
@@ -154,6 +157,7 @@ def _is_stale_open(command) -> bool:
 # because they answer the page with a ``stale`` outcome.)
 _REPLAY_GUARDED = ("rescue_apply", "gamma_analyze", "calc_rate", "dossier",
                    "x_post", "x_post_report", "scalp_refresh",
+                   "scalp_prob_refit",
                    "paper_reset", "paper_close", "paper_delete",
                    "paper_delete_closed", "captured_close",
                    "set_autoclose", "set_manual_paper_lifecycle")
@@ -179,7 +183,8 @@ SAFE_LATE = frozenset({"refresh_paper", "paper_reload", "captured_reload",
 # writer takes ``paper_lock.BOOK_LOCK``.
 SLOW_LANE = frozenset({"rescan", "swing_scan", "gamma_analyze", "gamma_explain",
                        "gamma_history", "calc_rate", "dossier",
-                       "x_post", "x_post_report", "scalp_refresh"})
+                       "x_post", "x_post_report", "scalp_refresh",
+                       "scalp_prob_refit"})
 
 
 def _market_state(bus):
@@ -3512,6 +3517,8 @@ _STALE_WHY = {
     "dossier": "a replayed lookup must not re-spend its Schwab calls",
     "scalp_refresh": "a replayed refresh must not re-fetch the scalp's bars and "
                      "chains",
+    "scalp_prob_refit": "a replayed refit would fit and store another version "
+                        "for nothing",
     "x_post": "a replayed command must not re-post to X",
     "x_post_report": "a replayed command must not re-post to X",
     "paper_reset": "a replayed reset would wipe the paper account",
@@ -3935,6 +3942,18 @@ def _cmd_scalp_refresh(bus, command):
         log.exception("scalp_refresh: the intraday section degraded")
 
 
+@_command("scalp_prob_refit")
+def _cmd_scalp_prob_refit(bus, command):
+    # Fit the chance-of-target weights now, as the Saturday slot does. Replay-
+    # guarded (see _REPLAY_GUARDED): each run stores a new version. Slow lane:
+    # a fit takes seconds to minutes and touches no paper book. Publishes
+    # nothing: the next call reads the new weights (scalp_prob_fit.refit never
+    # raises; it counts its own failure).
+    out = scalp_prob_fit.refit()
+    log.info("scalp_prob_refit: version %s, rows %s, %.1fs",
+             out.get("version"), out.get("rows"), out.get("seconds") or 0.0)
+
+
 @_command("x_post")
 def _cmd_x_post(bus, command):
     # A public post on X. Replay-guarded (see _REPLAY_GUARDED).
@@ -4061,7 +4080,9 @@ def handle_command(bus, command) -> None:
     time or on a closed day it republishes the last call and fetches nothing;
     one run at a time with the 08:36 slot), then fill the current intraday slot
     inside its window, or put today's published slots back off one (never an
-    off-slot call); else no-op.
+    off-slot call); ``scalp_prob_refit`` → fit the Opening Scalp's chance-of-target
+    weights from the stored history and keep them as a new version (replay-guarded,
+    slow lane; publishes nothing - the next call reads the new weights); else no-op.
 
     ⚠ This list IS the API the GUI codes against, and prose drifts:
     ``gamma_history``/``rescue_adhoc``/``sim_replay`` were implemented and missing

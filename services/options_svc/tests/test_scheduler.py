@@ -738,6 +738,44 @@ def test_scalp_bars_due_skips_weekends_and_holidays():
     assert scheduler.scalp_bars_due(_ct(2026, 1, 1, 16, 30), set()) is None   # holiday
 
 
+# ── Opening Scalp weekly refit of the chance's weights ([slots.scalp_prob]) ──
+def test_scalp_prob_due_only_on_the_refit_weekday():
+    # 2026-06-13 is a Saturday, 2026-06-12 a Friday. NOT gated on a trading day.
+    ran = set()
+    assert scheduler.scalp_prob_due(_ct(2026, 6, 13, 7, 59), ran) is None    # before 08:00
+    slot = scheduler.scalp_prob_due(_ct(2026, 6, 13, 8, 5), ran)
+    assert slot == "refit"
+    assert scheduler.scalp_prob_due(_ct(2026, 6, 12, 8, 5), ran) is None     # Friday
+    assert scheduler.scalp_prob_due(_ct(2026, 6, 15, 8, 5), ran) is None     # Monday
+    # a late start inside the 180-minute grace still runs it; past it, never
+    assert scheduler.scalp_prob_due(_ct(2026, 6, 13, 10, 59), set()) == "refit"
+    assert scheduler.scalp_prob_due(_ct(2026, 6, 13, 11, 0), set()) is None
+    assert scheduler.scalp_prob_due(_ct(2026, 6, 13, 11, 30), set()) is None
+    # latched once run
+    ran.add(("2026-06-13", slot))
+    assert scheduler.scalp_prob_due(_ct(2026, 6, 13, 8, 6), ran) is None
+    assert scheduler.scalp_prob_due(_ct(2026, 6, 13, 10, 59), ran) is None
+
+
+def test_scalp_prob_due_follows_the_configured_weekday(monkeypatch):
+    monkeypatch.setattr(scheduler.scalp_config, "prob_refit_weekday", lambda: 6)
+    assert scheduler.scalp_prob_due(_ct(2026, 6, 14, 8, 5), set()) == "refit"   # Sunday
+    assert scheduler.scalp_prob_due(_ct(2026, 6, 13, 8, 5), set()) is None      # Saturday
+
+
+def test_scalp_prob_branch_latches_before_it_runs_and_logs_the_refit():
+    import inspect
+
+    src = inspect.getsource(scheduler.loop)
+    assert "scalp_prob_ran = set()" in src
+    assert "scalp_prob_due(now, scalp_prob_ran)" in src
+    assert "run_in_executor(None, scalp_prob_fit.refit)" in src
+    latch = src.index("scalp_prob_ran.add(")
+    run = src.index("run_in_executor(None, scalp_prob_fit.refit)")
+    assert latch < run
+    assert "scalp prob refit degraded" in src
+
+
 def test_scalp_bars_branch_rebuilds_the_study_after_the_top_up_independently():
     import inspect
 

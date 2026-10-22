@@ -19,7 +19,7 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from services import _heartbeat
-from services.options_svc import compute, finder_public, flow_stream, handlers, scalp_call, scalp_fetch, scalp_grade, scalp_intraday_call, scalp_intraday_grade, scalp_intraday_study, scalp_study
+from services.options_svc import compute, finder_public, flow_stream, handlers, scalp_call, scalp_fetch, scalp_grade, scalp_intraday_call, scalp_intraday_grade, scalp_intraday_study, scalp_prob_fit, scalp_study
 from shared import market_calendar as mc
 from shared import paper_limits as _paper_limits
 from shared import scalp_config
@@ -555,6 +555,36 @@ def scalp_bars_due(now, ran_slots):
     return None
 
 
+# ── Opening Scalp weekly refit of the chance's weights (see config/sessions.toml
+# [slots.scalp_prob]) ──
+# ONE pass a week, on ``[prob] refit_weekday`` (Saturday), at 08:00 CT. Unlike every
+# other slot it is NOT gated on a trading day: the week's studies are graded by
+# Friday evening, and nothing here fetches from Schwab.
+_SCALP_PROB_SLOTS = {k: (t.hour, t.minute)
+                     for k, t in mc.slot_times("scalp_prob").items()}
+_SCALP_PROB_GRACE_MIN = mc.slot_grace_min("scalp_prob")
+
+
+def scalp_prob_due(now, ran_slots):
+    """Name of the weekly refit slot due now, or None.
+
+    Fires once on the configured weekday (``scalp_config.prob_refit_weekday()``)
+    when ``target <= now < target + grace`` and that ``(date, slot)`` is not in
+    ``ran_slots``; the caller records it. Deliberately NOT gated on a trading
+    day (the default weekday is a Saturday)."""
+    if now.weekday() != scalp_config.prob_refit_weekday():
+        return None
+    import datetime as _dt
+    day = now.date().isoformat()
+    for name, (h, m) in _SCALP_PROB_SLOTS.items():
+        if (day, name) in ran_slots:
+            continue
+        target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if target <= now < target + _dt.timedelta(minutes=_SCALP_PROB_GRACE_MIN):
+            return name
+    return None
+
+
 # ── Opening Scalp intraday calls ([intraday] in config/scalp.toml) ──
 # Every 15 minutes 08:51-13:51 CT (21 slots; the 08:36 call records its own):
 # scalp_intraday_call.run_slot makes a new call for the three scalp symbols,
@@ -776,6 +806,7 @@ async def loop(bus):
     scalp_call_ran = set()  # (date, slot) of fired Opening Scalp morning calls (see scalp_call_due)
     scalp_bars_ran = set()  # (date, slot) of fired Opening Scalp bar top-ups (see scalp_bars_due)
     scalp_intraday_ran = set()  # (date, slot) of recorded intraday slots (see scalp_intraday_due)
+    scalp_prob_ran = set()  # (date, slot) of fired weekly chance refits (see scalp_prob_due)
     eod_summary_ran = set()  # (date, slot) of fired EOD-summary pushes (see eod_summary_due)
     market_snapshot_ran = set()  # (date, "HH:MM") of fired market-snapshot pushes (see market_snapshot_due)
     trade_idea_ran = set()  # (date, slot) of fired hourly trade-idea posts (see trade_idea_due)
@@ -1287,6 +1318,32 @@ async def loop(bus):
 
         if bars_slot:
             branches.append(("scalp_bars", _scalp_bars_branch()))
+
+        # Opening Scalp weekly refit - the chance-of-target weights fitted from
+        # the stored history and kept as a new version (scalp_prob_fit.refit;
+        # it never raises and degrades itself). Fires on the refit weekday
+        # (Saturday), so it is NOT behind any trading-day check: this loop ticks
+        # every day. Latched BEFORE it runs, like the bar top-up: a slow fit can
+        # only delay itself. Nothing is published; the next call reads the new
+        # weights.
+        try:
+            prob_slot = scalp_prob_due(now, scalp_prob_ran)
+            if prob_slot:
+                scalp_prob_ran.add((now.date().isoformat(), prob_slot))
+        except Exception:
+            log.exception("scalp_prob_due gate degraded")
+            prob_slot = None
+
+        async def _scalp_prob_branch():
+            try:
+                out = await loop_.run_in_executor(None, scalp_prob_fit.refit)
+                log.info("scalp prob refit: version %s, rows %s, %.1fs",
+                         out.get("version"), out.get("rows"), out.get("seconds") or 0.0)
+            except Exception:
+                log.exception("scalp prob refit degraded")
+
+        if prob_slot:
+            branches.append(("scalp_prob", _scalp_prob_branch()))
 
         # Public Strategy Finder warm-up - queues a few requests on
         # cmd:finder_public and returns; the scans themselves run on that

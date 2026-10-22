@@ -20,6 +20,34 @@ def test_the_scans_and_the_briefings_are_on_the_slow_lane():
     assert {"rescan", "swing_scan", "gamma_analyze"} <= handlers.SLOW_LANE
 
 
+def test_scalp_prob_refit_command_registered_and_slow(monkeypatch):
+    import datetime as dt
+
+    from services.options_svc import scalp_prob_fit
+    from shared.bus import Bus
+    from shared.bus.client import reset_fake_bus
+    from shared.contracts.envelope import Command
+
+    reset_fake_bus()
+    bus = Bus(fake=True)
+
+    assert "scalp_prob_refit" in handlers._COMMANDS
+    assert "scalp_prob_refit" in handlers.SLOW_LANE
+    assert "scalp_prob_refit" in handlers._REPLAY_GUARDED
+    assert handlers._STALE_WHY["scalp_prob_refit"] == (
+        "a replayed refit would fit and store another version for nothing")
+    assert "scalp_prob_refit" in (handlers.handle_command.__doc__ or "")
+    ran = []
+    monkeypatch.setattr(scalp_prob_fit, "refit",
+                        lambda *a, **k: ran.append(1) or {"version": 3, "rows": {"a": 5}, "seconds": 0.1})
+    fresh = dt.datetime.now(dt.timezone.utc).isoformat()
+    handlers.handle_command(bus, Command(type="scalp_prob_refit", args={}, ts=fresh))
+    assert ran == [1]
+    stale = (dt.datetime.now(dt.timezone.utc) - dt.timedelta(hours=1)).isoformat()
+    handlers.handle_command(bus, Command(type="scalp_prob_refit", args={}, ts=stale))
+    assert ran == [1]                                # a stale replay never refits
+
+
 def test_no_command_that_changes_a_paper_book_waits_on_the_slow_lane():
     # The whole point: these must never queue behind a scan.
     money = {name for name in handlers._COMMANDS
