@@ -14,6 +14,9 @@ of ``scalp.db``, in two steps so the slow part can run anywhere:
     # 2. on the box that owns scalp.db (merges, never shadows a live record)
     python tools/scalp_prob_backfill.py load --in history.jsonl --db <scalp.db>
 
+History's flow is contract alerts only (no crossover or HIRO), so its counts are
+a subset of the live window's.
+
 ``extract`` writes, for every session day found in a copy, every call time (the
 08:36 call, entered on the 08:35 boundary, and each 15-minute slot) and every
 scalp symbol, ``{"kind", "day", "slot", "symbol", "snapshot"}`` per line. A
@@ -163,18 +166,33 @@ class _Gamma:
 def flow_alerts(conn, day) -> list:
     """The flagged contracts of one session as ``(alert, estimate)`` pairs in the
     shape ``scalp_confirm.flow_sense`` reads: the alert's ``type``, ``side``,
-    ``symbol`` and ``ts`` (its fire time), and the poll's bought / sold tally as the
-    estimate. A store with no such table is no flow."""
-    try:
-        rows = conn.execute(
-            "SELECT alert_id, symbol, side, alert_type, fired_ts, poll_bought, poll_sold "
-            "FROM flow_contract_days WHERE session_date = ? AND fired_ts IS NOT NULL "
-            "ORDER BY fired_ts, alert_id", (day.isoformat(),)).fetchall()
-    except sqlite3.OperationalError:
+    ``symbol`` and ``ts`` (its fire time), and the bought / sold tally AT ALERT TIME
+    (``at_bought`` / ``at_sold``) as the estimate. The ``poll_*`` columns are
+    running tallies overwritten all session, so a backup holds the end-of-day
+    figure: reading them would decide a pre-entry alert's direction from volume
+    traded after the entry. They are never read here. An alert whose ``at_*``
+    tally is NULL (a first write before the columns existed) has no estimate and
+    is not directional, as a live alert with no estimate is. A store with no such
+    table is no flow.
+
+    History holds contract alerts only (``uoa``, ``big_delta``): crossover and
+    HIRO alerts are not stored, so these counts are a subset of the live
+    window's."""
+    cols = {row[1] for row in conn.execute("PRAGMA table_info(flow_contract_days)")}
+    if not cols:
         return []
-    return [({"id": aid, "symbol": sym, "side": side, "type": typ, "ts": ts},
-             {"bought": bought, "sold": sold})
-            for aid, sym, side, typ, ts, bought, sold in rows]
+    tally = "at_bought, at_sold" if {"at_bought", "at_sold"} <= cols else "NULL, NULL"
+    rows = conn.execute(
+        f"SELECT alert_id, symbol, side, alert_type, fired_ts, {tally} "
+        "FROM flow_contract_days WHERE session_date = ? AND fired_ts IS NOT NULL "
+        "ORDER BY fired_ts, alert_id", (day.isoformat(),)).fetchall()
+    out = []
+    for aid, sym, side, typ, ts, bought, sold in rows:
+        estimate = None if bought is None or sold is None else {
+            "bought": bought, "sold": sold}
+        out.append(({"id": aid, "symbol": sym, "side": side, "type": typ, "ts": ts},
+                    estimate))
+    return out
 
 
 def flow_block(alerts, symbol, entry_ts, day) -> dict:

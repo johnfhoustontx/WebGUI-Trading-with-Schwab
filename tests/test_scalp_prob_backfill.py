@@ -60,11 +60,17 @@ def make_gamma(path, rows, drop_carried_column=False, flow=()):
     return str(path)
 
 
-def flow_row(alert_id, symbol, side, fired_ts, bought, sold, alert_type="uoa", day=DAY_ISO):
+def flow_row(alert_id, symbol, side, fired_ts, bought, sold, alert_type="uoa", day=DAY_ISO,
+             at=True):
+    """A flagged contract. ``bought`` / ``sold`` are the tally AT ALERT TIME (the
+    ``at_*`` columns); the ``poll_*`` running tally defaults to the same figures.
+    ``at=False`` leaves ``at_*`` NULL; a test sets ``poll_*`` apart to differ."""
     return {"session_date": day, "alert_id": alert_id, "symbol": symbol, "osi": "X " + alert_id,
             "side": side, "strike": 100.0, "expiry": day, "alert_type": alert_type,
             "fired_ts": fired_ts, "oi_prev": 1.0, "volume": bought + sold,
-            "poll_bought": bought, "poll_sold": sold, "poll_unlabelled": 0.0}
+            "poll_bought": bought, "poll_sold": sold, "poll_unlabelled": 0.0,
+            "at_bought": bought if at else None, "at_sold": sold if at else None,
+            "at_unlabelled": 0.0 if at else None}
 
 
 def run_extract(tmp_path, gamma, flow_db=None):
@@ -235,6 +241,51 @@ def test_extract_flow_window_counts_the_directional_alerts(tmp_path):
     assert win["by_type"] == {"uoa": {"n": 3, "bull": 1, "bear": 1}}
     assert rec["snapshot"]["flow"]["date"] == DAY_ISO
     assert rec["snapshot"]["sources"]["flow"]["state"] == "backfill"
+
+
+def test_flow_lean_uses_the_tally_at_alert_time(tmp_path):
+    # At alert time calls were being bought; by the close the running tally says
+    # sold. The call must read what was known at the alert, not what came after.
+    row = flow_row("a1", "SPY", "call", ENTRY - 300, 90.0, 10.0)
+    row.update(poll_bought=5.0, poll_sold=95.0)
+    g = make_gamma(tmp_path / "g.db", [("$SPX", ENTRY - 60, GRID, {})], flow=[row])
+    win = pick(run_extract(tmp_path, g, flow_db=g), "08:36", "SPY")["snapshot"]["flow"]["window"]
+    assert (win["n_alerts"], win["bull"], win["bear"]) == (1, 1, 0)
+    # and the other way round: sold then, bought later
+    row = flow_row("a2", "SPY", "call", ENTRY - 300, 5.0, 95.0)
+    row.update(poll_bought=95.0, poll_sold=5.0)
+    g2 = make_gamma(tmp_path / "g2.db", [("$SPX", ENTRY - 60, GRID, {})], flow=[row])
+    win = pick(run_extract(tmp_path, g2, flow_db=g2), "08:36", "SPY")["snapshot"]["flow"]["window"]
+    assert (win["n_alerts"], win["bull"], win["bear"]) == (1, 0, 1)
+
+
+def test_flow_alert_with_no_at_tally_is_not_directional(tmp_path):
+    row = flow_row("a1", "SPY", "call", ENTRY - 300, 90.0, 10.0, at=False)
+    g = make_gamma(tmp_path / "g.db", [("$SPX", ENTRY - 60, GRID, {})], flow=[row])
+    win = pick(run_extract(tmp_path, g, flow_db=g), "08:36", "SPY")["snapshot"]["flow"]["window"]
+    # counted as an alert, never as a lean (poll_* is not a fallback)
+    assert (win["n_alerts"], win["bull"], win["bear"]) == (1, 0, 0)
+
+
+def test_flow_reads_a_store_whose_table_predates_the_at_columns(tmp_path):
+    path = tmp_path / "old.db"
+    conn = sqlite3.connect(str(path))
+    conn.executescript(gh.FLOW_DAY_SCHEMA_SQL)       # the table as first shipped
+    conn.execute("ALTER TABLE flow_contract_days DROP COLUMN at_bought")
+    conn.execute("ALTER TABLE flow_contract_days DROP COLUMN at_sold")
+    conn.execute("ALTER TABLE flow_contract_days DROP COLUMN at_unlabelled")
+    conn.execute("INSERT INTO flow_contract_days (session_date, alert_id, symbol, osi, side, "
+                 "alert_type, fired_ts, poll_bought, poll_sold, poll_unlabelled) "
+                 "VALUES (?, 'a1', 'SPY', 'X', 'call', 'uoa', ?, 90, 10, 0)",
+                 (DAY_ISO, ENTRY - 300))
+    conn.commit()
+    conn.close()
+    ro = bf.open_readonly(str(path))
+    try:
+        alerts = bf.flow_alerts(ro, DAY)
+    finally:
+        ro.close()
+    assert len(alerts) == 1 and alerts[0][1] is None
 
 
 def test_extract_flow_is_a_gap_without_the_flow_db_or_a_flow_day(tmp_path):
