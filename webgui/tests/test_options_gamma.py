@@ -864,6 +864,22 @@ def test_flex_class_builds_arbitrary_value():
     assert g.flex_class(0, grow2=0, basis="0px") == "flex-[0_0_0px]"
 
 
+def test_the_panels_are_created_at_the_split_they_are_shown_at():
+    """The heatmap is created once and never rebuilt, so its width is whatever
+    its column was when it mounted. The columns were created 50/50 and moved to
+    the 40/60 split on the first paint, and that move relied on a reflow that
+    did not always land: the heatmap stayed half the row wide, short of the
+    right edge, until the window was resized (2026-10-22). Created at the split
+    itself, the first paint changes no width and there is nothing to catch."""
+    from pages.options import gamma as g
+    bar_w, heat_w = g._STRIKE_HEAT_SPLIT
+    assert g._INIT_FLEX == {"chart": g.flex_class(bar_w), "heat": g.flex_class(heat_w)}
+    src = inspect.getsource(g.render)
+    assert 'ui.column().classes(f"min-w-0 {_INIT_FLEX[\'chart\']}")' in src
+    assert 'ui.column().classes(f"min-w-0 {_INIT_FLEX[\'heat\']}")' in src
+    assert "flex_cur = dict(_INIT_FLEX)" in src
+
+
 def test_history_dates_distinct_newest_first():
     from pages.options import gamma as g
     payload = {"briefings": [
