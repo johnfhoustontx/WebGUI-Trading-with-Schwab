@@ -1298,7 +1298,7 @@ def test_each_symbol_has_one_closed_section_with_its_calls(drawn):
     _with_chance(view["intraday"]["latest"]["SPY"], _chance(pushes=_PUSHES))
     scalp._details(view, _at(2026, 10, 19, 10, 25))
     assert _folds(drawn) == ["SPY details", "QQQ details", "Today's calls",
-                             "Not in the probability: headlines, flow alerts and the report",
+                             "Context: headlines, flow alerts and the report",
                              "Scorecard"]
     texts = _texts(drawn)
     # inside SPY's section the 15-minute call comes first, then the 08:36 call
@@ -1584,3 +1584,74 @@ def test_a_malformed_chance_never_raises(drawn):
         scalp._details(view, _at(2026, 10, 19, 10, 25))
         scalp.intraday_role_rows(entry)
     assert scalp.push_rows({"pushes": [None, "x", {"factor": 3}]}) is not None
+
+
+# ── fix round 1: whole words for every factor, hourly, the context title ─────
+_MORNING_KEYS = (*scalp._INPUT_LABEL, "etf:XLK")
+_INTRADAY_KEYS = ("since_open", "vwap_side", "fut_15m", "vol_change",
+                  "breadth_up_share", "etf:XLK")
+
+
+def _label_of(factor, kind):
+    row, = scalp.push_rows(_chance(pushes=[_push(factor, 0.1, 1.0)]), kind)
+    return row["factor"]
+
+
+def test_every_intraday_input_has_a_whole_word_label():
+    assert _label_of("price:since_open", "intraday") == "Move since the open"
+    assert _label_of("price:vwap_side", "intraday") == "Side of VWAP"
+    assert _label_of("price:fut_15m", "intraday") == "Futures, last 15 minutes"
+    assert _label_of("price:vol_change", "intraday") == \
+        "Volatility index, last 15 minutes"
+    assert _label_of("price:breadth_up_share", "intraday") == "Big-ten breadth"
+    assert _label_of("price:etf:XLK", "intraday") == "XLK, last 15 minutes"
+    # the morning inputs keep their existing words
+    assert _label_of("price:fut_gap", "morning") == "Futures gap from yesterday's close"
+    assert _label_of("price:vol_change", "morning") == \
+        "Volatility index change before the open"
+    assert _label_of("price:etf:XLK", "morning") == \
+        "XLK premarket change from yesterday's close"
+
+
+def test_no_factor_label_is_a_raw_key_for_either_call_kind():
+    cases = [("morning", k) for k in _MORNING_KEYS] + \
+            [("intraday", k) for k in _INTRADAY_KEYS]
+    factors = [f"price:{k}" for _kind, k in cases] + [
+        "room", "breadth_room", "flip_side", "netprem", "flow", "sentiment",
+        "slope_5", "slope_15", "slope_60", "rsi_5", "rsi_15", "rsi_60",
+        "block:midday", "block:afternoon"]
+    for kind, key in cases:
+        label = _label_of(f"price:{key}", kind)
+        assert label != key and "_" not in label and ":" not in label, (kind, key, label)
+    for factor in factors:
+        for kind in ("morning", "intraday"):
+            label = _label_of(factor, kind)
+            assert label != factor and "_" not in label and ":" not in label, (factor, label)
+    # a key nobody has labelled still reads as words, not as the key
+    assert _label_of("price:brand_new_input", "intraday") == "Brand new input"
+
+
+def test_the_call_kind_is_inferred_from_its_own_factors():
+    rows = scalp.push_rows(_chance(pushes=[_push("price:since_open", 0.1, 1.0),
+                                          _push("price:vol_change", 0.1, 0.5)]))
+    assert [r["factor"] for r in rows] == ["Move since the open",
+                                           "Volatility index, last 15 minutes"]
+    rows = scalp.push_rows(_chance(pushes=[_push("price:vol_change", 0.1, 0.5)]))
+    assert rows[0]["factor"] == "Volatility index change before the open"
+
+
+def test_the_sixty_minute_timeframe_reads_hourly():
+    assert _label_of("slope_5", "intraday") == "Moving-average slope, 5-minute"
+    assert _label_of("slope_15", "intraday") == "Moving-average slope, 15-minute"
+    assert _label_of("slope_60", "intraday") == "Moving-average slope, hourly"
+    assert _label_of("rsi_5", "intraday") == "Momentum (RSI), 5-minute"
+    assert _label_of("rsi_15", "morning") == "Momentum (RSI), 15-minute"
+    assert _label_of("rsi_60", "intraday") == "Momentum (RSI), hourly"
+
+
+def test_the_context_section_is_titled_as_context_not_as_outside_the_probability(drawn):
+    scalp._details({}, _at(2026, 10, 19, 10, 25))
+    folds = _folds(drawn)
+    assert "Context: headlines, flow alerts and the report" in folds
+    assert not any(f.startswith("Not in the probability") for f in folds)
+    assert "_COMPONENT_SLOT" not in SRC

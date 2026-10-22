@@ -246,29 +246,64 @@ def chance_lead(section, now=None):
 _PUSH_LABEL = {"room": "Room to the wall", "breadth_room": "Room to the wall, big names",
                "flip_side": "Side of the gamma flip", "netprem": "Net premium",
                "flow": "Options flow", "sentiment": "Market sentiment"}
-_PUSH_PRICE_LABEL = {"breadth_up_share": "Share of the big names moving up"}
+#: The 15-minute calls' price inputs (``scalp_intraday_inputs``); the 08:36 call's
+#: are ``_INPUT_LABEL``'s. ``vol_change`` and ``etf:<X>`` exist in both and mean
+#: different moves, so the call's kind picks the words.
+_PUSH_INTRADAY_LABEL = {
+    "since_open": "Move since the open", "vwap_side": "Side of VWAP",
+    "fut_15m": "Futures, last 15 minutes",
+    "vol_change": "Volatility index, last 15 minutes",
+    "breadth_up_share": "Big-ten breadth"}
+_PUSH_PRICE_LABEL = {"breadth_up_share": "Big-ten breadth"}
+_INTRADAY_ONLY = ("since_open", "vwap_side", "fut_15m", "breadth_up_share")
 
 
-def _push_label(name):
-    """A factor's name in words."""
+def _timeframe(size):
+    """A bar size in minutes in words: ``5-minute``, ``hourly``."""
+    return "hourly" if int(size) == 60 else f"{int(size)}-minute"
+
+
+def _is_intraday(names):
+    """Whether these factor names are a 15-minute call's: it carries the time-of-day
+    indicators and its own price inputs."""
+    return any(n.startswith("block:") or n[len("price:"):] in _INTRADAY_ONLY
+               for n in names if n.startswith(("block:", "price:")))
+
+
+def _push_label(name, intraday=False):
+    """A factor's name in words, never a raw key."""
     if name.startswith("price:"):
         key = name[len("price:"):]
-        return _PUSH_PRICE_LABEL.get(key) or _input_label(key, {})
+        if intraday:
+            if key in _PUSH_INTRADAY_LABEL:
+                return _PUSH_INTRADAY_LABEL[key]
+            if key.startswith("etf:"):
+                return f"{key[4:]}, last 15 minutes"
+        label = _PUSH_PRICE_LABEL.get(key) or _input_label(key, {})
+        if label == key:                      # nobody has labelled it: words, not the key
+            label = key.replace("_", " ").replace(":", " ")
+            label = label[:1].upper() + label[1:]
+        return label
     if name.startswith("block:"):
         return "Time of day"
     kind, _sep, size = name.partition("_")
     if size.isdigit() and kind in ("slope", "rsi"):
         head = "Moving-average slope" if kind == "slope" else "Momentum (RSI)"
-        return f"{head}, {size}-minute"
+        return f"{head}, {_timeframe(size)}"
     return _PUSH_LABEL.get(name) or name.replace("_", " ").capitalize()
 
 
-def push_rows(chance):
+def push_rows(chance, kind=None):
     """One row per factor of ``chance["pushes"]``, largest push first: its name in
     words, its reading signed by the call (how much it agrees with it), its push in
     percentage points, the days its weight rests on, and ``assumed`` where the
     weight is still the starting one. PURE. ``[]`` with none."""
     pushes = _as_dict(chance).get("pushes")
+    if kind is None:
+        kind = "intraday" if _is_intraday(
+            [p["factor"] for p in pushes if isinstance(p, dict)
+             and isinstance(p.get("factor"), str)] if isinstance(pushes, list) else []
+        ) else "morning"
     pairs = []
     for push in pushes if isinstance(pushes, list) else []:
         if not isinstance(push, dict) or not isinstance(push.get("factor"), str) \
@@ -276,7 +311,7 @@ def push_rows(chance):
             continue
         points = _fmt.num(push.get("points"))
         pairs.append((abs(points or 0.0), {
-            "id": push["factor"], "factor": _push_label(push["factor"]),
+            "id": push["factor"], "factor": _push_label(push["factor"], kind == "intraday"),
             "reading": _fmt.ratio(push.get("reading")),
             "points": _fmt.NO_READING if points is None else _points(points) + " pts",
             "days": _days_word(push.get("days")),
@@ -582,7 +617,7 @@ def call_label(view, symbol_payload, now=None):
     return f"Call of {call_day}{stamp} — not today's call"
 
 
-# ── context: not in the probability ──────────────────────────────────────────
+# ── context: shown beside the call, not measured ──────────────────────────────────────────
 def report_href(context):
     return _nv.safe_href(_as_dict(context).get("report_url"))
 
@@ -1393,9 +1428,6 @@ _TIMELINE_CELL = r'''
     </div>
   </q-td>
 '''
-_COMPONENT_SLOT = r'''
-  <q-td :props="props"><span :class="props.row._tone_class">{{ props.value }}</span></q-td>
-'''
 
 _CARD = f"w-full {_t.CARD} gap-3"
 _SMALL = f"text-[12px] {_t.MUTED}"
@@ -1521,7 +1553,7 @@ def _timeline_panel(section, status, chance=True):
             table.add_slot(f"body-cell-s{i}", _TIMELINE_CELL.replace("@@", str(i)))
 
 
-def _chance_block(entry, lead=""):
+def _chance_block(entry, lead="", kind=None):
     """One symbol's chance of target and what moved it, for the trade with the
     call: a note line (when fitted, whether it beat the usual rate on unseen days)
     and one table of the factors, the largest push first. ``lead`` names the day
@@ -1534,7 +1566,7 @@ def _chance_block(entry, lead=""):
     chance = _chance_of(entry)
     if chance is None:
         return
-    rows = push_rows(chance)
+    rows = push_rows(chance, kind)
     with ui.column().classes(_CARD):
         kit.section_title(CHANCE_TITLE)
         if lead:
@@ -1663,14 +1695,14 @@ def _details(view, now=None, opened=(), on_toggle=None):
         if entry is not None:
             _latest_card(section, name, entry, now, title="15-minute call", chance=chance)
             if chance:
-                _chance_block(entry, lead)
+                _chance_block(entry, lead, "intraday")
 
     def _morning(name):
         sym = morning.get(name)
         if isinstance(sym, dict):
             _symbol_card(view, name, sym, now, title="08:36 call", chance=chance)
             if chance:
-                _chance_block(sym)
+                _chance_block(sym, kind="morning")
 
     with ui.column().classes("w-full gap-2"):
         for name in glance_symbols(view):
@@ -1683,7 +1715,7 @@ def _details(view, now=None, opened=(), on_toggle=None):
             status = intraday_status(section, now)
             with _fold(status["title"], "timeline", opened, on_toggle):
                 _timeline_panel(section, status, chance)
-        with _fold("Not in the probability: headlines, flow alerts and the report",
+        with _fold("Context: headlines, flow alerts and the report",
                    "context", opened, on_toggle):
             _context_panel(view.get("context"))
         with _fold("Scorecard", "scorecard", opened, on_toggle):
@@ -1697,7 +1729,7 @@ def _context_panel(context):
 
     with ui.column().classes(_CARD):
         ui.label("Shown beside the call for context. None of this was measured or "
-                 "fed into the win rates above.").classes(_SMALL)
+                 "fed into the usual win rates above.").classes(_SMALL)
         href = report_href(context)
         if href:
             ui.link("Open today's report", href, new_tab=True).classes("text-sm")
