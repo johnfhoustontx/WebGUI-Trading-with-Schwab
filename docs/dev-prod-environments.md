@@ -940,6 +940,22 @@ to start (`backup_local.EXTRA_FILES`) and the gitignored data trees
 |---|---|
 | `~/backups/` on the server | the newest 3 generations, plus the newest generation from each of the 4 weeks before those |
 | Google Drive (`gdrive:TradingBackups`) | the newest 3 archives, plus one from the week before |
+| The workstation (`E:\TradingBackups`) | the newest 5 generations, pulled by `tools/pull_backups.ps1` |
+
+**The workstation pull.** The Windows scheduled task **NeuralStrike backup pull**
+runs daily at 21:30 CT (and at the next logon if the PC was off then). It runs
+`C:\Users\john_\NeuralStrike\backup-pull\run_pull.ps1`, which appends each run to
+`pull_backups.log` beside it and exits 1 when the pull fails, so the task's Last
+Run Result shows a failure. Three things about that folder:
+
+- `pull_backups.ps1` there is a **copy** of `tools/pull_backups.ps1` from `main`.
+  Re-copy it when the tool changes. Never point the task at the old `D:\` checkout,
+  whose copy is the pre-2026-09-25 version that could delete `_keys`.
+- It is not under `AppData\Local`. Files the Claude desktop app writes there are
+  redirected into the app's private package folder, and a scheduled task, running
+  outside the app, does not see them.
+- The task runs `powershell.exe` directly. `conhost --headless` hides the window
+  but reports every exit as 0, so a failed pull would look like a success.
 
 A generation whose local part finished with no failure carries a `BACKUP_OK`
 file. **The newest generation carrying it is never pruned**, however many failed
