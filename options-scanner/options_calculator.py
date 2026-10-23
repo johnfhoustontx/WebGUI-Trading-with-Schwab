@@ -404,6 +404,37 @@ def bs_vanna_v(S, K, T, r, sigma, option_type="call"):
     return out if out.ndim else float(out)
 
 
+def bs_greek_arrays(S, K, T, r, sigma):
+    """Gamma, charm, vanna (per 1 vol-point) and CALL delta for one spot ``S``
+    over ``K``, ``T`` and ``sigma`` broadcast against each other element by
+    element: ``{"gamma", "charm", "vanna", "delta_call"}``.
+
+    The ``_v`` functions above take one volatility and one time; this takes one
+    per element, which is what pricing every contract of a chain at its own
+    volatility, at many times at once, needs (``K`` and ``sigma`` as a column,
+    ``T`` as a row). Put delta is ``delta_call - 1`` and put charm equals call
+    charm (see ``bs_charm``). Where ``T <= 0`` or ``sigma <= 0`` the gamma, charm
+    and vanna are 0 and the delta is the expiry's, as the scalar functions say;
+    such an element never poisons the others with a NaN."""
+    import numpy as np
+    from scipy.stats import norm
+    K, sig, T = np.broadcast_arrays(_as_array(K), _as_array(sigma), _as_array(T))
+    live = (sig > 0) & (T > 0)
+    s = np.where(live, sig, 1.0)                    # placeholders, masked below
+    t = np.where(live, T, 1.0)
+    sqrt_t = np.sqrt(t)
+    d1 = (np.log(S / K) + (r + 0.5 * s * s) * t) / (s * sqrt_t)
+    d2 = d1 - s * sqrt_t
+    pdf = norm.pdf(d1)
+    gamma = pdf / (S * s * sqrt_t)
+    charm = -pdf * (2.0 * r * t - d2 * s * sqrt_t) / (2.0 * t * s * sqrt_t)
+    vanna = -pdf * d2 / s / 100.0
+    expired = np.where(S > K, 1.0, 0.0)
+    return {"gamma": np.where(live, gamma, 0.0), "charm": np.where(live, charm, 0.0),
+            "vanna": np.where(live, vanna, 0.0),
+            "delta_call": np.where(live, norm.cdf(d1), expired)}
+
+
 def bs_theta(S, K, T, r, sigma, option_type="call"):
     """
     Black-Scholes theta per-day (annual theta / 365).

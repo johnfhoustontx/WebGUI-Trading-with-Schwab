@@ -2449,44 +2449,62 @@ def test_gamma_snapshot_none_when_chain_fetch_fails(monkeypatch):
     assert compute.gamma_snapshot("$SPX") is None
 
 
-def test_gamma_snapshot_gex_carries_projection(monkeypatch):
-    """The GEX view carries a forward `projection` block (times/grid/cone/spot),
-    cropped to the display window; other views do not."""
+def _forward_snapshot(monkeypatch, when):
+    """gamma_snapshot at ``when`` with forward_grid.build recorded, not run (the
+    gamma_tool here is a fake; the band's own math is test_forward_grid's)."""
+    from services.options_svc import forward_grid as _fg
+    from services.options_svc import scheduler as _sched
+    _patch_gamma(monkeypatch, history=[(1, 5400.0, 3, 4, 5, 6,
+                                        {float(5400 + i): {"net": 1.0} for i in range(-60, 61)})])
+    import sys as _sys
+    monkeypatch.setattr(_sys.modules["gamma_tool"], "GammaEngine", _WideEngine)
+    monkeypatch.setattr(_sched, "_market_now", lambda: when)
+    seen = []
+
+    def _build(chain, spot, marks, strikes):
+        seen.append({"marks": marks, "strikes": strikes})
+        return {v: {"ts": [int(m.timestamp()) for m in marks], "view": v} for v in strikes}
+
+    monkeypatch.setattr(_fg, "build", _build)
+    return compute.gamma_snapshot("$SPX"), seen
+
+
+def test_gamma_snapshot_attaches_a_forward_band_to_every_view(monkeypatch):
+    """All four views carry ``forward`` in session, priced on the CROPPED
+    strikes (the display window), each with the cone; ``projection`` is gone."""
     import datetime as _dtm
     from zoneinfo import ZoneInfo
-    from services.options_svc import scheduler as _sched
+    snap, seen = _forward_snapshot(
+        monkeypatch, _dtm.datetime(2026, 6, 18, 13, 0, tzinfo=ZoneInfo("America/Chicago")))
+    assert len(seen) == 1
+    assert set(seen[0]["strikes"]) == {"GEX", "Charm", "DEX", "Vanna"}
+    for strikes in seen[0]["strikes"].values():
+        assert strikes and all(5380.0 <= k <= 5420.0 for k in strikes)
+    for view, entry in snap["views"].items():
+        assert entry["forward"]["view"] == view
+        assert set(entry["forward"]["cone"]) == {"mid", "up", "down"}
+        assert "projection" not in entry
 
-    exp = "2026-06-18:0"
-    def _leg(k, oi):
-        return [{"strike": k, "gamma": 0.05, "openInterest": oi,
-                 "volatility": 20.0, "delta": 0.5, "daysToExpiration": 0}]
-    wide = {float(5400 + i): (5000 if i == 0 else 500) for i in range(-60, 61)}
-    chain = {"underlyingPrice": 5400.0,
-             "callExpDateMap": {exp: {f"{k:.1f}": _leg(k, oi) for k, oi in wide.items()}},
-             "putExpDateMap": {exp: {f"{k:.1f}": _leg(k, max(oi - 200, 100)) for k, oi in wide.items()}}}
 
-    class _ProjEngine(_WideEngine):
-        @staticmethod
-        def _find_nearest_exp_key(exp_map, today):
-            return (next(iter(exp_map)), 0) if exp_map else (None, None)
+def test_gamma_snapshot_has_no_forward_band_on_a_saturday(monkeypatch):
+    import datetime as _dtm
+    from zoneinfo import ZoneInfo
+    snap, seen = _forward_snapshot(
+        monkeypatch, _dtm.datetime(2026, 6, 20, 11, 0, tzinfo=ZoneInfo("America/Chicago")))
+    assert seen == []
+    assert not any("forward" in e for e in snap["views"].values())
 
-    _patch_gamma(monkeypatch, chain=chain,
-                 history=[(1, 5400.0, 3, 4, 5, 6, {5400.0: {"net": 1}})])
-    import sys as _sys
-    _sys.modules["gamma_tool"].GammaEngine = _ProjEngine
-    monkeypatch.setattr(_sched, "_market_now",
-                        lambda: _dtm.datetime(2026, 6, 18, 13, 0, tzinfo=ZoneInfo("America/Chicago")))
 
-    snap = compute.gamma_snapshot("$SPX")
-    proj = snap["views"]["GEX"]["projection"]
-    assert set(proj) >= {"times", "grid", "cone", "spot"}
-    assert proj["times"] and proj["times"][-1] == "15:00"
-    assert proj["grid"]                                     # populated
-    assert len(next(iter(proj["grid"].values()))) == len(proj["times"])
-    assert all(5380.0 <= float(k) <= 5420.0 for k in proj["grid"])   # cropped to +-20 window
-    assert set(proj["cone"]) == {"mid", "up", "down"}
-    assert "projection" not in snap["views"]["Charm"]
-    assert "projection" not in snap["views"]["DEX"]
+def test_gamma_snapshot_forward_band_follows_the_switch(monkeypatch):
+    import datetime as _dtm
+    from zoneinfo import ZoneInfo
+
+    from shared import gamma_heat_config as _cfg
+    monkeypatch.setattr(_cfg, "forward", lambda: {"enabled": False, "step_min": 5})
+    snap, seen = _forward_snapshot(
+        monkeypatch, _dtm.datetime(2026, 6, 18, 13, 0, tzinfo=ZoneInfo("America/Chicago")))
+    assert seen == []
+    assert not any("forward" in e for e in snap["views"].values())
 
 
 def test_build_gamma_read_maps_and_falls_back():

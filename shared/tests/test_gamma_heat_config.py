@@ -144,6 +144,29 @@ def test_ridge_defaults_and_overrides(monkeypatch):
     assert cfg.ridge() == {"every_min": 30, "overlap": 2.0, "height": "root"}
 
 
+def test_forward_defaults():
+    assert cfg.forward() == {"enabled": True, "step_min": 5}
+
+
+def test_forward_refuses_a_bad_step(monkeypatch):
+    for bad in (0, 31, True, "5", -5):
+        monkeypatch.setattr(cfg, "load", lambda b=bad: {"forward": {"step_min": b}})
+        assert cfg.forward()["step_min"] == 5
+    monkeypatch.setattr(cfg, "load", lambda: {"forward": {"step_min": 15}})
+    assert cfg.forward()["step_min"] == 15
+
+
+def test_forward_enabled_must_be_a_bool(monkeypatch):
+    """A 1 or a "yes" is not a switch: anything but a real bool is the default."""
+    for junk in (1, 0, "false", None):
+        monkeypatch.setattr(cfg, "load", lambda j=junk: {"forward": {"enabled": j}})
+        assert cfg.forward()["enabled"] is True
+    monkeypatch.setattr(cfg, "load", lambda: {"forward": {"enabled": False}})
+    assert cfg.forward()["enabled"] is False
+    monkeypatch.setattr(cfg, "load", lambda: {"forward": "off"})
+    assert cfg.forward() == {"enabled": True, "step_min": 5}
+
+
 def test_it_imports_only_the_config_loader_and_the_paths():
     """Tier 1 imports this module, so its import set is pinned (CLAUDE.md, the
     Tier-1 allow-list): stdlib, shared.config_toml and repo_paths."""

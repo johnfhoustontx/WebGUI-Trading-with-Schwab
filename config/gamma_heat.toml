@@ -68,6 +68,17 @@ minutes = 3.0
 # one. 0 leaves that direction alone.
 strikes = 0.8
 
+[forward]
+# From the open the heatmaps run to the close: right of the "now" line are
+# cells projected with price, open interest and volatility held where they are,
+# on all four views, and the contour lines carry on through them (dashed). The
+# options service reads these each time it builds a snapshot, so no restart is
+# needed. false shows the collected minutes only.
+enabled = true
+# The service prices the projection every this many minutes; the page fills
+# the minutes between. Smaller is finer and costs more each minute.
+step_min = 5
+
 [well]
 # The gravity well (the Gamma view's "Gravity well" switch) draws net gamma by
 # strike as ground. "root" draws each strike at the signed square root of its

@@ -218,7 +218,8 @@ def test_a_view_the_snapshot_lacks_is_published_empty_not_skipped(monkeypatch):
 
     Read on $SPX/GEX, the one published history there is: a view the table does
     not list is not written EITHER way, so it could not tell empty from skipped.
-    The private key keeps the same guarantee for all four views."""
+    The private key keeps the same guarantee for all four views, and neither
+    carries a projected afternoon (``forward``) the snapshot did not have."""
     bus = Bus(fake=True)
     monkeypatch.setattr(handlers.compute, "gamma_snapshot",
                         lambda s, chain=None: _snap(s, views=("Charm",)))
@@ -227,10 +228,10 @@ def test_a_view_the_snapshot_lacks_is_published_empty_not_skipped(monkeypatch):
 
     env = bus.cache_get(handlers.gamma_pub_history_key("$SPX", "GEX"))
     assert env is not None and env.payload == {
-        "symbol": "$SPX", "view": "GEX", "rows": []}
+        "symbol": "$SPX", "view": "GEX", "rows": [], "forward": None}
     priv = bus.cache_get(handlers.gamma_history_key("Vanna"))
     assert priv is not None and priv.payload == {
-        "symbol": "$SPX", "view": "Vanna", "rows": []}
+        "symbol": "$SPX", "view": "Vanna", "rows": [], "forward": None}
 
 
 def test_the_published_payload_carries_no_inline_history(monkeypatch):
@@ -379,3 +380,48 @@ def test_the_narrowed_publish_still_strips_history_from_every_payload(monkeypatc
 
     for entry in _pub(bus, "QQQ")["views"].values():
         assert "history" not in entry
+
+
+# --- the projected afternoon -------------------------------------------------
+
+def _with_forward(symbol, views=("GEX", "Charm")):
+    """A snapshot whose named views carry a forward band, as gamma_snapshot does."""
+    snap = _snap(symbol)
+    for v in views:
+        snap["views"][v]["forward"] = {"ts": [1, 2], "times": ["10:00", "10:05"],
+                                       "spot": 100.0, "call": {"100.0": [1.0, 2.0]},
+                                       "put": {"100.0": [-1.0, -2.0]},
+                                       "cone": {"mid": [100.0] * 2, "up": [101.0] * 2,
+                                                "down": [99.0] * 2}, "view": v}
+    return snap
+
+
+def test_the_forward_band_rides_in_each_views_history_payload(monkeypatch):
+    """The page reads only the history of the view on screen, so the band goes
+    there and a view nobody is looking at costs nothing; the main key stays slim."""
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "gamma_snapshot",
+                        lambda s, chain=None: _with_forward(s))
+
+    handlers.refresh_gamma(bus, "SPY")
+
+    for view in ("GEX", "Charm"):
+        payload = bus.cache_get(handlers.gamma_history_key(view)).payload
+        assert payload["forward"]["view"] == view
+        assert payload["rows"]
+    for view in ("DEX", "Vanna"):
+        assert bus.cache_get(handlers.gamma_history_key(view)).payload["forward"] is None
+    main = bus.cache_get(handlers.CACHE_GAMMA).payload
+    assert not any("forward" in e for e in main["views"].values())
+
+
+def test_the_published_history_carries_the_band_too(monkeypatch):
+    bus = Bus(fake=True)
+    monkeypatch.setattr(handlers.compute, "gamma_snapshot",
+                        lambda s, chain=None: _with_forward(s))
+
+    handlers.refresh_gamma_published(bus, "$SPX")
+
+    env = bus.cache_get(handlers.gamma_pub_history_key("$SPX", "GEX"))
+    assert env.payload["forward"]["view"] == "GEX"
+    assert not any("forward" in e for e in _pub(bus, "$SPX")["views"].values())

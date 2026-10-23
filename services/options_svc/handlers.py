@@ -1932,12 +1932,16 @@ def _publish_gamma(bus, snap, symbol, *, targets) -> None:
     the 4.99 MB payload the 2026-08-20 split removed.
     """
     views = snap.get("views")
-    rows_by_view = {}
+    rows_by_view, band_by_view = {}, {}
     if isinstance(views, dict):
         for view in set(GAMMA_HISTORY_VIEWS) | set(views):
             entry = views.get(view)
             rows = entry.pop("history", None) if isinstance(entry, dict) else None
             rows_by_view[view] = rows or []
+            # The view's projected afternoon travels WITH its rows (the page reads
+            # only the view on screen), never in the main key.
+            band_by_view[view] = (entry.pop("forward", None)
+                                  if isinstance(entry, dict) else None)
     for target in targets:
         main_key, event_key, history_key, wanted = target[:4]
         # A fifth element is a TTL for every key the target writes (the public
@@ -1948,7 +1952,8 @@ def _publish_gamma(bus, snap, symbol, *, targets) -> None:
             if wanted is not None and view not in wanted:
                 continue      # no screen draws it — see PUBLISHED_GAMMA_HISTORY_VIEWS
             bus.cache_set(history_key(view),
-                          {"symbol": symbol, "view": view, "rows": rows},
+                          {"symbol": symbol, "view": view, "rows": rows,
+                           "forward": band_by_view.get(view)},
                           skip_unchanged=True, ttl=ttl)
         if main_key is None:
             continue

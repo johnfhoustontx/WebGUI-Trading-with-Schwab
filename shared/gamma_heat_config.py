@@ -71,6 +71,15 @@ DEFAULTS = {
         # ...and across strikes, in strikes. 0 leaves that direction alone.
         "strikes": 0.8,
     },
+    "forward": {
+        # The heatmaps run to the close from the open: right of the "now" line
+        # are cells projected with price, open interest and volatility held
+        # where they are. False shows the collected minutes only.
+        "enabled": True,
+        # options_svc prices the projection every this many minutes; the page
+        # fills the minutes between.
+        "step_min": 5,
+    },
     "ridge": {
         # The ridge plot draws one by-strike profile every this many minutes.
         "every_min": 30,
@@ -157,6 +166,17 @@ def smooth() -> dict:
     with a strength chosen."""
     return {"minutes": _setting("smooth", "minutes", minimum=0.0, maximum=30.0),
             "strikes": _setting("smooth", "strikes", minimum=0.0, maximum=5.0)}
+
+
+def forward() -> dict:
+    """``{"enabled", "step_min"}`` for the heatmaps' projected afternoon. Read by
+    options_svc each time it builds a snapshot, so no restart is needed.
+    ``enabled`` must be a real bool: a 1 or a "false" is the default."""
+    table = load().get("forward")
+    raw = table.get("enabled") if isinstance(table, dict) else None
+    return {"enabled": raw if isinstance(raw, bool)
+            else DEFAULTS["forward"]["enabled"],
+            "step_min": _setting("forward", "step_min", minimum=1, maximum=30)}
 
 
 def ridge() -> dict:

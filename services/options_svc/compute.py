@@ -56,6 +56,7 @@ from shared import scanner_config as _scanner_config  # noqa: E402
 from shared import vol_gate as _vol_gate  # noqa: E402
 from services import _proxy  # noqa: E402
 from services.options_svc import commission  # noqa: E402  (round-trip $ for the break-even floor)
+from services.options_svc import forward_grid as _forward  # noqa: E402  (the heatmaps' projected afternoon)
 from services.options_svc import gamma_window as _gw  # noqa: E402  (the gamma display window + scale lock)
 from services.options_svc import greeks_census as _census  # noqa: E402  (a chain with no Greeks at all)
 from services.options_svc import idea_ledger as _ideas  # noqa: E402  (posted-idea rows stay out of the user's book)
@@ -4108,16 +4109,6 @@ def _crop_gamma_views(views, spot, n_side=None):
                 r = tuple(r[:6]) + (_crop_grid(r[6], keep),) + tuple(r[7:])
             cropped_rows.append(r)
         entry["history"] = cropped_rows
-        # Crop the forward-projection grid (GEX view only) to the same window.
-        # Its keys are strike STRINGS ("5400.0") vs the float ``keep`` set.
-        proj = entry.get("projection")
-        if isinstance(proj, dict) and isinstance(proj.get("grid"), dict) and proj["grid"]:
-            def _kf(s):
-                try:
-                    return float(s)
-                except (TypeError, ValueError):
-                    return None
-            proj["grid"] = {k: v for k, v in proj["grid"].items() if _kf(k) in keep}
     return views
 
 
@@ -4567,14 +4558,6 @@ def gamma_snapshot(symbol: str, chain=None, with_term: bool = True) -> dict | No
                     "projected_net_delta_close": data.get("projected_net_delta_close"),
                     "hedge_pressure": data.get("hedge_pressure"),
                 }
-            if vname == "GEX":
-                try:
-                    marks = _future_marks_ct(now)
-                    proj = project_gex_grid(eng, chain, spot, now)
-                    proj["cone"] = project_em_cone(spot, atm_iv_from_chain(chain, spot), marks, now)
-                    entry["projection"] = proj
-                except Exception:
-                    log.debug("gamma projection attach failed", exc_info=True)
             views[vname] = entry
         # Intraday options-flow series (spot + day call/put volume + that volume's
         # premium at the current mark) for the Flow view — reuses the SAME read-only connection as the
@@ -4649,6 +4632,9 @@ def gamma_snapshot(symbol: str, chain=None, with_term: bool = True) -> dict | No
     if _census.greeks_missing(chain):       # every gamma -999: say so, no tie walls
         _census.mark_no_greeks(views)
     _crop_gamma_views(views, spot)
+    # Every view's projected afternoon, priced on the strikes the crop kept.
+    _forward.attach(views, chain, spot, now, lambda marks: project_em_cone(
+        spot, atm_iv_from_chain(chain, spot), marks, now))
 
     try:
         # The Term view wants the next 5 expirations regardless of the symbol's
