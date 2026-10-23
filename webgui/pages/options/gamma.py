@@ -1354,8 +1354,9 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, forward=None,
     # in-place update would merge the last band's dash into a chart without one.
     lines = (_heat.contours(vstrikes, vz, zmax, **contours) if contours and zmax
              else {"pos": [], "neg": []})
-    zones = ([{"value": n_obs - 0.5}, {"dashStyle": "ShortDash"}] if projected
-             else [])
+    # "Dash", not "ShortDash": on a 1px line ShortDash's 3-on 1-off reads as solid
+    # at the chart's size (seen in the browser, 2026-10-23).
+    zones = ([{"value": n_obs - 0.5}, {"dashStyle": "Dash"}] if projected else [])
     for name, key, color in (("Contours above zero", "pos", CONTOUR_ABOVE_COLOR),
                              ("Contours below zero", "neg", CONTOUR_BELOW_COLOR)):
         series.append({"type": "scatter", "name": name, "data": lines[key],

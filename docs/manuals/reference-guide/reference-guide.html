@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-22</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-23</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -1331,9 +1331,16 @@ adaptive scale and the colour strip says <strong>settling</strong>.</p>
 smaller than the Strike frame's 20 on purpose: every extra strike the frame shows has
 to be kept in the history the service publishes each minute, around the day's low and
 high, and that has a cost (see the Technical Reference). The Spot and Bar controls
-hide in this frame, and the forward projection band is not drawn. Level movement
-works as it does in the Strike frame: off leaves one line per level at its distance
-from price now, on adds the path each level took.</p>
+hide in this frame. The projected afternoon is drawn here too, measured from the price
+it holds. Level movement works as it does in the Strike frame: off leaves one line per
+level at its distance from price now, on adds the path each level took.</p>
+<p><strong>The projected afternoon.</strong> From the open, the four Greek heat maps run to the close,
+one column a minute: collected minutes left of a dashed <strong>now</strong> line, projected ones
+right of it. The projection prices today's open interest with less time left and
+nothing else moving, so it shows where the clock alone pushes the positioning by the
+close: for an expiry that ends today, gamma and charm gather toward the strikes near
+the price. It is a baseline, not a forecast, and it is recomputed every minute. Every
+picker applies to it, and the contour lines run through it dashed.</p>
 <p><strong>Smooth</strong> (Off, Light, Medium, Strong; Medium by default). Averages each cell with
 its neighbouring minutes and strikes before it is coloured. Without it the only
 smoothing is your browser blending the picture as it enlarges it, which softens the

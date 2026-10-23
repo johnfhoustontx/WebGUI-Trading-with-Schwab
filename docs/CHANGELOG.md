@@ -4,7 +4,42 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-22 (**Opening Scalp: every call carries a fitted, weekly-refitted chance of target, weighted from price, moving-average slope and RSI on three bar sizes, the dealer read, net premium, flow and sentiment; the confirmation word leaves the page.**)
+**Last updated:** 2026-10-23 (**Dealer Positioning: from the open the four Greek heatmaps run to the close, with the contour lines carried through the projected afternoon.**)
+
+- **Asked for by the operator:** "As soon as the market opens I need you to display the
+  heatmap for the complete session and the associated contour lines", on GEX and the
+  other heatmaps, the contours keeping "the same function as what is displayed now".
+  They chose that the Adaptive colour scale (and so the contour levels) is set from the
+  collected and projected cells together, and that smoothing covers the whole picture.
+  Design and plan: `docs/plans/2026-10-23-heatmap-full-session-forward-{design,plan}.md`.
+- **What shipped** (branch `claude/heatmap-rth-contour-projection-33977a`):
+  1. *Config and math*: `config/gamma_heat.toml [forward]` (`enabled`, `step_min` 5) with
+     a Settings -> Configuration section; `options_calculator.bs_greek_arrays`, gamma,
+     charm, vanna and call delta broadcast over strikes, volatilities and times.
+  2. *Service* (`services/options_svc/forward_grid.py`): marks from now, every 5 minutes,
+     to 14:59, on a trading day after the open only; each view's nearest-expiry open
+     interest priced with `calc_all_from_chain`'s formulas and only T moving, so the
+     first mark is the collected cell. Attached in `gamma_snapshot` on the cropped
+     strikes; `_publish_gamma` sends it inside each view's history payload. The GEX-only
+     15-minute `projection` is retired (`project_gex_grid` stays for the briefing).
+  3. *Page*: `gamma_heat.forward_series` turns the band into one history-shaped row a
+     minute; `heatmap_figure(forward=)` appends them before every transform, so every
+     Value, Show, Frame, Smooth and Scale draws them; contours are dashed past "now" by
+     an x-axis zone; `heat_keeps_projection` / `projection_arg` are deleted.
+  4. *Docs*: page help, User Guide, Reference Guide, Technical Reference, route record.
+- **Measured** (synthetic `$SPX`-sized chain, 61 strikes, 08:31, 79 marks, all four
+  views): the build took 60 ms, 90% of it rounding one float at a time; rounded in numpy,
+  6 ms. Added history payload 111-134 KB per view at the open (75-97 KB at 41 strikes),
+  falling to a few KB by 14:50. The page's paint at 08:31 with Contours and Smooth on:
+  249 ms, against 193 ms for a collected 15:00 chart today.
+- **Caught in the build**: far-out strikes priced to denormal floats, which the vectorised
+  rounding turned into NaN (not JSON a browser can read); they are flushed to zero.
+- **Verified** in the local page harness at 08:31, 12:00 and 14:58 on a seed built by the
+  real engine, `forward_grid.attach` and `_publish_gamma`: the axis runs 08:30-14:59, the
+  contours run through the projected cells, dashed, and a view switch repaints cleanly.
+  Not yet seen on prod with a live chain.
+
+**Prior —** 2026-10-22 (**Opening Scalp: every call carries a fitted, weekly-refitted chance of target, weighted from price, moving-average slope and RSI on three bar sizes, the dealer read, net premium, flow and sentiment; the confirmation word leaves the page.**)
 
 - **Asked for by the operator:** the glance table's Confirmation column ("Mixed · 3 of 4
   sources") was a count, not something to size a trade on. They asked for **the

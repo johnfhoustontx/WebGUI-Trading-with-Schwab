@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-22</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-23</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -175,6 +175,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#dealer-delta-exposure-dex-and-projection">Dealer delta exposure (DEX) and projection</a></li>
+<li><a href="#the-heat-maps-projected-afternoon">The heat maps' projected afternoon</a></li>
 <li><a href="#directional-walls">Directional walls</a></li>
 <li><a href="#intraday-collection">Intraday collection</a></li>
 <li><a href="#hedging-flow-model-hiro">Hedging-flow model (HIRO)</a></li>
@@ -4790,7 +4791,7 @@ d2 = d1 - σ·√T
 intrinsic value and second-order Greeks are 0.</p>
 <p><strong><code>r</code> is <code>options_calculator.RISK_FREE_RATE = 0.045</code>, static, and it is the single
 source</strong> — the calculator, the simulator, <code>gamma_tool</code> and <code>options_svc.compute</code>
-(<code>calc_iv</code> and the forward projection band) all import it rather than declaring their
+(<code>calc_iv</code>), and <code>options_svc.forward_grid</code> (the heat maps' projected afternoon) all import it rather than declaring their
 own. (<code>backtest_0dte</code> was in that list until 2026-08-20, when it was deleted with the
 rest of the superseded CLI tooling.) It is a <strong>fixed assumption, not a live rate</strong>: nothing fetches
 a Treasury yield, so a real move in short rates does not reach the model until this
@@ -5086,7 +5087,9 @@ crossing = linear between two neighbouring strikes, or two neighbouring minutes
 was not measured. A line spanning fewer than <code>[contours] min_columns</code> minutes (3) is
 left out as a speck, and past <code>[contours] max_points</code> (6,000 a sign) the shortest
 lines are dropped. Measured on a stored <code>$SPX</code> session the lines cost about 27 ms and
-35 KB a repaint. They cover the collected minutes only, not the forward band.</p>
+35 KB a repaint. They are traced across the collected minutes and the projected
+afternoon as one grid, and the part past <strong>now</strong> is drawn dashed (a Highcharts zone on
+the x axis, so the series count does not change).</p>
 <p>The lines and the colours share one geometry. The chart paints the heat map as one
 picture with a pixel per cell, and that picture puts a strike on its own place on the
 axis only when the axis ends on a strike. So the strike range both panels share is
@@ -5107,7 +5110,8 @@ Light      = half of each;  Strong = twice
 the division by the weights actually used means an edge is not dimmed. It is
 applied to the grid in the frame being drawn and before Share of column is taken,
 so each minute still sums to 100%. The contour lines are traced from the smoothed
-cells; the forward band is not smoothed. Consequences: a peak is lower and wider,
+cells, and the projected afternoon is smoothed with them, so nothing steps at
+<strong>now</strong>. Consequences: a peak is lower and wider,
 and the last column is a one-sided average, so new moves lag by about σ minutes.
 Measured on a stored <code>$SPX</code> session: 27, 37 and 59 ms a repaint at Light, Medium
 and Strong. Without it the only smoothing is the browser interpolating the image
@@ -5149,6 +5153,28 @@ Measured on that session: 10 to 30 ms and 47 KB a repaint while on.</p>
 <p>The DEX/hedge panel sums <code>OI · delta · contract_multiplier · spot</code> across strikes
 for the current and a projected delta, surfacing net-delta-now vs projected-close
 hedging pressure.</p>
+<h2 id="the-heat-maps-projected-afternoon">The heat maps' projected afternoon</h2>
+<p>From the open to a minute before the close, <code>options_svc.forward_grid</code> prices each
+of the four Greek views at marks <code>[forward] step_min</code> (5) minutes apart, from now to
+14:59, and the page fills one column a minute between them by linear interpolation.
+Only the nearest expiration, only the strikes the published history keeps, and
+only the time left moves:</p>
+<pre><code>T(mark)  = (dte·24 + hours from mark to 15:00 CT) / (365·24), floored at 1e-6
+GEX      = chain gamma · OI · 100 · S² · 0.01 · Γ_BS(T') / Γ_BS(T_now)   (put negative)
+Charm    = charm_BS(T') · OI · 100 · S        (volatility &gt; 0 only)
+Vanna    = vanna_BS(T') · OI · 100 · S        (volatility &gt; 0 only)
+DEX      = (chain delta + Δ_BS(T') − Δ_BS(T_now)) · OI · 100 · S
+           (Δ_BS(T') where the chain has no delta)
+</code></pre>
+<p>S, open interest and each contract's volatility are held at the current chain's.
+Every formula is <code>calc_all_from_chain</code>'s, so at the first mark (now) each value is
+the collected cell itself and the picture has no seam. The last mark is a minute
+before the close because at T → 0 the at-the-money gamma, charm and vanna diverge.
+Nothing is projected before the open, at or after 14:59, or on a day the market is
+shut. The band travels in each view's history payload (<code>cache:options:gamma_hist_*</code>,
+<code>"forward"</code>), never the main key. In the page it joins the collected rows before every
+transform, so Value, Show, Frame, Smooth, Share and the colour scale treat the session
+as one; in Adaptive the projected cells count toward the colour scale.</p>
 <h2 id="directional-walls">Directional walls</h2>
 <p><code>get_directional_walls(gex_dict, spot)</code> returns one <strong>put wall</strong> (the strike below
 spot with the largest put GEX) and one <strong>call wall</strong> (the strike above spot with the

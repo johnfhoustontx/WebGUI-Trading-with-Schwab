@@ -151,7 +151,7 @@ def test_contours_run_past_now_and_are_dashed_there():
     assert any(p[0] > 9.5 and p[1] is not None for s in lines for p in s["data"])
     for s in lines:
         assert s["zoneAxis"] == "x"
-        assert s["zones"] == [{"value": 9.5}, {"dashStyle": "ShortDash"}]
+        assert s["zones"] == [{"value": 9.5}, {"dashStyle": "Dash"}]
 
 
 def test_without_a_band_the_dash_and_the_divider_are_cleared_not_left_out():

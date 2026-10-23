@@ -1264,7 +1264,8 @@ the close, one column a minute; it replaces the GEX-only 15-minute band and its
   treat the session as one. The spot line, candles and level tracks stay on the
   collected columns; the spot line continues flat at the band's spot; EM up/down sit
   over the projected columns. The two contour series always carry `zoneAxis: "x"` and
-  `zones` (`ShortDash` past `n_obs - 0.5`, `[]` with no band), and `xAxis.plotLines`
+  `zones` (`Dash` past `n_obs - 0.5`, `[]` with no band; `ShortDash` read as solid on a
+  1px line), and `xAxis.plotLines`
   is always emitted, so an in-place update after the close clears the dash and the
   divider. `heatmap_categories(rows, forward)` is built from the same rows, so the
   hedge panel keeps its columns.
