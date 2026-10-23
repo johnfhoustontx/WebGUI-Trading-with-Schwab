@@ -869,20 +869,26 @@ def heatmap_matrix(rows, mode="net"):
     return {"x": x, "y": strikes, "z": z, "spots": spots}
 
 
-def heatmap_categories(rows, projection=None):
-    """The heatmap's FULL x-axis categories: collected times + the forward band's.
+def _session_rows(rows, forward):
+    """``(collected + projected rows, the projected afternoon's series)``: the
+    rows ``heatmap_figure`` draws, one a minute to the close while the session
+    runs (``gamma_heat.forward_series``)."""
+    rows = list(rows or [])
+    band = _heat.forward_series(forward, rows[-1][0] if rows else None)
+    return rows + band["rows"], band
+
+
+def heatmap_categories(rows, forward=None):
+    """The heatmap's FULL x-axis categories: the collected minutes and the
+    projected ones to the close.
 
     The hedge panel below the heatmap is a SEPARATE element whose only job is to
     read vertically against it, so it must be built on THIS list, not on the
-    collected times alone — a GEX projection widens the heatmap's axis by up to
-    26 forward marks, and a hedge panel spanning only the session would stretch
-    those same minutes across the projection's width too. The guard condition
-    mirrors ``heatmap_figure``'s projection block exactly (a test pins the two
-    together)."""
-    times = list(heatmap_matrix(rows)["x"])
-    if projection and projection.get("times") and projection.get("grid"):
-        times += list(projection["times"])
-    return times
+    collected times alone: from the open the band widens the axis to the whole
+    session, and a hedge panel spanning only the collected minutes would stretch
+    them across it. Built from the same rows ``heatmap_figure`` draws (a test
+    pins the two together)."""
+    return list(heatmap_matrix(_session_rows(rows, forward)[0])["x"])
 
 
 def _pin_time_axis(axis, categories):
@@ -1104,7 +1110,7 @@ def track_points(values):
             for i, v in enumerate(values or [])]
 
 
-def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
+def heatmap_figure(rows, view="GEX", height=680, yrange=None, forward=None,
                    walls=None, spot=None, flip=None, levels=None,
                    show_tracks=False, spot_style="line", spot_interval=5,
                    projected_flip=None, mode="net", balanced=(), legend=None,
@@ -1118,11 +1124,9 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
 
     ``mode`` is the number each cell draws (``gamma_heat.VALUES``). It swaps the
     DATA inside the one heatmap series: the series count and the colour axis are
-    the same in every mode. The projection grid is net only, and whether to pass
-    one is the CALLER's decision (``heat_keeps_projection``), because the hedge
-    panel under this chart is built on the same category list. ``balanced`` are
-    strikes to mark on the axis. ``legend`` (a dict, when given) receives the
-    scale this paint used, for the strip beside the controls.
+    the same in every mode. ``balanced`` are strikes to mark on the axis.
+    ``legend`` (a dict, when given) receives the scale this paint used, for the
+    strip beside the controls.
 
     ``scale`` is how the colours are set (``gamma_heat.SCALES``): ``adaptive``
     (the default, and what this chart always did) refits them to the visible
@@ -1135,8 +1139,8 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     price is a flat line at zero and the levels move. The three level tracks are
     measured from each column's own spot and follow ``show_tracks``, the spot overlay
     is always the line, and ``yrange`` is the caller's range in those units
-    (``heat_yrange``). A ``projection`` is strike-and-flat-spot data and must not
-    be passed in this frame; the caller's ``heat_keeps_projection`` sees to that.
+    (``heat_yrange``). The projected rows hold the band's flat spot, so they
+    resample like any other column.
 
     ``show`` (``gamma_heat.SHOWS``) other than ``"level"`` draws how each cell has
     CHANGED: less the same strike's cell in the session's first column
@@ -1148,7 +1152,7 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     ``contours`` (``gamma_heat_config.contours()``, or None for off) overlays
     lines of equal value, taken from the grid EXACTLY as it is drawn (value,
     change, share and frame all applied) at fixed shares of the colour scale.
-    They cover the collected columns only, never the projection band. The two
+    They run across the projected afternoon too, dashed past "now". The two
     series exist either way, empty when off: the series count is fixed.
 
     ``smooth`` (``gamma_heat.smooth_args``, or None for off) averages each cell
@@ -1156,12 +1160,20 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     of the values, where ``interpolation`` only blends the picture. It is applied
     to the grid in the frame being drawn and before the share is taken, so a
     column still shares out to 100%; the contours are traced from the smoothed
-    cells; the tooltip says a cell is smoothed. The projection band is not.
+    cells; the tooltip says a cell is smoothed. It runs across "now" as well, so
+    neither the colours nor the lines step there.
 
-    ``projection`` (GEX only) appends a forward band: extra time columns of
-    projected net-per-mark cells on the SAME heatmap series/colorAxis, a 'now'
-    divider between the collected and future columns, the Spot line continued flat
-    along the cone midline, and faint EM up/down cone overlays."""
+    ``forward`` (the view's band from its history payload, ``history_forward``)
+    runs the chart to the close: one projected row a minute
+    (``gamma_heat.forward_series``) joins the collected rows BEFORE every
+    transform, so value, change, frame, smoothing, share, scale and contours all
+    treat the session as one. Only what means "what happened" stays on the
+    collected columns: the spot line, candles and level tracks. A dashed 'now'
+    divider sits between the two, the spot line carries on flat at the band's
+    spot, and the EM up/down cone is drawn over the projected columns."""
+    n_obs = len(rows or [])
+    rows, band = _session_rows(rows, forward)
+    projected = len(band["rows"])
     m = heatmap_matrix(rows, mode)
     times, strikes, z = m["x"], m["y"], m["z"]
     changed = show != "level"
@@ -1235,64 +1247,31 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
                                              else " {point.value:,.0f}")
                                           # Not the reading that was stored.
                                           + (" (smoothed)" if smooth else "")}}]
-    # Underlying price track over the session (on the shared Strike axis; a line series
-    # ignores the colorAxis so it isn't recolored by net value). Built here, appended
-    # (with the two EM-cone series) AFTER the projection block below. Measured from
-    # spot it is a flat line at zero: price stands still and everything else moves.
+    # Underlying price track (on the shared Strike axis; a line series ignores the
+    # colorAxis so it isn't recolored by net value). Collected minutes only, then
+    # carried on FLAT over the projected ones, which hold price where it is now.
+    # Measured from spot it is a flat line at zero: price stands still and
+    # everything else moves.
+    spots, band_spot = spots[:n_obs], _fmt.num((forward or {}).get("spot"))
     spot_pts = [[xi, 0.0 if from_spot else sp] for xi, sp in enumerate(spots)
                 if isinstance(sp, (int, float))]
-
-    # Forward projection band (GEX only): extend the figure with future columns,
-    # a 'now' seam, the spot line continued along the cone midline, and EM cones.
-    xaxis_plotlines = []
-    em_up_pts, em_down_pts = [], []
-    if projection and projection.get("times") and projection.get("grid"):
-        ptimes = list(projection["times"])
-        base = len(times)
-        pgrid = projection["grid"]
-        cone = projection.get("cone") or {}
-        # Future heatmap cells on the SAME heatmap series/colorAxis, cropped to yrange.
-        proj_rows_for_zmax = []
-        heat_series = series[0]      # the heatmap series
-        pairs = []
-        for strike, vals in pgrid.items():
-            try:
-                sk = float(strike)
-            except (TypeError, ValueError):
-                continue
-            if yrange is not None and not (yrange[0] <= sk <= yrange[1]):
-                continue
-            pairs.append((sk, list(vals)))
-        pairs.sort()                 # uniform_strike_grid needs an ordered ladder
-        pstrikes = [sk for sk, _ in pairs]
-        prows = [vals for _, vals in pairs]
-        # Same ladder fill as the collected cells — the projection sits on the
-        # chain's own strikes, so on a mixed ladder it would speckle the band with
-        # unwritten rows while the session behind it renders smooth.
-        pstrikes, prows = uniform_strike_grid(pstrikes, prows)
-        for sk, vals in zip(pstrikes, prows):
-            proj_rows_for_zmax.append([v for v in vals if v is not None])
-            for j, v in enumerate(vals):
-                if v is not None:
-                    heat_series["data"].append([base + j, sk, v])
-        # Re-clamp the color axis over collected + projected visible cells (robust
-        # 95th-pct so a few extreme 0-DTE ATM close cells don't wash the scale).
-        zmax = _heat.scale_max(vz + proj_rows_for_zmax, scale, lock, mode) or None
-        # 'now' divider between the last collected and first future column.
-        xaxis_plotlines.append({"value": base - 0.5, "color": "#8a93a3", "width": 1,
+    origin = band_spot if from_spot else 0.0
+    xaxis_plotlines, em_up_pts, em_down_pts = [], [], []
+    if projected:
+        if band_spot is not None:
+            spot_pts += [[n_obs + j, band_spot - (origin or 0.0)]
+                         for j in range(projected)]
+        if origin is not None:
+            em_up_pts = [[n_obs + j, v - origin] for j, v in enumerate(band["up"])
+                         if v is not None]
+            em_down_pts = [[n_obs + j, v - origin] for j, v in enumerate(band["down"])
+                           if v is not None]
+        # 'now' between the last collected and the first projected column.
+        xaxis_plotlines.append({"value": n_obs - 0.5, "color": "#8a93a3", "width": 1,
                                 "dashStyle": "Dash", "zIndex": 4,
                                 "className": "gamma-now-divider",
                                 "label": {"text": "now", "style": {"color": FONT},
                                           "rotation": 0, "y": 12}})
-        # Continue the Spot line flat along cone.mid into the future.
-        for j, mid in enumerate(cone.get("mid") or []):
-            if isinstance(mid, (int, float)):
-                spot_pts.append([base + j, mid])
-        em_up_pts = [[base + j, lvl] for j, lvl in enumerate(cone.get("up") or [])
-                     if isinstance(lvl, (int, float))]
-        em_down_pts = [[base + j, lvl] for j, lvl in enumerate(cone.get("down") or [])
-                       if isinstance(lvl, (int, float))]
-        times = times + ptimes
 
     # Append the three line series in a FIXED order (Spot, EM up, EM down) so EVERY
     # view emits exactly 4 series (heatmap + these 3). A VARYING series count breaks
@@ -1370,14 +1349,20 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, projection=None,
     # its points: the lines came out joined by long straight strokes
     # (2026-10-10). Every build, not only one whose lines changed: a repaint
     # with the same lines is merged just the same, their x values repeating.
+    # Past "now" a line is projected, so it is drawn dashed: a zone on the x
+    # axis, which keeps the series count. ALWAYS emitted, [] with no band, or an
+    # in-place update would merge the last band's dash into a chart without one.
     lines = (_heat.contours(vstrikes, vz, zmax, **contours) if contours and zmax
              else {"pos": [], "neg": []})
+    zones = ([{"value": n_obs - 0.5}, {"dashStyle": "ShortDash"}] if projected
+             else [])
     for name, key, color in (("Contours above zero", "pos", CONTOUR_ABOVE_COLOR),
                              ("Contours below zero", "neg", CONTOUR_BELOW_COLOR)):
         series.append({"type": "scatter", "name": name, "data": lines[key],
                        "pointStart": next(_CONTOUR_BUILD) if lines[key] else 0,
                        "color": color, "lineWidth": 1, "marker": {"enabled": False},
                        "colorAxis": False, "states": no_fade,
+                       "zoneAxis": "x", "zones": zones,
                        "enableMouseTracking": False})
     # The bar chart already labels the Strike axis and the heatmap shares its EXACT
     # y-range, so hide the heatmap's (duplicate) strike labels + title and drop its
@@ -2431,6 +2416,22 @@ def history_rows(payload, symbol):
     return rows
 
 
+def history_forward(payload, symbol):
+    """The view's projected afternoon out of a history payload, or None.
+
+    It rides in the SAME payload as the rows and is checked against ``symbol`` the
+    same way (``history_rows``), so a band can never be drawn beside another
+    symbol's rows. Junk-tolerant; never raises."""
+    if not isinstance(payload, dict):
+        return None
+    if symbol:
+        stamped = payload.get("symbol")
+        if not stamped or str(stamped).upper() != str(symbol).upper():
+            return None
+    band = payload.get("forward")
+    return band if isinstance(band, dict) else None
+
+
 def history_dates(cached):
     """Distinct briefing dates (newest first) from the cached gamma_briefings index.
 
@@ -2617,35 +2618,11 @@ def view_data(entry):
             "hedge_drift_by_strike": _refloat_keys(raw.get("hedge_drift_by_strike"))}
 
 
-def projection_arg(entry):
-    """A view entry's forward band as ``heatmap_figure`` takes it, or None when
-    the snapshot carries none (off-hours, or any view but GEX)."""
-    proj = (entry or {}).get("projection") or {}
-    if not (proj.get("times") and proj.get("grid")):
-        return None
-    return {"times": proj["times"], "grid": _refloat_keys(proj["grid"]),
-            "cone": proj.get("cone") or {}, "spot": proj.get("spot")}
-
-
 def _heat_setting(key, allowed, default):
     """A stored heatmap choice, or ``default`` when it is not one of ``allowed``
     (an older build's value, or a hand-edited settings file)."""
     value = app_settings.get(key)
     return value if value in allowed else default
-
-
-def heat_keeps_projection(mode, scale="adaptive", frame="strike", show="level",
-                          **_others):
-    """Whether the GEX forward band is drawn. It is a NET grid of raw exposure in
-    strike coordinates along a flat spot, and a projected LEVEL: so only net keeps
-    it, not on a share scale (every cell a percentage), not in the spot frame (an
-    axis measured from spot) and not in a change view (beside columns of change a
-    level would be read as a jump). The caller decides, never ``heatmap_figure``: the hedge panel
-    under the heatmap is built on the same ``projection``, and so on the same
-    columns. It takes ``HeatControls.read``'s whole dict (``**_hk``) and ignores
-    the keys that are not its business."""
-    return (mode == "net" and scale != "share" and frame != "spot"
-            and show == "level")
 
 
 def heat_yrange(strikes, spot, spot_path, frame, half):
@@ -3208,7 +3185,7 @@ def render(symbol: str | None = None, view: str | None = None,
     # one view at a time, so only the views actually looked at are ever paid for.
     state: dict = {"snap": None, "countdown": 120, "fetching": False,
                    "netprem": None, "np_fetching": False, "np_bulk": False,
-                   "hist": {}, "hist_fetching": False}
+                   "hist": {}, "fwd": {}, "hist_fetching": False}
     # Last-seen bus cache versions for the fetch-free repaint/dialog timers.
     seen = {"gamma": None, "explain": None, "analyze": None, "status": None,
             "netprem": None}
@@ -3909,13 +3886,11 @@ def render(symbol: str | None = None, view: str | None = None,
             _set_summary(summary_text(summary, _view_label(view)))
 
         if rows:
-            # The forward band is GEX's, and a NET grid: any other value drops it,
-            # and the hedge panel below is built on this same ``projection``.
-            projection = (projection_arg(entry) if view == "GEX"
-                          and heat_keeps_projection(**_hk) else None)
+            # The view's projected afternoon; the hedge panel below shares it.
+            forward = (state.get("fwd") or {}).get(view)
             _legend = {}
             _set_figure(heat_plot, heatmap_figure(rows, view, yrange=yr,
-                                                  projection=projection,
+                                                  forward=forward,
                                                   walls=walls, spot=view_spot,
                                                   flip=flip,
                                                   levels=entry.get("levels"),
@@ -3927,11 +3902,11 @@ def render(symbol: str | None = None, view: str | None = None,
             heat.show_legend(view, _legend)
             # The hedge panel is its own element under the heatmap, so their
             # horizontal alignment is entirely this wiring's job: SAME categories
-            # (the projection band widens the GEX axis) and the heatmap rows' ts
+            # (the projected afternoon widens the axis) and the heatmap rows' ts
             # (a minute with no 0-DTE book is absent from hedge_history, and by
             # row position every later bar would sit a column early).
             _hedge = snap.get("hedge_history") or []
-            _cats = heatmap_categories(rows, projection)
+            _cats = heatmap_categories(rows, forward)
             _col_ts = [r[0] for r in rows]
             _has_hedge = bool(hedge_points(_hedge, _col_ts))
             if _has_hedge:
@@ -4040,7 +4015,7 @@ def render(symbol: str | None = None, view: str | None = None,
         state["snap"] = snap
         # A new snapshot means new history rows; drop the per-view cache and pull
         # back only the view actually on screen.
-        state["hist"] = {}
+        state["hist"], state["fwd"] = {}, {}
         await _load_history(view_toggle.value)
         _render_view()
         chart_busy.hide()
@@ -4060,8 +4035,9 @@ def render(symbol: str | None = None, view: str | None = None,
             payload = await run.io_bound(bus_client.read_shared, history_key(view, _hsym()))
         finally:
             state["hist_fetching"] = False
-        state.setdefault("hist", {})[view] = history_rows(
-            payload, (state.get("snap") or {}).get("symbol"))
+        sym = (state.get("snap") or {}).get("symbol")
+        state.setdefault("hist", {})[view] = history_rows(payload, sym)
+        state.setdefault("fwd", {})[view] = history_forward(payload, sym)
 
     @guard_async
     async def _maybe_repaint_netprem(version):
@@ -4327,7 +4303,7 @@ def render(symbol: str | None = None, view: str | None = None,
         published keys hold now. The version-poll takes it from there."""
         if not _public or not sym:
             return
-        state.update(snap=None, hist={})
+        state.update(snap=None, hist={}, fwd={})
         seen["gamma"] = None
         pub.update(limited=False, failed=False, sent_at=None)
         if counted and not LIMITER.allow(_visitor_key):

@@ -719,9 +719,17 @@ From spot draws 10 strikes each side of price. That number is a setting, and it 
 smaller than the Strike frame's 20 on purpose: every extra strike the frame shows has
 to be kept in the history the service publishes each minute, around the day's low and
 high, and that has a cost (see the Technical Reference). The Spot and Bar controls
-hide in this frame, and the forward projection band is not drawn. Level movement
-works as it does in the Strike frame: off leaves one line per level at its distance
-from price now, on adds the path each level took.
+hide in this frame. The projected afternoon is drawn here too, measured from the price
+it holds. Level movement works as it does in the Strike frame: off leaves one line per
+level at its distance from price now, on adds the path each level took.
+
+**The projected afternoon.** From the open, the four Greek heat maps run to the close,
+one column a minute: collected minutes left of a dashed **now** line, projected ones
+right of it. The projection prices today's open interest with less time left and
+nothing else moving, so it shows where the clock alone pushes the positioning by the
+close: for an expiry that ends today, gamma and charm gather toward the strikes near
+the price. It is a baseline, not a forecast, and it is recomputed every minute. Every
+picker applies to it, and the contour lines run through it dashed.
 
 **Smooth** (Off, Light, Medium, Strong; Medium by default). Averages each cell with
 its neighbouring minutes and strikes before it is coloured. Without it the only

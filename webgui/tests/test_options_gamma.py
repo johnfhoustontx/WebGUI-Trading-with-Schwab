@@ -909,25 +909,31 @@ def _proj_rows():
              {99.0: {"net": 6.0}, 100.0: {"net": -2.0}, 101.0: {"net": 5.0}})]
 
 
-def test_heatmap_appends_projection_columns():
-    proj = {"times": ["13:15", "13:30"], "spot": 100.0,
-            "grid": {99.0: [5.0, 6.0], 100.0: [-8.0, -12.0], 101.0: [4.0, 3.0]},
-            "cone": {"mid": [100.0, 100.0], "up": [100.5, 100.8], "down": [99.5, 99.2]}}
-    fig = gamma.heatmap_figure(_proj_rows(), "GEX", yrange=[95.0, 105.0], projection=proj)
+# A projected afternoon of two minutes, after rows whose ts are clock text (so the
+# band starts at its own first minute).
+_PROJ_FWD = {"ts": [1_761_228_000, 1_761_228_060], "spot": 100.0,
+             "call": {"99.0": [5.0, 6.0], "100.0": [-8.0, -12.0], "101.0": [4.0, 3.0]},
+             "put": {"99.0": [0.0, 0.0], "100.0": [0.0, 0.0], "101.0": [0.0, 0.0]},
+             "cone": {"mid": [100.0, 100.0], "up": [100.5, 100.8], "down": [99.5, 99.2]}}
+
+
+def test_heatmap_runs_on_through_the_projected_minutes():
+    fig = gamma.heatmap_figure(_proj_rows(), "GEX", yrange=[95.0, 105.0], forward=_PROJ_FWD)
     cats = fig["xAxis"]["categories"]
-    assert cats[-2:] == ["13:15", "13:30"]                         # future cols appended
+    assert len(cats) == 4                                          # 2 collected + 2 projected
+    assert cats[-2:] == [gamma._fmt_ts(t) for t in _PROJ_FWD["ts"]]
     pls = fig["xAxis"].get("plotLines", [])
-    assert any(pl.get("className") == "gamma-now-divider" for pl in pls)   # 'now' seam
+    assert [pl["value"] for pl in pls if pl.get("className") == "gamma-now-divider"] == [1.5]
     hm = next(s for s in fig["series"] if s["type"] == "heatmap")
-    assert any(p[0] >= 2 for p in hm["data"])                      # future cells at idx>=2
-    names = [s.get("name") for s in fig["series"]]
-    assert "EM up" in names and "EM down" in names                # cone overlays
+    assert {(p[0], p[1]): p[2] for p in hm["data"] if p[0] >= 2}[(3, 100.0)] == -12.0
+    em = {s["name"]: s["data"] for s in fig["series"] if s.get("name") in ("EM up", "EM down")}
+    assert em == {"EM up": [[2, 100.5], [3, 100.8]], "EM down": [[2, 99.5], [3, 99.2]]}
     spot = next(s for s in fig["series"] if s.get("name") == "Spot")
-    assert len(spot["data"]) == 4                                  # 2 collected + 2 cone.mid
+    assert spot["data"] == [[0, 100.0], [1, 100.2], [2, 100.0], [3, 100.0]]   # flat past now
 
 
 def test_heatmap_no_projection_no_divider_empty_cone():
-    fig = gamma.heatmap_figure(_proj_rows(), "GEX", yrange=[95.0, 105.0], projection=None)
+    fig = gamma.heatmap_figure(_proj_rows(), "GEX", yrange=[95.0, 105.0], forward=None)
     assert not any(pl.get("className") == "gamma-now-divider"
                    for pl in fig["xAxis"].get("plotLines", []))
     # The EM cone series are ALWAYS present (fixed 4-series structure so the in-place
@@ -945,10 +951,9 @@ def test_heatmap_series_count_constant_across_projection():
     # (shifting colorIndex + leaving stray line paths) → the heatmap rendered as a
     # mess of thin lines. Regression guard: what matters is that the count is the
     # SAME everywhere, whatever the optional blocks are doing.
-    proj = {"times": ["13:15"], "spot": 100.0, "grid": {100.0: [5.0]},
-            "cone": {"mid": [100.0], "up": [100.5], "down": [99.5]}}
-    with_proj = gamma.heatmap_figure(_proj_rows(), "GEX", yrange=[95.0, 105.0], projection=proj)
-    no_proj = gamma.heatmap_figure(_proj_rows(), "Charm", yrange=[95.0, 105.0], projection=None)
+    with_proj = gamma.heatmap_figure(_proj_rows(), "GEX", yrange=[95.0, 105.0],
+                                     forward=_PROJ_FWD)
+    no_proj = gamma.heatmap_figure(_proj_rows(), "Charm", yrange=[95.0, 105.0], forward=None)
     assert len(with_proj["series"]) == len(no_proj["series"]) == 11
     assert [s["type"] for s in no_proj["series"]] == [
         "heatmap", "line", "columnrange", "errorbar"] + ["line"] * 5 + ["scatter"] * 2
@@ -2063,8 +2068,9 @@ _ALIGN_ROWS = [(10, 100.0, None, None, None, 0, {100.0: {"net": 1.0}}),
                (20, 100.1, None, None, None, 0, {100.0: {"net": 2.0}}),
                (30, 100.2, None, None, None, 0, {100.0: {"net": 3.0}}),
                (40, 100.3, None, None, None, 0, {100.0: {"net": 4.0}})]
-_ALIGN_PROJ = {"times": ["13:15", "13:30"], "spot": 100.0,
-               "grid": {100.0: [5.0, 6.0]},
+# Two projected minutes after the last collected row (ts 40): 60 and 120.
+_ALIGN_PROJ = {"ts": [45, 120], "spot": 100.0,
+               "call": {"100.0": [5.0, 6.0]}, "put": {"100.0": [0.0, 0.0]},
                "cone": {"mid": [100.0, 100.0], "up": [100.5, 100.8],
                         "down": [99.5, 99.2]}}
 
@@ -2091,7 +2097,7 @@ def test_hedge_points_drop_rows_with_no_heatmap_column():
 def test_hedge_panel_spans_the_heatmaps_full_axis_including_the_projection():
     cats = gamma.heatmap_categories(_ALIGN_ROWS, _ALIGN_PROJ)
     heat = gamma.heatmap_figure(_ALIGN_ROWS, "GEX", yrange=[95.0, 105.0],
-                                projection=_ALIGN_PROJ)
+                                forward=_ALIGN_PROJ)
     assert cats == heat["xAxis"]["categories"]     # one definition, two panels
     hedge = gamma.hedge_figure([{"ts": 40, "hedge_pressure": 1e9}], cats,
                                col_ts=[r[0] for r in _ALIGN_ROWS])
@@ -2103,7 +2109,7 @@ def test_hedge_panel_spans_the_heatmaps_full_axis_including_the_projection():
 def test_heatmap_categories_without_a_projection_are_just_the_collected_times():
     heat = gamma.heatmap_figure(_ALIGN_ROWS, "Charm", yrange=[95.0, 105.0])
     assert gamma.heatmap_categories(_ALIGN_ROWS) == heat["xAxis"]["categories"]
-    assert gamma.heatmap_categories(_ALIGN_ROWS, {"times": [], "grid": {}}) \
+    assert gamma.heatmap_categories(_ALIGN_ROWS, {"ts": [], "call": {}, "put": {}}) \
         == heat["xAxis"]["categories"]
 
 
@@ -2112,11 +2118,11 @@ def test_render_builds_the_hedge_panel_on_the_heatmaps_own_axis():
 
     It is a second element under the heatmap, so nothing about the layout forces
     the two to agree — the wiring is the whole guarantee. It must pass the
-    heatmap's full category list (``heatmap_categories``, projection band
+    heatmap's full category list (``heatmap_categories``, projected afternoon
     included) and the heatmap rows' timestamps (so a skipped minute doesn't shift
     the bars), for the visibility probe as well as the figure."""
     src = inspect.getsource(gamma.render)
-    assert "heatmap_categories(rows, projection)" in src
+    assert "heatmap_categories(rows, forward)" in src
     assert "col_ts=" in src
     # The has-hedge probe must use the same mapping the figure does, or a symbol
     # whose readings all fall outside the heatmap window shows an empty panel.
@@ -2135,7 +2141,7 @@ def test_both_panels_pin_their_time_axis_to_the_category_count():
     exactly n column slots and the heatmap picture's own columns."""
     cats = gamma.heatmap_categories(_ALIGN_ROWS, _ALIGN_PROJ)     # 4 collected + 2 future
     heat = gamma.heatmap_figure(_ALIGN_ROWS, "GEX", yrange=[95.0, 105.0],
-                                projection=_ALIGN_PROJ)
+                                forward=_ALIGN_PROJ)
     # A single late reading — the degenerate case, where an unpinned axis has no
     # range at all to derive.
     hedge = gamma.hedge_figure([{"ts": 40, "hedge_pressure": 1e9}], cats,
@@ -3470,21 +3476,6 @@ def test_refloat_rows_floats_each_grids_keys_and_copies_the_rows():
     assert gamma.refloat_rows(None) == [] and gamma.refloat_rows([]) == []
 
 
-def test_projection_arg_is_the_band_heatmap_figure_takes_or_none():
-    entry = {"projection": {"times": ["13:15"], "spot": 100.0,
-                            "grid": {"100.0": [5.0]},
-                            "cone": {"mid": [100.0], "up": [100.5], "down": [99.5]}}}
-    proj = gamma.projection_arg(entry)
-    assert proj == {"times": ["13:15"], "grid": {100.0: [5.0]},
-                    "cone": {"mid": [100.0], "up": [100.5], "down": [99.5]},
-                    "spot": 100.0}
-    fig = gamma.heatmap_figure(_proj_rows(), "GEX", yrange=[95.0, 105.0], projection=proj)
-    assert fig["xAxis"]["categories"][-1] == "13:15"
-    for empty in ({}, None, {"projection": None}, {"projection": {"times": ["13:15"]}},
-                  {"projection": {"grid": {"100.0": [1.0]}}}):
-        assert gamma.projection_arg(empty) is None
-
-
 def test_heat_setting_falls_back_on_a_value_it_does_not_know(monkeypatch):
     monkeypatch.setattr(gamma.app_settings, "get", lambda k: "gross")
     assert gamma._heat_setting("gamma_heat_value", gamma._heat.VALUES, "net") == "net"
@@ -3499,36 +3490,29 @@ def test_the_heat_value_is_a_stored_setting_that_defaults_to_net():
     assert app_settings.DEFAULTS["gamma_heat_value"] == "net"
 
 
-def test_the_projection_band_is_kept_only_for_net():
-    """The forward projection is a net grid. In any other value the band is
-    dropped by the CALLER, so the hedge panel is built on the same columns."""
-    assert gamma.heat_keeps_projection("net")
-    for mode in ("call", "put", "size"):
-        assert not gamma.heat_keeps_projection(mode)
-
-
 def test_render_builds_the_heat_controls_and_feeds_both_panels():
     src = inspect.getsource(gamma.render)
     assert "heat = HeatControls()" in src
     assert "heat.on_change(_render_view" in src
     paint = src[src.index("def _render_view("):src.index("def _request_refresh(")]
     assert paint.count("heat.read(") == 1
-    # bar_figure, heatmap_figure, and the projection rule: all from the one dict.
-    assert paint.count("**_hk") == 3
-    assert paint.count("heat_keeps_projection(**_hk)") == 1
+    # bar_figure and heatmap_figure: both from the one dict.
+    assert paint.count("**_hk") == 2
     assert paint.count("heat_yrange(") == 1          # one range for both panels
     assert "heat.show_legend(" in paint
     sync = src[src.index("def _sync_spot_controls("):]
     assert "heat.sync(" in sync[:sync.index("\n    spot_style_sel.on_value_change")]
 
 
-def test_the_hedge_panel_is_built_on_the_projection_the_heatmap_was_given():
-    """One ``projection`` name feeds both, so dropping the band for a non-net
-    value shortens the hedge panel's columns with it."""
+def test_the_hedge_panel_is_built_on_the_band_the_heatmap_was_given():
+    """One ``forward`` name feeds both, read from the view's own history payload,
+    so the hedge panel always has the heatmap's columns."""
     src = inspect.getsource(gamma.render)
     paint = src[src.index("def _render_view("):]
-    assert "projection=projection," in paint
-    assert "heatmap_categories(rows, projection)" in paint
+    assert "forward=forward," in paint
+    assert "heatmap_categories(rows, forward)" in paint
+    assert 'forward = (state.get("fwd") or {}).get(view)' in paint
+    assert "history_forward(payload, sym)" in src
 
 
 def test_robust_zmax_is_still_reachable_under_its_old_name():
@@ -3604,14 +3588,6 @@ def test_unlocked_bars_clear_the_soft_extent():
                {"scale": "locked", "lock": None}):
         fig = gamma.bar_figure(SIDED, 100.0, **kw)
         assert fig["yAxis"]["softMin"] is None and fig["yAxis"]["softMax"] is None, kw
-
-
-def test_the_projection_band_is_dropped_for_a_share_scale():
-    """Projected cells are raw exposure; on a percentage axis they mean nothing."""
-    assert gamma.heat_keeps_projection("net", "locked")
-    assert gamma.heat_keeps_projection("net", "adaptive")
-    assert not gamma.heat_keeps_projection("net", "share")
-    assert not gamma.heat_keeps_projection("size", "locked")
 
 
 def test_the_display_window_is_read_from_config_when_called(monkeypatch):
@@ -3831,13 +3807,6 @@ def test_every_heatmap_cell_is_painted_in_its_own_place():
         assert x0 - 0.5 + (col + 0.5) * (span + 1) / (v + 1) == pytest.approx(x)
 
 
-def test_the_projection_band_is_dropped_in_the_spot_frame():
-    """It is drawn in strike coordinates along a flat spot; on an axis measured
-    from spot it would be drawn in the wrong place."""
-    assert gamma.heat_keeps_projection("net", "locked", "strike")
-    assert not gamma.heat_keeps_projection("net", "locked", "spot")
-
-
 def _change_rows():
     """Four one-minute rows. Strike 100 grows, 101 is flat and nets to zero, and
     102 first appears in the third row."""
@@ -3950,14 +3919,6 @@ def test_bars_with_no_basis_yet_draw_nothing_rather_than_the_level():
     assert fig["title"]["text"] == "GAMMA by strike · change over 30 min"
 
 
-def test_the_projection_band_is_dropped_in_a_change_view():
-    """The band is a projected LEVEL; beside columns of change it would be read
-    as a jump."""
-    assert gamma.heat_keeps_projection("net", "locked", "strike", "level")
-    assert not gamma.heat_keeps_projection("net", "locked", "strike", "open")
-    assert not gamma.heat_keeps_projection("net", "locked", "strike", "window")
-
-
 class _FakeEl:
     """Stands in for a NiceGUI element in HeatControls."""
     def __init__(self, value=None):
@@ -4014,7 +3975,6 @@ def test_both_builders_take_everything_read_returns_in_a_change_view():
     bars = gamma.bar_figure(data, 100.0, basis=heat.basis(rows), **hk)
     fig = gamma.heatmap_figure(rows, "GEX", yrange=[95.0, 105.0], **hk)
     assert bars["series"][0]["data"][0]["y"] == _cells(fig)[(3, 100.0)] == 9.0
-    assert not gamma.heat_keeps_projection(**hk)
 
 
 def test_the_show_picker_is_shown_with_the_others():
@@ -4163,7 +4123,6 @@ def test_both_builders_take_everything_read_returns_in_the_spot_frame():
     fig = gamma.heatmap_figure(_frame_rows(), "GEX", yrange=yr, **hk)
     assert bars["xAxis"]["min"] == fig["yAxis"]["min"] == -10.0
     assert bars["xAxis"]["max"] == fig["yAxis"]["max"] == pytest.approx(10.0)
-    assert not gamma.heat_keeps_projection(**hk)
 
 
 def test_the_spot_frame_hides_the_spot_overlay_pickers():
@@ -4411,17 +4370,23 @@ def test_each_column_still_shares_out_to_a_whole_when_smoothed():
         assert sum(column) == pytest.approx(100.0)
 
 
-def test_the_forward_band_is_not_smoothed():
-    """It is a projection drawn beside the session, not a reading in it."""
-    proj = {"times": ["15:05", "15:10"], "grid": {98.0: [1.0, 9.0], 100.0: [9.0, 1.0],
-                                                  102.0: [5.0, 5.0]},
-            "cone": {}, "spot": 100.0}
-    fig = gamma.heatmap_figure(_striped_rows(), "GEX", yrange=[97.0, 103.0],
-                               projection=proj, smooth={"minutes": 3.0, "strikes": 1.0})
-    heat = next(s for s in fig["series"] if s["type"] == "heatmap")
-    future = {(x, y): v for x, y, v in heat["data"] if x >= 16}
-    assert future == {(16, 98.0): 1.0, (17, 98.0): 9.0, (16, 100.0): 9.0,
-                      (17, 100.0): 1.0, (16, 102.0): 5.0, (17, 102.0): 5.0}
+def test_smoothing_runs_across_now():
+    """The operator's decision (2026-10-23 design): a smoothed collected column
+    beside an unsmoothed projected one draws a step in the colours and the lines,
+    so the whole session is smoothed as one picture."""
+    band = {"ts": [960, 1020], "spot": 100.0, "cone": {},
+            "call": {"98.0": [1.0, 9.0], "100.0": [40.0, 40.0], "102.0": [5.0, 5.0]},
+            "put": {"98.0": [0.0, 0.0], "100.0": [0.0, 0.0], "102.0": [0.0, 0.0]}}
+
+    def cells(**kw):
+        fig = gamma.heatmap_figure(_striped_rows(), "GEX", yrange=[97.0, 103.0],
+                                   forward=band, **kw)
+        heat = next(s for s in fig["series"] if s["type"] == "heatmap")
+        return {(x, y): v for x, y, v in heat["data"]}
+    raw, smoothed = cells(), cells(smooth={"minutes": 3.0, "strikes": 1.0})
+    assert raw[(16, 100.0)] == 40.0
+    assert smoothed[(16, 100.0)] < 40.0              # the first projected minute is smoothed
+    assert smoothed[(15, 100.0)] > raw[(15, 100.0)]  # and pulls the last collected one up
 
 
 def test_the_bars_take_the_smooth_keyword_and_ignore_it():

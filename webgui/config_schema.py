@@ -1025,6 +1025,19 @@ _GAMMA_HEAT = ConfigFile(
                   "two neighbouring walls merge into one. 0 leaves strikes "
                   "alone.", kind="float", unit="strikes", min=0, max=5, step=0.1),
         )),
+        Section("Projected afternoon",
+                "From the open the heat maps run to the close. Right of the "
+                "\"now\" line the cells are projected with price, open interest "
+                "and volatility held where they are, on all four views, and the "
+                "contour lines carry on through them, dashed. The options service "
+                "reads these each minute, so no restart is needed.", (
+            Field("forward.enabled", "Show the projected afternoon",
+                  "Off shows the collected minutes only.", kind="bool"),
+            Field("forward.step_min", "Price it every",
+                  "The page fills the minutes between. Smaller is finer and "
+                  "costs the service more each minute.",
+                  kind="int", unit="min", min=1, max=30, step=1),
+        )),
         Section("Gravity well",
                 "The Gamma view's Gravity well switch draws net gamma by strike "
                 "as ground, with the price as a ball on it.", (

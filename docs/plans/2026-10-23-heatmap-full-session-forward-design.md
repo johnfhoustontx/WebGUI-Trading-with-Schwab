@@ -108,10 +108,12 @@ Claude's calls (the operator can overrule any of them):
    including GEX).
 8. **Time to expiry keeps the engine's fixed 15:00 rule** (`gamma_tool`
    `CLOSE_HOUR_CT`), so the value at the `now` mark equals the collected cell on
-   every day. On a half day the marks stop at that day's real close
-   (`regular_close_on`), but T still runs to 15:00, exactly as the collected
-   cells already do. Changing the engine's close would touch the collector, the
-   raw-feed replay and stored history; that is a separate piece of work.
+   every day. The marks stop a minute before `regular_close_on`, which reads
+   `sessions.regular` and is 15:00 on every date: the calendar knows holidays but
+   no early closes, so a half day is drawn as a full one, exactly as the collected
+   cells already price it. Teaching the calendar and the engine an early close
+   would touch the collector, the raw-feed replay and stored history; that is a
+   separate piece of work.
 9. **The last projected column is one minute before the close** (14:59 on a
    full day). At the close itself T hits its 1e-6 floor and at-the-money gamma,
    charm and vanna are effectively infinite, which says nothing a reader can
@@ -155,10 +157,12 @@ for example `forward_grid.py`, importing nothing from `compute`:
   - **DEX:** the chain's delta plus `bs_delta(T') − bs_delta(T_now)`, an additive
     offset (a ratio of deltas misbehaves near zero). Where the collected cell used
     the Black-Scholes fallback (no usable chain delta), use `bs_delta(T')`.
-- **Speed.** Vectorise with numpy over contracts × marks.
-  `options_calculator` already has `bs_delta_v`, `bs_gamma_v` and `bs_vanna_v`.
-  A `bs_charm_v` is added beside them and tested against `bs_charm` point by
-  point.
+- **Speed.** Vectorise with numpy over contracts × marks. The existing `_v`
+  functions take one volatility and one time, so `options_calculator` gains
+  `bs_greek_arrays(S, K, T, r, sigma)` (gamma, charm, vanna and call delta,
+  broadcast element by element), tested against the scalar functions point by
+  point. Measured on a 61-strike `$SPX`-sized chain at 08:31 (79 marks, all four
+  views): 60 ms, 90% of it rounding one float at a time; rounded in numpy, 6 ms.
 - **Shape.** Per view:
   `{"ts": [...], "times": [...], "spot": s, "cone": {"mid", "up", "down"},
   "call": {strike: [...]}, "put": {strike: [...]}}`. Values are rounded to the
@@ -238,10 +242,13 @@ Both are read through `shared/gamma_heat_config.py`, per paint / per publish
   real `$SPX` chain at 08:31 (the most marks). Budget: under 50 ms.
 - The history payload's added size per view at 08:31 (the most marks). Expected
   at a 41-strike window, 80 marks and two sides: about 6,600 numbers, around
-  70 KB of JSON per view.
+  70 KB of JSON per view. Measured: 75–97 KB at 41 strikes and 111–134 KB at 61,
+  falling through the day to a few KB by 14:50.
 - The browser: a heatmap of ~390 columns plus contours at 08:31 is the same cell
   count as today's chart at 15:00, which already renders. Confirm the repaint
-  stays smooth with Contours and Smooth on.
+  stays smooth with Contours and Smooth on. Measured in Python
+  (`heatmap_figure`, 61 strikes, Contours and Smooth Medium on): 249 ms at 08:31
+  with the band against 193 ms for a collected 15:00 chart.
 
 ## Left to the builder
 

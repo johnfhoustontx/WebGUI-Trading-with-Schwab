@@ -241,6 +241,76 @@ def basis_grid(rows, show, window_min):
     return best
 
 
+# ── the projected afternoon ──────────────────────────────────────────────────
+# options_svc prices each view's open interest at marks a few minutes apart, from
+# now to a minute before the close, with spot, open interest and volatility held
+# (services/options_svc/forward_grid.py). The page fills one row per MINUTE so
+# the heat map is one column a minute across the whole session, and the rows are
+# shaped like the history's so every transform above runs over them unchanged.
+# Design: docs/plans/2026-10-23-heatmap-full-session-forward-design.md
+
+
+def _between(values, j, w):
+    """The value ``w`` of the way from ``values[j]`` to ``values[j + 1]``, or
+    None when either is not a number."""
+    try:
+        a = _fmt.num(values[j])
+        b = _fmt.num(values[min(j + 1, len(values) - 1)])
+    except (TypeError, IndexError, KeyError):
+        return None
+    if a is None or b is None:
+        return None
+    return a + (b - a) * w
+
+
+def forward_series(forward, after_ts):
+    """``{"rows", "up", "down"}`` for a view's band: one history-shaped row a
+    minute, ``(ts, spot, None, None, None, None, {strike: {call, put, net}})``,
+    from the minute after ``after_ts`` (the last collected row's epoch seconds)
+    to the band's last mark, and the expected-move cone at each of those
+    minutes (None where it has none).
+
+    Each side is interpolated in time between the two marks around the minute;
+    a minute before the first mark takes the first. ``net`` is calls plus puts.
+    A strike whose side is not a number at a mark is a gap there. ``after_ts``
+    that is not a number starts the rows at the first whole minute of the band.
+    Bad input is an empty band. Builds new lists."""
+    empty = {"rows": [], "up": [], "down": []}
+    if not isinstance(forward, dict):
+        return empty
+    ts = [_fmt.num(t) for t in (forward.get("ts") or [])]
+    calls, puts = forward.get("call"), forward.get("put")
+    if (not ts or None in ts or not isinstance(calls, dict)
+            or not isinstance(puts, dict)):
+        return empty
+    strikes = []
+    for key in set(calls) | set(puts):
+        k = _fmt.num(key)
+        if k is not None:
+            strikes.append((k, calls.get(key) or [], puts.get(key) or []))
+    after = _fmt.num(after_ts)
+    start = (math.floor(after / 60) + 1) * 60 if after is not None \
+        else math.ceil(ts[0] / 60) * 60
+    spot = _fmt.num(forward.get("spot"))
+    cone = forward.get("cone") if isinstance(forward.get("cone"), dict) else {}
+    out = {"rows": [], "up": [], "down": []}
+    j = 0
+    for minute in range(int(start), int(ts[-1]) + 1, 60):
+        while j + 1 < len(ts) - 1 and ts[j + 1] <= minute:
+            j += 1
+        span = ts[min(j + 1, len(ts) - 1)] - ts[j]
+        w = min(1.0, max(0.0, (minute - ts[j]) / span)) if span > 0 else 0.0
+        grid = {}
+        for k, c_row, p_row in strikes:
+            c, p = _between(c_row, j, w), _between(p_row, j, w)
+            if c is not None and p is not None:
+                grid[k] = {"call": c, "put": p, "net": c + p}
+        out["rows"].append((minute, spot, None, None, None, None, grid))
+        for side in ("up", "down"):
+            out[side].append(_between(cone.get(side) or [], j, w))
+    return out
+
+
 # ── the vertical frame ───────────────────────────────────────────────────────
 # frame key -> the control's label.
 #   strike  the vertical axis is strike: price moves, the levels stand still

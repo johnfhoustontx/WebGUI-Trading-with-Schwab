@@ -755,6 +755,15 @@ accelerate price.
   If Schwab sends a chain with **no Greeks** (every one marked "not computed"),
   a sentence replaces the bars and no walls are drawn. Every value would be zero,
   so the page says so instead of showing empty bars and made-up walls.
+- **The whole session** — from the 08:30 open the heat map on Gamma, Charm,
+  Delta and Vanna runs to the close, one column a minute. Left of the dashed
+  **now** line are the minutes collected so far; right of it the afternoon is
+  **projected**: today's open interest priced with less time left, holding
+  price, open interest and volatility where they are now. The green and red
+  dashed lines fanning out past **now** are the expected move. It answers *"if
+  nothing else changes, where does the positioning build by the close?"* — a
+  **baseline, not a forecast**, and it is recomputed every minute. It is not
+  shown before the open, after the close, or on a day the market is shut.
 - **Value** — what each bar and each cell holds. **Net** is calls minus puts.
   **Calls** and **Puts** show one side alone. **Size** is calls **plus** puts,
   coloured by which way the strike leans, and the bars split into a call bar and
@@ -788,14 +797,16 @@ accelerate price.
   cell with the minutes and strikes around it before it is coloured. It is real
   smoothing of the numbers: noise from one minute to the next stops drawing as
   stripes and the bands read as bands. The price: a smoothed peak is lower and
-  wider than the real one, and the newest few minutes show late. Press and hold
-  then gives the smoothed figure and says so; the bars are never smoothed.
+  wider than the real one, and the newest few minutes show late. It runs across
+  the **now** line too, so the colours do not step there. Press and hold then
+  gives the smoothed figure and says so; the bars are never smoothed.
 - **Contours** (switch, off by default) draws lines of equal value over the heat
   map: one at the top of the colour scale, one at half of it and one at a
   quarter, above and below zero. Lines packed close together mark where the
   positioning changes fast from one strike to the next; a line far from the rest
   shows how far a band reaches. They follow whatever Value, Show, Scale and Frame
-  you have chosen.
+  you have chosen, and carry on through the projected afternoon **dashed**, so a
+  line you can trust is never mistaken for one that is projected.
 - **Gravity well** (switch, off by default, Gamma only) adds a panel under the
   charts that draws the gamma profile as ground. A **valley** is positive gamma,
   where dealer hedging damps moves; a **hill** is negative gamma, where it

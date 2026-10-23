@@ -1111,8 +1111,7 @@ two sides from the grid itself.
   *settling until 09:30*, *adapts to what is visible*, *share of each column*. The
   time is the first history row plus the lock's minutes. No lock after that time
   reads as adaptive, never as settling.
-- `heat_keeps_projection(mode, scale)` now drops the forward band on a share scale
-  too. `HeatControls.read(grid, rows, strikes, entry)` returns the four keywords
+- `HeatControls.read(grid, rows, strikes, entry)` returns the four keywords
   both builders take: `mode`, `balanced`, `scale`, `lock`.
 - The choice persists as `app_settings.gamma_heat_scale`.
 - ⚠ The page now holds TWO selects captioned "Scale": this one, and the hidden one
@@ -1140,9 +1139,8 @@ or **From spot**. `heatmap_figure` and `bar_figure` take `frame=` and `half=`.
   `tools/measure_gamma_crop.py` in hand: 20 added 40% to $SPX's history on a 1.1%
   day. With `spot_side = 0` the service crops as it did before, the frame is the
   display window tall, and it shows gaps on a trending day.
-- `heat_keeps_projection(**_hk)` drops the forward band in this frame too (it is
-  strike-and-flat-spot data). The hedge panel is built from the same `projection`
-  name, so its columns still match.
+- The projected afternoon is resampled like any other column: its rows hold the
+  band's flat spot.
 - **`HeatControls.sync(view, overlays)`** hides the page's Spot and Bar controls
   (never the Level movement switch) in the spot frame, AFTER `_sync_spot_controls` has applied its own
   rules. A frame change runs that sync, then the repaint.
@@ -1154,7 +1152,7 @@ or **From spot**. `heatmap_figure` and `bar_figure` take `frame=` and `half=`.
   `gamma_heat.smooth(vz, minutes=, strikes=)` on the grid AFTER the frame transform
   and BEFORE `share_of_column`: a normalised bell-curve average, time then strikes,
   gaps skipped and kept. The contours and the adaptive scale are taken from the
-  smoothed grid; the projection band is appended raw; the tooltip gains
+  smoothed grid, which includes the projected afternoon; the tooltip gains
   "(smoothed)". `bar_figure` takes the keyword and ignores it. Pure Python, about
   30 to 60 ms a repaint on `$SPX` while on. ⚠ `interpolation: True` is NOT this:
   it only scales the one-pixel-a-cell image.
@@ -1234,7 +1232,8 @@ default), **Change since open** or **Change over 30 min**. `heatmap_figure` and
   outline is a level and is dropped.
 - A locked change uses the value's OWN lock (`scale_max` is called as before), so one
   legend serves a level and its change.
-- `heat_keeps_projection(**_hk)` drops the forward band in a change view too.
+- A projected column's change is measured back by real minutes (its rows carry
+  epoch ts), against a collected or a projected column alike.
 - The tooltip is `gamma_heat.SHOW_HELP`, a named constant a test holds to its one
   job: saying a change is repricing, not new trades (the collector weights by open
   interest).
@@ -1242,6 +1241,35 @@ default), **Change since open** or **Change over 30 min**. `heatmap_figure` and
   when the page is built, so a changed window shows in the label after a reload.
 - The choice persists as `app_settings.gamma_heat_show`. `_hk` now carries eight
   keywords; `render` is unchanged in size.
+
+**The projected afternoon (2026-10-23).** From the open the four Greek heatmaps run to
+the close, one column a minute; it replaces the GEX-only 15-minute band and its
+`heat_keeps_projection` / `projection_arg` gate (both deleted).
+
+- **Service:** `options_svc/forward_grid.py`. `forward_marks(now, step_min)` is `[]`
+  unless the session has opened on a trading day and it is before 14:59; otherwise
+  now, every `[forward] step_min` (5) on the clock, and 14:59. `build` prices each
+  view's nearest-expiry open interest at each mark with `calc_all_from_chain`'s own
+  formulas (only T moves), so the first mark IS the collected cell. `attach` runs in
+  `gamma_snapshot` AFTER `_crop_gamma_views`, on the strikes the crop kept, and adds
+  the EM cone. `[forward] enabled` turns it off.
+- **Bus:** `_publish_gamma` pops `entry["forward"]` beside `history` and writes it into
+  that view's history payload (`{"symbol", "view", "rows", "forward"}`), never the
+  main key. The page reads it with `history_forward(payload, symbol)` under the same
+  symbol check as the rows, into `state["fwd"]`.
+- **Page:** `gamma_heat.forward_series(band, last collected ts)` makes one
+  history-shaped row a minute (each side interpolated between marks; a gap stays a
+  gap). `heatmap_figure(..., forward=)` appends them to the rows BEFORE every
+  transform, so Value, Show, Frame, Smooth, Share, the Adaptive scale and the contours
+  treat the session as one. The spot line, candles and level tracks stay on the
+  collected columns; the spot line continues flat at the band's spot; EM up/down sit
+  over the projected columns. The two contour series always carry `zoneAxis: "x"` and
+  `zones` (`ShortDash` past `n_obs - 0.5`, `[]` with no band), and `xAxis.plotLines`
+  is always emitted, so an in-place update after the close clears the dash and the
+  divider. `heatmap_categories(rows, forward)` is built from the same rows, so the
+  hedge panel keeps its columns.
+
+Design and plan: [whole-session heatmaps](plans/2026-10-23-heatmap-full-session-forward-design.md).
 
 Design and plan: [value, scale and frame](plans/2026-10-09-gamma-heatmap-value-scale-frame-design.md).
 These are Phases 1 to 4 of five. ⚠ **The fifth, a Premium value, was measured and

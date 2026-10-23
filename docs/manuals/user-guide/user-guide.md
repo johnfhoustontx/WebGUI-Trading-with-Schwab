@@ -901,8 +901,9 @@ still all day go dark, and only what has moved is left. Both panels switch toget
 
 In the first half hour of a session **Change over 30 min** is empty, because nothing
 is yet 30 minutes old. A strike that was not in the chain at the start of the window
-is left blank, never drawn as a change from zero. The forward projection band is not
-drawn in a Change view.
+is left blank, never drawn as a change from zero. The projected afternoon is measured
+the same way: a projected cell is compared with the column 30 minutes (or the open)
+before it, whether that column was collected or projected.
 
 **Scale** (a picker beside Show) chooses what a colour means:
 
@@ -933,9 +934,9 @@ now, and the heat map is left clear.
 
 From spot shows **10 strikes each side of price**, in both panels, so the bars still
 line up with the heat map. Two controls hide in this frame because they would do
-nothing: **Spot** and **Bar** (price is always the flat line). The forward projection
-band is not drawn either. Each level line keeps its own price in its label; only its
-position moves.
+nothing: **Spot** and **Bar** (price is always the flat line). The projected afternoon
+is drawn here too, measured from the price held where it is now. Each level line
+keeps its own price in its label; only its position moves.
 
 **The heat map is smoothed, and the Smooth picker sets how much** (Light, Medium or
 Strong; it starts at Medium, and Off is the map as collected). Each cell is averaged with the minutes
@@ -949,13 +950,17 @@ lower and wider than the real one. The newest few minutes show late, because the
 last column can only be averaged with what came before it. And the number you get
 by pressing and holding a cell is the smoothed one; the tooltip says "(smoothed)".
 For an exact reading use the bars, which are never smoothed, or set Smooth to Off.
+Smoothing runs across the **now** line as well, so neither the colours nor the
+contour lines step where the collected minutes meet the projected ones.
 
 **To see where the positioning changes fast, switch Contours on.** It draws lines of
 equal value over the heat map: at the top of the colour scale, at half of it and at a
 quarter, above and below zero. Where the lines bunch together, the exposure changes a
 lot across a few strikes. Where one line runs alone, it marks how far a band reaches.
 The lines follow the Value, Show, Scale and Frame you have chosen, and the switch is
-off until you turn it on.
+off until you turn it on. They carry on through the projected afternoon, **dashed**
+past the **now** line, so you can always tell a line drawn from collected minutes
+from one that is projected.
 
 **To see the gamma profile as a landscape, switch Gravity well on** (Gamma view only).
 A panel appears under the two charts. Strikes with positive gamma, where dealer hedging
@@ -994,9 +999,24 @@ dollars of delta on Delta, a plain figure on Charm and Vanna, percentages in Sha
 column. It also says what the scale is tied to. Read the strip before comparing two
 charts: in Adaptive, two charts with the same colours can differ tenfold in size.
 
-The forward projection band on the Gamma heat map is drawn in **Net** only, and not
-in Share of column. It is a net figure in dollars, so the other values and the
-percentage scale leave it out.
+**From the open, the heat map shows the whole session.** On Gamma, Charm, Delta and
+Vanna the time axis runs from 08:30 to the close, one column a minute. Left of the
+dashed **now** line are the minutes collected so far; right of it the afternoon is
+**projected**: today's open interest priced with less and less time left, holding
+price, open interest and volatility where they are now. The price line carries on
+flat past **now**, and the green and red dashed lines fanning out from it are the
+expected move. As the day goes on the collected part grows and the projected part
+shrinks; after the close the chart is all collected minutes.
+
+Read the projected part as a baseline, not a forecast. It answers *"if nothing else
+changes, where does the positioning build by the close?"* Any real move rewrites it,
+which is why it is recomputed every minute. Every Value, Show, Scale, Frame and Smooth
+setting applies to it, and in **Adaptive** the projected cells count toward the
+colours: early in the day, when most of the chart is projected, the large cells near
+the price late in the afternoon set the scale and the collected morning reads
+fainter. It is not drawn before the open, after the close, or on a day the market is
+shut, and Settings → Configuration → Dealer Positioning heatmap → **Projected
+afternoon** can turn it off.
 
 **The buttons at the top right open separate screens, each in a new browser tab:**
 

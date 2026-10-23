@@ -19,6 +19,9 @@ from shared import market_calendar as _cal
 # The four views, in the order calc_all_from_chain returns them.
 VIEWS = ("GEX", "Charm", "DEX", "Vanna")
 _YEAR_HOURS = 365 * 24
+# Below this a value cannot be scaled to six significant figures without
+# overflowing a float (10 ** 308 is the ceiling).
+_FLUSH = 1e-290
 
 
 def forward_marks(now, step_min):
@@ -100,10 +103,29 @@ def _side_values(rows, side, spot, years, r):
             "Vanna": np.where(live, g["vanna"], 0.0) * oi * 100 * spot}, strike[:, 0]
 
 
+def _significant(arr):
+    """``arr`` rounded to the history's significant figures, all at once.
+
+    ``gex_history_db._round_sig`` does it one float at a time and was 90% of a
+    build (measured: 38 ms of a 60 ms build at 08:31 on 61 strikes). This is the
+    same rounding in numpy; about 3% of values land one unit in the last place
+    from the decimal, which costs a few characters of JSON and nothing else."""
+    import numpy as np
+    from gex_history_db import _GRID_SIG_FIGS
+    out = np.array(arr, dtype=float)
+    # A far-out strike prices to a denormal, whose six-figure scale overflows to
+    # inf and comes back NaN. It is nothing on any colour scale: zero, as the
+    # history's own float32 packing makes it.
+    out[np.abs(out) < _FLUSH] = 0.0
+    live = np.isfinite(out) & (out != 0)
+    scale = 10.0 ** (_GRID_SIG_FIGS - 1 - np.floor(np.log10(np.abs(out[live]))))
+    out[live] = np.round(out[live] * scale) / scale
+    return out
+
+
 def _build(chain, spot, marks, strikes):
     import numpy as np
     from gamma_tool import GammaEngine
-    from gex_history_db import _round_sig
     from options_calculator import RISK_FREE_RATE
     if (not marks or not isinstance(chain, dict) or not chain or isinstance(spot, bool)
             or not isinstance(spot, (int, float)) or not spot > 0 or not strikes):
@@ -127,7 +149,7 @@ def _build(chain, spot, marks, strikes):
         for view, arr in values.items():
             total = np.zeros((len(uniq), len(marks)))
             np.add.at(total, idx, arr)
-            sums[(view, side)] = dict(zip(uniq.tolist(), total.tolist()))
+            sums[(view, side)] = dict(zip(uniq.tolist(), _significant(total).tolist()))
     head = {"ts": [int(m.timestamp()) for m in marks],
             "times": [m.astimezone(_cal.CT).strftime("%H:%M") for m in marks],
             "spot": spot}
@@ -139,8 +161,8 @@ def _build(chain, spot, marks, strikes):
         if not keep:
             continue
         out[view] = {**head,
-                     "call": {str(k): _round_sig(calls.get(k, zero)) for k in keep},
-                     "put": {str(k): _round_sig(puts.get(k, zero)) for k in keep}}
+                     "call": {str(k): calls.get(k, zero) for k in keep},
+                     "put": {str(k): puts.get(k, zero) for k in keep}}
     return out
 
 

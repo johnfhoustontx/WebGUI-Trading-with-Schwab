@@ -144,6 +144,20 @@ def test_dex_falls_back_to_the_model_without_a_chain_delta():
     assert out["DEX"]["call"]["105.0"][-1] != out["DEX"]["call"]["105.0"][0]
 
 
+def test_significant_figures_match_the_history_and_never_make_a_nan():
+    """Far-out strikes price to denormal floats; scaling one up to six figures
+    overflowed to inf and came back NaN, which is not JSON a browser can read."""
+    import math
+    import sys
+    vals = [123456789.0, -0.000123456789, 1e-310, -5e-324, 0.0, 1e-200, 2.5e15]
+    out = fg._significant(vals).tolist()
+    assert all(math.isfinite(v) for v in out)
+    assert out[0] == pytest.approx(123457000.0) and out[1] == pytest.approx(-0.000123457)
+    assert out[2] == out[3] == out[4] == 0.0
+    assert out[5] == pytest.approx(1e-200) and out[6] == pytest.approx(2.5e15)
+    assert sys.float_info.min > 1e-310            # the case really is a denormal
+
+
 # ── attach ───────────────────────────────────────────────────────────────────
 
 def _views():

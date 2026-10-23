@@ -2117,7 +2117,7 @@ intrinsic value and second-order Greeks are 0.
 
 **`r` is `options_calculator.RISK_FREE_RATE = 0.045`, static, and it is the single
 source** — the calculator, the simulator, `gamma_tool` and `options_svc.compute`
-(`calc_iv` and the forward projection band) all import it rather than declaring their
+(`calc_iv`), and `options_svc.forward_grid` (the heat maps' projected afternoon) all import it rather than declaring their
 own. (`backtest_0dte` was in that list until 2026-08-20, when it was deleted with the
 rest of the superseded CLI tooling.) It is a **fixed assumption, not a live rate**: nothing fetches
 a Treasury yield, so a real move in short rates does not reach the model until this
@@ -2380,7 +2380,9 @@ A cell with a gap in any corner is skipped, so no line is drawn through a value 
 was not measured. A line spanning fewer than `[contours] min_columns` minutes (3) is
 left out as a speck, and past `[contours] max_points` (6,000 a sign) the shortest
 lines are dropped. Measured on a stored `$SPX` session the lines cost about 27 ms and
-35 KB a repaint. They cover the collected minutes only, not the forward band.
+35 KB a repaint. They are traced across the collected minutes and the projected
+afternoon as one grid, and the part past **now** is drawn dashed (a Highcharts zone on
+the x axis, so the series count does not change).
 
 The lines and the colours share one geometry. The chart paints the heat map as one
 picture with a pixel per cell, and that picture puts a strike on its own place on the
@@ -2406,7 +2408,8 @@ Time first, then strikes. A cell with no reading is skipped and stays empty, and
 the division by the weights actually used means an edge is not dimmed. It is
 applied to the grid in the frame being drawn and before Share of column is taken,
 so each minute still sums to 100%. The contour lines are traced from the smoothed
-cells; the forward band is not smoothed. Consequences: a peak is lower and wider,
+cells, and the projected afternoon is smoothed with them, so nothing steps at
+**now**. Consequences: a peak is lower and wider,
 and the last column is a one-sided average, so new moves lag by about σ minutes.
 Measured on a stored `$SPX` session: 27, 37 and 59 ms a repaint at Light, Medium
 and Strong. Without it the only smoothing is the browser interpolating the image
@@ -2458,6 +2461,33 @@ Measured on that session: 10 to 30 ms and 47 KB a repaint while on.
 The DEX/hedge panel sums `OI · delta · contract_multiplier · spot` across strikes
 for the current and a projected delta, surfacing net-delta-now vs projected-close
 hedging pressure.
+
+## The heat maps' projected afternoon
+
+From the open to a minute before the close, `options_svc.forward_grid` prices each
+of the four Greek views at marks `[forward] step_min` (5) minutes apart, from now to
+14:59, and the page fills one column a minute between them by linear interpolation.
+Only the nearest expiration, only the strikes the published history keeps, and
+only the time left moves:
+
+```
+T(mark)  = (dte·24 + hours from mark to 15:00 CT) / (365·24), floored at 1e-6
+GEX      = chain gamma · OI · 100 · S² · 0.01 · Γ_BS(T') / Γ_BS(T_now)   (put negative)
+Charm    = charm_BS(T') · OI · 100 · S        (volatility > 0 only)
+Vanna    = vanna_BS(T') · OI · 100 · S        (volatility > 0 only)
+DEX      = (chain delta + Δ_BS(T') − Δ_BS(T_now)) · OI · 100 · S
+           (Δ_BS(T') where the chain has no delta)
+```
+
+S, open interest and each contract's volatility are held at the current chain's.
+Every formula is `calc_all_from_chain`'s, so at the first mark (now) each value is
+the collected cell itself and the picture has no seam. The last mark is a minute
+before the close because at T → 0 the at-the-money gamma, charm and vanna diverge.
+Nothing is projected before the open, at or after 14:59, or on a day the market is
+shut. The band travels in each view's history payload (`cache:options:gamma_hist_*`,
+`"forward"`), never the main key. In the page it joins the collected rows before every
+transform, so Value, Show, Frame, Smooth, Share and the colour scale treat the session
+as one; in Adaptive the projected cells count toward the colour scale.
 
 ## Directional walls
 
