@@ -3,7 +3,9 @@
 ``options-scanner/data/us_listed_stocks_classification.csv``
 (``repo_paths.LISTED_STOCKS_CSV``) is a roster of US listed stocks a person
 curated; ``tools/rank_listed_stocks.py`` ranks each one inside its industry
-every Saturday. This module only LOOKS THINGS UP in it: a symbol's sector,
+every Saturday. ``Sector`` / ``Industry`` are Yahoo Finance's (Morningstar's
+taxonomy) since 2026-10-24, ``Sub_Industry`` the SEC SIC description: the two
+do not nest. This module only LOOKS THINGS UP in it: a symbol's sector,
 industry and sub-industry, and the top-ranked stocks of its industry. It never
 writes the file and never calls Schwab.
 

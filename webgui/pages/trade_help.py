@@ -645,9 +645,10 @@ _GENERAL = {
     "classification": (
         "Where this stock is filed in the list of US listed stocks: its "
         "sector, its industry within that sector, and its sub-industry.\n\n"
-        "The industry and the sub-industry come from two different "
-        "classification systems, so one is not always a finer cut of the "
-        "other. A dash means the list has nothing for this symbol, which is "
+        "The sector and the industry are Yahoo Finance's (Morningstar's "
+        "classification). The sub-industry is the company's SEC filing code, "
+        "a different and older system, so it is not always a finer cut of "
+        "the industry. A dash means the list has nothing for this symbol, which is "
         "normal for a fund or an index."),
     "mtf_bias": (
         "The direction agreed by several timeframes at once, from the "

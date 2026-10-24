@@ -3004,8 +3004,10 @@ half-typed ticker never looks like the thing on screen.
 
 Sector, Industry and Sub-industry come from the list of US listed stocks kept on the
 server. A dash in any of them means the list has nothing for that symbol, which is
-normal for a fund or an index. The industry and the sub-industry come from two
-different classification systems, so one is not always a finer cut of the other.
+normal for a fund or an index. The sector and the industry are Yahoo Finance's
+(Morningstar's classification, for example Technology and Software - Infrastructure).
+The sub-industry is the company's SEC filing code, a different and older system, so
+it is not always a finer cut of the industry.
 Clearing the box and leaving it reverts to the last good symbol rather than blanking
 the desk.
 

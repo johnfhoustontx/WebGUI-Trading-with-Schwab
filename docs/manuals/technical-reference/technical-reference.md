@@ -1966,7 +1966,7 @@ analysis; nothing here is fetched from Schwab.
 
 | Field | Source |
 |-------|--------|
-| `sector`, `industry`, `sub_industry` | The file's `Sector`, `Industry` and `Sub_Industry` columns for the symbol, as written |
+| `sector`, `industry`, `sub_industry` | The file's `Sector`, `Industry` and `Sub_Industry` columns for the symbol, as written. Since 2026-10-24 `Sector` and `Industry` are Yahoo Finance's (Morningstar's taxonomy: 11 sectors, about 150 industries) for the 5,888 rows Yahoo profiles, with `Sector_Source = "Yahoo Finance"`; the Nasdaq screener's earlier values are kept in `Nasdaq_Sector` / `Nasdaq_Industry`. The 32 rows Yahoo does not profile (exchange-traded notes, trust certificates) keep the Nasdaq industry with the sector renamed into Yahoo's words. `Sub_Industry` is the SEC SIC description and does not nest under `Industry` |
 | `name` | The file's `Name` with the share-class wording dropped ("Apple Inc. Common Stock" -> "Apple Inc."); shown only when Schwab returns no name |
 | `industry_rank`, `industry_count` | The file's `Industry_Rank` and `Industry_Count` for the symbol |
 | `leaders[]` | The rows sharing the symbol's `Industry` that carry an `Industry_Rank`, in rank order, cut to `[display] industry_top` (5); each `{rank, symbol, name, market_cap}` |

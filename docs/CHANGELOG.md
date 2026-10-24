@@ -4,7 +4,34 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-23 (**Dealer Positioning: from the open the four Greek heatmaps run to the close, with the contour lines carried through the projected afternoon.**)
+**Last updated:** 2026-10-24 (**Listed-stocks file: sector and industry re-verified against Yahoo Finance for all 5,920 symbols.**)
+
+- **Asked for by the user:** the Trade Analyzer showed CRWV as "Computer Software:
+  Prepackaged Software" where it belongs to "Software - Infrastructure"; re-verify
+  every symbol's sector, industry and sub-industry.
+- **Cause:** the file's `Sector` / `Industry` were the Nasdaq screener's, which are
+  derived from the SEC SIC code. CRWV's SIC is 7372 (prepackaged software), so the
+  row was faithful to its source; the source was the problem. It also filed Agilent
+  under Industrials and 1,333 rows under "Finance".
+- **What changed (data only, on the server):** Yahoo Finance's `assetProfile`
+  (Morningstar's taxonomy) was fetched for every symbol; 5,888 answered with a sector
+  and an industry. Those rows now carry Yahoo's `Sector` / `Industry` and
+  `Sector_Source = "Yahoo Finance"`; the old values moved to two new columns,
+  `Nasdaq_Sector` / `Nasdaq_Industry`, inserted after `Sector_Source`. The 32 rows
+  Yahoo does not profile (Entergy and TVA notes, STRATS certificates, a few others)
+  keep the Nasdaq industry with the sector renamed into Yahoo's words, so no sector
+  exists under two spellings. `Sub_Industry` (SIC) is unchanged. 4,510 sectors and
+  5,679 industries changed; the file now has 11 sectors and 163 industries.
+  `Industry_Rank` / `Industry_Count` were recomputed in the new industries from the
+  file's own `Popularity_Score`, with the rank tool's tie order, so the leaders panel
+  is right before the next Saturday re-rank; the re-rank keeps the new columns
+  (it writes only its own ten).
+- **Verified:** row set and order unchanged, no column outside the five touched
+  differs; `listed_stocks.classification("CRWV")` over the new file gives Technology /
+  Software - Infrastructure, 9th of 179, leaders MSFT, PLTR, ORCL, PANW, CRWD. The
+  fetch and apply were one-off scripts, not committed. Code change: the
+  classification tooltip, the User Guide and the Technical Reference name the
+  sources.
 
 - **Asked for by the operator:** "As soon as the market opens I need you to display the
   heatmap for the complete session and the associated contour lines", on GEX and the
