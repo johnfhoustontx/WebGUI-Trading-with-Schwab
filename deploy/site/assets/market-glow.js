@@ -1,4 +1,4 @@
-/* NeuralStrike market glow -- the Live screens button lights up while the US
+/* NeuralStrike market glow -- the Live Desk button lights up while the US
  * stock market is open. Hand-written; the DATA it reads is generated.
  *
  * Two files on purpose. `market-clock.js` is written by

@@ -1,7 +1,7 @@
 """``tools/generate_market_clock.py`` -- the data half of the site's open/closed glow.
 
 ``neuralstrike.co`` is a static tree served by Caddy's ``file_server``, so
-nothing on the server can know whether the NYSE is open. The "Live screens"
+nothing on the server can know whether the NYSE is open. The "Live Desk"
 link's glow is therefore decided client-side, and the JavaScript that decides it
 needs a holiday calendar and the session bounds.
 

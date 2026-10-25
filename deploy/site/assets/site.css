@@ -970,10 +970,12 @@ a.ns-menu-item:hover {
 }
 .ns-social .btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
 
-/* ─── 10. Live page ──────────────────────────────────────────────────────
+/* ─── 10. Live page (the Live Desk) ──────────────────────────────────────
  *
- * A grid of fourteen tiles, each a still capture of one published live screen
- * (see the header comment in live.html for why a picture and not an iframe).
+ * Tool cards, then the picture tiles in three groups, each tile a still capture
+ * of one published live screen (see the header comment in live.html for why a
+ * picture and not an iframe). blog.html, ideas.html and report.html borrow the
+ * page frame below (.ns-live-page / -main / -head / -title / -lede / -note).
  *
  * ⚠ THE TILE'S BOX MUST EXIST BEFORE ITS PICTURE DOES. The captures are
  * generated on the serving box and gitignored, so on a fresh deploy — and any
@@ -1010,19 +1012,266 @@ a.ns-menu-item:hover {
   color: color-mix(in srgb, var(--color-text) 80%, transparent);
 }
 
-.ns-live-grid {
+/* The Live Desk layout (2026-10-24): a hero with jump pills, a row of tool
+ * cards, then three groups of picture tiles, each with its heading on the left.
+ * Every card shares .ns-desk-spot, the hover: a lift, an accent outline, and a
+ * radial glow that follows the cursor (assets/live.js sets --mx / --my; with no
+ * script the glow sits at the top centre). */
+.ns-desk-main { display: flex; flex-direction: column; gap: clamp(48px, 7vw, 72px); max-width: 1320px; }
+
+.ns-desk-hero { display: flex; flex-direction: column; gap: 18px; max-width: 760px; }
+.ns-desk-hero .ns-live-title { font-size: clamp(34px, 5vw, 60px); line-height: 1.04; letter-spacing: -0.03em; margin: 0; text-wrap: balance; }
+.ns-desk-hero .ns-live-lede { font-size: 17px; line-height: 1.6; max-width: none; text-wrap: pretty; }
+.ns-desk-eyebrow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-accent-300);
+}
+.ns-desk-sep { color: var(--color-neutral-600); }
+/* On a phone the count wraps to its own line, where a leading dot dangles. */
+@media (max-width: 480px) { .ns-desk-sep { display: none; } }
+.ns-desk-muted { color: var(--color-neutral-400); }
+.ns-desk-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-accent); flex: none; }
+/* Pulses only while the market glow has lit the menu button: the script puts
+ * .ns-market-open on that link, so this needs no script of its own. */
+body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
+@keyframes ns-desk-pulse {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 55%, transparent); }
+  70%  { box-shadow: 0 0 0 8px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+.ns-desk-jump { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+.ns-desk-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--color-neutral-300);
+  box-shadow: inset 0 0 0 1px var(--color-neutral-800);
+  text-decoration: none;
+  transition: color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
+}
+.ns-desk-pill .ns-ico { color: var(--color-accent); }
+.ns-desk-pill span { color: var(--color-neutral-600); font-variant-numeric: tabular-nums; }
+.ns-desk-pill:hover,
+.ns-desk-pill:focus-visible {
+  color: var(--color-text);
+  text-decoration: none;
+  box-shadow: inset 0 0 0 1px var(--color-accent), 0 0 18px -4px var(--color-accent);
+  transform: translateY(-1px);
+}
+
+/* Icons: the inline sprite at the top of live.html. Stroke settings inherit
+ * into each <use>, so one rule draws them all in the text colour. */
+.ns-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.ns-ico {
+  width: 1.15em;
+  height: 1.15em;
+  flex: none;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The shared card */
+.ns-desk-spot {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  text-decoration: none;
+  transition: transform 0.4s cubic-bezier(.2, .8, .2, 1), box-shadow 0.4s, opacity 0.4s, filter 0.4s;
+}
+.ns-desk-spot:hover,
+.ns-desk-spot:focus-visible {
+  color: var(--color-text);
+  text-decoration: none;
+  transform: translateY(-4px);
+  box-shadow:
+    0 0 0 1px var(--color-accent-600),
+    0 18px 40px -12px rgba(0, 0, 0, 0.7),
+    0 0 32px -8px color-mix(in srgb, var(--color-accent) 45%, transparent);
+}
+.ns-desk-glow {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+  background: radial-gradient(300px circle at var(--mx, 50%) var(--my, 0%),
+              color-mix(in srgb, var(--color-accent) 24%, transparent), transparent 70%);
+}
+.ns-desk-spot:hover .ns-desk-glow,
+.ns-desk-spot:focus-visible .ns-desk-glow { opacity: 1; }
+/* The rest of the row steps back while one card is hovered. :has() is the
+ * whole mechanism, so a browser without it simply shows no dimming. */
+.ns-desk-tools:has(.ns-desk-spot:hover) .ns-desk-spot:not(:hover),
+.ns-desk-screens:has(.ns-desk-spot:hover) .ns-desk-spot:not(:hover) { opacity: 0.55; filter: saturate(0.6); }
+
+.ns-desk-main section { scroll-margin-top: 80px; }
+.ns-desk-main h2 { font-family: var(--font-heading); font-weight: 500; font-size: 24px; letter-spacing: -0.02em; line-height: 1.2; margin: 0; }
+
+/* Tools */
+.ns-desk-tools-section { display: flex; flex-direction: column; gap: 20px; }
+.ns-desk-section-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
+.ns-desk-section-title span { font-size: 14px; color: var(--color-neutral-500); }
+.ns-desk-tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap: 12px; }
+.ns-desk-tool { display: flex; flex-direction: column; gap: 14px; padding: 18px; }
+.ns-desk-tool-top { position: relative; display: flex; align-items: center; justify-content: space-between; }
+.ns-desk-tool-icon {
   display: grid;
-  /* auto-fill, so the row count follows the viewport instead of a breakpoint
-   * list: four tiles wide on a desktop, one on a phone, and nothing to keep in
-   * step with a media query. */
-  grid-template-columns: repeat(auto-fill, minmax(272px, 1fr));
-  gap: clamp(14px, 1.6vw, 22px);
-  /* start, not stretch: a tile with sub-view links under it is taller, and
-   * a stretched neighbour would grow an empty band below its caption. */
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-md);
+  font-size: 20px;
+  background: var(--color-neutral-900);
+  color: var(--color-accent);
+  transition: background 0.35s, color 0.35s;
+}
+.ns-desk-tool:hover .ns-desk-tool-icon { background: var(--color-accent-800); color: var(--color-accent-200); }
+.ns-desk-step { font-size: 11px; letter-spacing: 0.1em; color: var(--color-neutral-600); font-variant-numeric: tabular-nums; }
+.ns-desk-tool-text { position: relative; display: flex; flex-direction: column; gap: 4px; }
+.ns-desk-tool-name { font-size: 16px; font-weight: 500; letter-spacing: -0.01em; }
+.ns-desk-tool-desc { font-size: 13px; line-height: 1.5; color: var(--color-neutral-400); }
+.ns-desk-cta {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  font-size: 12px;
+  color: var(--color-accent-300);
+  opacity: 0;
+  transform: translateX(-6px);
+  transition: opacity 0.35s, transform 0.35s;
+}
+.ns-desk-tool:hover .ns-desk-cta,
+.ns-desk-tool:focus-visible .ns-desk-cta { opacity: 1; transform: none; }
+
+/* Groups of screens */
+.ns-desk-group { display: flex; flex-wrap: wrap; gap: 28px 40px; }
+.ns-desk-group-head { flex: 1 1 220px; max-width: 280px; display: flex; flex-direction: column; gap: 10px; }
+.ns-desk-group-head p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--color-neutral-400); text-wrap: pretty; }
+.ns-desk-group-head .ns-desk-kicker {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-neutral-500);
+}
+.ns-desk-kicker .ns-ico { font-size: 20px; color: var(--color-accent); }
+.ns-desk-rule {
+  height: 1px;
+  width: 48px;
+  margin-top: 8px;
+  background: linear-gradient(90deg, var(--color-accent), transparent);
+  transition: width 0.5s cubic-bezier(.2, .8, .2, 1);
+}
+.ns-desk-group:has(.ns-live-tile:hover) .ns-desk-rule { width: 100%; }
+.ns-desk-screens {
+  flex: 999 1 560px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr));
+  gap: 14px;
+  /* start, not stretch: a tile whose description wraps to more lines is
+   * taller, and a stretched neighbour would grow an empty band. */
   align-items: start;
 }
 
-/* A tile plus the views that live under it (Screen.parent). */
+.ns-live-tile { display: flex; flex-direction: column; }
+.ns-desk-thumb {
+  position: relative;
+  display: block;
+  aspect-ratio: 8 / 5;
+  overflow: hidden;
+  background: var(--color-bg);
+  mix-blend-mode: lighten;
+}
+.ns-live-tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  aspect-ratio: 8 / 5;          /* the capture viewport, 1600x1000 */
+  object-fit: cover;
+  object-position: top left;
+  background: var(--color-bg);
+  transition: transform 0.8s cubic-bezier(.2, .8, .2, 1);
+  /* ⚠ THE EMPTY STATE IS A REAL STATE, not a transient one. The captures are
+     gitignored and written on the serving box, so this grid ships referencing
+     files that do not exist yet -- and if the capture timer ever stops, or its
+     settle delay turns out to be too short, it goes back to that state on a
+     PUBLIC page.
+
+     Without this, a missing capture renders its alt text spilling across the
+     top-left of the tile beside a broken-image icon, which reads as a broken
+     site rather than as a screen not captured yet. Transparent text drops the
+     spill; `aspect-ratio` above holds the box open at full size either way, so
+     what remains is an empty panel under its caption.
+
+     The alt attribute STAYS -- it is still read aloud, and .ns-live-cap
+     repeats the same name visually, so nothing is lost to a sighted reader. */
+  color: transparent;
+}
+.ns-live-tile:hover img { transform: scale(1.06); }
+.ns-desk-fade { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, transparent 45%, var(--color-surface)); }
+.ns-desk-badge {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  background: color-mix(in srgb, var(--color-bg) 75%, transparent);
+  backdrop-filter: blur(6px);
+  color: var(--color-neutral-200);
+  opacity: 0;
+  transform: translateX(-6px);
+  transition: opacity 0.35s, transform 0.35s;
+}
+.ns-live-tile:hover .ns-desk-badge,
+.ns-live-tile:focus-visible .ns-desk-badge { opacity: 1; transform: none; }
+.ns-desk-screen-text { display: flex; flex-direction: column; gap: 3px; padding: 4px 16px 16px; }
+.ns-desk-screen-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ns-live-cap { font-size: 15px; font-weight: 500; letter-spacing: -0.01em; }
+.ns-desk-screen-title .ns-ico { color: var(--color-accent); opacity: 0; transform: translateX(-6px); transition: opacity 0.35s, transform 0.35s; }
+.ns-live-tile:hover .ns-desk-screen-title .ns-ico,
+.ns-live-tile:focus-visible .ns-desk-screen-title .ns-ico { opacity: 1; transform: none; }
+.ns-desk-screen-desc { font-size: 13px; line-height: 1.45; color: var(--color-neutral-400); }
+.ns-desk-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--color-accent), transparent);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.45s cubic-bezier(.2, .8, .2, 1);
+}
+.ns-live-tile:hover .ns-desk-bar,
+.ns-live-tile:focus-visible .ns-desk-bar { transform: scaleX(1); }
+
+/* A tile plus the views that live under it (Screen.parent). No screen has a
+ * parent today; kept so one added to the table has somewhere to go. */
 .ns-live-group { display: flex; flex-direction: column; gap: 8px; }
 .ns-live-sub { display: flex; flex-wrap: wrap; gap: 6px; }
 .ns-live-sub a {
@@ -1043,54 +1292,15 @@ a.ns-menu-item:hover {
   text-decoration: none;
 }
 
-.ns-live-tile {
-  display: block;
-  border: 1px solid var(--color-neutral-800);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  background: var(--color-neutral-900);
-  color: var(--color-text);
-  text-decoration: none;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
-}
-.ns-live-tile:hover,
-.ns-live-tile:focus-visible {
-  border-color: var(--color-accent);
-  box-shadow: var(--shadow-md);
-  text-decoration: none;
-  color: var(--color-text);
-}
-.ns-live-tile img {
-  display: block;
-  width: 100%;
-  height: auto;
-  aspect-ratio: 8 / 5;          /* the capture viewport, 1600x1000 */
-  object-fit: cover;
-  background: var(--color-bg);
-  border-bottom: 1px solid var(--color-neutral-800);
-  /* ⚠ THE EMPTY STATE IS A REAL STATE, not a transient one. The captures are
-     gitignored and written on the serving box, so this grid ships referencing
-     fourteen files that do not exist yet -- and if the capture timer ever
-     stops, or its settle delay turns out to be too short, it goes back to
-     that state on a PUBLIC page.
+.ns-desk-note p { margin: 0 0 8px; }
+.ns-desk-note .ns-desk-quiet { display: flex; align-items: center; gap: 8px; color: var(--color-neutral-400); }
+.ns-desk-quiet .ns-ico { color: var(--color-accent); }
 
-     Without this, a missing capture renders its alt text spilling across the
-     top-left of the tile beside a broken-image icon, which reads as a broken
-     site rather than as a screen not captured yet. Transparent text drops the
-     spill; `aspect-ratio` above holds the box open at full size either way, so
-     what remains is an empty panel under its caption.
-
-     The alt attribute STAYS -- it is still read aloud, and .ns-live-cap
-     repeats the same name visually, so nothing is lost to a sighted reader. */
-  color: transparent;
+@media (prefers-reduced-motion: reduce) {
+  .ns-desk-main *, .ns-desk-main *::before, .ns-desk-main *::after { transition: none !important; animation: none !important; }
+  .ns-desk-dot { animation: none !important; }
 }
-.ns-live-cap {
-  display: block;
-  padding: 11px 14px;
-  font-size: 13.5px;
-  line-height: 1.3;
-  color: color-mix(in srgb, var(--color-text) 82%, transparent);
-}
+.ns-desk-main .ns-live-note { margin-top: 0; }
 
 .ns-live-note {
   margin: clamp(28px, 4vw, 44px) 0 0;

@@ -2,7 +2,7 @@
 
 ``neuralstrike.co`` is a static tree served by Caddy's ``file_server``. Nothing
 on the server side runs, so the site cannot be told whether the market is open
--- the "Live screens" link's open/closed glow has to be decided in the visitor's
+-- the "Live Desk" link's open/closed glow has to be decided in the visitor's
 browser, and that browser needs a holiday calendar and the session bounds.
 
 **Why generated rather than typed.** ``CLAUDE.md`` states the rule outright:

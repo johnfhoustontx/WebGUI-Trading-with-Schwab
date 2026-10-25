@@ -4,7 +4,41 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-24 (**Expected Move is the third Strategy Tools tab and shares the Calculator and Simulator's position; the public site gains an Expected Move, and its Tools menu names the three as one item, Strategy Tools.**)
+**Last updated:** 2026-10-24 (**The site's Live screens page becomes the Live Desk: tool cards, and the twelve screens in three groups.**)
+
+- **Asked for by the user:** a design handoff ("Neural Strike Live redesign.zip": one
+  self-contained `live.html` and a README) for the Live Screens page, plus the menu
+  wording. They approved building it with these adaptations: seven tool cards, the
+  Tools menu kept, inline SVG icons, the spotlight in `assets/live.js`, and the
+  screen descriptions drafted from `page_help.py`.
+- **The page:** `deploy/site/live.html` is now a hero with a count, four jump pills
+  (Tools, Market regime, Dealer positioning, Sector rotation), a row of seven
+  numbered tool cards (each Strategy Tool gets a card of its own, though the menu
+  names the three as one item), then the twelve picture tiles in three groups, each
+  with its heading on the left. The hover is the design's: lift, accent outline, a
+  thumbnail zoom, an Open badge, a bar along the bottom edge, the group's rule grows,
+  and the rest of the row dims (`:has()`). The hero's dot pulses only while the market
+  glow has lit the menu button.
+- **Adapted, not copied:** the design's own menu, its Google Fonts and its CDN icon font
+  were dropped. The site menu stays the same on all seven pages, Inter is
+  already self-hosted, and the icons are an inline `<symbol>` sprite. The cursor
+  spotlight is `assets/live.js`, the page's one script besides the glow.
+  The design was drawn when there were six tools, so the counts and cards were
+  corrected to seven.
+- **The menu:** the primary button reads **Live Desk** on all seven pages (was "Live
+  screens"). Blog entry pages copy the menu from `blog.html` and pick it up when
+  `blog_svc` rebuilds at start.
+- **Tests:** `deploy/tests/test_site.py` reads the new tile markup, and pins the groups
+  (`DESK_GROUPS`: every tile in exactly one), the tool cards against
+  `live_screens.SCREENS` in table order, the pill and eyebrow counts, the button's
+  name on every page, and `live.js` as the one allowed extra script with no off-origin
+  URL.
+- **Verified:** the page was served from `deploy/site` on loopback and checked in a
+  browser at 1100 px and 375 px: no horizontal overflow, no failed request except the
+  gitignored captures. Hover effects were not checked in the automation browser,
+  which freezes transitions. Not yet on prod.
+
+**Prior —** 2026-10-24 (**Expected Move is the third Strategy Tools tab and shares the Calculator and Simulator's position; the public site gains an Expected Move, and its Tools menu names the three as one item, Strategy Tools.**)
 
 - **Asked for by the user:** "Move the Options/Expected move to the subtab under the
   strategy tools. The properties from the calculator and simulator will also

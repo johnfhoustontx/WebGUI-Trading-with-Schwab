@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>NeuralStrike — Live screens</title>
+<title>NeuralStrike — Live Desk</title>
 <meta name="description" content="Nineteen NeuralStrike screens running against the market with nothing to sign into: dealer positioning, options flow, market regime and sector rotation, plus seven tools that find, rank, repair, price and simulate a trade, chart the move the market expects, and follow the news behind it.">
 <meta name="theme-color" content="#161826">
 <!-- Icons. The SVG is the good one and every modern browser takes it; the
@@ -20,12 +20,13 @@
 <link rel="stylesheet" href="assets/site.css">
 
 <!--
-  LIVE SCREENS — a menu of the screens published at
-  live.neuralstrike.co, which is a SEPARATE ORIGIN running its own process
-  (webgui/live_main.py). The table of what is published lives in
-  webgui/live_screens.py and nothing here restates it: the tiles below are
-  generated from it, and deploy/tests/test_site.py fails if the two drift in
-  either direction.
+  LIVE DESK (was "Live screens" until 2026-10-24) — a menu of the screens
+  published at live.neuralstrike.co, which is a SEPARATE ORIGIN running its own
+  process (webgui/live_main.py). The table of what is published lives in
+  webgui/live_screens.py: the tool cards and the picture tiles below are written
+  by hand against it, and deploy/tests/test_site.py fails if the two drift in
+  either direction. The GROUPS (regime / dealer / rotation) are this page's own
+  arrangement and exist nowhere else; the test checks every tile sits in one.
 
   ⚠ THIS PAGE IS STILL NOT THE APP, and must not become it. It is served off a
   public file server at neuralstrike.co; the trading UI lives behind its own
@@ -49,6 +50,11 @@
   capture the images 404 and the grid is text and reserved boxes — which is why
   every tile declares its width and height.
 
+  ── ICONS ARE AN INLINE SPRITE ──────────────────────────────────────────────
+  The design drew its icons from a web font on a CDN. This site fetches nothing
+  from anyone (test_no_page_reaches_an_external_origin), so the few it uses are
+  drawn here once as <symbol>s and placed with <use href="#i-...">.
+
   ── NO TIMESTAMP HERE, DELIBERATELY ─────────────────────────────────────────
   Baking a capture time into this file would make a committed source file a
   build artifact, and it would be a claim of freshness the file cannot keep —
@@ -58,6 +64,22 @@
 </head>
 
 <body>
+<svg class="ns-sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a4 4 0 0 0-5.3 5.2l-5.9 5.9a1.8 1.8 0 0 0 2.5 2.5l5.9-5.9a4 4 0 0 0 5.2-5.3l-2.5 2.5-2.4-.4-.4-2.4z"/></symbol>
+  <symbol id="i-compass" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M15.5 8.5l-2 5-5 2 2-5z"/></symbol>
+  <symbol id="i-bank" viewBox="0 0 24 24"><path d="M3 9.5L12 4l9 5.5M5.5 10.5v6.5M10 10.5v6.5M14 10.5v6.5M18.5 10.5v6.5M3.5 20h17"/></symbol>
+  <symbol id="i-rotate" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 0 1-13.2 4.9M4.5 12a7.5 7.5 0 0 1 13.2-4.9M18 3.5v3.8h-3.8M6 20.5v-3.8h3.8"/></symbol>
+  <symbol id="i-broadcast" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1.8"/><path d="M8.6 8.6a4.8 4.8 0 0 0 0 6.8M15.4 8.6a4.8 4.8 0 0 1 0 6.8M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M20 20l-4.8-4.8"/></symbol>
+  <symbol id="i-lifebuoy" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.8"/><path d="M5.6 5.6l3.7 3.7M14.7 14.7l3.7 3.7M18.4 5.6l-3.7 3.7M9.3 14.7l-3.7 3.7"/></symbol>
+  <symbol id="i-calculator" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8.5 6.5h7v3h-7zM8.5 13.5h.01M12 13.5h.01M15.5 13.5h.01M8.5 17h.01M12 17h.01M15.5 17h.01"/></symbol>
+  <symbol id="i-chart-up" viewBox="0 0 24 24"><path d="M4 4v16h16M7.5 15l3.5-3.5 3 3 5-6M15 8.5h4v4"/></symbol>
+  <symbol id="i-cone" viewBox="0 0 24 24"><path d="M3 19.5h18M4 19.5c3.2 0 4.6-12 8-12s4.8 12 8 12M12 7.5v12M8 19.5v-2.5M16 19.5v-2.5"/></symbol>
+  <symbol id="i-news" viewBox="0 0 24 24"><path d="M4 5h12.5v14H6a2 2 0 0 1-2-2zM16.5 9H20v8a2 2 0 0 1-2 2M7.5 9h5.5M7.5 12.5h5.5M7.5 16h3"/></symbol>
+  <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-arrow-up-right" viewBox="0 0 24 24"><path d="M7 17L17 7M8.5 7H17v8.5"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M19.5 14.5A7.8 7.8 0 1 1 9.5 4.5a6.2 6.2 0 0 0 10 10zM17 3v3.5M15.25 4.75h3.5"/></symbol>
+</svg>
 <div class="ns-page-sub ns-live-page">
 
   <!-- THE SITE MENU. Byte-identical on every page but for aria-current,
@@ -105,92 +127,175 @@
         </a>
       </div>
     </details>
-    <a class="btn btn-primary" href="live.html" aria-current="page" style="white-space: nowrap;">Live screens</a>
+    <a class="btn btn-primary" href="live.html" aria-current="page" style="white-space: nowrap;">Live Desk</a>
   </nav>
 
-  <main class="ns-live-main">
-    <div class="ns-live-head">
-      <p class="ns-eyebrow">Live screens</p>
-      <h1 class="ns-live-title">Running against the market, right now.</h1>
+  <main class="ns-live-main ns-desk-main">
+    <header class="ns-desk-hero">
+      <!-- The dot pulses only while the market glow has lit the menu button
+           (site.css, body:has(.ns-market-open)): "right now" at midnight
+           would be a pulse claiming a session that is not running. -->
+      <p class="ns-desk-eyebrow"><span class="ns-desk-dot"></span><span>Live Desk</span><span class="ns-desk-sep">·</span><span class="ns-desk-muted">19 open, nothing to sign into</span></p>
+      <h1 class="ns-live-title">Running against the market, right&nbsp;now.</h1>
       <p class="ns-live-lede">
         Nineteen screens from the desk, open to anyone. Twelve are the readings the desk runs on,
-        from dealer positioning to sector rotation. Seven are tools: Option Signals lists every trade
-        the scanner qualifies through the session, the Strategy Finder ranks every trade for a
-        symbol, Rescue repairs one you already hold, the three Strategy Tools price any structure,
-        show what it is worth as price and time move and chart the move the market expects by an
-        expiration, and Market News follows the headlines and filings behind it. Pick a screen to
-        open it; the thumbnails refresh through the session.
+        from market regime to sector rotation. Seven are tools that find, rank and repair a trade,
+        price it, simulate it, chart the move the market expects, and follow the news behind it.
+        The thumbnails refresh through the session.
       </p>
-    </div>
+      <div class="ns-desk-jump">
+        <a class="ns-desk-pill" href="#tools"><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-wrench"/></svg>Tools<span>7</span></a>
+        <a class="ns-desk-pill" href="#regime"><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-compass"/></svg>Market regime<span>4</span></a>
+        <a class="ns-desk-pill" href="#dealer"><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-bank"/></svg>Dealer positioning<span>4</span></a>
+        <a class="ns-desk-pill" href="#rotation"><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-rotate"/></svg>Sector rotation<span>4</span></a>
+      </div>
+    </header>
 
-    <div class="ns-live-grid">
-      <a class="ns-live-tile" href="https://live.neuralstrike.co/desk">
-        <img src="live/desk.webp" width="640" height="400" loading="eager" decoding="async"
-             alt="The Desk, captured from the live screen">
-        <span class="ns-live-cap">The Desk</span>
-      </a>
-      <a class="ns-live-tile" href="https://live.neuralstrike.co/opportunity">
-        <img src="live/opportunity.webp" width="640" height="400" loading="eager" decoding="async"
-             alt="Opportunity Board, captured from the live screen">
-        <span class="ns-live-cap">Opportunity Board</span>
-      </a>
-      <a class="ns-live-tile" href="https://live.neuralstrike.co/flow">
-        <img src="live/flow.webp" width="640" height="400" loading="lazy" decoding="async"
-             alt="Flow Alerts, captured from the live screen">
-        <span class="ns-live-cap">Flow Alerts</span>
-      </a>
-      <a class="ns-live-tile" href="https://live.neuralstrike.co/macro">
-        <img src="live/macro.webp" width="640" height="400" loading="lazy" decoding="async"
-             alt="Macro Board, captured from the live screen">
-        <span class="ns-live-cap">Macro Board</span>
-      </a>
-      <a class="ns-live-tile" href="https://live.neuralstrike.co/sentiment">
-        <img src="live/sentiment.webp" width="640" height="400" loading="lazy" decoding="async"
-             alt="Sentiment, captured from the live screen">
-        <span class="ns-live-cap">Sentiment</span>
-      </a>
-      <a class="ns-live-tile" href="https://live.neuralstrike.co/bullbear">
-        <img src="live/bullbear.webp" width="640" height="400" loading="lazy" decoding="async"
-             alt="Bull / Bear Map, captured from the live screen">
-        <span class="ns-live-cap">Bull / Bear Map</span>
-      </a>
-      <a class="ns-live-tile" href="https://live.neuralstrike.co/sectors">
-        <img src="live/sectors.webp" width="640" height="400" loading="lazy" decoding="async"
-             alt="Sector &amp; Industry, captured from the live screen">
-        <span class="ns-live-cap">Sector &amp; Industry</span>
-      </a>
-      <a class="ns-live-tile" href="https://live.neuralstrike.co/rotation">
-        <img src="live/rotation.webp" width="640" height="400" loading="lazy" decoding="async"
-             alt="Sector Rotation, captured from the live screen">
-        <span class="ns-live-cap">Sector Rotation</span>
-      </a>
-      <a class="ns-live-tile" href="https://live.neuralstrike.co/rrg">
-        <img src="live/rrg.webp" width="640" height="400" loading="lazy" decoding="async"
-             alt="RRG, captured from the live screen">
-        <span class="ns-live-cap">RRG</span>
-      </a>
-      <a class="ns-live-tile" href="https://live.neuralstrike.co/momentum">
-        <img src="live/momentum.webp" width="640" height="400" loading="lazy" decoding="async"
-             alt="Momentum, captured from the live screen">
-        <span class="ns-live-cap">Momentum</span>
-      </a>
-      <a class="ns-live-tile" href="https://live.neuralstrike.co/gamma">
-        <img src="live/gamma.webp" width="640" height="400" loading="lazy" decoding="async"
-             alt="Gamma, captured from the live screen">
-        <span class="ns-live-cap">Gamma</span>
-      </a>
-      <a class="ns-live-tile" href="https://live.neuralstrike.co/net-premium">
-        <img src="live/net-premium.webp" width="640" height="400" loading="lazy" decoding="async"
-             alt="Net Prem, captured from the live screen">
-        <span class="ns-live-cap">Net Prem</span>
-      </a>
-    </div>
+    <section class="ns-desk-tools-section" id="tools">
+      <div class="ns-desk-section-title"><h2>Tools</h2><span>Find a trade, repair one, price it, and follow the news behind it</span></div>
+      <div class="ns-desk-tools">
+        <a class="ns-desk-tool ns-desk-spot" href="https://live.neuralstrike.co/signals">
+          <span class="ns-desk-glow"></span>
+          <span class="ns-desk-tool-top"><span class="ns-desk-tool-icon"><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-broadcast"/></svg></span><span class="ns-desk-step">01</span></span>
+          <span class="ns-desk-tool-text"><span class="ns-desk-tool-name">Option Signals</span><span class="ns-desk-tool-desc">Every trade the scanner qualifies today</span></span>
+          <span class="ns-desk-cta">Open tool <svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></span>
+        </a>
+        <a class="ns-desk-tool ns-desk-spot" href="https://live.neuralstrike.co/finder">
+          <span class="ns-desk-glow"></span>
+          <span class="ns-desk-tool-top"><span class="ns-desk-tool-icon"><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-search"/></svg></span><span class="ns-desk-step">02</span></span>
+          <span class="ns-desk-tool-text"><span class="ns-desk-tool-name">Strategy Finder</span><span class="ns-desk-tool-desc">Rank every trade for a symbol</span></span>
+          <span class="ns-desk-cta">Open tool <svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></span>
+        </a>
+        <a class="ns-desk-tool ns-desk-spot" href="https://live.neuralstrike.co/rescue">
+          <span class="ns-desk-glow"></span>
+          <span class="ns-desk-tool-top"><span class="ns-desk-tool-icon"><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-lifebuoy"/></svg></span><span class="ns-desk-step">03</span></span>
+          <span class="ns-desk-tool-text"><span class="ns-desk-tool-name">Rescue my Sh*tty trade</span><span class="ns-desk-tool-desc">Repair a trade you already hold</span></span>
+          <span class="ns-desk-cta">Open tool <svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></span>
+        </a>
+        <a class="ns-desk-tool ns-desk-spot" href="https://live.neuralstrike.co/calculator">
+          <span class="ns-desk-glow"></span>
+          <span class="ns-desk-tool-top"><span class="ns-desk-tool-icon"><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-calculator"/></svg></span><span class="ns-desk-step">04</span></span>
+          <span class="ns-desk-tool-text"><span class="ns-desk-tool-name">Calculator</span><span class="ns-desk-tool-desc">Price any structure</span></span>
+          <span class="ns-desk-cta">Open tool <svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></span>
+        </a>
+        <a class="ns-desk-tool ns-desk-spot" href="https://live.neuralstrike.co/simulator">
+          <span class="ns-desk-glow"></span>
+          <span class="ns-desk-tool-top"><span class="ns-desk-tool-icon"><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-chart-up"/></svg></span><span class="ns-desk-step">05</span></span>
+          <span class="ns-desk-tool-text"><span class="ns-desk-tool-name">Simulator</span><span class="ns-desk-tool-desc">Value it as price and time move</span></span>
+          <span class="ns-desk-cta">Open tool <svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></span>
+        </a>
+        <a class="ns-desk-tool ns-desk-spot" href="https://live.neuralstrike.co/expected-move">
+          <span class="ns-desk-glow"></span>
+          <span class="ns-desk-tool-top"><span class="ns-desk-tool-icon"><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-cone"/></svg></span><span class="ns-desk-step">06</span></span>
+          <span class="ns-desk-tool-text"><span class="ns-desk-tool-name">Expected Move</span><span class="ns-desk-tool-desc">Chart the move the market expects by an expiration</span></span>
+          <span class="ns-desk-cta">Open tool <svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></span>
+        </a>
+        <a class="ns-desk-tool ns-desk-spot" href="https://live.neuralstrike.co/news">
+          <span class="ns-desk-glow"></span>
+          <span class="ns-desk-tool-top"><span class="ns-desk-tool-icon"><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-news"/></svg></span><span class="ns-desk-step">07</span></span>
+          <span class="ns-desk-tool-text"><span class="ns-desk-tool-name">Market News</span><span class="ns-desk-tool-desc">Headlines, filings and insider buys, live</span></span>
+          <span class="ns-desk-cta">Open tool <svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></span>
+        </a>
+      </div>
+    </section>
 
-    <p class="ns-live-note">
-      Quiet outside market hours: each screen holds the last session until the next one opens.
-      The <a href="gallery.html">gallery</a> has a capture of every screen, including the ones
-      that stay private.
-    </p>
+    <section class="ns-desk-group" id="regime">
+      <div class="ns-desk-group-head">
+        <p class="ns-desk-kicker"><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-compass"/></svg><span>Market regime</span></p>
+        <h2>What kind of market this is</h2>
+        <p>The desk’s overview, the macro tape and the mood behind it.</p>
+        <div class="ns-desk-rule"></div>
+      </div>
+      <div class="ns-desk-screens">
+        <a class="ns-live-tile ns-desk-spot" href="https://live.neuralstrike.co/desk">
+          <span class="ns-desk-thumb"><img src="live/desk.webp" width="640" height="400" loading="eager" decoding="async" alt="The Desk, captured from the live screen"><span class="ns-desk-fade"></span><span class="ns-desk-glow"></span><span class="ns-desk-badge">Open <svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-up-right"/></svg></span></span>
+          <span class="ns-desk-screen-text"><span class="ns-desk-screen-title"><span class="ns-live-cap">The Desk</span><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></span><span class="ns-desk-screen-desc">Sentiment, trend, bias and the day’s structure on one screen</span></span>
+          <span class="ns-desk-bar"></span>
+        </a>
+        <a class="ns-live-tile ns-desk-spot" href="https://live.neuralstrike.co/macro">
+          <span class="ns-desk-thumb"><img src="live/macro.webp" width="640" height="400" loading="eager" decoding="async" alt="Macro Board, captured from the live screen"><span class="ns-desk-fade"></span><span class="ns-desk-glow"></span><span class="ns-desk-badge">Open <svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-up-right"/></svg></span></span>
+          <span class="ns-desk-screen-text"><span class="ns-desk-screen-title"><span class="ns-live-cap">Macro Board</span><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></span><span class="ns-desk-screen-desc">Rates, dollar, volatility and commodities, read as risk-on or risk-off</span></span>
+          <span class="ns-desk-bar"></span>
+        </a>
+        <a class="ns-live-tile ns-desk-spot" href="https://live.neuralstrike.co/sentiment">
+          <span class="ns-desk-thumb"><img src="live/sentiment.webp" width="640" height="400" loading="eager" decoding="async" alt="Sentiment, captured from the live screen"><span class="ns-desk-fade"></span><span class="ns-desk-glow"></span><span class="ns-desk-badge">Open <svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-up-right"/></svg></span></span>
+          <span class="ns-desk-screen-text"><span class="ns-desk-screen-title"><span class="ns-live-cap">Sentiment</span><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></span><span class="ns-desk-screen-desc">A 0–10 read on conditions, today against its week and month</span></span>
+          <span class="ns-desk-bar"></span>
+        </a>
+        <a class="ns-live-tile ns-desk-spot" href="https://live.neuralstrike.co/bullbear">
+          <span class="ns-desk-thumb"><img src="live/bullbear.webp" width="640" height="400" loading="eager" decoding="async" alt="Bull / Bear Map, captured from the live screen"><span class="ns-desk-fade"></span><span class="ns-desk-glow"></span><span class="ns-desk-badge">Open <svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-up-right"/></svg></span></span>
+          <span class="ns-desk-screen-text"><span class="ns-desk-screen-title"><span class="ns-live-cap">Bull / Bear Map</span><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></span><span class="ns-desk-screen-desc">Strength and weakness by sector, sub-industry and stock</span></span>
+          <span class="ns-desk-bar"></span>
+        </a>
+      </div>
+    </section>
+
+    <section class="ns-desk-group" id="dealer">
+      <div class="ns-desk-group-head">
+        <p class="ns-desk-kicker"><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-bank"/></svg><span>Dealer positioning</span></p>
+        <h2>Where the dealers are leaning</h2>
+        <p>Gamma, premium and the flow that moves them — the readings that set the day’s levels.</p>
+        <div class="ns-desk-rule"></div>
+      </div>
+      <div class="ns-desk-screens">
+        <a class="ns-live-tile ns-desk-spot" href="https://live.neuralstrike.co/gamma">
+          <span class="ns-desk-thumb"><img src="live/gamma.webp" width="640" height="400" loading="lazy" decoding="async" alt="Gamma, captured from the live screen"><span class="ns-desk-fade"></span><span class="ns-desk-glow"></span><span class="ns-desk-badge">Open <svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-up-right"/></svg></span></span>
+          <span class="ns-desk-screen-text"><span class="ns-desk-screen-title"><span class="ns-live-cap">Gamma</span><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></span><span class="ns-desk-screen-desc">Where dealers must hedge, and the walls it builds, for any symbol collected</span></span>
+          <span class="ns-desk-bar"></span>
+        </a>
+        <a class="ns-live-tile ns-desk-spot" href="https://live.neuralstrike.co/net-premium">
+          <span class="ns-desk-thumb"><img src="live/net-premium.webp" width="640" height="400" loading="lazy" decoding="async" alt="Net Prem, captured from the live screen"><span class="ns-desk-fade"></span><span class="ns-desk-glow"></span><span class="ns-desk-badge">Open <svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-up-right"/></svg></span></span>
+          <span class="ns-desk-screen-text"><span class="ns-desk-screen-title"><span class="ns-live-cap">Net Prem</span><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></span><span class="ns-desk-screen-desc">Call against put premium through the session, for SPY, QQQ and the ten largest names</span></span>
+          <span class="ns-desk-bar"></span>
+        </a>
+        <a class="ns-live-tile ns-desk-spot" href="https://live.neuralstrike.co/flow">
+          <span class="ns-desk-thumb"><img src="live/flow.webp" width="640" height="400" loading="lazy" decoding="async" alt="Flow Alerts, captured from the live screen"><span class="ns-desk-fade"></span><span class="ns-desk-glow"></span><span class="ns-desk-badge">Open <svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-up-right"/></svg></span></span>
+          <span class="ns-desk-screen-text"><span class="ns-desk-screen-title"><span class="ns-live-cap">Flow Alerts</span><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></span><span class="ns-desk-screen-desc">Everything the options service flagged today, newest first</span></span>
+          <span class="ns-desk-bar"></span>
+        </a>
+        <a class="ns-live-tile ns-desk-spot" href="https://live.neuralstrike.co/opportunity">
+          <span class="ns-desk-thumb"><img src="live/opportunity.webp" width="640" height="400" loading="lazy" decoding="async" alt="Opportunity Board, captured from the live screen"><span class="ns-desk-fade"></span><span class="ns-desk-glow"></span><span class="ns-desk-badge">Open <svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-up-right"/></svg></span></span>
+          <span class="ns-desk-screen-text"><span class="ns-desk-screen-title"><span class="ns-live-cap">Opportunity Board</span><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></span><span class="ns-desk-screen-desc">Every tracked symbol on one grid: flow, premium, signals and the gamma flip</span></span>
+          <span class="ns-desk-bar"></span>
+        </a>
+      </div>
+    </section>
+
+    <section class="ns-desk-group" id="rotation">
+      <div class="ns-desk-group-head">
+        <p class="ns-desk-kicker"><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-rotate"/></svg><span>Sector rotation</span></p>
+        <h2>Where money is moving</h2>
+        <p>Leadership across sectors and industries, and the momentum carrying it.</p>
+        <div class="ns-desk-rule"></div>
+      </div>
+      <div class="ns-desk-screens">
+        <a class="ns-live-tile ns-desk-spot" href="https://live.neuralstrike.co/sectors">
+          <span class="ns-desk-thumb"><img src="live/sectors.webp" width="640" height="400" loading="lazy" decoding="async" alt="Sector &amp; Industry, captured from the live screen"><span class="ns-desk-fade"></span><span class="ns-desk-glow"></span><span class="ns-desk-badge">Open <svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-up-right"/></svg></span></span>
+          <span class="ns-desk-screen-text"><span class="ns-desk-screen-title"><span class="ns-live-cap">Sector &amp; Industry</span><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></span><span class="ns-desk-screen-desc">Day, week and month returns for every sector and the industries inside it</span></span>
+          <span class="ns-desk-bar"></span>
+        </a>
+        <a class="ns-live-tile ns-desk-spot" href="https://live.neuralstrike.co/rotation">
+          <span class="ns-desk-thumb"><img src="live/rotation.webp" width="640" height="400" loading="lazy" decoding="async" alt="Sector Rotation, captured from the live screen"><span class="ns-desk-fade"></span><span class="ns-desk-glow"></span><span class="ns-desk-badge">Open <svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-up-right"/></svg></span></span>
+          <span class="ns-desk-screen-text"><span class="ns-desk-screen-title"><span class="ns-live-cap">Sector Rotation</span><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></span><span class="ns-desk-screen-desc">Risk-on or risk-off: cyclical sectors’ momentum against defensive ones’</span></span>
+          <span class="ns-desk-bar"></span>
+        </a>
+        <a class="ns-live-tile ns-desk-spot" href="https://live.neuralstrike.co/rrg">
+          <span class="ns-desk-thumb"><img src="live/rrg.webp" width="640" height="400" loading="lazy" decoding="async" alt="RRG, captured from the live screen"><span class="ns-desk-fade"></span><span class="ns-desk-glow"></span><span class="ns-desk-badge">Open <svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-up-right"/></svg></span></span>
+          <span class="ns-desk-screen-text"><span class="ns-desk-screen-title"><span class="ns-live-cap">RRG</span><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></span><span class="ns-desk-screen-desc">Each sector’s strength and momentum against the S&amp;P 500, and which way it is heading</span></span>
+          <span class="ns-desk-bar"></span>
+        </a>
+        <a class="ns-live-tile ns-desk-spot" href="https://live.neuralstrike.co/momentum">
+          <span class="ns-desk-thumb"><img src="live/momentum.webp" width="640" height="400" loading="lazy" decoding="async" alt="Momentum, captured from the live screen"><span class="ns-desk-fade"></span><span class="ns-desk-glow"></span><span class="ns-desk-badge">Open <svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-up-right"/></svg></span></span>
+          <span class="ns-desk-screen-text"><span class="ns-desk-screen-title"><span class="ns-live-cap">Momentum</span><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-arrow-right"/></svg></span><span class="ns-desk-screen-desc">What is moving, and whether the market pays for chasing it today</span></span>
+          <span class="ns-desk-bar"></span>
+        </a>
+      </div>
+    </section>
+
+    <div class="ns-live-note ns-desk-note">
+      <p class="ns-desk-quiet"><svg class="ns-ico" aria-hidden="true" focusable="false"><use href="#i-moon"/></svg>Quiet outside market hours: each screen holds the last session until the next one opens.</p>
+      <p>The <a href="gallery.html">gallery</a> has a capture of every screen, including the ones that stay private.</p>
+    </div>
   </main>
 
   <footer class="ns-foot ns-live-foot">
@@ -198,9 +303,11 @@
   </footer>
 
 </div>
-<!-- THE MARKET GLOW: the Live screens button lights green while the US session is open.
-     Clock data FIRST, then the logic that reads it; index.html explains why. -->
+<!-- THE MARKET GLOW: the Live Desk button lights green while the US session is open.
+     Clock data FIRST, then the logic that reads it; index.html explains why.
+     live.js is this page's own: the spotlight that follows the cursor on a card. -->
 <script src="assets/market-clock.js" defer></script>
 <script src="assets/market-glow.js" defer></script>
+<script src="assets/live.js" defer></script>
 </body>
 </html>

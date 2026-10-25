@@ -785,6 +785,11 @@ def _live_screens():
     return mod
 
 
+# One picture tile on live.html: (its href, the capture's slug).
+TILE_RE = (r'<a class="ns-live-tile ns-desk-spot" href="([^"]+)"[^>]*>\s*'
+           r'<span class="ns-desk-thumb"><img src="live/([^"]+)\.webp"')
+
+
 def _tiled():
     """The published screens drawn as tiles. The interactive tools are
     published but untiled (``Screen.tile``) -- the Tools menu reaches them."""
@@ -813,10 +818,9 @@ def test_a_sub_view_is_a_link_under_its_parent_tile_and_nowhere_else():
     parents = {s.parent for s in screens if s.parent}
     assert len(groups) == len(parents), f"{len(groups)} groups for {parents}"
     for group in groups:
-        head = re.search(r'<a class="ns-live-tile" href="[^"]+"[^>]*>\s*'
-                         r'<img src="live/([^"]+)\.webp"', group)
+        head = re.search(TILE_RE, group)
         assert head, "a group with no tile"
-        parent = head.group(1)
+        parent = head.group(2)
         assert by_slug[parent].tile, parent
         sub = re.search(r'<nav class="ns-live-sub"[^>]*>(.*?)</nav>', group, re.S)
         links = [(h, _html.unescape(t)) for h, t in
@@ -869,12 +873,89 @@ def test_every_tile_links_to_its_own_route_on_the_live_origin():
     """A tile that shows one screen and opens another is worse than a missing
     tile, and looks like nothing at all until someone clicks."""
     markup = _markup("live.html")
-    tiles = re.findall(r'<a class="ns-live-tile" href="([^"]+)"[^>]*>\s*'
-                       r'<img src="live/([^"]+)\.webp"', markup)
+    tiles = re.findall(TILE_RE, markup)
     by_slug = {s.slug: s.route for s in _tiled()}
     assert len(tiles) == len(by_slug), f"{len(tiles)} tiles parsed"
     for href, slug in tiles:
         assert href == f"https://{repo_paths.LIVE_HOST}{by_slug[slug]}", (href, slug)
+
+
+# The Live Desk's groups (2026-10-24), in page order: the section id, the jump
+# pill's label, and the tiles inside. The arrangement is the page's own -- it
+# exists nowhere in live_screens.py -- so this is where it is written down.
+DESK_GROUPS = (
+    ("regime", "Market regime", ("desk", "macro", "sentiment", "bullbear")),
+    ("dealer", "Dealer positioning", ("gamma", "net-premium", "flow", "opportunity")),
+    ("rotation", "Sector rotation", ("sectors", "rotation", "rrg", "momentum")),
+)
+
+
+def _desk_sections():
+    """{section id: its markup} for every group section on live.html."""
+    return dict(re.findall(
+        r'<section class="ns-desk-group" id="([^"]+)">(.*?)</section>',
+        _markup("live.html"), re.S))
+
+
+def test_every_tile_sits_in_exactly_one_group():
+    """A screen added to the table needs a group as well as a tile. Without
+    this a new tile could land outside every section -- or a slug could be
+    pasted into two -- and the grid test above would still pass."""
+    sections = _desk_sections()
+    assert list(sections) == [gid for gid, _, _ in DESK_GROUPS]
+    placed = []
+    for gid, _, slugs in DESK_GROUPS:
+        got = tuple(slug for _, slug in re.findall(TILE_RE, sections[gid]))
+        assert got == slugs, (gid, got)
+        placed += got
+    assert sorted(placed) == sorted(s.slug for s in _tiled()), (
+        "the groups and the published tiles disagree")
+
+
+def _desk_tools():
+    return [s for s in _live_screens().SCREENS if not s.tile and not s.parent]
+
+
+def test_every_tool_has_a_card_in_table_order():
+    """The tool cards are the published, untiled screens -- each its own card,
+    the three Strategy Tools included, though the menu names them as one item.
+    Numbered in the order the table lists them."""
+    m = re.search(r'<section class="ns-desk-tools-section" id="tools">(.*?)</section>',
+                  _markup("live.html"), re.S)
+    assert m, "live.html has no tools section"
+    cards = re.findall(
+        r'<a class="ns-desk-tool ns-desk-spot" href="([^"]+)">.*?'
+        r'<span class="ns-desk-step">(\d+)</span>.*?'
+        r'<span class="ns-desk-tool-name">([^<]+)</span>', m.group(1), re.S)
+    want = [(f"https://{repo_paths.LIVE_HOST}{s.route}", f"{i:02d}", s.title)
+            for i, s in enumerate(_desk_tools(), 1)]
+    assert cards == want, cards
+
+
+def test_the_jump_pills_reach_each_section_and_count_it():
+    """A count on a pill is a fact that goes stale in silence, like the lede's."""
+    pills = re.findall(
+        r'<a class="ns-desk-pill" href="#([^"]+)">.*?</svg>([^<]+)<span>(\d+)</span></a>',
+        _markup("live.html"))
+    want = [("tools", "Tools", str(len(_desk_tools())))] + [
+        (gid, label, str(len(slugs))) for gid, label, slugs in DESK_GROUPS]
+    assert pills == want, pills
+
+
+def test_the_eyebrow_counts_what_is_open():
+    eyebrow = re.search(r'<p class="ns-desk-eyebrow">(.*?)</p>', _markup("live.html"), re.S)
+    assert eyebrow, "live.html has no eyebrow"
+    total = len(_tiled()) + len(_desk_tools())
+    assert f"{total} open, nothing to sign into" in eyebrow.group(1)
+
+
+def test_the_menu_button_is_named_live_desk():
+    """Renamed from "Live screens" on 2026-10-24, on every page at once."""
+    for name in PAGES:
+        button = re.search(r'<a class="btn btn-primary" href="live\.html"[^>]*>([^<]+)</a>',
+                           _nav(name))
+        assert button and button.group(1) == "Live Desk", f"{name}: {button and button.group(1)}"
+    assert "<title>NeuralStrike — Live Desk</title>" in _markup("live.html")
 
 
 def test_the_grid_links_to_the_live_origin_and_not_the_app():
@@ -922,7 +1003,8 @@ def test_the_live_page_states_the_published_counts_in_words():
     Derived from the same table the route registration reads, so the words
     cannot be right by luck. ``_WORDS`` is deliberately narrow: a count it does
     not name fails here, which is the moment to add the word AND reread the
-    lede -- the sentence that says "Five are tools" also lists them by name.
+    lede. Since the Live Desk (2026-10-24) the lede describes the tools and the
+    cards name them -- ``test_every_tool_has_a_card_in_table_order``.
     """
     screens = _live_screens().SCREENS
     tiles = sum(1 for s in screens if s.tile)
@@ -936,10 +1018,6 @@ def test_the_live_page_states_the_published_counts_in_words():
     assert prose.startswith(f"{_WORDS[total].capitalize()} screens"), prose[:60]
     assert f"{_WORDS[tiles].capitalize()} are the readings" in prose, prose
     assert f"{_WORDS[tools].capitalize()} are tools" in prose, prose
-    for _, title in TOOLS:
-        # The lede names every tool. Rescue's menu name is "Rescue my Sh*tty
-        # trade"; the prose says "Rescue", which is the word before "my".
-        assert title.split(" my ")[0] in prose, f"the lede does not name {title}"
     meta = re.search(r'<meta name="description" content="([^"]+)"', _text("live.html"))
     assert meta and meta.group(1).startswith(f"{_WORDS[total].capitalize()} NeuralStrike screens"), (
         "the meta description states a different count from the table")
@@ -977,7 +1055,7 @@ def test_live_screens_is_the_primary_call_to_action():
     live = re.search(r'<a[^>]*href="live\.html"[^>]*>', nav.group(0))
     gallery = re.search(r'<a[^>]*href="gallery\.html"[^>]*>', nav.group(0))
     assert live, "no live.html link in the index nav"
-    assert "btn-primary" in live.group(0), "Live screens is not the primary button"
+    assert "btn-primary" in live.group(0), "Live Desk is not the primary button"
     assert gallery and "btn-primary" not in gallery.group(0), (
         "the Gallery link still carries the primary treatment")
 
@@ -1012,12 +1090,13 @@ def test_the_grid_embeds_nothing_and_runs_nothing():
     NiceGUI session behind every tile -- fourteen per visitor -- and hand the
     static site a runtime dependency on the app being up.
 
-    Scripting is checked too: this page has no `.js` hook and needs none, so a
-    <script> here could only be something that crept in. The one exception is
-    the market glow every page carries for its own nav button."""
+    Scripting is checked too, against an exact list: the market glow every page
+    carries for its own nav button, and since the Live Desk (2026-10-24)
+    ``assets/live.js``, the cursor spotlight on a card. Anything else here
+    could only be something that crept in."""
     markup = _markup("live.html")
     assert "<iframe" not in markup
-    assert _scripts_besides_the_glow(markup) == []
+    assert _scripts_besides_the_glow(markup) == ['<script src="assets/live.js" defer>']
 
 
 # --- D. the site never points at the app ------------------------------------
@@ -1203,8 +1282,9 @@ def test_the_glow_script_does_not_reach_off_origin():
     inside a script, which is the one place an off-origin fetch would now be
     easiest to add and hardest to notice.
     """
-    js = _text("assets/market-glow.js")
-    assert "http://" not in js and "https://" not in js
+    for name in ("assets/market-glow.js", "assets/live.js"):
+        js = _text(name)
+        assert "http://" not in js and "https://" not in js, name
 
 
 def test_the_clock_data_loads_before_the_glow_logic():
@@ -1217,7 +1297,7 @@ def test_the_clock_data_loads_before_the_glow_logic():
     never break the page), which is exactly why nothing would report the swap:
     the button would simply never light up again.
 
-    EVERY page, not only the home page: each carries the same Live screens
+    EVERY page, not only the home page: each carries the same Live Desk
     button, and until 2026-10-20 only index.html loaded the scripts, so the
     button went dark the moment a visitor clicked anywhere else in the menu.
     """
@@ -1382,7 +1462,7 @@ def test_the_tools_menu_lists_the_tools_in_order():
 
 
 def test_the_tools_menu_needs_no_script():
-    """live.html runs no script (test above), so the menu is a native
+    """The menu runs no script of its own on any page, so it is a native
     <details>: it opens and closes with no JavaScript on any page."""
     for name in TOOLS_PAGES:
         assert "<script" not in _tools_menu(name)
