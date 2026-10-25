@@ -112,27 +112,25 @@ def cells(outcomes, scale, block, roles) -> dict:
 
 def usable_sessions(regime_map, outcomes) -> list:
     """The sorted ISO days the study counts: on or after the declared start, not an
-    early close, with a non-gap afternoon regime AND a labelled long afternoon
-    outcome at the decision multiplier."""
+    early close, with at least one afternoon call (day, slot, symbol) that has BOTH
+    a non-gap regime AND a labelled long outcome at the decision multiplier. The
+    statistic joins regime and outcome by slot and symbol, so a day whose regime
+    and outcome sit on different calls would count and contribute nothing."""
     start = scalp_config.regime_start_day().isoformat()
     early = scalp_config.early_close_days()
-    with_regime = set()
-    for (day, slot, _symbol), regime in regime_map.items():
-        if regime is not None and scalp_config.intraday_block(slot) == _DECISION_BLOCK:
-            with_regime.add(day)
+    with_regime = {key for key, regime in regime_map.items()
+                   if regime is not None
+                   and scalp_config.intraday_block(key[1]) == _DECISION_BLOCK}
     scale = _study._scale_key(scalp_config.iv_scale())
-    with_outcome = set()
+    days = set()
     for row in outcomes:
         if (row.get("block") == _DECISION_BLOCK and row.get("role") in LONG_ROLES
                 and _study._scale_key(row.get("iv_scale")) == scale
-                and _study._label(row.get("result")) is not None):
-            with_outcome.add(row["day"])
-    days = []
-    for day in with_regime & with_outcome:
-        if day < start or _is_early_close(day, early):
-            continue
-        days.append(day)
-    return sorted(days)
+                and _study._label(row.get("result")) is not None
+                and (row["day"], row["slot"], row["symbol"]) in with_regime):
+            days.add(row["day"])
+    return sorted(day for day in days
+                  if day >= start and not _is_early_close(day, early))
 
 
 def _is_early_close(day, early) -> bool:

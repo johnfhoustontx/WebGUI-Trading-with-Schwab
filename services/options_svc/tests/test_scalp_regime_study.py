@@ -82,6 +82,16 @@ def test_usable_sessions_ignore_the_0836_record():
     assert rs.usable_sessions(regime, [out("2026-10-21", "08:36")]) == []
 
 
+def test_usable_session_needs_regime_and_outcome_on_the_same_call():
+    regime = {("2026-10-21", "12:36", "$SPX"): rs.NEGATIVE}
+    apart = [out("2026-10-21", "13:06", "$SPX")]
+    assert rs.usable_sessions(regime, apart) == []
+    other_symbol = [out("2026-10-21", "12:36", "SPY")]
+    assert rs.usable_sessions(regime, other_symbol) == []
+    together = apart + [out("2026-10-21", "12:36", "$SPX")]
+    assert rs.usable_sessions(regime, together) == ["2026-10-21"]
+
+
 def test_day_without_afternoon_outcomes_is_not_usable():
     regime = {("2026-10-21", "12:36", "$SPX"): rs.NEGATIVE}
     assert rs.usable_sessions(regime, [out("2026-10-21", "10:06")]) == []
