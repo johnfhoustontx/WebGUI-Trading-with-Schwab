@@ -93,7 +93,7 @@
 
   <div class="ns-wrap gl-wrap">
     <header class="gl-head">
-      <span class="ns-eyebrow">Options glossary · <span class="ns-count">192 terms</span></span>
+      <span class="ns-eyebrow">Options glossary · <span class="ns-count">199 terms</span></span>
       <h1 class="ns-h2">The words, in plain English.</h1>
       <p class="ns-body">Every term the app puts on screen, defined without the jargon:
         from what a contract is, to what dealer gamma means and why it moves price.
@@ -537,9 +537,23 @@
           <dt>Walk-forward</dt>
           <dd>A way of testing a rule honestly. Each past day is scored using <em>only the days before it</em>, the way the rule would have worked at the time, instead of fitting the rule to the whole history and then admiring how well it fits. A rule that looks good only when it has already seen the answer is not a rule.</dd>
           <dt>Brier score</dt>
-          <dd>A score for probability forecasts: the average of the squared gap between the forecast (a number from 0 to 1) and what happened (0 or 1). Lower is better. A forecaster who always says &quot;50%&quot; scores 0.25; confident wrong forecasts are punished hard. The Opening Scalp study compares a bucket&#x27;s Brier score with the base rate&#x27;s on the same days: it counts as an edge only if it is lower.</dd>
+          <dd>A score for probability forecasts: the average of the squared gap between the forecast (a number from 0 to 1) and what happened (0 or 1). Lower is better. A forecaster who always says &quot;50%&quot; scores 0.25; confident wrong forecasts are punished hard. The Opening Scalp study compares a bucket&#x27;s Brier score with the base rate&#x27;s on the same days: it counts as an edge only if it is lower (the 15-minute calls also require it to be lower by a clear margin, because on random data a bare &quot;lower&quot; is passed by luck).</dd>
           <dt>Alignment</dt>
           <dd>Of the morning&#x27;s inputs that took a side, the share that agree with the direction the market opened. Inputs that were too small to take a side, or missing, do not vote. The Opening Scalp page sorts mornings into a low, mid or high alignment bucket.</dd>
+          <dt>Confirmation reading</dt>
+          <dd>A word (Confirms, Mixed or Contradicts) saying whether a set of <em>other</em> sources agree with a call&#x27;s direction. On the Opening Scalp&#x27;s 15-minute calls the sources are options flow, net premium, the dealer read and market sentiment (which counts half as much). It is *<em>no longer shown on the page</em><em>, and the word itself is </em><em>not part of the chance of target</em>*: the app still records the word and its sources every 15 minutes, and the chance reads those sources as numbers of their own. Read it as a second opinion, never as a chance of winning.</dd>
+          <dt>Dealer read</dt>
+          <dd>A one-line check of whether a trade has room to work before it meets the wall dealers are hedged around. For an up call it measures the distance from the price to the *<em>call wall</em><em>, for a down call to the </em><em>put wall</em>*, against the move the trade needs to reach its target; it also counts how many of the ten big names have the same room. A wall from a chain with no gamma reading (net GEX of zero) is not trusted and counts as no reading.</dd>
+          <dt>Chance of target</dt>
+          <dd>The fitted chance that an Opening Scalp trade <em>wins</em>, counted the way the usual win rate counts a win (+50% before −50% inside 60 minutes). It is weighted from every factor the app has: price, the slope of a moving average and the RSI on 5-minute, 15-minute and hourly charts, the dealer read, net premium, options flow and sentiment. Its weights are refitted every Saturday and frozen with each call. It sits <em>beside</em> the usual win rate, and the line under it says whether it *<em>beat the usual rate on days it was not fitted on</em>*. Read it as a measured estimate with a track record you can see, never as a promise.</dd>
+          <dt>Prior (assumed weight)</dt>
+          <dd>A starting guess for how much a factor should count, written down before the data is looked at. The chance of target begins every factor at a small prior weight, then lets the stored days move it: a factor with months of history moves a long way, one with a few days stays close to its prior. The page marks a weight *<em>assumed</em>* while it still rests mostly on the starting assumption (less than half of it learned from data), meaning the push you are reading is still the guess, not something measured.</dd>
+          <dt>Moving-average slope</dt>
+          <dd>How fast a moving average is rising or falling: here, the percent change of a 20-bar exponential moving average over its last 3 bars. A rising average on the chart the trade is read on agrees with an up call. The chance of target reads it on 5-minute (the main one), 15-minute and hourly bars. It is a trend gauge that lags the price by design.</dd>
+          <dt>RSI (relative strength index)</dt>
+          <dd>A momentum reading from 0 to 100 built from the average size of recent up closes against down closes (here 14 bars, Wilder&#x27;s smoothing). Above 50 means recent moves have been mostly up, below 50 mostly down; near 100 or 0 is stretched. The chance of target uses its distance from 50, read for the call&#x27;s direction, on 5-minute, 15-minute and hourly bars.</dd>
+          <dt>Breadth</dt>
+          <dd>How many names in a group are doing the same thing. In the Opening Scalp&#x27;s price reading it is the share of the ten big stocks, among those that moved over the last 15 minutes, that moved the same way as the call; a stock that barely moved is left out rather than counted against it. High breadth means the move is broad, not one stock&#x27;s.</dd>
         </dl>
       </section>
       <section class="gl-sec" id="quick-reference">
