@@ -141,10 +141,3 @@ deploy/site/blog.json
 # refuses a dirty tree. Each writer sweeps its own at the next start.
 deploy/site/.blog.json.*.tmp
 deploy/site/.ideas.json.*
-
-# The retired gallery's screenshots (the Gallery page went 2026-10-24). Nothing
-# writes here any more, but prod still holds the captures the old timer wrote:
-# un-ignored, they would be untracked files, and tools/promote.sh refuses a
-# dirty tree. Drop this rule only after deploy/site/assets/shots/ is deleted on
-# the box.
-deploy/site/assets/shots/

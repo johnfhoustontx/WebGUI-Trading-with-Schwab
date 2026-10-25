@@ -338,9 +338,7 @@ WHOLE bottom ticker (since 2026-09-21 it shows nothing else) — from `div.slotc
 that renames those publishes nothing (the last good summary stays, with one WARNING),
 so the Desk and the ticker go quietly stale rather than wrong. No Claude call sits behind the
 summary any more.
-**`deploy/site/assets/shots/` — the retired marketing gallery's captures** — stays
-ignored after the Gallery went (2026-10-24): prod still holds the files the old timer
-wrote, and un-ignored they would dirty the tree the promote checks. The gallery
-capture was the one tool that authenticated as the owner (it minted a full session
+**The retired marketing gallery** (removed 2026-10-24, its captures deleted from the
+box the same day) had the one capture tool that authenticated as the owner (it minted a full session
 cookie from the `auth_store` file); it went with the page, so nothing on the box now
 renders the private app for publication.
