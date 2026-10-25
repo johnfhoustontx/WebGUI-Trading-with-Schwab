@@ -19,9 +19,10 @@ Rules:
   ``scalp_study._label`` (skip is no label), at one volatility multiplier.
 * **Only the three blocks are used.** A slot with no block (the 08:36 record) and
   a day that closes early are never counted.
-* Pure functions of what they are given: no bus, no store, no import from
-  ``compute``.
+* Pure functions of what they are given: no bus, no import from ``compute``, and
+  no store of its own (the two loaders only read a connection they are handed).
 """
+import json
 import random
 from datetime import date
 
@@ -274,6 +275,31 @@ def _test_block(name, regime_map, outcomes, sessions, precondition) -> dict:
                 "long_with_pp": pp(("long_with",)),
                 "long_against_pp": pp(("long_against",)),
                 "timeout_share": _timeout_share(long_cells, regime_map)}}
+
+
+# ── the loaders (design 3.6): read an open connection, write nothing ──────────
+
+_OUTCOME_KEYS = ("day", "slot", "symbol", "iv_scale", "role", "block", "result")
+
+
+def load_readings(conn) -> dict:
+    """``{(day, slot, symbol): body}`` from ``intraday_readings`` (the shape of
+    ``scalp_store.readings_all``). A row whose JSON cannot be read is a body with
+    nothing in it, which ``regimes`` reads as a gap."""
+    out = {}
+    for day, slot, symbol, text in conn.execute(
+            "SELECT day, slot, symbol, json FROM intraday_readings"):
+        try:
+            out[(day, slot, symbol)] = json.loads(text)
+        except ValueError:
+            out[(day, slot, symbol)] = {}
+    return out
+
+
+def load_outcomes(conn) -> list:
+    """Every ``intraday_outcomes`` row as a dict of the seven columns the study reads."""
+    return [dict(zip(_OUTCOME_KEYS, row)) for row in conn.execute(
+        "SELECT " + ", ".join(_OUTCOME_KEYS) + " FROM intraday_outcomes")]
 
 
 def evaluate(regime_map, outcomes, agreement) -> dict:

@@ -1,12 +1,20 @@
 """The Opening Scalp's net-gamma regime study: the gap rule, the cells and the
 usable sessions (design 2026-10-25-scalp-gamma-regime-study, section 3.1)."""
+import datetime as dt
+import importlib.util
+import json
+import pathlib
 import random
+import sqlite3
 from datetime import date, timedelta
 
 import pytest
 
 from services.options_svc import scalp_regime_study as rs
+from services.options_svc import scalp_store
 from shared import scalp_config
+
+_ROOT = pathlib.Path(__file__).resolve().parents[3]
 
 
 def snap(symbol="$SPX", net_gex=-1e9, state="ok", age=1.0, untrusted=False):
@@ -212,3 +220,153 @@ def test_sessions_after_the_minimum_are_ignored():
     flipped = [dict(r, result="win") for r in more_rows if r["day"] > base["sessions"][-1]]
     again = rs.evaluate({**regime, **later}, rows + flipped, _AGREE)
     assert again == base
+
+
+# ── the loaders and the read-only report ─────────────────────────────────────
+
+def _regime_report():
+    spec = importlib.util.spec_from_file_location(
+        "scalp_regime_report", _ROOT / "tools" / "scalp_regime_report.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def seed_store(tmp_path, n_days, neg_win, pos_win):
+    """A real-schema store holding ``world``'s regimes as recorded readings and its
+    outcomes as ``intraday_outcomes`` rows."""
+    regime, rows = world(n_days, neg_win, pos_win)
+    db = tmp_path / "scalp.db"
+    conn = scalp_store.connect(db)
+    conn.close()
+    for (day, slot, sym), reg in regime.items():
+        gex = -1e9 if reg == rs.NEGATIVE else 1e9
+        scalp_store.save_reading(day, slot, sym, {"snapshot": snap(symbol=sym, net_gex=gex)},
+                                 db_path=db)
+    conn = scalp_store.connect(db)
+    try:
+        with conn:
+            conn.executemany(
+                "INSERT INTO intraday_outcomes (day, slot, symbol, iv_scale, role, "
+                "structure, block, bucket, result, minutes, entry_value, both_in_bar) "
+                "VALUES (?, ?, ?, ?, ?, 'long_call', ?, NULL, ?, NULL, NULL, 0)",
+                [(r["day"], r["slot"], r["symbol"], r["iv_scale"], r["role"],
+                  r["block"], r["result"]) for r in rows])
+    finally:
+        conn.close()
+    return db
+
+
+def readings_keys(db):
+    return list(scalp_store.readings_all(db_path=db))
+
+
+def opposite_snapshot(db, key):
+    """The snapshot with the other sign of net GEX than the one stored for ``key``."""
+    day, slot, sym = key
+    stored = scalp_store.readings_all(db_path=db)[key]["snapshot"]
+    net = stored["matrix"][sym]["net_gex"]
+    return snap(symbol=sym, net_gex=1e9 if net < 0 else -1e9)
+
+
+def test_loaders_round_trip(tmp_path):
+    db = seed_store(tmp_path, 3, 0.8, 0.2)
+    conn = sqlite3.connect(db)
+    readings, rows = rs.load_readings(conn), rs.load_outcomes(conn)
+    conn.close()
+    assert len({k[0] for k in readings}) == 3
+    assert set(rows[0]) == {"day", "slot", "symbol", "iv_scale", "role", "block", "result"}
+    assert readings == scalp_store.readings_all(db_path=db)
+
+
+def test_report_while_collecting_prints_only_the_count(tmp_path):
+    db = seed_store(tmp_path, 12, 0.9, 0.1)
+    text = _regime_report().render(db, today=dt.date(2026, 11, 6))
+    assert "# Gamma regime study - 2026-11-06" in text
+    assert "Collecting: 12 of 40 usable sessions since 2026-10-21." in text
+    assert "First usable session: 2026-10-21." in text
+    assert "Nothing else is shown until the 40th usable session is graded (design §3.4)." in text
+    assert " pp" not in text and "PASS" not in text and "FAIL" not in text
+
+
+def test_report_ready_prints_verdicts_in_order(tmp_path):
+    db = seed_store(tmp_path, 40, 0.8, 0.2)
+    agree = tmp_path / "agree.json"
+    agree.write_text(json.dumps({"share": 1.0, "sessions": 5}))
+    text = _regime_report().render(db, agreement_path=agree)
+    assert text.index("**afternoon: PASS**") < text.index("**midday:") < text.index("**morning:")
+    assert "Precondition: passed (100.00% of slots agree over 5 sessions)." in text
+    assert "Sessions: 2026-10-21 to " in text and " (40)." in text
+    assert " pp" in text
+
+
+def test_report_without_agreement_cannot_pass(tmp_path):
+    db = seed_store(tmp_path, 40, 0.8, 0.2)
+    text = _regime_report().render(db)
+    assert "Precondition not checked: no block can pass." in text
+    assert "**afternoon: FAIL** (precondition not checked)" in text
+    assert "A fail does not show there is no effect, only that it is not as large as it first looked." in text
+
+
+@pytest.mark.parametrize("content", [None, "{not json", "[1, 2]"])
+def test_an_unusable_agreement_file_is_no_file(tmp_path, content):
+    db = seed_store(tmp_path, 40, 0.8, 0.2)
+    path = tmp_path / "agree.json"
+    if content is not None:
+        path.write_text(content)
+    report = _regime_report()
+    assert report.render(db, agreement_path=path) == report.render(db)
+    assert "Precondition not checked: no block can pass." in report.render(db, agreement_path=path)
+
+
+def test_report_ignores_prob_sources(tmp_path):
+    db = seed_store(tmp_path, 40, 0.8, 0.2)
+    before = _regime_report().render(db, today=dt.date(2026, 12, 20))
+    flipped = [("intraday", day, slot, sym, opposite_snapshot(db, (day, slot, sym)))
+               for (day, slot, sym) in readings_keys(db)]
+    scalp_store.save_prob_sources(flipped, db_path=db)
+    assert _regime_report().render(db, today=dt.date(2026, 12, 20)) == before
+
+
+def test_report_opens_the_store_read_only(tmp_path):
+    missing = tmp_path / "nope.db"
+    with pytest.raises(sqlite3.OperationalError):
+        _regime_report().render(missing)
+    assert not missing.exists()
+
+
+def _canned(p, reasons=(), passed=False, tested=True):
+    return {"block": "afternoon", "tested": tested, "passed": passed,
+            "reasons": list(reasons),
+            "effect_pp": {"1": 7.5, "1.25": None}, "p": p,
+            "negative_pairs": 30, "positive_pairs": 28,
+            "reported": {"per_symbol": {"SPY": 3.0, "QQQ": None}, "credit_pp": -1.5,
+                         "long_with_pp": 4.0, "long_against_pp": None,
+                         "timeout_share": {"negative": 0.25, "positive": None}}}
+
+
+def test_report_prints_the_p_value_and_the_pass_and_fail_words(tmp_path, monkeypatch):
+    db = seed_store(tmp_path, 1, 0.8, 0.2)
+    ready = {"status": "ready", "sessions": ["2026-10-21", "2026-10-22"],
+             "precondition": {"checked": True, "passed": False, "share": 0.9, "sessions": 6},
+             "blocks": [_canned(0.0, ["p above alpha", "effect below the floor"]),
+                        dict(_canned(None, ["not tested: afternoon did not pass"], tested=False),
+                             block="midday")]}
+    monkeypatch.setattr(rs, "evaluate", lambda *a: ready)
+    text = _regime_report().render(db)
+    assert "Sessions: 2026-10-21 to 2026-10-22 (2)." in text
+    assert "Precondition failed (90.00% of slots agree): no block can pass." in text
+    assert "**afternoon: FAIL** (p above alpha; effect below the floor)" in text
+    assert "< 0.0033" in text                 # 1 / 300 permutations, four decimals
+    assert "+7.50 pp" in text and "-1.50 pp" in text
+    assert "**midday: not tested** (afternoon did not pass)" in text
+    ready["blocks"][0]["p"] = 0.0321
+    assert "0.0321" in _regime_report().render(db)
+
+
+def test_main_prints_the_report_for_a_path(tmp_path, capsys):
+    db = seed_store(tmp_path, 12, 0.9, 0.1)
+    agree = tmp_path / "agree.json"
+    agree.write_text(json.dumps({"share": 1.0, "sessions": 5}))
+    assert _regime_report().main([str(db), "--agreement", str(agree)]) == 0
+    assert "Collecting: 12 of 40 usable sessions" in capsys.readouterr().out
