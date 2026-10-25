@@ -4,7 +4,22 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-24 (**The site's Gallery and its Tools menu are retired: the Live Desk carries every screen and every tool.**)
+**Last updated:** 2026-10-24 (**The Live Desk shows the Calculator, Simulator and Expected Move as one card, Strategy Tools.**)
+
+- **Asked for by the user:** "The Calculator, Simulator and Expected move need to be
+  combined into one card on the Live Desk Screen. Reword it accordingly".
+- **The page:** five tool cards instead of seven. Strategy Tools (04) opens the
+  Calculator, whose tab strip reaches the other two; its description covers all three
+  ("Price any structure, simulate it, and chart the move the market expects"), and three
+  tags name them. The cards' minimum width went from 230 to 170 px so the five sit in one
+  row on a desktop. Market News is now 05 and the
+  Tools pill counts 5. The lede still says seven tools and the eyebrow 19 open: those
+  count screens, and all three are still screens. The two unused icons left the sprite.
+- **Tests:** `deploy/tests/test_site.py` derives the cards from `live_screens.SCREENS`
+  with the three folded into one (`STRATEGY_TOOLS`), checks the card's tags against the
+  table's titles, and fails if the Simulator or Expected Move gets a card again.
+
+**Prior —** 2026-10-24 (**The site's Gallery and its Tools menu are retired: the Live Desk carries every screen and every tool.**)
 
 - **Asked for by the user:** "Retire the Gallery on this branch: remove the page, its
   menu item and home-page links, add a redirect from gallery.html to live.html, and

@@ -137,7 +137,8 @@ SCREENS = (
     # ``public=True`` hands off to pages/options/em_live.py before the private
     # page builds anything (the owner's em_chain / expected_move commands and
     # shared_position never exist here). The three tools carry one tab strip
-    # (pages/options/strategy_strip.py); the Live Desk gives each its own card.
+    # (pages/options/strategy_strip.py), and the Live Desk shows the three as ONE
+    # card, Strategy Tools, opening the Calculator.
     Screen("expected-move", "/expected-move", "Expected Move",
            "options.expected_move", "/options/expected-move",
            kwargs={"public": True}, tile=False),

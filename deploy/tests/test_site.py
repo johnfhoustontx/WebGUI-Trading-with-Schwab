@@ -653,28 +653,72 @@ def _desk_tools():
     return [s for s in _live_screens().SCREENS if not s.tile and not s.parent]
 
 
-def test_every_tool_has_a_card_in_table_order():
-    """The tool cards are the published, untiled screens -- each its own card,
-    the three Strategy Tools included.
-    Numbered in the order the table lists them."""
+# The three screens that share ONE card (2026-10-24, the owner's ask): they
+# carry one tab strip (webgui/pages/options/strategy_strip.py), so the card
+# opens the first and the strip reaches the other two.
+STRATEGY_TOOLS = ("calculator", "simulator", "expected-move")
+STRATEGY_TOOLS_CARD = "Strategy Tools"
+
+
+def _desk_cards():
+    """``[(route, title, [slugs it names])]`` -- one per card, in table order:
+    each untiled screen its own card, but the Strategy Tools as one."""
+    cards = []
+    for s in _desk_tools():
+        if s.slug in STRATEGY_TOOLS[1:]:
+            continue
+        if s.slug == STRATEGY_TOOLS[0]:
+            cards.append((s.route, STRATEGY_TOOLS_CARD, list(STRATEGY_TOOLS)))
+        else:
+            cards.append((s.route, s.title, [s.slug]))
+    return cards
+
+
+def _tools_section():
     m = re.search(r'<section class="ns-desk-tools-section" id="tools">(.*?)</section>',
                   _markup("live.html"), re.S)
     assert m, "live.html has no tools section"
+    return m.group(1)
+
+
+def test_every_tool_has_a_card_in_table_order():
+    """The tool cards are the published, untiled screens in table order, one
+    card each -- except the three Strategy Tools, which share one card that
+    opens the Calculator. Numbered in that order."""
+    assert [s.slug for s in _desk_tools() if s.slug in STRATEGY_TOOLS] == list(STRATEGY_TOOLS), (
+        "the Strategy Tools are no longer adjacent, first-to-last, in the table")
     cards = re.findall(
         r'<a class="ns-desk-tool ns-desk-spot" href="([^"]+)">.*?'
         r'<span class="ns-desk-step">(\d+)</span>.*?'
-        r'<span class="ns-desk-tool-name">([^<]+)</span>', m.group(1), re.S)
-    want = [(f"https://{repo_paths.LIVE_HOST}{s.route}", f"{i:02d}", s.title)
-            for i, s in enumerate(_desk_tools(), 1)]
+        r'<span class="ns-desk-tool-name">([^<]+)</span>', _tools_section(), re.S)
+    want = [(f"https://{repo_paths.LIVE_HOST}{route}", f"{i:02d}", title)
+            for i, (route, title, _slugs) in enumerate(_desk_cards(), 1)]
     assert cards == want, cards
 
 
+def test_the_strategy_tools_card_names_all_three():
+    """A visitor who wants the Simulator or the Expected Move must be able to
+    see that this card is where they are."""
+    titles = {s.slug: s.title for s in _desk_tools()}
+    card = re.search(r'<span class="ns-desk-tool-name">Strategy Tools</span>.*?</a>',
+                     _tools_section(), re.S)
+    assert card, "no Strategy Tools card"
+    tags = re.findall(r"<span>([^<]+)</span>",
+                      re.search(r'<span class="ns-desk-tool-tags">(.*?)</span>\s*<span class="ns-desk-cta">',
+                                card.group(0), re.S).group(1))
+    assert tags == [titles[slug] for slug in STRATEGY_TOOLS], tags
+    for slug in STRATEGY_TOOLS[1:]:
+        assert f"{repo_paths.LIVE_HOST}/{slug}" not in _tools_section(), (
+            f"{slug} has a card of its own again")
+
+
 def test_the_jump_pills_reach_each_section_and_count_it():
-    """A count on a pill is a fact that goes stale in silence, like the lede's."""
+    """A count on a pill is a fact that goes stale in silence, like the lede's.
+    The Tools pill counts CARDS, which is what the reader sees under it."""
     pills = re.findall(
         r'<a class="ns-desk-pill" href="#([^"]+)">.*?</svg>([^<]+)<span>(\d+)</span></a>',
         _markup("live.html"))
-    want = [("tools", "Tools", str(len(_desk_tools())))] + [
+    want = [("tools", "Tools", str(len(_desk_cards())))] + [
         (gid, label, str(len(slugs))) for gid, label, slugs in DESK_GROUPS]
     assert pills == want, pills
 

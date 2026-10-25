@@ -831,7 +831,8 @@ body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
 .ns-desk-tools-section { display: flex; flex-direction: column; gap: 20px; }
 .ns-desk-section-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
 .ns-desk-section-title span { font-size: 14px; color: var(--color-neutral-500); }
-.ns-desk-tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap: 12px; }
+/* 170px: five cards sit in one row on a desktop rather than four and one. */
+.ns-desk-tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 170px), 1fr)); gap: 12px; }
 .ns-desk-tool { display: flex; flex-direction: column; gap: 14px; padding: 18px; }
 .ns-desk-tool-top { position: relative; display: flex; align-items: center; justify-content: space-between; }
 .ns-desk-tool-icon {
@@ -850,6 +851,16 @@ body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
 .ns-desk-tool-text { position: relative; display: flex; flex-direction: column; gap: 4px; }
 .ns-desk-tool-name { font-size: 16px; font-weight: 500; letter-spacing: -0.01em; }
 .ns-desk-tool-desc { font-size: 13px; line-height: 1.5; color: var(--color-neutral-400); }
+/* The Strategy Tools card names the three screens it opens. Text, not links:
+ * the whole card is already one. */
+.ns-desk-tool-tags { position: relative; display: flex; flex-wrap: wrap; gap: 6px; }
+.ns-desk-tool-tags span {
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  color: var(--color-neutral-300);
+  box-shadow: inset 0 0 0 1px var(--color-neutral-800);
+}
 .ns-desk-cta {
   position: relative;
   display: flex;
