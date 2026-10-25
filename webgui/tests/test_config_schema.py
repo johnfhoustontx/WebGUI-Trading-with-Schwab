@@ -278,12 +278,14 @@ def test_the_feed_switches_are_editable_and_named_by_feed():
 
 
 def test_no_other_file_has_a_read_only_field():
-    """Read-only is the news feed list's; nothing else changed shape."""
+    """Read-only is the news feed list's and the declared regime study's
+    ``[regime]`` table; nothing else changed shape."""
     for cfg in cs.EDITABLE:
         if cfg is NEWS:
             continue
+        allowed = "regime" if cfg.name == "scalp.toml" else None
         assert not [p for p in store.flatten(_shipped(cfg.name))
-                    if cs.is_readonly(cfg, p)], cfg.name
+                    if cs.is_readonly(cfg, p) and p[0] != allowed], cfg.name
 
 
 def test_quoted_feed_names_with_spaces_and_dots_split_and_locate():
@@ -920,9 +922,20 @@ SCALP = cs.BY_NAME["scalp.toml"]
 def test_the_scalp_file_is_editable_and_needs_no_restart():
     assert SCALP.editable and tuple(SCALP.restart) == ()
     for sec in SCALP.sections:
-        assert not sec.readonly, sec.title
+        # the declared study is the one read-only section (see the next test)
+        assert sec.readonly == (sec.title == "Gamma regime study"), sec.title
         for fld in sec.fields:
             assert tuple(cs.restart_for(SCALP, sec, fld)) == (), fld.key
+
+
+def test_the_declared_regime_study_is_shown_and_never_edited_here():
+    sec = next(s for s in SCALP.sections if s.title == "Gamma regime study")
+    assert sec.readonly
+    assert "Shown, not edited here: these were declared on 2026-10-25." in sec.help
+    paths = [p for p in store.flatten(_shipped("scalp.toml")) if p[0] == "regime"]
+    assert paths and all(cs.is_readonly(SCALP, p) for p in paths)
+    assert cs.is_readonly(SCALP, ("regime", "a_key_added_by_hand"))
+    assert not cs.is_readonly(SCALP, ("trade", "iv_scale"))
 
 
 def test_the_per_symbol_tables_locate_by_wildcard_and_quoted_symbol():

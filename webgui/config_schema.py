@@ -1431,7 +1431,8 @@ _SCALP = ConfigFile(
                 "The declared test of whether the dealer gamma regime changes how "
                 "often the 15-minute calls' long options reach their target. "
                 "Declared 2026-10-25: change a value only to declare a new "
-                "study.", (
+                "study. Shown, not edited here: these were declared on "
+                "2026-10-25.", (
             Field("regime.start_day", "First session counted",
                   "The first session of the test window. Earlier sessions are "
                   "never counted.", kind="date"),
@@ -1463,7 +1464,7 @@ _SCALP = ConfigFile(
             Field("regime.agree_min_sessions", "Sessions the agreement covers",
                   "Test-window sessions that agreement check must cover.",
                   kind="int", unit="sessions", min=1, max=100, step=1),
-        )),
+        ), readonly=True),
     ),
 )
 
