@@ -51,27 +51,31 @@ def compare(records, readings) -> dict:
     """Compare ``records`` (as ``bf._read_records`` returns them) with ``readings``
     (``scalp_regime_study.load_readings``'s mapping). See the module docstring."""
     start = scalp_config.regime_start_day().isoformat()
-    seen = set()
-    slots = agreeing = 0
-    days, disagreeing = set(), []
+    early = scalp_config.early_close_days()
+    copies = {}                    # (day, slot, symbol) -> the non-gap backfill regimes
     for (kind, day, slot, symbol), snapshot in records:
-        key = (day, slot, symbol)
-        if kind != _INTRADAY or day < start or key in seen:
+        if kind != _INTRADAY or day < start or scalp_regime_study._is_early_close(day, early):
             continue
         if scalp_config.intraday_block(slot) is None:
             continue
-        body = readings.get(key)
+        regime = scalp_regime_study.regime_of(snapshot, symbol)
+        if regime is not None:
+            copies.setdefault((day, slot, symbol), set()).add(regime)
+    slots = agreeing = 0
+    days, disagreeing = set(), []
+    for (day, slot, symbol), found in copies.items():
+        body = readings.get((day, slot, symbol))
         live = scalp_regime_study.regime_of(
             body.get("snapshot") if isinstance(body, dict) else None, symbol)
-        backfill = scalp_regime_study.regime_of(snapshot, symbol)
-        if live is None or backfill is None:
+        if live is None:
             continue
-        seen.add(key)
         slots += 1
         days.add(day)
-        if live == backfill:
+        if found == {live}:
             agreeing += 1
         else:
+            # Copies that disagree with each other are a disagreement, whatever their order.
+            backfill = next(iter(found)) if len(found) == 1 else "conflicting"
             disagreeing.append([day, slot, symbol, live, backfill])
     share = agreeing / slots if slots else None
     passed = (share is not None

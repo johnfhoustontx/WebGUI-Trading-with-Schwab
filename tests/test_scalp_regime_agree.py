@@ -59,6 +59,40 @@ def test_compare_needs_the_declared_sessions_even_at_full_agreement():
     assert got["share"] == 1.0 and got["sessions"] == 4 and got["passed"] is False
 
 
+def test_compare_counts_a_key_in_two_identical_copies_once():
+    live = {("2026-10-21", "12:36", "$SPX"): {"snapshot": snap(net_gex=-1e9)}}
+    copy = (("intraday", "2026-10-21", "12:36", "$SPX"), snap(net_gex=-2e9, state="backfill", age=None))
+    got = agree.compare([copy, copy], live)
+    assert (got["slots"], got["agreeing"]) == (1, 1)
+    assert got["disagreeing"] == []
+
+
+def test_compare_copies_that_conflict_disagree_whatever_their_order():
+    live = {("2026-10-21", "12:36", "$SPX"): {"snapshot": snap(net_gex=-1e9)}}
+    neg = (("intraday", "2026-10-21", "12:36", "$SPX"), snap(net_gex=-2e9, state="backfill", age=None))
+    pos = (("intraday", "2026-10-21", "12:36", "$SPX"), snap(net_gex=2e9, state="backfill", age=None))
+    for recs in ([neg, pos], [pos, neg]):
+        got = agree.compare(recs, live)
+        assert (got["slots"], got["agreeing"]) == (1, 0)
+        assert got["disagreeing"] == [["2026-10-21", "12:36", "$SPX", "negative", "conflicting"]]
+
+
+def test_compare_ignores_a_gap_copy_beside_a_readable_one():
+    live = {("2026-10-21", "12:36", "$SPX"): {"snapshot": snap(net_gex=-1e9)}}
+    gap = (("intraday", "2026-10-21", "12:36", "$SPX"), snap(untrusted=True, state="backfill", age=None))
+    good = (("intraday", "2026-10-21", "12:36", "$SPX"), snap(net_gex=-2e9, state="backfill", age=None))
+    got = agree.compare([gap, good], live)
+    assert (got["slots"], got["agreeing"]) == (1, 1)
+
+
+def test_compare_skips_early_close_days():
+    day = "2026-11-27"                      # in the shipped [intraday] early_close_days
+    live = {(day, "12:36", "$SPX"): {"snapshot": snap()}}
+    recs = [(("intraday", day, "12:36", "$SPX"), snap(state="backfill", age=None))]
+    got = agree.compare(recs, live)
+    assert got["slots"] == 0 and got["sessions"] == 0 and got["share"] is None
+
+
 def test_compare_lists_are_sorted():
     live = {("2026-10-22", "13:06", "$SPX"): {"snapshot": snap(net_gex=-1e9)},
             ("2026-10-21", "12:36", "$SPX"): {"snapshot": snap(net_gex=-1e9)}}
