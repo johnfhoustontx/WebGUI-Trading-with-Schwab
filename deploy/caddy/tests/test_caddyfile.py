@@ -682,9 +682,17 @@ def _caddy_path_matches(matcher, path):
     return matcher.lower() == path.lower()
 
 
+def _blog_redirects(block):
+    """The ``redir`` lines that send to the Blog's list, apart from the
+    retired-page ones (``test_a_retired_page_redirects_to_its_replacement``)."""
+    shaped, lines = _redirects(block)
+    blog = [r for r in shaped if r[0] not in caddy.RETIRED_PAGES]
+    return blog, lines - (len(shaped) - len(blog))
+
+
 def test_the_bare_blog_address_goes_to_the_blog_page(cfg):
     public = _block(cfg, repo_paths.SITE_HOST)
-    shaped, lines = _redirects(public)
+    shaped, lines = _blog_redirects(public)
     assert sorted(shaped) == [("/blog", "/blog.html", "308"), ("/blog/", "/blog.html", "308")]
     assert lines == 2, "a redirect in a shape this test does not read"
     assert tuple(m for m, _to, _code in shaped) == caddy.BLOG_BARE_PATHS
@@ -697,7 +705,7 @@ def test_the_blog_redirects_cannot_reach_an_entry_a_typeface_or_the_page_itself(
     """An exact path, never a pattern. ``redir /blog/* ...`` would send every
     entry, its document and every typeface to the list; and a matcher that took
     ``/blog.html`` would redirect the page to itself for ever."""
-    shaped, _lines = _redirects(_block(cfg, repo_paths.SITE_HOST))
+    shaped, _lines = _blog_redirects(_block(cfg, repo_paths.SITE_HOST))
     assert shaped
     for matcher, to, _code in shaped:
         assert matcher.startswith("/") and "*" not in matcher and not matcher.startswith("@")
@@ -713,7 +721,7 @@ def test_the_blog_redirects_cannot_reach_an_entry_a_typeface_or_the_page_itself(
 
 
 def test_the_blog_redirects_are_the_public_sites_only(cfg):
-    assert len(re.findall(r"^[ \t]*redir\b", cfg, re.M)) == 2
+    assert len(re.findall(r"^[ \t]*redir\b", cfg, re.M)) == 2 + len(caddy.RETIRED_PAGES)
     for host in (repo_paths.APP_HOST, repo_paths.LIVE_HOST):
         assert not re.search(r"^[ \t]*redir\b", _block(cfg, host), re.M), host
     assert cfg.isascii()
@@ -895,3 +903,18 @@ def test_the_login_limit_is_read_from_the_edge_config(monkeypatch):
 def test_an_unusable_login_limit_reads_as_the_shipped_one(monkeypatch, bad):
     monkeypatch.setattr(caddy, "load_edge", lambda: {"limits": {"login_body_kb": bad}})
     assert caddy.login_body_kb() == caddy.EDGE_DEFAULTS["limits"]["login_body_kb"]
+
+
+def test_a_retired_page_redirects_to_its_replacement(cfg):
+    """The Gallery was retired on 2026-10-24 and its address was shared, so it
+    must answer with a permanent redirect to the Live Desk, not a 404. The
+    page it sends to is a tracked file; the page it retires is gone, so the
+    redirect never shadows a file still being served."""
+    shaped, _lines = _redirects(_block(cfg, repo_paths.SITE_HOST))
+    retired = {m: (to, code) for m, to, code in shaped if m in caddy.RETIRED_PAGES}
+    assert retired == {"/gallery.html": ("/live.html", "308")}
+    site = pathlib.Path(repo_paths.SITE_ROOT)
+    for old, new in caddy.RETIRED_PAGES.items():
+        assert "*" not in old and old != new
+        assert (site / new.lstrip("/")).is_file(), new
+        assert not (site / old.lstrip("/")).exists(), f"{old} still exists"

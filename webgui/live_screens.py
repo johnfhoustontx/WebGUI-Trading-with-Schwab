@@ -35,7 +35,8 @@ class Screen:
     # Drawn as a picture tile on neuralstrike.co/live.html (and so captured by
     # tools/capture_live_shots.py). False for the interactive tools: a capture
     # of an empty form sells nothing, so they are reached from the site's
-    # Tools menu only (removed from the grid 2026-09-21 at the owner's ask).
+    # Tools cards only (removed from the grid 2026-09-21 at the owner's ask;
+    # the site's Tools menu that also listed them went 2026-10-24).
     tile: bool = True
     # The slug of the tile this screen is linked from instead, as a small
     # text link under that tile's caption (implies ``tile=False``). The four
@@ -136,8 +137,7 @@ SCREENS = (
     # ``public=True`` hands off to pages/options/em_live.py before the private
     # page builds anything (the owner's em_chain / expected_move commands and
     # shared_position never exist here). The three tools carry one tab strip
-    # (pages/options/strategy_strip.py), and the site's Tools menu names them
-    # as ONE item, Strategy Tools, linking the Calculator.
+    # (pages/options/strategy_strip.py); the Live Desk gives each its own card.
     Screen("expected-move", "/expected-move", "Expected Move",
            "options.expected_move", "/options/expected-move",
            kwargs={"public": True}, tile=False),

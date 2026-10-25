@@ -12,7 +12,7 @@ into ``options_svc`` would give the app two EOD reports free to drift. The
 webgui process has no app-wide scheduler either — its only timers are per-client
 ``ui.timer``s, so "generate at 15:15" would silently mean "generate at 15:15 if a
 browser tab happens to be open". A timer-owned oneshot is the pattern the
-gallery capture and the flow-delta instrumentation already use for exactly this
+flow-delta instrumentation already uses for exactly this
 shape of work.
 
 **It makes NO Schwab call and NO Claude call.** It reads Redis and writes two

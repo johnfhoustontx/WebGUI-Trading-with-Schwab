@@ -4,7 +4,44 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-24 (**The site's Live screens page becomes the Live Desk: tool cards, and the twelve screens in three groups.**)
+**Last updated:** 2026-10-24 (**The site's Gallery and its Tools menu are retired: the Live Desk carries every screen and every tool.**)
+
+- **Asked for by the user:** "Retire the Gallery on this branch: remove the page, its
+  menu item and home-page links, add a redirect from gallery.html to live.html, and
+  remove the capture timer, tool and tests", then "since the Tools menu resides under
+  the Live desk. This can also be removed". Asked first whether the Gallery was still
+  needed: 14 of its 15 sections were also public live screens or tools, only Stock
+  Evaluation (`/trade`) was private, and it cost a 22-render capture of the private
+  app every trading day at 09:07 CT.
+- **The site:** `gallery.html`, `assets/gallery.js`, the three tracked Simulator shots
+  and the gallery CSS are gone. The menu on the six remaining pages is now Market report ·
+  Trade ideas · Blog · Glossary · Community · **Live Desk**, with no Tools dropdown and no
+  `.ns-menu` CSS. The home page's "See all 15 screens" and closing buttons point at the
+  Live Desk; the sitemap drops the Gallery. The page's name follows everywhere a visitor
+  reads it: both home-page buttons say "Open the Live Desk", and the home page's
+  description, its closing paragraph and the Blog's intro say "Live Desk" (the
+  description also stops miscounting "nineteen live screens and seven tools": the
+  seven are among the nineteen). The one-row menu width fell from 905 px to
+  775 px (measured); the wrap breakpoint stays at 960.
+- **The redirect:** `deploy/caddy/generate_caddyfile.py` gains `RETIRED_PAGES`
+  (`/gallery.html` -> `/live.html`, 308). Caddy is a system unit, so it takes effect only
+  when the Caddyfile is regenerated and reloaded with sudo on the box.
+- **The capture:** `tools/capture_gallery_shots.py`, `tools/gallery_screens.py`, the
+  `trading-<env>-gallery-capture` timer and service, `[slots.gallery_capture]` (config,
+  calendar default, Settings catalogue) and their tests are removed. So is the private
+  app's screenshot mode: the `ns_capture` cookie no longer hides the reconnect banner or
+  non-public rows, and `shell.hides_non_public()` is now the public origin alone.
+  `deploy/site/assets/shots/` stays gitignored, because prod still holds the old
+  captures and un-ignored they would dirty the tree the promote checks.
+- **Docs:** the four manuals that mentioned gallery captures or the Tools menu, rebuilt;
+  `docs/reference/public-live-screens.md`, `running-and-environments.md`,
+  `docs/webgui-routes.md`, `page_help.py`.
+- **On the box, by hand** (`generate_units` never deletes a unit): disable and remove the
+  gallery timer and service, delete `deploy/site/assets/shots/`, and regenerate Caddy.
+- **Verified:** the site, Caddy, root, tools, shared, blog service and webgui suites;
+  the home page's menu checked in a browser at 1200 px and 375 px. Not yet on prod.
+
+**Prior —** 2026-10-24 (**The site's Live screens page becomes the Live Desk: tool cards, and the twelve screens in three groups.**)
 
 - **Asked for by the user:** a design handoff ("Neural Strike Live redesign.zip": one
   self-contained `live.html` and a README) for the Live Screens page, plus the menu

@@ -442,8 +442,8 @@ def test_the_momentum_quadrant_and_regime_colours_are_untouched():
 
 def test_render_still_takes_the_level_argument():
     """Load-bearing and must not change: ``live_screens.py`` pins
-    ``kwargs={"level": "industry"}`` for the published screen, and
-    ``test_gallery_routes.py`` drives ``?level=``. Passes before and after."""
+    ``kwargs={"level": "industry"}`` for the published screen, and the
+    private route takes ``?level=``. Passes before and after."""
     sig = inspect.signature(sm.render)
     assert list(sig.parameters) == ["level"]
     assert sig.parameters["level"].default == "industry"

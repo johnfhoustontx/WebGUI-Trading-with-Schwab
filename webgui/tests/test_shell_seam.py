@@ -221,67 +221,25 @@ def test_both_entrypoints_resolve_the_mark_against_one_static_tree():
     assert (shell._STATIC_DIR / "img").is_dir()
 
 
-# --- the screenshot session's chrome suppression -----------------------------
-def test_the_capture_css_needs_the_exact_cookie_value():
-    """Presence is not the contract. A stray or empty ns_capture must not
-    suppress a real visitor's disconnect warning -- that banner is the only
-    thing telling the owner their trading UI stopped updating."""
-    assert shell.capture_chrome_css({shell.CAPTURE_COOKIE: "1"})
-    for cookies in (None, {}, {shell.CAPTURE_COOKIE: ""},
-                    {shell.CAPTURE_COOKIE: "0"},
-                    {shell.CAPTURE_COOKIE: "true"},
-                    {"ns_session": "1"}):
-        assert shell.capture_chrome_css(cookies) is None, cookies
-
-
-def test_is_capture_needs_the_exact_cookie_value():
-    """The same contract as the CSS: presence is not enough."""
-    assert shell.is_capture({shell.CAPTURE_COOKIE: "1"}) is True
-    for cookies in (None, {}, {shell.CAPTURE_COOKIE: ""},
-                    {shell.CAPTURE_COOKIE: "0"},
-                    {shell.CAPTURE_COOKIE: "true"},
-                    {"ns_session": "1"}):
-        assert shell.is_capture(cookies) is False, cookies
-
-
-def test_a_capture_session_hides_non_public_content(monkeypatch):
-    """A capture render is about to be PUBLISHED (the neuralstrike.co gallery),
-    so it hides what the public origin hides."""
+# --- the screenshot session, RETIRED with the site's Gallery (2026-10-24) ------
+def test_hiding_follows_the_origin_alone(monkeypatch):
+    """A screenshot cookie once made the PRIVATE app hide non-public content,
+    because the Gallery published its pictures. That page is gone, so only the
+    public origin hides."""
     monkeypatch.setattr(shell, "is_public", lambda: False)
-    monkeypatch.setattr(shell, "_request_cookies",
-                        lambda: {shell.CAPTURE_COOKIE: "1"})
-    assert shell.capture_session() is True and shell.hides_non_public() is True
-    for cookies in (None, {shell.CAPTURE_COOKIE: ""}, {shell.CAPTURE_COOKIE: "0"}):
-        monkeypatch.setattr(shell, "_request_cookies", lambda c=cookies: c)
-        assert shell.hides_non_public() is False, cookies
+    assert shell.hides_non_public() is False
     monkeypatch.setattr(shell, "is_public", lambda: True)
     assert shell.hides_non_public() is True
 
 
-def test_no_request_is_never_a_capture():
-    """Outside any page (or the auto-index client, whose request is None) the
-    read degrades to "not a capture", never an error."""
-    assert shell.capture_session() is False
-
-
-def test_the_capture_css_hides_the_reconnect_banner_and_nothing_else():
-    """⚠ The blast radius IS the point. This CSS is injected into the real
-    trading app, so a rule that reached further would hide live content from a
-    screenshot and nobody would know which tile was lying."""
-    css = shell.capture_chrome_css({shell.CAPTURE_COOKIE: "1"})
-    selectors = [ln.split("{")[0].strip()
-                 for ln in css.strip().splitlines() if "{" in ln]
-    assert selectors == ["#popup.nicegui-error-popup"], selectors
-
-
-def test_the_public_origin_never_suppresses_its_own_chrome():
-    """⚠ On live.neuralstrike.co a VISITOR can set any cookie they like, so a
-    cookie-gated suppression there would let anyone hide their own disconnect
-    warning on a screen whose whole value is being live. The capture only ever
-    drives the private app on loopback, so live_main must never import this."""
-    src = (pathlib.Path(__file__).resolve().parents[1] / "live_main.py").read_text(encoding="utf-8")
-    assert "capture_chrome_css" not in src
-    assert shell.CAPTURE_COOKIE not in src
+def test_no_screenshot_cookie_is_honoured():
+    """The ``ns_capture`` cookie suppressed the reconnect banner. Nothing sets
+    it now, and a leftover reader would let anyone who sets it by hand hide the
+    one warning that says the trading UI stopped updating."""
+    for name in ("shell.py", "main.py", "live_main.py"):
+        src = (pathlib.Path(__file__).resolve().parents[1] / name).read_text(encoding="utf-8")
+        # Whole words: main.py's ``options_captured_page`` contains the letters.
+        assert not re.search(r"\b(ns_capture|CAPTURE_COOKIE)\b", src), name
 
 
 # --- the panel scroll CSS ----------------------------------------------------

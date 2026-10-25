@@ -41,8 +41,9 @@ def test_option_signals_is_the_scanner_with_no_tile_and_no_pin():
 
 
 def test_option_signals_leads_the_tools():
-    """The site's Tools menu lists it first (the owner's instruction), and the
-    table keeps the same order so the two read alike."""
+    """The Live Desk's tool cards list it first (the owner's instruction,
+    from when it led the site's Tools menu); the cards follow this table's
+    order, so the table keeps it first."""
     import live_screens
     tools = [s.slug for s in live_screens.SCREENS if not s.tile and not s.parent]
     assert tools[0] == "signals"

@@ -6,8 +6,7 @@ cannot see, and which a browser only reveals to whoever looks at the live page.
 
 Three failure modes motivate the file, all of them silent:
 
-* **a renamed or missing screenshot.** The gallery references 22 images by
-  path. Nothing breaks at deploy time; the page simply shows a broken image to
+* **a renamed or missing image.** The pages reference images by path. Nothing breaks at deploy time; the page simply shows a broken image to
   every visitor until somebody scrolls to that screen.
 * **a leaked reference to the app.** The public site must not name the app's
   hostname, its port, or a loopback address. The Caddy config is already pinned;
@@ -33,7 +32,7 @@ SITE = pathlib.Path(repo_paths.SITE_ROOT)
 # ⚠ EVERY page belongs here. A page left out is not partially checked, it is
 # UNCHECKED -- no link resolution, no app-host guard, no origin guard. The
 # glossary shipped with none of them until it was added.
-PAGES = ("index.html", "gallery.html", "live.html", "glossary.html", "report.html",
+PAGES = ("index.html", "live.html", "glossary.html", "report.html",
          "ideas.html", "blog.html")
 
 # The site calls nobody. Empty on purpose, and widening it is a decision:
@@ -81,34 +80,6 @@ ALLOWED_OUTBOUND = (
 # paths instead is test_the_blog_script_links_an_entry_where_the_service_writes_it
 # and test_the_blog_script_and_the_service_agree_on_what_a_slug_is.
 GENERATED_REF_PREFIXES = ("live/", "reports/", "ideas/", "blog/")
-
-
-def _regenerated_shot_refs():
-    """The gallery ``src`` values ``tools/capture_gallery_shots.py`` rewrites.
-
-    The SAME exemption as ``GENERATED_REF_PREFIXES``, deliberately NOT folded
-    into it: a prefix covering ``assets/shots/`` would exempt the whole
-    directory, and three of those files -- the Simulator shots the tool declines
-    (``unreachable_reason``) -- are ordinary committed images that nothing
-    regenerates. A rename of one of those is exactly what the reference check
-    exists to catch, so they stay checked and only the generated ones are
-    skipped.
-
-    ⚠ Imported inside the function. ``capture_gallery_shots`` APPENDS
-    ``webgui/`` to ``sys.path`` to reach the credential modules it mints a
-    cookie with, and ``webgui/`` holds top-level ``main``, ``proxy`` and
-    ``auth``. Appending is the safe end (see that module's own note, and
-    ``_live_screens`` below for why an insert would not be), and
-    ``tools/tests`` already pays exactly this cost in the same pytest session --
-    so this changes nothing about the session, while a hand-written list of
-    three filenames here would drift the first time a shot changes hands.
-    """
-    from tools import capture_gallery_shots as cap
-    from tools import gallery_screens
-
-    return {f"assets/shots/{sh.image}.webp"
-            for scr in gallery_screens.SCREENS for sh in scr.shots
-            if not cap.unreachable_reason(sh)}
 
 
 # Attributes that make the browser fetch something or follow somewhere.
@@ -179,16 +150,14 @@ def test_every_internal_reference_resolves_to_a_file(pages):
     invisible until one scrolls to it, so neither shows up in any other check
     here -- and by then it is on the public internet.
 
-    ``GENERATED_REF_PREFIXES`` and ``_regenerated_shot_refs`` are skipped: those
-    files are written on the serving box, not committed. See both for why, and
-    for what pins them instead.
+    ``GENERATED_REF_PREFIXES`` are skipped: those files are written on the
+    serving box, not committed. See it for why, and for what pins them instead.
     """
-    generated_shots = _regenerated_shot_refs()
     for name, text in pages.items():
         for ref in _refs(text):
             if ref.startswith(("#", "http://", "https://", "mailto:", "data:")):
                 continue
-            if ref.startswith(GENERATED_REF_PREFIXES) or ref in generated_shots:
+            if ref.startswith(GENERATED_REF_PREFIXES):
                 continue
             target = ref.split("#", 1)[0].split("?", 1)[0]
             # A leading "/" is root-absolute, and this site IS served at the
@@ -234,253 +203,23 @@ def test_every_anchor_target_exists(pages):
                 assert ref[1:] in ids, f"{name} links to #{ref[1:]}, which has no element"
 
 
-# --- C. the gallery and its images agree, in BOTH directions ----------------
+# --- C. the Gallery, retired 2026-10-24 --------------------------------------
 
-def test_the_gallery_shows_every_shot_the_capture_map_names_and_orphans_none():
-    """WAS an equality against the DIRECTORY, and that stopped being true.
-
-    Nineteen of the twenty-two shots are now written on the serving box and
-    gitignored, so ``assets/shots/`` legitimately holds only three files in a
-    fresh clone -- an equality against ``iterdir()`` would fail there while
-    everything is correct. The subject moved to the CAPTURE MAP instead
-    (``tools/gallery_screens``), which is what actually decides both what gets
-    written and what the tiles show, and is present in every checkout.
-
-    Two directions, and neither is the one a link-checker covers:
-
-    * every shot the tool captures has a tile. A capture with no tile writes a
-      file to the public tree that nobody will ever see, every single run.
-    * nothing on disk is unreferenced. That is the ORIGINAL assertion, kept and
-      made empty-safe -- it is what catches a shot left behind after its screen
-      was dropped, which is a picture published to the internet with no page
-      pointing at it.
-
-    The remaining direction -- referenced but never produced -- is
-    ``test_every_internal_reference_resolves_to_a_file`` for the three
-    committed shots, and ``tools/tests/test_gallery_screens.py`` (HTML against
-    the map, titles and order included) for the rest.
-    """
-    from tools import gallery_screens
-
-    in_map = {f"{sh.image}.webp"
-              for scr in gallery_screens.SCREENS for sh in scr.shots}
-    on_disk = {p.name for p in (SITE / "assets" / "shots").iterdir() if p.is_file()}
-    referenced = {r.rsplit("/", 1)[-1] for r in _refs(_markup("gallery.html"))
-                  if "assets/shots/" in r}
-
-    assert in_map <= referenced, (
-        f"the capture map writes shots the gallery shows nowhere: "
-        f"{sorted(in_map - referenced)}")
-    assert on_disk <= referenced, (
-        f"orphaned on disk, published to the internet and shown by nothing: "
-        f"{sorted(on_disk - referenced)}")
+def test_the_gallery_is_retired_and_nothing_links_to_it(pages):
+    """The Live Desk shows every published screen live, so the Gallery's
+    pictures of the private app went, with the daily recapture behind them.
+    Its address answers with a redirect to live.html (deploy/caddy, pinned in
+    test_a_retired_page_redirects_to_its_replacement), so no page may link to
+    it: a link would be a redirect on every click, and a sign the page is back."""
+    assert not (SITE / "gallery.html").exists()
+    assert not (SITE / "assets/gallery.js").exists()
+    for name, text in pages.items():
+        assert "gallery.html" not in text, f"{name} still links the Gallery"
+    assert "gallery" not in _text("sitemap.txt")
+    assert ".ns-gallery" not in _css("assets/site.css")
 
 
-def test_the_recaptured_shots_declare_the_capture_tool_s_viewport():
-    """A DECLARED SIZE THAT IS NOT THE FILE'S SIZE LETTERBOXES THE TILE.
-
-    Every shot the tool takes comes out at one fixed geometry, where the
-    original hand-cropped set had twenty-three different ones. The width/height
-    attributes are what stop the page reflowing as each screenshot arrives, so
-    they have to follow the capture viewport rather than the crop that used to
-    be there -- and a wrong pair reads as a CSS bug, not as a stale number.
-
-    Read from ``capture_gallery_shots`` rather than written down, so changing
-    the viewport fails here instead of quietly mis-sizing nineteen tiles.
-
-    The three shots the tool declines keep their own hand-cropped sizes: nothing
-    recaptures them, so their real dimensions do not change.
-    """
-    from tools import capture_gallery_shots as cap
-
-    want = f'width="{cap.VIEWPORT_WIDTH}" height="{cap.VIEWPORT_HEIGHT}"'
-    generated = _regenerated_shot_refs()
-    seen = 0
-    for tag in re.findall(r"<img \S[^>]*>", _markup("gallery.html")):
-        src = re.search(r'src="([^"]+)"', tag)
-        if not src or src.group(1) not in generated:
-            continue
-        seen += 1
-        assert want in tag, f"{src.group(1)} does not declare the capture viewport: {tag}"
-    assert seen == len(generated), (
-        f"{seen} of {len(generated)} recaptured shots have a tile")
-
-
-def test_the_replay_figure_is_not_captioned_as_a_whatif():
-    """THE GALLERY SHIPPED ONE CAPTION OVER ANOTHER TAB'S SCREENSHOT.
-
-    ``image18`` is the Simulator's Replay tab -- the six-panel
-    Price/Delta/Gamma/Theta/Vega/Rho stack, titled "Replay" inside the picture
-    itself -- and it shipped captioned "What-if: over time". Nothing detects
-    that: the tile renders perfectly, and only somebody who knows the app can
-    see that the words and the image disagree.
-
-    Corrected 2026-09-08. Pinned because it is the one defect here that a
-    recapture cannot fix -- the shot is never retaken (see
-    ``unreachable_reason``), so the caption is the only thing that can be wrong.
-    """
-    markup = _markup("gallery.html")
-    tag = re.search(r'<img src="assets/shots/image18\.webp"[^>]*>', markup)
-    assert tag, "image18 has no tile"
-    assert "Replay" in tag.group(0), (
-        f"image18 is the Replay tab and its alt text says otherwise: {tag.group(0)}")
-    assert "What-if: over time" not in markup, (
-        "the retired caption is back over the Replay screenshot")
-
-
-def test_the_rail_and_the_panels_are_the_same_length():
-    """gallery.js pairs them by index and bails out if they disagree, so a
-    mismatch does not throw -- the gallery just silently stops switching."""
-    text = _markup("gallery.html")
-    rails = re.findall(r'id="(rail-\d+)"', text)
-    panels = re.findall(r'id="(screen-\d+)"', text)
-    assert len(rails) == len(panels) == 15, f"{len(rails)} rail rows, {len(panels)} panels"
-    for rail, panel in zip(rails, panels):
-        assert rail.split("-")[1] == panel.split("-")[1]
-
-
-def test_the_pages_that_COUNT_the_screens_say_how_many_there_are():
-    """A COUNT IN COPY IS A FACT THAT GOES STALE IN SILENCE.
-
-    The gallery's header badge and the landing page's call to action both state
-    the number out loud -- "16 screens", "See all 16 screens" -- and both kept
-    saying sixteen after Daily Briefings was dropped, because nothing renders
-    differently when a number in prose is wrong. A visitor counts fifteen.
-
-    Derived from the panels, so the copy cannot be right by luck: the two pages
-    are checked against the same document that decides the answer.
-    """
-    gallery = _markup("gallery.html")
-    panels = len(re.findall(r'id="(screen-\d+)"', gallery))
-    assert panels, "no panels parsed; this test would then assert nothing"
-    for name, pattern in (("gallery.html", r'class="ns-count">(\d+) screens'),
-                          ("index.html", r"See all (\d+) screens")):
-        said = re.findall(pattern, _markup(name))
-        assert said, f"{name} no longer states a screen count; drop it from this test"
-        for n in said:
-            assert int(n) == panels, (
-                f"{name} says {n} screens; the gallery has {panels}")
-
-
-def test_every_rail_row_controls_a_panel_that_exists():
-    text = _markup("gallery.html")
-    ids = set(re.findall(r'\bid="([^"]+)"', text))
-    for controls in re.findall(r'aria-controls="([^"]+)"', text):
-        assert controls in ids, f"a rail row controls {controls}, which does not exist"
-
-
-def test_exactly_one_panel_and_one_shot_start_active():
-    """A second `is-active` panel would show two screens at once."""
-    text = _markup("gallery.html")
-    panels = re.findall(r'<section class="ns-screen[^"]*"[^>]*>', text)
-    assert len(panels) == 15
-    active = [p for p in panels if "is-active" in p]
-    assert len(active) == 1, f"{len(active)} panels start active, expected 1"
-
-    # Each multi-section screen opens on its own first shot.
-    for block in re.split(r'(?=<section class="ns-screen)', text)[1:]:
-        shots = re.findall(r'<figure class="ns-shot[^"]*"', block)
-        act = [s for s in shots if "is-active" in s]
-        assert len(act) == 1, f"a screen has {len(act)} active shots, expected 1"
-
-
-def test_no_panel_or_shot_uses_the_hidden_ATTRIBUTE():
-    """THE NO-JS FALLBACK LIVES OR DIES HERE, and it died once already.
-
-    `hidden` is native HTML: the browser's OWN stylesheet carries
-    ``[hidden] { display: none }``. An earlier build marked the inactive panels
-    with it and wrote ``.js .ns-screen[hidden] { display: none }``, believing the
-    hiding was opt-in behind the `.js` hook. It was not -- that selector was pure
-    decoration and the UA rule did the work, so a visitor with scripting off saw
-    ONE screen and no way to reach the other fifteen. The whole reason these
-    pages were rebuilt instead of copied from the design's bundle was that the
-    bundle needed JavaScript to show anything.
-
-    Nothing in the suite caught it: the content really was all in the source, so
-    every other check here passed. It took loading the page with the scripts
-    stripped. This test is the cheap standing version of that.
-
-    WARNING: this test's FIRST draft could not fail either. A shell-escaping
-    slip put a literal backspace byte where each ``\b`` belonged, so the
-    pattern read ``<BS>hidden<BS>`` and matched nothing -- a guard against a
-    silent bug that was itself silently broken. It was caught only by putting
-    the bug back and watching the suite stay green. Do that after editing this.
-    """
-    markup = _markup("gallery.html")
-    for tag in re.findall(r"<(?:section|figure)\b[^>]*>", markup):
-        if "ns-screen" in tag or "ns-shot" in tag:
-            assert not re.search(r"\bhidden\b", tag), (
-                f"a gallery element uses the hidden ATTRIBUTE, which hides it "
-                f"from scripting-off visitors too -- use `is-active`: {tag}")
-
-
-def test_the_visibility_rules_are_scoped_to_the_js_hook():
-    """The other half of the same invariant. If a rule that hides a panel is not
-    under `.js`, it applies to everyone -- including the fallback."""
-    css = _css("assets/site.css")
-    hiding = re.findall(r"([^{}]*\.ns-(?:screen|shot)[^{}]*)\{([^}]*)\}", css)
-    for selector, body in hiding:
-        if "display: none" in body:
-            assert ".js" in selector, (
-                f"`{selector.strip()}` hides a gallery element for everyone, "
-                f"including visitors with no JavaScript")
-
-
-def test_the_chip_row_breakpoint_is_the_same_number_in_the_css_and_the_js():
-    """The rail is a sidebar above 1000px and a horizontal chip strip below it.
-    CSS decides the layout; ``gallery.js`` reads the same width through
-    ``matchMedia`` to set ``aria-orientation``, because a strip announced as
-    vertical is a lie told only to the people who cannot see it.
-
-    Two copies of one number. If they drift, nothing breaks visibly and nothing
-    else in this suite notices -- the layout is simply described wrongly to
-    assistive technology across a band of widths.
-    """
-    css_widths = set(re.findall(r"@media\s*\(max-width:\s*(\d+)px\)", _css("assets/site.css")))
-    js_widths = set(re.findall(r"matchMedia\(\s*[\"']\(max-width:\s*(\d+)px\)",
-                               _text("assets/gallery.js")))
-    assert js_widths, "gallery.js no longer reads a breakpoint; drop this test with it"
-    assert js_widths <= css_widths, (
-        f"gallery.js watches {sorted(js_widths)} but site.css defines "
-        f"{sorted(css_widths)} -- the orientation announced to screen readers "
-        f"would disagree with the layout")
-
-
-def test_the_stack_and_the_chip_row_switch_together():
-    """The chip styles and the column stack MUST live in one media query.
-
-    Left to itself the gallery wraps when the rail and viewer stop fitting,
-    which falls out of two clamp() values at about 967px. A chip row keyed to a
-    different number would leave a band of widths rendering chips inside a 340px
-    sidebar, or a vertical list stretched across the full width. Declaring the
-    stack in the same block makes them the same number by construction.
-    """
-    css = _css("assets/site.css")
-    blocks = re.findall(r"@media\s*\(max-width:\s*(\d+)px\)\s*\{(.*?)\n\}", css, re.S)
-    owning = [(w, b) for w, b in blocks if "flex-direction: row" in b and ".ns-rail-list" in b]
-    assert owning, "no media query turns the rail list into a row"
-    for width, body in owning:
-        assert "flex-direction: column" in body and ".ns-gallery" in body, (
-            f"the {width}px block makes the rail horizontal without also forcing "
-            f".ns-gallery to stack, so the two can disagree")
-
-
-def test_the_stacked_rail_resets_its_flex_basis():
-    """`flex-basis` sizes the MAIN axis, so a column container reads
-    ``flex: 1 1 260px`` as a HEIGHT. Measured before the reset existed: a 260px
-    rail around 77px of chips and a 620px viewer around 310px of content, ~490px
-    of dead space that reads as a spacing bug and is a flex-axis one."""
-    css = _css("assets/site.css")
-    blocks = re.findall(r"@media\s*\(max-width:\s*\d+px\)\s*\{(.*?)\n\}", css, re.S)
-    stacking = [b for b in blocks if ".ns-gallery { flex-direction: column; }" in b]
-    assert stacking, "nothing forces the gallery to stack"
-    for body in stacking:
-        assert re.search(r"\.ns-rail,\s*\.ns-viewer\s*\{[^}]*flex:\s*0 0 auto", body), (
-            "the stacked gallery does not reset the rail/viewer flex basis, so "
-            "their 260px/620px bases become heights")
-
-
-# --- C2. the mark, which exists in seven copies -----------------------------
+# --- C2. the mark, which exists in six copies -----------------------------
 
 # The two optical sizes. LARGE is the site's nav and hero; SMALL is the favicon
 # and the app's 28px header slot, drawn heavier so a 1-device-pixel rule
@@ -489,7 +228,7 @@ def test_the_stacked_rail_resets_its_flex_basis():
 MARK_LARGE = ("M20 11 L32 23 L44 11", "M20 53 L32 41 L44 53")
 MARK_SMALL = ("M22 12 L32 23.5 L42 12", "M22 52 L32 41 L42 52")
 
-MARK_LARGE_FILES = ("index.html", "gallery.html", "live.html", "report.html", "ideas.html",
+MARK_LARGE_FILES = ("index.html", "live.html", "report.html", "ideas.html",
                     "blog.html", "assets/mark.svg")
 MARK_SMALL_FILES = ("assets/favicon.svg",)
 
@@ -792,15 +531,13 @@ TILE_RE = (r'<a class="ns-live-tile ns-desk-spot" href="([^"]+)"[^>]*>\s*'
 
 def _tiled():
     """The published screens drawn as tiles. The interactive tools are
-    published but untiled (``Screen.tile``) -- the Tools menu reaches them."""
+    published but untiled (``Screen.tile``) -- a tool card reaches each one."""
     return [s for s in _live_screens().SCREENS if s.tile]
 
 
 def test_the_interactive_tools_are_not_tiled():
     """Removed from the grid 2026-09-21: an empty form makes a blank tile."""
     screens = _live_screens().SCREENS
-    untiled = {s.slug for s in screens if not s.tile and not s.parent}
-    assert untiled == {slug for slug, _ in TOOLS} | set(STRATEGY_TOOLS)
     for s in screens:
         if not s.tile:
             assert f"live/{s.slug}.webp" not in _markup("live.html"), s.slug
@@ -918,7 +655,7 @@ def _desk_tools():
 
 def test_every_tool_has_a_card_in_table_order():
     """The tool cards are the published, untiled screens -- each its own card,
-    the three Strategy Tools included, though the menu names them as one item.
+    the three Strategy Tools included.
     Numbered in the order the table lists them."""
     m = re.search(r'<section class="ns-desk-tools-section" id="tools">(.*?)</section>',
                   _markup("live.html"), re.S)
@@ -993,8 +730,8 @@ _WORDS = {7: "seven", 12: "twelve", 19: "nineteen"}
 
 
 def test_the_live_page_states_the_published_counts_in_words():
-    """A COUNT IN COPY IS A FACT THAT GOES STALE IN SILENCE -- the live page's
-    twin of the gallery test above. live.html said "Twenty-four screens ...
+    """A COUNT IN COPY IS A FACT THAT GOES STALE IN SILENCE.
+    live.html said "Twenty-four screens ...
     twenty read-only ... four tools" from 2026-09-21 until 2026-09-26, while the
     table published seventeen (twelve tiles and five tools), because the tiles
     are pinned against ``live_screens.SCREENS`` and the prose never was. (It is
@@ -1035,7 +772,7 @@ def test_every_footer_carries_the_one_disclaimer_verbatim():
     read as a defect, not a style. report.html frames a document that carries
     its own footer, and the glossary is a reference page; the three pages that
     make the claim make it identically."""
-    for name in ("index.html", "gallery.html", "live.html", "ideas.html", "blog.html"):
+    for name in ("index.html", "live.html", "ideas.html", "blog.html"):
         markup = " ".join(_markup(name).split())
         assert DISCLAIMER in markup, f"{name} does not carry the disclaimer verbatim"
 
@@ -1053,36 +790,9 @@ def test_live_screens_is_the_primary_call_to_action():
     nav = re.search(r"<nav\b.*?</nav>", _markup("index.html"), re.S)
     assert nav, "index.html has no <nav>"
     live = re.search(r'<a[^>]*href="live\.html"[^>]*>', nav.group(0))
-    gallery = re.search(r'<a[^>]*href="gallery\.html"[^>]*>', nav.group(0))
     assert live, "no live.html link in the index nav"
     assert "btn-primary" in live.group(0), "Live Desk is not the primary button"
-    assert gallery and "btn-primary" not in gallery.group(0), (
-        "the Gallery link still carries the primary treatment")
-
-
-def test_the_gallery_and_the_live_grid_link_to_each_other_IN_THE_NAV():
-    """The two picture pages are each other's obvious next stop -- captures of
-    the app, and the app running -- and the gallery reached the live grid from
-    nowhere at all. That is the kind of dead end an author never meets, because
-    they always arrive from the page that does carry the link.
-
-    ⚠ Scoped to the ``<nav>``, and the shouty name says so. Written first
-    against the whole document, this test could not fail: ``live.html`` names
-    the gallery a SECOND time in its body prose, so deleting the nav link left
-    it green. A link buried in a paragraph is not navigation.
-
-    Every page now carries the same menu (test_every_page_carries_the_same_menu),
-    which covers the glossary too; this test keeps the pair it was written for.
-    """
-    def nav(name):
-        m = re.search(r"<nav\b.*?</nav>", _markup(name), re.S)
-        assert m, f"{name} has no <nav>"
-        return m.group(0)
-
-    assert 'href="live.html"' in nav("gallery.html"), (
-        "the gallery's nav offers no way to the live screens")
-    assert 'href="gallery.html"' in nav("live.html"), (
-        "the live grid's nav offers no way to the gallery")
+    assert nav.group(0).count("btn-primary") == 1, "more than one primary button"
 
 
 def test_the_grid_embeds_nothing_and_runs_nothing():
@@ -1182,22 +892,6 @@ def test_each_page_carries_its_own_content_without_scripting(pages):
     for name, text in pages.items():
         assert "<h1" in text or "<h2" in text, f"{name} has no heading in its source"
         assert "<nav" in text, f"{name} has no navigation in its source"
-
-
-def test_the_gallery_has_all_fifteen_screen_titles_in_its_source():
-    """With scripting off the panels stack; the text must therefore be readable
-    without running anything.
-
-    ⚠ RENAMED from ``..._all_sixteen_...`` when Daily Briefings was dropped on
-    2026-09-08. A test called sixteen asserting fifteen is how the next reader
-    is misled about what the site actually shows.
-    """
-    text = _markup("gallery.html")
-    assert len(re.findall(r"<h2>", text)) == 15
-    for title in ("The Desk", "Gamma Heatmap", "Strategy Calculator"):
-        assert f"<h2>{title}</h2>" in text, f"{title} is not in the gallery source"
-    assert "Daily Briefings" not in text, (
-        "Daily Briefings was dropped from the gallery; its panel is back")
 
 
 def test_no_page_carries_a_form_or_an_input(pages):
@@ -1355,13 +1049,13 @@ def test_the_report_page_runs_nothing():
 
 def test_the_market_report_is_in_every_destination_nav():
     """The menu item IS the feature: a report page reachable only by typing its
-    URL is not published. Scoped to the <nav> for the reason given in
-    test_the_gallery_and_the_live_grid_link_to_each_other_IN_THE_NAV."""
-    for name in ("index.html", "gallery.html", "live.html", "glossary.html"):
+    URL is not published. Scoped to the <nav>: a link buried in a paragraph is
+    not navigation, and a whole-document search passes on body prose."""
+    for name in ("index.html", "live.html", "glossary.html"):
         assert 'href="report.html"' in _nav(name), f"{name}'s nav has no Market report link"
     for page in ("report.html", "ideas.html"):
         nav = _nav(page)
-        for dest in ("glossary.html", "gallery.html", "live.html", "index.html"):
+        for dest in ("glossary.html", "live.html", "index.html"):
             assert f'href="{dest}"' in nav, f"{page}'s nav has no way to {dest}"
     assert 'href="report.html"' in _nav("ideas.html")
 
@@ -1382,90 +1076,16 @@ def test_the_report_is_in_the_sitemap():
     assert "https://neuralstrike.co/report.html" in _text("sitemap.txt")
 
 
-# --- F. the Tools menu ------------------------------------------------------
-# The interactive public screens live behind ONE nav item, so adding a tool
-# never adds a word to the home nav. Keyed by live-screen SLUG: a tool is a
-# link exactly when live_screens publishes it, and a "Coming soon" entry
-# otherwise -- never a link to a route that does not exist yet.
-
-# ("simulator", "Simulator") joined on 2026-09-21 with its public screen, and
-# ("news", "Market News") on 2026-09-26 with its. ("signals", "Option Signals")
-# joined on 2026-10-07 and LEADS the menu, at the owner's instruction: this
-# tuple's order is the menu's order (test_the_tools_menu_lists_the_tools_in_order).
-# On 2026-10-24 the Calculator and Simulator items became ONE, Strategy Tools,
-# when the public Expected Move joined them: it opens on the Calculator, whose
-# page carries the three tools' tab strip (webgui/pages/options/strategy_strip.py).
-TOOLS = (("signals", "Option Signals"),
-         ("finder", "Strategy Finder"), ("rescue", "Rescue my Sh*tty trade"),
-         ("calculator", "Strategy Tools"),
-         ("news", "Market News"))
-
-# The screens the ONE Strategy Tools item reaches: it links the first, and each
-# of the three carries the tab strip to the other two.
-STRATEGY_TOOLS = ("calculator", "simulator", "expected-move")
-
-# Every page: they all carry the one site menu, Tools included.
-TOOLS_PAGES = PAGES
-
-
-def _nav(name):
-    m = re.search(r"<nav\b.*?</nav>", _markup(name), re.S)
-    assert m, f"{name} has no <nav>"
-    return m.group(0)
-
-
-def _tools_menu(name):
-    menus = re.findall(r'<details class="ns-menu">.*?</details>', _nav(name), re.S)
-    assert len(menus) == 1, f"{name}: expected one Tools menu in the nav, found {len(menus)}"
-    return menus[0]
-
-
-def test_every_linking_nav_has_one_tools_menu():
-    for name in TOOLS_PAGES:
-        menu = _tools_menu(name)
-        assert re.search(r"<summary[^>]*>\s*Tools\b", menu), f"{name}: menu not labelled Tools"
-
-
-def test_the_tools_live_only_inside_the_menu():
-    """The point of the menu: the home nav gains ONE item, not three."""
-    for name in TOOLS_PAGES:
-        outside = _nav(name).replace(_tools_menu(name), "")
-        for _, title in TOOLS:
-            assert title not in outside, f"{name}: {title} is a top-level nav item"
-
-
-def test_a_tool_is_a_link_exactly_when_it_is_published():
-    routes = {s.slug: s.route for s in _live_screens().SCREENS}
-    for name in TOOLS_PAGES:
-        menu = _tools_menu(name)
-        for slug, title in TOOLS:
-            if slug in routes:
-                href = f"https://{repo_paths.LIVE_HOST}{routes[slug]}"
-                assert re.search(rf'<a class="ns-menu-item" href="{re.escape(href)}"'
-                                 rf'>\s*<span class="ns-menu-title">{re.escape(title)}</span>',
-                                 menu), f"{name}: {title} is published but not linked to {href}"
-            else:
-                item = re.search(rf'<span class="ns-menu-item ns-menu-soon"'
-                                 rf'>\s*<span class="ns-menu-title">{re.escape(title)}</span>'
-                                 rf'.*?Coming soon', menu, re.S)
-                assert item, f"{name}: unpublished {title} is not a 'Coming soon' entry"
-
-
-def test_the_tools_menu_lists_the_tools_in_order():
-    """Option Signals first (the owner's instruction, 2026-10-07), then the
-    rest as they were. Read off every page, though the one-menu test below
-    already makes them identical: this is the test that says what the order IS."""
-    for name in TOOLS_PAGES:
-        titles = re.findall(r'<span class="ns-menu-title">(.*?)</span>',
-                            _tools_menu(name))
-        assert titles == [title for _, title in TOOLS], f"{name}: {titles}"
-
-
-def test_the_tools_menu_needs_no_script():
-    """The menu runs no script of its own on any page, so it is a native
-    <details>: it opens and closes with no JavaScript on any page."""
-    for name in TOOLS_PAGES:
-        assert "<script" not in _tools_menu(name)
+# --- F. the Tools menu, retired 2026-10-24 ----------------------------------
+def test_no_page_carries_a_tools_menu():
+    """The Tools dropdown listed the interactive public screens; the Live Desk
+    now shows all of them as cards (test_every_tool_has_a_card_in_table_order),
+    so the menu went. A second list would be a second thing to keep in step."""
+    for name in PAGES:
+        nav = _nav(name)
+        assert "ns-menu" not in nav and "<details" not in nav, f"{name} has a Tools menu"
+        assert "live.neuralstrike.co" not in nav, f"{name}'s menu links a live screen"
+    assert ".ns-menu" not in _css("assets/site.css")
 
 
 # ── Trade ideas (ideas.html + the home page strip) ──────────────────────────
@@ -1783,8 +1403,11 @@ def test_the_stylesheet_defines_every_class_the_service_wraps_an_entry_in():
 # The narrowest viewport, in px, at which the menu below fits on ONE row,
 # measured in a browser (a vertical scrollbar present) for exactly the words in
 # MENU_WORDS. Not derivable here: it is the rendered width of text.
-MENU_FITS_FROM = 905
-MENU_WORDS = ["Market report", "Trade ideas", "Blog", "Glossary", "Gallery", "Community"]
+# 905 with Gallery and the Tools menu; 775 once both went (measured
+# 2026-10-24: 3px over at 770, clear at 780). The wrap stays at 960, so the
+# menu now wraps earlier than it must -- loosening that is a choice, not a fix.
+MENU_FITS_FROM = 775
+MENU_WORDS = ["Market report", "Trade ideas", "Blog", "Glossary", "Community"]
 
 
 def test_the_menu_wraps_before_it_stops_fitting():

@@ -2845,10 +2845,10 @@ def test_a_pinned_page_opens_no_report_it_could_never_have_asked_for(monkeypatch
 # ── the ``?view=`` ROUTE parameter ──────────────────────────────────────────
 # ``gamma.render`` has taken a ``view`` pin since the public live screens; until
 # 2026-09-08 the ``@_page`` function took no parameters, so ``/options/gamma?
-# view=Flow`` was accepted by the router and silently ignored. That is the
-# gallery's wrong-screenshot failure class: three tiles captioned Gamma Heatmap,
-# Premium Divergence and Net Options Premium would all have published the same
-# default GEX view, and nothing would have raised.
+# view=Flow`` was accepted by the router and silently ignored: a link asking for
+# one view would have opened the default GEX view, and nothing would have
+# raised. (Found when the site's Gallery, retired 2026-10-24, captured three
+# views through it.)
 #
 # ⚠ A ``@ui.page`` function's signature IS the query-parameter surface (see
 # ``live_main._register`` for the injection this repo already closed). These
@@ -2899,7 +2899,7 @@ def test_fastapi_binds_the_view_pin_from_the_QUERY_STRING():
     Every test below calls the page function in Python, which proves the value
     travels once it arrives — not that ``?view=Flow`` in a URL is where it comes
     from. A parameter FastAPI classified as a path or body field would satisfy
-    all of them and still leave the gallery capturing one view three times. Read
+    all of them and still leave every ``?view=`` link opening the same view. Read
     off the route's own dependant, which is what the router consults per
     request, and checked beside ``/sentiment/momentum`` so the shipped precedent
     says what a correctly-wired pin looks like."""
@@ -2943,8 +2943,7 @@ def test_a_pinned_route_renders_that_one_view(monkeypatch):
     """The pin reaches the page's OWN behaviour, not just its argument list.
 
     A pinned render builds no picker (``shows_view_picker``) — which is also the
-    visible consequence of wiring this parameter, and the reason the gallery's
-    recaptures will show one view with no subtab row."""
+    visible consequence of wiring this parameter."""
     assert _view_tab_names(_route_rendered(monkeypatch, view="Flow")) == set()
 
 

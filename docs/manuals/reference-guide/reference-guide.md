@@ -2927,7 +2927,7 @@ Throughout the session.
 ### On the public site
 
 `live.neuralstrike.co/signals` is this page, published as **Option Signals** and
-listed first in the site's Tools menu. It shows the same three tabs, both
+the first tool card on the site's Live Desk. It shows the same three tabs, both
 tables under 0-DTE and Swing, the Checks column, **Only clear**, **Why no
 trade?** and the Trade detail panel. What it leaves out is everything that is
 yours:

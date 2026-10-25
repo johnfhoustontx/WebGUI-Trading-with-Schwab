@@ -1376,7 +1376,7 @@ cmd:options
 `text`. The two `hiro_*` types also carry two flags the service stamps from
 `[hiro]` in `config/flow_alerts.toml`: **`quiet`** (true while `push` is off — not
 pushed, and the Desk does not speak it) and **`public`** (false while `public` is
-off — hidden on the public live screens and in gallery captures). A reader that
+off — hidden on the public live screens). A reader that
 shows flow-alert rows must go through `webgui/pages/options/flow.alert_rows` (its
 `_shown` filter does the hiding); an alert with no `public` key is shown. The
 `hiro_*` alerts are not counted in `flow_alert_cooldowns`-derived counts (Hotness,

@@ -2621,7 +2621,7 @@ and dropped.
 **Delivery.** Both alerts join `cache:options:flow_alerts` and carry two flags the
 service stamps: `quiet` (`[hiro].push` is not `true`: no phone push, and the Desk does
 not speak it) and `public` (`[hiro].public` is `true`; otherwise the row is hidden on
-the public live screens and in gallery captures). Both fail closed. With `push` on, a
+the public live screens). Both fail closed. With `push` on, a
 reversal is always pushed and a surge only at `mult` ≥ `push_k` (4), through the
 `flow_hiro` push category. Neither ever chimes or toasts in the browser. Neither
 counts toward the Opportunity Board's flow count or Hotness
@@ -4493,7 +4493,7 @@ the source; this table is a summary of them.
 Some scheduled jobs are **not** on any service's loop — they are systemd timers,
 generated from `config/sessions.toml` by `deploy/systemd/generate_units.py`, so moving
 one needs `generate_units --install` plus a `daemon-reload` rather than a service
-restart. The EOD report, gallery capture and flow-delta gate on the market calendar in
+restart. The EOD report and flow-delta gate on the market calendar in
 their own scripts, so their timers only exclude weekends; the labeler, the refit and
 the listed-stocks re-rank read history and have no session to gate on. The HIRO report's timer also excludes
 weekends only: with no `--date` it reports the newest closed session, so a holiday
@@ -4505,7 +4505,6 @@ firing just rewrites the previous trading day's report from the same stored minu
 | Failure alert | when a unit ends up failed | Every generated unit carries `OnFailure=`; `tools/notify_failure.py` sends a Server alert, at most once per `[system] failure_repeat_hours` (6) for a unit that stays failed. A service reaches it after its restart budget is spent; a timer job on any error exit. |
 | EOD report archive | **15:15** (`[slots.eod_report]`) | Writes `webgui/data/eod/<date>/summary.html` + `detail.html` — the `/eod` **Generate** button, unattended. Reads Redis only: no Schwab call, no Claude call. Writes nothing if every cache read was empty. |
 | Weekly trade-idea review | **15:30**, Mon-Fri (`[slots.idea_review]`) | `tools/weekly_idea_review.py` via `trading-<env>-idea-review.timer` (`Persistent=false`, `TimeoutStartSec=900`): writes `webgui/data/idea_review/<YYYY-Www>/report.html` only on the **last trading day of the ISO week** (Friday, or Thursday when Friday is a holiday) and exits 0 on the other days. Reads the Paper Ledger view from Redis and makes one Claude Code CLI call (the subscription, no API key). Exit 2 = bus unreadable or Ledger view missing or holding no rows at all, nothing written; exit 3 = written without Claude's assessment, which fails the unit so the failure alert fires. |
-| Marketing gallery recapture | **09:07** (`[slots.gallery_capture]`) | Re-photographs the private app for the public gallery. |
 | Flow-delta instrumentation | **16:00** (`[slots.flow_delta]`) | The only measurement of the `[big_delta]` / UOA thresholds. |
 | HIRO-model validation report | **16:10** (`[slots.hiro_report]`) | `tools/hiro_report.py` via `trading-<env>-hiro-report.timer` (Monday to Friday, `Persistent=true`, so a missed run catches up at boot): replays the day's `hiro_surge` / `hiro_flip` rules and the `gamma_flip` (Hedging flip) alert and scores the 5- and 15-minute price move after each fire against the same-direction base rate, into `options-scanner/data/hiro_report/<date>/report.md` (plus `gamma_flip.json`, the day's saved Hedging flips). Reads `gex_history.db` only — no Schwab, no Redis, no Claude call. The only measurement of the `[hiro]` thresholds and of the Hedging flip. |
 | Trade Analyzer outcome labelling | **18:30** (`[slots.label_journal]`) | `tools/label_journal.py`: writes the realized 5/10/20-day forward returns (raw, beta-adjusted, and SPY's) onto recommendations whose horizon has passed. One daily-bar fetch per symbol through the proxy; labels everything outstanding, so a missed night catches up. |

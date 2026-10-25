@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NeuralStrike — dealer flow, measured</title>
-<meta name="description" content="NeuralStrike measures the hedging that market makers are forced to do and shows where it will push price next. Nineteen live screens and seven tools, open to anyone with nothing to sign into. Paper positions only; no orders are ever sent to a broker.">
+<meta name="description" content="NeuralStrike measures the hedging that market makers are forced to do and shows where it will push price next. Nineteen screens on the Live Desk, seven of them tools, open to anyone with nothing to sign into. Paper positions only; no orders are ever sent to a broker.">
 <meta name="theme-color" content="#161826">
 <!-- Icons. The SVG is the good one and every modern browser takes it; the
      other two exist because some browsers never ask for it.
@@ -70,7 +70,7 @@
   <!-- THE SITE MENU. Byte-identical on every page but for aria-current,
        which marks the page you are on (deploy/tests/test_site.py pins it).
        The mark is inlined, not an <img>, so it takes the accent through
-       currentColor. Change it on ALL seven pages or none. -->
+       currentColor. Change it on ALL six pages or none. -->
   <nav class="ns-nav ns-nav-sticky" aria-label="Site">
     <a class="ns-lockup" href="index.html" aria-current="page">
       <svg class="ns-mark" viewBox="0 0 64 64" aria-hidden="true" focusable="false">
@@ -85,33 +85,7 @@
     <a class="ns-navlink" href="ideas.html">Trade ideas</a>
     <a class="ns-navlink" href="blog.html">Blog</a>
     <a class="ns-navlink" href="glossary.html">Glossary</a>
-    <a class="ns-navlink" href="gallery.html">Gallery</a>
     <a class="ns-navlink" href="index.html#community">Community</a>
-    <details class="ns-menu">
-      <summary class="ns-navlink">Tools</summary>
-      <div class="ns-menu-panel">
-        <a class="ns-menu-item" href="https://live.neuralstrike.co/signals">
-          <span class="ns-menu-title">Option Signals</span>
-          <span class="ns-menu-desc">Every trade the scanner qualifies today</span>
-        </a>
-        <a class="ns-menu-item" href="https://live.neuralstrike.co/finder">
-          <span class="ns-menu-title">Strategy Finder</span>
-          <span class="ns-menu-desc">Rank every trade for a symbol</span>
-        </a>
-        <a class="ns-menu-item" href="https://live.neuralstrike.co/rescue">
-          <span class="ns-menu-title">Rescue my Sh*tty trade</span>
-          <span class="ns-menu-desc">Repair a trade you already hold</span>
-        </a>
-        <a class="ns-menu-item" href="https://live.neuralstrike.co/calculator">
-          <span class="ns-menu-title">Strategy Tools</span>
-          <span class="ns-menu-desc">Price, simulate and chart the expected move</span>
-        </a>
-        <a class="ns-menu-item" href="https://live.neuralstrike.co/news">
-          <span class="ns-menu-title">Market News</span>
-          <span class="ns-menu-desc">Headlines, filings and insider buys, live</span>
-        </a>
-      </div>
-    </details>
     <a class="btn btn-primary" href="live.html" style="white-space: nowrap;">Live Desk</a>
   </nav>
 
@@ -125,7 +99,7 @@
       </h1>
       <p class="ns-lede" style="margin: 0 0 28px;">Every option you buy, a market maker sells. They do not want your bet, only the fee, so they hedge, and as price moves they have to hedge again. NeuralStrike measures that forced flow across the whole chain and puts the reading, the trade it implies and a paper book to test it on one screen.</p>
       <div class="ns-actions" style="margin-bottom: 26px;">
-        <a class="btn btn-primary" href="live.html">Open the live screens</a>
+        <a class="btn btn-primary" href="live.html">Open the Live Desk</a>
         <a class="btn btn-ghost" href="#idea">How the flow works</a>
       </div>
       <p class="ns-note" style="display: flex; align-items: center; gap: 10px; margin: 0;">
@@ -240,7 +214,7 @@
     <h2 class="ns-h2-sm" style="margin: 0 0 clamp(28px, 4vw, 44px); max-width: 34ch;">Four lenses on the same forced flow</h2>
 
     <p style="margin: -20px 0 clamp(24px, 3vw, 36px);">
-      <a class="btn btn-ghost btn-outline" href="gallery.html">See all 15 screens →</a>
+      <a class="btn btn-ghost btn-outline" href="live.html">See every screen on the Live Desk →</a>
     </p>
 
     <div>
@@ -289,11 +263,10 @@
   <section id="start" class="ns-wrap" style="padding-top: clamp(48px, 6vw, 80px); padding-bottom: clamp(48px, 6vw, 80px);">
     <h2 class="ns-h2-sm" style="margin: 0 0 16px; max-width: 26ch;">Start with the question, not the price.</h2>
     <p style="font-size: 16px; line-height: 1.65; max-width: 56ch; margin: 0 0 26px; color: color-mix(in srgb, var(--color-text) 80%, transparent);">
-      The live screens run against the market all session, with nothing to sign into. Read Dealer Positioning first, then what the rest of the desk makes of it. The gallery holds a capture of every screen, including the ones that stay private.
+      The Live Desk runs against the market all session, with nothing to sign into. Read Dealer Positioning first, then what the rest of the desk makes of it.
     </p>
     <div class="ns-actions">
-      <a class="btn btn-primary" href="live.html">Open the live screens</a>
-      <a class="btn btn-ghost btn-outline" href="gallery.html">Browse the gallery</a>
+      <a class="btn btn-primary" href="live.html">Open the Live Desk</a>
     </div>
   </section>
 
@@ -360,7 +333,7 @@
      with nothing to say why. deploy/tests/test_site.py pins the order.
 
      Nothing here is content: with scripting off the button is exactly the
-     button, which is why this needs no `.js` hook the way the gallery does. -->
+     button, which is why this needs no `.js` hook on <html>. -->
 <script src="assets/market-clock.js" defer></script>
 <script src="assets/market-glow.js" defer></script>
 <!-- The trade ideas strip above. Hidden until this fills it; with scripting

@@ -425,27 +425,6 @@ def test_the_public_status_line_counts_only_what_it_shows(monkeypatch):
     assert flow.status_text(view) == "2 alerts today · 2026-10-01"
 
 
-def _capture(monkeypatch, cookies):
-    import shell
-    monkeypatch.setattr(shell, "is_public", lambda: False)
-    monkeypatch.setattr(shell, "_request_cookies", lambda: cookies)
-
-
-def test_a_capture_session_hides_non_public_alerts_in_the_private_app(monkeypatch):
-    """tools/capture_gallery_shots.py photographs the PRIVATE app for the public
-    gallery, so its render hides what the public origin hides."""
-    view = {"alerts": [{**_HS, "id": "hidden", "public": False}, _XO]}
-    _capture(monkeypatch, {"ns_capture": "1"})
-    assert {r["id"] for r in flow.alert_rows(view)} == {_XO["id"]}
-
-
-def test_a_stray_capture_cookie_hides_nothing(monkeypatch):
-    view = {"alerts": [{**_HS, "id": "hidden", "public": False}, _XO]}
-    for cookies in ({"ns_capture": ""}, {"ns_capture": "0"}, None):
-        _capture(monkeypatch, cookies)
-        assert {r["id"] for r in flow.alert_rows(view)} == {"hidden", _XO["id"]}
-
-
 def test_kind_options_drop_hidden_hiro_kinds_only_while_hiding():
     rows = flow.alert_rows({"alerts": [_XO]})
     full = flow.kind_options(rows, hiding=False)

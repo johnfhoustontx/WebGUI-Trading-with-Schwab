@@ -769,9 +769,6 @@ _SESSIONS = ConfigFile(
                   kind="time", restart=(SENTIMENT, TRADE, WEBGUI)),
             Field("slots.calibration.at", "Signal calibration rebuild", "",
                   kind="time", restart=(OPTIONS, TRADE, WEBGUI)),
-            Field("slots.gallery_capture.at", "Website gallery capture",
-                  "Runs in session on purpose (index open interest zeroes after "
-                  "hours).", kind="time", restart=(TIMERS,)),
         )),
     ),
 )

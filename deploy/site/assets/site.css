@@ -6,7 +6,6 @@
  *   1. the self-hosted Inter faces, replacing the design's Google Fonts link
  *   2. the hover states the design canvas carried as `style-hover=` attributes,
  *      which are not a real HTML feature and had to become CSS rules
- *   3. the gallery's panel switching
  *
  * Nothing here restates a Nocturne token. If a value is needed, it comes
  * through var(--*).
@@ -173,83 +172,6 @@ a.ns-brand:hover { color: var(--color-accent); text-decoration: none; }
 }
 .ns-navlink:hover { color: var(--color-accent); text-decoration: none; }
 
-/* The Tools menu: every interactive public screen behind ONE nav item, so a
- * new tool never adds a word to the home nav. A native <details>, because
- * live.html runs no script: it opens and closes on a click or a tap, and on
- * Enter or Space from the keyboard, with nothing to load. */
-.ns-menu { position: relative; }
-.ns-menu > summary {
-  list-style: none;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-}
-.ns-menu > summary::-webkit-details-marker { display: none; }
-.ns-menu > summary::after {
-  content: "";
-  width: 6px;
-  height: 6px;
-  border-right: 1.5px solid currentColor;
-  border-bottom: 1.5px solid currentColor;
-  transform: translateY(-2px) rotate(45deg);
-  transition: transform 0.15s ease;
-}
-.ns-menu[open] > summary { color: var(--color-accent); }
-.ns-menu[open] > summary::after { transform: translateY(1px) rotate(-135deg); }
-.ns-menu-panel {
-  position: absolute;
-  right: 0;
-  top: calc(100% + 12px);
-  z-index: 20;
-  width: 260px;
-  max-width: calc(100vw - 32px);
-  padding: 6px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-divider);
-  border-radius: var(--radius-md);
-  box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.6);
-}
-.ns-menu-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 9px 12px;
-  border-radius: var(--radius-sm);
-  color: var(--color-text);
-}
-a.ns-menu-item:hover {
-  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
-  text-decoration: none;
-}
-.ns-menu-title { font-size: 13.5px; font-weight: 600; }
-.ns-menu-desc {
-  font-size: 12px;
-  color: color-mix(in srgb, var(--color-text) 58%, transparent);
-}
-/* Not yet published: visible, so the menu says what is coming, but not a link. */
-.ns-menu-soon { cursor: default; }
-.ns-menu-soon .ns-menu-title { color: color-mix(in srgb, var(--color-text) 55%, transparent); }
-/* On a phone the nav wraps and Tools lands mid-row, so a panel hung off its
- * right edge ran off the LEFT of a 375px screen (measured: left -108px). Below
- * the wrap point the panel hangs off the whole nav instead, full width less
- * the page gutter. The sticky nav is already a positioned box; the others
- * become one here. */
-@media (max-width: 700px) {
-  .ns-nav:not(.ns-nav-sticky) { position: relative; }
-  .ns-menu { position: static; }
-  .ns-menu-panel {
-    left: 16px;
-    right: 16px;
-    top: calc(100% - 4px);
-    width: auto;
-    max-width: none;
-  }
-}
-
 .ns-crumb {
   font-size: 13px;
   color: color-mix(in srgb, var(--color-text) 55%, transparent);
@@ -289,8 +211,7 @@ a.ns-menu-item:hover {
 }
 @media (max-width: 700px) {
   /* The one site menu wraps to three rows (~140px) on a 375px phone; pinned, it
-   * would hold a sixth of the screen while reading. It scrolls away instead.
-   * Still a positioned box, which the Tools panel above needs. */
+   * would hold a sixth of the screen while reading. It scrolls away instead. */
   .ns-nav-sticky { position: relative; }
 }
 /* The landing's nav settles at three visual rows on a 375px screen — brand,
@@ -609,224 +530,6 @@ a.ns-menu-item:hover {
   line-height: 1.7;
   color: color-mix(in srgb, var(--color-text) 55%, transparent);
 }
-
-/* ─── 7. Gallery ─────────────────────────────────────────────────────────
- *
- * PROGRESSIVE ENHANCEMENT, and it is the reason these pages were rebuilt
- * rather than copied from the design's bundle. Every one of the 15 screens is
- * a real element in gallery.html. With no JavaScript the panels simply stack
- * and the page is still a usable gallery; gallery.js adds `js` to <html>,
- * which is what turns the stack into a rail-plus-viewer.
- */
-.ns-gallery {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  gap: clamp(20px, 3vw, 40px);
-  padding: clamp(20px, 3vw, 40px) clamp(16px, 3vw, 40px) 64px;
-  max-width: 1680px;
-  margin: 0 auto;
-}
-.ns-rail { flex: 1 1 260px; min-width: 0; max-width: 340px; }
-.js .ns-rail { position: sticky; top: 76px; }
-.ns-rail-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-right: 4px;
-}
-.js .ns-rail-list { max-height: calc(100vh - 170px); overflow-y: auto; }
-
-.ns-rail-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  width: 100%;
-  text-align: left;
-  font-family: var(--font-body);
-  font-size: 14.5px;
-  padding: 11px 12px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid transparent;
-  color: color-mix(in srgb, var(--color-text) 76%, transparent);
-}
-/* The rows are anchors (so they navigate without JavaScript), which means they
- * inherit `a`'s accent colour and its hover underline. Both are wrong here —
- * a row's state is carried by its tint and border, not by link styling. */
-.ns-rail-row,
-.ns-rail-row:hover { text-decoration: none; }
-.ns-rail-row:hover {
-  border-color: var(--color-neutral-700);
-  color: var(--color-text);
-}
-.ns-rail-row[aria-current="true"] {
-  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
-  border-color: var(--color-accent-700);
-  color: var(--color-text);
-}
-.ns-rail-row .ns-rail-title { flex: 1; min-width: 0; line-height: 1.35; }
-.ns-rail-row .ns-rail-count {
-  flex: none;
-  font-size: 11.5px;
-  padding-top: 3px;
-  font-feature-settings: "tnum" 1;
-  color: color-mix(in srgb, var(--color-text) 45%, transparent);
-}
-
-.ns-viewer { flex: 4 1 620px; min-width: 0; }
-
-/* Without JS every screen shows, separated by space. With JS, only the
- * current one.
- *
- * ⚠ THE SWITCH IS A CLASS, NEVER THE `hidden` ATTRIBUTE, and the difference is
- * the whole no-JS fallback. `hidden` is native HTML: the browser's OWN
- * stylesheet carries `[hidden] { display: none }`, so a panel marked that way
- * disappears whether or not this file has an opinion — including for the
- * scripting-off visitor the fallback exists for. An earlier build wrote
- * `.js .ns-screen[hidden]` and that selector was doing nothing at all; the UA
- * rule was hiding the panels, and with JS off the gallery showed exactly one
- * screen and no way to reach the other fifteen.
- *
- * `is-active` means nothing to the UA stylesheet, so with no `.js` on <html>
- * neither rule below matches and every panel renders. */
-.js .ns-screen { display: none; }
-.js .ns-screen.is-active { display: block; }
-.ns-screen + .ns-screen { margin-top: clamp(40px, 6vw, 72px); }
-.js .ns-screen + .ns-screen { margin-top: 0; }
-
-.ns-screen h2 {
-  font-family: var(--font-heading);
-  font-weight: 500;
-  font-size: clamp(26px, 3vw, 40px);
-  line-height: 1.14;
-  letter-spacing: -0.018em;
-  margin: 0 0 12px;
-}
-.ns-screen-caption {
-  font-size: 15.5px;
-  line-height: 1.6;
-  margin: 0 0 20px;
-  max-width: 62ch;
-  color: color-mix(in srgb, var(--color-text) 76%, transparent);
-}
-.ns-kicker {
-  font-size: 12.5px;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--color-accent);
-  margin: 0 0 10px;
-}
-
-.ns-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px; }
-.ns-tab {
-  font-family: var(--font-heading);
-  font-weight: 500;
-  font-size: 13px;
-  padding: 7px 12px;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  background: transparent;
-  border: 1px solid var(--color-neutral-800);
-  color: color-mix(in srgb, var(--color-text) 72%, transparent);
-}
-.ns-tab:hover { border-color: var(--color-accent); }
-.ns-tab[aria-selected="true"] {
-  background: color-mix(in srgb, var(--color-accent) 14%, transparent);
-  border-color: var(--color-accent);
-  color: var(--color-accent-200);
-}
-
-.ns-shot {
-  margin: 0 0 12px;
-  border: 1px solid var(--color-neutral-800);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  box-shadow: var(--shadow-md);
-  background: var(--color-neutral-900);
-}
-.ns-shot:last-child { margin-bottom: 0; }
-.ns-shot img { display: block; width: 100%; height: auto; }
-/* Same rule, same reason, for the sub-tab sections. */
-.js .ns-shot { display: none; }
-.js .ns-shot.is-active { display: block; }
-
-/* ─── 7b. The rail becomes a horizontal chip row on narrow screens ───────
- *
- * A 15-item vertical list is fine as a sidebar and wrong as a preamble: below
- * the stacking width it put 15 screen names between the visitor and the first
- * screenshot. As chips it reads as what it is — a picker — and costs one row.
- *
- * ⚠ THE BREAKPOINT ALSO FORCES THE STACK, and that is the point of stating it
- * this way. Left to itself `.ns-gallery` wraps when 260px + 620px + the gap no
- * longer fit, which works out at ~967px — a number that falls out of two
- * `clamp()`s and moves the moment either is retuned. A chip row keyed to a
- * DIFFERENT number than the wrap would leave a band of widths showing chips in
- * a 340px sidebar, or a vertical list across the full width. Declaring
- * `flex-direction: column` here makes the two the same number by construction.
- */
-@media (max-width: 1000px) {
-  .ns-gallery { flex-direction: column; }
-
-  /* ⚠ `flex-basis` sizes the MAIN axis, so turning the container to a column
-   * turns `flex: 1 1 260px` and `flex: 4 1 620px` from widths into HEIGHTS.
-   * Measured before this line existed: the rail was 260px tall around 77px of
-   * chips and the viewer 620px around 310px of content — ~490px of dead space
-   * that looked like a spacing bug and was a flex-axis one. Resetting the basis
-   * to auto lets both size to their content, which is what a stacked column
-   * wants anyway. */
-  .ns-rail, .ns-viewer { flex: 0 0 auto; }
-
-  .ns-rail { max-width: none; width: 100%; }
-  /* Sticky belongs to a sidebar. A strip pinned under an already-sticky nav of
-   * its own variable height is a worse problem than scrolling back up. */
-  .js .ns-rail { position: static; }
-
-  .ns-rail-list {
-    flex-direction: row;
-    gap: 8px;
-    overflow-x: auto;
-    /* Room for the scrollbar so it never sits on top of a chip's border. */
-    padding: 0 0 6px;
-    scroll-snap-type: x proximity;
-    scrollbar-width: thin;
-  }
-  .js .ns-rail-list { max-height: none; overflow-y: hidden; }
-
-  .ns-rail-row {
-    width: auto;
-    flex: none;
-    align-items: center;
-    gap: 7px;
-    padding: 8px 14px;
-    /* A chip, not a row: pill radius, and a visible edge at rest — the sidebar
-     * version can afford a transparent border because the list has one line of
-     * text per row to align to, and a strip has nothing. */
-    border-radius: 999px;
-    border-color: var(--color-neutral-800);
-    white-space: nowrap;
-    scroll-snap-align: start;
-  }
-  .ns-rail-row .ns-rail-title { flex: none; }
-  .ns-rail-row .ns-rail-count { padding-top: 0; }
-}
-
-.ns-pager {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  margin-top: 20px;
-  align-items: center;
-}
-.ns-pager span {
-  font-size: 13px;
-  color: color-mix(in srgb, var(--color-text) 55%, transparent);
-}
-
-/* The tab row and the pager only mean anything once JS can switch panels. */
-.ns-js-only { display: none; }
-.js .ns-js-only { display: flex; }
 
 /* ─── 8. Glossary ────────────────────────────────────────────────────────
  *
@@ -1481,7 +1184,7 @@ body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
   text-decoration-thickness: 2px;
   text-underline-offset: 6px;
 }
-/* An eyebrow that carries a count (Gallery · 15 screens) keeps one type style. */
+/* An eyebrow that carries a count (Options glossary · 199 terms) keeps one type style. */
 .ns-eyebrow .ns-count { font-size: inherit; letter-spacing: inherit; color: inherit; }
 
 /* The strip's record line (ideas.js renderRecord): counts, then the closed total

@@ -1429,9 +1429,7 @@ def read_hidden(view) -> bool:
     public origin and the reading is not marked public.
 
     Hidden is not "no reading yet". That state has words of its own, and they
-    would be a false statement about a reading that exists and is withheld.
-
-    ⚠ Call it on the event loop: the capture check reads the client's request."""
+    would be a false statement about a reading that exists and is withheld."""
     if not isinstance(view, dict):
         return False
     if view.get("enabled") is False:
@@ -1448,15 +1446,13 @@ def _read_row_closed(row) -> bool:
 
 def read_view_shown(view):
     """What THIS render may show of ``view``, else None. On the public origin
-    (and in a gallery capture) only a view the service stamped ``public: True``
+    only a view the service stamped ``public: True``
     is shown; a missing flag is closed. A row closed on its own account is
     replaced by an empty "No reading" row, and the tally is recounted from the
     rows as drawn, so the withheld verdict is not readable from the count.
 
     Returns ``view`` itself when nothing is withheld, and a new dict when a
-    row is: the view is the shared parse every tab holds, and is never edited.
-
-    ⚠ Call it on the event loop: the capture check reads the client's request."""
+    row is: the view is the shared parse every tab holds, and is never edited."""
     if not _shell.hides_non_public():
         return view
     if not isinstance(view, dict) or view.get("public") is not True:

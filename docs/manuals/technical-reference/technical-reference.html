@@ -5301,7 +5301,7 @@ and dropped.</p>
 <p><strong>Delivery.</strong> Both alerts join <code>cache:options:flow_alerts</code> and carry two flags the
 service stamps: <code>quiet</code> (<code>[hiro].push</code> is not <code>true</code>: no phone push, and the Desk does
 not speak it) and <code>public</code> (<code>[hiro].public</code> is <code>true</code>; otherwise the row is hidden on
-the public live screens and in gallery captures). Both fail closed. With <code>push</code> on, a
+the public live screens). Both fail closed. With <code>push</code> on, a
 reversal is always pushed and a surge only at <code>mult</code> ≥ <code>push_k</code> (4), through the
 <code>flow_hiro</code> push category. Neither ever chimes or toasts in the browser. Neither
 counts toward the Opportunity Board's flow count or Hotness
@@ -7905,7 +7905,7 @@ the source; this table is a summary of them.</p>
 <p>Some scheduled jobs are <strong>not</strong> on any service's loop — they are systemd timers,
 generated from <code>config/sessions.toml</code> by <code>deploy/systemd/generate_units.py</code>, so moving
 one needs <code>generate_units --install</code> plus a <code>daemon-reload</code> rather than a service
-restart. The EOD report, gallery capture and flow-delta gate on the market calendar in
+restart. The EOD report and flow-delta gate on the market calendar in
 their own scripts, so their timers only exclude weekends; the labeler, the refit and
 the listed-stocks re-rank read history and have no session to gate on. The HIRO report's timer also excludes
 weekends only: with no <code>--date</code> it reports the newest closed session, so a holiday
@@ -7938,11 +7938,6 @@ firing just rewrites the previous trading day's report from the same stored minu
 <td>Weekly trade-idea review</td>
 <td><strong>15:30</strong>, Mon-Fri (<code>[slots.idea_review]</code>)</td>
 <td><code>tools/weekly_idea_review.py</code> via <code>trading-&lt;env&gt;-idea-review.timer</code> (<code>Persistent=false</code>, <code>TimeoutStartSec=900</code>): writes <code>webgui/data/idea_review/&lt;YYYY-Www&gt;/report.html</code> only on the <strong>last trading day of the ISO week</strong> (Friday, or Thursday when Friday is a holiday) and exits 0 on the other days. Reads the Paper Ledger view from Redis and makes one Claude Code CLI call (the subscription, no API key). Exit 2 = bus unreadable or Ledger view missing or holding no rows at all, nothing written; exit 3 = written without Claude's assessment, which fails the unit so the failure alert fires.</td>
-</tr>
-<tr>
-<td>Marketing gallery recapture</td>
-<td><strong>09:07</strong> (<code>[slots.gallery_capture]</code>)</td>
-<td>Re-photographs the private app for the public gallery.</td>
 </tr>
 <tr>
 <td>Flow-delta instrumentation</td>

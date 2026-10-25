@@ -53,8 +53,8 @@ already-armed timer reports `already enabled` and nothing changes.
 **Only the target is still yours to enable**, because that is the deliberate act
 of making this checkout the one that starts at boot (with
 `loginctl enable-linger`). **Dev arms nothing** — it generates the same timers,
-but its stores are a disposable copy of prod's and gallery/live-capture drive
-public surfaces a second checkout must never publish to.
+but its stores are a disposable copy of prod's and live-capture drives a
+public surface a second checkout must never publish to.
 
 | What it replaces | Directive |
 |---|---|

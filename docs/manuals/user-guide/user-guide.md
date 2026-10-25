@@ -210,7 +210,7 @@ Industry, Sector Rotation, RRG, Momentum, Net Prem, **Gamma**, the Market Scanne
 form (published as **Rescue my Sh\*tty trade**), the **Calculator**, the
 **Simulator**, the **Expected Move** and **Market News**.
 
-**Option Signals** (`/signals`, first in the site's Tools menu) is your Market
+**Option Signals** (`/signals`, the first tool card on the site's Live Desk) is your Market
 Scanner with nothing of yours on it. A visitor sees the 0-DTE, Swing and
 Directional tabs, the family tick boxes on 0-DTE and Swing, the Checks
 column, **Only clear**, **Why no trade?** and the Trade detail panel. They do
@@ -1197,8 +1197,7 @@ They ship **quiet and private**, because nobody has yet shown that they lead pri
 - They **never chime or pop up a toast**, whatever the settings.
 - They **do not reach your phone** and the **Desk does not speak them** (the row still
   glows).
-- They are **hidden on the public live screens** and in the website's gallery
-  pictures.
+- They are **hidden on the public live screens**.
 - They **do not count** toward the Opportunity Board's **Flow alerts** column or its
   score, or the end-of-day mover counts.
 

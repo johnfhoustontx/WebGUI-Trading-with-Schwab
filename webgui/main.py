@@ -20,7 +20,7 @@ for _p in (str(_REPO_ROOT), str(_REPO_ROOT / "webgui")):
 
 from fastapi import Request  # noqa: E402
 from fastapi.responses import HTMLResponse, RedirectResponse, Response  # noqa: E402
-from nicegui import app, context, run, ui  # noqa: E402
+from nicegui import app, run, ui  # noqa: E402
 
 import datetime as _dt  # noqa: E402
 import logging  # noqa: E402
@@ -54,8 +54,7 @@ from shell import (_CRUMB_CONTEXT, _CRUMB_LEAF, _SUBTAB_SLOT,  # noqa: F401,E402
 # `live_main.py` injects them and cannot import this module. TABLE_CSS is
 # aliased to the old private name because `_TABLE_CSS` has been reached for
 # since 2026-06.
-from shell import (PANEL_SCROLL_CSS, SUBTAB_CSS, TABLE_CSS,  # noqa: E402
-                   capture_chrome_css)
+from shell import PANEL_SCROLL_CSS, SUBTAB_CSS, TABLE_CSS  # noqa: E402
 
 # The brand lockup builders, likewise: `live_main.py` draws the same lockup in
 # the public screens' header and cannot import this module. Re-exported because
@@ -2187,13 +2186,6 @@ def _layout(active: str, title: str):
     ui.add_css(theme.APP_FIELD_CSS)  # boxed fields on every page, under .ns-app
     ui.add_css(SUBTAB_CSS)   # a page's own view-tab row (.compact-subtabs)
     ui.add_css(PANEL_SCROLL_CSS)  # a dashboard panel keeps its own overflow
-    # A screenshot session asks for the transient chrome to be suppressed; a
-    # real visitor never carries the cookie and this is None. getattr because
-    # Client.request is None for the auto-index client, which has no request.
-    _capture_css = capture_chrome_css(
-        getattr(getattr(context.client, "request", None), "cookies", None))
-    if _capture_css:
-        ui.add_css(_capture_css)
     # config/theme.toml [typography] + [menu] — app-wide text categories and menu
     # styling, injected AFTER the baseline CSS so a configured override wins.
     # Both are "" / no-ops when the config keeps the defaults.

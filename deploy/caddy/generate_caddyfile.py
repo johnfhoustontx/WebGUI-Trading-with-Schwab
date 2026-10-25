@@ -127,6 +127,12 @@ BLOG_PAGE_PATH = "/blog/*/"
 BLOG_BARE_PATHS = ("/blog", "/blog/")
 BLOG_LIST_PAGE = "/blog.html"
 
+# Pages the site no longer has, and the page each now REDIRECTS to. The Gallery
+# was retired on 2026-10-24 (the Live Desk shows every published screen, live);
+# its address was linked and shared, so it must not become a 404. Exact paths,
+# like the Blog's.
+RETIRED_PAGES = {"/gallery.html": "/live.html"}
+
 # Where Caddy reads its config on Debian/Ubuntu when installed from the official
 # repository. Named here rather than buried in main() so the tests can assert
 # the path and moving it is one edit.
@@ -239,9 +245,11 @@ def _public_block():
 
     **Two redirects, both to one tracked page.** ``/blog`` and ``/blog/`` go to
     ``/blog.html`` (``BLOG_BARE_PATHS``): exact paths, so no entry, document or
-    typeface under ``/blog/`` is ever redirected.
+    typeface under ``/blog/`` is ever redirected. And each retired page goes to
+    its replacement (``RETIRED_PAGES``): ``/gallery.html`` to ``/live.html``.
     """
     bare_blog = "\n".join(f"    redir {path} {BLOG_LIST_PAGE} 308" for path in BLOG_BARE_PATHS)
+    retired = "\n".join(f"    redir {path} {to} 308" for path, to in RETIRED_PAGES.items())
     return f"""{SITE_HOST}, www.{SITE_HOST} {{
     encode zstd gzip
 
@@ -256,6 +264,9 @@ def _public_block():
     # under /blog/fonts/ are never redirected. Caddy runs `redir` before
     # `file_server` whatever the order here. 308 is a permanent redirect.
 {bare_blog}
+
+    # A retired page goes to the one that replaced it (RETIRED_PAGES).
+{retired}
 
     header Strict-Transport-Security "{HSTS}"
 

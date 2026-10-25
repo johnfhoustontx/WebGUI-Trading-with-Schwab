@@ -388,9 +388,8 @@ def _share_pct(a):
 
 
 def _hiding():
-    """True when this render must hide non-public alerts: on the public origin,
-    and in a screenshot session of the private app (its pictures are published
-    to the neuralstrike.co gallery). Imported lazily, as ``render`` does."""
+    """True when this render must hide non-public alerts: on the public
+    origin. Imported lazily, as ``render`` does."""
     import shell as _shell
     return _shell.hides_non_public()
 
@@ -403,12 +402,7 @@ def _shown(alerts):
 
     This is the one filter: ``alert_rows`` (the Flow page, the Desk panel and
     its speech, the Symbol band) and ``status_text``'s count both go through
-    it, so a hidden alert cannot reach a published row OR count here.
-
-    ⚠ Call it on the event loop, inside a page build or a timer callback. The
-    capture check reads the current client's request; a worker thread
-    (``run.io_bound``) has no client, so a gallery capture would quietly stop
-    hiding. The public origin is unaffected (``is_public`` is process state)."""
+    it, so a hidden alert cannot reach a published row OR count here."""
     if not isinstance(alerts, list) or not _hiding():
         return alerts
     return [a for a in alerts
@@ -903,8 +897,7 @@ def render():
     # newest first, and where a click goes — lives in the page help
     # (``page_help.HELP_MD["/options/flow"]``).
     linked = _shell.can_navigate(GAMMA_ROUTE)
-    # One answer per page: the origin is process state and a client's request
-    # (the capture cookie) does not change for the life of the page.
+    # One answer per page: the origin is process state.
     hiding = _shell.hides_non_public()
     with kit.page():
         kit.header("Flow Alerts", view=VIEW)

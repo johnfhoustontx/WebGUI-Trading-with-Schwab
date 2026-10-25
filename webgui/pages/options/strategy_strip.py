@@ -4,8 +4,7 @@ On the private app the three tools are one rail group, and the shell draws the
 group's tab strip (``main.STRATEGY_TOOLS_CHILDREN``). The public origin has no
 shell to draw one - its header carries no navigation by design
 (``live_main._header``) - so each public tool draws this strip at the top of its
-own page instead, and the site's Tools menu names the three as ONE item,
-Strategy Tools.
+own page instead. The site's Live Desk gives each of the three a card.
 
 It links only to tools THIS origin serves: each tab is a private route resolved
 through ``shell`` (``can_navigate`` before drawing it, ``navigate_to`` on a

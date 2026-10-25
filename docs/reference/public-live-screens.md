@@ -17,7 +17,7 @@ are pure data in **`webgui/live_screens.py`** (`SCREENS` · `SETTINGS_PINS` ·
 `PUBLIC_PINS`), read by the route registration, `tools/capture_live_shots.py` and the
 static grid on `neuralstrike.co/live.html` alike — so **adding a `Screen` publishes a
 route**. `Screen.tile = False` (Option Signals, the four interactive tools and Market News) publishes the route but
-draws no grid tile and takes no capture; the site's Tools menu reaches them. `Screen.parent`
+draws no grid tile and takes no capture; a tool card on the Live Desk reaches each one. `Screen.parent`
 (the four extra $SPX Gamma views) draws a small link under that parent's tile instead. Per-screen detail: [docs/webgui-routes.md](../webgui-routes.md); design +
 plan: [`docs/plans/2026-09-07-public-live-screens-{design,plan}.md`](../plans/2026-09-07-public-live-screens-design.md).
 
@@ -254,11 +254,10 @@ measurement.
 **Flow alerts can carry service-stamped `quiet` / `public` flags** (since 2026-10-01,
 the HIRO-model `hiro_surge` / `hiro_flip`). `quiet: True` = no push and no Desk speech;
 `public: False` = hidden wherever `shell.hides_non_public()` is true — the public
-origin **and** gallery captures (`ns_capture=1`), which publish to the website. The
-one filter is `pages/options/flow._shown`, reached through `flow.alert_rows`; ⚠ **any
-NEW reader that shows flow-alert rows or COUNTS must go through it**, and must call it
-in the page context (it reads the request cookie, so inside `run.io_bound` a capture
-would silently stop hiding). Tier 1 decides from the flag on the alert, never from
+origin. (Until 2026-10-24 a gallery capture of the private app hid them too; the
+Gallery and its capture cookie are retired.) The one filter is
+`pages/options/flow._shown`, reached through `flow.alert_rows`; ⚠ **any NEW reader
+that shows flow-alert rows or COUNTS must go through it**. Tier 1 decides from the flag on the alert, never from
 `[hiro]` config, and a missing flag means shown/spoken. As with the news feed, the ACL
 is no layer here: the `live` user can read the whole `cache:options:flow_alerts`.
 
@@ -339,18 +338,9 @@ WHOLE bottom ticker (since 2026-09-21 it shows nothing else) — from `div.slotc
 that renames those publishes nothing (the last good summary stays, with one WARNING),
 so the Desk and the ticker go quietly stale rather than wrong. No Claude call sits behind the
 summary any more.
-**`deploy/site/assets/shots/*.webp` — the marketing gallery — is the same, with THREE
-TRACKED EXCEPTIONS** (`image16/17/18`). Those name a Simulator view that lives in page
-state rather than in the URL, so **nothing regenerates them**: ignored, a fresh clone
-would have no picture for those tiles *ever*, not merely until the next capture run.
-The pattern therefore excludes the **files**, not the directory — git cannot un-exclude
-a file inside an excluded directory — and `.gitignore` does not apply to a path already
-in the index, so such a pattern buys nothing until `git rm --cached` runs.
-
-⚠ **The gallery capture AUTHENTICATES AS THE OWNER; its sibling cannot.**
-`tools/capture_live_shots.py` reads the public origin and has no app access at all.
-`tools/capture_gallery_shots.py` reads the 0600 `auth_store` file and **mints a session
-cookie** — possible because `auth.mint_token` is stateless (no server-side registry of
-issued tokens, by design), so a valid cookie is a pure computation over the store's
-`session_secret` and `epoch`. What it mints is an ordinary full session, not a read-only
-one, so this tool carries the private app's blast radius rather than a public origin's.
+**`deploy/site/assets/shots/` — the retired marketing gallery's captures** — stays
+ignored after the Gallery went (2026-10-24): prod still holds the files the old timer
+wrote, and un-ignored they would dirty the tree the promote checks. The gallery
+capture was the one tool that authenticated as the owner (it minted a full session
+cookie from the `auth_store` file); it went with the page, so nothing on the box now
+renders the private app for publication.

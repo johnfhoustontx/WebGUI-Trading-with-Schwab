@@ -34,7 +34,7 @@ the shared ladder (``rotation_view.NEUTRAL`` / ``NT`` / ``NB`` / ``NE``) and the
 
 ⚠ **Two things the kit did NOT take.** ``render(level=…)``'s signature is
 load-bearing — ``live_screens.py`` pins ``kwargs={"level": "industry"}`` for the
-published screen and the gallery capture drives ``?level=``. And ``_name_chip``
+published screen, and the private route takes ``?level=``. And ``_name_chip``
 stays a raw ``ui.button``: it is ONE call site producing on the order of the
 whole level's universe per repaint, and it is a selectable name chip — 10.5px,
 ring-on-select, ``max-w-full`` — not a page action, so it is recorded in the

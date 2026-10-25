@@ -291,7 +291,7 @@ def render():
         "iv_manual": False,     # the visitor typed the IV: never overwrite it
         "rating_key": None,     # the newest rating request sent
         # False until the visitor's first action: a page load - a crawler, a
-        # visit from the Tools menu - must send nothing at all, not even a
+        # visit from the Live Desk - must send nothing at all, not even a
         # price or an implied volatility for a chain someone else loaded.
         "engaged": False,
         "applying": False,

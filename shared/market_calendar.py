@@ -325,9 +325,9 @@ _DEFAULTS = {
         # cash close and after [slots.action_alert] close + the 15:10 EOD push,
         # so the books it reads have settled; it costs no Schwab and no Claude
         # call, so sharing the minute with the last autoscan slot is free.
-        # ⚠ NINE of these slots are read by SYSTEMD rather than by a service
+        # ⚠ EIGHT of these slots are read by SYSTEMD rather than by a service
         # scheduler -- flow_delta, hiro_report, eod_report, idea_review,
-        # gallery_capture, label_journal, swing_refit, token_watch and stock_rank:
+        # label_journal, swing_refit, token_watch and stock_rank:
         # deploy/systemd/generate_units.py turns each into a timer's OnCalendar
         # at unit-GENERATION time, so moving one needs
         # `generate_units --install` + `daemon-reload`, not a service restart.
@@ -355,10 +355,6 @@ _DEFAULTS = {
         # time is configurable; the day is the unit's. After token_watch, so a
         # lapsing Schwab sign-in has already been reported. Read by systemd.
         "stock_rank": {"at": "08:00"},
-        # The marketing gallery recapture. It still needs a default here like
-        # every other slot -- the TOML only overrides, and a TOML-only slot
-        # raises KeyError out of _slot_group.
-        "gallery_capture": {"at": "09:07"},
         # The hourly public trade idea (options_svc). Five minutes after the
         # :30 autoscan so the post reads a scan that has finished, and the whole
         # regular session: the first at 08:35, the last at 14:35. No Schwab call
