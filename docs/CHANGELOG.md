@@ -4,7 +4,42 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-24 (**The Live Desk shows the Calculator, Simulator and Expected Move as one card, Strategy Tools.**)
+**Last updated:** 2026-10-25 (**The Opening Scalp's net-gamma regime study, phase 1: the test is declared and the data starts counting.**)
+
+- **What it is:** a study that asks one question of the Opening Scalp's 15-minute calls.
+  Do afternoon long calls win more often on a positive-gamma day than on a negative-gamma
+  one? Every rule is written down first: it counts from 2026-10-21, needs 40 usable
+  sessions, and uses a 0.05 permutation test (10,000 shuffles, seed 20261025) plus an
+  effect of at least 5 points. The order of tests is afternoon, then midday, then morning.
+  Design and plan: `docs/plans/2026-10-25-scalp-gamma-regime-study-{design,plan}.md`.
+- **What shipped:**
+  - `services/options_svc/scalp_regime_study.py`: the gap rule, the usable-session rule,
+    the effect, the permutation test, `evaluate`, and the read-only loaders. It imports
+    nothing from `compute` and touches no bus.
+  - `tools/scalp_regime_report.py`: a read-only report. Before the 40th usable session it
+    prints only a count, so nobody can peek at an early effect.
+  - `tools/scalp_regime_agree.py`: compares a `tools/scalp_prob_backfill.py extract` file
+    with the regime the service recorded live (`intraday_readings`). It needs 95 percent
+    agreement over at least 5 sessions. It skips early-close days, and a call whose
+    backfill copies disagree counts as conflicting.
+  - A `[regime]` table in `config/scalp.toml`, read through `shared/scalp_config.py`, with
+    a Field for each key in Settings -> Configuration.
+- **What did not change:** nothing on the Scalp page, in the chance model, or in any
+  call. The study only reads.
+- **Result 1, the report on the 2026-10-23 prod backup (read-only):** "Collecting: 3 of 40
+  usable sessions since 2026-10-21." That is 10-21, 10-22 and 10-23. No effect figure is
+  printed. The backup's `scalp.db` opened read-only with no copy.
+- **Result 2, the first look at agreement:** the extract over the backup's gamma copy
+  found 330 records over 5 days. The check compared 3 sessions and 189 slots, and 100.00
+  percent agreed (189 of 189, no disagreeing slot). It did not pass, as expected: 3
+  sessions is below the 5 required.
+- **Owed:** (1) rerun the agreement check once a backup holds 5 or more sessions from the
+  test window; (2) the one read of the study at the 40th usable session, about
+  2026-12-17. Nothing is looked at before then.
+- **Tests:** `services/options_svc/tests/test_scalp_regime_study.py`,
+  `tests/test_scalp_regime_agree.py`, and additions to `shared/tests/test_scalp_config.py`.
+
+**Prior —** 2026-10-24 (**The Live Desk shows the Calculator, Simulator and Expected Move as one card, Strategy Tools.**)
 
 - **Asked for by the user:** "The Calculator, Simulator and Expected move need to be
   combined into one card on the Live Desk Screen. Reword it accordingly".
