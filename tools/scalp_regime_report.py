@@ -12,13 +12,17 @@ What it prints:
 
 * before the declared number of usable sessions has been graded, ONLY the count of
   usable sessions - no effect, no p-value, no pass or fail (design section 3.4);
-* after it, the first that many sessions, the precondition (the other tool's check
+* after it, the first that many sessions and the precondition (the other tool's check
   that the recorded regime agrees with the regime read from the stored matrix,
   given as ``--agreement`` JSON ``{"share": ..., "sessions": ...}``; a missing or
-  unreadable file is "not checked", and no block can pass unchecked), and for each
-  block in the declared order its verdict, the effect at every volatility
-  multiplier, the permutation p-value, the pair counts and the figures reported
-  but never decided on.
+  unreadable file is "not checked"). While the precondition has not passed (design
+  section 3.2) that is ALL it prints: no effect, p-value or verdict. Once it has
+  passed, for each block in the declared order its verdict, the effect at every
+  volatility multiplier, the permutation p-value, the pair counts and the figures
+  reported but never decided on.
+
+Every run, in every state, says whether the settings in use equal the declared ones
+(``scalp_regime_study.DECLARED``) and lists the early-close days left out.
 
 The regime is read from ``intraday_readings`` only; ``prob_sources`` is never read.
 """
@@ -83,12 +87,25 @@ def _agreement(path):
 
 def _precondition_line(pre) -> str:
     if not pre["checked"]:
-        return "Precondition not checked: no block can pass."
+        return "Precondition not checked: the test does not run."
     share = "-" if pre["share"] is None else f"{pre['share']:.2%}"
     if pre["passed"]:
         return (f"Precondition: passed ({share} of slots agree over "
                 f"{pre['sessions']} sessions).")
-    return f"Precondition failed ({share} of slots agree): no block can pass."
+    return f"Precondition failed ({share} of slots agree): the test does not run."
+
+
+def _settings_lines() -> list:
+    """Whether the settings in use are the declared ones, and the early-close days
+    left out. Printed in every status."""
+    drifted = scalp_regime_study.drift()
+    if drifted:
+        settings = ("Settings DIFFER from the declaration: " + ", ".join(drifted)
+                    + ". This is not the declared study.")
+    else:
+        settings = "Settings: as declared."
+    early = sorted(d.isoformat() for d in scalp_config.early_close_days())
+    return [settings, f"Early-close days left out: {', '.join(early) if early else 'none'}.", ""]
 
 
 def _block_lines(block) -> list:
@@ -129,19 +146,27 @@ def render(db_path, agreement_path=None, today=None) -> str:
         conn.close()
     result = scalp_regime_study.evaluate(
         scalp_regime_study.regimes(readings), outcomes, _agreement(agreement_path))
-    lines = [f"# Gamma regime study - {today.isoformat()}", ""]
-    if result["status"] == "collecting":
+    status = result["status"]
+    heading = f"# Gamma regime study - {today.isoformat()}"
+    if status == "ready":
+        heading += f" (Python {sys.version.split()[0]})"
+    lines = [heading, ""] + _settings_lines()
+    if status == "collecting":
         needed = result["needed"]
         lines += [f"Collecting: {result['sessions']} of {needed} usable sessions since "
                   f"{result['start_day']}. First usable session: "
                   f"{result['first'] or 'none yet'}.",
                   "",
-                  f"Nothing else is shown until the {needed}th usable session is graded "
+                  f"Nothing else is shown until usable session {needed} is graded "
                   "(design §3.4).", ""]
         return "\n".join(lines)
     sessions = result["sessions"]
     lines += [f"Sessions: {sessions[0]} to {sessions[-1]} ({len(sessions)}).", "",
               _precondition_line(result["precondition"]), ""]
+    if status == "blocked":
+        lines += ["No effect, p-value or verdict is shown until the precondition "
+                  "passes (design §3.2).", ""]
+        return "\n".join(lines)
     for block in result["blocks"]:
         lines += _block_lines(block)
     return "\n".join(lines)

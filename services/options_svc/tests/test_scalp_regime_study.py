@@ -6,6 +6,7 @@ import json
 import pathlib
 import random
 import sqlite3
+import sys
 from datetime import date, timedelta
 
 import pytest
@@ -46,8 +47,21 @@ def test_regime_of_gaps():
     assert rs.regime_of(snap(symbol="SPY"), "$SPX") is None     # no row for it
 
 
-def test_regime_of_reads_a_backfilled_snapshot():
-    assert rs.regime_of(snap(state="backfill", age=None), "$SPX") == rs.NEGATIVE
+def test_regime_of_reads_a_backfilled_snapshot_only_when_allowed():
+    assert rs.regime_of(snap(state="backfill", age=None), "$SPX", allow_backfill=True) == rs.NEGATIVE
+
+
+def test_a_backfilled_snapshot_is_a_gap_for_the_study():
+    """Design 3.1: the regime is the LIVE record only."""
+    assert rs.regime_of(snap(state="backfill", age=None), "$SPX") is None
+    readings = {("2026-10-21", "12:36", "$SPX"): {"snapshot": snap(state="backfill", age=None)}}
+    assert rs.regimes(readings) == {("2026-10-21", "12:36", "$SPX"): None}
+
+
+def test_the_gap_rule_on_the_matrix_age():
+    assert rs.regime_of(snap(state="ok", age=None), "$SPX") is None     # no age is no proof
+    assert rs.regime_of(snap(age=5.0), "$SPX") == rs.NEGATIVE           # exactly the limit is fresh
+    assert rs.regime_of(snap(age=5.01), "$SPX") is None
 
 
 def test_regime_of_matches_symbol_without_dollar():
@@ -199,11 +213,29 @@ def test_small_effect_fails_the_floor(monkeypatch):
     assert "effect below the floor" in rs.evaluate(regime, rows, _AGREE)["blocks"][0]["reasons"]
 
 
-def test_precondition_missing_or_failed_blocks_a_pass():
+def test_precondition_missing_or_failed_blocks_the_test():
+    """Design 3.2: the precondition runs BEFORE the test; with it unpassed no
+    block, effect or p is computed."""
     regime, rows = world(40, 0.8, 0.2)
-    assert "precondition not checked" in rs.evaluate(regime, rows, None)["blocks"][0]["reasons"]
+    missing = rs.evaluate(regime, rows, None)
+    assert missing["status"] == "blocked" and "blocks" not in missing
+    assert missing["precondition"] == {"checked": False, "passed": False,
+                                       "share": None, "sessions": None}
+    assert missing["sessions"] == rs.usable_sessions(regime, rows)[:40]
     low = rs.evaluate(regime, rows, {"share": 0.9, "sessions": 5})
-    assert "precondition failed" in low["blocks"][0]["reasons"]
+    assert low["status"] == "blocked"
+    assert low["precondition"]["checked"] and not low["precondition"]["passed"]
+    few = rs.evaluate(regime, rows, {"share": 1.0, "sessions": 4})
+    assert few["status"] == "blocked"
+
+
+def test_a_blocked_evaluation_runs_no_permutation(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("the test must not run")
+    monkeypatch.setattr(rs, "permutation_p", boom)
+    monkeypatch.setattr(rs, "effect", boom)
+    regime, rows = world(40, 0.8, 0.2)
+    assert rs.evaluate(regime, rows, None)["status"] == "blocked"
 
 
 def test_a_multiplier_at_or_below_zero_fails():
@@ -285,8 +317,11 @@ def test_report_while_collecting_prints_only_the_count(tmp_path):
     assert "# Gamma regime study - 2026-11-06" in text
     assert "Collecting: 12 of 40 usable sessions since 2026-10-21." in text
     assert "First usable session: 2026-10-21." in text
-    assert "Nothing else is shown until the 40th usable session is graded (design §3.4)." in text
+    assert "Nothing else is shown until usable session 40 is graded (design §3.4)." in text
     assert " pp" not in text and "PASS" not in text and "FAIL" not in text
+    assert "p-value" not in text and "Precondition" not in text
+    # (the autouse fixture's 300 permutations are a drift from the declared 10000)
+    assert "Settings" in text and "Early-close days left out:" in text
 
 
 def test_report_ready_prints_verdicts_in_order(tmp_path):
@@ -298,14 +333,32 @@ def test_report_ready_prints_verdicts_in_order(tmp_path):
     assert "Precondition: passed (100.00% of slots agree over 5 sessions)." in text
     assert "Sessions: 2026-10-21 to " in text and " (40)." in text
     assert " pp" in text
+    assert f"(Python {sys.version.split()[0]})" in text.splitlines()[0]
 
 
-def test_report_without_agreement_cannot_pass(tmp_path):
+def _assert_nothing_decided(text):
+    assert " pp" not in text and "PASS" not in text and "FAIL" not in text
+    assert "p-value:" not in text and "Pairs" not in text and "Reported, never decided" not in text
+
+
+def test_report_without_agreement_shows_no_effect_at_all(tmp_path):
     db = seed_store(tmp_path, 40, 0.8, 0.2)
     text = _regime_report().render(db)
-    assert "Precondition not checked: no block can pass." in text
-    assert "**afternoon: FAIL** (precondition not checked)" in text
-    assert "A fail does not show there is no effect, only that it is not as large as it first looked." in text
+    assert "Sessions: 2026-10-21 to " in text and " (40)." in text
+    assert "Precondition not checked: the test does not run." in text
+    assert ("No effect, p-value or verdict is shown until the precondition passes "
+            "(design §3.2).") in text
+    _assert_nothing_decided(text)
+    assert "A fail does not show" not in text and "(Python" not in text
+
+
+def test_report_with_a_failed_agreement_shows_no_effect_either(tmp_path):
+    db = seed_store(tmp_path, 40, 0.8, 0.2)
+    agree = tmp_path / "agree.json"
+    agree.write_text(json.dumps({"share": 0.9, "sessions": 6}))
+    text = _regime_report().render(db, agreement_path=agree)
+    assert "Precondition failed (90.00% of slots agree): the test does not run." in text
+    _assert_nothing_decided(text)
 
 
 @pytest.mark.parametrize("content", [None, "{not json", "[1, 2]"])
@@ -316,7 +369,7 @@ def test_an_unusable_agreement_file_is_no_file(tmp_path, content):
         path.write_text(content)
     report = _regime_report()
     assert report.render(db, agreement_path=path) == report.render(db)
-    assert "Precondition not checked: no block can pass." in report.render(db, agreement_path=path)
+    assert "Precondition not checked: the test does not run." in report.render(db, agreement_path=path)
 
 
 def test_report_ignores_prob_sources(tmp_path):
@@ -348,14 +401,14 @@ def _canned(p, reasons=(), passed=False, tested=True):
 def test_report_prints_the_p_value_and_the_pass_and_fail_words(tmp_path, monkeypatch):
     db = seed_store(tmp_path, 1, 0.8, 0.2)
     ready = {"status": "ready", "sessions": ["2026-10-21", "2026-10-22"],
-             "precondition": {"checked": True, "passed": False, "share": 0.9, "sessions": 6},
+             "precondition": {"checked": True, "passed": True, "share": 0.99, "sessions": 6},
              "blocks": [_canned(0.0, ["p above alpha", "effect below the floor"]),
                         dict(_canned(None, ["not tested: afternoon did not pass"], tested=False),
                              block="midday")]}
     monkeypatch.setattr(rs, "evaluate", lambda *a: ready)
     text = _regime_report().render(db)
     assert "Sessions: 2026-10-21 to 2026-10-22 (2)." in text
-    assert "Precondition failed (90.00% of slots agree): no block can pass." in text
+    assert "Precondition: passed (99.00% of slots agree over 6 sessions)." in text
     assert "**afternoon: FAIL** (p above alpha; effect below the floor)" in text
     assert "< 0.0033" in text                 # 1 / 300 permutations, four decimals
     assert "+7.50 pp" in text and "-1.50 pp" in text
@@ -370,3 +423,139 @@ def test_main_prints_the_report_for_a_path(tmp_path, capsys):
     agree.write_text(json.dumps({"share": 1.0, "sessions": 5}))
     assert _regime_report().main([str(db), "--agreement", str(agree)]) == 0
     assert "Collecting: 12 of 40 usable sessions" in capsys.readouterr().out
+
+
+# ── the declared settings must not drift silently ────────────────────────────
+
+def test_declared_matches_the_shipped_config(monkeypatch):
+    monkeypatch.undo()                     # the autouse fixture's 300 permutations
+    assert rs.drift() == []
+    assert set(rs.settings_in_use()) == set(rs.DECLARED)
+    assert rs.DECLARED["regime.min_sessions"] == 40 and rs.DECLARED["regime.seed"] == 20261025
+
+
+def test_declared_is_frozen():
+    with pytest.raises(TypeError):
+        rs.DECLARED["regime.min_sessions"] = 30
+
+
+def test_drift_names_each_changed_setting(monkeypatch):
+    monkeypatch.undo()
+    monkeypatch.setattr(scalp_config, "regime_min_sessions", lambda: 30)
+    monkeypatch.setattr(scalp_config, "confirm_max_age_min", lambda: 9)
+    assert rs.drift() == ["regime.min_sessions", "confirm.max_age_min"]
+
+
+def test_drift_sees_a_moved_block(monkeypatch):
+    monkeypatch.undo()
+    blocks = scalp_config._blocks()
+    blocks["afternoon"] = (blocks["afternoon"][0], blocks["afternoon"][1] - 5)
+    monkeypatch.setattr(scalp_config, "_blocks", lambda: blocks)
+    assert rs.drift() == ["intraday.blocks.afternoon"]
+
+
+def test_report_says_the_settings_are_as_declared(tmp_path, monkeypatch):
+    monkeypatch.undo()
+    db = seed_store(tmp_path, 12, 0.9, 0.1)
+    text = _regime_report().render(db, today=dt.date(2026, 11, 6))
+    assert "Settings: as declared." in text and "DIFFER" not in text
+    assert "Early-close days left out: " in text and "2026-11-27" in text
+
+
+def test_report_names_a_drifted_setting_while_still_collecting(tmp_path, monkeypatch):
+    monkeypatch.undo()
+    monkeypatch.setattr(scalp_config, "regime_min_sessions", lambda: 30)
+    db = seed_store(tmp_path, 12, 0.9, 0.1)
+    text = _regime_report().render(db, today=dt.date(2026, 11, 6))
+    assert ("Settings DIFFER from the declaration: regime.min_sessions. "
+            "This is not the declared study.") in text.splitlines()
+    assert "Settings: as declared." not in text
+    assert "Collecting: 12 of 30 usable sessions" in text
+
+
+def test_report_prints_the_settings_line_in_every_status(tmp_path, monkeypatch):
+    monkeypatch.undo()
+    db = seed_store(tmp_path, 40, 0.8, 0.2)
+    report = _regime_report()
+    blocked = report.render(db)
+    assert "Settings: as declared." in blocked
+    ready = {"status": "ready", "sessions": ["2026-10-21", "2026-10-22"],
+             "precondition": {"checked": True, "passed": True, "share": 1.0, "sessions": 6},
+             "blocks": [_canned(0.01, passed=True)]}
+    monkeypatch.setattr(rs, "evaluate", lambda *a: ready)
+    assert "Settings: as declared." in report.render(db)
+    monkeypatch.setattr(scalp_config, "regime_alpha", lambda: 0.1)
+    assert ("Settings DIFFER from the declaration: regime.alpha. "
+            "This is not the declared study.") in report.render(db)
+
+
+# ── the permutation, pinned directly ─────────────────────────────────────────
+
+def test_permutation_of_two_sessions_is_a_coin_flip():
+    """Day A is negative and won, day B positive and lost: the observed effect is
+    100, and swapping the two days gives -100, so about half the relabelings (the
+    identity) reach it."""
+    regime = {("A", "12:36", "$SPX"): rs.NEGATIVE, ("B", "12:36", "$SPX"): rs.POSITIVE}
+    cell_map = {("A", "$SPX", "12:36"): [1, 1, 0], ("B", "$SPX", "12:36"): [0, 1, 0]}
+    observed = rs.effect(cell_map, regime)
+    assert observed == pytest.approx(100.0)
+    for seed in (1, 2, 20261025):
+        p = rs.permutation_p(cell_map, regime, ["A", "B"], observed, 2000, seed)
+        assert 0.4 <= p <= 0.6, (seed, p)
+
+
+def test_a_moved_day_keeps_only_the_slots_both_days_read():
+    regime = {("A", "12:36", "$SPX"): rs.NEGATIVE, ("A", "13:06", "$SPX"): rs.NEGATIVE,
+              ("B", "12:36", "$SPX"): rs.POSITIVE}                  # B has no 13:06 reading
+    swapped = rs._moved(regime, ["A", "B"], {"A": "B", "B": "A"})
+    assert swapped[("A", "12:36", "$SPX")] == rs.POSITIVE
+    assert swapped[("B", "12:36", "$SPX")] == rs.NEGATIVE
+    assert swapped[("A", "13:06", "$SPX")] is None                  # a gap, not A's own sign
+    assert ("B", "13:06", "$SPX") not in swapped
+    same = rs._moved(regime, ["A", "B"], {"A": "A", "B": "B"})
+    assert same == regime
+
+
+def test_a_gap_on_either_day_is_a_gap_after_the_move():
+    regime = {("A", "12:36", "$SPX"): None, ("B", "12:36", "$SPX"): rs.POSITIVE,
+              ("A", "13:06", "$SPX"): rs.NEGATIVE, ("B", "13:06", "$SPX"): None}
+    swapped = rs._moved(regime, ["A", "B"], {"A": "B", "B": "A"})
+    assert set(swapped.values()) == {None}
+
+
+def test_the_gap_decides_the_permuted_effect():
+    """A has two negative slots (both won), B one positive slot (lost). Swapped, A
+    keeps only the slot B has - positive - and B takes A's negative: the effect is
+    -100 from the shared slot alone. Were A's second slot to keep its own sign the
+    effect would read -50 instead."""
+    regime = {("A", "12:36", "$SPX"): rs.NEGATIVE, ("A", "13:06", "$SPX"): rs.NEGATIVE,
+              ("B", "12:36", "$SPX"): rs.POSITIVE}
+    cell_map = {("A", "$SPX", "12:36"): [1, 1, 0], ("A", "$SPX", "13:06"): [1, 1, 0],
+                ("B", "$SPX", "12:36"): [0, 1, 0]}
+    swapped = rs._moved(regime, ["A", "B"], {"A": "B", "B": "A"})
+    assert rs.effect(cell_map, swapped) == pytest.approx(-100.0)
+
+
+def test_permutation_moves_a_whole_day_across_symbols(monkeypatch):
+    """Three symbols that always share a day's sign still share it under every
+    relabeling the test draws: the day moves with all its symbols together."""
+    signs = [rs.NEGATIVE, rs.POSITIVE, rs.NEGATIVE, rs.POSITIVE, rs.POSITIVE]
+    days = [f"d{i}" for i in range(len(signs))]
+    regime = {(d, "12:36", s): sign for d, sign in zip(days, signs) for s in _WORLD_SYMBOLS}
+    cell_map = {(d, s, "12:36"): [1, 2, 0] for d in days for s in _WORLD_SYMBOLS}
+    drawn = []
+    real = rs._moved
+
+    def spy(*args, **kwargs):
+        got = real(*args, **kwargs)
+        drawn.append(got)
+        return got
+
+    monkeypatch.setattr(rs, "_moved", spy)
+    rs.permutation_p(cell_map, regime, days, 0.0, 200, 11)
+    assert len(drawn) == 200
+    for fake in drawn:
+        assert len(fake) == len(regime)
+        for d in days:
+            assert len({fake[(d, "12:36", s)] for s in _WORLD_SYMBOLS}) == 1
+    assert len({tuple(fake[(d, "12:36", "$SPX")] for d in days) for fake in drawn}) > 1

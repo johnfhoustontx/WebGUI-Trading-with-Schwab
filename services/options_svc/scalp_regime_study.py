@@ -13,8 +13,9 @@ Rules:
 * **A gap is ``None``, never a regime.** A matrix that is not fresh, a symbol with
   no row, an untrusted wall (net GEX of 0, missing or not a number) all give
   ``None``; a gap is dropped, not counted as either regime.
-* **A backfilled snapshot is read as recorded.** The extract applied the age when
-  it read, so ``"backfill"`` carries no age to check.
+* **The study reads the live record only.** A ``"backfill"`` snapshot is a gap
+  unless the caller passes ``allow_backfill`` (the agreement check's backfill side,
+  whose extract applied the age when it read).
 * **Long roles decide** (``long_with`` and ``long_against``), labelled through
   ``scalp_study._label`` (skip is no label), at one volatility multiplier.
 * **Only the three blocks are used.** A slot with no block (the 08:36 record) and
@@ -25,6 +26,7 @@ Rules:
 import json
 import random
 from datetime import date
+from types import MappingProxyType
 
 from shared import scalp_config
 from shared.numeric import finite as _finite
@@ -41,26 +43,84 @@ CREDIT_ROLES = ("credit_with", "credit_against")
 #: The block the decision is made on.
 _DECISION_BLOCK = "afternoon"
 
+#: Every setting the test depends on, as declared on 2026-10-25. The report states
+#: in every run whether the settings in use still equal these; a changed value is a
+#: new study, not this one. (Early-close days are not here: next year's half days
+#: get added to the calendar without changing the study.)
+DECLARED = MappingProxyType({
+    "regime.start_day": "2026-10-21",
+    "regime.min_sessions": 40,
+    "regime.alpha": 0.05,
+    "regime.min_effect_pp": 5.0,
+    "regime.order": ("afternoon", "midday", "morning"),
+    "regime.permutations": 10000,
+    "regime.seed": 20261025,
+    "regime.min_sign_agreement": 0.95,
+    "regime.agree_min_sessions": 5,
+    "trade.iv_scale": 1.0,
+    "study.iv_scales": (0.8, 1.0, 1.25, 1.5),
+    "intraday.blocks.morning": "08:51-09:51",
+    "intraday.blocks.midday": "10:06-12:21",
+    "intraday.blocks.afternoon": "12:36-13:51",
+    "confirm.max_age_min": 5,
+})
 
-def _fresh(source) -> bool:
-    """True when the matrix source was read recently enough, or was backfilled."""
+
+def _hhmm(minutes) -> str:
+    return f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def settings_in_use() -> dict:
+    """The same keys as ``DECLARED``, read from ``scalp_config`` now."""
+    blocks = scalp_config._blocks()
+    return {
+        "regime.start_day": scalp_config.regime_start_day().isoformat(),
+        "regime.min_sessions": scalp_config.regime_min_sessions(),
+        "regime.alpha": scalp_config.regime_alpha(),
+        "regime.min_effect_pp": scalp_config.regime_min_effect_pp(),
+        "regime.order": tuple(scalp_config.regime_order()),
+        "regime.permutations": scalp_config.regime_permutations(),
+        "regime.seed": scalp_config.regime_seed(),
+        "regime.min_sign_agreement": scalp_config.regime_min_sign_agreement(),
+        "regime.agree_min_sessions": scalp_config.regime_agree_min_sessions(),
+        "trade.iv_scale": scalp_config.iv_scale(),
+        "study.iv_scales": tuple(scalp_config.iv_scales()),
+        **{f"intraday.blocks.{name}": f"{_hhmm(blocks[name][0])}-{_hhmm(blocks[name][1])}"
+           for name in ("morning", "midday", "afternoon")},
+        "confirm.max_age_min": scalp_config.confirm_max_age_min(),
+    }
+
+
+def drift() -> list:
+    """The keys whose value in use differs from ``DECLARED`` (empty when the study
+    is still the declared one)."""
+    in_use = settings_in_use()
+    return [key for key, declared in DECLARED.items() if in_use.get(key) != declared]
+
+
+def _fresh(source, allow_backfill=False) -> bool:
+    """True when the matrix source was read live and recently enough. A backfilled
+    source is fresh only when ``allow_backfill`` (the agreement check's backfill
+    side); the study itself reads the live record only."""
     source = source if isinstance(source, dict) else {}
     state = source.get("state")
     if state == "backfill":
-        return True
+        return bool(allow_backfill)
     if state != "ok":
         return False
     age = _finite(source.get("age_min"))
     return age is not None and age <= scalp_config.confirm_max_age_min()
 
 
-def regime_of(snapshot, symbol):
+def regime_of(snapshot, symbol, *, allow_backfill=False):
     """``"negative"`` or ``"positive"`` for the symbol's net GEX in ``snapshot``
-    (a ``scalp_confirm.snapshot``), or ``None`` for a gap."""
+    (a ``scalp_confirm.snapshot``), or ``None`` for a gap. A backfilled snapshot is
+    a gap unless ``allow_backfill`` (only ``tools/scalp_regime_agree.py`` sets it)."""
     if not isinstance(snapshot, dict):
         return None
     sources = snapshot.get("sources")
-    if not _fresh((sources if isinstance(sources, dict) else {}).get("matrix")):
+    if not _fresh((sources if isinstance(sources, dict) else {}).get("matrix"),
+                  allow_backfill):
         return None
     matrix = snapshot.get("matrix")
     want = _confirm._norm(symbol)
@@ -184,21 +244,37 @@ def permutation_p(cell_map, regime_map, sessions, observed, n, seed) -> float:
     their serial structure and only the regime they are paired with is shuffled; a
     slot missing a regime on either day becomes a gap."""
     rng = random.Random(seed)
-    by_day = {}
-    for (day, slot, symbol), regime in regime_map.items():
-        by_day.setdefault(day, []).append((slot, symbol, regime))
+    by_day = _by_day(regime_map)
     hits = 0
     for _ in range(n):
         moved = rng.sample(sessions, len(sessions))
-        fake = {}
-        for a, b in zip(sessions, moved):
-            for slot, symbol, regime in by_day.get(a, ()):
-                other = regime_map.get((b, slot, symbol))
-                fake[(a, slot, symbol)] = other if (regime is not None and other is not None) else None
+        fake = _moved(regime_map, sessions, dict(zip(sessions, moved)), by_day)
         e = effect(cell_map, fake)
         if e is not None and e >= observed - 1e-9:
             hits += 1
     return hits / n
+
+
+def _by_day(regime_map) -> dict:
+    by_day = {}
+    for (day, slot, symbol), regime in regime_map.items():
+        by_day.setdefault(day, []).append((slot, symbol, regime))
+    return by_day
+
+
+def _moved(regime_map, sessions, mapping, by_day=None) -> dict:
+    """One relabeling: every session ``a`` in ``sessions`` takes the regimes of
+    session ``mapping[a]``, the whole day together (every slot of every symbol). A
+    slot that has no regime on either day is a gap (``None``) in the result, so a
+    day keeps only the slots both days read."""
+    by_day = _by_day(regime_map) if by_day is None else by_day
+    fake = {}
+    for a in sessions:
+        b = mapping[a]
+        for slot, symbol, regime in by_day.get(a, ()):
+            other = regime_map.get((b, slot, symbol))
+            fake[(a, slot, symbol)] = other if (regime is not None and other is not None) else None
+    return fake
 
 
 def _timeout_share(cell_map, regime_map) -> dict:
@@ -236,7 +312,7 @@ def _empty_block(name, reasons) -> dict:
                          "timeout_share": {NEGATIVE: None, POSITIVE: None}}}
 
 
-def _test_block(name, regime_map, outcomes, sessions, precondition) -> dict:
+def _test_block(name, regime_map, outcomes, sessions) -> dict:
     decision = scalp_config.iv_scale()
     long_cells = cells(outcomes, decision, name, LONG_ROLES)
     observed = effect(long_cells, regime_map)
@@ -257,10 +333,6 @@ def _test_block(name, regime_map, outcomes, sessions, precondition) -> dict:
             reasons.append("effect below the floor")
         if not all(v is not None and v > 0 for v in effects.values()):
             reasons.append("not above 0 at every multiplier")
-    if not precondition["checked"]:
-        reasons.append("precondition not checked")
-    elif not precondition["passed"]:
-        reasons.append("precondition failed")
 
     def pp(roles):
         return effect(cells(outcomes, decision, name, roles), regime_map)
@@ -304,9 +376,11 @@ def load_outcomes(conn) -> list:
 
 def evaluate(regime_map, outcomes, agreement) -> dict:
     """The declared verdict. Nothing is computed until the declared number of
-    usable sessions has been collected; then only the first that many are used,
-    each block in the declared order is tested only when the one before passed, and
-    a block passes when none of its reasons applies."""
+    usable sessions has been collected. Then the design 3.2 precondition runs BEFORE
+    the test: if it has not passed the status is ``"blocked"`` and no block, effect
+    or p is computed. Otherwise only the first that many sessions are used, each
+    block in the declared order is tested only when the one before passed, and a
+    block passes when none of its reasons applies."""
     usable = usable_sessions(regime_map, outcomes)
     needed = scalp_config.regime_min_sessions()
     if len(usable) < needed:
@@ -314,17 +388,19 @@ def evaluate(regime_map, outcomes, agreement) -> dict:
                 "first": usable[0] if usable else None,
                 "start_day": scalp_config.regime_start_day().isoformat()}
     sessions = usable[:needed]
+    precondition = _precondition(agreement)
+    if not precondition["passed"]:
+        return {"status": "blocked", "sessions": sessions, "precondition": precondition}
     chosen = set(sessions)
     regime_map = {k: v for k, v in regime_map.items() if k[0] in chosen}
     outcomes = [r for r in outcomes if r.get("day") in chosen]
-    precondition = _precondition(agreement)
 
     blocks, previous = [], None
     for name in scalp_config.regime_order():
         if previous is not None and not previous["passed"]:
             blocks.append(_empty_block(name, [f"not tested: {previous['block']} did not pass"]))
         else:
-            blocks.append(_test_block(name, regime_map, outcomes, sessions, precondition))
+            blocks.append(_test_block(name, regime_map, outcomes, sessions))
         previous = blocks[-1]
     return {"status": "ready", "sessions": sessions, "precondition": precondition,
             "blocks": blocks}

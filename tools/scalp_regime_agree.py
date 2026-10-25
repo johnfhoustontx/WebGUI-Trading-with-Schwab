@@ -58,7 +58,7 @@ def compare(records, readings) -> dict:
             continue
         if scalp_config.intraday_block(slot) is None:
             continue
-        regime = scalp_regime_study.regime_of(snapshot, symbol)
+        regime = scalp_regime_study.regime_of(snapshot, symbol, allow_backfill=True)
         if regime is not None:
             copies.setdefault((day, slot, symbol), set()).add(regime)
     slots = agreeing = 0

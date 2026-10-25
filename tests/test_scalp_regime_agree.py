@@ -32,6 +32,13 @@ def test_compare_counts_agreement():
     assert got["disagreeing"] == [["2026-10-21", "13:06", "$SPX", "negative", "positive"]]
 
 
+def test_compare_reads_the_live_side_from_live_records_only():
+    """The backfill side may be a backfilled snapshot; the live side may not."""
+    live = {("2026-10-21", "12:36", "$SPX"): {"snapshot": snap(net_gex=-1e9, state="backfill", age=None)}}
+    recs = [(("intraday", "2026-10-21", "12:36", "$SPX"), snap(net_gex=-2e9, state="backfill", age=None))]
+    assert agree.compare(recs, live)["slots"] == 0
+
+
 def test_compare_skips_gaps_morning_and_in_sample_days():
     live = {("2026-10-20", "12:36", "$SPX"): {"snapshot": snap()},
             ("2026-10-21", "08:36", "$SPX"): {"snapshot": snap()},
