@@ -755,7 +755,7 @@ def test_render_view_updates_in_place_not_clear():
     assert "_set_chart" in src            # kind-aware recreate for the bar<->Term switch
     assert "chart_box.clear()" not in src   # never tear down the whole panel/messages
     assert "heatmap_box.clear()" not in src
-    assert "_STRIKE_HEAT_SPLIT" in src   # fixed 40/60 strike/heatmap split is wired
+    assert "_STRIKE_HEAT_SPLIT" in src   # the configured strike/heatmap split is wired
     assert "reflow" in src               # panels reflow to fill their flex containers
     # The fixed-window y-range is wired. Since 2026-10-09 render reaches it through
     # heat_yrange (one range for both panels, in either frame), so both links of
@@ -960,7 +960,27 @@ def test_heatmap_series_count_constant_across_projection():
 
 
 def test_strike_heat_split_constant():
-    assert gamma._STRIKE_HEAT_SPLIT == (0.40, 0.60)   # flip to (0.70, 0.30) if hard to read
+    """The shipped split is 25/75 (60% before 2026-10-25): the heatmap takes
+    three quarters of the row, the bars the rest."""
+    assert gamma._STRIKE_HEAT_SPLIT == (0.25, 0.75)
+
+
+def test_the_strike_heat_split_is_read_from_the_config(monkeypatch):
+    """``[layout] heat_share`` sets the split. Read at import, so the proof
+    reloads the page module with the accessor patched, then loads it back."""
+    import importlib
+
+    from shared import gamma_heat_config
+    try:
+        monkeypatch.setattr(gamma_heat_config, "heat_share", lambda: 0.6)
+        importlib.reload(gamma)
+        assert gamma._STRIKE_HEAT_SPLIT == (0.4, 0.6)
+        assert gamma._INIT_FLEX == {"chart": "flex-[0.4_1_0%]",
+                                    "heat": "flex-[0.6_1_0%]"}
+    finally:
+        monkeypatch.undo()
+        importlib.reload(gamma)
+    assert gamma._STRIKE_HEAT_SPLIT == (0.25, 0.75)
 
 
 def test_status_strip_text_combines_sources():
@@ -3066,7 +3086,7 @@ def test_only_the_private_picker_rewrites_the_address(monkeypatch, pin):
 # transparent zero stop, ``interpolation``, the colorAxis present at element
 # creation, the press-and-hold tooltip's three attachment sites, ``_set_chart``'s
 # recreate-on-kind-change, ``uniform_strike_grid``, the fixed series count and the
-# 40/60 ``_INIT_FLEX`` split — is untouched, and the must-not-change guards at
+# ``_INIT_FLEX`` split — is untouched, and the must-not-change guards at
 # the end of this block are green on BOTH sides of the migration by design.
 
 

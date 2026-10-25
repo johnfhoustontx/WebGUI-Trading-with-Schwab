@@ -587,9 +587,12 @@ def bar_yrange(strikes, spot, pad_frac=0.04):
     return [lo - pad, hi + pad]
 
 
-# Fixed strike/heatmap flex split now that the full day + forward band are shown.
-# (strike, heat). Flip to (0.70, 0.30) if the day gets hard to read.
-_STRIKE_HEAT_SPLIT = (0.40, 0.60)
+# The strike/heatmap flex split, (strike, heat), from config/gamma_heat.toml
+# [layout] heat_share (0.75 since 2026-10-25; 0.60 before). Read once at import:
+# _INIT_FLEX creates the columns at it, so a per-paint read could move a column
+# the first paint does not reflow. Rounded so the flex class stays short.
+_STRIKE_HEAT_SPLIT = (round(1.0 - _heat_cfg.heat_share(), 2),
+                      round(_heat_cfg.heat_share(), 2))
 
 
 # Collector status-bar color → Tailwind arbitrary-value class. The finite color set

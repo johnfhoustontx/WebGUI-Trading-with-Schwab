@@ -99,3 +99,10 @@ overlap = 2.0
 # "root" draws the square root of each value's size, so the largest strike does
 # not flatten the rest; "linear" draws it in proportion.
 height = "root"
+
+[layout]
+# The share of the row the heatmap takes beside the by-strike bars on the four
+# Greek views; the bars take the rest. The 0-DTE hedge-pressure panel sits under
+# the heatmap and is always its width. Read when the web app starts, so a change
+# needs it restarted. 0.75 since 2026-10-25 (0.60 before).
+heat_share = 0.75

@@ -4,7 +4,20 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-25 (**The Opening Scalp's net-gamma regime study, phase 1: the test is declared and the data starts counting.**)
+**Last updated:** 2026-10-25 (**Dealer Positioning: the heatmap takes 75% of the row.**)
+
+- On the four Greek views (GEX, Charm, DEX, Vanna) the heatmap now takes three quarters
+  of the row and the by-strike bars the rest (it was 60/40). The 0-DTE hedge-pressure
+  panel sits under the heatmap in the same column, so it widens with it.
+- The share is now config: `config/gamma_heat.toml [layout] heat_share` (0.30 to 0.90,
+  default 0.75), read through `gamma_heat_config.heat_share()` and listed under
+  Settings → Configuration → Dealer Positioning heatmap → Layout. It is read once at
+  import, because the panels are created at the split (the 2026-10-22 fix), so a change
+  needs the web app restarted.
+- Checked on the local page harness: the columns measured 244 px and 732 px of a
+  976 px row.
+
+**Prior —** 2026-10-25 (**The Opening Scalp's net-gamma regime study, phase 1: the test is declared and the data starts counting.**)
 
 - **What it is:** a study that asks one question of the Opening Scalp's 15-minute calls.
   Do long options (both long roles) win more often when the dealers' net gamma is

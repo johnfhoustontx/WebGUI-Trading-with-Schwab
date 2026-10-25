@@ -1061,6 +1061,15 @@ _GAMMA_HEAT = ConfigFile(
                   "largest strike does not flatten the rest. Linear draws it "
                   "in proportion.", kind="choice", choices=("root", "linear")),
         )),
+        Section("Layout",
+                "How the row is shared between the by-strike bars and the "
+                "heat map on the four Greek views. The panels are created at "
+                "this split, so the web app must restart.", (
+            _pct("layout.heat_share", "Heat map width",
+                 "Its share of the row; the bars take the rest. The 0-DTE "
+                 "hedge-pressure panel under the heat map follows its width.",
+                 lo=30, hi=90, step=5),
+        ), restart=(WEBGUI,)),
     ),
 )
 

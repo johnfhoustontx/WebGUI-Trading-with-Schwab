@@ -91,6 +91,11 @@ DEFAULTS = {
         # the largest strike does not flatten the rest; "linear" is in proportion.
         "height": "root",
     },
+    "layout": {
+        # The heatmap's share of the row beside the by-strike bars; the bars
+        # take the rest, and the hedge-pressure panel follows the heatmap.
+        "heat_share": 0.75,
+    },
 }
 
 WELL_HEIGHTS = ("root", "linear")
@@ -197,3 +202,10 @@ def lock() -> dict:
     return {"minutes": _setting("lock", "minutes", minimum=5, maximum=390),
             "quantile": _setting("lock", "quantile", minimum=0.5, maximum=1.0),
             "headroom": _setting("lock", "headroom", minimum=1.0, maximum=5.0)}
+
+
+def heat_share() -> float:
+    """The heatmap's share of the row beside the by-strike bars, 0.3 to 0.9.
+    Read once when the page module loads (``gamma._STRIKE_HEAT_SPLIT``): the
+    panels are created at this split, so a change needs the web app restarted."""
+    return _setting("layout", "heat_share", minimum=0.3, maximum=0.9)

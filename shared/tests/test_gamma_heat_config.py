@@ -167,6 +167,15 @@ def test_forward_enabled_must_be_a_bool(monkeypatch):
     assert cfg.forward() == {"enabled": True, "step_min": 5}
 
 
+def test_heat_share_default_and_overrides(monkeypatch):
+    assert cfg.heat_share() == 0.75
+    monkeypatch.setattr(cfg, "load", lambda: {"layout": {"heat_share": 0.6}})
+    assert cfg.heat_share() == 0.6
+    for bad in (0.2, 0.95, "wide", True):
+        monkeypatch.setattr(cfg, "load", lambda bad=bad: {"layout": {"heat_share": bad}})
+        assert cfg.heat_share() == 0.75
+
+
 def test_it_imports_only_the_config_loader_and_the_paths():
     """Tier 1 imports this module, so its import set is pinned (CLAUDE.md, the
     Tier-1 allow-list): stdlib, shared.config_toml and repo_paths."""
