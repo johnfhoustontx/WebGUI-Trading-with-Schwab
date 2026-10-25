@@ -78,6 +78,13 @@ DEFAULTS = {
         "min_train_weeks": 8, "min_brier_margin": 0.005, "refit_weekday": 5,
         "show": True, "assumed_share": 0.5,
     },
+    # The declared net-gamma regime study (design 2026-10-25-scalp-gamma-regime-study).
+    "regime": {
+        "start_day": "2026-10-21", "min_sessions": 40, "alpha": 0.05,
+        "min_effect_pp": 5.0, "order": ["afternoon", "midday", "morning"],
+        "permutations": 10000, "seed": 20261025, "min_sign_agreement": 0.95,
+        "agree_min_sessions": 5,
+    },
 }
 
 load, reset_cache = toml_loader(SCALP_TOML, DEFAULTS, label="scalp.toml")
@@ -662,3 +669,67 @@ def prob_assumed_share() -> float:
     if not _real(raw) or not (0 < raw < 1):
         return float(DEFAULTS["prob"]["assumed_share"])
     return float(raw)
+
+
+# ── the declared net-gamma regime study ([regime]) ───────────────────────────
+def regime_start_day() -> date:
+    """The first session the study counts: an ISO ``YYYY-MM-DD`` string naming a
+    real date, else the declared 2026-10-21."""
+    raw = _section("regime").get("start_day")
+    try:
+        if isinstance(raw, str) and len(raw) == 10:
+            return date.fromisoformat(raw)
+    except ValueError:
+        pass
+    return date.fromisoformat(DEFAULTS["regime"]["start_day"])
+
+
+def regime_min_sessions() -> int:
+    """Usable sessions the test window needs before the study is read."""
+    return _count("regime", "min_sessions")
+
+
+def regime_alpha() -> float:
+    """The significance level: strictly between 0 and 1, else the default."""
+    raw = _section("regime").get("alpha")
+    if not _real(raw) or not (0 < raw < 1):
+        return float(DEFAULTS["regime"]["alpha"])
+    return float(raw)
+
+
+def regime_min_effect_pp() -> float:
+    """The smallest gap, in percentage points, between the regimes' target rates
+    that counts as an effect: finite and at least 0, else the default."""
+    return _number("regime", "min_effect_pp", floor=0.0, strict=False)
+
+
+def regime_order() -> list:
+    """The order the three session blocks are tested in: a list holding each of
+    ``morning``, ``midday`` and ``afternoon`` exactly once, else the default. A
+    fresh list each call."""
+    raw = _section("regime").get("order")
+    if (isinstance(raw, list) and len(raw) == 3
+            and sorted(raw, key=str) == ["afternoon", "midday", "morning"]):
+        return list(raw)
+    return list(DEFAULTS["regime"]["order"])
+
+
+def regime_permutations() -> int:
+    """Random relabelings the permutation test draws (at least 100)."""
+    return _count("regime", "permutations", minimum=100)
+
+
+def regime_seed() -> int:
+    """The permutation test's random seed (a whole number, at least 0)."""
+    return _count("regime", "seed", minimum=0)
+
+
+def regime_min_sign_agreement() -> float:
+    """The share of slots, backfilled against live, whose net-GEX sign must agree
+    before the study runs: above 0 and at most 1."""
+    return _fraction("regime", "min_sign_agreement", allow_zero=False)
+
+
+def regime_agree_min_sessions() -> int:
+    """Test-window sessions the backfill-versus-live agreement check must cover."""
+    return _count("regime", "agree_min_sessions")

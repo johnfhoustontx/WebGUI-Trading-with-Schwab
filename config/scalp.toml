@@ -244,3 +244,27 @@ sentiment = 0.05
 # flow, sentiment), so they stay near their assumed value.
 wide = 1.0
 tight = 0.10
+
+[regime]
+# The declared net-gamma regime study of the 15-minute calls (design
+# docs/plans/2026-10-25-scalp-gamma-regime-study-design.md). Every value below was
+# DECLARED on 2026-10-25, before any outcome of the test window was read. Changing
+# one after reading the result is a new study, declared and run as one.
+# The first session of the test window (YYYY-MM-DD). Sessions before it are never counted.
+start_day = "2026-10-21"
+# Usable sessions the afternoon needs graded before the study is read, once.
+min_sessions = 40
+# The significance level of each block's one-sided permutation test.
+alpha = 0.05
+# The smallest gap, in percentage points, between the negative and positive regimes' win rates that counts.
+min_effect_pp = 5.0
+# The fixed order the blocks are tested in; a block is tested only if the one before it passed.
+order = ["afternoon", "midday", "morning"]
+# Random relabelings the permutation test draws.
+permutations = 10000
+# The permutation test's random seed, fixed so a re-run gives the same p-value.
+seed = 20261025
+# The share of slots, backfilled against live, whose net-GEX sign must agree before the study runs.
+min_sign_agreement = 0.95
+# Test-window sessions that agreement check must cover.
+agree_min_sessions = 5

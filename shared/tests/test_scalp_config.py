@@ -686,3 +686,46 @@ def test_the_scalp_prob_slot_is_in_the_shipped_calendar():
     assert mc.slot_grace_min("scalp_prob") == 180
     (name, at), = mc.slot_times("scalp_prob").items()
     assert name == "refit" and (at.hour, at.minute) == (8, 0)
+
+
+def test_regime_defaults():
+    import datetime as dt
+    from shared import scalp_config as sc
+    assert sc.regime_start_day() == dt.date(2026, 10, 21)
+    assert sc.regime_min_sessions() == 40
+    assert sc.regime_alpha() == 0.05
+    assert sc.regime_min_effect_pp() == 5.0
+    assert sc.regime_order() == ["afternoon", "midday", "morning"]
+    assert sc.regime_permutations() == 10000
+    assert sc.regime_seed() == 20261025
+    assert sc.regime_min_sign_agreement() == 0.95
+    assert sc.regime_agree_min_sessions() == 5
+
+
+def test_regime_bad_values_read_as_defaults(monkeypatch):
+    from shared import scalp_config as sc
+    bad = {"start_day": "21/10/2026", "min_sessions": 0, "alpha": 1.0,
+           "min_effect_pp": -1, "order": ["afternoon", "afternoon", "morning"],
+           "permutations": 50, "seed": -3, "min_sign_agreement": 0,
+           "agree_min_sessions": 0}
+    monkeypatch.setattr(sc, "load", lambda: {"regime": bad})
+    test_regime_defaults()
+
+
+def test_regime_good_values_are_read(monkeypatch):
+    import datetime as dt
+    from shared import scalp_config as sc
+    good = {"start_day": "2026-11-02", "min_sessions": 60, "alpha": 0.01,
+            "min_effect_pp": 0, "order": ["midday", "afternoon", "morning"],
+            "permutations": 500, "seed": 7, "min_sign_agreement": 1.0,
+            "agree_min_sessions": 3}
+    monkeypatch.setattr(sc, "load", lambda: {"regime": good})
+    assert sc.regime_start_day() == dt.date(2026, 11, 2)
+    assert sc.regime_min_sessions() == 60
+    assert sc.regime_alpha() == 0.01
+    assert sc.regime_min_effect_pp() == 0.0
+    assert sc.regime_order() == ["midday", "afternoon", "morning"]
+    assert sc.regime_permutations() == 500
+    assert sc.regime_seed() == 7
+    assert sc.regime_min_sign_agreement() == 1.0
+    assert sc.regime_agree_min_sessions() == 3

@@ -1427,6 +1427,43 @@ _SCALP = ConfigFile(
                   "way (0 up to, not including, 0.25).",
                   kind="float", min=0, max=0.249, step=0.001),
         )),
+        Section("Gamma regime study",
+                "The declared test of whether the dealer gamma regime changes how "
+                "often the 15-minute calls' long options reach their target. "
+                "Declared 2026-10-25: change a value only to declare a new "
+                "study.", (
+            Field("regime.start_day", "First session counted",
+                  "The first session of the test window. Earlier sessions are "
+                  "never counted.", kind="date"),
+            Field("regime.min_sessions", "Sessions before the study is read",
+                  "Usable sessions the afternoon needs graded before the result "
+                  "is read, once.",
+                  kind="int", unit="sessions", min=1, max=1000, step=1),
+            Field("regime.alpha", "Significance level",
+                  "The p-value a block's one-sided permutation test must reach "
+                  "(0 to 1, not either end).",
+                  kind="float", min=0.001, max=0.5, step=0.001),
+            Field("regime.min_effect_pp", "Smallest effect",
+                  "The smallest gap between the negative and positive regimes' "
+                  "win rates that counts as an effect.",
+                  kind="float", unit="points", min=0, max=50, step=0.5),
+            Field("regime.order", "Order the blocks are tested",
+                  "Each of morning, midday and afternoon once. A block is "
+                  "tested only if the one before it passed.", kind="phrases"),
+            Field("regime.permutations", "Permutations",
+                  "Random relabelings the permutation test draws.",
+                  kind="int", min=100, max=100000, step=100),
+            Field("regime.seed", "Random seed",
+                  "Fixed, so a re-run gives the same p-value.",
+                  kind="int", min=0, max=2147483647, step=1),
+            Field("regime.min_sign_agreement", "Backfill agreement needed",
+                  "The share of slots, backfilled against live, whose net-gamma "
+                  "sign must agree before the study runs.",
+                  kind="fraction", unit="%", min=1, max=100, step=1),
+            Field("regime.agree_min_sessions", "Sessions the agreement covers",
+                  "Test-window sessions that agreement check must cover.",
+                  kind="int", unit="sessions", min=1, max=100, step=1),
+        )),
     ),
 )
 
