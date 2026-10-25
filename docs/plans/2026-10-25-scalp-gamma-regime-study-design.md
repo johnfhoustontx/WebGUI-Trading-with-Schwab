@@ -201,6 +201,9 @@ model changes, and the result is written up (§6).
 - `tools/scalp_regime_report.py`: prints the result as Markdown, like the other two
   study reports. **Before the 40th usable session it prints only the count of usable
   sessions so far, and the date of the first.** No flag prints the effect early.
+  After the 40th session, while the §3.2 precondition has not passed, it shows the
+  session range and the precondition line and nothing else. Every run states whether the
+  settings in use match the declaration.
 - `tools/scalp_regime_agree.py` (or a subcommand of `scalp_prob_backfill.py`): the
   §3.2 sign comparison of a backfill extract against the live record.
 - `[regime]` in `config/scalp.toml`, every key in `webgui/config_schema.py`:

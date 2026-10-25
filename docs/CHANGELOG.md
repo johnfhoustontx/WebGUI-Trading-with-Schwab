@@ -7,8 +7,8 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 **Last updated:** 2026-10-25 (**The Opening Scalp's net-gamma regime study, phase 1: the test is declared and the data starts counting.**)
 
 - **What it is:** a study that asks one question of the Opening Scalp's 15-minute calls.
-  Do afternoon long calls win more often on a positive-gamma day than on a negative-gamma
-  one? Every rule is written down first: it counts from 2026-10-21, needs 40 usable
+  Do long options (both long roles) win more often when the dealers' net gamma is
+  negative than when it is positive? Every rule is written down first: it counts from 2026-10-21, needs 40 usable
   sessions, and uses a 0.05 permutation test (10,000 shuffles, seed 20261025) plus an
   effect of at least 5 points. The order of tests is afternoon, then midday, then morning.
   Design and plan: `docs/plans/2026-10-25-scalp-gamma-regime-study-{design,plan}.md`.
@@ -17,7 +17,12 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
     the effect, the permutation test, `evaluate`, and the read-only loaders. It imports
     nothing from `compute` and touches no bus.
   - `tools/scalp_regime_report.py`: a read-only report. Before the 40th usable session it
-    prints only a count, so nobody can peek at an early effect.
+    prints only a count, so nobody can peek at an early effect. After the 40th, while the
+    agreement precondition has not passed, it prints the session range and that line and
+    no effect or p-value. Every run says whether the settings in use equal the declared
+    ones (`scalp_regime_study.DECLARED`), and the `[regime]` table is shown read-only in
+    Settings. The study reads the live record only: a backfilled snapshot is a gap
+    except on the agreement check's backfill side.
   - `tools/scalp_regime_agree.py`: compares a `tools/scalp_prob_backfill.py extract` file
     with the regime the service recorded live (`intraday_readings`). It needs 95 percent
     agreement over at least 5 sessions. It skips early-close days, and a call whose
