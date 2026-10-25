@@ -22,6 +22,7 @@ Rules:
 * Pure functions of what they are given: no bus, no store, no import from
   ``compute``.
 """
+import random
 from datetime import date
 
 from shared import scalp_config
@@ -138,3 +139,166 @@ def _is_early_close(day, early) -> bool:
         return date.fromisoformat(day) in early
     except (TypeError, ValueError):
         return False
+
+
+# ── the effect, the permutation and the declared verdict (design 3.3 - 3.5) ──
+
+def _shares(cell_map, regime_map, symbols=None):
+    """``(negative, positive)``, each ``{(day, symbol): [wins, n]}`` summed over the
+    slots of that pair whose regime is that one."""
+    pooled = {NEGATIVE: {}, POSITIVE: {}}
+    for (day, symbol, slot), (wins, n, _timeouts) in cell_map.items():
+        if symbols is not None and symbol not in symbols:
+            continue
+        side = pooled.get(regime_map.get((day, slot, symbol)))
+        if side is None:
+            continue
+        pair = side.setdefault((day, symbol), [0, 0])
+        pair[0] += wins
+        pair[1] += n
+    return pooled[NEGATIVE], pooled[POSITIVE]
+
+
+def _mean_share(side):
+    shares = [wins / n for wins, n in side.values() if n]
+    return sum(shares) / len(shares) if shares else None
+
+
+def effect(cell_map, regime_map, symbols=None):
+    """The negative-gamma target rate minus the positive-gamma one, in percentage
+    points: each side the mean over (day, symbol) pairs of that pair's pooled share.
+    ``None`` when either side has no pair. ``symbols`` limits the pairs."""
+    negative, positive = _shares(cell_map, regime_map, symbols)
+    low, high = _mean_share(negative), _mean_share(positive)
+    if low is None or high is None:
+        return None
+    return 100.0 * (low - high)
+
+
+def permutation_p(cell_map, regime_map, sessions, observed, n, seed) -> float:
+    """The share of ``n`` relabelings whose effect is at least ``observed``.
+
+    A relabeling gives each session another session's regimes (the whole day moved
+    together, slot for slot and symbol for symbol), so the day's own outcomes keep
+    their serial structure and only the regime they are paired with is shuffled; a
+    slot missing a regime on either day becomes a gap."""
+    rng = random.Random(seed)
+    by_day = {}
+    for (day, slot, symbol), regime in regime_map.items():
+        by_day.setdefault(day, []).append((slot, symbol, regime))
+    hits = 0
+    for _ in range(n):
+        moved = rng.sample(sessions, len(sessions))
+        fake = {}
+        for a, b in zip(sessions, moved):
+            for slot, symbol, regime in by_day.get(a, ()):
+                other = regime_map.get((b, slot, symbol))
+                fake[(a, slot, symbol)] = other if (regime is not None and other is not None) else None
+        e = effect(cell_map, fake)
+        if e is not None and e >= observed - 1e-9:
+            hits += 1
+    return hits / n
+
+
+def _timeout_share(cell_map, regime_map) -> dict:
+    """The timeouts over n of the long rows, pooled by regime."""
+    out = {}
+    for name in (NEGATIVE, POSITIVE):
+        n = timeouts = 0
+        for (day, symbol, slot), cell in cell_map.items():
+            if regime_map.get((day, slot, symbol)) == name:
+                n += cell[1]
+                timeouts += cell[2]
+        out[name] = timeouts / n if n else None
+    return out
+
+
+def _precondition(agreement) -> dict:
+    if not isinstance(agreement, dict):
+        return {"checked": False, "passed": False, "share": None, "sessions": None}
+    share = _finite(agreement.get("share"))
+    sessions = agreement.get("sessions")
+    sessions = sessions if isinstance(sessions, int) and not isinstance(sessions, bool) else None
+    passed = (share is not None and share >= scalp_config.regime_min_sign_agreement()
+              and sessions is not None
+              and sessions >= scalp_config.regime_agree_min_sessions())
+    return {"checked": True, "passed": passed, "share": share, "sessions": sessions}
+
+
+def _empty_block(name, reasons) -> dict:
+    return {"block": name, "tested": False, "passed": False, "reasons": reasons,
+            "effect_pp": {str(_study._scale_key(s)): None for s in scalp_config.iv_scales()},
+            "p": None, "negative_pairs": 0, "positive_pairs": 0,
+            "reported": {"per_symbol": {s: None for s in scalp_config.symbols()},
+                         "credit_pp": None, "long_with_pp": None,
+                         "long_against_pp": None,
+                         "timeout_share": {NEGATIVE: None, POSITIVE: None}}}
+
+
+def _test_block(name, regime_map, outcomes, sessions, precondition) -> dict:
+    decision = scalp_config.iv_scale()
+    long_cells = cells(outcomes, decision, name, LONG_ROLES)
+    observed = effect(long_cells, regime_map)
+    effects = {str(_study._scale_key(s)):
+               effect(cells(outcomes, s, name, LONG_ROLES), regime_map)
+               for s in scalp_config.iv_scales()}
+    negative, positive = _shares(long_cells, regime_map)
+
+    reasons, p = [], None
+    if observed is None:
+        reasons.append("effect undefined")
+    else:
+        p = permutation_p(long_cells, regime_map, sessions, observed,
+                          scalp_config.regime_permutations(), scalp_config.regime_seed())
+        if p > scalp_config.regime_alpha():
+            reasons.append("p above alpha")
+        if observed < scalp_config.regime_min_effect_pp():
+            reasons.append("effect below the floor")
+        if not all(v is not None and v > 0 for v in effects.values()):
+            reasons.append("not above 0 at every multiplier")
+    if not precondition["checked"]:
+        reasons.append("precondition not checked")
+    elif not precondition["passed"]:
+        reasons.append("precondition failed")
+
+    def pp(roles):
+        return effect(cells(outcomes, decision, name, roles), regime_map)
+
+    return {"block": name, "tested": True, "passed": not reasons, "reasons": reasons,
+            "effect_pp": effects, "p": p,
+            "negative_pairs": len(negative), "positive_pairs": len(positive),
+            "reported": {
+                "per_symbol": {s: effect(long_cells, regime_map, (s,))
+                               for s in scalp_config.symbols()},
+                "credit_pp": pp(CREDIT_ROLES),
+                "long_with_pp": pp(("long_with",)),
+                "long_against_pp": pp(("long_against",)),
+                "timeout_share": _timeout_share(long_cells, regime_map)}}
+
+
+def evaluate(regime_map, outcomes, agreement) -> dict:
+    """The declared verdict. Nothing is computed until the declared number of
+    usable sessions has been collected; then only the first that many are used,
+    each block in the declared order is tested only when the one before passed, and
+    a block passes when none of its reasons applies."""
+    usable = usable_sessions(regime_map, outcomes)
+    needed = scalp_config.regime_min_sessions()
+    if len(usable) < needed:
+        return {"status": "collecting", "sessions": len(usable), "needed": needed,
+                "first": usable[0] if usable else None,
+                "start_day": scalp_config.regime_start_day().isoformat()}
+    sessions = usable[:needed]
+    chosen = set(sessions)
+    regime_map = {k: v for k, v in regime_map.items() if k[0] in chosen}
+    outcomes = [r for r in outcomes if r.get("day") in chosen]
+    precondition = _precondition(agreement)
+
+    blocks, previous = [], None
+    for name in scalp_config.regime_order():
+        if previous is not None and not previous["passed"]:
+            blocks.append(_empty_block(name, [f"not tested: {previous['block']} did not pass"]))
+        else:
+            blocks.append(_test_block(name, regime_map, outcomes, sessions, precondition))
+        previous = blocks[-1]
+    return {"status": "ready", "sessions": sessions, "precondition": precondition,
+            "blocks": blocks}
