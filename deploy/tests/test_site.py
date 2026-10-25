@@ -795,7 +795,7 @@ def test_the_interactive_tools_are_not_tiled():
     """Removed from the grid 2026-09-21: an empty form makes a blank tile."""
     screens = _live_screens().SCREENS
     untiled = {s.slug for s in screens if not s.tile and not s.parent}
-    assert untiled == {slug for slug, _ in TOOLS}
+    assert untiled == {slug for slug, _ in TOOLS} | set(STRATEGY_TOOLS)
     for s in screens:
         if not s.tile:
             assert f"live/{s.slug}.webp" not in _markup("live.html"), s.slug
@@ -908,7 +908,7 @@ def test_the_grid_carries_no_timestamp():
     assert not re.search(r"\b\d{4}-\d{2}-\d{2}\b", markup)
 
 
-_WORDS = {6: "six", 12: "twelve", 18: "eighteen"}
+_WORDS = {7: "seven", 12: "twelve", 19: "nineteen"}
 
 
 def test_the_live_page_states_the_published_counts_in_words():
@@ -1312,10 +1312,17 @@ def test_the_report_is_in_the_sitemap():
 # ("news", "Market News") on 2026-09-26 with its. ("signals", "Option Signals")
 # joined on 2026-10-07 and LEADS the menu, at the owner's instruction: this
 # tuple's order is the menu's order (test_the_tools_menu_lists_the_tools_in_order).
+# On 2026-10-24 the Calculator and Simulator items became ONE, Strategy Tools,
+# when the public Expected Move joined them: it opens on the Calculator, whose
+# page carries the three tools' tab strip (webgui/pages/options/strategy_strip.py).
 TOOLS = (("signals", "Option Signals"),
          ("finder", "Strategy Finder"), ("rescue", "Rescue my Sh*tty trade"),
-         ("calculator", "Calculator"), ("simulator", "Simulator"),
+         ("calculator", "Strategy Tools"),
          ("news", "Market News"))
+
+# The screens the ONE Strategy Tools item reaches: it links the first, and each
+# of the three carries the tab strip to the other two.
+STRATEGY_TOOLS = ("calculator", "simulator", "expected-move")
 
 # Every page: they all carry the one site menu, Tools included.
 TOOLS_PAGES = PAGES

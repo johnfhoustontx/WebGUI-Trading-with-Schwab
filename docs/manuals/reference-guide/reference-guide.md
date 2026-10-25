@@ -2310,7 +2310,7 @@ you actually want. A plain **%** over dashes means neither basis exists. Before
 2026-08-19 the column was a share of the *premium received*; for a credit spread that
 is the identical number, because the credit **is** the maximum return.
 
-**The Simulator shows this same position** — the Calculator and the Simulator work on **one shared position** — the same symbol, strategy, legs and selected expiration. Whichever page you edited last is what the other one opens with, so there is nothing to copy between them.
+**The Simulator shows this same position** — the Calculator, the Simulator and the Expected Move work on **one shared position** — the same symbol, strategy, legs and selected expiration. Whichever page you edited last is what the others open with, so there is nothing to copy between them.
 **Expected Move** charts the legs.
 
 ### Why it matters
@@ -2451,6 +2451,102 @@ position is behaving in a way you do not understand.
 ### Related pages
 
 [Calculator](#calculator) · [Expected Move](#expected-move) · [Rescue](#rescue).
+
+---
+
+## Expected Move
+
+*Menu: STRATEGY → Strategy Tools → Expected Move · Route `/options/expected-move`*
+
+### What it is
+
+A price chart with a forward cone showing how far the market **expects** the symbol to
+move by a chosen expiration — with your strikes drawn on it.
+
+**The concept.** Option prices encode a forecast. If you know the implied volatility and
+the time to expiration, you can compute the one-standard-deviation range the market is
+pricing: roughly `price × volatility × √(time/365)`. Statistically, about 68% of
+outcomes fall inside one standard deviation.
+
+### Where the data comes from
+
+| | |
+|---|---|
+| Service | `options_svc` (:8211), `em_chain` command → `cache:options:em_chain` |
+| History | 6 months of daily candles |
+| Today's bar | Synthesized from the live quote, because Schwab's daily history ends at the previous session |
+| Shared position | The Calculator's and the Simulator's (`shared_position`): it opens on it, and writes back the symbol, the expiry and a strike you pick |
+
+### Reading the screen
+
+**The candles** are the daily price history the **Look-back** asks for. **The cone**
+fans forward from today to expiration, green above and red below, widening with the
+square root of time.
+
+**Strike lines** are overlaid — short strikes solid, long strikes dashed, coloured by
+put or call.
+
+**Expiry and strike are dropdowns** driven by the real chain. The expiry list carries a
+DTE suffix (`2026-08-12 (0d)`) so weeklies stay readable. Strikes are deduplicated
+across calls and puts.
+
+**Look-back** controls how much history shows. **A wider cone means higher implied
+volatility.**
+
+**It is a Strategy Tools tab, on the Calculator's position.** It opens drawing the
+strikes the Calculator and the Simulator were last showing. A new symbol here opens
+them on it with their own template; a new expiry moves their legs to it and drops
+the prices, which belonged to the old expiration; a strike you pick becomes a one-leg
+short put or short call. The strike pre-selected nearest the price is not shared.
+
+**On the public site** (`/expected-move`) it is the same chart, run on the public
+tools stream: the visitor loads the symbol and the expiration, the cone is sized off
+that public chain, and the only Schwab call it adds is the price history. It draws no
+forming bar for today; the cone starts at today's price instead.
+
+### Why it matters
+
+This is the single best sanity check for a premium seller. If your short strike sits
+**outside** the cone, the market is pricing that level as unlikely to be reached — which
+is exactly what you want when selling. If it sits **inside**, you are selling something
+the market thinks is a coin flip, and the credit should be much larger to justify it.
+
+It is also the fastest way to see whether a credit is fair. A wide cone with a small
+credit means you are underpaid for the risk.
+
+### Caveats and gotchas
+
+> **This page's implied volatility and expected move deliberately do NOT match
+> ThinkorSwim, and the difference has been measured rather than guessed. Do not "fix"
+> either number to match ToS without deciding which definition you want.**
+>
+> There are **two independent differences**, and they push in opposite directions:
+>
+> 1. **Different IV source.** This app reads the single strike nearest spot. On an
+>    equity volatility smile that strike is the *minimum* — measured on one example:
+>    46.08% at K=165, **45.59% at K=170 ≈ spot**, 49.03% at K=175. ThinkorSwim publishes
+>    a per-series IV aggregated across strikes, which necessarily sits above the
+>    at-the-money trough (52.11% in the same example). Schwab reports the *same*
+>    volatility for the at-the-money call and put, so put/call skew is not the cause.
+> 2. **Different move definition.** This app draws **one standard deviation**, a 68%
+>    containment band, which is the correct basis for a *cone*. ThinkorSwim's chain
+>    header shows the expected **absolute** move, smaller by exactly √(2/π) ≈ 0.798 —
+>    which is what an at-the-money straddle prices.
+>
+> **The trap:** on that example the two differences nearly cancelled (32.90 versus
+> 30.43, about 8% apart). That is luck, not calibration. On a symbol with a flatter
+> smile this app's move would read roughly 25% *larger*.
+
+Other caveats:
+
+- After 15:00 CT today's synthesized candle uses the last price, which can include
+  post-market prints. Sub-tick on a six-month chart, documented rather than fixed.
+- Opened in a new browser tab when handed off from another page.
+
+### Related pages
+
+[Calculator](#calculator) · [Simulator](#simulator) · [Market Scanner](#market-scanner) ·
+[Dealer Positioning](#dealer-positioning) (walls versus the cone is a strong combination).
 
 ---
 
@@ -2966,90 +3062,6 @@ express. Take a candidate to [Calculator](#calculator) to price it as it stands 
 
 [Strategy Finder](#strategy-finder) · [Calculator](#calculator) ·
 [Paper Ledger](#paper-ledger).
-
----
-
-## Expected Move
-
-*Menu: STRATEGY → Options → Expected Move · Route `/options/expected-move`*
-
-### What it is
-
-A price chart with a forward cone showing how far the market **expects** the symbol to
-move by a chosen expiration — with your strikes drawn on it.
-
-**The concept.** Option prices encode a forecast. If you know the implied volatility and
-the time to expiration, you can compute the one-standard-deviation range the market is
-pricing: roughly `price × volatility × √(time/365)`. Statistically, about 68% of
-outcomes fall inside one standard deviation.
-
-### Where the data comes from
-
-| | |
-|---|---|
-| Service | `options_svc` (:8211), `em_chain` command → `cache:options:em_chain` |
-| History | 6 months of daily candles |
-| Today's bar | Synthesized from the live quote, because Schwab's daily history ends at the previous session |
-
-### Reading the screen
-
-**The candles** are six months of daily price history. **The cone** fans forward from
-today to expiration, dashed green above and red below, widening with the square root of
-time.
-
-**Strike lines** are overlaid — short strikes solid, long strikes dashed, coloured by
-put or call.
-
-**Expiry and strike are dropdowns** driven by the real chain. The expiry list carries a
-DTE suffix (`2026-08-12 (0d)`) so weeklies stay readable. Strikes are deduplicated
-across calls and puts.
-
-**Look-back** controls how much history shows. **A wider cone means higher implied
-volatility.**
-
-### Why it matters
-
-This is the single best sanity check for a premium seller. If your short strike sits
-**outside** the cone, the market is pricing that level as unlikely to be reached — which
-is exactly what you want when selling. If it sits **inside**, you are selling something
-the market thinks is a coin flip, and the credit should be much larger to justify it.
-
-It is also the fastest way to see whether a credit is fair. A wide cone with a small
-credit means you are underpaid for the risk.
-
-### Caveats and gotchas
-
-> **This page's implied volatility and expected move deliberately do NOT match
-> ThinkorSwim, and the difference has been measured rather than guessed. Do not "fix"
-> either number to match ToS without deciding which definition you want.**
->
-> There are **two independent differences**, and they push in opposite directions:
->
-> 1. **Different IV source.** This app reads the single strike nearest spot. On an
->    equity volatility smile that strike is the *minimum* — measured on one example:
->    46.08% at K=165, **45.59% at K=170 ≈ spot**, 49.03% at K=175. ThinkorSwim publishes
->    a per-series IV aggregated across strikes, which necessarily sits above the
->    at-the-money trough (52.11% in the same example). Schwab reports the *same*
->    volatility for the at-the-money call and put, so put/call skew is not the cause.
-> 2. **Different move definition.** This app draws **one standard deviation**, a 68%
->    containment band, which is the correct basis for a *cone*. ThinkorSwim's chain
->    header shows the expected **absolute** move, smaller by exactly √(2/π) ≈ 0.798 —
->    which is what an at-the-money straddle prices.
->
-> **The trap:** on that example the two differences nearly cancelled (32.90 versus
-> 30.43, about 8% apart). That is luck, not calibration. On a symbol with a flatter
-> smile this app's move would read roughly 25% *larger*.
-
-Other caveats:
-
-- After 15:00 CT today's synthesized candle uses the last price, which can include
-  post-market prints. Sub-tick on a six-month chart, documented rather than fixed.
-- Opened in a new browser tab when handed off from another page.
-
-### Related pages
-
-[Calculator](#calculator) · [Market Scanner](#market-scanner) ·
-[Dealer Positioning](#dealer-positioning) (walls versus the cone is a strong combination).
 
 ---
 
@@ -5279,7 +5291,7 @@ workflow.
 | Market Scanner · Strategy Finder | **Send to Calculator** | Calculator | Symbol and all legs (the chain loads first, then the legs apply) |
 | Market Scanner · Strategy Finder | **Send to Paper trade** | Paper Ledger | The trade, as a paper entry — if it fits the ledger's risk limits; a message answers either way |
 | Market Scanner · Strategy Finder · Paper · Captured · Calculator | **Expected Move** | Expected Move (new tab) | Symbol, expiry and strikes |
-| Calculator ⇄ Simulator | *(nothing to press)* | the other page | One shared position: symbol, strategy, legs, selected expiration — whichever page was edited last |
+| Calculator ⇄ Simulator ⇄ Expected Move | *(nothing to press)* | the other pages | One shared position: symbol, strategy, legs, selected expiration — whichever page was edited last (the Expected Move shares the symbol, expiry and strikes) |
 | Flow Alerts | **click a row** | Dealer Positioning | That row's symbol |
 | Symbol | **→ Dealer Positioning** (names the app collects only) | Dealer Positioning | The dossier's symbol |
 | Opportunity Board | **click a symbol** | Symbol | That row's symbol |

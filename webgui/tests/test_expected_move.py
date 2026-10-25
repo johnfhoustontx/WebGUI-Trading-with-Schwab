@@ -31,6 +31,13 @@ def test_signal_to_em_payload_strips_dollar_symbol():
 
 
 from pages.options import expected_move as em
+from pages.options import shared_position as SP
+
+
+def setup_function(_):
+    # The position the Strategy Tools share is module-level: one test's draw
+    # must not become the next test's opening position.
+    SP.reset()
 
 
 def _payload():
@@ -775,3 +782,169 @@ def test_the_stock_module_construction_survives_the_migration():
     assert fig["rangeSelector"]["enabled"] is False
     assert fig["navigator"]["enabled"] is False
     assert fig["scrollbar"]["enabled"] is False
+
+
+# --- the position the Strategy Tools share (2026-10-24) ----------------------
+#
+# Expected Move became the third Strategy Tools tab: it opens on the position
+# the Calculator and the Simulator were last showing, and what is picked here
+# is what they open with next.
+
+def _ic_position():
+    def leg(otype, side, strike):
+        return {"option_type": otype, "side": side, "strike": strike,
+                "expiry": "2026-09-18", "qty": 2, "premium": 1.25}
+    SP.publish("SPY", "IC", [leg("put", "short", 540.0), leg("put", "long", 535.0),
+                             leg("call", "short", 560.0), leg("call", "long", 565.0)],
+               "2026-09-18")
+
+
+def _ic_lines():
+    return [{"strike": 540.0, "option_type": "put", "side": "short"},
+            {"strike": 535.0, "option_type": "put", "side": "long"},
+            {"strike": 560.0, "option_type": "call", "side": "short"},
+            {"strike": 565.0, "option_type": "call", "side": "long"}]
+
+
+def _render_recording(monkeypatch):
+    import nicegui.ui as ng_ui
+    from nicegui import ui
+
+    import bus_client
+
+    bus_client.reset()
+    calls, callbacks = [], []
+    monkeypatch.setattr(bus_client, "request",
+                        lambda domain, command: calls.append((domain, command)))
+    monkeypatch.setattr(ng_ui, "timer", _make_capturing_timer(callbacks))
+    with ui.card() as card:
+        em.render()
+    return card, calls, _page_polls(callbacks)[0]
+
+
+def _draws(calls):
+    return [c[1]["args"] for c in calls if c[1].get("type") == "expected_move"]
+
+
+def _land_chain(symbol, spot, expiries, strikes):
+    import bus_client
+
+    bus_client.bus().cache_set("cache:options:em_chain", {
+        "symbol": symbol, "api": symbol, "spot": spot, "expirations": expiries,
+        "strikes": {e: strikes for e in expiries}, "error": None})
+
+
+def _enter(inp):
+    from nicegui.events import GenericEventArguments
+    (listener,) = [l for l in inp._event_listeners.values() if l.type == "keydown.enter"]
+    listener.handler(GenericEventArguments(sender=inp, client=inp.client, args=None))
+
+
+def test_the_page_opens_on_the_shared_position_and_draws_its_strikes(monkeypatch):
+    from nicegui import ui
+
+    handoff.take_pending_expected_move()
+    _ic_position()
+    before = SP.current()
+    card, calls, poll = _render_recording(monkeypatch)
+
+    assert _find(card, ui.input, "Symbol").value == "SPY"
+    assert _find(card, ui.select, "Expiry").value == "2026-09-18"
+    (draw,) = _draws(calls)
+    assert draw["symbol"] == "SPY" and draw["expiry"] == "2026-09-18"
+    assert draw["legs"] == _ic_lines()
+    # The chain lands: the four strikes stand, no nearest-spot default.
+    _land_chain("SPY", 550.0, ["2026-09-18"], [535.0, 540.0, 550.0, 560.0, 565.0])
+    poll()
+    assert _find(card, ui.select, "Strike (optional)").value is None
+    assert SP.current() == before, "opening the page is not an edit"
+
+
+def test_a_hand_off_wins_over_the_shared_position(monkeypatch):
+    _ic_position()
+    handoff.set_pending_expected_move({"symbol": "QQQ", "expiry": "2026-09-18",
+                                       "legs": [{"strike": 470.0, "option_type": "put",
+                                                 "side": "short"}]})
+    _card, calls, _poll = _render_recording(monkeypatch)
+    (draw,) = _draws(calls)
+    assert draw["symbol"] == "QQQ"
+    # ...and what the hand-off drew is what the other two tabs open with.
+    assert SP.current()["symbol"] == "QQQ"
+    assert SP.current()["strategy"] == "NAKED_PUT"
+
+
+def test_a_new_expiry_keeps_drawing_the_spread_and_moves_the_shared_legs(monkeypatch):
+    from nicegui import ui
+
+    handoff.take_pending_expected_move()
+    _ic_position()
+    card, calls, poll = _render_recording(monkeypatch)
+    _land_chain("SPY", 550.0, ["2026-09-18", "2026-10-16"],
+                [535.0, 540.0, 550.0, 560.0, 565.0])
+    poll()
+
+    _find(card, ui.select, "Expiry").value = "2026-10-16"     # a real pick
+
+    draw = _draws(calls)[-1]
+    assert draw["expiry"] == "2026-10-16"
+    assert draw["legs"] == _ic_lines(), "a new expiry must not wipe the lines"
+    pos = SP.current()
+    assert pos["expiry"] == "2026-10-16" and pos["strategy"] == "IC"
+    assert {l["expiry"] for l in pos["legs"]} == {"2026-10-16"}
+    assert {l["qty"] for l in pos["legs"]} == {2}
+
+
+def test_a_picked_strike_becomes_the_shared_position(monkeypatch):
+    from nicegui import ui
+
+    handoff.take_pending_expected_move()
+    _ic_position()
+    card, _calls, poll = _render_recording(monkeypatch)
+    _land_chain("SPY", 550.0, ["2026-09-18"], [535.0, 540.0, 550.0, 560.0, 565.0])
+    poll()
+
+    _find(card, ui.select, "Strike (optional)").value = 550.0
+    pos = SP.current()
+    assert pos["strategy"] == "NAKED_PUT"
+    assert [(l["option_type"], l["side"], l["strike"]) for l in pos["legs"]] == [
+        ("put", "short", 550.0)]
+
+    # The put/call toggle carries no label of its own.
+    toggle = next(el for el in _descendants(card) if isinstance(el, ui.toggle))
+    toggle.value = "call"
+    assert SP.current()["strategy"] == "NAKED_CALL"
+
+
+def test_a_symbol_the_reader_loads_is_shared_and_the_start_up_load_is_not(monkeypatch):
+    from nicegui import ui
+
+    handoff.take_pending_expected_move()
+    card, calls, _poll = _render_recording(monkeypatch)
+    assert any(c[1].get("type") == "em_chain" for c in calls)
+    assert SP.current() is None, "the page's own SPY load is not an edit"
+
+    symbol_in = _find(card, ui.input, "Symbol")
+    symbol_in.value = "qqq"
+    _enter(symbol_in)
+    assert SP.current() == {"symbol": "QQQ", "strategy": None, "legs": [],
+                            "expiry": None}
+
+
+def test_a_chain_for_another_symbol_retires_the_handed_strikes(monkeypatch):
+    from nicegui import ui
+
+    handoff.take_pending_expected_move()
+    _ic_position()
+    card, calls, poll = _render_recording(monkeypatch)
+    _find(card, ui.input, "Symbol").value = "QQQ"
+    _land_chain("QQQ", 370.0, ["2026-09-18"], [365.0, 370.0, 375.0])
+    poll()
+
+    draw = _draws(calls)[-1]
+    assert draw["symbol"] == "QQQ"
+    assert draw["legs"] == [{"strike": 370.0, "option_type": "put", "side": "short"}], \
+        "SPY's strikes are not QQQ's: the nearest-spot default takes over"
+    # ...but that default is a convenience, not a position: the other two tabs
+    # get QQQ with the strategy kept and their own template's strikes.
+    assert SP.current() == {"symbol": "QQQ", "strategy": "IC", "legs": [],
+                            "expiry": "2026-09-18"}

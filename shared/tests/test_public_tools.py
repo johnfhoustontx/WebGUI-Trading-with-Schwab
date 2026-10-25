@@ -24,8 +24,30 @@ def test_two_streams_neither_the_owners_nor_rescues():
 def test_every_request_kind_is_on_exactly_one_stream():
     assert set(pt.TOOLS_KINDS) & set(pt.MATH_KINDS) == set()
     assert set(pt.TOOLS_KINDS) == {"chain", "expiry", "rate", "sim_snapshot",
-                                   "sim_expiry"}
+                                   "sim_expiry", "em"}
     assert set(pt.MATH_KINDS) == {"price", "iv", "sweep"}
+
+
+def test_an_expected_move_request_is_symbol_expiration_and_window_only():
+    """The Expected Move chart (2026-10-24). Its strike lines are drawn by the
+    page, so no leg reaches the request or its key: two visitors on one
+    symbol, expiration and window share one fetch."""
+    import datetime as dt
+    today = dt.date(2026, 9, 21)
+    cmd = pt.tools_command({"kind": "em", "symbol": " spy ", "expiry": "2026-10-02",
+                            "lookback": "3mo", "legs": [{"strike": 500}]}, today)
+    assert cmd == {"type": pt.TOOLS_TYPE,
+                   "args": {"kind": "em", "symbol": "SPY", "expiry": "2026-10-02",
+                            "lookback": "3mo"}}
+    bare = pt.tools_command({"kind": "em", "symbol": "SPY", "expiry": "2026-10-02"},
+                            today)
+    assert bare["args"]["lookback"] == "auto"
+    for bad in ({"lookback": "5y"}, {"lookback": ["auto"]}, {"lookback": None},
+                {"expiry": "soon"}, {"expiry": None}, {"symbol": "../x"}):
+        raw = {"kind": "em", "symbol": "SPY", "expiry": "2026-10-02", **bad}
+        assert pt.tools_command(raw, today) is None, bad
+    assert pt.math_command({"kind": "em", "symbol": "SPY",
+                            "expiry": "2026-10-02"}, today) is None
 
 
 def test_the_shipped_file_matches_the_defaults():

@@ -1499,8 +1499,8 @@ z
   commands. It imports no engine and makes no Schwab call. <code>webgui/live_main.py</code>
   (:8501) is a second Tier-1 process: the same page modules, published read-only
   and unauthenticated. It reads and subscribes, and writes only through its three
-  public request paths (the Strategy Finder, Rescue, and the Calculator and
-  Simulator), each an append-only stream. Caddy fronts
+  public request paths (the Strategy Finder, Rescue, and the Strategy Tools:
+  the Calculator, Simulator and Expected Move), each an append-only stream. Caddy fronts
   both: <code>app.</code> with password and TOTP, <code>live.</code> with no login.</li>
 <li><strong>Tier 3, store and communication.</strong> Redis (:6379) holds <code>cache:{domain}:{view}</code>,
   the <code>events:{domain}:{view}</code> pub/sub channels and the <code>cmd:{domain}</code> command

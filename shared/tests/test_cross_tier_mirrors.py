@@ -674,6 +674,19 @@ def test_the_desk_glow_fallback_is_the_market_read_default():
         "webgui/pages/desk.py:GLOW_FRESH_MIN.")
 
 
+# --- the Expected Move chart's look-back windows (2026-10-24) -------------------
+# The private page's menu, the public request validator and the engine's fixed
+# windows name one set. A key the validator lacks is a menu entry the public
+# page cannot send; one the engine lacks is quietly drawn as ``auto``.
+def test_the_expected_move_look_backs_agree_across_tiers():
+    page = [key for key, _label in _const("webgui/pages/options/expected_move.py",
+                                          "EM_LOOKBACKS")]
+    public = list(_const("shared/public_tools.py", "EM_LOOKBACKS"))
+    engine = ["auto"] + list(_const("services/options_svc/compute.py",
+                                    "_EM_OVERRIDES"))
+    assert page and page == public == engine, (page, public, engine)
+
+
 def test_the_breadth_pin_is_the_same_payload_in_both_tiers():
     """Each tier counts BREADTH_PIN in its own suite and expects (3, 2). That
     proves nothing unless the two payloads are one payload."""

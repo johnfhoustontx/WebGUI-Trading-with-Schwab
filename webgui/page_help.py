@@ -903,12 +903,15 @@ Re-prices a **multi-leg** option position under different what-ifs (Black-Schole
 Draws how far the market **expects** a symbol to move by an option's expiration —
 the ±1 standard-deviation cone.
 
-- **Symbol + Expiry** — the chart shows recent candles plus the dashed
-  expected-move bands.
+- **Symbol + Expiry** — the chart shows recent candles plus the upper and lower
+  expected-move lines.
 - **Strike lines** — your short/long strikes overlaid. Strikes **outside** the cone
   are ones the market thinks are unlikely to be reached (good for sellers).
 - **Look-back** — how much history to show. A wider cone means higher implied
   volatility.
+- **One position with the Calculator and Simulator** — it opens on their symbol,
+  expiry and strikes; a symbol, expiry or strike you pick here is what they open
+  with next.
 """,
     "/options/rescue": """
 **Rescue — the simple version**

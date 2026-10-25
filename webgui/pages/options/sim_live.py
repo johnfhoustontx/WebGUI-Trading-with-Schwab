@@ -53,6 +53,7 @@ from . import public_handoff
 from . import sim_view as sv
 from . import simulator as _sim
 from . import strategies
+from . import strategy_strip
 from . import theme as _t
 from .pub_chain_view import (LEG_SCROLL, LEG_TABLE_MIN, ladder_strikes,
                              snapshot_listed, snapshot_loaded)
@@ -246,6 +247,8 @@ def render():
     tile_refs: dict = {}
 
     with kit.page():
+        # The three public Strategy Tools' tab strip (the site's one menu item).
+        strategy_strip.render("/options/simulator")
         kit.header(TITLE)
         ui.label(intro_text(window, _after_hours.state(_calc_live.WINDOW)[1])
                  ).classes(f"text-sm {_t.MUTED}")

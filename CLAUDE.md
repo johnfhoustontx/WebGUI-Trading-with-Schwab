@@ -333,8 +333,8 @@ is data in `webgui/live_screens.py`.
   page import.
 - Exactly three write paths exist, each one XADD-only stream with its own worker
   loop: the Strategy Finder (`cmd:finder_public`), the Rescue form
-  (`cmd:rescue_public`), and the Calculator/Simulator (`cmd:tools_public`,
-  `cmd:tools_public_math`). `test_bus_client.py` pins the set of writers.
+  (`cmd:rescue_public`), and the Strategy Tools - Calculator, Simulator and
+  Expected Move (`cmd:tools_public`, `cmd:tools_public_math`). `test_bus_client.py` pins the set of writers.
 - ⚠ Redis is readable by the public process, so a quote written there is a quote
   published. A new public reader of the news feed or of flow alerts must take the
   public view or the `flow._shown` filter; the ACL is no layer for those.

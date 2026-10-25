@@ -37,7 +37,7 @@ CLOSED = dt.datetime(2026, 9, 21, 16, 30, tzinfo=CT)
 NEAR, MID, FAR = "2026-10-02", "2026-10-09", "2027-01-15"
 LISTED = [NEAR, MID, "2026-10-16", FAR]
 STRIKES = (495.0, 500.0, 505.0)
-SCHWAB = ("load", "fetch", "rate", "snapshot", "sim_fetch_expiry")
+SCHWAB = ("load", "fetch", "rate", "snapshot", "sim_fetch_expiry", "em_history")
 
 
 def _chain(expiries):
@@ -152,6 +152,16 @@ def schwab(monkeypatch):
     monkeypatch.setattr(compute, "calc_compute", calc)
     monkeypatch.setattr(compute, "calc_iv", calc_iv)
     monkeypatch.setattr(compute, "sim_run", sim_run)
+
+    def em_history(api, spec):
+        calls.append(("em_history", api, spec.get("mode")))
+        return [list(c) for c in Stub.em_candles]
+
+    # Two daily bars, the Thursday and Friday before OPEN (midnight CT epochs).
+    Stub.em_candles = [
+        [int(dt.datetime(2026, 9, d, tzinfo=CT).timestamp() * 1000),
+         500.0, 504.0, 497.0, 501.0] for d in (17, 18)]
+    monkeypatch.setattr(compute, "_fetch_em_candles", em_history)
     monkeypatch.setattr(tp, "_now", lambda: Stub.now)
     monkeypatch.setattr(rp, "_now", lambda: Stub.now)
     Stub.calls = calls
@@ -295,7 +305,8 @@ def _every_tools_request():
             dict(kind="expiry", symbol="SPY", expiry=FAR),
             dict(kind="rate", symbol="SPY", structure="PCS", legs=_calc_legs()),
             dict(kind="sim_snapshot", symbol="SPY"),
-            dict(kind="sim_expiry", symbol="SPY", expiry=FAR)]
+            dict(kind="sim_expiry", symbol="SPY", expiry=FAR),
+            dict(kind="em", symbol="SPY", expiry=NEAR, lookback="auto")]
 
 
 @pytest.mark.parametrize("age", [10_000, -3600])
@@ -1391,3 +1402,165 @@ def test_snapshot_meta_spot_is_rounded_like_the_public_chain(bus, schwab, monkey
     held = _tool(kind="sim_expiry", symbol="SPY", expiry=MID)
     tp.handle_tools(bus, held)
     assert _answer(bus, held) == "cached" and _result(bus, held)["spot"] == 502.37
+
+
+# ── em: the Expected Move chart (2026-10-24) ────────────────────────────────
+# One Schwab call per cone, the price history: the chain is the one this worker
+# already holds for the Calculator, and its spot is that chain's.
+
+def _vol_chain(vols):
+    """A held chain whose contracts carry Schwab's ``volatility`` (a percent),
+    per expiration; an expiration mapped to None has strikes but no vol."""
+    def maps():
+        return {f"{e}:9": {f"{k:.1f}": [{"bid": 1.0, "ask": 1.2, "mark": 1.1,
+                                         "volatility": v}]
+                           for k in STRIKES} for e, v in vols.items()}
+    return {"callExpDateMap": maps(), "putExpDateMap": maps()}
+
+
+def _hold_vols(vols):
+    public_chain.hold("SPY", {**public_chain.held("SPY"), "chain": _vol_chain(vols)})
+
+
+def _em_cmd(**over):
+    args = dict(kind="em", symbol="SPY", expiry=NEAR, lookback="auto")
+    args.update(over)
+    return _tool(**args)
+
+
+def _midnight_ms(day):
+    return int(dt.datetime(day.year, day.month, day.day, tzinfo=CT).timestamp() * 1000)
+
+
+def test_a_cone_costs_one_history_fetch_and_is_sized_off_the_held_chain(bus, schwab):
+    _load_chain(bus)
+    _hold_vols({NEAR: 21.0, MID: 30.0})
+    schwab.calls.clear()
+    cmd = _em_cmd()
+    tp.handle_tools(bus, cmd)
+    assert _answer(bus, cmd) == "done"
+    assert _schwab_calls(schwab) == [("em_history", "SPY", "daily")]
+    assert public_budget.status(bus, OPEN)["by_kind"] == {"chain": 1, "em": 1}
+    res = _result(bus, cmd)
+    assert res["atm_iv"] == 0.21, "NEAR's own volatility, not MID's"
+    assert res["spot"] == 502.37 and res["dte"] == 11
+    assert res["candles"] == schwab.em_candles
+    # Anchored TODAY (Schwab's daily history ends Friday) at today's spot.
+    assert res["em_upper"][0] == [_midnight_ms(OPEN.date()), 502.37]
+    assert res["em_upper"][-1][1] > 502.37 > res["em_lower"][-1][1]
+    assert res["lookback"] == {"label": "daily · 33d", "key": "auto"}
+
+
+def test_a_cone_publishes_no_contracts_quote(bus, schwab):
+    _load_chain(bus)
+    _hold_vols({NEAR: 21.0})
+    cmd = _em_cmd()
+    tp.handle_tools(bus, cmd)
+    text = repr(_result(bus, cmd))
+    for word in ("bid", "ask", "mark", "delta", "volatility"):
+        assert word not in text, word
+
+
+def test_a_second_ask_for_the_same_cone_is_cached(bus, schwab):
+    _load_chain(bus)
+    _hold_vols({NEAR: 21.0})
+    tp.handle_tools(bus, _em_cmd())
+    schwab.calls.clear()
+    again = _em_cmd()
+    tp.handle_tools(bus, again)
+    assert _answer(bus, again) == "cached"
+    assert _schwab_calls(schwab) == [] and _spent(bus) == 2
+
+
+def test_another_look_back_is_another_cone(bus, schwab):
+    _load_chain(bus)
+    _hold_vols({NEAR: 21.0})
+    tp.handle_tools(bus, _em_cmd())
+    year = _em_cmd(lookback="1y")
+    tp.handle_tools(bus, year)
+    assert _answer(bus, year) == "done"
+    assert _result(bus, year)["lookback"]["key"] == "1y"
+
+
+def test_a_cone_with_no_chain_held_is_load_first(bus, schwab):
+    cmd = _em_cmd()
+    tp.handle_tools(bus, cmd)
+    assert _answer(bus, cmd) == "load_first"
+    assert _schwab_calls(schwab) == [] and _spent(bus) == 0
+
+
+def test_a_cone_for_an_expiration_whose_strikes_are_not_held_is_load_first(
+        bus, schwab):
+    """Listed, but the lazy chain holds no strikes for it yet: the page asks
+    for the expiration first, as the Calculator does."""
+    _load_chain(bus)
+    schwab.calls.clear()
+    cmd = _em_cmd(expiry="2026-10-16")
+    tp.handle_tools(bus, cmd)
+    assert _answer(bus, cmd) == "load_first"
+    assert _schwab_calls(schwab) == [] and _spent(bus) == 1
+
+
+def test_a_cone_for_an_unlisted_expiration_is_not_listed(bus, schwab):
+    _load_chain(bus)
+    schwab.calls.clear()
+    cmd = _em_cmd(expiry="2026-10-23")
+    tp.handle_tools(bus, cmd)
+    assert _answer(bus, cmd) == "not_listed"
+    assert _schwab_calls(schwab) == [] and _spent(bus) == 1
+
+
+def test_no_volatility_on_the_expiration_is_an_error_never_another_expirations(
+        bus, schwab):
+    """``atm_iv_from_chain`` alone would fall back to the nearest expiration
+    with a volatility - here MID's 30% - and draw NEAR's cone from it."""
+    _load_chain(bus)
+    _hold_vols({NEAR: None, MID: 30.0})
+    cmd = _em_cmd()
+    tp.handle_tools(bus, cmd)
+    assert _answer(bus, cmd) == "error"
+    env = bus.cache_get(pt.cache_key(pt.answer_view(_key(cmd))))
+    assert "expected move" in env.payload["error_text"]
+    assert _result(bus, cmd) is None, "a failure is never cached"
+
+
+def test_no_price_history_is_an_error(bus, schwab):
+    _load_chain(bus)
+    _hold_vols({NEAR: 21.0})
+    schwab.em_candles = []
+    cmd = _em_cmd()
+    tp.handle_tools(bus, cmd)
+    assert _answer(bus, cmd) == "error" and _result(bus, cmd) is None
+
+
+def test_a_cone_drops_a_bar_it_cannot_write(bus, schwab):
+    _load_chain(bus)
+    _hold_vols({NEAR: 21.0})
+    schwab.em_candles = schwab.em_candles + [[1, float("nan"), 1.0, 1.0, 1.0]]
+    cmd = _em_cmd()
+    tp.handle_tools(bus, cmd)
+    assert len(_result(bus, cmd)["candles"]) == 2
+
+
+def test_a_cone_outside_the_window_is_closed(bus, schwab, monkeypatch):
+    _load_chain(bus)
+    _hold_vols({NEAR: 21.0})
+    _after_hours(monkeypatch, False)
+    schwab.now = CLOSED
+    schwab.calls.clear()
+    cmd = _em_cmd(now=CLOSED)
+    tp.handle_tools(bus, cmd)
+    assert _answer(bus, cmd) == "closed"
+    assert _schwab_calls(schwab) == []
+
+
+def test_the_cone_is_anchored_at_the_last_bar_before_the_open_and_on_a_weekend():
+    friday = _midnight_ms(dt.date(2026, 9, 18))
+    early = dt.datetime(2026, 9, 21, 7, 0, tzinfo=CT)
+    saturday = dt.datetime(2026, 9, 19, 11, 0, tzinfo=CT)
+    assert tp.em_anchor_ms(friday, early) == friday
+    assert tp.em_anchor_ms(friday, saturday) == friday
+    assert tp.em_anchor_ms(friday, OPEN) == _midnight_ms(OPEN.date())
+    # A history that already reaches today is never moved back.
+    later = _midnight_ms(OPEN.date()) + 1
+    assert tp.em_anchor_ms(later, OPEN) == later

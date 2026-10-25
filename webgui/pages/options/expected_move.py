@@ -5,7 +5,11 @@ and version-polls ``options:expected_move``; the cone + candles + ATM IV are all
 computed in ``services/options_svc``. Pure figure builders are unit-tested.
 
 Reached via a new-browser-tab handoff (handoff.send_to_expected_move) from the
-Scanner / Paper / Captured / Calculator pages, or standalone from the nav.
+Scanner / Paper / Captured / Calculator pages, or as the third tab of Strategy
+Tools (2026-10-24), beside the Calculator and the Simulator. It shares their ONE
+position (``shared_position``): it opens on the symbol, expiry and strikes they
+were last showing, and a symbol, expiry or strike picked here is what they open
+with next. Look-back is this page's own.
 Chart is Highcharts candlestick (extras=["stock"], which also provides the axis
 crosshair label boxes).
 
@@ -224,8 +228,14 @@ def expected_move_figure(payload, timeframe="daily", legs=None):
     }
 
 
-def render():
+def render(public=False):
     """Build the Expected Move page: input row + persistent candlestick chart.
+
+    ``public=True`` is the PUBLIC site's Expected Move (``em_live``, 2026-10-24),
+    answered through the public tools stream. It returns before this page
+    builds anything, so the owner's ``em_chain`` / ``expected_move`` commands
+    and the single-user ``shared_position`` never exist on the public origin.
+    Every function here that enqueues opens with ``if not _may_enqueue: return``.
 
     Expiry and strike are now **chain-driven dropdowns**: typing a symbol loads
     its live expirations (an ``em_chain`` command → ``cache:options:em_chain``),
@@ -244,6 +254,14 @@ def render():
     UNCHANGED symbol now reloads its expirations where it used to do nothing.
     That is the standard's intent — Enter is the reader pressing Load — and it
     costs one ``em_chain`` command. Tab-out keeps its dedup either way."""
+    if public:
+        from . import em_live
+        return em_live.render()
+    # The private page on the public origin would be a bug: nothing routes it
+    # there (the public screen passes public=True). The gate is the belt the
+    # live-commands guard asks every published module for - the Calculator's.
+    import shell as _shell_gate
+    _may_enqueue = _shell_gate.may_enqueue()
     from nicegui import ui
 
     import bus_client
@@ -254,6 +272,7 @@ def render():
     from pages.ui_guard import guard
 
     from . import handoff
+    from . import shared_position as _shared
 
     # "chain" holds the last-loaded ``cache:options:em_chain`` payload (expiries
     # + per-expiry strike ladders); "payload" holds the last expected-move result
@@ -272,12 +291,17 @@ def render():
     # with each other; it suppresses on_value_change while THIS code (not the
     # user) writes strike_sel.value in _fill_strikes.
     # "preserve_handed_legs" is True while there is a handed (Scanner/Paper/
-    # Captured/Calculator) leg list on screen that a silent strike default must
-    # not be allowed to clobber — see _fill_strikes + the handoff block below.
+    # Captured/Calculator, or the shared position) leg list on screen that a
+    # silent strike default must not be allowed to clobber — see _fill_strikes
+    # + the handoff block below. "handed_legs" / "handed_symbol" are that list
+    # and the symbol its strikes belong to: a Draw keeps drawing it (a new
+    # expiry no longer wipes a spread's lines) until the reader picks a strike
+    # or a chain for another symbol lands.
     state = {"ver": None, "chain_ver": None, "last": None,
              "payload": None, "chain": {}, "seeding": False,
              "drawn_symbol": None, "strike_touched": False,
-             "strike_seeding": False, "preserve_handed_legs": False}
+             "strike_seeding": False, "preserve_handed_legs": False,
+             "handed_legs": None, "handed_symbol": None}
 
     with kit.page():
         # ⚠ ``stale=False``. ``options:expected_move`` is REQUEST/RESPONSE — the
@@ -289,7 +313,8 @@ def render():
         kit.header("Expected Move", view="options:expected_move", stale=False)
 
         with kit.control_bar():
-            symbol_in = kit.symbol_field(value="SPY", on_load=lambda: _load_chain())
+            symbol_in = kit.symbol_field(value="SPY",
+                                         on_load=lambda: _load_chain(user=True))
             expiry_sel = kit.select_field("Expiry", {}, with_input=True,
                                           width="w-56")
             strike_sel = kit.select_field("Strike (optional)", {}, with_input=True,
@@ -364,6 +389,16 @@ def render():
         return [{"strike": float(strike_sel.value),
                  "option_type": type_tog.value, "side": "short"}]
 
+    def _drawn_legs():
+        """The legs a Draw sends: the handed list while it still stands (see
+        "handed_legs" above), else the strike/type selection."""
+        if state["preserve_handed_legs"] and state["handed_legs"]:
+            return [dict(l) for l in state["handed_legs"]]
+        if strike_sel.value is None:
+            return []
+        return [{"strike": float(strike_sel.value),
+                 "option_type": type_tog.value, "side": "short"}]
+
     def _repaint(payload=None):
         """Repaint from the SERVICE's own legs (a poll landing a fresh result).
 
@@ -394,6 +429,8 @@ def render():
 
     @guard
     def _enqueue(payload):
+        if not _may_enqueue:
+            return
         # ⚠ A refusal, no longer a message. "Symbol + expiry required." was FIELD
         # VALIDATION delivered as an outcome toast, and the Draw button is now
         # simply held disabled until both are set (``kit.gate`` below), so there
@@ -411,13 +448,21 @@ def render():
         state["drawn_symbol"] = payload["symbol"]
         args = {**payload, "lookback": lookback_sel.value}
         bus_client.request("options", {"type": "expected_move", "args": args})
+        # What is drawn is the position the Calculator and the Simulator open
+        # with next. ``merge_view`` keeps what this page cannot see (quantities,
+        # prices, share legs), and an unchanged draw changes nothing. The strike
+        # the page pre-selects nearest spot is a convenience, not a position:
+        # only a handed list or a strike the reader picked is shared.
+        named = state["strike_touched"] or state["preserve_handed_legs"]
+        _shared.publish_view(payload["symbol"], payload["expiry"],
+                             payload.get("legs") if named else None)
         status.text = f"Computing expected move for {payload['symbol']}…"
         _wait_start("compute", f"Computing expected move for {payload['symbol']}…")
 
     @guard
     def _draw():
         _enqueue({"symbol": (symbol_in.value or "").replace("$", "").upper(),
-                  "expiry": expiry_sel.value or "", "legs": _current_legs()})
+                  "expiry": expiry_sel.value or "", "legs": _drawn_legs()})
 
     @guard
     def _lookback_changed():
@@ -436,10 +481,16 @@ def render():
         _enqueue(payload)
 
     @guard
-    def _load_chain():
+    def _load_chain(user=False):
+        if not _may_enqueue:
+            return
         sym = (symbol_in.value or "").replace("$", "").upper()
         if not sym:
             return
+        if user:
+            # A symbol the reader loads is shared at once, before any expiry is
+            # picked; the page's own start-up load is not an edit.
+            _shared.publish_view(sym, None)
         bus_client.request("options", {"type": "em_chain", "args": {"symbol": sym}})
         status.text = f"Loading {sym} expirations…"
         _wait_start("chain", f"Loading {sym} expirations…")
@@ -463,6 +514,9 @@ def render():
             # payload's legs no longer need silent-default protection either
             # (see _fill_strikes) — a later symbol switch is free to re-default.
             state["preserve_handed_legs"] = False
+            # A picked strike is a one-leg position the Strategy Tools share.
+            _shared.publish_view(symbol_in.value, expiry_sel.value,
+                                 _current_legs())
         _repaint_local()
 
     def _fill_strikes():
@@ -515,6 +569,12 @@ def render():
         if meta.get("error"):
             status.text = meta["error"]
             return
+        chain_symbol = meta.get("symbol")
+        if chain_symbol and chain_symbol != state["handed_symbol"]:
+            # The handed strikes belong to another symbol: from here the
+            # strike ladder and its nearest-spot default are this chain's.
+            state["preserve_handed_legs"] = False
+            state["handed_legs"] = None
         keep = expiry_sel.value
         # Re-pointing the select at its OWN current value is a no-op in NiceGUI
         # (on_value_change only fires on an actual change), so this seeding guard
@@ -540,7 +600,6 @@ def render():
         # moved, whenever the just-loaded chain names a different symbol than
         # the one the chart is currently drawn for. No-op until an expiry is
         # actually selected (nothing to draw yet).
-        chain_symbol = meta.get("symbol")
         if chain_symbol and chain_symbol != state["drawn_symbol"] and expiry_sel.value:
             _draw()
 
@@ -567,7 +626,15 @@ def render():
             _apply_chain(v["options:em_chain"])
             _wait_done("chain")
 
+    # A hand-off wins; otherwise the page opens on the position the Calculator
+    # and the Simulator share, drawn exactly as a hand-off would be.
     pending = handoff.take_pending_expected_move()
+    if not pending:
+        position = _shared.current()
+        if position:
+            pending = {"symbol": position["symbol"],
+                       "expiry": position.get("expiry"),
+                       "legs": _shared.view_legs(position)}
     if pending:
         symbol_in.value = pending.get("symbol") or symbol_in.value
         if pending.get("legs"):
@@ -575,6 +642,8 @@ def render():
             # that's about to run (_load_chain -> _apply_chain -> _fill_strikes)
             # untouched by the strike-nearest-spot default — see _fill_strikes.
             state["preserve_handed_legs"] = True
+            state["handed_legs"] = [dict(l) for l in pending["legs"]]
+            state["handed_symbol"] = (symbol_in.value or "").replace("$", "").upper()
         if pending.get("expiry"):
             # Seed the select with the handed expiry so it shows BEFORE the
             # chain lands; _apply_chain keeps it if the real list contains it.

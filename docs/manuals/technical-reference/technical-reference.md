@@ -260,8 +260,8 @@ Redis backbone. No two Tier-2 services talk to each other directly.
   commands. It imports no engine and makes no Schwab call. `webgui/live_main.py`
   (:8501) is a second Tier-1 process: the same page modules, published read-only
   and unauthenticated. It reads and subscribes, and writes only through its three
-  public request paths (the Strategy Finder, Rescue, and the Calculator and
-  Simulator), each an append-only stream. Caddy fronts
+  public request paths (the Strategy Finder, Rescue, and the Strategy Tools:
+  the Calculator, Simulator and Expected Move), each an append-only stream. Caddy fronts
   both: `app.` with password and TOTP, `live.` with no login.
 - **Tier 3, store and communication.** Redis (:6379) holds `cache:{domain}:{view}`,
   the `events:{domain}:{view}` pub/sub channels and the `cmd:{domain}` command

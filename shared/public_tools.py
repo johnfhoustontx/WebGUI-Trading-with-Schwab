@@ -1,4 +1,7 @@
-"""The public Calculator and Simulator's requests, their keys, and its config.
+"""The public Strategy Tools' requests, their keys, and its config.
+
+The three tools are the Calculator, the Simulator and (since 2026-10-24) the
+Expected Move chart, the site's Strategy Tools.
 
 The public live origin (``webgui/live_main.py``) is read-only by four layers,
 with a short list of named writes: the Strategy Finder's scan request
@@ -11,7 +14,8 @@ Design: docs/plans/2026-09-21-public-calculator-simulator-design.md.
 Two streams, and the split is the point:
 
 * ``TOOLS_STREAM`` - requests that SPEND Schwab calls: a symbol's chain, one
-  more expiration, a trade rating, a Simulator snapshot and its expirations.
+  more expiration, a trade rating, a Simulator snapshot and its expirations,
+  and an expected-move cone (``em``: the price history it is drawn over).
 * ``MATH_STREAM`` - pure pricing over data already held: reprice a position,
   imply one contract's volatility, run a Simulator what-if sweep.
 
@@ -53,7 +57,7 @@ TOOLS_STREAM = "cmd:tools_public"
 MATH_STREAM = "cmd:tools_public_math"
 TOOLS_TYPE = "public_tool"
 MATH_TYPE = "public_math"
-TOOLS_KINDS = ("chain", "expiry", "rate", "sim_snapshot", "sim_expiry")
+TOOLS_KINDS = ("chain", "expiry", "rate", "sim_snapshot", "sim_expiry", "em")
 MATH_KINDS = ("price", "iv", "sweep")
 
 STATUS_VIEW = "options:tools_public_status"
@@ -266,6 +270,15 @@ def _math_args(raw, today):
     return None if any(v is None for v in args.values()) else args
 
 
+# The Expected Move chart's look-back menu: ``auto`` sizes the history to the
+# expiration (``compute.em_lookback_spec``), the rest are fixed daily windows.
+# The private page's own keys (``expected_move.EM_LOOKBACKS``), pinned equal by
+# ``shared/tests/test_cross_tier_mirrors.py``. Anything else refuses the request,
+# so a visitor cannot name a window the engine would treat as ``auto`` under a
+# key of its own.
+EM_LOOKBACKS = ("auto", "1mo", "3mo", "6mo", "1y")
+
+
 # A reloading page needs its legs' expirations and no more; each one is Schwab
 # work the visitor chooses, so two is the cap.
 MAX_SNAPSHOT_EXPIRIES = 2
@@ -306,6 +319,13 @@ def _tools_args(raw, today):
         return args
     if kind in ("expiry", "sim_expiry"):
         args["expiry"] = _pr.clean_expiry(raw.get("expiry"), today)
+    elif kind == "em":
+        # No legs: the strike lines are drawn by the page over the cone, so
+        # they cost the service nothing and stay out of the request key - two
+        # visitors on one symbol, expiration and window share one fetch.
+        lookback = raw.get("lookback", "auto")
+        args["expiry"] = _pr.clean_expiry(raw.get("expiry"), today)
+        args["lookback"] = lookback if lookback in EM_LOOKBACKS else None
     elif kind == "rate":
         args["structure"] = _known_code(raw.get("structure"))
         args["legs"] = _clean_legs(raw.get("legs"), _clean_calc_leg, today)

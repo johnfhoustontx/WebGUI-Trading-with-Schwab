@@ -1336,11 +1336,14 @@ def test_strategy_tools_group_pairs_calculator_with_simulator():
     """Calculator + Simulator are the app's two modelling tools — they share the leg
     editor, the strategy templates, the page-state snapshot and a Copy-to-each-other
     button, so they live under ONE rail item with two tabs instead of straddling two
-    nav levels (Calculator was a standalone rail page, Simulator an Options tab)."""
+    nav levels (Calculator was a standalone rail page, Simulator an Options tab).
+    Expected Move joined them as the third tab on 2026-10-24: it shares their
+    position, and keeps its route so every hand-off still lands."""
     import main
     assert main.STRATEGY_TOOLS_CHILDREN == [
         ("/options/calculator", "Calculator", "calculate"),
         ("/options/simulator", "Simulator", "science"),
+        ("/options/expected-move", "Expected Move", "candlestick_chart"),
     ]
     # It is a GROUP, so both pages get the tab strip (rail pages get none).
     for route, _l, _i in main.STRATEGY_TOOLS_CHILDREN:
@@ -1348,6 +1351,8 @@ def test_strategy_tools_group_pairs_calculator_with_simulator():
     # ...and the breadcrumb reads "Strategy › Strategy Tools › <page>".
     assert main.breadcrumb_trail("/options/simulator") == [
         "Strategy", "Strategy Tools", "Simulator"]
+    assert main.breadcrumb_trail("/options/expected-move") == [
+        "Strategy", "Strategy Tools", "Expected Move"]
 
 
 def test_strategy_tools_moved_out_of_their_old_homes():
@@ -1355,10 +1360,11 @@ def test_strategy_tools_moved_out_of_their_old_homes():
     import main
     assert not [r for r, _l, _i in main.OPTIONS_CHILDREN if r == "/options/simulator"]
     assert not [r for r, _l, _i in main.OPTIONS_RAIL if r == "/options/calculator"]
+    assert not [r for r, _l, _i in main.OPTIONS_CHILDREN
+                if r == "/options/expected-move"]
     # The Options strip keeps its find -> analyze -> track -> repair workflow.
     assert [r for r, _l, _i in main.OPTIONS_CHILDREN] == [
-        "/options/scanner", "/options/income",
-        "/options/expected-move", "/options/captured",
+        "/options/scanner", "/options/income", "/options/captured",
         "/options/paper", "/options/portfolio", "/options/shares", "/options/rescue"]
     # The rail keeps the standalone market-wide pages (Flow Alerts joined
     # 2026-08-09, Opening Scalp 2026-10-18, Market News 2026-09-26).

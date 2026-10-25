@@ -779,7 +779,8 @@ OPTIONS_CHILDREN = [
     # longer horizon, which is why it is a tab here and not a new rail group
     # (design doc 2026-09-05, "Menu placement").
     ("/options/income", "Income", "savings"),
-    ("/options/expected-move", "Expected Move", "candlestick_chart"),
+    # Expected Move left this strip on 2026-10-24 for Strategy Tools, where it
+    # shares the Calculator's and the Simulator's position.
     ("/options/captured", "Captured Signals", "bookmark"),
     ("/options/paper", "Paper Ledger", "request_quote"),
     ("/options/portfolio", "Paper Account", "account_balance_wallet"),
@@ -833,10 +834,16 @@ OPTIONS_RAIL = [
 # nav levels (Calculator a standalone rail page, Simulator an Options tab), so the
 # copy button threw you between them. They are deliberately NOT Options tabs: that
 # strip is the find → analyze → track → repair workflow over signals the app
-# FINDS, whereas these two model legs you bring yourself. (route, label, icon)
+# FINDS, whereas these two model legs you bring yourself.
+#
+# Expected Move joined them as the third tab on 2026-10-24: it draws the same
+# position on an implied-volatility cone, and reads and writes the one position
+# the three share (``pages/options/shared_position.py``). Its route keeps its
+# old address, so every hand-off and bookmark still lands. (route, label, icon)
 STRATEGY_TOOLS_CHILDREN = [
     ("/options/calculator", "Calculator", "calculate"),
     ("/options/simulator", "Simulator", "science"),
+    ("/options/expected-move", "Expected Move", "candlestick_chart"),
 ]
 
 # Trade Analyzer became a GROUP on 2026-08-22 (Phase 5): the single-symbol
@@ -2564,14 +2571,14 @@ def options_gamma_page(view: str | None = None, tab: str | None = None) -> None:
 
 @_page("/options/simulator")
 def options_simulator_page() -> None:
-    with _layout("/options/simulator", "Options · Simulator"):
+    with _layout("/options/simulator", "Strategy Tools · Simulator"):
         from pages.options import simulator
         simulator.render()
 
 
 @_page("/options/expected-move")
 def options_expected_move_page() -> None:
-    with _layout("/options/expected-move", "Options · Expected Move"):
+    with _layout("/options/expected-move", "Strategy Tools · Expected Move"):
         from pages.options import expected_move
         expected_move.render()
 

@@ -128,6 +128,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#strategy-what-should-i-trade">STRATEGY — what should I trade?</a><ul>
 <li><a href="#calculator">Calculator</a></li>
 <li><a href="#simulator">Simulator</a></li>
+<li><a href="#expected-move">Expected Move</a></li>
 <li><a href="#market-scanner">Market Scanner</a><ul>
 <li><a href="#using-the-checklist-to-pick-a-trade">Using the checklist to pick a trade</a></li>
 <li><a href="#other-structures">Other structures</a></li>
@@ -138,7 +139,6 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#opening-one-in-the-paper-account">Opening one in the paper account</a></li>
 </ul>
 </li>
-<li><a href="#expected-move">Expected Move</a></li>
 <li><a href="#captured-signals">Captured Signals</a><ul>
 <li><a href="#tracked-structures">Tracked structures</a></li>
 </ul>
@@ -387,13 +387,13 @@ priority) are under Settings → Configuration → <em>Sign-in from the phone</e
 <p><strong>Sitting at the machine itself?</strong> <code>http://127.0.0.1:8500</code> asks for the same
 sign-in; there is no exception for the machine's own browser.</p>
 <h2 id="the-public-live-screens">The public live screens</h2>
-<p>Eighteen of the app's screens are also published <strong>without any sign-in</strong> on
+<p>Nineteen of the app's screens are also published <strong>without any sign-in</strong> on
 a second address, <code>https://live.neuralstrike.co</code> — the Desk,
 Opportunity Board, Flow Alerts, Macro Board, Sentiment, Bull / Bear Map, Sector &amp;
 Industry, Sector Rotation, RRG, Momentum, Net Prem, <strong>Gamma</strong>, the Market Scanner
 (published as <strong>Option Signals</strong>), the <strong>Strategy Finder</strong>, the Rescue ad-hoc
 form (published as <strong>Rescue my Sh*tty trade</strong>), the <strong>Calculator</strong>, the
-<strong>Simulator</strong> and <strong>Market News</strong>.</p>
+<strong>Simulator</strong>, the <strong>Expected Move</strong> and <strong>Market News</strong>.</p>
 <p><strong>Option Signals</strong> (<code>/signals</code>, first in the site's Tools menu) is your Market
 Scanner with nothing of yours on it. A visitor sees the 0-DTE, Swing and
 Directional tabs, the family tick boxes on 0-DTE and Swing, the Checks
@@ -468,7 +468,16 @@ out, since they would publish the position's greeks. It opens on the position
 the Calculator handed over, or a visitor can load a symbol and build one.
 Nothing is kept between visits: the hand-off lives in that browser tab only,
 for up to an hour.</p>
-<p>Both run their chain loads, extra expirations, ratings and Simulator snapshots
+<p>The public <strong>Expected Move</strong> is the fifth: your Expected Move chart. A visitor
+loads a symbol, picks an expiration and sees its cone over the price history,
+with a strike line of their own; a position the Calculator handed over in the
+same tab opens drawn. Its cone costs one Schwab call (the price history): the
+implied volatility comes off the symbol's public chain, the one the Calculator
+loads, and the cone starts at today's price without drawing today's bar. The
+three — <strong>Calculator</strong>, <strong>Simulator</strong>, <strong>Expected Move</strong> — carry one tab strip
+across the top, and the site names them as one item, <strong>Strategy Tools</strong>.</p>
+<p>All three run their chain loads, extra expirations, ratings, Simulator
+snapshots and expected-move cones
 08:40–15:00 CT on trading days, inside the shared daily budget above, and each
 visitor may make 60 of those an hour. Pricing a loaded position spends no
 Schwab call, runs at any time and allows 600 an hour. Their limits are in
@@ -476,7 +485,8 @@ Schwab call, runs at any time and allows 600 an hour. Their limits are in
 budget is under <strong>Public Rescue form → Budget</strong>, because it is one allowance
 behind all three.</p>
 <p><code>https://neuralstrike.co/live.html</code> is a thumbnail menu of them, and the site's
-<strong>Tools</strong> menu links the four screens a visitor can act on, and Market News.</p>
+<strong>Tools</strong> menu links Option Signals, the Strategy Finder, Rescue, <strong>Strategy
+Tools</strong> (it opens the Calculator) and Market News.</p>
 <p>The public <strong>Market News</strong> page is your Market News page — headlines, the SEC
 filings and the calendar, laid out the same way — with every control that belongs to you taken out: no
 Refresh, no Watchlist only, and a ticker is a filter chip rather than a link to a
@@ -624,11 +634,11 @@ and <strong>Symbol</strong> (one screen about one ticker).</p>
 <tbody>
 <tr>
 <td><strong>Strategy Tools</strong> (group)</td>
-<td>Calculator · Simulator</td>
+<td>Calculator · Simulator · Expected Move</td>
 </tr>
 <tr>
 <td><strong>Options</strong> (group)</td>
-<td>Market Scanner · Income · Expected Move · Captured Signals · Paper Ledger · Paper Account · Shares · Rescue</td>
+<td>Market Scanner · Income · Captured Signals · Paper Ledger · Paper Account · Shares · Rescue</td>
 </tr>
 <tr>
 <td><strong>Strategy Finder</strong> (standalone)</td>
@@ -672,9 +682,9 @@ and the destructive one sits above it.</p>
   MARKETS, not under Options.</strong> They are market-<em>wide</em> reads. The Options group is the
   per-signal workflow — find a trade, analyze it, track it, repair it — and its
   tabs run in that order.</li>
-<li><strong>Calculator and Simulator are their own group.</strong> They model legs <em>you</em> bring,
-  whereas the Options tabs work on signals the app <em>finds</em>. They share a leg
-  editor and copy trades to each other, so they belong side by side.</li>
+<li><strong>Calculator, Simulator and Expected Move are their own group.</strong> They model
+  legs <em>you</em> bring, whereas the Options tabs work on signals the app <em>finds</em>. They
+  work on one shared position, so they belong side by side.</li>
 </ul>
 <p>The <strong>hamburger</strong> at the top left pins the rail open so it stops collapsing.</p>
 <h2 id="alert-badges-and-chimes">Alert badges and chimes</h2>
@@ -2055,7 +2065,7 @@ one.</p>
   <em>is</em> the maximum return.)</li>
 </ul>
 <p>If you arrived here via <strong>Send to Calculator</strong> from a signal table, the form is
-pre-filled and priced once the chain loads. The Calculator and the Simulator work on <strong>one shared position</strong> — the same symbol, strategy, legs and selected expiration. Whichever page you edited last is what the other one opens with, so there is nothing to copy between them.
+pre-filled and priced once the chain loads. The Calculator, the Simulator and the Expected Move work on <strong>one shared position</strong> — the same symbol, strategy, legs and selected expiration. Whichever page you edited last is what the others open with, so there is nothing to copy between them. The Expected Move shares the symbol, the expiration and the strikes (see <a href="#expected-move">Expected Move</a>).
 Open the Simulator after building a trade here and it is already loaded; change it
 there and the Calculator shows the change. Your IV, rate and contracts stay on this
 page. Loading a <strong>different</strong> symbol clears
@@ -2119,6 +2129,39 @@ next — there are no copy buttons. A position that holds <strong>shares</strong
 protective put or collar) is shown with its option legs only: a note says the shares
 are not simulated, and they stay in the position when you edit it here. The sliders
 and the open tab stay with this page.</p>
+<h2 id="expected-move">Expected Move</h2>
+<p><strong>Route:</strong> <code>/options/expected-move</code> — the third <strong>Strategy Tools</strong> tab, beside the
+Calculator and the Simulator.</p>
+<p>Charts a symbol's recent price action with a forward <strong>expected-move cone</strong> out to
+an option's expiration.</p>
+<p><strong>Inputs:</strong> <strong>Symbol</strong>, <strong>Expiry</strong> (a dropdown of the symbol's listed expirations,
+each with its days to expiry), an optional <strong>Strike</strong> with a put/call toggle, and a
+<strong>Look-back</strong> dropdown (Auto ≈ 3× DTE, or 1mo / 3mo / 6mo / 1y). Picking an expiry
+draws the chart; <strong>Draw</strong> draws it again.</p>
+<p><strong>The chart</strong> is a daily candlestick with:</p>
+<ul>
+<li><strong>Upper/lower expected-move</strong> lines (green above, red below) fanning out to
+  expiration.</li>
+<li><strong>Leg strike lines</strong> if you provided strikes (short = solid, long = dashed;
+  put = red, call = blue), each labeled.</li>
+<li>A price crosshair and a date-aware tooltip. Non-trading days are collapsed so
+  there are no blank weekend gaps.</li>
+</ul>
+<p><strong>It shares the Calculator's position.</strong> The page opens on the symbol,
+expiration and strikes the Calculator and the Simulator were last showing, and
+draws every leg's strike. What you change here is what they open with next:</p>
+<ul>
+<li>a new <strong>symbol</strong> — they open on it with their own template's strikes, keeping
+  the strategy;</li>
+<li>a new <strong>expiry</strong> — the legs move to it, and the Calculator re-prices them from
+  that expiration's chain (a calendar's far leg and any share legs stay put);</li>
+<li>a <strong>strike</strong> you pick — becomes a one-leg position, a short put or short call
+  at that strike, priced from the chain.</li>
+</ul>
+<p>The strike the page pre-selects nearest the price is a convenience and is not
+shared, and the <strong>Look-back</strong> is this page's own.</p>
+<p>The <strong>Expected Move</strong> button on a signal row opens it in a new browser tab,
+pre-filled and drawn, and that trade becomes the shared position too.</p>
 <h2 id="market-scanner">Market Scanner</h2>
 <p><strong>Route:</strong> <code>/options/scanner</code>.</p>
 <p>The Market Scanner continuously looks for credit-spread opportunities and lists them in a
@@ -2508,23 +2551,6 @@ when:</p>
 <p><strong>You are filled at the live price, not the board's.</strong> The board was scanned this
 morning; the number you see is what ranked the row, and the number you get is what
 the contract is worth when you press the button.</p>
-<h2 id="expected-move">Expected Move</h2>
-<p><strong>Route:</strong> <code>/options/expected-move</code>.</p>
-<p>Charts a symbol's recent price action with a forward <strong>expected-move cone</strong> out to
-an option's expiration.</p>
-<p><strong>Inputs:</strong> <strong>Symbol</strong>, <strong>Expiry</strong> (YYYY-MM-DD), an optional <strong>Strike</strong> with a
-put/call toggle, and a <strong>Look-back</strong> dropdown (Auto ≈ 3× DTE, or 1mo / 3mo / 6mo /
-1y). Press <strong>Draw</strong>.</p>
-<p><strong>The chart</strong> is a daily candlestick with:</p>
-<ul>
-<li>Dashed <strong>upper/lower expected-move</strong> bands fanning out to expiration.</li>
-<li><strong>Leg strike lines</strong> if you provided strikes (short = solid, long = dashed;
-  put = red, call = blue), each labeled.</li>
-<li>A price crosshair and a date-aware tooltip. Non-trading days are collapsed so
-  there are no blank weekend gaps.</li>
-</ul>
-<p>You usually reach this page through the <strong>Expected Move</strong> button on a signal row
-(it opens in a new browser tab, pre-filled and drawn).</p>
 <h2 id="captured-signals">Captured Signals</h2>
 <p><strong>Route:</strong> <code>/options/captured</code>.</p>
 <p>Signals the system has "captured" to track over time, with live re-pricing.</p>

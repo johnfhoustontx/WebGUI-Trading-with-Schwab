@@ -1,4 +1,4 @@
-"""The eighteen screens published on the public live origin.
+"""The nineteen screens published on the public live origin.
 
 PURE DATA -- no NiceGUI import -- so the route registration, the thumbnail
 capture script and the static grid on neuralstrike.co all read one source and
@@ -129,6 +129,18 @@ SCREENS = (
            "/options/calculator", kwargs={"public": True}, tile=False),
     Screen("simulator", "/simulator", "Simulator", "options.simulator",
            "/options/simulator", kwargs={"public": True}, tile=False),
+    # The third Strategy Tool (2026-10-24), and the FIFTH screen that writes - on
+    # the Calculator's own stream: a visitor's chain and expiration loads, and
+    # the cone itself (``em``), go on cmd:tools_public through
+    # bus_client.request_public_tool, so no new write selector was needed.
+    # ``public=True`` hands off to pages/options/em_live.py before the private
+    # page builds anything (the owner's em_chain / expected_move commands and
+    # shared_position never exist here). The three tools carry one tab strip
+    # (pages/options/strategy_strip.py), and the site's Tools menu names them
+    # as ONE item, Strategy Tools, linking the Calculator.
+    Screen("expected-move", "/expected-move", "Expected Move",
+           "options.expected_move", "/options/expected-move",
+           kwargs={"public": True}, tile=False),
     # A pure READER - the one Tools screen that writes nothing. Reads
     # cache:news:feed_public (items from feeds flagged public in
     # config/news.toml, re-checked at every publish). ``public=True`` hands off to

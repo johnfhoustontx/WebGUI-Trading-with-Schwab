@@ -202,13 +202,13 @@ sign-in; there is no exception for the machine's own browser.
 
 ## The public live screens
 
-Eighteen of the app's screens are also published **without any sign-in** on
+Nineteen of the app's screens are also published **without any sign-in** on
 a second address, `https://live.neuralstrike.co` — the Desk,
 Opportunity Board, Flow Alerts, Macro Board, Sentiment, Bull / Bear Map, Sector &
 Industry, Sector Rotation, RRG, Momentum, Net Prem, **Gamma**, the Market Scanner
 (published as **Option Signals**), the **Strategy Finder**, the Rescue ad-hoc
 form (published as **Rescue my Sh\*tty trade**), the **Calculator**, the
-**Simulator** and **Market News**.
+**Simulator**, the **Expected Move** and **Market News**.
 
 **Option Signals** (`/signals`, first in the site's Tools menu) is your Market
 Scanner with nothing of yours on it. A visitor sees the 0-DTE, Swing and
@@ -290,7 +290,17 @@ the Calculator handed over, or a visitor can load a symbol and build one.
 Nothing is kept between visits: the hand-off lives in that browser tab only,
 for up to an hour.
 
-Both run their chain loads, extra expirations, ratings and Simulator snapshots
+The public **Expected Move** is the fifth: your Expected Move chart. A visitor
+loads a symbol, picks an expiration and sees its cone over the price history,
+with a strike line of their own; a position the Calculator handed over in the
+same tab opens drawn. Its cone costs one Schwab call (the price history): the
+implied volatility comes off the symbol's public chain, the one the Calculator
+loads, and the cone starts at today's price without drawing today's bar. The
+three — **Calculator**, **Simulator**, **Expected Move** — carry one tab strip
+across the top, and the site names them as one item, **Strategy Tools**.
+
+All three run their chain loads, extra expirations, ratings, Simulator
+snapshots and expected-move cones
 08:40–15:00 CT on trading days, inside the shared daily budget above, and each
 visitor may make 60 of those an hour. Pricing a loaded position spends no
 Schwab call, runs at any time and allows 600 an hour. Their limits are in
@@ -299,7 +309,8 @@ budget is under **Public Rescue form → Budget**, because it is one allowance
 behind all three.
 
 `https://neuralstrike.co/live.html` is a thumbnail menu of them, and the site's
-**Tools** menu links the four screens a visitor can act on, and Market News.
+**Tools** menu links Option Signals, the Strategy Finder, Rescue, **Strategy
+Tools** (it opens the Calculator) and Market News.
 
 The public **Market News** page is your Market News page — headlines, the SEC
 filings and the calendar, laid out the same way — with every control that belongs to you taken out: no
@@ -437,8 +448,8 @@ and **Symbol** (one screen about one ticker).
 
 | Rail item | Pages |
 |-----------|-------|
-| **Strategy Tools** (group) | Calculator · Simulator |
-| **Options** (group) | Market Scanner · Income · Expected Move · Captured Signals · Paper Ledger · Paper Account · Shares · Rescue |
+| **Strategy Tools** (group) | Calculator · Simulator · Expected Move |
+| **Options** (group) | Market Scanner · Income · Captured Signals · Paper Ledger · Paper Account · Shares · Rescue |
 | **Strategy Finder** (standalone) | — |
 | **Trade Analyzer** (group) | Analyze · Rank Board |
 
@@ -464,9 +475,9 @@ Two groupings are worth explaining because they are deliberate:
   MARKETS, not under Options.** They are market-*wide* reads. The Options group is the
   per-signal workflow — find a trade, analyze it, track it, repair it — and its
   tabs run in that order.
-- **Calculator and Simulator are their own group.** They model legs *you* bring,
-  whereas the Options tabs work on signals the app *finds*. They share a leg
-  editor and copy trades to each other, so they belong side by side.
+- **Calculator, Simulator and Expected Move are their own group.** They model
+  legs *you* bring, whereas the Options tabs work on signals the app *finds*. They
+  work on one shared position, so they belong side by side.
 
 The **hamburger** at the top left pins the rail open so it stops collapsing.
 
@@ -1679,7 +1690,7 @@ one.
   *is* the maximum return.)
 
 If you arrived here via **Send to Calculator** from a signal table, the form is
-pre-filled and priced once the chain loads. The Calculator and the Simulator work on **one shared position** — the same symbol, strategy, legs and selected expiration. Whichever page you edited last is what the other one opens with, so there is nothing to copy between them.
+pre-filled and priced once the chain loads. The Calculator, the Simulator and the Expected Move work on **one shared position** — the same symbol, strategy, legs and selected expiration. Whichever page you edited last is what the others open with, so there is nothing to copy between them. The Expected Move shares the symbol, the expiration and the strikes (see [Expected Move](#expected-move)).
 Open the Simulator after building a trade here and it is already loaded; change it
 there and the Calculator shows the change. Your IV, rate and contracts stay on this
 page. Loading a **different** symbol clears
@@ -1750,6 +1761,45 @@ next — there are no copy buttons. A position that holds **shares** (a covered 
 protective put or collar) is shown with its option legs only: a note says the shares
 are not simulated, and they stay in the position when you edit it here. The sliders
 and the open tab stay with this page.
+
+## Expected Move
+
+**Route:** `/options/expected-move` — the third **Strategy Tools** tab, beside the
+Calculator and the Simulator.
+
+Charts a symbol's recent price action with a forward **expected-move cone** out to
+an option's expiration.
+
+**Inputs:** **Symbol**, **Expiry** (a dropdown of the symbol's listed expirations,
+each with its days to expiry), an optional **Strike** with a put/call toggle, and a
+**Look-back** dropdown (Auto ≈ 3× DTE, or 1mo / 3mo / 6mo / 1y). Picking an expiry
+draws the chart; **Draw** draws it again.
+
+**The chart** is a daily candlestick with:
+
+- **Upper/lower expected-move** lines (green above, red below) fanning out to
+  expiration.
+- **Leg strike lines** if you provided strikes (short = solid, long = dashed;
+  put = red, call = blue), each labeled.
+- A price crosshair and a date-aware tooltip. Non-trading days are collapsed so
+  there are no blank weekend gaps.
+
+**It shares the Calculator's position.** The page opens on the symbol,
+expiration and strikes the Calculator and the Simulator were last showing, and
+draws every leg's strike. What you change here is what they open with next:
+
+- a new **symbol** — they open on it with their own template's strikes, keeping
+  the strategy;
+- a new **expiry** — the legs move to it, and the Calculator re-prices them from
+  that expiration's chain (a calendar's far leg and any share legs stay put);
+- a **strike** you pick — becomes a one-leg position, a short put or short call
+  at that strike, priced from the chain.
+
+The strike the page pre-selects nearest the price is a convenience and is not
+shared, and the **Look-back** is this page's own.
+
+The **Expected Move** button on a signal row opens it in a new browser tab,
+pre-filled and drawn, and that trade becomes the shared position too.
 
 ## Market Scanner
 
@@ -2081,28 +2131,6 @@ when:
 **You are filled at the live price, not the board's.** The board was scanned this
 morning; the number you see is what ranked the row, and the number you get is what
 the contract is worth when you press the button.
-
-## Expected Move
-
-**Route:** `/options/expected-move`.
-
-Charts a symbol's recent price action with a forward **expected-move cone** out to
-an option's expiration.
-
-**Inputs:** **Symbol**, **Expiry** (YYYY-MM-DD), an optional **Strike** with a
-put/call toggle, and a **Look-back** dropdown (Auto ≈ 3× DTE, or 1mo / 3mo / 6mo /
-1y). Press **Draw**.
-
-**The chart** is a daily candlestick with:
-
-- Dashed **upper/lower expected-move** bands fanning out to expiration.
-- **Leg strike lines** if you provided strikes (short = solid, long = dashed;
-  put = red, call = blue), each labeled.
-- A price crosshair and a date-aware tooltip. Non-trading days are collapsed so
-  there are no blank weekend gaps.
-
-You usually reach this page through the **Expected Move** button on a signal row
-(it opens in a new browser tab, pre-filled and drawn).
 
 ## Captured Signals
 

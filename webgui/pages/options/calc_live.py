@@ -68,6 +68,7 @@ from . import leg_editor
 from . import public_handoff
 from . import rate_trade as _rate_trade
 from . import sim_view as _sim_view
+from . import strategy_strip
 from . import strategy_table as _strategy_table
 from . import theme as _t
 from .chain_grid import extract_price, leg_delta
@@ -308,6 +309,8 @@ def render():
         rating_panel = _detail.render(width=440)
 
     with kit.page():
+        # The three public Strategy Tools' tab strip (the site's one menu item).
+        strategy_strip.render("/options/calculator")
         head = kit.header(TITLE)
         with head.actions:
             # Drawn only where this origin serves the Simulator (the same

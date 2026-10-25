@@ -4,7 +4,41 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-24 (**Listed-stocks file: sector and industry re-verified against Yahoo Finance for all 5,920 symbols.**)
+**Last updated:** 2026-10-24 (**Expected Move is the third Strategy Tools tab and shares the Calculator and Simulator's position; the public site gains an Expected Move, and its Tools menu names the three as one item, Strategy Tools.**)
+
+- **Asked for by the user:** "Move the Options/Expected move to the subtab under the
+  strategy tools. The properties from the calculator and simulator will also
+  propagate to the expected move and vice versa", then "this will show in the
+  website as Strategy tools replacing the Calculator and Simulator menuitems". Asked
+  whether the website's Strategy Tools should include a public Expected Move (a new
+  anonymous request kind), they chose yes. Design:
+  `docs/plans/2026-10-24-strategy-tools-expected-move-design.md`.
+- **The app:** `/options/expected-move` left `OPTIONS_CHILDREN` for
+  `STRATEGY_TOOLS_CHILDREN` (route unchanged, so every hand-off still lands). It
+  opens on `shared_position` as if handed off and draws every option leg's strike;
+  what it draws is published back through the new `shared_position.merge_view` /
+  `publish_view`: a new symbol keeps the strategy and drops the legs, a new expiry
+  moves the legs on the old one and drops their prices, a picked strike is a one-leg
+  short (NAKED_PUT / NAKED_CALL), and nothing it cannot see (quantities, prices,
+  share legs, a calendar's far leg) is lost. The strike pre-selected nearest spot is
+  not shared. A new expiry now keeps drawing a handed spread's lines (it used to
+  wipe them).
+- **The public site:** a nineteenth screen, `/expected-move` (`em_live`), writing on
+  `cmd:tools_public` through `request_public_tool` - a new `em` kind (symbol,
+  expiration, look-back; no legs) answered by `tools_public._tools_em`, which sizes
+  the cone off the HELD public chain cut to that expiration and spends one Schwab
+  call, the price history. No new stream and no ACL change. The public Calculator,
+  Simulator and Expected Move carry one tab strip (`strategy_strip`), and the seven
+  site pages' Tools menu replaces Calculator + Simulator with **Strategy Tools**
+  (linking `/calculator`); `live.html`'s lede counts nineteen screens and seven tools.
+- **Docs:** the User Guide and Reference Guide move the Expected Move section under
+  Strategy Tools and describe the shared position and the public page;
+  `page_help.py`; `docs/webgui-routes.md`.
+- **Not verified:** nothing has run against a live chain. The pages were driven in
+  their test harnesses only (the private page's widget tests, the public page's
+  fake-bus tests, the worker against stubbed Schwab calls).
+
+**Prior —** 2026-10-24 (**Listed-stocks file: sector and industry re-verified against Yahoo Finance for all 5,920 symbols.**)
 
 - **Asked for by the user:** the Trade Analyzer showed CRWV as "Computer Software:
   Prepackaged Software" where it belongs to "Software - Infrastructure"; re-verify

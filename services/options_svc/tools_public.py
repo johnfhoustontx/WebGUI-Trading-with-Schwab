@@ -1,4 +1,4 @@
-"""The public Calculator and Simulator's workers: one visitor request -> one answer.
+"""The public Strategy Tools' workers: one visitor request -> one answer.
 
 A visitor on ``live.neuralstrike.co/calculator`` or ``/simulator`` loads a
 symbol, builds a position and prices it; the public process puts one validated
@@ -9,7 +9,9 @@ consumer loop here (``make_app``'s ``extra_consumers``):
   ``chain`` / ``expiry`` (the shared public chain, exactly Rescue's strikes
   list - ``public_chain.ladder_request``), ``rate`` (Rate My Trade against the
   held chain), ``sim_snapshot`` / ``sim_expiry`` (a Simulator snapshot in
-  ``PUBLIC_SIM``, never the owner's ``compute._SIM_SNAPSHOTS``).
+  ``PUBLIC_SIM``, never the owner's ``compute._SIM_SNAPSHOTS``), ``em`` (the
+  Expected Move chart's cone and the price history under it, sized from the
+  held chain - 2026-10-24).
 * ``handle_math`` on ``cmd:tools_public_math`` - pure pricing over data already
   held: ``price`` (``compute.calc_compute``), ``iv`` (``compute.calc_iv`` off
   the held chain's mark), ``sweep`` (``compute.sim_run``'s what-if half).
@@ -604,8 +606,122 @@ def _no_snapshot(symbol) -> bool:
     return at is not None and _mono() - at < hold
 
 
+# ── the expected-move cone ───────────────────────────────────────────────────
+# The private page's ``compute_expected_move`` makes three Schwab calls: the
+# price history, a chain from today to the expiration, and a quote. The public
+# one makes ONE, the history. The chain is the public chain this worker already
+# holds for the Calculator (so the visitor loads the symbol and the expiration
+# first, as on the Calculator), and the spot is that chain's.
+#
+# ⚠ What is published is the cone, its ATM IV and the candles - the
+# UNDERLYING's price history - and no contract's quote: the public Calculator
+# publishes an implied volatility on the same terms (``_math_iv``).
+
+def _one_expiry(chain, expiry):
+    """``chain`` cut to one expiration's two maps, or None when it lists no
+    strikes for it. ``compute.atm_iv_from_chain`` falls back to the NEAREST
+    expiration when the asked one has no volatility, which would size this
+    expiration's cone from another's: cut to one, there is nothing to fall
+    back to."""
+    out = {}
+    for map_key in ("callExpDateMap", "putExpDateMap"):
+        maps = (chain or {}).get(map_key) if isinstance(chain, dict) else None
+        out[map_key] = {k: v for k, v in (maps or {}).items()
+                        if str(k).split(":")[0] == expiry}
+    return out if any(out.values()) else None
+
+
+def _finite_candles(candles):
+    """``[ts, o, h, l, c]`` rows whose five values are all finite: a NaN cannot
+    be written as JSON, and one in a high or low is a bar drawn to infinity."""
+    out = []
+    for row in candles or []:
+        if not isinstance(row, (list, tuple)) or len(row) != 5:
+            continue
+        vals = [_finite(v) for v in row]
+        if all(v is not None for v in vals):
+            out.append([int(vals[0])] + [round(v, 4) for v in vals[1:]])
+    return out
+
+
+def em_anchor_ms(last_ts_ms, now) -> int:
+    """Where the cone starts: TODAY (midnight CT, Schwab's daily-bar epoch) once
+    the session is open on a trading day the history does not reach yet, else
+    the last candle. Schwab's daily history ends at the previous session, and
+    the cone is sized from today's spot; anchored at yesterday it would reach
+    the expiration a day early. The private page draws today's forming bar for
+    the same reason - from a quote this request does not spend."""
+    local = now.astimezone(CT)
+    today = local.date()
+    if (not market_calendar.is_trading_day(today)
+            or local.time() < dt.time(*compute._RTH_START)):
+        return int(last_ts_ms)
+    midnight = int(dt.datetime(today.year, today.month, today.day,
+                               tzinfo=CT).timestamp() * 1000)
+    return max(int(last_ts_ms), midnight)
+
+
+def em_payload(held, symbol, expiry, lookback, now):
+    """The public cone for ``expiry`` off the held chain ``held``, or None when
+    it cannot be drawn (no usable spot, no ATM volatility, no history)."""
+    spot = public_chain._spot(held.get("price"))
+    one = _one_expiry(held.get("chain"), expiry)
+    if spot is None or one is None:
+        return None
+    atm_iv = _finite(compute.atm_iv_from_chain(one, spot, expiry=expiry))
+    if atm_iv is None or atm_iv <= 0:
+        return None
+    dte = (dt.date.fromisoformat(expiry) - now.astimezone(CT).date()).days
+    spec = compute.em_lookback_spec(dte, lookback)
+    api = held.get("api") or symbol
+    candles = _finite_candles(compute._fetch_em_candles(api, spec))
+    if not candles:
+        return None
+    anchor = (candles[-1][0] if spec.get("mode") == "intraday"
+              else em_anchor_ms(candles[-1][0], now))
+    cone = compute.em_cone(spot, atm_iv, dte, anchor, trading_days_only=True)
+    return {"symbol": symbol, "expiry": expiry, "spot": spot,
+            "atm_iv": round(atm_iv, 6), "dte": dte, "candles": candles,
+            "em_upper": cone["upper"], "em_lower": cone["lower"],
+            "lookback": {"label": spec.get("label", ""), "key": lookback}}
+
+
+def _tools_em(bus, command, now, lim, key, args) -> str:
+    """One expected-move cone. Refusals, in order: ``expired``, ``cached``,
+    ``load_first`` (no chain held, or no strikes held for the expiration -
+    the page asks for them first), ``not_listed``, then the shared gate."""
+    symbol, expiry = args["symbol"], args["expiry"]
+    if _expired(command, now, lim):
+        return "expired"
+    if _fresh_result(bus, key, now, lim["result_ttl_min"]):
+        return "cached"
+    held = public_chain.held(symbol)
+    if held is None:
+        return "load_first"
+    listed = held.get("expirations") or []
+    if listed and expiry not in listed:
+        return "not_listed"
+    if _one_expiry(held.get("chain"), expiry) is None:
+        return "load_first"
+    outcome = _gate(bus, key, now, lim, "em")
+    if outcome is not None:
+        return outcome
+    _start(bus, now, key, "em")
+    try:
+        payload = em_payload(held, symbol, expiry, args["lookback"], now)
+        if payload is None:
+            return ("error", "No expected move could be drawn for that "
+                             "expiration. Try another one.")
+        _stamped(bus, key, payload, now, lim)
+        return "done"
+    except Exception:  # noqa: BLE001 - one visitor's request must not kill the loop
+        _degrade.degraded("options.tools_public_em", detail=symbol)
+        return "error"
+
+
 _TOOLS = {"chain": _tools_chain, "expiry": _tools_chain, "rate": _tools_rate,
-          "sim_snapshot": _tools_sim_snapshot, "sim_expiry": _tools_sim_expiry}
+          "sim_snapshot": _tools_sim_snapshot, "sim_expiry": _tools_sim_expiry,
+          "em": _tools_em}
 
 
 def _dispatch_tools(bus, command, now) -> None:
