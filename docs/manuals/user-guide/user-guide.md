@@ -3254,12 +3254,11 @@ recover a day the machine was off for. Weekends and market holidays are skipped.
   month's days appear below it, each with a **Summary** and a **Detail** link
   that open in a new tab.
 
-> Realized P&L is bucketed by **exit** date, while opened trades and credit
-> collected are bucketed by **entry** date. They answer different questions and will
-> not reconcile to each other — that is correct, not a bug. That includes open
-> trades: realized profit and the closed count only ever include closed trades, but
-> the **Opened** and **Credit collected** columns count every trade by its entry day,
-> open ones too.
+> Realized P&L is bucketed by **exit** date, while opened trades are bucketed by
+> **entry** date. They answer different questions and will not reconcile to each
+> other — that is correct, not a bug. That includes open trades: realized profit and
+> the closed count only ever include closed trades, but the **Opened** column counts
+> every trade by its entry day, open ones too.
 
 ### Weekly idea review
 

@@ -216,8 +216,7 @@ def test_normalize_trades_ledger():
     }], kind="ledger")
     assert led[0] == {
         "symbol": "AMD", "strategy": "PCS", "trade_type": "SWING", "status": "OPEN",
-        "entry_date": "2026-06-27", "exit_date": None, "realized_pnl": None,
-        "credit": 120.0}
+        "entry_date": "2026-06-27", "exit_date": None, "realized_pnl": None}
 
 
 # --- Task 3: period_buckets --------------------------------------------------
@@ -226,7 +225,7 @@ import datetime as _dt
 
 def _nt(entry, exit_, pnl, status="CLOSED"):
     return {"symbol": "X", "strategy": "PCS", "trade_type": "SWING", "status": status,
-            "entry_date": entry, "exit_date": exit_, "realized_pnl": pnl, "credit": 100.0}
+            "entry_date": entry, "exit_date": exit_, "realized_pnl": pnl}
 
 
 def test_period_buckets_daily_weekly_mtd():
@@ -286,15 +285,33 @@ def test_pct_helper():
 def test_performance_table_html_renders_periods():
     buckets = {
         "daily": {"realized": 50.0, "closed": 1, "wins": 1, "losses": 0,
-                  "win_rate": 1.0, "opened": 1, "credit": 100.0},
+                  "win_rate": 1.0, "opened": 1},
         "weekly": {"realized": 30.0, "closed": 2, "wins": 1, "losses": 1,
-                   "win_rate": 0.5, "opened": 3, "credit": 300.0},
+                   "win_rate": 0.5, "opened": 3},
         "mtd": {"realized": 230.0, "closed": 3, "wins": 2, "losses": 1,
-                "win_rate": 0.667, "opened": 4, "credit": 400.0},
+                "win_rate": 0.667, "opened": 4},
     }
     html = eod.performance_table_html(buckets)
     assert "Daily" in html and "Weekly" in html and "MTD" in html
     assert "$50.00" in html and "$230.00" in html
+
+
+def test_a_debit_book_shows_no_negative_credit_column():
+    """The "Credit collected" column summed ``entry_credit_total``, which stores
+    a debit as a NEGATIVE credit, so a month of debit trade ideas printed about
+    -$15.7k: premium paid, read as a loss. The column is gone; only Realized P&L
+    carries money in the period table."""
+    import datetime as _dt
+    snap = {"paper_trades": {"trades": [
+        {"symbol": "MU", "strategy": "BEAR_PUT", "trade_type": "SWING",
+         "status": "OPEN", "source": "trade_idea",
+         "entry_time": "2026-10-27T11:35:00", "exit_time": None,
+         "realized_pnl": None, "entry_credit_total": -2257.6}]}}
+    html = eod.summary_fragment(snap, "detail.html", today=_dt.date(2026, 10, 27))
+    assert "Credit collected" not in html
+    b = eod.period_buckets(eod.normalize_trades(
+        snap["paper_trades"]["trades"], kind="ledger"), _dt.date(2026, 10, 27))
+    assert b["mtd"]["opened"] == 1 and "credit" not in b["mtd"]
 
 
 def test_breakdown_table_html_renders():
@@ -414,7 +431,6 @@ def test_normalize_trades_reads_the_captured_shape():
     assert rows[0]["entry_date"] == "2026-09-02"
     assert rows[0]["exit_date"] == "2026-09-03"
     assert rows[0]["realized_pnl"] == 25.0
-    assert rows[0]["credit"] == 55.0            # already one-contract dollars
     assert rows[0]["trade_type"] == "0DTE"
 
 
@@ -434,7 +450,6 @@ def test_the_captured_book_reuses_the_shared_period_buckets():
     assert b["daily"]["realized"] == 25.0 and b["daily"]["closed"] == 1
     assert b["daily"]["wins"] == 1 and b["daily"]["losses"] == 0
     assert b["mtd"]["opened"] == 1            # opened 09-02, still inside MTD
-    assert b["mtd"]["credit"] == 55.0
 
 
 def test_the_captured_book_has_no_account_line():

@@ -4,7 +4,22 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-25 (**Dealer Positioning: the heatmap takes 75% of the row.**)
+**Last updated:** 2026-10-27 (**EOD Summary: the Credit collected column is removed.**)
+
+- The Daily / Weekly / MTD table on every book (Manual paper, Captured signals, Trade
+  ideas) loses its **Credit collected** column. It summed `entry_credit_total` by entry
+  date, and the Ledger stores a debit as a NEGATIVE credit, so the Trade ideas book
+  (34 debit ideas opened this month: 31 bear puts, 2 bull calls, 1 long put) showed
+  **-$15,704.10 MTD**. That was premium paid, and it read as a loss. On a mixed book
+  the figure netted credits against debits, and on Captured signals it was a
+  one-contract sum of trades nobody took. Realized P&L already answers "is it making
+  money"; nothing else read the field.
+- `normalize_trades` no longer carries `credit` and `period_buckets` no longer returns
+  it. `TRADE_IDEAS_NOTE`, the User Guide, the Reference Guide and `docs/webgui-routes.md`
+  are updated. A new test drives a debit trade idea through the summary and checks the
+  column is gone.
+
+**Prior —** 2026-10-25 (**Dealer Positioning: the heatmap takes 75% of the row.**)
 
 - On the four Greek views (GEX, Charm, DEX, Vanna) the heatmap now takes three quarters
   of the row and the by-strike bars the rest (it was 60/40). The 0-DTE hedge-pressure

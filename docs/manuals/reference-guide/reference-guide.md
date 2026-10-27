@@ -4713,12 +4713,14 @@ a table:
 | **Weekly (WTD)** | Week to date. |
 | **MTD** | Month to date. |
 
-Columns are realized P&L, closed count with a win-loss split, win %, opened count, and
-credit collected.
+Columns are realized P&L, closed count with a win-loss split, win %, and opened count.
+There is no premium column: summed over a period it netted credits received against
+debits paid, so a month of debit trades showed a large negative "credit" that read as a
+loss.
 
-> **Realized P&L is bucketed by *exit* date; opened trades and credit collected are
-> bucketed by *entry* date.** They are answering different questions and will not
-> reconcile to each other. That is correct.
+> **Realized P&L is bucketed by *exit* date; opened trades are bucketed by *entry*
+> date.** They are answering different questions and will not reconcile to each other.
+> That is correct.
 
 **Detailed** (`/eod/detail`) adds breakdowns by **strategy** (PCS / CCS / IC), by
 **0-DTE versus swing**, and by **status** (open / closed / expired), plus the full trade
@@ -4772,9 +4774,8 @@ and commissions are not in these numbers, so treat every figure as optimistic.
   (Settings → Configuration). Turn it off and no new idea appears; the ones already open
   keep closing and keep being counted.
 - **"Open trades are not in these totals" is about profit.** Realized profit and the
-  closed count include only closed ideas, but **Opened** and **Credit collected** count
-  every idea by the day it was posted, open ones too. For a debit idea the credit column
-  is negative, because the idea cost money.
+  closed count include only closed ideas, but **Opened** counts every idea by the day it
+  was posted, open ones too.
 
 ### Weekly idea review
 

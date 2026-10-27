@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-24</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-27</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -1793,7 +1793,7 @@ a restart, across a missed minute — is unlabelled, never guessed. The second b
 <strong>≈ Since alert</strong>, is a tick-by-tick reading that starts when the contract is flagged;
 the two are kept apart because they sample different stretches of the day at different
 resolutions.</p>
-<p><strong>Previous session.</strong> A second table under the alerts: yesterday's flagged contracts,
+<p><strong>Previous session.</strong> A second table under the alerts, folded until you open it: yesterday's flagged contracts,
 their open interest before and after, and a reading — <em>mostly opened</em> when open
 interest rose by at least half of that day's volume, <em>mostly closed</em> when it fell by as
 much, <em>mixed, or traded within the day</em> in between. This is the only part of the page
@@ -6375,12 +6375,14 @@ a table:</p>
 </tr>
 </tbody>
 </table>
-<p>Columns are realized P&amp;L, closed count with a win-loss split, win %, opened count, and
-credit collected.</p>
+<p>Columns are realized P&amp;L, closed count with a win-loss split, win %, and opened count.
+There is no premium column: summed over a period it netted credits received against
+debits paid, so a month of debit trades showed a large negative "credit" that read as a
+loss.</p>
 <blockquote>
-<p><strong>Realized P&amp;L is bucketed by <em>exit</em> date; opened trades and credit collected are
-bucketed by <em>entry</em> date.</strong> They are answering different questions and will not
-reconcile to each other. That is correct.</p>
+<p><strong>Realized P&amp;L is bucketed by <em>exit</em> date; opened trades are bucketed by <em>entry</em>
+date.</strong> They are answering different questions and will not reconcile to each other.
+That is correct.</p>
 </blockquote>
 <p><strong>Detailed</strong> (<code>/eod/detail</code>) adds breakdowns by <strong>strategy</strong> (PCS / CCS / IC), by
 <strong>0-DTE versus swing</strong>, and by <strong>status</strong> (open / closed / expired), plus the full trade
@@ -6427,9 +6429,8 @@ and commissions are not in these numbers, so treat every figure as optimistic.</
   (Settings → Configuration). Turn it off and no new idea appears; the ones already open
   keep closing and keep being counted.</li>
 <li><strong>"Open trades are not in these totals" is about profit.</strong> Realized profit and the
-  closed count include only closed ideas, but <strong>Opened</strong> and <strong>Credit collected</strong> count
-  every idea by the day it was posted, open ones too. For a debit idea the credit column
-  is negative, because the idea cost money.</li>
+  closed count include only closed ideas, but <strong>Opened</strong> counts every idea by the day it
+  was posted, open ones too.</li>
 </ul>
 <h3 id="weekly-idea-review">Weekly idea review</h3>
 <p><em>Menu: ACCOUNT → More → EOD Report → Weekly idea review · Route <code>/eod/weekly</code></em></p>

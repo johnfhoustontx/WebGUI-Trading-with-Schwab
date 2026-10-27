@@ -344,9 +344,14 @@ def _date_of(ts):
 
 def normalize_trades(raw, *, kind):
     """Map a book's raw trade dicts into one uniform shape:
-    {symbol, strategy, trade_type, status, entry_date, exit_date, realized_pnl, credit}.
+    {symbol, strategy, trade_type, status, entry_date, exit_date, realized_pnl}.
     ``kind`` = 'ledger' (manual paper_trades) | 'captured' (scanner signals
-    tracked to a close)."""
+    tracked to a close).
+
+    No entry credit is carried: summed over a period it netted credits received
+    against debits paid (a debit is stored as a negative credit), so a book of
+    debit trade ideas showed a large negative "credit collected" that read as a
+    loss. Realized P&L is the performance figure."""
     out = []
     for t in raw or []:
         t = t or {}
@@ -354,27 +359,17 @@ def normalize_trades(raw, *, kind):
             # A captured row carries the signal's OWN timestamp names, so this
             # branch only points ``_date_of`` at them - the same job it does for
             # the ledger, not a second date parser.
-            #
-            # The credit arrives already multiplied: ``compute.captured_perf_rows``
-            # puts it on the ONE-CONTRACT basis that ``realized_pnl`` uses, since
-            # a captured signal is never sized and the two figures on a row must
-            # share a basis to be read together.
             entry, exit_ = "first_seen_ts", "close_ts"
-            credit = _num(t.get("entry_credit_total"))
-            trade_type = t.get("trade_type")
         else:
             entry, exit_ = "entry_time", "exit_time"
-            credit = _num(t.get("entry_credit_total"))
-            trade_type = t.get("trade_type")
         out.append({
             "symbol": t.get("symbol"),
             "strategy": t.get("strategy"),
-            "trade_type": trade_type,
+            "trade_type": t.get("trade_type"),
             "status": t.get("status"),
             "entry_date": _date_of(t.get(entry)),
             "exit_date": _date_of(t.get(exit_)),
             "realized_pnl": _num(t.get("realized_pnl")),
-            "credit": credit,
         })
     return out
 
@@ -401,12 +396,11 @@ def _in_range(date_str, lo, hi):
 
 
 def period_buckets(norm_trades, today):
-    """{daily, weekly, mtd} each {realized, closed, wins, losses, win_rate, opened,
-    credit}. Realized/closed bucket by EXIT date; opened/credit by ENTRY date."""
+    """{daily, weekly, mtd} each {realized, closed, wins, losses, win_rate, opened}.
+    Realized/closed bucket by EXIT date; opened by ENTRY date."""
     out = {}
     for name, (lo, hi) in _period_ranges(today).items():
         realized = wins = losses = closed = opened = 0.0
-        credit = 0.0
         for t in norm_trades or []:
             if _in_range(t.get("exit_date"), lo, hi):
                 closed += 1
@@ -419,15 +413,12 @@ def period_buckets(norm_trades, today):
                         losses += 1
             if _in_range(t.get("entry_date"), lo, hi):
                 opened += 1
-                c = _num(t.get("credit"))
-                if c is not None:
-                    credit += c
         decided = wins + losses
         out[name] = {
             "realized": round(realized, 2), "closed": int(closed),
             "wins": int(wins), "losses": int(losses),
             "win_rate": (wins / decided) if decided else None,
-            "opened": int(opened), "credit": round(credit, 2),
+            "opened": int(opened),
         }
     return out
 
@@ -485,7 +476,7 @@ _PERIOD_LABELS = [("daily", "Daily"), ("weekly", "Weekly (WTD)"), ("mtd", "MTD")
 
 
 def performance_table_html(buckets):
-    """Daily/Weekly/MTD rows: Realized | Closed (W-L) | Win% | Opened | Credit."""
+    """Daily/Weekly/MTD rows: Realized | Closed (W-L) | Win% | Opened."""
     buckets = buckets or {}
     rows = []
     for key, label in _PERIOD_LABELS:
@@ -498,10 +489,9 @@ def performance_table_html(buckets):
             f'<td>{int(b.get("closed", 0))} ({wl})</td>'
             f'<td>{_pct(b.get("win_rate"))}</td>'
             f'<td>{int(b.get("opened", 0))}</td>'
-            f'<td>{_money(b.get("credit"))}</td>'
             "</tr>")
-    return _table(["Period", "Realized P&L", "Closed (W-L)", "Win %", "Opened",
-                   "Credit collected"], rows, empty="No activity.")
+    return _table(["Period", "Realized P&L", "Closed (W-L)", "Win %", "Opened"],
+                  rows, empty="No activity.")
 
 
 def breakdown_table_html(rows):
@@ -697,8 +687,8 @@ def idea_section(paper_trades_cache, today, now=None) -> str:
 TRADE_IDEAS_NOTE = (
     "Every posted trade idea, booked on the Paper Ledger and not held to its risk "
     "limits. Realized profit and the closed count include only trades that have "
-    "closed; the Opened and Credit collected columns count every idea by the day "
-    "it was posted, open ones too."
+    "closed; the Opened column counts every idea by the day it was posted, open "
+    "ones too."
 )
 
 

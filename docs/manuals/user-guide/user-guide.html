@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-24</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-27</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -1538,7 +1538,8 @@ switches off the second line only.</p>
 <p>Under the alert table, a second table lists the contracts flagged in the <strong>previous
 session</strong> and what their <strong>open interest</strong> did overnight. Open interest is the number
 of contracts still open, and it is only published once a day, which is why this
-reading arrives the morning after.</p>
+reading arrives the morning after. The panel starts <strong>folded</strong>: click its heading to
+open it, and it stays open until you close it or reload the page.</p>
 <table>
 <thead>
 <tr>
@@ -3870,12 +3871,11 @@ recover a day the machine was off for. Weekends and market holidays are skipped.
   that open in a new tab.</li>
 </ul>
 <blockquote>
-<p>Realized P&amp;L is bucketed by <strong>exit</strong> date, while opened trades and credit
-collected are bucketed by <strong>entry</strong> date. They answer different questions and will
-not reconcile to each other — that is correct, not a bug. That includes open
-trades: realized profit and the closed count only ever include closed trades, but
-the <strong>Opened</strong> and <strong>Credit collected</strong> columns count every trade by its entry day,
-open ones too.</p>
+<p>Realized P&amp;L is bucketed by <strong>exit</strong> date, while opened trades are bucketed by
+<strong>entry</strong> date. They answer different questions and will not reconcile to each
+other — that is correct, not a bug. That includes open trades: realized profit and
+the closed count only ever include closed trades, but the <strong>Opened</strong> column counts
+every trade by its entry day, open ones too.</p>
 </blockquote>
 <h3 id="weekly-idea-review">Weekly idea review</h3>
 <p><strong>Route:</strong> <code>/eod/weekly</code> — the <strong>Weekly idea review</strong> button at the top of the EOD
