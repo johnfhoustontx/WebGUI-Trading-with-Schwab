@@ -1087,7 +1087,7 @@ a restart, across a missed minute — is unlabelled, never guessed. The second b
 the two are kept apart because they sample different stretches of the day at different
 resolutions.
 
-**Previous session.** A second table under the alerts: yesterday's flagged contracts,
+**Previous session.** A second table under the alerts, folded until you open it: yesterday's flagged contracts,
 their open interest before and after, and a reading — *mostly opened* when open
 interest rose by at least half of that day's volume, *mostly closed* when it fell by as
 much, *mixed, or traded within the day* in between. This is the only part of the page

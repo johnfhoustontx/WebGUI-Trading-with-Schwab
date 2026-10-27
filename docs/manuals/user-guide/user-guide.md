@@ -1155,7 +1155,8 @@ switches off the second line only.
 Under the alert table, a second table lists the contracts flagged in the **previous
 session** and what their **open interest** did overnight. Open interest is the number
 of contracts still open, and it is only published once a day, which is why this
-reading arrives the morning after.
+reading arrives the morning after. The panel starts **folded**: click its heading to
+open it, and it stays open until you close it or reload the page.
 
 | Reading | What it means |
 |---|---|

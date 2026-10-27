@@ -1034,7 +1034,8 @@ The three shares always add up to the contract's volume for the day.
 - Bought is not the same as bullish: buying a call to close a short call looks
   the same here as buying one to open.
 
-**Previous session**, under the table, answers that last point a day late. For
+**Previous session**, under the table and folded until you click its heading,
+answers that last point a day late. For
 each contract flagged yesterday it shows the **open interest** before and after.
 If open interest rose by at least half of that day's volume, the volume **mostly
 opened** new positions; if it fell by as much, it **mostly closed** old ones; in

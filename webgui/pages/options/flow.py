@@ -876,6 +876,7 @@ def render():
     from pages import ui_kit as kit
     from pages.ui_guard import guard, guard_async
 
+    from . import theme as _t
     from .handoff import GAMMA_ROUTE, send_to_gamma
     from .swing import strategy_chip   # the app's one filter-chip look
 
@@ -888,7 +889,7 @@ def render():
     # an alert fires.
     state = {"version": None, "rows": [], "symbol": None, "chips": None,
              "payload": None, "sides": None, "sides_ver": None,
-             "follow_ver": None,
+             "follow_ver": None, "follow_open": False,
              "status": _copy.WAITING_OPTIONS,
              "hidden": parse_hidden_kinds(app_settings.get(HIDDEN_KINDS_KEY))}
 
@@ -980,8 +981,14 @@ def render():
         follow_box.clear()
         if not rows:
             return
-        with follow_box:
-            kit.section_title(followup_title(view))
+        # Folded until the reader opens it. The panel is rebuilt whenever its
+        # view moves, so the open state lives in page state, not the element.
+        with follow_box, ui.expansion(
+                followup_title(view), value=state["follow_open"],
+                on_value_change=guard(
+                    lambda e: state.update(follow_open=bool(e.value)))) \
+                .classes(f"w-full {_t.LABEL}") \
+                .props('dense header-class="text-subtitle2 font-semibold"'):
             kit.status_line(FOLLOWUP_CAPTION)
             kit.table(followup_columns(), rows, numeric=("volume",)) \
                 .add_slot("body-cell-sides", _FOLLOWUP_SIDES_SLOT)
