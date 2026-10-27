@@ -1055,9 +1055,9 @@ never observed — which is why their dollar figures carry a **≈** and their
 detail ends in **model**. They appear here, in the Desk's flow panel and on the
 Symbol page. They never chime or pop up a toast. While **Send hedging-flow
 pushes to the phone** is off in Settings → Configuration (it ships off) they do
-not reach your phone and the Desk does not speak them. They are not shown on the
-public live screens unless **Show
-hedging-flow alerts on the public screens** is on (it ships off). They never
+not reach your phone and the Desk does not speak them. They are shown on the
+public live screens while **Show
+hedging-flow alerts on the public screens** is on (it ships on). They never
 count toward the Opportunity Board's **Flow alerts** or its score.
 
 **Age** tells you whether this just happened or is this morning's news. Pick a

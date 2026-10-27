@@ -4450,7 +4450,7 @@ A consolidated table of the load-bearing constants. The cited file governs.
 | Flow: unusual activity (UOA) | volume ≥ 3.0 × OI, vol floor 500, premium floor **$5M**, top 3 per symbol | `[uoa]` |
 | Flow: gamma flip | 0.15% hysteresis band, cooldown 60 min, watching `$SPX SPY QQQ IWM` | `[gamma_flip]` |
 | Flow: big delta | fires at **25%** of the symbol's own gross delta-notional AND ≥ $10M; phone push at the higher **35%**; delta band 0.05–0.85 | `[big_delta]` |
-| Flow: hedging surge (HIRO model) | 15-min hedge impact ≥ **3×** normal (RMS of full windows over the 5 prior sessions) AND ≥ $25M; ≤ 50% unlabelled volume; cooldown 30 min per direction; phone push at **4×** only with `push = true` (ships `false`); `public = false`; watching `$SPX SPY QQQ IWM` | `[hiro]` |
+| Flow: hedging surge (HIRO model) | 15-min hedge impact ≥ **3×** normal (RMS of full windows over the 5 prior sessions) AND ≥ $25M; ≤ 50% unlabelled volume; cooldown 30 min per direction; phone push at **4×** only with `push = true` (ships `false`); `public = true`; watching `$SPX SPY QQQ IWM` | `[hiro]` |
 | Flow: hedging reversal (HIRO model) | running total clears zero by **1.0×** normal; none before 09:00 CT; cooldown 60 min; minute history kept 20 sessions | `[hiro]` |
 | Flow: bought / sold estimate | poll gap booked unlabelled past **450 s**; stream at most **200** contracts a day (hard limit 500); stream read timeout 45 s | `[sides]`, `flow_sides_tick.py`, `flow_stream.py` |
 | Market read | a reading every **15** min (or 30) from the first slot after the open to the close; sources older than **300 s** dropped; thresholds in the *Market read* section | `config/market_read.toml` |

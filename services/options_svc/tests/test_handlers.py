@@ -2917,10 +2917,15 @@ def _hiro_flags(monkeypatch, cfg_over=None):
     return got
 
 
-def test_hiro_alerts_ship_quiet_and_off_the_public_screens(monkeypatch):
+def test_hiro_alerts_ship_quiet_and_on_the_public_screens(monkeypatch):
     """Default config: both flags stamped on BOTH kinds. Tier 1 reads the flags,
     never the services' config."""
     got = _hiro_flags(monkeypatch)
+    assert got == {"hiro_surge": (True, True), "hiro_flip": (True, True)}
+
+
+def test_hiro_alerts_stay_off_the_public_screens_when_public_is_off(monkeypatch):
+    got = _hiro_flags(monkeypatch, {"public": False})
     assert got == {"hiro_surge": (True, False), "hiro_flip": (True, False)}
 
 
