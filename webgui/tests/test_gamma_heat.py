@@ -218,38 +218,48 @@ def test_the_strengths_are_shares_of_the_configured_width():
     assert gh.smooth_args("medium", {"minutes": 0, "strikes": 0}) is None
 
 
-# ── the colour ramp, from the operator's eight colours ───────────────────────
+# ── the colour ramp, from the operator's four colours ────────────────────────
 # Asked for by the user 2026-10-11: the put and call colours and their grading
-# are chosen in Settings -> Appearance. The shipped eight must build the exact
-# stops the page drew when they were literals.
+# are chosen in Settings -> Appearance. Since 2026-10-28 each side is two
+# colours, the main one for its largest values and a low one for its smallest
+# (the peak and middle grades went), shipped maroon and purple.
 
-SHIPPED_COLOURS = {
-    "put_peak": "#ffbadc", "put": "#ff4d8d", "put_mid": "#96247a", "put_low": "#7a2c5c",
-    "call_low": "#2a5f9b", "call_mid": "#2a76e0", "call": "#35c8ff", "call_peak": "#bef8ff",
-}
+SHIPPED_COLOURS = {"put": "#800000", "put_low": "#bf5454",
+                   "call": "#800080", "call_low": "#bf54bf"}
 SHIPPED_STOPS = [
-    [0.00, "rgba(255,186,220,0.98)"], [0.12, "rgba(255,77,141,0.92)"],
-    [0.28, "rgba(150,36,122,0.62)"], [0.48, "rgba(122,44,92,0.5)"],
+    [0.00, "rgba(128,0,0,0.98)"], [0.12, "rgba(128,0,0,0.92)"],
+    [0.48, "rgba(191,84,84,0.5)"],
     [0.50, "rgba(0,0,0,0.0)"],
-    [0.52, "rgba(42,95,155,0.5)"], [0.72, "rgba(42,118,224,0.62)"],
-    [0.88, "rgba(53,200,255,0.92)"], [1.00, "rgba(190,248,255,0.98)"],
+    [0.52, "rgba(191,84,191,0.5)"],
+    [0.88, "rgba(128,0,128,0.92)"], [1.00, "rgba(128,0,128,0.98)"],
 ]
 
 
-def test_the_shipped_colours_build_the_stops_the_page_always_drew():
+def test_the_shipped_colours_build_the_stops():
     assert gh.ramp_stops(SHIPPED_COLOURS) == SHIPPED_STOPS
 
 
-def test_a_chosen_colour_moves_its_own_stop_and_nothing_else():
+def test_each_side_grades_from_its_low_colour_to_its_main_colour():
+    """Out from zero: clear, the low colour, then the main colour to the end.
+    The same shape both ways, so the two sides read alike."""
+    keys = [key for _pos, key, _alpha in gh.RAMP]
+    assert keys == ["put", "put", "put_low", None, "call_low", "call", "call"]
+    positions = [pos for pos, _key, _alpha in gh.RAMP]
+    assert positions == sorted(positions)
+    assert all(abs(a + b - 1.0) < 1e-9 for a, b in zip(positions, reversed(positions)))
+
+
+def test_a_chosen_colour_moves_its_own_stops_and_nothing_else():
     stops = gh.ramp_stops(dict(SHIPPED_COLOURS, call="#00ff88", put_low="#402010"))
     changed = {i for i, (a, b) in enumerate(zip(stops, SHIPPED_STOPS)) if a != b}
-    assert changed == {3, 7}
-    assert stops[7] == [0.88, "rgba(0,255,136,0.92)"]
-    assert stops[3] == [0.48, "rgba(64,32,16,0.5)"]
+    assert changed == {2, 5, 6}
+    assert stops[5] == [0.88, "rgba(0,255,136,0.92)"]
+    assert stops[6] == [1.00, "rgba(0,255,136,0.98)"]
+    assert stops[2] == [0.48, "rgba(64,32,16,0.5)"]
     # Where each grade sits and how see-through it is are the design's, not the
     # operator's: zero stays clear so the wash behind shows through.
     assert [s[0] for s in stops] == [s[0] for s in SHIPPED_STOPS]
-    assert stops[4] == [0.50, "rgba(0,0,0,0.0)"]
+    assert stops[3] == [0.50, "rgba(0,0,0,0.0)"]
 
 
 def test_ramp_stops_do_not_write_to_the_colours():

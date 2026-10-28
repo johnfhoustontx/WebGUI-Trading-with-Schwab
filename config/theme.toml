@@ -59,22 +59,19 @@ flat   = "#8891ab"             # flat / no-data
 cyan   = "#6b86ff"             # the "Improving" RRG accent (Deep Slate → blue)
 
 [gamma]                        # ── Dealer Positioning heat map (/options/gamma) ─
-# The put and the call colour, and the three other shades each side grades
-# through, in the order the scale reads: largest put value to largest call
-# value. `put` and `call` are also the bars, the walls, the gravity well, the
-# ridge plot and the contour lines. Edit them in Settings → Appearance, which
-# shows the ramp before you save. "#rrggbb" only: where each grade sits on the
-# scale and how see-through it is are fixed in code. The Flow and Net Prem tabs
-# follow: a colour changed here replaces [flow]'s call, put, call_deep, put_deep
-# and ice (from call, put, call_mid, put_mid and call_peak).
-put_peak  = "#ffbadc"          # the largest put values (pale pink)
-put       = "#ff4d8d"          # strong puts; put bars, put wall (magenta)
-put_mid   = "#96247a"          # middling puts
-put_low   = "#7a2c5c"          # the smallest put values (aubergine)
-call_low  = "#2a5f9b"          # the smallest call values (deep blue)
-call_mid  = "#2a76e0"          # middling calls
-call      = "#35c8ff"          # strong calls; call bars, call wall (cyan)
-call_peak = "#bef8ff"          # the largest call values (ice)
+# Two colours a side. The main colour holds that side's LARGEST values and the
+# low colour its smallest; the heat map grades between them, and is clear at
+# zero. Each side is listed largest first, the same way for puts and calls.
+# `put` and `call` are also the bars, the walls, the gravity well, the ridge
+# plot and the contour lines. Edit them in Settings → Appearance, which shows
+# the ramp before you save. "#rrggbb" only: where each grade sits on the scale
+# and how see-through it is are fixed in code. The Flow and Net Prem tabs
+# follow: a colour changed here replaces [flow]'s call, put, call_deep and
+# put_deep (from call, put, call_low and put_low).
+put       = "#800000"          # the largest put values; put bars, put wall (maroon)
+put_low   = "#bf5454"          # the smallest put values
+call      = "#800080"          # the largest call values; call bars, call wall (purple)
+call_low  = "#bf54bf"          # the smallest call values
 
 [typography]                   # ── text categories: font + sizes ────────────
 # Sizes are in PIXELS — a plain number works too ("15" = "15px"); a larger
@@ -196,22 +193,22 @@ regime_crisis         = "#f2646b"
 # Page-scoped like [console] and [macro], and NOT surfaced in Settings →
 # Appearance for the same reason: that editor's sections are single-kind.
 #
-# call/put are DELIBERATELY the same pair as the plasma heatmap's POS/NEG
-# colours. These panels sit behind the same subtab strip, so a cyan that meant
+# call/put are DELIBERATELY the same pair as the heatmap's POS/NEG
+# colours ([gamma] call and put). These panels sit behind the same subtab strip, so a cyan that meant
 # "call" on one tab and something else on the next would be worse than no
 # colour coding at all — change them together or not at all.
 #
 # The per-symbol line colours on Flow Field are NOT here: they live in
 # gamma.NET_PREM_COLORS, one fixed hue per symbol across all 28, pinned by tests
 # for mutual distinctness. A 15-colour section could not cover them.
-call       = "#35C8FF"         # call premium (= gamma POS_COLOR)
-put        = "#FF4D8D"         # put premium  (= gamma NEG_COLOR)
+call       = "#800080"         # call premium (= gamma POS_COLOR)
+put        = "#800000"         # put premium  (= gamma NEG_COLOR)
 spot       = "#EAF6FF"         # underlying price — white, not yellow: yellow
                                # read as a third premium series
-call_line  = "#7FDCFF"         # hairline drawn over the call glow
-put_line   = "#FF86B3"
-call_deep  = "#2A76E0"         # far stop of the call ribbon gradient
-put_deep   = "#96247A"
+call_line  = "#B973B9"         # hairline drawn over the call glow
+put_line   = "#B97373"
+call_deep  = "#BF54BF"         # far stop of the call ribbon gradient
+put_deep   = "#BF5454"
 live       = "#5EF0B8"         # streaming pill + its pulsing dot
 panel_from = "#0B1A2C"         # 150deg panel wash, three stops
 panel_mid  = "#060E1A"

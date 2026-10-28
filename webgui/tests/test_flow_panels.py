@@ -643,7 +643,10 @@ def test_panels_use_no_data_attributes():
 # ice were also written into about twenty rgba(...) literals, here and in the
 # client script, which no theme could reach.
 
-_SHIPPED_RGB = {"call": "53,200,255", "put": "255,77,141", "ice": "190,248,255"}
+# The shipped call and put are the [gamma] pair, purple and maroon since
+# 2026-10-28 (cyan 53,200,255 and magenta 255,77,141 before). Ice is [flow]'s own.
+_SHIPPED_RGB = {"call": "128,0,128", "put": "128,0,0", "ice": "190,248,255"}
+_SHIPPED_HEX = ("#800080", "#800000", "#bef8ff", "#bf54bf", "#bf5454")
 _CHOSEN_FLOW = {"call": "#00ff88", "put": "#ff6a00", "call_deep": "#10803c",
                 "put_deep": "#a03c00", "ice": "#c8ffe4"}
 _CHOSEN_RGB = {"call": "0,255,136", "put": "255,106,0", "ice": "200,255,228"}
@@ -666,21 +669,21 @@ def _everything(module):
 
 
 def test_the_shipped_colours_draw_exactly_what_they_always_drew():
-    """Nothing moves until a colour is chosen: the derived strings are the old
-    literals to the character."""
-    assert fp._PANEL_SHADOW == "0 0 0 1px rgba(53,200,255,.12),0 40px 90px -40px #000"
+    """At the shipped colours the derived strings are these, to the character
+    (the old literals, in the shipped call and put since 2026-10-28)."""
+    assert fp._PANEL_SHADOW == "0 0 0 1px rgba(128,0,128,.12),0 40px 90px -40px #000"
     assert fp._CHIP_BG == "rgba(190,248,255,.035)"
     assert fp._CHIP_RING == "inset 0 0 0 1px rgba(190,248,255,.10)"
-    assert fp._HAIR == "rgba(53,200,255,.10)"
-    assert fp._RAIL_BG == "linear-gradient(180deg,rgba(53,200,255,.05),transparent 38%)"
+    assert fp._HAIR == "rgba(128,0,128,.10)"
+    assert fp._RAIL_BG == "linear-gradient(180deg,rgba(128,0,128,.05),transparent 38%)"
     out = _everything(fp)
-    for literal in ("rgba(53,200,255,.08)", "rgba(190,248,255,.07)",
-                    "rgba(190,248,255,.35)", "rgba(255,77,141,.8)",
-                    "rgba(53,200,255,.8)", "rgba(53,200,255,.12)",
-                    "rgba(53,200,255,.05)", "rgba(190,248,255,.12)",
-                    "rgba(190,248,255,.06)", "rgba(255,77,141,.7)",
-                    "rgba(255,77,141,.2)", "rgba(53,200,255,.2)",
-                    "rgba(53,200,255,.7)"):
+    for literal in ("rgba(128,0,128,.08)", "rgba(190,248,255,.07)",
+                    "rgba(190,248,255,.35)", "rgba(128,0,0,.8)",
+                    "rgba(128,0,128,.8)", "rgba(128,0,128,.12)",
+                    "rgba(128,0,128,.05)", "rgba(190,248,255,.12)",
+                    "rgba(190,248,255,.06)", "rgba(128,0,0,.7)",
+                    "rgba(128,0,0,.2)", "rgba(128,0,128,.2)",
+                    "rgba(128,0,128,.7)"):
         assert literal in out, f"{literal} is no longer drawn at the shipped colours"
 
 
@@ -693,7 +696,7 @@ def test_no_call_or_put_colour_is_written_into_the_module():
                      if not line.lstrip().startswith("#"))
     for name, rgb in _SHIPPED_RGB.items():
         assert rgb not in code, f"a literal {name} colour ({rgb}) is back"
-    for literal in ("#35c8ff", "#ff4d8d", "#bef8ff", "#2a76e0", "#96247a"):
+    for literal in ("#35c8ff", "#ff4d8d", "#2a76e0", "#96247a") + _SHIPPED_HEX:
         assert literal not in code.lower()
 
 
@@ -710,7 +713,7 @@ def test_both_panels_wear_the_chosen_colours(monkeypatch):
         out = _everything(fp)
         for name, rgb in _SHIPPED_RGB.items():
             assert rgb not in out, f"the shipped {name} colour is still drawn"
-        for shipped in ("#35c8ff", "#ff4d8d", "#bef8ff", "#2a76e0", "#96247a"):
+        for shipped in _SHIPPED_HEX:
             assert shipped not in out.lower()
         for name, rgb in _CHOSEN_RGB.items():
             assert f"rgba({rgb}," in out, f"no tint of the chosen {name} colour"
@@ -719,7 +722,7 @@ def test_both_panels_wear_the_chosen_colours(monkeypatch):
     finally:
         monkeypatch.undo()
         importlib.reload(fp)
-    assert fp._HAIR == "rgba(53,200,255,.10)"
+    assert fp._HAIR == "rgba(128,0,128,.10)"
 
 
 def test_the_scrub_script_takes_its_tints_from_the_payload():
@@ -729,10 +732,10 @@ def test_the_scrub_script_takes_its_tints_from_the_payload():
         _flow_rows(), _ladder_rows([_T0 + i * 60 for i in range(1, 13)]),
         "SPY", "0DTE", "fxd")
     col = payload["col"]
-    assert col["putInk"] == "rgba(255,77,141,.7)"
-    assert col["putDim"] == "rgba(255,77,141,.2)"
-    assert col["callInk"] == "rgba(53,200,255,.7)"
-    assert col["callDim"] == "rgba(53,200,255,.2)"
+    assert col["putInk"] == "rgba(128,0,0,.7)"
+    assert col["putDim"] == "rgba(128,0,0,.2)"
+    assert col["callInk"] == "rgba(128,0,128,.7)"
+    assert col["callDim"] == "rgba(128,0,128,.2)"
     assert col["rowBg"] == "rgba(190,248,255,.06)"
     for key in ("putInk", "putDim", "callInk", "callDim", "rowBg"):
         assert f"D.col.{key}" in fp._SCRUB_JS

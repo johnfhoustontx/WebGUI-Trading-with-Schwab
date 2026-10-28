@@ -4,7 +4,29 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-27 (**EOD Summary: the Credit collected column is removed.**)
+**Last updated:** 2026-10-28 (**Dealer Positioning colours: two a side, maroon and purple.**)
+
+- At the user's request the heat map's colours drop from eight to four: `put`,
+  `put_low`, `call`, `call_low` (`config/theme.toml [gamma]`, Settings → Appearance).
+  The peak and middle grades are gone. Each side grades from its low colour next to
+  zero to its main colour, which also stays the bars, walls, well, ridge and contours.
+- Shipped colours: put maroon `#800000` (low `#bf5454`), call purple `#800080` (low
+  `#bf54bf`). The put low is the one the user had saved on prod.
+- Both rows of the Appearance editor now run the same way, main colour then low
+  (`GROUP_ROW_SIZE` 2). Before, the put row ran largest first and the call row
+  smallest first, because the tiles followed the scale left to right.
+- `gamma_heat.RAMP` is seven stops: the main colour at 0/0.12 and 0.88/1, the low
+  colour at 0.48/0.52, clear at 0.50. The plasma special case in the wash
+  (`_WASH_SHIPPED`) went with the plasma lows: the wash is always mixed from the low
+  colours now.
+- The Flow and Net Prem tabs follow four keys (`FLOW_FOLLOWS`: call, put, call_deep
+  ← call_low, put_deep ← put_low). `ice` no longer follows, because the call peak it
+  followed is gone. The shipped `[flow]` call, put, deep and line colours were moved
+  to match the new pair.
+- Manuals: the User Guide and Reference Guide colour passages were rewritten and
+  both were rebuilt.
+
+**Prior —** 2026-10-27 (**EOD Summary: the Credit collected column is removed.**)
 
 - The Daily / Weekly / MTD table on every book (Manual paper, Captured signals, Trade
   ideas) loses its **Credit collected** column. It summed `entry_credit_total` by entry

@@ -609,8 +609,8 @@ Prem** and **Term** are different screens with their own controls, and each has 
 own subsection further down.
 
 **Bars (top chart).** Net exposure at each strike, ±20 strikes around the current
-price. The window is fixed so bar width stays constant all day. Blue/cyan is
-call-heavy, magenta is put-heavy (the shipped colours; Settings → Appearance →
+price. The window is fixed so bar width stays constant all day. Purple is
+call-heavy, maroon is put-heavy (the shipped colours; Settings → Appearance →
 Dealer Positioning changes them). A tall bar is a strike where a lot of hedging
 pressure is concentrated.
 
@@ -635,8 +635,8 @@ see pressure *building* at a level during the session.
   is being pulled through as the day passes. Only drawn when something expires today.
 
 **0-DTE hedge pressure (the small panel under the heat map).** A signed column chart in
-billions of dollars. Cyan means dealers must **buy** into the close if price holds;
-magenta means they must **sell**. This is the most actionable single number on the
+billions of dollars. The call colour (purple, as shipped) means dealers must **buy**
+into the close if price holds; the put colour (maroon) means they must **sell**. This is the most actionable single number on the
 page in the last hour of trading.
 
 **Level movement** (switch, off by default) overlays how the flip and walls have moved
@@ -5114,10 +5114,11 @@ the marquee is showing.
 **Appearance tab.** Every colour and font in the app, grouped as surfaces, text,
 fields, buttons, status colours, charts, Dealer Positioning, type and menu, with a
 live preview that shows an unsaved colour before anything else does. The **Dealer
-Positioning** group is the heat map's eight colours: the put and the call colour,
-which the bars, walls, gravity well, ridge plot and contour lines also use, and
-three more shades a side for the largest, middling and smallest values. The
-preview draws the resulting scale. **Save changes** writes an
+Positioning** group is the heat map's four colours, two a side and both rows in
+the same order: the put or call colour first, for the largest values (the bars,
+walls, gravity well, ridge plot and contour lines also use it), then its low
+colour, for the smallest. The heat map grades between them. The preview draws
+the resulting scale. **Save changes** writes an
 override in `config/local/theme.toml` (the shipped `config/theme.toml` is never
 edited) and **Restart now** applies it to every screen; **Reset to shipped values**
 (confirm-gated) removes the override.

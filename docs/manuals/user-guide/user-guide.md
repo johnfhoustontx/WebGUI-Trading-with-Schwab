@@ -868,8 +868,8 @@ line summary (spot, strike count, net exposure).
   spot line, a gamma-flip line, and call/put **wall** lines. (In **Term** view this
   becomes a full-width expiry × strike heat map.)
 - **Right** — an **intraday heat map** of strike × time. Call-heavy (positive)
-  strikes run deep blue → cyan; put-heavy (negative) run aubergine → magenta; near
-  zero fades to transparent so quiet strikes read as empty. Those are the shipped
+  strikes grade from a light purple to purple; put-heavy (negative) from a light
+  maroon to maroon; near zero fades to transparent so quiet strikes read as empty. Those are the shipped
   colours: you can choose your own in **Settings → Appearance → Dealer
   Positioning**. The spot price is
   overlaid. **Press and hold** the left mouse button to read a cell — plain hovering

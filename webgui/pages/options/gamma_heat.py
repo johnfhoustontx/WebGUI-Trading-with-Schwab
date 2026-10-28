@@ -484,18 +484,19 @@ def smooth(z, *, minutes, strikes):
 
 
 # ── the colour ramp ──────────────────────────────────────────────────────────
-# The colour axis's stops, built from the eight colours an operator can choose
-# (``theme.gamma_colors``). WHERE each grade sits and how see-through it is are
-# the design's and stay here: the axis is symmetric about zero, the bright
-# stops sit far out so most of the field stays deep, and opacity runs from
-# nothing at zero to nearly solid at the ends, which is what blends the field
-# into the wash behind it. (position, colour key or None for clear, opacity)
+# The colour axis's stops, built from the four colours an operator can choose
+# (``theme.gamma_colors``): each side grades from its low colour next to zero
+# to its main colour at the end of the scale. WHERE each grade sits and how
+# see-through it is are the design's and stay here: the axis is symmetric about
+# zero, the main colour is reached well before the end so the largest values
+# share it, and opacity runs from nothing at zero to nearly solid at the ends,
+# which is what blends the field into the wash behind it. Two colours a side
+# since 2026-10-28 (the user dropped the peak and middle grades).
+# (position, colour key or None for clear, opacity)
 RAMP = (
-    (0.00, "put_peak", 0.98), (0.12, "put", 0.92),
-    (0.28, "put_mid", 0.62), (0.48, "put_low", 0.5),
+    (0.00, "put", 0.98), (0.12, "put", 0.92), (0.48, "put_low", 0.5),
     (0.50, None, 0.0),
-    (0.52, "call_low", 0.5), (0.72, "call_mid", 0.62),
-    (0.88, "call", 0.92), (1.00, "call_peak", 0.98),
+    (0.52, "call_low", 0.5), (0.88, "call", 0.92), (1.00, "call", 0.98),
 )
 
 

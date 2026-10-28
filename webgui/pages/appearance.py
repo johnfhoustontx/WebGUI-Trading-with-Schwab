@@ -62,16 +62,16 @@ GROUP_NOTES = {
 # group's ramp is in the preview.
 GROUP_HELP = {
     "Dealer Positioning":
-        "The heat map's colours, four grades a side. Top row: the put side, "
-        "from its largest values to its smallest. Bottom row: the call side, "
-        "from its smallest values to its largest. Put and Call are also the "
-        "bars, the walls, the gravity well, the ridge plot and the contour "
-        "lines, and the Flow and Net Prem tabs follow them. Shows after a web "
-        "GUI restart.",
+        "The heat map's colours, two a side. Top row: the put side. Bottom "
+        "row: the call side. Each row runs the same way: the main colour for "
+        "the largest values, then the low colour for the smallest; the heat "
+        "map grades between them. Put and Call are also the bars, the walls, "
+        "the gravity well, the ridge plot and the contour lines, and the Flow "
+        "and Net Prem tabs follow them. Shows after a web GUI restart.",
 }
-# Tiles to a row, where a group has a shape of its own: the four put grades over
-# the four call grades. Any other group is one wrapping row.
-GROUP_ROW_SIZE = {"Dealer Positioning": 4}
+# Tiles to a row, where a group has a shape of its own: the two put colours over
+# the two call colours. Any other group is one wrapping row.
+GROUP_ROW_SIZE = {"Dealer Positioning": 2}
 # What a restart costs, on its own so the dialog and the warning that names the
 # unsaved edits cannot drift apart.
 RESTART_BODY = "Every open page reloads in a few seconds."

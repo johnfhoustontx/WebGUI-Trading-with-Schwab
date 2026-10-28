@@ -94,18 +94,16 @@ _DEFAULTS = {
         "flat": "#9e9e9e", "cyan": "#3fb6c7",
     },
     "gamma": {
-        # Dealer Positioning (/options/gamma): the put and the call colour, and
-        # the three other shades each side of the heat map grades through. In
-        # the order the scale reads, largest put to largest call. ``put`` and
-        # ``call`` are also the bars, the walls, the gravity well, the ridge
-        # plot and the contour lines. These are the plasma ramp's own eight
-        # colours (docs/plans/2026-08-15-gamma-plasma-palette-design.md), so
-        # nothing moves until an operator chooses. HEX ONLY: where each grade
+        # Dealer Positioning (/options/gamma): two colours a side. Each side's
+        # main colour holds its LARGEST values and its low colour its smallest;
+        # the heat map grades between them, and clear at zero. Each side runs
+        # largest first, the same way for puts and calls. ``put`` and ``call``
+        # are also the bars, the walls, the gravity well, the ridge plot and the
+        # contour lines. Maroon and purple since 2026-10-28 (the user's choice;
+        # the plasma ramp's eight colours before). HEX ONLY: where each grade
         # sits and how see-through it is stay with ``gamma_heat.RAMP``.
-        "put_peak": "#ffbadc", "put": "#ff4d8d",
-        "put_mid": "#96247a", "put_low": "#7a2c5c",
-        "call_low": "#2a5f9b", "call_mid": "#2a76e0",
-        "call": "#35c8ff", "call_peak": "#bef8ff",
+        "put": "#800000", "put_low": "#bf5454",
+        "call": "#800080", "call_low": "#bf54bf",
     },
     "typography": {
         # Text categories — sizes in PIXELS ("20px", or a bare number like "20";
@@ -208,18 +206,19 @@ _DEFAULTS = {
     # on one tab and something else on the next would be worse than no colour
     # coding at all. Source: the 2026-08-15 handoff spec.
     # Since 2026-10-11 an operator can change [gamma] in Settings → Appearance,
-    # and five of these keys FOLLOW it (``FLOW_FOLLOWS``, in ``flow_colors``):
-    # call, put, call_deep, put_deep and ice. The values here are what they are
-    # while the matching [gamma] colour is the shipped one.
+    # and four of these keys FOLLOW it (``FLOW_FOLLOWS``, in ``flow_colors``):
+    # call, put, call_deep and put_deep. The values here are what they are
+    # while the matching [gamma] colour is the shipped one, so they ARE the
+    # shipped [gamma] colours.
     "flow": {
-        "call": "#35C8FF",       # call premium — the plasma positive
-        "put": "#FF4D8D",        # put premium — the plasma negative
+        "call": "#800080",       # call premium — the [gamma] call
+        "put": "#800000",        # put premium — the [gamma] put
         "spot": "#EAF6FF",       # underlying price. Was yellow, which read as a
                                  # THIRD premium series beside the other two.
-        "call_line": "#7FDCFF",  # the hairline drawn over the call glow
-        "put_line": "#FF86B3",
-        "call_deep": "#2A76E0",  # far stop of the call ribbon gradient
-        "put_deep": "#96247A",
+        "call_line": "#B973B9",  # the hairline drawn over the call glow
+        "put_line": "#B97373",
+        "call_deep": "#BF54BF",  # far stop of the call ribbon gradient
+        "put_deep": "#BF5454",
         "live": "#5EF0B8",       # the streaming pill + its pulsing dot
         "panel_from": "#0B1A2C",  # 150deg panel wash, three stops
         "panel_mid": "#060E1A",
@@ -825,7 +824,7 @@ CONSOLE_KEYFRAMES_CSS = """
 
 
 # ── Dealer Positioning colours (/options/gamma heat map views) ───────────────
-GAMMA_KEYS = tuple(_DEFAULTS["gamma"])     # largest put … largest call
+GAMMA_KEYS = tuple(_DEFAULTS["gamma"])     # each side largest first: put, put low, call, call low
 _HEX3 = re.compile(r"^#[0-9a-fA-F]{3}$")
 _HEX6 = re.compile(r"^#[0-9a-fA-F]{6}$")
 
@@ -845,7 +844,7 @@ def hex6(value):
 
 
 def gamma_colors(theme):
-    """The eight Dealer Positioning colours as ``#rrggbb``, in ``GAMMA_KEYS``
+    """The four Dealer Positioning colours as ``#rrggbb``, in ``GAMMA_KEYS``
     order, the shipped one standing in for anything missing or not a hex.
 
     Total, like ``flow_colors``: no ``[gamma]`` section, or no theme at all,
@@ -870,10 +869,11 @@ _FLOW_KEYS = ("call", "put", "spot", "call_line", "put_line", "call_deep",
 
 # The Flow keys that ARE a call or put colour, and the Dealer Positioning colour
 # each takes once an operator has chosen one (flow key -> [gamma] key). The far
-# stop of each ribbon is that side's middle grade, and "ice" (chip rings, the
-# cursor, the bar grounds) is the call side's peak, as they always were.
-FLOW_FOLLOWS = {"call": "call", "put": "put", "call_deep": "call_mid",
-                "put_deep": "put_mid", "ice": "call_peak"}
+# stop of each ribbon is that side's low colour. "ice" (chip rings, the cursor,
+# the bar grounds) followed the plasma call peak, which went on 2026-10-28, so
+# it is the [flow] section's own again.
+FLOW_FOLLOWS = {"call": "call", "put": "put", "call_deep": "call_low",
+                "put_deep": "put_low"}
 
 
 def flow_colors(theme):

@@ -1054,8 +1054,8 @@ two sides from the grid itself.
   emit on every paint, drawn in `BALANCED_COLOR` grey on both panels in every
   Value. Grey because amber is the projected flip's.
 - **The colours are the operator's (2026-10-11).** `config/theme.toml [gamma]`:
-  `put_peak`, `put`, `put_mid`, `put_low`, `call_low`, `call_mid`, `call`,
-  `call_peak`, read through `theme.gamma_colors` (hex only, shipped colour for
+  `put`, `put_low`, `call`, `call_low` (two a side since 2026-10-28, each side
+  largest first; shipped maroon and purple), read through `theme.gamma_colors` (hex only, shipped colour for
   anything malformed). `gamma_heat.ramp_stops` builds `HEAT_STOPS` from them at
   the positions and opacities in `gamma_heat.RAMP`; `gamma.palette(colours)` is
   every other colour drawn in the call or put colour (`POS_COLOR`, `NEG_COLOR`,
@@ -1063,10 +1063,10 @@ two sides from the grid itself.
   Resolved once at import: a web GUI restart applies a change. ⚠ A new colour on
   this page is added to `palette`, never written as a hex literal, or it stays
   cyan beside a heat map the operator made green. The Flow and Net Prem panels
-  FOLLOW (2026-10-11): `theme.flow_colors` replaces five `[flow]` keys with the
-  chosen `[gamma]` colour (`FLOW_FOLLOWS`: call, put, call_deep ← call_mid,
-  put_deep ← put_mid, ice ← call_peak), only where that colour is not the shipped
-  one. Every tint of those in `flow_panels.py` is `_tone(key, alpha)`; the scrub
+  FOLLOW (2026-10-11): `theme.flow_colors` replaces four `[flow]` keys with the
+  chosen `[gamma]` colour (`FLOW_FOLLOWS`: call, put, call_deep ← call_low,
+  put_deep ← put_low), only where that colour is not the shipped one; the
+  shipped `[flow]` values are the shipped `[gamma]` ones. Every tint of those in `flow_panels.py` is `_tone(key, alpha)`; the scrub
   script's five come in the payload's `col`. A test reads the module's source and
   fails on a literal call, put or ice colour.
 - **The legend strip** is one line of SVG in the controls row

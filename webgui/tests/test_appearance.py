@@ -240,33 +240,30 @@ def _gamma_group():
     return next(g for g in appearance.GROUPS if g[0] == "Dealer Positioning")
 
 
-def test_dealer_positioning_offers_the_eight_colours_in_scale_order():
+def test_dealer_positioning_offers_two_colours_a_side_in_one_direction():
+    """No peak and no middle grade, and both sides main colour first (the user,
+    2026-10-28: the put row ran largest first and the call row smallest first)."""
     label, kind, keys = _gamma_group()
     assert kind == "color"
     assert keys == [("gamma", k) for k in theme.GAMMA_KEYS]
     assert "gamma" in appearance.EDITABLE_SECTIONS
-    # Largest put first, largest call last: the order the legend runs in.
     assert [theme.knob_label(k) for _s, k in keys] == [
-        "Put peak", "Put", "Put mid", "Put low",
-        "Call low", "Call mid", "Call", "Call peak"]
+        "Put", "Put low", "Call", "Call low"]
 
 
-def test_the_put_grades_sit_on_one_row_and_the_call_grades_on_the_next(monkeypatch):
-    """Eight tiles do not fit one row at every width, and a ragged wrap would
-    leave one call grade alone under the puts."""
+def test_the_put_colours_sit_on_one_row_and_the_call_colours_on_the_next(monkeypatch):
+    """A ragged wrap would leave one call colour alone under the puts."""
     from nicegui import ui
-    assert appearance.GROUP_ROW_SIZE["Dealer Positioning"] == 4
+    assert appearance.GROUP_ROW_SIZE["Dealer Positioning"] == 2
     host = _render(monkeypatch)
     heading = [e for e in host.descendants()
                if getattr(e, "text", None) == "Dealer Positioning"][0]
     card = heading.parent_slot.parent
     rows = [[lbl.text for lbl in row.descendants()
              if isinstance(lbl, ui.label) and lbl.text in (
-                 "Put peak", "Put", "Put mid", "Put low",
-                 "Call low", "Call mid", "Call", "Call peak")]
+                 "Put", "Put low", "Call", "Call low")]
             for row in card.descendants() if isinstance(row, ui.row)]
-    assert [r for r in rows if r] == [["Put peak", "Put", "Put mid", "Put low"],
-                                      ["Call low", "Call mid", "Call", "Call peak"]]
+    assert [r for r in rows if r] == [["Put", "Put low"], ["Call", "Call low"]]
 
 
 def test_dealer_positioning_says_what_the_colours_are(monkeypatch):
@@ -285,10 +282,10 @@ def _ramp_html(host):
 
 def test_the_preview_draws_the_ramp_from_the_unsaved_colours(monkeypatch):
     """The only place a colour can be judged before the restart that applies
-    it: all eight grades as the heat map's own gradient."""
+    it: all four colours as the heat map's own gradient."""
     from nicegui import ui
     host = _render(monkeypatch)
-    assert "rgb(53,200,255)" in _ramp_html(host)            # the shipped call
+    assert "rgb(128,0,128)" in _ramp_html(host)             # the shipped call (purple)
     pickers = [e for e in host.descendants() if isinstance(e, ui.color_picker)]
     first = len(pickers) - len(theme.GAMMA_KEYS)            # the group is last of the colours
     order = [k for _s, k in _gamma_group()[2]]
@@ -296,7 +293,7 @@ def test_the_preview_draws_the_ramp_from_the_unsaved_colours(monkeypatch):
                                 (order.index("put_low"), "#402010", "rgb(64,32,16)")):
         _pick(host, _color_index(host, first + offset), colour)
         assert rgb in _ramp_html(host), f"{colour} is not in the preview's ramp"
-    assert "rgb(53,200,255)" not in _ramp_html(host)
+    assert "rgb(128,0,128)" not in _ramp_html(host)
 
 
 def _color_index(host, index):

@@ -43,22 +43,23 @@ from .inputs import select_all_on_focus
 from . import theme as _theme
 from .theme import FLOW_KEYFRAMES_CSS, MUTED
 
-# "Plasma" palette (see docs/plans/2026-08-15-gamma-plasma-palette-design.md): the
-# exposure field runs CYAN for call-heavy (positive net) and MAGENTA for put-heavy
-# (negative). These two are the ramp's "hot" stops, and they do double duty — the
-# by-strike bars and the sided wall lines use them, so a bar, a wall and the cells
-# around them all read as the same instrument.
+# The exposure field runs in the CALL colour for call-heavy (positive net) and the
+# PUT colour for put-heavy (negative): purple and maroon since 2026-10-28, cyan and
+# magenta before (docs/plans/2026-08-15-gamma-plasma-palette-design.md). These two
+# are the ramp's end stops, and they do double duty — the by-strike bars and the
+# sided wall lines use them, so a bar, a wall and the cells around them all read
+# as the same instrument.
 #
 # Since 2026-10-11 the operator chooses them: ``config/theme.toml [gamma]``, in
 # Settings → Appearance. ``palette`` is everything the page derives from those
-# eight colours, and the constants below are its output for the running theme,
+# four colours, and the constants below are its output for the running theme,
 # resolved once at import like the rest of the theme (a web GUI restart applies
 # a change).
 
 
 def palette(colours):
     """Every colour the page draws in "the call colour" or "the put colour",
-    from the eight an operator can choose (``theme.gamma_colors``). PURE.
+    from the four an operator can choose (``theme.gamma_colors``). PURE.
 
     The contour lines are a pale tint of each main colour and the ridge plot's
     fills a dark one, so both follow a chosen colour instead of staying cyan
@@ -78,20 +79,15 @@ def palette(colours):
 
 
 # The wash behind the heat map (``_wash_background``): call side at the top,
-# put side at the bottom, each a dark tint of that side's LOWEST grade over a
-# near-black ground. The shipped low grades keep the wash the plasma design
-# drew, to the digit; any other pair is mixed, with weights chosen so the two
-# rules meet (a test pins both).
-_WASH_SHIPPED = ("#15263e", "#16223a", "#241628", "#281422")
+# put side at the bottom, each a dark tint of that side's LOW colour over a
+# near-black ground. (Until 2026-10-28 the shipped plasma lows kept the plasma
+# design's own four tones; those lows are no longer shipped.)
 _WASH_GROUND = "#0e1016"     # nearly neutral: a navy ground would tint every wash blue
 _WASH_MIX = ((0.00, "call_low", 0.25), (0.46, "call_low", 0.20),
              (0.62, "put_low", 0.20), (1.00, "put_low", 0.24))
 
 
 def _wash_stops(colours):
-    shipped = _theme.gamma_colors(None)
-    if all(colours[key] == shipped[key] for key in ("call_low", "put_low")):
-        return [[pos, tone] for (pos, _k, _w), tone in zip(_WASH_MIX, _WASH_SHIPPED)]
     return [[pos, _heat.mix(_WASH_GROUND, colours[key], weight)]
             for pos, key, weight in _WASH_MIX]
 
@@ -161,15 +157,15 @@ _PLOT_MARGIN_BOTTOM = 64
 # Two properties here are deliberate, not incidental:
 #  • the ALPHA ramp (0 at the centre → ~1 at the extremes) is what blends the field
 #    into the page, and the design does the same (`0.10 + a^1.05 * 0.90`);
-#  • the BRIGHT stops sit out at 0.88/0.12 rather than spread evenly, so most of the
-#    field stays deep blue/aubergine and only the cores reach cyan and ice. That
+#  • the MAIN colour is reached at 0.88/0.12 rather than at the ends, so the
+#    largest values share it and the rest grade toward the low colour. That
 #    reproduces the design's `pow(a, 1.7)` colour-position shaping without needing a
 #    non-linear axis.
 # Shared by all four intraday views AND Term via ``_coloraxis``.
 #
-# The positions and opacities are ``gamma_heat.RAMP``; the eight colours are
-# the operator's (``[gamma]``), shipped as the plasma ramp: pale pink, magenta,
-# two aubergines, clear at zero, two deep blues, cyan, ice.
+# The positions and opacities are ``gamma_heat.RAMP``; the four colours are
+# the operator's (``[gamma]``), shipped as maroon and its low colour, clear at
+# zero, then purple's low colour and purple.
 HEAT_STOPS = _PAL["stops"]
 
 # The washed plot background, blue at the top fading to magenta at the bottom.

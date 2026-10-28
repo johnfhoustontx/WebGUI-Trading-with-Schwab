@@ -496,56 +496,53 @@ def test_heatmap_figure_blended_no_lines_no_fade():
     assert [fig["yAxis"]["min"], fig["yAxis"]["max"]] == [440.0, 460.0]   # aligned to bars
 
 
-def test_heat_colorscale_is_plasma_with_transparent_zero():
-    # Diverging PLASMA scale: zero (stop 0.50) fades to transparent so the wash
-    # behind shows through; put-heavy (negative) runs magenta/pink, call-heavy
-    # (positive) runs cyan/ice.
+def test_heat_colorscale_runs_maroon_and_purple_with_transparent_zero():
+    # Diverging scale: zero (stop 0.50) fades to transparent so the wash behind
+    # shows through; put-heavy (negative) ends in maroon, call-heavy (positive)
+    # in purple, each through its low colour next to zero (2026-10-28).
     mid = next(s for s in gamma.HEAT_STOPS if s[0] == 0.50)
     assert mid[1] in ("rgba(0,0,0,0.0)", "rgba(0,0,0,0)")
-    assert "255,186,220" in gamma.HEAT_STOPS[0][1]        # most-negative → pale pink
-    assert "190,248,255" in gamma.HEAT_STOPS[-1][1]       # most-positive → ice
-    # The design's "hot" pair must be present as the near-extreme stops.
-    assert any("255,77,141" in s[1] for s in gamma.HEAT_STOPS)    # put hot (magenta)
-    assert any("53,200,255" in s[1] for s in gamma.HEAT_STOPS)    # call hot (cyan)
+    assert "128,0,0," in gamma.HEAT_STOPS[0][1]           # most-negative → maroon
+    assert "128,0,128," in gamma.HEAT_STOPS[-1][1]        # most-positive → purple
+    assert any("191,84,84," in s[1] for s in gamma.HEAT_STOPS)    # put low
+    assert any("191,84,191," in s[1] for s in gamma.HEAT_STOPS)   # call low
 
 
 # ── the colours are the operator's (Settings -> Appearance) ──────────────────
 # Asked for by the user 2026-10-11. ``palette`` is every colour the page derives
-# from the eight an operator can choose; the module's constants are its output
+# from the four an operator can choose; the module's constants are its output
 # for the running theme, resolved once at import like the rest of the theme.
 
-_CHOSEN = {"put_peak": "#ffe0c0", "put": "#ff6a00", "put_mid": "#a03c00",
-           "put_low": "#5a2200", "call_low": "#0a4020", "call_mid": "#10803c",
-           "call": "#00ff88", "call_peak": "#c8ffe4"}
+_CHOSEN = {"put": "#ff6a00", "put_low": "#5a2200",
+           "call": "#00ff88", "call_low": "#0a4020"}
 
 
-def test_palette_at_the_shipped_colours_is_what_the_page_always_drew():
+def test_palette_at_the_shipped_colours():
     from pages.options import theme
     pal = gamma.palette(theme.gamma_colors(theme._DEFAULTS))
-    assert (pal["pos"], pal["neg"]) == ("#35c8ff", "#ff4d8d")
-    assert pal["stops"][0] == [0.00, "rgba(255,186,220,0.98)"]
-    assert pal["stops"][-1] == [1.00, "rgba(190,248,255,0.98)"]
-    # The well's ground is each main colour, mostly see-through: unchanged.
-    assert pal["well_valley"] == "rgba(53,200,255,0.26)"
-    assert pal["well_hill"] == "rgba(255,77,141,0.26)"
+    assert (pal["pos"], pal["neg"]) == ("#800080", "#800000")
+    assert pal["stops"][0] == [0.00, "rgba(128,0,0,0.98)"]
+    assert pal["stops"][-1] == [1.00, "rgba(128,0,128,0.98)"]
+    # The well's ground is each main colour, mostly see-through.
+    assert pal["well_valley"] == "rgba(128,0,128,0.26)"
+    assert pal["well_hill"] == "rgba(128,0,0,0.26)"
 
 
 def test_palette_follows_every_chosen_colour():
     pal = gamma.palette(_CHOSEN)
     assert (pal["pos"], pal["neg"]) == ("#00ff88", "#ff6a00")
     ramp = " ".join(colour for _pos, colour in pal["stops"])
-    for rgb in ("255,224,192", "255,106,0", "160,60,0", "90,34,0",
-                "10,64,32", "16,128,60", "0,255,136", "200,255,228"):
+    for rgb in ("255,106,0", "90,34,0", "10,64,32", "0,255,136"):
         assert rgb in ramp
     # Everything drawn in "the call colour" or "the put colour" moves with it.
     assert pal["well_valley"].startswith("rgba(0,255,136,")
     assert pal["well_hill"].startswith("rgba(255,106,0,")
     for key in ("contour_above", "ridge_above"):
         assert pal[key] != gamma.palette(
-            dict(_CHOSEN, call="#35c8ff"))[key], f"{key} ignores the call colour"
+            dict(_CHOSEN, call="#800080"))[key], f"{key} ignores the call colour"
     for key in ("contour_below", "ridge_below"):
         assert pal[key] != gamma.palette(
-            dict(_CHOSEN, put="#ff4d8d"))[key], f"{key} ignores the put colour"
+            dict(_CHOSEN, put="#800000"))[key], f"{key} ignores the put colour"
 
 
 def test_a_contour_is_a_pale_tint_and_a_ridge_fill_a_dark_one():
@@ -560,37 +557,26 @@ def test_a_contour_is_a_pale_tint_and_a_ridge_fill_a_dark_one():
     assert all(a <= b for a, b in zip(rgb(pal["ridge_below"]), (255, 106, 0)))
 
 
-_SHIPPED_WASH = [[0.00, "#15263e"], [0.46, "#16223a"], [0.62, "#241628"], [1.00, "#281422"]]
-
-
 def _channels(colour):
     return [int(colour[i:i + 2], 16) for i in (1, 3, 5)]
 
 
-def test_the_wash_behind_the_heat_map_follows_the_lowest_grades():
+def test_the_wash_behind_the_heat_map_follows_the_low_colours():
     """Seen in the harness 2026-10-11: with green calls the plot still had a
-    blue cast at the top. The wash is a dark tint of each side's lowest grade."""
+    blue cast at the top. The wash is a dark tint of each side's low colour,
+    for the shipped colours too: the plasma lows' hand-tuned wash went with
+    them on 2026-10-28."""
     from pages.options import theme
-    shipped = theme.gamma_colors(None)
-    # The shipped colours keep the wash the page always had, to the digit.
-    assert gamma.palette(shipped)["wash"] == _SHIPPED_WASH
+    shipped = gamma.palette(theme.gamma_colors(None))["wash"]
+    assert shipped == [[0.00, "#3a2140"], [0.46, "#311e38"],
+                       [0.62, "#311e22"], [1.00, "#382025"]]
+    assert not hasattr(gamma, "_WASH_SHIPPED")
     wash = gamma.palette(_CHOSEN)["wash"]
     assert [pos for pos, _c in wash] == [0.00, 0.46, 0.62, 1.00]
     top, bottom = _channels(wash[0][1]), _channels(wash[-1][1])
     assert top[1] > top[0] and top[1] > top[2]             # call side: green
     assert bottom[0] > bottom[1] and bottom[0] > bottom[2]  # put side: orange
     assert max(top + bottom) < 90, "a wash is dim, or quiet strikes read as data"
-
-
-def test_a_small_change_of_colour_does_not_jump_the_wash():
-    """One step off the shipped low grades leaves the derived wash within a few
-    parts in 255 of the shipped one: the two rules meet."""
-    from pages.options import theme
-    nudged = dict(theme.gamma_colors(None), call_low="#2a5f9c", put_low="#7a2c5d")
-    wash = gamma.palette(nudged)["wash"]
-    assert wash != _SHIPPED_WASH
-    for (_p, got), (_q, was) in zip(wash, _SHIPPED_WASH):
-        assert all(abs(a - b) <= 12 for a, b in zip(_channels(got), _channels(was)))
 
 
 def test_the_page_reads_its_colours_from_the_theme(monkeypatch):
@@ -618,7 +604,7 @@ def test_the_page_reads_its_colours_from_the_theme(monkeypatch):
     finally:
         monkeypatch.undo()
         importlib.reload(gamma)
-    assert (gamma.POS_COLOR, gamma.NEG_COLOR) == ("#35c8ff", "#ff4d8d")
+    assert (gamma.POS_COLOR, gamma.NEG_COLOR) == ("#800080", "#800000")
 
 
 def test_heat_colorscale_stops_are_ordered_and_symmetric_about_zero():
@@ -630,23 +616,24 @@ def test_heat_colorscale_stops_are_ordered_and_symmetric_about_zero():
     assert {round(1.0 - p, 6) for p in pos} == {round(p, 6) for p in pos}
 
 
-def test_heat_colorscale_saves_the_bright_hues_for_the_extremes():
-    # The design shapes colour position by pow(a, 1.7), so most of the field sits
-    # in the deep blue / aubergine and only the cores reach cyan and ice. Mirror
-    # that by keeping the two hot stops out past 0.85 / under 0.15.
-    hot_pos = [s[0] for s in gamma.HEAT_STOPS
-               if "53,200,255" in s[1] or "255,77,141" in s[1]]
-    assert hot_pos and all(p >= 0.85 or p <= 0.15 for p in hot_pos)
+def test_heat_colorscale_saves_the_main_colours_for_the_extremes():
+    # The design shapes colour position by pow(a, 1.7), so most of the field
+    # grades through the low colours and only the cores reach the main ones.
+    # Mirror that by keeping the main colours out past 0.85 / under 0.15.
+    main_pos = [s[0] for s in gamma.HEAT_STOPS
+                if "128,0,128," in s[1] or "128,0,0," in s[1]]
+    assert main_pos and all(p >= 0.85 or p <= 0.15 for p in main_pos)
 
 
-def test_wash_background_is_a_vertical_blue_to_magenta_gradient():
+def test_wash_background_is_a_vertical_call_to_put_gradient():
     wash = gamma._wash_background()
     lg = wash["linearGradient"]
     # Vertical: same x, top-to-bottom y.
     assert lg["x1"] == lg["x2"] and lg["y1"] == 0 and lg["y2"] == 1
     stops = wash["stops"]
-    assert stops[0][1].lower() == "#15263e"               # blue at the top
-    assert stops[-1][1].lower() == "#281422"              # magenta at the bottom
+    top, bottom = _channels(stops[0][1]), _channels(stops[-1][1])
+    assert top[2] > top[1]                    # call side (purple) at the top
+    assert bottom[0] > bottom[2]              # put side (maroon) at the bottom
     assert [s[0] for s in stops] == sorted(s[0] for s in stops)
 
 
@@ -1093,11 +1080,11 @@ def test_the_four_level_colours_stay_mutually_distinct():
         assert f"{r},{g},{b}" not in ramp
 
 
-def test_bars_are_plasma_cyan_and_magenta():
+def test_bars_are_the_call_purple_and_the_put_maroon():
     b = gamma.bars_from_gex(GEX, 450.0)
     assert set(b["colors"]) <= {gamma.POS_COLOR, gamma.NEG_COLOR}
-    assert gamma.POS_COLOR.lower() == "#35c8ff"     # call hot
-    assert gamma.NEG_COLOR.lower() == "#ff4d8d"     # put hot
+    assert gamma.POS_COLOR.lower() == "#800080"     # call
+    assert gamma.NEG_COLOR.lower() == "#800000"     # put
 
 
 # --- 3D bevel + glow (the reference design's rail bars) ---
