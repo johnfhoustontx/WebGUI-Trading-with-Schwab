@@ -97,9 +97,10 @@ _DEFAULTS = {
         # Dealer Positioning (/options/gamma): two colours a side. Each side's
         # main colour holds its LARGEST values and its low colour its smallest;
         # the heat map grades between them, and clear at zero. Each side runs
-        # largest first, the same way for puts and calls. ``put`` and ``call``
-        # are also the bars, the walls, the gravity well, the ridge plot and the
-        # contour lines. Maroon and purple since 2026-10-28 (the user's choice;
+        # largest first, the same way for puts and calls. ``put_low`` and
+        # ``call_low`` are also the by-strike bars (since 2026-10-28); ``put``
+        # and ``call`` are the walls, the hedge panel, the gravity well, the
+        # ridge plot and the contour lines. Maroon and purple since 2026-10-28 (the user's choice;
         # the plasma ramp's eight colours before). HEX ONLY: where each grade
         # sits and how see-through it is stay with ``gamma_heat.RAMP``.
         "put": "#800000", "put_low": "#bf5454",

@@ -65,9 +65,11 @@ GROUP_HELP = {
         "The heat map's colours, two a side. Top row: the put side. Bottom "
         "row: the call side. Each row runs the same way: the main colour for "
         "the largest values, then the low colour for the smallest; the heat "
-        "map grades between them. Put and Call are also the bars, the walls, "
-        "the gravity well, the ridge plot and the contour lines, and the Flow "
-        "and Net Prem tabs follow them. Shows after a web GUI restart.",
+        "map grades between them. Put low and Call low are also the strike "
+        "bars. Put and Call are the walls, the hedge panel, the gravity well, "
+        "the ridge plot and the contour lines, and the Flow and Net Prem tabs "
+        "follow them. Restart now restarts the app and the live screens, "
+        "which both show these colours.",
 }
 # Tiles to a row, where a group has a shape of its own: the two put colours over
 # the two call colours. Any other group is one wrapping row.

@@ -600,7 +600,9 @@ def test_the_page_reads_its_colours_from_the_theme(monkeypatch):
         assert gamma.RIDGE_BELOW_FILL == gamma.palette(_CHOSEN)["ridge_below"]
         assert gamma.CONTOUR_ABOVE_COLOR == gamma.palette(_CHOSEN)["contour_above"]
         assert gamma._wash_background()["stops"] == gamma.palette(_CHOSEN)["wash"]
-        assert set(gamma.bars_from_gex(SIDED, 100.0)["colors"]) <= {"#00ff88", "#ff6a00"}
+        # The bars wear the LOW colours (the user, 2026-10-28).
+        assert set(gamma.bars_from_gex(SIDED, 100.0)["colors"]) <= {"#0a4020", "#5a2200"}
+        assert (gamma.BAR_POS_COLOR, gamma.BAR_NEG_COLOR) == ("#0a4020", "#5a2200")
     finally:
         monkeypatch.undo()
         importlib.reload(gamma)
@@ -1080,11 +1082,33 @@ def test_the_four_level_colours_stay_mutually_distinct():
         assert f"{r},{g},{b}" not in ramp
 
 
-def test_bars_are_the_call_purple_and_the_put_maroon():
+def test_bars_wear_the_low_colours_and_the_walls_the_main_ones():
+    """The user, 2026-10-28: the by-strike bars take the Put low and Call low
+    colours. The walls and the hedge panel keep the main pair."""
     b = gamma.bars_from_gex(GEX, 450.0)
-    assert set(b["colors"]) <= {gamma.POS_COLOR, gamma.NEG_COLOR}
-    assert gamma.POS_COLOR.lower() == "#800080"     # call
-    assert gamma.NEG_COLOR.lower() == "#800000"     # put
+    assert set(b["colors"]) <= {gamma.BAR_POS_COLOR, gamma.BAR_NEG_COLOR}
+    assert gamma.BAR_POS_COLOR.lower() == "#bf54bf"     # call low
+    assert gamma.BAR_NEG_COLOR.lower() == "#bf5454"     # put low
+    assert gamma.POS_COLOR.lower() == "#800080"         # call
+    assert gamma.NEG_COLOR.lower() == "#800000"         # put
+    assert (gamma.CALL_WALL_COLOR, gamma.PUT_WALL_COLOR) == (gamma.POS_COLOR, gamma.NEG_COLOR)
+    assert (gamma.HEDGE_BUY_COLOR, gamma.HEDGE_SELL_COLOR) == (gamma.POS_COLOR, gamma.NEG_COLOR)
+
+
+def test_every_bar_view_draws_in_the_low_colours():
+    """Net, Size and a change view each build their own points: none may fall
+    back to the main pair (which is also the walls', drawn across the bars)."""
+    low = {gamma.BAR_POS_COLOR.lower(), gamma.BAR_NEG_COLOR.lower()}
+    basis = {s: {"net": 0.0, "call": 0.0, "put": 0.0}
+             for s in (GEX.get("gex") or {})}
+    for kwargs in ({}, {"mode": "size"}, {"show": "open", "basis": basis}):
+        fig = gamma.bar_figure(GEX, 450.0, **kwargs)
+        bars = [s for s in fig["series"] if s.get("type") == "bar"
+                and s["name"] in ("Call gamma", "Put gamma")]
+        assert {s["shadow"]["color"].lower() for s in bars} == low, kwargs
+        # Each point's border is a darker shade of its own fill colour.
+        borders = {p["borderColor"].lower() for s in bars for p in s["data"]}
+        assert borders and borders <= {gamma._darker(c) for c in low}, kwargs
 
 
 # --- 3D bevel + glow (the reference design's rail bars) ---
@@ -1159,8 +1183,9 @@ def test_bar_figure_splits_by_sign_so_each_side_glows_its_own_colour():
     fig = gamma.bar_figure(GEX, 450.0, view="GEX")
     named = {s["name"]: s for s in fig["series"]}
     assert "Call gamma" in named and "Put gamma" in named
-    assert named["Call gamma"]["shadow"]["color"] == gamma.POS_COLOR
-    assert named["Put gamma"]["shadow"]["color"] == gamma.NEG_COLOR
+    # Each side glows its own bar colour: the low colour since 2026-10-28.
+    assert named["Call gamma"]["shadow"]["color"] == gamma.BAR_POS_COLOR
+    assert named["Put gamma"]["shadow"]["color"] == gamma.BAR_NEG_COLOR
     # Bevelled fills, not flat colours.
     for s in ("Call gamma", "Put gamma"):
         for p in named[s]["data"]:

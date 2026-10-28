@@ -609,9 +609,10 @@ Prem** and **Term** are different screens with their own controls, and each has 
 own subsection further down.
 
 **Bars (top chart).** Net exposure at each strike, ±20 strikes around the current
-price. The window is fixed so bar width stays constant all day. Purple is
-call-heavy, maroon is put-heavy (the shipped colours; Settings → Appearance →
-Dealer Positioning changes them). A tall bar is a strike where a lot of hedging
+price. The window is fixed so bar width stays constant all day. Call-heavy bars
+are drawn in the Call low colour and put-heavy ones in the Put low colour (light
+purple and light maroon as shipped; Settings → Appearance → Dealer Positioning
+changes them). A tall bar is a strike where a lot of hedging
 pressure is concentrated.
 
 **Heat map (below).** The same thing over time — strike on the vertical axis, clock on
@@ -5115,9 +5116,11 @@ the marquee is showing.
 fields, buttons, status colours, charts, Dealer Positioning, type and menu, with a
 live preview that shows an unsaved colour before anything else does. The **Dealer
 Positioning** group is the heat map's four colours, two a side and both rows in
-the same order: the put or call colour first, for the largest values (the bars,
-walls, gravity well, ridge plot and contour lines also use it), then its low
-colour, for the smallest. The heat map grades between them. The preview draws
+the same order: the put or call colour first, for the largest values (the
+walls, hedge panel, gravity well, ridge plot and contour lines also use it), then
+its low colour, for the smallest (the strike bars also use it). The heat map
+grades between them. **Restart now** restarts both the app and the public live
+screens, which show the same colours. The preview draws
 the resulting scale. **Save changes** writes an
 override in `config/local/theme.toml` (the shipped `config/theme.toml` is never
 edited) and **Restart now** applies it to every screen; **Reset to shipped values**

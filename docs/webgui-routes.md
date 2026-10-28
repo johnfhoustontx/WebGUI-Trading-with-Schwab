@@ -1058,9 +1058,13 @@ two sides from the grid itself.
   largest first; shipped maroon and purple), read through `theme.gamma_colors` (hex only, shipped colour for
   anything malformed). `gamma_heat.ramp_stops` builds `HEAT_STOPS` from them at
   the positions and opacities in `gamma_heat.RAMP`; `gamma.palette(colours)` is
-  every other colour drawn in the call or put colour (`POS_COLOR`, `NEG_COLOR`,
-  the well's fills, the ridge plot's fills, the contour colours, the wash).
-  Resolved once at import: a web GUI restart applies a change. ⚠ A new colour on
+  every other colour drawn in the call or put colour (`POS_COLOR`, `NEG_COLOR`
+  for the walls and hedge panel; `BAR_POS_COLOR`, `BAR_NEG_COLOR`, the LOW
+  colours, for the by-strike bars since 2026-10-28; the well's fills, the ridge
+  plot's fills, the contour colours, the wash). Resolved once at import in BOTH
+  web processes: Appearance's Restart now (`config_editor.web_restart_command`)
+  restarts `webgui_live` and `webgui` in one call, because restarting one left
+  the other on the old colours. ⚠ A new colour on
   this page is added to `palette`, never written as a hex literal, or it stays
   cyan beside a heat map the operator made green. The Flow and Net Prem panels
   FOLLOW (2026-10-11): `theme.flow_colors` replaces four `[flow]` keys with the

@@ -63,10 +63,15 @@ def palette(colours):
 
     The contour lines are a pale tint of each main colour and the ridge plot's
     fills a dark one, so both follow a chosen colour instead of staying cyan
-    and magenta beside it."""
+    and magenta beside it.
+
+    The by-strike BARS wear each side's LOW colour (``bar_pos`` / ``bar_neg``;
+    the user's choice, 2026-10-28). The walls, the hedge panel, the well and
+    the ridge keep the main colour."""
     call, put = colours["call"], colours["put"]
     return {
         "pos": call, "neg": put,
+        "bar_pos": colours["call_low"], "bar_neg": colours["put_low"],
         "stops": _heat.ramp_stops(colours),
         "contour_above": _heat.rgba(_heat.tint(call, 0.78), 0.62),
         "contour_below": _heat.rgba(_heat.tint(put, 0.78), 0.62),
@@ -95,6 +100,8 @@ def _wash_stops(colours):
 _PAL = palette(_theme.gamma_colors(_theme.THEME))
 POS_COLOR = _PAL["pos"]
 NEG_COLOR = _PAL["neg"]
+BAR_POS_COLOR = _PAL["bar_pos"]     # the by-strike bars: each side's low colour
+BAR_NEG_COLOR = _PAL["bar_neg"]
 CALL_WALL_COLOR = POS_COLOR
 PUT_WALL_COLOR = NEG_COLOR
 SPOT_COLOR = "#ffd54f"
@@ -541,7 +548,7 @@ def bars_from_gex(data, spot, n_side=None, mode="net"):
             continue
         strikes.append(strike)
         nets.append(net)
-        colors.append(POS_COLOR if net >= 0 else NEG_COLOR)
+        colors.append(BAR_POS_COLOR if net >= 0 else BAR_NEG_COLOR)
         d = drift.get(strike) if mode == "net" else None
         projected.append(net + d if isinstance(d, (int, float))
                          and not isinstance(d, bool) else None)
@@ -728,20 +735,20 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=None, heigh
                 f"{_heat.VALUES[side].lower()} change {m:+,.0f}"
                 for side, m in zip(sides, moved)))
             if mode == "size":
-                pos_pts.append(_pt(s, moved[0], POS_COLOR, hover))
-                neg_pts.append(_pt(s, moved[1], NEG_COLOR, hover))
+                pos_pts.append(_pt(s, moved[0], BAR_POS_COLOR, hover))
+                neg_pts.append(_pt(s, moved[1], BAR_NEG_COLOR, hover))
             else:
                 up = moved[0] >= 0
                 (pos_pts if up else neg_pts).append(
-                    _pt(s, moved[0], POS_COLOR if up else NEG_COLOR, hover))
+                    _pt(s, moved[0], BAR_POS_COLOR if up else BAR_NEG_COLOR, hover))
     elif mode == "size":
         # Calls into the first series and puts into the second, at the SAME
         # strike. (Charm and vanna can hold both sides on one side of zero; the
         # two bars then overlap and the tooltip carries both numbers.)
         gex = (data or {}).get("gex") or {}
         for s, h in zip(b["strikes"], b["hovers"]):
-            pos_pts.append(_pt(s, _heat.cell_value(gex[s], "call"), POS_COLOR, h))
-            neg_pts.append(_pt(s, _heat.cell_value(gex[s], "put"), NEG_COLOR, h))
+            pos_pts.append(_pt(s, _heat.cell_value(gex[s], "call"), BAR_POS_COLOR, h))
+            neg_pts.append(_pt(s, _heat.cell_value(gex[s], "put"), BAR_NEG_COLOR, h))
     else:
         for s, n, c, h in zip(b["strikes"], b["nets"], b["colors"], b["hovers"]):
             (pos_pts if n >= 0 else neg_pts).append(_pt(s, n, c, h))
@@ -800,9 +807,9 @@ def bar_figure(data, spot, view="GEX", walls=None, flip=None, n_side=None, heigh
                                 "crisp": False}},
         "series": [
             {"type": "bar", "name": "Call gamma", "data": pos_pts,
-             "colorByPoint": False, "shadow": glow(POS_COLOR)},
+             "colorByPoint": False, "shadow": glow(BAR_POS_COLOR)},
             {"type": "bar", "name": "Put gamma", "data": neg_pts,
-             "colorByPoint": False, "shadow": glow(NEG_COLOR)},
+             "colorByPoint": False, "shadow": glow(BAR_NEG_COLOR)},
         ],
     })
     # Projected close: each strike's net after ITS OWN 0-DTE charm drift. Drawn as an

@@ -62,16 +62,17 @@ cyan   = "#6b86ff"             # the "Improving" RRG accent (Deep Slate → blue
 # Two colours a side. The main colour holds that side's LARGEST values and the
 # low colour its smallest; the heat map grades between them, and is clear at
 # zero. Each side is listed largest first, the same way for puts and calls.
-# `put` and `call` are also the bars, the walls, the gravity well, the ridge
-# plot and the contour lines. Edit them in Settings → Appearance, which shows
+# `put_low` and `call_low` are also the strike bars; `put` and `call` are the
+# walls, the hedge panel, the gravity well, the ridge plot and the contour
+# lines. Edit them in Settings → Appearance, which shows
 # the ramp before you save. "#rrggbb" only: where each grade sits on the scale
 # and how see-through it is are fixed in code. The Flow and Net Prem tabs
 # follow: a colour changed here replaces [flow]'s call, put, call_deep and
 # put_deep (from call, put, call_low and put_low).
-put       = "#800000"          # the largest put values; put bars, put wall (maroon)
-put_low   = "#bf5454"          # the smallest put values
-call      = "#800080"          # the largest call values; call bars, call wall (purple)
-call_low  = "#bf54bf"          # the smallest call values
+put       = "#800000"          # the largest put values; put wall (maroon)
+put_low   = "#bf5454"          # the smallest put values; put bars
+call      = "#800080"          # the largest call values; call wall (purple)
+call_low  = "#bf54bf"          # the smallest call values; call bars
 
 [typography]                   # ── text categories: font + sizes ────────────
 # Sizes are in PIXELS — a plain number works too ("15" = "15px"); a larger

@@ -376,6 +376,23 @@ def test_the_pending_set_and_the_webgui_restart_keep_their_names():
     assert "config_editor._restart_webgui()" in src
 
 
+def test_the_web_restart_restarts_the_live_screens_and_the_app(monkeypatch):
+    """Seen on prod 2026-10-28: the app and the public Dealer Positioning
+    screen showed different colours, because a restart reached one process and
+    not the other. Both read the theme once at start, so the one restart button
+    restarts both, in one call that queues the jobs and does not wait (the
+    app's own restart ends the process that asked for it)."""
+    from pages import status
+    cmd = ce.web_restart_command()
+    assert cmd[:4] == ["systemctl", "--user", "--no-block", "restart"]
+    assert cmd[4:] == [f"{status.UNIT_PREFIX}webgui_live", f"{status.UNIT_PREFIX}webgui"]
+    spawned = []
+    monkeypatch.setattr(ce.subprocess, "Popen",
+                        lambda argv, **kw: spawned.append(argv))
+    ce._restart_webgui()
+    assert spawned == [cmd]
+
+
 # ── Phase 6, Task 10: the change-log clock ──────────────────────────────────
 def test_a_stamped_change_names_its_zone():
     """An aware row is rendered in Central and SAYS so. The project convention is

@@ -3600,12 +3600,15 @@ Preferences, all saved on your machine:
   it to every screen; **Reset to shipped values** (confirm-gated) goes back.
 - **To choose the Dealer Positioning colours**, open **Settings → Appearance** and
   find the **Dealer Positioning** group. The top row is the put side and the
-  bottom row the call side. **Put** and **Call** are the two main colours: the
-  bars, the walls, the gravity well, the ridge plot and the contour lines use
-  them. **Peak**, **Mid** and **Low** are the grading: the shade the heat map
-  shows for the largest, middling and smallest values on that side. Click a
-  tile to pick a colour; the strip in the preview shows the whole scale, largest
-  put on the left to largest call on the right, before you save. The Flow and
+  bottom row the call side, and both rows run the same way. **Put** and
+  **Call** are the main colours: the heat map's largest values, and the walls,
+  the hedge panel, the gravity well, the ridge plot and the contour lines.
+  **Put low** and **Call low** are the smallest values, and the strike bars.
+  The heat map grades from the low colour next to zero to the main colour.
+  Click a tile to pick a colour; the strip in the preview shows the whole
+  scale, largest put on the left to largest call on the right, before you
+  save. **Restart now** restarts both the app and the public live screens, so
+  the two show the same colours. The Flow and
   Net Prem tabs follow the same colours: their call and put lines, the strike
   ladder and the frame around them.
 - **API usage** — how many calls the app has made to **Schwab** (counted at the

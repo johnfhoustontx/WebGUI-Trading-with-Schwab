@@ -4,7 +4,21 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-28 (**Dealer Positioning colours: two a side, maroon and purple.**)
+**Last updated:** 2026-10-28 (**Dealer Positioning: the strike bars wear the low colours; one restart reaches both web processes.**)
+
+- The by-strike bars now take each side's LOW colour (`BAR_POS_COLOR` / `BAR_NEG_COLOR`
+  from `palette`'s `bar_pos` / `bar_neg`), in every Value and Show; their glow and
+  border follow. The walls, the hedge panel, the well, the ridge and the contours keep
+  the main pair. The user asked for it.
+- Found on prod the same morning: the app and the public Dealer Positioning screen
+  showed different colours. Colours were saved at 07:10; the live screens were
+  restarted twice after that and the app not at all (it ran from 07:05), so each
+  process held the theme it read at its own start. Appearance's **Restart now** (and
+  the Configuration tab's web-app restart) now runs
+  `config_editor.web_restart_command`: ONE `systemctl --user --no-block restart` of
+  `webgui_live` then `webgui`, so the two cannot part again from that button.
+
+**Prior —** 2026-10-28 (**Dealer Positioning colours: two a side, maroon and purple.**)
 
 - At the user's request the heat map's colours drop from eight to four: `put`,
   `put_low`, `call`, `call_low` (`config/theme.toml [gamma]`, Settings → Appearance).

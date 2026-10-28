@@ -261,10 +261,20 @@ def _restart_units(units):
     return results
 
 
-def _restart_webgui():
+def web_restart_command():
+    """The web tier's restart as ONE systemctl call: the public live screens,
+    then this app. Both draw the same pages from the same theme and config,
+    read once at start, so restarting the app alone left the live screens on
+    the old colours (2026-10-28). ``--no-block`` queues both jobs and returns:
+    the app's own restart ends this process, so nothing may wait on it."""
     from pages import status
+    return ["systemctl", "--user", "--no-block", "restart",
+            f"{status.UNIT_PREFIX}webgui_live", f"{status.UNIT_PREFIX}{cs.WEBGUI}"]
+
+
+def _restart_webgui():
     from repo_paths import REPO_ROOT
-    subprocess.Popen(status.restart_command({"name": cs.WEBGUI}), cwd=str(REPO_ROOT))
+    subprocess.Popen(web_restart_command(), cwd=str(REPO_ROOT))
 
 
 # ── page ─────────────────────────────────────────────────────────────────────
