@@ -4,7 +4,19 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-28 (**Dealer Positioning: the strike bars wear the low colours; one restart reaches both web processes.**)
+**Last updated:** 2026-10-28 (**Paper Ledger: Delete all closed clears closed trade ideas too.**)
+
+- The user reported that the Ledger's **Delete all closed** left the closed trade-idea
+  rows on the list. That was the 2026-10-20 design's own call (those rows are the only
+  record behind the weekly review and `/eod`'s week and month totals). At the user's
+  choice the button now CLEARS them instead: `trades.db` gains `cleared_at`
+  (additive migration), `trades_db.clear_closed_of_source` stamps the closed idea rows
+  and `paper_trader.delete_closed_trades` logs a `CLEARED` event for each. The page's
+  `paper.on_ledger` hides a cleared row; `cache:options:paper_trades` still carries
+  it, so the review and `/eod` count it as before. Open ideas are untouched, and the
+  manual rows are deleted as they always were. The confirm and the page help say so.
+
+**Prior —** 2026-10-28 (**Dealer Positioning: the strike bars wear the low colours; one restart reaches both web processes.**)
 
 - The by-strike bars now take each side's LOW colour (`BAR_POS_COLOR` / `BAR_NEG_COLOR`
   from `palette`'s `bar_pos` / `bar_neg`), in every Value and Show; their glow and

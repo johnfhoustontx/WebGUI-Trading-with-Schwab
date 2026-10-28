@@ -403,18 +403,22 @@ def delete_trade(trade_id):
 
 
 def delete_closed_trades():
-    """Delete all closed / expired trades except the posted trade ideas' (they are
-    the weekly review's evidence, not the user's book). Returns count deleted."""
+    """Delete all closed / expired trades except the posted trade ideas'. Those are
+    the weekly review's and /eod's evidence, so they are CLEARED instead: stamped
+    ``cleared_at`` and kept, and the Ledger's list hides them. Returns count deleted."""
     conn = trades_db.connect()
     try:
         closed = [
             t for t in trades_db.fetch_all(conn)
             if t["status"] in ("CLOSED", "EXPIRED")     # the SQL's own predicate
-            and t.get("source") != trades_db.IDEA_SOURCE
+            and (t.get("source") != trades_db.IDEA_SOURCE or not t.get("cleared_at"))
         ]
         n = trades_db.delete_closed_except_source(conn, trades_db.IDEA_SOURCE)
+        trades_db.clear_closed_of_source(conn, trades_db.IDEA_SOURCE,
+                                         datetime.now(TZ).isoformat())
         for t in closed:
-            _log_event(conn, t, "DELETED")
+            idea = t.get("source") == trades_db.IDEA_SOURCE
+            _log_event(conn, t, "CLEARED" if idea else "DELETED")
         conn.commit()
     finally:
         conn.close()

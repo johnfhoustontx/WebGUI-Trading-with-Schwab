@@ -193,13 +193,20 @@ DELETE_BODY = "It leaves the ledger for good."
 DELETE_IDEA_BODY = ("It leaves the ledger for good, and the trade drops out of the "
                     "weekly review of trade ideas.")
 DELETE_CLOSED_BODY = ("Their realized P&L leaves the ledger, and the deployment cap's "
-                      "equity moves with it. Trade idea rows are kept; delete one "
-                      "from its own panel.")
+                      "equity moves with it. Closed trade ideas leave this list too, "
+                      "but are kept for the weekly review and the end-of-day report.")
 
 
 def is_idea(t):
     """True for a trade-idea row. PURE; ``source`` is the only signal."""
     return (t or {}).get("source") == "trade_idea"
+
+
+def on_ledger(trades):
+    """The trades this page lists: all but the closed trade ideas "Delete all
+    closed" cleared (``cleared_at`` set). They stay in the cached view, which the
+    weekly review and /eod still read. PURE."""
+    return [t for t in trades or [] if not (t or {}).get("cleared_at")]
 
 
 def delete_body(t):
@@ -521,7 +528,7 @@ def render():
         ledger.busy.hide()
         kit.set_busy(refresh_btn, False)
         pt = pt or {}
-        trades = pt.get("trades") or []
+        trades = on_ledger(pt.get("trades"))
         raw_by_id.clear()
         for t in trades:
             if t.get("trade_id"):

@@ -79,7 +79,10 @@ CREATE TABLE IF NOT EXISTS trades (
     mae_at TEXT,
     last_mark_pnl REAL,
     last_mark_at TEXT,
-    entry_source TEXT
+    entry_source TEXT,
+    -- When "Delete all closed" took a closed trade-idea row off the Ledger's list.
+    -- The row stays for the weekly review and /eod; NULL = still listed.
+    cleared_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
@@ -115,7 +118,7 @@ _TRADE_COLUMNS = [
     "realized_pnl", "exit_reason", "notes",
     "source", "idea_id", "idea_posted", "idea_grade", "idea_score",
     "idea_label", "target_pnl", "stop_pnl", "mae_pnl", "mae_at",
-    "last_mark_pnl", "last_mark_at", "entry_source",
+    "last_mark_pnl", "last_mark_at", "entry_source", "cleared_at",
 ]
 
 _EVENT_COLUMNS = [
@@ -194,6 +197,7 @@ def init_db(db_path=None):
             ("target_pnl", "REAL"), ("stop_pnl", "REAL"), ("mae_pnl", "REAL"),
             ("mae_at", "TEXT"), ("last_mark_pnl", "REAL"),
             ("last_mark_at", "TEXT"), ("entry_source", "TEXT"),
+            ("cleared_at", "TEXT"),
         ):
             if col not in existing_cols:
                 conn.execute(f"ALTER TABLE trades ADD COLUMN {col} {col_type}")
@@ -326,6 +330,17 @@ def delete_closed_except_source(conn, source):
     cur = conn.execute(
         "DELETE FROM trades WHERE status IN ('CLOSED', 'EXPIRED') AND source IS NOT ?",
         (source,),
+    )
+    return cur.rowcount
+
+
+def clear_closed_of_source(conn, source, when):
+    """Stamp ``cleared_at`` on CLOSED / EXPIRED rows of ``source`` not yet cleared;
+    returns the count stamped. The rows stay: only the Ledger's list hides them."""
+    cur = conn.execute(
+        "UPDATE trades SET cleared_at = ? WHERE status IN ('CLOSED', 'EXPIRED') "
+        "AND source = ? AND cleared_at IS NULL",
+        (when, source),
     )
     return cur.rowcount
 

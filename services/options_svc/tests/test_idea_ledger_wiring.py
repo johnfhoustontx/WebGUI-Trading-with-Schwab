@@ -262,12 +262,14 @@ def test_expiring_idea_row_is_not_the_users_action_item(ledger, monkeypatch):
 
 
 # ── Delete closed trades ────────────────────────────────────────────────────
-def test_delete_closed_spares_idea_rows(ledger):
+def test_delete_closed_clears_idea_rows_but_keeps_them(ledger):
     ledger.add_trade(_manual("m1", "CLOSED"))
     ledger.add_trade(_idea_row("i1", "CLOSED"))
     ledger.add_trade(_manual("m2", "OPEN"))
     assert ledger.delete_closed_trades() == 1
-    assert sorted(t["trade_id"] for t in ledger.get_all_trades()) == ["i1", "m2"]
+    kept = {t["trade_id"]: t for t in ledger.get_all_trades()}
+    assert sorted(kept) == ["i1", "m2"]
+    assert kept["i1"]["cleared_at"]          # off the Ledger's list, still on file
 
 
 def test_the_two_idea_source_strings_agree():

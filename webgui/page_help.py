@@ -1341,7 +1341,8 @@ engine's positions live on **Paper Account**.
   still checked and closed. Open ideas are checked **every 5 minutes** for their
   target, their stop and their expiry, and close themselves on the first one
   reached; a close by hand is recorded as **MANUAL**. **Delete all closed**
-  keeps trade ideas, so the weekly review of ideas keeps its record; deleting an
+  takes closed trade ideas off this list too, but keeps them on file, so the
+  weekly review of ideas and the end-of-day report keep their record; deleting an
   idea row yourself, from its own panel, removes it from that review too.
 - Use it to test ideas from the Market Scanner without risk.
 """,

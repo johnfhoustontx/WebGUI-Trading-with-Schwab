@@ -574,10 +574,24 @@ def test_the_status_line_counts_only_the_shown_rows():
     assert paper.ledger_status([TRADE], "ideas") == ""
 
 
-def test_delete_closed_confirm_mentions_trade_ideas_kept():
-    assert "trade idea" in paper.DELETE_CLOSED_BODY.lower()
-    assert "kept" in paper.DELETE_CLOSED_BODY.lower()
+def test_delete_closed_confirm_says_trade_ideas_leave_the_list_but_are_kept():
+    body = paper.DELETE_CLOSED_BODY.lower()
+    assert "trade idea" in body and "leave this list" in body
+    assert "kept" in body and "weekly review" in body
     assert "DELETE_CLOSED_BODY" in inspect.getsource(paper.render)
+
+
+def test_cleared_idea_rows_are_off_the_ledger():
+    """Delete all closed stamps a closed idea ``cleared_at`` and keeps it; the page
+    lists everything else, an open idea and the user's own closed trades included."""
+    cleared = {**IDEA, "trade_id": "I2", "status": "CLOSED",
+               "cleared_at": "2026-10-28T10:00:00-05:00"}
+    closed_idea = {**IDEA, "trade_id": "I3", "status": "CLOSED", "cleared_at": None}
+    shown = [t["trade_id"] for t in paper.on_ledger([TRADE, IDEA, cleared, closed_idea])]
+    assert shown == ["T1", "I1", "I3"]
+    assert paper.on_ledger(None) == []
+    # The page filters through it before it builds the rows, the lookup and the count.
+    assert 'on_ledger(pt.get("trades"))' in inspect.getsource(paper.render)
 
 
 def test_idea_row_delete_confirm_says_it_leaves_the_weekly_review():

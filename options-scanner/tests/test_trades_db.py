@@ -203,16 +203,21 @@ def test_paper_trader_delete_closed_only(paper_sandbox):
     assert [t["trade_id"] for t in trades] == ["open1"]
 
 
-def test_delete_closed_spares_trade_idea_rows(paper_sandbox):
+def test_delete_closed_clears_trade_idea_rows_and_keeps_them(paper_sandbox):
     """Delete closed trades clears the user's book; a posted idea's result is the
-    weekly review's evidence, so its closed rows stay. The count is what was deleted."""
+    weekly review's evidence, so its closed rows are CLEARED (stamped, kept) rather
+    than deleted. An open idea is untouched. The count is what was deleted."""
     paper_trader.add_trade(_seed_trade("open1", status="OPEN"))
     paper_trader.add_trade(_seed_trade("closed1", status="CLOSED"))
     paper_trader.add_trade(dict(_seed_trade("idea1", status="CLOSED"), source="trade_idea"))
     paper_trader.add_trade(dict(_seed_trade("idea2", status="EXPIRED"), source="trade_idea"))
+    paper_trader.add_trade(dict(_seed_trade("idea3", status="OPEN"), source="trade_idea"))
     assert paper_trader.delete_closed_trades() == 1
-    assert sorted(t["trade_id"] for t in paper_trader.load_trades()) == [
-        "idea1", "idea2", "open1"]
+    kept = {t["trade_id"]: t for t in paper_trader.load_trades()}
+    assert sorted(kept) == ["idea1", "idea2", "idea3", "open1"]
+    assert kept["idea1"]["cleared_at"] and kept["idea2"]["cleared_at"]
+    assert kept["idea3"]["cleared_at"] is None
+    assert kept["open1"]["cleared_at"] is None
     conn = trades_db.connect()
     try:
         deleted = [e["trade_id"] for e in trades_db.fetch_events(conn)
@@ -220,6 +225,38 @@ def test_delete_closed_spares_trade_idea_rows(paper_sandbox):
     finally:
         conn.close()
     assert deleted == ["closed1"]
+
+
+def test_clearing_again_keeps_the_first_stamp(paper_sandbox):
+    """A second press stamps only rows not already cleared, and logs only them."""
+    paper_trader.add_trade(dict(_seed_trade("idea1", status="CLOSED"), source="trade_idea"))
+    paper_trader.delete_closed_trades()
+    first = paper_trader.load_trades()[0]["cleared_at"]
+    paper_trader.add_trade(dict(_seed_trade("idea2", status="CLOSED"), source="trade_idea"))
+    paper_trader.delete_closed_trades()
+    kept = {t["trade_id"]: t["cleared_at"] for t in paper_trader.load_trades()}
+    assert kept["idea1"] == first and kept["idea2"]
+    conn = trades_db.connect()
+    try:
+        cleared = [e["trade_id"] for e in trades_db.fetch_events(conn)
+                   if e["event"] == "CLEARED"]
+    finally:
+        conn.close()
+    assert cleared == ["idea1", "idea2"]
+
+
+def test_a_cleared_row_keeps_its_stamp_through_a_full_row_update(paper_sandbox):
+    """update_trade rewrites every column, so cleared_at must be one of them."""
+    paper_trader.add_trade(dict(_seed_trade("idea1", status="CLOSED"), source="trade_idea"))
+    paper_trader.delete_closed_trades()
+    t = paper_trader.load_trades()[0]
+    conn = trades_db.connect()
+    try:
+        trades_db.update_trade(conn, "idea1", dict(t, notes="x"))
+        conn.commit()
+    finally:
+        conn.close()
+    assert paper_trader.load_trades()[0]["cleared_at"] == t["cleared_at"]
 
 
 def test_delete_closed_except_source_counts_only_what_it_deleted(paper_sandbox):
@@ -544,14 +581,14 @@ def test_idea_columns_migrate_old_db(sandbox):
     conn = sqlite3.connect(db_path)
     try:
         cols = {r[1] for r in conn.execute("PRAGMA table_info(trades)")}
-        assert set(_IDEA_COLUMNS) <= cols
+        assert set(_IDEA_COLUMNS) | {"cleared_at"} <= cols
         row = conn.execute(
-            "SELECT source, idea_id, target_pnl, last_mark_at FROM trades "
+            "SELECT source, idea_id, target_pnl, last_mark_at, cleared_at FROM trades "
             "WHERE trade_id='old1'"
         ).fetchone()
     finally:
         conn.close()
-    assert row == (None, None, None, None)
+    assert row == (None, None, None, None, None)
 
 
 # --------------------------------------------------------------- connect cost ---

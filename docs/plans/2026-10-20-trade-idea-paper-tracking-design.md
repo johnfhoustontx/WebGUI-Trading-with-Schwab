@@ -174,8 +174,10 @@ The Ledger's own equity/caps line excludes them.
 
 **Deletes (my call).** Closed idea rows are the only source of the weekly review's
 all-time tables and `/eod`'s week and month totals, so "Delete closed trades"
-(`paper_trader.delete_closed_trades`) **spares `source='trade_idea'` rows**, and its
-confirm says so. A per-row Delete of an idea row is still allowed, behind a confirm that
+(`paper_trader.delete_closed_trades`) **does not delete `source='trade_idea'` rows**.
+Since 2026-10-28, at the user's choice, it **clears** the closed ones instead: it
+stamps `cleared_at`, the Ledger's list hides them (`paper.on_ledger`), and the cached
+view still carries them for the review and `/eod`. Its confirm says so. A per-row Delete of an idea row is still allowed, behind a confirm that
 names what it removes from the review.
 
 ### 5. The `/eod` report
