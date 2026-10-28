@@ -553,6 +553,13 @@ def draw_calendar(container, agenda):
                 ui.label(line).classes(f"{_CAL_EMPTY} pt-2")
 
 
+def utc_now():
+    """The page's clock, in UTC. The one place it is read, so a test can hold
+    the page at the moment its fixtures describe instead of the day it runs (a
+    fixed calendar event passed on 2026-10-28 and took a test with it)."""
+    return _dt.datetime.now(_dt.timezone.utc)
+
+
 def build_board(*, linked, symbol="", watchlist=None):
     """Build every region of the page inside the current context and return the
     handles a page feeds: ``take(feed)``, ``take_sec(sec)``, ``take_cal(cal)``
@@ -575,7 +582,7 @@ def build_board(*, linked, symbol="", watchlist=None):
           "cal_payload": None}
 
     def _now():
-        return _dt.datetime.now(_dt.timezone.utc)
+        return utc_now()
 
     with ui.element("div").classes(_GRID):
         with ui.column().classes(_LEFT):
@@ -878,7 +885,7 @@ def render(public=False):
         if isinstance(payload, dict):
             # Written on EVERY publish, visible tab or not; the rail badge that
             # will read it may want "seen while visible" instead.
-            app_settings.set(SEEN_KEY, _dt.datetime.now(_dt.timezone.utc).isoformat())
+            app_settings.set(SEEN_KEY, utc_now().isoformat())
 
     @guard_async
     async def _reread():

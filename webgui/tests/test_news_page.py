@@ -296,13 +296,17 @@ CAL_PAYLOAD = {
 }
 
 
-def _render_views(monkeypatch, by_view):
+def _render_views(monkeypatch, by_view, *, now=NOW):
+    """Render the page over ``by_view`` with its clock held at ``now`` (the
+    moment the fixtures here describe). On the real clock ``CAL_PAYLOAD``'s
+    FOMC event passed at 13:00 CT on 2026-10-28 and the page dropped it."""
     import app_settings
     import bus_client
     from nicegui import ui
 
     from pages import news
     reads = []
+    monkeypatch.setattr(news, "utc_now", lambda: now)
     monkeypatch.setattr(bus_client, "read", lambda v: reads.append(v) or by_view.get(v))
     monkeypatch.setattr(bus_client, "read_version", lambda v: 1)
     monkeypatch.setattr(app_settings, "set", lambda k, v: None)
@@ -734,6 +738,34 @@ def test_the_regions_render_left_then_right_in_dom_order(monkeypatch):
     grids = [e for e in new if "lg:grid-cols-3" in e.classes]
     assert len(grids) == 1
     assert [e for e in new if "lg:col-span-2" in e.classes]
+
+
+def test_the_page_reads_its_clock_from_utc_now(monkeypatch):
+    """The clock is READ through ``news.utc_now``, not merely the real one: the
+    same calendar held the day before the FOMC event, the morning of it and
+    after it draws three different agendas. On the real clock the test above
+    failed all of 2026-10-28: "TODAY · WED · OCT 28" that morning, nothing
+    after 13:00 CT (a past event is not drawn)."""
+    from nicegui import ui
+
+    from pages import news_view as nv
+
+    def _texts(now):
+        new, _ = _render_views(monkeypatch, {
+            nv.VIEW: _items_payload(_item(1, title="A headline")),
+            nv.VIEW_SEC: _items_payload(SEC_ITEM),
+            nv.VIEW_CAL: CAL_PAYLOAD,
+        }, now=now)
+        return [e.text for e in new if isinstance(e, (ui.label, ui.link))]
+    before = _texts(dt.datetime(2026, 10, 27, 17, 0, tzinfo=dt.timezone.utc))
+    morning = _texts(dt.datetime(2026, 10, 28, 15, 0, tzinfo=dt.timezone.utc))
+    after = _texts(dt.datetime(2026, 10, 28, 19, 0, tzinfo=dt.timezone.utc))
+    assert "FOMC statement" in before and "WED · OCT 28" in before
+    assert "FOMC statement" in morning and "TODAY · WED · OCT 28" in morning
+    assert "FOMC statement" not in after
+    assert not any("OCT 28" in text for text in after)
+    for texts in (before, morning, after):
+        assert "JPM dividend" in texts                    # a past ex-date is kept
 
 
 def test_the_sec_row_links_its_symbol_and_draws_its_form_value_and_time():
