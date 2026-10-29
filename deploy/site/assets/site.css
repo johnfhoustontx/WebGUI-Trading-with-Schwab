@@ -675,8 +675,8 @@ a.ns-brand:hover { color: var(--color-accent); text-decoration: none; }
 
 /* ─── 10. Live page (the Live Desk) ──────────────────────────────────────
  *
- * Tool cards, then the picture tiles in three groups, each tile a still capture
- * of one published live screen (see the header comment in live.html for why a
+ * The picture tiles on a turning wall, then the tool links; each tile a still
+ * capture of one published live screen (see the header comment in live.html for why a
  * picture and not an iframe). blog.html, ideas.html and report.html borrow the
  * page frame below (.ns-live-page / -main / -head / -title / -lede / -note).
  *
@@ -715,16 +715,33 @@ a.ns-brand:hover { color: var(--color-accent); text-decoration: none; }
   color: color-mix(in srgb, var(--color-text) 80%, transparent);
 }
 
-/* The Live Desk layout (2026-10-24): a hero with jump pills, a row of tool
- * cards, then three groups of picture tiles, each with its heading on the left.
- * Every card shares .ns-desk-spot, the hover: a lift, an accent outline, and a
- * radial glow that follows the cursor (assets/live.js sets --mx / --my; with no
- * script the glow sits at the top centre). */
-.ns-desk-main { display: flex; flex-direction: column; gap: clamp(48px, 7vw, 72px); max-width: 1320px; }
+/* The Live Desk layout (2026-10-29, "the wall"): a hero with three group
+ * chips, the twelve tiles on a turning 3D ring with the front screen's caption
+ * under it, then a row of tool links.
+ *
+ * TWO LAYOUTS FROM ONE MARKUP. live.html ships the tiles as a plain grid, three
+ * group sections each with its heading; that is what a visitor gets with no
+ * script. assets/live.js adds .is-on to .ns-wall, and every rule scoped under
+ * .ns-wall.is-on below turns the grid into the ring: the sections and their
+ * grids become display: contents, so each tile is laid out as a direct child
+ * of the ring, which is what preserve-3d needs. The script writes each tile's
+ * own rotateY/translateZ and the ring's turn; everything else is here.
+ *
+ * Design tokens are Nocturne's (assets/nocturne.css): the accent appears as a
+ * line or a glow, never as a fill. */
+/* The ring is wider than the column it sits in; on a phone its side tiles run
+ * off both edges. `clip`, not `hidden`: hidden would make this a scroll
+ * container, and the sticky menu inside it would stop sticking. */
+.ns-desk-page { overflow-x: clip; }
+.ns-desk-main { display: flex; flex-direction: column; gap: 22px; max-width: 1280px; margin: 0 auto; width: 100%; }
+/* The footer keeps to the same centred column as the page above it. */
+.ns-desk-page .ns-live-foot { max-width: 1280px; margin: 0 auto; width: 100%; }
 
-.ns-desk-hero { display: flex; flex-direction: column; gap: 18px; max-width: 760px; }
-.ns-desk-hero .ns-live-title { font-size: clamp(34px, 5vw, 60px); line-height: 1.04; letter-spacing: -0.03em; margin: 0; text-wrap: balance; }
-.ns-desk-hero .ns-live-lede { font-size: 17px; line-height: 1.6; max-width: none; text-wrap: pretty; }
+.ns-desk-hero { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 24px; }
+/* The copy gives way to the chips before the chips wrap under it. */
+.ns-desk-hero-copy { flex: 1 1 520px; display: flex; flex-direction: column; gap: 14px; max-width: 680px; }
+.ns-desk-hero .ns-live-title { font-size: clamp(34px, 4.6vw, 52px); line-height: 1.04; letter-spacing: -0.03em; margin: 0; text-wrap: balance; }
+.ns-desk-hero .ns-live-lede { font-size: 15.5px; line-height: 1.6; max-width: 64ch; color: var(--color-neutral-400); text-wrap: pretty; }
 .ns-desk-eyebrow {
   display: flex;
   flex-wrap: wrap;
@@ -740,7 +757,7 @@ a.ns-brand:hover { color: var(--color-accent); text-decoration: none; }
 /* On a phone the count wraps to its own line, where a leading dot dangles. */
 @media (max-width: 480px) { .ns-desk-sep { display: none; } }
 .ns-desk-muted { color: var(--color-neutral-400); }
-.ns-desk-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-accent); flex: none; }
+.ns-desk-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-accent); box-shadow: 0 0 12px var(--color-accent); flex: none; }
 /* Pulses only while the market glow has lit the menu button: the script puts
  * .ns-market-open on that link, so this needs no script of its own. */
 body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
@@ -750,7 +767,8 @@ body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
   100% { box-shadow: 0 0 0 0 transparent; }
 }
 
-.ns-desk-jump { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
+/* Group chips. aria-current marks the group of the screen in front (live.js). */
+.ns-desk-jump { display: flex; flex-wrap: wrap; gap: 8px; }
 .ns-desk-pill {
   display: inline-flex;
   align-items: center;
@@ -758,20 +776,20 @@ body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
   padding: 8px 14px;
   border-radius: 999px;
   font-size: 13px;
-  color: var(--color-neutral-300);
-  box-shadow: inset 0 0 0 1px var(--color-neutral-800);
+  color: var(--color-neutral-400);
   text-decoration: none;
-  transition: color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
+  transition: color 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
 }
 .ns-desk-pill .ns-ico { color: var(--color-accent); }
 .ns-desk-pill span { color: var(--color-neutral-600); font-variant-numeric: tabular-nums; }
 .ns-desk-pill:hover,
-.ns-desk-pill:focus-visible {
-  color: var(--color-text);
-  text-decoration: none;
-  box-shadow: inset 0 0 0 1px var(--color-accent), 0 0 18px -4px var(--color-accent);
-  transform: translateY(-1px);
+.ns-desk-pill:focus-visible { color: var(--color-text); background: var(--color-neutral-900); text-decoration: none; }
+.ns-desk-pill[aria-current="true"] {
+  color: var(--color-accent-200);
+  background: var(--color-accent-900);
+  box-shadow: inset 0 0 0 1px var(--color-accent-700), 0 0 18px -6px var(--color-accent);
 }
+.ns-desk-pill[aria-current="true"] span { color: var(--color-accent-300); }
 
 /* Icons: the inline sprite at the top of live.html. Stroke settings inherit
  * into each <use>, so one rule draws them all in the text colour. */
@@ -787,97 +805,12 @@ body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
   stroke-linejoin: round;
 }
 
-/* The shared card */
-.ns-desk-spot {
-  position: relative;
-  overflow: hidden;
-  background: var(--color-surface);
-  color: var(--color-text);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-sm);
-  text-decoration: none;
-  transition: transform 0.4s cubic-bezier(.2, .8, .2, 1), box-shadow 0.4s, opacity 0.4s, filter 0.4s;
-}
-.ns-desk-spot:hover,
-.ns-desk-spot:focus-visible {
-  color: var(--color-text);
-  text-decoration: none;
-  transform: translateY(-4px);
-  box-shadow:
-    0 0 0 1px var(--color-accent-600),
-    0 18px 40px -12px rgba(0, 0, 0, 0.7),
-    0 0 32px -8px color-mix(in srgb, var(--color-accent) 45%, transparent);
-}
-.ns-desk-glow {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 0.3s;
-  background: radial-gradient(300px circle at var(--mx, 50%) var(--my, 0%),
-              color-mix(in srgb, var(--color-accent) 24%, transparent), transparent 70%);
-}
-.ns-desk-spot:hover .ns-desk-glow,
-.ns-desk-spot:focus-visible .ns-desk-glow { opacity: 1; }
-/* The rest of the row steps back while one card is hovered. :has() is the
- * whole mechanism, so a browser without it simply shows no dimming. */
-.ns-desk-tools:has(.ns-desk-spot:hover) .ns-desk-spot:not(:hover),
-.ns-desk-screens:has(.ns-desk-spot:hover) .ns-desk-spot:not(:hover) { opacity: 0.55; filter: saturate(0.6); }
-
 .ns-desk-main section { scroll-margin-top: 80px; }
-.ns-desk-main h2 { font-family: var(--font-heading); font-weight: 500; font-size: 24px; letter-spacing: -0.02em; line-height: 1.2; margin: 0; }
+.ns-desk-main h2 { font-family: var(--font-heading); font-weight: 500; font-size: 22px; letter-spacing: -0.02em; line-height: 1.2; margin: 0; }
 
-/* Tools */
-.ns-desk-tools-section { display: flex; flex-direction: column; gap: 20px; }
-.ns-desk-section-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; }
-.ns-desk-section-title span { font-size: 14px; color: var(--color-neutral-500); }
-/* 170px: five cards sit in one row on a desktop rather than four and one. */
-.ns-desk-tools { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 170px), 1fr)); gap: 12px; }
-.ns-desk-tool { display: flex; flex-direction: column; gap: 14px; padding: 18px; }
-.ns-desk-tool-top { position: relative; display: flex; align-items: center; justify-content: space-between; }
-.ns-desk-tool-icon {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  border-radius: var(--radius-md);
-  font-size: 20px;
-  background: var(--color-neutral-900);
-  color: var(--color-accent);
-  transition: background 0.35s, color 0.35s;
-}
-.ns-desk-tool:hover .ns-desk-tool-icon { background: var(--color-accent-800); color: var(--color-accent-200); }
-.ns-desk-step { font-size: 11px; letter-spacing: 0.1em; color: var(--color-neutral-600); font-variant-numeric: tabular-nums; }
-.ns-desk-tool-text { position: relative; display: flex; flex-direction: column; gap: 4px; }
-.ns-desk-tool-name { font-size: 16px; font-weight: 500; letter-spacing: -0.01em; }
-.ns-desk-tool-desc { font-size: 13px; line-height: 1.5; color: var(--color-neutral-400); }
-/* The Strategy Tools card names the three screens it opens. Text, not links:
- * the whole card is already one. */
-.ns-desk-tool-tags { position: relative; display: flex; flex-wrap: wrap; gap: 6px; }
-.ns-desk-tool-tags span {
-  padding: 3px 9px;
-  border-radius: 999px;
-  font-size: 11.5px;
-  color: var(--color-neutral-300);
-  box-shadow: inset 0 0 0 1px var(--color-neutral-800);
-}
-.ns-desk-cta {
-  position: relative;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: auto;
-  font-size: 12px;
-  color: var(--color-accent-300);
-  opacity: 0;
-  transform: translateX(-6px);
-  transition: opacity 0.35s, transform 0.35s;
-}
-.ns-desk-tool:hover .ns-desk-cta,
-.ns-desk-tool:focus-visible .ns-desk-cta { opacity: 1; transform: none; }
-
-/* Groups of screens */
-.ns-desk-group { display: flex; flex-wrap: wrap; gap: 28px 40px; }
+/* ── The tiles: the plain grid (no script) ── */
+.ns-wall-ring { display: flex; flex-direction: column; gap: clamp(40px, 6vw, 60px); margin-top: 18px; }
+.ns-desk-group { display: flex; flex-wrap: wrap; gap: 24px 40px; }
 .ns-desk-group-head { flex: 1 1 220px; max-width: 280px; display: flex; flex-direction: column; gap: 10px; }
 .ns-desk-group-head p { margin: 0; font-size: 14px; line-height: 1.6; color: var(--color-neutral-400); text-wrap: pretty; }
 .ns-desk-group-head .ns-desk-kicker {
@@ -890,14 +823,6 @@ body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
   color: var(--color-neutral-500);
 }
 .ns-desk-kicker .ns-ico { font-size: 20px; color: var(--color-accent); }
-.ns-desk-rule {
-  height: 1px;
-  width: 48px;
-  margin-top: 8px;
-  background: linear-gradient(90deg, var(--color-accent), transparent);
-  transition: width 0.5s cubic-bezier(.2, .8, .2, 1);
-}
-.ns-desk-group:has(.ns-live-tile:hover) .ns-desk-rule { width: 100%; }
 .ns-desk-screens {
   flex: 999 1 560px;
   display: grid;
@@ -908,15 +833,21 @@ body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
   align-items: start;
 }
 
-.ns-live-tile { display: flex; flex-direction: column; }
-.ns-desk-thumb {
+/* One tile: a card with the capture on top and its name under it. */
+.ns-desk-spot {
   position: relative;
-  display: block;
-  aspect-ratio: 8 / 5;
   overflow: hidden;
-  background: var(--color-bg);
-  mix-blend-mode: lighten;
+  background: var(--color-surface);
+  color: var(--color-text);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 0 0 1px var(--color-neutral-800);
+  text-decoration: none;
+  transition: box-shadow 0.5s ease;
 }
+.ns-desk-spot:hover,
+.ns-desk-spot:focus-visible { color: var(--color-text); text-decoration: none; box-shadow: 0 0 0 1px var(--color-accent-600); }
+.ns-live-tile { display: flex; flex-direction: column; }
+.ns-desk-thumb { position: relative; display: block; aspect-ratio: 8 / 5; overflow: hidden; background: var(--color-bg); }
 .ns-live-tile img {
   display: block;
   width: 100%;
@@ -925,64 +856,190 @@ body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
   object-fit: cover;
   object-position: top left;
   background: var(--color-bg);
-  transition: transform 0.8s cubic-bezier(.2, .8, .2, 1);
+  pointer-events: none;
   /* ⚠ THE EMPTY STATE IS A REAL STATE, not a transient one. The captures are
-     gitignored and written on the serving box, so this grid ships referencing
-     files that do not exist yet -- and if the capture timer ever stops, or its
-     settle delay turns out to be too short, it goes back to that state on a
-     PUBLIC page.
+     gitignored and written on the serving box, so this page ships referencing
+     files that do not exist yet -- and if the capture timer ever stops, it
+     goes back to that state on a PUBLIC page.
 
      Without this, a missing capture renders its alt text spilling across the
      top-left of the tile beside a broken-image icon, which reads as a broken
      site rather than as a screen not captured yet. Transparent text drops the
      spill; `aspect-ratio` above holds the box open at full size either way, so
-     what remains is an empty panel under its caption.
+     what remains is an empty panel over its caption.
 
      The alt attribute STAYS -- it is still read aloud, and .ns-live-cap
      repeats the same name visually, so nothing is lost to a sighted reader. */
   color: transparent;
 }
-.ns-live-tile:hover img { transform: scale(1.06); }
-.ns-desk-fade { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, transparent 45%, var(--color-surface)); }
-.ns-desk-badge {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 9px;
-  border-radius: 999px;
-  font-size: 11px;
-  background: color-mix(in srgb, var(--color-bg) 75%, transparent);
-  backdrop-filter: blur(6px);
-  color: var(--color-neutral-200);
-  opacity: 0;
-  transform: translateX(-6px);
-  transition: opacity 0.35s, transform 0.35s;
-}
-.ns-live-tile:hover .ns-desk-badge,
-.ns-live-tile:focus-visible .ns-desk-badge { opacity: 1; transform: none; }
-.ns-desk-screen-text { display: flex; flex-direction: column; gap: 3px; padding: 4px 16px 16px; }
+.ns-desk-screen-text { display: flex; flex-direction: column; gap: 3px; padding: 10px 14px 14px; }
 .ns-desk-screen-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.ns-live-cap { font-size: 15px; font-weight: 500; letter-spacing: -0.01em; }
-.ns-desk-screen-title .ns-ico { color: var(--color-accent); opacity: 0; transform: translateX(-6px); transition: opacity 0.35s, transform 0.35s; }
-.ns-live-tile:hover .ns-desk-screen-title .ns-ico,
-.ns-live-tile:focus-visible .ns-desk-screen-title .ns-ico { opacity: 1; transform: none; }
+.ns-live-cap { font-size: 14.5px; font-weight: 500; letter-spacing: -0.01em; }
+/* The group's name on the tile is for the wall, where no heading says it. */
+.ns-desk-tile-kick { display: none; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-accent-300); white-space: nowrap; }
 .ns-desk-screen-desc { font-size: 13px; line-height: 1.45; color: var(--color-neutral-400); }
-.ns-desk-bar {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 2px;
-  background: linear-gradient(90deg, transparent, var(--color-accent), transparent);
-  transform: scaleX(0);
-  transform-origin: left;
-  transition: transform 0.45s cubic-bezier(.2, .8, .2, 1);
+
+/* ── The tiles: the wall (live.js has added .is-on) ── */
+.ns-wall { position: relative; display: flex; flex-direction: column; gap: 18px; }
+.ns-wall-floor, .ns-wall-caption { display: none; }
+.ns-wall.is-on .ns-wall-stage {
+  position: relative;
+  height: 400px;
+  perspective: 1500px;
+  perspective-origin: 50% 30%;
+  cursor: grab;
+  touch-action: pan-y;          /* a vertical swipe still scrolls the page */
+  user-select: none;
+  -webkit-user-select: none;
 }
-.ns-live-tile:hover .ns-desk-bar,
-.ns-live-tile:focus-visible .ns-desk-bar { transform: scaleX(1); }
+.ns-wall.is-on .ns-wall-stage:active { cursor: grabbing; }
+.ns-wall.is-on .ns-wall-stage:focus-visible { outline: 2px solid var(--color-accent); outline-offset: -2px; border-radius: var(--radius-lg); }
+/* The pool of light the ring stands in. */
+.ns-wall.is-on::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: min(1000px, 140vw);
+  height: 520px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  background: radial-gradient(closest-side, var(--color-accent-900), transparent);
+}
+.ns-wall.is-on .ns-wall-floor {
+  display: block;
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  bottom: 10px;
+  height: 120px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, color-mix(in srgb, var(--color-accent) 30%, transparent), transparent);
+  filter: blur(12px);
+  pointer-events: none;
+}
+.ns-wall.is-on .ns-wall-ring {
+  display: block;
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  transform-style: preserve-3d;
+  will-change: transform;
+}
+.ns-wall.is-on .ns-desk-group,
+.ns-wall.is-on .ns-desk-screens { display: contents; }
+.ns-wall.is-on .ns-desk-group-head,
+.ns-wall.is-on .ns-desk-screen-desc { display: none; }
+.ns-wall.is-on .ns-desk-tile-kick { display: inline; }
+.ns-wall.is-on .ns-live-tile {
+  position: absolute;
+  left: 50%;
+  /* The ring's tilt carries the front tile about 70px down from here, and
+   * the tiles behind it rise into the space above. */
+  top: 10px;
+  width: var(--ns-card-w, 300px);
+  margin-left: calc(var(--ns-card-w, 300px) / -2);
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+.ns-wall.is-on .ns-live-tile.is-front { box-shadow: 0 0 0 1px var(--color-accent), 0 0 50px -10px var(--color-accent); }
+
+/* The caption: the front screen's group and place, name and description. */
+.ns-wall.is-on .ns-wall-caption { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 24px; }
+.ns-wall-cap-left { display: flex; align-items: center; gap: 18px; }
+.ns-wall-cap-text { display: flex; flex-direction: column; gap: 3px; min-width: min(320px, 55vw); }
+.ns-wall-cap-kick { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--color-neutral-500); font-variant-numeric: tabular-nums; }
+.ns-wall-cap-name { font-family: var(--font-heading); font-size: 24px; font-weight: 500; letter-spacing: -0.02em; }
+.ns-wall-cap-desc { font-size: 14px; line-height: 1.5; color: var(--color-neutral-400); }
+.ns-wall-round {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  font-size: 17px;
+  cursor: pointer;
+  color: var(--color-text);
+  background: var(--color-surface);
+  box-shadow: inset 0 0 0 1px var(--color-neutral-700);
+  transition: box-shadow 0.2s ease, background 0.2s ease;
+}
+.ns-wall-round:hover { box-shadow: inset 0 0 0 1px var(--color-accent), 0 0 20px -4px var(--color-accent); }
+.ns-wall-round:active { background: var(--color-accent-900); }
+.ns-wall-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--color-accent-200);
+  box-shadow: inset 0 0 0 1px var(--color-accent);
+  text-decoration: none;
+  transition: color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+.ns-wall-open:hover,
+.ns-wall-open:focus-visible {
+  color: var(--color-text);
+  background: var(--color-accent-900);
+  text-decoration: none;
+  box-shadow: inset 0 0 0 1px var(--color-accent-300), 0 0 22px -6px var(--color-accent);
+}
+
+@media (max-width: 720px) {
+  .ns-wall.is-on .ns-wall-stage { height: 280px; }
+  .ns-wall.is-on .ns-live-tile { top: 0; }
+  .ns-wall-cap-left { gap: 12px; }
+  .ns-wall-cap-name { font-size: 20px; }
+}
+
+/* ── Tools: one row of links under the wall ── */
+.ns-desk-tools-section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 8px;
+  padding-top: 18px;
+  border-top: 1px solid var(--color-neutral-900);
+}
+.ns-desk-main .ns-desk-tools-label {
+  font-family: var(--font-body, inherit);
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-neutral-500);
+}
+.ns-desk-tools { display: flex; flex-wrap: wrap; gap: 8px; }
+.ns-desk-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  font-size: 13px;
+  color: var(--color-neutral-300);
+  box-shadow: inset 0 0 0 1px var(--color-neutral-800);
+  text-decoration: none;
+  transition: color 0.25s ease, box-shadow 0.25s ease, transform 0.25s ease;
+}
+.ns-desk-tool .ns-ico { color: var(--color-accent); }
+.ns-desk-tool:hover,
+.ns-desk-tool:focus-visible {
+  color: var(--color-text);
+  text-decoration: none;
+  box-shadow: inset 0 0 0 1px var(--color-accent), 0 0 16px -4px var(--color-accent);
+  transform: translateY(-1px);
+}
+/* The Strategy Tools link names the three screens it opens. Text, not links:
+ * the whole pill is already one. */
+.ns-desk-tool-tags { display: inline-flex; flex-wrap: wrap; gap: 0 6px; font-size: 12px; color: var(--color-neutral-500); }
+.ns-desk-tool-tags span + span::before { content: "·"; margin-right: 6px; color: var(--color-neutral-600); }
 
 /* A tile plus the views that live under it (Screen.parent). No screen has a
  * parent today; kept so one added to the table has somewhere to go. */

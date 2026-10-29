@@ -4,7 +4,27 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-29 (**Sentiment off-hours: two fake inputs out, two stale cards labelled.**)
+**Last updated:** 2026-10-29 (**The site's Live Desk becomes a turning 3D wall of its twelve screens.**)
+
+- The user's design handoff (`Neural Strike Live redesign.zip`, option 3a
+  "Wall") is the basis. `deploy/site/live.html`: the hero takes the design's
+  headline *Read the market. Then trade it.* and three group chips. The twelve
+  tiles stand on a 3D ring that drifts, drags, snaps, and steps by button or
+  arrow key. A caption names the screen in front with an Open screen button,
+  and the tools are one row of pills under it.
+- Adapted to the site's rules rather than dropped in: shared menu (no Gallery),
+  inline icons and self-hosted Inter instead of the design's CDNs, the existing
+  screen descriptions, and Strategy Tools kept as one link. The tiles stay in
+  the markup in their group sections, so the page is a plain grid with no
+  script. `assets/live.js` (now the wall, no longer the cursor spotlight) reads
+  them and adds `.is-on`.
+- Tests: the tool and chip tests read the pill markup; a new test pins that the
+  page ships as the grid and that `live.js` names no screen.
+  [Design](plans/2026-10-29-live-desk-wall-design.md). Checked in the browser
+  pane against a local server, at desktop and phone widths and with the script
+  removed. Not yet on prod.
+
+**Prior —** 2026-10-29 (**Sentiment off-hours: two fake inputs out, two stale cards labelled.**)
 
 - The user reported that before the open and overnight the Bias, Signal and
   Market Regime painted a different picture from the market. Measured on prod at

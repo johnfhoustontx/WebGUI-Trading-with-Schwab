@@ -308,9 +308,13 @@ Schwab call, runs at any time and allows 600 an hour. Their limits are in
 budget is under **Public Rescue form → Budget**, because it is one allowance
 behind all three.
 
-`https://neuralstrike.co/live.html` is a thumbnail menu of them, and the site's
-**Tools** menu links Option Signals, the Strategy Finder, Rescue, **Strategy
-Tools** (it opens the Calculator) and Market News.
+`https://neuralstrike.co/live.html` is the **Live Desk**: the twelve screens'
+thumbnails on a slowly turning wall. Drag it, or use the arrow buttons or keys.
+Click a side screen to bring it to the front and the front one to open it. The
+group chips turn it to Market regime, Dealer positioning or Sector rotation. A
+row under the wall links Option Signals, the Strategy Finder, Rescue, **Strategy
+Tools** (it opens the Calculator) and Market News. With JavaScript off the same
+page is a plain grid of the thumbnails.
 
 The public **Market News** page is your Market News page — headlines, the SEC
 filings and the calendar, laid out the same way — with every control that belongs to you taken out: no

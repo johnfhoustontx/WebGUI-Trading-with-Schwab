@@ -682,17 +682,17 @@ def _tools_section():
 
 
 def test_every_tool_has_a_card_in_table_order():
-    """The tool cards are the published, untiled screens in table order, one
-    card each -- except the three Strategy Tools, which share one card that
-    opens the Calculator. Numbered in that order."""
+    """The tool links are the published, untiled screens in table order, one
+    each -- except the three Strategy Tools, which share one link that opens
+    the Calculator. (Numbered cards until the wall, 2026-10-29; a row of pills
+    since, so the order on the page is the only order left to pin.)"""
     assert [s.slug for s in _desk_tools() if s.slug in STRATEGY_TOOLS] == list(STRATEGY_TOOLS), (
         "the Strategy Tools are no longer adjacent, first-to-last, in the table")
     cards = re.findall(
-        r'<a class="ns-desk-tool ns-desk-spot" href="([^"]+)">.*?'
-        r'<span class="ns-desk-step">(\d+)</span>.*?'
+        r'<a class="ns-desk-tool" href="([^"]+)"[^>]*>.*?'
         r'<span class="ns-desk-tool-name">([^<]+)</span>', _tools_section(), re.S)
-    want = [(f"https://{repo_paths.LIVE_HOST}{route}", f"{i:02d}", title)
-            for i, (route, title, _slugs) in enumerate(_desk_cards(), 1)]
+    want = [(f"https://{repo_paths.LIVE_HOST}{route}", title)
+            for route, title, _slugs in _desk_cards()]
     assert cards == want, cards
 
 
@@ -704,7 +704,7 @@ def test_the_strategy_tools_card_names_all_three():
                      _tools_section(), re.S)
     assert card, "no Strategy Tools card"
     tags = re.findall(r"<span>([^<]+)</span>",
-                      re.search(r'<span class="ns-desk-tool-tags">(.*?)</span>\s*<span class="ns-desk-cta">',
+                      re.search(r'<span class="ns-desk-tool-tags">(.*?)</span></a>',
                                 card.group(0), re.S).group(1))
     assert tags == [titles[slug] for slug in STRATEGY_TOOLS], tags
     for slug in STRATEGY_TOOLS[1:]:
@@ -714,12 +714,13 @@ def test_the_strategy_tools_card_names_all_three():
 
 def test_the_jump_pills_reach_each_section_and_count_it():
     """A count on a pill is a fact that goes stale in silence, like the lede's.
-    The Tools pill counts CARDS, which is what the reader sees under it."""
+    One pill per group, in page order; on the wall live.js turns the ring to
+    the group instead of jumping. (A Tools pill led them until 2026-10-29: the
+    tools now sit one row under the wall, where no jump is needed.)"""
     pills = re.findall(
         r'<a class="ns-desk-pill" href="#([^"]+)">.*?</svg>([^<]+)<span>(\d+)</span></a>',
         _markup("live.html"))
-    want = [("tools", "Tools", str(len(_desk_cards())))] + [
-        (gid, label, str(len(slugs))) for gid, label, slugs in DESK_GROUPS]
+    want = [(gid, label, str(len(slugs))) for gid, label, slugs in DESK_GROUPS]
     assert pills == want, pills
 
 
@@ -846,11 +847,31 @@ def test_the_grid_embeds_nothing_and_runs_nothing():
 
     Scripting is checked too, against an exact list: the market glow every page
     carries for its own nav button, and since the Live Desk (2026-10-24)
-    ``assets/live.js``, the cursor spotlight on a card. Anything else here
-    could only be something that crept in."""
+    ``assets/live.js`` -- the cursor spotlight on a card until 2026-10-29, the
+    3D wall since. Anything else here could only be something that crept in."""
     markup = _markup("live.html")
     assert "<iframe" not in markup
     assert _scripts_besides_the_glow(markup) == ['<script src="assets/live.js" defer>']
+
+
+def test_the_wall_is_built_from_the_grid_and_ships_as_the_grid():
+    """The wall (2026-10-29) is the grid turned by ``assets/live.js``, which
+    adds ``.is-on``. Two ways to break that without a visible error:
+
+    * ship ``is-on`` in the markup, and a visitor with no script -- or a
+      script that fails -- gets twelve tiles stacked on one spot;
+    * write the screen list into the script, and the wall can drift from the
+      tiles this file pins against ``live_screens.py``. The script reads the
+      tiles; it names no screen."""
+    markup = _markup("live.html")
+    assert re.search(r'<div class="ns-wall">', markup), "live.html has no wall"
+    assert "is-on" not in markup, "the wall is switched on in the markup"
+    script = _text("assets/live.js")
+    assert 'classList.add("is-on")' in script
+    for s in _live_screens().SCREENS:
+        assert f'"{s.slug}"' not in script and f"'{s.slug}'" not in script, (
+            f"live.js names {s.slug}; it must read the tiles")
+        assert s.title not in script, f"live.js names {s.title}; it must read the tiles"
 
 
 # --- D. the site never points at the app ------------------------------------
