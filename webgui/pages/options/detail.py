@@ -837,8 +837,8 @@ def _build_cards(s):
             caption = expiry_caption(s)
             if caption:
                 ui.label(caption).classes(f"text-xs {MUTED}")
-            # The contract as a ThinkorSwim bracket, for a vertical only. The
-            # owner's tool: the public origin draws none.
+            # The contract as a ThinkorSwim bracket, for any structure
+            # ``tos_order`` can write. The owner's tool: the public origin draws none.
             tos = None if _shell.is_public() else tos_order.order(s)
             if tos:
                 _tos_button(tos)

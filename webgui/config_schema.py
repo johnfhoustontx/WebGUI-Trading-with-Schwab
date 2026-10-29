@@ -2769,17 +2769,18 @@ _LOGIN_PUSH = ConfigFile(
 _TOS_ORDER = ConfigFile(
     name="tos_order.toml", title="ThinkorSwim order", icon="content_copy",
     summary="The bracket the Trade detail panel's Copy ThinkorSwim order button "
-            "puts on the clipboard for a vertical: an opening limit that "
-            "triggers a profit target and a stop, each a percentage of the "
-            "fill. Read on every click.",
+            "puts on the clipboard: an opening limit that triggers a profit "
+            "target and a stop, each a percentage of the fill. Read on every "
+            "click.",
     restart=(),
     sections=(
         Section("Order", "Change the size in ThinkorSwim when it differs.", (
-            Field("quantity", "Spreads per order", "", kind="int",
+            Field("quantity", "Spreads per order",
+                  "A covered call orders 100 shares for each.", kind="int",
                   min=1, max=1000, step=1),
         )),
-        Section("Debit verticals", "Bought: the target is a rise in the "
-                "spread's price, the stop a fall.", (
+        Section("Debit trades", "Bought: the target is a rise in the "
+                "trade's price, the stop a fall.", (
             Field("debit.target_pct", "Take profit above the debit",
                   "100 sells at double what was paid.", unit="%",
                   min=1, max=1000, step=5),
@@ -2787,13 +2788,13 @@ _TOS_ORDER = ConfigFile(
                   "50 stops out at half what was paid. Under 100.", unit="%",
                   min=1, max=99, step=5),
         )),
-        Section("Credit verticals", "Sold: the target is a fall in the "
-                "spread's price, the stop a rise.", (
+        Section("Credit trades", "Sold: the target is a fall in the "
+                "trade's price, the stop a rise.", (
             Field("credit.target_pct", "Take profit below the credit",
                   "50 buys back at half the credit received. Under 100.",
                   unit="%", min=1, max=99, step=5),
             Field("credit.stop_pct", "Stop above the credit",
-                  "100 stops out when the spread costs double the credit.",
+                  "100 stops out when the trade costs double the credit.",
                   unit="%", min=1, max=1000, step=5),
         )),
     ),

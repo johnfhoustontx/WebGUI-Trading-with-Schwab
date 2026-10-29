@@ -2161,21 +2161,40 @@ cell, and the T=0 "Exp" column showed premium instead of the kinked payoff.)
 ## ThinkorSwim bracket order (Trade detail panel)
 
 `webgui/pages/options/tos_order.py` builds the text the **Copy ThinkorSwim
-order** button copies, for a **vertical** only: two option legs, one long and
-one short, same right, same expiration, same quantity.
+order** button copies. It reads the position as signed legs (the canonical
+`legs`, or a stored row's strike keys), reduces their quantities to the
+smallest whole ratio, and names the structure from that geometry:
 
-- **Direction** comes from the strikes, never the sign of the price: a call
-  vertical is a debit when its long strike is the lower, a put vertical when its
-  long strike is the higher. ThinkorSwim reads `A/B` as long A, short B per +1,
-  so a debit opens `BUY +q … long/short` and a credit `SELL -q … short/long`.
+| Legs | ThinkorSwim order (opening line, `+1` shown) |
+|---|---|
+| one option | `BUY +1 INTC 100 (Weeklys) 6 NOV 26 100 CALL` |
+| two, same right and expiry, 1 / −1 | `VERTICAL … 95/100 CALL` (long first for +1) |
+| call and put, same expiry, same side | `STRADDLE … 95` / `STRANGLE … 105/85 CALL/PUT` |
+| two, same right, two expiries, 1 / −1 | `CALENDAR … 4 DEC 26/6 NOV 26 95 CALL` / `DIAGONAL … 95/100 CALL` (far first) |
+| three, same right, 1 / −2 / 1, equal wings | `BUTTERFLY … 90/95/100 CALL` |
+| four, same right, 1 / −1 / −1 / 1 | `CONDOR … 85/90/100/105 CALL` |
+| a call vertical and a put vertical | `IRON CONDOR … 105/110/85/80 CALL/PUT` (inner call / outer call / inner put / outer put; an iron butterfly has equal inners) |
+| long shares, one short call per lot | `BUY +100 COVERED … 100 CALL` (opening only) |
+| any other all-option position | `BUY +1 -1/2 CUSTOM … 6 NOV 26/6 NOV 26 95/100 CALL/CALL` |
+
+- **Direction** comes from the legs, never the sign of the price: ThinkorSwim
+  reads `+1` of a spread as LONG its first-listed leg of each pair, so the side
+  is whichever makes the listed spread the position held (a debit vertical
+  `BUY +q … long/short`, a credit one `SELL -q … short/long`). Only a CUSTOM
+  order takes its side from the price: a debit buys the ratios as held, a credit
+  sells them negated. A protective put or a collar (shares beside a long put)
+  gets no order. The position effect names one `TO OPEN` / `TO CLOSE` per leg.
+- **Verified**: each row above was pasted into ThinkorSwim on 2026-10-28 and
+  loaded as the position named.
 - **Price**: the absolute value of `net_cost`, else of `credit` (per share), to
   two decimals.
-- **Exits**, from `config/tos_order.toml` (read on every click): debit
-  `@TRG+100.00% LMT` and `STP TRG-50.00% MARK`; credit `@TRG-50.00% LMT` and
+- **Exits**, from `config/tos_order.toml` (read on every click), the opening
+  line with the side reversed: a buy (debit) `@TRG+100.00% LMT` and
+  `STP TRG-50.00% MARK`; a sell (credit) `@TRG-50.00% LMT` and
   `STP TRG+100.00% MARK`. Both are `TRG BY #1 OCO`: the opening order triggers
   them and each cancels the other. A percentage below the entry must be under
-  100, or it falls back to the default.
-- **Series tag**: `(Weeklys)` for any expiration except the monthly — the third
+  100, or it falls back to the default. A covered call has no exits.
+- **Series tag**: `(Weeklys)` when any expiration is not the monthly — the third
   Friday, or the session before it when that Friday is a closure
   (`shared/market_calendar`). A `$` is stripped from an index symbol (`$SPX` →
   `SPX`).

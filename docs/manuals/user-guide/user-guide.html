@@ -2196,10 +2196,10 @@ two-pane layout.</p>
 (credit, max loss, DTE, delta, theta, IV rank, and more) — with the full
 checklist at the top.</p>
 <h3 id="copying-a-trade-to-thinkorswim">Copying a trade to ThinkorSwim</h3>
-<p>For a <strong>vertical spread</strong>, the contract card at the top of the detail panel has
-a <strong>Copy ThinkorSwim order</strong> button — on every page that shows the panel, such
-as the Market Scanner, Captured Signals and the Paper Ledger.
-It puts a <em>first triggers OCO</em> bracket on the clipboard:</p>
+<p>The contract card at the top of the detail panel has a <strong>Copy ThinkorSwim
+order</strong> button — on every page that shows the panel, such as the Market Scanner,
+Captured Signals and the Paper Ledger. It puts a <em>first triggers OCO</em> bracket on
+the clipboard; for a debit vertical:</p>
 <pre><code>BUY +1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @1.50 LMT [TO OPEN/TO OPEN]
 SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @TRG+100.00% LMT TRG BY #1 OCO [TO CLOSE/TO CLOSE]
 SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL STP TRG-50.00% MARK TRG BY #1 OCO [TO CLOSE/TO CLOSE]
@@ -2210,17 +2210,27 @@ check the ticket, and send it there. The app never places an order.</p>
 <li><strong>The opening order</strong> is a limit at the price the panel shows (the debit paid
   or the credit received, per share).</li>
 <li><strong>The two exits</strong> are percentages of the fill, so ThinkorSwim prices them from
-  what you actually paid. A <strong>debit</strong> spread takes profit at <strong>+100%</strong> (double
-  the debit) and stops at <strong>−50%</strong>. A <strong>credit</strong> spread is the mirror: it buys
-  back at <strong>half the credit</strong> (−50%) and stops when the spread costs <strong>double the
-  credit</strong> (+100%). Change them, and the default size of 1, under <strong>Settings →
-  Configuration → ThinkorSwim order</strong>; a change applies on the next click.</li>
+  what you actually paid. A trade bought for a <strong>debit</strong> takes profit at
+  <strong>+100%</strong> (double the debit) and stops at <strong>−50%</strong>. A trade sold for a
+  <strong>credit</strong> is the mirror: it buys back at <strong>half the credit</strong> (−50%) and stops
+  when it costs <strong>double the credit</strong> (+100%). Change them, and the default size
+  of 1, under <strong>Settings → Configuration → ThinkorSwim order</strong>; a change applies
+  on the next click.</li>
+<li><strong>Every option structure gets the button</strong>: a single call or put, verticals,
+  straddles, strangles, calendars, diagonals (far month listed first),
+  butterflies, condors, iron condors and iron butterflies (which ThinkorSwim
+  takes as an IRON CONDOR with equal short strikes). Anything else that is all
+  options — a ratio, a backspread, a broken-wing butterfly — is written as a
+  ThinkorSwim <strong>CUSTOM</strong> order (<code>BUY +1 -1/2 CUSTOM …</code>). Each of these pasted
+  correctly into ThinkorSwim on 2026-10-28.</li>
+<li><strong>A covered call</strong> copies the opening order only (<code>BUY +100 COVERED …</code>): a
+  percentage of a price that is mostly the shares is no target or stop. A
+  <strong>protective put</strong> or a <strong>collar</strong> gets no button.</li>
 <li>An expiration that is not the monthly (third-Friday) one is tagged
   <strong>(Weeklys)</strong>, as ThinkorSwim names it. The order is only as good as what the
   panel shows: check the price, the expiration and the strikes in the ticket
   before sending. A price may need rounding to the option's tick size.</li>
-<li><strong>Condors, butterflies, calendars, single options and positions with shares
-  get no button.</strong> The button is not on the public site.</li>
+<li>The button is not on the public site.</li>
 </ul>
 <h3 id="using-the-checklist-to-pick-a-trade">Using the checklist to pick a trade</h3>
 <p>Every candidate row carries a <strong>Checks</strong> chip: the nine things worth knowing about

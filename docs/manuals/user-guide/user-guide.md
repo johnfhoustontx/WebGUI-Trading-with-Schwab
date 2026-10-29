@@ -1839,10 +1839,10 @@ checklist at the top.
 
 ### Copying a trade to ThinkorSwim
 
-For a **vertical spread**, the contract card at the top of the detail panel has
-a **Copy ThinkorSwim order** button — on every page that shows the panel, such
-as the Market Scanner, Captured Signals and the Paper Ledger.
-It puts a *first triggers OCO* bracket on the clipboard:
+The contract card at the top of the detail panel has a **Copy ThinkorSwim
+order** button — on every page that shows the panel, such as the Market Scanner,
+Captured Signals and the Paper Ledger. It puts a *first triggers OCO* bracket on
+the clipboard; for a debit vertical:
 
 ```
 BUY +1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @1.50 LMT [TO OPEN/TO OPEN]
@@ -1856,17 +1856,27 @@ check the ticket, and send it there. The app never places an order.
 - **The opening order** is a limit at the price the panel shows (the debit paid
   or the credit received, per share).
 - **The two exits** are percentages of the fill, so ThinkorSwim prices them from
-  what you actually paid. A **debit** spread takes profit at **+100%** (double
-  the debit) and stops at **−50%**. A **credit** spread is the mirror: it buys
-  back at **half the credit** (−50%) and stops when the spread costs **double the
-  credit** (+100%). Change them, and the default size of 1, under **Settings →
-  Configuration → ThinkorSwim order**; a change applies on the next click.
+  what you actually paid. A trade bought for a **debit** takes profit at
+  **+100%** (double the debit) and stops at **−50%**. A trade sold for a
+  **credit** is the mirror: it buys back at **half the credit** (−50%) and stops
+  when it costs **double the credit** (+100%). Change them, and the default size
+  of 1, under **Settings → Configuration → ThinkorSwim order**; a change applies
+  on the next click.
+- **Every option structure gets the button**: a single call or put, verticals,
+  straddles, strangles, calendars, diagonals (far month listed first),
+  butterflies, condors, iron condors and iron butterflies (which ThinkorSwim
+  takes as an IRON CONDOR with equal short strikes). Anything else that is all
+  options — a ratio, a backspread, a broken-wing butterfly — is written as a
+  ThinkorSwim **CUSTOM** order (`BUY +1 -1/2 CUSTOM …`). Each of these pasted
+  correctly into ThinkorSwim on 2026-10-28.
+- **A covered call** copies the opening order only (`BUY +100 COVERED …`): a
+  percentage of a price that is mostly the shares is no target or stop. A
+  **protective put** or a **collar** gets no button.
 - An expiration that is not the monthly (third-Friday) one is tagged
   **(Weeklys)**, as ThinkorSwim names it. The order is only as good as what the
   panel shows: check the price, the expiration and the strikes in the ticket
   before sending. A price may need rounding to the option's tick size.
-- **Condors, butterflies, calendars, single options and positions with shares
-  get no button.** The button is not on the public site.
+- The button is not on the public site.
 
 ### Using the checklist to pick a trade
 

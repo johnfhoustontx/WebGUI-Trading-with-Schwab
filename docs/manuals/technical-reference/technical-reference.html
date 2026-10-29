@@ -4830,21 +4830,74 @@ box resolved to 17:00 ET: the grid carried an extra hour of time value in every
 cell, and the T=0 "Exp" column showed premium instead of the kinked payoff.)</p>
 <h2 id="thinkorswim-bracket-order-trade-detail-panel">ThinkorSwim bracket order (Trade detail panel)</h2>
 <p><code>webgui/pages/options/tos_order.py</code> builds the text the <strong>Copy ThinkorSwim
-order</strong> button copies, for a <strong>vertical</strong> only: two option legs, one long and
-one short, same right, same expiration, same quantity.</p>
+order</strong> button copies. It reads the position as signed legs (the canonical
+<code>legs</code>, or a stored row's strike keys), reduces their quantities to the
+smallest whole ratio, and names the structure from that geometry:</p>
+<table>
+<thead>
+<tr>
+<th>Legs</th>
+<th>ThinkorSwim order (opening line, <code>+1</code> shown)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>one option</td>
+<td><code>BUY +1 INTC 100 (Weeklys) 6 NOV 26 100 CALL</code></td>
+</tr>
+<tr>
+<td>two, same right and expiry, 1 / −1</td>
+<td><code>VERTICAL … 95/100 CALL</code> (long first for +1)</td>
+</tr>
+<tr>
+<td>call and put, same expiry, same side</td>
+<td><code>STRADDLE … 95</code> / <code>STRANGLE … 105/85 CALL/PUT</code></td>
+</tr>
+<tr>
+<td>two, same right, two expiries, 1 / −1</td>
+<td><code>CALENDAR … 4 DEC 26/6 NOV 26 95 CALL</code> / <code>DIAGONAL … 95/100 CALL</code> (far first)</td>
+</tr>
+<tr>
+<td>three, same right, 1 / −2 / 1, equal wings</td>
+<td><code>BUTTERFLY … 90/95/100 CALL</code></td>
+</tr>
+<tr>
+<td>four, same right, 1 / −1 / −1 / 1</td>
+<td><code>CONDOR … 85/90/100/105 CALL</code></td>
+</tr>
+<tr>
+<td>a call vertical and a put vertical</td>
+<td><code>IRON CONDOR … 105/110/85/80 CALL/PUT</code> (inner call / outer call / inner put / outer put; an iron butterfly has equal inners)</td>
+</tr>
+<tr>
+<td>long shares, one short call per lot</td>
+<td><code>BUY +100 COVERED … 100 CALL</code> (opening only)</td>
+</tr>
+<tr>
+<td>any other all-option position</td>
+<td><code>BUY +1 -1/2 CUSTOM … 6 NOV 26/6 NOV 26 95/100 CALL/CALL</code></td>
+</tr>
+</tbody>
+</table>
 <ul>
-<li><strong>Direction</strong> comes from the strikes, never the sign of the price: a call
-  vertical is a debit when its long strike is the lower, a put vertical when its
-  long strike is the higher. ThinkorSwim reads <code>A/B</code> as long A, short B per +1,
-  so a debit opens <code>BUY +q … long/short</code> and a credit <code>SELL -q … short/long</code>.</li>
+<li><strong>Direction</strong> comes from the legs, never the sign of the price: ThinkorSwim
+  reads <code>+1</code> of a spread as LONG its first-listed leg of each pair, so the side
+  is whichever makes the listed spread the position held (a debit vertical
+  <code>BUY +q … long/short</code>, a credit one <code>SELL -q … short/long</code>). Only a CUSTOM
+  order takes its side from the price: a debit buys the ratios as held, a credit
+  sells them negated. A protective put or a collar (shares beside a long put)
+  gets no order. The position effect names one <code>TO OPEN</code> / <code>TO CLOSE</code> per leg.</li>
+<li><strong>Verified</strong>: each row above was pasted into ThinkorSwim on 2026-10-28 and
+  loaded as the position named.</li>
 <li><strong>Price</strong>: the absolute value of <code>net_cost</code>, else of <code>credit</code> (per share), to
   two decimals.</li>
-<li><strong>Exits</strong>, from <code>config/tos_order.toml</code> (read on every click): debit
-  <code>@TRG+100.00% LMT</code> and <code>STP TRG-50.00% MARK</code>; credit <code>@TRG-50.00% LMT</code> and
+<li><strong>Exits</strong>, from <code>config/tos_order.toml</code> (read on every click), the opening
+  line with the side reversed: a buy (debit) <code>@TRG+100.00% LMT</code> and
+  <code>STP TRG-50.00% MARK</code>; a sell (credit) <code>@TRG-50.00% LMT</code> and
   <code>STP TRG+100.00% MARK</code>. Both are <code>TRG BY #1 OCO</code>: the opening order triggers
   them and each cancels the other. A percentage below the entry must be under
-  100, or it falls back to the default.</li>
-<li><strong>Series tag</strong>: <code>(Weeklys)</code> for any expiration except the monthly — the third
+  100, or it falls back to the default. A covered call has no exits.</li>
+<li><strong>Series tag</strong>: <code>(Weeklys)</code> when any expiration is not the monthly — the third
   Friday, or the session before it when that Friday is a closure
   (<code>shared/market_calendar</code>). A <code>$</code> is stripped from an index symbol (<code>$SPX</code> →
   <code>SPX</code>).</li>

@@ -9,21 +9,32 @@ ThinkorSwim reads with Trade > Order Entry Tools > "Paste order from clipboard":
 
 The opening limit triggers the other two, which cancel each other. The two exit
 prices are PERCENTAGES of the fill, worked out by ThinkorSwim when the opening
-order fills, so they follow the price actually paid rather than the limit.
+order fills, so they follow the price actually paid rather than the limit. The
+closing lines repeat the opening one with the side reversed; the position
+effect names one ``TO OPEN`` / ``TO CLOSE`` per leg.
 
-**Verticals only**: two option legs, one bought and one sold, same right, same
-expiry, same quantity. Anything else (a condor, a butterfly, a calendar, a single
-option, a position with shares) gets no order, and the panel draws no button.
+**One rule orders every named structure's strikes**: ThinkorSwim reads ``+1`` of
+a spread as LONG its first-listed leg of each pair. So a debit vertical is
+``BUY +1 ... long/short`` and a credit vertical ``SELL -1 ... short/long``; a
+sold iron condor is ``SELL -1 IRON CONDOR ... 4730/4740/4730/4720 CALL/PUT``
+(short call / long call / short put / long put - the order text of a real
+ThinkorSwim fill, which also shows an iron butterfly travels as an IRON CONDOR
+with equal short strikes); a calendar or diagonal lists the far expiry first.
+Which side opens is read off the LEGS, never off the sign of the price: the
+adapters store a debit both as a negative ``credit`` and as a negative
+``net_cost``. Only a CUSTOM order, which has no geometry of its own, takes its
+side from the price's sign.
 
-**The strike order is ThinkorSwim's**: "A/B" is long A, short B for each +1, so
-a debit vertical is ``BUY +1 ... long/short`` and a credit vertical is
-``SELL -1 ... short/long``. A credit's exits are the mirror of a debit's: the
-target is a FALL in the spread's price and the stop a RISE (``config/tos_order.toml``).
+The structures: a single option, VERTICAL, STRADDLE, STRANGLE, CALENDAR,
+DIAGONAL, BUTTERFLY (equal wings), CONDOR, IRON CONDOR (and iron butterfly),
+COVERED (100 shares a contract, opening order only: a percentage of a price
+that is mostly shares is no exit), and CUSTOM for every other all-option
+position (ratios, backspreads, broken wings). A protective put or a collar
+holds shares beside a long put, which no ThinkorSwim order text carries, so
+they get none. A buy is a debit and takes ``[debit]``'s exits; a sell takes
+``[credit]``'s (``config/tos_order.toml``).
 
 Everything here is PURE except :func:`settings`, which reads the config file.
-The direction is read off the strikes, never off the sign of the price: the
-adapters store a debit both as a negative ``credit`` and as a negative
-``net_cost``, and a legacy row may carry neither sign.
 """
 import datetime as _dt
 import math
@@ -46,6 +57,21 @@ load, reset_cache = toml_loader(TOS_ORDER_TOML, DEFAULTS, label="tos_order.toml"
 _MULTIPLIER = "100"
 _WEEKLYS = "(Weeklys)"
 _LINK = "TRG BY #1 OCO"
+_SHARES_PER_CONTRACT = 100
+
+# A stored row with no ``legs`` keeps its strikes in named keys
+# (``signal_repricer._LEG_LAYOUT``, Tier 2): (right, key, +1 long / -1 short).
+_KEY_LAYOUT = {
+    "PCS": (("PUT", "short_strike", -1), ("PUT", "long_strike", +1)),
+    "CCS": (("CALL", "short_strike", -1), ("CALL", "long_strike", +1)),
+    "IC": (("PUT", "short_strike", -1), ("PUT", "long_strike", +1),
+           ("CALL", "call_short", -1), ("CALL", "call_long", +1)),
+    "SHORT_PUT": (("PUT", "short_strike", -1),),
+    "SHORT_CALL": (("CALL", "short_strike", -1),),
+    "COVERED_CALL": (("CALL", "short_strike", -1),),
+}
+_KEY_ALIASES = {"IRON_CONDOR": "IC", "NAKED_PUT": "SHORT_PUT",
+                "NAKED_CALL": "SHORT_CALL"}
 
 
 def _pct_setting(table, key, *, below_100):
@@ -76,6 +102,8 @@ def settings():
     }
 
 
+# ── reading the position ────────────────────────────────────────────────────
+
 def _date(raw):
     try:
         return _dt.date.fromisoformat(str(raw)[:10])
@@ -83,80 +111,66 @@ def _date(raw):
         return None
 
 
-def _is_stock(leg):
-    return str(leg.get("kind", "")).lower() == "stock"
+def _leg(right, signed_qty, strike, expiry):
+    return {"right": right, "qty": signed_qty, "strike": strike, "expiry": expiry}
 
 
 def _from_legs(signal, legs):
-    """``(long, short, right, expiry)`` from the canonical legs, or None."""
-    if any(not isinstance(l, dict) or _is_stock(l) for l in legs) or len(legs) != 2:
-        return None
-    kinds = {str(l.get("kind", "")).lower() for l in legs}
-    if len(kinds) != 1 or not kinds <= {"call", "put"}:
-        return None
-    by_side = {str(l.get("side", "")).lower(): l for l in legs}
-    if set(by_side) != {"long", "short"}:
-        return None
-    qtys = {num(l.get("qty", 1)) for l in legs}
-    if len(qtys) != 1:
-        return None
-    expiries = {_date(l.get("expiration") or signal.get("expiration")) for l in legs}
-    if len(expiries) != 1:
-        return None
-    return (num(by_side["long"].get("strike")), num(by_side["short"].get("strike")),
-            kinds.pop().upper(), expiries.pop())
+    """Canonical legs -> ``[{right, qty (signed), strike, expiry}]``, or None
+    when any leg is unreadable. A share leg's qty counts 100-share lots."""
+    out = []
+    for l in legs:
+        if not isinstance(l, dict):
+            return None
+        side = str(l.get("side", "")).lower()
+        if side not in ("long", "short"):
+            return None
+        sign = 1 if side == "long" else -1
+        q = num(l.get("qty", 1))
+        if q is None or q <= 0 or q != int(q):
+            return None
+        kind = str(l.get("kind", "")).lower()
+        if kind == "stock":
+            out.append(_leg("STOCK", sign * int(q), None, None))
+            continue
+        if kind not in ("call", "put"):
+            return None
+        strike = num(l.get("strike"))
+        expiry = _date(l.get("expiration") or signal.get("expiration"))
+        if strike is None or strike <= 0 or expiry is None:
+            return None
+        out.append(_leg(kind.upper(), sign * int(q), strike, expiry))
+    return out
 
 
 def _from_keys(signal):
-    """The same from a scanner row's strike keys, or None for an iron condor
-    and for a type that does not say calls or puts."""
-    if signal.get("call_short") is not None or signal.get("call_long") is not None:
-        return None
+    """A stored row's named strike keys -> legs, or None for a type whose
+    keys are not known here (an unknown type is never guessed at)."""
     t = str(signal.get("type", "")).upper()
-    if "IC" in t or "CONDOR" in t:
+    t = _KEY_ALIASES.get(t, t)
+    layout = _KEY_LAYOUT.get(t)
+    expiry = _date(signal.get("expiration"))
+    if layout is None or expiry is None:
         return None
-    if t.startswith("CC") or "CALL" in t:
-        right = "CALL"
-    elif t.startswith("PC") or "PUT" in t:
-        right = "PUT"
-    else:
-        return None
-    return (num(signal.get("long_strike")), num(signal.get("short_strike")),
-            right, _date(signal.get("expiration")))
+    out = []
+    for right, key, sign in layout:
+        strike = num(signal.get(key))
+        if strike is None or strike <= 0:
+            return None
+        out.append(_leg(right, sign, strike, expiry))
+    if t == "COVERED_CALL":
+        out.insert(0, _leg("STOCK", 1, None, None))
+    return out
 
 
-def vertical(signal):
-    """``{symbol, long, short, right, expiry, debit}`` for a vertical, else None.
-
-    ``debit`` is read off the strikes: a call vertical is bought when its long
-    strike is the lower, a put vertical when it is the higher."""
+def position_legs(signal):
+    """The position as signed legs, or None when it cannot be read."""
     s = signal if isinstance(signal, dict) else {}
     legs = s.get("legs")
-    parts = _from_legs(s, legs) if legs else _from_keys(s)
-    if parts is None:
-        return None
-    long_k, short_k, right, expiry = parts
-    symbol = str(s.get("symbol") or "").strip().lstrip("$").upper()
-    if (not symbol or expiry is None or long_k is None or short_k is None
-            or long_k <= 0 or short_k <= 0 or long_k == short_k):
-        return None
-    debit = long_k < short_k if right == "CALL" else long_k > short_k
-    return {"symbol": symbol, "long": long_k, "short": short_k, "right": right,
-            "expiry": expiry, "debit": debit}
+    return _from_legs(s, legs) if legs else _from_keys(s)
 
 
-def entry_price(signal):
-    """The per-share price to open at, always positive, or None. ``net_cost`` is
-    signed (negative = debit) and so is a debit row's ``credit``; only the size
-    is used here."""
-    s = signal if isinstance(signal, dict) else {}
-    v = num(s.get("net_cost"))
-    if v is None:
-        v = num(s.get("credit"))
-    if v is None or v == 0:
-        return None
-    return abs(v)
-
+# ── text pieces ─────────────────────────────────────────────────────────────
 
 def is_monthly(d):
     """The standard monthly expiry: the third Friday, or the session before it
@@ -178,35 +192,211 @@ def strike_text(k):
     return f"{k:.3f}".rstrip("0").rstrip(".")
 
 
+def _root(signal):
+    return str((signal or {}).get("symbol") or "").strip().lstrip("$").upper()
+
+
+def _series(sym, expiries):
+    """``SPX 100 (Weeklys)``: tagged when ANY expiry is not the monthly one."""
+    tag = "" if all(is_monthly(d) for d in expiries) else f" {_WEEKLYS}"
+    return f"{sym} {_MULTIPLIER}{tag}"
+
+
+def _join(items, fn=str):
+    return "/".join(fn(x) for x in items)
+
+
+# ── naming the structure ────────────────────────────────────────────────────
+
+def _named(sym, opts):
+    """``(body, side, name)`` for a named ThinkorSwim spread, or None.
+
+    ``opts`` are option legs whose quantities are already reduced to the
+    smallest whole ratio. ``side`` is +1 to BUY the listed spread, -1 to SELL."""
+    n = len(opts)
+    exps = {l["expiry"] for l in opts}
+    rights = {l["right"] for l in opts}
+    unit = all(abs(l["qty"]) == 1 for l in opts)
+    if n == 1:
+        l = opts[0]
+        return (f"{_series(sym, [l['expiry']])} {expiry_text(l['expiry'])} "
+                f"{strike_text(l['strike'])} {l['right']}",
+                1 if l["qty"] > 0 else -1, "single option")
+    if n == 2 and unit:
+        a, b = opts
+        if len(rights) == 1 and a["qty"] == -b["qty"]:
+            if len(exps) == 1 and a["strike"] != b["strike"]:
+                long_l, short_l = (a, b) if a["qty"] > 0 else (b, a)
+                lower_is_long = long_l["strike"] < short_l["strike"]
+                debit = lower_is_long if a["right"] == "CALL" else not lower_is_long
+                first, second = (long_l, short_l) if debit else (short_l, long_l)
+                return (f"VERTICAL {_series(sym, exps)} {expiry_text(a['expiry'])} "
+                        f"{strike_text(first['strike'])}/{strike_text(second['strike'])} "
+                        f"{a['right']}", 1 if debit else -1, "vertical")
+            if len(exps) == 2:
+                far, near = sorted(opts, key=lambda l: l["expiry"], reverse=True)
+                same = far["strike"] == near["strike"]
+                strikes = (strike_text(far["strike"]) if same else
+                           f"{strike_text(far['strike'])}/{strike_text(near['strike'])}")
+                name = "CALENDAR" if same else "DIAGONAL"
+                return (f"{name} {_series(sym, [far['expiry'], near['expiry']])} "
+                        f"{expiry_text(far['expiry'])}/{expiry_text(near['expiry'])} "
+                        f"{strikes} {far['right']}",
+                        1 if far["qty"] > 0 else -1, name.lower())
+        if rights == {"CALL", "PUT"} and len(exps) == 1 and a["qty"] == b["qty"]:
+            call, put = (a, b) if a["right"] == "CALL" else (b, a)
+            exp = expiry_text(a["expiry"])
+            side = 1 if a["qty"] > 0 else -1
+            if call["strike"] == put["strike"]:
+                return (f"STRADDLE {_series(sym, exps)} {exp} "
+                        f"{strike_text(call['strike'])}", side, "straddle")
+            return (f"STRANGLE {_series(sym, exps)} {exp} "
+                    f"{strike_text(call['strike'])}/{strike_text(put['strike'])} "
+                    "CALL/PUT", side, "strangle")
+        return None
+    if len(exps) != 1:
+        return None
+    exp = expiry_text(next(iter(exps)))
+    legs = sorted(opts, key=lambda l: l["strike"])
+    ks = [l["strike"] for l in legs]
+    qs = [l["qty"] for l in legs]
+    if n == 3 and len(rights) == 1 and len(set(ks)) == 3:
+        s = qs[0]
+        if qs == [s, -2 * s, s] and abs(s) == 1 and ks[1] - ks[0] == ks[2] - ks[1]:
+            return (f"BUTTERFLY {_series(sym, exps)} {exp} {_join(ks, strike_text)} "
+                    f"{legs[0]['right']}", s, "butterfly")
+        return None
+    if n == 4 and unit and len(rights) == 1 and len(set(ks)) == 4:
+        s = qs[0]
+        if qs == [s, -s, -s, s]:
+            return (f"CONDOR {_series(sym, exps)} {exp} {_join(ks, strike_text)} "
+                    f"{legs[0]['right']}", s, "condor")
+        return None
+    if n == 4 and unit and rights == {"CALL", "PUT"}:
+        calls = [l for l in legs if l["right"] == "CALL"]
+        puts = [l for l in legs if l["right"] == "PUT"]
+        if len(calls) != 2 or len(puts) != 2:
+            return None
+        c_in, c_out = calls                      # inner call = the lower strike
+        p_out, p_in = puts                       # inner put = the higher strike
+        if (c_in["strike"] == c_out["strike"] or p_in["strike"] == p_out["strike"]
+                or c_in["qty"] != -c_out["qty"] or p_in["qty"] != -p_out["qty"]
+                or c_in["qty"] != p_in["qty"] or c_in["strike"] < p_in["strike"]):
+            return None
+        return (f"IRON CONDOR {_series(sym, exps)} {exp} "
+                f"{_join([c_in['strike'], c_out['strike'], p_in['strike'], p_out['strike']], strike_text)} "
+                "CALL/PUT", c_in["qty"], "iron condor")
+    return None
+
+
+def _custom(sym, opts, debit):
+    """ThinkorSwim's CUSTOM order for any other all-option position: the
+    ratios, then each leg's expiry, strike and right, legs in expiry, right
+    and strike order. Listed as held for a buy, negated for a sell."""
+    legs = sorted(opts, key=lambda l: (l["expiry"], l["right"], l["strike"]))
+    side = 1 if debit else -1
+    ratios = _join([side * l["qty"] for l in legs])
+    exps = [l["expiry"] for l in legs]
+    return (f"{ratios} CUSTOM {_series(sym, exps)} {_join(exps, expiry_text)} "
+            f"{_join([l['strike'] for l in legs], strike_text)} "
+            f"{_join([l['right'] for l in legs])}", side, "custom")
+
+
+def _price_is_debit(signal):
+    """True / False from the price's sign, or None when it has none."""
+    s = signal if isinstance(signal, dict) else {}
+    for key in ("net_cost", "credit"):
+        v = num(s.get(key))
+        if v is not None and v != 0:
+            return v < 0
+    return None
+
+
+def entry_price(signal):
+    """The per-share price to open at, always positive, or None. ``net_cost`` is
+    signed (negative = debit) and so is a debit row's ``credit``; only the size
+    is used here."""
+    s = signal if isinstance(signal, dict) else {}
+    v = num(s.get("net_cost"))
+    if v is None:
+        v = num(s.get("credit"))
+    if v is None or v == 0:
+        return None
+    return abs(v)
+
+
+def structure(signal):
+    """``{body, side, legs, name, bracket}`` for the selected trade, or None.
+
+    ``body`` follows ``BUY +q`` / ``SELL -q``; ``legs`` counts the position
+    effects; ``bracket`` is False for a position holding shares."""
+    legs = position_legs(signal)
+    sym = _root(signal)
+    if not legs or not sym:
+        return None
+    stock = [l for l in legs if l["right"] == "STOCK"]
+    opts = [l for l in legs if l["right"] != "STOCK"]
+    if not opts:
+        return None
+    if stock:
+        # Covered: long shares, one short call a 100-share lot. Anything else
+        # with shares (a protective put, a collar) has no order text.
+        if (len(stock) != 1 or len(opts) != 1 or opts[0]["right"] != "CALL"
+                or stock[0]["qty"] <= 0 or opts[0]["qty"] != -stock[0]["qty"]):
+            return None
+        c = opts[0]
+        return {"body": (f"COVERED {_series(sym, [c['expiry']])} "
+                         f"{expiry_text(c['expiry'])} {strike_text(c['strike'])} CALL"),
+                "side": 1, "legs": 2, "name": "covered call", "bracket": False,
+                "shares": True}
+    g = math.gcd(*(abs(l["qty"]) for l in opts))
+    unit = [{**l, "qty": l["qty"] // g} for l in opts]
+    named = _named(sym, unit)
+    if named is None:
+        debit = _price_is_debit(signal)
+        named = _custom(sym, unit, True if debit is None else debit)
+    body, side, name = named
+    return {"body": body, "side": side, "legs": len(opts), "name": name,
+            "bracket": True, "shares": False}
+
+
+def _side_text(side, q):
+    return f"BUY +{q}" if side > 0 else f"SELL -{q}"
+
+
 def order(signal, cfg=None):
-    """``{"text", "summary"}`` for the selected trade, or None when it is not a
-    vertical with a usable price. ``text`` is the three lines to paste;
-    ``summary`` is one sentence for the button's tooltip."""
-    v = vertical(signal)
+    """``{"text", "summary"}`` for the selected trade, or None when it cannot be
+    written as a ThinkorSwim order or has no usable price. ``text`` is the
+    lines to paste; ``summary`` is one sentence for the button's tooltip."""
+    st = structure(signal)
     price = entry_price(signal)
-    if v is None or price is None:
+    if st is None or price is None:
         return None
     cfg = cfg or settings()
     q = cfg["quantity"]
-    if v["debit"]:
-        open_side, close_side = f"BUY +{q}", f"SELL -{q}"
-        first, second = v["long"], v["short"]
-        target, stop = cfg["debit"]["target_pct"], cfg["debit"]["stop_pct"]
-        tgt_sign, stp_sign, word = "+", "-", "debit"
-    else:
-        open_side, close_side = f"SELL -{q}", f"BUY +{q}"
-        first, second = v["short"], v["long"]
-        target, stop = cfg["credit"]["target_pct"], cfg["credit"]["stop_pct"]
-        tgt_sign, stp_sign, word = "-", "+", "credit"
-    tag = "" if is_monthly(v["expiry"]) else f" {_WEEKLYS}"
-    leg = (f"VERTICAL {v['symbol']} {_MULTIPLIER}{tag} {expiry_text(v['expiry'])} "
-           f"{strike_text(first)}/{strike_text(second)} {v['right']}")
+    if st["shares"]:
+        q *= _SHARES_PER_CONTRACT
+    opening = "/".join(["TO OPEN"] * st["legs"])
+    closing = "/".join(["TO CLOSE"] * st["legs"])
+    first = f"{_side_text(st['side'], q)} {st['body']} @{price:.2f} LMT [{opening}]"
+    paste = "Paste it with Order Entry Tools > Paste order from clipboard."
+    if not st["bracket"]:
+        return {"text": first,
+                "summary": f"Copies the ThinkorSwim opening order for this "
+                           f"{st['name']} at {price:.2f}, with no exits: a "
+                           f"percentage of a price that is mostly shares is no "
+                           f"target or stop. {paste}"}
+    debit = st["side"] > 0
+    pcts = cfg["debit"] if debit else cfg["credit"]
+    tgt_sign, stp_sign = ("+", "-") if debit else ("-", "+")
+    close = _side_text(-st["side"], q)
     text = "\n".join([
-        f"{open_side} {leg} @{price:.2f} LMT [TO OPEN/TO OPEN]",
-        f"{close_side} {leg} @TRG{tgt_sign}{target:.2f}% LMT {_LINK} [TO CLOSE/TO CLOSE]",
-        f"{close_side} {leg} STP TRG{stp_sign}{stop:.2f}% MARK {_LINK} [TO CLOSE/TO CLOSE]",
+        first,
+        f"{close} {st['body']} @TRG{tgt_sign}{pcts['target_pct']:.2f}% LMT {_LINK} [{closing}]",
+        f"{close} {st['body']} STP TRG{stp_sign}{pcts['stop_pct']:.2f}% MARK {_LINK} [{closing}]",
     ])
-    summary = (f"Copies a ThinkorSwim bracket: open for a {price:.2f} {word}, "
-               f"take profit at {tgt_sign}{target:.2f}%, stop at {stp_sign}{stop:.2f}%. "
-               "Paste it with Order Entry Tools > Paste order from clipboard.")
+    word = "debit" if debit else "credit"
+    summary = (f"Copies a ThinkorSwim bracket for this {st['name']}: open for a "
+               f"{price:.2f} {word}, take profit at {tgt_sign}{pcts['target_pct']:.2f}%, "
+               f"stop at {stp_sign}{pcts['stop_pct']:.2f}%. {paste}")
     return {"text": text, "summary": summary}

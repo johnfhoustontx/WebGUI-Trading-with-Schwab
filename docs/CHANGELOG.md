@@ -4,7 +4,21 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-28 (**Trade detail: Copy ThinkorSwim order.**)
+**Last updated:** 2026-10-28 (**Copy ThinkorSwim order: every structure.**)
+
+- The user found no button on an INTC calendar and asked for it on every strategy.
+  `tos_order` now reads the position as signed legs and names it from that
+  geometry: single, VERTICAL, STRADDLE, STRANGLE, CALENDAR, DIAGONAL, BUTTERFLY,
+  CONDOR, IRON CONDOR (an iron fly is an IRON CONDOR with equal inners - the order
+  text of a real ThinkorSwim fill shows it), COVERED (opening order only), and
+  CUSTOM for any other all-option mix. One rule orders every named spread: `+1`
+  is long the first-listed leg of each pair. A protective put and a collar still
+  get no button: no order text carries shares beside a long put.
+- The user pasted one example of each of fifteen structures into ThinkorSwim and
+  all fifteen loaded; those opening lines are now the test's expected strings.
+  The user also confirmed the credit exits stay at -50% / +100%.
+
+**Prior —** 2026-10-28 (**Trade detail: Copy ThinkorSwim order.**)
 
 - At the user's request the Trade detail panel's contract card gains **Copy
   ThinkorSwim order** for a vertical: a "1st triggers OCO" bracket in ThinkorSwim's

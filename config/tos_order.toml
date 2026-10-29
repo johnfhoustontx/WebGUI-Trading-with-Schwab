@@ -1,24 +1,24 @@
 # The Trade detail panel's "Copy ThinkorSwim order" button
 # (webgui/pages/options/tos_order.py).
 #
-# The button copies a "1st triggers OCO" bracket for the selected vertical:
-# the opening limit order, then a profit-target limit and a stop, each a
+# The button copies a "1st triggers OCO" bracket for the selected trade: the
+# opening limit order, then a profit-target limit and a stop, each a
 # percentage of the entry price that ThinkorSwim computes when the opening
 # order fills. Paste it in ThinkorSwim with Trade > Order Entry Tools >
-# "Paste order from clipboard".
+# "Paste order from clipboard". A covered call copies the opening order only.
 #
 # Read on every click; nothing needs a restart.
 
-quantity = 1                   # spreads per order; change it in ThinkorSwim for a different size
+quantity = 1                   # spreads per order (100 shares each for a covered call); change it in ThinkorSwim for a different size
 
 [debit]
-# A debit vertical (bought): the target is a rise in the spread's price, the
-# stop a fall. 100 / 50 = sell at double the debit, stop out at half of it.
+# Any trade opened for a debit (bought): the target is a rise in its price,
+# the stop a fall. 100 / 50 = sell at double the debit, stop out at half of it.
 target_pct = 100.0             # take profit at this % ABOVE the debit paid
 stop_pct = 50.0                # stop at this % BELOW the debit paid (under 100)
 
 [credit]
-# A credit vertical (sold): the target is a fall in the spread's price, the
-# stop a rise. 50 / 100 = buy back at half the credit, stop when it doubles.
+# Any trade opened for a credit (sold): the target is a fall in its price,
+# the stop a rise. 50 / 100 = buy back at half the credit, stop when it doubles.
 target_pct = 50.0              # take profit at this % BELOW the credit received (under 100)
 stop_pct = 100.0               # stop at this % ABOVE the credit received
