@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-28</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-29</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -2970,6 +2970,14 @@ present, the same shape as the Put/Call blend below:</p>
 <pre><code>score      = Σ(w · s  for present subs) / Σ(w for present subs)   # clamp 1..10
 confidence = Σ(w · c  over ALL THREE subs)                        # NOT renormalized
 </code></pre>
+<p><strong>A print from another time is absent too.</strong> <code>live_composite._paired_with</code> leaves
+<code>$VIX1D</code> or <code>$VIX9D</code> out when its last trade (<code>trade_time</code>, epoch ms, carried by
+the proxy client's flattened quote) is more than <code>config/sentiment.toml</code>
+<code>[vix] max_skew_min</code> (30) minutes before <code>$VIX</code>'s. Outside regular hours <code>$VIX</code>
+keeps trading and the other two stop at 15:15 CT, so the ratio paired two days:
+on 2026-10-29 at 05:50 CT, yesterday's VIX1D 13.15 over that morning's VIX 17.03
+scored 10, "calm". With both out the complex rests on the term score alone, at
+confidence 0.50. A quote with no trade time on either side is not refused.</p>
 <p>The confidence is deliberately left un-normalized: with <code>$VIX1D</code> missing it reads
 0.67, which is how the top-level composite down-weights a thinner reading. Before
 2026-08-20 the <em>score</em> was not renormalized either, so a missing sub contributed a
@@ -3001,6 +3009,13 @@ skew categorical.</p>
 </code></pre>
 <p><strong>Blend:</strong> when both are present, <code>score = 0.7 · ad_score + 0.3 · dma_score</code>; a new
 highs/lows ratio nudges ±1. Confidence ≈ <code>sqrt(fields_present / 4)</code>.</p>
+<p><strong>Counters that are not running are no reading.</strong> In the live composite
+(<code>live_composite._live_counts</code>), fewer than <code>config/sentiment.toml</code>
+<code>[breadth] min_issues</code> (500) issues between <code>$ADVN</code> and <code>$DECN</code> means the counters
+have not started, and both read absent. Before the open Schwab sends 4 and 0;
+<code>_breadth_ratio</code> correctly maps "no decliners" to infinity, so that pair scored
+10, the strongest breadth possible, at confidence 0.5. A live session counts about
+3,000 issues.</p>
 <h2 id="rotation">Rotation</h2>
 <p><strong>File:</strong> <code>scoring/rotation.py</code></p>
 <p>Two paths exist:</p>
@@ -3133,7 +3148,10 @@ and lowest components.</p>
 <h2 id="intraday-market-trend-directional-0100">Intraday Market Trend (directional 0–100)</h2>
 <p><strong>File:</strong> <code>scoring/intraday_trend.py</code></p>
 <p>A directional 0–100 trend score (50 = neutral, 100 = max bull) recomputed every
-15 minutes, blended from four sub-scores by <code>TREND_WEIGHTS</code>:</p>
+15 minutes, blended from four sub-scores by <code>TREND_WEIGHTS</code>. Its bars are
+regular-hours only, so outside 08:30–15:00 CT "today's session" is the last one,
+and the Market Trend cards say so where the scale usually sits ("AT WED CLOSE",
+from the calendar, since the payload carries no time of its own):</p>
 <pre><code>TREND_WEIGHTS = {price: 0.45, breadth: 0.25, sector: 0.20, vix: 0.10}
 </code></pre>
 <p>Each sub-score returns <code>TrendSub(score, confidence)</code>; <code>blend_trend</code> combines them
@@ -3187,7 +3205,9 @@ otherwise                                               -&gt; range
 flipping. Confidence: 0.0 below 50 bars, 0.5 from 50–200, 1.0 at ≥200 bars.</p>
 <h2 id="blended-market-regime-the-market-regime-console">Blended market regime (the Market Regime Console)</h2>
 <p><strong>File:</strong> <code>sentiment-dashboard/scoring/market_regime.py</code>. Published to
-<code>cache:sentiment:regime</code> + <code>:regime_history</code> every <strong>5 min</strong> in market hours.</p>
+<code>cache:sentiment:regime</code> + <code>:regime_history</code> every <strong>5 min</strong> in market hours.
+Outside them the last read persists, and the console's dial and the Desk's regime
+tile print its <code>as_of</code> (<code>console_page.close_note</code>: "AS OF WED 14:56 CT").</p>
 <p>This is a <strong>different</strong> classifier from the daily state machine above. It is a
 five-member simplex — every regime holds a <em>share</em> of the current tape, and the
 "label" is simply the largest share.</p>

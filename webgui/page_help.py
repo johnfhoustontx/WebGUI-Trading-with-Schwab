@@ -1539,8 +1539,13 @@ pulls it *down*.
   Trending says **mixed** beside it: the tape is trending, but the two reads
   don't agree on which way. Balanced, Whipsaw and Stressed have no direction by
   nature. Recomputes every
-  5 minutes during market hours; outside them it holds the last read. Says
+  5 minutes during market hours; outside them it holds the last read and says
+  when it was taken (**AS OF WED 14:56 CT**). Says
   "Unclear" when the evidence is genuinely weak rather than guessing.
+- **Before the open and overnight** — the Market Trend card reads the last
+  session too (**AT WED CLOSE** in its corner). The score keeps updating on
+  fewer inputs: breadth, put/call, VIX1D and VIX9D have no live reading then, so
+  they are left out rather than scored.
 - **Daily Sentiment & Trend** — the two color-coded intraday graphs (last 5 days).
 - **Sector & Industry**, **Sector Rotation** and **RRG** now have their own tabs
   along the top.

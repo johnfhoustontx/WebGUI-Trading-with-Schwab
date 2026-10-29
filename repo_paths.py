@@ -63,6 +63,11 @@ LOGIN_PUSH_TOML = REPO_ROOT / "config" / "login_push.toml"
 # restart sentiment_svc.
 MOMENTUM_TOML = REPO_ROOT / "config" / "momentum.toml"
 
+# The live sentiment composite's input checks: when an advance / decline count
+# or a VIX1D / VIX9D print is too thin or too old to score. Read by
+# sentiment-dashboard/composite_config.py on every composite refresh (no restart).
+SENTIMENT_TOML = REPO_ROOT / "config" / "sentiment.toml"
+
 # Trade-management stop/target rules (take-profit fraction, stop multiple, delta
 # drift + hard ceiling, cut-DTE, the trail ladders). Read by shared/trade_mgmt.py,
 # which BOTH options-scanner/signal_recommender.py (the auto-manage cycle) and

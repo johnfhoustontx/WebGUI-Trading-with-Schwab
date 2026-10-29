@@ -61,6 +61,41 @@ def session_label(now=None):
     return "US EQUITIES · CLOSED"
 
 
+def close_note(now=None, as_of=None):
+    """When a regular-hours-only reading was taken, or "" during regular hours.
+
+    The regime is recomputed on a regular-hours slot and persists overnight, and
+    the trend reads regular-hours bars only, so before the open both describe
+    the LAST session. On 2026-10-29 at 05:50 CT the console printed the
+    previous afternoon's "Firming" over a falling premarket, unlabelled.
+
+    With ``as_of`` (the regime's own stamp) the time is stated exactly:
+    "AS OF WED 14:56 CT". Without one (the trend carries none) the calendar
+    names the session the bars came from: "AT WED CLOSE". An unreadable
+    ``as_of`` falls back to the calendar. Never raises.
+    """
+    try:
+        from shared import market_calendar as cal
+        now = now or dt.datetime.now(CT)
+        if cal.is_regular_hours(now):
+            return ""
+        if isinstance(as_of, str) and as_of:
+            try:
+                at = dt.datetime.fromisoformat(as_of)
+            except ValueError:
+                at = None
+            if at is not None and at.tzinfo is not None:
+                return f"AS OF {at.astimezone(CT):%a %H:%M} CT".upper()
+        today = now.astimezone(CT).date()
+        if cal.is_trading_day(today) and now >= cal.regular_close_on(today):
+            day = today
+        else:
+            day = cal.prev_trading_day(today)
+        return f"AT {day:%a} CLOSE".upper()
+    except Exception:  # noqa: BLE001 — a label must never break the page.
+        return ""
+
+
 def footer_summary(points):
     """The one-line reading under the console — leader, margin, and any band
     sitting dormant."""
@@ -104,7 +139,7 @@ def apply(container, ctx):
             CARDS.render_trend_card(
                 ctx.get("trend_arcs"), ctx.get("trend_short"),
                 ctx.get("trend_verdict"), ctx.get("trend_guidance"),
-                ctx.get("trend_picture"))
+                ctx.get("trend_picture"), close=ctx.get("trend_close"))
             CARDS.render_signals_card(
                 ctx.get("signal_rows"), ctx.get("velocity_values"),
                 ctx.get("divergence_detail"))
@@ -113,7 +148,8 @@ def apply(container, ctx):
                 "grid grid-cols-[minmax(340px,396px)_1fr] gap-[22px] w-full "
                 "items-start"):
             with ui.column().classes("gap-[22px] w-full"):
-                REG.render_dial_card(ctx.get("regime"), points)
+                REG.render_dial_card(ctx.get("regime"), points,
+                                     close=ctx.get("regime_close"))
                 REG.render_tags_card(_evidence(ctx.get("regime")))
             with ui.column().classes("gap-[22px] w-full"):
                 REG.render_share_table(points)

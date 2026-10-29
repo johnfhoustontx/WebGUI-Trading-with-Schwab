@@ -1,0 +1,25 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# config/sentiment.toml — when the live sentiment composite refuses an input
+#
+#   Read by sentiment-dashboard/composite_config.py on every composite refresh,
+#   so an edit here (or in Settings -> Configuration) applies within two minutes
+#   with no restart. Anything you delete falls back to the built-in default, as
+#   does a value that is not a whole number of at least 1.
+#
+#   Both checks exist because of one morning (2026-10-29, 05:50 CT): before the
+#   open these inputs looked live and were not, and they lifted a risk-off tape
+#   to a near-Bullish 6.73.
+# ─────────────────────────────────────────────────────────────────────────────
+
+[breadth]
+# Fewer NYSE issues than this counted as advancing plus declining means the
+# counters are not running yet, and breadth is left out of the composite.
+# Before the open Schwab reads $ADVN 4 and $DECN 0, which scored as the most
+# bullish breadth possible. A live session counts about 3,000 issues.
+min_issues = 500
+
+[vix]
+# A $VIX1D or $VIX9D print more than this many minutes older than $VIX's is
+# left out of the VIX complex. Outside regular hours $VIX keeps printing while
+# the other two stop at 15:15 CT, so their ratios paired two different days.
+max_skew_min = 30

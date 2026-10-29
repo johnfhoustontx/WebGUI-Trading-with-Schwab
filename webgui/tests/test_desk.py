@@ -1853,7 +1853,11 @@ def test_render_never_puts_a_buy_or_sell_word_on_the_flow_feed(monkeypatch):
 
 def test_render_mounts_both_score_cards_with_the_consoles_own_anatomy(monkeypatch):
     """Head, hero and the three meters — the console card minus its footer. The
-    two SCALE 0—100 metas are what prove there are two cards, not one."""
+    two SCALE 0—100 metas are what prove there are two cards, not one. The
+    clock is held in regular hours: off-hours the trend card wears its close
+    note there instead (the twin below)."""
+    from pages import console_page
+    monkeypatch.setattr(console_page, "close_note", lambda now=None, as_of=None: "")
     payloads = _full_payloads()
     payloads["sentiment:composite"] = {
         "live": {"composite": {"bias": "Cautious", "total_score": 4.45}},
@@ -4288,3 +4292,46 @@ def test_the_strip_points_to_the_news_page_only_where_it_exists(monkeypatch):
         assert d.NEWS_MORE not in _rendered_texts()
     finally:
         shell.unpublish()
+
+
+# ── off-hours, the regime tile says when the regime was read (2026-10-29) ────
+
+def test_the_regime_foot_is_the_confidence_in_regular_hours():
+    assert d.regime_foot(0.7676, "") == "confidence 76.76%"
+
+
+def test_the_regime_foot_is_the_time_it_was_read_off_hours():
+    assert d.regime_foot(0.7676, "AS OF WED 14:56 CT") == "as of Wed 14:56 CT"
+
+
+def test_a_withheld_confidence_still_prints_nothing_in_regular_hours():
+    assert d.regime_foot(None, "") == ""
+    assert d.regime_foot(None, "AS OF WED 14:56 CT") == "as of Wed 14:56 CT"
+
+
+def test_the_desk_trend_card_takes_the_console_meta():
+    import inspect
+    src = inspect.getsource(d._compact_card)
+    assert "SCALE 0—100" not in src
+
+
+def test_off_hours_the_desk_trend_card_and_regime_tile_say_when(monkeypatch):
+    """The twin of the anatomy test: outside regular hours the trend card's
+    scale is replaced by its close note and the regime tile names its time."""
+    from pages import console_page
+    monkeypatch.setattr(console_page, "close_note",
+                        lambda now=None, as_of=None:
+                        "AS OF WED 14:56 CT" if as_of else "AT WED CLOSE")
+    payloads = _full_payloads()
+    payloads["sentiment:composite"] = {
+        "live": {"composite": {"bias": "Cautious", "total_score": 4.45}},
+        "derived": {"trend": {"state": "lack_of_bearishness", "score": 39.0,
+                              "confidence": 0.8}},
+    }
+    payloads["sentiment:regime"] = dict(payloads.get("sentiment:regime") or {},
+                                        as_of="2026-10-28T19:56:32+00:00")
+    _seed_bus(monkeypatch, payloads)
+    texts = [t for t in _rendered_texts() if t]
+    assert texts.count("SCALE 0—100") == 1          # the sentiment card's
+    assert texts.count("AT WED CLOSE") == 1         # the trend card's
+    assert "as of Wed 14:56 CT" in texts            # the regime tile's foot

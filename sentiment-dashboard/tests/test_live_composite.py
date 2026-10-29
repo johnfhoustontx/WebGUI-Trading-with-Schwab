@@ -355,3 +355,87 @@ def test_the_live_composite_carries_an_absent_sector_score_at_no_confidence():
     import live_composite
     src = inspect.getsource(live_composite.compute_live)
     assert "sec_score is None" in src or "sec_score is not None" in src
+
+
+# ── Before the open: two inputs that read as live and are not (2026-10-29) ────
+# Measured on prod at 05:50 CT: $ADVN 4 / $DECN 0 made breadth an infinite A/D
+# ratio, score 10. $VIX1D and $VIX9D last printed at 15:15 CT the day before
+# while $VIX traded on, so the VIX1D/VIX ratio paired two different days and
+# scored 10 "calm". Together they lifted a risk-off morning to 6.73.
+
+_T_NOW = 1761734400000            # $VIX's print, epoch ms
+_T_YESTERDAY = _T_NOW - 14 * 3600 * 1000 - 35 * 60 * 1000
+
+
+class _PreOpenClient(_FakeClient):
+    """Quotes shaped like the flattened proxy mapping, per symbol."""
+
+    def __init__(self, advn=4.0, decn=0.0, v1d_time=_T_YESTERDAY,
+                 v9d_time=_T_YESTERDAY):
+        self.q = {
+            "$VIX": {"last": 17.03, "trade_time": _T_NOW},
+            "$VIX1D": {"last": 13.15, "trade_time": v1d_time},
+            "$VIX9D": {"last": 15.6, "trade_time": v9d_time},
+            "$ADVN": {"last": advn, "trade_time": _T_NOW},
+            "$DECN": {"last": decn, "trade_time": _T_NOW},
+        }
+
+    def get_quote(self, s):
+        return self.q.get(s, {"last": 1.5})
+
+    def get_quotes(self, syms):
+        # An index this test does not name is absent, as $NYHGH was on prod.
+        return {s: self.q.get(s, {"last": 17.0, "change_pct": 0.5})
+                for s in syms if s in self.q or not s.startswith("$")}
+
+
+def _live(client):
+    L.reset_pcr_cache()
+    return L.compute_live(client, _SD)
+
+
+def test_pre_open_advance_decline_counters_are_no_breadth_reading():
+    snap = _live(_PreOpenClient(advn=4.0, decn=0.0))
+    assert snap["component_confidence"]["breadth"] == 0.0
+    assert snap["component_scores"]["breadth"] == 0.0
+
+
+def test_a_live_advance_decline_count_is_still_scored():
+    snap = _live(_PreOpenClient(advn=1800.0, decn=1100.0))
+    assert snap["component_confidence"]["breadth"] > 0.0
+    assert snap["component_scores"]["breadth"] == 7.0      # ratio 1.64
+
+
+def test_the_breadth_floor_is_read_from_config(monkeypatch):
+    import composite_config
+    monkeypatch.setattr(composite_config, "min_breadth_issues", lambda: 5000)
+    snap = _live(_PreOpenClient(advn=1800.0, decn=1100.0))
+    assert snap["component_confidence"]["breadth"] == 0.0
+
+
+def test_a_vix1d_and_vix9d_from_yesterday_leave_the_vix_complex():
+    snap = _live(_PreOpenClient())
+    # Term alone is left: its confidence weight is 0.50 of the complex.
+    assert snap["component_confidence"]["vix_complex"] == 0.5
+    assert snap["volatility"]["interpretation"].endswith("-1D0-S0")
+    assert snap["_vix1d"] == 0.0
+
+
+def test_a_vix1d_and_vix9d_printed_with_vix_are_still_used():
+    snap = _live(_PreOpenClient(v1d_time=_T_NOW - 60_000, v9d_time=_T_NOW))
+    assert snap["component_confidence"]["vix_complex"] == 1.0
+    assert "-1D0" not in snap["volatility"]["interpretation"]
+
+
+def test_a_quote_with_no_trade_time_is_not_refused():
+    """Absence skips the gate: a client that sends no time keeps the reading."""
+    snap = _live(_PreOpenClient(v1d_time=None, v9d_time=None))
+    assert snap["component_confidence"]["vix_complex"] == 1.0
+
+
+def test_the_vix_age_limit_is_read_from_config(monkeypatch):
+    import composite_config
+    monkeypatch.setattr(composite_config, "vix_max_skew_min", lambda: 24 * 60)
+    snap = _live(_PreOpenClient())
+    assert snap["component_confidence"]["vix_complex"] == 1.0
+

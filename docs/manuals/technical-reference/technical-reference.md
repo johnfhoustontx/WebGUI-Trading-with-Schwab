@@ -670,6 +670,15 @@ score      = Σ(w · s  for present subs) / Σ(w for present subs)   # clamp 1..
 confidence = Σ(w · c  over ALL THREE subs)                        # NOT renormalized
 ```
 
+**A print from another time is absent too.** `live_composite._paired_with` leaves
+`$VIX1D` or `$VIX9D` out when its last trade (`trade_time`, epoch ms, carried by
+the proxy client's flattened quote) is more than `config/sentiment.toml`
+`[vix] max_skew_min` (30) minutes before `$VIX`'s. Outside regular hours `$VIX`
+keeps trading and the other two stop at 15:15 CT, so the ratio paired two days:
+on 2026-10-29 at 05:50 CT, yesterday's VIX1D 13.15 over that morning's VIX 17.03
+scored 10, "calm". With both out the complex rests on the term score alone, at
+confidence 0.50. A quote with no trade time on either side is not refused.
+
 The confidence is deliberately left un-normalized: with `$VIX1D` missing it reads
 0.67, which is how the top-level composite down-weights a thinner reading. Before
 2026-08-20 the *score* was not renormalized either, so a missing sub contributed a
@@ -718,6 +727,14 @@ Blends an advance/decline reading with the percent of stocks above their 50-day 
 
 **Blend:** when both are present, `score = 0.7 · ad_score + 0.3 · dma_score`; a new
 highs/lows ratio nudges ±1. Confidence ≈ `sqrt(fields_present / 4)`.
+
+**Counters that are not running are no reading.** In the live composite
+(`live_composite._live_counts`), fewer than `config/sentiment.toml`
+`[breadth] min_issues` (500) issues between `$ADVN` and `$DECN` means the counters
+have not started, and both read absent. Before the open Schwab sends 4 and 0;
+`_breadth_ratio` correctly maps "no decliners" to infinity, so that pair scored
+10, the strongest breadth possible, at confidence 0.5. A live session counts about
+3,000 issues.
 
 ## Rotation
 
@@ -897,7 +914,10 @@ and lowest components.
 **File:** `scoring/intraday_trend.py`
 
 A directional 0–100 trend score (50 = neutral, 100 = max bull) recomputed every
-15 minutes, blended from four sub-scores by `TREND_WEIGHTS`:
+15 minutes, blended from four sub-scores by `TREND_WEIGHTS`. Its bars are
+regular-hours only, so outside 08:30–15:00 CT "today's session" is the last one,
+and the Market Trend cards say so where the scale usually sits ("AT WED CLOSE",
+from the calendar, since the payload carries no time of its own):
 
 ```
 TREND_WEIGHTS = {price: 0.45, breadth: 0.25, sector: 0.20, vix: 0.10}
@@ -973,6 +993,8 @@ flipping. Confidence: 0.0 below 50 bars, 0.5 from 50–200, 1.0 at ≥200 bars.
 
 **File:** `sentiment-dashboard/scoring/market_regime.py`. Published to
 `cache:sentiment:regime` + `:regime_history` every **5 min** in market hours.
+Outside them the last read persists, and the console's dial and the Desk's regime
+tile print its `as_of` (`console_page.close_note`: "AS OF WED 14:56 CT").
 
 This is a **different** classifier from the daily state machine above. It is a
 five-member simplex — every regime holds a *share* of the current tape, and the

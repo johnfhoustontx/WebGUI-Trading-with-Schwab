@@ -1387,6 +1387,16 @@ updates on its own about every two minutes whether or not the page is open; pres
 - **Components** and **Trend Detail** — press and hold either for a full breakdown.
 - **Daily Sentiment & Trend** — two intraday graphs over the last five trading days.
 
+> **Before the open and overnight, read the console as partly yesterday's.** The
+> Market Trend card and the Regime dial are built from regular-hours data, so
+> outside 08:30–15:00 CT they describe the last session, and each says so in its
+> corner (for example **AT WED CLOSE**, or **AS OF WED 14:56 CT** on the regime).
+> The sentiment score keeps updating, but on fewer inputs: breadth and put/call
+> have no live reading before the open, and VIX1D / VIX9D stop at 15:15 CT, so
+> they are left out rather than scored. Until the open it rests mostly on the
+> sector moves (thin extended-hours trading), rotation and VIX against its
+> 10-day average.
+
 > **An arc drawn as a plain track with an em-dash means "no usable reading", not
 > zero.** Likewise a regime of **Unclear** means the evidence is genuinely weak.
 > The app prefers to say nothing over stating a confident wrong number.

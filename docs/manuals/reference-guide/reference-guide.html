@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-28</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-29</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -2256,7 +2256,7 @@ convention: 50 is neutral, 100 is strongly bullish.</p>
 </tr>
 <tr>
 <td>Regime refresh</td>
-<td><strong>Every 5 minutes</strong> during market hours; holds the last read outside them</td>
+<td><strong>Every 5 minutes</strong> during market hours; holds the last read outside them, and the dial says when it was read</td>
 </tr>
 <tr>
 <td>Intraday graphs</td>
@@ -2264,6 +2264,14 @@ convention: 50 is neutral, 100 is strongly bullish.</p>
 </tr>
 </tbody>
 </table>
+<p><strong>Outside regular hours.</strong> The Market Trend card and the Regime dial describe the
+last session and say so in their corner (<strong>AT WED CLOSE</strong>, <strong>AS OF WED 14:56 CT</strong>).
+The sentiment score leaves out what has no live reading yet: breadth (Schwab's
+advancing / declining counters read 4 and 0 before the open), put/call (no option
+volume), and VIX1D / VIX9D once their last price is more than 30 minutes older than
+VIX's (they stop at 15:15 CT while VIX trades on). Both limits are in
+<code>config/sentiment.toml</code>. Before 2026-10-29 those inputs were scored, and they
+could lift a falling premarket into the Bullish band.</p>
 <h3 id="reading-the-screen_5">Reading the screen</h3>
 <p><strong>The two rings.</strong> Each ring carries three arcs on one dial:</p>
 <table>

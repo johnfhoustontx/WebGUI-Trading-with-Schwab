@@ -1838,6 +1838,35 @@ _MOMENTUM = ConfigFile(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Sentiment composite input checks — config/sentiment.toml
+# ─────────────────────────────────────────────────────────────────────────────
+_SENTIMENT = ConfigFile(
+    name="sentiment.toml", title="Sentiment inputs", icon="speed",
+    summary="When the live sentiment score leaves out an input that is not "
+            "live yet. Changes apply at the next refresh.",
+    restart=(),
+    sections=(
+        Section("Breadth", "The advancing and declining NYSE issue counts.", (
+            Field("breadth.min_issues", "Fewest issues counted",
+                  "Below this many issues counted as advancing plus declining, "
+                  "the counters are not running yet and breadth is left out. "
+                  "Before the open Schwab reads 4 and 0, which scored as the "
+                  "strongest breadth possible. A live session counts about "
+                  "3,000.",
+                  kind="int", min=1, max=3000, step=50),
+        )),
+        Section("Volatility", "VIX1D and VIX9D are read against VIX.", (
+            Field("vix.max_skew_min", "Oldest VIX1D or VIX9D beside VIX",
+                  "A VIX1D or VIX9D price this many minutes older than VIX's is "
+                  "left out. Outside regular hours VIX keeps trading while the "
+                  "other two stop at 15:15 CT, so the pair compared two "
+                  "different days.",
+                  kind="int", unit="min", min=1, max=1440, step=5),
+        )),
+    ),
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Market news — config/news.toml
 # ─────────────────────────────────────────────────────────────────────────────
 def _pts(key, label, help=""):
@@ -2800,7 +2829,7 @@ _TOS_ORDER = ConfigFile(
     ),
 )
 
-FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _LOGIN_PUSH, _TOS_ORDER, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _SECTORS, _MOMENTUM,
+FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _LOGIN_PUSH, _TOS_ORDER, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _SECTORS, _MOMENTUM, _SENTIMENT,
          _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
          _MARKET_READ, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)

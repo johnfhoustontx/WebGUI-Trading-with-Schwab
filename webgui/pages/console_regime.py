@@ -11,7 +11,7 @@ LEAD / TIGHTEST TODAY pair). This module is the console's presentation of it.
 from pages import console as K
 from pages import console_dial
 from pages import regime_mix as RM
-from pages.console_cards import pill_tooltip
+from pages.console_cards import CLOSE_META, pill_tooltip
 from pages.options import theme
 
 _C = theme.CONSOLE_COLORS
@@ -128,8 +128,10 @@ def change_text(row):
 
 
 # --- 5.3 dial card ----------------------------------------------------------
-def render_dial_card(regime, points):
-    """REGIME IDENTIFIED — the dial plus the LEAD / TIGHTEST stat pair."""
+def render_dial_card(regime, points, close=""):
+    """REGIME IDENTIFIED — the dial plus the LEAD / TIGHTEST stat pair.
+    ``close`` is ``console_page.close_note`` for the regime's ``as_of``: the
+    regime is recomputed in regular hours only and persists overnight."""
     from nicegui import ui
     r = regime if isinstance(regime, dict) else {}
     rows = RM.rank_rows(points)
@@ -138,8 +140,11 @@ def render_dial_card(regime, points):
     mark, mark_fill = regime_mark(name)
     runner = rows[1]["label"] if len(rows) > 1 else "—"
     with ui.column().classes(f"{_CARD} gap-4"):
-        ui.label("REGIME IDENTIFIED").classes(
-            f"text-[10px] tracking-[.26em] {K.DIM}")
+        with ui.row().classes("items-baseline justify-between w-full"):
+            ui.label("REGIME IDENTIFIED").classes(
+                f"text-[10px] tracking-[.26em] {K.DIM}")
+            if close:
+                ui.label(close).classes(CLOSE_META)
         dial = ui.html(console_dial.dial_svg(
             None if r.get("unclear") else r.get("confidence"), name,
             uid="regime", mark=mark, mark_fill=mark_fill)).classes(

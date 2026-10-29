@@ -4,7 +4,32 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-28 (**Copy ThinkorSwim order: every structure.**)
+**Last updated:** 2026-10-29 (**Sentiment off-hours: two fake inputs out, two stale cards labelled.**)
+
+- The user reported that before the open and overnight the Bias, Signal and
+  Market Regime painted a different picture from the market. Measured on prod at
+  05:50 CT: QQQ -0.93%, XLK -1.0%, XLC -1.5%, defensives bid (XLP +1.5%, XLV
+  +2.0%), and the console read 6.73 Neutral (one step under Bullish), "REGIME
+  BREAK +1.60σ" upward, and Regime "Firming ▲".
+- **Breadth was fabricated.** Pre-open, Schwab reads `$ADVN` 4 and `$DECN` 0;
+  "no decliners" maps to an infinite ratio, score 10, at confidence 0.5. Fewer
+  than `config/sentiment.toml [breadth] min_issues` (500) issues is now no
+  reading (`live_composite._live_counts`).
+- **VIX1D and VIX9D paired two days.** They stop at 15:15 CT while `$VIX` trades
+  overnight, so yesterday's VIX1D over today's VIX scored 10 "calm". The proxy
+  client's flattened quote now carries `trade_time`, and a VIX1D / VIX9D print
+  more than `[vix] max_skew_min` (30) minutes before VIX's is left out
+  (`live_composite._paired_with`). The VIX complex then rests on term alone.
+- Recomputed by hand, those two inputs alone moved 5.85 to 6.73 and made the
+  upward "regime break", which was an artefact of the data feed.
+- **The Regime and Today trend were yesterday's, with no label.** Both are
+  regular-hours reads by design. `console_page.close_note` now puts "AS OF WED
+  14:56 CT" on the Regime dial and Desk regime tile, and "AT WED CLOSE" on both
+  Market Trend cards where the scale sits, outside 08:30-15:00 CT.
+- New file `config/sentiment.toml` (Settings → Configuration → Sentiment inputs,
+  read per refresh, no restart). Manuals and the `/sentiment` hover guide updated.
+
+**Prior —** 2026-10-28 (**Copy ThinkorSwim order: every structure.**)
 
 - The user found no button on an INTC calendar and asked for it on every strategy.
   `tos_order` now reads the position as signed legs and names it from that

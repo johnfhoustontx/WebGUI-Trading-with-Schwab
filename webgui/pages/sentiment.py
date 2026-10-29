@@ -1001,6 +1001,10 @@ def render():
             "divergence_detail": derived.get("divergence_detail"),
             "regime": state.get("regime") or {},
             "regime_points": state.get("regime_points") or [],
+            # Both are regular-hours reads; off-hours each says when it was taken.
+            "trend_close": console_page.close_note(),
+            "regime_close": console_page.close_note(
+                as_of=(state.get("regime") or {}).get("as_of")),
         })
         rotation_value, sector_value = _comp_context()
         _render_components(latest, rotation_value, sector_value)

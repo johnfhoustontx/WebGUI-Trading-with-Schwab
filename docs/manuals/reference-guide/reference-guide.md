@@ -1461,8 +1461,17 @@ convention: 50 is neutral, 100 is strongly bullish.
 | Cache keys | `cache:sentiment:composite`, `:regime`, `:regime_history`, `:intraday_history`, `:sectors` |
 | Composite refresh | **Every 2 minutes** during market hours (every 15 minutes off-hours) |
 | Trend refresh | **Every 15 minutes** |
-| Regime refresh | **Every 5 minutes** during market hours; holds the last read outside them |
+| Regime refresh | **Every 5 minutes** during market hours; holds the last read outside them, and the dial says when it was read |
 | Intraday graphs | Recorded every 2 minutes, rolling last 5 trading days |
+
+**Outside regular hours.** The Market Trend card and the Regime dial describe the
+last session and say so in their corner (**AT WED CLOSE**, **AS OF WED 14:56 CT**).
+The sentiment score leaves out what has no live reading yet: breadth (Schwab's
+advancing / declining counters read 4 and 0 before the open), put/call (no option
+volume), and VIX1D / VIX9D once their last price is more than 30 minutes older than
+VIX's (they stop at 15:15 CT while VIX trades on). Both limits are in
+`config/sentiment.toml`. Before 2026-10-29 those inputs were scored, and they
+could lift a falling premarket into the Bullish band.
 
 ### Reading the screen
 

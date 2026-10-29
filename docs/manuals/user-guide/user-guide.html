@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-28</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-29</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -1786,6 +1786,15 @@ updates on its own about every two minutes whether or not the page is open; pres
 <li><strong>Daily Sentiment &amp; Trend</strong> — two intraday graphs over the last five trading days.</li>
 </ul>
 <blockquote>
+<p><strong>Before the open and overnight, read the console as partly yesterday's.</strong> The
+Market Trend card and the Regime dial are built from regular-hours data, so
+outside 08:30–15:00 CT they describe the last session, and each says so in its
+corner (for example <strong>AT WED CLOSE</strong>, or <strong>AS OF WED 14:56 CT</strong> on the regime).
+The sentiment score keeps updating, but on fewer inputs: breadth and put/call
+have no live reading before the open, and VIX1D / VIX9D stop at 15:15 CT, so
+they are left out rather than scored. Until the open it rests mostly on the
+sector moves (thin extended-hours trading), rotation and VIX against its
+10-day average.</p>
 <p><strong>An arc drawn as a plain track with an em-dash means "no usable reading", not
 zero.</strong> Likewise a regime of <strong>Unclear</strong> means the evidence is genuinely weak.
 The app prefers to say nothing over stating a confident wrong number.</p>

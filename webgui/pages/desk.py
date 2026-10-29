@@ -66,6 +66,7 @@ from nicegui import run, ui
 from pages import bullbear as _bb
 from pages import console as _K
 from pages import console_cards as _CC
+from pages import console_page as _CP
 from pages import console_regime as _CR
 from pages import regime_mix as _RM
 from pages.regime_mix import regime_picture as _regime_picture
@@ -852,6 +853,22 @@ def regime_display(regime_view):
         "direction_strong": bool(r.get("direction_strong")),
         "unclear": bool(r.get("unclear")),
     }
+
+
+def regime_foot(confidence, close):
+    """The regime tile's foot: the confidence in regular hours, and off-hours
+    WHEN the regime was read (``console_page.close_note``). The regime is
+    recomputed in regular hours only, so overnight its confidence is the
+    afternoon's and the time is the fact worth the line. A withheld confidence
+    prints nothing - never 0%, which is a reading."""
+    if close:
+        # "AS OF WED 14:56 CT" -> "as of Wed 14:56 CT", in the tile's case.
+        return " ".join(w.title() if w in _WEEKDAYS else w if w == "CT"
+                        else w.lower() for w in close.split())
+    return "" if confidence is None else f"confidence {confidence * 100:.2f}%"
+
+
+_WEEKDAYS = frozenset({"MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"})
 
 
 def regime_tone(reg):
@@ -3147,7 +3164,7 @@ def _mount_ruler():
         ui.element("div").classes("w-[24px] shrink-0")
 
 
-def _compact_card(title, arcs, pill_text, delta, pill_tip=""):
+def _compact_card(title, arcs, pill_text, delta, pill_tip="", close=""):
     """One compact score card: head · hero · three meters, in an app card.
 
     The hero and the meters sit SIDE BY SIDE, where the console stacks them.
@@ -3156,14 +3173,16 @@ def _compact_card(title, arcs, pill_text, delta, pill_tip=""):
     as the taller of them. Nothing is dropped to buy it.
 
     ``pill_tip`` is the pill's hover sentence, hung the way the console hangs
-    its own (``console_cards.pill_tooltip``).
+    its own (``console_cards.pill_tooltip``). ``close`` is the console's
+    off-hours note (``console_page.close_note``), worn where the scale sits.
     """
     arcs = list(arcs or [])
     text, hexv = _CC.hero_parts(arcs[0].get("value") if arcs else None)
     with ui.column().classes(f"{_TILE} w-full flex-1 cursor-pointer") as card:
         with ui.row().classes("items-baseline justify-between w-full gap-3"):
             ui.label(title).classes(_CARD_TITLE)
-            ui.label("SCALE 0—100").classes(_CARD_META)
+            ui.label(_CC.card_meta(close)).classes(
+                _CARD_META if not close else _CC.CLOSE_META)
         with ui.row().classes("items-end gap-4 w-full flex-nowrap"):
             with ui.row().classes("items-end gap-2 shrink-0"):
                 ui.label(text).classes(f"{_CARD_HERO} text-[{hexv}]")
@@ -3895,10 +3914,9 @@ def render():
             regime_lbl.clear()
             _CC.pill_tooltip(regime_lbl, reg["tip"])
             regime_tip["text"] = reg["tip"]
-        conf = reg["confidence"]
-        # A withheld confidence prints NOTHING. It must never print 0% — that
-        # is a reading, and "absent" is not one.
-        regime_sub.text = "" if conf is None else f"confidence {conf * 100:.2f}%"
+        regime_sub.text = regime_foot(
+            reg["confidence"],
+            _CP.close_note(as_of=_mapping("sentiment:regime").get("as_of")))
 
         fresh = freshness_facts(_view("options:gex_status"))
         fresh_lbl.text = fresh["label"]
@@ -3950,7 +3968,8 @@ def render():
             _compact_card("MARKET TREND", t_arcs, trend_pill_text(derived),
                           _CC.delta_parts(_arc_value(t_arcs, 0),
                                           _arc_value(t_arcs, 2), "MONTH"),
-                          pill_tip=trend_pill_tooltip(derived))
+                          pill_tip=trend_pill_tooltip(derived),
+                          close=_CP.close_note())
 
     # The seat order the strip last drew, fed back into ``by_day_move`` so its
     # hysteresis has something to hold: the sorter is a pure function of

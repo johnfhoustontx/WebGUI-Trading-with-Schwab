@@ -12,6 +12,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
+import composite_config
 from scoring import WEIGHTS
 from scoring import composite as scoring_composite
 from scoring import vix as _vix
@@ -235,6 +236,37 @@ def _breadth_ratio(advn, decn):
     return advn / decn
 
 
+def _live_counts(advn, decn, min_issues):
+    """``(advn, decn)``, or ``(None, None)`` when the counters are not running.
+
+    Before the open Schwab reads $ADVN 4 and $DECN 0 (measured 2026-10-29,
+    05:50 CT). ``_breadth_ratio`` rightly maps "no decliners" to infinity, so
+    those two numbers scored as the most bullish breadth possible. A live NYSE
+    session counts about 3,000 issues; fewer than ``min_issues`` between the two
+    is no reading.
+    """
+    present = [v for v in (advn, decn) if v is not None]
+    if present and sum(present) < min_issues:
+        return None, None
+    return advn, decn
+
+
+def _paired_with(qd, ref, max_skew_min):
+    """``qd``'s last, or None when it printed too long before ``ref`` did.
+
+    $VIX1D and $VIX9D are ratios against $VIX, and outside regular hours $VIX
+    keeps printing while they stop at 15:15 CT: this morning's VIX over
+    yesterday's VIX1D scored 10, "calm". A quote with no trade time on either
+    side is not refused (absence skips the check).
+    """
+    t = qd.get("trade_time") if isinstance(qd, dict) else None
+    t_ref = ref.get("trade_time") if isinstance(ref, dict) else None
+    if (isinstance(t, (int, float)) and isinstance(t_ref, (int, float))
+            and t_ref - t > max_skew_min * 60_000):
+        return None
+    return _last(qd)
+
+
 def _last(qd):
     if not isinstance(qd, dict):
         return None
@@ -291,8 +323,9 @@ def compute_live(schwab, sector_data, prior_vix1d=0.0, prior_sector_trends=None)
             vix_ma = sum(cl) / len(cl) if cl else 0.0
     except Exception:
         pass
-    v1d = _last(vq.get("$VIX1D")) or 0.0
-    v9d = _last(vq.get("$VIX9D")) or 0.0
+    skew = composite_config.vix_max_skew_min()
+    v1d = _paired_with(vq.get("$VIX1D"), vix_q.get("$VIX"), skew) or 0.0
+    v9d = _paired_with(vq.get("$VIX9D"), vix_q.get("$VIX"), skew) or 0.0
     term = _vix.score_term(vix, vix_ma)
     v1d_r = _vix.score_vix1d(v1d, vix, _safe_float(prior_vix1d))
     slope = _vix.score_term_slope(v9d, vix)
@@ -305,7 +338,8 @@ def compute_live(schwab, sector_data, prior_vix1d=0.0, prior_sector_trends=None)
             if v is not None:
                 return v
         return None
-    advn, decn = _first("advn"), _first("decn")
+    advn, decn = _live_counts(_first("advn"), _first("decn"),
+                              composite_config.min_breadth_issues())
     highs, lows = _first("nyhgh") or 0, _first("nylow") or 0
     pct50 = _first("pct50")
     ratio = _breadth_ratio(advn, decn)

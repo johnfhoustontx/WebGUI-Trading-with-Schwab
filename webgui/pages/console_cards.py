@@ -29,6 +29,9 @@ _C = theme.CONSOLE_COLORS
 CARD_SHELL = f"{K.CARD} overflow-hidden gap-[18px] w-full h-full"
 HEAD_TITLE = f"text-[19px] font-bold tracking-[.16em] {K.TXT}"
 HEAD_META = f"text-[10px] tracking-[.18em] {K.DIM}"
+# The head note that says a reading is the LAST session's: the console's
+# "previous close" colour, so it does not read as boilerplate.
+CLOSE_META = f"text-[10px] tracking-[.18em] text-[{_C['warning']}]"
 HERO_VALUE = "text-[76px] font-semibold leading-[.85] tracking-[-.02em]"
 KICKER = f"text-[10px] tracking-[.28em] {K.MUTED}"
 LINK = f"text-[11px] tracking-[.22em] {CON_ACCENT}"
@@ -110,6 +113,12 @@ def divergence_text(detail):
 
 
 # --- shared chrome ----------------------------------------------------------
+def card_meta(close):
+    """A card head's right-hand note: when the reading was taken, off-hours,
+    else the scale. The scale is boilerplate; the age is not."""
+    return close or "SCALE 0—100"
+
+
 def _card_head(title, meta, meta_class=None):
     from nicegui import ui
     with ui.row().classes("items-baseline justify-between w-full"):
@@ -192,15 +201,19 @@ def render_sentiment_card(arcs, bias, total, confidence, picture=""):
 
 
 # --- 4.2 Trend --------------------------------------------------------------
-def render_trend_card(arcs, short_state, verdict, guidance, picture=""):
+def render_trend_card(arcs, short_state, verdict, guidance, picture="",
+                      close=""):
     """Hero + state pill + meters (incl. the NO READ horizon) + verdict block.
-    ``picture`` is the state word's hover sentence."""
+    ``picture`` is the state word's hover sentence; ``close`` is
+    ``console_page.close_note`` (regular-hours bars only, so off-hours this is
+    the last session's read)."""
     from nicegui import ui
     day = (arcs[0].get("value") if arcs else None)
     month = (arcs[2].get("value") if arcs and len(arcs) > 2 else None)
     _, hero_hex = hero_parts(day)
     with ui.column().classes(CARD_SHELL):
-        _card_head("MARKET TREND", "SCALE 0—100")
+        _card_head("MARKET TREND", card_meta(close),
+                   CLOSE_META if close else None)
         _hero(day, str(short_state or "").upper(), hero_hex, "DAY READ",
               delta_parts(day, month, "MONTH"), pill_tip=picture)
         _meters(arcs)

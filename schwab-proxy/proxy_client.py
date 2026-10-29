@@ -367,6 +367,7 @@ class SchwabProxyClient:
                 "high": q.get("highPrice", 0),
                 "low": q.get("lowPrice", 0),
                 "volume": q.get("totalVolume", 0),
+                "trade_time": q.get("tradeTime"),
                 "symbol": sym,
             }
         return None
@@ -386,6 +387,9 @@ class SchwabProxyClient:
                 "high": q.get("highPrice", 0),
                 "low": q.get("lowPrice", 0),
                 "volume": q.get("totalVolume", 0),
+                # Epoch ms of the last print. Off-hours $VIX keeps printing and
+                # $VIX1D / $VIX9D do not; the sentiment composite pairs them.
+                "trade_time": q.get("tradeTime"),
             }
         return result
 
