@@ -703,6 +703,29 @@ def trade_idea_due(now, ran_slots):
     return None
 
 
+# ── Daily 0-DTE condor (see config/sessions.toml [slots.daily_condor]) ───────
+_DAILY_CONDOR_SLOTS = {k: (t.hour, t.minute)
+                       for k, t in mc.slot_times("daily_condor").items()}
+_DAILY_CONDOR_GRACE_MIN = mc.slot_grace_min("daily_condor")
+
+
+def daily_condor_due(now, ran_slots):
+    """Name of the daily-condor slot due now, or None. Mirrors ``trade_idea_due``:
+    once per trading day, within the grace window, never backfilled - a service
+    started after the grace skips the day rather than entering late."""
+    if not _is_trading_day(now):
+        return None
+    import datetime as _dt
+    day = now.date().isoformat()
+    for name, (h, m) in _DAILY_CONDOR_SLOTS.items():
+        if (day, name) in ran_slots:
+            continue
+        target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if target <= now < target + _dt.timedelta(minutes=_DAILY_CONDOR_GRACE_MIN):
+            return name
+    return None
+
+
 # ── Scheduler loop ─────────────────────────────────────────────────────────
 POLL_INTERVAL_SEC = 30  # check the slot every 30s (mirrors the page's autoscan loop cadence)
 
@@ -810,6 +833,7 @@ async def loop(bus):
     eod_summary_ran = set()  # (date, slot) of fired EOD-summary pushes (see eod_summary_due)
     market_snapshot_ran = set()  # (date, "HH:MM") of fired market-snapshot pushes (see market_snapshot_due)
     trade_idea_ran = set()  # (date, slot) of fired hourly trade-idea posts (see trade_idea_due)
+    daily_condor_ran = set()  # (date, slot) of fired daily-condor entries (see daily_condor_due)
     last_site_results_slot = None  # public-site trade idea results slot (see site_results_due)
     # One-shot startup refresh so the Paper Portfolio page has data on first
     # load. The paper account only changes on user actions (entry/manage/reset
@@ -1446,6 +1470,26 @@ async def loop(bus):
 
         if ti_slot:
             branches.append(("trade_idea", _trade_idea_branch(ti_slot)))
+
+        # The daily 0-DTE condor's entry into the Paper Ledger: one chain fetch.
+        # Latched BEFORE the fetch, so a slow chain cannot refire the slot; the
+        # booking itself also refuses a second condor the same day.
+        try:
+            dc_slot = daily_condor_due(now, daily_condor_ran)
+            if dc_slot:
+                daily_condor_ran.add((now.date().isoformat(), dc_slot))
+        except Exception:
+            log.exception("daily_condor_due gate degraded")
+            dc_slot = None
+
+        async def _daily_condor_branch():
+            try:
+                await loop_.run_in_executor(None, handlers.run_daily_condor, bus)
+            except Exception:
+                log.exception("run_daily_condor branch degraded")
+
+        if dc_slot:
+            branches.append(("daily_condor", _daily_condor_branch()))
 
         # The public site's trade idea results - how each posted idea has done,
         # from the stock price only. One batched quote call per [site] refresh_min.

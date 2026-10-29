@@ -1502,6 +1502,22 @@ def run_idea_marks_and_publish(bus) -> None:
         refresh_paper_trades(bus, reprice=False, keep_live_pnl=True)
 
 
+def run_daily_condor(bus) -> dict:
+    """Book today's 0-DTE condor (``daily_condor.book``), then publish the Ledger view
+    - only when a row was written, and without a chain reprice (the row shows its
+    own mark; the user's rows keep their last live P&L). Never raises: a failure
+    is a degrade on /health and ``{"status": "failed", ...}``."""
+    from services.options_svc import daily_condor
+    try:
+        out = daily_condor.book(_now_ct())
+    except Exception as exc:  # noqa: BLE001 - the scheduler tick must survive it
+        _degrade.degraded("options.run_daily_condor")
+        return {"status": "failed", "trade_id": None, "reason": str(exc)}
+    if out.get("status") == "booked":
+        refresh_paper_trades(bus, reprice=False, keep_live_pnl=True)
+    return out
+
+
 def _carry_live_pnl(bus, data) -> None:
     """Put the cached view's live ``unrealized_pnl`` back on the user's OPEN rows
     that this publish did not reprice (never on an idea row: it shows its own

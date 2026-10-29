@@ -221,3 +221,58 @@ def test_book_skips_with_the_pick_reason(ledger, fetched, cfg):  # noqa: F811
 def test_book_takes_the_book_lock():
     import paper_lock
     assert paper_lock.is_serialized(daily_condor.book)
+
+
+# ── the slot ────────────────────────────────────────────────────────────────
+def _at(day, hh, mm):
+    return dt.datetime(2026, 9, day, hh, mm, tzinfo=_CT)
+
+
+@pytest.mark.parametrize("hh, mm, due", [
+    (8, 44, False), (8, 45, True), (8, 54, True), (8, 55, False), (8, 56, False)])
+def test_slot_due_inside_its_grace_only(hh, mm, due):
+    from services.options_svc import scheduler
+    assert (scheduler.daily_condor_due(_at(17, hh, mm), set()) == "at") is due
+
+
+def test_slot_fires_once_a_day_and_never_on_a_weekend_or_holiday():
+    from services.options_svc import scheduler
+    ran = {("2026-09-17", "at")}
+    assert scheduler.daily_condor_due(_at(17, 8, 46), ran) is None
+    assert scheduler.daily_condor_due(_at(18, 8, 46), ran) == "at"
+    assert scheduler.daily_condor_due(_at(19, 8, 46), set()) is None        # Saturday
+    christmas = dt.datetime(2026, 12, 25, 8, 46, tzinfo=_CT)
+    assert scheduler.daily_condor_due(christmas, set()) is None
+
+
+class _Bus:
+    def __init__(self):
+        self.sets = []
+
+
+def test_run_daily_condor_publishes_the_ledger_only_when_it_booked(monkeypatch):
+    from services.options_svc import handlers
+    published = []
+    monkeypatch.setattr(handlers, "refresh_paper_trades",
+                        lambda bus, **kw: published.append(kw))
+    monkeypatch.setattr(daily_condor, "book",
+                        lambda now: {"status": "booked", "trade_id": "x", "reason": None})
+    assert handlers.run_daily_condor(_Bus())["status"] == "booked"
+    assert published == [{"reprice": False, "keep_live_pnl": True}]
+    monkeypatch.setattr(daily_condor, "book",
+                        lambda now: {"status": "skipped", "trade_id": None, "reason": "r"})
+    assert handlers.run_daily_condor(_Bus())["status"] == "skipped"
+    assert len(published) == 1
+
+
+def test_run_daily_condor_never_raises(monkeypatch):
+    from services import _degrade
+    from services.options_svc import handlers
+
+    def boom(now):
+        raise RuntimeError("proxy down")
+    monkeypatch.setattr(daily_condor, "book", boom)
+    _degrade.reset()
+    assert handlers.run_daily_condor(_Bus()) == {"status": "failed", "trade_id": None,
+                                                 "reason": "proxy down"}
+    assert _degrade.counts().get("options.run_daily_condor") == 1
