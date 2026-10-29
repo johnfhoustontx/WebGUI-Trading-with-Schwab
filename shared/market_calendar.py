@@ -363,6 +363,10 @@ _DEFAULTS = {
                        "h0835": "08:35", "h0935": "09:35", "h1035": "10:35",
                        "h1135": "11:35", "h1235": "12:35", "h1335": "13:35",
                        "h1435": "14:35"},
+        # The daily 0-DTE iron condor's entry into the Paper Ledger
+        # (options_svc/daily_condor.py): one chain fetch, 15 minutes after the
+        # open. A short grace: a late start skips the day, never enters late.
+        "daily_condor": {"grace_min": 10, "at": "08:45"},
     },
     "alerts": {"fire_in_extended_hours": False},
 }

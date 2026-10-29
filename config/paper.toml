@@ -57,3 +57,25 @@ min_n = 5
 # The Claude model the weekly review's written judgment uses (a tier name, never
 # a version).
 review_model = "sonnet"
+
+[daily_condor]
+# One mechanical 0-DTE iron condor, booked into the Paper Ledger every trading
+# morning at [slots.daily_condor] (config/sessions.toml, 08:45 CT) by
+# options_svc/daily_condor.py. It bypasses EVERY risk cap: it is a measurement.
+# It is checked on the trade ideas' mark cycle ([idea_trades] mark_interval_min)
+# and otherwise settled at the close. A bad value reads as the shipped default.
+#
+# Book it at all. false stops new bookings; an open one is still marked and
+# settled. Must be true or false.
+enabled = true
+# The underlying. Its same-day expiry is traded.
+symbol = "SPY"
+# Each short leg is the strike whose delta is nearest this (absolute, 0 to 0.5).
+short_delta = 0.15
+# Dollars between each short strike and its long wing (above 0, up to 100).
+width = 5.0
+# The stop: closed when the LOSS reaches this multiple of the credit. 2.0 with
+# $1.00 taken in closes when buying it back costs $3.00 (above 0, up to 20).
+stop_mult = 2.0
+# Condors per day (a whole number, 1 or more).
+quantity = 1

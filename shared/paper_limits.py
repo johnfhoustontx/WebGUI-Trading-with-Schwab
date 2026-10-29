@@ -43,6 +43,16 @@ DEFAULTS = {
         "min_n": 5,
         "review_model": "sonnet",
     },
+    # One mechanical 0-DTE iron condor booked into the Paper Ledger each trading
+    # morning ([slots.daily_condor]), past every cap, and measured there.
+    "daily_condor": {
+        "enabled": True,
+        "symbol": "SPY",
+        "short_delta": 0.15,
+        "width": 5.0,
+        "stop_mult": 2.0,
+        "quantity": 1,
+    },
 }
 
 load, reset_cache = toml_loader(PAPER_TOML, DEFAULTS, label="paper.toml")
@@ -142,3 +152,30 @@ def max_risk_per_trade() -> float:
 def ledger_max_risk_per_trade() -> float:
     """The Paper Ledger's per-trade cap."""
     return _dollars("ledger_max_risk_per_trade")
+
+
+def daily_condor() -> dict:
+    """``[daily_condor]``: the daily 0-DTE iron condor booked into the Paper Ledger
+    (``options_svc/daily_condor.py``). Always a full dict; each key that is missing
+    or unusable reads as its shipped default on its own, and nothing here raises.
+
+    ``enabled`` must be a real boolean; ``symbol`` a ticker ``shared.symbols``
+    accepts; ``short_delta`` in (0, 0.5); ``width`` in (0, 100] dollars;
+    ``stop_mult`` in (0, 20] - the stop is a LOSS of this multiple of the credit;
+    ``quantity`` a whole number of condors, 1 or more."""
+    from shared.symbols import clean_symbol
+
+    d = DEFAULTS["daily_condor"]
+    sec = load().get("daily_condor")
+    if not isinstance(sec, dict):
+        sec = {}
+    enabled = sec.get("enabled")
+    delta = _idea_float(sec.get("short_delta"), 0.0, 0.5, d["short_delta"])
+    return {
+        "enabled": enabled if isinstance(enabled, bool) else d["enabled"],
+        "symbol": clean_symbol(sec.get("symbol")) or d["symbol"],
+        "short_delta": delta if delta < 0.5 else d["short_delta"],
+        "width": _idea_float(sec.get("width"), 0.0, 100.0, d["width"]),
+        "stop_mult": _idea_float(sec.get("stop_mult"), 0.0, 20.0, d["stop_mult"]),
+        "quantity": _idea_int(sec.get("quantity"), 1, 10**6, d["quantity"]),
+    }

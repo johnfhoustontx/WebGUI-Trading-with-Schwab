@@ -735,6 +735,13 @@ _SESSIONS = ConfigFile(
                   kind="int", unit="min", min=1, max=59, step=1),
             Field("slots.trade_idea.*", "", "", kind="time"),
         ), restart=(OPTIONS,)),
+        Section("Daily SPY condor", "", (
+            Field("slots.daily_condor.grace_min", "Fire if late by at most",
+                  "A service that starts later than this skips the day rather "
+                  "than entering late.",
+                  kind="int", unit="min", min=1, max=60, step=1),
+            Field("slots.daily_condor.*", "", "", kind="time"),
+        ), restart=(OPTIONS,)),
         Section("After-close jobs", "", (
             Field("slots.eod_report.at", "End-of-day report", "", kind="time",
                   restart=(TIMERS,)),
@@ -1805,6 +1812,30 @@ _PAPER = ConfigFile(
                   "The Claude model tier that writes the weekly judgment. Use a "
                   "tier name such as sonnet, not a version. Applies at the "
                   "next weekly run.", kind="text", restart=()),
+        ), restart=(OPTIONS,)),
+        Section("Daily SPY condor in the Paper Ledger",
+                "One 0-DTE iron condor booked into the Paper Ledger every trading "
+                "morning, past every risk cap, and measured there. Its stop is "
+                "checked with the trade ideas' marks; otherwise it is settled at "
+                "the close.", (
+            Field("daily_condor.enabled", "Book the daily condor",
+                  "Off stops new bookings. A condor already open is still marked "
+                  "and settled.", kind="bool"),
+            Field("daily_condor.symbol", "Underlying",
+                  "Its same-day expiry is traded.", kind="text"),
+            Field("daily_condor.short_delta", "Short-leg delta",
+                  "Each short leg is the strike whose delta is nearest this.",
+                  kind="float", min=0.01, max=0.49, step=0.01),
+            Field("daily_condor.width", "Wing width",
+                  "Dollars between each short strike and its long wing.",
+                  kind="money", min=0.5, max=100, step=0.5),
+            Field("daily_condor.stop_mult", "Stop at a loss of",
+                  "Closed when the loss reaches this multiple of the credit. 2.0 "
+                  "with $1.00 taken in closes when buying it back costs $3.00.",
+                  kind="float", unit="x credit", min=0.1, max=20, step=0.1),
+            Field("daily_condor.quantity", "Condors per day",
+                  "How many condors are booked each morning.",
+                  kind="int", min=1, max=100, step=1),
         ), restart=(OPTIONS,)),
     ),
 )
