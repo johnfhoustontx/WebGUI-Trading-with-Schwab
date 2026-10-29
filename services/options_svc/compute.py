@@ -2559,7 +2559,7 @@ def _reprice_open_pnl(trades) -> None:
     for t in trades or []:
         if (t.get("status") or "").upper() != "OPEN":
             continue
-        if _ideas.is_idea(t):                  # shown by paper_trades_view, never a chain fetch
+        if _ideas.is_self_managed(t):                  # shown by paper_trades_view, never a chain fetch
             continue
         try:
             # DEBIT/legs trades (long options + debit verticals) reprice generically off
@@ -2633,7 +2633,7 @@ def ledger_book_state(trades=None) -> dict:
         trades = paper_trader.get_all_trades()
     open_rows, realized = [], 0.0
     for t in trades or ():
-        if not isinstance(t, dict) or _ideas.is_idea(t):
+        if not isinstance(t, dict) or _ideas.is_self_managed(t):
             continue
         if t.get("status") == "OPEN":
             open_rows.append({"symbol": t.get("symbol"),
@@ -2932,7 +2932,7 @@ def close_paper(trade_id, debit: float) -> None:
     # pass already closed would otherwise have its exit and realized P&L
     # overwritten by this second close (audit AR-02).
     if t and (t.get("status") or "").upper() == "OPEN":
-        closed = (_ideas.manual_close(t, float(debit)) if _ideas.is_idea(t)
+        closed = (_ideas.manual_close(t, float(debit)) if _ideas.is_self_managed(t)
                   else paper_trader.close_paper_trade(t, float(debit), "MANUAL_CLOSE"))
         paper_trader.update_trade(trade_id, closed)
     elif t:
@@ -2992,7 +2992,7 @@ def expire_ledger_trades(now_ct=None) -> int:
 
     settled = 0
     for t in trades:
-        if (t.get("status") or "").upper() != "OPEN" or _ideas.is_idea(t):
+        if (t.get("status") or "").upper() != "OPEN" or _ideas.is_self_managed(t):
             continue
         if not paper_engine.should_settle(t.get("expiration"), today, now_ct):
             continue
@@ -3109,7 +3109,7 @@ def manage_ledger_trades(now_ct=None) -> int:
 
     closed = 0
     for t in trades or []:
-        if (t.get("status") or "").upper() != "OPEN" or _ideas.is_idea(t):
+        if (t.get("status") or "").upper() != "OPEN" or _ideas.is_self_managed(t):
             continue
         if (t.get("direction") or "").upper() != _LEDGER_MANAGED_DIRECTION:
             continue
@@ -10410,7 +10410,7 @@ def collect_action_items(now_ct=None) -> dict:
         import paper_trader
         for t in paper_trader.get_all_trades():
             if (t.get("status") or "").upper() == "OPEN" and str(t.get("expiration"))[:10] == today \
-                    and not _ideas.is_idea(t):    # an idea settles on its own
+                    and not _ideas.is_self_managed(t):    # settles on its own cycle
                 out["expiring_today"].append({
                     "book": "ledger", "symbol": t.get("symbol"),
                     "strategy": t.get("strategy"), "expiration": t.get("expiration"),

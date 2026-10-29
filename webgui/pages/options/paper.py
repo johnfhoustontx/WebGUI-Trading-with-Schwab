@@ -187,19 +187,33 @@ def _strikes(t):
 IDEA_TAG = "Trade idea"
 # A fixed class for the tag (a finite state maps to a fixed class, never a built one).
 IDEA_TAG_CLASS = "bg-amber-400/15 text-amber-300 rounded-[6px]"
+# The daily SPY condor's rows (``source == "daily_condor"``): booked each morning,
+# past the caps, and closed by their own cycle. Neither the operator's trade nor an
+# idea, so they show under All only.
+CONDOR_TAG = "SPY condor"
+CONDOR_TAG_CLASS = "bg-sky-400/15 text-sky-300 rounded-[6px]"
+_TAGS = {"trade_idea": (IDEA_TAG, IDEA_TAG_CLASS),
+         "daily_condor": (CONDOR_TAG, CONDOR_TAG_CLASS)}
 FILTER_OPTIONS = {"all": "All", "mine": "My trades", "ideas": "Trade ideas"}
 
 DELETE_BODY = "It leaves the ledger for good."
 DELETE_IDEA_BODY = ("It leaves the ledger for good, and the trade drops out of the "
                     "weekly review of trade ideas.")
 DELETE_CLOSED_BODY = ("Their realized P&L leaves the ledger, and the deployment cap's "
-                      "equity moves with it. Closed trade ideas leave this list too, "
-                      "but are kept for the weekly review and the end-of-day report.")
+                      "equity moves with it. Closed trade ideas and SPY condors leave "
+                      "this list too, but are kept: the ideas for the weekly review "
+                      "and the end-of-day report, the condors as their record.")
 
 
 def is_idea(t):
     """True for a trade-idea row. PURE; ``source`` is the only signal."""
     return (t or {}).get("source") == "trade_idea"
+
+
+def tag_of(t):
+    """``(tag, tag class)`` for a row: the idea's, the condor's, or ``("", "")`` for
+    the operator's own trade. PURE; ``source`` is the only signal."""
+    return _TAGS.get((t or {}).get("source"), ("", ""))
 
 
 def on_ledger(trades):
@@ -214,25 +228,26 @@ def delete_body(t):
     return DELETE_IDEA_BODY if is_idea(t) else DELETE_BODY
 
 
-def _keeps(idea, which):
-    """Whether a row (idea or not) is shown under the filter. An unknown choice
-    shows everything: a bad value must not hide the book."""
+def _keeps(tag, which):
+    """Whether a row wearing ``tag`` ("" for the operator's own) is shown under the
+    filter. An unknown choice shows everything: a bad value must not hide the book."""
     if which == "mine":
-        return not idea
+        return not tag
     if which == "ideas":
-        return idea
+        return tag == IDEA_TAG
     return True
 
 
 def filter_rows(rows, which):
     """The table rows under the All / My trades / Trade ideas choice. PURE."""
-    return [r for r in rows or [] if _keeps(r.get("tag") == IDEA_TAG, which)]
+    return [r for r in rows or [] if _keeps(r.get("tag"), which)]
 
 
 def paper_rows(trades):
     rows = []
     for t in trades or []:
         pnl = trade_pnl(t)
+        tag, tag_class = tag_of(t)
         rows.append({
             "id": t.get("trade_id"),
             "trade_id": t.get("trade_id"),
@@ -247,8 +262,8 @@ def paper_rows(trades):
             "_pnl_class": pnl_class(pnl),
             "status": t.get("status", ""),
             "_status_class": status_badge_class(t.get("status")),
-            "_tag_class": IDEA_TAG_CLASS,
-            "tag": IDEA_TAG if is_idea(t) else "",
+            "_tag_class": tag_class,
+            "tag": tag,
             # Trim to seconds and show "YYYY-MM-DD HH:MM:SS" (drop the ISO 'T').
             "entry_time": (t.get("entry_time") or "")[:19].replace("T", " "),
             # At-risk rescue tint (left border on the symbol cell). Safe no-op
@@ -264,7 +279,7 @@ def paper_rows(trades):
 def ledger_status(trades, which="all"):
     """The status line: how many trades SHOWN under the filter, how many open.
     PURE. Blank for no trades - the empty table says that."""
-    trades = [t for t in trades or [] if _keeps(is_idea(t), which)]
+    trades = [t for t in trades or [] if _keeps(tag_of(t)[0], which)]
     if not trades:
         return ""
     n = len(trades)
@@ -442,7 +457,7 @@ def render():
 
     # Symbol cell gets a colored left-border + faint tint when the row is
     # at-risk (rescue_state tested/critical). Plain cell otherwise.
-    # A trade-idea row also wears its tag (a fixed class: IDEA_TAG_CLASS).
+    # An idea or condor row also wears its tag (a fixed class: ``tag_of``).
     table.add_slot('body-cell-symbol', r'''
       <q-td :props="props">
         <span v-if="props.row._rescue_class" :class="props.row._rescue_class + ' pl-1.5'">

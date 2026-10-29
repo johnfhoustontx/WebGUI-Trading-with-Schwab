@@ -352,6 +352,16 @@ def test_position_rows_leaves_out_open_trade_idea_rows():
     assert [r.get("trade_id") for r in rows if r["book"] == "ledger"] == [10]
 
 
+def test_position_rows_leaves_out_open_daily_condor_rows():
+    """The daily condor is a measurement too, not a position the user holds."""
+    books = _books()
+    books["options:paper_trades"]["trades"].append(
+        {"trade_id": 13, "symbol": "MU", "strategy": "IC", "status": "OPEN",
+         "source": "daily_condor"})
+    rows = sf.position_rows("MU", books)
+    assert [r.get("trade_id") for r in rows if r["book"] == "ledger"] == [10]
+
+
 def test_position_rows_drops_closed_and_expired():
     rows = sf.position_rows("MU", _books())
     assert not any(str(r.get("status", "")).upper() in ("CLOSED", "EXPIRED")

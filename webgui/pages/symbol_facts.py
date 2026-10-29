@@ -221,14 +221,19 @@ def merge_facts(cached, fetched):
             "fetched_at": fetched.get("fetched_at")}
 
 
+#: Ledger rows that are measurements, not positions the user holds.
+_MEASURED_SOURCES = ("trade_idea", "daily_condor")
+
+
 def position_rows(symbol, books):
     """Open rows in ``symbol`` from all three books, each tagged with ``book``.
 
     ``books`` maps a view name (``BOOK_VIEWS``) to its payload. Open means the
     Desk's rule (``desk._is_open``: not CLOSED / EXPIRED, a missing status is
     open) so the two pages cannot disagree about what is held. A posted trade
-    idea booked on the ledger (``source == "trade_idea"``) is a measurement the
-    user does not hold, so it is left out. Rows are copies; the payload is never
+    idea or a daily condor booked on the ledger (``source`` in
+    ``_MEASURED_SOURCES``) is a measurement the user does not hold, so it is left
+    out. Rows are copies; the payload is never
     mutated. Empty or missing books give ``[]``.
     """
     sym = _sym(symbol)
@@ -242,7 +247,7 @@ def position_rows(symbol, books):
             continue
         for p in entries:
             if (isinstance(p, dict) and _sym(p.get("symbol")) == sym
-                    and _desk._is_open(p) and p.get("source") != "trade_idea"):
+                    and _desk._is_open(p) and p.get("source") not in _MEASURED_SOURCES):
                 out.append(dict(p, book=tag))
     return out
 

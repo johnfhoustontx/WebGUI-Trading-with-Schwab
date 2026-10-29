@@ -45,6 +45,13 @@ from shared.numeric import parsed_finite as _finite  # noqa: E402
 log = logging.getLogger(__name__)
 
 SOURCE = "trade_idea"
+#: The daily 0-DTE iron condor's rows (``daily_condor.py``). Not an idea - the weekly
+#: review never reads one - but booked past the caps and closed only by this file's
+#: 5-minute cycle, exactly as an idea row is.
+CONDOR_SOURCE = "daily_condor"
+#: Every Ledger row the user's own passes (caps, equity, reprice, manage, expiry,
+#: the action list) leave alone, and ``mark_cycle`` marks, stops and settles.
+SELF_MANAGED_SOURCES = frozenset({SOURCE, CONDOR_SOURCE})
 _MULT = 100.0                  # one contract = 100 shares; entry_credit is per share
 _CT = ZoneInfo("America/Chicago")
 
@@ -54,12 +61,19 @@ def is_idea(trade) -> bool:
     return bool(isinstance(trade, dict) and trade.get("source") == SOURCE)
 
 
+def is_self_managed(trade) -> bool:
+    """A Ledger row this module's cycle owns: a posted idea or a daily condor. The
+    user's own Ledger passes skip it; ``is_idea`` stays the narrower "a posted idea"
+    the weekly review and the site's results read."""
+    return bool(isinstance(trade, dict) and trade.get("source") in SELF_MANAGED_SOURCES)
+
+
 def show_mark(trade) -> None:
-    """Put an OPEN idea row's recorded mark on it as ``unrealized_pnl`` (the mark is
-    per contract). No chain is read, so it holds outside the session too; no mark
-    recorded yet leaves it blank."""
+    """Put an OPEN self-managed row's recorded mark on it as ``unrealized_pnl`` (the
+    mark is per contract). No chain is read, so it holds outside the session too; no
+    mark recorded yet leaves it blank."""
     mark = trade.get("last_mark_pnl")
-    if is_idea(trade) and (trade.get("status") or "").upper() == "OPEN" and mark is not None:
+    if is_self_managed(trade) and (trade.get("status") or "").upper() == "OPEN" and mark is not None:
         trade["unrealized_pnl"] = round(mark * int(trade.get("quantity") or 1), 2)
 
 
@@ -292,7 +306,7 @@ def _mark(t, client, now_ct):
 
 @_paper_lock.serialized
 def mark_cycle(now_ct, client=None, *, settle_only=False) -> dict:
-    """One pass over the OPEN idea rows: ``{"marked", "closed", "settled", "skipped"}``.
+    """One pass over the OPEN self-managed rows (ideas and daily condors): ``{"marked", "closed", "settled", "skipped"}``.
 
     Per row, in order: settle it when ``paper_engine.should_settle`` says it is due;
     otherwise mark it (``settle_only`` stops here: the 15:05 CT settle slot calls it
@@ -304,7 +318,7 @@ def mark_cycle(now_ct, client=None, *, settle_only=False) -> dict:
     client = client if client is not None else _proxy.schwab_py_client
     today = now_ct.date().isoformat()
     rows = [t for t in paper_trader.get_all_trades()
-            if is_idea(t) and (t.get("status") or "").upper() == "OPEN"]
+            if is_self_managed(t) and (t.get("status") or "").upper() == "OPEN"]
     if rows and not settle_only:
         signal_repricer.clear_chain_cache()     # structure_marks fetches through it
     for t in rows:

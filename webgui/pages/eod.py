@@ -518,12 +518,21 @@ def _is_idea(trade) -> bool:
     return isinstance(trade, dict) and trade.get("source") == "trade_idea"
 
 
+#: Ledger rows that are measurements rather than the user's own trades: the posted
+#: ideas and the daily SPY condor (``source == "daily_condor"``).
+_MEASURED_SOURCES = ("trade_idea", "daily_condor")
+
+
 def split_ledger(trades):
     """(manual, ideas): the Ledger's rows split by ``source``. An idea row is
-    identified by ``source == "trade_idea"`` and nothing else."""
+    identified by ``source == "trade_idea"`` and nothing else; a daily-condor row
+    is in neither list (it is not the user's trade, and not an idea)."""
     manual, ideas = [], []
     for t in trades or []:
-        (ideas if _is_idea(t) else manual).append(t)
+        if _is_idea(t):
+            ideas.append(t)
+        elif not (isinstance(t, dict) and t.get("source") in _MEASURED_SOURCES):
+            manual.append(t)
     return manual, ideas
 
 

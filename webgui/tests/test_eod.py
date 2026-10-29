@@ -1123,6 +1123,14 @@ def test_split_ledger_separates_idea_rows_by_source():
     assert eod.split_ledger(None) == ([], [])
 
 
+def test_split_ledger_leaves_condor_rows_out_of_both_books():
+    """The daily SPY condor is neither the user's trade nor a trade idea."""
+    condor = {**_manual(), "symbol": "SPY", "source": "daily_condor"}
+    manual, ideas = eod.split_ledger([_manual(), _idea(), condor])
+    assert [t["symbol"] for t in manual] == ["QQQ"]
+    assert [t.get("source") for t in ideas] == ["trade_idea"]
+
+
 def test_manual_book_excludes_idea_rows():
     snap = {"paper_trades": {"trades": [_manual(), _idea(realized_pnl=999.0)]}}
     norm = [n for label, n, _s in eod._books(snap) if label == "Manual paper"][0]

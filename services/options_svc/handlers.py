@@ -1517,7 +1517,7 @@ def _carry_live_pnl(bus, data) -> None:
         log.exception("carry live P&L: cached ledger view unreadable")
         return
     for t in (data or {}).get("trades") or []:
-        if ((t.get("status") or "").upper() == "OPEN" and not idea_ledger.is_idea(t)
+        if ((t.get("status") or "").upper() == "OPEN" and not idea_ledger.is_self_managed(t)
                 and t.get("unrealized_pnl") is None
                 and live.get(t.get("trade_id")) is not None):
             t["unrealized_pnl"] = live[t.get("trade_id")]

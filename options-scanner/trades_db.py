@@ -322,25 +322,40 @@ def delete_trades_by_status(conn, statuses):
 #: ``services.options_svc.idea_ledger.SOURCE`` (this folder cannot import services;
 #: a services test pins that the two are equal).
 IDEA_SOURCE = "trade_idea"
+#: Every ``source`` whose closed rows "Delete all closed" CLEARS rather than deletes:
+#: the posted ideas and the daily condor, both measurements. Twin of
+#: ``idea_ledger.SELF_MANAGED_SOURCES`` (a services test pins that they agree).
+SELF_MANAGED_SOURCES = frozenset({IDEA_SOURCE, "daily_condor"})
 
 
-def delete_closed_except_source(conn, source):
-    """Delete CLOSED / EXPIRED rows whose ``source`` is not ``source``; returns the
-    count deleted. ``IS NOT`` so a NULL source (every row but an idea) is deleted."""
+def _in(sources):
+    """``(placeholders, values)`` for an SQL ``IN`` over ``sources``, in a fixed order."""
+    values = sorted(sources)
+    return ", ".join("?" * len(values)), values
+
+
+def delete_closed_except_sources(conn, sources):
+    """Delete CLOSED / EXPIRED rows whose ``source`` is in none of ``sources``; returns
+    the count deleted. A NULL source (every row the user booked) is deleted:
+    ``NULL IN (...)`` is not true, so the ``IS NULL`` arm says so explicitly."""
+    marks, values = _in(sources)
     cur = conn.execute(
-        "DELETE FROM trades WHERE status IN ('CLOSED', 'EXPIRED') AND source IS NOT ?",
-        (source,),
+        "DELETE FROM trades WHERE status IN ('CLOSED', 'EXPIRED') "
+        f"AND (source IS NULL OR source NOT IN ({marks}))",
+        values,
     )
     return cur.rowcount
 
 
-def clear_closed_of_source(conn, source, when):
-    """Stamp ``cleared_at`` on CLOSED / EXPIRED rows of ``source`` not yet cleared;
-    returns the count stamped. The rows stay: only the Ledger's list hides them."""
+def clear_closed_of_sources(conn, sources, when):
+    """Stamp ``cleared_at`` on CLOSED / EXPIRED rows of any of ``sources`` not yet
+    cleared; returns the count stamped. The rows stay: only the Ledger's list hides
+    them."""
+    marks, values = _in(sources)
     cur = conn.execute(
         "UPDATE trades SET cleared_at = ? WHERE status IN ('CLOSED', 'EXPIRED') "
-        "AND source = ? AND cleared_at IS NULL",
-        (when, source),
+        f"AND source IN ({marks}) AND cleared_at IS NULL",
+        [when, *values],
     )
     return cur.rowcount
 

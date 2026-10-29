@@ -259,19 +259,37 @@ def test_a_cleared_row_keeps_its_stamp_through_a_full_row_update(paper_sandbox):
     assert paper_trader.load_trades()[0]["cleared_at"] == t["cleared_at"]
 
 
-def test_delete_closed_except_source_counts_only_what_it_deleted(paper_sandbox):
+def test_delete_closed_except_sources_counts_only_what_it_deleted(paper_sandbox):
     paper_trader.add_trade(_seed_trade("a", status="CLOSED"))
     paper_trader.add_trade(dict(_seed_trade("b", status="CLOSED"), source="other"))
     paper_trader.add_trade(dict(_seed_trade("c", status="CLOSED"), source="trade_idea"))
+    paper_trader.add_trade(dict(_seed_trade("d", status="CLOSED"), source="daily_condor"))
     conn = trades_db.connect()
     try:
-        # a NULL source is not "trade_idea": the comparison must be NULL-safe
-        n = trades_db.delete_closed_except_source(conn, trades_db.IDEA_SOURCE)
+        # a NULL source is in no set: the comparison must be NULL-safe
+        n = trades_db.delete_closed_except_sources(conn, trades_db.SELF_MANAGED_SOURCES)
         conn.commit()
     finally:
         conn.close()
     assert n == 2
-    assert [t["trade_id"] for t in paper_trader.load_trades()] == ["c"]
+    assert sorted(t["trade_id"] for t in paper_trader.load_trades()) == ["c", "d"]
+
+
+def test_clear_closed_of_sources_stamps_each_kept_source_once(paper_sandbox):
+    paper_trader.add_trade(dict(_seed_trade("c", status="CLOSED"), source="trade_idea"))
+    paper_trader.add_trade(dict(_seed_trade("d", status="CLOSED"), source="daily_condor"))
+    paper_trader.add_trade(dict(_seed_trade("e", status="OPEN"), source="daily_condor"))
+    conn = trades_db.connect()
+    try:
+        n = trades_db.clear_closed_of_sources(conn, trades_db.SELF_MANAGED_SOURCES, "T1")
+        again = trades_db.clear_closed_of_sources(conn, trades_db.SELF_MANAGED_SOURCES,
+                                                  "T2")
+        conn.commit()
+    finally:
+        conn.close()
+    assert (n, again) == (2, 0)
+    stamps = {t["trade_id"]: t.get("cleared_at") for t in paper_trader.load_trades()}
+    assert stamps == {"c": "T1", "d": "T1", "e": None}
 
 
 def test_paper_trader_get_open_trades(paper_sandbox):

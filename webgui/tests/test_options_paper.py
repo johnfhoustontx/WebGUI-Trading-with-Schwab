@@ -609,3 +609,30 @@ def test_page_help_describes_trade_ideas():
     assert "risk limits" in text and "do not apply" in text
     assert "Delete all closed" in text and "keeps" in text
 
+
+
+# ── the daily SPY condor's rows ─────────────────────────────────────────────
+CONDOR = {**TRADE, "trade_id": "C1", "source": "daily_condor", "strategy": "IC"}
+
+
+def test_paper_rows_tag_condor_rows_with_their_own_tag_and_class():
+    rows = {r["trade_id"]: r for r in paper.paper_rows([TRADE, IDEA, CONDOR])}
+    assert rows["C1"]["tag"] == "SPY condor"
+    assert rows["C1"]["_tag_class"] == paper.CONDOR_TAG_CLASS
+    assert rows["I1"]["_tag_class"] == paper.IDEA_TAG_CLASS
+    assert paper.CONDOR_TAG_CLASS != paper.IDEA_TAG_CLASS
+
+
+def test_a_condor_row_is_neither_mine_nor_an_idea():
+    rows = paper.paper_rows([TRADE, IDEA, CONDOR])
+    assert sorted(r["trade_id"] for r in paper.filter_rows(rows, "all")) == ["C1", "I1", "T1"]
+    assert [r["trade_id"] for r in paper.filter_rows(rows, "mine")] == ["T1"]
+    assert [r["trade_id"] for r in paper.filter_rows(rows, "ideas")] == ["I1"]
+    trades = [TRADE, IDEA, CONDOR]
+    assert paper.ledger_status(trades) == "3 trades · 3 open"
+    assert paper.ledger_status(trades, "mine") == "1 trade · 1 open"
+    assert paper.ledger_status(trades, "ideas") == "1 trade · 1 open"
+
+
+def test_delete_closed_confirm_names_the_condor_too():
+    assert "condor" in paper.DELETE_CLOSED_BODY.lower()
