@@ -1836,6 +1836,11 @@ _PAPER = ConfigFile(
             Field("daily_condor.quantity", "Condors per day",
                   "How many condors are booked each morning.",
                   kind="int", min=1, max=100, step=1),
+            Field("daily_condor.max_delta_miss", "Largest delta miss",
+                  "How far a short leg's delta may sit from the target. Past it "
+                  "the day is skipped, so a chain with broken deltas near the "
+                  "money is never booked as a different trade.",
+                  kind="float", min=0.01, max=0.49, step=0.01),
         ), restart=(OPTIONS,)),
     ),
 )

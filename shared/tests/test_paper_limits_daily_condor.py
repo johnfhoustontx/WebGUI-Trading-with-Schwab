@@ -7,7 +7,7 @@ from shared import market_calendar as mc
 from shared import paper_limits as pl
 
 SHIPPED = {"enabled": True, "symbol": "SPY", "short_delta": 0.15, "width": 5.0,
-           "stop_mult": 2.0, "quantity": 1}
+           "stop_mult": 2.0, "quantity": 1, "max_delta_miss": 0.05}
 
 
 @pytest.fixture
@@ -36,9 +36,10 @@ def test_missing_file_reads_the_defaults(toml):
 
 def test_the_file_overrides_each_key(toml):
     toml("[daily_condor]\nenabled = false\nsymbol = \"qqq\"\nshort_delta = 0.2\n"
-         "width = 10\nstop_mult = 1.5\nquantity = 3\n")
+         "width = 10\nstop_mult = 1.5\nquantity = 3\nmax_delta_miss = 0.03\n")
     assert pl.daily_condor() == {"enabled": False, "symbol": "QQQ", "short_delta": 0.2,
-                                 "width": 10.0, "stop_mult": 1.5, "quantity": 3}
+                                 "width": 10.0, "stop_mult": 1.5, "quantity": 3,
+                                 "max_delta_miss": 0.03}
 
 
 def test_a_bad_key_reverts_alone(toml):
@@ -57,6 +58,8 @@ def test_a_bad_key_reverts_alone(toml):
     ("stop_mult = 21", "stop_mult"),
     ("quantity = 0", "quantity"),
     ("quantity = 1.5", "quantity"),
+    ("max_delta_miss = 0", "max_delta_miss"),
+    ("max_delta_miss = 0.6", "max_delta_miss"),
 ])
 def test_unusable_values_read_as_the_default(toml, line, key):
     toml(f"[daily_condor]\n{line}\n")

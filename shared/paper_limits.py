@@ -52,6 +52,7 @@ DEFAULTS = {
         "width": 5.0,
         "stop_mult": 2.0,
         "quantity": 1,
+        "max_delta_miss": 0.05,
     },
 }
 
@@ -162,7 +163,9 @@ def daily_condor() -> dict:
     ``enabled`` must be a real boolean; ``symbol`` a ticker ``shared.symbols``
     accepts; ``short_delta`` in (0, 0.5); ``width`` in (0, 100] dollars;
     ``stop_mult`` in (0, 20] - the stop is a LOSS of this multiple of the credit;
-    ``quantity`` a whole number of condors, 1 or more."""
+    ``quantity`` a whole number of condors, 1 or more; ``max_delta_miss`` in
+    (0, 0.5) - how far a short's delta may sit from ``short_delta`` before the
+    day is skipped rather than booked as something else."""
     from shared.symbols import clean_symbol
 
     d = DEFAULTS["daily_condor"]
@@ -171,6 +174,7 @@ def daily_condor() -> dict:
         sec = {}
     enabled = sec.get("enabled")
     delta = _idea_float(sec.get("short_delta"), 0.0, 0.5, d["short_delta"])
+    miss = _idea_float(sec.get("max_delta_miss"), 0.0, 0.5, d["max_delta_miss"])
     return {
         "enabled": enabled if isinstance(enabled, bool) else d["enabled"],
         "symbol": clean_symbol(sec.get("symbol")) or d["symbol"],
@@ -178,4 +182,5 @@ def daily_condor() -> dict:
         "width": _idea_float(sec.get("width"), 0.0, 100.0, d["width"]),
         "stop_mult": _idea_float(sec.get("stop_mult"), 0.0, 20.0, d["stop_mult"]),
         "quantity": _idea_int(sec.get("quantity"), 1, 10**6, d["quantity"]),
+        "max_delta_miss": miss if miss < 0.5 else d["max_delta_miss"],
     }

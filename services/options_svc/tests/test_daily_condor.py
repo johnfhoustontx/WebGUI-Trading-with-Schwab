@@ -17,7 +17,7 @@ _CT = ZoneInfo("America/Chicago")
 TODAY = "2026-09-17"
 NOW = dt.datetime(2026, 9, 17, 8, 45, tzinfo=_CT)
 CFG = {"enabled": True, "symbol": "SPY", "short_delta": 0.15, "width": 5.0,
-       "stop_mult": 2.0, "quantity": 1}
+       "stop_mult": 2.0, "quantity": 1, "max_delta_miss": 0.05}
 
 
 def _contract(kind, strike, delta):
@@ -84,6 +84,14 @@ def test_pick_skips_when_no_usable_delta():
     assert daily_condor.pick(chain, TODAY, CFG) == {"skip": "no usable put delta"}
 
 
+def test_pick_skips_when_the_nearest_usable_delta_is_too_far():
+    """Schwab's -999 on every near strike must not pass a far 0.02 put off as the
+    15-delta short: past ``max_delta_miss`` the day is a skip."""
+    near = {("put", float(k)): {"delta": -999.0} for k in range(563, 580)}
+    got = daily_condor.pick(_chain(overrides=near), TODAY, CFG)
+    assert got == {"skip": "no put delta within 0.05 of 0.15"}
+
+
 def test_pick_skips_without_a_wing_at_width():
     chain = _chain()
     del chain["callExpDateMap"][f"{TODAY}:0"]["595.0"]
@@ -130,7 +138,7 @@ def test_build_row_sets_the_price_stop():
     assert row["breakeven"] == "569.05 / 590.95"
     assert row["underlying_at_entry"] == 580.0 and row["dte_at_entry"] == 0
     assert row["entry_time"] == NOW.isoformat(timespec="seconds")
-    assert row["notes"] == "Daily SPY condor"
+    assert row["notes"] == "Daily SPY condor (put delta -0.15, call delta 0.15)"
     # the stop line is exactly a $3.00 cost to close
     from structure_marks import pnl_of
     assert pnl_of(row, 3.00) == pytest.approx(-row["stop_pnl"])

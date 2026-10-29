@@ -79,3 +79,8 @@ width = 5.0
 stop_mult = 2.0
 # Condors per day (a whole number, 1 or more).
 quantity = 1
+# How far a short leg's delta may sit from short_delta (0 to 0.5). When Schwab
+# sends no usable delta near the target - its -999 on the near strikes - the
+# nearest usable one can be far off; past this the day is skipped rather than
+# booked as a different trade.
+max_delta_miss = 0.05

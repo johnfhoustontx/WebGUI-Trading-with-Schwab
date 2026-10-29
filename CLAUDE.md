@@ -593,15 +593,21 @@ Detail: [options engine invariants](docs/reference/options-engine-invariants.md)
 - The five money-path views (paper account, rescue summary, ledger, ledger caps,
   the Paper answer) are validated by small models before they are published; an
   invalid payload is not published and is counted as a degrade.
-- **Trade-idea rows live in the Ledger** (`source == "trade_idea"`, and nothing else
-  identifies one). They book with no cap, are followed only by `idea_ledger.mark_cycle`
-  (5-minute marks, stop/target/expiry), and are skipped by the Ledger's caps, equity,
-  manage, expiry and reprice passes; **Delete all closed** never deletes one, it
-  stamps a closed one `cleared_at` and the page hides it (the review and `/eod`
-  still read it). Every new Ledger pass must skip them too. `[idea_trades] enabled` stops booking only. The weekly
-  review (`shared/idea_review.py`, `tools/weekly_idea_review.py`, archive in
-  `webgui/data/idea_review/`) rates them and checks Claude's numbers against the
-  computed facts ([design](docs/plans/2026-10-20-trade-idea-paper-tracking-design.md)).
+- **Self-managed rows live in the Ledger**: the trade ideas (`source == "trade_idea"`)
+  and the daily 0-DTE condor (`"daily_condor"`, booked at 08:45 CT by
+  `options_svc/daily_condor.py`). `source` alone identifies them, through
+  `idea_ledger.is_self_managed` / `SELF_MANAGED_SOURCES` (twin:
+  `trades_db.SELF_MANAGED_SOURCES`). They book with no cap, are followed only by
+  `idea_ledger.mark_cycle` (5-minute marks, stop/target/expiry), and are skipped by
+  the Ledger's caps, equity, manage, expiry and reprice passes; **Delete all closed**
+  never deletes one, it stamps a closed one `cleared_at` and the page hides it.
+  **Every new Ledger pass must skip them too: test `is_self_managed`, never
+  `is_idea`.** `is_idea` is the narrower "a posted idea", for the readers that
+  must never see a condor: the weekly review (`shared/idea_review.py`,
+  `tools/weekly_idea_review.py`, archive in `webgui/data/idea_review/`) rates the
+  ideas and checks Claude's numbers against the computed facts
+  ([design](docs/plans/2026-10-20-trade-idea-paper-tracking-design.md)), and the
+  site's idea results. `[idea_trades] enabled` stops booking ideas only.
 
 **Selection.**
 - ⚠ The "0-DTE" bucket spans DTE 0..4. The earnings gate's decision is

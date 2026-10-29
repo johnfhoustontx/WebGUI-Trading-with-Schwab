@@ -83,8 +83,11 @@ def pick(chain, expiration, cfg) -> dict:
 
     ``{"legs", "put_short", "put_long", "call_short", "call_long", "put_delta",
     "call_delta", "credit", "spot"}``; ``credit`` is per share, gross of commission,
-    the two verticals' realistic fills summed. Every leg must have a market
-    (``signal_repricer._market``), and a condor that takes in nothing is a skip."""
+    the two verticals' realistic fills summed. A short whose delta misses
+    ``short_delta`` by more than ``max_delta_miss`` is a skip (Schwab's ``-999`` on
+    the near strikes would otherwise pass a far strike off as the target), every leg
+    must have a market (``signal_repricer._market``), and a condor that takes in
+    nothing is a skip."""
     puts, calls = _contracts(chain, "put"), _contracts(chain, "call")
     spot = _sr._chain_spot(chain) if isinstance(chain, dict) else None
     if not puts or not calls or not spot:
@@ -97,6 +100,9 @@ def pick(chain, expiration, cfg) -> dict:
         if found is None:
             return _skip(f"no usable {kind} delta")
         short_k, delta = found
+        miss = float(cfg["max_delta_miss"])
+        if round(abs(abs(delta) - target), 6) > miss:
+            return _skip(f"no {kind} delta within {miss:g} of {target:g}")
         long_k = round(short_k + sign * width, 2)
         whole = puts if kind == "put" else calls
         if long_k not in whole:
@@ -147,8 +153,10 @@ def build_row(p, now, cfg, commission_total) -> dict:
         "breakeven": f"{p['put_short'] - net:.2f} / {p['call_short'] + net:.2f}",
         "underlying_at_entry": p["spot"],
         "entry_time": now.isoformat(timespec="seconds"),
-        "notes": "Daily SPY condor" if cfg["symbol"] == "SPY"
-        else f"Daily {cfg['symbol']} condor",
+        # The deltas the shorts were picked at, so a day picked off a thin chain can
+        # be found later (``short_delta`` holds one leg; an IC has two).
+        "notes": (f"Daily {cfg['symbol']} condor (put delta {p['put_delta']:.2f}, "
+                  f"call delta {p['call_delta']:.2f})"),
         "source": SOURCE, "entry_source": SOURCE,
         "target_pnl": None,
         "stop_pnl": round((float(cfg["stop_mult"]) * credit + k) * _MULT, 2),

@@ -51,7 +51,9 @@ a signal and not an idea: there is no scoring, no filter, and no judgment in it.
 
 Weekends, NYSE holidays (`shared.market_calendar`), `enabled = false`, a condor
 already booked today, and any day the chain cannot price it: no chain, no expiry
-today, no usable delta on a side (Schwab's `-999`, refused by `shared.greeks`), no
+today, no usable delta on a side (Schwab's `-999`, refused by `shared.greeks`), a
+nearest usable delta more than `max_delta_miss` (0.05, added after review) from the
+target, no
 strike exactly `width` away, or a leg with no bid/ask. Each skip logs one line with
 its reason. Nothing retries later in the day.
 
