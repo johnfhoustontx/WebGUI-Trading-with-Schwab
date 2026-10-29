@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-24</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-28</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -166,6 +166,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#black-scholes-the-simulator">Black-Scholes &amp; the Simulator</a><ul>
 <li><a href="#pricing-and-greeks">Pricing and Greeks</a></li>
 <li><a href="#spread-metrics-and-pl-grid">Spread metrics and P&amp;L grid</a></li>
+<li><a href="#thinkorswim-bracket-order-trade-detail-panel">ThinkorSwim bracket order (Trade detail panel)</a></li>
 <li><a href="#simulator-engines">Simulator engines</a></li>
 </ul>
 </li>
@@ -4827,6 +4828,27 @@ byte-identical to the legacy path). Each leg's <code>leg_T0</code> comes from
 (It previously built its own naive 4pm against a host-local clock, which on the CT
 box resolved to 17:00 ET: the grid carried an extra hour of time value in every
 cell, and the T=0 "Exp" column showed premium instead of the kinked payoff.)</p>
+<h2 id="thinkorswim-bracket-order-trade-detail-panel">ThinkorSwim bracket order (Trade detail panel)</h2>
+<p><code>webgui/pages/options/tos_order.py</code> builds the text the <strong>Copy ThinkorSwim
+order</strong> button copies, for a <strong>vertical</strong> only: two option legs, one long and
+one short, same right, same expiration, same quantity.</p>
+<ul>
+<li><strong>Direction</strong> comes from the strikes, never the sign of the price: a call
+  vertical is a debit when its long strike is the lower, a put vertical when its
+  long strike is the higher. ThinkorSwim reads <code>A/B</code> as long A, short B per +1,
+  so a debit opens <code>BUY +q … long/short</code> and a credit <code>SELL -q … short/long</code>.</li>
+<li><strong>Price</strong>: the absolute value of <code>net_cost</code>, else of <code>credit</code> (per share), to
+  two decimals.</li>
+<li><strong>Exits</strong>, from <code>config/tos_order.toml</code> (read on every click): debit
+  <code>@TRG+100.00% LMT</code> and <code>STP TRG-50.00% MARK</code>; credit <code>@TRG-50.00% LMT</code> and
+  <code>STP TRG+100.00% MARK</code>. Both are <code>TRG BY #1 OCO</code>: the opening order triggers
+  them and each cancels the other. A percentage below the entry must be under
+  100, or it falls back to the default.</li>
+<li><strong>Series tag</strong>: <code>(Weeklys)</code> for any expiration except the monthly — the third
+  Friday, or the session before it when that Friday is a closure
+  (<code>shared/market_calendar</code>). A <code>$</code> is stripped from an index symbol (<code>$SPX</code> →
+  <code>SPX</code>).</li>
+</ul>
 <h2 id="simulator-engines">Simulator engines</h2>
 <p><strong>File:</strong> <code>options-scanner/options_simulator/</code>.</p>
 <p>Positions are <strong>multi-leg</strong>: <code>Position(legs=[Leg(contract, sign, ratio), …])</code>, and
@@ -7818,7 +7840,7 @@ grids and arbitrary wall levels. Index gamma is only meaningful during the sessi
 </tr>
 <tr>
 <td>Flow: hedging surge (HIRO model)</td>
-<td>15-min hedge impact ≥ <strong>3×</strong> normal (RMS of full windows over the 5 prior sessions) AND ≥ $25M; ≤ 50% unlabelled volume; cooldown 30 min per direction; phone push at <strong>4×</strong> only with <code>push = true</code> (ships <code>false</code>); <code>public = false</code>; watching <code>$SPX SPY QQQ IWM</code></td>
+<td>15-min hedge impact ≥ <strong>3×</strong> normal (RMS of full windows over the 5 prior sessions) AND ≥ $25M; ≤ 50% unlabelled volume; cooldown 30 min per direction; phone push at <strong>4×</strong> only with <code>push = true</code> (ships <code>false</code>); <code>public = true</code>; watching <code>$SPX SPY QQQ IWM</code></td>
 <td><code>[hiro]</code></td>
 </tr>
 <tr>

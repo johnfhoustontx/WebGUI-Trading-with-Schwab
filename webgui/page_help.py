@@ -349,6 +349,15 @@ directional trades on their own tab.
   when a smaller size would fit, how many contracts. Before you send, the Paper
   trade box shows each limit in green (fits) or red (breaks) for the quantity you
   type, and greys out Create when one breaks.
+- **Copy ThinkorSwim order** (in the detail panel, for a vertical spread) puts
+  a bracket on the clipboard: the opening limit at the trade's price, then a
+  profit target and a stop that ThinkorSwim works out from the fill. In
+  ThinkorSwim use Trade → Order Entry Tools → *Paste order from clipboard*.
+  A debit spread targets +100% and stops at −50%; a credit spread targets
+  half the credit back and stops when the spread doubles (Settings →
+  Configuration → ThinkorSwim order). Condors, butterflies, calendars and
+  single options get no button. The same button is on every page with this
+  panel.
 - **Probability vs Needs** (in the detail panel) — "Needs" is the win rate this
   trade's own price DEMANDS to break even. Probability above it is cushion,
   below it means the trade loses money over time even when it usually wins.

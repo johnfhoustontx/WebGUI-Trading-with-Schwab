@@ -1837,6 +1837,37 @@ two-pane layout.
 (credit, max loss, DTE, delta, theta, IV rank, and more) — with the full
 checklist at the top.
 
+### Copying a trade to ThinkorSwim
+
+For a **vertical spread**, the contract card at the top of the detail panel has
+a **Copy ThinkorSwim order** button — on every page that shows the panel, such
+as the Market Scanner, Captured Signals and the Paper Ledger.
+It puts a *first triggers OCO* bracket on the clipboard:
+
+```
+BUY +1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @1.50 LMT [TO OPEN/TO OPEN]
+SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @TRG+100.00% LMT TRG BY #1 OCO [TO CLOSE/TO CLOSE]
+SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL STP TRG-50.00% MARK TRG BY #1 OCO [TO CLOSE/TO CLOSE]
+```
+
+In ThinkorSwim, open **Trade → Order Entry Tools → Paste order from clipboard**,
+check the ticket, and send it there. The app never places an order.
+
+- **The opening order** is a limit at the price the panel shows (the debit paid
+  or the credit received, per share).
+- **The two exits** are percentages of the fill, so ThinkorSwim prices them from
+  what you actually paid. A **debit** spread takes profit at **+100%** (double
+  the debit) and stops at **−50%**. A **credit** spread is the mirror: it buys
+  back at **half the credit** (−50%) and stops when the spread costs **double the
+  credit** (+100%). Change them, and the default size of 1, under **Settings →
+  Configuration → ThinkorSwim order**; a change applies on the next click.
+- An expiration that is not the monthly (third-Friday) one is tagged
+  **(Weeklys)**, as ThinkorSwim names it. The order is only as good as what the
+  panel shows: check the price, the expiration and the strikes in the ticket
+  before sending. A price may need rounding to the option's tick size.
+- **Condors, butterflies, calendars, single options and positions with shares
+  get no button.** The button is not on the public site.
+
 ### Using the checklist to pick a trade
 
 Every candidate row carries a **Checks** chip: the nine things worth knowing about

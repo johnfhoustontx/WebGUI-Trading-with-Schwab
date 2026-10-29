@@ -423,8 +423,8 @@ maps, and anything whose change needs code to follow it.
   `scanner` (selection floors and, since 2026-10-04, `[selection]` strike rules),
   `trade_mgmt`, `paper`, `symbols`, `sectors`, `marketdata`, `services`,
   `flow_alerts`, `notify`, `commissions`, `theme`, `news`, `edge`, `market_read`,
-  `blog`, `gamma_heat`, `listed_stocks`, `login_push`, `scalp`, and the public
-  tools' files.
+  `blog`, `gamma_heat`, `listed_stocks`, `login_push`, `scalp`, `tos_order`, and
+  the public tools' files.
 - `shared/market_calendar.py` is the single source for the NYSE calendar and the
   session/window predicates. Add no holiday literal or window constant elsewhere.
 - `options_calculator.RISK_FREE_RATE` is the one pricing rate; import it.

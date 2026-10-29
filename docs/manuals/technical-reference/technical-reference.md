@@ -2158,6 +2158,28 @@ byte-identical to the legacy path). Each leg's `leg_T0` comes from
 box resolved to 17:00 ET: the grid carried an extra hour of time value in every
 cell, and the T=0 "Exp" column showed premium instead of the kinked payoff.)
 
+## ThinkorSwim bracket order (Trade detail panel)
+
+`webgui/pages/options/tos_order.py` builds the text the **Copy ThinkorSwim
+order** button copies, for a **vertical** only: two option legs, one long and
+one short, same right, same expiration, same quantity.
+
+- **Direction** comes from the strikes, never the sign of the price: a call
+  vertical is a debit when its long strike is the lower, a put vertical when its
+  long strike is the higher. ThinkorSwim reads `A/B` as long A, short B per +1,
+  so a debit opens `BUY +q … long/short` and a credit `SELL -q … short/long`.
+- **Price**: the absolute value of `net_cost`, else of `credit` (per share), to
+  two decimals.
+- **Exits**, from `config/tos_order.toml` (read on every click): debit
+  `@TRG+100.00% LMT` and `STP TRG-50.00% MARK`; credit `@TRG-50.00% LMT` and
+  `STP TRG+100.00% MARK`. Both are `TRG BY #1 OCO`: the opening order triggers
+  them and each cancels the other. A percentage below the entry must be under
+  100, or it falls back to the default.
+- **Series tag**: `(Weeklys)` for any expiration except the monthly — the third
+  Friday, or the session before it when that Friday is a closure
+  (`shared/market_calendar`). A `$` is stripped from an index symbol (`$SPX` →
+  `SPX`).
+
 ## Simulator engines
 
 **File:** `options-scanner/options_simulator/`.

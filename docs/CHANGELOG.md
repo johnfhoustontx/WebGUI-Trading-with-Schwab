@@ -4,7 +4,24 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-28 (**Paper Ledger: Delete all closed clears closed trade ideas too.**)
+**Last updated:** 2026-10-28 (**Trade detail: Copy ThinkorSwim order.**)
+
+- At the user's request the Trade detail panel's contract card gains **Copy
+  ThinkorSwim order** for a vertical: a "1st triggers OCO" bracket in ThinkorSwim's
+  paste format (`pages/options/tos_order.py`). The opening limit is the panel's
+  price; the exits are percentages of the fill. Debit: +100% target, −50% stop (the
+  user's numbers). Credit, the user's choice of the mirror: −50% target, +100% stop.
+  All four and the size are `config/tos_order.toml` (Settings → Configuration,
+  read per click). Direction is read off the strikes, not the price's sign; a
+  non-monthly expiry is tagged `(Weeklys)`. The copy runs in the browser inside the
+  click (`detail.tos_copy_js`) and reports back for the toast. Condors, butterflies,
+  calendars, singles and share positions get no button; the public origin gets none.
+- Checked in the page harness on the Paper Ledger: the debit row hands the browser
+  the user's example verbatim, the credit row the mirrored bracket, the condor no
+  button. The in-app browser refuses all clipboard writes, so the real paste into
+  ThinkorSwim is unverified.
+
+**Prior —** 2026-10-28 (**Paper Ledger: Delete all closed clears closed trade ideas too.**)
 
 - The user reported that the Ledger's **Delete all closed** left the closed trade-idea
   rows on the list. That was the 2026-10-20 design's own call (those rows are the only

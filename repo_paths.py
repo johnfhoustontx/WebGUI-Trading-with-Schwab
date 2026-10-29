@@ -137,6 +137,9 @@ LISTED_STOCKS_TOML = REPO_ROOT / "config" / "listed_stocks.toml"
 MARKETDATA_TOML = REPO_ROOT / "config" / "marketdata.toml"
 MARKET_READ_TOML = REPO_ROOT / "config" / "market_read.toml"
 SERVICES_TOML = REPO_ROOT / "config" / "services.toml"
+# The Trade detail panel's "Copy ThinkorSwim order" bracket percentages
+# (webgui/pages/options/tos_order.py). Read on each click; no restart.
+TOS_ORDER_TOML = REPO_ROOT / "config" / "tos_order.toml"
 
 # History of Gamma Analyze briefings (the 4×/day Auto briefings + ad-hoc/manual runs).
 # Stores the STRUCTURED analysis payload (the source of truth) per (date, slot); the

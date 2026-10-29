@@ -31,6 +31,7 @@ the gauge**: it was the only chart on all four pages that mount this panel
 now. If one of those pages ever gains a chart created after first render, it has
 to bring its own anchor — this panel no longer provides one.
 """
+import json
 import logging
 import re
 
@@ -40,9 +41,10 @@ import bus_client
 import shell as _shell
 
 from .. import fmt as _fmt
+from .. import ui_kit as kit
 from ..fmt import num
-from ..ui_guard import is_deleted_error
-from . import checks, checks_feed, ev, svg
+from ..ui_guard import guard, is_deleted_error
+from . import checks, checks_feed, ev, svg, tos_order
 from .theme import (TXT_POS, TXT_WARN, TXT_NEG, TXT_NEUTRAL,
                     TILE_3D, CARD, EYEBROW, MUTED, THEME)
 
@@ -835,6 +837,11 @@ def _build_cards(s):
             caption = expiry_caption(s)
             if caption:
                 ui.label(caption).classes(f"text-xs {MUTED}")
+            # The contract as a ThinkorSwim bracket, for a vertical only. The
+            # owner's tool: the public origin draws none.
+            tos = None if _shell.is_public() else tos_order.order(s)
+            if tos:
+                _tos_button(tos)
 
     # 2 — THE ECONOMICS. Four figures, each carrying its unit: the two dollar
     # rows say "per contract" outright, so a per-share number can never be read
@@ -927,6 +934,43 @@ def _build_cards(s):
                 ui.label(label).classes("text-xs w-20 opacity-80")
                 ui.html(svg.gradient_bar_svg(val if known else 0))
                 ui.label(factor_value_text(val, known)).classes("text-xs w-8 text-right")
+
+
+TOS_COPIED_TEXT = "ThinkorSwim order copied. Paste it with Order Entry Tools."
+TOS_REFUSED_TEXT = ("The browser would not write to the clipboard. Allow "
+                    "clipboard access for this site and try again.")
+
+
+def tos_copy_js(text):
+    """The click's browser handler: writes ``text`` to the clipboard IN THE
+    BROWSER, inside the click, and reports back whether it could. A write sent
+    from the server after the round trip has lost the click, and Safari and a
+    phone refuse it."""
+    return ("() => { const c = navigator.clipboard; "
+            "if (!c || !c.writeText) { emit({ok: false}); return; } "
+            f"c.writeText({json.dumps(text)}).then(() => emit({{ok: true}}), "
+            "() => emit({ok: false})); }")
+
+
+def tos_copied(args):
+    """Whether the browser handler reported a successful write."""
+    return isinstance(args, dict) and args.get("ok") is True
+
+
+@guard
+def _tos_reported(e):
+    if tos_copied(getattr(e, "args", None)):
+        kit.toast("ok", TOS_COPIED_TEXT)
+    else:
+        kit.toast("warn", TOS_REFUSED_TEXT)
+
+
+def _tos_button(tos):
+    """The 'Copy ThinkorSwim order' button for ``tos_order.order``'s result."""
+    kit.button("Copy ThinkorSwim order", kind="quiet", icon="content_copy",
+               tooltip=tos["summary"]) \
+        .classes("self-start mt-1") \
+        .on("click", _tos_reported, js_handler=tos_copy_js(tos["text"]))
 
 
 def _greek(label, value, fmt="{:.3f}", color=None):

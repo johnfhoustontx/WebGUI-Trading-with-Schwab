@@ -2763,7 +2763,43 @@ _LOGIN_PUSH = ConfigFile(
     ),
 )
 
-FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _LOGIN_PUSH, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _SECTORS, _MOMENTUM,
+# ─────────────────────────────────────────────────────────────────────────────
+# The Trade detail panel's ThinkorSwim order — config/tos_order.toml
+# ─────────────────────────────────────────────────────────────────────────────
+_TOS_ORDER = ConfigFile(
+    name="tos_order.toml", title="ThinkorSwim order", icon="content_copy",
+    summary="The bracket the Trade detail panel's Copy ThinkorSwim order button "
+            "puts on the clipboard for a vertical: an opening limit that "
+            "triggers a profit target and a stop, each a percentage of the "
+            "fill. Read on every click.",
+    restart=(),
+    sections=(
+        Section("Order", "Change the size in ThinkorSwim when it differs.", (
+            Field("quantity", "Spreads per order", "", kind="int",
+                  min=1, max=1000, step=1),
+        )),
+        Section("Debit verticals", "Bought: the target is a rise in the "
+                "spread's price, the stop a fall.", (
+            Field("debit.target_pct", "Take profit above the debit",
+                  "100 sells at double what was paid.", unit="%",
+                  min=1, max=1000, step=5),
+            Field("debit.stop_pct", "Stop below the debit",
+                  "50 stops out at half what was paid. Under 100.", unit="%",
+                  min=1, max=99, step=5),
+        )),
+        Section("Credit verticals", "Sold: the target is a fall in the "
+                "spread's price, the stop a rise.", (
+            Field("credit.target_pct", "Take profit below the credit",
+                  "50 buys back at half the credit received. Under 100.",
+                  unit="%", min=1, max=99, step=5),
+            Field("credit.stop_pct", "Stop above the credit",
+                  "100 stops out when the spread costs double the credit.",
+                  unit="%", min=1, max=1000, step=5),
+        )),
+    ),
+)
+
+FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _LOGIN_PUSH, _TOS_ORDER, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _SECTORS, _MOMENTUM,
          _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
          _MARKET_READ, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
