@@ -2414,6 +2414,34 @@ by the same books as everything else. These rows behave differently from yours:
   ideas*, never in *Manual paper*, its *Paper Trades* table or its *Paper trades*
   tile. The Symbol dossier does not list an open idea as a position you hold.
 
+**The daily SPY condor.** Every trading morning at **08:45 CT** the app books one
+0-DTE iron condor on SPY into this ledger, tagged **SPY condor**, so one fixed,
+mechanical trade is measured day after day. It is set under Settings →
+Configuration → *Daily SPY condor in the Paper Ledger* (it ships on), and its time
+under *Daily SPY condor* in the schedule.
+
+- **The trade.** On today's expiry: sell the put whose delta is nearest **0.15** and
+  buy the put **$5** below it; sell the call whose delta is nearest 0.15 and buy the
+  call $5 above it. One condor (*Condors per day*). The price is a realistic fill
+  from a chain fetched at 08:45 (a little worse than the midpoint), and the
+  commission for opening and closing is taken at entry.
+- **The stop.** It closes when its loss reaches **2x the credit** (*Stop at a loss
+  of*): with $1.00 taken in, when buying it back costs $3.00. It is checked with the
+  trade ideas, **every 5 minutes**, and closes at that check's price, which can be
+  past $3.00 if SPY jumped between checks. There is no profit target.
+- **Otherwise held to the close** and settled at intrinsic value in the 15:05 CT
+  pass.
+- **No trade that day** on weekends and market holidays, when a condor is already
+  booked today, when the service starts after 08:55, or when the chain cannot price
+  it (no usable delta within 0.05 of the target, *Largest delta miss*; no strike
+  exactly $5 out; a leg with no quote). The reason is in the service log; the day is
+  not retried. The row's note records the two deltas the shorts were picked at.
+- **Like an idea row, but not an idea.** It is not held to the risk limits, the
+  automatic exit rules or the expiry pass above, and **Delete all closed** keeps it
+  on file. It shows under **All** only, not **My trades** or **Trade ideas**; the
+  weekly idea review never rates it, and the EOD Report and the Symbol dossier do
+  not count it as yours.
+
 ## Paper Account
 
 **Route:** `/options/portfolio`.

@@ -234,6 +234,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#the-weekly-review">The weekly review</a></li>
 </ul>
 </li>
+<li><a href="#the-daily-0-dte-condor-in-the-paper-ledger">The daily 0-DTE condor in the Paper Ledger</a></li>
 <li><a href="#market-news">Market News</a><ul>
 <li><a href="#sources">Sources</a></li>
 <li><a href="#tickers-duplicates-retention">Tickers, duplicates, retention</a></li>
@@ -355,7 +356,7 @@ would mean writing the same formulas out four times and letting the copies drift
 </tr>
 <tr>
 <td><strong>Captured Signals</strong> · <strong>Paper Ledger</strong> · <strong>Paper Account</strong></td>
-<td><em>Options Scoring</em> (entry quality) · <em>Rescue Tested Trades</em> (the management rules) · <em>Debit exit rules</em> (the Ledger's debit rows) · <em>Trade ideas in the Paper Ledger</em> (its tagged idea rows)</td>
+<td><em>Options Scoring</em> (entry quality) · <em>Rescue Tested Trades</em> (the management rules) · <em>Debit exit rules</em> (the Ledger's debit rows) · <em>Trade ideas in the Paper Ledger</em> (its tagged idea rows) · <em>The daily 0-DTE condor in the Paper Ledger</em> (its SPY condor rows)</td>
 </tr>
 <tr>
 <td><strong>Rescue</strong></td>
@@ -7133,6 +7134,79 @@ that, and the prompt tells Claude to keep each figure's sign and subject.</p>
 the facts it cites (the totals count only when they are the only cites), never a sum -
 the cited groups overlap, so a sum would invent trades. It is <code>thin</code> when that <code>n</code> is
 below <code>min_n</code>.</p>
+<h1 id="the-daily-0-dte-condor-in-the-paper-ledger">The daily 0-DTE condor in the Paper Ledger</h1>
+<p><strong>Files:</strong> <code>services/options_svc/daily_condor.py</code> (pick, row, booking),
+<code>services/options_svc/scheduler.py</code> (<code>daily_condor_due</code>),
+<code>services/options_svc/handlers.py</code> (<code>run_daily_condor</code>), <code>config/paper.toml</code>
+<code>[daily_condor]</code>, <code>config/sessions.toml</code> <code>[slots.daily_condor]</code>. Design:
+<code>docs/plans/2026-10-29-daily-spy-condor-design.md</code>.</p>
+<p>At <code>[slots.daily_condor] at</code> (08:45 CT, grace 10 minutes, once per trading day,
+never backfilled) one chain of <code>symbol</code>'s same-day expiry is fetched with
+<code>max_age=0</code>. <code>daily_condor.pick</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Short</td>
+<td>the out-of-the-money strike (put below spot, call above) whose usable delta (<code>shared.greeks.delta</code>, which refuses <code>-999</code>) is nearest <code>short_delta</code> (0.15); a tie (to 6 places) takes the strike farther from spot; a miss above <code>max_delta_miss</code> (0.05) is a skip, so <code>-999</code> on the near strikes cannot pass a far strike off as the target. Both deltas go in <code>notes</code></td>
+</tr>
+<tr>
+<td>Wing</td>
+<td>the strike exactly <code>width</code> (5.0) beyond the short; absent is a skip</td>
+</tr>
+<tr>
+<td>Markets</td>
+<td>every leg must have one (<code>signal_repricer._market</code>)</td>
+</tr>
+<tr>
+<td>Credit <code>c</code></td>
+<td>per share: <code>fill_model.realistic_vertical_fill(..., "SELL_TO_OPEN")</code> for each vertical, summed, rounded to 2 places; <code>c &lt;= 0</code> is a skip</td>
+</tr>
+</tbody>
+</table>
+<p>The row (<code>build_row</code>) is an ordinary <code>IC</code> row with <code>source = "daily_condor"</code>. With
+<code>k</code> the round-trip commission a share (<code>commission.round_trip_commission("IC", ...)</code>
+/ quantity / 100):</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>entry_credit</code></td>
+<td><code>c - k</code> (per share)</td>
+</tr>
+<tr>
+<td><code>max_loss_per</code></td>
+<td><code>width - (c - k)</code></td>
+</tr>
+<tr>
+<td><code>stop_pnl</code></td>
+<td><code>(stop_mult x c + k) x 100</code> per contract, so the stop fires at a cost to close of <code>(1 + stop_mult) x c</code> exactly</td>
+</tr>
+<tr>
+<td><code>target_pnl</code></td>
+<td>None</td>
+</tr>
+</tbody>
+</table>
+<p><code>book</code> (under <code>paper_lock.BOOK_LOCK</code>) books at most one a day per symbol, across
+every row open or closed; it evaluates <strong>no</strong> risk cap. From then on the row is
+<strong>self-managed</strong> (<code>idea_ledger.SELF_MANAGED_SOURCES</code>): <code>idea_ledger.mark_cycle</code> marks
+it every <code>[idea_trades] mark_interval_min</code> minutes and closes it at its stop at the
+mark's value, the 15:05 settle pass settles it at intrinsic, and every pass of the
+user's own Ledger (<code>ledger_book_state</code>, the chain reprice, <code>manage_ledger_trades</code>,
+<code>expire_ledger_trades</code>, the action list) skips it. <strong>Delete all closed</strong> clears it
+(<code>cleared_at</code>) rather than deleting it. <code>idea_ledger.is_idea</code> is false for it, so
+the weekly idea review and the site's idea results never read it.</p>
 <h1 id="market-news">Market News</h1>
 <p><code>services/news_svc</code> — one of the two services with no Schwab or Claude call and no
 call to the proxy (the other is <code>blog_svc</code>, see <em>Site Blog</em>). It reads one optional

@@ -4,7 +4,30 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-29 (**The site's Live Desk becomes a turning 3D wall of its twelve screens.**)
+**Last updated:** 2026-10-29 (**A daily SPY 0-DTE iron condor is booked into the Paper Ledger at 08:45 CT.**)
+
+- The user asked for one mechanical trade a day: sell a 15-delta put spread and
+  a 15-delta call spread, $5 wide, on SPY's same-day expiry at about 08:45, into
+  the Paper Ledger, stopped at a loss of 2x the credit ("if I pay $1, $3 is
+  200%"), otherwise carried to the close, past every per-trade limit, checked
+  every 5 minutes.
+- `services/options_svc/daily_condor.py` picks and prices it from a chain fetched
+  at that moment (the realistic fill, commission in) and books an `IC` row with
+  `source = "daily_condor"`; `[slots.daily_condor]` fires it once per trading day
+  with a 10-minute grace, and a day it cannot price is skipped with the reason
+  logged. Config: `config/paper.toml [daily_condor]`, in Settings ->
+  Configuration.
+- Its rows ride the trade ideas' machinery: `idea_ledger.SELF_MANAGED_SOURCES`
+  / `is_self_managed` widen the ideas' 5-minute mark, stop and settlement and
+  their exclusion from the user's own Ledger passes, and Delete all closed
+  clears them. `is_idea` keeps its narrower meaning, so the weekly review never
+  rates a condor. The Ledger page tags them **SPY condor** and shows them under
+  All only; /eod and the Symbol page leave them out of the user's positions.
+- Manuals: User Guide (Paper Ledger), Technical Reference (a new section), and
+  the Ledger's hover guide. [Design](plans/2026-10-29-daily-spy-condor-design.md),
+  [plan](plans/2026-10-29-daily-spy-condor-plan.md). Not yet on prod.
+
+**Prior —** 2026-10-29 (**The site's Live Desk becomes a turning 3D wall of its twelve screens.**)
 
 - The user's design handoff (`Neural Strike Live redesign.zip`, option 3a
   "Wall") is the basis. `deploy/site/live.html`: the hero takes the design's

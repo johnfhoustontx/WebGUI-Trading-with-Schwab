@@ -74,6 +74,7 @@ _BRANCH_HANDLERS = (
     "publish_tracked", "run_tracked_manage_and_publish",
     "run_paper_entry_and_manage", "run_paper_settle", "run_scheduled_gamma_analyze",
     "run_action_alert", "run_eod_summary", "run_market_snapshot", "run_trade_idea",
+    "run_daily_condor",
     "refresh_calibration", "refresh_ledger_caps",
     # The income branch is due at the fixed 09:00 CT clock these tests pin
     # (slot 08:52 + 20 min grace), and unstubbed it fans out ~23 LIVE chain

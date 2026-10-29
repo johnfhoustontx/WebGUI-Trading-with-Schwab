@@ -1355,6 +1355,13 @@ engine's positions live on **Paper Account**.
   takes closed trade ideas off this list too, but keeps them on file, so the
   weekly review of ideas and the end-of-day report keep their record; deleting an
   idea row yourself, from its own panel, removes it from that review too.
+- **The daily SPY condor lives here too.** Every trading morning at 08:45 CT one
+  0-DTE SPY iron condor is booked, tagged **SPY condor**: 15-delta shorts, $5
+  wings, past every risk limit. It is checked every 5 minutes with the ideas and
+  closes when its loss reaches 2x the credit (buy-back at 3x); otherwise it is
+  settled at the close. It shows under **All** only, and **Delete all closed**
+  keeps it on file. Settings -> Configuration -> *Daily SPY condor in the Paper
+  Ledger*.
 - Use it to test ideas from the Market Scanner without risk.
 """,
     "/options/captured": """

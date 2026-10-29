@@ -41,7 +41,7 @@ Use this map to get from a screen to its numbers. Menu order matches the rail.
 | **Market Scanner** | *Options Scoring* · *Technical Indicators* |
 | **Strategy Finder** | *Options Scoring* (the Fit + Quality score) |
 | **Expected Move** | *Options Scoring* → **Expected move and IV analysis** |
-| **Captured Signals** · **Paper Ledger** · **Paper Account** | *Options Scoring* (entry quality) · *Rescue Tested Trades* (the management rules) · *Debit exit rules* (the Ledger's debit rows) · *Trade ideas in the Paper Ledger* (its tagged idea rows) |
+| **Captured Signals** · **Paper Ledger** · **Paper Account** | *Options Scoring* (entry quality) · *Rescue Tested Trades* (the management rules) · *Debit exit rules* (the Ledger's debit rows) · *Trade ideas in the Paper Ledger* (its tagged idea rows) · *The daily 0-DTE condor in the Paper Ledger* (its SPY condor rows) |
 | **Rescue** | *Rescue Tested Trades* |
 | **Opening Scalp** | *Opening Scalp* — the direction, the alignment buckets, the modelled outcomes, the walk-forward verdict, the 08:36 call and the grading; *The 15-minute calls* — the slots and blocks, the price reading, the day-unit study, the confirmation reading, the recording and the intraday grading; *The chance of target* — the factors, the scaling, the priors, the fit, the weekly walk-forward check and the Saturday refit · *Black-Scholes & the Simulator* (the pricer it reuses) |
 | **Trade Analyzer** | *Trade Analyzer* · *Technical Indicators* |
@@ -4067,6 +4067,46 @@ that, and the prompt tells Claude to keep each figure's sign and subject.
 the facts it cites (the totals count only when they are the only cites), never a sum -
 the cited groups overlap, so a sum would invent trades. It is `thin` when that `n` is
 below `min_n`.
+
+# The daily 0-DTE condor in the Paper Ledger
+
+**Files:** `services/options_svc/daily_condor.py` (pick, row, booking),
+`services/options_svc/scheduler.py` (`daily_condor_due`),
+`services/options_svc/handlers.py` (`run_daily_condor`), `config/paper.toml`
+`[daily_condor]`, `config/sessions.toml` `[slots.daily_condor]`. Design:
+`docs/plans/2026-10-29-daily-spy-condor-design.md`.
+
+At `[slots.daily_condor] at` (08:45 CT, grace 10 minutes, once per trading day,
+never backfilled) one chain of `symbol`'s same-day expiry is fetched with
+`max_age=0`. `daily_condor.pick`:
+
+| Step | Rule |
+|---|---|
+| Short | the out-of-the-money strike (put below spot, call above) whose usable delta (`shared.greeks.delta`, which refuses `-999`) is nearest `short_delta` (0.15); a tie (to 6 places) takes the strike farther from spot; a miss above `max_delta_miss` (0.05) is a skip, so `-999` on the near strikes cannot pass a far strike off as the target. Both deltas go in `notes` |
+| Wing | the strike exactly `width` (5.0) beyond the short; absent is a skip |
+| Markets | every leg must have one (`signal_repricer._market`) |
+| Credit `c` | per share: `fill_model.realistic_vertical_fill(..., "SELL_TO_OPEN")` for each vertical, summed, rounded to 2 places; `c <= 0` is a skip |
+
+The row (`build_row`) is an ordinary `IC` row with `source = "daily_condor"`. With
+`k` the round-trip commission a share (`commission.round_trip_commission("IC", ...)`
+/ quantity / 100):
+
+| Field | Value |
+|---|---|
+| `entry_credit` | `c - k` (per share) |
+| `max_loss_per` | `width - (c - k)` |
+| `stop_pnl` | `(stop_mult x c + k) x 100` per contract, so the stop fires at a cost to close of `(1 + stop_mult) x c` exactly |
+| `target_pnl` | None |
+
+`book` (under `paper_lock.BOOK_LOCK`) books at most one a day per symbol, across
+every row open or closed; it evaluates **no** risk cap. From then on the row is
+**self-managed** (`idea_ledger.SELF_MANAGED_SOURCES`): `idea_ledger.mark_cycle` marks
+it every `[idea_trades] mark_interval_min` minutes and closes it at its stop at the
+mark's value, the 15:05 settle pass settles it at intrinsic, and every pass of the
+user's own Ledger (`ledger_book_state`, the chain reprice, `manage_ledger_trades`,
+`expire_ledger_trades`, the action list) skips it. **Delete all closed** clears it
+(`cleared_at`) rather than deleting it. `idea_ledger.is_idea` is false for it, so
+the weekly idea review and the site's idea results never read it.
 
 # Market News
 

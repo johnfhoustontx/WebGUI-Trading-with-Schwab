@@ -485,9 +485,13 @@ Schwab call, runs at any time and allows 600 an hour. Their limits are in
 <strong>Settings → Configuration → Public Calculator and Simulator</strong>; the daily
 budget is under <strong>Public Rescue form → Budget</strong>, because it is one allowance
 behind all three.</p>
-<p><code>https://neuralstrike.co/live.html</code> is a thumbnail menu of them, and the site's
-<strong>Tools</strong> menu links Option Signals, the Strategy Finder, Rescue, <strong>Strategy
-Tools</strong> (it opens the Calculator) and Market News.</p>
+<p><code>https://neuralstrike.co/live.html</code> is the <strong>Live Desk</strong>: the twelve screens'
+thumbnails on a slowly turning wall. Drag it, or use the arrow buttons or keys.
+Click a side screen to bring it to the front and the front one to open it. The
+group chips turn it to Market regime, Dealer positioning or Sector rotation. A
+row under the wall links Option Signals, the Strategy Finder, Rescue, <strong>Strategy
+Tools</strong> (it opens the Calculator) and Market News. With JavaScript off the same
+page is a plain grid of the thumbnails.</p>
 <p>The public <strong>Market News</strong> page is your Market News page — headlines, the SEC
 filings and the calendar, laid out the same way — with every control that belongs to you taken out: no
 Refresh, no Watchlist only, and a ticker is a filter chip rather than a link to a
@@ -2862,6 +2866,34 @@ by the same books as everything else. These rows behave differently from yours:<
 <li><strong>Counted on their own.</strong> The EOD Report counts them as a third book, <em>Trade
   ideas</em>, never in <em>Manual paper</em>, its <em>Paper Trades</em> table or its <em>Paper trades</em>
   tile. The Symbol dossier does not list an open idea as a position you hold.</li>
+</ul>
+<p><strong>The daily SPY condor.</strong> Every trading morning at <strong>08:45 CT</strong> the app books one
+0-DTE iron condor on SPY into this ledger, tagged <strong>SPY condor</strong>, so one fixed,
+mechanical trade is measured day after day. It is set under Settings →
+Configuration → <em>Daily SPY condor in the Paper Ledger</em> (it ships on), and its time
+under <em>Daily SPY condor</em> in the schedule.</p>
+<ul>
+<li><strong>The trade.</strong> On today's expiry: sell the put whose delta is nearest <strong>0.15</strong> and
+  buy the put <strong>$5</strong> below it; sell the call whose delta is nearest 0.15 and buy the
+  call $5 above it. One condor (<em>Condors per day</em>). The price is a realistic fill
+  from a chain fetched at 08:45 (a little worse than the midpoint), and the
+  commission for opening and closing is taken at entry.</li>
+<li><strong>The stop.</strong> It closes when its loss reaches <strong>2x the credit</strong> (<em>Stop at a loss
+  of</em>): with $1.00 taken in, when buying it back costs $3.00. It is checked with the
+  trade ideas, <strong>every 5 minutes</strong>, and closes at that check's price, which can be
+  past $3.00 if SPY jumped between checks. There is no profit target.</li>
+<li><strong>Otherwise held to the close</strong> and settled at intrinsic value in the 15:05 CT
+  pass.</li>
+<li><strong>No trade that day</strong> on weekends and market holidays, when a condor is already
+  booked today, when the service starts after 08:55, or when the chain cannot price
+  it (no usable delta within 0.05 of the target, <em>Largest delta miss</em>; no strike
+  exactly $5 out; a leg with no quote). The reason is in the service log; the day is
+  not retried. The row's note records the two deltas the shorts were picked at.</li>
+<li><strong>Like an idea row, but not an idea.</strong> It is not held to the risk limits, the
+  automatic exit rules or the expiry pass above, and <strong>Delete all closed</strong> keeps it
+  on file. It shows under <strong>All</strong> only, not <strong>My trades</strong> or <strong>Trade ideas</strong>; the
+  weekly idea review never rates it, and the EOD Report and the Symbol dossier do
+  not count it as yours.</li>
 </ul>
 <h2 id="paper-account">Paper Account</h2>
 <p><strong>Route:</strong> <code>/options/portfolio</code>.</p>
