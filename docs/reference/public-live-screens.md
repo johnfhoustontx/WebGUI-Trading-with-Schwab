@@ -264,12 +264,17 @@ is no layer here: the `live` user can read the whole `cache:options:flow_alerts`
 ⚠ **The published route set is the eighteen screens, the eight 308 redirects in
 `live_screens.RETIRED_ROUTES` (the pinned Gamma screens retired 2026-09-22, each
 now a redirect to `/gamma`), PLUS exactly one non-page route: `/static`
-(2026-09-09).** Every screen now carries a slim header — the
-brand lockup, a hairline, the screen name, and **no navigation of any kind** —
-and `[brand].mark` is a file under `/static`, which this process serves from its
-OWN ASGI app: measured before the mount, `:8500/static/img/neuralstrike-mark.svg`
-was 200 and `:8501` was 404, so the header would have drawn a broken image while
-the markup read as correct. ⚠ **Mounting a directory publishes every file in it,
+(2026-09-09).** Every screen carries the public SITE's own menu (since
+2026-10-29, `webgui/site_nav.py`): copied from `deploy/site/blog.html` as the
+blog entries copy it, every address made absolute on `SITE_HOST`, the logo a
+link to the site's home page, and the screen's name as the site's breadcrumb.
+⚠ **Every link is a page on the public site**, never this origin's or the app's;
+`site_nav` refuses a menu holding anything else. When the menu cannot be read
+the header falls back to the app's brand lockup and the screen name, with no
+links — and that lockup's `[brand].mark` is a file under `/static`, which this
+process serves from its OWN ASGI app: measured before the mount,
+`:8500/static/img/neuralstrike-mark.svg` was 200 and `:8501` was 404, so the
+header would have drawn a broken image while the markup read as correct. ⚠ **Mounting a directory publishes every file in it,
 now and later** — that tree is three alert WAVs and four brand images, and
 `test_live_main.py` pins both that `/static` is the only addition and that
 nothing but bundled assets lives under it. `/voice` is deliberately NOT mounted.

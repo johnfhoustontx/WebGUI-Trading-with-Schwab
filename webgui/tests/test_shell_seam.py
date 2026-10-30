@@ -460,6 +460,9 @@ def test_both_content_columns_carry_the_app_scope():
     assert 'classes("ns-app w-full p-4 gap-3 pb-10")' in \
         (webgui / "main.py").read_text(encoding="utf-8")
     # pb-10 on both: each origin mounts the fixed market-summary marquee, and
-    # the padding is what keeps it off the last content row.
-    assert '_CONTENT = "ns-app w-full p-4 gap-3 pb-10"' in \
+    # the padding is what keeps it off the last content row. The public column
+    # is p-8 / pb-14 because live_main also takes NiceGUI's own 16px page
+    # padding away (so the site menu runs edge to edge): 16 + p-4 = p-8, and
+    # 16 + pb-10 = pb-14, the same clearance in the same place.
+    assert '_CONTENT = "ns-app w-full p-8 gap-3 pb-14"' in \
         (webgui / "live_main.py").read_text(encoding="utf-8")

@@ -1873,20 +1873,31 @@ the same fixed footer `main._layout` mounts. It reads only `market:summary`
 (the published market report) and enqueues nothing; `ticker_enabled` /
 `ticker_speed` come from the frozen store's DEFAULTS.
 
-**Every screen carries a slim brand header (2026-09-09).** The brand reached these
-screens through the browser TAB TITLE alone, which is not what a stranger reads — so
-someone opening one saw a dense trading board belonging to nobody. `live_main._header(screen)` draws the app header's LEFT half and nothing
-else: `shell.brand_lockup_html()` (mark + two-tone wordmark), a hairline, and
-`screen.title`, over a `border-b` band about 40px tall. The mark is sized 32px here
-rather than the app's 44px — `LIVE_HEADER_CSS`, this entrypoint's one `ui.add_css`,
-and the documented escape hatch since `.brand-mark` lives inside a raw HTML string.
-The screen name reuses `shell._CRUMB_LEAF`, the private breadcrumb's leaf style, so
-the two cannot drift.
+**Every screen carries the public site's menu (2026-10-29).** The brand reached these
+screens through the browser TAB TITLE alone until 2026-09-09, and from then until
+2026-10-29 through a slim header of the app's own: a 32px image mark and the
+Montserrat wordmark, a different size and face from neuralstrike.co's, and not a
+link. `live_main._header(screen)` now draws `site_nav.site_nav_html(screen.title)`:
+the `<nav>` of `deploy/site/blog.html` (the menu the blog entries carry, found by
+the same pattern as `sitewriter.NAV_RE`), with every address made absolute on
+`repo_paths.SITE_HOST` — the logo goes to `https://<site_host>/` — the Live Desk
+marked as the page you are on, the sticky class dropped (a screen pins its own table
+headers), and `screen.title` as the site's `.ns-crumb` after the wordmark. Its
+styling is `site_nav.SITE_NAV_CSS`, the site's own declarations scoped under
+`.ns-site-bar` (`tests/test_site_nav.py` compares each with `site.css` and
+`nocturne.css`), and its face is Inter from Google Fonts. `_render` takes NiceGUI's
+page padding off so the menu runs edge to edge; `_CONTENT` (`p-8`, `pb-14`) puts it
+back around the screen. A change to the site's menu reaches the screens on their
+next restart.
 
-⚠ **The header links to NOTHING, and that is the design.** Settings, Terminate, Sign
-out and the whole rail do not exist in this process; a link to a route this origin
-does not serve reads as broken, and one pointing at the private host would advertise
-it. ⚠ It also forced the **one non-page route** this process serves: `[brand].mark` is
+⚠ **Every link is a page on the PUBLIC SITE, and that is the design.** Settings,
+Terminate, Sign out and the whole rail do not exist in this process; a link to a
+route this origin does not serve reads as broken, and one pointing at the private
+host would advertise it. `site_nav` refuses a menu holding anything but plain site
+pages and then answers `""`, and the header falls back to the app's lockup
+(`shell.brand_lockup_html()`, the mark at 32px through `LIVE_HEADER_CSS`), a
+hairline and the screen name, with no links. ⚠ That fallback is why this process
+still serves its **one non-page route**: `[brand].mark` is
 a file under `/static`, and `live_main` mounts that directory (measured before the
 mount, `:8500/static/img/neuralstrike-mark.svg` was 200 and `:8501` was 404). Mounting
 a directory publishes every file in it — three alert WAVs and four brand images, no

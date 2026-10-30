@@ -62,6 +62,7 @@ for _p in (str(_HERE.parent), str(_HERE)):
 import app_settings                                   # noqa: E402
 import bus_client                                     # noqa: E402
 import live_screens                                   # noqa: E402
+import site_nav                                       # noqa: E402
 
 from repo_paths import (ENV_NAME, LIVE_HOST,          # noqa: E402
                         NICEGUI_LIVE_PORT, REDIS_DB)
@@ -365,21 +366,36 @@ nicegui_app.storage.max_tab_storage_age = public_tools.handoff_keep_min() * 60
 # (the ten Dealer Positioning pins are the same module and draw none). Wrapping
 # them again would draw a second frame around each. A neutral container is what
 # "cannot drift from the private page" actually means here.
-_CONTENT = "ns-app w-full p-4 gap-3 pb-10"
+#
+# p-8 / pb-14 rather than the app's p-4 / pb-10: `_render` takes NiceGUI's own
+# 16px page padding away so the site menu can run edge to edge, and this puts
+# it back around the screen, which therefore sits exactly where it did.
+_CONTENT = "ns-app w-full p-8 gap-3 pb-14"
 
 # ── the public header ────────────────────────────────────────────────────────
 # The brand reached these screens through the browser TAB TITLE alone, which is
 # not what a stranger reads — so someone opening a published screen saw a dense
 # trading board with nothing saying whose it is.
 #
-# It is the app header's LEFT half and nothing else: the lockup, a hairline, the
-# screen's name. ⚠ NO NAVIGATION OF ANY KIND, and not because there is nothing
-# worth linking to — Settings, Terminate, Sign out and the whole rail DO NOT
-# EXIST in this process, and that origin separation IS the security control. A
-# link to a route this origin does not serve reads as broken; one pointing at
-# the private host would advertise it. There is nothing here to click.
-_HEADER = ("live-header w-full items-center gap-3 no-wrap px-4 pb-2 "
+# Since 2026-10-29 it is the PUBLIC SITE'S OWN MENU (`site_nav`), the one
+# every page on neuralstrike.co carries: the same 26px mark and
+# wordmark, the logo a link to the site's home page, the same links, and the
+# screen's name as the site's breadcrumb. Before that it was the app's lockup
+# (a 32px image and the Montserrat wordmark) with no links, so the logo changed
+# size and face between the site and a screen and went nowhere.
+#
+# ⚠ EVERY LINK IS ON THE PUBLIC SITE, never on this origin or the app's.
+# Settings, Terminate, Sign out and the whole rail DO NOT EXIST in this
+# process, and that origin separation IS the security control: a link to a
+# route this origin does not serve reads as broken, and one pointing at the
+# private host would advertise it. `site_nav` refuses a menu holding anything
+# but plain site pages, and `tests/test_live_main.py` checks every address.
+#
+# The fallback, when the site's menu cannot be read: the app's lockup, as
+# before, with the screen's name after a hairline.
+_HEADER = ("live-header w-full items-center gap-3 no-wrap px-8 pt-4 pb-2 "
            "border-b border-white/[0.06]")
+_SITE_BAR = "ns-site-bar w-full"
 
 # The app's own "the thing you are looking at" crumb style, taken from the seam
 # rather than restated, so the public screen name and the private breadcrumb
@@ -408,7 +424,11 @@ LIVE_HEADER_CSS = """
 
 
 def _header(screen) -> None:
-    """The brand lockup, a hairline, and the name of the screen you are on."""
+    """The site's menu with the screen's name, or the plain lockup without it."""
+    nav = site_nav.site_nav_html(screen.title)
+    if nav:
+        ui.html(nav).classes(_SITE_BAR)
+        return
     with ui.row().classes(_HEADER):
         # mark=True — unlike `main._layout`, which passes mark=False because
         # there the logo is a real button (the menu's pin control) built beside
@@ -458,6 +478,12 @@ def _render(screen) -> None:
         ui.add_head_html(theme.BRAND_FONT_HEAD_HTML)
     ui.add_css(theme.BRAND_CSS)
     ui.add_css(LIVE_HEADER_CSS)
+    # The site's menu: its stylesheet (scoped to `.ns-site-bar`) and its face.
+    ui.add_head_html(site_nav.FONT_HEAD_HTML)
+    ui.add_css(site_nav.SITE_NAV_CSS)
+    # The menu runs edge to edge as it does on the site, so NiceGUI's own page
+    # padding goes and `_CONTENT` carries it instead (p-8 = 16px + p-4).
+    ui.query(".nicegui-content").classes("p-0")
     module = importlib.import_module(f"pages.{screen.module}")
     # The header is a SIBLING of the page's own container, not a Quasar
     # ``ui.header``: a fixed bar would need the layout padding `main._NAV_CSS`

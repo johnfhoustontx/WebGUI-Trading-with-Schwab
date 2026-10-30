@@ -439,7 +439,7 @@ def _drive_render(screen, monkeypatch):
         colors=lambda **_k: None,
         column=lambda *a, **k: _Slot(), row=lambda *a, **k: _Slot(),
         html=lambda *a, **k: _Slot(), label=lambda *a, **k: _Slot(),
-        element=lambda *a, **k: _Slot()))
+        element=lambda *a, **k: _Slot(), query=lambda *a, **k: _Slot()))
     monkeypatch.setattr(live_main, "importlib", types.SimpleNamespace(
         import_module=lambda _n: types.SimpleNamespace(render=lambda **_k: None)))
     live_main._render(screen)
@@ -498,45 +498,52 @@ def test_the_public_render_injects_the_page_level_css(monkeypatch):
 # trading board belonging to nobody. These pin the header that fixes that, and
 # the three things it must never become.
 
-def test_every_published_screen_carries_the_brand(monkeypatch):
-    """⚠ Asserted against the BUILDER's own output, never the word
-    "NeuralStrike". The app name is ``[brand]`` config -- two halves, each
-    carrying its own gradient -- so a test looking for a literal would pass a
-    lockup that had lost its mark, its second half or its wrapper, and would
-    fail on a rename that broke nothing."""
+def test_every_published_screen_carries_the_site_menu(monkeypatch):
+    """The SITE's menu, the one neuralstrike.co's pages carry -- so the logo is
+    the same size and face on a screen as on the site. Asserted against the
+    builder's own output, never a literal, so a lost mark or wordmark fails."""
     import live_screens
-    import shell
+    import site_nav
 
-    lockup = shell.brand_lockup_html()
-    assert "brand-word" in lockup, "the builder returned nothing to look for"
     for screen in live_screens.SCREENS:
-        assert lockup in _markup(_rendered(screen, monkeypatch)), \
-            f"{screen.route} renders no brand lockup"
+        nav = site_nav.site_nav_html(screen.title)
+        assert 'class="ns-lockup"' in nav, "the builder returned nothing to look for"
+        assert nav in _markup(_rendered(screen, monkeypatch)), \
+            f"{screen.route} renders no site menu"
 
 
 def test_the_header_names_the_screen_it_is(monkeypatch):
-    """The other half of "whose screen is this": WHICH screen.
+    """The other half of "whose screen is this": WHICH screen, as the site's
+    breadcrumb after the logo.
 
     Checked both ways -- the screen's own title is present AND no other
     screen's is -- because the loop-variable trap this file already pins would
     show up here as fourteen headers all reading "Premium Divergence · QQQ",
     which is a header worse than none."""
+    import html
+
     import live_screens
+
+    def crumb(title):
+        return f'<span class="ns-crumb">{html.escape(title)}</span>'
 
     titles = [s.title for s in live_screens.SCREENS]
     assert len(set(titles)) == len(titles), "two screens share a title"
     for screen in live_screens.SCREENS:
-        texts = {str(getattr(e, "text", "")) for e in _rendered(screen, monkeypatch)}
-        assert screen.title in texts, f"{screen.route} does not name itself"
-        wrong = texts & {t for t in titles if t != screen.title}
-        assert not wrong, f"{screen.route} names {sorted(wrong)}"
+        markup = "".join(_markup(_rendered(screen, monkeypatch)))
+        assert crumb(screen.title) in markup, f"{screen.route} does not name itself"
+        wrong = [t for t in titles if t != screen.title and crumb(t) in markup]
+        assert not wrong, f"{screen.route} names {wrong}"
 
 
-def test_the_public_header_links_to_nothing(monkeypatch):
+def test_the_public_header_links_only_to_the_public_site(monkeypatch):
     """⚠ Settings, Terminate, Sign out and the rail DO NOT EXIST in this
     process, and that origin separation IS the security control. A link to a
     route this origin does not serve reads as broken; one pointing at the
-    private host would advertise it. The header is identity, not navigation."""
+    private host would advertise it. So every address the header carries is a
+    page on the public SITE -- and the logo is its home page."""
+    import re
+
     import live_screens
 
     elements = _rendered(live_screens.SCREENS[0], monkeypatch)
@@ -546,19 +553,42 @@ def test_the_public_header_links_to_nothing(monkeypatch):
         for key in ("href", "to"):
             assert key not in props, \
                 f"{type(element).__name__} carries {key}={props.get(key)!r}"
-    for markup in _markup(elements):
-        assert "<a " not in markup and "href=" not in markup, markup
+    markup = "".join(_markup(elements))
+    hrefs = re.findall(r'href="([^"]*)"', markup)
+    assert hrefs, "the menu carries no links -- this test would be vacuous"
+    site = f"https://{repo_paths.SITE_HOST}/"
+    for href in hrefs:
+        assert href.startswith(site), href
+    assert f'<a class="ns-lockup" href="{site}"' in markup, "the logo does not go home"
 
 
-def test_the_header_survives_a_missing_brand_mark(monkeypatch):
-    """``brand_mark_src`` returns "" for an asset that is not on disk, and the
-    lockup then renders the WORDMARK ALONE. A fresh clone, or a ``[brand].mark``
-    naming a file nobody committed, must not put a broken-image icon on a page
-    served to the internet."""
+def test_the_header_falls_back_to_the_lockup_without_the_site_menu(monkeypatch):
+    """A checkout with no readable site menu still says whose screen this is:
+    the app's lockup and the screen's name, and no links at all."""
     import live_screens
     import shell
+    import site_nav
+
+    monkeypatch.setattr(site_nav, "MENU_PAGE", repo_paths.REPO_ROOT / "no-such-page.html")
+    elements = _rendered(live_screens.SCREENS[0], monkeypatch)
+    markup = "".join(_markup(elements))
+    assert shell.brand_lockup_html() in markup
+    assert "href=" not in markup, markup
+    texts = {str(getattr(e, "text", "")) for e in elements}
+    assert live_screens.SCREENS[0].title in texts
+
+
+def test_the_fallback_survives_a_missing_brand_mark(monkeypatch):
+    """``brand_mark_src`` returns "" for an asset that is not on disk, and the
+    fallback lockup then renders the WORDMARK ALONE. A fresh clone, or a
+    ``[brand].mark`` naming a file nobody committed, must not put a
+    broken-image icon on a page served to the internet."""
+    import live_screens
+    import shell
+    import site_nav
     from pages.options import theme
 
+    monkeypatch.setattr(site_nav, "MENU_PAGE", repo_paths.REPO_ROOT / "no-such-page.html")
     monkeypatch.setattr(theme, "BRAND_MARK", "/static/img/no-such-mark.svg")
     assert shell.brand_mark_src() == "", "the guard itself stopped working"
 
@@ -567,24 +597,26 @@ def test_the_header_survives_a_missing_brand_mark(monkeypatch):
     assert "<img" not in markup, "a missing asset rendered a broken-image icon"
 
 
-def test_the_public_render_injects_the_brand_css(monkeypatch):
-    """The wordmark is two gradients clipped to text (``background-clip: text``)
-    -- precisely what the bundled Tailwind JIT will not emit -- so without
-    ``theme.BRAND_CSS`` the lockup paints two TRANSPARENT words, which is to say
-    nothing at all. The brand FONT is loaded separately from the body font
-    (``[brand].font_url`` against ``[typography].font_url``), so it needs its
-    own ``<link>`` or the wordmark falls back to the local stack."""
+def test_the_public_render_injects_the_menu_and_brand_css(monkeypatch):
+    """The site menu is a raw HTML string, so its stylesheet and its face go in
+    with ``add_css`` / ``add_head_html`` or it renders as bare links. The
+    fallback lockup's wordmark is two gradients clipped to text, which the
+    bundled Tailwind JIT will not emit -- without ``theme.BRAND_CSS`` it paints
+    two TRANSPARENT words."""
     import live_screens
     import shell
+    import site_nav
     from pages.options import theme
 
     css, head = _drive_render(live_screens.SCREENS[0], monkeypatch)
+    assert site_nav.SITE_NAV_CSS in css, "the published menu renders unstyled"
+    assert site_nav.FONT_HEAD_HTML in head, "the published menu renders in the body font"
     assert theme.BRAND_CSS, "the theme built no brand CSS -- this would be vacuous"
-    assert theme.BRAND_CSS in css, "the published wordmark renders transparent"
+    assert theme.BRAND_CSS in css, "the fallback wordmark renders transparent"
     if theme.BRAND_FONT_HEAD_HTML:
         assert theme.BRAND_FONT_HEAD_HTML in head, \
-            "the published wordmark renders in the body font"
-    # And the brand did not displace what was already going in.
+            "the fallback wordmark renders in the body font"
+    # And the menu did not displace what was already going in.
     assert shell.TABLE_CSS in css
 
 

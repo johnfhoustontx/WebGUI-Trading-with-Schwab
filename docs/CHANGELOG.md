@@ -4,7 +4,29 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-29 (**A daily SPY 0-DTE iron condor is booked into the Paper Ledger at 08:45 CT.**)
+**Last updated:** 2026-10-29 (**The live screens carry the site's own top bar; the logo goes home.**)
+
+- The user found the logo at the top left a different size on different pages
+  and asked for one top bar on every page of the site, its logo a link to the
+  home page. The six pages on neuralstrike.co (and the blog entries) already
+  shared one menu, measured identical in a browser: 26px mark, 14px Inter
+  wordmark, 63px bar. The odd ones out were the nineteen live screens on
+  live.neuralstrike.co: a 32px image mark beside the Montserrat wordmark, no
+  links, and a logo that went nowhere.
+- `webgui/site_nav.py` copies the menu out of `deploy/site/blog.html`, makes
+  every address absolute on the public site (the logo to its home page), marks
+  the Live Desk, and adds the screen's name as the site's breadcrumb; its CSS is
+  the site's own declarations scoped under `.ns-site-bar`. `live_main._header`
+  draws it, and falls back to the old lockup, without links, when it cannot be
+  read. Measured on a local render: bar 63px, mark 26px, wordmark 130x22 at
+  14px/600, the same as live.html; at 375px it wraps as the site's does.
+- `test_live_main.py`'s "the header links to nothing" became "links only to the
+  public site"; `tests/test_site_nav.py` pins the addresses, the refusals and
+  each CSS declaration against `site.css` / `nocturne.css`. The Live Desk
+  button does not take the site's green market-open glow on the screens (that is
+  the site's script). Not yet on prod.
+
+**Prior —** 2026-10-29 (**A daily SPY 0-DTE iron condor is booked into the Paper Ledger at 08:45 CT.**)
 
 - The user asked for one mechanical trade a day: sell a 15-delta put spread and
   a 15-delta call spread, $5 wide, on SPY's same-day expiry at about 08:45, into
