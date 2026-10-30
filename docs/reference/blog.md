@@ -569,7 +569,7 @@ All under `deploy/site/`, all gitignored generated state like `ideas/` and
 |---|---|
 | `blog.json` | The list `assets/blog.js` draws |
 | `blog/<address>/index.html` | The entry's page: the site menu around a frame |
-| `blog/<address>/entry.html` | The entry itself, as the store holds it |
+| `blog/<address>/entry.html` | The entry itself, with the site's top bar put in (`shared/site_nav.inject_into_document`); the store keeps it as cleaned |
 | `blog/fonts/<20 hex>.woff2` | Every typeface a published entry uses |
 | `blog/sitemap.txt` | The entries' addresses |
 

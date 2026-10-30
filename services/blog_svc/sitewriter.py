@@ -6,7 +6,7 @@ it, so there is one order of writes and one rule for what may be deleted:
 
     deploy/site/blog.json                  the list ``assets/blog.js`` draws
     deploy/site/blog/<slug>/index.html     the entry's page: the site menu round a frame
-    deploy/site/blog/<slug>/entry.html     the entry itself, as the store holds it
+    deploy/site/blog/<slug>/entry.html     the entry itself, with the site's bar put in
     deploy/site/blog/fonts/<20 hex>.woff2  every typeface a published entry uses
     deploy/site/blog/sitemap.txt           the entries' addresses
 
@@ -73,7 +73,7 @@ from zoneinfo import ZoneInfo
 import repo_paths
 from services import _degrade
 from services.blog_svc import _trace
-from shared import blog_inbox
+from shared import blog_inbox, site_nav
 
 log = logging.getLogger("blog_svc.sitewriter")
 
@@ -236,7 +236,7 @@ def entry_page(parts, entry, site_host) -> str:
         "      </p>\n"
         "    </div>\n"
         f'    <iframe class="ns-report-frame" sandbox="{blog_inbox.ENTRY_SANDBOX}" '
-        f'src="{document}" title="{title}"></iframe>\n'
+        f'src="{site_nav.framed_src(document)}" title="{title}"></iframe>\n'
         "  </main>\n"
         f'  <footer class="ns-foot ns-live-foot">{parts["footer"]}</footer>\n'
         "</div>\n"
@@ -399,6 +399,12 @@ def _write_entry(blog, parts, store, row, report) -> bool:
         document = None if folder is None else store.entry_html(slug)
         if document is not None:
             page = entry_page(parts, row, repo_paths.SITE_HOST)
+            # The site's bar at the top of the document, and the document's own
+            # logo hidden; the frame above loads it as #ns-framed, which hides
+            # the bar again, so either way the page shows ONE logo
+            # (shared/site_nav.py). Unchanged when the menu cannot be built.
+            document = site_nav.inject_into_document(
+                document, current=site_nav.BLOG, page=blog.parent / TEMPLATE)
             _put(folder / DOC, document.encode("utf-8"), report)
             _put(folder / PAGE, page.encode("utf-8"), report)
             return True

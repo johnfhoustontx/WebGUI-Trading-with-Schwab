@@ -1100,7 +1100,9 @@ def test_the_report_page_frames_the_latest_report():
     markup = _markup("report.html")
     frames = re.findall(r"<iframe\b[^>]*>", markup)
     assert len(frames) == 1, f"report.html should frame exactly one document, has {len(frames)}"
-    assert 'src="reports/latest.html"' in frames[0]
+    # The fragment hides the site bar the report carries for its own page
+    # (shared/site_nav.py), so the frame shows one logo, this page's.
+    assert 'src="reports/latest.html#ns-framed"' in frames[0]
     assert "title=" in frames[0], "the report frame has no accessible title"
     assert 'href="reports/latest.html"' in markup, (
         "no plain link to the report, so a reader whose frame fails has no way in")

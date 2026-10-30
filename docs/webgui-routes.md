@@ -1884,7 +1884,7 @@ the same pattern as `sitewriter.NAV_RE`), with every address made absolute on
 marked as the page you are on, the sticky class dropped (a screen pins its own table
 headers), and `screen.title` as the site's `.ns-crumb` after the wordmark. Its
 styling is `site_nav.SITE_NAV_CSS`, the site's own declarations scoped under
-`.ns-site-bar` (`tests/test_site_nav.py` compares each with `site.css` and
+`.ns-site-bar` (`shared/tests/test_site_nav.py` compares each with `site.css` and
 `nocturne.css`), and its face is Inter from Google Fonts. `_render` takes NiceGUI's
 page padding off so the menu runs edge to edge; `_CONTENT` (`p-8`, `pb-14`) puts it
 back around the screen. A change to the site's menu reaches the screens on their

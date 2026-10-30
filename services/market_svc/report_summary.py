@@ -23,6 +23,7 @@ import re
 from html.parser import HTMLParser
 
 from repo_paths import SITE_HOST, SITE_ROOT
+from shared import site_nav
 
 log = logging.getLogger("market_svc.report_summary")
 
@@ -41,10 +42,14 @@ def frame_url(day, slot):
     The file name never changes, so a dialog left open across a new report
     would otherwise go on showing the old one under the new report's name: a
     changed address is what reloads the frame. The stamp comes off a file, so
-    it joins the address only when both parts are plain tokens."""
+    it joins the address only when both parts are plain tokens.
+
+    It ends ``#ns-framed`` (``shared.site_nav.framed_src``): the report carries
+    the site's top bar for when it is opened on its own page, and that fragment
+    is what hides the bar inside a frame."""
     if _VERSION_PART.fullmatch(day or "") and _VERSION_PART.fullmatch(slot or ""):
-        return f"{FRAME_URL}?v={day}-{slot}"
-    return FRAME_URL
+        return site_nav.framed_src(f"{FRAME_URL}?v={day}-{slot}")
+    return site_nav.framed_src(FRAME_URL)
 
 
 def _squash(text):

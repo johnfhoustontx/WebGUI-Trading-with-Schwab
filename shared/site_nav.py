@@ -1,4 +1,16 @@
-"""The public site's menu, drawn at the top of every public live screen.
+"""The public site's menu, for the pages the site does not draw itself.
+
+Two kinds of page carry it through here: the public live screens
+(``webgui/live_main.py``), and the documents the site shows in a frame -- a
+Blog entry (``services/blog_svc/sitewriter.py``) and the market report (the
+report pipeline's publish step, outside this repo). Each such document drew a
+logo of its own, at its own size and in its own colours, so the Blog and
+Market report pages showed two different logos one above the other.
+``inject_into_document`` replaces that: the document gets the site's bar, its
+own lockup is hidden, and the bar hides itself when the document is loaded as
+``…#ns-framed`` (``framed_src``), which is how the site's frames load it. So a
+framed document shows one logo, the page's, and the same document opened on
+its own page shows the site's bar like every other page.
 
 neuralstrike.co's six pages carry ONE menu, byte for byte (the mark, the
 wordmark, the links, the Live Desk button), and the blog writer copies it into
@@ -45,8 +57,8 @@ _PLAIN_HREF_RE = re.compile(r"[a-z0-9-]+\.html(#[a-z0-9-]+)?")
 _HOST_RE = re.compile(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+")
 
 # Every live screen belongs to the Live Desk, so that is the item marked as the
-# page you are on, as live.html marks it.
-_CURRENT = "live.html"
+# page you are on, as live.html marks it. A document names its own section.
+LIVE_DESK, BLOG, REPORT = "live.html", "blog.html", "report.html"
 
 # The site self-hosts Inter (site.css). The live process already takes its two
 # faces from Google Fonts ([typography].font_url, [brand].font_url), so the
@@ -63,13 +75,15 @@ def _absolute(href, base):
     return f"{base}{path}" + (f"#{fragment}" if fragment else "")
 
 
-def site_nav_html(screen_title="", *, site_host=None, page=None) -> str:
+def site_nav_html(screen_title="", *, site_host=None, page=None,
+                  current=LIVE_DESK) -> str:
     """The site's menu with absolute addresses, or ``""`` when it cannot be built.
 
     ``screen_title`` is set after the wordmark as the site's own breadcrumb
-    (``.ns-crumb``), so a visitor still reads which screen this is. The sticky
-    class is dropped: a live screen pins its own table headers to the top of
-    the window, and a pinned menu would sit over them.
+    (``.ns-crumb``), so a visitor still reads which screen this is. ``current``
+    is the menu item marked as the page you are on. The sticky class is
+    dropped: a live screen pins its own table headers to the top of the window,
+    and a pinned menu would sit over them.
 
     Never raises: a missing file, a second menu, an odd address or a bad host
     all answer ``""``."""
@@ -90,8 +104,8 @@ def site_nav_html(screen_title="", *, site_host=None, page=None) -> str:
     base = f"https://{host}/"
     nav = nav.replace(" ns-nav-sticky", "").replace(' aria-current="page"', "")
     nav = _HREF_RE.sub(lambda m: f'href="{_absolute(m.group(1), base)}"', nav)
-    nav = nav.replace(f'href="{base}{_CURRENT}"',
-                      f'href="{base}{_CURRENT}" aria-current="page"', 1)
+    nav = nav.replace(f'href="{base}{current}"',
+                      f'href="{base}{current}" aria-current="page"', 1)
     if screen_title:
         crumb = f'<span class="ns-crumb">{html.escape(str(screen_title))}</span>'
         nav = nav.replace('<span class="ns-spacer"></span>',
@@ -103,7 +117,7 @@ def site_nav_html(screen_title="", *, site_host=None, page=None) -> str:
 # and site.css (the menu rules), every rule scoped under `.ns-site-bar` so none
 # of it reaches the screen below. ⚠ The documented escape hatch: the menu is a
 # raw HTML string inside `ui.html`, which no `.classes()` can reach.
-# webgui/tests/test_site_nav.py compares each declaration with the site's own
+# shared/tests/test_site_nav.py compares each declaration with the site's own
 # stylesheets, so a retune there fails here until it is copied.
 SITE_NAV_CSS = """
 .ns-site-bar {
@@ -191,3 +205,100 @@ SITE_NAV_CSS = """
   .ns-site-bar .ns-nav .ns-spacer { flex: 0 0 100%; height: 0; }
 }
 """
+
+
+# ── the bar inside a framed document ─────────────────────────────────────────
+# The fragment the site's frames load a document with, and the id of the bar
+# injected into it: `.ns-site-bar:target` hides the bar exactly when the
+# document was loaded as `…#ns-framed`. CSS only, because a Blog entry runs no
+# script (its sandbox and its policy both forbid one), and the report's frame
+# page runs nothing either. The target is the bar itself, at the very top of
+# the body and hidden, so loading the fragment scrolls nowhere.
+FRAMED_ID = "ns-framed"
+
+# The site's own Inter files (site.css's @font-face), by root path: every
+# document this is put into is served from the site's origin, and a Blog
+# entry's policy allows fonts from that origin only. Under a family name of the
+# bar's own, so a document that declares an "Inter" of its own is not mixed in.
+_DOC_FONT = "NS Site Inter"
+_DOC_FONT_CSS = """
+@font-face {
+  font-family: "NS Site Inter";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/assets/inter-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+  font-family: "NS Site Inter";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/assets/inter-latin.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
+    U+2212, U+2215, U+FEFF, U+FFFD;
+}
+"""
+
+# What a document adds to SITE_NAV_CSS:
+# * the face above in place of "Inter";
+# * the bar above anything the document positions (the report paints a fixed
+#   background as its first element);
+# * the document's own lockup HIDDEN, framed or not, so a page never shows two
+#   logos. `visibility`, not `display`: the lockup shares a header row with the
+#   document's date and desk line, which keep their places.
+# * the bar gone when the document was loaded as `#ns-framed`.
+DOCUMENT_CSS = _DOC_FONT_CSS + SITE_NAV_CSS + f"""
+.ns-site-bar.ns-doc-bar {{
+  --font-heading: "{_DOC_FONT}", system-ui, sans-serif;
+  --font-body: "{_DOC_FONT}", system-ui, sans-serif;
+  position: relative;
+  z-index: 10;
+  display: block;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+}}
+.ns-site-bar.ns-doc-bar .ns-nav {{
+  margin: 0; max-width: none; width: auto; position: static; background: transparent;
+}}
+.ns-site-bar.ns-doc-bar .ns-mark {{ max-width: none; margin: 0; }}
+.ns-site-bar.ns-doc-bar .ns-navlink, .ns-site-bar.ns-doc-bar .ns-brand,
+.ns-site-bar.ns-doc-bar .ns-crumb {{ margin: 0; padding: 0; background: none; border: 0; }}
+.ns-site-bar.ns-doc-bar:target {{ display: none; }}
+.lockup {{ visibility: hidden !important; }}
+"""
+
+_HEAD_END_RE = re.compile(r"</head\s*>", re.I)
+_BODY_OPEN_RE = re.compile(r"<body\b[^>]*>", re.I)
+
+
+def framed_src(url) -> str:
+    """The address a site frame loads a document at: ``url#ns-framed``."""
+    return f"{url}#{FRAMED_ID}"
+
+
+def inject_into_document(document, *, current, site_host=None, page=None) -> str:
+    """``document`` with the site's bar at the top of its body.
+
+    The stylesheet goes in before ``</head>``, the bar straight after
+    ``<body…>``. ``current`` is the menu item to mark (``BLOG``, ``REPORT``).
+    ``document`` comes back UNCHANGED when the menu cannot be built, when it has
+    no head or body to place them in, or when it already carries the bar -- so
+    running this twice, or on a document it cannot read, changes nothing, and a
+    document never loses its own lockup without gaining the site's."""
+    if not isinstance(document, str) or f'id="{FRAMED_ID}"' in document:
+        return document
+    nav = site_nav_html(site_host=site_host, page=page, current=current)
+    head_end, body_open = _HEAD_END_RE.search(document), _BODY_OPEN_RE.search(document)
+    if not nav or not head_end or not body_open or head_end.start() > body_open.start():
+        return document
+    bar = f'\n<div class="ns-site-bar ns-doc-bar" id="{FRAMED_ID}">{nav}</div>\n'
+    style = f"<style>{DOCUMENT_CSS}</style>\n"
+    at_body = body_open.end()
+    return (document[:head_end.start()] + style + document[head_end.start():at_body]
+            + bar + document[at_body:])

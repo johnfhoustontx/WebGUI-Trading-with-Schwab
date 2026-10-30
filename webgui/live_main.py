@@ -62,7 +62,7 @@ for _p in (str(_HERE.parent), str(_HERE)):
 import app_settings                                   # noqa: E402
 import bus_client                                     # noqa: E402
 import live_screens                                   # noqa: E402
-import site_nav                                       # noqa: E402
+from shared import site_nav                            # noqa: E402
 
 from repo_paths import (ENV_NAME, LIVE_HOST,          # noqa: E402
                         NICEGUI_LIVE_PORT, REDIS_DB)

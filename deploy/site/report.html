@@ -29,6 +29,12 @@
   frame keeps the nav in this tracked file and the report whole. It loads
   nothing off-origin and runs no script — the frame scrolls on its own.
 
+  ── WHY #ns-framed ───────────────────────────────────────────────────────────
+  The publisher puts the site's top bar into the report (shared/site_nav.py,
+  inject_into_document) and hides the report's own logo, so the report opened
+  on its own page looks like every other page. Loaded with this fragment, the
+  bar hides itself (CSS :target), so this page shows ONE logo, the menu's.
+
   ── NO TIMESTAMP HERE, DELIBERATELY ─────────────────────────────────────────
   Same reason as live.html: this file is served long after anything it could
   say. The report carries its own time stamp in its header.
@@ -74,7 +80,7 @@
       </p>
     </div>
 
-    <iframe class="ns-report-frame" src="reports/latest.html"
+    <iframe class="ns-report-frame" src="reports/latest.html#ns-framed"
             title="The latest NeuralStrike market report"></iframe>
   </main>
 

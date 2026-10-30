@@ -21,7 +21,7 @@ from services import _degrade
 from services.blog_svc import clean, clean_bound, fonts, handlers, sitewriter
 from services.blog_svc import store as store_mod
 from services.blog_svc.tests import _fonts_kit as kit
-from shared import blog_inbox
+from shared import blog_inbox, site_nav
 from shared.bus import Bus
 from shared.contracts.envelope import Command
 
@@ -362,8 +362,13 @@ def test_publish_writes_the_site_and_removes_the_draft(bus, site):
                                 "blog/why-spreads-work/entry.html"}
     with store_mod.Store() as st:
         document = st.entry_html("why-spreads-work")
-    assert (site / "blog" / "why-spreads-work" / "entry.html").read_bytes() == \
-        document.encode("utf-8")
+    # The store's document with the site's bar put in (shared/site_nav.py) -
+    # and the store itself still holds the document as it was cleaned.
+    written = (site / "blog" / "why-spreads-work" / "entry.html").read_bytes()
+    assert written == site_nav.inject_into_document(
+        document, current=site_nav.BLOG, page=site / "blog.html").encode("utf-8")
+    assert written != document.encode("utf-8"), "the bar was not put in"
+    assert 'id="ns-framed"' not in document
     listing = json.loads((site / "blog.json").read_bytes())
     assert [row["slug"] for row in listing["entries"]] == ["why-spreads-work"]
     assert listing["entries"][0]["published"] == entry["published_at"]

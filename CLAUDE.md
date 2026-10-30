@@ -162,6 +162,9 @@ stdlib + `shared.config_toml` + `repo_paths` only, pinned by
 view names, the frame's `sandbox` and policy strings, and the two file readers
 behind the preview routes - stdlib + `repo_paths` + `shared.config_toml` only,
 pinned by `shared/tests/test_blog_inbox.py`) ·
+`shared.site_nav` (since 2026-10-29; the public site's menu for the live
+screens' header and the framed documents - stdlib + `repo_paths` only, pinned by
+`shared/tests/test_site_nav.py`) ·
 `repo_paths` · `requests` — **only** for the
 `/health` fan-out the shell and Status page run, the proxy helper's calls
 (`webgui/proxy.py`: API-usage counts, and the Schwab sign-in's link and
@@ -355,6 +358,11 @@ than the push, and the gate's open list stays `/login` + `/favicon.ico`.
 **The site's Blog.** `deploy/site/blog/` and `deploy/site/blog.json` are generated,
 gitignored state like `ideas/` and `reports/`: only `blog_svc` writes them, from
 its own store ([the site blog](docs/reference/blog.md)).
+
+**One logo per page.** A document the site frames (a Blog entry, the market
+report) carries the site's top bar and has its own `.lockup` hidden
+(`shared/site_nav.inject_into_document`); a frame must load it through
+`site_nav.framed_src` (`…#ns-framed`), which hides that bar, or the page shows two.
 
 ## Sentiment and regime scoring
 

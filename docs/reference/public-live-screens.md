@@ -265,7 +265,7 @@ is no layer here: the `live` user can read the whole `cache:options:flow_alerts`
 `live_screens.RETIRED_ROUTES` (the pinned Gamma screens retired 2026-09-22, each
 now a redirect to `/gamma`), PLUS exactly one non-page route: `/static`
 (2026-09-09).** Every screen carries the public SITE's own menu (since
-2026-10-29, `webgui/site_nav.py`): copied from `deploy/site/blog.html` as the
+2026-10-29, `shared/site_nav.py`): copied from `deploy/site/blog.html` as the
 blog entries copy it, every address made absolute on `SITE_HOST`, the logo a
 link to the site's home page, and the screen's name as the site's breadcrumb.
 ⚠ **Every link is a page on the public site**, never this origin's or the app's;

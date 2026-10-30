@@ -47,21 +47,21 @@ def test_the_frame_address_is_the_report_itself_versioned_by_the_report():
     old one under the new report's name."""
     close = rs.parse_report(_page("Chips broke"), "2026-09-14 5 close 16:20CT\n")
     assert close["frame_url"] == (
-        f"https://{rs.SITE_HOST}/reports/latest.html?v=2026-09-14-close")
+        f"https://{rs.SITE_HOST}/reports/latest.html?v=2026-09-14-close#ns-framed")
     midday = rs.parse_report(_page("Chips broke"), "2026-09-14 4 midday 12:05CT\n")
     assert midday["frame_url"] != close["frame_url"]
-    assert midday["frame_url"].endswith("?v=2026-09-14-midday")
+    assert midday["frame_url"].endswith("?v=2026-09-14-midday#ns-framed")
 
 
 def test_the_frame_address_has_no_version_when_the_stamp_is_unknown():
     for stamp in ("", "2026-09-14", "garbage"):
         p = rs.parse_report(_page("Chips broke"), stamp)
-        assert p["frame_url"] == f"https://{rs.SITE_HOST}/reports/latest.html", stamp
+        assert p["frame_url"] == f"https://{rs.SITE_HOST}/reports/latest.html#ns-framed", stamp
 
 
 def test_the_version_is_built_from_safe_characters_only():
     p = rs.parse_report(_page("Chips broke"), '2026-09-14 5 clo"se&x=1 16:20CT')
-    assert p["frame_url"] == f"https://{rs.SITE_HOST}/reports/latest.html"
+    assert p["frame_url"] == f"https://{rs.SITE_HOST}/reports/latest.html#ns-framed"
 
 
 def test_the_published_payload_fits_its_contract():

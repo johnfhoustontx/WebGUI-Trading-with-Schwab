@@ -503,7 +503,7 @@ def test_every_published_screen_carries_the_site_menu(monkeypatch):
     the same size and face on a screen as on the site. Asserted against the
     builder's own output, never a literal, so a lost mark or wordmark fails."""
     import live_screens
-    import site_nav
+    from shared import site_nav
 
     for screen in live_screens.SCREENS:
         nav = site_nav.site_nav_html(screen.title)
@@ -567,7 +567,7 @@ def test_the_header_falls_back_to_the_lockup_without_the_site_menu(monkeypatch):
     the app's lockup and the screen's name, and no links at all."""
     import live_screens
     import shell
-    import site_nav
+    from shared import site_nav
 
     monkeypatch.setattr(site_nav, "MENU_PAGE", repo_paths.REPO_ROOT / "no-such-page.html")
     elements = _rendered(live_screens.SCREENS[0], monkeypatch)
@@ -585,7 +585,7 @@ def test_the_fallback_survives_a_missing_brand_mark(monkeypatch):
     broken-image icon on a page served to the internet."""
     import live_screens
     import shell
-    import site_nav
+    from shared import site_nav
     from pages.options import theme
 
     monkeypatch.setattr(site_nav, "MENU_PAGE", repo_paths.REPO_ROOT / "no-such-page.html")
@@ -605,7 +605,7 @@ def test_the_public_render_injects_the_menu_and_brand_css(monkeypatch):
     two TRANSPARENT words."""
     import live_screens
     import shell
-    import site_nav
+    from shared import site_nav
     from pages.options import theme
 
     css, head = _drive_render(live_screens.SCREENS[0], monkeypatch)

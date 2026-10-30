@@ -4,7 +4,25 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-29 (**The live screens carry the site's own top bar; the logo goes home.**)
+**Last updated:** 2026-10-29 (**One logo per page: framed documents carry the site's bar, hidden in the frame.**)
+
+- After the live screens took the site's bar, the user still saw two sizes: the
+  Blog entries and the Market report are documents shown in a frame under the
+  site bar, and each drew its own logo inside it (an entry: a 22px variant of the
+  mark and a 13px Montserrat wordmark; the report: a 24px mark, "Strike" in the
+  app's blue). The user chose: hide the document's logo in the frame, and give
+  the document the site's bar when it is opened on its own page.
+- `webgui/site_nav.py` moved to `shared/site_nav.py` (added to the Tier-1
+  allow-list) and gained `inject_into_document`: the site's bar at the top of
+  the body, the document's `.lockup` hidden, and `.ns-site-bar:target` hiding
+  the bar when the document is loaded as `#ns-framed` (`framed_src`). CSS only,
+  since an entry runs no script. The bar uses the site's own Inter files.
+- `blog_svc/sitewriter.py` writes each `entry.html` through it (the store keeps
+  the cleaned document) and frames `entry.html#ns-framed`; `report.html` and
+  `report_summary.frame_url` (the Desk's report dialog) frame
+  `reports/latest.html#ns-framed`. The report's own copy is written by the
+  report pipeline on the box, outside this repo; its publish step calls the same
+  function.
 
 - The user found the logo at the top left a different size on different pages
   and asked for one top bar on every page of the site, its logo a link to the

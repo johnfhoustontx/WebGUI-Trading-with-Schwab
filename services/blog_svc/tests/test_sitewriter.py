@@ -23,7 +23,7 @@ import pytest
 import repo_paths
 from services import _degrade
 from services.blog_svc import sitewriter as sw
-from shared import blog_inbox
+from shared import blog_inbox, site_nav
 
 REAL_SITE = pathlib.Path(repo_paths.REPO_ROOT) / "deploy" / "site"
 
@@ -231,7 +231,8 @@ def test_the_frame_is_sandboxed_with_the_shared_tokens(parts):
     assert len(frames) == 1
     assert f'sandbox="{blog_inbox.ENTRY_SANDBOX}"' in frames[0]
     assert "allow-scripts" not in frames[0]
-    assert 'src="blog/a-first-entry/entry.html"' in frames[0]
+    # #ns-framed hides the site bar the document carries for its own page.
+    assert 'src="blog/a-first-entry/entry.html#ns-framed"' in frames[0]
     assert 'class="ns-report-frame"' in frames[0]
     assert 'title="A first entry"' in frames[0]
 
@@ -355,6 +356,27 @@ def test_rebuild_writes_pages_documents_fonts_manifest_and_sitemap(site, monkeyp
                                          b"https://example.test/blog/first/\n")
     assert degrades() == before
     assert sw.pending() is False
+
+
+def test_a_document_with_a_head_and_body_gets_the_sites_bar(site, monkeypatch):
+    """The entry's own logo is hidden and the site's bar takes its place, so a
+    page never shows two logos (shared/site_nav.py). The rest of the document
+    is the store's own bytes, newlines included."""
+    monkeypatch.setattr(repo_paths, "SITE_HOST", HOST)
+    doc = ("<!doctype html>\r\n<html><head><title>t</title></head>\r\n<body>\r\n"
+           '<div class="lockup">NeuralStrike</div><p>caf' + E_ACUTE + "</p>\r\n</body></html>")
+    store = FakeStore()
+    store.add("first", doc=doc)
+
+    assert sw.rebuild(site, store, NOW)["ok"] is True
+
+    written = tree(site)["blog/first/entry.html"].decode("utf-8")
+    assert written == site_nav.inject_into_document(
+        doc, current=site_nav.BLOG, page=site / "blog.html", site_host=HOST)
+    assert f'id="{site_nav.FRAMED_ID}"' in written
+    assert f'href="https://{HOST}/blog.html" aria-current="page"' in written
+    assert f'<a class="ns-lockup" href="https://{HOST}/"' in written
+    assert store.entry_html("first") == doc, "the store's document must not change"
 
 
 def test_rebuild_with_nothing_published_writes_an_empty_list(site):
