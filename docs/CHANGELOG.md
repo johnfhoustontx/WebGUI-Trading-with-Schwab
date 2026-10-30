@@ -4,7 +4,24 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-29 (**One logo per page: framed documents carry the site's bar, hidden in the frame.**)
+**Last updated:** 2026-10-30 (**Opening Scalp: a running icon for every call since the open; colour and icons in the glance.**)
+
+- The user asked for the glance's **08:36 call** column to become a running record of
+  every call since the open, the columns tightened, and more colour and icons.
+  `glance_calls` draws one icon per call (08:36, then each `timeline` row): an arrow, a
+  dash for no signal, a ringed arrow for a call with a measured edge, the time and words
+  in the tooltip. No service change: the view already carried every slot.
+- Headers are one word (Trade, Chance, Usual, Room). The chance's fit line, the edge and
+  caution words and the full wall clause moved into tooltips behind icons; the room is
+  shortened to "Call wall 510.00 · 1.29%". The widest columns narrowed.
+- Colour: direction and the trade's lean green or red; room green or red. The chance's
+  arrow is coloured against the usual rate, its number only when the weights beat that
+  rate on unseen days, so an unproven figure is not drawn like a proven one (my decision;
+  the one-point band with no arrow, `_CHANCE_SAME_PTS`, too). The Today's calls directions
+  are coloured and the morning inputs' verdicts carry an icon.
+- `webgui/page_help.py`, the User Guide and `docs/webgui-routes.md` updated.
+
+**Prior —** 2026-10-29 (**One logo per page: framed documents carry the site's bar, hidden in the frame.**)
 
 - After the live screens took the site's bar, the user still saw two sizes: the
   Blog entries and the Market report are documents shown in a frame under the

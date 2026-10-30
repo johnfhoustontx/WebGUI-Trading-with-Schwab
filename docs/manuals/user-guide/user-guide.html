@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-29</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-30</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -3032,13 +3032,23 @@ past mornings that looked like this one. <strong>It does not place trades</stron
 <p><strong>The top of the page is one table, a row per symbol.</strong> Above it a line names the call
 it shows ("Latest call at 09:21 · next at 09:36"), counts down to the next one ("next
 call in 4 min") and says whether any symbol has a measured edge. Each row shows the
-symbol and its price, <strong>Now</strong> (↑ Up, ↓ Down or no direction, and which call that is),
-the <strong>trade with the call</strong> (the trade with a measured edge instead, when there is one),
-its <strong>Chance of target</strong>, how often it <strong>usually wins</strong>, the <strong>room to the wall</strong>, and
-the <strong>08:36 call</strong>'s direction. The row reads the latest 15-minute call once the
-first one is out (08:51) and the 08:36 call before that. A call that is no longer
-current keeps its words and loses its colour. <strong>Chance of target</strong> is explained under
-<em>The chance of target</em>, below; read it beside <strong>Usually wins</strong>, never instead of it.</p>
+symbol and its price, <strong>Now</strong> (up, down or no direction, and which call that is), the
+<strong>Trade</strong> with the call (the trade with a measured edge instead, when there is one), its
+<strong>Chance</strong> of target, how often it <strong>usually</strong> wins, the <strong>Room</strong> to the wall, and
+<strong>Calls since the open</strong>: one icon per call, oldest on the left, starting with the 08:36
+call. An up arrow is up, a down arrow is down, a dash is no signal, and an arrow in a ring
+is a call that had a measured edge; hover an icon for its time and what it said. The row
+reads the latest 15-minute call once the first one is out (08:51) and the 08:36 call
+before that.</p>
+<p>Green leans up and red leans down, for the direction and for the trade (a long call and a
+put credit spread lean up). Room is green when the target is short of the wall and red
+when the wall is inside the target or already passed. Beside the chance, a small arrow
+says which side of the usual rate it is on (none within one point) and an icon says
+whether it beat that rate on unseen days: a tick for yes, a question mark for no, an
+hourglass when not fitted yet. Only a proven figure is itself coloured. A call that is no
+longer current keeps its words and loses its colour; earlier calls today keep theirs, as
+the day's record. <strong>Chance of target</strong> is explained under <em>The chance of target</em>, below;
+read it beside the usual rate, never instead of it.</p>
 <p><strong>Everything else is below it, in closed sections:</strong> one per symbol (its 15-minute
 call, <strong>what moved its chance</strong> and its 08:36 call), then <strong>Today's calls</strong>, the
 <strong>Context</strong> (headlines, flow alerts and the report) and the <strong>Scorecard</strong>. Click a
@@ -3190,7 +3200,7 @@ the row names; the <strong>15-minute call</strong> and <strong>08:36 call</stron
   still the starting guess, not a measurement. Flow, sentiment, net premium and the dealer
   read are held close to their assumption, so they can stay assumed after many days. Read a big push on an
   <strong>assumed</strong> factor with caution: nothing has tested it yet.</li>
-<li><strong>The line under the figure.</strong> <em>fitted Oct 25 · beats the usual rate on unseen days: no.</em>
+<li><strong>The line behind the icon.</strong> Hover the icon beside the figure: <em>fitted Oct 25 · beats the usual rate on unseen days: no.</em>
   Every refit tests the chance the way the bucket study tests an edge: week by week, it is
   fitted on the earlier weeks and scored on the next, which it has never seen, against the
   plain usual win rate. <strong>yes</strong> means it did better by a clear margin over the weeks tested;

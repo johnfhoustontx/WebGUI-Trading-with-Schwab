@@ -3762,9 +3762,13 @@ There are no trade buttons: you read it and decide.
 symbol doing now?" without scrolling: the direction of the latest call (the 15-minute
 call from 08:51, the 08:36 call before that), the trade that goes with the call, its
 **chance of target** and how often it usually wins, the room to the dealers' wall, and
-the 08:36 call's direction. The line above it names the call shown, counts down to the
-next one and says whether any symbol has a measured edge. A row whose call is no longer
-current keeps its words and is drawn without colour.
+an icon for every call since the open, oldest on the left: an arrow for each direction,
+a dash for no signal, an arrow in a ring for a call with a measured edge. The line above
+it names the call shown, counts down to the next one and says whether any symbol has a
+measured edge. Green leans up and red leans down; the chance's own number is coloured
+only when it has beaten the usual rate on unseen days. A row whose call is no longer
+current keeps its words and is drawn without colour; earlier calls today keep theirs, as
+the day's record. Words an icon stands for are on the icon: hover it.
 
 **The detail sits below, closed until you open it**: a section per symbol holding its
 15-minute call, **what moved its chance** and its 08:36 call (the most recent first),
@@ -3977,7 +3981,7 @@ marks **assumed** where its weight still rests mostly on the starting assumption
 than half of it learned from data), however many days it has: a tightly held factor
 stays assumed for a long time.
 
-**Reading the line under it.** "fitted Oct 25 · beats the usual rate on unseen days: no".
+**Reading the line behind its icon.** "fitted Oct 25 · beats the usual rate on unseen days: no".
 The refit also tests itself: for each past week after the first 8, it fits on the weeks
 before and scores that week, and compares the squared-error (Brier) score with the usual
 rate's. **yes** only when it is lower by at least 0.005 over the weeks tested. **no** is a

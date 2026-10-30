@@ -31,9 +31,15 @@ and not an empty state. The rules that keep it truthful:
 
 The page leads with a glance: one table row per symbol (the latest call's
 direction, the trade with the call, its fitted chance of target beside its usual
-rate, the room to the wall and the 08:36 direction). Everything else sits below it
-in closed sections: one per symbol (its 15-minute call, what moved its chance and
-its 08:36 call), then the day's calls, the context and the scorecard.
+rate, the room to the wall and an icon for every call since the open). Everything
+else sits below it in closed sections: one per symbol (its 15-minute call, what
+moved its chance and its 08:36 call), then the day's calls, the context and the
+scorecard.
+
+Colour in the glance says which way something leans, and a figure the study has not
+proven stays plain: the chance's arrow is coloured against the usual rate, its
+number only when the weights beat that rate on unseen days. The words an icon
+replaces stay on it as its tooltip.
 
 The chance of target is a fitted figure for the trade a row names
 (``entry["chance"]``, ``role["chance"]``): it sits BESIDE the usual win rate, never
@@ -56,6 +62,7 @@ view and imports no engine and no config module of the service.
 from __future__ import annotations
 
 import datetime as _dt
+import re
 from zoneinfo import ZoneInfo
 
 from shared import market_calendar as _mc
@@ -454,6 +461,9 @@ NO_DIRECTION = "No opening direction"
 _VERDICT_CLASS = {"Agrees": _t.TXT_POS, "Disagrees": _t.TXT_NEG,
                   "No side taken (dead zone)": _t.MUTED, ABSENT: _t.MUTED,
                   INFO_ONLY: _t.MUTED, NO_DIRECTION: _t.MUTED}
+_VERDICT_ICON = {"Agrees": "check_circle", "Disagrees": "cancel",
+                 "No side taken (dead zone)": "remove", ABSENT: "remove",
+                 INFO_ONLY: "info", NO_DIRECTION: "remove"}
 
 
 def _input_label(key, sym):
@@ -508,7 +518,8 @@ def input_rows(symbol_payload):
             verdict = ABSENT
         rows.append({"id": key, "label": _input_label(key, sym),
                      "reading": _input_reading(key, inputs.get(key)),
-                     "verdict": verdict, "_tone_class": _VERDICT_CLASS[verdict]})
+                     "verdict": verdict, "_tone_class": _VERDICT_CLASS[verdict],
+                     "_tone_icon": _VERDICT_ICON[verdict]})
     return rows
 
 
@@ -1096,6 +1107,9 @@ def timeline_rows(section, muted=False, chance=True):
             note = note.strip() if isinstance(note, str) else ""
             row[f"s{i}"] = (_DIRECTION_CELL.get(cell.get("direction"), _NO_DIRECTION_CELL)
                             if cell else _fmt.NO_READING)
+            row[f"s{i}_class"] = (_t.MUTED if muted or not cell else
+                                  _GLANCE_DIRECTION_CLASS.get(_direction(cell.get("direction")),
+                                                              _t.MUTED))
             row[f"s{i}_pick"] = picked
             row[f"s{i}_pick_class"] = (f"{_t.TXT_POS} font-semibold"
                                        if picked != _fmt.NO_READING and not muted
@@ -1193,8 +1207,23 @@ def has_scorecard(scorecard):
 # and sets its rate against the usual one. A row that is not current (another
 # day's, or a call whose time has passed) keeps its words and loses its colour.
 GLANCE_EDGE_NONE = f"{NO_EDGE} — the rates are the usual win rates"
-_GLANCE_DIRECTION = {1: "↑ Up", -1: "↓ Down"}
+_GLANCE_DIRECTION = {1: "Up", -1: "Down"}
 _GLANCE_DIRECTION_CLASS = {1: _t.TXT_POS, -1: _t.TXT_NEG}
+_DIRECTION_ICON = {1: "arrow_upward", -1: "arrow_downward"}
+#: A call in the running column that carried a measured edge: the same arrow, ringed.
+_EDGE_ICON = {1: "arrow_circle_up", -1: "arrow_circle_down"}
+NO_SIGNAL = "No signal"
+NO_SIGNAL_ICON = "remove"
+NO_CALL_RECORDED = "no call recorded"
+_LEAN_ICON = {1: "trending_up", -1: "trending_down"}
+_RATE_ICON = {"edge": "verified", "caution": "warning", "plain": ""}
+#: How near the usual rate, in percentage points, a chance draws no arrow: at that
+#: distance "above" or "below" is not something the eye should be told.
+_CHANCE_SAME_PTS = 1.0
+#: The service's first clause of ``dealer_line`` (``scalp_confirm._dealer_line``),
+#: shortened for the table. A wording this does not know keeps its own words and no
+#: colour, so a change there costs the short form and never a wrong reading.
+_WALL = re.compile(r"(call|put) wall at ([\d,.]+)(?: \(([\d.]+)%\))?")
 
 
 def _direction(v):
@@ -1244,9 +1273,129 @@ def _glance_price(entry):
     return ""
 
 
-def glance_row(name, entry, kind, *, current, when, morning=None):
-    """One symbol's row. PURE. ``kind`` is ``"intraday"`` or ``"morning"``;
-    ``morning`` is the 08:36 payload, for the last column."""
+def _leans(role_name, d):
+    """Which way the contract leans: 1 up (a long call, a put credit spread), -1
+    down, None with no direction. A ``with`` role leans with the move."""
+    if d is None or role_name is None:
+        return None
+    return d if role_name.endswith("_with") else -d
+
+
+def _chance_marks(sym, role_name, role, current):
+    """The chance's icons and colours. PURE. The arrow is the side of the usual
+    rate, and is always coloured while the call is current; the number is coloured
+    only when the weights beat the usual rate on unseen days, so a figure the study
+    has not proven is never drawn like one it has."""
+    marks = {"chance_icon": "", "_chance_icon_class": "", "chance_delta": "",
+             "proof_icon": "", "_proof_class": "",
+             "_chance_class": "" if current else _t.MUTED}
+    block = _chance_of(sym)
+    if role is None:
+        return marks
+    if block is not None:
+        beats = _as_dict(block.get("beats_usual")).get(role_name)
+        if block.get("version") is None:
+            marks["proof_icon"], tone = "hourglass_empty", _t.MUTED
+        elif beats is True:
+            marks["proof_icon"], tone = "check_circle", _t.TXT_POS
+        else:
+            marks["proof_icon"], tone = "help_outline", _t.MUTED
+        marks["_proof_class"] = tone if current else _t.MUTED
+    value, usual = _fmt.num(_role_chance(sym, role_name, role)), _fmt.num(role.get("p_base"))
+    if value is None or usual is None:
+        return marks
+    delta = (value - usual) * 100.0
+    if abs(delta) < _CHANCE_SAME_PTS:
+        return marks
+    side = 1 if delta > 0 else -1
+    colour = _GLANCE_DIRECTION_CLASS[side]
+    marks["chance_icon"] = "arrow_drop_up" if side > 0 else "arrow_drop_down"
+    marks["chance_delta"] = f"{_points(delta)} points against the usual rate"
+    marks["_chance_icon_class"] = colour if current else _t.MUTED
+    if current and block is not None and _as_dict(block.get("beats_usual")).get(role_name) is True:
+        marks["_chance_class"] = colour
+    return marks
+
+
+def _room_marks(room, current):
+    """The room's short form, icon and colour from the service's own first clause.
+    PURE. Room to the wall reads green; a wall inside the target or already passed
+    reads red (both are the service's own 'no room'); anything else stays plain."""
+    wall = _WALL.search(room)
+    if room.startswith("Room "):
+        icon, colour = "check_circle", _t.TXT_POS
+    elif room.endswith("is inside the target") or room.startswith("Spot "):
+        icon, colour = "block", _t.TXT_NEG
+    else:
+        icon, colour = "", _t.MUTED
+    short = room
+    if icon and wall:
+        kind, price, pct = wall.groups()
+        short = f"{kind.capitalize()} wall {price} · {pct + '%' if pct else 'passed'}"
+    return {"room_short": short, "room_icon": icon,
+            "_room_class": colour if current else _t.MUTED}
+
+
+def _call_mark(slot, direction, pick, note, muted):
+    """One icon of the running column: an arrow for a direction (ringed when the
+    call carried a measured edge), a dash for no signal; its colour; and its
+    tooltip, the time and what the call said."""
+    d = _direction(direction)
+    edge = bool(pick) and pick != _fmt.NO_READING
+    note = note.strip() if isinstance(note, str) else ""
+    if note.lower() == NO_EDGE.lower():
+        note = ""
+    if d is None:
+        words = [slot, NO_SIGNAL]
+        icon, colour = NO_SIGNAL_ICON, _t.MUTED
+    else:
+        words = [slot, _GLANCE_DIRECTION[d]]
+        icon = _EDGE_ICON[d] if edge else _DIRECTION_ICON[d]
+        colour = _GLANCE_DIRECTION_CLASS[d]
+        if edge:
+            words.append(pick)
+    if note:
+        words.append(note)
+    return {"icon": icon, "cls": _t.MUTED if muted else colour, "tip": " · ".join(words)}
+
+
+def glance_calls(view, name, now=None):
+    """Every call of the day the glance shows for ``name``, oldest first: the 08:36
+    call, then one per published 15-minute slot. PURE. A slot with no call for the
+    symbol is no signal too, and its tooltip says so. Another day's calls keep their
+    icons and lose their colour; today's keep theirs after the latest goes past,
+    because they are the record of the day, not a current reading."""
+    view = _as_dict(view)
+    section = intraday_section(view)
+    lead = intraday_leads(view)
+    day = section.get("day") if lead else view.get("call_day")
+    muted = day != _clock(now).date().isoformat()
+    calls = []
+    sym = _as_dict(view.get("symbols")).get(name)
+    if isinstance(sym, dict) and view.get("call_day") == day:
+        made = _ct(sym.get("made_at"))
+        hl = sym.get("highlight")
+        role = _as_dict(sym.get("roles")).get(hl) if isinstance(hl, str) else None
+        pick = "" if not isinstance(role, dict) else _pick_text(
+            {"highlight": hl, "direction": sym.get("direction"), "edge_p": role.get("p"),
+             "edge_p_base": role.get("p_base")})
+        calls.append(_call_mark(made.strftime("%H:%M") if made else "08:36",
+                                sym.get("direction"), pick, sym.get("note"), muted))
+    if lead:
+        for row in _timeline(section):
+            slot = row.get("slot") if isinstance(row.get("slot"), str) else _fmt.NO_READING
+            cell = _as_dict(row.get("symbols")).get(name)
+            if isinstance(cell, dict):
+                calls.append(_call_mark(slot, cell.get("direction"), _pick_text(cell),
+                                        cell.get("note"), muted))
+            else:
+                calls.append(_call_mark(slot, None, "", NO_CALL_RECORDED, muted))
+    return calls
+
+
+def glance_row(name, entry, kind, *, current, when, calls=()):
+    """One symbol's row. PURE. ``kind`` is ``"intraday"`` or ``"morning"``; ``calls``
+    is the running column (:func:`glance_calls`)."""
     sym = _as_dict(entry)
     d = _direction(sym.get("direction"))
     role_name, role = _glance_role(sym)
@@ -1275,20 +1424,23 @@ def glance_row(name, entry, kind, *, current, when, morning=None):
     room = _fmt.NO_READING
     if kind == "intraday" and d is not None and dealer_line(sym):
         room = dealer_line(sym).split(";")[0].strip()
-    m = _direction(_as_dict(morning).get("direction"))
+    lean = _leans(role_name, d)
     return {
         "id": name, "symbol": name, "price": _glance_price(sym),
         "now": _GLANCE_DIRECTION.get(d, "No direction"), "when": when,
+        "now_icon": _DIRECTION_ICON.get(d, NO_SIGNAL_ICON),
         "_now_class": _GLANCE_DIRECTION_CLASS.get(d, _t.MUTED) if current else _t.MUTED,
         "chance": chance, "chance_note": chance_line,
-        "_chance_class": "" if current else _t.MUTED,
+        **_chance_marks(sym, role_name, role, current),
         "trade": trade, "side": side, "rate": rate, "rate_note": note,
+        "trade_icon": _LEAN_ICON.get(lean, ""),
+        "_trade_class": ("" if lean is None else
+                         _GLANCE_DIRECTION_CLASS[lean] if current else _t.MUTED),
+        "rate_icon": _RATE_ICON[tone],
         "edge": tone == "edge" and current,
         "_rate_class": _RATE_CLASS[tone] if current and tone != "plain" else "",
-        "room": room,
-        "morning": (_GLANCE_DIRECTION.get(m, "No direction") if morning is not None
-                    else _fmt.NO_READING),
-        "_morning_class": _GLANCE_DIRECTION_CLASS.get(m, _t.MUTED) if current else _t.MUTED}
+        "room": room, **_room_marks(room, current),
+        "calls": list(calls)}
 
 
 def glance_rows(view, now=None):
@@ -1312,7 +1464,7 @@ def glance_rows(view, now=None):
             when = (f"{slot} call" + ("" if current else " · past") if status["today"]
                     else f"{section.get('day') or 'an earlier day'} {slot} call · not today's")
             rows.append(glance_row(name, entry, "intraday", current=current,
-                                   when=when, morning=sym))
+                                   when=when, calls=glance_calls(view, name, now)))
         elif sym is not None:
             made = _ct(sym.get("made_at"))
             stamp = made.strftime("%H:%M") if made else "08:36"
@@ -1320,7 +1472,7 @@ def glance_rows(view, now=None):
             when = (f"{stamp} call" if current
                     else f"{call_day or 'an earlier day'} {stamp} call · not today's")
             rows.append(glance_row(name, sym, "morning", current=current,
-                                   when=when, morning=sym))
+                                   when=when, calls=glance_calls(view, name, now)))
     return rows
 
 
@@ -1357,22 +1509,22 @@ def countdown_text(view, now=None):
 
 
 def glance_columns(chance=True):
-    """The glance's columns; the chance of target sits right beside the usual win
-    rate so the two read together. ``chance=False`` is the service with the chance
-    switched off."""
+    """The glance's columns, with one-word headers so the running column has the
+    room; the chance of target sits right beside the usual win rate so the two read
+    together. ``chance=False`` is the service with the chance switched off."""
     cols = [
         {"name": "symbol", "label": "Symbol", "field": "symbol", "align": "left",
          "sortable": False},
         {"name": "now", "label": "Now", "field": "now", "align": "left", "sortable": False},
-        {"name": "trade", "label": "Trade with the call", "field": "trade",
+        {"name": "trade", "label": "Trade", "field": "trade",
          "align": "left", "sortable": False},
-        {"name": "chance", "label": CHANCE_LABEL, "field": "chance", "align": "left",
+        {"name": "chance", "label": "Chance", "field": "chance", "align": "left",
          "sortable": False},
-        {"name": "rate", "label": "Usually wins", "field": "rate", "align": "left",
+        {"name": "rate", "label": "Usual", "field": "rate", "align": "left",
          "sortable": False},
-        {"name": "room", "label": "Room to the wall", "field": "room", "align": "left",
+        {"name": "room", "label": "Room", "field": "room", "align": "left",
          "sortable": False},
-        {"name": "morning", "label": "08:36 call", "field": "morning", "align": "left",
+        {"name": "calls", "label": "Calls since the open", "field": "calls", "align": "left",
          "sortable": False},
     ]
     return cols if chance else [c for c in cols if c["name"] != "chance"]
@@ -1404,7 +1556,11 @@ _MOVE_SLOT = r'''
   </q-td>
 '''
 _VERDICT_SLOT = r'''
-  <q-td :props="props"><span :class="props.row._tone_class">{{ props.value }}</span></q-td>
+  <q-td :props="props">
+    <span :class="props.row._tone_class">
+      <q-icon :name="props.row._tone_icon" size="14px" class="mr-1"></q-icon>{{ props.value }}
+    </span>
+  </q-td>
 '''
 
 _INTRADAY_MOVE_SLOT = r'''
@@ -1420,7 +1576,7 @@ _INTRADAY_MOVE_SLOT = r'''
 #: One timeline cell per symbol; ``@@`` is the symbol's column number.
 _TIMELINE_CELL = r'''
   <q-td :props="props">
-    <div class="font-semibold">{{ props.row.s@@ }}</div>
+    <div class="font-semibold" :class="props.row.s@@_class">{{ props.row.s@@ }}</div>
     <div class="text-[12px]" :class="props.row.s@@_pick_class">{{ props.row.s@@_pick }}</div>
     <div v-if="props.row.s@@_chance" class="text-[11px] opacity-70">{{ props.row.s@@_chance }}</div>
     <div v-if="props.row.s@@_note"
@@ -1593,38 +1749,69 @@ _GLANCE_SLOTS = {
 ''',
     "now": r'''
   <q-td :props="props">
-    <div class="font-semibold" :class="props.row._now_class">{{ props.row.now }}</div>
+    <div class="font-semibold" :class="props.row._now_class">
+      <q-icon :name="props.row.now_icon" size="16px"></q-icon> {{ props.row.now }}
+    </div>
     <div class="text-[11px] opacity-70">{{ props.row.when }}</div>
   </q-td>
 ''',
     "trade": r'''
   <q-td :props="props">
-    <div class="max-w-[220px] whitespace-normal leading-tight">{{ props.row.trade }}</div>
+    <div class="max-w-[170px] whitespace-normal leading-tight font-semibold"
+         :class="props.row._trade_class">
+      <q-icon v-if="props.row.trade_icon" :name="props.row.trade_icon" size="16px"></q-icon>
+      {{ props.row.trade }}
+    </div>
     <div v-if="props.row.side" class="text-[11px] opacity-70">{{ props.row.side }}</div>
   </q-td>
 ''',
     "chance": r'''
   <q-td :props="props">
-    <div class="font-semibold" :class="props.row._chance_class">{{ props.row.chance }}</div>
-    <div v-if="props.row.chance_note"
-         class="max-w-[200px] whitespace-normal leading-tight text-[11px] opacity-70">{{ props.row.chance_note }}</div>
+    <div class="flex items-center no-wrap font-semibold">
+      <span :class="props.row._chance_class">{{ props.row.chance }}</span>
+      <q-icon v-if="props.row.chance_icon" :name="props.row.chance_icon" size="20px"
+              :class="props.row._chance_icon_class">
+        <q-tooltip>{{ props.row.chance_delta }}</q-tooltip>
+      </q-icon>
+      <q-icon v-if="props.row.proof_icon" :name="props.row.proof_icon" size="14px"
+              class="ml-1" :class="props.row._proof_class">
+        <q-tooltip>{{ props.row.chance_note }}</q-tooltip>
+      </q-icon>
+    </div>
   </q-td>
 ''',
     "rate": r'''
   <q-td :props="props">
-    <div class="font-semibold" :class="props.row._rate_class">{{ props.row.rate }}</div>
-    <div v-if="props.row.rate_note"
-         class="max-w-[180px] whitespace-normal leading-tight text-[11px]"
-         :class="props.row._rate_class">{{ props.row.rate_note }}</div>
+    <div class="max-w-[110px] whitespace-normal leading-tight font-semibold"
+         :class="props.row._rate_class">
+      <q-icon v-if="props.row.rate_icon" :name="props.row.rate_icon" size="14px">
+        <q-tooltip>{{ props.row.rate_note }}</q-tooltip>
+      </q-icon>
+      {{ props.row.rate }}
+    </div>
   </q-td>
 ''',
     "room": r'''
   <q-td :props="props">
-    <div class="max-w-[240px] whitespace-normal leading-tight text-[12px]">{{ props.row.room }}</div>
+    <div class="max-w-[170px] whitespace-normal leading-tight text-[12px]"
+         :class="props.row._room_class">
+      <q-icon v-if="props.row.room_icon" :name="props.row.room_icon" size="14px"></q-icon>
+      {{ props.row.room_short }}
+      <q-tooltip v-if="props.row.room_short !== props.row.room">{{ props.row.room }}</q-tooltip>
+    </div>
   </q-td>
 ''',
-    "morning": r'''
-  <q-td :props="props"><span :class="props.row._morning_class">{{ props.row.morning }}</span></q-td>
+    # One icon per call, oldest on the left, wrapping at eleven: 21 slots and the
+    # 08:36 call are two rows of eleven at the end of the session.
+    "calls": r'''
+  <q-td :props="props">
+    <div class="flex flex-wrap w-[176px]">
+      <q-icon v-for="(call, i) in props.row.calls" :key="i" :name="call.icon" size="16px"
+              :class="call.cls">
+        <q-tooltip>{{ call.tip }}</q-tooltip>
+      </q-icon>
+    </div>
+  </q-td>
 ''',
 }
 

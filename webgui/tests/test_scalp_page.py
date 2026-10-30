@@ -1175,7 +1175,8 @@ def test_the_glance_row_reads_the_latest_15_minute_call():
     from pages.options import theme
     row, = scalp.glance_rows(_glance_view(), _at(2026, 10, 19, 10, 25))
     assert row["symbol"] == "SPY" and row["price"] == fmt.price(503.5)
-    assert row["now"] == "↑ Up" and row["when"] == "10:21 call"
+    assert row["now"] == "Up" and row["now_icon"] == "arrow_upward"
+    assert row["when"] == "10:21 call"
     assert row["_now_class"] == theme.TXT_POS
     # no `chance` key on this payload: the dash, and nothing to say about the fit
     assert row["chance"] == fmt.NO_READING and row["chance_note"] == ""
@@ -1184,7 +1185,6 @@ def test_the_glance_row_reads_the_latest_15_minute_call():
     # the headline number is the USUAL rate, not the bucket's own
     assert row["rate"] == "50.00%" and row["rate_note"] == "" and row["edge"] is False
     assert row["room"] == "The call wall at 503.75 (0.05%) is inside the target"
-    assert row["morning"] == "↓ Down"
 
 
 def test_the_room_is_the_dealer_lines_own_first_clause():
@@ -1213,7 +1213,6 @@ def test_a_call_whose_time_has_passed_keeps_its_words_and_loses_its_colour():
     assert past["when"] == "10:21 call · past" and past["edge"] is False
     assert past["rate_note"] == scalp.EDGE and past["_rate_class"] == ""
     assert past["_now_class"] == theme.MUTED and past["_chance_class"] == theme.MUTED
-    assert past["_morning_class"] == theme.MUTED
 
 
 def test_a_caution_is_said_beside_the_rate_never_as_an_edge():
@@ -1229,7 +1228,7 @@ def test_before_the_first_15_minute_call_the_0836_call_leads():
     view = _glance_view(day="2026-10-20", call_day="2026-10-20")
     assert scalp.intraday_leads(view) is False
     row, = scalp.glance_rows(view, _at(2026, 10, 20, 8, 40))
-    assert row["when"] == "08:36 call" and row["now"] == "↓ Down"
+    assert row["when"] == "08:36 call" and row["now"] == "Down"
     assert row["chance"] == fmt.NO_READING and row["_chance_class"] == ""
     assert row["room"] == fmt.NO_READING
     assert row["trade"] == f"Long put {fmt.strike(501.0)}" and row["rate"] == "40.00%"
@@ -1375,7 +1374,7 @@ def test_glance_shows_the_chance_not_the_word():
     assert row["chance_note"] == "fitted Oct 25 · beats the usual rate on unseen days: no"
     assert "word" not in row and "sources" not in row and "_word_class" not in row
     labels = [c["label"] for c in scalp.glance_columns()]
-    assert "Chance of target" in labels and "Confirmation" not in labels
+    assert "Chance" in labels and "Confirmation" not in labels
     names = [c["name"] for c in scalp.glance_columns()]
     assert names.index("chance") < names.index("rate")          # beside the usual rate
     assert row["rate"] == "50.00%"                               # the base rate stays
@@ -1655,3 +1654,229 @@ def test_the_context_section_is_titled_as_context_not_as_outside_the_probability
     assert "Context: headlines, flow alerts and the report" in folds
     assert not any(f.startswith("Not in the probability") for f in folds)
     assert "_COMPONENT_SLOT" not in SRC
+
+
+# ── the running calls column: every call since the open, oldest first ───────
+def _icons(row):
+    return [c["icon"] for c in row["calls"]]
+
+
+def test_the_calls_column_runs_from_the_0836_call_through_every_15_minute_call():
+    from pages.options import theme
+    row, = scalp.glance_rows(_glance_view(), _at(2026, 10, 19, 10, 25))
+    # 08:36 down, 09:06 up, 09:21 down with a measured edge
+    assert _icons(row) == ["arrow_downward", "arrow_upward", "arrow_circle_down"]
+    assert [c["tip"].split(" · ")[0] for c in row["calls"]] == ["08:36", "09:06", "09:21"]
+    assert [c["cls"] for c in row["calls"]] == [theme.TXT_NEG, theme.TXT_POS, theme.TXT_NEG]
+    assert row["calls"][1]["tip"] == "09:06 · Up"
+    assert row["calls"][2]["tip"] == "09:21 · Down · Long put · 63.00% vs 50.00% usually"
+
+
+def test_the_calls_column_replaces_the_0836_column():
+    names = [c["name"] for c in scalp.glance_columns()]
+    assert "calls" in names and "morning" not in names
+    assert "morning" not in scalp.glance_rows(_glance_view(), _at(2026, 10, 19, 10, 25))[0]
+    assert "calls" in scalp._GLANCE_SLOTS
+
+
+def test_a_flat_call_and_a_missing_call_are_both_no_signal_and_say_which():
+    from pages.options import theme
+    view = _glance_view(symbols={"SPY": _symbol(-1), "QQQ": _symbol(1)})
+    view["intraday"]["latest"]["QQQ"] = _ientry(1)
+    rows = {r["symbol"]: r for r in scalp.glance_rows(view, _at(2026, 10, 19, 10, 25))}
+    calls = rows["QQQ"]["calls"]
+    assert [c["icon"] for c in calls] == ["arrow_upward", "remove", "remove"]
+    assert calls[1]["cls"] == calls[2]["cls"] == theme.MUTED
+    assert calls[1]["tip"] == "09:06 · No signal · flat over the last 15 minutes — no direction"
+    assert calls[2]["tip"] == "09:21 · No signal · no call recorded"
+
+
+def test_the_usual_no_edge_note_is_not_repeated_in_a_calls_tip():
+    row, = scalp.glance_rows(_glance_view(), _at(2026, 10, 19, 10, 25))
+    assert not any("no measured edge" in c["tip"].lower() for c in row["calls"])
+
+
+def test_before_the_first_15_minute_call_the_calls_column_holds_the_0836_call_alone():
+    view = _glance_view(day="2026-10-20", call_day="2026-10-20")
+    row, = scalp.glance_rows(view, _at(2026, 10, 20, 8, 40))
+    assert _icons(row) == ["arrow_downward"]        # yesterday's 15-minute calls stay out
+
+
+def test_another_days_calls_keep_their_icons_and_lose_their_colour():
+    from pages.options import theme
+    row, = scalp.glance_rows(_glance_view(), _at(2026, 10, 20, 8, 0))
+    assert _icons(row) == ["arrow_downward", "arrow_upward", "arrow_circle_down"]
+    assert {c["cls"] for c in row["calls"]} == {theme.MUTED}
+
+
+def test_todays_earlier_calls_keep_their_colour_after_the_latest_goes_past():
+    from pages.options import theme
+    row, = scalp.glance_rows(_glance_view(), _at(2026, 10, 19, 10, 40))
+    assert row["_now_class"] == theme.MUTED                 # the latest call is past
+    assert row["calls"][1]["cls"] == theme.TXT_POS          # the record of the day is not
+
+
+def test_an_0836_call_of_another_day_stays_out_of_the_15_minute_calls():
+    view = _glance_view(call_day="2026-10-16")
+    row, = scalp.glance_rows(view, _at(2026, 10, 19, 10, 25))
+    assert _icons(row) == ["arrow_upward", "arrow_circle_down"]
+
+
+@pytest.mark.parametrize("cell", ["junk", None, {}, {"direction": True}, {"direction": "up"}])
+def test_a_malformed_timeline_cell_is_no_signal(cell):
+    view = _glance_view(call_day="2026-10-16", intraday=_section(
+        timeline=[{"slot": "09:06", "symbols": {"SPY": cell}}]))
+    row, = scalp.glance_rows(view, _at(2026, 10, 19, 10, 25))
+    assert _icons(row) == ["remove"]
+
+
+# ── colour and icons in the glance ──────────────────────────────────────────
+def test_the_now_column_carries_an_icon_for_each_direction():
+    flat = _ientry(None, roles={}, note="flat")
+    assert scalp.glance_row("SPY", flat, "intraday", current=True, when="x")["now_icon"] == "remove"
+    down = scalp.glance_row("SPY", _ientry(-1), "intraday", current=True, when="x")
+    assert down["now_icon"] == "arrow_downward" and down["now"] == "Down"
+
+
+@pytest.mark.parametrize("direction,highlight,icon,bullish", [
+    (1, None, "trending_up", True),              # long call, with an up move
+    (-1, None, "trending_down", False),          # long put, with a down move
+    (1, "long_against", "trending_down", False),  # long put against an up move
+    (-1, "long_against", "trending_up", True),   # long call against a down move
+    (1, "credit_with", "trending_up", True),     # put credit spread
+    (1, "credit_against", "trending_down", False),  # call credit spread
+    (-1, "credit_with", "trending_down", False),  # call credit spread
+    (-1, "credit_against", "trending_up", True),  # put credit spread
+])
+def test_the_trade_is_coloured_by_the_way_the_contract_leans(direction, highlight, icon, bullish):
+    from pages.options import theme
+    row = scalp.glance_row("SPY", _ientry(direction, highlight=highlight), "intraday",
+                           current=True, when="x")
+    assert row["trade_icon"] == icon
+    assert row["_trade_class"] == (theme.TXT_POS if bullish else theme.TXT_NEG)
+    past = scalp.glance_row("SPY", _ientry(direction, highlight=highlight), "intraday",
+                            current=False, when="x")
+    assert past["_trade_class"] == theme.MUTED and past["trade_icon"] == icon
+
+
+def test_a_row_with_no_trade_has_no_trade_icon():
+    flat = _ientry(None, roles={}, note="flat")
+    row = scalp.glance_row("SPY", flat, "intraday", current=True, when="x")
+    assert row["trade_icon"] == "" and row["_trade_class"] == ""
+
+
+def _chance_row(chance_value, beats=False, *, current=True):
+    entry = _with_chance(_ientry(1), _chance(chance_value, beats=beats))
+    return scalp.glance_row("SPY", entry, "intraday", current=current, when="x")
+
+
+def test_the_chance_arrow_says_which_side_of_the_usual_rate_it_is():
+    from pages.options import theme
+    above, below = _chance_row(0.60), _chance_row(0.40)           # the usual rate is 50%
+    assert above["chance_icon"] == "arrow_drop_up"
+    assert above["_chance_icon_class"] == theme.TXT_POS
+    assert below["chance_icon"] == "arrow_drop_down"
+    assert below["_chance_icon_class"] == theme.TXT_NEG
+
+
+def test_a_chance_near_the_usual_rate_has_no_arrow():
+    near = _chance_row(0.505)
+    assert near["chance_icon"] == "" and near["_chance_class"] == ""
+
+
+def test_only_a_proven_chance_colours_its_figure():
+    from pages.options import theme
+    assert _chance_row(0.60, beats=False)["_chance_class"] == ""
+    assert _chance_row(0.60, beats=True)["_chance_class"] == f"{theme.TXT_POS}"
+    assert _chance_row(0.40, beats=True)["_chance_class"] == f"{theme.TXT_NEG}"
+
+
+def test_the_proof_icon_says_whether_the_chance_beat_the_usual_rate():
+    from pages.options import theme
+    proven, unproven = _chance_row(0.60, beats=True), _chance_row(0.60)
+    assert proven["proof_icon"] == "check_circle" and proven["_proof_class"] == theme.TXT_POS
+    assert unproven["proof_icon"] == "help_outline" and unproven["_proof_class"] == theme.MUTED
+    # the words the line used to show are kept, as the icon's tooltip
+    assert unproven["chance_note"] == "fitted Oct 25 · beats the usual rate on unseen days: no"
+    entry = _with_chance(_ientry(1), _chance(version=None))
+    unfitted = scalp.glance_row("SPY", entry, "intraday", current=True, when="x")
+    assert unfitted["proof_icon"] == "hourglass_empty"
+
+
+def test_a_row_with_no_chance_has_no_chance_icons():
+    row = scalp.glance_row("SPY", _ientry(1), "intraday", current=True, when="x")
+    assert row["chance_icon"] == "" and row["proof_icon"] == ""
+
+
+def test_a_chance_that_is_not_current_draws_no_colour():
+    from pages.options import theme
+    past = _chance_row(0.60, beats=True, current=False)
+    assert past["_chance_class"] == theme.MUTED
+    assert past["_chance_icon_class"] == theme.MUTED and past["_proof_class"] == theme.MUTED
+
+
+def test_edge_and_caution_rates_carry_an_icon_and_keep_their_words_as_the_tip():
+    edge = scalp.glance_row("SPY", _ientry(1, highlight="long_with"), "intraday",
+                            current=True, when="x")
+    assert edge["rate_icon"] == "verified" and edge["rate_note"] == scalp.EDGE
+    caution = scalp.glance_row("SPY", _ientry(1, avoid=["long_with"]), "intraday",
+                               current=True, when="x")
+    assert caution["rate_icon"] == "warning" and caution["rate_note"] == scalp.CAUTION
+    plain = scalp.glance_row("SPY", _ientry(1), "intraday", current=True, when="x")
+    assert plain["rate_icon"] == "" and plain["rate_note"] == ""
+
+
+@pytest.mark.parametrize("line,short,icon,tone", [
+    ("Room up to the call wall at 510.00 (1.29%); 8 of 10 big names have room",
+     "Call wall 510.00 · 1.29%", "check_circle", "pos"),
+    ("Room down to the put wall at 1,490.25 (0.50%); breadth not read",
+     "Put wall 1,490.25 · 0.50%", "check_circle", "pos"),
+    ("The call wall at 503.75 (0.05%) is inside the target; breadth not read",
+     "Call wall 503.75 · 0.05%", "block", "neg"),
+    ("Spot 505.00 is above the call wall at 503.75; breadth not read",
+     "Call wall 503.75 · passed", "block", "neg"),
+    ("No call wall for SPY; breadth not read", "No call wall for SPY", "", "muted"),
+    ("No usable put wall for SPY (no gamma reading); breadth not read",
+     "No usable put wall for SPY (no gamma reading)", "", "muted"),
+    ("No reading: the dealer data is stale", "No reading: the dealer data is stale", "", "muted"),
+])
+def test_the_room_is_short_coloured_and_keeps_the_services_words_as_the_tip(line, short, icon, tone):
+    from pages.options import theme
+    row = scalp.glance_row("SPY", _ientry(1, dealer_line=line), "intraday", current=True, when="x")
+    assert row["room_short"] == short and row["room_icon"] == icon
+    assert row["room"] == line.split(";")[0]
+    assert row["_room_class"] == {"pos": theme.TXT_POS, "neg": theme.TXT_NEG,
+                                  "muted": theme.MUTED}[tone]
+
+
+def test_a_row_with_no_room_reading_is_the_dash_and_a_past_one_loses_its_colour():
+    from pages.options import theme
+    morning = scalp.glance_row("SPY", _symbol(1), "morning", current=True, when="x")
+    assert morning["room_short"] == fmt.NO_READING and morning["room_icon"] == ""
+    past = scalp.glance_row("SPY", _ientry(1, dealer_line="Room up to the call wall at 510.00 (1.29%)"),
+                            "intraday", current=False, when="x")
+    assert past["_room_class"] == theme.MUTED and past["room_icon"] == "check_circle"
+
+
+def test_every_glance_header_is_a_short_whole_word():
+    labels = {c["name"]: c["label"] for c in scalp.glance_columns()}
+    assert labels == {"symbol": "Symbol", "now": "Now", "trade": "Trade", "chance": "Chance",
+                      "rate": "Usual", "room": "Room", "calls": "Calls since the open"}
+
+
+def test_a_timeline_direction_is_coloured_and_muted_on_another_day():
+    from pages.options import theme
+    rows = scalp.timeline_rows(_section())
+    assert rows[0]["s0_class"] == theme.TXT_POS and rows[1]["s0_class"] == theme.TXT_NEG
+    assert rows[0]["s1_class"] == theme.MUTED                     # QQQ was flat
+    old = scalp.timeline_rows(_section(), muted=True)
+    assert old[0]["s0_class"] == theme.MUTED
+
+
+def test_an_input_verdict_carries_its_own_icon():
+    rows = scalp.input_rows({"direction": 1, "inputs": {"fut_gap": 0.2, "fut_asia": 0.1, "vol_change": None},
+                             "agree": {"fut_gap": 1, "fut_asia": -1}})
+    by_id = {r["id"]: r for r in rows}
+    assert by_id["fut_gap"]["_tone_icon"] == "check_circle"
+    assert by_id["fut_asia"]["_tone_icon"] == "cancel"
+    assert by_id["vol_change"]["_tone_icon"] == "remove"

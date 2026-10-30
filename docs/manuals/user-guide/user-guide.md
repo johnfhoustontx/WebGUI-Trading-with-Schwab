@@ -2586,13 +2586,24 @@ past mornings that looked like this one. **It does not place trades** — you de
 **The top of the page is one table, a row per symbol.** Above it a line names the call
 it shows ("Latest call at 09:21 · next at 09:36"), counts down to the next one ("next
 call in 4 min") and says whether any symbol has a measured edge. Each row shows the
-symbol and its price, **Now** (↑ Up, ↓ Down or no direction, and which call that is),
-the **trade with the call** (the trade with a measured edge instead, when there is one),
-its **Chance of target**, how often it **usually wins**, the **room to the wall**, and
-the **08:36 call**'s direction. The row reads the latest 15-minute call once the
-first one is out (08:51) and the 08:36 call before that. A call that is no longer
-current keeps its words and loses its colour. **Chance of target** is explained under
-*The chance of target*, below; read it beside **Usually wins**, never instead of it.
+symbol and its price, **Now** (up, down or no direction, and which call that is), the
+**Trade** with the call (the trade with a measured edge instead, when there is one), its
+**Chance** of target, how often it **usually** wins, the **Room** to the wall, and
+**Calls since the open**: one icon per call, oldest on the left, starting with the 08:36
+call. An up arrow is up, a down arrow is down, a dash is no signal, and an arrow in a ring
+is a call that had a measured edge; hover an icon for its time and what it said. The row
+reads the latest 15-minute call once the first one is out (08:51) and the 08:36 call
+before that.
+
+Green leans up and red leans down, for the direction and for the trade (a long call and a
+put credit spread lean up). Room is green when the target is short of the wall and red
+when the wall is inside the target or already passed. Beside the chance, a small arrow
+says which side of the usual rate it is on (none within one point) and an icon says
+whether it beat that rate on unseen days: a tick for yes, a question mark for no, an
+hourglass when not fitted yet. Only a proven figure is itself coloured. A call that is no
+longer current keeps its words and loses its colour; earlier calls today keep theirs, as
+the day's record. **Chance of target** is explained under *The chance of target*, below;
+read it beside the usual rate, never instead of it.
 
 **Everything else is below it, in closed sections:** one per symbol (its 15-minute
 call, **what moved its chance** and its 08:36 call), then **Today's calls**, the
@@ -2747,7 +2758,7 @@ the row names; the **15-minute call** and **08:36 call** cards show all four, in
   still the starting guess, not a measurement. Flow, sentiment, net premium and the dealer
   read are held close to their assumption, so they can stay assumed after many days. Read a big push on an
   **assumed** factor with caution: nothing has tested it yet.
-- **The line under the figure.** *fitted Oct 25 · beats the usual rate on unseen days: no.*
+- **The line behind the icon.** Hover the icon beside the figure: *fitted Oct 25 · beats the usual rate on unseen days: no.*
   Every refit tests the chance the way the bucket study tests an edge: week by week, it is
   fitted on the earlier weeks and scored on the next, which it has never seen, against the
   plain usual win rate. **yes** means it did better by a clear margin over the weeks tested;

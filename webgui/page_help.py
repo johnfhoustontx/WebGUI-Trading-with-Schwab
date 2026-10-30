@@ -1092,9 +1092,18 @@ buttons, and you decide.
 **Read the table at the top first.** One row per symbol: which way it is going
 **now** (the latest 15-minute call from 08:51, the 08:36 call before that), the
 **trade with the call**, its **chance of target** and how often it **usually
-wins**, the **room to the wall**, and the **08:36 call**. The line above says which
+wins**, the **room to the wall**, and **every call since the open**: one icon per
+call, oldest on the left, starting with the 08:36 call. An up arrow is up, a down
+arrow is down, a dash is no signal, and an arrow in a ring is a call that had a
+measured edge; hover an icon for its time and what it said. The line above says which
 call this is, when the next one comes, and whether any symbol has a measured edge.
-A call that is no longer current is drawn without colour. Everything below the
+
+**The colours.** Green leans up and red leans down, for the direction and for the
+trade (a long call and a put credit spread lean up). Room is green when the target
+is short of the wall and red when the wall is inside the target or already passed.
+A shield-tick beside **Usual** is a measured edge and a triangle is a caution; hover
+either for the words. A call that is no longer current is drawn without colour;
+earlier calls today keep theirs, since they are the day's record. Everything below the
 table is **closed**: open a symbol's section for its full calls and **what moved
 the chance**, or Today's calls, the Context and the Scorecard. A section you open
 stays open when a new call arrives.
@@ -1106,7 +1115,11 @@ the **slope of a 20-bar moving average** and **momentum (RSI)** on the 5-minute,
 15-minute and hourly charts, the dealer read, net premium, options flow and market
 sentiment. Each factor has a weight; the weights are **refitted every Saturday**
 from the stored days and **frozen with each call**, so a refit never changes a call
-already shown. Under the figure a small line says **fitted <date>** and whether the
+already shown. Beside the figure a small arrow says which side of the usual rate it
+is on (none within one point), and an icon says whether it has been proven: a tick
+when it did beat the usual rate, a question mark when it did not, an hourglass when
+not fitted yet. Only a proven figure is itself coloured. Hover the icon for **fitted
+<date>** and whether the
 chance **beats the usual rate on unseen days**: yes only when, tested week by week
 on days it was not fitted on, it scored better than the plain usual win rate by a
 clear margin. **no** is common and it means: do not lean on the figure more than on
