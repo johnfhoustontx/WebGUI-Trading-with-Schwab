@@ -228,6 +228,12 @@ def build_chain(snapshot: FuturesChainSnapshot) -> AdaptedChain:
     if not rows:
         raise Refused("no contracts read a value")
 
+    if all(row.open_int is None for row in rows):
+        # Open interest weights every dollar figure: with none, zero at every strike
+        # would read as a real flat reading. Zero itself is a reading and passes.
+        raise Refused("no contract reports open interest, so the dollar figures "
+                      "would all read zero")
+
     implied = _implied_future(rows, future)
     gap = None if implied is None else abs(implied - future)
     if gap is not None and gap > spec["parity_limit_pts"]:

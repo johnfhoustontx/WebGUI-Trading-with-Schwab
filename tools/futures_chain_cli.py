@@ -15,12 +15,14 @@ no Redis of its own. Once per interval it does two things here:
                                   there (``futures_chain_feed``).
 
 It validates the shape and the size and nothing else: the contract, the age, the
-terms and the checks against the last capture are the service's. A batch is all
-or nothing as far as the input goes -- one snapshot over the limit sends none of
-them -- so a half-readable file never reaches the stream.
+terms and the checks against the last capture are the service's. Input it cannot
+read at all sends nothing. A snapshot over the limit is dropped and named on
+stderr, and the others still go (one instrument failing does not block the
+other); the exit status is 3 so the capture knows.
 
 Exit codes: 0 written, 2 input or usage the command cannot use, 3 a snapshot over
-``max_snapshot_kb``, 4 Redis refused a write. The reason is on stderr.
+``max_snapshot_kb`` was dropped (the rest were written) or stdin was larger than a
+capture can be, 4 Redis refused a write. The reason is on stderr.
 
 Run it through ``tools/futures_chain_remote.sh``, which loads the stack's ``.env``
 (Redis needs a password) and the venv. Design:
@@ -104,13 +106,19 @@ def _parse(text: str):
     return snapshots, status
 
 
-def _check_sizes(snapshots: list) -> None:
+def _split_by_size(snapshots: list):
+    """``(kept, dropped)``: the snapshots within ``max_snapshot_kb`` and a sentence
+    for each that is not. One instrument's snapshot never blocks the other's."""
     limit_kb = futures_chain_config.capture()["max_snapshot_kb"]
+    kept, dropped = [], []
     for snapshot in snapshots:
         size = len(json.dumps(snapshot, separators=(",", ":")).encode("utf-8"))
         if size > limit_kb * 1024:
-            raise _Refused(f"the {snapshot['instrument']} snapshot is {size // 1024} KB, over "
-                           f"the {limit_kb} KB limit; nothing was sent", EXIT_TOO_BIG)
+            dropped.append(f"the {snapshot['instrument']} snapshot is {size // 1024} KB, "
+                           f"over the {limit_kb} KB limit; it was not sent")
+        else:
+            kept.append(snapshot)
+    return kept, dropped
 
 
 def _enqueue(bus, commands: list) -> list:
@@ -140,13 +148,15 @@ def _plan(stdout) -> int:
 
 def _ingest(stdin, stdout) -> int:
     snapshots, status = _parse(_read(stdin))
-    _check_sizes(snapshots)
+    snapshots, dropped = _split_by_size(snapshots)
     commands = [("snapshot", snapshot) for snapshot in snapshots]
     if status is not None:
         commands.append(("pc_status", status))
-    queued = _enqueue(Bus(), commands)
+    queued = _enqueue(Bus(), commands) if commands else []
     stdout.write(json.dumps({"queued": queued}) + "\n")
-    return EXIT_OK
+    for sentence in dropped:
+        sys.stderr.write(f"futures_chain_cli ingest: {sentence}\n")
+    return EXIT_TOO_BIG if dropped else EXIT_OK
 
 
 def main(argv=None, stdin=None, stdout=None) -> int:

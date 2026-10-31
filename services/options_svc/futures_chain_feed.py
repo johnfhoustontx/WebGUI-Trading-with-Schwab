@@ -54,7 +54,7 @@ _MAX_REASON = 300
 # What a status entry holds before the instrument has had a capture accepted.
 _BLANK = {"captured_at": None, "expiry": None, "listed": None, "with_gamma": None,
           "parity_gap": None, "reason": "", "repeats": 0, "refused_at": None,
-          "price": None, "activity": None}
+          "price": None, "activity": None, "refused_listed": None}
 
 
 def _now() -> float:
@@ -94,7 +94,10 @@ def _number(value) -> bool:
 
 
 def _span(seconds: float) -> str:
-    """A length of time in whole words: ``45 seconds``, ``20 minutes``."""
+    """A length of time in whole words: ``45 seconds``, ``20 minutes``. Total: a
+    length that is not a number is worded too, never raised on."""
+    if not math.isfinite(seconds):
+        return "an unknown length of time"
     seconds = max(0, int(round(seconds)))
     if seconds < 90:
         return f"{seconds} second{'s' if seconds != 1 else ''}"
@@ -104,10 +107,11 @@ def _span(seconds: float) -> str:
     return f"{round(seconds / 3600, 1):g} hours"
 
 
-def _refuse(bus, status: dict, symbol: str, reason: str, now: float) -> None:
+def _refuse(bus, status: dict, symbol: str, reason: str, now: float, **fields) -> None:
     """Record why this instrument's snapshot was not used, keeping what the last
-    good one said about the rest."""
+    good one said about the rest. ``fields`` are further entry values to keep."""
     entry = _entry(status, symbol)
+    entry.update(fields)
     entry["reason"] = reason
     entry["refused_at"] = now
     status[symbol] = entry
@@ -197,6 +201,13 @@ def _snapshot(bus, args) -> None:
     capture = futures_chain_config.capture()
     taken = snapshot.captured_at
 
+    # Before any comparison or any wording of an age: an infinite stamp would
+    # raise out of the handler and the command would be dead-lettered unexplained.
+    if not math.isfinite(taken):
+        _refuse(bus, status, symbol, "Refused: the capture time is not a time. The "
+                "snapshot carries no usable capture stamp.", now)
+        return
+
     # The age gate is also the replay guard: a consumer group created at id 0 is
     # handed the stream's whole history, and none of it may read as current.
     if taken < now - capture["max_age_sec"]:
@@ -227,14 +238,20 @@ def _snapshot(bus, args) -> None:
     same_session = previous["expiry"] == adapted.expiry.isoformat()
 
     # A capture that reads far fewer contracts than the one before it is a sheet
-    # that had not filled; the page keeps the last good chain instead.
+    # that had not filled; the page keeps the last good chain instead. But the
+    # operator can narrow the strike width on purpose, and that drops the count
+    # for good: a half-filled sheet does not read the same short count twice, a
+    # resized one does, so a capture that repeats the last REFUSED count is taken.
     share = capture["min_fill_fraction"]
     if (same_session and _number(previous["listed"])
-            and adapted.listed < share * previous["listed"]):
+            and adapted.listed < share * previous["listed"]
+            and previous["refused_listed"] != adapted.listed):
         _refuse(bus, status, symbol, f"Refused: the capture read {adapted.listed} "
                 f"contracts, fewer than {round(share * 100):g} percent of the "
                 f"{previous['listed']} before it. ThinkorSwim may not have finished "
-                "filling the sheet.", now)
+                f"filling the sheet. If the next capture reads the same "
+                f"{adapted.listed} contracts it will be accepted, as the sheet is "
+                "then probably narrower on purpose.", now, refused_listed=adapted.listed)
         return
 
     # The run of captures with the same price and the same volume and open
@@ -261,7 +278,7 @@ def _snapshot(bus, args) -> None:
     entry.update(
         captured_at=taken, expiry=adapted.expiry.isoformat(), listed=adapted.listed,
         with_gamma=adapted.with_gamma, parity_gap=adapted.parity_gap, repeats=repeats,
-        price=price, activity=activity, reason="")
+        price=price, activity=activity, reason="", refused_listed=None)
     if repeats >= capture["frozen_repeats"]:
         entry["reason"] = (f"The prices and counts are not changing: the last {repeats} "
                            "captures read exactly the same values. ThinkorSwim may have "

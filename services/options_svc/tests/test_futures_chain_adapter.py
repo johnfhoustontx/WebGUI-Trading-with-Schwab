@@ -186,6 +186,23 @@ def test_a_chain_whose_only_volatility_underflows_is_refused():
         adapt(snap(rows=[row(7600, "C", iv="1e-322%")]), hours=6.5)
 
 
+@pytest.mark.parametrize("open_int", [None, "N/A"])
+def test_a_chain_where_no_contract_has_open_interest_is_refused(open_int):
+    """Open interest weights every dollar figure: with none, zero at every strike
+    would read as a real flat reading."""
+    with pytest.raises(Refused, match="open interest"):
+        adapt(snap(rows=[row(7600, "C", open_int=open_int), row(7600, "P", open_int=open_int)]))
+
+
+def test_a_zero_open_interest_is_a_reading_and_is_not_refused():
+    a = adapt(snap(rows=[row(7600, "C", open_int=0), row(7600, "P", open_int=0)]))
+    assert a.listed == 2
+
+
+def test_one_contract_with_open_interest_is_enough():
+    adapt(snap(rows=[row(7600, "C", open_int=None), row(7600, "P", open_int=10)]))
+
+
 def test_the_chain_carries_the_volatility_in_percent_as_the_engine_reads_it():
     c = contract_at(adapt(snap(rows=[row(7600, "C", iv="12.51%")])), 7600, "C")
     assert c["volatility"] == pytest.approx(12.51)
@@ -201,7 +218,8 @@ def test_counts_are_scaled_by_contract_size(inst, mult, scale):
 
 
 def test_an_absent_count_stays_absent_when_scaled():
-    c = contract_at(adapt(snap(rows=[row(7600, "C", open_int=None, volume=None)])), 7600, "C")
+    a = adapt(snap(rows=[row(7600, "C", open_int=None, volume=None), row(7600, "P", open_int=10)]))
+    c = contract_at(a, 7600, "C")
     assert c["openInterest"] is None and c["totalVolume"] is None
 
 

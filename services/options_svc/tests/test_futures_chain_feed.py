@@ -309,6 +309,25 @@ def test_a_capture_that_stamps_no_time_is_refused_not_stored(bus, db):
     assert rows(db) == 0 and status(bus)["FOP.ES"]["reason"]
 
 
+@pytest.mark.parametrize("stamp", [float("inf"), float("-inf")])
+def test_an_infinite_capture_time_is_refused_with_a_reason_not_a_crash(bus, db, stamp):
+    with frozen_clock(T):
+        handle(bus, cmd(snapshot(captured=stamp)))
+    assert rows(db) == 0 and latest(bus, "FOP.ES") is None
+    assert "not a time" in status(bus)["FOP.ES"]["reason"]
+
+
+def test_a_capture_time_that_is_not_a_number_is_refused_in_words(bus, db):
+    with frozen_clock(T):
+        handle(bus, cmd(snapshot(captured=float("nan"))))
+    assert "not a time" in status(bus)["FOP.ES"]["reason"]
+
+
+@pytest.mark.parametrize("seconds", [float("inf"), float("-inf"), float("nan"), -5, 0, 1e300])
+def test_a_length_of_time_can_always_be_worded(seconds):
+    assert isinstance(feed._span(seconds), str) and feed._span(seconds)
+
+
 # ── Review Focus 1: a feed that has stopped moving ───────────────────────────
 
 def test_identical_values_repeating_are_marked_as_not_moving(bus, db):
@@ -386,6 +405,64 @@ def test_a_new_session_is_not_compared_with_the_last_sessions_count(bus, db):
     handle(bus, cmd(snapshot(captured=T, expiry=MON, n=300)))
     handle(bus, cmd(snapshot(captured=T + 8000, expiry=TUE, n=100)))
     assert latest(bus, "FOP.ES")["expiry"] == TUE.isoformat()
+
+
+def test_a_resized_sheet_is_taken_when_the_next_capture_repeats_its_count(bus, db):
+    """Narrowing the strike width drops the count on purpose. A half-filled sheet
+    does not repeat the same short count; a resized one does."""
+    handle(bus, cmd(snapshot(captured=T, n=300)))
+    handle(bus, cmd(snapshot(captured=T + 300, n=100)))
+    refused = status(bus)["FOP.ES"]
+    assert latest(bus, "FOP.ES")["captured_at"] == T
+    assert refused["refused_listed"] == 100 and "will be accepted" in refused["reason"]
+    assert "100 contracts" in refused["reason"]
+    handle(bus, cmd(snapshot(captured=T + 600, n=100)))
+    assert latest(bus, "FOP.ES")["captured_at"] == T + 600
+    taken = status(bus)["FOP.ES"]
+    assert taken["listed"] == 100 and taken["reason"] == "" and taken["refused_listed"] is None
+
+
+def test_the_new_count_is_the_baseline_after_a_resize(bus, db):
+    handle(bus, cmd(snapshot(captured=T, n=300)))
+    handle(bus, cmd(snapshot(captured=T + 300, n=100)))
+    handle(bus, cmd(snapshot(captured=T + 600, n=100)))
+    handle(bus, cmd(snapshot(captured=T + 900, n=30)))          # half filled against 100
+    assert latest(bus, "FOP.ES")["captured_at"] == T + 600
+
+
+def test_two_different_short_counts_are_not_a_resize(bus, db):
+    handle(bus, cmd(snapshot(captured=T, n=300)))
+    handle(bus, cmd(snapshot(captured=T + 300, n=100)))
+    handle(bus, cmd(snapshot(captured=T + 600, n=60)))          # still filling
+    assert latest(bus, "FOP.ES")["captured_at"] == T
+    assert status(bus)["FOP.ES"]["refused_listed"] == 60
+    handle(bus, cmd(snapshot(captured=T + 900, n=100)))         # 100 was not the last refusal
+    assert latest(bus, "FOP.ES")["captured_at"] == T
+
+
+def test_a_refusal_that_is_not_a_count_leaves_the_refused_count_alone(bus, db):
+    handle(bus, cmd(snapshot(captured=T, n=300)))
+    handle(bus, cmd(snapshot(captured=T + 300, n=100)))
+    handle(bus, cmd(snapshot(captured=T + 600, n=100, price=0)))
+    handle(bus, cmd(snapshot(captured=T + 900, n=100)))
+    assert latest(bus, "FOP.ES")["captured_at"] == T + 900
+
+
+def test_a_full_capture_after_a_short_one_is_taken_and_forgets_the_refused_count(bus, db):
+    handle(bus, cmd(snapshot(captured=T, n=300)))
+    handle(bus, cmd(snapshot(captured=T + 300, n=100)))
+    handle(bus, cmd(snapshot(captured=T + 600, n=300)))
+    assert latest(bus, "FOP.ES")["captured_at"] == T + 600
+    assert status(bus)["FOP.ES"]["refused_listed"] is None
+
+
+def test_a_resized_sheet_is_still_remembered_after_a_restart(bus, db):
+    handle(bus, cmd(snapshot(captured=T, n=300)))
+    handle(bus, cmd(snapshot(captured=T + 300, n=100)))
+    importlib.reload(feed)
+    feed._now = lambda: T + 605
+    feed.handle(Bus(fake=True), cmd(snapshot(captured=T + 600, n=100)))
+    assert latest(bus, "FOP.ES")["captured_at"] == T + 600
 
 
 def test_the_last_count_survives_a_restart(bus, db):

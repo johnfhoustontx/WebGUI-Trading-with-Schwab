@@ -131,11 +131,37 @@ def test_ingest_refuses_an_oversized_snapshot(fake_bus):
     assert cli.main(["ingest"], stdin=huge()) != 0 and stream_types(fake_bus, STREAM) == []
 
 
-def test_ingest_refuses_the_whole_batch_when_one_snapshot_is_oversized(fake_bus):
-    big = {**es(), "contracts": ["x" * 1000] * 700}
-    code = cli.main(["ingest"], stdin=stdin_of({"snapshots": [nq(), big],
+def test_an_oversized_nq_does_not_block_es(fake_bus, capsys):
+    """One instrument failing does not touch the other (design 5.6): /ES lands,
+    the PC's status lands, the dropped one is named and the exit says so."""
+    big = {**nq(), "contracts": ["x" * 1000] * 700}
+    code = cli.main(["ingest"], stdin=stdin_of({"snapshots": [es(), big],
                                                 "status": {"reason": ""}}))
-    assert code != 0 and stream_types(fake_bus, STREAM) == []
+    assert code == 3
+    assert stream_types(fake_bus, STREAM) == ["snapshot", "pc_status"]
+    assert stream_args(fake_bus, STREAM)[0]["instrument"] == "ES"
+    err = capsys.readouterr().err
+    assert "NQ" in err and "not sent" in err
+
+
+def test_an_oversized_es_does_not_block_nq(fake_bus):
+    big = {**es(), "contracts": ["x" * 1000] * 700}
+    assert cli.main(["ingest"], stdin=stdin_of({"snapshots": [big, nq()]})) == 3
+    assert [a["instrument"] for a in stream_args(fake_bus, STREAM)] == ["NQ"]
+
+
+def test_an_oversized_snapshot_still_says_what_was_queued(fake_bus):
+    big = {**nq(), "contracts": ["x" * 1000] * 700}
+    out = io.StringIO()
+    cli.main(["ingest"], stdin=stdin_of({"snapshots": [es(), big]}), stdout=out)
+    assert json.loads(out.getvalue()) == {"queued": ["snapshot"]}
+
+
+def test_an_oversized_snapshot_alone_opens_no_connection(monkeypatch):
+    def no_bus(*args, **kwargs):
+        raise AssertionError("opened a bus with nothing to send")
+    monkeypatch.setattr(cli, "Bus", no_bus)
+    assert cli.main(["ingest"], stdin=huge()) == 3
 
 
 def test_the_size_limit_comes_from_the_config(fake_bus, monkeypatch):
