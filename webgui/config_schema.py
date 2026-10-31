@@ -2690,6 +2690,16 @@ _COMMANDS = ConfigFile(
                   "most allowed here, about 250 MB. More than this many sent "
                   "while the blog service is stopped, and the oldest are lost.",
                   kind="int", unit="commands", min=10, max=500, step=10),
+            Field("stream_keep.cmd:futures_chain",
+                  "The /ES and /NQ chain feed's snapshots",
+                  "Kept small on purpose: each command carries one chain "
+                  "snapshot, up to the largest the futures chain settings "
+                  "allow, two every capture. At 20 that is the newest ten "
+                  "captures, at most about 10 MB; at 200, the most allowed "
+                  "here, at most about 100 MB. A snapshot older than the "
+                  "futures chain settings' age limit is dropped on arrival, so "
+                  "a longer backlog would be worth nothing.",
+                  kind="int", unit="commands", min=10, max=200, step=10),
             Field("stream_keep.*", "",
                   "A queue given its own number by hand in the settings file, "
                   "shown under the queue's own name.",
@@ -2833,6 +2843,125 @@ _LOGIN_PUSH = ConfigFile(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
+# The /ES and /NQ 0-DTE chain feed — config/futures_chain.toml
+# ─────────────────────────────────────────────────────────────────────────────
+# Read by the capture on the PC (through the plan the options service builds), by
+# the options service when it ingests a snapshot, and by the page.
+def _instrument_fields(root, name):
+    p = f"instruments.{root}."
+    return (
+        Field(p + "symbol", f"{name}: internal name",
+              "The name the app keeps it under. It must start with FOP. and "
+              "pass the ticker rule, so changing it is rarely wise.",
+              kind="text"),
+        Field(p + "label", f"{name}: name on the page", "", kind="text"),
+        Field(p + "multiplier", f"{name}: dollars a point",
+              "Read from each contract's own description; this is what the "
+              "service scales open interest and volume by, as a share of 100.",
+              kind="int", unit="$", min=1, max=10000, step=1),
+        Field(p + "exchange", f"{name}: exchange code",
+              "As ThinkorSwim spells it after the colon in a contract name.",
+              kind="text"),
+        Field(p + "strike_step", f"{name}: strike spacing tried",
+              "Not every strike in the ladder is listed, so a few tries read "
+              "as not listed, which is normal.",
+              kind="float", unit="points", min=0.25, max=1000, step=0.25),
+        Field(p + "strike_width_pct", f"{name}: reach each side of the future",
+              "The walls and the flip see only the strikes captured, so a "
+              "narrower reach shows less of the chain.",
+              kind="float", unit="%", min=0.5, max=50, step=0.5),
+        Field(p + "parity_limit_pts", f"{name}: put-call check may miss by",
+              "At the money, a call minus a put plus the strike should land on "
+              "the future. Further apart than this stops that instrument's "
+              "snapshot and reports it.",
+              kind="float", unit="points", min=0.25, max=100000, step=0.25),
+        Field(p + "weekday_roots", f"{name}: Monday to Thursday series",
+              "Four names, Monday first, with {w} for the week of the month "
+              "(1 to 5). The month letter and the year follow.",
+              kind="phrases"),
+        Field(p + "friday_root", f"{name}: Friday series",
+              "With {w} for the week of the month.", kind="text"),
+        Field(p + "eom_root", f"{name}: month-end series", "", kind="text"),
+        Field(p + "quarterly_root", f"{name}: quarterly series", "", kind="text"),
+    )
+
+
+_FUTURES_CHAIN = ConfigFile(
+    name="futures_chain.toml", title="/ES and /NQ chain feed", icon="schedule",
+    summary="The 0-DTE option chains for /ES and /NQ on Dealer Positioning. They "
+            "come from ThinkorSwim on your PC, never from Schwab: how often a "
+            "snapshot is taken, what makes one unfit to use, the trading "
+            "session, and each future's size and contract names.",
+    restart=(OPTIONS, WEBGUI),
+    sections=(
+        Section("How often and how old",
+                "One interval drives everything; nothing assumes five minutes. "
+                "The capture on your PC reads its interval from the plan the "
+                "options service gives it.", (
+            Field("capture.interval_sec", "Take a snapshot every",
+                  "The cost of a shorter interval is on ThinkorSwim and Excel, "
+                  "not on Schwab: this feed never calls it.",
+                  kind="int", unit="seconds", min=30, max=3600, step=30),
+            Field("capture.max_age_sec", "Drop a snapshot older than",
+                  "So a backlog after an outage never reads as current.",
+                  kind="int", unit="seconds", min=60, max=86400, step=60),
+            Field("capture.stale_after_sec", "Call a symbol stale after",
+                  "During the session only. The page keeps the numbers and "
+                  "marks them with their age; it never falls back to $SPX or "
+                  "$NDX. A little over two intervals suits.",
+                  kind="int", unit="seconds", min=60, max=86400, step=60),
+            Field("capture.max_future_skew_sec", "Refuse a snapshot stamped ahead by",
+                  "A PC clock that is wrong.",
+                  kind="int", unit="seconds", min=0, max=600, step=5),
+            Field("capture.fill_step_sec", "Repeat each capture across the page every",
+                  "The charts draw a column a minute. Each capture is repeated "
+                  "to this step until the next one, for up to one interval; a "
+                  "longer outage stays empty.",
+                  kind="int", unit="seconds", min=10, max=600, step=10),
+        )),
+        Section("What makes a snapshot unfit",
+                "A snapshot that fails is not sent, and the reason is shown on "
+                "System Status.", (
+            _pct("capture.min_fill_fraction", "Contracts that must read a value",
+                 "Below this, ThinkorSwim is probably logged out or the sheet "
+                 "had not filled.", lo=5, hi=100, step=5),
+            Field("capture.frozen_repeats", "Frozen after this many identical captures",
+                  "In a row, while the future's price is moving.",
+                  kind="int", unit="captures", min=2, max=100, step=1),
+            Field("capture.max_snapshot_kb", "Largest snapshot",
+                  "", kind="int", unit="KB", min=16, max=4096, step=16),
+            Field("capture.alert_repeat_min", "Repeat the stopped-capture alert at most every",
+                  "The phone alert for a capture that stops during the "
+                  "session. It is quiet in the daily gap and at weekends.",
+                  kind="int", unit="minutes", min=5, max=1440, step=5),
+        )),
+        Section("Between sessions",
+                "The heatmaps keep the last session. The by-strike charts show "
+                "a capture frozen shortly before expiry, not the final spike.", (
+            Field("capture.frozen_before_expiry_min", "Freeze the charts this long before expiry",
+                  "The last capture taken at least this long before expiry "
+                  "stays on screen, labelled with its own time.",
+                  kind="int", unit="minutes", min=0, max=1440, step=5),
+        )),
+        Section("On the Dealer Positioning list",
+                "Whether /ES and /NQ are offered in the symbol list. The page "
+                "ships without them.", (
+            Field("capture.show_in_dropdown", "Offer /ES and /NQ in the list",
+                  "", kind="bool"),
+        )),
+        Section("Trading session",
+                "One session is one expiry: trading opens for it the evening "
+                "before and it expires the next afternoon. Central time. A "
+                "holiday is found by the contracts returning no data.", (
+            Field("session.open_ct", "Opens", "", kind="time"),
+            Field("session.close_ct", "Expires", "", kind="time"),
+        )),
+        Section("/ES", "", _instrument_fields("ES", "/ES")),
+        Section("/NQ", "", _instrument_fields("NQ", "/NQ")),
+    ),
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # The Trade detail panel's ThinkorSwim order — config/tos_order.toml
 # ─────────────────────────────────────────────────────────────────────────────
 _TOS_ORDER = ConfigFile(
@@ -2895,7 +3024,7 @@ _GEX_ARCHIVE = ConfigFile(
 )
 
 FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _LOGIN_PUSH, _TOS_ORDER, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _SECTORS, _MOMENTUM, _SENTIMENT,
-         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _GEX_ARCHIVE, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
+         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _FUTURES_CHAIN, _GEX_ARCHIVE, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
          _MARKET_READ, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}

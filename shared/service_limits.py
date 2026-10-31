@@ -48,15 +48,16 @@ DEFAULTS = {
     "pool": {"workers": 16},
     # How many entries each command stream keeps - its newest N, whether or not
     # they have been run: ``default`` for every stream, and a number of its own
-    # for a stream named here. The one named carries a whole blog document in
+    # for a stream named here. ``cmd:blog`` carries a whole blog document in
     # each entry (up to config/blog.toml [limits] max_html_kb), so a thousand of
-    # them is hundreds of megabytes of Redis.
+    # them is hundreds of megabytes of Redis; ``cmd:futures_chain`` carries a
+    # chain snapshot (up to config/futures_chain.toml [capture] max_snapshot_kb).
     # ⚠ Keyed by stream NAME. shared/tests/test_service_limits.py pins it
     # against shared.blog_inbox, so a renamed stream cannot quietly lose its cap.
     # ⚠ ``cmd:blog_inbox`` (the parked connector's stream) had a cap here too.
     # Nothing writes that stream, so it has none; the same test file fails the
     # day something names it, and the cap must come back BEFORE anything writes.
-    "stream_keep": {"default": 1000, "cmd:blog": 50},
+    "stream_keep": {"default": 1000, "cmd:blog": 50, "cmd:futures_chain": 20},
 }
 MAX_SEC = 7 * 24 * 3600        # past a week a "limit" is a typo
 # What a stream cap may be.
@@ -75,7 +76,13 @@ STREAM_KEEP_MIN, STREAM_KEEP_MAX = 10, 100000
 # hundred bytes is tens of megabytes; 100000 documents is not a number to offer.
 # At 500 the blog stream can hold about 250 MB at the shipped document limit
 # (shared/blog_inbox.py has the arithmetic beside BOUNDS).
-STREAM_KEEP_CEILINGS = {"cmd:blog": 500}
+#
+# ``cmd:futures_chain`` carries one chain snapshot per command (up to
+# config/futures_chain.toml [capture] max_snapshot_kb, shipped 512 KB, from two
+# instruments each interval): 20 is the newest ten captures of both, at most about
+# 10 MB. Its ceiling of 200 is at most about 100 MB. Stale snapshots are dropped on arrival, so
+# a long backlog is worth nothing.
+STREAM_KEEP_CEILINGS = {"cmd:blog": 500, "cmd:futures_chain": 200}
 # How much of one field a dead letter may keep, in KB.
 DEAD_FIELD_KB_MIN, DEAD_FIELD_KB_MAX = 1, 4096
 

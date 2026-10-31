@@ -106,6 +106,11 @@ GAMMA_PUBLIC_TOML = REPO_ROOT / "config" / "gamma_public.toml"
 # The Dealer Positioning heatmap's controls: which strikes it marks and how its
 # colour scale is set. Read by shared/gamma_heat_config.py.
 GAMMA_HEAT_TOML = REPO_ROOT / "config" / "gamma_heat.toml"
+
+# The /ES and /NQ 0-DTE chain feed (ThinkorSwim, not Schwab): the capture's
+# cadence and checks, the futures session, each instrument's size and series
+# names. Read by shared/futures_chain_config.py.
+FUTURES_CHAIN_TOML = REPO_ROOT / "config" / "futures_chain.toml"
 FEED_TOML = REPO_ROOT / "config" / "feed.toml"
 
 # The Gamma Archive: what is kept of each session past the 5-session purge. Read

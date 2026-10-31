@@ -158,6 +158,11 @@ the ticker set, `[trending] window_h` and `[desk] headlines` from it) ·
 `shared.gamma_heat_config` (since 2026-10-09; `config/gamma_heat.toml`'s loader -
 stdlib + `shared.config_toml` + `repo_paths` only, pinned by
 `shared/tests/test_gamma_heat_config.py`) ·
+`shared.futures_chain` + `shared.futures_chain_config` (since 2026-10-31; the
+/ES and /NQ chain feed's stream, cache keys, `FOP.ES` / `FOP.NQ` names and
+labels, session clock, series names and the capture's plan - stdlib +
+`shared.symbols` + `repo_paths` + `shared.config_toml` only, pinned by
+`shared/tests/test_futures_chain.py` and `test_futures_chain_config.py`) ·
 `shared.blog_inbox` (since 2026-10-06; the Blog's command builders, validators,
 view names, the frame's `sandbox` and policy strings, and the two file readers
 behind the preview routes - stdlib + `repo_paths` + `shared.config_toml` only,
@@ -432,7 +437,7 @@ maps, and anything whose change needs code to follow it.
   `scanner` (selection floors and, since 2026-10-04, `[selection]` strike rules),
   `trade_mgmt`, `paper`, `symbols`, `sectors`, `marketdata`, `services`,
   `flow_alerts`, `notify`, `commissions`, `theme`, `news`, `edge`, `market_read`,
-  `blog`, `gamma_heat`, `gex_archive`, `listed_stocks`, `login_push`, `scalp`, `tos_order`,
+  `blog`, `gamma_heat`, `futures_chain`, `gex_archive`, `listed_stocks`, `login_push`, `scalp`, `tos_order`,
   `sentiment` (when the live composite refuses a pre-open input), and
   the public tools' files.
 - `shared/market_calendar.py` is the single source for the NYSE calendar and the

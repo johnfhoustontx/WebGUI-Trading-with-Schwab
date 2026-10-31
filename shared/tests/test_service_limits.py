@@ -134,9 +134,10 @@ def test_the_document_stream_is_named_as_the_blog_names_it():
     ONE stream, the one in use. ``blog_inbox.INBOX_STREAM`` (``cmd:blog_inbox``)
     belongs to the connector, which is parked: nothing writes it, so it has no
     cap of its own and no row under Settings. The test below is what says so."""
-    from shared import blog_inbox
+    from shared import blog_inbox, futures_chain
     small = {s for s, n in cl.DEFAULTS["stream_keep"].items() if s != "default"}
-    assert small == {f"cmd:{blog_inbox.OWNER_DOMAIN}"}
+    # The blog's stream, and the /ES and /NQ feed's: it carries a snapshot per command.
+    assert small == {f"cmd:{blog_inbox.OWNER_DOMAIN}", futures_chain.STREAM}
 
 
 def test_the_parked_inbox_stream_has_no_cap_because_nothing_writes_it():
@@ -225,8 +226,9 @@ def test_the_bounds_are_ten_to_a_hundred_thousand(monkeypatch):
 def test_a_document_stream_has_a_ceiling_of_its_own(monkeypatch):
     """100000 commands of a few hundred bytes is tens of megabytes; 100000
     documents is not a number to offer. The stream whose entries carry a
-    document stops at 500, and past it a value reads as its shipped 50."""
-    assert cl.STREAM_KEEP_CEILINGS == {"cmd:blog": 500}
+    document stops at 500, and past it a value reads as its shipped 50. The chain
+    feed's stream carries a snapshot, stops at 200, and reads as its shipped 20."""
+    assert cl.STREAM_KEEP_CEILINGS == {"cmd:blog": 500, "cmd:futures_chain": 200}
     # every stream that ships with a number of its own has a ceiling of its own
     named = {s for s in cl.DEFAULTS["stream_keep"] if s != "default"}
     assert set(cl.STREAM_KEEP_CEILINGS) == named
@@ -239,7 +241,8 @@ def test_a_document_stream_has_a_ceiling_of_its_own(monkeypatch):
         for over in (ceiling + 1, 1000, 100000):
             monkeypatch.setattr(cl, "load", lambda s=stream, v=over: {
                 "stream_keep": {"default": 1000, s: v}})
-            assert cl.stream_keep(stream) == 50, (stream, over)
+            assert cl.stream_keep(stream) == cl.DEFAULTS["stream_keep"][stream], (
+                stream, over)
     # the ceiling is theirs alone: any other stream may still go that high
     monkeypatch.setattr(cl, "load", lambda: {"stream_keep": {"cmd:options": 501}})
     assert cl.stream_keep("cmd:options") == 501

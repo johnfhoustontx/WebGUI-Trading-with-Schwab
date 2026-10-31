@@ -784,8 +784,9 @@ def test_the_queue_caps_are_catalogued_and_bounded_as_the_loader_bounds_them():
     assert sl.stream_keep_bounds("cmd:blog") == (10, 500)
     # Exactly these rows: the default and the Blog page's own queue. The parked
     # connector's cmd:blog_inbox had a row ("Drafts arriving from Claude Chat")
-    # for a queue nothing writes.
-    assert set(shipped) == {"default", "cmd:blog"}
+    # for a queue nothing writes. The /ES and /NQ chain feed's queue has its own.
+    assert sl.stream_keep_bounds("cmd:futures_chain") == (10, 200)
+    assert set(shipped) == {"default", "cmd:blog", "cmd:futures_chain"}
 
 
 def test_a_queue_cap_at_either_bound_is_one_the_loader_uses(monkeypatch):
@@ -873,7 +874,7 @@ def test_a_queue_cap_override_round_trips_through_the_writer(tmp_path):
     load, _reset = toml_loader(tmp_path / "services.toml", sl.DEFAULTS)
     table = load()["stream_keep"]
     assert (table["cmd:blog"], table["cmd:options"], table["default"]) == (20, 300, 1000)
-    assert set(table) == {"cmd:blog", "cmd:options", "default"}
+    assert set(table) == {"cmd:blog", "cmd:options", "cmd:futures_chain", "default"}
 
 
 def test_the_dead_letter_field_limit_is_catalogued_and_bounded_as_the_loader():
@@ -1119,3 +1120,33 @@ def test_the_early_close_fields_parse_and_check():
     assert not cs.cross_check("scalp.toml", {("intraday", "early_close_time"): "12:00"})
     src = by_key["confirm.min_sources"]
     assert (src.min, src.max) == (1, 4)
+
+def test_the_futures_chain_numbers_are_bounded_as_the_loader_bounds_them(monkeypatch):
+    """``shared.futures_chain_config.capture`` reads a number outside its range
+    as the default, so the form offers that range and no other, and what it
+    accepts at either end is what the loader then uses."""
+    from shared import futures_chain_config as fc
+    cfg = cs.BY_NAME["futures_chain.toml"]
+    for key, (low, high) in fc._CAPTURE_BOUNDS.items():
+        _sec, fld = cs.locate(cfg, ("capture", key))
+        assert fld is not None and "*" not in fld.key, key
+        scale = 100 if fld.kind == "fraction" else 1       # a fraction is typed as a percent
+        assert (fld.min, fld.max) == (low * scale, high * scale), key
+        for edge in (low, high):
+            saved = cs.parse(fld, edge * scale, shipped=fc.DEFAULTS["capture"][key])
+            monkeypatch.setattr(fc, "load", lambda k=key, v=saved: {"capture": {k: v}})
+            assert fc.capture()[key] == edge, (key, edge)
+        for outside in (low * scale - 1, high * scale + 1):
+            with pytest.raises(ValueError):
+                cs.parse(fld, outside)
+
+
+def test_the_futures_chain_file_covers_both_futures_and_the_switch():
+    cfg = cs.BY_NAME["futures_chain.toml"]
+    shipped = _shipped("futures_chain.toml")
+    assert set(shipped["instruments"]) == {"ES", "NQ"}
+    _s, switch = cs.locate(cfg, ("capture", "show_in_dropdown"))
+    assert switch.kind == "bool" and shipped["capture"]["show_in_dropdown"] is False
+    for root in ("ES", "NQ"):
+        for key in shipped["instruments"][root]:
+            assert cs.locate(cfg, ("instruments", root, key))[1] is not None, (root, key)

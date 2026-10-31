@@ -1,0 +1,77 @@
+# The /ES and /NQ 0-DTE chain feed for Dealer Positioning (design:
+# docs/plans/2026-10-31-futures-0dte-chain-feed-design.md).
+# Read through shared/futures_chain_config.py by the capture on the PC, by
+# options_svc (the ingest) and by the page. Nothing here reaches Schwab: the
+# chains come from ThinkorSwim.
+
+[capture]
+# Seconds between snapshots. One value: nothing else assumes five minutes.
+interval_sec = 300
+# The server drops a snapshot older than this, so a backlog never replays as
+# current.
+max_age_sec = 900
+# The page labels a symbol stale when its newest snapshot is older than this
+# during the session. A little over two intervals.
+stale_after_sec = 660
+# A snapshot stamped further ahead than this is refused (a clock that is wrong).
+max_future_skew_sec = 30
+# Share of the tried contracts that must read a value. Below it the snapshot is
+# not sent (ThinkorSwim logged out, or the sheet had not filled).
+min_fill_fraction = 0.8
+# This many captures in a row with every value unchanged, while the future is
+# moving, is a frozen feed and is reported.
+frozen_repeats = 3
+# The history is stored one row per capture; the page repeats each row across
+# the minutes to the next one, to this step, up to one interval.
+fill_step_sec = 60
+# Between sessions the by-strike charts show the last capture taken at least this
+# many minutes before expiry, so the last hour's gamma spike is not left on screen.
+frozen_before_expiry_min = 60
+# The phone alert for a stopped capture repeats at most this often.
+alert_repeat_min = 240
+# A snapshot larger than this is refused.
+max_snapshot_kb = 512
+# Whether /ES and /NQ are offered in the Dealer Positioning symbol list. The
+# feed ships off the list; the operator decides when it joins.
+show_in_dropdown = false
+
+[session]
+# One session is one expiry: trading opens for it the evening before and it
+# expires the next afternoon. Central time. Weekends are not modelled, and a
+# holiday is found by the contracts not returning data.
+open_ct = "17:00"
+close_ct = "15:00"
+
+[instruments.ES]
+# The internal name passes the app's ticker rule; the page shows the label.
+symbol = "FOP.ES"
+label = "/ES"
+# Dollars a point, from the contract's own description.
+multiplier = 50
+exchange = "XCME"
+# Points between the strikes the capture tries.
+strike_step = 5
+# How far each side of the future the capture reaches, in percent of its price.
+strike_width_pct = 5
+# A call minus a put at the money should land on the future; further apart than
+# this, in points, stops the snapshot.
+parity_limit_pts = 15
+# Series names, before the month code and the two-digit year. {w} is the week of
+# the month, 1 to 5. Monday to Thursday, then Friday, month-end and quarterly.
+weekday_roots = ["E{w}A", "E{w}B", "E{w}C", "E{w}D"]
+friday_root = "EW{w}"
+eom_root = "EW"
+quarterly_root = "ES"
+
+[instruments.NQ]
+symbol = "FOP.NQ"
+label = "/NQ"
+multiplier = 20
+exchange = "XCME"
+strike_step = 10
+strike_width_pct = 5
+parity_limit_pts = 60
+weekday_roots = ["Q{w}A", "Q{w}B", "Q{w}C", "Q{w}D"]
+friday_root = "QN{w}"
+eom_root = "QNE"
+quarterly_root = "NQ"

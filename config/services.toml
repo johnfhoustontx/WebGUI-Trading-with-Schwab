@@ -76,6 +76,15 @@ default = 1000
 # that cannot be read, falls back to 50, not to the default above.
 "cmd:blog" = 50
 
+# The /ES and /NQ chain feed: each command carries one chain snapshot, up to
+# config/futures_chain.toml [capture] max_snapshot_kb (512 KB as shipped), two
+# instruments every capture. Twenty is the newest ten captures of both, at most
+# about 10 MB; a snapshot older than [capture] max_age_sec is dropped on arrival,
+# so a longer backlog would be worth nothing. 10 to 200 for this queue (200 is at
+# most about 100 MB). A value outside that, or one that cannot be read, falls
+# back to 20, not to the default above.
+"cmd:futures_chain" = 20
+
 [pool]
 # Threads each service keeps for its scheduled work (scans, the one-minute
 # collection, refreshes). Each command queue has a thread of its own outside
