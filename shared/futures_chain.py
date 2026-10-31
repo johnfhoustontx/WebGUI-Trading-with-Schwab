@@ -193,6 +193,11 @@ def _central(now: datetime) -> datetime:
     return now.astimezone(_CENTRAL)
 
 
+def central_time(epoch) -> datetime:
+    """Epoch seconds as an aware Central datetime."""
+    return datetime.fromtimestamp(epoch, _CENTRAL)
+
+
 def _at(day: date, clock: str) -> datetime:
     hour, minute = clock.split(":")
     return datetime.combine(day, time(int(hour), int(minute)), tzinfo=_CENTRAL)

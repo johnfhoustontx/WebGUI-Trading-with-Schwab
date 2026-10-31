@@ -307,6 +307,19 @@ def test_stale_after_the_limit_with_the_numbers_kept_and_marked(bus, db, write_c
     assert "20 minutes" in snap["feed"]["reason"]
 
 
+def test_the_cause_travels_apart_from_the_age_written_with_the_payload(bus, db, write_captures):
+    """The page works out its own age; a sentence of age from when the payload was
+    written would contradict it once the payload has sat in the cache."""
+    write_captures(ct(2026, 11, 2, 9, 0))
+    block = snapshot(bus, "FOP.ES", now=ct(2026, 11, 2, 9, 20))["feed"]
+    assert block["why"] == "" and "20 minutes" in block["reason"]
+    feed.handle(bus, Command(type="pc_status",
+                             args={"reason": "ThinkorSwim is logged out",
+                                   "at": ct(2026, 11, 2, 9, 3).timestamp()}))
+    block = snapshot(bus, "FOP.ES", now=ct(2026, 11, 2, 9, 20))["feed"]
+    assert block["why"] == "ThinkorSwim is logged out"
+
+
 def test_a_stale_snapshot_says_why_the_capture_stopped(bus, db, write_captures):
     write_captures(ct(2026, 11, 2, 9, 0))
     feed.handle(bus, Command(type="pc_status",

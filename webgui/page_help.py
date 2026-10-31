@@ -756,6 +756,17 @@ accelerate price.
 
 - **Symbol dropdown** — pick the index or stock. The page **remembers** your last
   symbol when you come back, and switching symbols refreshes automatically.
+- **/ES and /NQ** — the two futures, when the feed is switched on. Their chains do
+  not come from Schwab: **ThinkorSwim on your PC** captures the options expiring at
+  the end of the session, one capture every few minutes, from the evening before.
+  ThinkorSwim sends no gamma, so it is **calculated** from each contract's implied
+  volatility. The line above the charts says when the numbers were captured and
+  which strikes were captured, and **they can go stale**: if the PC, ThinkorSwim or
+  the capture stops, the charts stay and the line turns into a **Stale** notice with
+  the age, or **Last session** once the session is over. Time with no capture is a
+  **blank stretch** on the heat map, never a smooth change. Flow and Term are not
+  offered for them, and neither are Explain, Analyze and Briefings. The Bar picker
+  still counts minutes, but a bar only sees the captures inside it.
 - **Gamma / Charm / Delta / Vanna / Flow / Net Prem / Term** — the small tabs at
   the very top (under the page tabs): different lenses on dealer positioning; the
   **walls** mark likely support/resistance. The header names the one you're on,

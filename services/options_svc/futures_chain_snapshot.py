@@ -115,6 +115,9 @@ def _feed_block(bus, symbol: str, captured: dict, frozen: bool, now: datetime) -
     return {"label": futures_chain.display_symbol(symbol), "captured_at": taken,
             "expiry": captured["expiry"], "frozen": frozen, "stale": stale,
             "reason": " ".join(part for part in (reason, why) if part),
+            # The cause alone. ``reason`` also holds an age worked out now, which the
+            # page's own label would contradict once the payload has sat in the cache.
+            "why": why,
             "strike_low": low, "strike_high": high}
 
 

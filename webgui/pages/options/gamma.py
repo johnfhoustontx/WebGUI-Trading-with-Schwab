@@ -32,10 +32,12 @@ from pages import fmt as _fmt    # the ONE numeric vocabulary (pages/fmt.py)
 from pages import ui_kit as kit
 from pages.ui_guard import guard, guard_async
 from shared import market_calendar as _mc
+from shared import futures_chain as _fc  # Tier-1 allow-listed: names only
 from shared import gamma_heat_config as _heat_cfg  # Tier-1 allow-listed: config
 from shared import public_gamma as _pg  # Tier-1 allow-listed: config + validator
 from shared import symbols as _symbols
 from . import flow_panels as _fx
+from . import gamma_feed as _feed
 from . import gamma_heat as _heat
 from . import gamma_ridge as _ridge
 from . import gamma_well as _well
@@ -2138,6 +2140,17 @@ def wire_view_tabs(tabs, on_change, view, public=False) -> None:
     tabs.on_value_change(_name_tab_in_url)
 
 
+def view_tab(v):
+    """One tab of the view picker, with its help. Returned so a symbol can hide it."""
+    from nicegui import ui
+    tab = ui.tab(v, label=_view_label(v))
+    _h = _page_help.subtab_help("/options/gamma", v)
+    if _h:
+        with tab:
+            ui.tooltip(_h).props("delay=350 max-width=340px")
+    return tab
+
+
 def shows_view_picker(view) -> bool:
     """Whether to BUILD the view-picker subtabs.
 
@@ -2205,6 +2218,14 @@ def reads_snapshot(view) -> bool:
     return shows_view_picker(view) or _resolve_view(view) != "Net Prem"
 
 
+# Auto briefings: the $SPX/SPY/QQQ Analyze the options service auto-generates at
+# premarket / ~18 min after open / midday / close, folded into a single dropdown
+# to save a header row. Each item opens that slot's briefing in a new tab (the
+# slot key is separate from the ad-hoc Analyze key, so these never auto-open). An
+# item is **highlighted** only when its slot's data is from TODAY (CT); prior-day
+# data (e.g. over the weekend) stays dim — see _sync_sched_btns. Clickable
+# whenever data exists; disabled when a slot has never run.
+#
 # The four auto-briefing slots, in header order: (cache-view suffix, menu label).
 # Module level because ``polled_views`` and the menu builder must not drift —
 # a slot in one and not the other is either a dead probe or a button whose
@@ -2474,6 +2495,8 @@ def no_spot_text(symbol, can_refresh: bool) -> str:
 
     The SYMBOL survives on both origins — which symbol has no price is the whole
     content of the line; only the advice, which names a button, drops."""
+    if _fc.is_feed_symbol(symbol):
+        return _feed.no_capture_text(symbol)
     base = f"No spot price for {symbol} yet (market closed or sparse data)"
     if can_refresh:
         return f"{base} — try Refresh during market hours."
@@ -2487,6 +2510,8 @@ def no_greeks_text(symbol) -> str:
     exposure is then zero, so the bars have no length and the walls would be
     ties. One wording on both origins: it names no control, because there is
     nothing the reader can do but wait for Schwab."""
+    if _fc.is_feed_symbol(symbol):
+        return _feed.no_greeks_text(symbol)
     return (f"Schwab sent no Greeks for {symbol}: every contract's gamma came back "
             "as \"not computed\", so there are no strike bars or walls to draw. "
             "They return when Schwab's data does.")
@@ -3230,16 +3255,14 @@ def render(symbol: str | None = None, view: str | None = None,
     # same question once.
     _reads_snap = reads_snapshot(view)
 
+    _tab_els = {}
+
     def _build_view_tabs():
         tabs = ui.tabs(value=_pinned_view).classes("compact-subtabs").props(
             "dense no-caps inline-label align=left")
         with tabs:
             for v in view_order(_public):
-                tab = ui.tab(v, label=_view_label(v))
-                _h = _page_help.subtab_help("/options/gamma", v)
-                if _h:
-                    with tab:
-                        ui.tooltip(_h).props("delay=350 max-width=340px")
+                _tab_els[v] = view_tab(v)
         return tabs
 
     if shows_view_picker(view):
@@ -3262,13 +3285,6 @@ def render(symbol: str | None = None, view: str | None = None,
         # ``view_toggle.value``, which is the pinned view and never moves.
         view_toggle = _PinnedView(_pinned_view)
 
-    # Auto briefings: the $SPX/SPY/QQQ Analyze the options service auto-generates at
-    # premarket / ~18 min after open / midday / close, folded into a single dropdown
-    # to save a header row. Each item opens that slot's briefing in a new tab (the
-    # slot key is separate from the ad-hoc Analyze key, so these never auto-open). An
-    # item is **highlighted** only when its slot's data is from TODAY (CT); prior-day
-    # data (e.g. over the weekend) stays dim — see _sync_sched_btns. Clickable
-    # whenever data exists; disabled when a slot has never run.
     _SCHED_HL = "bg-[#2563eb] text-white opacity-100"  # today's briefing is ready
     _SCHED_DIM = "opacity-40"                           # prior-day data, or none yet
     sched_btns = {}
@@ -3359,7 +3375,8 @@ def render(symbol: str | None = None, view: str | None = None,
         # a control's caption off.
         with ui.row().classes("items-center gap-3 flex-wrap w-full"):
             if _may_enqueue:
-                _sym_opts = symbol_options(bus_client.read("options:gamma_symbols"))
+                _sym_opts = _feed.select_options(
+                    symbol_options(bus_client.read("options:gamma_symbols")))
                 symbol_in = select_all_on_focus(
                     ui.select(_sym_opts, value=_DEFAULT_SYMBOL,
                               with_input=True, label="Symbol").classes("w-40"))
@@ -3402,6 +3419,8 @@ def render(symbol: str | None = None, view: str | None = None,
             # every slot taken, or outside market hours (public_status_text).
             pub_line = (ui.label("").classes(f"text-xs {MUTED}")
                         if _public else None)
+        feed = _feed.FeedPage(head, view_toggle, _tab_els, enabled=_may_enqueue,
+                              buttons=(explain_btn, analyze_btn, briefings_btn))
 
     # --- Net Prem controls (this view only) ---------------------------------
     # Shown/hidden as one block by _sync_np_controls, the same way the Bar-size
@@ -3503,8 +3522,8 @@ def render(symbol: str | None = None, view: str | None = None,
                    else None}
 
     def _repaint_strip():
-        detail_lbl.text = status_strip_text(strip_state["status"], strip_state["summary"],
-                                            strip_state["countdown"])
+        detail_lbl.text = feed.strip(strip_state["summary"]) or status_strip_text(
+            strip_state["status"], strip_state["summary"], strip_state["countdown"])
 
     def _set_summary(text):
         strip_state["summary"] = text or ""
@@ -3568,7 +3587,7 @@ def render(symbol: str | None = None, view: str | None = None,
         # summary). Sits under the charts so it never collides with the time-axis labels.
         with ui.row().classes("w-full justify-end items-baseline gap-2 text-[10px] "
                               "leading-none opacity-90 -mt-1"):
-            status_lbl = ui.label("").classes("font-medium")
+            status_lbl = feed.keep_status_word(ui.label("").classes("font-medium"))
             detail_lbl = ui.label("").classes("opacity-70")
 
         # Long-form guide to the three 0-DTE projection overlays (outline bars, the
@@ -3797,6 +3816,7 @@ def render(symbol: str | None = None, view: str | None = None,
 
         The Highcharts elements persist across repaints and are updated in place
         (via _set_figure / _set_chart) so the charts don't flicker."""
+        feed.sync(state["snap"], _current_symbol())
         under.paint(view_toggle.value, state["snap"], state.get("hist"), heat.value.value)
         if view_toggle.value == "Net Prem":
             # Handled BEFORE the no-snapshot early return: this view is
@@ -3874,7 +3894,7 @@ def render(symbol: str | None = None, view: str | None = None,
 
         # History rows first (index-6 grid dict needs its keys re-floated too): the
         # intraday spot path (index 1) feeds the shared y-range below.
-        rows = refloat_rows((state.get("hist") or {}).get(view))
+        rows = feed.columns(refloat_rows((state.get("hist") or {}).get(view)))
         spot_path = [r[1] for r in rows if len(r) > 1 and isinstance(r[1], (int, float))]
 
         # One shared strike range so the bar chart and the intraday heatmap line up
@@ -3896,16 +3916,13 @@ def render(symbol: str | None = None, view: str | None = None,
             # The view's projected afternoon; the hedge panel below shares it.
             forward = (state.get("fwd") or {}).get(view)
             _legend = {}
-            _set_figure(heat_plot, heatmap_figure(rows, view, yrange=yr,
-                                                  forward=forward,
-                                                  walls=walls, spot=view_spot,
-                                                  flip=flip,
-                                                  levels=entry.get("levels"),
-                                                  show_tracks=bool(tracks_sw.value),
-                                                  spot_style=spot_style_sel.value,
-                                                  spot_interval=spot_int_sel.value,
-                                                  projected_flip=snap.get("projected_flip"),
-                                                  legend=_legend, **_hk))
+            _set_figure(heat_plot, feed.figure(heatmap_figure(
+                rows, view, yrange=yr, forward=forward, walls=walls, spot=view_spot,
+                flip=flip, levels=feed.levels(entry.get("levels"), rows),
+                show_tracks=bool(tracks_sw.value), spot_style=spot_style_sel.value,
+                spot_interval=feed.bar_columns(spot_int_sel.value),
+                projected_flip=snap.get("projected_flip"),
+                legend=_legend, **_hk), rows))
             heat.show_legend(view, _legend)
             # The hedge panel is its own element under the heatmap, so their
             # horizontal alignment is entirely this wiring's job: SAME categories
@@ -3936,7 +3953,8 @@ def render(symbol: str | None = None, view: str | None = None,
             # Fold the 0-DTE hedge-pressure into the bottom-right status strip (no
             # separate tiles row) so Delta has no extra line.
             _set_summary(strip_state["summary"] + "  ·  "
-                         + dex_hedge_suffix(entry.get("hedge")))
+                         + (feed.hedge_note(entry.get("hedge"))
+                            or dex_hedge_suffix(entry.get("hedge"))))
 
     @guard
     def _request_refresh():
@@ -3956,7 +3974,7 @@ def render(symbol: str | None = None, view: str | None = None,
         bus_client.request("options", {"type": "gamma_refresh", "args": {"symbol": sym}})
         # No toast: the scrim over the chart row says "Loading SPY…" for exactly
         # as long as the wait lasts, which a toast cannot.
-        chart_busy.show(f"Loading {sym}…")
+        chart_busy.show(f"Loading {_fc.display_symbol(sym)}…")
         state["countdown"] = 120
 
     @guard
@@ -3987,6 +4005,7 @@ def render(symbol: str | None = None, view: str | None = None,
         if state["countdown"] < 0:
             state["countdown"] = 120
         strip_state["countdown"] = state["countdown"] if _may_enqueue else None
+        feed.paint(state["snap"])     # a capture's age is a function of the clock
         _repaint_strip()
         if _public:
             _paint_public_line()      # "asking…" ages into its answer by the clock
@@ -4268,7 +4287,7 @@ def render(symbol: str | None = None, view: str | None = None,
         if not sym:
             return
         if sym not in symbol_in.options:
-            symbol_in.options = list(symbol_in.options) + [sym]
+            symbol_in.options = _feed.select_options(list(symbol_in.options) + [sym])
         symbol_in.value = sym
         symbol_in.update()
 
@@ -4400,6 +4419,7 @@ def render(symbol: str | None = None, view: str | None = None,
                    explain_btn, analyze_btn, briefings_btn):
             if el is not None:
                 el.set_visibility(symbol_scoped)
+        feed.sync_buttons()
         # Bar size is meaningless for a line — hide it rather than leave a control
         # that silently does nothing.
         spot_int_sel.set_visibility(
@@ -4598,6 +4618,8 @@ def render(symbol: str | None = None, view: str | None = None,
         _render_view()
         if handoff_sym:
             _request_refresh()
+        elif feed.on:         # no chain to wait for, and the cached capture may be old
+            _auto_refresh()
 
     _render_view()                       # instant empty/placeholder paint
     ui.timer(0.05, _initial_load_public if _public else _initial_load,
