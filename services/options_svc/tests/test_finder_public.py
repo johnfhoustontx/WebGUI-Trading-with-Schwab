@@ -239,11 +239,14 @@ def test_the_service_consumes_the_public_stream_on_its_own_loop():
     # public Calculator/Simulator's two (Schwab-spending tools, and pure math
     # on a loop of its own so a snapshot fetch never stalls a reprice). The
     # public Gamma page's hot-set requests joined 2026-09-22 (no Schwab call).
+    # The sixth stream is not public: the /ES and /NQ chain feed's, written from
+    # the operator's PC through the ingest CLI (2026-10-31), last in the list.
     assert kw["extra_consumers"] == ("((public_scan.STREAM, finder_public.handle), "
                                      "(public_rescue.STREAM, rescue_public.handle), "
                                      "(public_tools.TOOLS_STREAM, tools_public.handle_tools), "
                                      "(public_tools.MATH_STREAM, tools_public.handle_math), "
-                                     "(public_gamma.STREAM, gamma_public.handle))")
+                                     "(public_gamma.STREAM, gamma_public.handle), "
+                                     "(futures_chain.STREAM, futures_chain_feed.handle))")
 
 
 def test_the_worker_writes_only_its_own_keys():

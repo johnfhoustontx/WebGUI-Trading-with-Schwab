@@ -16,6 +16,9 @@ Assembles the shared scaffold with this domain's scheduler + command handler:
 * ``tools_public.handle_math`` on ``cmd:tools_public_math`` — their pure pricing
   (reprice, implied volatility, what-if sweep), on a loop of its own so a
   snapshot fetch never stalls the reprice a visitor's every edit triggers.
+* ``futures_chain_feed.handle`` on ``cmd:futures_chain`` — the /ES and /NQ
+  0-DTE chains the capture on the PC sends (no Schwab call; nothing on this
+  stream reaches a paper book).
 
 Importable without side effects; only starts uvicorn under ``__main__`` on the
 ``options`` service port (8211) from ``repo_paths.SERVICE_PORTS``.
@@ -31,9 +34,10 @@ if str(_REPO_ROOT) not in sys.path:
 
 from services._scaffold import make_app  # noqa: E402
 from services.options_svc import (  # noqa: E402
-    finder_public, gamma_public, handlers, rescue_public, scheduler, tools_public)
+    finder_public, futures_chain_feed, gamma_public, handlers, rescue_public,
+    scheduler, tools_public)
 from shared import (  # noqa: E402
-    public_gamma, public_rescue, public_scan, public_tools)
+    futures_chain, public_gamma, public_rescue, public_scan, public_tools)
 
 app = make_app(
     "options",
@@ -54,7 +58,10 @@ app = make_app(
                      (public_rescue.STREAM, rescue_public.handle),
                      (public_tools.TOOLS_STREAM, tools_public.handle_tools),
                      (public_tools.MATH_STREAM, tools_public.handle_math),
-                     (public_gamma.STREAM, gamma_public.handle)),
+                     (public_gamma.STREAM, gamma_public.handle),
+                     # The /ES and /NQ chains from the PC: a stream of its own,
+                     # since each command carries a document (a low stream_keep).
+                     (futures_chain.STREAM, futures_chain_feed.handle)),
 )
 
 
