@@ -194,13 +194,22 @@ def test_a_chain_where_no_contract_has_open_interest_is_refused(open_int):
         adapt(snap(rows=[row(7600, "C", open_int=open_int), row(7600, "P", open_int=open_int)]))
 
 
-def test_a_zero_open_interest_is_a_reading_and_is_not_refused():
-    a = adapt(snap(rows=[row(7600, "C", open_int=0), row(7600, "P", open_int=0)]))
-    assert a.listed == 2
+@pytest.mark.parametrize("open_ints", [(0, 0), (0, None), (None, 0)])
+def test_a_chain_where_no_contract_has_open_interest_above_zero_is_refused(open_ints):
+    """All zero publishes a flat zero GEX at every strike: the same false reading
+    as having no open interest at all."""
+    call, put = open_ints
+    with pytest.raises(Refused, match="open interest"):
+        adapt(snap(rows=[row(7600, "C", open_int=call), row(7600, "P", open_int=put)]))
 
 
-def test_one_contract_with_open_interest_is_enough():
-    adapt(snap(rows=[row(7600, "C", open_int=None), row(7600, "P", open_int=10)]))
+def test_one_contract_with_open_interest_above_zero_is_enough_and_the_zeros_stay():
+    a = adapt(snap(rows=[row(7600, "C", open_int=0), row(7600, "P", open_int=10),
+                         row(7605, "C", open_int=None)]))
+    assert a.listed == 3
+    assert contract_at(a, 7600, "C")["openInterest"] == 0.0
+    assert contract_at(a, 7605, "C")["openInterest"] is None
+    assert contract_at(a, 7600, "P")["openInterest"] == 5.0
 
 
 def test_the_chain_carries_the_volatility_in_percent_as_the_engine_reads_it():
