@@ -35,7 +35,7 @@ DEFAULTS = {
         "max_future_skew_sec": 30,
         # Share of the tried contracts that must read a value.
         "min_fill_fraction": 0.8,
-        # Captures in a row with nothing changed, while the future moves.
+        # Captures in a row with the price, volume and open interest unchanged.
         "frozen_repeats": 3,
         # The page repeats each stored row across the minutes to the next one, to
         # this step, up to one interval.
@@ -46,6 +46,9 @@ DEFAULTS = {
         "alert_repeat_min": 240,
         # A snapshot larger than this is refused.
         "max_snapshot_kb": 512,
+        # The put-call check looks at this many strikes, nearest the price first,
+        # for a call and a put that both have a mark.
+        "parity_strikes": 5,
         # Offered in the Dealer Positioning list. Ships off.
         "show_in_dropdown": False,
     },
@@ -91,6 +94,7 @@ _CAPTURE_BOUNDS = {
     "frozen_before_expiry_min": (0, 1440),
     "alert_repeat_min": (5, 1440),
     "max_snapshot_kb": (16, 4096),
+    "parity_strikes": (1, 50),
 }
 
 

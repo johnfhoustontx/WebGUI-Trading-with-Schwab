@@ -16,10 +16,13 @@ stale_after_sec = 660
 # A snapshot stamped further ahead than this is refused (a clock that is wrong).
 max_future_skew_sec = 30
 # Share of the tried contracts that must read a value. Below it the snapshot is
-# not sent (ThinkorSwim logged out, or the sheet had not filled).
+# not sent (ThinkorSwim logged out, or the sheet had not filled). The server
+# applies it again between captures: one that reads fewer contracts than this
+# share of the one before is refused as half filled.
 min_fill_fraction = 0.8
-# This many captures in a row with every value unchanged, while the future is
-# moving, is a frozen feed and is reported.
+# This many captures in a row with the future's price and the volume and open
+# interest all unchanged is a frozen feed and is reported: a live future does
+# not hold one price for minutes.
 frozen_repeats = 3
 # The history is stored one row per capture; the page repeats each row across
 # the minutes to the next one, to this step, up to one interval.
@@ -31,6 +34,10 @@ frozen_before_expiry_min = 60
 alert_repeat_min = 240
 # A snapshot larger than this is refused.
 max_snapshot_kb = 512
+# The put-call check looks at this many strikes, nearest the future's price
+# first, for a call and a put that both have a mark. Not wider: far strikes
+# quote wide.
+parity_strikes = 5
 # Whether /ES and /NQ are offered in the Dealer Positioning symbol list. The
 # feed ships off the list; the operator decides when it joins.
 show_in_dropdown = false

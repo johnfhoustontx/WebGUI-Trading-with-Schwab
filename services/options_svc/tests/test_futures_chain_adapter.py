@@ -158,6 +158,34 @@ def test_no_usable_volatility_still_runs_through_the_engine():
     assert gex["gex"][7600.0]["call"] == 0.0     # no gamma contributes nothing
 
 
+def test_the_result_counts_the_contracts_that_have_a_gamma():
+    a = adapt(snap(rows=[row(7600, "C", iv="N/A"), row(7600, "P", iv="15%"),
+                         row(7605, "C", iv="15%")]))
+    assert a.with_gamma == 2 and a.listed == 3
+
+
+@pytest.mark.parametrize("iv", ["N/A", "0%", "-1%", None])
+def test_a_chain_where_no_contract_has_a_volatility_is_refused(iv):
+    """Every gamma absent would publish a net gamma of zero at every strike: a
+    flat chart that reads as a finding. It is refused instead."""
+    with pytest.raises(Refused, match="volatility"):
+        adapt(snap(rows=[row(7600, "C", iv=iv), row(7600, "P", iv=iv)]))
+
+
+def test_an_underflowing_volatility_is_no_gamma_and_does_not_divide_by_zero():
+    """sigma * sqrt(T) underflows to zero for a volatility of 1e-322 percent: a
+    number ``_volatility`` calls usable and the division could not take."""
+    a = adapt(snap(rows=[row(7600, "C", iv="1e-322%"), row(7600, "P", iv="15%")]), hours=6.5)
+    assert contract_at(a, 7600, "C")["gamma"] is None
+    assert contract_at(a, 7600, "P")["gamma"] is not None
+    assert a.with_gamma == 1
+
+
+def test_a_chain_whose_only_volatility_underflows_is_refused():
+    with pytest.raises(Refused, match="volatility"):
+        adapt(snap(rows=[row(7600, "C", iv="1e-322%")]), hours=6.5)
+
+
 def test_the_chain_carries_the_volatility_in_percent_as_the_engine_reads_it():
     c = contract_at(adapt(snap(rows=[row(7600, "C", iv="12.51%")])), 7600, "C")
     assert c["volatility"] == pytest.approx(12.51)
@@ -398,6 +426,16 @@ def test_parity_does_not_search_the_whole_ladder():
     rows = [row(7600, "C"), row(7600, "P")]
     rows += [row(7600 + 5 * i, "C") for i in range(1, 20)] + [row(7600 + 5 * i, "P") for i in range(1, 20)]
     rows += [row(7800, "C", mark=900), row(7800, "P", mark=1)]       # absurd, 40 strikes out
+    assert adapt(snap(price=7600, rows=rows)).parity_gap is None
+
+
+def test_parity_looks_at_as_many_strikes_as_the_config_says(monkeypatch):
+    from shared import futures_chain_config as cfg
+    rows = [row(7600, "C", mark="N/A"), row(7600, "P", mark=10),     # nearest: no call
+            row(7605, "C", mark=8), row(7605, "P", mark=13)]          # second nearest: implies 7600
+    assert adapt(snap(price=7600, rows=rows)).parity_gap == pytest.approx(0.0)
+    real = cfg.capture
+    monkeypatch.setattr(cfg, "capture", lambda: {**real(), "parity_strikes": 1})
     assert adapt(snap(price=7600, rows=rows)).parity_gap is None
 
 

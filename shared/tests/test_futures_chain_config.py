@@ -31,7 +31,7 @@ def test_the_capture_defaults():
         "interval_sec": 300, "max_age_sec": 900, "stale_after_sec": 660,
         "max_future_skew_sec": 30, "min_fill_fraction": 0.8, "frozen_repeats": 3,
         "fill_step_sec": 60, "frozen_before_expiry_min": 60, "alert_repeat_min": 240,
-        "max_snapshot_kb": 512, "show_in_dropdown": False}
+        "max_snapshot_kb": 512, "parity_strikes": 5, "show_in_dropdown": False}
     assert isinstance(cfg.capture()["min_fill_fraction"], float)
     assert cfg.capture()["show_in_dropdown"] is False
 
@@ -75,6 +75,8 @@ def test_an_override_is_read(monkeypatch):
     ("min_fill_fraction", 0), ("min_fill_fraction", 1.5), ("min_fill_fraction", True),
     ("frozen_repeats", 1), ("fill_step_sec", 0), ("frozen_before_expiry_min", -1),
     ("alert_repeat_min", 0), ("max_snapshot_kb", 0), ("max_snapshot_kb", 10 ** 6),
+    ("parity_strikes", 0), ("parity_strikes", 51), ("parity_strikes", 2.5),
+    ("parity_strikes", True), ("parity_strikes", "5"),
     ("show_in_dropdown", 1), ("show_in_dropdown", "true"), ("show_in_dropdown", None),
 ])
 def test_a_bad_capture_value_falls_back_to_the_default(monkeypatch, key, bad):

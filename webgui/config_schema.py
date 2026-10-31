@@ -2924,12 +2924,21 @@ _FUTURES_CHAIN = ConfigFile(
                 "System Status.", (
             _pct("capture.min_fill_fraction", "Contracts that must read a value",
                  "Below this, ThinkorSwim is probably logged out or the sheet "
-                 "had not filled.", lo=5, hi=100, step=5),
+                 "had not filled. The service also refuses a capture that "
+                 "reads fewer contracts than this share of the one before.",
+                 lo=5, hi=100, step=5),
             Field("capture.frozen_repeats", "Frozen after this many identical captures",
-                  "In a row, while the future's price is moving.",
+                  "In a row with the future's price and the volume and open "
+                  "interest all the same. A live future does not hold one "
+                  "price for minutes.",
                   kind="int", unit="captures", min=2, max=100, step=1),
             Field("capture.max_snapshot_kb", "Largest snapshot",
                   "", kind="int", unit="KB", min=16, max=4096, step=16),
+            Field("capture.parity_strikes", "Strikes the put-call check looks at",
+                  "Nearest the future's price first, for a call and a put that "
+                  "both have a mark. Far strikes quote wide, so a wider look "
+                  "can stop a good snapshot.",
+                  kind="int", unit="strikes", min=1, max=50, step=1),
             Field("capture.alert_repeat_min", "Repeat the stopped-capture alert at most every",
                   "The phone alert for a capture that stops during the "
                   "session. It is quiet in the daily gap and at weekends.",

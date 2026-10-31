@@ -35,10 +35,6 @@ _HOURS_PER_YEAR = 365.0 * 24.0
 # instrument's own multiplier, so counts are scaled by multiplier / 100.
 _ENGINE_SHARES = 100.0
 
-# The parity check looks at this many strikes, nearest the price first, for a
-# call and put that both have a mark. Not wider: far strikes quote wide.
-_PARITY_STRIKES = 5
-
 
 class Refused(Exception):
     """The snapshot cannot be vouched for. ``reason`` is what the status view
@@ -57,6 +53,7 @@ class AdaptedChain(NamedTuple):
     hours_left: float         # to the close; finite and positive
     parity_gap: float | None  # |implied future - read future|, None if not checkable
     listed: int               # contracts that read at least one value
+    with_gamma: int           # of those, the ones with a gamma (a usable volatility)
 
 
 # ── the snapshot itself ──────────────────────────────────────────────────────
@@ -141,8 +138,13 @@ def _gamma(future: float, strike: float, iv_pct: float, hours_left: float):
         return None
     sigma = iv_pct / 100.0
     root_t = math.sqrt(hours_left / _HOURS_PER_YEAR)
-    d1 = (math.log(future / strike) + 0.5 * sigma * sigma * root_t * root_t) / (sigma * root_t)
-    value = math.exp(-0.5 * d1 * d1) / math.sqrt(2.0 * math.pi) / (future * sigma * root_t)
+    spread = sigma * root_t
+    # A volatility so small that this underflows to zero is no volatility: absent,
+    # like any other that cannot be used, and never a division by zero.
+    if not spread > 0.0 or not future * spread > 0.0:
+        return None
+    d1 = (math.log(future / strike) + 0.5 * spread * spread) / spread
+    value = math.exp(-0.5 * d1 * d1) / math.sqrt(2.0 * math.pi) / (future * spread)
     return value if math.isfinite(value) else None
 
 
@@ -195,7 +197,8 @@ def _implied_future(rows: list[FuturesContractRow], future: float):
         if price is not None:
             by_strike.setdefault(row.strike, {}).setdefault(row.series, {}).setdefault(
                 row.side, price)
-    for strike in sorted({r.strike for r in rows}, key=lambda k: (abs(k - future), k))[:_PARITY_STRIKES]:
+    nearest = futures_chain_config.capture()["parity_strikes"]
+    for strike in sorted({r.strike for r in rows}, key=lambda k: (abs(k - future), k))[:nearest]:
         for sides in by_strike.get(strike, {}).values():
             if "C" in sides and "P" in sides:
                 return strike + sides["C"] - sides["P"]
@@ -243,5 +246,12 @@ def build_chain(snapshot: FuturesChainSnapshot) -> AdaptedChain:
         "callExpDateMap": {key: maps["C"]},
         "putExpDateMap": {key: maps["P"]},
     }
+    with_gamma = sum(1 for side in maps.values() for contracts in side.values()
+                     for contract in contracts if contract["gamma"] is not None)
+    if with_gamma == 0:
+        # Every gamma absent would publish zero at every strike: a flat chart that
+        # reads as a finding. No volatility is no chart.
+        raise Refused("no contract has a usable implied volatility, so there is "
+                      "no gamma to calculate")
     return AdaptedChain(spec["symbol"], snapshot.expiry, chain, snapshot.captured_at,
-                        hours_left, gap, len(rows))
+                        hours_left, gap, len(rows), with_gamma)
