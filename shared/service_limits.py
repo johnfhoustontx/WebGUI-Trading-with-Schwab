@@ -79,8 +79,9 @@ STREAM_KEEP_MIN, STREAM_KEEP_MAX = 10, 100000
 #
 # ``cmd:futures_chain`` carries one chain snapshot per command (up to
 # config/futures_chain.toml [capture] max_snapshot_kb, shipped 512 KB, from two
-# instruments each interval): 20 is the newest ten captures of both, at most about
-# 10 MB. Its ceiling of 200 is at most about 100 MB. Stale snapshots are dropped on arrival, so
+# instruments each interval, with a third command for the PC's status): 20 is about
+# the newest six captures, at most about 7 MB. Its ceiling of 200 is at most about
+# 70 MB of snapshots. Stale snapshots are dropped on arrival, so
 # a long backlog is worth nothing.
 STREAM_KEEP_CEILINGS = {"cmd:blog": 500, "cmd:futures_chain": 200}
 # How much of one field a dead letter may keep, in KB.

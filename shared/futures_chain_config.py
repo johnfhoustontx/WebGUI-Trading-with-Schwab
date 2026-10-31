@@ -33,8 +33,13 @@ DEFAULTS = {
         "stale_after_sec": 660,
         # A snapshot stamped further ahead than this is refused.
         "max_future_skew_sec": 30,
-        # Share of the tried contracts that must read a value.
+        # A capture reading fewer contracts than this share of the most read lately
+        # is not used: the PC measures against the most its ladder has read, the
+        # server against the capture before. Not a share of the contracts tried.
         "min_fill_fraction": 0.8,
+        # The floor against the contracts tried, for a first read with nothing to
+        # compare with. Low: /NQ's uneven spacing lists 416 of 572 tried (0.73).
+        "min_read_fraction": 0.25,
         # Captures in a row with the price, volume and open interest unchanged.
         "frozen_repeats": 3,
         # The page repeats each stored row across the minutes to the next one, to
@@ -49,6 +54,25 @@ DEFAULTS = {
         # The put-call check looks at this many strikes, nearest the price first,
         # for a call and a put that both have a mark.
         "parity_strikes": 5,
+        # The rest are the PC's own: how it waits for ThinkorSwim and looks after
+        # itself. They reach it in the plan.
+        # How long a sheet's count of filled cells must hold, and the most it waits.
+        "fill_settle_sec": 5,
+        "fill_wait_max_sec": 20,
+        # Where to look for a series: round strikes this many steps apart, this many
+        # each side of the price.
+        "probe_round_steps": 10,
+        "probe_reach": 3,
+        # The ladder is rewritten once the price has moved this share of the way to
+        # its end.
+        "recentre_share": 0.5,
+        # A hung ssh is killed after this.
+        "ssh_timeout_sec": 60,
+        # The first retry after a failed plan fetch, doubling up to the second value.
+        "no_plan_retry_sec": 60,
+        "plan_retry_max_sec": 900,
+        # No sign of life from the capture's loop for this long: its Excel is stopped.
+        "hang_limit_sec": 600,
         # Offered in the Dealer Positioning list. Ships off.
         "show_in_dropdown": False,
     },
@@ -95,6 +119,16 @@ _CAPTURE_BOUNDS = {
     "alert_repeat_min": (5, 1440),
     "max_snapshot_kb": (16, 4096),
     "parity_strikes": (1, 50),
+    "min_read_fraction": (0.01, 1.0),
+    "fill_settle_sec": (1, 60),
+    "fill_wait_max_sec": (5, 300),
+    "probe_round_steps": (1, 200),
+    "probe_reach": (1, 20),
+    "recentre_share": (0.05, 1.0),
+    "ssh_timeout_sec": (10, 600),
+    "no_plan_retry_sec": (5, 3600),
+    "plan_retry_max_sec": (30, 7200),
+    "hang_limit_sec": (120, 7200),
 }
 
 

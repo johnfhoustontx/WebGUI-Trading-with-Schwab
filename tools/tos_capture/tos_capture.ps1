@@ -29,13 +29,11 @@ param(
 Set-StrictMode -Version 2
 $ErrorActionPreference = 'Stop'
 
-# -- the machine's own settings (everything about the feed is in the plan) ------
+# -- the machine's own settings (everything else arrives in the plan) ------------
 
 # One line, no inner quotes: PowerShell 5.1 drops quotes inside an ssh command line.
 $SshExe = 'ssh'
 $SshArguments = '-o BatchMode=yes -o ConnectTimeout=20 vps2 /home/administrator/dev/tools/futures_chain_remote.sh'
-# A hung ssh is killed after this: the next boundary's capture matters more.
-$SshTimeoutSec = 60
 $SshDrainMs = 2000
 
 $WorkDir = Join-Path $env:LOCALAPPDATA 'TosCapture'
@@ -54,28 +52,61 @@ $ExcelBusyPauseMs = 500
 $XlCalculationAutomatic = -4105
 $XlOpenXmlWorkbook = 51
 
+$FillPollMs = 1000
+$SleepSliceSec = 5
+$WatchdogPollSec = 2
+# Allowed above two whole ssh limits when working out the hang limit.
+$SshHangMarginSec = 30
+
+# -- the plan's settings ---------------------------------------------------------
+
+# Each lives in config/futures_chain.toml [capture] and arrives in the plan. The PC
+# and the server do not update together, so a plan from an older server may lack
+# one: this default is then used, and it is logged once.
+#
 # A cell just written reads N/A or 0 until ThinkorSwim answers (about 730 contracts
 # took about 3 seconds). Excel hands RTD updates over in batches, every 2 seconds
 # by default, so a count of filled cells can sit still between two batches of a
 # sheet that is still filling. A sheet is called filled only when the count has held
 # for longer than two such batches, and at least one cell reads a value. A listed
 # contract can stay N/A for good, so the wait is capped rather than waiting for all
-# of them; what it could not fill is then judged by the plan's min_fill_fraction.
-$FillPollMs = 1000
-$FillSettleSec = 5
-$FillWaitMaxSec = 20
-
+# of them; a sheet that reaches the cap is not read on the boundary it was written.
+$FillSettleSec = 5  # fill_settle_sec
+$FillWaitMaxSec = 20  # fill_wait_max_sec
 # Where to look for each candidate series: round strikes around the price. A listed
 # series can read N/A at one strike and resolve at another, so several are tried.
-$ProbeRoundSteps = 10
-$ProbeReach = 3
-
+$ProbeRoundSteps = 10  # probe_round_steps
+$ProbeReach = 3  # probe_reach
 # The ladder is rewritten around the price when the price has moved this share of
 # the way to the ladder's end, because walls and the flip only see captured strikes.
-$RecentreShare = 0.5
-
-# With no plan there is no interval to sleep to.
-$NoPlanRetrySec = 60
+$RecentreShare = 0.5  # recentre_share
+# A hung ssh is killed after this: the next boundary's capture matters more.
+$SshTimeoutSec = 60  # ssh_timeout_sec
+# A failed plan fetch retries after the first, doubling up to the second. A burst of
+# ssh connections has shut the operator out of the server before.
+$NoPlanRetrySec = 60  # no_plan_retry_sec
+$PlanRetryMaxSec = 900  # plan_retry_max_sec
+# The floor against the contracts tried: below it the sheet has not filled, or
+# ThinkorSwim is logged out. /NQ's uneven spacing lists 416 of 572 tried.
+$MinReadFraction = 0.25  # min_read_fraction
+# No heartbeat from the loop for this long and its Excel is stopped. It must exceed
+# the longest honest stretch without a heartbeat, or a healthy Excel is killed. The
+# loop beats through every sleep and every poll of a filling sheet, so that stretch
+# is one call that cannot beat: one whole ssh (twice its limit, write then exit), one
+# Excel start, or one workbook opened and saved (5 seconds at a session's size).
+$HangLimitSec = 600  # hang_limit_sec
+$PlanSettings = [ordered]@{
+    fill_settle_sec = 'FillSettleSec'
+    fill_wait_max_sec = 'FillWaitMaxSec'
+    probe_round_steps = 'ProbeRoundSteps'
+    probe_reach = 'ProbeReach'
+    recentre_share = 'RecentreShare'
+    ssh_timeout_sec = 'SshTimeoutSec'
+    no_plan_retry_sec = 'NoPlanRetrySec'
+    plan_retry_max_sec = 'PlanRetryMaxSec'
+    min_read_fraction = 'MinReadFraction'
+    hang_limit_sec = 'HangLimitSec'
+}
 
 $RtdFields = @('MARK', 'BID', 'ASK', 'VOLUME', 'OPEN_INT', 'IMPL_VOL', 'DELTA')
 $Invariant = [Globalization.CultureInfo]::InvariantCulture
@@ -87,9 +118,18 @@ $script:Plan = $null
 $script:Excel = $null
 $script:Book = $null
 $script:Sheets = @{}
-$script:ExcelProcessId = $null
+$script:Owned = $null
 $script:Ladders = @{}
 $script:Problems = @{}
+$script:PlanRetryAt = 0.0
+$script:PlanRetryDelay = 0.0
+$script:DefaultedSettings = @{}
+$script:RestoreSeen = @{}
+$script:WatchShell = $null
+# Shared with the watchdog's thread.
+$script:Watch = [hashtable]::Synchronized(@{
+        Beat = 0.0; LimitSec = 0.0; Owned = $null; Stop = $false; LogPath = $LogPath
+    })
 $script:GeneralProblem = ''
 $script:InSession = $false
 $script:ThinkorswimId = $null
@@ -210,7 +250,7 @@ function Release-Com {
 function Invoke-Ssh {
     # One ssh, with Body (bytes) on its stdin. Returns what it did and never hangs.
     param([string]$Verb, [byte[]]$Body)
-    $timeoutMs = $SshTimeoutSec * 1000
+    $timeoutMs = [int]($SshTimeoutSec * 1000)
 
     # .NET Framework builds StandardInput's writer from the console's input encoding,
     # with no way to choose another, and on a UTF-8 console that writer puts a byte
@@ -320,23 +360,54 @@ function Get-CapturePlan {
     return $found
 }
 
+function Update-PlanSettings {
+    # The PC's tunables from the plan. One the plan lacks keeps its stated default.
+    param($Fetched)
+    $names = @($Fetched.PSObject.Properties | ForEach-Object { $_.Name })
+    foreach ($key in $PlanSettings.Keys) {
+        $number = if ($names -contains $key) { ConvertTo-Reading ([string]$Fetched.$key) } else { $null }
+        if ($null -ne $number) {
+            Set-Variable -Name $PlanSettings[$key] -Scope Script -Value $number
+        } elseif (-not $script:DefaultedSettings.ContainsKey($key)) {
+            $script:DefaultedSettings[$key] = $true
+            $held = Get-Variable -Name $PlanSettings[$key] -Scope Script -ValueOnly
+            Write-Log ('the plan has no ' + $key + '; using ' + $held)
+        }
+    }
+    Update-WatchdogLimit
+}
+
 function Update-Plan {
     # At the start and whenever valid_until passes. On failure the old plan is NOT
-    # kept: past valid_until its expiry is over.
+    # kept: past valid_until its expiry is over. A failure waits longer each time,
+    # because a dozen ssh connections in a few minutes can lock the operator out.
     $now = Get-EpochSeconds
     if ($null -ne $script:Plan -and $now -lt [double]$script:Plan.valid_until) { return }
     $previous = if ($null -ne $script:Plan) { [string]$script:Plan.expiry } else { '' }
     $script:Plan = $null
+    if ($now -lt $script:PlanRetryAt) { return }
+    $fetched = $null
+    $why = ''
     try {
         $fetched = Get-CapturePlan
+        if ($now -ge [double]$fetched.valid_until) {
+            $why = 'the plan for ' + $fetched.expiry + ' is already past its end'
+            $fetched = $null
+        }
     } catch {
-        Write-Log ('no plan: ' + $_.Exception.Message)
+        $why = $_.Exception.Message
+    }
+    if ($null -eq $fetched) {
+        $script:PlanRetryDelay = if ($script:PlanRetryDelay -gt 0) {
+            [math]::Min($script:PlanRetryDelay * 2, $PlanRetryMaxSec)
+        } else { $NoPlanRetrySec }
+        $script:PlanRetryAt = $now + $script:PlanRetryDelay
+        Write-Log ('no plan: ' + $why + '; next try in ' + $script:PlanRetryDelay + ' seconds')
         return
     }
-    if ($now -ge [double]$fetched.valid_until) {
-        Write-Log ('the plan for ' + $fetched.expiry + ' is already past its end; retrying')
-        return
-    }
+    $script:PlanRetryDelay = 0.0
+    $script:PlanRetryAt = 0.0
+    Update-PlanSettings $fetched
     $script:Plan = $fetched
     Write-Log ('plan: expiry ' + $fetched.expiry + ', every ' + $fetched.interval_sec + ' seconds')
     if ($previous -and $previous -ne [string]$fetched.expiry) {
@@ -358,17 +429,58 @@ function Get-WindowProcessId {
     return [int]$owner
 }
 
+function New-OwnedRecord {
+    # What identifies a copy this run owns. Reading .Handle makes the Process object
+    # hold the handle open, and Windows does not give an id with an open handle to
+    # another process, however long this copy has been dead.
+    param([Diagnostics.Process]$Process, [string]$Name = 'EXCEL', [string]$Switch = '/automation')
+    [void]$Process.Handle
+    return [pscustomobject]@{
+        Process = $Process; Id = $Process.Id; StartTime = $Process.StartTime
+        Name = $Name; Switch = $Switch
+    }
+}
+
+function Stop-OwnedExcel {
+    # The ONE way an Excel is stopped, on either thread, so it takes everything it
+    # needs as an argument and says what it did rather than logging. An id that is
+    # not the copy recorded (another start time, name or command line) is left alone:
+    # it could be the operator's, with unsaved work.
+    param($Owned)
+    if ($null -eq $Owned) { return 'no Excel to stop' }
+    $id = $Owned.Id
+    $running = Get-Process -Id $id -ErrorAction SilentlyContinue
+    if ($null -eq $running) { return 'process ' + $id + ' had already gone' }
+    $found = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $id)
+    $command = if ($null -ne $found) { [string]$found.CommandLine } else { '' }
+    if ($running.ProcessName -ne $Owned.Name -or $running.StartTime -ne $Owned.StartTime -or
+        $command -notmatch [regex]::Escape($Owned.Switch)) {
+        return 'process ' + $id + ' is not the copy this run started; left alone'
+    }
+    Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
+    return 'process ' + $id + ' stopped'
+}
+
+function Write-ExcelIdFile {
+    # The id and the start time: enough to know the same copy after a restart.
+    param($Owned)
+    $text = [string]$Owned.Id + ' ' + $Owned.StartTime.ToUniversalTime().Ticks
+    [IO.File]::WriteAllText($ExcelIdFile, $text, $Utf8NoBom)
+}
+
 function Stop-LeftoverExcel {
     # A run stopped from outside (the task ended, a log-off) has no finally. Its Excel
-    # is known by the id it recorded, and only a copy started for automation is
-    # stopped: the id may since have been reused by the operator's own Excel.
+    # is known by what it recorded, and is stopped only if it is still that copy.
     if (-not (Test-Path -LiteralPath $ExcelIdFile)) { return }
     try {
-        $recorded = [int]([IO.File]::ReadAllText($ExcelIdFile).Trim())
-        $found = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $recorded)
-        if ($null -ne $found -and $found.Name -eq 'EXCEL.EXE' -and $found.CommandLine -match '/automation') {
-            Stop-Process -Id $recorded -Force -ErrorAction SilentlyContinue
-            Write-Log ('stopped the Excel process ' + $recorded + ' a previous run left behind')
+        $parts = [IO.File]::ReadAllText($ExcelIdFile).Trim() -split ' '
+        if ($parts.Length -eq 2) {
+            $started = (New-Object DateTime ([long]$parts[1]), ([DateTimeKind]::Utc)).ToLocalTime()
+            $recorded = [pscustomobject]@{
+                Process = $null; Id = [int]$parts[0]; StartTime = $started
+                Name = 'EXCEL'; Switch = '/automation'
+            }
+            Write-Log ('a previous run''s Excel: ' + (Stop-OwnedExcel $recorded))
         }
         Remove-Item -LiteralPath $ExcelIdFile -Force
     } catch {
@@ -381,8 +493,9 @@ function Start-CaptureExcel {
     # hands back is checked against the process id, so the capture can only ever
     # work in a copy made for it.
     $process = Start-Process -FilePath 'EXCEL.EXE' -ArgumentList '/automation -Embedding' -WindowStyle Hidden -PassThru
-    $script:ExcelProcessId = $process.Id
-    [IO.File]::WriteAllText($ExcelIdFile, [string]$process.Id, $Utf8NoBom)
+    $script:Owned = New-OwnedRecord $process
+    $script:Watch.Owned = $script:Owned
+    Write-ExcelIdFile $script:Owned
     Write-Log ('Excel process ' + $process.Id + ' started')
     try {
         [void]$process.WaitForInputIdle($ExcelIdleWaitMs)
@@ -396,18 +509,30 @@ function Start-CaptureExcel {
     if ($owner -ne $process.Id) {
         # Measured on a cold start: this copy was not ready, and COM launched another
         # for this very call. That one is as private as this one, and it is the one
-        # connected, so it is kept and the idle copy is stopped. Anything that is not
-        # an automation copy is let go and never touched.
+        # connected, so it is kept and the idle copy is stopped. An Excel embedded in
+        # another program can carry the same switch, so a copy holding a workbook or
+        # showing a window is not kept. Whatever is not kept is let go, never touched.
         $other = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $owner)
-        if ($null -eq $other -or $other.CommandLine -notmatch '/automation') {
+        $madeForThis = $null -ne $other -and $other.CommandLine -match '/automation'
+        if ($madeForThis -and ($attached.Workbooks.Count -ne 0 -or $attached.Visible)) {
+            $madeForThis = $false
+        }
+        if (-not $madeForThis) {
             Release-Com $attached
             throw ('COM attached to Excel process ' + $owner + ', which this run did not start')
         }
-        Write-Log ('COM started Excel process ' + $owner + '; using it and stopping ' + $process.Id)
-        Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
-        $script:ExcelProcessId = $owner
-        [IO.File]::WriteAllText($ExcelIdFile, [string]$owner, $Utf8NoBom)
+        Write-Log ('COM started Excel process ' + $owner + '; using it. Stopping the idle one: ' + (Stop-OwnedExcel $script:Owned))
+        $script:Owned.Process.Dispose()
+        $script:Owned = New-OwnedRecord ([Diagnostics.Process]::GetProcessById($owner))
+        $script:Watch.Owned = $script:Owned
+        Write-ExcelIdFile $script:Owned
     }
+    # Before any workbook: a file the operator double-clicks is handed to a running
+    # Excel, and a hidden copy could be that Excel. It would then open out of sight
+    # and die with this copy. Excel saves this value on a clean exit, where it would
+    # make the operator's own double-clicks open an empty window, so this copy must
+    # never exit cleanly: see Stop-CaptureExcel.
+    $attached.IgnoreRemoteRequests = $true
     $attached.Visible = $false
     $attached.DisplayAlerts = $false
     $attached.AskToUpdateLinks = $false
@@ -423,15 +548,17 @@ function Stop-CaptureExcel {
     # By process id, and before anything else, with no Quit(). Quit() has left hidden
     # copies behind, and it once crashed this Excel on its way out (an access violation
     # in combase.dll, 2026-10-31). Windows then restarted the crashed Excel with
-    # /restore: a VISIBLE window on the operator's desktop. Stopping the process does
-    # not count as a crash, so nothing restarts it, and the workbook it holds was never
-    # saved, so nothing is lost. The operator's Excel has a different id and is never
-    # looked at. The COM objects are released afterwards, against a server that is gone.
-    $id = $script:ExcelProcessId
-    if ($null -ne $id) {
-        Stop-Process -Id $id -Force -ErrorAction SilentlyContinue
-        Write-Log ('Excel process ' + $id + ' stopped')
-        $script:ExcelProcessId = $null
+    # /restore: a VISIBLE window on the operator's desktop. A clean exit would also
+    # save IgnoreRemoteRequests into the operator's own settings. Stopping the process
+    # is neither a crash nor a clean exit, so nothing restarts it and nothing is saved,
+    # and the workbook it holds was never saved, so nothing is lost. The operator's
+    # Excel has a different id and is never looked at. The COM objects are released
+    # afterwards, against a server that is gone.
+    if ($null -ne $script:Owned) {
+        $script:Watch.Owned = $null
+        Write-Log ('Excel ' + (Stop-OwnedExcel $script:Owned))
+        if ($null -ne $script:Owned.Process) { $script:Owned.Process.Dispose() }
+        $script:Owned = $null
     }
     foreach ($sheet in @($script:Sheets.Values)) { Release-Com $sheet }
     $script:Sheets = @{}
@@ -447,15 +574,88 @@ function Stop-CaptureExcel {
     }
 }
 
+function Write-RestoreNotice {
+    # Windows brings back a crashed Excel with /restore, as a visible window. It is
+    # not this run's copy, so it is left alone, but the operator's first question is
+    # where it came from.
+    try {
+        $found = @(Get-CimInstance Win32_Process -Filter "Name='EXCEL.EXE'" | Where-Object { $_.CommandLine -match '/restore' })
+        foreach ($item in $found) {
+            if (-not $script:RestoreSeen.ContainsKey($item.ProcessId)) {
+                $script:RestoreSeen[$item.ProcessId] = $true
+                Write-Log ('Excel process ' + $item.ProcessId + ' is a /restore window: Windows has brought back an Excel that crashed. It is left alone.')
+            }
+        }
+    } catch {
+        Write-Verbose ('no look for a restored Excel: ' + $_.Exception.Message)
+    }
+}
+
 function Test-ExcelAlive {
-    if ($null -eq $script:Excel -or $null -eq $script:ExcelProcessId) { return $false }
-    $found = Get-Process -Id $script:ExcelProcessId -ErrorAction SilentlyContinue
-    if ($null -eq $found -or $found.ProcessName -ne 'EXCEL') { return $false }
+    if ($null -eq $script:Excel -or $null -eq $script:Owned) { return $false }
+    if ($script:Owned.Process.HasExited) { return $false }
     try {
         return [bool]($script:Excel.Hwnd)
     } catch {
         # Excel being busy is alive; a dead RPC server is not.
         return (Test-ExcelBusy $_.Exception.Message)
+    }
+}
+
+# -- the watchdog ----------------------------------------------------------------
+
+# A COM call has no timeout, so an Excel that stops answering would hold the loop for
+# ever, and a hung process has not failed, so the task does not restart it. This runs
+# on its own thread and reads the heartbeat. Stopping the Excel makes the loop's stuck
+# call throw, and the existing restart path takes over.
+$WatchdogBody = @'
+$firedAt = 0.0
+while (-not $Watch.Stop) {
+    Start-Sleep -Seconds $PollSec
+    try {
+        $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0
+        $age = $now - $Watch.Beat
+        if ($age -gt $Watch.LimitSec -and ($now - $firedAt) -gt $Watch.LimitSec) {
+            $firedAt = $now
+            $did = Stop-OwnedExcel $Watch.Owned
+            $line = [DateTimeOffset]::Now.ToString('yyyy-MM-dd HH:mm:ss zzz') + ' watchdog: no heartbeat for ' +
+                [int]$age + ' seconds (limit ' + $Watch.LimitSec + '): ' + $did + "`r`n"
+            [IO.File]::AppendAllText($Watch.LogPath, $line)
+        }
+    } catch {
+        try { [IO.File]::AppendAllText($Watch.LogPath, 'watchdog failed: ' + $_.Exception.Message + "`r`n") } catch { $null = $_ }
+    }
+}
+'@
+
+function Update-Heartbeat {
+    $script:Watch.Beat = Get-EpochSeconds
+}
+
+function Update-WatchdogLimit {
+    # Never below a whole ssh, whatever the plan says: that would kill a healthy Excel.
+    $script:Watch.LimitSec = [math]::Max([double]$HangLimitSec, 2 * [double]$SshTimeoutSec + $SshHangMarginSec)
+}
+
+function Start-Watchdog {
+    Update-Heartbeat
+    Update-WatchdogLimit
+    $script:Watch.Stop = $false
+    # The check is passed by its text: a runspace does not share this one's functions.
+    $text = 'param($Watch, $PollSec)' + "`n" + 'function Stop-OwnedExcel {' +
+        ${function:Stop-OwnedExcel}.ToString() + "}`n" + $WatchdogBody
+    $shell = [powershell]::Create()
+    [void]$shell.AddScript($text).AddArgument($script:Watch).AddArgument($WatchdogPollSec)
+    [void]$shell.BeginInvoke()
+    $script:WatchShell = $shell
+}
+
+function Stop-Watchdog {
+    $script:Watch.Stop = $true
+    if ($null -ne $script:WatchShell) {
+        try { $script:WatchShell.Stop() } catch { Write-Verbose $_.Exception.Message }
+        $script:WatchShell.Dispose()
+        $script:WatchShell = $null
     }
 }
 
@@ -537,6 +737,8 @@ function Wait-Filled {
     $since = Get-EpochSeconds
     while ((Get-EpochSeconds) -lt $deadline) {
         $values = Read-Block $Sheet $Rows $Columns
+        # Excel just answered, so this is a sign of life.
+        Update-Heartbeat
         $filled = 0
         $nonZero = 0
         foreach ($cell in $values) {
@@ -698,6 +900,7 @@ function Build-Ladder {
     return @{
         Root = $Root; Sheet = $sheet; Future = $future; Series = $series; Rows = $rows
         Columns = $columns; Centre = $price; Reach = $reach; MostRead = 0
+        Settled = $settled; BuiltSlot = [math]::Floor((Get-EpochSeconds) / [double]$script:Plan.interval_sec)
     }
 }
 
@@ -735,12 +938,14 @@ function Invoke-Prepare {
     $now = Get-EpochSeconds
     $script:InSession = [bool]$Once -or ($now -ge [double]$script:Plan.opens -and $now -lt [double]$script:Plan.valid_until)
     if (-not $script:InSession) { return }
+    Write-RestoreNotice
 
     if (-not (Test-ExcelAlive)) {
-        if ($null -ne $script:ExcelProcessId) { Write-Log 'Excel has gone; restarting it' }
+        if ($null -ne $script:Owned) { Write-Log 'Excel has gone; restarting it' }
         Stop-CaptureExcel
         for ($attempt = 1; $attempt -le $ExcelStartAttempts; $attempt++) {
             try {
+                Update-Heartbeat
                 Start-CaptureExcel
                 break
             } catch {
@@ -754,14 +959,15 @@ function Invoke-Prepare {
         }
     }
 
-    # Looked at, never started. This process is ThinkorSwim's own launcher.
-    $thinkorswim = @(Get-Process -Name 'thinkorswim' -ErrorAction SilentlyContinue)
+    # Looked at, never started. Oldest first: if two share the name the same one is
+    # picked every time, so their order cannot read as a restart.
+    $thinkorswim = @(Get-Process -Name 'thinkorswim' -ErrorAction SilentlyContinue | Sort-Object StartTime, Id)
     if ($thinkorswim.Length -eq 0) {
         $script:GeneralProblem = 'ThinkorSwim is not running on the capture PC.'
         $script:Ladders = @{}
         return
     }
-    $currentId = $thinkorswim[0].Id
+    $currentId = ($thinkorswim | Select-Object -First 1).Id
     if ($null -ne $script:ThinkorswimId -and $script:ThinkorswimId -ne $currentId) {
         # A restarted ThinkorSwim is a new RTD server, and Excel still holds the dead
         # one. A fresh Excel is the start known to work.
@@ -778,6 +984,7 @@ function Invoke-Prepare {
     foreach ($entry in $script:Plan.instruments.PSObject.Properties) {
         $root = $entry.Name
         if ($script:Ladders.ContainsKey($root)) { continue }
+        Update-Heartbeat
         try {
             $script:Ladders[$root] = Build-Ladder $root $entry.Value
         } catch {
@@ -787,10 +994,23 @@ function Invoke-Prepare {
     }
 }
 
+function Wait-Sleeping {
+    # A sleep in short pieces, each with a heartbeat: a long wait is not a hang.
+    param([double]$Seconds)
+    $until = (Get-EpochSeconds) + $Seconds
+    $left = $Seconds
+    while ($left -gt 0) {
+        Update-Heartbeat
+        Start-Sleep -Milliseconds ([math]::Max(10, [int]([math]::Min($left, $SleepSliceSec) * 1000)))
+        $left = $until - (Get-EpochSeconds)
+    }
+    Update-Heartbeat
+}
+
 function Wait-NextBoundary {
     # Boundaries counted from the epoch, so a restart stays on the same clock.
     if ($null -eq $script:Plan) {
-        Start-Sleep -Seconds $NoPlanRetrySec
+        Wait-Sleeping ([math]::Max(1, $script:PlanRetryAt - (Get-EpochSeconds)))
         return
     }
     $interval = [double]$script:Plan.interval_sec
@@ -798,17 +1018,33 @@ function Wait-NextBoundary {
     $next = ([math]::Floor($now / $interval) + 1) * $interval
     while ($now -lt $next) {
         # A sleep can wake a little early, and that would capture this boundary twice.
-        Start-Sleep -Milliseconds ([math]::Max(10, [int](($next - $now) * 1000)))
+        Wait-Sleeping ($next - $now)
         $now = Get-EpochSeconds
     }
 }
 
 # -- one capture ---------------------------------------------------------------
 
+function Test-RowReadsNothing {
+    # True when no field holds anything but a zero or an absence.
+    param([object[]]$Readings)
+    foreach ($reading in $Readings) {
+        if ($null -ne $reading -and $reading -ne 0) { return $false }
+    }
+    return $true
+}
+
 function Read-Snapshot {
     # The instrument's snapshot, or $null with the reason in $script:Problems.
     param($Ladder, $Plan)
     $root = $Ladder.Root
+    # A ladder that reached the fill cap straight before this read is half a chain,
+    # and the first capture of a session has nothing to be compared with. By the next
+    # boundary it has had minutes.
+    if (-not $Ladder.Settled -and [math]::Floor((Get-EpochSeconds) / [double]$Plan.interval_sec) -eq $Ladder.BuiltSlot) {
+        $script:Problems[$root] = 'the sheet was still filling when it was written; it is read at the next boundary'
+        return $null
+    }
     $rowCount = $Ladder.Rows.Count + 1
     # Taken at the read: this is the moment the values describe.
     $capturedAt = Get-EpochSeconds
@@ -835,10 +1071,12 @@ function Read-Snapshot {
     }
 
     $contracts = New-Object System.Collections.ArrayList
+    $tried = 0
     $line = 1
     foreach ($row in $Ladder.Rows) {
         $line++
         if (-not $descriptions.ContainsKey($row.Series)) { continue }
+        $tried++
         $mark = ConvertTo-Reading $values[$line, 1]
         $bid = ConvertTo-Reading $values[$line, 2]
         $ask = ConvertTo-Reading $values[$line, 3]
@@ -847,9 +1085,10 @@ function Read-Snapshot {
         $iv = ConvertTo-PercentReading $values[$line, 6]
         $delta = ConvertTo-Reading $values[$line, 7]
         # N/A on every field is a contract that is not listed. A listed one can read
-        # N/A on some fields, and those travel as absent, never as zero.
-        if ($null -eq $mark -and $null -eq $bid -and $null -eq $ask -and $null -eq $volume -and
-            $null -eq $openInt -and $null -eq $iv -and $null -eq $delta) { continue }
+        # N/A on some fields, and those travel as absent, never as zero. Nothing but
+        # zeros is a cell ThinkorSwim has not answered yet: sending it would put a false
+        # 0 open interest on the wire.
+        if (Test-RowReadsNothing @($mark, $bid, $ask, $volume, $openInt, $iv, $delta)) { continue }
         [void]$contracts.Add([ordered]@{
                 series = $row.Series; side = $row.Side; strike = $row.Strike
                 mark = $mark; bid = $bid; ask = $ask; volume = $volume
@@ -863,11 +1102,21 @@ function Read-Snapshot {
         return $null
     }
 
+    # Against what was tried, for a first read with nothing to compare with.
+    if ($contracts.Count -lt $MinReadFraction * $tried) {
+        $script:Problems[$root] = 'read ' + $contracts.Count + ' of ' + $tried + ' contracts tried; not sent'
+        [void]$script:Ladders.Remove($root)
+        return $null
+    }
+
     # Contracts do not delist within a session, so a large fall against the most this
-    # ladder has read is a sheet that has lost its feed, not a thinner chain.
+    # ladder has read is a sheet that has lost its feed, not a thinner chain. Rewriting
+    # is what might bring the feed back; the server's repeated-count rule decides what
+    # is done with the smaller count if it stays.
     $least = [double]$Plan.min_fill_fraction * $Ladder.MostRead
     if ($contracts.Count -lt $least) {
         $script:Problems[$root] = 'read ' + $contracts.Count + ' contracts against ' + $Ladder.MostRead + ' earlier; not sent'
+        [void]$script:Ladders.Remove($root)
         return $null
     }
     if ($contracts.Count -gt $Ladder.MostRead) { $Ladder.MostRead = $contracts.Count }
@@ -1000,6 +1249,7 @@ function Invoke-Capture {
                 [void]$reasons.Add($root + ': ' + $why)
                 continue
             }
+            Update-Heartbeat
             try {
                 $snapshot = Read-Snapshot $script:Ladders[$root] $plan
             } catch {
@@ -1034,7 +1284,9 @@ function Invoke-Capture {
     if ($OutFile) {
         [IO.File]::WriteAllBytes((Resolve-UserPath $OutFile), $body)
     }
+    Update-Heartbeat
     Send-Body $body
+    Update-Heartbeat
     $script:SnapshotCount = $snapshots.Count
 
     # After the send and apart from it: a workbook that fails never costs the capture.
@@ -1067,6 +1319,7 @@ function Invoke-Main {
     try {
         Write-Log ('capture started' + $(if ($Once) { ' (-Once)' } else { '' }))
         Stop-LeftoverExcel
+        Start-Watchdog
         if ($Once) {
             Invoke-Prepare
             Invoke-Capture
@@ -1074,6 +1327,7 @@ function Invoke-Main {
             return
         }
         while ($true) {
+            Update-Heartbeat
             try {
                 Invoke-Prepare
             } catch {
@@ -1082,12 +1336,19 @@ function Invoke-Main {
             Wait-NextBoundary
             try {
                 Invoke-Prepare -KeepTime
+            } catch {
+                # The boundary still reports: silence here reads as a PC that has gone.
+                Write-Log ('prepare failed: ' + $_.Exception.Message)
+                $script:GeneralProblem = 'The capture could not get ready: ' + $_.Exception.Message
+            }
+            try {
                 Invoke-Capture
             } catch {
                 Write-Log ('capture failed: ' + $_.Exception.Message)
             }
         }
     } finally {
+        Stop-Watchdog
         Stop-CaptureExcel
         Write-Log 'capture stopped'
         $mutex.ReleaseMutex()

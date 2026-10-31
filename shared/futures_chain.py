@@ -265,6 +265,13 @@ def fill_rows(rows: list, interval_sec: int, step_sec: int) -> list:
 
 # ── the plan the capture works from ──────────────────────────────────────────
 
+# The capture machine's own tunables. The script holds a stated default for each,
+# because the PC and the server do not update together.
+_PC_SETTINGS = ("min_read_fraction", "fill_settle_sec", "fill_wait_max_sec",
+                "probe_round_steps", "probe_reach", "recentre_share", "ssh_timeout_sec",
+                "no_plan_retry_sec", "plan_retry_max_sec", "hang_limit_sec")
+
+
 def build_plan(now: datetime) -> dict:
     """What the capture needs to know at ``now``, as plain JSON: the expiry it is
     capturing, how to print it, the series to try for each instrument and the
@@ -282,6 +289,7 @@ def build_plan(now: datetime) -> dict:
         "interval_sec": capture["interval_sec"],
         "min_fill_fraction": capture["min_fill_fraction"],
         "max_snapshot_kb": capture["max_snapshot_kb"],
+        **{key: capture[key] for key in _PC_SETTINGS},
         "instruments": {
             root: {key: inst[key] for key in
                    ("symbol", "multiplier", "exchange", "strike_step",

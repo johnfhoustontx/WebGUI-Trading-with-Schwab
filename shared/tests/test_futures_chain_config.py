@@ -31,7 +31,11 @@ def test_the_capture_defaults():
         "interval_sec": 300, "max_age_sec": 900, "stale_after_sec": 660,
         "max_future_skew_sec": 30, "min_fill_fraction": 0.8, "frozen_repeats": 3,
         "fill_step_sec": 100, "frozen_before_expiry_min": 60, "alert_repeat_min": 240,
-        "max_snapshot_kb": 512, "parity_strikes": 5, "show_in_dropdown": False}
+        "max_snapshot_kb": 512, "parity_strikes": 5, "show_in_dropdown": False,
+        "min_read_fraction": 0.25, "fill_settle_sec": 5, "fill_wait_max_sec": 20,
+        "probe_round_steps": 10, "probe_reach": 3, "recentre_share": 0.5,
+        "ssh_timeout_sec": 60, "no_plan_retry_sec": 60, "plan_retry_max_sec": 900,
+        "hang_limit_sec": 600}
     assert isinstance(cfg.capture()["min_fill_fraction"], float)
     assert cfg.capture()["show_in_dropdown"] is False
 
@@ -78,6 +82,11 @@ def test_an_override_is_read(monkeypatch):
     ("parity_strikes", 0), ("parity_strikes", 51), ("parity_strikes", 2.5),
     ("parity_strikes", True), ("parity_strikes", "5"),
     ("show_in_dropdown", 1), ("show_in_dropdown", "true"), ("show_in_dropdown", None),
+    ("min_read_fraction", 0), ("min_read_fraction", 1.5), ("fill_settle_sec", 0),
+    ("fill_wait_max_sec", 1), ("probe_round_steps", 0), ("probe_reach", 0),
+    ("probe_reach", 2.5), ("recentre_share", 0), ("recentre_share", 2),
+    ("ssh_timeout_sec", 1), ("no_plan_retry_sec", 0), ("plan_retry_max_sec", 1),
+    ("hang_limit_sec", 1), ("hang_limit_sec", True),
 ])
 def test_a_bad_capture_value_falls_back_to_the_default(monkeypatch, key, bad):
     monkeypatch.setattr(cfg, "load", lambda: {"capture": {key: bad}})

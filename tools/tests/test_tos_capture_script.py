@@ -79,11 +79,163 @@ def test_excel_is_stopped_first_and_never_asked_to_quit():
     # visible window on the operator's desktop. Stopping the process is not a crash.
     assert ".Quit(" not in CODE
     body = CODE[CODE.index("function Stop-CaptureExcel"):CODE.index("function Test-ExcelAlive")]
-    assert body.index("Stop-Process -Id") < body.index("Release-Com")
+    assert body.index("Stop-OwnedExcel") < body.index("Release-Com")
 
 
-def test_a_dead_excel_is_seen_by_its_process_id():
+def test_a_dead_excel_is_seen_by_its_held_process_object():
     assert re.search(r"Get-Process\s+-Id\s+\$", CODE)
+    assert ".Process.HasExited" in CODE
+
+
+def _function(name):
+    start = CODE.index(f"function {name} ")
+    following = re.compile(r"^function ", re.M).search(CODE, start + 1)
+    return CODE[start:following.start() if following else len(CODE)]
+
+
+def test_the_private_copy_refuses_the_operators_files_before_any_workbook():
+    # A double-clicked file is handed to a running Excel, and a hidden copy can be
+    # that Excel: the operator's workbook would then open out of sight and die with it.
+    body = _function("Start-CaptureExcel")
+    assert re.search(r"\.IgnoreRemoteRequests\s*=\s*\$true", body)
+    assert body.index("IgnoreRemoteRequests") < body.index("Workbooks.Add()")
+
+
+def test_the_id_cannot_be_reused_while_the_copy_lives():
+    # Reading .Handle makes the Process object hold the handle open, and an id with
+    # an open handle is not given to another process.
+    assert ".Handle" in _function("New-OwnedRecord") and "$script:Owned" in CODE
+
+
+def test_every_excel_stop_goes_through_the_identity_check():
+    body = _function("Stop-OwnedExcel")
+    assert "StartTime" in body and "CommandLine" in body
+    assert body.index("StartTime") < body.index("Stop-Process -Id")
+    assert "left alone" in body
+    for name in ("Stop-CaptureExcel", "Start-CaptureExcel", "Stop-LeftoverExcel"):
+        assert "Stop-Process" not in _function(name), name
+    # Only the checked stop and ssh's own, whose object is held from its start.
+    assert len(re.findall(r"Stop-Process\s+-Id", CODE)) == 2
+
+
+def test_a_copy_is_adopted_only_if_it_is_empty_and_hidden():
+    body = _function("Start-CaptureExcel")
+    assert ".Workbooks.Count -ne 0" in body and "$attached.Visible" in body
+    assert body.index("Workbooks.Count") < body.index("$script:Excel = $attached")
+
+
+def test_the_leftover_check_compares_the_recorded_start_time():
+    assert "StartTime" in _function("Write-ExcelIdFile")
+    assert "Stop-OwnedExcel" in _function("Stop-LeftoverExcel")
+
+
+def test_an_unsettled_ladder_is_not_read_on_the_boundary_it_was_built_on():
+    assert "Settled = $settled" in _function("Build-Ladder")
+    body = _function("Read-Snapshot")
+    assert "$Ladder.Settled" in body and "$Ladder.BuiltSlot" in body
+    assert body.index("$Ladder.Settled") < body.index("Read-Block")
+
+
+def test_there_is_a_floor_against_contracts_tried_and_it_rewrites():
+    body = _function("Read-Snapshot")
+    assert "$MinReadFraction" in body and "$tried" in body
+    floor = body[body.index("$MinReadFraction"):]
+    assert "Ladders.Remove($root)" in floor[:floor.index("return $null")]
+
+
+def test_a_row_of_nothing_but_zeros_and_absences_is_left_out():
+    assert "Test-RowReadsNothing" in _function("Read-Snapshot")
+    assert "-ne 0" in _function("Test-RowReadsNothing")
+
+
+def test_a_fall_against_the_most_read_rewrites_the_ladder():
+    body = _function("Read-Snapshot")
+    branch = body[body.index("if ($contracts.Count -lt $least)"):]
+    assert "Ladders.Remove($root)" in branch[:branch.index("return $null")]
+
+
+# ── the watchdog ─────────────────────────────────────────────────────────────
+
+def test_a_watchdog_on_its_own_thread_stops_a_hung_excel():
+    assert "[powershell]::Create()" in CODE
+    assert "HangLimitSec" in CODE and "hang_limit_sec" in CODE
+    assert "Stop-OwnedExcel" in CODE[CODE.index("$WatchdogBody"):]
+    body = _function("Stop-Watchdog")
+    assert ".Stop()" in body and ".Dispose()" in body
+
+
+def test_the_heartbeat_is_kept_through_a_sleep_and_a_fill():
+    assert "Update-Heartbeat" in _function("Wait-Sleeping")
+    assert "Update-Heartbeat" in _function("Wait-Filled")
+    assert "Wait-Sleeping" in _function("Wait-NextBoundary")
+    assert "Start-Sleep" not in _function("Wait-NextBoundary")
+    assert "Update-Heartbeat" in _function("Invoke-Main")
+
+
+def test_the_limit_can_never_be_below_a_whole_ssh():
+    assert "$SshTimeoutSec" in _function("Update-WatchdogLimit")
+
+
+# ── what the plan may not carry yet ──────────────────────────────────────────
+
+@pytest.mark.parametrize("key", [
+    "fill_settle_sec", "fill_wait_max_sec", "probe_round_steps", "probe_reach",
+    "recentre_share", "ssh_timeout_sec", "no_plan_retry_sec", "plan_retry_max_sec",
+    "min_read_fraction", "hang_limit_sec",
+])
+def test_each_tunable_is_read_from_the_plan_with_a_stated_default(key):
+    assert f"{key} = " in CODE[CODE.index("$PlanSettings"):CODE.index("$RtdFields")]
+
+
+def test_a_plan_from_an_older_server_is_logged_once():
+    body = _function("Update-PlanSettings")
+    assert "$script:DefaultedSettings" in body and "Write-Log" in body
+
+
+def test_the_shipped_values_and_the_scripts_defaults_agree():
+    import tomllib
+    with open(ROOT / "config" / "futures_chain.toml", "rb") as fh:
+        shipped = tomllib.load(fh)["capture"]
+    table = CODE[CODE.index("$PlanSettings"):CODE.index("$RtdFields")]
+    found = re.findall(r"(\w+) = '\w+'", table)
+    assert len(found) == 10
+    for key in found:
+        default = re.search(rf"^\$\w+ = ([\d.]+)\s*# {key}$", CODE, re.M)
+        assert default, key
+        assert float(default.group(1)) == shipped[key], key
+
+
+# ── the rest ─────────────────────────────────────────────────────────────────
+
+def test_plan_failures_back_off():
+    body = _function("Update-Plan")
+    assert "$script:PlanRetryAt" in body and "$PlanRetryMaxSec" in body
+    assert "$script:PlanRetryDelay * 2" in body
+
+
+def test_thinkorswim_is_picked_by_a_stable_rule():
+    assert "Sort-Object StartTime, Id" in _function("Invoke-Prepare")
+    assert "$thinkorswim[0]" not in CODE
+
+
+def test_a_failed_prepare_at_the_boundary_still_reports():
+    loop = _function("Invoke-Main")
+    keep = loop[loop.index("Invoke-Prepare -KeepTime"):]
+    assert "$script:GeneralProblem" in keep[:keep.index("Invoke-Capture")]
+
+
+def test_a_restored_window_is_logged_and_left_alone():
+    body = _function("Write-RestoreNotice")
+    assert "/restore" in body and "Write-Log" in body and "Stop-" not in body
+    assert "Write-RestoreNotice" in _function("Invoke-Prepare")
+
+
+@pytest.mark.parametrize("name", [
+    "fake_ssh.py", "check_functions.ps1", "check_live.ps1", "check_watchdog.ps1",
+])
+def test_the_by_hand_checks_are_kept(name):
+    path = ROOT / "tools" / "tos_capture" / "by_hand_checks" / name
+    assert path.read_text(encoding="utf-8").isascii()
 
 
 def test_formulas_go_in_as_one_bulk_assignment():
@@ -241,6 +393,14 @@ def test_installer_runs_only_while_the_operator_is_logged_on_and_holds_no_creden
     assert "-LogonType Interactive" in INSTALL
     assert "password" not in INSTALL.lower()
     assert "-Credential" not in INSTALL and "Get-Credential" not in INSTALL
+
+
+def test_installer_brings_an_exited_capture_back():
+    assert "-RepetitionInterval" in INSTALL and ".Repetition" in INSTALL
+
+
+def test_installer_says_a_rerun_leaves_the_running_copy_on_old_code():
+    assert "next logon" in INSTALL and "old code" in INSTALL
 
 
 def test_installer_copies_the_script_so_a_branch_change_cannot_alter_the_feed():

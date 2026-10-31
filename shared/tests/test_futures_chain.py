@@ -358,6 +358,22 @@ def test_plan_carries_what_the_capture_needs_per_instrument():
     assert p["min_fill_fraction"] == 0.8 and p["max_snapshot_kb"] == 512
 
 
+def test_plan_carries_the_capture_machines_tunables(monkeypatch):
+    """They reach the PC through the plan, so a change in Settings -> Configuration
+    needs no edit of the script there. Read from config, not fixed here."""
+    keys = ("min_read_fraction", "fill_settle_sec", "fill_wait_max_sec",
+            "probe_round_steps", "probe_reach", "recentre_share", "ssh_timeout_sec",
+            "no_plan_retry_sec", "plan_retry_max_sec", "hang_limit_sec")
+    p = build_plan(ct(2026, 11, 1, 18, 0))
+    for key in keys:
+        assert p[key] == cfg.DEFAULTS["capture"][key]
+    changed = {key: cfg.DEFAULTS["capture"][key] * 2 for key in keys}
+    monkeypatch.setattr(cfg, "capture", lambda: {**cfg.DEFAULTS["capture"], **changed})
+    p = build_plan(ct(2026, 11, 1, 18, 0))
+    for key in keys:
+        assert p[key] == changed[key]
+
+
 def test_plan_is_plain_json():
     """It crosses a machine boundary: no dates, tuples or NamedTuples."""
     p = build_plan(ct(2026, 11, 1, 18, 0))

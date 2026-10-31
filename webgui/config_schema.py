@@ -2694,9 +2694,10 @@ _COMMANDS = ConfigFile(
                   "The /ES and /NQ chain feed's snapshots",
                   "Kept small on purpose: each command carries one chain "
                   "snapshot, up to the largest the futures chain settings "
-                  "allow, two every capture. At 20 that is the newest ten "
-                  "captures, at most about 10 MB; at 200, the most allowed "
-                  "here, at most about 100 MB. A snapshot older than the "
+                  "allow, two every capture and a third for the PC's status. At "
+                  "20 that is about the newest six captures, at most about 7 MB of "
+                  "chains; at 200, the most allowed "
+                  "here, at most about 70 MB. A snapshot older than the "
                   "futures chain settings' age limit is dropped on arrival, so "
                   "a longer backlog would be worth nothing.",
                   kind="int", unit="commands", min=10, max=200, step=10),
@@ -2924,11 +2925,19 @@ _FUTURES_CHAIN = ConfigFile(
         Section("What makes a snapshot unfit",
                 "A snapshot that fails is not sent, and the reason is shown on "
                 "System Status.", (
-            _pct("capture.min_fill_fraction", "Contracts that must read a value",
-                 "Below this, ThinkorSwim is probably logged out or the sheet "
-                 "had not filled. The service also refuses a capture that "
-                 "reads fewer contracts than this share of the one before.",
+            _pct("capture.min_fill_fraction", "Least share of the most read lately",
+                 "A capture reading fewer contracts than this share is not used. "
+                 "The PC compares with the most its sheet has read, and rewrites "
+                 "the sheet; the service compares with the capture before. It is "
+                 "not a share of the contracts tried, because /NQ's spacing is "
+                 "uneven and a healthy chain lists far fewer than it tries.",
                  lo=5, hi=100, step=5),
+            _pct("capture.min_read_fraction", "Least share of the contracts tried",
+                 "For a first read, with nothing to compare with. Below this the "
+                 "sheet has not filled or ThinkorSwim is logged out. On 31 October "
+                 "2026, market closed, /ES read 306 of 306 tried and /NQ 416 of 572, "
+                 "so keep it well under 73 percent.",
+                 lo=1, hi=100, step=1),
             Field("capture.frozen_repeats", "Frozen after this many identical captures",
                   "In a row with the future's price and the volume and open "
                   "interest all the same. A live future does not hold one "
@@ -2945,6 +2954,48 @@ _FUTURES_CHAIN = ConfigFile(
                   "The phone alert for a capture that stops during the "
                   "session. It is quiet in the daily gap and at weekends.",
                   kind="int", unit="minutes", min=5, max=1440, step=5),
+        )),
+        Section("The capture on your PC",
+                "How it waits for ThinkorSwim and looks after itself. These reach "
+                "the PC in the plan the next time it fetches one, at the session's "
+                "end or when the capture starts.", (
+            Field("capture.fill_settle_sec", "A sheet has filled once its count holds for",
+                  "Excel hands ThinkorSwim's values over in batches about 2 seconds "
+                  "apart, so this must be longer than two of them, or a sheet still "
+                  "filling can pass as filled.",
+                  kind="int", unit="seconds", min=1, max=60, step=1),
+            Field("capture.fill_wait_max_sec", "Wait for a sheet to fill at most",
+                  "A listed contract can stay not available for good, so the wait "
+                  "has an end. A sheet that reaches it is not read on that boundary.",
+                  kind="int", unit="seconds", min=5, max=300, step=5),
+            Field("capture.probe_round_steps", "Look for a series every",
+                  "Round strikes this many strike steps apart. A series can read "
+                  "not available at one strike and resolve at another.",
+                  kind="int", unit="steps", min=1, max=200, step=1),
+            Field("capture.probe_reach", "Strikes looked at each side of the price",
+                  "", kind="int", unit="strikes", min=1, max=20, step=1),
+            _pct("capture.recentre_share", "Rewrite the sheet when the price has moved",
+                 "This share of the way to the end of the strikes captured. The "
+                 "walls and the flip see only those strikes.",
+                 lo=5, hi=100, step=5),
+            Field("capture.ssh_timeout_sec", "Stop a hung ssh after",
+                  "A send that overruns costs that capture, and the next one is "
+                  "fresh.",
+                  kind="int", unit="seconds", min=10, max=600, step=10),
+            Field("capture.no_plan_retry_sec", "After a failed plan fetch, retry after",
+                  "Doubling on each failure up to the limit below.",
+                  kind="int", unit="seconds", min=5, max=3600, step=5),
+            Field("capture.plan_retry_max_sec", "Retry a plan fetch at least every",
+                  "Many ssh connections in a few minutes have shut the operator "
+                  "out of the server before, so a failing fetch slows down.",
+                  kind="int", unit="seconds", min=30, max=7200, step=30),
+            Field("capture.hang_limit_sec", "Stop a hung Excel after",
+                  "With no sign of life from the capture's loop for this long, its "
+                  "private Excel is stopped, which frees the loop to start another. "
+                  "It must be longer than the longest honest stretch of work: one "
+                  "workbook save, or one whole ssh. The PC never uses less than "
+                  "twice the ssh limit above.",
+                  kind="int", unit="seconds", min=120, max=7200, step=30),
         )),
         Section("Between sessions",
                 "The heatmaps keep the last session. The by-strike charts show "

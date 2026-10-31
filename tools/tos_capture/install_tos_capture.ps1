@@ -3,9 +3,13 @@
 #     powershell -ExecutionPolicy Bypass -File tools\tos_capture\install_tos_capture.ps1
 #
 # It copies the capture to %LOCALAPPDATA%\TosCapture, so a branch change in a checkout
-# cannot alter a running feed, and registers a scheduled task that starts it at logon.
-# Run it again after the script changes. The task runs as whoever is logged on, only
-# while they are, so ThinkorSwim and Excel share a desktop; it holds no credential.
+# cannot alter a running feed, and registers a scheduled task that starts it at logon
+# and checks every few minutes that it is still there. The task runs as whoever is
+# logged on, only while they are, so ThinkorSwim and Excel share a desktop; it holds no
+# credential.
+#
+# Run it again after the script changes. A capture already running stays on the old code
+# until the next logon, or until it is stopped: Stop-ScheduledTask, then Start-ScheduledTask.
 #
 # ASCII only: Windows PowerShell 5.1 reads a file with no byte order mark as ANSI.
 $ErrorActionPreference = 'Stop'
@@ -13,6 +17,10 @@ $ErrorActionPreference = 'Stop'
 $TaskName = 'ToS 0DTE Capture'
 $RestartCount = 3
 $RestartMinutes = 5
+# Restart-on-failure does not cover every way a capture can end. A repeating trigger
+# brings an exited one back, and is safe: the task's IgnoreNew and the capture's own
+# mutex mean a running capture is never doubled.
+$RepeatMinutes = 5
 
 $target = Join-Path $env:LOCALAPPDATA 'TosCapture'
 if (-not (Test-Path -LiteralPath $target)) {
@@ -24,6 +32,8 @@ Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'tos_capture.ps1') -Destination 
 $action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument (
     '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $script + '"')
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+$trigger.Repetition = (New-ScheduledTaskTrigger -Once -At (Get-Date) `
+        -RepetitionInterval (New-TimeSpan -Minutes $RepeatMinutes)).Repetition
 $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew `
     -RestartCount $RestartCount -RestartInterval (New-TimeSpan -Minutes $RestartMinutes) `
     -ExecutionTimeLimit ([TimeSpan]::Zero) `

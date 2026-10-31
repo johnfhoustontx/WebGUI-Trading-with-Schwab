@@ -15,11 +15,17 @@ max_age_sec = 900
 stale_after_sec = 660
 # A snapshot stamped further ahead than this is refused (a clock that is wrong).
 max_future_skew_sec = 30
-# Share of the tried contracts that must read a value. Below it the snapshot is
-# not sent (ThinkorSwim logged out, or the sheet had not filled). The server
-# applies it again between captures: one that reads fewer contracts than this
-# share of the one before is refused as half filled.
+# A capture reading fewer contracts than this share of the most read lately is
+# not used. The PC measures against the most its ladder has read, and rewrites the
+# ladder; the server against the capture before it, and refuses it as half filled.
+# It is NOT a share of the contracts tried: /NQ's spacing is uneven, so a healthy
+# chain lists far fewer than it tries.
 min_fill_fraction = 0.8
+# The floor against the contracts tried, for a first read with nothing to compare
+# with: below it the sheet is not filled, or ThinkorSwim is logged out. Measured
+# with the market closed on 2026-10-31: /ES read 306 of 306 tried, /NQ 416 of 572
+# (0.73). Low, so a thinner chain than that still passes.
+min_read_fraction = 0.25
 # This many captures in a row with the future's price and the volume and open
 # interest all unchanged is a frozen feed and is reported: a live future does
 # not hold one price for minutes.
@@ -42,6 +48,30 @@ max_snapshot_kb = 512
 # first, for a call and a put that both have a mark. Not wider: far strikes
 # quote wide.
 parity_strikes = 5
+# The rest are the PC's own, and reach it in the plan. How long a sheet's count of
+# filled cells must hold before it is called filled: Excel hands ThinkorSwim's
+# values over in batches about 2 seconds apart, so longer than two of them.
+fill_settle_sec = 5
+# The most it waits. A listed contract can stay N/A for good.
+fill_wait_max_sec = 20
+# Where the capture looks for a series: round strikes this many strike steps
+# apart, this many each side of the price. A series can read N/A at one strike and
+# resolve at another.
+probe_round_steps = 10
+probe_reach = 3
+# The ladder is rewritten once the price has moved this share of the way to its
+# end, because the walls and the flip see only the strikes captured.
+recentre_share = 0.5
+# A hung ssh is killed after this many seconds: the next capture matters more.
+ssh_timeout_sec = 60
+# After a failed plan fetch the first retry waits this long, doubling up to the
+# second value. Many ssh connections in a few minutes have shut the operator out.
+no_plan_retry_sec = 60
+plan_retry_max_sec = 900
+# No sign of life from the capture's loop for this long and its Excel is stopped,
+# which frees the loop to start another. Longer than any honest stretch of work:
+# that is at most one workbook save or one whole ssh.
+hang_limit_sec = 600
 # Whether /ES and /NQ are offered in the Dealer Positioning symbol list. The
 # feed ships off the list; the operator decides when it joins.
 show_in_dropdown = false
