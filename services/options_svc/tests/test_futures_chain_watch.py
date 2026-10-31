@@ -146,6 +146,68 @@ def test_a_healthy_feed_that_never_stopped_says_nothing():
 def test_nothing_is_said_about_a_feed_that_never_captured():
     assert decide(ct(2026, 11, 2, 9, 30), {}, {}) == ([], {})
     assert decide(ct(2026, 11, 2, 9, 30), {ES: {"captured_at": None, "repeats": 0}}, {})[0] == []
+    # Only the PC has spoken: it has not tried a capture, so nothing is refused.
+    assert decide(ct(2026, 11, 2, 9, 30), {"pc": {"reason": "ThinkorSwim logged out",
+                                                  "at": 1.0}}, {}) == ([], {})
+
+
+# ── an instrument whose every capture is refused (no capture ever accepted) ──
+
+def refused_only(when, reason="Refused: the chain has no open interest.", symbol=ES):
+    """The status entry the feed leaves when the PC sends and every capture is
+    refused: a reason and a time, and no accepted capture."""
+    return {symbol: {"captured_at": None, "expiry": None, "listed": None,
+                     "with_gamma": None, "parity_gap": None, "reason": reason,
+                     "repeats": 0, "refused_at": when.timestamp(), "price": None,
+                     "activity": None, "refused_listed": None}}
+
+
+def test_an_instrument_whose_every_capture_is_refused_alerts_once_with_the_reason():
+    view = refused_only(ct(2026, 11, 2, 9, 19))
+    alerts, state = decide(ct(2026, 11, 2, 9, 20), view, {})
+    assert [(a.kind, a.symbol) for a in alerts] == [("stopped", ES)]
+    assert "no open interest" in " ".join(alerts[0].lines)
+    assert "/ES" in alerts[0].title and "FOP" not in " ".join(alerts[0].lines)
+    assert decide(ct(2026, 11, 2, 9, 25), view, state)[0] == []
+
+
+def test_a_refused_only_instrument_is_quiet_in_the_first_minutes_of_a_session():
+    view = refused_only(ct(2026, 11, 8, 17, 4))
+    assert decide(ct(2026, 11, 8, 17, 5), view, {})[0] == []
+    assert [a.kind for a in decide(ct(2026, 11, 8, 17, 12), view, {})[0]] == ["stopped"]
+
+
+def test_a_refused_only_instrument_is_quiet_outside_the_session():
+    view = refused_only(ct(2026, 11, 2, 14, 0))
+    for quiet in ((2026, 11, 2, 16, 0), (2026, 11, 7, 12, 0)):
+        assert decide(ct(*quiet), view, {})[0] == []
+
+
+def test_a_refused_only_instrument_repeats_only_after_the_configured_time():
+    view = refused_only(ct(2026, 11, 2, 0, 0))
+    _, state = decide(ct(2026, 11, 2, 0, 0), view, {})
+    assert decide(ct(2026, 11, 2, 3, 59), view, state)[0] == []
+    assert len(decide(ct(2026, 11, 2, 4, 1), view, state)[0]) == 1
+
+
+def test_a_refused_only_instrument_resumes_when_a_capture_is_accepted():
+    _, state = decide(ct(2026, 11, 2, 9, 20), refused_only(ct(2026, 11, 2, 9, 19)), {})
+    alerts, state = decide(ct(2026, 11, 2, 9, 30), status(captured=ct(2026, 11, 2, 9, 29)), state)
+    assert [a.kind for a in alerts] == ["resumed"] and state == {}
+
+
+def test_a_refused_only_instrument_names_itself_beside_a_healthy_one():
+    view = {**status(captured=ct(2026, 11, 2, 9, 19)),
+            **refused_only(ct(2026, 11, 2, 9, 19), symbol=NQ)}
+    alerts, _ = decide(ct(2026, 11, 2, 9, 20), view, {})
+    assert [a.symbol for a in alerts] == [NQ]
+
+
+def test_a_refused_only_instrument_is_told_through_tick(bus, spy_send):
+    bus.cache_set(futures_chain.STATUS_KEY, refused_only(ct(2026, 11, 2, 9, 19)))
+    tick(bus, now=ct(2026, 11, 2, 9, 20))
+    tick(bus, now=ct(2026, 11, 2, 9, 21))
+    assert len(spy_send.calls) == 1 and "no open interest" in " ".join(spy_send.calls[0][1])
 
 
 def test_the_gap_between_sessions_neither_alerts_nor_clears():
@@ -232,8 +294,10 @@ def test_a_failed_send_is_retried_on_the_next_tick(bus, monkeypatch):
 
 
 def test_a_send_that_reached_no_channel_is_retried(bus, monkeypatch):
-    """``system_alert.send`` returns ``[]`` when it reached nobody (a channel
-    failed inside it, or notifications are off): the alert is not marked as told."""
+    """``system_alert.send`` returns ``[]`` when notifications are off or
+    unconfigured (the master switch, the ``system`` category, no destination): the
+    alert is not marked as told. A channel's own network failure is swallowed
+    inside ``send`` and still names the channel, so it is not this path."""
     write_status(bus, captured=ct(2026, 11, 2, 9, 0))
     monkeypatch.setattr(system_alert, "send", lambda title, lines, **kw: [])
     tick(bus, now=ct(2026, 11, 2, 9, 20))
@@ -427,6 +491,28 @@ def test_health_reports_the_pcs_reason(bus):
 
 def test_health_survives_a_garbled_status_view(bus):
     bus.cache_set(futures_chain.STATUS_KEY, {ES: "no", "pc": 3})
+    assert futures_chain_watch.health(bus)["instruments"] == {}
+
+
+def test_health_lists_a_refused_only_instrument_with_its_reason_and_no_capture_time(bus, monkeypatch):
+    bus.cache_set(futures_chain.STATUS_KEY, refused_only(ct(2026, 11, 2, 9, 19)))
+    monkeypatch.setattr(futures_chain_watch, "_now", lambda: ct(2026, 11, 2, 9, 30))
+    shown = futures_chain_watch.health(bus)["instruments"]["/ES"]
+    assert shown["reason"] == "Refused: the chain has no open interest."
+    assert "captured_at" in shown and shown["captured_at"] is None
+    assert shown["age_s"] is None and shown["state"] == "stopped"
+    assert shown["refused_at"] == ct(2026, 11, 2, 9, 19).timestamp()
+
+
+def test_health_says_a_refused_only_instrument_has_no_accepted_capture_between_sessions(bus, monkeypatch):
+    bus.cache_set(futures_chain.STATUS_KEY, refused_only(ct(2026, 11, 2, 14, 0)))
+    monkeypatch.setattr(futures_chain_watch, "_now", lambda: ct(2026, 11, 2, 16, 0))
+    shown = futures_chain_watch.health(bus)["instruments"]["/ES"]
+    assert shown["state"] == "no capture accepted" and shown["captured_at"] is None
+
+
+def test_health_leaves_out_an_instrument_the_pc_has_never_tried(bus):
+    bus.cache_set(futures_chain.STATUS_KEY, {"pc": {"reason": "", "at": 1.0}})
     assert futures_chain_watch.health(bus)["instruments"] == {}
 
 

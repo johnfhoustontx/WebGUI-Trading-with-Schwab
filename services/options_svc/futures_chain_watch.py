@@ -17,13 +17,19 @@ Quiet where it should be:
   nothing is expected;
 * for ``stale_after_sec`` after a session opens, since the capture has had no time
   to take its first snapshot;
-* for an instrument that has never been captured, which is a feed not yet in use.
+* for an instrument with no status entry at all, which is a feed the PC has not
+  yet tried (not installed, or not started).
+
+An instrument the PC HAS tried, whose every capture was refused, has an entry with
+a reason and no accepted capture. That is stopped like any other, once the session
+has been open for ``stale_after_sec``, and the alert carries the refusal.
 
 What has already been told lives in its own Redis key
 (``futures_chain.ALERT_STATE_KEY``), so a service restart does not repeat an alert
 and a second writer never shares ``STATUS_KEY`` with the stream's consumer. State
-is saved for an alert only after its message was sent: a send that failed leaves
-the state as it was and the next tick, 30 seconds on, tries again.
+is saved for an alert only after its message was sent: a send that raised, or
+reached no channel, leaves the state as it was and the next tick, 30 seconds on,
+tries again.
 
 Design: docs/plans/2026-10-31-futures-0dte-chain-feed-design.md, section 5.9.
 Imports nothing from ``compute`` (which has a line ceiling) and calls no client.
@@ -77,6 +83,13 @@ def _captured_at(entry):
     return float(value) if _number(value) else None
 
 
+def _refused(entry) -> bool:
+    """Whether the feed has refused a capture of this instrument: its entry keeps
+    the time and the reason. An entry with neither is a blank one."""
+    return isinstance(entry, dict) and (_number(entry.get("refused_at"))
+                                        or bool(_text(entry.get("reason"))))
+
+
 def _repeats(entry) -> int:
     value = entry.get("repeats") if isinstance(entry, dict) else None
     return int(value) if _number(value) else 0
@@ -95,17 +108,23 @@ def _opens(now: datetime) -> float:
 
 def _assess(entry, at: float, opens: float, capture: dict) -> str:
     """Where one instrument stands during the session: ``"never"`` (no capture has
-    ever been accepted), ``"stopped"``, ``"healthy"``, or ``"starting"`` (the
-    session opened too recently to judge, and the last capture is the last one's).
+    ever been accepted and none refused: the PC has not tried), ``"stopped"``,
+    ``"healthy"``, or ``"starting"`` (the session opened too recently to judge, and
+    the last capture is the last one's).
+
+    An instrument with refusals and no accepted capture is judged from the
+    session's open alone: it is trying, and nothing it sends is used.
 
     Age counts from the later of the capture and the session's open: a feed that
     stopped on Friday has had no chance since the Sunday evening open. A run of
     unchanged values counts only when the capture belongs to this session; the
     run carried over from the last expiry is no news."""
     captured = _captured_at(entry)
-    if captured is None:
-        return "never"
     limit = capture["stale_after_sec"]
+    if captured is None:
+        if not _refused(entry):
+            return "never"
+        return "stopped" if at - opens > limit else "starting"
     frozen = captured >= opens and _repeats(entry) >= capture["frozen_repeats"]
     if frozen or at - max(captured, opens) > limit:
         return "stopped"
@@ -114,14 +133,19 @@ def _assess(entry, at: float, opens: float, capture: dict) -> str:
 
 def _stopped_lines(entry, pc, at: float, repeat: bool) -> list:
     captured = _captured_at(entry)
-    when = datetime.fromtimestamp(captured, _CENTRAL).strftime("%A %H:%M")
-    lines = [f"The last good capture was {feed._span(at - captured)} ago, on {when} "
-             "Central time."
-             + (" Capture is still stopped." if repeat else "")]
+    if captured is None:
+        lines = ["No capture has been accepted yet: every capture the PC sent was "
+                 "refused." + (" Capture is still stopped." if repeat else "")]
+    else:
+        when = datetime.fromtimestamp(captured, _CENTRAL).strftime("%A %H:%M")
+        lines = [f"The last good capture was {feed._span(at - captured)} ago, on "
+                 f"{when} Central time."
+                 + (" Capture is still stopped." if repeat else "")]
     reason = _text(entry.get("reason"))
     if reason:
         lines.append(reason)
-    elif _repeats(entry) >= futures_chain_config.capture()["frozen_repeats"]:
+    elif (captured is not None
+          and _repeats(entry) >= futures_chain_config.capture()["frozen_repeats"]):
         lines.append(f"The last {_repeats(entry)} captures read exactly the same values.")
     said = _text(pc.get("reason")) if isinstance(pc, dict) else ""
     if said:
@@ -175,9 +199,12 @@ def _read_state(bus) -> dict:
 
 
 def _delivered(alert: Alert) -> bool:
-    """Send one alert. ``True`` only when a channel took it: ``send`` returns the
-    channels it reached, and ``[]`` is nothing reached (a channel failed inside it,
-    or notifications are off), which is retried like a raise."""
+    """Send one alert. ``True`` when ``send`` named a channel. ``[]`` means the
+    message went nowhere because notifications are off or unconfigured (the master
+    switch, the ``system`` category, no destination), which is retried like a raise
+    and costs nothing. A channel's own network failure is NOT seen here:
+    ``send_telegram`` and ``send_discord`` swallow it and ``send`` still names the
+    channel, so that alert counts as told and waits for the next repeat."""
     try:
         return bool(system_alert.send(alert.title, alert.lines))
     except Exception:
@@ -227,13 +254,16 @@ def health(bus) -> dict:
     for symbol in futures_chain.feed_symbols():
         entry = status.get(symbol)
         captured = _captured_at(entry)
-        if captured is None:
+        if captured is None and not _refused(entry):
             continue
         standing = _assess(entry, at, opens, capture) if in_session else None
+        # No accepted capture: no time, never 0 or a made-up one.
+        outside = "between sessions" if captured is not None else "no capture accepted"
         instruments[futures_chain.display_symbol(symbol)] = {
             "captured_at": captured,
-            "age_s": int(max(0, at - captured)),
-            "state": _WORDS.get(standing, "between sessions"),
+            "age_s": None if captured is None else int(max(0, at - captured)),
+            "refused_at": entry.get("refused_at") if _number(entry.get("refused_at")) else None,
+            "state": _WORDS.get(standing, outside),
             "repeats": _repeats(entry),
             "listed": entry.get("listed"),
             "with_gamma": entry.get("with_gamma"),
