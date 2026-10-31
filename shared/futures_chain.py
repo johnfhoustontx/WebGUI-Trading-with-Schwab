@@ -33,6 +33,11 @@ STREAM = "cmd:futures_chain"
 _CHAIN_PREFIX = "cache:options:futures_chain:"
 # The feed's health: capture age, what each instrument last did, and why not.
 STATUS_KEY = "cache:options:futures_chain_status"
+# What the stopped-capture alert has already told the operator, per instrument.
+# Its own key: STATUS_KEY is read, changed and written back by the stream's
+# consumer thread, and a second writer on it would lose one of the two writes.
+# Written by options_svc's watch only; no page reads it.
+ALERT_STATE_KEY = "cache:options:futures_chain_alert"
 
 
 def chain_key(symbol) -> str:

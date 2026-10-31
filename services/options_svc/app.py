@@ -19,6 +19,9 @@ Assembles the shared scaffold with this domain's scheduler + command handler:
 * ``futures_chain_feed.handle`` on ``cmd:futures_chain`` — the /ES and /NQ
   0-DTE chains the capture on the PC sends (no Schwab call; nothing on this
   stream reaches a paper book).
+* ``futures_chain_watch.tick`` - a branch of ``scheduler.loop`` (every tick, no
+  NYSE gate): the phone alert when that capture stops during the CME session.
+  ``/health`` carries the feed's report under ``futures_chain``.
 
 Importable without side effects; only starts uvicorn under ``__main__`` on the
 ``options`` service port (8211) from ``repo_paths.SERVICE_PORTS``.
@@ -34,8 +37,8 @@ if str(_REPO_ROOT) not in sys.path:
 
 from services._scaffold import make_app  # noqa: E402
 from services.options_svc import (  # noqa: E402
-    finder_public, futures_chain_feed, gamma_public, handlers, rescue_public,
-    scheduler, tools_public)
+    finder_public, futures_chain_feed, futures_chain_watch, gamma_public, handlers,
+    rescue_public, scheduler, tools_public)
 from shared import (  # noqa: E402
     futures_chain, public_gamma, public_rescue, public_scan, public_tools)
 
@@ -62,6 +65,9 @@ app = make_app(
                      # The /ES and /NQ chains from the PC: a stream of its own,
                      # since each command carries a document (a low stream_keep).
                      (futures_chain.STREAM, futures_chain_feed.handle)),
+    # The /ES and /NQ feed's age and state on /health: a report only, never the
+    # verdict (a PC that is off is not an options service that is down).
+    health_extra=lambda bus: {"futures_chain": futures_chain_watch.health(bus)},
 )
 
 

@@ -467,6 +467,23 @@ def _schedulers_enabled() -> bool:
     return bool(ENV_FLAGS.get("schedulers", True))
 
 
+def _health_extra(provider, bus, domain: str) -> dict:
+    """The keys a service adds to ``/health`` (``make_app``'s ``health_extra``), or
+    ``{}``. Never raises: a report that fails must not take the probe down with it,
+    since the probe is what says the service is alive."""
+    if provider is None:
+        return {}
+    try:
+        extra = provider(bus)
+    except Exception:  # noqa: BLE001
+        _degrade.degraded(f"{domain}.health_extra")
+        return {}
+    if not isinstance(extra, dict):
+        _degrade.degraded(f"{domain}.health_extra", detail="not a dict", exc_info=False)
+        return {}
+    return extra
+
+
 def make_app(
     domain: str,
     *,
@@ -480,6 +497,7 @@ def make_app(
     late_ok=frozenset(),
     on_dropped=None,
     slow_commands=frozenset(),
+    health_extra=None,
 ) -> FastAPI:
     """Build the domain FastAPI app (see module docstring).
 
@@ -506,6 +524,12 @@ def make_app(
       its slow lane (see :func:`_consume_stream`): the ones that take many
       seconds to minutes. Everything else runs on the fast lane and never waits
       for them.
+    * ``health_extra(bus) -> dict`` — more keys for ``/health``'s body (a service
+      reporting something of its own, such as a feed's age). It can ADD keys and
+      never change one: a key the body already has (``up`` included) keeps its
+      own value, so the verdict is the scaffold's alone. A call that raises is
+      counted as a degrade and the body goes out without it. ``None`` (the
+      default) leaves the body exactly as it was.
     """
     the_bus = bus  # resolved lazily in lifespan if None (honors pytest fake selection).
 
@@ -585,7 +609,9 @@ def make_app(
         # climbing" or "this area is 300 and every other is 0", which is exactly
         # what a silent ``except Exception -> return a plausible default`` hides.
         up, reason = health_verdict(hs)
-        return {
+        # First, so a failure is already in the degrade counts reported below.
+        extra = _health_extra(health_extra, app.state.bus, domain)
+        body = {
             "domain": domain,
             "up": up,
             # Why it is not up, in words the Status card shows. None when it is.
@@ -605,5 +631,8 @@ def make_app(
             "degrades_total": _degrade.total(),
             "degrades": _degrade.counts(),
         }
+        # Added keys only: the body's own always win.
+        body.update({key: value for key, value in extra.items() if key not in body})
+        return body
 
     return app

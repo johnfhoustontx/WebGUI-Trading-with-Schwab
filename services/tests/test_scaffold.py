@@ -1030,3 +1030,96 @@ def test_without_a_slow_set_every_command_stays_on_the_one_lane():
     with TestClient(app):
         assert _wait_for(lambda: len(names) == 2)
     assert len(set(names)) == 1
+
+
+# --- a service's own keys on /health (health_extra, 2026-10-31) --------------
+# The /ES and /NQ feed reports its capture age on the options service's /health.
+# A report may ADD keys; the verdict (``up``) and the body's own keys stay the
+# scaffold's, and a report that fails must not take the probe down.
+
+_BASE_HEALTH_KEYS = {"domain", "up", "reason", "scheduler_alive", "scheduler_restarts",
+                     "scheduler_uptime_s", "scheduler_last_tick_age_s", "dead_letters",
+                     "degrades_total", "degrades"}
+
+
+def test_health_extra_defaults_to_none_and_leaves_the_body_unchanged():
+    for app in (make_app("plainx", bus=Bus(fake=True)),
+                make_app("plainx", bus=Bus(fake=True), health_extra=None)):
+        with TestClient(app) as client:
+            assert set(client.get("/health").json()) == _BASE_HEALTH_KEYS
+
+
+def test_health_extra_adds_its_keys_and_is_handed_the_bus():
+    bus = Bus(fake=True)
+    seen = []
+
+    def extra(b):
+        seen.append(b)
+        return {"feed": {"age_s": 12}}
+
+    app = make_app("extrax", bus=bus, health_extra=extra)
+    with TestClient(app) as client:
+        body = client.get("/health").json()
+    assert body["feed"] == {"age_s": 12} and body["up"] is True
+    assert set(body) == _BASE_HEALTH_KEYS | {"feed"}
+    assert seen and seen[0] is bus
+
+
+def test_health_extra_cannot_change_a_key_the_body_already_has():
+    app = make_app("extray", bus=Bus(fake=True), health_extra=lambda b: {
+        "up": False, "domain": "other", "reason": "made up", "degrades_total": 99,
+        "scheduler_alive": False, "extra": 1})
+    with TestClient(app) as client:
+        body = client.get("/health").json()
+    assert body["up"] is True and body["domain"] == "extray"
+    assert body["reason"] is None and body["degrades_total"] == 0
+    assert body["scheduler_alive"] is True and body["extra"] == 1
+
+
+def test_health_extra_cannot_make_a_dead_scheduler_look_up(schedulers_enabled):
+    async def always_boom(b):
+        raise RuntimeError("always")
+
+    app = make_app("extradead", scheduler=always_boom, bus=Bus(fake=True),
+                   scheduler_restart_backoff_s=0.02, scheduler_max_restarts=2,
+                   health_extra=lambda b: {"up": True, "scheduler_alive": True})
+    with TestClient(app) as client:
+        for _ in range(200):
+            if client.get("/health").json()["scheduler_alive"] is False:
+                break
+            time.sleep(0.02)
+        body = client.get("/health").json()
+    assert body["up"] is False and body["scheduler_alive"] is False
+
+
+def test_a_failing_health_extra_leaves_health_answering_and_is_counted():
+    from services import _degrade
+
+    def broken(b):
+        raise RuntimeError("the report broke")
+
+    _degrade.reset()
+    try:
+        app = make_app("extrabad", bus=Bus(fake=True), health_extra=broken)
+        with TestClient(app) as client:
+            response = client.get("/health")
+            body = response.json()
+        assert response.status_code == 200 and body["up"] is True
+        assert set(body) == _BASE_HEALTH_KEYS
+        assert body["degrades"] == {"extrabad.health_extra": 1}
+    finally:
+        _degrade.reset()
+
+
+def test_a_health_extra_that_is_not_a_dict_is_ignored_and_counted():
+    from services import _degrade
+
+    _degrade.reset()
+    try:
+        app = make_app("extranotdict", bus=Bus(fake=True), health_extra=lambda b: ["no"])
+        with TestClient(app) as client:
+            body = client.get("/health").json()
+        assert body["up"] is True and set(body) == _BASE_HEALTH_KEYS
+        assert body["degrades"] == {"extranotdict.health_extra": 1}
+    finally:
+        _degrade.reset()

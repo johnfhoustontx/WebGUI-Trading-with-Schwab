@@ -235,7 +235,14 @@ stopped or its last tick is older than `[health] tick_stale_sec` (600 s) in
 `config/services.toml`. Other keys: `scheduler_alive`, `scheduler_uptime_s`,
 `scheduler_last_tick_age_s`, `dead_letters` (commands the service could not run,
 kept for reading and never re-run; `null` if the count cannot be read),
-`degrades_total` and `degrades`.
+`degrades_total` and `degrades`. A service may add keys of its own through
+`make_app(health_extra=...)`, a function of the bus that returns a dict: it can
+add keys and never change one the body already has, `up` included, and a
+function that raises is counted in `degrades` and leaves the body as it was. The
+options service adds `futures_chain`, the /ES and /NQ chain feed's report
+(`in_session`, `instruments` keyed by the page's label with the capture's
+`captured_at`, `age_s` and `state`, and `pc`, the capturing PC's last reason). It
+describes the feed and never decides `up`.
 
 Each command stream has a thread of its own for its blocking read and its
 handler; scheduled work shares a pool of `[pool] workers` threads

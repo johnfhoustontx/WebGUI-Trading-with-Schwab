@@ -19,7 +19,7 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from services import _heartbeat
-from services.options_svc import compute, finder_public, flow_stream, handlers, scalp_call, scalp_fetch, scalp_grade, scalp_intraday_call, scalp_intraday_grade, scalp_intraday_study, scalp_prob_fit, scalp_study
+from services.options_svc import compute, finder_public, flow_stream, futures_chain_watch, handlers, scalp_call, scalp_fetch, scalp_grade, scalp_intraday_call, scalp_intraday_grade, scalp_intraday_study, scalp_prob_fit, scalp_study
 from shared import market_calendar as mc
 from shared import paper_limits as _paper_limits
 from shared import scalp_config
@@ -1509,6 +1509,19 @@ async def loop(bus):
 
         if sr_due:
             branches.append(("site_results", _site_results_branch()))
+
+        # The /ES and /NQ chain feed's watch (phone alert when capture stops). Every
+        # tick, with NO NYSE gate: the CME session runs overnight and at weekends,
+        # and the watch decides for itself whether the session is open. One cheap
+        # read when there is nothing to say. Rides this loop, so the scheduler
+        # switch (_schedulers_enabled) suppresses it with everything else.
+        async def _futures_chain_watch_branch():
+            try:
+                await loop_.run_in_executor(None, futures_chain_watch.tick, bus, now)
+            except Exception:
+                log.exception("futures_chain_watch branch degraded")
+
+        branches.append(("futures_chain_watch", _futures_chain_watch_branch()))
 
         # Launch all DUE branches as keyed background tasks (bounded by the fixed
         # key set). The tick does NOT wait for them — see launch_branches.
