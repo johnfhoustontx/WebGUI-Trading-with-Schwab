@@ -1,0 +1,17 @@
+# The Gamma Archive: what tools/archive_gex.py keeps of each closed session in
+# options-scanner/gex_archive.db, which is never purged. A change applies to the
+# NEXT session archived; sessions already held keep the thinning they were made
+# with (recorded in archived_sessions). Design and measurements:
+# docs/plans/2026-10-31-gamma-archive-design.md
+
+# false stops new sessions being archived. Nothing already held is touched.
+enabled = true
+
+# One row per symbol, per view, per this many minutes.
+grid_interval_min = 5
+
+# Strikes kept each side of the row's own spot, as a fraction (0.15 = 15%).
+strike_band = 0.15
+
+# The per-expiry $SPX table is larger per timestamp, so it is thinned harder.
+term_interval_min = 15

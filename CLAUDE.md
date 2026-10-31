@@ -240,6 +240,7 @@ open migration item. Full design:
 | `portfolio-analyzer/`  | `src/` — sector breakdown, vs-sector perf, live streaming.  | engines only (Tk UI dropped) |
 | `services/`            | The seven Tier-2 services — `sentiment`/`options`/`portfolio`/`trade`/`market`/`news`/`blog` `_svc` (:8210–8213, 8215–8217) — plus `_scaffold`/`_degrade`/`_heartbeat`. **`news_svc`** and **`blog_svc`** are the two with no copied engine and no Schwab or Claude call: `news_svc` is RSS/EDGAR and economic-calendar adapters → `services/news_svc/data/news.db` → eight views; `blog_svc` cleans an uploaded document into `services/blog_svc/data/` and is the only writer of the site's blog files. **`trade_svc` runs a scheduler** (since 2026-09-26) with one job, the daily watchlist dividend pull through the proxy into `shared/dividends.py`'s store; `news_svc` opens that store read-only and never calls the proxy. | backend          |
 | `services/options_svc/data/scalp.db` | The Opening Scalp's store: price bars, the 08:36 chain slices, the study, the published calls and their grades, and the `intraday_*` tables of the 15-minute calls and their recorded readings. **Kept forever and in the nightly backup**: it holds price history Schwab no longer serves (1-minute about 6 weeks, 5-minute about 7 months), so never add it to `DB_EXCLUDE`. | backend |
+| `options-scanner/gex_archive.db` | The Gamma Archive: each closed session of `gex_history.db`, thinned, written nightly by `tools/archive_gex.py`. **Kept forever and in the nightly backup**: `gex_history.db` keeps 5 sessions, so this is the only per-strike history past them. Never add it to `DB_EXCLUDE` ([design](docs/plans/2026-10-31-gamma-archive-design.md)). | backend |
 | `shared/`              | `analysis_lib/` (technical · sector_analysis · config) + secret templates/values. | library          |
 | `tools/`               | `check_env.py`, `db_admin.py` maintenance utilities.        | CLI              |
 | `webgui/`              | **NEW** NiceGUI multi-page front-end. Shell + Options section built. | the new UI, :8500 |
@@ -431,7 +432,7 @@ maps, and anything whose change needs code to follow it.
   `scanner` (selection floors and, since 2026-10-04, `[selection]` strike rules),
   `trade_mgmt`, `paper`, `symbols`, `sectors`, `marketdata`, `services`,
   `flow_alerts`, `notify`, `commissions`, `theme`, `news`, `edge`, `market_read`,
-  `blog`, `gamma_heat`, `listed_stocks`, `login_push`, `scalp`, `tos_order`,
+  `blog`, `gamma_heat`, `gex_archive`, `listed_stocks`, `login_push`, `scalp`, `tos_order`,
   `sentiment` (when the live composite refuses a pre-open input), and
   the public tools' files.
 - `shared/market_calendar.py` is the single source for the NYSE calendar and the

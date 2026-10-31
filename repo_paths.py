@@ -108,6 +108,10 @@ GAMMA_PUBLIC_TOML = REPO_ROOT / "config" / "gamma_public.toml"
 GAMMA_HEAT_TOML = REPO_ROOT / "config" / "gamma_heat.toml"
 FEED_TOML = REPO_ROOT / "config" / "feed.toml"
 
+# The Gamma Archive: what is kept of each session past the 5-session purge. Read
+# by options-scanner/gex_archive.py.
+GEX_ARCHIVE_TOML = REPO_ROOT / "config" / "gex_archive.toml"
+
 # Opening Scalp: its tunables (shared/scalp_config.py) and its bar / chain store.
 SCALP_TOML = REPO_ROOT / "config" / "scalp.toml"
 SCALP_DB = REPO_ROOT / "services" / "options_svc" / "data" / "scalp.db"

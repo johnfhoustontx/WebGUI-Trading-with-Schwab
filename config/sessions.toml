@@ -241,6 +241,15 @@ at = "16:00"
 # [slots.flow_delta]: moving it needs `generate_units --install` + `daemon-reload`.
 at = "16:10"
 
+[slots.gex_archive]
+# The Gamma Archive (tools/archive_gex.py): copies each closed session past the
+# 5-session purge into options-scanner/gex_archive.db, thinned by
+# config/gex_archive.toml. It reads gex_history.db only (no proxy, no Redis). After
+# the 16:30 rebuild and before the 20:00 backup; a missed night is caught up on the
+# next run while the live store still holds the session. A systemd timer, like
+# [slots.hiro_report]: moving it needs `generate_units --install` + `daemon-reload`.
+at = "17:00"
+
 [slots.label_journal]
 # The recommendation-journal labeler (tools/label_journal.py): fills in the realized
 # 5/10/20-trading-day forward returns (raw, beta-adjusted, and SPY's own move) on

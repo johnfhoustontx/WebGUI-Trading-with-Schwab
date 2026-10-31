@@ -134,6 +134,11 @@ FLOW_DELTA_TIMEOUT_SEC = 1800
 # that a slow disk or a long keep_sessions history cannot reach.
 HIRO_REPORT_TIMEOUT_SEC = 600
 
+# The Gamma Archive reads a session's rows one at a time from a store of about
+# 2 GB. A first run may hold several sessions. A run killed here loses nothing:
+# each session is one transaction, and the next run redoes it.
+GEX_ARCHIVE_TIMEOUT_SEC = 3600
+
 # The journal labeler fetches two years of daily bars per distinct symbol that
 # has a matured reading, through the proxy's 5 req/s. Usually a handful of
 # symbols; the ceiling covers a catch-up night over the whole rank-board universe.
@@ -845,6 +850,59 @@ WantedBy=timers.target
             f"trading-{ENV_NAME}-hiro-report.timer": tmr}
 
 
+def _gex_archive_units():
+    """The Gamma Archive: a oneshot plus its timer.
+
+    **17:00 CT, from [slots.gex_archive].** After collection stops, before the
+    20:00 backup. It reads gex_history.db alone.
+
+    **Persistent=true.** It takes every closed session it does not hold, so a
+    catch-up run after downtime archives what it missed, while the live store
+    still has it (5 sessions).
+
+    **No Restart=.** A failure lands in `systemctl --user --failed` and sends the
+    push; the next night's run retries it. Docs:
+    docs/plans/2026-10-31-gamma-archive-design.md
+    """
+    at = slot_times("gex_archive")["at"]
+
+    svc = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - Gamma Archive
+# No PartOf and no [Install]: the timer owns this.
+# NOTE: these belong in [Unit]; systemd moved them there in v229
+# and silently ignores them in [Service].
+StartLimitIntervalSec={START_LIMIT_INTERVAL_SEC}
+StartLimitBurst={START_LIMIT_BURST}
+
+[Service]
+Type=oneshot
+WorkingDirectory={_workdir()}
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=America/Chicago
+# Convention only: the tool reads gex_history.db and no secret.
+EnvironmentFile={_env_file()}
+TimeoutStartSec={GEX_ARCHIVE_TIMEOUT_SEC}
+ExecStart={_python()} -X utf8 tools/archive_gex.py
+"""
+
+    tmr = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - Gamma Archive timer
+
+[Timer]
+# Derived from [slots.gex_archive] in config/sessions.toml.
+# Mon..Fri excludes weekends only. A holiday firing finds nothing new and exits.
+OnCalendar=Mon..Fri *-*-* {at.hour:02d}:{at.minute:02d}:00
+# Persistent=true: a catch-up run archives whatever it missed.
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target
+"""
+    return {f"trading-{ENV_NAME}-gex-archive.service": svc,
+            f"trading-{ENV_NAME}-gex-archive.timer": tmr}
+
+
 def _label_journal_units():
     """The recommendation-journal labeler: a oneshot plus its timer.
 
@@ -1159,6 +1217,7 @@ def render_all():
     out.update(_idea_review_units())
     out.update(_flow_delta_units())
     out.update(_hiro_report_units())
+    out.update(_gex_archive_units())
     out.update(_label_journal_units())
     out.update(_swing_refit_units())
     out.update(_token_watch_units())

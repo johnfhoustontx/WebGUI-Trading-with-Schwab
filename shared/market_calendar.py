@@ -318,6 +318,10 @@ _DEFAULTS = {
         # The daily HIRO-model validation report (tools/hiro_report.py). Reads
         # gex_history.db only, so it can run beside flow_delta's fan-out.
         "hiro_report": {"at": "16:10"},
+        # The Gamma Archive (tools/archive_gex.py): after collection stops and the
+        # 16:30 rebuild, before the 20:00 backup, so a night's session is in that
+        # night's copy. Reads gex_history.db alone. Read by systemd.
+        "gex_archive": {"at": "17:00"},
         "momentum": {"at": "16:20"},
         "calibration": {"at": "16:30"},
         # The end-of-day report archive (tools/generate_eod_report.py): the
@@ -325,9 +329,9 @@ _DEFAULTS = {
         # cash close and after [slots.action_alert] close + the 15:10 EOD push,
         # so the books it reads have settled; it costs no Schwab and no Claude
         # call, so sharing the minute with the last autoscan slot is free.
-        # ⚠ EIGHT of these slots are read by SYSTEMD rather than by a service
-        # scheduler -- flow_delta, hiro_report, eod_report, idea_review,
-        # label_journal, swing_refit, token_watch and stock_rank:
+        # ⚠ NINE of these slots are read by SYSTEMD rather than by a service
+        # scheduler -- flow_delta, hiro_report, gex_archive, eod_report,
+        # idea_review, label_journal, swing_refit, token_watch and stock_rank:
         # deploy/systemd/generate_units.py turns each into a timer's OnCalendar
         # at unit-GENERATION time, so moving one needs
         # `generate_units --install` + `daemon-reload`, not a service restart.

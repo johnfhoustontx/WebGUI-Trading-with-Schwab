@@ -4,7 +4,20 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-30 (**Opening Scalp: a running icon for every call since the open; colour and icons in the glance.**)
+**Last updated:** 2026-10-31 (**The Gamma Archive: each session kept past the 5-session purge.**)
+
+- First item of the ideas research (`docs/plans/2026-10-31-gamma-archive-design.md`).
+  `tools/archive_gex.py`, a 17:00 CT timer, copies each closed session of
+  `gex_history.db` into `options-scanner/gex_archive.db`, which is never purged.
+- Thinned by `config/gex_archive.toml`: a row every 5 minutes, strikes within 15% of
+  spot, the per-expiry table every 15. Each bucket keeps its latest FETCHED row,
+  because half of a session's rows are carried. Measured on 2026-10-29: 32.7 MB of
+  grids against 274 MB. A real run over nine stored sessions made 487 MB: 54 MB a
+  session, about 14 GB a year.
+- Same table shapes as the live store, so its readers work on the archive. Nothing
+  reads it yet.
+
+**Prior —** 2026-10-30 (**Opening Scalp: a running icon for every call since the open; colour and icons in the glance.**)
 
 - The user asked for the glance's **08:36 call** column to become a running record of
   every call since the open, the columns tightened, and more colour and icons.

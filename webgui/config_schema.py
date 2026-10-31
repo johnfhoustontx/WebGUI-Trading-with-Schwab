@@ -759,6 +759,10 @@ _SESSIONS = ConfigFile(
                   "Scores the day's hedging-flow alerts against the price move "
                   "after each. Must be after the close.",
                   kind="time", restart=(TIMERS,)),
+            Field("slots.gex_archive.at", "Gamma Archive",
+                  "Copies each closed session into the store that is never "
+                  "purged. Must be after collection stops.",
+                  kind="time", restart=(TIMERS,)),
             Field("slots.label_journal.at", "Trade Analyzer outcome labelling",
                   "Fills in how each recommendation actually did once its "
                   "20-day horizon has passed. Must be after the close.",
@@ -2865,8 +2869,33 @@ _TOS_ORDER = ConfigFile(
     ),
 )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# The Gamma Archive — config/gex_archive.toml
+# ─────────────────────────────────────────────────────────────────────────────
+# Read by tools/archive_gex.py each night, so a saved change needs no restart.
+_GEX_ARCHIVE = ConfigFile(
+    name="gex_archive.toml", title="Gamma Archive", icon="inventory_2",
+    summary="What is kept of each session in the store that is never purged. A "
+            "change applies to the next session; those already held stay as they are.",
+    restart=(),
+    sections=(
+        Section("What is kept",
+                "Finer settings cost disk. The shipped ones take about 54 MB a "
+                "session, about 14 GB a year.", (
+            Field("enabled", "Archive each session",
+                  "Off stops new sessions being archived, and a session the "
+                  "5-session purge then reaches is gone for good.", kind="bool"),
+            Field("grid_interval_min", "Keep a row every",
+                  "Per symbol and view.", kind="int", unit="min", min=1, max=60, step=1),
+            _pct("strike_band", "Strikes kept each side of spot", "", lo=1.0, hi=100.0),
+            Field("term_interval_min", "Keep the expiry table every",
+                  "The per-expiry $SPX table.", kind="int", unit="min", min=5, max=60, step=5),
+        )),
+    ),
+)
+
 FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _LOGIN_PUSH, _TOS_ORDER, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _SECTORS, _MOMENTUM, _SENTIMENT,
-         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
+         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _GEX_ARCHIVE, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
          _MARKET_READ, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}

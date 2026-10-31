@@ -243,6 +243,12 @@ cd webgui ; ..\.venv/bin/python -m pytest -q
   `DELETE` reuses pages without shrinking the file — reclaim space with the offline
   `tools/vacuum_gex.py` (or **Settings → Maintenance → Vacuum GEX history DB**), which
   refuses to run while the collector is active.
+- **`gex_archive.db` grows on purpose.** The Gamma Archive
+  (`tools/archive_gex.py`, 17:00 CT on weekdays) copies each closed session out of
+  `gex_history.db` before the purge reaches it, and nothing ever purges it. It keeps
+  a row every 5 minutes for strikes within 15% of spot (`config/gex_archive.toml`,
+  **Settings → Configuration → Gamma Archive**), about 54 MB a session. A night it
+  misses is caught up on the next run while the live store still holds the session.
 
 ---
 

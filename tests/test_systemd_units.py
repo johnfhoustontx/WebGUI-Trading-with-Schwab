@@ -1257,6 +1257,52 @@ def test_the_hiro_report_timer_is_armed_in_prod_and_never_in_dev(monkeypatch):
     assert statuses[HR_TMR].startswith("skipped")
 
 
+# --- the Gamma Archive --------------------------------------------------------
+#
+# tools/archive_gex.py keeps each session past the 5-session purge. A night it
+# misses is caught up while the live store still holds the session.
+GA_SVC = f"trading-{ENV_NAME}-gex-archive.service"
+GA_TMR = f"trading-{ENV_NAME}-gex-archive.timer"
+
+
+def test_the_gex_archive_schedule_follows_the_slot_rather_than_a_literal(monkeypatch):
+    import datetime as _dt
+
+    monkeypatch.setattr(units, "slot_times", lambda name: {"at": _dt.time(21, 3)})
+    text = units.render_all()[GA_TMR]
+    assert _directives(text, "OnCalendar") == ["Mon..Fri *-*-* 21:03:00"]
+
+
+def test_the_gex_archive_runs_after_collection_stops():
+    from shared import market_calendar as mc
+    at = mc.slot_times("gex_archive")["at"]
+    _start, stop = mc.window_bounds("collection")
+    assert at > stop, (at, stop)
+
+
+def test_the_gex_archive_catches_up_after_downtime(rendered):
+    tmr = rendered[GA_TMR]
+    assert tmr["Timer"]["Persistent"].lower() == "true"
+    assert tmr["Install"]["WantedBy"] == "timers.target"
+
+
+def test_the_gex_archive_is_a_oneshot_outside_the_fleet(rendered):
+    svc = rendered[GA_SVC]
+    assert svc["Service"]["Type"] == "oneshot"
+    assert "Restart" not in svc["Service"]
+    assert "PartOf" not in svc["Unit"]
+    assert GA_SVC not in stack_services()
+    assert int(svc["Service"]["TimeoutStartSec"]) > 90
+    assert svc["Service"]["ExecStart"].endswith("tools/archive_gex.py")
+
+
+def test_the_gex_archive_timer_is_armed_in_prod_and_never_in_dev(monkeypatch):
+    assert GA_TMR in units.timer_units()
+    monkeypatch.setattr(units, "IS_DEV", True)
+    statuses = dict(units.activate(runner=_fake_systemctl()))
+    assert statuses[GA_TMR].startswith("skipped")
+
+
 # ---- failure alerts (audit AR-03) --------------------------------------------
 # Failure detection existed only in an open browser tab: no unit had an
 # on-failure action, a failed backup was silent, and nothing warned before the
