@@ -364,9 +364,14 @@ The page and the stack think in stock-market days. These symbols do not.
   existing symbols must go through unchanged code. Offer no new switch that overrides an
   existing one.
 - **Heatmap size:** 22 hours is more than three times the columns of a regular session.
-  With 5.8's fill to one column a minute that is about 1,320 columns. The builder measures
-  the payload and rendering, and may fill to a coarser grid for these symbols if that is
-  too heavy, but must keep the picture on its axis.
+  A fill to one column a minute would be about 1,320 columns. Measured at build on
+  synthetic chains (264 captures, 365 strikes, on the real engine and store) against a
+  regular `$SPX` session of 5.28 MB: a 60-second step gave 1,316 rows and 16.85 MB (3.19
+  times), and a 120-second step 790 rows and 10.18 MB (1.93 times). The feed ships at
+  `fill_step_sec = 100`, not measured itself: at a 300-second interval it makes the same
+  790 rows as 120 by arithmetic (three per capture), evenly spaced because 100 divides
+  300. A real session's wider spot path may crop larger; the shadow session measures
+  that, and rendering is still to be checked. The picture must stay on its axis.
 - **The projected afternoon** (`forward_grid`, `gamma_heat.forward_series`) assumes the
   session it knows. Check that it projects from any hour of the night.
 - **The engine's time left is wrong overnight.** `gamma_tool.py` computes

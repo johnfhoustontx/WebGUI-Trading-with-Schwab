@@ -316,6 +316,27 @@ def test_a_stale_snapshot_says_why_the_capture_stopped(bus, db, write_captures):
     assert "ThinkorSwim is logged out" in reason
 
 
+def _identical_captures(count):
+    """``count`` captures five minutes apart with every value the same, as when
+    ThinkorSwim stops updating while Excel goes on answering."""
+    return [ct(2026, 11, 2, 9, 0) + _dt.timedelta(minutes=5 * i) for i in range(count)]
+
+
+def test_captures_that_stopped_changing_are_stale_however_young(bus, db, write_captures):
+    whens = _identical_captures(futures_chain_config.capture()["frozen_repeats"])
+    write_captures(*whens)
+    snap = snapshot(bus, "FOP.ES", now=whens[-1] + _dt.timedelta(minutes=1))
+    assert snap["feed"]["stale"] is True and snap["views"]["GEX"]["data"]
+    assert "not changing" in snap["feed"]["reason"]
+
+
+def test_one_capture_fewer_than_the_limit_is_not_stale(bus, db, write_captures):
+    whens = _identical_captures(futures_chain_config.capture()["frozen_repeats"] - 1)
+    write_captures(*whens)
+    block = snapshot(bus, "FOP.ES", now=whens[-1] + _dt.timedelta(minutes=1))["feed"]
+    assert block["stale"] is False and block["reason"] == ""
+
+
 def test_between_sessions_shows_the_frozen_capture_labelled_with_its_time(
         bus, db, write_captures):
     write_captures(ct(2026, 11, 6, 13, 55), ct(2026, 11, 6, 14, 55))

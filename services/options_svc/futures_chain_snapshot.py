@@ -15,7 +15,7 @@ Which capture is shown, and how it is labelled, is decided here and said in the
 payload's ``feed`` block:
 
 * while its expiry's session has not ended, the newest capture, marked ``stale``
-  past the limit with its numbers kept;
+  past the age limit or after a run of identical captures, with its numbers kept;
 * after that, the frozen capture (the last taken far enough before expiry that the
   closing spike in gamma is not left on screen), marked ``frozen``, and also
   ``stale`` when the next session is open and no capture has arrived for it;
@@ -103,8 +103,14 @@ def _feed_block(bus, symbol: str, captured: dict, frozen: bool, now: datetime) -
         if stale:
             reason = f"No capture has arrived for this session. {reason}"
     else:
-        stale = age > futures_chain_config.capture()["stale_after_sec"]
-        reason = f"The last capture is {_feed._span(age)} old." if stale else ""
+        settings = futures_chain_config.capture()
+        too_old = age > settings["stale_after_sec"]
+        # A feed that stopped moving goes on arriving on time, so its age says
+        # nothing: the run of identical captures is what marks it. The status
+        # entry's reason (``why``) says so in words.
+        repeats = _feed._entry(_feed._read_status(bus), symbol)["repeats"]
+        stale = too_old or repeats >= settings["frozen_repeats"]
+        reason = f"The last capture is {_feed._span(age)} old." if too_old else ""
     low, high = _strike_range(captured["chain"])
     return {"label": futures_chain.display_symbol(symbol), "captured_at": taken,
             "expiry": captured["expiry"], "frozen": frozen, "stale": stale,
