@@ -817,8 +817,12 @@ def derive_minute(engine, conn, minute: RawMinute, on_chain=None) -> None:
             # Single pass yields GEX, Charm, DEX, Vanna — all persisted below.
             # Priced AT the minute, not at the wall clock: a minute derived later
             # (the raw feed) must price exactly as it did live.
+            # Only a symbol with its own time left is handed one: every other call
+            # is the call it always was.
+            left = ({"hours_left": minute.hours_left[symbol]}
+                    if symbol in minute.hours_left else {})
             gex, charm, dex, vanna = engine.calc_all_from_chain(
-                chain, use_volume=False, now=minute_dt)
+                chain, use_volume=False, now=minute_dt, **left)
             dte = engine._last_dte
             if gex:
                 gex_summary = GammaEngine.snapshot_summary(gex)

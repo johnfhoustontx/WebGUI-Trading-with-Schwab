@@ -10,7 +10,7 @@ import zlib
 import sqlite3
 import time
 from pathlib import Path
-from typing import Iterable, Tuple
+from typing import Iterable, NamedTuple, Tuple
 
 import numpy as np
 
@@ -42,9 +42,26 @@ _MMAP_BYTES = 1 << 30  # 1 GiB
 _VACUUM_MAX_PAGES = 20000
 
 
+# The /ES and /NQ feed's rows are keyed ``FOP.<root>``. They have no place in a
+# count of sessions: their session opens the evening before, so a Sunday evening
+# would otherwise make a date no stock or index symbol has and push the oldest
+# of THEIR kept sessions out. This module takes no ``shared`` import, so the
+# pattern is restated here and pinned equal to ``shared/futures_chain`` by
+# ``shared/tests/test_cross_tier_mirrors.py``.
+FEED_SYMBOL_LIKE = "FOP.%"
+
+
+class SessionSpan(NamedTuple):
+    """An explicit ``[start_ts, end_ts)`` in unix seconds, accepted anywhere a
+    ``date`` is by ``_local_unix_range``. A futures-option session starts the
+    evening before and so spans two calendar dates."""
+    start_ts: int
+    end_ts: int
+
+
 def _local_unix_range(d=None) -> tuple[int, int]:
     """``[start, end)`` unix seconds spanning the LOCAL calendar day ``d``
-    (default: today).
+    (default: today). A ``SessionSpan`` is returned as it stands.
 
     Lets day-filters use a sargable ``ts >= ? AND ts < ?`` range (the index on
     ``ts`` applies) instead of ``DATE(ts,'unixepoch','localtime') = DATE('now')``,
@@ -57,6 +74,8 @@ def _local_unix_range(d=None) -> tuple[int, int]:
     ``DATE(...,'localtime')``. Immaterial here — GEX snapshots only exist 08:30–
     15:20 CT, never near the 02:00/midnight boundary, so no row is ever classified
     differently."""
+    if isinstance(d, SessionSpan):
+        return int(d.start_ts), int(d.end_ts)
     now = _dt.datetime.now().astimezone()
     base = now if d is None else _dt.datetime(d.year, d.month, d.day, tzinfo=now.tzinfo)
     start = base.replace(hour=0, minute=0, second=0, microsecond=0)
@@ -1158,13 +1177,17 @@ def _distinct_session_dates(conn: sqlite3.Connection) -> list[str]:
 
     Derived from the ``snapshots.ts`` epoch column via
     ``DATE(ts,'unixepoch','localtime')`` (only for the small DISTINCT scan — the
-    per-row DELETE below uses a sargable ``ts <`` range so the index applies)."""
+    per-row DELETE below uses a sargable ``ts <`` range so the index applies).
+
+    The /ES and /NQ feed's rows (``FEED_SYMBOL_LIKE``) are not counted: see there."""
     cur = conn.execute(
         """
         SELECT DISTINCT DATE(ts, 'unixepoch', 'localtime') AS d
           FROM snapshots
+         WHERE symbol NOT LIKE ?
          ORDER BY d DESC
-        """
+        """,
+        (FEED_SYMBOL_LIKE,),
     )
     return [r[0] for r in cur.fetchall() if r[0] is not None]
 

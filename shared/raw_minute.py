@@ -35,6 +35,10 @@ class RawMinute:
     #: The universe asked this minute (a failed fetch is in here and not in
     #: ``chains``).
     symbols: list = field(default_factory=list)
+    #: Hours to expiry for a symbol whose session is not the equity day, keyed by
+    #: symbol (the /ES and /NQ feed). The engine prices that symbol's chain with
+    #: it; a symbol not in here is priced from the clock, as before.
+    hours_left: dict = field(default_factory=dict)
 
     def chain_for_skew(self, symbol):
         """The chain the skew, volume, premium and per-strike premium read: the

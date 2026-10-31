@@ -692,3 +692,32 @@ def test_the_breadth_pin_is_the_same_payload_in_both_tiers():
     proves nothing unless the two payloads are one payload."""
     assert (_const("services/market_svc/tests/test_market_read.py", "BREADTH_PIN")
             == _const("webgui/tests/test_market.py", "BREADTH_PIN"))
+
+
+# --- the /ES and /NQ feed's symbol prefix (2026-10-31) --------------------------
+# ``gex_history_db`` takes no ``shared`` import, so it restates the LIKE pattern
+# that keeps the feed's rows out of a session count and out of the Gamma Archive.
+# A feed symbol the pattern missed would cost every other symbol a kept session
+# again, silently.
+def test_the_history_stores_feed_pattern_matches_every_feed_symbol():
+    import sqlite3
+
+    from shared import futures_chain
+
+    pattern = _const("options-scanner/gex_history_db.py", "FEED_SYMBOL_LIKE")
+    symbols = futures_chain.feed_symbols()
+    assert symbols, "the feed lists no symbol: this mirror would prove nothing"
+    conn = sqlite3.connect(":memory:")
+    for symbol in symbols:
+        assert conn.execute("SELECT ? LIKE ?", (symbol, pattern)).fetchone()[0], (
+            f"{symbol} escapes gex_history_db.FEED_SYMBOL_LIKE ({pattern!r})")
+    for ordinary in ("$SPX", "SPY", "ES", "FOP", "FOPX"):
+        assert not conn.execute("SELECT ? LIKE ?", (ordinary, pattern)).fetchone()[0], (
+            f"{ordinary} is a real symbol that FEED_SYMBOL_LIKE would hide")
+
+
+def test_the_feed_pattern_is_the_prefix_the_config_demands():
+    pattern = _const("options-scanner/gex_history_db.py", "FEED_SYMBOL_LIKE")
+    assert pattern == "FOP.%"
+    assert "startswith(\"FOP.\")" in (ROOT / "shared/futures_chain_config.py").read_text(
+        encoding="utf-8")
