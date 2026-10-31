@@ -50,6 +50,7 @@ from scanner_engine import run_full_scan  # noqa: E402
 from iv_analysis import run_iv_analysis  # noqa: E402
 
 from services import _degrade  # noqa: E402
+from shared import futures_chain as _futures_chain  # noqa: E402  (/ES and /NQ never reach Schwab)
 from shared import gamma_heat_config as _heat_cfg  # noqa: E402
 from shared import greeks as _greeks  # noqa: E402  (Schwab's -999 is not a Greek)
 from shared import scanner_config as _scanner_config  # noqa: E402
@@ -3857,9 +3858,12 @@ _GAMMA_VIEWS = {"GEX": (0, "gex"), "Charm": (1, "charm"),
 def _gamma_fetch_chain(symbol):
     """Fetch the option chain for ``symbol`` (today → +7d). None on non-200/empty.
 
-    Mirrors the page's ``do_fetch``/``_analyze_prompt`` chain pull exactly."""
+    Mirrors the page's ``do_fetch``/``_analyze_prompt`` chain pull exactly. The /ES
+    and /NQ feed symbols have no chain at Schwab: None, with no call."""
     import datetime as dt
 
+    if _futures_chain.is_feed_symbol(symbol):
+        return None
     resp = _proxy.schwab_py_client.get_option_chain(
         symbol, contract_type="ALL", from_date=dt.date.today(),
         to_date=dt.date.today() + dt.timedelta(days=7))
@@ -4412,7 +4416,11 @@ def _history_rows_incremental(gh, conn, symbol, vstr, session_date):
 
     Cold (or on a session-date change): full ``load_date_with_grid``. Warm: load
     only rows with ``ts > last-seen`` and append. Returns a shallow copy of the
-    accumulated row list (callers must not receive the memo's own list)."""
+    accumulated row list (callers must not receive the memo's own list). A
+    ``SessionSpan`` (a tuple; a date is not) is read whole: the memo holds ONE date
+    for every symbol, and a feed session's span would evict all of them."""
+    if isinstance(session_date, tuple):
+        return gh.load_date_with_grid(conn, symbol, vstr, date=session_date)
     with _HIST_LOCK:
         if _HIST_MEMO["date"] != session_date:
             _HIST_MEMO.update(date=session_date, data={})
@@ -4439,7 +4447,8 @@ def _history_rows_incremental(gh, conn, symbol, vstr, session_date):
         return list(ent["rows"])
 
 
-def gamma_snapshot(symbol: str, chain=None, with_term: bool = True) -> dict | None:
+def gamma_snapshot(symbol: str, chain=None, with_term: bool = True,
+                   session=None) -> dict | None:
     """Fetch + compute the full Gamma snapshot for ``symbol``.
 
     ``chain`` — an optional already-fetched chain dict (same tick). When omitted,
@@ -4459,6 +4468,10 @@ def gamma_snapshot(symbol: str, chain=None, with_term: bool = True) -> dict | No
     calls. The public Gamma page's hot symbols build this way -- it has no Term
     view (roadmap decision D6).
 
+    ``session`` -- a ``futures_chain_snapshot.FeedSession``, for the /ES and /NQ
+    feed: the rows of its span, every hour of it, filled onto the page's columns,
+    and ``chain`` priced at the capture rather than the clock. None changes nothing.
+
     Returns None if the chain fetch fails or GammaEngine can't compute — the
     handler caches a graceful-empty view in that case. Per-view sub-failures are
     defensive (a single view degrades to empty fields) so one bad view never
@@ -4477,11 +4490,12 @@ def gamma_snapshot(symbol: str, chain=None, with_term: bool = True) -> dict | No
     # AND the heatmap stay visible PRE- and POST-market. The heatmap loads the ACTIVE
     # SESSION DATE (today once collection starts at 08:00 CT, else the prior session),
     # so premarket it shows yesterday until today's snapshots begin.
-    now = _sched._market_now()
+    now = session.priced_at if session else _sched._market_now()
     # The time-axis charts (heatmap + Flow) show RTH only, so before the 08:30 open
     # fall back to the prior session — today has collected rows but none displayable.
-    session_date = _display_session_date(now, _sched.active_session_date(now))
-    rth = _rth_bounds(session_date)
+    session_date = (session.span if session
+                    else _display_session_date(now, _sched.active_session_date(now)))
+    rth = None if session else _rth_bounds(session_date)
 
     if chain is None:
         chain = _take_tick_chain(symbol)
@@ -4491,7 +4505,8 @@ def gamma_snapshot(symbol: str, chain=None, with_term: bool = True) -> dict | No
         return None
 
     eng = gt.GammaEngine()
-    res = eng.calc_all_from_chain(chain)
+    res = (eng.calc_all_from_chain(chain, now=session.priced_at, hours_left=session.hours_left)
+           if session else eng.calc_all_from_chain(chain))
     if not res:
         return None
     gex, charm, dex, vanna = res
@@ -4521,9 +4536,10 @@ def gamma_snapshot(symbol: str, chain=None, with_term: bool = True) -> dict | No
             # (see _history_rows_incremental) instead of a full-session re-decode.
             # The memo holds EVERY collected row; RTH filtering happens after it, so
             # the append-only load still works off the true last-collected ts.
-            return _rth_only(
+            rows = _rth_only(
                 _history_rows_incremental(gh, hist_conn, symbol, vstr, session_date),
                 rth)
+            return session.fill(rows) if session else rows
         except Exception:
             return []
 
@@ -4588,6 +4604,7 @@ def gamma_snapshot(symbol: str, chain=None, with_term: bool = True) -> dict | No
             try:
                 _hrows = _rth_only(
                     gh.load_hedge_series(hist_conn, symbol, session_date), rth)
+                _hrows = session.fill(_hrows) if session else _hrows
                 hedge_history = [{"ts": r[0], "hedge_pressure": r[1],
                                   "net_delta_0dte": r[2], "projected_flip": r[3]}
                                  for r in _hrows]

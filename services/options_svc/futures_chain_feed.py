@@ -285,6 +285,20 @@ def _snapshot(bus, args) -> None:
                            "stopped updating.")
     status[symbol] = entry
     bus.cache_set(futures_chain.STATUS_KEY, status)
+    _repaint(bus, symbol)
+
+
+def _repaint(bus, symbol: str) -> None:
+    """Rebuild the private page's snapshot when it is on this symbol. Imported
+    here: ``handlers`` imports ``compute``, and this file does not. The capture is
+    already stored, so a failure costs one repaint and is not raised, or the
+    command would be dead-lettered as if the capture had failed."""
+    from services.options_svc import handlers
+    try:
+        if handlers._current_gamma_symbol(bus) == symbol:
+            handlers.refresh_gamma(bus, symbol)
+    except Exception:
+        _degrade.degraded(AREA, detail=f"{symbol} repaint")
 
 
 # ── the capture machine's own report ─────────────────────────────────────────

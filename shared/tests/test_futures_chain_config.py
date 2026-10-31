@@ -30,7 +30,7 @@ def test_the_capture_defaults():
     assert cfg.capture() == {
         "interval_sec": 300, "max_age_sec": 900, "stale_after_sec": 660,
         "max_future_skew_sec": 30, "min_fill_fraction": 0.8, "frozen_repeats": 3,
-        "fill_step_sec": 60, "frozen_before_expiry_min": 60, "alert_repeat_min": 240,
+        "fill_step_sec": 120, "frozen_before_expiry_min": 60, "alert_repeat_min": 240,
         "max_snapshot_kb": 512, "parity_strikes": 5, "show_in_dropdown": False}
     assert isinstance(cfg.capture()["min_fill_fraction"], float)
     assert cfg.capture()["show_in_dropdown"] is False

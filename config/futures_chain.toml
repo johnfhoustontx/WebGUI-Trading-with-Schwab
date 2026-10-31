@@ -25,8 +25,10 @@ min_fill_fraction = 0.8
 # not hold one price for minutes.
 frozen_repeats = 3
 # The history is stored one row per capture; the page repeats each row across
-# the minutes to the next one, to this step, up to one interval.
-fill_step_sec = 60
+# the minutes to the next one, to this step, up to one interval. Not 60: a
+# 22-hour session a column a minute measured 3.2 times a regular $SPX payload;
+# 120 measured 1.9 times.
+fill_step_sec = 120
 # Between sessions the by-strike charts show the last capture taken at least this
 # many minutes before expiry, so the last hour's gamma spike is not left on screen.
 frozen_before_expiry_min = 60

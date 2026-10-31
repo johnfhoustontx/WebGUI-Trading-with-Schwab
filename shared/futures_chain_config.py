@@ -39,7 +39,7 @@ DEFAULTS = {
         "frozen_repeats": 3,
         # The page repeats each stored row across the minutes to the next one, to
         # this step, up to one interval.
-        "fill_step_sec": 60,
+        "fill_step_sec": 120,
         # Between sessions: the last capture at least this long before expiry.
         "frozen_before_expiry_min": 60,
         # The stopped-capture alert repeats at most this often.

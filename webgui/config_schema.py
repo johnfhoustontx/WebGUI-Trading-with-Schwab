@@ -2914,9 +2914,11 @@ _FUTURES_CHAIN = ConfigFile(
                   "A PC clock that is wrong.",
                   kind="int", unit="seconds", min=0, max=600, step=5),
             Field("capture.fill_step_sec", "Repeat each capture across the page every",
-                  "The charts draw a column a minute. Each capture is repeated "
+                  "The charts draw one column per row. Each capture is repeated "
                   "to this step until the next one, for up to one interval; a "
-                  "longer outage stays empty.",
+                  "longer outage stays empty. A smaller step makes a heavier "
+                  "page: a whole session at 60 seconds is about three times a "
+                  "regular day's.",
                   kind="int", unit="seconds", min=10, max=600, step=10),
         )),
         Section("What makes a snapshot unfit",
