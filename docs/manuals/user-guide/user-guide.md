@@ -1069,10 +1069,12 @@ service and the web app from System Status.
 are never worked out from `$SPX` or `$NDX`, not even when the feed is down. A capture
 program on **your PC** reads the chains out of **ThinkorSwim** through Excel and sends
 each one to the server. It takes a snapshot every **300 seconds** (**Take a snapshot
-every**, `interval_sec`), from **17:00** Central the evening before an expiry
-(**Opens**, `open_ct`) to **15:00** Central on it (**Expires**, `close_ct`). Monday's
-options therefore start on Sunday evening, and there is no capture from Friday afternoon
-to Sunday evening, nor between an expiry and the next open (15:00 to 17:00 as shipped).
+every**, `interval_sec`), from **06:00** Central on the day of an expiry (**Capture
+starts**, `open_ct`) to **15:00** Central, when it expires (**Expires**, `close_ct`),
+Monday to Friday. Nothing is captured overnight or at the weekend, so the heat map starts
+at 06:00 and the PC need not be on before then. Set **Capture starts** to **17:00** to
+capture the whole futures session: a start at or after the expiry's time means the evening
+before, so Monday's options then start on Sunday evening.
 
 > **The PC has to be on, awake, online and logged in to Windows, and ThinkorSwim has to
 > be running and logged in.** The capture never starts ThinkorSwim and never types your

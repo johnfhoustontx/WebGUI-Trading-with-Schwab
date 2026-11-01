@@ -718,13 +718,15 @@ design in [the chain feed design](docs/plans/2026-10-31-futures-0dte-chain-feed-
   PC's other call, `plan`, only prints. The server never connects to the PC. The stream
   has its own `[stream_keep]` entry (20), because each command carries a document, and
   nothing on it reaches a paper book.
-- **A session opens the evening before its expiry** (17:00 to 15:00 Central) and so
-  spans two calendar dates: `session_date` alone does not name it. Use
+- **A session is one expiry, captured 06:00 to 15:00 Central on its date** (`[session]`
+  `open_ct`, `close_ct`). A start at or after the close means the evening before, so 17:00
+  restores the whole futures session, and a session then spans two calendar dates:
+  `session_date` alone does not name it. Use
   `futures_chain.session_expiry` / `session_bounds` and `gex_history_db.SessionSpan`,
   never `date.today()`.
 - **The purge and the Gamma Archive leave `FOP.%` out** (`gex_history_db.FEED_SYMBOL_LIKE`,
-  restated there and pinned to every feed symbol by the mirror test): a Sunday evening would otherwise
-  count as a session and cost every other symbol one. The feed keeps the store's 5
+  restated there and pinned to every feed symbol by the mirror test): with a 17:00 start, a Sunday evening
+  would otherwise count as a session and cost every other symbol one. The feed keeps the store's 5
   sessions and no more.
 - **Contract size is the adapter's.** Open interest and volume are scaled by
   `multiplier / 100` (0.5, 0.2) in `futures_chain_adapter`, so `gamma_tool.py` is not

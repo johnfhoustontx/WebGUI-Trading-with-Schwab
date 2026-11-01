@@ -43,9 +43,9 @@ _VACUUM_MAX_PAGES = 20000
 
 
 # The /ES and /NQ feed's rows are keyed ``FOP.<root>``. They have no place in a
-# count of sessions: their session opens the evening before, so a Sunday evening
-# would otherwise make a date no stock or index symbol has and push the oldest
-# of THEIR kept sessions out. This module takes no ``shared`` import, so the
+# count of sessions: their session can open the evening before, so a Sunday
+# evening would otherwise make a date no stock or index symbol has and push the
+# oldest of THEIR kept sessions out. This module takes no ``shared`` import, so the
 # pattern is restated here and pinned equal to ``shared/futures_chain`` by
 # ``shared/tests/test_cross_tier_mirrors.py``.
 FEED_SYMBOL_LIKE = "FOP.%"
@@ -53,8 +53,8 @@ FEED_SYMBOL_LIKE = "FOP.%"
 
 class SessionSpan(NamedTuple):
     """An explicit ``[start_ts, end_ts)`` in unix seconds, accepted anywhere a
-    ``date`` is by ``_local_unix_range``. A futures-option session starts the
-    evening before and so spans two calendar dates."""
+    ``date`` is by ``_local_unix_range``. A futures-option session can start the
+    evening before and so span two calendar dates."""
     start_ts: int
     end_ts: int
 

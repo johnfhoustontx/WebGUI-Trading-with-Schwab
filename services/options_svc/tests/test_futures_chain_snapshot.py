@@ -169,14 +169,28 @@ def history_ts(snap, view="GEX"):
 
 # ── the session's rows ───────────────────────────────────────────────────────
 
-def test_snapshot_loads_rows_from_both_calendar_dates(bus, db, write_captures):
+@pytest.fixture
+def from_the_evening(monkeypatch):
+    """A start of 17:00, which puts a session on two calendar dates."""
+    monkeypatch.setattr(futures_chain_config, "session",
+                        lambda: {"open_ct": "17:00", "close_ct": "15:00"})
+
+
+def test_rows_before_the_capture_starts_are_left_out(bus, db, write_captures):
+    """A capture taken by hand overnight is kept in the store and is not drawn."""
+    write_captures(ct(2026, 11, 2, 5, 55), ct(2026, 11, 2, 6, 0))
+    ts = history_ts(snapshot(bus, "FOP.ES", now=ct(2026, 11, 2, 6, 1)))
+    assert ts == [int(ct(2026, 11, 2, 6, 0).timestamp())]
+
+
+def test_snapshot_loads_rows_from_both_calendar_dates(bus, db, write_captures, from_the_evening):
     write_captures(ct(2026, 11, 1, 18, 0), ct(2026, 11, 2, 9, 0))
     ts = set(history_ts(snapshot(bus, "FOP.ES", now=ct(2026, 11, 2, 9, 1))))
     assert int(ct(2026, 11, 1, 18, 0).timestamp()) in ts
     assert int(ct(2026, 11, 2, 9, 0).timestamp()) in ts
 
 
-def test_rows_of_the_session_before_are_left_out(bus, db, write_captures):
+def test_rows_of_the_session_before_are_left_out(bus, db, write_captures, from_the_evening):
     write_captures(ct(2026, 10, 30, 14, 0), ct(2026, 11, 1, 18, 0))
     ts = history_ts(snapshot(bus, "FOP.ES", now=ct(2026, 11, 1, 18, 1)))
     assert ts == [int(ct(2026, 11, 1, 18, 0).timestamp())]
@@ -221,7 +235,7 @@ def test_the_hedge_panel_is_filled_onto_the_heatmaps_columns(bus, db, write_capt
     assert len(hedge) > 2 and set(hedge) <= set(history_ts(snap))
 
 
-def test_flow_and_ladder_read_the_whole_session_unfilled(bus, db, write_captures):
+def test_flow_and_ladder_read_the_whole_session_unfilled(bus, db, write_captures, from_the_evening):
     evening, morning = ct(2026, 11, 1, 18, 0), ct(2026, 11, 2, 9, 0)
     write_captures(evening, morning)
     snap = snapshot(bus, "FOP.ES", now=ct(2026, 11, 2, 9, 1))
@@ -273,10 +287,10 @@ def test_building_a_snapshot_never_reads_the_market_clock(bus, db, write_capture
 
 
 def test_the_session_passes_the_stock_days_filter_through(bus, db, write_captures):
-    """A row at 03:00 is outside 08:30 to 15:00 and is still shown."""
-    write_captures(ct(2026, 11, 2, 3, 0))
-    snap = snapshot(bus, "FOP.ES", now=ct(2026, 11, 2, 3, 1))
-    assert history_ts(snap) == [int(ct(2026, 11, 2, 3, 0).timestamp())]
+    """A row at 07:00 is outside 08:30 to 15:00 and is still shown."""
+    write_captures(ct(2026, 11, 2, 7, 0))
+    snap = snapshot(bus, "FOP.ES", now=ct(2026, 11, 2, 7, 1))
+    assert history_ts(snap) == [int(ct(2026, 11, 2, 7, 0).timestamp())]
 
 
 def test_no_term_for_the_feed(bus, db, write_captures):
@@ -417,11 +431,11 @@ def test_an_old_reason_does_not_follow_a_frozen_label_through_a_weekend(bus, db,
 
 
 def test_a_frozen_label_in_the_next_session_still_says_why(bus, db, write_captures):
-    """Trading is open and nothing has arrived: the cause is current."""
+    """Capture has started and nothing has arrived: the cause is current."""
     write_captures(ct(2026, 11, 6, 13, 55))
     feed.handle(bus, Command(type="pc_status", args={
-        "reason": "ThinkorSwim is logged out", "at": ct(2026, 11, 8, 17, 10).timestamp()}))
-    block = snapshot(bus, "FOP.ES", now=ct(2026, 11, 8, 17, 20))["feed"]
+        "reason": "ThinkorSwim is logged out", "at": ct(2026, 11, 9, 6, 10).timestamp()}))
+    block = snapshot(bus, "FOP.ES", now=ct(2026, 11, 9, 6, 20))["feed"]
     assert block["frozen"] is True and block["stale"] is True
     assert block["why"] == "ThinkorSwim is logged out"
 
@@ -520,8 +534,15 @@ def test_a_frozen_snapshot_projects_no_afternoon(bus, db, write_captures):
 
 def test_a_session_open_with_no_capture_yet_is_frozen_and_stale(bus, db, write_captures):
     write_captures(ct(2026, 11, 2, 13, 0))
-    block = snapshot(bus, "FOP.ES", now=ct(2026, 11, 2, 18, 0))["feed"]
+    block = snapshot(bus, "FOP.ES", now=ct(2026, 11, 3, 6, 20))["feed"]
     assert block["frozen"] is True and block["stale"] is True
+
+
+@pytest.mark.parametrize("when", [ct(2026, 11, 2, 18, 0), ct(2026, 11, 3, 5, 59)])
+def test_overnight_the_last_session_is_shown_and_is_not_stale(bus, db, write_captures, when):
+    write_captures(ct(2026, 11, 2, 13, 0))
+    block = snapshot(bus, "FOP.ES", now=when)["feed"]
+    assert block["frozen"] is True and block["stale"] is False
 
 
 def test_an_expired_session_with_nothing_frozen_is_no_snapshot(bus, db, write_captures):

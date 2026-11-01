@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-31</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-01</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -8368,8 +8368,8 @@ is wrong overnight: at 18:00 Central on the evening before expiry it returns 24 
 21 remain) with <code>T = max(hours_left / (365 · 24), 1e-6)</code>, for GEX, charm, vanna, the
 calculated delta and the 0-DTE projection alike. <code>RawMinute.hours_left</code> carries it through
 <code>derive_minute</code> for a symbol that has one. Every other caller passes nothing and prices as
-before. <code>daysToExpiration</code> is stamped 0 on every contract, including an evening capture whose
-expiry is tomorrow, so the engine's 0-DTE slice and its nearest-expiry search find the one
+before. <code>daysToExpiration</code> is stamped 0 on every contract, however far off the
+expiry is, so the engine's 0-DTE slice and its nearest-expiry search find the one
 expiry; <code>dte</code> says nothing to a reader here.</p>
 <h2 id="gamma-as-coded">Gamma, as coded</h2>
 <p>ThinkorSwim's own <code>GAMMA</code> for these contracts is rounded to two decimals and reads <code>0.0</code>, so
@@ -8491,10 +8491,13 @@ does, so a capture that repeats the last refused count is taken.</p>
 reported as a stopped feed on the entry's reason, though they arrive on time.</p>
 <h2 id="the-session-storage-and-what-the-page-shows">The session, storage and what the page shows</h2>
 <ul>
-<li><strong>A session opens the evening before its expiry</strong> and so spans two calendar dates.
-  <code>futures_chain.session_expiry(now)</code> names the session a moment belongs to (the daily gap
-  names the next day's, a weekend rolls to Monday); <code>session_bounds(expiry)</code> is its
-  <code>(opens, ends)</code>; <code>gex_history_db.SessionSpan</code> lets the history loaders take a span where
+<li><strong>A session is one expiry, captured from <code>open_ct</code> (06:00 Central) to <code>close_ct</code>
+  (15:00).</strong> A start before the close is on the expiry's own date; a start at or after it
+  (17:00, the whole futures session) is the evening before, and that session spans two
+  calendar dates. <code>futures_chain.session_expiry(now)</code> names the session a moment belongs to
+  (the hours after a close name the next day's, a weekend rolls to Monday);
+  <code>session_bounds(expiry)</code> is its <code>(opens, ends)</code>, and <code>in_session</code> is what the plan, the
+  stopped-capture watch and the page's label all ask; <code>gex_history_db.SessionSpan</code> lets the history loaders take a span where
   they took a date. <code>compute.gamma_snapshot(session=)</code> reads the whole span, with no 08:30 to
   15:00 window, prices the chain at the capture's own time and its <code>hours_left</code>, and fills
   the rows to the page's columns.</li>
@@ -8803,7 +8806,7 @@ the source; this table is a summary of them.</p>
 </tr>
 <tr>
 <td>/ES and /NQ chain feed</td>
-<td>Not a service: a capture on the operator's PC, every <strong>300 s</strong> on the epoch clock (<code>[capture] interval_sec</code> in <code>config/futures_chain.toml</code>) from <strong>17:00</strong> Central the evening before an expiry to <strong>15:00</strong> Central on it, then one ssh to vps2 per capture. <code>options_svc</code> handles each on arrival (<code>cmd:futures_chain</code>) and its <strong>stopped-capture watch</strong> runs each 30 s scheduler tick, with no NYSE gate. No Schwab or proxy call. See <em>The /ES and /NQ chain feed</em>.</td>
+<td>Not a service: a capture on the operator's PC, every <strong>300 s</strong> on the epoch clock (<code>[capture] interval_sec</code> in <code>config/futures_chain.toml</code>) from <strong>06:00</strong> Central on the day of an expiry to <strong>15:00</strong> Central, Monday to Friday (<code>[session]</code>), then one ssh to vps2 per capture. <code>options_svc</code> handles each on arrival (<code>cmd:futures_chain</code>) and its <strong>stopped-capture watch</strong> runs each 30 s scheduler tick, with no NYSE gate. No Schwab or proxy call. See <em>The /ES and /NQ chain feed</em>.</td>
 </tr>
 </tbody>
 </table>

@@ -1426,17 +1426,20 @@ symbol moves. The price of that is that a contract count read downstream is scal
 places that printed one (the Flow tab's summary and panel) go with the Flow tab, which these
 symbols do not offer.
 
-**Why a session is not a date.** One session is one expiry. Trading opens for it at 17:00
-Central the evening before (so Monday's opens on Sunday) and it ends at 15:00 on the day.
-Anything keyed on the calendar date of a capture puts a Sunday evening in Sunday's session.
-`session_expiry(now)` names the session a moment belongs to (the daily gap names the next
-day's, a weekend rolls to Monday), `session_bounds(expiry)` is its `(opens, ends)` in epoch
+**Why a session is not a date.** One session is one expiry, and it ends at 15:00 Central on
+the day. Trading opens for it at 17:00 the evening before, but the capture ships starting at
+06:00 on the expiry's own date (`open_ct`; the reasoning is in the design's section 5.11).
+A start at or after `close_ct` means the evening before, so 17:00 restores the whole
+session, and Monday's then opens on Sunday: anything keyed on the calendar date of a capture
+would put that Sunday evening in Sunday's session.
+`session_expiry(now)` names the session a moment belongs to (the hours after a close name
+the next day's, a weekend rolls to Monday), `session_bounds(expiry)` is its `(opens, ends)` in epoch
 seconds, and `gex_history_db.SessionSpan` lets the history loaders take a span where they
 took a date. The shared `_history_rows_incremental` memo holds ONE date for every symbol, so
 a span bypasses it.
 
 **Why the purge and the archive skip `FOP.%`.** `_distinct_session_dates` counts distinct
-calendar dates to keep five sessions. A Sunday-evening capture makes a date no stock symbol
+calendar dates to keep five sessions. With a 17:00 start, a Sunday-evening capture makes a date no stock symbol
 has, and the purge would then delete the oldest session of every existing symbol to make
 room. The archive closes a day at the stock session's stop, so the evening rows would be
 missed and a Sunday would never close. Both filter `symbol NOT LIKE 'FOP.%'`
@@ -1507,8 +1510,8 @@ after the first logoff, the operator checks Excel, Options, Advanced, General, t
   against volume and the operator decides.
 - The dealer sign (long calls, short puts) is carried over from the index formula. Futures
   option dealers may be positioned differently.
-- The adapter stamps `daysToExpiration` 0 on every capture, including an evening one whose
-  expiry is tomorrow, so `dte` says nothing here and no page text is built from it.
+- The adapter stamps `daysToExpiration` 0 on every capture, however far off the expiry is,
+  so `dte` says nothing here and no page text is built from it.
 - CME's open and expiry times, the fifth-Monday and Friday series names beyond those
   sampled (`QN1` and `QN2` read `N/A` at one strike), and behaviour in a live market,
   across a logoff and from the scheduled task, were not measured.

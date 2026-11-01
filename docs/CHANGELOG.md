@@ -4,7 +4,20 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-31 (**/ES and /NQ 0-DTE option chains on Dealer Positioning, captured from ThinkorSwim on the PC. Ships hidden.**)
+**Last updated:** 2026-11-01 (**/ES and /NQ are captured from 06:00 Central on the expiry's date, not from 17:00 the evening before.**)
+
+- The operator's call: 06:00 to the 15:00 expiry, Monday to Friday. It is one setting,
+  `[session] open_ct`, and no second clock: `session_bounds` puts a start before `close_ct` on
+  the expiry's date and a start at or after it on the evening before, so `"17:00"` restores
+  the whole futures session. The PC, the stopped-capture watch and the page's label all ask
+  the same two functions, so none of them needed a change of its own, and the script is
+  untouched (it waits for the plan's `opens`).
+- A capture's gamma depends only on that capture's own open interest, volatility, price and
+  time left, so values from 06:00 on are the same as they would have been. What goes is the
+  overnight history, which cannot be recovered later. Settings → Configuration now labels the
+  field **Capture starts**. Nothing measured on a live session yet.
+
+**Prior —** 2026-10-31 (**/ES and /NQ 0-DTE option chains on Dealer Positioning, captured from ThinkorSwim on the PC. Ships hidden.**)
 
 - **The final review's fix wave.** The PC's reasons are joined with `; `, which is what the
   server splits on: a logged-out ThinkorSwim gave /ES's label /NQ's reason and /NQ's none.

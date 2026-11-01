@@ -758,7 +758,7 @@ accelerate price.
   symbol when you come back, and switching symbols refreshes automatically.
 - **/ES and /NQ** — the two futures, when the feed is switched on. Their chains do
   not come from Schwab: **ThinkorSwim on your PC** captures the options expiring at
-  the end of the session, one capture every few minutes, from the evening before.
+  the end of the session, one capture every few minutes, from 06:00 Central that day.
   ThinkorSwim's own gamma rounds to zero for these, so it is **calculated** from each
   contract's implied volatility. The heat map draws one column per capture, so it holds one capture a
   column rather than one minute. The line above the charts says when the numbers were

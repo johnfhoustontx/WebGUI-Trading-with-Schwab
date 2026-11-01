@@ -3035,10 +3035,12 @@ _FUTURES_CHAIN = ConfigFile(
                   "", kind="bool"),
         )),
         Section("Trading session",
-                "One session is one expiry: trading opens for it the evening "
-                "before and it expires the next afternoon. Central time. A "
-                "holiday is found by the contracts returning no data.", (
-            Field("session.open_ct", "Opens", "", kind="time"),
+                "One session is one expiry, captured from the start time until it "
+                "expires. Central time. A start before the expiry's time is on "
+                "the expiry's own date; a start at or after it, such as 17:00, is "
+                "the evening before. A holiday is found by the contracts "
+                "returning no data.", (
+            Field("session.open_ct", "Capture starts", "", kind="time"),
             Field("session.close_ct", "Expires", "", kind="time"),
         )),
         Section("/ES", "", _instrument_fields("ES", "/ES")),

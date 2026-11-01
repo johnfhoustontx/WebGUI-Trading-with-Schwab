@@ -1,8 +1,8 @@
 """What Dealer Positioning does differently for /ES and /NQ.
 
 These two have no stock session and no chain from Schwab: each is a capture from
-ThinkorSwim on the operator's PC, one every interval, across a session that opens the
-evening before its expiry. Three things follow, and all three live here:
+ThinkorSwim on the operator's PC, one every interval, across a session that runs up to
+its expiry. Three things follow, and all three live here:
 
 * **The label.** The page's own clock and scan times describe the stock market, so the
   page says what these numbers are instead: when they were captured, and whether that
@@ -22,7 +22,7 @@ evening before its expiry. Three things follow, and all three live here:
   holds one. The analysis buttons report on the stock indexes or fetch from Schwab.
 
 No label or status text is built from ``dte``: the adapter stamps 0 on every capture,
-including an evening's whose expiry is tomorrow, so it says nothing to a reader.
+including one hours from its expiry and one a day away, so it says nothing to a reader.
 
 Every existing symbol passes through untouched: ``FeedPage`` hands back the same
 objects. ``futures_chain.is_feed_symbol`` re-validates its tables on each call, so it
@@ -187,7 +187,7 @@ def no_greeks_text(symbol) -> str:
 
 def hedge_note(hedge):
     """The Delta view's note when the engine has no hedge figure, or ``None`` when
-    it has one. An evening capture's nearest expiry is the session's own, so the
+    it has one. A capture's nearest expiry is the session's own, so the
     page's sentence about the nearest expiry would be false here."""
     if (hedge or {}).get("hedge_pressure") is not None:
         return None

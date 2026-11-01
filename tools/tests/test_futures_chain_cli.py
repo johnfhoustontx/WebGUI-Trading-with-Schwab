@@ -67,8 +67,7 @@ def fake_bus():
 
 @pytest.fixture
 def frozen_sunday_evening(monkeypatch):
-    """Sunday 2026-11-01, 18:00 Central: the session that opened at 17:00 belongs
-    to Monday."""
+    """Sunday 2026-11-01, 18:00 Central: the session to come is Monday's."""
     monkeypatch.setattr(cli, "_now", lambda: datetime(2026, 11, 1, 18, 0, tzinfo=_CT))
 
 

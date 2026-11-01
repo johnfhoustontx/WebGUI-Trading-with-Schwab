@@ -589,7 +589,7 @@ level on this page. Above it, expect mean-reversion; below it, expect momentum.
 | Page refresh | Every 2 minutes; the symbol dropdown refreshes on change |
 | Storage | `gex_history.db` — five series per symbol per minute (gamma, charm, delta, vanna, premium) |
 | Off-hours | The **last available session** stays on screen 24/7. Friday's chart holds all weekend. |
-| /ES and /NQ | Hidden until switched on (Settings → Configuration → /ES and /NQ chain feed). Not from Schwab: a capture from ThinkorSwim on the operator's PC, one chain per interval, from the evening before an expiry to its afternoon close, so the charts run through the night and the label says how old the numbers are. See the User Guide's */ES and /NQ* |
+| /ES and /NQ | Hidden until switched on (Settings → Configuration → /ES and /NQ chain feed). Not from Schwab: a capture from ThinkorSwim on the operator's PC, one chain per interval, from 06:00 Central on the day of an expiry to its afternoon close, and the label says how old the numbers are. See the User Guide's */ES and /NQ* |
 
 ### Reading the screen
 

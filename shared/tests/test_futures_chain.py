@@ -255,6 +255,44 @@ def test_another_zone_is_converted_to_central():
 
 
 @pytest.mark.parametrize("when,expected", [
+    ((2026, 11, 2, 5, 59), False),   # Monday, before the capture starts
+    ((2026, 11, 2, 6, 0), True),
+    ((2026, 11, 2, 14, 59), True),   # before expiry
+    ((2026, 11, 2, 15, 0), False),   # expired
+    ((2026, 11, 2, 17, 0), False),   # futures reopen; the capture waits for 06:00
+    ((2026, 11, 3, 2, 0), False),    # overnight
+    ((2026, 11, 6, 18, 0), False),   # Friday evening
+    ((2026, 11, 7, 12, 0), False),   # Saturday
+    ((2026, 11, 8, 18, 0), False),   # Sunday evening
+])
+def test_in_session(when, expected):
+    assert in_session(ct(*when)) is expected
+
+
+def test_a_session_runs_from_six_to_the_expiry_on_the_one_date():
+    lo, hi = session_bounds(date(2026, 11, 3))
+    assert lo == ct(2026, 11, 3, 6, 0).timestamp() and hi == ct(2026, 11, 3, 15, 0).timestamp()
+
+
+def test_a_mondays_session_opens_on_the_monday():
+    lo, _hi = session_bounds(date(2026, 11, 2))
+    assert lo == ct(2026, 11, 2, 6, 0).timestamp()
+
+
+def test_overnight_names_the_session_to_come_and_is_not_in_it():
+    expiry = session_expiry(ct(2026, 11, 1, 18, 0))
+    assert expiry == date(2026, 11, 2)
+    assert ct(2026, 11, 1, 18, 0).timestamp() < session_bounds(expiry)[0]
+
+
+@pytest.fixture
+def from_the_evening(monkeypatch):
+    """The whole futures session: a start at or after the expiry's time of day is
+    the evening before, which is how an operator goes back to 23x5."""
+    monkeypatch.setattr(cfg, "session", lambda: {"open_ct": "17:00", "close_ct": "15:00"})
+
+
+@pytest.mark.parametrize("when,expected", [
     ((2026, 11, 2, 14, 59), True),   # Monday, before expiry
     ((2026, 11, 2, 15, 0), False),   # the daily gap
     ((2026, 11, 2, 17, 0), True),    # opens for Tuesday
@@ -263,24 +301,32 @@ def test_another_zone_is_converted_to_central():
     ((2026, 11, 8, 16, 59), False),  # Sunday, before the open
     ((2026, 11, 8, 17, 0), True),
 ])
-def test_in_session(when, expected):
+def test_in_session_from_the_evening(from_the_evening, when, expected):
     assert in_session(ct(*when)) is expected
 
 
-def test_session_bounds_span_two_calendar_dates():
+def test_from_the_evening_the_bounds_span_two_calendar_dates(from_the_evening):
     lo, hi = session_bounds(date(2026, 11, 3))
     assert lo == ct(2026, 11, 2, 17, 0).timestamp() and hi == ct(2026, 11, 3, 15, 0).timestamp()
 
 
-def test_a_mondays_session_opens_on_the_sunday():
+def test_from_the_evening_a_mondays_session_opens_on_the_sunday(from_the_evening):
     lo, hi = session_bounds(date(2026, 11, 2))
     assert lo == ct(2026, 11, 1, 17, 0).timestamp() and hi == ct(2026, 11, 2, 15, 0).timestamp()
 
 
-def test_the_session_bounds_follow_the_clock_across_a_clock_change():
+def test_the_session_bounds_follow_the_clock_across_a_clock_change(from_the_evening):
     # US clocks went back on 2026-11-01: Sunday 17:00 CST is 23:00 UTC.
     lo, _hi = session_bounds(date(2026, 11, 2))
     assert datetime.fromtimestamp(lo, ZoneInfo("UTC")).hour == 23
+
+
+@pytest.mark.parametrize("start,day", [("14:59", 3), ("15:00", 2), ("15:01", 2)])
+def test_the_start_is_the_expirys_day_only_when_it_comes_before_the_expiry(
+        monkeypatch, start, day):
+    monkeypatch.setattr(cfg, "session", lambda: {"open_ct": start, "close_ct": "15:00"})
+    hour, minute = map(int, start.split(":"))
+    assert session_bounds(date(2026, 11, 3))[0] == ct(2026, 11, day, hour, minute).timestamp()
 
 
 def test_the_session_times_are_read_from_config(monkeypatch):
@@ -343,7 +389,8 @@ def test_date_text_is_the_form_thinkorswim_prints():
 def test_plan_names_the_session_the_series_and_the_date_text():
     p = build_plan(ct(2026, 11, 1, 18, 0))
     assert p["expiry"] == "2026-11-02" and p["date_text"] == "2 NOV 26"
-    assert p["interval_sec"] == 300 and p["in_session"] is True
+    assert p["interval_sec"] == 300 and p["in_session"] is False
+    assert p["opens"] == ct(2026, 11, 2, 6, 0).timestamp()
     assert "E1AX26" in p["instruments"]["ES"]["candidates"]
     assert p["instruments"]["NQ"]["strike_step"] > 0
     assert p["valid_until"] == ct(2026, 11, 2, 15, 0).timestamp()

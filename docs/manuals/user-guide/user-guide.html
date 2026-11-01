@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-31</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-01</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -1442,10 +1442,12 @@ service and the web app from System Status.</p>
 are never worked out from <code>$SPX</code> or <code>$NDX</code>, not even when the feed is down. A capture
 program on <strong>your PC</strong> reads the chains out of <strong>ThinkorSwim</strong> through Excel and sends
 each one to the server. It takes a snapshot every <strong>300 seconds</strong> (<strong>Take a snapshot
-every</strong>, <code>interval_sec</code>), from <strong>17:00</strong> Central the evening before an expiry
-(<strong>Opens</strong>, <code>open_ct</code>) to <strong>15:00</strong> Central on it (<strong>Expires</strong>, <code>close_ct</code>). Monday's
-options therefore start on Sunday evening, and there is no capture from Friday afternoon
-to Sunday evening, nor between an expiry and the next open (15:00 to 17:00 as shipped).</p>
+every</strong>, <code>interval_sec</code>), from <strong>06:00</strong> Central on the day of an expiry (<strong>Capture
+starts</strong>, <code>open_ct</code>) to <strong>15:00</strong> Central, when it expires (<strong>Expires</strong>, <code>close_ct</code>),
+Monday to Friday. Nothing is captured overnight or at the weekend, so the heat map starts
+at 06:00 and the PC need not be on before then. Set <strong>Capture starts</strong> to <strong>17:00</strong> to
+capture the whole futures session: a start at or after the expiry's time means the evening
+before, so Monday's options then start on Sunday evening.</p>
 <blockquote>
 <p><strong>The PC has to be on, awake, online and logged in to Windows, and ThinkorSwim has to
 be running and logged in.</strong> The capture never starts ThinkorSwim and never types your

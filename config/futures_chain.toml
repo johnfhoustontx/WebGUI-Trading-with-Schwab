@@ -94,10 +94,12 @@ hang_exit_after_sec = 240
 show_in_dropdown = false
 
 [session]
-# One session is one expiry: trading opens for it the evening before and it
-# expires the next afternoon. Central time. Weekends are not modelled, and a
-# holiday is found by the contracts not returning data.
-open_ct = "17:00"
+# One session is one expiry, and these are the hours it is captured, Central time.
+# A start before the expiry's time is on the expiry's own date. A start at or after
+# it is the evening before: "17:00" captures the whole futures session (23x5).
+# Weekends are not modelled, and a holiday is found by the contracts not returning
+# data.
+open_ct = "06:00"
 close_ct = "15:00"
 
 [instruments.ES]

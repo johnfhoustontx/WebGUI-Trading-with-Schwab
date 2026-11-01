@@ -214,10 +214,9 @@ def _weekday_on_or_after(day: date) -> date:
 def session_expiry(now: datetime) -> date:
     """The expiry date of the session ``now`` belongs to, or comes next.
 
-    One session is one expiry: trading opens for it the evening before and it ends
-    at ``close_ct`` on the day. So a Sunday-evening capture belongs to Monday, and
-    the hours after the close (the daily gap) name the next day's session. A
-    weekend rolls to Monday."""
+    One session is one expiry, ending at ``close_ct`` on the day. So the hours after
+    the close name the next day's session, whether or not capture has started for
+    it, and a Sunday evening belongs to Monday. A weekend rolls to Monday."""
     local = _central(now)
     cutoff = _at(local.date(), _cfg.session()["close_ct"])
     day = local.date() if local < cutoff else local.date() + timedelta(days=1)
@@ -225,17 +224,22 @@ def session_expiry(now: datetime) -> date:
 
 
 def session_bounds(expiry: date) -> tuple[int, int]:
-    """``(opens, ends)`` of ``expiry``'s session as epoch seconds. It opens at
-    ``open_ct`` on the calendar day before the expiry (so Monday's opens on the
-    Sunday) and ends at ``close_ct`` on it: two calendar dates."""
+    """``(opens, ends)`` of ``expiry``'s session as epoch seconds. It ends at
+    ``close_ct`` on the expiry. It opens at ``open_ct`` on the expiry when that comes
+    before ``close_ct`` (06:00 to 15:00, one date), and otherwise on the calendar day
+    before it (17:00 on the Sunday for Monday's, two dates). So moving ``open_ct``
+    back to 17:00 restores the whole futures session."""
     clocks = _cfg.session()
-    return (int(_at(expiry - timedelta(days=1), clocks["open_ct"]).timestamp()),
+    # Both are zero-padded "HH:MM", so they order as text.
+    same_day = clocks["open_ct"] < clocks["close_ct"]
+    first = expiry if same_day else expiry - timedelta(days=1)
+    return (int(_at(first, clocks["open_ct"]).timestamp()),
             int(_at(expiry, clocks["close_ct"]).timestamp()))
 
 
 def in_session(now: datetime) -> bool:
-    """Whether trading is open for the session ``now`` belongs to. False in the
-    daily gap, at weekends and before the Sunday open."""
+    """Whether a capture is expected for the session ``now`` belongs to. False from
+    the expiry until the next session opens, and at weekends."""
     opens, ends = session_bounds(session_expiry(now))
     return opens <= _central(now).timestamp() < ends
 

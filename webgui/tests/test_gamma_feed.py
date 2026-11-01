@@ -795,8 +795,17 @@ def test_a_session_that_ended_while_the_payload_sat_drops_its_cause_too():
 def test_a_last_session_label_in_the_next_session_keeps_its_cause():
     captured = ct(2026, 11, 6, 13, 55).timestamp()
     payload = snap(captured, frozen=True, stale=True, why="ThinkorSwim is logged out")
-    label = feed_label(payload, ct(2026, 11, 8, 17, 20).timestamp())
+    label = feed_label(payload, ct(2026, 11, 9, 6, 20).timestamp())
     assert "No capture has arrived" in label and "logged out" in label
+
+
+@pytest.mark.parametrize("when", [(2026, 11, 8, 18, 0), (2026, 11, 9, 5, 59)])
+def test_before_the_capture_starts_the_last_session_label_asks_nothing(when):
+    captured = ct(2026, 11, 6, 13, 55).timestamp()
+    payload = snap(captured, frozen=True, stale=True, why="ThinkorSwim is logged out")
+    label = feed_label(payload, ct(*when).timestamp())
+    assert "Last session" in label
+    assert "No capture has arrived" not in label and "logged out" not in label
 
 
 def _band(close_in=7200, marks=5):

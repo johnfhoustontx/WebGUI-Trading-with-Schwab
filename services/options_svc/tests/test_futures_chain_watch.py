@@ -106,29 +106,36 @@ def test_alerts_once_when_capture_stops_in_session():
 
 
 def test_repeats_only_after_the_configured_time():
-    _, state = decide(ct(2026, 11, 2, 0, 0), status(captured=ct(2026, 11, 1, 23, 0)), {})
-    assert decide(ct(2026, 11, 2, 3, 59), status(captured=ct(2026, 11, 1, 23, 0)), state)[0] == []
-    assert len(decide(ct(2026, 11, 2, 4, 1), status(captured=ct(2026, 11, 1, 23, 0)), state)[0]) == 1
+    _, state = decide(ct(2026, 11, 2, 7, 0), status(captured=ct(2026, 11, 2, 6, 30)), {})
+    assert decide(ct(2026, 11, 2, 10, 59), status(captured=ct(2026, 11, 2, 6, 30)), state)[0] == []
+    assert len(decide(ct(2026, 11, 2, 11, 1), status(captured=ct(2026, 11, 2, 6, 30)), state)[0]) == 1
 
 
-@pytest.mark.parametrize("quiet", [(2026, 11, 2, 16, 0), (2026, 11, 7, 12, 0), (2026, 11, 8, 16, 30)])
-def test_quiet_in_the_daily_gap_and_the_weekend(quiet):
+@pytest.mark.parametrize("quiet", [
+    (2026, 11, 2, 16, 0),    # after the expiry
+    (2026, 11, 2, 18, 0),    # futures have reopened; the capture has not started
+    (2026, 11, 3, 5, 59),    # a minute before it does
+    (2026, 11, 7, 12, 0),    # Saturday
+    (2026, 11, 8, 18, 0),    # Sunday evening
+    (2026, 11, 9, 5, 59),    # Monday, a minute before it does
+])
+def test_quiet_outside_the_capture_hours(quiet):
     assert decide(ct(*quiet), status(captured=ct(2026, 11, 2, 9, 0)), {})[0] == []
 
 
 def test_the_first_minutes_of_a_session_do_not_alert():
-    assert decide(ct(2026, 11, 8, 17, 5), status(captured=ct(2026, 11, 6, 14, 55)), {})[0] == []
+    assert decide(ct(2026, 11, 9, 6, 5), status(captured=ct(2026, 11, 6, 14, 55)), {})[0] == []
 
 
 def test_the_first_minutes_do_not_alert_on_the_last_sessions_frozen_run():
     old = status(captured=ct(2026, 11, 6, 14, 55), repeats=5)
-    assert decide(ct(2026, 11, 8, 17, 5), old, {})[0] == []
+    assert decide(ct(2026, 11, 9, 6, 5), old, {})[0] == []
 
 
 def test_a_session_that_never_gets_a_capture_alerts_once_the_quiet_time_has_passed():
     old = status(captured=ct(2026, 11, 6, 14, 55))
-    assert decide(ct(2026, 11, 8, 17, 5), old, {})[0] == []
-    assert [a.kind for a in decide(ct(2026, 11, 8, 17, 12), old, {})[0]] == ["stopped"]
+    assert decide(ct(2026, 11, 9, 6, 5), old, {})[0] == []
+    assert [a.kind for a in decide(ct(2026, 11, 9, 6, 12), old, {})[0]] == ["stopped"]
 
 
 def test_clears_with_one_message_when_it_resumes():
@@ -172,9 +179,9 @@ def test_an_instrument_whose_every_capture_is_refused_alerts_once_with_the_reaso
 
 
 def test_a_refused_only_instrument_is_quiet_in_the_first_minutes_of_a_session():
-    view = refused_only(ct(2026, 11, 8, 17, 4))
-    assert decide(ct(2026, 11, 8, 17, 5), view, {})[0] == []
-    assert [a.kind for a in decide(ct(2026, 11, 8, 17, 12), view, {})[0]] == ["stopped"]
+    view = refused_only(ct(2026, 11, 9, 6, 4))
+    assert decide(ct(2026, 11, 9, 6, 5), view, {})[0] == []
+    assert [a.kind for a in decide(ct(2026, 11, 9, 6, 12), view, {})[0]] == ["stopped"]
 
 
 def test_a_refused_only_instrument_is_quiet_outside_the_session():
@@ -184,10 +191,10 @@ def test_a_refused_only_instrument_is_quiet_outside_the_session():
 
 
 def test_a_refused_only_instrument_repeats_only_after_the_configured_time():
-    view = refused_only(ct(2026, 11, 2, 0, 0))
-    _, state = decide(ct(2026, 11, 2, 0, 0), view, {})
-    assert decide(ct(2026, 11, 2, 3, 59), view, state)[0] == []
-    assert len(decide(ct(2026, 11, 2, 4, 1), view, state)[0]) == 1
+    view = refused_only(ct(2026, 11, 2, 7, 0))
+    _, state = decide(ct(2026, 11, 2, 7, 0), view, {})
+    assert decide(ct(2026, 11, 2, 10, 59), view, state)[0] == []
+    assert len(decide(ct(2026, 11, 2, 11, 1), view, state)[0]) == 1
 
 
 def test_a_refused_only_instrument_resumes_when_a_capture_is_accepted():
