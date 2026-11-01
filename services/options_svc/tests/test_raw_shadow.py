@@ -108,13 +108,25 @@ def _feed_row(conn, symbol="FOP.ES"):
                        {7600.0: {"call": 1.0, "put": 0.0, "net": 1.0}}, 0)
 
 
-def test_a_symbol_the_raw_minute_does_not_name_is_not_a_difference(tmp_path, live_conn, minute):
+def test_a_feed_row_is_not_a_difference(tmp_path, live_conn, minute):
     """The /ES and /NQ feed stores its own rows, not through the collector, and a
     capture can share a minute with the poll. Its rows are not this minute's."""
     raw_store.write_minute(D, minute, root=tmp_path)
     _feed_row(live_conn)
+    _feed_row(live_conn, "FOP.NQ")
     out = raw_shadow.compare_minute(D, TS, live_conn, root=tmp_path)
     assert out["diffs"] == []
+
+
+def test_a_chain_the_raw_minute_lost_is_still_reported(tmp_path, live_conn, minute):
+    """The collector wrote QQQ and the raw minute does not hold it: exactly what this
+    check exists to catch. Only the feed's rows are left out, not whatever is unnamed."""
+    raw_store.write_minute(D, RawMinute(ts=TS, chains=[("SPY", _chain())], term=minute.term,
+                                        symbols=["SPY"]), root=tmp_path)
+    _feed_row(live_conn)
+    diffs = raw_shadow.compare_minute(D, TS, live_conn, root=tmp_path)["diffs"]
+    assert "QQQ/gex missing from shadow" in diffs
+    assert not any("FOP" in d for d in diffs)
 
 
 def test_an_existing_symbols_difference_is_still_reported_beside_a_feed_row(
@@ -129,7 +141,7 @@ def test_an_existing_symbols_difference_is_still_reported_beside_a_feed_row(
     assert not any("FOP" in d for d in diffs)
 
 
-def test_the_row_count_is_the_named_symbols_alone(tmp_path, live_conn, minute):
+def test_the_row_count_leaves_out_the_feed(tmp_path, live_conn, minute):
     raw_store.write_minute(D, minute, root=tmp_path)
     before = raw_shadow.compare_minute(D, TS, live_conn, root=tmp_path)["rows"]
     _feed_row(live_conn)

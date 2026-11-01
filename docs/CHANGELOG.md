@@ -8,7 +8,8 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 - **The final review's fix wave.** The PC's reasons are joined with `; `, which is what the
   server splits on: a logged-out ThinkorSwim gave /ES's label /NQ's reason and /NQ's none.
-  `raw_shadow` compares only the symbols a raw minute names, so a feed row is no difference.
+  `raw_shadow` leaves out the feed's rows on both sides, so one is no difference; a chain the
+  raw minute lost is still reported.
   One column width (`column_step`), and an outage tolerance that scales with the interval
   (`outage_after`): changing `interval_sec` alone left bars, Smooth, blanks and the projection
   wrong. A missed capture blanks at a lowered step. The feed waits for a busy store
