@@ -53,7 +53,7 @@ def test_condor_rows_excluded_from_caps_and_equity():
     assert state["realized_pnl"] == 0.0
 
 
-def test_manage_ledger_skips_condor_rows(ledger, monkeypatch):
+def test_manage_ledger_skips_condor_rows(ledger, monkeypatch):  # noqa: F811
     import signal_repricer
     repriced = []
     monkeypatch.setattr(signal_repricer, "reprice_legs",
@@ -66,7 +66,7 @@ def test_manage_ledger_skips_condor_rows(ledger, monkeypatch):
     assert repriced == ["m1"]
 
 
-def test_expire_ledger_skips_condor_rows(ledger, monkeypatch):
+def test_expire_ledger_skips_condor_rows(ledger, monkeypatch):  # noqa: F811
     import paper_engine
     monkeypatch.setattr(paper_engine, "settlement_underlying", lambda *a: 100.0)
     ledger.add_trade(_condor("c1", expiration="2026-09-10"))
@@ -76,7 +76,7 @@ def test_expire_ledger_skips_condor_rows(ledger, monkeypatch):
     assert by_id["c1"]["status"] == "OPEN" and by_id["m1"]["status"] == "EXPIRED"
 
 
-def test_reprice_view_shows_the_condor_mark_and_fetches_no_chain(view, ledger):
+def test_reprice_view_shows_the_condor_mark_and_fetches_no_chain(view, ledger):  # noqa: F811
     session, repriced = view
     ledger.add_trade(_condor("c1", quantity=2, last_mark_pnl=-40.0))
     got = {t["trade_id"]: t.get("unrealized_pnl")
@@ -84,7 +84,7 @@ def test_reprice_view_shows_the_condor_mark_and_fetches_no_chain(view, ledger):
     assert got["c1"] == -80.0 and "c1" not in repriced
 
 
-def test_expiring_condor_row_is_not_the_users_action_item(ledger, monkeypatch):
+def test_expiring_condor_row_is_not_the_users_action_item(ledger, monkeypatch):  # noqa: F811
     monkeypatch.setattr(compute, "reprice_captured", lambda: {"signals": [], "flags": []})
     monkeypatch.setattr(compute, "_load_open_positions", lambda: [])
     ledger.add_trade(_manual("m1", expiration="2026-09-17"))
@@ -93,7 +93,7 @@ def test_expiring_condor_row_is_not_the_users_action_item(ledger, monkeypatch):
     assert [r["symbol"] for r in out["expiring_today"]] == ["SPY"]
 
 
-def test_manual_close_of_a_condor_row_is_the_idea_close(ledger):
+def test_manual_close_of_a_condor_row_is_the_idea_close(ledger):  # noqa: F811
     ledger.add_trade(_condor("c1"))
     compute.close_paper("c1", 0.40)
     (row,) = ledger.get_all_trades()
@@ -119,7 +119,7 @@ def test_mark_cycle_holds_a_condor_row_short_of_its_stop(ledger, cycle):  # noqa
                                            "skipped": 0}
 
 
-def test_delete_closed_clears_condor_rows(ledger):
+def test_delete_closed_clears_condor_rows(ledger):  # noqa: F811
     ledger.add_trade(_manual("m1", "CLOSED"))
     ledger.add_trade(_condor("c1", "CLOSED"))
     ledger.add_trade(_condor("c2", "OPEN"))
