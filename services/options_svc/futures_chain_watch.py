@@ -13,8 +13,8 @@ not repeat all night), and one message when it resumes.
 
 Quiet where it should be:
 
-* outside the session (the daily gap, the weekend, before the Sunday open), when
-  nothing is expected;
+* outside the session (from the expiry until the next day's start, and the
+  weekend), when nothing is expected;
 * for ``stale_after_sec`` after a session opens, since the capture has had no time
   to take its first snapshot;
 * for an instrument with no status entry at all, which is a feed the PC has not
@@ -116,7 +116,7 @@ def _assess(entry, at: float, opens: float, capture: dict) -> str:
     session's open alone: it is trying, and nothing it sends is used.
 
     Age counts from the later of the capture and the session's open: a feed that
-    stopped on Friday has had no chance since the Sunday evening open. A run of
+    stopped on Friday has had no chance since Monday's open. A run of
     unchanged values counts only when the capture belongs to this session; the
     run carried over from the last expiry is no news."""
     captured = _captured_at(entry)

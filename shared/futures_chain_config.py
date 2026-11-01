@@ -88,7 +88,7 @@ DEFAULTS = {
         # Offered in the Dealer Positioning list. Ships off.
         "show_in_dropdown": False,
     },
-    "session": {"open_ct": "17:00", "close_ct": "15:00"},
+    "session": {"open_ct": "06:00", "close_ct": "15:00"},
     # Exactly these two. The symbol, the keys and the page follow code that knows
     # them, so a table for another root is not a feed and is ignored.
     "instruments": {"ES": _ES, "NQ": _NQ},
@@ -202,8 +202,9 @@ def _clock(raw, default) -> str:
 
 
 def session() -> dict:
-    """``{"open_ct", "close_ct"}``, each ``"HH:MM"`` Central: when trading opens
-    for an expiry and when that expiry stops."""
+    """``{"open_ct", "close_ct"}``, each ``"HH:MM"`` Central: when capture starts
+    for an expiry and when that expiry stops. ``futures_chain.session_bounds`` says
+    which date ``open_ct`` falls on."""
     table = _table("session")
     return {key: _clock(table.get(key), DEFAULTS["session"][key])
             for key in ("open_ct", "close_ct")}

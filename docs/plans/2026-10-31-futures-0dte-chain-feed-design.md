@@ -369,6 +369,13 @@ The page and the stack think in stock-market days. These symbols do not.
   two hours and a longer one at weekends. Confirm these times against CME. Rows and
   views for these symbols key on the expiry date, not the calendar date of the capture,
   so a Sunday-evening capture belongs to Monday's session.
+- **Changed 2026-11-01, the operator's call: the capture ships starting at 06:00 CT on the
+  expiry's own date.** Each capture's gamma depends only on that capture, so values from
+  06:00 on do not change; the overnight columns go, which also leaves about 108 columns by
+  the close rather than 264, and a colour scale that locks on 06:00 to 07:00 rather than on
+  the thin first evening hour. The overnight history cannot be recovered later. `open_ct`
+  at or after `close_ct` still means the evening before, so `"17:00"` restores this
+  section's whole session.
 - **The time charts:** the page's filters (`_rth_only`, `_rth_bounds`,
   `_display_session_date`) keep 08:30 to 15:00. These symbols need the full session, and
   existing symbols must go through unchanged code. Offer no new switch that overrides an

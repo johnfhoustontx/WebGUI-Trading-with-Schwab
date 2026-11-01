@@ -29,6 +29,33 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 - Settings → Configuration → Market read → Volume holds every threshold and window. The
   manuals and `page_help.py` follow.
 
+**Prior —** 2026-11-01 (**/ES and /NQ rows on the Desk's Dealer Positioning panel, with the frame unchanged and a scrollbar.**)
+
+- The operator's request. `options:matrix` is public and the feed never reaches a public key,
+  so each accepted capture writes its own short row (`services/options_svc/futures_chain_desk.py`,
+  `cache:options:futures_chain_desk`), and the private Desk reads it through `pages/desk_feed.py`.
+  The published Desk does not probe the view (`desk.live_views`) and its panel is unchanged.
+- Head + four rows measure 276.75 px at 1920 (63.19 a row), so the body stops at 277, or 296
+  with the stale-walls note, and scrolls under a pinned head. Checked in the page harness with
+  the feed view rewritten every 8 s: the scroll position survives a repaint.
+- A row has no prior close, so its second line says `as of 13:55`. It keeps its own clock: the
+  stock feed's stale note now says "Stock and index walls" when these rows share the panel. A
+  row is not clickable while `show_in_dropdown` is off, as the list could not hold the symbol.
+- `_paint_dealer` moved out of `desk.render` to module level, and its ceiling came down with it.
+
+**Prior —** 2026-11-01 (**/ES and /NQ are captured from 06:00 Central on the expiry's date, not from 17:00 the evening before.**)
+
+- The operator's call: 06:00 to the 15:00 expiry, Monday to Friday. It is one setting,
+  `[session] open_ct`, and no second clock: `session_bounds` puts a start before `close_ct` on
+  the expiry's date and a start at or after it on the evening before, so `"17:00"` restores
+  the whole futures session. The PC, the stopped-capture watch and the page's label all ask
+  the same two functions, so none of them needed a change of its own, and the script is
+  untouched (it waits for the plan's `opens`).
+- A capture's gamma depends only on that capture's own open interest, volatility, price and
+  time left, so values from 06:00 on are the same as they would have been. What goes is the
+  overnight history, which cannot be recovered later. Settings → Configuration now labels the
+  field **Capture starts**. Nothing measured on a live session yet.
+
 **Prior —** 2026-10-31 (**/ES and /NQ 0-DTE option chains on Dealer Positioning, captured from ThinkorSwim on the PC. Ships hidden.**)
 
 - **The final review's fix wave.** The PC's reasons are joined with `; `, which is what the

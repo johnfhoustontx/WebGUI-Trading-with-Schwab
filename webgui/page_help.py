@@ -79,7 +79,9 @@ on · what is being said.*
   read yet**, so every chip falls back to the three-month view and the strip says
   so under the count. A colour you see pre-open is **not** a statement about
   today.
-- **Dealer positioning** — one row each for **$SPX, SPY, QQQ, $NDX**: price, the
+- **Dealer positioning** — one row each for **$SPX, SPY, QQQ, $NDX** (**/ES and
+  /NQ** follow once captures arrive: **scroll the panel** to reach them, and under
+  their price they say when they were captured, not a day change): price, the
   **floor**, a little bar showing where price sits **between the walls**, the
   **ceiling** (the put and call walls — each coloured like its marker on the bar,
   and the ceiling only caps price while price is below it), the **flip level**
@@ -765,7 +767,7 @@ accelerate price.
   symbol when you come back, and switching symbols refreshes automatically.
 - **/ES and /NQ** — the two futures, when the feed is switched on. Their chains do
   not come from Schwab: **ThinkorSwim on your PC** captures the options expiring at
-  the end of the session, one capture every few minutes, from the evening before.
+  the end of the session, one capture every few minutes, from 06:00 Central that day.
   ThinkorSwim's own gamma rounds to zero for these, so it is **calculated** from each
   contract's implied volatility. The heat map draws one column per capture, so it holds one capture a
   column rather than one minute. The line above the charts says when the numbers were

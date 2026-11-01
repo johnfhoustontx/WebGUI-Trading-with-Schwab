@@ -553,7 +553,7 @@ structure · what should I act on · what is being said.*
 | Panel | What it gives you |
 |-------|-------------------|
 | **Top strip** | Clock, two dials showing **Day / Week / Month** for sentiment and trend, then **Bias** (Long / Neutral / Cautious / Short), **Signal** (Strong Bull … Strong Bear) and the **market regime** word |
-| **Dealer Positioning** | One row each for **$SPX, SPY, QQQ, $NDX** — price, gamma flip and distance to it, call and put walls, net gamma, and a pins-or-runs chip |
+| **Dealer Positioning** | One row each for **$SPX, SPY, QQQ, $NDX**, then **/ES and /NQ** once captures arrive (scroll the panel to reach them; the frame stays four rows high, and they are not on the public Desk) — price, gamma flip and distance to it, call and put walls, net gamma, and a pins-or-runs chip |
 | **Opportunity Board** | The six hottest names, with implied volatility and whether it is rising or falling, and a setup tag |
 | **Live Flow Alerts** | The newest unusual-options events. A row that names one contract can carry a bar under it: the estimated share of its volume that was bought (green), sold (red), or could not be told (grey) |
 | **Headlines** | The nine newest stories from Market News, one line each — time (Central), feed, and the headline, which opens the article in a new tab. **All headlines →** opens Market News. It sits beside Live Flow Alerts. How many it shows is a setting: **Settings → Configuration → Market news → Headlines on the Desk** |
@@ -1083,10 +1083,12 @@ service and the web app from System Status.
 are never worked out from `$SPX` or `$NDX`, not even when the feed is down. A capture
 program on **your PC** reads the chains out of **ThinkorSwim** through Excel and sends
 each one to the server. It takes a snapshot every **300 seconds** (**Take a snapshot
-every**, `interval_sec`), from **17:00** Central the evening before an expiry
-(**Opens**, `open_ct`) to **15:00** Central on it (**Expires**, `close_ct`). Monday's
-options therefore start on Sunday evening, and there is no capture from Friday afternoon
-to Sunday evening, nor between an expiry and the next open (15:00 to 17:00 as shipped).
+every**, `interval_sec`), from **06:00** Central on the day of an expiry (**Capture
+starts**, `open_ct`) to **15:00** Central, when it expires (**Expires**, `close_ct`),
+Monday to Friday. Nothing is captured overnight or at the weekend, so the heat map starts
+at 06:00 and the PC need not be on before then. Set **Capture starts** to **17:00** to
+capture the whole futures session: a start at or after the expiry's time means the evening
+before, so Monday's options then start on Sunday evening.
 
 > **The PC has to be on, awake, online and logged in to Windows, and ThinkorSwim has to
 > be running and logged in.** The capture never starts ThinkorSwim and never types your

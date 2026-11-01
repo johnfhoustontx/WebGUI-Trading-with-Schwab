@@ -248,6 +248,9 @@ was replaced by Bias and Signal on 2026-08-24.
 change, the **gamma flip** with the signed distance to it, the **call and put
 walls**, net gamma exposure, and a regime chip. The small bar shows where price
 sits *between the two walls*.
+/ES and /NQ follow the four once captures arrive, in the private app only. The frame stays
+four rows high, so scroll the panel to reach them. Under their price they say when the
+capture was taken instead of a day change, and their walls hide when that capture is old.
 
 The chip reads **LONG GAMMA · PINS** or **SHORT GAMMA · RUNS**, and it is derived
 from price-versus-flip and nothing else. Net gamma exposure is shown beside it as a
@@ -593,7 +596,7 @@ level on this page. Above it, expect mean-reversion; below it, expect momentum.
 | Page refresh | Every 2 minutes; the symbol dropdown refreshes on change |
 | Storage | `gex_history.db` — five series per symbol per minute (gamma, charm, delta, vanna, premium) |
 | Off-hours | The **last available session** stays on screen 24/7. Friday's chart holds all weekend. |
-| /ES and /NQ | Hidden until switched on (Settings → Configuration → /ES and /NQ chain feed). Not from Schwab: a capture from ThinkorSwim on the operator's PC, one chain per interval, from the evening before an expiry to its afternoon close, so the charts run through the night and the label says how old the numbers are. See the User Guide's */ES and /NQ* |
+| /ES and /NQ | Hidden until switched on (Settings → Configuration → /ES and /NQ chain feed). Not from Schwab: a capture from ThinkorSwim on the operator's PC, one chain per interval, from 06:00 Central on the day of an expiry to its afternoon close, and the label says how old the numbers are. See the User Guide's */ES and /NQ* |
 
 ### Reading the screen
 

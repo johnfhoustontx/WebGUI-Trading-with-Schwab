@@ -165,7 +165,7 @@ def _contract(row: FuturesContractRow, future: float, hours_left: float, scale: 
         "mark": row.mark,
         "bid": row.bid,
         "ask": row.ask,
-        # One session is one expiry, at DTE 0 from the evening it opens: the
+        # One session is one expiry, at DTE 0 from the moment it opens: the
         # engine's 0-DTE slice and nearest-expiry search both rely on it.
         "daysToExpiration": 0,
         "series": row.series,

@@ -42,7 +42,7 @@ def test_the_capture_defaults():
 
 
 def test_the_session_defaults():
-    assert cfg.session() == {"open_ct": "17:00", "close_ct": "15:00"}
+    assert cfg.session() == {"open_ct": "06:00", "close_ct": "15:00"}
 
 
 def test_the_shipped_file_carries_the_defaults():

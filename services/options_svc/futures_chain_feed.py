@@ -302,7 +302,20 @@ def _snapshot(bus, args) -> None:
                            "stopped updating.")
     status[symbol] = entry
     bus.cache_set(futures_chain.STATUS_KEY, status)
+    _publish_desk_row(bus, adapted, price, capture, repeats)
     _repaint(bus, symbol)
+
+
+def _publish_desk_row(bus, adapted, price, capture: dict, repeats: int) -> None:
+    """The Desk's row. Imported here because that module reads this one. The capture
+    is already stored, so a failure costs one row and is not raised, or the command
+    would be dead-lettered as if the capture had failed."""
+    from services.options_svc import futures_chain_desk
+    try:
+        futures_chain_desk.publish(bus, adapted, price, capture,
+                                   not_moving=repeats >= capture["frozen_repeats"])
+    except Exception:
+        _degrade.degraded(AREA, detail=f"{adapted.symbol} Desk row")
 
 
 def _repaint(bus, symbol: str) -> None:

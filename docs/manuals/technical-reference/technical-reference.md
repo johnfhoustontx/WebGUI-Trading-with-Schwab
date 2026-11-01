@@ -4655,8 +4655,8 @@ is wrong overnight: at 18:00 Central on the evening before expiry it returns 24 
 21 remain) with `T = max(hours_left / (365 · 24), 1e-6)`, for GEX, charm, vanna, the
 calculated delta and the 0-DTE projection alike. `RawMinute.hours_left` carries it through
 `derive_minute` for a symbol that has one. Every other caller passes nothing and prices as
-before. `daysToExpiration` is stamped 0 on every contract, including an evening capture whose
-expiry is tomorrow, so the engine's 0-DTE slice and its nearest-expiry search find the one
+before. `daysToExpiration` is stamped 0 on every contract, however far off the
+expiry is, so the engine's 0-DTE slice and its nearest-expiry search find the one
 expiry; `dte` says nothing to a reader here.
 
 ## Gamma, as coded
@@ -4757,10 +4757,13 @@ reported as a stopped feed on the entry's reason, though they arrive on time.
 
 ## The session, storage and what the page shows
 
-- **A session opens the evening before its expiry** and so spans two calendar dates.
-  `futures_chain.session_expiry(now)` names the session a moment belongs to (the daily gap
-  names the next day's, a weekend rolls to Monday); `session_bounds(expiry)` is its
-  `(opens, ends)`; `gex_history_db.SessionSpan` lets the history loaders take a span where
+- **A session is one expiry, captured from `open_ct` (06:00 Central) to `close_ct`
+  (15:00).** A start before the close is on the expiry's own date; a start at or after it
+  (17:00, the whole futures session) is the evening before, and that session spans two
+  calendar dates. `futures_chain.session_expiry(now)` names the session a moment belongs to
+  (the hours after a close name the next day's, a weekend rolls to Monday);
+  `session_bounds(expiry)` is its `(opens, ends)`, and `in_session` is what the plan, the
+  stopped-capture watch and the page's label all ask; `gex_history_db.SessionSpan` lets the history loaders take a span where
   they took a date. `compute.gamma_snapshot(session=)` reads the whole span, with no 08:30 to
   15:00 window, prices the chain at the capture's own time and its `hours_left`, and fills
   the rows to the page's columns.
@@ -4951,7 +4954,7 @@ the source; this table is a summary of them.
 | market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); report summary re-read when the published market report changes (a stat of `deploy/site/reports/latest.html` + `latest.txt` per poll) — no Claude call. |
 | news_svc | Three branches, launched every **30 s** tick (`TICK_S`) as keyed background tasks, so a slow one delays only itself and one still running is skipped, never doubled. **feeds**: every feed polled every **2 min** 08:30–15:00 CT (`[collector] rth_poll_min`), **5 min** in the extended sessions 06:30–08:25 and 15:00–15:15 CT (`eth_poll_min`), **30 min** otherwise on a trading day (`offhours_poll_min`) and **30 min** at weekends and holidays (`weekend_poll_min`), counted from the END of the last poll; nothing polls faster than **60 s** (`MIN_INTERVAL_S`). **calendar**: every tick, fetching only the sources whose own `refresh_min` is due (Fed 60 min, BLS / BEA / FRED calendar 720, Nasdaq 240, values 240). **watch**: every tick, fetching only a series whose release just passed — every **2 min** for up to **60 min**. All in `config/news.toml`, editable in Settings. One cycle of each at a time: a Refresh during one is skipped. |
 | blog_svc | The loop wakes every **30 s** (`TICK_S`) to beat its heartbeat and re-read the interval. **At start**: repair the store, rebuild every entry page on the site, publish the two list views. **Then every 30 min** (`[site] republish_min` in `config/blog.toml`, 1 to 1440, counted from the END of the last pass): the site rebuild again, which rewrites only what differs from the store, and the two views again. A pass that fails is retried at the next wake. Everything else is on demand, when the Blog page sends a command. |
-| /ES and /NQ chain feed | Not a service: a capture on the operator's PC, every **300 s** on the epoch clock (`[capture] interval_sec` in `config/futures_chain.toml`) from **17:00** Central the evening before an expiry to **15:00** Central on it, then one ssh to vps2 per capture. `options_svc` handles each on arrival (`cmd:futures_chain`) and its **stopped-capture watch** runs each 30 s scheduler tick, with no NYSE gate. No Schwab or proxy call. See *The /ES and /NQ chain feed*. |
+| /ES and /NQ chain feed | Not a service: a capture on the operator's PC, every **300 s** on the epoch clock (`[capture] interval_sec` in `config/futures_chain.toml`) from **06:00** Central on the day of an expiry to **15:00** Central, Monday to Friday (`[session]`), then one ssh to vps2 per capture. `options_svc` handles each on arrival (`cmd:futures_chain`) and its **stopped-capture watch** runs each 30 s scheduler tick, with no NYSE gate. No Schwab or proxy call. See *The /ES and /NQ chain feed*. |
 
 Some scheduled jobs are **not** on any service's loop — they are systemd timers,
 generated from `config/sessions.toml` by `deploy/systemd/generate_units.py`, so moving

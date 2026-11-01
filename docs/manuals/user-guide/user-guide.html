@@ -766,7 +766,7 @@ structure · what should I act on · what is being said.</em></p>
 </tr>
 <tr>
 <td><strong>Dealer Positioning</strong></td>
-<td>One row each for <strong>$SPX, SPY, QQQ, $NDX</strong> — price, gamma flip and distance to it, call and put walls, net gamma, and a pins-or-runs chip</td>
+<td>One row each for <strong>$SPX, SPY, QQQ, $NDX</strong>, then <strong>/ES and /NQ</strong> once captures arrive (scroll the panel to reach them; the frame stays four rows high, and they are not on the public Desk) — price, gamma flip and distance to it, call and put walls, net gamma, and a pins-or-runs chip</td>
 </tr>
 <tr>
 <td><strong>Opportunity Board</strong></td>
@@ -1461,10 +1461,12 @@ service and the web app from System Status.</p>
 are never worked out from <code>$SPX</code> or <code>$NDX</code>, not even when the feed is down. A capture
 program on <strong>your PC</strong> reads the chains out of <strong>ThinkorSwim</strong> through Excel and sends
 each one to the server. It takes a snapshot every <strong>300 seconds</strong> (<strong>Take a snapshot
-every</strong>, <code>interval_sec</code>), from <strong>17:00</strong> Central the evening before an expiry
-(<strong>Opens</strong>, <code>open_ct</code>) to <strong>15:00</strong> Central on it (<strong>Expires</strong>, <code>close_ct</code>). Monday's
-options therefore start on Sunday evening, and there is no capture from Friday afternoon
-to Sunday evening, nor between an expiry and the next open (15:00 to 17:00 as shipped).</p>
+every</strong>, <code>interval_sec</code>), from <strong>06:00</strong> Central on the day of an expiry (<strong>Capture
+starts</strong>, <code>open_ct</code>) to <strong>15:00</strong> Central, when it expires (<strong>Expires</strong>, <code>close_ct</code>),
+Monday to Friday. Nothing is captured overnight or at the weekend, so the heat map starts
+at 06:00 and the PC need not be on before then. Set <strong>Capture starts</strong> to <strong>17:00</strong> to
+capture the whole futures session: a start at or after the expiry's time means the evening
+before, so Monday's options then start on Sunday evening.</p>
 <blockquote>
 <p><strong>The PC has to be on, awake, online and logged in to Windows, and ThinkorSwim has to
 be running and logged in.</strong> The capture never starts ThinkorSwim and never types your

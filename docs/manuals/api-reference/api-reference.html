@@ -2764,6 +2764,10 @@ empty, not a number, not finite or a boolean is <code>null</code>, never 0; a pr
 <td>The feed's health: <code>{&lt;symbol&gt;: entry, pc: {reason, at}}</code>, below</td>
 </tr>
 <tr>
+<td><code>cache:options:futures_chain_desk</code></td>
+<td>The private Desk's rows: <code>{&lt;symbol&gt;: {latest, frozen}}</code>, each <code>{symbol, spot, flip, call_wall, put_wall, net_gex, gex_regime, captured_at, expiry, not_moving}</code>. Written on each accepted capture; <code>frozen</code> stops <code>frozen_before_expiry_min</code> before expiry. The published Desk never reads it.</td>
+</tr>
+<tr>
 <td><code>cache:options:futures_chain_alert</code></td>
 <td>What the stopped-capture alert has told the operator: <code>{&lt;symbol&gt;: {alerted_at}}</code> for each instrument last reported stopped. Its own key: the status view is read, changed and written back by the stream's consumer thread, and a second writer would lose a write. Nothing else reads it</td>
 </tr>
@@ -3874,6 +3878,7 @@ cache:options:futures_chain:&lt;FOP.ES | FOP.NQ&gt;   (the newest /ES or /NQ cha
 cache:options:futures_chain:&lt;FOP.ES | FOP.NQ&gt;:frozen   (the last capture far enough before expiry)
 cache:options:futures_chain_status   (the feed's health, per instrument, and the PC's report)
 cache:options:futures_chain_alert    (what the stopped-capture alert has told the operator)
+cache:options:futures_chain_desk     (the private Desk's /ES and /NQ rows)
 cmd:futures_chain                    (the PC's snapshots, over ssh through tools/futures_chain_cli.py)
 cmd:options
 </code></pre>
