@@ -53,7 +53,7 @@ class MarketSummary(_Base):
 class MarketRead(_Base):
     """The Desk's Market read (cache:market:read).
 
-    Six rows, each a ``tailwind`` / ``headwind`` / ``neutral`` / ``none``
+    Seven rows, each a ``tailwind`` / ``headwind`` / ``neutral`` / ``none``
     verdict for stocks with the numbers it was decided from, taken on a clock
     slot in the regular session (``services/market_svc/market_read.py``). Like
     the other domain contracts this validates the envelope's shape, not each
@@ -79,3 +79,28 @@ class MarketRead(_Base):
     tally: dict = {}               # {verdict code: count}
     rows: list[dict] = []          # [{key, verdict, facts, prev, estimate?, public?}]
     history: list[dict] = []       # [{slot, verdicts: {key: code}}] for the day
+
+
+class MarketVolume(_Base):
+    """Traded volume and what it says (cache:market:volume).
+
+    Built by ``services/market_svc/volume_read.py``. The Desk's Market read takes
+    its Volume row from it, and the daily market reports print its ``statements``
+    word for word. A figure that is not available is ``None``, never 0.
+
+    ``date`` is the CT day the view was built on; ``session_date`` is the session
+    its figures describe, which is an EARLIER one when ``phase`` is
+    ``before_open`` or ``closed``.
+    """
+
+    enabled: bool = True
+    date: str = ""                 # the CT day it was built, YYYY-MM-DD
+    ts: int = 0                    # unix seconds it was built
+    phase: str = ""                # session | after_close | before_open | closed
+    session_date: str | None = None
+    through: str | None = None     # "HH:MM" Central: the end of the last whole bar
+    # [{symbol, pace, up_share, word, bars, baseline_sessions}]
+    symbols: list[dict] = []
+    sectors: dict | None = None    # {up_share, funds}
+    range_hint: str | None = None  # "wider" | "narrower", in the session only
+    statements: list[str] = []     # the view as plain sentences

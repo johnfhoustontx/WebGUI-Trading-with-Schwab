@@ -2807,6 +2807,53 @@ _MARKET_READ = ConfigFile(
             Field("flow.min_contracts", "Needs at least this many flagged contracts",
                   "Fewer reads No reading.", kind="int", min=1, max=200, step=1),
         )),
+        Section("Volume", "Traded volume, for the Volume row and the daily market "
+                "reports. Heavy volume went with wider moves later and did not "
+                "predict direction, so a chip says what has happened.", (
+            Field("volume.enabled", "Fetch traded volume",
+                  "Off stops the fetch. The Volume row then reads No reading and "
+                  "the reports say the figures are not available.", kind="bool"),
+            Field("volume.symbols", "Symbols read",
+                  "Read from five-minute bars. They must agree for the row to "
+                  "lean either way.", kind="symbols"),
+            Field("volume.sector_symbols", "Sector funds",
+                  "For the share of dollars traded in rising sectors. A fact in "
+                  "the text; it decides no chip.", kind="symbols"),
+            Field("volume.baseline_sessions", "Usual is the median of",
+                  "That many earlier sessions, by the same time of day. At most "
+                  "9: Schwab serves ten days of bars, today included.",
+                  kind="int", unit="sessions", min=1, max=9, step=1),
+            Field("volume.min_sessions", "Needs at least this many sessions",
+                  "Fewer reads No reading.", kind="int", unit="sessions",
+                  min=1, max=9, step=1),
+            Field("volume.min_bars", "Needs at least this many finished bars today",
+                  "Fewer reads No reading. Each bar is five minutes.",
+                  kind="int", min=1, max=78, step=1),
+            Field("volume.heavy_ratio", "Heavy at or above",
+                  "Times the usual volume by this time of day. Must be above "
+                  "light, or both revert.", kind="float", unit="times",
+                  min=0.5, max=5, step=0.05),
+            Field("volume.light_ratio", "Light at or below",
+                  "Times the usual volume by this time of day.", kind="float",
+                  unit="times", min=0.1, max=2, step=0.05),
+            _pct("volume.up_share_strong", "Tailwind when heavy and at least",
+                 "This share of the volume came in rising bars."),
+            _pct("volume.up_share_weak", "Headwind when heavy and at most",
+                 "This share of the volume came in rising bars. Must be below "
+                 "the share above, or both revert."),
+            Field("volume.min_sectors", "Needs at least this many sector funds",
+                  "Fewer leaves the sector share out.", kind="int", min=1, max=50, step=1),
+            Field("volume.refresh_min", "Fetch every",
+                  "In the session. Each fetch costs one bar series per symbol "
+                  "and one quote call.", kind="int", unit="min", min=5, max=30, step=5),
+            Field("volume.settle_sec", "Wait after the mark",
+                  "So the bar has closed. At least 60: Schwab refuses calls in "
+                  "the minute after the hour and half hour.",
+                  kind="int", unit="sec", min=60, max=240, step=10),
+            Field("volume.stale_after_sec", "Ignore volume older than",
+                  "The Volume row reads No reading past this.",
+                  kind="int", unit="sec", min=60, max=3600, step=30),
+        )),
     ),
 )
 

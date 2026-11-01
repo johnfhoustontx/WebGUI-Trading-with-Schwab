@@ -61,6 +61,13 @@ def _status(age=40.0):
     return {"status_label": "Live", "age_seconds": age, "last_scan": "12:44:20 PM"}
 
 
+def _volume(date=MON):
+    """Ordinary volume: the row reads Neutral. ``test_volume_read`` covers the rest."""
+    return {"date": date, "ts": 1, "phase": "session", "through": "12:40",
+            "symbols": [{"symbol": s, "pace": 1.0, "up_share": 0.5, "word": "usual",
+                         "bars": 40, "baseline_sessions": 9} for s in ("SPY", "QQQ")]}
+
+
 @pytest.fixture
 def bus():
     b = Bus()
@@ -68,6 +75,7 @@ def bus():
     b.cache_set(scheduler.READ_INPUTS["matrix"], _matrix())
     b.cache_set(scheduler.READ_INPUTS["gex_status"], _status())
     b.cache_set(scheduler.READ_INPUTS["sides"], _flow())
+    b.cache_set(scheduler.READ_INPUTS["volume"], _volume())
     return b
 
 
@@ -89,7 +97,7 @@ def test_a_due_slot_publishes_one_reading(bus):
     view = _view(bus)
     assert (view["date"], view["slot"], view["next_slot"]) == (MON, "12:45", "13:00")
     assert [r["key"] for r in view["rows"]] == list(market_read.ROW_KEYS)
-    assert [r["verdict"] for r in view["rows"]] == [T, T, H, H, T, N]
+    assert [r["verdict"] for r in view["rows"]] == [T, T, H, H, T, N, N]
     assert view["public"] is True and view["final"] is False
     MarketRead(**view)                      # the published payload fits its contract
 
@@ -154,8 +162,8 @@ def test_empty_sources_publish_no_reading_on_every_row_never_neutral():
     bus = Bus()
     assert scheduler.refresh_read(bus, {}, now=_at(12, 46)) == "12:45"
     view = _view(bus)
-    assert [r["verdict"] for r in view["rows"]] == [X] * 6
-    assert view["tally"] == {"tailwind": 0, "headwind": 0, "neutral": 0, "none": 6}
+    assert [r["verdict"] for r in view["rows"]] == [X] * 7
+    assert view["tally"] == {"tailwind": 0, "headwind": 0, "neutral": 0, "none": 7}
 
 
 def test_a_dashboard_with_no_tiles_publishes_no_reading_for_its_rows(bus):
@@ -174,7 +182,7 @@ def _verdicts(bus):
 def test_every_stale_source_is_treated_as_absent(bus, _cfg):
     # An hour past the moment the sources were written.
     scheduler.refresh_read(bus, {}, now=_at(12, 46), wall=time.time() + 3600)
-    assert list(_verdicts(bus).values()) == [X] * 6
+    assert list(_verdicts(bus).values()) == [X] * 7
     # The flow view too. options_svc rewrites it every minute once a contract
     # is flagged, and an unchanged write still refreshes its stamp, so an old
     # one means the tally has stopped moving, not that the tape is quiet.
@@ -192,6 +200,7 @@ def test_the_two_stale_limits_are_read_from_config(bus, _cfg):
     scheduler.refresh_read(bus, {}, now=_at(12, 46), wall=time.time() + 3600)
     got = _verdicts(bus)
     assert got["flow"] == T                 # judged by the general limit
+    assert got["volume"] == X               # the volume view has a limit of its own
     assert got["direction"] == X            # the dashboard has a limit of its own
     _cfg["dashboard_stale_after_sec"] = 7200
     scheduler.refresh_read(bus, {}, now=_at(13, 1), wall=time.time() + 3600)
@@ -292,7 +301,7 @@ def test_switching_it_back_on_takes_a_reading_at_once(bus, _cfg):
     _cfg["enabled"] = True
     assert scheduler.refresh_read(bus, state, now=_at(12, 48)) == "12:45"
     view = _view(bus)
-    assert view["enabled"] is True and len(view["rows"]) == 6
+    assert view["enabled"] is True and len(view["rows"]) == 7
     assert all(r["prev"] is None for r in view["rows"])
 
 

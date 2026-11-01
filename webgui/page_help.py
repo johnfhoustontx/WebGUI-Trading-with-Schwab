@@ -118,7 +118,7 @@ on · what is being said.*
 - **Your positions are not on this page.** Open paper trades are on **Paper
   Account**, captured signals on **Captured Signals**, and the **Symbol** page
   shows anything open in one name.
-- **Market read** (button, top right) — opens a popup of six readings, each
+- **Market read** (button, top right) — opens a popup of seven readings, each
   marked **Tailwind**, **Headwind** or **Neutral** under the heading **For
   stocks**. The smaller text under its name, inside the button, is the time of
   the reading and its count, so you can read it without opening anything. A new reading is taken every 15
@@ -128,7 +128,12 @@ on · what is being said.*
   funds and stocks are rising against falling), **Structure** (where SPY and
   QQQ sit against the dealer flip and the ceiling), **Volatility** (the VIX and
   its one-day and three-month versions), **Flow** (the bought/sold estimate,
-  marked ≈) and **Cross-asset** (Treasuries, the dollar and credit).
+  marked ≈), **Cross-asset** (Treasuries, the dollar and credit) and **Volume**
+  (how SPY and QQQ have traded against their usual volume by this time of day,
+  and how much of it came as prices rose). Volume is a Tailwind or a Headwind
+  only when both funds trade heavily with prices going the same way. It says
+  what has happened: heavy volume has gone with wider moves later in the day,
+  and light volume with narrower ones, and neither has said which way.
   **Since last** says what changed: "was Neutral" when the chip flipped,
   otherwise how far the row's main number moved.
   It is a count of rules, **not a forecast** and not advice, and it is a
@@ -141,7 +146,9 @@ on · what is being said.*
 - **Market report** (button, top right) — opens the **latest market report**
   in a popup, in full. The smaller text under its name, inside the button, says
   which report it is (for example *Market close report · 14 Sep · 16:20 CT*); it changes when a
-  new report is published (five a trading day), not on a clock. **Open in a new
+  new report is published (five a trading day), not on a clock. Each report has a
+  **Volume** section with the same figures, written by the market service and
+  printed word for word. **Open in a new
   tab** inside the popup opens the same report on the website. The button is
   absent until a report has been published.
   **Either button glows** for five minutes after a new reading or a new

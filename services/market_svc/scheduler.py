@@ -27,7 +27,7 @@ from datetime import time as _time
 from zoneinfo import ZoneInfo
 
 from services import _degrade, _heartbeat
-from services.market_svc import compute, handlers, market_read, report_summary
+from services.market_svc import compute, handlers, market_read, report_summary, volume_read
 from shared import market_calendar as mc
 from shared import market_read_config
 from shared.numeric import finite
@@ -109,19 +109,21 @@ def refresh_summary(bus, last_stamp, reports_dir=None):
 
 
 # ── the Desk's Market read ───────────────────────────────────────────────────
-# The four views a reading is built from. Every one is rewritten on a clock
-# while its publisher is alive (the dashboard every poll; the other three every
-# minute or faster, and an unchanged write still refreshes the view's stamp), so
-# an OLD one means its publisher has stopped and it is judged by AGE.
+# The five views a reading is built from. Every one is rewritten on a clock
+# while its publisher is alive (the dashboard every poll; the volume view every
+# ``[volume] refresh_min``; the other three every minute or faster, and an
+# unchanged write still refreshes the view's stamp), so an OLD one means its
+# publisher has stopped and it is judged by AGE.
 READ_INPUTS = {
     "dashboard": handlers.CACHE,
     "matrix": "cache:options:matrix",
     "gex_status": "cache:options:gex_status",
     "sides": "cache:options:flow_sides",
+    "volume": handlers.CACHE_VOLUME,
 }
-# ...and this one by the session DATE it carries as well: yesterday's tally,
+# ...and these by the session DATE they carry as well: yesterday's tally,
 # republished by nothing, is still not today's.
-_READ_BY_DATE = ("sides",)
+_READ_BY_DATE = ("sides", "volume")
 
 
 def _age_sec(stamp, wall):
@@ -133,7 +135,7 @@ def _age_sec(stamp, wall):
 
 
 def _read_inputs(bus, today, wall, cfg) -> dict:
-    """The four source views, each None when it is missing, too old, or from
+    """The five source views, each None when it is missing, too old, or from
     another day: absent to the row that reads it, which then has no reading."""
     metas = bus.cache_metas(list(READ_INPUTS.values()))
     out, ages = {}, {}
@@ -142,8 +144,9 @@ def _read_inputs(bus, today, wall, cfg) -> dict:
         payload = env.payload if env else None
         stamp = (metas.get(key) or (None, None))[1] or getattr(env, "ts", None)
         age = ages[name] = _age_sec(stamp, wall)
-        limit = cfg["dashboard_stale_after_sec" if name == "dashboard"
-                    else "stale_after_sec"]
+        limit = (cfg["dashboard_stale_after_sec"] if name == "dashboard"
+                 else cfg["volume"]["stale_after_sec"] if name == "volume"
+                 else cfg["stale_after_sec"])
         if (not isinstance(payload, dict) or age is None or age > limit
                 or (name in _READ_BY_DATE and payload.get("date") != today)):
             out[name] = None
@@ -223,15 +226,64 @@ def refresh_read(bus, state, now=None, wall=None):
         return None
 
 
+# ── traded volume ────────────────────────────────────────────────────────────
+def refresh_volume(bus, state, now=None):
+    """Fetch and publish ``cache:market:volume`` when due; return the key, or None.
+
+    ``state`` is the caller's dict and survives between calls. Never raises. When
+    no symbol's bars came back nothing is published, so the last view stays and
+    goes stale by age, and the fetch is retried after ``retry_sec``: a failed
+    fetch must not read as a session with no volume."""
+    at = market_read.ct(now or _dt.datetime.now(_CT))
+    retry = market_read_config.DEFAULTS["retry_sec"]
+    try:
+        if at.timestamp() < state.get("retry_at", 0):
+            return None
+        cfg = market_read_config.load()
+        retry = cfg["retry_sec"]
+        limits = cfg["volume"]
+        if limits.get("enabled") is not True:
+            return None
+        due = volume_read.due(at, state.get("key"), limits)
+        if due is None:
+            return None
+        key, through = due
+        candles = {s: compute.fetch_bars(s, period_days=volume_read.BAR_PERIOD_DAYS,
+                                         frequency=volume_read.BAR_MIN)
+                   for s in limits["symbols"]}
+        if all(c is None for c in candles.values()):
+            state["retry_at"] = at.timestamp() + retry
+            return None
+        raw = (compute.fetch_raw_quotes(limits["sector_symbols"])
+               if volume_read.phase_at(at) in (volume_read.SESSION, volume_read.AFTER_CLOSE)
+               else {})
+        handlers.publish_volume(bus, volume_read.build(
+            candles, raw, at, limits, ts=int(at.timestamp()), through=through))
+        state["key"] = key
+        return key
+    except Exception:
+        _degrade.degraded("market.volume")
+        state["retry_at"] = at.timestamp() + retry
+        return None
+
+
 async def loop(bus) -> None:
     """Poll → publish → the Market read, when a slot is due → (the report
-    summary, when the report changed) → sleep."""
+    summary, when the report changed) → sleep. Traded volume is fetched beside
+    this, never inside it: a slow bar series must not hold up the three-second
+    poll."""
     loop_ = asyncio.get_running_loop()
     report_stamp = None
     read_state: dict = {}
+    volume_state: dict = {}
+    volume_fetch = None
     while True:
         _heartbeat.tick()
         interval = poll_interval()
+        # At most one at a time. refresh_volume never raises, and it returns at
+        # once when nothing is due.
+        if volume_fetch is None or volume_fetch.done():
+            volume_fetch = loop_.run_in_executor(None, refresh_volume, bus, volume_state)
         try:
             payload = await loop_.run_in_executor(None, compute.collect, bus)
             await loop_.run_in_executor(None, handlers.publish, bus, payload)

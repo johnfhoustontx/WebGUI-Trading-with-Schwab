@@ -557,7 +557,7 @@ structure · what should I act on · what is being said.*
 | **Opportunity Board** | The six hottest names, with implied volatility and whether it is rising or falling, and a setup tag |
 | **Live Flow Alerts** | The newest unusual-options events. A row that names one contract can carry a bar under it: the estimated share of its volume that was bought (green), sold (red), or could not be told (grey) |
 | **Headlines** | The nine newest stories from Market News, one line each — time (Central), feed, and the headline, which opens the article in a new tab. **All headlines →** opens Market News. It sits beside Live Flow Alerts. How many it shows is a setting: **Settings → Configuration → Market news → Headlines on the Desk** |
-| **Market read** (button, top right) | Opens a popup of six readings, each marked Tailwind, Headwind or Neutral for stocks, retaken every 15 minutes in the session. The time and the count are the button's second line, and the button glows for five minutes after a new reading. See [The Market read](#the-market-read) |
+| **Market read** (button, top right) | Opens a popup of seven readings, each marked Tailwind, Headwind or Neutral for stocks, retaken every 15 minutes in the session. The time and the count are the button's second line, and the button glows for five minutes after a new reading. See [The Market read](#the-market-read) |
 | **Market report** (button, top right) | Opens the latest published market report, in full, in a popup. Which report it is is the button's second line, and the button glows for five minutes after a new report |
 
 **The Desk does not show your positions.** It did until 11 October 2026, in the
@@ -656,7 +656,7 @@ button's second line shows when the reading was taken and how it counts, for exa
 with the popup closed. **Either button glows** for five minutes after a new reading or a new report (Settings → Configuration → Market read → *Glow the Desk's buttons for*; 0 turns it off).
 
 The Desk, the Market Dashboard and Flow Alerts each show part of what the market
-is doing. The Market read lines six of those readings up and says, for each, which
+is doing. The Market read lines seven of those readings up and says, for each, which
 way it points **for stocks**.
 
 | Row | What it reads | Tailwind when | Headwind when |
@@ -667,6 +667,7 @@ way it points **for stocks**.
 | **Volatility** | The VIX, the one-day VIX and the three-month VIX | The VIX is down at least 1% and below the three-month | The VIX is up at least 1% on a day stocks are up, or the one-day is above the VIX |
 | **Flow** | The bought/sold estimate, pooled over today's flagged contracts | Calls lean bought by 5 points or more and puts do not | Puts lean bought by 5 points or more and calls do not |
 | **Cross-asset** | Long Treasuries, the dollar and high-yield credit, by their Market Dashboard colours | At least two are risk-on | At least two are risk-off |
+| **Volume** | SPY and QQQ against their usual volume by this time of day, and how much of it came in rising five-minute bars | Both trade at least 1.2 times usual with at least 55% in rising bars | Both trade at least 1.2 times usual with at most 45% in rising bars |
 
 Anything in between is **Neutral**.
 
@@ -678,7 +679,14 @@ Anything in between is **Neutral**.
   date: a symbol with no ceiling, too few flagged contracts, a feed that stopped.
   Structure says *Dealer levels are not current* when the gamma collector has
   fallen behind, the same moment the Dealer positioning panel greys its levels.
-  Volatility needs the VIX, the one-day and the three-month all present.
+  Volatility needs the VIX, the one-day and the three-month all present. Volume
+  needs both funds' figures, which take two finished five-minute bars after the open.
+- **Reading Volume.** "SPY 1.40 times usual" compares today so far with the median of
+  the last nine sessions **at the same time of day**, so a morning is not read as
+  light for being only a morning. The row also prints the share of the dollars traded
+  across the sector funds that went into rising sectors; that share decides no chip.
+  The row's figures refresh every five minutes, so they can be a few minutes behind
+  the reading's own time.
 - **Since last** is the change from the previous reading: "was Neutral" when the
   chip flipped, otherwise how far the row's main number moved, or "unchanged".
 - **The head** shows when the reading was taken and when the next one is due. The
@@ -696,6 +704,12 @@ Anything in between is **Neutral**.
 - **The Flow row is the weakest.** It rests on an estimate, and on its first live
   day that estimate was nearly even between bought and sold. Expect it to read
   Neutral most of the time.
+- **Volume says how much, not which way.** Over 149 sessions to 30 October 2026, heavy
+  volume went with a wider range for the rest of the session and light volume with a
+  narrower one, and a move carried on no more often on heavy volume than on usual.
+  So a Tailwind on this row says the heavier trading has been on the way up so far. It
+  does not say prices will keep rising, or even that they are up on the day. Expect it
+  to read Neutral on most readings.
 
 **To change it:** Settings → Configuration → **Market read**. Every threshold in
 the table is there, along with 15 or 30 minutes between readings, and the switch

@@ -2752,6 +2752,53 @@ session), `--force` (a weekend or holiday), `--out DIR`, `--k 2,3,4`,
 `--horizons 5,15`. It exits **1** when nothing was measured (every symbol failed, or a
 trading day with no stored minute for any symbol — a dead collector).
 
+## Traded volume
+
+**Files:** `services/market_svc/volume_read.py` (pure: the figures, the sentences, when
+a fetch is due), `scheduler.refresh_volume`, `compute.fetch_bars`, `[volume]` in
+`config/market_read.toml`. Design:
+`docs/plans/2026-11-01-volume-in-read-and-reports-design.md`. Publishes
+`cache:market:volume`, read by the Market read's `volume` row and by the market reports.
+
+| Figure | Formula | Source |
+|---|---|---|
+| `pace` | Σ today's finished bars ÷ median over the last `baseline_sessions` (9) sessions of Σ that session's bars ending by the same clock time | `/pricehistory`, five-minute bars, regular session |
+| `word` | `heavy` at `pace` ≥ `heavy_ratio` (1.2), `light` at ≤ `light_ratio` (0.8), else `usual` | |
+| `up_share` | volume in bars with close > open ÷ volume in bars with close ≠ open | the same bars |
+| `sectors.up_share` | Σ `last × totalVolume` of rising funds ÷ the same for rising and falling funds; a flat fund counts on neither side | `/quotes` on `volume.sector_symbols` (11) |
+
+- **Cadence.** Every `refresh_min` (5) minutes in the session, `settle_sec` (90) after
+  the mark so the bar has closed and clear of the minute after the hour and half hour.
+  Once after the close for the whole session. Once a day before the open and on a day
+  with no session. Three Schwab calls per refresh, about 240 a session. It runs in the
+  executor beside the three-second dashboard poll, one at a time, so it cannot hold the
+  poll up.
+- **Absence.** Fewer than `min_bars` (2) finished bars today or fewer than `min_sessions`
+  (5) usable earlier sessions leaves `pace` as `null`, never 0. An earlier session with an
+  early close is skipped once the clock is past it. Fewer than `min_sectors` (8) funds with
+  a price and volume leaves `sectors` as `null`. When no symbol's bars come back nothing is
+  published, the last view stays and ages out, and the fetch retries after `retry_sec`.
+- **Outside the session.** The view reports the newest earlier session and says that
+  pre-market trading is thin and not read as a signal. The bars are regular-session only,
+  and the sector share is left out, because a quote before the open carries thin prints.
+- **The bases differ.** SPY's five-minute bars summed to about 0.60 to 0.72 of its daily
+  bar over ten sessions measured on 2026-11-01, and the daily bar agrees with the quote's
+  `totalVolume`. So `pace` compares bars with bars.
+- **What it implies, measured** (149 sessions to 2026-10-30, in-sample, 95% bootstrap
+  interval by session). The mean range for the rest of the session was 0.64% on heavy
+  volume (0.52 to 0.77), 0.52% on usual (0.46 to 0.60) and 0.41% on light (0.33 to 0.52).
+  A move of at least 0.25% carried on to the close 45% of the time on heavy volume (30 to
+  60) and 50% on usual (40 to 60). The row's `tailwind` was followed by −0.34% (9 readings,
+  7 sessions) and `headwind` by +0.15% (23 readings, 15 sessions). So the sentences say
+  range and not direction, and a chip reads what has happened.
+
+**In the market reports.** The tooling lives in `vps2:~/neuralstrike-reports`, outside this
+repo; its change is `deploy/report_tooling/report_tooling_volume.patch`. `remote_collect.py`
+copies the view into each slot's snapshot, and `render.py`'s `volume` block prints
+`statements` from that snapshot, so the model never handles them. The block says the figures
+are not available when the view is missing, and not current when it is from another day or
+a `session` view over 15 minutes old.
+
 ## Market read
 
 **Files:** `services/market_svc/market_read.py` (pure: the six rows, the slots, the
@@ -2760,9 +2807,10 @@ assembly), `scheduler.refresh_read` (reads the sources and publishes),
 (`read_rows`, `read_header`, `paint_read`). Design:
 `docs/plans/2026-10-05-market-read-scorecard-design.md`.
 
-Six readings, each given a verdict **for stocks**: `tailwind`, `headwind`, `neutral`,
-or `none`. The verdict is absolute, not relative to the day's move. No Schwab call and
-no Claude call: every input is a view another service already publishes.
+Seven readings, each given a verdict **for stocks**: `tailwind`, `headwind`, `neutral`,
+or `none`. The verdict is absolute, not relative to the day's move. No Claude call. Every
+input is a published view; only `cache:market:volume` costs Schwab calls, and that is
+counted under *Traded volume* below.
 
 | Row | Source | `tailwind` | `headwind` |
 |---|---|---|---|
@@ -2772,6 +2820,7 @@ no Claude call: every input is a view another service already publishes.
 | `volatility` | `market:dashboard` tiles `VIX`, `VIX1D`, `VIX3M`, `SPX` | VIX `change_pct` ≤ −`vix_move_pct` (1.0) and VIX < VIX3M | VIX `change_pct` ≥ +`vix_move_pct` with SPX up, or VIX1D > VIX |
 | `flow` | `options:flow_sides` alone (each entry names its `side` and `osi`) | call lean ≥ `lean_pts` (5.0) and put lean below it | put lean ≥ `lean_pts` and call lean below it |
 | `cross_asset` | `market:dashboard` tiles `TLT`, `$DXY`, `HYG`, by `color_state` | at least two risk-on | at least two risk-off |
+| `volume` | `market:volume`, for `volume.symbols` (SPY, QQQ), `phase = session` only | every symbol `pace` ≥ `heavy_ratio` (1.2) and `up_share` ≥ `up_share_strong` (0.55) | every symbol `pace` ≥ `heavy_ratio` and `up_share` ≤ `up_share_weak` (0.45) |
 
 All bounds are inclusive. Everything between the two is `neutral`.
 
@@ -2798,16 +2847,17 @@ All bounds are inclusive. Everything between the two is `neutral`.
 **`none` is "no reading", never `neutral`.** A row is `none` when a tile it needs has no
 number, a matrix row has no flip or (above the flip) no ceiling, a symbol's net gamma is
 exactly zero (the after-hours artefact the dealer panel also hides), the dealer levels
-are not current, fewer than `flow.min_contracts` (10) contracts are flagged, or its
-source view is absent. A row that raises is also `none`, and the other five still
-publish (`market.read.<row>` on `/health`).
+are not current, fewer than `flow.min_contracts` (10) contracts are flagged, a volume
+symbol has no pace or up share, or its source view is absent. A row that raises is also
+`none`, and the other six still publish (`market.read.<row>` on `/health`).
 
 **Too old.** Every source is rewritten on a clock while its publisher is alive (an
 unchanged write still refreshes the view's `:ts`), so an old one means the publisher
 has stopped. A view is dropped when its `:ts` is older than `stale_after_sec` (300);
 the dashboard, republished every 3 seconds, has its own shorter limit,
-`dashboard_stale_after_sec` (60). The flow view is also dropped when the session
-`date` it carries is not today's.
+`dashboard_stale_after_sec` (60), and so does the volume view, `volume.stale_after_sec`
+(600), which is rewritten only every 5 minutes. The flow and volume views are also dropped
+when the `date` they carry is not today's.
 
 **Structure follows the collector, not the matrix.** The matrix is republished every
 minute whether or not the GEX collector ran, so its own age proves nothing about the
@@ -4868,6 +4918,7 @@ A consolidated table of the load-bearing constants. The cited file governs.
 | Flow: hedging reversal (HIRO model) | running total clears zero by **1.0×** normal; none before 09:00 CT; cooldown 60 min; minute history kept 20 sessions | `[hiro]` |
 | Flow: bought / sold estimate | poll gap booked unlabelled past **450 s**; stream at most **200** contracts a day (hard limit 500); stream read timeout 45 s | `[sides]`, `flow_sides_tick.py`, `flow_stream.py` |
 | Market read | a reading every **15** min (or 30) from the first slot after the open to the close; sources older than **300 s** dropped; thresholds in the *Market read* section | `config/market_read.toml` |
+| Traded volume | a fetch every **5** min in the session, **90 s** after the mark; once after the close; once a day otherwise. Usual is the median of **9** sessions; heavy at **1.2** times, light at **0.8**; thresholds in the *Traded volume* section | `config/market_read.toml [volume]` |
 | Flow: opened or closed (next day) | open-interest change ÷ volume ≥ **+0.5** opened, ≤ **−0.5** closed; flagged contracts kept **20** sessions | `[followup]` |
 
 > **Five detectors, and the file is the source.** `services/options_svc/flow_alerts.py`

@@ -121,6 +121,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#trade-stream-tracker">Trade-stream tracker</a></li>
 <li><a href="#streaming-server-sent-events">Streaming (server-sent events)</a></li>
 <li><a href="#the-market-read-view">The Market read view</a></li>
+<li><a href="#the-traded-volume-view">The traded volume view</a></li>
 </ul>
 </li>
 <li><a href="#cache-key-index">Cache Key Index</a></li>
@@ -181,7 +182,7 @@ keys that feed it. Menu order matches the rail.</p>
 <tr>
 <td><strong>Market Dashboard</strong></td>
 <td><code>market_svc</code> :8215</td>
-<td><code>cache:market:dashboard</code>, <code>:summary</code>, <code>:read</code> (the Desk's Market read)</td>
+<td><code>cache:market:dashboard</code>, <code>:summary</code>, <code>:read</code> (the Desk's Market read), <code>:volume</code> (traded volume, for the Market read and the reports)</td>
 </tr>
 <tr>
 <td><strong>Sentiment</strong></td>
@@ -3756,8 +3757,8 @@ slot in the regular session:</p>
 <li><code>glow_min</code> is how many minutes the Desk's two header buttons glow after a new
   reading or report (<code>config/market_read.toml</code>); <code>0</code> = never.</li>
 <li><code>tally</code> is <code>{tailwind, headwind, neutral, none}</code> counts.</li>
-<li><code>rows</code> is six objects in a fixed order — <code>direction</code>, <code>breadth</code>, <code>structure</code>,
-  <code>volatility</code>, <code>flow</code>, <code>cross_asset</code> — each <code>{key, verdict, facts, prev}</code>. <code>verdict</code>
+<li><code>rows</code> is seven objects in a fixed order — <code>direction</code>, <code>breadth</code>, <code>structure</code>,
+  <code>volatility</code>, <code>flow</code>, <code>cross_asset</code>, <code>volume</code> — each <code>{key, verdict, facts, prev}</code>. <code>verdict</code>
   is <code>tailwind</code>, <code>headwind</code>, <code>neutral</code> or <code>none</code>. <strong><code>none</code> means no reading and must
   never be shown or counted as <code>neutral</code>.</strong> <code>facts</code> are the numbers the verdict was
   decided from, and differ per row; <code>prev</code> is the same row's <code>{verdict, facts}</code> at the
@@ -3772,6 +3773,32 @@ slot in the regular session:</p>
 <code>public</code> is exactly <code>true</code>, and a row that carries its own <code>public</code> only when that is
 exactly <code>true</code> too (recounting <code>tally</code> without it). The rules and thresholds are in the Technical Reference,
 <em>Market read</em>.</p>
+<h2 id="the-traded-volume-view">The traded volume view</h2>
+<p><strong><code>cache:market:volume</code></strong> (<code>MarketVolume</code>) is built by
+<code>services/market_svc/volume_read.py</code>, every 5 minutes in the session and once for each
+other part of the day:</p>
+<pre><code>{enabled, date, ts, phase, session_date, through, symbols, sectors, range_hint, statements}
+</code></pre>
+<ul>
+<li><code>date</code> is the Central day it was built. <code>session_date</code> is the session its figures
+  describe, an <strong>earlier</strong> one when <code>phase</code> is <code>before_open</code> or <code>closed</code> (<code>session</code> and
+  <code>after_close</code> are the other two).</li>
+<li><code>through</code> is <code>"HH:MM"</code> Central, the end of the last finished five-minute bar.</li>
+<li><code>symbols</code> is <code>[{symbol, pace, up_share, word, bars, baseline_sessions}]</code>. <code>pace</code> is
+  volume so far over the median of the last <code>baseline_sessions</code> sessions by the same
+  time of day. <code>up_share</code> is volume in rising bars over volume in rising and falling
+  bars. <code>word</code> is <code>heavy</code>, <code>usual</code>, <code>light</code> or <code>null</code>.</li>
+<li><code>sectors</code> is <code>{up_share, funds}</code>, the share of the dollars traded across the sector
+  funds in rising sectors, or <code>null</code>. It is present only in the session and at the close.</li>
+<li><code>range_hint</code> is <code>wider</code> or <code>narrower</code> when every symbol reads heavy or every one
+  reads light, in the session only, else <code>null</code>.</li>
+<li><code>statements</code> are the figures as finished sentences. The market reports print them
+  word for word.</li>
+<li><strong>A missing figure is <code>null</code>, never 0</strong>, and must not be shown as light volume.</li>
+<li>⚠ <code>pace</code> and <code>up_share</code> are on the basis of the five-minute bars, and a sector's
+  <code>totalVolume</code> is not: a bar series sums to about 0.6 to 0.7 of a daily bar. Do not
+  compare across them.</li>
+</ul>
 <hr />
 <h1 id="cache-key-index">Cache Key Index</h1>
 <p>Every Redis key by domain. Views without a strict contract are validated
@@ -3905,7 +3932,8 @@ cache:trade:markov_prior       cache:trade:universe_factors
 cache:portfolio:positions      events:portfolio:positions     (PortfolioModel)
 cache:market:dashboard         events:market:dashboard        (MarketDashboard)
 cache:market:summary           events:market:summary          (MarketSummary)
-cache:market:read              events:market:read             (MarketRead - the Desk's six readings)
+cache:market:read              events:market:read             (MarketRead - the Desk's seven readings)
+cache:market:volume            events:market:volume           (MarketVolume - traded volume, also read by the market reports)
 cache:news:feed                events:news:feed               (headlines - every kind but the SEC ones)
 cache:news:feed_public         events:news:feed_public        (public feeds only - a live-origin key)
 cache:news:sec                 events:news:sec                (Form 4s and offering filings)

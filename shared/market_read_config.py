@@ -35,6 +35,16 @@ DEFAULTS = {
                   "stale_after_sec": 150},
     "volatility": {"vix_move_pct": 1.0},
     "flow": {"lean_pts": 5.0, "min_contracts": 10},
+    # Reads the market service's own ``cache:market:volume``, which the daily
+    # market reports read too. ``baseline_sessions`` tops out at 9: Schwab serves
+    # ten days of minute bars, and one of them is today.
+    "volume": {"enabled": True, "symbols": ["SPY", "QQQ"],
+               "sector_symbols": ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP",
+                                  "XLRE", "XLU", "XLV", "XLY"],
+               "baseline_sessions": 9, "min_sessions": 5, "min_bars": 2,
+               "heavy_ratio": 1.2, "light_ratio": 0.8,
+               "up_share_strong": 0.55, "up_share_weak": 0.45, "min_sectors": 8,
+               "refresh_min": 5, "settle_sec": 90, "stale_after_sec": 600},
 }
 
 load_raw, reset_cache = toml_loader(MARKET_READ_TOML, DEFAULTS, label="market_read.toml")
@@ -52,6 +62,54 @@ def _at_least(value, default, floor=0.0):
     else ``default``. Text is not parsed and a bool is not a number."""
     f = finite(value)
     return default if f is None or f < floor else f
+
+
+def _whole(value, default, low, high):
+    """``value`` as an int when it is a finite number in ``low..high``, else ``default``."""
+    f = finite(value)
+    return int(f) if f is not None and low <= f <= high else default
+
+
+def _names(value, default):
+    names = ([x.strip() for x in value if isinstance(x, str) and x.strip()]
+             if isinstance(value, list) else [])
+    return names or list(default)
+
+
+def _volume(raw) -> dict:
+    d = DEFAULTS["volume"]
+    v = _table(raw, "volume")
+    heavy = finite(v.get("heavy_ratio"))
+    light = finite(v.get("light_ratio"))
+    # Each pair together or not at all, like the breadth shares: crossed bounds
+    # would make one reading both.
+    if heavy is None or light is None or not 0 < light < heavy:
+        heavy, light = d["heavy_ratio"], d["light_ratio"]
+    strong = finite(v.get("up_share_strong"))
+    weak = finite(v.get("up_share_weak"))
+    if strong is None or weak is None or not 0 <= weak < strong <= 1:
+        strong, weak = d["up_share_strong"], d["up_share_weak"]
+    sessions = _whole(v.get("baseline_sessions"), d["baseline_sessions"], 1, 9)
+    least = _whole(v.get("min_sessions"), d["min_sessions"], 1, 9)
+    limit = finite(v.get("stale_after_sec"))
+    return {
+        "enabled": v.get("enabled") is True,
+        "symbols": _names(v.get("symbols"), d["symbols"]),
+        "sector_symbols": _names(v.get("sector_symbols"), d["sector_symbols"]),
+        "baseline_sessions": sessions,
+        # More required than are ever asked for would be "No reading" for ever.
+        "min_sessions": min(least, sessions),
+        "min_bars": _whole(v.get("min_bars"), d["min_bars"], 1, 78),
+        "heavy_ratio": heavy, "light_ratio": light,
+        "up_share_strong": strong, "up_share_weak": weak,
+        "min_sectors": _whole(v.get("min_sectors"), d["min_sectors"], 1, 50),
+        "refresh_min": _whole(v.get("refresh_min"), d["refresh_min"], 5, 30),
+        # Under a minute would land in the minute after the hour, where Schwab
+        # refuses calls.
+        "settle_sec": _whole(v.get("settle_sec"), d["settle_sec"], 60, 240),
+        "stale_after_sec": (limit if limit is not None and limit > 0
+                            else d["stale_after_sec"]),
+    }
 
 
 def load() -> dict:
@@ -108,4 +166,5 @@ def load() -> dict:
         "lean_pts": _at_least(f.get("lean_pts"), d["flow"]["lean_pts"]),
         "min_contracts": (int(floor) if floor is not None and floor >= 1
                           else d["flow"]["min_contracts"])}
+    out["volume"] = _volume(raw)
     return out

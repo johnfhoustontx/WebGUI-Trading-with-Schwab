@@ -1,4 +1,4 @@
-"""The Desk's Market read: six readings, each a tailwind, a headwind or neutral
+"""The Desk's Market read: seven readings, each a tailwind, a headwind or neutral
 for stocks, decided by rule from views the services already publish. PURE.
 
 No Schwab call, no Claude call, no I/O: plain dicts in, a plain dict out. Each
@@ -19,13 +19,15 @@ from shared import market_calendar as _mc
 from shared.numeric import finite
 
 from services import _degrade
+from services.market_svc import volume_read
 from services.market_svc.symbols import BREADTH_CATEGORIES
 
 TAILWIND, HEADWIND, NEUTRAL, NONE = "tailwind", "headwind", "neutral", "none"
 VERDICTS = (TAILWIND, HEADWIND, NEUTRAL, NONE)
 
 # The rows, in the order the panel draws them.
-ROW_KEYS = ("direction", "breadth", "structure", "volatility", "flow", "cross_asset")
+ROW_KEYS = ("direction", "breadth", "structure", "volatility", "flow", "cross_asset",
+            "volume")
 
 # The Market Dashboard tiles each row reads, by the tile's display name.
 INDEX_TILES = ("SPX", "NDX")
@@ -59,7 +61,7 @@ def _last(tiles, name):
     return finite((tiles.get(name) or {}).get("last"))
 
 
-# ── the six rows ─────────────────────────────────────────────────────────────
+# ── the seven rows ───────────────────────────────────────────────────────────
 def direction(dashboard, cfg) -> dict:
     """$SPX and $NDX on the day: both up, both down, or neither."""
     tiles = tiles_by_name(dashboard)
@@ -286,6 +288,43 @@ def cross_asset(dashboard, cfg) -> dict:
     return _row("cross_asset", NEUTRAL, facts)
 
 
+def volume(view, cfg) -> dict:
+    """Whether heavy volume stands behind rising or falling prices, from
+    ``cache:market:volume``. The symbols must AGREE, as in Structure.
+
+    Light or ordinary volume is Neutral whichever way prices went. The chip says
+    what has happened, like Direction: measured, heavy volume went with a wider
+    range for the rest of the session and did not predict direction, so it is
+    not a forecast either. Only a view of THIS session is read: before the open
+    the view reports the last one, and pre-market trading is thin."""
+    limits = cfg["volume"]
+    facts = {"symbols": [], "sector_up_share": None, "through": None, "pace": None,
+             "range_hint": None}
+    if not isinstance(view, dict) or view.get("phase") != volume_read.SESSION:
+        return _row("volume", NONE, facts)
+    readings = [r for r in view.get("symbols") or () if isinstance(r, dict)]
+    sectors = view.get("sectors") if isinstance(view.get("sectors"), dict) else {}
+    facts.update(symbols=readings, through=view.get("through"),
+                 sector_up_share=finite(sectors.get("up_share")),
+                 range_hint=view.get("range_hint"),
+                 pace=finite(readings[0].get("pace")) if readings else None)
+    states = set()
+    for r in readings:
+        side = volume_read.symbol_side(r, limits)
+        word = r.get("word")
+        if finite(r.get("pace")) is None or side is None:
+            states.add(NONE)
+        elif word == volume_read.HEAVY and side == volume_read.RISING:
+            states.add(TAILWIND)
+        elif word == volume_read.HEAVY and side == volume_read.FALLING:
+            states.add(HEADWIND)
+        else:
+            states.add(NEUTRAL)
+    if not readings or NONE in states:
+        return _row("volume", NONE, facts)
+    return _row("volume", states.pop() if len(states) == 1 else NEUTRAL, facts)
+
+
 # ── slots ────────────────────────────────────────────────────────────────────
 def ct(now):
     """``now`` in Central time. A naive datetime MEANS Central (the repo-wide
@@ -358,9 +397,9 @@ def _safely(key, fn, *args) -> dict:
 
 
 def build(inputs, cfg, *, date, slot, ts, previous=None) -> dict:
-    """One reading. ``inputs`` holds the four views, each already None when
+    """One reading. ``inputs`` holds the five views, each already None when
     it is missing, stale or from another day: ``dashboard``, ``matrix``,
-    ``gex_status``, ``sides``. ``previous`` is the last published reading; the same date
+    ``gex_status``, ``sides``, ``volume``. ``previous`` is the last published reading; the same date
     supplies each row's ``prev`` and the day's ``history``."""
     dashboard, matrix = inputs.get("dashboard"), inputs.get("matrix")
     rows = [
@@ -370,6 +409,7 @@ def build(inputs, cfg, *, date, slot, ts, previous=None) -> dict:
         _safely("volatility", volatility, dashboard, cfg),
         _safely("flow", flow, inputs.get("sides"), cfg),
         _safely("cross_asset", cross_asset, dashboard, cfg),
+        _safely("volume", volume, inputs.get("volume"), cfg),
     ]
     same_day = isinstance(previous, dict) and previous.get("date") == date
     before = {r.get("key"): r for r in previous.get("rows", [])
