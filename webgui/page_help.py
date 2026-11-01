@@ -760,13 +760,17 @@ accelerate price.
   not come from Schwab: **ThinkorSwim on your PC** captures the options expiring at
   the end of the session, one capture every few minutes, from the evening before.
   ThinkorSwim sends no gamma, so it is **calculated** from each contract's implied
-  volatility. The line above the charts says when the numbers were captured and
-  which strikes were captured, and **they can go stale**: if the PC, ThinkorSwim or
-  the capture stops, the charts stay and the line turns into a **Stale** notice with
-  the age, or **Last session** once the session is over. Time with no capture is a
-  **blank stretch** on the heat map, never a smooth change. Flow and Term are not
-  offered for them, and neither are Explain, Analyze and Briefings. The Bar picker
-  still counts minutes, but a bar only sees the captures inside it.
+  volatility. The heat map draws one column per capture, so it holds one capture a
+  column rather than one minute. The line above the charts says when the numbers were
+  captured and which strikes were captured, and **they can go stale**: if the PC,
+  ThinkorSwim or the capture stops, the charts stay and the line turns into a **Stale**
+  notice with the age, or **Last session** once the session is over, and no **now**
+  line or projected afternoon is drawn from a stale capture. A capture a minute late is
+  nothing; time with none is a blank band labelled **No capture**, never a smooth
+  change, and Smooth does not reach across it. Flow and Term are not offered for them,
+  and neither are Explain, Analyze and Briefings. The Bar and Smooth pickers still mean
+  minutes, but a bar only sees the captures inside it, so one no longer than the
+  capture interval holds a single reading.
 - **Gamma / Charm / Delta / Vanna / Flow / Net Prem / Term** — the small tabs at
   the very top (under the page tabs): different lenses on dealer positioning; the
   **walls** mark likely support/resistance. The header names the one you're on,

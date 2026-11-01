@@ -30,13 +30,20 @@ min_read_fraction = 0.25
 # interest all unchanged is a frozen feed and is reported: a live future does
 # not hold one price for minutes.
 frozen_repeats = 3
-# The history is stored one row per capture; the page repeats each row across
-# the minutes to the next one, to this step, up to one interval. Choose a step
-# that divides interval_sec, or the columns are unevenly spaced. Measured on
-# synthetic chains, a 22-hour session against a regular $SPX payload: a step of
-# 60 was 3.2 times, 120 was 1.9 times. 100 was not measured: at a 300-second
-# interval it makes the same number of rows as 120 (three per capture).
-fill_step_sec = 100
+# The history is stored one row per capture; the page draws one column per row
+# and repeats a row to this step, up to one interval. At the interval itself each
+# column is a real capture and nothing is repeated. A lower step repeats rows and
+# makes a heavier page: every repaint at 794 columns blocked the browser 4.5 s,
+# past NiceGUI's 2 s ping (measured 2026-10-31). Choose a step that divides
+# interval_sec, or the columns are unevenly spaced.
+fill_step_sec = 300
+# Two captures further apart than this have an outage between them, drawn blank.
+# Above the interval because a capture can be a minute late: rows are floored to
+# the minute and a read can cross one, giving gaps of 240 and then 360. A value
+# below the interval reads as the interval.
+outage_after_sec = 450
+# The most blank columns one jump can add.
+max_outage_columns = 288
 # Between sessions the by-strike charts show the last capture taken at least this
 # many minutes before expiry, so the last hour's gamma spike is not left on screen.
 frozen_before_expiry_min = 60

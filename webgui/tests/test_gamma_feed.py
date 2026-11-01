@@ -37,14 +37,14 @@ def _expiry_of(captured):
     return futures_chain.session_expiry(datetime.fromtimestamp(captured, _CT)).isoformat()
 
 
-def snap(captured, *, stale=False, frozen=False, reason="", strike_low=None,
-         strike_high=None, expiry=None, symbol="FOP.ES"):
+def snap(captured, *, stale=False, frozen=False, why="", strike_low=None,
+         strike_high=None, expiry=None, symbol="FOP.ES", last_row_at=None):
     """A payload holding only what a label is built from."""
-    return {"symbol": symbol, "dte": 1,
+    return {"symbol": symbol, "dte": 0,
             "feed": {"label": futures_chain.display_symbol(symbol), "captured_at": captured,
                      "expiry": expiry or _expiry_of(captured), "frozen": frozen,
-                     "stale": stale, "reason": reason, "strike_low": strike_low,
-                     "strike_high": strike_high}}
+                     "stale": stale, "reason": "", "why": why, "strike_low": strike_low,
+                     "strike_high": strike_high, "last_row_at": last_row_at}}
 
 
 def _settings():
@@ -133,9 +133,9 @@ def test_no_feed_block_no_label():
     assert feed_label(None, NOW) is None
 
 
-def test_reason_is_carried_on_the_label():
+def test_the_cause_is_carried_on_the_label():
     assert "not changing" in feed_label(
-        snap(NOW - 60, stale=True, reason="values not changing"), NOW)
+        snap(NOW - 60, stale=True, why="values not changing"), NOW)
 
 
 def test_the_label_states_the_captured_range_when_it_was_narrowed():
@@ -193,17 +193,19 @@ def test_a_last_session_label_says_when_the_next_session_has_no_capture():
 def test_the_cached_age_sentence_never_contradicts_the_label():
     """``reason`` holds an age worked out when the payload was written. ``why`` is
     the cause alone, and it is what the label carries when it is there."""
-    payload = snap(NOW - 20000, stale=True,
-                   reason="The last capture is 20 minutes old. ThinkorSwim is logged out")
-    payload["feed"]["why"] = "ThinkorSwim is logged out"
+    payload = snap(NOW - 20000, stale=True, why="ThinkorSwim is logged out")
+    payload["feed"]["reason"] = "The last capture is 20 minutes old. ThinkorSwim is logged out"
     label = feed_label(payload, NOW)
     assert "20 minutes" not in label and "ThinkorSwim is logged out" in label
+    # ``reason`` alone is never read: it could only print the cached age.
+    payload["feed"]["why"] = ""
+    assert "20 minutes" not in feed_label(payload, NOW)
 
 
 def test_no_label_is_built_from_dte():
-    """``dte`` reads 1 on an evening capture: right for the data, wrong as words."""
+    """The adapter stamps ``dte`` 0 on every capture, an evening's included."""
     one = snap(NOW - 60)
-    other = {**one, "dte": 0}
+    other = {**one, "dte": 1}
     assert feed_label(one, NOW) == feed_label(other, NOW)
     assert "DTE" not in feed_label(one, NOW)
     reads = [n.value for n in ast.walk(ast.parse(inspect.getsource(gamma_feed)))
@@ -389,9 +391,9 @@ def test_the_new_module_keeps_to_the_allow_list():
 
 def test_the_page_guide_says_what_the_two_are_and_that_they_can_go_stale():
     import page_help
-    guide = page_help.HELP["/options/gamma"] if hasattr(page_help, "HELP") else None
-    guide = guide or inspect.getsource(page_help)
-    for words in ("/ES and /NQ", "ThinkorSwim", "calculated", "Stale", "blank stretch"):
+    guide = page_help.help_md("/options/gamma")
+    for words in ("/ES and /NQ", "ThinkorSwim", "calculated", "Stale", "No capture",
+                  "one capture"):
         assert words in guide
 
 
@@ -606,3 +608,459 @@ def test_the_public_page_builds_no_feed_elements_and_changes_no_row():
     rows = [(1, None)]
     assert disabled.on is False and disabled.columns(rows) is rows
     assert disabled.strip("GEX") is None and disabled.bar_columns(5) == 5
+
+
+# ── one column per capture ───────────────────────────────────────────────────
+
+def _gaps(*gaps):
+    start = ct(2026, 11, 8, 23, 0).timestamp()
+    at = [start]
+    for gap in gaps:
+        at.append(at[-1] + gap)
+    return _filled(*at)
+
+
+@pytest.mark.parametrize("gaps,blanks", [
+    ((300,) * 8, 0),
+    ((300, 240, 360, 300, 240, 360, 300, 300), 0),
+    ((360, 240) * 4, 0),
+    ((450,), 0),
+    ((600,), 1),
+    ((620,), 1),
+    ((900,), 2),
+])
+def test_only_a_capture_really_missed_is_a_blank(gaps, blanks):
+    """A read crossing a minute gives 240 then 360: a capture a minute late."""
+    out = gamma_feed.with_outages(_gaps(*gaps))
+    assert len([r for r in out if _is_blank(r)]) == blanks
+    assert [r[0] for r in out] == sorted(r[0] for r in out)
+
+
+def test_a_tolerance_below_the_interval_reads_as_the_interval(monkeypatch):
+    real = futures_chain_config.capture
+    monkeypatch.setattr(futures_chain_config, "capture",
+                        lambda: {**real(), "outage_after_sec": 30})
+    assert gamma_feed.with_outages(_gaps(300, 300)) == _gaps(300, 300)
+    assert len(gamma_feed.with_outages(_gaps(360))) == 3
+
+
+def test_the_tolerance_comes_from_the_config(monkeypatch):
+    real = futures_chain_config.capture
+    monkeypatch.setattr(futures_chain_config, "capture",
+                        lambda: {**real(), "outage_after_sec": 700})
+    assert gamma_feed.with_outages(_gaps(600)) == _gaps(600)
+
+
+def test_one_jump_adds_no_more_than_the_cap():
+    """A weekend inside the rows would be 780 blank columns at 300 seconds."""
+    capture = futures_chain_config.capture()
+    start = ct(2026, 11, 6, 15, 0).timestamp()
+    monday = ct(2026, 11, 9, 8, 0).timestamp()
+    rows = [_row(start), _row(monday)]
+    out = gamma_feed.with_outages(rows)
+    assert len([r for r in out if _is_blank(r)]) == capture["max_outage_columns"]
+    assert out[0] == rows[0] and out[-1] == rows[1]
+    assert [r[0] for r in out] == sorted(r[0] for r in out)
+
+
+def test_a_step_wider_than_the_gap_never_draws_a_column_out_of_order(monkeypatch):
+    real = futures_chain_config.capture
+    monkeypatch.setattr(futures_chain_config, "capture",
+                        lambda: {**real(), "fill_step_sec": 600})
+    start = ct(2026, 11, 8, 23, 0).timestamp()
+    rows = [_row(start), _row(start + 500)]
+    assert gamma_feed.with_outages(rows) == rows
+
+
+def _band(close_in=7200, marks=5):
+    """A projected afternoon, as the service publishes one."""
+    start = NOW_LIVE()
+    ts = [start + i * close_in // (marks - 1) for i in range(marks)]
+    row = [1.0] * marks
+    return {"ts": ts, "spot": 7600.0, "call": {"7600.0": row, "7605.0": row},
+            "put": {"7600.0": row, "7605.0": row},
+            "cone": {"up": [7610.0] * marks, "down": [7590.0] * marks}}
+
+
+def NOW_LIVE():
+    return int(datetime.now().timestamp()) // 60 * 60
+
+
+def test_the_projection_is_a_minute_a_column_for_every_existing_symbol():
+    """Byte for byte: the parameter's default is what the page always drew."""
+    from pages.options import gamma_heat
+    band = _band()
+    after = band["ts"][0]
+    default = gamma_heat.forward_series(band, after)
+    assert default == gamma_heat.forward_series(band, after, step=60)
+    assert default == gamma_heat.forward_series({**band, "step": 60}, after)
+    assert [r[0] for r in default["rows"]] == list(
+        range(after + 60, band["ts"][-1] + 1, 60))
+    rows = [_row(after)]
+    stepped = {**band, "step": 60}
+    assert gamma.heatmap_categories(rows, band) == gamma.heatmap_categories(rows, stepped)
+    fig, same = gamma.heatmap_figure(rows, forward=band), gamma.heatmap_figure(
+        rows, forward=stepped)
+    assert fig["series"][0]["data"] == same["series"][0]["data"]
+    assert fig["xAxis"]["categories"] == same["xAxis"]["categories"]
+    assert len(fig["xAxis"]["categories"]) == 1 + 120
+
+
+def test_the_projection_can_run_at_the_feeds_step_with_the_hedge_panel_beside_it():
+    band = {**_band(), "step": 300}       # the band carries it, so neither can differ
+    rows = [_row(band["ts"][0])]
+    fig = gamma.heatmap_figure(rows, forward=band)
+    cats = gamma.heatmap_categories(rows, band)
+    assert fig["xAxis"]["categories"] == cats
+    assert len(cats) <= 1 + 120 // 5 + 1
+    cone = next(s for s in fig["series"] if s["name"] == "EM up")["data"]
+    assert len(cone) == len(cats) - 1
+
+
+def test_smooth_means_the_same_minutes_on_the_feeds_columns():
+    _interval, step = _settings()
+    out = gamma_feed.smooth_on_columns({"minutes": 3.0, "strikes": 1.0}, [_row(1), _row(2)])
+    assert out["minutes"] == 3.0 * 60 / step and out["strikes"] == 1.0
+
+
+def test_smooth_does_not_cross_a_blank_column():
+    from pages.options import gamma_heat
+    row = [1.0, 1.0, None, 100.0, 100.0]
+    kept = gamma_heat.smooth([row], minutes=2, strikes=0, breaks=frozenset({2}))
+    assert kept[0] == pytest.approx([1.0, 1.0, None, 100.0, 100.0])
+    # Without a break a gap is still only a gap, as it always was for every symbol.
+    assert gamma_heat.smooth([row], minutes=2, strikes=0)[0][1] > 1.0
+
+
+def test_a_blank_column_stays_blank_through_smoothing_on_the_page():
+    interval, _step = _settings()
+    start = ct(2026, 11, 8, 23, 0).timestamp()
+    rows = gamma_feed.with_outages(_filled(start, start + interval, start + 3 * interval))
+    blank = [i for i, r in enumerate(rows) if _is_blank(r)]
+    assert blank
+    smooth = gamma_feed.smooth_on_columns({"minutes": 15.0, "strikes": 0.0}, rows)
+    assert smooth["breaks"] == frozenset(blank)
+    fig = gamma.heatmap_figure(rows, smooth=smooth)
+    assert not set(blank) & {x for x, _y, _v in fig["series"][0]["data"]}
+
+
+def test_the_first_candle_after_a_blank_opens_at_its_own_price():
+    bars = gamma.ohlc_bars([100.0, None, 200.0, 210.0], 1, reopen_after_gap=True)
+    assert [b[1] for b in bars] == [100.0, 200.0, 200.0]
+    assert bars[1][3] == 200.0            # no wick reaching back across the outage
+    # A blank at the end of a wider bar breaks it too.
+    wide = gamma.ohlc_bars([100.0, None, 200.0, 201.0], 2, reopen_after_gap=True)
+    assert wide[1][1] == 200.0
+
+
+def test_candles_of_an_existing_symbol_still_carry_the_open():
+    assert [b[1] for b in gamma.ohlc_bars([100.0, None, 200.0], 1)] == [100.0, 100.0]
+
+
+def test_a_frozen_label_states_both_times():
+    captured = ct(2026, 11, 2, 14, 0).timestamp()
+    label = feed_label(snap(captured, frozen=True,
+                            last_row_at=ct(2026, 11, 2, 14, 55).timestamp()),
+                       ct(2026, 11, 2, 16, 0).timestamp())
+    assert label.startswith("Last session. Strike bars as of 14:00 Central on Monday, "
+                            "November 2; the heat map runs to 14:55")
+
+
+def test_a_last_session_with_no_later_rows_states_one_time():
+    captured = ct(2026, 11, 2, 14, 50).timestamp()
+    label = feed_label(snap(captured, last_row_at=captured),
+                       ct(2026, 11, 2, 16, 0).timestamp())
+    assert label.startswith("Last session, as of 14:50 Central on Monday, November 2")
+
+
+# ── the chart itself, through the real render ────────────────────────────────
+
+def _plot(kids, title):
+    for chart in kids:
+        if type(chart).__name__ == "highchart" or "Highchart" in type(chart).__name__:
+            text = ((chart.options.get("title") or {}).get("text") or "")
+            if title in text:
+                return chart
+    raise AssertionError(f"no chart titled {title}")
+
+
+def _heat_plot(kids):
+    return _plot(kids, "intraday")
+
+
+def _hedge_plot(kids):
+    for chart in kids:
+        if "Highchart" in type(chart).__name__ or type(chart).__name__ == "highchart":
+            series = chart.options.get("series") or []
+            if series and str(series[0].get("name", "")).startswith("Hedge"):
+                return chart
+    raise AssertionError("no hedge panel")
+
+
+def _outage_rows():
+    """Captures to 20 minutes ago, with a 2-hour hole before them, as published."""
+    interval, _step = _settings()
+    last = NOW_LIVE() - 60
+    after = [last - i * interval for i in range(4)][::-1]
+    before = [after[0] - 7200 - i * interval for i in range(4)][::-1]
+    return _filled(*before, *after)
+
+
+def _drawn(rows, *, forward=None, symbol="FOP.ES", captured=None, hedge=None, **settings):
+    from nicegui import ui
+    import app_settings
+    real = app_settings.get
+    patched = dict(settings)
+    original, app_settings.get = app_settings.get, (
+        lambda key, *a: patched[key] if key in patched else real(key, *a))
+    try:
+        reset_fake_bus()
+        bus_client.reset()
+        payload = _feed_payload(captured or rows[-1][0], symbol=symbol)
+        payload["feed"]["last_row_at"] = rows[-1][0]
+        payload["hedge_history"] = hedge or []
+        bus_client.bus().cache_set("cache:options:gamma", payload)
+        bus_client.bus().cache_set(f"cache:{gamma.history_key('GEX')}", {
+            "symbol": symbol, "view": "GEX", "forward": forward,
+            "rows": [[*r[:6], {str(k): v for k, v in r[6].items()}] for r in rows]})
+        with ui.card() as card:
+            gamma.render()
+        kids = list(card.descendants())
+        _load(kids)
+    finally:
+        app_settings.get = original
+    return kids
+
+
+def test_an_outage_reaches_the_chart(requests):
+    rows = _outage_rows()
+    shown = gamma_feed.with_outages(rows)
+    blank = [i for i, r in enumerate(shown) if _is_blank(r)]
+    assert len(blank) > 10
+    hedge = [{"ts": r[0], "hedge_pressure": 1.0e9} for r in rows]
+    options = _heat_plot(_drawn(rows, hedge=hedge)).options
+    assert len(options["xAxis"]["categories"]) == len(shown)
+    assert not set(blank) & {x for x, _y, _v in options["series"][0]["data"]}
+    spot = next(s for s in options["series"] if s["name"] == "Spot")["data"]
+    assert [x for x, y in spot if y is None] == [blank[0]]
+    bands = options["xAxis"]["plotBands"]
+    assert [(b["from"], b["to"]) for b in bands] == [(blank[0] - 0.5, blank[-1] + 0.5)]
+    assert bands[0]["label"]["text"] == "No capture" and bands[0]["color"] == gamma.OUTAGE_COLOR
+
+
+def test_the_hedge_panel_has_the_heat_maps_columns(requests):
+    rows = _outage_rows()
+    hedge = [{"ts": r[0], "hedge_pressure": 1.0e9} for r in rows]
+    kids = _drawn(rows, hedge=hedge)
+    heat, panel = _heat_plot(kids).options, _hedge_plot(kids).options
+    assert panel["xAxis"]["categories"] == heat["xAxis"]["categories"]
+    assert len(panel["xAxis"]["categories"]) == len(gamma_feed.with_outages(rows))
+
+
+def test_the_level_tracks_reach_the_chart_on_their_columns(requests):
+    rows = _outage_rows()
+    shown = gamma_feed.with_outages(rows)
+    reset_fake_bus()
+    payload_levels = {"flip": [float(i) for i in range(len(rows))]}
+    original = _feed_payload
+    def with_levels(*a, **k):
+        out = original(*a, **k)
+        out["views"]["GEX"]["levels"] = payload_levels
+        return out
+    globals()["_feed_payload"] = with_levels
+    try:
+        options = _heat_plot(_drawn(rows, gamma_level_tracks=True)).options
+    finally:
+        globals()["_feed_payload"] = original
+    track = next(s for s in options["series"] if s["name"] == "Flip track")["data"]
+    columns = {x for x, y in track if y is not None}
+    assert not columns & {i for i, r in enumerate(shown) if _is_blank(r)}
+    assert max(columns) == len(shown) - 1
+
+
+def test_the_bar_size_reaches_the_chart_in_minutes(requests):
+    rows = _outage_rows()
+    options = _heat_plot(_drawn(rows, gamma_spot_style="candle", gamma_spot_interval=15)).options
+    body = next(s for s in options["series"] if s["name"] == "Spot candles")["data"]
+    columns = gamma_feed.bar_columns(15)
+    assert columns == 3
+    spots = [r[1] for r in gamma_feed.with_outages(rows)]
+    assert [p["x"] for p in body] == [bar[0] for bar in gamma.ohlc_bars(spots, columns, True)]
+    assert len(body) > 2                  # 15 columns would be a very different picture
+
+
+def test_smooth_reaches_the_chart_in_minutes(requests):
+    from pages.options import gamma_heat
+    seen = {}
+    real = gamma_heat.smooth
+    def spy(z, **kwargs):
+        seen.update(kwargs)
+        return real(z, **kwargs)
+    gamma_heat.smooth = spy
+    try:
+        _drawn(_outage_rows(), gamma_heat_smooth="medium")
+    finally:
+        gamma_heat.smooth = real
+    _interval, step = _settings()
+    assert seen["minutes"] == gamma_heat_medium_minutes() * 60 / step
+    assert seen["breaks"]
+
+
+def gamma_heat_medium_minutes():
+    from pages.options import gamma_heat
+    from shared import gamma_heat_config
+    return gamma_heat.smooth_args("medium", gamma_heat_config.smooth())["minutes"]
+
+
+def test_a_current_payload_draws_the_projection_at_the_feeds_step(requests):
+    rows = _outage_rows()
+    band = _band()
+    options = _heat_plot(_drawn(rows, forward=band)).options
+    shown = len(gamma_feed.with_outages(rows))
+    assert any(line.get("className") == "gamma-now-divider"
+               for line in options["xAxis"]["plotLines"])
+    assert len(options["xAxis"]["categories"]) <= shown + 120 // 5 + 1
+
+
+def test_a_stale_payload_draws_no_now_and_no_projection(requests):
+    """Capture stopped hours ago: those hours are not a forecast from "now"."""
+    rows = _outage_rows()
+    old = rows[-1][0] - 10800
+    kept = [r for r in rows if r[0] <= old] or rows[:1]
+    kids = _drawn(kept, forward=_band(), hedge=[{"ts": kept[0][0], "hedge_pressure": 1.0e9}],
+                  captured=old)
+    options = _heat_plot(kids).options
+    assert not options["xAxis"]["plotLines"]
+    assert next(s for s in options["series"] if s["name"] == "EM up")["data"] == []
+    shown = gamma_feed.with_outages(kept)
+    assert len(options["xAxis"]["categories"]) == len(shown)
+    assert _hedge_plot(kids).options["xAxis"]["categories"] == options["xAxis"]["categories"]
+    assert any(t.startswith("Stale") for t in _texts(kids))
+
+
+def test_the_chart_redraws_when_the_payload_goes_stale_with_the_page_open(requests, monkeypatch):
+    rows = _outage_rows()
+    kids = _drawn(rows, forward=_band())
+    plot = _heat_plot(kids)
+    assert plot.options["xAxis"]["plotLines"]
+    limit = futures_chain_config.capture()["stale_after_sec"]
+    monkeypatch.setattr(gamma_feed, "_now", lambda: rows[-1][0] + limit + 60)
+    with kids[0].parent_slot.parent:
+        _timer(kids, "_tick")()
+    assert not plot.options["xAxis"]["plotLines"]
+
+
+def _poll(kids):
+    async def _go():
+        with kids[0].parent_slot.parent:
+            await _timer(kids, "_poll")()
+    asyncio.run(_go())
+
+
+def test_the_same_capture_republished_does_not_repaint_the_chart(requests):
+    rows = _outage_rows()
+    kids = _drawn(rows)
+    plot = _heat_plot(kids)
+    before = plot.options
+    payload = _feed_payload(rows[-1][0])
+    payload["feed"]["last_row_at"] = rows[-1][0]
+    payload["feed"]["why"] = "ThinkorSwim is logged out"
+    bus_client.bus().cache_set("cache:options:gamma", payload)
+    _poll(kids)
+    assert plot.options is before
+    assert any("ThinkorSwim is logged out" in t for t in _texts(kids))
+
+
+def test_a_republish_of_the_last_symbol_ends_no_wait_for_the_one_picked(requests):
+    rows = _outage_rows()
+    kids = _drawn(rows)
+    picker = next(e for e in kids if type(e).__name__ == "Select"
+                  and e.props.get("label") == "Symbol")
+    picker.value = "SPY"
+    payload = _feed_payload(rows[-1][0])
+    payload["feed"]["last_row_at"] = rows[-1][0]
+    payload["feed"]["why"] = "ThinkorSwim is logged out"
+    bus_client.bus().cache_set("cache:options:gamma", payload)
+    _poll(kids)
+    assert not any("ThinkorSwim is logged out" in t for t in _texts(kids))
+
+
+def test_a_new_capture_does_repaint_the_chart(requests):
+    rows = _outage_rows()
+    kids = _drawn(rows)
+    plot = _heat_plot(kids)
+    before = plot.options
+    newer = rows[-1][0] + 300
+    payload = _feed_payload(newer)
+    payload["feed"]["last_row_at"] = newer
+    bus_client.bus().cache_set("cache:options:gamma", payload)
+    bus_client.bus().cache_set(f"cache:{gamma.history_key('GEX', 'FOP.ES')}", {
+        "symbol": "FOP.ES", "view": "GEX", "forward": None,
+        "rows": [[*r[:6], {str(k): v for k, v in r[6].items()}]
+                 for r in (*rows, _row(newer))]})
+    _poll(kids)
+    assert plot.options is not before
+
+
+def test_a_repeat_of_an_existing_symbol_still_repaints():
+    page = _page_for("SPY")
+    state = {"snap": {"symbol": "SPY"}, "hist": {"GEX": [1]}}
+    assert page.keep_chart(state, {"symbol": "SPY"}, "GEX", lambda: None) is False
+
+
+def test_explain_sends_nothing_for_a_feed_symbol_picked_before_its_payload(requests):
+    payload = {"symbol": "SPY", "spot": 500.0, "views": {}, "term": {}}
+    kids = _rendered(payload)
+    _load(kids)
+    sel = next(e for e in kids if type(e).__name__ == "Select"
+               and e.props.get("label") == "Symbol")
+    sel.options = {**dict.fromkeys(sel.options, "x"), "FOP.ES": "/ES"} if isinstance(
+        sel.options, dict) else [*sel.options, "FOP.ES"]
+    sel.update()
+    sel.value = "FOP.ES"
+    requests.clear()
+    button = _button(kids, "Explain")
+    assert button.visible is True          # the page has not heard yet
+    listeners = [ls.handler for ls in button._event_listeners.values() if ls.type == "click"]
+    with kids[0].parent_slot.parent:
+        for handler in listeners:
+            handler(None) if inspect.signature(handler).parameters else handler()
+    assert not [c for c in requests if c["type"] == "gamma_explain"]
+
+
+def test_the_bar_pickers_tooltip_says_capture_for_the_feed_only(requests):
+    def tip(kids):
+        picker = next(e for e in kids if type(e).__name__ == "Select"
+                      and e.props.get("label") == "Bar")
+        return next(c.text for c in picker.parent_slot.children
+                    if type(c).__name__ == "Tooltip"
+                    and c.props.get("target") == f"#{picker.html_id}")
+    feed_kids = _rendered(_feed_payload())
+    _load(feed_kids)
+    assert "once a minute" not in tip(feed_kids) and "capture" in tip(feed_kids)
+    spy_kids = _rendered({"symbol": "SPY", "spot": 500.0, "views": {}, "term": {}})
+    _load(spy_kids)
+    assert "once a minute" in tip(spy_kids)
+
+
+def test_no_rows_never_names_a_collector_for_the_feed(requests):
+    kids = _rendered(_feed_payload())
+    _load(kids)
+    assert not any("collector" in (t or "") for t in _texts(kids))
+
+
+def test_an_existing_symbol_keeps_its_collector_sentence(requests):
+    assert gamma_feed.FeedPage(None, None, {}, enabled=False).no_rows_text() is None
+
+
+def test_a_switch_back_clears_the_bands_from_the_chart_in_place():
+    """An in-place update merges options: a key left out keeps the last symbol's."""
+    page = _page_for("FOP.ES")
+    interval, _step = _settings()
+    start = ct(2026, 11, 8, 23, 0).timestamp()
+    rows = gamma_feed.with_outages(_filled(start, start + 3 * interval))
+    assert page.figure({"xAxis": {}, "series": []}, rows)["xAxis"]["plotBands"]
+    page.sync({"symbol": "SPY"}, "SPY")
+    assert page.figure({"xAxis": {}, "series": []}, [_row(start)])["xAxis"]["plotBands"] == []
+    fig = {"xAxis": {}, "series": []}
+    assert "plotBands" not in page.figure(fig, [_row(start)])["xAxis"]

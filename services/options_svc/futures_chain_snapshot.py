@@ -31,6 +31,7 @@ is imported only inside the function that needs it.
 """
 from __future__ import annotations
 
+import re
 from datetime import date, datetime
 from typing import Callable, NamedTuple
 from zoneinfo import ZoneInfo
@@ -82,17 +83,36 @@ def _choose(bus, symbol: str, now_ts: float):
     return (kept, True) if kept is not None else (None, False)
 
 
+def _pc_reason_for(reason: str, symbol: str) -> str:
+    """The PC's report as it concerns ``symbol``. It can name instruments by root, as
+    ``ES: ...; NQ: ...``: only this one's part belongs on its label, under its label.
+    A report naming none is about the PC, and so about every instrument."""
+    labels = {futures_chain.display_symbol(s)[1:]: futures_chain.display_symbol(s)
+              for s in futures_chain.feed_symbols()}
+    names = "|".join(re.escape(root) for root in labels)
+    parts = re.split(rf"(?:^|;\s+)({names}):\s+", reason)
+    if len(parts) == 1:
+        return reason
+    mine = futures_chain.display_symbol(symbol)
+    for root, text in zip(parts[1::2], parts[2::2]):
+        if labels[root] == mine:
+            return f"{mine}: {text}"
+    return ""
+
+
 def _why_not_capturing(bus, symbol: str) -> str:
     """What the server last heard: this instrument's refusal, else the PC's report."""
     status = _feed._read_status(bus)
     pc = status.get("pc")
     return (_feed._entry(status, symbol)["reason"]
-            or (pc.get("reason") if isinstance(pc, dict) else "") or "")
+            or _pc_reason_for((pc.get("reason") if isinstance(pc, dict) else "") or "", symbol))
 
 
-def _feed_block(bus, symbol: str, captured: dict, frozen: bool, now: datetime) -> dict:
+def _feed_block(bus, symbol: str, captured: dict, frozen: bool, now: datetime,
+                last_row_at=None) -> dict:
     """The payload's account of itself. A stale or frozen capture keeps its numbers
-    and this is what says so; a number must never read as current when it is not."""
+    and this is what says so; a number must never read as current when it is not.
+    ``last_row_at`` is where the session's rows end: past a frozen capture."""
     taken = captured["captured_at"]
     age = now.timestamp() - taken
     why = _why_not_capturing(bus, symbol)
@@ -118,7 +138,7 @@ def _feed_block(bus, symbol: str, captured: dict, frozen: bool, now: datetime) -
             # The cause alone. ``reason`` also holds an age worked out now, which the
             # page's own label would contradict once the payload has sat in the cache.
             "why": why,
-            "strike_low": low, "strike_high": high}
+            "strike_low": low, "strike_high": high, "last_row_at": last_row_at}
 
 
 def snapshot(bus, symbol, now=None) -> dict | None:
@@ -139,12 +159,15 @@ def snapshot(bus, symbol, now=None) -> dict | None:
                                   session=_session(captured))
     if snap is None:
         return None
-    if frozen:
-        # The rows run on past the frozen capture, into an afternoon that has
-        # already happened: a band projected from it would be drawn over them.
+    rows = (snap["views"].get("GEX") or {}).get("history") or []
+    snap["feed"] = _feed_block(bus, symbol, captured, frozen, now,
+                               last_row_at=rows[-1][0] if rows else None)
+    if frozen or snap["feed"]["stale"]:
+        # The rows run on past a frozen capture, into an afternoon that has already
+        # happened, and a stale one was priced at a time long past: a band projected
+        # from either would be drawn as a forecast from a "now" that is not now.
         for entry in snap["views"].values():
             entry.pop("forward", None)
-    snap["feed"] = _feed_block(bus, symbol, captured, frozen, now)
     return snap
 
 

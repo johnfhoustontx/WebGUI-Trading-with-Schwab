@@ -246,10 +246,11 @@ def fill_rows(rows: list, interval_sec: int, step_sec: int) -> list:
     """``rows`` (each led by its epoch second) with every row repeated every
     ``step_sec`` until the next one, but never for longer than ``interval_sec``.
 
-    The store keeps one truthful row per capture; the page draws a column a
-    minute. A longer outage stays a gap rather than being drawn as data, and the
-    newest row is not drawn into the future. The rest of each row is kept as it
-    was, and ``rows`` is not changed."""
+    The store keeps one truthful row per capture; the page draws a column per
+    row, so at a step of the interval itself nothing is repeated. A longer outage
+    stays a gap rather than being drawn as data, and the newest row is not drawn
+    into the future. The rest of each row is kept as it was, and ``rows`` is not
+    changed."""
     ordered = sorted(rows, key=lambda row: row[0])
     if step_sec <= 0 or interval_sec <= 0:
         return ordered

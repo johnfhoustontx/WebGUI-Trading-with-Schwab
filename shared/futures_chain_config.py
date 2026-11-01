@@ -42,9 +42,14 @@ DEFAULTS = {
         "min_read_fraction": 0.25,
         # Captures in a row with the price, volume and open interest unchanged.
         "frozen_repeats": 3,
-        # The page repeats each stored row across the minutes to the next one, to
-        # this step, up to one interval.
-        "fill_step_sec": 100,
+        # The page draws one column per row and repeats a row to this step, up to
+        # one interval. At the interval itself nothing is repeated.
+        "fill_step_sec": 300,
+        # Two captures further apart than this have an outage between them. Below
+        # the interval it reads as the interval.
+        "outage_after_sec": 450,
+        # The most blank columns one jump can add.
+        "max_outage_columns": 288,
         # Between sessions: the last capture at least this long before expiry.
         "frozen_before_expiry_min": 60,
         # The stopped-capture alert repeats at most this often.
@@ -115,6 +120,8 @@ _CAPTURE_BOUNDS = {
     "min_fill_fraction": (0.05, 1.0),
     "frozen_repeats": (2, 100),
     "fill_step_sec": (10, 600),
+    "outage_after_sec": (30, 86400),
+    "max_outage_columns": (1, 2000),
     "frozen_before_expiry_min": (0, 1440),
     "alert_repeat_min": (5, 1440),
     "max_snapshot_kb": (16, 4096),

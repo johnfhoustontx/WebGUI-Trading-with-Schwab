@@ -263,9 +263,11 @@ def _between(values, j, w):
     return a + (b - a) * w
 
 
-def forward_series(forward, after_ts):
-    """``{"rows", "up", "down"}`` for a view's band: one history-shaped row a
-    minute, ``(ts, spot, None, None, None, None, {strike: {call, put, net}})``,
+def forward_series(forward, after_ts, step=None):
+    """``{"rows", "up", "down"}`` for a view's band: one history-shaped row every
+    ``step`` seconds, or the band's own ``"step"``, and a minute unless columns
+    are further apart,
+    ``(ts, spot, None, None, None, None, {strike: {call, put, net}})``,
     from the minute after ``after_ts`` (the last collected row's epoch seconds)
     to the band's last mark, and the expected-move cone at each of those
     minutes (None where it has none).
@@ -289,13 +291,14 @@ def forward_series(forward, after_ts):
         if k is not None:
             strikes.append((k, calls.get(key) or [], puts.get(key) or []))
     after = _fmt.num(after_ts)
-    start = (math.floor(after / 60) + 1) * 60 if after is not None \
-        else math.ceil(ts[0] / 60) * 60
+    step = step or forward.get("step") or 60
+    start = (math.floor(after / step) + 1) * step if after is not None \
+        else math.ceil(ts[0] / step) * step
     spot = _fmt.num(forward.get("spot"))
     cone = forward.get("cone") if isinstance(forward.get("cone"), dict) else {}
     out = {"rows": [], "up": [], "down": []}
     j = 0
-    for minute in range(int(start), int(ts[-1]) + 1, 60):
+    for minute in range(int(start), int(ts[-1]) + 1, int(step)):
         while j + 1 < len(ts) - 1 and ts[j + 1] <= minute:
             j += 1
         span = ts[min(j + 1, len(ts) - 1)] - ts[j]
@@ -463,19 +466,33 @@ def _averaged(line, weights):
     return out
 
 
-def smooth(z, *, minutes, strikes):
+def _averaged_apart(line, weights, breaks):
+    """``_averaged`` on each stretch between the columns in ``breaks``, so nothing
+    is carried across one. Those columns come back as gaps."""
+    out, start = [], 0
+    for stop in [*sorted(breaks), len(line)]:
+        out += _averaged(line[start:stop], weights)
+        if stop < len(line):
+            out.append(None)
+        start = stop + 1
+    return out
+
+
+def smooth(z, *, minutes, strikes, breaks=()):
     """The grid ``z[yi][xi]`` with each cell averaged over its neighbours: a bell
     curve ``minutes`` columns wide along time and ``strikes`` rows wide along the
     strike axis (each a standard deviation; 0 leaves that direction alone).
 
-    A cell that is not a number is a gap, before and after. Nothing is written
-    to ``z``; with both widths at 0 it is handed back as it came."""
+    A cell that is not a number is a gap, before and after. ``breaks`` are columns
+    no average may cross, which a plain gap does not stop. Nothing is written to
+    ``z``; with both widths at 0 it is handed back as it came."""
     if not z or (minutes <= 0 and strikes <= 0):
         return z
     grid = [[v if _fmt.num(v) is not None else None for v in row] for row in z]
     if minutes > 0:
         weights = _weights(minutes)
-        grid = [_averaged(row, weights) for row in grid]
+        grid = [(_averaged_apart(row, weights, breaks) if breaks
+                 else _averaged(row, weights)) for row in grid]
     if strikes > 0:
         weights = _weights(strikes)
         columns = [_averaged(list(col), weights) for col in zip(*grid)]

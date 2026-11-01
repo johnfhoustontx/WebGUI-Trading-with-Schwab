@@ -149,6 +149,15 @@ def show_true(monkeypatch):
                         lambda: {**real(), "show_in_dropdown": True})
 
 
+@pytest.fixture
+def repeated_rows(monkeypatch):
+    """A step below the interval, which an operator can choose: the shipped step
+    repeats nothing, so two captures would not exercise the filled path."""
+    real = futures_chain_config.capture
+    monkeypatch.setattr(futures_chain_config, "capture",
+                        lambda: {**real(), "fill_step_sec": 100})
+
+
 def set_current_gamma_symbol(bus, symbol):
     bus.cache_set(handlers.CACHE_GAMMA, {"symbol": symbol, "views": {}})
 
@@ -190,14 +199,21 @@ def test_the_store_keeps_one_row_per_capture(bus, db, write_captures):
     assert count == 2
 
 
-def test_the_level_tracks_stay_parallel_with_the_filled_rows(bus, db, write_captures):
+def test_the_shipped_step_repeats_no_row(bus, db, write_captures):
+    first = ct(2026, 11, 2, 9, 0)
+    write_captures(first, first + _dt.timedelta(seconds=360), first + _dt.timedelta(seconds=600))
+    snap = snapshot(bus, "FOP.ES", now=ct(2026, 11, 2, 9, 11))
+    assert [ts - int(first.timestamp()) for ts in history_ts(snap)] == [0, 360, 600]
+
+
+def test_the_level_tracks_stay_parallel_with_the_filled_rows(bus, db, write_captures, repeated_rows):
     write_captures(ct(2026, 11, 2, 9, 0), ct(2026, 11, 2, 9, 5))
     gex = snapshot(bus, "FOP.ES", now=ct(2026, 11, 2, 9, 6))["views"]["GEX"]
     assert len(gex["history"]) > 2
     assert len(gex["levels"]["flip"]) == len(gex["history"])
 
 
-def test_the_hedge_panel_is_filled_onto_the_heatmaps_columns(bus, db, write_captures):
+def test_the_hedge_panel_is_filled_onto_the_heatmaps_columns(bus, db, write_captures, repeated_rows):
     write_captures(ct(2026, 11, 2, 9, 0), ct(2026, 11, 2, 9, 5))
     snap = snapshot(bus, "FOP.ES", now=ct(2026, 11, 2, 9, 6))
     hedge = [row["ts"] for row in snap["hedge_history"]]
@@ -318,6 +334,40 @@ def test_the_cause_travels_apart_from_the_age_written_with_the_payload(bus, db, 
                                    "at": ct(2026, 11, 2, 9, 3).timestamp()}))
     block = snapshot(bus, "FOP.ES", now=ct(2026, 11, 2, 9, 20))["feed"]
     assert block["why"] == "ThinkorSwim is logged out"
+
+
+def test_a_capture_too_old_at_build_carries_no_projection(bus, db, write_captures):
+    """Nothing about the hours since is known, so nothing is drawn as a forecast."""
+    write_captures(ct(2026, 11, 2, 9, 0))
+    fresh = snapshot(bus, "FOP.ES", now=ct(2026, 11, 2, 9, 4))
+    assert fresh["views"]["GEX"]["forward"]
+    old = snapshot(bus, "FOP.ES", now=ct(2026, 11, 2, 13, 0))
+    assert old["feed"]["stale"] is True
+    assert not [v for v, entry in old["views"].items() if "forward" in entry]
+
+
+def test_the_block_says_where_the_rows_end(bus, db, write_captures):
+    write_captures(ct(2026, 11, 6, 13, 55), ct(2026, 11, 6, 14, 55))
+    block = snapshot(bus, "FOP.ES", now=ct(2026, 11, 7, 12, 0))["feed"]
+    assert block["captured_at"] == ct(2026, 11, 6, 13, 55).timestamp()
+    assert block["last_row_at"] == int(ct(2026, 11, 6, 14, 55).timestamp())
+
+
+def test_another_instruments_reason_stays_off_this_label(bus, db, write_captures):
+    write_captures(ct(2026, 11, 2, 9, 0))
+    feed.handle(bus, Command(type="pc_status", args={
+        "reason": "ES: every contract reads N/A; NQ: read 100 of 400 contracts tried; not sent",
+        "at": ct(2026, 11, 2, 9, 3).timestamp()}))
+    from services.options_svc.futures_chain_snapshot import _why_not_capturing
+    assert _why_not_capturing(bus, "FOP.ES") == "/ES: every contract reads N/A"
+    assert _why_not_capturing(bus, "FOP.NQ") == "/NQ: read 100 of 400 contracts tried; not sent"
+    feed.handle(bus, Command(type="pc_status", args={
+        "reason": "NQ: read 100 of 400 contracts tried; not sent",
+        "at": ct(2026, 11, 2, 9, 3).timestamp()}))
+    assert _why_not_capturing(bus, "FOP.ES") == ""
+    feed.handle(bus, Command(type="pc_status", args={
+        "reason": "ThinkorSwim is logged out", "at": ct(2026, 11, 2, 9, 3).timestamp()}))
+    assert _why_not_capturing(bus, "FOP.ES") == "ThinkorSwim is logged out"
 
 
 def test_a_stale_snapshot_says_why_the_capture_stopped(bus, db, write_captures):
@@ -476,7 +526,7 @@ def test_refresh_gamma_for_the_feed_makes_no_schwab_call(bus, db, write_captures
     assert payload["feed"]["label"] == "/ES"
 
 
-def test_the_rows_land_in_the_private_history_key_not_the_main_one(bus, db, write_captures):
+def test_the_rows_land_in_the_private_history_key_not_the_main_one(bus, db, write_captures, repeated_rows):
     write_captures(ct(2026, 11, 2, 9, 0), ct(2026, 11, 2, 9, 5))
     handlers.refresh_gamma(bus, "FOP.ES")
     payload = bus.cache_get(handlers.CACHE_GAMMA).payload

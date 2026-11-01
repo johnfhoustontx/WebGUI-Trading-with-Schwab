@@ -2914,13 +2914,22 @@ _FUTURES_CHAIN = ConfigFile(
             Field("capture.max_future_skew_sec", "Refuse a snapshot stamped ahead by",
                   "A PC clock that is wrong.",
                   kind="int", unit="seconds", min=0, max=600, step=5),
-            Field("capture.fill_step_sec", "Repeat each capture across the page every",
-                  "The charts draw one column per row. Each capture is repeated "
-                  "to this step until the next one, for up to one interval; a "
-                  "longer outage stays empty. A smaller step makes a heavier "
-                  "page: a whole session at 60 seconds is about three times a "
-                  "regular day's.",
+            Field("capture.fill_step_sec", "One column on the page every",
+                  "The charts draw one column per row. At the interval each column "
+                  "is a real capture. Lower, each capture is repeated to this step "
+                  "until the next one, and the page gets heavier: a whole session "
+                  "at 100 seconds froze the browser for over 4 seconds at every "
+                  "repaint.",
                   kind="int", unit="seconds", min=10, max=600, step=10),
+            Field("capture.outage_after_sec", "Draw an outage when captures are apart by over",
+                  "Longer than this is drawn as a blank stretch. Keep it above the "
+                  "interval, because a capture can land a minute late; below the "
+                  "interval it counts as the interval.",
+                  kind="int", unit="seconds", min=30, max=86400, step=30),
+            Field("capture.max_outage_columns", "Most blank columns for one outage",
+                  "Only a limit on the page's size: a longer outage still reads as "
+                  "one, and its axis jumps to the next capture.",
+                  kind="int", unit="columns", min=1, max=2000, step=12),
         )),
         Section("What makes a snapshot unfit",
                 "A snapshot that fails is not sent, and the reason is shown on "

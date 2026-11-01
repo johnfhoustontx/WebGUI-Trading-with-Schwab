@@ -82,6 +82,7 @@ def palette(colours):
         "ridge_above": _heat.rgba(_heat.shade(call, 0.4), 0.9),
         "ridge_below": _heat.rgba(_heat.shade(put, 0.4), 0.9),
         "wash": _wash_stops(colours),
+        "outage": _heat.rgba(_heat.shade(_heat.mix(call, put, 0.5), 0.5), 0.35),
     }
 
 
@@ -104,6 +105,8 @@ POS_COLOR = _PAL["pos"]
 NEG_COLOR = _PAL["neg"]
 BAR_POS_COLOR = _PAL["bar_pos"]     # the by-strike bars: each side's low colour
 BAR_NEG_COLOR = _PAL["bar_neg"]
+OUTAGE_COLOR = _PAL["outage"]       # /ES and /NQ: a stretch with no capture
+_NO_ROWS_TEXT = "No intraday snapshots yet (history collector not running)."
 CALL_WALL_COLOR = POS_COLOR
 PUT_WALL_COLOR = NEG_COLOR
 SPOT_COLOR = "#ffd54f"
@@ -880,7 +883,7 @@ def heatmap_matrix(rows, mode="net"):
 def _session_rows(rows, forward):
     """``(collected + projected rows, the projected afternoon's series)``: the
     rows ``heatmap_figure`` draws, one a minute to the close while the session
-    runs (``gamma_heat.forward_series``)."""
+    runs, or at the band's own ``"step"`` (``gamma_heat.forward_series``)."""
     rows = list(rows or [])
     band = _heat.forward_series(forward, rows[-1][0] if rows else None)
     return rows + band["rows"], band
@@ -945,7 +948,7 @@ HEDGE_BUY_COLOR = POS_COLOR
 HEDGE_SELL_COLOR = NEG_COLOR
 
 
-def ohlc_bars(spots, interval):
+def ohlc_bars(spots, interval, reopen_after_gap=False):
     """``[[x, open, high, low, close], …]`` from the per-snapshot spot samples.
 
     Spot is stored as a 1-min POINT SAMPLE, not a bar, so bars are derived the way
@@ -972,13 +975,15 @@ def ohlc_bars(spots, interval):
         chunk = spots[start:start + step]
         vals = [v for v in chunk
                 if isinstance(v, (int, float)) and not isinstance(v, bool)]
+        if reopen_after_gap and chunk[0] not in vals:
+            prev_close = None
         if not vals:
             continue
         o = prev_close if prev_close is not None else vals[0]
         c = vals[-1]
         out.append([start + (len(chunk) - 1) // 2, o, max([o] + vals),
                     min([o] + vals), c])
-        prev_close = c
+        prev_close = None if reopen_after_gap and chunk[-1] not in vals else c
     return out
 
 
@@ -1124,7 +1129,7 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, forward=None,
                    projected_flip=None, mode="net", balanced=(), legend=None,
                    scale="adaptive", lock=None, frame="strike", half=None,
                    show="level", change_window_min=30, contours=None,
-                   smooth=None):
+                   smooth=None, reopen_after_gap=False):
     """Intraday strike×time Highcharts heatmap (dark, cell separators, concise
     hover) with the underlying spot-price line overlaid on the same (linear)
     strike axis. ``yrange`` (when given) sets the Strike axis range so it aligns
@@ -1178,7 +1183,9 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, forward=None,
     treat the session as one. Only what means "what happened" stays on the
     collected columns: the spot line, candles and level tracks. A dashed 'now'
     divider sits between the two, the spot line carries on flat at the band's
-    spot, and the EM up/down cone is drawn over the projected columns."""
+    spot, and the EM up/down cone is drawn over the projected columns.
+    ``reopen_after_gap``: a candle after a blank column opens at its own price
+    (``ohlc_bars``)."""
     n_obs = len(rows or [])
     rows, band = _session_rows(rows, forward)
     projected = len(band["rows"])
@@ -1302,7 +1309,7 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, forward=None,
     # always draws the line.
     if from_spot:
         spot_style = "line"
-    _bars = (ohlc_bars(spots, spot_interval)
+    _bars = (ohlc_bars(spots, spot_interval, reopen_after_gap)
              if spot_style in ("candle", "ohlc") else [])
     _body, _wick = candle_points(_bars)
     # The white track crosses bright cyan cores, so it carries the design's dark
@@ -3419,8 +3426,8 @@ def render(symbol: str | None = None, view: str | None = None,
             # every slot taken, or outside market hours (public_status_text).
             pub_line = (ui.label("").classes(f"text-xs {MUTED}")
                         if _public else None)
-        feed = _feed.FeedPage(head, view_toggle, _tab_els, enabled=_may_enqueue,
-                              buttons=(explain_btn, analyze_btn, briefings_btn))
+        feed = _feed.FeedPage(head, view_toggle, _tab_els, buttons=(explain_btn, analyze_btn, briefings_btn),
+                              enabled=_may_enqueue, bar_picker=spot_int_sel, band=(OUTAGE_COLOR, FONT))
 
     # --- Net Prem controls (this view only) ---------------------------------
     # Shown/hidden as one block by _sync_np_controls, the same way the Bar-size
@@ -3904,7 +3911,7 @@ def render(symbol: str | None = None, view: str | None = None,
         # when price drifted out of that window.
         _strikes = bars_from_gex(data, view_spot)["strikes"]
         # Value, marks, scale and frame: ONE set of keywords, ONE range, both panels.
-        _hk = heat.read(data["gex"], rows, _strikes, entry)
+        _hk = feed.heat_keywords(heat.read(data["gex"], rows, _strikes, entry), rows)
         yr = heat_yrange(_strikes, view_spot, spot_path, _hk["frame"], _hk["half"])
         if not show_no_greeks(entry, state["chart_el"], chart_msg, snap.get("symbol") or _current_symbol(), _set_summary):
             _set_chart(bar_figure(data, view_spot, view=view, walls=walls, flip=flip,
@@ -3915,6 +3922,7 @@ def render(symbol: str | None = None, view: str | None = None,
         if rows:
             # The view's projected afternoon; the hedge panel below shares it.
             forward = (state.get("fwd") or {}).get(view)
+            forward = feed.forward(forward, snap)
             _legend = {}
             _set_figure(heat_plot, feed.figure(heatmap_figure(
                 rows, view, yrange=yr, forward=forward, walls=walls, spot=view_spot,
@@ -3922,7 +3930,7 @@ def render(symbol: str | None = None, view: str | None = None,
                 show_tracks=bool(tracks_sw.value), spot_style=spot_style_sel.value,
                 spot_interval=feed.bar_columns(spot_int_sel.value),
                 projected_flip=snap.get("projected_flip"),
-                legend=_legend, **_hk), rows))
+                legend=_legend, reopen_after_gap=feed.on, **_hk), rows))
             heat.show_legend(view, _legend)
             # The hedge panel is its own element under the heatmap, so their
             # horizontal alignment is entirely this wiring's job: SAME categories
@@ -3945,7 +3953,7 @@ def render(symbol: str | None = None, view: str | None = None,
             heat_plot.set_visibility(False)
             hedge_plot.set_visibility(False)
             hedge_lbl.set_visibility(False)
-            heat_msg.text = "No intraday snapshots yet (history collector not running)."
+            heat_msg.text = feed.no_rows_text() or _NO_ROWS_TEXT
             heat_msg.set_visibility(True)
         _apply_flex(len(rows))
 
@@ -4005,7 +4013,8 @@ def render(symbol: str | None = None, view: str | None = None,
         if state["countdown"] < 0:
             state["countdown"] = 120
         strip_state["countdown"] = state["countdown"] if _may_enqueue else None
-        feed.paint(state["snap"])     # a capture's age is a function of the clock
+        if feed.paint(state["snap"]):     # a capture's age is a function of the clock
+            _render_view()                # stale now: no "now" line, no projection
         _repaint_strip()
         if _public:
             _paint_public_line()      # "asking…" ages into its answer by the clock
@@ -4037,6 +4046,8 @@ def render(symbol: str | None = None, view: str | None = None,
         # revert the displayed symbol out from under the user.
         want = _current_symbol()
         if snap and want and (snap.get("symbol") or "").upper() != want:
+            return
+        if feed.keep_chart(state, snap, view_toggle.value, chart_busy.hide):
             return
         state["snap"] = snap
         # A new snapshot means new history rows; drop the per-view cache and pull
@@ -4107,16 +4118,16 @@ def render(symbol: str | None = None, view: str | None = None,
     def _request_explain():
         if not _may_enqueue:
             return                        # see may_enqueue — no button either
+        if not _feed.shows_analysis(_current_symbol()):
+            return                        # picked, and its payload not here yet
         sym = _current_symbol()
         if not sym:
             kit.symbol_error(symbol_in, "Enter a symbol first.")
             return
         kit.symbol_error(symbol_in, None)
         bus_client.request("options", {"type": "gamma_explain", "args": {"symbol": sym}})
-        # The button holds its own spinner until _watch_explain opens the tab (or
-        # the kit's backstop gives it back). Nothing on THIS page repaints, so the
-        # chart scrim would be the wrong wait, and a toast saying "building…" is
-        # what the design's toast rule sends to a spinner.
+        # The button holds its own spinner until _watch_explain opens the tab (or the
+        # kit's backstop gives it back): nothing HERE repaints, so no scrim, no toast.
         kit.set_busy(explain_btn)
 
     @guard
