@@ -308,7 +308,7 @@ gamma spikes; this is the same behaviour as other 0-DTE symbols, not a defect he
 afternoon is one column per minute. Hedge and level panels share that axis.
 
 The store stays truthful with one row per capture, and the view draws one column per
-capture: `fill_step_sec` ships at 300, the interval, so no row is repeated (5.11 has the
+capture: `fill_step_sec` ships at the interval (300 when this was written, 120 since 2026-11-01), so no row is repeated (5.11 has the
 measurement behind that). A column is `min(fill_step_sec, interval_sec)` apart
 (`futures_chain_config.column_step`), and everything that counts columns works from that
 one width: the Bar picker, Smooth, the blank columns of an outage and the projection,

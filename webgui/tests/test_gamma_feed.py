@@ -26,6 +26,38 @@ from shared.futures_chain import is_feed_symbol
 _CT = ZoneInfo("America/Chicago")
 
 
+@pytest.fixture(autouse=True)
+def five_minute_captures(monkeypatch):
+    """These tests measure gaps against a 300-second capture with no faster cadence to
+    fall back from. ``shipped_cadence`` is the one that holds what ships."""
+    real = futures_chain_config.capture
+    monkeypatch.setattr(futures_chain_config, "capture",
+                        lambda: {**real(), "interval_sec": 300, "fill_step_sec": 300,
+                                 "fallback_interval_sec": 300})
+
+
+@pytest.fixture
+def shipped_cadence(monkeypatch):
+    settings = futures_chain_config.DEFAULTS["capture"]
+    real = futures_chain_config.capture
+    monkeypatch.setattr(futures_chain_config, "capture", lambda: {**real(), **{
+        key: settings[key] for key in ("interval_sec", "fill_step_sec", "fallback_interval_sec")}})
+
+
+def test_a_gap_at_the_fallback_is_held_and_no_outage(shipped_cadence):
+    start = ct(2026, 11, 8, 9, 0).timestamp()
+    rows = futures_chain.fill_rows([(start, 1.0), (start + 300, 2.0), (start + 420, 3.0)], 300, 120)
+    assert [r[0] - start for r in rows] == [0, 120, 240, 300, 420]
+    assert [r[1] for r in gamma_feed.with_outages(rows)] == [1.0, 1.0, 1.0, 2.0, 3.0]
+
+
+def test_a_gap_past_the_fallback_is_still_an_outage(shipped_cadence):
+    start = ct(2026, 11, 8, 9, 0).timestamp()
+    out = gamma_feed.with_outages([(start, 1.0), (start + 600, 2.0)])
+    assert [r[0] - start for r in out] == [0, 120, 240, 360, 480, 600]
+    assert [r[1] for r in out] == [1.0, None, None, None, None, 2.0]
+
+
 def ct(y, m, d, hh, mm):
     return datetime(y, m, d, hh, mm, tzinfo=_CT)
 
@@ -684,7 +716,7 @@ def two_minutes(monkeypatch):
     """The 2 minutes the design names, set alone in Settings: the step stays 300."""
     real = futures_chain_config.capture
     monkeypatch.setattr(futures_chain_config, "capture",
-                        lambda: {**real(), "interval_sec": 120})
+                        lambda: {**real(), "interval_sec": 120, "fallback_interval_sec": 120})
 
 
 def test_a_five_minute_bar_at_two_minute_captures_spans_its_real_columns(two_minutes):

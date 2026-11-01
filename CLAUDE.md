@@ -734,8 +734,9 @@ design in [the chain feed design](docs/plans/2026-10-31-futures-0dte-chain-feed-
   downstream is therefore scaled: print none for these symbols. Gamma is calculated per
   contract from its own implied volatility; with none there is no gamma (absent, never 0).
 - **A column's width is `futures_chain_config.column_step()`**, never `fill_step_sec`
-  read alone, and an outage is `outage_after()`, which scales with the interval: the
-  interval is one setting, and changing it alone must leave every chart true.
+  read alone, and an outage is `outage_after()`, which scales with `slowest_interval()`: the
+  interval is one setting, and changing it alone must leave every chart true. After a miss
+  the PC captures at `fallback_interval_sec`, and the page holds rows across that gap.
 - **Never touch the operator's Excel.** The capture starts its own
   `EXCEL.EXE /automation -Embedding`, stops it by process id after an identity check, never
   calls `Quit()`, never starts ThinkorSwim and never enters a password. It reads; it

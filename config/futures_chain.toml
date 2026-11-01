@@ -5,13 +5,20 @@
 # chains come from ThinkorSwim.
 
 [capture]
-# Seconds between snapshots. One value: nothing else assumes five minutes.
-interval_sec = 300
+# Seconds between snapshots. One value: nothing else assumes a cadence.
+interval_sec = 120
+# After a boundary with a miss (an instrument left out, a failed send, or work that ran
+# past the interval) the capture drops to this cadence, and returns to interval_sec
+# after this many clean captures in a row. Each session starts at interval_sec. A value
+# at or below interval_sec is no fallback. The page reads a gap this long as captures
+# being slower, not as an outage.
+fallback_interval_sec = 300
+fallback_clean_captures = 3
 # The server drops a snapshot older than this, so a backlog never replays as
 # current.
 max_age_sec = 900
 # The page labels a symbol stale when its newest snapshot is older than this
-# during the session. A little over two intervals.
+# during the session. A little over two of the slower intervals (the fallback's).
 stale_after_sec = 660
 # A snapshot stamped further ahead than this is refused (a clock that is wrong).
 max_future_skew_sec = 30
@@ -31,19 +38,20 @@ min_read_fraction = 0.25
 # not hold one price for minutes.
 frozen_repeats = 3
 # The history is stored one row per capture; the page draws one column per row
-# and repeats a row to this step, up to one interval. At the interval itself each
-# column is a real capture and nothing is repeated. A lower step repeats rows and
+# and repeats a row to this step, up to one interval (the fallback's, so a slower
+# stretch keeps its width in time). At the interval itself each column is a real
+# capture and only a slower stretch is repeated. A lower step repeats rows and
 # makes a heavier page: every repaint at 794 columns blocked the browser 4.5 s,
 # past NiceGUI's 2 s ping (measured 2026-10-31). Choose a step that divides
 # interval_sec, or the columns are unevenly spaced. Above the interval it reads as
 # the interval: rows are never further apart than captures are.
-fill_step_sec = 300
+fill_step_sec = 120
 # Two captures further apart than this have an outage between them, drawn blank.
 # Above the interval because a capture can be a minute late: rows are floored to
 # the minute and a read can cross one, giving gaps of 240 and then 360. This is
-# stated at the shipped interval of 300 and scales with interval_sec, so 450 is one
-# and a half intervals: 180 at an interval of 120, 900 at 600. A value that works
-# out below the interval reads as the interval.
+# stated at an interval of 300 and scales with the slower of interval_sec and
+# fallback_interval_sec, so 450 is one and a half of those: 180 at 120 with no
+# fallback, 900 at 600. A value that works out below that interval reads as it.
 outage_after_sec = 450
 # The most blank columns one jump can add.
 max_outage_columns = 288

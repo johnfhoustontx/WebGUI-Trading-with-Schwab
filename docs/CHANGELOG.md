@@ -4,7 +4,24 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-01 (**The ThinkorSwim capture runs with no window, and a stray line in `.env` no longer stops its plan.**)
+**Last updated:** 2026-11-01 (**/ES and /NQ are captured every 2 minutes, falling back to every 5 after a miss.**)
+
+- The operator's request, on the result of a test. Sunday 08:26-08:54 CT, market closed, nothing
+  sent: 15 of 15 captures on their minute, /ES 306 and /NQ 416 contracts, no problems, Excel
+  stopped cleanly. The service's adapter calculated gamma on 282 of 306 and 416 of 416 each time.
+  Prices were frozen, so fill time in a live market and the ssh send are still unmeasured.
+- `interval_sec = 120`, `fill_step_sec = 120`. New: `fallback_interval_sec = 300` and
+  `fallback_clean_captures = 3`, both in the plan and in Settings → Configuration. A miss is an
+  instrument left out, a failed send, or a capture that ran past the interval or threw. A further
+  miss owes all three again, and each session starts at the interval.
+- A 300-second gap must not read as an outage, so `futures_chain_config.slowest_interval()` now
+  drives `outage_after()` (450, as before) and how far a row is held, and a slower stretch keeps
+  its width in time. The cost: a missed capture at 2 minutes alone is no longer drawn blank, because
+  a gap under 450 seconds cannot be told from the fallback.
+- A session is 270 columns at this cadence, about what the 264 of a 22-hour session at 5 minutes
+  were when the repaint was measured.
+
+**Prior —** 2026-11-01 (**The ThinkorSwim capture runs with no window, and a stray line in `.env` no longer stops its plan.**)
 
 - The operator could close the capture by accident: asked to hide itself, `powershell.exe` still
   landed in a Windows Terminal window. The task now starts it through `conhost.exe --headless`.

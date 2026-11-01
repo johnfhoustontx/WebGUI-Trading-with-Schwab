@@ -52,8 +52,7 @@ class FeedSession(NamedTuple):
 def _session(captured: dict) -> FeedSession:
     """The session a cached capture (``futures_chain_feed.latest``) belongs to."""
     _, gex_history, _ = _feed._engines()
-    settings = futures_chain_config.capture()
-    interval, step = settings["interval_sec"], futures_chain_config.column_step()
+    interval, step = futures_chain_config.slowest_interval(), futures_chain_config.column_step()
     opens, ends = futures_chain.session_bounds(date.fromisoformat(captured["expiry"]))
     return FeedSession(
         span=gex_history.SessionSpan(opens, ends),

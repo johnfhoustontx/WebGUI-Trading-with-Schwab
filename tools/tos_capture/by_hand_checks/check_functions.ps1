@@ -168,4 +168,29 @@ $threw = $false
 try { Send-Body $bytes } catch { $threw = $true }
 Check 'Send-Body quiet with no ssh at all' $threw $false
 
+# The cadence: a miss moves to the fallback, three clean captures return, and a fallback
+# at or below the interval never changes anything.
+$script:Plan = [pscustomobject]@{ interval_sec = 120 }
+$FallbackIntervalSec = 300
+$FallbackCleanCaptures = 3
+$script:CleanOwed = 0
+Check 'cadence starts at the interval' (Get-CaptureInterval) 120
+Update-Cadence $true ''
+Check 'a clean capture changes nothing' (Get-CaptureInterval) 120
+Update-Cadence $false 'a test miss'
+Check 'a miss moves to the fallback' (Get-CaptureInterval) 300
+Update-Cadence $true ''
+Update-Cadence $true ''
+Check 'two clean captures are not enough' (Get-CaptureInterval) 300
+Update-Cadence $false 'a second miss'
+Update-Cadence $true ''
+Update-Cadence $true ''
+Check 'a miss owes all three again' (Get-CaptureInterval) 300
+Update-Cadence $true ''
+Check 'three clean captures return' (Get-CaptureInterval) 120
+$FallbackIntervalSec = 0
+Update-Cadence $false 'no fallback'
+Check 'no fallback from an older server' (Get-CaptureInterval) 120
+$script:CleanOwed = 0
+
 "failures: $fails"

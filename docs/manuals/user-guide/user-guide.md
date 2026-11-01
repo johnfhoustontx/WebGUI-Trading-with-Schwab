@@ -1082,8 +1082,11 @@ service and the web app from System Status.
 **Where the numbers come from.** Schwab serves no futures-option chains, and these two
 are never worked out from `$SPX` or `$NDX`, not even when the feed is down. A capture
 program on **your PC** reads the chains out of **ThinkorSwim** through Excel and sends
-each one to the server. It takes a snapshot every **300 seconds** (**Take a snapshot
-every**, `interval_sec`), from **06:00** Central on the day of an expiry (**Capture
+each one to the server. It takes a snapshot every **120 seconds** (**Take a snapshot
+every**, `interval_sec`), and after a miss (an instrument left out, a failed send, or a
+capture that ran past the interval) every **300 seconds** (**After a miss, take one every**,
+`fallback_interval_sec`) until **3** clean captures in a row (**Return after this many clean
+captures**, `fallback_clean_captures`). It takes them from **06:00** Central on the day of an expiry (**Capture
 starts**, `open_ct`) to **15:00** Central, when it expires (**Expires**, `close_ct`),
 Monday to Friday. Nothing is captured overnight or at the weekend, so the heat map starts
 at 06:00 and the PC need not be on before then. Set **Capture starts** to **17:00** to
@@ -1113,8 +1116,9 @@ before, so Monday's options then start on Sunday evening.
   both). The walls and the flip are found among those strikes only, and the line above the
   charts names the range.
 - **One column is one capture.** The heat map has a column per capture (**One column on the
-  page every**, `fill_step_sec`, shipped 300 seconds), and its time runs through the
-  night. The projected afternoon is drawn only from a current capture.
+  page every**, `fill_step_sec`, shipped 120 seconds). After a miss the same capture fills
+  the columns until the next one, so a slower stretch keeps its width in time. The projected
+  afternoon is drawn only from a current capture.
 - **Not offered:** Flow, Term, Explain, Analyze and Briefings (the last three read the stock
   indexes or fetch from Schwab). **Net Prem** stays and is unrelated to the symbol. In the
   Delta view the hedge panel may say *hedge n/a for this capture*.
@@ -1131,10 +1135,10 @@ even when nothing new arrives.
 | the same, then *No capture has arrived for this session* | The next session is open and nothing has come. | The alert's reasons below. |
 | *No capture of /ES to show yet. Its chain comes from ThinkorSwim on the PC, not from Schwab.* | The server holds no capture at all. | Install and start the capture (below). |
 | *No gamma could be calculated for /ES* | The last capture carried no usable implied volatility. | Wait one capture. If ThinkorSwim shows no volatilities, it is a ThinkorSwim data problem. |
-| a blank stretch on the heat map, labelled **No capture**, and blank on the hedge panel below it | Captures were further apart than **Draw an outage when captures are apart by over** (`outage_after_sec`, shipped 450 seconds, which is one and a half intervals and scales if you change the interval). It is drawn blank on purpose: smooth shading across five hours would read as data. | Nothing. The Smooth setting does not reach across it. |
+| a blank stretch on the heat map, labelled **No capture**, and blank on the hedge panel below it | Captures were further apart than **Draw an outage when captures are apart by over** (`outage_after_sec`, shipped 450 seconds, which is one and a half of the slower 300-second interval and scales if you change it). It is drawn blank on purpose: smooth shading across five hours would read as data. | Nothing. The Smooth setting does not reach across it. |
 
-A capture that arrives a minute late is not an outage: 450 seconds is above the 300-second
-interval for that reason.
+A capture that arrives a minute late, or a slower stretch after a miss, is not an outage:
+450 seconds is above the 300-second fallback for that reason.
 
 **The phone alert.** When capture stops during the session, one message goes out through
 **Server alerts** (Settings → General → Push notifications), titled *"/ES chain capture has

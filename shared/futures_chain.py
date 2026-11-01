@@ -284,7 +284,8 @@ def fill_rows(rows: list, interval_sec: int, step_sec: int) -> list:
 # because the PC and the server do not update together.
 _PC_SETTINGS = ("min_read_fraction", "fill_settle_sec", "fill_wait_max_sec",
                 "probe_round_steps", "probe_reach", "recentre_share", "ssh_timeout_sec",
-                "no_plan_retry_sec", "plan_retry_max_sec", "hang_limit_sec", "hang_exit_after_sec")
+                "no_plan_retry_sec", "plan_retry_max_sec", "hang_limit_sec", "hang_exit_after_sec",
+                "fallback_interval_sec", "fallback_clean_captures")
 
 
 def build_plan(now: datetime) -> dict:

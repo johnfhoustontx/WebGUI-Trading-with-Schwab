@@ -4579,8 +4579,11 @@ series whose `DESCRIPTION` states the plan's date, on its own and not as part of
 - **Waiting for a fill.** A written sheet reads `N/A` until ThinkorSwim answers; Excel hands
   updates over in batches. A sheet is called filled once its count has held for
   `fill_settle_sec` (5) with at least one value, waiting at most `fill_wait_max_sec` (20).
-- **The clock.** Boundaries are multiples of `interval_sec` (300) since the epoch, so a
-  restart stays on the same clock. The plan is fetched at the start and each time its
+- **The clock.** Boundaries are multiples of `interval_sec` (120) since the epoch, so a
+  restart stays on the same clock. After a miss (an instrument left out, a failed send, a
+  capture that ran past the interval, or a capture that threw) they are multiples of
+  `fallback_interval_sec` (300) until `fallback_clean_captures` (3) clean captures in a row;
+  a further miss owes all of them again, and each session starts at the interval. The plan is fetched at the start and each time its
   `valid_until` (the session's end) passes; a failed fetch retries after `no_plan_retry_sec`
   (60), doubling to `plan_retry_max_sec` (900). A hung ssh is stopped after
   `ssh_timeout_sec` (60), and a loop with no sign of life for `hang_limit_sec` (600) has its
@@ -4714,15 +4717,16 @@ The only places that printed one were on the Flow tab, which these two do not of
 
 | What | When |
 |---|---|
-| A snapshot | every `interval_sec` (300 s) on the epoch clock, from `[session] open_ct` (17:00 Central the evening before the expiry) to `close_ct` (15:00 Central on it). Expiries are weekdays, so Monday's opens Sunday evening. CME holidays are not modelled: a holiday is found by the contracts not returning data |
+| A snapshot | every `interval_sec` (120 s) on the epoch clock, or `fallback_interval_sec` (300 s) after a miss, from `[session] open_ct` (06:00 Central on the expiry's date) to `close_ct` (15:00 Central on it). A start at or after the close means the evening before, so 17:00 captures the whole futures session. CME holidays are not modelled: a holiday is found by the contracts not returning data |
 | One ssh per capture | `futures_chain_cli.py ingest`; plus `plan` at the capture's start and as each session's end passes |
 | The consumer | on arrival; the capture's own minute is the stored row's minute |
 | The page's snapshot | rebuilt when a capture arrives for the symbol on screen, on the page's 120-second timer and at page load; the label is worked out again every second against the clock |
 | The watch | each `options_svc` scheduler tick (30 s), with no NYSE gate |
 
 The history keeps **one row per capture**. The page draws one column per row and repeats a
-row only to `fill_step_sec` (300) and never past one interval, so at the shipped value
-nothing is repeated, and a value above the interval reads as the interval: a column is
+row only to `fill_step_sec` (120) and never past the slower of `interval_sec` and
+`fallback_interval_sec` (`slowest_interval()`), so at the shipped value only a slower stretch
+after a miss is repeated, and a value above the interval reads as the interval: a column is
 `min(fill_step_sec, interval_sec)` apart, and the Bar picker, Smooth, the blank columns and
 the projection all use that width. A lower value repeats rows and makes a heavier page: at a 100-second
 step every repaint of a whole session (about 790 columns) blocked the browser for 4.5
@@ -4730,9 +4734,10 @@ seconds, past NiceGUI's 2 second ping, measured at build. Two captures further a
 `outage_after_sec` (450) have an outage between them, drawn blank. 450 is above the interval
 because a capture can be a minute late: rows are floored to the minute and a read can cross
 one, giving gaps of 240 and then 360 seconds at a 300-second interval. The setting is stated
-at an interval of 300 and scales with the real one, so 450 is one and a half intervals: 180
+at an interval of 300 and scales with `slowest_interval()`, so 450 is one and a half of the
+300-second fallback, and a gap at the fallback is no outage. With no fallback it would be 180
 seconds at an interval of 120, where one missed capture is a gap of 240. It never works out
-below one interval or one minute. At a step below the interval the gap is measured between
+below that interval or one minute. At a step below the interval the gap is measured between
 captures, not from a capture's last repeated row.
 
 ## What the server keeps, and when it refuses

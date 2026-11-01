@@ -754,7 +754,8 @@ contract description prints it), `in_session`, `opens` and `valid_until` (epoch 
 `interval_sec`, `min_fill_fraction`, `max_snapshot_kb`, the PC's own settings
 (`min_read_fraction`, `fill_settle_sec`, `fill_wait_max_sec`, `probe_round_steps`,
 `probe_reach`, `recentre_share`, `ssh_timeout_sec`, `no_plan_retry_sec`,
-`plan_retry_max_sec`, `hang_limit_sec`), and `instruments`, keyed by root (`ES`, `NQ`):
+`plan_retry_max_sec`, `hang_limit_sec`, `hang_exit_after_sec`, `fallback_interval_sec`,
+`fallback_clean_captures`), and `instruments`, keyed by root (`ES`, `NQ`):
 `symbol`, `multiplier`, `exchange`, `strike_step`, `strike_width_pct`, `parity_limit_pts` and
 `candidates`, the series names to try. A key a capture lacks takes a stated default in the
 script, because the PC and the server do not update together.

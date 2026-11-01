@@ -2943,37 +2943,47 @@ _FUTURES_CHAIN = ConfigFile(
     restart=(OPTIONS, WEBGUI),
     sections=(
         Section("How often and how old",
-                "One interval drives everything; nothing assumes five minutes. "
+                "One interval drives everything; nothing assumes a cadence. "
                 "The capture on your PC reads its interval from the plan the "
                 "options service gives it.", (
             Field("capture.interval_sec", "Take a snapshot every",
                   "The cost of a shorter interval is on ThinkorSwim and Excel, "
                   "not on Schwab: this feed never calls it.",
                   kind="int", unit="seconds", min=30, max=3600, step=30),
+            Field("capture.fallback_interval_sec", "After a miss, take one every",
+                  "A miss is an instrument left out, a failed send, or work that ran "
+                  "past the interval. Each session starts at the interval above. At or "
+                  "below that interval there is no fallback. The page holds a capture "
+                  "across a gap this long rather than calling it an outage.",
+                  kind="int", unit="seconds", min=30, max=3600, step=30),
+            Field("capture.fallback_clean_captures", "Return after this many clean captures",
+                  "In a row, at the slower cadence.",
+                  kind="int", unit="captures", min=1, max=100, step=1),
             Field("capture.max_age_sec", "Drop a snapshot older than",
                   "So a backlog after an outage never reads as current.",
                   kind="int", unit="seconds", min=60, max=86400, step=60),
             Field("capture.stale_after_sec", "Call a symbol stale after",
                   "During the session only. The page keeps the numbers and "
                   "marks them with their age; it never falls back to $SPX or "
-                  "$NDX. A little over two intervals suits.",
+                  "$NDX. A little over two of the slower intervals suits.",
                   kind="int", unit="seconds", min=60, max=86400, step=60),
             Field("capture.max_future_skew_sec", "Refuse a snapshot stamped ahead by",
                   "A PC clock that is wrong.",
                   kind="int", unit="seconds", min=0, max=600, step=5),
             Field("capture.fill_step_sec", "One column on the page every",
                   "The charts draw one column per row. At the interval each column "
-                  "is a real capture. Lower, each capture is repeated to this step "
+                  "is a real capture, and a slower stretch after a miss is held across "
+                  "its gap. Lower, each capture is repeated to this step "
                   "until the next one, and the page gets heavier: a whole session "
                   "at 100 seconds froze the browser for over 4 seconds at every "
                   "repaint. Above the interval it reads as the interval.",
                   kind="int", unit="seconds", min=10, max=600, step=10),
             Field("capture.outage_after_sec", "Draw an outage when captures are apart by over",
                   "Longer than this is drawn as a blank stretch. Stated at an interval "
-                  "of 300 seconds and scaled with the interval above: 450 is one and a "
-                  "half intervals, so 180 at an interval of 120. Keep it above one "
-                  "interval, because a capture can land a minute late; below, it "
-                  "counts as one interval.",
+                  "of 300 seconds and scaled with the slower of the two intervals above: "
+                  "450 is one and a half of it, so 180 at 120 with no fallback. Keep it "
+                  "above that interval, because a capture can land a minute late; below, "
+                  "it counts as that interval.",
                   kind="int", unit="seconds", min=30, max=86400, step=30),
             Field("capture.max_outage_columns", "Most blank columns for one outage",
                   "Only a limit on the page's size: a longer outage still reads as "

@@ -28,9 +28,10 @@ def test_contract_roots_are_the_ones_that_returned_data():
 
 def test_the_capture_defaults():
     assert cfg.capture() == {
-        "interval_sec": 300, "max_age_sec": 900, "stale_after_sec": 660,
+        "interval_sec": 120, "fallback_interval_sec": 300, "fallback_clean_captures": 3,
+        "max_age_sec": 900, "stale_after_sec": 660,
         "max_future_skew_sec": 30, "min_fill_fraction": 0.8, "frozen_repeats": 3,
-        "fill_step_sec": 300, "outage_after_sec": 450, "max_outage_columns": 288,
+        "fill_step_sec": 120, "outage_after_sec": 450, "max_outage_columns": 288,
         "frozen_before_expiry_min": 60, "alert_repeat_min": 240,
         "max_snapshot_kb": 512, "parity_strikes": 5, "show_in_dropdown": False,
         "min_read_fraction": 0.25, "fill_settle_sec": 5, "fill_wait_max_sec": 20,
@@ -146,16 +147,32 @@ def test_the_shipped_outage_tolerance_is_450():
     (30, 60),      # rows are floored to the minute: every row would be an outage at 45
 ])
 def test_the_outage_tolerance_follows_the_interval(monkeypatch, interval, after):
-    monkeypatch.setattr(cfg, "load", lambda: {"capture": {"interval_sec": interval}})
+    monkeypatch.setattr(cfg, "load", lambda: {
+        "capture": {"interval_sec": interval, "fallback_interval_sec": interval}})
     assert cfg.outage_after() == after
+
+
+def test_a_gap_at_the_fallback_is_no_outage(monkeypatch):
+    monkeypatch.setattr(cfg, "load", lambda: {
+        "capture": {"interval_sec": 120, "fallback_interval_sec": 300}})
+    assert cfg.slowest_interval() == 300
+    assert cfg.outage_after() == 450
+    assert cfg.column_step() == 120
+
+
+def test_a_fallback_at_or_below_the_interval_changes_nothing(monkeypatch):
+    monkeypatch.setattr(cfg, "load", lambda: {
+        "capture": {"interval_sec": 600, "fallback_interval_sec": 300}})
+    assert cfg.slowest_interval() == 600
+    assert cfg.outage_after() == 900
 
 
 def test_a_changed_tolerance_is_read_and_scales_too(monkeypatch):
     monkeypatch.setattr(cfg, "load", lambda: {
-        "capture": {"interval_sec": 300, "outage_after_sec": 700}})
+        "capture": {"interval_sec": 300, "fallback_interval_sec": 300, "outage_after_sec": 700}})
     assert cfg.outage_after() == 700
     monkeypatch.setattr(cfg, "load", lambda: {
-        "capture": {"interval_sec": 150, "outage_after_sec": 700}})
+        "capture": {"interval_sec": 150, "fallback_interval_sec": 150, "outage_after_sec": 700}})
     assert cfg.outage_after() == 350
 
 

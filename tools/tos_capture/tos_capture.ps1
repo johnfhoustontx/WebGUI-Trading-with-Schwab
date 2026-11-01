@@ -100,6 +100,10 @@ $HangLimitSec = 600  # hang_limit_sec
 # failed, so nothing else would restart it: the capture ends itself, and the task's
 # repeating trigger starts another. Long enough for the three tries at restarting Excel.
 $HangExitAfterSec = 240  # hang_exit_after_sec
+# After a miss the boundaries move to this cadence until this many clean captures in a
+# row. Zero, from a server that does not send it, is no fallback.
+$FallbackIntervalSec = 0  # fallback_interval_sec
+$FallbackCleanCaptures = 3  # fallback_clean_captures
 $PlanSettings = [ordered]@{
     fill_settle_sec = 'FillSettleSec'
     fill_wait_max_sec = 'FillWaitMaxSec'
@@ -112,6 +116,8 @@ $PlanSettings = [ordered]@{
     min_read_fraction = 'MinReadFraction'
     hang_limit_sec = 'HangLimitSec'
     hang_exit_after_sec = 'HangExitAfterSec'
+    fallback_interval_sec = 'FallbackIntervalSec'
+    fallback_clean_captures = 'FallbackCleanCaptures'
 }
 
 $RtdFields = @('MARK', 'BID', 'ASK', 'VOLUME', 'OPEN_INT', 'IMPL_VOL', 'DELTA')
@@ -132,6 +138,9 @@ $script:PlanRetryDelay = 0.0
 $script:DefaultedSettings = @{}
 $script:RestoreSeen = @{}
 $script:ConsoleHost = $null
+# Clean captures still owed before the cadence returns to the plan's interval.
+$script:CleanOwed = 0
+$script:SendFailed = $false
 $script:WatchShell = $null
 # Shared with the watchdog's thread.
 $script:Watch = [hashtable]::Synchronized(@{
@@ -327,6 +336,7 @@ function Send-Body {
     # The JSON body to the server. A failure is logged and is never raised: the next
     # boundary sends a fresh capture, and the workbook must still get this one.
     param([byte[]]$Body)
+    $script:SendFailed = $false
     if ($NoSend) {
         Write-Log ('not sent (-NoSend): ' + $Body.Length + ' bytes')
         return
@@ -334,13 +344,16 @@ function Send-Body {
     try {
         $result = Invoke-Ssh 'ingest' $Body
         if ($result.TimedOut) {
+            $script:SendFailed = $true
             Write-Log ('send timed out after ' + $SshTimeoutSec + ' seconds; ssh was stopped')
         } elseif ($result.ExitCode -ne 0) {
+            $script:SendFailed = $true
             Write-Log ('send exit ' + $result.ExitCode + ': ' + $result.Err)
         } else {
             Write-Log ('sent ' + $Body.Length + ' bytes: ' + $result.Out.Trim())
         }
     } catch {
+        $script:SendFailed = $true
         Write-Log ('send failed: ' + $_.Exception.Message)
     }
 }
@@ -1049,13 +1062,39 @@ function Wait-Sleeping {
     Update-Heartbeat
 }
 
+function Get-CaptureInterval {
+    # The plan's interval, or the fallback while clean captures are owed. A fallback at
+    # or below the interval is no fallback.
+    $interval = [double]$script:Plan.interval_sec
+    if ($script:CleanOwed -gt 0 -and [double]$FallbackIntervalSec -gt $interval) {
+        return [double]$FallbackIntervalSec
+    }
+    return $interval
+}
+
+function Update-Cadence {
+    # One boundary's verdict. A miss owes clean captures afresh; each clean one pays one.
+    param([bool]$Clean, [string]$Why)
+    if (-not $Clean) {
+        if ($script:CleanOwed -eq 0 -and [double]$FallbackIntervalSec -gt [double]$script:Plan.interval_sec) {
+            Write-Log ('falling back to every ' + $FallbackIntervalSec + ' seconds: ' + $Why)
+        }
+        $script:CleanOwed = [int]$FallbackCleanCaptures
+    } elseif ($script:CleanOwed -gt 0) {
+        $script:CleanOwed--
+        if ($script:CleanOwed -eq 0 -and [double]$FallbackIntervalSec -gt [double]$script:Plan.interval_sec) {
+            Write-Log ('back to every ' + $script:Plan.interval_sec + ' seconds')
+        }
+    }
+}
+
 function Wait-NextBoundary {
     # Boundaries counted from the epoch, so a restart stays on the same clock.
     if ($null -eq $script:Plan) {
         Wait-Sleeping ([math]::Max(1, $script:PlanRetryAt - (Get-EpochSeconds)))
         return
     }
-    $interval = [double]$script:Plan.interval_sec
+    $interval = Get-CaptureInterval
     $now = Get-EpochSeconds
     $next = ([math]::Floor($now / $interval) + 1) * $interval
     while ($now -lt $next -and -not (Test-HostGone)) {
@@ -1275,8 +1314,13 @@ function Invoke-Capture {
     # Reads every instrument, sends what read and says why anything did not, then
     # keeps the copy. One instrument failing never blocks the other.
     $script:SnapshotCount = 0
-    if ($null -eq $script:Plan -or -not $script:InSession) { return }
+    if ($null -eq $script:Plan -or -not $script:InSession) {
+        # Each session starts at the plan's interval.
+        $script:CleanOwed = 0
+        return
+    }
     $plan = $script:Plan
+    $began = Get-EpochSeconds
     $snapshots = New-Object System.Collections.ArrayList
     $reasons = New-Object System.Collections.ArrayList
 
@@ -1341,6 +1385,17 @@ function Invoke-Capture {
             Write-Log ('workbook not written: ' + $_.Exception.Message)
         }
     }
+
+    $took = (Get-EpochSeconds) - $began
+    if ($reasons.Count -gt 0) {
+        Update-Cadence $false $reason
+    } elseif ($script:SendFailed) {
+        Update-Cadence $false 'the send failed'
+    } elseif ($took -ge [double]$plan.interval_sec) {
+        Update-Cadence $false ('the capture took ' + [int]$took + ' seconds')
+    } else {
+        Update-Cadence $true ''
+    }
 }
 
 # -- the loop ------------------------------------------------------------------
@@ -1394,6 +1449,7 @@ function Invoke-Main {
                 Invoke-Capture
             } catch {
                 Write-Log ('capture failed: ' + $_.Exception.Message)
+                Update-Cadence $false $_.Exception.Message
             }
         }
     } finally {

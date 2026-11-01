@@ -25,8 +25,12 @@ _NQ = {
 
 DEFAULTS = {
     "capture": {
-        # Seconds between snapshots. One value; nothing assumes five minutes.
-        "interval_sec": 300,
+        # Seconds between snapshots. One value; nothing assumes a cadence.
+        "interval_sec": 120,
+        # After a miss the capture runs at this cadence, until this many clean captures
+        # in a row. At or below the interval it is no fallback.
+        "fallback_interval_sec": 300,
+        "fallback_clean_captures": 3,
         # The server drops a snapshot older than this.
         "max_age_sec": 900,
         # The page calls a symbol stale past this, during the session.
@@ -43,11 +47,11 @@ DEFAULTS = {
         # Captures in a row with the price, volume and open interest unchanged.
         "frozen_repeats": 3,
         # The page draws one column per row and repeats a row to this step, up to
-        # one interval. At the interval itself nothing is repeated. Read through
-        # column_step(): above the interval it reads as the interval.
-        "fill_step_sec": 300,
+        # the slower interval. At the interval itself only a slower stretch is repeated.
+        # Read through column_step(): above the interval it reads as the interval.
+        "fill_step_sec": 120,
         # Two captures further apart than this have an outage between them. Stated
-        # at the shipped interval and scaled with it: read through outage_after().
+        # at an interval of 300 and scaled with it: read through outage_after().
         "outage_after_sec": 450,
         # The most blank columns one jump can add.
         "max_outage_columns": 288,
@@ -122,6 +126,8 @@ def _in_range(raw, default, minimum, maximum):
 # Each capture value: (minimum, maximum), inclusive.
 _CAPTURE_BOUNDS = {
     "interval_sec": (30, 3600),
+    "fallback_interval_sec": (30, 3600),
+    "fallback_clean_captures": (1, 100),
     "max_age_sec": (60, 86400),
     "stale_after_sec": (60, 86400),
     "max_future_skew_sec": (0, 600),
@@ -169,22 +175,31 @@ def column_step() -> int:
     return min(settings["fill_step_sec"], settings["interval_sec"])
 
 
+def slowest_interval() -> int:
+    """The furthest apart two healthy captures can be: the interval, or the fallback
+    the capture drops to after a miss. A gap this long is captures being slower, so
+    its rows are held across it, and it is no outage."""
+    settings = capture()
+    return max(settings["interval_sec"], settings["fallback_interval_sec"])
+
+
 # Rows are floored to the minute when stored, so no two are closer than this.
 _ROW_SEC = 60
+# The interval ``outage_after_sec`` is stated at.
+_OUTAGE_STATED_AT_SEC = 300
 
 
 def outage_after() -> float:
     """How far apart two captures must be to have an outage between them.
 
-    ``outage_after_sec`` is stated at the shipped interval and scales with the real
-    one: 450 at 300 is one and a half intervals, and so 180 at 120. Held in seconds
-    it would hide a missed capture or two at a shorter interval, and call a capture
-    one minute late an outage at a longer one. One and a half intervals is enough:
-    a missed capture is a gap of two, and a late one a minute over one. It is never
-    below the interval, nor below a row's own minute."""
-    settings = capture()
-    interval = settings["interval_sec"]
-    scaled = settings["outage_after_sec"] * interval / DEFAULTS["capture"]["interval_sec"]
+    ``outage_after_sec`` is stated at an interval of 300 and scales with the slowest
+    one in use: 450 at 300 is one and a half intervals, and so 180 at 120 with no
+    fallback. Held in seconds it would hide a missed capture or two at a shorter
+    interval, and call a capture one minute late an outage at a longer one. One and a
+    half intervals is enough: a missed capture is a gap of two, and a late one a minute
+    over one. It is never below that interval, nor below a row's own minute."""
+    interval = slowest_interval()
+    scaled = capture()["outage_after_sec"] * interval / _OUTAGE_STATED_AT_SEC
     return max(scaled, interval, _ROW_SEC)
 
 

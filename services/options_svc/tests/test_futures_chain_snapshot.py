@@ -214,7 +214,30 @@ def test_the_store_keeps_one_row_per_capture(bus, db, write_captures):
     assert count == 2
 
 
-def test_the_shipped_step_repeats_no_row(bus, db, write_captures):
+@pytest.fixture
+def five_minutes(monkeypatch):
+    """Captures every 300 seconds, with no faster cadence to fall back from."""
+    real = futures_chain_config.capture
+    monkeypatch.setattr(futures_chain_config, "capture",
+                        lambda: {**real(), "interval_sec": 300, "fill_step_sec": 300})
+
+
+def test_a_slower_stretch_after_a_miss_keeps_its_width_in_time(bus, db, write_captures):
+    """As shipped: columns 120 apart, and a capture is held across the fallback's gap."""
+    first = ct(2026, 11, 2, 9, 0)
+    write_captures(first, first + _dt.timedelta(seconds=120), first + _dt.timedelta(seconds=420))
+    snap = snapshot(bus, "FOP.ES", now=ct(2026, 11, 2, 9, 8))
+    assert [ts - int(first.timestamp()) for ts in history_ts(snap)] == [0, 120, 240, 360, 420]
+
+
+def test_captures_on_the_interval_repeat_no_row(bus, db, write_captures):
+    first = ct(2026, 11, 2, 9, 0)
+    write_captures(*(first + _dt.timedelta(seconds=120 * i) for i in range(4)))
+    snap = snapshot(bus, "FOP.ES", now=ct(2026, 11, 2, 9, 7))
+    assert [ts - int(first.timestamp()) for ts in history_ts(snap)] == [0, 120, 240, 360]
+
+
+def test_the_step_at_the_interval_repeats_no_row(bus, db, write_captures, five_minutes):
     first = ct(2026, 11, 2, 9, 0)
     write_captures(first, first + _dt.timedelta(seconds=360), first + _dt.timedelta(seconds=600))
     snap = snapshot(bus, "FOP.ES", now=ct(2026, 11, 2, 9, 11))
@@ -489,9 +512,10 @@ def test_a_frozen_label_in_the_next_session_still_says_why(bus, db, write_captur
     assert block["why"] == "ThinkorSwim is logged out"
 
 
-def test_the_levels_and_hedge_stay_parallel_with_the_rows_at_the_shipped_step(bus, db, write_captures):
-    """The page lays them out by position, one value per row: at the shipped step,
-    with one column per capture, each must have exactly one entry per row."""
+def test_the_levels_and_hedge_stay_parallel_with_the_rows_at_one_column_a_capture(
+        bus, db, write_captures, five_minutes):
+    """The page lays them out by position, one value per row: with one column per
+    capture, each must have exactly one entry per row."""
     assert fill_step() == futures_chain_config.capture()["interval_sec"]
     start = ct(2026, 11, 2, 9, 0)
     write_captures(*(start + _dt.timedelta(minutes=5 * i) for i in range(6)))

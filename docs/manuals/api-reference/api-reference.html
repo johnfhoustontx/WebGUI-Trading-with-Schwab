@@ -2656,7 +2656,8 @@ contract description prints it), <code>in_session</code>, <code>opens</code> and
 <code>interval_sec</code>, <code>min_fill_fraction</code>, <code>max_snapshot_kb</code>, the PC's own settings
 (<code>min_read_fraction</code>, <code>fill_settle_sec</code>, <code>fill_wait_max_sec</code>, <code>probe_round_steps</code>,
 <code>probe_reach</code>, <code>recentre_share</code>, <code>ssh_timeout_sec</code>, <code>no_plan_retry_sec</code>,
-<code>plan_retry_max_sec</code>, <code>hang_limit_sec</code>), and <code>instruments</code>, keyed by root (<code>ES</code>, <code>NQ</code>):
+<code>plan_retry_max_sec</code>, <code>hang_limit_sec</code>, <code>hang_exit_after_sec</code>, <code>fallback_interval_sec</code>,
+<code>fallback_clean_captures</code>), and <code>instruments</code>, keyed by root (<code>ES</code>, <code>NQ</code>):
 <code>symbol</code>, <code>multiplier</code>, <code>exchange</code>, <code>strike_step</code>, <code>strike_width_pct</code>, <code>parity_limit_pts</code> and
 <code>candidates</code>, the series names to try. A key a capture lacks takes a stated default in the
 script, because the PC and the server do not update together.</p>

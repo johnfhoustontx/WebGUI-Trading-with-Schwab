@@ -389,7 +389,8 @@ def test_date_text_is_the_form_thinkorswim_prints():
 def test_plan_names_the_session_the_series_and_the_date_text():
     p = build_plan(ct(2026, 11, 1, 18, 0))
     assert p["expiry"] == "2026-11-02" and p["date_text"] == "2 NOV 26"
-    assert p["interval_sec"] == 300 and p["in_session"] is False
+    assert p["interval_sec"] == 120 and p["in_session"] is False
+    assert p["fallback_interval_sec"] == 300 and p["fallback_clean_captures"] == 3
     assert p["opens"] == ct(2026, 11, 2, 6, 0).timestamp()
     assert "E1AX26" in p["instruments"]["ES"]["candidates"]
     assert p["instruments"]["NQ"]["strike_step"] > 0

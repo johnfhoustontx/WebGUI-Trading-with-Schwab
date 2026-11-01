@@ -1460,8 +1460,11 @@ service and the web app from System Status.</p>
 <p><strong>Where the numbers come from.</strong> Schwab serves no futures-option chains, and these two
 are never worked out from <code>$SPX</code> or <code>$NDX</code>, not even when the feed is down. A capture
 program on <strong>your PC</strong> reads the chains out of <strong>ThinkorSwim</strong> through Excel and sends
-each one to the server. It takes a snapshot every <strong>300 seconds</strong> (<strong>Take a snapshot
-every</strong>, <code>interval_sec</code>), from <strong>06:00</strong> Central on the day of an expiry (<strong>Capture
+each one to the server. It takes a snapshot every <strong>120 seconds</strong> (<strong>Take a snapshot
+every</strong>, <code>interval_sec</code>), and after a miss (an instrument left out, a failed send, or a
+capture that ran past the interval) every <strong>300 seconds</strong> (<strong>After a miss, take one every</strong>,
+<code>fallback_interval_sec</code>) until <strong>3</strong> clean captures in a row (<strong>Return after this many clean
+captures</strong>, <code>fallback_clean_captures</code>). It takes them from <strong>06:00</strong> Central on the day of an expiry (<strong>Capture
 starts</strong>, <code>open_ct</code>) to <strong>15:00</strong> Central, when it expires (<strong>Expires</strong>, <code>close_ct</code>),
 Monday to Friday. Nothing is captured overnight or at the weekend, so the heat map starts
 at 06:00 and the PC need not be on before then. Set <strong>Capture starts</strong> to <strong>17:00</strong> to
@@ -1491,8 +1494,9 @@ for round-the-clock coverage, not a promise of it.</p>
   both). The walls and the flip are found among those strikes only, and the line above the
   charts names the range.</li>
 <li><strong>One column is one capture.</strong> The heat map has a column per capture (<strong>One column on the
-  page every</strong>, <code>fill_step_sec</code>, shipped 300 seconds), and its time runs through the
-  night. The projected afternoon is drawn only from a current capture.</li>
+  page every</strong>, <code>fill_step_sec</code>, shipped 120 seconds). After a miss the same capture fills
+  the columns until the next one, so a slower stretch keeps its width in time. The projected
+  afternoon is drawn only from a current capture.</li>
 <li><strong>Not offered:</strong> Flow, Term, Explain, Analyze and Briefings (the last three read the stock
   indexes or fetch from Schwab). <strong>Net Prem</strong> stays and is unrelated to the symbol. In the
   Delta view the hedge panel may say <em>hedge n/a for this capture</em>.</li>
@@ -1541,13 +1545,13 @@ even when nothing new arrives.</p>
 </tr>
 <tr>
 <td>a blank stretch on the heat map, labelled <strong>No capture</strong>, and blank on the hedge panel below it</td>
-<td>Captures were further apart than <strong>Draw an outage when captures are apart by over</strong> (<code>outage_after_sec</code>, shipped 450 seconds, which is one and a half intervals and scales if you change the interval). It is drawn blank on purpose: smooth shading across five hours would read as data.</td>
+<td>Captures were further apart than <strong>Draw an outage when captures are apart by over</strong> (<code>outage_after_sec</code>, shipped 450 seconds, which is one and a half of the slower 300-second interval and scales if you change it). It is drawn blank on purpose: smooth shading across five hours would read as data.</td>
 <td>Nothing. The Smooth setting does not reach across it.</td>
 </tr>
 </tbody>
 </table>
-<p>A capture that arrives a minute late is not an outage: 450 seconds is above the 300-second
-interval for that reason.</p>
+<p>A capture that arrives a minute late, or a slower stretch after a miss, is not an outage:
+450 seconds is above the 300-second fallback for that reason.</p>
 <p><strong>The phone alert.</strong> When capture stops during the session, one message goes out through
 <strong>Server alerts</strong> (Settings → General → Push notifications), titled <em>"/ES chain capture has
 stopped"</em> (or /NQ). It says how long ago the last good capture was, the reason the server

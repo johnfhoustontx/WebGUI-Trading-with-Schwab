@@ -216,7 +216,7 @@ def with_outages(rows) -> list:
     capture = futures_chain_config.capture()
     step = futures_chain_config.column_step()
     after = futures_chain_config.outage_after()
-    interval = capture["interval_sec"]
+    interval = futures_chain_config.slowest_interval()
     repeated = step < interval
     taken = None
     out: list = []

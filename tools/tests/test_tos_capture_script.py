@@ -198,11 +198,13 @@ def test_the_shipped_values_and_the_scripts_defaults_agree():
         shipped = tomllib.load(fh)["capture"]
     table = CODE[CODE.index("$PlanSettings"):CODE.index("$RtdFields")]
     found = re.findall(r"(\w+) = '\w+'", table)
-    assert len(found) == 11
+    assert len(found) == 13
     for key in found:
         default = re.search(rf"^\$\w+ = ([\d.]+)\s*# {key}$", CODE, re.M)
         assert default, key
-        assert float(default.group(1)) == shipped[key], key
+        # A plan with no fallback is an older server's, which has no fallback either.
+        want = 0 if key == "fallback_interval_sec" else shipped[key]
+        assert float(default.group(1)) == want, key
 
 
 def _plan_settings():
@@ -354,6 +356,35 @@ def test_captured_at_is_an_instant_not_the_pcs_local_clock():
     assert "ToUnixTimeMilliseconds" in CODE
     assert "captured_at" in CODE
     assert "Get-Date -UFormat" not in CODE
+
+
+def test_the_boundaries_follow_the_cadence_not_the_plan_alone():
+    assert "$interval = Get-CaptureInterval" in _function("Wait-NextBoundary")
+
+
+def test_a_fallback_at_or_below_the_interval_is_none():
+    assert "[double]$FallbackIntervalSec -gt $interval" in _function("Get-CaptureInterval")
+
+
+def test_every_kind_of_miss_moves_the_cadence():
+    capture = _function("Invoke-Capture")
+    assert "Update-Cadence $false $reason" in capture
+    assert "$script:SendFailed" in capture
+    assert "$took -ge [double]$plan.interval_sec" in capture
+    assert "Update-Cadence $true" in capture
+    assert "Update-Cadence $false $_.Exception.Message" in _function("Invoke-Main")
+    # Every way a send can fail says so, and the flag is cleared first.
+    assert _function("Send-Body").count("$script:SendFailed = $true") == 3
+    assert "$script:SendFailed = $false" in _function("Send-Body")
+
+
+def test_each_session_starts_at_the_plans_interval():
+    capture = _function("Invoke-Capture")
+    assert "$script:CleanOwed = 0" in capture[:capture.index("$began")]
+
+
+def test_a_miss_owes_every_clean_capture_again():
+    assert "$script:CleanOwed = [int]$FallbackCleanCaptures" in _function("Update-Cadence")
 
 
 def test_the_boundaries_are_measured_from_the_epoch():
