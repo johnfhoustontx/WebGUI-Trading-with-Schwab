@@ -1397,7 +1397,7 @@ def signed_class(v):
 
 
 # ── the market read (cache:market:read) ──────────────────────────────────────
-# Six readings, each marked a tailwind, a headwind or neutral FOR STOCKS, taken
+# Seven readings, each marked a tailwind, a headwind or neutral FOR STOCKS, taken
 # on a clock slot by market_svc (services/market_svc/market_read.py). The
 # SERVICE decides each verdict code; this page turns the code into a word and a
 # fixed colour, and the numbers into a sentence. It computes no verdict of its
@@ -1407,7 +1407,7 @@ READ_VIEW = "market:read"
 READ_TITLE = "Market read"
 # Not a forecast, and the dialog says so: each chip restates a reading that is
 # already on a page, decided by rule.
-READ_USE_LINE = ("Six readings, each a tailwind or a headwind for stocks. "
+READ_USE_LINE = ("Seven readings, each a tailwind or a headwind for stocks. "
                  "By rule, not a forecast.")
 
 # The four codes, as whole words. An unknown code is "No reading": a missing
@@ -1420,7 +1420,7 @@ READ_CHIPS = {"tailwind": CHIP_POS, "headwind": CHIP_WARN,
               "neutral": CHIP_LABEL, "none": CHIP_MUTED}
 READ_QUESTIONS = {"direction": "Direction", "breadth": "Breadth",
                   "structure": "Structure", "volatility": "Volatility",
-                  "flow": "Flow", "cross_asset": "Cross-asset"}
+                  "flow": "Flow", "cross_asset": "Cross-asset", "volume": "Volume"}
 READ_HEADS = ("QUESTION", "READING", "SINCE LAST", "FOR STOCKS")
 READ_WAITING = ("No market read yet this session. The first is taken shortly "
                 "after the open.")
@@ -1560,6 +1560,36 @@ def _read_cross_asset(f):
     return " · ".join(parts) or _DASH
 
 
+def _read_volume_symbol(s):
+    sym, pace = s.get("symbol") or "", _finite(s.get("pace"))
+    if pace is None:
+        return f"{sym} {_DASH}"
+    share = _finite(s.get("up_share"))
+    rising = f", {_fmt.pct(share * 100)} in rising bars" if share is not None else ""
+    return f"{sym} {_fmt.ratio(pace)} times usual{rising}"
+
+
+# Heavy volume went with a wider range later and did not predict direction, so
+# the words say the one and not the other. Service codes, finite: an unknown one
+# adds nothing.
+_READ_VOLUME_HINTS = {"wider": "wider moves have followed heavy volume, either way",
+                      "narrower": "narrower moves have followed light volume, either way"}
+
+
+def _read_volume(f):
+    symbols = [s for s in f.get("symbols") or () if isinstance(s, dict)]
+    if not symbols:
+        return _DASH
+    parts = [_read_volume_symbol(s) for s in symbols]
+    sectors = _finite(f.get("sector_up_share"))
+    if sectors is not None:
+        parts.append(f"{_fmt.pct(sectors * 100)} of sector dollars in rising sectors")
+    hint = _READ_VOLUME_HINTS.get(f.get("range_hint"))
+    if hint:
+        parts.append(hint)
+    return " · ".join(parts)
+
+
 def read_reading(key, facts, verdict):
     """One row's numbers as a sentence. A missing number is a dash, never a zero."""
     f = facts if isinstance(facts, dict) else {}
@@ -1567,14 +1597,15 @@ def read_reading(key, facts, verdict):
         return _read_flow(f, verdict)
     builder = {"direction": _read_direction, "breadth": _read_breadth,
                "structure": _read_structure, "volatility": _read_volatility,
-               "cross_asset": _read_cross_asset}.get(key)
+               "cross_asset": _read_cross_asset, "volume": _read_volume}.get(key)
     return builder(f) if builder else _DASH
 
 
 # The one number each row's "since" compares, and how the change is worded.
 _READ_SINCE = {"direction": ("spx_pct", "$SPX {} points"),
                "volatility": ("vix_level", "VIX {}"),
-               "flow": ("call_lean", "calls {} points")}
+               "flow": ("call_lean", "calls {} points"),
+               "volume": ("pace", "{} times usual")}
 
 
 def read_since(key, row):

@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-31</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-01</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -782,7 +782,7 @@ structure · what should I act on · what is being said.</em></p>
 </tr>
 <tr>
 <td><strong>Market read</strong> (button, top right)</td>
-<td>Opens a popup of six readings, each marked Tailwind, Headwind or Neutral for stocks, retaken every 15 minutes in the session. The time and the count are the button's second line, and the button glows for five minutes after a new reading. See <a href="#the-market-read">The Market read</a></td>
+<td>Opens a popup of seven readings, each marked Tailwind, Headwind or Neutral for stocks, retaken every 15 minutes in the session. The time and the count are the button's second line, and the button glows for five minutes after a new reading. See <a href="#the-market-read">The Market read</a></td>
 </tr>
 <tr>
 <td><strong>Market report</strong> (button, top right)</td>
@@ -873,7 +873,7 @@ button's second line shows when the reading was taken and how it counts, for exa
 "12:45 CT · next 13:00 · 2 tailwinds · 2 headwinds", so the page says something
 with the popup closed. <strong>Either button glows</strong> for five minutes after a new reading or a new report (Settings → Configuration → Market read → <em>Glow the Desk's buttons for</em>; 0 turns it off).</p>
 <p>The Desk, the Market Dashboard and Flow Alerts each show part of what the market
-is doing. The Market read lines six of those readings up and says, for each, which
+is doing. The Market read lines seven of those readings up and says, for each, which
 way it points <strong>for stocks</strong>.</p>
 <table>
 <thead>
@@ -921,6 +921,12 @@ way it points <strong>for stocks</strong>.</p>
 <td>At least two are risk-on</td>
 <td>At least two are risk-off</td>
 </tr>
+<tr>
+<td><strong>Volume</strong></td>
+<td>SPY and QQQ against their usual volume by this time of day, and how much of it came in rising five-minute bars</td>
+<td>Both trade at least 1.2 times usual with at least 55% in rising bars</td>
+<td>Both trade at least 1.2 times usual with at most 45% in rising bars</td>
+</tr>
 </tbody>
 </table>
 <p>Anything in between is <strong>Neutral</strong>.</p>
@@ -932,7 +938,14 @@ way it points <strong>for stocks</strong>.</p>
   date: a symbol with no ceiling, too few flagged contracts, a feed that stopped.
   Structure says <em>Dealer levels are not current</em> when the gamma collector has
   fallen behind, the same moment the Dealer positioning panel greys its levels.
-  Volatility needs the VIX, the one-day and the three-month all present.</li>
+  Volatility needs the VIX, the one-day and the three-month all present. Volume
+  needs both funds' figures, which take two finished five-minute bars after the open.</li>
+<li><strong>Reading Volume.</strong> "SPY 1.40 times usual" compares today so far with the median of
+  the last nine sessions <strong>at the same time of day</strong>, so a morning is not read as
+  light for being only a morning. The row also prints the share of the dollars traded
+  across the sector funds that went into rising sectors; that share decides no chip.
+  The row's figures refresh every five minutes, so they can be a few minutes behind
+  the reading's own time.</li>
 <li><strong>Since last</strong> is the change from the previous reading: "was Neutral" when the
   chip flipped, otherwise how far the row's main number moved, or "unchanged".</li>
 <li><strong>The head</strong> shows when the reading was taken and when the next one is due. The
@@ -950,6 +963,12 @@ way it points <strong>for stocks</strong>.</p>
 <li><strong>The Flow row is the weakest.</strong> It rests on an estimate, and on its first live
   day that estimate was nearly even between bought and sold. Expect it to read
   Neutral most of the time.</li>
+<li><strong>Volume says how much, not which way.</strong> Over 149 sessions to 30 October 2026, heavy
+  volume went with a wider range for the rest of the session and light volume with a
+  narrower one, and a move carried on no more often on heavy volume than on usual.
+  So a Tailwind on this row says the heavier trading has been on the way up so far. It
+  does not say prices will keep rising, or even that they are up on the day. Expect it
+  to read Neutral on most readings.</li>
 </ul>
 <p><strong>To change it:</strong> Settings → Configuration → <strong>Market read</strong>. Every threshold in
 the table is there, along with 15 or 30 minutes between readings, and the switch

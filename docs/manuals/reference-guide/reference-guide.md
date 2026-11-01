@@ -296,8 +296,8 @@ ones in trouble, and the [Symbol](#symbol) page for one name.
 
 **Market read.** A button at the top right of the page, with the time of the
 reading and its count as its second line; it opens the reading as a popup, and it
-glows for five minutes after a new reading. Six readings — direction,
-breadth, structure, volatility, flow and cross-asset — each marked **Tailwind**,
+glows for five minutes after a new reading. Seven readings — direction,
+breadth, structure, volatility, flow, cross-asset and volume — each marked **Tailwind**,
 **Headwind** or **Neutral** *for stocks*, retaken on the clock every 15 minutes while
 the market is open. Each one is a reading that already exists on another page; this
 panel only says which way it points and what changed since the last reading. It is the
@@ -307,7 +307,11 @@ text. A row whose data is missing or out of date reads **No reading**, which is 
 Neutral; when the Market read is switched off in Settings the button leaves the page.
 
 Use it to see **whether the layers agree**. A rising tape with structure and volatility
-both reading Headwind is a different day from one where all six agree. **No reading** is
+both reading Headwind is a different day from one where all seven agree. **Volume** is the
+one to read differently: heavy volume has gone with **wider** moves later in the session and
+light volume with narrower ones, without saying which way, so use it to size the day rather
+than to pick a side. The market reports carry the same figures in a Volume section.
+**No reading** is
 not Neutral: it means that row had nothing to go on. And it is **not a forecast**: the
 thresholds are starting guesses, and nobody has measured whether the tally predicts
 anything.

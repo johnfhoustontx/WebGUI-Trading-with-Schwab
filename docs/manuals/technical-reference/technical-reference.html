@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-31</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-01</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -180,6 +180,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#directional-walls">Directional walls</a></li>
 <li><a href="#intraday-collection">Intraday collection</a></li>
 <li><a href="#hedging-flow-model-hiro">Hedging-flow model (HIRO)</a></li>
+<li><a href="#traded-volume">Traded volume</a></li>
 <li><a href="#market-read">Market read</a></li>
 <li><a href="#bought-sold-estimate-on-flow-alerts">Bought / sold estimate on flow alerts</a></li>
 </ul>
@@ -5474,15 +5475,85 @@ any stored day can be re-run: <code>--date YYYY-MM-DD</code> (default: the newes
 session), <code>--force</code> (a weekend or holiday), <code>--out DIR</code>, <code>--k 2,3,4</code>,
 <code>--horizons 5,15</code>. It exits <strong>1</strong> when nothing was measured (every symbol failed, or a
 trading day with no stored minute for any symbol — a dead collector).</p>
+<h2 id="traded-volume">Traded volume</h2>
+<p><strong>Files:</strong> <code>services/market_svc/volume_read.py</code> (pure: the figures, the sentences, when
+a fetch is due), <code>scheduler.refresh_volume</code>, <code>compute.fetch_bars</code>, <code>[volume]</code> in
+<code>config/market_read.toml</code>. Design:
+<code>docs/plans/2026-11-01-volume-in-read-and-reports-design.md</code>. Publishes
+<code>cache:market:volume</code>, read by the Market read's <code>volume</code> row and by the market reports.</p>
+<table>
+<thead>
+<tr>
+<th>Figure</th>
+<th>Formula</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pace</code></td>
+<td>Σ today's finished bars ÷ median over the last <code>baseline_sessions</code> (9) sessions of Σ that session's bars ending by the same clock time</td>
+<td><code>/pricehistory</code>, five-minute bars, regular session</td>
+</tr>
+<tr>
+<td><code>word</code></td>
+<td><code>heavy</code> at <code>pace</code> ≥ <code>heavy_ratio</code> (1.2), <code>light</code> at ≤ <code>light_ratio</code> (0.8), else <code>usual</code></td>
+<td></td>
+</tr>
+<tr>
+<td><code>up_share</code></td>
+<td>volume in bars with close &gt; open ÷ volume in bars with close ≠ open</td>
+<td>the same bars</td>
+</tr>
+<tr>
+<td><code>sectors.up_share</code></td>
+<td>Σ <code>last × totalVolume</code> of rising funds ÷ the same for rising and falling funds; a flat fund counts on neither side</td>
+<td><code>/quotes</code> on <code>volume.sector_symbols</code> (11)</td>
+</tr>
+</tbody>
+</table>
+<ul>
+<li><strong>Cadence.</strong> Every <code>refresh_min</code> (5) minutes in the session, <code>settle_sec</code> (90) after
+  the mark so the bar has closed and clear of the minute after the hour and half hour.
+  Once after the close for the whole session. Once a day before the open and on a day
+  with no session. Three Schwab calls per refresh, about 240 a session. It runs in the
+  executor beside the three-second dashboard poll, one at a time, so it cannot hold the
+  poll up.</li>
+<li><strong>Absence.</strong> Fewer than <code>min_bars</code> (2) finished bars today or fewer than <code>min_sessions</code>
+  (5) usable earlier sessions leaves <code>pace</code> as <code>null</code>, never 0. An earlier session with an
+  early close is skipped once the clock is past it. Fewer than <code>min_sectors</code> (8) funds with
+  a price and volume leaves <code>sectors</code> as <code>null</code>. When no symbol's bars come back nothing is
+  published, the last view stays and ages out, and the fetch retries after <code>retry_sec</code>.</li>
+<li><strong>Outside the session.</strong> The view reports the newest earlier session and says that
+  pre-market trading is thin and not read as a signal. The bars are regular-session only,
+  and the sector share is left out, because a quote before the open carries thin prints.</li>
+<li><strong>The bases differ.</strong> SPY's five-minute bars summed to about 0.60 to 0.72 of its daily
+  bar over ten sessions measured on 2026-11-01, and the daily bar agrees with the quote's
+  <code>totalVolume</code>. So <code>pace</code> compares bars with bars.</li>
+<li><strong>What it implies, measured</strong> (149 sessions to 2026-10-30, in-sample, 95% bootstrap
+  interval by session). The mean range for the rest of the session was 0.64% on heavy
+  volume (0.52 to 0.77), 0.52% on usual (0.46 to 0.60) and 0.41% on light (0.33 to 0.52).
+  A move of at least 0.25% carried on to the close 45% of the time on heavy volume (30 to
+  60) and 50% on usual (40 to 60). The row's <code>tailwind</code> was followed by −0.34% (9 readings,
+  7 sessions) and <code>headwind</code> by +0.15% (23 readings, 15 sessions). So the sentences say
+  range and not direction, and a chip reads what has happened.</li>
+</ul>
+<p><strong>In the market reports.</strong> The tooling lives in <code>vps2:~/neuralstrike-reports</code>, outside this
+repo; its change is <code>deploy/report_tooling/report_tooling_volume.patch</code>. <code>remote_collect.py</code>
+copies the view into each slot's snapshot, and <code>render.py</code>'s <code>volume</code> block prints
+<code>statements</code> from that snapshot, so the model never handles them. The block says the figures
+are not available when the view is missing, and not current when it is from another day or
+a <code>session</code> view over 15 minutes old.</p>
 <h2 id="market-read">Market read</h2>
 <p><strong>Files:</strong> <code>services/market_svc/market_read.py</code> (pure: the six rows, the slots, the
 assembly), <code>scheduler.refresh_read</code> (reads the sources and publishes),
 <code>shared/market_read_config.py</code> + <code>config/market_read.toml</code>, <code>webgui/pages/desk.py</code>
 (<code>read_rows</code>, <code>read_header</code>, <code>paint_read</code>). Design:
 <code>docs/plans/2026-10-05-market-read-scorecard-design.md</code>.</p>
-<p>Six readings, each given a verdict <strong>for stocks</strong>: <code>tailwind</code>, <code>headwind</code>, <code>neutral</code>,
-or <code>none</code>. The verdict is absolute, not relative to the day's move. No Schwab call and
-no Claude call: every input is a view another service already publishes.</p>
+<p>Seven readings, each given a verdict <strong>for stocks</strong>: <code>tailwind</code>, <code>headwind</code>, <code>neutral</code>,
+or <code>none</code>. The verdict is absolute, not relative to the day's move. No Claude call. Every
+input is a published view; only <code>cache:market:volume</code> costs Schwab calls, and that is
+counted under <em>Traded volume</em> below.</p>
 <table>
 <thead>
 <tr>
@@ -5529,6 +5600,12 @@ no Claude call: every input is a view another service already publishes.</p>
 <td>at least two risk-on</td>
 <td>at least two risk-off</td>
 </tr>
+<tr>
+<td><code>volume</code></td>
+<td><code>market:volume</code>, for <code>volume.symbols</code> (SPY, QQQ), <code>phase = session</code> only</td>
+<td>every symbol <code>pace</code> ≥ <code>heavy_ratio</code> (1.2) and <code>up_share</code> ≥ <code>up_share_strong</code> (0.55)</td>
+<td>every symbol <code>pace</code> ≥ <code>heavy_ratio</code> and <code>up_share</code> ≤ <code>up_share_weak</code> (0.45)</td>
+</tr>
 </tbody>
 </table>
 <p>All bounds are inclusive. Everything between the two is <code>neutral</code>.</p>
@@ -5559,15 +5636,16 @@ no Claude call: every input is a view another service already publishes.</p>
 <p><strong><code>none</code> is "no reading", never <code>neutral</code>.</strong> A row is <code>none</code> when a tile it needs has no
 number, a matrix row has no flip or (above the flip) no ceiling, a symbol's net gamma is
 exactly zero (the after-hours artefact the dealer panel also hides), the dealer levels
-are not current, fewer than <code>flow.min_contracts</code> (10) contracts are flagged, or its
-source view is absent. A row that raises is also <code>none</code>, and the other five still
-publish (<code>market.read.&lt;row&gt;</code> on <code>/health</code>).</p>
+are not current, fewer than <code>flow.min_contracts</code> (10) contracts are flagged, a volume
+symbol has no pace or up share, or its source view is absent. A row that raises is also
+<code>none</code>, and the other six still publish (<code>market.read.&lt;row&gt;</code> on <code>/health</code>).</p>
 <p><strong>Too old.</strong> Every source is rewritten on a clock while its publisher is alive (an
 unchanged write still refreshes the view's <code>:ts</code>), so an old one means the publisher
 has stopped. A view is dropped when its <code>:ts</code> is older than <code>stale_after_sec</code> (300);
 the dashboard, republished every 3 seconds, has its own shorter limit,
-<code>dashboard_stale_after_sec</code> (60). The flow view is also dropped when the session
-<code>date</code> it carries is not today's.</p>
+<code>dashboard_stale_after_sec</code> (60), and so does the volume view, <code>volume.stale_after_sec</code>
+(600), which is rewritten only every 5 minutes. The flow and volume views are also dropped
+when the <code>date</code> they carry is not today's.</p>
 <p><strong>Structure follows the collector, not the matrix.</strong> The matrix is republished every
 minute whether or not the GEX collector ran, so its own age proves nothing about the
 levels in it. The row is <code>none</code> (<code>facts.stale: true</code>, no levels handed on) when the
@@ -8736,6 +8814,11 @@ rest on very few contracts. The weighting has not been compared with volume. See
 <td>Market read</td>
 <td>a reading every <strong>15</strong> min (or 30) from the first slot after the open to the close; sources older than <strong>300 s</strong> dropped; thresholds in the <em>Market read</em> section</td>
 <td><code>config/market_read.toml</code></td>
+</tr>
+<tr>
+<td>Traded volume</td>
+<td>a fetch every <strong>5</strong> min in the session, <strong>90 s</strong> after the mark; once after the close; once a day otherwise. Usual is the median of <strong>9</strong> sessions; heavy at <strong>1.2</strong> times, light at <strong>0.8</strong>; thresholds in the <em>Traded volume</em> section</td>
+<td><code>config/market_read.toml [volume]</code></td>
 </tr>
 <tr>
 <td>Flow: opened or closed (next day)</td>

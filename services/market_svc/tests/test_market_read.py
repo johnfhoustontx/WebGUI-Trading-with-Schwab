@@ -1,4 +1,4 @@
-"""market_read: the Desk's six readings, each a tailwind, a headwind or neutral
+"""market_read: the Desk's seven readings, each a tailwind, a headwind or neutral
 for stocks, and the slot schedule that publishes them.
 
 Design: docs/plans/2026-10-05-market-read-scorecard-design.md.
@@ -544,11 +544,11 @@ def _inputs():
                                  + _many("put", 4, 560, 440))}
 
 
-def test_build_assembles_six_rows_in_order(cfg):
+def test_build_assembles_seven_rows_in_order(cfg):
     out = mr.build(_inputs(), cfg, date=MON, slot="12:45", ts=1000)
     assert [r["key"] for r in out["rows"]] == list(mr.ROW_KEYS)
-    assert [r["verdict"] for r in out["rows"]] == [T, T, H, H, H, N]
-    assert out["tally"] == {"tailwind": 2, "headwind": 3, "neutral": 1, "none": 0}
+    assert [r["verdict"] for r in out["rows"]] == [T, T, H, H, H, N, X]     # no volume view
+    assert out["tally"] == {"tailwind": 2, "headwind": 3, "neutral": 1, "none": 1}
     assert (out["date"], out["slot"], out["next_slot"], out["final"]) \
         == (MON, "12:45", "13:00", False)
     assert out["interval_min"] == 15 and out["public"] is True and out["ts"] == 1000
@@ -556,7 +556,7 @@ def test_build_assembles_six_rows_in_order(cfg):
     assert all(r["prev"] is None for r in out["rows"])
     assert out["history"] == [{"slot": "12:45", "verdicts": {
         "direction": T, "breadth": T, "structure": H, "volatility": H,
-        "flow": H, "cross_asset": N}}]
+        "flow": H, "cross_asset": N, "volume": X}}]
 
 
 def test_build_carries_the_previous_reading_and_the_days_history(cfg):
@@ -585,8 +585,8 @@ def test_the_close_reading_is_final_and_has_no_next_slot(cfg):
 def test_missing_views_make_their_rows_no_reading_not_neutral(cfg):
     out = mr.build({"dashboard": None, "matrix": None, "gex_status": None, "sides": None},
                    cfg, date=MON, slot="12:45", ts=1)
-    assert [r["verdict"] for r in out["rows"]] == [X] * 6
-    assert out["tally"] == {"tailwind": 0, "headwind": 0, "neutral": 0, "none": 6}
+    assert [r["verdict"] for r in out["rows"]] == [X] * 7
+    assert out["tally"] == {"tailwind": 0, "headwind": 0, "neutral": 0, "none": 7}
 
 
 def test_one_row_raising_costs_only_that_row(cfg, monkeypatch):
@@ -594,7 +594,7 @@ def test_one_row_raising_costs_only_that_row(cfg, monkeypatch):
     monkeypatch.setattr(_degrade, "degraded", lambda area, **k: seen.append(area))
     monkeypatch.setattr(mr, "breadth", lambda *a: (_ for _ in ()).throw(ValueError("x")))
     out = mr.build(_inputs(), cfg, date=MON, slot="12:45", ts=1)
-    assert [r["verdict"] for r in out["rows"]] == [T, X, H, H, H, N]
+    assert [r["verdict"] for r in out["rows"]] == [T, X, H, H, H, N, X]
     assert seen == ["market.read.breadth"]
 
 

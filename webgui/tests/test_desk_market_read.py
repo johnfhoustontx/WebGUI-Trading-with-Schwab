@@ -1,4 +1,4 @@
-"""The Desk's Market read: six readings, each marked a tailwind, a headwind or
+"""The Desk's Market read: seven readings, each marked a tailwind, a headwind or
 neutral for stocks, from ``cache:market:read``. Since 2026-10-06 it is a dialog
 opened from the page header, with a one-line status beside its button.
 
@@ -507,3 +507,46 @@ def test_the_dialog_says_what_it_is_and_what_it_is_not():
     title, use_line = d.READ_TITLE, d.READ_USE_LINE
     assert title == "Market read"
     assert "for stocks" in use_line and "not a forecast" in use_line
+
+
+# --- the Volume row -----------------------------------------------------------
+
+_VOLUME_FACTS = {
+    "symbols": [{"symbol": "SPY", "pace": 1.4, "up_share": 0.61, "word": "heavy"},
+                {"symbol": "QQQ", "pace": 1.25, "up_share": None, "word": "heavy"}],
+    "sector_up_share": 0.58, "through": "12:10", "pace": 1.4, "range_hint": "wider"}
+
+
+def test_the_volume_row_reads_each_symbol_against_usual_and_says_what_followed():
+    assert d.read_reading("volume", _VOLUME_FACTS, "tailwind") == (
+        "SPY 1.40 times usual, 61.00% in rising bars · QQQ 1.25 times usual · "
+        "58.00% of sector dollars in rising sectors · "
+        "wider moves have followed heavy volume, either way")
+
+
+def test_the_volume_row_never_prints_a_missing_figure_as_zero():
+    facts = {"symbols": [{"symbol": "SPY", "pace": None, "up_share": None}],
+             "sector_up_share": None, "range_hint": None}
+    got = d.read_reading("volume", facts, "none")
+    assert got == f"SPY {d._DASH}" and "0.00" not in got
+    assert d.read_reading("volume", {"symbols": []}, "none") == d._DASH
+    assert d.read_reading("volume", None, "none") == d._DASH
+
+
+def test_an_unknown_range_code_adds_nothing():
+    got = d.read_reading("volume", {**_VOLUME_FACTS, "range_hint": "sideways"}, "neutral")
+    assert "either way" not in got and "sideways" not in got
+
+
+def test_the_volume_rows_since_compares_its_pace():
+    now = {"verdict": "neutral", "facts": {"pace": 1.4}, "prev": {"verdict": "neutral",
+                                                                  "facts": {"pace": 1.25}}}
+    assert d.read_since("volume", now) == "+0.15 times usual"
+    same = {**now, "prev": {"verdict": "neutral", "facts": {"pace": None}}}
+    assert d.read_since("volume", same) == "unchanged"
+
+
+def test_the_volume_row_has_a_question_and_a_use_line_that_counts_it():
+    rows = d.read_rows({"rows": [{"key": "volume", "verdict": "neutral", "facts": _VOLUME_FACTS}]})
+    assert rows[0]["question"] == "Volume" and rows[0]["verdict_word"] == "Neutral"
+    assert d.READ_USE_LINE.startswith("Seven readings")

@@ -767,6 +767,11 @@ design in [the chain feed design](docs/plans/2026-10-31-futures-0dte-chain-feed-
   first tick after a connect) is booked UNLABELLED, never dropped or guessed. The
   poll figure and the stream figure are shown apart, never blended. The poll hook
   works in memory and must never open the store.
+- A five-minute bar's volume is on a different basis from a daily bar and a quote's
+  `totalVolume` (bars sum to about 0.6 to 0.7 of them): compare bars with bars, as
+  `market_svc/volume_read.py` does. Heavy volume was measured to go with a wider range
+  later, and not to predict direction: a sentence or a chip must not claim more
+  ([design](docs/plans/2026-11-01-volume-in-read-and-reports-design.md)).
 - The stored premium (`prem`, `call_prem` / `put_prem`) is the day's volume at the
   CURRENT mark and falls when marks fall: never difference it or read a fall as
   money leaving. `tprem` is the running total that cannot fall

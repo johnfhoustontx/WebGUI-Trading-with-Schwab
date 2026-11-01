@@ -4,7 +4,32 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-31 (**/ES and /NQ 0-DTE option chains on Dealer Positioning, captured from ThinkorSwim on the PC. Ships hidden.**)
+**Last updated:** 2026-11-01 (**Traded volume in the Market read and the market reports.**)
+
+- The operator asked for the Market reports and Market reads to take traded volume and its
+  impact on the markets into account. Design:
+  `docs/plans/2026-11-01-volume-in-read-and-reports-design.md`.
+- **What "impact" means here was decided by measurement.** Over 149 sessions (to 2026-10-30,
+  in-sample), heavy volume went with a wider range for the rest of the session (0.64% against
+  0.41% on light) and did not predict direction: a move carried on to the close 45% of the
+  time on heavy volume and 50% on usual. So the text says how much, not which way, and a
+  chip reads what has happened.
+- **New view, `cache:market:volume`** (`services/market_svc/volume_read.py`, contract
+  `MarketVolume`), from five-minute bars on SPY and QQQ and one quote call on the sector funds:
+  volume against the median of the last nine sessions by the same time of day, the share in
+  rising bars, and the share of dollars traded in rising sectors. Every 5 minutes in the
+  session, 3 Schwab calls a time, beside the dashboard poll rather than inside it. Before the
+  open it reports the last session and says pre-market trading is thin.
+- **The Market read has a seventh row, Volume.** A chip only when both funds trade heavily with
+  prices going the same way; No reading when a figure is missing, never Neutral or light.
+- **The market reports get a Volume section, once a patch is applied.** Their tooling is
+  outside the repo, so the change is `deploy/report_tooling/report_tooling_volume.patch`, not
+  yet applied to the box. `render.py`'s new `volume` block prints the service's sentences from
+  the snapshot, so the model never handles them.
+- Settings → Configuration → Market read → Volume holds every threshold and window. The
+  manuals and `page_help.py` follow.
+
+**Prior —** 2026-10-31 (**/ES and /NQ 0-DTE option chains on Dealer Positioning, captured from ThinkorSwim on the PC. Ships hidden.**)
 
 - **The final review's fix wave.** The PC's reasons are joined with `; `, which is what the
   server splits on: a logged-out ThinkorSwim gave /ES's label /NQ's reason and /NQ's none.

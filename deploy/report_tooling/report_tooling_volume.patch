@@ -1,0 +1,168 @@
+--- a/tools/REPORT_GUIDE.md
++++ b/tools/REPORT_GUIDE.md
+@@ -71,6 +71,9 @@
+    - `regime` — Balanced / Whipsaw / Rallying / Retreating / Firming / Softening / Breakdown /
+      Stressed, with memberships and evidence.
+    - `order_flow` — SPY/QQQ aggressor ratio and cumulative volume delta.
++   - `volume` — traded volume, from the market service: `payload.statements` are finished
++     sentences, and `payload.symbols` and `payload.sectors` the figures behind them. Print them
++     with the `volume` block (section 5), never by hand. See "Reading volume" below.
+    - `dealer_positioning.rows` — per index + Big 10: spot, day %, gamma flip, call/put walls,
+      net GEX, ATM IV, P/C, net premium ($M). **Regular-session data** — before 08:30 CT it is
+      the prior session's.
+@@ -98,6 +101,20 @@
+ - Equal-weight vs cap-weight tells whether a move is broad or concentrated. VIX vs VIX3M tells
+   whether stress is real (inversion) or a spike inside contango. HYG confirms or denies fear.
+ - A number you did not read from the snapshot or a verified source does not go in the report.
++- **Reading volume.** The market service states what volume did; you only join it to the rest of
++  the report. Over 149 sessions (to 2026-10-30, measured on the S&P 500 fund) heavy volume went
++  with a **wider** range for the rest of the session and light volume with a narrower one, and
++  neither said which way: a move continued about as often on heavy volume as on usual volume.
++  So:
++  - Volume tells the reader **how much movement to expect**, not the direction. Heavy volume is
++    never one of the two confirming reads a 70% call needs, and a direction call never rests
++    on it. A call about the size of the day's range may.
++  - The figures, and any sentence that gives a volume figure, stay in the `volume` block. In other
++    text you may say only what the block says, in words: "volume was heavy", "volume was light".
++  - Missing or out-of-date volume is said in the block itself. It is never "light", "quiet" or zero,
++    and you do not explain it away.
++  - Before the open the block reports the last session and says pre-market trading is thin. Do
++    not read a pre-market move as having volume behind it, or none.
+ - **No disclaimers of any kind.** No "not financial advice", no "could not confirm",
+   no hedging boilerplate. State conclusions with their confidence levels instead.
+ 
+@@ -226,6 +243,12 @@
+ then numbered sections. Aim for 3–5 PDF pages. Always include the Big 10 (`symbols` block,
+ sorted by move, grouped Chips / Platform / Consumer or by what the day is actually about).
+ 
++Every report also has one **Volume** section (eyebrow `NN &middot; Volume`), placed directly
++before the section holding the calls or, in the close, directly before **Next session**, with
++the sections after it renumbered. A one-sentence title in your words, then `{"type": "volume"}`.
++A lede may say what the block means for the reports' other reads, under "Reading volume" (section 2). The sections
++named below keep their names; the social card finds them by eyebrow.
++
+ **1 · premarket** — the full assessment:
+ 01 Macro (verdict + area table) · 02 Rotation (sector/theme/factor bars + country bars +
+ findings) · 03 The Big 10 (symbols + 3 cards on what drives the split, flow skew) ·
+@@ -303,6 +326,7 @@
+ | `scorecard` | `items[{source, call, confidence, verdict: hit/partial/miss/open, evidence}]` |
+ | `watch` | `items[{trigger, meaning}]` |
+ | `timeline` | `title`, `columns[]` (e.g. `"Pre-market 7:44 a.m."`), `rows[{label, sub, values[], fmt: pct/signed/num, digits}]` |
++| `volume` | none. `render.py` prints the market service's sentences from this slot's snapshot, word for word, or says they are not available |
+ 
+ Big 10 names: NVDA NVIDIA · MSFT Microsoft · GOOGL Alphabet · AMZN Amazon · META Meta ·
+ AAPL Apple · TSLA Tesla · AVGO Broadcom · PLTR Palantir · AMD AMD.
+--- a/tools/remote_collect.py
++++ b/tools/remote_collect.py
+@@ -106,6 +106,9 @@
+                      **{k: p.get(k) for k in ("label", "committed_label", "confidence", "memberships",
+                                               "evidence", "direction", "transition")}}
+ out["order_flow"] = stamp(get("cache:sentiment:order_flow"))
++# Traded volume, as sentences the market service wrote. render.py prints them word
++# for word; the model never handles them.
++out["volume"] = stamp(get("cache:market:volume"))
+ out["header"] = stamp(get("cache:options:header"))
+ # cache:market:summary is NOT collected: since 2026-09-16 it is the previous
+ # market report's own highlights (market_svc reads reports/latest.html), so
+--- a/tools/render.py
++++ b/tools/render.py
+@@ -227,9 +227,49 @@
+     return f'{title}<table class="grid tl"><thead><tr>{head}</tr></thead><tbody>{"".join(body)}</tbody></table>'
+ 
+ 
++VOLUME_MISSING = "Volume figures are not available for this report."
++VOLUME_STALE = "Volume figures are not current, so they are not read in this report."
++# The view is rewritten every five minutes in the session and otherwise once a phase,
++# so an old one in the session means its publisher has stopped.
++VOLUME_MAX_AGE_MIN = 15
++_volume_lines = None    # set by build() for the spec being rendered
++
++
++def volume_lines(spec):
++    """The market service's volume sentences for this spec's slot, read from the newest
++    snapshot, so the model cannot reword them. Absent or old reads as that, never as a
++    quiet market."""
++    data = pathlib.Path(__file__).resolve().parent.parent / str(spec.get("date")) / "data"
++    snaps = sorted(data.glob(f"{spec.get('slot')}-*.json"), key=lambda p: p.stat().st_mtime)
++    if not snaps:
++        return [VOLUME_MISSING]
++    try:
++        snap = json.loads(snaps[-1].read_text(encoding="utf-8"))
++    except (OSError, ValueError):
++        return [VOLUME_MISSING]
++    view = snap.get("volume") if isinstance(snap, dict) else None
++    payload = view.get("payload") if isinstance(view, dict) else None
++    if not isinstance(payload, dict) or not payload.get("statements"):
++        return [VOLUME_MISSING]
++    today = (snap.get("calendar") or {}).get("today")
++    age = view.get("age_min")
++    if payload.get("date") != today or (
++            payload.get("phase") == "session"
++            and (not isinstance(age, (int, float)) or age > VOLUME_MAX_AGE_MIN)):
++        return [VOLUME_STALE]
++    return [str(line) for line in payload["statements"]]
++
++
++def b_volume(b):
++    """No text of its own: see volume_lines."""
++    lines = _volume_lines if _volume_lines is not None else [VOLUME_MISSING]
++    return "<ul>" + "".join(f"<li>{esc(line)}</li>" for line in lines) + "</ul>"
++
++
+ BLOCKS = {"verdict": b_verdict, "paragraph": b_paragraph, "note": b_note, "table": b_table, "bars": b_bars,
+           "columns": b_columns, "bullets": b_bullets, "cards": b_cards, "symbols": b_symbols,
+-          "confidence": b_confidence, "scorecard": b_scorecard, "watch": b_watch, "timeline": b_timeline}
++          "confidence": b_confidence, "scorecard": b_scorecard, "watch": b_watch, "timeline": b_timeline,
++          "volume": b_volume}
+ 
+ 
+ def block(b):
+@@ -398,6 +438,8 @@
+ 
+ 
+ def build(spec, site=False, pdf_href=None):
++    global _volume_lines
++    _volume_lines = volume_lines(spec)
+     slot = spec.get("slot", "adhoc")
+     label = spec.get("slot_label") or SLOT_LABEL.get(slot, "Update")
+     day, as_of = spec["date"], spec.get("as_of", "")
+@@ -489,6 +531,8 @@
+     try:
+         import plain_english
+         print(plain_english.report(spec))
++        for note in plain_english.volume_notes(spec):
++            print(note)
+     except Exception as exc:
+         print(f"plain-english: check failed ({type(exc).__name__}: {exc})")
+ 
+--- a/tools/plain_english.py
++++ b/tools/plain_english.py
+@@ -17,6 +17,7 @@
+   written in capitals (NVIDIA, AMD, CNBC ...).
+ """
+ import html as _html
++import json
+ import re
+ 
+ # Everyday abbreviations and proper names that stay as written.
+@@ -176,6 +177,20 @@
+     return flags
+ 
+ 
++def volume_notes(spec):
++    """Listing only, like the rest: no volume block, or a volume figure outside it."""
++    text = json.dumps(spec, ensure_ascii=False)
++    notes = []
++    if '"type": "volume"' not in text and '"type":"volume"' not in text:
++        notes.append("volume: this report has no volume block (guide section 4)")
++    figure = re.compile(r"[^.<>\"]*\bvolume\b[^.<>\"]*\b\d[\d.,]*\s*(?:times|%|percent)[^.<>\"]*|"
++                        r"[^.<>\"]*\b\d[\d.,]*\s*(?:times|%|percent)[^.<>\"]*\bvolume\b[^.<>\"]*",
++                        re.IGNORECASE)
++    for hit in figure.findall(text):
++        notes.append("volume: a volume figure outside the block: " + hit.strip()[:120])
++    return notes
++
++
+ def report(spec, limit=60):
+     """The block render.py prints."""
+     flags = check(spec)

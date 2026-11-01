@@ -24,7 +24,7 @@ keys that feed it. Menu order matches the rail.
 | **Opportunity Board** | `options_svc` | `cache:options:matrix` |
 | **Flow Alerts** | `options_svc` | `cache:options:flow_alerts`, `:flow_sides`, `:flow_followup` |
 | **Market News** | `news_svc` :8216 | `cache:news:feed`, `:sec`, `:calendar`, `:status` (the public copy reads `:feed_public`, `:sec_public`, `:calendar_public`); also the Desk's Headlines panel (`:feed`) and the Symbol page's news band (`:feed` + `:sec`) |
-| **Market Dashboard** | `market_svc` :8215 | `cache:market:dashboard`, `:summary`, `:read` (the Desk's Market read) |
+| **Market Dashboard** | `market_svc` :8215 | `cache:market:dashboard`, `:summary`, `:read` (the Desk's Market read), `:volume` (traded volume, for the Market read and the reports) |
 | **Sentiment** | `sentiment_svc` :8210 | `cache:sentiment:composite`, `:regime`, `:regime_history`, `:intraday_history` |
 | **Sector & Industry** | `sentiment_svc` | `cache:sentiment:sectors` |
 | **Sector Rotation** · **RRG** | `sentiment_svc` | `cache:sentiment:rotation` |
@@ -1377,8 +1377,8 @@ slot in the regular session:
 - `glow_min` is how many minutes the Desk's two header buttons glow after a new
   reading or report (`config/market_read.toml`); `0` = never.
 - `tally` is `{tailwind, headwind, neutral, none}` counts.
-- `rows` is six objects in a fixed order — `direction`, `breadth`, `structure`,
-  `volatility`, `flow`, `cross_asset` — each `{key, verdict, facts, prev}`. `verdict`
+- `rows` is seven objects in a fixed order — `direction`, `breadth`, `structure`,
+  `volatility`, `flow`, `cross_asset`, `volume` — each `{key, verdict, facts, prev}`. `verdict`
   is `tailwind`, `headwind`, `neutral` or `none`. **`none` means no reading and must
   never be shown or counted as `neutral`.** `facts` are the numbers the verdict was
   decided from, and differ per row; `prev` is the same row's `{verdict, facts}` at the
@@ -1393,6 +1393,35 @@ A reader must check `date` against today, treat a reading older than two
 `public` is exactly `true`, and a row that carries its own `public` only when that is
 exactly `true` too (recounting `tally` without it). The rules and thresholds are in the Technical Reference,
 *Market read*.
+
+## The traded volume view
+
+**`cache:market:volume`** (`MarketVolume`) is built by
+`services/market_svc/volume_read.py`, every 5 minutes in the session and once for each
+other part of the day:
+
+```
+{enabled, date, ts, phase, session_date, through, symbols, sectors, range_hint, statements}
+```
+
+- `date` is the Central day it was built. `session_date` is the session its figures
+  describe, an **earlier** one when `phase` is `before_open` or `closed` (`session` and
+  `after_close` are the other two).
+- `through` is `"HH:MM"` Central, the end of the last finished five-minute bar.
+- `symbols` is `[{symbol, pace, up_share, word, bars, baseline_sessions}]`. `pace` is
+  volume so far over the median of the last `baseline_sessions` sessions by the same
+  time of day. `up_share` is volume in rising bars over volume in rising and falling
+  bars. `word` is `heavy`, `usual`, `light` or `null`.
+- `sectors` is `{up_share, funds}`, the share of the dollars traded across the sector
+  funds in rising sectors, or `null`. It is present only in the session and at the close.
+- `range_hint` is `wider` or `narrower` when every symbol reads heavy or every one
+  reads light, in the session only, else `null`.
+- `statements` are the figures as finished sentences. The market reports print them
+  word for word.
+- **A missing figure is `null`, never 0**, and must not be shown as light volume.
+- ⚠ `pace` and `up_share` are on the basis of the five-minute bars, and a sector's
+  `totalVolume` is not: a bar series sums to about 0.6 to 0.7 of a daily bar. Do not
+  compare across them.
 
 ---
 
@@ -1540,7 +1569,8 @@ cache:trade:markov_prior       cache:trade:universe_factors
 cache:portfolio:positions      events:portfolio:positions     (PortfolioModel)
 cache:market:dashboard         events:market:dashboard        (MarketDashboard)
 cache:market:summary           events:market:summary          (MarketSummary)
-cache:market:read              events:market:read             (MarketRead - the Desk's six readings)
+cache:market:read              events:market:read             (MarketRead - the Desk's seven readings)
+cache:market:volume            events:market:volume           (MarketVolume - traded volume, also read by the market reports)
 cache:news:feed                events:news:feed               (headlines - every kind but the SEC ones)
 cache:news:feed_public         events:news:feed_public        (public feeds only - a live-origin key)
 cache:news:sec                 events:news:sec                (Form 4s and offering filings)

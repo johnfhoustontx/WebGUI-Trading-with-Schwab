@@ -169,3 +169,58 @@ def test_a_scalar_where_a_table_belongs_falls_back_to_that_table(monkeypatch):
 def test_the_desk_glow_is_a_non_negative_number_of_minutes(monkeypatch, value, want):
     _with(monkeypatch, glow_min=value)
     assert mr.load()["glow_min"] == want
+
+
+# --- [volume] ---------------------------------------------------------------
+
+def test_the_volume_ratios_are_taken_together_or_not_at_all(monkeypatch):
+    for heavy, light in ((0.8, 1.2), (1.0, 1.0), (1.2, 0), ("x", 0.8), (1.2, None)):
+        _with(monkeypatch, volume={"heavy_ratio": heavy, "light_ratio": light})
+        got = mr.load()["volume"]
+        assert (got["heavy_ratio"], got["light_ratio"]) == (1.2, 0.8)
+    _with(monkeypatch, volume={"heavy_ratio": 1.5, "light_ratio": 0.7})
+    got = mr.load()["volume"]
+    assert (got["heavy_ratio"], got["light_ratio"]) == (1.5, 0.7)
+
+
+def test_the_up_shares_are_taken_together_or_not_at_all(monkeypatch):
+    for strong, weak in ((0.4, 0.6), (0.5, 0.5), (1.2, 0.4), (0.6, None)):
+        _with(monkeypatch, volume={"up_share_strong": strong, "up_share_weak": weak})
+        got = mr.load()["volume"]
+        assert (got["up_share_strong"], got["up_share_weak"]) == (0.55, 0.45)
+
+
+@pytest.mark.parametrize("value,want", [(9, 9), (5, 5), (10, 9), (0, 9), ("x", 9), (True, 9)])
+def test_the_baseline_cannot_ask_for_more_sessions_than_schwab_serves(monkeypatch, value, want):
+    _with(monkeypatch, volume={"baseline_sessions": value})
+    assert mr.load()["volume"]["baseline_sessions"] == want
+
+
+def test_the_sessions_required_never_exceed_the_sessions_asked_for(monkeypatch):
+    _with(monkeypatch, volume={"baseline_sessions": 3, "min_sessions": 8})
+    got = mr.load()["volume"]
+    assert (got["baseline_sessions"], got["min_sessions"]) == (3, 3)
+
+
+@pytest.mark.parametrize("value,want", [(60, 60), (90, 90), (59, 90), (0, 90), ("x", 90)])
+def test_the_wait_stays_out_of_the_minute_schwab_refuses(monkeypatch, value, want):
+    _with(monkeypatch, volume={"settle_sec": value})
+    assert mr.load()["volume"]["settle_sec"] == want
+
+
+@pytest.mark.parametrize("value,want", [(True, True), (False, False), ("true", False), (None, False)])
+def test_the_volume_switch_is_on_only_for_a_real_true(monkeypatch, value, want):
+    _with(monkeypatch, volume={"enabled": value})
+    assert mr.load()["volume"]["enabled"] is want
+
+
+def test_a_scalar_where_the_volume_table_belongs_falls_back(monkeypatch):
+    _with(monkeypatch, volume=5)
+    got = mr.load()["volume"]
+    assert got["symbols"] == ["SPY", "QQQ"] and got["enabled"] is True
+
+
+@pytest.mark.parametrize("bad", ["SPY", [], [1, 2], None])
+def test_the_volume_symbols_must_be_a_list_of_names(monkeypatch, bad):
+    _with(monkeypatch, volume={"symbols": bad})
+    assert mr.load()["volume"]["symbols"] == ["SPY", "QQQ"]

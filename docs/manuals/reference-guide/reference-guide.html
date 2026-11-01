@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-31</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-01</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -806,8 +806,8 @@ only on their own pages: <strong>Paper Account</strong>, <strong>Captured Signal
 ones in trouble, and the <a href="#symbol">Symbol</a> page for one name.</p>
 <p><strong>Market read.</strong> A button at the top right of the page, with the time of the
 reading and its count as its second line; it opens the reading as a popup, and it
-glows for five minutes after a new reading. Six readings — direction,
-breadth, structure, volatility, flow and cross-asset — each marked <strong>Tailwind</strong>,
+glows for five minutes after a new reading. Seven readings — direction,
+breadth, structure, volatility, flow, cross-asset and volume — each marked <strong>Tailwind</strong>,
 <strong>Headwind</strong> or <strong>Neutral</strong> <em>for stocks</em>, retaken on the clock every 15 minutes while
 the market is open. Each one is a reading that already exists on another page; this
 panel only says which way it points and what changed since the last reading. It is the
@@ -816,7 +816,11 @@ closest the app comes to reading the Desk, the <a href="#market-dashboard">Marke
 text. A row whose data is missing or out of date reads <strong>No reading</strong>, which is not
 Neutral; when the Market read is switched off in Settings the button leaves the page.</p>
 <p>Use it to see <strong>whether the layers agree</strong>. A rising tape with structure and volatility
-both reading Headwind is a different day from one where all six agree. <strong>No reading</strong> is
+both reading Headwind is a different day from one where all seven agree. <strong>Volume</strong> is the
+one to read differently: heavy volume has gone with <strong>wider</strong> moves later in the session and
+light volume with narrower ones, without saying which way, so use it to size the day rather
+than to pick a side. The market reports carry the same figures in a Volume section.
+<strong>No reading</strong> is
 not Neutral: it means that row had nothing to go on. And it is <strong>not a forecast</strong>: the
 thresholds are starting guesses, and nobody has measured whether the tally predicts
 anything.</p>

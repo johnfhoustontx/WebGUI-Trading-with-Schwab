@@ -276,6 +276,12 @@ The public live Desk renders them too.
   so a phone gets the status above its button instead of a header pushed off
   the screen.
 - **Market read** is described in its own bullet above.
+- **The Volume row (2026-11-01).** The Market read's seventh row, from `market_svc`'s
+  `cache:market:volume` (design
+  [`plans/2026-11-01-volume-in-read-and-reports-design.md`](plans/2026-11-01-volume-in-read-and-reports-design.md)).
+  The page prints `read_reading`'s `_read_volume` and decides nothing; a missing figure is
+  a dash. `facts.range_hint` is a finite code mapped to fixed words (`_READ_VOLUME_HINTS`);
+  an unknown one adds nothing.
 - **Market report** frames the report itself. `market_svc/report_summary.py`
   parses `deploy/site/reports/latest.html` (+ `latest.txt`) whenever its stamp
   changes — a `stat` per poll — and publishes `cache:market:summary`
