@@ -4,7 +4,58 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-10-31 (**The Gamma Archive: each session kept past the 5-session purge.**)
+**Last updated:** 2026-10-31 (**/ES and /NQ 0-DTE option chains on Dealer Positioning, captured from ThinkorSwim on the PC. Ships hidden.**)
+
+- The operator wanted dealer positioning for /ES and /NQ computed only from their own
+  0-DTE futures option chains, not from `$SPX` or `$NDX`. Schwab serves no futures-option
+  chains, so a capture on the operator's Windows PC reads them out of ThinkorSwim through
+  Excel's RTD link every 5 minutes (`[capture] interval_sec`), around the clock of the CME
+  session, and sends each over ssh. Design:
+  `docs/plans/2026-10-31-futures-0dte-chain-feed-design.md`; plan beside it.
+- **It ships hidden.** `[capture] show_in_dropdown = false` in `config/futures_chain.toml`:
+  deploying it changes nothing on the page. The list changes when the operator sets
+  `show_in_dropdown = true` in `config/local/futures_chain.toml` and restarts.
+- The pieces:
+  - `config/futures_chain.toml` with `shared/futures_chain_config.py` and
+    `shared/futures_chain.py` (stream, cache keys, the `FOP.ES` / `FOP.NQ` names and `/ES` /
+    `/NQ` labels, the session clock, the plan the PC works from), and a Settings →
+    Configuration group, "/ES and /NQ chain feed". `SYMBOL_RE` is not touched.
+  - The PC: `tools/tos_capture/tos_capture.ps1` (a private hidden Excel started with
+    `/automation -Embedding`, stopped by process id, a watchdog for a hung one, a dated
+    workbook under `Documents\ToS 0DTE`) and `install_tos_capture.ps1` (a scheduled task at
+    logon with a repeating trigger). The server side of its ssh is
+    `tools/futures_chain_remote.sh` and `tools/futures_chain_cli.py` (`plan`, `ingest`).
+  - `options_svc`: `futures_chain_adapter` (checks each series against its own description,
+    calculates gamma per contract, scales open interest and volume by multiplier / 100,
+    refuses what it cannot vouch for), `futures_chain_feed` (the `cmd:futures_chain`
+    consumer, the status view), `futures_chain_snapshot` (the page's payload from the stored
+    chain, labelled current, stale or frozen) and `futures_chain_watch` (the phone alert when
+    capture stops, and a `futures_chain` block on `/health` through the new
+    `make_app(health_extra=)`).
+  - Engine seams, each an optional argument that leaves every existing symbol as it was:
+    `calc_all_from_chain(hours_left=)` (the engine's time left is wrong overnight),
+    `RawMinute.hours_left`, `gex_history_db.SessionSpan`, and `symbol NOT LIKE 'FOP.%'` in
+    the 5-session purge and in the Gamma Archive. `gamma_tool.py` is not edited for contract
+    size.
+  - The page: `webgui/pages/options/gamma_feed.py` (the label with the capture time and the
+    strikes captured, blank "No capture" bands for an outage, one column per capture; no
+    Flow, Term, Explain, Analyze or Briefings for these two).
+- Changes from the plan, found while building: the heat map draws one column per capture
+  (`fill_step_sec` 300, not a column a minute: at about 790 columns every repaint blocked
+  the browser past NiceGUI's 2 second ping), `outage_after_sec` is 450, so a capture a minute
+  late is not drawn as an outage; a chain with no open interest anywhere, or with no usable
+  implied volatility anywhere, is refused rather than published as a flat zero; and the
+  capture got a watchdog and a repeating task trigger, set `IgnoreRemoteRequests` on its own
+  Excel and never calls `Quit()`.
+- **Not run.** Everything above was built and tested against fakes and, for the PC side, by
+  hand with ThinkorSwim open on the developer PC. Not yet run: a real ssh against vps2 (the
+  `plan` and `ingest` verbs through `futures_chain_remote.sh`), the scheduled task starting
+  the capture, a live market (the chain was only ever read with the market closed), a
+  Windows logoff, and the page with the feed switched on against real captures. CME's open
+  and expiry times, and the `QN1` / `QN2` series names on a Friday, are unconfirmed. The
+  first run is a shadow session on the server before the page shows the symbols.
+
+**Prior —** 2026-10-31 (**The Gamma Archive: each session kept past the 5-session purge.**)
 
 - First item of the ideas research (`docs/plans/2026-10-31-gamma-archive-design.md`).
   `tools/archive_gex.py`, a 17:00 CT timer, copies each closed session of

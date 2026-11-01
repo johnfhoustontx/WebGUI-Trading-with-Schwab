@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-30</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-31</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -107,7 +107,10 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#markets-what-is-the-market-doing">MARKETS — what is the market doing?</a><ul>
-<li><a href="#dealer-positioning">Dealer Positioning</a></li>
+<li><a href="#dealer-positioning">Dealer Positioning</a><ul>
+<li><a href="#es-and-nq">/ES and /NQ</a></li>
+</ul>
+</li>
 <li><a href="#opportunity-board">Opportunity Board</a></li>
 <li><a href="#flow-alerts">Flow Alerts</a><ul>
 <li><a href="#bought-sold-estimate">Bought / sold (estimate)</a></li>
@@ -1066,7 +1069,8 @@ taken in. Nothing here proposes a trade.</p>
 related measures.</p>
 <p><strong>Controls:</strong></p>
 <ul>
-<li>A <strong>Symbol</strong> dropdown (default <code>$SPX</code>; the list is the collected watchlist).</li>
+<li>A <strong>Symbol</strong> dropdown (default <code>$SPX</code>; the list is the collected watchlist, plus
+  <strong>/ES</strong> and <strong>/NQ</strong> once you switch them on: see <em><a href="#es-and-nq">/ES and /NQ</a></em>).</li>
 <li><strong>Refresh</strong>, an <strong>Explain</strong> button, an <strong>Analyze</strong> button and a <strong>Briefings</strong>
   menu, all on the page's header line, plus a <strong>Next refresh</strong> countdown in the
   strip under the charts. Explain, Analyze and Briefings' items each open their
@@ -1425,6 +1429,224 @@ doesn't re-fetch.</p>
 briefings run on your Claude subscription</strong> through Claude Code on the server, and
 fall back to the API only when that fails. The running count of billed API calls is
 on the <strong>Settings</strong> page under <em>API usage</em>.</p>
+</blockquote>
+<h3 id="es-and-nq">/ES and /NQ</h3>
+<p>Dealer Positioning can also show the two stock-index futures, <strong>/ES</strong> and <strong>/NQ</strong>,
+worked out only from their own options expiring that session. <strong>They ship hidden.</strong>
+Until you turn them on they are not in the Symbol dropdown and nothing on the page
+changes.</p>
+<p><strong>Turning them on.</strong> Settings → Configuration → <strong>/ES and /NQ chain feed</strong> →
+<strong>Offer /ES and /NQ in the list</strong> (<code>show_in_dropdown</code>, shipped off). Restart the options
+service and the web app from System Status.</p>
+<p><strong>Where the numbers come from.</strong> Schwab serves no futures-option chains, and these two
+are never worked out from <code>$SPX</code> or <code>$NDX</code>, not even when the feed is down. A capture
+program on <strong>your PC</strong> reads the chains out of <strong>ThinkorSwim</strong> through Excel and sends
+each one to the server. It takes a snapshot every <strong>300 seconds</strong> (<strong>Take a snapshot
+every</strong>, <code>interval_sec</code>), from <strong>17:00</strong> Central the evening before an expiry
+(<strong>Opens</strong>, <code>open_ct</code>) to <strong>15:00</strong> Central on it (<strong>Expires</strong>, <code>close_ct</code>). Monday's
+options therefore start on Sunday evening, and there is no capture from Friday afternoon
+to Sunday evening, nor between an expiry and the next open (15:00 to 17:00 as shipped).</p>
+<blockquote>
+<p><strong>The PC has to be on, awake, online and logged in to Windows, and ThinkorSwim has to
+be running and logged in.</strong> The capture never starts ThinkorSwim and never types your
+password. If you log out of ThinkorSwim, or the PC sleeps, capture stops until you are
+back; the page keeps the last numbers and says how old they are. The feed is a target
+for round-the-clock coverage, not a promise of it.</p>
+</blockquote>
+<p><strong>Reading it.</strong></p>
+<ul>
+<li><strong>Gamma is calculated, not copied.</strong> ThinkorSwim's own gamma for these contracts rounds
+  to zero, so each contract's gamma is worked out from its own implied volatility. A
+  contract with no usable volatility has no gamma, and a snapshot with none at all is
+  refused rather than drawn as a flat chart.</li>
+<li><strong>Dollars are right, counts are not shown.</strong> Open interest and volume are scaled to each
+  future's dollars a point (<code>multiplier</code>, shipped 50 for /ES and 20 for /NQ), so the exposure dollars are true. A raw contract count would not be, which
+  is why Flow, which prints counts, is not offered for them.</li>
+<li><strong>Open interest is thin, and thinner on /NQ.</strong> Open interest cannot include 0-DTE
+  positions opened and closed the same day, so a wall can rest on very few contracts.
+  Treat /NQ's walls with more caution than <code>$SPX</code>'s.</li>
+<li><strong>Only the strikes captured are seen.</strong> The capture reaches a share of the future's price
+  each side (<strong>reach each side of the future</strong>, <code>strike_width_pct</code>, shipped 5 percent for
+  both). The walls and the flip are found among those strikes only, and the line above the
+  charts names the range.</li>
+<li><strong>One column is one capture.</strong> The heat map has a column per capture (<strong>One column on the
+  page every</strong>, <code>fill_step_sec</code>, shipped 300 seconds), and its time runs through the
+  night. The projected afternoon is drawn only from a current capture.</li>
+<li><strong>Not offered:</strong> Flow, Term, Explain, Analyze and Briefings (the last three read the stock
+  indexes or fetch from Schwab). <strong>Net Prem</strong> stays and is unrelated to the symbol. In the
+  Delta view the hedge panel may say <em>hedge n/a for this capture</em>.</li>
+</ul>
+<p><strong>The line above the charts.</strong> It replaces the stock-market clock and the refresh
+countdown, and works out its state against your clock every second, so it keeps ageing
+even when nothing new arrives.</p>
+<table>
+<thead>
+<tr>
+<th>It says</th>
+<th>It means</th>
+<th>What to do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><em>Captured 14:55 Central, 1 minute ago. Strikes captured 7,220.00 to 7,980.00</em></td>
+<td><strong>Current.</strong></td>
+<td>Nothing.</td>
+</tr>
+<tr>
+<td><em>Stale: captured 21 minutes ago</em>, usually with a cause after it</td>
+<td>The newest capture is older than <strong>Call a symbol stale after</strong> (<code>stale_after_sec</code>, shipped 660 seconds, eleven minutes), <strong>or</strong> the last <strong>Frozen after this many identical captures</strong> (<code>frozen_repeats</code>, shipped 3) read exactly the same values. The numbers stay as they were; no <em>now</em> line and no projected afternoon is drawn from them.</td>
+<td>The alert's reasons below.</td>
+</tr>
+<tr>
+<td><em>Last session, as of 14:00 Central on Monday, November 2</em> (sometimes <em>the heat map runs to 14:55</em>)</td>
+<td><strong>Frozen.</strong> The session has ended. The strike bars show the last capture taken at least <strong>Freeze the charts this long before expiry</strong> (<code>frozen_before_expiry_min</code>, shipped 60 minutes) before the end, so the closing spike in gamma is not left on screen all weekend.</td>
+<td>Nothing. It clears when the next session's first capture arrives.</td>
+</tr>
+<tr>
+<td>the same, then <em>No capture has arrived for this session</em></td>
+<td>The next session is open and nothing has come.</td>
+<td>The alert's reasons below.</td>
+</tr>
+<tr>
+<td><em>No capture of /ES to show yet. Its chain comes from ThinkorSwim on the PC, not from Schwab.</em></td>
+<td>The server holds no capture at all.</td>
+<td>Install and start the capture (below).</td>
+</tr>
+<tr>
+<td><em>No gamma could be calculated for /ES</em></td>
+<td>The last capture carried no usable implied volatility.</td>
+<td>Wait one capture. If ThinkorSwim shows no volatilities, it is a ThinkorSwim data problem.</td>
+</tr>
+<tr>
+<td>a blank stretch on the heat map and hedge panel, labelled <strong>No capture</strong></td>
+<td>Captures were further apart than <strong>Draw an outage when captures are apart by over</strong> (<code>outage_after_sec</code>, shipped 450 seconds). It is drawn blank on purpose: smooth shading across five hours would read as data.</td>
+<td>Nothing. The Smooth setting does not reach across it.</td>
+</tr>
+</tbody>
+</table>
+<p>A capture that arrives a minute late is not an outage: 450 seconds is above the 300-second
+interval for that reason.</p>
+<p><strong>The phone alert.</strong> When capture stops during the session, one message goes out through
+<strong>Server alerts</strong> (Settings → General → Push notifications), titled <em>"/ES chain capture has
+stopped"</em> (or /NQ). It says how long ago the last good capture was, the reason the server
+refused the latest one, and anything the PC reported itself. It is sent when the newest
+accepted capture is older than <code>stale_after_sec</code>, or <code>frozen_repeats</code> captures in a row
+were identical. It is repeated no more often than <strong>Repeat the stopped-capture alert at
+most every</strong> (<code>alert_repeat_min</code>, shipped 240 minutes), and one message, <em>has resumed</em>,
+follows the first good capture. It stays quiet in the daily gap and at weekends, for
+<code>stale_after_sec</code> after a session opens, and for a future the PC has never tried to
+capture (so nothing is sent before you install it).</p>
+<p><strong>What to do for each reason.</strong> The reason is at the end of the alert, and at the end of
+the line above the charts. The wording is the app's.</p>
+<table>
+<thead>
+<tr>
+<th>Reason (the start of it)</th>
+<th>What it means and what to do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>No reason, only <em>The last good capture was ... ago</em></td>
+<td>Nothing is reaching the server: the PC is off, asleep, offline, or the capture is not running, or <code>ssh vps2</code> from the PC is failing. Check the PC, then <code>%LOCALAPPDATA%\TosCapture\capture.log</code>.</td>
+</tr>
+<tr>
+<td><em>ThinkorSwim is not running on the capture PC.</em></td>
+<td>Start ThinkorSwim and log in. The capture resumes by itself at its next snapshot.</td>
+</tr>
+<tr>
+<td><em>Excel did not start on the capture PC.</em></td>
+<td>Check that Excel opens normally; restart the PC if not. The capture tries again at each snapshot.</td>
+</tr>
+<tr>
+<td><em>every price cell reads N/A</em> or <em>every contract reads N/A; ThinkorSwim may be logged out</em></td>
+<td>Log in to ThinkorSwim.</td>
+</tr>
+<tr>
+<td><em>read N of M contracts tried; not sent</em>, or <em>read N contracts against M earlier; not sent</em></td>
+<td>The sheet has not filled, or ThinkorSwim lost its data. The capture rewrites the sheet. Wait one snapshot; if it repeats, check ThinkorSwim's connection.</td>
+</tr>
+<tr>
+<td><em>Refused: the capture read N contracts, fewer than 80 percent of the M before it ...</em></td>
+<td>Shown for one snapshot. The limit is <strong>Least share of the most read lately</strong> (<code>min_fill_fraction</code>, shipped 80 percent). If the next capture reads the same N it is accepted: a half-filled sheet does not read the same short count twice, a narrowed ladder does.</td>
+</tr>
+<tr>
+<td><em>The prices and counts are not changing: the last N captures read exactly the same values</em></td>
+<td>ThinkorSwim may have stopped updating. Look at its quotes; log out and in if they are frozen.</td>
+</tr>
+<tr>
+<td><em>Refused: parity: the options imply X but the future reads Y</em></td>
+<td>At the money, a call minus a put plus the strike should land on the future. Further apart than <strong>Put-call check may miss by</strong> (<code>parity_limit_pts</code>, shipped 15 points for /ES and 60 for /NQ) means one of the two prices is stale. Wait a snapshot; if it repeats, compare the future's quote in ThinkorSwim with its options.</td>
+</tr>
+<tr>
+<td><em>Refused: no contract has a usable implied volatility</em></td>
+<td>No gamma can be calculated. Overnight volatilities can be missing. Wait; it is a data problem if ThinkorSwim shows none.</td>
+</tr>
+<tr>
+<td><em>Refused: no contract has open interest above zero</em></td>
+<td>Usually a brand-new expiry on its first evening. It clears when a contract prints.</td>
+</tr>
+<tr>
+<td><em>Refused: no series passed its check</em> or <em>no series states 2 NOV 26</em></td>
+<td>The contract names the capture tried do not describe that expiry. CME holidays are not built in, so a holiday week shows this. Wait for the next session; if it persists on a normal day, it is a fault to investigate.</td>
+</tr>
+<tr>
+<td><em>Dropped: the snapshot was N old when it arrived</em></td>
+<td>The limit is <strong>Drop a snapshot older than</strong> (<code>max_age_sec</code>, shipped 900 seconds). A backlog after an outage is thrown away on purpose. Nothing to do.</td>
+</tr>
+<tr>
+<td><em>Dropped: the snapshot is stamped N ahead of the server's clock</em></td>
+<td>The PC's clock is wrong (limit <strong>Refuse a snapshot stamped ahead by</strong>, <code>max_future_skew_sec</code>, shipped 30 seconds). Set the PC's clock.</td>
+</tr>
+<tr>
+<td><em>the snapshot is N KB, over the limit</em></td>
+<td>The limit is <strong>Largest snapshot</strong> (<code>max_snapshot_kb</code>, shipped 512). Lower <strong>reach each side of the future</strong>.</td>
+</tr>
+<tr>
+<td><em>The snapshot could not be read: it does not match the agreed layout</em></td>
+<td>The capture on the PC and the server are out of step. Run the installer again on the PC.</td>
+</tr>
+<tr>
+<td><em>the chain could not be written to the store</em>, or <em>could not be turned into gamma figures</em>, or <em>could not be checked (see the options service log)</em></td>
+<td>A fault on the server, not the PC: read the options service log.</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Installing the capture on the PC.</strong> You need: ThinkorSwim installed and logged in, Excel
+installed, a copy of this project on the PC, and <code>ssh vps2</code> working from that PC without a
+password prompt (the capture runs it unattended, with <code>BatchMode</code>).</p>
+<ol>
+<li>In PowerShell, from the project folder:
+   <code>powershell -ExecutionPolicy Bypass -File tools\tos_capture\install_tos_capture.ps1</code></li>
+<li>It copies the capture to <code>%LOCALAPPDATA%\TosCapture</code>, so changing branches in the
+   project cannot alter a running capture, and registers a scheduled task named
+   <strong>ToS 0DTE Capture</strong>. The task starts at logon, runs only while you are logged on (so
+   ThinkorSwim and Excel share your desktop), holds no password, and starts the capture
+   again if it has ended.</li>
+<li>Start it now with <code>Start-ScheduledTask -TaskName "ToS 0DTE Capture"</code>, or sign out and in.
+   The first possible session is the Sunday evening before a Monday expiry.</li>
+<li>Run the installer again after the script changes. A running capture stays on the old
+   code until the next logon, or until you run <code>Stop-ScheduledTask</code> and
+   <code>Start-ScheduledTask</code>.</li>
+</ol>
+<p>What it leaves on the PC: the log, <code>%LOCALAPPDATA%\TosCapture\capture.log</code>, and a dated
+workbook per expiry under <code>Documents\ToS 0DTE\</code>, with a sheet per future (a copy of what
+was captured). If you have that day's workbook open, that capture's rows are skipped, never
+overwritten. The capture works in an Excel of its own that has no window and never touches
+the Excel you use.</p>
+<p><strong>Uninstalling.</strong> There is no uninstall script. In PowerShell:
+<code>Stop-ScheduledTask -TaskName "ToS 0DTE Capture"</code>, then
+<code>Unregister-ScheduledTask -TaskName "ToS 0DTE Capture" -Confirm:$false</code>, then delete
+<code>%LOCALAPPDATA%\TosCapture</code>. Your workbooks in Documents are left alone. If an Excel with
+no window is still listed in Task Manager afterwards, it is the capture's; end it.</p>
+<blockquote>
+<p><strong>After the first Windows logoff, check Excel once.</strong> Open Excel, then <strong>Options →
+Advanced → General</strong>, and make sure <strong>Ignore other applications that use DDE</strong> is
+<strong>not ticked</strong>. The capture sets that on its own hidden Excel so a file you double-click
+opens in yours; Excel would save the setting into your own options if that copy ever
+exited cleanly, and a logoff is the one way it might. Ticked, your double-clicked files
+would open as an empty window.</p>
 </blockquote>
 <h2 id="opportunity-board">Opportunity Board</h2>
 <p><strong>Route:</strong> <code>/options/matrix</code>. In the rail under <strong>MARKETS</strong>, not in the Options tab
@@ -4169,7 +4391,7 @@ web app. A service restarted while the gateway is down will start and then fail 
 fetch anything.</p>
 </blockquote>
 <h3 id="server-alerts-being-told-when-you-are-not-looking">Server alerts — being told when you are not looking</h3>
-<p>The health board only helps while it is open. Three things now reach your phone
+<p>The health board only helps while it is open. These now reach your phone
 on their own, through the <strong>Server alerts</strong> row under Settings → General → Push
 notifications (Discord and Telegram, both ticked as shipped):</p>
 <table>
@@ -4187,6 +4409,10 @@ notifications (Discord and Telegram, both ticked as shipped):</p>
 <tr>
 <td><strong>A scheduled job failed</strong></td>
 <td>The nightly backup, the end-of-day report or another timed job exited with an error.</td>
+</tr>
+<tr>
+<td><strong>/ES or /NQ chain capture has stopped</strong></td>
+<td>Only once the /ES and /NQ feed is installed and has tried a capture: during its session, no good capture for <code>stale_after_sec</code> or a run of identical ones. Repeated at most every <code>alert_repeat_min</code>, and followed by <em>has resumed</em>. See <em><a href="#es-and-nq">/ES and /NQ</a></em> under Dealer Positioning.</td>
 </tr>
 <tr>
 <td><strong>The Schwab sign-in is about to run out</strong></td>

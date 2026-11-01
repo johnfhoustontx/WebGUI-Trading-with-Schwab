@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-29</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-31</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -253,12 +253,26 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#cadence">Cadence</a></li>
 </ul>
 </li>
+<li><a href="#the-es-and-nq-chain-feed">The /ES and /NQ chain feed</a><ul>
+<li><a href="#names">Names</a></li>
+<li><a href="#the-capture-on-the-pc">The capture (on the PC)</a></li>
+<li><a href="#the-adapter">The adapter</a></li>
+<li><a href="#time-left-and-settlement">Time left and settlement</a></li>
+<li><a href="#gamma-as-coded">Gamma, as coded</a></li>
+<li><a href="#contract-size">Contract size</a></li>
+<li><a href="#cadence_1">Cadence</a></li>
+<li><a href="#what-the-server-keeps-and-when-it-refuses">What the server keeps, and when it refuses</a></li>
+<li><a href="#the-session-storage-and-what-the-page-shows">The session, storage and what the page shows</a></li>
+<li><a href="#the-stopped-capture-alert-and-health">The stopped-capture alert and /health</a></li>
+</ul>
+</li>
 <li><a href="#known-issues">Known issues</a><ul>
 <li><a href="#the-price-sub-score-missing-inputs-and-the-daily-horizons">The PRICE sub-score: missing inputs, and the daily horizons</a></li>
 <li><a href="#carried-chains-and-what-a-study-may-read">Carried chains, and what a study may read</a></li>
 <li><a href="#scanner-strike-rules">Scanner strike rules</a></li>
 <li><a href="#expected-move-deliberately-disagrees-with-thinkorswim">Expected Move deliberately disagrees with ThinkorSwim</a></li>
 <li><a href="#index-open-interest-reads-zero-after-hours">Index open interest reads zero after hours</a></li>
+<li><a href="#nq-open-interest-is-thin">/NQ open interest is thin</a></li>
 </ul>
 </li>
 <li><a href="#constants-appendix">Constants Appendix</a><ul>
@@ -308,7 +322,7 @@ would mean writing the same formulas out four times and letting the copies drift
 </tr>
 <tr>
 <td><strong>Dealer Positioning</strong></td>
-<td><em>GEX / Gamma</em> · <em>Black-Scholes &amp; the Simulator</em> (the Greeks behind charm and vanna)</td>
+<td><em>GEX / Gamma</em> · <em>Black-Scholes &amp; the Simulator</em> (the Greeks behind charm and vanna) · <em>The /ES and /NQ chain feed</em> (the two futures: where their chains come from, their gamma, time left and contract size)</td>
 </tr>
 <tr>
 <td><strong>Opportunity Board</strong></td>
@@ -984,6 +998,12 @@ cd webgui ; ..\.venv/bin/python -m pytest -q
   <code>DELETE</code> reuses pages without shrinking the file — reclaim space with the offline
   <code>tools/vacuum_gex.py</code> (or <strong>Settings → Maintenance → Vacuum GEX history DB</strong>), which
   refuses to run while the collector is active.</li>
+<li><strong><code>gex_archive.db</code> grows on purpose.</strong> The Gamma Archive
+  (<code>tools/archive_gex.py</code>, 17:00 CT on weekdays) copies each closed session out of
+  <code>gex_history.db</code> before the purge reaches it, and nothing ever purges it. It keeps
+  a row every 5 minutes for strikes within 15% of spot (<code>config/gex_archive.toml</code>,
+  <strong>Settings → Configuration → Gamma Archive</strong>), about 54 MB a session. A night it
+  misses is caught up on the next run while the live store still holds the session.</li>
 </ul>
 <hr />
 <h1 id="architecture-overview">Architecture Overview</h1>
@@ -7808,6 +7828,703 @@ names any more is deleted after a publish, a discard or an unpublish.</p>
 </table>
 <p>Times shown for an entry are Central: the Blog's list and each entry page date an
 entry by the day it was published in <code>America/Chicago</code>.</p>
+<h1 id="the-es-and-nq-chain-feed">The /ES and /NQ chain feed</h1>
+<p><strong>Files:</strong> <code>config/futures_chain.toml</code> · <code>shared/futures_chain.py</code> ·
+<code>shared/futures_chain_config.py</code> · <code>shared/contracts/futures_chain.py</code> ·
+<code>services/options_svc/futures_chain_adapter.py</code> (the checks, the gamma, the scaling) ·
+<code>futures_chain_feed.py</code> (the consumer and the status view) · <code>futures_chain_snapshot.py</code>
+(the page's payload) · <code>futures_chain_watch.py</code> (the alert and <code>/health</code>) ·
+<code>tools/tos_capture/tos_capture.ps1</code> (the PC) · <code>tools/futures_chain_cli.py</code> ·
+<code>webgui/pages/options/gamma_feed.py</code>.</p>
+<p>Dealer Positioning can show <strong>/ES</strong> and <strong>/NQ</strong> computed only from their own 0-DTE
+option chains. Schwab serves no futures-option chains, so the chains come from
+ThinkorSwim on the operator's PC. Nothing here reaches Schwab or the proxy, and no /ES
+or /NQ figure is ever taken from <code>$SPX</code> or <code>$NDX</code>, including as a fallback. The feed
+<strong>ships hidden</strong>: <code>[capture] show_in_dropdown = false</code>. Design:
+<code>docs/plans/2026-10-31-futures-0dte-chain-feed-design.md</code>.</p>
+<figure class="diagram" data-diagram="futures-chain-feed"><svg xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 720 374.4" xmlns="http://www.w3.org/2000/svg" version="1.1" role="img" stroke-linejoin="round" stroke-linecap="butt" style="width:100%;height:auto">
+ <g id="futures-chain-feed-figure_1">
+  <g id="futures-chain-feed-patch_1">
+   <path d="M 0 374.4 
+L 720 374.4 
+L 720 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="futures-chain-feed-axes_1">
+   <g id="futures-chain-feed-patch_2">
+    <path d="M 31.68 14.4 
+L 234.72 14.4 
+Q 244.8 14.4 244.8 24.48 
+L 244.8 342.72 
+Q 244.8 352.8 234.72 352.8 
+L 31.68 352.8 
+Q 21.6 352.8 21.6 342.72 
+L 21.6 24.48 
+Q 21.6 14.4 31.68 14.4 
+L 31.68 14.4 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: none; stroke-dasharray: 5,4; stroke-dashoffset: 0; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_3">
+    <path d="M 52.56 43.2 
+L 213.84 43.2 
+Q 219.6 43.2 219.6 48.96 
+L 219.6 77.76 
+Q 219.6 83.52 213.84 83.52 
+L 52.56 83.52 
+Q 46.8 83.52 46.8 77.76 
+L 46.8 48.96 
+Q 46.8 43.2 52.56 43.2 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_4">
+    <path d="M 52.56 108 
+L 213.84 108 
+Q 219.6 108 219.6 113.76 
+L 219.6 142.56 
+Q 219.6 148.32 213.84 148.32 
+L 52.56 148.32 
+Q 46.8 148.32 46.8 142.56 
+L 46.8 113.76 
+Q 46.8 108 52.56 108 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_5">
+    <path d="M 52.56 172.8 
+L 213.84 172.8 
+Q 219.6 172.8 219.6 178.56 
+L 219.6 207.36 
+Q 219.6 213.12 213.84 213.12 
+L 52.56 213.12 
+Q 46.8 213.12 46.8 207.36 
+L 46.8 178.56 
+Q 46.8 172.8 52.56 172.8 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_6">
+    <path d="M 52.56 252 
+L 213.84 252 
+Q 219.6 252 219.6 257.76 
+L 219.6 286.56 
+Q 219.6 292.32 213.84 292.32 
+L 52.56 292.32 
+Q 46.8 292.32 46.8 286.56 
+L 46.8 257.76 
+Q 46.8 252 52.56 252 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_7">
+    <path d="M 298.08 14.4 
+L 688.32 14.4 
+Q 698.4 14.4 698.4 24.48 
+L 698.4 342.72 
+Q 698.4 352.8 688.32 352.8 
+L 298.08 352.8 
+Q 288 352.8 288 342.72 
+L 288 24.48 
+Q 288 14.4 298.08 14.4 
+L 298.08 14.4 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: none; stroke-dasharray: 5,4; stroke-dashoffset: 0; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_8">
+    <path d="M 315.36 43.2 
+L 476.64 43.2 
+Q 482.4 43.2 482.4 48.96 
+L 482.4 77.76 
+Q 482.4 83.52 476.64 83.52 
+L 315.36 83.52 
+Q 309.6 83.52 309.6 77.76 
+L 309.6 48.96 
+Q 309.6 43.2 315.36 43.2 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_9">
+    <path d="M 516.96 43.2 
+L 678.24 43.2 
+Q 684 43.2 684 48.96 
+L 684 77.76 
+Q 684 83.52 678.24 83.52 
+L 516.96 83.52 
+Q 511.2 83.52 511.2 77.76 
+L 511.2 48.96 
+Q 511.2 43.2 516.96 43.2 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #faeeda; stroke: #854f0b; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_10">
+    <path d="M 516.96 100.8 
+L 678.24 100.8 
+Q 684 100.8 684 106.56 
+L 684 135.36 
+Q 684 141.12 678.24 141.12 
+L 516.96 141.12 
+Q 511.2 141.12 511.2 135.36 
+L 511.2 106.56 
+Q 511.2 100.8 516.96 100.8 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_11">
+    <path d="M 315.36 165.6 
+L 476.64 165.6 
+Q 482.4 165.6 482.4 171.36 
+L 482.4 200.16 
+Q 482.4 205.92 476.64 205.92 
+L 315.36 205.92 
+Q 309.6 205.92 309.6 200.16 
+L 309.6 171.36 
+Q 309.6 165.6 315.36 165.6 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_12">
+    <path d="M 516.96 165.6 
+L 678.24 165.6 
+Q 684 165.6 684 171.36 
+L 684 200.16 
+Q 684 205.92 678.24 205.92 
+L 516.96 205.92 
+Q 511.2 205.92 511.2 200.16 
+L 511.2 171.36 
+Q 511.2 165.6 516.96 165.6 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #faeeda; stroke: #854f0b; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_13">
+    <path d="M 315.36 237.6 
+L 476.64 237.6 
+Q 482.4 237.6 482.4 243.36 
+L 482.4 272.16 
+Q 482.4 277.92 476.64 277.92 
+L 315.36 277.92 
+Q 309.6 277.92 309.6 272.16 
+L 309.6 243.36 
+Q 309.6 237.6 315.36 237.6 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_14">
+    <path d="M 516.96 237.6 
+L 678.24 237.6 
+Q 684 237.6 684 243.36 
+L 684 272.16 
+Q 684 277.92 678.24 277.92 
+L 516.96 277.92 
+Q 511.2 277.92 511.2 272.16 
+L 511.2 243.36 
+Q 511.2 237.6 516.96 237.6 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #eeedfe; stroke: #534ab7; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-line2d_1">
+    <path d="M 219.6 192.96 
+L 262.8 192.96 
+L 262.8 63.36 
+L 262.8 63.36 
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: none; stroke: #5f5e5a; stroke-linecap: square"/>
+   </g>
+   <g id="futures-chain-feed-line2d_2">
+    <path d="M 511.2 120.96 
+L 396 120.96 
+L 396 120.96 
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: none; stroke: #5f5e5a; stroke-linecap: square"/>
+   </g>
+   <g id="futures-chain-feed-line2d_3">
+    <path d="M 547.2 205.92 
+L 547.2 221.76 
+L 396 221.76 
+L 396 221.76 
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: none; stroke: #5f5e5a; stroke-linecap: square"/>
+   </g>
+   <g id="futures-chain-feed-text_1">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #5f5e5a" x="33.12" y="29.828145" transform="rotate(-0 33.12 29.828145)">Your PC (Windows)</text>
+   </g>
+   <g id="futures-chain-feed-text_2">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="133.2" y="59.017852" transform="rotate(-0 133.2 59.017852)">ThinkorSwim</text>
+   </g>
+   <g id="futures-chain-feed-text_3">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="133.2" y="73.618242" transform="rotate(-0 133.2 73.618242)">Logged in by you; only read</text>
+   </g>
+   <g id="futures-chain-feed-text_4">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="133.2" y="123.817852" transform="rotate(-0 133.2 123.817852)">Private hidden Excel</text>
+   </g>
+   <g id="futures-chain-feed-text_5">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="133.2" y="138.418242" transform="rotate(-0 133.2 138.418242)">RTD link; started for the capture</text>
+   </g>
+   <g id="futures-chain-feed-text_6">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="133.2" y="188.617422" transform="rotate(-0 133.2 188.617422)">tos_capture.ps1</text>
+   </g>
+   <g id="futures-chain-feed-text_7">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="133.2" y="203.218242" transform="rotate(-0 133.2 203.218242)">A snapshot on the clock</text>
+   </g>
+   <g id="futures-chain-feed-text_8">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="133.2" y="267.817852" transform="rotate(-0 133.2 267.817852)">Dated workbook</text>
+   </g>
+   <g id="futures-chain-feed-text_9">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="133.2" y="282.417891" transform="rotate(-0 133.2 282.417891)">Documents\ToS 0DTE, a copy</text>
+   </g>
+   <g id="futures-chain-feed-patch_15">
+    <path d="M 133.2 83.52 
+Q 133.2 95.04 133.2 105.441966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 135.4 101.041966 
+L 133.2 105.441966 
+L 131 101.041966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="futures-chain-feed-patch_16">
+    <path d="M 133.2 148.32 
+Q 133.2 159.84 133.2 170.241966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 135.4 165.841966 
+L 133.2 170.241966 
+L 131 165.841966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="futures-chain-feed-patch_17">
+    <path d="M 133.2 213.12 
+Q 133.2 231.84 133.2 249.441966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 135.4 245.041966 
+L 133.2 249.441966 
+L 131 245.041966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="futures-chain-feed-text_10">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0f6e56" x="309.6" y="29.828145" transform="rotate(-0 309.6 29.828145)">vps2: Tier 2 and Tier 3</text>
+   </g>
+   <g id="futures-chain-feed-text_11">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="396" y="59.017852" transform="rotate(-0 396 59.017852)">futures_chain_cli.py</text>
+   </g>
+   <g id="futures-chain-feed-text_12">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="396" y="73.618242" transform="rotate(-0 396 73.618242)">ingest (and plan, on request)</text>
+   </g>
+   <g id="futures-chain-feed-text_13">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #633806" x="597.6" y="59.017852" transform="rotate(-0 597.6 59.017852)">cmd:futures_chain</text>
+   </g>
+   <g id="futures-chain-feed-text_14">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #854f0b" x="597.6" y="73.618242" transform="rotate(-0 597.6 73.618242)">A Redis stream of its own</text>
+   </g>
+   <g id="futures-chain-feed-text_15">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="597.6" y="116.617852" transform="rotate(-0 597.6 116.617852)">options_svc consumer</text>
+   </g>
+   <g id="futures-chain-feed-text_16">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="597.6" y="131.218242" transform="rotate(-0 597.6 131.218242)">Checks, gamma, scaling</text>
+   </g>
+   <g id="futures-chain-feed-text_17">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="396" y="181.417852" transform="rotate(-0 396 181.417852)">gex_history.db</text>
+   </g>
+   <g id="futures-chain-feed-text_18">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="396" y="196.018242" transform="rotate(-0 396 196.018242)">Five views, a row per capture</text>
+   </g>
+   <g id="futures-chain-feed-text_19">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #633806" x="597.6" y="181.417852" transform="rotate(-0 597.6 181.417852)">Redis views</text>
+   </g>
+   <g id="futures-chain-feed-text_20">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #854f0b" x="597.6" y="196.018242" transform="rotate(-0 597.6 196.018242)">Chain, frozen chain, status</text>
+   </g>
+   <g id="futures-chain-feed-text_21">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="396" y="253.417852" transform="rotate(-0 396 253.417852)">Stopped-capture watch</text>
+   </g>
+   <g id="futures-chain-feed-text_22">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="396" y="268.018242" transform="rotate(-0 396 268.018242)">Phone alert, /health</text>
+   </g>
+   <g id="futures-chain-feed-text_23">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #3c3489" x="597.6" y="253.417852" transform="rotate(-0 597.6 253.417852)">webgui :8500</text>
+   </g>
+   <g id="futures-chain-feed-text_24">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #534ab7" x="597.6" y="268.018242" transform="rotate(-0 597.6 268.018242)">Dealer Positioning, private</text>
+   </g>
+   <g id="futures-chain-feed-patch_18">
+    <path d="M 262.8 63.36 
+Q 285.48 63.36 307.041966 63.36 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 302.641966 61.16 
+L 307.041966 63.36 
+L 302.641966 65.56 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="futures-chain-feed-text_25">
+    <text style="font-style: italic; font-size: 8.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="396" y="98.68834" transform="rotate(-0 396 98.68834)">reached by one ssh per capture</text>
+   </g>
+   <g id="futures-chain-feed-patch_19">
+    <path d="M 483.84 63.36 
+Q 496.8 63.36 508.641966 63.36 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 504.241966 61.16 
+L 508.641966 63.36 
+L 504.241966 65.56 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="futures-chain-feed-patch_20">
+    <path d="M 597.6 83.52 
+Q 597.6 91.44 597.6 98.241966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 599.8 93.841966 
+L 597.6 98.241966 
+L 595.4 93.841966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="futures-chain-feed-patch_21">
+    <path d="M 396 120.96 
+Q 396 142.56 396 163.041966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 398.2 158.641966 
+L 396 163.041966 
+L 393.8 158.641966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="futures-chain-feed-patch_22">
+    <path d="M 597.6 141.12 
+Q 597.6 152.64 597.6 163.041966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 599.8 158.641966 
+L 597.6 163.041966 
+L 595.4 158.641966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="futures-chain-feed-patch_23">
+    <path d="M 396 221.76 
+Q 396 228.96 396 235.041966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 398.2 230.641966 
+L 396 235.041966 
+L 393.8 230.641966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="futures-chain-feed-patch_24">
+    <path d="M 597.6 205.92 
+Q 597.6 221.04 597.6 235.041966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 599.8 230.641966 
+L 597.6 235.041966 
+L 595.4 230.641966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="futures-chain-feed-text_26">
+    <text style="font-style: italic; font-size: 8.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #5f5e5a" x="360" y="319.00834" transform="rotate(-0 360 319.00834)">No Schwab and no proxy: the chains come only from ThinkorSwim</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="futures-chain-feed-p0ada42c376">
+   <rect x="0" y="0" width="720" height="374.4"/>
+  </clipPath>
+ </defs>
+</svg>
+<figcaption>The /ES and /NQ chain feed, from ThinkorSwim to the page</figcaption></figure>
+<p>Every value below that can be tuned is in <code>config/futures_chain.toml</code> (Settings →
+Configuration → <strong>/ES and /NQ chain feed</strong>); the setting's key is named, with its shipped
+value.</p>
+<h2 id="names">Names</h2>
+<p>The internal symbols are <code>FOP.ES</code> and <code>FOP.NQ</code> (<code>[instruments.ES] symbol</code>); the page shows
+<code>/ES</code> and <code>/NQ</code> (<code>label</code>) through <code>futures_chain.display_symbol</code>. They pass the app's one
+ticker rule (<code>shared.symbols</code>), which refuses <code>/</code> and is not loosened; <code>ES</code> alone is
+Eversource. A configured symbol that the rule would change is not a feed symbol.</p>
+<h2 id="the-capture-on-the-pc">The capture (on the PC)</h2>
+<p>ThinkorSwim serves these chains over RTD, which needs Excel. The capture owns one private
+hidden Excel (<code>EXCEL.EXE /automation -Embedding</code>), stops it by process id, and never
+touches an Excel it did not start. It never starts ThinkorSwim, never enters a password and
+places or prepares no order. The server builds its <strong>plan</strong> (<code>futures_chain.build_plan</code>),
+so a change of config or of session reaches it without editing a file there: the expiry,
+how to print it, the series to try, the numbers to try them with.</p>
+<p><strong>Which series.</strong> The names are rules, not a table. A series is a root, a month letter
+(<code>FGHJKMNQUVXZ</code>) and a two-digit year. The roots, from <code>[instruments.*]</code>:</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Monday to Thursday</th>
+<th>Friday</th>
+<th>Month-end</th>
+<th>Quarterly</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>/ES</td>
+<td><code>E{w}A</code>, <code>E{w}B</code>, <code>E{w}C</code>, <code>E{w}D</code></td>
+<td><code>EW{w}</code></td>
+<td><code>EW</code></td>
+<td><code>ES</code></td>
+</tr>
+<tr>
+<td>/NQ</td>
+<td><code>Q{w}A</code>, <code>Q{w}B</code>, <code>Q{w}C</code>, <code>Q{w}D</code></td>
+<td><code>QN{w}</code></td>
+<td><code>QNE</code></td>
+<td><code>NQ</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>{w}</code> is the week of the month, 1 to 5. For an expiry the candidates are that weekday's
+root for weeks 1 to 5, always the month-end root (a fifth Monday can also be month-end and
+trade as <code>EWX26</code>, not <code>E5AX26</code>), and the quarterly root for the expiry's own month and the
+next quarterly month. A name that does not exist is harmless: the capture keeps only
+series whose <code>DESCRIPTION</code> states the plan's date, on its own and not as part of another
+(<code>2 NOV 26</code> is inside <code>12 NOV 26</code>), and that is not <code>(AM Settled)</code>.</p>
+<ul>
+<li><strong>Which future.</strong> The one the contract's own description names (<code>/ESZ26:XCME</code>), not the
+  continuous contract and not <code>shared/futures.py</code>'s front month, which rolls by chart
+  convention eight days before expiry. A series written on another future is left out.</li>
+<li><strong>Which strikes.</strong> Every <code>strike_step</code> points (5 for /ES, 10 for /NQ) within
+  <code>strike_width_pct</code> (5) of the future's price. A contract that is not listed reads <code>N/A</code>,
+  which is normal: /NQ's spacing is uneven, so a healthy chain lists far fewer than it
+  tries (416 of 572 on 2026-10-31, market closed). The ladder is rewritten when the price
+  has moved <code>recentre_share</code> (0.5) of the way to its end, because the walls and the flip
+  see only the strikes captured.</li>
+<li><strong>Which fields.</strong> <code>MARK</code>, <code>BID</code>, <code>ASK</code>, <code>VOLUME</code>, <code>OPEN_INT</code>, <code>IMPL_VOL</code>, <code>DELTA</code>, and a
+  <code>DESCRIPTION</code> per series. <code>N/A</code>, an empty cell or a non-number is absent, never 0; a row
+  with nothing but zeros is a cell ThinkorSwim has not answered yet and is not sent.
+  <code>IMPL_VOL</code> prints a percent (<code>"12.51%"</code>) and must carry its sign: a bare number could be
+  either scale, and the wrong one misstates every gamma, so it is absent.</li>
+<li><strong>Waiting for a fill.</strong> A written sheet reads <code>N/A</code> until ThinkorSwim answers; Excel hands
+  updates over in batches. A sheet is called filled once its count has held for
+  <code>fill_settle_sec</code> (5) with at least one value, waiting at most <code>fill_wait_max_sec</code> (20).</li>
+<li><strong>The clock.</strong> Boundaries are multiples of <code>interval_sec</code> (300) since the epoch, so a
+  restart stays on the same clock. The plan is fetched at the start and each time its
+  <code>valid_until</code> (the session's end) passes; a failed fetch retries after <code>no_plan_retry_sec</code>
+  (60), doubling to <code>plan_retry_max_sec</code> (900). A hung ssh is stopped after
+  <code>ssh_timeout_sec</code> (60), and a loop with no sign of life for <code>hang_limit_sec</code> (600) has its
+  Excel stopped, which frees it to start another.</li>
+<li><strong>What it sends.</strong> One document per capture, <code>{"snapshots": [...], "status": {"reason",
+  "at"}}</code>, over one ssh (see the API / Developer Reference). Before sending, it leaves out an
+  instrument whose sheet is wholly <code>N/A</code> (ThinkorSwim logged out), that read fewer than
+  <code>min_read_fraction</code> (0.25) of the contracts tried, that read fewer than
+  <code>min_fill_fraction</code> (0.8) of the most that ladder has read, or whose snapshot is over
+  <code>max_snapshot_kb</code> (512), and puts the reason in <code>status</code>. One instrument failing never
+  blocks the other.</li>
+<li><strong>The copy.</strong> A dated workbook per expiry under <code>Documents\ToS 0DTE\&lt;expiry&gt;.xlsx</code>, a sheet
+  per instrument (<code>ES</code>, <code>NQ</code>) with a row per contract per capture appended, written after the
+  send so a workbook that fails never costs a capture. A workbook the operator has open is
+  skipped, never overwritten.</li>
+</ul>
+<h2 id="the-adapter">The adapter</h2>
+<p><code>futures_chain_adapter.build_chain</code> is the one gate between a snapshot and everything the
+page draws. It never repairs a snapshot into a plausible one: it returns an <code>AdaptedChain</code>
+or raises <code>Refused</code> with a sentence for the status view. In order:</p>
+<ol>
+<li>The instrument is configured; the future's price is finite and positive; the capture
+   time is a time.</li>
+<li><strong>Time left</strong> (below), refused at or after the session's close.</li>
+<li>Each series' <code>DESCRIPTION</code> is parsed (<code>futures_chain.parse_description</code>) and must state
+   this snapshot's expiry, the configured multiplier, the series name and an underlying that
+   starts with <code>/</code> and the instrument's root and equals the one the price was read from;
+   a series marked <code>(AM Settled)</code> is excluded. A series that fails is dropped and logged
+   while another passes; none left is refused. <code>EXPIRATION_DAY</code> is not used: it reads a day
+   later than the description.</li>
+<li>Rows are de-duplicated on (series, side, strike) and must read at least one value.</li>
+<li><strong>Some contract must have open interest above zero</strong>, or every strike would publish
+   zero, which reads as a real flat reading. The zeros of other contracts stay.</li>
+<li><strong>Parity.</strong> At the strike nearest the future (looking at the nearest <code>parity_strikes</code>, 5)
+   with both a call and a put priced (the mark, else the bid-ask midpoint), the future the
+   options imply, <code>K + call - put</code>, must be within <code>parity_limit_pts</code> of the price read (15
+   points for /ES, 60 for /NQ). Otherwise the price is wrong and every strike's gamma would
+   shift with no visible error. No readable pair is not a disagreement: the snapshot goes
+   through, and the gap is recorded as <code>None</code>.</li>
+<li>Counts are scaled (below), gamma is calculated per contract, and the chain is laid out as
+   Schwab lays out its own (one expiry key, <code>YYYY-MM-DD:0</code>, <code>daysToExpiration</code> 0,
+   <code>callExpDateMap</code> and <code>putExpDateMap</code>), so <code>GammaEngine</code>, <code>flow_skew</code> and <code>iv_analysis</code>
+   read it unchanged. <code>atm_iv</code> stays empty on these rows: <code>extract_atm_iv</code> reads only DTE 7 to 60.</li>
+<li><strong>Some contract must have a gamma</strong>, or every strike would publish zero.</li>
+</ol>
+<p><code>FuturesContractRow</code> fixes the shapes first: a price or count below zero is absent, the
+strike must be positive, and every field passes <code>_reading</code> (finite, or <code>None</code>).</p>
+<h2 id="time-left-and-settlement">Time left and settlement</h2>
+<pre><code>hours_left = time_to_expiry_years(captured_at, expiry) · 365 · 24
+</code></pre>
+<p><code>time_to_expiry_years</code> is the tier's one helper (<code>options_svc/expiry_time.py</code>): real elapsed
+time from the capture to <strong>16:00 America/New_York on the expiry date</strong>, which is 15:00
+Central, over a 365-day year. Every series kept in a snapshot shares that instant, because a
+morning-settled series (the description says <code>AM Settled</code>) has already expired during the
+session and is excluded by rule. The adapter refuses a capture at or after the session's
+close (<code>[session] close_ct</code>, 15:00 Central), and one whose hours are not finite and positive.</p>
+<p>⚠ <code>close_ct</code> and the helper's 16:00 New York are two statements of one instant. <code>close_ct</code>
+moves the session window and the refusal; <strong>it does not move the hours</strong>, which always come
+from the helper. If <code>close_ct</code> is edited, the two disagree.</p>
+<p>The engine takes it as an optional argument. <code>GammaEngine.calc_all_from_chain(..., hours_left=)</code>
+replaces the clock formula (<code>dte · 24</code> plus the hours to 15:00 when that is positive, which
+is wrong overnight: at 18:00 Central on the evening before expiry it returns 24 hours where
+21 remain) with <code>T = max(hours_left / (365 · 24), 1e-6)</code>, for GEX, charm, vanna, the
+calculated delta and the 0-DTE projection alike. <code>RawMinute.hours_left</code> carries it through
+<code>derive_minute</code> for a symbol that has one. Every other caller passes nothing and prices as
+before. <code>daysToExpiration</code> is stamped 0 on every contract, including an evening capture whose
+expiry is tomorrow, so the engine's 0-DTE slice and its nearest-expiry search find the one
+expiry; <code>dte</code> says nothing to a reader here.</p>
+<h2 id="gamma-as-coded">Gamma, as coded</h2>
+<p>ThinkorSwim's own <code>GAMMA</code> for these contracts is rounded to two decimals and reads <code>0.0</code>, so
+gamma is calculated per contract from that contract's own implied volatility
+(<code>futures_chain_adapter._gamma</code>):</p>
+<pre><code>σ     = IV% / 100
+T     = hours_left / (365 · 24)
+d1    = ( ln(F / K) + ½ σ² T ) / ( σ √T )
+gamma = φ(d1) / ( F · σ · √T )           φ(x) = e^(−x²/2) / √(2π)
+</code></pre>
+<p><code>F</code> is the future's price, <code>K</code> the strike. This is Black-76 gamma with <strong>no carry</strong>: the
+discount factor <code>e^(−rT)</code> is left out, which at under a day to expiry changes the result by
+about one part in ten thousand at most. A contract with no usable volatility (absent, not
+above zero, or so small that <code>σ√T</code> underflows) has <strong>no gamma</strong>: <code>None</code>, never <code>0.0</code>. The
+<code>volatility</code> field handed on is the percent, or <code>0.0</code> when unusable, which is the engine's own
+skip for charm and vanna.</p>
+<p>The engine's per-strike value is then the stock one, with the future as the spot
+(<code>gamma_tool.py</code>):</p>
+<pre><code>GEX_strike = gamma · weight · 100 · F² · 0.01      calls positive, puts negative
+</code></pre>
+<p><code>weight</code> is the <strong>scaled open interest</strong>. Charm and vanna are the engine's Black-Scholes with
+the project rate on the future's price (carry is not removed from them, so they are the less
+exact of the four here); delta is ThinkorSwim's, and the engine's calculated delta is used
+only where it reads 0 or is absent. The dealer sign (long calls, short puts) is carried over
+from the index formula; futures-option dealers may be positioned differently, so the page's
+meaning for these two is less tested than for <code>$SPX</code>.</p>
+<h2 id="contract-size">Contract size</h2>
+<p><code>gamma_tool.py</code> and <code>forward_grid.py</code> assume 100 per contract in dozens of lines, and an
+option on /ES is 50 a point, on /NQ 20. The adapter scales each contract's open interest and
+volume by <code>multiplier / 100</code>, 0.5 for /ES and 0.2 for /NQ (an absent count stays absent),
+before the engine sees them:</p>
+<pre><code>weight · 100 · (multiplier / 100)  =  weight · multiplier
+</code></pre>
+<p>so every dollar figure the engine produces (GEX, charm, vanna, delta exposure, and the
+stored <code>prem</code>, since scaled volume times mark times 100 is the true figure) is right, and
+<code>gamma_tool.py</code> is <strong>not edited for size</strong>, which guarantees no existing symbol moves.
+Consequence: a contract <strong>count</strong> read downstream is scaled (100 /ES contracts read as 50).
+The only places that printed one were on the Flow tab, which these two do not offer.</p>
+<h2 id="cadence_1">Cadence</h2>
+<table>
+<thead>
+<tr>
+<th>What</th>
+<th>When</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A snapshot</td>
+<td>every <code>interval_sec</code> (300 s) on the epoch clock, from <code>[session] open_ct</code> (17:00 Central the evening before the expiry) to <code>close_ct</code> (15:00 Central on it). Expiries are weekdays, so Monday's opens Sunday evening. CME holidays are not modelled: a holiday is found by the contracts not returning data</td>
+</tr>
+<tr>
+<td>One ssh per capture</td>
+<td><code>futures_chain_cli.py ingest</code>; plus <code>plan</code> at the capture's start and as each session's end passes</td>
+</tr>
+<tr>
+<td>The consumer</td>
+<td>on arrival; the capture's own minute is the stored row's minute</td>
+</tr>
+<tr>
+<td>The page's snapshot</td>
+<td>rebuilt when a capture arrives for the symbol on screen, on the page's 120-second timer and at page load; the label is worked out again every second against the clock</td>
+</tr>
+<tr>
+<td>The watch</td>
+<td>each <code>options_svc</code> scheduler tick (30 s), with no NYSE gate</td>
+</tr>
+</tbody>
+</table>
+<p>The history keeps <strong>one row per capture</strong>. The page draws one column per row and repeats a
+row only to <code>fill_step_sec</code> (300) and never past one interval, so at the shipped value
+nothing is repeated. A lower value repeats rows and makes a heavier page: at a 100-second
+step every repaint of a whole session (about 790 columns) blocked the browser for 4.5
+seconds, past NiceGUI's 2 second ping, measured at build. Two captures further apart than
+<code>outage_after_sec</code> (450) have an outage between them, drawn blank. 450 is above the interval
+because a capture can be a minute late: rows are floored to the minute and a read can cross
+one, giving gaps of 240 and then 360 seconds at a 300-second interval.</p>
+<h2 id="what-the-server-keeps-and-when-it-refuses">What the server keeps, and when it refuses</h2>
+<p><code>futures_chain_feed</code> ends every snapshot one of three ways, and says which per instrument in
+<code>cache:options:futures_chain_status</code>:</p>
+<table>
+<thead>
+<tr>
+<th>End</th>
+<th>When</th>
+<th>Setting</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Dropped without comment</strong></td>
+<td>not newer than the stored capture (a late one never replaces a newer one)</td>
+<td></td>
+</tr>
+<tr>
+<td><strong>Refused, with a reason</strong></td>
+<td>the capture time is not a time; older than <code>max_age_sec</code> (900), which is also the replay guard; stamped further ahead than <code>max_future_skew_sec</code> (30); any adapter refusal above; fewer than <code>min_fill_fraction</code> (0.8) of the contracts the capture before it read, in the same session (see below); the store could not take it</td>
+<td>the key named</td>
+</tr>
+<tr>
+<td><strong>Written</strong></td>
+<td>the five views into <code>gex_history.db</code> at the capture's own minute; the chain into <code>cache:options:futures_chain:&lt;symbol&gt;</code>; and the same into <code>…:frozen</code> while the capture is at least <code>frozen_before_expiry_min</code> (60) before the close</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>The half-filled test compares with the previous capture's count <strong>read from the status
+view in Redis, not module state</strong>, so a restart cannot make the next half-filled capture look
+like the first. The operator can narrow the strike width on purpose, which lowers the count
+for good; a half-filled sheet does not read the same short count twice and a narrowed ladder
+does, so a capture that repeats the last refused count is taken.</p>
+<p><code>frozen_repeats</code> (3) captures in a row with the same price, volume and open interest are
+reported as a stopped feed on the entry's reason, though they arrive on time.</p>
+<h2 id="the-session-storage-and-what-the-page-shows">The session, storage and what the page shows</h2>
+<ul>
+<li><strong>A session opens the evening before its expiry</strong> and so spans two calendar dates.
+  <code>futures_chain.session_expiry(now)</code> names the session a moment belongs to (the daily gap
+  names the next day's, a weekend rolls to Monday); <code>session_bounds(expiry)</code> is its
+  <code>(opens, ends)</code>; <code>gex_history_db.SessionSpan</code> lets the history loaders take a span where
+  they took a date. <code>compute.gamma_snapshot(session=)</code> reads the whole span, with no 08:30 to
+  15:00 window, prices the chain at the capture's own time and its <code>hours_left</code>, and fills
+  the rows to the page's columns.</li>
+<li><strong>The purge and the Gamma Archive leave these symbols out</strong> (<code>symbol NOT LIKE 'FOP.%'</code>).
+  The purge counts distinct calendar dates, so a Sunday evening would cost every other
+  symbol a session; the archive closes a date at the stock session's stop. The feed keeps
+  the live store's 5 sessions and no archive.</li>
+<li><strong>Which capture is shown</strong> (<code>futures_chain_snapshot</code>): while the newest capture's session
+  has not ended, the newest, marked <strong>stale</strong> when it is older than <code>stale_after_sec</code> (660) or
+  <code>frozen_repeats</code> captures read identically, numbers kept; after that, the frozen capture
+  (the last taken far enough before expiry that the closing spike is not left on screen),
+  marked <strong>frozen</strong>, and also stale when the next session is open with nothing yet; with
+  neither, nothing. A stale or frozen payload drops its projected afternoon.</li>
+<li><strong>What is not offered.</strong> <strong>Term</strong>: the feed holds one expiry, so there is nothing to
+  compare (<code>with_term=False</code>). <strong>Flow</strong>: it prints contract counts, which the adapter scales, which is why
+  it was left out; the feed's minutes are also written with no <code>on_chain</code> hook (tally,
+  traded premium, unusual activity, HIRO), so none of those exist for these symbols. <strong>Explain</strong>,
+  <strong>Analyze</strong> and <strong>Briefings</strong> fetch from Schwab or read the stock indexes. Net Prem stays: it
+  does not depend on the symbol.</li>
+<li><strong>Open interest is thin, and thinner on /NQ.</strong> On the Monday ladder sampled on 2026-10-31,
+  /NQ held 3,967 contracts of open interest against 19,527 of volume, and open interest
+  cannot include 0-DTE positions opened and closed the same day. Its walls may rest on very
+  few contracts, and a listed /NQ contract can read <code>N/A</code> for <code>OPEN_INT</code>. The weighting is
+  open interest, as for every symbol; it has not been compared with volume.</li>
+</ul>
+<h2 id="the-stopped-capture-alert-and-health">The stopped-capture alert and <code>/health</code></h2>
+<p><code>futures_chain_watch.decide</code> is pure over the status view and the alert state. During the
+CME session an instrument is <strong>stopped</strong> when its newest accepted capture is older than
+<code>stale_after_sec</code> (counted from the later of the capture and the session's open, so a feed
+that stopped on Friday gets no alert at the Sunday open), or its last <code>frozen_repeats</code>
+captures read identically in this session; one with refusals and no accepted capture is
+stopped once the session has been open that long. One message goes through the <code>system</code>
+category when it stops, the same message at most every <code>alert_repeat_min</code> (240) minutes, and
+one when it resumes; none outside the session or for an instrument with no status entry at
+all. The state is in <code>cache:options:futures_chain_alert</code>, saved only after a message was
+sent, so a restart does not repeat one and a send that raised is tried again 30 seconds on.
+<code>/health</code> reports the feed under <code>futures_chain</code> and never changes <code>up</code>: a PC that is off is
+not a failed options service.</p>
 <h1 id="known-issues">Known issues</h1>
 <p>Documented defects a maintainer should know about before trusting a number. These
 are recorded rather than silently carried.</p>
@@ -7868,6 +8585,13 @@ drawn cone.</p>
 <h2 id="index-open-interest-reads-zero-after-hours">Index open interest reads zero after hours</h2>
 <p><code>$SPX</code> and <code>$NDX</code> report zero open interest overnight, which yields all-zero GEX
 grids and arbitrary wall levels. Index gamma is only meaningful during the session.</p>
+<h2 id="nq-open-interest-is-thin">/NQ open interest is thin</h2>
+<p>The /ES and /NQ feed weights every figure by open interest, as every symbol is, and /NQ's is
+thin: on the Monday ladder sampled on 2026-10-31 the whole /NQ ladder held 3,967 contracts
+of open interest against 19,527 of volume, and a listed contract can read <code>N/A</code> for it. Open
+interest cannot include 0-DTE positions opened and closed the same day, so /NQ's walls may
+rest on very few contracts. The weighting has not been compared with volume. See <em>The /ES and
+/NQ chain feed</em>.</p>
 <hr />
 <h1 id="constants-appendix">Constants Appendix</h1>
 <p>A consolidated table of the load-bearing constants. The cited file governs.</p>
@@ -8068,6 +8792,10 @@ the source; this table is a summary of them.</p>
 <tr>
 <td>blog_svc</td>
 <td>The loop wakes every <strong>30 s</strong> (<code>TICK_S</code>) to beat its heartbeat and re-read the interval. <strong>At start</strong>: repair the store, rebuild every entry page on the site, publish the two list views. <strong>Then every 30 min</strong> (<code>[site] republish_min</code> in <code>config/blog.toml</code>, 1 to 1440, counted from the END of the last pass): the site rebuild again, which rewrites only what differs from the store, and the two views again. A pass that fails is retried at the next wake. Everything else is on demand, when the Blog page sends a command.</td>
+</tr>
+<tr>
+<td>/ES and /NQ chain feed</td>
+<td>Not a service: a capture on the operator's PC, every <strong>300 s</strong> on the epoch clock (<code>[capture] interval_sec</code> in <code>config/futures_chain.toml</code>) from <strong>17:00</strong> Central the evening before an expiry to <strong>15:00</strong> Central on it, then one ssh to vps2 per capture. <code>options_svc</code> handles each on arrival (<code>cmd:futures_chain</code>) and its <strong>stopped-capture watch</strong> runs each 30 s scheduler tick, with no NYSE gate. No Schwab or proxy call. See <em>The /ES and /NQ chain feed</em>.</td>
 </tr>
 </tbody>
 </table>

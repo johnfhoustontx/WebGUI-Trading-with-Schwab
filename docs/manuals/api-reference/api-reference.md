@@ -171,6 +171,7 @@ enqueue, so a change needs no restart):
 |---|---|---|---|
 | `default` | 1000 | 10–100000 | every stream not named below |
 | `"cmd:blog"` | 50 | 10–500 | the Blog page's uploads and its Publish |
+| `"cmd:futures_chain"` | 20 | 10–200 | the /ES and /NQ chain feed's snapshots: one chain per command, up to `config/futures_chain.toml` `[capture] max_snapshot_kb` (512 KB) each |
 
 The blog stream is small because one of its commands carries a whole
 document, up to `config/blog.toml [limits] max_html_kb` (512 KB): a thousand
@@ -223,6 +224,7 @@ a contract (listed in *Cache Key Index*).
 | `CompositeSnapshot` | `sentiment.py` | (validation only) | `total: float`, `bias: str`, `components{}` |
 | `RescueAdvisory` | `options.py` | `cache:options:rescue:<position_id>` | `position_id`, `symbol`, `strategy`, `state`, `heat`, `mark`, `context[]`, `candidates[]`, `error` |
 | `RescueCandidate` | `options.py` | (embedded in `RescueAdvisory.candidates`) | `action`, `label`, `apply_kind` (`execute`\|`advisory`), `gross_cash`, `commission`, `net_cash`, `new_max_loss`, `breakeven`, `short_delta`, `width`, `expiry`, `dte_after`, `est_fill_legs[]`, `rationale[]`, `context[]`, `warnings[]`, `score` |
+| `FuturesChainSnapshot` | `futures_chain.py` | (the `snapshot` command's args on `cmd:futures_chain`) | `instrument`, `expiry`, `captured_at`, `descriptions{}`, `underlying_symbol`, `underlying_price`, `contracts[]` of `{series, side, strike, mark, bid, ask, volume, open_int, iv, delta}`; an absent reading is `null`. See *The /ES and /NQ chain feed* under the Options service |
 
 ---
 
@@ -718,6 +720,107 @@ the files (the first non-null value of each field wins) and never writes a key
 Dated price history is fetched through the proxy's `/passthrough` (`endpoint=/pricehistory`):
 a tool that calls it by hand (`tools/scalp_backfill.py`) must have the stack's `.env`
 loaded, or every request is a 401 (`PROXY_SHARED_SECRET`).
+
+### The /ES and /NQ chain feed (`cmd:futures_chain`)
+
+The options service also takes the 0-DTE option chains of /ES and /NQ from a capture on
+the operator's Windows PC (ThinkorSwim through Excel), because Schwab serves no
+futures-option chains. Nothing here reaches Schwab or the proxy. The feed **ships hidden**
+(`[capture] show_in_dropdown = false`). The Technical Reference's *The /ES and /NQ chain
+feed* has the checks, the gamma and the cadence.
+
+{{diagram: futures-chain-feed | The /ES and /NQ chain feed, from ThinkorSwim to the page}}
+
+**One direction.** The PC sends; the server never connects to it. The PC runs two commands
+over one ssh each, through `tools/futures_chain_remote.sh` (which loads the stack's `.env`
+and the checkout's venv, so the capture needs to know one path):
+
+| Command | What it does |
+|---|---|
+| `futures_chain_cli.py plan` | Prints the capture's plan as one line of JSON and exits 0. Reads nothing. |
+| `futures_chain_cli.py ingest` | Reads `{"snapshots": [...], "status": {...}}` from standard input and puts one `snapshot` command per instrument, then one `pc_status`, on `cmd:futures_chain`. It prints `{"queued": ["snapshot", ...]}`. |
+
+`ingest` checks the shape and the size and nothing else: the contract, the age, the terms and
+the checks against the last capture are the service's. A byte order mark (PowerShell adds
+one) is stripped. A snapshot whose `instrument` is not `ES` or `NQ` is refused whole; a
+snapshot over `[capture] max_snapshot_kb` is dropped and named on standard error while the
+others still go. Exit status: **0** written; **2** input or usage it cannot use (nothing
+sent); **3** a snapshot over the limit was dropped (the rest were written), or standard input
+was larger than a capture can be; **4** Redis refused a write (its message says how many
+commands were queued first). The reason is on standard error.
+
+**The plan** (`futures_chain.build_plan`): `expiry` (ISO date), `date_text` (`2 NOV 26`, as a
+contract description prints it), `in_session`, `opens` and `valid_until` (epoch seconds),
+`interval_sec`, `min_fill_fraction`, `max_snapshot_kb`, the PC's own settings
+(`min_read_fraction`, `fill_settle_sec`, `fill_wait_max_sec`, `probe_round_steps`,
+`probe_reach`, `recentre_share`, `ssh_timeout_sec`, `no_plan_retry_sec`,
+`plan_retry_max_sec`, `hang_limit_sec`), and `instruments`, keyed by root (`ES`, `NQ`):
+`symbol`, `multiplier`, `exchange`, `strike_step`, `strike_width_pct`, `parity_limit_pts` and
+`candidates`, the series names to try. A key a capture lacks takes a stated default in the
+script, because the PC and the server do not update together.
+
+**Commands (`cmd:futures_chain`):**
+
+| Type | Args | Effect |
+|---|---|---|
+| `snapshot` | a `FuturesChainSnapshot` (below) | One instrument's capture. Ends as exactly one of: dropped without comment (not newer than the stored capture), refused with a reason on the status view, or written: the five views into `gex_history.db` at the capture's own minute, the chain into `cache:options:futures_chain:<symbol>` (and `…:frozen` while it is far enough before expiry), then a repaint of the page's gamma view when it is on that symbol. A payload that does not match the model is counted as a degrade (`options.futures_chain`) and refused |
+| `pc_status` | `{reason, at}` | The PC's own report: why it is not capturing (ThinkorSwim logged out, Excel would not start) or `""` when it is. `reason` is cut to 300 characters; `at` is epoch seconds (the service's own clock when it is missing or not a number). Stored on the status view's `pc` entry, apart from the instruments' entries |
+| anything else | | Logged and ignored |
+
+The stream has its own `[stream_keep]` cap (`"cmd:futures_chain"`, shipped 20), because each
+command carries a document. A snapshot older than `[capture] max_age_sec` (900 s) when it
+arrives is refused, which is also what keeps a consumer group created at id 0 from replaying
+the stream's history as current. Nothing on this stream reaches a paper book.
+
+**`FuturesChainSnapshot`** (`shared/contracts/futures_chain.py`):
+
+| Field | Type | Meaning |
+|---|---|---|
+| `instrument` | string | The root, `ES` or `NQ` |
+| `expiry` | date | The expiry the capture meant to read |
+| `captured_at` | float | Epoch seconds the values describe, on the PC's clock |
+| `descriptions` | `{series: string}` | One contract's ThinkorSwim `DESCRIPTION` per series; the adapter reads the multiplier, expiry, underlying and `AM Settled` off it |
+| `underlying_symbol` | string | The future the options are written on, e.g. `/ESZ26:XCME` |
+| `underlying_price` | float | What it traded at |
+| `contracts` | list of rows | Below |
+
+Each row is `{series, side, strike, mark, bid, ask, volume, open_int, iv, delta}`: `side` is
+`"C"` or `"P"`, `strike` a positive number, and the rest readings. A reading that is `N/A`,
+empty, not a number, not finite or a boolean is `null`, never 0; a price or count below zero is
+`null`; `iv` is the percent as ThinkorSwim prints it (`"12.51%"` is `12.51`).
+
+**Views.**
+
+| Cache key | Payload |
+|---|---|
+| `cache:options:futures_chain:<FOP.ES or FOP.NQ>` | `{chain, captured_at, expiry, hours_left}`: the adapted chain in Schwab's layout (one expiry key, `YYYY-MM-DD:0`, every contract at `daysToExpiration` 0, open interest and volume already scaled by multiplier / 100, a calculated `gamma`, and `series`), the capture's epoch time, the ISO expiry and the hours to the close. No event is published |
+| `cache:options:futures_chain:<symbol>:frozen` | The same, for the last capture taken at least `frozen_before_expiry_min` (60) before expiry |
+| `cache:options:futures_chain_status` | The feed's health: `{<symbol>: entry, pc: {reason, at}}`, below |
+| `cache:options:futures_chain_alert` | What the stopped-capture alert has told the operator: `{<symbol>: {alerted_at}}` for each instrument last reported stopped. Its own key: the status view is read, changed and written back by the stream's consumer thread, and a second writer would lose a write. Nothing else reads it |
+| `cache:options:gamma` | For these symbols only, the usual snapshot plus a **`feed`** block: `{label (/ES), captured_at, expiry, frozen, stale, reason, why, strike_low, strike_high, last_row_at}`. `stale` and `frozen` are worked out when the payload is built and are as old as it, so a reader works the state out again against its own clock; `reason` is the age sentence plus `why`; `why` is the cause alone; `strike_low` / `strike_high` are the range captured; `last_row_at` is where the session's rows end. A stale or frozen payload carries no `forward` band. `compute.gamma_snapshot` is called with `with_term=False`, so there is no Term |
+| `cache:options:gamma_symbols` | Lists `FOP.ES` and `FOP.NQ` only while `show_in_dropdown` is on. The public list (`public_gamma.SYMBOLS_KEY`) never does |
+
+**A status entry** (per `FOP.` symbol; every field is always present): `captured_at` (the
+newest accepted capture, or `null`), `expiry`, `listed` (contracts that read a value),
+`with_gamma` (of those, the ones with a calculated gamma), `parity_gap` (`null` when no pair
+could be read), `reason` (a sentence in whole words, empty when well; a snapshot that was
+refused leaves the last good one's other fields in place), `repeats` (the run of captures with
+the same price, volume and open interest), `refused_at`, `price`, `activity` (volume plus open
+interest, to compare captures) and `refused_listed` (the count of the last refused half-filled
+capture). The comparisons between one capture and the one before it read it from here, so a
+service restart does not forget it.
+
+**`/health`** carries a `futures_chain` block, through `make_app(health_extra=)`:
+`{in_session, instruments, pc}`. `instruments` is keyed by the page's label (`/ES`) and holds
+only an instrument with an accepted capture or a refusal: `{captured_at, age_s, refused_at,
+state, repeats, listed, with_gamma, reason}`, where `state` is `capturing`, `stopped` or
+`starting` during the session and `between sessions` or `no capture accepted` outside it.
+`pc` is `{reason, at}` or `null`. It describes the feed and never changes `up`: a PC that is
+off is not a failed options service.
+
+**Rules for a reader.** The cached chain holds every contract's bid, ask and mark, and Redis
+is readable by the public process, so no public page may read these keys. A reader must not
+fall back to another symbol's chain: a stale capture is labelled, never shown as current.
 
 ## Portfolio service — :8212
 
@@ -1374,6 +1477,11 @@ cache:options:expected_move    events:options:expected_move
 cache:options:rescue:<position_id>   events:options:rescue:<position_id>   (RescueAdvisory contract)
 cache:options:rescue_summary   events:options:rescue_summary
 cache:options:scalp           events:options:scalp         (Opening Scalp; ScalpView contract)
+cache:options:futures_chain:<FOP.ES | FOP.NQ>   (the newest /ES or /NQ chain, adapted; no event)
+cache:options:futures_chain:<FOP.ES | FOP.NQ>:frozen   (the last capture far enough before expiry)
+cache:options:futures_chain_status   (the feed's health, per instrument, and the PC's report)
+cache:options:futures_chain_alert    (what the stopped-capture alert has told the operator)
+cmd:futures_chain                    (the PC's snapshots, over ssh through tools/futures_chain_cli.py)
 cmd:options
 ```
 
@@ -1469,7 +1577,10 @@ The scaffold provides:
    consumer="c1")`, blocking 50 ms per poll, up to 10 messages per batch; dispatches
    to the handler via an executor; acks after the handler returns; swallows and logs
    handler exceptions.
-3. **Health** — `GET /health` → `{"domain": ..., "up": true}`.
+3. **Health** — `GET /health` → `{"domain": ..., "up": true}` plus the keys listed under
+   *Per-Service Reference*. A service may add keys of its own with
+   `make_app(health_extra=lambda bus: {...})`; it can add and never change one the body
+   already has, and a function that raises is counted in `degrades`.
 
 > **Process isolation matters.** Several app folders expose same-named top-level
 > modules (`config`, `scoring`, `notifier`, `src`). Running two service test suites

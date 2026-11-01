@@ -759,8 +759,8 @@ accelerate price.
 - **/ES and /NQ** — the two futures, when the feed is switched on. Their chains do
   not come from Schwab: **ThinkorSwim on your PC** captures the options expiring at
   the end of the session, one capture every few minutes, from the evening before.
-  ThinkorSwim sends no gamma, so it is **calculated** from each contract's implied
-  volatility. The heat map draws one column per capture, so it holds one capture a
+  ThinkorSwim's own gamma rounds to zero for these, so it is **calculated** from each
+  contract's implied volatility. The heat map draws one column per capture, so it holds one capture a
   column rather than one minute. The line above the charts says when the numbers were
   captured and which strikes were captured, and **they can go stale**: if the PC,
   ThinkorSwim or the capture stops, the charts stay and the line turns into a **Stale**

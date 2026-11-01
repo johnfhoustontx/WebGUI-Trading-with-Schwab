@@ -29,7 +29,7 @@ Use this map to get from a screen to its numbers. Menu order matches the rail.
 |---|---|
 | **Desk** | Composition only — every figure is produced by the same function that produces it on the page it summarises, so follow that page's row. The one exception is the **Market read** popup, whose verdicts are decided in the market service: see *Market read*. Its own two constants (the arrival glow, the voice cache) are in the *Constants Appendix* |
 | **Symbol** | Composition, like the Desk. Its own arithmetic — IV vs HV and the expected move — is in *Options Scoring* → **Expected move and IV analysis**; the signal age and score trend in **Signal age and score trend**; the look-up's cost in the *Constants Appendix* |
-| **Dealer Positioning** | *GEX / Gamma* · *Black-Scholes & the Simulator* (the Greeks behind charm and vanna) |
+| **Dealer Positioning** | *GEX / Gamma* · *Black-Scholes & the Simulator* (the Greeks behind charm and vanna) · *The /ES and /NQ chain feed* (the two futures: where their chains come from, their gamma, time left and contract size) |
 | **Opportunity Board** | *GEX / Gamma* (the flip and flow series) · *Options Scoring* (its signal counts) |
 | **Flow Alerts** | *GEX / Gamma* (the premium series, **Hedging-flow model (HIRO)** for the two hedging alerts, and **Bought / sold estimate on flow alerts**) · *Constants Appendix* (detector thresholds) |
 | **Market Dashboard** | *Architecture Overview* — the board normalizes and colours quotes rather than deriving anything |
@@ -4458,6 +4458,291 @@ names any more is deleted after a publish, a discard or an unpublish.
 Times shown for an entry are Central: the Blog's list and each entry page date an
 entry by the day it was published in `America/Chicago`.
 
+# The /ES and /NQ chain feed
+
+**Files:** `config/futures_chain.toml` · `shared/futures_chain.py` ·
+`shared/futures_chain_config.py` · `shared/contracts/futures_chain.py` ·
+`services/options_svc/futures_chain_adapter.py` (the checks, the gamma, the scaling) ·
+`futures_chain_feed.py` (the consumer and the status view) · `futures_chain_snapshot.py`
+(the page's payload) · `futures_chain_watch.py` (the alert and `/health`) ·
+`tools/tos_capture/tos_capture.ps1` (the PC) · `tools/futures_chain_cli.py` ·
+`webgui/pages/options/gamma_feed.py`.
+
+Dealer Positioning can show **/ES** and **/NQ** computed only from their own 0-DTE
+option chains. Schwab serves no futures-option chains, so the chains come from
+ThinkorSwim on the operator's PC. Nothing here reaches Schwab or the proxy, and no /ES
+or /NQ figure is ever taken from `$SPX` or `$NDX`, including as a fallback. The feed
+**ships hidden**: `[capture] show_in_dropdown = false`. Design:
+`docs/plans/2026-10-31-futures-0dte-chain-feed-design.md`.
+
+{{diagram: futures-chain-feed | The /ES and /NQ chain feed, from ThinkorSwim to the page}}
+
+Every value below that can be tuned is in `config/futures_chain.toml` (Settings →
+Configuration → **/ES and /NQ chain feed**); the setting's key is named, with its shipped
+value.
+
+## Names
+
+The internal symbols are `FOP.ES` and `FOP.NQ` (`[instruments.ES] symbol`); the page shows
+`/ES` and `/NQ` (`label`) through `futures_chain.display_symbol`. They pass the app's one
+ticker rule (`shared.symbols`), which refuses `/` and is not loosened; `ES` alone is
+Eversource. A configured symbol that the rule would change is not a feed symbol.
+
+## The capture (on the PC)
+
+ThinkorSwim serves these chains over RTD, which needs Excel. The capture owns one private
+hidden Excel (`EXCEL.EXE /automation -Embedding`), stops it by process id, and never
+touches an Excel it did not start. It never starts ThinkorSwim, never enters a password and
+places or prepares no order. The server builds its **plan** (`futures_chain.build_plan`),
+so a change of config or of session reaches it without editing a file there: the expiry,
+how to print it, the series to try, the numbers to try them with.
+
+**Which series.** The names are rules, not a table. A series is a root, a month letter
+(`FGHJKMNQUVXZ`) and a two-digit year. The roots, from `[instruments.*]`:
+
+| | Monday to Thursday | Friday | Month-end | Quarterly |
+|---|---|---|---|---|
+| /ES | `E{w}A`, `E{w}B`, `E{w}C`, `E{w}D` | `EW{w}` | `EW` | `ES` |
+| /NQ | `Q{w}A`, `Q{w}B`, `Q{w}C`, `Q{w}D` | `QN{w}` | `QNE` | `NQ` |
+
+`{w}` is the week of the month, 1 to 5. For an expiry the candidates are that weekday's
+root for weeks 1 to 5, always the month-end root (a fifth Monday can also be month-end and
+trade as `EWX26`, not `E5AX26`), and the quarterly root for the expiry's own month and the
+next quarterly month. A name that does not exist is harmless: the capture keeps only
+series whose `DESCRIPTION` states the plan's date, on its own and not as part of another
+(`2 NOV 26` is inside `12 NOV 26`), and that is not `(AM Settled)`.
+
+- **Which future.** The one the contract's own description names (`/ESZ26:XCME`), not the
+  continuous contract and not `shared/futures.py`'s front month, which rolls by chart
+  convention eight days before expiry. A series written on another future is left out.
+- **Which strikes.** Every `strike_step` points (5 for /ES, 10 for /NQ) within
+  `strike_width_pct` (5) of the future's price. A contract that is not listed reads `N/A`,
+  which is normal: /NQ's spacing is uneven, so a healthy chain lists far fewer than it
+  tries (416 of 572 on 2026-10-31, market closed). The ladder is rewritten when the price
+  has moved `recentre_share` (0.5) of the way to its end, because the walls and the flip
+  see only the strikes captured.
+- **Which fields.** `MARK`, `BID`, `ASK`, `VOLUME`, `OPEN_INT`, `IMPL_VOL`, `DELTA`, and a
+  `DESCRIPTION` per series. `N/A`, an empty cell or a non-number is absent, never 0; a row
+  with nothing but zeros is a cell ThinkorSwim has not answered yet and is not sent.
+  `IMPL_VOL` prints a percent (`"12.51%"`) and must carry its sign: a bare number could be
+  either scale, and the wrong one misstates every gamma, so it is absent.
+- **Waiting for a fill.** A written sheet reads `N/A` until ThinkorSwim answers; Excel hands
+  updates over in batches. A sheet is called filled once its count has held for
+  `fill_settle_sec` (5) with at least one value, waiting at most `fill_wait_max_sec` (20).
+- **The clock.** Boundaries are multiples of `interval_sec` (300) since the epoch, so a
+  restart stays on the same clock. The plan is fetched at the start and each time its
+  `valid_until` (the session's end) passes; a failed fetch retries after `no_plan_retry_sec`
+  (60), doubling to `plan_retry_max_sec` (900). A hung ssh is stopped after
+  `ssh_timeout_sec` (60), and a loop with no sign of life for `hang_limit_sec` (600) has its
+  Excel stopped, which frees it to start another.
+- **What it sends.** One document per capture, `{"snapshots": [...], "status": {"reason",
+  "at"}}`, over one ssh (see the API / Developer Reference). Before sending, it leaves out an
+  instrument whose sheet is wholly `N/A` (ThinkorSwim logged out), that read fewer than
+  `min_read_fraction` (0.25) of the contracts tried, that read fewer than
+  `min_fill_fraction` (0.8) of the most that ladder has read, or whose snapshot is over
+  `max_snapshot_kb` (512), and puts the reason in `status`. One instrument failing never
+  blocks the other.
+- **The copy.** A dated workbook per expiry under `Documents\ToS 0DTE\<expiry>.xlsx`, a sheet
+  per instrument (`ES`, `NQ`) with a row per contract per capture appended, written after the
+  send so a workbook that fails never costs a capture. A workbook the operator has open is
+  skipped, never overwritten.
+
+## The adapter
+
+`futures_chain_adapter.build_chain` is the one gate between a snapshot and everything the
+page draws. It never repairs a snapshot into a plausible one: it returns an `AdaptedChain`
+or raises `Refused` with a sentence for the status view. In order:
+
+1. The instrument is configured; the future's price is finite and positive; the capture
+   time is a time.
+2. **Time left** (below), refused at or after the session's close.
+3. Each series' `DESCRIPTION` is parsed (`futures_chain.parse_description`) and must state
+   this snapshot's expiry, the configured multiplier, the series name and an underlying that
+   starts with `/` and the instrument's root and equals the one the price was read from;
+   a series marked `(AM Settled)` is excluded. A series that fails is dropped and logged
+   while another passes; none left is refused. `EXPIRATION_DAY` is not used: it reads a day
+   later than the description.
+4. Rows are de-duplicated on (series, side, strike) and must read at least one value.
+5. **Some contract must have open interest above zero**, or every strike would publish
+   zero, which reads as a real flat reading. The zeros of other contracts stay.
+6. **Parity.** At the strike nearest the future (looking at the nearest `parity_strikes`, 5)
+   with both a call and a put priced (the mark, else the bid-ask midpoint), the future the
+   options imply, `K + call - put`, must be within `parity_limit_pts` of the price read (15
+   points for /ES, 60 for /NQ). Otherwise the price is wrong and every strike's gamma would
+   shift with no visible error. No readable pair is not a disagreement: the snapshot goes
+   through, and the gap is recorded as `None`.
+7. Counts are scaled (below), gamma is calculated per contract, and the chain is laid out as
+   Schwab lays out its own (one expiry key, `YYYY-MM-DD:0`, `daysToExpiration` 0,
+   `callExpDateMap` and `putExpDateMap`), so `GammaEngine`, `flow_skew` and `iv_analysis`
+   read it unchanged. `atm_iv` stays empty on these rows: `extract_atm_iv` reads only DTE 7 to 60.
+8. **Some contract must have a gamma**, or every strike would publish zero.
+
+`FuturesContractRow` fixes the shapes first: a price or count below zero is absent, the
+strike must be positive, and every field passes `_reading` (finite, or `None`).
+
+## Time left and settlement
+
+```
+hours_left = time_to_expiry_years(captured_at, expiry) · 365 · 24
+```
+
+`time_to_expiry_years` is the tier's one helper (`options_svc/expiry_time.py`): real elapsed
+time from the capture to **16:00 America/New_York on the expiry date**, which is 15:00
+Central, over a 365-day year. Every series kept in a snapshot shares that instant, because a
+morning-settled series (the description says `AM Settled`) has already expired during the
+session and is excluded by rule. The adapter refuses a capture at or after the session's
+close (`[session] close_ct`, 15:00 Central), and one whose hours are not finite and positive.
+
+⚠ `close_ct` and the helper's 16:00 New York are two statements of one instant. `close_ct`
+moves the session window and the refusal; **it does not move the hours**, which always come
+from the helper. If `close_ct` is edited, the two disagree.
+
+The engine takes it as an optional argument. `GammaEngine.calc_all_from_chain(..., hours_left=)`
+replaces the clock formula (`dte · 24` plus the hours to 15:00 when that is positive, which
+is wrong overnight: at 18:00 Central on the evening before expiry it returns 24 hours where
+21 remain) with `T = max(hours_left / (365 · 24), 1e-6)`, for GEX, charm, vanna, the
+calculated delta and the 0-DTE projection alike. `RawMinute.hours_left` carries it through
+`derive_minute` for a symbol that has one. Every other caller passes nothing and prices as
+before. `daysToExpiration` is stamped 0 on every contract, including an evening capture whose
+expiry is tomorrow, so the engine's 0-DTE slice and its nearest-expiry search find the one
+expiry; `dte` says nothing to a reader here.
+
+## Gamma, as coded
+
+ThinkorSwim's own `GAMMA` for these contracts is rounded to two decimals and reads `0.0`, so
+gamma is calculated per contract from that contract's own implied volatility
+(`futures_chain_adapter._gamma`):
+
+```
+σ     = IV% / 100
+T     = hours_left / (365 · 24)
+d1    = ( ln(F / K) + ½ σ² T ) / ( σ √T )
+gamma = φ(d1) / ( F · σ · √T )           φ(x) = e^(−x²/2) / √(2π)
+```
+
+`F` is the future's price, `K` the strike. This is Black-76 gamma with **no carry**: the
+discount factor `e^(−rT)` is left out, which at under a day to expiry changes the result by
+about one part in ten thousand at most. A contract with no usable volatility (absent, not
+above zero, or so small that `σ√T` underflows) has **no gamma**: `None`, never `0.0`. The
+`volatility` field handed on is the percent, or `0.0` when unusable, which is the engine's own
+skip for charm and vanna.
+
+The engine's per-strike value is then the stock one, with the future as the spot
+(`gamma_tool.py`):
+
+```
+GEX_strike = gamma · weight · 100 · F² · 0.01      calls positive, puts negative
+```
+
+`weight` is the **scaled open interest**. Charm and vanna are the engine's Black-Scholes with
+the project rate on the future's price (carry is not removed from them, so they are the less
+exact of the four here); delta is ThinkorSwim's, and the engine's calculated delta is used
+only where it reads 0 or is absent. The dealer sign (long calls, short puts) is carried over
+from the index formula; futures-option dealers may be positioned differently, so the page's
+meaning for these two is less tested than for `$SPX`.
+
+## Contract size
+
+`gamma_tool.py` and `forward_grid.py` assume 100 per contract in dozens of lines, and an
+option on /ES is 50 a point, on /NQ 20. The adapter scales each contract's open interest and
+volume by `multiplier / 100`, 0.5 for /ES and 0.2 for /NQ (an absent count stays absent),
+before the engine sees them:
+
+```
+weight · 100 · (multiplier / 100)  =  weight · multiplier
+```
+
+so every dollar figure the engine produces (GEX, charm, vanna, delta exposure, and the
+stored `prem`, since scaled volume times mark times 100 is the true figure) is right, and
+`gamma_tool.py` is **not edited for size**, which guarantees no existing symbol moves.
+Consequence: a contract **count** read downstream is scaled (100 /ES contracts read as 50).
+The only places that printed one were on the Flow tab, which these two do not offer.
+
+## Cadence
+
+| What | When |
+|---|---|
+| A snapshot | every `interval_sec` (300 s) on the epoch clock, from `[session] open_ct` (17:00 Central the evening before the expiry) to `close_ct` (15:00 Central on it). Expiries are weekdays, so Monday's opens Sunday evening. CME holidays are not modelled: a holiday is found by the contracts not returning data |
+| One ssh per capture | `futures_chain_cli.py ingest`; plus `plan` at the capture's start and as each session's end passes |
+| The consumer | on arrival; the capture's own minute is the stored row's minute |
+| The page's snapshot | rebuilt when a capture arrives for the symbol on screen, on the page's 120-second timer and at page load; the label is worked out again every second against the clock |
+| The watch | each `options_svc` scheduler tick (30 s), with no NYSE gate |
+
+The history keeps **one row per capture**. The page draws one column per row and repeats a
+row only to `fill_step_sec` (300) and never past one interval, so at the shipped value
+nothing is repeated. A lower value repeats rows and makes a heavier page: at a 100-second
+step every repaint of a whole session (about 790 columns) blocked the browser for 4.5
+seconds, past NiceGUI's 2 second ping, measured at build. Two captures further apart than
+`outage_after_sec` (450) have an outage between them, drawn blank. 450 is above the interval
+because a capture can be a minute late: rows are floored to the minute and a read can cross
+one, giving gaps of 240 and then 360 seconds at a 300-second interval.
+
+## What the server keeps, and when it refuses
+
+`futures_chain_feed` ends every snapshot one of three ways, and says which per instrument in
+`cache:options:futures_chain_status`:
+
+| End | When | Setting |
+|---|---|---|
+| **Dropped without comment** | not newer than the stored capture (a late one never replaces a newer one) | |
+| **Refused, with a reason** | the capture time is not a time; older than `max_age_sec` (900), which is also the replay guard; stamped further ahead than `max_future_skew_sec` (30); any adapter refusal above; fewer than `min_fill_fraction` (0.8) of the contracts the capture before it read, in the same session (see below); the store could not take it | the key named |
+| **Written** | the five views into `gex_history.db` at the capture's own minute; the chain into `cache:options:futures_chain:<symbol>`; and the same into `…:frozen` while the capture is at least `frozen_before_expiry_min` (60) before the close | |
+
+The half-filled test compares with the previous capture's count **read from the status
+view in Redis, not module state**, so a restart cannot make the next half-filled capture look
+like the first. The operator can narrow the strike width on purpose, which lowers the count
+for good; a half-filled sheet does not read the same short count twice and a narrowed ladder
+does, so a capture that repeats the last refused count is taken.
+
+`frozen_repeats` (3) captures in a row with the same price, volume and open interest are
+reported as a stopped feed on the entry's reason, though they arrive on time.
+
+## The session, storage and what the page shows
+
+- **A session opens the evening before its expiry** and so spans two calendar dates.
+  `futures_chain.session_expiry(now)` names the session a moment belongs to (the daily gap
+  names the next day's, a weekend rolls to Monday); `session_bounds(expiry)` is its
+  `(opens, ends)`; `gex_history_db.SessionSpan` lets the history loaders take a span where
+  they took a date. `compute.gamma_snapshot(session=)` reads the whole span, with no 08:30 to
+  15:00 window, prices the chain at the capture's own time and its `hours_left`, and fills
+  the rows to the page's columns.
+- **The purge and the Gamma Archive leave these symbols out** (`symbol NOT LIKE 'FOP.%'`).
+  The purge counts distinct calendar dates, so a Sunday evening would cost every other
+  symbol a session; the archive closes a date at the stock session's stop. The feed keeps
+  the live store's 5 sessions and no archive.
+- **Which capture is shown** (`futures_chain_snapshot`): while the newest capture's session
+  has not ended, the newest, marked **stale** when it is older than `stale_after_sec` (660) or
+  `frozen_repeats` captures read identically, numbers kept; after that, the frozen capture
+  (the last taken far enough before expiry that the closing spike is not left on screen),
+  marked **frozen**, and also stale when the next session is open with nothing yet; with
+  neither, nothing. A stale or frozen payload drops its projected afternoon.
+- **What is not offered.** **Term**: the feed holds one expiry, so there is nothing to
+  compare (`with_term=False`). **Flow**: it prints contract counts, which the adapter scales, which is why
+  it was left out; the feed's minutes are also written with no `on_chain` hook (tally,
+  traded premium, unusual activity, HIRO), so none of those exist for these symbols. **Explain**,
+  **Analyze** and **Briefings** fetch from Schwab or read the stock indexes. Net Prem stays: it
+  does not depend on the symbol.
+- **Open interest is thin, and thinner on /NQ.** On the Monday ladder sampled on 2026-10-31,
+  /NQ held 3,967 contracts of open interest against 19,527 of volume, and open interest
+  cannot include 0-DTE positions opened and closed the same day. Its walls may rest on very
+  few contracts, and a listed /NQ contract can read `N/A` for `OPEN_INT`. The weighting is
+  open interest, as for every symbol; it has not been compared with volume.
+
+## The stopped-capture alert and `/health`
+
+`futures_chain_watch.decide` is pure over the status view and the alert state. During the
+CME session an instrument is **stopped** when its newest accepted capture is older than
+`stale_after_sec` (counted from the later of the capture and the session's open, so a feed
+that stopped on Friday gets no alert at the Sunday open), or its last `frozen_repeats`
+captures read identically in this session; one with refusals and no accepted capture is
+stopped once the session has been open that long. One message goes through the `system`
+category when it stops, the same message at most every `alert_repeat_min` (240) minutes, and
+one when it resumes; none outside the session or for an instrument with no status entry at
+all. The state is in `cache:options:futures_chain_alert`, saved only after a message was
+sent, so a restart does not repeat one and a send that raised is tried again 30 seconds on.
+`/health` reports the feed under `futures_chain` and never changes `up`: a PC that is off is
+not a failed options service.
+
 # Known issues
 
 Documented defects a maintainer should know about before trusting a number. These
@@ -4530,6 +4815,15 @@ drawn cone.
 `$SPX` and `$NDX` report zero open interest overnight, which yields all-zero GEX
 grids and arbitrary wall levels. Index gamma is only meaningful during the session.
 
+## /NQ open interest is thin
+
+The /ES and /NQ feed weights every figure by open interest, as every symbol is, and /NQ's is
+thin: on the Monday ladder sampled on 2026-10-31 the whole /NQ ladder held 3,967 contracts
+of open interest against 19,527 of volume, and a listed contract can read `N/A` for it. Open
+interest cannot include 0-DTE positions opened and closed the same day, so /NQ's walls may
+rest on very few contracts. The weighting has not been compared with volume. See *The /ES and
+/NQ chain feed*.
+
 ---
 
 # Constants Appendix
@@ -4598,6 +4892,7 @@ the source; this table is a summary of them.
 | market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); report summary re-read when the published market report changes (a stat of `deploy/site/reports/latest.html` + `latest.txt` per poll) — no Claude call. |
 | news_svc | Three branches, launched every **30 s** tick (`TICK_S`) as keyed background tasks, so a slow one delays only itself and one still running is skipped, never doubled. **feeds**: every feed polled every **2 min** 08:30–15:00 CT (`[collector] rth_poll_min`), **5 min** in the extended sessions 06:30–08:25 and 15:00–15:15 CT (`eth_poll_min`), **30 min** otherwise on a trading day (`offhours_poll_min`) and **30 min** at weekends and holidays (`weekend_poll_min`), counted from the END of the last poll; nothing polls faster than **60 s** (`MIN_INTERVAL_S`). **calendar**: every tick, fetching only the sources whose own `refresh_min` is due (Fed 60 min, BLS / BEA / FRED calendar 720, Nasdaq 240, values 240). **watch**: every tick, fetching only a series whose release just passed — every **2 min** for up to **60 min**. All in `config/news.toml`, editable in Settings. One cycle of each at a time: a Refresh during one is skipped. |
 | blog_svc | The loop wakes every **30 s** (`TICK_S`) to beat its heartbeat and re-read the interval. **At start**: repair the store, rebuild every entry page on the site, publish the two list views. **Then every 30 min** (`[site] republish_min` in `config/blog.toml`, 1 to 1440, counted from the END of the last pass): the site rebuild again, which rewrites only what differs from the store, and the two views again. A pass that fails is retried at the next wake. Everything else is on demand, when the Blog page sends a command. |
+| /ES and /NQ chain feed | Not a service: a capture on the operator's PC, every **300 s** on the epoch clock (`[capture] interval_sec` in `config/futures_chain.toml`) from **17:00** Central the evening before an expiry to **15:00** Central on it, then one ssh to vps2 per capture. `options_svc` handles each on arrival (`cmd:futures_chain`) and its **stopped-capture watch** runs each 30 s scheduler tick, with no NYSE gate. No Schwab or proxy call. See *The /ES and /NQ chain feed*. |
 
 Some scheduled jobs are **not** on any service's loop — they are systemd timers,
 generated from `config/sessions.toml` by `deploy/systemd/generate_units.py`, so moving

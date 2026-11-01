@@ -71,6 +71,8 @@ after release), against the old clocked cadence's ~18/day.
 | Scanner day-union merge + publish | options_svc | event-driven, every rescan | pure `merge_day_signals` → `cache:options:scan_day` (date-scoped, CT-pinned, capped 2000/list). No API calls; `cache:options:scan` stays live-only for the driver |
 | EOD digest push | options_svc | 1×/day ~15:10 CT | Telegram/Discord/SMS |
 | Process supervision | systemd units | `Restart=on-failure` | restarts a dead process, storm-capped at 5 per 5 min then left down and logged |
+| /ES and /NQ chain capture | the operator's PC (`tools/tos_capture/`), not a service | every **300 s** on the epoch clock (`config/futures_chain.toml` `[capture] interval_sec`), from 17:00 CT the evening before an expiry to 15:00 CT on it (expiries are weekdays, so Sunday evening to Friday afternoon) | No Schwab or proxy call: ThinkorSwim through a private hidden Excel, then one ssh to vps2 per capture (`tools/futures_chain_cli.py ingest`). One more ssh (`plan`) when the capture starts and each time a session's end passes; a failed one retries after 60 s, doubling to 900 s |
+| /ES and /NQ stopped-capture watch | options_svc | each scheduler tick (30 s), no NYSE gate | one status read; a phone alert only when a capture stops during the CME session, repeated at most every 240 min (`[capture] alert_repeat_min`) |
 
 ## 4. Browser-side polling (webgui — Redis reads only)
 

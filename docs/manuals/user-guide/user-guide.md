@@ -799,7 +799,8 @@ related measures.
 
 **Controls:**
 
-- A **Symbol** dropdown (default `$SPX`; the list is the collected watchlist).
+- A **Symbol** dropdown (default `$SPX`; the list is the collected watchlist, plus
+  **/ES** and **/NQ** once you switch them on: see *[/ES and /NQ](#es-and-nq)*).
 - **Refresh**, an **Explain** button, an **Analyze** button and a **Briefings**
   menu, all on the page's header line, plus a **Next refresh** countdown in the
   strip under the charts. Explain, Analyze and Briefings' items each open their
@@ -1052,6 +1053,141 @@ doesn't re-fetch.
 > briefings run on your Claude subscription** through Claude Code on the server, and
 > fall back to the API only when that fails. The running count of billed API calls is
 > on the **Settings** page under *API usage*.
+
+### /ES and /NQ {#es-and-nq}
+
+Dealer Positioning can also show the two stock-index futures, **/ES** and **/NQ**,
+worked out only from their own options expiring that session. **They ship hidden.**
+Until you turn them on they are not in the Symbol dropdown and nothing on the page
+changes.
+
+**Turning them on.** Settings → Configuration → **/ES and /NQ chain feed** →
+**Offer /ES and /NQ in the list** (`show_in_dropdown`, shipped off). Restart the options
+service and the web app from System Status.
+
+**Where the numbers come from.** Schwab serves no futures-option chains, and these two
+are never worked out from `$SPX` or `$NDX`, not even when the feed is down. A capture
+program on **your PC** reads the chains out of **ThinkorSwim** through Excel and sends
+each one to the server. It takes a snapshot every **300 seconds** (**Take a snapshot
+every**, `interval_sec`), from **17:00** Central the evening before an expiry
+(**Opens**, `open_ct`) to **15:00** Central on it (**Expires**, `close_ct`). Monday's
+options therefore start on Sunday evening, and there is no capture from Friday afternoon
+to Sunday evening, nor between an expiry and the next open (15:00 to 17:00 as shipped).
+
+> **The PC has to be on, awake, online and logged in to Windows, and ThinkorSwim has to
+> be running and logged in.** The capture never starts ThinkorSwim and never types your
+> password. If you log out of ThinkorSwim, or the PC sleeps, capture stops until you are
+> back; the page keeps the last numbers and says how old they are. The feed is a target
+> for round-the-clock coverage, not a promise of it.
+
+**Reading it.**
+
+- **Gamma is calculated, not copied.** ThinkorSwim's own gamma for these contracts rounds
+  to zero, so each contract's gamma is worked out from its own implied volatility. A
+  contract with no usable volatility has no gamma, and a snapshot with none at all is
+  refused rather than drawn as a flat chart.
+- **Dollars are right, counts are not shown.** Open interest and volume are scaled to each
+  future's dollars a point (`multiplier`, shipped 50 for /ES and 20 for /NQ), so the exposure dollars are true. A raw contract count would not be, which
+  is why Flow, which prints counts, is not offered for them.
+- **Open interest is thin, and thinner on /NQ.** Open interest cannot include 0-DTE
+  positions opened and closed the same day, so a wall can rest on very few contracts.
+  Treat /NQ's walls with more caution than `$SPX`'s.
+- **Only the strikes captured are seen.** The capture reaches a share of the future's price
+  each side (**reach each side of the future**, `strike_width_pct`, shipped 5 percent for
+  both). The walls and the flip are found among those strikes only, and the line above the
+  charts names the range.
+- **One column is one capture.** The heat map has a column per capture (**One column on the
+  page every**, `fill_step_sec`, shipped 300 seconds), and its time runs through the
+  night. The projected afternoon is drawn only from a current capture.
+- **Not offered:** Flow, Term, Explain, Analyze and Briefings (the last three read the stock
+  indexes or fetch from Schwab). **Net Prem** stays and is unrelated to the symbol. In the
+  Delta view the hedge panel may say *hedge n/a for this capture*.
+
+**The line above the charts.** It replaces the stock-market clock and the refresh
+countdown, and works out its state against your clock every second, so it keeps ageing
+even when nothing new arrives.
+
+| It says | It means | What to do |
+|---|---|---|
+| *Captured 14:55 Central, 1 minute ago. Strikes captured 7,220.00 to 7,980.00* | **Current.** | Nothing. |
+| *Stale: captured 21 minutes ago*, usually with a cause after it | The newest capture is older than **Call a symbol stale after** (`stale_after_sec`, shipped 660 seconds, eleven minutes), **or** the last **Frozen after this many identical captures** (`frozen_repeats`, shipped 3) read exactly the same values. The numbers stay as they were; no *now* line and no projected afternoon is drawn from them. | The alert's reasons below. |
+| *Last session, as of 14:00 Central on Monday, November 2* (sometimes *the heat map runs to 14:55*) | **Frozen.** The session has ended. The strike bars show the last capture taken at least **Freeze the charts this long before expiry** (`frozen_before_expiry_min`, shipped 60 minutes) before the end, so the closing spike in gamma is not left on screen all weekend. | Nothing. It clears when the next session's first capture arrives. |
+| the same, then *No capture has arrived for this session* | The next session is open and nothing has come. | The alert's reasons below. |
+| *No capture of /ES to show yet. Its chain comes from ThinkorSwim on the PC, not from Schwab.* | The server holds no capture at all. | Install and start the capture (below). |
+| *No gamma could be calculated for /ES* | The last capture carried no usable implied volatility. | Wait one capture. If ThinkorSwim shows no volatilities, it is a ThinkorSwim data problem. |
+| a blank stretch on the heat map and hedge panel, labelled **No capture** | Captures were further apart than **Draw an outage when captures are apart by over** (`outage_after_sec`, shipped 450 seconds). It is drawn blank on purpose: smooth shading across five hours would read as data. | Nothing. The Smooth setting does not reach across it. |
+
+A capture that arrives a minute late is not an outage: 450 seconds is above the 300-second
+interval for that reason.
+
+**The phone alert.** When capture stops during the session, one message goes out through
+**Server alerts** (Settings → General → Push notifications), titled *"/ES chain capture has
+stopped"* (or /NQ). It says how long ago the last good capture was, the reason the server
+refused the latest one, and anything the PC reported itself. It is sent when the newest
+accepted capture is older than `stale_after_sec`, or `frozen_repeats` captures in a row
+were identical. It is repeated no more often than **Repeat the stopped-capture alert at
+most every** (`alert_repeat_min`, shipped 240 minutes), and one message, *has resumed*,
+follows the first good capture. It stays quiet in the daily gap and at weekends, for
+`stale_after_sec` after a session opens, and for a future the PC has never tried to
+capture (so nothing is sent before you install it).
+
+**What to do for each reason.** The reason is at the end of the alert, and at the end of
+the line above the charts. The wording is the app's.
+
+| Reason (the start of it) | What it means and what to do |
+|---|---|
+| No reason, only *The last good capture was ... ago* | Nothing is reaching the server: the PC is off, asleep, offline, or the capture is not running, or `ssh vps2` from the PC is failing. Check the PC, then `%LOCALAPPDATA%\TosCapture\capture.log`. |
+| *ThinkorSwim is not running on the capture PC.* | Start ThinkorSwim and log in. The capture resumes by itself at its next snapshot. |
+| *Excel did not start on the capture PC.* | Check that Excel opens normally; restart the PC if not. The capture tries again at each snapshot. |
+| *every price cell reads N/A* or *every contract reads N/A; ThinkorSwim may be logged out* | Log in to ThinkorSwim. |
+| *read N of M contracts tried; not sent*, or *read N contracts against M earlier; not sent* | The sheet has not filled, or ThinkorSwim lost its data. The capture rewrites the sheet. Wait one snapshot; if it repeats, check ThinkorSwim's connection. |
+| *Refused: the capture read N contracts, fewer than 80 percent of the M before it ...* | Shown for one snapshot. The limit is **Least share of the most read lately** (`min_fill_fraction`, shipped 80 percent). If the next capture reads the same N it is accepted: a half-filled sheet does not read the same short count twice, a narrowed ladder does. |
+| *The prices and counts are not changing: the last N captures read exactly the same values* | ThinkorSwim may have stopped updating. Look at its quotes; log out and in if they are frozen. |
+| *Refused: parity: the options imply X but the future reads Y* | At the money, a call minus a put plus the strike should land on the future. Further apart than **Put-call check may miss by** (`parity_limit_pts`, shipped 15 points for /ES and 60 for /NQ) means one of the two prices is stale. Wait a snapshot; if it repeats, compare the future's quote in ThinkorSwim with its options. |
+| *Refused: no contract has a usable implied volatility* | No gamma can be calculated. Overnight volatilities can be missing. Wait; it is a data problem if ThinkorSwim shows none. |
+| *Refused: no contract has open interest above zero* | Usually a brand-new expiry on its first evening. It clears when a contract prints. |
+| *Refused: no series passed its check* or *no series states 2 NOV 26* | The contract names the capture tried do not describe that expiry. CME holidays are not built in, so a holiday week shows this. Wait for the next session; if it persists on a normal day, it is a fault to investigate. |
+| *Dropped: the snapshot was N old when it arrived* | The limit is **Drop a snapshot older than** (`max_age_sec`, shipped 900 seconds). A backlog after an outage is thrown away on purpose. Nothing to do. |
+| *Dropped: the snapshot is stamped N ahead of the server's clock* | The PC's clock is wrong (limit **Refuse a snapshot stamped ahead by**, `max_future_skew_sec`, shipped 30 seconds). Set the PC's clock. |
+| *the snapshot is N KB, over the limit* | The limit is **Largest snapshot** (`max_snapshot_kb`, shipped 512). Lower **reach each side of the future**. |
+| *The snapshot could not be read: it does not match the agreed layout* | The capture on the PC and the server are out of step. Run the installer again on the PC. |
+| *the chain could not be written to the store*, or *could not be turned into gamma figures*, or *could not be checked (see the options service log)* | A fault on the server, not the PC: read the options service log. |
+
+**Installing the capture on the PC.** You need: ThinkorSwim installed and logged in, Excel
+installed, a copy of this project on the PC, and `ssh vps2` working from that PC without a
+password prompt (the capture runs it unattended, with `BatchMode`).
+
+1. In PowerShell, from the project folder:
+   `powershell -ExecutionPolicy Bypass -File tools\tos_capture\install_tos_capture.ps1`
+2. It copies the capture to `%LOCALAPPDATA%\TosCapture`, so changing branches in the
+   project cannot alter a running capture, and registers a scheduled task named
+   **ToS 0DTE Capture**. The task starts at logon, runs only while you are logged on (so
+   ThinkorSwim and Excel share your desktop), holds no password, and starts the capture
+   again if it has ended.
+3. Start it now with `Start-ScheduledTask -TaskName "ToS 0DTE Capture"`, or sign out and in.
+   The first possible session is the Sunday evening before a Monday expiry.
+4. Run the installer again after the script changes. A running capture stays on the old
+   code until the next logon, or until you run `Stop-ScheduledTask` and
+   `Start-ScheduledTask`.
+
+What it leaves on the PC: the log, `%LOCALAPPDATA%\TosCapture\capture.log`, and a dated
+workbook per expiry under `Documents\ToS 0DTE\`, with a sheet per future (a copy of what
+was captured). If you have that day's workbook open, that capture's rows are skipped, never
+overwritten. The capture works in an Excel of its own that has no window and never touches
+the Excel you use.
+
+**Uninstalling.** There is no uninstall script. In PowerShell:
+`Stop-ScheduledTask -TaskName "ToS 0DTE Capture"`, then
+`Unregister-ScheduledTask -TaskName "ToS 0DTE Capture" -Confirm:$false`, then delete
+`%LOCALAPPDATA%\TosCapture`. Your workbooks in Documents are left alone. If an Excel with
+no window is still listed in Task Manager afterwards, it is the capture's; end it.
+
+> **After the first Windows logoff, check Excel once.** Open Excel, then **Options →
+> Advanced → General**, and make sure **Ignore other applications that use DDE** is
+> **not ticked**. The capture sets that on its own hidden Excel so a file you double-click
+> opens in yours; Excel would save the setting into your own options if that copy ever
+> exited cleanly, and a logoff is the one way it might. Ticked, your double-clicked files
+> would open as an empty window.
 
 ## Opportunity Board
 
@@ -3572,7 +3708,7 @@ A health board for the whole stack.
 
 ### Server alerts — being told when you are not looking
 
-The health board only helps while it is open. Three things now reach your phone
+The health board only helps while it is open. These now reach your phone
 on their own, through the **Server alerts** row under Settings → General → Push
 notifications (Discord and Telegram, both ticked as shipped):
 
@@ -3580,6 +3716,7 @@ notifications (Discord and Telegram, both ticked as shipped):
 |---|---|
 | **A part of the app is down and staying down** | A service crashed and used up its automatic restarts. One crash that restarts cleanly sends nothing. |
 | **A scheduled job failed** | The nightly backup, the end-of-day report or another timed job exited with an error. |
+| **/ES or /NQ chain capture has stopped** | Only once the /ES and /NQ feed is installed and has tried a capture: during its session, no good capture for `stale_after_sec` or a run of identical ones. Repeated at most every `alert_repeat_min`, and followed by *has resumed*. See *[/ES and /NQ](#es-and-nq)* under Dealer Positioning. |
 | **The Schwab sign-in is about to run out** | Checked every day at 07:30 CT, weekends included. Sent when 48 hours or fewer are left, when it has already expired or been rejected, and when the check cannot read the answer. |
 
 The Schwab sign-in lasts 7 days and only you can renew it (**Re-authorize** on

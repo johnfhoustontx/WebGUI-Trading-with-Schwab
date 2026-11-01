@@ -1386,3 +1386,125 @@ Settings → API usage is a count of BILLED calls; a new call site must pass its
 or it will count subscription calls as spend. ⚠ The options_svc conftest makes
 `claude_cli._default_run` raise — the subscription is real money too, and the CLI and
 token ARE installed on the prod box.
+
+## The /ES and /NQ chain feed has its own names, its own session and no Schwab
+
+The rules are in CLAUDE.md ("The /ES and /NQ chain feed"). This is what stands behind
+each, so that a change to one does not undo the reason for it. Design:
+[the chain feed design](../plans/2026-10-31-futures-0dte-chain-feed-design.md) (what was
+measured on 2026-10-31, with the market closed); plan:
+[the build plan](../plans/2026-10-31-futures-0dte-chain-feed-plan.md).
+
+**Why `FOP.ES`, and why `SYMBOL_RE` is not touched.** `shared.symbols.SYMBOL_RE` refuses
+`/` on purpose: a ticker becomes part of a Redis key name (`cache:options:dossier:<SYMBOL>`)
+and the rule guards the public pages. `ES` alone would pass it, and is Eversource. So the
+internal names carry a prefix no ticker has, `shared.futures_chain._feed()` admits a
+configured symbol only if `clean_symbol` returns it unchanged, and the page's `/ES` is a
+label, looked up through `display_symbol`, never a value to store or pass on.
+
+**Why gamma is calculated.** ThinkorSwim's `GAMMA` for these contracts arrives rounded to
+two decimals, so /ES and /NQ read `0.0` (a Double, and the chain window shows 0 too). The
+rounding is the only reason: /CL contracts returned 0.11 and 0.06 on the same link, and a
+hand calculation from implied volatility, price and time left gave about 0.109 and 0.058.
+That is a check on two strikes, not a validation. `futures_chain_adapter._gamma` therefore
+fills the chain's gamma field itself and the engine, which has no fallback, is unchanged.
+A contract with no usable implied volatility has no gamma: `None`, never `0.0`, and a chain
+where no contract has one is refused, because a gamma of zero at every strike would read
+as a real flat finding.
+
+**Why the engine took one optional argument.** `GammaEngine.calc_all_from_chain` works out
+the time left as `dte * 24` hours plus the hours to the 15:00 close when that is positive.
+At 18:00 Central on the evening before expiry (`dte` 1, the close already behind the clock
+hour) that returns 24 hours where 21 remain, which moves charm, vanna and any
+calculated delta. `hours_left` (default `None`) replaces that formula for a symbol that
+supplies its own; `RawMinute.hours_left` carries it through `derive_minute`, and only the
+feed fills it. Every other call passes nothing and prices exactly as before.
+`gamma_tool.py` is **not** edited for contract size: the adapter scales open interest and
+volume by `multiplier / 100`, which makes every downstream dollar figure right (`prem` too,
+since scaled volume times mark times 100 is the true figure) and guarantees no existing
+symbol moves. The price of that is that a contract count read downstream is scaled. The two
+places that printed one (the Flow tab's summary and panel) go with the Flow tab, which these
+symbols do not offer.
+
+**Why a session is not a date.** One session is one expiry. Trading opens for it at 17:00
+Central the evening before (so Monday's opens on Sunday) and it ends at 15:00 on the day.
+Anything keyed on the calendar date of a capture puts a Sunday evening in Sunday's session.
+`session_expiry(now)` names the session a moment belongs to (the daily gap names the next
+day's, a weekend rolls to Monday), `session_bounds(expiry)` is its `(opens, ends)` in epoch
+seconds, and `gex_history_db.SessionSpan` lets the history loaders take a span where they
+took a date. The shared `_history_rows_incremental` memo holds ONE date for every symbol, so
+a span bypasses it.
+
+**Why the purge and the archive skip `FOP.%`.** `_distinct_session_dates` counts distinct
+calendar dates to keep five sessions. A Sunday-evening capture makes a date no stock symbol
+has, and the purge would then delete the oldest session of every existing symbol to make
+room. The archive closes a day at the stock session's stop, so the evening rows would be
+missed and a Sunday would never close. Both filter `symbol NOT LIKE 'FOP.%'`
+(`FEED_SYMBOL_LIKE`; the module takes no `shared` import, so the pattern is restated and
+`test_cross_tier_mirrors.py` pins it against every feed symbol and the config's required
+prefix). The cost is that the feed has the five sessions of the live store and no archive;
+the oldest kept feed session also loses its evening rows to the purge's cutoff (local
+midnight of the oldest kept date). Reconsider both before the feed is offered to the public.
+
+**The refusals, and why each exists.** `build_chain` never repairs a snapshot into a
+plausible one; it refuses with a sentence the status view shows. Each exists because the
+alternative publishes a number that looks fine:
+- A series whose own `DESCRIPTION` does not state the snapshot's expiry, multiplier,
+  underlying or series name is dropped; none left, refused. No hand-kept expiry table
+  exists. A series marked `(AM Settled)` has expired before the session and is excluded by
+  rule. `EXPIRATION_DAY` reads a day later than the description and is not used.
+- No contract above zero open interest anywhere: every strike would publish zero. A
+  brand-new expiry with no open interest on its first evening is therefore refused until
+  a contract prints some.
+- Parity: at the strike nearest the future with both a call and a put marked, `K + call -
+  put` must land within `parity_limit_pts` of the future read. Otherwise the future's price
+  is wrong and every strike's gamma would shift with no visible error. No readable pair
+  (overnight quotes go missing) is not a disagreement; the snapshot goes through.
+- A capture at or after the close, from the future, older than `max_age_sec`, or not newer
+  than the stored one is not used. The age gate is also the replay guard: a consumer group
+  created at id 0 is handed the stream's whole history and none of it may read as current.
+- A capture that reads fewer than `min_fill_fraction` of the contracts the capture before it
+  read is a sheet that had not filled, and is refused. The operator can narrow the strike
+  width on purpose, which lowers the count for good, so a capture that repeats the last
+  refused count is taken: a half-filled sheet does not read the same short count twice.
+  The comparison reads the previous count from the status view in Redis, not module state,
+  because a service restart must not make the next half-filled capture look like the first.
+- `frozen_repeats` captures in a row with the same price, volume and open interest are
+  reported as a stopped feed, though they arrive on time.
+
+**Why the page draws one column per capture.** The heat map makes one category-axis column
+per stored row. The design first repeated each row to one column a minute. Measured at
+build on synthetic chains (264 captures, 365 strikes): a 60-second step gave 3.19 times a
+regular `$SPX` session's payload, a 120-second step 1.93 times, and every repaint at about
+790 columns blocked the browser 4.5 seconds, past NiceGUI's 2 second ping (one reload lost
+a symbol pick). So `fill_step_sec` ships at 300, the interval, and no row is repeated. The
+outage rule follows: a read that crosses a minute boundary gives gaps of 240 and then 360
+seconds, which is a late capture and not a missing one, so `outage_after_sec` ships at 450.
+Rows are floored to the minute when stored, so a stored gap can be a minute off the real one.
+
+**Why the capture never touches the operator's Excel.** ThinkorSwim serves these chains
+over RTD and RTD needs Excel. With no Excel open, creating `Excel.Application` through COM
+failed (`0x80080005`, DCOM event 10010), and starting `EXCEL.EXE /automation -Embedding`
+first let it succeed; `Quit()` also left hidden copies behind, and once crashed Excel on its
+way out, after which Windows restarted it as a visible `/restore` window on the desktop. So
+the script starts its own copy, holds the process handle, stops it by process id only after
+checking the name, start time and command line, and never calls `Quit()`. It sets
+`IgnoreRemoteRequests` on that copy so a file the operator double-clicks is not handed to
+it; Excel would save that setting into the operator's own options on a CLEAN exit, which is
+why the copy must never exit cleanly. Windows logoff is the one path that might let it:
+after the first logoff, the operator checks Excel, Options, Advanced, General, that
+"Ignore other applications that use DDE" is unticked.
+
+**Left open on purpose.**
+- Open interest is thin, and more so on /NQ. The sampled Monday ladder held 3,967 contracts
+  of open interest against 19,527 of volume, and open interest cannot include 0-DTE
+  positions opened and closed the same day. /NQ's walls may rest on very few contracts.
+  The weighting stays open interest, as for every symbol, until a few sessions are compared
+  against volume and the operator decides.
+- The dealer sign (long calls, short puts) is carried over from the index formula. Futures
+  option dealers may be positioned differently.
+- The adapter stamps `daysToExpiration` 0 on every capture, including an evening one whose
+  expiry is tomorrow, so `dte` says nothing here and no page text is built from it.
+- CME's open and expiry times, the fifth-Monday and Friday series names beyond those
+  sampled (`QN1` and `QN2` read `N/A` at one strike), and behaviour in a live market,
+  across a logoff and from the scheduled task, were not measured.

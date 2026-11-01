@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-24</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-31</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -94,7 +94,10 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </li>
 <li><a href="#per-service-reference">Per-Service Reference</a><ul>
 <li><a href="#sentiment-service-8210">Sentiment service — :8210</a></li>
-<li><a href="#options-service-8211">Options service — :8211</a></li>
+<li><a href="#options-service-8211">Options service — :8211</a><ul>
+<li><a href="#the-es-and-nq-chain-feed-cmdfutures_chain">The /ES and /NQ chain feed (cmd:futures_chain)</a></li>
+</ul>
+</li>
 <li><a href="#portfolio-service-8212">Portfolio service — :8212</a></li>
 <li><a href="#trade-service-8213">Trade service — :8213</a></li>
 <li><a href="#market-service-8215">Market service — :8215</a></li>
@@ -923,6 +926,12 @@ enqueue, so a change needs no restart):</p>
 <td>10–500</td>
 <td>the Blog page's uploads and its Publish</td>
 </tr>
+<tr>
+<td><code>"cmd:futures_chain"</code></td>
+<td>20</td>
+<td>10–200</td>
+<td>the /ES and /NQ chain feed's snapshots: one chain per command, up to <code>config/futures_chain.toml</code> <code>[capture] max_snapshot_kb</code> (512 KB) each</td>
+</tr>
 </tbody>
 </table>
 <p>The blog stream is small because one of its commands carries a whole
@@ -1028,6 +1037,12 @@ a contract (listed in <em>Cache Key Index</em>).</p>
 <td>(embedded in <code>RescueAdvisory.candidates</code>)</td>
 <td><code>action</code>, <code>label</code>, <code>apply_kind</code> (<code>execute</code>|<code>advisory</code>), <code>gross_cash</code>, <code>commission</code>, <code>net_cash</code>, <code>new_max_loss</code>, <code>breakeven</code>, <code>short_delta</code>, <code>width</code>, <code>expiry</code>, <code>dte_after</code>, <code>est_fill_legs[]</code>, <code>rationale[]</code>, <code>context[]</code>, <code>warnings[]</code>, <code>score</code></td>
 </tr>
+<tr>
+<td><code>FuturesChainSnapshot</code></td>
+<td><code>futures_chain.py</code></td>
+<td>(the <code>snapshot</code> command's args on <code>cmd:futures_chain</code>)</td>
+<td><code>instrument</code>, <code>expiry</code>, <code>captured_at</code>, <code>descriptions{}</code>, <code>underlying_symbol</code>, <code>underlying_price</code>, <code>contracts[]</code> of <code>{series, side, strike, mark, bid, ask, volume, open_int, iv, delta}</code>; an absent reading is <code>null</code>. See <em>The /ES and /NQ chain feed</em> under the Options service</td>
+</tr>
 </tbody>
 </table>
 <hr />
@@ -1039,7 +1054,14 @@ stopped or its last tick is older than <code>[health] tick_stale_sec</code> (600
 <code>config/services.toml</code>. Other keys: <code>scheduler_alive</code>, <code>scheduler_uptime_s</code>,
 <code>scheduler_last_tick_age_s</code>, <code>dead_letters</code> (commands the service could not run,
 kept for reading and never re-run; <code>null</code> if the count cannot be read),
-<code>degrades_total</code> and <code>degrades</code>.</p>
+<code>degrades_total</code> and <code>degrades</code>. A service may add keys of its own through
+<code>make_app(health_extra=...)</code>, a function of the bus that returns a dict: it can
+add keys and never change one the body already has, <code>up</code> included, and a
+function that raises is counted in <code>degrades</code> and leaves the body as it was. The
+options service adds <code>futures_chain</code>, the /ES and /NQ chain feed's report
+(<code>in_session</code>, <code>instruments</code> keyed by the page's label with the capture's
+<code>captured_at</code>, <code>age_s</code> and <code>state</code>, and <code>pc</code>, the capturing PC's last reason). It
+describes the feed and never decides <code>up</code>.</p>
 <p>Each command stream has a thread of its own for its blocking read and its
 handler; scheduled work shares a pool of <code>[pool] workers</code> threads
 (<code>config/services.toml</code>). On <code>cmd:options</code> the long, self-contained commands
@@ -2204,6 +2226,575 @@ the files (the first non-null value of each field wins) and never writes a key
 Dated price history is fetched through the proxy's <code>/passthrough</code> (<code>endpoint=/pricehistory</code>):
 a tool that calls it by hand (<code>tools/scalp_backfill.py</code>) must have the stack's <code>.env</code>
 loaded, or every request is a 401 (<code>PROXY_SHARED_SECRET</code>).</p>
+<h3 id="the-es-and-nq-chain-feed-cmdfutures_chain">The /ES and /NQ chain feed (<code>cmd:futures_chain</code>)</h3>
+<p>The options service also takes the 0-DTE option chains of /ES and /NQ from a capture on
+the operator's Windows PC (ThinkorSwim through Excel), because Schwab serves no
+futures-option chains. Nothing here reaches Schwab or the proxy. The feed <strong>ships hidden</strong>
+(<code>[capture] show_in_dropdown = false</code>). The Technical Reference's <em>The /ES and /NQ chain
+feed</em> has the checks, the gamma and the cadence.</p>
+<figure class="diagram" data-diagram="futures-chain-feed"><svg xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 720 374.4" xmlns="http://www.w3.org/2000/svg" version="1.1" role="img" stroke-linejoin="round" stroke-linecap="butt" style="width:100%;height:auto">
+ <g id="futures-chain-feed-figure_1">
+  <g id="futures-chain-feed-patch_1">
+   <path d="M 0 374.4 
+L 720 374.4 
+L 720 0 
+L 0 0 
+z
+" style="fill: #ffffff"/>
+  </g>
+  <g id="futures-chain-feed-axes_1">
+   <g id="futures-chain-feed-patch_2">
+    <path d="M 31.68 14.4 
+L 234.72 14.4 
+Q 244.8 14.4 244.8 24.48 
+L 244.8 342.72 
+Q 244.8 352.8 234.72 352.8 
+L 31.68 352.8 
+Q 21.6 352.8 21.6 342.72 
+L 21.6 24.48 
+Q 21.6 14.4 31.68 14.4 
+L 31.68 14.4 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: none; stroke-dasharray: 5,4; stroke-dashoffset: 0; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_3">
+    <path d="M 52.56 43.2 
+L 213.84 43.2 
+Q 219.6 43.2 219.6 48.96 
+L 219.6 77.76 
+Q 219.6 83.52 213.84 83.52 
+L 52.56 83.52 
+Q 46.8 83.52 46.8 77.76 
+L 46.8 48.96 
+Q 46.8 43.2 52.56 43.2 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_4">
+    <path d="M 52.56 108 
+L 213.84 108 
+Q 219.6 108 219.6 113.76 
+L 219.6 142.56 
+Q 219.6 148.32 213.84 148.32 
+L 52.56 148.32 
+Q 46.8 148.32 46.8 142.56 
+L 46.8 113.76 
+Q 46.8 108 52.56 108 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_5">
+    <path d="M 52.56 172.8 
+L 213.84 172.8 
+Q 219.6 172.8 219.6 178.56 
+L 219.6 207.36 
+Q 219.6 213.12 213.84 213.12 
+L 52.56 213.12 
+Q 46.8 213.12 46.8 207.36 
+L 46.8 178.56 
+Q 46.8 172.8 52.56 172.8 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_6">
+    <path d="M 52.56 252 
+L 213.84 252 
+Q 219.6 252 219.6 257.76 
+L 219.6 286.56 
+Q 219.6 292.32 213.84 292.32 
+L 52.56 292.32 
+Q 46.8 292.32 46.8 286.56 
+L 46.8 257.76 
+Q 46.8 252 52.56 252 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_7">
+    <path d="M 298.08 14.4 
+L 688.32 14.4 
+Q 698.4 14.4 698.4 24.48 
+L 698.4 342.72 
+Q 698.4 352.8 688.32 352.8 
+L 298.08 352.8 
+Q 288 352.8 288 342.72 
+L 288 24.48 
+Q 288 14.4 298.08 14.4 
+L 298.08 14.4 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: none; stroke-dasharray: 5,4; stroke-dashoffset: 0; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_8">
+    <path d="M 315.36 43.2 
+L 476.64 43.2 
+Q 482.4 43.2 482.4 48.96 
+L 482.4 77.76 
+Q 482.4 83.52 476.64 83.52 
+L 315.36 83.52 
+Q 309.6 83.52 309.6 77.76 
+L 309.6 48.96 
+Q 309.6 43.2 315.36 43.2 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_9">
+    <path d="M 516.96 43.2 
+L 678.24 43.2 
+Q 684 43.2 684 48.96 
+L 684 77.76 
+Q 684 83.52 678.24 83.52 
+L 516.96 83.52 
+Q 511.2 83.52 511.2 77.76 
+L 511.2 48.96 
+Q 511.2 43.2 516.96 43.2 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #faeeda; stroke: #854f0b; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_10">
+    <path d="M 516.96 100.8 
+L 678.24 100.8 
+Q 684 100.8 684 106.56 
+L 684 135.36 
+Q 684 141.12 678.24 141.12 
+L 516.96 141.12 
+Q 511.2 141.12 511.2 135.36 
+L 511.2 106.56 
+Q 511.2 100.8 516.96 100.8 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_11">
+    <path d="M 315.36 165.6 
+L 476.64 165.6 
+Q 482.4 165.6 482.4 171.36 
+L 482.4 200.16 
+Q 482.4 205.92 476.64 205.92 
+L 315.36 205.92 
+Q 309.6 205.92 309.6 200.16 
+L 309.6 171.36 
+Q 309.6 165.6 315.36 165.6 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_12">
+    <path d="M 516.96 165.6 
+L 678.24 165.6 
+Q 684 165.6 684 171.36 
+L 684 200.16 
+Q 684 205.92 678.24 205.92 
+L 516.96 205.92 
+Q 511.2 205.92 511.2 200.16 
+L 511.2 171.36 
+Q 511.2 165.6 516.96 165.6 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #faeeda; stroke: #854f0b; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_13">
+    <path d="M 315.36 237.6 
+L 476.64 237.6 
+Q 482.4 237.6 482.4 243.36 
+L 482.4 272.16 
+Q 482.4 277.92 476.64 277.92 
+L 315.36 277.92 
+Q 309.6 277.92 309.6 272.16 
+L 309.6 243.36 
+Q 309.6 237.6 315.36 237.6 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-patch_14">
+    <path d="M 516.96 237.6 
+L 678.24 237.6 
+Q 684 237.6 684 243.36 
+L 684 272.16 
+Q 684 277.92 678.24 277.92 
+L 516.96 277.92 
+Q 511.2 277.92 511.2 272.16 
+L 511.2 243.36 
+Q 511.2 237.6 516.96 237.6 
+z
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: #eeedfe; stroke: #534ab7; stroke-linejoin: miter"/>
+   </g>
+   <g id="futures-chain-feed-line2d_1">
+    <path d="M 219.6 192.96 
+L 262.8 192.96 
+L 262.8 63.36 
+L 262.8 63.36 
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: none; stroke: #5f5e5a; stroke-linecap: square"/>
+   </g>
+   <g id="futures-chain-feed-line2d_2">
+    <path d="M 511.2 120.96 
+L 396 120.96 
+L 396 120.96 
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: none; stroke: #5f5e5a; stroke-linecap: square"/>
+   </g>
+   <g id="futures-chain-feed-line2d_3">
+    <path d="M 547.2 205.92 
+L 547.2 221.76 
+L 396 221.76 
+L 396 221.76 
+" clip-path="url(#futures-chain-feed-p0ada42c376)" style="fill: none; stroke: #5f5e5a; stroke-linecap: square"/>
+   </g>
+   <g id="futures-chain-feed-text_1">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #5f5e5a" x="33.12" y="29.828145" transform="rotate(-0 33.12 29.828145)">Your PC (Windows)</text>
+   </g>
+   <g id="futures-chain-feed-text_2">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="133.2" y="59.017852" transform="rotate(-0 133.2 59.017852)">ThinkorSwim</text>
+   </g>
+   <g id="futures-chain-feed-text_3">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="133.2" y="73.618242" transform="rotate(-0 133.2 73.618242)">Logged in by you; only read</text>
+   </g>
+   <g id="futures-chain-feed-text_4">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="133.2" y="123.817852" transform="rotate(-0 133.2 123.817852)">Private hidden Excel</text>
+   </g>
+   <g id="futures-chain-feed-text_5">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="133.2" y="138.418242" transform="rotate(-0 133.2 138.418242)">RTD link; started for the capture</text>
+   </g>
+   <g id="futures-chain-feed-text_6">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="133.2" y="188.617422" transform="rotate(-0 133.2 188.617422)">tos_capture.ps1</text>
+   </g>
+   <g id="futures-chain-feed-text_7">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="133.2" y="203.218242" transform="rotate(-0 133.2 203.218242)">A snapshot on the clock</text>
+   </g>
+   <g id="futures-chain-feed-text_8">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="133.2" y="267.817852" transform="rotate(-0 133.2 267.817852)">Dated workbook</text>
+   </g>
+   <g id="futures-chain-feed-text_9">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="133.2" y="282.417891" transform="rotate(-0 133.2 282.417891)">Documents\ToS 0DTE, a copy</text>
+   </g>
+   <g id="futures-chain-feed-patch_15">
+    <path d="M 133.2 83.52 
+Q 133.2 95.04 133.2 105.441966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 135.4 101.041966 
+L 133.2 105.441966 
+L 131 101.041966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="futures-chain-feed-patch_16">
+    <path d="M 133.2 148.32 
+Q 133.2 159.84 133.2 170.241966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 135.4 165.841966 
+L 133.2 170.241966 
+L 131 165.841966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="futures-chain-feed-patch_17">
+    <path d="M 133.2 213.12 
+Q 133.2 231.84 133.2 249.441966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 135.4 245.041966 
+L 133.2 249.441966 
+L 131 245.041966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="futures-chain-feed-text_10">
+    <text style="font-size: 9.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0f6e56" x="309.6" y="29.828145" transform="rotate(-0 309.6 29.828145)">vps2: Tier 2 and Tier 3</text>
+   </g>
+   <g id="futures-chain-feed-text_11">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="396" y="59.017852" transform="rotate(-0 396 59.017852)">futures_chain_cli.py</text>
+   </g>
+   <g id="futures-chain-feed-text_12">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="396" y="73.618242" transform="rotate(-0 396 73.618242)">ingest (and plan, on request)</text>
+   </g>
+   <g id="futures-chain-feed-text_13">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #633806" x="597.6" y="59.017852" transform="rotate(-0 597.6 59.017852)">cmd:futures_chain</text>
+   </g>
+   <g id="futures-chain-feed-text_14">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #854f0b" x="597.6" y="73.618242" transform="rotate(-0 597.6 73.618242)">A Redis stream of its own</text>
+   </g>
+   <g id="futures-chain-feed-text_15">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="597.6" y="116.617852" transform="rotate(-0 597.6 116.617852)">options_svc consumer</text>
+   </g>
+   <g id="futures-chain-feed-text_16">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="597.6" y="131.218242" transform="rotate(-0 597.6 131.218242)">Checks, gamma, scaling</text>
+   </g>
+   <g id="futures-chain-feed-text_17">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="396" y="181.417852" transform="rotate(-0 396 181.417852)">gex_history.db</text>
+   </g>
+   <g id="futures-chain-feed-text_18">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="396" y="196.018242" transform="rotate(-0 396 196.018242)">Five views, a row per capture</text>
+   </g>
+   <g id="futures-chain-feed-text_19">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #633806" x="597.6" y="181.417852" transform="rotate(-0 597.6 181.417852)">Redis views</text>
+   </g>
+   <g id="futures-chain-feed-text_20">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #854f0b" x="597.6" y="196.018242" transform="rotate(-0 597.6 196.018242)">Chain, frozen chain, status</text>
+   </g>
+   <g id="futures-chain-feed-text_21">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="396" y="253.417852" transform="rotate(-0 396 253.417852)">Stopped-capture watch</text>
+   </g>
+   <g id="futures-chain-feed-text_22">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="396" y="268.018242" transform="rotate(-0 396 268.018242)">Phone alert, /health</text>
+   </g>
+   <g id="futures-chain-feed-text_23">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #3c3489" x="597.6" y="253.417852" transform="rotate(-0 597.6 253.417852)">webgui :8500</text>
+   </g>
+   <g id="futures-chain-feed-text_24">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #534ab7" x="597.6" y="268.018242" transform="rotate(-0 597.6 268.018242)">Dealer Positioning, private</text>
+   </g>
+   <g id="futures-chain-feed-patch_18">
+    <path d="M 262.8 63.36 
+Q 285.48 63.36 307.041966 63.36 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 302.641966 61.16 
+L 307.041966 63.36 
+L 302.641966 65.56 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="futures-chain-feed-text_25">
+    <text style="font-style: italic; font-size: 8.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="396" y="98.68834" transform="rotate(-0 396 98.68834)">reached by one ssh per capture</text>
+   </g>
+   <g id="futures-chain-feed-patch_19">
+    <path d="M 483.84 63.36 
+Q 496.8 63.36 508.641966 63.36 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 504.241966 61.16 
+L 508.641966 63.36 
+L 504.241966 65.56 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="futures-chain-feed-patch_20">
+    <path d="M 597.6 83.52 
+Q 597.6 91.44 597.6 98.241966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 599.8 93.841966 
+L 597.6 98.241966 
+L 595.4 93.841966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="futures-chain-feed-patch_21">
+    <path d="M 396 120.96 
+Q 396 142.56 396 163.041966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 398.2 158.641966 
+L 396 163.041966 
+L 393.8 158.641966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="futures-chain-feed-patch_22">
+    <path d="M 597.6 141.12 
+Q 597.6 152.64 597.6 163.041966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 599.8 158.641966 
+L 597.6 163.041966 
+L 595.4 158.641966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="futures-chain-feed-patch_23">
+    <path d="M 396 221.76 
+Q 396 228.96 396 235.041966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 398.2 230.641966 
+L 396 235.041966 
+L 393.8 230.641966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="futures-chain-feed-patch_24">
+    <path d="M 597.6 205.92 
+Q 597.6 221.04 597.6 235.041966 
+" style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
+    <path d="M 599.8 230.641966 
+L 597.6 235.041966 
+L 595.4 230.641966 
+z
+" style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
+   </g>
+   <g id="futures-chain-feed-text_26">
+    <text style="font-style: italic; font-size: 8.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #5f5e5a" x="360" y="319.00834" transform="rotate(-0 360 319.00834)">No Schwab and no proxy: the chains come only from ThinkorSwim</text>
+   </g>
+  </g>
+ </g>
+ <defs>
+  <clipPath id="futures-chain-feed-p0ada42c376">
+   <rect x="0" y="0" width="720" height="374.4"/>
+  </clipPath>
+ </defs>
+</svg>
+<figcaption>The /ES and /NQ chain feed, from ThinkorSwim to the page</figcaption></figure>
+<p><strong>One direction.</strong> The PC sends; the server never connects to it. The PC runs two commands
+over one ssh each, through <code>tools/futures_chain_remote.sh</code> (which loads the stack's <code>.env</code>
+and the checkout's venv, so the capture needs to know one path):</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>futures_chain_cli.py plan</code></td>
+<td>Prints the capture's plan as one line of JSON and exits 0. Reads nothing.</td>
+</tr>
+<tr>
+<td><code>futures_chain_cli.py ingest</code></td>
+<td>Reads <code>{"snapshots": [...], "status": {...}}</code> from standard input and puts one <code>snapshot</code> command per instrument, then one <code>pc_status</code>, on <code>cmd:futures_chain</code>. It prints <code>{"queued": ["snapshot", ...]}</code>.</td>
+</tr>
+</tbody>
+</table>
+<p><code>ingest</code> checks the shape and the size and nothing else: the contract, the age, the terms and
+the checks against the last capture are the service's. A byte order mark (PowerShell adds
+one) is stripped. A snapshot whose <code>instrument</code> is not <code>ES</code> or <code>NQ</code> is refused whole; a
+snapshot over <code>[capture] max_snapshot_kb</code> is dropped and named on standard error while the
+others still go. Exit status: <strong>0</strong> written; <strong>2</strong> input or usage it cannot use (nothing
+sent); <strong>3</strong> a snapshot over the limit was dropped (the rest were written), or standard input
+was larger than a capture can be; <strong>4</strong> Redis refused a write (its message says how many
+commands were queued first). The reason is on standard error.</p>
+<p><strong>The plan</strong> (<code>futures_chain.build_plan</code>): <code>expiry</code> (ISO date), <code>date_text</code> (<code>2 NOV 26</code>, as a
+contract description prints it), <code>in_session</code>, <code>opens</code> and <code>valid_until</code> (epoch seconds),
+<code>interval_sec</code>, <code>min_fill_fraction</code>, <code>max_snapshot_kb</code>, the PC's own settings
+(<code>min_read_fraction</code>, <code>fill_settle_sec</code>, <code>fill_wait_max_sec</code>, <code>probe_round_steps</code>,
+<code>probe_reach</code>, <code>recentre_share</code>, <code>ssh_timeout_sec</code>, <code>no_plan_retry_sec</code>,
+<code>plan_retry_max_sec</code>, <code>hang_limit_sec</code>), and <code>instruments</code>, keyed by root (<code>ES</code>, <code>NQ</code>):
+<code>symbol</code>, <code>multiplier</code>, <code>exchange</code>, <code>strike_step</code>, <code>strike_width_pct</code>, <code>parity_limit_pts</code> and
+<code>candidates</code>, the series names to try. A key a capture lacks takes a stated default in the
+script, because the PC and the server do not update together.</p>
+<p><strong>Commands (<code>cmd:futures_chain</code>):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Args</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>snapshot</code></td>
+<td>a <code>FuturesChainSnapshot</code> (below)</td>
+<td>One instrument's capture. Ends as exactly one of: dropped without comment (not newer than the stored capture), refused with a reason on the status view, or written: the five views into <code>gex_history.db</code> at the capture's own minute, the chain into <code>cache:options:futures_chain:&lt;symbol&gt;</code> (and <code>…:frozen</code> while it is far enough before expiry), then a repaint of the page's gamma view when it is on that symbol. A payload that does not match the model is counted as a degrade (<code>options.futures_chain</code>) and refused</td>
+</tr>
+<tr>
+<td><code>pc_status</code></td>
+<td><code>{reason, at}</code></td>
+<td>The PC's own report: why it is not capturing (ThinkorSwim logged out, Excel would not start) or <code>""</code> when it is. <code>reason</code> is cut to 300 characters; <code>at</code> is epoch seconds (the service's own clock when it is missing or not a number). Stored on the status view's <code>pc</code> entry, apart from the instruments' entries</td>
+</tr>
+<tr>
+<td>anything else</td>
+<td></td>
+<td>Logged and ignored</td>
+</tr>
+</tbody>
+</table>
+<p>The stream has its own <code>[stream_keep]</code> cap (<code>"cmd:futures_chain"</code>, shipped 20), because each
+command carries a document. A snapshot older than <code>[capture] max_age_sec</code> (900 s) when it
+arrives is refused, which is also what keeps a consumer group created at id 0 from replaying
+the stream's history as current. Nothing on this stream reaches a paper book.</p>
+<p><strong><code>FuturesChainSnapshot</code></strong> (<code>shared/contracts/futures_chain.py</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Field</th>
+<th>Type</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>instrument</code></td>
+<td>string</td>
+<td>The root, <code>ES</code> or <code>NQ</code></td>
+</tr>
+<tr>
+<td><code>expiry</code></td>
+<td>date</td>
+<td>The expiry the capture meant to read</td>
+</tr>
+<tr>
+<td><code>captured_at</code></td>
+<td>float</td>
+<td>Epoch seconds the values describe, on the PC's clock</td>
+</tr>
+<tr>
+<td><code>descriptions</code></td>
+<td><code>{series: string}</code></td>
+<td>One contract's ThinkorSwim <code>DESCRIPTION</code> per series; the adapter reads the multiplier, expiry, underlying and <code>AM Settled</code> off it</td>
+</tr>
+<tr>
+<td><code>underlying_symbol</code></td>
+<td>string</td>
+<td>The future the options are written on, e.g. <code>/ESZ26:XCME</code></td>
+</tr>
+<tr>
+<td><code>underlying_price</code></td>
+<td>float</td>
+<td>What it traded at</td>
+</tr>
+<tr>
+<td><code>contracts</code></td>
+<td>list of rows</td>
+<td>Below</td>
+</tr>
+</tbody>
+</table>
+<p>Each row is <code>{series, side, strike, mark, bid, ask, volume, open_int, iv, delta}</code>: <code>side</code> is
+<code>"C"</code> or <code>"P"</code>, <code>strike</code> a positive number, and the rest readings. A reading that is <code>N/A</code>,
+empty, not a number, not finite or a boolean is <code>null</code>, never 0; a price or count below zero is
+<code>null</code>; <code>iv</code> is the percent as ThinkorSwim prints it (<code>"12.51%"</code> is <code>12.51</code>).</p>
+<p><strong>Views.</strong></p>
+<table>
+<thead>
+<tr>
+<th>Cache key</th>
+<th>Payload</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cache:options:futures_chain:&lt;FOP.ES or FOP.NQ&gt;</code></td>
+<td><code>{chain, captured_at, expiry, hours_left}</code>: the adapted chain in Schwab's layout (one expiry key, <code>YYYY-MM-DD:0</code>, every contract at <code>daysToExpiration</code> 0, open interest and volume already scaled by multiplier / 100, a calculated <code>gamma</code>, and <code>series</code>), the capture's epoch time, the ISO expiry and the hours to the close. No event is published</td>
+</tr>
+<tr>
+<td><code>cache:options:futures_chain:&lt;symbol&gt;:frozen</code></td>
+<td>The same, for the last capture taken at least <code>frozen_before_expiry_min</code> (60) before expiry</td>
+</tr>
+<tr>
+<td><code>cache:options:futures_chain_status</code></td>
+<td>The feed's health: <code>{&lt;symbol&gt;: entry, pc: {reason, at}}</code>, below</td>
+</tr>
+<tr>
+<td><code>cache:options:futures_chain_alert</code></td>
+<td>What the stopped-capture alert has told the operator: <code>{&lt;symbol&gt;: {alerted_at}}</code> for each instrument last reported stopped. Its own key: the status view is read, changed and written back by the stream's consumer thread, and a second writer would lose a write. Nothing else reads it</td>
+</tr>
+<tr>
+<td><code>cache:options:gamma</code></td>
+<td>For these symbols only, the usual snapshot plus a <strong><code>feed</code></strong> block: <code>{label (/ES), captured_at, expiry, frozen, stale, reason, why, strike_low, strike_high, last_row_at}</code>. <code>stale</code> and <code>frozen</code> are worked out when the payload is built and are as old as it, so a reader works the state out again against its own clock; <code>reason</code> is the age sentence plus <code>why</code>; <code>why</code> is the cause alone; <code>strike_low</code> / <code>strike_high</code> are the range captured; <code>last_row_at</code> is where the session's rows end. A stale or frozen payload carries no <code>forward</code> band. <code>compute.gamma_snapshot</code> is called with <code>with_term=False</code>, so there is no Term</td>
+</tr>
+<tr>
+<td><code>cache:options:gamma_symbols</code></td>
+<td>Lists <code>FOP.ES</code> and <code>FOP.NQ</code> only while <code>show_in_dropdown</code> is on. The public list (<code>public_gamma.SYMBOLS_KEY</code>) never does</td>
+</tr>
+</tbody>
+</table>
+<p><strong>A status entry</strong> (per <code>FOP.</code> symbol; every field is always present): <code>captured_at</code> (the
+newest accepted capture, or <code>null</code>), <code>expiry</code>, <code>listed</code> (contracts that read a value),
+<code>with_gamma</code> (of those, the ones with a calculated gamma), <code>parity_gap</code> (<code>null</code> when no pair
+could be read), <code>reason</code> (a sentence in whole words, empty when well; a snapshot that was
+refused leaves the last good one's other fields in place), <code>repeats</code> (the run of captures with
+the same price, volume and open interest), <code>refused_at</code>, <code>price</code>, <code>activity</code> (volume plus open
+interest, to compare captures) and <code>refused_listed</code> (the count of the last refused half-filled
+capture). The comparisons between one capture and the one before it read it from here, so a
+service restart does not forget it.</p>
+<p><strong><code>/health</code></strong> carries a <code>futures_chain</code> block, through <code>make_app(health_extra=)</code>:
+<code>{in_session, instruments, pc}</code>. <code>instruments</code> is keyed by the page's label (<code>/ES</code>) and holds
+only an instrument with an accepted capture or a refusal: <code>{captured_at, age_s, refused_at,
+state, repeats, listed, with_gamma, reason}</code>, where <code>state</code> is <code>capturing</code>, <code>stopped</code> or
+<code>starting</code> during the session and <code>between sessions</code> or <code>no capture accepted</code> outside it.
+<code>pc</code> is <code>{reason, at}</code> or <code>null</code>. It describes the feed and never changes <code>up</code>: a PC that is
+off is not a failed options service.</p>
+<p><strong>Rules for a reader.</strong> The cached chain holds every contract's bid, ask and mark, and Redis
+is readable by the public process, so no public page may read these keys. A reader must not
+fall back to another symbol's chain: a stale capture is labelled, never shown as current.</p>
 <h2 id="portfolio-service-8212">Portfolio service — :8212</h2>
 <p><strong>Entry:</strong> <code>services/portfolio_svc/app.py</code>. <strong>Scheduler:</strong> initial rebuild + SSE
 quote-stream worker; throttled publish ≤ every 2 s while ticks pending; full rebuild
@@ -3252,6 +3843,11 @@ cache:options:expected_move    events:options:expected_move
 cache:options:rescue:&lt;position_id&gt;   events:options:rescue:&lt;position_id&gt;   (RescueAdvisory contract)
 cache:options:rescue_summary   events:options:rescue_summary
 cache:options:scalp           events:options:scalp         (Opening Scalp; ScalpView contract)
+cache:options:futures_chain:&lt;FOP.ES | FOP.NQ&gt;   (the newest /ES or /NQ chain, adapted; no event)
+cache:options:futures_chain:&lt;FOP.ES | FOP.NQ&gt;:frozen   (the last capture far enough before expiry)
+cache:options:futures_chain_status   (the feed's health, per instrument, and the PC's report)
+cache:options:futures_chain_alert    (what the stopped-capture alert has told the operator)
+cmd:futures_chain                    (the PC's snapshots, over ssh through tools/futures_chain_cli.py)
 cmd:options
 </code></pre>
 <p><strong><code>cache:options:flow_alerts</code></strong> is <code>{date, alerts: [...]}</code>, oldest first, capped at
@@ -3335,7 +3931,10 @@ cmd:trade   cmd:portfolio   cmd:market   cmd:news   cmd:blog
    consumer="c1")</code>, blocking 50 ms per poll, up to 10 messages per batch; dispatches
    to the handler via an executor; acks after the handler returns; swallows and logs
    handler exceptions.</li>
-<li><strong>Health</strong> — <code>GET /health</code> → <code>{"domain": ..., "up": true}</code>.</li>
+<li><strong>Health</strong> — <code>GET /health</code> → <code>{"domain": ..., "up": true}</code> plus the keys listed under
+   <em>Per-Service Reference</em>. A service may add keys of its own with
+   <code>make_app(health_extra=lambda bus: {...})</code>; it can add and never change one the body
+   already has, and a function that raises is counted in <code>degrades</code>.</li>
 </ol>
 <blockquote>
 <p><strong>Process isolation matters.</strong> Several app folders expose same-named top-level

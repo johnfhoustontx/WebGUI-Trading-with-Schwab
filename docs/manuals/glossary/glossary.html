@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Options Glossary</h1>
-  <div class="meta">NeuralStrike · Generated 2026-10-22</div>
+  <div class="meta">NeuralStrike · Generated 2026-10-31</div>
 </div>
 <h1 id="options-trading-glossary">Options Trading Glossary</h1>
 <p>Plain-English definitions of the terms you'll run into trading and analyzing options.</p>
@@ -85,6 +85,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <p><strong>Premium</strong> — The price of the option. What the buyer pays and the seller collects.</p>
 <p><strong>Contract multiplier</strong> — Standard equity options control 100 shares. A premium of $2.50 means you pay $250 per contract. Index options like SPX use $100 per point too, but settle in cash.</p>
 <p><strong>Underlying</strong> — Whatever the option is written on: a stock, an ETF, an index, a futures contract.</p>
+<p><strong>Futures option</strong> — An option whose underlying is a futures contract, not shares. Its multiplier is the future's dollars a point: $50 a point for /ES and $20 for /NQ (the E-mini sizes), not 100. Each series names the future it is written on (for example <code>/ESZ26</code>) and its own expiry.</p>
 <p><strong>Long / Short</strong> — Long means you bought it. Short means you sold it (and owe something). "Long puts" and "short calls" are very different positions even though both are bearish.</p>
 <p><strong>Writing</strong> — Selling an option you don't already own. Same thing as going short the option.</p>
 <hr />
@@ -113,6 +114,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <p><strong>Do-not-exercise (DNE) instruction</strong> — Telling your broker <em>not</em> to auto-exercise a barely-ITM option, usually because commissions and overnight share risk cost more than the pennies of intrinsic value.</p>
 <p><strong>AM settlement</strong> — The contract settles off the opening prices of the index components on expiration morning. SPX monthly contracts work this way, and the settlement value can differ noticeably from where the index printed at Thursday's close.</p>
 <p><strong>PM settlement</strong> — Settles off the closing price on expiration day. SPXW (weeklies and dailies) and all equity options are PM settled.</p>
+<p><strong>AM Settled (in ThinkorSwim's contract description)</strong> — The same idea as AM settlement, as a label: a futures-option series marked <code>(AM Settled)</code> expires on the morning of its date, before that day's trading, so it has nothing left to show during the session. The /ES and /NQ feed leaves such a series out.</p>
 <p><strong>SET</strong> — The specific published settlement value for AM-settled SPX contracts. It's a calculated number, not a price anything actually traded at, which is why you occasionally see it land outside the day's range.</p>
 <p><strong>Adjusted option</strong> — A contract whose terms were changed after a split, merger, spinoff, or special dividend. The deliverable may no longer be 100 clean shares. These trade badly, price strangely, and are usually best avoided.</p>
 <p><strong>Deliverable</strong> — What actually changes hands on exercise. Normally 100 shares, but adjusted options can deliver odd share counts plus cash or shares of a second company.</p>
@@ -267,6 +269,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <h2 id="8-pricing-models-and-math">8. Pricing Models and Math</h2>
 <p>Relevant if you're calculating any of this yourself rather than reading it off a screen.</p>
 <p><strong>Black-Scholes-Merton</strong> — The standard closed-form model for European options. Fast, analytic greeks, and the common language of the market. Its assumptions (constant volatility, lognormal returns, no jumps) are all wrong, which is precisely why the volatility surface exists — traders bend IV per strike to force the model to match reality.</p>
+<p><strong>Black-76</strong> — The Black-Scholes variant for options on futures. The underlying is the future's price and carries no cost of carry, so its gamma is the normal density at d1 divided by the future's price, the volatility and the square root of the time left. The /ES and /NQ feed calculates its gamma this way, because ThinkorSwim's own gamma for them rounds to zero.</p>
 <p><strong>Implied volatility solve</strong> — IV isn't calculated directly; you invert the pricing model numerically until the theoretical price matches the market price. Bisection is robust, Newton-Raphson is fast, and hybrid approaches handle the deep wings where vega goes to nearly zero and the solve becomes unstable.</p>
 <p><strong>Binomial model (Cox-Ross-Rubinstein)</strong> — A price tree stepped backward from expiration. Slower than closed-form but handles American early exercise and discrete dividends naturally.</p>
 <p><strong>Bjerksund-Stensland / Barone-Adesi-Whaley</strong> — Closed-form approximations for American options. The practical choice when you need American pricing across thousands of contracts and can't afford a tree per contract.</p>

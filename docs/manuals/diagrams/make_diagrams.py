@@ -259,12 +259,44 @@ def raw_feed_target():
     save(fig, "raw-feed-target")
 
 
+def futures_chain_feed():
+    fig, ax = canvas(520)
+    container(ax, 30, 20, 310, 470, "Your PC (Windows)", "gray")
+    box(ax, 65, 60, 240, 56, "ThinkorSwim", "Logged in by you; only read", "gray")
+    box(ax, 65, 150, 240, 56, "Private hidden Excel", "RTD link; started for the capture", "gray")
+    box(ax, 65, 240, 240, 56, "tos_capture.ps1", "A snapshot on the clock", "gray")
+    box(ax, 65, 350, 240, 56, "Dated workbook", "Documents\\ToS 0DTE, a copy", "gray")
+    arrow(ax, (185, 116), (185, 148))
+    arrow(ax, (185, 206), (185, 238))
+    arrow(ax, (185, 296), (185, 348))
+
+    container(ax, 400, 20, 570, 470, "vps2: Tier 2 and Tier 3", "teal", label_x=430)
+    box(ax, 430, 60, 240, 56, "futures_chain_cli.py", "ingest (and plan, on request)", "gray")
+    box(ax, 710, 60, 240, 56, "cmd:futures_chain", "A Redis stream of its own", "amber")
+    box(ax, 710, 140, 240, 56, "options_svc consumer", "Checks, gamma, scaling", "teal")
+    box(ax, 430, 230, 240, 56, "gex_history.db", "Five views, a row per capture", "gray")
+    box(ax, 710, 230, 240, 56, "Redis views", "Chain, frozen chain, status", "amber")
+    box(ax, 430, 330, 240, 56, "Stopped-capture watch", "Phone alert, /health", "teal")
+    box(ax, 710, 330, 240, 56, "webgui :8500", "Dealer Positioning, private", "purple")
+    path(ax, [(305, 268), (365, 268), (365, 88), (428, 88)])
+    note(ax, 550, 134, "reached by one ssh per capture", ha="center")
+    arrow(ax, (672, 88), (708, 88))
+    arrow(ax, (830, 116), (830, 138))
+    path(ax, [(710, 168), (550, 168), (550, 228)])
+    arrow(ax, (830, 196), (830, 228))
+    path(ax, [(760, 286), (760, 308), (550, 308), (550, 328)])
+    arrow(ax, (830, 286), (830, 328))
+    note(ax, 500, 440, "No Schwab and no proxy: the chains come only from ThinkorSwim", ha="left")
+    save(fig, "futures-chain-feed")
+
+
 DIAGRAMS = {
     "system-overview": system_overview,
     "request-flow": request_flow,
     "deploy-units": deploy_units,
     "minute-collection": minute_collection,
     "raw-feed-target": raw_feed_target,
+    "futures-chain-feed": futures_chain_feed,
 }
 
 

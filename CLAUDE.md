@@ -700,6 +700,44 @@ gate, not idempotency. The long, self-contained commands (`handlers.SLOW_LANE`:
 the scans, the briefings, the rating, the Symbol lookup, X posts) run on the
 queue's slow lane; nothing that changes a paper book may be put there.
 
+**The /ES and /NQ chain feed** (their own chains from ThinkorSwim on the operator's
+PC; detail in [options engine invariants](docs/reference/options-engine-invariants.md),
+design in [the chain feed design](docs/plans/2026-10-31-futures-0dte-chain-feed-design.md)).
+- **Names.** The internal symbols are `FOP.ES` and `FOP.NQ`; the page shows `/ES` and
+  `/NQ` through `futures_chain.display_symbol`. `shared.symbols.SYMBOL_RE` refuses `/`
+  on purpose (a symbol becomes part of a Redis key, and `ES` alone is Eversource):
+  never loosen it and never take the label as a symbol. `futures_chain.is_feed_symbol`
+  is the one test.
+- **No other source.** A /ES or /NQ number taken from `$SPX` or `$NDX`, even as a
+  fallback, is a failure. These symbols never reach Schwab, the proxy,
+  `gex_collector.collection_symbols()` or any public key, and a stale capture is
+  labelled, never shown as current. The cached chain holds every contract's bid, ask
+  and mark: no public page may read it.
+- **One stream, one direction.** `cmd:futures_chain` (`snapshot`, `pc_status`) is
+  written only by `tools/futures_chain_cli.py ingest`, which the PC runs over ssh; the
+  PC's other call, `plan`, only prints. The server never connects to the PC. The stream
+  has its own `[stream_keep]` entry (20), because each command carries a document, and
+  nothing on it reaches a paper book.
+- **A session opens the evening before its expiry** (17:00 to 15:00 Central) and so
+  spans two calendar dates: `session_date` alone does not name it. Use
+  `futures_chain.session_expiry` / `session_bounds` and `gex_history_db.SessionSpan`,
+  never `date.today()`.
+- **The purge and the Gamma Archive leave `FOP.%` out** (`gex_history_db.FEED_SYMBOL_LIKE`,
+  restated there and pinned to every feed symbol by the mirror test): a Sunday evening would otherwise
+  count as a session and cost every other symbol one. The feed keeps the store's 5
+  sessions and no more.
+- **Contract size is the adapter's.** Open interest and volume are scaled by
+  `multiplier / 100` (0.5, 0.2) in `futures_chain_adapter`, so `gamma_tool.py` is not
+  edited for size (its one change is the optional `hours_left`). A contract COUNT read
+  downstream is therefore scaled: print none for these symbols. Gamma is calculated per
+  contract from its own implied volatility; with none there is no gamma (absent, never 0).
+- **Never touch the operator's Excel.** The capture starts its own
+  `EXCEL.EXE /automation -Embedding`, stops it by process id after an identity check, never
+  calls `Quit()`, never starts ThinkorSwim and never enters a password. It reads; it
+  places or prepares no order.
+- **Ships hidden.** `[capture] show_in_dropdown = false`; the list changes only when the
+  operator decides.
+
 **Other standing facts.**
 - The one-minute GEX poll is `fetch_minute` → `derive_minute`, and a collected
   minute is derived AT its minute: `calc_all_from_chain(now=)`, and the
@@ -816,6 +854,8 @@ entries (plus `approval` and `dashboard_frontend`) went on 2026-09-19.
 - [`docs/plans/2026-08-17-momentum-guided-page-design.md`](docs/plans/2026-08-17-momentum-guided-page-design.md) — **Momentum guided page** (a numbered argument; leaderboard behind a toggle; the ragged `rank_history` trap)
 - [`docs/plans/2026-10-03-market-data-store-design.md`](docs/plans/2026-10-03-market-data-store-design.md) — **the proxy's local market-data store** (what one day's calls were, what a store can and cannot remove, the collector's two tiers, what review changed)
 - [`docs/plans/2026-10-03-market-data-store-plan.md`](docs/plans/2026-10-03-market-data-store-plan.md) — bite-sized TDD implementation plan for the above
+- [`docs/plans/2026-10-31-futures-0dte-chain-feed-design.md`](docs/plans/2026-10-31-futures-0dte-chain-feed-design.md) — **the /ES and /NQ chain feed** (ThinkorSwim through Excel on the PC, what was measured, the session, the staleness rules)
+- [`docs/plans/2026-10-31-futures-0dte-chain-feed-plan.md`](docs/plans/2026-10-31-futures-0dte-chain-feed-plan.md) — the build plan for the above
 
 ## User-facing manuals
 

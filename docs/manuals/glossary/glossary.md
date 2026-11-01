@@ -22,6 +22,8 @@ Plain-English definitions of the terms you'll run into trading and analyzing opt
 
 **Underlying** — Whatever the option is written on: a stock, an ETF, an index, a futures contract.
 
+**Futures option** — An option whose underlying is a futures contract, not shares. Its multiplier is the future's dollars a point: $50 a point for /ES and $20 for /NQ (the E-mini sizes), not 100. Each series names the future it is written on (for example `/ESZ26`) and its own expiry.
+
 **Long / Short** — Long means you bought it. Short means you sold it (and owe something). "Long puts" and "short calls" are very different positions even though both are bearish.
 
 **Writing** — Selling an option you don't already own. Same thing as going short the option.
@@ -77,6 +79,8 @@ Plain-English definitions of the terms you'll run into trading and analyzing opt
 **AM settlement** — The contract settles off the opening prices of the index components on expiration morning. SPX monthly contracts work this way, and the settlement value can differ noticeably from where the index printed at Thursday's close.
 
 **PM settlement** — Settles off the closing price on expiration day. SPXW (weeklies and dailies) and all equity options are PM settled.
+
+**AM Settled (in ThinkorSwim's contract description)** — The same idea as AM settlement, as a label: a futures-option series marked `(AM Settled)` expires on the morning of its date, before that day's trading, so it has nothing left to show during the session. The /ES and /NQ feed leaves such a series out.
 
 **SET** — The specific published settlement value for AM-settled SPX contracts. It's a calculated number, not a price anything actually traded at, which is why you occasionally see it land outside the day's range.
 
@@ -385,6 +389,8 @@ These describe what market makers are forced to do to stay hedged, and why that 
 Relevant if you're calculating any of this yourself rather than reading it off a screen.
 
 **Black-Scholes-Merton** — The standard closed-form model for European options. Fast, analytic greeks, and the common language of the market. Its assumptions (constant volatility, lognormal returns, no jumps) are all wrong, which is precisely why the volatility surface exists — traders bend IV per strike to force the model to match reality.
+
+**Black-76** — The Black-Scholes variant for options on futures. The underlying is the future's price and carries no cost of carry, so its gamma is the normal density at d1 divided by the future's price, the volatility and the square root of the time left. The /ES and /NQ feed calculates its gamma this way, because ThinkorSwim's own gamma for them rounds to zero.
 
 **Implied volatility solve** — IV isn't calculated directly; you invert the pricing model numerically until the theoretical price matches the market price. Bisection is robust, Newton-Raphson is fast, and hybrid approaches handle the deep wings where vega goes to nearly zero and the solve becomes unstable.
 
