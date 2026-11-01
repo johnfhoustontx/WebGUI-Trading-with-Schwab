@@ -740,6 +740,9 @@ design in [the chain feed design](docs/plans/2026-10-31-futures-0dte-chain-feed-
   `EXCEL.EXE /automation -Embedding`, stops it by process id after an identity check, never
   calls `Quit()`, never starts ThinkorSwim and never enters a password. It reads; it
   places or prepares no order.
+- **The capture has no window.** The task starts it through `conhost.exe --headless`:
+  a hidden `powershell.exe` still lands in a window where Windows Terminal is the default.
+  Stopping the task ends only that host, so the capture watches it (`Test-HostGone`).
 - **Ships hidden.** `[capture] show_in_dropdown = false`; the list changes only when the
   operator decides.
 - **The Desk's rows are private.** `/desk` is a published screen, and its /ES and /NQ rows

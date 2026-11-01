@@ -451,6 +451,41 @@ def test_installer_runs_one_copy_restarts_it_and_keeps_it_hidden():
     assert "-Hidden" in INSTALL
 
 
+def test_installer_starts_the_capture_with_no_window_anyone_can_close():
+    # A hidden-window flag on powershell.exe is not enough: where Windows Terminal is the
+    # default terminal, it takes the console over and shows a window of its own.
+    assert "-Execute 'conhost.exe'" in INSTALL
+    assert "'--headless powershell.exe " in INSTALL
+    assert "-WindowStyle" not in INSTALL
+
+
+def test_capture_stops_when_the_task_ends_its_console_host():
+    # Stop-ScheduledTask ends only the headless host. Left running, this copy would hold
+    # the mutex and keep the old code running after a stop and a start.
+    main = CODE[CODE.index("function Invoke-Main"):]
+    assert "$script:ConsoleHost = Get-ConsoleHost" in main
+    boundary = main.index("Wait-NextBoundary")
+    gone = main.index("if (Test-HostGone)", boundary)
+    assert gone < main.index("Invoke-Prepare -KeepTime")
+    assert "return" in main[gone:main.index("Invoke-Prepare -KeepTime")]
+
+
+def test_a_sleep_ends_early_when_the_console_host_has_gone():
+    sleeping = CODE[CODE.index("function Wait-Sleeping"):CODE.index("function Wait-NextBoundary")]
+    assert "Test-HostGone" in sleeping
+    boundary = CODE[CODE.index("function Wait-NextBoundary"):CODE.index("function Test-RowReadsNothing")]
+    assert "Test-HostGone" in boundary
+
+
+def test_only_a_console_host_parent_is_watched():
+    # Run by hand from a shell, or by an older task, the parent is no console host, and
+    # that parent ending must not stop a capture. -Once never reaches the loop.
+    body = CODE[CODE.index("function Get-ConsoleHost"):CODE.index("function Test-HostGone")]
+    assert "ProcessName -eq 'conhost'" in body
+    # Holding the handle keeps HasExited true to THIS process if its id is reused.
+    assert ".Handle" in body
+
+
 def test_installer_runs_only_while_the_operator_is_logged_on_and_holds_no_credential():
     assert "-LogonType Interactive" in INSTALL
     assert "password" not in INSTALL.lower()

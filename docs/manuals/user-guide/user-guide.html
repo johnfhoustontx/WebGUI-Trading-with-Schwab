@@ -1625,12 +1625,14 @@ password prompt (the capture runs it unattended, with <code>BatchMode</code>).</
    project cannot alter a running capture, and registers a scheduled task named
    <strong>ToS 0DTE Capture</strong>. The task starts at logon, runs only while you are logged on (so
    ThinkorSwim and Excel share your desktop), holds no password, and starts the capture
-   again if it has ended.</li>
+   again if it has ended. It runs with no window at all, so there is nothing on screen to
+   close by accident; the log below is how to see what it is doing.</li>
 <li>Start it now with <code>Start-ScheduledTask -TaskName "ToS 0DTE Capture"</code>, or sign out and in.
    The first possible session is the Sunday evening before a Monday expiry.</li>
 <li>Run the installer again after the script changes. A running capture stays on the old
-   code until the next logon, or until you run <code>Stop-ScheduledTask</code> and
-   <code>Start-ScheduledTask</code>.</li>
+   code until the next logon, or until you run <code>Stop-ScheduledTask</code> and, a few seconds
+   later, <code>Start-ScheduledTask</code> (the capture takes up to about five seconds to stop; start
+   it sooner and the task's five-minute check brings it back instead).</li>
 </ol>
 <p>What it leaves on the PC: the log, <code>%LOCALAPPDATA%\TosCapture\capture.log</code>, and a dated
 workbook per expiry under <code>Documents\ToS 0DTE\</code>, with a sheet per future (a copy of what

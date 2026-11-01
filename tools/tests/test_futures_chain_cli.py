@@ -11,6 +11,8 @@ import ast
 import io
 import json
 import pathlib
+import shutil
+import subprocess
 import sys
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -320,3 +322,24 @@ def test_remote_script_starts_the_cli_from_the_checkout_with_utf8():
 def test_remote_script_loads_the_env_before_it_starts_python():
     text = REMOTE.read_text(encoding="utf-8")
     assert text.index(". ./.env") < text.index("exec ")
+
+
+@pytest.mark.skipif(shutil.which("bash") is None, reason="needs bash")
+def test_remote_script_survives_a_stray_line_in_the_env_file(tmp_path):
+    # Prod's .env opens with a prose line that lost its '#'. systemd skips such a line, so
+    # the services run; under `set -e` it ended this script with 127 before any plan.
+    tools = tmp_path / "tools"
+    tools.mkdir()
+    script = tools / "futures_chain_remote.sh"
+    script.write_bytes(REMOTE.read_bytes())
+    (tmp_path / ".env").write_bytes(b"  THIS FILE CARRIES SECRETS\nLOADED_LATER=yes\n")
+    python = tmp_path / ".venv" / "bin" / "python"
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b'#!/usr/bin/env bash\necho "loaded=$LOADED_LATER args=$*"\n')
+    python.chmod(0o755)
+
+    done = subprocess.run(["bash", script.as_posix(), "plan"], capture_output=True, text=True,
+                          timeout=30)
+
+    assert done.returncode == 0, done.stderr
+    assert done.stdout.strip() == "loaded=yes args=-X utf8 tools/futures_chain_cli.py plan"

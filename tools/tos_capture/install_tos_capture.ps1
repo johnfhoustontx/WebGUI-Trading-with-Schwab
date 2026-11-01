@@ -9,7 +9,8 @@
 # credential.
 #
 # Run it again after the script changes. A capture already running stays on the old code
-# until the next logon, or until it is stopped: Stop-ScheduledTask, then Start-ScheduledTask.
+# until the next logon, or until it is stopped: Stop-ScheduledTask, then Start-ScheduledTask
+# a few seconds later (started sooner, the repeating trigger brings it back instead).
 #
 # ASCII only: Windows PowerShell 5.1 reads a file with no byte order mark as ANSI.
 $ErrorActionPreference = 'Stop'
@@ -29,8 +30,11 @@ if (-not (Test-Path -LiteralPath $target)) {
 $script = Join-Path $target 'tos_capture.ps1'
 Copy-Item -LiteralPath (Join-Path $PSScriptRoot 'tos_capture.ps1') -Destination $script -Force
 
-$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument (
-    '-NoProfile -NonInteractive -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $script + '"')
+# A headless console host, so there is no window to close by accident: asked to hide
+# itself, powershell.exe still ends up in a window where Windows Terminal is the default
+# terminal. Stopping the task ends only this host; the capture watches it and stops too.
+$action = New-ScheduledTaskAction -Execute 'conhost.exe' -Argument (
+    '--headless powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + $script + '"')
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
 $trigger.Repetition = (New-ScheduledTaskTrigger -Once -At (Get-Date) `
         -RepetitionInterval (New-TimeSpan -Minutes $RepeatMinutes)).Repetition

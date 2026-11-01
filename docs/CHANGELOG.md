@@ -4,7 +4,19 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-01 (**/ES and /NQ rows on the Desk's Dealer Positioning panel, with the frame unchanged and a scrollbar.**)
+**Last updated:** 2026-11-01 (**The ThinkorSwim capture runs with no window, and a stray line in `.env` no longer stops its plan.**)
+
+- The operator could close the capture by accident: asked to hide itself, `powershell.exe` still
+  landed in a Windows Terminal window. The task now starts it through `conhost.exe --headless`.
+- Stopping the task ends only that host, so the capture holds its parent's handle and stops
+  itself within a sleep slice, with its usual cleanup. Only a `conhost` parent is watched. Run on
+  this PC: no new terminal, a second start does not double it, a stop leaves no process, and a
+  start after it runs again. Re-run the installer to pick this up.
+- Found in that log: every plan call failed with exit 127. Prod's `.env` opens with a prose line
+  that has lost its `#`; systemd skips it, but `tools/futures_chain_remote.sh` loaded the file
+  under `set -e`. It now loads it without. No capture could have started until this is promoted.
+
+**Prior —** 2026-11-01 (**/ES and /NQ rows on the Desk's Dealer Positioning panel, with the frame unchanged and a scrollbar.**)
 
 - The operator's request. `options:matrix` is public and the feed never reaches a public key,
   so each accepted capture writes its own short row (`services/options_svc/futures_chain_desk.py`,

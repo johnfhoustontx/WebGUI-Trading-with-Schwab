@@ -14,5 +14,9 @@
 # python, which reads it.
 set -e
 cd "$(dirname "$0")/.."
+# Not under -e: a stray line in .env would end this script here, and systemd, which the
+# services load the same file through, only skips such a line.
+set +e
 set -a; . ./.env; set +a
+set -e
 exec .venv/bin/python -X utf8 tools/futures_chain_cli.py "$@"

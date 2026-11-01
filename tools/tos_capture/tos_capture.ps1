@@ -131,6 +131,7 @@ $script:PlanRetryAt = 0.0
 $script:PlanRetryDelay = 0.0
 $script:DefaultedSettings = @{}
 $script:RestoreSeen = @{}
+$script:ConsoleHost = $null
 $script:WatchShell = $null
 # Shared with the watchdog's thread.
 $script:Watch = [hashtable]::Synchronized(@{
@@ -1013,12 +1014,34 @@ function Invoke-Prepare {
     }
 }
 
+function Get-ConsoleHost {
+    # The headless console host the task starts this copy through, or $null when this copy
+    # was started some other way. A stopped task ends only the host, and nothing tells
+    # this copy, so it has to look. Reading Handle keeps it open, so HasExited stays true
+    # to this process even if Windows gives its id to another.
+    try {
+        $parentId = (Get-CimInstance Win32_Process -Filter ('ProcessId=' + $PID)).ParentProcessId
+        $parent = [Diagnostics.Process]::GetProcessById($parentId)
+        if ($parent.ProcessName -eq 'conhost') {
+            [void]$parent.Handle
+            return $parent
+        }
+    } catch {
+        Write-Log ('could not read the parent process: ' + $_.Exception.Message)
+    }
+    return $null
+}
+
+function Test-HostGone {
+    return ($null -ne $script:ConsoleHost -and $script:ConsoleHost.HasExited)
+}
+
 function Wait-Sleeping {
     # A sleep in short pieces, each with a heartbeat: a long wait is not a hang.
     param([double]$Seconds)
     $until = (Get-EpochSeconds) + $Seconds
     $left = $Seconds
-    while ($left -gt 0) {
+    while ($left -gt 0 -and -not (Test-HostGone)) {
         Update-Heartbeat
         Start-Sleep -Milliseconds ([math]::Max(10, [int]([math]::Min($left, $SleepSliceSec) * 1000)))
         $left = $until - (Get-EpochSeconds)
@@ -1035,7 +1058,7 @@ function Wait-NextBoundary {
     $interval = [double]$script:Plan.interval_sec
     $now = Get-EpochSeconds
     $next = ([math]::Floor($now / $interval) + 1) * $interval
-    while ($now -lt $next) {
+    while ($now -lt $next -and -not (Test-HostGone)) {
         # A sleep can wake a little early, and that would capture this boundary twice.
         Wait-Sleeping ($next - $now)
         $now = Get-EpochSeconds
@@ -1347,6 +1370,7 @@ function Invoke-Main {
             if ($script:SnapshotCount -eq 0) { $script:ExitCode = 1 }
             return
         }
+        $script:ConsoleHost = Get-ConsoleHost
         while ($true) {
             Update-Heartbeat
             try {
@@ -1355,6 +1379,10 @@ function Invoke-Main {
                 Write-Log ('prepare failed: ' + $_.Exception.Message)
             }
             Wait-NextBoundary
+            if (Test-HostGone) {
+                Write-Log 'the task was stopped; this capture stops'
+                return
+            }
             try {
                 Invoke-Prepare -KeepTime
             } catch {
