@@ -553,7 +553,7 @@ structure · what should I act on · what is being said.*
 | Panel | What it gives you |
 |-------|-------------------|
 | **Top strip** | Clock, two dials showing **Day / Week / Month** for sentiment and trend, then **Bias** (Long / Neutral / Cautious / Short), **Signal** (Strong Bull … Strong Bear) and the **market regime** word |
-| **Dealer Positioning** | One row each for **$SPX, SPY, QQQ, $NDX** — price, gamma flip and distance to it, call and put walls, net gamma, and a pins-or-runs chip |
+| **Dealer Positioning** | One row each for **$SPX, SPY, QQQ, $NDX**, then **/ES and /NQ** once captures arrive (scroll the panel to reach them; the frame stays four rows high, and they are not on the public Desk) — price, gamma flip and distance to it, call and put walls, net gamma, and a pins-or-runs chip |
 | **Opportunity Board** | The six hottest names, with implied volatility and whether it is rising or falling, and a setup tag |
 | **Live Flow Alerts** | The newest unusual-options events. A row that names one contract can carry a bar under it: the estimated share of its volume that was bought (green), sold (red), or could not be told (grey) |
 | **Headlines** | The nine newest stories from Market News, one line each — time (Central), feed, and the headline, which opens the article in a new tab. **All headlines →** opens Market News. It sits beside Live Flow Alerts. How many it shows is a setting: **Settings → Configuration → Market news → Headlines on the Desk** |

@@ -79,7 +79,9 @@ on · what is being said.*
   read yet**, so every chip falls back to the three-month view and the strip says
   so under the count. A colour you see pre-open is **not** a statement about
   today.
-- **Dealer positioning** — one row each for **$SPX, SPY, QQQ, $NDX**: price, the
+- **Dealer positioning** — one row each for **$SPX, SPY, QQQ, $NDX** (**/ES and
+  /NQ** follow once captures arrive: **scroll the panel** to reach them, and under
+  their price they say when they were captured, not a day change): price, the
   **floor**, a little bar showing where price sits **between the walls**, the
   **ceiling** (the put and call walls — each coloured like its marker on the bar,
   and the ceiling only caps price while price is below it), the **flip level**

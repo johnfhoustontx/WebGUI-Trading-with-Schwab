@@ -742,6 +742,9 @@ design in [the chain feed design](docs/plans/2026-10-31-futures-0dte-chain-feed-
   places or prepares no order.
 - **Ships hidden.** `[capture] show_in_dropdown = false`; the list changes only when the
   operator decides.
+- **The Desk's rows are private.** `/desk` is a published screen, and its /ES and /NQ rows
+  read `futures_chain.DESK_VIEW`, which `desk.live_views` keeps off the public origin; they
+  are not in `options:matrix` because that view is public. They keep the feed's own clock.
 
 **Other standing facts.**
 - The one-minute GEX poll is `fetch_minute` → `derive_minute`, and a collected

@@ -33,6 +33,11 @@ STREAM = "cmd:futures_chain"
 _CHAIN_PREFIX = "cache:options:futures_chain:"
 # The feed's health: capture age, what each instrument last did, and why not.
 STATUS_KEY = "cache:options:futures_chain_status"
+# One short row per symbol for the Desk's Dealer Positioning panel, written by the
+# stream's consumer on each accepted capture and read only by the private Desk. The
+# view's name is what a page asks ``bus_client`` for.
+DESK_VIEW = "options:futures_chain_desk"
+DESK_KEY = f"cache:{DESK_VIEW}"
 # What the stopped-capture alert has already told the operator, per instrument.
 # Its own key: STATUS_KEY is read, changed and written back by the stream's
 # consumer thread, and a second writer on it would lose one of the two writes.

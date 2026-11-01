@@ -796,6 +796,7 @@ empty, not a number, not finite or a boolean is `null`, never 0; a price or coun
 | `cache:options:futures_chain:<FOP.ES or FOP.NQ>` | `{chain, captured_at, expiry, hours_left}`: the adapted chain in Schwab's layout (one expiry key, `YYYY-MM-DD:0`, every contract at `daysToExpiration` 0, open interest and volume already scaled by multiplier / 100, a calculated `gamma`, and `series`), the capture's epoch time, the ISO expiry and the hours to the close. No event is published |
 | `cache:options:futures_chain:<symbol>:frozen` | The same, for the last capture taken at least `frozen_before_expiry_min` (60) before expiry |
 | `cache:options:futures_chain_status` | The feed's health: `{<symbol>: entry, pc: {reason, at}}`, below |
+| `cache:options:futures_chain_desk` | The private Desk's rows: `{<symbol>: {latest, frozen}}`, each `{symbol, spot, flip, call_wall, put_wall, net_gex, gex_regime, captured_at, expiry, not_moving}`. Written on each accepted capture; `frozen` stops `frozen_before_expiry_min` before expiry. The published Desk never reads it. |
 | `cache:options:futures_chain_alert` | What the stopped-capture alert has told the operator: `{<symbol>: {alerted_at}}` for each instrument last reported stopped. Its own key: the status view is read, changed and written back by the stream's consumer thread, and a second writer would lose a write. Nothing else reads it |
 | `cache:options:gamma` | For these symbols only, the usual snapshot plus a **`feed`** block: `{label (/ES), captured_at, expiry, frozen, stale, reason, why, strike_low, strike_high, last_row_at}`. `stale` and `frozen` are worked out when the payload is built and are as old as it, so a reader works the state out again against its own clock; `reason` is the age sentence plus `why`; `why` is the cause alone; `strike_low` / `strike_high` are the range captured; `last_row_at` is where the session's rows end. A stale or frozen payload carries no `forward` band. `compute.gamma_snapshot` is called with `with_term=False`, so there is no Term |
 | `cache:options:gamma_symbols` | Lists `FOP.ES` and `FOP.NQ` only while `show_in_dropdown` is on. The public list (`public_gamma.SYMBOLS_KEY`) never does |
@@ -1481,6 +1482,7 @@ cache:options:futures_chain:<FOP.ES | FOP.NQ>   (the newest /ES or /NQ chain, ad
 cache:options:futures_chain:<FOP.ES | FOP.NQ>:frozen   (the last capture far enough before expiry)
 cache:options:futures_chain_status   (the feed's health, per instrument, and the PC's report)
 cache:options:futures_chain_alert    (what the stopped-capture alert has told the operator)
+cache:options:futures_chain_desk     (the private Desk's /ES and /NQ rows)
 cmd:futures_chain                    (the PC's snapshots, over ssh through tools/futures_chain_cli.py)
 cmd:options
 ```

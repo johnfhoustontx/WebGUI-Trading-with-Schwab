@@ -2567,7 +2567,8 @@ _ROW_BUILDERS = ("_dealer_row", "_board_row", "_flow_row",
 def _painters_source():
     import textwrap
     parts = [textwrap.dedent(inspect.getsource(d.render))]
-    parts += [inspect.getsource(getattr(d, name)) for name in _ROW_BUILDERS]
+    parts += [inspect.getsource(getattr(d, name))
+              for name in (*_ROW_BUILDERS, "_paint_dealer")]
     return (chr(10) * 2).join(parts)
 
 
@@ -3919,7 +3920,9 @@ def test_the_empty_panels_use_the_apps_one_empty_line():
     # Seven, plus the headlines panel's two (cold feed, quiet feed) since
     # 2026-09-26 - and those two are worded differently too. It was eleven
     # until the Positions panel took its two away.
-    assert inspect.getsource(d.render).count("kit.empty(") == 9
+    # Two of them went to ``_paint_dealer`` when it left ``render``.
+    assert inspect.getsource(d.render).count("kit.empty(") == 7
+    assert inspect.getsource(d._paint_dealer).count("kit.empty(") == 2
     assert "text-center" in kit.EMPTY
 
 

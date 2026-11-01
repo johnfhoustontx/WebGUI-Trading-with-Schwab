@@ -321,6 +321,55 @@ def test_the_projected_band_starts_at_the_capture_inside_the_stock_window(
     assert band["ts"][0] == int(ct(2026, 11, 2, 9, 0).timestamp())
 
 
+# ── the Desk's row ───────────────────────────────────────────────────────────
+
+def desk_entry(bus, symbol="FOP.ES"):
+    return bus.cache_get(futures_chain.DESK_KEY).payload[symbol]
+
+
+def test_a_capture_writes_the_figures_the_page_shows(bus, db, write_captures):
+    write_captures(ct(2026, 11, 2, 9, 0))
+    row = desk_entry(bus)["latest"]
+    gex = snapshot(bus, "FOP.ES", now=ct(2026, 11, 2, 9, 1))["views"]["GEX"]
+    assert row["captured_at"] == ct(2026, 11, 2, 9, 0).timestamp()
+    assert row["expiry"] == "2026-11-02" and row["spot"] == PRICE["ES"]
+    assert row["flip"] == gex["flip"]
+    assert sorted(w for w in (row["put_wall"], row["call_wall"]) if w) == sorted(gex["walls"])
+    assert row["not_moving"] is False
+
+
+def test_the_last_hour_does_not_replace_the_kept_row(bus, db, write_captures):
+    write_captures(ct(2026, 11, 2, 13, 55), ct(2026, 11, 2, 14, 30))
+    entry = desk_entry(bus)
+    assert entry["frozen"]["captured_at"] == ct(2026, 11, 2, 13, 55).timestamp()
+    assert entry["latest"]["captured_at"] == ct(2026, 11, 2, 14, 30).timestamp()
+
+
+def test_each_symbol_keeps_its_own_row(bus, db, write_captures):
+    write_captures(ct(2026, 11, 2, 9, 0))
+    write_captures(ct(2026, 11, 2, 9, 1), instrument="NQ")
+    assert desk_entry(bus, "FOP.ES")["latest"]["spot"] == PRICE["ES"]
+    assert desk_entry(bus, "FOP.NQ")["latest"]["spot"] == PRICE["NQ"]
+
+
+def test_a_failed_desk_row_costs_the_row_and_not_the_capture(
+        bus, db, write_captures, monkeypatch):
+    from services.options_svc import futures_chain_desk
+    def boom(*a, **k):
+        raise RuntimeError("no row")
+    monkeypatch.setattr(futures_chain_desk, "publish", boom)
+    before = _degrade.total()
+    write_captures(ct(2026, 11, 2, 9, 0))
+    assert feed.latest(bus, "FOP.ES") is not None
+    assert bus.cache_get(futures_chain.DESK_KEY) is None
+    assert _degrade.total() == before + 1
+
+
+def test_the_desk_key_is_not_a_public_one():
+    assert futures_chain.DESK_KEY == f"cache:{futures_chain.DESK_VIEW}"
+    assert "public" not in futures_chain.DESK_KEY
+
+
 # ── stale and frozen ─────────────────────────────────────────────────────────
 
 def test_a_current_capture_is_neither_stale_nor_frozen(bus, db, write_captures):

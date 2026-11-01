@@ -248,6 +248,9 @@ was replaced by Bias and Signal on 2026-08-24.
 change, the **gamma flip** with the signed distance to it, the **call and put
 walls**, net gamma exposure, and a regime chip. The small bar shows where price
 sits *between the two walls*.
+/ES and /NQ follow the four once captures arrive, in the private app only. The frame stays
+four rows high, so scroll the panel to reach them. Under their price they say when the
+capture was taken instead of a day change, and their walls hide when that capture is old.
 
 The chip reads **LONG GAMMA · PINS** or **SHORT GAMMA · RUNS**, and it is derived
 from price-versus-flip and nothing else. Net gamma exposure is shown beside it as a

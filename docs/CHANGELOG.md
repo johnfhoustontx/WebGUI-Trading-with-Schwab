@@ -4,7 +4,21 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-01 (**/ES and /NQ are captured from 06:00 Central on the expiry's date, not from 17:00 the evening before.**)
+**Last updated:** 2026-11-01 (**/ES and /NQ rows on the Desk's Dealer Positioning panel, with the frame unchanged and a scrollbar.**)
+
+- The operator's request. `options:matrix` is public and the feed never reaches a public key,
+  so each accepted capture writes its own short row (`services/options_svc/futures_chain_desk.py`,
+  `cache:options:futures_chain_desk`), and the private Desk reads it through `pages/desk_feed.py`.
+  The published Desk does not probe the view (`desk.live_views`) and its panel is unchanged.
+- Head + four rows measure 276.75 px at 1920 (63.19 a row), so the body stops at 277, or 296
+  with the stale-walls note, and scrolls under a pinned head. Checked in the page harness with
+  the feed view rewritten every 8 s: the scroll position survives a repaint.
+- A row has no prior close, so its second line says `as of 13:55`. It keeps its own clock: the
+  stock feed's stale note now says "Stock and index walls" when these rows share the panel. A
+  row is not clickable while `show_in_dropdown` is off, as the list could not hold the symbol.
+- `_paint_dealer` moved out of `desk.render` to module level, and its ceiling came down with it.
+
+**Prior —** 2026-11-01 (**/ES and /NQ are captured from 06:00 Central on the expiry's date, not from 17:00 the evening before.**)
 
 - The operator's call: 06:00 to the 15:00 expiry, Monday to Friday. It is one setting,
   `[session] open_ct`, and no second clock: `session_bounds` puts a start before `close_ct` on
