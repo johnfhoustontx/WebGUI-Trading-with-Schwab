@@ -13,6 +13,7 @@ import io
 import json
 import pathlib
 import sqlite3
+import threading
 import types
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -22,7 +23,7 @@ import pytest
 from services import _degrade
 from services.options_svc import compute  # noqa: F401  puts options-scanner on sys.path
 from services.options_svc import futures_chain_feed as feed
-from shared import futures_chain
+from shared import futures_chain, futures_chain_config
 from shared.bus import Bus
 from shared.bus.client import reset_fake_bus
 from shared.contracts.envelope import Command
@@ -564,6 +565,74 @@ def test_a_store_that_wrote_no_gamma_row_is_a_reason_and_no_chain(bus, db, monke
     monkeypatch.setattr(feed, "_store", lambda adapted: False)
     handle(bus, cmd(snapshot(captured=T)))
     assert latest(bus, "FOP.ES") is None and "gamma" in status(bus)["FOP.ES"]["reason"]
+
+
+def test_a_store_that_wrote_no_gamma_row_says_so_truly_and_counts(bus, db, monkeypatch, degrade_count):
+    """It may have been the store and not the chain: the reason must not say the
+    chain could not be priced as if that were known."""
+    monkeypatch.setattr(feed, "_store", lambda adapted: False)
+    handle(bus, cmd(snapshot(captured=T)))
+    reason = status(bus)["FOP.ES"]["reason"]
+    assert degrade_count() == 1
+    assert "busy" in reason and "gamma" in reason and "log" in reason
+
+
+def _busy_wait(monkeypatch, seconds):
+    real = futures_chain_config.capture
+    monkeypatch.setattr(futures_chain_config, "capture",
+                        lambda: {**real(), "store_busy_wait_sec": seconds})
+
+
+def test_a_store_locked_for_a_moment_loses_nothing(bus, db, monkeypatch):
+    """The consumer has a thread of its own and can wait out a purge's transaction."""
+    handle(bus, cmd(snapshot(captured=T - 300)))     # the schema exists
+    _busy_wait(monkeypatch, 20)
+    holder = sqlite3.connect(str(db), timeout=0, check_same_thread=False)
+    holder.execute("BEGIN IMMEDIATE")
+    release = threading.Timer(1.0, holder.rollback)
+    release.start()
+    try:
+        handle(bus, cmd(snapshot(captured=T)))
+    finally:
+        release.join()
+        holder.close()
+    entry = status(bus)["FOP.ES"]
+    assert entry["captured_at"] == T and entry["reason"] == ""
+
+
+def test_a_store_locked_past_the_wait_leaves_a_true_reason(bus, db, monkeypatch, degrade_count):
+    handle(bus, cmd(snapshot(captured=T - 300)))
+    _busy_wait(monkeypatch, 1)
+    holder = sqlite3.connect(str(db), timeout=0)
+    holder.execute("BEGIN IMMEDIATE")
+    try:
+        handle(bus, cmd(snapshot(captured=T)))
+    finally:
+        holder.rollback()
+        holder.close()
+    entry = status(bus)["FOP.ES"]
+    assert entry["captured_at"] == T - 300, "the capture before it stands"
+    assert "busy" in entry["reason"] and degrade_count() >= 1
+
+
+def test_the_schema_is_made_once_per_store_and_process(bus, db, monkeypatch):
+    gex_collector, gex_history, _engine = feed._engines()
+    real, calls = gex_history.init_schema, []
+    monkeypatch.setattr(gex_history, "init_schema",
+                        lambda conn: (calls.append(1), real(conn))[1])
+    handle(bus, cmd(snapshot(captured=T - 600)))
+    handle(bus, cmd(snapshot(captured=T - 300)))
+    handle(bus, cmd(snapshot(captured=T)))
+    assert calls == [1]
+    assert status(bus)["FOP.ES"]["captured_at"] == T
+
+
+def test_a_long_refusal_is_cut_like_the_pcs_own(bus, db, monkeypatch):
+    def _long(_snapshot):
+        raise feed.Refused("the series named " + "E1AX26, " * 200)
+    monkeypatch.setattr(feed, "build_chain", _long)
+    handle(bus, cmd(snapshot(captured=T)))
+    assert len(status(bus)["FOP.ES"]["reason"]) <= feed._MAX_REASON
 
 
 def test_the_store_reports_whether_the_gamma_row_landed(bus, db, monkeypatch):

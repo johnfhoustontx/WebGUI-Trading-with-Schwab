@@ -198,11 +198,73 @@ def test_the_shipped_values_and_the_scripts_defaults_agree():
         shipped = tomllib.load(fh)["capture"]
     table = CODE[CODE.index("$PlanSettings"):CODE.index("$RtdFields")]
     found = re.findall(r"(\w+) = '\w+'", table)
-    assert len(found) == 10
+    assert len(found) == 11
     for key in found:
         default = re.search(rf"^\$\w+ = ([\d.]+)\s*# {key}$", CODE, re.M)
         assert default, key
         assert float(default.group(1)) == shipped[key], key
+
+
+def _plan_settings():
+    table = CODE[CODE.index("$PlanSettings = "):CODE.index("$RtdFields")]
+    return dict(re.findall(r"(\w+) = '(\w+)'", table))
+
+
+def test_each_plan_key_maps_to_the_variable_that_holds_its_default():
+    """A key mapped to the wrong variable sets the wrong setting, silently: the stated
+    default on the variable's own line names the same key, and the variable is used."""
+    settings = _plan_settings()
+    assert len(set(settings.values())) == len(settings)
+    for key, variable in settings.items():
+        assert re.search(rf"^\${variable} = [\d.]+\s*# {key}$", CODE, re.M), key
+        uses = re.findall(rf"\${variable}\b", CODE)
+        assert len(uses) >= 2, f"${variable} is set and never read"
+
+
+def test_the_plan_carries_exactly_the_keys_the_script_reads():
+    from shared import futures_chain
+    assert set(_plan_settings()) == set(futures_chain._PC_SETTINGS)
+
+
+# ── the watchdog's second stage ──────────────────────────────────────────────
+
+def _watchdog_body():
+    return SRC[SRC.index("$WatchdogBody = @'"):SRC.index("function Update-Heartbeat")]
+
+
+def test_a_call_that_does_not_throw_after_the_stop_ends_the_process():
+    # Stopping Excel only helps if the stuck COM call then throws. If it does not, the
+    # loop is gone for good and a hung process has not failed: only an exit brings the
+    # task's repeating trigger back.
+    body = _watchdog_body()
+    assert "$Watch.ExitAfterSec" in body
+    assert "GetCurrentProcess().Kill()" in body
+    assert body.index("Stop-OwnedExcel") < body.index("GetCurrentProcess().Kill()")
+
+
+def test_the_exit_is_logged_before_it_happens():
+    body = _watchdog_body()
+    assert re.search(r"AppendAllText\(\$Watch\.LogPath", body)
+    kill = body.index("GetCurrentProcess().Kill()")
+    assert "AppendAllText" in body[body.rindex("ExitAfterSec", 0, kill):kill]
+
+
+def test_the_exit_needs_a_heartbeat_missing_since_the_stop():
+    # A loop that has beaten since the stop came back by itself and must be left alone.
+    body = _watchdog_body()
+    assert "$Watch.Beat -gt $stoppedAt" in body or "$Watch.Beat -lt $stoppedAt" in body
+
+
+def test_the_exit_time_is_the_plans():
+    assert "$script:Watch.ExitAfterSec" in _function("Update-WatchdogLimit")
+    assert "$HangExitAfterSec" in _function("Update-WatchdogLimit")
+    assert _plan_settings()["hang_exit_after_sec"] == "HangExitAfterSec"
+
+
+def test_the_reasons_are_joined_as_the_server_parses_them():
+    # The server splits on ";" and a space before a root's name, and each sentence can
+    # hold a semicolon of its own. With a bare space, /ES's label carries /NQ's reason.
+    assert "$reasons -join '; '" in CODE
 
 
 # ── the rest ─────────────────────────────────────────────────────────────────

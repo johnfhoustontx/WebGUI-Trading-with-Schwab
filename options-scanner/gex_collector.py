@@ -28,6 +28,7 @@ from gamma_tool import GammaEngine
 import gex_history_db as db
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
+from shared import futures_chain as _futures_chain  # noqa: E402
 from shared import symbols as _symbols  # noqa: E402
 from shared.raw_minute import RawMinute  # noqa: E402
 import iv_analysis
@@ -89,7 +90,9 @@ def collection_symbols():
         return list(SYMBOLS)
     out, seen = [], set()
     for s in list(SYMBOLS) + list(extra or []):
-        if s and s not in seen:
+        # /ES and /NQ have no chain at Schwab: the ticker rule passes their names, so
+        # a watchlist entry must not become a request every minute.
+        if s and s not in seen and not _futures_chain.is_feed_symbol(s):
             seen.add(s)
             out.append(s)
     return out

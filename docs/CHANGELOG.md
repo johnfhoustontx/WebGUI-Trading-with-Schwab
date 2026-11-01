@@ -6,6 +6,15 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 **Last updated:** 2026-10-31 (**/ES and /NQ 0-DTE option chains on Dealer Positioning, captured from ThinkorSwim on the PC. Ships hidden.**)
 
+- **The final review's fix wave.** The PC's reasons are joined with `; `, which is what the
+  server splits on: a logged-out ThinkorSwim gave /ES's label /NQ's reason and /NQ's none.
+  `raw_shadow` compares only the symbols a raw minute names, so a feed row is no difference.
+  One column width (`column_step`), and an outage tolerance that scales with the interval
+  (`outage_after`): changing `interval_sec` alone left bars, Smooth, blanks and the projection
+  wrong. A missed capture blanks at a lowered step. The feed waits for a busy store
+  (`store_busy_wait_sec`) and makes the schema once. `FOP.ES` is refused by the Symbol lookup
+  and the public Finder and never collected from a watchlist. The watchdog has a second stage
+  (`hang_exit_after_sec`). A frozen label drops its cause between sessions.
 - The operator wanted dealer positioning for /ES and /NQ computed only from their own
   0-DTE futures option chains, not from `$SPX` or `$NDX`. Schwab serves no futures-option
   chains, so a capture on the operator's Windows PC reads them out of ThinkorSwim through

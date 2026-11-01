@@ -9,6 +9,7 @@ import ast
 import datetime as _dt
 import json
 import pathlib
+import re
 import sqlite3
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
@@ -370,6 +371,96 @@ def test_another_instruments_reason_stays_off_this_label(bus, db, write_captures
     assert _why_not_capturing(bus, "FOP.ES") == "ThinkorSwim is logged out"
 
 
+def _script_separator():
+    """The separator the capture on the PC really joins its reasons with."""
+    script = pathlib.Path(__file__).resolve().parents[3] / "tools" / "tos_capture" / "tos_capture.ps1"
+    found = re.search(r"\$reason = \$reasons -join '([^']*)'",
+                      script.read_text(encoding="utf-8"))
+    assert found, "the capture's status line moved"
+    return found.group(1)
+
+
+def test_the_pcs_own_wording_reaches_each_instruments_own_label(bus, db, write_captures):
+    """ThinkorSwim logged out overnight, the commonest failure, in the script's exact
+    words and its own separator. Each sentence holds a semicolon of its own."""
+    write_captures(ct(2026, 11, 2, 9, 0))
+    logged_out = "every contract reads N/A; ThinkorSwim may be logged out"
+    wire = _script_separator().join([f"ES: {logged_out}", f"NQ: {logged_out}"])
+    feed.handle(bus, Command(type="pc_status", args={
+        "reason": wire, "at": ct(2026, 11, 2, 9, 3).timestamp()}))
+    from services.options_svc.futures_chain_snapshot import _why_not_capturing
+    assert _why_not_capturing(bus, "FOP.ES") == f"/ES: {logged_out}"
+    assert _why_not_capturing(bus, "FOP.NQ") == f"/NQ: {logged_out}"
+
+
+def test_the_pcs_mixed_reasons_stay_with_their_own_instrument(bus, db, write_captures):
+    write_captures(ct(2026, 11, 2, 9, 0))
+    wire = _script_separator().join([
+        "ES: the sheet was still filling when it was written; it is read at the next boundary",
+        "NQ: read 100 of 400 contracts tried; not sent"])
+    feed.handle(bus, Command(type="pc_status", args={
+        "reason": wire, "at": ct(2026, 11, 2, 9, 3).timestamp()}))
+    from services.options_svc.futures_chain_snapshot import _why_not_capturing
+    assert _why_not_capturing(bus, "FOP.ES") == (
+        "/ES: the sheet was still filling when it was written; it is read at the next boundary")
+    assert _why_not_capturing(bus, "FOP.NQ") == "/NQ: read 100 of 400 contracts tried; not sent"
+
+
+def test_an_old_reason_does_not_follow_a_frozen_label_through_a_weekend(bus, db, write_captures):
+    """Friday's cause, read on Saturday: it is not why nothing is arriving now."""
+    write_captures(ct(2026, 11, 6, 13, 55))
+    feed.handle(bus, Command(type="pc_status", args={
+        "reason": "ThinkorSwim is logged out", "at": ct(2026, 11, 6, 14, 30).timestamp()}))
+    block = snapshot(bus, "FOP.ES", now=ct(2026, 11, 7, 12, 0))["feed"]
+    assert block["frozen"] is True and block["stale"] is False
+    assert block["why"] == "" and "logged out" not in block["reason"]
+
+
+def test_a_frozen_label_in_the_next_session_still_says_why(bus, db, write_captures):
+    """Trading is open and nothing has arrived: the cause is current."""
+    write_captures(ct(2026, 11, 6, 13, 55))
+    feed.handle(bus, Command(type="pc_status", args={
+        "reason": "ThinkorSwim is logged out", "at": ct(2026, 11, 8, 17, 10).timestamp()}))
+    block = snapshot(bus, "FOP.ES", now=ct(2026, 11, 8, 17, 20))["feed"]
+    assert block["frozen"] is True and block["stale"] is True
+    assert block["why"] == "ThinkorSwim is logged out"
+
+
+def test_the_levels_and_hedge_stay_parallel_with_the_rows_at_the_shipped_step(bus, db, write_captures):
+    """The page lays them out by position, one value per row: at the shipped step,
+    with one column per capture, each must have exactly one entry per row."""
+    assert fill_step() == futures_chain_config.capture()["interval_sec"]
+    start = ct(2026, 11, 2, 9, 0)
+    write_captures(*(start + _dt.timedelta(minutes=5 * i) for i in range(6)))
+    snap = snapshot(bus, "FOP.ES", now=start + _dt.timedelta(minutes=26))
+    for view in ("GEX", "DEX"):
+        entry = snap["views"][view]
+        rows = entry["history"]
+        assert len(rows) == 6, view
+        levels = entry.get("levels")
+        assert levels, view
+        for key, values in levels.items():
+            assert len(values) == len(rows), (view, key)
+    times = [row[0] for row in snap["views"]["GEX"]["history"]]
+    hedge = snap.get("hedge_history") or []
+    assert hedge and [row["ts"] for row in hedge] == times
+
+
+def test_a_changed_interval_changes_the_columns_it_repeats_to(bus, db, write_captures, monkeypatch):
+    """Rows at 120 with a step of 300 are one column a capture, not a repeat of 300."""
+    real = futures_chain_config.capture
+    monkeypatch.setattr(futures_chain_config, "capture",
+                        lambda: {**real(), "interval_sec": 120, "fill_step_sec": 60})
+    start = ct(2026, 11, 2, 9, 0)
+    write_captures(start, start + _dt.timedelta(minutes=2))
+    rows = snapshot(bus, "FOP.ES", now=start + _dt.timedelta(minutes=3))["views"]["GEX"]["history"]
+    assert rows[1][0] - rows[0][0] == 60 and len(rows) == 3
+    monkeypatch.setattr(futures_chain_config, "capture",
+                        lambda: {**real(), "interval_sec": 120, "fill_step_sec": 300})
+    rows = snapshot(bus, "FOP.ES", now=start + _dt.timedelta(minutes=3))["views"]["GEX"]["history"]
+    assert [b[0] - a[0] for a, b in zip(rows, rows[1:])] == [120]
+
+
 def test_a_stale_snapshot_says_why_the_capture_stopped(bus, db, write_captures):
     write_captures(ct(2026, 11, 2, 9, 0))
     feed.handle(bus, Command(type="pc_status",
@@ -587,6 +678,17 @@ def test_an_existing_symbol_prices_with_no_new_arguments(db, monkeypatch):
 
 def test_the_feed_stays_out_of_the_collection(show_true):
     assert not any(is_feed_symbol(s) for s in gex_collector.collection_symbols())
+
+
+def test_a_feed_symbol_on_the_watchlist_is_never_collected(monkeypatch):
+    """``clean_symbol`` passes ``FOP.ES``, so a watchlist entry would otherwise send a
+    chain request to Schwab every minute. Nothing else on the list changes."""
+    import watchlist
+    monkeypatch.setattr(watchlist, "get_scan_symbols", lambda: ["SPY", "FOP.ES", "MU", "FOP.NQ"])
+    out = gex_collector.collection_symbols()
+    assert "FOP.ES" not in out and "FOP.NQ" not in out
+    assert out == [*gex_collector.SYMBOLS,
+                   *(s for s in ("SPY", "MU") if s not in gex_collector.SYMBOLS)]
 
 
 def test_the_private_list_gets_the_feed_only_when_shown(bus, show_true, monkeypatch):

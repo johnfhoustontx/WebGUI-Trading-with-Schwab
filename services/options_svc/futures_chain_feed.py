@@ -48,13 +48,19 @@ log = logging.getLogger(__name__)
 # The swallowed-exception counter this feed reports under (``/health``).
 AREA = "options.futures_chain"
 
-# The longest reason text kept from the PC: it is shown on the Status page.
+# The longest reason text kept: it goes into the phone alert, the page's label and
+# ``/health``.
 _MAX_REASON = 300
 
 # What a status entry holds before the instrument has had a capture accepted.
 _BLANK = {"captured_at": None, "expiry": None, "listed": None, "with_gamma": None,
           "parity_gap": None, "reason": "", "repeats": 0, "refused_at": None,
           "price": None, "activity": None, "refused_listed": None}
+
+
+# The stores this process has made sure of, by file. Making sure takes a write lock
+# and is not free, on a thread that does this every interval.
+_SCHEMA_READY: set = set()
 
 
 def _now() -> float:
@@ -154,7 +160,14 @@ def _store(adapted) -> bool:
                     hours_left={adapted.symbol: adapted.hours_left})
     conn = gex_history.connect()
     try:
-        gex_history.init_schema(conn)
+        # A collector or purge transaction can hold the store for seconds, and
+        # ``derive_minute`` swallows the error it would get: this thread can wait.
+        wait_sec = futures_chain_config.capture()["store_busy_wait_sec"]
+        conn.execute(f"PRAGMA busy_timeout={int(wait_sec * 1000)}")
+        store_file = conn.execute("PRAGMA database_list").fetchone()[2]
+        if store_file not in _SCHEMA_READY:
+            gex_history.init_schema(conn)
+            _SCHEMA_READY.add(store_file)
         gex_collector.derive_minute(engine_class(), conn, raw)
         conn.commit()
         return conn.execute("SELECT 1 FROM snapshots WHERE symbol = ? AND view = 'gex' "
@@ -227,7 +240,7 @@ def _snapshot(bus, args) -> None:
     try:
         adapted = build_chain(snapshot)
     except Refused as refusal:
-        _refuse(bus, status, symbol, f"Refused: {refusal.reason}", now)
+        _refuse(bus, status, symbol, f"Refused: {refusal.reason}"[:_MAX_REASON], now)
         return
     except Exception:
         _degrade.degraded(AREA, detail=symbol)
@@ -269,8 +282,12 @@ def _snapshot(bus, args) -> None:
                 "the store (see the options service log).", now)
         return
     if not stored:
-        _refuse(bus, status, symbol, "Refused: the chain could not be turned into "
-                "gamma figures (see the options service log).", now)
+        # ``derive_minute`` logged why. It was the store being busy past the wait, or
+        # a chain it could not price, and from here the two look alike.
+        _degrade.degraded(AREA, detail=f"{symbol} no gamma row", exc_info=False)
+        _refuse(bus, status, symbol, "Refused: no gamma figures were stored. The store "
+                "may have been busy, or the chain could not be priced (see the options "
+                "service log).", now)
         return
 
     _publish(bus, adapted, capture)

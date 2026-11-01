@@ -35,12 +35,15 @@ frozen_repeats = 3
 # column is a real capture and nothing is repeated. A lower step repeats rows and
 # makes a heavier page: every repaint at 794 columns blocked the browser 4.5 s,
 # past NiceGUI's 2 s ping (measured 2026-10-31). Choose a step that divides
-# interval_sec, or the columns are unevenly spaced.
+# interval_sec, or the columns are unevenly spaced. Above the interval it reads as
+# the interval: rows are never further apart than captures are.
 fill_step_sec = 300
 # Two captures further apart than this have an outage between them, drawn blank.
 # Above the interval because a capture can be a minute late: rows are floored to
-# the minute and a read can cross one, giving gaps of 240 and then 360. A value
-# below the interval reads as the interval.
+# the minute and a read can cross one, giving gaps of 240 and then 360. This is
+# stated at the shipped interval of 300 and scales with interval_sec, so 450 is one
+# and a half intervals: 180 at an interval of 120, 900 at 600. A value that works
+# out below the interval reads as the interval.
 outage_after_sec = 450
 # The most blank columns one jump can add.
 max_outage_columns = 288
@@ -51,6 +54,9 @@ frozen_before_expiry_min = 60
 alert_repeat_min = 240
 # A snapshot larger than this is refused.
 max_snapshot_kb = 512
+# How long the feed waits for gex_history.db when another writer holds it. Its own
+# thread can wait; past this the capture is refused and the reason says so.
+store_busy_wait_sec = 30
 # The put-call check looks at this many strikes, nearest the future's price
 # first, for a call and a put that both have a mark. Not wider: far strikes
 # quote wide.
@@ -79,6 +85,10 @@ plan_retry_max_sec = 900
 # which frees the loop to start another. Longer than any honest stretch of work:
 # that is at most one workbook save or one whole ssh.
 hang_limit_sec = 600
+# Stopping that Excel should make the loop's stuck call throw. With still no sign of
+# life this long after the stop, the capture ends itself, and its scheduled task's
+# repeating trigger starts it again. It covers restarting Excel, three tries at most.
+hang_exit_after_sec = 240
 # Whether /ES and /NQ are offered in the Dealer Positioning symbol list. The
 # feed ships off the list; the operator decides when it joins.
 show_in_dropdown = false

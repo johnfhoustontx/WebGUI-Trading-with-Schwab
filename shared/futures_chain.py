@@ -240,7 +240,7 @@ def in_session(now: datetime) -> bool:
     return opens <= _central(now).timestamp() < ends
 
 
-# ── rows on a one-minute page ────────────────────────────────────────────────
+# ── rows on the page's columns ───────────────────────────────────────────────
 
 def fill_rows(rows: list, interval_sec: int, step_sec: int) -> list:
     """``rows`` (each led by its epoch second) with every row repeated every
@@ -275,7 +275,7 @@ def fill_rows(rows: list, interval_sec: int, step_sec: int) -> list:
 # because the PC and the server do not update together.
 _PC_SETTINGS = ("min_read_fraction", "fill_settle_sec", "fill_wait_max_sec",
                 "probe_round_steps", "probe_reach", "recentre_share", "ssh_timeout_sec",
-                "no_plan_retry_sec", "plan_retry_max_sec", "hang_limit_sec")
+                "no_plan_retry_sec", "plan_retry_max_sec", "hang_limit_sec", "hang_exit_after_sec")
 
 
 def build_plan(now: datetime) -> dict:

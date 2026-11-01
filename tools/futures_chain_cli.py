@@ -46,6 +46,11 @@ EXIT_OK, EXIT_BAD_INPUT, EXIT_TOO_BIG, EXIT_BUS = 0, 2, 3, 4
 # wrapping, and whitespace.
 _SLACK_BYTES = 64 * 1024
 
+# A capture is a document holding snapshots holding contracts. Deeper input parses and
+# then fails on its way to Redis, where it would read as Redis refusing a write.
+_MAX_DEPTH = 8
+_TOO_DEEP = "the input is nested too deeply to be a capture"
+
 
 class _Refused(Exception):
     """Input the command will not send; ``code`` is the exit status."""
@@ -83,12 +88,27 @@ def _read(stdin) -> str:
     return raw.lstrip("﻿")
 
 
+def _too_deep(value) -> bool:
+    """Whether ``value`` nests past ``_MAX_DEPTH``. A loop, so it cannot recurse."""
+    level = [value]
+    for _ in range(_MAX_DEPTH):
+        level = [child for item in level if isinstance(item, (dict, list))
+                 for child in (item.values() if isinstance(item, dict) else item)]
+        if not level:
+            return False
+    return True
+
+
 def _parse(text: str):
     """``(snapshots, status)`` from the input, or ``_Refused``."""
     try:
         payload = json.loads(text)
     except ValueError as exc:
         raise _Refused(f"the input is not JSON: {exc}") from None
+    except RecursionError:
+        raise _Refused(_TOO_DEEP) from None
+    if _too_deep(payload):
+        raise _Refused(_TOO_DEEP)
     if not isinstance(payload, dict):
         raise _Refused('the input must be a JSON object: {"snapshots": [...], "status": {...}}')
     snapshots = payload.get("snapshots", [])
@@ -99,7 +119,8 @@ def _parse(text: str):
         raise _Refused('"status" must be an object')
     roots = futures_chain_config.instruments()
     for index, snapshot in enumerate(snapshots):
-        if not isinstance(snapshot, dict) or snapshot.get("instrument") not in roots:
+        instrument = snapshot.get("instrument") if isinstance(snapshot, dict) else None
+        if not isinstance(instrument, str) or instrument not in roots:
             raise _Refused(f"snapshot {index + 1} is not a snapshot of {' or '.join(roots)}")
     if not snapshots and status is None:
         raise _Refused("the input holds nothing to send: no snapshots and no status")

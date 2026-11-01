@@ -46,6 +46,7 @@ import math
 
 from services import _degrade
 from services.options_svc import compute
+from shared import futures_chain
 
 #: The payload's complete key set. BOTH shapes are built from it.
 DOSSIER_KEYS = ("symbol", "error", "fetched_at", "spot", "day_pct",
@@ -193,6 +194,12 @@ def build_dossier(symbol):
     out = dict.fromkeys(DOSSIER_KEYS)
     out["symbol"] = symbol
     out["fetched_at"] = _stamp()
+
+    # /ES and /NQ never reach Schwab. The ticker rule passes their internal names, so
+    # one typed in reads as any symbol with no quote.
+    if futures_chain.is_feed_symbol(symbol):
+        out["error"] = NO_QUOTE
+        return out
 
     try:
         quote = _quote(symbol)

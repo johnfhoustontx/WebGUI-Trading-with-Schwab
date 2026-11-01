@@ -302,17 +302,27 @@ gamma spikes; this is the same behaviour as other 0-DTE symbols, not a defect he
   two must be split so these names reach the private list only, with a test that
   they never reach the public one.
 
-### 5.8 Five-minute rows on a one-minute page
+### 5.8 One column per capture
 
-`heatmap_matrix` makes one column per stored row, and the projected afternoon is one
-column per minute, so 5-minute rows would squeeze the morning relative to the
-projection. Hedge and level panels share that axis.
+`heatmap_matrix` makes one column per stored row, and an existing symbol's projected
+afternoon is one column per minute. Hedge and level panels share that axis.
 
-Plan: leave the store truthful with one row per capture, and when building the view
-repeat each row across the minutes to the next capture, for these symbols only, up to
-one interval. A longer outage stays a gap. Existing symbols go through unchanged
-code. The builder checks the interpolated heatmap (`uniform_strike_grid`,
-`raster_range`) with these strike grids: /NQ's strike spacing is unmeasured.
+The store stays truthful with one row per capture, and the view draws one column per
+capture: `fill_step_sec` ships at 300, the interval, so no row is repeated (5.11 has the
+measurement behind that). A column is `min(fill_step_sec, interval_sec)` apart
+(`futures_chain_config.column_step`), and everything that counts columns works from that
+one width: the Bar picker, Smooth, the blank columns of an outage and the projection,
+which steps at the same width for these symbols. A lower step repeats each row up to one
+interval, for these symbols only, and makes a heavier page.
+
+A longer outage stays a gap in the rows, and the page draws it as blank columns.
+`outage_after_sec` is stated at the shipped interval and scales with the real one
+(`futures_chain_config.outage_after`), so it is one and a half intervals as shipped: 450
+at 300, 180 at 120. A missed capture is a gap of two intervals and blanks; a capture a
+minute late does not. At a lowered step the jump is measured between captures, not from a
+capture's last repeat. Existing symbols go through unchanged code. The builder checks the
+interpolated heatmap (`uniform_strike_grid`, `raster_range`) with these strike grids:
+/NQ's strike spacing is unmeasured.
 
 ### 5.9 Staleness
 

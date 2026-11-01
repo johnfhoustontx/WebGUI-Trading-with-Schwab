@@ -2919,12 +2919,14 @@ _FUTURES_CHAIN = ConfigFile(
                   "is a real capture. Lower, each capture is repeated to this step "
                   "until the next one, and the page gets heavier: a whole session "
                   "at 100 seconds froze the browser for over 4 seconds at every "
-                  "repaint.",
+                  "repaint. Above the interval it reads as the interval.",
                   kind="int", unit="seconds", min=10, max=600, step=10),
             Field("capture.outage_after_sec", "Draw an outage when captures are apart by over",
-                  "Longer than this is drawn as a blank stretch. Keep it above the "
-                  "interval, because a capture can land a minute late; below the "
-                  "interval it counts as the interval.",
+                  "Longer than this is drawn as a blank stretch. Stated at an interval "
+                  "of 300 seconds and scaled with the interval above: 450 is one and a "
+                  "half intervals, so 180 at an interval of 120. Keep it above one "
+                  "interval, because a capture can land a minute late; below, it "
+                  "counts as one interval.",
                   kind="int", unit="seconds", min=30, max=86400, step=30),
             Field("capture.max_outage_columns", "Most blank columns for one outage",
                   "Only a limit on the page's size: a longer outage still reads as "
@@ -2932,8 +2934,9 @@ _FUTURES_CHAIN = ConfigFile(
                   kind="int", unit="columns", min=1, max=2000, step=12),
         )),
         Section("What makes a snapshot unfit",
-                "A snapshot that fails is not sent, and the reason is shown on "
-                "System Status.", (
+                "A snapshot that fails is not sent. The reason shows in the phone "
+                "alert, on the page's label, and in the options service's /health "
+                "report.", (
             _pct("capture.min_fill_fraction", "Least share of the most read lately",
                  "A capture reading fewer contracts than this share is not used. "
                  "The PC compares with the most its sheet has read, and rewrites "
@@ -2954,6 +2957,11 @@ _FUTURES_CHAIN = ConfigFile(
                   kind="int", unit="captures", min=2, max=100, step=1),
             Field("capture.max_snapshot_kb", "Largest snapshot",
                   "", kind="int", unit="KB", min=16, max=4096, step=16),
+            Field("capture.store_busy_wait_sec", "Wait for a busy history store",
+                  "The feed has a thread of its own and can wait out another writer. "
+                  "Past this, the capture is refused and the reason says the store "
+                  "may have been busy.",
+                  kind="int", unit="seconds", min=1, max=300, step=1),
             Field("capture.parity_strikes", "Strikes the put-call check looks at",
                   "Nearest the future's price first, for a call and a put that "
                   "both have a mark. Far strikes quote wide, so a wider look "
@@ -3005,6 +3013,12 @@ _FUTURES_CHAIN = ConfigFile(
                   "workbook save, or one whole ssh. The PC never uses less than "
                   "twice the ssh limit above.",
                   kind="int", unit="seconds", min=120, max=7200, step=30),
+            Field("capture.hang_exit_after_sec", "End a capture still hung after",
+                  "Stopping the Excel should make the loop's stuck call fail. With "
+                  "still no sign of life this long after that, the capture ends "
+                  "itself and its scheduled task starts it again within a few minutes. "
+                  "Long enough to restart Excel, which can take three tries.",
+                  kind="int", unit="seconds", min=60, max=3600, step=30),
         )),
         Section("Between sessions",
                 "The heatmaps keep the last session. The by-strike charts show "

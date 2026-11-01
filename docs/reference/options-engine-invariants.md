@@ -1480,6 +1480,10 @@ regular `$SPX` session's payload, a 120-second step 1.93 times, and every repain
 a symbol pick). So `fill_step_sec` ships at 300, the interval, and no row is repeated. The
 outage rule follows: a read that crosses a minute boundary gives gaps of 240 and then 360
 seconds, which is a late capture and not a missing one, so `outage_after_sec` ships at 450.
+Read in seconds alone, 450 hid one or two missed captures at an interval of 120 and called a
+late capture an outage at 600, so it is stated at the shipped interval and scales with the
+real one (`futures_chain_config.outage_after`); and a column's width is `column_step()`, never
+the step alone, or a changed interval leaves every width on the page wrong.
 Rows are floored to the minute when stored, so a stored gap can be a minute off the real one.
 
 **Why the capture never touches the operator's Excel.** ThinkorSwim serves these chains

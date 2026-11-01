@@ -36,7 +36,7 @@ def test_the_capture_defaults():
         "min_read_fraction": 0.25, "fill_settle_sec": 5, "fill_wait_max_sec": 20,
         "probe_round_steps": 10, "probe_reach": 3, "recentre_share": 0.5,
         "ssh_timeout_sec": 60, "no_plan_retry_sec": 60, "plan_retry_max_sec": 900,
-        "hang_limit_sec": 600}
+        "hang_limit_sec": 600, "hang_exit_after_sec": 240, "store_busy_wait_sec": 30}
     assert isinstance(cfg.capture()["min_fill_fraction"], float)
     assert cfg.capture()["show_in_dropdown"] is False
 
@@ -92,6 +92,76 @@ def test_an_override_is_read(monkeypatch):
 def test_a_bad_capture_value_falls_back_to_the_default(monkeypatch, key, bad):
     monkeypatch.setattr(cfg, "load", lambda: {"capture": {key: bad}})
     assert cfg.capture()[key] == cfg.DEFAULTS["capture"][key]
+
+
+@pytest.mark.parametrize("bad", [float("inf"), float("-inf"), float("nan")])
+@pytest.mark.parametrize("key", ["interval_sec", "fill_step_sec", "min_fill_fraction"])
+def test_a_value_that_is_not_finite_is_the_default_and_never_raises(monkeypatch, key, bad):
+    """TOML can spell ``inf`` and ``nan``, and ``int()`` raises on both. A whole-number
+    key and a fraction key alike."""
+    monkeypatch.setattr(cfg, "load", lambda: {"capture": {key: bad}})
+    assert cfg.capture()[key] == cfg.DEFAULTS["capture"][key]
+
+
+@pytest.mark.parametrize("bad", [float("inf"), float("nan")])
+def test_a_multiplier_that_is_not_finite_is_the_default(monkeypatch, bad):
+    monkeypatch.setattr(cfg, "load", lambda: {"instruments": {"ES": {"multiplier": bad}}})
+    assert cfg.instruments()["ES"]["multiplier"] == 50
+
+
+@pytest.mark.parametrize("bad", [59, 3601, True, "300"])
+def test_the_exit_after_a_hang_refuses_a_bad_value(monkeypatch, bad):
+    monkeypatch.setattr(cfg, "load", lambda: {"capture": {"hang_exit_after_sec": bad}})
+    assert cfg.capture()["hang_exit_after_sec"] == 240
+
+
+@pytest.mark.parametrize("bad", [0, 301, True, "30"])
+def test_the_stores_busy_wait_refuses_a_bad_value(monkeypatch, bad):
+    monkeypatch.setattr(cfg, "load", lambda: {"capture": {"store_busy_wait_sec": bad}})
+    assert cfg.capture()["store_busy_wait_sec"] == 30
+
+
+# ── how far apart a column is, and what counts as an outage ──────────────────
+
+@pytest.mark.parametrize("interval,step,column", [
+    (300, 300, 300),     # as shipped: one column per capture
+    (120, 300, 120),     # rows are 120 apart, whatever the step says
+    (300, 100, 100),     # each capture repeated to the step
+    (300, 600, 300),
+])
+def test_a_column_is_the_smaller_of_the_step_and_the_interval(monkeypatch, interval, step, column):
+    monkeypatch.setattr(cfg, "load", lambda: {
+        "capture": {"interval_sec": interval, "fill_step_sec": step}})
+    assert cfg.column_step() == column
+
+
+def test_the_shipped_outage_tolerance_is_450():
+    assert cfg.outage_after() == 450
+
+
+@pytest.mark.parametrize("interval,after", [
+    (120, 180),    # one and a half intervals: a capture missed at 120 is a gap of 240
+    (600, 900),    # and a late capture at 600 (660) is not an outage
+    (60, 90),
+    (30, 60),      # rows are floored to the minute: every row would be an outage at 45
+])
+def test_the_outage_tolerance_follows_the_interval(monkeypatch, interval, after):
+    monkeypatch.setattr(cfg, "load", lambda: {"capture": {"interval_sec": interval}})
+    assert cfg.outage_after() == after
+
+
+def test_a_changed_tolerance_is_read_and_scales_too(monkeypatch):
+    monkeypatch.setattr(cfg, "load", lambda: {
+        "capture": {"interval_sec": 300, "outage_after_sec": 700}})
+    assert cfg.outage_after() == 700
+    monkeypatch.setattr(cfg, "load", lambda: {
+        "capture": {"interval_sec": 150, "outage_after_sec": 700}})
+    assert cfg.outage_after() == 350
+
+
+def test_a_tolerance_below_the_interval_reads_as_the_interval(monkeypatch):
+    monkeypatch.setattr(cfg, "load", lambda: {"capture": {"outage_after_sec": 30}})
+    assert cfg.outage_after() == 300
 
 
 def test_a_non_table_section_is_the_defaults(monkeypatch):

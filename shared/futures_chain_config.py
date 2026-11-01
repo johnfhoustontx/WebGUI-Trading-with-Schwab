@@ -43,10 +43,11 @@ DEFAULTS = {
         # Captures in a row with the price, volume and open interest unchanged.
         "frozen_repeats": 3,
         # The page draws one column per row and repeats a row to this step, up to
-        # one interval. At the interval itself nothing is repeated.
+        # one interval. At the interval itself nothing is repeated. Read through
+        # column_step(): above the interval it reads as the interval.
         "fill_step_sec": 300,
-        # Two captures further apart than this have an outage between them. Below
-        # the interval it reads as the interval.
+        # Two captures further apart than this have an outage between them. Stated
+        # at the shipped interval and scaled with it: read through outage_after().
         "outage_after_sec": 450,
         # The most blank columns one jump can add.
         "max_outage_columns": 288,
@@ -56,6 +57,9 @@ DEFAULTS = {
         "alert_repeat_min": 240,
         # A snapshot larger than this is refused.
         "max_snapshot_kb": 512,
+        # How long the feed's own thread waits for gex_history.db when another
+        # writer holds it. It can wait: nothing else runs on its stream.
+        "store_busy_wait_sec": 30,
         # The put-call check looks at this many strikes, nearest the price first,
         # for a call and a put that both have a mark.
         "parity_strikes": 5,
@@ -78,6 +82,9 @@ DEFAULTS = {
         "plan_retry_max_sec": 900,
         # No sign of life from the capture's loop for this long: its Excel is stopped.
         "hang_limit_sec": 600,
+        # Stopping that Excel should make the stuck call throw. If there is still no
+        # sign of life this long after, the capture ends itself and its task restarts it.
+        "hang_exit_after_sec": 240,
         # Offered in the Dealer Positioning list. Ships off.
         "show_in_dropdown": False,
     },
@@ -103,12 +110,13 @@ def _in_range(raw, default, minimum, maximum):
     """``raw`` as the default's own type when it is a number inside the range
     (a bool is refused: ``True`` is an int), else ``default``. A whole-number
     default also refuses a fraction: it counts something."""
-    if not _is_number(raw):
+    # The range first: TOML can spell inf and nan, and int() raises on both. Neither
+    # is inside a range, because nan compares false with everything.
+    if not _is_number(raw) or not minimum <= raw <= maximum:
         return default
     if isinstance(default, int) and raw != int(raw):
         return default
-    value = type(default)(raw)
-    return value if minimum <= value <= maximum else default
+    return type(default)(raw)
 
 
 # Each capture value: (minimum, maximum), inclusive.
@@ -125,6 +133,7 @@ _CAPTURE_BOUNDS = {
     "frozen_before_expiry_min": (0, 1440),
     "alert_repeat_min": (5, 1440),
     "max_snapshot_kb": (16, 4096),
+    "store_busy_wait_sec": (1, 300),
     "parity_strikes": (1, 50),
     "min_read_fraction": (0.01, 1.0),
     "fill_settle_sec": (1, 60),
@@ -136,6 +145,7 @@ _CAPTURE_BOUNDS = {
     "no_plan_retry_sec": (5, 3600),
     "plan_retry_max_sec": (30, 7200),
     "hang_limit_sec": (120, 7200),
+    "hang_exit_after_sec": (60, 3600),
 }
 
 
@@ -149,6 +159,33 @@ def capture() -> dict:
     out["show_in_dropdown"] = (raw if isinstance(raw, bool)
                                else DEFAULTS["capture"]["show_in_dropdown"])
     return out
+
+
+def column_step() -> int:
+    """How many seconds apart the page's columns really are. Rows are one interval
+    apart, and repeated only down to the step, so a step above the interval says
+    nothing: at an interval of 120 and a step of 300 a column is 120 seconds."""
+    settings = capture()
+    return min(settings["fill_step_sec"], settings["interval_sec"])
+
+
+# Rows are floored to the minute when stored, so no two are closer than this.
+_ROW_SEC = 60
+
+
+def outage_after() -> float:
+    """How far apart two captures must be to have an outage between them.
+
+    ``outage_after_sec`` is stated at the shipped interval and scales with the real
+    one: 450 at 300 is one and a half intervals, and so 180 at 120. Held in seconds
+    it would hide a missed capture or two at a shorter interval, and call a capture
+    one minute late an outage at a longer one. One and a half intervals is enough:
+    a missed capture is a gap of two, and a late one a minute over one. It is never
+    below the interval, nor below a row's own minute."""
+    settings = capture()
+    interval = settings["interval_sec"]
+    scaled = settings["outage_after_sec"] * interval / DEFAULTS["capture"]["interval_sec"]
+    return max(scaled, interval, _ROW_SEC)
 
 
 def _clock(raw, default) -> str:

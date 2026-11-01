@@ -8304,7 +8304,9 @@ series whose <code>DESCRIPTION</code> states the plan's date, on its own and not
   <code>valid_until</code> (the session's end) passes; a failed fetch retries after <code>no_plan_retry_sec</code>
   (60), doubling to <code>plan_retry_max_sec</code> (900). A hung ssh is stopped after
   <code>ssh_timeout_sec</code> (60), and a loop with no sign of life for <code>hang_limit_sec</code> (600) has its
-  Excel stopped, which frees it to start another.</li>
+  Excel stopped, which frees it to start another. With still no sign of life
+  <code>hang_exit_after_sec</code> (240) after that stop, the capture logs it and ends itself, and the
+  scheduled task's repeating trigger starts a new one within five minutes.</li>
 <li><strong>What it sends.</strong> One document per capture, <code>{"snapshots": [...], "status": {"reason",
   "at"}}</code>, over one ssh (see the API / Developer Reference). Before sending, it leaves out an
   instrument whose sheet is wholly <code>N/A</code> (ThinkorSwim logged out), that read fewer than
@@ -8439,12 +8441,18 @@ The only places that printed one were on the Flow tab, which these two do not of
 </table>
 <p>The history keeps <strong>one row per capture</strong>. The page draws one column per row and repeats a
 row only to <code>fill_step_sec</code> (300) and never past one interval, so at the shipped value
-nothing is repeated. A lower value repeats rows and makes a heavier page: at a 100-second
+nothing is repeated, and a value above the interval reads as the interval: a column is
+<code>min(fill_step_sec, interval_sec)</code> apart, and the Bar picker, Smooth, the blank columns and
+the projection all use that width. A lower value repeats rows and makes a heavier page: at a 100-second
 step every repaint of a whole session (about 790 columns) blocked the browser for 4.5
 seconds, past NiceGUI's 2 second ping, measured at build. Two captures further apart than
 <code>outage_after_sec</code> (450) have an outage between them, drawn blank. 450 is above the interval
 because a capture can be a minute late: rows are floored to the minute and a read can cross
-one, giving gaps of 240 and then 360 seconds at a 300-second interval.</p>
+one, giving gaps of 240 and then 360 seconds at a 300-second interval. The setting is stated
+at an interval of 300 and scales with the real one, so 450 is one and a half intervals: 180
+seconds at an interval of 120, where one missed capture is a gap of 240. It never works out
+below one interval or one minute. At a step below the interval the gap is measured between
+captures, not from a capture's last repeated row.</p>
 <h2 id="what-the-server-keeps-and-when-it-refuses">What the server keeps, and when it refuses</h2>
 <p><code>futures_chain_feed</code> ends every snapshot one of three ways, and says which per instrument in
 <code>cache:options:futures_chain_status</code>:</p>

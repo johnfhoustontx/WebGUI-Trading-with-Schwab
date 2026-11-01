@@ -7,7 +7,8 @@
 # What this does NOT show: Excel itself hanging, and a real stuck COM call throwing once
 # its server has gone. Neither can be produced honestly here. The second is the documented
 # behaviour of COM (an RPC failure), and Test-ExcelAlive's restart path has been run live
-# by killing the copy (check_live.ps1).
+# by killing the copy (check_live.ps1). The second stage, for a call that does not throw,
+# runs in a child PowerShell at the end, because it ends the process it runs in.
 param([Parameter(Mandatory = $true)][string]$WorkFolder)
 . (Join-Path $PSScriptRoot '..\tos_capture.ps1') -Once
 $ErrorActionPreference = 'Continue'
@@ -52,6 +53,7 @@ try {
 
     # The watchdog, with short limits
     $HangLimitSec = 8
+    $HangExitAfterSec = 3600     # the second stage has a process of its own, below
     $SshTimeoutSec = 1
     $SshHangMarginSec = 1
     $WatchdogPollSec = 1
@@ -90,4 +92,55 @@ try {
     Stop-Watchdog
     if (-not $standIn.HasExited) { Stop-Process -Id $standIn.Id -Force }
 }
+
+# The second stage: a loop that never comes back ends the process. A child, because of that.
+$childLog = Join-Path $WorkFolder 'check_watchdog_child.log'
+if (Test-Path -LiteralPath $childLog) { Remove-Item -LiteralPath $childLog }
+$childScript = Join-Path $WorkFolder 'check_watchdog_child.ps1'
+$capture = Join-Path $PSScriptRoot '..\tos_capture.ps1'
+$childLines = @(
+    ('. ''' + $capture + ''' -Once'),
+    ('$LogPath = ''' + $childLog + ''''),
+    '$script:Watch.LogPath = $LogPath',
+    '$HangLimitSec = 5',
+    '$HangExitAfterSec = 4',
+    '$SshTimeoutSec = 1',
+    '$SshHangMarginSec = 1',
+    '$WatchdogPollSec = 1',
+    'Start-Watchdog',
+    # Stuck, as a COM call that does not throw is: no heartbeat from here on.
+    'Start-Sleep -Seconds 120',
+    '[IO.File]::AppendAllText($LogPath, ''the loop came back'')'
+)
+[IO.File]::WriteAllLines($childScript, $childLines)
+$child = Start-Process -FilePath 'powershell.exe' -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -File "' + $childScript + '"') -WindowStyle Hidden -PassThru
+$clock = [Diagnostics.Stopwatch]::StartNew()
+$ended = $child.WaitForExit(40000)
+$took = $clock.Elapsed.TotalSeconds
+Check 'a loop that never comes back ends the process' $ended $true
+if ($ended) {
+    Check 'not before the stop plus the wait' ($took -ge 8) $true
+    Check 'and soon after' ($took -lt 20) $true
+    "     ended after $([math]::Round($took, 1)) seconds"
+    $lines = @([IO.File]::ReadAllLines($childLog))
+    Check 'the first stage logged' (@($lines | Where-Object { $_ -match 'watchdog: no heartbeat' }).Length) 1
+    Check 'the second stage logged why' (@($lines | Where-Object { $_ -match 'ending this process' }).Length) 1
+    Check 'the loop never came back' (@($lines | Where-Object { $_ -match 'came back' }).Length) 0
+} else {
+    Stop-Process -Id $child.Id -Force
+}
+
+# A loop that does come back after the stop is left alone.
+$childLog = Join-Path $WorkFolder 'check_watchdog_child2.log'
+if (Test-Path -LiteralPath $childLog) { Remove-Item -LiteralPath $childLog }
+$childLines[1] = '$LogPath = ''' + $childLog + ''''
+$childLines[9] = 'Start-Sleep -Seconds 8; Update-Heartbeat; Wait-Sleeping 12'
+$childLines[10] = '[IO.File]::AppendAllText($LogPath, ''the loop came back'')'
+[IO.File]::WriteAllLines($childScript, $childLines)
+$child = Start-Process -FilePath 'powershell.exe' -ArgumentList ('-NoProfile -ExecutionPolicy Bypass -File "' + $childScript + '"') -WindowStyle Hidden -PassThru
+[void]$child.WaitForExit(40000)
+$lines = @([IO.File]::ReadAllLines($childLog))
+Check 'a loop that came back is not ended' (@($lines | Where-Object { $_ -match 'ending this process' }).Length) 0
+Check 'and it carried on' (@($lines | Where-Object { $_ -match 'came back' }).Length) 1
+if (-not $child.HasExited) { Stop-Process -Id $child.Id -Force }
 "failures: $fails"

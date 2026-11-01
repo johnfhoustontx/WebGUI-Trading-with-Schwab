@@ -95,6 +95,11 @@ $MinReadFraction = 0.25  # min_read_fraction
 # is one call that cannot beat: one whole ssh (twice its limit, write then exit), one
 # Excel start, or one workbook opened and saved (5 seconds at a session's size).
 $HangLimitSec = 600  # hang_limit_sec
+# Stopping the Excel should make the loop's stuck call throw. With still no heartbeat
+# this long after the stop the call is not coming back, and a hung process has not
+# failed, so nothing else would restart it: the capture ends itself, and the task's
+# repeating trigger starts another. Long enough for the three tries at restarting Excel.
+$HangExitAfterSec = 240  # hang_exit_after_sec
 $PlanSettings = [ordered]@{
     fill_settle_sec = 'FillSettleSec'
     fill_wait_max_sec = 'FillWaitMaxSec'
@@ -106,6 +111,7 @@ $PlanSettings = [ordered]@{
     plan_retry_max_sec = 'PlanRetryMaxSec'
     min_read_fraction = 'MinReadFraction'
     hang_limit_sec = 'HangLimitSec'
+    hang_exit_after_sec = 'HangExitAfterSec'
 }
 
 $RtdFields = @('MARK', 'BID', 'ASK', 'VOLUME', 'OPEN_INT', 'IMPL_VOL', 'DELTA')
@@ -128,7 +134,7 @@ $script:RestoreSeen = @{}
 $script:WatchShell = $null
 # Shared with the watchdog's thread.
 $script:Watch = [hashtable]::Synchronized(@{
-        Beat = 0.0; LimitSec = 0.0; Owned = $null; Stop = $false; LogPath = $LogPath
+        Beat = 0.0; LimitSec = 0.0; ExitAfterSec = 0.0; Owned = $null; Stop = $false; LogPath = $LogPath
     })
 $script:GeneralProblem = ''
 $script:InSession = $false
@@ -607,20 +613,32 @@ function Test-ExcelAlive {
 # A COM call has no timeout, so an Excel that stops answering would hold the loop for
 # ever, and a hung process has not failed, so the task does not restart it. This runs
 # on its own thread and reads the heartbeat. Stopping the Excel makes the loop's stuck
-# call throw, and the existing restart path takes over.
+# call throw, and the existing restart path takes over. If the call does not throw,
+# the second stage ends this process: .Kill(), because an orderly exit can wait on the
+# very thread that is stuck. The next start stops any Excel left behind, by its record,
+# and the mutex of a killed process is free.
 $WatchdogBody = @'
 $firedAt = 0.0
+$stoppedAt = 0.0
 while (-not $Watch.Stop) {
     Start-Sleep -Seconds $PollSec
     try {
         $now = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds() / 1000.0
         $age = $now - $Watch.Beat
+        if ($stoppedAt -gt 0 -and $Watch.Beat -gt $stoppedAt) { $stoppedAt = 0.0 }
         if ($age -gt $Watch.LimitSec -and ($now - $firedAt) -gt $Watch.LimitSec) {
             $firedAt = $now
+            if ($stoppedAt -eq 0) { $stoppedAt = $now }
             $did = Stop-OwnedExcel $Watch.Owned
             $line = [DateTimeOffset]::Now.ToString('yyyy-MM-dd HH:mm:ss zzz') + ' watchdog: no heartbeat for ' +
                 [int]$age + ' seconds (limit ' + $Watch.LimitSec + '): ' + $did + "`r`n"
             [IO.File]::AppendAllText($Watch.LogPath, $line)
+        }
+        if ($stoppedAt -gt 0 -and ($now - $stoppedAt) -gt $Watch.ExitAfterSec) {
+            $line = [DateTimeOffset]::Now.ToString('yyyy-MM-dd HH:mm:ss zzz') + ' watchdog: still no heartbeat ' +
+                [int]($now - $stoppedAt) + ' seconds after the stop (limit ' + $Watch.ExitAfterSec + '): ending this process; its task starts another' + "`r`n"
+            [IO.File]::AppendAllText($Watch.LogPath, $line)
+            [Diagnostics.Process]::GetCurrentProcess().Kill()
         }
     } catch {
         try { [IO.File]::AppendAllText($Watch.LogPath, 'watchdog failed: ' + $_.Exception.Message + "`r`n") } catch { $null = $_ }
@@ -635,6 +653,7 @@ function Update-Heartbeat {
 function Update-WatchdogLimit {
     # Never below a whole ssh, whatever the plan says: that would kill a healthy Excel.
     $script:Watch.LimitSec = [math]::Max([double]$HangLimitSec, 2 * [double]$SshTimeoutSec + $SshHangMarginSec)
+    $script:Watch.ExitAfterSec = [double]$HangExitAfterSec
 }
 
 function Start-Watchdog {
@@ -1274,7 +1293,9 @@ function Invoke-Capture {
         }
     }
 
-    $reason = $reasons -join ' '
+    # '; ' and nothing else: the server splits this on it, to give each instrument's
+    # label its own reason. Each sentence can hold a semicolon of its own.
+    $reason = $reasons -join '; '
     if ($reason) { Write-Log ('status: ' + $reason) }
     $document = [ordered]@{
         snapshots = $snapshots.ToArray()

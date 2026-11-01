@@ -139,11 +139,20 @@ def _term_diffs(live: list, shadow: list) -> list:
     return out
 
 
+def _named(rows: dict, symbols: set) -> dict:
+    """``rows`` (keyed ``(symbol, view)``) for ``symbols`` alone."""
+    return {key: row for key, row in rows.items() if key[0] in symbols}
+
+
 def compare_minute(date_iso: str, ts: int, live_conn=None, root=None) -> dict:
     """Derive raw minute ``ts`` of session ``date_iso`` again and compare it with
     the live rows. ``{"ts", "rows", "diffs": [str], "ms", "missing_raw"}``;
     ``ms`` is the time the derive took. ``live_conn`` None opens
-    ``gex_history.db`` read-only."""
+    ``gex_history.db`` read-only.
+
+    Only the symbols the raw minute names are compared, on both sides: the /ES and
+    /NQ feed stores its own rows, not through the collector, and a capture can share
+    a minute with the poll without being part of it."""
     started = time.perf_counter()
     minute = raw_store.read_minute(date_iso, ts, root=root)
     if minute is None:
@@ -158,8 +167,9 @@ def compare_minute(date_iso: str, ts: int, live_conn=None, root=None) -> dict:
         own = live_conn is None
         live = gh.connect(read_only=True) if own else live_conn
         try:
-            shadow_rows = gh.rows_at(shadow, ts, DERIVED_VIEWS)
-            diffs = _row_diffs(gh.rows_at(live, ts, DERIVED_VIEWS), shadow_rows)
+            named = {symbol for symbol, _chain in minute.chains}
+            shadow_rows = _named(gh.rows_at(shadow, ts, DERIVED_VIEWS), named)
+            diffs = _row_diffs(_named(gh.rows_at(live, ts, DERIVED_VIEWS), named), shadow_rows)
             if minute.term is not None:
                 ts_iso = datetime.fromtimestamp(int(ts), CT).isoformat()
                 diffs += _term_diffs(gh.load_term_snapshot(live, ts_iso, _TERM_SYMBOL),

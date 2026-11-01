@@ -105,6 +105,18 @@ def test_an_invalid_symbol_is_refused_without_a_scan(bus, scans):
     assert bus._r.keys("cache:options:swing_pub:*") == []
 
 
+@pytest.mark.parametrize("symbol", ["FOP.ES", "fop.nq"])
+def test_a_feed_symbol_is_refused_in_the_invalid_words_without_a_scan(bus, scans, symbol):
+    """The ticker rule passes them, so the page waits on this symbol's outcome: it is
+    recorded, and the page says what it says for any symbol it cannot scan."""
+    fp.handle(bus, _cmd(symbol))
+    assert scans.calls == []
+    state = _status(bus)
+    assert state["invalid_today"] == 1 and state["scans_today"] == 0
+    assert state["last"][symbol.upper()]["outcome"] == "invalid"
+    assert bus._r.keys("cache:options:swing_pub:*") == []
+
+
 def test_a_request_that_waited_too_long_is_dropped(bus, scans):
     """Also the replay guard: a backlog replayed at startup is older than this."""
     fp.handle(bus, _cmd("SPY", age_s=ps.limits()["max_wait_sec"] + 5))

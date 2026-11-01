@@ -53,7 +53,7 @@ def _session(captured: dict) -> FeedSession:
     """The session a cached capture (``futures_chain_feed.latest``) belongs to."""
     _, gex_history, _ = _feed._engines()
     settings = futures_chain_config.capture()
-    interval, step = settings["interval_sec"], settings["fill_step_sec"]
+    interval, step = settings["interval_sec"], futures_chain_config.column_step()
     opens, ends = futures_chain.session_bounds(date.fromisoformat(captured["expiry"]))
     return FeedSession(
         span=gex_history.SessionSpan(opens, ends),
@@ -118,6 +118,10 @@ def _feed_block(bus, symbol: str, captured: dict, frozen: bool, now: datetime,
     why = _why_not_capturing(bus, symbol)
     if frozen:
         stale = futures_chain.in_session(now)
+        if not stale:
+            # Nothing is expected between sessions, and a cause from days ago is not
+            # why: it must not read as current through a weekend.
+            why = ""
         when = datetime.fromtimestamp(taken, _CENTRAL)
         reason = f"Showing the capture from {when:%H:%M} Central on {when:%A, %B} {when.day}."
         if stale:

@@ -4534,7 +4534,9 @@ series whose `DESCRIPTION` states the plan's date, on its own and not as part of
   `valid_until` (the session's end) passes; a failed fetch retries after `no_plan_retry_sec`
   (60), doubling to `plan_retry_max_sec` (900). A hung ssh is stopped after
   `ssh_timeout_sec` (60), and a loop with no sign of life for `hang_limit_sec` (600) has its
-  Excel stopped, which frees it to start another.
+  Excel stopped, which frees it to start another. With still no sign of life
+  `hang_exit_after_sec` (240) after that stop, the capture logs it and ends itself, and the
+  scheduled task's repeating trigger starts a new one within five minutes.
 - **What it sends.** One document per capture, `{"snapshots": [...], "status": {"reason",
   "at"}}`, over one ssh (see the API / Developer Reference). Before sending, it leaves out an
   instrument whose sheet is wholly `N/A` (ThinkorSwim logged out), that read fewer than
@@ -4670,12 +4672,18 @@ The only places that printed one were on the Flow tab, which these two do not of
 
 The history keeps **one row per capture**. The page draws one column per row and repeats a
 row only to `fill_step_sec` (300) and never past one interval, so at the shipped value
-nothing is repeated. A lower value repeats rows and makes a heavier page: at a 100-second
+nothing is repeated, and a value above the interval reads as the interval: a column is
+`min(fill_step_sec, interval_sec)` apart, and the Bar picker, Smooth, the blank columns and
+the projection all use that width. A lower value repeats rows and makes a heavier page: at a 100-second
 step every repaint of a whole session (about 790 columns) blocked the browser for 4.5
 seconds, past NiceGUI's 2 second ping, measured at build. Two captures further apart than
 `outage_after_sec` (450) have an outage between them, drawn blank. 450 is above the interval
 because a capture can be a minute late: rows are floored to the minute and a read can cross
-one, giving gaps of 240 and then 360 seconds at a 300-second interval.
+one, giving gaps of 240 and then 360 seconds at a 300-second interval. The setting is stated
+at an interval of 300 and scales with the real one, so 450 is one and a half intervals: 180
+seconds at an interval of 120, where one missed capture is a gap of 240. It never works out
+below one interval or one minute. At a step below the interval the gap is measured between
+captures, not from a capture's last repeated row.
 
 ## What the server keeps, and when it refuses
 

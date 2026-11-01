@@ -72,6 +72,16 @@ def test_no_usable_quote_is_an_error_and_spends_no_further_calls(legs):
     assert legs["_earnings"].calls == []
 
 
+@pytest.mark.parametrize("symbol", ["FOP.ES", "FOP.NQ"])
+def test_a_feed_symbol_reads_as_an_unknown_ticker_and_never_reaches_schwab(legs, symbol):
+    """/ES and /NQ have no quote at Schwab. The ticker rule passes the internal names,
+    so one typed into the Symbol page is refused here, in the same words as a typo."""
+    out = dossier.build_dossier(symbol)
+    assert out["error"] == dossier.NO_QUOTE and out["symbol"] == symbol
+    for leg in legs.values():
+        assert leg.calls == []
+
+
 def test_a_raising_quote_leg_reads_as_fetch_failed_and_speaks(legs, degrades):
     # An outage is not an unknown symbol: "check the symbol" would be false.
     legs["_quote"].exc = RuntimeError("proxy down")

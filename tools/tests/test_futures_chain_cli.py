@@ -109,6 +109,40 @@ def test_plan_needs_no_bus(monkeypatch, frozen_sunday_evening):
 
 # ── ingest ───────────────────────────────────────────────────────────────────
 
+@pytest.mark.parametrize("instrument", [["ES"], {"ES": 1}, 5, None])
+def test_an_instrument_that_cannot_be_looked_up_exits_two(fake_bus, capsys, instrument):
+    """A list is unhashable: it used to raise out of ``in roots``, a traceback and exit 1."""
+    code = cli.main(["ingest"], stdin=stdin_of({"snapshots": [{**es(), "instrument": instrument}]}))
+    assert code == cli.EXIT_BAD_INPUT
+    assert "snapshot 1" in capsys.readouterr().err
+    assert stream_types(fake_bus, STREAM) == []
+
+
+def test_json_nested_too_deep_exits_two_with_no_traceback(fake_bus, capsys):
+    deep = '{"snapshots": ' + "[" * 200000 + "]" * 200000 + "}"
+    assert cli.main(["ingest"], stdin=io.StringIO(deep)) == cli.EXIT_BAD_INPUT
+    assert "nested" in capsys.readouterr().err
+    assert stream_types(fake_bus, STREAM) == []
+
+
+@pytest.mark.parametrize("depth", [20, 500, 990, 5000, 20000])
+def test_a_deep_snapshot_that_parses_is_not_reported_as_redis_refusing(fake_bus, capsys, depth):
+    """Deep enough to pass ``json.loads`` and fail when it is written back, which read
+    as "could not write to Redis", exit 4."""
+    nested = "[" * depth + "]" * depth
+    text = '{"snapshots": [{"instrument": "ES", "contracts": ' + nested + "}]}"
+    assert cli.main(["ingest"], stdin=io.StringIO(text)) == cli.EXIT_BAD_INPUT
+    assert "nested" in capsys.readouterr().err
+    assert stream_types(fake_bus, STREAM) == []
+
+
+def test_a_real_captures_depth_is_well_inside_the_limit():
+    row = {"series": "E1AX26", "side": "C", "strike": 7600, "mark": 1.0}
+    assert not cli._too_deep({"snapshots": [{**es(), "descriptions": {"E1AX26": "text"},
+                                             "contracts": [row]}],
+                              "status": {"reason": "", "at": 1.0}})
+
+
 def test_ingest_enqueues_one_command_per_instrument(fake_bus):
     assert cli.main(["ingest"], stdin=io.StringIO(json.dumps(
         {"snapshots": [es(), nq()], "status": {"reason": ""}}))) == 0

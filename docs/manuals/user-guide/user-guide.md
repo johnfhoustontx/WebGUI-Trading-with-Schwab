@@ -1115,7 +1115,7 @@ even when nothing new arrives.
 | the same, then *No capture has arrived for this session* | The next session is open and nothing has come. | The alert's reasons below. |
 | *No capture of /ES to show yet. Its chain comes from ThinkorSwim on the PC, not from Schwab.* | The server holds no capture at all. | Install and start the capture (below). |
 | *No gamma could be calculated for /ES* | The last capture carried no usable implied volatility. | Wait one capture. If ThinkorSwim shows no volatilities, it is a ThinkorSwim data problem. |
-| a blank stretch on the heat map and hedge panel, labelled **No capture** | Captures were further apart than **Draw an outage when captures are apart by over** (`outage_after_sec`, shipped 450 seconds). It is drawn blank on purpose: smooth shading across five hours would read as data. | Nothing. The Smooth setting does not reach across it. |
+| a blank stretch on the heat map, labelled **No capture**, and blank on the hedge panel below it | Captures were further apart than **Draw an outage when captures are apart by over** (`outage_after_sec`, shipped 450 seconds, which is one and a half intervals and scales if you change the interval). It is drawn blank on purpose: smooth shading across five hours would read as data. | Nothing. The Smooth setting does not reach across it. |
 
 A capture that arrives a minute late is not an outage: 450 seconds is above the 300-second
 interval for that reason.
@@ -1179,8 +1179,13 @@ the Excel you use.
 **Uninstalling.** There is no uninstall script. In PowerShell:
 `Stop-ScheduledTask -TaskName "ToS 0DTE Capture"`, then
 `Unregister-ScheduledTask -TaskName "ToS 0DTE Capture" -Confirm:$false`, then delete
-`%LOCALAPPDATA%\TosCapture`. Your workbooks in Documents are left alone. If an Excel with
-no window is still listed in Task Manager afterwards, it is the capture's; end it.
+`%LOCALAPPDATA%\TosCapture`. Your workbooks in Documents are left alone. Your own Excel can
+be open at the same time and also shows as `EXCEL.EXE`, so check before ending anything. In
+PowerShell, this lists each Excel with its command line:
+`Get-CimInstance Win32_Process -Filter "Name='EXCEL.EXE'" | Select-Object ProcessId, CommandLine`.
+The capture's is the one whose command line contains `/automation`. End that one by its
+process id, `Stop-Process -Id <ProcessId>`, and only if the task has stopped. If no command
+line contains `/automation`, there is nothing to end.
 
 > **After the first Windows logoff, check Excel once.** Open Excel, then **Options →
 > Advanced → General**, and make sure **Ignore other applications that use DDE** is

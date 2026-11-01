@@ -11,13 +11,15 @@ evening before its expiry. Three things follow, and all three live here:
   (the overnight tick does not run, and nothing else rewrites it).
 * **An outage is an outage.** ``heatmap_matrix`` makes one column per row on a category
   axis, so two captures five hours apart would sit side by side and blend into a smooth
-  change. A gap past ``outage_after_sec`` is drawn as blank columns at the fill step, in
-  a band labelled "No capture". A capture a minute late is not an outage.
+  change. A gap past ``futures_chain_config.outage_after()`` is drawn as blank columns,
+  in a band labelled "No capture". A capture a minute late is not an outage.
 * **A column is a capture, not a minute.** The Bar picker, Smooth and the projected
   afternoon all count columns on a page that assumes a minute each, so each is handed
-  what it says in minutes, at this page's step.
-* **What is offered.** Flow and Term need data the feed does not have, and the analysis
-  buttons report on the stock indexes or fetch from Schwab.
+  what it says in minutes, at ``futures_chain_config.column_step()``, the one width.
+* **What is offered.** Flow prints scaled contract counts: the adapter scales open
+  interest and volume by contract size so the engine's dollars come out right, and that
+  is no number of contracts to show. Term needs more than one expiry, and a capture
+  holds one. The analysis buttons report on the stock indexes or fetch from Schwab.
 
 No label or status text is built from ``dte``: the adapter stamps 0 on every capture,
 including an evening's whose expiry is tomorrow, so it says nothing to a reader.
@@ -155,13 +157,16 @@ def feed_label(snap, now):
     if state is None:
         return None
     block = _block(snap)
+    # The same rule as the service's, at this page's clock: the payload may be from
+    # last week. Between sessions nothing is expected, and an old cause is not why.
+    between = state == "last" and not futures_chain.in_session(futures_chain.central_time(now))
     parts = [_headline(state, _fmt.num(block.get("captured_at")), now,
                        _fmt.num(block.get("last_row_at")))]
     low, high = _fmt.num(block.get("strike_low")), _fmt.num(block.get("strike_high"))
     if low is not None and high is not None:
         parts.append(f"Strikes captured {_fmt.price(low)} to {_fmt.price(high)}")
     cause = block.get("why")
-    if isinstance(cause, str) and cause.strip():
+    if isinstance(cause, str) and cause.strip() and not between:
         parts.append(cause.strip().rstrip("."))
     return ". ".join(parts)
 
@@ -196,25 +201,38 @@ def _is_blank(row) -> bool:
 
 
 def with_outages(rows) -> list:
-    """``rows`` with every time jump past ``outage_after_sec`` turned into blank
-    columns, ``(ts, None, ..., None)``, at the fill step: as many as captures fit in
-    it, the nearest whole number, at least one and at most ``max_outage_columns``.
-    A shorter jump adds nothing: a read crossing a minute gives gaps of 240 and then
-    360 at a 300-second interval, and that capture was late, not missing. The rows
-    themselves are kept as they came."""
+    """``rows`` with every time jump past ``outage_after()`` turned into blank columns,
+    ``(ts, None, ..., None)``, at the column width: as many as fit in it, the nearest
+    whole number, at least one and at most ``max_outage_columns``. A shorter jump adds
+    nothing: a read crossing a minute gives gaps of 240 and then 360 at a 300-second
+    interval, and that capture was late, not missing. The rows themselves are kept as
+    they came.
+
+    The jump is measured between captures. At a step below the interval a capture's
+    last repeat sits up to an interval past it, so a missed capture would measure short
+    from there. A repeat holds the same cells as the row before and lies under one
+    interval from its capture, so two identical captures a whole interval apart are
+    still two captures."""
     capture = futures_chain_config.capture()
-    step = capture["fill_step_sec"]
-    after = max(capture["outage_after_sec"], capture["interval_sec"])
+    step = futures_chain_config.column_step()
+    after = futures_chain_config.outage_after()
+    interval = capture["interval_sec"]
+    repeated = step < interval
+    taken = None
     out: list = []
     for row in rows or []:
         if out:
             last, ts = out[-1][0], row[0]
-            if ts - last > after:
+            if repeated and ts - taken < interval and row[1:] == out[-1][1:]:
+                out.append(row)
+                continue
+            if ts - taken > after:
                 count = max(1, int((ts - last + step / 2) // step) - 1)
                 blank = (None,) * (len(row) - 1)
                 out.extend((at, *blank) for at in
                            (last + step * (i + 1) for i in range(min(count, capture["max_outage_columns"])))
                            if at < ts)
+        taken = row[0]
         out.append(row)
     return out
 
@@ -272,9 +290,8 @@ def levels_on_columns(levels, rows):
 
 def bar_columns(minutes) -> int:
     """How many columns a bar of ``minutes`` spans. The page's bar picker counts one
-    column a minute; the feed's columns are the fill step apart."""
-    step = futures_chain_config.capture()["fill_step_sec"]
-    return max(1, round(minutes * 60 / step))
+    column a minute; the feed's columns are ``column_step`` apart."""
+    return max(1, round(minutes * 60 / futures_chain_config.column_step()))
 
 
 def smooth_on_columns(smooth, rows) -> dict:
@@ -282,8 +299,7 @@ def smooth_on_columns(smooth, rows) -> dict:
     page that assumes a minute each, so Medium would otherwise blur five times as far
     as it says. An average may not reach across a blank column either: a gap is only
     skipped, and the capture on the far side would still be counted."""
-    step = futures_chain_config.capture()["fill_step_sec"]
-    return {**smooth, "minutes": smooth["minutes"] * 60 / step,
+    return {**smooth, "minutes": smooth["minutes"] * 60 / futures_chain_config.column_step(),
             "breaks": frozenset(i for i, row in enumerate(rows) if _is_blank(row))}
 
 
@@ -322,10 +338,13 @@ class FeedPage:
         if not enabled:
             return
         if bar_picker is not None:
-            self._bar_tip = next(child for child in bar_picker.parent_slot.children
-                                 if isinstance(child, ui.tooltip)
-                                 and child.props.get("target", "").endswith(bar_picker.html_id))
-            self._bar_tip_text = self._bar_tip.text
+            # Found in NiceGUI's own element tree. If that shape ever changes the tip
+            # keeps the stock market's words, and the page must still open.
+            self._bar_tip = next((child for child in bar_picker.parent_slot.children
+                                  if isinstance(child, ui.tooltip)
+                                  and str(child.props.get("target", "")).endswith(bar_picker.html_id)),
+                                 None)
+            self._bar_tip_text = getattr(self._bar_tip, "text", None)
         self._line = ui.label("").classes("text-xs opacity-70")
         self._notice = kit.notice("", icon="schedule")
         self._notice_text = next(child for child in self._notice.default_slot.children
@@ -429,7 +448,7 @@ class FeedPage:
             return band
         if reading(snap, _now()) != "current":
             return None
-        return {**band, "step": futures_chain_config.capture()["fill_step_sec"]}
+        return {**band, "step": futures_chain_config.column_step()}
 
     def heat_keywords(self, keywords, rows):
         """``HeatControls.read``'s keywords, with Smooth on this page's columns."""

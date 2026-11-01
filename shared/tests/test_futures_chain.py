@@ -374,6 +374,18 @@ def test_plan_carries_the_capture_machines_tunables(monkeypatch):
         assert p[key] == changed[key]
 
 
+def test_plan_carries_the_exit_after_a_hang(monkeypatch):
+    p = build_plan(ct(2026, 11, 1, 18, 0))
+    assert p["hang_exit_after_sec"] == 240
+    monkeypatch.setattr(cfg, "capture",
+                        lambda: {**cfg.DEFAULTS["capture"], "hang_exit_after_sec": 900})
+    assert build_plan(ct(2026, 11, 1, 18, 0))["hang_exit_after_sec"] == 900
+
+
+def test_the_stores_busy_wait_stays_on_the_server():
+    assert "store_busy_wait_sec" not in build_plan(ct(2026, 11, 1, 18, 0))
+
+
 def test_plan_is_plain_json():
     """It crosses a machine boundary: no dates, tuples or NamedTuples."""
     p = build_plan(ct(2026, 11, 1, 18, 0))

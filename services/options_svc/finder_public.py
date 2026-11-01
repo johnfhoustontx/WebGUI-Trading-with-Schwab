@@ -43,6 +43,7 @@ from services import _degrade
 from services.options_svc import handlers
 from shared import market_calendar
 from shared import public_scan
+from shared import futures_chain
 from shared.symbols import clean_symbol
 
 log = logging.getLogger(__name__)
@@ -193,6 +194,15 @@ def handle(bus, command) -> None:
         status["invalid_today"] += 1
         log.info("public scan refused: invalid symbol %r", args.get("symbol")
                  if isinstance(args, dict) else args)
+        _write_status(bus, status)
+        return
+
+    if futures_chain.is_feed_symbol(symbol):
+        # /ES and /NQ never reach Schwab, and the ticker rule passes their internal
+        # names. A clean name can key an outcome, and the page is waiting on one.
+        status["invalid_today"] += 1
+        log.info("public scan refused: %s is not a Schwab symbol", symbol)
+        _record(status, symbol, "invalid", now)
         _write_status(bus, status)
         return
 

@@ -664,12 +664,139 @@ def test_one_jump_adds_no_more_than_the_cap():
 
 
 def test_a_step_wider_than_the_gap_never_draws_a_column_out_of_order(monkeypatch):
+    """A step wider than the interval reads as the interval (``column_step``), so a
+    jump past the tolerance has a real column to blank."""
     real = futures_chain_config.capture
     monkeypatch.setattr(futures_chain_config, "capture",
                         lambda: {**real(), "fill_step_sec": 600})
     start = ct(2026, 11, 8, 23, 0).timestamp()
     rows = [_row(start), _row(start + 500)]
+    out = gamma_feed.with_outages(rows)
+    assert [r[0] for r in out] == sorted(r[0] for r in out)
+    assert out[0] == rows[0] and out[-1] == rows[1]
+    assert [r[0] for r in out if _is_blank(r)] == [start + 300]
+
+
+# ── a changed interval: a column is what the rows really are ─────────────────
+
+@pytest.fixture
+def two_minutes(monkeypatch):
+    """The 2 minutes the design names, set alone in Settings: the step stays 300."""
+    real = futures_chain_config.capture
+    monkeypatch.setattr(futures_chain_config, "capture",
+                        lambda: {**real(), "interval_sec": 120})
+
+
+def test_a_five_minute_bar_at_two_minute_captures_spans_its_real_columns(two_minutes):
+    assert gamma_feed.bar_columns(5) == 2     # 2.5, to the nearest whole column
+    assert gamma_feed.bar_columns(30) == 15
+
+
+def test_smooth_at_two_minute_captures_is_as_wide_as_it_says(two_minutes):
+    assert gamma_feed.smooth_on_columns({"minutes": 15}, [])["minutes"] == 7.5
+
+
+def test_an_outage_at_two_minute_captures_draws_every_column_that_fits(two_minutes):
+    start = ct(2026, 11, 8, 23, 0).timestamp()
+    out = gamma_feed.with_outages([_row(start), _row(start + 1800)])
+    blanks = [r[0] for r in out if _is_blank(r)]
+    assert blanks == [start + 120 * i for i in range(1, 15)]
+
+
+def test_one_missed_capture_at_two_minutes_is_an_outage(two_minutes):
+    """Under the 450 a 300-second interval takes, it would hide a missed capture or two."""
+    start = ct(2026, 11, 8, 23, 0).timestamp()
+    out = gamma_feed.with_outages([_row(start), _row(start + 120), _row(start + 360)])
+    assert [r[0] for r in out if _is_blank(r)] == [start + 240]
+
+
+def test_a_capture_a_minute_late_at_two_minutes_is_not_an_outage(two_minutes):
+    start = ct(2026, 11, 8, 23, 0).timestamp()
+    rows = [_row(start), _row(start + 60), _row(start + 240)]
     assert gamma_feed.with_outages(rows) == rows
+
+
+def test_the_projection_steps_at_the_real_column_width(two_minutes, monkeypatch):
+    from types import SimpleNamespace
+    head = SimpleNamespace(stamp=_Stub())
+    page = gamma_feed.FeedPage(head, _Stub("GEX"), {v: _Stub() for v in gamma._VIEW_ORDER},
+                               enabled=False)
+    page.enabled, page.on = True, True
+    monkeypatch.setattr(gamma_feed, "reading", lambda _snap, _now: "current")
+    assert page.forward({"ts": []}, {})["step"] == 120
+
+
+def test_a_shipped_page_is_what_it_was():
+    assert gamma_feed.bar_columns(5) == 1 and gamma_feed.bar_columns(30) == 6
+    assert gamma_feed.smooth_on_columns({"minutes": 15}, [])["minutes"] == 3
+
+
+# ── a step below the interval: a repeat is not a capture ─────────────────────
+
+@pytest.fixture
+def step_100(monkeypatch):
+    real = futures_chain_config.capture
+    monkeypatch.setattr(futures_chain_config, "capture",
+                        lambda: {**real(), "fill_step_sec": 100})
+
+
+def _on_the_step(*times):
+    interval = futures_chain_config.capture()["interval_sec"]
+    return futures_chain.fill_rows(
+        [_row(t, spot=7600.0 + i) for i, t in enumerate(times)],
+        interval, futures_chain_config.column_step())
+
+
+def test_a_missed_capture_at_a_lowered_step_is_blanked(step_100):
+    """Measured from the last repeat it would be 400, under the 450; it is 600."""
+    start = ct(2026, 11, 8, 23, 0).timestamp()
+    out = gamma_feed.with_outages(_on_the_step(start, start + 600))
+    assert [r[0] for r in out if _is_blank(r)] == [start + 300, start + 400, start + 500]
+    assert [r[0] for r in out] == [start + 100 * i for i in range(7)]
+
+
+def test_a_late_capture_at_a_lowered_step_is_not_blanked(step_100):
+    start = ct(2026, 11, 8, 23, 0).timestamp()
+    rows = _on_the_step(start, start + 360, start + 600)
+    assert gamma_feed.with_outages(rows) == rows
+
+
+def test_steady_captures_at_a_lowered_step_are_not_blanked(step_100):
+    start = ct(2026, 11, 8, 23, 0).timestamp()
+    rows = _on_the_step(start, start + 300, start + 600)
+    assert gamma_feed.with_outages(rows) == rows
+
+
+def test_a_frozen_feed_at_a_lowered_step_is_not_blanked(step_100):
+    """The same values capture after capture: each is still a capture. A repeat lasts
+    under one interval, so the next row at a whole interval starts a new run."""
+    start = ct(2026, 11, 8, 23, 0).timestamp()
+    rows = futures_chain.fill_rows([_row(start + 300 * i) for i in range(4)], 300, 100)
+    assert gamma_feed.with_outages(rows) == rows
+
+
+# ── a label does not carry an old reason through a weekend ───────────────────
+
+def test_a_cause_is_dropped_from_a_last_session_label_between_sessions():
+    """Friday's payload holds the cause it was written with, read on Saturday."""
+    captured = ct(2026, 11, 6, 13, 55).timestamp()
+    payload = snap(captured, frozen=True, why="ThinkorSwim is logged out")
+    label = feed_label(payload, ct(2026, 11, 7, 12, 0).timestamp())
+    assert label.startswith("Last session") and "logged out" not in label
+
+
+def test_a_session_that_ended_while_the_payload_sat_drops_its_cause_too():
+    captured = ct(2026, 11, 6, 14, 50).timestamp()
+    payload = snap(captured, stale=True, why="ThinkorSwim is logged out")
+    label = feed_label(payload, ct(2026, 11, 7, 12, 0).timestamp())
+    assert "logged out" not in label
+
+
+def test_a_last_session_label_in_the_next_session_keeps_its_cause():
+    captured = ct(2026, 11, 6, 13, 55).timestamp()
+    payload = snap(captured, frozen=True, stale=True, why="ThinkorSwim is logged out")
+    label = feed_label(payload, ct(2026, 11, 8, 17, 20).timestamp())
+    assert "No capture has arrived" in label and "logged out" in label
 
 
 def _band(close_in=7200, marks=5):
@@ -1041,6 +1168,22 @@ def test_the_bar_pickers_tooltip_says_capture_for_the_feed_only(requests):
     spy_kids = _rendered({"symbol": "SPY", "spot": 500.0, "views": {}, "term": {}})
     _load(spy_kids)
     assert "once a minute" in tip(spy_kids)
+
+
+def test_a_changed_tooltip_shape_leaves_the_page_working(requests, monkeypatch):
+    """The Bar picker's tooltip is found in NiceGUI's own element tree. If that shape
+    changes the words stay the stock market's: the private page must still open, for
+    every symbol, and not raise out of the render."""
+    from types import SimpleNamespace
+
+    class NotTheTooltip:
+        pass
+    monkeypatch.setattr(gamma_feed, "ui",
+                        SimpleNamespace(tooltip=NotTheTooltip, label=gamma_feed.ui.label))
+    for payload in (_feed_payload(), {"symbol": "SPY", "spot": 500.0, "views": {}, "term": {}}):
+        kids = _rendered(payload)
+        _load(kids)
+        assert any(type(e).__name__ == "Select" and e.props.get("label") == "Bar" for e in kids)
 
 
 def test_no_rows_never_names_a_collector_for_the_feed(requests):

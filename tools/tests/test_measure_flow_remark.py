@@ -27,6 +27,22 @@ def _rows(pairs, spots=None, vols=None, step=60):
 
 # ---- the rows the ribbon draws ------------------------------------------------
 
+def test_the_all_summary_leaves_out_the_feed_symbols():
+    """/ES and /NQ store rows beside the collector's. They have no flow to measure,
+    and one capture every five minutes is not a Flow ribbon."""
+    import sqlite3
+
+    import gex_history_db as gh
+    conn = sqlite3.connect(":memory:")
+    gh.init_schema(conn)
+    day = __import__("datetime").date(2026, 11, 2)
+    start, _end = gh._local_unix_range(day)
+    for symbol in ("SPY", "FOP.ES", "FOP.NQ"):
+        gh.insert_snapshot(conn, symbol, "gex", {"ts": start + 3600, "spot": 1.0},
+                           {1.0: {"call": 1.0, "put": 0.0, "net": 1.0}}, 0)
+    assert tool.symbols_on(conn, day) == ["SPY"]
+
+
 def test_usable_keeps_rows_with_both_premiums_in_time_order():
     rows = [(1120, 1.0, 0, 0, 5.0, 4.0), (1060, 1.0, 0, 0, None, 4.0),
             (1000, 1.0, 0, 0, 3.0, 2.0), (1180, 1.0, 0, 0, float("nan"), 1.0),

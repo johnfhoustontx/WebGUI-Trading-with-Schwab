@@ -1519,8 +1519,8 @@ even when nothing new arrives.</p>
 <td>Wait one capture. If ThinkorSwim shows no volatilities, it is a ThinkorSwim data problem.</td>
 </tr>
 <tr>
-<td>a blank stretch on the heat map and hedge panel, labelled <strong>No capture</strong></td>
-<td>Captures were further apart than <strong>Draw an outage when captures are apart by over</strong> (<code>outage_after_sec</code>, shipped 450 seconds). It is drawn blank on purpose: smooth shading across five hours would read as data.</td>
+<td>a blank stretch on the heat map, labelled <strong>No capture</strong>, and blank on the hedge panel below it</td>
+<td>Captures were further apart than <strong>Draw an outage when captures are apart by over</strong> (<code>outage_after_sec</code>, shipped 450 seconds, which is one and a half intervals and scales if you change the interval). It is drawn blank on purpose: smooth shading across five hours would read as data.</td>
 <td>Nothing. The Smooth setting does not reach across it.</td>
 </tr>
 </tbody>
@@ -1638,8 +1638,13 @@ the Excel you use.</p>
 <p><strong>Uninstalling.</strong> There is no uninstall script. In PowerShell:
 <code>Stop-ScheduledTask -TaskName "ToS 0DTE Capture"</code>, then
 <code>Unregister-ScheduledTask -TaskName "ToS 0DTE Capture" -Confirm:$false</code>, then delete
-<code>%LOCALAPPDATA%\TosCapture</code>. Your workbooks in Documents are left alone. If an Excel with
-no window is still listed in Task Manager afterwards, it is the capture's; end it.</p>
+<code>%LOCALAPPDATA%\TosCapture</code>. Your workbooks in Documents are left alone. Your own Excel can
+be open at the same time and also shows as <code>EXCEL.EXE</code>, so check before ending anything. In
+PowerShell, this lists each Excel with its command line:
+<code>Get-CimInstance Win32_Process -Filter "Name='EXCEL.EXE'" | Select-Object ProcessId, CommandLine</code>.
+The capture's is the one whose command line contains <code>/automation</code>. End that one by its
+process id, <code>Stop-Process -Id &lt;ProcessId&gt;</code>, and only if the task has stopped. If no command
+line contains <code>/automation</code>, there is nothing to end.</p>
 <blockquote>
 <p><strong>After the first Windows logoff, check Excel once.</strong> Open Excel, then <strong>Options →
 Advanced → General</strong>, and make sure <strong>Ignore other applications that use DDE</strong> is
