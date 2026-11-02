@@ -744,6 +744,10 @@ design in [the chain feed design](docs/plans/2026-10-31-futures-0dte-chain-feed-
 - **The capture has no window.** The task starts it through `conhost.exe --headless`:
   a hidden `powershell.exe` still lands in a window where Windows Terminal is the default.
   Stopping the task ends only that host, so the capture watches it (`Test-HostGone`).
+- **A live market makes Excel refuse COM calls.** PowerShell can return a failed COM property
+  read as nothing rather than an error, so per-call retries cannot be enough: the capture
+  registers a message filter (`Register-BusyFilter`). Test a change to it with a first start on
+  an open market; a closed one streams nothing and passes regardless.
 - **Ships hidden.** `[capture] show_in_dropdown = false`; the list changes only when the
   operator decides.
 - **The Desk's rows are private.** `/desk` is a published screen, and its /ES and /NQ rows

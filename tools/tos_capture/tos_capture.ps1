@@ -49,6 +49,10 @@ $ExcelIdleWaitMs = 30000
 $ExcelAttachPauseSec = 2
 $ExcelBusyAttempts = 10
 $ExcelBusyPauseMs = 500
+# How long one COM call waits on a busy Excel (see Register-BusyFilter) before it is
+# refused. With $ExcelBusyAttempts this stays well inside the hang limit.
+$ExcelBusyWaitMs = 20000
+$ExcelGaveNothing = 'Excel returned nothing for a read, as it can while busy (0x80010001)'
 $XlCalculationAutomatic = -4105
 $XlOpenXmlWorkbook = 51
 
@@ -692,17 +696,91 @@ function Stop-Watchdog {
     }
 }
 
+function Register-BusyFilter {
+    # With RTD streaming, Excel refuses COM calls while it is busy, and any call can be
+    # the one: an Add threw, and on 2026-11-01 a plain $Sheet.Cells came back as nothing
+    # at all, because PowerShell swallows a failed property read. Retrying each call
+    # cannot reach that, so COM itself is told to wait: an IOleMessageFilter, the
+    # answer Microsoft documents for "Call was rejected by callee". It covers this
+    # thread, the one that made the Excel object, and needs a single-threaded apartment.
+    Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+namespace TosCapture {
+    [ComImport, Guid("00000016-0000-0000-C000-000000000046"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    public interface IOleMessageFilter {
+        [PreserveSig] int HandleInComingCall(int callType, IntPtr caller, int ticks, IntPtr info);
+        [PreserveSig] int RetryRejectedCall(IntPtr callee, int ticks, int rejectType);
+        [PreserveSig] int MessagePending(IntPtr callee, int ticks, int pendingType);
+    }
+    public class BusyFilter : IOleMessageFilter {
+        [DllImport("ole32.dll")] private static extern int CoRegisterMessageFilter(IOleMessageFilter filter, out IOleMessageFilter previous);
+        private static BusyFilter kept;
+        public static int WaitMs;
+        public static int Refusals;
+        public static int LongestMs;
+        public static int Register(int waitMs) {
+            WaitMs = waitMs;
+            kept = new BusyFilter();
+            IOleMessageFilter previous;
+            return CoRegisterMessageFilter(kept, out previous);
+        }
+        public int HandleInComingCall(int callType, IntPtr caller, int ticks, IntPtr info) { return 0; }
+        public int RetryRejectedCall(IntPtr callee, int ticks, int rejectType) {
+            Refusals++;
+            if (ticks > LongestMs) { LongestMs = ticks; }
+            return ticks < WaitMs ? 200 : -1;
+        }
+        public int MessagePending(IntPtr callee, int ticks, int pendingType) { return 2; }
+    }
+}
+'@
+    $apartment = [Threading.Thread]::CurrentThread.GetApartmentState()
+    $result = [TosCapture.BusyFilter]::Register($ExcelBusyWaitMs)
+    if ($result -ne 0 -or [string]$apartment -ne 'STA') {
+        Write-Log ('the Excel busy filter is not active: result ' + $result + ', apartment ' + $apartment)
+    }
+}
+
+function Write-BusyCount {
+    # What Excel refused since the last call: the measure of how busy a live market makes it.
+    if (-not ('TosCapture.BusyFilter' -as [type])) { return }
+    if ([TosCapture.BusyFilter]::Refusals -eq 0) { return }
+    Write-Log ('Excel refused ' + [TosCapture.BusyFilter]::Refusals + ' calls; the longest wait was ' + [TosCapture.BusyFilter]::LongestMs + ' ms')
+    [TosCapture.BusyFilter]::Refusals = 0
+    [TosCapture.BusyFilter]::LongestMs = 0
+}
+
 function Test-ExcelBusy {
-    # "Call was rejected by callee" and "the application is busy": ask again shortly.
+    # "Call was rejected by callee" and the two forms of "the application is busy":
+    # ask again shortly. A live market brings these on, with RTD cells streaming.
     param([string]$Message)
-    return $Message -match '0x8001010A|0x800AC472'
+    return $Message -match '0x80010001|0x8001010A|0x800AC472'
+}
+
+function Invoke-WhileExcelBusy {
+    # One call Excel can refuse while it is busy, asked again a bounded number of times.
+    # Anything else it throws, and a busy Excel past the last attempt, is the caller's.
+    param([scriptblock]$Call)
+    $attempt = 0
+    while ($true) {
+        try {
+            return & $Call
+        } catch {
+            $attempt++
+            if ($attempt -ge $ExcelBusyAttempts -or -not (Test-ExcelBusy $_.Exception.Message)) { throw }
+            if ($attempt -eq 1) { Write-Log ('Excel is busy, asking again: ' + $_.Exception.Message) }
+            Start-Sleep -Milliseconds $ExcelBusyPauseMs
+        }
+    }
 }
 
 function Get-InstrumentSheet {
     param([string]$Root)
     if ($script:Sheets.ContainsKey($Root)) { return $script:Sheets[$Root] }
-    $sheet = $script:Book.Worksheets.Add()
-    $sheet.Name = $Root
+    # Apart, so a refused name does not add a second sheet.
+    $sheet = Invoke-WhileExcelBusy { $script:Book.Worksheets.Add() }
+    Invoke-WhileExcelBusy { $sheet.Name = $Root }
     $script:Sheets[$Root] = $sheet
     return $sheet
 }
@@ -718,6 +796,7 @@ function Write-Formulas {
         $target = $null
         try {
             $cells = $Sheet.Cells
+            if ($null -eq $cells) { throw $ExcelGaveNothing }
             [void]$cells.ClearContents()
             $target = $Sheet.Range($cells.Item(1, 1), $cells.Item($rows, $columns))
             $target.Formula = $Matrix
@@ -743,9 +822,12 @@ function Read-Block {
         $target = $null
         try {
             $cells = $Sheet.Cells
+            if ($null -eq $cells) { throw $ExcelGaveNothing }
             $target = $Sheet.Range($cells.Item(1, 1), $cells.Item($Rows, $Columns))
             $values = $target.Value2
             if ($values -isnot [array]) {
+                # Only one cell comes back as a bare value. A larger block is a failed read.
+                if ($Rows * $Columns -gt 1) { throw $ExcelGaveNothing }
                 $single = [Array]::CreateInstance([object], [int[]]@(1, 1), [int[]]@(1, 1))
                 $single.SetValue($values, 1, 1)
                 $values = $single
@@ -1314,6 +1396,7 @@ function Invoke-Capture {
     # Reads every instrument, sends what read and says why anything did not, then
     # keeps the copy. One instrument failing never blocks the other.
     $script:SnapshotCount = 0
+    Write-BusyCount
     if ($null -eq $script:Plan -or -not $script:InSession) {
         # Each session starts at the plan's interval.
         $script:CleanOwed = 0
@@ -1418,6 +1501,7 @@ function Invoke-Main {
     try {
         Write-Log ('capture started' + $(if ($Once) { ' (-Once)' } else { '' }))
         Stop-LeftoverExcel
+        Register-BusyFilter
         Start-Watchdog
         if ($Once) {
             Invoke-Prepare

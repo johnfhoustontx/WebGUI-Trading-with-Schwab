@@ -193,4 +193,63 @@ Update-Cadence $false 'no fallback'
 Check 'no fallback from an older server' (Get-CaptureInterval) 120
 $script:CleanOwed = 0
 
+# Excel refusing a call: asked again while it is busy, and nothing else is.
+$rejected = 'Call was rejected by callee. (Exception from HRESULT: 0x80010001 (RPC_E_CALL_REJECTED))'
+$ExcelBusyPauseMs = 1
+Check 'a rejected call is busy' (Test-ExcelBusy $rejected) $true
+Check 'a dead Excel is not busy' (Test-ExcelBusy 'The RPC server is unavailable. (Exception from HRESULT: 0x800706BA)') $false
+$script:Tries = 0
+$got = Invoke-WhileExcelBusy { $script:Tries++; if ($script:Tries -lt 3) { throw $rejected }; 'added' }
+Check 'busy twice, then answered' $got 'added'
+Check 'asked three times' $script:Tries 3
+$script:Tries = 0
+$threw = $false
+try { Invoke-WhileExcelBusy { $script:Tries++; throw $rejected } } catch { $threw = $true }
+Check 'busy for ever is thrown' $threw $true
+Check 'after the last attempt' $script:Tries $ExcelBusyAttempts
+$script:Tries = 0
+$threw = $false
+try { Invoke-WhileExcelBusy { $script:Tries++; throw 'something else' } } catch { $threw = $true }
+Check 'any other error is thrown' $threw $true
+Check 'at once' $script:Tries 1
+
+# A sheet: added once and named, even when both are refused first.
+$script:Adds = 0
+$script:Names = 0
+$fakeSheet = [pscustomobject]@{ Stored = '' }
+$fakeSheet | Add-Member -MemberType ScriptProperty -Name Name -Value { $this.Stored } -SecondValue {
+    param($value)
+    $script:Names++
+    if ($script:Names -lt 2) { throw $rejected }
+    $this.Stored = $value
+}
+$fakeWorksheets = [pscustomobject]@{}
+$fakeWorksheets | Add-Member -MemberType ScriptMethod -Name Add -Value {
+    $script:Adds++
+    if ($script:Adds -lt 2) { throw $rejected }
+    return $fakeSheet
+}
+$script:Book = [pscustomobject]@{ Worksheets = $fakeWorksheets }
+$script:Sheets = @{}
+$sheet = Get-InstrumentSheet 'NQ'
+Check 'the sheet is named' $sheet.Name 'NQ'
+Check 'a refused add is asked again' $script:Adds 2
+Check 'a refused name adds no second sheet' $script:Names 2
+Check 'and it is kept' ($script:Sheets['NQ'].Name) 'NQ'
+$script:Book = $null
+$script:Sheets = @{}
+
+# COM told to wait on a busy Excel. Only a live market brings a real refusal; this checks the rest.
+Register-BusyFilter
+Check 'the filter compiles and registers on this thread' ([TosCapture.BusyFilter]::WaitMs) $ExcelBusyWaitMs
+Check 'it needs this apartment' ([string][Threading.Thread]::CurrentThread.GetApartmentState()) 'STA'
+$filter = New-Object TosCapture.BusyFilter
+Check 'a refusal is retried' ($filter.RetryRejectedCall([IntPtr]::Zero, 1000, 2)) 200
+Check 'of either kind' ($filter.RetryRejectedCall([IntPtr]::Zero, 1000, 1)) 200
+Check 'and given up on in the end' ($filter.RetryRejectedCall([IntPtr]::Zero, $ExcelBusyWaitMs, 2)) -1
+Write-BusyCount
+Check 'the count is cleared once logged' ([TosCapture.BusyFilter]::Refusals) 0
+$logged = @([IO.File]::ReadAllLines($LogPath) | Where-Object { $_ -match 'Excel refused 3 calls' })
+Check 'and it is logged' ($logged.Length -ge 1) $true
+
 "failures: $fails"

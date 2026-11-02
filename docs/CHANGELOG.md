@@ -4,7 +4,26 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-01 (**/ES and /NQ are captured every 2 minutes, falling back to every 5 after a miss.**)
+**Last updated:** 2026-11-01 (**The capture waits on a busy Excel, which only a live market showed up.**)
+
+- A 30-minute run on the open Globex session (17:47-18:18 CT, nothing sent) found what the
+  closed-market tests could not: with RTD streaming, Excel refuses COM calls. On the first start
+  `Worksheets.Add()` threw `0x80010001`, missing from `Test-ExcelBusy` and not retried, so /NQ was
+  left out and the 5-minute fallback ran. With that fixed, the next start failed differently:
+  `$Sheet.Cells` came back as nothing, probably because PowerShell swallows a failed COM property
+  read, so there was no error to retry on. Two first starts, two failures.
+- The fix is at the COM layer: `Register-BusyFilter` installs an `IOleMessageFilter` on the
+  capture's thread, so a refused call waits up to `$ExcelBusyWaitMs`. `Test-ExcelBusy` gains the
+  code (it also stops a refusal reading as a dead Excel in `Test-ExcelAlive`), adding a sheet is
+  asked again, and a read that returns nothing counts as busy. Each capture logs what was refused.
+- Four fresh first starts on the live market afterwards: both ladders built each time, every
+  capture held both instruments, no fallback. Excel refused 4 calls across them, and the longest
+  logged wait was 16 ms. The 08:30 open is busier and unmeasured, and the ssh send is still unrun.
+- The same run's numbers: gamma calculated on 217-268 of 306 /ES and 395-440 of 574 /NQ contracts,
+  none missing within 1% of the future; walls held at 7660 / 7600 and 28800 / 28500. /NQ's flip
+  moved between about 28609 and 29239 as net GEX sat near zero, and /ES drew none. Both left as they are.
+
+**Prior —** 2026-11-01 (**/ES and /NQ are captured every 2 minutes, falling back to every 5 after a miss.**)
 
 - The operator's request, on the result of a test. Sunday 08:26-08:54 CT, market closed, nothing
   sent: 15 of 15 captures on their minute, /ES 306 and /NQ 416 contracts, no problems, Excel

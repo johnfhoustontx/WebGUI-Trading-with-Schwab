@@ -93,6 +93,48 @@ def _function(name):
     return CODE[start:following.start() if following else len(CODE)]
 
 
+@pytest.mark.parametrize("code", ["0x80010001", "0x8001010A", "0x800AC472"])
+def test_every_way_excel_says_busy_is_asked_again(code):
+    # 0x80010001 is the one a live market produced, on 2026-11-01: with it missing, a
+    # sheet being added beside a streaming ladder failed, and it would also read as
+    # a dead Excel in Test-ExcelAlive.
+    assert code in _function("Test-ExcelBusy")
+
+
+def test_adding_a_sheet_asks_again_while_excel_is_busy():
+    body = _function("Get-InstrumentSheet")
+    assert re.search(r"Invoke-WhileExcelBusy \{[^}]*Worksheets\.Add\(\)", body)
+    assert re.search(r"Invoke-WhileExcelBusy \{[^}]*\.Name = ", body)
+
+
+def test_asking_again_is_bounded_and_only_for_busy():
+    body = _function("Invoke-WhileExcelBusy")
+    assert "$ExcelBusyAttempts" in body and "$ExcelBusyPauseMs" in body
+    assert "Test-ExcelBusy" in body and "throw" in body
+
+
+def test_com_itself_waits_on_a_busy_excel_before_excel_starts():
+    # A failed property read comes back as nothing, with no error to retry on.
+    body = _function("Register-BusyFilter")
+    assert "00000016-0000-0000-C000-000000000046" in body
+    assert "CoRegisterMessageFilter" in body and "RetryRejectedCall" in body
+    assert "ticks < WaitMs ? 200 : -1" in body, "the wait must be bounded"
+    assert "$ExcelBusyWaitMs" in body and "GetApartmentState" in body
+    main = _function("Invoke-Main")
+    assert main.index("Register-BusyFilter") < main.index("Invoke-Prepare")
+
+
+def test_a_read_that_returns_nothing_counts_as_busy():
+    assert "0x80010001" in re.search(r"\$ExcelGaveNothing = '([^']*)'", CODE).group(1)
+    for name in ("Write-Formulas", "Read-Block"):
+        assert re.search(r"if \(\$null -eq \$cells\) \{ throw \$ExcelGaveNothing \}", _function(name))
+    assert re.search(r"\$Rows \* \$Columns -gt 1\) \{ throw \$ExcelGaveNothing", _function("Read-Block"))
+
+
+def test_what_excel_refused_is_logged_with_each_capture():
+    assert "Write-BusyCount" in _function("Invoke-Capture")
+
+
 def test_the_private_copy_refuses_the_operators_files_before_any_workbook():
     # A double-clicked file is handed to a running Excel, and a hidden copy can be
     # that Excel: the operator's workbook would then open out of sight and die with it.
