@@ -144,6 +144,28 @@ def _feed_block(bus, symbol: str, captured: dict, frozen: bool, now: datetime,
             "strike_low": low, "strike_high": high, "last_row_at": last_row_at}
 
 
+def _flip_by_rule(snap: dict, symbol: str, captured_at: float) -> None:
+    """Put the feed's own gamma flip on the GEX view: the one stored for the shown
+    capture's minute, which the ingest wrote by ``[flip] rule``, so the page's
+    summary says what the Desk and the Flip track say. ``flip_rule`` names the rule
+    for the summary's wording. The per-strike rule leaves the view as it is."""
+    from services.options_svc import futures_chain_flip
+    from services.options_svc.collect_derive import minute_of
+
+    entry = snap["views"].get("GEX")
+    rule = futures_chain_config.flip()["rule"]
+    if not entry or rule == "per_strike":
+        return
+    _, gex_history, _ = _feed._engines()
+    conn = gex_history.connect(read_only=True)
+    try:
+        level = futures_chain_flip.stored(conn, gex_history, symbol, minute_of(captured_at))
+    finally:
+        conn.close()
+    entry["flip"] = level
+    entry["summary"] = {**(entry.get("summary") or {}), "flip": level, "flip_rule": rule}
+
+
 def snapshot(bus, symbol, now=None) -> dict | None:
     """``compute.gamma_snapshot``'s payload for a feed symbol plus its ``feed``
     block, or ``None`` when there is nothing to show. ``now`` (the wall clock when
@@ -162,6 +184,7 @@ def snapshot(bus, symbol, now=None) -> dict | None:
                                   session=_session(captured))
     if snap is None:
         return None
+    _flip_by_rule(snap, symbol, captured["captured_at"])
     rows = (snap["views"].get("GEX") or {}).get("history") or []
     snap["feed"] = _feed_block(bus, symbol, captured, frozen, now,
                                last_row_at=rows[-1][0] if rows else None)

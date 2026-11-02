@@ -87,6 +87,13 @@ def test_a_row_opens_dealer_positioning_only_while_the_list_offers_it(monkeypatc
     assert out["opens"] is offered
 
 
+@pytest.mark.parametrize("rule, note", [("cumulative", feed.FLIP_NOTE), ("per_strike", "")])
+def test_the_flip_carries_a_hover_note_naming_the_cumulative_rule(monkeypatch, rule, note):
+    monkeypatch.setattr(cfg, "flip", lambda: {"rule": rule, "band_pct": 3.0})
+    (out,) = feed.rows(view(row(ct(2026, 11, 2, 9, 0))), ct(2026, 11, 2, 9, 1))
+    assert out["flip_note"] == note
+
+
 def test_the_phase_moves_when_only_the_clock_does():
     v = view(row(ct(2026, 11, 2, 9, 0)))
     assert feed.phase(v, ct(2026, 11, 2, 9, 1)) == feed.phase(v, ct(2026, 11, 2, 9, 2))

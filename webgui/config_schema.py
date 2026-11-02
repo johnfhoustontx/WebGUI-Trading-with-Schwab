@@ -3100,6 +3100,22 @@ _FUTURES_CHAIN = ConfigFile(
             Field("session.open_ct", "Capture starts", "", kind="time"),
             Field("session.close_ct", "Expires", "", kind="time"),
         )),
+        Section("Gamma flip",
+                "How the gamma flip is found for /ES and /NQ. Every other symbol "
+                "keeps the per-strike rule. A change applies to captures from then "
+                "on; stored ones keep the flip they were written with.", (
+            Field("flip.rule", "Rule",
+                  "\"cumulative\": where net gamma, summed up the strikes from the "
+                  "lowest captured, changes sign. \"per_strike\": where one strike's "
+                  "net gamma changes sign against the next. On 2 November 2026 the "
+                  "per-strike flip jumped between captures two minutes apart (/ES "
+                  "7641, none, 7775), because net gamma near the future was small; "
+                  "the cumulative flip held within a point.",
+                  kind="choice", choices=("cumulative", "per_strike")),
+            Field("flip.band_pct", "Look for a crossing within",
+                  "Of the future's price, either side. The nearest crossing wins.",
+                  kind="float", unit="%", min=0.5, max=20, step=0.5),
+        )),
         Section("/ES", "", _instrument_fields("ES", "/ES")),
         Section("/NQ", "", _instrument_fields("NQ", "/NQ")),
     ),

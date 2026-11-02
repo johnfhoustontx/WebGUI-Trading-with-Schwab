@@ -93,6 +93,11 @@ DEFAULTS = {
         "show_in_dropdown": False,
     },
     "session": {"open_ct": "06:00", "close_ct": "15:00"},
+    # How the gamma flip is found for these two: "cumulative" (where the running total
+    # of net gamma, summed up the strikes, changes sign) or "per_strike" (the rule
+    # every other symbol uses). Crossings further than band_pct from the future are
+    # not considered.
+    "flip": {"rule": "cumulative", "band_pct": 3.0},
     # Exactly these two. The symbol, the keys and the page follow code that knows
     # them, so a table for another root is not a feed and is ignored.
     "instruments": {"ES": _ES, "NQ": _NQ},
@@ -223,6 +228,19 @@ def session() -> dict:
     table = _table("session")
     return {key: _clock(table.get(key), DEFAULTS["session"][key])
             for key in ("open_ct", "close_ct")}
+
+
+FLIP_RULES = ("cumulative", "per_strike")
+
+
+def flip() -> dict:
+    """``{"rule", "band_pct"}``: how the gamma flip is found for the feed. ``rule``
+    is one of ``FLIP_RULES``; ``band_pct`` is percent of the future's price."""
+    table = _table("flip")
+    rule = table.get("rule")
+    return {"rule": rule if rule in FLIP_RULES else DEFAULTS["flip"]["rule"],
+            "band_pct": _in_range(table.get("band_pct"), DEFAULTS["flip"]["band_pct"],
+                                  0.5, 20.0)}
 
 
 def _word(raw, default, *, allow_week=False, longest=12):

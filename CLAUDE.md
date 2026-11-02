@@ -744,6 +744,10 @@ design in [the chain feed design](docs/plans/2026-10-31-futures-0dte-chain-feed-
 - **The capture has no window.** The task starts it through `conhost.exe --headless`:
   a hidden `powershell.exe` still lands in a window where Windows Terminal is the default.
   Stopping the task ends only that host, so the capture watches it (`Test-HostGone`).
+- **Their gamma flip is cumulative** (`[flip] rule`, `futures_chain_flip`): the per-strike
+  rule flickered on their small near-spot nets. It is written into the stored `gex` row by the
+  ingest, which the Desk, the Flip track and the page all read; never change
+  `gamma_tool.calc_flip_point` for these two.
 - **A live market makes Excel refuse COM calls.** PowerShell can return a failed COM property
   read as nothing rather than an error, so per-call retries cannot be enough: the capture
   registers a message filter (`Register-BusyFilter`). Test a change to it with a first start on

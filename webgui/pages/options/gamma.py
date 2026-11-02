@@ -2046,7 +2046,9 @@ def summary_text(summary, view):
     if s.get("net_total") is not None:
         parts.append(f"net {s['net_total']:,.0f}")
     if s.get("flip") is not None:
-        parts.append(f"flip {_fmt.price(s['flip'])}")
+        # /ES and /NQ find their gamma flip by a rule of their own, so it is named.
+        name = "cumulative flip" if s.get("flip_rule") == "cumulative" else "flip"
+        parts.append(f"{name} {_fmt.price(s['flip'])}")
     return "  ·  ".join(parts)
 
 

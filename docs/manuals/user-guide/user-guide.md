@@ -1108,6 +1108,14 @@ before, so Monday's options then start on Sunday evening.
 - **Dollars are right, counts are not shown.** Open interest and volume are scaled to each
   future's dollars a point (`multiplier`, shipped 50 for /ES and 20 for /NQ), so the exposure dollars are true. A raw contract count would not be, which
   is why Flow, which prints counts, is not offered for them.
+- **Their gamma flip is cumulative.** It is the price where net gamma, added up strike by
+  strike from the lowest captured, turns from negative to positive or back, and the
+  summary under the chart calls it **cumulative flip**. Every other symbol uses the
+  per-strike flip (where one strike's net gamma changes sign against the next). On these
+  two that per-strike flip jumped between captures two minutes apart, because net gamma
+  near the future is small, while the cumulative one held within a point. Settings →
+  Configuration → **/ES and /NQ chain feed** → **Gamma flip** → **Rule** (`[flip] rule`)
+  switches back.
 - **Open interest is thin, and thinner on /NQ.** Open interest cannot include 0-DTE
   positions opened and closed the same day, so a wall can rest on very few contracts.
   Treat /NQ's walls with more caution than `$SPX`'s.

@@ -4794,6 +4794,36 @@ reported as a stopped feed on the entry's reason, though they arrive on time.
   few contracts, and a listed /NQ contract can read `N/A` for `OPEN_INT`. The weighting is
   open interest, as for every symbol; it has not been compared with volume.
 
+## The gamma flip, by a rule of its own
+
+Every other symbol's flip is `gamma_tool.calc_flip_point`: where one strike's net gamma
+changes sign against the next, kept only when the sign holds for two more strikes, the
+crossing nearest the price winning. On the first live session (2 November 2026, 06:01 to
+06:12 Central) that flip jumped between captures two minutes apart: /ES 7641.65, none,
+7641.81, 7641.77, 7775.24, none, 7641.77, and /NQ between 28609 and 29133. Net gamma near
+the future was small and changed sign from strike to strike (/ES 7635 −0.7M, 7640 −13.7M,
+7645 +24.9M, 7650 +104.5M, 7655 −44.3M, 7660 +1,785M), so the crossing near the price
+passed the two-strike test in one capture and failed it in the next.
+
+So /ES and /NQ use the **cumulative flip** (`[flip] rule = "cumulative"`, the shipped
+setting): the running total of net gamma, summed up the strikes from the lowest captured,
+and the price where that total changes sign, interpolated between the two strikes it
+crosses between. Only a crossing whose upper strike is within `band_pct` (3) percent of
+the future counts, and the nearest wins. On the same seven captures it held at /ES 7656.7
+to 7657.0 and /NQ 28793 to 28797. The sum starts at the lowest strike captured
+(`strike_width_pct`, 5 percent below the future), so a strike outside the capture is not
+in it.
+
+The ingest writes it into the stored `gex` row's `flip` column, from that row's own grid,
+in the transaction that wrote the row (`futures_chain_flip.restamp`). The Desk
+(`latest_flip`), the heatmap's Flip track (the stored column) and the page's summary
+(`futures_chain_snapshot._flip_by_rule`, which reads the stored value for the shown
+capture's minute) therefore show one number. The page's summary calls it **cumulative
+flip**, and the Desk's flip carries a hover note saying so. Charm, delta and vanna keep
+the per-strike rule; only the gamma flip was measured. `rule = "per_strike"` restores the
+shared rule for captures from then on; rows already stored keep the flip they were written
+with.
+
 ## The stopped-capture alert and `/health`
 
 `futures_chain_watch.decide` is pure over the status view and the alert state. During the

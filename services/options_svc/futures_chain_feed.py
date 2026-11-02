@@ -37,6 +37,7 @@ import time
 from pydantic import ValidationError
 
 from services import _degrade
+from services.options_svc import futures_chain_flip
 from services.options_svc.collect_derive import minute_of
 from services.options_svc.futures_chain_adapter import Refused, build_chain
 from shared import futures_chain, futures_chain_config
@@ -169,6 +170,12 @@ def _store(adapted) -> bool:
             gex_history.init_schema(conn)
             _SCHEMA_READY.add(store_file)
         gex_collector.derive_minute(engine_class(), conn, raw)
+        # The feed's own flip rule, in the same transaction: the Desk, the Flip
+        # track and the page's summary all read the stored column.
+        flip = futures_chain_config.flip()
+        if flip["rule"] != "per_strike":
+            futures_chain_flip.restamp(conn, gex_history, adapted.symbol,
+                                       gex_history.SessionSpan(minute, minute + 1), flip)
         conn.commit()
         return conn.execute("SELECT 1 FROM snapshots WHERE symbol = ? AND view = 'gex' "
                             "AND ts = ?", (adapted.symbol, minute)).fetchone() is not None

@@ -23,6 +23,10 @@ from shared import futures_chain, futures_chain_config
 
 VIEW = futures_chain.DESK_VIEW
 
+# The flip's hover note while the feed finds it cumulatively ([flip] rule).
+FLIP_NOTE = ("Cumulative flip: where net gamma, summed up the strikes from the "
+             "lowest captured, changes sign. Other symbols use the per-strike flip.")
+
 
 def _entry(view, symbol):
     entry = view.get(symbol) if isinstance(view, dict) else None
@@ -68,6 +72,7 @@ def rows(view, now) -> list:
     only while the operator offers these symbols in its list."""
     out = []
     opens = futures_chain_config.capture()["show_in_dropdown"]
+    flip_note = FLIP_NOTE if futures_chain_config.flip()["rule"] == "cumulative" else ""
     for symbol in futures_chain.feed_symbols():
         row = _chosen(view, symbol, now)
         captured = _finite(row.get("captured_at")) if row else None
@@ -87,6 +92,7 @@ def rows(view, now) -> list:
             "day_pct": None,
             "as_of": as_of(captured, now),
             "flip": flip,
+            "flip_note": flip_note,
             "flip_distance": dist,
             "flip_side": side,
             "call_wall": call_wall,

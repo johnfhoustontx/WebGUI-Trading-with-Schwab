@@ -4,7 +4,26 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-01 (**The capture waits on a busy Excel, which only a live market showed up.**)
+**Last updated:** 2026-11-02 (**/ES and /NQ use a cumulative gamma flip.**)
+
+- The first live session (06:01-06:12 CT) showed the Desk's /ES flip at 7775.24 and the page's at
+  none. The two agreed on any one capture (06:12: /ES 7641.77, /NQ 28609.1); they had been read two
+  minutes apart. The flip itself was jumping: /ES 7641.65, none, 7641.81, 7641.77, 7775.24, none,
+  7641.77, and /NQ between 28609 and 29133. Net gamma near the future was small and changed sign
+  from strike to strike, so the crossing near the price passed the per-strike rule's two-strike
+  test in one capture and failed it in the next.
+- On the operator's decision, the two futures now use the cumulative flip: where net gamma, summed
+  up the strikes from the lowest captured, changes sign (within `[flip] band_pct`, 3 percent, the
+  nearest winning). On the same captures it held at /ES 7656.7-7657.0 and /NQ 28793-28797.
+  `gamma_tool.calc_flip_point` is unchanged, and so is every other symbol's flip, and Charm,
+  delta and vanna on the futures.
+- `futures_chain_flip.restamp` writes it into the stored `gex` rows in the ingest's own transaction,
+  so the Desk, the Flip track and the page's summary (read back by `_flip_by_rule`) show one number.
+  The summary says **cumulative flip** and the Desk's flip has a hover note. `[flip] rule =
+  "per_strike"` switches back for later captures. New: `config/futures_chain.toml [flip]`, its two
+  Settings fields, `services/options_svc/futures_chain_flip.py` and its tests.
+
+**Prior —** 2026-11-01 (**The capture waits on a busy Excel, which only a live market showed up.**)
 
 - A 30-minute run on the open Globex session (17:47-18:18 CT, nothing sent) found what the
   closed-market tests could not: with RTD streaming, Excel refuses COM calls. On the first start

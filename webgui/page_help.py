@@ -779,7 +779,9 @@ accelerate price.
   change, and Smooth does not reach across it. Flow and Term are not offered for them,
   and neither are Explain, Analyze and Briefings. The Bar and Smooth pickers still mean
   minutes, but a bar only sees the captures inside it, so one no longer than the
-  capture interval holds a single reading.
+  capture interval holds a single reading. Their gamma flip is the **cumulative
+  flip**: where net gamma, added up strike by strike from the lowest, changes sign.
+  The per-strike flip other symbols use jumped between captures on these two.
 - **Gamma / Charm / Delta / Vanna / Flow / Net Prem / Term** — the small tabs at
   the very top (under the page tabs): different lenses on dealer positioning; the
   **walls** mark likely support/resistance. The header names the one you're on,

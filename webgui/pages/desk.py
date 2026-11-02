@@ -3528,7 +3528,10 @@ def _dealer_row(row):
             _structure_map(row["structure"])
         _cell(fmt_price(row["call_wall"]), f"text-[14px] text-[{CALL_HEX}]")
         with _stack():
-            ui.label(fmt_price(row["flip"])).classes(_V_FLIP)
+            flip_label = ui.label(fmt_price(row["flip"])).classes(_V_FLIP)
+            if row.get("flip_note"):
+                # /ES and /NQ find their flip by a rule of their own.
+                flip_label.tooltip(row["flip_note"])
             # Empty string, not an em-dash: the level above it already
             # carries the dash when there is no flip to report.
             ui.label(flip_sub_text(row)).classes(

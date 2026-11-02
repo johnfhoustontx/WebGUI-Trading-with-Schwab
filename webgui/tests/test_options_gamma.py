@@ -384,6 +384,13 @@ def test_summary_text_keeps_net_and_flip_drops_spot_and_strikes():
     assert "450.00" not in txt                                  # spot value gone
 
 
+def test_summary_text_names_the_feeds_cumulative_flip():
+    """/ES and /NQ find their flip by a rule of their own; the summary says which."""
+    txt = gamma.summary_text({"flip": 7656.71, "flip_rule": "cumulative"}, "GEX")
+    assert "cumulative flip 7,656.71" in txt or "cumulative flip 7656.71" in txt
+    assert "cumulative" not in gamma.summary_text({"flip": 449.5}, "GEX")
+
+
 def test_dex_hedge_suffix_variants():
     s = gamma.dex_hedge_suffix({"net_delta_0dte": 10, "projected_net_delta_close": 5,
                                 "hedge_pressure": -5})
