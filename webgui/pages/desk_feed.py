@@ -11,7 +11,8 @@ hold a view written hours ago.
 * **No day change.** A capture carries no prior close, so the second line under the
   price says when the numbers are from instead. A number is never left to read as
   current when it is not.
-* **After expiry** the row falls back to the capture kept before the last hour.
+* **After expiry** the flip, walls and net gamma fall back to the capture kept before
+  the last hour; the price and its time stay those of the session's last capture.
 * **Private.** ``desk.live_views`` keeps the published Desk from ever reading the view.
 """
 from datetime import date
@@ -42,13 +43,20 @@ def _session_ended(row, now) -> bool:
 
 
 def _chosen(view, symbol, now):
-    """The row to show at ``now``: the newest until its expiry, then the kept one."""
+    """The row to show at ``now``: the newest until its expiry, then the kept one's
+    levels with the price, and its time, of the session's last capture."""
     entry = _entry(view, symbol)
     latest = entry.get("latest")
     if isinstance(latest, dict) and not _session_ended(latest, now):
         return latest
     kept = entry.get("frozen")
-    return kept if isinstance(kept, dict) else None
+    if not isinstance(kept, dict):
+        return None
+    if not isinstance(latest, dict) or latest.get("expiry") != kept.get("expiry"):
+        return kept
+    side, _ = flip_read(_finite(latest.get("spot")), _finite(kept.get("flip")))
+    return {**kept, "spot": latest.get("spot"), "captured_at": latest.get("captured_at"),
+            "gex_regime": side or "na"}
 
 
 def _stale(row, now) -> bool:

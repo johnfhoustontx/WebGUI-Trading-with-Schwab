@@ -51,11 +51,27 @@ def test_a_feed_that_stopped_moving_is_stale_however_new():
     assert out["stale"] is True and out["call_wall"] is None
 
 
-def test_after_expiry_the_row_is_the_capture_kept_before_the_last_hour():
+def test_after_expiry_the_levels_are_the_capture_kept_before_the_last_hour():
+    kept = row(ct(2026, 11, 2, 13, 55), flip=6700.0, net_gex=1.0e9)
+    latest = row(ct(2026, 11, 2, 14, 55), flip=6760.0, net_gex=9.0e9)
+    (out,) = feed.rows(view(latest, kept), ct(2026, 11, 2, 15, 1))
+    assert out["flip"] == 6700.0 and out["net_gex"] == 1.0e9 and out["stale"] is True
+
+
+def test_after_expiry_the_price_runs_to_the_last_capture_of_the_session():
+    kept = row(ct(2026, 11, 2, 13, 55), spot=6745.25, flip=6700.0)
+    latest = row(ct(2026, 11, 2, 14, 58), spot=6690.0, flip=6650.0, gex_regime="above")
+    (out,) = feed.rows(view(latest, kept), ct(2026, 11, 2, 15, 1))
+    assert out["spot"] == 6690.0 and out["as_of"] == "as of 14:58"
+    # The side is read against the kept flip, not carried from either capture.
+    assert out["flip_side"] == "below" and out["regime_word"] == d.regime_word("below")
+
+
+def test_a_last_capture_of_another_session_does_not_lend_its_price():
     kept = row(ct(2026, 11, 2, 13, 55), spot=1.0)
-    (out,) = feed.rows(view(row(ct(2026, 11, 2, 14, 55), spot=2.0), kept),
-                       ct(2026, 11, 2, 15, 1))
-    assert out["spot"] == 1.0 and out["stale"] is True and out["as_of"] == "as of 13:55"
+    latest = row(ct(2026, 11, 3, 14, 58), spot=2.0, expiry="2026-11-03")
+    (out,) = feed.rows(view(latest, kept), ct(2026, 11, 3, 15, 1))
+    assert out["spot"] == 1.0 and out["as_of"] == "as of Mon 13:55"
 
 
 def test_after_expiry_with_nothing_kept_there_is_no_row():
@@ -65,7 +81,7 @@ def test_after_expiry_with_nothing_kept_there_is_no_row():
 def test_another_days_capture_names_its_day():
     kept = row(ct(2026, 11, 2, 13, 55))
     (out,) = feed.rows(view(row(ct(2026, 11, 2, 14, 55)), kept), ct(2026, 11, 3, 5, 0))
-    assert out["as_of"] == "as of Mon 13:55"
+    assert out["as_of"] == "as of Mon 14:55"
 
 
 @pytest.mark.parametrize("bad", [None, [], "x", {"FOP.ES": 5}, {"FOP.ES": {"latest": 5}},

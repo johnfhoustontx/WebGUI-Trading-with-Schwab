@@ -4,7 +4,15 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-03 (**ThinkorSwim order: GTC exits, and three fixes from a format check.**)
+**Last updated:** 2026-11-03 (**The Desk's /ES and /NQ price runs to the session's last capture.**)
+
+- After the 15:00 expiry the Desk showed the whole capture kept an hour before it, so the
+  price read `as of 13:58` while captures had arrived until 14:58. On the operator's request
+  `desk_feed._chosen` now keeps the flip, walls and net gamma from that kept capture and takes
+  the price and its time from the session's last one; the flip side is read again from that
+  price. A last capture of another expiry lends nothing. Nothing in the service changed.
+
+**Prior —** 2026-11-03 (**ThinkorSwim order: GTC exits, and three fixes from a format check.**)
 
 - On the operator's instruction the Copy ThinkorSwim order bracket's profit target and stop are
   GTC (`@TRG… LMT GTC TRG BY #1 OCO`, `STP TRG… MARK GTC TRG BY #1 OCO`); the opening order stays
