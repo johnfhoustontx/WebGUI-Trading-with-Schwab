@@ -4,7 +4,22 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-02 (**/ES and /NQ use a cumulative gamma flip.**)
+**Last updated:** 2026-11-03 (**ThinkorSwim order: GTC exits, and three fixes from a format check.**)
+
+- On the operator's instruction the Copy ThinkorSwim order bracket's profit target and stop are
+  GTC (`@TRG… LMT GTC TRG BY #1 OCO`, `STP TRG… MARK GTC TRG BY #1 OCO`); the opening order stays
+  DAY and still carries no time-in-force word, as pasted on 2026-10-28. New
+  `config/tos_order.toml exit_tif` (`GTC` / `DAY`, Settings → ThinkorSwim order → Exits last).
+  The GTC placement follows ThinkorSwim's own order text and has not yet been pasted.
+- A check of every structure's text found: a position several lots deep was ordered as one unit
+  at the WHOLE position's price (a 3-lot vertical at three times its limit); the price is now
+  divided by the lots, for a covered call too. A CUSTOM order whose legs all buy (a long strangle
+  across two expiries) took its side from a captured row's positive price and SOLD; it now
+  follows the legs, and only a mixed CUSTOM reads the price. A "guts" strangle (call strike below
+  the put) is written as CUSTOM rather than a STRANGLE no paste has tested. Same-expiry
+  strangles, long and short, in either leg order, were already right.
+
+**Prior —** 2026-11-02 (**/ES and /NQ use a cumulative gamma flip.**)
 
 - The first live session (06:01-06:12 CT) showed the Desk's /ES flip at 7775.24 and the page's at
   none. The two agreed on any one capture (06:12: /ES 7641.77, /NQ 28609.1); they had been read two

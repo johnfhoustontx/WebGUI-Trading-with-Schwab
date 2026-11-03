@@ -36,8 +36,8 @@ def test_a_debit_vertical_is_the_operators_example_exactly():
     got = tos_order.order(DEBIT_CALL)["text"]
     assert got == "\n".join([
         "BUY +1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @1.50 LMT [TO OPEN/TO OPEN]",
-        "SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @TRG+100.00% LMT TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
-        "SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL STP TRG-50.00% MARK TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
+        "SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @TRG+100.00% LMT GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
+        "SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL STP TRG-50.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
     ])
 
 
@@ -48,8 +48,8 @@ def test_a_credit_vertical_sells_short_first_and_mirrors_the_exits():
     got = tos_order.order(CREDIT_PUT)["text"]
     assert got == "\n".join([
         "SELL -1 VERTICAL SPY 100 (Weeklys) 6 NOV 26 580/575 PUT @1.20 LMT [TO OPEN/TO OPEN]",
-        "BUY +1 VERTICAL SPY 100 (Weeklys) 6 NOV 26 580/575 PUT @TRG-50.00% LMT TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
-        "BUY +1 VERTICAL SPY 100 (Weeklys) 6 NOV 26 580/575 PUT STP TRG+100.00% MARK TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
+        "BUY +1 VERTICAL SPY 100 (Weeklys) 6 NOV 26 580/575 PUT @TRG-50.00% LMT GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
+        "BUY +1 VERTICAL SPY 100 (Weeklys) 6 NOV 26 580/575 PUT STP TRG+100.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
     ])
 
 
@@ -173,8 +173,8 @@ def test_the_exits_reverse_the_opening_line(credit, legs, opening):
     close = "SELL -1" if bought else "BUY +1"
     effects = opening.rsplit("[", 1)[1].replace("OPEN", "CLOSE")
     tgt, stp = ("+100.00", "-50.00") if bought else ("-50.00", "+100.00")
-    assert lines[1] == f"{close} {body} @TRG{tgt}% LMT TRG BY #1 OCO [{effects}"
-    assert lines[2] == f"{close} {body} STP TRG{stp}% MARK TRG BY #1 OCO [{effects}"
+    assert lines[1] == f"{close} {body} @TRG{tgt}% LMT GTC TRG BY #1 OCO [{effects}"
+    assert lines[2] == f"{close} {body} STP TRG{stp}% MARK GTC TRG BY #1 OCO [{effects}"
 
 
 def test_the_side_of_a_named_spread_comes_from_its_legs_not_its_price():
@@ -205,9 +205,95 @@ def test_a_short_put_from_the_scanners_keys():
 
 
 def test_a_position_several_lots_deep_orders_its_smallest_ratio():
+    """The row's price is the whole position's (marks times quantities), so
+    one unit of a vertical three deep opens at a third of it."""
     legs = [_leg("call", "long", 95, qty=3), _leg("call", "short", 100, qty=3)]
-    o = tos_order.order({"symbol": "INTC", "credit": -1.5, "legs": legs})
-    assert o["text"].startswith("BUY +1 VERTICAL INTC 100 (Weeklys) 6 NOV 26 95/100 CALL")
+    o = tos_order.order({"symbol": "INTC", "credit": -4.5, "legs": legs})
+    assert o["text"].splitlines()[0] == (
+        "BUY +1 VERTICAL INTC 100 (Weeklys) 6 NOV 26 95/100 CALL @1.50 LMT "
+        "[TO OPEN/TO OPEN]")
+    strangle = [_leg("call", "short", 105, qty=2), _leg("put", "short", 85, qty=2)]
+    o = tos_order.order({"symbol": "INTC", "credit": 4.2, "legs": strangle})
+    assert "CALL/PUT @2.10 LMT" in o["text"].splitlines()[0]
+    covered = [{"kind": "stock", "side": "long", "strike": None, "qty": 2},
+               _leg("call", "short", 100, M, qty=2)]
+    o = tos_order.order({"symbol": "INTC", "credit": -182.0, "legs": covered})
+    assert o["text"] == ("BUY +100 COVERED INTC 100 20 NOV 26 100 CALL @91.00 LMT "
+                         "[TO OPEN/TO OPEN]")
+
+
+# ── strangles ───────────────────────────────────────────────────────────────
+
+def test_a_long_strangle_buys_and_takes_the_debit_exits():
+    legs = [_leg("call", "long", 105), _leg("put", "long", 85)]
+    for price in (-1.9, 1.9):             # a captured debit row may be positive
+        lines = tos_order.order({"symbol": "INTC", "credit": price, "legs": legs})[
+            "text"].splitlines()
+        assert lines == [
+            "BUY +1 STRANGLE INTC 100 (Weeklys) 6 NOV 26 105/85 CALL/PUT @1.90 LMT [TO OPEN/TO OPEN]",
+            "SELL -1 STRANGLE INTC 100 (Weeklys) 6 NOV 26 105/85 CALL/PUT @TRG+100.00% LMT GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
+            "SELL -1 STRANGLE INTC 100 (Weeklys) 6 NOV 26 105/85 CALL/PUT STP TRG-50.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
+        ]
+
+
+def test_a_strangle_lists_the_call_first_whatever_order_its_legs_come_in():
+    a = [_leg("call", "short", 105), _leg("put", "short", 85)]
+    b = list(reversed(a))
+    ta = tos_order.order({"symbol": "INTC", "credit": 2.1, "legs": a})["text"]
+    tb = tos_order.order({"symbol": "INTC", "credit": 2.1, "legs": b})["text"]
+    assert ta == tb
+    assert ta.splitlines()[0].startswith("SELL -1 STRANGLE INTC 100 (Weeklys) 6 NOV 26 105/85 CALL/PUT ")
+
+
+def test_an_index_strangle_drops_the_dollar_and_keeps_a_half_strike():
+    legs = [_leg("call", "short", 6105.5), _leg("put", "short", 5850)]
+    assert tos_order.order({"symbol": "$SPX", "credit": 4.0, "legs": legs})[
+        "text"].splitlines()[0] == (
+        "SELL -1 STRANGLE SPX 100 (Weeklys) 6 NOV 26 6105.5/5850 CALL/PUT @4.00 LMT "
+        "[TO OPEN/TO OPEN]")
+
+
+def test_a_guts_strangle_is_written_as_custom():
+    """Call strike below the put strike: never pasted as a STRANGLE."""
+    legs = [_leg("call", "short", 85), _leg("put", "short", 105)]
+    first = tos_order.order({"symbol": "INTC", "credit": 12.0, "legs": legs})[
+        "text"].splitlines()[0]
+    assert first == ("SELL -1 1/1 CUSTOM INTC 100 (Weeklys) 6 NOV 26/6 NOV 26 85/105 "
+                     "CALL/PUT @12.00 LMT [TO OPEN/TO OPEN]")
+
+
+def test_a_custom_order_that_only_buys_or_only_sells_ignores_the_price_sign():
+    """A strangle across two expiries is CUSTOM; bought legs still BUY when a
+    captured row carries a positive price."""
+    long_split = [_leg("call", "long", 105, D), _leg("put", "long", 85)]
+    first = tos_order.order({"symbol": "INTC", "credit": 3.0, "legs": long_split})[
+        "text"].splitlines()[0]
+    assert first == ("BUY +1 1/1 CUSTOM INTC 100 (Weeklys) 6 NOV 26/4 DEC 26 85/105 "
+                     "PUT/CALL @3.00 LMT [TO OPEN/TO OPEN]")
+    short_split = [_leg("call", "short", 105, D), _leg("put", "short", 85)]
+    first = tos_order.order({"symbol": "INTC", "credit": -3.0, "legs": short_split})[
+        "text"].splitlines()[0]
+    # A sell lists the ratios negated: +1 of "1/1" is long both, SELL -1 shorts both.
+    assert first.startswith("SELL -1 1/1 CUSTOM INTC 100 (Weeklys) 6 NOV 26/4 DEC 26 85/105 PUT/CALL")
+
+
+# ── time in force ───────────────────────────────────────────────────────────
+
+def test_the_opening_order_is_day_and_the_exits_are_gtc():
+    lines = tos_order.order(CREDIT_PUT)["text"].splitlines()
+    assert "GTC" not in lines[0] and "DAY" not in lines[0]
+    assert " LMT GTC TRG BY #1 OCO " in lines[1]
+    assert " MARK GTC TRG BY #1 OCO " in lines[2]
+    assert "good till cancelled" in tos_order.order(CREDIT_PUT)["summary"]
+
+
+def test_day_exits_write_no_time_in_force(monkeypatch):
+    monkeypatch.setattr(tos_order, "load", lambda: {**tos_order.DEFAULTS,
+                                                    "exit_tif": "day"})
+    lines = tos_order.order(CREDIT_PUT)["text"].splitlines()
+    assert lines[1].endswith("@TRG-50.00% LMT TRG BY #1 OCO [TO CLOSE/TO CLOSE]")
+    assert lines[2].endswith("STP TRG+100.00% MARK TRG BY #1 OCO [TO CLOSE/TO CLOSE]")
+    assert "for the day" in tos_order.order(CREDIT_PUT)["summary"]
 
 
 def test_mixed_expiries_are_tagged_weeklys_once_any_is():
@@ -258,11 +344,13 @@ def test_the_percentages_and_quantity_come_from_config(monkeypatch):
     {"debit": {"stop_pct": 100}}, {"credit": {"target_pct": 100}},
     {"debit": {"target_pct": -5}}, {"credit": {"stop_pct": float("nan")}},
     {"debit": {"target_pct": "lots"}},
+    {"exit_tif": "GTD"}, {"exit_tif": 1}, {"exit_tif": ""},
 ])
 def test_a_bad_setting_falls_back_to_the_default(monkeypatch, bad):
     monkeypatch.setattr(tos_order, "load", lambda: bad)
     s = tos_order.settings()
     assert s["quantity"] == 1
+    assert s["exit_tif"] == "GTC"
     assert s["debit"] == tos_order.DEFAULTS["debit"]
     assert s["credit"] == tos_order.DEFAULTS["credit"]
 
@@ -277,7 +365,7 @@ def test_the_shipped_file_matches_the_defaults():
 def test_every_key_is_in_the_settings_catalogue():
     cfg = config_schema.BY_NAME["tos_order.toml"]
     keys = {f.key for sec in cfg.sections for f in sec.fields}
-    assert keys == {"quantity", "debit.target_pct", "debit.stop_pct",
+    assert keys == {"quantity", "exit_tif", "debit.target_pct", "debit.stop_pct",
                     "credit.target_pct", "credit.stop_pct"}
 
 

@@ -4,14 +4,20 @@ The button puts a "1st triggers OCO" bracket on the clipboard, in the text
 ThinkorSwim reads with Trade > Order Entry Tools > "Paste order from clipboard":
 
     BUY +1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @1.50 LMT [TO OPEN/TO OPEN]
-    SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @TRG+100.00% LMT TRG BY #1 OCO [TO CLOSE/TO CLOSE]
-    SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL STP TRG-50.00% MARK TRG BY #1 OCO [TO CLOSE/TO CLOSE]
+    SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @TRG+100.00% LMT GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]
+    SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL STP TRG-50.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]
 
 The opening limit triggers the other two, which cancel each other. The two exit
 prices are PERCENTAGES of the fill, worked out by ThinkorSwim when the opening
 order fills, so they follow the price actually paid rather than the limit. The
 closing lines repeat the opening one with the side reversed; the position
 effect names one ``TO OPEN`` / ``TO CLOSE`` per leg.
+
+The opening order is a DAY order, written with no time-in-force word (DAY is
+what ThinkorSwim reads when there is none, and the lines pasted on 2026-10-28
+had none). The two exits carry ``exit_tif`` (shipped ``GTC``) after the order
+type, and after a stop's ``MARK`` trigger: they should outlive the session the
+trade opened in.
 
 **One rule orders every named structure's strikes**: ThinkorSwim reads ``+1`` of
 a spread as LONG its first-listed leg of each pair. So a debit vertical is
@@ -22,8 +28,12 @@ ThinkorSwim fill, which also shows an iron butterfly travels as an IRON CONDOR
 with equal short strikes); a calendar or diagonal lists the far expiry first.
 Which side opens is read off the LEGS, never off the sign of the price: the
 adapters store a debit both as a negative ``credit`` and as a negative
-``net_cost``. Only a CUSTOM order, which has no geometry of its own, takes its
-side from the price's sign.
+``net_cost``. Only a CUSTOM order that both buys and sells, which has no
+geometry of its own, takes its side from the price's sign.
+
+The row's price is the WHOLE position's (the legs' marks times their
+quantities), so a position several lots deep is ordered as its smallest whole
+ratio at the price divided by the lots.
 
 The structures: a single option, VERTICAL, STRADDLE, STRANGLE, CALENDAR,
 DIAGONAL, BUTTERFLY (equal wings), CONDOR, IRON CONDOR (and iron butterfly),
@@ -47,6 +57,7 @@ from ..fmt import num
 
 DEFAULTS = {
     "quantity": 1,
+    "exit_tif": "GTC",
     "debit": {"target_pct": 100.0, "stop_pct": 50.0},
     "credit": {"target_pct": 50.0, "stop_pct": 100.0},
 }
@@ -58,6 +69,8 @@ _MULTIPLIER = "100"
 _WEEKLYS = "(Weeklys)"
 _LINK = "TRG BY #1 OCO"
 _SHARES_PER_CONTRACT = 100
+# The exits' time in force. DAY writes no word: ThinkorSwim's own text omits it.
+EXIT_TIFS = ("GTC", "DAY")
 
 # A stored row with no ``legs`` keeps its strikes in named keys
 # (``signal_repricer._LEG_LAYOUT``, Tier 2): (right, key, +1 long / -1 short).
@@ -93,8 +106,13 @@ def settings():
     if isinstance(q, bool) or not isinstance(q, (int, float)) or q != int(q) \
             or not 1 <= q <= 1000:
         q = DEFAULTS["quantity"]
+    tif = load().get("exit_tif")
+    tif = tif.strip().upper() if isinstance(tif, str) else None
+    if tif not in EXIT_TIFS:
+        tif = DEFAULTS["exit_tif"]
     return {
         "quantity": int(q),
+        "exit_tif": tif,
         "debit": {"target_pct": _pct_setting("debit", "target_pct", below_100=False),
                   "stop_pct": _pct_setting("debit", "stop_pct", below_100=True)},
         "credit": {"target_pct": _pct_setting("credit", "target_pct", below_100=True),
@@ -250,6 +268,10 @@ def _named(sym, opts):
             if call["strike"] == put["strike"]:
                 return (f"STRADDLE {_series(sym, exps)} {exp} "
                         f"{strike_text(call['strike'])}", side, "straddle")
+            if call["strike"] < put["strike"]:
+                # A "guts" strangle (both legs in the money) has never been
+                # pasted as a STRANGLE; CUSTOM is a text that has.
+                return None
             return (f"STRANGLE {_series(sym, exps)} {exp} "
                     f"{strike_text(call['strike'])}/{strike_text(put['strike'])} "
                     "CALL/PUT", side, "strangle")
@@ -312,6 +334,18 @@ def _price_is_debit(signal):
     return None
 
 
+def _custom_is_debit(signal, opts):
+    """A CUSTOM order's side: every leg bought is a debit and every leg sold a
+    credit, whatever sign the price carries; only a mixed position reads the
+    price's sign (a debit when it has none)."""
+    if all(l["qty"] > 0 for l in opts):
+        return True
+    if all(l["qty"] < 0 for l in opts):
+        return False
+    debit = _price_is_debit(signal)
+    return True if debit is None else debit
+
+
 def entry_price(signal):
     """The per-share price to open at, always positive, or None. ``net_cost`` is
     signed (negative = debit) and so is a debit row's ``credit``; only the size
@@ -326,10 +360,13 @@ def entry_price(signal):
 
 
 def structure(signal):
-    """``{body, side, legs, name, bracket}`` for the selected trade, or None.
+    """``{body, side, legs, name, bracket, shares, lots}`` for the selected
+    trade, or None.
 
     ``body`` follows ``BUY +q`` / ``SELL -q``; ``legs`` counts the position
-    effects; ``bracket`` is False for a position holding shares."""
+    effects; ``bracket`` is False for a position holding shares. ``lots`` is
+    how many of the ordered unit the position holds (3 for a vertical three
+    deep): the row's price is the whole position's, so the order divides it."""
     legs = position_legs(signal)
     sym = _root(signal)
     if not legs or not sym:
@@ -348,16 +385,15 @@ def structure(signal):
         return {"body": (f"COVERED {_series(sym, [c['expiry']])} "
                          f"{expiry_text(c['expiry'])} {strike_text(c['strike'])} CALL"),
                 "side": 1, "legs": 2, "name": "covered call", "bracket": False,
-                "shares": True}
+                "shares": True, "lots": stock[0]["qty"]}
     g = math.gcd(*(abs(l["qty"]) for l in opts))
     unit = [{**l, "qty": l["qty"] // g} for l in opts]
     named = _named(sym, unit)
     if named is None:
-        debit = _price_is_debit(signal)
-        named = _custom(sym, unit, True if debit is None else debit)
+        named = _custom(sym, unit, _custom_is_debit(signal, unit))
     body, side, name = named
     return {"body": body, "side": side, "legs": len(opts), "name": name,
-            "bracket": True, "shares": False}
+            "bracket": True, "shares": False, "lots": g}
 
 
 def _side_text(side, q):
@@ -372,6 +408,7 @@ def order(signal, cfg=None):
     price = entry_price(signal)
     if st is None or price is None:
         return None
+    price /= st["lots"]
     cfg = cfg or settings()
     q = cfg["quantity"]
     if st["shares"]:
@@ -390,13 +427,15 @@ def order(signal, cfg=None):
     pcts = cfg["debit"] if debit else cfg["credit"]
     tgt_sign, stp_sign = ("+", "-") if debit else ("-", "+")
     close = _side_text(-st["side"], q)
+    tif = "" if cfg["exit_tif"] == "DAY" else f" {cfg['exit_tif']}"
     text = "\n".join([
         first,
-        f"{close} {st['body']} @TRG{tgt_sign}{pcts['target_pct']:.2f}% LMT {_LINK} [{closing}]",
-        f"{close} {st['body']} STP TRG{stp_sign}{pcts['stop_pct']:.2f}% MARK {_LINK} [{closing}]",
+        f"{close} {st['body']} @TRG{tgt_sign}{pcts['target_pct']:.2f}% LMT{tif} {_LINK} [{closing}]",
+        f"{close} {st['body']} STP TRG{stp_sign}{pcts['stop_pct']:.2f}% MARK{tif} {_LINK} [{closing}]",
     ])
     word = "debit" if debit else "credit"
     summary = (f"Copies a ThinkorSwim bracket for this {st['name']}: open for a "
                f"{price:.2f} {word}, take profit at {tgt_sign}{pcts['target_pct']:.2f}%, "
-               f"stop at {stp_sign}{pcts['stop_pct']:.2f}%. {paste}")
+               f"stop at {stp_sign}{pcts['stop_pct']:.2f}%, both "
+               f"{'good till cancelled' if tif else 'for the day'}. {paste}")
     return {"text": text, "summary": summary}

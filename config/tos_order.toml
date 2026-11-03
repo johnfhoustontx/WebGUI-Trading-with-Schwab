@@ -10,6 +10,7 @@
 # Read on every click; nothing needs a restart.
 
 quantity = 1                   # spreads per order (100 shares each for a covered call); change it in ThinkorSwim for a different size
+exit_tif = "GTC"               # the profit target and stop: "GTC" (good till cancelled) or "DAY". The opening order is always DAY
 
 [debit]
 # Any trade opened for a debit (bought): the target is a rise in its price,

@@ -3136,6 +3136,10 @@ _TOS_ORDER = ConfigFile(
             Field("quantity", "Spreads per order",
                   "A covered call orders 100 shares for each.", kind="int",
                   min=1, max=1000, step=1),
+            Field("exit_tif", "Exits last",
+                  "GTC keeps the profit target and stop working until filled "
+                  "or cancelled; DAY ends them at the close. The opening order "
+                  "is always a DAY order.", kind="choice", choices=("GTC", "DAY")),
         )),
         Section("Debit trades", "Bought: the target is a rise in the "
                 "trade's price, the stop a fall.", (

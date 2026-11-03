@@ -2031,15 +2031,19 @@ the clipboard; for a debit vertical:
 
 ```
 BUY +1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @1.50 LMT [TO OPEN/TO OPEN]
-SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @TRG+100.00% LMT TRG BY #1 OCO [TO CLOSE/TO CLOSE]
-SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL STP TRG-50.00% MARK TRG BY #1 OCO [TO CLOSE/TO CLOSE]
+SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @TRG+100.00% LMT GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]
+SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL STP TRG-50.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]
 ```
 
 In ThinkorSwim, open **Trade → Order Entry Tools → Paste order from clipboard**,
 check the ticket, and send it there. The app never places an order.
 
-- **The opening order** is a limit at the price the panel shows (the debit paid
-  or the credit received, per share).
+- **The opening order** is a DAY limit at the price the panel shows (the debit
+  paid or the credit received, per share, for one spread: a position several
+  lots deep is priced per lot).
+- **The two exits are GTC** (good till cancelled), so the target and the stop
+  keep working after the day the trade opens. **Exits last** under Settings →
+  Configuration → ThinkorSwim order sets them to DAY instead.
 - **The two exits** are percentages of the fill, so ThinkorSwim prices them from
   what you actually paid. A trade bought for a **debit** takes profit at
   **+100%** (double the debit) and stops at **−50%**. A trade sold for a

@@ -366,7 +366,9 @@ directional trades on their own tab.
   butterflies, condors, iron condors and flies, and any other mix of options
   as a CUSTOM order. A trade bought for a debit targets +100% and stops at
   −50%; one sold for a credit buys back at half the credit and stops when it
-  doubles (Settings → Configuration → ThinkorSwim order). A covered call
+  doubles (Settings → Configuration → ThinkorSwim order). The opening order
+  is a DAY order; the target and stop are GTC, so they keep working after
+  the day you open. A covered call
   copies the opening order only; a protective put or a collar gets no button.
   The same button is on every page with this panel.
 - **Probability vs Needs** (in the detail panel) — "Needs" is the win rate this

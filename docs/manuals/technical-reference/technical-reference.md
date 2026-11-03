@@ -2210,16 +2210,23 @@ smallest whole ratio, and names the structure from that geometry:
   is whichever makes the listed spread the position held (a debit vertical
   `BUY +q … long/short`, a credit one `SELL -q … short/long`). Only a CUSTOM
   order takes its side from the price: a debit buys the ratios as held, a credit
-  sells them negated. A protective put or a collar (shares beside a long put)
+  sells them negated; a CUSTOM order whose legs are all bought, or all sold,
+  takes its side from the legs. A strangle whose call strike is below its put
+  strike (a "guts") is written as CUSTOM. A protective put or a collar (shares beside a long put)
   gets no order. The position effect names one `TO OPEN` / `TO CLOSE` per leg.
 - **Verified**: each row above was pasted into ThinkorSwim on 2026-10-28 and
   loaded as the position named.
-- **Price**: the absolute value of `net_cost`, else of `credit` (per share), to
-  two decimals.
+- **Price**: the absolute value of `net_cost`, else of `credit` (per share),
+  divided by the lots the position holds of its smallest whole ratio (the row's
+  price is the whole position's), to two decimals.
+- **Time in force**: the opening line carries none, which ThinkorSwim reads as
+  DAY. The exits carry `exit_tif` (shipped `GTC`) after `LMT` and after the
+  stop's `MARK`: `@TRG+100.00% LMT GTC TRG BY #1 OCO`,
+  `STP TRG-50.00% MARK GTC TRG BY #1 OCO`. `exit_tif = "DAY"` writes no word.
 - **Exits**, from `config/tos_order.toml` (read on every click), the opening
   line with the side reversed: a buy (debit) `@TRG+100.00% LMT` and
   `STP TRG-50.00% MARK`; a sell (credit) `@TRG-50.00% LMT` and
-  `STP TRG+100.00% MARK`. Both are `TRG BY #1 OCO`: the opening order triggers
+  `STP TRG+100.00% MARK`, each followed by the time in force. Both are `TRG BY #1 OCO`: the opening order triggers
   them and each cancels the other. A percentage below the entry must be under
   100, or it falls back to the default. A covered call has no exits.
 - **Series tag**: `(Weeklys)` when any expiration is not the monthly — the third
