@@ -840,9 +840,10 @@ def test_before_the_capture_starts_the_last_session_label_asks_nothing(when):
     assert "No capture has arrived" not in label and "logged out" not in label
 
 
-def _band(close_in=7200, marks=5):
-    """A projected afternoon, as the service publishes one."""
-    start = NOW_LIVE()
+def _band(close_in=7200, marks=5, start=None):
+    """A projected afternoon, as the service publishes one, from ``start`` (the
+    wall clock's minute by default)."""
+    start = NOW_LIVE() if start is None else start
     ts = [start + i * close_in // (marks - 1) for i in range(marks)]
     row = [1.0] * marks
     return {"ts": ts, "spot": 7600.0, "call": {"7600.0": row, "7605.0": row},
@@ -965,10 +966,11 @@ def _hedge_plot(kids):
     raise AssertionError("no hedge panel")
 
 
-def _outage_rows():
-    """Captures to 20 minutes ago, with a 2-hour hole before them, as published."""
+def _outage_rows(now=None):
+    """Captures to 20 minutes before ``now`` (the wall clock by default), with a
+    2-hour hole before them, as published."""
     interval, _step = _settings()
-    last = NOW_LIVE() - 60
+    last = (NOW_LIVE() if now is None else now) - 60
     after = [last - i * interval for i in range(4)][::-1]
     before = [after[0] - 7200 - i * interval for i in range(4)][::-1]
     return _filled(*before, *after)
@@ -1090,12 +1092,19 @@ def test_a_current_payload_draws_the_projection_at_the_feeds_step(requests):
     assert len(options["xAxis"]["categories"]) <= shown + 120 // 5 + 1
 
 
-def test_a_stale_payload_draws_no_now_and_no_projection(requests):
-    """Capture stopped hours ago: those hours are not a forecast from "now"."""
-    rows = _outage_rows()
+def test_a_stale_payload_draws_no_now_and_no_projection(requests, monkeypatch):
+    """Capture stopped hours ago: those hours are not a forecast from "now".
+
+    The clock is pinned mid-session. On the wall clock, from 15:00 to about 18:00
+    Central a capture three hours old belongs to the session that has just ENDED,
+    which the page rightly calls "Last session", not "Stale" (CI failed at 17:10)."""
+    now = int(NOW) // 60 * 60
+    monkeypatch.setattr(gamma_feed, "_now", lambda: now)
+    rows = _outage_rows(now)
     old = rows[-1][0] - 10800
     kept = [r for r in rows if r[0] <= old] or rows[:1]
-    kids = _drawn(kept, forward=_band(), hedge=[{"ts": kept[0][0], "hedge_pressure": 1.0e9}],
+    assert gamma_feed.reading(_feed_payload(old), now) == "stale"
+    kids = _drawn(kept, forward=_band(start=now), hedge=[{"ts": kept[0][0], "hedge_pressure": 1.0e9}],
                   captured=old)
     options = _heat_plot(kids).options
     assert not options["xAxis"]["plotLines"]
