@@ -44,6 +44,15 @@ lxml==6.1.1               # blog_svc: parses a submitted entry (the document cle
 tinycss2==1.5.1           # blog_svc: tokenizes an entry's CSS, so an escaped url() is still a url()
 webencodings==0.5.1       # tinycss2's only dependency - pinned so the lock stays complete
 
+# --- User manuals build (docs/manuals/build_docs.py) ---
+# tests/test_manual_diagrams.py imports build_docs, so CI needs all four. bs4 was
+# dropped from the lock on 2026-08-29 as an orphan of yfinance; from 2026-10-15, when
+# that test arrived, repo-tests failed in CI while local venvs still held the old copy.
+Markdown==3.10.2          # build_docs: Markdown -> HTML
+beautifulsoup4==4.15.0    # build_docs: walks the HTML into the .docx
+soupsieve==2.9.0          # beautifulsoup4's CSS selectors - pinned so the lock stays complete
+python-docx==1.2.0        # build_docs: writes the .docx manuals
+
 # --- Schwab API SDK (P, O, S) ---
 schwab-py==1.5.1          # pinned (was unpinned) — provides the `schwab` package (auth, streaming)
 
