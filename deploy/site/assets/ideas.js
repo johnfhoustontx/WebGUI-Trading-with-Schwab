@@ -220,6 +220,53 @@
     box.hidden = false;
   }
 
+  // ── Open or closed, as an icon on each card ─────────────────────────────────
+  // Open = the result is still live ("open"); closed = it reached its target or
+  // stop, or settled at expiry - the same three FINAL states site_ideas never
+  // revisits. No result yet means no badge: the page does not guess.
+  var SVG_NS = "http://www.w3.org/2000/svg";
+  var LOCK_SHACKLE = {
+    open: "M8 11V7a4 4 0 0 1 7.75-1.4",     // swung up and away: unlocked
+    closed: "M8 11V7a4 4 0 0 1 8 0v4"        // seated in the body: locked
+  };
+
+  function stateOf(idea) {
+    var r = resultOf(idea);
+    if (!r) return null;
+    if (r.status === "open") return "open";
+    if (r.status === "target" || r.status === "stop" || r.status === "expired") return "closed";
+    return null;
+  }
+
+  function lockIcon(state) {
+    var svg = document.createElementNS(SVG_NS, "svg");
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    var body = document.createElementNS(SVG_NS, "rect");
+    body.setAttribute("x", "5");
+    body.setAttribute("y", "11");
+    body.setAttribute("width", "14");
+    body.setAttribute("height", "10");
+    body.setAttribute("rx", "2");
+    var shackle = document.createElementNS(SVG_NS, "path");
+    shackle.setAttribute("d", LOCK_SHACKLE[state]);
+    svg.appendChild(body);
+    svg.appendChild(shackle);
+    return svg;
+  }
+
+  function stateBadge(idea) {
+    var state = stateOf(idea);
+    if (!state) return null;
+    var word = state === "open" ? "Open" : "Closed";
+    var badge = el("span", "ns-idea-status is-" + state);
+    badge.title = state === "open" ? "This trade is still open" : "This trade is closed";
+    badge.appendChild(lockIcon(state));
+    badge.appendChild(el("span", "ns-idea-status-word", word));
+    return badge;
+  }
+
   function card(idea, eager) {
     var a = el("a", "ns-idea-card");
     a.href = idea.full;
@@ -239,6 +286,8 @@
     var bits = [str(idea.symbol), str(idea.label)];
     if (str(idea.grade)) bits.push(str(idea.grade));
     meta.appendChild(el("span", "ns-idea-what", bits.filter(Boolean).join(" · ")));
+    var badge = stateBadge(idea);
+    if (badge) meta.appendChild(badge);
 
     a.appendChild(img);
     a.appendChild(meta);

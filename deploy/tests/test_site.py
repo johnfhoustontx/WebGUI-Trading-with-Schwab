@@ -1234,6 +1234,31 @@ def test_an_open_result_is_labelled_as_an_expiry_payoff_not_a_mark():
         assert word not in shown, word
 
 
+def test_each_card_shows_whether_the_trade_is_open_or_closed():
+    """A lock icon on every card with a result: unlocked "Open" while the result
+    is live, locked "Closed" once it hit its target or stop or expired - the
+    three final states site_ideas never revisits. Not the P&L green/red."""
+    js = _text("assets/ideas.js")
+    assert '"Open"' in js and '"Closed"' in js
+    states = re.search(r"function stateOf\(idea\)\s*\{(.*?)\n  \}", js, re.S)
+    assert states, "ideas.js needs stateOf(idea)"
+    body = states.group(1)
+    assert 'r.status === "open"' in body
+    for final in ("target", "stop", "expired"):
+        assert f'r.status === "{final}"' in body, final
+    css = _text("assets/site.css")
+    for cls in (".ns-idea-status.is-open", ".ns-idea-status.is-closed"):
+        assert cls in css, cls
+    rule = re.search(r"\.ns-idea-status\.is-(?:open|closed)\s*\{[^}]*\}", css).group(0)
+    assert "--ns-up" not in rule and "--ns-down" not in rule
+    # Open glows and breathes; the breathing stops for reduced motion.
+    open_rule = re.search(r"\.ns-idea-status\.is-open\s*\{[^}]*\}", css).group(0)
+    assert "box-shadow" in open_rule and "animation: ns-open-glow" in open_rule
+    assert "@keyframes ns-open-glow" in css
+    assert re.search(r"prefers-reduced-motion: reduce\)\s*\{\s*\.ns-idea-status\.is-open"
+                     r"\s*\{\s*animation: none", css)
+
+
 def test_the_home_strip_states_the_record_and_it_ships_hidden():
     """One line under the strip's heading: how every idea the site keeps has
     done. Hidden until the script fills it, like the strip itself; the dollar

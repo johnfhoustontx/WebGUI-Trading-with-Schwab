@@ -1243,6 +1243,72 @@ body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
   color: color-mix(in srgb, var(--color-text) 50%, transparent);
 }
 
+/* Open or closed (ideas.js stateBadge): a lock icon at the end of the meta line,
+ * unlocked in the site accent while the trade runs, locked and muted once it has
+ * hit its target or stop or expired. Not green/red: those mean up/down here. */
+.ns-idea-status {
+  flex: none;
+  align-self: center;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px 3px 7px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+.ns-idea-status svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* Open glows: the market glow's three shadows (hairline, halo, bloom) in the
+ * accent, breathing at .ns-dot's pace, with the icon lit to match. Steady under
+ * prefers-reduced-motion - the glow, not its motion, says "open". */
+.ns-idea-status.is-open {
+  --ns-glow: var(--color-accent);
+  color: color-mix(in srgb, var(--ns-glow) 70%, #fff);
+  border-color: color-mix(in srgb, var(--ns-glow) 85%, #fff);
+  background: color-mix(in srgb, var(--ns-glow) 22%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--ns-glow) 35%, transparent),
+    0 0 12px 1px color-mix(in srgb, var(--ns-glow) 75%, transparent),
+    0 0 28px 4px color-mix(in srgb, var(--ns-glow) 45%, transparent);
+  text-shadow: 0 0 8px var(--ns-glow);
+  animation: ns-open-glow 2.8s ease-in-out infinite;
+}
+.ns-idea-status.is-open svg {
+  filter: drop-shadow(0 0 4px var(--ns-glow));
+}
+@keyframes ns-open-glow {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--ns-glow) 25%, transparent),
+      0 0 8px 0 color-mix(in srgb, var(--ns-glow) 55%, transparent),
+      0 0 18px 1px color-mix(in srgb, var(--ns-glow) 30%, transparent);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--ns-glow) 45%, transparent),
+      0 0 16px 3px color-mix(in srgb, var(--ns-glow) 90%, transparent),
+      0 0 38px 8px color-mix(in srgb, var(--ns-glow) 55%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ns-idea-status.is-open { animation: none; }
+}
+.ns-idea-status.is-closed {
+  color: color-mix(in srgb, var(--color-text) 58%, transparent);
+  background: color-mix(in srgb, var(--color-text) 6%, transparent);
+}
+
 /* The page you are on, in the one site menu (every page carries the same menu;
  * aria-current marks the current item instead of the item being left out). */
 .ns-navlink[aria-current="page"] {
