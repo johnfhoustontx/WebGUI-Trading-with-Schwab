@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-01</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-05</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -264,6 +264,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#cadence_1">Cadence</a></li>
 <li><a href="#what-the-server-keeps-and-when-it-refuses">What the server keeps, and when it refuses</a></li>
 <li><a href="#the-session-storage-and-what-the-page-shows">The session, storage and what the page shows</a></li>
+<li><a href="#the-gamma-flip-by-a-rule-of-its-own">The gamma flip, by a rule of its own</a></li>
 <li><a href="#the-stopped-capture-alert-and-health">The stopped-capture alert and /health</a></li>
 </ul>
 </li>
@@ -718,7 +719,7 @@ were removed in September 2026 — nothing in the stack talks to those processes
 <tbody>
 <tr>
 <td><strong>Push notifications</strong></td>
-<td>Gitignored <code>shared/notifications.json</code> (template: <code>shared/notifications.example.json</code>). Telegram needs a bot token + chat id; Discord needs a channel webhook URL; Google Fi SMS needs your 10-digit Fi number plus a Gmail <strong>App Password</strong>. Each channel self-gates — missing creds are a silent no-op. Env vars override file values. <strong>Per-category on/off</strong> lives in <code>config/notify.toml</code> (<code>[channels.&lt;category&gt;] discord / telegram</code>, all on by default; Settings → General writes <code>config/local/notify.toml</code>), enforced in <code>shared/notify/channels.discord_target</code> / <code>telegram_target</code> and read at send time (mtime-cached, no restart). The trade idea's optional <strong>Google Calendar event</strong> (<code>channels.trade_idea.calendar</code>, <code>[calendar] calendar_id / lead_min / duration_min</code>) is created by <code>shared/notify/gcal.py</code> with the service-account key <code>shared/google_calendar_sa.json</code>; it uses the calendar's own default notification (<code>reminders.useDefault</code>). Each <strong>posted</strong> trade idea is also written into the public site by <code>services/options_svc/site_ideas.py</code> — <code>deploy/site/ideas/&lt;day&gt;/&lt;HHMM&gt;-&lt;SYMBOL&gt;.{png,webp}</code> plus the manifest <code>deploy/site/ideas.json</code> (gitignored), keeping the newest <code>[site] keep_days</code> posting days (default 6); <code>deploy/site/assets/ideas.js</code> draws the home page strip and <code>ideas.html</code> from it. Each idea's <strong>result</strong> applies the app's exit rules (<code>trade_mgmt.structure_rules</code>): target = <code>tp_frac</code> × the debit (single long option; else max profit) or × the credit; stop = <code>debit_stop_frac</code> × the debit, or <code>stop_mult</code> × the credit where <code>loss_rules</code>. A backspread has no target and no stop and is held to expiry, as the app's tracked rows hold it (<code>structure_marks.open_ended</code> with a sold leg). The option is modelled — Black-Scholes (<code>options_calculator</code>) at the IV solved from the entry price at the post — on every 1-minute stock bar (<code>/pricehistory</code>, incremental from <code>checked_to</code>); stop before target, a stop gapped through fills at the bar's open, a target at the level. Unhit ideas settle at intrinsic on the expiry-day daily close. Refreshed every <code>[site] refresh_min</code> (default 15) inside 08:00–15:15 CT: one batched <code>/quotes</code> call plus one minute-history call per symbol. No option quote is read. % = result ÷ max loss.</td>
+<td>Gitignored <code>shared/notifications.json</code> (template: <code>shared/notifications.example.json</code>). Telegram needs a bot token + chat id; Discord needs a channel webhook URL; Google Fi SMS needs your 10-digit Fi number plus a Gmail <strong>App Password</strong>. Each channel self-gates — missing creds are a silent no-op. Env vars override file values. <strong>Per-category on/off</strong> lives in <code>config/notify.toml</code> (<code>[channels.&lt;category&gt;] discord / telegram</code>, all on by default; Settings → General writes <code>config/local/notify.toml</code>), enforced in <code>shared/notify/channels.discord_target</code> / <code>telegram_target</code> and read at send time (mtime-cached, no restart). The trade idea's optional <strong>Google Calendar event</strong> (<code>channels.trade_idea.calendar</code>, <code>[calendar] calendar_id / lead_min / duration_min</code>) is created by <code>shared/notify/gcal.py</code> with the service-account key <code>shared/google_calendar_sa.json</code>; it uses the calendar's own default notification (<code>reminders.useDefault</code>). Each <strong>posted</strong> trade idea is also written into the public site by <code>services/options_svc/site_ideas.py</code> — <code>deploy/site/ideas/&lt;day&gt;/&lt;HHMM&gt;-&lt;SYMBOL&gt;.{png,webp}</code> plus the manifest <code>deploy/site/ideas.json</code> (gitignored), keeping the newest <code>[site] keep_days</code> posting days (default 6); <code>deploy/site/assets/ideas.js</code> draws the home page strip and <code>ideas.html</code> from it. Each idea's <strong>result</strong> is the <strong>Paper Ledger row's own</strong> wherever one exists (<code>idea_ledger.site_rows</code>, matched on symbol + post time; read every refresh, so it overrides an earlier modelled result): its status (<code>target</code>, <code>stop</code>, <code>closed</code> for a hand close, <code>expired</code>, or <code>open</code>), and its P&amp;L per contract (<code>realized_pnl</code> ÷ quantity, or the last 5-minute mark while open), tagged <code>basis: "ledger"</code>. A single-option idea's figure is withheld while <code>config/finder_public.toml [display] show_leg_quotes</code> is off (status and exit only, <code>withheld: true</code>); a multi-leg net is shown. An idea with no Ledger row, or none marked yet, is <strong>modelled</strong> instead, under the app's exit rules (<code>trade_mgmt.structure_rules</code>): target = <code>tp_frac</code> × the debit (single long option; else max profit) or × the credit; stop = <code>debit_stop_frac</code> × the debit, or <code>stop_mult</code> × the credit where <code>loss_rules</code>. A backspread has no target and no stop and is held to expiry, as the app's tracked rows hold it (<code>structure_marks.open_ended</code> with a sold leg). The option is modelled — Black-Scholes (<code>options_calculator</code>) at the IV solved from the entry price at the post — on every 1-minute stock bar (<code>/pricehistory</code>, incremental from <code>checked_to</code>); stop before target, a stop gapped through fills at the bar's open, a target at the level. Unhit ideas settle at intrinsic on the expiry-day daily close. Refreshed every <code>[site] refresh_min</code> (default 15) inside 08:00–15:15 CT: one batched <code>/quotes</code> call plus one minute-history call per symbol with modelled open ideas (a Ledger-backed idea needs only its stock quote, for the move shown beside it). The model reads no option quote; the Ledger's figures come from its own option marks. % = result ÷ max loss.</td>
 </tr>
 <tr>
 <td><strong>Sign-in approval push</strong></td>
@@ -4927,16 +4928,23 @@ smallest whole ratio, and names the structure from that geometry:</p>
   is whichever makes the listed spread the position held (a debit vertical
   <code>BUY +q … long/short</code>, a credit one <code>SELL -q … short/long</code>). Only a CUSTOM
   order takes its side from the price: a debit buys the ratios as held, a credit
-  sells them negated. A protective put or a collar (shares beside a long put)
+  sells them negated; a CUSTOM order whose legs are all bought, or all sold,
+  takes its side from the legs. A strangle whose call strike is below its put
+  strike (a "guts") is written as CUSTOM. A protective put or a collar (shares beside a long put)
   gets no order. The position effect names one <code>TO OPEN</code> / <code>TO CLOSE</code> per leg.</li>
 <li><strong>Verified</strong>: each row above was pasted into ThinkorSwim on 2026-10-28 and
   loaded as the position named.</li>
-<li><strong>Price</strong>: the absolute value of <code>net_cost</code>, else of <code>credit</code> (per share), to
-  two decimals.</li>
+<li><strong>Price</strong>: the absolute value of <code>net_cost</code>, else of <code>credit</code> (per share),
+  divided by the lots the position holds of its smallest whole ratio (the row's
+  price is the whole position's), to two decimals.</li>
+<li><strong>Time in force</strong>: the opening line carries none, which ThinkorSwim reads as
+  DAY. The exits carry <code>exit_tif</code> (shipped <code>GTC</code>) after <code>LMT</code> and after the
+  stop's <code>MARK</code>: <code>@TRG+100.00% LMT GTC TRG BY #1 OCO</code>,
+  <code>STP TRG-50.00% MARK GTC TRG BY #1 OCO</code>. <code>exit_tif = "DAY"</code> writes no word.</li>
 <li><strong>Exits</strong>, from <code>config/tos_order.toml</code> (read on every click), the opening
   line with the side reversed: a buy (debit) <code>@TRG+100.00% LMT</code> and
   <code>STP TRG-50.00% MARK</code>; a sell (credit) <code>@TRG-50.00% LMT</code> and
-  <code>STP TRG+100.00% MARK</code>. Both are <code>TRG BY #1 OCO</code>: the opening order triggers
+  <code>STP TRG+100.00% MARK</code>, each followed by the time in force. Both are <code>TRG BY #1 OCO</code>: the opening order triggers
   them and each cancels the other. A percentage below the entry must be under
   100, or it falls back to the default. A covered call has no exits.</li>
 <li><strong>Series tag</strong>: <code>(Weeklys)</code> when any expiration is not the monthly — the third
@@ -8606,6 +8614,32 @@ reported as a stopped feed on the entry's reason, though they arrive on time.</p
   few contracts, and a listed /NQ contract can read <code>N/A</code> for <code>OPEN_INT</code>. The weighting is
   open interest, as for every symbol; it has not been compared with volume.</li>
 </ul>
+<h2 id="the-gamma-flip-by-a-rule-of-its-own">The gamma flip, by a rule of its own</h2>
+<p>Every other symbol's flip is <code>gamma_tool.calc_flip_point</code>: where one strike's net gamma
+changes sign against the next, kept only when the sign holds for two more strikes, the
+crossing nearest the price winning. On the first live session (2 November 2026, 06:01 to
+06:12 Central) that flip jumped between captures two minutes apart: /ES 7641.65, none,
+7641.81, 7641.77, 7775.24, none, 7641.77, and /NQ between 28609 and 29133. Net gamma near
+the future was small and changed sign from strike to strike (/ES 7635 −0.7M, 7640 −13.7M,
+7645 +24.9M, 7650 +104.5M, 7655 −44.3M, 7660 +1,785M), so the crossing near the price
+passed the two-strike test in one capture and failed it in the next.</p>
+<p>So /ES and /NQ use the <strong>cumulative flip</strong> (<code>[flip] rule = "cumulative"</code>, the shipped
+setting): the running total of net gamma, summed up the strikes from the lowest captured,
+and the price where that total changes sign, interpolated between the two strikes it
+crosses between. Only a crossing whose upper strike is within <code>band_pct</code> (3) percent of
+the future counts, and the nearest wins. On the same seven captures it held at /ES 7656.7
+to 7657.0 and /NQ 28793 to 28797. The sum starts at the lowest strike captured
+(<code>strike_width_pct</code>, 5 percent below the future), so a strike outside the capture is not
+in it.</p>
+<p>The ingest writes it into the stored <code>gex</code> row's <code>flip</code> column, from that row's own grid,
+in the transaction that wrote the row (<code>futures_chain_flip.restamp</code>). The Desk
+(<code>latest_flip</code>), the heatmap's Flip track (the stored column) and the page's summary
+(<code>futures_chain_snapshot._flip_by_rule</code>, which reads the stored value for the shown
+capture's minute) therefore show one number. The page's summary calls it <strong>cumulative
+flip</strong>, and the Desk's flip carries a hover note saying so. Charm, delta and vanna keep
+the per-strike rule; only the gamma flip was measured. <code>rule = "per_strike"</code> restores the
+shared rule for captures from then on; rows already stored keep the flip they were written
+with.</p>
 <h2 id="the-stopped-capture-alert-and-health">The stopped-capture alert and <code>/health</code></h2>
 <p><code>futures_chain_watch.decide</code> is pure over the status view and the alert state. During the
 CME session an instrument is <strong>stopped</strong> when its newest accepted capture is older than

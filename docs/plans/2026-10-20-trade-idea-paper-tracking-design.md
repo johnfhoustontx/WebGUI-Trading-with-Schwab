@@ -130,7 +130,7 @@ handles one per-leg (it uses `structure_marks`).
 | `idea_posted` | post time (CT ISO) |
 | `idea_grade`, `idea_score`, `idea_trade_type`, `idea_label` | what the signal knew |
 | `idea_spot` | stock price at the post |
-| `target_pnl`, `stop_pnl` | per contract. Target from `site_ideas.exit_levels(entry_facts(idea))` (NULL for a backspread). Stop from the same call, **except** that a debit idea for which it gives no stop (every debit structure today: `debit_stop_frac` ships commented out) gets the idea book's OWN stop, `[idea_trades] debit_stop_frac` (default 0.60) × the debit paid — the user's decision, 2026-10-20. Applies to idea rows only: the card, `ideas.html`, the user's own Ledger trades and the Account are unchanged, so an idea's Ledger result can differ from its `ideas.html` result |
+| `target_pnl`, `stop_pnl` | per contract. Target from `site_ideas.exit_levels(entry_facts(idea))` (NULL for a backspread). Stop from the same call, **except** that a debit idea for which it gives no stop (every debit structure today: `debit_stop_frac` ships commented out) gets the idea book's OWN stop, `[idea_trades] debit_stop_frac` (default 0.60) × the debit paid — the user's decision, 2026-10-20. Applies to idea rows only: the card, `ideas.html`, the user's own Ledger trades and the Account are unchanged. (Since 2026-11-05 `ideas.html` shows the Ledger row's own result, so the two no longer differ.) |
 | `mae_pnl`, `mae_at` | worst unrealized P&L per contract seen at a mark (≤ 0; 0 until a mark goes negative) and when |
 | `last_mark_pnl`, `last_mark_at` | the latest mark, so the 5-minute cycle's result is visible without a chain fetch |
 | `entry_source` | `'card'` |

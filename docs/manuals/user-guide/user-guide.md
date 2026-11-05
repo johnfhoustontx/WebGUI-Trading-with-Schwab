@@ -107,15 +107,18 @@ The app reads market data and your positions from Schwab, so you need:
   ones that have closed.
   Settings → Configuration → Push notifications → *Public site* turns that off or
   changes how many days are kept; nothing that already posted is taken down by it.
-  Each card also shows **how the idea did under the app's own exit rules** (the
-  profit target and stop in Settings → Configuration → Trade management): it closes
-  the first minute its option reaches the target or the stop, and otherwise settles
-  at intrinsic on the expiry-day close. The option's value is *modelled* from the
-  stock price at the volatility its entry price implied, so no option quote is ever
-  published, and an open idea shows an estimated value now beside its target. A stop
-  reached by an overnight gap is booked at the opening value, worse than the stop
-  itself. It refreshes every 15 minutes during the session (*Result refresh* in the
-  same section).
+  Each card also shows **how the idea did, exactly as the Paper Ledger has it**:
+  every posted idea is booked there, valued every five minutes from option quotes,
+  and closed at its profit target or stop, by hand, or at expiry. The card shows the
+  Ledger row's Open or Closed state and its P&L per contract (an open idea's P&L
+  beside its target), marked *Paper Ledger*. A **single-option** idea (a long call
+  or put) shows its state and exit but no dollar result while the public quotes
+  switch (`config/finder_public.toml [display] show_leg_quotes`) is off, because its
+  P&L is that one option's price; it also stays out of the record's dollar total. An
+  idea the Ledger does not hold (posted before the Ledger booked ideas, or with idea
+  booking off) is still *modelled* from the stock price under the app's exit rules,
+  and says so. It refreshes every 15 minutes during the session (*Result refresh* in
+  the same section).
 - **The watchlist workbook** `options-scanner/data/Top 20.xlsx` — sets which stocks
   the scanner watches. Without it, the app falls back to the core index symbols.
 

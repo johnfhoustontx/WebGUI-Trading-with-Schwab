@@ -268,8 +268,122 @@ def _expired(facts, close, now):
             "settled": facts["expiration"], "as_of": now.isoformat(timespec="seconds")}
 
 
+# ── The Paper Ledger's own result (idea_ledger rows) ─────────────────────────
+# Every posted idea is also booked into the Paper Ledger, marked there from real
+# option quotes every 5 minutes and closed at its stop or target
+# (``idea_ledger.mark_cycle``). Where an idea has a Ledger row, the site shows
+# THAT row's status and P&L, so the site and the Ledger never disagree; the model
+# above is left for an idea with no row (posted before the Ledger booked ideas,
+# or with ``[idea_trades] enabled`` off) or one not marked yet. The stock price
+# beside a Ledger result is still read here: the Ledger records none.
+#
+# The figures are quote-derived, so they follow ``show_leg_quotes`` as the public
+# pages do: on a SINGLE-option idea the P&L is that option's price, so while the
+# switch is off its result carries the status and exit but no dollar figure
+# (``withheld``). A multi-leg idea's net figure is shown either way.
+_LEDGER_EXIT = {"TARGET": "target", "STOP": "stop", "EXPIRED": "expired",
+                "MANUAL": "closed"}
+
+
+def ledger_key(symbol, posted) -> tuple:
+    """How a manifest row finds its Ledger row: the symbol and the post time.
+    ``handlers.run_trade_idea`` hands the SAME ``now`` to ``publish`` (the row's
+    ``posted``) and ``idea_ledger.book`` (the row's ``idea_posted``)."""
+    return (str(symbol or ""), str(posted or ""))
+
+
+def _withhold_single() -> bool:
+    """True while the public quotes switch is off (``config/finder_public.toml
+    [display] show_leg_quotes``)."""
+    from shared import public_scan
+    return not public_scan.show_leg_quotes()
+
+
+def ledger_result(facts, row, prev, *, withhold_single=True):
+    """The site result for Ledger ``row``, or None when the row has nothing to show
+    yet (OPEN with no mark, or closed with no P&L). PURE.
+
+    Every figure is PER CONTRACT, the card's basis: ``last_mark_pnl`` already is,
+    ``realized_pnl`` is divided by the row's quantity. A closed-by-hand row
+    (``MANUAL``) is ``closed``, final like a target or stop."""
+    prev = prev if isinstance(prev, dict) else {}
+    status = str(row.get("status") or "").upper()
+    withheld = bool(withhold_single) and len(facts.get("legs") or ()) == 1
+    if status == "OPEN":
+        pnl = _finite(row.get("last_mark_pnl"))
+        if pnl is None:
+            return None
+        out = {"status": "open", "basis": "ledger", "as_of": row.get("last_mark_at"),
+               "target": _finite(row.get("target_pnl"))}
+        if prev.get("status") == "open" and _finite(prev.get("spot")):
+            out["spot"], out["move_pct"] = prev["spot"], prev.get("move_pct")
+    elif status in ("CLOSED", "EXPIRED"):
+        realized = _finite(row.get("realized_pnl"))
+        if realized is None:
+            return None
+        pnl = realized / max(1, int(row.get("quantity") or 1))
+        state = "expired" if status == "EXPIRED" else \
+            _LEDGER_EXIT.get(str(row.get("exit_reason") or "").upper(), "closed")
+        out = {"status": state, "basis": "ledger", "closed_at": row.get("exit_time"),
+               "as_of": row.get("exit_time")}
+        if state == "expired":
+            out["settled"] = facts["expiration"]
+            if prev.get("basis") == "ledger" and prev.get("status") == "expired" \
+                    and _finite(prev.get("spot")):
+                out["spot"], out["move_pct"] = prev["spot"], prev.get("move_pct")
+    else:
+        return None
+    if withheld:
+        out.pop("target", None)
+        out["withheld"] = True
+    else:
+        out["pnl"], out["pnl_pct"] = round(pnl, 2), _pct(facts, pnl)
+    return out
+
+
+def _from_ledger(i, ledger, withhold_single):
+    """``i``'s Ledger result, or None (no Ledger read, no row, nothing to show)."""
+    if not ledger or not i.get("legs") or not i.get("posted"):
+        return None
+    row = ledger.get(ledger_key(i.get("symbol"), i.get("posted")))
+    if not isinstance(row, dict):
+        return None
+    return ledger_result(_facts_of(i), row, i.get("result"),
+                         withhold_single=withhold_single)
+
+
+def _stock_beside(i, r, quotes, closes):
+    """Put the stock price on Ledger result ``r``: the latest quote while it is
+    open, the expiry-day close once it has expired. A missing one keeps the last."""
+    facts = _facts_of(i)
+    price = None
+    if r["status"] == "open":
+        price = _finite((quotes or {}).get(i["symbol"]))
+    elif r["status"] == "expired" and r.get("spot") is None:
+        price = _finite((closes or {}).get((i["symbol"], i["expiration"])))
+    if price:
+        r["spot"], r["move_pct"] = round(price, 2), _move(facts, price)
+    return r
+
+
+def apply_ledger(manifest, ledger, withhold_single=True) -> dict:
+    """PURE. ``manifest`` with every idea that has a Ledger result showing it (no
+    stock price yet). Run before ``due`` so a refresh asks only for what the
+    Ledger results still need."""
+    for d in _valid_days(manifest):
+        for i in d["ideas"]:
+            r = _from_ledger(i, ledger, withhold_single)
+            if r is not None:
+                i["result"] = r
+    return manifest
+
+
+def _ledger_backed(i):
+    return (i.get("result") or {}).get("basis") == "ledger"
+
+
 # ── Which ideas a refresh touches ────────────────────────────────────────────
-_FINAL = ("target", "stop", "expired")
+_FINAL = ("target", "stop", "expired", "closed")
 # Settle only once the bars have been scanned to within this of the close (so a
 # late target hit is not missed), or give up waiting after GIVE_UP.
 SCAN_COMPLETE_SLACK = _dt.timedelta(minutes=15)
@@ -292,10 +406,18 @@ def _since(i):
 
 def due(manifest, now):
     """``(symbols to quote, {(symbol, expiration)} past expiry, {symbol: earliest
-    time its bars are needed from})`` for a refresh."""
+    time its bars are needed from})`` for a refresh. An idea showing its Ledger
+    result needs no bars: a quote while it is open, its expiry close once."""
     quotes, settle, since = set(), set(), {}
     for d in _valid_days(manifest):
         for i in d["ideas"]:
+            if _ledger_backed(i):
+                r = i["result"]
+                if r.get("status") == "open":
+                    quotes.add(i["symbol"])
+                elif r.get("status") == "expired" and r.get("spot") is None:
+                    settle.add((i["symbol"], i["expiration"]))
+                continue
             if not _measurable(i):
                 continue
             sym = i["symbol"]
@@ -321,15 +443,24 @@ def minute_days(since, now):
     return next((p for p in _MINUTE_PERIODS if p >= need), _MINUTE_PERIODS[-1])
 
 
-def apply_results(manifest, quotes, closes, candles, now) -> dict:
-    """PURE. The manifest after one refresh: fill a missing entry price from the
-    bars, solve the entry IV once, scan the new bars for a target or stop, then
-    settle an expired idea or model an open one. A target, stop or expiry is
-    FINAL. A missing quote or close leaves the previous result alone."""
+def apply_results(manifest, quotes, closes, candles, now, ledger=None, *,
+                  withhold_single=True) -> dict:
+    """PURE. The manifest after one refresh. An idea with a Ledger result in
+    ``ledger`` (``{ledger_key: row}``) shows it, whatever the model said before;
+    one already showing a Ledger result keeps it when the Ledger could not be read
+    (``ledger`` None). Every other idea is modelled: fill a missing entry price
+    from the bars, solve the entry IV once, scan the new bars for a target or
+    stop, then settle an expired idea or model an open one. A modelled target,
+    stop or expiry is FINAL. A missing quote or close leaves the previous result
+    alone."""
     days = _valid_days(manifest)
     for d in days:
         for i in d["ideas"]:
-            if not _measurable(i):
+            r = _from_ledger(i, ledger, withhold_single)
+            if r is not None:
+                i["result"] = _stock_beside(i, r, quotes, closes)
+                continue
+            if _ledger_backed(i) or not _measurable(i):
                 continue
             posted = _dt.datetime.fromisoformat(i["posted"])
             bars = candles.get(i["symbol"]) or []
@@ -362,27 +493,44 @@ def apply_results(manifest, quotes, closes, candles, now) -> dict:
     return out
 
 
-def refresh(quote_fn, close_fn, now, *, root=None, minutes_fn=None) -> int:
+def _read_ledger(ledger_fn):
+    """``ledger_fn()``, or None when there is none or it fails (each idea then
+    keeps the result it shows)."""
+    if ledger_fn is None:
+        return None
+    try:
+        return ledger_fn()
+    except Exception:  # noqa: BLE001 -- a Ledger read must never cost the refresh
+        log.warning("trade idea: Paper Ledger read failed", exc_info=True)
+        return None
+
+
+def refresh(quote_fn, close_fn, now, *, root=None, minutes_fn=None, ledger_fn=None) -> int:
     """Recompute every open idea's result and rewrite the manifest.
 
-    ``quote_fn(symbols) -> {symbol: last}`` is ONE batched call;
-    ``minutes_fn(symbol, days) -> raw 1-minute candles`` runs once per symbol with
-    open ideas; ``close_fn(symbol, day) -> close`` once per expired idea. Returns
-    the number of ideas whose result changed. Never raises."""
+    ``ledger_fn() -> {ledger_key: Ledger row}`` is read first (one read of the
+    book); an idea with a Ledger result shows it. ``quote_fn(symbols) -> {symbol:
+    last}`` is ONE batched call; ``minutes_fn(symbol, days) -> raw 1-minute
+    candles`` runs once per symbol with modelled open ideas; ``close_fn(symbol,
+    day) -> close`` once per expired idea. Returns the number of ideas whose
+    result changed. Never raises."""
     try:
         path = (pathlib.Path(root) if root is not None else SITE_ROOT) / MANIFEST
         with _LOCK:
             manifest = _read_manifest(path)
-            symbols, settle, since = due(manifest, now)
-            if not symbols and not settle:
+            before = json.loads(json.dumps(manifest))
+            ledger = _read_ledger(ledger_fn)
+            withhold = _withhold_single() if ledger else True
+            work = apply_ledger(json.loads(json.dumps(manifest)), ledger, withhold)
+            symbols, settle, since = due(work, now)
+            if not symbols and not settle and work == before:
                 return 0
             quotes = quote_fn(sorted(symbols)) if symbols else {}
             candles = ({s: minutes_fn(s, minute_days(t, now)) for s, t in sorted(since.items())}
-                       if minutes_fn else {})
+                       if minutes_fn and since else {})
             closes = {(s, e): close_fn(s, e) for s, e in sorted(settle)}
-            before = json.loads(json.dumps(manifest))
-            out = apply_results(json.loads(json.dumps(manifest)), quotes or {}, closes,
-                                candles, now)
+            out = apply_results(work, quotes or {}, closes, candles, now, ledger,
+                                withhold_single=withhold)
             n = sum(1 for d0, d1 in zip(_valid_days(before), out["days"])
                     for a, b in zip(d0["ideas"], d1["ideas"])
                     if a.get("result") != b.get("result"))

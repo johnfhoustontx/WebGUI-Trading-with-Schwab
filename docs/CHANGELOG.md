@@ -4,7 +4,23 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-03 (**The Desk's /ES and /NQ price runs to the session's last capture.**)
+**Last updated:** 2026-11-05 (**The site's trade idea results are the Paper Ledger's.**)
+
+- The site and the Ledger computed each idea's result separately: the site modelled the
+  option from the stock price (Black-Scholes at the entry IV) with no stop for a debit idea,
+  while the Ledger marks real option quotes every 5 minutes and stops a debit idea at its own
+  `debit_stop_frac`. On prod, 7 of 39 ideas the Ledger had closed still showed Open on the
+  site, and BAC 11-02 showed a target the Ledger had stopped out. `site_ideas.refresh` now
+  reads the Ledger first (`ledger_fn=idea_ledger.site_rows`, keyed by symbol + post time) and
+  an idea with a Ledger row shows that row's status and per-contract P&L (`basis: "ledger"`),
+  overriding any earlier modelled result; a hand close is the new final status `closed`. Only
+  an idea with no Ledger row, or none marked yet, is still modelled.
+- Ruled by the operator: the figures follow the public quotes switch. A single-option idea
+  shows its state and exit with no dollar figure (`withheld`) while `show_leg_quotes` is off,
+  and stays out of "Closed so far"; a multi-leg net is shown. Run over a copy of prod's manifest
+  and Ledger, all 39 cards matched the Ledger.
+
+**Prior —** 2026-11-03 (**The Desk's /ES and /NQ price runs to the session's last capture.**)
 
 - After the 15:00 expiry the Desk showed the whole capture kept an hour before it, so the
   price read `as of 13:58` while captures had arrived until 14:58. On the operator's request

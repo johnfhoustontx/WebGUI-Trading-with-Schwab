@@ -3073,20 +3073,24 @@ def _publish_trade_idea_site(idea, png, now) -> bool:
 
 
 def refresh_site_idea_results(now=None) -> int:
-    """Recompute how each posted trade idea on the public site has done, under the
-    app's exit rules, from the STOCK price only: one batched quote call, one
-    1-minute history call per symbol with open ideas (the modelled target/stop
-    check), and a daily close for each one that has expired. Driven by ``scheduler.site_results_due``
-    every ``[site] refresh_min``. Returns the ideas updated; never raises."""
+    """Recompute how each posted trade idea on the public site has done. An idea
+    booked into the Paper Ledger shows that row's own status and P&L
+    (``idea_ledger.site_rows``, one read of the book), so the site matches the
+    Ledger; any other is modelled from the STOCK price under the app's exit rules.
+    One batched quote call, one 1-minute history call per symbol with modelled
+    open ideas, and a daily close for each one that has expired. Driven by
+    ``scheduler.site_results_due`` every ``[site] refresh_min``. Returns the ideas
+    updated; never raises."""
     from zoneinfo import ZoneInfo as _ZI
     now = now or _dt.datetime.now(_ZI("America/Chicago"))
     try:
-        from services.options_svc import site_ideas
+        from services.options_svc import idea_ledger, site_ideas
         from shared.notify import switches
         if not switches.site_settings()["trade_ideas"]:
             return 0
         n = site_ideas.refresh(compute.site_idea_quotes, compute.daily_close, now,
-                               minutes_fn=compute.minute_candles)
+                               minutes_fn=compute.minute_candles,
+                               ledger_fn=idea_ledger.site_rows)
         if n:
             log.info("site trade idea results: %d updated", n)
         return n

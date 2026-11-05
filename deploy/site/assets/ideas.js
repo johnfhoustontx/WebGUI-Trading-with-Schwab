@@ -78,13 +78,18 @@
   }
 
   // ── How the idea did (site_ideas.refresh) ──────────────────────────────────
-  // Each idea follows the app's own exit rules (config/trade_mgmt.toml): closed at
-  // its profit target or its stop, the first minute the option reaches one, or
-  // settled at expiry. The option is MODELLED from the stock price at the implied
-  // volatility of its entry price - no option quote is read or published - so the
-  // line says "modelled" and an open idea's figure is an estimate. Without a model
-  // (no entry stock price yet) the open line falls back to the expiry payoff at
-  // today's price, labelled "At the close of today" (operator wording).
+  // An idea booked into the Paper Ledger (basis "ledger") shows that row exactly:
+  // its status, its P&L per contract, closed at its target or stop or by hand
+  // ("closed"), or settled at expiry - so the site and the Ledger agree. On a
+  // single-option idea the P&L is that option's price, so while the site's quotes
+  // switch is off the result is "withheld": status and exit, no dollar figure, and
+  // never in the dollar total.
+  // Any other idea follows the app's own exit rules (config/trade_mgmt.toml) with
+  // the option MODELLED from the stock price at the implied volatility of its
+  // entry price, so the line says "modelled" and an open figure is an estimate.
+  // Without a model (no entry stock price yet) the open line falls back to the
+  // expiry payoff at today's price, labelled "At the close of today" (operator
+  // wording).
   function num(v) {
     return typeof v === "number" && isFinite(v) ? v : null;
   }
@@ -128,30 +133,48 @@
 
   function resultOf(idea) {
     var r = idea && idea.result;
-    if (!r || num(r.pnl) === null || num(r.spot) === null) return null;
+    if (!r) return null;
+    if (r.basis === "ledger") return num(r.pnl) !== null || r.withheld === true ? r : null;
+    if (num(r.pnl) === null || num(r.spot) === null) return null;
     return r;
   }
+
+  var EXIT_WORDS = {
+    target: "Closed at its profit target",
+    stop: "Stopped out",
+    closed: "Closed by hand"
+  };
 
   function resultBlock(idea) {
     var r = resultOf(idea);
     if (!r) return null;
-    var tone = r.pnl > 0 ? " is-up" : r.pnl < 0 ? " is-down" : "";
+    var ledger = r.basis === "ledger";
+    var shown = num(r.pnl) !== null;
+    var tone = !shown ? "" : r.pnl > 0 ? " is-up" : r.pnl < 0 ? " is-down" : "";
     var box = el("span", "ns-idea-result" + tone);
     var pct = num(r.pnl_pct) === null ? "" : " (" + signedPct(r.pnl_pct) + " of risk)";
-    var move = num(idea.spot) !== null
-      ? str(idea.symbol) + " " + price(idea.spot) + " → " + price(r.spot)
-        + (num(r.move_pct) === null ? "" : " (" + signedPct(r.move_pct) + ")")
-      : str(idea.symbol) + " " + price(r.spot);
-    var modelled = r.status === "target" || r.status === "stop" || r.basis === "model";
-    if ((r.status === "target" || r.status === "stop") && str(r.closed_at)) {
+    var move = num(r.spot) === null ? ""
+      : num(idea.spot) !== null
+        ? str(idea.symbol) + " " + price(idea.spot) + " → " + price(r.spot)
+          + (num(r.move_pct) === null ? "" : " (" + signedPct(r.move_pct) + ")")
+        : str(idea.symbol) + " " + price(r.spot);
+    var modelled = !ledger
+      && (r.status === "target" || r.status === "stop" || r.basis === "model");
+    if (EXIT_WORDS[r.status] && str(r.closed_at)) {
       var when = closedAt(r.closed_at);
-      box.appendChild(el("span", "ns-idea-state", (r.status === "target"
-        ? "Closed at its profit target" : "Stopped out") + (when ? " · " + when : "")));
-      box.appendChild(el("span", "ns-idea-pnl", "Result " + money(r.pnl) + pct));
+      box.appendChild(el("span", "ns-idea-state", EXIT_WORDS[r.status]
+        + (when ? " · " + when : "")));
+      if (shown) box.appendChild(el("span", "ns-idea-pnl", "Result " + money(r.pnl) + pct));
     } else if (r.status === "expired" && DAY.test(str(r.settled))) {
       box.appendChild(el("span", "ns-idea-state", "Expired " + shortDate(r.settled)
-        + " at " + price(r.spot)));
-      box.appendChild(el("span", "ns-idea-pnl", "Result " + money(r.pnl) + pct));
+        + (num(r.spot) === null ? "" : " at " + price(r.spot))));
+      if (shown) box.appendChild(el("span", "ns-idea-pnl", "Result " + money(r.pnl) + pct));
+    } else if (ledger) {
+      if (move) box.appendChild(el("span", "ns-idea-state", move));
+      if (shown) {
+        box.appendChild(el("span", "ns-idea-pnl", "Open P&L " + money(r.pnl) + pct
+          + (num(r.target) === null ? "" : " · target " + money(r.target))));
+      }
     } else if (r.basis === "model") {
       box.appendChild(el("span", "ns-idea-state", move));
       box.appendChild(el("span", "ns-idea-pnl", "Est. value now " + money(r.pnl) + pct
@@ -163,6 +186,8 @@
     var note = [];
     if (r.status === "open") note.push(asOf(r.as_of));
     if (modelled) note.push("modelled");
+    if (ledger) note.push("Paper Ledger");
+    if (r.withheld) note.push("single-option result not published");
     if (idea.approx) note.push("approx. entry");
     note = note.filter(Boolean);
     if (note.length) box.appendChild(el("span", "ns-idea-note", note.join(" · ")));
@@ -173,7 +198,7 @@
     var up = 0, down = 0;
     ideas.forEach(function (i) {
       var r = resultOf(i);
-      if (!r) return;
+      if (!r || num(r.pnl) === null) return;
       if (r.pnl > 0) up += 1;
       else if (r.pnl < 0) down += 1;
     });
@@ -182,10 +207,11 @@
 
   // The record over every idea the site keeps: how the feed has done, as counts
   // plus the dollar result of the ideas that have CLOSED. Open ideas are counted,
-  // never added to the total - their figure is a modelled estimate that moves.
+  // never added to the total - their figure still moves. A withheld result (no
+  // dollar figure) is counted and adds nothing.
   function record(days) {
     var out = { days: days.length, ideas: 0, hit: 0, stopped: 0, expired: 0,
-                open: 0, closed: 0, net: 0 };
+                byHand: 0, open: 0, closed: 0, net: 0 };
     days.forEach(function (d) {
       d.ideas.forEach(function (i) {
         out.ideas += 1;
@@ -194,7 +220,9 @@
         if (r.status === "target") out.hit += 1;
         else if (r.status === "stop") out.stopped += 1;
         else if (r.status === "expired") out.expired += 1;
+        else if (r.status === "closed") out.byHand += 1;
         else { out.open += 1; return; }
+        if (num(r.pnl) === null) return;
         out.closed += 1;
         out.net += r.pnl;
       });
@@ -208,6 +236,7 @@
     while (box.firstChild) box.removeChild(box.firstChild);
     var parts = [r.hit + " hit target", r.stopped + " stopped out"];
     if (r.expired) parts.push(r.expired + " expired");
+    if (r.byHand) parts.push(r.byHand + " closed by hand");
     parts.push(r.open + " open");
     box.appendChild(el("span", "ns-ideas-record-counts",
       "Last " + r.days + (r.days === 1 ? " trading day" : " trading days") + " · "
@@ -222,8 +251,9 @@
 
   // ── Open or closed, as an icon on each card ─────────────────────────────────
   // Open = the result is still live ("open"); closed = it reached its target or
-  // stop, or settled at expiry - the same three FINAL states site_ideas never
-  // revisits. No result yet means no badge: the page does not guess.
+  // stop, was closed by hand in the Paper Ledger, or settled at expiry - the FINAL
+  // states (site_ideas._FINAL). No result yet means no badge: the page does not
+  // guess.
   var SVG_NS = "http://www.w3.org/2000/svg";
   var LOCK_SHACKLE = {
     open: "M8 11V7a4 4 0 0 1 7.75-1.4",     // swung up and away: unlocked
@@ -234,7 +264,8 @@
     var r = resultOf(idea);
     if (!r) return null;
     if (r.status === "open") return "open";
-    if (r.status === "target" || r.status === "stop" || r.status === "expired") return "closed";
+    if (r.status === "target" || r.status === "stop" || r.status === "expired"
+        || r.status === "closed") return "closed";
     return null;
   }
 

@@ -1,6 +1,7 @@
 """How each posted trade idea did - under the app's own exit rules.
 
-Measured from the STOCK price only; no option quote is read or published. Each
+An idea with a Paper Ledger row shows that row (the last section below). Any
+other is measured from the STOCK price only; no option quote is read. Each
 idea's option is modelled with Black-Scholes at the implied volatility its entry
 price implies, on every 1-minute stock bar since the post. The first bar that
 reaches the profit target (``[stops] tp_frac``, 50%: of the DEBIT for a long
@@ -393,3 +394,161 @@ def test_price_at_takes_the_last_bar_at_or_before_the_post():
     assert S.price_at(bars, POSTED) == 186.4
     assert S.price_at(bars, POSTED - dt.timedelta(hours=1)) is None
     assert S.price_at(bars, POSTED + dt.timedelta(hours=3)) is None
+
+
+# ── the Paper Ledger's own result (idea_ledger rows win over the model) ─────
+# Every posted idea is booked into the Paper Ledger, marked from real option
+# quotes every 5 minutes and closed there at its stop or target. Where an idea has
+# a Ledger row, the site shows THAT row's status and P&L, so the two never
+# disagree. Only a single-option idea's dollar figure is withheld while
+# ``show_leg_quotes`` is off: on one option, the P&L is that option's price.
+def _ledger_row(idea, posted=POSTED, **over):
+    row = {"symbol": idea["symbol"], "idea_posted": posted.isoformat(timespec="seconds"),
+           "source": "trade_idea", "status": "OPEN", "quantity": 1,
+           "last_mark_pnl": None, "last_mark_at": None, "target_pnl": 61.0,
+           "realized_pnl": None, "exit_reason": None, "exit_time": None}
+    row.update(over)
+    return {S.ledger_key(row["symbol"], row["idea_posted"]): row}
+
+
+def _one(out):
+    return out["days"][0]["ideas"][0]["result"]
+
+
+def test_a_ledger_stop_closes_the_idea_the_model_still_holds_open():
+    """The prod case of 2026-11-04: TSLA stopped out in the Ledger, open on the site."""
+    old = {"status": "open", "basis": "model", "spot": 760.0, "pnl": 15.0,
+           "pnl_pct": 4.0, "move_pct": 0.1, "target": 61.0, "as_of": "x"}
+    m = _manifest(_row(_pcs(), result=dict(old), iv=0.3))
+    led = _ledger_row(_pcs(), status="CLOSED", exit_reason="STOP", realized_pnl=-244.0,
+                      last_mark_pnl=-244.0, exit_time="2026-09-30T10:05:00-05:00")
+    out = S.apply_results(m, {"QQQ": 750.0}, {}, {"QQQ": []},
+                          POSTED + dt.timedelta(days=1), led, withhold_single=True)
+    r = _one(out)
+    assert r["status"] == "stop" and r["basis"] == "ledger"
+    assert r["pnl"] == -244.0 and r["pnl_pct"] == pytest.approx(-64.6, abs=0.05)
+    assert r["closed_at"] == "2026-09-30T10:05:00-05:00"
+
+
+def test_the_ledger_overrides_a_model_result_already_final():
+    """The model is FINAL once it books a target, so it never revisits one. A
+    Ledger row is read on every refresh and wins even then (BAC, 2026-11-02:
+    target on the site, stopped in the Ledger)."""
+    final = {"status": "target", "spot": 770.0, "pnl": 61.0, "pnl_pct": 16.1,
+             "closed_at": "2026-09-29T11:00:00-05:00", "as_of": "x"}
+    m = _manifest(_row(_pcs(), result=dict(final), iv=0.3))
+    led = _ledger_row(_pcs(), status="CLOSED", exit_reason="STOP", realized_pnl=-71.1,
+                      exit_time="2026-09-29T13:00:00-05:00")
+    r = _one(S.apply_results(m, {}, {}, {}, POSTED + dt.timedelta(days=1), led))
+    assert r["status"] == "stop" and r["pnl"] == -71.1
+
+
+@pytest.mark.parametrize("reason,status", [("TARGET", "target"), ("STOP", "stop"),
+                                           ("MANUAL", "closed")])
+def test_each_ledger_exit_reason_has_its_own_final_status(reason, status):
+    led = _ledger_row(_pcs(), status="CLOSED", exit_reason=reason, realized_pnl=50.0,
+                      exit_time="2026-09-30T10:05:00-05:00")
+    r = _one(S.apply_results(_manifest(_row(_pcs())), {}, {}, {}, POSTED, led))
+    assert r["status"] == status and status in S._FINAL
+
+
+def test_the_site_figure_is_per_contract_whatever_the_ledger_quantity():
+    led = _ledger_row(_pcs(), status="CLOSED", exit_reason="TARGET", quantity=3,
+                      realized_pnl=183.0, exit_time="2026-09-30T10:05:00-05:00")
+    r = _one(S.apply_results(_manifest(_row(_pcs())), {}, {}, {}, POSTED, led))
+    assert r["pnl"] == 61.0
+
+
+def test_an_open_ledger_row_shows_its_last_mark_and_the_stock_now():
+    led = _ledger_row(_pcs(), last_mark_pnl=24.1, last_mark_at="2026-09-29T11:30:00-05:00")
+    out = S.apply_results(_manifest(_row(_pcs())), {"QQQ": 762.0}, {}, {"QQQ": []},
+                          POSTED + dt.timedelta(hours=1), led)
+    r = _one(out)
+    assert r["status"] == "open" and r["basis"] == "ledger"
+    assert r["pnl"] == 24.1 and r["target"] == 61.0
+    assert r["as_of"] == "2026-09-29T11:30:00-05:00"
+    assert r["spot"] == 762.0 and r["move_pct"] == pytest.approx(0.34, abs=0.015)
+    assert "checked_to" not in out["days"][0]["ideas"][0]        # no model walk
+
+
+def test_an_open_ledger_row_with_no_mark_yet_leaves_the_model_running():
+    led = _ledger_row(_long_call())                              # booked, not marked yet
+    bars = {"MU": _bars(POSTED + dt.timedelta(minutes=1), [187.0] * 3)}
+    r = _one(S.apply_results(_manifest(_row(_long_call())), {"MU": 188.0}, {}, bars,
+                             POSTED + dt.timedelta(minutes=5), led, withhold_single=False))
+    assert r["basis"] == "model"
+
+
+def test_a_ledger_expiry_settles_at_the_expiry_close():
+    led = _ledger_row(_pcs(), status="EXPIRED", exit_reason="EXPIRED", realized_pnl=122.0,
+                      exit_time="2026-10-02T15:05:00-05:00")
+    now = dt.datetime(2026, 10, 2, 15, 10, tzinfo=_CT)
+    r = _one(S.apply_results(_manifest(_row(_pcs())), {}, {("QQQ", EXP): 755.0}, {}, now,
+                             led))
+    assert r["status"] == "expired" and r["pnl"] == 122.0 and r["settled"] == EXP
+    assert r["spot"] == 755.0
+
+
+def test_a_single_option_idea_shows_its_ledger_status_but_no_figure_while_withheld():
+    led = _ledger_row(_long_call(), status="CLOSED", exit_reason="TARGET",
+                      realized_pnl=205.5, exit_time="2026-09-30T10:05:00-05:00")
+    m = _manifest(_row(_long_call()))
+    hidden = _one(S.apply_results(m, {}, {}, {}, POSTED, led, withhold_single=True))
+    assert hidden["status"] == "target" and hidden["withheld"] is True
+    assert "pnl" not in hidden and "pnl_pct" not in hidden
+    shown = _one(S.apply_results(m, {}, {}, {}, POSTED, led, withhold_single=False))
+    assert shown["pnl"] == 205.5 and "withheld" not in shown
+
+
+def test_a_single_option_idea_is_withheld_by_default():
+    led = _ledger_row(_long_call(), last_mark_pnl=40.0, last_mark_at="t")
+    r = _one(S.apply_results(_manifest(_row(_long_call())), {}, {}, {}, POSTED, led))
+    assert r["status"] == "open" and r["withheld"] is True and "pnl" not in r
+
+
+def test_a_multi_leg_idea_keeps_its_figure_while_withheld():
+    led = _ledger_row(_pcs(), last_mark_pnl=24.1, last_mark_at="t")
+    r = _one(S.apply_results(_manifest(_row(_pcs())), {}, {}, {}, POSTED, led,
+                             withhold_single=True))
+    assert r["pnl"] == 24.1 and "withheld" not in r
+
+
+def test_a_ledger_result_is_kept_when_the_ledger_cannot_be_read():
+    kept = {"status": "open", "basis": "ledger", "pnl": 24.1, "pnl_pct": 6.4,
+            "target": 61.0, "as_of": "t", "spot": 760.0, "move_pct": 0.1}
+    m = _manifest(_row(_pcs(), result=dict(kept), iv=0.3))
+    r = _one(S.apply_results(m, {"QQQ": 700.0}, {}, {"QQQ": _bars(POSTED, [700.0])},
+                             POSTED + dt.timedelta(hours=1), None))
+    assert r == kept                                       # the model never writes over it
+
+
+def test_due_asks_a_ledger_idea_for_its_stock_price_only():
+    open_ = _row(_pcs(), result={"status": "open", "basis": "ledger", "pnl": 1.0})
+    shut = _row(_long_call(), result={"status": "stop", "basis": "ledger", "pnl": -1.0})
+    quotes, settle, since = S.due(_manifest(open_, shut), POSTED + dt.timedelta(hours=1))
+    assert quotes == {"QQQ"} and settle == set() and since == {}
+
+
+def test_refresh_reads_the_ledger_and_writes_its_result(tmp_path, monkeypatch):
+    monkeypatch.setattr(S, "_withhold_single", lambda: True)
+    (tmp_path / S.MANIFEST).write_text(json.dumps(_manifest(_row(_pcs()))))
+    led = _ledger_row(_pcs(), status="CLOSED", exit_reason="TARGET", realized_pnl=61.0,
+                      exit_time="2026-09-29T12:00:00-05:00")
+
+    def boom(*a):
+        raise AssertionError("a closed Ledger idea needs no market data")
+    n = S.refresh(boom, boom, POSTED + dt.timedelta(hours=3), root=tmp_path,
+                  minutes_fn=boom, ledger_fn=lambda: led)
+    assert n == 1
+    r = json.loads((tmp_path / S.MANIFEST).read_text())["days"][0]["ideas"][0]["result"]
+    assert r["status"] == "target" and r["basis"] == "ledger" and r["pnl"] == 61.0
+
+
+def test_refresh_survives_a_ledger_that_cannot_be_read(tmp_path):
+    (tmp_path / S.MANIFEST).write_text(json.dumps(_manifest(_row(_pcs()))))
+
+    def broken():
+        raise RuntimeError("trades.db locked")
+    n = S.refresh(lambda s: {"QQQ": 760.0}, lambda s, d: None, POSTED + dt.timedelta(hours=1),
+                  root=tmp_path, minutes_fn=lambda s, d: [], ledger_fn=broken)
+    assert n == 1                                          # the model still ran

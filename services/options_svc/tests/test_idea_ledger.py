@@ -150,6 +150,17 @@ def test_is_idea_reads_the_source_and_nothing_else():
     assert not idea_ledger.is_idea({})
 
 
+def test_site_rows_key_each_posted_idea_as_the_site_manifest_does(ledger):
+    """The site's results read the Ledger by (symbol, post time): the same ``now``
+    names the manifest row's ``posted`` and the Ledger row's ``idea_posted``. A row
+    that is not a posted idea is never in it."""
+    idea_ledger.book(PCS_IDEA, NOW)
+    ledger.add_trade({**idea_ledger.build_row(LONG_PUT_IDEA, NOW, CFG), "source": None})
+    rows = idea_ledger.site_rows()
+    key = site_ideas.ledger_key(PCS_IDEA["symbol"], NOW.isoformat(timespec="seconds"))
+    assert list(rows) == [key] and rows[key]["source"] == "trade_idea"
+
+
 def test_book_writes_one_open_row(ledger):
     out = idea_ledger.book(PCS_IDEA, NOW)
     assert out["status"] == "booked" and len(out["trade_id"]) == 8

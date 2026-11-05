@@ -324,13 +324,18 @@ moment the capture timer first fires, and **`tools/promote.sh` refuses a dirty t
 **`deploy/site/ideas/` + `deploy/site/ideas.json` are the same** — every POSTED hourly
 trade idea's card, written by `options_svc/site_ideas.py` after the sends (never
 raising, so a site write cannot cost a post) and drawn by `assets/ideas.js` on the home
-strip and `ideas.html`. ⚠ Each card's RESULT follows the app's own exit rules
-(`trade_mgmt.structure_rules`, operator overrides included): the option is MODELLED
-(Black-Scholes at the entry price's implied volatility) on every 1-minute STOCK bar,
-stop checked before target, a gap through a stop filled at the open. Never an option
-quote: a live option mark on a public page is a published quote (the open D2
-question). The scan is incremental (`checked_to`), so bars that arrive late are
-still scanned and a hit keeps its true minute.
+strip and `ideas.html`. ⚠ Each card's RESULT is the PAPER LEDGER's own row
+(`idea_ledger.site_rows`, matched on symbol + post time by `site_ideas.ledger_key`;
+`basis: "ledger"`), read on every refresh and winning over anything the model wrote
+before, so the site and the Ledger cannot disagree (until 2026-11-05 they were two
+computations, and seven Ledger-closed ideas sat open on the site). Those figures are
+quote-derived, so they follow `show_leg_quotes` (the open D2 question) as Option
+Signals does: a SINGLE-option idea's result is `withheld` (status and exit, no
+dollar figure) while it is off; a multi-leg net is shown. Only an idea with no Ledger
+row, or not marked yet, is MODELLED: Black-Scholes at the entry price's implied
+volatility on every 1-minute STOCK bar under the app's exit rules, stop before
+target, a gap through a stop filled at the open, scanned incrementally
+(`checked_to`).
 ⚠ The options_svc conftest redirects `site_ideas.SITE_ROOT`;
 a test that posts without it writes cards into this checkout.
 **`deploy/site/reports/` is the same** — the market reports `report.html` frames, uploaded

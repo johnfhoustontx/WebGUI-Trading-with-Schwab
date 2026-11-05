@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-01</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-05</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -297,15 +297,18 @@ just click <strong>Authorize</strong> again.</p>
   ones that have closed.
   Settings → Configuration → Push notifications → <em>Public site</em> turns that off or
   changes how many days are kept; nothing that already posted is taken down by it.
-  Each card also shows <strong>how the idea did under the app's own exit rules</strong> (the
-  profit target and stop in Settings → Configuration → Trade management): it closes
-  the first minute its option reaches the target or the stop, and otherwise settles
-  at intrinsic on the expiry-day close. The option's value is <em>modelled</em> from the
-  stock price at the volatility its entry price implied, so no option quote is ever
-  published, and an open idea shows an estimated value now beside its target. A stop
-  reached by an overnight gap is booked at the opening value, worse than the stop
-  itself. It refreshes every 15 minutes during the session (<em>Result refresh</em> in the
-  same section).</li>
+  Each card also shows <strong>how the idea did, exactly as the Paper Ledger has it</strong>:
+  every posted idea is booked there, valued every five minutes from option quotes,
+  and closed at its profit target or stop, by hand, or at expiry. The card shows the
+  Ledger row's Open or Closed state and its P&amp;L per contract (an open idea's P&amp;L
+  beside its target), marked <em>Paper Ledger</em>. A <strong>single-option</strong> idea (a long call
+  or put) shows its state and exit but no dollar result while the public quotes
+  switch (<code>config/finder_public.toml [display] show_leg_quotes</code>) is off, because its
+  P&amp;L is that one option's price; it also stays out of the record's dollar total. An
+  idea the Ledger does not hold (posted before the Ledger booked ideas, or with idea
+  booking off) is still <em>modelled</em> from the stock price under the app's exit rules,
+  and says so. It refreshes every 15 minutes during the session (<em>Result refresh</em> in
+  the same section).</li>
 <li><strong>The watchlist workbook</strong> <code>options-scanner/data/Top 20.xlsx</code> — sets which stocks
   the scanner watches. Without it, the app falls back to the core index symbols.</li>
 </ul>
@@ -766,7 +769,7 @@ structure · what should I act on · what is being said.</em></p>
 </tr>
 <tr>
 <td><strong>Dealer Positioning</strong></td>
-<td>One row each for <strong>$SPX, SPY, QQQ, $NDX</strong>, then <strong>/ES and /NQ</strong> once captures arrive (scroll the panel to reach them; the frame stays four rows high, and they are not on the public Desk) — price, gamma flip and distance to it, call and put walls, net gamma, and a pins-or-runs chip</td>
+<td>One row each for <strong>$SPX, SPY, QQQ, $NDX</strong>, then <strong>/ES and /NQ</strong> once captures arrive (scroll the panel to reach them; the frame stays four rows high, and they are not on the public Desk; after the 15:00 expiry their gamma levels are the ones from an hour before it, while the price runs to the session's last capture) — price, gamma flip and distance to it, call and put walls, net gamma, and a pins-or-runs chip</td>
 </tr>
 <tr>
 <td><strong>Opportunity Board</strong></td>
@@ -1486,6 +1489,14 @@ for round-the-clock coverage, not a promise of it.</p>
 <li><strong>Dollars are right, counts are not shown.</strong> Open interest and volume are scaled to each
   future's dollars a point (<code>multiplier</code>, shipped 50 for /ES and 20 for /NQ), so the exposure dollars are true. A raw contract count would not be, which
   is why Flow, which prints counts, is not offered for them.</li>
+<li><strong>Their gamma flip is cumulative.</strong> It is the price where net gamma, added up strike by
+  strike from the lowest captured, turns from negative to positive or back, and the
+  summary under the chart calls it <strong>cumulative flip</strong>. Every other symbol uses the
+  per-strike flip (where one strike's net gamma changes sign against the next). On these
+  two that per-strike flip jumped between captures two minutes apart, because net gamma
+  near the future is small, while the cumulative one held within a point. Settings →
+  Configuration → <strong>/ES and /NQ chain feed</strong> → <strong>Gamma flip</strong> → <strong>Rule</strong> (<code>[flip] rule</code>)
+  switches back.</li>
 <li><strong>Open interest is thin, and thinner on /NQ.</strong> Open interest cannot include 0-DTE
   positions opened and closed the same day, so a wall can rest on very few contracts.
   Treat /NQ's walls with more caution than <code>$SPX</code>'s.</li>
@@ -2468,14 +2479,18 @@ order</strong> button — on every page that shows the panel, such as the Market
 Captured Signals and the Paper Ledger. It puts a <em>first triggers OCO</em> bracket on
 the clipboard; for a debit vertical:</p>
 <pre><code>BUY +1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @1.50 LMT [TO OPEN/TO OPEN]
-SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @TRG+100.00% LMT TRG BY #1 OCO [TO CLOSE/TO CLOSE]
-SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL STP TRG-50.00% MARK TRG BY #1 OCO [TO CLOSE/TO CLOSE]
+SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @TRG+100.00% LMT GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]
+SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL STP TRG-50.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]
 </code></pre>
 <p>In ThinkorSwim, open <strong>Trade → Order Entry Tools → Paste order from clipboard</strong>,
 check the ticket, and send it there. The app never places an order.</p>
 <ul>
-<li><strong>The opening order</strong> is a limit at the price the panel shows (the debit paid
-  or the credit received, per share).</li>
+<li><strong>The opening order</strong> is a DAY limit at the price the panel shows (the debit
+  paid or the credit received, per share, for one spread: a position several
+  lots deep is priced per lot).</li>
+<li><strong>The two exits are GTC</strong> (good till cancelled), so the target and the stop
+  keep working after the day the trade opens. <strong>Exits last</strong> under Settings →
+  Configuration → ThinkorSwim order sets them to DAY instead.</li>
 <li><strong>The two exits</strong> are percentages of the fill, so ThinkorSwim prices them from
   what you actually paid. A trade bought for a <strong>debit</strong> takes profit at
   <strong>+100%</strong> (double the debit) and stops at <strong>−50%</strong>. A trade sold for a

@@ -1222,8 +1222,8 @@ def test_the_sitemap_lists_the_ideas_page():
 
 
 def test_an_open_result_is_labelled_as_an_expiry_payoff_not_a_mark():
-    """The site measures an idea from the STOCK price only (no option quote is
-    published). An open idea's number is what the trade would pay AT EXPIRY at
+    """An idea the Paper Ledger does not hold is measured from the STOCK price
+    only. With no model, its open number is what the trade would pay AT EXPIRY at
     today's price - a long option also carries time value - so the words must
     say so, and no line may present it as a current value."""
     js = _text("assets/ideas.js")
@@ -1232,6 +1232,21 @@ def test_an_open_result_is_labelled_as_an_expiry_payoff_not_a_mark():
     shown = " ".join(re.findall(r'"([^"\n]*)"', js)).lower()
     for word in ("unrealized", "current value", "now worth", "mark"):
         assert word not in shown, word
+
+
+def test_a_ledger_result_is_shown_as_the_ledger_has_it():
+    """An idea booked into the Paper Ledger shows that row's status and P&L
+    (``site_ideas.ledger_result``, ``basis: "ledger"``): never labelled
+    "modelled", a hand close has its own words, and a single-option result the
+    quotes switch withholds (``withheld``, no ``pnl``) still renders its status
+    and never joins the dollar total."""
+    js = _text("assets/ideas.js")
+    assert 'r.basis === "ledger"' in js and "Closed by hand" in js
+    assert "r.withheld" in js
+    result_of = re.search(r"function resultOf\(idea\)\s*\{(.*?)\n  \}", js, re.S).group(1)
+    assert "withheld" in result_of
+    rec = re.search(r"function record\(days\)\s*\{(.*?)\n  \}", js, re.S).group(1)
+    assert "num(r.pnl)" in rec                    # a withheld result adds nothing
 
 
 def test_each_card_shows_whether_the_trade_is_open_or_closed():
@@ -1244,7 +1259,7 @@ def test_each_card_shows_whether_the_trade_is_open_or_closed():
     assert states, "ideas.js needs stateOf(idea)"
     body = states.group(1)
     assert 'r.status === "open"' in body
-    for final in ("target", "stop", "expired"):
+    for final in ("target", "stop", "expired", "closed"):
         assert f'r.status === "{final}"' in body, final
     css = _text("assets/site.css")
     for cls in (".ns-idea-status.is-open", ".ns-idea-status.is-closed"):

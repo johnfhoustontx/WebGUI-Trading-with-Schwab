@@ -68,6 +68,16 @@ def is_self_managed(trade) -> bool:
     return bool(isinstance(trade, dict) and trade.get("source") in SELF_MANAGED_SOURCES)
 
 
+def site_rows() -> dict:
+    """``{site_ideas.ledger_key: row}`` for every posted-idea row, open or closed:
+    what the public site's results read (``site_ideas.refresh``), so a card there
+    shows the Ledger's own status and P&L. A daily condor is not an idea and is
+    never in it."""
+    return {site_ideas.ledger_key(t.get("symbol"), t.get("idea_posted")): t
+            for t in paper_trader.get_all_trades()
+            if is_idea(t) and t.get("idea_posted")}
+
+
 def show_mark(trade) -> None:
     """Put an OPEN self-managed row's recorded mark on it as ``unrealized_pnl`` (the
     mark is per contract). No chain is read, so it holds outside the session too; no
