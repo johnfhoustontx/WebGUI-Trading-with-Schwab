@@ -23,8 +23,19 @@ Decisions taken on 2026-11-05:
   that, it opens at **1**. The operator can type any other whole number
   (2026-11-05: "default number of contracts will be up to $1000 risk per order.
   If the risk is greater than 1000 it will default to 1 contract").
-- **The account is picked from a list** of the linked Schwab accounts, limited to
-  an allow-list the operator keeps.
+- **Two accounts, shown by name, never by number** (2026-11-05: "Trading will be
+  done in the Accounts ending with 6763 and 1191 (default) instead of displaying
+  account numbers use alias 6763 will be IRA and 1191 will be Trading account"):
+
+  | Account | Shown as | |
+  |---|---|---|
+  | ending 1191 | **Trading account** | the default |
+  | ending 6763 | **IRA** | |
+
+  Both passed every Phase 0 preview. The other two linked accounts (ending 2878
+  and 9591) are not approved for these options and are never offered. No page,
+  dialog, log line or cached view shows an account's digits: the page names the
+  account by its alias alone.
 - **The authenticator code is asked once a day, before the first live trade.**
   The first Send of each Central trading day asks for the code. Once it is right,
   that day is unlocked and later Sends ask only for the final confirmation. The
@@ -106,8 +117,8 @@ or the Paper Account, and nothing in those books ever sends a live order.
      `default_risk_usd`, or 1 when a single contract risks more. A typed size
      whose risk passes `default_risk_usd` shows the risk in the warning colour
      but is allowed, up to the hard ceilings;
-   - **Account**: a dropdown of allow-listed accounts, showing nickname and last 4
-     digits, never the full number;
+   - **Account**: a dropdown of the configured accounts by alias only
+     ("Trading account", "IRA"), opening on the one marked default;
    - worked out from the above: max risk, max profit, the target and stop prices,
      and an estimate of commissions (`config/commissions.toml`);
    - the order text in ThinkorSwim's paste format (`tos_order.order`), so the
@@ -125,7 +136,7 @@ or the Paper Account, and nothing in those books ever sends a live order.
      wrong code counts toward the sign-in's failure lockout (`auth.py`'s
      limiter), so the code box cannot be guessed at.
    - **Every Send** ends with a final confirmation that names the size, the
-     account's last 4 digits and the limit (`kit.confirm`).
+     account's alias and the limit (`kit.confirm`).
 6. **After.** The page shows Schwab's order ID and the order's status (Working,
    Filled, Rejected, Canceled), read from Schwab every few seconds while the page
    is open.
@@ -137,7 +148,7 @@ webgui /send-order (Tier 1)            options_svc (Tier 2)                 schw
   build ticket view  ──cmd:live_order──▶ live_order_handlers                  POST /orders/preview
   Preview / Send       {preview|place}    · builds the payload (shared/)  ──▶ POST /orders/place
   reads cache:live_order:ticket:<id> ◀──  · live_orders.db (journal)          GET  /orders/{hash}/{id}
-                                          · status poll                       GET  /accounts/nicknames
+                                          · status poll
 ```
 
 ### Shared, pure: `shared/live_order.py`
@@ -225,8 +236,13 @@ ThinkorSwim. A single option keeps the full bracket.
   allows them (`preview` for the preview, `live` for the place). The proxy reads the switch itself, so turning it off stops orders even
   if a service is wrong.
 - `place` returns the order ID from Schwab's `Location` header (201, empty body).
-- New read-only routes: `GET /orders/{hash}/{order_id}` (status) and
-  `GET /accounts/nicknames` (from `/userPreference`), for the dropdown.
+- New read-only route: `GET /orders/{hash}/{order_id}` (status). The dropdown's
+  names are the operator's aliases from config, so no Schwab nickname route is
+  needed.
+- The service maps an alias to an account HASH (from `/accounts`) inside Tier 2.
+  The page, the command and the cache carry only the alias. A hash or an account
+  number never reaches Tier 1, and Schwab's answers are scrubbed before they are
+  cached or stored (Phase 0 found that `previewOrder` echoes the full number).
 - None of these is on the public domain; the proxy never is.
 
 ### The service: `services/options_svc/live_order_handlers.py`
@@ -281,8 +297,17 @@ Following the configurable-by-default rule, every value has an entry in
 ```toml
 mode = "off"                 # the one switch: "off", "preview" (Phase 0), "live" (Phase 1);
                              # read on every request by the proxy and the service
-accounts = []                # last 4 digits of the accounts orders may go to. Empty = none.
-                             # Set it in config/local/live_orders.toml (gitignored), never here.
+# [[accounts]] tables: the accounts orders may go to. NONE in this tracked file;
+# the operator's config/local/live_orders.toml (gitignored) holds them:
+#   [[accounts]]
+#   last4 = "1191"
+#   alias = "Trading account"
+#   default = true
+#   [[accounts]]
+#   last4 = "6763"
+#   alias = "IRA"
+# An account not listed is refused. Exactly one may be the default; with
+# none marked, the first listed opens.
 default_risk_usd = 1000.0    # the Contracts box opens at the most contracts risking at most this; 1 if one risks more
 max_contracts = 50           # hard ceiling: an order of more contracts is refused
 max_risk_usd = 5000.0        # hard ceiling: an order risking more is refused
@@ -424,8 +449,9 @@ it is cached or stored.**
   the ticket says in plain words, beside the exits, that the stop is **not on
   the order** and must be set in ThinkorSwim. This is the fallback this design
   named before the run.
-- **The allow-list ships empty, and …2878 and …9591 should stay off it.** The
-  ticket would only ever show Schwab's rejection for them.
+- **The allow-list ships empty in the tracked file.** The operator chose
+  …1191 ("Trading account", the default) and …6763 ("IRA") for prod's
+  `config/local/live_orders.toml`. …2878 and …9591 stay off it.
 - `previewOrder` stays the gate before Send.
 
 ## How it is tested and verified
