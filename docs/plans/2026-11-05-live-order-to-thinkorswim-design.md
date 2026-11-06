@@ -31,12 +31,11 @@ Decisions taken on 2026-11-05:
   unlock ends at midnight Central.
 - **Paper-only is reversed on purpose, behind a switch that ships off.**
 
-Not yet answered by the operator, so this is the design's proposal, in config
-(see "Open questions"):
-
-- A hard ceiling beside the $1,000 default, to catch a mistyped size:
-  `max_contracts = 50` and `max_risk_usd = 5000`. An order past either is refused,
-  whatever was typed.
+- **A typed size may risk more than $1,000; the risk then shows in the warning
+  colour** (2026-11-05: "The warning color is good for now"). A hard ceiling
+  catches a mistyped size: `max_contracts = 50` and `max_risk_usd = 5000` as
+  shipped. An order past either is refused, whatever was typed. Both are settings,
+  and the operator has not tuned them yet.
 
 ## "Sending to ThinkorSwim" means placing a Schwab order
 
@@ -284,8 +283,8 @@ mode = "off"                 # the one switch: "off", "preview" (Phase 0), "live
 accounts = []                # last 4 digits of the accounts orders may go to. Empty = none.
                              # Set it in config/local/live_orders.toml (gitignored), never here.
 default_risk_usd = 1000.0    # the Contracts box opens at the most contracts risking at most this; 1 if one risks more
-max_contracts = 50           # hard ceiling: an order of more contracts is refused (proposed; to confirm)
-max_risk_usd = 5000.0        # hard ceiling: an order risking more is refused (proposed; to confirm)
+max_contracts = 50           # hard ceiling: an order of more contracts is refused
+max_risk_usd = 5000.0        # hard ceiling: an order risking more is refused
 max_drift_pct = 10.0         # warn when the live mid has moved this far from the idea's price
 totp = "daily"               # the authenticator code: "daily" (before the first Send of each
                              # Central day) or "every_send"
@@ -418,7 +417,5 @@ Built 2026-11-05. **Nothing in it can place an order**: no such route exists.
 
 - Does Schwab's API take a STOP on a multi-leg order (phase 0)?
 - Should the page offer the opening order alone, with no exits, as a choice?
-- The hard ceilings beside the $1,000 default: `max_contracts = 50` and
-  `max_risk_usd = 5000` are proposals. Should a typed size be allowed past
-  $1,000 of risk at all, or should $1,000 be the ceiling except for the
-  one-contract case?
+- Are the hard ceilings right (50 contracts, $5,000 of risk)? The warning colour
+  past $1,000 is the operator's choice "for now", so it may be revisited.
