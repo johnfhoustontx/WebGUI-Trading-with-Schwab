@@ -1182,8 +1182,9 @@ Both are behind the login and exist only in the private process.
 **Entry:** `schwab-proxy/schwab_proxy.py`, port **8100**. Central token manager +
 HTTP gateway. Market-data calls are spaced ~200 ms apart (5 a second) and
 retried up to 3× with backoff (0.25 / 0.5 / 1.0 s). Every call to Schwab is a
-GET: **the proxy has no order route**, and `trader_request` refuses any other
-method.
+GET except one: **no route places an order**. `trader_request` refuses any
+method but GET, and the one write, `POST /orders/preview`, only asks Schwab to
+check an order (below).
 
 **Request header: `X-Priority: 1`** on `/chains`, `/quotes` or `/quote` — send
 this request ahead of ordinary ones that are waiting for a slot. It is for the
@@ -1304,6 +1305,7 @@ missing header, **401**. `proxy_client._apply_secret(session)` attaches it. See
 | `/accounts` | GET | `[{hashValue, accountNumber, ...}]` |
 | `/positions/{account_hash}` | GET | Normalized positions (net qty; options carry underlying) |
 | `/transactions/{account_hash}` | GET (`start_date, end_date`) | Normalized TRADE transactions |
+| `/orders/preview` | POST `{account_hash, order}` | Schwab's `previewOrder` answer, with Schwab's status code: it CHECKS the order and places nothing. **403** unless `config/live_orders.toml mode = "preview"` (read per request); **400** for a bad hash or an order over 16 KB |
 
 ## Trade-stream tracker
 

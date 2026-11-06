@@ -56,7 +56,7 @@ design brings back a route that:
 
 1. needs `PROXY_SHARED_SECRET` and refuses outright without one (as the account
    reads do now);
-2. is off unless `config/live_orders.toml enabled = true`, read on **every**
+2. is off unless `config/live_orders.toml` `mode` allows it, read on **every**
    request;
 3. places only an order the service built, for an account on the allow-list,
    within the size and risk limits, in regular market hours, as a LIMIT order;
@@ -200,8 +200,8 @@ that **the stop is not on the order** and must be set in ThinkorSwim.
   `/accounts/{hash}/previewOrder` and `/accounts/{hash}/orders`. Anything else still
   raises.
 - `POST /orders/preview` and `POST /orders/place`, both behind
-  `require_account_secret`, both refusing with 403 while `live_orders.toml enabled`
-  is false. The proxy reads the switch itself, so turning it off stops orders even
+  `require_account_secret`, both refusing with 403 unless `live_orders.toml mode`
+  allows them (`preview` for the preview, `live` for the place). The proxy reads the switch itself, so turning it off stops orders even
   if a service is wrong.
 - `place` returns the order ID from Schwab's `Location` header (201, empty body).
 - New read-only routes: `GET /orders/{hash}/{order_id}` (status) and
@@ -258,7 +258,8 @@ Following the configurable-by-default rule, every value has an entry in
 `webgui/config_schema.py` (Settings → Configuration).
 
 ```toml
-enabled = false              # the one switch; read on every request by the proxy and the service
+mode = "off"                 # the one switch: "off", "preview" (Phase 0), "live" (Phase 1);
+                             # read on every request by the proxy and the service
 accounts = []                # last 4 digits of the accounts orders may go to. Empty = none.
                              # Set it in config/local/live_orders.toml (gitignored), never here.
 max_contracts = 5            # the Contracts box's ceiling
@@ -305,13 +306,13 @@ place.
 ## Phases (the smallest usable slice first)
 
 0. **Measure, placing nothing.** Add the proxy's preview route only, with the
-   switch on for preview alone (`enabled = "preview"`). Preview a single option, a
+   switch on for preview alone (`mode = "preview"`). Preview a single option, a
    vertical and an iron condor, each with the bracket, on SPX, SPY and a stock.
    Record which order types Schwab accepts, the stop-on-a-spread answer above, and
-   the tick rule. Write the results into this doc.
+   the tick rule. Write the results into this doc (see "Phase 0" below).
 1. **Single options, verticals and iron condors**, which covers most ideas: the
    builder, the ticket page, preview, place, the journal and the status read. The
-   in-app idea banner comes with it. Ships with `enabled = false`.
+   in-app idea banner comes with it. Ships with `mode = "off"`.
 2. **The other structures**: butterflies, condors, straddles and strangles, CUSTOM.
 3. **Cancel from the page** (a third write route, `DELETE`, by the same rules), a
    list of today's live orders, and the covered call.
@@ -319,6 +320,59 @@ place.
 Each phase updates the manuals and `webgui/page_help.py` in the same commit, adds
 the `cmd:live_order` row to the API Reference, and edits CLAUDE.md's
 paper-only and order-route sentences in place (phase 1).
+
+## Phase 0: what was built, and how to run it
+
+Built 2026-11-05. **Nothing in it can place an order**: no such route exists.
+
+- `config/live_orders.toml`: `mode = "off"` as shipped; `"preview"` lets the
+  proxy ask Schwab to check an order. Anything else reads as `off`
+  (`shared/live_orders_config.py`). Also `[ticks]`, the first guess at the price
+  steps. Settings → Configuration → Live orders.
+- `shared/live_order.py`: the pure builder. Legs in the app's canonical shape
+  plus each contract's Schwab symbol (from the chain, never built), out comes
+  the order JSON in three shapes: `open`, `target` (opening triggers a profit
+  target) and `bracket` (opening triggers an OCO of target and stop). Exits are
+  priced off the limit with `config/tos_order.toml`'s percentages.
+- The proxy: `trader_preview(account_hash, order)` POSTs to exactly
+  `/accounts/{hash}/previewOrder`, with the endpoint fixed in code, one attempt
+  and no retry loop. `POST /orders/preview` wraps it behind
+  `require_account_secret` and the switch. `trader_request` is still GET-only.
+  `/health` reports `live_orders` (the mode). `test_account_surface.py` pins
+  that the trader URL is built only in `trader_request` and `trader_preview`,
+  that `session.post` appears only in `trader_preview`, and that the one route
+  naming an order is `/orders/preview`.
+- `tools/live_order_preview.py`: `accounts` lists the linked accounts by their
+  last 4 digits; `matrix --account 1234` builds the four structures (long call,
+  debit call vertical, credit put vertical, iron condor) on SPY, $SPX and INTC's
+  nearest expiry 1 to 10 days out, in all three shapes, at 1 contract, previews
+  each, and prints Schwab's verdict. `--out` saves the orders and answers (last 4
+  digits only, never the hash).
+
+**To run it** (after a promote, during market hours, with the operator's go):
+
+1. Set Settings → Configuration → Live orders to `preview` (it is read on the
+   next request; no restart).
+2. On the box:
+   ```bash
+   cd /home/administrator/dev && set -a && . ./.env && set +a && .venv/bin/python tools/live_order_preview.py accounts
+   ```
+   then `matrix --account <last 4> --out /tmp/live_order_preview.json`.
+3. Set it back to `off`.
+
+**What Phase 0 must answer:**
+
+1. Does `previewOrder` answer at all? It is in Schwab's Trader API reference,
+   but nothing in this app has ever called it. If it answers 404 or 501, the
+   design loses its check-before-send step, and that has to be settled before
+   Phase 1.
+2. Does each structure's opening order pass, with the complex type this builder
+   names (`VERTICAL`, `IRON_CONDOR`, none for one leg)?
+3. Does `TRIGGER` → single target pass? Does `TRIGGER` → `OCO` (target and
+   `STOP`) pass, for one leg and for a spread?
+4. Are the price steps right for SPY, $SPX and a non-penny stock?
+
+**Results:** not yet run.
 
 ## How it is tested and verified
 

@@ -154,6 +154,9 @@ SERVICES_TOML = REPO_ROOT / "config" / "services.toml"
 # The Trade detail panel's "Copy ThinkorSwim order" bracket percentages
 # (webgui/pages/options/tos_order.py). Read on each click; no restart.
 TOS_ORDER_TOML = REPO_ROOT / "config" / "tos_order.toml"
+# Live orders to the Schwab account (shared/live_orders_config.py). Phase 0:
+# preview only. Read by the proxy on every request; no restart.
+LIVE_ORDERS_TOML = REPO_ROOT / "config" / "live_orders.toml"
 
 # History of Gamma Analyze briefings (the 4×/day Auto briefings + ad-hoc/manual runs).
 # Stores the STRUCTURED analysis payload (the source of truth) per (date, slot); the

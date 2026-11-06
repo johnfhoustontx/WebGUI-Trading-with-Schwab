@@ -40,14 +40,20 @@ sentiment-dashboard, and the Tier-2 services all fetch market data through it.
   only — `PASSTHROUGH_ENDPOINTS`, matched exactly), `/accounts`, `/positions`,
   `/positions/{account_hash}`, `/transactions/{account_hash}`, and the
   trade-stream tracker (`/track`, `/untrack`).
-- ⚠ **The account routes FAIL CLOSED, and there is no order route.**
-  `/accounts`, `/positions*` and `/transactions*` depend on
+- ⚠ **The account routes FAIL CLOSED, and no route places an order.**
+  `/accounts`, `/positions*`, `/transactions*` and `/orders/preview` depend on
   `require_account_secret`: with no `PROXY_SHARED_SECRET` configured they answer
   503 to everyone; with one, 401 without the matching `X-Proxy-Secret`.
-  `trader_request` is GET-only and raises on anything else. A new route that
-  calls `trader_request` must carry that dependency and a new write to the
-  brokerage API must not exist at all — `tests/test_account_surface.py` fails on
-  both. `require_secret` (a no-op with no secret) is for market data only.
+  `trader_request` is GET-only and raises on anything else. The ONE brokerage
+  write is `trader_preview`, which POSTs to the fixed endpoint
+  `/accounts/{hash}/previewOrder` (Schwab checks the order and places nothing),
+  behind `POST /orders/preview`, which also refuses (403) unless
+  `config/live_orders.toml mode = "preview"`, read per request
+  ([live-order design](../docs/plans/2026-11-05-live-order-to-thinkorswim-design.md)).
+  A new route that reaches the brokerage API must carry the fail-closed
+  dependency, and any other write must not exist: `tests/test_account_surface.py`
+  fails on a new trader URL builder, a new `session.post`, or a second route
+  naming an order. `require_secret` (a no-op with no secret) is for market data only.
 - **`/positions` aggregates ALL linked accounts** (not just the first): it loops
   every account hash from `/accounts/accountNumbers`, normalizes each, and folds
   same-symbol holdings across accounts into one row via `_merge_positions` (sums

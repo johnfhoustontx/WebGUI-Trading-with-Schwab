@@ -437,7 +437,7 @@ maps, and anything whose change needs code to follow it.
   `scanner` (selection floors and, since 2026-10-04, `[selection]` strike rules),
   `trade_mgmt`, `paper`, `symbols`, `sectors`, `marketdata`, `services`,
   `flow_alerts`, `notify`, `commissions`, `theme`, `news`, `edge`, `market_read`,
-  `blog`, `gamma_heat`, `futures_chain`, `gex_archive`, `listed_stocks`, `login_push`, `scalp`, `tos_order`,
+  `blog`, `gamma_heat`, `futures_chain`, `gex_archive`, `listed_stocks`, `login_push`, `scalp`, `tos_order`, `live_orders`,
   `sentiment` (when the live composite refuses a pre-open input), and
   the public tools' files.
 - `shared/market_calendar.py` is the single source for the NYSE calendar and the
@@ -506,8 +506,12 @@ is in git; `--install` also arms the timers). Start order: Redis (a system unit)
   A token refresh must never move `RefreshTokenExpiresAt`, and the recovery
   path must not need the tailnet.
 - The proxy's account routes fail CLOSED without `PROXY_SHARED_SECRET`
-  (`X-Proxy-Secret`), so do `/track` and `/untrack`, and it has no order route:
-  `trader_request` is GET-only. This app is paper-only.
+  (`X-Proxy-Secret`), so do `/track` and `/untrack`, and no route places an order:
+  `trader_request` is GET-only, and the one brokerage write is `POST /orders/preview`
+  (Schwab's `previewOrder`, which places nothing), off unless
+  `config/live_orders.toml mode = "preview"`. This app is still paper-only: it
+  places no order. Live orders are being designed
+  ([design](docs/plans/2026-11-05-live-order-to-thinkorswim-design.md)).
 - A unit that ends FAILED sends a push; `/health` reports `up: false` with a
   reason when a scheduler has stopped or gone silent. Two units carry a memory
   cap (`webgui_live`, `webgui`); never add one to a service or the proxy as a

@@ -28,9 +28,13 @@ The routes that read the brokerage account — `/accounts`, `/positions`,
 the check was skipped when no secret was set, which is how production ran: any
 caller that could reach the port, loopback or tailnet, could read the account.
 
-**There is no order route.** `POST /orders/{hash}` forwarded a real order to
+**No route places an order.** `POST /orders/{hash}` forwarded a real order to
 Schwab and nothing called it; it was deleted, and `trader_request` refuses any
-method but GET. This application is paper-only.
+method but GET. The one write since (2026-11-05) is `POST /orders/preview`: it
+sends an order to Schwab's `previewOrder`, which checks it and places nothing.
+It needs the secret like the account routes, and it refuses (403) unless
+`config/live_orders.toml` says `mode = "preview"`, read on every request
+([design](plans/2026-11-05-live-order-to-thinkorswim-design.md)).
 
 To set the secret:
 

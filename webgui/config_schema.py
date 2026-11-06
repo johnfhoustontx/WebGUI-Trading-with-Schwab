@@ -3163,6 +3163,41 @@ _TOS_ORDER = ConfigFile(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Live orders to the Schwab account — config/live_orders.toml
+# ─────────────────────────────────────────────────────────────────────────────
+# Read by the proxy on every request (shared/live_orders_config.py).
+_LIVE_ORDERS = ConfigFile(
+    name="live_orders.toml", title="Live orders", icon="send",
+    summary="Sending an order to the Schwab account. For now the proxy can only "
+            "ask Schwab to check an order (a preview), which places nothing. "
+            "Read on every request.",
+    restart=(),
+    caution="This switch decides whether the proxy may send your Schwab "
+            "account an order to check. Leave it off unless you are running "
+            "the preview check.",
+    sections=(
+        Section("Switch", "Off refuses every request.", (
+            Field("mode", "Live orders",
+                  "off: nothing is sent. preview: Schwab checks an order and "
+                  "places nothing.", kind="choice", choices=("off", "preview")),
+        )),
+        Section("Price steps", "The step an option price must move in. Schwab's "
+                "preview names a price that is off it.", (
+            Field("ticks.under_3", "Step under $3", "", unit="$",
+                  min=0.01, max=1, step=0.01),
+            Field("ticks.from_3", "Step at $3 and up", "", unit="$",
+                  min=0.01, max=1, step=0.01),
+            Field("ticks.penny_under_3", "Penny symbols: step under $3", "",
+                  unit="$", min=0.01, max=1, step=0.01),
+            Field("ticks.penny_from_3", "Penny symbols: step at $3 and up", "",
+                  unit="$", min=0.01, max=1, step=0.01),
+            Field("ticks.penny", "Penny symbols",
+                  "Quoted in pennies under $3 and nickels above.", kind="symbols"),
+        )),
+    ),
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # The Gamma Archive — config/gex_archive.toml
 # ─────────────────────────────────────────────────────────────────────────────
 # Read by tools/archive_gex.py each night, so a saved change needs no restart.
@@ -3187,7 +3222,7 @@ _GEX_ARCHIVE = ConfigFile(
     ),
 )
 
-FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _LOGIN_PUSH, _TOS_ORDER, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _SECTORS, _MOMENTUM, _SENTIMENT,
+FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _LOGIN_PUSH, _TOS_ORDER, _LIVE_ORDERS, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _SECTORS, _MOMENTUM, _SENTIMENT,
          _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _FUTURES_CHAIN, _GEX_ARCHIVE, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
          _MARKET_READ, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)

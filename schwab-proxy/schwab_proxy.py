@@ -3,10 +3,13 @@ SchwabProxy - Centralized Schwab API Token Manager & Proxy
 Version: 1.0.1
 Last Updated: 2026-05-26
 
-Trader API endpoints are READ-ONLY (accounts, positions, transactions) and
-fail closed without the shared secret. The order route this header used to
-list (POST /orders/{account_hash}) was deleted 2026-10-03: the application is
-paper-only and nothing called it.
+Trader API endpoints READ accounts, positions and transactions, and fail
+closed without the shared secret. The order route this header used to list
+(POST /orders/{account_hash}) was deleted 2026-10-03 (audit SE-02). The one
+write since is POST /orders/preview (2026-11-05, Phase 0 of
+docs/plans/2026-11-05-live-order-to-thinkorswim-design.md): it asks Schwab's
+previewOrder to CHECK an order, places nothing, and is off unless
+config/live_orders.toml says mode = "preview".
 
 Added trade stream tracker (TRADE STREAM TRACKER section):
   POST /track / POST /untrack     — register OptionsScanner paper trades
@@ -70,6 +73,7 @@ import rate_gate
 import schwab_symbols
 from shared import market_calendar as _market_calendar
 from shared import marketdata_config as _marketdata_config
+from shared import live_orders_config as _live_orders_config
 
 #############################################
 # LOGGING
@@ -664,6 +668,9 @@ def health():
         "token_file": str(TOKEN_FILE),
         # Whether /accounts, /positions and /transactions will answer at all.
         "account_routes": account_routes_state(),
+        # config/live_orders.toml: "off", or "preview" (Schwab may be asked to
+        # CHECK an order). No mode places one.
+        "live_orders": _live_orders_config.mode(),
         # The local market-data store: its mode, and how many store faults fell
         # back to a plain fetch. None when it cannot be read.
         "market_store": _store_state(),
@@ -1021,7 +1028,8 @@ def passthrough(endpoint: str, params: Optional[str] = None):
 
 
 #############################################
-# TRADER API ENDPOINTS (account READS only - no order route exists)
+# TRADER API ENDPOINTS (account READS, plus the one order PREVIEW below:
+# no route places an order)
 #############################################
 
 def trader_request(method: str, endpoint: str, json_body: dict = None) -> dict:
@@ -1083,6 +1091,84 @@ def trader_request(method: str, endpoint: str, json_body: dict = None) -> dict:
             time.sleep(RETRY_BACKOFF_BASE * (2 ** attempt))
             logger.info(f"Retrying trader {endpoint} (attempt {attempt + 2}/{attempts})")
     return result
+
+
+#: Schwab's account hash (``hashValue`` from ``/accounts/accountNumbers``).
+_ACCOUNT_HASH_RE = re.compile(r"^[A-Za-z0-9]{16,128}$")
+#: The largest order a preview will forward. A four-leg bracket is ~3 KB.
+_PREVIEW_MAX_BYTES = 16_384
+#: The ONE brokerage endpoint this proxy may POST to, and only through
+#: :func:`trader_preview`. ``previewOrder`` checks an order and places nothing.
+PREVIEW_ENDPOINT = "/accounts/{account_hash}/previewOrder"
+
+
+def trader_preview(account_hash: str, order: dict) -> dict:
+    """Ask Schwab to CHECK ``order`` for one account. Places NOTHING.
+
+    Design: docs/plans/2026-11-05-live-order-to-thinkorswim-design.md (Phase 0).
+
+    The endpoint is fixed here: no caller names a path, so this cannot be
+    pointed at ``/orders`` by a parameter. ``trader_request`` stays GET-only.
+    One attempt, no retry loop: a preview is cheap to ask again by hand, and a
+    write path that retries by itself is the habit this file must not grow.
+    Returns ``{"status_code", "data", "error"}``; a rejection's body is kept,
+    because Schwab's reasons are what Phase 0 is measuring.
+    """
+    if not isinstance(account_hash, str) or not _ACCOUNT_HASH_RE.match(account_hash):
+        raise ValueError("account_hash is not a Schwab account hash")
+    if not isinstance(order, dict) or not order:
+        raise ValueError("order must be a non-empty JSON object")
+    body = json.dumps(order, separators=(",", ":"))
+    if len(body.encode("utf-8")) > _PREVIEW_MAX_BYTES:
+        raise ValueError(f"order is larger than {_PREVIEW_MAX_BYTES} bytes")
+    token_mgr.ensure_valid_token()
+    url = SCHWAB_TRADER_URL + PREVIEW_ENDPOINT.format(account_hash=account_hash)
+    headers = {
+        "Authorization": f'Bearer {token_mgr.tokens["AccessToken"]}',
+        "Accept":        "application/json",
+        "Content-Type":  "application/json",
+    }
+    session = token_mgr.session
+    try:
+        api_call_counter.record()
+        resp = session.post(url, headers=headers, data=body, timeout=30)
+        if resp.status_code == 401:
+            logger.warning("previewOrder 401 - refreshing token and asking once more")
+            with token_mgr._lock:
+                token_mgr._refresh()
+            headers["Authorization"] = f'Bearer {token_mgr.tokens["AccessToken"]}'
+            api_call_counter.record()
+            resp = session.post(url, headers=headers, data=body, timeout=30)
+    except requests.exceptions.RequestException as e:
+        return {"status_code": 502, "data": None, "error": str(e)[:500]}
+    try:
+        data = resp.json() if resp.text else {}
+    except ValueError:
+        data = None
+    # The status only: an account hash or an order never goes in the log.
+    logger.info("previewOrder answered %s", resp.status_code)
+    ok = resp.status_code in (200, 201)
+    return {"status_code": resp.status_code, "data": data,
+            "error": None if ok else (resp.text or "")[:2000]}
+
+
+@app.post("/orders/preview", dependencies=[Depends(require_account_secret)])
+def preview_order(body: Dict[str, Any]):
+    """Ask Schwab to check an order and place nothing: ``{"account_hash",
+    "order"}`` in, Schwab's answer out, with Schwab's own status code.
+
+    Refused (403) unless ``config/live_orders.toml mode = "preview"``, read on
+    this request, so switching it off needs no restart. No route here places
+    an order (``tests/test_account_surface.py``)."""
+    if not _live_orders_config.preview_allowed():
+        raise HTTPException(status_code=403,
+                            detail='live orders are off (config/live_orders.toml mode)')
+    try:
+        result = trader_preview(body.get("account_hash"), body.get("order"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return JSONResponse(status_code=result["status_code"],
+                        content={"schwab": result["data"], "error": result["error"]})
 
 
 def _normalize_positions(raw: dict) -> list[dict]:

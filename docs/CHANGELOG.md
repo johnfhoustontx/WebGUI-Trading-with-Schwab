@@ -4,7 +4,26 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-05 (**The site's trade idea results are the Paper Ledger's.**)
+**Last updated:** 2026-11-05 (**Live orders, Phase 0: the proxy can ask Schwab to check an order, and place none.**)
+
+- The first step of [sending a trade idea to ThinkorSwim](plans/2026-11-05-live-order-to-thinkorswim-design.md).
+  `POST /orders/preview` (behind `require_account_secret`) sends an order to Schwab's
+  `previewOrder`, which checks it and places nothing, through `trader_preview`, whose one
+  endpoint is fixed in code. It refuses (403) unless the new `config/live_orders.toml` says
+  `mode = "preview"`, read per request; it ships `off`. `trader_request` is still GET-only,
+  and `test_account_surface.py` now pins that the trader URL is built only in those two
+  functions and that `/orders/preview` is the one route naming an order. `/health` reports
+  `live_orders`.
+- `shared/live_order.py` builds the order JSON from canonical legs (each with its Schwab
+  symbol from the chain): the opening order, with a target, or the full target-and-stop
+  bracket, exits priced off the limit with `tos_order.toml`'s percentages.
+  `tools/live_order_preview.py matrix` previews four structures on SPY, $SPX and INTC in all
+  three shapes and prints Schwab's verdict. Not yet run: it needs a promote and the switch
+  set to `preview`.
+- SECURITY.md, the API Reference and the Technical Reference no longer say "there is no
+  order route"; they say no route places one.
+
+**Prior —** 2026-11-05 (**The site's trade idea results are the Paper Ledger's.**)
 
 - The site and the Ledger computed each idea's result separately: the site modelled the
   option from the stock price (Black-Scholes at the entry IV) with no stop for a debit idea,

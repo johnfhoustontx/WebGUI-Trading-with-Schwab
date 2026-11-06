@@ -1,0 +1,18 @@
+# Live orders to the Schwab account (what ThinkorSwim shows).
+# Design: docs/plans/2026-11-05-live-order-to-thinkorswim-design.md
+#
+# PHASE 0: the proxy can only PREVIEW an order (Schwab's previewOrder, which
+# checks an order and places nothing). No route that places an order exists yet.
+#
+# Read by the proxy on every request, so a saved change needs no restart.
+
+mode = "off"                   # "off" refuses every request; "preview" lets the proxy ask Schwab to check an order
+
+[ticks]
+# The price step an option order must use. Schwab's preview names any price that
+# is off it, so these are a first guess that Phase 0 corrects.
+under_3 = 0.05                 # step for a price under $3.00
+from_3 = 0.10                  # step for a price of $3.00 and up
+penny_under_3 = 0.01           # the same two for the penny-program symbols below
+penny_from_3 = 0.05
+penny = ["SPY", "QQQ", "IWM"]  # symbols quoted in pennies under $3 and nickels above
