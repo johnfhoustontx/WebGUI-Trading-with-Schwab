@@ -546,19 +546,34 @@ def test_the_scheduler_reads_the_configured_slots():
     assert scheduler._TRADE_IDEA_SLOTS == {
         k: (t.hour, t.minute) for k, t in mc.slot_times("trade_idea").items()}
     assert len(scheduler._TRADE_IDEA_SLOTS) == 7
-    assert min(scheduler._TRADE_IDEA_SLOTS.values()) == (8, 35)
-    assert max(scheduler._TRADE_IDEA_SLOTS.values()) == (14, 35)
+    assert min(scheduler._TRADE_IDEA_SLOTS.values()) == (8, 40)
+    assert max(scheduler._TRADE_IDEA_SLOTS.values()) == (14, 40)
+
+
+# The quarter-hour scan starts [windows.scan] offset_min late and its last log
+# line has landed up to 3.5 minutes after it starts (prod, 2026-10-29..11-06).
+_SCAN_RUN_MIN = 6
+
+
+def test_every_slot_reads_a_finished_scan():
+    """A slot inside a scan's run reads the scan before it. At 08:35 on
+    2026-11-06 that was the pre-open scan, which held nothing to post: the 08:32
+    scan published one second after the slot ran."""
+    ready = mc.scan_offset_min() + _SCAN_RUN_MIN
+    for name, (_h, m) in scheduler._TRADE_IDEA_SLOTS.items():
+        assert m % 15 >= ready, f"{name} runs before its scan has published"
 
 
 def test_a_slot_fires_once_within_grace_and_never_on_a_holiday():
     ran = set()
-    at = dt.datetime(2026, 9, 17, 10, 38, tzinfo=_CT)
+    at = dt.datetime(2026, 9, 17, 10, 43, tzinfo=_CT)
     slot = scheduler.trade_idea_due(at, ran)
-    assert slot == "h1035"
+    assert slot == "h1040"
     ran.add((at.date().isoformat(), slot))
     assert scheduler.trade_idea_due(at, ran) is None
-    assert scheduler.trade_idea_due(dt.datetime(2026, 9, 17, 10, 50, tzinfo=_CT), set()) is None
-    assert scheduler.trade_idea_due(dt.datetime(2026, 12, 25, 10, 36, tzinfo=_CT), set()) is None
+    assert scheduler.trade_idea_due(dt.datetime(2026, 9, 17, 10, 38, tzinfo=_CT), set()) is None
+    assert scheduler.trade_idea_due(dt.datetime(2026, 9, 17, 10, 55, tzinfo=_CT), set()) is None
+    assert scheduler.trade_idea_due(dt.datetime(2026, 12, 25, 10, 41, tzinfo=_CT), set()) is None
 
 
 # ── X: the text, and the post after the private channels ───────────────────

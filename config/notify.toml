@@ -48,7 +48,7 @@ telegram = true
 discord = true
 telegram = true
 
-[channels.trade_idea]          # the hourly trade idea ([slots.trade_idea], :35)
+[channels.trade_idea]          # the hourly trade idea ([slots.trade_idea], :40)
 discord = true
 telegram = true
 calendar = false               # also create a Google Calendar event (see [calendar])

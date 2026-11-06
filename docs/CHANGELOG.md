@@ -4,7 +4,22 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-06 (**Opening Scalp: the Calls since the open column draws coloured discs, grey after the close, on one line when there is room.**)
+**Last updated:** 2026-11-06 (**The hourly trade idea moves from :35 to :40, so it reads a finished scan.**)
+
+- **Why.** The 08:35 idea on 2026-11-06 was skipped as `nothing eligible` (0
+  candidates). The 08:32 scan logged its last line at 08:35:28 and the idea ran at
+  08:35:29, so it read the 08:17 pre-open scan, which had nothing to post. The 08:47
+  scan, read afterwards, held 103 eligible trades. The slot was set five minutes after
+  a :30 scan, but `[windows.scan] offset_min = 2` had moved the scan to :32, and on
+  prod its last log line lands between :34:33 and :35:28. So every :35 slot was racing
+  the scan. The first miss was 11-06; every slot from 10-26 to 11-05 posted.
+- `config/sessions.toml [slots.trade_idea]` and the built-in defaults in
+  `shared/market_calendar.py` now run 08:40 ... 14:40 (slots `h0840` ... `h1440`).
+- `test_every_slot_reads_a_finished_scan` fails on a slot less than `offset_min` + 6
+  minutes past its quarter hour.
+- User Guide and the site's Trade ideas page say 8:40 to 2:40.
+
+**Prior —** 2026-11-06 (**Opening Scalp: the Calls since the open column draws coloured discs, grey after the close, on one line when there is room.**)
 
 - The user asked for the column's icons to become filled circles with a white arrow:
   green up, orange right (no signal, which was a dash), red down. A call with a

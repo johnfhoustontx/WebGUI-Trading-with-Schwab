@@ -84,7 +84,7 @@ The app reads market data and your positions from Schwab, so you need:
 - **Push notifications** (Telegram / Discord / text message) — configured in
   `shared/notifications.json` if you want alerts on your phone. Skip it and the app
   is silent on those channels. Once they are set, the app also posts one **trade idea**
-  an hour during the regular session (08:35–14:35 CT): the best Strong or Good trade
+  an hour during the regular session (08:40–14:40 CT): the best Strong or Good trade
   on the Market Scanner, drawn as an image with its legs, grade, risk, profit,
   probability of profit and payoff chart. It picks from every Scanner table: the
   credit spreads, the Directional tab's single options, and the **Other structures**

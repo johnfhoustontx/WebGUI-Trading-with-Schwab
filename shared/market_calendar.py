@@ -359,14 +359,14 @@ _DEFAULTS = {
         # time is configurable; the day is the unit's. After token_watch, so a
         # lapsing Schwab sign-in has already been reported. Read by systemd.
         "stock_rank": {"at": "08:00"},
-        # The hourly public trade idea (options_svc). Five minutes after the
-        # :30 autoscan so the post reads a scan that has finished, and the whole
-        # regular session: the first at 08:35, the last at 14:35. No Schwab call
-        # and no Claude call -- it reads the published scan.
+        # The hourly public trade idea (options_svc). At :40, after the :32
+        # autoscan has published (at :35 it raced it), and the whole regular
+        # session: the first at 08:40, the last at 14:40. No Schwab call and no
+        # Claude call -- it reads the published scan.
         "trade_idea": {"grace_min": 10,
-                       "h0835": "08:35", "h0935": "09:35", "h1035": "10:35",
-                       "h1135": "11:35", "h1235": "12:35", "h1335": "13:35",
-                       "h1435": "14:35"},
+                       "h0840": "08:40", "h0940": "09:40", "h1040": "10:40",
+                       "h1140": "11:40", "h1240": "12:40", "h1340": "13:40",
+                       "h1440": "14:40"},
         # The daily 0-DTE iron condor's entry into the Paper Ledger
         # (options_svc/daily_condor.py): one chain fetch, 15 minutes after the
         # open. A short grace: a late start skips the day, never enters late.
