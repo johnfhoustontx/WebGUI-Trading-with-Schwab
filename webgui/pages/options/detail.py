@@ -968,7 +968,8 @@ def _tos_reported(e):
 
 def _tos_button(tos):
     """The 'Copy ThinkorSwim order' button for ``tos_order.order``'s result."""
-    kit.button("Copy ThinkorSwim order", kind="quiet", icon="content_copy",
+    # ``secondary``, matching Send Live Order beside it and the footer buttons.
+    kit.button("Copy ThinkorSwim order", kind="secondary", icon="content_copy",
                tooltip=tos["summary"]) \
         .classes("self-start mt-1") \
         .on("click", _tos_reported, js_handler=tos_copy_js(tos["text"]))
