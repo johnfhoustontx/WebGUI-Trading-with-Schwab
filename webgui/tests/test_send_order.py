@@ -97,7 +97,7 @@ def test_no_public_module_reaches_live_orders():
     """The public process renders page modules: none may import the ticket page,
     the banner or the unlock, or read a live-order view. The one way in is the
     detail panel's LAZY import of ``live_order_link`` (next test)."""
-    allowed = {"send_order.py", "idea_banner.py", "live_unlock.py"}
+    allowed = {"send_order.py", "idea_banner.py", "live_unlock.py", "live_orders.py"}
     for path in [ROOT / "live_main.py", ROOT / "live_screens.py", ROOT / "shell.py",
                  *(ROOT / "pages").rglob("*.py")]:
         if path.name in allowed or "tests" in path.parts:
@@ -108,9 +108,12 @@ def test_no_public_module_reaches_live_orders():
         assert "send_order" not in text, path
         assert "idea_banner" not in text, path
         assert "/send-order" not in text, path
+        assert "/live-orders" not in text, path
+        assert "TODAY_KEY" not in text, path
         if path.name != "detail.py":
             assert "live_order_link" not in text, path
-    assert "/send-order" not in (ROOT / "live_screens.py").read_text(encoding="utf-8")
+    screens = (ROOT / "live_screens.py").read_text(encoding="utf-8")
+    assert "/send-order" not in screens and "/live-orders" not in screens
 
 
 def test_the_detail_panel_reaches_the_ticket_only_off_the_public_origin():
@@ -224,3 +227,41 @@ def test_a_calendar_shows_no_false_unlimited_profit():
     p = so.priced(cal, 2.00, 1)
     assert p["loss"] == 200.0 and p["profit_known"] is False
     assert so.priced(QUOTE, 1.50, 1)["profit_known"] is True
+
+
+# ── Phase 3: cancel and today's orders ───────────────────────────────────────
+
+def test_cancel_is_offered_only_for_a_sent_order_schwab_has_not_finished():
+    assert so.can_cancel({"status": "sent", "order_status": "WORKING"})
+    assert so.can_cancel({"status": "sent"})
+    assert not so.can_cancel({"status": "sent", "order_status": "FILLED"})
+    assert not so.can_cancel({"status": "unknown"})
+    assert not so.can_cancel({"status": "previewed"})
+    assert not so.can_cancel(None)
+
+
+def test_todays_orders_rows_read_plainly():
+    from pages import live_orders as lo
+    row = {"ticket_id": "a" * 32, "alias": "IRA", "symbol": "SPY", "structure": "IRON_CONDOR",
+           "contracts": 2, "limit": 1.5, "debit": False, "status": "sent",
+           "order_status": "WORKING", "sent_at": "2026-11-06T10:02:11-06:00",
+           "can_cancel": True}
+    assert lo.order_line(row) == "10:02:11 · IRA · SPY iron condor · 2 at 1.50 credit"
+    assert lo.status_words(row) == "Sent: working" and lo.tone(row) == "open"
+    assert lo.tone({**row, "order_status": "FILLED"}) == "done"
+    assert lo.tone({**row, "order_status": "REJECTED"}) == "bad"
+    assert lo.tone({**row, "status": "unknown", "order_status": None}) == "bad"
+    assert lo.any_open({"orders": [row]})
+    assert not lo.any_open({"orders": [{**row, "can_cancel": False}]})
+    assert not lo.any_open(None)
+
+
+def test_the_pages_enqueue_only_on_the_live_order_stream():
+    """Both pages ask the options service through ``bus_client.request`` on
+    ``live_order.DOMAIN`` and nowhere else."""
+    for name in ("send_order.py", "live_orders.py"):
+        tree = ast.parse((ROOT / "pages" / name).read_text(encoding="utf-8"))
+        calls = [ast.unparse(n.args[0]) for n in ast.walk(tree)
+                 if isinstance(n, ast.Call) and getattr(n.func, "attr", None) == "request"
+                 and getattr(n.func.value, "id", None) == "bus_client"]
+        assert calls == ["live_order.DOMAIN"], (name, calls)

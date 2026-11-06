@@ -436,6 +436,25 @@ def ticket_key(ticket_id):
     return f"cache:live_order:ticket:{ticket_id}"
 
 
+#: The day's sent orders (Phase 3): alias, structure, size, limit and Schwab's
+#: status per ticket. Never a number or a hash.
+TODAY_KEY = "cache:live_order:today"
+
+#: Schwab order statuses after which nothing more happens to the order.
+FINAL_ORDER_STATUSES = frozenset({"FILLED", "CANCELED", "REJECTED", "EXPIRED", "REPLACED"})
+
+
+def order_is_final(order_status) -> bool:
+    """Whether Schwab's status says the order is done (filled, cancelled, ...)."""
+    return isinstance(order_status, str) and order_status.upper() in FINAL_ORDER_STATUSES
+
+
+def offers_cancel(ticket_status, order_status) -> bool:
+    """Whether a page offers Cancel for a ticket: it was sent and Schwab has not
+    said the order is done. The service asks Schwab again before it cancels."""
+    return ticket_status == "sent" and not order_is_final(order_status)
+
+
 def quote_key(trade_id):
     """The cache view a live quote is published to: a Ledger idea's trade id,
     or the page's own 32-hex quote id for legs taken from a detail panel."""

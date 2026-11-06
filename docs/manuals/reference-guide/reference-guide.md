@@ -3458,7 +3458,11 @@ hard ceilings of 50 contracts and $5,000.
 
 ⚠ The Paper Ledger row is the idea's scorecard, not your position: sending the order does
 not change the row, and the row keeps being marked and closed by its own rules whatever
-happens to the real order. A real order is managed in ThinkorSwim.
+happens to the real order. A real order is managed in ThinkorSwim, with two
+exceptions: while the opening order is still working the ticket (and **Today's Live
+Orders**, at `/live-orders`) can cancel it, and that page lists every order sent
+today with Schwab's status. Once it fills, its exits are changed or cancelled in
+ThinkorSwim.
 
 ### Reading the screen
 

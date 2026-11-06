@@ -4957,7 +4957,11 @@ risks more opens at 1. Typing more is allowed and shown in the warning colour, u
 hard ceilings of 50 contracts and $5,000.</p>
 <p>⚠ The Paper Ledger row is the idea's scorecard, not your position: sending the order does
 not change the row, and the row keeps being marked and closed by its own rules whatever
-happens to the real order. A real order is managed in ThinkorSwim.</p>
+happens to the real order. A real order is managed in ThinkorSwim, with two
+exceptions: while the opening order is still working the ticket (and <strong>Today's Live
+Orders</strong>, at <code>/live-orders</code>) can cancel it, and that page lists every order sent
+today with Schwab's status. Once it fills, its exits are changed or cancelled in
+ThinkorSwim.</p>
 <h3 id="reading-the-screen_17">Reading the screen</h3>
 <p>Columns: <strong>SYMBOL · STRAT · STRIKES · EXP · QTY · CREDIT · RISK · P&amp;L · STATUS ·
 ENTRY</strong>, newest first. P&amp;L shows realized for closed trades and live unrealized for open

@@ -826,7 +826,7 @@ fall back to another symbol's chain: a stale capture is labelled, never shown as
 
 ### Live orders to ThinkorSwim (`cmd:live_order`)
 
-A trade can be sent to the Schwab account as a real order (Phases 1-2 of the
+A trade can be sent to the Schwab account as a real order, and cancelled while it works (Phases 1-3 of the
 [design](../../plans/2026-11-05-live-order-to-thinkorswim-design.md)): a single option, a
 vertical, an iron condor, a straddle, a strangle, a butterfly, a condor, a calendar, a
 diagonal, or any other all-option mix as `CUSTOM` (`live_order.SENDABLE_TYPES`). The page
@@ -853,14 +853,17 @@ no time or is older than `max_command_age_sec` (30).
 | `quote` | `trade_id`, or `quote_id` (32 hex) + `spec` | Reprices the trade's legs from a fresh chain (`maxAge: 0`, every expiry the legs use) and publishes the quote view under the `trade_id` or the `quote_id` |
 | `preview` | `ticket_id` (32 hex, new), `trade_id` + `idea_posted` or `quote_id` + `spec`, `alias`, `contracts`, `limit` | Builds the order, sends it to `/orders/preview`, stores the ticket (`previewed` if Schwab accepted it, else `refused`; good for `ticket_ttl_sec` 120) and publishes the ticket view. A repeated `ticket_id` is ignored |
 | `place` | `ticket_id` | Sends a `previewed` ticket once: mode `live`, the regular session, not expired, the order unchanged (a digest), the size inside the ceilings. Claimed with one conditional UPDATE, then ONE POST to `/orders/place`. Ends `sent`, `rejected` or `unknown` (settled by listing the account's orders: exactly one match on legs and price) |
-| `status` | `ticket_id` | Expires a stale preview, settles an `unknown`, or reads a `sent` order's Schwab status; republishes the ticket view |
+| `status` | `ticket_id` | Expires a stale preview, settles an `unknown`, or reads a `sent` order's Schwab status; republishes the ticket view and the day's list |
+| `cancel` | `ticket_id` | (Phase 3) Reads the ticket's order from Schwab and, only when Schwab says `cancelable`, sends ONE `DELETE /orders/{hash}/{order_id}`. Refused while the mode is `off` or for a ticket that is not `sent`; any hour. The outcome is the ticket view's `error` line ("Cancel sent", "Schwab refused the cancel", "No answer"), with Schwab's status read again |
+| `today` | none | (Phase 3) Reads each open ticket sent since midnight Central from Schwab and publishes the day's list |
 
 **Views** (24-hour TTL):
 
 | Key | Holds |
 |---|---|
 | `cache:live_order:quote:<trade_id or quote_id>` | `mode`, `aliases`, `in_session`, `symbol`, `structure`, `strategy`, `expiration`, `expirations[]`, `price_source` (`idea` or `panel`), `debit`, `posted_price`, `legs[]` (each with its `mid`), `live_price`, `max_loss_per_contract`, `max_profit_per_contract` (`null` when unbounded, or with two expiries when it depends on volatility), `default_contracts`, `drift_pct`, `drift_warn`, `exits` (`target`, `stop`, `stop_on_order`, `exit_tif`, `pcts`); `error` when it could not be priced |
-| `cache:live_order:ticket:<ticket_id>` | `status`, `alias`, `contracts`, `limit`, `max_loss`, `verdict`, `messages[]`, `legs[]` (instruction, quantity, option symbol), `expires_epoch`, `order_id`, `order_status`, `error`, `exits`, `in_session` |
+| `cache:live_order:ticket:<ticket_id>` | `status`, `alias`, `contracts`, `limit`, `max_loss`, `verdict`, `messages[]`, `legs[]` (instruction, quantity, option symbol), `expires_epoch`, `order_id`, `order_status`, `error`, `exits`, `in_session`, `can_cancel` |
+| `cache:live_order:today` | `checked_at`, `mode`, `orders[]`: each `ticket_id`, `alias`, `symbol`, `structure`, `contracts`, `limit`, `debit`, `max_loss`, `status`, `order_id`, `order_status`, `sent_at`, `error`, `can_cancel` (newest first, at most 50) |
 
 ⚠ Neither view carries an account number or hash: the alias is looked up to a hash in the
 service on each send (`[[accounts]]` in the operator's `config/local/live_orders.toml`), and
@@ -1354,6 +1357,7 @@ missing header, **401**. `proxy_client._apply_secret(session)` attaches it. See
 | `/orders/preview` | POST `{account_hash, order}` | Schwab's `previewOrder` answer, with Schwab's status code: it CHECKS the order and places nothing. **403** unless `config/live_orders.toml mode` is `preview` or `live` (read per request); **400** for a bad hash or an order over 16 KB |
 | `/orders/place` | POST `{account_hash, order}` | PLACES the order: `{order_id, unknown, error}` with Schwab's status code. ONE attempt, never retried; a timeout, a 5xx or a 201 with no order id in `Location` sets `unknown: true` (settle it by listing the orders, never by sending again). **403** unless the mode is `live`; **400** as above. Its one caller is `options_svc` (`cmd:live_order place`) |
 | `/orders/{account_hash}/{order_id}` | GET | Schwab's order (its `status`, legs, fills); **400** for an id that is not digits |
+| `/orders/{account_hash}/{order_id}` | DELETE | CANCELS the order (`trader_cancel`): `{cancelled, error}`, `cancelled` true, false (Schwab refused) or null (no answer). ONE attempt. **403** only while the mode is `off`, so it still works in `preview`; **400** for a bad hash or id. Its one caller is `options_svc` (`cmd:live_order cancel`) |
 | `/orders/{account_hash}` | GET (`from_time, to_time`, ISO UTC) | The account's orders entered in that window; how an `unknown` place is settled |
 
 ## Trade-stream tracker

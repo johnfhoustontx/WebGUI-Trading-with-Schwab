@@ -165,6 +165,19 @@ def update(ticket_id: str, db_path=None, **fields) -> None:
         conn.close()
 
 
+def sent_since(epoch: float, limit: int = 50, db_path=None) -> list:
+    """Tickets sent toward Schwab at or after ``epoch`` (``sent_at`` set:
+    ``sending``, ``sent``, ``unknown``, ``rejected``), newest first."""
+    conn = connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT * FROM tickets WHERE sent_at IS NOT NULL AND sent_at >= ? "
+            "ORDER BY sent_at DESC LIMIT ?", (epoch, int(limit))).fetchall()
+        return [_row(r) for r in rows]
+    finally:
+        conn.close()
+
+
 def expire_stale(now: float, db_path=None) -> int:
     """Mark every previewed ticket past its time as expired. Returns how many."""
     conn = connect(db_path)

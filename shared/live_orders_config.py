@@ -75,6 +75,13 @@ def place_allowed() -> bool:
     return mode() == "live"
 
 
+def cancel_allowed() -> bool:
+    """Whether the proxy may CANCEL an order the app sent: whenever live orders
+    are not off. Turning ``live`` back to ``preview`` stops new orders and must
+    leave the way to pull one already working (Phase 3)."""
+    return mode() in ("preview", "live")
+
+
 def _number(key):
     raw = load().get(key)
     lo, hi = _RANGES[key]

@@ -1172,6 +1172,7 @@ _TAB_COLOR = {
     "/portfolio": "#9ccc65",             # Portfolio — light green
     "/eod": "#78909c",                   # EOD Report — blue grey
     "/send-order": "#66bb6a",            # Send Live Order — the Ledger's green
+    "/live-orders": "#66bb6a",           # Today's Live Orders — the same green
     "/x": "#1d9bf0",                     # Post to X — X blue
     # Parchment: a pale, low-saturation tan. Every other colour in this map is
     # a saturated Material hue or a blue grey, so a paper colour is the one
@@ -2729,6 +2730,16 @@ def send_order_page(request: Request, trade: str | None = None,
     with _layout("/options/paper", "Send Live Order"):
         from pages import send_order
         send_order.render(trade, _client_ip(request), spec)
+
+
+@_page("/live-orders")
+def live_orders_page() -> None:
+    # Today's live orders and their Cancel (live-order design, Phase 3). No
+    # parameters: nothing a stranger types reaches it. Private only: never in
+    # live_screens.
+    with _layout("/options/paper", "Today's Live Orders"):
+        from pages import live_orders
+        live_orders.render()
 
 
 @_page("/x")

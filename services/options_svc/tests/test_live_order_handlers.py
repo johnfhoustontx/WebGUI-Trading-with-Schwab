@@ -1,4 +1,4 @@
-"""cmd:live_order: a trade -> a Schwab order (live-order design, Phases 1-2).
+"""cmd:live_order: a trade -> a Schwab order (live-order design, Phases 1-3).
 
 Nothing here reaches the network or a real store: the proxy is a fake answering
 from a table, the Ledger row is handed in, and the ticket store is a temp file.
@@ -65,7 +65,8 @@ class FakeProxy:
         self.calls = []
         self.place = (201, {"order_id": "9001", "unknown": False, "error": None})
         self.listed = []
-        self.order = {"status": "WORKING"}
+        self.order = {"status": "WORKING", "cancelable": True}
+        self.cancel = (200, {"cancelled": True, "error": None})
 
     def get(self, path, params=None, *, timeout):
         self.calls.append(("GET", path, params))
@@ -93,6 +94,15 @@ class FakeProxy:
             return self.place
         return 404, {"detail": "no route"}
 
+    def delete(self, path, *, timeout):
+        self.calls.append(("DELETE", path, None))
+        if isinstance(self.cancel, Exception):
+            raise self.cancel
+        return self.cancel
+
+    def deletes(self):
+        return [c for c in self.calls if c[0] == "DELETE"]
+
     def posts(self, path):
         return [c for c in self.calls if c[0] == "POST" and c[1] == path]
 
@@ -111,6 +121,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(live_orders_config, "load", lambda: cfg)
     monkeypatch.setattr(h, "_get", proxy.get)
     monkeypatch.setattr(h, "_post", proxy.post)
+    monkeypatch.setattr(h, "_delete", proxy.delete)
     monkeypatch.setattr(h, "_ledger_row", lambda tid: rows.get(tid))
     monkeypatch.setattr(h, "_now", lambda: clock["now"])
     monkeypatch.setattr(h, "_exit_settings", lambda: {
@@ -361,6 +372,98 @@ def test_status_expires_an_old_preview(env):
     assert store.get(TID)["status"] == "expired"
 
 
+# ── cancel (Phase 3) ─────────────────────────────────────────────────────────
+
+def _cancel(env, ticket_id=TID):
+    h.handle(env.bus, _cmd("cancel", {"ticket_id": ticket_id}, base=env.clock["now"]))
+    return env.bus.views.get(live_order.ticket_key(ticket_id))
+
+
+def test_cancel_deletes_the_tickets_own_order_once(env):
+    _preview(env)
+    _place(env)
+    assert env.bus.views[live_order.ticket_key(TID)]["can_cancel"] is True
+    v = _cancel(env)
+    assert env.proxy.deletes() == [("DELETE", "/orders/HASH-1191/9001", None)]
+    assert "Cancel sent" in v["error"]
+    _no_account_digits(v)
+
+
+def test_cancel_reads_schwab_first_and_sends_nothing_when_it_cannot(env):
+    _preview(env)
+    _place(env)
+    env.proxy.order = {"status": "FILLED", "cancelable": False}
+    v = _cancel(env)
+    assert env.proxy.deletes() == []
+    assert "FILLED" in v["error"] and v["order_status"] == "FILLED"
+    assert v["can_cancel"] is False
+
+
+@pytest.mark.parametrize("setup, said", [
+    (lambda env: None, "no such ticket"),
+    (lambda env: _preview(env), "previewed"),
+    (lambda env: (_preview(env), env.cfg.update(mode="off")), "off"),
+])
+def test_cancel_refusals_send_nothing(env, setup, said):
+    setup(env)
+    v = _cancel(env)
+    assert env.proxy.deletes() == []
+    assert said in v["error"]
+
+
+def test_cancel_works_after_live_is_turned_back_to_preview(env):
+    _preview(env)
+    _place(env)
+    env.cfg["mode"] = "preview"
+    _cancel(env)
+    assert len(env.proxy.deletes()) == 1
+
+
+@pytest.mark.parametrize("answer, said", [
+    ((400, {"cancelled": False, "error": "not cancelable"}), "refused the cancel"),
+    (requests.ConnectionError("down"), "No answer"),
+    ((503, {"cancelled": None, "error": "x"}), "No answer"),
+])
+def test_a_cancel_that_did_not_take_says_so(env, answer, said):
+    _preview(env)
+    _place(env)
+    env.proxy.cancel = answer
+    v = _cancel(env)
+    assert said in v["error"]
+    assert len(env.proxy.deletes()) == 1
+
+
+# ── today's orders (Phase 3) ─────────────────────────────────────────────────
+
+def test_today_lists_the_days_sent_orders_by_alias(env):
+    _preview(env)
+    _place(env)
+    _preview(env, ticket_id="b" * 32, contracts=1)              # previewed, never sent
+    env.proxy.order = {"status": "FILLED"}
+    h.handle(env.bus, _cmd("today", {}, base=env.clock["now"]))
+    view = env.bus.views[live_order.TODAY_KEY]
+    (row,) = view["orders"]
+    assert row["ticket_id"] == TID and row["alias"] == "Trading account"
+    assert row["order_status"] == "FILLED" and row["can_cancel"] is False
+    assert row["contracts"] == 2 and row["structure"] == "VERTICAL"
+    _no_account_digits(view)
+    assert "HASH" not in json.dumps(view)
+
+
+def test_today_starts_at_midnight_central(env):
+    _preview(env)
+    _place(env)
+    env.clock["now"] = NOW + 24 * 3600
+    h.handle(env.bus, _cmd("today", {}, base=env.clock["now"]))
+    assert env.bus.views[live_order.TODAY_KEY]["orders"] == []
+
+
+def test_a_send_republishes_the_days_list(env):
+    _preview(env)
+    _place(env)
+    assert [r["ticket_id"] for r in env.bus.views[live_order.TODAY_KEY]["orders"]] == [TID]
+
+
 # ── the age gate ─────────────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("cmd", [
@@ -397,7 +500,7 @@ def test_it_writes_only_its_own_views():
     assert sets == ["key"]                                       # inside _publish
     published = {ast.unparse(n.args[1]) for n in ast.walk(tree)
                  if isinstance(n, ast.Call) and getattr(n.func, "id", None) == "_publish"}
-    assert published == {"key"}
+    assert published == {"key", "live_order.TODAY_KEY"}
     keys = {ast.unparse(n.value) for n in ast.walk(tree)
             if isinstance(n, ast.Assign) and any(getattr(t, "id", None) == "key"
                                                  for t in n.targets)}

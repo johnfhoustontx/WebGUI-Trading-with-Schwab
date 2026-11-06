@@ -205,6 +205,8 @@ PHASE_8_FILES = ["status.py", "settings.py", "terminate.py", "manuals.py",
                  "x_post.py",
                  # Send a trade idea to ThinkorSwim (live orders, Phase 1).
                  "send_order.py", "idea_banner.py",
+                 # ... and today's live orders (Phase 3).
+                 "live_orders.py",
                  # The site Blog's page: upload, preview, publish.
                  "blog.py",
                  # Market News - the pure facts module, and its page.

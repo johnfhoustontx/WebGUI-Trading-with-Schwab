@@ -1265,9 +1265,77 @@ def place_order(body: Dict[str, Any]):
                         content={k: result[k] for k in ("order_id", "unknown", "error")})
 
 
+#: The ONE brokerage endpoint that CANCELS an order, used only by
+#: :func:`trader_cancel` and only while ``config/live_orders.toml mode`` is not off.
+CANCEL_ENDPOINT = "/accounts/{account_hash}/orders/{order_id}"
+
+
+def trader_cancel(account_hash: str, order_id: str) -> dict:
+    """CANCEL one working order: ``DELETE /accounts/{hash}/orders/{order_id}``.
+
+    Design: docs/plans/2026-11-05-live-order-to-thinkorswim-design.md (Phase 3).
+    Only the options service calls this, through ``DELETE /orders/{hash}/{id}``,
+    for an order a ticket of its own sent. A cancel removes risk and places
+    nothing, but it is still a write: ONE attempt (a 401 refreshes the token and
+    asks once more). No answer is ``unknown``: the caller reads the order to
+    learn what happened, and the operator may ask again.
+
+    Returns ``{"status_code", "cancelled", "error"}``; ``cancelled`` is True,
+    False (Schwab refused, e.g. the order already filled) or None (no answer).
+    """
+    if not isinstance(account_hash, str) or not _ACCOUNT_HASH_RE.match(account_hash):
+        raise ValueError("account_hash is not a Schwab account hash")
+    if not isinstance(order_id, str) or not _ORDER_ID_RE.match(order_id):
+        raise ValueError("order_id is not a Schwab order id")
+    token_mgr.ensure_valid_token()
+    url = SCHWAB_TRADER_URL + CANCEL_ENDPOINT.format(account_hash=account_hash,
+                                                     order_id=order_id)
+    headers = {"Authorization": f'Bearer {token_mgr.tokens["AccessToken"]}',
+               "Accept": "application/json"}
+    session = token_mgr.session
+    try:
+        api_call_counter.record()
+        resp = session.delete(url, headers=headers, timeout=30)
+        if resp.status_code == 401:
+            logger.warning("cancel order 401 - refreshing token and asking once more")
+            with token_mgr._lock:
+                token_mgr._refresh()
+            headers["Authorization"] = f'Bearer {token_mgr.tokens["AccessToken"]}'
+            api_call_counter.record()
+            resp = session.delete(url, headers=headers, timeout=30)
+    except requests.exceptions.RequestException as e:
+        logger.error("cancel order: no answer from Schwab (%s)", type(e).__name__)
+        return {"status_code": 502, "cancelled": None,
+                "error": f"no answer from Schwab: {str(e)[:300]}"}
+    logger.info("cancel order answered %s", resp.status_code)
+    if resp.status_code in (200, 201, 204):
+        return {"status_code": 200, "cancelled": True, "error": None}
+    return {"status_code": resp.status_code,
+            "cancelled": None if resp.status_code >= 500 else False,
+            "error": (resp.text or "")[:2000]}
+
+
 def _account_hash_or_400(account_hash):
     if not isinstance(account_hash, str) or not _ACCOUNT_HASH_RE.match(account_hash):
         raise HTTPException(status_code=400, detail="not a Schwab account hash")
+
+
+@app.delete("/orders/{account_hash}/{order_id}", dependencies=[Depends(require_account_secret)])
+def cancel_order(account_hash: str, order_id: str):
+    """CANCEL one working order: ``{"cancelled", "error"}`` with Schwab's status.
+
+    Refused (403) while ``config/live_orders.toml mode = "off"``, read on this
+    request. It works in ``preview`` as well as ``live``: switching live off
+    must not take away the way to pull an order the app already sent."""
+    if not _live_orders_config.cancel_allowed():
+        raise HTTPException(status_code=403,
+                            detail='live orders are off (config/live_orders.toml mode)')
+    try:
+        result = trader_cancel(account_hash, order_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return JSONResponse(status_code=result["status_code"],
+                        content={k: result[k] for k in ("cancelled", "error")})
 
 
 @app.get("/orders/{account_hash}/{order_id}", dependencies=[Depends(require_account_secret)])

@@ -2131,7 +2131,22 @@ depends on the far leg's volatility at the near expiry*: no fixed number exists.
 
 If Schwab's answer never comes back, the order is **not sent again**: the page says
 *No answer from Schwab*, and the app looks for it in the account's orders and
-reports what it finds. Cancel or change a working order in ThinkorSwim.
+reports what it finds.
+
+**Cancelling it.** While the opening order is still working, the ticket shows
+**Cancel order**. After a confirmation, the app first asks Schwab whether the order
+can still be cancelled, and cancels it only if so. This works whenever live orders
+are not `off`, so switching `live` back to `preview` still lets you pull an order.
+Once the opening order has filled, its take-profit (and a single option's stop) are
+orders of their own: change or cancel those in ThinkorSwim.
+
+**Today's live orders** (the ticket's *Today's live orders* button, or `/live-orders`)
+lists every order the app sent since midnight Central: the time, the account by
+name, the structure, the size and limit, and Schwab's status, refreshed every few
+seconds while one is still working. Each working order has its own **Cancel order**.
+
+A **covered call** is not sent from the app (the operator's choice, 2026-11-05: its
+risk is the whole stock): use the paste text.
 
 ### Using the checklist to pick a trade
 

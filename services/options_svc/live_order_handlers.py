@@ -4,7 +4,7 @@ Design: docs/plans/2026-11-05-live-order-to-thinkorswim-design.md (Phases 1-2).
 This is that stream's handler (``make_app``'s ``extra_consumers``), on a thread
 of its own. It is never on ``cmd:options``' table or its slow lane.
 
-Four commands, each answered on a cache view the ticket page watches:
+Six commands, each answered on a cache view a page watches:
 
 * ``quote`` ``{trade_id}`` or ``{quote_id, spec}``: the trade's legs priced
   from a chain fetched FRESH (``maxAge=0``), with the default size, the max
@@ -18,6 +18,11 @@ Four commands, each answered on a cache view the ticket page watches:
   sends, after claiming the ticket ``previewed -> sending`` in one conditional
   UPDATE (``live_order_store.claim``).
 * ``status`` ``{ticket_id}``: Schwab's state of a sent order.
+* ``cancel`` ``{ticket_id}`` (Phase 3): cancels the opening order of a ticket
+  this app sent, after Schwab's own order says it can be cancelled. Never while
+  live orders are off; any hour.
+* ``today`` ``{}`` (Phase 3): every ticket sent since midnight Central, each
+  open one read from Schwab first -> ``live_order.TODAY_KEY``.
 
 **Replay.** A fresh consumer group replays its stream's backlog on its first
 launch. Three guards, each enough on its own: a command older than
@@ -69,6 +74,8 @@ _CALLER = "options_svc.live_order"
 #: Seconds the service waits for the proxy. The place call's own Schwab timeout
 #: is 30 s; past this the outcome is unknown, never a failure.
 _TIMEOUT = {"chain": 30, "accounts": 20, "preview": 45, "place": 45, "read": 20}
+#: The most tickets the day's list carries (a day has a handful).
+_TODAY_MAX = 50
 #: The views stay this long: a ticket is a record the page may reopen today.
 _VIEW_TTL_SEC = 24 * 3600
 #: How far either side of the send the order list is searched for an order whose
@@ -104,6 +111,16 @@ def _get(path, params=None, *, timeout):
 def _post(path, body, *, timeout):
     """``(status, json-or-text)`` of a POST to the proxy. Raises on no answer."""
     r = _session().post(f"{PROXY_URL}{path}", json=body, timeout=timeout)
+    try:
+        return r.status_code, r.json()
+    except ValueError:
+        return r.status_code, r.text
+
+
+def _delete(path, *, timeout):
+    """``(status, json-or-text)`` of a DELETE to the proxy (the cancel route
+    only). Raises on no answer."""
+    r = _session().delete(f"{PROXY_URL}{path}", timeout=timeout)
     try:
         return r.status_code, r.json()
     except ValueError:
@@ -344,6 +361,7 @@ def _ticket_view(t, extra=None) -> dict:
     view["expires_at"] = _iso(t.get("expires_at"))
     view["sent_at"] = _iso(t.get("sent_at"))
     view["expires_epoch"] = t.get("expires_at")
+    view["can_cancel"] = live_order.offers_cancel(t.get("status"), t.get("order_status"))
     payload = t.get("payload") or {}
     view["legs"] = [{"instruction": l.get("instruction"), "quantity": l.get("quantity"),
                      "symbol": (l.get("instrument") or {}).get("symbol")}
@@ -589,9 +607,41 @@ def _place(bus, args) -> None:
     else:
         log.warning("live_order: ticket %s %s", ticket_id, fields["status"])
     _publish(bus, key, _ticket_view(store.get(ticket_id)))
+    _publish_today(bus)
 
 
 # ── status ───────────────────────────────────────────────────────────────────
+
+def _read_order(t):
+    """Schwab's own JSON for a sent ticket's order, or None. A READ."""
+    try:
+        status, order = _get(f"/orders/{t['account_hash']}/{t['order_id']}",
+                             timeout=_TIMEOUT["read"])
+    except requests.RequestException:
+        return None
+    return order if status == 200 and isinstance(order, dict) else None
+
+
+def _refresh(t):
+    """Bring one ticket up to date with Schwab and return it as stored: expire a
+    stale preview, settle an ``unknown``, or read a sent order's status. Reads
+    only; nothing is ever sent again."""
+    ticket_id = t["ticket_id"]
+    if t["status"] == "previewed" and t["expires_at"] <= _now():
+        store.update(ticket_id, status="expired", updated_at=_now())
+    elif t["status"] == "unknown":
+        found = _reconcile(t)
+        if found:
+            store.update(ticket_id, status="sent", order_id=found, updated_at=_now(),
+                         error="Schwab's answer never came back; the order was found "
+                               "in the account")
+    elif t["status"] == "sent" and t.get("order_id") \
+            and not live_order.order_is_final(t.get("order_status")):
+        order = _read_order(t)
+        if order is not None and isinstance(order.get("status"), str):
+            store.update(ticket_id, order_status=order["status"][:40], updated_at=_now())
+    return store.get(ticket_id)
+
 
 def _status(bus, args) -> None:
     ticket_id = args.get("ticket_id")
@@ -602,26 +652,109 @@ def _status(bus, args) -> None:
     t = store.get(ticket_id)
     if t is None:
         return
-    if t["status"] == "previewed" and t["expires_at"] <= _now():
-        store.update(ticket_id, status="expired", updated_at=_now())
-    elif t["status"] == "unknown":
-        found = _reconcile(t)
-        if found:
-            store.update(ticket_id, status="sent", order_id=found, updated_at=_now(),
-                         error="Schwab's answer never came back; the order was found "
-                               "in the account")
-    elif t["status"] == "sent" and t.get("order_id"):
-        try:
-            status, order = _get(f"/orders/{t['account_hash']}/{t['order_id']}",
-                                 timeout=_TIMEOUT["read"])
-        except requests.RequestException:
-            status, order = None, None
-        if status == 200 and isinstance(order, dict) and isinstance(order.get("status"), str):
-            store.update(ticket_id, order_status=order["status"][:40], updated_at=_now())
-    _publish(bus, key, _ticket_view(store.get(ticket_id)))
+    _publish(bus, key, _ticket_view(_refresh(t)))
+    _publish_today(bus)
 
 
-_COMMANDS = {"quote": _quote, "preview": _preview, "place": _place, "status": _status}
+# ── cancel (Phase 3) ─────────────────────────────────────────────────────────
+
+def _cancel(bus, args) -> None:
+    """Cancel the opening order of a ticket THIS app sent, while Schwab still
+    says it can be cancelled. Any hour, in ``preview`` or ``live`` (never while
+    off). Once the opening order has filled, its exits are working orders of
+    their own and are managed in ThinkorSwim."""
+    ticket_id = args.get("ticket_id")
+    try:
+        key = live_order.ticket_key(ticket_id)
+    except ValueError:
+        log.warning("live_order cancel: bad ticket id ignored")
+        return
+    t = store.get(ticket_id)
+    if t is None:
+        _publish(bus, key, _refusal_view(ticket_id, "no such ticket"))
+        return
+    reason = None
+    order = None
+    if not live_orders_config.cancel_allowed():
+        reason = "live orders are off (Settings, Configuration, Live orders)"
+    elif t["status"] != "sent" or not t.get("order_id"):
+        reason = f"this ticket is {t['status']}: there is no order of it to cancel"
+    else:
+        order = _read_order(t)
+        if order is None:
+            reason = "Schwab's order could not be read; try again"
+        elif order.get("cancelable") is not True:
+            reason = (f"Schwab says the order is {str(order.get('status') or 'not working')}"
+                      " and cannot be cancelled")
+    if order is not None and isinstance(order.get("status"), str):
+        store.update(ticket_id, order_status=order["status"][:40], updated_at=_now())
+    if reason is not None:
+        _publish(bus, key, _ticket_view(store.get(ticket_id), {"error": reason}))
+        _publish_today(bus)
+        return
+    try:
+        status, answer = _delete(f"/orders/{t['account_hash']}/{t['order_id']}",
+                                 timeout=_TIMEOUT["place"])
+    except requests.RequestException:
+        status, answer = None, {"cancelled": None, "error": "no answer from the proxy"}
+    answer = live_order.scrub(answer) if isinstance(answer, dict)         else {"error": str(answer)[:300]}
+    cancelled = answer.get("cancelled")
+    after = _read_order(t)
+    if after is not None and isinstance(after.get("status"), str):
+        store.update(ticket_id, order_status=after["status"][:40], updated_at=_now())
+    if cancelled is True:
+        note = "Cancel sent to Schwab."
+        log.info("live_order: ticket %s order cancel accepted (%s)", ticket_id, t["alias"])
+    elif cancelled is False or (status is not None and 400 <= status < 500):
+        note = ("Schwab refused the cancel: "
+                + str(answer.get("error") or answer.get("detail") or status)[:300])
+        log.warning("live_order: ticket %s cancel refused (%s)", ticket_id, status)
+    else:
+        note = ("No answer to the cancel. Check the order's status below or in "
+                "ThinkorSwim before asking again.")
+        log.warning("live_order: ticket %s cancel unanswered", ticket_id)
+    _publish(bus, key, _ticket_view(store.get(ticket_id), {"error": note}))
+    _publish_today(bus)
+
+
+# ── today's orders (Phase 3) ─────────────────────────────────────────────────
+
+def _day_start(now):
+    """The epoch of midnight Central on ``now``'s date."""
+    day = _dt.datetime.fromtimestamp(now, _CT).date()
+    return _dt.datetime.combine(day, _dt.time(0), tzinfo=_CT).timestamp()
+
+
+def _today_row(t) -> dict:
+    """One sent ticket as a row of the day's list: alias only, never a hash."""
+    return {"ticket_id": t["ticket_id"], "alias": t.get("alias"), "symbol": t.get("symbol"),
+            "structure": t.get("structure"), "contracts": t.get("contracts"),
+            "limit": t.get("limit_price"), "debit": bool(t.get("debit")),
+            "max_loss": t.get("max_loss"), "status": t.get("status"),
+            "order_id": t.get("order_id"), "order_status": t.get("order_status"),
+            "sent_at": _iso(t.get("sent_at")), "error": t.get("error"),
+            "can_cancel": live_order.offers_cancel(t.get("status"), t.get("order_status"))}
+
+
+def _publish_today(bus, refresh=False) -> None:
+    """Publish ``live_order.TODAY_KEY``: every ticket sent toward Schwab since
+    midnight Central, newest first. ``refresh`` reads each open one first."""
+    now = _now()
+    rows = []
+    for t in store.sent_since(_day_start(now), _TODAY_MAX):
+        if refresh:
+            t = _refresh(t)
+        rows.append(_today_row(t))
+    _publish(bus, live_order.TODAY_KEY, {
+        "checked_at": _iso(now), "mode": live_orders_config.mode(), "orders": rows})
+
+
+def _list_today(bus, args) -> None:
+    _publish_today(bus, refresh=True)
+
+
+_COMMANDS = {"quote": _quote, "preview": _preview, "place": _place, "status": _status,
+             "cancel": _cancel, "today": _list_today}
 
 
 def handle(bus, command) -> None:

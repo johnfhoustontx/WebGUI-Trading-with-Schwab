@@ -2803,7 +2803,7 @@ off is not a failed options service.</p>
 is readable by the public process, so no public page may read these keys. A reader must not
 fall back to another symbol's chain: a stale capture is labelled, never shown as current.</p>
 <h3 id="live-orders-to-thinkorswim-cmdlive_order">Live orders to ThinkorSwim (<code>cmd:live_order</code>)</h3>
-<p>A trade can be sent to the Schwab account as a real order (Phases 1-2 of the
+<p>A trade can be sent to the Schwab account as a real order, and cancelled while it works (Phases 1-3 of the
 <a href="../../plans/2026-11-05-live-order-to-thinkorswim-design.md">design</a>): a single option, a
 vertical, an iron condor, a straddle, a strangle, a butterfly, a condor, a calendar, a
 diagonal, or any other all-option mix as <code>CUSTOM</code> (<code>live_order.SENDABLE_TYPES</code>). The page
@@ -2850,7 +2850,17 @@ no time or is older than <code>max_command_age_sec</code> (30).</p>
 <tr>
 <td><code>status</code></td>
 <td><code>ticket_id</code></td>
-<td>Expires a stale preview, settles an <code>unknown</code>, or reads a <code>sent</code> order's Schwab status; republishes the ticket view</td>
+<td>Expires a stale preview, settles an <code>unknown</code>, or reads a <code>sent</code> order's Schwab status; republishes the ticket view and the day's list</td>
+</tr>
+<tr>
+<td><code>cancel</code></td>
+<td><code>ticket_id</code></td>
+<td>(Phase 3) Reads the ticket's order from Schwab and, only when Schwab says <code>cancelable</code>, sends ONE <code>DELETE /orders/{hash}/{order_id}</code>. Refused while the mode is <code>off</code> or for a ticket that is not <code>sent</code>; any hour. The outcome is the ticket view's <code>error</code> line ("Cancel sent", "Schwab refused the cancel", "No answer"), with Schwab's status read again</td>
+</tr>
+<tr>
+<td><code>today</code></td>
+<td>none</td>
+<td>(Phase 3) Reads each open ticket sent since midnight Central from Schwab and publishes the day's list</td>
 </tr>
 </tbody>
 </table>
@@ -2869,7 +2879,11 @@ no time or is older than <code>max_command_age_sec</code> (30).</p>
 </tr>
 <tr>
 <td><code>cache:live_order:ticket:&lt;ticket_id&gt;</code></td>
-<td><code>status</code>, <code>alias</code>, <code>contracts</code>, <code>limit</code>, <code>max_loss</code>, <code>verdict</code>, <code>messages[]</code>, <code>legs[]</code> (instruction, quantity, option symbol), <code>expires_epoch</code>, <code>order_id</code>, <code>order_status</code>, <code>error</code>, <code>exits</code>, <code>in_session</code></td>
+<td><code>status</code>, <code>alias</code>, <code>contracts</code>, <code>limit</code>, <code>max_loss</code>, <code>verdict</code>, <code>messages[]</code>, <code>legs[]</code> (instruction, quantity, option symbol), <code>expires_epoch</code>, <code>order_id</code>, <code>order_status</code>, <code>error</code>, <code>exits</code>, <code>in_session</code>, <code>can_cancel</code></td>
+</tr>
+<tr>
+<td><code>cache:live_order:today</code></td>
+<td><code>checked_at</code>, <code>mode</code>, <code>orders[]</code>: each <code>ticket_id</code>, <code>alias</code>, <code>symbol</code>, <code>structure</code>, <code>contracts</code>, <code>limit</code>, <code>debit</code>, <code>max_loss</code>, <code>status</code>, <code>order_id</code>, <code>order_status</code>, <code>sent_at</code>, <code>error</code>, <code>can_cancel</code> (newest first, at most 50)</td>
 </tr>
 </tbody>
 </table>
@@ -3735,6 +3749,11 @@ missing header, <strong>401</strong>. <code>proxy_client._apply_secret(session)<
 <td><code>/orders/{account_hash}/{order_id}</code></td>
 <td>GET</td>
 <td>Schwab's order (its <code>status</code>, legs, fills); <strong>400</strong> for an id that is not digits</td>
+</tr>
+<tr>
+<td><code>/orders/{account_hash}/{order_id}</code></td>
+<td>DELETE</td>
+<td>CANCELS the order (<code>trader_cancel</code>): <code>{cancelled, error}</code>, <code>cancelled</code> true, false (Schwab refused) or null (no answer). ONE attempt. <strong>403</strong> only while the mode is <code>off</code>, so it still works in <code>preview</code>; <strong>400</strong> for a bad hash or id. Its one caller is <code>options_svc</code> (<code>cmd:live_order cancel</code>)</td>
 </tr>
 <tr>
 <td><code>/orders/{account_hash}</code></td>

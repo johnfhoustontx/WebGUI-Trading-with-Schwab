@@ -1416,8 +1416,10 @@ engine's positions live on **Paper Account**.
   check the order and places nothing; **Send** then places it, in the regular
   session only, after your authenticator code once a day and a last confirm. A
   spread goes in without its stop (Schwab refuses one on a spread): set the stop
-  in ThinkorSwim. The Ledger row is not changed by the real order. Off until
-  Settings -> Configuration -> *Live orders* is set to live.
+  in ThinkorSwim. While the opening order is still working the ticket offers
+  **Cancel order**, and its *Today's live orders* button lists every order sent
+  today with Schwab's status. The Ledger row is not changed by the real order.
+  Off until Settings -> Configuration -> *Live orders* is set to live.
 - Use it to test ideas from the Market Scanner without risk.
 """,
     "/options/captured": """

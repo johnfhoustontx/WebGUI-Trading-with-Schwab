@@ -19,6 +19,7 @@ def test_it_ships_off_and_with_no_accounts():
     assert cfg.DEFAULTS["mode"] == "off"
     assert cfg.mode() == "off"
     assert cfg.preview_allowed() is False and cfg.place_allowed() is False
+    assert cfg.cancel_allowed() is False
     assert "accounts" not in cfg.DEFAULTS
     assert cfg.accounts() == [] and cfg.aliases() == []
 
@@ -30,6 +31,8 @@ def test_each_mode(monkeypatch, mode, preview, place):
     assert cfg.mode() == mode
     assert cfg.preview_allowed() is preview
     assert cfg.place_allowed() is place
+    # A cancel pulls an order already sent: allowed whenever not off (Phase 3).
+    assert cfg.cancel_allowed() is preview
 
 
 def test_anything_but_an_exact_mode_is_off(monkeypatch):
@@ -37,6 +40,7 @@ def test_anything_but_an_exact_mode_is_off(monkeypatch):
         monkeypatch.setattr(cfg, "load", lambda bad=bad: {"mode": bad})
         assert cfg.mode() == "off", bad
         assert cfg.place_allowed() is False and cfg.preview_allowed() is False, bad
+        assert cfg.cancel_allowed() is False, bad
 
 
 def test_the_limits_default_and_bad_values_fall_back(monkeypatch):

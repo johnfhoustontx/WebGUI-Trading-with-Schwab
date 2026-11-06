@@ -73,3 +73,12 @@ def test_the_journal_is_never_excluded_from_the_backup():
     import backup_local
     rel = repo_paths.LIVE_ORDERS_DB.relative_to(repo_paths.REPO_ROOT).as_posix()
     assert not any(rel == x or rel.startswith(x + "/") for x in backup_local.DB_EXCLUDE)
+
+
+def test_sent_since_lists_what_went_to_schwab_newest_first(db):
+    store.insert(_ticket(), db_path=db)                                   # never sent
+    store.insert(_ticket(ticket_id="t2", status="sent", sent_at=150.0), db_path=db)
+    store.insert(_ticket(ticket_id="t3", status="unknown", sent_at=170.0), db_path=db)
+    store.insert(_ticket(ticket_id="t4", status="sent", sent_at=50.0), db_path=db)
+    assert [t["ticket_id"] for t in store.sent_since(100.0, db_path=db)] == ["t3", "t2"]
+    assert [t["ticket_id"] for t in store.sent_since(0.0, limit=1, db_path=db)] == ["t3"]

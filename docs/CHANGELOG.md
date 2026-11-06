@@ -4,7 +4,30 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-05 (**Live orders, Phase 2: every structure, and a Send Live Order button on every Trade detail panel.**)
+**Last updated:** 2026-11-05 (**Live orders, Phase 3: cancel a working order from the app, and a list of today's live orders.** Covered calls left out, the operator's choice.)
+
+- **The proxy's third brokerage write**: `DELETE /orders/{hash}/{order_id}` ->
+  `trader_cancel`, one attempt, behind the account secret, refused only while
+  `live_orders.toml mode = "off"` (`cancel_allowed()`), so turning `live` back to
+  `preview` still lets a working order be pulled. `test_account_surface.py` pins one
+  caller and one `session.delete`.
+- **`cmd:live_order` gains `cancel` and `today`.** A cancel acts only on a ticket the
+  app sent, after Schwab's own order says `cancelable`; it cancels the opening order,
+  and a filled order's exits stay in ThinkorSwim. `today` publishes
+  `cache:live_order:today` (alias only): every ticket sent since midnight Central,
+  each open one read from Schwab first. A send, a status read and a cancel republish
+  it. `live_order_store.sent_since`; no schema change.
+- **The pages.** The ticket shows **Cancel order** (with a confirm, no authenticator
+  code) while Schwab has not finished the order, and a **Today's live orders** button
+  to a new private page, `/live-orders` (`pages/live_orders.py`), with a Cancel per
+  working order.
+- **Covered calls are not sent from the app.** Their loss (the stock to zero) is far
+  past the $5,000 ceiling; offered their own ceiling, the same one or none, the
+  operator chose none.
+- Checked in the page harness (the list, the cancel confirm, the command enqueued).
+  No cancel has been sent to Schwab yet.
+
+**Prior —** 2026-11-05 (**Live orders, Phase 2: every structure, and a Send Live Order button on every Trade detail panel.**)
 
 - **Renamed** "Send to ThinkorSwim" to **Send Live Order**, at the operator's request,
   in the page, the manuals and `page_help`.

@@ -1,5 +1,5 @@
 """Send Live Order: a trade as a real order in the Schwab account (live-order
-design, Phases 1-2). Two ways in:
+design, Phases 1-3). Two ways in:
 
 * ``/send-order?trade=<id>``: a Paper Ledger trade idea (the banner, or an
   idea row's detail panel); the service reads the idea from the Ledger;
@@ -23,6 +23,10 @@ will send is worked out here with the SAME pure builder it uses
    confirm that names the size, the account and the limit, and only then
    enqueues ``place``. The service sends the order it STORED at the preview,
    never one from this page.
+4. **Cancel** (Phase 3): while Schwab has not said the sent order is done, a
+   confirm enqueues ``cancel``; the service asks Schwab first and cancels only
+   an order Schwab says can be cancelled. **Today's live orders** lists every
+   order sent today (``pages/live_orders.py``).
 
 PRIVATE only: ``bus_client.request`` refuses on the public read-only process,
 the route is registered in ``main.py`` alone, and nothing here names an account
@@ -39,15 +43,13 @@ from nicegui import ui
 import bus_client
 import live_order_link
 import live_unlock
+import shell as _shell
 from pages import fmt
 from pages import ui_kit as kit
 from pages.options import theme as _t
 from pages.options import tos_order
 from pages.ui_guard import guard
 from shared import live_order, live_orders_config
-
-#: Schwab's words for an order that will not change again.
-FINAL_ORDER_STATES = frozenset({"FILLED", "CANCELED", "REJECTED", "EXPIRED", "REPLACED"})
 
 _STATUS_WORDS = {
     "previewed": "Preview passed", "refused": "Not sent", "sending": "Sending",
@@ -195,7 +197,14 @@ def still_working(ticket) -> bool:
     if ticket.get("status") == "unknown":
         return True
     return ticket.get("status") == "sent" and \
-        str(ticket.get("order_status") or "").upper() not in FINAL_ORDER_STATES
+        not live_order.order_is_final(ticket.get("order_status"))
+
+
+def can_cancel(ticket) -> bool:
+    """Whether the ticket offers Cancel: sent, and Schwab has not said the
+    order is done. The service asks Schwab again before it cancels."""
+    return isinstance(ticket, dict) and \
+        live_order.offers_cancel(ticket.get("status"), ticket.get("order_status"))
 
 
 def leg_line(leg) -> str:
@@ -279,6 +288,11 @@ def _ticket_page(view_id: str, source: dict, client: str) -> None:
         kit.section_title("Schwab's answer")
         ticket_line = ui.label("Not previewed yet.").classes(f"text-sm {_t.LABEL}")
         messages_box = ui.column().classes("w-full gap-0")
+        with ui.row().classes("w-full items-center gap-2 flex-wrap"):
+            cancel_btn = kit.button("Cancel order", kind="danger", icon="cancel")
+            cancel_btn.set_visibility(False)
+            kit.button("Today's live orders", kind="quiet", icon="list_alt",
+                       on_click=lambda: _shell.navigate_to("/live-orders"))
         kit.section_title("The same order for ThinkorSwim's paste")
         paste_line = ui.label("").classes(
             f"text-xs font-mono whitespace-pre-wrap break-words {_t.MUTED}")
@@ -291,6 +305,11 @@ def _ticket_page(view_id: str, source: dict, client: str) -> None:
         code_error = ui.label("").classes(f"text-sm {_t.TXT_NEG}")
     send_dlg = kit.confirm("Send this order?", "", confirm_text="Send order",
                            on_confirm=lambda: _place(), danger=True)
+    cancel_dlg = kit.confirm("Cancel this order?", "Schwab is asked to cancel the "
+                             "opening order. If it has already filled, nothing changes: "
+                             "its exits are then managed in ThinkorSwim.",
+                             confirm_text="Cancel order", on_confirm=lambda: _cancel(),
+                             danger=True)
 
     # ── reading the page's inputs ───────────────────────────────────────────
     def _inputs():
@@ -416,6 +435,7 @@ def _ticket_page(view_id: str, source: dict, client: str) -> None:
         with messages_box:
             for m in (t or {}).get("messages") or ():
                 ui.label(str(m)).classes(f"text-sm {_t.MUTED}")
+        cancel_btn.set_visibility(can_cancel(t))
         _paint_buttons()
 
     # ── actions ─────────────────────────────────────────────────────────────
@@ -485,6 +505,15 @@ def _ticket_page(view_id: str, source: dict, client: str) -> None:
             st["ticket"] = {**t, "status": "sending"}
             _paint_ticket()
 
+    def _ask_cancel(_e=None):
+        if can_cancel(st["ticket"]):
+            cancel_dlg.open()
+
+    def _cancel():
+        t = st["ticket"]
+        if can_cancel(t) and _request("cancel", {"ticket_id": t["ticket_id"]}):
+            kit.set_busy(cancel_btn)
+
     # ── watching the two views ──────────────────────────────────────────────
     @guard
     def _tick():
@@ -503,6 +532,7 @@ def _ticket_page(view_id: str, source: dict, client: str) -> None:
                 if got is not None:
                     st["ticket"] = got
                     _release(preview_btn)
+                    _release(cancel_btn)
                     _paint_ticket()
             t = st["ticket"]
             now = time.time()
@@ -517,6 +547,7 @@ def _ticket_page(view_id: str, source: dict, client: str) -> None:
     refresh_btn.on_click(_refresh)
     preview_btn.on_click(_preview)
     send_btn.on_click(_ask_send)
+    cancel_btn.on_click(_ask_cancel)
 
     # An earlier quote (this trade's, from a previous visit) paints at once; the
     # fresh one asked for below replaces it when it lands.

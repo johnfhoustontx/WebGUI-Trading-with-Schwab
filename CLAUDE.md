@@ -516,15 +516,20 @@ is in git; `--install` also arms the timers). Start order: Redis (a system unit)
   path must not need the tailnet.
 - The proxy's account routes fail CLOSED without `PROXY_SHARED_SECRET`
   (`X-Proxy-Secret`), so do `/track` and `/untrack`. `trader_request` is GET-only;
-  the two brokerage writes are `POST /orders/preview` (Schwab's `previewOrder`,
+  the three brokerage writes are `POST /orders/preview` (Schwab's `previewOrder`,
   which places nothing; off unless `config/live_orders.toml mode` is `preview` or
-  `live`) and `POST /orders/place` (`trader_place`: ONE attempt, never retried; a
+  `live`), `POST /orders/place` (`trader_place`: ONE attempt, never retried; a
   timeout or 5xx is `unknown`, reconciled by reading the account's orders, never
-  by sending again; off unless the mode is `live`). The proxy reads the switch
+  by sending again; off unless the mode is `live`) and
+  `DELETE /orders/{hash}/{order_id}` (`trader_cancel`, one attempt; off only while
+  the mode is `off`, so turning `live` back to `preview` still lets a working
+  order be pulled). The proxy reads the switch
   itself on every request. Orders are placed from ONE place: the private
   ticket page (`/send-order`) → `cmd:live_order` → `options_svc`'s
   `live_order_handlers.place`, which sends only a stored, previewed, unexpired
-  ticket, once, in the regular session. It ships `mode = "off"`, and until the
+  ticket, once, in the regular session; a cancel reaches only an order a ticket
+  of its own sent, after Schwab's own order says it can be cancelled. It ships
+  `mode = "off"`, and until the
   operator turns `live` on the app is paper-only: nothing else may place,
   replace or cancel an order. No account
   number or hash reaches Tier 1 or a cache view (`cache:*` is publicly

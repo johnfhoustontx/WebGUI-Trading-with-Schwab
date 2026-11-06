@@ -399,3 +399,26 @@ def test_a_sold_put_is_sendable_and_its_risk_is_the_strike():
     got = lo.read_spec(_spec(legs=[{"kind": "put", "side": "short", "strike": 90,
                                     "expiration": EXP}]), TODAY)
     assert lo.max_loss_per_contract(got["legs"], 1.0, False) == 8900.0
+
+
+# ── Phase 3: cancel and the day's list ───────────────────────────────────────
+
+def test_the_days_list_key_is_under_the_live_order_views():
+    assert lo.TODAY_KEY == "cache:live_order:today"
+
+
+@pytest.mark.parametrize("status, order_status, final, offered", [
+    ("sent", None, False, True),                 # sent, Schwab not read yet
+    ("sent", "WORKING", False, True),
+    ("sent", "PENDING_ACTIVATION", False, True),
+    ("sent", "FILLED", True, False),
+    ("sent", "canceled", True, False),
+    ("sent", "REJECTED", True, False),
+    ("unknown", None, False, False),             # not known to be at Schwab
+    ("previewed", None, False, False),
+    ("rejected", None, False, False),
+])
+def test_cancel_is_offered_for_a_sent_order_schwab_has_not_finished(
+        status, order_status, final, offered):
+    assert lo.order_is_final(order_status) is final
+    assert lo.offers_cancel(status, order_status) is offered

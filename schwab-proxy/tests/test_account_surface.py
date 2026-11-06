@@ -83,10 +83,12 @@ def test_the_passthrough_route_carries_the_secret_check():
 # ── SE-02: one guarded way to place an order, and the account routes fail closed
 
 #: Every route that names an order (live-order design, 2026-11-05): the
-#: preview (places nothing), the place (off unless mode = "live"), and two reads.
+#: preview (places nothing), the place (off unless mode = "live"), two reads,
+#: and the cancel (Phase 3; off only while mode = "off").
 ORDER_ROUTES = {("POST", "/orders/preview"), ("POST", "/orders/place"),
                 ("GET", "/orders/{account_hash}/{order_id}"),
-                ("GET", "/orders/{account_hash}")}
+                ("GET", "/orders/{account_hash}"),
+                ("DELETE", "/orders/{account_hash}/{order_id}")}
 
 
 def _routes():
@@ -112,6 +114,24 @@ def test_exactly_one_route_places_an_order():
     assert callers == {"place_order"}
 
 
+def test_exactly_one_route_cancels_an_order():
+    """``trader_cancel`` is called by ``cancel_order`` and nothing else, and it
+    is the one ``session.delete`` in the proxy."""
+    callers, deletes = set(), set()
+    for fn in ast.walk(ast.parse(SOURCE)):
+        if not isinstance(fn, ast.FunctionDef):
+            continue
+        for n in ast.walk(fn):
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)                     and n.func.id == "trader_cancel":
+                callers.add(fn.name)
+            if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                    and n.func.attr == "delete" and isinstance(n.func.value, ast.Name)
+                    and n.func.value.id == "session"):
+                deletes.add(fn.name)
+    assert callers == {"cancel_order"}
+    assert deletes == {"trader_cancel"}
+
+
 def test_the_trader_api_url_is_used_by_the_reader_and_the_preview_only():
     """Every request to Schwab's brokerage API goes through ``trader_request``
     (GET only) or ``trader_preview`` (one fixed endpoint, previewOrder). A new
@@ -123,7 +143,7 @@ def test_the_trader_api_url_is_used_by_the_reader_and_the_preview_only():
                 isinstance(n, ast.Name) and n.id == "SCHWAB_TRADER_URL"
                 for n in ast.walk(fn)):
             users.add(fn.name)
-    assert users == {"trader_request", "trader_preview", "trader_place"}
+    assert users == {"trader_request", "trader_preview", "trader_place", "trader_cancel"}
 
 
 def test_the_brokerage_posts_are_the_preview_and_the_place():

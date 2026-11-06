@@ -1,6 +1,6 @@
 # Send a trade idea to ThinkorSwim as a live order: design
 
-**Date:** 2026-11-05 · **Status:** Phase 0 run on prod; Phase 1 merged and on prod (mode `preview`); Phase 2 built · **Branch:** `claude/live-trade-thinkorswim-47ff6c`
+**Date:** 2026-11-05 · **Status:** Phase 0 run on prod; Phase 1 on prod (mode `preview`); Phase 2 on main; Phase 3 built (cancel and today's list; covered calls left out) · **Branch:** `claude/live-trade-thinkorswim-47ff6c`
 
 ## What the operator asked for
 
@@ -362,8 +362,10 @@ place.
 
 - **Protective puts and collars**: they hold shares beside a long put, and there is
   no order text for them; `tos_order` already gives them none.
-- **Covered calls**: these buy 100 shares a contract. They come in the last phase,
-  as an opening order only, as the paste script does.
+- **Covered calls**: these buy 100 shares a contract, so their loss (the stock to
+  zero) is far past the $5,000 ceiling on most stocks. Offered three ways on
+  2026-11-05 (their own $25,000 ceiling, the same $5,000, or not at all), the
+  operator chose **not at all**: a covered call keeps the paste text.
 - ~~**Calendars and diagonals** never post as ideas, so they never reach this page.~~
   They do since Phase 2, which opens the ticket from every detail panel: see
   "Phase 2" below.
@@ -384,8 +386,9 @@ place.
 2. **The other structures**: butterflies, condors, straddles and strangles,
    calendars and diagonals, CUSTOM; and the button on every detail panel, not only
    on an idea row. Built 2026-11-05 (see "Phase 2" below).
-3. **Cancel from the page** (a third write route, `DELETE`, by the same rules), a
-   list of today's live orders, and the covered call.
+3. **Cancel from the page** (a third write route, `DELETE`) and a list of today's
+   live orders. Built 2026-11-05 (see "Phase 3" below); the covered call was left
+   out by the operator.
 
 Each phase updates the manuals and `webgui/page_help.py` in the same commit, adds
 the `cmd:live_order` row to the API Reference, and edits CLAUDE.md's
@@ -516,6 +519,36 @@ Calculator too, so it imports `live_order_link` LAZILY inside `_live_button`, wh
 runs only where the Copy ThinkorSwim order button was built (never on the public
 origin); `test_send_order.py` pins both. The Paper Ledger's own footer button went:
 an idea row's panel carries `live_idea`, and its button opens the idea's ticket.
+
+## Phase 3: cancel, and today's orders
+
+Built 2026-11-05.
+
+**The proxy's third write.** `DELETE /orders/{hash}/{order_id}` -> `trader_cancel`
+-> Schwab's `DELETE /accounts/{hash}/orders/{id}`, behind `require_account_secret`.
+One attempt (a 401 refreshes and asks once more); no answer is `cancelled: null`,
+never a retry. It is refused (403) only while the mode is **off**, not in
+`preview`: "the same rules" as place would have meant that turning `live` back to
+`preview` (the natural first move when something looks wrong) also took away the
+way to pull an order already working. `cancel_allowed()` is that rule, and
+`test_account_surface.py` pins one caller and one `session.delete`.
+
+**The service's two commands.** `cancel {ticket_id}` acts only on a ticket this app
+sent (`status = sent`, an order id), and only after reading Schwab's own order:
+`cancelable` must be true. So it never cancels an order the app did not send, and
+never asks for one Schwab has finished. It cancels the OPENING order; once that
+fills, the exits are working orders of their own (Schwab gives them their own ids)
+and stay in ThinkorSwim. `today {}` reads each open ticket sent since midnight
+Central and publishes `cache:live_order:today` (alias only, at most 50 rows); a
+send, a status read and a cancel republish it too. No store migration: the list is
+`live_order_store.sent_since`, over the columns Phase 1 already had.
+
+**The pages.** The ticket shows **Cancel order** while `live_order.offers_cancel`
+holds (sent, and Schwab has not said the order is done), behind a confirm, and a
+**Today's live orders** button to `/live-orders` (`pages/live_orders.py`, private,
+no query parameters), which lists the day's orders and offers the same Cancel per
+row. Cancel asks for no authenticator code: it removes risk, and a code standing
+between the operator and pulling an order is the wrong way round.
 
 ## How it is tested and verified
 
