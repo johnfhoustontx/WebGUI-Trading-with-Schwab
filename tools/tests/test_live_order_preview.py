@@ -92,3 +92,24 @@ def test_reading_schwabs_answers():
     assert tool.summarize(403, {"detail": "live orders are off"}) == (
         "error 403", ["live orders are off"])
     assert tool.summarize(404, "Not Found") == ("error 404", ["Not Found"])
+
+
+def test_account_numbers_are_scrubbed_from_schwabs_answer():
+    """Schwab's preview echoes the full account number (found on the first
+    run, 2026-11-05); nothing the tool prints or saves may carry it."""
+    answer = {"schwab": {"orderStrategy": {"accountNumber": "12345678",
+                                           "orderLegs": [{"accountId": 87654321}]},
+                         "orderValidationResult": {"accepts": []}},
+              "account_hash": "ABCDEF0123456789ABCDEF"}
+    out = tool.scrub(answer)
+    text = str(out)
+    assert "12345678" not in text and "87654321" not in text
+    assert "ABCDEF0123456789ABCDEF" not in text
+    assert out["schwab"]["orderStrategy"]["accountNumber"] == "…5678"
+    assert out["schwab"]["orderValidationResult"] == {"accepts": []}
+
+
+def test_matrix_scrubs_before_it_keeps_an_answer():
+    import inspect
+    src = inspect.getsource(tool.cmd_matrix)
+    assert "answer = scrub(resp.json())" in src

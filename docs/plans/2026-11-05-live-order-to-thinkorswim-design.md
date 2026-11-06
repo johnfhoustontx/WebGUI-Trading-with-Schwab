@@ -208,11 +208,12 @@ priced off the **limit** (the operator's decision above). A fill better than the
 limit therefore leaves the exits a little wider than a pasted order's. The page
 says so beside the exit prices.
 
-⚠ **Not yet known: whether Schwab's API accepts a STOP on a multi-leg spread.**
-ThinkorSwim's own text does (`STP TRG-50.00% MARK`), but that does not prove the
-API takes it. Phase 0 measures it with `previewOrder`. If the API refuses it, the
-bracket becomes opening order + profit target, and the page says in plain words
-that **the stop is not on the order** and must be set in ThinkorSwim.
+⚠ **Measured in Phase 0: Schwab's API refuses a STOP on a multi-leg spread**
+(`400 "Stop price must be populated only for stop orders."`, in every form
+tried), though ThinkorSwim's own text carries one (`STP TRG-50.00% MARK`). So a
+spread's order is the opening order + the profit target, and the page says in
+plain words that **the stop is not on the order** and must be set in
+ThinkorSwim. A single option keeps the full bracket.
 
 ### The proxy
 
@@ -394,7 +395,38 @@ Built 2026-11-05. **Nothing in it can place an order**: no such route exists.
    `STOP`) pass, for one leg and for a spread?
 4. Are the price steps right for SPY, $SPX and a non-penny stock?
 
-**Results:** not yet run.
+**Results (run 2026-11-05, 18:45-19:05 CT, after the close; nothing placed).**
+Four structures (long call, debit call vertical, credit put vertical, iron
+condor) on SPY, $SPX and INTC's nearest expiry (2026-11-06), each in the three
+shapes, at 1 contract, on all four linked accounts: 144 previews.
+
+| Question | Answer |
+|---|---|
+| 1. Does `previewOrder` answer? | **Yes.** Every preview came back with Schwab's full `orderValidationResult` (accepts, rejects, warns). The check-before-send step stands. |
+| 2. Do the opening orders pass? | **Yes**, on accounts …6763 and …1191, for all four structures on all three symbols, with the complex types this builder names (`VERTICAL`, `IRON_CONDOR`, none for one leg). |
+| 3a. Opening → profit target? | **Yes**, every structure, on …6763 and …1191. |
+| 3b. Opening → OCO of target and STOP? | **A single option: yes. Any spread: no.** Every vertical and iron condor bracket answered `400 "Stop price must be populated only for stop orders."` on every account. Two other forms of a spread's stop were tried on …6763: without `complexOrderStrategyType`, and as `STOP_LIMIT`. Both got the same 400. A third, the stop written as a `NET_CREDIT` limit at the stop price, was "accepted", but that is a limit order to sell BELOW the market, which fills at once: it is no stop, and must never be sent. |
+| 4. Price steps | Every price the builder sent passed (SPY in pennies, $SPX and INTC in nickels under $3). |
+| Accounts | **…2878 and …9591 cannot trade these options**: every order was rejected with "The account is not approved for this level of options trading" (plus buying-power and "a naked option requires $5000 in equity" rejects, even on long-only orders). **…6763 and …1191** passed everything above. |
+
+**One thing the run found in the tool itself.** Schwab's preview answer echoes
+the FULL account number (`orderStrategy.accountNumber`). The tool saved those
+answers to `--out` unscrubbed, against its own docstring. The four result files
+were deleted from the box straight after the run, and the tool now scrubs every
+account-naming key to its last 4 digits before it prints or saves anything
+(`tools/live_order_preview.scrub`, with a test). **The same answer reaches the
+service and the ticket page in Phase 1, so the service must scrub it before
+it is cached or stored.**
+
+**What this changes for Phase 1:**
+- **Exits by structure.** A single option sends the full bracket (target and
+  stop). **A spread sends the opening order and the profit target only**, and
+  the ticket says in plain words, beside the exits, that the stop is **not on
+  the order** and must be set in ThinkorSwim. This is the fallback this design
+  named before the run.
+- **The allow-list ships empty, and …2878 and …9591 should stay off it.** The
+  ticket would only ever show Schwab's rejection for them.
+- `previewOrder` stays the gate before Send.
 
 ## How it is tested and verified
 
@@ -415,7 +447,7 @@ Built 2026-11-05. **Nothing in it can place an order**: no such route exists.
 
 ## Open questions
 
-- Does Schwab's API take a STOP on a multi-leg order (phase 0)?
+- ~~Does Schwab's API take a STOP on a multi-leg order?~~ No (Phase 0).
 - Should the page offer the opening order alone, with no exits, as a choice?
 - Are the hard ceilings right (50 contracts, $5,000 of risk)? The warning colour
   past $1,000 is the operator's choice "for now", so it may be revisited.

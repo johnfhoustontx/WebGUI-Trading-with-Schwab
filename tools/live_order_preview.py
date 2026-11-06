@@ -23,8 +23,9 @@ each in three shapes (the opening order alone, with a profit target, and the
 full target-and-stop bracket), at 1 contract, and prints Schwab's verdict on
 each. ``--out`` saves every order and answer as JSON for the write-up.
 
-An account number or hash is never printed or saved: the JSON carries the last
-four digits only.
+An account number or hash is never printed or saved: Schwab's answer echoes the
+full account number, so :func:`scrub` cuts every account-naming key to its last
+four digits before anything is printed or saved.
 """
 import argparse
 import datetime as dt
@@ -126,6 +127,23 @@ def net_price(legs):
     return abs(net) if abs(net) >= 0.01 else None
 
 
+#: Keys of Schwab's answer that name the account. Schwab's preview echoes the
+#: FULL account number (``orderStrategy.accountNumber``, found 2026-11-05 on
+#: the first run), so every answer is scrubbed before it is printed or saved.
+_ACCOUNT_KEYS = frozenset({"accountNumber", "accountId", "hashValue",
+                           "accountHash", "account_hash"})
+
+
+def scrub(value):
+    """``value`` with every account-naming key's value cut to its last 4."""
+    if isinstance(value, dict):
+        return {k: (("…" + str(v)[-4:]) if k in _ACCOUNT_KEYS and v is not None
+                    else scrub(v)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [scrub(v) for v in value]
+    return value
+
+
 def summarize(status, answer):
     """``(verdict, messages)`` from Schwab's preview answer. ``verdict`` is
     ``accepted``, ``rejected`` or ``error <status>``."""
@@ -225,7 +243,7 @@ def cmd_matrix(args):
                 resp = session.post(f"{PROXY_URL}/orders/preview", timeout=60,
                                     json={"account_hash": account_hash, "order": order})
                 try:
-                    answer = resp.json()
+                    answer = scrub(resp.json())
                 except ValueError:
                     answer = resp.text
                 verdict, messages = summarize(resp.status_code, answer)

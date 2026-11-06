@@ -18,8 +18,14 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   symbol from the chain): the opening order, with a target, or the full target-and-stop
   bracket, exits priced off the limit with `tos_order.toml`'s percentages.
   `tools/live_order_preview.py matrix` previews four structures on SPY, $SPX and INTC in all
-  three shapes and prints Schwab's verdict. Not yet run: it needs a promote and the switch
-  set to `preview`.
+  three shapes and prints Schwab's verdict.
+- **Run on prod the same evening (nothing placed):** `previewOrder` works. Opening orders and
+  opening + target pass for every structure on accounts …6763 and …1191. A stop passes on a
+  single option, but **Schwab's API refuses a stop on any spread** (400, in every form tried),
+  so a spread will go in as opening + target, and its stop is set in ThinkorSwim. Accounts
+  …2878 and …9591 are not approved for these options. Schwab's answer echoes the full account
+  number: the result files were deleted from the box, and the tool now scrubs account keys to
+  their last 4 digits (`tools/live_order_preview.scrub`).
 - SECURITY.md, the API Reference and the Technical Reference no longer say "there is no
   order route"; they say no route places one.
 
