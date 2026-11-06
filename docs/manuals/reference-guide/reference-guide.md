@@ -3803,8 +3803,9 @@ There are no trade buttons: you read it and decide.
 symbol doing now?" without scrolling: the direction of the latest call (the 15-minute
 call from 08:51, the 08:36 call before that), the trade that goes with the call, its
 **chance of target** and how often it usually wins, the room to the dealers' wall, and
-an icon for every call since the open, oldest on the left: an arrow for each direction,
-a dash for no signal, an arrow in a ring for a call with a measured edge. The line above
+a round icon for every call since the open, oldest on the left: green with an up arrow,
+red with a down arrow, orange with a right arrow for no signal, ringed for a call with a
+measured edge, and all grey after the close. The line above
 it names the call shown, counts down to the next one and says whether any symbol has a
 measured edge. Green leans up and red leans down; the chance's own number is coloured
 only when it has beaten the usual rate on unseen days. A row whose call is no longer

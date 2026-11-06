@@ -2845,9 +2845,12 @@ call in 4 min") and says whether any symbol has a measured edge. Each row shows 
 symbol and its price, **Now** (up, down or no direction, and which call that is), the
 **Trade** with the call (the trade with a measured edge instead, when there is one), its
 **Chance** of target, how often it **usually** wins, the **Room** to the wall, and
-**Calls since the open**: one icon per call, oldest on the left, starting with the 08:36
-call. An up arrow is up, a down arrow is down, a dash is no signal, and an arrow in a ring
-is a call that had a measured edge; hover an icon for its time and what it said. The row
+**Calls since the open**: one round icon per call, oldest on the left, starting with the
+08:36 call. A green circle with an up arrow is up, a red circle with a down arrow is down,
+an orange circle with an arrow pointing right is no signal, and a circle with a ring round
+it is a call that had a measured edge; hover an icon for its time and what it said. With
+room on the page the whole day's calls sit on one line, else two rows of eleven. After the
+close, and for another day's calls, every circle is grey. The row
 reads the latest 15-minute call once the first one is out (08:51) and the 08:36 call
 before that.
 

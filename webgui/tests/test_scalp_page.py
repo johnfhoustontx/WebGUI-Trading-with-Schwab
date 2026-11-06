@@ -1664,10 +1664,12 @@ def _icons(row):
 def test_the_calls_column_runs_from_the_0836_call_through_every_15_minute_call():
     from pages.options import theme
     row, = scalp.glance_rows(_glance_view(), _at(2026, 10, 19, 10, 25))
-    # 08:36 down, 09:06 up, 09:21 down with a measured edge
-    assert _icons(row) == ["arrow_downward", "arrow_upward", "arrow_circle_down"]
+    # 08:36 down, 09:06 up, 09:21 down with a measured edge (the same disc, ringed)
+    assert _icons(row) == ["arrow_downward", "arrow_upward", "arrow_downward"]
     assert [c["tip"].split(" · ")[0] for c in row["calls"]] == ["08:36", "09:06", "09:21"]
-    assert [c["cls"] for c in row["calls"]] == [theme.TXT_NEG, theme.TXT_POS, theme.TXT_NEG]
+    assert [c["cls"] for c in row["calls"]] == [
+        theme.DISC_NEG, theme.DISC_POS, f"{theme.DISC_NEG} {theme.DISC_RING_NEG}"]
+    assert [c["edge"] for c in row["calls"]] == [False, False, True]
     assert row["calls"][1]["tip"] == "09:06 · Up"
     assert row["calls"][2]["tip"] == "09:21 · Down · Long put · 63.00% vs 50.00% usually"
 
@@ -1685,8 +1687,8 @@ def test_a_flat_call_and_a_missing_call_are_both_no_signal_and_say_which():
     view["intraday"]["latest"]["QQQ"] = _ientry(1)
     rows = {r["symbol"]: r for r in scalp.glance_rows(view, _at(2026, 10, 19, 10, 25))}
     calls = rows["QQQ"]["calls"]
-    assert [c["icon"] for c in calls] == ["arrow_upward", "remove", "remove"]
-    assert calls[1]["cls"] == calls[2]["cls"] == theme.MUTED
+    assert [c["icon"] for c in calls] == ["arrow_upward", "arrow_forward", "arrow_forward"]
+    assert calls[1]["cls"] == calls[2]["cls"] == theme.DISC_WARN       # the orange disc
     assert calls[1]["tip"] == "09:06 · No signal · flat over the last 15 minutes — no direction"
     assert calls[2]["tip"] == "09:21 · No signal · no call recorded"
 
@@ -1705,21 +1707,33 @@ def test_before_the_first_15_minute_call_the_calls_column_holds_the_0836_call_al
 def test_another_days_calls_keep_their_icons_and_lose_their_colour():
     from pages.options import theme
     row, = scalp.glance_rows(_glance_view(), _at(2026, 10, 20, 8, 0))
-    assert _icons(row) == ["arrow_downward", "arrow_upward", "arrow_circle_down"]
-    assert {c["cls"] for c in row["calls"]} == {theme.MUTED}
+    assert _icons(row) == ["arrow_downward", "arrow_upward", "arrow_downward"]
+    assert [c["cls"] for c in row["calls"]] == [
+        theme.DISC_MUTED, theme.DISC_MUTED, f"{theme.DISC_MUTED} {theme.DISC_RING_MUTED}"]
 
 
 def test_todays_earlier_calls_keep_their_colour_after_the_latest_goes_past():
     from pages.options import theme
     row, = scalp.glance_rows(_glance_view(), _at(2026, 10, 19, 10, 40))
     assert row["_now_class"] == theme.MUTED                 # the latest call is past
-    assert row["calls"][1]["cls"] == theme.TXT_POS          # the record of the day is not
+    assert row["calls"][1]["cls"] == theme.DISC_POS         # the record of the day is not
+
+
+@pytest.mark.parametrize("hour,minute,grey", [(15, 0, False), (15, 1, True), (18, 30, True)])
+def test_todays_calls_turn_grey_once_the_regular_session_closes(hour, minute, grey):
+    from pages.options import theme
+    row, = scalp.glance_rows(_glance_view(), _at(2026, 10, 19, hour, minute))
+    assert _icons(row) == ["arrow_downward", "arrow_upward", "arrow_downward"]
+    discs = {c["cls"].split(" outline")[0] for c in row["calls"]}
+    assert (discs == {theme.DISC_MUTED}) is grey
+    assert row["calls"][2]["edge"] is True                   # the ring stays, in grey
 
 
 def test_an_0836_call_of_another_day_stays_out_of_the_15_minute_calls():
     view = _glance_view(call_day="2026-10-16")
     row, = scalp.glance_rows(view, _at(2026, 10, 19, 10, 25))
-    assert _icons(row) == ["arrow_upward", "arrow_circle_down"]
+    assert _icons(row) == ["arrow_upward", "arrow_downward"]
+    assert row["calls"][1]["edge"] is True
 
 
 @pytest.mark.parametrize("cell", ["junk", None, {}, {"direction": True}, {"direction": "up"}])
@@ -1727,7 +1741,7 @@ def test_a_malformed_timeline_cell_is_no_signal(cell):
     view = _glance_view(call_day="2026-10-16", intraday=_section(
         timeline=[{"slot": "09:06", "symbols": {"SPY": cell}}]))
     row, = scalp.glance_rows(view, _at(2026, 10, 19, 10, 25))
-    assert _icons(row) == ["remove"]
+    assert _icons(row) == ["arrow_forward"]
 
 
 # ── colour and icons in the glance ──────────────────────────────────────────

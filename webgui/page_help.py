@@ -1124,10 +1124,11 @@ buttons, and you decide.
 **Read the table at the top first.** One row per symbol: which way it is going
 **now** (the latest 15-minute call from 08:51, the 08:36 call before that), the
 **trade with the call**, its **chance of target** and how often it **usually
-wins**, the **room to the wall**, and **every call since the open**: one icon per
-call, oldest on the left, starting with the 08:36 call. An up arrow is up, a down
-arrow is down, a dash is no signal, and an arrow in a ring is a call that had a
-measured edge; hover an icon for its time and what it said. The line above says which
+wins**, the **room to the wall**, and **every call since the open**: one round icon
+per call, oldest on the left, starting with the 08:36 call. Green with an up arrow
+is up, red with a down arrow is down, orange with a right arrow is no signal, and a
+circle with a ring round it is a call that had a measured edge; after the close every
+circle is grey. Hover an icon for its time and what it said. The line above says which
 call this is, when the next one comes, and whether any symbol has a measured edge.
 
 **The colours.** Green leans up and red leans down, for the direction and for the

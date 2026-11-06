@@ -4,7 +4,23 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-05 (**Live orders, Phase 3: cancel a working order from the app, and a list of today's live orders.** Covered calls left out, the operator's choice.)
+**Last updated:** 2026-11-06 (**Opening Scalp: the Calls since the open column draws coloured discs, grey after the close, on one line when there is room.**)
+
+- The user asked for the column's icons to become filled circles with a white arrow:
+  green up, orange right (no signal, which was a dash), red down. A call with a
+  measured edge keeps its ring, now an outline round the disc in its own colour.
+- **Grey after hours.** `_calls_muted` greys every disc for another day's calls, as
+  before, and now also for today's once the regular session has closed (after 15:00 CT,
+  `market_calendar.regular_close_on`, inclusive like `session_at`).
+- **One line when it fits.** The slot draws the discs in two unbreakable halves of
+  eleven, so a wide table shows the whole day on one line and a narrow one two even
+  rows of eleven, never a ragged wrap.
+- New theme tokens `DISC_POS` / `DISC_WARN` / `DISC_NEG` / `DISC_MUTED` and their
+  `DISC_RING_*` outlines, from the semantic palette (restyled by `config/theme.toml`).
+- Checked in the page harness at 1700, 1100 and 820 pixels wide, and with another
+  day's calls (grey). User Guide, Reference Guide and the page's hover help updated.
+
+**Prior —** 2026-11-05 (**Live orders, Phase 3: cancel a working order from the app, and a list of today's live orders.** Covered calls left out, the operator's choice.)
 
 - **The proxy's third brokerage write**: `DELETE /orders/{hash}/{order_id}` ->
   `trader_cancel`, one attempt, behind the account secret, refused only while

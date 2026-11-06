@@ -400,6 +400,19 @@ def build_tokens(theme):
         "BADGE_NEG": f"bg-[{s['negative']}]/15 text-[{s['negative']}] rounded-[6px]",
         "BADGE_ACCENT": "bg-[#a9b6ff]/15 text-[#a9b6ff] rounded-[6px]",
         "BADGE_MUTED": "bg-white/5 text-[#8891ab] rounded-[6px]",
+        # Solid state DISCS: a filled circle in the semantic colour with a white
+        # glyph on it (the Opening Scalp's running calls). MUTED is the grey disc a
+        # call is drawn in once it is not live colour (another day, after hours).
+        "DISC_POS": f"bg-[{s['positive']}] text-white rounded-full",
+        "DISC_WARN": f"bg-[{s['warning']}] text-white rounded-full",
+        "DISC_NEG": f"bg-[{s['negative']}] text-white rounded-full",
+        "DISC_MUTED": f"bg-[{p['muted']}] text-white rounded-full",
+        # The ring a disc wears when its call carried a measured edge: an outline
+        # in the disc's own colour, offset so the page shows between them.
+        "DISC_RING_POS": f"outline outline-[1.5px] outline-offset-[1.5px] outline-[{s['positive']}]",
+        "DISC_RING_WARN": f"outline outline-[1.5px] outline-offset-[1.5px] outline-[{s['warning']}]",
+        "DISC_RING_NEG": f"outline outline-[1.5px] outline-offset-[1.5px] outline-[{s['negative']}]",
+        "DISC_RING_MUTED": f"outline outline-[1.5px] outline-offset-[1.5px] outline-[{p['muted']}]",
     }
 
 
@@ -1183,6 +1196,14 @@ BADGE_WARN = _TOKENS["BADGE_WARN"]
 BADGE_NEG = _TOKENS["BADGE_NEG"]
 BADGE_ACCENT = _TOKENS["BADGE_ACCENT"]
 BADGE_MUTED = _TOKENS["BADGE_MUTED"]
+DISC_POS = _TOKENS["DISC_POS"]
+DISC_WARN = _TOKENS["DISC_WARN"]
+DISC_NEG = _TOKENS["DISC_NEG"]
+DISC_MUTED = _TOKENS["DISC_MUTED"]
+DISC_RING_POS = _TOKENS["DISC_RING_POS"]
+DISC_RING_WARN = _TOKENS["DISC_RING_WARN"]
+DISC_RING_NEG = _TOKENS["DISC_RING_NEG"]
+DISC_RING_MUTED = _TOKENS["DISC_RING_MUTED"]
 
 # The same rules for EVERY page: both entrypoints put ``ns-app`` on their content
 # column and inject this, so a page needs neither a scope class nor an add_css of
