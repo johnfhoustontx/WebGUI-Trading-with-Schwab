@@ -842,6 +842,7 @@ def _build_cards(s):
             tos = None if _shell.is_public() else tos_order.order(s)
             if tos:
                 _tos_button(tos)
+                _live_button(s)
 
     # 2 — THE ECONOMICS. Four figures, each carrying its unit: the two dollar
     # rows say "per contract" outright, so a per-share number can never be read
@@ -971,6 +972,23 @@ def _tos_button(tos):
                tooltip=tos["summary"]) \
         .classes("self-start mt-1") \
         .on("click", _tos_reported, js_handler=tos_copy_js(tos["text"]))
+
+
+def _live_button(s):
+    """'Send Live Order' for the same trade (live-order design, Phase 2): a
+    REAL order in the Schwab account, through the ticket page's preview and
+    confirm. Reached only where the copy button was built, which the public
+    origin never does, and the module is imported HERE, lazily, so the public
+    process never loads it (the ticket page's tests pin both)."""
+    import live_order_link as _link
+    found = _link.offer(s)
+    if found is None:
+        return
+    kit.button(_link.BUTTON_TEXT, kind="quiet", icon="send",
+               tooltip="Opens an order ticket for this trade: preview it with Schwab, "
+                       "then send it to your account",
+               on_click=lambda: _shell.navigate_to(_link.href_for(found))) \
+        .classes("self-start")
 
 
 def _greek(label, value, fmt="{:.3f}", color=None):

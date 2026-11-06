@@ -172,9 +172,12 @@ screens' header and the framed documents - stdlib + `repo_paths` only, pinned by
 `shared/tests/test_site_nav.py`) ·
 `shared.live_order` + `shared.live_orders_config` + `shared.tos_order_config`
 (since 2026-11-05; the live-order ticket's stream, view keys, sizing and exit
-arithmetic, the switch and the ThinkorSwim percentages - `math` / `re` +
-`repo_paths` + `shared.config_toml` only, so the ticket page prices exactly
-what the service will send) ·
+arithmetic, the switch and the ThinkorSwim percentages - `math` / `re` /
+`datetime` + `shared.symbols` + `repo_paths` + `shared.config_toml` only, so the
+ticket page prices exactly what the service will send, and a detail panel's
+trade is checked by the same `read_spec` in both tiers; `pages/options/detail.py`,
+which the public Calculator draws too, reaches it only through a LAZY import of
+`live_order_link` that runs off the public origin) ·
 `repo_paths` · `requests` — **only** for the
 `/health` fan-out the shell and Status page run, the proxy helper's calls
 (`webgui/proxy.py`: API-usage counts, and the Schwab sign-in's link and

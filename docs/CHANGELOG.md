@@ -4,7 +4,33 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-05 (**Live orders, Phase 1: a posted trade idea can be sent to ThinkorSwim as a real order, for single options, verticals and iron condors.** Ships with `mode = "off"`.)
+**Last updated:** 2026-11-05 (**Live orders, Phase 2: every structure, and a Send Live Order button on every Trade detail panel.**)
+
+- **Renamed** "Send to ThinkorSwim" to **Send Live Order**, at the operator's request,
+  in the page, the manuals and `page_help`.
+- **The button is on every detail panel** (Market Scanner, Swing, Captured Signals, Paper
+  Ledger, Calculator), under Copy ThinkorSwim order, while live orders are not off. The
+  Paper Ledger's footer button went: an idea row's panel carries `live_idea` and opens the
+  idea's own ticket (`/send-order?trade=<id>`). Any other trade travels as a SPEC
+  `{symbol, legs, label, price}`, held in the webgui's memory under a 32-hex token
+  (`webgui/live_order_link.py`, newest 64) and opened as `/send-order?spec=<token>`.
+  `detail.py` is drawn by the public Calculator too, so it imports the link lazily, only
+  where the Copy ThinkorSwim order button was built.
+- **The service checks a spec as strictly as an idea** (`live_order.read_spec`, both
+  tiers): the ticker allow-list, each leg, a sendable structure, no expired leg, no short
+  far leg, no more calls sold than bought, no /ES or /NQ. It prices the legs itself; the
+  panel's price only drives the drift warning ("the panel showed").
+- **More structures** (`SENDABLE_TYPES`): straddle, strangle, butterfly, condor,
+  calendar, diagonal and CUSTOM join the single option, vertical and iron condor.
+  Duplicate legs merge and divide by their gcd (`merge_legs`). A calendar or diagonal's
+  loss is bounded at the near expiry with the far leg at intrinsic; its max profit is
+  shown as depending on volatility. A mixed CUSTOM's debit side is read from the live
+  mids. Every multi-leg order still goes in as opening + target, without the stop.
+- Tested in the page harness (the button on a vertical, a calendar and an idea row; the
+  idea opens `?trade=`, the vertical `?spec=<token>`). No preview against Schwab yet for
+  the new structures.
+
+**Prior —** 2026-11-05 (**Live orders, Phase 1: a posted trade idea can be sent to ThinkorSwim as a real order, for single options, verticals and iron condors.** Ships with `mode = "off"`.)
 
 - **The proxy places one order per click.** `POST /orders/place` (`trader_place`, behind
   `require_account_secret`, 403 unless `config/live_orders.toml mode = "live"`) makes ONE

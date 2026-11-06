@@ -1,19 +1,19 @@
-"""``cmd:live_order``: a posted trade idea, sent to the Schwab account as an order.
+"""``cmd:live_order``: a trade, sent to the Schwab account as an order.
 
-Design: docs/plans/2026-11-05-live-order-to-thinkorswim-design.md (Phase 1).
+Design: docs/plans/2026-11-05-live-order-to-thinkorswim-design.md (Phases 1-2).
 This is that stream's handler (``make_app``'s ``extra_consumers``), on a thread
 of its own. It is never on ``cmd:options``' table or its slow lane.
 
 Four commands, each answered on a cache view the ticket page watches:
 
-* ``quote`` ``{trade_id}``: the idea's legs priced from a chain fetched FRESH
-  (``maxAge=0``), with the default size, the max loss and the exits ->
-  ``live_order.quote_key(trade_id)``.
-* ``preview`` ``{ticket_id, trade_id, idea_posted, alias, contracts, limit}``:
-  re-reads the idea from the Paper Ledger (never the page's echo), re-checks
-  every limit, builds the order, has Schwab check it (``previewOrder``, which
-  places nothing), and stores a TICKET: the exact payload, its digest, the
-  account hash -> ``live_order.ticket_key(ticket_id)``.
+* ``quote`` ``{trade_id}`` or ``{quote_id, spec}``: the trade's legs priced
+  from a chain fetched FRESH (``maxAge=0``), with the default size, the max
+  loss and the exits -> ``live_order.quote_key(trade_id or quote_id)``.
+* ``preview`` ``{ticket_id, alias, contracts, limit}`` plus the same source:
+  re-reads the trade, re-checks every limit, builds the order, has Schwab
+  check it (``previewOrder``, which places nothing), and stores a TICKET: the
+  exact payload, its digest, the account hash ->
+  ``live_order.ticket_key(ticket_id)``.
 * ``place`` ``{ticket_id}``: places the STORED payload, never one the page
   sends, after claiming the ticket ``previewed -> sending`` in one conditional
   UPDATE (``live_order_store.claim``).
@@ -28,6 +28,13 @@ single-use; a ticket expires ``ticket_ttl_sec`` after its preview.
 errors after it may have reached Schwab, the ticket is ``unknown`` and is NEVER
 sent again: the service lists the account's orders around that time and, on
 exactly one match, records its id. The page says to check ThinkorSwim.
+
+**Two sources of a trade.** A Paper Ledger trade idea (``trade_id``) is read
+from the Ledger itself, never from the page's echo. Any other trade comes from
+a detail panel as a SPEC: its ticker and legs, which ``live_order.read_spec``
+checks as strictly (the one ticker allow-list, each leg, a structure that may be
+sent, expiries that bound the loss). Either way the service prices the legs
+itself, builds the payload itself, and places only what Schwab previewed.
 
 **What reaches Tier 1.** The views carry the account's ALIAS only: never its
 number or hash, and Schwab's answers are scrubbed (``live_order.scrub``) before
@@ -199,12 +206,58 @@ def _read_idea(trade_id, idea_posted=None):
     return row, symbol, expiration
 
 
-def _priced_legs(symbol, expiration, legs):
-    """``(legs with symbol, mids)`` from a chain fetched fresh. Raises Refused."""
+def _today():
+    return _dt.datetime.fromtimestamp(_now(), _CT).date()
+
+
+def _source(args):
+    """The trade a command names: ``{trade_id, idea_posted, symbol, legs,
+    label, strategy, posted_price, price_source}``. Raises Refused."""
+    spec = args.get("spec")
+    if spec is None:
+        row, symbol, _expiration = _read_idea(args.get("trade_id"), args.get("idea_posted"))
+        legs, lots = live_order.merge_legs(_legs_of(row))
+        posted = abs(float(row.get("entry_credit") or 0.0)) or None
+        return {"trade_id": row["trade_id"], "idea_posted": row.get("idea_posted"),
+                "symbol": symbol, "legs": legs, "label": row.get("idea_label"),
+                "strategy": row.get("strategy"),
+                "posted_price": None if posted is None else posted / lots,
+                "price_source": "idea"}
+    quote_id = args.get("quote_id")
+    if not isinstance(quote_id, str) or not live_order.TICKET_ID_RE.match(quote_id):
+        raise Refused("this ticket's id cannot be read; open it again from the trade")
+    try:
+        got = live_order.read_spec(spec, _today())
+    except ValueError as e:
+        raise Refused(str(e)) from None
+    if futures_chain.is_feed_symbol(got["symbol"]):
+        raise Refused("Schwab cannot place an order on /ES or /NQ options")
+    return {"trade_id": quote_id, "idea_posted": None, "symbol": got["symbol"],
+            "legs": got["legs"], "label": got["label"], "strategy": None,
+            "posted_price": got["price"], "price_source": "panel"}
+
+
+def _side(legs, mids):
+    """``(debit, net mid or None)``: the side off the legs, or, for a CUSTOM
+    order that both buys and sells, off the mids. Raises Refused."""
+    debit = live_order.is_debit(legs)
+    priced = live_order.net_mid(legs, mids)
+    if debit is None:
+        if priced is None:
+            raise Refused("this order both buys and sells, and with no two-sided "
+                          "market on every leg it cannot tell which way it pays")
+        debit = priced[1]
+    return debit, priced
+
+
+def _priced_legs(symbol, legs):
+    """``(legs with symbol, mids)`` from a chain fetched fresh across every
+    leg's expiry. Raises Refused."""
+    exps = sorted({leg["expiration"] for leg in legs})
     try:
         status, chain = _get("/chains", {
-            "symbol": symbol, "contractType": "ALL", "fromDate": expiration,
-            "toDate": expiration, "maxAge": 0}, timeout=_TIMEOUT["chain"])
+            "symbol": symbol, "contractType": "ALL", "fromDate": exps[0],
+            "toDate": exps[-1], "maxAge": 0}, timeout=_TIMEOUT["chain"])
     except requests.RequestException:
         raise Refused("the chain could not be read; try again") from None
     if status != 200 or not isinstance(chain, dict):
@@ -213,7 +266,8 @@ def _priced_legs(symbol, expiration, legs):
     for leg in legs:
         c = live_order.find_contract(chain, leg["kind"], leg["expiration"], leg["strike"])
         if c is None or not isinstance(c.get("symbol"), str):
-            raise Refused(f"the {leg['strike']:g} {leg['kind']} is not in today's chain")
+            raise Refused(f"the {leg['expiration']} {leg['strike']:g} {leg['kind']} "
+                          "is not in today's chain")
         out.append({**leg, "symbol": c["symbol"]})
         mids.append(live_order.contract_mid(c))
     return out, mids
@@ -224,9 +278,12 @@ def _structure(legs):
         ctype = live_order.complex_type(legs)
     except ValueError as e:
         raise Refused(f"the legs cannot be read: {e}") from None
-    if ctype not in live_order.PHASE1_TYPES:
-        raise Refused("this structure is not sent from here yet: single options, "
-                      "verticals and iron condors are")
+    if ctype not in live_order.SENDABLE_TYPES:
+        raise Refused("this structure is not sent from here")
+    try:
+        live_order.check_expiries(legs)
+    except ValueError as e:
+        raise Refused(str(e)) from None
     return ctype
 
 
@@ -305,26 +362,32 @@ def _refusal_view(ticket_id, reason, args=None) -> dict:
 # ── quote ────────────────────────────────────────────────────────────────────
 
 def _quote(bus, args) -> None:
-    trade_id = args.get("trade_id")
+    from_panel = args.get("spec") is not None
+    view_id = args.get("quote_id") if from_panel else args.get("trade_id")
     try:
-        key = live_order.quote_key(trade_id)
+        if from_panel and not (isinstance(view_id, str)
+                               and live_order.TICKET_ID_RE.match(view_id)):
+            raise ValueError("a panel's quote id is the page's own 32 hex")
+        key = live_order.quote_key(view_id)
     except ValueError:
-        log.warning("live_order quote: bad trade id %r ignored", trade_id)
+        log.warning("live_order quote: bad id %r ignored", view_id)
         return
-    view = {"trade_id": trade_id, "checked_at": _iso(_now()),
+    view = {"trade_id": view_id, "checked_at": _iso(_now()),
             "mode": live_orders_config.mode(), "aliases": live_orders_config.aliases(),
             "in_session": _in_session(_now())}
     try:
-        row, symbol, expiration = _read_idea(trade_id)
-        legs, mids = _priced_legs(symbol, expiration, _legs_of(row))
+        src = _source(args)
+        symbol = src["symbol"]
+        legs, mids = _priced_legs(symbol, src["legs"])
         ctype = _structure(legs)
-        debit = live_order.is_debit(legs)
-        priced = live_order.net_mid(legs, mids)
-        posted = abs(float(row.get("entry_credit") or 0.0)) or None
+        debit, priced = _side(legs, mids)
+        posted = src["posted_price"]
+        exps = sorted({l["expiration"] for l in legs})
         view.update({
-            "symbol": symbol, "structure": ctype, "strategy": row.get("strategy"),
-            "idea_posted": row.get("idea_posted"), "idea_label": row.get("idea_label"),
-            "expiration": expiration, "debit": debit, "posted_price": posted,
+            "symbol": symbol, "structure": ctype, "strategy": src["strategy"],
+            "idea_posted": src["idea_posted"], "idea_label": src["label"],
+            "expiration": exps[0], "expirations": exps, "debit": debit,
+            "posted_price": posted, "price_source": src["price_source"],
             "legs": [{**{k: l[k] for k in ("kind", "side", "strike", "qty", "expiration",
                                            "symbol")}, "mid": m}
                      for l, m in zip(legs, mids)],
@@ -347,6 +410,8 @@ def _quote(bus, args) -> None:
             })
     except Refused as e:
         view["error"] = str(e)
+    except ValueError as e:
+        view["error"] = f"the order cannot be priced: {e}"
     _publish(bus, key, view)
 
 
@@ -371,17 +436,18 @@ def _preview(bus, args) -> None:
         if isinstance(limit, bool) or not isinstance(limit, (int, float)) \
                 or not math.isfinite(limit) or limit <= 0:
             raise Refused("the limit price must be a positive number")
-        row, symbol, expiration = _read_idea(args.get("trade_id"), args.get("idea_posted"))
-        legs, _mids = _priced_legs(symbol, expiration, _legs_of(row))
+        src = _source(args)
+        symbol = src["symbol"]
+        legs, mids = _priced_legs(symbol, src["legs"])
         ctype = _structure(legs)
-        debit = live_order.is_debit(legs)
+        debit, _priced = _side(legs, mids)
         ticks = live_orders_config.ticks()
         limit = live_order.round_to_tick(float(limit), symbol, ticks)
         loss = live_order.max_loss_per_contract(legs, limit, debit)
         _check_size(contracts, None if loss is None else round(loss * contracts, 2))
         exits = _exits(legs, limit, debit, symbol)
         payload = live_order.schwab_order(
-            legs, contracts=contracts, limit=limit, variant=exits["variant"],
+            legs, contracts=contracts, limit=limit, variant=exits["variant"], debit=debit,
             pcts=exits["pcts"], exit_tif=exits["exit_tif"], root=symbol, ticks=ticks)
         account_hash = _account_hash(alias)
     except Refused as e:
@@ -400,8 +466,8 @@ def _preview(bus, args) -> None:
     verdict, messages = live_order.preview_verdict(status, answer)
     now = _now()
     ticket = {
-        "ticket_id": ticket_id, "trade_id": row["trade_id"],
-        "idea_posted": row.get("idea_posted"), "alias": alias,
+        "ticket_id": ticket_id, "trade_id": src["trade_id"],
+        "idea_posted": src["idea_posted"], "alias": alias,
         "account_hash": account_hash, "symbol": symbol, "structure": ctype,
         "contracts": contracts, "limit_price": limit, "debit": int(bool(debit)),
         "max_loss": None if loss is None else round(loss * contracts, 2),

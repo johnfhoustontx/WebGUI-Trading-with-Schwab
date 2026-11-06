@@ -371,6 +371,10 @@ directional trades on their own tab.
   the day you open. A covered call
   copies the opening order only; a protective put or a collar gets no button.
   The same button is on every page with this panel.
+- **Send Live Order** (under it, while Settings → Configuration → *Live orders*
+  is on) sends the same trade to your Schwab account as a REAL order, through a
+  ticket where you set the limit, the contracts and the account, and Schwab
+  previews it before anything is placed. Options only: no shares, no /ES or /NQ.
 - **Probability vs Needs** (in the detail panel) — "Needs" is the win rate this
   trade's own price DEMANDS to break even. Probability above it is cushion,
   below it means the trade loses money over time even when it usually wins.
@@ -1403,9 +1407,9 @@ engine's positions live on **Paper Account**.
   settled at the close. It shows under **All** only, and **Delete all closed**
   keeps it on file. Settings -> Configuration -> *Daily SPY condor in the Paper
   Ledger*.
-- **Send to ThinkorSwim — this one is REAL money.** On a trade-idea row (a single
-  option, a vertical or an iron condor) the detail panel has **Send to
-  ThinkorSwim**, and a banner offers the same when an idea posts. It opens an
+- **Send Live Order — this one is REAL money.** Every row's detail panel has
+  **Send Live Order** (options only: not shares, not /ES or /NQ), and a banner
+  offers the same when an idea posts. It opens an
   order ticket: the live price, a **Limit**, **Contracts** (opens at the most
   that risk at most $1,000; more is allowed, in the warning colour, up to 50
   contracts and $5,000) and the **Account** by name. **Preview** asks Schwab to

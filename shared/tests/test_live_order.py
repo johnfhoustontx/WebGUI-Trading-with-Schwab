@@ -56,7 +56,17 @@ def test_option_symbol_shape():
     (IRON_CONDOR, "IRON_CONDOR", False),
     (REVERSE_IC, "IRON_CONDOR", True),
     (BACKSPREAD, "CUSTOM", None),
-    ([leg("call", "long", 95), leg("put", "long", 95)], "CUSTOM", True),
+    ([leg("call", "long", 95), leg("put", "long", 95)], "STRADDLE", True),
+    ([leg("call", "short", 105), leg("put", "short", 95)], "STRANGLE", False),
+    ([leg("call", "long", 95), leg("put", "long", 105)], "CUSTOM", True),     # guts
+    ([leg("call", "long", 95), leg("call", "short", 100, qty=2),
+      leg("call", "long", 105)], "BUTTERFLY", True),
+    ([leg("put", "short", 90), leg("put", "long", 95, qty=2),
+      leg("put", "short", 100)], "BUTTERFLY", False),
+    ([leg("call", "long", 95), leg("call", "short", 100, qty=2),
+      leg("call", "long", 110)], "CUSTOM", None),                              # broken wing: the mids decide
+    ([leg("call", "long", 90), leg("call", "short", 95), leg("call", "short", 100),
+      leg("call", "long", 105)], "CONDOR", True),
 ])
 def test_structure_and_side_come_from_the_legs(legs, ctype, debit):
     assert lo.complex_type(legs) == ctype
@@ -204,7 +214,8 @@ def test_the_module_is_pure():
             names |= {a.name for a in node.names}
         elif isinstance(node, ast.ImportFrom):
             names.add(node.module)
-    assert names == {"math", "re"}
+    assert names == {"datetime", "math", "re", "shared"}
+    assert "from shared import symbols as _symbols" in pathlib.Path(lo.__file__).read_text(encoding="utf-8")
 
 
 # ── Phase 1 ──────────────────────────────────────────────────────────────────
@@ -304,3 +315,87 @@ def test_net_mid_reads_the_side_off_the_legs():
     assert lo.net_mid(DEBIT_CALL_VERTICAL, [1.0, None]) is None
     assert lo.net_mid(DEBIT_CALL_VERTICAL, [1.0, 1.0]) is None
     assert lo.net_mid(DEBIT_CALL_VERTICAL, [1.0]) is None
+
+
+# ── Phase 2 ──────────────────────────────────────────────────────────────────
+
+FAR = "2026-12-18"
+
+
+def far(kind, side, strike, qty=1):
+    return {**leg(kind, side, strike, qty), "expiration": FAR,
+            "symbol": sym("INTC", kind[0].upper(), strike, "261218")}
+
+
+def test_calendars_and_diagonals_bound_their_loss_at_the_near_expiry():
+    cal = [leg("call", "short", 100), far("call", "long", 100)]
+    assert lo.complex_type(cal) == "CALENDAR" and lo.is_debit(cal) is True
+    assert lo.max_loss_per_contract(cal, 1.20, True) == 120.0      # the debit
+    assert lo.max_profit_per_contract(cal, 1.20, True) is None     # volatility decides
+    # Long the WORSE strike: the width can be lost on top of the debit.
+    diag = [leg("call", "short", 100), far("call", "long", 105)]
+    assert lo.complex_type(diag) == "DIAGONAL"
+    assert lo.max_loss_per_contract(diag, 0.50, True) == 550.0
+    # The sold leg outlives the bought one: never sent.
+    with pytest.raises(ValueError, match="outlives"):
+        lo.max_loss_per_contract([leg("call", "long", 100), far("call", "short", 100)],
+                                 1.0, False)
+
+
+def test_merge_legs_makes_the_unit_schwab_takes():
+    legs, lots = lo.merge_legs([
+        {"kind": "call", "side": "long", "strike": 95, "qty": 3, "expiration": EXP},
+        {"kind": "call", "side": "short", "strike": 100, "qty": 3, "expiration": EXP},
+        {"kind": "call", "side": "short", "strike": 100.0, "qty": 3, "expiration": EXP},
+        {"kind": "call", "side": "long", "strike": 105, "qty": 3, "expiration": EXP}])
+    assert lots == 3
+    assert sorted((l["strike"], l["side"], l["qty"]) for l in legs) == \
+        [(95, "long", 1), (100, "short", 2), (105, "long", 1)]
+
+
+TODAY = __import__("datetime").date(2026, 11, 5)
+
+
+def _spec(**kw):
+    s = {"symbol": "intc", "label": "INTC Bull Call Spread <b>",
+         "price": 1.5, "legs": [
+             {"kind": "Call", "side": "LONG", "strike": 95, "qty": 2, "expiration": EXP},
+             {"kind": "call", "side": "short", "strike": 100, "qty": 2.0,
+              "expiration": EXP + "T00:00:00"}]}
+    s.update(kw)
+    return s
+
+
+def test_read_spec_checks_and_normalises_a_panels_trade():
+    got = lo.read_spec(_spec(), TODAY)
+    assert got["symbol"] == "INTC" and got["price"] == 1.5
+    assert got["label"] == "INTC Bull Call Spread b"            # no markup survives
+    assert got["legs"] == [
+        {"kind": "call", "side": "long", "strike": 95, "qty": 1, "expiration": EXP},
+        {"kind": "call", "side": "short", "strike": 100, "qty": 1, "expiration": EXP}]
+    assert lo.read_spec(_spec(price=-1), TODAY)["price"] is None
+
+
+@pytest.mark.parametrize("bad, why", [
+    ({"symbol": "BAD:KEY"}, "ticker"),
+    ({"symbol": "/ES"}, "ticker"),
+    ({"legs": []}, "legs"),
+    ({"legs": [{"kind": "stock", "side": "long", "strike": 1, "expiration": EXP}]}, "kind"),
+    ({"legs": [{"kind": "call", "side": "long", "strike": 95, "expiration": "2026-11-04"}]},
+     "expired"),
+    ({"legs": [{"kind": "call", "side": "short", "strike": 95, "expiration": EXP}]},
+     "no limit"),
+    ({"legs": [{"kind": "call", "side": "long", "strike": 95, "qty": 0.5,
+                "expiration": EXP}]}, "qty"),
+    ("not a dict", "cannot be read"),
+])
+def test_read_spec_refuses(bad, why):
+    spec = bad if isinstance(bad, str) else _spec(**bad)
+    with pytest.raises(ValueError, match=why):
+        lo.read_spec(spec, TODAY)
+
+
+def test_a_sold_put_is_sendable_and_its_risk_is_the_strike():
+    got = lo.read_spec(_spec(legs=[{"kind": "put", "side": "short", "strike": 90,
+                                    "expiration": EXP}]), TODAY)
+    assert lo.max_loss_per_contract(got["legs"], 1.0, False) == 8900.0

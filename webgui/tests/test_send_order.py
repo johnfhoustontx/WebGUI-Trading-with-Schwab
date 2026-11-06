@@ -95,18 +95,37 @@ def test_it_enqueues_only_on_the_live_order_stream():
 
 def test_no_public_module_reaches_live_orders():
     """The public process renders page modules: none may import the ticket page,
-    the banner or the unlock, or read a live-order view."""
+    the banner or the unlock, or read a live-order view. The one way in is the
+    detail panel's LAZY import of ``live_order_link`` (next test)."""
     allowed = {"send_order.py", "idea_banner.py", "live_unlock.py"}
     for path in [ROOT / "live_main.py", ROOT / "live_screens.py", ROOT / "shell.py",
                  *(ROOT / "pages").rglob("*.py")]:
-        if path.name in allowed:
+        if path.name in allowed or "tests" in path.parts:
             continue
         text = path.read_text(encoding="utf-8")
         assert "live_unlock" not in text, path
         assert "cache:live_order" not in text, path
         assert "send_order" not in text, path
         assert "idea_banner" not in text, path
+        assert "/send-order" not in text, path
+        if path.name != "detail.py":
+            assert "live_order_link" not in text, path
     assert "/send-order" not in (ROOT / "live_screens.py").read_text(encoding="utf-8")
+
+
+def test_the_detail_panel_reaches_the_ticket_only_off_the_public_origin():
+    """``detail.py`` is drawn by the public Calculator too. Its one live-order
+    import sits inside ``_live_button``, which runs only where the Copy
+    ThinkorSwim order button was built: never on the public origin."""
+    src = (ROOT / "pages" / "options" / "detail.py").read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    top = [n for n in tree.body if isinstance(n, (ast.Import, ast.ImportFrom))]
+    assert not any("live_order_link" in ast.unparse(n) for n in top)
+    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+              and n.name == "_live_button")
+    assert "import live_order_link" in ast.unparse(fn)
+    assert "tos = None if _shell.is_public() else tos_order.order(s)" in src
+    assert "            if tos:\n                _tos_button(tos)\n                _live_button(s)" in src
 
 
 def test_the_page_never_names_an_account_number():
@@ -115,16 +134,93 @@ def test_the_page_never_names_an_account_number():
     assert "live_orders_config.aliases()" in SRC
 
 
-def test_the_ledger_offers_the_ticket_for_an_idea_row_only(monkeypatch):
-    from pages.options import paper
+# ── Phase 2: every detail panel ──────────────────────────────────────────────
+
+TODAY = __import__("datetime").date(2026, 11, 5)
+PCS = {"symbol": "SPY", "type": "PCS", "expiration": EXP, "short_strike": 95,
+       "long_strike": 90, "credit": 0.50}
+
+
+@pytest.fixture
+def mode(monkeypatch):
     from shared import live_orders_config
+    box = {"mode": "preview"}
     monkeypatch.setattr(live_orders_config, "load",
-                        lambda: {**live_orders_config.DEFAULTS, "mode": "preview"})
-    idea = {"trade_id": "ab12cd34", "source": "trade_idea"}
-    assert paper.offers_live_order(idea)
-    assert not paper.offers_live_order({**idea, "source": "daily_condor"})
-    assert not paper.offers_live_order({**idea, "source": None})
-    assert not paper.offers_live_order({**idea, "trade_id": "a b"})
-    monkeypatch.setattr(live_orders_config, "load",
-                        lambda: {**live_orders_config.DEFAULTS, "mode": "off"})
-    assert not paper.offers_live_order(idea)
+                        lambda: {**live_orders_config.DEFAULTS, "mode": box["mode"]})
+    return box
+
+
+def test_a_ledger_idea_opens_its_own_ticket(mode):
+    import live_order_link as link
+    from pages.options import paper
+    row = {"trade_id": "ab12cd34", "source": "trade_idea", "symbol": "SPY",
+           "expiration": EXP, "legs": QUOTE["legs"]}
+    sig = paper.synth_from_trade(row)
+    assert link.offer(sig, TODAY) == {"href": "/send-order?trade=ab12cd34"}
+    # Any other Ledger row travels as its legs.
+    mine = paper.synth_from_trade({**row, "source": None})
+    assert mine["live_idea"] is None and "spec" in link.offer(mine, TODAY)
+    mode["mode"] = "off"
+    assert link.offer(sig, TODAY) is None
+
+
+def test_a_scanner_row_becomes_a_spec_the_service_will_accept(mode):
+    import live_order_link as link
+    from shared import live_order
+    got = link.offer(PCS, TODAY)
+    spec = got["spec"]
+    assert spec["symbol"] == "SPY" and spec["price"] == 0.5
+    assert spec["label"] == "SPY Vertical"
+    assert sorted((l["strike"], l["side"]) for l in spec["legs"]) == \
+        [(90, "long"), (95, "short")]
+    assert live_order.read_spec(spec, TODAY)["legs"]
+
+
+def test_no_offer_for_what_cannot_be_sent(mode):
+    import live_order_link as link
+    covered = {"symbol": "INTC", "expiration": EXP, "legs": [
+        {"kind": "stock", "side": "long", "qty": 1},
+        {"kind": "call", "side": "short", "strike": 30, "qty": 1, "expiration": EXP}]}
+    naked_call = {"symbol": "SPY", "type": "NAKED_CALL", "expiration": EXP,
+                  "short_strike": 110, "credit": 1.0}
+    expired = {**PCS, "expiration": "2026-11-04"}
+    feed = {**PCS, "symbol": "FOP.ES"}
+    for sig in (covered, naked_call, expired, feed, {}, None):
+        assert link.offer(sig, TODAY) is None, sig
+
+
+def test_the_stash_is_bounded_and_survives_a_reload():
+    import live_order_link as link
+    link._STASH.clear()
+    first = link.stash({"n": 0})
+    assert link.take(first) == {"n": 0} and link.take(first) == {"n": 0}
+    for i in range(link.STASH_MAX):
+        link.stash({"n": i + 1})
+    assert link.take(first) is None and len(link._STASH) == link.STASH_MAX
+    assert link.take("not-hex") is None and link.take(None) is None
+    link._STASH.clear()
+
+
+def test_the_page_opens_from_an_idea_or_a_held_spec_only():
+    import live_order_link as link
+    link._STASH.clear()
+    assert so.source_for("ab12cd34", None) == ("ab12cd34", {"trade_id": "ab12cd34"})
+    token = link.stash({"symbol": "SPY"})
+    assert so.source_for(None, token) == (token, {"quote_id": token,
+                                                  "spec": {"symbol": "SPY"}})
+    view, why = so.source_for(None, "f" * 32)
+    assert view is None and "no longer held" in why
+    view, why = so.source_for("a b", None)
+    assert view is None and "detail panel" in why
+    link._STASH.clear()
+
+
+def test_a_calendar_shows_no_false_unlimited_profit():
+    cal = {**QUOTE, "expirations": [EXP, "2026-12-18"],
+           "legs": [{"kind": "call", "side": "short", "strike": 100, "qty": 1,
+                     "expiration": EXP},
+                    {"kind": "call", "side": "long", "strike": 100, "qty": 1,
+                     "expiration": "2026-12-18"}]}
+    p = so.priced(cal, 2.00, 1)
+    assert p["loss"] == 200.0 and p["profit_known"] is False
+    assert so.priced(QUOTE, 1.50, 1)["profit_known"] is True

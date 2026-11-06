@@ -2071,26 +2071,33 @@ idea can also be sent to the account from the app itself (next section).
   before sending. A price may need rounding to the option's tick size.
 - The button is not on the public site.
 
-### Sending a trade idea to ThinkorSwim
+### Sending a live order (Send Live Order)
 
-A posted trade idea can be sent to your Schwab account as a real order, which then
-shows in ThinkorSwim like any other. This covers a **single call or put**, a
-**vertical** and an **iron condor**; other structures still use the paste above. It
-is off until you turn it on: **Settings → Configuration → Live orders → Live orders**
+A trade can be sent to your Schwab account as a real order, which then shows in
+ThinkorSwim like any other. This covers a **single call or put**, a **vertical**,
+an **iron condor**, a **straddle**, a **strangle**, a **butterfly**, a **condor**,
+a **calendar**, a **diagonal**, and other all-option combinations (sent as a
+custom order). It is not offered for a position that holds shares (a covered
+call), for one that sells more calls than it buys (its loss has no limit), for a
+calendar that sells the far month, for an expired leg, or for **/ES** and **/NQ**.
+It is off until you turn it on: **Settings → Configuration → Live orders → Live orders**
 (`off`, `preview` to let Schwab check orders without placing any, `live` to send).
 
 **Where it starts.**
 
+- Every **Trade detail** panel (Market Scanner, Swing, Captured Signals, Paper
+  Ledger, Calculator) has a **Send Live Order** button under **Copy ThinkorSwim
+  order**, for the same trade.
 - When an idea posts and is booked to the Paper Ledger, a banner appears under the
   page header: *New trade idea: …* with **Open order ticket** and **Dismiss**. It is
   in the app only (never Telegram or Discord), and it goes away after 30 minutes
   (*No banner for an idea older than*).
-- Any idea row in the **Paper Ledger** has a **Send to ThinkorSwim** button in its
-  detail panel.
 
-**The ticket** (`/send-order`) re-prices the idea's legs from a fresh chain and
-shows the live mid beside the price the idea posted at, with a warning when it has
-moved more than 10%. Fill in three boxes:
+**The ticket** (`/send-order`) re-prices the trade's legs from a fresh chain and
+shows the live mid beside the price the idea posted at (for a trade idea) or the
+price the panel showed (for anything else), with a warning when it has moved more
+than 10%. A ticket opened from a panel is held until the app restarts; after a
+restart, open it again from the panel. Fill in three boxes:
 
 - **Limit**: opens at the live mid, on the option's price step.
 - **Contracts**: opens at the most contracts whose maximum loss is at most **$1,000**
@@ -2102,10 +2109,13 @@ moved more than 10%. Fill in three boxes:
 
 Under them: the maximum loss and profit for that size, and the exits, priced off
 the limit with the *ThinkorSwim order* percentages. Because they are priced off the
-limit, a better fill does not move them. **Schwab refuses a stop on a spread**, so a
-vertical or a condor goes in as the opening order plus its profit target; set the
-stop in ThinkorSwim once it fills. A single option gets the full bracket. The same
-order is also shown as ThinkorSwim paste text.
+limit, a better fill does not move them. **Schwab refuses a stop on a spread**, so
+any order of more than one leg goes in as the opening order plus its profit target;
+set the stop in ThinkorSwim once it fills. A single option gets the full bracket. The same
+order is also shown as ThinkorSwim paste text. For a **calendar or diagonal** the
+maximum loss is read at the near expiry (the far leg counted at what it is worth in
+the money then, the least it can be worth), and the profit line says *Max profit
+depends on the far leg's volatility at the near expiry*: no fixed number exists.
 
 **Sending it.**
 

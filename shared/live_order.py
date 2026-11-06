@@ -24,9 +24,14 @@ read: ``{"kind": "call"|"put", "side": "long"|"short", "strike", "qty",
 (SPX or SPXW, NDX or NDXP) depends on the series, and the chain knows it.
 
 PURE: no network, no config read, no clock. Bad input raises ``ValueError``.
+The one import past the standard library is ``shared.symbols``, whose ticker
+allow-list a panel's legs (``read_spec``) must pass, as every other ticker does.
 """
+import datetime as _dt
 import math
 import re
+
+from shared import symbols as _symbols
 
 VARIANTS = ("open", "target", "bracket")
 
@@ -43,9 +48,20 @@ def _finite_positive(v):
             and math.isfinite(v) and v > 0)
 
 
+def shape_legs(legs):
+    """The legs, each with ``sign`` (+1 long, -1 short) and an int ``qty``,
+    WITHOUT needing a Schwab symbol yet: what a structure, a side or a risk is
+    read from. Raises ValueError on anything it cannot read."""
+    return _read_legs(legs, need_symbol=False)
+
+
 def check_legs(legs):
-    """The legs, each with ``sign`` (+1 long, -1 short) and an int ``qty``.
-    Raises ValueError on anything it cannot read."""
+    """:func:`shape_legs`, and each leg must carry its Schwab ``symbol``: what
+    an order is built from."""
+    return _read_legs(legs, need_symbol=True)
+
+
+def _read_legs(legs, *, need_symbol):
     if not isinstance(legs, (list, tuple)) or not 1 <= len(legs) <= MAX_LEGS:
         raise ValueError(f"an order takes 1 to {MAX_LEGS} legs")
     out = []
@@ -65,25 +81,57 @@ def check_legs(legs):
         if not _finite_positive(strike):
             raise ValueError(f"a leg's strike must be a positive number, not {strike!r}")
         symbol = leg.get("symbol")
-        if not isinstance(symbol, str) or not OPTION_SYMBOL_RE.match(symbol):
+        if need_symbol and (not isinstance(symbol, str) or not OPTION_SYMBOL_RE.match(symbol)):
             raise ValueError(f"a leg's symbol is not a Schwab option symbol: {symbol!r}")
         out.append({**leg, "kind": kind, "side": side, "qty": qty,
                     "sign": 1 if side == "long" else -1})
     return out
 
 
+def _exp(leg):
+    return str(leg.get("expiration"))[:10]
+
+
 def complex_type(legs):
-    """Schwab's ``complexOrderStrategyType`` for the legs: ``NONE`` for one leg,
-    ``VERTICAL``, ``IRON_CONDOR``, or ``CUSTOM`` for anything else."""
-    legs = check_legs(legs)
+    """Schwab's ``complexOrderStrategyType`` for the legs, named the way the
+    paste script names them (``tos_order._named``): ``NONE`` for one leg,
+    ``VERTICAL``, ``STRADDLE``, ``STRANGLE``, ``CALENDAR``, ``DIAGONAL``,
+    ``BUTTERFLY`` (equal wings, 1-2-1), ``CONDOR``, ``IRON_CONDOR`` (an iron
+    butterfly is one with equal short strikes), or ``CUSTOM`` for anything else
+    (a ratio, a backspread, a broken wing, a guts strangle)."""
+    legs = shape_legs(legs)
     if len(legs) == 1:
         return "NONE"
-    exps = {str(l.get("expiration"))[:10] for l in legs}
+    exps = {_exp(l) for l in legs}
     kinds = {l["kind"] for l in legs}
     unit = all(l["qty"] == 1 for l in legs)
-    if len(legs) == 2 and unit and len(kinds) == 1 and len(exps) == 1 \
-            and legs[0]["sign"] == -legs[1]["sign"] and legs[0]["strike"] != legs[1]["strike"]:
-        return "VERTICAL"
+    if len(legs) == 2 and unit:
+        a, b = legs
+        if len(kinds) == 1 and a["sign"] == -b["sign"]:
+            if len(exps) == 1 and a["strike"] != b["strike"]:
+                return "VERTICAL"
+            if len(exps) == 2:
+                return "CALENDAR" if a["strike"] == b["strike"] else "DIAGONAL"
+        if kinds == {"call", "put"} and len(exps) == 1 and a["sign"] == b["sign"]:
+            call, put = (a, b) if a["kind"] == "call" else (b, a)
+            if call["strike"] == put["strike"]:
+                return "STRADDLE"
+            if call["strike"] > put["strike"]:
+                return "STRANGLE"
+        return "CUSTOM"
+    if len(exps) != 1:
+        return "CUSTOM"
+    by_strike = sorted(legs, key=lambda l: l["strike"])
+    ks = [l["strike"] for l in by_strike]
+    if len(legs) == 3 and len(kinds) == 1 and len(set(ks)) == 3:
+        q = [l["sign"] * l["qty"] for l in by_strike]
+        s = q[0]
+        if abs(s) == 1 and q == [s, -2 * s, s] and ks[1] - ks[0] == ks[2] - ks[1]:
+            return "BUTTERFLY"
+        return "CUSTOM"
+    if len(legs) == 4 and unit and len(kinds) == 1 and len(set(ks)) == 4:
+        q = [l["sign"] for l in by_strike]
+        return "CONDOR" if q == [q[0], -q[0], -q[0], q[0]] else "CUSTOM"
     if len(legs) == 4 and unit and kinds == {"call", "put"} and len(exps) == 1:
         calls = sorted((l for l in legs if l["kind"] == "call"), key=lambda l: l["strike"])
         puts = sorted((l for l in legs if l["kind"] == "put"), key=lambda l: l["strike"])
@@ -105,10 +153,14 @@ def is_debit(legs):
     say (a mixed CUSTOM position).
 
     The same answers as ``tos_order``'s side: ``+1`` there is a debit here."""
-    legs = check_legs(legs)
+    legs = shape_legs(legs)
     ctype = complex_type(legs)
-    if ctype == "NONE":
+    if ctype in ("NONE", "STRADDLE", "STRANGLE"):
         return legs[0]["sign"] > 0
+    if ctype in ("BUTTERFLY", "CONDOR"):
+        return min(legs, key=lambda l: l["strike"])["sign"] > 0
+    if ctype in ("CALENDAR", "DIAGONAL"):
+        return max(legs, key=_exp)["sign"] > 0
     if ctype == "VERTICAL":
         long_l = next(l for l in legs if l["sign"] > 0)
         short_l = next(l for l in legs if l["sign"] < 0)
@@ -268,9 +320,10 @@ def schwab_order(legs, *, contracts, limit, variant="bracket", debit=None,
 
 # ── Phase 1: what a ticket may send, and its size ───────────────────────────
 
-#: The structures Phase 1 sends. Butterflies, condors, straddles, strangles and
-#: CUSTOM orders are Phase 2.
-PHASE1_TYPES = ("NONE", "VERTICAL", "IRON_CONDOR")
+#: The structures a ticket sends (Phase 1: the first three; Phase 2: the rest).
+#: Anything holding shares (a covered call, a collar) is not sent from here.
+SENDABLE_TYPES = ("NONE", "VERTICAL", "IRON_CONDOR", "STRADDLE", "STRANGLE",
+                  "BUTTERFLY", "CONDOR", "CALENDAR", "DIAGONAL", "CUSTOM")
 
 MULT = 100
 
@@ -296,18 +349,39 @@ def _value_at(legs, price):
     return total
 
 
+def check_expiries(legs):
+    """Raise ValueError unless every short leg is covered by a long leg of the
+    same kind that expires later. One expiry always passes.
+
+    A position whose short leg outlives its long one (a reverse calendar) has a
+    loss nothing here can bound, so it is never sent."""
+    legs = shape_legs(legs)
+    if len({_exp(l) for l in legs}) == 1:
+        return
+    if complex_type(legs) not in ("CALENDAR", "DIAGONAL"):
+        raise ValueError("a position over two expiries is sent only as a calendar or a diagonal")
+    long_l = next(l for l in legs if l["sign"] > 0)
+    short_l = next(l for l in legs if l["sign"] < 0)
+    if _exp(long_l) <= _exp(short_l):
+        raise ValueError("the sold leg outlives the bought one, so its loss has no bound")
+
+
 def max_loss_per_contract(legs, limit, debit):
     """The most one unit can lose at expiry, in dollars, opened at ``limit``
     (per share, positive), or None when the loss has no bound (more calls
     sold than bought).
 
     Read off the payoff at every strike and at zero, the way
-    ``trade_idea.economics`` reads it, never off a row's own ``max_loss``."""
-    legs = check_legs(legs)
+    ``trade_idea.economics`` reads it, never off a row's own ``max_loss``.
+
+    A calendar or a diagonal is read at the NEAR expiry with the far leg
+    counted at its intrinsic value alone: the far leg is worth at least that
+    (a deep in-the-money European put can trade a little under it), so the
+    figure is a ceiling on the loss, and for a calendar it is the debit."""
+    legs = shape_legs(legs)
     if not _finite_positive(limit):
         raise ValueError(f"the limit must be a positive number, not {limit!r}")
-    if len({str(l.get("expiration"))[:10] for l in legs}) != 1:
-        raise ValueError("a max loss needs one expiry")
+    check_expiries(legs)
     if sum(l["sign"] * l["qty"] for l in legs if l["kind"] == "call") < 0:
         return None
     entry = -limit if debit else limit
@@ -328,10 +402,13 @@ def default_contracts(risk_per_contract, budget, ceiling):
 
 def max_profit_per_contract(legs, limit, debit):
     """The most one unit can make at expiry, in dollars, or None when the gain
-    has no bound (more calls bought than sold)."""
-    legs = check_legs(legs)
+    has no bound (more calls bought than sold) or cannot be read off expiry
+    values (a calendar or a diagonal: it depends on the far leg's volatility)."""
+    legs = shape_legs(legs)
     if not _finite_positive(limit):
         raise ValueError(f"the limit must be a positive number, not {limit!r}")
+    if len({_exp(l) for l in legs}) != 1:
+        return None
     if sum(l["sign"] * l["qty"] for l in legs if l["kind"] == "call") > 0:
         return None
     entry = -limit if debit else limit
@@ -360,7 +437,8 @@ def ticket_key(ticket_id):
 
 
 def quote_key(trade_id):
-    """The cache view a Ledger idea's live quote is published to."""
+    """The cache view a live quote is published to: a Ledger idea's trade id,
+    or the page's own 32-hex quote id for legs taken from a detail panel."""
     if not isinstance(trade_id, str) or not TRADE_ID_RE.match(trade_id):
         raise ValueError("not a trade id")
     return f"cache:live_order:quote:{trade_id}"
@@ -447,8 +525,94 @@ def net_mid(legs, mids):
     mid is missing or the mids net to less than a cent."""
     if len(mids) != len(legs) or any(m is None for m in mids):
         return None
-    legs = check_legs(legs)
+    legs = shape_legs(legs)
     net = sum(l["sign"] * l["qty"] * m for l, m in zip(legs, mids))
     if abs(net) < 0.01:
         return None
     return abs(net), net > 0
+
+
+# ── legs from a trade's detail panel (Phase 2) ───────────────────────────────
+
+#: The most characters of a panel's label the views carry.
+LABEL_MAX = 60
+_LABEL_RE = re.compile(r"[^A-Za-z0-9 $./,:()+-]")
+
+
+def merge_legs(legs):
+    """``(legs, lots)``: legs with the same contract and side summed into one,
+    and every quantity divided by their common factor ``lots``. A butterfly
+    held as two middle legs is the 1-2-1 Schwab takes, and a vertical three
+    deep is one vertical (``lots`` 3)."""
+    merged = {}
+    for leg in legs:
+        k = (leg["kind"], leg["side"], float(leg["strike"]), _exp(leg))
+        if k in merged:
+            merged[k] = {**merged[k], "qty": merged[k]["qty"] + leg["qty"]}
+        else:
+            merged[k] = dict(leg)
+    out = list(merged.values())
+    g = math.gcd(*(l["qty"] for l in out))
+    return [{**l, "qty": l["qty"] // g} for l in out], g
+
+
+def read_spec(spec, today):
+    """A detail panel's trade, checked: ``{symbol, legs, label, price}``, with
+    the legs merged (:func:`merge_legs`) and ``price`` the per-unit price the
+    panel showed (None when it showed none). Raises ValueError with a reason
+    the page can show. ``today`` is the Central date.
+
+    This is what a ticket opened from any panel sends, so the service checks it
+    here as strictly as an idea it read itself: the ticker against the one
+    allow-list, each leg's kind, side, strike, quantity and expiry, a structure
+    it may send, and expiries that bound the loss."""
+    if not isinstance(spec, dict):
+        raise ValueError("the trade cannot be read")
+    symbol = _symbols.clean_symbol(spec.get("symbol"))
+    if symbol is None:
+        raise ValueError("the ticker cannot be read")
+    raw = spec.get("legs")
+    if not isinstance(raw, list) or not 1 <= len(raw) <= 2 * MAX_LEGS:
+        raise ValueError(f"an order takes 1 to {MAX_LEGS} legs")
+    legs = []
+    for leg in raw:
+        if not isinstance(leg, dict):
+            raise ValueError("a leg cannot be read")
+        qty = leg.get("qty", 1)
+        if isinstance(qty, float) and qty.is_integer():
+            qty = int(qty)
+        try:
+            exp = _dt.date.fromisoformat(str(leg.get("expiration") or "")[:10])
+        except ValueError:
+            raise ValueError("a leg's expiry cannot be read") from None
+        if exp < today:
+            raise ValueError("a leg has expired")
+        legs.append({"kind": str(leg.get("kind", "")).lower(),
+                     "side": str(leg.get("side", "")).lower(),
+                     "strike": leg.get("strike"), "qty": qty,
+                     "expiration": exp.isoformat()})
+    if len(legs) > MAX_LEGS:                  # two halves of one leg may merge
+        legs, _lots = merge_legs([dict(l, sign=0) for l in _read_many(legs)])
+    else:
+        legs, _lots = merge_legs(shape_legs(legs))
+    legs = [{k: l[k] for k in ("kind", "side", "strike", "qty", "expiration")}
+            for l in shape_legs(legs)]
+    if complex_type(legs) not in SENDABLE_TYPES:
+        raise ValueError("this structure is not sent from here")
+    check_expiries(legs)
+    if sum((1 if l["side"] == "long" else -1) * l["qty"]
+           for l in legs if l["kind"] == "call") < 0:
+        raise ValueError("more calls are sold than bought, so the loss has no limit")
+    price = spec.get("price")
+    if not _finite_positive(price):
+        price = None
+    label = _LABEL_RE.sub("", str(spec.get("label") or symbol))[:LABEL_MAX].strip() or symbol
+    return {"symbol": symbol, "legs": legs, "label": label, "price": price}
+
+
+def _read_many(legs):
+    """:func:`shape_legs` for a list longer than one order takes (before merging)."""
+    out = []
+    for i in range(0, len(legs), MAX_LEGS):
+        out.extend(shape_legs(legs[i:i + MAX_LEGS]))
+    return out

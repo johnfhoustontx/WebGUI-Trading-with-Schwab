@@ -1,13 +1,19 @@
-"""Send to ThinkorSwim (/send-order?trade=<id>): a Paper Ledger trade idea as a
-real order in the Schwab account (live-order design, Phase 1).
+"""Send Live Order: a trade as a real order in the Schwab account (live-order
+design, Phases 1-2). Two ways in:
+
+* ``/send-order?trade=<id>``: a Paper Ledger trade idea (the banner, or an
+  idea row's detail panel); the service reads the idea from the Ledger;
+* ``/send-order?spec=<token>``: any other trade's detail panel, whose legs
+  ``live_order_link`` stashed under that token; the service checks them with
+  ``live_order.read_spec`` and prices them itself.
 
 The page asks and shows; the options service acts. Every number the service
 will send is worked out here with the SAME pure builder it uses
 (``shared/live_order.py``), so what the ticket shows is what is sent:
 
 1. **Quote**: on load (and on Refresh price) the page enqueues ``quote``; the
-   service prices the idea's legs from a chain fetched fresh and publishes
-   ``live_order.quote_key(trade)``.
+   service prices the trade's legs from a chain fetched fresh and publishes
+   ``live_order.quote_key(trade or token)``.
 2. **Preview**: enqueues ``preview`` with a ticket id made here; Schwab checks
    the order and places nothing. Changing the limit, the size or the account
    drops the preview.
@@ -31,6 +37,7 @@ import uuid
 from nicegui import ui
 
 import bus_client
+import live_order_link
 import live_unlock
 from pages import fmt
 from pages import ui_kit as kit
@@ -61,6 +68,21 @@ def _view(key: str) -> str:
 
 def valid_trade(trade) -> bool:
     return isinstance(trade, str) and bool(live_order.TRADE_ID_RE.match(trade))
+
+
+def source_for(trade, spec_token):
+    """``(view id, the source a command carries)`` for the page's address, or
+    ``(None, reason)`` when it names nothing the page can open."""
+    if valid_trade(trade):
+        return trade, {"trade_id": trade}
+    if spec_token is not None:
+        spec = live_order_link.take(spec_token)
+        if spec is None:
+            return None, ("This ticket is no longer held (the app restarted, or it is "
+                          "an old link). Open it again from the trade's detail panel.")
+        return spec_token, {"quote_id": spec_token, "spec": spec}
+    return None, ("Open this page from a trade's detail panel (Send Live Order), "
+                  "or from the New trade idea banner.")
 
 
 def risk_total(loss_per_contract, contracts):
@@ -111,6 +133,9 @@ def priced(quote, limit, contracts):
     return {"loss": risk_total(loss, contracts),
             "profit": None if profit is None or contracts is None
             else round(profit * contracts, 2),
+            # Two expiries: the gain depends on the far leg's volatility, so
+            # None there is "cannot be read", not "no limit".
+            "profit_known": len(quote.get("expirations") or ()) < 2,
             "target": target, "stop": stop,
             "stop_on_order": bool(exits.get("stop_on_order")),
             "exit_tif": exits.get("exit_tif", "GTC")}
@@ -194,18 +219,18 @@ def _money(v):
 
 # ── page ────────────────────────────────────────────────────────────────────
 
-def render(trade: str | None, client: str) -> None:
+def render(trade: str | None, client: str, spec: str | None = None) -> None:
     with kit.page(width="form"):
-        kit.header("Send to ThinkorSwim")
-        if not valid_trade(trade):
-            kit.notice("Open this page from a trade idea: the banner, or the Paper "
-                       "Ledger's Send to ThinkorSwim button.")
+        kit.header("Send Live Order")
+        view_id, source = source_for(trade, spec)
+        if view_id is None:
+            kit.notice(source)
             return
-        _ticket_page(trade, client)
+        _ticket_page(view_id, source, client)
 
 
-def _ticket_page(trade: str, client: str) -> None:
-    quote_view = _view(live_order.quote_key(trade))
+def _ticket_page(view_id: str, source: dict, client: str) -> None:
+    quote_view = _view(live_order.quote_key(view_id))
     st = {"quote": None, "ticket": None, "ticket_view": None, "quote_ver": None,
           "ticket_ver": None, "risk_cls": RISK_CLASS["ok"], "last_status": 0.0,
           "seeded": False}
@@ -303,11 +328,14 @@ def _ticket_page(trade: str, client: str) -> None:
                 ui.label(leg_line(leg)).classes(f"text-sm {_t.LABEL}")
         if q.get("live_price") is not None:
             posted = q.get("posted_price")
+            said = "posted at" if q.get("price_source") == "idea" else "the panel showed"
             price_line.text = (f"Live mid {fmt.price(q['live_price'])}"
-                               + (f", posted at {fmt.price(posted)}" if posted else "")
+                               + (f", {said} {fmt.price(posted)}" if posted else "")
                                + f". Read at {read_time(q.get('checked_at'))} Central.")
-        drift_line.text = (f"The price has moved {fmt.pct(q.get('drift_pct'), signed=True)} since "
-                           "the idea was posted." if q.get("drift_warn") else "")
+        since = "the idea was posted" if q.get("price_source") == "idea" \
+            else "the price the panel showed"
+        drift_line.text = (f"The price has moved {fmt.pct(q.get('drift_pct'), signed=True)} "
+                           f"since {since}." if q.get("drift_warn") else "")
         drift_line.set_visibility(bool(q.get("drift_warn")))
         quote_error.text = q.get("error") or ""
         quote_error.set_visibility(bool(q.get("error")))
@@ -338,7 +366,9 @@ def _ticket_page(trade: str, client: str) -> None:
             if cls != st["risk_cls"]:
                 risk_line.classes(remove=st["risk_cls"], add=cls)
                 st["risk_cls"] = cls
-            profit_line.text = f"Max profit {_money(p['profit'])}"
+            profit_line.text = (f"Max profit {_money(p['profit'])}" if p["profit_known"]
+                                else "Max profit depends on the far leg's volatility "
+                                     "at the near expiry")
             exits_line.text = (f"Take profit at {fmt.price(p['target'])}"
                                + (f", stop at {fmt.price(p['stop'])}" if p["stop_on_order"]
                                   else "") + f" ({p['exit_tif']})")
@@ -402,16 +432,17 @@ def _ticket_page(trade: str, client: str) -> None:
 
     @guard
     def _refresh(_e=None):
-        if _request("quote", {"trade_id": trade}):
+        if _request("quote", dict(source)):
             kit.set_busy(refresh_btn)
 
     @guard
     def _preview(_e=None):
         limit, contracts, alias = _inputs()
         ticket_id = uuid.uuid4().hex
-        args = {"ticket_id": ticket_id, "trade_id": trade,
-                "idea_posted": (st["quote"] or {}).get("idea_posted"),
+        args = {"ticket_id": ticket_id, **source,
                 "alias": alias, "contracts": contracts, "limit": limit}
+        if "trade_id" in source:
+            args["idea_posted"] = (st["quote"] or {}).get("idea_posted")
         if _request("preview", args):
             st["ticket"], st["ticket_ver"] = None, None
             st["ticket_view"] = _view(live_order.ticket_key(ticket_id))
@@ -487,7 +518,7 @@ def _ticket_page(trade: str, client: str) -> None:
     preview_btn.on_click(_preview)
     send_btn.on_click(_ask_send)
 
-    # An earlier quote (this idea's, from a previous visit) paints at once; the
+    # An earlier quote (this trade's, from a previous visit) paints at once; the
     # fresh one asked for below replaces it when it lands.
     st["quote_ver"] = bus_client.read_version(quote_view)
     st["quote"] = bus_client.read(quote_view)

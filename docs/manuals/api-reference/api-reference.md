@@ -826,20 +826,32 @@ fall back to another symbol's chain: a stale capture is labelled, never shown as
 
 ### Live orders to ThinkorSwim (`cmd:live_order`)
 
-A posted trade idea that the Paper Ledger booked can be sent to the Schwab account as a real
-order, for a single option, a vertical or an iron condor (Phase 1 of the
-[design](../../plans/2026-11-05-live-order-to-thinkorswim-design.md)). The page is
-`/send-order?trade=<trade_id>` in the private app; the service is `options_svc`
-(`live_order_handlers.py`, store `live_order_store.py`). Everything is off while
-`config/live_orders.toml mode = "off"`, the shipped value.
+A trade can be sent to the Schwab account as a real order (Phases 1-2 of the
+[design](../../plans/2026-11-05-live-order-to-thinkorswim-design.md)): a single option, a
+vertical, an iron condor, a straddle, a strangle, a butterfly, a condor, a calendar, a
+diagonal, or any other all-option mix as `CUSTOM` (`live_order.SENDABLE_TYPES`). The page
+is in the private app, reached two ways:
+
+- `/send-order?trade=<trade_id>`: a trade idea the Paper Ledger booked; the service reads
+  its legs from the Ledger.
+- `/send-order?spec=<token>`: any other detail panel. `webgui/live_order_link.py` stashes
+  the panel's trade as a SPEC `{symbol, legs, label, price}` under a 32-hex token (in the
+  webgui process's memory, the newest 64), and the commands carry the spec itself. The
+  service checks it again with `live_order.read_spec` (the ticker allow-list, each leg,
+  a sendable structure, no expired leg, no short far leg, no uncovered call), refuses a
+  feed symbol, and prices it itself; `price` is only what the panel showed, for the drift
+  warning.
+
+The service is `options_svc` (`live_order_handlers.py`, store `live_order_store.py`).
+Everything is off while `config/live_orders.toml mode = "off"`, the shipped value.
 
 **Commands (`cmd:live_order`, domain `live_order`).** Each is dropped unread when it carries
 no time or is older than `max_command_age_sec` (30).
 
 | Command | Args | Does |
 |---|---|---|
-| `quote` | `trade_id` | Reprices the idea's legs from a fresh chain (`maxAge: 0`) and publishes the quote view |
-| `preview` | `ticket_id` (32 hex, new), `trade_id`, `idea_posted`, `alias`, `contracts`, `limit` | Builds the order, sends it to `/orders/preview`, stores the ticket (`previewed` if Schwab accepted it, else `refused`; good for `ticket_ttl_sec` 120) and publishes the ticket view. A repeated `ticket_id` is ignored |
+| `quote` | `trade_id`, or `quote_id` (32 hex) + `spec` | Reprices the trade's legs from a fresh chain (`maxAge: 0`, every expiry the legs use) and publishes the quote view under the `trade_id` or the `quote_id` |
+| `preview` | `ticket_id` (32 hex, new), `trade_id` + `idea_posted` or `quote_id` + `spec`, `alias`, `contracts`, `limit` | Builds the order, sends it to `/orders/preview`, stores the ticket (`previewed` if Schwab accepted it, else `refused`; good for `ticket_ttl_sec` 120) and publishes the ticket view. A repeated `ticket_id` is ignored |
 | `place` | `ticket_id` | Sends a `previewed` ticket once: mode `live`, the regular session, not expired, the order unchanged (a digest), the size inside the ceilings. Claimed with one conditional UPDATE, then ONE POST to `/orders/place`. Ends `sent`, `rejected` or `unknown` (settled by listing the account's orders: exactly one match on legs and price) |
 | `status` | `ticket_id` | Expires a stale preview, settles an `unknown`, or reads a `sent` order's Schwab status; republishes the ticket view |
 
@@ -847,7 +859,7 @@ no time or is older than `max_command_age_sec` (30).
 
 | Key | Holds |
 |---|---|
-| `cache:live_order:quote:<trade_id>` | `mode`, `aliases`, `in_session`, `symbol`, `structure`, `strategy`, `expiration`, `debit`, `posted_price`, `legs[]` (each with its `mid`), `live_price`, `max_loss_per_contract`, `max_profit_per_contract` (`null` when unbounded), `default_contracts`, `drift_pct`, `drift_warn`, `exits` (`target`, `stop`, `stop_on_order`, `exit_tif`, `pcts`); `error` when it could not be priced |
+| `cache:live_order:quote:<trade_id or quote_id>` | `mode`, `aliases`, `in_session`, `symbol`, `structure`, `strategy`, `expiration`, `expirations[]`, `price_source` (`idea` or `panel`), `debit`, `posted_price`, `legs[]` (each with its `mid`), `live_price`, `max_loss_per_contract`, `max_profit_per_contract` (`null` when unbounded, or with two expiries when it depends on volatility), `default_contracts`, `drift_pct`, `drift_warn`, `exits` (`target`, `stop`, `stop_on_order`, `exit_tif`, `pcts`); `error` when it could not be priced |
 | `cache:live_order:ticket:<ticket_id>` | `status`, `alias`, `contracts`, `limit`, `max_loss`, `verdict`, `messages[]`, `legs[]` (instruction, quantity, option symbol), `expires_epoch`, `order_id`, `order_status`, `error`, `exits`, `in_session` |
 
 ⚠ Neither view carries an account number or hash: the alias is looked up to a hash in the

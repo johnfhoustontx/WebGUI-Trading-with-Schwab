@@ -3431,14 +3431,19 @@ review too. Reading across pages: the [EOD Report](#eod-report) tallies these ro
 book of their own (its *Paper Trades* table and *Paper trades* tile are yours only) and
 its **Weekly idea review** summarises them; the Symbol dossier never lists one as held.
 
-### Sending an idea to the real account
+### Sending a trade to the real account
 
-**An idea row can become a real order.** Its detail panel has a **Send to ThinkorSwim**
-button (and a banner offers the same when an idea is booked), which opens the order
-ticket at `/send-order`. It works for a single option, a vertical and an iron condor, and
-only while **Settings → Configuration → Live orders** is on (it ships off).
+**Any row can become a real order.** Every Trade detail panel (here, and on the Market
+Scanner, Swing, Captured Signals and the Calculator) has a **Send Live Order** button
+(and a banner offers the same when an idea is booked), which opens the order ticket at
+`/send-order`. It works for a single option, a vertical, an iron condor, a straddle, a
+strangle, a butterfly, a condor, a calendar, a diagonal and other all-option
+combinations; not for shares, a sold call with no bought call to cover it, or /ES and
+/NQ. It shows only while **Settings → Configuration → Live orders** is on (it ships off).
+An idea row's ticket reads the idea from the Ledger; any other row's ticket carries its
+legs, which the service checks again and prices itself.
 
-| | Copy ThinkorSwim order | Send to ThinkorSwim |
+| | Copy ThinkorSwim order | Send Live Order |
 |---|---|---|
 | What it does | Puts paste text on the clipboard | Sends the order to your Schwab account |
 | Who checks it | You, in ThinkorSwim's ticket | Schwab's own order check (Preview), then you |

@@ -1,6 +1,6 @@
 # Send a trade idea to ThinkorSwim as a live order: design
 
-**Date:** 2026-11-05 · **Status:** Phase 0 run on prod; Phase 1 built (ships `mode = "off"`) · **Branch:** `claude/live-trade-thinkorswim-47ff6c`
+**Date:** 2026-11-05 · **Status:** Phase 0 run on prod; Phase 1 merged and on prod (mode `preview`); Phase 2 built · **Branch:** `claude/live-trade-thinkorswim-47ff6c`
 
 ## What the operator asked for
 
@@ -105,7 +105,7 @@ or the Paper Account, and nothing in those books ever sends a live order.
    banner exists in `main.py` only, so the public process (`live_main.py`) never
    draws it.
 2. **From the Paper Ledger.** An idea's row (`is_idea`) gets a
-   **Send to ThinkorSwim** button that opens the same page, for an idea that was
+   **Send Live Order** button that opens the same page, for an idea that was
    missed or dismissed.
 3. **The ticket page** (`/send-order`, behind the login; never in `live_screens`):
    - the idea as posted: structure, legs, expiry, the price it was posted at;
@@ -364,7 +364,9 @@ place.
   no order text for them; `tos_order` already gives them none.
 - **Covered calls**: these buy 100 shares a contract. They come in the last phase,
   as an opening order only, as the paste script does.
-- **Calendars and diagonals** never post as ideas, so they never reach this page.
+- ~~**Calendars and diagonals** never post as ideas, so they never reach this page.~~
+  They do since Phase 2, which opens the ticket from every detail panel: see
+  "Phase 2" below.
 - **Market orders**: never. A limit only.
 - **Booking a live fill into the paper books**: not done. The paper books stay a
   measurement of the app's picks, not of what the operator traded.
@@ -379,7 +381,9 @@ place.
 1. **Single options, verticals and iron condors**, which covers most ideas: the
    builder, the ticket page, preview, place, the journal and the status read. The
    in-app idea banner comes with it. Ships with `mode = "off"`.
-2. **The other structures**: butterflies, condors, straddles and strangles, CUSTOM.
+2. **The other structures**: butterflies, condors, straddles and strangles,
+   calendars and diagonals, CUSTOM; and the button on every detail panel, not only
+   on an idea row. Built 2026-11-05 (see "Phase 2" below).
 3. **Cancel from the page** (a third write route, `DELETE`, by the same rules), a
    list of today's live orders, and the covered call.
 
@@ -471,6 +475,47 @@ it is cached or stored.**
   …1191 ("Trading account", the default) and …6763 ("IRA") for prod's
   `config/local/live_orders.toml`. …2878 and …9591 stay off it.
 - `previewOrder` stays the gate before Send.
+
+## Phase 2: every structure, from every detail panel
+
+Built 2026-11-05. The operator's words: rename the button to **Send Live Order**
+and make it available on all Trade Detail windows.
+
+**Structures.** `live_order.complex_type` names what `tos_order._named` names:
+`STRADDLE` (a call and a put, same strike, same side), `STRANGLE` (the call's strike
+above the put's), `BUTTERFLY` (1-2-1, equal wings, one kind), `CONDOR` (four of one
+kind, signs s,−s,−s,s), `CALENDAR` / `DIAGONAL` (two expiries, one kind, opposite
+sides), and `CUSTOM` for any other all-option mix. `SENDABLE_TYPES` is the set the
+service builds. Whether the order is a debit is read from the legs where the shape
+says it (a straddle's side, a fly's or condor's lowest strike, a calendar's far leg);
+a mixed `CUSTOM` is read from the net of the live mids. Duplicate legs are summed and
+the quantities divided by their gcd (`merge_legs`), so a fly stored as four legs is
+one 1-2-1 order with the lot count as contracts.
+
+**Calendars and diagonals.** Their loss is bounded at the near expiry with the far
+leg counted at intrinsic (the least it can be worth then); a calendar that SELLS the
+far month is refused (`check_expiries`), because its loss after the near expiry has
+no bound. Their max profit depends on the far leg's volatility at the near expiry,
+so the ticket says so rather than print a number or "unlimited". The chain is
+fetched across every expiry the legs use.
+
+**The second way in.** A non-idea trade has no Ledger row for the service to read,
+so the panel sends a SPEC `{symbol, legs, label, price}`. Tier 1 holds it in memory
+under a random 32-hex token (`webgui/live_order_link.py`, the newest 64) and opens
+`/send-order?spec=<token>`; the token is the quote id, so the address bar carries
+no legs. Every command carries the spec, and the service re-reads it with
+`live_order.read_spec`, the same checks for both tiers: the ticker against
+`shared.symbols`, each leg, a sendable structure, no expired leg, no short far leg,
+and no more calls sold than bought. A feed symbol (/ES, /NQ) is refused in both
+tiers. The service prices the legs itself; the panel's price is used only for the
+drift warning ("the panel showed"). So the service still sends only what it built
+and Schwab previewed.
+
+**Where the button lives.** `pages/options/detail.py` is drawn by the public
+Calculator too, so it imports `live_order_link` LAZILY inside `_live_button`, which
+runs only where the Copy ThinkorSwim order button was built (never on the public
+origin); `test_send_order.py` pins both. The Paper Ledger's own footer button went:
+an idea row's panel carries `live_idea`, and its button opens the idea's ticket.
 
 ## How it is tested and verified
 

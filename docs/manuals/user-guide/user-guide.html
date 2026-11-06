@@ -134,7 +134,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#expected-move">Expected Move</a></li>
 <li><a href="#market-scanner">Market Scanner</a><ul>
 <li><a href="#copying-a-trade-to-thinkorswim">Copying a trade to ThinkorSwim</a></li>
-<li><a href="#sending-a-trade-idea-to-thinkorswim">Sending a trade idea to ThinkorSwim</a></li>
+<li><a href="#sending-a-live-order-send-live-order">Sending a live order (Send Live Order)</a></li>
 <li><a href="#using-the-checklist-to-pick-a-trade">Using the checklist to pick a trade</a></li>
 <li><a href="#other-structures">Other structures</a></li>
 <li><a href="#why-was-there-no-trade-on-x-today">"Why was there no trade on X today?"</a></li>
@@ -2516,24 +2516,31 @@ idea can also be sent to the account from the app itself (next section).</p>
   before sending. A price may need rounding to the option's tick size.</li>
 <li>The button is not on the public site.</li>
 </ul>
-<h3 id="sending-a-trade-idea-to-thinkorswim">Sending a trade idea to ThinkorSwim</h3>
-<p>A posted trade idea can be sent to your Schwab account as a real order, which then
-shows in ThinkorSwim like any other. This covers a <strong>single call or put</strong>, a
-<strong>vertical</strong> and an <strong>iron condor</strong>; other structures still use the paste above. It
-is off until you turn it on: <strong>Settings → Configuration → Live orders → Live orders</strong>
+<h3 id="sending-a-live-order-send-live-order">Sending a live order (Send Live Order)</h3>
+<p>A trade can be sent to your Schwab account as a real order, which then shows in
+ThinkorSwim like any other. This covers a <strong>single call or put</strong>, a <strong>vertical</strong>,
+an <strong>iron condor</strong>, a <strong>straddle</strong>, a <strong>strangle</strong>, a <strong>butterfly</strong>, a <strong>condor</strong>,
+a <strong>calendar</strong>, a <strong>diagonal</strong>, and other all-option combinations (sent as a
+custom order). It is not offered for a position that holds shares (a covered
+call), for one that sells more calls than it buys (its loss has no limit), for a
+calendar that sells the far month, for an expired leg, or for <strong>/ES</strong> and <strong>/NQ</strong>.
+It is off until you turn it on: <strong>Settings → Configuration → Live orders → Live orders</strong>
 (<code>off</code>, <code>preview</code> to let Schwab check orders without placing any, <code>live</code> to send).</p>
 <p><strong>Where it starts.</strong></p>
 <ul>
+<li>Every <strong>Trade detail</strong> panel (Market Scanner, Swing, Captured Signals, Paper
+  Ledger, Calculator) has a <strong>Send Live Order</strong> button under <strong>Copy ThinkorSwim
+  order</strong>, for the same trade.</li>
 <li>When an idea posts and is booked to the Paper Ledger, a banner appears under the
   page header: <em>New trade idea: …</em> with <strong>Open order ticket</strong> and <strong>Dismiss</strong>. It is
   in the app only (never Telegram or Discord), and it goes away after 30 minutes
   (<em>No banner for an idea older than</em>).</li>
-<li>Any idea row in the <strong>Paper Ledger</strong> has a <strong>Send to ThinkorSwim</strong> button in its
-  detail panel.</li>
 </ul>
-<p><strong>The ticket</strong> (<code>/send-order</code>) re-prices the idea's legs from a fresh chain and
-shows the live mid beside the price the idea posted at, with a warning when it has
-moved more than 10%. Fill in three boxes:</p>
+<p><strong>The ticket</strong> (<code>/send-order</code>) re-prices the trade's legs from a fresh chain and
+shows the live mid beside the price the idea posted at (for a trade idea) or the
+price the panel showed (for anything else), with a warning when it has moved more
+than 10%. A ticket opened from a panel is held until the app restarts; after a
+restart, open it again from the panel. Fill in three boxes:</p>
 <ul>
 <li><strong>Limit</strong>: opens at the live mid, on the option's price step.</li>
 <li><strong>Contracts</strong>: opens at the most contracts whose maximum loss is at most <strong>$1,000</strong>
@@ -2545,10 +2552,13 @@ moved more than 10%. Fill in three boxes:</p>
 </ul>
 <p>Under them: the maximum loss and profit for that size, and the exits, priced off
 the limit with the <em>ThinkorSwim order</em> percentages. Because they are priced off the
-limit, a better fill does not move them. <strong>Schwab refuses a stop on a spread</strong>, so a
-vertical or a condor goes in as the opening order plus its profit target; set the
-stop in ThinkorSwim once it fills. A single option gets the full bracket. The same
-order is also shown as ThinkorSwim paste text.</p>
+limit, a better fill does not move them. <strong>Schwab refuses a stop on a spread</strong>, so
+any order of more than one leg goes in as the opening order plus its profit target;
+set the stop in ThinkorSwim once it fills. A single option gets the full bracket. The same
+order is also shown as ThinkorSwim paste text. For a <strong>calendar or diagonal</strong> the
+maximum loss is read at the near expiry (the far leg counted at what it is worth in
+the money then, the least it can be worth), and the profit line says <em>Max profit
+depends on the far leg's volatility at the near expiry</em>: no fixed number exists.</p>
 <p><strong>Sending it.</strong></p>
 <ol>
 <li><strong>Preview</strong>: Schwab checks the order and places nothing. Its answer (and any

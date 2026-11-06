@@ -288,7 +288,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#automatic-exits">Automatic exits</a></li>
 <li><a href="#risk-limits-on-new-trades">Risk limits on new trades</a></li>
 <li><a href="#trade-ideas-in-the-ledger">Trade ideas in the ledger</a></li>
-<li><a href="#sending-an-idea-to-the-real-account">Sending an idea to the real account</a></li>
+<li><a href="#sending-a-trade-to-the-real-account">Sending a trade to the real account</a></li>
 <li><a href="#reading-the-screen_17">Reading the screen</a></li>
 <li><a href="#why-it-matters_17">Why it matters</a></li>
 <li><a href="#when-to-use-it_16">When to use it</a></li>
@@ -4905,17 +4905,22 @@ keep being marked and closed. Deleting one idea row by hand removes it from the 
 review too. Reading across pages: the <a href="#eod-report">EOD Report</a> tallies these rows in a
 book of their own (its <em>Paper Trades</em> table and <em>Paper trades</em> tile are yours only) and
 its <strong>Weekly idea review</strong> summarises them; the Symbol dossier never lists one as held.</p>
-<h3 id="sending-an-idea-to-the-real-account">Sending an idea to the real account</h3>
-<p><strong>An idea row can become a real order.</strong> Its detail panel has a <strong>Send to ThinkorSwim</strong>
-button (and a banner offers the same when an idea is booked), which opens the order
-ticket at <code>/send-order</code>. It works for a single option, a vertical and an iron condor, and
-only while <strong>Settings → Configuration → Live orders</strong> is on (it ships off).</p>
+<h3 id="sending-a-trade-to-the-real-account">Sending a trade to the real account</h3>
+<p><strong>Any row can become a real order.</strong> Every Trade detail panel (here, and on the Market
+Scanner, Swing, Captured Signals and the Calculator) has a <strong>Send Live Order</strong> button
+(and a banner offers the same when an idea is booked), which opens the order ticket at
+<code>/send-order</code>. It works for a single option, a vertical, an iron condor, a straddle, a
+strangle, a butterfly, a condor, a calendar, a diagonal and other all-option
+combinations; not for shares, a sold call with no bought call to cover it, or /ES and
+/NQ. It shows only while <strong>Settings → Configuration → Live orders</strong> is on (it ships off).
+An idea row's ticket reads the idea from the Ledger; any other row's ticket carries its
+legs, which the service checks again and prices itself.</p>
 <table>
 <thead>
 <tr>
 <th></th>
 <th>Copy ThinkorSwim order</th>
-<th>Send to ThinkorSwim</th>
+<th>Send Live Order</th>
 </tr>
 </thead>
 <tbody>

@@ -1171,7 +1171,7 @@ _TAB_COLOR = {
     "/trade": "#26c6da",                 # Trade — cyan
     "/portfolio": "#9ccc65",             # Portfolio — light green
     "/eod": "#78909c",                   # EOD Report — blue grey
-    "/send-order": "#66bb6a",            # Send to ThinkorSwim — the Ledger's green
+    "/send-order": "#66bb6a",            # Send Live Order — the Ledger's green
     "/x": "#1d9bf0",                     # Post to X — X blue
     # Parchment: a pale, low-saturation tan. Every other colour in this map is
     # a saturated Material hue or a blue grey, so a paper colour is the one
@@ -2716,16 +2716,19 @@ def eod_weekly_page() -> None:
 
 
 @_page("/send-order")
-def send_order_page(request: Request, trade: str | None = None) -> None:
+def send_order_page(request: Request, trade: str | None = None,
+                    spec: str | None = None) -> None:
     # ⚠ A @ui.page signature IS its query-parameter surface. ``trade`` is a
     # Paper Ledger id that reaches a Redis key name and the options service, so
     # pages.send_order.render allow-lists it (shared.live_order.TRADE_ID_RE) and
-    # the service allow-lists it AGAIN. ``request`` is injected, never a query
+    # the service allow-lists it AGAIN. ``spec`` is a token (32 hex) that only
+    # LOOKS UP legs live_order_link stashed in this process; a stranger's token
+    # finds nothing. ``request`` is injected, never a query
     # parameter: the authenticator code's failures count against this address.
     # Private only: never in live_screens (live-order design, Phase 1).
-    with _layout("/options/paper", "Send to ThinkorSwim"):
+    with _layout("/options/paper", "Send Live Order"):
         from pages import send_order
-        send_order.render(trade, _client_ip(request))
+        send_order.render(trade, _client_ip(request), spec)
 
 
 @_page("/x")

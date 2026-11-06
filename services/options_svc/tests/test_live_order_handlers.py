@@ -1,4 +1,4 @@
-"""cmd:live_order: a Ledger trade idea -> a Schwab order (live-order design, Phase 1).
+"""cmd:live_order: a trade -> a Schwab order (live-order design, Phases 1-2).
 
 Nothing here reaches the network or a real store: the proxy is a fake answering
 from a table, the Ledger row is handed in, and the ticket store is a temp file.
@@ -218,18 +218,24 @@ def test_preview_refuses_with_the_switch_off(env):
     assert env.proxy.calls == []
 
 
-def test_preview_refuses_a_feed_symbol_and_a_later_phase_structure(env):
+def test_preview_refuses_a_feed_symbol_and_sends_a_phase_2_butterfly(env):
     env.rows[TRADE] = _row(symbol="FOP.ES")
     assert "/ES" in _preview(env)["error"]
+    # Held as two middle legs: merged to the 1-2-1 Schwab takes.
     env.rows[TRADE] = _row(legs=[
         {"kind": "call", "side": "long", "strike": 95, "qty": 1, "expiration": EXP},
-        {"kind": "call", "side": "short", "strike": 100, "qty": 2, "expiration": EXP},
+        {"kind": "call", "side": "short", "strike": 100, "qty": 1, "expiration": EXP},
+        {"kind": "call", "side": "short", "strike": 100, "qty": 1, "expiration": EXP},
         {"kind": "call", "side": "long", "strike": 105, "qty": 1, "expiration": EXP}])
     CHAIN["callExpDateMap"][f"{EXP}:0"]["95.0"] = _contract("SPY   261106C00095000", 7.0, 7.2)
     try:
-        assert "not sent from here yet" in _preview(env, ticket_id="b" * 32)["error"]
+        v = _preview(env, ticket_id="b" * 32, limit=1.0)
     finally:
         del CHAIN["callExpDateMap"][f"{EXP}:0"]["95.0"]
+    assert v["status"] == "previewed" and v["structure"] == "BUTTERFLY"
+    payload = store.get("b" * 32)["payload"]
+    assert payload["complexOrderStrategyType"] == "BUTTERFLY"
+    assert sorted(l["quantity"] for l in payload["orderLegCollection"]) == [2, 2, 4]
 
 
 def test_a_repeated_preview_changes_nothing(env):
@@ -395,8 +401,106 @@ def test_it_writes_only_its_own_views():
     keys = {ast.unparse(n.value) for n in ast.walk(tree)
             if isinstance(n, ast.Assign) and any(getattr(t, "id", None) == "key"
                                                  for t in n.targets)}
-    assert keys == {"live_order.quote_key(trade_id)", "live_order.ticket_key(ticket_id)"}
+    assert keys == {"live_order.quote_key(view_id)", "live_order.ticket_key(ticket_id)"}
 
 
 def test_the_ticket_view_never_names_the_hash():
     assert "account_hash" not in h._TICKET_FIELDS
+
+
+# ── Phase 2: a trade from any detail panel ───────────────────────────────────
+
+QID = "c" * 32
+FAR = "2026-12-18"
+FAR_CHAIN = {
+    "callExpDateMap": {f"{EXP}:0": CHAIN["callExpDateMap"][f"{EXP}:0"],
+                       f"{FAR}:42": {"100.0": _contract("SPY   261218C00100000", 4.40, 4.60)}},
+    "putExpDateMap": CHAIN["putExpDateMap"],
+}
+
+
+def _spec(legs=None, **kw):
+    s = {"symbol": "SPY", "label": "SPY Put Credit Spread", "price": 0.50,
+         "legs": legs or [
+             {"kind": "put", "side": "short", "strike": 95, "qty": 1, "expiration": EXP},
+             {"kind": "put", "side": "long", "strike": 90, "qty": 1, "expiration": EXP}]}
+    s.update(kw)
+    return s
+
+
+def _spec_quote(env, spec):
+    h.handle(env.bus, _cmd("quote", {"quote_id": QID, "spec": spec}, base=env.clock["now"]))
+    return env.bus.views[live_order.quote_key(QID)]
+
+
+def test_a_panels_trade_is_quoted_and_previewed_from_its_own_legs(env):
+    v = _spec_quote(env, _spec())
+    assert "error" not in v, v.get("error")
+    assert v["structure"] == "VERTICAL" and v["debit"] is False
+    assert v["live_price"] == 0.50 and v["price_source"] == "panel"
+    assert v["idea_label"] == "SPY Put Credit Spread"
+    p = _preview(env, trade_id=None, idea_posted=None, quote_id=QID, spec=_spec(),
+                 limit=0.50)
+    assert p["status"] == "previewed"
+    t = store.get(TID)
+    assert t["trade_id"] == QID and t["idea_posted"] is None
+    assert t["payload"]["orderType"] == "NET_CREDIT"
+    _no_account_digits(p)
+
+
+@pytest.mark.parametrize("spec, said", [
+    (_spec(symbol="FOP.ES"), "/ES"),
+    (_spec(symbol="BAD KEY"), "ticker"),
+    (_spec(legs=[{"kind": "call", "side": "short", "strike": 100, "expiration": EXP}]),
+     "no limit"),
+    (_spec(legs=[{"kind": "call", "side": "long", "strike": 100, "expiration": EXP},
+                 {"kind": "call", "side": "short", "strike": 100, "expiration": FAR}]),
+     "outlives"),
+])
+def test_a_panels_trade_is_checked_as_strictly_as_an_idea(env, spec, said):
+    v = _spec_quote(env, spec)
+    assert said in v["error"]
+    p = _preview(env, trade_id=None, idea_posted=None, quote_id=QID, spec=spec)
+    assert p["status"] == "refused" and said in p["error"]
+    assert env.proxy.posts("/orders/preview") == []
+
+
+def test_a_panels_trade_needs_the_pages_own_quote_id(env):
+    h.handle(env.bus, _cmd("quote", {"quote_id": "not-hex", "spec": _spec()}))
+    assert env.bus.views == {}
+    p = _preview(env, trade_id=None, quote_id="ab12cd34", spec=_spec())
+    assert "id cannot be read" in p["error"]
+
+
+def test_a_calendar_reads_both_expiries_from_one_chain(env, monkeypatch):
+    calls = []
+
+    def get(path, params=None, *, timeout):
+        calls.append(params)
+        return (200, FAR_CHAIN) if path == "/chains" else env.proxy.get(path, params,
+                                                                        timeout=timeout)
+    monkeypatch.setattr(h, "_get", get)
+    cal = _spec(legs=[{"kind": "call", "side": "short", "strike": 100, "expiration": EXP},
+                      {"kind": "call", "side": "long", "strike": 100, "expiration": FAR}])
+    v = _spec_quote(env, cal)
+    assert "error" not in v, v.get("error")
+    assert v["structure"] == "CALENDAR" and v["debit"] is True
+    assert v["live_price"] == 2.00                         # 4.50 - 2.50
+    assert v["max_loss_per_contract"] == 200.0             # the debit
+    assert v["max_profit_per_contract"] is None
+    assert v["expirations"] == [EXP, FAR]
+    assert (calls[0]["fromDate"], calls[0]["toDate"]) == (EXP, FAR)
+
+
+def test_a_custom_order_that_buys_and_sells_reads_its_side_off_the_mids(env):
+    ratio = _spec(legs=[{"kind": "call", "side": "long", "strike": 100, "expiration": EXP},
+                        {"kind": "call", "side": "short", "strike": 105, "qty": 2,
+                         "expiration": EXP}])
+    # 2.50 - 2 x 1.00 = 0.50 paid... but more calls are sold than bought.
+    assert "no limit" in _spec_quote(env, ratio)["error"]
+    back = _spec(legs=[{"kind": "call", "side": "short", "strike": 100, "expiration": EXP},
+                       {"kind": "call", "side": "long", "strike": 105, "qty": 2,
+                        "expiration": EXP}])
+    v = _spec_quote(env, back)
+    assert v["structure"] == "CUSTOM"
+    assert v["debit"] is False and v["live_price"] == 0.50      # 2.50 in, 2.00 out
