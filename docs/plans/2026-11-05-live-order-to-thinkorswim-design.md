@@ -17,19 +17,26 @@ Decisions taken on 2026-11-05:
   −50 %, `[credit]` −50 % / +100 %). The paste script's exits are percentages of
   the FILL, which ThinkorSwim works out after the fill. The API takes fixed prices
   (see "The one difference from the paste script").
-- **The number of contracts is typed in by hand.** The box starts empty and
-  nothing can be sent until it holds a whole number from 1 to `max_contracts`. The
-  box has no default, so a size is never chosen for the operator.
+- **The number of contracts is typed in by hand, from a default sized to $1,000
+  of risk.** The box opens holding the most contracts whose combined max loss is
+  at most `default_risk_usd` ($1,000). When one contract alone risks more than
+  that, it opens at **1**. The operator can type any other whole number
+  (2026-11-05: "default number of contracts will be up to $1000 risk per order.
+  If the risk is greater than 1000 it will default to 1 contract").
 - **The account is picked from a list** of the linked Schwab accounts, limited to
   an allow-list the operator keeps.
+- **The authenticator code is asked once a day, before the first live trade.**
+  The first Send of each Central trading day asks for the code. Once it is right,
+  that day is unlocked and later Sends ask only for the final confirmation. The
+  unlock ends at midnight Central.
 - **Paper-only is reversed on purpose, behind a switch that ships off.**
 
-Not yet answered by the operator, so these are this design's defaults. Each one is
-in config, so changing it means editing a setting, not the code:
+Not yet answered by the operator, so this is the design's proposal, in config
+(see "Open questions"):
 
-- A fresh authenticator (TOTP) code is required for every Send (`require_totp = true`).
-- Tight limits as shipped (`max_contracts = 5`, `max_risk_usd = 1000`), in line
-  with the operator's standing preference for the tightest risk controls.
+- A hard ceiling beside the $1,000 default, to catch a mistyped size:
+  `max_contracts = 50` and `max_risk_usd = 5000`. An order past either is refused,
+  whatever was typed.
 
 ## "Sending to ThinkorSwim" means placing a Schwab order
 
@@ -95,7 +102,11 @@ or the Paper Account, and nothing in those books ever sends a live order.
    - the live mid of those legs, fetched fresh (`maxAge=0`), and how far it has
      moved from the posted price, with a warning past `max_drift_pct`;
    - **Limit price**: starts at the live mid, can be edited, rounded to the tick;
-   - **Contracts**: an empty box the operator types into;
+   - **Contracts**: a number box the operator can type into. It opens at
+     `default_contracts`: the most contracts whose max loss is at most
+     `default_risk_usd`, or 1 when a single contract risks more. A typed size
+     whose risk passes `default_risk_usd` shows the risk in the warning colour
+     but is allowed, up to the hard ceilings;
    - **Account**: a dropdown of allow-listed accounts, showing nickname and last 4
      digits, never the full number;
    - worked out from the above: max risk, max profit, the target and stop prices,
@@ -107,9 +118,15 @@ or the Paper Account, and nothing in those books ever sends a live order.
    verdict, warnings and the effect on buying power. Changing the price, size or
    account clears the preview.
 5. **Send.** It stays disabled until a preview has passed within
-   `ticket_ttl_sec`. It asks for a TOTP code (`auth.verify_totp`), then a final
-   confirmation that names the size, the account's last 4 digits and the limit
-   (`kit.confirm`).
+   `ticket_ttl_sec`.
+   - **The first Send of the day** asks for the authenticator code
+     (`auth.verify_totp`). A right code records the unlock server-side in the
+     app's credential store (`auth_store.py`) for that Central date, never in the
+     browser, so a reload or another tab on the same sign-in stays unlocked. A
+     wrong code counts toward the sign-in's failure lockout (`auth.py`'s
+     limiter), so the code box cannot be guessed at.
+   - **Every Send** ends with a final confirmation that names the size, the
+     account's last 4 digits and the limit (`kit.confirm`).
 6. **After.** The page shows Schwab's order ID and the order's status (Working,
    Filled, Rejected, Canceled), read from Schwab every few seconds while the page
    is open.
@@ -145,6 +162,10 @@ the Tier-1 allow-list in CLAUDE.md with a pinned import-set test.
 - `schwab_order(legs, contracts, limit, cfg)`: the JSON below.
 - `risk(legs, contracts, limit)`: max loss at that size, read off the same payoff
   function `trade_idea.economics` uses (never the rows' own `max_loss` fields).
+- `default_contracts(risk_per_contract, budget, ceiling)`: `floor(budget /
+  risk_per_contract)`, never below 1 and never above `ceiling`. So $230 a contract
+  opens at 4 ($920), $1,000 at 1, $1,400 at 1. A risk that cannot be worked out
+  (no finite max loss) opens at 1.
 
 A test drives every one of the 15 structures in `test_tos_order.PASTED` through
 both `tos_order.order` and `schwab_order`. The two must agree on leg order, side
@@ -262,10 +283,12 @@ mode = "off"                 # the one switch: "off", "preview" (Phase 0), "live
                              # read on every request by the proxy and the service
 accounts = []                # last 4 digits of the accounts orders may go to. Empty = none.
                              # Set it in config/local/live_orders.toml (gitignored), never here.
-max_contracts = 5            # the Contracts box's ceiling
-max_risk_usd = 1000.0        # max loss of one order, at its size
+default_risk_usd = 1000.0    # the Contracts box opens at the most contracts risking at most this; 1 if one risks more
+max_contracts = 50           # hard ceiling: an order of more contracts is refused (proposed; to confirm)
+max_risk_usd = 5000.0        # hard ceiling: an order risking more is refused (proposed; to confirm)
 max_drift_pct = 10.0         # warn when the live mid has moved this far from the idea's price
-require_totp = true          # a fresh authenticator code on every Send
+totp = "daily"               # the authenticator code: "daily" (before the first Send of each
+                             # Central day) or "every_send"
 ticket_ttl_sec = 120         # a preview is good for this long
 max_command_age_sec = 30     # older cmd:live_order commands are dropped unread
 status_poll_sec = 5          # the page's status refresh while an order is working
@@ -379,6 +402,9 @@ Built 2026-11-05. **Nothing in it can place an order**: no such route exists.
 - **Unit tests**: the builder against `test_tos_order.PASTED`; the exit prices for
   debit and credit; rounding to the tick; refusals (no account, zero or too many
   contracts, risk over the limit, outside hours, a feed symbol, the switch off);
+  the default size ($230 -> 4, $1,000 -> 1, $1,400 -> 1, no finite risk -> 1, the
+  ceiling); the daily unlock (asked on the first Send, not on the second that
+  day, asked again after midnight Central, a wrong code counted as a failure);
   the single-use ticket under two deliveries; the age gate; the `unknown` path when
   the place call errors.
 - **Proxy tests**: `test_account_surface.py` pins the exact write set; each write
@@ -392,3 +418,7 @@ Built 2026-11-05. **Nothing in it can place an order**: no such route exists.
 
 - Does Schwab's API take a STOP on a multi-leg order (phase 0)?
 - Should the page offer the opening order alone, with no exits, as a choice?
+- The hard ceilings beside the $1,000 default: `max_contracts = 50` and
+  `max_risk_usd = 5000` are proposals. Should a typed size be allowed past
+  $1,000 of risk at all, or should $1,000 be the ceiling except for the
+  one-contract case?
