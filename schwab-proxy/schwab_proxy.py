@@ -9,7 +9,9 @@ closed without the shared secret. The order route this header used to list
 write since is POST /orders/preview (2026-11-05, Phase 0 of
 docs/plans/2026-11-05-live-order-to-thinkorswim-design.md): it asks Schwab's
 previewOrder to CHECK an order, places nothing, and is off unless
-config/live_orders.toml says mode = "preview".
+config/live_orders.toml says mode = "preview" or "live". Phase 1 adds
+POST /orders/place, which PLACES one and is off unless the mode is "live",
+and two order READS (one order's state; the orders entered in a window).
 
 Added trade stream tracker (TRADE STREAM TRACKER section):
   POST /track / POST /untrack     — register OptionsScanner paper trades
@@ -1028,8 +1030,8 @@ def passthrough(endpoint: str, params: Optional[str] = None):
 
 
 #############################################
-# TRADER API ENDPOINTS (account READS, plus the one order PREVIEW below:
-# no route places an order)
+# TRADER API ENDPOINTS (account READS, the order PREVIEW, and the one order
+# PLACE route, off unless config/live_orders.toml says mode = "live")
 #############################################
 
 def trader_request(method: str, endpoint: str, json_body: dict = None) -> dict:
@@ -1169,6 +1171,133 @@ def preview_order(body: Dict[str, Any]):
         raise HTTPException(status_code=400, detail=str(e))
     return JSONResponse(status_code=result["status_code"],
                         content={"schwab": result["data"], "error": result["error"]})
+
+
+#: The ONE brokerage endpoint that PLACES an order, used only by
+#: :func:`trader_place` and only while ``config/live_orders.toml mode = "live"``.
+PLACE_ENDPOINT = "/accounts/{account_hash}/orders"
+#: Schwab's order id: digits only.
+_ORDER_ID_RE = re.compile(r"^\d{1,20}$")
+_UTC_ISO_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?Z$")
+
+
+def _order_id_from(location: str):
+    """The order id at the end of Schwab's ``Location`` header, or None."""
+    tail = str(location or "").rstrip("/").rsplit("/", 1)[-1]
+    return tail if _ORDER_ID_RE.match(tail) else None
+
+
+def trader_place(account_hash: str, order: dict) -> dict:
+    """PLACE ``order`` in one account: ``POST /accounts/{hash}/orders``.
+
+    Design: docs/plans/2026-11-05-live-order-to-thinkorswim-design.md (Phase 1).
+    Only the options service's ticket path calls this, through
+    ``POST /orders/place``, and only for an order Schwab's preview has passed.
+
+    ⚠ ONE attempt, and no retry of any kind after the request may have reached
+    Schwab: a timeout or a 5xx does not prove the order was refused, and a
+    retry could place it twice. The answer then says ``unknown`` and the caller
+    must look at the account's orders before anything is sent again. A 401
+    (refused before Schwab looked at the order) refreshes the token and asks
+    once more, as every trader call does.
+
+    Returns ``{"status_code", "order_id", "error", "unknown"}``.
+    """
+    if not isinstance(account_hash, str) or not _ACCOUNT_HASH_RE.match(account_hash):
+        raise ValueError("account_hash is not a Schwab account hash")
+    if not isinstance(order, dict) or not order:
+        raise ValueError("order must be a non-empty JSON object")
+    body = json.dumps(order, separators=(",", ":"))
+    if len(body.encode("utf-8")) > _PREVIEW_MAX_BYTES:
+        raise ValueError(f"order is larger than {_PREVIEW_MAX_BYTES} bytes")
+    token_mgr.ensure_valid_token()
+    url = SCHWAB_TRADER_URL + PLACE_ENDPOINT.format(account_hash=account_hash)
+    headers = {
+        "Authorization": f'Bearer {token_mgr.tokens["AccessToken"]}',
+        "Accept":        "application/json",
+        "Content-Type":  "application/json",
+    }
+    session = token_mgr.session
+    try:
+        api_call_counter.record()
+        resp = session.post(url, headers=headers, data=body, timeout=30)
+        if resp.status_code == 401:
+            logger.warning("place order 401 - refreshing token and asking once more")
+            with token_mgr._lock:
+                token_mgr._refresh()
+            headers["Authorization"] = f'Bearer {token_mgr.tokens["AccessToken"]}'
+            api_call_counter.record()
+            resp = session.post(url, headers=headers, data=body, timeout=30)
+    except requests.exceptions.RequestException as e:
+        logger.error("place order: no answer from Schwab (%s); outcome unknown",
+                     type(e).__name__)
+        return {"status_code": 502, "order_id": None, "unknown": True,
+                "error": f"no answer from Schwab: {str(e)[:300]}"}
+    logger.info("place order answered %s", resp.status_code)
+    if resp.status_code in (200, 201):
+        order_id = _order_id_from((getattr(resp, "headers", None) or {}).get("Location", ""))
+        return {"status_code": resp.status_code, "order_id": order_id,
+                "unknown": order_id is None,
+                "error": None if order_id else "Schwab accepted the order but sent no order id"}
+    # A 5xx may or may not have placed it; a 4xx is Schwab refusing it.
+    return {"status_code": resp.status_code, "order_id": None,
+            "unknown": resp.status_code >= 500,
+            "error": (resp.text or "")[:2000]}
+
+
+@app.post("/orders/place", dependencies=[Depends(require_account_secret)])
+def place_order(body: Dict[str, Any]):
+    """PLACE an order: ``{"account_hash", "order"}`` in, ``{"order_id",
+    "unknown", "error"}`` out, with Schwab's status code.
+
+    Refused (403) unless ``config/live_orders.toml mode = "live"``, read on
+    this request. The proxy reads the switch itself, so turning it off stops
+    orders here even if a caller is wrong."""
+    if not _live_orders_config.place_allowed():
+        raise HTTPException(status_code=403,
+                            detail='live orders are not on (config/live_orders.toml mode)')
+    try:
+        result = trader_place(body.get("account_hash"), body.get("order"))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return JSONResponse(status_code=result["status_code"],
+                        content={k: result[k] for k in ("order_id", "unknown", "error")})
+
+
+def _account_hash_or_400(account_hash):
+    if not isinstance(account_hash, str) or not _ACCOUNT_HASH_RE.match(account_hash):
+        raise HTTPException(status_code=400, detail="not a Schwab account hash")
+
+
+@app.get("/orders/{account_hash}/{order_id}", dependencies=[Depends(require_account_secret)])
+def get_order(account_hash: str, order_id: str):
+    """One order's state (Schwab's own JSON). A READ."""
+    _account_hash_or_400(account_hash)
+    if not _ORDER_ID_RE.match(str(order_id)):
+        raise HTTPException(status_code=400, detail="not a Schwab order id")
+    result = trader_request("GET", f"/accounts/{account_hash}/orders/{order_id}")
+    if result["status_code"] not in (200, 201):
+        raise HTTPException(status_code=result["status_code"], detail=result["error"])
+    return result["data"]
+
+
+@app.get("/orders/{account_hash}", dependencies=[Depends(require_account_secret)])
+def list_orders(account_hash: str, from_time: str, to_time: str):
+    """The account's orders entered between two UTC ISO times (Schwab's
+    ``fromEnteredTime`` / ``toEnteredTime``). A READ, used to find an order
+    whose place answer never came back."""
+    _account_hash_or_400(account_hash)
+    for t in (from_time, to_time):
+        if not isinstance(t, str) or not _UTC_ISO_RE.match(t):
+            raise HTTPException(status_code=400,
+                                detail="times are UTC ISO, e.g. 2026-11-06T14:30:00.000Z")
+    from urllib.parse import quote
+    result = trader_request(
+        "GET", f"/accounts/{account_hash}/orders"
+               f"?fromEnteredTime={quote(from_time)}&toEnteredTime={quote(to_time)}")
+    if result["status_code"] not in (200, 201):
+        raise HTTPException(status_code=result["status_code"], detail=result["error"])
+    return result["data"]
 
 
 def _normalize_positions(raw: dict) -> list[dict]:

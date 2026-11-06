@@ -40,20 +40,26 @@ sentiment-dashboard, and the Tier-2 services all fetch market data through it.
   only — `PASSTHROUGH_ENDPOINTS`, matched exactly), `/accounts`, `/positions`,
   `/positions/{account_hash}`, `/transactions/{account_hash}`, and the
   trade-stream tracker (`/track`, `/untrack`).
-- ⚠ **The account routes FAIL CLOSED, and no route places an order.**
-  `/accounts`, `/positions*`, `/transactions*` and `/orders/preview` depend on
-  `require_account_secret`: with no `PROXY_SHARED_SECRET` configured they answer
-  503 to everyone; with one, 401 without the matching `X-Proxy-Secret`.
-  `trader_request` is GET-only and raises on anything else. The ONE brokerage
-  write is `trader_preview`, which POSTs to the fixed endpoint
-  `/accounts/{hash}/previewOrder` (Schwab checks the order and places nothing),
-  behind `POST /orders/preview`, which also refuses (403) unless
-  `config/live_orders.toml mode = "preview"`, read per request
-  ([live-order design](../docs/plans/2026-11-05-live-order-to-thinkorswim-design.md)).
+- ⚠ **The account routes FAIL CLOSED, and ONE route places an order.**
+  `/accounts`, `/positions*`, `/transactions*` and every `/orders*` route depend
+  on `require_account_secret`: with no `PROXY_SHARED_SECRET` configured they
+  answer 503 to everyone; with one, 401 without the matching `X-Proxy-Secret`.
+  `trader_request` is GET-only and raises on anything else (it serves the two
+  order READS, `GET /orders/{hash}/{order_id}` and `GET /orders/{hash}` with a
+  UTC entered-time window). The two brokerage writes
+  ([live-order design](../docs/plans/2026-11-05-live-order-to-thinkorswim-design.md)):
+  `trader_preview` POSTs to `/accounts/{hash}/previewOrder` (Schwab checks the
+  order and places nothing) behind `POST /orders/preview`, 403 unless
+  `config/live_orders.toml mode` is `preview` or `live`; `trader_place` POSTs to
+  `/accounts/{hash}/orders` behind `POST /orders/place`, 403 unless the mode is
+  `live`. Both read the switch per request. ⚠ `trader_place` makes ONE attempt
+  (a 401 refreshes and asks once more, as Schwab looked at nothing): a timeout,
+  a 5xx or a 201 with no order id in `Location` answers `unknown`, which the
+  caller resolves by listing the account's orders, never by sending again.
   A new route that reaches the brokerage API must carry the fail-closed
   dependency, and any other write must not exist: `tests/test_account_surface.py`
-  fails on a new trader URL builder, a new `session.post`, or a second route
-  naming an order. `require_secret` (a no-op with no secret) is for market data only.
+  fails on a new trader URL builder, a new `session.post`, a new route naming an
+  order, or a second caller of `trader_place`. `require_secret` (a no-op with no secret) is for market data only.
 - **`/positions` aggregates ALL linked accounts** (not just the first): it loops
   every account hash from `/accounts/accountNumbers`, normalizes each, and folds
   same-symbol holdings across accounts into one row via `_merge_positions` (sums

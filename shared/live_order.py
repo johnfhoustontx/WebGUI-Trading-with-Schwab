@@ -264,3 +264,63 @@ def schwab_order(legs, *, contracts, limit, variant="bracket", debit=None,
                      "childOrderStrategies": [target_order, stop_order]}]
     return {**opening, "orderStrategyType": "TRIGGER",
             "childOrderStrategies": children}
+
+
+# ── Phase 1: what a ticket may send, and its size ───────────────────────────
+
+#: The structures Phase 1 sends. Butterflies, condors, straddles, strangles and
+#: CUSTOM orders are Phase 2.
+PHASE1_TYPES = ("NONE", "VERTICAL", "IRON_CONDOR")
+
+MULT = 100
+
+
+def exit_variant(legs):
+    """The exits an order of these legs carries.
+
+    Measured in Phase 0 (2026-11-05): Schwab's API takes a STOP on a single
+    option but refuses one on any spread (400 "Stop price must be populated
+    only for stop orders."), in every form tried. So a single option sends the
+    full ``bracket`` and a spread sends the opening order and its ``target``;
+    the ticket says the spread's stop must be set in ThinkorSwim."""
+    return "bracket" if complex_type(legs) == "NONE" else "target"
+
+
+def _value_at(legs, price):
+    """The legs' value per unit at expiry with the underlying at ``price``."""
+    total = 0.0
+    for l in legs:
+        intrinsic = max(0.0, price - l["strike"]) if l["kind"] == "call" \
+            else max(0.0, l["strike"] - price)
+        total += l["sign"] * l["qty"] * intrinsic
+    return total
+
+
+def max_loss_per_contract(legs, limit, debit):
+    """The most one unit can lose at expiry, in dollars, opened at ``limit``
+    (per share, positive), or None when the loss has no bound (more calls
+    sold than bought).
+
+    Read off the payoff at every strike and at zero, the way
+    ``trade_idea.economics`` reads it, never off a row's own ``max_loss``."""
+    legs = check_legs(legs)
+    if not _finite_positive(limit):
+        raise ValueError(f"the limit must be a positive number, not {limit!r}")
+    if len({str(l.get("expiration"))[:10] for l in legs}) != 1:
+        raise ValueError("a max loss needs one expiry")
+    if sum(l["sign"] * l["qty"] for l in legs if l["kind"] == "call") < 0:
+        return None
+    entry = -limit if debit else limit
+    points = [0.0] + [l["strike"] for l in legs]
+    worst = min(_value_at(legs, p) + entry for p in points)
+    return round(max(0.0, -worst) * MULT, 2)
+
+
+def default_contracts(risk_per_contract, budget, ceiling):
+    """The Contracts box's opening size: the most contracts whose max loss is at
+    most ``budget``, and 1 when a single contract risks more (the operator's
+    rule, 2026-11-05). Never above ``ceiling``; 1 when the risk is unknown."""
+    if not _finite_positive(risk_per_contract) or not _finite_positive(budget):
+        return 1
+    n = int(budget // risk_per_contract)
+    return max(1, min(n, int(ceiling)))

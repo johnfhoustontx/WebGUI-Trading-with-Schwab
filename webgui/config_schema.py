@@ -3168,18 +3168,52 @@ _TOS_ORDER = ConfigFile(
 # Read by the proxy on every request (shared/live_orders_config.py).
 _LIVE_ORDERS = ConfigFile(
     name="live_orders.toml", title="Live orders", icon="send",
-    summary="Sending an order to the Schwab account. For now the proxy can only "
-            "ask Schwab to check an order (a preview), which places nothing. "
-            "Read on every request.",
+    summary="Sending a trade idea to the Schwab account as a real order, which "
+            "ThinkorSwim then shows. Off refuses everything; preview lets Schwab "
+            "check an order and places nothing; live lets the ticket's Send place "
+            "one. Read on every request.",
     restart=(),
-    caution="This switch decides whether the proxy may send your Schwab "
-            "account an order to check. Leave it off unless you are running "
-            "the preview check.",
+    caution="Live places real orders in your Schwab account. Each one still needs "
+            "a preview, your authenticator code and a final confirm on the ticket.",
     sections=(
         Section("Switch", "Off refuses every request.", (
             Field("mode", "Live orders",
                   "off: nothing is sent. preview: Schwab checks an order and "
-                  "places nothing.", kind="choice", choices=("off", "preview")),
+                  "places nothing. live: the ticket's Send places it.",
+                  kind="choice", choices=("off", "preview", "live")),
+            Field("totp", "Ask for the authenticator code",
+                  "daily: before the first Send of each Central day. every_send: "
+                  "before every Send.", kind="choice", choices=("daily", "every_send")),
+        )),
+        Section("Size", "The Contracts box on the ticket.", (
+            Field("default_risk_usd", "Open the box at up to this much risk",
+                  "The most contracts whose max loss fits; 1 when one contract "
+                  "risks more. A larger size may still be typed, and shows in the "
+                  "warning colour.", kind="money", min=1, max=100000),
+            Field("max_contracts", "Most contracts in one order",
+                  "An order of more is refused, whatever was typed.",
+                  kind="int", min=1, max=1000, step=1),
+            Field("max_risk_usd", "Most risk in one order",
+                  "An order whose max loss is more is refused.",
+                  kind="money", min=1, max=1000000),
+        )),
+        Section("Ticket", "", (
+            Field("max_drift_pct", "Warn when the price has moved",
+                  "From the idea's price to the live mid.", unit="%",
+                  min=0.5, max=100, step=0.5),
+            Field("ticket_ttl_sec", "A preview is good for",
+                  "Send needs a newer one after this.", kind="int", unit="s",
+                  min=15, max=900, step=15),
+            Field("max_command_age_sec", "Refuse a request older than",
+                  "A live-order request that waited this long is not acted on.",
+                  kind="int", unit="s", min=5, max=300, step=5),
+            Field("status_poll_sec", "Refresh a working order every", "",
+                  kind="int", unit="s", min=2, max=60, step=1),
+        )),
+        Section("Prompt", "How a new trade idea is offered. In the app only.", (
+            Field("prompt.banner", "Show the New trade idea banner", "", kind="bool"),
+            Field("prompt.banner_max_age_min", "No banner for an idea older than", "",
+                  kind="int", unit="min", min=1, max=390, step=1),
         )),
         Section("Price steps", "The step an option price must move in. Schwab's "
                 "preview names a price that is off it.", (
@@ -3194,6 +3228,15 @@ _LIVE_ORDERS = ConfigFile(
             Field("ticks.penny", "Penny symbols",
                   "Quoted in pennies under $3 and nickels above.", kind="symbols"),
         )),
+        # The accounts are written by hand in config/local/live_orders.toml and
+        # never through this page: shown read-only, by alias. The last four
+        # digits are deliberately not catalogued, so the page never draws them.
+        Section("Accounts", "Set in config/local/live_orders.toml by hand. "
+                "Pages show the name only.", (
+            Field("accounts.*.alias", "Name", "", kind="text", optional=True),
+            Field("accounts.*.default", "Selected first", "", kind="bool",
+                  optional=True),
+        ), readonly=True),
     ),
 )
 

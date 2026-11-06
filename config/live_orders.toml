@@ -1,16 +1,39 @@
 # Live orders to the Schwab account (what ThinkorSwim shows).
 # Design: docs/plans/2026-11-05-live-order-to-thinkorswim-design.md
 #
-# PHASE 0: the proxy can only PREVIEW an order (Schwab's previewOrder, which
-# checks an order and places nothing). No route that places an order exists yet.
+# "off" refuses everything. "preview" lets the proxy ask Schwab to CHECK an
+# order (previewOrder), which places nothing. "live" also lets the ticket page's
+# Send place one. Read by the proxy and the service on every request, so a saved
+# change needs no restart.
 #
-# Read by the proxy on every request, so a saved change needs no restart.
+# The accounts orders may go to are NOT in this tracked file. They live in the
+# operator's config/local/live_orders.toml (gitignored), one table each:
+#
+#   [[accounts]]
+#   last4 = "1191"
+#   alias = "Trading account"
+#   default = true
+#
+# Pages show the alias only, never digits. An account not listed is refused.
 
-mode = "off"                   # "off" refuses every request; "preview" lets the proxy ask Schwab to check an order
+mode = "off"                   # "off", "preview" or "live"
+
+default_risk_usd = 1000.0      # the Contracts box opens at the most contracts whose max loss is at most this; 1 if one contract risks more
+max_contracts = 50             # hard ceiling: an order of more contracts is refused, whatever was typed
+max_risk_usd = 5000.0          # hard ceiling: an order whose max loss is more than this is refused
+max_drift_pct = 10.0           # warn when the live mid has moved this far from the idea's price
+totp = "daily"                 # the authenticator code: "daily" (before the first Send of each Central day) or "every_send"
+ticket_ttl_sec = 120           # a preview is good for this long; Send needs a newer one
+max_command_age_sec = 30       # a live-order command older than this is refused unread
+status_poll_sec = 5            # how often the ticket page refreshes a working order's status
+
+[prompt]
+banner = true                  # show the in-app "New trade idea" banner when an idea posts
+banner_max_age_min = 30        # no banner for an idea older than this
 
 [ticks]
-# The price step an option order must use. Schwab's preview names any price that
-# is off it, so these are a first guess that Phase 0 corrects.
+# The price step an option order must use. Measured 2026-11-05: every price on
+# these steps passed Schwab's preview for SPY, $SPX and INTC.
 under_3 = 0.05                 # step for a price under $3.00
 from_3 = 0.10                  # step for a price of $3.00 and up
 penny_under_3 = 0.01           # the same two for the penny-program symbols below

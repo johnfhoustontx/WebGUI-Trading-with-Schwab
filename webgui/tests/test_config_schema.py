@@ -1150,3 +1150,16 @@ def test_the_futures_chain_file_covers_both_futures_and_the_switch():
     for root in ("ES", "NQ"):
         for key in shipped["instruments"][root]:
             assert cs.locate(cfg, ("instruments", root, key))[1] is not None, (root, key)
+
+
+def test_live_order_accounts_are_read_only_and_their_digits_uncatalogued():
+    """The accounts are hand-written in config/local and never saved by the
+    page; the last four digits have no field, so the page never draws them."""
+    cfg = cs.BY_NAME["live_orders.toml"]
+    for path in (("accounts", 0, "alias"), ("accounts", 0, "default"),
+                 ("accounts", 0, "last4"), ("accounts", 1, "anything")):
+        assert cs.is_readonly(cfg, path), path
+    assert cs.locate(cfg, ("accounts", 0, "last4"))[1] is None
+    assert not cs.is_readonly(cfg, ("mode",))
+    (mode,) = [f for s in cfg.sections for f in s.fields if f.key == "mode"]
+    assert mode.choices == ("off", "preview", "live")

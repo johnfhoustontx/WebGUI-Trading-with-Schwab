@@ -205,3 +205,37 @@ def test_the_module_is_pure():
         elif isinstance(node, ast.ImportFrom):
             names.add(node.module)
     assert names == {"math", "re"}
+
+
+# ── Phase 1 ──────────────────────────────────────────────────────────────────
+
+def test_exits_by_structure():
+    """Phase 0: a stop passes on a single option and is refused on any spread."""
+    assert lo.exit_variant(LONG_CALL) == "bracket"
+    assert lo.exit_variant(SHORT_PUT) == "bracket"
+    assert lo.exit_variant(DEBIT_CALL_VERTICAL) == "target"
+    assert lo.exit_variant(IRON_CONDOR) == "target"
+
+
+@pytest.mark.parametrize("legs, limit, debit, want", [
+    (LONG_CALL, 1.80, True, 180.0),
+    (DEBIT_CALL_VERTICAL, 1.50, True, 150.0),
+    (CREDIT_PUT_VERTICAL, 0.90, False, 410.0),        # 5 wide - 0.90
+    (IRON_CONDOR, 1.40, False, 360.0),                # 5 wide wings - 1.40
+    (REVERSE_IC, 1.00, True, 100.0),
+    (SHORT_PUT, 1.20, False, 8880.0),                 # 90 strike to zero
+])
+def test_max_loss_per_contract(legs, limit, debit, want):
+    assert lo.max_loss_per_contract(legs, limit, debit) == want
+
+
+def test_a_naked_short_call_has_no_bounded_loss():
+    assert lo.max_loss_per_contract([leg("call", "short", 105)], 1.0, False) is None
+
+
+@pytest.mark.parametrize("risk, want", [
+    (230.0, 4), (1000.0, 1), (1400.0, 1), (999.99, 1), (10.0, 50),
+    (None, 1), (0, 1), (float("inf"), 1), (float("nan"), 1)])
+def test_default_contracts(risk, want):
+    """The operator's rule: up to $1,000 of risk, else 1; never past the ceiling."""
+    assert lo.default_contracts(risk, 1000.0, 50) == want

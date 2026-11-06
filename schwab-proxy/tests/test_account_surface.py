@@ -80,14 +80,36 @@ def test_the_passthrough_route_carries_the_secret_check():
     assert schwab_proxy.require_secret in [d.call for d in route.dependant.dependencies]
 
 
-# ── SE-02: no order can be placed, and the account routes fail closed ────────
+# ── SE-02: one guarded way to place an order, and the account routes fail closed
 
-def test_no_route_places_an_order():
-    """The one route that names an order is the PREVIEW (Phase 0 of the
-    live-order design, 2026-11-05), which asks Schwab to check an order and
-    places nothing. A second one must fail here first."""
-    paths = {getattr(r, "path", "") for r in schwab_proxy.app.routes}
-    assert [p for p in paths if "order" in p.lower()] == ["/orders/preview"]
+#: Every route that names an order (live-order design, 2026-11-05): the
+#: preview (places nothing), the place (off unless mode = "live"), and two reads.
+ORDER_ROUTES = {("POST", "/orders/preview"), ("POST", "/orders/place"),
+                ("GET", "/orders/{account_hash}/{order_id}"),
+                ("GET", "/orders/{account_hash}")}
+
+
+def _routes():
+    for r in schwab_proxy.app.routes:
+        for m in getattr(r, "methods", None) or ():
+            yield m, getattr(r, "path", "")
+
+
+def test_the_order_routes_are_exactly_these():
+    """A new route that names an order must fail here first."""
+    named = {(m, p) for m, p in _routes() if "order" in p.lower() and m != "HEAD"}
+    assert named == ORDER_ROUTES
+
+
+def test_exactly_one_route_places_an_order():
+    """``trader_place`` is called by ``place_order`` and nothing else."""
+    callers = set()
+    for fn in ast.walk(ast.parse(SOURCE)):
+        if isinstance(fn, ast.FunctionDef) and any(
+                isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                and n.func.id == "trader_place" for n in ast.walk(fn)):
+            callers.add(fn.name)
+    assert callers == {"place_order"}
 
 
 def test_the_trader_api_url_is_used_by_the_reader_and_the_preview_only():
@@ -101,11 +123,12 @@ def test_the_trader_api_url_is_used_by_the_reader_and_the_preview_only():
                 isinstance(n, ast.Name) and n.id == "SCHWAB_TRADER_URL"
                 for n in ast.walk(fn)):
             users.add(fn.name)
-    assert users == {"trader_request", "trader_preview"}
+    assert users == {"trader_request", "trader_preview", "trader_place"}
 
 
-def test_the_one_brokerage_post_is_to_preview_order():
+def test_the_brokerage_posts_are_the_preview_and_the_place():
     assert schwab_proxy.PREVIEW_ENDPOINT == "/accounts/{account_hash}/previewOrder"
+    assert schwab_proxy.PLACE_ENDPOINT == "/accounts/{account_hash}/orders"
     posts = set()
     for fn in ast.walk(ast.parse(SOURCE)):
         if not isinstance(fn, ast.FunctionDef):
@@ -115,7 +138,7 @@ def test_the_one_brokerage_post_is_to_preview_order():
                     and n.func.attr == "post" and isinstance(n.func.value, ast.Name)
                     and n.func.value.id == "session"):
                 posts.add(fn.name)
-    assert posts == {"trader_preview"}
+    assert posts == {"trader_preview", "trader_place"}
 
 
 def test_the_trader_api_is_only_ever_read():
@@ -147,9 +170,10 @@ def test_trader_request_refuses_a_method_other_than_get(monkeypatch):
 
 
 ACCOUNT_ROUTES = {"/accounts", "/positions", "/positions/{account_hash}",
-                  "/transactions/{account_hash}"}
-# Routes that reach the brokerage API through ``trader_preview``.
-PREVIEW_ROUTES = {"/orders/preview"}
+                  "/transactions/{account_hash}",
+                  "/orders/{account_hash}/{order_id}", "/orders/{account_hash}"}
+# Routes that reach the brokerage API through ``trader_preview`` / ``trader_place``.
+PREVIEW_ROUTES = {"/orders/preview", "/orders/place"}
 
 
 def test_every_account_route_carries_the_fail_closed_check():

@@ -506,11 +506,14 @@ is in git; `--install` also arms the timers). Start order: Redis (a system unit)
   A token refresh must never move `RefreshTokenExpiresAt`, and the recovery
   path must not need the tailnet.
 - The proxy's account routes fail CLOSED without `PROXY_SHARED_SECRET`
-  (`X-Proxy-Secret`), so do `/track` and `/untrack`, and no route places an order:
-  `trader_request` is GET-only, and the one brokerage write is `POST /orders/preview`
-  (Schwab's `previewOrder`, which places nothing), off unless
-  `config/live_orders.toml mode = "preview"`. This app is still paper-only: it
-  places no order. Live orders are being designed
+  (`X-Proxy-Secret`), so do `/track` and `/untrack`. `trader_request` is GET-only;
+  the two brokerage writes are `POST /orders/preview` (Schwab's `previewOrder`,
+  which places nothing; off unless `config/live_orders.toml mode` is `preview` or
+  `live`) and `POST /orders/place` (`trader_place`: ONE attempt, never retried; a
+  timeout or 5xx is `unknown`, reconciled by reading the account's orders, never
+  by sending again; off unless the mode is `live`). The proxy reads the switch
+  itself on every request. This app is still paper-only: it places no order
+  until the ticket page and its service ship and the operator turns `live` on
   ([design](docs/plans/2026-11-05-live-order-to-thinkorswim-design.md)).
 - A unit that ends FAILED sends a push; `/health` reports `up: false` with a
   reason when a scheduler has stopped or gone silent. Two units carry a memory
