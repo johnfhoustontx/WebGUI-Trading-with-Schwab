@@ -49,9 +49,13 @@ SOURCE = "trade_idea"
 #: review never reads one - but booked past the caps and closed only by this file's
 #: 5-minute cycle, exactly as an idea row is.
 CONDOR_SOURCE = "daily_condor"
+#: The quality-triggered ideas booked IN SHADOW (``idea_shadow.py``): never posted,
+#: so not an idea - the site, the weekly review and the banner never read one - but
+#: booked and closed exactly as an idea row is, so the two can be compared.
+SHADOW_SOURCE = "idea_shadow"
 #: Every Ledger row the user's own passes (caps, equity, reprice, manage, expiry,
 #: the action list) leave alone, and ``mark_cycle`` marks, stops and settles.
-SELF_MANAGED_SOURCES = frozenset({SOURCE, CONDOR_SOURCE})
+SELF_MANAGED_SOURCES = frozenset({SOURCE, CONDOR_SOURCE, SHADOW_SOURCE})
 _MULT = 100.0                  # one contract = 100 shares; entry_credit is per share
 _CT = ZoneInfo("America/Chicago")
 
@@ -62,7 +66,8 @@ def is_idea(trade) -> bool:
 
 
 def is_self_managed(trade) -> bool:
-    """A Ledger row this module's cycle owns: a posted idea or a daily condor. The
+    """A Ledger row this module's cycle owns: a posted idea, a daily condor or a
+    shadow idea. The
     user's own Ledger passes skip it; ``is_idea`` stays the narrower "a posted idea"
     the weekly review and the site's results read."""
     return bool(isinstance(trade, dict) and trade.get("source") in SELF_MANAGED_SOURCES)
@@ -125,8 +130,9 @@ def _strikes(legs, strategy) -> dict:
             else round(abs(short_k - long_k), 2)}
 
 
-def build_row(idea, now, cfg) -> dict:
-    """The Ledger row for ``idea`` posted at ``now``. Pure: no store, no clock."""
+def build_row(idea, now, cfg, source=SOURCE) -> dict:
+    """The Ledger row for ``idea`` posted at ``now``. Pure: no store, no clock.
+    ``source`` is ``SOURCE`` for a posted idea, ``SHADOW_SOURCE`` for a shadow pick."""
     qty = int(cfg["quantity"])
     cash = float(idea["entry_cash"])                  # per contract, signed, commission in
     max_loss, max_profit = idea.get("max_loss"), idea.get("max_profit")
@@ -151,8 +157,8 @@ def build_row(idea, now, cfg) -> dict:
         "breakeven": " / ".join(str(b) for b in (idea.get("breakevens") or [])),
         "underlying_at_entry": idea.get("spot"),
         "entry_time": stamp,
-        "notes": "Trade idea",
-        "source": SOURCE, "idea_id": idea.get("id"), "idea_posted": stamp,
+        "notes": "Shadow idea" if source == SHADOW_SOURCE else "Trade idea",
+        "source": source, "idea_id": idea.get("id"), "idea_posted": stamp,
         "idea_grade": idea.get("grade"), "idea_score": idea.get("score"),
         "idea_label": idea.get("label"),
         "target_pnl": target, "stop_pnl": stop, "mae_pnl": 0.0,
@@ -166,17 +172,21 @@ def build_row(idea, now, cfg) -> dict:
 
 
 @_paper_lock.serialized
-def book(idea, now) -> dict:
+def book(idea, now, *, source=SOURCE) -> dict:
     """Book ``idea`` as an OPEN Ledger row, once per post.
 
     ``{"status": "booked" | "duplicate" | "disabled", "trade_id": str | None}``. The
     post is identified by ``(idea id, post time)`` across every row, open or closed,
     so a retry of the same post books nothing, while the same idea posted on a later
-    day is a second trade. No cap is evaluated and no structure refused."""
+    day is a second trade. No cap is evaluated and no structure refused.
+
+    ``source=SHADOW_SOURCE`` books a shadow pick (``idea_shadow.py``). It is not
+    stopped by ``[idea_trades] enabled``, which stops booking posted ideas only; the
+    shadow has its own switch, read by its caller."""
     cfg = paper_limits.idea_trades()
-    if not cfg["enabled"]:
+    if source == SOURCE and not cfg["enabled"]:
         return {"status": "disabled", "trade_id": None}
-    row = build_row(idea, now, cfg)
+    row = build_row(idea, now, cfg, source=source)
     for t in paper_trader.get_all_trades():
         if t.get("idea_id") == row["idea_id"] and t.get("idea_posted") == row["idea_posted"]:
             return {"status": "duplicate", "trade_id": None}

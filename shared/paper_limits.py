@@ -43,6 +43,17 @@ DEFAULTS = {
         "min_n": 5,
         "review_model": "sonnet",
     },
+    # Quality-triggered trade ideas, in shadow: checked after every scan, booked
+    # into the Paper Ledger as "idea_shadow" rows, never posted (idea_shadow.py).
+    "idea_shadow": {
+        "mode": "shadow",
+        "min_grade": "Strong",
+        "min_vol_rank": 50.0,
+        "max_per_hour": 2,
+        "min_gap_min": 20,
+        "max_per_day": 10,
+        "one_per_symbol": True,
+    },
     # One mechanical 0-DTE iron condor booked into the Paper Ledger each trading
     # morning ([slots.daily_condor]), past every cap, and measured there.
     "daily_condor": {
@@ -142,6 +153,46 @@ def idea_trades() -> dict:
         "min_n": _idea_int(sec.get("min_n"), 1, 10**6, d["min_n"]),
         "review_model": (model.strip() if isinstance(model, str) and model.strip()
                          else d["review_model"]),
+    }
+
+
+#: ``[idea_shadow] mode``: "off" books nothing, "shadow" books the picks into the
+#: Ledger without posting them. There is no posting mode yet.
+IDEA_SHADOW_MODES = ("off", "shadow")
+#: ``[idea_shadow] min_grade`` -> the grades that qualify, best first.
+IDEA_SHADOW_GRADES = {"Strong": ("Strong",), "Good": ("Strong", "Good")}
+
+
+def idea_shadow() -> dict:
+    """``[idea_shadow]``: the quality-triggered trade ideas, booked in shadow
+    (``options_svc/idea_shadow.py``). Always a full dict; each key that is missing
+    or unusable reads as its shipped default on its own, and nothing here raises.
+
+    ``mode`` is one of ``IDEA_SHADOW_MODES``; ``min_grade`` a key of
+    ``IDEA_SHADOW_GRADES`` (``grades`` is added, the qualifying grades);
+    ``min_vol_rank`` 0..100, where 0 is off; ``max_per_hour`` 1..4;
+    ``min_gap_min`` 0..59; ``max_per_day`` 1..30; ``one_per_symbol`` a real
+    boolean."""
+    d = DEFAULTS["idea_shadow"]
+    sec = load().get("idea_shadow")
+    if not isinstance(sec, dict):
+        sec = {}
+    mode = sec.get("mode")
+    grade = sec.get("min_grade")
+    one = sec.get("one_per_symbol")
+    vol = sec.get("min_vol_rank")
+    vol_ok = (not isinstance(vol, bool) and isinstance(vol, (int, float))
+              and math.isfinite(float(vol)) and 0.0 <= float(vol) <= 100.0)
+    grade = grade if grade in IDEA_SHADOW_GRADES else d["min_grade"]
+    return {
+        "mode": mode if mode in IDEA_SHADOW_MODES else d["mode"],
+        "min_grade": grade,
+        "grades": IDEA_SHADOW_GRADES[grade],
+        "min_vol_rank": float(vol) if vol_ok else d["min_vol_rank"],
+        "max_per_hour": _idea_int(sec.get("max_per_hour"), 1, 4, d["max_per_hour"]),
+        "min_gap_min": _idea_int(sec.get("min_gap_min"), 0, 59, d["min_gap_min"]),
+        "max_per_day": _idea_int(sec.get("max_per_day"), 1, 30, d["max_per_day"]),
+        "one_per_symbol": one if isinstance(one, bool) else d["one_per_symbol"],
     }
 
 

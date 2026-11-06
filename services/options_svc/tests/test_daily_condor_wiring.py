@@ -29,7 +29,7 @@ def _condor(trade_id, status="OPEN", **over):
 
 def test_the_sources():
     assert idea_ledger.CONDOR_SOURCE == "daily_condor"
-    assert idea_ledger.SELF_MANAGED_SOURCES == {"trade_idea", "daily_condor"}
+    assert idea_ledger.SELF_MANAGED_SOURCES == {"trade_idea", "daily_condor", "idea_shadow"}
     assert idea_ledger.is_self_managed(_condor("c1"))
     assert idea_ledger.is_self_managed({"source": "trade_idea"})
     assert not idea_ledger.is_self_managed(_manual("m1"))

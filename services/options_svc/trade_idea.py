@@ -30,6 +30,7 @@ PURE: no bus, no Schwab, no clock of its own. Every function takes what it reads
 """
 import datetime as _dt
 import pathlib
+from shared import structures as _structures
 from shared.numeric import parsed_finite as _num  # noqa: E402 - one shared definition (audit CQ-07)
 
 MULT = 100
@@ -193,9 +194,16 @@ def normalize(row):
     if t in _CREDIT_TYPES and not row.get("legs"):
         legs, cash = _credit_legs(row), _credit_entry_cash(row)
         bias = _CREDIT_BIAS[t]
+        # A credit row's ``net_vega`` is short minus long (the scanner's
+        # convention); ``position_greek`` reads the sign the position holds.
+        vega = _structures.position_greek(row, "vega")
     else:
         legs, cash = _directional_legs(row), _directional_entry_cash(row)
         bias = row.get("bias") or "neutral"
+        # A legs row (strategy_scanner) already sums each leg's vega by its side.
+        vega = _num(row.get("entry_net_vega_position"))
+        if vega is None:
+            vega = _num(row.get("net_vega"))
     if not legs or cash is None:
         return None
     expirations = {lg["expiration"] for lg in legs}
@@ -221,6 +229,10 @@ def normalize(row):
         "breakevens": breakevens,
         "em": _num(row.get("em_to_expiry")),
         "trade_type": row.get("trade_type"),
+        # Read by the shadow rule's volatility floor (idea_shadow.vol_blocked);
+        # None when the row does not say.
+        "iv_rank": _num(row.get("iv_rank")),
+        "position_vega": vega,
     }
 
 

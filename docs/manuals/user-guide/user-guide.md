@@ -2698,6 +2698,28 @@ under *Daily SPY condor* in the schedule.
   weekly idea review never rates it, and the EOD Report and the Symbol dossier do
   not count it as yours.
 
+**Shadow ideas.** A test of posting trade ideas on quality instead of on the hourly
+clock. After every scan (four an hour), the app looks for a trade that was not a
+candidate in the previous scan and is graded **Strong**. If one fits the limits, it
+is booked into this ledger tagged **Shadow idea**. **Nothing is posted**: not to
+Discord, Telegram, X, the site or the calendar. Set under Settings → Configuration →
+*Shadow trade ideas in the Paper Ledger* (it ships on, in shadow).
+
+- **The limits** count the hourly posts and the shadow ideas together, as a real
+  feed would: at most **2 in any 60 minutes**, at least **20 minutes** after the last
+  one, at most **10 a day**, and one per symbol a day. A trade that sells premium
+  also needs a Vol Rank of at least **50**. Only one is booked per scan, and only
+  in the regular session.
+- **Not on the first scan of the day.** That scan only records what is there, so a
+  restart or the morning's first scan never books a burst.
+- **Followed like an idea.** The same 5-minute checks, target and stop as the
+  hourly ideas. It shows under **All** only; the weekly idea review, the site and
+  the live-order banner never see it, and the EOD Report and the Symbol dossier do
+  not count it as yours.
+- **The point** is the comparison: after a few weeks `tools/idea_shadow_compare.py`
+  sets the shadow ideas' results beside the hourly posts'. Posting on quality goes
+  live only if the shadow ideas did better.
+
 ## Paper Account
 
 **Route:** `/options/portfolio`.

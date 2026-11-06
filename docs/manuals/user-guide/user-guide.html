@@ -3236,6 +3236,28 @@ under <em>Daily SPY condor</em> in the schedule.</p>
   weekly idea review never rates it, and the EOD Report and the Symbol dossier do
   not count it as yours.</li>
 </ul>
+<p><strong>Shadow ideas.</strong> A test of posting trade ideas on quality instead of on the hourly
+clock. After every scan (four an hour), the app looks for a trade that was not a
+candidate in the previous scan and is graded <strong>Strong</strong>. If one fits the limits, it
+is booked into this ledger tagged <strong>Shadow idea</strong>. <strong>Nothing is posted</strong>: not to
+Discord, Telegram, X, the site or the calendar. Set under Settings → Configuration →
+<em>Shadow trade ideas in the Paper Ledger</em> (it ships on, in shadow).</p>
+<ul>
+<li><strong>The limits</strong> count the hourly posts and the shadow ideas together, as a real
+  feed would: at most <strong>2 in any 60 minutes</strong>, at least <strong>20 minutes</strong> after the last
+  one, at most <strong>10 a day</strong>, and one per symbol a day. A trade that sells premium
+  also needs a Vol Rank of at least <strong>50</strong>. Only one is booked per scan, and only
+  in the regular session.</li>
+<li><strong>Not on the first scan of the day.</strong> That scan only records what is there, so a
+  restart or the morning's first scan never books a burst.</li>
+<li><strong>Followed like an idea.</strong> The same 5-minute checks, target and stop as the
+  hourly ideas. It shows under <strong>All</strong> only; the weekly idea review, the site and
+  the live-order banner never see it, and the EOD Report and the Symbol dossier do
+  not count it as yours.</li>
+<li><strong>The point</strong> is the comparison: after a few weeks <code>tools/idea_shadow_compare.py</code>
+  sets the shadow ideas' results beside the hourly posts'. Posting on quality goes
+  live only if the shadow ideas did better.</li>
+</ul>
 <h2 id="paper-account">Paper Account</h2>
 <p><strong>Route:</strong> <code>/options/portfolio</code>.</p>
 <p>The account view for the automated paper-trading engine.</p>

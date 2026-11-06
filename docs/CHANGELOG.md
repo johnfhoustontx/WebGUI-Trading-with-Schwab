@@ -4,7 +4,31 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-06 (**The hourly trade idea moves from :35 to :40, so it reads a finished scan.**)
+**Last updated:** 2026-11-06 (**Shadow trade ideas: a quality-triggered pick after every scan, booked in the Paper Ledger and never posted.**)
+
+- **Why.** The operator asked whether ideas could be posted on quality rather than at
+  :40, more than once an hour if warranted. Measured first, on the 75 closed idea
+  trades of 10-21 to 11-05 (the 11-05 prod backup): every post scored 77-81, so the
+  composite score cannot trigger anything; grade Strong was the one separator (+0.45R
+  on 8 trades against +0.22R for Good). The operator chose shadow first.
+- **The rule** (`services/options_svc/idea_shadow.py`, pure): once per published scan,
+  a candidate NEW since the previous scan (by a trade key; scan row ids are list
+  indexes), graded Strong, not posted today (trade or symbol), Vol Rank 50 or more when
+  it sells premium, inside 2 an hour / 20 minutes apart / 10 a day counting the hourly
+  posts. The first scan of a day seeds and books nothing.
+- **Wiring.** `handlers.run_idea_shadow`, the scheduler's scan-version gate
+  (`idea_shadow_due`), `idea_ledger.book(..., source="idea_shadow")`. The source is in
+  both `SELF_MANAGED_SOURCES`, the Ledger's tags (**Shadow idea**, under All only), and
+  the measured sources of `/eod` and the Symbol page. `trade_idea.normalize` now
+  carries `iv_rank` and a position-signed `position_vega`.
+- **Config.** `config/paper.toml [idea_shadow]` (ships `mode = "shadow"`), in Settings
+  → Configuration → *Shadow trade ideas in the Paper Ledger*.
+- **Measuring.** `tools/idea_shadow_compare.py --db <trades.db>`; on the 11-05 backup
+  it prints the hourly baseline, 75 trades at +0.242R. Re-run after 15-20 sessions.
+- Not built: posting (`mode = "on"`), a liquidity check (the three row shapes carry no
+  common bid and ask).
+
+**Prior —** 2026-11-06 (**The hourly trade idea moves from :35 to :40, so it reads a finished scan.**)
 
 - **Why.** The 08:35 idea on 2026-11-06 was skipped as `nothing eligible` (0
   candidates). The 08:32 scan logged its last line at 08:35:28 and the idea ran at

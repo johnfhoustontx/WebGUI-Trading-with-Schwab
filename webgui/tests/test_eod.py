@@ -1131,6 +1131,14 @@ def test_split_ledger_leaves_condor_rows_out_of_both_books():
     assert [t.get("source") for t in ideas] == ["trade_idea"]
 
 
+def test_split_ledger_leaves_shadow_ideas_out_of_both_books():
+    """A shadow idea was never posted: it is neither the user's trade nor an idea."""
+    shadow = {**_manual(), "symbol": "NVDA", "source": "idea_shadow"}
+    manual, ideas = eod.split_ledger([_manual(), _idea(), shadow])
+    assert [t["symbol"] for t in manual] == ["QQQ"]
+    assert [t.get("source") for t in ideas] == ["trade_idea"]
+
+
 def test_manual_book_excludes_idea_rows():
     snap = {"paper_trades": {"trades": [_manual(), _idea(realized_pnl=999.0)]}}
     norm = [n for label, n, _s in eod._books(snap) if label == "Manual paper"][0]

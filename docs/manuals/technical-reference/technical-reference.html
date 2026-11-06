@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-05</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-06</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -236,6 +236,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#the-daily-0-dte-condor-in-the-paper-ledger">The daily 0-DTE condor in the Paper Ledger</a></li>
+<li><a href="#shadow-trade-ideas-in-the-paper-ledger">Shadow trade ideas in the Paper Ledger</a></li>
 <li><a href="#market-news">Market News</a><ul>
 <li><a href="#sources">Sources</a></li>
 <li><a href="#tickers-duplicates-retention">Tickers, duplicates, retention</a></li>
@@ -7313,6 +7314,77 @@ user's own Ledger (<code>ledger_book_state</code>, the chain reprice, <code>mana
 <code>expire_ledger_trades</code>, the action list) skips it. <strong>Delete all closed</strong> clears it
 (<code>cleared_at</code>) rather than deleting it. <code>idea_ledger.is_idea</code> is false for it, so
 the weekly idea review and the site's idea results never read it.</p>
+<h1 id="shadow-trade-ideas-in-the-paper-ledger">Shadow trade ideas in the Paper Ledger</h1>
+<p><strong>Files:</strong> <code>services/options_svc/idea_shadow.py</code> (the decision, pure),
+<code>services/options_svc/handlers.py</code> (<code>run_idea_shadow</code>),
+<code>services/options_svc/scheduler.py</code> (<code>idea_shadow_due</code>), <code>config/paper.toml</code>
+<code>[idea_shadow]</code>, <code>tools/idea_shadow_compare.py</code>. Design:
+<code>docs/plans/2026-11-06-trade-idea-quality-shadow-design.md</code>.</p>
+<p>The scheduler's 30-second tick reads <code>cache:options:scan</code>'s version; when it has
+moved, <code>run_idea_shadow</code> runs once. It reads the scan and the hourly idea's last
+result (<code>cache:options:trade_idea</code>) and makes no Schwab or Claude call.
+<code>idea_shadow.decide</code>, in order:</p>
+<table>
+<thead>
+<tr>
+<th>Step</th>
+<th>Rule</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Once per scan</td>
+<td>a scan whose <code>timestamp</code> equals the last one checked is skipped</td>
+</tr>
+<tr>
+<td>Fresh</td>
+<td>the <code>trade_idea</code> block's <code>max_age_min</code> (45)</td>
+</tr>
+<tr>
+<td>Candidates</td>
+<td><code>trade_idea.candidates</code> at the grades <code>min_grade</code> allows (<code>Strong</code>), with the block's <code>min_score</code>, <code>min_dte</code>, <code>other_structures</code></td>
+</tr>
+<tr>
+<td>First scan</td>
+<td>with no previous keys today, the keys are recorded and nothing is booked</td>
+</tr>
+<tr>
+<td>Session</td>
+<td>outside the regular session the keys move and nothing is booked</td>
+</tr>
+<tr>
+<td>New</td>
+<td>the trade key (symbol, type, expiry, sorted legs) was not a candidate in the previous scan; a row <code>id</code> holds a list index and is never used</td>
+</tr>
+<tr>
+<td>Not repeated</td>
+<td>the key, and with <code>one_per_symbol</code> the symbol, is not among today's posts</td>
+</tr>
+<tr>
+<td>Vol Rank</td>
+<td><code>vol_gate.blocks(iv_rank, position_vega, floor=min_vol_rank)</code>; the row's <code>iv_rank</code>, else the scan's <code>iv_data[symbol]</code>; the vega is position-signed (<code>structures.position_greek</code> on a credit row)</td>
+</tr>
+<tr>
+<td>Limits</td>
+<td>today's posts, hourly (seen through <code>note_clock</code>) and shadow together: <code>max_per_day</code> (10), <code>max_per_hour</code> (2, rolling 60 minutes), <code>min_gap_min</code> (20)</td>
+</tr>
+<tr>
+<td>Pick</td>
+<td><code>trade_idea.pick</code> among the rest (score, then grade); one per scan</td>
+</tr>
+</tbody>
+</table>
+<p>A pick is booked with <code>idea_ledger.book(idea, now, source="idea_shadow")</code>, notes
+<code>Shadow idea</code>. <code>[idea_trades] enabled</code> does not stop it; <code>mode = "off"</code> does. The
+row is self-managed (<code>SELF_MANAGED_SOURCES</code> in <code>idea_ledger</code> and its twin in
+<code>trades_db</code>), so <code>mark_cycle</code> marks, stops and settles it as an idea row, and the
+user's own Ledger passes skip it. <code>is_idea</code> is false: the site's results, the
+weekly review and the live-order banner never read it, and <code>/eod</code> and the Symbol
+page list it among the measured sources. <code>cache:options:idea_shadow</code> holds the
+day's state and the last decision's <code>reason</code>.</p>
+<p><code>tools/idea_shadow_compare.py --db &lt;trades.db&gt;</code> opens the store read-only and
+immutable and prints each source's closed rows: n, distinct days, win rate, mean R
+(<code>realized_pnl / max_loss_total</code>) and P&amp;L, then by grade.</p>
 <h1 id="market-news">Market News</h1>
 <p><code>services/news_svc</code> — one of the two services with no Schwab or Claude call and no
 call to the proxy (the other is <code>blog_svc</code>, see <em>Site Blog</em>). It reads one optional

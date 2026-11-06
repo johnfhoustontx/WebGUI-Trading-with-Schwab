@@ -4171,6 +4171,45 @@ user's own Ledger (`ledger_book_state`, the chain reprice, `manage_ledger_trades
 (`cleared_at`) rather than deleting it. `idea_ledger.is_idea` is false for it, so
 the weekly idea review and the site's idea results never read it.
 
+# Shadow trade ideas in the Paper Ledger
+
+**Files:** `services/options_svc/idea_shadow.py` (the decision, pure),
+`services/options_svc/handlers.py` (`run_idea_shadow`),
+`services/options_svc/scheduler.py` (`idea_shadow_due`), `config/paper.toml`
+`[idea_shadow]`, `tools/idea_shadow_compare.py`. Design:
+`docs/plans/2026-11-06-trade-idea-quality-shadow-design.md`.
+
+The scheduler's 30-second tick reads `cache:options:scan`'s version; when it has
+moved, `run_idea_shadow` runs once. It reads the scan and the hourly idea's last
+result (`cache:options:trade_idea`) and makes no Schwab or Claude call.
+`idea_shadow.decide`, in order:
+
+| Step | Rule |
+|---|---|
+| Once per scan | a scan whose `timestamp` equals the last one checked is skipped |
+| Fresh | the `trade_idea` block's `max_age_min` (45) |
+| Candidates | `trade_idea.candidates` at the grades `min_grade` allows (`Strong`), with the block's `min_score`, `min_dte`, `other_structures` |
+| First scan | with no previous keys today, the keys are recorded and nothing is booked |
+| Session | outside the regular session the keys move and nothing is booked |
+| New | the trade key (symbol, type, expiry, sorted legs) was not a candidate in the previous scan; a row `id` holds a list index and is never used |
+| Not repeated | the key, and with `one_per_symbol` the symbol, is not among today's posts |
+| Vol Rank | `vol_gate.blocks(iv_rank, position_vega, floor=min_vol_rank)`; the row's `iv_rank`, else the scan's `iv_data[symbol]`; the vega is position-signed (`structures.position_greek` on a credit row) |
+| Limits | today's posts, hourly (seen through `note_clock`) and shadow together: `max_per_day` (10), `max_per_hour` (2, rolling 60 minutes), `min_gap_min` (20) |
+| Pick | `trade_idea.pick` among the rest (score, then grade); one per scan |
+
+A pick is booked with `idea_ledger.book(idea, now, source="idea_shadow")`, notes
+`Shadow idea`. `[idea_trades] enabled` does not stop it; `mode = "off"` does. The
+row is self-managed (`SELF_MANAGED_SOURCES` in `idea_ledger` and its twin in
+`trades_db`), so `mark_cycle` marks, stops and settles it as an idea row, and the
+user's own Ledger passes skip it. `is_idea` is false: the site's results, the
+weekly review and the live-order banner never read it, and `/eod` and the Symbol
+page list it among the measured sources. `cache:options:idea_shadow` holds the
+day's state and the last decision's `reason`.
+
+`tools/idea_shadow_compare.py --db <trades.db>` opens the store read-only and
+immutable and prints each source's closed rows: n, distinct days, win rate, mean R
+(`realized_pnl / max_loss_total`) and P&L, then by grade.
+
 # Market News
 
 `services/news_svc` — one of the two services with no Schwab or Claude call and no

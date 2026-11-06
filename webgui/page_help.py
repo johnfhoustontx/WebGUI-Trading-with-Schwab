@@ -1408,6 +1408,14 @@ engine's positions live on **Paper Account**.
   settled at the close. It shows under **All** only, and **Delete all closed**
   keeps it on file. Settings -> Configuration -> *Daily SPY condor in the Paper
   Ledger*.
+- **Shadow ideas are a test of posting on quality.** After every scan, a trade
+  that is new in that scan, graded **Strong**, and fits the limits (at most 2
+  posts an hour, 20 minutes apart, 10 a day, one per symbol, counting the hourly
+  posts too) is booked here tagged **Shadow idea**. Nothing is posted anywhere.
+  They are followed exactly like the hourly ideas (5-minute checks, the same
+  target and stop), show under **All** only, and never reach the site or the
+  weekly review. They exist to be compared with the hourly posts after a few
+  weeks. Settings -> Configuration -> *Shadow trade ideas in the Paper Ledger*.
 - **Send Live Order — this one is REAL money.** Every row's detail panel has
   **Send Live Order** (options only: not shares, not /ES or /NQ), and a banner
   offers the same when an idea posts. It opens an

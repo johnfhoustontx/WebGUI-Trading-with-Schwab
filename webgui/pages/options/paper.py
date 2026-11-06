@@ -192,8 +192,13 @@ IDEA_TAG_CLASS = "bg-amber-400/15 text-amber-300 rounded-[6px]"
 # idea, so they show under All only.
 CONDOR_TAG = "SPY condor"
 CONDOR_TAG_CLASS = "bg-sky-400/15 text-sky-300 rounded-[6px]"
+# A quality-triggered idea booked IN SHADOW (``source == "idea_shadow"``): never
+# posted, measured against the hourly ideas. Like the condor, under All only.
+SHADOW_TAG = "Shadow idea"
+SHADOW_TAG_CLASS = "bg-violet-400/15 text-violet-300 rounded-[6px]"
 _TAGS = {"trade_idea": (IDEA_TAG, IDEA_TAG_CLASS),
-         "daily_condor": (CONDOR_TAG, CONDOR_TAG_CLASS)}
+         "daily_condor": (CONDOR_TAG, CONDOR_TAG_CLASS),
+         "idea_shadow": (SHADOW_TAG, SHADOW_TAG_CLASS)}
 FILTER_OPTIONS = {"all": "All", "mine": "My trades", "ideas": "Trade ideas"}
 
 DELETE_BODY = "It leaves the ledger for good."

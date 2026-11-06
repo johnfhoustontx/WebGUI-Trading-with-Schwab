@@ -222,7 +222,7 @@ def merge_facts(cached, fetched):
 
 
 #: Ledger rows that are measurements, not positions the user holds.
-_MEASURED_SOURCES = ("trade_idea", "daily_condor")
+_MEASURED_SOURCES = ("trade_idea", "daily_condor", "idea_shadow")
 
 
 def position_rows(symbol, books):

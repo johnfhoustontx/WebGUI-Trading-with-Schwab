@@ -519,8 +519,9 @@ def _is_idea(trade) -> bool:
 
 
 #: Ledger rows that are measurements rather than the user's own trades: the posted
-#: ideas and the daily SPY condor (``source == "daily_condor"``).
-_MEASURED_SOURCES = ("trade_idea", "daily_condor")
+#: ideas, the daily SPY condor (``source == "daily_condor"``) and the shadow ideas
+#: (``source == "idea_shadow"``, never posted, so not in the ideas table either).
+_MEASURED_SOURCES = ("trade_idea", "daily_condor", "idea_shadow")
 
 
 def split_ledger(trades):
