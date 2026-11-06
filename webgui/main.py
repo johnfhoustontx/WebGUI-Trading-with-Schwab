@@ -1171,6 +1171,7 @@ _TAB_COLOR = {
     "/trade": "#26c6da",                 # Trade — cyan
     "/portfolio": "#9ccc65",             # Portfolio — light green
     "/eod": "#78909c",                   # EOD Report — blue grey
+    "/send-order": "#66bb6a",            # Send to ThinkorSwim — the Ledger's green
     "/x": "#1d9bf0",                     # Post to X — X blue
     # Parchment: a pale, low-saturation tan. Every other colour in this map is
     # a saturated Material hue or a blue grey, so a paper colour is the one
@@ -2443,6 +2444,10 @@ def _layout(active: str, title: str):
                     f"schwab-proxy is not reachable at {proxy.PROXY_URL} — "
                     "start it first (python schwab-proxy/schwab_proxy.py)."
                 )
+        # "New trade idea" -> Open order ticket (live-order design, Phase 1). In
+        # the app only: this layout is the private process's, never live_main's.
+        from pages import idea_banner
+        idea_banner.render()
         yield content
 
 
@@ -2708,6 +2713,19 @@ def eod_weekly_page() -> None:
     with _layout("/eod", "Weekly idea review"):
         from pages import idea_review
         idea_review.render()
+
+
+@_page("/send-order")
+def send_order_page(request: Request, trade: str | None = None) -> None:
+    # ⚠ A @ui.page signature IS its query-parameter surface. ``trade`` is a
+    # Paper Ledger id that reaches a Redis key name and the options service, so
+    # pages.send_order.render allow-lists it (shared.live_order.TRADE_ID_RE) and
+    # the service allow-lists it AGAIN. ``request`` is injected, never a query
+    # parameter: the authenticator code's failures count against this address.
+    # Private only: never in live_screens (live-order design, Phase 1).
+    with _layout("/options/paper", "Send to ThinkorSwim"):
+        from pages import send_order
+        send_order.render(trade, _client_ip(request))
 
 
 @_page("/x")

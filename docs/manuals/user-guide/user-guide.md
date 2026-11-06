@@ -2039,7 +2039,8 @@ SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL STP TRG-50.00% MARK 
 ```
 
 In ThinkorSwim, open **Trade → Order Entry Tools → Paste order from clipboard**,
-check the ticket, and send it there. The app never places an order.
+check the ticket, and send it there. This button places nothing; a posted trade
+idea can also be sent to the account from the app itself (next section).
 
 - **The opening order** is a DAY limit at the price the panel shows (the debit
   paid or the credit received, per share, for one spread: a position several
@@ -2069,6 +2070,58 @@ check the ticket, and send it there. The app never places an order.
   panel shows: check the price, the expiration and the strikes in the ticket
   before sending. A price may need rounding to the option's tick size.
 - The button is not on the public site.
+
+### Sending a trade idea to ThinkorSwim
+
+A posted trade idea can be sent to your Schwab account as a real order, which then
+shows in ThinkorSwim like any other. This covers a **single call or put**, a
+**vertical** and an **iron condor**; other structures still use the paste above. It
+is off until you turn it on: **Settings → Configuration → Live orders → Live orders**
+(`off`, `preview` to let Schwab check orders without placing any, `live` to send).
+
+**Where it starts.**
+
+- When an idea posts and is booked to the Paper Ledger, a banner appears under the
+  page header: *New trade idea: …* with **Open order ticket** and **Dismiss**. It is
+  in the app only (never Telegram or Discord), and it goes away after 30 minutes
+  (*No banner for an idea older than*).
+- Any idea row in the **Paper Ledger** has a **Send to ThinkorSwim** button in its
+  detail panel.
+
+**The ticket** (`/send-order`) re-prices the idea's legs from a fresh chain and
+shows the live mid beside the price the idea posted at, with a warning when it has
+moved more than 10%. Fill in three boxes:
+
+- **Limit**: opens at the live mid, on the option's price step.
+- **Contracts**: opens at the most contracts whose maximum loss is at most **$1,000**
+  (*Open the box at up to this much risk*), or 1 when one contract risks more. You can type any size; past
+  $1,000 the risk line turns the warning colour. An order over **50 contracts** or
+  **$5,000** of risk is refused.
+- **Account**: **Trading account** (the default) or **IRA**. The page shows the
+  name only, never the account number.
+
+Under them: the maximum loss and profit for that size, and the exits, priced off
+the limit with the *ThinkorSwim order* percentages. Because they are priced off the
+limit, a better fill does not move them. **Schwab refuses a stop on a spread**, so a
+vertical or a condor goes in as the opening order plus its profit target; set the
+stop in ThinkorSwim once it fills. A single option gets the full bracket. The same
+order is also shown as ThinkorSwim paste text.
+
+**Sending it.**
+
+1. **Preview**: Schwab checks the order and places nothing. Its answer (and any
+   warnings) shows under *Schwab's answer*. A preview is good for **2 minutes**;
+   changing the limit, the size or the account drops it.
+2. **Send**: lit only after a passed preview, in **live** mode, in the regular
+   session (08:30–15:00 CT). The first send of each day asks for your
+   **authenticator code**; then a last confirmation says *This places a real
+   order*.
+3. The page follows the order (*Sent to Schwab: order …*, with Schwab's status)
+   every 5 seconds until it is filled, cancelled or rejected.
+
+If Schwab's answer never comes back, the order is **not sent again**: the page says
+*No answer from Schwab*, and the app looks for it in the account's orders and
+reports what it finds. Cancel or change a working order in ThinkorSwim.
 
 ### Using the checklist to pick a trade
 

@@ -4,7 +4,38 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-05 (**Live orders, Phase 0: the proxy can ask Schwab to check an order, and place none.**)
+**Last updated:** 2026-11-05 (**Live orders, Phase 1: a posted trade idea can be sent to ThinkorSwim as a real order, for single options, verticals and iron condors.** Ships with `mode = "off"`.)
+
+- **The proxy places one order per click.** `POST /orders/place` (`trader_place`, behind
+  `require_account_secret`, 403 unless `config/live_orders.toml mode = "live"`) makes ONE
+  attempt: a timeout, a 5xx or a 201 with no order id in `Location` answers `unknown`, and
+  is resolved by reading the account's orders, never by sending again. Two reads join it,
+  `GET /orders/{hash}/{order_id}` and `GET /orders/{hash}` (an entered-time window).
+  `test_account_surface.py` pins one caller of `trader_place`.
+- **`options_svc` owns the order** on a new stream, `cmd:live_order` (`quote`, `preview`,
+  `place`, `status`; `live_order_handlers.py`). `quote` reprices the idea's legs from a
+  fresh chain (`maxAge: 0`) and publishes the live price, risk per contract, the default
+  size and the exits. `preview` sends the order to Schwab's `previewOrder` and keeps the
+  verdict as a TICKET in a new store, `services/options_svc/data/live_orders.db`
+  (`live_order_store.py`). `place` sends only a ticket that passed, unexpired, unchanged
+  (a digest of the order), in the regular session, and claims it in one conditional
+  UPDATE so it can be sent once. A command older than `max_command_age_sec` is dropped.
+- **Sizing is the operator's rule.** The default is the most contracts whose max loss is
+  at most `default_risk_usd` ($1,000), or 1 when one contract risks more; a size past
+  that is allowed and shown in the warning colour, up to 50 contracts and $5,000.
+- **Accounts are aliases.** `[[accounts]]` in `config/local/live_orders.toml` maps the last
+  4 digits to an alias; the page shows only the alias, and the hash is looked up in the
+  service on each send. Schwab's answers are scrubbed (`live_order.scrub`) before they are
+  stored or published.
+- **The page:** `/send-order?trade=<id>` (private app only), reached from a banner when an
+  idea is booked to the Ledger (`pages/idea_banner.py`, in the app, never Telegram) or from
+  the Ledger's new **Send to ThinkorSwim** button on an idea row. The authenticator code is
+  asked once a day before the first send (`webgui/live_unlock.py`, `totp`).
+- A spread goes in as opening + target: Schwab refuses a stop on a spread (Phase 0), so the
+  page says to set it in ThinkorSwim. `tos_order.toml`'s percentages are now validated in
+  one place both tiers import, `shared/tos_order_config.py`.
+
+**Prior —** 2026-11-05 (**Live orders, Phase 0: the proxy can ask Schwab to check an order, and place none.**)
 
 - The first step of [sending a trade idea to ThinkorSwim](plans/2026-11-05-live-order-to-thinkorswim-design.md).
   `POST /orders/preview` (behind `require_account_secret`) sends an order to Schwab's

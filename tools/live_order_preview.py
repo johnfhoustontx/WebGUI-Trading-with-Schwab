@@ -127,45 +127,10 @@ def net_price(legs):
     return abs(net) if abs(net) >= 0.01 else None
 
 
-#: Keys of Schwab's answer that name the account. Schwab's preview echoes the
-#: FULL account number (``orderStrategy.accountNumber``, found 2026-11-05 on
-#: the first run), so every answer is scrubbed before it is printed or saved.
-_ACCOUNT_KEYS = frozenset({"accountNumber", "accountId", "hashValue",
-                           "accountHash", "account_hash"})
-
-
-def scrub(value):
-    """``value`` with every account-naming key's value cut to its last 4."""
-    if isinstance(value, dict):
-        return {k: (("…" + str(v)[-4:]) if k in _ACCOUNT_KEYS and v is not None
-                    else scrub(v)) for k, v in value.items()}
-    if isinstance(value, list):
-        return [scrub(v) for v in value]
-    return value
-
-
-def summarize(status, answer):
-    """``(verdict, messages)`` from Schwab's preview answer. ``verdict`` is
-    ``accepted``, ``rejected`` or ``error <status>``."""
-    schwab = (answer or {}).get("schwab") if isinstance(answer, dict) else None
-    result = (schwab or {}).get("orderValidationResult") if isinstance(schwab, dict) else None
-    messages = []
-    if isinstance(result, dict):
-        for kind in ("rejects", "reviews", "warns", "alerts"):
-            for item in result.get(kind) or ():
-                text = item.get("message") or item.get("activityMessage") \
-                    if isinstance(item, dict) else str(item)
-                messages.append(f"{kind[:-1]}: {text}")
-    if status not in (200, 201):
-        err = (answer or {}).get("error") or (answer or {}).get("detail") \
-            if isinstance(answer, dict) else answer
-        if not messages and err:
-            messages.append(str(err)[:300])
-        return f"error {status}", messages
-    if isinstance(result, dict) and result.get("rejects"):
-        return "rejected", messages
-    return "accepted", messages
-
+# The account scrubber and the verdict reader are the service's own
+# (``shared/live_order.py``), so the tool and the ticket scrub the same keys.
+scrub = live_order.scrub
+summarize = live_order.preview_verdict
 
 # ── talking to the proxy ────────────────────────────────────────────────────
 

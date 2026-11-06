@@ -1159,9 +1159,10 @@ def preview_order(body: Dict[str, Any]):
     """Ask Schwab to check an order and place nothing: ``{"account_hash",
     "order"}`` in, Schwab's answer out, with Schwab's own status code.
 
-    Refused (403) unless ``config/live_orders.toml mode = "preview"``, read on
-    this request, so switching it off needs no restart. No route here places
-    an order (``tests/test_account_surface.py``)."""
+    Refused (403) unless ``config/live_orders.toml mode`` is ``preview`` or
+    ``live``, read on this request, so switching it off needs no restart. It
+    places nothing; the one route that places is ``/orders/place``
+    (``tests/test_account_surface.py``)."""
     if not _live_orders_config.preview_allowed():
         raise HTTPException(status_code=403,
                             detail='live orders are off (config/live_orders.toml mode)')

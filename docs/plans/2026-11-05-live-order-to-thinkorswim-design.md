@@ -1,6 +1,6 @@
 # Send a trade idea to ThinkorSwim as a live order: design
 
-**Date:** 2026-11-05 · **Status:** design, not built · **Branch:** `claude/live-trade-thinkorswim-47ff6c`
+**Date:** 2026-11-05 · **Status:** Phase 0 run on prod; Phase 1 built (ships `mode = "off"`) · **Branch:** `claude/live-trade-thinkorswim-47ff6c`
 
 ## What the operator asked for
 
@@ -228,15 +228,18 @@ ThinkorSwim. A single option keeps the full bracket.
 
 ### The proxy
 
-- `trader_request` allows POST to exactly two endpoint shapes,
-  `/accounts/{hash}/previewOrder` and `/accounts/{hash}/orders`. Anything else still
-  raises.
+- `trader_request` stays GET-only. The two writes are functions of their own, each
+  with its one endpoint fixed in code: `trader_preview` (`/accounts/{hash}/previewOrder`)
+  and `trader_place` (`/accounts/{hash}/orders`, ONE attempt; a 401 refreshes and asks
+  once more, since Schwab looked at nothing). `test_account_surface.py` pins them.
 - `POST /orders/preview` and `POST /orders/place`, both behind
   `require_account_secret`, both refusing with 403 unless `live_orders.toml mode`
   allows them (`preview` for the preview, `live` for the place). The proxy reads the switch itself, so turning it off stops orders even
   if a service is wrong.
 - `place` returns the order ID from Schwab's `Location` header (201, empty body).
-- New read-only route: `GET /orders/{hash}/{order_id}` (status). The dropdown's
+- New read-only routes: `GET /orders/{hash}/{order_id}` (status) and
+  `GET /orders/{hash}?from_time=&to_time=` (the account's orders in a UTC window, for
+  settling an `unknown`). The dropdown's
   names are the operator's aliases from config, so no Schwab nickname route is
   needed.
 - The service maps an alias to an account HASH (from `/accounts`) inside Tier 2.
@@ -248,14 +251,19 @@ ThinkorSwim. A single option keeps the full bracket.
 ### The service: `services/options_svc/live_order_handlers.py`
 
 A sibling module that imports nothing from `compute` (the size ceiling). It has a
-stream of its own, **`cmd:live_order`**, with its own consumer thread, its own
-`[stream_keep]` entry (50) and none of `cmd:options`' table. It is never on the
-slow lane.
+stream of its own, **`cmd:live_order`**, with its own consumer thread and none of
+`cmd:options`' table. It is never on the slow lane. It has no `[stream_keep]` entry:
+its commands are a few hundred bytes, not documents, so the default cap stands.
 
-Two commands:
+Four commands:
 
-- **`preview`** `{idea_id, posted, account_hash, contracts, limit}`: re-reads the
-  idea from the Ledger by `idea_id` + `idea_posted` (never from the page's echo),
+- **`quote`** `{trade_id}`: reprices the idea's legs from a chain fetched with
+  `maxAge: 0` and publishes `cache:live_order:quote:<trade_id>` (the live price, the
+  risk per contract, the default size, the exits). It opens the ticket page and backs
+  its Refresh price button.
+- **`preview`** `{ticket_id, trade_id, idea_posted, alias, contracts, limit}` (the page
+  mints the ticket id): re-reads the idea from the Ledger by `trade_id` + `idea_posted`
+  (never from the page's echo),
   checks the limits, builds the payload, calls the proxy's preview, and stores a
   **ticket** in `live_orders.db`: an id, the exact payload, its digest, the
   account hash, `status = 'previewed'`, `expires_at`. The result is published to
@@ -265,6 +273,13 @@ Two commands:
   `previewed → sending` in ONE `UPDATE … WHERE status = 'previewed' AND expires_at > now`;
   if no row changed, it refuses. So a second delivery of the same command places
   nothing.
+- **`status`** `{ticket_id}`: expires a stale preview, settles an `unknown`, or reads a
+  sent order's Schwab status. The page sends it every `status_poll_sec` while an order
+  is working.
+
+**Hours.** A preview is allowed at any hour (Schwab checks the order whatever the
+clock says); a place is refused outside the regular session (08:30–15:00 CT), by the
+service and again by the page.
 
 **Against replay:** this matters more here than anywhere in the app, because a
 fresh consumer group replays the stream's whole backlog on its first launch.
@@ -335,8 +350,11 @@ place.
 - The read-only Redis user (`REDIS_LIVE_URL`) cannot `XADD` to `cmd:live_order`;
   `test_bus_client.py`'s pinned writer set does not include it.
 - `/send-order` is a `@ui.page` in `main.py` only, never in `live_screens.py`.
-- The ticket cache holds account hashes: it gets a key prefix
-  (`cache:live_order:`) the public ACL user cannot read.
+- The ticket and quote views sit under `cache:live_order:`, inside `cache:*`, which
+  the public ACL user CAN read. So they carry no account hash and no number: the
+  ticket view is built from the store without the hash or the payload's account,
+  Schwab's answer is scrubbed first, and `test_send_order.py` pins that no module the
+  public process loads names the keys.
 - `/ES` and `/NQ` (`futures_chain.is_feed_symbol`) are refused at the builder:
   Schwab cannot place futures options.
 

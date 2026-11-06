@@ -3431,6 +3431,30 @@ review too. Reading across pages: the [EOD Report](#eod-report) tallies these ro
 book of their own (its *Paper Trades* table and *Paper trades* tile are yours only) and
 its **Weekly idea review** summarises them; the Symbol dossier never lists one as held.
 
+### Sending an idea to the real account
+
+**An idea row can become a real order.** Its detail panel has a **Send to ThinkorSwim**
+button (and a banner offers the same when an idea is booked), which opens the order
+ticket at `/send-order`. It works for a single option, a vertical and an iron condor, and
+only while **Settings → Configuration → Live orders** is on (it ships off).
+
+| | Copy ThinkorSwim order | Send to ThinkorSwim |
+|---|---|---|
+| What it does | Puts paste text on the clipboard | Sends the order to your Schwab account |
+| Who checks it | You, in ThinkorSwim's ticket | Schwab's own order check (Preview), then you |
+| Size and account | One lot; you change it in ThinkorSwim | Typed on the page; the account by its name |
+| Stop on a spread | In the paste | Not sent (Schwab's API refuses it): set it in ThinkorSwim |
+| When | Any time | The regular session only, after the day's authenticator code |
+
+**Why the size opens where it does.** The Contracts box opens at the most contracts whose
+loss is at most $1,000, the size the operator chose as a normal order; one contract that
+risks more opens at 1. Typing more is allowed and shown in the warning colour, up to the
+hard ceilings of 50 contracts and $5,000.
+
+⚠ The Paper Ledger row is the idea's scorecard, not your position: sending the order does
+not change the row, and the row keeps being marked and closed by its own rules whatever
+happens to the real order. A real order is managed in ThinkorSwim.
+
 ### Reading the screen
 
 Columns: **SYMBOL · STRAT · STRIKES · EXP · QTY · CREDIT · RISK · P&L · STATUS ·

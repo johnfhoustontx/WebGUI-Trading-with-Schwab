@@ -239,3 +239,68 @@ def test_a_naked_short_call_has_no_bounded_loss():
 def test_default_contracts(risk, want):
     """The operator's rule: up to $1,000 of risk, else 1; never past the ceiling."""
     assert lo.default_contracts(risk, 1000.0, 50) == want
+
+
+def test_max_profit_per_contract():
+    assert lo.max_profit_per_contract(DEBIT_CALL_VERTICAL, 1.50, True) == 350.0
+    assert lo.max_profit_per_contract(CREDIT_PUT_VERTICAL, 0.90, False) == 90.0
+    assert lo.max_profit_per_contract(IRON_CONDOR, 1.40, False) == 140.0
+    assert lo.max_profit_per_contract(LONG_CALL, 1.80, True) is None
+
+
+# ── the names both tiers share ───────────────────────────────────────────────
+
+def test_view_keys_take_only_their_own_ids():
+    assert lo.ticket_key("a" * 32) == "cache:live_order:ticket:" + "a" * 32
+    assert lo.quote_key("ab12cd34") == "cache:live_order:quote:ab12cd34"
+    assert lo.STREAM == "cmd:live_order"
+    for bad in ("A" * 32, "a" * 31, "a" * 32 + ":x", None, ""):
+        with pytest.raises(ValueError):
+            lo.ticket_key(bad)
+    for bad in ("ab:cd", "a b", "", None, "x" * 41):
+        with pytest.raises(ValueError):
+            lo.quote_key(bad)
+
+
+# ── reading Schwab's answers ─────────────────────────────────────────────────
+
+def test_scrub_cuts_every_account_key_to_four_digits():
+    answer = {"orderStrategy": {"accountNumber": "12345678", "legs": [
+        {"accountId": 99991191}, {"hashValue": "ABCDEF", "x": 1}]}, "accountHash": None}
+    out = lo.scrub(answer)
+    assert out["orderStrategy"]["accountNumber"] == "…5678"
+    assert out["orderStrategy"]["legs"] == [{"accountId": "…1191"},
+                                           {"hashValue": "…CDEF", "x": 1}]
+    assert out["accountHash"] is None
+
+
+def test_preview_verdict():
+    ok = {"schwab": {"orderValidationResult": {"warns": [{"message": "wide"}]}}}
+    assert lo.preview_verdict(200, ok) == ("accepted", ["warn: wide"])
+    no = {"schwab": {"orderValidationResult": {"rejects": [{"activityMessage": "level"}]}}}
+    assert lo.preview_verdict(200, no) == ("rejected", ["reject: level"])
+    assert lo.preview_verdict(403, {"detail": "off"}) == ("error 403", ["off"])
+
+
+CHAIN = {"callExpDateMap": {"2026-11-06:1": {"100.0": [{"symbol": "C100", "bid": 1.0, "ask": 1.2}]}},
+         "putExpDateMap": {"2026-11-06:1": {"452.5": [{"symbol": "P452", "bid": 0, "ask": 0.1}]}}}
+
+
+def test_find_contract_and_its_mid():
+    c = lo.find_contract(CHAIN, "call", "2026-11-06", 100)
+    assert c["symbol"] == "C100" and lo.contract_mid(c) == pytest.approx(1.1)
+    p = lo.find_contract(CHAIN, "put", "2026-11-06", 452.5)
+    assert p["symbol"] == "P452" and lo.contract_mid(p) is None      # no bid
+    assert lo.find_contract(CHAIN, "call", "2026-11-13", 100) is None
+    assert lo.find_contract(CHAIN, "call", "2026-11-06", 101) is None
+    assert lo.find_contract(CHAIN, "stock", "2026-11-06", 100) is None
+    assert lo.contract_mid({"bid": float("nan"), "ask": 1}) is None
+    assert lo.contract_mid({"bid": True, "ask": 1}) is None
+
+
+def test_net_mid_reads_the_side_off_the_legs():
+    assert lo.net_mid(DEBIT_CALL_VERTICAL, [2.5, 1.0]) == (1.5, True)
+    assert lo.net_mid(CREDIT_PUT_VERTICAL, [1.2, 0.3]) == (pytest.approx(0.9), False)
+    assert lo.net_mid(DEBIT_CALL_VERTICAL, [1.0, None]) is None
+    assert lo.net_mid(DEBIT_CALL_VERTICAL, [1.0, 1.0]) is None
+    assert lo.net_mid(DEBIT_CALL_VERTICAL, [1.0]) is None

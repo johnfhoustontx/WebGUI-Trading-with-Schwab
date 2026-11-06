@@ -120,6 +120,9 @@ GEX_ARCHIVE_TOML = REPO_ROOT / "config" / "gex_archive.toml"
 # Opening Scalp: its tunables (shared/scalp_config.py) and its bar / chain store.
 SCALP_TOML = REPO_ROOT / "config" / "scalp.toml"
 SCALP_DB = REPO_ROOT / "services" / "options_svc" / "data" / "scalp.db"
+# Live-order tickets (live_order_store.py): never DB_EXCLUDE, it is the journal
+# of every order sent to the Schwab account.
+LIVE_ORDERS_DB = REPO_ROOT / "services" / "options_svc" / "data" / "live_orders.db"
 
 # The public Rescue form: its budgets, reuse windows and per-visitor limits.
 # Read by shared/public_rescue.py from both options_svc (the worker) and the

@@ -38,9 +38,9 @@ if str(_REPO_ROOT) not in sys.path:
 from services._scaffold import make_app  # noqa: E402
 from services.options_svc import (  # noqa: E402
     finder_public, futures_chain_feed, futures_chain_watch, gamma_public, handlers,
-    rescue_public, scheduler, tools_public)
+    live_order_handlers, rescue_public, scheduler, tools_public)
 from shared import (  # noqa: E402
-    futures_chain, public_gamma, public_rescue, public_scan, public_tools)
+    futures_chain, live_order, public_gamma, public_rescue, public_scan, public_tools)
 
 app = make_app(
     "options",
@@ -64,7 +64,10 @@ app = make_app(
                      (public_gamma.STREAM, gamma_public.handle),
                      # The /ES and /NQ chains from the PC: a stream of its own,
                      # since each command carries a document (a low stream_keep).
-                     (futures_chain.STREAM, futures_chain_feed.handle)),
+                     (futures_chain.STREAM, futures_chain_feed.handle),
+                     # A trade idea sent to the Schwab account (Phase 1 of the
+                     # live-order design): its own thread, never cmd:options' table.
+                     (live_order.STREAM, live_order_handlers.handle)),
     # The /ES and /NQ feed's age and state on /health: a report only, never the
     # verdict (a PC that is off is not an options service that is down).
     health_extra=lambda bus: {"futures_chain": futures_chain_watch.health(bus)},

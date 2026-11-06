@@ -170,6 +170,11 @@ pinned by `shared/tests/test_blog_inbox.py`) ·
 `shared.site_nav` (since 2026-10-29; the public site's menu for the live
 screens' header and the framed documents - stdlib + `repo_paths` only, pinned by
 `shared/tests/test_site_nav.py`) ·
+`shared.live_order` + `shared.live_orders_config` + `shared.tos_order_config`
+(since 2026-11-05; the live-order ticket's stream, view keys, sizing and exit
+arithmetic, the switch and the ThinkorSwim percentages - `math` / `re` +
+`repo_paths` + `shared.config_toml` only, so the ticket page prices exactly
+what the service will send) ·
 `repo_paths` · `requests` — **only** for the
 `/health` fan-out the shell and Status page run, the proxy helper's calls
 (`webgui/proxy.py`: API-usage counts, and the Schwab sign-in's link and
@@ -180,8 +185,9 @@ three **credential primitives** the login uses — `argon2` (password hashing),
 `pyotp` (the TOTP second factor) and `itsdangerous` (the signed session and
 remember-device cookies). They join the list on the same footing `edge_tts` did:
 none is an engine, none touches a DB or Schwab, and each is a leaf library over
-bytes. They live in `auth.py`, `auth_store.py`, `auth_middleware.py` and
-`login_page.py` and nowhere else. **Zero** engine imports, zero
+bytes. They live in `auth.py`, `auth_store.py`, `auth_middleware.py`,
+`login_page.py` and `live_unlock.py` (the live-order code, once a day) and
+nowhere else. **Zero** engine imports, zero
 `sqlite3`, zero Schwab calls, and — since 2026-08-21 — zero `sys.path` glue into
 a hyphenated app folder (`webgui/proxy.py` held the last of it for two dead
 client singletons; `test_proxy.py` now guards it at source level). ⚠ The
@@ -512,8 +518,15 @@ is in git; `--install` also arms the timers). Start order: Redis (a system unit)
   `live`) and `POST /orders/place` (`trader_place`: ONE attempt, never retried; a
   timeout or 5xx is `unknown`, reconciled by reading the account's orders, never
   by sending again; off unless the mode is `live`). The proxy reads the switch
-  itself on every request. This app is still paper-only: it places no order
-  until the ticket page and its service ship and the operator turns `live` on
+  itself on every request. Orders are placed from ONE place: the private
+  ticket page (`/send-order`) → `cmd:live_order` → `options_svc`'s
+  `live_order_handlers.place`, which sends only a stored, previewed, unexpired
+  ticket, once, in the regular session. It ships `mode = "off"`, and until the
+  operator turns `live` on the app is paper-only: nothing else may place,
+  replace or cancel an order. No account
+  number or hash reaches Tier 1 or a cache view (`cache:*` is publicly
+  readable): an alias goes up, the service looks the hash up per send, and
+  Schwab's answers are scrubbed
   ([design](docs/plans/2026-11-05-live-order-to-thinkorswim-design.md)).
 - A unit that ends FAILED sends a push; `/health` reports `up: false` with a
   reason when a scheduler has stopped or gone silent. Two units carry a memory

@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-01</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-05</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -288,6 +288,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#automatic-exits">Automatic exits</a></li>
 <li><a href="#risk-limits-on-new-trades">Risk limits on new trades</a></li>
 <li><a href="#trade-ideas-in-the-ledger">Trade ideas in the ledger</a></li>
+<li><a href="#sending-an-idea-to-the-real-account">Sending an idea to the real account</a></li>
 <li><a href="#reading-the-screen_17">Reading the screen</a></li>
 <li><a href="#why-it-matters_17">Why it matters</a></li>
 <li><a href="#when-to-use-it_16">When to use it</a></li>
@@ -4904,6 +4905,54 @@ keep being marked and closed. Deleting one idea row by hand removes it from the 
 review too. Reading across pages: the <a href="#eod-report">EOD Report</a> tallies these rows in a
 book of their own (its <em>Paper Trades</em> table and <em>Paper trades</em> tile are yours only) and
 its <strong>Weekly idea review</strong> summarises them; the Symbol dossier never lists one as held.</p>
+<h3 id="sending-an-idea-to-the-real-account">Sending an idea to the real account</h3>
+<p><strong>An idea row can become a real order.</strong> Its detail panel has a <strong>Send to ThinkorSwim</strong>
+button (and a banner offers the same when an idea is booked), which opens the order
+ticket at <code>/send-order</code>. It works for a single option, a vertical and an iron condor, and
+only while <strong>Settings → Configuration → Live orders</strong> is on (it ships off).</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Copy ThinkorSwim order</th>
+<th>Send to ThinkorSwim</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>What it does</td>
+<td>Puts paste text on the clipboard</td>
+<td>Sends the order to your Schwab account</td>
+</tr>
+<tr>
+<td>Who checks it</td>
+<td>You, in ThinkorSwim's ticket</td>
+<td>Schwab's own order check (Preview), then you</td>
+</tr>
+<tr>
+<td>Size and account</td>
+<td>One lot; you change it in ThinkorSwim</td>
+<td>Typed on the page; the account by its name</td>
+</tr>
+<tr>
+<td>Stop on a spread</td>
+<td>In the paste</td>
+<td>Not sent (Schwab's API refuses it): set it in ThinkorSwim</td>
+</tr>
+<tr>
+<td>When</td>
+<td>Any time</td>
+<td>The regular session only, after the day's authenticator code</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Why the size opens where it does.</strong> The Contracts box opens at the most contracts whose
+loss is at most $1,000, the size the operator chose as a normal order; one contract that
+risks more opens at 1. Typing more is allowed and shown in the warning colour, up to the
+hard ceilings of 50 contracts and $5,000.</p>
+<p>⚠ The Paper Ledger row is the idea's scorecard, not your position: sending the order does
+not change the row, and the row keeps being marked and closed by its own rules whatever
+happens to the real order. A real order is managed in ThinkorSwim.</p>
 <h3 id="reading-the-screen_17">Reading the screen</h3>
 <p>Columns: <strong>SYMBOL · STRAT · STRIKES · EXP · QTY · CREDIT · RISK · P&amp;L · STATUS ·
 ENTRY</strong>, newest first. P&amp;L shows realized for closed trades and live unrealized for open

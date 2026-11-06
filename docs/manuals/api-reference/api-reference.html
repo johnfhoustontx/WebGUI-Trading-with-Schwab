@@ -96,6 +96,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#sentiment-service-8210">Sentiment service — :8210</a></li>
 <li><a href="#options-service-8211">Options service — :8211</a><ul>
 <li><a href="#the-es-and-nq-chain-feed-cmdfutures_chain">The /ES and /NQ chain feed (cmd:futures_chain)</a></li>
+<li><a href="#live-orders-to-thinkorswim-cmdlive_order">Live orders to ThinkorSwim (cmd:live_order)</a></li>
 </ul>
 </li>
 <li><a href="#portfolio-service-8212">Portfolio service — :8212</a></li>
@@ -2801,6 +2802,71 @@ off is not a failed options service.</p>
 <p><strong>Rules for a reader.</strong> The cached chain holds every contract's bid, ask and mark, and Redis
 is readable by the public process, so no public page may read these keys. A reader must not
 fall back to another symbol's chain: a stale capture is labelled, never shown as current.</p>
+<h3 id="live-orders-to-thinkorswim-cmdlive_order">Live orders to ThinkorSwim (<code>cmd:live_order</code>)</h3>
+<p>A posted trade idea that the Paper Ledger booked can be sent to the Schwab account as a real
+order, for a single option, a vertical or an iron condor (Phase 1 of the
+<a href="../../plans/2026-11-05-live-order-to-thinkorswim-design.md">design</a>). The page is
+<code>/send-order?trade=&lt;trade_id&gt;</code> in the private app; the service is <code>options_svc</code>
+(<code>live_order_handlers.py</code>, store <code>live_order_store.py</code>). Everything is off while
+<code>config/live_orders.toml mode = "off"</code>, the shipped value.</p>
+<p><strong>Commands (<code>cmd:live_order</code>, domain <code>live_order</code>).</strong> Each is dropped unread when it carries
+no time or is older than <code>max_command_age_sec</code> (30).</p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Args</th>
+<th>Does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>quote</code></td>
+<td><code>trade_id</code></td>
+<td>Reprices the idea's legs from a fresh chain (<code>maxAge: 0</code>) and publishes the quote view</td>
+</tr>
+<tr>
+<td><code>preview</code></td>
+<td><code>ticket_id</code> (32 hex, new), <code>trade_id</code>, <code>idea_posted</code>, <code>alias</code>, <code>contracts</code>, <code>limit</code></td>
+<td>Builds the order, sends it to <code>/orders/preview</code>, stores the ticket (<code>previewed</code> if Schwab accepted it, else <code>refused</code>; good for <code>ticket_ttl_sec</code> 120) and publishes the ticket view. A repeated <code>ticket_id</code> is ignored</td>
+</tr>
+<tr>
+<td><code>place</code></td>
+<td><code>ticket_id</code></td>
+<td>Sends a <code>previewed</code> ticket once: mode <code>live</code>, the regular session, not expired, the order unchanged (a digest), the size inside the ceilings. Claimed with one conditional UPDATE, then ONE POST to <code>/orders/place</code>. Ends <code>sent</code>, <code>rejected</code> or <code>unknown</code> (settled by listing the account's orders: exactly one match on legs and price)</td>
+</tr>
+<tr>
+<td><code>status</code></td>
+<td><code>ticket_id</code></td>
+<td>Expires a stale preview, settles an <code>unknown</code>, or reads a <code>sent</code> order's Schwab status; republishes the ticket view</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Views</strong> (24-hour TTL):</p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Holds</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cache:live_order:quote:&lt;trade_id&gt;</code></td>
+<td><code>mode</code>, <code>aliases</code>, <code>in_session</code>, <code>symbol</code>, <code>structure</code>, <code>strategy</code>, <code>expiration</code>, <code>debit</code>, <code>posted_price</code>, <code>legs[]</code> (each with its <code>mid</code>), <code>live_price</code>, <code>max_loss_per_contract</code>, <code>max_profit_per_contract</code> (<code>null</code> when unbounded), <code>default_contracts</code>, <code>drift_pct</code>, <code>drift_warn</code>, <code>exits</code> (<code>target</code>, <code>stop</code>, <code>stop_on_order</code>, <code>exit_tif</code>, <code>pcts</code>); <code>error</code> when it could not be priced</td>
+</tr>
+<tr>
+<td><code>cache:live_order:ticket:&lt;ticket_id&gt;</code></td>
+<td><code>status</code>, <code>alias</code>, <code>contracts</code>, <code>limit</code>, <code>max_loss</code>, <code>verdict</code>, <code>messages[]</code>, <code>legs[]</code> (instruction, quantity, option symbol), <code>expires_epoch</code>, <code>order_id</code>, <code>order_status</code>, <code>error</code>, <code>exits</code>, <code>in_session</code></td>
+</tr>
+</tbody>
+</table>
+<p>⚠ Neither view carries an account number or hash: the alias is looked up to a hash in the
+service on each send (<code>[[accounts]]</code> in the operator's <code>config/local/live_orders.toml</code>), and
+Schwab's answers pass through <code>live_order.scrub</code> first. The public Redis user can read
+<code>cache:*</code>, so this is the rule, not a courtesy; no public module reads these keys.</p>
+<p><strong>Store:</strong> <code>services/options_svc/data/live_orders.db</code> (<code>tickets</code>), kept and backed up: it is
+the record of what was sent.</p>
 <h2 id="portfolio-service-8212">Portfolio service — :8212</h2>
 <p><strong>Entry:</strong> <code>services/portfolio_svc/app.py</code>. <strong>Scheduler:</strong> initial rebuild + SSE
 quote-stream worker; throttled publish ≤ every 2 s while ticks pending; full rebuild
@@ -3646,7 +3712,22 @@ missing header, <strong>401</strong>. <code>proxy_client._apply_secret(session)<
 <tr>
 <td><code>/orders/preview</code></td>
 <td>POST <code>{account_hash, order}</code></td>
-<td>Schwab's <code>previewOrder</code> answer, with Schwab's status code: it CHECKS the order and places nothing. <strong>403</strong> unless <code>config/live_orders.toml mode = "preview"</code> (read per request); <strong>400</strong> for a bad hash or an order over 16 KB</td>
+<td>Schwab's <code>previewOrder</code> answer, with Schwab's status code: it CHECKS the order and places nothing. <strong>403</strong> unless <code>config/live_orders.toml mode</code> is <code>preview</code> or <code>live</code> (read per request); <strong>400</strong> for a bad hash or an order over 16 KB</td>
+</tr>
+<tr>
+<td><code>/orders/place</code></td>
+<td>POST <code>{account_hash, order}</code></td>
+<td>PLACES the order: <code>{order_id, unknown, error}</code> with Schwab's status code. ONE attempt, never retried; a timeout, a 5xx or a 201 with no order id in <code>Location</code> sets <code>unknown: true</code> (settle it by listing the orders, never by sending again). <strong>403</strong> unless the mode is <code>live</code>; <strong>400</strong> as above. Its one caller is <code>options_svc</code> (<code>cmd:live_order place</code>)</td>
+</tr>
+<tr>
+<td><code>/orders/{account_hash}/{order_id}</code></td>
+<td>GET</td>
+<td>Schwab's order (its <code>status</code>, legs, fills); <strong>400</strong> for an id that is not digits</td>
+</tr>
+<tr>
+<td><code>/orders/{account_hash}</code></td>
+<td>GET (<code>from_time, to_time</code>, ISO UTC)</td>
+<td>The account's orders entered in that window; how an <code>unknown</code> place is settled</td>
 </tr>
 </tbody>
 </table>

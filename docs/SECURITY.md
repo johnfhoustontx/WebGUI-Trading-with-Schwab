@@ -28,13 +28,29 @@ The routes that read the brokerage account — `/accounts`, `/positions`,
 the check was skipped when no secret was set, which is how production ran: any
 caller that could reach the port, loopback or tailnet, could read the account.
 
-**No route places an order.** `POST /orders/{hash}` forwarded a real order to
-Schwab and nothing called it; it was deleted, and `trader_request` refuses any
-method but GET. The one write since (2026-11-05) is `POST /orders/preview`: it
-sends an order to Schwab's `previewOrder`, which checks it and places nothing.
-It needs the secret like the account routes, and it refuses (403) unless
-`config/live_orders.toml` says `mode = "preview"`, read on every request
-([design](plans/2026-11-05-live-order-to-thinkorswim-design.md)).
+**One route places an order, and only when the operator turns it on.** The old
+`POST /orders/{hash}` forwarded a real order to Schwab and nothing called it; it
+was deleted, and `trader_request` refuses any method but GET. Since 2026-11-05
+there are two writes, each behind the secret and each reading
+`config/live_orders.toml mode` on every request
+([design](plans/2026-11-05-live-order-to-thinkorswim-design.md)):
+
+- `POST /orders/preview` sends an order to Schwab's `previewOrder`, which checks
+  it and places nothing. 403 unless the mode is `preview` or `live`.
+- `POST /orders/place` places it. 403 unless the mode is `live`. It makes ONE
+  attempt and never retries: an answer it cannot read is `unknown`, settled by
+  reading the account's orders. Its one caller is `options_svc`'s
+  `live_order_handlers.place`, which sends only a ticket that passed a preview,
+  unexpired and unchanged, in the regular session, claimed once in the store.
+
+The page that asks for it (`/send-order`) exists only in the private app, behind
+the password + TOTP sign-in, and asks for the authenticator code again before
+the first send of each Central day (`webgui/live_unlock.py`). The public process
+imports none of it (`webgui/tests/test_send_order.py`). Account numbers never
+leave the service: the page shows an alias, the hash is looked up per send, and
+Schwab's answers are scrubbed to the last 4 digits before anything is stored or
+published. The ticket and quote views sit under `cache:live_order:*`, which the
+public Redis user can read, so they carry neither.
 
 To set the secret:
 

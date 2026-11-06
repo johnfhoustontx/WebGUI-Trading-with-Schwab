@@ -417,7 +417,9 @@ def test_the_written_file_is_json_the_app_can_load(store, monkeypatch):
 
     raw = json.loads(store.read_text(encoding="utf-8"))
     assert set(raw) == {"password_hash", "totp_secret", "session_secret",
-                        "epoch", "last_totp_counter"}
+                        "epoch", "last_totp_counter",
+                        "live_unlock_date"}   # the live-order code's day (webgui/live_unlock.py)
+    assert raw["live_unlock_date"] == ""      # a fresh enrolment has unlocked nothing
     creds = auth_store.load(store)
     assert auth.verify_password(creds.password_hash, "pw")
     assert len(creds.session_secret) >= 32

@@ -25,6 +25,7 @@ from pages import ui_kit as kit
 from nicegui import ui
 
 from pages.ui_guard import guard
+from shared import live_order, live_orders_config
 
 from . import detail, handoff
 from .rescue import rescue_highlight
@@ -203,6 +204,14 @@ DELETE_CLOSED_BODY = ("Their realized P&L leaves the ledger, and the deployment 
                       "equity moves with it. Closed trade ideas and SPY condors leave "
                       "this list too, but are kept: the ideas for the weekly review "
                       "and the end-of-day report, the condors as their record.")
+
+
+def offers_live_order(t):
+    """Whether the detail panel offers Send to ThinkorSwim for this row: a
+    posted idea, with live orders not off. PURE but for the switch."""
+    tid = (t or {}).get("trade_id")
+    return (is_idea(t) and isinstance(tid, str) and bool(live_order.TRADE_ID_RE.match(tid))
+            and live_orders_config.mode() != "off")
 
 
 def is_idea(t):
@@ -501,6 +510,12 @@ def render():
                    on_click=lambda: _send_em())
         analyze_btn = kit.button("Analyze", kind="secondary", icon="biotech",
                                  on_click=lambda: _analyze())
+        # A posted idea, as a real order in the Schwab account (live-order
+        # design, Phase 1). Shown for an idea row only, and only while live
+        # orders are not off; the page it opens does every check again.
+        send_tos_btn = kit.button("Send to ThinkorSwim", kind="secondary", icon="send",
+                                  on_click=lambda: _send_tos())
+        send_tos_btn.set_visibility(False)
         # "Close trade", not "Close": a dialog's own Close dismisses the dialog.
         kit.button("Close trade", kind="primary", icon="check_circle",
                    on_click=lambda: _close())
@@ -528,6 +543,7 @@ def render():
         if not trade:
             detail_panel.clear()
             return
+        send_tos_btn.set_visibility(offers_live_order(trade))
         base = synth_from_trade(trade)
         live = state["live"].get(trade.get("trade_id"))
         detail_panel.update(merge_detail(base, live))
@@ -582,6 +598,12 @@ def render():
         """The clicked trade, or None. Silent: the action footer is only visible
         while a row is shown, so 'click a row first' is unreachable."""
         return raw_by_id.get(state.get("sel_id"))
+
+    @guard
+    def _send_tos():
+        t = _selected_trade()
+        if t and offers_live_order(t):
+            ui.navigate.to(f"/send-order?trade={t['trade_id']}")
 
     def _send_em():
         t = _selected_trade()

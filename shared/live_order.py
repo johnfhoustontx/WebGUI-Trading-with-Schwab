@@ -324,3 +324,131 @@ def default_contracts(risk_per_contract, budget, ceiling):
         return 1
     n = int(budget // risk_per_contract)
     return max(1, min(n, int(ceiling)))
+
+
+def max_profit_per_contract(legs, limit, debit):
+    """The most one unit can make at expiry, in dollars, or None when the gain
+    has no bound (more calls bought than sold)."""
+    legs = check_legs(legs)
+    if not _finite_positive(limit):
+        raise ValueError(f"the limit must be a positive number, not {limit!r}")
+    if sum(l["sign"] * l["qty"] for l in legs if l["kind"] == "call") > 0:
+        return None
+    entry = -limit if debit else limit
+    points = [0.0] + [l["strike"] for l in legs]
+    best = max(_value_at(legs, p) + entry for p in points)
+    return round(max(0.0, best) * MULT, 2)
+
+
+# ── the names both tiers share (Phase 1) ─────────────────────────────────────
+
+#: ``bus_client.request(DOMAIN, ...)`` writes ``cmd:live_order``.
+DOMAIN = "live_order"
+STREAM = "cmd:" + DOMAIN
+#: A ticket's id: the page makes it, so it knows which view to watch.
+TICKET_ID_RE = re.compile(r"^[0-9a-f]{32}$")
+#: A Paper Ledger row's id (``idea_ledger.build_row``: 8 hex characters).
+TRADE_ID_RE = re.compile(r"^[0-9A-Za-z-]{1,40}$")
+
+
+def ticket_key(ticket_id):
+    """The cache view one ticket is published to. It holds the account's ALIAS,
+    never a number or a hash."""
+    if not isinstance(ticket_id, str) or not TICKET_ID_RE.match(ticket_id):
+        raise ValueError("not a ticket id")
+    return f"cache:live_order:ticket:{ticket_id}"
+
+
+def quote_key(trade_id):
+    """The cache view a Ledger idea's live quote is published to."""
+    if not isinstance(trade_id, str) or not TRADE_ID_RE.match(trade_id):
+        raise ValueError("not a trade id")
+    return f"cache:live_order:quote:{trade_id}"
+
+
+# ── reading Schwab's answers (pure) ──────────────────────────────────────────
+
+#: Keys of Schwab's answers that name an account. ``previewOrder`` echoes the
+#: FULL account number (``orderStrategy.accountNumber``, found 2026-11-05), so
+#: every answer is scrubbed before it is printed, stored or cached.
+ACCOUNT_KEYS = frozenset({"accountNumber", "accountId", "hashValue",
+                          "accountHash", "account_hash"})
+
+
+def scrub(value):
+    """``value`` with every account-naming key's value cut to its last 4."""
+    if isinstance(value, dict):
+        return {k: (("…" + str(v)[-4:]) if k in ACCOUNT_KEYS and v is not None
+                    else scrub(v)) for k, v in value.items()}
+    if isinstance(value, list):
+        return [scrub(v) for v in value]
+    return value
+
+
+def preview_verdict(status, answer):
+    """``(verdict, messages)`` from the proxy's preview answer
+    (``{"schwab": ..., "error": ...}``). ``verdict`` is ``accepted``,
+    ``rejected`` or ``error <status>``."""
+    schwab = (answer or {}).get("schwab") if isinstance(answer, dict) else None
+    result = (schwab or {}).get("orderValidationResult") if isinstance(schwab, dict) else None
+    messages = []
+    if isinstance(result, dict):
+        for kind in ("rejects", "reviews", "warns", "alerts"):
+            for item in result.get(kind) or ():
+                text = item.get("message") or item.get("activityMessage") \
+                    if isinstance(item, dict) else str(item)
+                messages.append(f"{kind[:-1]}: {text}")
+    if status not in (200, 201):
+        err = (answer or {}).get("error") or (answer or {}).get("detail") \
+            if isinstance(answer, dict) else answer
+        if not messages and err:
+            messages.append(str(err)[:300])
+        return f"error {status}", messages
+    if isinstance(result, dict) and result.get("rejects"):
+        return "rejected", messages
+    return "accepted", messages
+
+
+def contract_mid(contract):
+    """A chain contract's mid, or None with no two-sided market."""
+    if not isinstance(contract, dict):
+        return None
+    bid, ask = contract.get("bid"), contract.get("ask")
+    if not all(isinstance(v, (int, float)) and not isinstance(v, bool)
+               and math.isfinite(v) for v in (bid, ask)) or bid <= 0 or ask < bid:
+        return None
+    return (bid + ask) / 2
+
+
+def find_contract(chain, kind, expiration, strike):
+    """The chain's contract for one leg (``kind`` call or put, ``expiration``
+    YYYY-MM-DD, ``strike``), or None. Read from Schwab's ``callExpDateMap`` /
+    ``putExpDateMap``, whose keys are ``"2026-11-06:1"`` and ``"5800.0"``."""
+    if not isinstance(chain, dict) or kind not in ("call", "put"):
+        return None
+    side = chain.get("callExpDateMap" if kind == "call" else "putExpDateMap") or {}
+    exp = str(expiration)[:10]
+    for key, strikes in side.items():
+        if str(key).split(":", 1)[0] != exp or not isinstance(strikes, dict):
+            continue
+        for strike_text, contracts in strikes.items():
+            try:
+                k = float(strike_text)
+            except (TypeError, ValueError):
+                continue
+            if abs(k - float(strike)) < 1e-6 and contracts:
+                return contracts[0] if isinstance(contracts[0], dict) else None
+    return None
+
+
+def net_mid(legs, mids):
+    """``(price, debit)`` for opening the legs at their ``mids`` (one per leg,
+    per share): the positive net price and whether it is paid. None when any
+    mid is missing or the mids net to less than a cent."""
+    if len(mids) != len(legs) or any(m is None for m in mids):
+        return None
+    legs = check_legs(legs)
+    net = sum(l["sign"] * l["qty"] * m for l, m in zip(legs, mids))
+    if abs(net) < 0.01:
+        return None
+    return abs(net), net > 0

@@ -50,17 +50,13 @@ import datetime as _dt
 import math
 
 from repo_paths import TOS_ORDER_TOML
-from shared import market_calendar
+from shared import market_calendar, tos_order_config
 from shared.config_toml import toml_loader
+# The validation is shared with the live-order service (Tier 2), which must price
+# the same exits; this page keeps its own loader so its tests can patch ``load``.
+from shared.tos_order_config import DEFAULTS, EXIT_TIFS  # noqa: F401  (tests read them)
 
 from ..fmt import num
-
-DEFAULTS = {
-    "quantity": 1,
-    "exit_tif": "GTC",
-    "debit": {"target_pct": 100.0, "stop_pct": 50.0},
-    "credit": {"target_pct": 50.0, "stop_pct": 100.0},
-}
 
 load, reset_cache = toml_loader(TOS_ORDER_TOML, DEFAULTS, label="tos_order.toml")
 
@@ -69,8 +65,6 @@ _MULTIPLIER = "100"
 _WEEKLYS = "(Weeklys)"
 _LINK = "TRG BY #1 OCO"
 _SHARES_PER_CONTRACT = 100
-# The exits' time in force. DAY writes no word: ThinkorSwim's own text omits it.
-EXIT_TIFS = ("GTC", "DAY")
 
 # A stored row with no ``legs`` keeps its strikes in named keys
 # (``signal_repricer._LEG_LAYOUT``, Tier 2): (right, key, +1 long / -1 short).
@@ -87,37 +81,9 @@ _KEY_ALIASES = {"IRON_CONDOR": "IC", "NAKED_PUT": "SHORT_PUT",
                 "NAKED_CALL": "SHORT_CALL"}
 
 
-def _pct_setting(table, key, *, below_100):
-    """A percentage from ``[table]``, or the default for a missing or bad one.
-    A percentage BELOW the entry must stay under 100: at 100 the price is zero."""
-    raw = (load().get(table) or {}).get(key)
-    if isinstance(raw, bool) or not isinstance(raw, (int, float)) \
-            or not math.isfinite(raw) or raw <= 0:
-        return DEFAULTS[table][key]
-    too_big = (raw >= 100) if below_100 else (raw > 1000)
-    if too_big:
-        return DEFAULTS[table][key]
-    return float(raw)
-
-
 def settings():
-    """The validated settings; never raises."""
-    q = load().get("quantity")
-    if isinstance(q, bool) or not isinstance(q, (int, float)) or q != int(q) \
-            or not 1 <= q <= 1000:
-        q = DEFAULTS["quantity"]
-    tif = load().get("exit_tif")
-    tif = tif.strip().upper() if isinstance(tif, str) else None
-    if tif not in EXIT_TIFS:
-        tif = DEFAULTS["exit_tif"]
-    return {
-        "quantity": int(q),
-        "exit_tif": tif,
-        "debit": {"target_pct": _pct_setting("debit", "target_pct", below_100=False),
-                  "stop_pct": _pct_setting("debit", "stop_pct", below_100=True)},
-        "credit": {"target_pct": _pct_setting("credit", "target_pct", below_100=True),
-                   "stop_pct": _pct_setting("credit", "stop_pct", below_100=False)},
-    }
+    """The validated settings; never raises (``shared.tos_order_config``)."""
+    return tos_order_config.settings_from(load())
 
 
 # ── reading the position ────────────────────────────────────────────────────

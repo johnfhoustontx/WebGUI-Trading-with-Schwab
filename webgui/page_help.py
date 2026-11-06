@@ -1403,6 +1403,17 @@ engine's positions live on **Paper Account**.
   settled at the close. It shows under **All** only, and **Delete all closed**
   keeps it on file. Settings -> Configuration -> *Daily SPY condor in the Paper
   Ledger*.
+- **Send to ThinkorSwim — this one is REAL money.** On a trade-idea row (a single
+  option, a vertical or an iron condor) the detail panel has **Send to
+  ThinkorSwim**, and a banner offers the same when an idea posts. It opens an
+  order ticket: the live price, a **Limit**, **Contracts** (opens at the most
+  that risk at most $1,000; more is allowed, in the warning colour, up to 50
+  contracts and $5,000) and the **Account** by name. **Preview** asks Schwab to
+  check the order and places nothing; **Send** then places it, in the regular
+  session only, after your authenticator code once a day and a last confirm. A
+  spread goes in without its stop (Schwab refuses one on a spread): set the stop
+  in ThinkorSwim. The Ledger row is not changed by the real order. Off until
+  Settings -> Configuration -> *Live orders* is set to live.
 - Use it to test ideas from the Market Scanner without risk.
 """,
     "/options/captured": """

@@ -28,6 +28,10 @@ class Credentials:
     session_secret: str
     epoch: int = 1
     last_totp_counter: int = 0
+    # The Central date (YYYY-MM-DD) on which the authenticator code last unlocked
+    # live orders (``live_unlock.py``). Stored here, server-side, so a reload or a
+    # second tab on the same sign-in stays unlocked for the rest of that day.
+    live_unlock_date: str = ""
 
 
 def load(path: pathlib.Path | None = None) -> Credentials | None:
@@ -43,6 +47,7 @@ def load(path: pathlib.Path | None = None) -> Credentials | None:
             session_secret=str(raw["session_secret"]),
             epoch=int(raw.get("epoch", 1)),
             last_totp_counter=int(raw.get("last_totp_counter", 0)),
+            live_unlock_date=str(raw.get("live_unlock_date", "") or ""),
         )
     except (ValueError, KeyError, TypeError) as exc:
         raise CredentialsError(f"{p} is not a readable credentials file: {exc}") from exc
