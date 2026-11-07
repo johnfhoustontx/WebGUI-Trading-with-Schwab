@@ -326,6 +326,9 @@ CACHE_MARKET_SNAPSHOT = "cache:options:market_snapshot"
 #: What the hourly trade idea last did (posted / skipped + why) and today's posted
 #: set, which is what stops the same trade or symbol posting twice in a day.
 CACHE_TRADE_IDEA = "cache:options:trade_idea"
+#: The quality-triggered ideas in shadow (``idea_shadow.py``): today's state (the
+#: last scan's keys, the posts counted) and the last decision with its reason.
+CACHE_IDEA_SHADOW = "cache:options:idea_shadow"
 
 CACHE_EOD_SUMMARY = "cache:options:eod_summary"
 EVENT_EOD_SUMMARY = "events:options:eod_summary"
@@ -3037,6 +3040,70 @@ def run_trade_idea(bus, slot, now=None) -> dict:
     else:
         result["reason"] = "send failed"
     return _finish()
+
+
+def run_idea_shadow(bus, now=None) -> dict:
+    """Check the newest published scan for a quality-triggered idea, IN SHADOW.
+
+    Driven by the scheduler when ``cache:options:scan``'s version moves. Reads the
+    scan and the hourly idea's last result (no Schwab call, no Claude call), decides
+    with ``idea_shadow.decide``, and books a pick into the Paper Ledger as an
+    ``idea_shadow`` row. Nothing is posted. Always writes ``CACHE_IDEA_SHADOW`` with
+    the decision, so a day with no pick says why. Never raises into the scheduler."""
+    from zoneinfo import ZoneInfo as _ZI
+    from services.options_svc import idea_ledger, idea_shadow
+    from shared import paper_limits
+
+    now = now or _dt.datetime.now(_ZI("America/Chicago"))
+    cfg = paper_limits.idea_shadow()
+    result = {"at": now.isoformat(), "mode": cfg["mode"], "reason": None,
+              "idea": None, "ledger": None, "state": None}
+    if cfg["mode"] == "off":
+        result["reason"] = "off"
+        try:
+            bus.cache_set(CACHE_IDEA_SHADOW, result)
+        except Exception:  # noqa: BLE001
+            log.exception("idea shadow: cache_set failed")
+        return result
+
+    def _payload(key):
+        try:
+            env = bus.cache_get(key)
+            return env.payload if env is not None else None
+        except Exception:  # noqa: BLE001 -- a missing read is a skipped check
+            log.exception("idea shadow: %s read failed", key)
+            return None
+
+    prev = _payload(CACHE_IDEA_SHADOW)
+    try:
+        out = idea_shadow.decide(
+            _payload("cache:options:scan"), (prev or {}).get("state"), now, cfg,
+            push_notify.trade_idea_config() or {}, _payload(CACHE_TRADE_IDEA),
+            in_session=mc.is_regular_hours(now))
+    except Exception:  # noqa: BLE001
+        _degrade.degraded("options.run_idea_shadow.decide")
+        result["reason"] = "decide failed"
+        return result
+    state, idea = out["state"], out["idea"]
+    result.update(reason=out["reason"], idea=idea, state=state)
+    if idea is not None:
+        try:
+            booked = idea_ledger.book(idea, now, source=idea_ledger.SHADOW_SOURCE)
+        except Exception:  # noqa: BLE001
+            _degrade.degraded("options.run_idea_shadow.book")
+            booked = {"status": "failed", "trade_id": None}
+        result["ledger"] = booked
+        if booked.get("status") in ("booked", "duplicate"):
+            result["state"] = idea_shadow.record_pick(state, idea, now)
+        if booked.get("status") == "booked":
+            refresh_paper_trades(bus, reprice=False, keep_live_pnl=True)
+    try:
+        bus.cache_set(CACHE_IDEA_SHADOW, result)
+    except Exception:  # noqa: BLE001
+        log.exception("idea shadow: cache_set failed")
+    log.info("idea shadow: %s %s", result["reason"],
+             (idea or {}).get("symbol") or "")
+    return result
 
 
 def _book_trade_idea_ledger(idea, now) -> dict:

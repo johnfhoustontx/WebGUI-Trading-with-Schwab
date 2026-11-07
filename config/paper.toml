@@ -63,6 +63,31 @@ min_n = 5
 # a version).
 review_model = "sonnet"
 
+[idea_shadow]
+# Quality-triggered trade ideas, IN SHADOW (options_svc/idea_shadow.py, design
+# docs/plans/2026-11-06-trade-idea-quality-shadow-design.md). After every scan, a
+# NEW candidate at min_grade or better, inside the limits below, is booked into
+# the Paper Ledger tagged "Shadow idea" and marked like a posted idea. Nothing is
+# posted anywhere. tools/idea_shadow_compare.py compares them with the hourly
+# posts. A bad value in this table reads as the shipped default.
+#
+# "shadow" books the picks; "off" books nothing. Open shadow rows are still
+# marked and settled either way.
+mode = "shadow"
+# The lowest grade that qualifies: "Strong" or "Good".
+min_grade = "Strong"
+# A trade that sells premium needs at least this Vol Rank (0 to 100; 0 = off).
+min_vol_rank = 50.0
+# The combined feed (hourly posts plus shadow picks) stays inside these limits.
+# Most posts in any 60 minutes (1 to 4).
+max_per_hour = 2
+# Fewest minutes since the last post (0 to 59).
+min_gap_min = 20
+# Most posts in a day (1 to 30).
+max_per_day = 10
+# At most one post per symbol a day. Must be true or false.
+one_per_symbol = true
+
 [daily_condor]
 # One mechanical 0-DTE iron condor, booked into the Paper Ledger every trading
 # morning at [slots.daily_condor] (config/sessions.toml, 08:45 CT) by

@@ -1822,6 +1822,33 @@ _PAPER = ConfigFile(
                   "tier name such as sonnet, not a version. Applies at the "
                   "next weekly run.", kind="text", restart=()),
         ), restart=(OPTIONS,)),
+        Section("Shadow trade ideas in the Paper Ledger",
+                "After every scan, a new candidate at the chosen grade, inside the "
+                "limits below, is booked into the Paper Ledger tagged Shadow idea "
+                "and followed like a posted idea. Nothing is posted anywhere: this "
+                "measures whether posting on quality would beat the hourly posts.", (
+            Field("idea_shadow.mode", "Shadow ideas",
+                  "shadow books the picks; off books nothing. Shadow ideas already "
+                  "open are still marked and settled.",
+                  kind="choice", choices=("shadow", "off")),
+            Field("idea_shadow.min_grade", "Lowest grade that qualifies",
+                  "Strong, or Strong and Good.",
+                  kind="choice", choices=("Strong", "Good")),
+            Field("idea_shadow.min_vol_rank", "Lowest Vol Rank to sell premium",
+                  "A trade that sells premium needs at least this Vol Rank. 0 "
+                  "turns the check off.", kind="float", min=0, max=100, step=1),
+            Field("idea_shadow.max_per_hour", "Most posts in an hour",
+                  "Hourly posts and shadow picks together, in any 60 minutes.",
+                  kind="int", min=1, max=4, step=1),
+            Field("idea_shadow.min_gap_min", "Fewest minutes between posts",
+                  "Since the last hourly post or shadow pick.",
+                  kind="int", unit="min", min=0, max=59, step=1),
+            Field("idea_shadow.max_per_day", "Most posts in a day",
+                  "Hourly posts and shadow picks together.",
+                  kind="int", min=1, max=30, step=1),
+            Field("idea_shadow.one_per_symbol", "One post per symbol a day",
+                  "Off still never repeats the same trade.", kind="bool"),
+        ), restart=(OPTIONS,)),
         Section("Daily SPY condor in the Paper Ledger",
                 "One 0-DTE iron condor booked into the Paper Ledger every trading "
                 "morning, past every risk cap, and measured there. Its stop is "

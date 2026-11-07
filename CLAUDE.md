@@ -635,9 +635,12 @@ Detail: [options engine invariants](docs/reference/options-engine-invariants.md)
 - The five money-path views (paper account, rescue summary, ledger, ledger caps,
   the Paper answer) are validated by small models before they are published; an
   invalid payload is not published and is counted as a degrade.
-- **Self-managed rows live in the Ledger**: the trade ideas (`source == "trade_idea"`)
-  and the daily 0-DTE condor (`"daily_condor"`, booked at 08:45 CT by
-  `options_svc/daily_condor.py`). `source` alone identifies them, through
+- **Self-managed rows live in the Ledger**: the trade ideas (`source == "trade_idea"`),
+  the daily 0-DTE condor (`"daily_condor"`, booked at 08:45 CT by
+  `options_svc/daily_condor.py`) and the shadow ideas (`"idea_shadow"`, booked after
+  a scan by `options_svc/idea_shadow.py` and never posted). A new source goes in
+  both `SELF_MANAGED_SOURCES`, the Ledger page's `_TAGS`, and the `_MEASURED_SOURCES`
+  of `/eod` and the Symbol page, or it counts as the operator's own trade. `source` alone identifies them, through
   `idea_ledger.is_self_managed` / `SELF_MANAGED_SOURCES` (twin:
   `trades_db.SELF_MANAGED_SOURCES`). They book with no cap, are followed only by
   `idea_ledger.mark_cycle` (5-minute marks, stop/target/expiry), and are skipped by

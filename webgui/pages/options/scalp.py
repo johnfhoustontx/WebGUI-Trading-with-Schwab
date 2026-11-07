@@ -1210,8 +1210,14 @@ GLANCE_EDGE_NONE = f"{NO_EDGE} — the rates are the usual win rates"
 _GLANCE_DIRECTION = {1: "Up", -1: "Down"}
 _GLANCE_DIRECTION_CLASS = {1: _t.TXT_POS, -1: _t.TXT_NEG}
 _DIRECTION_ICON = {1: "arrow_upward", -1: "arrow_downward"}
-#: A call in the running column that carried a measured edge: the same arrow, ringed.
-_EDGE_ICON = {1: "arrow_circle_up", -1: "arrow_circle_down"}
+#: The running column's discs: a white arrow on a filled circle, green up, orange
+#: across for no signal, red down. A call that carried a measured edge wears a ring
+#: in its own colour; once the column is not live (another day, or after the
+#: regular close) every disc is grey.
+_CALL_ICON = {1: "arrow_upward", None: "arrow_forward", -1: "arrow_downward"}
+_CALL_DISC = {1: _t.DISC_POS, None: _t.DISC_WARN, -1: _t.DISC_NEG}
+_CALL_RING = {_t.DISC_POS: _t.DISC_RING_POS, _t.DISC_WARN: _t.DISC_RING_WARN,
+              _t.DISC_NEG: _t.DISC_RING_NEG, _t.DISC_MUTED: _t.DISC_RING_MUTED}
 NO_SIGNAL = "No signal"
 NO_SIGNAL_ICON = "remove"
 NO_CALL_RECORDED = "no call recorded"
@@ -1337,39 +1343,46 @@ def _room_marks(room, current):
 
 
 def _call_mark(slot, direction, pick, note, muted):
-    """One icon of the running column: an arrow for a direction (ringed when the
-    call carried a measured edge), a dash for no signal; its colour; and its
-    tooltip, the time and what the call said."""
+    """One disc of the running column: a white arrow on a filled circle (up green,
+    across orange for no signal, down red), ringed when the call carried a measured
+    edge; ``cls`` is the disc's classes and ``edge`` whether it is ringed; ``tip`` is
+    the time and what the call said. A ``muted`` disc is grey, ring and all."""
     d = _direction(direction)
-    edge = bool(pick) and pick != _fmt.NO_READING
+    edge = d is not None and bool(pick) and pick != _fmt.NO_READING
     note = note.strip() if isinstance(note, str) else ""
     if note.lower() == NO_EDGE.lower():
         note = ""
-    if d is None:
-        words = [slot, NO_SIGNAL]
-        icon, colour = NO_SIGNAL_ICON, _t.MUTED
-    else:
-        words = [slot, _GLANCE_DIRECTION[d]]
-        icon = _EDGE_ICON[d] if edge else _DIRECTION_ICON[d]
-        colour = _GLANCE_DIRECTION_CLASS[d]
-        if edge:
-            words.append(pick)
+    words = [slot, NO_SIGNAL if d is None else _GLANCE_DIRECTION[d]]
+    if edge:
+        words.append(pick)
     if note:
         words.append(note)
-    return {"icon": icon, "cls": _t.MUTED if muted else colour, "tip": " · ".join(words)}
+    disc = _t.DISC_MUTED if muted else _CALL_DISC[d]
+    cls = f"{disc} {_CALL_RING[disc]}" if edge else disc
+    return {"icon": _CALL_ICON[d], "cls": cls, "edge": edge, "tip": " · ".join(words)}
+
+
+def _calls_muted(day, now):
+    """Whether the running column is grey: another day's calls, or today's once
+    the regular session is over (the record of the day, no longer live)."""
+    now = _clock(now)
+    if day != now.date().isoformat():
+        return True
+    return now > _mc.regular_close_on(now.date())    # the close is inclusive, as in session_at
 
 
 def glance_calls(view, name, now=None):
     """Every call of the day the glance shows for ``name``, oldest first: the 08:36
     call, then one per published 15-minute slot. PURE. A slot with no call for the
     symbol is no signal too, and its tooltip says so. Another day's calls keep their
-    icons and lose their colour; today's keep theirs after the latest goes past,
-    because they are the record of the day, not a current reading."""
+    icons and lose their colour, and so do today's once the regular session closes;
+    during the session today's keep theirs after the latest goes past, because they
+    are the record of the day, not a current reading."""
     view = _as_dict(view)
     section = intraday_section(view)
     lead = intraday_leads(view)
     day = section.get("day") if lead else view.get("call_day")
-    muted = day != _clock(now).date().isoformat()
+    muted = _calls_muted(day, now)
     calls = []
     sym = _as_dict(view.get("symbols")).get(name)
     if isinstance(sym, dict) and view.get("call_day") == day:
@@ -1801,15 +1814,22 @@ _GLANCE_SLOTS = {
     </div>
   </q-td>
 ''',
-    # One icon per call, oldest on the left, wrapping at eleven: 21 slots and the
-    # 08:36 call are two rows of eleven at the end of the session.
+    # One disc per call, oldest on the left, in two unbreakable halves of eleven
+    # (the 08:36 call and 21 slots are 22). With room to the right the halves sit
+    # side by side on ONE line; on a narrower page the second drops under the
+    # first, two even rows of eleven rather than a ragged wrap.
     "calls": r'''
   <q-td :props="props">
-    <div class="flex flex-wrap w-[176px]">
-      <q-icon v-for="(call, i) in props.row.calls" :key="i" :name="call.icon" size="16px"
+    <div class="flex flex-wrap gap-[4px]">
+      <div v-for="(half, h) in [props.row.calls.slice(0, 11), props.row.calls.slice(11)]"
+           v-show="half.length" :key="h" class="flex no-wrap gap-[4px]">
+        <span v-for="(call, i) in half" :key="i"
+              class="inline-flex items-center justify-center shrink-0 w-[16px] h-[16px]"
               :class="call.cls">
-        <q-tooltip>{{ call.tip }}</q-tooltip>
-      </q-icon>
+          <q-icon :name="call.icon" size="12px"></q-icon>
+          <q-tooltip>{{ call.tip }}</q-tooltip>
+        </span>
+      </div>
     </div>
   </q-td>
 ''',

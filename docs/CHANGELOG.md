@@ -11,7 +11,7 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   `quantity` as before). Live sizing is `live_order.default_contracts` with
   `config/live_orders.toml` `default_risk_usd` ($1,000) and `max_contracts` (50):
   the most contracts whose max loss is within the budget, 1 when one contract
-  risks more or the loss is unbounded. The idea sizes on its own `max_loss`
+  risks more or the loss is unbounded. A posted idea and a shadow pick size on the idea's own `max_loss`
   (commission in); the condor on `(width - credit) x 100` plus one condor's round
   trip. Rows already booked keep their size.
 - **The Paper trade box** (`handoff.opening_quantity`) opens at the same size,
@@ -24,6 +24,61 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 - Settings -> Configuration gains *Contracts per idea from* and *Condors per day
   from*. Also on main: Send Live Order and Copy ThinkorSwim order use the panel's
   secondary button.
+
+**Prior —** 2026-11-06 (**Shadow trade ideas: a quality-triggered pick after every scan, booked in the Paper Ledger and never posted.**)
+
+- **Why.** The operator asked whether ideas could be posted on quality rather than at
+  :40, more than once an hour if warranted. Measured first, on the 75 closed idea
+  trades of 10-21 to 11-05 (the 11-05 prod backup): every post scored 77-81, so the
+  composite score cannot trigger anything; grade Strong was the one separator (+0.45R
+  on 8 trades against +0.22R for Good). The operator chose shadow first.
+- **The rule** (`services/options_svc/idea_shadow.py`, pure): once per published scan,
+  a candidate NEW since the previous scan (by a trade key; scan row ids are list
+  indexes), graded Strong, not posted today (trade or symbol), Vol Rank 50 or more when
+  it sells premium, inside 2 an hour / 20 minutes apart / 10 a day counting the hourly
+  posts. The first scan of a day seeds and books nothing.
+- **Wiring.** `handlers.run_idea_shadow`, the scheduler's scan-version gate
+  (`idea_shadow_due`), `idea_ledger.book(..., source="idea_shadow")`. The source is in
+  both `SELF_MANAGED_SOURCES`, the Ledger's tags (**Shadow idea**, under All only), and
+  the measured sources of `/eod` and the Symbol page. `trade_idea.normalize` now
+  carries `iv_rank` and a position-signed `position_vega`.
+- **Config.** `config/paper.toml [idea_shadow]` (ships `mode = "shadow"`), in Settings
+  → Configuration → *Shadow trade ideas in the Paper Ledger*.
+- **Measuring.** `tools/idea_shadow_compare.py --db <trades.db>`; on the 11-05 backup
+  it prints the hourly baseline, 75 trades at +0.242R. Re-run after 15-20 sessions.
+- Not built: posting (`mode = "on"`), a liquidity check (the three row shapes carry no
+  common bid and ask).
+
+**Prior —** 2026-11-06 (**The hourly trade idea moves from :35 to :40, so it reads a finished scan.**)
+
+- **Why.** The 08:35 idea on 2026-11-06 was skipped as `nothing eligible` (0
+  candidates). The 08:32 scan logged its last line at 08:35:28 and the idea ran at
+  08:35:29, so it read the 08:17 pre-open scan, which had nothing to post. The 08:47
+  scan, read afterwards, held 103 eligible trades. The slot was set five minutes after
+  a :30 scan, but `[windows.scan] offset_min = 2` had moved the scan to :32, and on
+  prod its last log line lands between :34:33 and :35:28. So every :35 slot was racing
+  the scan. The first miss was 11-06; every slot from 10-26 to 11-05 posted.
+- `config/sessions.toml [slots.trade_idea]` and the built-in defaults in
+  `shared/market_calendar.py` now run 08:40 ... 14:40 (slots `h0840` ... `h1440`).
+- `test_every_slot_reads_a_finished_scan` fails on a slot less than `offset_min` + 6
+  minutes past its quarter hour.
+- User Guide and the site's Trade ideas page say 8:40 to 2:40.
+
+**Prior —** 2026-11-06 (**Opening Scalp: the Calls since the open column draws coloured discs, grey after the close, on one line when there is room.**)
+
+- The user asked for the column's icons to become filled circles with a white arrow:
+  green up, orange right (no signal, which was a dash), red down. A call with a
+  measured edge keeps its ring, now an outline round the disc in its own colour.
+- **Grey after hours.** `_calls_muted` greys every disc for another day's calls, as
+  before, and now also for today's once the regular session has closed (after 15:00 CT,
+  `market_calendar.regular_close_on`, inclusive like `session_at`).
+- **One line when it fits.** The slot draws the discs in two unbreakable halves of
+  eleven, so a wide table shows the whole day on one line and a narrow one two even
+  rows of eleven, never a ragged wrap.
+- New theme tokens `DISC_POS` / `DISC_WARN` / `DISC_NEG` / `DISC_MUTED` and their
+  `DISC_RING_*` outlines, from the semantic palette (restyled by `config/theme.toml`).
+- Checked in the page harness at 1700, 1100 and 820 pixels wide, and with another
+  day's calls (grey). User Guide, Reference Guide and the page's hover help updated.
 
 **Prior —** 2026-11-05 (**Live orders, Phase 3: cancel a working order from the app, and a list of today's live orders.** Covered calls left out, the operator's choice.)
 

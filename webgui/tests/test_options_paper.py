@@ -634,5 +634,19 @@ def test_a_condor_row_is_neither_mine_nor_an_idea():
     assert paper.ledger_status(trades, "ideas") == "1 trade · 1 open"
 
 
+SHADOW = {**TRADE, "trade_id": "S1", "source": "idea_shadow"}
+
+
+def test_a_shadow_idea_wears_its_own_tag_and_is_neither_mine_nor_an_idea():
+    rows = paper.paper_rows([TRADE, IDEA, SHADOW])
+    by_id = {r["trade_id"]: r for r in rows}
+    assert by_id["S1"]["tag"] == "Shadow idea"
+    assert by_id["S1"]["_tag_class"] == paper.SHADOW_TAG_CLASS
+    assert paper.SHADOW_TAG_CLASS not in (paper.IDEA_TAG_CLASS, paper.CONDOR_TAG_CLASS)
+    assert [r["trade_id"] for r in paper.filter_rows(rows, "mine")] == ["T1"]
+    assert [r["trade_id"] for r in paper.filter_rows(rows, "ideas")] == ["I1"]
+    assert not paper.is_idea(SHADOW)
+
+
 def test_delete_closed_confirm_names_the_condor_too():
     assert "condor" in paper.DELETE_CLOSED_BODY.lower()

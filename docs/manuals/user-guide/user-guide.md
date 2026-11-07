@@ -84,7 +84,7 @@ The app reads market data and your positions from Schwab, so you need:
 - **Push notifications** (Telegram / Discord / text message) — configured in
   `shared/notifications.json` if you want alerts on your phone. Skip it and the app
   is silent on those channels. Once they are set, the app also posts one **trade idea**
-  an hour during the regular session (08:35–14:35 CT): the best Strong or Good trade
+  an hour during the regular session (08:40–14:40 CT): the best Strong or Good trade
   on the Market Scanner, drawn as an image with its legs, grade, risk, profit,
   probability of profit and payoff chart. It picks from every Scanner table: the
   credit spreads, the Directional tab's single options, and the **Other structures**
@@ -2703,6 +2703,28 @@ under *Daily SPY condor* in the schedule.
   weekly idea review never rates it, and the EOD Report and the Symbol dossier do
   not count it as yours.
 
+**Shadow ideas.** A test of posting trade ideas on quality instead of on the hourly
+clock. After every scan (four an hour), the app looks for a trade that was not a
+candidate in the previous scan and is graded **Strong**. If one fits the limits, it
+is booked into this ledger tagged **Shadow idea**. **Nothing is posted**: not to
+Discord, Telegram, X, the site or the calendar. Set under Settings → Configuration →
+*Shadow trade ideas in the Paper Ledger* (it ships on, in shadow).
+
+- **The limits** count the hourly posts and the shadow ideas together, as a real
+  feed would: at most **2 in any 60 minutes**, at least **20 minutes** after the last
+  one, at most **10 a day**, and one per symbol a day. A trade that sells premium
+  also needs a Vol Rank of at least **50**. Only one is booked per scan, and only
+  in the regular session.
+- **Not on the first scan of the day.** That scan only records what is there, so a
+  restart or the morning's first scan never books a burst.
+- **Followed like an idea.** The same 5-minute checks, target and stop as the
+  hourly ideas. It shows under **All** only; the weekly idea review, the site and
+  the live-order banner never see it, and the EOD Report and the Symbol dossier do
+  not count it as yours.
+- **The point** is the comparison: after a few weeks `tools/idea_shadow_compare.py`
+  sets the shadow ideas' results beside the hourly posts'. Posting on quality goes
+  live only if the shadow ideas did better.
+
 ## Paper Account
 
 **Route:** `/options/portfolio`.
@@ -2850,9 +2872,12 @@ call in 4 min") and says whether any symbol has a measured edge. Each row shows 
 symbol and its price, **Now** (up, down or no direction, and which call that is), the
 **Trade** with the call (the trade with a measured edge instead, when there is one), its
 **Chance** of target, how often it **usually** wins, the **Room** to the wall, and
-**Calls since the open**: one icon per call, oldest on the left, starting with the 08:36
-call. An up arrow is up, a down arrow is down, a dash is no signal, and an arrow in a ring
-is a call that had a measured edge; hover an icon for its time and what it said. The row
+**Calls since the open**: one round icon per call, oldest on the left, starting with the
+08:36 call. A green circle with an up arrow is up, a red circle with a down arrow is down,
+an orange circle with an arrow pointing right is no signal, and a circle with a ring round
+it is a call that had a measured edge; hover an icon for its time and what it said. With
+room on the page the whole day's calls sit on one line, else two rows of eleven. After the
+close, and for another day's calls, every circle is grey. The row
 reads the latest 15-minute call once the first one is out (08:51) and the 08:36 call
 before that.
 

@@ -221,6 +221,61 @@ def test_captured_badge_survives_reprice_but_fires_on_new_signal(monkeypatch):
     assert main._NAV_BADGES["/options/captured"] == 1
 
 
+def test_captured_badge_is_not_raised_by_a_webgui_restart(monkeypatch):
+    """The acknowledged ids live in process memory, so every restart (each promote
+    restarts the webgui, several a day) used to forget them: with any captured
+    signal still open the badge showed 1 until the page was opened again, with
+    nothing new captured. The first read after a start seeds the seen set from the
+    view; only a capture that arrives AFTER it raises the badge."""
+    import main
+
+    state = {"payload": {"signals": [{"signal_id": "s1"}, {"signal_id": "s2"}]},
+             "ver": 7}
+    monkeypatch.setattr(main.bus_client, "read",
+                        lambda v: state["payload"] if v == "options:captured" else {})
+    monkeypatch.setattr(main.bus_client, "read_version",
+                        lambda v: state["ver"] if v == "options:captured" else None)
+    monkeypatch.setattr(main.bus_client, "read_full", lambda v: (None, None))
+    # A freshly started process: nothing acknowledged, nothing read yet.
+    monkeypatch.setitem(main._ALERT_STATE, "captured_acked", None)
+    monkeypatch.setitem(main._ALERT_STATE, "captured_keys", set())
+    monkeypatch.setitem(main._ALERT_STATE, "captured_keys_ver", None)
+
+    main._recompute_badges(scan={"signals": []})
+    assert main._NAV_BADGES["/options/captured"] == 0     # was 1 (the bug)
+
+    # A capture after the start still raises it.
+    state["payload"] = {"signals": [{"signal_id": "s1"}, {"signal_id": "s2"},
+                                    {"signal_id": "s3"}]}
+    state["ver"] = 8
+    main._recompute_badges(scan={"signals": []})
+    assert main._NAV_BADGES["/options/captured"] == 1
+
+
+def test_captured_badge_seed_waits_for_a_published_view(monkeypatch):
+    """A start before the view exists (no version) must not seed an EMPTY seen
+    set, or the first publish would raise the badge for every open signal."""
+    import main
+
+    state = {"payload": None, "ver": None}
+    monkeypatch.setattr(main.bus_client, "read",
+                        lambda v: state["payload"] if v == "options:captured" else {})
+    monkeypatch.setattr(main.bus_client, "read_version",
+                        lambda v: state["ver"] if v == "options:captured" else None)
+    monkeypatch.setattr(main.bus_client, "read_full", lambda v: (None, None))
+    monkeypatch.setitem(main._ALERT_STATE, "captured_acked", None)
+    monkeypatch.setitem(main._ALERT_STATE, "captured_keys", set())
+    monkeypatch.setitem(main._ALERT_STATE, "captured_keys_ver", None)
+
+    main._recompute_badges(scan={"signals": []})
+    assert main._NAV_BADGES["/options/captured"] == 0
+    assert main._ALERT_STATE["captured_acked"] is None    # still unseeded
+
+    state.update(payload={"signals": [{"signal_id": "s1"}]}, ver=1)
+    main._recompute_badges(scan={"signals": []})
+    assert main._NAV_BADGES["/options/captured"] == 0
+
+
 def test_acknowledge_reuses_injected_scan(monkeypatch):
     """When _layout has already read options:scan, it passes it to _acknowledge,
     which then does NOT re-read it."""

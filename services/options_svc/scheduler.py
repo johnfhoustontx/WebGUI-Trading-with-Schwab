@@ -703,6 +703,12 @@ def trade_idea_due(now, ran_slots):
     return None
 
 
+def idea_shadow_due(scan_ver, last_ver) -> bool:
+    """True when a scan has been published since the shadow idea check last ran
+    (``config/paper.toml [idea_shadow]``). No version yet (no scan) is never due."""
+    return scan_ver is not None and scan_ver != last_ver
+
+
 # ── Daily 0-DTE condor (see config/sessions.toml [slots.daily_condor]) ───────
 _DAILY_CONDOR_SLOTS = {k: (t.hour, t.minute)
                        for k, t in mc.slot_times("daily_condor").items()}
@@ -834,6 +840,7 @@ async def loop(bus):
     market_snapshot_ran = set()  # (date, "HH:MM") of fired market-snapshot pushes (see market_snapshot_due)
     trade_idea_ran = set()  # (date, slot) of fired hourly trade-idea posts (see trade_idea_due)
     daily_condor_ran = set()  # (date, slot) of fired daily-condor entries (see daily_condor_due)
+    last_shadow_scan_ver = None  # the scan version the shadow idea check last saw (see idea_shadow_due)
     last_site_results_slot = None  # public-site trade idea results slot (see site_results_due)
     # One-shot startup refresh so the Paper Portfolio page has data on first
     # load. The paper account only changes on user actions (entry/manage/reset
@@ -1470,6 +1477,27 @@ async def loop(bus):
 
         if ti_slot:
             branches.append(("trade_idea", _trade_idea_branch(ti_slot)))
+
+        # Quality-triggered trade ideas, in shadow: one check per published scan
+        # (its version moved). Latched before the check; the check itself skips a
+        # scan it has already seen, so a restart re-books nothing.
+        try:
+            scan_ver = bus.cache_version("cache:options:scan")
+            shadow_due = idea_shadow_due(scan_ver, last_shadow_scan_ver)
+            if shadow_due:
+                last_shadow_scan_ver = scan_ver
+        except Exception:
+            log.exception("idea_shadow_due gate degraded")
+            shadow_due = False
+
+        async def _idea_shadow_branch():
+            try:
+                await loop_.run_in_executor(None, handlers.run_idea_shadow, bus)
+            except Exception:
+                log.exception("run_idea_shadow branch degraded")
+
+        if shadow_due:
+            branches.append(("idea_shadow", _idea_shadow_branch()))
 
         # The daily 0-DTE condor's entry into the Paper Ledger: one chain fetch.
         # Latched BEFORE the fetch, so a slow chain cannot refire the slot; the

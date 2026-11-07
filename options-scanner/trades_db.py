@@ -323,9 +323,9 @@ def delete_trades_by_status(conn, statuses):
 #: a services test pins that the two are equal).
 IDEA_SOURCE = "trade_idea"
 #: Every ``source`` whose closed rows "Delete all closed" CLEARS rather than deletes:
-#: the posted ideas and the daily condor, both measurements. Twin of
-#: ``idea_ledger.SELF_MANAGED_SOURCES`` (a services test pins that they agree).
-SELF_MANAGED_SOURCES = frozenset({IDEA_SOURCE, "daily_condor"})
+#: the posted ideas, the daily condor and the shadow ideas, all measurements. Twin
+#: of ``idea_ledger.SELF_MANAGED_SOURCES`` (a services test pins that they agree).
+SELF_MANAGED_SOURCES = frozenset({IDEA_SOURCE, "daily_condor", "idea_shadow"})
 
 
 def _in(sources):
