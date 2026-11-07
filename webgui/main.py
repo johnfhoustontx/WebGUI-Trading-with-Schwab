@@ -1304,8 +1304,11 @@ _ALERT_STATE: dict = {
     # plus a version-gated cache of the current ids so the badge fires on a
     # genuinely new capture rather than on every reprice-republish. captured_keys is
     # recomputed only when captured_keys_ver moves (the cheap :ver probe gates the
-    # payload deserialize).
-    "captured_acked": set(), "captured_keys": set(), "captured_keys_ver": None,
+    # payload deserialize). captured_acked starts as None = "not seeded yet": the
+    # first published view after a start is taken as already seen, because a
+    # restart (every promote) would otherwise forget the acknowledgement and show
+    # the badge for signals that were open before it.
+    "captured_acked": None, "captured_keys": set(), "captured_keys_ver": None,
     "rescue_seen": None,
     # Health/staleness (R4b/R8): the set of currently stale/down component keys
     # already alerted, so we chime only on transition INTO bad (fire-on-transition,
@@ -1760,8 +1763,14 @@ def _recompute_badges(scan=None) -> None:
         _ALERT_STATE["captured_keys"] = alerts.captured_keys(
             bus_client.read("options:captured") or {})
         _ALERT_STATE["captured_keys_ver"] = cap_ver
-    _NAV_BADGES["/options/captured"] = 1 if alerts.unread_count(
-        _ALERT_STATE["captured_keys"], _ALERT_STATE["captured_acked"]) else 0
+    # Seed on the first PUBLISHED view after a start (a version exists), never on
+    # a missing one: seeding an empty set would light the badge for every open
+    # signal at the first publish.
+    if _ALERT_STATE["captured_acked"] is None and cap_ver is not None:
+        _ALERT_STATE["captured_acked"] = set(_ALERT_STATE["captured_keys"])
+    cap_acked = _ALERT_STATE["captured_acked"]
+    _NAV_BADGES["/options/captured"] = 1 if cap_acked is not None and alerts.unread_count(
+        _ALERT_STATE["captured_keys"], cap_acked) else 0
     # Rescue: count of at-risk paper positions (tested + critical) from the small
     # rescue_summary view. Cleared on open (version acknowledged), so the count
     # only re-appears when the manage cycle republishes a changed summary.
