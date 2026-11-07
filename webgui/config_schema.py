@@ -1794,9 +1794,14 @@ _PAPER = ConfigFile(
             Field("idea_trades.enabled", "Book the posted ideas",
                   "Off stops new bookings. Ideas already booked are still "
                   "marked and settled.", kind="bool"),
+            Field("idea_trades.sizing", "Contracts per idea from",
+                  "live books the number of contracts the live order ticket "
+                  "opens at: the most whose max loss is within the live orders' "
+                  "default risk, and 1 when one contract risks more. fixed books "
+                  "the number below.", kind="choice", choices=("live", "fixed")),
             Field("idea_trades.quantity", "Contracts per idea",
-                  "How many contracts each booked idea trades.",
-                  kind="int", min=1, max=100, step=1),
+                  "How many contracts each booked idea trades when the size is "
+                  "fixed.", kind="int", min=1, max=100, step=1),
             Field("idea_trades.mark_interval_min", "Minutes between marks",
                   "How often the open idea trades are priced.",
                   kind="int", unit="min", min=1, max=60, step=1),
@@ -1837,9 +1842,14 @@ _PAPER = ConfigFile(
                   "Closed when the loss reaches this multiple of the credit. 2.0 "
                   "with $1.00 taken in closes when buying it back costs $3.00.",
                   kind="float", unit="x credit", min=0.1, max=20, step=0.1),
+            Field("daily_condor.sizing", "Condors per day from",
+                  "live books the number of condors the live order ticket opens "
+                  "at: the most whose max loss is within the live orders' default "
+                  "risk, and 1 when one condor risks more. fixed books the number "
+                  "below.", kind="choice", choices=("live", "fixed")),
             Field("daily_condor.quantity", "Condors per day",
-                  "How many condors are booked each morning.",
-                  kind="int", min=1, max=100, step=1),
+                  "How many condors are booked each morning when the size is "
+                  "fixed.", kind="int", min=1, max=100, step=1),
             Field("daily_condor.max_delta_miss", "Largest delta miss",
                   "How far a short leg's delta may sit from the target. Past it "
                   "the day is skipped, so a chain with broken deltas near the "

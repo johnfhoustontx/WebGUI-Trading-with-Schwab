@@ -198,6 +198,11 @@ def book(now, client=None) -> dict:
     if "skip" in p:
         log.warning("daily condor SKIPPED %s %s: %s", cfg["symbol"], day, p["skip"])
         return _done("skipped", reason=p["skip"])
+    # The live ticket's opening size: one condor's max loss, commission in, the
+    # same basis the idea rows size on.
+    one = commission.round_trip_commission("IC", cfg["symbol"], 1)
+    risk_one = (float(cfg["width"]) - float(p["credit"])) * _MULT + one
+    cfg = {**cfg, "quantity": paper_limits.booking_quantity(cfg, risk_one)}
     rt = commission.round_trip_commission("IC", cfg["symbol"], int(cfg["quantity"]))
     row = build_row(p, now, cfg, rt)
     paper_trader.add_trade(row)

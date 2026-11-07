@@ -41,7 +41,12 @@ chain_max_age_sec = 45
 # Book the ideas at all. false stops new bookings; open ones are still marked and
 # settled. Must be true or false.
 enabled = true
-# Contracts per idea (a whole number, 1 or more).
+# How many contracts each idea books. "live": the number the live order ticket
+# opens at (config/live_orders.toml: the most contracts whose max loss is at most
+# default_risk_usd, 1 when one contract risks more, never above max_contracts), so
+# the Ledger holds what a live order of the same idea would. "fixed": quantity.
+sizing = "live"
+# Contracts per idea when sizing = "fixed" (a whole number, 1 or more).
 quantity = 1
 # Minutes between marks of the open idea trades (1 to 60).
 mark_interval_min = 5
@@ -77,7 +82,10 @@ width = 5.0
 # The stop: closed when the LOSS reaches this multiple of the credit. 2.0 with
 # $1.00 taken in closes when buying it back costs $3.00 (above 0, up to 20).
 stop_mult = 2.0
-# Condors per day (a whole number, 1 or more).
+# How many condors are booked. "live": the number the live order ticket opens at,
+# as [idea_trades] sizing above. "fixed": quantity.
+sizing = "live"
+# Condors per day when sizing = "fixed" (a whole number, 1 or more).
 quantity = 1
 # How far a short leg's delta may sit from short_delta (0 to 0.5). When Schwab
 # sends no usable delta near the target - its -999 on the near strikes - the

@@ -416,6 +416,31 @@ def paper_dialog_view(signal, caps, qty):
     }
 
 
+def opening_quantity(signal, caps):
+    """The Quantity box's opening value. PURE.
+
+    The live order ticket's own opening size (``live_order.default_contracts``:
+    the most contracts whose max loss is at most ``config/live_orders.toml``'s
+    ``default_risk_usd``, 1 when one contract risks more), so the Ledger holds
+    the number a live order of the same trade opens at (the operator's rule,
+    2026-11-07). Held down to what the Ledger's caps let in when that is fewer,
+    and to the dialog's own ceiling; never below 1."""
+    from shared import book_caps, live_order, live_orders_config
+
+    from . import book_fit
+
+    sig = signal if isinstance(signal, dict) else {}
+    one = book_caps.booked_risk(sig.get("ledger_risk_basis"), 1)
+    n = live_order.default_contracts(one, live_orders_config.default_risk_usd(),
+                                     live_orders_config.max_contracts())
+    n = min(n, PAPER_QTY_CEILING)
+    p = book_fit.preview(sig, caps, n)
+    fits = p.get("max_quantity") if p.get("available") else None
+    if isinstance(fits, int) and not isinstance(fits, bool) and 1 <= fits < n:
+        n = fits
+    return max(1, n)
+
+
 def sent_text(n):
     """The confirm toast, naming the quantity that went out. PURE."""
     unit = "contract" if n == 1 else "contracts"
@@ -435,7 +460,8 @@ def send_to_paper(signal):
         caps = bus_client.read(LEDGER_CAPS_VIEW)
     except Exception:  # noqa: BLE001 - no preview is the degrade; the service still checks
         caps = None
-    state = {"view": paper_dialog_view(signal, caps, 1), "sent": False}
+    start = opening_quantity(signal, caps)
+    state = {"view": paper_dialog_view(signal, caps, start), "sent": False}
 
     view = state["view"]
     # ephemeral: this dialog is built per click, so it removes itself on close
@@ -454,7 +480,7 @@ def send_to_paper(signal):
         # min only: the ceiling MOVES with the quantity (``qty_max`` is never
         # below a typed quantity that fits), so ``paint`` writes it into
         # ``_props["max"]`` rather than freezing it into the field's own check.
-        qty = kit.number_field("Quantity", value=1, min=1, integer=True)
+        qty = kit.number_field("Quantity", value=start, min=1, integer=True)
 
     def confirm():
         # A latch, not just the button: a queued second click still runs

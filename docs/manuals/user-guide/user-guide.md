@@ -2570,7 +2570,10 @@ type:
 - **grey** — *Not checked*, with the reason.
 
 When a line is red, **Create** is greyed out and the box says *Up to N contracts
-fit.*, or *No quantity fits the paper ledger's limits right now.* When you leave the
+fit.*, or *No quantity fits the paper ledger's limits right now.* The **Quantity**
+box opens at the number of contracts **Send Live Order** would open at for the same
+trade (the most whose max loss is $1,000 or less, 1 when one contract risks more),
+lowered to the largest quantity that fits these limits when that is fewer. When you leave the
 **Quantity** box, a number above the largest quantity that fits drops back to it (to
 1 when nothing fits). The box also stops at 100 contracts, the most one trade can
 open, and **Create** is greyed out when the quantity is not a whole number of at
@@ -2678,7 +2681,9 @@ under *Daily SPY condor* in the schedule.
 
 - **The trade.** On today's expiry: sell the put whose delta is nearest **0.15** and
   buy the put **$5** below it; sell the call whose delta is nearest 0.15 and buy the
-  call $5 above it. One condor (*Condors per day*). The price is a realistic fill
+  call $5 above it. As many condors as a live order of it would open at: the most
+  whose max loss is $1,000 or less, and 1 when one condor risks more (*Condors per
+  day from*: *live*; set it to *fixed* to book *Condors per day* instead). The price is a realistic fill
   from a chain fetched at 08:45 (a little worse than the midpoint), and the
   commission for opening and closing is taken at entry.
 - **The stop.** It closes when its loss reaches **2x the credit** (*Stop at a loss

@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-05</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-07</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -3110,7 +3110,10 @@ type:</p>
 <li><strong>grey</strong> — <em>Not checked</em>, with the reason.</li>
 </ul>
 <p>When a line is red, <strong>Create</strong> is greyed out and the box says <em>Up to N contracts
-fit.</em>, or <em>No quantity fits the paper ledger's limits right now.</em> When you leave the
+fit.</em>, or <em>No quantity fits the paper ledger's limits right now.</em> The <strong>Quantity</strong>
+box opens at the number of contracts <strong>Send Live Order</strong> would open at for the same
+trade (the most whose max loss is $1,000 or less, 1 when one contract risks more),
+lowered to the largest quantity that fits these limits when that is fewer. When you leave the
 <strong>Quantity</strong> box, a number above the largest quantity that fits drops back to it (to
 1 when nothing fits). The box also stops at 100 contracts, the most one trade can
 open, and <strong>Create</strong> is greyed out when the quantity is not a whole number of at
@@ -3216,7 +3219,9 @@ under <em>Daily SPY condor</em> in the schedule.</p>
 <ul>
 <li><strong>The trade.</strong> On today's expiry: sell the put whose delta is nearest <strong>0.15</strong> and
   buy the put <strong>$5</strong> below it; sell the call whose delta is nearest 0.15 and buy the
-  call $5 above it. One condor (<em>Condors per day</em>). The price is a realistic fill
+  call $5 above it. As many condors as a live order of it would open at: the most
+  whose max loss is $1,000 or less, and 1 when one condor risks more (<em>Condors per
+  day from</em>: <em>live</em>; set it to <em>fixed</em> to book <em>Condors per day</em> instead). The price is a realistic fill
   from a chain fetched at 08:45 (a little worse than the midpoint), and the
   commission for opening and closing is taken at entry.</li>
 <li><strong>The stop.</strong> It closes when its loss reaches <strong>2x the credit</strong> (<em>Stop at a loss

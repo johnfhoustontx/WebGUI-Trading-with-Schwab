@@ -57,7 +57,7 @@ def test_the_shipped_file_matches_the_defaults():
 
 # --- trade ideas in the Paper Ledger ([idea_trades]) -------------------------
 
-_IDEA_DEFAULTS = {"enabled": True, "quantity": 1, "mark_interval_min": 5,
+_IDEA_DEFAULTS = {"enabled": True, "sizing": "live", "quantity": 1, "mark_interval_min": 5,
                   "debit_stop_frac": 0.60, "clean_mae_pct": 25.0, "min_n": 5,
                   "review_model": "sonnet"}
 
@@ -76,10 +76,11 @@ def test_idea_trades_has_no_review_length_setting(toml):
 
 
 def test_idea_trades_file_overrides_each_key(toml):
-    toml("[idea_trades]\nenabled = false\nquantity = 2\nmark_interval_min = 15\n"
+    toml("[idea_trades]\nenabled = false\nsizing = \"fixed\"\nquantity = 2\n"
+         "mark_interval_min = 15\n"
          "debit_stop_frac = 0.5\nclean_mae_pct = 40\nmin_n = 8\n"
          'review_model = "haiku"\n')
-    assert pl.idea_trades() == {"enabled": False, "quantity": 2,
+    assert pl.idea_trades() == {"enabled": False, "sizing": "fixed", "quantity": 2,
                                 "mark_interval_min": 15, "debit_stop_frac": 0.5,
                                 "clean_mae_pct": 40.0, "min_n": 8,
                                 "review_model": "haiku"}
@@ -93,6 +94,7 @@ def test_idea_trades_file_overrides_each_key(toml):
     ("clean_mae_pct", 0), ("clean_mae_pct", 101), ("clean_mae_pct", float("nan")),
     ("min_n", "x"), ("min_n", 0), ("min_n", False),
     ("enabled", "yes"), ("enabled", 1),
+    ("sizing", "half"), ("sizing", ""), ("sizing", 1), ("sizing", True),
     ("review_model", ""), ("review_model", "  "), ("review_model", 5),
 ])
 def test_idea_trades_bad_value_falls_back(monkeypatch, key, bad):
@@ -116,6 +118,54 @@ def test_idea_trades_boundaries_are_accepted(monkeypatch):
 def test_idea_trades_survives_a_table_that_is_not_a_table(monkeypatch):
     monkeypatch.setattr(pl, "load", lambda: {"idea_trades": "oops"})
     assert pl.idea_trades() == _IDEA_DEFAULTS
+
+
+def test_sizing_reads_any_case(monkeypatch):
+    monkeypatch.setattr(pl, "load", lambda: {"idea_trades": {"sizing": " Fixed "}})
+    assert pl.idea_trades()["sizing"] == "fixed"
+
+
+# --- booking_quantity: the Ledger books the live ticket's opening size --------
+
+def _live(monkeypatch, risk=1000.0, ceiling=50):
+    from shared import live_orders_config as loc
+    monkeypatch.setattr(loc, "default_risk_usd", lambda: risk)
+    monkeypatch.setattr(loc, "max_contracts", lambda: ceiling)
+
+
+@pytest.mark.parametrize("risk_one, want", [
+    (250.0, 4),        # 4 x $250 = $1,000, the budget exactly
+    (300.0, 3),        # a 4th would be $1,200
+    (1000.0, 1),
+    (1500.0, 1),       # one contract over the budget still books 1, as the ticket
+    (None, 1),         # an unbounded loss
+    (float("nan"), 1),
+    (0.0, 1),
+])
+def test_live_sizing_is_the_live_tickets_opening_size(monkeypatch, risk_one, want):
+    from shared import live_order
+    _live(monkeypatch)
+    cfg = {"sizing": "live", "quantity": 7}
+    assert pl.booking_quantity(cfg, risk_one) == want
+    # the ticket's own rule, called the way live_order_handlers calls it
+    assert want == live_order.default_contracts(risk_one, 1000.0, 50)
+
+
+def test_live_sizing_follows_the_live_order_settings(monkeypatch):
+    _live(monkeypatch, risk=2000.0, ceiling=5)
+    assert pl.booking_quantity({"sizing": "live", "quantity": 1}, 250.0) == 5
+    _live(monkeypatch, risk=2000.0, ceiling=50)
+    assert pl.booking_quantity({"sizing": "live", "quantity": 1}, 250.0) == 8
+
+
+def test_fixed_sizing_books_the_quantity(monkeypatch):
+    _live(monkeypatch)
+    assert pl.booking_quantity({"sizing": "fixed", "quantity": 3}, 100.0) == 3
+
+
+def test_the_shipped_file_sizes_both_bookers_live():
+    assert pl.idea_trades()["sizing"] == "live"
+    assert pl.daily_condor()["sizing"] == "live"
 
 
 def test_the_idea_review_slot_ships_at_1530():

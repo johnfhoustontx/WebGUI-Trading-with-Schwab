@@ -268,3 +268,50 @@ def test_an_unreadable_caps_view_leaves_create_enabled(monkeypatch):
     shown = [e.text for e in dlg.content.descendants()
              if isinstance(e, ui.label) and e.visible]
     assert book_fit.UNAVAILABLE in shown
+
+
+# --- the opening quantity: the live ticket's size (2026-11-07) ---------------
+
+def _live(monkeypatch, risk=1000.0, ceiling=50):
+    from shared import live_orders_config
+    monkeypatch.setattr(live_orders_config, "default_risk_usd", lambda: risk)
+    monkeypatch.setattr(live_orders_config, "max_contracts", lambda: ceiling)
+
+
+def test_the_box_opens_at_the_live_tickets_size(monkeypatch):
+    from shared import live_order
+    _live(monkeypatch)
+    roomy = {**CAPS, "limits": {**LIMITS, "max_risk_per_trade": 5000.0,
+                                "max_risk_per_symbol": 5000.0}}
+    # $190 a contract: five fit $1,000, the live ticket's own rule
+    assert handoff.opening_quantity(SIG, roomy) == 5
+    assert live_order.default_contracts(190.0, 1000.0, 50) == 5
+
+
+def test_the_box_opens_no_higher_than_the_ledgers_caps_allow(monkeypatch):
+    _live(monkeypatch)
+    # the $750 per-trade cap: three ($570) fit, four ($760) do not
+    assert handoff.opening_quantity(SIG, CAPS) == 3
+
+
+def test_the_box_opens_at_the_live_size_when_the_caps_cannot_be_read(monkeypatch):
+    _live(monkeypatch)
+    assert handoff.opening_quantity(SIG, None) == 5
+
+
+def test_the_box_opens_at_one_without_a_risk(monkeypatch):
+    _live(monkeypatch)
+    assert handoff.opening_quantity({**SIG, "ledger_risk_basis": None}, CAPS) == 1
+    assert handoff.opening_quantity(None, CAPS) == 1
+
+
+def test_the_box_never_opens_above_the_dialogs_ceiling(monkeypatch):
+    _live(monkeypatch, risk=10**7, ceiling=10**6)
+    assert handoff.opening_quantity(SIG, None) == handoff.PAPER_QTY_CEILING
+
+
+def test_the_dialog_opens_with_that_quantity(monkeypatch):
+    _live(monkeypatch)
+    dlg, _notes = _open_dialog(monkeypatch, lambda d, c: None)
+    assert _qty(dlg).value == 3
+    assert dlg.confirm.enabled is True

@@ -36,6 +36,7 @@ DEFAULTS = {
     # measurement, and a weekly review reads how they did.
     "idea_trades": {
         "enabled": True,
+        "sizing": "live",
         "quantity": 1,
         "mark_interval_min": 5,
         "debit_stop_frac": 0.60,
@@ -51,6 +52,7 @@ DEFAULTS = {
         "short_delta": 0.15,
         "width": 5.0,
         "stop_mult": 2.0,
+        "sizing": "live",
         "quantity": 1,
         "max_delta_miss": 0.05,
     },
@@ -113,6 +115,34 @@ def _idea_float(raw, lo, hi, default):
     return val if math.isfinite(val) and lo < val <= hi else default
 
 
+SIZINGS = ("live", "fixed")
+
+
+def _sizing(raw, default):
+    """``"live"`` or ``"fixed"`` (any case, spaces trimmed), else ``default``."""
+    if isinstance(raw, str) and raw.strip().lower() in SIZINGS:
+        return raw.strip().lower()
+    return default
+
+
+def booking_quantity(cfg: dict, risk_per_contract) -> int:
+    """How many contracts a self-managed Ledger row books (``[idea_trades]`` or
+    ``[daily_condor]``, as ``cfg``).
+
+    ``sizing = "live"``: the live order ticket's own opening size
+    (``shared.live_order.default_contracts`` with ``config/live_orders.toml``'s
+    ``default_risk_usd`` and ``max_contracts``), so the Ledger holds the number of
+    contracts a live order of the same trade opens at (the operator's rule,
+    2026-11-07). ``risk_per_contract`` is one contract's max loss in dollars; an
+    unknown or unbounded one sizes 1, as the ticket does. ``"fixed"``: ``quantity``."""
+    if cfg.get("sizing") != "live":
+        return int(cfg["quantity"])
+    from shared import live_order, live_orders_config   # lazy: only the bookers need it
+    return live_order.default_contracts(risk_per_contract,
+                                        live_orders_config.default_risk_usd(),
+                                        live_orders_config.max_contracts())
+
+
 def idea_trades() -> dict:
     """``[idea_trades]``: how the hourly trade ideas are booked into the Paper
     Ledger and reviewed. Always a full dict. Each key that is missing or unusable
@@ -120,6 +150,7 @@ def idea_trades() -> dict:
     the other keys with it - and nothing here raises.
 
     ``enabled`` must be a real boolean (a string such as ``"yes"`` is not one).
+    ``sizing`` is ``"live"`` or ``"fixed"`` (see ``booking_quantity``).
     ``quantity`` and ``min_n`` are positive whole numbers; ``mark_interval_min``
     is 1..60 minutes; ``debit_stop_frac`` is a fraction in (0, 1];
     ``clean_mae_pct`` a percentage in (0, 100]; ``review_model`` a non-empty
@@ -132,6 +163,7 @@ def idea_trades() -> dict:
     model = sec.get("review_model")
     return {
         "enabled": enabled if isinstance(enabled, bool) else d["enabled"],
+        "sizing": _sizing(sec.get("sizing"), d["sizing"]),
         "quantity": _idea_int(sec.get("quantity"), 1, 10**6, d["quantity"]),
         "mark_interval_min": _idea_int(sec.get("mark_interval_min"), 1, 60,
                                        d["mark_interval_min"]),
@@ -163,7 +195,8 @@ def daily_condor() -> dict:
     ``enabled`` must be a real boolean; ``symbol`` a ticker ``shared.symbols``
     accepts; ``short_delta`` in (0, 0.5); ``width`` in (0, 100] dollars;
     ``stop_mult`` in (0, 20] - the stop is a LOSS of this multiple of the credit;
-    ``quantity`` a whole number of condors, 1 or more; ``max_delta_miss`` in
+    ``sizing`` ``"live"`` or ``"fixed"`` (see ``booking_quantity``); ``quantity`` a
+    whole number of condors, 1 or more, booked when ``sizing`` is ``"fixed"``; ``max_delta_miss`` in
     (0, 0.5) - how far a short's delta may sit from ``short_delta`` before the
     day is skipped rather than booked as something else."""
     from shared.symbols import clean_symbol
@@ -181,6 +214,7 @@ def daily_condor() -> dict:
         "short_delta": delta if delta < 0.5 else d["short_delta"],
         "width": _idea_float(sec.get("width"), 0.0, 100.0, d["width"]),
         "stop_mult": _idea_float(sec.get("stop_mult"), 0.0, 20.0, d["stop_mult"]),
+        "sizing": _sizing(sec.get("sizing"), d["sizing"]),
         "quantity": _idea_int(sec.get("quantity"), 1, 10**6, d["quantity"]),
         "max_delta_miss": miss if miss < 0.5 else d["max_delta_miss"],
     }

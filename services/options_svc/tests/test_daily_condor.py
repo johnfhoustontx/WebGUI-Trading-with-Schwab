@@ -284,3 +284,36 @@ def test_run_daily_condor_never_raises(monkeypatch):
     assert handlers.run_daily_condor(_Bus()) == {"status": "failed", "trade_id": None,
                                                  "reason": "proxy down"}
     assert _degrade.counts().get("options.run_daily_condor") == 1
+
+
+# ── sizing: the Ledger books the live ticket's opening size (2026-11-07) ──────
+def test_book_sizes_live_off_one_condors_max_loss(ledger, fetched, cfg, monkeypatch):  # noqa: F811
+    from shared import live_orders_config
+    cfg["sizing"] = "live"
+    monkeypatch.setattr(live_orders_config, "max_contracts", lambda: 50)
+    monkeypatch.setattr(live_orders_config, "default_risk_usd", lambda: 10**6)
+    daily_condor.book(NOW, client="C")
+    (row,) = ledger.get_all_trades()
+    assert row["quantity"] == 50                           # the ceiling binds
+
+
+def test_book_live_sizing_matches_the_live_tickets_rule(ledger, fetched, cfg, monkeypatch):  # noqa: F811
+    from shared import live_order, live_orders_config
+    cfg["sizing"] = "live"
+    monkeypatch.setattr(live_orders_config, "max_contracts", lambda: 50)
+    monkeypatch.setattr(live_orders_config, "default_risk_usd", lambda: 1000.0)
+    daily_condor.book(NOW, client="C")
+    (row,) = ledger.get_all_trades()
+    one = row["max_loss_per"] * 100
+    assert row["quantity"] == live_order.default_contracts(one, 1000.0, 50)
+    assert row["quantity"] * one <= 1000.0 + 0.01 or row["quantity"] == 1
+    assert row["max_loss_total"] == pytest.approx(one * row["quantity"], abs=0.02)
+
+
+def test_book_fixed_sizing_books_the_configured_quantity(ledger, fetched, cfg, monkeypatch):  # noqa: F811
+    from shared import live_orders_config
+    cfg.update(sizing="fixed", quantity=2)
+    monkeypatch.setattr(live_orders_config, "default_risk_usd", lambda: 10**6)
+    daily_condor.book(NOW, client="C")
+    (row,) = ledger.get_all_trades()
+    assert row["quantity"] == 2

@@ -4,7 +4,28 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-05 (**Live orders, Phase 3: cancel a working order from the app, and a list of today's live orders.** Covered calls left out, the operator's choice.)
+**Last updated:** 2026-11-07 (**The Paper Ledger books the live ticket's size.** The operator's rule: the Ledger shows the same number of contracts as the live trades.)
+
+- **`paper_limits.booking_quantity`** and a new `sizing` key in `[idea_trades]` and
+  `[daily_condor]` (`config/paper.toml`, shipped `"live"`; `"fixed"` books
+  `quantity` as before). Live sizing is `live_order.default_contracts` with
+  `config/live_orders.toml` `default_risk_usd` ($1,000) and `max_contracts` (50):
+  the most contracts whose max loss is within the budget, 1 when one contract
+  risks more or the loss is unbounded. The idea sizes on its own `max_loss`
+  (commission in); the condor on `(width - credit) x 100` plus one condor's round
+  trip. Rows already booked keep their size.
+- **The Paper trade box** (`handoff.opening_quantity`) opens at the same size,
+  lowered to the most the Ledger's caps let in ($750 a trade binds before $1,000
+  does) and to the box's 100.
+- **The weekly idea review is per contract** (`shared/idea_review.py`): realized and
+  unrealized P&L, entry and exit divide by `quantity`, so a group average weighs
+  each idea once. The site's idea results already did. Every row before this
+  change is 1 contract, so no past figure moves.
+- Settings -> Configuration gains *Contracts per idea from* and *Condors per day
+  from*. Also on main: Send Live Order and Copy ThinkorSwim order use the panel's
+  secondary button.
+
+**Prior —** 2026-11-05 (**Live orders, Phase 3: cancel a working order from the app, and a list of today's live orders.** Covered calls left out, the operator's choice.)
 
 - **The proxy's third brokerage write**: `DELETE /orders/{hash}/{order_id}` ->
   `trader_cancel`, one attempt, behind the account secret, refused only while

@@ -176,7 +176,10 @@ def book(idea, now) -> dict:
     cfg = paper_limits.idea_trades()
     if not cfg["enabled"]:
         return {"status": "disabled", "trade_id": None}
-    row = build_row(idea, now, cfg)
+    # The live ticket's opening size for this trade, off the idea's own max loss
+    # (one contract, commission in); ``build_row`` stays pure and reads the result.
+    qty = paper_limits.booking_quantity(cfg, idea.get("max_loss"))
+    row = build_row(idea, now, {**cfg, "quantity": qty})
     for t in paper_trader.get_all_trades():
         if t.get("idea_id") == row["idea_id"] and t.get("idea_posted") == row["idea_posted"]:
             return {"status": "duplicate", "trade_id": None}

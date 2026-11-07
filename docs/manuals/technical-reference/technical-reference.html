@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-05</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-07</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -7111,7 +7111,7 @@ on a later day is a second trade. <code>[idea_trades] enabled = false</code> sto
 </tr>
 <tr>
 <td><code>quantity</code></td>
-<td><code>[idea_trades] quantity</code> (1)</td>
+<td><code>paper_limits.booking_quantity</code>: with <code>[idea_trades] sizing = "live"</code> (shipped), the live ticket's opening size, <code>live_order.default_contracts(idea max_loss, [live_orders] default_risk_usd, max_contracts)</code> (the most contracts whose max loss, commission in, is at most $1,000; 1 when one risks more or the loss is unbounded); with <code>"fixed"</code>, <code>[idea_trades] quantity</code> (1)</td>
 </tr>
 <tr>
 <td><code>max_loss_per</code>, <code>max_loss_total</code>, <code>max_profit_total</code></td>
@@ -7208,6 +7208,10 @@ Rescue and Analyze still read them.</p>
   week and for all time. Each group carries <code>n</code>, the target / stop / expired / by-hand
   counts, win rate (% of rows with <code>realized_pnl &gt; 0</code>), average and total P&amp;L, average
   <code>mae_pct</code>, average hours held and <code>thin</code> (<code>n &lt; min_n</code>, default 5).</li>
+<li><strong>One contract's figures.</strong> Every money figure (realized and unrealized P&amp;L, entry,
+  exit) is the row's total divided by its <code>quantity</code>, so a group's average weighs each
+  idea once however many contracts it booked (sizes vary since 2026-11-07); <code>mae_pnl</code>
+  is per contract already.</li>
 </ul>
 <p><code>tools/weekly_idea_review.py</code> reads the Ledger view through <code>pages.eod.read_snapshot()</code>,
 exactly as the EOD report does, computes the facts, asks Claude for an assessment and
@@ -7275,6 +7279,10 @@ never backfilled) one chain of <code>symbol</code>'s same-day expiry is fetched 
 </tr>
 </tbody>
 </table>
+<p>The quantity is <code>paper_limits.booking_quantity</code> on one condor's max loss, commission
+in (<code>(width - c) x 100</code> plus one condor's round trip): with <code>[daily_condor] sizing =
+"live"</code> (shipped) the live ticket's opening size against <code>config/live_orders.toml</code>
+<code>default_risk_usd</code> and <code>max_contracts</code>, with <code>"fixed"</code> <code>[daily_condor] quantity</code>.</p>
 <p>The row (<code>build_row</code>) is an ordinary <code>IC</code> row with <code>source = "daily_condor"</code>. With
 <code>k</code> the round-trip commission a share (<code>commission.round_trip_commission("IC", ...)</code>
 / quantity / 100):</p>

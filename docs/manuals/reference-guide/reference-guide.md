@@ -3364,7 +3364,9 @@ when it fits (*Position 2 of 3 in ORCL*), red when it breaks (*Risks $950, over 
 $750 per-trade limit*), grey when it was not checked. A red line greys out
 **Create** and says *Up to N contracts fit.* (or that no quantity fits), and the
 **Quantity** box drops back to the largest quantity that fits when you leave it; 100
-is the box's own ceiling. The preview reads the same limits and the same open
+is the box's own ceiling. The box opens at the size the live order ticket would (the
+most contracts whose max loss is $1,000 or less), or lower when the limits allow
+fewer. The preview reads the same limits and the same open
 trades the ledger uses, so the two agree — but the book can change before the
 trade arrives, so the ledger checks again and its message is the answer. When the
 box cannot preview a trade it says so and **Create** stays available: a missing
@@ -3399,7 +3401,7 @@ and the **All / My trades / Trade ideas** buttons above the table choose what is
 
 | | A row you sent | A trade-idea row |
 |---|---|---|
-| Who opens it | You | The posting of the idea (one contract by default) |
+| Who opens it | You | The posting of the idea, at the size a live order of it opens at (the most contracts whose max loss is $1,000 or less; 1 when one risks more) |
 | Risk limits above | Checked before it is written | **Not applied** — it always books |
 | Counts toward the limits and equity | Yes | **No** |
 | Exits | Hourly rules on debit rows; credit rows only expire | Its own: **stop, target or expiry**, checked every 5 minutes |

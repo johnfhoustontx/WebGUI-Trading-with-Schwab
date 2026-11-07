@@ -301,3 +301,31 @@ def test_fact_numbers_cover_open_closed_and_repeats():
     nums = ir.fact_numbers(f)
     assert {"-41.25", "41.25", "-20.00", "20.00", "2"} <= nums
     assert "100.00" in nums  # a closed trade's realized P&L
+
+
+# ---- sizes: every money figure is one contract's (2026-11-07) ---------------
+
+def test_a_multi_contract_row_counts_as_one_contracts_pnl():
+    big = row(quantity=4, realized_pnl=400.0, entry_credit_total=200.0,
+              exit_debit_total=40.0)
+    small = row(quantity=1, realized_pnl=-50.0, idea_id="i2")
+    f = ir.facts([big, small], TODAY, CFG)
+    line = next(c for c in f["closed_week"] if c["idea_id"] == "i1")
+    assert line["realized_pnl"] == 100.0
+    assert line["entry"] == 50.0 and line["exit"] == 10.0
+    total = f["week"]["total"]
+    assert total["total_pnl"] == pytest.approx(50.0)       # 100 - 50, not 400 - 50
+    assert total["avg_pnl"] == pytest.approx(25.0)
+    assert total["win_rate"] == pytest.approx(50.0)
+
+
+def test_an_open_multi_contract_row_shows_one_contracts_unrealized():
+    t = row(status="OPEN", quantity=5, unrealized_pnl=250.0, exit_time=None,
+            exit_reason=None)
+    (line,) = ir.facts([t], TODAY, CFG)["open"]
+    assert line["unrealized_pnl"] == 50.0
+
+
+@pytest.mark.parametrize("q", [None, 0, -2, "x", True, 1.0])
+def test_an_unreadable_quantity_reads_as_one(q):
+    assert ir._pnl(row(quantity=q, realized_pnl=80.0)) == 80.0

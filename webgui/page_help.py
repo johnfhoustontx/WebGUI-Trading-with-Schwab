@@ -1386,10 +1386,15 @@ engine's positions live on **Paper Account**.
   ($25,000 plus your closed trades' realized P&L, so **Delete all closed** moves
   it). A trade that would break one is not written, and a message on the page you
   sent it from says which limit — plus *Up to N contracts fit* when a smaller size
-  would clear them all.
+  would clear them all. The Paper trade box opens at the size **Send Live Order**
+  would (the most contracts whose max loss is $1,000 or less), or at the most
+  these limits allow when that is fewer.
 - **Trade ideas live here too.** While **Book the posted ideas** is on (Settings
   -> Configuration), each hourly trade idea is booked into this ledger as it is
-  posted, tagged **Trade idea** beside the symbol. The buttons above the table
+  posted, tagged **Trade idea** beside the symbol. It books the number of
+  contracts **Send Live Order** would open at for the same trade (the most whose
+  max loss is $1,000 or less; 1 when one contract risks more), so this book and
+  your live trades match. The buttons above the table
   filter the list: **All**, **My trades** or **Trade ideas**, and the count line
   shows only what is on screen. Idea rows are **not** held to the risk limits
   listed above - they do not apply to them, so an idea always books, whatever else
@@ -1402,7 +1407,8 @@ engine's positions live on **Paper Account**.
   idea row yourself, from its own panel, removes it from that review too.
 - **The daily SPY condor lives here too.** Every trading morning at 08:45 CT one
   0-DTE SPY iron condor is booked, tagged **SPY condor**: 15-delta shorts, $5
-  wings, past every risk limit. It is checked every 5 minutes with the ideas and
+  wings, past every risk limit, sized the same way as the ideas. It is checked
+  every 5 minutes with the ideas and
   closes when its loss reaches 2x the credit (buy-back at 3x); otherwise it is
   settled at the close. It shows under **All** only, and **Delete all closed**
   keeps it on file. Settings -> Configuration -> *Daily SPY condor in the Paper

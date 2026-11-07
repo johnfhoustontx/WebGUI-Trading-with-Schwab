@@ -20,6 +20,9 @@ Rows and rules
   ``mae_pct = mae_pnl / (max_loss_per * 100) * 100`` (``None`` when the max
   loss is 0 or missing). ``webgui/pages/eod.py`` keeps its own copy of this
   one-liner on purpose: Tier 1 may not import this module.
+* Every money figure is ONE contract's (a row's total divided by its
+  ``quantity``): ideas book different sizes since 2026-11-07, and a group's
+  average must weigh each idea once. ``mae_pnl`` is per contract already.
 * ``win_rate`` is a percentage (0-100) of closed trades with a P&L above zero.
   A closed row with no ``realized_pnl`` counts as 0.
 
@@ -105,8 +108,27 @@ def _held_h(t: dict) -> float | None:
     return secs / 3600.0 if secs >= 0 else None
 
 
+def _qty(t: dict) -> int:
+    """The row's contract count, 1 when it is missing or not a whole number above 0."""
+    q = t.get("quantity")
+    if isinstance(q, bool):
+        return 1
+    try:
+        q = int(q)
+    except (TypeError, ValueError):
+        return 1
+    return q if q >= 1 else 1
+
+
+def _per(value, t: dict):
+    """A row's money total as one contract's share; ``None`` stays ``None``."""
+    return None if value is None else value / _qty(t)
+
+
 def _pnl(t: dict) -> float:
-    return _real(t.get("realized_pnl")) or 0.0
+    """The realized P&L of ONE contract: rows book different sizes, and a group's
+    average must weigh each idea once, not each contract."""
+    return _per(_real(t.get("realized_pnl")), t) or 0.0
 
 
 # ---- ratings and the calendar --------------------------------------------
@@ -252,8 +274,8 @@ def _closed_line(t: dict, clean: float) -> dict:
         "score": t.get("idea_score"),
         "exit_reason": t.get("exit_reason"),
         "rating": rate(t, clean),
-        "entry": _real(t.get("entry_credit_total")),
-        "exit": _real(t.get("exit_debit_total")),
+        "entry": _per(_real(t.get("entry_credit_total")), t),
+        "exit": _per(_real(t.get("exit_debit_total")), t),
         "realized_pnl": _pnl(t),
         "mae_pct": mae_pct(t),
         "held_h": _held_h(t),
@@ -268,7 +290,7 @@ def _open_line(t: dict, today: date) -> dict:
         "strategy": _text(t.get("strategy"), "unknown"),
         "structure": _structure(t),
         "grade": _text(t.get("idea_grade"), "ungraded"),
-        "unrealized_pnl": _real(t.get("unrealized_pnl")),
+        "unrealized_pnl": _per(_real(t.get("unrealized_pnl")), t),
         "mae_pnl": _real(t.get("mae_pnl")),
         "mae_pct": mae_pct(t),
         "days_open": max((today - p.date()).days, 0) if p is not None else None,

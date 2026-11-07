@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-05</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-07</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -4805,7 +4805,9 @@ when it fits (<em>Position 2 of 3 in ORCL</em>), red when it breaks (<em>Risks $
 $750 per-trade limit</em>), grey when it was not checked. A red line greys out
 <strong>Create</strong> and says <em>Up to N contracts fit.</em> (or that no quantity fits), and the
 <strong>Quantity</strong> box drops back to the largest quantity that fits when you leave it; 100
-is the box's own ceiling. The preview reads the same limits and the same open
+is the box's own ceiling. The box opens at the size the live order ticket would (the
+most contracts whose max loss is $1,000 or less), or lower when the limits allow
+fewer. The preview reads the same limits and the same open
 trades the ledger uses, so the two agree — but the book can change before the
 trade arrives, so the ledger checks again and its message is the answer. When the
 box cannot preview a trade it says so and <strong>Create</strong> stays available: a missing
@@ -4847,7 +4849,7 @@ and the <strong>All / My trades / Trade ideas</strong> buttons above the table c
 <tr>
 <td>Who opens it</td>
 <td>You</td>
-<td>The posting of the idea (one contract by default)</td>
+<td>The posting of the idea, at the size a live order of it opens at (the most contracts whose max loss is $1,000 or less; 1 when one risks more)</td>
 </tr>
 <tr>
 <td>Risk limits above</td>

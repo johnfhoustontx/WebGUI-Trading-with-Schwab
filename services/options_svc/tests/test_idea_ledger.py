@@ -848,3 +848,43 @@ def test_exit_commission_basis():
     row = idea_ledger.build_row(debit_idea, NOW, {**CFG, "quantity": 2})
     out = idea_ledger.close_row(row, -5.0, "TARGET", _at(5))
     assert out["realized_pnl"] == pytest.approx((row["entry_credit"] + 5.0) * 100 * 2)
+
+
+# ── sizing: the Ledger books the live ticket's opening size (2026-11-07) ──────
+def _live_budget(monkeypatch, risk, ceiling=50):
+    from shared import live_orders_config
+    monkeypatch.setattr(live_orders_config, "default_risk_usd", lambda: risk)
+    monkeypatch.setattr(live_orders_config, "max_contracts", lambda: ceiling)
+
+
+def test_book_sizes_live_off_the_ideas_max_loss(ledger, monkeypatch):
+    from shared import live_order, paper_limits
+    monkeypatch.setattr(paper_limits, "idea_trades", lambda: {**CFG, "sizing": "live"})
+    one = PCS_IDEA["max_loss"]
+    assert one and one > 0
+    _live_budget(monkeypatch, risk=one * 3 + 1)            # room for exactly three
+    idea_ledger.book(PCS_IDEA, NOW)
+    (row,) = ledger.get_all_trades()
+    assert row["quantity"] == 3
+    assert row["quantity"] == live_order.default_contracts(one, one * 3 + 1, 50)
+    assert row["max_loss_total"] == pytest.approx(one * 3)
+    assert row["entry_credit_total"] == pytest.approx(PCS_IDEA["entry_cash"] * 3)
+
+
+def test_book_live_sizing_books_one_when_one_contract_is_over_budget(ledger, monkeypatch):
+    from shared import paper_limits
+    monkeypatch.setattr(paper_limits, "idea_trades", lambda: {**CFG, "sizing": "live"})
+    _live_budget(monkeypatch, risk=PCS_IDEA["max_loss"] / 2)
+    idea_ledger.book(PCS_IDEA, NOW)
+    (row,) = ledger.get_all_trades()
+    assert row["quantity"] == 1
+
+
+def test_book_fixed_sizing_books_the_configured_quantity(ledger, monkeypatch):
+    from shared import paper_limits
+    monkeypatch.setattr(paper_limits, "idea_trades",
+                        lambda: {**CFG, "sizing": "fixed", "quantity": 2})
+    _live_budget(monkeypatch, risk=10**6)
+    idea_ledger.book(PCS_IDEA, NOW)
+    (row,) = ledger.get_all_trades()
+    assert row["quantity"] == 2

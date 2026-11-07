@@ -4006,7 +4006,7 @@ on a later day is a second trade. `[idea_trades] enabled = false` stops **bookin
 | Row field | From |
 |---|---|
 | `entry_credit` | the idea's `entry_cash / 100`, signed, **commission already in** (a debit is negative, as for every Ledger debit row) |
-| `quantity` | `[idea_trades] quantity` (1) |
+| `quantity` | `paper_limits.booking_quantity`: with `[idea_trades] sizing = "live"` (shipped), the live ticket's opening size, `live_order.default_contracts(idea max_loss, [live_orders] default_risk_usd, max_contracts)` (the most contracts whose max loss, commission in, is at most $1,000; 1 when one risks more or the loss is unbounded); with `"fixed"`, `[idea_trades] quantity` (1) |
 | `max_loss_per`, `max_loss_total`, `max_profit_total` | the idea's own `max_loss` / `max_profit`; `unbounded` when there is no max profit |
 | `target_pnl`, `stop_pnl` | `idea_ledger.levels`: the same `site_ideas.exit_levels` the public results use; a debit the rules give no stop gets `debit_stop_frac` (0.60) x the debit |
 | `mae_pnl`, `mae_at` | the worst point (below); starts at `0.0` |
@@ -4096,6 +4096,10 @@ Rescue and Analyze still read them.
   week and for all time. Each group carries `n`, the target / stop / expired / by-hand
   counts, win rate (% of rows with `realized_pnl > 0`), average and total P&L, average
   `mae_pct`, average hours held and `thin` (`n < min_n`, default 5).
+- **One contract's figures.** Every money figure (realized and unrealized P&L, entry,
+  exit) is the row's total divided by its `quantity`, so a group's average weighs each
+  idea once however many contracts it booked (sizes vary since 2026-11-07); `mae_pnl`
+  is per contract already.
 
 `tools/weekly_idea_review.py` reads the Ledger view through `pages.eod.read_snapshot()`,
 exactly as the EOD report does, computes the facts, asks Claude for an assessment and
@@ -4149,6 +4153,11 @@ never backfilled) one chain of `symbol`'s same-day expiry is fetched with
 | Wing | the strike exactly `width` (5.0) beyond the short; absent is a skip |
 | Markets | every leg must have one (`signal_repricer._market`) |
 | Credit `c` | per share: `fill_model.realistic_vertical_fill(..., "SELL_TO_OPEN")` for each vertical, summed, rounded to 2 places; `c <= 0` is a skip |
+
+The quantity is `paper_limits.booking_quantity` on one condor's max loss, commission
+in (`(width - c) x 100` plus one condor's round trip): with `[daily_condor] sizing =
+"live"` (shipped) the live ticket's opening size against `config/live_orders.toml`
+`default_risk_usd` and `max_contracts`, with `"fixed"` `[daily_condor] quantity`.
 
 The row (`build_row`) is an ordinary `IC` row with `source = "daily_condor"`. With
 `k` the round-trip commission a share (`commission.round_trip_commission("IC", ...)`
