@@ -4,7 +4,24 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-08 (**The Blog list shows each entry's card, and the entry picture gets its own class.**)
+**Last updated:** 2026-11-08 (**The social cards are copied to the PC every day.**)
+
+- The operator asked for the cards at `D:\WebGUI Trading with Schwab\Social Media`.
+  `tools/social_cards_export.py` runs on the server (piped to its Python, so it needs
+  no promote) and writes one tar: `Blog/<published day> <slug>` and
+  `Trade Ideas/<date> <HHMM>-<SYMBOL>`, each as `.png`, `.jpg` and a caption `.txt`
+  (the caption the Social Cards page copies). `tools/pull_social_cards.ps1` unpacks
+  it and never deletes, so the folder keeps ideas the site prunes after six days.
+- Windows task **NeuralStrike social cards pull**, daily 18:00, runs copies of both
+  from `C:\Users\john_\NeuralStrike\social-cards-pull\`
+  (`docs/dev-prod-environments.md` section 11). First run: 159 files (12 blog entries
+  and 41 trade ideas, three files each).
+- Seen while building it: the older **NeuralStrike social pull** task (the market
+  reports' cards, `D:\NeuralStrike Reports`) has failed every run since about
+  2026-11-04, because it uses `vps2-ts`, which this PC cannot reach with ProtonVPN on.
+  Not changed here.
+
+**Prior —** 2026-11-08 (**The Blog list shows each entry's card, and the entry picture gets its own class.**)
 
 - The operator's ask: the card was on each entry's page but not on the Blog list
   (`blog.html`). `blog.json` now carries `card: true` when the entry's card on disk

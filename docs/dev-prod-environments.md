@@ -957,6 +957,20 @@ Run Result shows a failure. Three things about that folder:
 - The task runs `powershell.exe` directly. `conhost --headless` hides the window
   but reports every exit as 0, so a failed pull would look like a success.
 
+**The social cards pull.** A second task, **NeuralStrike social cards pull**, runs
+daily at 18:00 (and when the PC is next on if it was off then). It copies every
+blog and trade idea card on the public site into
+`D:\WebGUI Trading with Schwab\Social Media\` (`Blog\` and `Trade Ideas\`, each card
+as `.png`, `.jpg` and a caption `.txt`), and never deletes one there, so it keeps
+the trade ideas the site prunes after six days. It runs
+`C:\Users\john_\NeuralStrike\social-cards-pull\pull_social_cards.ps1`, a **copy** of
+`tools/pull_social_cards.ps1`, beside a copy of `tools/social_cards_export.py`, which
+it pipes to the server's Python over one ssh connection to `vps2`. Re-copy both when
+either changes. The log is `pull_social_cards.log` beside them; a failed run exits 1.
+The same two rules as above hold: not under `AppData\Local`, and `powershell.exe`
+directly. The folder is ignored by git through the main checkout's
+`.git/info/exclude`, not `.gitignore`, so it exists only on that PC.
+
 A generation whose local part finished with no failure carries a `BACKUP_OK`
 file. **The newest generation carrying it is never pruned**, however many failed
 nights follow, and pruning happens after the run's result is known.
