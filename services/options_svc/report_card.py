@@ -20,12 +20,13 @@ import logging
 
 from services.options_svc import card_kit as K
 from services.options_svc.trade_idea_card import (
-    BRAND_ACCENT, HEIGHT, PAD, SCALE, WIDTH, _header,
+    BRAND_ACCENT, PAD, SCALE, WIDTH, _header,
 )
 from shared.card_draw import Canvas as _Canvas, font
 
 log = logging.getLogger(__name__)
 
+HEIGHT = 675                  # its own 16:9 frame until the report card is redrawn (Task 6)
 MAX_HIGHLIGHTS = 4
 HEADLINE_SIZE, HEADLINE_LEAD, HEADLINE_LINES = 34, 44, 2
 HIGHLIGHT_SIZE, HIGHLIGHT_STEP = 20, 58
