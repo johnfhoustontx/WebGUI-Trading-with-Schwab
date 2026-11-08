@@ -72,8 +72,8 @@ from zoneinfo import ZoneInfo
 
 import repo_paths
 from services import _degrade
-from services.blog_svc import _trace
-from shared import blog_inbox, site_nav
+from services.blog_svc import _trace, card as card_mod
+from shared import blog_inbox, card_draw, site_nav, social_cards
 
 log = logging.getLogger("blog_svc.sitewriter")
 
@@ -82,6 +82,10 @@ MANIFEST, BLOG_DIR, FONTS_DIR, SITEMAP = "blog.json", "blog", "fonts", "sitemap.
 # The tracked page the menu is lifted from, and an entry's two files.
 TEMPLATE = "blog.html"
 PAGE, DOC = "index.html", "entry.html"
+# The entry's social card: the PNG the page links to, its JPEG copy, and the
+# digest of what it was drawn from (so a rebuild draws only what changed).
+CARD_PNG, CARD_JPG, CARD_META = "card.png", "card.jpg", "card.json"
+_CARD_FILES = (CARD_PNG, CARD_JPG, CARD_META)
 AREA = "blog.site"
 
 # The menu, over the RAW file (deploy/tests/test_site.py pins this expression
@@ -113,7 +117,7 @@ def _tmp_re(*names):
 # this module never writes that file is still not ours.
 _ROOT_TMP = _tmp_re(re.escape(MANIFEST))
 _BLOG_TMP = _tmp_re(re.escape(SITEMAP))
-_ENTRY_TMP = _tmp_re(re.escape(PAGE), re.escape(DOC))
+_ENTRY_TMP = _tmp_re(re.escape(PAGE), re.escape(DOC), *(re.escape(n) for n in _CARD_FILES))
 _FONT_TMP = _tmp_re(r"[0-9a-f]{20}\.woff2")
 
 # One rebuild at a time: the command thread (a publish) and the scheduler's
@@ -186,7 +190,7 @@ def _esc(value) -> str:
     return html.escape(value if isinstance(value, str) else "", quote=True)
 
 
-def entry_page(parts, entry, site_host) -> str:
+def entry_page(parts, entry, site_host, *, card: bool = False) -> str:
     """PURE. The whole page for one entry: the site's menu, a compact header
     and the entry in a sandboxed frame.
 
@@ -202,6 +206,16 @@ def entry_page(parts, entry, site_host) -> str:
     day = _day(entry.get("published_at"))
     dated = (f'        <time datetime="{_esc(entry.get("published_at"))}">{day}</time> ·\n'
              if day else "")
+    image = f"{BLOG_DIR}/{slug}/{CARD_PNG}"
+    card_meta = (
+        f'<meta property="og:image" content="https://{_esc(site_host)}/{image}">',
+        '<meta property="og:image:width" content="2400">',
+        '<meta property="og:image:height" content="1260">',
+        f'<meta property="og:image:alt" content="{title}">',
+        '<meta name="twitter:card" content="summary_large_image">',
+    ) if card else ()
+    card_img = (f'    <img class="ns-blog-card" src="{image}" width="1200" height="630" '
+                f'alt="{title}">\n') if card else ""
     head = "\n".join((
         "<!doctype html>",
         '<html lang="en">',
@@ -216,6 +230,7 @@ def entry_page(parts, entry, site_host) -> str:
         f'<meta property="og:title" content="{title}">',
         f'<meta property="og:description" content="{summary}">',
         f'<meta property="og:url" content="{address}">',
+        *card_meta,
         '<meta name="theme-color" content="#161826">',
         *parts["icons"],
         *parts["styles"],
@@ -235,6 +250,7 @@ def entry_page(parts, entry, site_host) -> str:
         f'        <a href="{document}">Open the entry on its own page</a>\n'
         "      </p>\n"
         "    </div>\n"
+        f"{card_img}"
         f'    <iframe class="ns-report-frame" sandbox="{blog_inbox.ENTRY_SANDBOX}" '
         f'src="{site_nav.framed_src(document)}" title="{title}"></iframe>\n'
         "  </main>\n"
@@ -326,7 +342,7 @@ def _remove_entry(folder) -> bool:
 
     Only the two files this module writes there (and its own temporary ones).
     A folder that still holds something else is left with it."""
-    for name in (PAGE, DOC):
+    for name in (PAGE, DOC, *_CARD_FILES):
         with contextlib.suppress(FileNotFoundError):
             (folder / name).unlink()
     _sweep(folder, _ENTRY_TMP)
@@ -389,6 +405,69 @@ def _write_fonts(folder, store, names, report) -> None:
             _fail(report, "writing a typeface", exc)
 
 
+def _card_current(folder, digest) -> bool:
+    """Whether ``folder``'s card was drawn from exactly ``digest`` and both
+    pictures are there."""
+    try:
+        meta = json.loads((folder / CARD_META).read_bytes().decode("utf-8"))
+    except (OSError, ValueError):
+        return False
+    return (isinstance(meta, dict) and meta.get("digest") == digest
+            and all((folder / n).is_file() and not (folder / n).is_symlink()
+                    for n in (CARD_PNG, CARD_JPG)))
+
+
+def _write_card(folder, row, report) -> bool:
+    """Draw the entry's card beside its page, only when what it is drawn from
+    has changed. True when the card is there (written now or already right).
+
+    A card that cannot be drawn is reported and the entry still publishes:
+    False, and the page then carries no card. ``card.json`` is written LAST, so
+    a card interrupted half way is drawn again."""
+    try:
+        digest = card_mod.digest(row)
+        if _card_current(folder, digest):
+            return True
+        png = card_mod.render_blog_card(row)
+        if not png:
+            _fail(report, "an entry's card could not be drawn; it was published without one")
+            return False
+        jpg = card_draw.jpeg_from_png(png, social_cards.config()["cards"]["jpeg_quality"])
+        if not jpg:
+            _fail(report, "an entry's card could not be made into a JPEG; it was published "
+                          "without one")
+            return False
+        _put(folder / CARD_PNG, png, report)
+        _put(folder / CARD_JPG, jpg, report)
+        _put(folder / CARD_META, json.dumps({"digest": digest}).encode("utf-8"), report)
+        return True
+    except Exception as exc:  # noqa: BLE001 -- a card is never worth an entry
+        _fail(report, "drawing an entry's card", exc)
+        return False
+
+
+def card_rows(root, store, entries=None) -> list:
+    """The entries that have a card on the site, as ``social_cards.row`` rows.
+    Reads the files' presence, so an entry whose card was not drawn is absent."""
+    base = (SITE_ROOT if root is None else pathlib.Path(root)) / BLOG_DIR
+    cap = social_cards.config()["caption"]["max_hashtags"]
+    out = []
+    for entry in (store.entries() if entries is None else entries):
+        slug = entry.get("slug") if isinstance(entry, dict) else None
+        if not (isinstance(slug, str) and blog_inbox.existing_slug(slug) == slug):
+            continue
+        if not all((base / slug / n).is_file() for n in (CARD_PNG, CARD_JPG)):
+            continue
+        address = f"https://{repo_paths.SITE_HOST}/{BLOG_DIR}/{slug}/"
+        out.append(social_cards.row(
+            social_cards.blog_key(slug), "blog", entry.get("published_at"),
+            entry.get("title"),
+            social_cards.blog_caption(entry.get("title"), entry.get("summary"), address,
+                                      entry.get("tags"), cap),
+            address, f"{BLOG_DIR}/{slug}/{CARD_PNG}", f"{BLOG_DIR}/{slug}/{CARD_JPG}"))
+    return out
+
+
 def _write_entry(blog, parts, store, row, report) -> bool:
     """One entry's document, then its page. Returns whether the entry belongs
     in the list: True when it was written, and also when it could not be but
@@ -398,7 +477,8 @@ def _write_entry(blog, parts, store, row, report) -> bool:
     try:
         document = None if folder is None else store.entry_html(slug)
         if document is not None:
-            page = entry_page(parts, row, repo_paths.SITE_HOST)
+            has_card = _write_card(folder, row, report)
+            page = entry_page(parts, row, repo_paths.SITE_HOST, card=has_card)
             # The site's bar at the top of the document, and the document's own
             # logo hidden; the frame above loads it as #ns-framed, which hides
             # the bar again, so either way the page shows ONE logo
