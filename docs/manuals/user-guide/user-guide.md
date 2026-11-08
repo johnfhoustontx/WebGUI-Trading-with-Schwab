@@ -3810,9 +3810,13 @@ A health board for the whole stack.
 - A **component grid** — Redis, the Schwab gateway, the seven services, the web app
   itself, and the public live screens beside it, each with Online/Offline and its
   tier. The gateway's card also shows the **Schwab auth** state.
-- The gateway card's auth line says how long the Schwab sign-in has left
-  ("authorized — sign-in lasts another 6 days 22 hours"). The sign-in lasts 7
-  days from the day you signed in.
+- The gateway card's auth line is a clock counting down what the Schwab sign-in
+  has left, to the second ("Auth: 6d 22:14:05 left"). It is **green** while it
+  runs, **yellow** with under 6 hours left, and **red** once the sign-in has
+  expired; a sign-in Schwab has rejected shows a red sentence instead. The
+  yellow line is **Sign-in clock turns yellow under** in Settings →
+  Configuration (Server alerts). The sign-in lasts 7 days from the day you
+  signed in.
 - A **Re-authorize** button on the gateway card (**Authorize** when the sign-in
   has lapsed) opens the **Sign in to Schwab** dialog:
   1. **Log in to Schwab** opens Schwab's own login in a new tab.

@@ -2073,7 +2073,9 @@ the last check ran — the page re-checks itself every 15 seconds, and
   the page you are looking at, and restarting the *Schwab gateway* while the
   market is open takes market data away from every service for a few seconds.
 - **Authorize** (or **Re-authorize**) renews the Schwab login, which lasts **7
-  days**; the line beside it says how long is left. It opens a dialog with
+  days**; the clock beside it counts down what is left, to the second. It is
+  green while it runs, yellow under 6 hours (Settings → Configuration, Server
+  alerts) and red once the sign-in has expired. It opens a dialog with
   three steps: log in at Schwab in a new tab, copy the address of the page
   Schwab then sends you to (it will not load — that is expected), then come
   back and press **Paste and sign in**. Do it straight away: the code in it

@@ -2474,6 +2474,13 @@ _NOTIFY = ConfigFile(
                   "again on the proxy's /auth page. The warning is sent once a "
                   "day while this many hours or fewer remain.",
                   kind="int", unit="hours", min=1, max=168, step=1),
+            Field("system.status_clock_warn_hours",
+                  "Sign-in clock turns yellow under",
+                  "The System Status page counts down the Schwab sign-in. It "
+                  "is green while more than this many hours remain, yellow "
+                  "under it, and red once the sign-in has expired. Sends "
+                  "nothing.",
+                  kind="int", unit="hours", min=1, max=168, step=1),
             Field("system.failure_repeat_hours", "Repeat a failure alert after",
                   "One alert per failing part per this many hours, so a job "
                   "that fails every 15 minutes does not send four an hour.",

@@ -1,6 +1,8 @@
 """Tests for the System Status pure builders (webgui/pages/status.py)."""
 import datetime as _dt
 
+import pytest
+
 from pages import status
 
 _NOW = _dt.datetime(2026, 6, 19, 12, 0, 0, tzinfo=_dt.timezone.utc)
@@ -1456,3 +1458,95 @@ def test_no_login_link_means_no_dialog_and_a_plain_error(monkeypatch):
     assert not any(d.value for d in mine)
     assert any(status.SIGN_IN_NO_LINK in str(s) for s in said)
 
+
+
+# ── the sign-in countdown clock (2026-11-08) ─────────────────────────────────
+class _FrozenClock(_dt.datetime):
+    """``datetime`` whose ``now`` is set by the test, so a tick can be driven
+    across a deadline without sleeping."""
+    at = None
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls.at
+
+
+def _freeze(monkeypatch, at):
+    import types
+    _FrozenClock.at = at
+    monkeypatch.setattr(status, "_dt", types.SimpleNamespace(
+        datetime=_FrozenClock, timezone=_dt.timezone, timedelta=_dt.timedelta))
+
+
+def _sweep_with_deadline(deadline):
+    rows = [dict(r) for r in _SWEEP]
+    for r in rows:
+        if r["kind"] == "auth":
+            r["expires_at"] = deadline.isoformat()
+    return rows
+
+
+def _clock_label(host):
+    found = [lb for lb in _labels(host)
+             if str(lb.text).startswith("Auth: ")]
+    assert len(found) == 1, [lb.text for lb in found]
+    return found[0]
+
+
+_T0 = _dt.datetime(2026, 11, 8, 15, 0, 0, tzinfo=_dt.timezone.utc)
+
+
+@pytest.mark.parametrize("left, text, colour", [
+    (_dt.timedelta(days=6, hours=22, minutes=14, seconds=5),
+     "Auth: 6d 22:14:05 left", "TXT_POS"),
+    (_dt.timedelta(hours=5, minutes=59, seconds=12),
+     "Auth: 05:59:12 left", "TXT_WARN"),
+    (-_dt.timedelta(minutes=1), status.CLOCK_EXPIRED_TEXT, "TXT_NEG"),
+])
+def test_the_proxy_card_shows_the_sign_in_clock(monkeypatch, left, text, colour):
+    _freeze(monkeypatch, _T0)
+    host = _render_status(monkeypatch, results=_sweep_with_deadline(_T0 + left))
+    _run_timer(host, "_refresh")
+    label = _clock_label(host)
+    assert label.text == text
+    assert getattr(theme, colour).split()[0] in label._classes
+    assert not any("lasts another" in str(t) for t in _texts(host))
+
+
+def test_the_clock_ticks_and_turns_red_at_the_deadline(monkeypatch):
+    """The 15-second sweep is not the clock: a page-level one-second timer
+    moves it between sweeps, and the colour follows."""
+    _freeze(monkeypatch, _T0)
+    deadline = _T0 + _dt.timedelta(hours=6, seconds=1)
+    host = _render_status(monkeypatch, results=_sweep_with_deadline(deadline))
+    _run_timer(host, "_refresh")
+    label = _clock_label(host)
+    assert label.text == "Auth: 06:00:01 left"
+    assert theme.TXT_POS.split()[0] in label._classes
+
+    _FrozenClock.at = _T0 + _dt.timedelta(seconds=2)
+    _run_timer(host, "_tick_auth_clock")
+    assert label.text == "Auth: 05:59:59 left"
+    assert theme.TXT_WARN.split()[0] in label._classes
+    assert theme.TXT_POS.split()[0] not in label._classes
+
+    _FrozenClock.at = deadline
+    _run_timer(host, "_tick_auth_clock")
+    assert label.text == status.CLOCK_EXPIRED_TEXT
+    assert theme.TXT_NEG.split()[0] in label._classes
+
+
+def test_a_rejected_sign_in_is_a_red_sentence_not_a_clock(monkeypatch):
+    rows = [dict(r) for r in _SWEEP]
+    for r in rows:
+        if r["kind"] == "auth":
+            r.update(up=False, expires_at=None,
+                     detail="refresh token rejected by Schwab — "
+                            "re-authorization required")
+    host = _render_status(monkeypatch, results=rows)
+    _run_timer(host, "_refresh")
+    label = _clock_label(host)
+    assert "rejected by Schwab" in label.text
+    assert theme.TXT_NEG.split()[0] in label._classes
+    _run_timer(host, "_tick_auth_clock")      # no clock: the tick leaves it
+    assert "rejected by Schwab" in label.text

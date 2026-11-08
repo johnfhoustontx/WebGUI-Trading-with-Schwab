@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-07</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-08</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -4493,9 +4493,13 @@ in a trading workflow, which is why they sit apart.</p>
 <li>A <strong>component grid</strong> — Redis, the Schwab gateway, the seven services, the web app
   itself, and the public live screens beside it, each with Online/Offline and its
   tier. The gateway's card also shows the <strong>Schwab auth</strong> state.</li>
-<li>The gateway card's auth line says how long the Schwab sign-in has left
-  ("authorized — sign-in lasts another 6 days 22 hours"). The sign-in lasts 7
-  days from the day you signed in.</li>
+<li>The gateway card's auth line is a clock counting down what the Schwab sign-in
+  has left, to the second ("Auth: 6d 22:14:05 left"). It is <strong>green</strong> while it
+  runs, <strong>yellow</strong> with under 6 hours left, and <strong>red</strong> once the sign-in has
+  expired; a sign-in Schwab has rejected shows a red sentence instead. The
+  yellow line is <strong>Sign-in clock turns yellow under</strong> in Settings →
+  Configuration (Server alerts). The sign-in lasts 7 days from the day you
+  signed in.</li>
 <li>A <strong>Re-authorize</strong> button on the gateway card (<strong>Authorize</strong> when the sign-in
   has lapsed) opens the <strong>Sign in to Schwab</strong> dialog:
   1. <strong>Log in to Schwab</strong> opens Schwab's own login in a new tab.

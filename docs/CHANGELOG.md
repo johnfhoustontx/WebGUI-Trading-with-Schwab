@@ -4,7 +4,22 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-07 (**The Paper Ledger books the live ticket's size.** The operator's rule: the Ledger shows the same number of contracts as the live trades.)
+**Last updated:** 2026-11-08 (**The Status page's Schwab sign-in line is a countdown clock.**)
+
+- The proxy card's "Auth: authorized — sign-in lasts another 7 hours" is now a
+  clock ticking every second ("Auth: 6d 22:14:05 left"): green while it runs,
+  yellow under `[system] status_clock_warn_hours` (config/notify.toml, shipped 6,
+  Settings -> Configuration under Server alerts), red "expired" once it passes.
+- The deadline is the proxy's own `refresh_token_expires_at` stamp (the hours
+  are rounded to 36 seconds and would make the clock jump each sweep), falling
+  back to `refresh_token_hours_left`. A rejected or expired sign-in carries no
+  deadline and keeps its red sentence.
+- A page-level one-second `ui.timer` (`_tick_auth_clock`) moves one label
+  between the 15-second sweeps; it reads nothing. Tests:
+  `webgui/tests/test_status_auth_clock.py` and the rendered clock in
+  `test_status.py`.
+
+**Prior —** 2026-11-07 (**The Paper Ledger books the live ticket's size.** The operator's rule: the Ledger shows the same number of contracts as the live trades.)
 
 - **`paper_limits.booking_quantity`** and a new `sizing` key in `[idea_trades]` and
   `[daily_condor]` (`config/paper.toml`, shipped `"live"`; `"fixed"` books
