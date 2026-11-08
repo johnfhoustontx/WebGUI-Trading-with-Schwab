@@ -453,7 +453,9 @@ def _write_card(folder, row, report) -> bool:
 
 def card_rows(root, store, entries=None) -> list:
     """The entries that have a card on the site, as ``social_cards.row`` rows.
-    Reads the files' presence, so an entry whose card was not drawn is absent."""
+    A card is listed only when it was drawn from the entry as it is now (the stored
+    digest matches), so one whose redraw failed after a title change is absent
+    rather than offered with the new caption."""
     base = (SITE_ROOT if root is None else pathlib.Path(root)) / BLOG_DIR
     cap = social_cards.config()["caption"]["max_hashtags"]
     out = []
@@ -461,7 +463,7 @@ def card_rows(root, store, entries=None) -> list:
         slug = entry.get("slug") if isinstance(entry, dict) else None
         if not (isinstance(slug, str) and blog_inbox.existing_slug(slug) == slug):
             continue
-        if not all((base / slug / n).is_file() for n in (CARD_PNG, CARD_JPG)):
+        if not _card_current(base / slug, card_mod.digest(entry)):
             continue
         address = f"https://{repo_paths.SITE_HOST}/{BLOG_DIR}/{slug}/"
         out.append(social_cards.row(

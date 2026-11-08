@@ -14,7 +14,12 @@ old image: a card with an invented number is worse than an old card. The expecte
 move is the one field left empty - the band is a drawing, not a printed figure.
 
 A redrawn row is never listed on the Social page: it was posted before
-``[cards] listed_from``.
+``[cards] listed_from``. A row already in the new card (``shape == "wide"`` or a
+stored ``card``) and a row posted on or after ``listed_from`` are skipped.
+
+``--write`` has no lock against ``options_svc``, which rewrites ``ideas.json`` on
+every post and results pass. Run it outside market hours, when no idea is posting.
+It re-reads ``ideas.json`` just before it writes, so a row added meanwhile is kept.
 
     .venv/bin/python -m tools.redraw_idea_cards                    # dry run
     .venv/bin/python -m tools.redraw_idea_cards --root DIR         # a copy of deploy/site
@@ -116,6 +121,16 @@ def _ideas(manifest):
                 yield i
 
 
+def _skip_reason(row):
+    """Why a row must not be redrawn, or "". The card of a row drawn after launch is
+    what X received; a row posted on or after ``listed_from`` would become listed."""
+    if row.get("shape") == "wide" or "card" in row:
+        return "already in the new card"
+    if social_cards.listed(row.get("posted"), social_cards.config()):
+        return "posted on or after [cards] listed_from"
+    return ""
+
+
 def _load_ledger():
     try:
         from services.options_svc import idea_ledger
@@ -140,6 +155,10 @@ def main(argv=None, ledger=None) -> int:
 
     done = {}        # full path -> the three new fields
     for i in _ideas(manifest):
+        why = _skip_reason(i)
+        if why:
+            print(f"skip   {i['full']} ({i.get('symbol', '')}): {why}")
+            continue
         key = site_ideas.ledger_key(i.get("symbol"), i.get("posted"))
         facts, missing = facts_for(i, ledger.get(key))
         name = f"{i['full']} ({i.get('symbol', '')})"
@@ -158,7 +177,7 @@ def main(argv=None, ledger=None) -> int:
         web = site_ideas.webp_copy(png)
         site_ideas._write_atomic(root / i["full"], png)
         site_ideas._write_atomic(root / (i["full"][:-len(".png")] + ".jpg"), jpg)
-        if web:
+        if web and str(i.get("img", "")).endswith(".webp"):
             site_ideas._write_atomic(root / i["img"], web)
         done[i["full"]] = {"jpg": i["full"][:-len(".png")] + ".jpg", "shape": "wide",
                            "card": json.loads(json.dumps(trade_idea_card.card_facts(facts)))}

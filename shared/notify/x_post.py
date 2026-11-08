@@ -6,7 +6,7 @@ tweepy's ``media_upload`` is the v1.1 endpoint X has been retiring, which is why
 this does not use tweepy. ⚠ The v2 upload's exact form fields are unverified
 against a live account until the first real post; ``dry_run`` exists for that.
 
-Every attempt is appended to ``cache:options:x_log`` (the /x page reads it) and to
+Every attempt is appended to ``cache:options:x_log`` (Social Cards (/social) reads it) and to
 ``x_posts.jsonl`` on disk. **Never raises**: a refusal or a failure comes back as
 ``{"ok": False, "error": ...}``. The daily cap counts real posts only, per CT day.
 ⚠ The cap is read-then-written, not atomic in Redis. TWO threads in options_svc
@@ -156,7 +156,7 @@ def _valid_creds(x):
 
 def _image_type(data):
     """``(filename, mime)`` from the image's magic bytes, or None when it is
-    neither PNG nor JPEG - the only two the /x page and the cards produce."""
+    neither PNG nor JPEG - the only two Social Cards (/social) and the cards produce."""
     if data[:8] == _PNG_MAGIC:
         return "card.png", "image/png"
     if data[:3] == _JPEG_MAGIC:

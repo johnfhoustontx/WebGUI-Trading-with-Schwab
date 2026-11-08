@@ -130,6 +130,43 @@ def test_facts_for_does_not_mutate_its_input():
     assert row == snap
 
 
+def _png_of(site):
+    return (site / "ideas/2026-11-06/0935-SPY.png").read_bytes()
+
+
+def test_new_cards_are_not_redrawn(tmp_path, capsys):
+    for extra in ({"shape": "wide"}, {"card": {"grade": "Good"}}):
+        row = dict(_row(), **extra)
+        site = _site(tmp_path / extra.keys().__iter__().__next__(), row)
+        assert r.main(["--root", str(site), "--write"], ledger=_ledger_for(row)) == 0
+        assert _png_of(site) == b"OLD"
+        assert "skip" in capsys.readouterr().out
+
+
+def test_dry_run_reports_both_kinds_of_skip(tmp_path, capsys):
+    row = dict(_row(), shape="wide")
+    site = _site(tmp_path, row)
+    r.main(["--root", str(site)], ledger=_ledger_for(row))
+    assert "skip" in capsys.readouterr().out
+
+
+def test_a_post_on_or_after_listed_from_is_not_redrawn(tmp_path, monkeypatch, capsys):
+    from shared import social_cards
+    monkeypatch.setattr(social_cards, "config",
+                        lambda: {"cards": {"jpeg_quality": 90, "listed_from": "2026-11-06"}})
+    site = _site(tmp_path)
+    assert r.main(["--root", str(site), "--write"], ledger=_ledger_for()) == 0
+    assert _png_of(site) == b"OLD"
+    assert "skip" in capsys.readouterr().out
+
+
+def test_webp_is_not_written_over_the_png(tmp_path):
+    row = dict(_row(), img="ideas/2026-11-06/0935-SPY.png")
+    site = _site(tmp_path, row)
+    assert r.main(["--root", str(site), "--write"], ledger=_ledger_for(row)) == 0
+    assert _png_of(site)[:8] == b"\x89PNG\r\n\x1a\n"
+
+
 def test_economics_failure_keeps_old_image_and_the_run_goes_on(tmp_path, monkeypatch):
     def boom(legs, cash):
         raise ValueError("odd legs")

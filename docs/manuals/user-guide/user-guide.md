@@ -3699,7 +3699,7 @@ styles and needs nothing else to display.
 When you publish an entry, the app also draws a picture card for it. The entry's
 page shows the card at the top, and a link to the entry previews as that card when
 you paste it into a message. Entries already on the site get a card the next time
-the service starts. The card is listed on the Social Cards page for posting only
+the service starts or its scheduled site rebuild runs, whichever comes first. The card is listed on the Social Cards page for posting only
 if the entry was published after the cards launched. Taking an entry off the site
 removes its card too.
 
@@ -3781,8 +3781,8 @@ you.
 Only cards for posts made after the cards launched are listed. Older blog
 entries and trade ideas have cards on the website so it looks the same
 throughout, but this page does not offer them. Trade idea cards also appear here
-only while trade ideas are published to the site (Settings, General). When the
-list is empty and that switch is off, the page says so under "No cards yet."
+only while trade ideas are published to the site (Settings, General). Whenever
+that switch is off, the page says so above the list, even while blog cards are listed.
 
 **Post to X** (the box below the cards) is also where you write a one-off post
 of your own, and where you see every post the app has made on X.

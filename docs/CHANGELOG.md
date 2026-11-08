@@ -40,14 +40,18 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   has a card on the site and is never listed for posting. `tools/redraw_idea_cards.py`
   redraws the ideas still on the site from the manifest, the caption's POP and the
   Ledger's score and grade, and keeps the old image for any idea missing a printed
-  figure; it is a dry run unless given `--write`.
+  figure; it is a dry run unless given `--write`. It skips an idea already in the new
+  card (`shape` wide or a stored `card`) and one posted on or after `listed_from`, and
+  says so in the output.
 - **Manuals.** User Guide and Reference Guide: Post to X became Social Cards (and the
   Blog sections mention the card); API Reference: the two views and the two routes;
   `webgui/page_help.py` has a `/social` guide. `docs/reference/blog.md` has a section
   on the card.
 - **To do after the promote** (operator): run `tools/redraw_idea_cards.py --root
   <copy of deploy/site>` on prod and compare each card with its original, then
-  `--write` against the real site; on the first live trade idea look at it on X,
+  `--write` against the real site, outside market hours when no idea is posting
+  (the tool holds no lock against `options_svc`, which rewrites `ideas.json` on every
+  post and results pass; it re-reads `ideas.json` just before it writes); on the first live trade idea look at it on X,
   Discord, Telegram and the site and log what each showed here.
 
 **Prior —** 2026-11-07 (**The Paper Ledger books the live ticket's size.** The operator's rule: the Ledger shows the same number of contracts as the live trades.)

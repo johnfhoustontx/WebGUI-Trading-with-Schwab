@@ -179,8 +179,8 @@ def render() -> None:
         with box:
             if not rows:
                 kit.empty(EMPTY_TEXT)
-                if site_switch_off(ideas_payload):
-                    ui.label(SITE_OFF_TEXT).classes(f"w-full text-center text-sm {_t.MUTED}")
+            if site_switch_off(ideas_payload):
+                ui.label(SITE_OFF_TEXT).classes(f"w-full text-center text-sm {_t.MUTED}")
             for row in rows:
                 _row(row)
 

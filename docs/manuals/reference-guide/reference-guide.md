@@ -5051,8 +5051,8 @@ did not go out is listed with the reason, rather than simply not appearing.
   from before that day have a card on the website for the look of the site but are
   never offered here.
 - **Trade idea cards need the site switch.** They appear only while trade ideas are
-  published to the site (Settings → General). The page says so only when no card is
-  listed at all and that switch is off.
+  published to the site (Settings → General). The page says so whenever that switch is
+  off, even while blog cards are listed.
 - **Off and dry until configured.** Nothing reaches X until the `x` block in
   `shared/notifications.json` holds the account's keys and is enabled; while
   `x.dry_run` is on every post is logged as *Dry run*. The default hashtags for each kind

@@ -3575,7 +3575,7 @@ def run_x_post_report(bus, args, now=None):
 
 
 def run_x_post(bus, args, now=None):
-    """One ad-hoc marketing post from the /x page. Never raises.
+    """One ad-hoc marketing post from Social Cards (/social). Never raises.
 
     ``image_b64`` (optional) must be strict base64 decoding to at most 5 MB; a
     bad or oversized image is refused and logged - the post is never sent
@@ -3678,7 +3678,7 @@ def _refuse_stale(bus, command) -> None:
                 getattr(command, "ts", None),
                 _STALE_WHY.get(command.type, "a replayed command must not run again"))
     if command.type == "x_post":
-        # The /x page is watching its log; a silent drop reads as a hang.
+        # Social Cards (/social) is watching its log; a silent drop reads as a hang.
         x_post.record_refusal(bus, "marketing", str(args.get("text") or ""),
                               "expired in the queue")
 
@@ -3689,7 +3689,7 @@ def command_dropped(bus, command, why) -> None:
     page that is still waiting on it. Never raises.
 
     Only two commands have somebody waiting on a result view: the Paper button
-    (``cache:options:paper_create``) and the /x page's post. For the rest the
+    (``cache:options:paper_create``) and Social Cards (/social)'s post. For the rest the
     page shows its last good view, which is the truth."""
     try:
         kind = getattr(command, "type", None)

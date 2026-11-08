@@ -22,7 +22,7 @@ Telegram show whole.
 
 The face is Inter, the public site's own font (``deploy/site/assets``), a variable
 font whose weights are selected by name. A host without it falls back to
-card_kit's system fonts -- an ugly card beats no post.
+Pillow's built-in default font (``shared.card_draw.font``) -- an ugly card beats no post.
 
 CONTRACT: **never raises.** A card that cannot be drawn returns None, and the push
 falls back to its text caption.

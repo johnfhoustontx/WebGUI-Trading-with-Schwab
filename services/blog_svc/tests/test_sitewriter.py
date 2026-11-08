@@ -863,6 +863,16 @@ def test_unpublish_removes_card_files_and_folder(site):
     assert not (site / "blog" / "goes").exists()
 
 
+def test_card_rows_leaves_out_a_card_drawn_from_an_older_title(site, monkeypatch):
+    monkeypatch.setattr(repo_paths, "SITE_HOST", HOST)
+    store = FakeStore()
+    store.add("first", title="Old title", published=at(5))
+    sw.rebuild(site, store, NOW)
+    assert [r["key"] for r in sw.card_rows(site, store)] == ["blog:first"]
+    store.rows["first"]["title"] = "New title"       # the redraw did not happen
+    assert sw.card_rows(site, store) == []
+
+
 def test_card_rows_shape(site, monkeypatch):
     monkeypatch.setattr(repo_paths, "SITE_HOST", HOST)
     store = FakeStore()

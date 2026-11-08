@@ -1,4 +1,4 @@
-"""The /x page's pure helpers: the live preview, the log table and the command."""
+"""Social Cards (/social)'s pure helpers: the live preview, the log table and the command."""
 from pages import x_post as page
 
 

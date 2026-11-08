@@ -261,6 +261,15 @@ def test_download_button_points_at_the_jpeg(site, monkeypatch):
     assert calls == [("/social/card/blog:alpha/jpg?download=1",)]
 
 
+def test_site_switch_notice_shows_while_blog_cards_are_listed(site, monkeypatch):
+    from nicegui import ui
+    host, _ = _render(monkeypatch, ideas={"site_enabled": False, "cards": []})
+    labels = [e.text for e in _all(host, ui.label)]
+    assert "No cards yet." not in labels
+    assert ("Trade idea cards appear here only while trade ideas are published "
+            "to the site (Settings → General).") in labels
+
+
 def test_empty_state_explains_site_switch(site, monkeypatch):
     from nicegui import ui
     host, _ = _render(monkeypatch, blog={"cards": []},

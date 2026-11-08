@@ -583,9 +583,9 @@ Social Cards page lists with a Download, a caption and a Post to X.
   never worth a missing entry.
 - **Unpublish.** The entry's folder goes, and the card files with it; the next
   `blog:social_cards` no longer lists it.
-- **Not on the public bus.** `blog:social_cards` is readable by the public
-  process like every `cache:blog:*` view, and holds only what the public site
-  already shows.
+- **On the bus, public-safe.** `blog:social_cards` is on the bus, which the public
+  process can read like every `cache:blog:*` view; it carries only what the public
+  site already shows.
 
 ## The public files
 
