@@ -320,7 +320,7 @@ one-minute GEX collection and the raw feed* has the diagrams and fields.
 | `paper_delete` | `{trade_id}` | `cache:options:paper_trades` |
 | `paper_delete_closed` | — (deletes every CLOSED / EXPIRED row **except trade-idea rows**, which are the weekly review's evidence; `paper_delete` of a single idea row still removes it) | `cache:options:paper_trades` |
 | `paper_analyze` | `{trade_id}` | `cache:options:paper_analyze` |
-| `x_post` | `{text, tags[], link, image_b64?}` — an ad-hoc marketing post from the `/x` page. The image is refused over 5 MB or when it does not decode (logged, nothing posted). Replay-guarded | `cache:options:x_log` |
+| `x_post` | `{text, tags[], link, image_b64?}` — an ad-hoc marketing post from the composer on the `/social` page (Social Cards; `/x` now redirects there). The image is refused over 5 MB or when it does not decode (logged, nothing posted). Replay-guarded | `cache:options:x_log` |
 | `x_post_report` | `{report, mtime}` — enqueued by market_svc when the published market report changes; `report` is the `cache:market:summary` payload, `mtime` the epoch seconds of `latest.html`. Posted once per report (`report_date`, `slot`, `as_of`, `headline`); a report older than `x.report_max_age_min` (45), or of unknown age, is skipped. Replay-guarded | `cache:options:x_log` + `cache:options:x_reports` |
 | `scalp_refresh` | — | `cache:options:scalp` — runs the Opening Scalp's `scalp_call.run` now: before the 08:36 CT call time or on a closed day it republishes the last call under a `waiting` / `closed` state and fetches nothing. A call already published today is reused whole, so it only fills in a symbol with none, and no new call is built after entry + `time_stop_min` (09:35 CT). It then runs `scalp_intraday_call.run_slot` for the 15-minute slot whose window is open (`current_slot()`): inside a slot's window (its time up to `[intraday] grace_min`, 5 min) it fills only the symbols that slot has not frozen; outside every window it republishes the slots already published today and makes **no call**, so no `entry_ts` falls between slots. Replay-guarded and on the slow lane (it can fetch bars and three chains, about 30 Schwab calls, and a slot adds about 26 more) |
 | `scalp_prob_refit` | — | none published: fits the Opening Scalp's eight chance-of-target models (the 08:36 call and the 15-minute calls, each x four trades) from the stored history, walk-forward checks each and stores them in `scalp.db` `prob_models` under a **new version** (`scalp_prob_fit.refit`; older versions are never touched). The next call reads the new weights; no published call changes. Logs the version, the rows read per kind and the seconds. A failure stores nothing and is counted as a degrade (`options.scalp_prob`). The Saturday 08:00 CT scheduler slot runs the same refit. Replay-guarded (a replay would store another version for nothing) and on the slow lane |
@@ -1149,6 +1149,16 @@ document.**
 revision does not move an entry up). `skip_unchanged`. Each row: `slug`, `title`,
 `summary`, `tags`, `published_at`, `updated_at`.
 
+**`cache:blog:social_cards`** — `{"cards": [row, …]}`, one row per published entry
+that has a card on the site. `skip_unchanged`. A row is `shared.social_cards.row`:
+`key` (`blog:<address>`), `kind` (`blog`), `at` (the publish time), `title`,
+`caption`, `link` (the entry's address), `png` and `jpg` (paths under the site
+folder) and `listed` (true when the post is on or after `[cards] listed_from`;
+the Social Cards page shows only listed rows). The sibling view
+`cache:options:social_cards` has the same rows for posted trade ideas, plus
+`site_enabled`: false when trade ideas are not published to the site, in which
+case `cards` is empty.
+
 **`cache:blog:result`** — how the last command ended. Written plainly, so the same
 answer twice is two events.
 
@@ -1221,6 +1231,15 @@ degrade areas: `blog.handlers`, `blog.clean`, `blog.clean.too_slow`,
 |---|---|
 | `GET /blog/preview/{draft_id}/entry.html` | A waiting draft's cleaned document, with `Content-Security-Policy: <ENTRY_CSP>` and `Cache-Control: no-store`. 404 unless `cache:blog:drafts` lists the id and a file with the listed digest is on disk. |
 | `GET /blog/preview/fonts/{name}` | One typeface as `font/woff2`. 404 unless the name matches `FONT_NAME_RE` and the file's content hashes to it. |
+
+Both are behind the login and exist only in the private process.
+
+### The private Social Cards routes (webgui)
+
+| Route | Serves |
+|---|---|
+| `GET /social` | The Social Cards page: the cards from `cache:blog:social_cards` and `cache:options:social_cards`, newest first, over the X composer. `GET /x` answers 308 to it. |
+| `GET /social/card/{key}/{fmt}` | One card's image, `fmt` `png` (`image/png`) or `jpg` (`image/jpeg`); `?download=1` sets `Content-Disposition: attachment`. 404 unless the key is a listed card and the file is the one that row names under the site folder. |
 
 Both are behind the login and exist only in the private process.
 
@@ -1541,6 +1560,7 @@ cache:feed:shadow                                           (config/feed.toml mo
 cache:options:x_log                                         (every X post attempt, newest first, last 100)
 cache:options:x_count                                       (X posts made today, CT day - the daily cap)
 cache:options:x_reports                                     (market reports already posted to X)
+cache:options:social_cards     events:options:social_cards  (posted trade ideas' social cards; site_enabled)
 cache:options:em_chain         events:options:em_chain      (Expected Move ladders)
 cache:options:calc_iv          events:options:calc_iv
 cache:options:calc_rating      events:options:calc_rating   (Rate my trade)
@@ -1639,6 +1659,7 @@ cache:news:calendar_status     events:news:calendar_status    (private: per-sour
 cache:news:status              events:news:status
 cache:blog:drafts              events:blog:drafts             (drafts waiting - metadata and a digest, never a document)
 cache:blog:posts               events:blog:posts              (published entries - metadata)
+cache:blog:social_cards        events:blog:social_cards       (blog entries' social cards - paths and captions)
 cache:blog:result              events:blog:result             (how the last cmd:blog command ended)
 cmd:trade   cmd:portfolio   cmd:market   cmd:news   cmd:blog
 ```

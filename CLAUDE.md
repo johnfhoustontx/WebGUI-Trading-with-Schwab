@@ -158,6 +158,8 @@ the ticker set, `[trending] window_h` and `[desk] headlines` from it) ·
 `shared.gamma_heat_config` (since 2026-10-09; `config/gamma_heat.toml`'s loader -
 stdlib + `shared.config_toml` + `repo_paths` only, pinned by
 `shared/tests/test_gamma_heat_config.py`) ·
+`shared.social_cards` (since 2026-11-08; the card lists' view names, keys, caption
+and `listed` rule - stdlib + `shared.config_toml` + `repo_paths` only) ·
 `shared.futures_chain` + `shared.futures_chain_config` (since 2026-10-31; the
 /ES and /NQ chain feed's stream, cache keys, `FOP.ES` / `FOP.NQ` names and
 labels, session clock, series names and the capture's plan - stdlib +
@@ -379,6 +381,13 @@ report) carries the site's top bar and has its own `.lockup` hidden
 (`shared/site_nav.inject_into_document`); a frame must load it through
 `site_nav.framed_src` (`…#ns-framed`), which hides that bar, or the page shows two.
 
+**Social cards.** Every published blog entry and posted trade idea has one card:
+drawn at 2400 x 1260 by `shared/card_draw.py` (service side only, never Tier 1),
+its essentials inside the middle 3:4 strip for Instagram's grid. The private
+`/social` page lists the cards from `blog:social_cards` and `options:social_cards`
+and posts nothing by itself. A card from before `[cards] listed_from` is drawn for
+the site but never listed ([design](docs/plans/2026-11-08-social-cards-design.md)).
+
 ## Sentiment and regime scoring
 
 Detail: [development notes](docs/reference/webgui-dev-notes.md) (the NaN section, ADX, the two RRG engines, the regime names).
@@ -446,7 +455,7 @@ maps, and anything whose change needs code to follow it.
   `scanner` (selection floors and, since 2026-10-04, `[selection]` strike rules),
   `trade_mgmt`, `paper`, `symbols`, `sectors`, `marketdata`, `services`,
   `flow_alerts`, `notify`, `commissions`, `theme`, `news`, `edge`, `market_read`,
-  `blog`, `gamma_heat`, `futures_chain`, `gex_archive`, `listed_stocks`, `login_push`, `scalp`, `tos_order`, `live_orders`,
+  `blog`, `social_cards`, `gamma_heat`, `futures_chain`, `gex_archive`, `listed_stocks`, `login_push`, `scalp`, `tos_order`, `live_orders`,
   `sentiment` (when the live composite refuses a pre-open input), and
   the public tools' files.
 - `shared/market_calendar.py` is the single source for the NYSE calendar and the

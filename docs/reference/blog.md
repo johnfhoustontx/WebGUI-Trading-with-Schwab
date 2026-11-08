@@ -501,6 +501,7 @@ nothing serves but the private preview.
 |---|---|---|
 | `blog:drafts` | `{"drafts": [...]}`, newest first. Each row: `id`, `source`, `revises`, `slug`, `title`, `summary`, `tags`, `removed`, `font_note`, `bytes`, `digest`, `received_at` | `skip_unchanged`, so it holds no timestamp of its own |
 | `blog:posts` | `{"entries": [...]}`, newest first publication first. Each row: `slug`, `title`, `summary`, `tags`, `published_at`, `updated_at` | `skip_unchanged` |
+| `blog:social_cards` | `{"cards": [...]}`: one `shared.social_cards.row` per entry that has a card on the site (`kind` `blog`, key `blog:<address>`, the caption, the page's address, the `card.png` / `card.jpg` paths, `listed`). Written by `handlers.publish_views` with the other two, after a command and on the scheduler's timer | `skip_unchanged` |
 | `blog:result` | `{"request_id", "command", "ok", "message", "draft_id", "slug"}`, always all six keys | Plainly, so the same refusal twice is two answers |
 
 The row keys are named in `handlers.DRAFT_KEYS` and `handlers.ENTRY_KEYS`, so
@@ -559,6 +560,33 @@ upload carries none); its title and summary are the new document's.
 handler raised, whole, and a `draft_submit` carries the entire document. A
 fault is answered, counted (`blog.handlers`) and goes no further.
 
+## The social card
+
+Each published entry carries a card, drawn by `services/blog_svc/card.py`
+(`render_blog_card`, 1200 x 630 layout px at 2x, on `shared/card_draw.py`). It is
+what the entry's page shows at the top (`<img class="ns-blog-card">`), what the
+page names as its `og:image` and `twitter:card` preview, and what the private
+Social Cards page lists with a Download, a caption and a Post to X.
+
+- **Where it is drawn.** `sitewriter._write_card`, from `rebuild`. The card is
+  redrawn only when `card.json`'s `digest` no longer matches what it is drawn
+  from (`card.digest`: the render version, title, summary, tags and
+  `published_at`), or a picture file is missing. `card.json` is written LAST, so
+  a card interrupted half way is drawn again. Bump `card.RENDER_VERSION` to
+  redraw every entry.
+- **Existing entries.** They get a card on the first rebuild after the promote
+  (the service rebuilds at start). Their `published_at` is earlier than
+  `[cards] listed_from`, so `social_cards.row` marks them `listed: false` and the
+  Social Cards page does not offer them: they are drawn for the site's look only.
+- **Failure.** A card that cannot be drawn or made into a JPEG is reported, the
+  entry still publishes, and its page carries no card tags. A missing card is
+  never worth a missing entry.
+- **Unpublish.** The entry's folder goes, and the card files with it; the next
+  `blog:social_cards` no longer lists it.
+- **Not on the public bus.** `blog:social_cards` is readable by the public
+  process like every `cache:blog:*` view, and holds only what the public site
+  already shows.
+
 ## The public files
 
 All under `deploy/site/`, all gitignored generated state like `ideas/` and
@@ -568,6 +596,7 @@ All under `deploy/site/`, all gitignored generated state like `ideas/` and
 | Path | Purpose |
 |---|---|
 | `blog.json` | The list `assets/blog.js` draws |
+| `blog/<address>/card.png` · `card.jpg` · `card.json` | The entry's social card (2400 x 1260), its JPEG copy, and `{"digest": ...}`, what the card was drawn from. See [The social card](#the-social-card) |
 | `blog/<address>/index.html` | The entry's page: the site menu around a frame |
 | `blog/<address>/entry.html` | The entry itself, with the site's top bar put in (`shared/site_nav.inject_into_document`); the store keeps it as cleaned |
 | `blog/fonts/<20 hex>.woff2` | Every typeface a published entry uses |

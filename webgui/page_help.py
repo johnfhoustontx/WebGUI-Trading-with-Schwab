@@ -1387,7 +1387,7 @@ engine's positions live on **Paper Account**.
   ($25,000 plus your closed trades' realized P&L, so **Delete all closed** moves
   it). A trade that would break one is not written, and a message on the page you
   sent it from says which limit — plus *Up to N contracts fit* when a smaller size
-  would clear them all. The Paper trade box opens at the size **Send Live Order**
+  would clear them all. The Paper button's order box starts at the size **Send Live Order**
   would (the most contracts whose max loss is $1,000 or less), or at the most
   these limits allow when that is fewer.
 - **Trade ideas live here too.** While **Book the posted ideas** is on (Settings

@@ -417,6 +417,26 @@ def _card_current(folder, digest) -> bool:
                     for n in (CARD_PNG, CARD_JPG)))
 
 
+def _draw_card(folder, row, report) -> bool:
+    """``_write_card``'s body: the digest check, the drawing and the three writes."""
+    digest = card_mod.digest(row)
+    if _card_current(folder, digest):
+        return True
+    png = card_mod.render_blog_card(row)
+    if not png:
+        _fail(report, "an entry's card could not be drawn; it was published without one")
+        return False
+    jpg = card_draw.jpeg_from_png(png, social_cards.config()["cards"]["jpeg_quality"])
+    if not jpg:
+        _fail(report, "an entry's card could not be made into a JPEG; it was published "
+                      "without one")
+        return False
+    _put(folder / CARD_PNG, png, report)
+    _put(folder / CARD_JPG, jpg, report)
+    _put(folder / CARD_META, json.dumps({"digest": digest}).encode("utf-8"), report)
+    return True
+
+
 def _write_card(folder, row, report) -> bool:
     """Draw the entry's card beside its page, only when what it is drawn from
     has changed. True when the card is there (written now or already right).
@@ -425,22 +445,7 @@ def _write_card(folder, row, report) -> bool:
     False, and the page then carries no card. ``card.json`` is written LAST, so
     a card interrupted half way is drawn again."""
     try:
-        digest = card_mod.digest(row)
-        if _card_current(folder, digest):
-            return True
-        png = card_mod.render_blog_card(row)
-        if not png:
-            _fail(report, "an entry's card could not be drawn; it was published without one")
-            return False
-        jpg = card_draw.jpeg_from_png(png, social_cards.config()["cards"]["jpeg_quality"])
-        if not jpg:
-            _fail(report, "an entry's card could not be made into a JPEG; it was published "
-                          "without one")
-            return False
-        _put(folder / CARD_PNG, png, report)
-        _put(folder / CARD_JPG, jpg, report)
-        _put(folder / CARD_META, json.dumps({"digest": digest}).encode("utf-8"), report)
-        return True
+        return _draw_card(folder, row, report)
     except Exception as exc:  # noqa: BLE001 -- a card is never worth an entry
         _fail(report, "drawing an entry's card", exc)
         return False

@@ -210,3 +210,5 @@ A Tier-1 page in the More group, replacing Post to X.
 - Inter is vendored at `deploy/site/assets/inter-latin.woff2` and is what
   `trade_idea_card.font()` already loads (it rendered in this design's mockup
   session); the shared drawing module keeps its fallback to `card_kit`'s fonts.
+
+Plan: [2026-11-08-social-cards-plan.md](2026-11-08-social-cards-plan.md).

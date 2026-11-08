@@ -4889,65 +4889,6 @@ changes nothing by itself.
 
 ---
 
-## Post to X
-
-*Menu: ACCOUNT → More → Post to X · Route `/x`*
-
-### What it is
-
-A composer for one-off marketing posts on the app's X account, above a log of every
-post the app has made there — the scheduled market reports and hourly trade ideas as
-well as what you write here.
-
-### Where the data comes from
-
-The page writes nothing to X itself. **Post** sends an `x_post` command to the options
-service, which fits the text, attaches the image and posts it. Every attempt from any
-source is recorded to the `options:x_log` cache (the newest 100), which is what the log
-table reads.
-
-### Reading the screen
-
-**Post**, **Link** and **Hashtags** make up the post: the text, then a blank line, then
-the link and the hashtags on the lines beneath it. The **counter** measures it the way
-X does — a link is 23 characters and an emoji or other wide character 2 — and turns red
-when the post as written is over 280. The **Preview** is the fitted post: hashtags drop
-from the end first, and only then is the text cut with an ellipsis. The link always
-survives. An optional **Image** (PNG or JPEG, up to 5 MB) travels with the post.
-
-**Recent posts** shows, per post, when it was attempted, its source (*Market report*,
-*Trade idea* or *Marketing*), its status and the link to the post — or, where nothing
-went out, the reason.
-
-| Status | Meaning |
-|---|---|
-| **Posted** | It is on X; the last column links to it. |
-| **Dry run** | `x.dry_run` is on, so it was logged and not sent. |
-| **Refused** | The app declined to send it — X is disabled, that kind of post is switched off, the daily cap is reached, or the image was unusable. |
-| **Failed** | X answered with an error. |
-| **Unknown** | The request left, but no answer said whether it landed. |
-
-### Why it matters
-
-It is the one place that shows what the app has said in public. A report or trade idea
-that did not go out is listed with the reason, rather than simply not appearing.
-
-### Caveats and gotchas
-
-- **Off and dry until configured.** Nothing reaches X until the `x` block in
-  `shared/notifications.json` holds the account's keys and is enabled; while
-  `x.dry_run` is on every post is logged as *Dry run*. The default hashtags for each kind
-  of post live in `x.hashtags`, `max_tags` caps how many any post carries, and
-  `daily_cap` limits how many posts go out per day across all sources.
-- **A post is public.** The confirm dialog shows the exact text before anything is sent.
-- This page exists only in the private app; the public live screens have no way to post.
-
-### Related pages
-
-[EOD Report](#eod-report) · [Settings](#settings).
-
----
-
 ## Blog
 
 *Menu: ACCOUNT → More → Blog · Route `/blog`*
@@ -4960,6 +4901,11 @@ self-contained HTML document: a file that carries its own styles and needs nothi
 else to display. On the site, the list of entries is at `neuralstrike.co/blog.html`
 (**Blog** in the site's menu; typing `neuralstrike.co/blog` goes to the same page)
 and each entry has a page of its own at `neuralstrike.co/blog/<address>/`.
+
+Each published entry also gets a picture card, drawn by the blog service. The entry's
+page shows it at the top and names it as its link preview, and the private
+[Social Cards](#social-cards) page lists it for posting. Unpublishing an entry removes
+its card with it.
 
 ### Where the data comes from
 
@@ -5024,7 +4970,99 @@ without passing through cleaning, a draft you can look at, and your own Publish.
 
 ### Related pages
 
-[Post to X](#post-to-x) · [System Status](#system-status) · [Settings](#settings).
+[Social Cards](#social-cards) · [System Status](#system-status) · [Settings](#settings).
+
+---
+
+## Social Cards
+
+*Menu: ACCOUNT → More → Social Cards · Route `/social`*
+
+### What it is
+
+The list of every picture card the app has made for the public, with the buttons to
+post them, over the composer for one-off posts on the app's X account and the log of
+everything the app has posted there. It replaces the old Post to X page: `/x` now
+forwards here.
+
+A card is one image per published blog entry or posted trade idea. The same image is
+what X, Discord and Telegram show, what the website's trade ideas strip and each blog
+entry page show, and what a pasted link to a blog entry previews as. The essentials of
+each card (ticker or title, the strategy or summary, the payoff or grade) sit in the
+middle strip of the image, so Instagram's profile grid, which crops to that strip,
+still reads on its own.
+
+### Where the data comes from
+
+The page draws nothing and posts nothing itself. The blog service draws a blog entry's
+card when the entry is published; the options service draws a trade idea's card when it
+posts the idea. Each publishes a list of its cards (`blog:social_cards` and
+`options:social_cards`), and the page reads both. The image files are served to the
+page by the private app from the site's own folder. **Post to X** sends an `x_post`
+command to the options service, which fits the text, attaches the image and posts it;
+every attempt from any source is recorded to the `options:x_log` cache (the newest
+100), which the log table reads.
+
+### Reading the screen
+
+Each **card row** shows the image, a *Blog* or *Trade idea* label, the publish time
+(Central) and the title, with three buttons.
+
+| Button | What it does |
+|---|---|
+| **Download** | Saves the card as a JPEG, the format Instagram takes. |
+| **Copy caption** | Copies the caption to the clipboard, to paste into Instagram, Facebook or anywhere else. |
+| **Post to X** | Fills the composer below with the card, its caption and its link and scrolls to it. Nothing is sent until you press **Post** and confirm. |
+
+Posting to Instagram is by hand: download the card, copy the caption, and post both
+from Instagram. The app does not post to Instagram or Facebook.
+
+The composer: **Post**, **Link** and **Hashtags** make up the post: the text, then a
+blank line, then the link and the hashtags on the lines beneath it. The **counter**
+measures it the way X does (a link is 23 characters and an emoji or other wide
+character 2) and turns red when the post as written is over 280. The **Preview** is the
+fitted post: hashtags drop from the end first, and only then is the text cut with an
+ellipsis. The link always survives. An optional **Image** (PNG or JPEG, up to 5 MB)
+travels with the post.
+
+**Recent posts** shows, per post, when it was attempted, its source (*Market report*,
+*Trade idea* or *Marketing*), its status and the link to the post, or, where nothing
+went out, the reason.
+
+| Status | Meaning |
+|---|---|
+| **Posted** | It is on X; the last column links to it. |
+| **Dry run** | `x.dry_run` is on, so it was logged and not sent. |
+| **Refused** | The app declined to send it: X is disabled, that kind of post is switched off, the daily cap is reached, or the image was unusable. |
+| **Failed** | X answered with an error. |
+| **Unknown** | The request left, but no answer said whether it landed. |
+
+### Why it matters
+
+Posting a card by hand is slow and easy to get wrong when the image is saved from a
+chat app. Here every card is one click from its JPEG and its caption, and the
+composer and log show what the app has said in public. A report or trade idea that
+did not go out is listed with the reason, rather than simply not appearing.
+
+### Caveats and gotchas
+
+- **Only new posts are listed.** A card is listed only when its post was made on or
+  after `[cards] listed_from` (Settings → Configuration). Blog entries and trade ideas
+  from before that day have a card on the website for the look of the site but are
+  never offered here.
+- **Trade idea cards need the site switch.** They appear only while trade ideas are
+  published to the site (Settings → General); the page says so when that is off.
+- **Off and dry until configured.** Nothing reaches X until the `x` block in
+  `shared/notifications.json` holds the account's keys and is enabled; while
+  `x.dry_run` is on every post is logged as *Dry run*. The default hashtags for each kind
+  of post live in `x.hashtags`, `max_tags` caps how many any post carries, and
+  `daily_cap` limits how many posts go out per day across all sources.
+- **A post is public.** The confirm dialog shows the exact text before anything is sent.
+- This page exists only in the private app; the public live screens have no way to post.
+
+### Related pages
+
+[Blog](#blog) · [EOD Report](#eod-report) · [Settings](#settings).
 
 ---
 

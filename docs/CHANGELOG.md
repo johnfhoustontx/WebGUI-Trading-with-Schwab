@@ -4,7 +4,53 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-07 (**The Paper Ledger books the live ticket's size.** The operator's rule: the Ledger shows the same number of contracts as the live trades.)
+**Last updated:** 2026-11-08 (**Social Cards: one picture card for every blog entry and trade idea, a private page to post them from, and Post to X folded into it.**)
+
+- **Why.** Instagram has no way in for the app, and saving a card from Telegram or
+  the site by hand is slow. Every post that leaves NeuralStrike now has one card, and
+  the same image is what X, Discord, Telegram, the site's link previews, Instagram and
+  Facebook show. Design: [`plans/2026-11-08-social-cards-design.md`](plans/2026-11-08-social-cards-design.md);
+  plan: [`plans/2026-11-08-social-cards-plan.md`](plans/2026-11-08-social-cards-plan.md).
+- **The drawing kit.** `shared/card_draw.py` (Pillow canvas, the mark, fonts,
+  `jpeg_from_png`), used by both services, never by Tier 1. Cards are 1200 x 630 layout
+  px drawn at 2x (2400 x 1260), with the essentials in the middle 3:4 strip so
+  Instagram's profile grid reads on its own; the wings hold what a feed may show and a
+  grid may lose.
+- **The trade idea card** (`options_svc/trade_idea_card.py`) is redrawn at 1200 x 630
+  in three columns and replaces the 1200 x 675 card everywhere (X, Discord, Telegram,
+  the site's home strip and `ideas.html`). `card_facts` / `CARD_FIELDS` name exactly
+  what it draws; the site manifest rows now carry `jpg`, `shape` and `card`.
+- **The blog card** (`blog_svc/card.py`) is drawn when an entry is published or on the
+  next rebuild (redrawn only when its digest changes). Each entry folder holds
+  `card.png`, `card.jpg` and `card.json`; the entry page shows the card at the top and
+  carries `og:image` / `twitter:card` tags. Unpublishing removes them with the folder.
+- **Two new views**, `blog:social_cards` (`blog_svc`) and `options:social_cards`
+  (`options_svc`, from the site manifest, with `site_enabled`), both `skip_unchanged`,
+  merged by `shared/social_cards.py`, which also holds the caption builder and the
+  `listed` rule. `config/social_cards.toml` (`[cards] jpeg_quality`, `listed_from`,
+  `[blog]` title and summary sizes, `[caption] max_hashtags`) is in Settings ->
+  Configuration.
+- **The page.** `/social` (More, between Blog and User Manuals): the cards newest
+  first with Download (JPEG), Copy caption and Post to X, which fills the composer
+  beneath it and sends nothing until its own confirm. The composer and Recent posts are
+  Post to X's (`x_post.build`); `/x` answers 308 to `/social`. A private route,
+  `/social/card/{key}/{fmt}`, serves a listed card's file.
+- **The past is drawn for the site only.** `[cards] listed_from` ships as `2026-11-09`
+  (set it to the promote day before merging); every older blog entry and trade idea
+  has a card on the site and is never listed for posting. `tools/redraw_idea_cards.py`
+  redraws the ideas still on the site from the manifest, the caption's POP and the
+  Ledger's score and grade, and keeps the old image for any idea missing a printed
+  figure; it is a dry run unless given `--write`.
+- **Manuals.** User Guide and Reference Guide: Post to X became Social Cards (and the
+  Blog sections mention the card); API Reference: the two views and the two routes;
+  `webgui/page_help.py` has a `/social` guide. `docs/reference/blog.md` has a section
+  on the card.
+- **To do after the promote** (operator): run `tools/redraw_idea_cards.py --root
+  <copy of deploy/site>` on prod and compare each card with its original, then
+  `--write` against the real site; on the first live trade idea look at it on X,
+  Discord, Telegram and the site and log what each showed here.
+
+**Prior —** 2026-11-07 (**The Paper Ledger books the live ticket's size.** The operator's rule: the Ledger shows the same number of contracts as the live trades.)
 
 - **`paper_limits.booking_quantity`** and a new `sizing` key in `[idea_trades]` and
   `[daily_condor]` (`config/paper.toml`, shipped `"live"`; `"fixed"` books
