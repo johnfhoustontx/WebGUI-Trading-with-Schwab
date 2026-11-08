@@ -79,7 +79,7 @@ def _render(monkeypatch, payload=None):
     monkeypatch.setattr(bus_client, "read_version", lambda view: 1)
     monkeypatch.setattr(bus_client, "request", lambda domain, cmd: sent.append((domain, cmd)))
     with ui.card() as host:
-        page.render()
+        page.build()
     return host, sent
 
 

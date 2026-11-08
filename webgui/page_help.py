@@ -1978,8 +1978,26 @@ An end-of-day summary of the day's options activity and paper trading.
 - **Archive** — pick a month to list that month's saved reports, newest first;
   each day opens its **Summary** or **Detail** in a new tab.
 """,
-    "/x": """
-**Post to X — the simple version**
+    "/social": """
+**Social Cards — the simple version**
+
+Every blog entry and trade idea has a picture card for sharing. This page lists
+them, newest first, and lets you post one to X. Underneath is the box for writing
+a one-off post of your own, and the log of everything the app has posted.
+
+- **The cards.** Each row shows the card, whether it is a *Blog* entry or a
+  *Trade idea*, when it was published (Central time) and its title. A card only
+  appears once its entry or idea is public. Trade idea cards appear only while
+  trade ideas are published to the site (Settings → General).
+- **Download** saves the card as a JPEG file.
+- **Copy caption** puts the caption on your clipboard, ready to paste into
+  Instagram or anywhere else. If your browser refuses, allow clipboard access for
+  this site and try again.
+- **Post to X** fills the box below with the card, its caption and its link, and
+  scrolls down to it. **Nothing is sent** until you press **Post** there and
+  confirm.
+
+**The box below — Post to X**
 
 Write a one-off post for the app's X account, and see everything the app has
 posted there.

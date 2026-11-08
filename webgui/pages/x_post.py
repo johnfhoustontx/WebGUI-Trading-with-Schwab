@@ -1,10 +1,10 @@
-"""Post to X (/x) — an ad-hoc marketing post, and the log of every X post.
+"""The Post to X composer and the log of every X post (drawn on /social).
 
 The page composes; the options service posts. ``Post`` enqueues an ``x_post``
 command on ``cmd:options`` and the service fits the text, attaches the image
 and posts through ``shared/notify/x_post`` — which logs every attempt (market
 reports, hourly trade ideas and posts from here) to ``cache:options:x_log``,
-the table at the foot of this page.
+the table at the foot of the composer.
 
 Tier-1: the live count and preview are ``shared.x_text`` — the SAME weighted
 length and fitting the service posts with, so what the page shows is what goes
@@ -132,41 +132,64 @@ def command(text, tags, link, image):
 
 
 # ── page ────────────────────────────────────────────────────────────────────
-def render() -> None:
+class Composer:
+    """The composer ``build`` drew: its fields and the one way to fill them.
+
+    ``fill`` is what a Social Cards row's Post to X does - it only FILLS the
+    fields and the image; nothing is sent until the composer's own confirm."""
+
+    def __init__(self, *, card, body, link, tags, set_image, repaint):
+        self.card, self.body, self.link, self.tags = card, body, link, tags
+        self._set_image, self._repaint = set_image, repaint
+
+    def fill(self, text: str, link: str, tags: str, image: bytes | None,
+             name: str) -> None:
+        """Replace the post, the link, the hashtags and the image. An image
+        over ``IMAGE_MAX_BYTES`` is not attached (X would refuse it) and a
+        toast says so, as the composer's own upload does."""
+        self.body.value, self.link.value, self.tags.value = text or "", link or "", tags or ""
+        if image and len(image) > IMAGE_MAX_BYTES:
+            kit.toast("warn", "That image is over 5 MB - X will not take it")
+            image = None
+        self._set_image(image or None, name if image else None)
+        self._repaint()
+
+
+def build() -> Composer:
+    """Draw the composer, its preview, the confirm and Recent posts into the
+    current container. The caller owns the page and its header."""
     state = {"image": None, "name": None, "count_cls": COUNT_OK, "sending": False}
 
-    with kit.page():
-        kit.header("Post to X", view=VIEW)
-        kit.notice("Posts go out from the options service with the settings in "
-                   "shared/notifications.json (x). While x.dry_run is on nothing "
-                   "reaches X — the log below shows what would have been posted.")
+    kit.notice("Posts go out from the options service with the settings in "
+               "shared/notifications.json (x). While x.dry_run is on nothing "
+               "reaches X - the log below shows what would have been posted.")
 
-        with ui.column().classes(f"{_t.CARD} w-full gap-3"):
-            with kit.field("Post", grow=True):
-                body = ui.textarea(placeholder="What do you want to say?") \
-                    .props(f"{kit.FIELD_PROPS} autogrow").classes("w-full")
-            with ui.row().classes("w-full items-end gap-x-4 gap-y-2 flex-wrap"):
-                link = kit.text_field("Link", value=DEFAULT_LINK, width="w-72")
-                tags = kit.text_field("Hashtags", value=DEFAULT_TAGS, width="w-72")
-                ui.space()
-                count = ui.label("").classes(f"text-sm font-semibold {COUNT_OK}")
-            with ui.row().classes("w-full items-center gap-3 flex-wrap"):
-                upload = ui.upload(auto_upload=True, max_file_size=IMAGE_MAX_BYTES,
-                                   label="Image (PNG or JPEG, up to 5 MB)") \
-                    .props('accept="image/png,image/jpeg" flat bordered') \
-                    .classes("w-72")
-                with ui.column().classes("gap-1") as image_box:
-                    image_name = ui.label("").classes(f"text-sm {_t.LABEL}")
-                    remove = kit.button("Remove image", kind="secondary", icon="close")
-                image_box.set_visibility(False)
-                ui.space()
-                post_btn = kit.button("Post", kind="primary", icon="send")
-            kit.section_title("Preview")
-            shown = ui.label("").classes(
-                f"text-sm whitespace-pre-wrap break-words {_t.LABEL}")
+    with ui.column().classes(f"{_t.CARD} w-full gap-3") as card:
+        with kit.field("Post", grow=True):
+            body = ui.textarea(placeholder="What do you want to say?") \
+                .props(f"{kit.FIELD_PROPS} autogrow").classes("w-full")
+        with ui.row().classes("w-full items-end gap-x-4 gap-y-2 flex-wrap"):
+            link = kit.text_field("Link", value=DEFAULT_LINK, width="w-72")
+            tags = kit.text_field("Hashtags", value=DEFAULT_TAGS, width="w-72")
+            ui.space()
+            count = ui.label("").classes(f"text-sm font-semibold {COUNT_OK}")
+        with ui.row().classes("w-full items-center gap-3 flex-wrap"):
+            upload = ui.upload(auto_upload=True, max_file_size=IMAGE_MAX_BYTES,
+                               label="Image (PNG or JPEG, up to 5 MB)") \
+                .props('accept="image/png,image/jpeg" flat bordered') \
+                .classes("w-72")
+            with ui.column().classes("gap-1") as image_box:
+                image_name = ui.label("").classes(f"text-sm {_t.LABEL}")
+                remove = kit.button("Remove image", kind="secondary", icon="close")
+            image_box.set_visibility(False)
+            ui.space()
+            post_btn = kit.button("Post", kind="primary", icon="send")
+        kit.section_title("Preview")
+        shown = ui.label("").classes(
+            f"text-sm whitespace-pre-wrap break-words {_t.LABEL}")
 
-        kit.section_title("Recent posts")
-        log_box = ui.column().classes("w-full gap-2")
+    kit.section_title("Recent posts")
+    log_box = ui.column().classes("w-full gap-2")
 
     confirm = kit.confirm("Post to X?", "", confirm_text="Post", on_confirm=lambda: _send())
 
@@ -197,9 +220,7 @@ def render() -> None:
         if len(data) > IMAGE_MAX_BYTES:
             kit.toast("warn", "That image is over 5 MB - X will not take it")
             return
-        state["image"], state["name"] = data, f.name
-        image_name.text = f.name
-        image_box.set_visibility(True)
+        _set_image(data, f.name)
         upload.reset()
         _repaint_preview()
 
@@ -207,11 +228,15 @@ def render() -> None:
     def _on_rejected(_e=None):
         kit.toast("warn", "Only a PNG or JPEG of up to 5 MB can be attached")
 
+    def _set_image(data, name):
+        """Attach ``data`` (or, with None, clear the image) and show its name."""
+        state["image"], state["name"] = data, name
+        image_name.text = name or ""
+        image_box.set_visibility(bool(data))
+
     @guard
     def _remove_image(_e=None):
-        state["image"], state["name"] = None, None
-        image_name.text = ""
-        image_box.set_visibility(False)
+        _set_image(None, None)
         _repaint_preview()
 
     def _send():
@@ -265,3 +290,5 @@ def render() -> None:
     _repaint_preview()
     _repaint_log()
     watch_view(VIEW, _repaint_log)
+    return Composer(card=card, body=body, link=link, tags=tags,
+                    set_image=_set_image, repaint=_repaint_preview)
