@@ -20,8 +20,9 @@ import logging
 
 from services.options_svc import card_kit as K
 from services.options_svc.trade_idea_card import (
-    BRAND_ACCENT, HEIGHT, PAD, SCALE, WIDTH, _Canvas, _header, font,
+    BRAND_ACCENT, HEIGHT, PAD, SCALE, WIDTH, _header,
 )
+from shared.card_draw import Canvas as _Canvas, font
 
 log = logging.getLogger(__name__)
 
