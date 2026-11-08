@@ -308,7 +308,13 @@
     img.src = idea.img;
     img.alt = str(idea.alt) || str(idea.symbol) + " trade idea";
     img.width = 1200;
-    img.height = 675;
+    // A card drawn at 1200x630 says so; one from before the redraw keeps 1200x675.
+    if (idea.shape === "wide") {
+      img.height = 630;
+      img.className = "ns-card-wide";
+    } else {
+      img.height = 675;
+    }
     img.loading = eager ? "eager" : "lazy";
     img.decoding = "async";
 

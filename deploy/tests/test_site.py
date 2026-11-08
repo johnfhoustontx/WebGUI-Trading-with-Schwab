@@ -1217,6 +1217,19 @@ def test_ideas_js_reads_the_manifest_safely():
     assert "innerHTML" not in js and "insertAdjacentHTML" not in js
 
 
+def test_idea_card_shape_follows_the_row():
+    """A card the service drew at 1200x630 says so (``shape == "wide"``): the page
+    sets that height and a class that gives the image its 40:21 box. A row from
+    before the redraw (no shape) keeps the old 1200x675."""
+    js = _text("assets/ideas.js")
+    body = re.search(r"function card\(idea, eager\)\s*\{(.*?)\n  \}", js, re.S).group(1)
+    assert 'idea.shape === "wide"' in body
+    assert "img.height = 630" in body and "img.height = 675" in body
+    assert '"ns-card-wide"' in body
+    css = _css("assets/site.css")
+    assert re.search(r"\.ns-idea-card img\.ns-card-wide\s*\{[^}]*aspect-ratio:\s*40\s*/\s*21", css)
+
+
 def test_the_sitemap_lists_the_ideas_page():
     assert "https://neuralstrike.co/ideas.html" in _text("sitemap.txt").split()
 

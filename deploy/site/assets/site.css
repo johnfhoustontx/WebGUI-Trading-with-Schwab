@@ -1173,6 +1173,7 @@ body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
   border-bottom: 1px solid var(--color-neutral-800);
   color: transparent;            /* no alt-text spill if a card 404s; see .ns-live-tile img */
 }
+.ns-idea-card img.ns-card-wide { aspect-ratio: 40 / 21; }   /* 1200x630 */
 .ns-idea-meta {
   display: flex;
   gap: 10px;
