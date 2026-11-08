@@ -888,7 +888,7 @@ def test_the_app_block_limits_the_login_body(cfg):
 
 
 def test_the_login_limit_does_not_bound_the_rest_of_the_app(cfg):
-    """The /x page uploads an image of up to 5 MB through the app. A site-wide
+    """The /social composer uploads an image of up to 5 MB through the app. A site-wide
     limit at the login's size would break it."""
     block = cfg.split(caddy.APP_HOST + " {", 1)[1]
     assert block.count("request_body") == 1

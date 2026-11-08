@@ -3781,8 +3781,8 @@ you.
 Only cards for posts made after the cards launched are listed. Older blog
 entries and trade ideas have cards on the website so it looks the same
 throughout, but this page does not offer them. Trade idea cards also appear here
-only while trade ideas are published to the site (Settings, General); the page
-says so when they are off.
+only while trade ideas are published to the site (Settings, General). When the
+list is empty and that switch is off, the page says so under "No cards yet."
 
 **Post to X** (the box below the cards) is also where you write a one-off post
 of your own, and where you see every post the app has made on X.

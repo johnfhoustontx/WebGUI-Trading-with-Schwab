@@ -315,7 +315,7 @@ zeroing), and a malformed value reads as ON. The trade idea's Google Calendar ev
 API-written reminder belongs to the service account, so it would never pop up.
 
 **X has ONE posting path (2026-09-22).** Every post — market reports, hourly
-trade ideas, the `/x` page's ad-hoc posts — goes through
+trade ideas, the Social Cards composer's (`/social`) ad-hoc posts — goes through
 `shared/notify/x_post.post`, called only from `options_svc` (market_svc enqueues
 `x_post_report` rather than posting). Nothing else imports tweepy or calls the X
 API; `test_push_notify.py::test_nothing_but_x_post_talks_to_x` pins it. That one

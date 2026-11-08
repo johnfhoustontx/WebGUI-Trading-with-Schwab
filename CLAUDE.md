@@ -151,7 +151,7 @@ stream, request builder, status and dropdown-list keys and hot-set config -
 `shared/tests/test_public_gamma.py`) ·
 `shared.x_text` (since 2026-09-22; X's weighted length, hashtags and
 fitting a post into 280 - stdlib only, pinned by `shared/tests/test_x_text.py`,
-so the `/x` page's live count is the service's own computation) ·
+so the Social Cards (`/social`) live count is the service's own computation) ·
 `shared.news_config` (since 2026-09-26; `config/news.toml`'s loader - stdlib +
 `shared.config_toml` + `shared.symbols` + `repo_paths` only; Tier 1 reads just
 the ticker set, `[trending] window_h` and `[desk] headlines` from it) ·

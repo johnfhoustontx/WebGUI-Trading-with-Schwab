@@ -79,7 +79,10 @@ def facts_for(row, ledger):
     for name, v in (("entry_cash", cash), ("spot", spot)):
         if v is None:
             return None, name
-    max_profit, max_loss, breakevens = trade_idea.economics(legs, cash)
+    try:
+        max_profit, max_loss, breakevens = trade_idea.economics(legs, cash)
+    except Exception:  # noqa: BLE001 -- one odd idea must not abort a --write run
+        return None, "breakevens"
     if _num(row.get("max_loss")) is None:
         return None, "max_loss"
     if row.get("max_profit") is None and max_profit is not None:

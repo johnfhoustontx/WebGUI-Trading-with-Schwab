@@ -128,3 +128,13 @@ def test_facts_for_does_not_mutate_its_input():
     snap = copy.deepcopy(row)
     r.facts_for(row, LEDGER)
     assert row == snap
+
+
+def test_economics_failure_keeps_old_image_and_the_run_goes_on(tmp_path, monkeypatch):
+    def boom(legs, cash):
+        raise ValueError("odd legs")
+    monkeypatch.setattr(r.trade_idea, "economics", boom)
+    assert r.facts_for(_row(), LEDGER) == (None, "breakevens")
+    site = _site(tmp_path)
+    assert r.main(["--root", str(site), "--write"], ledger=_ledger_for()) == 0
+    assert (site / "ideas/2026-11-06/0935-SPY.png").read_bytes() == b"OLD"

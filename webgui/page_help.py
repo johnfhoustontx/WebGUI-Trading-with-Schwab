@@ -1988,7 +1988,8 @@ a one-off post of your own, and the log of everything the app has posted.
 - **The cards.** Each row shows the card, whether it is a *Blog* entry or a
   *Trade idea*, when it was published (Central time) and its title. A card only
   appears once its entry or idea is public. Trade idea cards appear only while
-  trade ideas are published to the site (Settings → General).
+  trade ideas are published to the site (Settings → General). When no card is
+  listed at all and that switch is off, the page says so under "No cards yet."
 - **Download** saves the card as a JPEG file.
 - **Copy caption** puts the caption on your clipboard, ready to paste into
   Instagram or anywhere else. If your browser refuses, allow clipboard access for
