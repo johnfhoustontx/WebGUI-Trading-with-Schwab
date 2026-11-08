@@ -36,7 +36,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 import repo_paths  # noqa: E402,F401 - puts the repo on the path / checks the clock
-from services.options_svc import site_ideas, trade_idea, trade_idea_card  # noqa: E402
+from services.options_svc import rate_trade, site_ideas, trade_idea, trade_idea_card  # noqa: E402
 from shared import card_draw, social_cards  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -48,13 +48,27 @@ def _num(v):
     return site_ideas._finite(v)
 
 
+#: The bias the scanner gives each structure it builds, read off the table that is
+#: already pinned to the scanner's builders (``rate_trade.CALC_TO_SCORER``): a posted
+#: idea's bias came from the scanner row, and the manifest does not keep it.
+_TYPE_BIAS = {stype: bias for stype, _family, _label, bias in rate_trade.CALC_TO_SCORER.values()}
+_SINGLE_LEG = {"LONG_CALL": ("long", "call"), "LONG_PUT": ("long", "put"),
+               "SHORT_CALL": ("short", "call"), "SHORT_PUT": ("short", "put")}
+
+
 def _bias(row, legs):
     kind = str(row.get("type") or "")
     if kind in trade_idea._CREDIT_BIAS:
         return trade_idea._CREDIT_BIAS[kind]
-    if len(legs) == 1 and legs[0]["side"] == "long":
-        return "bullish" if legs[0]["kind"] == "call" else "bearish"
-    return None
+    if len(legs) == 1:
+        leg = legs[0]
+        if leg["side"] == "long":
+            return "bullish" if leg["kind"] == "call" else "bearish"
+        # A short single leg is read through its structure, only when they agree.
+        if _SINGLE_LEG.get(kind) == (leg["side"], leg["kind"]):
+            return _TYPE_BIAS.get(kind)
+        return None
+    return _TYPE_BIAS.get(kind)
 
 
 def facts_for(row, ledger):

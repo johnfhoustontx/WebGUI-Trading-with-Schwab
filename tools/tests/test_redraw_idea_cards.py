@@ -89,6 +89,35 @@ def test_directional_bias_from_single_leg():
     assert r.facts_for(row, LEDGER) == (None, "bias")
 
 
+def test_structure_bias_is_the_scanners_own():
+    """Most posted ideas are debit spreads and condors; their bias is the one the
+    scanner gives the structure (``rate_trade.CALC_TO_SCORER``)."""
+    row = _row()
+    row.update(type="BEAR_PUT", label="Bear Put Spread",
+               legs=[_leg("long", "put", 600.0), _leg("short", "put", 590.0)],
+               entry_cash=-400.0, max_loss=400.0, max_profit=600.0)
+    assert r.facts_for(row, LEDGER)[0]["bias"] == "bearish"
+    row.update(type="BULL_CALL", label="Bull Call Spread",
+               legs=[_leg("long", "call", 600.0), _leg("short", "call", 610.0)])
+    assert r.facts_for(row, LEDGER)[0]["bias"] == "bullish"
+    row.update(type="CONDOR_PUT", label="Put Condor",
+               legs=[_leg("long", "put", 580.0), _leg("short", "put", 590.0),
+                     _leg("short", "put", 600.0), _leg("long", "put", 610.0)],
+               entry_cash=-300.0, max_loss=300.0, max_profit=700.0)
+    assert r.facts_for(row, LEDGER)[0]["bias"] == "neutral"
+    row["type"] = "NOT_A_STRUCTURE"
+    assert r.facts_for(row, LEDGER) == (None, "bias")
+
+
+def test_short_single_leg_takes_its_structures_bias_only_when_the_leg_matches():
+    row = _row()
+    row.update(type="SHORT_PUT", label="Short Put", legs=[_leg("short", "put", 590.0)],
+               entry_cash=300.0, max_loss=58700.0, max_profit=300.0)
+    assert r.facts_for(row, LEDGER)[0]["bias"] == "bullish"
+    row["legs"] = [_leg("short", "call", 610.0)]
+    assert r.facts_for(row, LEDGER) == (None, "bias")
+
+
 def test_dry_run_writes_nothing(tmp_path, capsys):
     site = _site(tmp_path)
     before = (site / "ideas.json").read_text()
