@@ -157,13 +157,16 @@ def read_parts(root) -> dict | None:
 
 # ── pure: the list, and one entry's page ─────────────────────────────────────
 
-def manifest(entries, updated) -> dict:
+def manifest(entries, updated, cards=frozenset()) -> dict:
     """PURE. What ``blog.json`` holds: each entry's address, title, summary,
-    tags and its two dates, newest FIRST publication first (a revision does not
-    move an entry up). Never a document."""
+    tags, its two dates and whether it has a card (its slug is in ``cards``),
+    newest FIRST publication first (a revision does not move an entry up).
+    Never a document. ``card`` is a flag, not a path: the list builds the
+    card's address from the slug it has already checked."""
     rows = [{"slug": entry["slug"], "title": entry["title"], "summary": entry["summary"],
              "tags": list(entry["tags"]), "published": entry["published_at"],
-             "updated": entry["updated_at"]} for entry in entries]
+             "updated": entry["updated_at"], "card": entry["slug"] in cards}
+            for entry in entries]
     rows.sort(key=lambda row: row["slug"])
     # Stored times are UTC in one spelling (``store._iso``), so text order is
     # time order.
@@ -214,7 +217,7 @@ def entry_page(parts, entry, site_host, *, card: bool = False) -> str:
         f'<meta property="og:image:alt" content="{title}">',
         '<meta name="twitter:card" content="summary_large_image">',
     ) if card else ()
-    card_img = (f'    <img class="ns-blog-card" src="{image}" width="1200" height="630" '
+    card_img = (f'    <img class="ns-blog-hero" src="{image}" width="1200" height="630" '
                 f'alt="{title}">\n') if card else ""
     head = "\n".join((
         "<!doctype html>",
@@ -516,8 +519,12 @@ def _manifest_bytes(path, listing, updated):
 
 
 def _write_lists(root, listed, updated, report) -> None:
-    """The sitemap, then ``blog.json`` - the last write of a rebuild."""
-    listing = manifest(listed, updated)
+    """The sitemap, then ``blog.json`` - the last write of a rebuild. An entry is
+    marked as having a card only when the card on disk was drawn from it as it is
+    now, the rule ``card_rows`` lists by."""
+    cards = {row["slug"] for row in listed
+             if _card_current(root / BLOG_DIR / row["slug"], card_mod.digest(row))}
+    listing = manifest(listed, updated, cards)
     lines = "".join(f"https://{repo_paths.SITE_HOST}/{BLOG_DIR}/{row['slug']}/\n"
                     for row in listing["entries"])
     try:

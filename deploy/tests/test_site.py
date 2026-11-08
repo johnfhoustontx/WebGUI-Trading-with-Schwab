@@ -1318,6 +1318,7 @@ SERVICE_NAV_RE = re.compile(r'<nav class="ns-nav.*?</nav>', re.S)
 # alone; the rest are report.html's frame, reused.
 SERVICE_CLASSES = ("ns-page-sub", "ns-live-page", "ns-live-main", "ns-report-main",
                    "ns-live-head", "ns-report-head", "ns-eyebrow", "ns-blog-crumb",
+                   "ns-blog-hero",
                    "ns-report-links", "ns-report-frame", "ns-foot", "ns-live-foot")
 
 
@@ -1470,6 +1471,31 @@ def test_the_blog_script_links_an_entry_where_the_service_writes_it():
     assert len(hrefs) == 1, f"blog.js sets {len(hrefs)} addresses, expected the card's"
     assert re.fullmatch(r'"blog/" \+ [\w.]+ \+ "/"', hrefs[0]), hrefs[0]
     assert "target" not in code, "an entry opens in the same tab: it is this site"
+
+
+def test_the_blog_script_shows_an_entrys_card_where_the_service_draws_it():
+    """``blog/<slug>/card.png``, beside the entry's page, and only when the
+    manifest's ``card`` is exactly ``true``. The address is built from the slug
+    that passed ``SLUG``, never read from the manifest, so it cannot leave the
+    blog folder. The card repeats the title, which follows as text: alt is empty."""
+    code = _blog_js_code()
+    srcs = re.findall(r"\.src\s*=\s*([^;]+);", code)
+    assert len(srcs) == 1, f"blog.js sets {len(srcs)} image addresses, expected the card's"
+    assert re.fullmatch(r'"blog/" \+ [\w.]+ \+ "/card\.png"', srcs[0]), srcs[0]
+    assert re.search(r"card:\s*r\.card\s*===\s*true", code)
+    assert re.search(r'el\("img",\s*"ns-blog-card-img"\)', code)
+    assert re.search(r'\.alt\s*=\s*""', code)
+    assert re.search(r'\.loading\s*=\s*"lazy"', code)
+
+
+def test_the_entry_image_and_the_list_entry_do_not_share_a_class():
+    """``.ns-blog-card`` is the list's entry (a padded box); the picture at the top
+    of an entry's page is ``.ns-blog-hero``. One name for both gave each the
+    other's padding, background and fixed shape."""
+    css = _css("assets/site.css")
+    assert re.search(r"\.ns-blog-hero\s*\{[^}]*aspect-ratio:\s*40\s*/\s*21", css)
+    for rule in re.findall(r"\.ns-blog-card\s*\{([^}]*)\}", css):
+        assert "aspect-ratio" not in rule, "the list entry is not a fixed shape"
 
 
 def test_the_blog_script_caps_the_tags_it_draws():

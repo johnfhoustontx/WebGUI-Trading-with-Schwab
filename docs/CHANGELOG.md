@@ -4,7 +4,24 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-08 (**Social Cards: one picture card for every blog entry and trade idea, a private page to post them from, and Post to X folded into it.**)
+**Last updated:** 2026-11-08 (**The Blog list shows each entry's card, and the entry picture gets its own class.**)
+
+- The operator's ask: the card was on each entry's page but not on the Blog list
+  (`blog.html`). `blog.json` now carries `card: true` when the entry's card on disk
+  is current (`sitewriter._card_current`, the same rule `card_rows` uses), and
+  `assets/blog.js` draws `blog/<slug>/card.png` at the top of that entry's box,
+  built from the checked slug, lazy, with empty `alt` (the title follows as text).
+- Fixed in the same change: the entry page's picture and the list's entry both
+  used `.ns-blog-card`, so each took the other's styling (the list boxes got the
+  picture's fixed 40:21 shape, the picture got the box's padding and background).
+  The picture is now `.ns-blog-hero`; the next rebuild rewrites every entry page.
+- Checked on a local copy of the site with prod's 12 entries and their cards, at
+  1280 px (three columns) and 375 px (one), with one entry left without a card.
+  Tests: `test_the_manifest_says_which_entries_have_a_card`,
+  `test_the_blog_script_shows_an_entrys_card_where_the_service_draws_it`,
+  `test_the_entry_image_and_the_list_entry_do_not_share_a_class`.
+
+**Prior —** 2026-11-08 (**Social Cards: one picture card for every blog entry and trade idea, a private page to post them from, and Post to X folded into it.**)
 
 - **Why.** Instagram has no way in for the app, and saving a card from Telegram or
   the site by hand is slow. Every post that leaves NeuralStrike now has one card, and

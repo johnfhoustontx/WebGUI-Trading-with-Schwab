@@ -307,7 +307,8 @@ def test_the_manifest_is_newest_first_and_holds_no_html():
     out = sw.manifest(rows, NOW)
     assert out["updated"] == NOW
     assert [row["slug"] for row in out["entries"]] == ["new", "mid", "old"]
-    assert all(set(row) == {"slug", "title", "summary", "tags", "published", "updated"}
+    assert all(set(row) == {"slug", "title", "summary", "tags", "published", "updated",
+                            "card"}
                for row in out["entries"])
     assert out["entries"][2]["published"] == at(1)
     assert out["entries"][2]["updated"] == at(9)
@@ -322,6 +323,16 @@ def test_the_manifest_is_pure():
     out = sw.manifest(rows, NOW)
     out["entries"][0]["tags"].append("two")
     assert rows[0]["tags"] == ["one"]
+
+
+def test_the_manifest_says_which_entries_have_a_card():
+    """The Blog list shows an entry's card only when the service says it drew one:
+    a flag, never a path (blog.js builds the address from the slug it checked)."""
+    rows = [entry(slug="new", published_at=at(2)), entry(slug="old", published_at=at(1))]
+    out = sw.manifest(rows, NOW, cards={"new"})
+    assert [(row["slug"], row["card"]) for row in out["entries"]] == [
+        ("new", True), ("old", False)]
+    assert all(row["card"] is False for row in sw.manifest(rows, NOW)["entries"])
 
 
 # ── rebuild ──────────────────────────────────────────────────────────────────
@@ -352,8 +363,9 @@ def test_rebuild_writes_pages_documents_fonts_manifest_and_sitemap(site, monkeyp
     page = files["blog/second/index.html"].decode("utf-8")
     assert page == sw.entry_page(sw.read_parts(site), store.rows["second"], HOST, card=True)
     manifest = json.loads(files["blog.json"].decode("utf-8"))
-    assert manifest == sw.manifest(store.entries(), NOW)
+    assert manifest == sw.manifest(store.entries(), NOW, cards={"first", "second"})
     assert [row["slug"] for row in manifest["entries"]] == ["second", "first"]
+    assert all(row["card"] is True for row in manifest["entries"])
     assert files["blog/sitemap.txt"] == (b"https://example.test/blog/second/\n"
                                          b"https://example.test/blog/first/\n")
     assert degrades() == before
@@ -830,8 +842,9 @@ def test_card_failure_still_publishes_entry(site, monkeypatch):
     assert "blog/first/index.html" in files and "blog/first/entry.html" in files
     assert not any(name.startswith("blog/first/card") for name in files)
     page = files["blog/first/index.html"].decode("utf-8")
-    assert 'property="og:image"' not in page and "ns-blog-card" not in page
+    assert 'property="og:image"' not in page and "ns-blog-hero" not in page
     assert [r["slug"] for r in json.loads(files["blog.json"])["entries"]] == ["first"]
+    assert json.loads(files["blog.json"])["entries"][0]["card"] is False
 
 
 def test_entry_page_with_card_has_og_and_img(parts):
@@ -844,12 +857,15 @@ def test_entry_page_with_card_has_og_and_img(parts):
     assert '<meta property="og:image:height" content="1260">' in head
     assert f'<meta property="og:image:alt" content="{title}">' in head
     assert '<meta name="twitter:card" content="summary_large_image">' in head
-    img = (f'<img class="ns-blog-card" src="blog/a-first-entry/card.png" width="1200" '
+    # Its own class: .ns-blog-card is the Blog list's entry, and sharing it gave
+    # each the other's styling.
+    img = (f'<img class="ns-blog-hero" src="blog/a-first-entry/card.png" width="1200" '
            f'height="630" alt="{title}">')
     assert page.count(img) == 1
     assert page.index(img) < page.index("<iframe")
+    assert "ns-blog-card" not in page
     plain = sw.entry_page(parts, entry(), HOST)
-    assert "og:image" not in plain and "ns-blog-card" not in plain and "twitter:card" not in plain
+    assert "og:image" not in plain and "ns-blog-hero" not in plain and "twitter:card" not in plain
 
 
 def test_unpublish_removes_card_files_and_folder(site):

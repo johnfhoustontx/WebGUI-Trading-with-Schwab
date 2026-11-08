@@ -3757,8 +3757,9 @@ removes its card too.
 `/x` address still works: it takes you here.)
 
 Every blog entry and every trade idea the app posts has a picture card. The same
-card is what X, Discord and Telegram show, what the website shows, and what a
-link to a blog entry previews as when you paste it into a message. This page
+card is what X, Discord and Telegram show, what the website shows (a blog entry's
+card is at the top of its page and of its box on the Blog list), and what a link
+to a blog entry previews as when you paste it into a message. This page
 lists the cards, newest first, so you can post them to Instagram, Facebook or X
 from one place.
 

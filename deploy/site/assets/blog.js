@@ -16,8 +16,10 @@
  *    part of an address, so anything else is dropped, never repaired.
  *  - Always revalidated (cache: "no-cache"). A stale manifest would hide a new
  *    entry and keep listing one that was unpublished.
- *  - One request, to the manifest beside this page. Nothing is stored, nothing
- *    is scheduled and nothing is fetched from anywhere else.
+ *  - One request, to the manifest beside this page; the only other files are
+ *    the entries' cards (blog/<slug>/card.png), each built from a slug that
+ *    passed SLUG and shown only when the manifest's card is true. Nothing is
+ *    stored, nothing is scheduled and nothing is fetched from anywhere else.
  *
  * An entry is dated by the day it was published in Central time, the clock the
  * rest of the site keeps. A date that does not parse is left out.
@@ -84,7 +86,8 @@
         title: title,
         summary: str(r.summary).trim(),
         published: when(r.published),
-        tags: tagsOf(r.tags)
+        tags: tagsOf(r.tags),
+        card: r.card === true
       });
     });
     return out;
@@ -93,6 +96,20 @@
   function card(row) {
     var a = el("a", "ns-blog-card");
     a.href = "blog/" + row.slug + "/";
+
+    if (row.card) {
+      /* The picture its link preview shows. It repeats the title, which follows
+       * as text, so it carries no alt text of its own. */
+      var img = el("img", "ns-blog-card-img");
+      img.src = "blog/" + row.slug + "/card.png";
+      img.alt = "";
+      img.width = 1200;
+      img.height = 630;
+      img.loading = "lazy";
+      img.decoding = "async";
+      a.appendChild(img);
+    }
+
     a.appendChild(el("h2", "ns-blog-card-title", row.title));
 
     var day = row.published ? longDate(row.published) : "";

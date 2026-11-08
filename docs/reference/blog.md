@@ -564,9 +564,20 @@ fault is answered, counted (`blog.handlers`) and goes no further.
 
 Each published entry carries a card, drawn by `services/blog_svc/card.py`
 (`render_blog_card`, 1200 x 630 layout px at 2x, on `shared/card_draw.py`). It is
-what the entry's page shows at the top (`<img class="ns-blog-card">`), what the
-page names as its `og:image` and `twitter:card` preview, and what the private
-Social Cards page lists with a Download, a caption and a Post to X.
+what the entry's page shows at the top (`<img class="ns-blog-hero">`), what each
+entry on the Blog list shows at the top of its box (`blog.js`, `.ns-blog-card-img`),
+what the page names as its `og:image` and `twitter:card` preview, and what the
+private Social Cards page lists with a Download, a caption and a Post to X.
+
+- **The Blog list.** `blog.json` carries `card: true` for an entry whose card on
+  disk was drawn from it as it is now (`_card_current`, the rule `card_rows` lists
+  by), and `false` otherwise. It is a flag, never a path: `blog.js` builds
+  `blog/<slug>/card.png` from the slug that passed `SLUG`, and draws no picture
+  for anything but `true`. Its `alt` is empty, because the title follows as text.
+- **Two class names, on purpose.** `.ns-blog-card` is the list's entry (a padded
+  box) and `.ns-blog-hero` the picture on an entry's page. They shared the first
+  name for one day (2026-11-08) and each took the other's padding and fixed
+  shape; `deploy/tests/test_site.py` now keeps them apart.
 
 - **Where it is drawn.** `sitewriter._write_card`, from `rebuild`. The card is
   redrawn only when `card.json`'s `digest` no longer matches what it is drawn
