@@ -3302,8 +3302,45 @@ _GEX_ARCHIVE = ConfigFile(
     ),
 )
 
+_SOCIAL_CARDS = ConfigFile(
+    name="social_cards.toml", title="Social cards", icon="image",
+    summary="The preview images drawn for each blog entry and each trade idea: "
+            "how the title is fitted, how many hashtags the caption carries, and "
+            "the first day a card is listed for posting.",
+    restart=(),
+    sections=(
+        Section("Cards", "", (
+            Field("cards.jpeg_quality", "JPEG quality",
+                  "The quality of the JPEG copy made beside each PNG.",
+                  kind="int", min=50, max=100, step=1),
+            Field("cards.listed_from", "Listed from",
+                  "The first day (YYYY-MM-DD, Central) a card is listed. Earlier "
+                  "posts keep their cards but are not offered for posting.",
+                  kind="text"),
+        )),
+        Section("Blog title and summary", "How a blog entry's words are fitted "
+                "to the card.", (
+            Field("blog.title_max_px", "Largest title", "The size tried first.",
+                  kind="int", unit="px", min=20, max=120, step=1),
+            Field("blog.title_min_px", "Smallest title",
+                  "A title that still does not fit at this size is cut with an "
+                  "ellipsis.", kind="int", unit="px", min=16, max=120, step=1),
+            Field("blog.title_max_lines", "Title lines", "", kind="int",
+                  min=1, max=8, step=1),
+            Field("blog.summary_px", "Summary size", "", kind="int", unit="px",
+                  min=12, max=60, step=1),
+            Field("blog.summary_max_lines", "Summary lines", "", kind="int",
+                  min=1, max=8, step=1),
+        )),
+        Section("Caption", "", (
+            Field("caption.max_hashtags", "Hashtags", "The most a caption carries.",
+                  kind="int", min=0, max=15, step=1),
+        )),
+    ),
+)
+
 FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _LOGIN_PUSH, _TOS_ORDER, _LIVE_ORDERS, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _SECTORS, _MOMENTUM, _SENTIMENT,
-         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _FUTURES_CHAIN, _GEX_ARCHIVE, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
+         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _FUTURES_CHAIN, _GEX_ARCHIVE, _SOCIAL_CARDS, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
          _MARKET_READ, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}

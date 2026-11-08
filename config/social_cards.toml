@@ -1,0 +1,17 @@
+# Social cards - the preview images for blog entries and trade ideas.
+# Read through shared/social_cards.py (built-in defaults <- this file <- config/local/social_cards.toml).
+# Every key is editable in Settings -> Configuration.
+
+[cards]
+jpeg_quality = 90             # the JPEG copy made beside each PNG
+listed_from  = "2026-11-09"   # first day (Central) a card is listed; earlier posts keep no listed card
+
+[blog]
+title_max_px      = 50        # the size tried first
+title_min_px      = 34        # smallest before the title is cut with an ellipsis
+title_max_lines  = 4
+summary_px        = 20
+summary_max_lines = 3
+
+[caption]
+max_hashtags = 4              # the most a caption carries
