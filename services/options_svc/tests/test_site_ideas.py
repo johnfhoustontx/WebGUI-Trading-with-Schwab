@@ -185,12 +185,29 @@ def test_a_failed_jpeg_leaves_jpg_out_and_the_post_lands(tmp_path):
 def test_manifest_row_has_jpg_shape_and_card(tmp_path):
     from services.options_svc import trade_idea_card as C
     idea = _card_idea()
-    S.publish(idea, _png(), "cap", NOW, root=tmp_path)
+    S.publish(idea, _png(2400, 1260), "cap", NOW, root=tmp_path)
     _, first = _first_row(tmp_path)
     assert first["jpg"] == "ideas/2026-09-29/1436-SPY.jpg"
     assert first["shape"] == "wide"
     assert first["card"] == json.loads(json.dumps(C.card_facts(idea)))
     assert set(first["card"]) == set(C.CARD_FIELDS)
+
+
+def test_shape_is_wide_only_for_the_new_card_size(tmp_path):
+    S.publish(_card_idea(), _png(2400, 1350), "cap", NOW, root=tmp_path)
+    assert "shape" not in _first_row(tmp_path)[1]
+
+
+def test_a_card_facts_failure_keeps_the_shape_and_drops_the_facts(tmp_path, monkeypatch):
+    from services.options_svc import trade_idea_card as C
+
+    def boom(idea):
+        raise RuntimeError("facts")
+    monkeypatch.setattr(C, "card_facts", boom)
+    assert S.publish(_card_idea(), _png(2400, 1260), "cap", NOW, root=tmp_path) is True
+    first = _first_row(tmp_path)[1]
+    assert first["shape"] == "wide" and "card" not in first
+    assert first["jpg"].endswith(".jpg")
 
 
 def test_ref_re_accepts_jpg():

@@ -666,18 +666,29 @@ def _prune(ideas_dir, keep):
             shutil.rmtree(p, ignore_errors=True)
 
 
+def _png_size(png):
+    """``(width, height)`` of the PNG bytes, or None when they do not decode."""
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(png)) as im:
+            return im.size
+    except Exception:  # noqa: BLE001
+        return None
+
+
 def _social_card(row, idea, png, root):
     """Add the social card's three fields to ``row``: a JPEG beside the PNG (what
     Instagram takes), the card's own facts and its shape. Each is best-effort and
     left OUT on a failure; the post never depends on any of them."""
+    # The shape comes from the PNG itself, so a card_facts failure cannot hide it.
+    if _png_size(png) == (2400, 1260):
+        row["shape"] = "wide"
     try:
         from services.options_svc import trade_idea_card
         row["card"] = json.loads(json.dumps(trade_idea_card.card_facts(idea)))
-        row["shape"] = "wide"
     except Exception:  # noqa: BLE001 -- the card and its PNG still publish
         _degrade.degraded("options.site_ideas.card_facts")
         row.pop("card", None)
-        row.pop("shape", None)
     try:
         jpg = _card_draw.jpeg_from_png(png, _social_cards.config()["cards"]["jpeg_quality"])
         if jpg:
