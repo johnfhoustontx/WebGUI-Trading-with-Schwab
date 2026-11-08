@@ -62,6 +62,8 @@ telegram = true
 [system]
 token_warn_hours = 48          # warn when the Schwab refresh token has this long or less left
                                # (it lasts 7 days and is renewed only by signing in again)
+status_clock_warn_hours = 6    # the Status page's sign-in clock turns yellow under this
+                               # many hours left (green above, red once it has expired)
 failure_repeat_hours = 6       # one alert per failing unit per this many hours (a job on a
                                # 15-minute timer would otherwise alert four times an hour)
 

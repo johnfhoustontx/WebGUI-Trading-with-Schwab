@@ -47,6 +47,7 @@ import shell as _shell
 from pages import ui_kit as kit
 from pages.options import theme
 from pages.ui_guard import guard, guard_async
+from shared.config_toml import toml_loader
 from repo_paths import (
     ENV_NAME,
     IS_DEV,  # noqa: F401 - not read here; test_status patches it by name
@@ -55,6 +56,7 @@ from repo_paths import (
     NICEGUI_LIVE_URL,
     NICEGUI_PORT,
     NICEGUI_URL,
+    NOTIFY_TOML,
     OWNS_PROXY,
     PROXY_PORT,
     PROXY_PUBLIC_URL,
@@ -351,6 +353,96 @@ def sign_in_left_text(hours):
     if rest:
         parts.append(f"{rest} hour" + ("" if rest == 1 else "s"))
     return " ".join(parts)
+
+
+def sign_in_deadline(health, now):
+    """When the Schwab sign-in runs out, as an aware UTC datetime, or None.
+
+    The proxy's own stamp (``refresh_token_expires_at``) first: the clock ticks
+    every second, and ``refresh_token_hours_left`` is rounded to 36 seconds, so
+    a deadline rebuilt from it would jump on every sweep. The hours are the
+    fallback for a proxy that does not send the stamp. A naive stamp is UTC
+    (the proxy writes ``utcnow``), never Central."""
+    if not health:
+        return None
+    stamp = health.get("refresh_token_expires_at")
+    if isinstance(stamp, str) and stamp.strip():
+        try:
+            when = _dt.datetime.fromisoformat(stamp.strip().replace("Z", "+00:00"))
+        except ValueError:
+            when = None
+        if when is not None:
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=_dt.timezone.utc)
+            return when.astimezone(_dt.timezone.utc)
+    hours = health.get("refresh_token_hours_left")
+    if isinstance(hours, bool) or not isinstance(hours, (int, float)):
+        return None
+    if not math.isfinite(hours) or hours < 0:
+        return None
+    return now + _dt.timedelta(hours=hours)
+
+
+def countdown_text(seconds):
+    """'6d 22:14:05', '05:59:12' or '00:00:00'. Rounded DOWN: time left must
+    never read as more than there is."""
+    total = max(0, int(seconds))
+    days, rest = divmod(total, 86400)
+    hours, rest = divmod(rest, 3600)
+    minutes, secs = divmod(rest, 60)
+    clock = f"{hours:02d}:{minutes:02d}:{secs:02d}"
+    return f"{days}d {clock}" if days else clock
+
+
+def countdown_level(seconds, warn_hours):
+    """``ok`` (green), ``warn`` (yellow: under ``warn_hours`` left) or
+    ``expired`` (red)."""
+    if seconds <= 0:
+        return "expired"
+    if seconds < warn_hours * 3600:
+        return "warn"
+    return "ok"
+
+
+# The clock's colour per level. Fixed classes, never built at runtime.
+_CLOCK_CLASSES = {
+    "ok": f"text-sm font-medium tabular-nums {theme.TXT_POS}",
+    "warn": f"text-sm font-medium tabular-nums {theme.TXT_WARN}",
+    "expired": f"text-sm font-medium tabular-nums {theme.TXT_NEG}",
+}
+CLOCK_EXPIRED_TEXT = "Auth: expired — re-authorization required"
+
+
+def auth_clock_view(deadline, now, warn_hours):
+    """``(text, classes)`` for the sign-in clock at ``now``."""
+    left = (deadline - now).total_seconds()
+    level = countdown_level(left, warn_hours)
+    if level == "expired":
+        return CLOCK_EXPIRED_TEXT, _CLOCK_CLASSES[level]
+    return f"Auth: {countdown_text(left)} left", _CLOCK_CLASSES[level]
+
+
+# When the clock turns yellow: ``[system] status_clock_warn_hours`` in
+# config/notify.toml, beside the push's own ``token_warn_hours``. Read on every
+# sweep (the loader is mtime-cached), so a change needs no restart.
+_CLOCK_WARN_DEFAULT = 6
+_notify_load, _notify_reset = toml_loader(
+    NOTIFY_TOML, {"system": {"status_clock_warn_hours": _CLOCK_WARN_DEFAULT}},
+    label="notify.toml")
+
+
+def clock_warn_hours():
+    """Hours left under which the clock is yellow; the default for a missing
+    or unusable value (anything but a number from 1 to 168)."""
+    try:
+        raw = (_notify_load().get("system") or {}).get("status_clock_warn_hours")
+    except Exception:  # noqa: BLE001 - a config read must not break the page.
+        return _CLOCK_WARN_DEFAULT
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return _CLOCK_WARN_DEFAULT
+    if not math.isfinite(raw) or not 1 <= raw <= 168:
+        return _CLOCK_WARN_DEFAULT
+    return raw
 
 
 def sign_in_paste_problem(pasted):
@@ -671,6 +763,11 @@ def _probe_one(target, proxy_health=None):
             h = proxy_health if proxy_health is not None else proxy.health()
             up, detail = auth_status(h)
             out.update(up=up, detail=detail)
+            # The clock's deadline, only for a sign-in that is good: a rejected
+            # or expired one keeps its red sentence, never a count.
+            deadline = (sign_in_deadline(h, _dt.datetime.now(_dt.timezone.utc))
+                        if up else None)
+            out["expires_at"] = deadline.isoformat() if deadline else None
         else:  # service
             resp = requests.get(f"{target['url']}/health", timeout=_HTTP_TIMEOUT)
             body = resp.json() if resp.status_code == 200 else {}
@@ -715,13 +812,16 @@ _RESTART_RESWEEP_SEC = 7.0
 # The auto-refresh cadence, and the first tick that fills the page.
 _AUTO_REFRESH_SEC = 15.0
 _FIRST_SWEEP_SEC = 0.1
+# The sign-in clock counts seconds (a unit convention, not a tunable).
+_CLOCK_TICK_SEC = 1.0
 
 
 def render():
     """The health board: one header line with a hand-driven stamp, the overall
     verdict, a card per component, then the published-data freshness table."""
     state = {"results": [], "busy": False, "hold_until": 0.0,
-             "restart_target": None}
+             "restart_target": None, "auth_clock": None,
+             "warn_hours": clock_warn_hours()}
 
     with kit.page():
         head = kit.header("System Status")
@@ -809,11 +909,7 @@ def render():
                             ui.label(r.get("detail", "")).classes(
                                 f"text-xs {theme.MUTED}")
                             if merged_auth is not None:
-                                ui.label(f"Auth: {merged_auth.get('detail', '')}") \
-                                    .classes("text-xs " + (
-                                        theme.TXT_NEG
-                                        if merged_auth.get("up") is False
-                                        else theme.MUTED))
+                                _paint_auth_line(merged_auth)
                         with ui.row().classes("shrink-0 min-w-[120px] justify-end "
                                               "items-center gap-2 flex-wrap"):
                             if merged_auth is not None and merged_auth.get("up") is not None:
@@ -825,6 +921,40 @@ def render():
                                 kit.button("Restart", kind="danger",
                                            icon="restart_alt",
                                            on_click=lambda t=r: _restart_clicked(t))
+
+    def _paint_auth_line(auth):
+        """The sign-in's countdown clock, or the auth sentence when there is
+        no deadline to count to (rejected, expired, a proxy that does not
+        say). The label is kept in ``state`` so the one-second tick can move
+        it between sweeps; each sweep rebuilds the card and replaces it."""
+        state["auth_clock"] = None
+        deadline = None
+        if auth.get("expires_at"):
+            try:
+                deadline = _dt.datetime.fromisoformat(auth["expires_at"])
+            except (TypeError, ValueError):
+                deadline = None
+        if deadline is None:
+            ui.label(f"Auth: {auth.get('detail', '')}").classes(
+                "text-xs " + (theme.TXT_NEG if auth.get("up") is False
+                              else theme.MUTED))
+            return
+        text, cls = auth_clock_view(
+            deadline, _dt.datetime.now(_dt.timezone.utc), state["warn_hours"])
+        label = ui.label(text).classes(cls)
+        state["auth_clock"] = (label, deadline)
+
+    @guard
+    def _tick_auth_clock():
+        held = state.get("auth_clock")
+        if held is None:
+            return
+        label, deadline = held
+        text, cls = auth_clock_view(
+            deadline, _dt.datetime.now(_dt.timezone.utc), state["warn_hours"])
+        if label.text != text:
+            label.set_text(text)
+            label.classes(replace=cls)
 
     def _paint_freshness(rows):
         """Draw rows ALREADY READ (see :func:`_freshness_rows`)."""
@@ -1007,6 +1137,7 @@ def render():
             # ``or []`` / ``or ()``: run.io_bound answers None once the app is
             # stopping, and an empty board is the honest reading of that.
             state["results"] = await run.io_bound(_sweep) or []
+            state["warn_hours"] = clock_warn_hours()
             _paint_components()
             _paint_freshness(await run.io_bound(_freshness_rows) or ())
             # LAST, and only on a sweep that completed: a stamp that advanced
@@ -1030,6 +1161,9 @@ def render():
     fresh.busy.show()
     ui.timer(_FIRST_SWEEP_SEC, _refresh, once=True)
     ui.timer(_AUTO_REFRESH_SEC, _refresh)
+    # The sign-in clock's second hand. It reads no bus and calls nothing: it
+    # recomputes one label from the deadline the last sweep brought.
+    ui.timer(_CLOCK_TICK_SEC, _tick_auth_clock)
     # The push's link, and a phone's reload mid-sign-in: open the dialog.
     if wants_sign_in(_page_query()):
         ui.timer(_FIRST_SWEEP_SEC, _authorize_clicked, once=True)

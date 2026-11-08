@@ -4390,7 +4390,7 @@ styles and needs nothing else to display.</p>
 <p>When you publish an entry, the app also draws a picture card for it. The entry's
 page shows the card at the top, and a link to the entry previews as that card when
 you paste it into a message. Entries already on the site get a card the next time
-the service starts. The card is listed on the Social Cards page for posting only
+the service starts or its scheduled site rebuild runs, whichever comes first. The card is listed on the Social Cards page for posting only
 if the entry was published after the cards launched. Taking an entry off the site
 removes its card too.</p>
 <p><strong>To add an entry:</strong></p>
@@ -4469,8 +4469,8 @@ you.</p>
 <p>Only cards for posts made after the cards launched are listed. Older blog
 entries and trade ideas have cards on the website so it looks the same
 throughout, but this page does not offer them. Trade idea cards also appear here
-only while trade ideas are published to the site (Settings, General). When the
-list is empty and that switch is off, the page says so under "No cards yet."</p>
+only while trade ideas are published to the site (Settings, General). Whenever
+that switch is off, the page says so above the list, even while blog cards are listed.</p>
 <p><strong>Post to X</strong> (the box below the cards) is also where you write a one-off post
 of your own, and where you see every post the app has made on X.</p>
 <ul>
@@ -4526,9 +4526,13 @@ in a trading workflow, which is why they sit apart.</p>
 <li>A <strong>component grid</strong> — Redis, the Schwab gateway, the seven services, the web app
   itself, and the public live screens beside it, each with Online/Offline and its
   tier. The gateway's card also shows the <strong>Schwab auth</strong> state.</li>
-<li>The gateway card's auth line says how long the Schwab sign-in has left
-  ("authorized — sign-in lasts another 6 days 22 hours"). The sign-in lasts 7
-  days from the day you signed in.</li>
+<li>The gateway card's auth line is a clock counting down what the Schwab sign-in
+  has left, to the second ("Auth: 6d 22:14:05 left"). It is <strong>green</strong> while it
+  runs, <strong>yellow</strong> with under 6 hours left, and <strong>red</strong> once the sign-in has
+  expired; a sign-in Schwab has rejected shows a red sentence instead. The
+  yellow line is <strong>Sign-in clock turns yellow under</strong> in Settings →
+  Configuration (Server alerts). The sign-in lasts 7 days from the day you
+  signed in.</li>
 <li>A <strong>Re-authorize</strong> button on the gateway card (<strong>Authorize</strong> when the sign-in
   has lapsed) opens the <strong>Sign in to Schwab</strong> dialog:
   1. <strong>Log in to Schwab</strong> opens Schwab's own login in a new tab.
