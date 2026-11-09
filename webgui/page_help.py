@@ -1387,7 +1387,7 @@ engine's positions live on **Paper Account**.
   ($25,000 plus your closed trades' realized P&L, so **Delete all closed** moves
   it). A trade that would break one is not written, and a message on the page you
   sent it from says which limit — plus *Up to N contracts fit* when a smaller size
-  would clear them all. The Paper trade box opens at the size **Send Live Order**
+  would clear them all. The Paper button's order box starts at the size **Send Live Order**
   would (the most contracts whose max loss is $1,000 or less), or at the most
   these limits allow when that is fewer.
 - **Trade ideas live here too.** While **Book the posted ideas** is on (Settings
@@ -1978,8 +1978,28 @@ An end-of-day summary of the day's options activity and paper trading.
 - **Archive** — pick a month to list that month's saved reports, newest first;
   each day opens its **Summary** or **Detail** in a new tab.
 """,
-    "/x": """
-**Post to X — the simple version**
+    "/social": """
+**Social Cards — the simple version**
+
+Every blog entry and trade idea has a picture card for sharing. This page lists
+them, newest first, and lets you post one to X. Underneath is the box for writing
+a one-off post of your own, and the log of everything the app has posted.
+
+- **The cards.** Each row shows the card, whether it is a *Blog* entry or a
+  *Trade idea*, when it was published (Central time) and its title. A card only
+  appears once its entry or idea is public. Trade idea cards appear only while
+  trade ideas are published to the site (Settings → General). Whenever that
+  switch is off the page says so above the list, even while blog cards are listed.
+  Posts made before launch have cards on the site but are never listed here.
+- **Download** saves the card as a JPEG file.
+- **Copy caption** puts the caption on your clipboard, ready to paste into
+  Instagram or anywhere else. If your browser refuses, allow clipboard access for
+  this site and try again.
+- **Post to X** fills the box below with the card, its caption and its link, and
+  scrolls down to it. **Nothing is sent** until you press **Post** there and
+  confirm.
+
+**The box below — Post to X**
 
 Write a one-off post for the app's X account, and see everything the app has
 posted there.

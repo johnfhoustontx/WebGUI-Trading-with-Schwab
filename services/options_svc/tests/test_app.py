@@ -83,6 +83,8 @@ _BRANCH_HANDLERS = (
     # The public site's trade idea results: a live /quotes call, plus a write
     # into deploy/site if a manifest exists.
     "refresh_site_idea_results",
+    # The startup one-shot that republishes the social cards view from the manifest.
+    "publish_idea_cards",
 )
 
 

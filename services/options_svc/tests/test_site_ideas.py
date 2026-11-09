@@ -151,3 +151,139 @@ def test_an_ideas_settlement_close_asks_for_a_series_fetched_now(monkeypatch):
     compute.daily_close("SPY", "2026-10-02")
     assert seen["endpoint"] == "/pricehistory"
     assert seen["params"]["maxAge"] == 0
+
+
+# ── the social card: a JPEG beside the PNG, the card's facts, the view ──────
+def _card_idea():
+    """A real normalized idea, so the card's facts are the card's own."""
+    from services.options_svc import trade_idea as T
+    from services.options_svc.tests.test_trade_idea import pcs
+    return T.normalize(pcs(type="IC", call_short=775.0, call_long=780.0))
+
+
+def _first_row(root):
+    m = json.loads((root / "ideas.json").read_text(encoding="utf-8"))
+    return m, m["days"][0]["ideas"][0]
+
+
+def test_publish_writes_jpeg_beside_png(tmp_path):
+    from PIL import Image
+    assert S.publish(_card_idea(), _png(), "cap", NOW, root=tmp_path) is True
+    jpg = tmp_path / "ideas" / "2026-09-29" / "1436-SPY.jpg"
+    assert jpg.read_bytes()[:3] == b"\xff\xd8\xff"
+    with Image.open(jpg) as im:
+        assert im.format == "JPEG" and im.size == (2400, 1350)
+
+
+def test_a_failed_jpeg_leaves_jpg_out_and_the_post_lands(tmp_path):
+    assert S.publish(_card_idea(), b"\x89PNG not really", "cap", NOW, root=tmp_path) is True
+    _, first = _first_row(tmp_path)
+    assert "jpg" not in first and first["full"].endswith(".png")
+    assert not (tmp_path / "ideas" / "2026-09-29" / "1436-SPY.jpg").exists()
+
+
+def test_manifest_row_has_jpg_shape_and_card(tmp_path):
+    from services.options_svc import trade_idea_card as C
+    idea = _card_idea()
+    S.publish(idea, _png(2400, 1260), "cap", NOW, root=tmp_path)
+    _, first = _first_row(tmp_path)
+    assert first["jpg"] == "ideas/2026-09-29/1436-SPY.jpg"
+    assert first["shape"] == "wide"
+    assert first["card"] == json.loads(json.dumps(C.card_facts(idea)))
+    assert set(first["card"]) == set(C.CARD_FIELDS)
+
+
+def test_shape_is_wide_only_for_the_new_card_size(tmp_path):
+    S.publish(_card_idea(), _png(2400, 1350), "cap", NOW, root=tmp_path)
+    assert "shape" not in _first_row(tmp_path)[1]
+
+
+def test_a_card_facts_failure_keeps_the_shape_and_drops_the_facts(tmp_path, monkeypatch):
+    from services.options_svc import trade_idea_card as C
+
+    def boom(idea):
+        raise RuntimeError("facts")
+    monkeypatch.setattr(C, "card_facts", boom)
+    assert S.publish(_card_idea(), _png(2400, 1260), "cap", NOW, root=tmp_path) is True
+    first = _first_row(tmp_path)[1]
+    assert first["shape"] == "wide" and "card" not in first
+    assert first["jpg"].endswith(".jpg")
+
+
+def test_ref_re_accepts_jpg():
+    assert S._REF_RE.match("ideas/2026-09-29/1436-SPY.jpg")
+    assert not S._REF_RE.match("ideas/2026-09-29/1436-SPY.gif")
+    ok = dict(_entry(), jpg="ideas/2026-09-29/1435-MU.jpg")
+    old = {"days": [{"date": "2026-09-29", "ideas": [ok]}]}
+    assert S.merge_manifest(old, "2026-09-29", _entry("15:35"), 6, "u")["days"][0][
+        "ideas"][1]["jpg"] == "ideas/2026-09-29/1435-MU.jpg"
+
+
+def test_card_rows_from_manifest(tmp_path):
+    import repo_paths
+    S.publish(_card_idea(), _png(), "Trade idea: SPY", NOW, root=tmp_path)
+    manifest, _ = _first_row(tmp_path)
+    assert S.card_rows(manifest) == [{
+        "key": "idea:2026-09-29-1436-SPY", "kind": "idea",
+        "at": "2026-09-29T14:36:00-05:00", "title": "SPY Iron Condor",
+        "caption": "Trade idea: SPY", "link": f"https://{repo_paths.SITE_HOST}/ideas.html",
+        "png": "ideas/2026-09-29/1436-SPY.png", "jpg": "ideas/2026-09-29/1436-SPY.jpg",
+        "listed": False}]
+
+
+def test_card_rows_skip_old_rows_without_jpg():
+    old = {"days": [{"date": "2026-11-10", "ideas": [_entry("10:35", "2026-11-10")]}]}
+    assert S.card_rows(old) == []
+    assert S.card_rows(None) == [] and S.card_rows({"days": "x"}) == []
+
+
+def test_card_rows_are_listed_from_the_config_date():
+    row = dict(_entry("10:35", "2026-11-10"), jpg="ideas/2026-11-10/1035-MU.jpg",
+               posted=None)
+    out = S.card_rows({"days": [{"date": "2026-11-10", "ideas": [row]}]})
+    assert out[0]["at"] == "2026-11-10T10:35:00" and out[0]["listed"] is True
+
+
+class _CardBus:
+    def __init__(self):
+        self.sets = []
+
+    def cache_set(self, key, payload, **kw):
+        self.sets.append((key, payload, kw))
+        return 1
+
+
+def test_publish_idea_cards_writes_the_view(tmp_path, monkeypatch):
+    from services.options_svc import handlers
+    from shared.notify import switches
+    monkeypatch.setattr(S, "SITE_ROOT", tmp_path)
+    monkeypatch.setattr(switches, "site_settings", lambda: {"trade_ideas": True, "keep_days": 6})
+    S.publish(_card_idea(), _png(), "cap", NOW, root=tmp_path)
+    bus = _CardBus()
+    assert handlers.publish_idea_cards(bus) is None
+    key, payload, kw = bus.sets[0]
+    assert key == "cache:options:social_cards"
+    assert payload["site_enabled"] is True and len(payload["cards"]) == 1
+    assert kw["skip_unchanged"] is True and kw["event"]
+
+
+def test_publish_idea_cards_with_site_off(tmp_path, monkeypatch):
+    from services.options_svc import handlers
+    from shared.notify import switches
+    monkeypatch.setattr(S, "SITE_ROOT", tmp_path)
+    monkeypatch.setattr(switches, "site_settings", lambda: {"trade_ideas": False, "keep_days": 6})
+    S.publish(_card_idea(), _png(), "cap", NOW, root=tmp_path)
+    bus = _CardBus()
+    handlers.publish_idea_cards(bus)
+    assert bus.sets[0][1] == {"cards": [], "site_enabled": False}
+
+
+def test_publish_idea_cards_never_raises(tmp_path, monkeypatch):
+    from services.options_svc import handlers
+
+    class _Boom:
+        def cache_set(self, *a, **k):
+            raise RuntimeError("redis down")
+    monkeypatch.setattr(S, "SITE_ROOT", tmp_path)
+    assert handlers.publish_idea_cards(_Boom()) is None
+    assert handlers.publish_idea_cards(None) is None

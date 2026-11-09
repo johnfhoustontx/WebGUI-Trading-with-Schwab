@@ -467,7 +467,7 @@ The autonomous Claude paper trader (*Claude Trades*) was removed on 2026-09-22.
 | Rail item | Pages |
 |-----------|-------|
 | **Portfolio** (standalone) | — |
-| **More** (group) | EOD Report · Post to X · Blog · User Manuals |
+| **More** (group) | EOD Report · Blog · Social Cards · User Manuals |
 
 **System controls** sit at the foot of the rail, below a separator: **System
 Status**, **Settings**, a red-outlined **Stop All Services** button, and **Sign
@@ -3682,40 +3682,9 @@ setting. It uses your Claude subscription (the Claude Code command line), never 
 paid API key. The time is **Weekly trade-idea review** under *After-close jobs* in
 Settings → Configuration.
 
-## Post to X
-
-**Route:** `/x`.
-
-Write a one-off post for the app's X account, and see every post the app has
-made there.
-
-- **Post** is the text of the post. **Link** and **Hashtags** go on the lines
-  under it, the way every post from the app is laid out.
-- The **counter** shows the length the way X counts it: a link always counts
-  as 23 characters and an emoji as 2. It turns **red** when the post is too long,
-  and the service will then drop hashtags from the end first and only then cut
-  the text. The **Preview** underneath is exactly what will be sent — unless
-  `x.max_tags` is set to something other than 4, since the page previews four
-  hashtags at most.
-- **Image** attaches one PNG or JPEG of up to 5 MB; **Remove image** takes it off.
-- **Post** asks you to confirm, then hands the post to the options service, which
-  sends it. The result appears in the log a moment later.
-- **Recent posts** lists every post the app makes to X — the market reports, the
-  hourly trade ideas and posts from this page — with a link to each one that went
-  out, or the reason it did not (refused, failed, over the daily cap).
-
-> **X is off, and dry, until you set it up.** Nothing reaches X until the `x`
-> block in `shared/notifications.json` has its keys filled in and `enabled` is on.
-> While `x.dry_run` is on, every post is logged as *Dry run* and nothing is sent.
-> The default hashtags for the market reports and the trade ideas live in
-> `x.hashtags`; this page's own defaults (`#options #trading` and the
-> neuralstrike.co link) are built into the page, and it does not read
-> `x.hashtags.marketing`. `max_tags` caps how many hashtags any post carries, and
-> `daily_cap` limits how many posts go out in a day.
-
 ## Blog
 
-**Route:** `/blog` — a tab in the **More** group, after Post to X.
+**Route:** `/blog` — a tab in the **More** group, after EOD Report.
 
 Put an entry on the public site's Blog, and take one off. The Blog's list of
 entries is at `neuralstrike.co/blog.html`, reached from **Blog** in the site's
@@ -3726,6 +3695,13 @@ styles and needs nothing else to display.
 
 > **Nothing is public until you press Publish.** Uploading a file only makes a
 > *draft*: a cleaned copy that waits on this page, where only you can see it.
+
+When you publish an entry, the app also draws a picture card for it. The entry's
+page shows the card at the top, and a link to the entry previews as that card when
+you paste it into a message. Entries already on the site get a card the next time
+the service starts or its scheduled site rebuild runs, whichever comes first. The card is listed on the Social Cards page for posting only
+if the entry was published after the cards launched. Taking an entry off the site
+removes its card too.
 
 **To add an entry:**
 
@@ -3774,6 +3750,67 @@ styles and needs nothing else to display.
   for the blog service, and a message at the bottom of the screen says how it
   went. If the blog service is stopped nothing happens: the control waits, then
   comes back. **System Status** shows whether the service is running.
+
+## Social Cards
+
+**Route:** `/social` — a tab in the **More** group, after Blog. (The old
+`/x` address still works: it takes you here.)
+
+Every blog entry and every trade idea the app posts has a picture card. The same
+card is what X, Discord and Telegram show, what the website shows (a blog entry's
+card is at the top of its page and of its box on the Blog list), and what a link
+to a blog entry previews as when you paste it into a message. This page
+lists the cards, newest first, so you can post them to Instagram, Facebook or X
+from one place.
+
+- Each row shows the card, whether it is a **Blog** entry or a **Trade idea**,
+  when it was published (Central time) and its title. A card appears here within
+  a minute of the entry or idea going public.
+- **Download** saves the card as a JPEG file, the format Instagram accepts.
+- **Copy caption** puts the caption on your clipboard, ready to paste into
+  Instagram or anywhere else. If your browser refuses, allow clipboard access
+  for the site and try again.
+- **Post to X** fills the box underneath with the card, its caption and its
+  link, and scrolls down to it. **Nothing is sent** until you press **Post**
+  there and confirm.
+
+**To post a card to Instagram by hand:** press **Download**, press **Copy
+caption**, then open Instagram on your phone or computer, choose the downloaded
+file and paste the caption. The app never posts to Instagram or Facebook for
+you.
+
+Only cards for posts made after the cards launched are listed. Older blog
+entries and trade ideas have cards on the website so it looks the same
+throughout, but this page does not offer them. Trade idea cards also appear here
+only while trade ideas are published to the site (Settings, General). Whenever
+that switch is off, the page says so above the list, even while blog cards are listed.
+
+**Post to X** (the box below the cards) is also where you write a one-off post
+of your own, and where you see every post the app has made on X.
+
+- **Post** is the text of the post. **Link** and **Hashtags** go on the lines
+  under it, the way every post from the app is laid out.
+- The **counter** shows the length the way X counts it: a link always counts
+  as 23 characters and an emoji as 2. It turns **red** when the post is too long,
+  and the service will then drop hashtags from the end first and only then cut
+  the text. The **Preview** underneath is exactly what will be sent, unless
+  `x.max_tags` is set to something other than 4, since the page previews four
+  hashtags at most.
+- **Image** attaches one PNG or JPEG of up to 5 MB; **Remove image** takes it off.
+- **Post** asks you to confirm, then hands the post to the options service, which
+  sends it. The result appears in the log a moment later.
+- **Recent posts** lists every post the app makes to X (the market reports, the
+  hourly trade ideas and posts from this page), with a link to each one that went
+  out, or the reason it did not (refused, failed, over the daily cap).
+
+> **X is off, and dry, until you set it up.** Nothing reaches X until the `x`
+> block in `shared/notifications.json` has its keys filled in and `enabled` is on.
+> While `x.dry_run` is on, every post is logged as *Dry run* and nothing is sent.
+> The default hashtags for the market reports and the trade ideas live in
+> `x.hashtags`; the composer's own defaults (`#options #trading` and the
+> neuralstrike.co link) are built into the page, and it does not read
+> `x.hashtags.marketing`. `max_tags` caps how many hashtags any post carries, and
+> `daily_cap` limits how many posts go out in a day.
 
 ## User Manuals
 

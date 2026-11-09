@@ -1,4 +1,4 @@
-"""X's text rules, pure. Tier 1 imports this module (the /x page's live count)."""
+"""X's text rules, pure. Tier 1 imports this module (Social Cards (/social)'s live count)."""
 import pathlib
 import subprocess
 import sys

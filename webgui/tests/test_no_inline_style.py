@@ -201,8 +201,8 @@ PHASE_8_FILES = ["status.py", "settings.py", "terminate.py", "manuals.py",
                  "symbol_facts.py", "symbol.py",
                  # Settings -> Configuration.
                  "config_editor.py",
-                 # Post to X.
-                 "x_post.py",
+                 # Post to X, and the Social Cards page that absorbed it.
+                 "x_post.py", "social_cards.py",
                  # Send a trade idea to ThinkorSwim (live orders, Phase 1).
                  "send_order.py", "idea_banner.py",
                  # ... and today's live orders (Phase 3).

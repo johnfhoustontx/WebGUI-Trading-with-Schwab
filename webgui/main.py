@@ -762,6 +762,28 @@ def _serve_blog_preview(draft_id: str):
                              "X-Content-Type-Options": "nosniff"})
 
 
+# The Social Cards page's card images. ``pages.social_cards.serve`` is the whole
+# decision: a key a LISTED card carries, a format of png / jpg, and a file that
+# card names under the site folder; anything else is a 404. Behind the login like
+# every route here, and never registered in the public process.
+@app.get("/social/card/{key}/{fmt}")
+def _serve_social_card(key: str, fmt: str, request: Request):
+    import repo_paths
+    from pages import social_cards
+    from shared import social_cards as cards
+    found = social_cards.serve(
+        key, fmt, request.query_params.get("download") == "1",
+        bus_client.read(cards.VIEW_BLOG), bus_client.read(cards.VIEW_IDEAS),
+        repo_paths.SITE_ROOT)
+    if found is None:
+        return _blog_not_found()
+    data, media_type, disposition = found
+    headers = {"Cache-Control": "private, max-age=60", "X-Content-Type-Options": "nosniff"}
+    if disposition:
+        headers["Content-Disposition"] = disposition
+    return Response(data, media_type=media_type, headers=headers)
+
+
 # Options scanning + auto-scan now live in services/options_svc (Tier 2): the
 # service owns the engine and the 08:00–15:15 CT schedule, writes results to the
 # Redis bus, and the GUI reads the cache + enqueues rescan commands. Sentiment
@@ -877,8 +899,8 @@ FLAT_NAV = [
 # of EOD Report — the old indented sub-group is retired. (route, label, icon)
 MORE_CHILDREN = [
     ("/eod", "EOD Report", "summarize"),
-    ("/x", "Post to X", "campaign"),
     ("/blog", "Blog", "article"),
+    ("/social", "Social Cards", "share"),
 ]
 
 # Sub-menu items that used to nest under the Settings entry; Settings is now a
@@ -1173,7 +1195,7 @@ _TAB_COLOR = {
     "/eod": "#78909c",                   # EOD Report — blue grey
     "/send-order": "#66bb6a",            # Send Live Order — the Ledger's green
     "/live-orders": "#66bb6a",           # Today's Live Orders — the same green
-    "/x": "#1d9bf0",                     # Post to X — X blue
+    "/social": "#1d9bf0",                # Social Cards — X blue
     # Parchment: a pale, low-saturation tan. Every other colour in this map is
     # a saturated Material hue or a blue grey, so a paper colour is the one
     # ground left that reads as its own tab at 16px.
@@ -2751,11 +2773,17 @@ def live_orders_page() -> None:
         live_orders.render()
 
 
-@_page("/x")
-def x_page() -> None:
-    with _layout("/x", "Post to X"):
-        from pages import x_post
-        x_post.render()
+@_page("/social")
+def social_page() -> None:
+    with _layout("/social", "Social Cards"):
+        from pages import social_cards
+        social_cards.render()
+
+
+@app.get("/x")
+def _x_to_social():
+    """Post to X moved into Social Cards; an old bookmark follows it."""
+    return RedirectResponse(url="/social", status_code=308)
 
 
 @_page("/blog")

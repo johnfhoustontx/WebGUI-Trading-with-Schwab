@@ -1,6 +1,6 @@
 """X's text rules — weighted length, hashtags, fitting a post into 280.
 
-Stdlib only: Tier 1 imports it so the /x page's live count is the SAME
+Stdlib only: Tier 1 imports it so Social Cards (/social)'s live count is the SAME
 computation the service posts with (pinned by shared/tests/test_x_text.py).
 
 X counts a URL as 23 (t.co wrapping) and weights characters outside a few Latin

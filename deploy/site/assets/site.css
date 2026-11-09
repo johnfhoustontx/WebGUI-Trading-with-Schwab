@@ -1100,6 +1100,18 @@ body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
   margin: 14px 0 0;
   font-size: 14px;
 }
+/* An entry's social card, above its frame: the same picture the link preview shows.
+ * Its own name: .ns-blog-card is the Blog list's entry, a padded box. */
+.ns-blog-hero {
+  display: block;
+  width: 100%;
+  max-width: 1100px;
+  height: auto;
+  aspect-ratio: 40 / 21;
+  margin: 0 0 20px;
+  border: 1px solid var(--color-neutral-800);
+  border-radius: var(--radius-md);
+}
 .ns-report-frame {
   display: block;
   width: 100%;
@@ -1173,6 +1185,7 @@ body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
   border-bottom: 1px solid var(--color-neutral-800);
   color: transparent;            /* no alt-text spill if a card 404s; see .ns-live-tile img */
 }
+.ns-idea-card img.ns-card-wide { aspect-ratio: 40 / 21; }   /* 1200x630 */
 .ns-idea-meta {
   display: flex;
   gap: 10px;
@@ -1379,6 +1392,17 @@ body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
   box-shadow: var(--shadow-md);
   color: var(--color-text);
   text-decoration: none;
+}
+/* The entry's social card at the top of its box: the picture its link preview
+ * shows. 1.91:1 like the file, so the row does not jump while it loads. */
+.ns-blog-card-img {
+  display: block;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 40 / 21;
+  border: 1px solid var(--color-neutral-800);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg);
 }
 .ns-blog-card-title {
   margin: 0;

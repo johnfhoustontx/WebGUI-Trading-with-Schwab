@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-07</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-08</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -397,7 +397,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#related-pages_28">Related pages</a></li>
 </ul>
 </li>
-<li><a href="#post-to-x">Post to X</a><ul>
+<li><a href="#blog">Blog</a><ul>
 <li><a href="#what-it-is_31">What it is</a></li>
 <li><a href="#where-the-data-comes-from_30">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_29">Reading the screen</a></li>
@@ -406,7 +406,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#related-pages_29">Related pages</a></li>
 </ul>
 </li>
-<li><a href="#blog">Blog</a><ul>
+<li><a href="#social-cards">Social Cards</a><ul>
 <li><a href="#what-it-is_32">What it is</a></li>
 <li><a href="#where-the-data-comes-from_31">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_30">Reading the screen</a></li>
@@ -6582,90 +6582,27 @@ changes nothing by itself.</p>
 <h3 id="related-pages_28">Related pages</h3>
 <p><a href="#paper-ledger">Paper Ledger</a> · <a href="#paper-account">Paper Account</a>.</p>
 <hr />
-<h2 id="post-to-x">Post to X</h2>
-<p><em>Menu: ACCOUNT → More → Post to X · Route <code>/x</code></em></p>
-<h3 id="what-it-is_31">What it is</h3>
-<p>A composer for one-off marketing posts on the app's X account, above a log of every
-post the app has made there — the scheduled market reports and hourly trade ideas as
-well as what you write here.</p>
-<h3 id="where-the-data-comes-from_30">Where the data comes from</h3>
-<p>The page writes nothing to X itself. <strong>Post</strong> sends an <code>x_post</code> command to the options
-service, which fits the text, attaches the image and posts it. Every attempt from any
-source is recorded to the <code>options:x_log</code> cache (the newest 100), which is what the log
-table reads.</p>
-<h3 id="reading-the-screen_29">Reading the screen</h3>
-<p><strong>Post</strong>, <strong>Link</strong> and <strong>Hashtags</strong> make up the post: the text, then a blank line, then
-the link and the hashtags on the lines beneath it. The <strong>counter</strong> measures it the way
-X does — a link is 23 characters and an emoji or other wide character 2 — and turns red
-when the post as written is over 280. The <strong>Preview</strong> is the fitted post: hashtags drop
-from the end first, and only then is the text cut with an ellipsis. The link always
-survives. An optional <strong>Image</strong> (PNG or JPEG, up to 5 MB) travels with the post.</p>
-<p><strong>Recent posts</strong> shows, per post, when it was attempted, its source (<em>Market report</em>,
-<em>Trade idea</em> or <em>Marketing</em>), its status and the link to the post — or, where nothing
-went out, the reason.</p>
-<table>
-<thead>
-<tr>
-<th>Status</th>
-<th>Meaning</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><strong>Posted</strong></td>
-<td>It is on X; the last column links to it.</td>
-</tr>
-<tr>
-<td><strong>Dry run</strong></td>
-<td><code>x.dry_run</code> is on, so it was logged and not sent.</td>
-</tr>
-<tr>
-<td><strong>Refused</strong></td>
-<td>The app declined to send it — X is disabled, that kind of post is switched off, the daily cap is reached, or the image was unusable.</td>
-</tr>
-<tr>
-<td><strong>Failed</strong></td>
-<td>X answered with an error.</td>
-</tr>
-<tr>
-<td><strong>Unknown</strong></td>
-<td>The request left, but no answer said whether it landed.</td>
-</tr>
-</tbody>
-</table>
-<h3 id="why-it-matters_24">Why it matters</h3>
-<p>It is the one place that shows what the app has said in public. A report or trade idea
-that did not go out is listed with the reason, rather than simply not appearing.</p>
-<h3 id="caveats-and-gotchas_14">Caveats and gotchas</h3>
-<ul>
-<li><strong>Off and dry until configured.</strong> Nothing reaches X until the <code>x</code> block in
-  <code>shared/notifications.json</code> holds the account's keys and is enabled; while
-  <code>x.dry_run</code> is on every post is logged as <em>Dry run</em>. The default hashtags for each kind
-  of post live in <code>x.hashtags</code>, <code>max_tags</code> caps how many any post carries, and
-  <code>daily_cap</code> limits how many posts go out per day across all sources.</li>
-<li><strong>A post is public.</strong> The confirm dialog shows the exact text before anything is sent.</li>
-<li>This page exists only in the private app; the public live screens have no way to post.</li>
-</ul>
-<h3 id="related-pages_29">Related pages</h3>
-<p><a href="#eod-report">EOD Report</a> · <a href="#settings">Settings</a>.</p>
-<hr />
 <h2 id="blog">Blog</h2>
 <p><em>Menu: ACCOUNT → More → Blog · Route <code>/blog</code></em></p>
-<h3 id="what-it-is_32">What it is</h3>
+<h3 id="what-it-is_31">What it is</h3>
 <p>The owner's side of the Blog on the public site: upload an entry, look at the draft
 made from it, publish it, and take a published entry back off. An entry is one
 self-contained HTML document: a file that carries its own styles and needs nothing
 else to display. On the site, the list of entries is at <code>neuralstrike.co/blog.html</code>
 (<strong>Blog</strong> in the site's menu; typing <code>neuralstrike.co/blog</code> goes to the same page)
 and each entry has a page of its own at <code>neuralstrike.co/blog/&lt;address&gt;/</code>.</p>
-<h3 id="where-the-data-comes-from_31">Where the data comes from</h3>
+<p>Each published entry also gets a picture card, drawn by the blog service. The entry's
+page shows it at the top and names it as its link preview, and the private
+<a href="#social-cards">Social Cards</a> page lists it for posting. Unpublishing an entry removes
+its card with it.</p>
+<h3 id="where-the-data-comes-from_30">Where the data comes from</h3>
 <p>The page changes nothing itself. Each action is a command to the blog service, which
 cleans an uploaded document, keeps it as a draft, and — only on <strong>Publish</strong> — writes it
 into the public site's files. The page reads three things the service publishes: the
 drafts waiting, the entries published, and its answer to the last command. The
 <strong>Preview</strong> is the cleaned document itself, served from the service's own folder
 through the private app, behind the login.</p>
-<h3 id="reading-the-screen_30">Reading the screen</h3>
+<h3 id="reading-the-screen_29">Reading the screen</h3>
 <p><strong>Add a draft</strong> takes one HTML file (UTF-8, up to the size printed under the box).
 <strong>Replace an existing entry</strong> decides whether the file is a new entry or a new version
 of one that is already published.</p>
@@ -6696,10 +6633,10 @@ once as shipped; past that an upload is refused until one is published or discar
 <p><strong>Preview</strong> opens the cleaned document in a frame. <strong>Publish</strong> puts it on the public
 site at once; <strong>Discard</strong> deletes the draft. <strong>Published</strong> lists the entries on the
 site, newest first, each with <strong>Open on the site</strong> and <strong>Unpublish</strong>.</p>
-<h3 id="why-it-matters_25">Why it matters</h3>
+<h3 id="why-it-matters_24">Why it matters</h3>
 <p>A document written elsewhere can carry anything. Nothing reaches the public site
 without passing through cleaning, a draft you can look at, and your own Publish.</p>
-<h3 id="caveats-and-gotchas_15">Caveats and gotchas</h3>
+<h3 id="caveats-and-gotchas_14">Caveats and gotchas</h3>
 <ul>
 <li><strong>Nothing is public until you press Publish</strong>, and Publish takes effect at once.</li>
 <li><strong>Cleaning removes</strong> scripts, forms, event handlers, embedded frames, images, and
@@ -6724,8 +6661,122 @@ without passing through cleaning, a draft you can look at, and your own Publish.
   running.</li>
 <li>This page exists only in the private app; the public live screens cannot reach it.</li>
 </ul>
+<h3 id="related-pages_29">Related pages</h3>
+<p><a href="#social-cards">Social Cards</a> · <a href="#system-status">System Status</a> · <a href="#settings">Settings</a>.</p>
+<hr />
+<h2 id="social-cards">Social Cards</h2>
+<p><em>Menu: ACCOUNT → More → Social Cards · Route <code>/social</code></em></p>
+<h3 id="what-it-is_32">What it is</h3>
+<p>The list of every picture card the app has made for the public, with the buttons to
+post them, over the composer for one-off posts on the app's X account and the log of
+everything the app has posted there. It replaces the old Post to X page: <code>/x</code> now
+forwards here.</p>
+<p>A card is one image per published blog entry or posted trade idea. The same image is
+what X, Discord and Telegram show, what the website's trade ideas strip and each blog
+entry page show, and what a pasted link to a blog entry previews as. The essentials of
+each card (ticker or title, the strategy or summary, the payoff or grade) sit in the
+middle strip of the image, so Instagram's profile grid, which crops to that strip,
+still reads on its own.</p>
+<h3 id="where-the-data-comes-from_31">Where the data comes from</h3>
+<p>The page draws nothing and posts nothing itself. The blog service draws a blog entry's
+card when the entry is published; the options service draws a trade idea's card when it
+posts the idea. Each publishes a list of its cards (<code>blog:social_cards</code> and
+<code>options:social_cards</code>), and the page reads both. The image files are served to the
+page by the private app from the site's own folder. <strong>Post to X</strong> sends an <code>x_post</code>
+command to the options service, which fits the text, attaches the image and posts it;
+every attempt from any source is recorded to the <code>options:x_log</code> cache (the newest
+100), which the log table reads.</p>
+<h3 id="reading-the-screen_30">Reading the screen</h3>
+<p>Each <strong>card row</strong> shows the image, a <em>Blog</em> or <em>Trade idea</em> label, the publish time
+(Central) and the title, with three buttons.</p>
+<table>
+<thead>
+<tr>
+<th>Button</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Download</strong></td>
+<td>Saves the card as a JPEG, the format Instagram takes.</td>
+</tr>
+<tr>
+<td><strong>Copy caption</strong></td>
+<td>Copies the caption to the clipboard, to paste into Instagram, Facebook or anywhere else.</td>
+</tr>
+<tr>
+<td><strong>Post to X</strong></td>
+<td>Fills the composer below with the card, its caption and its link and scrolls to it. Nothing is sent until you press <strong>Post</strong> and confirm.</td>
+</tr>
+</tbody>
+</table>
+<p>Posting to Instagram is by hand: download the card, copy the caption, and post both
+from Instagram. The app does not post to Instagram or Facebook.</p>
+<p>The composer: <strong>Post</strong>, <strong>Link</strong> and <strong>Hashtags</strong> make up the post: the text, then a
+blank line, then the link and the hashtags on the lines beneath it. The <strong>counter</strong>
+measures it the way X does (a link is 23 characters and an emoji or other wide
+character 2) and turns red when the post as written is over 280. The <strong>Preview</strong> is the
+fitted post: hashtags drop from the end first, and only then is the text cut with an
+ellipsis. The link always survives. An optional <strong>Image</strong> (PNG or JPEG, up to 5 MB)
+travels with the post.</p>
+<p><strong>Recent posts</strong> shows, per post, when it was attempted, its source (<em>Market report</em>,
+<em>Trade idea</em> or <em>Marketing</em>), its status and the link to the post, or, where nothing
+went out, the reason.</p>
+<table>
+<thead>
+<tr>
+<th>Status</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Posted</strong></td>
+<td>It is on X; the last column links to it.</td>
+</tr>
+<tr>
+<td><strong>Dry run</strong></td>
+<td><code>x.dry_run</code> is on, so it was logged and not sent.</td>
+</tr>
+<tr>
+<td><strong>Refused</strong></td>
+<td>The app declined to send it: X is disabled, that kind of post is switched off, the daily cap is reached, or the image was unusable.</td>
+</tr>
+<tr>
+<td><strong>Failed</strong></td>
+<td>X answered with an error.</td>
+</tr>
+<tr>
+<td><strong>Unknown</strong></td>
+<td>The request left, but no answer said whether it landed.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="why-it-matters_25">Why it matters</h3>
+<p>Posting a card by hand is slow and easy to get wrong when the image is saved from a
+chat app. Here every card is one click from its JPEG and its caption, and the
+composer and log show what the app has said in public. A report or trade idea that
+did not go out is listed with the reason, rather than simply not appearing.</p>
+<h3 id="caveats-and-gotchas_15">Caveats and gotchas</h3>
+<ul>
+<li><strong>Only new posts are listed.</strong> A card is listed only when its post was made on or
+  after <code>[cards] listed_from</code> (Settings → Configuration). Blog entries and trade ideas
+  from before that day have a card on the website for the look of the site but are
+  never offered here.</li>
+<li><strong>Trade idea cards need the site switch.</strong> They appear only while trade ideas are
+  published to the site (Settings → General). The page says so only when no card is
+  listed at all and that switch is off.</li>
+<li><strong>Off and dry until configured.</strong> Nothing reaches X until the <code>x</code> block in
+  <code>shared/notifications.json</code> holds the account's keys and is enabled; while
+  <code>x.dry_run</code> is on every post is logged as <em>Dry run</em>. The default hashtags for each kind
+  of post live in <code>x.hashtags</code>, <code>max_tags</code> caps how many any post carries, and
+  <code>daily_cap</code> limits how many posts go out per day across all sources.</li>
+<li><strong>A post is public.</strong> The confirm dialog shows the exact text before anything is sent.</li>
+<li>This page exists only in the private app; the public live screens have no way to post.</li>
+</ul>
 <h3 id="related-pages_30">Related pages</h3>
-<p><a href="#post-to-x">Post to X</a> · <a href="#system-status">System Status</a> · <a href="#settings">Settings</a>.</p>
+<p><a href="#blog">Blog</a> · <a href="#eod-report">EOD Report</a> · <a href="#settings">Settings</a>.</p>
 <hr />
 <h2 id="user-manuals">User Manuals</h2>
 <p><em>Menu: ACCOUNT → More → User Manuals · Route <code>/manuals</code></em></p>

@@ -21,7 +21,7 @@ from services import _degrade
 from services.blog_svc import clean, clean_bound, fonts, handlers, sitewriter
 from services.blog_svc import store as store_mod
 from services.blog_svc.tests import _fonts_kit as kit
-from shared import blog_inbox, site_nav
+from shared import blog_inbox, site_nav, social_cards
 from shared.bus import Bus
 from shared.contracts.envelope import Command
 
@@ -359,7 +359,10 @@ def test_publish_writes_the_site_and_removes_the_draft(bus, site):
         "why-spreads-work", "Why spreads work, revised", ["options"])
     assert site_files(site) == {"blog.html", "blog.json", "blog/sitemap.txt",
                                 "blog/why-spreads-work/index.html",
-                                "blog/why-spreads-work/entry.html"}
+                                "blog/why-spreads-work/entry.html",
+                                "blog/why-spreads-work/card.png",
+                                "blog/why-spreads-work/card.jpg",
+                                "blog/why-spreads-work/card.json"}
     with store_mod.Store() as st:
         document = st.entry_html("why-spreads-work")
     # The store's document with the site's bar put in (shared/site_nav.py) -
@@ -674,7 +677,9 @@ def test_unpublish_removes_the_entry_from_the_store_and_the_site(bus, site):
                       "draft_id": "", "slug": slug}
     assert [entry["slug"] for entry in stored()[1]] == [keep]
     assert site_files(site) == {"blog.html", "blog.json", "blog/sitemap.txt",
-                                f"blog/{keep}/index.html", f"blog/{keep}/entry.html"}
+                                f"blog/{keep}/index.html", f"blog/{keep}/entry.html",
+                                f"blog/{keep}/card.png", f"blog/{keep}/card.jpg",
+                                f"blog/{keep}/card.json"}
     assert not (site / "blog" / slug).exists()
     assert [row["slug"] for row in json.loads((site / "blog.json").read_bytes())["entries"]] == [
         keep]
@@ -946,7 +951,7 @@ def test_the_views_are_read_and_written_as_one_step():
             held.append(handlers._VIEWS_LOCK.locked())
 
     handlers.publish_views(WatchedBus(), WatchedStore())
-    assert held == [True, True, True, True]
+    assert held == [True] * 5           # two reads (drafts, entries), three views
     assert handlers._VIEWS_LOCK.locked() is False
 
 
@@ -1008,3 +1013,17 @@ def test_a_dropped_command_nobody_can_be_told_about_raises_nothing(bus):
     for command in (None, object(), Command.model_construct(type=None, args=None)):
         handlers.on_dropped(bus, command, "restart")
     assert everything_on(bus) == before
+
+
+def test_publish_views_sets_card_view(bus, site):
+    slug = published(bus)
+    view_ = view(bus, social_cards.VIEW_BLOG)
+    assert set(view_) == {"cards"}
+    assert [r["key"] for r in view_["cards"]] == [f"blog:{slug}"]
+    row = view_["cards"][0]
+    assert row["png"] == f"blog/{slug}/card.png" and row["jpg"] == f"blog/{slug}/card.jpg"
+    assert (site / row["png"]).is_file() and (site / row["jpg"]).is_file()
+    version = bus.cache_version(handlers.CACHE_CARDS)
+    with store_mod.Store() as st:
+        handlers.publish_views(bus, st)
+    assert bus.cache_version(handlers.CACHE_CARDS) == version     # skip_unchanged

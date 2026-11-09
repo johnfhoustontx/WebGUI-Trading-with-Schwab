@@ -1298,7 +1298,7 @@ def test_nothing_but_x_post_talks_to_x():
     for base in ("services", "shared", "webgui", "tools"):
         for p in (root / base).rglob("*.py"):
             rel = p.relative_to(root).as_posix()
-            # Only the poster itself is exempt - by PATH, since the /x page shares
+            # Only the poster itself is exempt - by PATH, since Social Cards (/social) shares
             # its file name.
             if "tests" in p.parts or rel == "shared/notify/x_post.py":
                 continue

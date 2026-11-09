@@ -1,5 +1,5 @@
 """The two X commands: ``x_post_report`` (a published market report, once) and
-``x_post`` (an ad-hoc marketing post from the /x page).
+``x_post`` (an ad-hoc marketing post from Social Cards (/social)).
 
 ``x_post.post`` is stubbed except in the one end-to-end test, which runs the real
 poster in dry-run with the real report card. The notifications config is always

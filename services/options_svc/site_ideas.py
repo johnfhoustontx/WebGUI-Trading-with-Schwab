@@ -32,7 +32,10 @@ import threading
 from zoneinfo import ZoneInfo
 
 import repo_paths
+from services import _degrade
 from services.options_svc import trade_idea as _ti
+from shared import card_draw as _card_draw
+from shared import social_cards as _social_cards
 from shared.numeric import parsed_finite as _finite  # noqa: E402 - one shared definition (audit CQ-07)
 
 log = logging.getLogger(__name__)
@@ -53,7 +56,7 @@ SETTLE_AT = _dt.time(15, 0)
 _LOCK = threading.Lock()
 
 _DAY_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_REF_RE = re.compile(r"^ideas/\d{4}-\d{2}-\d{2}/[A-Za-z0-9-]+\.(png|webp)$")
+_REF_RE = re.compile(r"^ideas/\d{4}-\d{2}-\d{2}/[A-Za-z0-9-]+\.(png|webp|jpg)$")
 
 
 def slug(symbol) -> str:
@@ -637,6 +640,13 @@ def _read_manifest(path):
         return None
 
 
+def read_manifest(root=None):
+    """The published ``ideas.json`` (or None), read under the same lock as a write."""
+    root = pathlib.Path(root) if root is not None else SITE_ROOT
+    with _LOCK:
+        return _read_manifest(root / MANIFEST)
+
+
 def _write_atomic(path, data: bytes):
     fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
     try:
@@ -654,6 +664,65 @@ def _prune(ideas_dir, keep):
     for p in ideas_dir.iterdir():
         if p.is_dir() and _DAY_RE.match(p.name) and p.name not in keep:
             shutil.rmtree(p, ignore_errors=True)
+
+
+def _png_size(png):
+    """``(width, height)`` of the PNG bytes, or None when they do not decode."""
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(png)) as im:
+            return im.size
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _social_card(row, idea, png, root):
+    """Add the social card's three fields to ``row``: a JPEG beside the PNG (what
+    Instagram takes), the card's own facts and its shape. Each is best-effort and
+    left OUT on a failure; the post never depends on any of them."""
+    # The shape comes from the PNG itself, so a card_facts failure cannot hide it.
+    if _png_size(png) == (2400, 1260):
+        row["shape"] = "wide"
+    try:
+        from services.options_svc import trade_idea_card
+        row["card"] = json.loads(json.dumps(trade_idea_card.card_facts(idea)))
+    except Exception:  # noqa: BLE001 -- the card and its PNG still publish
+        _degrade.degraded("options.site_ideas.card_facts")
+        row.pop("card", None)
+    try:
+        jpg = _card_draw.jpeg_from_png(png, _social_cards.config()["cards"]["jpeg_quality"])
+        if jpg:
+            rel = row["full"][:-len(".png")] + ".jpg"
+            _write_atomic(root / rel, jpg)
+            row["jpg"] = rel
+    except Exception:  # noqa: BLE001 -- a missing JPEG leaves ``jpg`` out
+        _degrade.degraded("options.site_ideas.jpeg")
+        row.pop("jpg", None)
+
+
+def card_rows(manifest) -> list:
+    """One ``social_cards.row`` per posted idea that has a JPEG, newest first.
+
+    A row from before the JPEG existed has no ``jpg`` and is left out: there is no
+    file for the Social page to offer. ``at`` is the post time."""
+    out = []
+    days = manifest.get("days") if isinstance(manifest, dict) else None
+    for d in days if isinstance(days, list) else ():
+        if not isinstance(d, dict) or not isinstance(d.get("ideas"), list):
+            continue
+        for i in d["ideas"]:
+            if not (isinstance(i, dict) and isinstance(i.get("jpg"), str)
+                    and _REF_RE.match(i["jpg"]) and _valid_idea(i)):
+                continue
+            posted = i.get("posted")
+            at = posted if isinstance(posted, str) and posted else f"{d.get('date')}T{i['time']}:00"
+            stem = i["full"].rsplit("/", 1)[-1][:-len(".png")]
+            out.append(_social_cards.row(
+                _social_cards.idea_key(d.get("date"), stem), "idea", at,
+                f"{i.get('symbol', '')} {i.get('label', '')}".strip(),
+                i.get("alt", ""), f"https://{repo_paths.SITE_HOST}/ideas.html",
+                i["full"], i["jpg"]))
+    return out
 
 
 def publish(idea, png, caption_text, now, *, root=None, keep_days=6, approx=False) -> bool:
@@ -677,6 +746,7 @@ def _publish(idea, png, caption_text, now, root, keep_days, approx):
     full = root / row["full"]
     full.parent.mkdir(parents=True, exist_ok=True)
     _write_atomic(full, png)
+    _social_card(row, idea, png, root)
     web = webp_copy(png)
     if web:
         _write_atomic(root / row["img"], web)

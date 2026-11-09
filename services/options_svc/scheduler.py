@@ -820,6 +820,12 @@ async def loop(bus):
         flow_stream.start()
     except Exception:
         log.exception("flow stream failed to start")
+    # The social cards view starts out as the site has it, so the Social page is
+    # not empty until the next idea posts. Guarded like its neighbours.
+    try:
+        await loop_.run_in_executor(None, handlers.publish_idea_cards, bus)
+    except Exception:
+        log.exception("startup social cards publish degraded")
     last_gex_slot = None  # 1-min GEX history-collection slot (see gex_due)
     last_captured_manage_slot = None  # 5-min captured auto-manage slot (see captured_manage_due)
     last_idea_marks_slot = None  # the trade ideas' mark slot (see idea_marks_due)
@@ -1531,7 +1537,8 @@ async def loop(bus):
 
         async def _site_results_branch():
             try:
-                await loop_.run_in_executor(None, handlers.refresh_site_idea_results)
+                await loop_.run_in_executor(
+                    None, lambda: handlers.refresh_site_idea_results(bus=bus))
             except Exception:
                 log.exception("refresh_site_idea_results branch degraded")
 

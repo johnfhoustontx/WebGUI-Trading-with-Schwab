@@ -43,7 +43,7 @@ import threading
 from services import _degrade
 from services.blog_svc import _trace, clean_bound, fonts, sitewriter
 from services.blog_svc import store as store_mod
-from shared import blog_inbox
+from shared import blog_inbox, social_cards
 
 log = logging.getLogger("blog_svc.handlers")
 
@@ -55,6 +55,8 @@ CACHE_POSTS = f"cache:{blog_inbox.VIEW_POSTS}"
 EVENT_POSTS = f"events:{blog_inbox.VIEW_POSTS}"
 CACHE_RESULT = f"cache:{blog_inbox.VIEW_RESULT}"
 EVENT_RESULT = f"events:{blog_inbox.VIEW_RESULT}"
+CACHE_CARDS = f"cache:{social_cards.VIEW_BLOG}"
+EVENT_CARDS = f"events:{social_cards.VIEW_BLOG}"
 
 # What one row of each view holds. Named here so that nothing else - a draft's
 # typeface list, a column added to the store later - reaches a key the public
@@ -188,11 +190,16 @@ def publish_views(bus, store) -> None:
     # the newer one - a draft shown as waiting for the next half hour.
     with _VIEWS_LOCK:
         drafts = [_row(draft, DRAFT_KEYS) for draft in store.drafts()]
-        entries = [_row(entry, ENTRY_KEYS) for entry in store.entries()]
+        stored = store.entries()
+        entries = [_row(entry, ENTRY_KEYS) for entry in stored]
         bus.cache_set(CACHE_DRAFTS, {"drafts": drafts}, event=EVENT_DRAFTS,
                       skip_unchanged=True)
         bus.cache_set(CACHE_POSTS, {"entries": entries}, event=EVENT_POSTS,
                       skip_unchanged=True)
+        # The cards the site holds, for the private Social Cards page. Rows carry
+        # no time of their own, so an unchanged list bumps nothing.
+        bus.cache_set(CACHE_CARDS, {"cards": sitewriter.card_rows(None, store, stored)},
+                      event=EVENT_CARDS, skip_unchanged=True)
 
 
 # ── pieces the commands share ────────────────────────────────────────────────

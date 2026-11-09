@@ -1,4 +1,4 @@
-"""The /x page's pure helpers: the live preview, the log table and the command."""
+"""Social Cards (/social)'s pure helpers: the live preview, the log table and the command."""
 from pages import x_post as page
 
 
@@ -79,7 +79,7 @@ def _render(monkeypatch, payload=None):
     monkeypatch.setattr(bus_client, "read_version", lambda view: 1)
     monkeypatch.setattr(bus_client, "request", lambda domain, cmd: sent.append((domain, cmd)))
     with ui.card() as host:
-        page.render()
+        page.build()
     return host, sent
 
 

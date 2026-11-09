@@ -497,7 +497,7 @@ def _app_block():
 
     # POST /login is the one route open without a session. Refuse a large body
     # here, before the app sees it. Scoped to that path: the app's own uploads
-    # (the /x page's image) are far larger and sit behind the login.
+    # (the /social composer's image) are far larger and sit behind the login.
     @login path /login
     request_body @login {{
         max_size {login_body_kb()}KB

@@ -117,6 +117,10 @@ FEED_TOML = REPO_ROOT / "config" / "feed.toml"
 # by options-scanner/gex_archive.py.
 GEX_ARCHIVE_TOML = REPO_ROOT / "config" / "gex_archive.toml"
 
+# The Social Cards (blog and idea preview images): sizes, line limits, the first
+# day cards are listed. Read by shared/social_cards.py.
+SOCIAL_CARDS_TOML = REPO_ROOT / "config" / "social_cards.toml"
+
 # Opening Scalp: its tunables (shared/scalp_config.py) and its bar / chain store.
 SCALP_TOML = REPO_ROOT / "config" / "scalp.toml"
 SCALP_DB = REPO_ROOT / "services" / "options_svc" / "data" / "scalp.db"

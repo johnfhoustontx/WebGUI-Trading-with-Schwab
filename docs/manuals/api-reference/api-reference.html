@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-05</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-08</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -110,6 +110,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#on-disk">On disk</a></li>
 <li><a href="#scheduler-and-health">Scheduler and health</a></li>
 <li><a href="#the-private-preview-routes-webgui">The private preview routes (webgui)</a></li>
+<li><a href="#the-private-social-cards-routes-webgui">The private Social Cards routes (webgui)</a></li>
 </ul>
 </li>
 </ul>
@@ -1593,7 +1594,7 @@ z
 </tr>
 <tr>
 <td><code>x_post</code></td>
-<td><code>{text, tags[], link, image_b64?}</code> — an ad-hoc marketing post from the <code>/x</code> page. The image is refused over 5 MB or when it does not decode (logged, nothing posted). Replay-guarded</td>
+<td><code>{text, tags[], link, image_b64?}</code> — an ad-hoc marketing post from the composer on the <code>/social</code> page (Social Cards; <code>/x</code> now redirects there). The image is refused over 5 MB or when it does not decode (logged, nothing posted). Replay-guarded</td>
 <td><code>cache:options:x_log</code></td>
 </tr>
 <tr>
@@ -3381,6 +3382,15 @@ document.</strong></p>
 <p><strong><code>cache:blog:posts</code></strong> — <code>{"entries": [row, …]}</code>, newest first publication first (a
 revision does not move an entry up). <code>skip_unchanged</code>. Each row: <code>slug</code>, <code>title</code>,
 <code>summary</code>, <code>tags</code>, <code>published_at</code>, <code>updated_at</code>.</p>
+<p><strong><code>cache:blog:social_cards</code></strong> — <code>{"cards": [row, …]}</code>, one row per published entry
+that has a card on the site. <code>skip_unchanged</code>. A row is <code>shared.social_cards.row</code>:
+<code>key</code> (<code>blog:&lt;address&gt;</code>), <code>kind</code> (<code>blog</code>), <code>at</code> (the publish time), <code>title</code>,
+<code>caption</code>, <code>link</code> (the entry's address), <code>png</code> and <code>jpg</code> (paths under the site
+folder) and <code>listed</code> (true when the post is on or after <code>[cards] listed_from</code>;
+the Social Cards page shows only listed rows). The sibling view
+<code>cache:options:social_cards</code> has the same rows for posted trade ideas, plus
+<code>site_enabled</code>: false when trade ideas are not published to the site, in which
+case <code>cards</code> is empty.</p>
 <p><strong><code>cache:blog:result</code></strong> — how the last command ended. Written plainly, so the same
 answer twice is two events.</p>
 <pre><code class="language-json">{&quot;request_id&quot;: &quot;…&quot;, &quot;command&quot;: &quot;publish&quot;, &quot;ok&quot;: true,
@@ -3494,6 +3504,26 @@ degrade areas: <code>blog.handlers</code>, <code>blog.clean</code>, <code>blog.c
 <tr>
 <td><code>GET /blog/preview/fonts/{name}</code></td>
 <td>One typeface as <code>font/woff2</code>. 404 unless the name matches <code>FONT_NAME_RE</code> and the file's content hashes to it.</td>
+</tr>
+</tbody>
+</table>
+<p>Both are behind the login and exist only in the private process.</p>
+<h3 id="the-private-social-cards-routes-webgui">The private Social Cards routes (webgui)</h3>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Serves</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /social</code></td>
+<td>The Social Cards page: the cards from <code>cache:blog:social_cards</code> and <code>cache:options:social_cards</code>, newest first, over the X composer. <code>GET /x</code> answers 308 to it.</td>
+</tr>
+<tr>
+<td><code>GET /social/card/{key}/{fmt}</code></td>
+<td>One card's image, <code>fmt</code> <code>png</code> (<code>image/png</code>) or <code>jpg</code> (<code>image/jpeg</code>); <code>?download=1</code> sets <code>Content-Disposition: attachment</code>. 404 unless the key is a listed card and the file is the one that row names under the site folder.</td>
 </tr>
 </tbody>
 </table>
@@ -3971,6 +4001,7 @@ cache:feed:shadow                                           (config/feed.toml mo
 cache:options:x_log                                         (every X post attempt, newest first, last 100)
 cache:options:x_count                                       (X posts made today, CT day - the daily cap)
 cache:options:x_reports                                     (market reports already posted to X)
+cache:options:social_cards     events:options:social_cards  (posted trade ideas' social cards; site_enabled)
 cache:options:em_chain         events:options:em_chain      (Expected Move ladders)
 cache:options:calc_iv          events:options:calc_iv
 cache:options:calc_rating      events:options:calc_rating   (Rate my trade)
@@ -4063,6 +4094,7 @@ cache:news:calendar_status     events:news:calendar_status    (private: per-sour
 cache:news:status              events:news:status
 cache:blog:drafts              events:blog:drafts             (drafts waiting - metadata and a digest, never a document)
 cache:blog:posts               events:blog:posts              (published entries - metadata)
+cache:blog:social_cards        events:blog:social_cards       (blog entries' social cards - paths and captions)
 cache:blog:result              events:blog:result             (how the last cmd:blog command ended)
 cmd:trade   cmd:portfolio   cmd:market   cmd:news   cmd:blog
 </code></pre>

@@ -22,6 +22,90 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   token, which the real proxy never sends. The new tests start from the proxy's
   own `/health` body.
 
+**Prior —** 2026-11-08 (**The social cards are copied to the PC every day.**)
+
+- The operator asked for the cards at `D:\WebGUI Trading with Schwab\Social Media`.
+  `tools/social_cards_export.py` runs on the server (piped to its Python, so it needs
+  no promote) and writes one tar: `Blog/<published day> <slug>` and
+  `Trade Ideas/<date> <HHMM>-<SYMBOL>`, each as `.png`, `.jpg` and a caption `.txt`
+  (the caption the Social Cards page copies). `tools/pull_social_cards.ps1` unpacks
+  it and never deletes, so the folder keeps ideas the site prunes after six days.
+- Windows task **NeuralStrike social cards pull**, daily 18:00, runs copies of both
+  from `C:\Users\john_\NeuralStrike\social-cards-pull\`
+  (`docs/dev-prod-environments.md` section 11). First run: 159 files (12 blog entries
+  and 41 trade ideas, three files each).
+- Seen while building it: the older **NeuralStrike social pull** task (the market
+  reports' cards, `D:\NeuralStrike Reports`) has failed every run since about
+  2026-11-04, because it uses `vps2-ts`, which this PC cannot reach with ProtonVPN on.
+  Not changed here.
+
+**Prior —** 2026-11-08 (**The Blog list shows each entry's card, and the entry picture gets its own class.**)
+
+- The operator's ask: the card was on each entry's page but not on the Blog list
+  (`blog.html`). `blog.json` now carries `card: true` when the entry's card on disk
+  is current (`sitewriter._card_current`, the same rule `card_rows` uses), and
+  `assets/blog.js` draws `blog/<slug>/card.png` at the top of that entry's box,
+  built from the checked slug, lazy, with empty `alt` (the title follows as text).
+- Fixed in the same change: the entry page's picture and the list's entry both
+  used `.ns-blog-card`, so each took the other's styling (the list boxes got the
+  picture's fixed 40:21 shape, the picture got the box's padding and background).
+  The picture is now `.ns-blog-hero`; the next rebuild rewrites every entry page.
+- Checked on a local copy of the site with prod's 12 entries and their cards, at
+  1280 px (three columns) and 375 px (one), with one entry left without a card.
+  Tests: `test_the_manifest_says_which_entries_have_a_card`,
+  `test_the_blog_script_shows_an_entrys_card_where_the_service_draws_it`,
+  `test_the_entry_image_and_the_list_entry_do_not_share_a_class`.
+
+**Prior —** 2026-11-08 (**Social Cards: one picture card for every blog entry and trade idea, a private page to post them from, and Post to X folded into it.**)
+
+- **Why.** Instagram has no way in for the app, and saving a card from Telegram or
+  the site by hand is slow. Every post that leaves NeuralStrike now has one card, and
+  the same image is what X, Discord, Telegram, the site's link previews, Instagram and
+  Facebook show. Design: [`plans/2026-11-08-social-cards-design.md`](plans/2026-11-08-social-cards-design.md);
+  plan: [`plans/2026-11-08-social-cards-plan.md`](plans/2026-11-08-social-cards-plan.md).
+- **The drawing kit.** `shared/card_draw.py` (Pillow canvas, the mark, fonts,
+  `jpeg_from_png`), used by both services, never by Tier 1. Cards are 1200 x 630 layout
+  px drawn at 2x (2400 x 1260), with the essentials in the middle 3:4 strip so
+  Instagram's profile grid reads on its own; the wings hold what a feed may show and a
+  grid may lose.
+- **The trade idea card** (`options_svc/trade_idea_card.py`) is redrawn at 1200 x 630
+  in three columns and replaces the 1200 x 675 card everywhere (X, Discord, Telegram,
+  the site's home strip and `ideas.html`). `card_facts` / `CARD_FIELDS` name exactly
+  what it draws; the site manifest rows now carry `jpg`, `shape` and `card`.
+- **The blog card** (`blog_svc/card.py`) is drawn when an entry is published or on the
+  next rebuild (redrawn only when its digest changes). Each entry folder holds
+  `card.png`, `card.jpg` and `card.json`; the entry page shows the card at the top and
+  carries `og:image` / `twitter:card` tags. Unpublishing removes them with the folder.
+- **Two new views**, `blog:social_cards` (`blog_svc`) and `options:social_cards`
+  (`options_svc`, from the site manifest, with `site_enabled`), both `skip_unchanged`,
+  merged by `shared/social_cards.py`, which also holds the caption builder and the
+  `listed` rule. `config/social_cards.toml` (`[cards] jpeg_quality`, `listed_from`,
+  `[blog]` title and summary sizes, `[caption] max_hashtags`) is in Settings ->
+  Configuration.
+- **The page.** `/social` (More, between Blog and User Manuals): the cards newest
+  first with Download (JPEG), Copy caption and Post to X, which fills the composer
+  beneath it and sends nothing until its own confirm. The composer and Recent posts are
+  Post to X's (`x_post.build`); `/x` answers 308 to `/social`. A private route,
+  `/social/card/{key}/{fmt}`, serves a listed card's file.
+- **The past is drawn for the site only.** `[cards] listed_from` ships as `2026-11-09`
+  (set it to the promote day before merging); every older blog entry and trade idea
+  has a card on the site and is never listed for posting. `tools/redraw_idea_cards.py`
+  redraws the ideas still on the site from the manifest, the caption's POP and the
+  Ledger's score and grade, and keeps the old image for any idea missing a printed
+  figure; it is a dry run unless given `--write`. It skips an idea already in the new
+  card (`shape` wide or a stored `card`) and one posted on or after `listed_from`, and
+  says so in the output.
+- **Manuals.** User Guide and Reference Guide: Post to X became Social Cards (and the
+  Blog sections mention the card); API Reference: the two views and the two routes;
+  `webgui/page_help.py` has a `/social` guide. `docs/reference/blog.md` has a section
+  on the card.
+- **To do after the promote** (operator): run `tools/redraw_idea_cards.py --root
+  <copy of deploy/site>` on prod and compare each card with its original, then
+  `--write` against the real site, outside market hours when no idea is posting
+  (the tool holds no lock against `options_svc`, which rewrites `ideas.json` on every
+  post and results pass; it re-reads `ideas.json` just before it writes); on the first live trade idea look at it on X,
+  Discord, Telegram and the site and log what each showed here.
+
 **Prior —** 2026-11-08 (**The Status page's Schwab sign-in line is a countdown clock.**)
 
 - The proxy card's "Auth: authorized — sign-in lasts another 7 hours" is now a

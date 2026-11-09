@@ -14,26 +14,30 @@ two things differ from the snapshot and briefing cards:
   web GUI's theme, and a post that fails because a colour file moved would be a
   poor trade. ⚠ If the mark or the brand hexes change, this copy does not follow.
 
+The card is 1200 x 630 layout px and is built in three columns. Instagram's profile
+grid crops a post to its centre strip (``card_draw.GRID_STRIP``), so the MIDDLE
+column holds what must read on its own there -- ticker, strategy, payoff, grade --
+and the two WINGS hold the figures, which the feed, the site, X, Discord and
+Telegram show whole.
+
 The face is Inter, the public site's own font (``deploy/site/assets``), a variable
 font whose weights are selected by name. A host without it falls back to
-card_kit's system fonts -- an ugly card beats no post.
+Pillow's built-in default font (``shared.card_draw.font``) -- an ugly card beats no post.
 
 CONTRACT: **never raises.** A card that cannot be drawn returns None, and the push
 falls back to its text caption.
 """
 import datetime as _dt
-import functools
-import io
 import logging
-import pathlib
 
 from services.options_svc import card_kit as K
 from services.options_svc import trade_idea as T
+from shared import card_draw as D
+from shared.card_draw import SCALE, Canvas, _box, _s  # noqa: F401 -- SCALE is read by report_card and the tests
 
 log = logging.getLogger(__name__)
 
-WIDTH, HEIGHT = 1200, 675          # 16:9 -- what Discord, Telegram and X preview uncropped
-SCALE = 2
+WIDTH, HEIGHT = 1200, 630          # 40:21; the middle 472 px survive Instagram's 3:4 grid crop
 PAD = 44
 
 BRAND_TITLE = (238, 241, 246)      # [brand].a_from, the mark's chevrons
@@ -44,169 +48,140 @@ FLAT = K.TONES["flat"]
 GRADE_TONE = {"Strong": POS, "Good": BRAND_ACCENT, "Marginal": (224, 183, 78)}
 BIAS_TONE = {"bullish": POS, "bearish": NEG}
 
-_INTER = pathlib.Path(__file__).resolve().parents[2] / "deploy" / "site" / "assets" / "inter-latin.woff2"
-_WEIGHT_NAMES = {"regular": b"Regular", "medium": b"Medium", "semibold": b"SemiBold",
-                 "bold": b"Bold", "extrabold": b"ExtraBold"}
+# What the card draws and nothing else: the site stores exactly these beside the JPEG.
+CARD_FIELDS = ("symbol", "type", "label", "bias", "legs", "expiration", "dte", "spot",
+               "grade", "score", "pop_pct", "entry_cash", "max_profit", "max_loss",
+               "breakevens", "em")
+_LEG_FIELDS = ("kind", "side", "strike", "expiration", "qty")
+
+# Layout px of the three columns; the middle one sits inside the grid strip.
+MID = (384, 816)
+LEFT = (PAD, 344)
+RIGHT = (856, WIDTH - PAD)
+CX = WIDTH / 2
 
 
-@functools.lru_cache(maxsize=64)
-def font(size, weight="regular"):
-    """Inter at ``size`` layout px (scaled), or card_kit's fallback."""
-    px = int(round(size * SCALE))
-    try:
-        from PIL import ImageFont
-        if _INTER.exists():
-            f = ImageFont.truetype(str(_INTER), px)
-            try:
-                f.set_variation_by_name(_WEIGHT_NAMES.get(weight, b"Regular"))
-            except Exception:  # noqa: BLE001 -- a static build: one weight will do
-                pass
-            return f
-    except Exception:  # noqa: BLE001 -- fall through to the system face
-        log.debug("Inter load failed", exc_info=True)
-    return K._font(px, "bold" if weight in ("semibold", "bold", "extrabold") else "regular")
-
-
-def _s(v):
-    return int(round(v * SCALE))
-
-
-def _box(*xy):
-    return tuple(_s(v) for v in xy)
-
-
-class _Canvas:
-    """Layout-px drawing over a SCALE-x image, so every call reads in the 1200 grid."""
-
-    def __init__(self, im):
-        from PIL import ImageDraw
-        self.im = im
-        self.d = ImageDraw.Draw(im)
-
-    def text(self, x, y, s, size, weight="regular", fill=K.TEXT, anchor="la", spacing=0.0):
-        f = font(size, weight)
-        if not spacing:
-            self.d.text((_s(x), _s(y)), s, font=f, fill=fill, anchor=anchor)
-            return self.width(s, size, weight)
-        # Tracked text: draw per character so capitals breathe like the app's lockup.
-        cx = x
-        for ch in s:
-            self.d.text((_s(cx), _s(y)), ch, font=f, fill=fill, anchor="la")
-            cx += self.width(ch, size, weight) + spacing
-        return cx - x - spacing
-
-    def width(self, s, size, weight="regular", spacing=0.0):
-        w = self.d.textlength(s, font=font(size, weight)) / SCALE
-        return w + spacing * max(0, len(s) - 1)
-
-    def rrect(self, x0, y0, x1, y1, r, fill=None, outline=None, width=1):
-        self.d.rounded_rectangle(_box(x0, y0, x1, y1), radius=_s(r), fill=fill,
-                                 outline=outline, width=_s(width))
-
-    def line(self, pts, fill, width=1):
-        self.d.line([(_s(x), _s(y)) for x, y in pts], fill=fill, width=max(1, _s(width)),
-                    joint="curve")
-
-    def pill(self, x, y, s, size, fg, weight="bold", pad_x=9, h=24, spacing=1.2):
-        w = self.width(s, size, weight, spacing) + 2 * pad_x
-        bg = tuple(int(c * 0.18 + b * 0.82) for c, b in zip(fg, K.CARD))
-        self.rrect(x, y, x + w, y + h, h / 2, fill=bg, outline=_mix(fg, K.CARD, 0.45))
-        self.text(x + pad_x, y + (h - size) / 2 - size * 0.12, s, size, weight, fg,
-                  spacing=spacing)
-        return w
-
-
-def _mix(a, b, t):
-    """``t`` of colour ``a`` over ``b``."""
-    return tuple(int(round(x * t + y * (1 - t))) for x, y in zip(a, b))
-
-
-def _mark(c, x, y, size):
-    """THE FLIP, from neuralstrike-mark.svg's 64-unit geometry."""
-    k = size / 64.0
-    c.rrect(x + 5 * k, y + 30.75 * k, x + 59 * k, y + 33.25 * k, 1.25 * k, fill=BRAND_ACCENT)
-    c.line([(x + 20 * k, y + 11 * k), (x + 32 * k, y + 23 * k), (x + 44 * k, y + 11 * k)],
-           BRAND_TITLE, 4.6 * k)
-    c.line([(x + 20 * k, y + 53 * k), (x + 32 * k, y + 41 * k), (x + 44 * k, y + 53 * k)],
-           BRAND_TITLE, 6.2 * k)
+def card_facts(idea):
+    """The fields the card draws, as plain data. ``render_trade_idea_png`` of this is
+    byte-identical to its render of ``idea`` itself."""
+    out = {k: idea.get(k) for k in CARD_FIELDS}
+    out["legs"] = [{k: lg[k] for k in _LEG_FIELDS if k in lg}
+                   for lg in (idea.get("legs") or [])]
+    return out
 
 
 def _header(c, now, label="TRADE IDEA"):
-    """The lockup, a right-aligned ``<label> · <date> · <time> CT`` eyebrow and the
-    rule under both. ``label`` lets the market report card share it."""
-    _mark(c, PAD, 30, 34)
-    x = PAD + 46
-    x += c.text(x, 38, "NEURAL", 17, "extrabold", BRAND_TITLE, spacing=2.4) + 2.4
-    c.text(x, 38, "STRIKE", 17, "extrabold", BRAND_ACCENT, spacing=2.4)
-    right = f"{label}  ·  {now:%a %b} {now.day}  ·  {now:%H:%M} CT".upper()
-    c.text(WIDTH - PAD - c.width(right, 13, "semibold", 1.6), 41, right, 13, "semibold",
+    """The lockup at the left, ``label`` centred in brand blue and the date at the
+    right. ``label`` lets the market report card share it."""
+    D.mark(c, PAD, 34, 30, rule=BRAND_ACCENT, chevrons=BRAND_TITLE)
+    x = PAD + 42
+    x += c.text(x, 40, "NEURAL", 17, "semibold", BRAND_TITLE, spacing=3.4) + 3.4
+    c.text(x, 40, "STRIKE", 17, "bold", BRAND_ACCENT, spacing=3.4)
+    lab = label.upper()
+    c.text(CX - c.width(lab, 13, "bold", 2.0) / 2, 40, lab, 13, "bold", BRAND_ACCENT,
+           spacing=2.0)
+    when = f"{now:%a %b} {now.day}  ·  {now:%H:%M} CT".upper()
+    c.text(WIDTH - PAD - c.width(when, 12, "semibold", 1.6), 42, when, 12, "semibold",
            K.EYEBROW, spacing=1.6)
-    c.line([(PAD, 86), (WIDTH - PAD, 86)], K.EDGE, 1)
+
+
+def _fit_size(c, s, size, weight, max_w, floor=12):
+    while size > floor and c.width(s, size, weight) > max_w:
+        size -= 1
+    return size
+
+
+def _tile(c, x0, y0, x1, y1, label, value, tone, size=44):
+    """A labelled figure tile: the label small and tracked, the value large."""
+    c.rrect(x0, y0, x1, y1, 10, fill=K.CARD, outline=K.EDGE)
+    c.text(x0 + 18, y0 + 20, label, 11, "bold", K.EYEBROW, spacing=1.8)
+    size = _fit_size(c, value, size, "bold", (x1 - x0) - 36)
+    c.text(x0 + 18, y0 + (y1 - y0) * 0.5 + size * 0.62 + 4, value, size, "bold", tone,
+           anchor="ls")
+
+
+def _middle_head(c, idea):
+    """Ticker, ``<label> · $<spot>`` and the bias pill, centred in the strip."""
+    width = MID[1] - MID[0]
+    sym = str(idea["symbol"])
+    size = _fit_size(c, sym, 96, "extrabold", width)
+    c.text(CX, 82 + size * 0.86, sym, size, "extrabold", K.TITLE, anchor="ms")
+
+    label = str(idea["label"])
+    spot = f"${idea['spot']:,.2f}" if idea.get("spot") is not None else ""
+    sep = "  ·  " if spot else ""
+    size = 26
+    while size > 14 and c.width(label + sep + spot, size, "medium") > width:
+        size -= 1
+    x = CX - c.width(label + sep + spot, size, "medium") / 2
+    base = 186 + size * 0.97
+    x += c.text(x, base, label, size, "medium", K.TEXT, anchor="ls")
+    if spot:
+        x += c.text(x, base, sep, size, "medium", K.MUTED, anchor="ls")
+        c.text(x, base, spot, size, "medium", K.MUTED, anchor="ls")
+
+    bias = str(idea.get("bias") or "neutral").upper()
+    pw = c.width(bias, 12, "bold", 1.8) + 28
+    c.pill(CX - pw / 2, 226, bias, 12, BIAS_TONE.get(bias.lower(), FLAT), K.BG, pad_x=14,
+           spacing=1.8)
 
 
 def _left(c, idea):
-    x, y = PAD, 110
-    sym_w = c.text(x, y - 6, str(idea["symbol"]), 60, "extrabold", K.TITLE)
-    if idea.get("spot") is not None:
-        c.text(x + sym_w + 16, y + 34, f"${idea['spot']:,.2f}", 20, "medium", K.MUTED)
-    y += 76
-    lw = c.text(x, y, idea["label"], 24, "semibold", K.TEXT)
-    bias = str(idea.get("bias") or "neutral")
-    c.pill(x + lw + 14, y + 3, bias.upper(), 11, BIAS_TONE.get(bias, FLAT))
-
-    # ── legs ────────────────────────────────────────────────────────────────
-    y += 50
-    c.text(x, y, "LEGS", 12, "bold", K.EYEBROW, spacing=1.8)
-    dte = idea.get("dte")
-    exp_note = T.expiry_text(idea["expiration"]) + (f" · {dte} DTE" if dte is not None else "")
-    c.text(x + 470 - c.width(exp_note, 13, "medium"), y, exp_note, 13, "medium", K.MUTED)
-    y += 24
+    """The legs, the expiry line under them, and the breakeven tile."""
+    x0, x1 = LEFT
+    c.text(x0, 104, "LEGS", 11, "bold", K.EYEBROW, spacing=1.8)
+    y = 132
     for lg in idea["legs"][:4]:
-        c.rrect(x, y, x + 470, y + 38, 8, fill=K.CARD, outline=K.EDGE)
+        c.rrect(x0, y, x1, y + 38, 8, fill=K.CARD, outline=K.EDGE)
         long_ = lg["side"] == "long"
-        tag = "BUY" if long_ else "SELL"
         tone = POS if long_ else NEG
-        c.rrect(x + 10, y + 8, x + 62, y + 30, 11, fill=_mix(tone, K.CARD, 0.18),
-                outline=_mix(tone, K.CARD, 0.45))
-        c.text(x + 36, y + 19, tag, 11, "bold", tone, anchor="mm")
-        c.text(x + 76, y + 9, f"{lg['qty']}×", 17, "medium", K.MUTED)
-        c.text(x + 108, y + 8, T.strike_text(lg["strike"]), 19, "bold", K.TITLE)
-        c.text(x + 210, y + 9, lg["kind"].upper(), 17, "semibold", K.TEXT)
-        exp = T.expiry_text(lg["expiration"])
-        c.text(x + 460 - c.width(exp, 15), y + 11, exp, 15, "regular", K.MUTED)
-        y += 44
-    return y
+        pw = c.pill(x0 + 10, y + 7, "BUY" if long_ else "SELL", 10, tone, K.CARD, pad_x=9,
+                    h=24, spacing=1.0)
+        sx = x0 + 10 + pw + 12
+        sx += c.text(sx, y + 25.5, f"{lg['qty']}×", 16, "medium", K.MUTED, anchor="ls") + 10
+        c.text(sx, y + 26, T.strike_text(lg["strike"]), 19, "bold", K.TITLE, anchor="ls")
+        kind = lg["kind"].upper()
+        c.text(x1 - 12 - c.width(kind, 15, "semibold", 1.0), y + 12, kind, 15, "semibold",
+               K.TEXT, spacing=1.0)
+        y += 46
+    dte = idea.get("dte")
+    note = T.expiry_text(idea["expiration"]) + (f" · {dte} DTE" if dte is not None else "")
+    c.text(x0, y + 4, note, 14, "medium", K.MUTED)
+
+    be = idea.get("breakevens") or []
+    value = " / ".join(T.strike_text(b) for b in be[:2]) or "-"
+    c.rrect(x0, 440, x1, 532, 10, fill=K.CARD, outline=K.EDGE)
+    c.text(x0 + 16, 456, "BREAKEVEN", 11, "bold", K.EYEBROW, spacing=1.8)
+    size = _fit_size(c, value, 26, "bold", (x1 - x0) - 32)
+    c.text(x0 + 16, 512, value, size, "bold", K.TITLE, anchor="ls")
 
 
-def _grade(c, idea, x, y, w):
+def _stats(c, idea):
+    """The right wing: max risk, max profit, probability of profit."""
+    x0, x1 = RIGHT
+    pop = idea.get("pop_pct")
+    _tile(c, x0, 104, x1, 234, "MAX RISK", T.money(idea["max_loss"]), NEG)
+    _tile(c, x0, 250, x1, 380, "MAX PROFIT", T.money(idea["max_profit"]), POS)
+    _tile(c, x0, 396, x1, 532, "PROBABILITY OF PROFIT",
+          f"{pop:.0f}%" if pop is not None else "-", K.TITLE)
+
+
+def _grade(c, idea):
+    x0, x1 = MID
+    y0, y1 = 460, 544
     tone = GRADE_TONE.get(idea.get("grade"), FLAT)
-    c.rrect(x, y, x + w, y + 86, 12, fill=_mix(tone, K.CARD, 0.10), outline=_mix(tone, K.CARD, 0.5))
-    c.text(x + 18, y + 14, "GRADE", 12, "bold", K.EYEBROW, spacing=1.8)
-    c.text(x + 18, y + 34, str(idea.get("grade") or "-"), 34, "extrabold", tone)
+    c.rrect(x0, y0, x1, y1, 10, fill=D.mix(tone, K.CARD, 0.10),
+            outline=D.mix(tone, K.CARD, 0.5))
+    c.text(x0 + 18, y0 + 14, "GRADE", 11, "bold", K.EYEBROW, spacing=1.8)
+    c.text(x0 + 18, y0 + 66, str(idea.get("grade") or "-"), 38, "extrabold", tone,
+           anchor="ls")
     if idea.get("score") is not None:
         s = f"{idea['score']:.0f}"
-        sw = c.width(s, 34, "extrabold")
-        c.text(x + w - 18 - sw - c.width(" / 100", 15, "medium"), y + 34, s, 34, "extrabold", K.TITLE)
-        c.text(x + w - 18 - c.width(" / 100", 15, "medium"), y + 51, " / 100", 15, "medium", K.MUTED)
-
-
-def _stats(c, idea, y):
-    be = idea.get("breakevens") or []
-    cells = [
-        ("MAX RISK", T.money(idea["max_loss"]), NEG),
-        ("MAX PROFIT", T.money(idea["max_profit"]), POS),
-        ("PROBABILITY OF PROFIT", f"{idea['pop_pct']:.0f}%", K.TITLE),
-        ("BREAKEVEN", " / ".join(T.strike_text(b) for b in be[:2]) or "-", K.TITLE),
-    ]
-    gap = 14
-    w = (WIDTH - 2 * PAD - gap * 3) / 4
-    for i, (label, value, tone) in enumerate(cells):
-        x = PAD + i * (w + gap)
-        c.rrect(x, y, x + w, y + 84, 12, fill=K.CARD, outline=K.EDGE)
-        c.text(x + 18, y + 15, label, 11, "bold", K.EYEBROW, spacing=1.6)
-        size = 30 if c.width(value, 30, "bold") < w - 36 else 22
-        c.text(x + 18, y + 38 + (30 - size) * 0.5, value, size, "bold", tone)
-    c.text(PAD, y + 92, "Per contract, at expiration, after commissions.", 12, "regular", K.MUTED)
+        tail = " / 100"
+        tw = c.width(tail, 15, "medium")
+        c.text(x1 - 18 - tw, y0 + 66, tail, 15, "medium", K.MUTED, anchor="ls")
+        c.text(x1 - 18 - tw - c.width(s, 38, "extrabold"), y0 + 66, s, 38, "extrabold",
+               K.TITLE, anchor="ls")
 
 
 def chart_window(idea):
@@ -225,10 +200,10 @@ def chart_window(idea):
 def _chart(c, idea, x0, y0, x1, y1):
     from PIL import Image, ImageDraw
 
-    c.rrect(x0, y0, x1, y1, 14, fill=K.CARD, outline=K.EDGE)
-    c.text(x0 + 20, y0 + 16, "PAYOFF AT EXPIRATION", 12, "bold", K.EYEBROW, spacing=1.8)
+    c.rrect(x0, y0, x1, y1, 10, fill=K.CARD, outline=K.EDGE)
+    c.text(x0 + 16, y0 + 12, "PAYOFF AT EXPIRATION", 11, "bold", K.EYEBROW, spacing=1.8)
 
-    px0, px1, py0, py1 = x0 + 24, x1 - 24, y0 + 60, y1 - 44
+    px0, px1, py0, py1 = x0 + 20, x1 - 20, y0 + 40, y1 - 34
     lo, hi = chart_window(idea)
     n = 240
     prices = [lo + (hi - lo) * i / n for i in range(n + 1)]
@@ -278,9 +253,9 @@ def _chart(c, idea, x0, y0, x1, y1):
             c.line([(sx, yy), (sx, min(yy + 6, py1))], K.MUTED, 1.2)
             yy += 11
         label = f"Spot {T.strike_text(spot)}"
-        lw = c.width(label, 12, "semibold")
+        lw = c.width(label, 11, "semibold")
         lx = min(max(sx - lw / 2, px0), px1 - lw)
-        c.text(lx, y1 - 34, label, 12, "semibold", K.TEXT)
+        c.text(lx, y1 - 26, label, 11, "semibold", K.TEXT)
 
     for b in idea.get("breakevens") or []:
         if lo <= b <= hi:
@@ -292,24 +267,28 @@ def _chart(c, idea, x0, y0, x1, y1):
     # trade's max profit or loss (a long put's floor sits far off the left edge),
     # and a corner label reading +$10,758 beside a MAX PROFIT tile reading $91,484
     # looks like the card contradicting itself.
-    c.text(px0 + 2, zero - 18, "$0", 11, "semibold", K.MUTED)
+    c.text(px0 + 2, zero - 16, "$0", 10, "semibold", K.MUTED)
+
+
+def layout(idea, now, footer="neuralstrike.co"):
+    """Draw the card and return the canvas, so a test reads ``drawn``."""
+    c = Canvas(D.new_image(K.BG, WIDTH, HEIGHT))
+    _header(c, now)
+    _middle_head(c, idea)
+    _chart(c, idea, MID[0], 268, MID[1], 448)
+    _grade(c, idea)
+    _left(c, idea)
+    _stats(c, idea)
+    c.text(PAD, 572, "Per contract, at expiration, after commissions.", 13, "regular",
+           K.MUTED)
+    if footer:
+        c.text(WIDTH - PAD - c.width(footer, 13, "semibold", 0.6), 572, footer, 13,
+               "semibold", K.MUTED, spacing=0.6)
+    return c
 
 
 def _render(idea, now, footer):
-    from PIL import Image
-
-    im = Image.new("RGB", (WIDTH * SCALE, HEIGHT * SCALE), K.BG)
-    c = _Canvas(im)
-    _header(c, now)
-    _left(c, idea)
-    _chart(c, idea, 560, 106, WIDTH - PAD, 420)
-    _stats(c, idea, 518)
-    _grade(c, idea, 560, 426, WIDTH - PAD - 560)
-    if footer:
-        c.text(PAD, HEIGHT - 34, footer, 13, "semibold", K.MUTED, spacing=0.6)
-    buf = io.BytesIO()
-    im.save(buf, format="PNG", optimize=True)
-    return buf.getvalue()
+    return D.png_bytes(layout(idea, now, footer).im)
 
 
 def render_trade_idea_png(idea, *, now=None, footer="neuralstrike.co"):

@@ -3036,6 +3036,7 @@ def run_trade_idea(bus, slot, now=None) -> dict:
         result["posted"] = trade_idea.next_posted(posted, idea, today)
         result["x"] = _post_trade_idea_x(bus, idea, png, now)
         result["site"] = _publish_trade_idea_site(idea, png, now)
+        publish_idea_cards(bus)
         result["ledger"] = _book_trade_idea_ledger(idea, now)
     else:
         result["reason"] = "send failed"
@@ -3139,7 +3140,28 @@ def _publish_trade_idea_site(idea, png, now) -> bool:
         return False
 
 
-def refresh_site_idea_results(now=None) -> int:
+CACHE_SOCIAL_CARDS = "cache:options:social_cards"
+EVENT_SOCIAL_CARDS = "events:options:social_cards"
+
+
+def publish_idea_cards(bus) -> None:
+    """Publish the posted trade ideas' social cards as ``cache:options:social_cards``
+    for the private Social page: one row per idea that has a JPEG, read from the
+    site's manifest. With the site switch off the list is empty (``site_enabled``
+    says why). Never raises: a view that cannot be written costs nothing."""
+    try:
+        from services.options_svc import site_ideas
+        from shared.notify import switches
+        enabled = bool(switches.site_settings()["trade_ideas"])
+        manifest = site_ideas.read_manifest() if enabled else None
+        rows = site_ideas.card_rows(manifest) if enabled else []
+        bus.cache_set(CACHE_SOCIAL_CARDS, {"cards": rows, "site_enabled": enabled},
+                      event=EVENT_SOCIAL_CARDS, skip_unchanged=True)
+    except Exception:  # noqa: BLE001
+        _degrade.degraded("options.publish_idea_cards")
+
+
+def refresh_site_idea_results(now=None, bus=None) -> int:
     """Recompute how each posted trade idea on the public site has done. An idea
     booked into the Paper Ledger shows that row's own status and P&L
     (``idea_ledger.site_rows``, one read of the book), so the site matches the
@@ -3160,6 +3182,8 @@ def refresh_site_idea_results(now=None) -> int:
                                ledger_fn=idea_ledger.site_rows)
         if n:
             log.info("site trade idea results: %d updated", n)
+        if bus is not None:
+            publish_idea_cards(bus)
         return n
     except Exception:  # noqa: BLE001
         _degrade.degraded("options.refresh_site_idea_results")
@@ -3551,7 +3575,7 @@ def run_x_post_report(bus, args, now=None):
 
 
 def run_x_post(bus, args, now=None):
-    """One ad-hoc marketing post from the /x page. Never raises.
+    """One ad-hoc marketing post from Social Cards (/social). Never raises.
 
     ``image_b64`` (optional) must be strict base64 decoding to at most 5 MB; a
     bad or oversized image is refused and logged - the post is never sent
@@ -3654,7 +3678,7 @@ def _refuse_stale(bus, command) -> None:
                 getattr(command, "ts", None),
                 _STALE_WHY.get(command.type, "a replayed command must not run again"))
     if command.type == "x_post":
-        # The /x page is watching its log; a silent drop reads as a hang.
+        # Social Cards (/social) is watching its log; a silent drop reads as a hang.
         x_post.record_refusal(bus, "marketing", str(args.get("text") or ""),
                               "expired in the queue")
 
@@ -3665,7 +3689,7 @@ def command_dropped(bus, command, why) -> None:
     page that is still waiting on it. Never raises.
 
     Only two commands have somebody waiting on a result view: the Paper button
-    (``cache:options:paper_create``) and the /x page's post. For the rest the
+    (``cache:options:paper_create``) and Social Cards (/social)'s post. For the rest the
     page shows its last good view, which is the truth."""
     try:
         kind = getattr(command, "type", None)

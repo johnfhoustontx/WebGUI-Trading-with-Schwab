@@ -19,16 +19,32 @@ import io
 import logging
 
 from services.options_svc import card_kit as K
-from services.options_svc.trade_idea_card import (
-    BRAND_ACCENT, HEIGHT, PAD, SCALE, WIDTH, _Canvas, _header, font,
-)
+from services.options_svc.trade_idea_card import BRAND_ACCENT, BRAND_TITLE
+from shared import card_draw as _D
+from shared.card_draw import Canvas as _Canvas, font
 
 log = logging.getLogger(__name__)
 
+WIDTH, HEIGHT = 1200, 675     # its own 16:9 frame; the trade idea card moved to 1200 x 630
+PAD, SCALE = 44, _D.SCALE
 MAX_HIGHLIGHTS = 4
 HEADLINE_SIZE, HEADLINE_LEAD, HEADLINE_LINES = 34, 44, 2
 HIGHLIGHT_SIZE, HIGHLIGHT_STEP = 20, 58
 ELLIPSIS = "…"
+
+
+def _header(c, now, label):
+    """The lockup, a right-aligned ``<label> · <date> · <time> CT`` eyebrow and the
+    rule under both. This card's own copy: the trade idea card's header was
+    redrawn for the Instagram grid and this card keeps its look."""
+    _D.mark(c, PAD, 30, 34, rule=BRAND_ACCENT, chevrons=BRAND_TITLE)
+    x = PAD + 46
+    x += c.text(x, 38, "NEURAL", 17, "extrabold", BRAND_TITLE, spacing=2.4) + 2.4
+    c.text(x, 38, "STRIKE", 17, "extrabold", BRAND_ACCENT, spacing=2.4)
+    right = f"{label}  ·  {now:%a %b} {now.day}  ·  {now:%H:%M} CT".upper()
+    c.text(WIDTH - PAD - c.width(right, 13, "semibold", 1.6), 41, right, 13, "semibold",
+           K.EYEBROW, spacing=1.6)
+    c.line([(PAD, 86), (WIDTH - PAD, 86)], K.EDGE, 1)
 
 
 def highlights(report):

@@ -70,7 +70,9 @@ def test_the_first_pass_repairs_rebuilds_and_publishes(monkeypatch):
 
     assert order == ["repair", "rebuild", "views"]
     assert site_files() == {"blog.html", "blog.json", "blog/sitemap.txt",
-                            "blog/first-entry/index.html", "blog/first-entry/entry.html"}
+                            "blog/first-entry/index.html", "blog/first-entry/entry.html",
+                            "blog/first-entry/card.png", "blog/first-entry/card.jpg",
+                            "blog/first-entry/card.json"}
     assert [row["slug"] for row in view(bus, blog_inbox.VIEW_POSTS)["entries"]] == ["first-entry"]
     assert view(bus, blog_inbox.VIEW_DRAFTS) == {"drafts": []}
 
@@ -177,7 +179,9 @@ def test_a_later_pass_catches_the_site_up_once_it_is_switched_back_on(monkeypatc
     scheduler.later_pass(Bus())
 
     assert site_files() == {"blog.html", "blog.json", "blog/sitemap.txt",
-                            "blog/first-entry/index.html", "blog/first-entry/entry.html"}
+                            "blog/first-entry/index.html", "blog/first-entry/entry.html",
+                            "blog/first-entry/card.png", "blog/first-entry/card.jpg",
+                            "blog/first-entry/card.json"}
 
 
 def test_a_later_pass_takes_down_what_was_unpublished_while_the_site_was_off(monkeypatch):
