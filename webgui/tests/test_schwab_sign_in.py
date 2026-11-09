@@ -293,3 +293,52 @@ def test_the_sign_in_is_refused_in_the_public_process():
     handlers read the process, not a flag a caller could leave out."""
     src = inspect.getsource(status.render)
     assert src.count("_shell.is_public()") >= 2
+
+
+# ── an EXPIRED sign-in must still offer Authorize (2026-11-08) ───────────────
+# The proxy's own /health for a dead sign-in, as schwab_proxy.health() builds
+# it: since 2026-08-22 it answers status "reauth_required", and the app's
+# proxy.health() reads anything but "ok" as up False. auth_status took that for
+# "proxy down", returned up None, and the page draws Authorize only for a
+# known up/down - so the button vanished exactly when the sign-in expired.
+# Every earlier test fed auth_status "up": True with an expired token, a
+# combination the real proxy never sends; these start from the PRODUCER.
+_EXPIRED_HEALTH = {
+    "status": "reauth_required", "has_token": True, "token_expired": True,
+    "refresh_token_expired": True, "refresh_token_rejected": False,
+    "refresh_error": None, "refresh_token_expires_at": "2026-11-08T14:00:00Z",
+    "refresh_token_hours_left": 0.0,
+}
+_REJECTED_HEALTH = {**_EXPIRED_HEALTH, "refresh_token_expired": False,
+                    "refresh_token_rejected": True,
+                    "refresh_token_hours_left": 40.0}
+_NO_TOKEN_HEALTH = {"status": "reauth_required", "has_token": False,
+                    "token_expired": True, "refresh_token_expired": True,
+                    "refresh_token_rejected": False}
+
+
+@pytest.mark.parametrize("payload, reason", [
+    (_EXPIRED_HEALTH, "refresh token expired"),
+    (_REJECTED_HEALTH, "rejected by Schwab"),
+    (_NO_TOKEN_HEALTH, "no token"),
+])
+def test_a_dead_sign_in_is_a_known_down_not_a_proxy_down(monkeypatch, payload,
+                                                          reason):
+    monkeypatch.setattr(proxy_mod.requests, "get",
+                        lambda url, timeout=None: _Resp(200, dict(payload)))
+    up, detail = status.auth_status(proxy_mod.health())
+    assert up is False, detail          # False draws Authorize; None hides it
+    assert reason in detail
+
+
+def test_an_unreachable_proxy_is_still_unknown(monkeypatch):
+    """Non-vacuity partner: a proxy that does not answer is not a dead sign-in."""
+    def _boom(url, timeout=None):
+        raise requests.ConnectionError("refused")
+
+    monkeypatch.setattr(proxy_mod.requests, "get", _boom)
+    up, _ = status.auth_status(proxy_mod.health())
+    assert up is None
+    monkeypatch.setattr(proxy_mod.requests, "get",
+                        lambda url, timeout=None: _Resp(502, None))
+    assert status.auth_status(proxy_mod.health())[0] is None

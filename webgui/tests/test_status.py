@@ -1550,3 +1550,41 @@ def test_a_rejected_sign_in_is_a_red_sentence_not_a_clock(monkeypatch):
     assert theme.TXT_NEG.split()[0] in label._classes
     _run_timer(host, "_tick_auth_clock")      # no clock: the tick leaves it
     assert "rejected by Schwab" in label.text
+
+
+# ── an expired sign-in keeps its Authorize button (2026-11-08) ───────────────
+def _dead_sign_in_rows():
+    """The proxy and auth rows as the REAL probe builds them from the proxy's
+    /health for an expired sign-in, after ``proxy.health`` has read its
+    ``reauth_required`` status as ``up: False``."""
+    health = {"up": False, "status": "reauth_required", "has_token": True,
+              "token_expired": True, "refresh_token_expired": True,
+              "refresh_token_rejected": False,
+              "refresh_token_expires_at": "2026-11-08T14:00:00Z",
+              "refresh_token_hours_left": 0.0}
+    targets = [t for t in status.component_targets()
+               if t["kind"] in ("proxy", "auth")]
+    assert {t["kind"] for t in targets} == {"proxy", "auth"}
+    return [status._probe_one(t, proxy_health=dict(health)) for t in targets]
+
+
+def test_an_expired_sign_in_still_offers_authorize(monkeypatch):
+    """Reported 2026-11-08: once the sign-in expired it could not be renewed
+    from the app. The page read the proxy as down and drew no Authorize."""
+    host = _render_status(monkeypatch, results=_dead_sign_in_rows())
+    _run_timer(host, "_refresh")
+    assert [b.text for b in _buttons(host)].count("Authorize") == 1
+    auth = _clock_label(host)
+    assert "refresh token expired" in auth.text
+    assert theme.TXT_NEG.split()[0] in auth._classes
+    texts = [str(t) for t in _texts(host)]
+    assert "unreachable" not in texts
+    assert "running · Schwab sign-in required" in texts
+
+
+def test_an_expired_sign_in_is_still_a_component_down(monkeypatch):
+    """The proxy card reads as running, but the dead sign-in still turns the
+    banner: a credential that stops all market data must not render green."""
+    verdict = status.overall_status(_dead_sign_in_rows())
+    assert not verdict["all_up"]
+    assert verdict["color"] == "negative"

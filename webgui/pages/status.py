@@ -305,6 +305,16 @@ def freshness_row(label, view, version, ts, now, scheduled):
     }
 
 
+PROXY_REAUTH_STATUS = "reauth_required"
+
+
+def proxy_needs_sign_in(health):
+    """True when the proxy ANSWERED and says its Schwab sign-in is dead (no
+    token, expired, or rejected by Schwab). It is running: a restart cannot
+    help, and Authorize can."""
+    return isinstance(health, dict) and health.get("status") == PROXY_REAUTH_STATUS
+
+
 def auth_status(health):
     """Map a proxy ``/health`` dict to ``(up, detail)`` for the Schwab Auth card.
 
@@ -314,7 +324,13 @@ def auth_status(health):
     * ``up=True`` — authorized. An expired **access** token is still ``True`` because
       the proxy auto-refreshes it from a valid refresh token.
     """
-    if not health or not health.get("up"):
+    # ⚠ A proxy answering ``status: "reauth_required"`` is RUNNING with a dead
+    # sign-in, and ``proxy.health`` reads it as ``up: False`` (anything but
+    # "ok"). Until 2026-11-08 this line took that for "proxy down", returned
+    # None, and the page draws Authorize only for a known up/down: the button
+    # vanished exactly when the sign-in expired, which is the one time it is
+    # needed. The reasons below then name which way it died.
+    if not health or not (health.get("up") or proxy_needs_sign_in(health)):
         return (None, "proxy down — can't check authorization")
     if not health.get("has_token"):
         return (False, "no token — authorization required")
@@ -665,6 +681,8 @@ def proxy_detail(health) -> str:
     faults fell back to a plain fetch since the proxy started: those were
     visible only on ``/stats/api_calls``, which no screen reads. An older proxy
     has no ``market_store`` block and a garbled one adds nothing. PURE."""
+    if proxy_needs_sign_in(health):
+        return "running · Schwab sign-in required"
     if not isinstance(health, dict) or not health.get("up"):
         sc = health.get("status_code") if isinstance(health, dict) else None
         return f"HTTP {sc}" if sc else "unreachable"
@@ -741,7 +759,10 @@ def _probe_one(target, proxy_health=None):
                 up, bus_client.persistence() if up else "unknown"))
         elif kind == "proxy":
             h = proxy_health if proxy_health is not None else proxy.health()
-            out.update(up=bool(h.get("up")), detail=proxy_detail(h))
+            # A proxy with a dead sign-in is running: the card says so, and the
+            # failed sign-in shows on its auth line and turns its icon red.
+            out.update(up=bool(h.get("up")) or proxy_needs_sign_in(h),
+                       detail=proxy_detail(h))
         elif kind == "peer":
             # An HTTP probe, never a TCP connect: a dead accept loop stays bound
             # and passes a connect, which is how a promote once left prod

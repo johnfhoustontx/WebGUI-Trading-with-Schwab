@@ -4,7 +4,25 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-08 (**The Status page's Schwab sign-in line is a countdown clock.**)
+**Last updated:** 2026-11-08 (**An expired Schwab sign-in can be renewed from the app again.**)
+
+- **The bug.** Once the sign-in expired, the Status page showed the proxy as
+  "Offline · unreachable", the auth line as "proxy down — can't check
+  authorization", and no Authorize button, so the only way back was the
+  proxy's tailnet page. Since 2026-08-22 the proxy answers `/health` with
+  `status: "reauth_required"` for a dead sign-in; `webgui/proxy.health` reads
+  anything but `"ok"` as `up: False`, and `auth_status` took that for a proxy
+  that did not answer (`up=None`), for which the page draws no Authorize.
+- **The fix** (`webgui/pages/status.py`, `proxy_needs_sign_in`): a proxy that
+  answers `reauth_required` is running. `auth_status` gives the reason (expired,
+  rejected, no token) with `up=False`, which draws Authorize; the proxy card
+  reads "running · Schwab sign-in required", and its icon and the banner stay
+  red. `proxy.health` and the shell's banner are unchanged.
+- **Why the tests missed it:** they fed `auth_status` `up: True` with an expired
+  token, which the real proxy never sends. The new tests start from the proxy's
+  own `/health` body.
+
+**Prior —** 2026-11-08 (**The Status page's Schwab sign-in line is a countdown clock.**)
 
 - The proxy card's "Auth: authorized — sign-in lasts another 7 hours" is now a
   clock ticking every second ("Auth: 6d 22:14:05 left"): green while it runs,
