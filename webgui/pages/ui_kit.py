@@ -792,6 +792,32 @@ def info_dialog(title, *, width="w-[720px]"):
                            open=dlg.open, close=dlg.close)
 
 
+def window(title, *, width="w-[760px]"):
+    """A window over the page that opened it: a title, a close ✕, the content.
+    A click outside does NOT close it (a half-filled form survives a stray
+    click); the ✕ and Esc do. Built at the CLIENT's top level, so a panel
+    repaint behind it cannot delete it, and deleted once closed: a handle is
+    SINGLE-USE, so build a new one per open."""
+    with ui.context.client.content:
+        with ui.dialog().props("no-backdrop-dismiss") as dlg, \
+                ui.card().classes(f"ns-app {_t.CARD} {width} max-w-[95vw] gap-3"):
+            with ui.row().classes("w-full items-center no-wrap gap-2"):
+                title_lbl = ui.label(title).classes(
+                    f"text-subtitle1 font-semibold {_t.LABEL}")
+                ui.space()
+                icon_button("close", tooltip="Close", on_click=dlg.close)
+            content = ui.column().classes("w-full gap-3")
+
+    @guard
+    def _on_toggle(e):
+        if not e.value:
+            dlg.delete()
+
+    dlg.on_value_change(_on_toggle)
+    return SimpleNamespace(dialog=dlg, title=title_lbl, content=content,
+                           open=dlg.open, close=dlg.close)
+
+
 def section_title(text):
     """A heading inside a page ("Open positions", "Analytics")."""
     return ui.label(text).classes(f"text-subtitle2 font-semibold {_t.LABEL}")

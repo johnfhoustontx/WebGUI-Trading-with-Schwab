@@ -373,7 +373,7 @@ directional trades on their own tab.
   The same button is on every page with this panel.
 - **Send Live Order** (under it, while Settings → Configuration → *Live orders*
   is on) sends the same trade to your Schwab account as a REAL order, through a
-  ticket where you set the limit, the contracts and the account, and Schwab
+  ticket (a window over the page) where you set the limit, the contracts and the account, and Schwab
   previews it before anything is placed. Options only: no shares, no /ES or /NQ.
 - **Probability vs Needs** (in the detail panel) — "Needs" is the win rate this
   trade's own price DEMANDS to break even. Probability above it is cushion,
@@ -1425,7 +1425,8 @@ engine's positions live on **Paper Account**.
 - **Send Live Order — this one is REAL money.** Every row's detail panel has
   **Send Live Order** (options only: not shares, not /ES or /NQ), and a banner
   offers the same when an idea posts. It opens an
-  order ticket: the live price, a **Limit**, **Contracts** (opens at the most
+  order ticket in a window over the page (the ✕ or Esc closes it; a click
+  outside does not): the live price, a **Limit**, **Contracts** (opens at the most
   that risk at most $1,000; more is allowed, in the warning colour, up to 50
   contracts and $5,000) and the **Account** by name. **Preview** asks Schwab to
   check the order and places nothing; **Send** then places it, in the regular

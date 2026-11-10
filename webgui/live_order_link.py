@@ -5,11 +5,15 @@ built by ``pages/options/detail.py`` (Market Scanner, Swing, Captured Signals,
 Paper Ledger, Calculator) offers **Send Live Order** beside **Copy ThinkorSwim
 order**, for the same trade:
 
-* a Paper Ledger trade idea opens ``/send-order?trade=<id>``, and the service
-  reads the idea from the Ledger itself;
+* a Paper Ledger trade idea opens the ticket for ``trade=<id>``, and the
+  service reads the idea from the Ledger itself;
 * any other trade is turned into a SPEC (its ticker, legs, a label and the
-  price the panel showed), stashed here under a random token, and opens
-  ``/send-order?spec=<token>``. The service checks the spec as strictly as an
+  price the panel showed), stashed here under a random token, and opens the
+  ticket for ``spec=<token>``.
+
+The ticket opens as a WINDOW over the panel (``send_order.open_window``), so
+the trade stays in view behind it; ``/send-order`` still serves the same ticket
+as a page for a typed or reloaded address. The service checks the spec as strictly as an
   idea (``live_order.read_spec``), prices the legs itself and builds the order
   itself.
 
@@ -64,7 +68,7 @@ def spec_for(signal):
 
 
 def offer(signal, today=None):
-    """What the panel's button opens: ``{"href": ...}`` for a Ledger trade idea,
+    """What the panel's button opens: ``{"trade": id}`` for a Ledger trade idea,
     ``{"spec": ...}`` for any other trade a ticket may send, or None (live
     orders off, shares, an /ES or /NQ contract, or legs ``read_spec`` refuses)."""
     if live_orders_config.mode() == "off":
@@ -72,7 +76,7 @@ def offer(signal, today=None):
     s = signal if isinstance(signal, dict) else {}
     idea = s.get("live_idea")
     if isinstance(idea, str) and live_order.TRADE_ID_RE.match(idea):
-        return {"href": f"/send-order?trade={idea}"}
+        return {"trade": idea}
     if futures_chain.is_feed_symbol(str(s.get("symbol") or "")):
         return None
     spec = spec_for(s)
@@ -102,10 +106,14 @@ def take(token):
     return _STASH.get(token)
 
 
-def href_for(found) -> str | None:
-    """The ticket's address for :func:`offer`'s answer (stashing a spec)."""
+def open_ticket(found) -> None:
+    """Open :func:`offer`'s answer as the ticket WINDOW over the panel, stashing
+    a spec first. The ticket page is imported here, lazily, for the same reason
+    this module is imported lazily: the public process must never load it."""
     if not found:
-        return None
-    if "href" in found:
-        return found["href"]
-    return f"/send-order?spec={stash(found['spec'])}"
+        return
+    from pages import send_order
+    if "trade" in found:
+        send_order.open_window(trade=found["trade"])
+    else:
+        send_order.open_window(spec=stash(found["spec"]))

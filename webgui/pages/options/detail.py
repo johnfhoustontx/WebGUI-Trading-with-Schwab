@@ -986,11 +986,12 @@ def _live_button(s):
     if found is None:
         return
     # ``secondary``, the panel's footer buttons' own kind (Expected Move,
-    # Analyze): an action that opens a page, not a quiet inline link.
+    # Analyze): an action that opens a window, not a quiet inline link. The
+    # ticket opens OVER this page, so the trade stays in view behind it.
     kit.button(_link.BUTTON_TEXT, kind="secondary", icon="send",
-               tooltip="Opens an order ticket for this trade: preview it with Schwab, "
-                       "then send it to your account",
-               on_click=lambda: _shell.navigate_to(_link.href_for(found))) \
+               tooltip="Opens an order ticket for this trade over this page: preview it "
+                       "with Schwab, then send it to your account",
+               on_click=lambda: _link.open_ticket(found)) \
         .classes("self-start mt-1")
 
 

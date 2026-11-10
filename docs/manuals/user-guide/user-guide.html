@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-08</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-10</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -2536,7 +2536,11 @@ It is off until you turn it on: <strong>Settings → Configuration → Live orde
   in the app only (never Telegram or Discord), and it goes away after 30 minutes
   (<em>No banner for an idea older than</em>).</li>
 </ul>
-<p><strong>The ticket</strong> (<code>/send-order</code>) re-prices the trade's legs from a fresh chain and
+<p><strong>The ticket</strong> opens as a window over the page you are on, so the trade stays in
+view behind it. The ✕ or Esc closes it; a click outside it does not, so a
+half-filled ticket survives a stray click. Closing it does not cancel an order
+already sent: <strong>Today's live orders</strong> still lists it. (The same ticket is also a
+page at <code>/send-order</code>.) It re-prices the trade's legs from a fresh chain and
 shows the live mid beside the price the idea posted at (for a trade idea) or the
 price the panel showed (for anything else), with a warning when it has moved more
 than 10%. A ticket opened from a panel is held until the app restarts; after a

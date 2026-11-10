@@ -2,8 +2,8 @@
 
 When the hourly trade idea posts and is booked into the Paper Ledger,
 ``cache:options:trade_idea`` moves. Every private page's ``_layout`` mounts this
-banner, which offers **Open order ticket** (``/send-order?trade=<id>``) and
-**Dismiss**. It never sends anything itself.
+banner, which offers **Open order ticket** (the ticket for ``trade=<id>``, as a
+window over the page the operator is on) and **Dismiss**. It never sends anything itself.
 
 **In the app only.** Nothing goes to Telegram, Discord, X, ntfy or the site: a
 ticket link in a chat with a wide audience would show who acts on which idea.
@@ -22,6 +22,7 @@ from collections import OrderedDict
 from nicegui import ui
 
 import bus_client
+from pages import send_order
 from pages import ui_kit as kit
 from pages.options import theme as _t
 from pages.ui_guard import guard
@@ -102,7 +103,7 @@ def render() -> None:
             ui.label(got["text"]).classes(f"text-sm font-semibold {_t.LABEL}")
             ui.space()
             kit.button("Open order ticket", kind="primary", icon="send",
-                       on_click=lambda: ui.navigate.to(got["href"]))
+                       on_click=lambda: send_order.open_window(trade=got["trade_id"]))
             kit.button("Dismiss", kind="secondary", icon="close",
                        on_click=lambda: (dismiss(got["trade_id"]), _paint()))
 

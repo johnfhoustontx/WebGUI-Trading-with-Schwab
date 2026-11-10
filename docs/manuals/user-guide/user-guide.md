@@ -2093,7 +2093,11 @@ It is off until you turn it on: **Settings → Configuration → Live orders →
   in the app only (never Telegram or Discord), and it goes away after 30 minutes
   (*No banner for an idea older than*).
 
-**The ticket** (`/send-order`) re-prices the trade's legs from a fresh chain and
+**The ticket** opens as a window over the page you are on, so the trade stays in
+view behind it. The ✕ or Esc closes it; a click outside it does not, so a
+half-filled ticket survives a stray click. Closing it does not cancel an order
+already sent: **Today's live orders** still lists it. (The same ticket is also a
+page at `/send-order`.) It re-prices the trade's legs from a fresh chain and
 shows the live mid beside the price the idea posted at (for a trade idea) or the
 price the panel showed (for anything else), with a warning when it has moved more
 than 10%. A ticket opened from a panel is held until the app restarts; after a

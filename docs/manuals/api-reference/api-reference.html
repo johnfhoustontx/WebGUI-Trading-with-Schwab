@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-08</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-10</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -2807,12 +2807,15 @@ fall back to another symbol's chain: a stale capture is labelled, never shown as
 <p>A trade can be sent to the Schwab account as a real order, and cancelled while it works (Phases 1-3 of the
 <a href="../../plans/2026-11-05-live-order-to-thinkorswim-design.md">design</a>): a single option, a
 vertical, an iron condor, a straddle, a strangle, a butterfly, a condor, a calendar, a
-diagonal, or any other all-option mix as <code>CUSTOM</code> (<code>live_order.SENDABLE_TYPES</code>). The page
-is in the private app, reached two ways:</p>
+diagonal, or any other all-option mix as <code>CUSTOM</code> (<code>live_order.SENDABLE_TYPES</code>). The ticket
+is in the private app. A detail panel (<code>live_order_link.open_ticket</code>) and the idea banner
+open it as a WINDOW over the page (<code>pages/send_order.open_window</code>, built on <code>kit.window</code>);
+the route <code>/send-order</code> serves the same ticket as a page. Either way it names its trade
+one of two ways:</p>
 <ul>
-<li><code>/send-order?trade=&lt;trade_id&gt;</code>: a trade idea the Paper Ledger booked; the service reads
+<li><code>trade=&lt;trade_id&gt;</code>: a trade idea the Paper Ledger booked; the service reads
   its legs from the Ledger.</li>
-<li><code>/send-order?spec=&lt;token&gt;</code>: any other detail panel. <code>webgui/live_order_link.py</code> stashes
+<li><code>spec=&lt;token&gt;</code>: any other detail panel. <code>webgui/live_order_link.py</code> stashes
   the panel's trade as a SPEC <code>{symbol, legs, label, price}</code> under a 32-hex token (in the
   webgui process's memory, the newest 64), and the commands carry the spec itself. The
   service checks it again with <code>live_order.read_spec</code> (the ticker allow-list, each leg,

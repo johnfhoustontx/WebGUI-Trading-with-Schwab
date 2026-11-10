@@ -159,7 +159,7 @@ def test_a_ledger_idea_opens_its_own_ticket(mode):
     row = {"trade_id": "ab12cd34", "source": "trade_idea", "symbol": "SPY",
            "expiration": EXP, "legs": QUOTE["legs"]}
     sig = paper.synth_from_trade(row)
-    assert link.offer(sig, TODAY) == {"href": "/send-order?trade=ab12cd34"}
+    assert link.offer(sig, TODAY) == {"trade": "ab12cd34"}
     # Any other Ledger row travels as its legs.
     mine = paper.synth_from_trade({**row, "source": None})
     assert mine["live_idea"] is None and "spec" in link.offer(mine, TODAY)
@@ -202,6 +202,28 @@ def test_the_stash_is_bounded_and_survives_a_reload():
     assert link.take(first) is None and len(link._STASH) == link.STASH_MAX
     assert link.take("not-hex") is None and link.take(None) is None
     link._STASH.clear()
+
+
+def test_the_panel_opens_the_ticket_as_a_window(monkeypatch):
+    """Send Live Order opens the ticket OVER the panel: an idea by its id, any
+    other trade by a freshly stashed spec. Nothing navigates away."""
+    import live_order_link as link
+    link._STASH.clear()
+    opened = []
+    monkeypatch.setattr(so, "open_window", lambda **kw: opened.append(kw))
+    link.open_ticket({"trade": "ab12cd34"})
+    link.open_ticket({"spec": {"symbol": "SPY"}})
+    link.open_ticket(None)
+    assert opened[0] == {"trade": "ab12cd34"}
+    assert link.take(opened[1]["spec"]) == {"symbol": "SPY"} and len(opened) == 2
+    link._STASH.clear()
+    detail = (ROOT / "pages" / "options" / "detail.py").read_text(encoding="utf-8")
+    fn = next(n for n in ast.parse(detail).body if isinstance(n, ast.FunctionDef)
+              and n.name == "_live_button")
+    assert "_link.open_ticket(found)" in ast.unparse(fn)
+    assert "navigate" not in ast.unparse(fn)
+    banner = (ROOT / "pages" / "idea_banner.py").read_text(encoding="utf-8")
+    assert "send_order.open_window(trade=" in banner and "ui.navigate" not in banner
 
 
 def test_the_page_opens_from_an_idea_or_a_held_spec_only():

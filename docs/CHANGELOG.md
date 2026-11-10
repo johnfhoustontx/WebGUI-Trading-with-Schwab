@@ -4,7 +4,25 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-08 (**An expired Schwab sign-in can be renewed from the app again.**)
+**Last updated:** 2026-11-10 (**The live-order ticket opens as a window over the page.**)
+
+- At the operator's request, **Send Live Order** on a detail panel and **Open order
+  ticket** on the idea banner no longer navigate away: the ticket opens as a window
+  over the page, with the trade still behind it (`send_order.open_window`, reached
+  from a panel through `live_order_link.open_ticket`, which still stashes a spec first).
+- The window is a new kit piece, `kit.window`: a title and a close ✕, built at the
+  client's top level so a panel repaint behind it cannot delete it, closed by ✕ or
+  Esc but NOT by a click outside (a half-filled ticket survives a stray click), and
+  deleted on close, which stops the ticket's one-second timer with it.
+- The authenticator code's failures are counted against the page's own request
+  address (`visitor_limit.client_key`, the copy of `main._client_ip`'s rule).
+- `/send-order` still serves the same ticket as a page. `live_order_link.offer`
+  now answers `{"trade": id}` for an idea rather than an address; `href_for` is gone.
+- Checked in the local page harness (no dev environment): the window opens over a
+  panel repainting every 3 s and survives it, ✕ and Esc each remove it, a click on
+  the page behind does not.
+
+**Prior —** 2026-11-08 (**An expired Schwab sign-in can be renewed from the app again.**)
 
 - **The bug.** Once the sign-in expired, the Status page showed the proxy as
   "Offline · unreachable", the auth line as "proxy down — can't check

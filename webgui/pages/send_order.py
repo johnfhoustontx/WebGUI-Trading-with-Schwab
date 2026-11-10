@@ -44,6 +44,7 @@ import bus_client
 import live_order_link
 import live_unlock
 import shell as _shell
+import visitor_limit
 from pages import fmt
 from pages import ui_kit as kit
 from pages.options import theme as _t
@@ -236,6 +237,24 @@ def render(trade: str | None, client: str, spec: str | None = None) -> None:
             kit.notice(source)
             return
         _ticket_page(view_id, source, client)
+
+
+def open_window(trade: str | None = None, spec: str | None = None) -> None:
+    """The same ticket as a window over the page that asked for it (a detail
+    panel's Send Live Order, the New trade idea banner), so the trade stays in
+    view behind it. Closing the window drops the ticket's timer with it; an
+    order already sent is still listed on Today's live orders."""
+    win = kit.window("Send Live Order")
+    with win.content:
+        view_id, source = source_for(trade, spec)
+        if view_id is None:
+            kit.notice(source)
+        else:
+            # The authenticator code's failures count against this address:
+            # the same rule as the route's (``visitor_limit`` is its copy).
+            _ticket_page(view_id, source,
+                         visitor_limit.client_key(ui.context.client.request))
+    win.open()
 
 
 def _ticket_page(view_id: str, source: dict, client: str) -> None:

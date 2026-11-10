@@ -3437,8 +3437,9 @@ its **Weekly idea review** summarises them; the Symbol dossier never lists one a
 
 **Any row can become a real order.** Every Trade detail panel (here, and on the Market
 Scanner, Swing, Captured Signals and the Calculator) has a **Send Live Order** button
-(and a banner offers the same when an idea is booked), which opens the order ticket at
-`/send-order`. It works for a single option, a vertical, an iron condor, a straddle, a
+(and a banner offers the same when an idea is booked), which opens the order ticket as
+a window over the page, with the trade still behind it (the same ticket is a page at
+`/send-order`). It works for a single option, a vertical, an iron condor, a straddle, a
 strangle, a butterfly, a condor, a calendar, a diagonal and other all-option
 combinations; not for shares, a sold call with no bought call to cover it, or /ES and
 /NQ. It shows only while **Settings → Configuration → Live orders** is on (it ships off).

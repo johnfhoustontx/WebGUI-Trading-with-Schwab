@@ -829,12 +829,15 @@ fall back to another symbol's chain: a stale capture is labelled, never shown as
 A trade can be sent to the Schwab account as a real order, and cancelled while it works (Phases 1-3 of the
 [design](../../plans/2026-11-05-live-order-to-thinkorswim-design.md)): a single option, a
 vertical, an iron condor, a straddle, a strangle, a butterfly, a condor, a calendar, a
-diagonal, or any other all-option mix as `CUSTOM` (`live_order.SENDABLE_TYPES`). The page
-is in the private app, reached two ways:
+diagonal, or any other all-option mix as `CUSTOM` (`live_order.SENDABLE_TYPES`). The ticket
+is in the private app. A detail panel (`live_order_link.open_ticket`) and the idea banner
+open it as a WINDOW over the page (`pages/send_order.open_window`, built on `kit.window`);
+the route `/send-order` serves the same ticket as a page. Either way it names its trade
+one of two ways:
 
-- `/send-order?trade=<trade_id>`: a trade idea the Paper Ledger booked; the service reads
+- `trade=<trade_id>`: a trade idea the Paper Ledger booked; the service reads
   its legs from the Ledger.
-- `/send-order?spec=<token>`: any other detail panel. `webgui/live_order_link.py` stashes
+- `spec=<token>`: any other detail panel. `webgui/live_order_link.py` stashes
   the panel's trade as a SPEC `{symbol, legs, label, price}` under a 32-hex token (in the
   webgui process's memory, the newest 64), and the commands carry the spec itself. The
   service checks it again with `live_order.read_spec` (the ticker allow-list, each leg,
