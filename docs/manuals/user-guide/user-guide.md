@@ -2714,17 +2714,21 @@ is booked into this ledger tagged **Shadow idea**. **Nothing is posted**: not to
 Discord, Telegram, X, the site or the calendar. Set under Settings → Configuration →
 *Shadow trade ideas in the Paper Ledger* (it ships on, in shadow).
 
-- **The limits** count the hourly posts and the shadow ideas together, as a real
-  feed would: at most **2 in any 60 minutes**, at least **20 minutes** after the last
-  one, at most **10 a day**, and one per symbol a day. A trade that sells premium
-  also needs a Vol Rank of at least **50**. Only one is booked per scan, and only
-  in the regular session.
+- **A separate feed.** The limits count the shadow ideas only, never the hourly
+  posts: at most **2 in any 60 minutes**, at least **20 minutes** after the last
+  shadow idea, at most **10 a day**, and one per symbol a day. A trade that sells
+  premium also needs a Vol Rank of at least **50**. Only one is booked per scan, and
+  only in the regular session.
+- **Never the hourly idea's trade.** A trade the hourly idea posted today is
+  skipped, and so is the one the next hourly post would take from the same scan.
+  The same symbol with a different trade can still be a shadow idea.
 - **Not on the first scan of the day.** That scan only records what is there, so a
   restart or the morning's first scan never books a burst.
 - **Followed like an idea.** The same 5-minute checks, target and stop as the
   hourly ideas. It shows under **All** only; the weekly idea review, the site and
-  the live-order banner never see it, and the EOD Report and the Symbol dossier do
-  not count it as yours.
+  the live-order banner never see it, and the Symbol dossier does not count it as
+  yours. The EOD Report shows it as its own book, *Shadow ideas*, apart from both
+  your trades and the posted ideas.
 - **The point** is the comparison: after a few weeks `tools/idea_shadow_compare.py`
   sets the shadow ideas' results beside the hourly posts'. Posting on quality goes
   live only if the shadow ideas did better.
@@ -3610,8 +3614,8 @@ An end-of-day rollup of the day's Options activity.
 
 | View | Route | Contents |
 |------|-------|----------|
-| **Summary** | `/eod` | Headline tiles plus a Daily / Weekly (WTD) / MTD performance block **per book** — manual paper, captured signals (counted at one contract per signal) and trade ideas (while **Book the posted ideas** is on in Settings → Configuration, every idea the app posts is booked on the Paper Ledger and kept out of manual paper). The *Paper trades* tile counts your own Ledger trades only; another tile shows today's closed trade-idea profit and the count closed. |
-| **Detailed** | `/eod/detail` | The same performance plus breakdowns by **strategy** (PCS / CCS / IC), by **0-DTE vs swing**, and by **status** (open / closed / expired), then the full trade (your own Ledger trades), scanner and captured tables, and a **Trade ideas** section: today's posted ideas (time posted, structure by name, grade, entry and exit with which way the money went, why it closed in words — *Target reached*, *Stopped out*, *Expired*, *Closed by hand* — time held in words such as *4 hours 6 minutes*, worst point in dollars and as a percent of maximum loss, result), ideas closed today that were posted earlier, and open ideas at their last mark, with closed profit for the day, week and month. Open trades' unrealized profit sits on its own line and is never added to those totals. |
+| **Summary** | `/eod` | Headline tiles plus a Daily / Weekly (WTD) / MTD performance block **per book** — manual paper, captured signals (counted at one contract per signal) and trade ideas (while **Book the posted ideas** is on in Settings → Configuration, every idea the app posts is booked on the Paper Ledger and kept out of manual paper), and shadow ideas (booked after a scan, never posted). The *Paper trades* tile counts your own Ledger trades only; two more tiles show today's closed profit and the count closed for the trade ideas and for the shadow ideas. |
+| **Detailed** | `/eod/detail` | The same performance plus breakdowns by **strategy** (PCS / CCS / IC), by **0-DTE vs swing**, and by **status** (open / closed / expired), then the full trade (your own Ledger trades), scanner and captured tables, and a **Trade ideas** section: today's posted ideas (time posted, structure by name, grade, entry and exit with which way the money went, why it closed in words — *Target reached*, *Stopped out*, *Expired*, *Closed by hand* — time held in words such as *4 hours 6 minutes*, worst point in dollars and as a percent of maximum loss, result), ideas closed today that were posted earlier, and open ideas at their last mark, with closed profit for the day, week and month. Open trades' unrealized profit sits on its own line and is never added to those totals. A **Shadow ideas** section follows, with the same three tables for the shadow ideas (*Picked* in place of *Posted*). |
 
 Both views use a jump-link table of contents, and every section is collapsible —
 which keeps working in the exported file as well as in the app.

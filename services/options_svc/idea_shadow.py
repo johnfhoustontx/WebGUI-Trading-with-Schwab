@@ -10,6 +10,11 @@ Why grade and novelty, not the composite score: every hourly post from 10-21 to
 11-05 scored 77-81, so a score threshold fires on every scan or on none. Grade
 Strong was the one measured separator (+0.45R on 8 trades against +0.22R).
 
+The shadow is a SEPARATE feed (the operator's call, 2026-11-10): its limits count
+its own picks only, and it never picks the hourly idea's trade, neither one the
+hourly already posted today nor the one the hourly would post off this scan.
+``posts`` still records the hourly posts, for that second rule.
+
 PURE: no bus, no store, no clock of its own. ``decide`` takes the scan, today's
 state, the time and the two config dicts, and hands back the new state, the pick
 (or None) and the reason. The state is a plain dict cached between scans::
@@ -100,18 +105,45 @@ def vol_blocked(idea, scan, floor) -> bool:
 
 
 def limit_reason(posts, now, cfg):
-    """Why the combined feed has no room for another post now, or None."""
-    if len(posts) >= cfg["max_per_day"]:
-        return f"{len(posts)} posts today"
-    ages = [a for a in (_since(now, p.get("at")) for p in posts) if a is not None]
+    """Why the shadow has no room for another pick now, or None.
+
+    Only the shadow's OWN picks count: the hourly posts are a separate feed, and
+    the limits are the shadow's alone (``max_per_day`` shadow picks a day, on top
+    of however many hourly posts went out)."""
+    picks = [p for p in posts if p.get("kind") == "shadow"]
+    if len(picks) >= cfg["max_per_day"]:
+        return f"{len(picks)} shadow picks today"
+    ages = [a for a in (_since(now, p.get("at")) for p in picks) if a is not None]
     recent = sum(1 for a in ages if a < _HOUR)
     if recent >= cfg["max_per_hour"]:
-        return f"{recent} posts in the last hour"
+        return f"{recent} shadow picks in the last hour"
     gap = _dt.timedelta(minutes=cfg["min_gap_min"])
     newest = min(ages, default=None)
     if newest is not None and newest < gap:
-        return f"last post {int(newest.total_seconds() // 60)} min ago"
+        return f"last shadow pick {int(newest.total_seconds() // 60)} min ago"
     return None
+
+
+def hourly_next_key(scan, idea_cfg, clock, today):
+    """The trade key the hourly idea would post off ``scan``, or None.
+
+    ``trade_idea.pick`` with the hourly's own grades and today's posted state, the
+    same call ``handlers.run_trade_idea`` makes. The shadow runs on the scan the
+    next hourly post reads, so without this it picks the hourly's trade minutes
+    before the hourly posts it (2026-11-10: two of five picks were the identical
+    trade). ``idea_cfg`` empty means the hourly is off and will post nothing."""
+    if not idea_cfg:
+        return None
+    grades = tuple(idea_cfg.get("grades") or trade_idea.DEFAULT_GRADES)
+    ideas = trade_idea.candidates(
+        scan, grades=grades, min_score=idea_cfg.get("min_score") or 0,
+        today=_dt.date.fromisoformat(today),
+        min_dte=idea_cfg.get("min_dte", trade_idea.DEFAULT_MIN_DTE),
+        other_structures=idea_cfg.get("other_structures", True) is not False)
+    posted = trade_idea.todays_posted(
+        clock.get("posted") if isinstance(clock, dict) else None, today)
+    idea = trade_idea.pick(ideas, posted, grades=grades)
+    return trade_key(idea) if idea is not None else None
 
 
 def decide(scan, state, now, cfg, idea_cfg, clock=None, *, in_session=True) -> dict:
@@ -154,11 +186,18 @@ def decide(scan, state, now, cfg, idea_cfg, clock=None, *, in_session=True) -> d
     if not pool:
         return out("nothing new", new_state=checked)
     posts = state["posts"]
-    done_keys = {p.get("key") for p in posts}
-    done_syms = {p.get("symbol") for p in posts} if cfg["one_per_symbol"] else set()
+    hourly = {p.get("key") for p in posts if p.get("kind") == "clock"}
+    hourly.add(hourly_next_key(scan, idea_cfg, clock, today))
+    hourly.discard(None)
+    pool = [(k, i) for k, i in pool if k not in hourly]
+    if not pool:
+        return out("the hourly idea's trade", new_state=checked)
+    picks = [p for p in posts if p.get("kind") == "shadow"]
+    done_keys = {p.get("key") for p in picks}
+    done_syms = {p.get("symbol") for p in picks} if cfg["one_per_symbol"] else set()
     pool = [(k, i) for k, i in pool if k not in done_keys and i["symbol"] not in done_syms]
     if not pool:
-        return out("already posted today", new_state=checked)
+        return out("already picked today", new_state=checked)
     floor = cfg["min_vol_rank"]
     pool = [(k, i) for k, i in pool if not vol_blocked(i, scan, floor)]
     if not pool:

@@ -435,10 +435,11 @@ def test_normalize_trades_reads_the_captured_shape():
 
 
 def test_captured_is_the_second_book():
-    # Trade ideas became the third book (2026-10-20); captured stays second.
+    # Trade ideas became the third book (2026-10-20) and Shadow ideas the
+    # fourth (2026-11-10); captured stays second.
     snap = {"captured_perf": {"rows": [_CAP_ROW]}}
     assert [label for label, _n, _s in eod._books(snap)] == [
-        "Manual paper", "Captured signals", "Trade ideas"]
+        "Manual paper", "Captured signals", "Trade ideas", "Shadow ideas"]
 
 
 def test_the_captured_book_reuses_the_shared_period_buckets():
@@ -1171,7 +1172,7 @@ def test_trade_ideas_is_third_book():
     snap = {"paper_trades": {"trades": [_manual(), _idea()]}}
     books = eod._books(snap)
     assert [label for label, _n, _s in books] == [
-        "Manual paper", "Captured signals", "Trade ideas"]
+        "Manual paper", "Captured signals", "Trade ideas", "Shadow ideas"]
     label, norm, now_snap = books[2]
     assert [t["symbol"] for t in norm] == ["SPY"] and now_snap is None
     assert eod._book_slug("Trade ideas") == "trade"
@@ -1319,3 +1320,62 @@ def test_summary_has_idea_tile():
     tile = html.split("Trade idea P&amp;L today", 1)[1].split("</div></div>", 1)[0]
     assert "$70.00" in tile and "2 closed" in tile
     assert "Trade ideas" in html                      # the book is labelled
+
+
+# --- Shadow ideas: the fourth book and its section (2026-11-10) --------------
+def _shadow(**kw):
+    return _idea(source="idea_shadow", **kw)
+
+
+def test_shadow_ideas_is_the_fourth_book_and_holds_only_shadow_rows():
+    snap = {"paper_trades": {"trades": [
+        _manual(), _idea(symbol="POSTED"), _shadow(symbol="SHAD"),
+        {**_manual(), "symbol": "CONDOR", "source": "daily_condor"}]}}
+    books = eod._books(snap)
+    label, norm, now_snap = books[3]
+    assert label == "Shadow ideas" and now_snap is None
+    assert [t["symbol"] for t in norm] == ["SHAD"]
+    assert [t["symbol"] for t in books[2][1]] == ["POSTED"]
+    assert eod._book_slug("Shadow ideas") == "shadow"
+
+
+def test_shadow_section_lists_only_shadow_rows_in_picked_words():
+    trades = [_idea(symbol="POSTED"), _shadow(symbol="AAA"),
+              _shadow(symbol="OPN", status="OPEN", exit_time=None, exit_reason=None,
+                      exit_debit_total=None, realized_pnl=None, unrealized_pnl=12.0)]
+    html = eod.idea_section({"trades": trades}, _TODAY, now=_NOW,
+                            source=eod.SHADOW_SOURCE)
+    assert "AAA" in html and "OPN" in html and "POSTED" not in html
+    assert "<h3>Picked today</h3>" in html and "<th>Picked</th>" in html
+    assert "Closed today, picked earlier" in html and "<th>Posted</th>" not in html
+    posted = eod.idea_section({"trades": trades}, _TODAY, now=_NOW)
+    assert "POSTED" in posted and "AAA" not in posted and "<th>Posted</th>" in posted
+
+
+def test_shadow_section_empty_says_no_shadow_ideas_yet():
+    html = eod.idea_section({"trades": [_idea(), _manual()]}, _TODAY, now=_NOW,
+                            source=eod.SHADOW_SOURCE)
+    assert "No shadow ideas yet." in html
+
+
+def test_detail_fragment_has_the_shadow_ideas_section_and_nav():
+    snap = {"date": "2026-10-20", "paper_trades": {"trades": [_shadow(symbol="SHAD")]}}
+    html = eod.detail_fragment(snap, today=_TODAY)
+    assert 'href="#shadow-ideas"' in html and 'id="shadow-ideas"' in html
+    assert "Shadow ideas — performance" in html
+    assert eod.SHADOW_IDEAS_NOTE in html.replace("&#x27;", "'")
+    section = html.split('id="shadow-ideas"', 1)[1]
+    assert "SHAD" in section
+
+
+def test_summary_has_a_shadow_idea_tile_apart_from_the_posted_ideas():
+    snap = {"date": "2026-10-20", "paper_trades": {"trades": [
+        _idea(realized_pnl=90.0), _shadow(symbol="S1", realized_pnl=40.0),
+        _shadow(symbol="S2", realized_pnl=-15.0), _manual()]}}
+    html = eod.summary_fragment(snap, "/eod/detail", today=_TODAY)
+    shadow = html.split("Shadow idea P&amp;L today", 1)[1].split("</div></div>", 1)[0]
+    assert "$25.00" in shadow and "2 closed" in shadow
+    posted = html.split("Trade idea P&amp;L today", 1)[1].split("</div></div>", 1)[0]
+    assert "$90.00" in posted and "1 closed" in posted
+    tile = html.split("Paper trades</div>", 1)[1].split("</div>", 1)[0]
+    assert tile.endswith(">1"), tile

@@ -17,7 +17,11 @@ TODAY = NOW.date().isoformat()
 CFG = {"mode": "shadow", "min_grade": "Strong", "grades": ("Strong",),
        "min_vol_rank": 50.0, "max_per_hour": 2, "min_gap_min": 20,
        "max_per_day": 10, "one_per_symbol": True}
-IDEA_CFG = {"max_age_min": 45, "min_dte": 1, "min_score": 0, "other_structures": True}
+# The hourly idea's block. Its grades take nothing the Strong rows below offer, so
+# the hourly would post none of them and each test sees the shadow's own rules;
+# the hourly-duplicate tests use HOURLY_CFG.
+IDEA_CFG = {"max_age_min": 45, "min_dte": 1, "min_score": 0, "other_structures": True,
+            "grades": ("Good",)}
 
 
 def call(symbol="NVDA", strike=190.0, grade="Strong", score=79.0, **over):
@@ -123,20 +127,67 @@ def _post(at, symbol, key=None, kind="clock"):
     return {"at": at.isoformat(), "symbol": symbol, "key": key, "kind": kind}
 
 
-def test_a_symbol_posted_today_is_skipped():
-    posts = [_post(NOW - dt.timedelta(hours=2), "NVDA")]
+def test_a_symbol_the_shadow_picked_today_is_skipped():
+    posts = [_post(NOW - dt.timedelta(hours=2), "NVDA", kind="shadow")]
     out = S.decide(scan(directional=[call()]), seeded(posts=posts), NOW, CFG, IDEA_CFG)
-    assert out["idea"] is None and out["reason"] == "already posted today"
+    assert out["idea"] is None and out["reason"] == "already picked today"
 
 
 def test_with_one_per_symbol_off_only_the_same_trade_is_skipped():
     cfg = {**CFG, "one_per_symbol": False}
-    other = _post(NOW - dt.timedelta(hours=2), "NVDA", key="something else")
+    other = _post(NOW - dt.timedelta(hours=2), "NVDA", key="something else", kind="shadow")
     out = S.decide(scan(directional=[call()]), seeded(posts=[other]), NOW, cfg, IDEA_CFG)
     assert out["idea"]["symbol"] == "NVDA"
-    same = _post(NOW - dt.timedelta(hours=2), "NVDA", key=S.trade_key(T.normalize(call())))
+    same = _post(NOW - dt.timedelta(hours=2), "NVDA", key=S.trade_key(T.normalize(call())),
+                 kind="shadow")
     out = S.decide(scan(directional=[call()]), seeded(posts=[same]), NOW, cfg, IDEA_CFG)
-    assert out["idea"] is None and out["reason"] == "already posted today"
+    assert out["idea"] is None and out["reason"] == "already picked today"
+
+
+# ── the hourly idea's trade ─────────────────────────────────────────────────
+# The hourly's pick ranks a symbol not yet posted today first, then score; these
+# rows give it a clear favourite.
+HOURLY_CFG = {**IDEA_CFG, "grades": ("Strong", "Good")}
+
+
+def test_a_symbol_the_hourly_posted_with_another_trade_is_still_open_to_the_shadow():
+    posts = [_post(NOW - dt.timedelta(hours=2), "NVDA", key="another NVDA trade")]
+    out = S.decide(scan(directional=[call()]), seeded(posts=posts), NOW, CFG, IDEA_CFG)
+    assert out["idea"]["symbol"] == "NVDA"
+
+
+def test_the_trade_the_hourly_posted_today_is_skipped():
+    key = S.trade_key(T.normalize(call()))
+    posts = [_post(NOW - dt.timedelta(hours=2), "NVDA", key=key)]
+    out = S.decide(scan(directional=[call()]), seeded(posts=posts), NOW, CFG, IDEA_CFG)
+    assert out["idea"] is None and out["reason"] == "the hourly idea's trade"
+
+
+def test_the_trade_the_hourly_would_post_off_this_scan_is_skipped():
+    """2026-11-10: the shadow picked at :35 and the hourly posted the same trade at :40."""
+    rows = [call(symbol="AMD", score=82.0), call(symbol="NVDA", score=79.0)]
+    out = S.decide(scan(directional=rows), seeded(), NOW, CFG, HOURLY_CFG)
+    assert out["idea"]["symbol"] == "NVDA"
+    only = S.decide(scan(directional=rows[:1]), seeded(), NOW, CFG, HOURLY_CFG)
+    assert only["idea"] is None and only["reason"] == "the hourly idea's trade"
+
+
+def test_the_hourly_pick_reads_what_the_hourly_already_posted():
+    """With AMD posted, the hourly's next is NVDA (a symbol not yet posted ranks
+    first), so the shadow leaves NVDA alone and AMD's other trade is its pick."""
+    amd_posted = call(symbol="AMD", strike=150.0, score=90.0)
+    clock = {"status": "posted", "at": (NOW - dt.timedelta(hours=1)).isoformat(),
+             "idea": T.normalize(amd_posted),
+             "posted": {"date": TODAY, "ids": [amd_posted["id"] + "_old"],
+                        "symbols": ["AMD"], "last_type": "LONG_CALL"}}
+    rows = [call(symbol="AMD", score=82.0), call(symbol="NVDA", score=79.0)]
+    out = S.decide(scan(directional=rows), seeded(), NOW, CFG, HOURLY_CFG, clock)
+    assert out["idea"]["symbol"] == "AMD"
+
+
+def test_with_the_hourly_off_nothing_is_reserved_for_it():
+    out = S.decide(scan(directional=[call()]), seeded(), NOW, CFG, {})
+    assert out["idea"]["symbol"] == "NVDA"
 
 
 def test_the_hourly_post_is_counted_once_it_is_seen():
@@ -187,29 +238,38 @@ def test_a_floor_of_zero_is_off():
     assert out["idea"]["type"] == "PCS"
 
 
-# ── the feed's limits ───────────────────────────────────────────────────────
-def test_two_posts_in_the_last_hour_hold_the_pick():
-    posts = [_post(NOW - dt.timedelta(minutes=50), "AAA"),
+# ── the shadow's own limits ─────────────────────────────────────────────────
+def test_two_shadow_picks_in_the_last_hour_hold_the_pick():
+    posts = [_post(NOW - dt.timedelta(minutes=50), "AAA", kind="shadow"),
              _post(NOW - dt.timedelta(minutes=25), "BBB", kind="shadow")]
     out = S.decide(scan(directional=[call()]), seeded(posts=posts), NOW, CFG, IDEA_CFG)
-    assert out["idea"] is None and out["reason"] == "2 posts in the last hour"
+    assert out["idea"] is None and out["reason"] == "2 shadow picks in the last hour"
 
 
-def test_a_post_inside_the_gap_holds_the_pick():
-    posts = [_post(NOW - dt.timedelta(minutes=10), "AAA")]
+def test_a_shadow_pick_inside_the_gap_holds_the_pick():
+    posts = [_post(NOW - dt.timedelta(minutes=10), "AAA", kind="shadow")]
     out = S.decide(scan(directional=[call()]), seeded(posts=posts), NOW, CFG, IDEA_CFG)
-    assert out["idea"] is None and out["reason"] == "last post 10 min ago"
+    assert out["idea"] is None and out["reason"] == "last shadow pick 10 min ago"
 
 
-def test_the_day_cap_holds_the_pick():
-    posts = [_post(NOW - dt.timedelta(hours=1, minutes=i), f"S{i}") for i in range(10)]
+def test_the_day_cap_counts_shadow_picks():
+    posts = [_post(NOW - dt.timedelta(hours=1, minutes=i), f"S{i}", kind="shadow")
+             for i in range(10)]
     out = S.decide(scan(directional=[call()]), seeded(posts=posts), NOW, CFG, IDEA_CFG)
-    assert out["idea"] is None and out["reason"] == "10 posts today"
+    assert out["idea"] is None and out["reason"] == "10 shadow picks today"
 
 
-def test_a_post_just_past_the_gap_and_hour_is_fine():
-    posts = [_post(NOW - dt.timedelta(minutes=61), "AAA"),
-             _post(NOW - dt.timedelta(minutes=20), "BBB")]
+def test_hourly_posts_count_toward_none_of_the_limits():
+    """The operator's call, 2026-11-10: the shadow's ten a day are its own."""
+    posts = [_post(NOW - dt.timedelta(minutes=m), f"H{m}") for m in (5, 30, 55)]
+    posts += [_post(NOW - dt.timedelta(hours=2, minutes=i), f"C{i}") for i in range(10)]
+    out = S.decide(scan(directional=[call()]), seeded(posts=posts), NOW, CFG, IDEA_CFG)
+    assert out["idea"]["symbol"] == "NVDA"
+
+
+def test_a_pick_just_past_the_gap_and_hour_is_fine():
+    posts = [_post(NOW - dt.timedelta(minutes=61), "AAA", kind="shadow"),
+             _post(NOW - dt.timedelta(minutes=20), "BBB", kind="shadow")]
     out = S.decide(scan(directional=[call()]), seeded(posts=posts), NOW, CFG, IDEA_CFG)
     assert out["idea"]["symbol"] == "NVDA"
 

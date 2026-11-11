@@ -1415,12 +1415,15 @@ engine's positions live on **Paper Account**.
   keeps it on file. Settings -> Configuration -> *Daily SPY condor in the Paper
   Ledger*.
 - **Shadow ideas are a test of posting on quality.** After every scan, a trade
-  that is new in that scan, graded **Strong**, and fits the limits (at most 2
-  posts an hour, 20 minutes apart, 10 a day, one per symbol, counting the hourly
-  posts too) is booked here tagged **Shadow idea**. Nothing is posted anywhere.
+  that is new in that scan, graded **Strong**, and fits the shadow's own limits
+  (at most 2 an hour, 20 minutes apart, 10 a day, one per symbol; the hourly
+  posts count toward none of them) is booked here tagged **Shadow idea**. It is
+  never the hourly idea's trade: not one already posted today, and not the one
+  the next hourly post would take. Nothing is posted anywhere.
   They are followed exactly like the hourly ideas (5-minute checks, the same
   target and stop), show under **All** only, and never reach the site or the
-  weekly review. They exist to be compared with the hourly posts after a few
+  weekly review. The EOD report shows them as their own book, **Shadow ideas**.
+  They exist to be compared with the hourly posts after a few
   weeks. Settings -> Configuration -> *Shadow trade ideas in the Paper Ledger*.
 - **Send Live Order — this one is REAL money.** Every row's detail panel has
   **Send Live Order** (options only: not shares, not /ES or /NQ), and a banner
@@ -1952,17 +1955,21 @@ A live grid of macro tickers, grouped into framed panels by category.
 An end-of-day summary of the day's options activity and paper trading.
 
 - **Summary tiles** plus per-section tables (scanner, captured, paper).
-- **Three books, each with its own Daily / Weekly / MTD table:** your **Manual
-  paper** trades, the **Captured signals**, and the **Trade ideas**. While **Book the
-  posted ideas** is on (Settings -> Configuration), every idea the app posts is
-  booked on the Paper Ledger and tagged, and it is counted in its own book, never
-  in Manual paper. A tile shows today's idea profit and how many closed.
+- **Four books, each with its own Daily / Weekly / MTD table:** your **Manual
+  paper** trades, the **Captured signals**, the **Trade ideas** and the **Shadow
+  ideas**. While **Book the posted ideas** is on (Settings -> Configuration), every
+  idea the app posts is booked on the Paper Ledger and tagged, and it is counted in
+  its own book, never in Manual paper. The shadow ideas (picked after a scan,
+  never posted) are a book of their own too. A tile each shows today's idea profit
+  and how many closed.
 - **Detail → Trade ideas** lists the ideas posted today (when, structure, grade,
   entry, exit, why it closed, how long it was held, the worst point it reached in
   dollars and as a share of its maximum loss, and the result), the ones closed today
   that were posted earlier, and the ones still open at their last mark. Closed profit
   is totalled for the day, week and month; **open trades are shown on their own line
   and never added to those totals.**
+- **Detail → Shadow ideas** is the same three tables for the shadow ideas, with
+  *Picked* where the trade ideas say *Posted*.
 - **Weekly idea review** (the button at the top) opens the weekly look back at the
   trade ideas, written at the end of each week. Every figure in Claude's assessment
   there is one the app computed; whether Claude used it with the right subject is

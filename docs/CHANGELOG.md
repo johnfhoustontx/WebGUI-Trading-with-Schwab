@@ -4,7 +4,26 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-10 (**The live-order ticket opens as a window over the page.**)
+**Last updated:** 2026-11-10 (**Shadow ideas are a separate feed, never the hourly's trade, and on the EOD report.**)
+
+- **Why.** The shadow booked 5 on 2026-11-10. Its limits counted the hourly posts,
+  so every hour the :35 pick plus the :40 post filled the 2-an-hour limit, and
+  `one_per_symbol` (also counting hourly posts) blocked 10 of the 26 scans. Two of
+  the five picks were the identical trade the hourly posted five minutes later
+  (same scan, same `trade_idea.pick`).
+- **Separate limits.** `idea_shadow.limit_reason` and the symbol rule count the
+  shadow's own picks only: up to `max_per_day` (10) shadow picks a day on top of
+  the hourly posts. The reasons now read "shadow picks", and "already posted
+  today" became "already picked today".
+- **Never the hourly's trade.** A trade the hourly posted today, or the one it
+  would post off the same scan (`idea_shadow.hourly_next_key`), is skipped with
+  the reason "the hourly idea's trade". The same symbol with another trade stays open.
+- **EOD report.** Shadow rows were in no book. They are now a fourth book,
+  **Shadow ideas** (performance, breakdowns, a detail section in "Picked" words,
+  and a summary tile), kept apart from the posted ideas.
+- Config comments, Settings help, the Ledger hover guide and the design doc updated.
+
+**Prior —** 2026-11-10 (**The live-order ticket opens as a window over the page.**)
 
 - At the operator's request, **Send Live Order** on a detail panel and **Open order
   ticket** on the idea banner no longer navigate away: the ticket opens as a window

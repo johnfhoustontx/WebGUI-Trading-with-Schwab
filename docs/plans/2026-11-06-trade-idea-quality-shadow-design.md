@@ -43,14 +43,24 @@ timestamp, so a restart re-evaluates nothing). A trade is picked when ALL hold:
 2. **New this scan**: its trade key (symbol, structure, expiry, legs) was not a
    candidate in the previous scan. Scan row ids carry a list index and are not
    stable between scans, so they are never used for this.
-3. Not already posted or shadow-booked today, and (with `one_per_symbol`) its
-   symbol was not.
+3. **Not the hourly idea's trade** (2026-11-10): not a trade the hourly posted
+   today, and not the trade the hourly would post off this same scan
+   (`idea_shadow.hourly_next_key`: `trade_idea.pick` with the hourly's grades and
+   today's posted state). On 2026-11-10 the shadow picked at :35 and the hourly
+   posted the identical trade at :40 twice in five picks, so the comparison
+   measured the hourly against itself. A symbol the hourly posted with a
+   different trade stays open to the shadow.
+   Then not already shadow-booked today, and (with `one_per_symbol`) its symbol
+   was not shadow-booked today.
 4. Selling premium: the symbol's Vol Rank is at least `min_vol_rank` (50),
    through `shared/vol_gate.blocks` on the row's own `net_vega` sign. An absent
    reading or vega skips the check (the gate's own rule).
-5. The combined feed would stay inside its limits: `max_per_hour` (2, rolling 60
-   minutes), `min_gap_min` (20) since the last post, `max_per_day` (10). These
-   count the clock posts and the shadow picks together, as the live feed would.
+5. The shadow stays inside its OWN limits: `max_per_hour` (2, rolling 60
+   minutes), `min_gap_min` (20) since the last shadow pick, `max_per_day` (10).
+   Until 2026-11-10 these counted the clock posts too, as one combined feed; the
+   hourly post then took one of every hour's two places and the shadow booked 5
+   on its first full day. The operator made the shadow a separate feed: ten
+   shadow picks a day, the hourly posts counted toward none of its limits.
 
 Among several, `trade_idea.pick`'s order chooses one (score, then grade). At most
 one per scan. Picks are booked only in the regular session; outside it a scan

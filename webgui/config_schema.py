@@ -1826,7 +1826,9 @@ _PAPER = ConfigFile(
                 "After every scan, a new candidate at the chosen grade, inside the "
                 "limits below, is booked into the Paper Ledger tagged Shadow idea "
                 "and followed like a posted idea. Nothing is posted anywhere: this "
-                "measures whether posting on quality would beat the hourly posts.", (
+                "measures whether posting on quality would beat the hourly posts. "
+                "It never takes the hourly idea's trade, and the hourly posts "
+                "count toward none of the limits.", (
             Field("idea_shadow.mode", "Shadow ideas",
                   "shadow books the picks; off books nothing. Shadow ideas already "
                   "open are still marked and settled.",
@@ -1837,16 +1839,16 @@ _PAPER = ConfigFile(
             Field("idea_shadow.min_vol_rank", "Lowest Vol Rank to sell premium",
                   "A trade that sells premium needs at least this Vol Rank. 0 "
                   "turns the check off.", kind="float", min=0, max=100, step=1),
-            Field("idea_shadow.max_per_hour", "Most posts in an hour",
-                  "Hourly posts and shadow picks together, in any 60 minutes.",
+            Field("idea_shadow.max_per_hour", "Most shadow picks in an hour",
+                  "Shadow picks only, in any 60 minutes.",
                   kind="int", min=1, max=4, step=1),
-            Field("idea_shadow.min_gap_min", "Fewest minutes between posts",
-                  "Since the last hourly post or shadow pick.",
+            Field("idea_shadow.min_gap_min", "Fewest minutes between shadow picks",
+                  "Since the last shadow pick.",
                   kind="int", unit="min", min=0, max=59, step=1),
-            Field("idea_shadow.max_per_day", "Most posts in a day",
-                  "Hourly posts and shadow picks together.",
+            Field("idea_shadow.max_per_day", "Most shadow picks in a day",
+                  "Shadow picks only; the hourly posts are not counted.",
                   kind="int", min=1, max=30, step=1),
-            Field("idea_shadow.one_per_symbol", "One post per symbol a day",
+            Field("idea_shadow.one_per_symbol", "One shadow pick per symbol a day",
                   "Off still never repeats the same trade.", kind="bool"),
         ), restart=(OPTIONS,)),
         Section("Daily SPY condor in the Paper Ledger",

@@ -69,7 +69,11 @@ review_model = "sonnet"
 # NEW candidate at min_grade or better, inside the limits below, is booked into
 # the Paper Ledger tagged "Shadow idea" and marked like a posted idea. Nothing is
 # posted anywhere. tools/idea_shadow_compare.py compares them with the hourly
-# posts. A bad value in this table reads as the shipped default.
+# posts, and the EOD report shows them as their own book. The shadow is a
+# SEPARATE feed: it never takes the hourly idea's trade (one posted today, or
+# the one the hourly would post off the same scan), and the limits below count
+# the shadow's own picks only. A bad value in this table reads as the shipped
+# default.
 #
 # "shadow" books the picks; "off" books nothing. Open shadow rows are still
 # marked and settled either way.
@@ -78,14 +82,14 @@ mode = "shadow"
 min_grade = "Strong"
 # A trade that sells premium needs at least this Vol Rank (0 to 100; 0 = off).
 min_vol_rank = 50.0
-# The combined feed (hourly posts plus shadow picks) stays inside these limits.
-# Most posts in any 60 minutes (1 to 4).
+# The shadow's own limits; the hourly posts count toward none of them.
+# Most shadow picks in any 60 minutes (1 to 4).
 max_per_hour = 2
-# Fewest minutes since the last post (0 to 59).
+# Fewest minutes since the last shadow pick (0 to 59).
 min_gap_min = 20
-# Most posts in a day (1 to 30).
+# Most shadow picks in a day (1 to 30).
 max_per_day = 10
-# At most one post per symbol a day. Must be true or false.
+# At most one shadow pick per symbol a day. Must be true or false.
 one_per_symbol = true
 
 [daily_condor]

@@ -518,6 +518,16 @@ def _is_idea(trade) -> bool:
     return isinstance(trade, dict) and trade.get("source") == "trade_idea"
 
 
+#: The shadow ideas' ``source`` (``options_svc/idea_shadow.py``): picked and booked
+#: after a scan, never posted. They are their own book here, beside the posted ideas.
+SHADOW_SOURCE = "idea_shadow"
+
+
+def rows_of(trades, source) -> list:
+    """The Ledger rows booked with ``source``, and nothing else."""
+    return [t for t in trades or [] if isinstance(t, dict) and t.get("source") == source]
+
+
 #: Ledger rows that are measurements rather than the user's own trades: the posted
 #: ideas, the daily SPY condor (``source == "daily_condor"``) and the shadow ideas
 #: (``source == "idea_shadow"``, never posted, so not in the ideas table either).
@@ -614,15 +624,17 @@ def _idea_row(t, now):
     }
 
 
-def idea_rows(trades, today, now=None) -> dict:
+def idea_rows(trades, today, now=None, *, source="trade_idea") -> dict:
     """The trade-idea Ledger rows as display dicts in three lists:
     ``posted_today`` (any state), ``closed_today_earlier`` (closed today, posted
     on an earlier day) and ``open`` (every open idea, at its last mark). ``now``
-    is a naive Central datetime; an open row is held up to it."""
+    is a naive Central datetime; an open row is held up to it. ``source`` picks
+    the book: the posted ideas, or ``SHADOW_SOURCE`` for the shadow picks (whose
+    ``idea_posted`` is the time the shadow picked it)."""
     now = now or dt.datetime.now(_CT).replace(tzinfo=None)
     iso = today.isoformat()
     out = {"posted_today": [], "closed_today_earlier": [], "open": []}
-    for t in split_ledger(trades)[1]:
+    for t in rows_of(trades, source):
         r = _idea_row(t, now)
         posted_d = _date_of(r["_posted"])
         if posted_d == iso:
@@ -641,8 +653,21 @@ def idea_rows(trades, today, now=None) -> dict:
 _IDEA_COLS = ["Posted", "Symbol", "Structure", "Grade", IDEA_ENTRY_COL,
               IDEA_EXIT_COL, "Reason", "Held", "MAE $", "MAE % of max loss", "P&L"]
 
+#: Each idea book's words. A shadow pick was never posted, so its tables say
+#: "Picked" where the posted ideas say "Posted".
+_IDEA_WORDS = {
+    "trade_idea": {"when": "Posted", "none": "No trade ideas yet.",
+                   "today": "No trade ideas posted today.",
+                   "earlier": "No earlier trade ideas closed today.",
+                   "open": "No open trade ideas."},
+    SHADOW_SOURCE: {"when": "Picked", "none": "No shadow ideas yet.",
+                    "today": "No shadow ideas picked today.",
+                    "earlier": "No earlier shadow ideas closed today.",
+                    "open": "No open shadow ideas."},
+}
 
-def _idea_table(rows, empty) -> str:
+
+def _idea_table(rows, empty, when="Posted") -> str:
     body = []
     for r in rows:
         pct = r["mae_pct"]
@@ -657,20 +682,22 @@ def _idea_table(rows, empty) -> str:
             + _cell("—" if pct is None else f"{pct:.2f}%")
             + f'<td class="{_pn_class(r["pnl"])}">{_money(r["pnl"])}</td>'
             + "</tr>")
-    return _table(_IDEA_COLS, body, empty=empty)
+    return _table([when] + _IDEA_COLS[1:], body, empty=empty)
 
 
-def idea_section(paper_trades_cache, today, now=None) -> str:
-    """The detail report's "Trade ideas" section: today's posted ideas, the ones
-    closed today from earlier days, the open ones at their last mark, then closed
-    P&L for the day / week / month. The open trades' unrealized total is its own
-    line and never enters those period totals."""
+def idea_section(paper_trades_cache, today, now=None, *, source="trade_idea") -> str:
+    """The detail report's "Trade ideas" section (or, with ``source=SHADOW_SOURCE``,
+    its "Shadow ideas" section): today's ideas, the ones closed today from earlier
+    days, the open ones at their last mark, then closed P&L for the day / week /
+    month. The open trades' unrealized total is its own line and never enters
+    those period totals."""
+    words = _IDEA_WORDS[source]
     trades = (paper_trades_cache.get("trades")
               if isinstance(paper_trades_cache, dict) else None)
-    ideas = split_ledger(trades)[1]
+    ideas = rows_of(trades, source)
     if not ideas:
-        return '<p class="none">No trade ideas yet.</p>'
-    rows = idea_rows(ideas, today, now=now)
+        return f'<p class="none">{escape(words["none"])}</p>'
+    rows = idea_rows(ideas, today, now=now, source=source)
     buckets = period_buckets(normalize_trades(ideas, kind="ledger"), today)
     totals = " · ".join(
         f'{escape(label)} <span class="{_pn_class(b["realized"])}">'
@@ -679,14 +706,14 @@ def idea_section(paper_trades_cache, today, now=None) -> str:
                          (("daily", "Day"), ("weekly", "Week"), ("mtd", "Month"))))
     unreal = [r["pnl"] for r in rows["open"] if r["pnl"] is not None]
     unreal_total = sum(unreal) if unreal else None
+    when = words["when"]
     return (
-        "<h3>Posted today</h3>"
-        + _idea_table(rows["posted_today"], "No trade ideas posted today.")
-        + "<h3>Closed today, posted earlier</h3>"
-        + _idea_table(rows["closed_today_earlier"],
-                      "No earlier trade ideas closed today.")
+        f"<h3>{when} today</h3>"
+        + _idea_table(rows["posted_today"], words["today"], when)
+        + f"<h3>Closed today, {when.lower()} earlier</h3>"
+        + _idea_table(rows["closed_today_earlier"], words["earlier"], when)
         + "<h3>Open now</h3>"
-        + _idea_table(rows["open"], "No open trade ideas.")
+        + _idea_table(rows["open"], words["open"], when)
         + f'<p class="summary-line">Closed P&amp;L: {totals}</p>'
         + '<p class="summary-line">Open trades, unrealized: '
         f'<span class="{_pn_class(unreal_total)}">{_money(unreal_total)}</span> '
@@ -701,6 +728,13 @@ TRADE_IDEAS_NOTE = (
     "ones too."
 )
 
+SHADOW_IDEAS_NOTE = (
+    "Every shadow idea: a new Strong trade picked after a scan, booked on the "
+    "Paper Ledger and marked like a posted idea, but never posted. It never takes "
+    "the hourly idea's trade, so it can be measured against the posted ideas. "
+    "Realized profit and the closed count include only trades that have closed."
+)
+
 
 # ----------------------------------------------------------------------------- #
 # Per-book performance (shared by summary + detail)
@@ -708,22 +742,26 @@ TRADE_IDEAS_NOTE = (
 def _books(snap):
     """[(label, norm_trades, now_snapshot)] for each book.
 
-    Three of them: the manual paper book (the Ledger without its trade-idea
-    rows), the captured signals scored from 2026-09-01, and the trade ideas
-    booked on the Ledger. Captured and Trade ideas pass ``None`` for the
-    snapshot because neither has an account behind it - they are TRACKING books,
+    Four of them: the manual paper book (the Ledger without its trade-idea
+    rows), the captured signals scored from 2026-09-01, the trade ideas booked
+    on the Ledger, and the shadow ideas booked beside them. All but the manual
+    book pass ``None`` for the snapshot because none has an account behind it -
+    they are TRACKING books,
     and ``_book_now_line`` already renders nothing for an absent snapshot rather
     than inventing an equity."""
     snap = snap or {}
-    manual, ideas = split_ledger((snap.get("paper_trades") or {}).get("trades"))
+    trades = (snap.get("paper_trades") or {}).get("trades")
+    manual, ideas = split_ledger(trades)
     led = normalize_trades(manual, kind="ledger")
     idea_norm = normalize_trades(ideas, kind="ledger")
+    shadow_norm = normalize_trades(rows_of(trades, SHADOW_SOURCE), kind="ledger")
     cap = normalize_trades((snap.get("captured_perf") or {}).get("rows"),
                            kind="captured")
     return [
         ("Manual paper", led, (snap.get("paper_account") or {}).get("snapshot")),
         ("Captured signals", cap, None),
         ("Trade ideas", idea_norm, None),
+        ("Shadow ideas", shadow_norm, None),
     ]
 
 
@@ -774,6 +812,8 @@ def _performance_block(snap, today):
             body += f'<p class="book-note">{escape(CAPTURED_BASIS_NOTE)}</p>'
         elif label == "Trade ideas":
             body += f'<p class="book-note">{escape(TRADE_IDEAS_NOTE)}</p>'
+        elif label == "Shadow ideas":
+            body += f'<p class="book-note">{escape(SHADOW_IDEAS_NOTE)}</p>'
 
         sections.append(details_section(anchor, f"{label} — performance", body))
     return toc_entries, "".join(sections)
@@ -806,6 +846,7 @@ def detail_fragment(snap: dict, today=None) -> str:
         ("captured", "Captured"),
         ("captured-closed", "Captured closed"),
         ("trade-ideas", "Trade ideas"),
+        ("shadow-ideas", "Shadow ideas"),
     ])
 
     parts = [
@@ -825,6 +866,9 @@ def detail_fragment(snap: dict, today=None) -> str:
                         captured_closed_section(snap.get("captured_closed"))),
         details_section("trade-ideas", "Trade ideas",
                         idea_section(snap.get("paper_trades"), today)),
+        details_section("shadow-ideas", "Shadow ideas",
+                        idea_section(snap.get("paper_trades"), today,
+                                     source=SHADOW_SOURCE)),
         "</div>",
     ]
     return "".join(parts)
@@ -856,8 +900,9 @@ def summary_fragment(snap: dict, detail_href: str, today=None) -> str:
     n_paper = len(split_ledger(led if isinstance(led, list) else None)[0])
     acct = (snap.get("paper_account") or {}).get("snapshot") or {}
     session_pnl = acct.get("session_pnl")
-    idea_norm = [n for label, n, _s in _books(snap) if label == "Trade ideas"][0]
-    idea_day = period_buckets(idea_norm, today)["daily"]
+    books = {label: n for label, n, _s in _books(snap)}
+    idea_day = period_buckets(books["Trade ideas"], today)["daily"]
+    shadow_day = period_buckets(books["Shadow ideas"], today)["daily"]
     tiles = "".join([
         _tile("Paper session P&L", _money(session_pnl), _pn_class(session_pnl)),
         _tile("Scanner signals", n_scan),
@@ -866,6 +911,9 @@ def summary_fragment(snap: dict, detail_href: str, today=None) -> str:
         _tile("Trade idea P&L today",
               f'{_money(idea_day["realized"])} · {idea_day["closed"]} closed',
               _pn_class(idea_day["realized"])),
+        _tile("Shadow idea P&L today",
+              f'{_money(shadow_day["realized"])} · {shadow_day["closed"]} closed',
+              _pn_class(shadow_day["realized"])),
     ])
     perf_toc, perf_html = _performance_block(snap, today)
     nav = toc(perf_toc + [("captured-closed", "Captured closed")])

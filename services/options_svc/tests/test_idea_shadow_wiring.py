@@ -48,6 +48,11 @@ def ledger(tmp_path, monkeypatch):
     return paper_trader
 
 
+#: The row the hourly idea would post off each scan (the highest score), which the
+#: shadow leaves alone; ``call()`` is then the shadow's pick.
+_HOURLY = call(symbol="AMD", score=90.0)
+
+
 def _bus_after_one_scan(rows_before=()):
     """A bus whose shadow state has already seen one scan holding ``rows_before``."""
     bus = _Bus({"cache:options:scan": scan(at=NOW - dt.timedelta(minutes=21),
@@ -63,7 +68,7 @@ def _shadow_rows(paper_trader):
 
 def test_a_new_strong_idea_is_booked_as_a_shadow_row(ledger):
     bus = _bus_after_one_scan()
-    bus.caches["cache:options:scan"] = scan(directional=[call()])
+    bus.caches["cache:options:scan"] = scan(directional=[_HOURLY, call()])
     res = handlers.run_idea_shadow(bus, now=NOW)
     assert res["reason"] == "picked" and res["ledger"]["status"] == "booked"
     rows = _shadow_rows(ledger)
@@ -77,7 +82,7 @@ def test_a_new_strong_idea_is_booked_as_a_shadow_row(ledger):
 
 def test_the_same_scan_seen_again_books_nothing(ledger):
     bus = _bus_after_one_scan()
-    bus.caches["cache:options:scan"] = scan(directional=[call()])
+    bus.caches["cache:options:scan"] = scan(directional=[_HOURLY, call()])
     handlers.run_idea_shadow(bus, now=NOW)
     again = handlers.run_idea_shadow(bus, now=NOW + dt.timedelta(seconds=30))
     assert again["reason"] == "scan already checked"
@@ -85,7 +90,7 @@ def test_the_same_scan_seen_again_books_nothing(ledger):
 
 
 def test_the_first_scan_of_the_day_books_nothing(ledger):
-    bus = _Bus({"cache:options:scan": scan(directional=[call()])})
+    bus = _Bus({"cache:options:scan": scan(directional=[_HOURLY, call()])})
     res = handlers.run_idea_shadow(bus, now=NOW)
     assert res["reason"] == "first scan today" and _shadow_rows(ledger) == []
 
@@ -95,7 +100,7 @@ def test_mode_off_books_nothing(ledger, monkeypatch):
     monkeypatch.setattr(paper_limits, "idea_shadow",
                         lambda: {**SHADOW_CFG, "mode": "off"})
     bus = _bus_after_one_scan()
-    bus.caches["cache:options:scan"] = scan(directional=[call()])
+    bus.caches["cache:options:scan"] = scan(directional=[_HOURLY, call()])
     assert handlers.run_idea_shadow(bus, now=NOW)["reason"] == "off"
     assert _shadow_rows(ledger) == []
 
@@ -105,25 +110,33 @@ def test_idea_booking_off_does_not_stop_the_shadow(ledger, monkeypatch):
     from shared import paper_limits
     monkeypatch.setattr(paper_limits, "idea_trades", lambda: {**CFG, "enabled": False})
     bus = _bus_after_one_scan()
-    bus.caches["cache:options:scan"] = scan(directional=[call()])
+    bus.caches["cache:options:scan"] = scan(directional=[_HOURLY, call()])
     assert handlers.run_idea_shadow(bus, now=NOW)["ledger"]["status"] == "booked"
 
 
-def test_the_hourly_post_is_counted_against_the_limits(ledger):
+def test_an_hourly_post_minutes_ago_does_not_hold_the_shadow(ledger):
+    """The shadow's limits count its own picks only (2026-11-10)."""
     bus = _bus_after_one_scan()
     bus.caches[handlers.CACHE_TRADE_IDEA] = {
         "status": "posted", "at": (NOW - dt.timedelta(minutes=8)).isoformat(),
         "idea": {"symbol": "MU"}}
-    bus.caches["cache:options:scan"] = scan(directional=[call()])
+    bus.caches["cache:options:scan"] = scan(directional=[_HOURLY, call()])
     res = handlers.run_idea_shadow(bus, now=NOW)
-    assert res["reason"] == "last post 8 min ago" and _shadow_rows(ledger) == []
+    assert res["reason"] == "picked" and res["idea"]["symbol"] == "NVDA"
+
+
+def test_the_hourly_ideas_trade_is_never_booked_as_a_shadow_row(ledger):
+    bus = _bus_after_one_scan()
+    bus.caches["cache:options:scan"] = scan(directional=[_HOURLY])
+    res = handlers.run_idea_shadow(bus, now=NOW)
+    assert res["reason"] == "the hourly idea's trade" and _shadow_rows(ledger) == []
 
 
 def test_a_failed_booking_is_not_counted_as_a_post(ledger, monkeypatch):
     monkeypatch.setattr(idea_ledger, "book",
                         lambda idea, now, source=None: {"status": "failed"})
     bus = _bus_after_one_scan()
-    bus.caches["cache:options:scan"] = scan(directional=[call()])
+    bus.caches["cache:options:scan"] = scan(directional=[_HOURLY, call()])
     res = handlers.run_idea_shadow(bus, now=NOW)
     assert res["state"]["posts"] == []
     assert ledger.published == []
@@ -143,7 +156,7 @@ def test_the_mark_cycle_marks_a_shadow_row(ledger, monkeypatch):
     monkeypatch.setattr(structure_marks, "reprice",
                         lambda t, client, today: seen.append(t["trade_id"]) or None)
     bus = _bus_after_one_scan()
-    bus.caches["cache:options:scan"] = scan(directional=[call()])
+    bus.caches["cache:options:scan"] = scan(directional=[_HOURLY, call()])
     tid = handlers.run_idea_shadow(bus, now=NOW)["ledger"]["trade_id"]
     idea_ledger.mark_cycle(NOW + dt.timedelta(minutes=5), client="C")
     assert seen == [tid]
