@@ -28,8 +28,10 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   last trade. FUISF and RLNIY carry no trade time at all and read −73.40% and
   +9.03%. A line idle for more than `stale_after_h` (96) shows its price and
   "last <date>". A line with no trade on record shows no price and "no trades".
-- Verified in the local page harness, seeded with real proxy quotes. Not yet
-  promoted.
+- Verified in the local page harness, seeded with real proxy quotes, then promoted
+  at 07:46 CT on 2026-11-12 at the operator's call (ab9edbb -> e78686c). The
+  holdings view published 39 funds within the first poll. The restart cost the
+  07:47 and 07:48 GEX slots, both before the open.
 
 **Prior —** 2026-11-12 (**The copied ThinkorSwim order's stop is a trailing stop.**)
 
