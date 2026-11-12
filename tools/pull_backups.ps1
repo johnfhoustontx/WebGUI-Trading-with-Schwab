@@ -34,6 +34,17 @@
   age identity that decrypts the offsite archives), and an unscoped prune sorted
   `_keys` last and would have deleted it once more than -Keep folders existed.
 
+  ONE COMPRESSED STREAM. The VPS sends the generation as a single tar piped
+  through zstd (-ZstdLevel, 3 by default) over ssh, saved as <generation>.tar.zst
+  in -Dest and unpacked by Windows' own tar.exe (bsdtar, which reads zstd) into
+  <generation>.partial; the .tar.zst is deleted once unpacked. Until 2026-11-11
+  this was `scp -r` of ~1,200 separate files with no compression: 3.8 GB took 34
+  minutes. zstd -3 measured 3.92 -> 2.60 GB on the VPS that night.
+
+  The stream is received through a .NET Process, never a PowerShell pipeline:
+  Windows PowerShell 5.1 decodes a native command's output as TEXT, which would
+  corrupt the binary stream.
+
   VERIFICATION happens BEFORE the rename, not after: every file the VPS has must
   land at the same size, and every SQLite database must pass `quick_check`. A
   generation that fails stays `.partial`, which nothing here counts or prunes,
@@ -59,6 +70,8 @@ param(
   [string]$Dest      = "E:\TradingBackups",    # 3.6 TB free, and off the working drives
   [int]$Keep         = 5,
   [string]$EnvName   = "prod",                 # backup_local.py prefixes generations with ENV_NAME
+  [ValidateRange(1, 19)][int]$ZstdLevel   = 3, # 1 fastest .. 19 smallest; 3 measured best per second
+  [ValidateRange(1, 4)][int]$ZstdThreads  = 2, # the VPS has 4 cores and is running the stack
   [switch]$Fresh
 )
 
@@ -74,6 +87,26 @@ function Invoke-Native([scriptblock]$Block) {
   $ErrorActionPreference = "Continue"
   try { $out = & $Block } finally { $ErrorActionPreference = $saved }
   return , @($out)
+}
+
+# Run one command on the VPS and write its stdout, byte for byte, to $OutFile.
+# Returns ssh's exit code. stderr is drained on its own task so a chatty remote
+# cannot fill the pipe and stall the transfer.
+function Receive-SshStream([string]$HostName, [string]$Command, [string]$OutFile) {
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = (Get-Command ssh -CommandType Application | Select-Object -First 1).Source
+  $psi.Arguments = "-o BatchMode=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=4 $HostName `"$Command`""
+  $psi.UseShellExecute = $false
+  $psi.RedirectStandardOutput = $true
+  $psi.RedirectStandardError = $true
+  $p = [System.Diagnostics.Process]::Start($psi)
+  $errTask = $p.StandardError.ReadToEndAsync()
+  $fs = [System.IO.File]::Create($OutFile)
+  try { $p.StandardOutput.BaseStream.CopyTo($fs, 1MB) } finally { $fs.Dispose() }
+  $p.WaitForExit()
+  $err = "$($errTask.Result)".Trim()
+  if ($err) { Write-Warning "ssh said: $err" }
+  return $p.ExitCode
 }
 
 $genPattern = '^' + [regex]::Escape($EnvName) + '_\d{4}-\d{2}-\d{2}_\d{4}$'
@@ -123,9 +156,24 @@ if (Test-Path -LiteralPath $local) {
   if (Test-Path -LiteralPath $partial) { Remove-Item -LiteralPath $partial -Recurse -Force }
   New-Item -ItemType Directory -Path $partial -Force | Out-Null
 
-  Say "pulling ~1.5 GB (this takes a few minutes)..."
-  $null = Invoke-Native { scp -q -r "${sshHostUsed}:backups/$name/." $partial }
-  if ($LASTEXITCODE -ne 0) { throw "scp failed (exit $LASTEXITCODE); left $partial in place for inspection" }
+  # One zstd-compressed tar stream, saved beside the destination, then unpacked.
+  # $name matched $genPattern, so it carries no character the shell would read.
+  $archive = "$local.tar.zst"
+  if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force }
+  $remoteCmd = "set -o pipefail; tar cf - -C backups/$name . | zstd -q -T$ZstdThreads -$ZstdLevel"
+  Say "pulling $name as one zstd -$ZstdLevel stream..."
+  $t0 = Get-Date
+  $rc = Receive-SshStream $sshHostUsed $remoteCmd $archive
+  $secs = [math]::Max(1, [int]((Get-Date) - $t0).TotalSeconds)
+  $mb = [math]::Round((Get-Item -LiteralPath $archive).Length / 1MB)
+  Say ("received $mb MB in $secs s (" + [math]::Round($mb / $secs, 1) + " MB/s)")
+  if ($rc -ne 0) { throw "the stream failed (ssh exit $rc); left $archive in place for inspection" }
+
+  $tarExe = Join-Path $env:SystemRoot 'System32\tar.exe'   # bsdtar: reads zstd itself
+  $null = Invoke-Native { & $tarExe -x -f $archive -C $partial }
+  if ($LASTEXITCODE -ne 0) { throw "unpacking failed (tar exit $LASTEXITCODE); left $archive and $partial in place" }
+  Remove-Item -LiteralPath $archive -Force
+  Say ("unpacked in " + [int]((Get-Date) - $t0).TotalSeconds + " s from the start of the pull")
 
   # --- 4. Verify what LANDED against what the VPS holds, file by file. -------
   $manifest = Invoke-Native { ssh -o BatchMode=yes $sshHostUsed "cd ~/backups/$name && find . -type f -printf '%P|%s\n'" }

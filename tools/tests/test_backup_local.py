@@ -377,6 +377,93 @@ def test_the_offsite_keeps_a_weekly_archive_too():
     assert drop == ["prod_2026-09-29_2000.tar.age"]
 
 
+#############################################
+# The offsite archive is COMPRESSED, and old ones leave Drive for good
+#############################################
+#
+# 2026-11-11: the upload failed with storageQuotaExceeded. Drive held four live
+# archives (13.8 GB) and 53.4 GiB of TRASH: rclone's deletefile moves a Drive
+# file to the trash, which still counts against the quota, so every pruned
+# archive kept its space. Same night: zstd -3 measured 0.72 / 0.66 on the two
+# gamma stores at ~180 MB/s, ~30% off the whole generation.
+
+
+def test_the_archive_is_tar_then_zstd_then_age():
+    cmd = bl.archive_command(pathlib.PurePosixPath("/b/prod_2026-11-11_2000"),
+                             pathlib.PurePosixPath("/b/prod_2026-11-11_2000.tar.zst.age"),
+                             "age1xyz", level=3, threads=2)
+    stages = [s.strip().split()[0] for s in cmd.split(">")[0].split("|")]
+    assert stages == ["tar", "zstd", "age"], cmd
+    assert " -3 " in cmd and " -T2 " in cmd, cmd
+
+
+def test_a_new_archive_is_named_for_its_compression():
+    assert bl.ARCHIVE_SUFFIX == ".tar.zst.age"
+
+
+def test_an_archive_name_gives_back_its_generation_either_way():
+    assert bl.archive_stem("prod_2026-11-11_2000.tar.zst.age") == "prod_2026-11-11_2000"
+    assert bl.archive_stem("prod_2026-11-10_2005.tar.age") == "prod_2026-11-10_2005"
+    assert bl.archive_stem("prod_2026-11-10_2005.txt") is None
+
+
+def test_the_offsite_prune_counts_old_and_new_archives_as_one_rotation():
+    """The first compressed nights sit beside the uncompressed ones: both kinds
+    must age out by date, or the old .tar.age files stay on Drive forever."""
+    names = ["prod_2026-11-06_2004.tar.age", "prod_2026-11-09_2002.tar.age",
+             "prod_2026-11-10_2005.tar.age", "prod_2026-11-11_2000.tar.zst.age",
+             "prod_2026-11-12_2000.tar.zst.age", "prod_2026-10-30_2003.tar.age"]
+    drop = bl.remote_to_delete(names, keep=3, keep_weekly=1)
+    assert drop == ["prod_2026-10-30_2003.tar.age", "prod_2026-11-09_2002.tar.age"]
+
+
+def test_prune_drops_a_compressed_archive_with_its_generation(tmp_path):
+    for n in ("prod_2026-08-01_2000", "prod_2026-08-02_2000"):
+        _gen(tmp_path, n)
+        (tmp_path / f"{n}.tar.zst.age").write_bytes(b"age-encryption.org/v1\n")
+    (tmp_path / "prod_2026-08-01_2000.tar.age").write_bytes(b"age-encryption.org/v1\n")
+    bl.prune(tmp_path, 1)
+    left = sorted(p.name for p in tmp_path.iterdir() if p.is_file())
+    assert left == ["prod_2026-08-02_2000.tar.zst.age"]
+
+
+def test_an_offsite_delete_skips_the_drive_trash(tmp_path, monkeypatch):
+    calls = []
+
+    class _Done:
+        def __init__(self, stdout=""):
+            self.returncode, self.stdout, self.stderr = 0, stdout, ""
+
+    def fake_run(cmd, **kw):
+        calls.append(cmd)
+        if cmd[:2] == ["rclone", "lsf"]:
+            return _Done("\n".join(n + ".tar.age" for n in _names(
+                "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06", "2026-11-09")))
+        return _Done()
+
+    monkeypatch.setattr(bl.subprocess, "run", fake_run)
+    f = tmp_path / "prod_2026-11-10_2000.tar.zst.age"
+    f.write_bytes(b"x")
+    ok, _ = bl.upload(f, keep=3)
+    deletes = [c for c in calls if c[:2] == ["rclone", "deletefile"]]
+    assert ok and deletes, calls
+    assert all("--drive-use-trash=false" in c for c in deletes), deletes
+
+
+@pytest.mark.parametrize("raw, want", [(None, 3), (5, 5), (0, 3), (20, 3), (True, 3), ("3", 3)])
+def test_the_zstd_level_is_read_from_config_and_bounded(monkeypatch, raw, want):
+    cfg = {"offsite": {} if raw is None else {"zstd_level": raw}}
+    monkeypatch.setattr(bl, "_load_config", lambda: cfg)
+    assert bl.zstd_level() == want
+
+
+@pytest.mark.parametrize("raw, want", [(None, 2), (4, 4), (0, 2), (-1, 2), (2.5, 2)])
+def test_the_zstd_threads_are_read_from_config_and_bounded(monkeypatch, raw, want):
+    cfg = {"offsite": {} if raw is None else {"zstd_threads": raw}}
+    monkeypatch.setattr(bl, "_load_config", lambda: cfg)
+    assert bl.zstd_threads() == want
+
+
 def test_the_raw_feed_store_is_never_backed_up(tmp_path):
     """~1 GB a session of raw chains, re-collected rather than restored
     (docs/plans/2026-10-14-raw-feed-and-catch-up-design.md §4). The sweep takes

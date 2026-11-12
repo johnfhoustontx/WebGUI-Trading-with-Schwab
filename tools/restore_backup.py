@@ -7,9 +7,10 @@ nobody had ever tried, so the first restore would also have been the first test
 (audit AR-04).
 
     # 1. If the generation is only offsite, fetch and decrypt it first:
-    rclone copy gdrive:TradingBackups/prod_2026-10-02_2004.tar.age /tmp/restore/
-    age -d -i ~/.config/age/backup-key.txt /tmp/restore/prod_2026-10-02_2004.tar.age \\
-        | tar xf - -C /tmp/restore
+    # (an archive from before 2026-11-11 is .tar.age: drop the zstd step)
+    rclone copy gdrive:TradingBackups/prod_2026-11-12_2000.tar.zst.age /tmp/restore/
+    age -d -i ~/.config/age/backup-key.txt /tmp/restore/prod_2026-11-12_2000.tar.zst.age \\
+        | zstd -dc | tar xf - -C /tmp/restore
 
     # 2. Look before writing anything:
     .venv/bin/python tools/restore_backup.py /tmp/restore/prod_2026-10-02_2004 \\

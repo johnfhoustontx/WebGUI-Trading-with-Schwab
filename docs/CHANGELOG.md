@@ -4,7 +4,33 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-10 (**Shadow ideas are a separate feed, never the hourly's trade, and on the EOD report.**)
+**Last updated:** 2026-11-12 (**The backups are compressed, and a pruned Drive archive no longer sits in the trash.**)
+
+- **Why.** The 2026-11-11 offsite upload failed with `storageQuotaExceeded`: Drive
+  held 13.8 GB of live archives and 53.4 GiB of TRASH. `rclone deletefile` moves a
+  Drive file to the trash, which still counts against the quota, so every archive
+  the rotation pruned since 2026-10-02 kept its space. The trash was emptied by
+  hand that night (23 archives, all ours, at the operator's say-so). Separately the
+  operator asked for compression to cut the E: pull's time (34 min for 3.8 GB).
+- **Measured, not assumed.** The old docstring said the gamma stores were already
+  compressed, so compression would buy nothing. zstd -3 on the VPS took the
+  generation from 3.92 to 2.60 GB (34%) in 39 s; level 9 saves 1-2 points more at
+  a fifth of the speed.
+- **Drive.** `backup_local.py` writes `tar | zstd | age` as `<gen>.tar.zst.age`
+  (`archive_command`); the old `.tar.age` name is still recognised so both age out
+  of one rotation (`archive_stem`, `remote_to_delete`, local `prune`). Old archives
+  are deleted with `--drive-use-trash=false`. Level and threads are
+  `config/backup.toml` (`repo_paths.BACKUP_TOML`, Settings -> Nightly backup).
+  The night's archive was built with the new pipeline and uploaded by hand
+  (checksum-verified; round trip gave `gex_history.db` back sha-identical).
+- **E: pull.** `pull_backups.ps1` receives one zstd tar stream over ssh into
+  `<gen>.tar.zst` (through a .NET Process: a PS 5.1 pipeline would decode the
+  bytes as text), unpacks it with Windows' bsdtar into `.partial`, then runs the
+  same size and `quick_check` verification. `-ZstdLevel` / `-ZstdThreads`.
+- Restore commands (`restore_backup.py`, runbook section 11) add `zstd -dc`. The
+  runbook's pull time was wrong since DST ended: the trigger is 02:30 UTC.
+
+**Prior —** 2026-11-10 (**Shadow ideas are a separate feed, never the hourly's trade, and on the EOD report.**)
 
 - **Why.** The shadow booked 5 on 2026-11-10. Its limits counted the hourly posts,
   so every hour the :35 pick plus the :40 post filled the 2-an-hour limit, and

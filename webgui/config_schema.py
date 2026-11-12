@@ -3311,6 +3311,29 @@ _GEX_ARCHIVE = ConfigFile(
     ),
 )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# The nightly backup — config/backup.toml
+# ─────────────────────────────────────────────────────────────────────────────
+# Read by tools/backup_local.py on each run, so a saved change needs no restart.
+_BACKUP = ConfigFile(
+    name="backup.toml", title="Nightly backup", icon="backup",
+    summary="How the nightly backup's Google Drive copy is compressed. A change "
+            "applies to the next night's backup.",
+    restart=(),
+    sections=(
+        Section("Compression",
+                "The shipped level makes a night's backup about 30 percent "
+                "smaller in about 20 seconds.", (
+            Field("offsite.zstd_level", "Compression level",
+                  "1 is fastest, 19 is smallest. Above 3 saves little and runs "
+                  "much slower.", kind="int", min=1, max=19, step=1),
+            Field("offsite.zstd_threads", "Compression threads",
+                  "The server has 4 cores and is running the trading stack at "
+                  "the same time.", kind="int", min=1, max=16, step=1),
+        )),
+    ),
+)
+
 _SOCIAL_CARDS = ConfigFile(
     name="social_cards.toml", title="Social cards", icon="image",
     summary="The preview images drawn for each blog entry and each trade idea: "
@@ -3349,7 +3372,7 @@ _SOCIAL_CARDS = ConfigFile(
 )
 
 FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _LOGIN_PUSH, _TOS_ORDER, _LIVE_ORDERS, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _SECTORS, _MOMENTUM, _SENTIMENT,
-         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _FUTURES_CHAIN, _GEX_ARCHIVE, _SOCIAL_CARDS, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
+         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _FUTURES_CHAIN, _GEX_ARCHIVE, _BACKUP, _SOCIAL_CARDS, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
          _MARKET_READ, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}

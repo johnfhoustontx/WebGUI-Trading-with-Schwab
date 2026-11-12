@@ -35,11 +35,12 @@ WHAT IT DELIBERATELY DOES NOT DO
     against corruption and mistakes; they do NOT protect against losing the
     instance. That is what the offsite pull is for -- see tools/pull_backups.ps1.
 
-OFFSITE. Once the local generation is complete it is tarred, age-encrypted to
-the public key in ``~/.config/age/backup-key.txt``, uploaded to Google Drive and
-verified with ``rclone check`` (hashes, not just size). Drive never sees
-plaintext: the archive carries live Schwab OAuth tokens, the Schwab API keys, the
-Anthropic key and the notification credentials.
+OFFSITE. Once the local generation is complete it is tarred, compressed with
+zstd (``config/backup.toml``), age-encrypted to the public key in
+``~/.config/age/backup-key.txt``, uploaded to Google Drive as
+``<generation>.tar.zst.age`` and verified with ``rclone check`` (hashes, not just
+size). Drive never sees plaintext: the archive carries live Schwab OAuth tokens,
+the Schwab API keys, the Anthropic key and the notification credentials.
 
 ⚠ THE PRIVATE KEY IS THE BACKUP. Lose every copy of
 ``~/.config/age/backup-key.txt`` and the Drive archive is permanently
@@ -64,7 +65,32 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
-from repo_paths import ENV_NAME, MEMURAI_PORT, REDIS_DB, REPO_ROOT  # noqa: E402
+from repo_paths import BACKUP_TOML, ENV_NAME, MEMURAI_PORT, REDIS_DB, REPO_ROOT  # noqa: E402
+from shared.config_toml import toml_loader  # noqa: E402
+
+# config/backup.toml: the offsite archive's zstd level and threads. Read on each
+# run, so a change applies to the next night with no restart.
+CONFIG_DEFAULTS = {"offsite": {"zstd_level": 3, "zstd_threads": 2}}
+_load_config, _reset_config = toml_loader(BACKUP_TOML, CONFIG_DEFAULTS, label="backup.toml")
+
+
+def _offsite_int(key, lo, hi):
+    """A whole number in [lo, hi] from ``[offsite]``, else the built-in default."""
+    cfg = _load_config()
+    sec = cfg.get("offsite") if isinstance(cfg, dict) else None
+    raw = sec.get(key) if isinstance(sec, dict) else None
+    if isinstance(raw, bool) or not isinstance(raw, int) or not lo <= raw <= hi:
+        return CONFIG_DEFAULTS["offsite"][key]
+    return raw
+
+
+def zstd_level():
+    """1 (fastest) .. 19 (smallest)."""
+    return _offsite_int("zstd_level", 1, 19)
+
+
+def zstd_threads():
+    return _offsite_int("zstd_threads", 1, 16)
 
 KEEP = 3
 # One generation from each of this many EARLIER weeks is kept as well. Three
@@ -90,6 +116,12 @@ KEEP_REMOTE = 3
 # of a shared Drive quota (23 GiB free, 2026-10-03), so the weekly depth lives
 # on the server's disk and only one week of it is shipped.
 KEEP_REMOTE_WEEKLY = 1
+
+# What an offsite archive is called. Compressed since 2026-11-11; the older
+# uncompressed ``.tar.age`` name is still recognised so those archives age out of
+# the same rotation. Longest first: ``archive_stem`` strips the first that fits.
+ARCHIVE_SUFFIX = ".tar.zst.age"
+ARCHIVE_SUFFIXES = (ARCHIVE_SUFFIX, ".tar.age")
 
 # Loose gitignored files that live OUTSIDE the data trees below.
 EXTRA_FILES = (
@@ -274,15 +306,31 @@ def age_recipient(identity=AGE_IDENTITY):
     return None
 
 
-def encrypt_generation(gen_dir, out_path, recipient):
-    """tar the generation and age-encrypt it. Returns (ok, detail).
+def archive_command(gen_dir, out_path, recipient, *, level, threads):
+    """The shell pipeline that writes one offsite archive (PURE).
 
-    NOT compressed: gex_history.db is ~95% of the bytes and its grids are
-    already zlib-compressed, so gzip would burn CPU for almost nothing.
+    tar, then zstd, then age: compression must come BEFORE encryption, because
+    ciphertext does not compress. Uncompressed until 2026-11-11 on the belief
+    that the gamma stores were already compressed; measured that night, zstd -3
+    took the generation from 3.8 GB to about 2.7 GB in about 20 seconds.
     """
-    cmd = (f"tar cf - -C {shlex.quote(str(gen_dir.parent))} "
-           f"{shlex.quote(gen_dir.name)} | age -r {shlex.quote(recipient)} "
-           f"> {shlex.quote(str(out_path))}")
+    return (f"tar cf - -C {shlex.quote(str(gen_dir.parent))} "
+            f"{shlex.quote(gen_dir.name)} | zstd -q -T{int(threads)} -{int(level)} "
+            f"| age -r {shlex.quote(recipient)} > {shlex.quote(str(out_path))}")
+
+
+def archive_stem(name):
+    """The generation an archive name belongs to, or None if it is not one."""
+    for suffix in ARCHIVE_SUFFIXES:
+        if name.endswith(suffix):
+            return name[:-len(suffix)]
+    return None
+
+
+def encrypt_generation(gen_dir, out_path, recipient):
+    """tar the generation, compress it, age-encrypt it. Returns (ok, detail)."""
+    cmd = archive_command(gen_dir, out_path, recipient,
+                          level=zstd_level(), threads=zstd_threads())
     try:
         p = subprocess.run(["bash", "-o", "pipefail", "-c", cmd],
                            capture_output=True, text=True, timeout=3600)
@@ -300,6 +348,11 @@ def upload(path, remote=RCLONE_REMOTE, keep=KEEP_REMOTE):
 
     ⚠ Verified with `rclone check`, not by exit code alone. A transfer can
     report success and leave a short object; the check compares hashes.
+
+    ⚠ Old archives are deleted PAST the Drive trash (`--drive-use-trash=false`).
+    A plain deletefile moves the file to the trash, which still counts against
+    the quota: by 2026-11-11 the trash held 53.4 GiB of pruned archives and the
+    upload failed with storageQuotaExceeded.
     """
     try:
         p = subprocess.run(["rclone", "copy", str(path), remote + "/", "--transfers", "1"],
@@ -313,10 +366,11 @@ def upload(path, remote=RCLONE_REMOTE, keep=KEEP_REMOTE):
             return False, "uploaded but CHECKSUM MISMATCH: " + (c.stderr or "").strip()[:200]
         listing = subprocess.run(["rclone", "lsf", remote + "/"],
                                  capture_output=True, text=True, timeout=300)
-        names = sorted(n for n in listing.stdout.split() if n.endswith(".tar.age"))
+        names = sorted(n for n in listing.stdout.split() if archive_stem(n))
         drop = remote_to_delete(names, keep=keep, keep_weekly=KEEP_REMOTE_WEEKLY)
         for old in drop:
-            subprocess.run(["rclone", "deletefile", f"{remote}/{old}"],
+            subprocess.run(["rclone", "deletefile", "--drive-use-trash=false",
+                            f"{remote}/{old}"],
                            capture_output=True, text=True, timeout=300)
         return True, f"verified; {len(names) - len(drop)} generation(s) offsite"
     except Exception as exc:  # noqa: BLE001
@@ -357,10 +411,17 @@ def select_keep(names, keep, keep_weekly=0):
 
 
 def remote_to_delete(archives, keep, keep_weekly=0):
-    """Which offsite ``.tar.age`` names to delete, oldest first (PURE)."""
-    stems = {a[:-len(".tar.age")]: a for a in archives if a.endswith(".tar.age")}
+    """Which offsite archive names to delete, oldest first (PURE).
+
+    Both archive kinds (``ARCHIVE_SUFFIXES``) share one rotation, keyed on the
+    generation they hold."""
+    stems = {}
+    for a in archives:
+        stem = archive_stem(a)
+        if stem:
+            stems.setdefault(stem, []).append(a)
     kept = select_keep(list(stems), keep, keep_weekly)
-    return sorted(a for stem, a in stems.items() if stem not in kept)
+    return sorted(a for stem, names in stems.items() if stem not in kept for a in names)
 
 
 def prune(root, keep, keep_weekly=0):
@@ -391,7 +452,8 @@ def prune(root, keep, keep_weekly=0):
         if d.name in kept:
             continue
         shutil.rmtree(d, ignore_errors=True)
-        (root / f"{d.name}.tar.age").unlink(missing_ok=True)
+        for suffix in ARCHIVE_SUFFIXES:
+            (root / f"{d.name}{suffix}").unlink(missing_ok=True)
         dropped.append(d.name)
     return sorted(dropped)
 
@@ -489,7 +551,7 @@ def main(argv=None):
             failures.append(f"offsite: no age identity at {AGE_IDENTITY}")
             print(f"  FAIL offsite: no age identity at {AGE_IDENTITY}")
         else:
-            enc = out.parent / (out.name + ".tar.age")
+            enc = out.parent / (out.name + ARCHIVE_SUFFIX)
             ok, detail = encrypt_generation(out, enc, recipient)
             print(f"  {'ok  ' if ok else 'FAIL'}encrypted  {detail}")
             if not ok:

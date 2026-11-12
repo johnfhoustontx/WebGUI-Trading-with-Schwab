@@ -117,6 +117,9 @@ FEED_TOML = REPO_ROOT / "config" / "feed.toml"
 # by options-scanner/gex_archive.py.
 GEX_ARCHIVE_TOML = REPO_ROOT / "config" / "gex_archive.toml"
 
+# The nightly backup's offsite compression. Read by tools/backup_local.py.
+BACKUP_TOML = REPO_ROOT / "config" / "backup.toml"
+
 # The Social Cards (blog and idea preview images): sizes, line limits, the first
 # day cards are listed. Read by shared/social_cards.py.
 SOCIAL_CARDS_TOML = REPO_ROOT / "config" / "social_cards.toml"

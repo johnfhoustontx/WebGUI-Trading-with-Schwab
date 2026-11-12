@@ -932,7 +932,17 @@ sudo systemctl restart caddy`.
 weeknights. It copies every SQLite store through the online-backup API (the
 stack keeps running), dumps Redis, copies the gitignored files a checkout needs
 to start (`backup_local.EXTRA_FILES`) and the gitignored data trees
-(`DATA_TREES`), then encrypts the generation and uploads it to Google Drive.
+(`DATA_TREES`), then compresses the generation with zstd (`config/backup.toml`,
+level 3: about 30% smaller), encrypts it and uploads it to Google Drive as
+`<generation>.tar.zst.age`. Archives from before 2026-11-11 are `.tar.age`
+(not compressed) and age out of the same rotation.
+
+Old archives are deleted from Drive **past the trash**
+(`rclone deletefile --drive-use-trash=false`). A plain delete puts the file in
+the Drive trash, which still counts against the quota: by 2026-11-11 the trash
+held 53.4 GiB of pruned archives and the upload failed with
+`storageQuotaExceeded`. If that error comes back, look at `rclone about gdrive:`
+and its `Trashed` line first.
 
 **What is kept.**
 
@@ -943,10 +953,18 @@ to start (`backup_local.EXTRA_FILES`) and the gitignored data trees
 | The workstation (`E:\TradingBackups`) | the newest 5 generations, pulled by `tools/pull_backups.ps1` |
 
 **The workstation pull.** The Windows scheduled task **NeuralStrike backup pull**
-runs daily at 21:30 CT (and at the next logon if the PC was off then). It runs
+runs daily at 02:30 UTC, which is 20:30 Central in winter and 21:30 in summer
+(the trigger is pinned to UTC, so it moves with daylight saving time); it runs at
+the next logon if the PC was off then. It runs
 `C:\Users\john_\NeuralStrike\backup-pull\run_pull.ps1`, which appends each run to
 `pull_backups.log` beside it and exits 1 when the pull fails, so the task's Last
-Run Result shows a failure. Three things about that folder:
+Run Result shows a failure. The pull asks the server for ONE zstd-compressed tar
+stream of the newest generation over ssh (`-ZstdLevel`, 3 by default), saves it
+as `<generation>.tar.zst` beside the destination, unpacks it with Windows' own
+`tar` into `<generation>.partial`, and only then verifies every file's size and
+every database's `quick_check` and renames it; the `.tar.zst` is deleted once
+unpacked. E: still holds plain folders. Until 2026-11-11 it was `scp -r` of 1,200
+separate files with no compression. Three things about that folder:
 
 - `pull_backups.ps1` there is a **copy** of `tools/pull_backups.ps1` from `main`.
   Re-copy it when the tool changes. Never point the task at the old `D:\` checkout,
@@ -995,12 +1013,15 @@ production generation: do step 3 into a scratch directory once, when convenient.
 `~/backups/`. From Drive:
 
 ```bash
-mkdir -p /tmp/restore && rclone copy gdrive:TradingBackups/prod_2026-10-02_2004.tar.age /tmp/restore/
+mkdir -p /tmp/restore && rclone copy gdrive:TradingBackups/prod_2026-11-12_2000.tar.zst.age /tmp/restore/
 ```
 
 ```bash
-age -d -i ~/.config/age/backup-key.txt /tmp/restore/prod_2026-10-02_2004.tar.age | tar xf - -C /tmp/restore
+age -d -i ~/.config/age/backup-key.txt /tmp/restore/prod_2026-11-12_2000.tar.zst.age | zstd -dc | tar xf - -C /tmp/restore
 ```
+
+An archive from before 2026-11-11 ends `.tar.age` and is not compressed: leave
+out `| zstd -dc`.
 
 The private key is the backup. It lives at `~/.config/age/backup-key.txt` on the
 server and is escrowed on the workstation; without a copy the archive cannot be

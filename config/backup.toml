@@ -1,0 +1,12 @@
+# The nightly backup (tools/backup_local.py): how its Google Drive archive is
+# compressed. Read on each run, so a change applies to the next night with no
+# restart. The E: pull compresses with its own -ZstdLevel (tools/pull_backups.ps1).
+
+[offsite]
+# zstd level, 1 (fastest) .. 19 (smallest). Measured 2026-11-11 on the VPS:
+# level 3 takes the two gamma stores to 0.72 and 0.66 of their size at about
+# 180 MB/s; level 9 saves 1-2 points more at a fifth of the speed.
+zstd_level = 3
+
+# Threads zstd may use. The VPS has 4 cores and is also running the stack.
+zstd_threads = 2
