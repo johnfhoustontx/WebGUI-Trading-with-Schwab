@@ -4,7 +4,29 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-12 (**The backups are compressed, and a pruned Drive archive no longer sits in the trash.**)
+**Last updated:** 2026-11-12 (**The copied ThinkorSwim order's stop is a trailing stop.**)
+
+- **What.** Copy ThinkorSwim order (`webgui/pages/options/tos_order.py`) writes its
+  stop line as `TRSTP MARK{±}{trail_pct}% MARK`: a trailing stop that sits
+  `trail_pct` from the moving mark (debit 50% below the highest, credit 100% above
+  the lowest), in place of `STP TRG{±}{stop_pct}% MARK`. The operator chose a
+  percent of the moving mark over a fixed dollar trail.
+- **Config.** `config/tos_order.toml` gains `stop_type` (`"trailing"` / `"fixed"`)
+  and `[debit|credit] trail_pct`, validated in `shared/tos_order_config.py` and
+  listed in Settings -> Configuration -> ThinkorSwim order. `stop_type = "fixed"`
+  writes the 2026-10-28 paste-verified stop again.
+- **Not changed.** The live ticket (`shared/live_order.schwab_order`) still sends a
+  fixed `STOP` on a single option, priced from `stop_pct`, at the operator's
+  request. Its "same order for ThinkorSwim's paste" line reuses the copy button's
+  text, so it now shows the trailing stop.
+- **Verified by paste.** ThinkorSwim's manual says trailing stops are taken only
+  for listed stocks, so the form (from a stock's order text found online) was
+  pasted by the operator on 2026-11-12: a long SPY call (`TRSTP MARK-50.00% MARK`)
+  and a SPY put credit vertical (`TRSTP MARK+100.00% MARK`) each loaded as
+  TRAILSTOP / link MARK / % offset / trigger MARK / GTC. The same pastes are the
+  first check of the exits' `GTC` placement (2026-11-03): it loads.
+
+**Prior —** 2026-11-12 (**The backups are compressed, and a pruned Drive archive no longer sits in the trash.**)
 
 - **Why.** The 2026-11-11 offsite upload failed with `storageQuotaExceeded`: Drive
   held 13.8 GB of live archives and 53.4 GiB of TRASH. `rclone deletefile` moves a

@@ -5,13 +5,25 @@ ThinkorSwim reads with Trade > Order Entry Tools > "Paste order from clipboard":
 
     BUY +1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @1.50 LMT [TO OPEN/TO OPEN]
     SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @TRG+100.00% LMT GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]
-    SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL STP TRG-50.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]
+    SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL TRSTP MARK-50.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]
 
-The opening limit triggers the other two, which cancel each other. The two exit
-prices are PERCENTAGES of the fill, worked out by ThinkorSwim when the opening
-order fills, so they follow the price actually paid rather than the limit. The
-closing lines repeat the opening one with the side reversed; the position
-effect names one ``TO OPEN`` / ``TO CLOSE`` per leg.
+The opening limit triggers the other two, which cancel each other. The profit
+target is a PERCENTAGE of the fill, worked out by ThinkorSwim when the opening
+order fills, so it follows the price actually paid rather than the limit. The
+stop is a TRAILING stop (``stop_type = "trailing"``, the operator's choice of
+2026-11-12): it sits ``trail_pct`` from the trade's MARK and follows the mark
+as it moves in the trade's favour, never back. ``stop_type = "fixed"`` writes
+the stop pasted on 2026-10-28 instead, ``STP TRG-50.00% MARK``: ``stop_pct``
+from the fill. The closing lines repeat the opening one with the side
+reversed; the position effect names one ``TO OPEN`` / ``TO CLOSE`` per leg.
+
+The trailing line (``_TRAIL_STOP``) was pasted by the operator on 2026-11-12,
+on a single call (``TRSTP MARK-50.00% MARK``) and a put credit vertical
+(``TRSTP MARK+100.00% MARK``): each loaded as order type TRAILSTOP, link MARK,
+a ``%`` offset, trigger MARK, GTC. ThinkorSwim's manual says trailing stops
+are for listed stocks only; its order entry takes them on options and spreads
+all the same. Should a structure ever load otherwise, ``stop_type = "fixed"``
+brings the 2026-10-28 stop back with no code change.
 
 The opening order is a DAY order, written with no time-in-force word (DAY is
 what ThinkorSwim reads when there is none, and the lines pasted on 2026-10-28
@@ -42,7 +54,8 @@ that is mostly shares is no exit), and CUSTOM for every other all-option
 position (ratios, backspreads, broken wings). A protective put or a collar
 holds shares beside a long put, which no ThinkorSwim order text carries, so
 they get none. A buy is a debit and takes ``[debit]``'s exits; a sell takes
-``[credit]``'s (``config/tos_order.toml``).
+``[credit]``'s (``config/tos_order.toml``). A debit's trailing stop sits below
+the highest mark since the fill, a credit's above the lowest.
 
 Everything here is PURE except :func:`settings`, which reads the config file.
 """
@@ -64,6 +77,11 @@ load, reset_cache = toml_loader(TOS_ORDER_TOML, DEFAULTS, label="tos_order.toml"
 _MULTIPLIER = "100"
 _WEEKLYS = "(Weeklys)"
 _LINK = "TRG BY #1 OCO"
+# The stop's order type and price. A fixed stop is a percentage of the fill
+# (``TRG``); a trailing one a percentage of the moving mark (``MARK``). Both
+# trigger on the mark. Both are paste-verified (module doc).
+_FIXED_STOP = "STP TRG{sign}{pct:.2f}% MARK"
+_TRAIL_STOP = "TRSTP MARK{sign}{pct:.2f}% MARK"
 _SHARES_PER_CONTRACT = 100
 
 # A stored row with no ``legs`` keeps its strikes in named keys
@@ -394,14 +412,21 @@ def order(signal, cfg=None):
     tgt_sign, stp_sign = ("+", "-") if debit else ("-", "+")
     close = _side_text(-st["side"], q)
     tif = "" if cfg["exit_tif"] == "DAY" else f" {cfg['exit_tif']}"
+    if cfg.get("stop_type", "trailing") == "trailing":
+        stop = _TRAIL_STOP.format(sign=stp_sign, pct=pcts["trail_pct"])
+        stop_words = (f"a trailing stop {pcts['trail_pct']:.2f}% "
+                      f"{'below the highest' if debit else 'above the lowest'} mark")
+    else:
+        stop = _FIXED_STOP.format(sign=stp_sign, pct=pcts["stop_pct"])
+        stop_words = f"stop at {stp_sign}{pcts['stop_pct']:.2f}%"
     text = "\n".join([
         first,
         f"{close} {st['body']} @TRG{tgt_sign}{pcts['target_pct']:.2f}% LMT{tif} {_LINK} [{closing}]",
-        f"{close} {st['body']} STP TRG{stp_sign}{pcts['stop_pct']:.2f}% MARK{tif} {_LINK} [{closing}]",
+        f"{close} {st['body']} {stop}{tif} {_LINK} [{closing}]",
     ])
     word = "debit" if debit else "credit"
     summary = (f"Copies a ThinkorSwim bracket for this {st['name']}: open for a "
                f"{price:.2f} {word}, take profit at {tgt_sign}{pcts['target_pct']:.2f}%, "
-               f"stop at {stp_sign}{pcts['stop_pct']:.2f}%, both "
+               f"{stop_words}, both "
                f"{'good till cancelled' if tif else 'for the day'}. {paste}")
     return {"text": text, "summary": summary}

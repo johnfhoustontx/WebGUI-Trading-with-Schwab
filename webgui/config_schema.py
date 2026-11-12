@@ -3174,8 +3174,8 @@ _TOS_ORDER = ConfigFile(
     name="tos_order.toml", title="ThinkorSwim order", icon="content_copy",
     summary="The bracket the Trade detail panel's Copy ThinkorSwim order button "
             "puts on the clipboard: an opening limit that triggers a profit "
-            "target and a stop, each a percentage of the fill. Read on every "
-            "click.",
+            "target (a percentage of the fill) and a stop (a trailing stop "
+            "that follows the mark, or a fixed one). Read on every click.",
     restart=(),
     sections=(
         Section("Order", "Change the size in ThinkorSwim when it differs.", (
@@ -3186,24 +3186,38 @@ _TOS_ORDER = ConfigFile(
                   "GTC keeps the profit target and stop working until filled "
                   "or cancelled; DAY ends them at the close. The opening order "
                   "is always a DAY order.", kind="choice", choices=("GTC", "DAY")),
+            Field("stop_type", "Stop",
+                  "trailing: the stop follows the trade's mark by the trail "
+                  "below. fixed: the stop sits at the stop percentage from the "
+                  "fill and never moves.", kind="choice",
+                  choices=("trailing", "fixed")),
         )),
         Section("Debit trades", "Bought: the target is a rise in the "
                 "trade's price, the stop a fall.", (
             Field("debit.target_pct", "Take profit above the debit",
                   "100 sells at double what was paid.", unit="%",
                   min=1, max=1000, step=5),
-            Field("debit.stop_pct", "Stop below the debit",
-                  "50 stops out at half what was paid. Under 100.", unit="%",
+            Field("debit.trail_pct", "Trailing stop below the highest mark",
+                  "50 stops out when the trade falls to half the highest mark "
+                  "it reached after the fill. Under 100.", unit="%",
                   min=1, max=99, step=5),
+            Field("debit.stop_pct", "Fixed stop below the debit",
+                  "50 stops out at half what was paid. Used when the stop is "
+                  "fixed, and by Send Live Order for a single option. Under 100.",
+                  unit="%", min=1, max=99, step=5),
         )),
         Section("Credit trades", "Sold: the target is a fall in the "
                 "trade's price, the stop a rise.", (
             Field("credit.target_pct", "Take profit below the credit",
                   "50 buys back at half the credit received. Under 100.",
                   unit="%", min=1, max=99, step=5),
-            Field("credit.stop_pct", "Stop above the credit",
-                  "100 stops out when the trade costs double the credit.",
-                  unit="%", min=1, max=1000, step=5),
+            Field("credit.trail_pct", "Trailing stop above the lowest mark",
+                  "100 stops out when the trade costs double the lowest mark "
+                  "it reached after the fill.", unit="%", min=1, max=1000, step=5),
+            Field("credit.stop_pct", "Fixed stop above the credit",
+                  "100 stops out when the trade costs double the credit. Used "
+                  "when the stop is fixed, and by Send Live Order for a single "
+                  "option.", unit="%", min=1, max=1000, step=5),
         )),
     ),
 )

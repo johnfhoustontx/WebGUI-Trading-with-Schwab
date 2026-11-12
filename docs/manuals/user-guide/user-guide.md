@@ -2035,7 +2035,7 @@ the clipboard; for a debit vertical:
 ```
 BUY +1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @1.50 LMT [TO OPEN/TO OPEN]
 SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @TRG+100.00% LMT GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]
-SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL STP TRG-50.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]
+SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL TRSTP MARK-50.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]
 ```
 
 In ThinkorSwim, open **Trade → Order Entry Tools → Paste order from clipboard**,
@@ -2048,13 +2048,25 @@ idea can also be sent to the account from the app itself (next section).
 - **The two exits are GTC** (good till cancelled), so the target and the stop
   keep working after the day the trade opens. **Exits last** under Settings →
   Configuration → ThinkorSwim order sets them to DAY instead.
-- **The two exits** are percentages of the fill, so ThinkorSwim prices them from
-  what you actually paid. A trade bought for a **debit** takes profit at
-  **+100%** (double the debit) and stops at **−50%**. A trade sold for a
-  **credit** is the mirror: it buys back at **half the credit** (−50%) and stops
-  when it costs **double the credit** (+100%). Change them, and the default size
-  of 1, under **Settings → Configuration → ThinkorSwim order**; a change applies
-  on the next click.
+- **The profit target** is a percentage of the fill, so ThinkorSwim prices it
+  from what you actually paid. A trade bought for a **debit** takes profit at
+  **+100%** (double the debit); a trade sold for a **credit** buys back at
+  **half the credit** (−50%).
+- **The stop is a trailing stop** (`TRSTP`): it sits a percentage from the
+  trade's **mark** and follows the mark when it moves your way, never back. A
+  **debit** trade's stop trails **50% below** the highest mark since the fill,
+  so it starts at half the debit and rises as the trade gains. A **credit**
+  trade's stop trails **100% above** the lowest mark, so it starts where the
+  trade costs double the credit and falls as the trade decays.
+- Change the percentages, the default size of 1, and **Stop** (trailing or
+  fixed) under **Settings → Configuration → ThinkorSwim order**; a change applies
+  on the next click. **Fixed** writes the stop used before 2026-11-12: a stop at
+  −50% (debit) or +100% (credit) of the fill that never moves
+  (`STP TRG-50.00% MARK`).
+- **Checked in ThinkorSwim on 2026-11-12**: a single call and a put vertical
+  each pasted with the stop row reading TRAILSTOP, linked to MARK, the percent
+  trail, triggered on MARK, GTC. If a structure ever loads a different stop,
+  set **Stop** to **fixed**.
 - **Every option structure gets the button**: a single call or put, verticals,
   straddles, strangles, calendars, diagonals (far month listed first),
   butterflies, condors, iron condors and iron butterflies (which ThinkorSwim
@@ -2115,8 +2127,10 @@ Under them: the maximum loss and profit for that size, and the exits, priced off
 the limit with the *ThinkorSwim order* percentages. Because they are priced off the
 limit, a better fill does not move them. **Schwab refuses a stop on a spread**, so
 any order of more than one leg goes in as the opening order plus its profit target;
-set the stop in ThinkorSwim once it fills. A single option gets the full bracket. The same
-order is also shown as ThinkorSwim paste text. For a **calendar or diagonal** the
+set the stop in ThinkorSwim once it fills. A single option gets the full bracket, with a
+**fixed** stop at the *ThinkorSwim order* stop percentage (the ticket sends no trailing
+stop). The same order is also shown as ThinkorSwim paste text; that text carries the copy
+button's stop, which is a trailing one unless **Stop** is set to fixed. For a **calendar or diagonal** the
 maximum loss is read at the near expiry (the far leg counted at what it is worth in
 the money then, the least it can be worth), and the profit line says *Max profit
 depends on the far leg's volatility at the near expiry*: no fixed number exists.

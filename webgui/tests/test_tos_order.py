@@ -37,7 +37,7 @@ def test_a_debit_vertical_is_the_operators_example_exactly():
     assert got == "\n".join([
         "BUY +1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @1.50 LMT [TO OPEN/TO OPEN]",
         "SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @TRG+100.00% LMT GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
-        "SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL STP TRG-50.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
+        "SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL TRSTP MARK-50.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
     ])
 
 
@@ -49,7 +49,7 @@ def test_a_credit_vertical_sells_short_first_and_mirrors_the_exits():
     assert got == "\n".join([
         "SELL -1 VERTICAL SPY 100 (Weeklys) 6 NOV 26 580/575 PUT @1.20 LMT [TO OPEN/TO OPEN]",
         "BUY +1 VERTICAL SPY 100 (Weeklys) 6 NOV 26 580/575 PUT @TRG-50.00% LMT GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
-        "BUY +1 VERTICAL SPY 100 (Weeklys) 6 NOV 26 580/575 PUT STP TRG+100.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
+        "BUY +1 VERTICAL SPY 100 (Weeklys) 6 NOV 26 580/575 PUT TRSTP MARK+100.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
     ])
 
 
@@ -174,7 +174,7 @@ def test_the_exits_reverse_the_opening_line(credit, legs, opening):
     effects = opening.rsplit("[", 1)[1].replace("OPEN", "CLOSE")
     tgt, stp = ("+100.00", "-50.00") if bought else ("-50.00", "+100.00")
     assert lines[1] == f"{close} {body} @TRG{tgt}% LMT GTC TRG BY #1 OCO [{effects}"
-    assert lines[2] == f"{close} {body} STP TRG{stp}% MARK GTC TRG BY #1 OCO [{effects}"
+    assert lines[2] == f"{close} {body} TRSTP MARK{stp}% MARK GTC TRG BY #1 OCO [{effects}"
 
 
 def test_the_side_of_a_named_spread_comes_from_its_legs_not_its_price():
@@ -232,7 +232,7 @@ def test_a_long_strangle_buys_and_takes_the_debit_exits():
         assert lines == [
             "BUY +1 STRANGLE INTC 100 (Weeklys) 6 NOV 26 105/85 CALL/PUT @1.90 LMT [TO OPEN/TO OPEN]",
             "SELL -1 STRANGLE INTC 100 (Weeklys) 6 NOV 26 105/85 CALL/PUT @TRG+100.00% LMT GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
-            "SELL -1 STRANGLE INTC 100 (Weeklys) 6 NOV 26 105/85 CALL/PUT STP TRG-50.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
+            "SELL -1 STRANGLE INTC 100 (Weeklys) 6 NOV 26 105/85 CALL/PUT TRSTP MARK-50.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
         ]
 
 
@@ -292,7 +292,7 @@ def test_day_exits_write_no_time_in_force(monkeypatch):
                                                     "exit_tif": "day"})
     lines = tos_order.order(CREDIT_PUT)["text"].splitlines()
     assert lines[1].endswith("@TRG-50.00% LMT TRG BY #1 OCO [TO CLOSE/TO CLOSE]")
-    assert lines[2].endswith("STP TRG+100.00% MARK TRG BY #1 OCO [TO CLOSE/TO CLOSE]")
+    assert lines[2].endswith("TRSTP MARK+100.00% MARK TRG BY #1 OCO [TO CLOSE/TO CLOSE]")
     assert "for the day" in tos_order.order(CREDIT_PUT)["summary"]
 
 
@@ -329,14 +329,55 @@ def test_what_cannot_be_written_gets_no_order(sig):
 
 def test_the_percentages_and_quantity_come_from_config(monkeypatch):
     monkeypatch.setattr(tos_order, "load", lambda: {
-        "quantity": 3, "debit": {"target_pct": 80, "stop_pct": 40},
-        "credit": {"target_pct": 60, "stop_pct": 150}})
+        "quantity": 3,
+        "debit": {"target_pct": 80, "stop_pct": 40, "trail_pct": 30},
+        "credit": {"target_pct": 60, "stop_pct": 150, "trail_pct": 75}})
     lines = tos_order.order(DEBIT_CALL)["text"].splitlines()
     assert lines[0].startswith("BUY +3 ")
-    assert "@TRG+80.00% LMT" in lines[1] and "STP TRG-40.00% MARK" in lines[2]
+    assert "@TRG+80.00% LMT" in lines[1] and "TRSTP MARK-30.00% MARK" in lines[2]
     lines = tos_order.order(CREDIT_PUT)["text"].splitlines()
     assert lines[0].startswith("SELL -3 ")
-    assert "@TRG-60.00% LMT" in lines[1] and "STP TRG+150.00% MARK" in lines[2]
+    assert "@TRG-60.00% LMT" in lines[1] and "TRSTP MARK+75.00% MARK" in lines[2]
+
+
+# ── the stop: trailing (shipped) or fixed ───────────────────────────────────
+
+def test_the_shipped_stop_trails_the_mark_and_says_so():
+    """A debit's trail sits below the highest mark, a credit's above the lowest;
+    neither line carries the fill's TRG price any more."""
+    debit = tos_order.order(DEBIT_CALL)
+    credit = tos_order.order(CREDIT_PUT)
+    assert " TRSTP MARK-50.00% MARK " in debit["text"].splitlines()[2]
+    assert " TRSTP MARK+100.00% MARK " in credit["text"].splitlines()[2]
+    assert "STP TRG" not in debit["text"] + credit["text"]
+    assert "a trailing stop 50.00% below the highest mark" in debit["summary"]
+    assert "a trailing stop 100.00% above the lowest mark" in credit["summary"]
+
+
+def test_a_fixed_stop_writes_the_stop_pasted_on_2026_10_28(monkeypatch):
+    """``stop_type = "fixed"`` is the way back if ThinkorSwim refuses the
+    trailing line: the verified stop at ``stop_pct`` from the fill."""
+    monkeypatch.setattr(tos_order, "load", lambda: {**tos_order.DEFAULTS,
+                                                    "stop_type": "FIXED"})
+    assert tos_order.order(DEBIT_CALL)["text"].splitlines()[2] == (
+        "SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL "
+        "STP TRG-50.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]")
+    credit = tos_order.order(CREDIT_PUT)
+    assert credit["text"].splitlines()[2] == (
+        "BUY +1 VERTICAL SPY 100 (Weeklys) 6 NOV 26 580/575 PUT "
+        "STP TRG+100.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]")
+    assert "stop at +100.00%" in credit["summary"]
+    assert "TRSTP" not in credit["text"]
+
+
+def test_the_trail_and_the_fixed_stop_are_separate_settings(monkeypatch):
+    """The live ticket prices its single-option stop off ``stop_pct``, so the
+    trail must not move it, and the other way round."""
+    monkeypatch.setattr(tos_order, "load", lambda: {
+        "debit": {"stop_pct": 40, "trail_pct": 25}})
+    s = tos_order.settings()
+    assert s["debit"]["stop_pct"] == 40.0 and s["debit"]["trail_pct"] == 25.0
+    assert "TRSTP MARK-25.00% MARK" in tos_order.order(DEBIT_CALL)["text"]
 
 
 @pytest.mark.parametrize("bad", [
@@ -344,13 +385,17 @@ def test_the_percentages_and_quantity_come_from_config(monkeypatch):
     {"debit": {"stop_pct": 100}}, {"credit": {"target_pct": 100}},
     {"debit": {"target_pct": -5}}, {"credit": {"stop_pct": float("nan")}},
     {"debit": {"target_pct": "lots"}},
+    {"debit": {"trail_pct": 100}}, {"debit": {"trail_pct": 0}},
+    {"credit": {"trail_pct": 1001}}, {"credit": {"trail_pct": True}},
     {"exit_tif": "GTD"}, {"exit_tif": 1}, {"exit_tif": ""},
+    {"stop_type": "trailing stop"}, {"stop_type": 1}, {"stop_type": ""},
 ])
 def test_a_bad_setting_falls_back_to_the_default(monkeypatch, bad):
     monkeypatch.setattr(tos_order, "load", lambda: bad)
     s = tos_order.settings()
     assert s["quantity"] == 1
     assert s["exit_tif"] == "GTC"
+    assert s["stop_type"] == "trailing"
     assert s["debit"] == tos_order.DEFAULTS["debit"]
     assert s["credit"] == tos_order.DEFAULTS["credit"]
 
@@ -365,8 +410,9 @@ def test_the_shipped_file_matches_the_defaults():
 def test_every_key_is_in_the_settings_catalogue():
     cfg = config_schema.BY_NAME["tos_order.toml"]
     keys = {f.key for sec in cfg.sections for f in sec.fields}
-    assert keys == {"quantity", "exit_tif", "debit.target_pct", "debit.stop_pct",
-                    "credit.target_pct", "credit.stop_pct"}
+    assert keys == {"quantity", "exit_tif", "stop_type",
+                    "debit.target_pct", "debit.stop_pct", "debit.trail_pct",
+                    "credit.target_pct", "credit.stop_pct", "credit.trail_pct"}
 
 
 # ── the panel's button ───────────────────────────────────────────────────────

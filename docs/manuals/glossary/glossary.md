@@ -340,6 +340,10 @@ These describe what market makers are forced to do to stay hedged, and why that 
 
 **Limit order** — Fill at your price or better. The default for options; market orders in wide chains are how you donate money.
 
+**Stop order** — An order that turns into a market order once the price reaches its activation (stop) price. It protects against a larger loss, but the fill can be well past the stop in a fast or thin market.
+
+**Trailing stop** — A stop that sits a set amount or percentage from the current price and follows it when the price moves your way, but never moves back. The app's copied ThinkorSwim order uses one by default (`TRSTP`, a percentage of the mark).
+
 **Multi-leg / combo order** — Sending a spread as a single order so all legs fill together at a net price.
 
 **Legging in** — Entering the legs of a spread separately, hoping for a better combined price. Risks being stuck half-filled.
