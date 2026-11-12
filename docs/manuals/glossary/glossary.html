@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Options Glossary</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-01</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-12</div>
 </div>
 <h1 id="options-trading-glossary">Options Trading Glossary</h1>
 <p>Plain-English definitions of the terms you'll run into trading and analyzing options.</p>
@@ -244,6 +244,8 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <p><strong>Slippage</strong> — The gap between the price you expected and the price you got. Kills multi-leg strategies traded in illiquid chains.</p>
 <p><strong>Liquidity</strong> — How easily you can get in and out. Judge it by spread width, open interest, and daily volume — not by whether a strike is listed.</p>
 <p><strong>Limit order</strong> — Fill at your price or better. The default for options; market orders in wide chains are how you donate money.</p>
+<p><strong>Stop order</strong> — An order that turns into a market order once the price reaches its activation (stop) price. It protects against a larger loss, but the fill can be well past the stop in a fast or thin market.</p>
+<p><strong>Trailing stop</strong> — A stop that sits a set amount or percentage from the current price and follows it when the price moves your way, but never moves back. The app's copied ThinkorSwim order uses one by default (<code>TRSTP</code>, a percentage of the mark).</p>
 <p><strong>Multi-leg / combo order</strong> — Sending a spread as a single order so all legs fill together at a net price.</p>
 <p><strong>Legging in</strong> — Entering the legs of a spread separately, hoping for a better combined price. Risks being stuck half-filled.</p>
 <p><strong>Margin</strong> — Collateral required to hold short options. Defined-risk spreads require much less than naked positions.</p>

@@ -15,8 +15,19 @@ def test_bad_values_fall_back_one_at_a_time():
                              "debit": {"target_pct": 200, "stop_pct": 100},
                              "credit": {"target_pct": True, "stop_pct": 1001}})
     assert got["quantity"] == 1 and got["exit_tif"] == "DAY"
-    assert got["debit"] == {"target_pct": 200.0, "stop_pct": 50.0}
-    assert got["credit"] == {"target_pct": 50.0, "stop_pct": 100.0}
+    assert got["debit"] == {"target_pct": 200.0, "stop_pct": 50.0, "trail_pct": 50.0}
+    assert got["credit"] == {"target_pct": 50.0, "stop_pct": 100.0, "trail_pct": 100.0}
+
+
+def test_the_stop_type_and_the_trail():
+    got = toc.settings_from({"stop_type": " Fixed ",
+                             "debit": {"trail_pct": 99.0},
+                             "credit": {"trail_pct": 250}})
+    assert got["stop_type"] == "fixed"
+    assert got["debit"]["trail_pct"] == 99.0 and got["credit"]["trail_pct"] == 250.0
+    # a debit's trail is below the mark, so 100 would put the stop at zero
+    bad = toc.settings_from({"stop_type": "trail", "debit": {"trail_pct": 100}})
+    assert bad["stop_type"] == "trailing" and bad["debit"]["trail_pct"] == 50.0
 
 
 def test_the_page_and_the_service_validate_alike(monkeypatch):

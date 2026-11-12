@@ -2221,14 +2221,30 @@ smallest whole ratio, and names the structure from that geometry:
   price is the whole position's), to two decimals.
 - **Time in force**: the opening line carries none, which ThinkorSwim reads as
   DAY. The exits carry `exit_tif` (shipped `GTC`) after `LMT` and after the
-  stop's `MARK`: `@TRG+100.00% LMT GTC TRG BY #1 OCO`,
-  `STP TRG-50.00% MARK GTC TRG BY #1 OCO`. `exit_tif = "DAY"` writes no word.
+  stop's trigger `MARK`: `@TRG+100.00% LMT GTC TRG BY #1 OCO`,
+  `TRSTP MARK-50.00% MARK GTC TRG BY #1 OCO`. `exit_tif = "DAY"` writes no word.
 - **Exits**, from `config/tos_order.toml` (read on every click), the opening
-  line with the side reversed: a buy (debit) `@TRG+100.00% LMT` and
-  `STP TRG-50.00% MARK`; a sell (credit) `@TRG-50.00% LMT` and
-  `STP TRG+100.00% MARK`, each followed by the time in force. Both are `TRG BY #1 OCO`: the opening order triggers
-  them and each cancels the other. A percentage below the entry must be under
-  100, or it falls back to the default. A covered call has no exits.
+  line with the side reversed. The target is a percentage of the fill
+  (`target_pct`): a buy (debit) `@TRG+100.00% LMT`, a sell (credit)
+  `@TRG-50.00% LMT`. The stop depends on `stop_type`:
+  - `"trailing"` (shipped, 2026-11-12): `TRSTP MARK{±}{trail_pct}% MARK`, a
+    trailing stop offset `trail_pct` from the moving mark and triggered on the
+    mark. A debit's `TRSTP MARK-50.00% MARK` trails 50% below the highest mark
+    since the fill; a credit's `TRSTP MARK+100.00% MARK` trails 100% above the
+    lowest. Paste-verified on 2026-11-12 on a single call and a put vertical:
+    ThinkorSwim loads it as order type TRAILSTOP, link MARK, a `%` offset,
+    trigger MARK (its manual lists trailing stops for listed stocks only, but
+    its order entry takes them on options and spreads).
+  - `"fixed"`: `STP TRG{±}{stop_pct}% MARK`, a stop at `stop_pct` of the fill
+    (`STP TRG-50.00% MARK` for a debit, `STP TRG+100.00% MARK` for a credit),
+    as verified on 2026-10-28.
+
+  Each is followed by the time in force, and both exits are `TRG BY #1 OCO`: the
+  opening order triggers them and each cancels the other. A percentage below the
+  price (a debit's stop or trail, a credit's target) must be under 100, or it
+  falls back to the default. A covered call has no exits. `stop_pct` is also the
+  live ticket's single-option stop (`shared/live_order.exit_prices`), which is
+  always a fixed `STOP`: the ticket never reads `stop_type` or `trail_pct`.
 - **Series tag**: `(Weeklys)` when any expiration is not the monthly — the third
   Friday, or the session before it when that Friday is a closure
   (`shared/market_calendar`). A `$` is stripped from an index symbol (`$SPX` →

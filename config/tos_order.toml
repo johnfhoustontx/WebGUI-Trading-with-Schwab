@@ -2,24 +2,29 @@
 # (webgui/pages/options/tos_order.py).
 #
 # The button copies a "1st triggers OCO" bracket for the selected trade: the
-# opening limit order, then a profit-target limit and a stop, each a
+# opening limit order, then a profit-target limit and a stop. The target is a
 # percentage of the entry price that ThinkorSwim computes when the opening
-# order fills. Paste it in ThinkorSwim with Trade > Order Entry Tools >
+# order fills. The stop is a TRAILING stop that follows the trade's mark by
+# trail_pct (stop_type = "trailing"), or a fixed stop at stop_pct from the fill
+# (stop_type = "fixed"). Paste it in ThinkorSwim with Trade > Order Entry Tools >
 # "Paste order from clipboard". A covered call copies the opening order only.
 #
 # Read on every click; nothing needs a restart.
 
 quantity = 1                   # spreads per order (100 shares each for a covered call); change it in ThinkorSwim for a different size
 exit_tif = "GTC"               # the profit target and stop: "GTC" (good till cancelled) or "DAY". The opening order is always DAY
+stop_type = "trailing"         # "trailing": the stop follows the mark by trail_pct; "fixed": the stop sits at stop_pct from the fill
 
 [debit]
 # Any trade opened for a debit (bought): the target is a rise in its price,
 # the stop a fall. 100 / 50 = sell at double the debit, stop out at half of it.
 target_pct = 100.0             # take profit at this % ABOVE the debit paid
-stop_pct = 50.0                # stop at this % BELOW the debit paid (under 100)
+stop_pct = 50.0                # fixed stop (and the live ticket's single-option stop) at this % BELOW the debit paid (under 100)
+trail_pct = 50.0               # trailing stop this % BELOW the highest mark since the fill (under 100)
 
 [credit]
 # Any trade opened for a credit (sold): the target is a fall in its price,
 # the stop a rise. 50 / 100 = buy back at half the credit, stop when it doubles.
 target_pct = 50.0              # take profit at this % BELOW the credit received (under 100)
-stop_pct = 100.0               # stop at this % ABOVE the credit received
+stop_pct = 100.0               # fixed stop (and the live ticket's single-option stop) at this % ABOVE the credit received
+trail_pct = 100.0              # trailing stop this % ABOVE the lowest mark since the fill

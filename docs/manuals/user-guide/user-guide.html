@@ -2487,7 +2487,7 @@ Captured Signals and the Paper Ledger. It puts a <em>first triggers OCO</em> bra
 the clipboard; for a debit vertical:</p>
 <pre><code>BUY +1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @1.50 LMT [TO OPEN/TO OPEN]
 SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @TRG+100.00% LMT GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]
-SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL STP TRG-50.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]
+SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL TRSTP MARK-50.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]
 </code></pre>
 <p>In ThinkorSwim, open <strong>Trade → Order Entry Tools → Paste order from clipboard</strong>,
 check the ticket, and send it there. This button places nothing; a posted trade
@@ -2499,13 +2499,25 @@ idea can also be sent to the account from the app itself (next section).</p>
 <li><strong>The two exits are GTC</strong> (good till cancelled), so the target and the stop
   keep working after the day the trade opens. <strong>Exits last</strong> under Settings →
   Configuration → ThinkorSwim order sets them to DAY instead.</li>
-<li><strong>The two exits</strong> are percentages of the fill, so ThinkorSwim prices them from
-  what you actually paid. A trade bought for a <strong>debit</strong> takes profit at
-  <strong>+100%</strong> (double the debit) and stops at <strong>−50%</strong>. A trade sold for a
-  <strong>credit</strong> is the mirror: it buys back at <strong>half the credit</strong> (−50%) and stops
-  when it costs <strong>double the credit</strong> (+100%). Change them, and the default size
-  of 1, under <strong>Settings → Configuration → ThinkorSwim order</strong>; a change applies
-  on the next click.</li>
+<li><strong>The profit target</strong> is a percentage of the fill, so ThinkorSwim prices it
+  from what you actually paid. A trade bought for a <strong>debit</strong> takes profit at
+  <strong>+100%</strong> (double the debit); a trade sold for a <strong>credit</strong> buys back at
+  <strong>half the credit</strong> (−50%).</li>
+<li><strong>The stop is a trailing stop</strong> (<code>TRSTP</code>): it sits a percentage from the
+  trade's <strong>mark</strong> and follows the mark when it moves your way, never back. A
+  <strong>debit</strong> trade's stop trails <strong>50% below</strong> the highest mark since the fill,
+  so it starts at half the debit and rises as the trade gains. A <strong>credit</strong>
+  trade's stop trails <strong>100% above</strong> the lowest mark, so it starts where the
+  trade costs double the credit and falls as the trade decays.</li>
+<li>Change the percentages, the default size of 1, and <strong>Stop</strong> (trailing or
+  fixed) under <strong>Settings → Configuration → ThinkorSwim order</strong>; a change applies
+  on the next click. <strong>Fixed</strong> writes the stop used before 2026-11-12: a stop at
+  −50% (debit) or +100% (credit) of the fill that never moves
+  (<code>STP TRG-50.00% MARK</code>).</li>
+<li><strong>Checked in ThinkorSwim on 2026-11-12</strong>: a single call and a put vertical
+  each pasted with the stop row reading TRAILSTOP, linked to MARK, the percent
+  trail, triggered on MARK, GTC. If a structure ever loads a different stop,
+  set <strong>Stop</strong> to <strong>fixed</strong>.</li>
 <li><strong>Every option structure gets the button</strong>: a single call or put, verticals,
   straddles, strangles, calendars, diagonals (far month listed first),
   butterflies, condors, iron condors and iron butterflies (which ThinkorSwim
@@ -2564,8 +2576,10 @@ restart, open it again from the panel. Fill in three boxes:</p>
 the limit with the <em>ThinkorSwim order</em> percentages. Because they are priced off the
 limit, a better fill does not move them. <strong>Schwab refuses a stop on a spread</strong>, so
 any order of more than one leg goes in as the opening order plus its profit target;
-set the stop in ThinkorSwim once it fills. A single option gets the full bracket. The same
-order is also shown as ThinkorSwim paste text. For a <strong>calendar or diagonal</strong> the
+set the stop in ThinkorSwim once it fills. A single option gets the full bracket, with a
+<strong>fixed</strong> stop at the <em>ThinkorSwim order</em> stop percentage (the ticket sends no trailing
+stop). The same order is also shown as ThinkorSwim paste text; that text carries the copy
+button's stop, which is a trailing one unless <strong>Stop</strong> is set to fixed. For a <strong>calendar or diagonal</strong> the
 maximum loss is read at the near expiry (the far leg counted at what it is worth in
 the money then, the least it can be worth), and the profit line says <em>Max profit
 depends on the far leg's volatility at the near expiry</em>: no fixed number exists.</p>

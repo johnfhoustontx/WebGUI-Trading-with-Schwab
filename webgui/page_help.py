@@ -359,14 +359,18 @@ directional trades on their own tab.
   trade box shows each limit in green (fits) or red (breaks) for the quantity you
   type, and greys out Create when one breaks.
 - **Copy ThinkorSwim order** (in the detail panel) puts a bracket on the
-  clipboard: the opening limit at the trade's price, then a profit target and
-  a stop that ThinkorSwim works out from the fill. In ThinkorSwim use Trade →
+  clipboard: the opening limit at the trade's price, then a profit target that
+  ThinkorSwim works out from the fill and a TRAILING stop that follows the
+  trade's mark (Settings → Configuration → ThinkorSwim order can make it a
+  fixed stop instead). In ThinkorSwim use Trade →
   Order Entry Tools → *Paste order from clipboard*. It writes every structure:
   single options, verticals, straddles, strangles, calendars, diagonals,
   butterflies, condors, iron condors and flies, and any other mix of options
-  as a CUSTOM order. A trade bought for a debit targets +100% and stops at
-  −50%; one sold for a credit buys back at half the credit and stops when it
-  doubles (Settings → Configuration → ThinkorSwim order). The opening order
+  as a CUSTOM order. A trade bought for a debit targets +100% and its stop
+  trails 50% below the highest mark it reaches; one sold for a credit buys
+  back at half the credit and its stop trails 100% above the lowest mark, so
+  it starts where the trade doubles and moves down as the trade decays
+  (Settings → Configuration → ThinkorSwim order). The opening order
   is a DAY order; the target and stop are GTC, so they keep working after
   the day you open. A covered call
   copies the opening order only; a protective put or a collar gets no button.

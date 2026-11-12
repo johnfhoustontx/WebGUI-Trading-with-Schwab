@@ -4940,19 +4940,34 @@ smallest whole ratio, and names the structure from that geometry:</p>
   price is the whole position's), to two decimals.</li>
 <li><strong>Time in force</strong>: the opening line carries none, which ThinkorSwim reads as
   DAY. The exits carry <code>exit_tif</code> (shipped <code>GTC</code>) after <code>LMT</code> and after the
-  stop's <code>MARK</code>: <code>@TRG+100.00% LMT GTC TRG BY #1 OCO</code>,
-  <code>STP TRG-50.00% MARK GTC TRG BY #1 OCO</code>. <code>exit_tif = "DAY"</code> writes no word.</li>
+  stop's trigger <code>MARK</code>: <code>@TRG+100.00% LMT GTC TRG BY #1 OCO</code>,
+  <code>TRSTP MARK-50.00% MARK GTC TRG BY #1 OCO</code>. <code>exit_tif = "DAY"</code> writes no word.</li>
 <li><strong>Exits</strong>, from <code>config/tos_order.toml</code> (read on every click), the opening
-  line with the side reversed: a buy (debit) <code>@TRG+100.00% LMT</code> and
-  <code>STP TRG-50.00% MARK</code>; a sell (credit) <code>@TRG-50.00% LMT</code> and
-  <code>STP TRG+100.00% MARK</code>, each followed by the time in force. Both are <code>TRG BY #1 OCO</code>: the opening order triggers
-  them and each cancels the other. A percentage below the entry must be under
-  100, or it falls back to the default. A covered call has no exits.</li>
-<li><strong>Series tag</strong>: <code>(Weeklys)</code> when any expiration is not the monthly — the third
+  line with the side reversed. The target is a percentage of the fill
+  (<code>target_pct</code>): a buy (debit) <code>@TRG+100.00% LMT</code>, a sell (credit)
+  <code>@TRG-50.00% LMT</code>. The stop depends on <code>stop_type</code>:</li>
+<li><code>"trailing"</code> (shipped, 2026-11-12): <code>TRSTP MARK{±}{trail_pct}% MARK</code>, a
+    trailing stop offset <code>trail_pct</code> from the moving mark and triggered on the
+    mark. A debit's <code>TRSTP MARK-50.00% MARK</code> trails 50% below the highest mark
+    since the fill; a credit's <code>TRSTP MARK+100.00% MARK</code> trails 100% above the
+    lowest. Paste-verified on 2026-11-12 on a single call and a put vertical:
+    ThinkorSwim loads it as order type TRAILSTOP, link MARK, a <code>%</code> offset,
+    trigger MARK (its manual lists trailing stops for listed stocks only, but
+    its order entry takes them on options and spreads).</li>
+<li><code>"fixed"</code>: <code>STP TRG{±}{stop_pct}% MARK</code>, a stop at <code>stop_pct</code> of the fill
+    (<code>STP TRG-50.00% MARK</code> for a debit, <code>STP TRG+100.00% MARK</code> for a credit),
+    as verified on 2026-10-28.</li>
+</ul>
+<p>Each is followed by the time in force, and both exits are <code>TRG BY #1 OCO</code>: the
+  opening order triggers them and each cancels the other. A percentage below the
+  price (a debit's stop or trail, a credit's target) must be under 100, or it
+  falls back to the default. A covered call has no exits. <code>stop_pct</code> is also the
+  live ticket's single-option stop (<code>shared/live_order.exit_prices</code>), which is
+  always a fixed <code>STOP</code>: the ticket never reads <code>stop_type</code> or <code>trail_pct</code>.
+- <strong>Series tag</strong>: <code>(Weeklys)</code> when any expiration is not the monthly — the third
   Friday, or the session before it when that Friday is a closure
   (<code>shared/market_calendar</code>). A <code>$</code> is stripped from an index symbol (<code>$SPX</code> →
-  <code>SPX</code>).</li>
-</ul>
+  <code>SPX</code>).</p>
 <h2 id="simulator-engines">Simulator engines</h2>
 <p><strong>File:</strong> <code>options-scanner/options_simulator/</code>.</p>
 <p>Positions are <strong>multi-leg</strong>: <code>Position(legs=[Leg(contract, sign, ratio), …])</code>, and
