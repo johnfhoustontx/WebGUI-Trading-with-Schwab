@@ -291,7 +291,7 @@ Redis backbone. No two Tier-2 services talk to each other directly.
 | options_svc | 8211 | Scans, paper trading, gamma collection, flow alerts, calculator, simulator, expected move, rescue. |
 | portfolio_svc | 8212 | Holdings, sectors, performance, live P&L stream. |
 | trade_svc | 8213 | On-demand single-symbol analysis + deep dive; the daily watchlist dividend pull. |
-| market_svc | 8215 | Live macro-ticker Market Dashboard (~3 s RTH poll). Its /ES and /NQ tiles quote the front-month contract: quarterly (H, M, U, Z), expiring the third Friday of the month or the session before when that Friday is a closure, and switched `[futures] roll_days_before_expiry` days (8) before expiry — `shared/futures.py`. |
+| market_svc | 8215 | Live macro-ticker Market Dashboard (~3 s RTH poll), and its fund tiles' top holdings for the hover card (`cache:market:holdings`, one quote request every 15 s in the session, 300 s outside it). Its /ES and /NQ tiles quote the front-month contract: quarterly (H, M, U, Z), expiring the third Friday of the month or the session before when that Friday is a closure, and switched `[futures] roll_days_before_expiry` days (8) before expiry — `shared/futures.py`. |
 | news_svc | 8216 | Market News: polls free public RSS / Google News / Yahoo / SEC EDGAR feeds and the economic calendar (Fed, BLS, BEA, FRED, Nasdaq) into `news.db`. No Schwab, no Claude, no proxy. |
 | blog_svc | 8217 | The site Blog: cleans an uploaded HTML document, keeps drafts and entries in `blog.db` and the files beside it, and writes published entries into the served site. No Schwab, no Claude, no proxy; the one outside request is the typeface copy from Google Fonts at upload. |
 | webgui | 8500 | The web UI. |

@@ -3371,9 +3371,54 @@ _SOCIAL_CARDS = ConfigFile(
     ),
 )
 
+# ─────────────────────────────────────────────────────────────────────────────
+# The Macro Board's ETF hover card — config/etf_holdings.toml
+# ─────────────────────────────────────────────────────────────────────────────
+_ETF_HOLDINGS = ConfigFile(
+    name="etf_holdings.toml", title="Fund holdings", icon="pie_chart",
+    summary="The top holdings a fund tile on the Macro Board shows on hover, "
+            "each with its price and move from the previous close.",
+    # The market service reads this file on every refresh.
+    restart=(),
+    caution="The lists are kept by hand: Schwab does not publish what a fund "
+            "holds. Update the date below when you check them.",
+    sections=(
+        Section("Card", "", (
+            Field("enabled", "Holdings card on",
+                  "Off takes the card off every tile within a refresh; the tile "
+                  "then shows its one-line name again.", kind="bool"),
+            Field("top_n", "Holdings shown per fund", "", kind="int",
+                  min=1, max=10, step=1),
+            Field("as_of", "Lists last checked",
+                  "Printed on every card. Change it when you update the lists.",
+                  kind="date"),
+            Field("rth_refresh_sec", "Reprice during the session every",
+                  "One quote request for every holding at once.",
+                  kind="int", unit="sec", min=3, max=3600, step=1),
+            Field("offhours_refresh_sec", "Reprice outside the session every", "",
+                  kind="int", unit="sec", min=15, max=86400, step=15),
+            Field("stale_after_h", "Show no move for a line idle longer than",
+                  "A thin over-the-counter line can report a large move against "
+                  "a close months old. Past this, the card shows the day it last "
+                  "traded instead.", kind="int", unit="hours", min=1, max=720, step=1),
+        )),
+        Section("Funds", "Each fund's holdings, largest first, by the ticker "
+                "Schwab quotes. A foreign company is its US ADR or OTC line.", (
+            Field("funds.*", "", "", kind="symbols"),
+        )),
+        Section("Names", "The name printed beside each ticker.", (
+            Field("names.*", "", "", kind="text"),
+        )),
+        Section("Notes", "A line printed on a fund's card instead of, or above, "
+                "its holdings.", (
+            Field("notes.*", "", "", kind="text"),
+        )),
+    ),
+)
+
 FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _LOGIN_PUSH, _TOS_ORDER, _LIVE_ORDERS, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _SECTORS, _MOMENTUM, _SENTIMENT,
          _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _FUTURES_CHAIN, _GEX_ARCHIVE, _BACKUP, _SOCIAL_CARDS, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
-         _MARKET_READ, _PORTS, _ENVS)
+         _MARKET_READ, _ETF_HOLDINGS, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}
 

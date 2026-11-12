@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-10</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-12</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -123,6 +123,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#trade-stream-tracker">Trade-stream tracker</a></li>
 <li><a href="#streaming-server-sent-events">Streaming (server-sent events)</a></li>
 <li><a href="#the-market-read-view">The Market read view</a></li>
+<li><a href="#the-fund-holdings-view">The fund holdings view</a></li>
 <li><a href="#the-traded-volume-view">The traded volume view</a></li>
 </ul>
 </li>
@@ -184,7 +185,7 @@ keys that feed it. Menu order matches the rail.</p>
 <tr>
 <td><strong>Market Dashboard</strong></td>
 <td><code>market_svc</code> :8215</td>
-<td><code>cache:market:dashboard</code>, <code>:summary</code>, <code>:read</code> (the Desk's Market read), <code>:volume</code> (traded volume, for the Market read and the reports)</td>
+<td><code>cache:market:dashboard</code>, <code>:summary</code>, <code>:read</code> (the Desk's Market read), <code>:volume</code> (traded volume, for the Market read and the reports), <code>:holdings</code> (each fund tile's top holdings, quoted, for the hover card)</td>
 </tr>
 <tr>
 <td><strong>Sentiment</strong></td>
@@ -3925,6 +3926,26 @@ slot in the regular session:</p>
 <code>public</code> is exactly <code>true</code>, and a row that carries its own <code>public</code> only when that is
 exactly <code>true</code> too (recounting <code>tally</code> without it). The rules and thresholds are in the Technical Reference,
 <em>Market read</em>.</p>
+<h2 id="the-fund-holdings-view">The fund holdings view</h2>
+<p><strong><code>cache:market:holdings</code></strong> (<code>MarketHoldings</code>) is built by
+<code>services/market_svc/holdings.py</code> from <code>config/etf_holdings.toml</code>, every
+<code>rth_refresh_sec</code> (15) seconds in the session and <code>offhours_refresh_sec</code> (300)
+outside it, with ONE proxy <code>/quotes</code> request for every holding at once:</p>
+<pre><code>{enabled, ts, as_of, funds: {&lt;fund&gt;: {rows: [{symbol, name, last, change_pct, stale, traded}], note}}}
+</code></pre>
+<ul>
+<li><code>&lt;fund&gt;</code> is the tile's display symbol. The Macro Board draws a holdings card on any
+  tile whose symbol is a key here, and the one-line description on every other.</li>
+<li><code>change_pct</code> is the quote's own percent change from the previous close, as a tile's.</li>
+<li><code>stale</code> is true when the line's last trade is older than <code>stale_after_h</code> (96):
+  <code>change_pct</code> is then <code>null</code> and <code>traded</code> is that trade's <code>YYYY-MM-DD</code>. A line with
+  no trade on record at all is <code>stale</code> with <code>last</code>, <code>change_pct</code> and <code>traded</code> all
+  <code>null</code>. A holding Schwab returned nothing for has <code>last</code> and <code>change_pct</code> <code>null</code>
+  and <code>stale</code> false.</li>
+<li><code>as_of</code> is the date the lists were checked by hand; <code>ts</code> when the quotes were fetched.</li>
+<li>Switched off (<code>enabled = false</code>), the view is published once as <code>{enabled: false,
+  funds: {}}</code> and the cards go.</li>
+</ul>
 <h2 id="the-traded-volume-view">The traded volume view</h2>
 <p><strong><code>cache:market:volume</code></strong> (<code>MarketVolume</code>) is built by
 <code>services/market_svc/volume_read.py</code>, every 5 minutes in the session and once for each
@@ -4087,6 +4108,7 @@ cache:market:dashboard         events:market:dashboard        (MarketDashboard)
 cache:market:summary           events:market:summary          (MarketSummary)
 cache:market:read              events:market:read             (MarketRead - the Desk's seven readings)
 cache:market:volume            events:market:volume           (MarketVolume - traded volume, also read by the market reports)
+cache:market:holdings          events:market:holdings         (MarketHoldings - the Macro Board's fund hover card)
 cache:news:feed                events:news:feed               (headlines - every kind but the SEC ones)
 cache:news:feed_public         events:news:feed_public        (public feeds only - a live-origin key)
 cache:news:sec                 events:news:sec                (Form 4s and offering filings)

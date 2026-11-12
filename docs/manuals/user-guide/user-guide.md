@@ -1504,9 +1504,9 @@ a 24-hour clock.
 that rail item lands here. (The app's landing page is the **Desk** — opening
 `http://127.0.0.1:8500` redirects there.)
 
-A live wall of about 48 macro instruments in framed panels — volatility, options
+A live wall of about 77 macro instruments in framed panels — volatility, options
 sentiment, breadth internals, currency, cash indices, futures, broad ETFs, the top
-ten mega-caps, sectors, thematic ETFs, factors, credit, crypto and countries.
+ten mega-caps, sectors, thematic ETFs, credit, crypto, metals and countries.
 
 - **Tile colour means risk-on (green) / risk-off (red) / no data (grey)**, not
   simply up and down. Fear gauges are flipped: VIX, SKEW, put/call, TLT and UUP
@@ -1524,6 +1524,12 @@ ten mega-caps, sectors, thematic ETFs, factors, credit, crypto and countries.
   Settings → Configuration → Symbols & watchlists → *Index futures*; it takes
   effect on the next refresh, with no restart.
 - Tiles **flash** when their value changes.
+- **Hover a fund tile** (Broad-Market ETF, Sector SPDR, Thematic or Countries) to
+  see its top five holdings, each with its price and its move since the previous
+  close. A foreign company is shown by its US line. A thin line that has not traded
+  for four days reads **last** and the date it traded, not a move. The lists are kept
+  by hand: edit them, and the date they were checked, in Settings → Configuration →
+  *Fund holdings*. The prices refresh every 15 seconds in the session.
 
 Updates about every 3 seconds during market hours, 15 seconds outside them, and 60
 seconds at weekends.

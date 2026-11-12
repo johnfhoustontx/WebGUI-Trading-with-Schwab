@@ -192,7 +192,6 @@ _ENTRIES = [
     _q("AMD", "AMD", "Advanced Micro Devices", _MAG, prem=True),
     # Thematic / Industry ETF
     _q("SMH", "SMH", "VanEck Semiconductor ETF", _THM),
-    _q("XSD", "XSD", "SPDR S&P Semiconductor ETF", _THM),
     _q("IGV", "IGV", "iShares Expanded Tech-Software Sector ETF", _THM),
     _q("QTUM", "QTUM", "Defiance Quantum ETF", _THM),
     _q("XBI", "XBI", "SPDR S&P Biotech ETF", _THM),
@@ -200,6 +199,9 @@ _ENTRIES = [
     _q("XME", "XME", "SPDR S&P Metals & Mining ETF", _THM),
     _q("USO", "USO", "United States Oil Fund (WTI crude)", _THM),
     _q("IYT", "IYT", "iShares Transportation Average ETF", _THM),
+    # CIBR + PAVE replaced XSD on 2026-11-12: XSD repeated SMH's semis read.
+    _q("CIBR", "CIBR", "First Trust Nasdaq Cybersecurity ETF", _THM),
+    _q("PAVE", "PAVE", "Global X U.S. Infrastructure Development ETF", _THM),
     # Sector SPDR (all literal up=green — defensive sectors NOT inverted, per design)
     _q("XLB", "XLB", "Materials Select Sector SPDR", _SEC),
     _q("XLC", "XLC", "Communication Services Select Sector SPDR", _SEC),

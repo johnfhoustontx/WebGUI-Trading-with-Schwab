@@ -1,0 +1,256 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# config/etf_holdings.toml — THE MACRO BOARD'S ETF HOVER CARD
+#
+#   Hovering a fund tile on the Macro Board (/market, and the public /macro)
+#   shows its top holdings with each one's price and move from the previous
+#   close. market_svc quotes them (services/market_svc/holdings.py) and
+#   publishes cache:market:holdings. Read on every refresh: no restart.
+#
+#   ⚠ THE LISTS ARE KEPT BY HAND. Schwab's API serves no fund holdings, so
+#     nothing here is derived. A fund's top five drift as prices move and as it
+#     rebalances; `as_of` is the date they were last checked, and the card prints
+#     it. Checked 2026-11-10 against stockanalysis.com's holdings pages.
+#
+#   ⚠ A FOREIGN STOCK IS ITS US LINE. The Countries funds hold shares listed in
+#     Tokyo, Seoul, Taipei... which Schwab does not quote. Each is entered as its
+#     US ADR, or its OTC line where there is no ADR, so its price is the US
+#     line's in dollars and its move is that line's own day. A holding with no US
+#     line at all was skipped and the next one taken, which is why EWT's fifth
+#     name is its fourteenth holding.
+#
+#   ⚠ ONE COMPANY ONCE. Where a fund holds two classes (GOOGL + GOOG, Petrobras
+#     common + preferred) the larger is listed and the next company taken.
+#
+#   A holding Schwab returns no quote for prints a dash, never 0. Every ticker
+#   here was quoted through the proxy on 2026-11-12.
+# ─────────────────────────────────────────────────────────────────────────────
+
+enabled = true
+# Holdings shown per card (a list may carry more, for when one stops quoting).
+top_n = 5
+# Seconds between quote fetches for the holdings: one proxy request each time.
+rth_refresh_sec = 15
+offhours_refresh_sec = 300
+# A holding whose last trade is older than this shows its last price and the
+# date it traded, and no move: a thin OTC line's "move" is against a close that
+# can be months old (Samsung's SSNLF read +10% on 2026-11-12 with no trade since
+# April). 96 hours clears a long weekend.
+stale_after_h = 96
+# The date the lists below were last checked against the funds' holdings.
+as_of = "2026-11-10"
+
+[funds]
+# Broad-Market ETF
+SPY = ["AAPL", "NVDA", "MSFT", "AMZN", "GOOGL"]
+DIA = ["GS", "CAT", "MSFT", "AMGN", "V"]
+QQQ = ["AAPL", "NVDA", "MSFT", "AMZN", "AMD"]
+# Weights are thin and the order turns over day to day (IWM's top names are
+# about 0.3-0.5% each; RSP and QQEW are equal-weighted).
+IWM = ["GKOS", "BTSG", "FROG", "UMBF", "MOG.A"]
+RSP = ["MRNA", "PTC", "ACN", "IDXX", "MTD"]
+QQEW = ["APP", "IDXX", "ISRG", "REGN", "TXN"]
+# Sector SPDR
+XLB = ["LIN", "NEM", "VMC", "ECL", "SHW"]
+XLC = ["META", "GOOGL", "APP", "DIS", "TTWO"]
+XLE = ["XOM", "CVX", "COP", "MPC", "PSX"]
+XLF = ["BRK.B", "JPM", "V", "MA", "BAC"]
+XLI = ["GE", "RTX", "CAT", "GEV", "UNP"]
+XLK = ["AAPL", "NVDA", "MSFT", "AVGO", "AMD"]
+XLP = ["WMT", "COST", "PG", "KO", "PM"]
+XLRE = ["WELL", "PLD", "EQIX", "AMT", "SPG"]
+XLU = ["NEE", "SO", "DUK", "CEG", "AEP"]
+XLV = ["LLY", "JNJ", "ABBV", "MRK", "UNH"]
+XLY = ["AMZN", "TSLA", "HD", "MCD", "TJX"]
+# Thematic / Industry ETF
+SMH = ["NVDA", "TSM", "TXN", "AVGO", "AMD"]
+IGV = ["MSFT", "PLTR", "PANW", "CRWD", "ORCL"]
+# QTUM's largest holding, Global Unichip (Taipei), has no US line.
+QTUM = ["ESTC", "NET", "MSFT", "RDNT", "PLTR"]
+XBI = ["MRNA", "EXEL", "SYRE", "BIIB", "ORKA"]
+XRT = ["REAL", "VSXY", "KSS", "ASO", "UPBD"]
+XME = ["RS", "CLF", "RGLD", "NUE", "STLD"]
+USO = []
+IYT = ["UNP", "UBER", "CSX", "DAL", "UAL"]
+CIBR = ["CRWD", "AVGO", "CSCO", "PANW", "FTNT"]
+PAVE = ["FAST", "EMR", "DE", "NUE", "CRH"]
+# Countries (US ADR or OTC lines)
+MCHI = ["TCEHY", "BABA", "CICHY", "XIACY", "IDCBY"]
+EWJ = ["MUFG", "TM", "SONY", "RCRUY", "SMFG"]
+# Celltrion (#7) has no US line Schwab quotes; Woori Financial is the next
+# holding that does.
+EWY = ["SSNLF", "SKHY", "KB", "SHG", "WF"]
+INDA = ["HDB", "IBN", "RLNIY", "INFY", "MAHMF"]
+EWT = ["TSM", "HNHPF", "ASX", "FUISF", "UMC"]
+EWZ = ["NU", "VALE", "ITUB", "PBR.A", "WEGZY"]
+EWA = ["BHP", "CMWAY", "WBKCY", "NABZY", "ANZGY"]
+EWU = ["HSBC", "AZN", "SHEL", "RYCEY", "UL"]
+EWG = ["SAP", "SIEGY", "ALIZY", "SMERY", "DTEGY"]
+EWQ = ["TTE", "SBGSY", "EADSY", "AIQUY", "SAFRY"]
+EWW = ["GMBXF", "GBOOY", "FMX", "AMX", "WMMVY"]
+EWC = ["RY", "TD", "SHOP", "BMO", "BNS"]
+
+[notes]
+USO = "Holds WTI crude oil futures, cash and Treasury bills, not stocks."
+
+[names]
+AAPL = "Apple"
+ABBV = "AbbVie"
+ACN = "Accenture"
+AEP = "American Electric Power"
+AIQUY = "Air Liquide (OTC)"
+ALIZY = "Allianz (OTC)"
+AMD = "Advanced Micro Devices"
+AMGN = "Amgen"
+AMT = "American Tower"
+AMX = "America Movil (ADR)"
+AMZN = "Amazon"
+ANZGY = "ANZ Group (OTC)"
+APP = "AppLovin"
+ASO = "Academy Sports"
+ASX = "ASE Technology (ADR)"
+AVGO = "Broadcom"
+AZN = "AstraZeneca (ADR)"
+BABA = "Alibaba (ADR)"
+BAC = "Bank of America"
+BHP = "BHP Group (ADR)"
+BIIB = "Biogen"
+BMO = "Bank of Montreal"
+BNS = "Bank of Nova Scotia"
+"BRK.B" = "Berkshire Hathaway B"
+BTSG = "BrightSpring Health"
+CAT = "Caterpillar"
+CEG = "Constellation Energy"
+CICHY = "China Construction Bank (OTC)"
+CLF = "Cleveland-Cliffs"
+CMWAY = "Commonwealth Bank (OTC)"
+COP = "ConocoPhillips"
+COST = "Costco"
+CRH = "CRH"
+CRWD = "CrowdStrike"
+CSCO = "Cisco"
+CSX = "CSX"
+CVX = "Chevron"
+DAL = "Delta Air Lines"
+DE = "Deere"
+DIS = "Walt Disney"
+DTEGY = "Deutsche Telekom (OTC)"
+DUK = "Duke Energy"
+EADSY = "Airbus (OTC)"
+ECL = "Ecolab"
+EMR = "Emerson Electric"
+EQIX = "Equinix"
+ESTC = "Elastic"
+EXEL = "Exelixis"
+FAST = "Fastenal"
+FMX = "FEMSA (ADR)"
+FROG = "JFrog"
+FTNT = "Fortinet"
+FUISF = "Fubon Financial (OTC)"
+GBOOY = "Banorte (OTC)"
+GE = "GE Aerospace"
+GEV = "GE Vernova"
+GKOS = "Glaukos"
+GMBXF = "Grupo Mexico (OTC)"
+GOOGL = "Alphabet A"
+GS = "Goldman Sachs"
+HD = "Home Depot"
+HDB = "HDFC Bank (ADR)"
+HNHPF = "Hon Hai / Foxconn (OTC)"
+HSBC = "HSBC (ADR)"
+IBN = "ICICI Bank (ADR)"
+IDCBY = "ICBC (OTC)"
+IDXX = "IDEXX Laboratories"
+INFY = "Infosys (ADR)"
+ISRG = "Intuitive Surgical"
+ITUB = "Itau Unibanco (ADR)"
+JNJ = "Johnson & Johnson"
+JPM = "JPMorgan Chase"
+KB = "KB Financial (ADR)"
+KO = "Coca-Cola"
+KSS = "Kohl's"
+LIN = "Linde"
+LLY = "Eli Lilly"
+MA = "Mastercard"
+MAHMF = "Mahindra & Mahindra (OTC)"
+MCD = "McDonald's"
+META = "Meta Platforms"
+"MOG.A" = "Moog A"
+MPC = "Marathon Petroleum"
+MRK = "Merck"
+MRNA = "Moderna"
+MSFT = "Microsoft"
+MTD = "Mettler-Toledo"
+MUFG = "Mitsubishi UFJ (ADR)"
+NABZY = "National Australia Bank (OTC)"
+NEE = "NextEra Energy"
+NEM = "Newmont"
+NET = "Cloudflare"
+NU = "Nu Holdings"
+NUE = "Nucor"
+NVDA = "NVIDIA"
+ORCL = "Oracle"
+ORKA = "Oruka Therapeutics"
+PANW = "Palo Alto Networks"
+"PBR.A" = "Petrobras pref (ADR)"
+PG = "Procter & Gamble"
+PLD = "Prologis"
+PLTR = "Palantir"
+PM = "Philip Morris"
+PSX = "Phillips 66"
+PTC = "PTC"
+RCRUY = "Recruit Holdings (OTC)"
+RDNT = "RadNet"
+REAL = "The RealReal"
+REGN = "Regeneron"
+RGLD = "Royal Gold"
+RLNIY = "Reliance Industries (OTC)"
+RS = "Reliance Inc"
+RTX = "RTX"
+RY = "Royal Bank of Canada"
+RYCEY = "Rolls-Royce (OTC)"
+SAFRY = "Safran (OTC)"
+SAP = "SAP (ADR)"
+SBGSY = "Schneider Electric (OTC)"
+SHEL = "Shell (ADR)"
+SHG = "Shinhan Financial (ADR)"
+SHOP = "Shopify"
+SHW = "Sherwin-Williams"
+SIEGY = "Siemens (OTC)"
+SKHY = "SK hynix (ADR)"
+SMERY = "Siemens Energy (OTC)"
+SMFG = "Sumitomo Mitsui (ADR)"
+SO = "Southern Company"
+SONY = "Sony Group (ADR)"
+SPG = "Simon Property Group"
+SSNLF = "Samsung Electronics (OTC)"
+STLD = "Steel Dynamics"
+SYRE = "Spyre Therapeutics"
+TCEHY = "Tencent (OTC)"
+TD = "Toronto-Dominion Bank"
+TJX = "TJX Companies"
+TM = "Toyota (ADR)"
+TSLA = "Tesla"
+TSM = "Taiwan Semiconductor (ADR)"
+TTE = "TotalEnergies (ADR)"
+TTWO = "Take-Two Interactive"
+TXN = "Texas Instruments"
+UAL = "United Airlines"
+UBER = "Uber"
+UL = "Unilever (ADR)"
+UMBF = "UMB Financial"
+UMC = "United Microelectronics (ADR)"
+UNH = "UnitedHealth"
+UNP = "Union Pacific"
+UPBD = "Upbound Group"
+V = "Visa"
+VALE = "Vale (ADR)"
+VMC = "Vulcan Materials"
+VSXY = "Victoria's Secret"
+WBKCY = "Westpac (OTC)"
+WEGZY = "WEG (OTC)"
+WELL = "Welltower"
+WMMVY = "Walmart de Mexico (OTC)"
+WF = "Woori Financial (ADR)"
+WMT = "Walmart"
+XIACY = "Xiaomi (OTC)"
+XOM = "ExxonMobil"

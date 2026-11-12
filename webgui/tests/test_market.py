@@ -1,3 +1,5 @@
+import pytest
+
 from pages import market
 
 
@@ -502,3 +504,66 @@ def test_the_price_flare_ends_on_the_colour_the_price_actually_wears(monkeypatch
     assert f"text-[{end.group(1)}]" in price._classes, (
         f"the flare ends on {end.group(1)} but the price label wears "
         f"{[c for c in price._classes if c.startswith('text-[#')]}")
+
+
+# ── the ETF hover card (2026-11-12) ──────────────────────────────────────────
+_HOLD = {"enabled": True, "ts": 1_762_965_720, "as_of": "2026-11-10",
+         "funds": {"XLK": {"rows": [
+             {"symbol": "NVDA", "name": "NVIDIA", "last": 186.2, "change_pct": 1.25},
+             {"symbol": "AAPL", "name": "Apple", "last": None, "change_pct": None}],
+             "note": ""},
+             "USO": {"rows": [], "note": "Holds oil futures, not stocks"}}}
+
+
+def test_a_fund_tile_gets_its_card_and_others_get_none():
+    assert market.fund_card(_HOLD, "XLK")["rows"][0]["symbol"] == "NVDA"
+    assert market.fund_card(_HOLD, "USO")["note"]
+    assert market.fund_card(_HOLD, "VIX") is None
+    assert market.fund_card(None, "XLK") is None
+
+
+def test_a_switched_off_view_gives_no_cards():
+    off = {**_HOLD, "enabled": False}
+    assert market.fund_card(off, "XLK") is None
+    assert market.card_shape(off) == {}
+
+
+def test_card_shape_is_the_symbol_lists():
+    assert market.card_shape(_HOLD) == {"XLK": ("NVDA", "AAPL"), "USO": ()}
+    assert market.card_shape(None) == {}
+
+
+def test_holding_text_prints_two_decimals_and_a_dash_for_no_quote():
+    rows = _HOLD["funds"]["XLK"]["rows"]
+    assert market.holding_text(rows[0]) == {
+        "symbol": "NVDA", "name": "NVIDIA", "last": "186.20", "change": "+1.25%"}
+    assert market.holding_text(rows[1])["last"] == "—"
+    assert market.holding_text(rows[1])["change"] == "—"
+
+
+@pytest.mark.parametrize("pct,want", [(1.2, "up"), (-0.4, "dn"), (0, "flat"),
+                                      (None, "flat")])
+def test_a_holding_is_coloured_by_its_own_move(pct, want):
+    assert market.holding_direction({"change_pct": pct}) == want
+
+
+def test_the_footer_says_when_the_lists_and_prices_were_taken():
+    # 1_762_965_720 is 10:42 Central
+    assert market.card_footer(_HOLD) == "Holdings as of 2026-11-10 · prices 10:42 CT"
+    assert market.card_footer({"ts": 0, "as_of": ""}) == ""
+    assert market.card_footer(None) == ""
+
+
+def test_a_stale_holding_shows_the_day_it_last_traded():
+    row = {"symbol": "SSNLF", "name": "Samsung", "last": 154.2, "change_pct": None,
+           "stale": True, "traded": "2026-04-14"}
+    assert market.holding_text(row)["change"] == "last Apr 14"
+    assert market.holding_text(row)["last"] == "154.20"
+    assert market.holding_direction(row) == "flat"
+
+
+def test_a_line_with_no_trade_on_record_says_so():
+    row = {"symbol": "FUISF", "last": None, "change_pct": None, "stale": True,
+           "traded": None}
+    assert market.holding_text(row)["change"] == "no trades"
+    assert market.holding_text(row)["last"] == "—"

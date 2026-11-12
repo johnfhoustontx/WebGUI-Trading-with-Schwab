@@ -24,7 +24,7 @@ keys that feed it. Menu order matches the rail.
 | **Opportunity Board** | `options_svc` | `cache:options:matrix` |
 | **Flow Alerts** | `options_svc` | `cache:options:flow_alerts`, `:flow_sides`, `:flow_followup` |
 | **Market News** | `news_svc` :8216 | `cache:news:feed`, `:sec`, `:calendar`, `:status` (the public copy reads `:feed_public`, `:sec_public`, `:calendar_public`); also the Desk's Headlines panel (`:feed`) and the Symbol page's news band (`:feed` + `:sec`) |
-| **Market Dashboard** | `market_svc` :8215 | `cache:market:dashboard`, `:summary`, `:read` (the Desk's Market read), `:volume` (traded volume, for the Market read and the reports) |
+| **Market Dashboard** | `market_svc` :8215 | `cache:market:dashboard`, `:summary`, `:read` (the Desk's Market read), `:volume` (traded volume, for the Market read and the reports), `:holdings` (each fund tile's top holdings, quoted, for the hover card) |
 | **Sentiment** | `sentiment_svc` :8210 | `cache:sentiment:composite`, `:regime`, `:regime_history`, `:intraday_history` |
 | **Sector & Industry** | `sentiment_svc` | `cache:sentiment:sectors` |
 | **Sector Rotation** · **RRG** | `sentiment_svc` | `cache:sentiment:rotation` |
@@ -1473,6 +1473,29 @@ A reader must check `date` against today, treat a reading older than two
 exactly `true` too (recounting `tally` without it). The rules and thresholds are in the Technical Reference,
 *Market read*.
 
+## The fund holdings view
+
+**`cache:market:holdings`** (`MarketHoldings`) is built by
+`services/market_svc/holdings.py` from `config/etf_holdings.toml`, every
+`rth_refresh_sec` (15) seconds in the session and `offhours_refresh_sec` (300)
+outside it, with ONE proxy `/quotes` request for every holding at once:
+
+```
+{enabled, ts, as_of, funds: {<fund>: {rows: [{symbol, name, last, change_pct, stale, traded}], note}}}
+```
+
+- `<fund>` is the tile's display symbol. The Macro Board draws a holdings card on any
+  tile whose symbol is a key here, and the one-line description on every other.
+- `change_pct` is the quote's own percent change from the previous close, as a tile's.
+- `stale` is true when the line's last trade is older than `stale_after_h` (96):
+  `change_pct` is then `null` and `traded` is that trade's `YYYY-MM-DD`. A line with
+  no trade on record at all is `stale` with `last`, `change_pct` and `traded` all
+  `null`. A holding Schwab returned nothing for has `last` and `change_pct` `null`
+  and `stale` false.
+- `as_of` is the date the lists were checked by hand; `ts` when the quotes were fetched.
+- Switched off (`enabled = false`), the view is published once as `{enabled: false,
+  funds: {}}` and the cards go.
+
 ## The traded volume view
 
 **`cache:market:volume`** (`MarketVolume`) is built by
@@ -1652,6 +1675,7 @@ cache:market:dashboard         events:market:dashboard        (MarketDashboard)
 cache:market:summary           events:market:summary          (MarketSummary)
 cache:market:read              events:market:read             (MarketRead - the Desk's seven readings)
 cache:market:volume            events:market:volume           (MarketVolume - traded volume, also read by the market reports)
+cache:market:holdings          events:market:holdings         (MarketHoldings - the Macro Board's fund hover card)
 cache:news:feed                events:news:feed               (headlines - every kind but the SEC ones)
 cache:news:feed_public         events:news:feed_public        (public feeds only - a live-origin key)
 cache:news:sec                 events:news:sec                (Form 4s and offering filings)

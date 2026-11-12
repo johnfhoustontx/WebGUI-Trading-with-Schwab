@@ -4,7 +4,36 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-12 (**The backups are compressed, and a pruned Drive archive no longer sits in the trash.**)
+**Last updated:** 2026-11-12 (**The Macro Board shows a fund's top holdings on hover; Thematic swaps XSD for CIBR and PAVE.**)
+
+- **Thematic frame.** XSD (SPDR semiconductors) is gone, since it repeated SMH's
+  read. CIBR (First Trust Nasdaq Cybersecurity) and PAVE (Global X U.S.
+  Infrastructure Development) were added. The board now has 77 tiles.
+- **Hover card.** Hovering a tile in Broad-Market ETF, Sector SPDR, Thematic or
+  Countries lists the fund's top five holdings, each with its price and its move
+  from the previous close. `services/market_svc/holdings.py` publishes
+  `cache:market:holdings` (`MarketHoldings`, validated on write). It makes one
+  `/quotes` request for all ~160 holdings, every 15 s in the session and 300 s
+  outside it. The request runs beside the 3 s poll, never inside it, so the
+  dashboard payload did not grow.
+- **The lists are kept by hand** in `config/etf_holdings.toml`
+  (`shared/etf_holdings_config.py`, Settings → Configuration → Fund holdings),
+  because Schwab serves no fund holdings. They were taken from stockanalysis.com's
+  holdings pages dated 2026-11-09/10. A foreign holding is its US ADR or OTC line.
+  A holding with no US line was skipped and the next one taken. Every ticker was
+  quoted through the prod proxy on 2026-11-12. CONIF (Celltrion) returned nothing,
+  so EWY takes WF (Woori) instead.
+- **Measured trap: an idle OTC line reports a fake move.** SSNLF (Samsung) had not
+  traded since 2026-04-16 and read +10.15%. MAHMF read +21.43% ten days after its
+  last trade. FUISF and RLNIY carry no trade time at all and read −73.40% and
+  +9.03%. A line idle for more than `stale_after_h` (96) shows its price and
+  "last <date>". A line with no trade on record shows no price and "no trades".
+- Verified in the local page harness, seeded with real proxy quotes. Not yet
+  promoted.
+
+---
+
+**Prior —** 2026-11-12 (**The backups are compressed, and a pruned Drive archive no longer sits in the trash.**)
 
 - **Why.** The 2026-11-11 offsite upload failed with `storageQuotaExceeded`: Drive
   held 13.8 GB of live archives and 53.4 GiB of TRASH. `rclone deletefile` moves a

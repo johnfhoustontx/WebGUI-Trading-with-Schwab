@@ -27,7 +27,8 @@ from datetime import time as _time
 from zoneinfo import ZoneInfo
 
 from services import _degrade, _heartbeat
-from services.market_svc import compute, handlers, market_read, report_summary, volume_read
+from services.market_svc import (compute, handlers, holdings, market_read, report_summary,
+                                 volume_read)
 from shared import market_calendar as mc
 from shared import market_read_config
 from shared.numeric import finite
@@ -269,14 +270,16 @@ def refresh_volume(bus, state, now=None):
 
 async def loop(bus) -> None:
     """Poll → publish → the Market read, when a slot is due → (the report
-    summary, when the report changed) → sleep. Traded volume is fetched beside
-    this, never inside it: a slow bar series must not hold up the three-second
-    poll."""
+    summary, when the report changed) → sleep. Traded volume and the ETF
+    holdings' quotes are fetched beside this, never inside it: a slow fetch must
+    not hold up the three-second poll."""
     loop_ = asyncio.get_running_loop()
     report_stamp = None
     read_state: dict = {}
     volume_state: dict = {}
     volume_fetch = None
+    holdings_state: dict = {}
+    holdings_fetch = None
     while True:
         _heartbeat.tick()
         interval = poll_interval()
@@ -284,6 +287,11 @@ async def loop(bus) -> None:
         # once when nothing is due.
         if volume_fetch is None or volume_fetch.done():
             volume_fetch = loop_.run_in_executor(None, refresh_volume, bus, volume_state)
+        # The ETF hover card's holdings: beside the poll too, on their own
+        # cadence (holdings.refresh never raises and returns at once when not due).
+        if holdings_fetch is None or holdings_fetch.done():
+            holdings_fetch = loop_.run_in_executor(None, holdings.refresh, bus,
+                                                   holdings_state)
         try:
             payload = await loop_.run_in_executor(None, compute.collect, bus)
             await loop_.run_in_executor(None, handlers.publish, bus, payload)

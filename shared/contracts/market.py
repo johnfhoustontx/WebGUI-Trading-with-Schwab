@@ -104,3 +104,21 @@ class MarketVolume(_Base):
     sectors: dict | None = None    # {up_share, funds}
     range_hint: str | None = None  # "wider" | "narrower", in the session only
     statements: list[str] = []     # the view as plain sentences
+
+
+class MarketHoldings(_Base):
+    """Each fund's top holdings, quoted (cache:market:holdings).
+
+    Built by ``services/market_svc/holdings.py`` from ``config/etf_holdings.toml``
+    for the Macro Board's ETF hover card. ``funds`` is keyed by the tile's
+    display symbol: ``{fund: {"rows": [{symbol, name, last, change_pct, stale,
+    traded}], "note": str}}``. A price or move with no quote is ``None``, never
+    0; a ``stale`` row (no trade for ``stale_after_h``) has no move and carries
+    the date it last ``traded``.
+    ``as_of`` is the date the holding lists were last checked, by hand.
+    """
+
+    enabled: bool = True
+    ts: int = 0                    # unix seconds the quotes were fetched
+    as_of: str = ""                # YYYY-MM-DD the lists were checked
+    funds: dict = {}

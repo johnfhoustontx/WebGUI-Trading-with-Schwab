@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-10</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-12</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -1997,9 +1997,9 @@ judgement, and nothing here is a trade recommendation.</p>
 <p><strong>Route:</strong> <code>/market</code>. It is the <strong>Trend &amp; Sentiment</strong> group's first tab, so clicking
 that rail item lands here. (The app's landing page is the <strong>Desk</strong> — opening
 <code>http://127.0.0.1:8500</code> redirects there.)</p>
-<p>A live wall of about 48 macro instruments in framed panels — volatility, options
+<p>A live wall of about 77 macro instruments in framed panels — volatility, options
 sentiment, breadth internals, currency, cash indices, futures, broad ETFs, the top
-ten mega-caps, sectors, thematic ETFs, factors, credit, crypto and countries.</p>
+ten mega-caps, sectors, thematic ETFs, credit, crypto, metals and countries.</p>
 <ul>
 <li><strong>Tile colour means risk-on (green) / risk-off (red) / no data (grey)</strong>, not
   simply up and down. Fear gauges are flipped: VIX, SKEW, put/call, TLT and UUP
@@ -2017,6 +2017,12 @@ ten mega-caps, sectors, thematic ETFs, factors, credit, crypto and countries.</p
   Settings → Configuration → Symbols &amp; watchlists → <em>Index futures</em>; it takes
   effect on the next refresh, with no restart.</li>
 <li>Tiles <strong>flash</strong> when their value changes.</li>
+<li><strong>Hover a fund tile</strong> (Broad-Market ETF, Sector SPDR, Thematic or Countries) to
+  see its top five holdings, each with its price and its move since the previous
+  close. A foreign company is shown by its US line. A thin line that has not traded
+  for four days reads <strong>last</strong> and the date it traded, not a move. The lists are kept
+  by hand: edit them, and the date they were checked, in Settings → Configuration →
+  <em>Fund holdings</em>. The prices refresh every 15 seconds in the session.</li>
 </ul>
 <p>Updates about every 3 seconds during market hours, 15 seconds outside them, and 60
 seconds at weekends.</p>
@@ -3252,17 +3258,21 @@ is booked into this ledger tagged <strong>Shadow idea</strong>. <strong>Nothing 
 Discord, Telegram, X, the site or the calendar. Set under Settings → Configuration →
 <em>Shadow trade ideas in the Paper Ledger</em> (it ships on, in shadow).</p>
 <ul>
-<li><strong>The limits</strong> count the hourly posts and the shadow ideas together, as a real
-  feed would: at most <strong>2 in any 60 minutes</strong>, at least <strong>20 minutes</strong> after the last
-  one, at most <strong>10 a day</strong>, and one per symbol a day. A trade that sells premium
-  also needs a Vol Rank of at least <strong>50</strong>. Only one is booked per scan, and only
-  in the regular session.</li>
+<li><strong>A separate feed.</strong> The limits count the shadow ideas only, never the hourly
+  posts: at most <strong>2 in any 60 minutes</strong>, at least <strong>20 minutes</strong> after the last
+  shadow idea, at most <strong>10 a day</strong>, and one per symbol a day. A trade that sells
+  premium also needs a Vol Rank of at least <strong>50</strong>. Only one is booked per scan, and
+  only in the regular session.</li>
+<li><strong>Never the hourly idea's trade.</strong> A trade the hourly idea posted today is
+  skipped, and so is the one the next hourly post would take from the same scan.
+  The same symbol with a different trade can still be a shadow idea.</li>
 <li><strong>Not on the first scan of the day.</strong> That scan only records what is there, so a
   restart or the morning's first scan never books a burst.</li>
 <li><strong>Followed like an idea.</strong> The same 5-minute checks, target and stop as the
   hourly ideas. It shows under <strong>All</strong> only; the weekly idea review, the site and
-  the live-order banner never see it, and the EOD Report and the Symbol dossier do
-  not count it as yours.</li>
+  the live-order banner never see it, and the Symbol dossier does not count it as
+  yours. The EOD Report shows it as its own book, <em>Shadow ideas</em>, apart from both
+  your trades and the posted ideas.</li>
 <li><strong>The point</strong> is the comparison: after a few weeks <code>tools/idea_shadow_compare.py</code>
   sets the shadow ideas' results beside the hourly posts'. Posting on quality goes
   live only if the shadow ideas did better.</li>
@@ -4302,12 +4312,12 @@ pair against SPY, since relative return is what the model actually predicts.</p>
 <tr>
 <td><strong>Summary</strong></td>
 <td><code>/eod</code></td>
-<td>Headline tiles plus a Daily / Weekly (WTD) / MTD performance block <strong>per book</strong> — manual paper, captured signals (counted at one contract per signal) and trade ideas (while <strong>Book the posted ideas</strong> is on in Settings → Configuration, every idea the app posts is booked on the Paper Ledger and kept out of manual paper). The <em>Paper trades</em> tile counts your own Ledger trades only; another tile shows today's closed trade-idea profit and the count closed.</td>
+<td>Headline tiles plus a Daily / Weekly (WTD) / MTD performance block <strong>per book</strong> — manual paper, captured signals (counted at one contract per signal) and trade ideas (while <strong>Book the posted ideas</strong> is on in Settings → Configuration, every idea the app posts is booked on the Paper Ledger and kept out of manual paper), and shadow ideas (booked after a scan, never posted). The <em>Paper trades</em> tile counts your own Ledger trades only; two more tiles show today's closed profit and the count closed for the trade ideas and for the shadow ideas.</td>
 </tr>
 <tr>
 <td><strong>Detailed</strong></td>
 <td><code>/eod/detail</code></td>
-<td>The same performance plus breakdowns by <strong>strategy</strong> (PCS / CCS / IC), by <strong>0-DTE vs swing</strong>, and by <strong>status</strong> (open / closed / expired), then the full trade (your own Ledger trades), scanner and captured tables, and a <strong>Trade ideas</strong> section: today's posted ideas (time posted, structure by name, grade, entry and exit with which way the money went, why it closed in words — <em>Target reached</em>, <em>Stopped out</em>, <em>Expired</em>, <em>Closed by hand</em> — time held in words such as <em>4 hours 6 minutes</em>, worst point in dollars and as a percent of maximum loss, result), ideas closed today that were posted earlier, and open ideas at their last mark, with closed profit for the day, week and month. Open trades' unrealized profit sits on its own line and is never added to those totals.</td>
+<td>The same performance plus breakdowns by <strong>strategy</strong> (PCS / CCS / IC), by <strong>0-DTE vs swing</strong>, and by <strong>status</strong> (open / closed / expired), then the full trade (your own Ledger trades), scanner and captured tables, and a <strong>Trade ideas</strong> section: today's posted ideas (time posted, structure by name, grade, entry and exit with which way the money went, why it closed in words — <em>Target reached</em>, <em>Stopped out</em>, <em>Expired</em>, <em>Closed by hand</em> — time held in words such as <em>4 hours 6 minutes</em>, worst point in dollars and as a percent of maximum loss, result), ideas closed today that were posted earlier, and open ideas at their last mark, with closed profit for the day, week and month. Open trades' unrealized profit sits on its own line and is never added to those totals. A <strong>Shadow ideas</strong> section follows, with the same three tables for the shadow ideas (<em>Picked</em> in place of <em>Posted</em>).</td>
 </tr>
 </tbody>
 </table>

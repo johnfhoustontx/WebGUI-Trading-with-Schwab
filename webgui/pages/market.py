@@ -35,9 +35,13 @@ IMPORTANT — colour semantics: direction (up/down/flat) keys on the service's
 up = risk-off = red, TLT up = red, …), which the prototype's naïve pct-sign
 colouring would break. Wash MAGNITUDE still scales with |%change|.
 """
+import datetime as _dt
+from zoneinfo import ZoneInfo
+
 import app_settings
 import bus_client
 from nicegui import run, ui
+from pages import fmt
 from pages import ui_kit as kit
 from pages.options import theme
 from pages.options.theme import (
@@ -49,6 +53,11 @@ from pages.ui_guard import guard, guard_async
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
 
 VIEW = "market:dashboard"
+# Each fund's top holdings, quoted (market_svc/holdings.py). A tile whose
+# display symbol is a key of this view's ``funds`` gets the holdings card on
+# hover; every other tile keeps its one-line description.
+HOLDINGS_VIEW = "market:holdings"
+_CT = ZoneInfo("America/Chicago")
 
 _P = theme.THEME["palette"]
 # Surface, text and borders are the APP's now. What stays is every colour that
@@ -293,6 +302,67 @@ def breadth_counts(payload):
     return up, dn
 
 
+# ── the ETF hover card ──────────────────────────────────────────────────────
+def fund_card(holdings, display):
+    """The card for one tile from the holdings view, or None for a tile that has
+    none (not a fund, the view switched off, or not yet published)."""
+    if not isinstance(holdings, dict) or holdings.get("enabled") is False:
+        return None
+    funds = holdings.get("funds")
+    card = funds.get(display) if isinstance(funds, dict) else None
+    return card if isinstance(card, dict) else None
+
+
+def card_shape(holdings):
+    """{display: (symbols…)}: what the built cards are made of. When it changes,
+    the cards are rebuilt; when only prices move, they are repainted in place."""
+    if not isinstance(holdings, dict) or holdings.get("enabled") is False:
+        return {}
+    funds = holdings.get("funds")
+    if not isinstance(funds, dict):
+        return {}
+    return {d: tuple(r.get("symbol", "") for r in (c.get("rows") or []))
+            for d, c in funds.items() if isinstance(c, dict)}
+
+
+def holding_direction(row):
+    """up / dn / flat by the holding's own move: a stock has no inverted polarity."""
+    p = fmt.num(row.get("change_pct"))
+    if p is None or p == 0:
+        return "flat"
+    return "up" if p > 0 else "dn"
+
+
+def holding_text(row):
+    """One card row's strings: {symbol, name, last, change}. A stale row (its US
+    line has not traded for days) shows the date it last traded, not a move; one
+    with no trade on record says so."""
+    change = fmt.pct(row.get("change_pct"), signed=True)
+    if row.get("stale"):
+        try:
+            change = "last " + _dt.date.fromisoformat(str(row.get("traded"))).strftime("%b %d")
+        except ValueError:
+            change = "no trades"
+    return {"symbol": str(row.get("symbol") or ""),
+            "name": str(row.get("name") or ""),
+            "last": fmt.price(row.get("last")),
+            "change": change}
+
+
+def card_footer(holdings):
+    """'Holdings as of 2026-11-12 · prices 10:42 CT'. The lists are kept by hand,
+    so the date they were checked is part of the reading."""
+    if not isinstance(holdings, dict):
+        return ""
+    parts = []
+    if holdings.get("as_of"):
+        parts.append(f"Holdings as of {holdings['as_of']}")
+    ts = fmt.num(holdings.get("ts"))
+    if ts:
+        parts.append("prices " + _dt.datetime.fromtimestamp(ts, _CT).strftime("%H:%M CT"))
+    return " · ".join(parts)
+
+
 def flex_class(weight):
     """A proportional flex-grow class for the breadth bar (continuous value →
     runtime arbitrary, the documented exception; reset via remove/add)."""
@@ -318,7 +388,9 @@ def render():
     ui.add_css(MACRO_CSS)
 
     skin = "B" if str(app_settings.get("macro_skin") or "A").upper() == "B" else "A"
-    state = {"version": None, "built": False, "tiles": {}, "skin": skin}
+    state = {"version": None, "built": False, "tiles": {}, "skin": skin,
+             "payload": None, "holdings": None, "h_version": None,
+             "cards": {}, "card_shape": {}}
 
     # ── frame ────────────────────────────────────────────────────────────────
     # ⚠ ``macro-board`` and the skin class ride the KIT's page column. They are
@@ -406,6 +478,9 @@ def render():
     def _build(payload):
         board.clear()
         state["tiles"] = {}
+        state["cards"] = {}
+        state["payload"] = payload
+        state["card_shape"] = card_shape(state["holdings"])
         with board:
             for cat in payload.get("categories", []):
                 name = cat.get("category", "")
@@ -474,12 +549,73 @@ def render():
             ex_lbl = ui.label(descriptor_line(t)).classes(
                 f"mb-desc {_FAINT_TXT} text-[10px] "
                 "tracking-[.05em] mt-[2px] truncate max-w-[128px]")
-            ui.tooltip(t.get("description", ""))
+            card = fund_card(state["holdings"], t.get("display"))
+            if card is None:
+                ui.tooltip(t.get("description", ""))
+            else:
+                _build_card(t, card)
         state["tiles"][t.get("display")] = {
             "el": container, "px": px_lbl, "ch": ch_lbl, "ex": ex_lbl,
             "rc": rc, "order": oc, "sig": tile_signature(t)}
 
+    # The card's columns: symbol, name, price, move. Fixed widths so the rows
+    # line up and a repaint cannot make the card jump.
+    _CARD_SYM = f"{_PRICE_TXT} text-[11px] font-bold tracking-[.06em] w-[52px]"
+    _CARD_NAME = f"{_SYM_TXT} text-[11px] w-[150px] truncate"
+    _CARD_NUM = "text-[11px] tabular-nums text-right"
+
+    def _build_card(t, card):
+        """The holdings card: the fund's name, its top holdings with price and
+        move from the previous close, and the date the lists were checked."""
+        rows = []
+        n = len(card.get("rows") or [])
+        with ui.tooltip().props("delay=250").classes(
+                f"{_FRAME_BG} border {_FRAME_EDGE} rounded-[10px] "
+                "px-3 py-[10px] max-w-[410px] shadow-lg"):
+            with ui.column().classes("gap-[5px]"):
+                ui.label(t.get("description", "")).classes(
+                    f"{_PRICE_TXT} text-[12px] font-medium")
+                ui.label(f"TOP {n} HOLDINGS" if n else "HOLDINGS").classes(
+                    f"{_FAINT_TXT} text-[9.5px] tracking-[.18em]")
+                if card.get("note"):
+                    ui.label(card["note"]).classes(f"{_SYM_TXT} text-[11px]")
+                for r in card.get("rows") or []:
+                    tx, d = holding_text(r), holding_direction(r)
+                    with ui.row().classes("items-center gap-3 no-wrap"):
+                        ui.label(tx["symbol"]).classes(_CARD_SYM)
+                        ui.label(tx["name"]).classes(_CARD_NAME)
+                        px = ui.label(tx["last"]).classes(
+                            f"{_CARD_NUM} {_PRICE_TXT} w-[64px]")
+                        ch = ui.label(tx["change"]).classes(
+                            f"{_CARD_NUM} {change_text_class(d)} w-[72px]")
+                    rows.append({"px": px, "ch": ch, "dir": d})
+                foot = ui.label(card_footer(state["holdings"])).classes(
+                    f"{_FAINT_TXT} text-[10px] mt-[3px]")
+        state["cards"][t.get("display")] = {"rows": rows, "foot": foot}
+
+    def _paint_cards():
+        """Reprice the built cards in place; rebuild the board when a fund's
+        list changed (or cards appeared or went), which is rare."""
+        h = state["holdings"]
+        if card_shape(h) != state["card_shape"]:
+            if state["built"] and state["payload"]:
+                _build(state["payload"])
+            return
+        foot = card_footer(h)
+        for display, handles in state["cards"].items():
+            card = fund_card(h, display) or {}
+            for r, hd in zip(card.get("rows") or [], handles["rows"]):
+                tx, d = holding_text(r), holding_direction(r)
+                hd["px"].text = tx["last"]
+                hd["ch"].text = tx["change"]
+                if d != hd["dir"]:
+                    hd["ch"].classes(remove=change_text_class(hd["dir"]),
+                                     add=change_text_class(d))
+                    hd["dir"] = d
+            handles["foot"].text = foot
+
     def _update(payload):
+        state["payload"] = payload
         flashed = []
         for cat in payload.get("categories", []):
             for i, t in enumerate(cat.get("tiles", [])):
@@ -541,6 +677,13 @@ def render():
 
     @guard_async
     async def _poll():
+        hv = await run.io_bound(bus_client.read_version, HOLDINGS_VIEW)
+        if hv is not None and hv != state["h_version"]:
+            h = await run.io_bound(bus_client.read, HOLDINGS_VIEW)
+            if h:
+                state["h_version"] = hv
+                state["holdings"] = h
+                _paint_cards()
         v = await run.io_bound(bus_client.read_version, VIEW)
         if v is None or v == state["version"]:
             return
@@ -550,6 +693,9 @@ def render():
             _paint(payload)
 
     _paint_seg()
+    holdings, h_version = bus_client.read_full(HOLDINGS_VIEW)
+    if holdings:
+        state["holdings"], state["h_version"] = holdings, h_version
     payload, version = bus_client.read_full(VIEW)
     if payload:
         state["version"] = version

@@ -1940,6 +1940,12 @@ A live grid of macro tickers, grouped into framed panels by category.
   ranked **stock** frames only, so a bid VIX or a rallying Treasury doesn't count
   as a decline. The BIG10 tile is skipped, since it's the average of the ten
   mega-caps already counted beside it.
+- **Hover a fund** — on a Broad-Market ETF, Sector SPDR, Thematic or Countries
+  tile the card lists the fund's top five holdings with each one's price and move
+  since the previous close. Foreign companies show their US line. A line that
+  hasn't traded for four days reads **last** and its trade date instead of a move.
+  The lists are kept by hand (Settings → Configuration → Fund holdings), and the
+  card says when they were checked.
 - **Skin toggle** (top right) switches between the two board looks; your choice
   is remembered.
 - **Futures tiles** — **/ES** and **/NQ** name their contract in brackets

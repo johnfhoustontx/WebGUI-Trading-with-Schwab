@@ -27,7 +27,7 @@ _EXPECTED_DISPLAYS = {
     "SPY", "DIA", "QQQ", "IWM", "RSP", "QQEW",
     "BIG10", "NVDA", "MSFT", "GOOGL", "AMZN", "META", "AAPL", "TSLA",
     "AVGO", "PLTR", "AMD",
-    "SMH", "XSD", "IGV", "QTUM", "XBI", "XRT", "XME", "USO", "IYT",
+    "SMH", "IGV", "QTUM", "XBI", "XRT", "XME", "USO", "IYT", "CIBR", "PAVE",
     "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY",
     "TLT", "HYG", "LQD",
     "GDLC", "VCX",
@@ -37,17 +37,18 @@ _EXPECTED_DISPLAYS = {
 
 
 def test_every_csv_symbol_is_mapped():
-    # 75 tiles: base 55 + the Top 10 frame (a BIG10 composite + 10 constituents:
+    # 77 tiles: base 55 + the Top 10 frame (a BIG10 composite + 10 constituents:
     # the Mag-7 + AVGO/PLTR/AMD) + the Net Prem external tile + the $MGTN index tile
     # (CBOE Magnificent Ten, added 2026-07-21) + USO (added 2026-08-12) + IYT
     # (added 2026-09-11) + the Metals frame GLD/SLV/COPX (added 2026-09-21)
     # + EWG/EWQ country ETFs (added 2026-09-27) + the FXY/FXE/FXB currency tiles
     # (added 2026-09-27) − the MTUM/SPMO Factor frame (dropped 2026-09-27).
+    # + CIBR/PAVE − XSD in the Thematic frame (2026-11-12).
     # (base 55 = $PCALL+$PCSP→ONE put/call tile; HYG-LQD dropped; $ADD/$ADSPD dropped;
     # XLB added; +10 country ETFs.)
-    assert len(_map()) == 76
+    assert len(_map()) == 77
     # A future mistyped ticker/display must fail: the full display set is pinned.
-    assert len(_EXPECTED_DISPLAYS) == 76
+    assert len(_EXPECTED_DISPLAYS) == 77
     assert {t["display"] for t in _map()} == _EXPECTED_DISPLAYS
     # Every entry has a non-empty display; every quote tile has a real quote_symbol.
     for t in _map():

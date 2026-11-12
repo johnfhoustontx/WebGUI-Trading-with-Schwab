@@ -1370,7 +1370,7 @@ intensity scales with the size of the move.
 | **Broad-Market ETF** | SPY, DIA, QQQ, IWM, RSP, QQEW | Ranked by the day's move. RSP and QQEW are *equal-weighted* — compare where they land against SPY and QQQ to see if the move is broad or driven by a few giants. |
 | **Top 10** | A **BIG10** composite plus its ten mega-cap members | BIG10 shows the equal-weighted average move and a breadth subline ("5/10 up"). |
 | **Sector SPDR** | The eleven S&P sectors | Ranked by the day's move. |
-| **Thematic / Industry ETF** | Semis, biotech, software, retail, oil, transports (IYT)… | Ranked. |
+| **Thematic / Industry ETF** | Semis, software, quantum, biotech, retail, metals & mining, oil, transports (IYT), cybersecurity (CIBR), infrastructure (PAVE) | Ranked. |
 | **Fixed Income / Credit** | TLT, HYG, LQD | HYG weak while equities rally is a classic warning. |
 | **Crypto / Alternatives**, **Countries** | | Countries is ranked. |
 
@@ -1388,6 +1388,18 @@ Top 10, Sector SPDR and Thematic / Industry — so a bid VIX, a stronger dollar 
 rallying Treasury does not register as a decline, and the meter reads the equity tape
 rather than the whole risk complex. The BIG10 composite is skipped, since it is the
 average of the ten mega-caps already counted beside it.
+
+**Hover a fund for its top holdings.** On a Broad-Market ETF, Sector SPDR, Thematic
+or Countries tile the hover card lists the fund's five largest holdings, each with its
+price and its move from the previous close, so you can see whether a sector's move is
+one giant or the whole basket. The lists are kept by hand (Schwab does not publish what
+a fund holds), and the card's last line says when they were checked and when the
+prices were taken. A foreign company is shown by its US line (an ADR, or an
+over-the-counter line where there is none), so its price is that line's, in dollars. A
+thin line that has not traded for four days shows **last** and the date it traded
+instead of a move, because its "move" would be against a close weeks old; one with no
+trade on record shows **no trades**. USO holds oil futures, not stocks, and its card
+says so. The lists are in **Settings → Configuration → Fund holdings**.
 
 **Premium sublines.** Index, broad-ETF and mega-cap tiles carry a small "Call 37%" /
 "Put 11%" line — that name's dollar-weighted call-versus-put premium. A dash means the
