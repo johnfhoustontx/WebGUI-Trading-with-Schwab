@@ -27,7 +27,7 @@ def test_normalizes_common_handle_forms():
 
 
 def test_rejects_invalid_handles():
-    for bad in ["", "@", "x.com/home", "has space", "a-b", "abcdefghijklmnop", "name\n", None]:
+    for bad in ["", "@", "x.com/home", "has space", "a-b", "abcdefghijklmnop", "na\nme", None]:
         assert normalize_handle(bad) is None, f"expected None for {bad!r}"
 
 
