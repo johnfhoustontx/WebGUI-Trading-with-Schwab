@@ -1346,6 +1346,58 @@ spins until the check finishes, usually within a few minutes.
 Headlines open on the publisher's own site, in a new tab. Nothing here is a
 recommendation, and a headline is not a verified fact.
 """,
+    "/news/x": """
+**X Feed — the simple version**
+
+The posts of the X accounts you watch, newest first, in one list. It is the
+second tab of **Market News**; **Headlines** is the first. Two columns: the
+**posts** on the left, the **accounts** you watch on the right (below the posts
+on a phone). All times are Central, on a 24-hour clock.
+
+- **Each post is one line**: the time, **POST**, **RT** (a repost, with the
+  original author) or **REPLY** (the account replying in its own thread), the
+  first line of the text, a mark for photos, video or a quoted post, up to two
+  tickers (**+3** means three more — hover for the list) and the account. A
+  **date line** starts each earlier day. On a phone the marks and tickers are
+  hidden so the text keeps its room.
+- **NEW** — a post that arrived in the last minute while the feed was checking
+  live has a green edge and the word **NEW** for that minute. Posts picked up
+  after a pause (a restart, an account that was failing) come in at their real
+  times and are not marked new.
+- **Click a post** to open it under its line: the full text with its links and
+  @mentions (they open on X), photos (click for full size), a video's picture
+  and **Play on X ↗**, a quoted post, the reply / repost / like / view counts,
+  when it was **Posted**, and **Open on X ↗**. Click a **$TICKER** in the text to
+  filter the feed by it or open its **Symbol page**. Click the line again to
+  close it.
+- **An amber line** — *Some posts from @x between 09:10 and 11:40 may be
+  missing* — marks a stretch the feed could not fully catch up on after a
+  pause (it reads back 25 pages at most). Reposts from a pause are never
+  filled in.
+- **Filters** (fold them away with the arrow; a short line then says which are
+  on): the **group tabs** (All, each group, Ungrouped, with post counts), the
+  **search** box (words in a post, a handle or a name; **$NVDA** finds posts
+  tagged with that ticker), **All / Posts / Reposts / Replies**, and one chip
+  per account — click one to see only that account, click again to clear.
+- **Most mentioned** — the tickers in the posts listed, most often first; click
+  one to filter by it, again to clear. At the right: how many posts are shown
+  (**300+** means there are older ones).
+- **Load older posts** at the bottom (it also loads by itself as you scroll
+  near it) reaches back through the whole history, not just the newest posts.
+- **Accounts** — add one by **@handle** or an x.com link, with a group if you
+  like (an existing group's name is offered as you type). A new account starts
+  from its **next** post: what it posted before is not pulled in. Under each
+  account: when it was last **checked**, or the error (**account not found**
+  after repeated misses). The folder button moves it to another group, to
+  **Ungrouped**, or to a **New group…**; the **✕** stops watching it (you are
+  asked first). Click a group's name to fold it away.
+
+The top line says **Live · checking every 60s** while the X feed service is
+publishing, and turns red — **X feed service not answering** — when it has
+not reported for three check intervals. The interval is set in **Settings →
+Configuration** (the link under the accounts). Posts reach the app through the
+FxEmbed service, not from X directly; nothing here is a recommendation.
+""",
     "/options/paper": """
 **Paper Ledger — the simple version**
 

@@ -1401,7 +1401,9 @@ setting it was fired under, so the rows already on today's list keep theirs.
 
 ## Market News
 
-**Route:** `/news`. A rail item under **MARKETS**, directly below Flow Alerts.
+**Route:** `/news`. A rail item under **MARKETS**, directly below Flow Alerts. Market
+News has two tabs: **Headlines** (this page, `/news`) and **X Feed** (`/news/x`, the
+next section); the rail item opens Headlines.
 
 Two columns: the **headlines** and their filters on the left (two thirds of the
 width); on the right, **Next on the calendar**, the **SEC filings** and the
@@ -1497,6 +1499,40 @@ a 24-hour clock.
 
 > A headline is not a verified fact, the impact word is a rule count and not a
 > judgement, and nothing here is a trade recommendation.
+
+## X Feed
+
+**Route:** `/news/x`. The second tab of **Market News** (MARKETS).
+
+The posts of the X accounts you watch, newest first. Two columns: the posts on the
+left, the accounts on the right (below the posts on a phone). Every time is Central,
+on a 24-hour clock.
+
+- **One line per post**: the time, **POST** / **RT** / **REPLY**, the first line of
+  the text, marks for photos, video or a quoted post, up to two tickers and the
+  account. A **NEW** post (arrived in the last minute) has a green edge. A date line
+  starts each earlier day; an **amber line** says some posts from one account may be
+  missing for a stretch after a pause.
+- **Click a line** to open the post under it: the full text (links and @mentions open
+  on X), photos (click for full size), a video's picture and **Play on X ↗**, a quoted
+  post, the counts, **Posted …** and **Open on X ↗**. Click a **$TICKER** in the text
+  to filter the feed by it or to open its **Symbol** page.
+- **Filters** (fold them away with the arrow): the group tabs with post counts, a
+  search box (`$NVDA` finds posts tagged with that ticker), **All / Posts / Reposts /
+  Replies**, and one chip per account. **Most mentioned** lists the tickers in the
+  posts shown — click one to filter. **Load older posts** at the bottom (it also loads
+  as you scroll near it) reaches back through the whole history.
+- **Accounts**: type a **@handle** or an x.com link, optionally a group, and **Add**.
+  A new account starts from its next post. Each account shows when it was last
+  checked, or its error (**account not found** after repeated misses). The folder
+  button moves it to another group, Ungrouped or a **New group…**; **✕** stops
+  watching it after you confirm.
+- The line at the top reads **Live · checking every 60s**, or **X feed service not
+  answering** in red when the service has gone quiet. The interval is set in
+  **Settings → Configuration** (the link under the accounts).
+
+> A post is its author's words, not a verified fact, and nothing here is a trade
+> recommendation.
 
 ## Market Dashboard
 

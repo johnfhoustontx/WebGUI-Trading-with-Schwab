@@ -843,10 +843,17 @@ OPTIONS_RAIL = [
     # win rates of four 0DTE scalps. A morning read like Flow Alerts, so it sits
     # beside it - a rail page, not a tenth tab on the Options strip.
     ("/options/scalp", "Opening Scalp", "timer"),
-    # Market News: headlines, SEC filings and insider buys, tagged by ticker
-    # (news_svc). A market-wide read like the three above, so it sits beside
-    # them under MARKETS.
-    ("/news", "Market News", "newspaper"),
+]
+
+# Market News became a GROUP on 2026-11-13. Headlines (/news: headlines, SEC
+# filings and the economic calendar, from news_svc) keeps its route and stays
+# first, so the rail item - which lands on children[0] - and every old bookmark
+# still open it. X Feed (/news/x) is the watched X accounts (xfeed_svc). Both are
+# market-wide reads, so the group sits under MARKETS where the page used to.
+# (route, label, icon)
+MARKET_NEWS_CHILDREN = [
+    ("/news", "Headlines", "newspaper"),
+    ("/news/x", "X Feed", "alternate_email"),
 ]
 
 # The two MODELLING tools, paired as their own group (2026-07-28). They are the
@@ -955,6 +962,7 @@ _NAV_GROUPS = [
     ("More", "more_horiz", MORE_CHILDREN + SETTINGS_CHILDREN),
     ("Strategy Tools", "build", STRATEGY_TOOLS_CHILDREN),
     ("Trade Analyzer", "query_stats", TRADE_CHILDREN),
+    ("Market News", "newspaper", MARKET_NEWS_CHILDREN),
 ]
 
 
@@ -1005,7 +1013,7 @@ NAV_SECTIONS = [
         _sec_page("/options/gamma"),      # Dealer Positioning
         _sec_page("/options/matrix"),     # Opportunity Board
         _sec_page("/options/flow"),       # Flow Alerts
-        _sec_page("/news"),               # Market News
+        _sec_group("Market News"),        # Headlines | X Feed
         _sec_group("Trend & Sentiment"),
     ]),
     ("STRATEGY", [
@@ -1152,7 +1160,8 @@ def drawer_width(pinned: bool) -> int:
 _NAV_LABEL = {route: label for route, label, _icon in
               OPTIONS_CHILDREN + OPTIONS_RAIL + STRATEGY_TOOLS_CHILDREN
               + SENTIMENT_CHILDREN + TRADE_CHILDREN + FLAT_NAV
-              + MORE_CHILDREN + SETTINGS_CHILDREN + SYSTEM_RAIL}
+              + MORE_CHILDREN + SETTINGS_CHILDREN + SYSTEM_RAIL
+              + MARKET_NEWS_CHILDREN}
 
 # One distinct color per route (the favicon fill). Material hues, all visually apart.
 _TAB_COLOR = {
@@ -1166,7 +1175,10 @@ _TAB_COLOR = {
     # Chartreuse: hue 105, the midpoint of the widest gap left in this map's hue
     # circle (Momentum's light green at 88 and Paper Ledger's green at 123).
     "/options/scalp": "#79d85a",          # Opening Scalp — chartreuse
-    "/news": "#ff7043",                   # Market News — deep orange
+    "/news": "#ff7043",                   # Market News · Headlines — deep orange
+    # Violet: hue 275, the widest gap left in this map's hue circle (Dealer
+    # Positioning's deep purple at 262 and Captured Signals / Flow Alerts at 291).
+    "/news/x": "#bb5cff",                 # Market News · X Feed — violet
     "/options/paper": "#66bb6a",          # Paper Ledger — green
     "/options/captured": "#ab47bc",       # Captured Signals — purple
     "/options/portfolio": "#26a69a",      # Paper Account — teal
@@ -2642,9 +2654,16 @@ def options_scalp_page() -> None:
 
 @_page("/news")
 def news_page() -> None:
-    with _layout("/news", "Market News"):
+    with _layout("/news", "Market News · Headlines"):
         from pages import news
         news.render()
+
+
+@_page("/news/x")
+def news_x_page() -> None:
+    with _layout("/news/x", "Market News · X Feed"):
+        from pages import xfeed
+        xfeed.render()
 
 
 @_page("/sentiment")

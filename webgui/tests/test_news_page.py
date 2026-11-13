@@ -7,9 +7,15 @@ PAGES = pathlib.Path(__file__).resolve().parents[1] / "pages"
 
 
 def test_route_rail_and_breadcrumb():
+    """Market News became a tab group on 2026-11-13: /news is its first tab,
+    Headlines, so the rail entry (the group) still lands here."""
     import main
-    assert main.breadcrumb_trail("/news") == ["Markets", "Market News"]
-    assert ("/news", "Market News", "newspaper") in main.OPTIONS_RAIL
+    assert main.breadcrumb_trail("/news") == ["Markets", "Market News", "Headlines"]
+    assert main.MARKET_NEWS_CHILDREN[0] == ("/news", "Headlines", "newspaper")
+    assert main._group_children("/news") == main.MARKET_NEWS_CHILDREN
+    assert "/news" not in [r for r, _l, _i in main.OPTIONS_RAIL]
+    _caption, entries = next(s for s in main.NAV_SECTIONS if s[0] == "MARKETS")
+    assert main._sec_group("Market News") in entries
 
 
 def test_help_exists():

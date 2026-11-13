@@ -22,7 +22,7 @@ def test_shell_registers_all_pages():
         "/trade", "/trade/evidence", "/trade/board", "/trade/plan",
         "/portfolio", "/settings",
         "/eod", "/eod/detail", "/eod/weekly", "/send-order", "/live-orders", "/social", "/blog", "/status", "/manuals", "/terminate",
-        "/market", "/desk", "/symbol", "/news",
+        "/market", "/desk", "/symbol", "/news", "/news/x",
     )
     for path in expected:
         assert path in routes, f"missing page route {path}; have {sorted(routes)}"
@@ -108,6 +108,9 @@ def test_group_children_maps_routes_to_their_group():
     # inside the other.
     assert main._group_children("/trade") == main.TRADE_CHILDREN
     assert main._group_children("/trade/board") == main.TRADE_CHILDREN
+    # Market News became a group on 2026-11-13: Headlines | X Feed.
+    assert main._group_children("/news") == main.MARKET_NEWS_CHILDREN
+    assert main._group_children("/news/x") == main.MARKET_NEWS_CHILDREN
     # Strategy Finder left the Options strip for its own rail row (2026-09-13).
     assert main._group_children("/options/swing") is None
     # Rail pages are standalone: promoted OUT of the Options tab strip.
@@ -508,6 +511,7 @@ def test_breadcrumb_trail_starts_at_a_section_for_every_page():
     assert main.breadcrumb_trail("/market") == [
         "Markets", "Trend & Sentiment", "Market Dashboard"]
     assert main.breadcrumb_trail("/eod") == ["Account", "More", "EOD Report"]
+    assert main.breadcrumb_trail("/news/x") == ["Markets", "Market News", "X Feed"]
     assert main.breadcrumb_trail("/options/calculator") == [
         "Strategy", "Strategy Tools", "Calculator"]
     # A standalone rail page → two crumbs, NOT a bare page name.
@@ -1425,9 +1429,10 @@ def test_strategy_tools_moved_out_of_their_old_homes():
         "/options/scanner", "/options/income", "/options/captured",
         "/options/paper", "/options/portfolio", "/options/shares", "/options/rescue"]
     # The rail keeps the standalone market-wide pages (Flow Alerts joined
-    # 2026-08-09, Opening Scalp 2026-10-18, Market News 2026-09-26).
+    # 2026-08-09, Opening Scalp 2026-10-18). Market News joined on 2026-09-26
+    # and left on 2026-11-13, when it became a tab group (Headlines | X Feed).
     assert [r for r, _l, _i in main.OPTIONS_RAIL] == [
-        "/options/gamma", "/options/matrix", "/options/flow", "/options/scalp", "/news"]
+        "/options/gamma", "/options/matrix", "/options/flow", "/options/scalp"]
 
 
 def test_strategy_tools_group_is_reachable_from_the_drawer():

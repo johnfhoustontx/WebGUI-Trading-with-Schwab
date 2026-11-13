@@ -1168,7 +1168,17 @@ you already follow is worth more than a strong alert on a name you have never tr
 
 ## Market News
 
-*Menu: MARKETS → Market News · Route `/news`*
+*Menu: MARKETS → Market News — a tab strip: **Headlines** (`/news`) and **X Feed**
+(`/news/x`)*
+
+Two tabs for the two kinds of news the app follows. **Headlines** is the market's
+own news — the feeds, SEC filings and the economic calendar — and **X Feed** is the
+posts of the X accounts you choose to watch. The rail item lands on Headlines, so
+every older link to `/news` still opens the same page.
+
+## Headlines
+
+*Menu: MARKETS → Market News → Headlines · Route `/news`*
 
 ### What it is
 
@@ -1327,7 +1337,68 @@ nothing, so a visitor cannot make the service fetch.
 
 ### Related pages
 
-[Symbol](#symbol) · [Flow Alerts](#flow-alerts) · [Desk](#desk).
+[Symbol](#symbol) · [Flow Alerts](#flow-alerts) · [Desk](#desk) · [X Feed](#x-feed).
+
+---
+
+## X Feed
+
+*Menu: MARKETS → Market News → X Feed · Route `/news/x`*
+
+### What it is
+
+The posts of the X accounts you watch, newest first, in one list you can filter and
+read back through. It answers *"what have the accounts I follow said, and did any of
+them name a ticker?"* without leaving the app or signing in to X.
+
+### Where the data comes from
+
+The `xfeed_svc` service checks every watched account through the FxEmbed API (not X
+itself) once per interval — 60 seconds by default, set in **Settings → Configuration**
+— and keeps every post in its own store. The page shows the newest few hundred live
+and asks the service for anything filtered or older.
+
+### Reading the screen
+
+- **Each post is one line**: the time (Central), **POST**, **RT** (a repost) or
+  **REPLY** (the account replying in its own thread), the first line of text, marks
+  for photos, video or a quoted post, up to two tickers and the account. **NEW** with
+  a green edge marks a post that arrived in the last minute.
+- **Click a line** to open the post: full text with links, photos, video, the quoted
+  post, counts, when it was posted and **Open on X ↗**. A **$TICKER** in the text
+  filters the feed or opens its Symbol page.
+- **An amber line** says some posts from one account may be missing for a stretch
+  after a pause (the catch-up reads back 25 pages at most).
+- **Filters**: group tabs, a search box (`$NVDA` searches tickers), All / Posts /
+  Reposts / Replies, one chip per account; **Most mentioned** tickers and how many
+  posts are shown; **Load older posts** at the bottom.
+- **Accounts**, on the right (below on a phone): add by handle with an optional group,
+  change an account's group, stop watching it, and see when each was last checked or
+  why it failed.
+
+### Why it matters
+
+Market-moving lines often appear on a few X accounts first. Watching them inside the
+app keeps them beside the Symbol pages and behind the app's own sign-in.
+
+### When to use it
+
+When you want the quick, unfiltered word from specific accounts — a headline
+account, an analyst — rather than the ranked news on Headlines.
+
+### Caveats and gotchas
+
+- **Forward only.** A newly added account starts from its next post; nothing older is
+  pulled in. After a pause the feed catches up at the posts' real times and never
+  marks them NEW. Reposts made during a pause are not filled in.
+- **"X feed service not answering"** in red means the service has not reported for
+  three intervals; the list shows what it last had.
+- A post is the author's words, not a verified fact, and nothing here is a
+  recommendation.
+
+### Related pages
+
+[Headlines](#headlines) · [Symbol](#symbol) · [Settings](#settings).
 
 ---
 
