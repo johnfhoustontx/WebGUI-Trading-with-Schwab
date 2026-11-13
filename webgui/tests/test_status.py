@@ -296,7 +296,7 @@ def test_everything_else_stays_restartable_in_prod(monkeypatch):
     restartable = {t["key"] for t in status.component_targets()
                    if status.restart_spec(t) is not None}
     assert restartable == {"proxy", "sentiment", "options", "portfolio",
-                           "trade", "market", "news", "blog", "webgui",
+                           "trade", "market", "news", "blog", "xfeed", "webgui",
                            "webgui_live"}
     assert "driver" not in {t["key"] for t in status.component_targets()}
 
@@ -315,7 +315,7 @@ def test_dev_can_still_restart_everything_it_owns(monkeypatch):
     # screens share nothing: dev binds its own offset port and runs its own
     # process, so this button reaches only this checkout.
     assert restartable == {"sentiment", "options", "portfolio", "trade",
-                           "market", "news", "blog", "webgui", "webgui_live"}
+                           "market", "news", "blog", "xfeed", "webgui", "webgui_live"}
 
 
 # --- restart_command ----------------------------------------------------------

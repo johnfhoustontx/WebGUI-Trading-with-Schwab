@@ -1,0 +1,35 @@
+# X accounts feed - how xfeed_svc polls the FxEmbed API and what the page shows.
+# Read through services/xfeed_svc/config.py (built-in defaults <- this file <-
+# config/local/xfeed.toml). Edit here (or in Settings -> Configuration). The
+# poller re-reads this file every tick, so a saved change applies with no restart.
+# A missing key or a bad value reads as the shipped value below, never as an error.
+
+[fxembed]
+base_url = "https://api.fxtwitter.com"
+user_agent = "neuralstrike-xfeed/1.0"
+timeout_s = 15
+not_found_retries = 3
+retry_delay_s = 0.5
+
+[poller]
+interval_s = 60          # minimum 30, enforced in code
+account_gap_s = 1.0
+page_gap_s = 1.0
+max_pages = 25
+backoff_s = [60, 120, 300]
+not_found_limit = 3
+live_slack_min = 15      # OLD_POST_SLACK
+recent_factor = 3        # "live" needs last_ok within 3 intervals
+tick_s = 5
+
+[views]
+latest_rows = 300
+query_limit_max = 1000
+top_tickers = 10
+answer_ttl_s = 120
+group_name_max = 30
+
+[page]
+new_highlight_s = 60
+answer_poll_s = 0.25
+answer_timeout_s = 20

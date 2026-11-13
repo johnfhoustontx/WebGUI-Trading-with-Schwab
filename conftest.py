@@ -54,6 +54,7 @@ _LIVE_DIRS = (
     _ROOT / "services" / "trade_svc" / "data",
     _ROOT / "services" / "news_svc" / "data",
     _ROOT / "services" / "blog_svc" / "data",
+    _ROOT / "services" / "xfeed_svc" / "data",
 )
 
 

@@ -107,6 +107,7 @@ schwab-proxy/data/
 shared/data/
 services/trade_svc/data/
 services/news_svc/data/
+services/xfeed_svc/data/
 services/feed_svc/data/
 # Thumbnail captures for the public live grid. Generated on the box that serves
 # them, every 15 min inside [windows.live_capture]. ⚠ NOT committed: tracked,

@@ -179,6 +179,7 @@ def component_targets():
         "market": "market_svc (macro-ticker dashboard)",
         "news": "news_svc (public news feeds)",
         "blog": "blog_svc (site blog drafts + entries)",
+        "xfeed": "xfeed_svc (X accounts feed)",
     }
     for domain, label in svc_labels.items():
         url = SERVICE_URLS.get(domain)

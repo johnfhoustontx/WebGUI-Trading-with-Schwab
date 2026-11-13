@@ -189,6 +189,9 @@ jobs:
           - name: blog_svc
             dir: "."
             cmd: python -m pytest services/blog_svc -q
+          - name: xfeed_svc
+            dir: "."
+            cmd: python -m pytest services/xfeed_svc -q
           - name: shared-notify
             dir: "."
             cmd: python -m pytest shared/notify/tests -q

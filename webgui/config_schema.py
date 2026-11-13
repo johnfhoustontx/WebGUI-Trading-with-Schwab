@@ -41,6 +41,7 @@ SENTIMENT = "sentiment_svc"
 MARKET = "market_svc"
 NEWS = "news_svc"
 BLOG = "blog_svc"
+XFEED = "xfeed_svc"
 TRADE = "trade_svc"
 WEBGUI = "webgui"
 TIMERS = "timers"
@@ -51,6 +52,7 @@ RESTART_LABELS = {
     MARKET: "Market service",
     NEWS: "News service",
     BLOG: "Blog service",
+    XFEED: "X feed service",
     TRADE: "Trade service",
     WEBGUI: "Web app (this page reloads)",
     TIMERS: "Scheduled timers (regenerated, no restart)",
@@ -3430,7 +3432,58 @@ _ETF_HOLDINGS = ConfigFile(
     ),
 )
 
-FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _LOGIN_PUSH, _TOS_ORDER, _LIVE_ORDERS, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _SECTORS, _MOMENTUM, _SENTIMENT,
+# ─────────────────────────────────────────────────────────────────────────────
+# The X accounts feed — config/xfeed.toml
+# ─────────────────────────────────────────────────────────────────────────────
+# xfeed_svc re-reads the file (mtime-cached) on every poller tick, so a saved
+# change applies on the next tick with no restart.
+_XFEED = ConfigFile(
+    name="xfeed.toml", title="X feed", icon="alternate_email",
+    summary="How the X accounts feed polls the FxEmbed API, and what its page shows.",
+    restart=(),
+    sections=(
+        Section("FxEmbed API", "The public service the feed reads each account's posts from.", (
+            Field("fxembed.base_url", "API address", "", kind="text"),
+            Field("fxembed.user_agent", "User-Agent", "Sent with every request.", kind="text"),
+            Field("fxembed.timeout_s", "Request timeout", "", kind="int", unit="s", min=1, max=120, step=1),
+            Field("fxembed.not_found_retries", "Retries on a 404",
+                  "A 404 for a real account is retried this many times before it is counted.",
+                  kind="int", min=0, max=10, step=1),
+            Field("fxembed.retry_delay_s", "Delay between retries", "", kind="float", unit="s", min=0, max=30, step=0.1),
+        )),
+        Section("Poller", "How often and how patiently the accounts are read.", (
+            Field("poller.interval_s", "Poll every", "Below 30 seconds is read as 30.",
+                  kind="int", unit="s", min=30, max=3600, step=1),
+            Field("poller.account_gap_s", "Gap between accounts", "", kind="float", unit="s", min=0, max=60, step=0.1),
+            Field("poller.page_gap_s", "Gap between pages", "", kind="float", unit="s", min=0, max=60, step=0.1),
+            Field("poller.max_pages", "Most pages per account", "", kind="int", min=1, max=100, step=1),
+            Field("poller.backoff_s", "Backoff after a failure",
+                  "Seconds waited after the first, second and later failures in a row.",
+                  kind="numbers", unit="s", min=1, max=3600),
+            Field("poller.not_found_limit", "Not-found limit",
+                  "Consecutive not-found polls before an account is marked missing.",
+                  kind="int", min=1, max=20, step=1),
+            Field("poller.live_slack_min", "Old-post slack", "", kind="int", unit="min", min=0, max=1440, step=1),
+            Field("poller.recent_factor", "Live window", "An account is live when its last good poll is within this many intervals.",
+                  kind="int", unit="intervals", min=1, max=20, step=1),
+            Field("poller.tick_s", "Scheduler tick", "", kind="int", unit="s", min=1, max=60, step=1),
+        )),
+        Section("Views", "What the service publishes to the page.", (
+            Field("views.latest_rows", "Latest posts", "", kind="int", unit="rows", min=10, max=5000, step=10),
+            Field("views.query_limit_max", "Largest query", "", kind="int", unit="rows", min=10, max=10000, step=10),
+            Field("views.top_tickers", "Top tickers", "", kind="int", min=1, max=50, step=1),
+            Field("views.answer_ttl_s", "Answer kept for", "", kind="int", unit="s", min=10, max=3600, step=1),
+            Field("views.group_name_max", "Longest group name", "", kind="int", unit="chars", min=5, max=100, step=1),
+        )),
+        Section("Page", "How the X Feed page behaves.", (
+            Field("page.new_highlight_s", "Highlight new posts for", "", kind="int", unit="s", min=0, max=3600, step=1),
+            Field("page.answer_poll_s", "Check for an answer every", "", kind="float", unit="s", min=0.05, max=5, step=0.05),
+            Field("page.answer_timeout_s", "Give up waiting after", "", kind="int", unit="s", min=1, max=120, step=1),
+        )),
+    ),
+)
+
+FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _LOGIN_PUSH, _TOS_ORDER, _LIVE_ORDERS, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _XFEED, _SECTORS, _MOMENTUM, _SENTIMENT,
          _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _FUTURES_CHAIN, _GEX_ARCHIVE, _BACKUP, _SOCIAL_CARDS, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
          _MARKET_READ, _ETF_HOLDINGS, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)

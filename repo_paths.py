@@ -269,6 +269,10 @@ NEWS_DB = NEWS_SVC_DATA / "news.db"
 BLOG_DATA = REPO_ROOT / "services" / "blog_svc" / "data"
 BLOG_DB = BLOG_DATA / "blog.db"
 
+# xfeed_svc: the X accounts feed's own store (gitignored data/).
+XFEED_SVC_DATA = REPO_ROOT / "services" / "xfeed_svc" / "data"
+XFEED_DB = XFEED_SVC_DATA / "xfeed.db"
+
 # ------------------------------------------------------------------ environment
 # Which environment this CHECKOUT is (dev or prod), and the behavior flags that
 # follow from it. Resolution lives here rather than in a new module because this

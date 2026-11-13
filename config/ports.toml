@@ -29,3 +29,4 @@ trade     = 8213
 market    = 8215
 news      = 8216   # public-feed news collector (news_svc)
 blog      = 8217   # the site blog (blog_svc)
+xfeed     = 8219   # X accounts feed (xfeed_svc)

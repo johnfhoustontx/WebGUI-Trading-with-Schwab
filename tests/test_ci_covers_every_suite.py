@@ -22,7 +22,7 @@ ROOT_SUITES = [
     "shared/bus", "shared/contracts", "shared/tests", "shared/notify/tests",
     "services/tests", "services/sentiment_svc", "services/options_svc",
     "services/portfolio_svc", "services/trade_svc", "services/market_svc",
-    "services/news_svc", "services/blog_svc", "tools/tests", "tests", "deploy",
+    "services/news_svc", "services/blog_svc", "services/xfeed_svc", "tools/tests", "tests", "deploy",
     ".claude/hooks/tests",
 ]
 APP_DIRS = ["webgui", "schwab-proxy", "options-scanner", "sentiment-dashboard",
