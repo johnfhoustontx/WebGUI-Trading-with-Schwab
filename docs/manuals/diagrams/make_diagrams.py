@@ -183,7 +183,7 @@ def deploy_units():
     box(ax, 30, 120, 170, 64, "Redis :6379", "A system unit", "amber")
     container(ax, 240, 40, 730, 250, "trading-prod.target: a promote stops and starts all of it", "purple")
     box(ax, 270, 80, 180, 64, "schwab-proxy", ":8100, starts first", "gray")
-    box(ax, 490, 80, 200, 64, "Seven services", ":8210 to :8217", "teal")
+    box(ax, 490, 80, 200, 64, "Eight services", ":8210 to :8219", "teal")
     box(ax, 730, 80, 210, 64, "webgui :8500", "Ordered after the proxy", "purple")
     box(ax, 730, 190, 210, 64, "webgui_live :8501", "Needs only Redis", "purple")
     arrow(ax, (200, 140), (268, 112))

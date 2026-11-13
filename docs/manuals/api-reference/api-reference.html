@@ -186,7 +186,7 @@ keys that feed it. Menu order matches the rail.</p>
 <tr>
 <td><strong>X Feed</strong></td>
 <td><code>xfeed_svc</code> :8219</td>
-<td><code>cache:xfeed:latest</code>, <code>:accounts</code>; the page asks <code>query</code> / <code>stats</code> on <code>cmd:xfeed</code> and reads the answer at <code>cache:xfeed:answer:&lt;id&gt;</code></td>
+<td><code>cache:xfeed:latest</code>, <code>:accounts</code>; the page asks <code>query</code> (and <code>add_account</code> / <code>remove_account</code> / <code>set_group</code>) on <code>cmd:xfeed</code> and reads the answer at <code>cache:xfeed:answer:&lt;id&gt;</code></td>
 </tr>
 <tr>
 <td><strong>Market Dashboard</strong></td>
@@ -3574,17 +3574,21 @@ a waiting ordinary one, an ordinary one is sent; <code>0</code> switches the lan
 rate is unchanged. A request answered from the local store never waits.</p>
 <h2 id="x-feed-service-8219">X Feed service — :8219</h2>
 <p><strong>Entry:</strong> <code>services/xfeed_svc/app.py</code> (<code>make_app("xfeed", scheduler=scheduler.loop,
-command_handler=handlers.handle_command)</code>). Polls the FxEmbed API (<code>api.fxtwitter.com</code>,
+command_handler=handlers.handle_command, slow_commands=handlers.SLOW)</code>). Polls the FxEmbed API (<code>api.fxtwitter.com</code>,
 no key) for each watched X account into <code>services/xfeed_svc/data/xfeed.db</code> (the
 standalone Node feed's schema: <code>accounts</code>, <code>posts</code>, <code>gaps</code>, <code>settings</code>; times in epoch
 milliseconds) and publishes two views. <strong>No Schwab call, no Claude call, no proxy.</strong>
 Tunables are <code>config/xfeed.toml</code> (<code>[fxembed]</code>, <code>[poller]</code>, <code>[views]</code>, <code>[page]</code>), re-read
-every tick. The fetch deadline watchdog is <code>shared/http_watchdog.py</code>, shared with
+every tick — except <code>[fxembed]</code>: the FxEmbed client is built once, so those keys need an
+<code>xfeed_svc</code> restart (Settings says so). The fetch deadline watchdog is <code>shared/http_watchdog.py</code>, shared with
 <code>news_svc</code>. Design: <code>docs/plans/2026-11-13-x-feed-design.md</code>.</p>
 <p><strong>Scheduler</strong> (<code>services/xfeed_svc/scheduler.py</code>): the loop wakes every <code>tick_s</code> (5 s),
 beats the heartbeat and starts a poll cycle when <code>interval_s</code> (60, minimum 30) has passed
-since the last one ENDED. A cycle never doubles and runs off the loop. A fault is counted
-(<code>_degrade</code>) and never escapes. Gated by the <code>schedulers</code> flag.</p>
+since the last one ENDED. A cycle never doubles and runs off the loop, and ends by
+republishing both views (<code>skip_unchanged</code>, so only their <code>:ts</code> stamp moves when nothing
+changed) — with no account due the page would otherwise read the service as not answering.
+A fault is counted (<code>_degrade</code>) and never escapes. An unexpected fault while polling one
+account is counted (<code>xfeed.poller</code>) and recorded on it as <code>internal error</code> with a backoff. Gated by the <code>schedulers</code> flag.</p>
 <p><strong>Commands (<code>cmd:xfeed</code>)</strong>, each carrying a <code>request_id</code> (32 hex chars, made by the page):</p>
 <table>
 <thead>
@@ -3603,12 +3607,12 @@ since the last one ENDED. A cycle never doubles and runs off the loop. A fault i
 <tr>
 <td><code>remove_account</code></td>
 <td><code>handle</code></td>
-<td>Stops watching it (its posts stay). Error: <code>Not watching that account</code></td>
+<td>Stops watching it (its posts stay). Waits for a poll of that account to finish (slow). Error: <code>Not watching that account</code></td>
 </tr>
 <tr>
 <td><code>set_group</code></td>
 <td><code>handle</code>, <code>group</code> (null = Ungrouped)</td>
-<td>Trims and collapses spaces, at most <code>group_name_max</code> (30) characters, reuses an existing group's spelling case-insensitively</td>
+<td>Trims and collapses spaces, at most <code>group_name_max</code> (30) characters, reuses an existing group's spelling case-insensitively. Waits for a poll of that account to finish (slow)</td>
 </tr>
 <tr>
 <td><code>query</code></td>
@@ -3617,7 +3621,8 @@ since the last one ENDED. A cycle never doubles and runs off the loop. A fault i
 </tr>
 </tbody>
 </table>
-<p>There is no reply on the stream. Every command is ANSWERED on
+<p>The three slow commands run on the stream's slow lane (one at a time, in order), so a
+<code>query</code> never waits behind them. There is no reply on the stream. Every command is ANSWERED on
 <code>cache:xfeed:answer:&lt;request_id&gt;</code> (a TTL of <code>answer_ttl_s</code>, 120 s; no event):
 <code>{request_id, command, ok, error}</code> plus the command's own fields. A <code>query</code> answer adds
 <code>rows</code>, <code>limit</code> (the page size actually used, <code>limit</code> clamped to <code>1..query_limit_max</code>,

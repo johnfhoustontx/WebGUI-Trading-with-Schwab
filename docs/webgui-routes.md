@@ -994,11 +994,15 @@ FxEmbed. Design and plan:
   RIGHT, the collapsible accounts panel (add by handle or x.com link, the accounts by
   group, change group, stop watching after a confirm, a link to Settings →
   Configuration where the interval is set). Times are Central (`America/Chicago`), 24-hour.
-- **Status line**: *Live · checking every Ns* while the accounts view is recent
-  (`recent_factor` x the interval), **X feed service not answering** in red otherwise;
+- **Status line**: *Live · checking every Ns* while the accounts view's `:ts` stamp is
+  within 3 intervals (`STALE_FACTOR = 3` in `pages/xfeed_parts.py`, a page constant — not
+  the poller's `recent_factor`, which is its live-post rule), **X feed service not
+  answering** in red otherwise. The service republishes the views at the end of every
+  cycle, so the stamp moves even when no account was due;
   a NEW post (origin `live`, under `new_highlight_s` old) has a green edge.
 - **Config**: `config/xfeed.toml` (`[fxembed]`, `[poller]`, `[views]`, `[page]`), each key
-  in `webgui/config_schema.py`; the poller re-reads it every tick. `interval_s` has a
+  in `webgui/config_schema.py`; the poller re-reads it every tick (`[fxembed]` needs an
+  `xfeed_svc` restart: the client is built once). `interval_s` has a
   floor of 30 in code.
 - **Moving the standalone feed's data in**: `python tools/import_x_feed.py --source <feed.db>`
   (`--source` the old `feed.db`, opened read-only; `--target` defaults to

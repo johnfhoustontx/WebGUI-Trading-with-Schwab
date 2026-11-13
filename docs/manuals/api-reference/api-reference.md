@@ -24,7 +24,7 @@ keys that feed it. Menu order matches the rail.
 | **Opportunity Board** | `options_svc` | `cache:options:matrix` |
 | **Flow Alerts** | `options_svc` | `cache:options:flow_alerts`, `:flow_sides`, `:flow_followup` |
 | **Market News** | `news_svc` :8216 | `cache:news:feed`, `:sec`, `:calendar`, `:status` (the public copy reads `:feed_public`, `:sec_public`, `:calendar_public`); also the Desk's Headlines panel (`:feed`) and the Symbol page's news band (`:feed` + `:sec`) |
-| **X Feed** | `xfeed_svc` :8219 | `cache:xfeed:latest`, `:accounts`; the page asks `query` / `stats` on `cmd:xfeed` and reads the answer at `cache:xfeed:answer:<id>` |
+| **X Feed** | `xfeed_svc` :8219 | `cache:xfeed:latest`, `:accounts`; the page asks `query` (and `add_account` / `remove_account` / `set_group`) on `cmd:xfeed` and reads the answer at `cache:xfeed:answer:<id>` |
 | **Market Dashboard** | `market_svc` :8215 | `cache:market:dashboard`, `:summary`, `:read` (the Desk's Market read), `:volume` (traded volume, for the Market read and the reports), `:holdings` (each fund tile's top holdings, quoted, for the hover card) |
 | **Sentiment** | `sentiment_svc` :8210 | `cache:sentiment:composite`, `:regime`, `:regime_history`, `:intraday_history` |
 | **Sector & Industry** | `sentiment_svc` | `cache:sentiment:sectors` |
@@ -1269,29 +1269,34 @@ rate is unchanged. A request answered from the local store never waits.
 ## X Feed service — :8219
 
 **Entry:** `services/xfeed_svc/app.py` (`make_app("xfeed", scheduler=scheduler.loop,
-command_handler=handlers.handle_command)`). Polls the FxEmbed API (`api.fxtwitter.com`,
+command_handler=handlers.handle_command, slow_commands=handlers.SLOW)`). Polls the FxEmbed API (`api.fxtwitter.com`,
 no key) for each watched X account into `services/xfeed_svc/data/xfeed.db` (the
 standalone Node feed's schema: `accounts`, `posts`, `gaps`, `settings`; times in epoch
 milliseconds) and publishes two views. **No Schwab call, no Claude call, no proxy.**
 Tunables are `config/xfeed.toml` (`[fxembed]`, `[poller]`, `[views]`, `[page]`), re-read
-every tick. The fetch deadline watchdog is `shared/http_watchdog.py`, shared with
+every tick — except `[fxembed]`: the FxEmbed client is built once, so those keys need an
+`xfeed_svc` restart (Settings says so). The fetch deadline watchdog is `shared/http_watchdog.py`, shared with
 `news_svc`. Design: `docs/plans/2026-11-13-x-feed-design.md`.
 
 **Scheduler** (`services/xfeed_svc/scheduler.py`): the loop wakes every `tick_s` (5 s),
 beats the heartbeat and starts a poll cycle when `interval_s` (60, minimum 30) has passed
-since the last one ENDED. A cycle never doubles and runs off the loop. A fault is counted
-(`_degrade`) and never escapes. Gated by the `schedulers` flag.
+since the last one ENDED. A cycle never doubles and runs off the loop, and ends by
+republishing both views (`skip_unchanged`, so only their `:ts` stamp moves when nothing
+changed) — with no account due the page would otherwise read the service as not answering.
+A fault is counted (`_degrade`) and never escapes. An unexpected fault while polling one
+account is counted (`xfeed.poller`) and recorded on it as `internal error` with a backoff. Gated by the `schedulers` flag.
 
 **Commands (`cmd:xfeed`)**, each carrying a `request_id` (32 hex chars, made by the page):
 
 | Type | Payload | Effect |
 |---|---|---|
 | `add_account` | `handle`, `group?` | Baselines the handle from FxEmbed (slow). Errors: `Invalid handle`, `Already watching @x`, `Account not found`, `Could not reach FxEmbed (...)`, group too long |
-| `remove_account` | `handle` | Stops watching it (its posts stay). Error: `Not watching that account` |
-| `set_group` | `handle`, `group` (null = Ungrouped) | Trims and collapses spaces, at most `group_name_max` (30) characters, reuses an existing group's spelling case-insensitively |
+| `remove_account` | `handle` | Stops watching it (its posts stay). Waits for a poll of that account to finish (slow). Error: `Not watching that account` |
+| `set_group` | `handle`, `group` (null = Ungrouped) | Trims and collapses spaces, at most `group_name_max` (30) characters, reuses an existing group's spelling case-insensitively. Waits for a poll of that account to finish (slow) |
 | `query` | `group?`, `ungrouped?`, `account?`, `type?`, `q?`, `ticker?`, `before?`, `before_key?`, `limit` | One filtered page of posts and gap rows |
 
-There is no reply on the stream. Every command is ANSWERED on
+The three slow commands run on the stream's slow lane (one at a time, in order), so a
+`query` never waits behind them. There is no reply on the stream. Every command is ANSWERED on
 `cache:xfeed:answer:<request_id>` (a TTL of `answer_ttl_s`, 120 s; no event):
 `{request_id, command, ok, error}` plus the command's own fields. A `query` answer adds
 `rows`, `limit` (the page size actually used, `limit` clamped to `1..query_limit_max`,

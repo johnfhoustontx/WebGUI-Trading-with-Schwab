@@ -9,8 +9,8 @@
 
 ## Running
 
-**The stack is eleven `systemd --user` units on a Linux host** — the target, the
-proxy, the seven services, the web app, and `webgui_live`, the public read-only
+**The stack is twelve `systemd --user` units on a Linux host** — the target, the
+proxy, the eight services, the web app, and `webgui_live`, the public read-only
 screens (2026-09-07). There are no
 launcher scripts: the twelve `.bat` files, `tools/stop_all.py`, `watchdog.py` and
 both `check_stack_*` helpers were deleted in the 2026-08-29 migration, because
@@ -219,8 +219,8 @@ stack:
 .venv/bin/python services/options_svc/app.py     # :8211
 ```
 
-Same order as the units: Redis, then the proxy on :8100, then the seven services
-(8210–8213, 8215–8217), then `webgui/main.py` on :8500. Everything reads market data through
+Same order as the units: Redis, then the proxy on :8100, then the eight services
+(8210–8213, 8215–8217, 8219), then `webgui/main.py` on :8500. Everything reads market data through
 the proxy, so it starts first. `webgui/live_main.py` on :8501 orders after nothing
 in the target — it reads Redis (a *system* unit) and nothing else.
 
@@ -259,7 +259,7 @@ Rationale: [design](../plans/2026-08-08-dev-prod-environments-design.md).
 |---|---|---|
 | Folder | `/home/administrator/dev` ⚠ (not `…/prod` — see above) | — none exists today |
 | schwab-proxy | **owns** it, `:8100` | **borrows** prod's — runs no proxy unit |
-| sentiment / options / portfolio / trade / market / news / blog | 8210–8213, 8215–8217 | 9210–9213, 9215–9217 |
+| sentiment / options / portfolio / trade / market / news / blog / xfeed | 8210–8213, 8215–8217, 8219 | 9210–9213, 9215–9217, 9219 |
 | webgui | `:8500` | `:9500` |
 | webgui_live (public screens) | `:8501` | `:9501` |
 | Redis (`:6379`) | **db 0** | **db 1** |
@@ -304,7 +304,7 @@ the code already has, so a suppressed dev cannot take a code path prod never tak
 |---|---|---|
 | `allow_notifications` | `shared/notify/channels.py:load_config` | recursively zeroes **every** `enabled` key, LAST so it also overrides the `NOTIFY_ENABLED`/`X_ENABLED` env escapes — kills Telegram, Discord, Fi-SMS, **X** (and each of its `kinds`) and the sentiment state-transition alert in one stroke. `options_svc/push_notify.load_config` delegates here, so this is the single chokepoint |
 | `allow_claude` | the client factory in `options_svc/compute.py` returns `None` | falls into the existing *no-API-key* path: the briefing renders its explanatory page (market_svc makes no Claude call since 2026-09-16 — its summary quotes the published market report) |
-| `schedulers` | `services/_scaffold.py:_schedulers_enabled` (consumed by `make_app`) | all seven services stop collecting and polling; **command handlers still run**, so the UI stays fully usable off the snapshot |
+| `schedulers` | `services/_scaffold.py:_schedulers_enabled` (consumed by `make_app`) | all eight services stop collecting and polling; **command handlers still run**, so the UI stays fully usable off the snapshot |
 
 **Per-category push switches live in `config/notify.toml` (2026-09-28)** and are
 enforced ONLY at `channels.discord_target` / `telegram_target` — a new push category
@@ -405,7 +405,7 @@ anyway). It guards on `ENV_NAME`, not the folder name, so a directory called
 back.** The fetch, the fast-forward check and (when `requirements.lock` moves) a
 `pip install --dry-run` of the new lock all happen with prod still up; after the
 stop there is no network step left. If the install, the unit start or any
-process's health probe then fails — it probes the proxy, all seven services and
+process's health probe then fails — it probes the proxy, all eight services and
 the web GUI — an EXIT trap puts the previous commit back and restarts on it.
 `tools/promote.sh --rollback` does the same on request, to the commit recorded
 in `logs/promote_previous_commit`. Until 2026-10-03 it stopped prod first and

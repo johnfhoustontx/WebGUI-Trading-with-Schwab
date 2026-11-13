@@ -2146,7 +2146,7 @@ Shows whether each part of the app is alive. **Updated** in the corner is when
 the last check ran — the page re-checks itself every 15 seconds, and
 **Refresh** does it now.
 
-- **Green/red cards** — Redis, the Schwab gateway, your Schwab login, the seven
+- **Green/red cards** — Redis, the Schwab gateway, your Schwab login, the eight
   services, this web app, and the public live screens beside it. The gateway's
   card also says which mode its market data store is in and counts its faults. The live
   screens are a separate app on their own address: if that card is red the

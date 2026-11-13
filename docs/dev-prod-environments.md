@@ -34,7 +34,7 @@ box, along with the twelve `.bat` launchers.
 | Redis (one server, `:6379`) | **db 0** | **db 1** |
 | SQLite, `logs/`, `webgui/data` | its own | its own |
 | Schedulers · Claude · notifications | live | **off** |
-| Units | `trading-prod.target` — **10** units | `trading-dev.target` — **9** (no proxy) |
+| Units | `trading-prod.target` — **11** units | `trading-dev.target` — **10** (no proxy) |
 | Start / stop | `systemctl --user start trading-prod.target` | `systemctl --user start trading-dev.target` |
 | Nightly backup timer | **enabled** | **not enabled** — its data is a disposable snapshot of prod |
 | Secrets in `.env` | `MEMURAI_PASSWORD` | `MEMURAI_PASSWORD` only |
@@ -474,7 +474,7 @@ In a **dev** checkout it arms nothing, deliberately: see the warning at step 8.
 Read its output — a timer it could not arm is printed as `FAILED` and the
 command exits non-zero.
 
-Confirm the shape before starting anything: **nine** `trading-dev-*` units and
+Confirm the shape before starting anything: **ten** `trading-dev-*` units and
 **no proxy unit** — ownership is encoded in which units exist, not in a kill-list
 filter. `systemd-analyze --user verify ~/.config/systemd/user/trading-dev.target`
 should print nothing at all; any output is an error.
@@ -558,7 +558,7 @@ not. Without it the SQLite half completes and the Redis half dies on
 Then work at **http://127.0.0.1:9500**. The header carries a `DEV` chip and the
 browser tab reads `DEV · NeuralStrike` — that is how you tell the two tabs apart.
 
-`systemctl --user start trading-dev.target` brings up **eleven** units (eight
+`systemctl --user start trading-dev.target` brings up **ten** units (eight
 services + webgui + webgui_live, and no proxy — dev borrows prod's; the live
 screens are NOT withheld the way the proxy is, because nothing about them is a
 shared exclusive credential). Output goes to the

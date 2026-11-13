@@ -37,7 +37,26 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   60b7849 store rollback, efd6276 poller, 153b713 poller tests, 4cb4094 commands and
   views, 1588c03 handler faults, 4454e24 FxClient fault count, d82e914 scheduler,
   a30e1da scheduler fixes, 42a7993 importer, 7123c86 view model, d290d44 the page,
-  1d5c1c5 page fix, and this commit (documentation).
+  1d5c1c5 page fix, 22d90fa documentation; the final review's fix wave: 891d6e5
+  service fixes, d1e9fc5 filter-card redraw, 4e193cc importer, and this commit
+  (fix-wave docs).
+- **Fix wave (final review).** Every poll cycle ends by republishing both views, so
+  an empty database (the cut-over window) or all accounts backing off no longer read
+  as *X feed service not answering*. A lone UTF-16 surrogate in FxEmbed's JSON becomes
+  U+FFFD (as Node writes it) instead of wedging the account, and any unexpected fault
+  in one account's poll is counted (`xfeed.poller`) and recorded as `internal error`
+  with a backoff. `remove_account` / `set_group` moved to the slow lane, so a `query`
+  never waits behind a poll's account lock. `[fxembed]` needs an `xfeed_svc` restart
+  and Settings now says so. The filter card is redrawn only when what it shows
+  changes. The importer turns a SQLite error into one line and exit 2, and Task 12 of
+  the plan gains a rehearsal import and a stop rule. Docs: unit counts (prod 11, dev
+  10), "seven services" swept to eight (the deploy-units diagram redrawn), no `stats`
+  command, and the status line's `STALE_FACTOR = 3`.
+- **Tests.** `services/xfeed_svc services/tests tools/tests tests`: **2295 passed, 2
+  failed**, the two in `tools/tests/test_generate_glossary_page.py`, which fail the
+  same way on `origin/main` in this venv (the baseline). `webgui`: **8544 passed, 1
+  skipped**. The X feed's own tests: `services/xfeed_svc` 132, `webgui/tests/test_xfeed_page.py`
+  and `test_xfeed_view.py` 48, `tools/tests/test_import_x_feed.py` 8.
 - **Not yet done.** Deploy to prod, run the importer against the vps2 `feed.db`,
   and retire the Node service: the operator's call, after the branch is reviewed
   and merged.

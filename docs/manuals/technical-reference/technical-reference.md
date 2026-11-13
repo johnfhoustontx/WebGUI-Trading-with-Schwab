@@ -116,7 +116,7 @@ Load-bearing runtime packages:
 
 | Requirement | Detail | Status |
 |-------------|--------|--------|
-| **Redis running on `:6379`** | `sudo systemctl enable --now redis-server`. It is the Tier-3 cache, pub/sub, and command bus — **without it none of the seven services can publish and every page shows a "Waiting for … service" placeholder.** It is a **system** unit, so a `systemctl --user` stop of the stack cannot reach it: it survives a Stop All by construction, not by a filter. | Required |
+| **Redis running on `:6379`** | `sudo systemctl enable --now redis-server`. It is the Tier-3 cache, pub/sub, and command bus — **without it none of the eight services can publish and every page shows a "Waiting for … service" placeholder.** It is a **system** unit, so a `systemctl --user` stop of the stack cannot reach it: it survives a Stop All by construction, not by a filter. | Required |
 | `MEMURAI_PASSWORD` | Optional AUTH. Unset = no AUTH (the default, unchanged behavior). | Optional |
 
 ## Schwab API credentials
@@ -210,7 +210,7 @@ GEX collection and the raw feed* below).
 
 | Launcher | Behavior |
 |----------|----------|
-| `systemctl --user start trading-prod.target` | Proxy + 7 services + webgui + webgui_live. Also starts at boot. |
+| `systemctl --user start trading-prod.target` | Proxy + 8 services + webgui + webgui_live. Also starts at boot. |
 | `systemctl --user stop trading-prod.target` | Stops all ten, the public live screens included. **Redis survives** — it is a system unit this cannot reach. |
 | `systemctl --user restart trading-prod-options_svc` | One component. This is exactly what the Status page's Restart button runs. |
 | `journalctl --user -u trading-prod-webgui -f` | Logs. Replaces the `logs/*.out.log` redirection. |
@@ -303,7 +303,7 @@ Redis backbone. No two Tier-2 services talk to each other directly.
 Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 
 > **These are the *prod* profile.** A **dev** checkout offsets the `[services]`
-> ports to 9210–9213 and 9215–9217 and the web GUI to 9500, uses Redis **db 1** instead of db 0,
+> ports to 9210–9213, 9215–9217 and 9219 and the web GUI to 9500, uses Redis **db 1** instead of db 0,
 > and starts **no proxy of its own** — it borrows prod's on 8100, because the Schwab
 > OAuth refresh token is a single rotating credential that two proxies would
 > invalidate for each other. Identity comes from the gitignored
@@ -5062,7 +5062,7 @@ the source; this table is a summary of them.
 | trade_svc | Analysis on demand. One scheduled job: the watchlist **dividend pull**, once a trading day at or after **06:40 CT** (`[calendar.dividends] refresh_at` in `config/news.toml`); the loop wakes every **60 s** and retries a failed pull after **15 min**. |
 | market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); report summary re-read when the published market report changes (a stat of `deploy/site/reports/latest.html` + `latest.txt` per poll) — no Claude call. |
 | news_svc | Three branches, launched every **30 s** tick (`TICK_S`) as keyed background tasks, so a slow one delays only itself and one still running is skipped, never doubled. **feeds**: every feed polled every **2 min** 08:30–15:00 CT (`[collector] rth_poll_min`), **5 min** in the extended sessions 06:30–08:25 and 15:00–15:15 CT (`eth_poll_min`), **30 min** otherwise on a trading day (`offhours_poll_min`) and **30 min** at weekends and holidays (`weekend_poll_min`), counted from the END of the last poll; nothing polls faster than **60 s** (`MIN_INTERVAL_S`). **calendar**: every tick, fetching only the sources whose own `refresh_min` is due (Fed 60 min, BLS / BEA / FRED calendar 720, Nasdaq 240, values 240). **watch**: every tick, fetching only a series whose release just passed — every **2 min** for up to **60 min**. All in `config/news.toml`, editable in Settings. One cycle of each at a time: a Refresh during one is skipped. |
-| xfeed_svc | The loop wakes every **5 s** (`[poller] tick_s`) to beat its heartbeat and decide whether a cycle is due: one starts when the last one ENDED at least `interval_s` (**60 s**, minimum 30, re-read every tick) ago, as a background task, never doubled. A cycle polls each watched account in turn (`account_gap_s` 1.0 apart), pages back at most `max_pages` (25) at `page_gap_s` 1.0, and backs off 60/120/300 s after an error. Everything else is on demand: `add_account`, `remove_account`, `set_group` and `query` on `cmd:xfeed`. |
+| xfeed_svc | The loop wakes every **5 s** (`[poller] tick_s`) to beat its heartbeat and decide whether a cycle is due: one starts when the last one ENDED at least `interval_s` (**60 s**, minimum 30, re-read every tick) ago, as a background task, never doubled. A cycle polls each watched account in turn (`account_gap_s` 1.0 apart), pages back at most `max_pages` (25) at `page_gap_s` 1.0, and backs off 60/120/300 s after an error (an unexpected fault in one account's poll is counted and recorded on it as `internal error`, with the same backoff). Every cycle ends by republishing both views, so their freshness stamp moves even when no account was due. Everything else is on demand: `add_account`, `remove_account`, `set_group` (these three on the stream's slow lane, so a `query` never waits behind a poll's account lock) and `query` on `cmd:xfeed`. |
 | blog_svc | The loop wakes every **30 s** (`TICK_S`) to beat its heartbeat and re-read the interval. **At start**: repair the store, rebuild every entry page on the site, publish the two list views. **Then every 30 min** (`[site] republish_min` in `config/blog.toml`, 1 to 1440, counted from the END of the last pass): the site rebuild again, which rewrites only what differs from the store, and the two views again. A pass that fails is retried at the next wake. Everything else is on demand, when the Blog page sends a command. |
 | /ES and /NQ chain feed | Not a service: a capture on the operator's PC, every **300 s** on the epoch clock (`[capture] interval_sec` in `config/futures_chain.toml`) from **06:00** Central on the day of an expiry to **15:00** Central, Monday to Friday (`[session]`), then one ssh to vps2 per capture. `options_svc` handles each on arrival (`cmd:futures_chain`) and its **stopped-capture watch** runs each 30 s scheduler tick, with no NYSE gate. No Schwab or proxy call. See *The /ES and /NQ chain feed*. |
 

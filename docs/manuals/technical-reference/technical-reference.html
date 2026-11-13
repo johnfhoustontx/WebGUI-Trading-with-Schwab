@@ -537,7 +537,7 @@ Highcharts license. This is a licensing prerequisite, not a technical one.</p>
 <tbody>
 <tr>
 <td><strong>Redis running on <code>:6379</code></strong></td>
-<td><code>sudo systemctl enable --now redis-server</code>. It is the Tier-3 cache, pub/sub, and command bus — <strong>without it none of the seven services can publish and every page shows a "Waiting for … service" placeholder.</strong> It is a <strong>system</strong> unit, so a <code>systemctl --user</code> stop of the stack cannot reach it: it survives a Stop All by construction, not by a filter.</td>
+<td><code>sudo systemctl enable --now redis-server</code>. It is the Tier-3 cache, pub/sub, and command bus — <strong>without it none of the eight services can publish and every page shows a "Waiting for … service" placeholder.</strong> It is a <strong>system</strong> unit, so a <code>systemctl --user</code> stop of the stack cannot reach it: it survives a Stop All by construction, not by a filter.</td>
 <td>Required</td>
 </tr>
 <tr>
@@ -869,10 +869,10 @@ L 82.8 159.84
     <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="259.2" y="90.898242" transform="rotate(-0 259.2 90.898242)">:8100, starts first</text>
    </g>
    <g id="deploy-units-text_6">
-    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="424.8" y="76.297852" transform="rotate(-0 424.8 76.297852)">Seven services</text>
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="424.8" y="76.297852" transform="rotate(-0 424.8 76.297852)">Eight services</text>
    </g>
    <g id="deploy-units-text_7">
-    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="424.8" y="90.897891" transform="rotate(-0 424.8 90.897891)">:8210 to :8217</text>
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="424.8" y="90.897891" transform="rotate(-0 424.8 90.897891)">:8210 to :8219</text>
    </g>
    <g id="deploy-units-text_8">
     <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #3c3489" x="601.2" y="76.297852" transform="rotate(-0 601.2 76.297852)">webgui :8500</text>
@@ -959,7 +959,7 @@ GEX collection and the raw feed</em> below).</p>
 <tbody>
 <tr>
 <td><code>systemctl --user start trading-prod.target</code></td>
-<td>Proxy + 7 services + webgui + webgui_live. Also starts at boot.</td>
+<td>Proxy + 8 services + webgui + webgui_live. Also starts at boot.</td>
 </tr>
 <tr>
 <td><code>systemctl --user stop trading-prod.target</code></td>
@@ -1639,7 +1639,7 @@ z
 <p>Ports come from <code>config/ports.toml</code> via <code>repo_paths.py</code> — never hard-coded.</p>
 <blockquote>
 <p><strong>These are the <em>prod</em> profile.</strong> A <strong>dev</strong> checkout offsets the <code>[services]</code>
-ports to 9210–9213 and 9215–9217 and the web GUI to 9500, uses Redis <strong>db 1</strong> instead of db 0,
+ports to 9210–9213, 9215–9217 and 9219 and the web GUI to 9500, uses Redis <strong>db 1</strong> instead of db 0,
 and starts <strong>no proxy of its own</strong> — it borrows prod's on 8100, because the Schwab
 OAuth refresh token is a single rotating credential that two proxies would
 invalidate for each other. Identity comes from the gitignored
@@ -9049,7 +9049,7 @@ the source; this table is a summary of them.</p>
 </tr>
 <tr>
 <td>xfeed_svc</td>
-<td>The loop wakes every <strong>5 s</strong> (<code>[poller] tick_s</code>) to beat its heartbeat and decide whether a cycle is due: one starts when the last one ENDED at least <code>interval_s</code> (<strong>60 s</strong>, minimum 30, re-read every tick) ago, as a background task, never doubled. A cycle polls each watched account in turn (<code>account_gap_s</code> 1.0 apart), pages back at most <code>max_pages</code> (25) at <code>page_gap_s</code> 1.0, and backs off 60/120/300 s after an error. Everything else is on demand: <code>add_account</code>, <code>remove_account</code>, <code>set_group</code> and <code>query</code> on <code>cmd:xfeed</code>.</td>
+<td>The loop wakes every <strong>5 s</strong> (<code>[poller] tick_s</code>) to beat its heartbeat and decide whether a cycle is due: one starts when the last one ENDED at least <code>interval_s</code> (<strong>60 s</strong>, minimum 30, re-read every tick) ago, as a background task, never doubled. A cycle polls each watched account in turn (<code>account_gap_s</code> 1.0 apart), pages back at most <code>max_pages</code> (25) at <code>page_gap_s</code> 1.0, and backs off 60/120/300 s after an error (an unexpected fault in one account's poll is counted and recorded on it as <code>internal error</code>, with the same backoff). Every cycle ends by republishing both views, so their freshness stamp moves even when no account was due. Everything else is on demand: <code>add_account</code>, <code>remove_account</code>, <code>set_group</code> (these three on the stream's slow lane, so a <code>query</code> never waits behind a poll's account lock) and <code>query</code> on <code>cmd:xfeed</code>.</td>
 </tr>
 <tr>
 <td>blog_svc</td>
