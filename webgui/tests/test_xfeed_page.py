@@ -533,3 +533,25 @@ def test_nothing_that_sends_is_drawn_where_this_process_may_not_enqueue(monkeypa
     assert not _labelled(bus, xfeed.LOAD_OLDER)
     assert not [e for e in _new_elements(bus.before) if getattr(e, "_xfeed_type", None)]
     assert bus.sent == []
+
+
+# ── the filter card is rebuilt only when what it shows changes (final review A5)
+def _type_options(bus):
+    return [e for e in _new_elements(bus.before) if getattr(e, "_xfeed_type", None) is not None]
+
+
+def test_a_republish_that_only_moves_checked_times_does_not_rebuild_the_filters(monkeypatch):
+    bus = _render(monkeypatch, _views([_post(1)]))
+    first = {e.id for e in _type_options(bus)}
+    assert len(first) == 4
+    moved = _accounts_view()
+    for a in moved["accounts"]:
+        a["last_checked_at"] += 2_000          # every poll moves this, ~every 2 s
+        a["last_ok_at"] += 2_000
+    bus.page._take_accounts(moved)
+    assert {e.id for e in _type_options(bus)} == first     # nothing redrawn
+
+    counted = _accounts_view(counts={"reuters": 4, "zerohedge": 3})
+    bus.page._take_accounts(counted)                        # a count the chips show did move
+    assert {e.id for e in _type_options(bus)}.isdisjoint(first)
+    assert len({e.id for e in _type_options(bus)} - first) == 4

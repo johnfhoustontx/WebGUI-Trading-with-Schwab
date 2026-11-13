@@ -114,7 +114,7 @@ class XFeedPage:
         self.lines = {}               # key -> (row, its line) of the painted posts
         self.list_card, self.last_painted = None, None
         self.painted_new = set()
-        self.acct_sig, self.acct_status = None, {}
+        self.acct_sig, self.acct_status, self.filter_sig = None, {}, None
         self.collapsed_groups = set()
         self.stale = False
         self.search = self.group_box = self.type_box = self.chip_box = None
@@ -483,6 +483,12 @@ class XFeedPage:
         if self.group_box is None:
             return
         tabs = xv.group_tabs(self.accounts_view or {})
+        counts = self._counts()
+        mine = [a for a in self._accounts() if xp.in_group(a, self.f["group"])]
+        sig = xp.filters_sig(self.f, tabs, mine, counts)
+        if sig == self.filter_sig:
+            return                          # an account poll moved only what the card does not show
+        self.filter_sig = sig
         self.group_box.clear()
         self.group_box.set_visibility(bool(tabs))
         for tab in tabs:
@@ -492,8 +498,6 @@ class XFeedPage:
         for key, text in xp.TYPE_OPTIONS:
             opt = self._option(self.type_box, text, self.f["type"] == key, {"type": key})
             opt._xfeed_type = key
-        counts = self._counts()
-        mine = [a for a in self._accounts() if xp.in_group(a, self.f["group"])]
         self.chip_box.clear()
         with self.chip_box:
             self._chip("All", sum(counts.get(a.get("handle"), 0) for a in mine),
@@ -559,9 +563,7 @@ class XFeedPage:
         names = self._group_names()
         if self.handle_in is not None:
             self.group_in.set_autocomplete(names)
-        sig = (tuple((a.get("handle"), a.get("display_name"), a.get("avatar_url"),
-                      a.get("group_name"), a.get("last_error")) for a in accounts),
-               frozenset(self.collapsed_groups), self.accounts_view is None)
+        sig = xp.accounts_sig(accounts, self.collapsed_groups, self.accounts_view is None)
         if sig == self.acct_sig:
             self._refresh_checked(now)      # only the "checked …" times moved
             return

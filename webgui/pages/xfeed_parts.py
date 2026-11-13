@@ -248,6 +248,23 @@ def in_group(account, group) -> bool:
     return not name if group == "" else name.lower() == group.lower()
 
 
+def filters_sig(f, tabs, mine, counts) -> tuple:
+    """Everything the filter card shows: the choice, the group tabs and the
+    chips' handles and counts. Every account poll republishes the accounts view
+    (its ``last_checked_at`` moves), so the page redraws the card only when this
+    changes."""
+    return (tuple(sorted(f.items(), key=lambda kv: kv[0])),
+            tuple((t.get("key"), t.get("label"), t.get("count")) for t in tabs),
+            tuple((a.get("handle"), counts.get(a.get("handle"), 0)) for a in mine))
+
+
+def accounts_sig(accounts, collapsed, cold) -> tuple:
+    """Everything the accounts card draws except the "checked …" times."""
+    return (tuple((a.get("handle"), a.get("display_name"), a.get("avatar_url"),
+                   a.get("group_name"), a.get("last_error")) for a in accounts),
+            frozenset(collapsed), cold)
+
+
 def watching(n) -> str:
     return f"Watching {n} account{'' if n == 1 else 's'}. New posts appear here as they are posted."
 
