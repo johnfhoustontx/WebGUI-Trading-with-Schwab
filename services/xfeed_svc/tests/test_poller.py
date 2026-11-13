@@ -486,3 +486,65 @@ def test_stop_mid_cycle_polls_no_further_accounts_and_reports_no_change_for_them
     fx.calls.clear()
     poller.run_cycle(lambda: None)
     assert len(fx.calls) == 3   # resume lets a later cycle poll everyone
+
+
+# -- a fault inside poll_account (final review A2) ------------------------------
+
+def test_a_lone_surrogate_in_a_status_is_stored_as_the_replacement_character():
+    bad = {**st(id="1"), "text": "hi \ud83d"}
+    bad["author"] = {**bad["author"], "name": "N \ud83d"}
+    repo = baselined([bad], 0)                     # take_baseline: upsert + insert, no UnicodeEncodeError
+    assert repo.get_account("acct")["display_name"] == "N �"
+    now = 2 * MIN
+    new = {**st(id="2", created=now - 1000), "text": "new \ud83d"}
+    r = poll(repo, StubFx([[new, bad]]), now)
+    assert r["status"] == "ok"
+    assert [p["text"] for p in r["new_posts"]] == ["new �"]
+    assert repo.get_account("acct")["last_ok_at"] == now
+
+
+def test_an_unexpected_poll_fault_is_recorded_backed_off_and_counted(monkeypatch):
+    from services import _degrade
+    from services.xfeed_svc import poller as poller_mod
+
+    repo = baselined([st(id="1")], 0)
+    clock = [MIN]
+
+    def boom(*a, **k):
+        raise RuntimeError("secret-handle exploded")
+
+    monkeypatch.setattr(poller_mod, "poll_account", boom)
+    _degrade.reset()
+    changes = []
+    make_poller(repo, StubFx([]), clock).run_cycle(lambda: changes.append(1))
+    a = repo.get_account("acct")
+    assert a["last_error"] == "internal error"
+    assert a["fail_count"] == 1
+    assert a["last_checked_at"] == MIN
+    assert a["next_check_at"] == MIN + 60_000          # the first backoff step
+    assert _degrade.counts()["xfeed.poller"] == 1
+    assert changes == [1]
+
+
+def test_a_fault_recording_the_poll_fault_never_breaks_the_cycle(monkeypatch):
+    from services import _degrade
+    from services.xfeed_svc import poller as poller_mod
+
+    repo = Store(":memory:")
+    for h in ("a", "b"):
+        take_baseline(repo, StubFx([[st(id=h, author=h)]]), h, now=0)
+    polled = []
+
+    def boom(store, fx, account, **k):
+        polled.append(account["handle"])
+        raise RuntimeError("poll exploded")
+
+    def record_boom(*a, **k):
+        raise RuntimeError("db exploded")
+
+    monkeypatch.setattr(poller_mod, "poll_account", boom)
+    monkeypatch.setattr(repo, "record_check", record_boom)
+    _degrade.reset()
+    make_poller(repo, StubFx([]), [MIN]).run_cycle(lambda: None)    # must not raise
+    assert polled == ["a", "b"]                                   # the second account still ran
+    assert _degrade.counts()["xfeed.poller"] == 4                 # each poll fault + each record fault

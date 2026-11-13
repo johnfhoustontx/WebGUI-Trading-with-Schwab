@@ -22,10 +22,14 @@ import logging
 import threading
 import time
 
-from services.xfeed_svc import config
-from services.xfeed_svc.mapping import map_status
+from services import _degrade
+from services.xfeed_svc import _trace, config
+from services.xfeed_svc.mapping import map_status, scrub
 
 log = logging.getLogger("xfeed_svc.poller")
+
+AREA = "xfeed.poller"
+INTERNAL_ERROR = "internal error"
 
 _MIN_INTERVAL_S = 30
 
@@ -97,11 +101,11 @@ def _profile_from(results, handle):
     for s in results:
         author = s.get("author") or {}
         if (author.get("screen_name") or "").lower() == handle:
-            return {"display_name": author.get("name"), "avatar_url": author.get("avatar_url") or None}
+            return scrub({"display_name": author.get("name"), "avatar_url": author.get("avatar_url") or None})
     for s in results:
         rt = s.get("reposted_by") or {}
         if (rt.get("screen_name") or "").lower() == handle:
-            return {"display_name": rt.get("name"), "avatar_url": rt.get("avatar_url") or None}
+            return scrub({"display_name": rt.get("name"), "avatar_url": rt.get("avatar_url") or None})
     return {"display_name": handle, "avatar_url": None}
 
 
@@ -276,6 +280,20 @@ class Poller:
                 self._polled_since_start.add(handle)
             return r
 
+    def _record_fault(self, account, exc) -> None:
+        """An unexpected fault inside ``poll_account`` (its write rolled back): count
+        it and record a failed check with a backoff, so the account shows an error
+        and is not re-polled into the same fault every cycle. A fault while
+        recording is counted too and never breaks the cycle."""
+        _degrade.degraded(AREA, detail=_trace.where("polling an account", exc), exc_info=False)
+        try:
+            now = self._now_ms()
+            self._store.record_check(
+                account["handle"], now=now, ok=False, error=INTERNAL_ERROR, not_found_streak=0,
+                next_check_at=now + backoff_ms((account.get("fail_count") or 0) + 1, self._cfg()["backoff_s"]))
+        except Exception as exc2:
+            _degrade.degraded(AREA, detail=_trace.where("recording a poll fault", exc2), exc_info=False)
+
     def run_cycle(self, on_change) -> None:
         if not self._cycle_guard.acquire(blocking=False):
             return  # a cycle is already running
@@ -298,8 +316,8 @@ class Poller:
                                          sleep=self._sleep, force_catchup=force_catchup)
                         if r["status"] == "ok":
                             self._polled_since_start.add(handle)
-                    except Exception:
-                        log.exception("poll @%s failed", handle)
+                    except Exception as exc:
+                        self._record_fault(account, exc)
                 try:
                     on_change()
                 except Exception:

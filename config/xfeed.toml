@@ -1,7 +1,9 @@
 # X accounts feed - how xfeed_svc polls the FxEmbed API and what the page shows.
 # Read through services/xfeed_svc/config.py (built-in defaults <- this file <-
 # config/local/xfeed.toml). Edit here (or in Settings -> Configuration). The
-# poller re-reads this file every tick, so a saved change applies with no restart.
+# poller re-reads this file every tick, so a saved change applies with no restart -
+# except [fxembed]: the FxEmbed client is built once at start, so those keys need
+# an xfeed_svc restart.
 # A missing key or a bad value reads as the shipped value below, never as an error.
 
 [fxembed]

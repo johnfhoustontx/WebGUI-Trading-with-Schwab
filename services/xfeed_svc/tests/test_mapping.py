@@ -87,3 +87,32 @@ def test_extract_cashtags_returns_unique_uppercase_tickers_in_order():
     assert extract_cashtags("Buy $nvda and $TSLA, not $5 or $NVDA again") == ["NVDA", "TSLA"]
     assert extract_cashtags("$BRK.B up") == ["BRK.B"]
     assert extract_cashtags("") == []
+
+
+def _has_surrogate(value) -> bool:
+    try:
+        json.dumps(value, ensure_ascii=False).encode("utf-8")
+    except UnicodeEncodeError:
+        return True
+    return False
+
+
+def test_a_lone_surrogate_becomes_the_replacement_character_everywhere_incl_raw():
+    # json.loads yields a lone "\ud83d" from FxEmbed's text; Node writes U+FFFD for it,
+    # and SQLite cannot store it at all (UnicodeEncodeError), so map_status scrubs it.
+    status = json.loads(
+        '{"id": "1", "url": "https://x.com/acct/status/1", "text": "hi \ud83d $NVDA",'
+        ' "author": {"screen_name": "acct", "name": "A \ud83d", "avatar_url": null},'
+        ' "created_timestamp": 1, "quote": {"text": "q \ud83d", "author": {"name": "Q", "screen_name": "q"}},'
+        ' "media": {"all": [{"type": "photo", "url": "https://p/1.jpg", "altText": "alt \ud83d"}]},'
+        ' "extra": ["\ud83d", {"\ud83d key": 1}], "ok": "pair \ud83d\ude00 kept"}')
+    p = map_status(status, "acct")
+    assert p["text"] == "hi � $NVDA"
+    assert p["cashtags"] == ["NVDA"]
+    assert p["author_name"] == "A �"
+    assert p["quote"]["text"] == "q �"
+    assert p["media"][0]["alt"] == "alt �"
+    assert p["raw"]["text"] == "hi � $NVDA"
+    assert p["raw"]["extra"] == ["�", {"� key": 1}]
+    assert p["raw"]["ok"] == "pair \U0001F600 kept"        # a valid pair is untouched
+    assert not _has_surrogate(p)

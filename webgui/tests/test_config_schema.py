@@ -1163,3 +1163,14 @@ def test_live_order_accounts_are_read_only_and_their_digits_uncatalogued():
     assert not cs.is_readonly(cfg, ("mode",))
     (mode,) = [f for s in cfg.sections for f in s.fields if f.key == "mode"]
     assert mode.choices == ("off", "preview", "live")
+
+
+def test_the_xfeed_fxembed_keys_restart_the_xfeed_service_and_the_rest_need_none():
+    """xfeed_svc builds its FxEmbed client ONCE from a config snapshot, so a change
+    under [fxembed] only applies after a restart; the poller, views and page keys
+    are re-read every tick and must not offer one (final review A3)."""
+    cfg = cs.BY_NAME["xfeed.toml"]
+    for sec in cfg.sections:
+        for f in sec.fields:
+            want = (cs.XFEED,) if f.key.startswith("fxembed.") else ()
+            assert tuple(cs.restart_for(cfg, sec, f)) == want, f.key

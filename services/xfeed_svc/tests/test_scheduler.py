@@ -111,12 +111,12 @@ def test_publishes_views_at_start(env, monkeypatch):
     poller, rt, published, clock, _ = env
     order = []
     poller.order = order
-    poller.notify = False      # the cycle publishes nothing, so only the start publish can
+    poller.notify = False      # the cycle reports no change: only the start and end-of-cycle publishes
     monkeypatch.setattr(scheduler.handlers, "publish_all",
                         lambda bus, r: (order.append("publish"), published.append((bus, r))))
     drive(clock, lambda i: stop())
-    assert published == [("BUS", rt)]
-    assert order == ["publish", "cycle"]      # views are out before the first cycle starts
+    assert published == [("BUS", rt), ("BUS", rt)]
+    assert order == ["publish", "cycle", "publish"]   # views are out before the first cycle starts
 
 
 def test_first_cycle_runs_immediately(env):
@@ -216,7 +216,7 @@ def test_a_failing_first_publish_does_not_kill_the_loop(env, monkeypatch):
     _degrade.reset()
     drive(clock, lambda i: stop())
     assert poller.started == 1
-    assert _degrade.counts()[scheduler.AREA] == 2    # the start publish and the cycle's on_change
+    assert _degrade.counts()[scheduler.AREA] == 3    # the start publish, the cycle's on_change, its end publish
 
 
 @pytest.mark.parametrize("bad", [0, -3, "soon", None, True, float("nan")])
@@ -286,3 +286,30 @@ def test_cancelling_the_loop_cancels_a_live_cycle_and_stops_the_poller(env):
     assert seen["done"] and seen["cancelled"]
     assert seen["stopped"] == 1
     assert seen["leftover"] == []                  # the cycle task was cancelled and awaited
+
+
+def test_every_cycle_republishes_the_views_even_with_no_account_due(env):
+    """Zero accounts (or all backing off): no poll calls on_change, yet the views'
+    :ts stamp must move every cycle or the page reads the service as not answering."""
+    poller, rt, published, clock, _ = env     # interval 60, tick 5
+    poller.notify = False                     # nothing due: the cycle reports no change
+    drive(clock, lambda i: stop() if i == 30 else None)    # 150 fake seconds: 3 cycles
+    assert poller.started == 3
+    assert published == [("BUS", rt)] * 4     # the start publish + one per cycle
+
+
+def test_a_failing_post_cycle_publish_is_counted_and_the_loop_survives(env, monkeypatch):
+    poller, rt, published, clock, _ = env
+    poller.notify = False
+    calls = {"n": 0}
+
+    def flaky(bus, r):
+        calls["n"] += 1
+        if calls["n"] > 1:                    # the start publish works; the cycle's fail
+            raise RuntimeError("bus down")
+
+    monkeypatch.setattr(scheduler.handlers, "publish_all", flaky)
+    _degrade.reset()
+    drive(clock, lambda i: stop() if i == 14 else None)
+    assert poller.started == 2
+    assert _degrade.counts()[scheduler.AREA] == 2

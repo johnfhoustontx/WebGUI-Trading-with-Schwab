@@ -6,6 +6,8 @@ accounts) on the default executor as a background task, so the loop keeps beatin
 while one runs. A running cycle is never doubled, the interval is measured from when
 the last cycle ENDED, and the interval is re-read from config every tick, so an edit
 applies without a restart. Cancelling the loop cancels and awaits the cycle task.
+Every cycle ends by republishing the views, so their freshness stamp moves even
+when no account was due.
 
 A fault in the first publish, a cycle or the config read is counted
 (``_degrade.degraded``) and never escapes the loop.
@@ -63,11 +65,23 @@ async def loop(bus) -> None:
 
     async def run_cycle(rt):
         try:
-            await _to_thread(rt.poller.run_cycle, lambda: on_change(rt))
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            _note("running a poll cycle", exc)
+            try:
+                await _to_thread(rt.poller.run_cycle, lambda: on_change(rt))
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                _note("running a poll cycle", exc)
+            # Publish once per cycle whatever it did. ``on_change`` only fires for a
+            # polled account, so with no account due (an empty database, or every
+            # account backing off) nothing else would refresh the views' ``:ts``
+            # stamp and the page would read a healthy service as not answering.
+            # The writes are ``skip_unchanged``: only ``:ts`` moves when nothing did.
+            try:
+                await _to_thread(handlers.publish_all, bus, rt)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                _note("publishing after a poll cycle", exc)
         finally:
             state["last_end"] = _monotonic()
 

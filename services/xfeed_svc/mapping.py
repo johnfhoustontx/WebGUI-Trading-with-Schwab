@@ -72,12 +72,36 @@ def _count(value):
     return 0 if value is None else value
 
 
+def _scrub_str(s):
+    try:
+        s.encode("utf-8")
+        return s
+    except UnicodeEncodeError:
+        # A lone UTF-16 surrogate (json.loads keeps one from FxEmbed's JSON) becomes
+        # U+FFFD, as Node writes it; a valid pair round-trips unchanged.
+        return s.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
+
+
+def scrub(value):
+    """``value`` with every string (dict keys included) free of lone surrogates,
+    which SQLite cannot store (``UnicodeEncodeError``)."""
+    if isinstance(value, str):
+        return _scrub_str(value)
+    if isinstance(value, dict):
+        return {scrub(k): scrub(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [scrub(v) for v in value]
+    return value
+
+
 def map_status(status, watched):
     """Map an FxEmbed status into the post dict for the watched account.
 
     Returns None for other people's tweets and for replies to other people
-    (only self-thread replies are kept).
+    (only self-thread replies are kept). Every string, ``raw`` included, is
+    scrubbed of lone surrogates first.
     """
+    status = scrub(status)
     author = status.get("author") or {}
     if status.get("reposted_by"):
         kind = "repost"

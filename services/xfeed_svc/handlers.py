@@ -1,9 +1,13 @@
 """``cmd:xfeed``: the page's four commands, one answer key per request, two views.
 
     add_account      baseline a handle (slow: it fetches from FxEmbed)
-    remove_account   stop watching a handle
-    set_group        change or clear a handle's group
+    remove_account   stop watching a handle (slow: waits on the account's lock)
+    set_group        change or clear a handle's group (slow: waits on the lock)
     query            one filtered page of the feed (filters, "load more")
+
+The three that take an account's lock run on the stream's slow lane: the poller
+holds that lock for a whole poll of the account, and on the stream lane every
+query from every tab would queue behind them and time out.
 
 Every command carries a ``request_id`` (32 hex chars, made by the page) and is
 ANSWERED on ``cache:xfeed:answer:{request_id}`` - one key per request, with a TTL
@@ -31,7 +35,7 @@ CACHE_ACCOUNTS = "cache:xfeed:accounts"
 EVENT_ACCOUNTS = "events:xfeed:accounts"
 
 COMMANDS = ("add_account", "remove_account", "set_group", "query")
-SLOW = frozenset({"add_account"})
+SLOW = frozenset({"add_account", "remove_account", "set_group"})
 
 RESTARTED = "The X feed service restarted - try again."
 _REQUEST_ID = re.compile(r"^[0-9a-f]{32}$")

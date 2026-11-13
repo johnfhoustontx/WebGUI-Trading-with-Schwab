@@ -377,5 +377,5 @@ def test_resolve_group_edge_cases():
 
 def test_constants():
     assert handlers.COMMANDS == ("add_account", "remove_account", "set_group", "query")
-    assert handlers.SLOW == frozenset({"add_account"})
+    assert handlers.SLOW == frozenset({"add_account", "remove_account", "set_group"})   # each waits on an account lock
     assert handlers.answer_key("ab") == "cache:xfeed:answer:ab"

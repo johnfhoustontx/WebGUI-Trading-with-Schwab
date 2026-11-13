@@ -3436,7 +3436,9 @@ _ETF_HOLDINGS = ConfigFile(
 # The X accounts feed — config/xfeed.toml
 # ─────────────────────────────────────────────────────────────────────────────
 # xfeed_svc re-reads the file (mtime-cached) on every poller tick, so a saved
-# change applies on the next tick with no restart.
+# change applies on the next tick with no restart - EXCEPT [fxembed]: the
+# FxEmbed client is built once from a config snapshot (runtime.get), so those
+# keys need an xfeed_svc restart.
 _XFEED = ConfigFile(
     name="xfeed.toml", title="X feed", icon="alternate_email",
     summary="How the X accounts feed polls the FxEmbed API, and what its page shows.",
@@ -3450,7 +3452,7 @@ _XFEED = ConfigFile(
                   "A 404 for a real account is retried this many times before it is counted.",
                   kind="int", min=0, max=10, step=1),
             Field("fxembed.retry_delay_s", "Delay between retries", "", kind="float", unit="s", min=0, max=30, step=0.1),
-        )),
+        ), restart=(XFEED,)),
         Section("Poller", "How often and how patiently the accounts are read.", (
             Field("poller.interval_s", "Poll every", "Below 30 seconds is read as 30.",
                   kind="int", unit="s", min=30, max=3600, step=1),
