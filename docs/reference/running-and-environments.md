@@ -265,7 +265,7 @@ Rationale: [design](../plans/2026-08-08-dev-prod-environments-design.md).
 | Redis (`:6379`) | **db 0** | **db 1** |
 | SQLite, `logs/`, `webgui/data` | its own | its own |
 | Schedulers · Claude · notifications | live | **off** |
-| Units | `trading-prod.target` (10 units) | `trading-dev.target` (9 — no proxy, but it DOES get `webgui_live`) |
+| Units | `trading-prod.target` (11 units) | `trading-dev.target` (10 — no proxy, but it DOES get `webgui_live`) |
 
 Prod's ports are byte-identical to the pre-environment numbers, so prod is a
 relocation, not a reconfiguration. Dev borrows prod's proxy because the Schwab

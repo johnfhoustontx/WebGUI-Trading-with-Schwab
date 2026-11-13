@@ -963,7 +963,7 @@ GEX collection and the raw feed</em> below).</p>
 </tr>
 <tr>
 <td><code>systemctl --user stop trading-prod.target</code></td>
-<td>Stops all ten, the public live screens included. <strong>Redis survives</strong> — it is a system unit this cannot reach.</td>
+<td>Stops all eleven, the public live screens included. <strong>Redis survives</strong> — it is a system unit this cannot reach.</td>
 </tr>
 <tr>
 <td><code>systemctl --user restart trading-prod-options_svc</code></td>
@@ -980,7 +980,8 @@ GEX collection and the raw feed</em> below).</p>
 </tbody>
 </table>
 <blockquote>
-<p>The nine processes must stay <strong>separate OS processes</strong>. Merging services into one
+<p>The eleven processes in prod (the proxy, the eight services, webgui and webgui_live;
+ten in dev, which runs no proxy) must stay <strong>separate OS processes</strong>. Merging services into one
 Python process would re-introduce the top-level module-name collisions
 (<code>config</code> / <code>scoring</code> / <code>notifier</code> / <code>src</code>) that the 3-tier split exists to prevent.</p>
 </blockquote>
