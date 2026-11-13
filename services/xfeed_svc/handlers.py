@@ -15,12 +15,17 @@ tickers) and ``cache:xfeed:accounts`` (watched accounts, counts, poll interval,
 page tunables), written ``skip_unchanged``.
 """
 import logging
+import os
 import re
+import traceback
 
+from services import _degrade
 from services.xfeed_svc import config, runtime
 from services.xfeed_svc.mapping import normalize_handle
 
 log = logging.getLogger("xfeed_svc.handlers")
+
+AREA = "xfeed.handlers"
 
 CACHE_LATEST = "cache:xfeed:latest"
 EVENT_LATEST = "events:xfeed:latest"
@@ -192,28 +197,63 @@ _DISPATCH = {
 }
 
 
-def handle_command(bus, command) -> None:
-    args = command.args or {}
-    request_id = args.get("request_id")
-    if not _valid_id(request_id):
-        log.warning("xfeed command %r ignored: bad request_id", command.type)
-        return
-    fn = _DISPATCH.get(command.type)
-    if fn is None:
-        log.warning("xfeed command %r ignored: unknown", command.type)
-        return
+def _where(doing, exc) -> str:
+    """Where a fault was, never what it said (``str(exc)`` can quote a handle or group).
+    Same shape as ``blog_svc._trace.where``."""
+    frames = traceback.extract_tb(exc.__traceback__, limit=-4)
+    trail = " < ".join(f"{os.path.basename(f.filename)}:{f.lineno} {f.name}" for f in reversed(frames))
+    return f"{doing}: {type(exc).__name__} at {trail or 'no frame'}"
+
+
+def _safe_answer(bus, request_id, command, error) -> None:
+    """Answer a fault; when the fault IS the bus there is nobody to tell, so count it."""
     try:
+        _answer(bus, request_id, command, False, error)
+    except Exception as exc:
+        _degrade.degraded(AREA, detail=_where("answering after a fault", exc), exc_info=False)
+
+
+def _read(command):
+    """(type, args, request_id) with request_id None unless valid. May raise on a malformed command."""
+    args = command.args
+    if not isinstance(args, dict):
+        args = {}
+    request_id = args.get("request_id")
+    return command.type, args, request_id if _valid_id(request_id) else None
+
+
+def handle_command(bus, command) -> None:
+    """One ``cmd:xfeed`` command. NEVER raises: a fault is counted, answered and kept
+    from the dead-letter list."""
+    request_id = None
+    type_ = ""
+    try:
+        type_, args, request_id = _read(command)
+        if request_id is None:
+            log.warning("xfeed: a %s command with no usable request id was dropped", _kind(type_))
+            return
+        fn = _DISPATCH.get(type_)
+        if fn is None:
+            log.warning("xfeed: an unknown command (%s) was dropped", _kind(type_))
+            _safe_answer(bus, request_id, _kind(type_), "Unknown command")
+            return
         fn(bus, runtime.get(), request_id, args)
-    except Exception:
-        log.exception("xfeed command %s failed", command.type)
-        try:
-            _answer(bus, request_id, command.type, False, "Server error")
-        except Exception:
-            log.exception("xfeed could not answer %s", command.type)
+    except Exception as exc:
+        _degrade.degraded(AREA, detail=_where("handling an xfeed command", exc), exc_info=False)
+        if request_id:
+            _safe_answer(bus, request_id, _kind(type_), "Server error")
+
+
+def _kind(type_) -> str:
+    """The command type for a log line or an answer: known names whole, anything else cut short."""
+    return type_ if type_ in COMMANDS else str(type_)[:20]
 
 
 def on_dropped(bus, command, why) -> None:
-    request_id = (command.args or {}).get("request_id")
-    if not _valid_id(request_id):
-        return
-    _answer(bus, request_id, command.type, False, RESTARTED)
+    """The scaffold's notice that a command will never run. Never raises."""
+    try:
+        type_, _args, request_id = _read(command)
+        if request_id:
+            _safe_answer(bus, request_id, _kind(type_), RESTARTED)
+    except Exception as exc:
+        _degrade.degraded(AREA, detail=_where("answering a dropped command", exc), exc_info=False)

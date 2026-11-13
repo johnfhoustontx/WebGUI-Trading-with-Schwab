@@ -9,6 +9,7 @@ import uuid
 
 import pytest
 
+from services import _degrade
 from services.xfeed_svc import config, handlers, runtime
 from services.xfeed_svc.poller import Poller
 from services.xfeed_svc.store import Store
@@ -285,8 +286,49 @@ def test_unexpected_failure_is_answered_not_raised(bus, make):
     def boom(**kw):
         raise RuntimeError("db gone")
     rt.store.query_feed = boom
+    _degrade.reset()
     r = send(bus, "query")
     assert r["ok"] is False and r["error"] == "Server error"
+    assert _degrade.counts() == {"xfeed.handlers": 1}
+
+
+def test_fault_log_does_not_quote_the_exception(bus, make, caplog):
+    rt = make()
+
+    def boom(**kw):
+        raise RuntimeError("secret-handle-text")
+    rt.store.query_feed = boom
+    caplog.set_level("DEBUG")
+    send(bus, "query")
+    assert "secret-handle-text" not in caplog.text
+
+
+def test_unknown_command_with_valid_id_is_answered(bus, make):
+    make()
+    r = send(bus, "bogus" * 10)
+    assert r["ok"] is False and r["error"] == "Unknown command"
+    assert len(r["command"]) <= 20
+
+
+def test_non_dict_args_do_not_raise(bus, make):
+    make()
+    _degrade.reset()
+    cmd = Command(type="query", args={"request_id": rid()})
+    object.__setattr__(cmd, "args", "oops")
+    handlers.handle_command(bus, cmd)
+    handlers.on_dropped(bus, cmd, "restart")
+    assert list(bus._r.scan_iter("cache:xfeed:answer:*")) == []
+
+
+def test_on_dropped_never_raises_and_counts_a_bus_fault(make):
+    make()
+    _degrade.reset()
+
+    class DeadBus:
+        def cache_set(self, *a, **k):
+            raise ConnectionError("down")
+    handlers.on_dropped(DeadBus(), Command(type="query", args={"request_id": rid()}), "restart")
+    assert _degrade.counts() == {"xfeed.handlers": 1}
 
 
 def test_top_tickers_orders_by_count_then_tag_and_skips_gaps():
