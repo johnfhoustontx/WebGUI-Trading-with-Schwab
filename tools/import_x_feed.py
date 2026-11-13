@@ -2,11 +2,14 @@
 
     python tools/import_x_feed.py --source ~/x-news-feed/data/feed.db [--target PATH] [--force]
 
-The source is NEVER written: it is opened with ``mode=ro`` and a consistent copy
-(WAL content included) is taken with ``Connection.backup`` into a temp file; all
-reads come from that copy. The target is refused (exit 2) if it already has any
-``accounts`` row, unless ``--force``, which empties the four tables inside the
-same transaction as the copy (so a failure leaves the old data in place).
+The source is never modified: it is opened with ``mode=ro`` and a consistent
+copy (WAL content included) is taken with ``Connection.backup`` into a temp file;
+all reads come from that copy. (SQLite may still create empty ``-wal`` / ``-shm``
+files beside a WAL-mode source; the database itself is not changed.) The target
+is refused (exit 2) if it already has any ``accounts`` row, unless ``--force``,
+which empties the four tables inside the same transaction as the copy (so a
+failure leaves the old data in place). Any SQLite error is one line on stderr
+and exit 2.
 """
 import argparse
 import pathlib
@@ -60,10 +63,6 @@ def import_db(source: pathlib.Path, target: pathlib.Path, *, force: bool = False
         src = sqlite3.connect(snap)
         dst = sqlite3.connect(target, timeout=30, isolation_level=None)
         try:
-            have = dst.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]
-            if have and not force:
-                raise ImportRefused(
-                    f"target {target} already has {have} account(s); use --force to replace")
             plan = {}
             for t in TABLES:
                 cols = _columns(src, t)
@@ -72,6 +71,11 @@ def import_db(source: pathlib.Path, target: pathlib.Path, *, force: bool = False
                 plan[t] = (cols, src.execute(f"SELECT {', '.join(cols)} FROM {t}").fetchall())
             dst.execute("BEGIN IMMEDIATE")
             try:
+                # Checked under the write lock, so no writer can slip in before the copy.
+                have = dst.execute("SELECT COUNT(*) FROM accounts").fetchone()[0]
+                if have and not force:
+                    raise ImportRefused(
+                        f"target {target} already has {have} account(s); use --force to replace")
                 for t in TABLES:
                     dst.execute(f"DELETE FROM {t}")  # a no-op unless --force
                 counts = {}
@@ -109,6 +113,9 @@ def main(argv=None) -> int:
         counts = import_db(pathlib.Path(args.source), target, force=args.force)
     except ImportRefused as exc:
         print(f"refusing: {exc}", file=sys.stderr)
+        return 2
+    except sqlite3.Error as exc:
+        print(f"import failed, nothing imported: {type(exc).__name__}: {exc}", file=sys.stderr)
         return 2
     print(" ".join(f"{t}={counts[t]}" for t in TABLES))
     return 0

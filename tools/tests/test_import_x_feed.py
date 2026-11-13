@@ -120,3 +120,24 @@ def test_source_wal_content_is_included(tmp_path):
         assert import_x_feed.import_db(p, dst)["settings"] == 1
     finally:
         c.close()
+
+
+def test_a_sqlite_error_exits_2_with_one_line_and_leaves_the_target_alone(src, tmp_path, capsys):
+    dst = tmp_path / "xfeed.db"
+    dst.write_bytes(b"this is not a database, it is sixty-odd bytes of plain text....")
+    before = dst.read_bytes()
+    assert import_x_feed.main(["--source", str(src), "--target", str(dst)]) == 2
+    out = capsys.readouterr()
+    assert out.out == ""
+    lines = out.err.strip().splitlines()
+    assert len(lines) == 1 and "Traceback" not in out.err
+    assert "not a database" in lines[0]
+    assert dst.read_bytes() == before
+
+
+def test_the_non_empty_check_is_inside_the_write_transaction(src, tmp_path):
+    """The target's account count is read under BEGIN IMMEDIATE, so a writer that
+    lands between the check and the copy cannot slip past the refusal."""
+    import inspect
+    body = inspect.getsource(import_x_feed.import_db)
+    assert body.index('BEGIN IMMEDIATE') < body.index('SELECT COUNT(*) FROM accounts')
