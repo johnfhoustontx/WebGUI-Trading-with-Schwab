@@ -7,10 +7,11 @@ so a not-found is retried ``not_found_retries`` times before it is believed.
 
 ``requests``' ``timeout`` bounds each READ, not the request, so a stuck socket
 could hold the poller for ever. Each attempt therefore runs under the same total
-deadline watchdog as ``news_svc.fetch`` (``3 x timeout_s``): a timer that shuts
-the attempt's sockets down, waking whatever read is blocked. The watchdog pieces
-are reused from there, not re-invented. A fresh session per attempt (when none is
-injected) keeps every socket one the watchdog saw opened.
+deadline watchdog as ``news_svc.fetch`` (``3 x timeout_s``, ``shared.http_watchdog``):
+a timer that shuts the attempt's sockets down, waking whatever read is blocked.
+A fresh session per attempt (when none is injected) keeps every socket one the
+watchdog saw opened. An INJECTED session is used unwatched (tests pass a fake), so
+the 3x guard applies only to the default session.
 """
 import json
 import threading
@@ -19,9 +20,7 @@ from urllib.parse import quote
 
 import requests
 
-from services.news_svc import fetch as _wd
-
-_DEADLINE_FACTOR = 3
+from shared import http_watchdog as _wd
 
 
 def _err(msg):
@@ -41,26 +40,22 @@ class FxClient:
     def _get(self, url, headers):
         if self._session is not None:
             return self._session.get(url, headers=headers, timeout=self._timeout)
-        with requests.Session() as s:
-            adapter = _wd._WatchedAdapter()
-            s.mount("http://", adapter)
-            s.mount("https://", adapter)
-            return s.get(url, headers=headers, timeout=self._timeout)
+        return _wd.get(url, headers=headers, timeout=self._timeout)
 
     def _once(self, url):
         headers = {"User-Agent": self._ua, "Accept": "application/json"}
-        watch = _wd._Watch()
-        timer = threading.Timer(float(self._timeout) * _DEADLINE_FACTOR, watch.fire)
+        watch = _wd.Watch()
+        timer = threading.Timer(float(self._timeout) * _wd.DEADLINE_FACTOR, watch.fire)
         timer.name = "xfeed-fx-deadline"
         timer.daemon = True
-        _wd._ACTIVE.watch = watch
+        _wd.ACTIVE.watch = watch
         timer.start()
         r = None
         try:
             try:
                 r = self._get(url, headers)
             finally:
-                _wd._ACTIVE.watch = None
+                _wd.ACTIVE.watch = None
             if watch.expired:                      # a cut body must not pass as a short one
                 return _err("timeout")
             return self._classify(r)

@@ -145,7 +145,7 @@ def _block_live_databases(request, monkeypatch):
 #     production modules hold a persistent ``requests.Session()``, so patching
 #     ``requests.post`` would have missed most callers. The patch is on the
 #     CLASS, so a subclass that does not override ``send`` is covered too
-#     (``news_svc.fetch._WatchedAdapter``, the one ``from requests.adapters
+#     (``shared.http_watchdog.WatchedAdapter``, the one ``from requests.adapters
 #     import HTTPAdapter`` in the repo).
 #   * ``urllib.request.urlopen`` — daily_trade_log reaches the proxy this way
 #     (90-second timeout), and earnings_history / edgar_fundamentals reach out.

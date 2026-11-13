@@ -91,6 +91,7 @@ def test_builds_url_with_replies_and_cursor_sends_user_agent():
     fx.fetch_statuses("nasa", cursor="a b")
     assert s.calls[0]["url"] == "https://api.fxtwitter.com/2/profile/nasa/statuses?with_replies=1&cursor=a%20b"
     assert s.calls[0]["headers"]["User-Agent"] == config.DEFAULTS["fxembed"]["user_agent"]
+    assert s.calls[0]["headers"]["Accept"] == "application/json"
     assert s.calls[0]["timeout"] == 15
 
 
