@@ -244,3 +244,21 @@ def test_concurrent_threads_do_not_error(tmp_path):
     assert errors == []
     assert len(s.query_feed(limit=1000)) == 400
     s.close()
+
+
+def test_failed_write_rolls_back_and_store_stays_usable(repo):
+    bad = make_post(raw={"x": object()})  # json cannot encode it
+    with pytest.raises(TypeError):
+        repo.insert_posts([make_post(), bad])
+    assert repo.query_feed() == []
+    assert repo.insert_posts([make_post()]) == 1
+
+
+def test_default_path_resolves_repo_paths(tmp_path, monkeypatch):
+    import repo_paths
+    target = tmp_path / "sub" / "x.db"
+    monkeypatch.setattr(repo_paths, "XFEED_DB", target)
+    s = Store()
+    s.upsert_account("a", display_name="A", avatar_url=None, now=1)
+    s.close()
+    assert target.exists()

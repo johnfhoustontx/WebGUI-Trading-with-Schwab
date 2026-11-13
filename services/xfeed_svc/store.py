@@ -167,10 +167,13 @@ class Store:
             self._c.execute("BEGIN IMMEDIATE")
             try:
                 yield self._c
+                self._c.execute("COMMIT")
             except BaseException:
-                self._c.execute("ROLLBACK")
+                # COMMIT is inside the guard: a failed commit can leave the
+                # transaction open, and every later BEGIN would then fail.
+                with contextlib.suppress(sqlite3.Error):
+                    self._c.execute("ROLLBACK")
                 raise
-            self._c.execute("COMMIT")
 
     def close(self) -> None:
         with self._lock:
