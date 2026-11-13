@@ -20,6 +20,8 @@ from urllib.parse import quote
 
 import requests
 
+from services import _degrade
+from services.xfeed_svc import _trace
 from shared import http_watchdog as _wd
 
 
@@ -121,4 +123,5 @@ class FxClient:
                 result = self._once(url)
             return result
         except Exception as exc:                   # belt and braces: never raises
+            _degrade.degraded("xfeed.fxapi", detail=_trace.where("fetching statuses", exc), exc_info=False)
             return _err(f"network: {exc}")

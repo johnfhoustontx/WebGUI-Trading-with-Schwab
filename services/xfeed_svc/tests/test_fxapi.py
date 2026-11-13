@@ -168,3 +168,12 @@ def test_a_dripping_server_is_cut_by_the_total_deadline(monkeypatch):
         t.join(5)
     assert r == {"status": "error", "error": "timeout"}
     assert elapsed < 3.0
+
+
+def test_unexpected_fault_is_counted_and_still_returned_as_error():
+    from services import _degrade
+    _degrade.reset()
+    fx, _s, _sl = client([])
+    fx._once = lambda url: (_ for _ in ()).throw(ValueError("handle=secret"))
+    assert fx.fetch_statuses("nasa") == {"status": "error", "error": "network: handle=secret"}
+    assert _degrade.counts() == {"xfeed.fxapi": 1}
