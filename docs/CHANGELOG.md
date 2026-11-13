@@ -6,6 +6,7 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 **Last updated:** 2026-11-13 (**The X Feed is inside the app: `xfeed_svc` (:8219) and `/news/x`.**)
 
+- **Live on prod (2026-11-13, ~10:02 CT).** Promoted e78686cd3 -> ddb99b09 (all 11 units up). Import rehearsed on a copy first (accounts=30 posts=4536 gaps=1 settings=1, exit 0), then `x-news-feed` stopped + disabled and the real import ran: accounts=30 posts=4537 gaps=1 settings=1, exit 0. First cycle checked all 29 active accounts with no errors; post-import rows were catch-up then live. Verified signed in on app.neuralstrike.co/news/x: 3 groups + history, filters, Load older, add/remove of a throwaway account, Status shows xfeed_svc healthy, /news unchanged. Still to retire (user OK): tailnet serve :4300, the cos.neuralstrike.co/feed/ Caddy route, and later the x-news-feed unit file + ~/x-news-feed folder.
 - **What.** The standalone Node "X News Feed" on vps2 is now a service and a page.
   `services/xfeed_svc` (Tier 2, domain `xfeed`, port 8219, commands on `cmd:xfeed`)
   polls the FxEmbed API for the watched accounts into
