@@ -104,13 +104,15 @@ client and market data through `http://127.0.0.1:8100`.
 The monorepo was re-tiered (strangler-fig) into three **physically separate** tiers over a
 **Redis backbone**. **All five domains are migrated** — sentiment, options,
 portfolio, trade, market — and every page reads Redis (the autonomous driver,
-once a sixth, was removed 2026-09-22). The sixth and seventh services were born
+once a sixth, was removed 2026-09-22). The sixth, seventh and eighth services were born
 in the tiers rather than migrated. **`news_svc`** (2026-09-26) polls free public
 feeds and calls neither the proxy nor Claude, and reads one optional credential,
 `FRED_API_KEY` (from the stack `.env`, never `.env.live` or config; without it the
 calendar's values come from FRED's key-free CSV). **`blog_svc`** (2026-10-06)
 keeps the public site's Blog; it calls neither Schwab, the proxy nor Claude, and
-its one outside request is a typeface copy from Google Fonts. The shape:
+its one outside request is a typeface copy from Google Fonts. **`xfeed_svc`**
+(2026-11-13, :8219) polls the FxEmbed API for the X accounts the operator watches
+(Market News → X Feed, `/news/x`); no Schwab, proxy or Claude call, no key. The shape:
 
 **The Tier-1 import allow-list, stated exactly** (audited 2026-08-21 across all
 153 non-test `webgui/**/*.py`, extended 2026-08-21, and again 2026-08-25, and 2026-09-15):
@@ -240,7 +242,7 @@ TIER 2 PROCESSING  services/{domain}_svc FastAPI (options/sentiment/trade/portfo
 ```
 
 **Unit order: Redis → proxy → services → webgui**, expressed as `Requires=`/`After=`.** Ports: `memurai=6379` plus one
-per service (8210–8213, 8215–8217; 8214 was the removed driver's). One shim survives by decision — `sentiment_bridge.json` is still
+per service (8210–8213, 8215–8217, 8219; 8214 was the removed driver's). One shim survives by decision — `sentiment_bridge.json` is still
 dual-written for `regime_filter`; retiring it (making `regime_filter` read Redis) is the last
 open migration item. Full design:
 [3-tier design doc](docs/plans/2026-06-15-three-tier-architecture-design.md).
@@ -254,7 +256,7 @@ open migration item. Full design:
 | `sentiment-dashboard/` | Market sentiment `scoring/` + `history_backfill` + `live_composite.py` (live intraday composite + bridge payload) + `publish_bridge.py` (headless bridge writer) + bridge + `sectors_ref.py`. **Its `market_calendar.py` was absorbed into `shared/market_calendar.py` and DELETED (2026-08-02)** — same module name and same three function names, but *inclusive* `prev/next_trading_day` vs the shared module's *exclusive*, an invisible one-day trap. | ported to NiceGUI `/sentiment` |
 | `trade-analyzer/`      | `src/analysis` — fundamentals, recommendation, scoring, sector. | engines only (Tk UI dropped) |
 | `portfolio-analyzer/`  | `src/` — sector breakdown, vs-sector perf, live streaming.  | engines only (Tk UI dropped) |
-| `services/`            | The seven Tier-2 services — `sentiment`/`options`/`portfolio`/`trade`/`market`/`news`/`blog` `_svc` (:8210–8213, 8215–8217) — plus `_scaffold`/`_degrade`/`_heartbeat`. **`news_svc`** and **`blog_svc`** are the two with no copied engine and no Schwab or Claude call: `news_svc` is RSS/EDGAR and economic-calendar adapters → `services/news_svc/data/news.db` → eight views; `blog_svc` cleans an uploaded document into `services/blog_svc/data/` and is the only writer of the site's blog files. **`trade_svc` runs a scheduler** (since 2026-09-26) with one job, the daily watchlist dividend pull through the proxy into `shared/dividends.py`'s store; `news_svc` opens that store read-only and never calls the proxy. | backend          |
+| `services/`            | The eight Tier-2 services — `sentiment`/`options`/`portfolio`/`trade`/`market`/`news`/`blog`/`xfeed` `_svc` (:8210–8213, 8215–8217, 8219) — plus `_scaffold`/`_degrade`/`_heartbeat`. **`news_svc`** and **`blog_svc`** are the two with no copied engine and no Schwab or Claude call: `news_svc` is RSS/EDGAR and economic-calendar adapters → `services/news_svc/data/news.db` → eight views; `blog_svc` cleans an uploaded document into `services/blog_svc/data/` and is the only writer of the site's blog files; `xfeed_svc` (also no Schwab or Claude call) polls FxEmbed → `services/xfeed_svc/data/xfeed.db` → two views plus per-request answers on `cmd:xfeed`, with `shared/http_watchdog.py` (shared with `news_svc`) as its fetch deadline. **`trade_svc` runs a scheduler** (since 2026-09-26) with one job, the daily watchlist dividend pull through the proxy into `shared/dividends.py`'s store; `news_svc` opens that store read-only and never calls the proxy. | backend          |
 | `services/options_svc/data/scalp.db` | The Opening Scalp's store: price bars, the 08:36 chain slices, the study, the published calls and their grades, and the `intraday_*` tables of the 15-minute calls and their recorded readings. **Kept forever and in the nightly backup**: it holds price history Schwab no longer serves (1-minute about 6 weeks, 5-minute about 7 months), so never add it to `DB_EXCLUDE`. | backend |
 | `options-scanner/gex_archive.db` | The Gamma Archive: each closed session of `gex_history.db`, thinned, written nightly by `tools/archive_gex.py`. **Kept forever and in the nightly backup**: `gex_history.db` keeps 5 sessions, so this is the only per-strike history past them. Never add it to `DB_EXCLUDE` ([design](docs/plans/2026-10-31-gamma-archive-design.md)). | backend |
 | `shared/`              | `analysis_lib/` (technical · sector_analysis · config) + secret templates/values. | library          |
@@ -489,7 +491,7 @@ Detail: [running and environments](docs/reference/running-and-environments.md) �
 The stack is `systemd --user` units behind `trading-<env>.target`, GENERATED by
 `deploy/systemd/generate_units.py --install` from `repo_paths` (no `.service` file
 is in git; `--install` also arms the timers). Start order: Redis (a system unit)
-→ proxy `:8100` → the seven services (8210–8213, 8215–8217) → `webgui` `:8500`;
+→ proxy `:8100` → the eight services (8210–8213, 8215–8217, 8219) → `webgui` `:8500`;
 `webgui_live` `:8501` needs only Redis. Logs are the journal.
 
 - ⚠ **This box runs ONE checkout, at `/home/administrator/dev`, and it is PROD.**

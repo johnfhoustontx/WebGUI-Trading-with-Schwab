@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-12</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-13</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -116,6 +116,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#schwab-proxy">Schwab Proxy</a><ul>
+<li><a href="#x-feed-service-8219">X Feed service — :8219</a></li>
 <li><a href="#health-auth">Health &amp; auth</a></li>
 <li><a href="#market-data">Market data</a></li>
 <li><a href="#local-market-data-store">Local market-data store</a></li>
@@ -181,6 +182,11 @@ keys that feed it. Menu order matches the rail.</p>
 <td><strong>Market News</strong></td>
 <td><code>news_svc</code> :8216</td>
 <td><code>cache:news:feed</code>, <code>:sec</code>, <code>:calendar</code>, <code>:status</code> (the public copy reads <code>:feed_public</code>, <code>:sec_public</code>, <code>:calendar_public</code>); also the Desk's Headlines panel (<code>:feed</code>) and the Symbol page's news band (<code>:feed</code> + <code>:sec</code>)</td>
+</tr>
+<tr>
+<td><strong>X Feed</strong></td>
+<td><code>xfeed_svc</code> :8219</td>
+<td><code>cache:xfeed:latest</code>, <code>:accounts</code>; the page asks <code>query</code> / <code>stats</code> on <code>cmd:xfeed</code> and reads the answer at <code>cache:xfeed:answer:&lt;id&gt;</code></td>
 </tr>
 <tr>
 <td><strong>Market Dashboard</strong></td>
@@ -405,10 +411,10 @@ z
    </g>
    <g id="system-overview-patch_10">
     <path d="M 51.12 344.16 
-L 124.56 344.16 
-Q 130.32 344.16 130.32 349.92 
-L 130.32 381.6 
-Q 130.32 387.36 124.56 387.36 
+L 115.92 344.16 
+Q 121.68 344.16 121.68 349.92 
+L 121.68 381.6 
+Q 121.68 387.36 115.92 387.36 
 L 51.12 387.36 
 Q 45.36 387.36 45.36 381.6 
 L 45.36 349.92 
@@ -417,84 +423,97 @@ z
 " clip-path="url(#system-overview-pae42fd94f3)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
    </g>
    <g id="system-overview-patch_11">
-    <path d="M 141.84 344.16 
-L 215.28 344.16 
-Q 221.04 344.16 221.04 349.92 
-L 221.04 381.6 
-Q 221.04 387.36 215.28 387.36 
-L 141.84 387.36 
-Q 136.08 387.36 136.08 381.6 
-L 136.08 349.92 
-Q 136.08 344.16 141.84 344.16 
+    <path d="M 131.76 344.16 
+L 196.56 344.16 
+Q 202.32 344.16 202.32 349.92 
+L 202.32 381.6 
+Q 202.32 387.36 196.56 387.36 
+L 131.76 387.36 
+Q 126 387.36 126 381.6 
+L 126 349.92 
+Q 126 344.16 131.76 344.16 
 z
 " clip-path="url(#system-overview-pae42fd94f3)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
    </g>
    <g id="system-overview-patch_12">
-    <path d="M 232.56 344.16 
-L 306 344.16 
-Q 311.76 344.16 311.76 349.92 
-L 311.76 381.6 
-Q 311.76 387.36 306 387.36 
-L 232.56 387.36 
-Q 226.8 387.36 226.8 381.6 
-L 226.8 349.92 
-Q 226.8 344.16 232.56 344.16 
+    <path d="M 212.4 344.16 
+L 277.2 344.16 
+Q 282.96 344.16 282.96 349.92 
+L 282.96 381.6 
+Q 282.96 387.36 277.2 387.36 
+L 212.4 387.36 
+Q 206.64 387.36 206.64 381.6 
+L 206.64 349.92 
+Q 206.64 344.16 212.4 344.16 
 z
 " clip-path="url(#system-overview-pae42fd94f3)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
    </g>
    <g id="system-overview-patch_13">
-    <path d="M 323.28 344.16 
-L 396.72 344.16 
-Q 402.48 344.16 402.48 349.92 
-L 402.48 381.6 
-Q 402.48 387.36 396.72 387.36 
-L 323.28 387.36 
-Q 317.52 387.36 317.52 381.6 
-L 317.52 349.92 
-Q 317.52 344.16 323.28 344.16 
+    <path d="M 293.04 344.16 
+L 357.84 344.16 
+Q 363.6 344.16 363.6 349.92 
+L 363.6 381.6 
+Q 363.6 387.36 357.84 387.36 
+L 293.04 387.36 
+Q 287.28 387.36 287.28 381.6 
+L 287.28 349.92 
+Q 287.28 344.16 293.04 344.16 
 z
 " clip-path="url(#system-overview-pae42fd94f3)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
    </g>
    <g id="system-overview-patch_14">
-    <path d="M 414 344.16 
-L 487.44 344.16 
-Q 493.2 344.16 493.2 349.92 
-L 493.2 381.6 
-Q 493.2 387.36 487.44 387.36 
-L 414 387.36 
-Q 408.24 387.36 408.24 381.6 
-L 408.24 349.92 
-Q 408.24 344.16 414 344.16 
+    <path d="M 373.68 344.16 
+L 438.48 344.16 
+Q 444.24 344.16 444.24 349.92 
+L 444.24 381.6 
+Q 444.24 387.36 438.48 387.36 
+L 373.68 387.36 
+Q 367.92 387.36 367.92 381.6 
+L 367.92 349.92 
+Q 367.92 344.16 373.68 344.16 
 z
 " clip-path="url(#system-overview-pae42fd94f3)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
    </g>
    <g id="system-overview-patch_15">
-    <path d="M 504.72 344.16 
-L 578.16 344.16 
-Q 583.92 344.16 583.92 349.92 
-L 583.92 381.6 
-Q 583.92 387.36 578.16 387.36 
-L 504.72 387.36 
-Q 498.96 387.36 498.96 381.6 
-L 498.96 349.92 
-Q 498.96 344.16 504.72 344.16 
+    <path d="M 454.32 344.16 
+L 519.12 344.16 
+Q 524.88 344.16 524.88 349.92 
+L 524.88 381.6 
+Q 524.88 387.36 519.12 387.36 
+L 454.32 387.36 
+Q 448.56 387.36 448.56 381.6 
+L 448.56 349.92 
+Q 448.56 344.16 454.32 344.16 
 z
 " clip-path="url(#system-overview-pae42fd94f3)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
    </g>
    <g id="system-overview-patch_16">
-    <path d="M 595.44 344.16 
-L 668.88 344.16 
-Q 674.64 344.16 674.64 349.92 
-L 674.64 381.6 
-Q 674.64 387.36 668.88 387.36 
-L 595.44 387.36 
-Q 589.68 387.36 589.68 381.6 
-L 589.68 349.92 
-Q 589.68 344.16 595.44 344.16 
+    <path d="M 534.96 344.16 
+L 599.76 344.16 
+Q 605.52 344.16 605.52 349.92 
+L 605.52 381.6 
+Q 605.52 387.36 599.76 387.36 
+L 534.96 387.36 
+Q 529.2 387.36 529.2 381.6 
+L 529.2 349.92 
+Q 529.2 344.16 534.96 344.16 
 z
 " clip-path="url(#system-overview-pae42fd94f3)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
    </g>
    <g id="system-overview-patch_17">
+    <path d="M 615.6 344.16 
+L 680.4 344.16 
+Q 686.16 344.16 686.16 349.92 
+L 686.16 381.6 
+Q 686.16 387.36 680.4 387.36 
+L 615.6 387.36 
+Q 609.84 387.36 609.84 381.6 
+L 609.84 349.92 
+Q 609.84 344.16 615.6 344.16 
+z
+" clip-path="url(#system-overview-pae42fd94f3)" style="fill: #e1f5ee; stroke: #0f6e56; stroke-linejoin: miter"/>
+   </g>
+   <g id="system-overview-patch_18">
     <path d="M 48.96 460.8 
 L 224.64 460.8 
 Q 230.4 460.8 230.4 466.56 
@@ -507,7 +526,7 @@ Q 43.2 460.8 48.96 460.8
 z
 " clip-path="url(#system-overview-pae42fd94f3)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
    </g>
-   <g id="system-overview-patch_18">
+   <g id="system-overview-patch_19">
     <path d="M 279.36 460.8 
 L 411.84 460.8 
 Q 417.6 460.8 417.6 466.56 
@@ -520,7 +539,7 @@ Q 273.6 460.8 279.36 460.8
 z
 " clip-path="url(#system-overview-pae42fd94f3)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
    </g>
-   <g id="system-overview-patch_19">
+   <g id="system-overview-patch_20">
     <path d="M 466.56 460.8 
 L 563.04 460.8 
 Q 568.8 460.8 568.8 466.56 
@@ -533,7 +552,7 @@ Q 460.8 460.8 466.56 460.8
 z
 " clip-path="url(#system-overview-pae42fd94f3)" style="fill: #f1efe8; stroke: #5f5e5a; stroke-linejoin: miter"/>
    </g>
-   <g id="system-overview-patch_20">
+   <g id="system-overview-patch_21">
     <path d="M 596.16 460.8 
 L 685.44 460.8 
 Q 691.2 460.8 691.2 466.56 
@@ -558,7 +577,7 @@ z
    <g id="system-overview-text_4">
     <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="360" y="102.418242" transform="rotate(-0 360 102.418242)">app. needs password + TOTP  ·  live. has no login</text>
    </g>
-   <g id="system-overview-patch_21">
+   <g id="system-overview-patch_22">
     <path d="M 216 46.08 
 Q 216 58.32 216 69.441966 
 " style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
@@ -568,7 +587,7 @@ L 213.8 65.041966
 z
 " style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
    </g>
-   <g id="system-overview-patch_22">
+   <g id="system-overview-patch_23">
     <path d="M 504 46.08 
 Q 504 58.32 504 69.441966 
 " style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
@@ -593,7 +612,7 @@ z
    <g id="system-overview-text_9">
     <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #534ab7" x="504" y="188.818242" transform="rotate(-0 504 188.818242)">Public screens, read-only</text>
    </g>
-   <g id="system-overview-patch_23">
+   <g id="system-overview-patch_24">
     <path d="M 216 112.32 
 Q 216 133.92 216 154.401966 
 " style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
@@ -603,7 +622,7 @@ L 213.8 150.001966
 z
 " style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
    </g>
-   <g id="system-overview-patch_24">
+   <g id="system-overview-patch_25">
     <path d="M 504 112.32 
 Q 504 133.92 504 154.401966 
 " style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
@@ -619,7 +638,7 @@ z
    <g id="system-overview-text_11">
     <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #854f0b" x="360" y="280.258242" transform="rotate(-0 360 280.258242)">Cache views  ·  events  ·  command streams</text>
    </g>
-   <g id="system-overview-patch_25">
+   <g id="system-overview-patch_26">
     <path d="M 216 201.278034 
 Q 216 223.56 216 245.841966 
 " style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
@@ -634,7 +653,7 @@ L 213.8 241.441966
 z
 " style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
    </g>
-   <g id="system-overview-patch_26">
+   <g id="system-overview-patch_27">
     <path d="M 504 201.278034 
 Q 504 223.56 504 245.841966 
 " style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
@@ -659,51 +678,57 @@ z
     <text style="font-size: 9.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: start; fill: #0f6e56" x="40.32" y="332.228145" transform="rotate(-0 40.32 332.228145)">Tier 2 · services: each owns its scheduler, commands and engines</text>
    </g>
    <g id="system-overview-text_15">
-    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="87.84" y="361.417852" transform="rotate(-0 87.84 361.417852)">sentiment</text>
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="83.52" y="361.417852" transform="rotate(-0 83.52 361.417852)">sentiment</text>
    </g>
    <g id="system-overview-text_16">
-    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="87.84" y="376.017891" transform="rotate(-0 87.84 376.017891)">:8210</text>
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="83.52" y="376.017891" transform="rotate(-0 83.52 376.017891)">:8210</text>
    </g>
    <g id="system-overview-text_17">
-    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="178.56" y="361.417852" transform="rotate(-0 178.56 361.417852)">options</text>
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="164.16" y="361.417852" transform="rotate(-0 164.16 361.417852)">options</text>
    </g>
    <g id="system-overview-text_18">
-    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="178.56" y="376.017891" transform="rotate(-0 178.56 376.017891)">:8211</text>
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="164.16" y="376.017891" transform="rotate(-0 164.16 376.017891)">:8211</text>
    </g>
    <g id="system-overview-text_19">
-    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="269.28" y="361.417852" transform="rotate(-0 269.28 361.417852)">portfolio</text>
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="244.8" y="361.417852" transform="rotate(-0 244.8 361.417852)">portfolio</text>
    </g>
    <g id="system-overview-text_20">
-    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="269.28" y="376.017891" transform="rotate(-0 269.28 376.017891)">:8212</text>
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="244.8" y="376.017891" transform="rotate(-0 244.8 376.017891)">:8212</text>
    </g>
    <g id="system-overview-text_21">
-    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="360" y="361.417852" transform="rotate(-0 360 361.417852)">trade</text>
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="325.44" y="361.417852" transform="rotate(-0 325.44 361.417852)">trade</text>
    </g>
    <g id="system-overview-text_22">
-    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="360" y="376.017891" transform="rotate(-0 360 376.017891)">:8213</text>
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="325.44" y="376.017891" transform="rotate(-0 325.44 376.017891)">:8213</text>
    </g>
    <g id="system-overview-text_23">
-    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="450.72" y="361.417852" transform="rotate(-0 450.72 361.417852)">market</text>
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="406.08" y="361.417852" transform="rotate(-0 406.08 361.417852)">market</text>
    </g>
    <g id="system-overview-text_24">
-    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="450.72" y="376.017891" transform="rotate(-0 450.72 376.017891)">:8215</text>
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="406.08" y="376.017891" transform="rotate(-0 406.08 376.017891)">:8215</text>
    </g>
    <g id="system-overview-text_25">
-    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="541.44" y="361.417422" transform="rotate(-0 541.44 361.417422)">news</text>
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="486.72" y="361.417422" transform="rotate(-0 486.72 361.417422)">news</text>
    </g>
    <g id="system-overview-text_26">
-    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="541.44" y="376.017891" transform="rotate(-0 541.44 376.017891)">:8216</text>
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="486.72" y="376.017891" transform="rotate(-0 486.72 376.017891)">:8216</text>
    </g>
    <g id="system-overview-text_27">
-    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="632.16" y="361.417852" transform="rotate(-0 632.16 361.417852)">blog</text>
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="567.36" y="361.417852" transform="rotate(-0 567.36 361.417852)">blog</text>
    </g>
    <g id="system-overview-text_28">
-    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="632.16" y="376.017891" transform="rotate(-0 632.16 376.017891)">:8217</text>
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="567.36" y="376.017891" transform="rotate(-0 567.36 376.017891)">:8217</text>
    </g>
    <g id="system-overview-text_29">
+    <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #085041" x="648" y="361.417852" transform="rotate(-0 648 361.417852)">xfeed</text>
+   </g>
+   <g id="system-overview-text_30">
+    <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #0f6e56" x="648" y="376.017891" transform="rotate(-0 648 376.017891)">:8219</text>
+   </g>
+   <g id="system-overview-text_31">
     <text style="font-style: italic; font-size: 8.5px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="360" y="409.00834" transform="rotate(-0 360 409.00834)">publish views and events to Redis  ·  consume their own cmd:{domain}</text>
    </g>
-   <g id="system-overview-patch_27">
+   <g id="system-overview-patch_28">
     <path d="M 360 292.718034 
 Q 360 303.48 360 314.241966 
 " style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
@@ -718,31 +743,31 @@ L 357.8 309.841966
 z
 " style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
    </g>
-   <g id="system-overview-text_30">
+   <g id="system-overview-text_32">
     <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="136.8" y="478.057852" transform="rotate(-0 136.8 478.057852)">schwab-proxy :8100</text>
    </g>
-   <g id="system-overview-text_31">
+   <g id="system-overview-text_33">
     <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="136.8" y="492.658242" transform="rotate(-0 136.8 492.658242)">The only Schwab client</text>
    </g>
-   <g id="system-overview-text_32">
+   <g id="system-overview-text_34">
     <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="345.6" y="478.057852" transform="rotate(-0 345.6 478.057852)">Schwab API</text>
    </g>
-   <g id="system-overview-text_33">
+   <g id="system-overview-text_35">
     <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="345.6" y="492.658242" transform="rotate(-0 345.6 492.658242)">Chains, quotes, accounts</text>
    </g>
-   <g id="system-overview-text_34">
+   <g id="system-overview-text_36">
     <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="514.8" y="478.057852" transform="rotate(-0 514.8 478.057852)">Public feeds</text>
    </g>
-   <g id="system-overview-text_35">
+   <g id="system-overview-text_37">
     <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="514.8" y="492.657891" transform="rotate(-0 514.8 492.657891)">RSS, EDGAR, FRED</text>
    </g>
-   <g id="system-overview-text_36">
+   <g id="system-overview-text_38">
     <text style="font-weight: 700; font-size: 11px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #2c2c2a" x="640.8" y="478.057852" transform="rotate(-0 640.8 478.057852)">Claude API</text>
    </g>
-   <g id="system-overview-text_37">
+   <g id="system-overview-text_39">
     <text style="font-size: 9px; font-family: 'DejaVu Sans', sans-serif; text-anchor: middle; fill: #5f5e5a" x="640.8" y="492.658242" transform="rotate(-0 640.8 492.658242)">Briefings</text>
    </g>
-   <g id="system-overview-patch_28">
+   <g id="system-overview-patch_29">
     <path d="M 136.8 424.8 
 Q 136.8 442.08 136.8 458.241966 
 " style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
@@ -752,7 +777,7 @@ L 134.6 453.841966
 z
 " style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
    </g>
-   <g id="system-overview-patch_29">
+   <g id="system-overview-patch_30">
     <path d="M 230.4 482.4 
 Q 251.28 482.4 271.041966 482.4 
 " style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
@@ -762,7 +787,7 @@ L 266.641966 484.6
 z
 " style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
    </g>
-   <g id="system-overview-patch_30">
+   <g id="system-overview-patch_31">
     <path d="M 541.44 424.8 
 Q 528.12 442.08 515.482569 458.474506 
 " style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
@@ -772,7 +797,7 @@ L 516.426381 453.646544
 z
 " style="fill: #5f5e5a; stroke: #5f5e5a; stroke-linecap: round"/>
    </g>
-   <g id="system-overview-patch_31">
+   <g id="system-overview-patch_32">
     <path d="M 637.2 424.8 
 Q 637.2 442.08 637.2 458.241966 
 " style="fill: none; stroke: #5f5e5a; stroke-linecap: round"/>
@@ -3547,6 +3572,80 @@ one-minute collection poll (<code>gex_collector</code>, through
 After <code>[limiter] priority_run</code> marked requests (4 as shipped) have gone ahead of
 a waiting ordinary one, an ordinary one is sent; <code>0</code> switches the lane off. The
 rate is unchanged. A request answered from the local store never waits.</p>
+<h2 id="x-feed-service-8219">X Feed service — :8219</h2>
+<p><strong>Entry:</strong> <code>services/xfeed_svc/app.py</code> (<code>make_app("xfeed", scheduler=scheduler.loop,
+command_handler=handlers.handle_command)</code>). Polls the FxEmbed API (<code>api.fxtwitter.com</code>,
+no key) for each watched X account into <code>services/xfeed_svc/data/xfeed.db</code> (the
+standalone Node feed's schema: <code>accounts</code>, <code>posts</code>, <code>gaps</code>, <code>settings</code>; times in epoch
+milliseconds) and publishes two views. <strong>No Schwab call, no Claude call, no proxy.</strong>
+Tunables are <code>config/xfeed.toml</code> (<code>[fxembed]</code>, <code>[poller]</code>, <code>[views]</code>, <code>[page]</code>), re-read
+every tick. The fetch deadline watchdog is <code>shared/http_watchdog.py</code>, shared with
+<code>news_svc</code>. Design: <code>docs/plans/2026-11-13-x-feed-design.md</code>.</p>
+<p><strong>Scheduler</strong> (<code>services/xfeed_svc/scheduler.py</code>): the loop wakes every <code>tick_s</code> (5 s),
+beats the heartbeat and starts a poll cycle when <code>interval_s</code> (60, minimum 30) has passed
+since the last one ENDED. A cycle never doubles and runs off the loop. A fault is counted
+(<code>_degrade</code>) and never escapes. Gated by the <code>schedulers</code> flag.</p>
+<p><strong>Commands (<code>cmd:xfeed</code>)</strong>, each carrying a <code>request_id</code> (32 hex chars, made by the page):</p>
+<table>
+<thead>
+<tr>
+<th>Type</th>
+<th>Payload</th>
+<th>Effect</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>add_account</code></td>
+<td><code>handle</code>, <code>group?</code></td>
+<td>Baselines the handle from FxEmbed (slow). Errors: <code>Invalid handle</code>, <code>Already watching @x</code>, <code>Account not found</code>, <code>Could not reach FxEmbed (...)</code>, group too long</td>
+</tr>
+<tr>
+<td><code>remove_account</code></td>
+<td><code>handle</code></td>
+<td>Stops watching it (its posts stay). Error: <code>Not watching that account</code></td>
+</tr>
+<tr>
+<td><code>set_group</code></td>
+<td><code>handle</code>, <code>group</code> (null = Ungrouped)</td>
+<td>Trims and collapses spaces, at most <code>group_name_max</code> (30) characters, reuses an existing group's spelling case-insensitively</td>
+</tr>
+<tr>
+<td><code>query</code></td>
+<td><code>group?</code>, <code>ungrouped?</code>, <code>account?</code>, <code>type?</code>, <code>q?</code>, <code>ticker?</code>, <code>before?</code>, <code>before_key?</code>, <code>limit</code></td>
+<td>One filtered page of posts and gap rows</td>
+</tr>
+</tbody>
+</table>
+<p>There is no reply on the stream. Every command is ANSWERED on
+<code>cache:xfeed:answer:&lt;request_id&gt;</code> (a TTL of <code>answer_ttl_s</code>, 120 s; no event):
+<code>{request_id, command, ok, error}</code> plus the command's own fields. A <code>query</code> answer adds
+<code>rows</code>, <code>limit</code> (the page size actually used, <code>limit</code> clamped to <code>1..query_limit_max</code>,
+1000), <code>tickers</code> and <code>counts</code>. An unknown command or a handler fault is answered too.</p>
+<p><strong>Views:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Key</th>
+<th>Payload</th>
+<th>Written</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>cache:xfeed:latest</code></td>
+<td><code>{"rows": [...], "tickers": [{tag, n}, ...], "total": n, "limit": n}</code> — the newest <code>latest_rows</code> (300) visible posts and gap rows across active accounts, the top <code>top_tickers</code> (10), and <code>limit</code>, the row cap in force</td>
+<td><code>skip_unchanged</code>; no timestamp (read <code>cache:xfeed:latest:ts</code>)</td>
+</tr>
+<tr>
+<td><code>cache:xfeed:accounts</code></td>
+<td><code>{"accounts": [...], "counts": {...}, "interval_s": n, "page": {...}}</code> — active accounts (handle, name, avatar, group, last checked / ok, error, fail count), post counts per account and per group, the poll interval and the page's tunables (<code>new_highlight_s</code>, <code>answer_poll_s</code>, <code>answer_timeout_s</code>)</td>
+<td><code>skip_unchanged</code>; no timestamp</td>
+</tr>
+</tbody>
+</table>
+<p>Every string in a row (text, names, URLs) is third-party text: render it escaped, and
+never use a URL as a link without checking it is http(s).</p>
 <h2 id="health-auth">Health &amp; auth</h2>
 <table>
 <thead>
@@ -4120,8 +4219,11 @@ cache:news:status              events:news:status
 cache:blog:drafts              events:blog:drafts             (drafts waiting - metadata and a digest, never a document)
 cache:blog:posts               events:blog:posts              (published entries - metadata)
 cache:blog:social_cards        events:blog:social_cards       (blog entries' social cards - paths and captions)
+cache:xfeed:latest             events:xfeed:latest            (X Feed - the newest posts and gap rows, top tickers, the row cap)
+cache:xfeed:accounts           events:xfeed:accounts          (X Feed - the watched accounts, counts, poll interval, page tunables)
+cache:xfeed:answer:&lt;request_id&gt;                               (one command's answer - a TTL, NO event)
 cache:blog:result              events:blog:result             (how the last cmd:blog command ended)
-cmd:trade   cmd:portfolio   cmd:market   cmd:news   cmd:blog
+cmd:trade   cmd:portfolio   cmd:market   cmd:news   cmd:blog   cmd:xfeed
 </code></pre>
 <hr />
 <h1 id="service-scaffold">Service Scaffold</h1>
@@ -4412,6 +4514,11 @@ hard-code ports or <code>D:\</code> paths.</p>
 <td><code>SERVICE_PORTS["blog"]</code></td>
 </tr>
 <tr>
+<td>xfeed_svc</td>
+<td>8219</td>
+<td><code>SERVICE_PORTS["xfeed"]</code></td>
+</tr>
+<tr>
 <td>webgui (NiceGUI)</td>
 <td>8500</td>
 <td><code>NICEGUI_PORT</code> / <code>NICEGUI_URL</code></td>
@@ -4441,8 +4548,8 @@ resolves the identity and every port consumer follows it with no edit of its own
 <tbody>
 <tr>
 <td><code>[services]</code> ports</td>
-<td>8210–8213, 8215–8217</td>
-<td><strong>9210–9213, 9215–9217</strong> (<code>port_offset</code>)</td>
+<td>8210–8213, 8215–8217, 8219</td>
+<td><strong>9210–9213, 9215–9217, 9219</strong> (<code>port_offset</code>)</td>
 </tr>
 <tr>
 <td>webgui</td>

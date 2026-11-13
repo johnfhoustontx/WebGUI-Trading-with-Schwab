@@ -35,6 +35,7 @@ trade     = 8213
 market    = 8215
 news      = 8216
 blog      = 8217
+xfeed     = 8219   # X accounts feed (xfeed_svc)
 ```
 
 **STANDING RULE — configurable by default (the user's instruction, 2026-09-19).**

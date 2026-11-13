@@ -1,6 +1,6 @@
 # X Feed inside the app — design
 
-Status: draft for approval, 2026-11-13. Branch `claude/x-feed-in-app`.
+Status: approved, built, 2026-11-13. Branch `claude/x-feed-in-app`.
 
 ## Intent
 
@@ -166,7 +166,7 @@ in payloads):
 
 | View | Contents | When |
 |---|---|---|
-| `cache:xfeed:latest` (+ `events:xfeed:latest`) | newest 300 visible rows across all active accounts, merged with gap rows, plus top-10 tickers | after any cycle/add/remove/regroup that changed it |
+| `cache:xfeed:latest` (+ `events:xfeed:latest`) | newest 300 visible rows across all active accounts, merged with gap rows, plus top-10 tickers, `total`, and `limit` (the effective row cap, `views.latest_rows`) | after any cycle/add/remove/regroup that changed it |
 | `cache:xfeed:accounts` (+ event) | active accounts (handle, name, avatar, group, last checked/ok, error, fail count), per-account and per-group visible post counts, the poll interval | after every account poll and every account change |
 
 Commands on `cmd:xfeed`, each carrying a `request_id`:
@@ -176,7 +176,7 @@ Commands on `cmd:xfeed`, each carrying a `request_id`:
 | `add_account` | `handle`, `group?` | ok + account, or "Invalid handle" / "Already watching @x" / "Account not found" / "Could not reach FxEmbed (…)" / group too long |
 | `remove_account` | `handle` | ok, or "Not watching that account" |
 | `set_group` | `handle`, `group` (null = Ungrouped) | ok, or error |
-| `query` | `group?`/`ungrouped?`, `account?`, `type?`, `q?`, `ticker?`, `before?`, `before_key?`, `limit` (≤ 1000) | rows (posts + gaps, as `queryFeed` today), counts, top tickers |
+| `query` | `group?`/`ungrouped?`, `account?`, `type?`, `q?`, `ticker?`, `before?`, `before_key?`, `limit` (≤ 1000) | rows (posts + gaps, as `queryFeed` today), `limit` (the clamped page size actually used), counts, top tickers |
 
 Answers go to a **per-request key** `cache:xfeed:answer:{request_id}`, written
 with a short TTL (config; ~120 s) and no event. While a request is pending the

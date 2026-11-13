@@ -302,7 +302,7 @@ def test_everything_else_stays_restartable_in_prod(monkeypatch):
 
 
 def test_dev_can_still_restart_everything_it_owns(monkeypatch):
-    # The guards must not over-fire. Dev owns its seven services (offset ports)
+    # The guards must not over-fire. Dev owns its services (offset ports)
     # and its own web GUI; leaving an operator unable to restart ANYTHING would
     # be a worse outcome than the cross-environment hazard being fixed.
     monkeypatch.setattr(status, "IS_DEV", True)
@@ -1025,7 +1025,7 @@ def test_the_card_row_can_wrap_so_it_fits_a_phone(monkeypatch):
 
 
 # ── Phase 6, Task 7: Restart gets a confirm ──────────────────────────────────
-# Ten of twelve components are restartable — the seven services, the proxy only
+# Most components are restartable — every service, the proxy only
 # when this checkout owns it, this web app and the public live screens — and
 # every one of them bounces a live process. ⚠ ``restart_spec``'s ten tests and
 # ``restart_command``'s five are PURE and untouched: if one of them breaks,
@@ -1099,7 +1099,7 @@ def test_the_market_hours_warning_is_the_configuration_tabs_own_predicate():
 
 def test_a_restart_asks_before_it_bounces_anything(monkeypatch):
     """Every destructive action confirms. Nothing pinned that a Restart did
-    NOT, so adding this breaks nothing — and eight of ten cards carry one."""
+    NOT, so adding this breaks nothing — and most cards carry one."""
     spawned = []
     host = _render_status(monkeypatch, results=_ONE_SERVICE)
     _run_timer(host, "_refresh")

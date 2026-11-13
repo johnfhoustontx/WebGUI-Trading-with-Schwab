@@ -817,9 +817,11 @@ Opening Scalp (**NEW 2026-10-18**; design [`plans/2026-10-18-opening-scalp-desig
 
 ## `/news`
 
-**Market News (NEW 2026-09-26; v2 the same day; redesigned to the operator's mockup
-the same evening)** — a standalone rail page under **MARKETS**, after Flow Alerts
-(`main.OPTIONS_RAIL`). Three views, each its own `watch_view` (`pages/news.py`; every
+**Market News · Headlines (NEW 2026-09-26; v2 the same day; redesigned to the operator's mockup
+the same evening; since 2026-11-13 the first tab of the Market News group, with [`/news/x`](#newsx))** — a
+rail group under **MARKETS**, after Flow Alerts (`main.MARKET_NEWS_CHILDREN`; the
+rail item lands on this tab, so the route and every old bookmark are unchanged;
+the tab label is **Headlines**). Three views, each its own `watch_view` (`pages/news.py`; every
 fact from the pure `pages/news_view.py`), all published by **`news_svc`** (:8216):
 the **headlines** (`cache:news:feed`), the **SEC filings** (`cache:news:sec`) and the
 **calendar** (`cache:news:calendar`). Two columns at `lg` — two thirds and one third
@@ -950,6 +952,57 @@ Not built from the design: the rail badge counting unseen items (`SEEN_KEY` is w
 each visit, read by nothing yet), and a status line naming a failing feed or calendar
 source — `cache:news:status` is read only to release Refresh, and
 `cache:news:calendar_status` by no page at all (read it with `redis-cli`).
+
+## `/news/x`
+
+**X Feed (NEW 2026-11-13)** — the second tab of the Market News group
+(`main.MARKET_NEWS_CHILDREN`, label **X Feed**, violet `#bb5cff`), the posts of the X
+accounts the operator watches, replacing the standalone Node feed on vps2. Tier-1
+`pages/xfeed.py` (the page), `pages/xfeed_parts.py` (the row, the open post, the
+account line; every X string reaches the screen through `ui.label` / `ui.link`, every
+URL through `news_view.safe_href`) and the pure `pages/xfeed_view.py`. Everything is
+published by **`xfeed_svc`** (:8219); the page never opens a database and never calls
+FxEmbed. Design and plan:
+[`plans/2026-11-13-x-feed-design.md`](plans/2026-11-13-x-feed-design.md),
+[`plans/2026-11-13-x-feed-plan.md`](plans/2026-11-13-x-feed-plan.md).
+
+- **Reads** two views, each its own `watch_view`: `cache:xfeed:latest` (`{rows, tickers,
+  total, limit}`: the newest `[views] latest_rows` (300) posts and gap rows across every
+  active account, the top tickers, and the row cap in force) and `cache:xfeed:accounts`
+  (`{accounts, counts, interval_s, page}`: the active accounts, per-account and per-group
+  post counts, the poll interval and this page's tunables). Both `skip_unchanged`, no `ts`.
+- **Writes** only through `cmd:xfeed`, in one place (`XFeedPage._send`), behind
+  `shell.may_enqueue()`; where the process may not enqueue, no control that would send is
+  drawn. Four commands, each with a fresh 32-hex `request_id`: `add_account` (`handle`,
+  `group?`), `remove_account`, `set_group` (null = Ungrouped) and `query` (`group?`,
+  `ungrouped?`, `account?`, `type?`, `q?`, `ticker?`, `before?`, `before_key?`, `limit`).
+  There is no reply on the stream: the service writes the answer to
+  `cache:xfeed:answer:<request_id>` (a TTL of `answer_ttl_s`, no event) and the page polls
+  that one key every `answer_poll_s` (0.25) until it appears or `answer_timeout_s` (20)
+  passes. A `query` answer carries the `limit` actually used (clamped to
+  `query_limit_max`), which is how the page tells a full page from the last one.
+- **Data flow**: no group, no filter and nothing older loaded: the list IS the latest
+  view and repaints when its version moves. Anything else is a `query`; while the list is
+  a query, a new latest re-runs it quietly. **Load older posts** (a button, and a sentinel
+  that fires near the bottom) sends `query` with `before` / `before_key` from the last post
+  row.
+- **Layout**: two columns at `lg`, stacking below. LEFT, a collapsible filter card (group
+  tabs with counts, search where `$NVDA` searches cashtags, All / Posts / Reposts /
+  Replies, one chip per account), **Most mentioned** tickers, then one line per post with
+  day dividers and amber gap markers; a click opens the post under its line (full text,
+  photos, a video's poster with **Play on X**, the quoted post, counts, **Open on X**).
+  RIGHT, the collapsible accounts panel (add by handle or x.com link, the accounts by
+  group, change group, stop watching after a confirm, a link to Settings →
+  Configuration where the interval is set). Times are Central (`America/Chicago`), 24-hour.
+- **Status line**: *Live · checking every Ns* while the accounts view is recent
+  (`recent_factor` x the interval), **X feed service not answering** in red otherwise;
+  a NEW post (origin `live`, under `new_highlight_s` old) has a green edge.
+- **Config**: `config/xfeed.toml` (`[fxembed]`, `[poller]`, `[views]`, `[page]`), each key
+  in `webgui/config_schema.py`; the poller re-reads it every tick. `interval_s` has a
+  floor of 30 in code.
+- **Moving the standalone feed's data in**: `python tools/import_x_feed.py --source <feed.db>`
+  (`--source` the old `feed.db`, opened read-only; `--target` defaults to
+  `repo_paths.XFEED_DB`; it refuses a store that already has accounts unless `--force`).
 
 ## `/options/captured`
 

@@ -125,7 +125,7 @@ The app reads market data and your positions from Schwab, so you need:
 ## Ports the app uses
 
 The app runs entirely on your own machine and needs these local ports free:
-**6379** (Redis), **8100** (Schwab gateway), **8210–8213** and **8215–8217** (the seven services),
+**6379** (Redis), **8100** (Schwab gateway), **8210–8213**, **8215–8217** and **8219** (the eight services),
 **8500** (the web app) and **8501** (the public live screens). If another program
 is already using one of them, the matching piece won't start.
 
@@ -140,7 +140,7 @@ all together with one of the launcher scripts in the project root:
 
 | Command | What it does |
 |----------|--------------|
-| `systemctl --user start trading-prod.target` | Starts the gateway, the seven services, the web app and the public live screens. |
+| `systemctl --user start trading-prod.target` | Starts the gateway, the eight services, the web app and the public live screens. |
 | `systemctl --user list-units 'trading-prod*'` | Shows what is running. |
 | `journalctl --user -u trading-prod-options_svc -f` | Follows one service's log. |
 
@@ -361,8 +361,8 @@ You don't interact with these directly, but it helps to know they exist:
 - **Schwab gateway (proxy)** — handles the Schwab connection and market data.
   Everything else depends on it. **It must be running first** (the launcher
   handles ordering for you).
-- **Seven services** — Sentiment, Options, Portfolio, Trade, Market, News and
-  Blog. Each one powers its matching page(s).
+- **Eight services** — Sentiment, Options, Portfolio, Trade, Market, News, Blog and
+  X Feed. Each one powers its matching page(s).
 - **The public live screens** — a second, read-only copy of the web app serving
   `live.neuralstrike.co`. See *The public live screens* above.
 - **Redis** — a local data backbone the services and the web app share.
@@ -385,7 +385,7 @@ launcher, or restart the specific service from the **System Status** page.
 Use **Stop All Services** at the foot of the rail — it asks for your
 authenticator code before it will do anything — or run
 `systemctl --user stop trading-prod.target`. This stops the
-gateway, the seven services, the web app **and the public live screens** — so the
+gateway, the eight services, the web app **and the public live screens** — so the
 public site goes dark until you start the stack again. (Redis is intentionally
 left running — it is a *system* service the app's own units cannot reach.)
 
@@ -3908,7 +3908,7 @@ A health board for the whole stack.
 
 - An **overall banner** — green (all up), red (naming what's down), or grey
   (checking).
-- A **component grid** — Redis, the Schwab gateway, the seven services, the web app
+- A **component grid** — Redis, the Schwab gateway, the eight services, the web app
   itself, and the public live screens beside it, each with Online/Offline and its
   tier. The gateway's card also shows the **Schwab auth** state.
 - The gateway card's auth line is a clock counting down what the Schwab sign-in
@@ -4178,7 +4178,7 @@ group, next to EOD Report.
 A guarded "stop the whole local stack" page. The **Stop all services** button — a
 red outline, matching the rail — opens a confirmation; the solid red button is the
 **Stop everything** inside it, which is where the decision is actually made.
-Confirming stops the gateway, the seven services, the web app **and the public live
+Confirming stops the gateway, the eight services, the web app **and the public live
 screens** — the public site goes dark with it.
 
 **The confirmation asks for your authenticator code.** Type the current 6-digit

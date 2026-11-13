@@ -28,7 +28,7 @@ box, along with the twelve `.bat` launchers.
 | Folder | `/home/administrator/prod` | `/home/administrator/dev` |
 | Git | pinned to `main` | feature branches |
 | schwab-proxy | **owns** it, `:8100` | **borrows** prod's — starts none |
-| sentiment / options / portfolio / trade / market / news / blog | 8210–8213, 8215–8217 | 9210–9213, 9215–9217 |
+| sentiment / options / portfolio / trade / market / news / blog / xfeed | 8210–8213, 8215–8217, 8219 | 9210–9213, 9215–9217, 9219 |
 | webgui | `:8500` | `:9500` |
 | webgui_live (public screens) | `:8501` | `:9501` |
 | Redis (one server, `:6379`) | **db 0** | **db 1** |
@@ -558,7 +558,7 @@ not. Without it the SQLite half completes and the Redis half dies on
 Then work at **http://127.0.0.1:9500**. The header carries a `DEV` chip and the
 browser tab reads `DEV · NeuralStrike` — that is how you tell the two tabs apart.
 
-`systemctl --user start trading-dev.target` brings up **ten** units (seven
+`systemctl --user start trading-dev.target` brings up **eleven** units (eight
 services + webgui + webgui_live, and no proxy — dev borrows prod's; the live
 screens are NOT withheld the way the proxy is, because nothing about them is a
 shared exclusive credential). Output goes to the
@@ -700,7 +700,7 @@ Then it records the current commit in `logs/promote_previous_commit`, stops the
 target, waits for both the units and their **listening sockets** to go
 (`is-active` clears about a second early), fast-forwards, reinstalls
 dependencies **only if `requirements.lock` moved**, regenerates the units,
-starts, and probes **every process** over HTTP — the proxy, the seven services'
+starts, and probes **every process** over HTTP — the proxy, the eight services'
 `/health` and the web GUI (a dead accept loop stays bound and would pass a TCP
 connect). The public screens are probed too, but only warned about.
 

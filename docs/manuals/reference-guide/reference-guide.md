@@ -43,7 +43,7 @@ Three layers, running as separate programs on your machine:
 | Layer | What it is | Why you care |
 |---|---|---|
 | **The gateway** | `schwab-proxy` on port 8100. Holds your Schwab login and fetches all market data. | If this is down, nothing has fresh data. Start it first. |
-| **The services** | Seven background programs (ports 8210–8213 and 8215–8217), one per subject area: sentiment, options, portfolio, trade, market, news, and the site's blog. | They do the work — scanning, scoring, collecting — whether or not a browser is open. |
+| **The services** | Eight background programs (ports 8210–8213, 8215–8217 and 8219), one per subject area: sentiment, options, portfolio, trade, market, news, the site's blog, and the X accounts feed. | They do the work — scanning, scoring, collecting — whether or not a browser is open. |
 | **The web app** | What you look at, on port 8500. | It **only displays**. It never calculates anything itself. |
 
 Between them sits a small in-memory database (Redis).
@@ -5198,6 +5198,7 @@ merely running but actually *publishing*.
 | market_svc | 2 | 8215 |
 | news_svc | 2 | 8216 |
 | blog_svc | 2 | 8217 |
+| xfeed_svc | 2 | 8219 |
 | webgui (this app) | 1 | 8500 |
 | webgui_live (public live screens) | 1 | 8501 |
 
@@ -5367,7 +5368,7 @@ number before that happens. The Claude counter does the same for money.
 
 *Menu: bottom of the rail, the red-outlined button · Route `/terminate`*
 
-A confirm-gated stop of the entire local stack — the gateway, all seven services, the
+A confirm-gated stop of the entire local stack — the gateway, all eight services, the
 web app itself, and the public live screens on `live.neuralstrike.co`, which go dark
 with it. **Redis is deliberately left running**, because it is a *system* service
 this app does not own.

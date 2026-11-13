@@ -24,6 +24,7 @@ keys that feed it. Menu order matches the rail.
 | **Opportunity Board** | `options_svc` | `cache:options:matrix` |
 | **Flow Alerts** | `options_svc` | `cache:options:flow_alerts`, `:flow_sides`, `:flow_followup` |
 | **Market News** | `news_svc` :8216 | `cache:news:feed`, `:sec`, `:calendar`, `:status` (the public copy reads `:feed_public`, `:sec_public`, `:calendar_public`); also the Desk's Headlines panel (`:feed`) and the Symbol page's news band (`:feed` + `:sec`) |
+| **X Feed** | `xfeed_svc` :8219 | `cache:xfeed:latest`, `:accounts`; the page asks `query` / `stats` on `cmd:xfeed` and reads the answer at `cache:xfeed:answer:<id>` |
 | **Market Dashboard** | `market_svc` :8215 | `cache:market:dashboard`, `:summary`, `:read` (the Desk's Market read), `:volume` (traded volume, for the Market read and the reports), `:holdings` (each fund tile's top holdings, quoted, for the hover card) |
 | **Sentiment** | `sentiment_svc` :8210 | `cache:sentiment:composite`, `:regime`, `:regime_history`, `:intraday_history` |
 | **Sector & Industry** | `sentiment_svc` | `cache:sentiment:sectors` |
@@ -1265,6 +1266,47 @@ After `[limiter] priority_run` marked requests (4 as shipped) have gone ahead of
 a waiting ordinary one, an ordinary one is sent; `0` switches the lane off. The
 rate is unchanged. A request answered from the local store never waits.
 
+## X Feed service — :8219
+
+**Entry:** `services/xfeed_svc/app.py` (`make_app("xfeed", scheduler=scheduler.loop,
+command_handler=handlers.handle_command)`). Polls the FxEmbed API (`api.fxtwitter.com`,
+no key) for each watched X account into `services/xfeed_svc/data/xfeed.db` (the
+standalone Node feed's schema: `accounts`, `posts`, `gaps`, `settings`; times in epoch
+milliseconds) and publishes two views. **No Schwab call, no Claude call, no proxy.**
+Tunables are `config/xfeed.toml` (`[fxembed]`, `[poller]`, `[views]`, `[page]`), re-read
+every tick. The fetch deadline watchdog is `shared/http_watchdog.py`, shared with
+`news_svc`. Design: `docs/plans/2026-11-13-x-feed-design.md`.
+
+**Scheduler** (`services/xfeed_svc/scheduler.py`): the loop wakes every `tick_s` (5 s),
+beats the heartbeat and starts a poll cycle when `interval_s` (60, minimum 30) has passed
+since the last one ENDED. A cycle never doubles and runs off the loop. A fault is counted
+(`_degrade`) and never escapes. Gated by the `schedulers` flag.
+
+**Commands (`cmd:xfeed`)**, each carrying a `request_id` (32 hex chars, made by the page):
+
+| Type | Payload | Effect |
+|---|---|---|
+| `add_account` | `handle`, `group?` | Baselines the handle from FxEmbed (slow). Errors: `Invalid handle`, `Already watching @x`, `Account not found`, `Could not reach FxEmbed (...)`, group too long |
+| `remove_account` | `handle` | Stops watching it (its posts stay). Error: `Not watching that account` |
+| `set_group` | `handle`, `group` (null = Ungrouped) | Trims and collapses spaces, at most `group_name_max` (30) characters, reuses an existing group's spelling case-insensitively |
+| `query` | `group?`, `ungrouped?`, `account?`, `type?`, `q?`, `ticker?`, `before?`, `before_key?`, `limit` | One filtered page of posts and gap rows |
+
+There is no reply on the stream. Every command is ANSWERED on
+`cache:xfeed:answer:<request_id>` (a TTL of `answer_ttl_s`, 120 s; no event):
+`{request_id, command, ok, error}` plus the command's own fields. A `query` answer adds
+`rows`, `limit` (the page size actually used, `limit` clamped to `1..query_limit_max`,
+1000), `tickers` and `counts`. An unknown command or a handler fault is answered too.
+
+**Views:**
+
+| Key | Payload | Written |
+|---|---|---|
+| `cache:xfeed:latest` | `{"rows": [...], "tickers": [{tag, n}, ...], "total": n, "limit": n}` — the newest `latest_rows` (300) visible posts and gap rows across active accounts, the top `top_tickers` (10), and `limit`, the row cap in force | `skip_unchanged`; no timestamp (read `cache:xfeed:latest:ts`) |
+| `cache:xfeed:accounts` | `{"accounts": [...], "counts": {...}, "interval_s": n, "page": {...}}` — active accounts (handle, name, avatar, group, last checked / ok, error, fail count), post counts per account and per group, the poll interval and the page's tunables (`new_highlight_s`, `answer_poll_s`, `answer_timeout_s`) | `skip_unchanged`; no timestamp |
+
+Every string in a row (text, names, URLs) is third-party text: render it escaped, and
+never use a URL as a link without checking it is http(s).
+
 ## Health & auth
 
 | Endpoint | Method | Returns |
@@ -1687,8 +1729,11 @@ cache:news:status              events:news:status
 cache:blog:drafts              events:blog:drafts             (drafts waiting - metadata and a digest, never a document)
 cache:blog:posts               events:blog:posts              (published entries - metadata)
 cache:blog:social_cards        events:blog:social_cards       (blog entries' social cards - paths and captions)
+cache:xfeed:latest             events:xfeed:latest            (X Feed - the newest posts and gap rows, top tickers, the row cap)
+cache:xfeed:accounts           events:xfeed:accounts          (X Feed - the watched accounts, counts, poll interval, page tunables)
+cache:xfeed:answer:<request_id>                               (one command's answer - a TTL, NO event)
 cache:blog:result              events:blog:result             (how the last cmd:blog command ended)
-cmd:trade   cmd:portfolio   cmd:market   cmd:news   cmd:blog
+cmd:trade   cmd:portfolio   cmd:market   cmd:news   cmd:blog   cmd:xfeed
 ```
 
 ---
@@ -1775,6 +1820,7 @@ hard-code ports or `D:\` paths.
 | market_svc | 8215 | `SERVICE_PORTS["market"]` |
 | news_svc | 8216 | `SERVICE_PORTS["news"]` |
 | blog_svc | 8217 | `SERVICE_PORTS["blog"]` |
+| xfeed_svc | 8219 | `SERVICE_PORTS["xfeed"]` |
 | webgui (NiceGUI) | 8500 | `NICEGUI_PORT` / `NICEGUI_URL` |
 | webgui_live (public screens) | 8501 | `NICEGUI_LIVE_PORT` / `NICEGUI_LIVE_URL` |
 
@@ -1788,7 +1834,7 @@ resolves the identity and every port consumer follows it with no edit of its own
 
 | | prod | dev |
 |---|---|---|
-| `[services]` ports | 8210–8213, 8215–8217 | **9210–9213, 9215–9217** (`port_offset`) |
+| `[services]` ports | 8210–8213, 8215–8217, 8219 | **9210–9213, 9215–9217, 9219** (`port_offset`) |
 | webgui | 8500 | **9500** |
 | webgui_live | 8501 | **9501** |
 | Redis | Redis db **0** | Redis db **1** |

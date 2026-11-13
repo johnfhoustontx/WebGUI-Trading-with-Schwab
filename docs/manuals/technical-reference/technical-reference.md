@@ -96,7 +96,7 @@ Load-bearing runtime packages:
 | Package | Role |
 |---------|------|
 | `nicegui[highcharts]>=2.0.0` | The web GUI and every chart/gauge. |
-| `fastapi==0.137.0`, `uvicorn==0.49.0`, `starlette==1.3.1` | The proxy + the seven services. |
+| `fastapi==0.137.0`, `uvicorn==0.49.0`, `starlette==1.3.1` | The proxy + the eight services. |
 | `redis==8.0.0` | Client for the Redis backbone. `fakeredis>=2.20` backs the tests (no live server needed). |
 | `pydantic>=2.0` | The typed cross-tier contracts. |
 | `schwab-py==1.5.1` | Schwab auth / market data / streaming. |
@@ -175,6 +175,7 @@ Ports come from `config/ports.toml` via `repo_paths.py` — never hard-coded.
 | 8215 | market_svc | Required |
 | 8216 | news_svc | Required |
 | 8217 | blog_svc | Required |
+| 8219 | xfeed_svc | Required |
 | 8500 | webgui (NiceGUI) | Required |
 | 8501 | webgui_live — the PUBLIC read-only screens, a second NiceGUI process | Required |
 
@@ -192,7 +193,7 @@ were removed in September 2026 — nothing in the stack talks to those processes
 
 ## Startup order
 
-The dependency chain is strict: **Redis → schwab-proxy → the seven services → webgui.**
+The dependency chain is strict: **Redis → schwab-proxy → the eight services → webgui.**
 Services wait on the proxy because they resolve market data through it (`news_svc`
 and `blog_svc` call no proxy — one reads public feeds, the other a local store — but
 both are ordered with the others).
@@ -222,10 +223,10 @@ GEX collection and the raw feed* below).
 ## Verifying the install
 
 1. Open **`http://127.0.0.1:8500/status`** — the System Status page probes Redis,
-   the proxy, Schwab authorization, all seven services, the webgui and the public
+   the proxy, Schwab authorization, all eight services, the webgui and the public
    live screens, plus a data-freshness table.
 2. Or probe directly: `GET http://127.0.0.1:8100/health` and
-   `GET http://127.0.0.1:82{10..13}/health`, `:8215/health`, `:8216/health` and `:8217/health` (each returns `{"domain": …, "up": true}`).
+   `GET http://127.0.0.1:82{10..13}/health`, `:8215/health`, `:8216/health`, `:8217/health` and `:8219/health` (each returns `{"domain": …, "up": true}`).
 3. Run the tests **one folder at a time** (never `pytest services` across all of
    them — that re-triggers the module-name collisions):
 
@@ -273,12 +274,13 @@ Redis backbone. No two Tier-2 services talk to each other directly.
   the `events:{domain}:{view}` pub/sub channels and the `cmd:{domain}` command
   streams. `shared/bus` wraps it; `shared/contracts` holds the typed payloads that
   some views are validated against on write.
-- **Tier 2, services.** Seven FastAPI services, `services/{domain}_svc`: sentiment,
-  options, portfolio, trade, market, news and blog. Each imports only its own
+- **Tier 2, services.** Eight FastAPI services, `services/{domain}_svc`: sentiment,
+  options, portfolio, trade, market, news, blog and xfeed. Each imports only its own
   engines, owns its scheduler and command consumer, and validates, caches and
   publishes its results. Five of them fetch market data through `schwab-proxy`
   (:8100), the only process that talks to Schwab. `news_svc` reads public feeds
-  and `blog_svc` its own store; neither calls the proxy. The scheduled briefings
+  and `blog_svc` its own store; neither calls the proxy. `xfeed_svc` polls the FxEmbed
+  API (no key) into its own store and calls neither the proxy nor Claude. The scheduled briefings
   call Claude.
 
 ## Process map and ports
@@ -294,6 +296,7 @@ Redis backbone. No two Tier-2 services talk to each other directly.
 | market_svc | 8215 | Live macro-ticker Market Dashboard (~3 s RTH poll), and its fund tiles' top holdings for the hover card (`cache:market:holdings`, one quote request every 15 s in the session, 300 s outside it). Its /ES and /NQ tiles quote the front-month contract: quarterly (H, M, U, Z), expiring the third Friday of the month or the session before when that Friday is a closure, and switched `[futures] roll_days_before_expiry` days (8) before expiry — `shared/futures.py`. |
 | news_svc | 8216 | Market News: polls free public RSS / Google News / Yahoo / SEC EDGAR feeds and the economic calendar (Fed, BLS, BEA, FRED, Nasdaq) into `news.db`. No Schwab, no Claude, no proxy. |
 | blog_svc | 8217 | The site Blog: cleans an uploaded HTML document, keeps drafts and entries in `blog.db` and the files beside it, and writes published entries into the served site. No Schwab, no Claude, no proxy; the one outside request is the typeface copy from Google Fonts at upload. |
+| xfeed_svc | 8219 | The X Feed: polls the FxEmbed API for the watched X accounts into `xfeed.db` (the standalone Node feed's schema), publishes the newest posts and the accounts, and answers the page's per-request queries. No Schwab, no Claude, no proxy; the one outside host is `api.fxtwitter.com`. |
 | webgui | 8500 | The web UI. |
 | webgui_live | 8501 | The eighteen public screens, on their own origin. |
 
@@ -579,7 +582,7 @@ silent.
 | `trade-analyzer/` | `src/analysis` — recommendation, scoring, fundamentals, sector. |
 | `portfolio-analyzer/` | `src/` — sector breakdown, comparisons, evaluation. |
 | `shared/` | `analysis_lib/` (technical, market data), `contracts/`, `bus/`. |
-| `services/` | The seven Tier-2 services. |
+| `services/` | The eight Tier-2 services. |
 | `webgui/` | The NiceGUI front end. |
 
 ## Scoring conventions (shared idioms)
@@ -5059,6 +5062,7 @@ the source; this table is a summary of them.
 | trade_svc | Analysis on demand. One scheduled job: the watchlist **dividend pull**, once a trading day at or after **06:40 CT** (`[calendar.dividends] refresh_at` in `config/news.toml`); the loop wakes every **60 s** and retries a failed pull after **15 min**. |
 | market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); report summary re-read when the published market report changes (a stat of `deploy/site/reports/latest.html` + `latest.txt` per poll) — no Claude call. |
 | news_svc | Three branches, launched every **30 s** tick (`TICK_S`) as keyed background tasks, so a slow one delays only itself and one still running is skipped, never doubled. **feeds**: every feed polled every **2 min** 08:30–15:00 CT (`[collector] rth_poll_min`), **5 min** in the extended sessions 06:30–08:25 and 15:00–15:15 CT (`eth_poll_min`), **30 min** otherwise on a trading day (`offhours_poll_min`) and **30 min** at weekends and holidays (`weekend_poll_min`), counted from the END of the last poll; nothing polls faster than **60 s** (`MIN_INTERVAL_S`). **calendar**: every tick, fetching only the sources whose own `refresh_min` is due (Fed 60 min, BLS / BEA / FRED calendar 720, Nasdaq 240, values 240). **watch**: every tick, fetching only a series whose release just passed — every **2 min** for up to **60 min**. All in `config/news.toml`, editable in Settings. One cycle of each at a time: a Refresh during one is skipped. |
+| xfeed_svc | The loop wakes every **5 s** (`[poller] tick_s`) to beat its heartbeat and decide whether a cycle is due: one starts when the last one ENDED at least `interval_s` (**60 s**, minimum 30, re-read every tick) ago, as a background task, never doubled. A cycle polls each watched account in turn (`account_gap_s` 1.0 apart), pages back at most `max_pages` (25) at `page_gap_s` 1.0, and backs off 60/120/300 s after an error. Everything else is on demand: `add_account`, `remove_account`, `set_group` and `query` on `cmd:xfeed`. |
 | blog_svc | The loop wakes every **30 s** (`TICK_S`) to beat its heartbeat and re-read the interval. **At start**: repair the store, rebuild every entry page on the site, publish the two list views. **Then every 30 min** (`[site] republish_min` in `config/blog.toml`, 1 to 1440, counted from the END of the last pass): the site rebuild again, which rewrites only what differs from the store, and the two views again. A pass that fails is retried at the next wake. Everything else is on demand, when the Blog page sends a command. |
 | /ES and /NQ chain feed | Not a service: a capture on the operator's PC, every **300 s** on the epoch clock (`[capture] interval_sec` in `config/futures_chain.toml`) from **06:00** Central on the day of an expiry to **15:00** Central, Monday to Friday (`[session]`), then one ssh to vps2 per capture. `options_svc` handles each on arrival (`cmd:futures_chain`) and its **stopped-capture watch** runs each 30 s scheduler tick, with no NYSE gate. No Schwab or proxy call. See *The /ES and /NQ chain feed*. |
 

@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-12</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-13</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -119,6 +119,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </ul>
 </li>
 <li><a href="#market-news">Market News</a></li>
+<li><a href="#x-feed">X Feed</a></li>
 <li><a href="#market-dashboard">Market Dashboard</a></li>
 <li><a href="#sentiment">Sentiment</a></li>
 <li><a href="#bull-bear-map">Bull / Bear Map</a></li>
@@ -315,7 +316,7 @@ just click <strong>Authorize</strong> again.</p>
 </ul>
 <h2 id="ports-the-app-uses">Ports the app uses</h2>
 <p>The app runs entirely on your own machine and needs these local ports free:
-<strong>6379</strong> (Redis), <strong>8100</strong> (Schwab gateway), <strong>8210–8213</strong> and <strong>8215–8217</strong> (the seven services),
+<strong>6379</strong> (Redis), <strong>8100</strong> (Schwab gateway), <strong>8210–8213</strong>, <strong>8215–8217</strong> and <strong>8219</strong> (the eight services),
 <strong>8500</strong> (the web app) and <strong>8501</strong> (the public live screens). If another program
 is already using one of them, the matching piece won't start.</p>
 <hr />
@@ -333,7 +334,7 @@ all together with one of the launcher scripts in the project root:</p>
 <tbody>
 <tr>
 <td><code>systemctl --user start trading-prod.target</code></td>
-<td>Starts the gateway, the seven services, the web app and the public live screens.</td>
+<td>Starts the gateway, the eight services, the web app and the public live screens.</td>
 </tr>
 <tr>
 <td><code>systemctl --user list-units 'trading-prod*'</code></td>
@@ -538,8 +539,8 @@ rather than the moment you open the menu. The screen behind it is always live.</
 <li><strong>Schwab gateway (proxy)</strong> — handles the Schwab connection and market data.
   Everything else depends on it. <strong>It must be running first</strong> (the launcher
   handles ordering for you).</li>
-<li><strong>Seven services</strong> — Sentiment, Options, Portfolio, Trade, Market, News and
-  Blog. Each one powers its matching page(s).</li>
+<li><strong>Eight services</strong> — Sentiment, Options, Portfolio, Trade, Market, News, Blog and
+  X Feed. Each one powers its matching page(s).</li>
 <li><strong>The public live screens</strong> — a second, read-only copy of the web app serving
   <code>live.neuralstrike.co</code>. See <em>The public live screens</em> above.</li>
 <li><strong>Redis</strong> — a local data backbone the services and the web app share.</li>
@@ -557,7 +558,7 @@ launcher, or restart the specific service from the <strong>System Status</strong
 <p>Use <strong>Stop All Services</strong> at the foot of the rail — it asks for your
 authenticator code before it will do anything — or run
 <code>systemctl --user stop trading-prod.target</code>. This stops the
-gateway, the seven services, the web app <strong>and the public live screens</strong> — so the
+gateway, the eight services, the web app <strong>and the public live screens</strong> — so the
 public site goes dark until you start the stack again. (Redis is intentionally
 left running — it is a <em>system</em> service the app's own units cannot reach.)</p>
 <hr />
@@ -1896,7 +1897,9 @@ model)</strong>:</p>
 <p>Either switch applies to alerts fired <strong>after</strong> the change: each alert carries the
 setting it was fired under, so the rows already on today's list keep theirs.</p>
 <h2 id="market-news">Market News</h2>
-<p><strong>Route:</strong> <code>/news</code>. A rail item under <strong>MARKETS</strong>, directly below Flow Alerts.</p>
+<p><strong>Route:</strong> <code>/news</code>. A rail item under <strong>MARKETS</strong>, directly below Flow Alerts. Market
+News has two tabs: <strong>Headlines</strong> (this page, <code>/news</code>) and <strong>X Feed</strong> (<code>/news/x</code>, the
+next section); the rail item opens Headlines.</p>
 <p>Two columns: the <strong>headlines</strong> and their filters on the left (two thirds of the
 width); on the right, <strong>Next on the calendar</strong>, the <strong>SEC filings</strong> and the
 <strong>Economic calendar</strong>. On a phone they stack in that order. Every time is Central, on
@@ -1992,6 +1995,39 @@ a 24-hour clock.</p>
 <blockquote>
 <p>A headline is not a verified fact, the impact word is a rule count and not a
 judgement, and nothing here is a trade recommendation.</p>
+</blockquote>
+<h2 id="x-feed">X Feed</h2>
+<p><strong>Route:</strong> <code>/news/x</code>. The second tab of <strong>Market News</strong> (MARKETS).</p>
+<p>The posts of the X accounts you watch, newest first. Two columns: the posts on the
+left, the accounts on the right (below the posts on a phone). Every time is Central,
+on a 24-hour clock.</p>
+<ul>
+<li><strong>One line per post</strong>: the time, <strong>POST</strong> / <strong>RT</strong> / <strong>REPLY</strong>, the first line of
+  the text, marks for photos, video or a quoted post, up to two tickers and the
+  account. A <strong>NEW</strong> post (arrived in the last minute) has a green edge. A date line
+  starts each earlier day; an <strong>amber line</strong> says some posts from one account may be
+  missing for a stretch after a pause.</li>
+<li><strong>Click a line</strong> to open the post under it: the full text (links and @mentions open
+  on X), photos (click for full size), a video's picture and <strong>Play on X ↗</strong>, a quoted
+  post, the counts, <strong>Posted …</strong> and <strong>Open on X ↗</strong>. Click a <strong>$TICKER</strong> in the text
+  to filter the feed by it or to open its <strong>Symbol</strong> page.</li>
+<li><strong>Filters</strong> (fold them away with the arrow): the group tabs with post counts, a
+  search box (<code>$NVDA</code> finds posts tagged with that ticker), <strong>All / Posts / Reposts /
+  Replies</strong>, and one chip per account. <strong>Most mentioned</strong> lists the tickers in the
+  posts shown — click one to filter. <strong>Load older posts</strong> at the bottom (it also loads
+  as you scroll near it) reaches back through the whole history.</li>
+<li><strong>Accounts</strong>: type a <strong>@handle</strong> or an x.com link, optionally a group, and <strong>Add</strong>.
+  A new account starts from its next post. Each account shows when it was last
+  checked, or its error (<strong>account not found</strong> after repeated misses). The folder
+  button moves it to another group, Ungrouped or a <strong>New group…</strong>; <strong>✕</strong> stops
+  watching it after you confirm.</li>
+<li>The line at the top reads <strong>Live · checking every 60s</strong>, or <strong>X feed service not
+  answering</strong> in red when the service has gone quiet. The interval is set in
+  <strong>Settings → Configuration</strong> (the link under the accounts).</li>
+</ul>
+<blockquote>
+<p>A post is its author's words, not a verified fact, and nothing here is a trade
+recommendation.</p>
 </blockquote>
 <h2 id="market-dashboard">Market Dashboard</h2>
 <p><strong>Route:</strong> <code>/market</code>. It is the <strong>Trend &amp; Sentiment</strong> group's first tab, so clicking
@@ -4552,7 +4588,7 @@ in a trading workflow, which is why they sit apart.</p>
 <ul>
 <li>An <strong>overall banner</strong> — green (all up), red (naming what's down), or grey
   (checking).</li>
-<li>A <strong>component grid</strong> — Redis, the Schwab gateway, the seven services, the web app
+<li>A <strong>component grid</strong> — Redis, the Schwab gateway, the eight services, the web app
   itself, and the public live screens beside it, each with Online/Offline and its
   tier. The gateway's card also shows the <strong>Schwab auth</strong> state.</li>
 <li>The gateway card's auth line is a clock counting down what the Schwab sign-in
@@ -4865,7 +4901,7 @@ group, next to EOD Report.</p>
 <p>A guarded "stop the whole local stack" page. The <strong>Stop all services</strong> button — a
 red outline, matching the rail — opens a confirmation; the solid red button is the
 <strong>Stop everything</strong> inside it, which is where the decision is actually made.
-Confirming stops the gateway, the seven services, the web app <strong>and the public live
+Confirming stops the gateway, the eight services, the web app <strong>and the public live
 screens</strong> — the public site goes dark with it.</p>
 <p><strong>The confirmation asks for your authenticator code.</strong> Type the current 6-digit
 code from your authenticator app into the dialog and press <strong>Stop everything</strong> — or

@@ -4,7 +4,45 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-12 (**The Macro Board shows a fund's top holdings on hover; Thematic swaps XSD for CIBR and PAVE.**)
+**Last updated:** 2026-11-13 (**The X Feed is inside the app: `xfeed_svc` (:8219) and `/news/x`.**)
+
+- **What.** The standalone Node "X News Feed" on vps2 is now a service and a page.
+  `services/xfeed_svc` (Tier 2, domain `xfeed`, port 8219, commands on `cmd:xfeed`)
+  polls the FxEmbed API for the watched accounts into
+  `services/xfeed_svc/data/xfeed.db` (the Node app's schema, times in epoch
+  milliseconds) and publishes `cache:xfeed:latest` and `cache:xfeed:accounts`.
+  **Market News is now a group**: **Headlines** keeps `/news`, **X Feed** is
+  `/news/x` (`pages/xfeed.py`, `xfeed_parts.py`, the pure `xfeed_view.py`).
+- **Pieces.** The poller is a port of the Node one, not a redesign (baseline,
+  catch-up, gaps, the live rule). `add_account`, `remove_account`, `set_group` and
+  `query` are answered on a per-request key, `cache:xfeed:answer:<request_id>`, so
+  two open tabs cannot overwrite each other. `cache:xfeed:latest` and a `query`
+  answer carry `limit`, the row cap in force, which is how the page tells a full
+  page from the last one. Every tunable is in `config/xfeed.toml` with a
+  `webgui/config_schema.py` entry. `tools/import_x_feed.py` is the one-shot import
+  of the old `feed.db` (the source is opened read-only; a non-empty target is
+  refused unless `--force`).
+- **Shared module.** The fetch deadline watchdog moved out of
+  `services/news_svc/fetch.py` into **`shared/http_watchdog.py`**; `news_svc` and
+  `xfeed_svc` both use it (`conftest.py`'s network guard names it).
+- **Docs.** `docs/webgui-routes.md` (`/news/x`), the four manuals (page, ports,
+  commands, views, the system-overview diagram's eighth service box),
+  `CLAUDE.md`'s service lists, `docs/reference/` (ports, shell, testing) and the
+  design (now approved, built).
+- **Backup.** `tools/backup_local.py` sweeps every non-empty `*.db`, so `xfeed.db`
+  is backed up with no change to it.
+- **Commits** (`git log --oneline origin/main..HEAD`): 7a5396e design, 49f151a plan,
+  8bc3aaa register the service, 0e926f5 handle normalisation, 34635d9 test fix,
+  def0c6c FxEmbed client, 2d763f8 watchdog to `shared/http_watchdog`, d1d36a4 store,
+  60b7849 store rollback, efd6276 poller, 153b713 poller tests, 4cb4094 commands and
+  views, 1588c03 handler faults, 4454e24 FxClient fault count, d82e914 scheduler,
+  a30e1da scheduler fixes, 42a7993 importer, 7123c86 view model, d290d44 the page,
+  1d5c1c5 page fix, and this commit (documentation).
+- **Not yet done.** Deploy to prod, run the importer against the vps2 `feed.db`,
+  and retire the Node service: the operator's call, after the branch is reviewed
+  and merged.
+
+**Prior —** 2026-11-12 (**The Macro Board shows a fund's top holdings on hover; Thematic swaps XSD for CIBR and PAVE.**)
 
 - **Thematic frame.** XSD (SPDR semiconductors) is gone, since it repeated SMH's
   read. CIBR (First Trust Nasdaq Cybersecurity) and PAVE (Global X U.S.

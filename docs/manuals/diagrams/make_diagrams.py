@@ -143,9 +143,9 @@ def system_overview():
 
     container(ax, 40, 440, 920, 150, "Tier 2 · services: each owns its scheduler, commands and engines", "teal")
     services = [("sentiment", ":8210"), ("options", ":8211"), ("portfolio", ":8212"),
-                ("trade", ":8213"), ("market", ":8215"), ("news", ":8216"), ("blog", ":8217")]
+                ("trade", ":8213"), ("market", ":8215"), ("news", ":8216"), ("blog", ":8217"), ("xfeed", ":8219")]
     for i, (name, port) in enumerate(services):
-        box(ax, 63 + i * 126, 478, 118, 60, name, port, "teal")
+        box(ax, 63 + i * 112, 478, 106, 60, name, port, "teal")
     note(ax, 500, 565, "publish views and events to Redis  ·  consume their own cmd:{domain}", ha="center")
     arrow(ax, (500, 405), (500, 438), both=True)
 

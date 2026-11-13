@@ -35,7 +35,7 @@ at the defaults (2026-08-28).** The repo-root **`conftest.py`** carries an autou
 fixture that refuses any connect resolving into a live data directory
 (`options-scanner/data`, `options-scanner` itself for `gex_history.db`,
 `shared/data`, `webgui/data`, `services/trade_svc/data`, `services/news_svc/data`,
-`services/blog_svc/data`).
+`services/blog_svc/data`, `services/xfeed_svc/data`).
 `tmp_path` and
 `:memory:` are unaffected; a test that genuinely must read production shape marks
 itself **`@pytest.mark.allow_live_db`**. It applies to per-app runs
@@ -83,7 +83,7 @@ one chokepoint per HTTP stack a production call can travel:
 
 | stack | chokepoint | who uses it for real calls | raises |
 |---|---|---|---|
-| `requests` | `requests.adapters.HTTPAdapter.send` | the proxy client, the stream tracker, the stream consumers, `news_svc.fetch` | `NetworkBlockedInTest` (a `requests` `ConnectionError`) |
+| `requests` | `requests.adapters.HTTPAdapter.send` | the proxy client, the stream tracker, the stream consumers, `news_svc.fetch`, `xfeed_svc.fxapi` (both through `shared/http_watchdog.py`) | `NetworkBlockedInTest` (a `requests` `ConnectionError`) |
 | `urllib` | `urllib.request.urlopen` | `daily_trade_log`, `earnings_history`, `edgar_fundamentals`, `tools/wait_http`, `tools/token_watch`, `tools/rank_listed_stocks` | `UrllibBlockedInTest` (a `URLError`) |
 | `httpx` | `httpx.HTTPTransport.handle_request` and `httpx.AsyncHTTPTransport.handle_async_request` | no module here imports it, but the `anthropic` SDK (a PAID call) and `schwab-py` (the stream bridge's OAuth client) run on it | `HttpxBlockedInTest` (an `httpx.ConnectError`) |
 
