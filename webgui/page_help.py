@@ -1413,6 +1413,13 @@ engine's positions live on **Paper Account**.
 - **Entry is positive for a credit and negative for a debit** — one column, and
   the sign tells you which. **P&L** is unrealised while a trade is open and
   realised once it is closed.
+- **P&L by account**, under the table, totals the rows shown — one line each for
+  **My trades**, **Trade idea**, **SPY condor** and **Shadow idea**, plus a
+  **Total**. **Realized P&L** sums the closed and expired trades, **Open P&L** the
+  open ones, and **Win rate** is the share of closed trades that made money. It
+  follows the All / My trades / Trade ideas choice. An open trade with no live
+  price yet is left out of Open P&L (a note says how many) rather than counted as
+  zero.
 - **Click a row** to load it into the **detail panel** on the right; its
   **Delete**, **Expected Move**, **Analyze** and **Close trade** buttons sit at
   the foot of that panel.

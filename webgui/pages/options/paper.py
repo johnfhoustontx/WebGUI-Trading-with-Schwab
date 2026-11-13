@@ -292,6 +292,90 @@ def ledger_status(trades, which="all"):
     return f"{n} trade{'s' if n != 1 else ''} · {open_n} open"
 
 
+# ── the P&L summary under the ledger: one row per account ────────────────────
+# The operator's own trades first, then the self-managed books in the order the
+# tags are declared. A source this page does not know reads as the operator's own,
+# exactly as ``tag_of`` already treats it.
+MINE_ACCOUNT = "My trades"
+TOTAL_ACCOUNT = "Total"
+SUMMARY_ACCOUNTS = (MINE_ACCOUNT, IDEA_TAG, CONDOR_TAG, SHADOW_TAG)
+_SUMMARY_NUMERIC = ("trades", "open", "closed", "realized", "unrealized", "total",
+                    "win_rate")
+_SUMMARY_PNL = ("realized", "unrealized", "total")
+
+
+def summary_columns():
+    """The summary table's columns. "Open P&L" is the live figure on OPEN trades
+    only, "Realized" the booked figure on the closed ones; the ledger's own "P&L"
+    column mixes the two by row, which is why it is not one of these names."""
+    spec = [("account", "Account"), ("trades", "Trades"), ("open", "Open"),
+            ("closed", "Closed"), ("realized", "Realized P&L"),
+            ("unrealized", "Open P&L"), ("total", "Total P&L"),
+            ("win_rate", "Win rate")]
+    return [{"name": f, "label": lbl, "field": f, "sortable": False, "align": "left"}
+            for f, lbl in spec]
+
+
+def _sum_or_none(values):
+    """The sum of the figures that EXIST, or None when none does: a missing
+    reading is never a zero."""
+    got = [v for v in values if isinstance(v, (int, float))]
+    return round(sum(got), 2) if got else None
+
+
+def _summary_row(account, trades):
+    is_open = [str(t.get("status") or "").upper() == "OPEN" for t in trades]
+    open_t = [t for t, o in zip(trades, is_open) if o]
+    closed_t = [t for t, o in zip(trades, is_open) if not o]
+    realized = _sum_or_none(trade_pnl(t) for t in closed_t)
+    unrealized = _sum_or_none(trade_pnl(t) for t in open_t)
+    total = _sum_or_none((realized, unrealized))
+    graded = [trade_pnl(t) for t in closed_t if trade_pnl(t) is not None]
+    win_rate = (100.0 * sum(1 for v in graded if v > 0) / len(graded)
+                if graded else None)
+    return {
+        "id": account, "account": account, "trades": len(trades),
+        "open": len(open_t), "closed": len(closed_t),
+        "realized": realized, "unrealized": unrealized, "total": total,
+        "win_rate": round(win_rate, 2) if win_rate is not None else None,
+        "unpriced": sum(1 for t in open_t if trade_pnl(t) is None),
+        **{f"_{k}_class": pnl_class(v) for k, v in
+           (("realized", realized), ("unrealized", unrealized), ("total", total))},
+        "_row_class": "font-semibold" if account == TOTAL_ACCOUNT else "",
+    }
+
+
+def pnl_summary(trades, which="all"):
+    """One row per account shown under the filter (My trades, Trade idea, SPY
+    condor, Shadow idea), in that order, plus a Total row when more than one is
+    shown. PURE. An account with no trade on the ledger has no row; no trade at
+    all is an empty list. Realized sums the closed (and expired) trades, Open P&L
+    the open ones that carry a live mark; an unpriced open trade is counted in
+    ``unpriced``, never as zero. Win rate is the share of closed trades with a
+    realized figure that made money."""
+    groups = {a: [] for a in SUMMARY_ACCOUNTS}
+    for t in trades or []:
+        tag = tag_of(t)[0]
+        if _keeps(tag, which):
+            groups[tag or MINE_ACCOUNT].append(t)
+    rows = [_summary_row(a, ts) for a, ts in groups.items() if ts]
+    if len(rows) > 1:
+        rows.append(_summary_row(TOTAL_ACCOUNT,
+                                 [t for ts in groups.values() for t in ts]))
+    return rows
+
+
+def pnl_summary_note(rows):
+    """The line under the summary when an open trade has no live mark yet: its
+    P&L is left out of Open P&L rather than read as zero. Blank otherwise."""
+    rows = rows or []
+    n = (rows[-1] if rows else {}).get("unpriced") or 0
+    if not n:
+        return ""
+    return (f"{n} open trade{'s' if n != 1 else ''} not yet priced "
+            f"{'is' if n == 1 else 'are'} left out of Open P&L.")
+
+
 def _num(v):
     """Coerce to float, or None — handles values stored as strings (e.g. breakeven)."""
     try:
@@ -462,6 +546,13 @@ def render():
                 # No selection checkbox — clicking a row selects it, which drives
                 # the detail panel and the action footer inside it.
                 table = kit.table(paper_columns(), numeric=_NUMERIC)
+                # The P&L by account, under the rows it sums (same filter).
+                summary_box = ui.column().classes("w-full gap-1 pt-3")
+                with summary_box:
+                    kit.section_title("P&L by account")
+                    summary_table = kit.table(summary_columns(),
+                                              numeric=_SUMMARY_NUMERIC)
+                    summary_note = ui.label("").classes(f"text-xs {MUTED}")
             detail_panel = detail.render()
 
     # Symbol cell gets a colored left-border + faint tint when the row is
@@ -493,6 +584,22 @@ def render():
         </span>
       </q-td>
     ''')
+    # Summary P&L cells: signed, 2 decimals, green/red/grey like the ledger's.
+    for _f in _SUMMARY_PNL:
+        summary_table.add_slot(f'body-cell-{_f}', r'''
+          <q-td :props="props" class="text-right">
+            <span v-if="props.value == null">—</span>
+            <span v-else :class="props.row._''' + _f + r'''_class + ' font-semibold'">
+              {{ (props.value >= 0 ? '+' : '') + Number(props.value).toFixed(2) }}
+            </span>
+          </q-td>
+        ''')
+    summary_table.add_slot('body-cell-win_rate', r'''
+      <q-td :props="props" class="text-right">
+        {{ props.value == null ? '—' : Number(props.value).toFixed(2) + '%' }}
+      </q-td>
+    ''')
+
     # Status as a Deep Slate pill (OPEN blue-accent / closed grey).
     table.add_slot('body-cell-status', r'''
       <q-td :props="props">
@@ -569,6 +676,12 @@ def render():
         elif sel:
             detail_panel.clear()  # selected trade no longer present
         status.text = ledger_status(trades, state["which"])
+        summary = pnl_summary(trades, state["which"])
+        summary_table.rows = summary
+        summary_table.update()
+        summary_note.text = pnl_summary_note(summary)
+        summary_note.set_visibility(bool(summary_note.text))
+        summary_box.set_visibility(bool(summary))
 
     @guard
     def _set_filter(which):

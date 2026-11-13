@@ -3361,6 +3361,25 @@ rules — see *Trade ideas in the ledger* below.)
 | Management cycle | **Hourly, 09:00–14:00 CT** on trading days (the manual paper account's own cadence), plus **Run manage cycle** on [Paper Account](#paper-account) |
 | Expiry settlement | **15:05 CT** on trading days: a settle-only pass closes each expired trade at intrinsic value against that day's close. One missed is settled later against the expiration day's daily close, never a later day's price |
 
+### P&L by account
+
+Under the table, **P&L by account** totals the rows listed: one line each for **My
+trades**, **Trade idea**, **SPY condor** and **Shadow idea** (an account with no row
+on the ledger has no line), plus a **Total** when more than one is shown. It follows
+the All / My trades / Trade ideas choice above the table.
+
+| Column | What it sums |
+|---|---|
+| **Realized P&L** | the booked P&L of the closed and expired trades |
+| **Open P&L** | the live P&L of the open trades that have a current price |
+| **Total P&L** | the two together |
+| **Win rate** | the share of closed trades, with a booked P&L, that made money |
+
+An open trade with no live price yet (off-hours, before its first re-price) is
+**left out of Open P&L, never counted as zero**; a note under the summary says how
+many. Rows cleared by **Delete all closed** are not on the ledger, so they are not
+in the summary either.
+
 ### Automatic exits
 
 **What closes itself, and what does not:**

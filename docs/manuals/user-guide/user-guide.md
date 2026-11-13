@@ -2601,6 +2601,13 @@ ledger* below).
   **per spread** (i.e. per share — type `2.00`, not `200`).
 - **Table:** Trade ID, Symbol, Strategy, Strikes, Expiration, Qty, Entry Credit,
   Max Loss, P&L, Status, Entry Time.
+- **P&L by account** (under the table): one line each for **My trades**, **Trade
+  idea**, **SPY condor** and **Shadow idea**, plus a **Total**, over the rows
+  listed under the current All / My trades / Trade ideas choice. Columns: Trades,
+  Open, Closed, **Realized P&L** (closed and expired trades), **Open P&L** (open
+  trades at their live mark), **Total P&L** and **Win rate** (the share of closed
+  trades that made money). An open trade not yet priced is left out of Open P&L,
+  and a note under the table says how many, rather than counting it as zero.
 - Click a row to load its **detail panel**; the app automatically runs a live
   analysis and overlays current Greeks and P&L.
 - Each row also has an **Expected Move** button.

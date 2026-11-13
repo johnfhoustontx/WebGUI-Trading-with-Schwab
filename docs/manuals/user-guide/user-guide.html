@@ -3120,6 +3120,13 @@ ledger</em> below).</p>
   <strong>per spread</strong> (i.e. per share — type <code>2.00</code>, not <code>200</code>).</li>
 <li><strong>Table:</strong> Trade ID, Symbol, Strategy, Strikes, Expiration, Qty, Entry Credit,
   Max Loss, P&amp;L, Status, Entry Time.</li>
+<li><strong>P&amp;L by account</strong> (under the table): one line each for <strong>My trades</strong>, <strong>Trade
+  idea</strong>, <strong>SPY condor</strong> and <strong>Shadow idea</strong>, plus a <strong>Total</strong>, over the rows
+  listed under the current All / My trades / Trade ideas choice. Columns: Trades,
+  Open, Closed, <strong>Realized P&amp;L</strong> (closed and expired trades), <strong>Open P&amp;L</strong> (open
+  trades at their live mark), <strong>Total P&amp;L</strong> and <strong>Win rate</strong> (the share of closed
+  trades that made money). An open trade not yet priced is left out of Open P&amp;L,
+  and a note under the table says how many, rather than counting it as zero.</li>
 <li>Click a row to load its <strong>detail panel</strong>; the app automatically runs a live
   analysis and overlays current Greeks and P&amp;L.</li>
 <li>Each row also has an <strong>Expected Move</strong> button.</li>

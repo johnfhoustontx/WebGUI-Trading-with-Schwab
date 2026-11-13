@@ -650,3 +650,79 @@ def test_a_shadow_idea_wears_its_own_tag_and_is_neither_mine_nor_an_idea():
 
 def test_delete_closed_confirm_names_the_condor_too():
     assert "condor" in paper.DELETE_CLOSED_BODY.lower()
+
+
+# ── the P&L summary under the ledger, one row per account ────────────────────
+def _closed(base, tid, pnl, status="CLOSED"):
+    return {**base, "trade_id": tid, "status": status, "realized_pnl": pnl}
+
+
+def _open(base, tid, pnl):
+    return {**base, "trade_id": tid, "status": "OPEN", "unrealized_pnl": pnl}
+
+
+def test_pnl_summary_one_row_per_account_in_a_fixed_order_and_a_total():
+    trades = [_open(SHADOW, "S1", 5.0), _closed(IDEA, "I1", 40.0),
+              _open(TRADE, "T1", -12.5), _closed(TRADE, "T2", 100.0),
+              _closed(CONDOR, "C1", -30.0, status="EXPIRED")]
+    rows = paper.pnl_summary(trades)
+    assert [r["account"] for r in rows] == [
+        "My trades", "Trade idea", "SPY condor", "Shadow idea", "Total"]
+    mine = rows[0]
+    assert (mine["trades"], mine["open"], mine["closed"]) == (2, 1, 1)
+    assert mine["realized"] == 100.0 and mine["unrealized"] == -12.5
+    assert mine["total"] == 87.5
+    # An EXPIRED trade is a closed one: its realized P&L counts.
+    assert rows[2]["closed"] == 1 and rows[2]["realized"] == -30.0
+    total = rows[-1]
+    assert (total["trades"], total["open"], total["closed"]) == (5, 2, 3)
+    assert total["realized"] == 110.0 and total["unrealized"] == -7.5
+    assert total["total"] == 102.5
+
+
+def test_pnl_summary_win_rate_counts_closed_trades_with_a_reading():
+    trades = [_closed(TRADE, "A", 10.0), _closed(TRADE, "B", -5.0),
+              _closed(TRADE, "C", 0.0), _closed(TRADE, "D", None),
+              _open(TRADE, "E", 50.0)]
+    row = paper.pnl_summary(trades)[0]
+    # 1 win of 3 closed trades with a realized figure; the unvalued one and the
+    # open one are not in the rate.
+    assert row["win_rate"] == 33.33
+    assert paper.pnl_summary([_open(TRADE, "E", 5.0)])[0]["win_rate"] is None
+
+
+def test_pnl_summary_never_reads_a_missing_figure_as_zero():
+    unpriced = _open(TRADE, "U", None)
+    rows = paper.pnl_summary([unpriced])
+    assert len(rows) == 1                       # one account: no Total row
+    row = rows[0]
+    assert row["unrealized"] is None and row["realized"] is None
+    assert row["total"] is None and row["unpriced"] == 1
+    # A priced trade beside it is summed; the unpriced one is still counted.
+    row = paper.pnl_summary([unpriced, _open(TRADE, "P", 8.0)])[0]
+    assert row["unrealized"] == 8.0 and row["unpriced"] == 1
+    assert row["_unrealized_class"] == paper.pnl_class(8.0)
+
+
+def test_pnl_summary_follows_the_filter():
+    trades = [_closed(TRADE, "T1", 10.0), _closed(IDEA, "I1", 20.0),
+              _closed(SHADOW, "S1", 30.0)]
+    assert [r["account"] for r in paper.pnl_summary(trades, "mine")] == ["My trades"]
+    assert [r["account"] for r in paper.pnl_summary(trades, "ideas")] == ["Trade idea"]
+    assert paper.pnl_summary([], "all") == []
+    assert paper.pnl_summary([_closed(TRADE, "T1", 1.0)], "ideas") == []
+
+
+def test_pnl_summary_note_names_the_unpriced_open_trades():
+    assert paper.pnl_summary_note([]) == ""
+    assert paper.pnl_summary_note([{"unpriced": 0}]) == ""
+    one = paper.pnl_summary([_open(TRADE, "U", None), _open(IDEA, "V", 3.0)])
+    assert "1 open trade" in paper.pnl_summary_note(one)
+    two = paper.pnl_summary([_open(TRADE, "U", None), _open(IDEA, "V", None)])
+    assert "2 open trades" in paper.pnl_summary_note(two)
+
+
+def test_the_page_draws_the_summary_under_the_ledger():
+    src = inspect.getsource(paper.render)
+    assert "pnl_summary(trades, state[\"which\"])" in src
+    assert src.index("summary_table") > src.index("table = kit.table")

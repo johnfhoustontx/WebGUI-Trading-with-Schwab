@@ -4,7 +4,14 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-13 (**The X Feed is inside the app: `xfeed_svc` (:8219) and `/news/x`.**)
+**Last updated:** 2026-11-13 (**Paper Ledger: P&L by account under the table.**)
+
+- **What.** `/options/paper` now shows a **P&L by account** table under the ledger: My trades, Trade idea, SPY condor and Shadow idea (each only when it has a row), plus a Total, with Trades / Open / Closed / Realized P&L / Open P&L / Total P&L / Win rate. It follows the All / My trades / Trade ideas toggle.
+- **Pieces.** `pages/options/paper.py`: `summary_columns`, `pnl_summary`, `pnl_summary_note`; the render adds the table and repaints it in `_populate`. Page only, no service or view change. Unpriced open trades are left out of Open P&L and counted in a note, never read as zero.
+- **Tests.** Six new tests in `webgui/tests/test_options_paper.py`; checked in `tools/ui_harness.py options.paper` on a seeded fake bus (all three filters).
+- **Docs.** `page_help.py`, the User Guide and Reference Guide Paper Ledger sections, `docs/webgui-routes.md`.
+
+**Prior —** 2026-11-13 (**The X Feed is inside the app: `xfeed_svc` (:8219) and `/news/x`.**)
 
 - **Live on prod (2026-11-13, ~10:02 CT).** Promoted e78686cd3 -> ddb99b09 (all 11 units up). Import rehearsed on a copy first (accounts=30 posts=4536 gaps=1 settings=1, exit 0), then `x-news-feed` stopped + disabled and the real import ran: accounts=30 posts=4537 gaps=1 settings=1, exit 0. First cycle checked all 29 active accounts with no errors; post-import rows were catch-up then live. Verified signed in on app.neuralstrike.co/news/x: 3 groups + history, filters, Load older, add/remove of a throwaway account, Status shows xfeed_svc healthy, /news unchanged. Still to retire (user OK): tailnet serve :4300, the cos.neuralstrike.co/feed/ Caddy route, and later the x-news-feed unit file + ~/x-news-feed folder.
 - **What.** The standalone Node "X News Feed" on vps2 is now a service and a page.

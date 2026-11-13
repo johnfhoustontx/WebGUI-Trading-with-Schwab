@@ -296,6 +296,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#paper-ledger">Paper Ledger</a><ul>
 <li><a href="#what-it-is_20">What it is</a></li>
 <li><a href="#where-the-data-comes-from_19">Where the data comes from</a></li>
+<li><a href="#pl-by-account">P&amp;L by account</a></li>
 <li><a href="#automatic-exits">Automatic exits</a></li>
 <li><a href="#risk-limits-on-new-trades">Risk limits on new trades</a></li>
 <li><a href="#trade-ideas-in-the-ledger">Trade ideas in the ledger</a></li>
@@ -4765,6 +4766,41 @@ rules — see <em>Trade ideas in the ledger</em> below.)</p>
 </tr>
 </tbody>
 </table>
+<h3 id="pl-by-account">P&amp;L by account</h3>
+<p>Under the table, <strong>P&amp;L by account</strong> totals the rows listed: one line each for <strong>My
+trades</strong>, <strong>Trade idea</strong>, <strong>SPY condor</strong> and <strong>Shadow idea</strong> (an account with no row
+on the ledger has no line), plus a <strong>Total</strong> when more than one is shown. It follows
+the All / My trades / Trade ideas choice above the table.</p>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>What it sums</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Realized P&amp;L</strong></td>
+<td>the booked P&amp;L of the closed and expired trades</td>
+</tr>
+<tr>
+<td><strong>Open P&amp;L</strong></td>
+<td>the live P&amp;L of the open trades that have a current price</td>
+</tr>
+<tr>
+<td><strong>Total P&amp;L</strong></td>
+<td>the two together</td>
+</tr>
+<tr>
+<td><strong>Win rate</strong></td>
+<td>the share of closed trades, with a booked P&amp;L, that made money</td>
+</tr>
+</tbody>
+</table>
+<p>An open trade with no live price yet (off-hours, before its first re-price) is
+<strong>left out of Open P&amp;L, never counted as zero</strong>; a note under the summary says how
+many. Rows cleared by <strong>Delete all closed</strong> are not on the ledger, so they are not
+in the summary either.</p>
 <h3 id="automatic-exits">Automatic exits</h3>
 <p><strong>What closes itself, and what does not:</strong></p>
 <table>
