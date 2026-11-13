@@ -26,6 +26,22 @@ _sleep = asyncio.sleep
 _monotonic = time.monotonic
 
 
+DEFAULT_TICK_S = 5.0
+
+
+def _tick_s(value) -> float:
+    """Seconds between ticks: at least 1; a bad value (non-number, NaN, inf, bool) is the default."""
+    try:
+        if isinstance(value, bool):
+            raise TypeError
+        v = float(value)
+        if v != v or v in (float("inf"), float("-inf")):
+            raise ValueError
+    except (TypeError, ValueError):
+        return DEFAULT_TICK_S
+    return max(1.0, v)
+
+
 async def _to_thread(fn, *args):
     """Run a blocking call on the default executor. A seam: tests swap in an inline call."""
     return await asyncio.get_running_loop().run_in_executor(None, fn, *args)
@@ -57,16 +73,18 @@ async def loop(bus) -> None:
 
     try:
         try:
-            await _to_thread(handlers.publish_all, bus, runtime.get())
+            rt0 = runtime.get()
+            rt0.poller.resume()
+            await _to_thread(handlers.publish_all, bus, rt0)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
             _note("publishing the views at start", exc)
         while True:
             _heartbeat.tick()
-            tick_s = 5
+            tick_s = DEFAULT_TICK_S
             try:
-                tick_s = config.load()["poller"]["tick_s"]
+                tick_s = _tick_s(config.load()["poller"]["tick_s"])
                 running = cycle is not None and not cycle.done()
                 if not running:
                     rt = runtime.get()
@@ -78,5 +96,9 @@ async def loop(bus) -> None:
             await _sleep(tick_s)
     finally:
         if cycle is not None and not cycle.done():
+            try:
+                runtime.get().poller.stop()    # the worker thread outlives the task: ask it to stop
+            except Exception as exc:
+                _note("stopping the poller at shutdown", exc)
             cycle.cancel()
             await asyncio.gather(cycle, return_exceptions=True)

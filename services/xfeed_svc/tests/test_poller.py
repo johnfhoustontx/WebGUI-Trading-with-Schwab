@@ -464,3 +464,25 @@ def test_interval_floor():
     poller = Poller(Store(":memory:"), StubFx([]), load_cfg=lambda: {"poller": {**CFG, "interval_s": 5}},
                     now_ms=lambda: 0, sleep=no_sleep)
     assert poller.interval_s() == 30
+
+
+def test_stop_mid_cycle_polls_no_further_accounts_and_reports_no_change_for_them():
+    repo = Store(":memory:")
+    for h in ("a", "b", "c"):
+        take_baseline(repo, StubFx([[st(id=h, author=h)]]), h, now=0)
+    fx = StubFx([[st(id="z", author="a")]])
+    poller = make_poller(repo, fx, [MIN])
+    changes = []
+
+    def on_change():
+        changes.append(1)
+        poller.stop()          # shutdown arrives during the first account
+
+    poller.run_cycle(on_change)
+    assert len(fx.calls) == 1
+    assert len(changes) == 1
+
+    poller.resume()
+    fx.calls.clear()
+    poller.run_cycle(lambda: None)
+    assert len(fx.calls) == 3   # resume lets a later cycle poll everyone

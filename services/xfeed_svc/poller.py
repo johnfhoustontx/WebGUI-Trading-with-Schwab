@@ -245,9 +245,18 @@ class Poller:
         self._locks = {}
         self._locks_guard = threading.Lock()
         self._cycle_guard = threading.Lock()
+        self._stop = threading.Event()
 
     def _cfg(self):
         return self._load_cfg()["poller"]
+
+    def stop(self) -> None:
+        """Ask a running cycle to finish: it polls no further account. Shutdown calls this."""
+        self._stop.set()
+
+    def resume(self) -> None:
+        """Undo ``stop`` (a restarted loop in the same process)."""
+        self._stop.clear()
 
     def interval_s(self) -> int:
         return _interval_s(self._cfg())
@@ -276,6 +285,8 @@ class Poller:
             for i, due_account in enumerate(due):
                 if i > 0:
                     self._sleep(self._cfg()["account_gap_s"])
+                if self._stop.is_set():
+                    return      # shutting down: no further account, no on_change for it
                 handle = due_account["handle"]
                 with self.account_lock(handle):
                     account = self._store.get_account(handle)
