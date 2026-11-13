@@ -217,6 +217,14 @@ def page_cfg(accounts_view) -> dict:
     return cfg
 
 
+def page_limit(payload, fallback) -> int:
+    """The row cap the service used for ``payload`` (the latest view or a query
+    answer names it as ``limit``); a page holding that many posts has more
+    behind it. ``fallback`` (the page's ask) when the payload does not say."""
+    v = payload.get("limit") if isinstance(payload, dict) else None
+    return v if isinstance(v, int) and not isinstance(v, bool) and v > 0 else fallback
+
+
 def filter_summary(f) -> list:
     """The active filters as short words (the collapsed filter card's line)."""
     parts = []

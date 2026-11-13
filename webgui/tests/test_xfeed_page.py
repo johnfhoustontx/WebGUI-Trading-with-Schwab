@@ -151,8 +151,11 @@ def _accounts_view(*accounts, counts=None):
             "page": {"new_highlight_s": 60, "answer_poll_s": 0.25, "answer_timeout_s": 20}}
 
 
-def _latest(rows, tickers=()):
-    return {"rows": list(rows), "tickers": list(tickers), "total": len(rows)}
+def _latest(rows, tickers=(), limit=None):
+    out = {"rows": list(rows), "tickers": list(tickers), "total": len(rows)}
+    if limit is not None:
+        out["limit"] = limit
+    return out
 
 
 def _new_elements(before):
@@ -207,7 +210,7 @@ def _render(monkeypatch, views, *, may_enqueue=True, meta_ts=None):
     monkeypatch.setattr(shell, "may_enqueue", lambda: may_enqueue)
     monkeypatch.setattr(xfeed, "now_ms", lambda: NOW_MS)
     before = set(ui.context.client.elements)
-    xfeed.render()
+    bus.page = xfeed.render()
     bus.before = before
     return bus
 
@@ -359,6 +362,107 @@ def test_load_older_sends_before_from_the_last_post(monkeypatch):
     _fire_answer_timers(bus)
     texts = _texts(bus)
     assert "An older post" in texts and "Post number 0" in texts   # appended, not replaced
+
+
+def _type_option(bus, key):
+    (opt,) = [e for e in _new_elements(bus.before) if getattr(e, "_xfeed_type", None) == key]
+    return opt
+
+
+def _more_shown(bus):
+    return bus.page.more_row.visible
+
+
+def test_a_failed_filter_query_drops_the_old_list_and_can_be_retried(monkeypatch):
+    """A failed query must not leave the previous filter's rows (and their
+    "Load older" cursor) live under the new filter's chips."""
+    from pages import xfeed
+    rows = [_post(i, minutes_ago=i) for i in range(xfeed.PAGE)]
+    bus = _render(monkeypatch, _views(rows))
+    assert _more_shown(bus)
+    _click(_type_option(bus, "repost"))
+    ((_d, cmd),) = bus.sent
+    bus.answer(cmd, ok=False, error="database is locked")
+    _fire_answer_timers(bus)
+    texts = _texts(bus)
+    assert "Could not load the feed: database is locked" in texts
+    assert "Post number 0" not in texts             # the old filter's list is gone
+    assert not _more_shown(bus) and bus.page.count.text == ""
+    bus.page._more()                                # the sentinel firing late
+    assert len(bus.sent) == 1                       # no stale-cursor query
+    (retry,) = _labelled(bus, xfeed.RETRY)
+    _click(retry)
+    assert len(bus.sent) == 2
+    _d, again = bus.sent[1]
+    assert again["args"]["type"] == "repost" and "before" not in again["args"]
+    bus.answer(again, rows=[_post(7, text="A repost")], tickers=[], counts={}, limit=xfeed.PAGE)
+    _fire_answer_timers(bus)
+    assert "A repost" in _texts(bus)
+
+
+def test_after_a_failure_choosing_the_same_filter_again_retries(monkeypatch):
+    bus = _render(monkeypatch, _views([_post(1)]))
+    _click(_type_option(bus, "reply"))
+    ((_d, cmd),) = bus.sent
+    bus.answer(cmd, ok=False, error="boom")
+    _fire_answer_timers(bus)
+    _click(_type_option(bus, "reply"))              # the same option, re-clicked
+    assert len(bus.sent) == 2 and bus.sent[1][1]["args"]["type"] == "reply"
+
+
+def test_load_older_waits_while_a_new_filter_is_loading(monkeypatch):
+    from pages import xfeed
+    rows = [_post(i, minutes_ago=i) for i in range(xfeed.PAGE)]
+    bus = _render(monkeypatch, _views(rows))
+    _click(_type_option(bus, "post"))
+    assert len(bus.sent) == 1
+    assert not _more_shown(bus)
+    bus.page._more()
+    assert len(bus.sent) == 1                       # the old list's cursor is not sent
+
+
+def test_load_older_shows_when_the_latest_view_is_smaller_than_a_page(monkeypatch):
+    """views.latest_rows (Settings) can be below the page's ask: the latest view
+    names its own limit and a full view still offers older posts."""
+    from pages import xfeed
+    from pages import xfeed_view as xv
+    rows = [_post(i, minutes_ago=i) for i in range(50)]
+    views = _views(rows)
+    views[xv.VIEW_LATEST] = _latest(rows, limit=50)
+    bus = _render(monkeypatch, views)
+    assert _more_shown(bus)
+    (more,) = _labelled(bus, xfeed.LOAD_OLDER)
+    _click(more)
+    assert len(bus.sent) == 1
+    bus2 = _render(monkeypatch, {**views, xv.VIEW_LATEST: _latest(rows[:49], limit=50)})
+    assert not _more_shown(bus2)                    # fewer than its limit: that is all
+
+
+def test_query_pages_below_the_page_size_keep_paging(monkeypatch):
+    """views.query_limit_max (Settings) can clamp a query below PAGE: the answer
+    names the limit used, and a full answer still offers older posts."""
+    from pages import xfeed
+    bus = _render(monkeypatch, _views([_post(1)]))
+    _click(_type_option(bus, "post"))
+    ((_d, cmd),) = bus.sent
+    page = [_post(i, minutes_ago=i) for i in range(20)]
+    bus.answer(cmd, rows=page, tickers=[], counts={}, limit=20)
+    _fire_answer_timers(bus)
+    assert _more_shown(bus)
+    (more,) = [e for e in _labelled(bus, xfeed.LOAD_OLDER)]
+    _click(more)
+    assert len(bus.sent) == 2
+    _d, older = bus.sent[1]
+    assert older["args"]["before"] == page[-1]["sort_at"]
+    bus.answer(older, rows=[_post(100 + i, minutes_ago=100 + i) for i in range(20)],
+               tickers=[], counts={}, limit=20)
+    _fire_answer_timers(bus)
+    assert _more_shown(bus)                         # still a full page: still more
+    _click(more)
+    _d, last = bus.sent[2]
+    bus.answer(last, rows=[_post(500, minutes_ago=500)], tickers=[], counts={}, limit=20)
+    _fire_answer_timers(bus)
+    assert not _more_shown(bus)
 
 
 # ── an expanded row ──────────────────────────────────────────────────────────

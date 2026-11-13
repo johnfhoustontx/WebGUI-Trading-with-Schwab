@@ -61,7 +61,10 @@ def top_tickers(rows, n) -> list:
 def publish_latest(bus, rt) -> int:
     views = config.load()["views"]
     rows = rt.store.query_feed(limit=views["latest_rows"])
-    payload = {"rows": rows, "tickers": top_tickers(rows, views["top_tickers"]), "total": len(rows)}
+    # ``limit`` is the view's row cap (a Settings tunable): the page reads a view
+    # holding that many posts as "there are older ones".
+    payload = {"rows": rows, "tickers": top_tickers(rows, views["top_tickers"]), "total": len(rows),
+               "limit": views["latest_rows"]}
     return bus.cache_set(CACHE_LATEST, payload, event=EVENT_LATEST, skip_unchanged=True)
 
 
@@ -183,7 +186,9 @@ def _query(bus, rt, request_id, args) -> None:
         before_key=args.get("before_key") or None,
         limit=limit,
     )
-    _answer(bus, request_id, "query", True, rows=rows,
+    # ``limit`` is the size actually used (query_limit_max may cut the page's ask),
+    # so the page can tell a full page - more to load - from the last one.
+    _answer(bus, request_id, "query", True, rows=rows, limit=limit,
             tickers=top_tickers(rows, views["top_tickers"]), counts=rt.store.account_counts())
 
 

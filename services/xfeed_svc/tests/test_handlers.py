@@ -216,6 +216,34 @@ def test_query_limit_is_clamped(bus, make):
     assert len(send(bus, "query", limit=10**9)["rows"]) == 3    # clamped down to query_limit_max
 
 
+def _views_cfg(monkeypatch, **views):
+    real = config.load()
+    patched = {**real, "views": {**real["views"], **views}}
+    monkeypatch.setattr(config, "load", lambda: patched)
+
+
+def test_query_answer_names_the_limit_it_used(bus, make, monkeypatch):
+    """The page decides "more to load" by comparing the posts it got with the
+    size actually used - query_limit_max (a Settings tunable) may be below the
+    page's ask."""
+    rt = make({"acct": [ok_page([])]})
+    send(bus, "add_account", handle="acct")
+    rt.store.insert_posts([post("acct", str(i), sort_at=i) for i in range(1, 4)])
+    assert send(bus, "query", limit=300)["limit"] == 300
+    _views_cfg(monkeypatch, query_limit_max=2)
+    r = send(bus, "query", limit=300)
+    assert r["limit"] == 2 and len(r["rows"]) == 2
+
+
+def test_latest_view_names_its_row_limit(bus, make, monkeypatch):
+    rt = make()
+    handlers.publish_latest(bus, rt)
+    assert payload(bus, handlers.CACHE_LATEST)["limit"] == config.load()["views"]["latest_rows"]
+    _views_cfg(monkeypatch, latest_rows=50)
+    handlers.publish_latest(bus, rt)
+    assert payload(bus, handlers.CACHE_LATEST)["limit"] == 50
+
+
 def test_two_queries_get_separate_answer_keys(bus, make):
     rt = make({"a": [ok_page([])], "b": [ok_page([])]})
     send(bus, "add_account", handle="a", group="News")

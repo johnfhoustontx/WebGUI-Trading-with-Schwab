@@ -49,7 +49,8 @@ from pages import xfeed_view as xv
 from pages.options import theme as _t
 from pages.ui_guard import guard, guard_async
 
-PAGE = 300                 # rows a query asks for (the old page's PAGE)
+PAGE = 300                 # rows a query asks for (the old page's PAGE); the service may
+                           # use fewer and says so (``limit``), and "more" compares with that
 TICKER_CHIPS = 8           # chips on the MOST MENTIONED line (as today)
 TICK_S = 5.0               # "checked Ns ago" and the NEW highlight's age move on this clock
 STATUS_POLL_S = 10.0       # how often the status line re-reads the accounts view's stamp
@@ -61,6 +62,7 @@ NO_MATCH = "No posts match these filters."
 COLD = "No X posts yet — the X feed has not published since it started."
 NO_ONE = "Not watching anyone yet. Try @Reuters or @zerohedge."
 TIMEOUT = "The X feed service did not answer - try again."
+RETRY = "Try again"
 LOAD_OLDER = "Load older posts"
 SEARCH_HINT = "Search posts, or $TICKER"
 NEW_ACCENT = xp.NEW_ACCENT
@@ -106,6 +108,7 @@ class XFeedPage:
         self.exhausted, self.older = True, False
         self.gen = 0                  # bumped by every reload; an older load's answer is dropped
         self.feed_rid = None          # the query whose answer the list waits for
+        self.failed = False           # the last load failed: the list is the error line
         self.loading_more = False
         self.open_key, self.detail = None, None
         self.lines = {}               # key -> (row, its line) of the painted posts
@@ -260,7 +263,7 @@ class XFeedPage:
 
     def _set_filter(self, patch):
         new = {**self.f, **patch}
-        if new == self.f:
+        if new == self.f and not self.failed:       # the same choice after a failure retries
             return
         self.f = new
         self._reload()
@@ -270,10 +273,12 @@ class XFeedPage:
         self.older, self.open_key, self.loading_more = False, None, False
         if self.more is not None:
             kit.set_busy(self.more, False)
+        self.more_row.set_visibility(False)         # the old list's cursor is not this filter's
         self._paint_filters()
         self._load()
 
     def _load(self, *, merge=False, quiet=False):
+        self.failed = False
         if self._is_live():
             self.feed_rid = None
             self._from_latest()
@@ -288,7 +293,7 @@ class XFeedPage:
         p = self.latest if isinstance(self.latest, dict) else {}
         self.rows = [r for r in p.get("rows") or [] if isinstance(r, dict)]
         self.tickers = [t for t in p.get("tickers") or [] if isinstance(t, dict)]
-        self.exhausted = len(xp.post_rows(self.rows)) < PAGE
+        self.exhausted = len(xp.post_rows(self.rows)) < xp.page_limit(p, PAGE)
         self._paint_feed()
 
     def _took_feed(self, answer, *, merge, quiet):
@@ -297,8 +302,8 @@ class XFeedPage:
         self.feed_rid = None
         self.region.busy.hide()
         if not answer.get("ok"):
-            if not quiet:
-                self._paint_message(self._error(answer, "Could not load the feed"))
+            if not quiet:                   # a quiet re-run keeps its (same-filter) list
+                self._fail(self._error(answer, "Could not load the feed"))
             return
         rows = [r for r in answer.get("rows") or [] if isinstance(r, dict)]
         if merge:
@@ -307,13 +312,26 @@ class XFeedPage:
         else:
             self.rows = rows
             self.tickers = [t for t in answer.get("tickers") or [] if isinstance(t, dict)]
-            self.exhausted = len(xp.post_rows(rows)) < PAGE
+            self.exhausted = len(xp.post_rows(rows)) < xp.page_limit(answer, PAGE)
         self._paint_feed()
+
+    def _fail(self, text):
+        """A load failed: drop the previous filter's list - its rows, count, tickers
+        and older-posts cursor - and show the error with a retry."""
+        self.rows, self.tickers, self.exhausted, self.failed = [], [], True, True
+        self._paint_trend()
+        self.count.text = ""
+        self.more_row.set_visibility(False)
+        self._paint_message(text, retry=True)
+
+    @guard
+    def _retry(self, _e=None):
+        self._load()
 
     @guard
     def _more(self, _e=None):
-        if self.loading_more or self.exhausted or self.more is None:
-            return
+        if self.loading_more or self.exhausted or self.more is None or self.feed_rid is not None:
+            return                      # (a reload pending: the list is not this filter's yet)
         last = next((r for r in reversed(self.rows) if r.get("kind") == "post"), None)
         if last is None:
             return
@@ -335,7 +353,7 @@ class XFeedPage:
         have = {xp.row_key(r) for r in self.rows}
         fresh = [r for r in rows if xp.row_key(r) not in have]
         self.rows.extend(fresh)
-        self.exhausted = len(xp.post_rows(rows)) < PAGE
+        self.exhausted = len(xp.post_rows(rows)) < xp.page_limit(answer, PAGE)
         self.older = True
         self._paint_feed(append=fresh)
 
@@ -370,12 +388,15 @@ class XFeedPage:
             return COLD
         return xp.watching(len(self._accounts()))
 
-    def _paint_message(self, text):
+    def _paint_message(self, text, *, retry=False):
         self.region.content.clear()
         self.list_card, self.lines, self.detail, self.painted_new = None, {}, None, set()
         if text:
             with self.region.content:
                 kit.empty(text)
+                if retry and self._may_enqueue:
+                    with ui.row().classes("w-full justify-center"):
+                        kit.button(RETRY, kind="secondary", icon="refresh", on_click=self._retry)
 
     def _today(self):
         return xv.with_dividers([{"sort_at": now_ms()}])[0][1]
@@ -507,7 +528,7 @@ class XFeedPage:
         self._show_status()
         if gone:
             self._reload()
-        elif paint_feed and not self.rows:
+        elif paint_feed and not self.rows and not self.failed:
             self._paint_feed()              # the empty line depends on the accounts
 
     @guard_async
@@ -669,8 +690,8 @@ class XFeedPage:
             self._reload()
 
 
-def render() -> None:
-    """Build the X Feed page (the private app only)."""
+def render() -> XFeedPage:
+    """Build the X Feed page (the private app only); returns it for tests."""
     import shell as _shell
     _may_enqueue = _shell.may_enqueue()
-    XFeedPage(_may_enqueue, symbol_linked=_shell.can_navigate(SYMBOL_ROUTE))
+    return XFeedPage(_may_enqueue, symbol_linked=_shell.can_navigate(SYMBOL_ROUTE))
