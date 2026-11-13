@@ -387,11 +387,13 @@ def test_run_cycle_skips_accounts_whose_next_check_at_is_in_the_future_and_repor
 # -- Python-only Poller tests ---------------------------------------------------
 
 def test_first_cycle_after_start_is_catchup():
+    # The migration case: the old feed's last good check was a minute ago, well inside
+    # the live window, so only the forced first-cycle catch-up keeps these off "live".
     now = 10 * 60 * MIN
-    repo = baselined([st(id="1", created=0)], now - 3 * 60 * MIN)
-    assert repo.get_account("acct")["last_ok_at"] == now - 3 * 60 * MIN
-    a = st(id="a", created=now - 2 * MIN)
-    b = st(id="b", created=now - 5 * MIN)
+    repo = baselined([st(id="1", created=0)], now - MIN)
+    assert repo.get_account("acct")["last_ok_at"] == now - MIN
+    a = st(id="a", created=now - 20_000)
+    b = st(id="b", created=now - 40_000)
     clock = [now]
     poller = make_poller(repo, StubFx([[a, b, st(id="1")]]), clock)
     poller.run_cycle(lambda: None)
@@ -400,6 +402,37 @@ def test_first_cycle_after_start_is_catchup():
     assert all(r["origin"] == "catchup" for r in rows)
     assert all(r["sort_at"] == r["created_at"] for r in rows)
     assert not any(r["origin"] == "live" for r in rows)
+
+
+def test_failed_account_catches_up_after_recovery():
+    t0 = 10 * 60 * MIN
+    repo = Store(":memory:")
+    clock = [t0]
+    pages = [[st(id="1", created=0)]]
+    poller = make_poller(repo, StubFx(pages), clock)
+    assert poller.add_account("acct", None)["ok"] is True       # now in polled-since-start
+    repo.record_check("acct", now=t0 + 30_000, ok=False, error="HTTP 502", next_check_at=0)
+    a = repo.get_account("acct")
+    assert a["fail_count"] == 1 and a["next_check_at"] == 0 and a["last_ok_at"] == t0
+    clock[0] = t0 + MIN                                         # inside the live window
+    fresh = st(id="f", created=t0 + 40_000)
+    pages[0] = [fresh, st(id="1", created=0)]
+    poller.run_cycle(lambda: None)
+    rows = feed(repo)
+    assert [(r["status_id"], r["origin"], r["sort_at"]) for r in rows] == [("f", "catchup", ts_ms(fresh))]
+
+
+def test_live_only_from_page_one():
+    old = st(id="1", created=0)
+    repo = baselined([old], 0)
+    now = 2 * MIN                                               # live poll
+    p1 = [st(id="n1", created=now - 10_000), st(id="n2", created=now - 20_000)]
+    p2 = [st(id="n3", created=now - 30_000), old]
+    fx = StubFx([p1, p2])
+    r = poll(repo, fx, now)
+    assert len(fx.calls) == 2
+    assert r["gap"] is None
+    assert {p["status_id"]: p["origin"] for p in r["new_posts"]} == {"n1": "live", "n2": "live", "n3": "catchup"}
 
 
 def test_add_does_not_wait_for_other_accounts_poll():
