@@ -62,3 +62,17 @@ QQQ = "$VXN"
 # A symbol whose bars carry no volume reads this symbol's volume instead.
 [range.volume_from]
 "$SPX" = "SPY"
+
+# The exit chance (ML roadmap Phase 3b, docs/plans/2026-11-14-exit-chance-design.md):
+# at each mark of a closed captured credit signal, the chance it still reaches its
+# take-profit fraction ([stops] tp_frac in trade_mgmt.toml) before its own exits
+# ended it, scored against the rate by how far it had already travelled. Shadow:
+# nothing reads it.
+[exit]
+enabled = true
+types = ["SWING", "0DTE", "INCOME"]   # scanner types, each scored on its own
+thin_min = 30           # keep one mark per this many minutes of each trade
+min_train_days = 15     # entry days of closed trades before the first fit
+min_days = 40           # scored days before a verdict
+penalty = 1.0           # prior precision on each weight: larger holds them nearer 0
+buckets = [-1.0, -0.5, -0.25, 0.0, 0.25]   # P&L / credit edges of the baseline

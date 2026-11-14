@@ -3414,6 +3414,32 @@ _MODEL_HEALTH = ConfigFile(
                   "For a symbol whose bars carry no volume, the symbol read instead.",
                   kind="text"),
         )),
+        Section("Exit chance",
+                "A shadow score of the chance an open captured signal still reaches "
+                "its profit target, against how far it has already travelled. "
+                "Nothing uses it.", (
+            Field("exit.enabled", "Score the exit chance",
+                  "Off leaves the Exit chance table empty.", kind="bool"),
+            Field("exit.types", "Scanner types",
+                  "SWING, 0DTE or INCOME; each is scored on its own.",
+                  kind="symbols"),
+            Field("exit.thin_min", "One mark per",
+                  "Neighbouring marks repeat one another; one per this many minutes "
+                  "of each trade is kept.", kind="int", unit="min", min=5, max=240,
+                  step=5),
+            Field("exit.min_train_days", "Days before a fit",
+                  "Entry days of closed trades needed before the first fit.",
+                  kind="int", unit="days", min=5, max=120, step=1),
+            Field("exit.min_days", "Days before a verdict",
+                  "Scored days needed before a verdict.",
+                  kind="int", unit="days", min=10, max=250, step=1),
+            Field("exit.penalty", "Weight penalty",
+                  "How strongly the fit is held back from large weights.",
+                  kind="float", min=1e-6, max=1e3, step=0.5),
+            Field("exit.buckets", "Distance buckets",
+                  "Edges of profit or loss as a share of the credit, for the rate it "
+                  "is judged against.", kind="numbers", min=-10, max=10),
+        )),
     ),
 )
 
