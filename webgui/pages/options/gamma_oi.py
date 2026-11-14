@@ -350,9 +350,13 @@ T_BIG = "text-h6"                # a tile's one large figure
 T_SMALL = "text-xs"              # captions, row labels, tags
 
 # Calls and puts wear the Dealer Positioning colours (``[gamma]``, Settings →
-# Appearance), the ones its by-strike bars wear: a colour is chosen once and
-# both tabs follow. The ground, the price and the type stay the Flow panels'.
+# Appearance): a colour is chosen once and both tabs follow. The BARS, the
+# split bars and the swatches take each side's MAIN colour (the user's choice,
+# 2026-11-14). Text, ticks and tag outlines take its low colour, which is the
+# paler of the pair: the shipped main colours are too dark to read as type on
+# this ground. The ground, the price and the type stay the Flow panels'.
 _GAMMA = _theme.gamma_colors(_theme.THEME)
+BAR_CALL, BAR_PUT = _GAMMA["call"], _GAMMA["put"]
 CALL, PUT = _GAMMA["call_low"], _GAMMA["put_low"]
 
 _DIM = _fx._tone("label", ".62")
@@ -433,8 +437,8 @@ def _distance(level, spot):
 def _split_bar(calls, puts):
     share = calls / (calls + puts) * 100.0 if calls + puts > 0 else 50.0
     return (f'<div style="display:flex;height:8px;gap:2px">'
-            f'<div style="width:{share:.1f}%;background:{CALL}"></div>'
-            f'<div style="flex:1 1 0;background:{PUT}"></div></div>')
+            f'<div style="width:{share:.1f}%;background:{BAR_CALL}"></div>'
+            f'<div style="flex:1 1 0;background:{BAR_PUT}"></div></div>')
 
 
 def _split_head(calls, puts):
@@ -682,11 +686,11 @@ def _map(mdl, u):
             f'<div id="{u}-pr-{i}" title="{tip}" style="{row};'
             f'justify-content:flex-end;border-right:1px solid '
             f'{_fx._tone("ice", ".22")}"><div id="{u}-p-{i}" style="height:'
-            f'{BAR_H:.0f}px;background:{PUT};width:{put_w:.1f}%"></div></div>')
+            f'{BAR_H:.0f}px;background:{BAR_PUT};width:{put_w:.1f}%"></div></div>')
         calls_col.append(
             f'<div id="{u}-cr-{i}" title="{tip}" style="{row}">'
             f'<div id="{u}-c-{i}" style="height:{BAR_H:.0f}px;'
-            f'background:{CALL};width:{call_w:.1f}%"></div></div>')
+            f'background:{BAR_CALL};width:{call_w:.1f}%"></div></div>')
         text, kind = first_tags.get(i, ("", None))
         style = _tag_style(kind) if kind else "display:none"
         tag_col.append(f'<div style="{row}"><span id="{u}-t-{i}" '
@@ -730,9 +734,9 @@ def _map(mdl, u):
         f'height:8px;background:linear-gradient(90deg,{_fx._tone("ice", ".08")},'
         f'{_fx._tone("ice", ".95")})"></span>'
         f'tops out at the {mdl["cap_pct"]}th percentile</span>'
-        f'<span style="{item}"><span style="{swatch};background:{CALL}">'
+        f'<span style="{item}"><span style="{swatch};background:{BAR_CALL}">'
         f'</span>Calls</span>'
-        f'<span style="{item}"><span style="{swatch};background:{PUT}">'
+        f'<span style="{item}"><span style="{swatch};background:{BAR_PUT}">'
         f'</span>Puts</span>'
         f'<span style="{item}"><span style="width:14px;border-top:1.5px dashed '
         f'{C["spot"]}"></span>Price</span>'

@@ -37,8 +37,11 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 - **60 / 40.** The expiry strip takes six parts of the map's width and each side of
   the bars two; a cell keeps its size (80 px wide at least) and a wider strip shows
   more expiries.
-- **Colours.** Calls and puts take `[gamma]`'s `call_low` / `put_low`, the by-strike
-  bars' pair, so one choice in Settings → Appearance colours both.
+- **Colours.** Calls and puts take `[gamma]`'s colours, so one choice in Settings →
+  Appearance colours both tabs. The bars, the split bars and the swatches take the
+  main `call` / `put` (the user's choice); the text, ticks and tag outlines take
+  `call_low` / `put_low`, the paler pair, because the shipped main colours are too
+  dark to read as type.
 - **Type.** The panel names no font and no pixel size: it inherits the app's family and
   uses the app's text classes, so it follows `[typography]` like the other pages. The
   letter-spaced capitals went with the mono face.

@@ -885,7 +885,8 @@ do not fit. **$SPX is the exception**: its whole chain is too large to ask Schwa
 so it shows its nearest twelve (Settings → Configuration → Open Interest tab → **Symbols
 not shown whole** and **Expirations for those symbols**). The expirations take 60% of
 the map's width and the put and call bars 40%. Calls and puts wear the colours chosen
-for Dealer Positioning (Settings → Appearance), the same pair as the by-strike bars. It
+for Dealer Positioning (Settings → Appearance): the bars take each side's main colour
+and the labels its paler one. It
 answers *which strikes, in which expiry, hold the positions*. It replaced the Term
 subtab (net gamma by expiry) in November 2026.
 

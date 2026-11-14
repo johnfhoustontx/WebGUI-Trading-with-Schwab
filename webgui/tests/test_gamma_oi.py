@@ -417,15 +417,20 @@ def test_an_expiry_in_a_later_year_than_the_nearest_carries_its_year():
 
 
 def test_calls_and_puts_wear_the_dealer_positioning_colours():
-    """One choice in Settings -> Appearance colours this tab and the by-strike
-    bars beside it: the tab takes [gamma]'s two bar colours and holds no call
-    or put colour of its own."""
+    """One choice in Settings -> Appearance colours this tab and Dealer
+    Positioning: the tab holds no call or put colour of its own. Its BARS take
+    each side's main colour (the user's choice, 2026-11-14), not the low one;
+    its text takes the low one, which is the paler."""
     from pages.options import theme
     chosen = theme.gamma_colors(theme.THEME)
+    assert (oi.BAR_CALL, oi.BAR_PUT) == (chosen["call"], chosen["put"])
     assert (oi.CALL, oi.PUT) == (chosen["call_low"], chosen["put_low"])
     html, _ = _panel()
-    assert f"background:{oi.CALL};width:" in html
-    assert f"background:{oi.PUT};width:" in html
+    assert f"background:{oi.BAR_CALL};width:" in html
+    assert f"background:{oi.BAR_PUT};width:" in html
+    assert f"background:{oi.CALL};width:" not in html
+    assert f"background:{oi.PUT};width:" not in html
+    assert f"background:{oi.BAR_CALL}\"></span>Calls" in html       # the legend
     source = open(oi.__file__, encoding="utf-8").read()
     assert 'C["call' not in source and 'C["put' not in source
     assert '"call_deep"' not in source and '"put_deep"' not in source
@@ -439,9 +444,12 @@ def test_a_chosen_colour_reaches_the_tab(monkeypatch):
         "put": "#333333", "put_low": "#444444"})
     try:
         fresh = importlib.reload(oi)
+        assert (fresh.BAR_CALL, fresh.BAR_PUT) == ("#111111", "#333333")
         assert (fresh.CALL, fresh.PUT) == ("#222222", "#444444")
-        assert "background:#222222;width:" in fresh.panel(
-            _grid(), 100.0, "SPY", "oimap", CFG)[0]
+        html = fresh.panel(_grid(), 100.0, "SPY", "oimap", CFG)[0]
+        assert "background:#111111;width:" in html
+        assert "background:#333333;width:" in html
+        assert "color:#222222" in html and "color:#444444" in html
     finally:
         monkeypatch.undo()
         importlib.reload(oi)
