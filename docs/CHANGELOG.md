@@ -4,7 +4,21 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-14 (**Range forecast on Model Health: ML roadmap Phase 2, approach A.**)
+**Last updated:** 2026-11-14 (**Captured signals: no time stop in the first 30 minutes.**)
+
+- **Why.** The time stop (DTE <= `cut_dte` and underwater) fired on a capture's
+  first mark, because a fresh spread is underwater by its bid/ask alone. On the
+  2026-11-13 backup, 47 of the 78 Sep-Nov `TIME_STOP` closes came within 15
+  minutes of capture (median hold 6 minutes), so the short-dated captures measured
+  the spread, not the trade, and could not train Phase 3 of the ML roadmap.
+- **What.** `[stops] time_stop_min_hold_min` (30; 0 turns it off; Settings →
+  Configuration). `signal_recommender.build_mark` passes `held_min` from
+  `first_seen_ts`; `recommend` skips rule 2 while it is below the setting. The money
+  and delta stops are unchanged and still fire inside the hold.
+- **Not changed.** The paper Account and the Ledger pass no holding time, so their
+  time stop is as before; changing them is the operator's call.
+
+**Prior —** 2026-11-14 (**Range forecast on Model Health: ML roadmap Phase 2, approach A.**)
 
 - **What.** A shadow forecast of the range still to come for SPY, QQQ and `$SPX`
   (30 minutes, 60 minutes, rest of session; 10th, 50th and 90th percentiles), made

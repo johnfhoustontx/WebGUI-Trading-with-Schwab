@@ -45,6 +45,12 @@ DEFAULTS = {
         "delta_hard_ceiling": 0.45,    # ...but never hold past this, whatever the entry
         "delta_abs_fallback": 0.35,    # absolute breach when entry delta is unknown
         "cut_dte": 2,                  # cut when DTE <= this and underwater
+        # ...but not in a trade's first this-many minutes, for a caller that
+        # says how long it has been held (captured signals). A fresh spread is
+        # "underwater" by its bid/ask alone, so without this a capture entered
+        # at DTE <= cut_dte was closed on its first mark (2026-11-13: 47 of 78
+        # Sep-Nov time stops within 15 minutes, median hold 6 minutes).
+        "time_stop_min_hold_min": 30,
         "recovery_dte_min": 5,         # min DTE to DEFER a soft delta stop
         "recovery_min_cushion": 0.015,  # min spot<->short-strike cushion to defer
     },

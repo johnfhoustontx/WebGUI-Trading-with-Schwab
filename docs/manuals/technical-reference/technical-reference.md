@@ -4023,7 +4023,9 @@ row stores it already multiplied while the repricer's P&L is per contract.
 
 **Rule 3 is profit-blind** (`TAKE_PROFIT` ahead, `CUT` behind, code `TIME_EXIT`
 either way - distinct from `TIME_STOP`, which means DTE <= `cut_dte` **and**
-underwater), and the `dte_at_entry > exit_dte` condition is load-bearing: the
+underwater, and for a captured signal also held at least `[stops]
+time_stop_min_hold_min` (30) minutes since `first_seen_ts`; the paper Account and
+the Ledger pass no holding time and keep the plain rule), and the `dte_at_entry > exit_dte` condition is load-bearing: the
 Market Scanner's Directional tab scans **DTE 0-4** and **DTE 5-15**, so every
 debit it can produce arrives inside 21 days and an unguarded rule would close
 100% of them on the following cycle. Those positions are bounded by their target

@@ -603,6 +603,60 @@ def test_build_mark_dte_remaining_drives_low_dte_cut():
     assert mark["recommendation"] == "CUT"
 
 
+def test_time_stop_waits_out_the_minimum_hold():
+    # A capture underwater at DTE <= cut_dte is not time-stopped in its first
+    # minutes: a fresh spread is underwater by its bid/ask alone.
+    from shared import trade_mgmt
+    hold = trade_mgmt.stops()["time_stop_min_hold_min"]
+    assert hold == 30
+    fresh = rec.recommend({**_ctx(pnl=-5.0, dte_remaining=1), "held_min": hold - 1})
+    assert fresh["code"] != "TIME_STOP"
+    held = rec.recommend({**_ctx(pnl=-5.0, dte_remaining=1), "held_min": hold})
+    assert held["action"] == "CUT" and held["code"] == "TIME_STOP"
+
+
+def test_time_stop_without_a_holding_time_is_unchanged():
+    # The paper Account and the Ledger pass no held_min: the old rule stands.
+    r = rec.recommend({**_ctx(pnl=-5.0, dte_remaining=1), "held_min": None})
+    assert r["code"] == "TIME_STOP"
+
+
+def test_money_stop_still_fires_inside_the_hold():
+    r = rec.recommend({**_ctx(credit=1.0, pnl=-250.0, dte_remaining=1), "held_min": 1})
+    assert r["code"] == "MONEY_STOP"
+
+
+def test_time_stop_hold_zero_turns_it_off(monkeypatch):
+    import shared.trade_mgmt as tm
+    real = tm.stops
+    monkeypatch.setattr(tm, "stops",
+                        lambda: {**real(), "time_stop_min_hold_min": 0})
+    r = rec.recommend({**_ctx(pnl=-5.0, dte_remaining=1), "held_min": 0.5})
+    assert r["code"] == "TIME_STOP"
+
+
+def test_build_mark_fresh_capture_is_not_time_stopped():
+    now = datetime(2030, 1, 14, 14, 30, tzinfo=_TZ)
+    fresh = _signal_row(expiration="2030-01-15",
+                        first_seen_ts=datetime(2030, 1, 14, 14, 24, tzinfo=_TZ).isoformat())
+    mark = rec.build_mark(fresh, _repricer_ok(unrealized_pnl=-5.0,
+                                              current_short_delta=-0.10), now)
+    assert mark["recommendation_code"] != "TIME_STOP"
+    old = _signal_row(expiration="2030-01-15",
+                      first_seen_ts=datetime(2030, 1, 14, 13, 0, tzinfo=_TZ).isoformat())
+    mark = rec.build_mark(old, _repricer_ok(unrealized_pnl=-5.0,
+                                            current_short_delta=-0.10), now)
+    assert mark["recommendation_code"] == "TIME_STOP"
+
+
+def test_held_minutes_reads_naive_as_central_and_refuses_junk():
+    now = datetime(2030, 1, 14, 14, 30, tzinfo=_TZ)
+    assert rec._held_minutes("2030-01-14T14:00:00", now) == 30.0
+    assert rec._held_minutes("2030-01-14T20:00:00+00:00", now) == 30.0
+    assert rec._held_minutes("not a time", now) is None
+    assert rec._held_minutes(None, now) is None
+
+
 def test_build_mark_score_drift_none_when_score_unavailable(monkeypatch):
     # Force the scoring path to fail → score remains None → drift None
     import signal_recommender
