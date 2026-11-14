@@ -38,6 +38,11 @@ delta_hard_ceiling = 0.45
 delta_abs_fallback = 0.35
 
 cut_dte = 2               # cut when DTE <= this AND underwater
+# ...but never in a captured signal's first this-many minutes: a fresh spread is
+# underwater by its bid/ask alone, so a capture entered at DTE <= cut_dte was
+# closed on its first mark. 0 turns the hold off. The paper Account and the
+# Ledger do not pass a holding time, so this does not reach them.
+time_stop_min_hold_min = 30
 
 # A soft delta stop can be DEFERRED when the trade still has room to recover:
 # both of these must hold, or the stop fires.

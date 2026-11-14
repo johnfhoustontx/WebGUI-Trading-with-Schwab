@@ -352,6 +352,11 @@ _TRADE_MGMT = ConfigFile(
             Field("stops.cut_dte", "Time stop",
                   "Cut a LOSING position at or below this many days to expiry.",
                   kind="int", unit="days", min=0, max=30, step=1),
+            Field("stops.time_stop_min_hold_min", "No time stop in the first",
+                  "A captured signal is not time-stopped until it has been held "
+                  "this long: a fresh spread shows a loss from its bid/ask alone. "
+                  "0 turns the hold off. The paper Account and Ledger are not "
+                  "affected.", kind="int", unit="min", min=0, max=1440, step=5),
         )),
         Section("Delta stops (the short leg)", "", (
             Field("stops.delta_drift", "Delta drift allowed",

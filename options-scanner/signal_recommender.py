@@ -9,7 +9,8 @@ write structurally identical rows.
 
 import pathlib as _pathlib
 import sys as _sys
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[1]))  # repo root
 from shared import greeks as _greeks  # noqa: E402
@@ -288,7 +289,9 @@ def recommend(ctx):
 
     Lifecycle (first match wins — see the captured-autoclose design):
       1. Money-stop (HARD): pnl <= -stop_mult*credit → CUT/MONEY_STOP.
-      2. Time-stop (HARD): DTE <= cut_dte and underwater → CUT/TIME_STOP.
+      2. Time-stop (HARD): DTE <= cut_dte and underwater → CUT/TIME_STOP, except
+         while ``ctx["held_min"]`` (when a caller gives it) is under
+         ``time_stop_min_hold_min``: a fresh spread is underwater by its bid/ask.
       3. Break-even stop (only when ``be_armed``): pnl <= ``be_level`` → CUT/BREAKEVEN_STOP.
       4. Delta-stop (SOFT): a delta drift/ceiling breach → CUT/DELTA_STOP, UNLESS
          ``_recoverable(ctx)`` (defers to HOLD).
@@ -336,7 +339,9 @@ def recommend(ctx):
     # expiry is NOT time-stopped (it rides to full credit, protected by the
     # break-even stop below).
     cut_dte = rules["cut_dte"]
-    if loss_rules and dte <= cut_dte and pnl < 0:
+    held = ctx.get("held_min")
+    too_fresh = held is not None and held < rules.get("time_stop_min_hold_min", 0)
+    if loss_rules and dte <= cut_dte and pnl < 0 and not too_fresh:
         return {"action": "CUT", "reason": f"DTE <= {cut_dte} and underwater",
                 "code": "TIME_STOP"}
 
@@ -478,6 +483,22 @@ def _recompute_score(signal_row, repricer_result, iv_data, technicals):
         return None, None
 
 
+def _held_minutes(first_seen_ts, now):
+    """Minutes from ``first_seen_ts`` (ISO text; naive means Central) to ``now``,
+    or None when either cannot be read."""
+    if not first_seen_ts or now is None:
+        return None
+    try:
+        seen = datetime.fromisoformat(str(first_seen_ts))
+    except (TypeError, ValueError):
+        return None
+    if seen.tzinfo is None:
+        seen = seen.replace(tzinfo=ZoneInfo("America/Chicago"))
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=ZoneInfo("America/Chicago"))
+    return (now - seen).total_seconds() / 60.0
+
+
 def build_mark(signal_row, repricer_result, now, iv_data=None, technicals=None,
                *, be_level=None, trail_ladder=None, peak_pnl_frac=None):
     """Compose a complete signal_marks row from a repricer result.
@@ -536,6 +557,9 @@ def build_mark(signal_row, repricer_result, now, iv_data=None, technicals=None,
         "current_short_delta": repricer_result.get("current_short_delta"),
         "entry_short_delta": signal_row.get("entry_short_delta"),
         "dte_remaining": dte_remaining,
+        # Minutes since capture, so a fresh capture is not time-stopped on the
+        # bid/ask alone (``time_stop_min_hold_min``). None = unknown: no hold.
+        "held_min": _held_minutes(signal_row.get("first_seen_ts"), now),
         "current_score": cur_score,
         "entry_score": entry_score,
         # Lifecycle inputs (threaded from the row + reprice + caller's be_level).
