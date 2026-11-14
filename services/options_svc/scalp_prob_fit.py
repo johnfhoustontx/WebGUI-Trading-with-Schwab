@@ -44,6 +44,11 @@ through ``scalp_sim.strikes_for`` and ``level_points`` at the entry. The chain i
 not stored historically, so the live call (which prices from the chain's
 volatility when it has one) can read a slightly different room.
 
+The general parts (the MAP logistic fit, the walk-forward split, the usual rate,
+the Brier score and the calibration table) are ``shared/ml``'s since 2026-11-14;
+``tests/test_scalp_prob_fit_golden.py`` holds the numbers to what they were
+before the move.
+
 Imports nothing from ``compute``.
 """
 import datetime as _dt
@@ -57,6 +62,7 @@ from zoneinfo import ZoneInfo
 import numpy as np
 
 from shared import scalp_config
+from shared.ml import baselines, logistic, metrics, walkforward
 from shared.numeric import finite as _finite
 
 from services import _degrade
@@ -72,10 +78,6 @@ KINDS = ("morning", "intraday")
 #: The slot the 08:36 call is recorded under (``intraday_readings`` and
 #: ``prob_sources``).
 MORNING_SLOT = "08:36"
-#: Newton's stopping rule: a step whose largest move is under ``_TOL``, or
-#: ``_MAX_STEPS`` steps (numerical-solver constants, not tunables).
-_TOL = 1e-8
-_MAX_STEPS = 50
 _CT = ZoneInfo("America/Chicago")
 #: One refit at a time: the scheduler and the command must not interleave two
 #: fits under one version number.
@@ -237,52 +239,6 @@ def _usable(rows, role, kind) -> list:
     return out
 
 
-def _sigmoid(z):
-    return 0.5 * (1.0 + np.tanh(0.5 * z))
-
-
-def _newton(x, y, w, mean, prec) -> np.ndarray:
-    """The weights minimising the weighted log-loss plus the Gaussian priors'
-    penalty, by Newton steps with step halving (the objective is strictly
-    convex: the prior makes the Hessian positive definite)."""
-    def objective(theta):
-        z = x @ theta
-        return float(np.sum(w * (np.logaddexp(0.0, z) - y * z))
-                     + 0.5 * np.sum(prec * (theta - mean) ** 2))
-
-    theta = mean.copy()
-    value = objective(theta)
-    for _ in range(_MAX_STEPS):
-        p = _sigmoid(x @ theta)
-        grad = x.T @ (w * (p - y)) + prec * (theta - mean)
-        hess = (x.T * (w * p * (1.0 - p))) @ x + np.diag(prec)
-        step = np.linalg.solve(hess, grad)
-        t = 1.0
-        while True:
-            cand = theta - t * step
-            cand_value = objective(cand)
-            if cand_value <= value + 1e-12 * max(1.0, abs(value)) or t < 1e-6:
-                break
-            t *= 0.5
-        theta, value = cand, cand_value
-        if float(np.max(np.abs(t * step), initial=0.0)) < _TOL:
-            break
-    if not np.all(np.isfinite(theta)):
-        raise ValueError("the fit did not end on finite weights")
-    return theta
-
-
-def _data_share(x, w, theta, prec) -> np.ndarray:
-    """Per column, how much of the posterior precision at ``theta`` is the
-    data's: ``H_ii / (H_ii + prec_i)`` with ``H`` the weighted data Hessian
-    ``X^T W diag(p (1 - p)) X`` (the rows' own weights). Near 1 the history
-    decided the weight; under one half it is still mostly its prior. Always
-    finite and in 0..1 (``prec`` is positive)."""
-    p = _sigmoid(x @ theta)
-    h = np.square(x).T @ (w * p * (1.0 - p))
-    return h / (h + prec)
-
-
 def fit(rows, role, kind, priors, prior_sd) -> Model:
     """The MAP logistic model of ``kind``'s ``role`` over ``rows`` (others are
     ignored). ``priors`` are written for the trades with the move and signed here
@@ -318,8 +274,8 @@ def fit(rows, role, kind, priors, prior_sd) -> Model:
     sd = [wide] * k + [wide if scalp_prob_features.is_wide(n) else tight for n in names]
     prec = 1.0 / np.square(np.array(sd))
 
-    theta = _newton(x, y, w, mean, prec)
-    share = _data_share(x, w, theta, prec)
+    theta = logistic.map_fit(x, y, w, mean, prec)
+    share = logistic.data_share(x, w, theta, prec)
     return Model(
         role=role, kind=kind,
         weights={n: float(theta[col[n]]) for n in names},
@@ -337,7 +293,7 @@ def predict(model: Model, symbol, factors) -> tuple:
     s = scalp_prob_features.scaled(factors, model.scaling)
     pushes = {n: float(wt * s.get(n, 0.0)) for n, wt in model.weights.items()}
     z = float(model.intercepts.get(symbol, 0.0)) + sum(pushes.values())
-    return float(_sigmoid(z)), pushes
+    return float(logistic.sigmoid(z)), pushes
 
 
 # ── the walk-forward check ───────────────────────────────────────────────────
@@ -349,47 +305,16 @@ def _usual_rates(rows, kind) -> list:
     """Per row, the weighted win share of the rows of its (symbol, trade[, block])
     on EARLIER days; ``None`` with no earlier day."""
     blocks = {}
-    groups = defaultdict(list)
-    for j, r in enumerate(rows):
+    groups = []
+    for r in rows:
         block = None
         if kind == "intraday":
             if r.slot not in blocks:
                 blocks[r.slot] = scalp_config.intraday_block(r.slot)
             block = blocks[r.slot]
-        groups[(r.symbol, r.role, block)].append(j)
-    out = [None] * len(rows)
-    for idxs in groups.values():
-        idxs.sort(key=lambda j: rows[j].day)
-        weight = wins = 0.0
-        i = 0
-        while i < len(idxs):
-            day = rows[idxs[i]].day
-            day_weight = day_wins = 0.0
-            while i < len(idxs) and rows[idxs[i]].day == day:
-                r = rows[idxs[i]]
-                out[idxs[i]] = wins / weight if weight > 0 else None
-                day_weight += r.weight
-                day_wins += r.weight * r.win
-                i += 1
-            weight += day_weight
-            wins += day_wins
-    return out
-
-
-def _calibration(scored) -> list:
-    """``[lo, hi, mean_p, rate, n]`` per tenth of the predicted probability;
-    ``mean_p`` / ``rate`` weighted, ``None`` for an empty tenth."""
-    bins = [[0.0, 0.0, 0.0, 0] for _ in range(10)]    # weight, w*p, w*y, n
-    for p, _u, y, w in scored:
-        b = bins[min(int(p * 10), 9)]
-        b[0] += w
-        b[1] += w * p
-        b[2] += w * y
-        b[3] += 1
-    return [[round(k / 10, 1), round((k + 1) / 10, 1),
-             b[1] / b[0] if b[0] > 0 else None,
-             b[2] / b[0] if b[0] > 0 else None, b[3]]
-            for k, b in enumerate(bins)]
+        groups.append((r.symbol, r.role, block))
+    return baselines.usual_rates(groups, [r.day for r in rows], [r.win for r in rows],
+                                 [r.weight for r in rows])
 
 
 def walk_forward(rows, role, kind, priors, prior_sd) -> dict:
@@ -400,29 +325,25 @@ def walk_forward(rows, role, kind, priors, prior_sd) -> dict:
     usual rate's Brier is at least ``prob_min_brier_margin()`` above the model's;
     with no scored week the Brier fields are ``None``."""
     used = _usable(rows, role, kind)
-    weeks_of = [_week(r.day) for r in used]
     usual = _usual_rates(used, kind)
-    scored, n_weeks = [], 0
-    for week in sorted(set(weeks_of))[scalp_config.prob_min_train_weeks():]:
-        test = [j for j, wk in enumerate(weeks_of) if wk == week and usual[j] is not None]
-        if not test:
-            continue
-        train = [r for r, wk in zip(used, weeks_of) if wk < week]
-        model = fit(train, role, kind, priors, prior_sd)
-        for j in test:
-            r = used[j]
-            p, _pushes = predict(model, r.symbol, r.factors)
-            scored.append((p, usual[j], r.win, r.weight))
-        n_weeks += 1
-    total = sum(w for *_rest, w in scored)
-    if not scored or total <= 0:
+    # ``fit`` is looked up at call time, so a test that wraps it sees every fit.
+    scored, n_weeks = walkforward.walk_forward(
+        len(used), lambda j: _week(used[j].day), scalp_config.prob_min_train_weeks(),
+        lambda train: fit([used[j] for j in train], role, kind, priors, prior_sd),
+        lambda model, j: predict(model, used[j].symbol, used[j].factors)[0],
+        keep=lambda j: usual[j] is not None)
+    p = [prob for _j, prob in scored]
+    u = [usual[j] for j, _prob in scored]
+    y = [used[j].win for j, _prob in scored]
+    w = [used[j].weight for j, _prob in scored]
+    brier = metrics.brier(p, y, w)
+    if not scored or brier is None:
         return {"weeks": 0, "brier": None, "brier_usual": None, "beats_usual": False,
-                "calibration": _calibration([])}
-    brier = sum(w * (p - y) ** 2 for p, _u, y, w in scored) / total
-    brier_usual = sum(w * (u - y) ** 2 for _p, u, y, w in scored) / total
+                "calibration": metrics.reliability([], [], [])}
+    brier_usual = metrics.brier(u, y, w)
     return {"weeks": n_weeks, "brier": brier, "brier_usual": brier_usual,
             "beats_usual": bool(brier_usual - brier >= scalp_config.prob_min_brier_margin()),
-            "calibration": _calibration(scored)}
+            "calibration": metrics.reliability(p, y, w)}
 
 
 # ── the refit ────────────────────────────────────────────────────────────────
