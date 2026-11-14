@@ -3914,6 +3914,20 @@ only reports.** Nothing on it changes a chance, a rule or another page.
   report is saved too. **Recompute** works it out now; the table changes only if
   a figure changed. The settings are in Settings → Configuration → Model Health.
 
+**Range forecast (shadow)** is the second table. Every 15 minutes of each past
+session it forecasts how far SPY, QQQ and $SPX would still travel (high minus
+low) over the next 30 minutes, the next 60 minutes and the rest of the session,
+using only bars that had already closed. Each forecast is a likely low, middle
+and high.
+
+- **vs realised volatility** and **vs implied move** say whether its forecasts
+  were closer than each simple prediction over whole days: *Beats*, *Matches* or
+  *Does not beat*, with the difference and its range beside it (below zero is
+  better).
+- **Inside 10th to 90th** is how often the real range landed between the likely
+  low and high. About 80% is right.
+- It forecasts how far, never which way, and nothing in the app uses it yet.
+
 ## User Manuals
 
 **Route:** `/manuals` — a tab in the **More** group, alongside EOD Report. (It used

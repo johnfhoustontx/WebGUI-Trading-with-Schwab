@@ -4,7 +4,30 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-14 (**Model Health: ML roadmap Phase 1.**)
+**Last updated:** 2026-11-14 (**Range forecast on Model Health: ML roadmap Phase 2, approach A.**)
+
+- **What.** A shadow forecast of the range still to come for SPY, QQQ and `$SPX`
+  (30 minutes, 60 minutes, rest of session; 10th, 50th and 90th percentiles), made
+  every 15 minutes of each past session from closed bars and scored nightly against
+  a realised-volatility yardstick and the implied move. A second table on Model
+  Health and a section of its report. Nothing reads it. IWM is out (no stored bars).
+- **Pieces.** `services/options_svc/range_forecast.py`; `shared/ml/linear.py`
+  (ridge), `metrics.pinball` and `metrics.weighted_quantile`; `[range]` in
+  `config/model_health.toml` with Settings entries; the page table.
+- **Changed in the build.** The implied-move baseline also reads the minutes left:
+  without it, it lost partly on time of day alone. The drift check reads only the
+  gap, the index's change since the open and the volume ratio: the volatility levels
+  read "shifted" on every symbol because they cluster for weeks.
+- **First reading** (2026-11-13 backup, 114 scored days each): at 30 and 60 minutes
+  the forecast **beats** both baselines for all three symbols (loss about 4% below the
+  yardstick and 11 to 14% below the implied move). For the rest of the session it
+  **matches** the yardstick for all three, beats the implied move for SPY and `$SPX`
+  and matches it for QQQ. Coverage of the 10th to 90th band is 78 to 79%. `$VIX`'s
+  change since the open shifted in the last five sessions. This is in-sample history,
+  walk-forward; the live test is approach B, which waits on the operator.
+- **Design / plan.** `docs/plans/2026-11-14-range-forecast-{design,plan}.md`.
+
+**Prior —** 2026-11-14 (**Model Health: ML roadmap Phase 1.**)
 
 - **What.** A private page, More → **Model Health** (`/model-health`), and a nightly
   dated report (`services/options_svc/data/model_health/<date>/report.md`), scoring

@@ -43,8 +43,13 @@ IMPLIED = ("implied", "mins_left")
 FORECAST = ("rv_30", "rv_day", "rv_prev", "rv_5", "gap", "iv", "iv_change",
             "volume", "mins_left", "horizon")
 MODELS = {"forecast": FORECAST, "yardstick": YARDSTICK, "implied": IMPLIED}
-#: The inputs whose drift is read (``implied`` and ``horizon`` repeat others).
-DRIFT_INPUTS = ("rv_30", "rv_day", "rv_prev", "rv_5", "gap", "iv", "iv_change", "volume")
+#: The inputs whose drift is read. Only those that should look alike in any
+#: market: the volatility LEVELS (realised and the index) cluster for weeks, so
+#: a recent week always differs from the history and the session shuffle, which
+#: treats sessions as interchangeable, flags them every time (measured on prod's
+#: 2026-11-13 backup: every symbol "shifted"). A level that moved is the market
+#: the forecast reads, not a broken input.
+DRIFT_INPUTS = ("gap", "iv_change", "volume")
 
 
 @dataclass

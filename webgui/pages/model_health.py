@@ -175,6 +175,16 @@ def reliability_lines(model) -> list:
     return out
 
 
+#: The range forecast's inputs in words (the scalp inputs print as stored).
+INPUT_WORDS = {"rv_30": "realised volatility, last 30 minutes",
+               "rv_day": "realised volatility, session so far",
+               "rv_prev": "realised volatility, previous session",
+               "rv_5": "realised volatility, previous 5 sessions",
+               "gap": "overnight gap", "iv": "volatility index",
+               "iv_change": "volatility index since the open",
+               "volume": "volume against its usual level"}
+
+
 def drift_lines(model) -> list:
     """One line per moved or shifted input, worst first as the service sent them,
     with the share of "no reading" before and after."""
@@ -182,7 +192,8 @@ def drift_lines(model) -> list:
     for f in (model or {}).get("drift") or []:
         before, after = _fmt.num(f.get("missing_before")), _fmt.num(f.get("missing_after"))
         psi = _fmt.num(f.get("psi"))
-        line = f"{f.get('input')}: {f.get('band')}"
+        name = f.get("input")
+        line = f"{INPUT_WORDS.get(name, name)}: {f.get('band')}"
         if psi is not None:
             line += f", stability index {psi:.2f}"
         p = _fmt.num(f.get("p"))
@@ -192,6 +203,92 @@ def drift_lines(model) -> list:
             line += f"; no reading {before:.0%} before, {after:.0%} now"
         out.append(line)
     return out
+
+
+# ── the range forecast (shadow) ─────────────────────────────────────────────
+RANGE_TITLE = "Range forecast (shadow)"
+RANGE_NOTE = ("How far each symbol still travels (high minus low) over the next 30 "
+              "minutes, 60 minutes and the rest of the session, forecast every 15 "
+              "minutes from bars already closed. Scored against recent realised "
+              "volatility and against the implied move from the volatility index. "
+              "Loss is the pinball loss of the 10th, 50th and 90th percentiles; "
+              "below zero the forecast was closer. Nothing uses it.")
+RANGE_OFF = "The range forecast is switched off or could not be scored."
+_SHORT = {"beats": "Beats", "matches": "Matches", "does_not_beat": "Does not beat",
+          "too_few_days": "Too few days", "no_data": "No results yet"}
+
+
+def horizon_text(minutes) -> str:
+    m = _fmt.num(minutes)
+    if m is None:
+        return _fmt.NO_READING
+    return "Rest of session" if m == 0 else f"{m:.0f} min"
+
+
+def _short_verdict(word, entry) -> str:
+    text = _SHORT.get(word, _fmt.NO_READING)
+    if word == "too_few_days":
+        days, floor = _fmt.num(entry.get("days")), _fmt.num(entry.get("min_days"))
+        if days is not None and floor is not None:
+            text = f"{text} ({days:.0f} of {floor:.0f})"
+    return text
+
+
+def range_rows(payload) -> list:
+    """One row per (symbol, horizon), in the service's order."""
+    out = []
+    for e in (payload or {}).get("range") or []:
+        e = e or {}
+        vy, vi = e.get("verdict_yardstick"), e.get("verdict_implied")
+        cover = _fmt.num(e.get("coverage"))
+        out.append({
+            "id": f"{e.get('symbol')}:{e.get('horizon')}",
+            "symbol": e.get("symbol") or _fmt.NO_READING,
+            "horizon": horizon_text(e.get("horizon")),
+            "vs_yardstick": _short_verdict(vy, e),
+            "_vs_yardstick_class": VERDICT_CLASSES.get(vy, MUTED),
+            "diff_yardstick": diff_text(e.get("diff_yardstick")),
+            "vs_implied": _short_verdict(vi, e),
+            "_vs_implied_class": VERDICT_CLASSES.get(vi, MUTED),
+            "diff_implied": diff_text(e.get("diff_implied")),
+            "coverage": _fmt.NO_READING if cover is None else f"{cover:.0%}",
+            "days": _fmt.fixed(e.get("days"), 0),
+            "drift": drift_text(e),
+            "_drift_class": DRIFT_CLASSES.get(e.get("drift_status"), MUTED),
+        })
+    return out
+
+
+def range_columns():
+    spec = [("symbol", "Symbol"), ("horizon", "Horizon"),
+            ("vs_yardstick", "vs realised volatility"), ("diff_yardstick", "Loss difference (95%)"),
+            ("vs_implied", "vs implied move"), ("diff_implied", "Loss difference (95%)"),
+            ("coverage", "Inside 10th to 90th"), ("days", "Days"), ("drift", "Inputs")]
+    return [{"name": f, "label": l, "field": f, "sortable": False, "align": "left"}
+            for f, l in spec]
+
+
+def range_drift(payload) -> list:
+    """``[(symbol, [lines])]`` for each symbol whose inputs moved, once each."""
+    seen, out = set(), []
+    for e in (payload or {}).get("range") or []:
+        sym = (e or {}).get("symbol")
+        if sym in seen:
+            continue
+        seen.add(sym)
+        lines = drift_lines(e)
+        if lines:
+            out.append((sym, lines))
+    return out
+
+
+def _class_slot(cls_field):
+    """A cell drawn in the row's own fixed class, read from ``cls_field``."""
+    return (r'''
+  <q-td :props="props">
+    <span :class="props.row.''' + cls_field + r'''">{{ props.value }}</span>
+  </q-td>
+''')
 
 
 _VERDICT_SLOT = r'''
@@ -216,8 +313,16 @@ def render():
         with board.content:
             table = kit.table(columns(), rows_per_page=0)
             details = ui.column().classes("w-full gap-3")
+            ui.label(RANGE_TITLE).classes("text-base font-semibold pt-2")
+            ui.label(RANGE_NOTE).classes(f"text-sm {MUTED}")
+            range_status = ui.label("").classes(f"text-sm {MUTED}")
+            range_table = kit.table(range_columns(), rows_per_page=0)
+            range_details = ui.column().classes("w-full gap-1")
         table.add_slot("body-cell-verdict", _VERDICT_SLOT)
         table.add_slot("body-cell-drift", _DRIFT_SLOT)
+        range_table.add_slot("body-cell-vs_yardstick", _class_slot("_vs_yardstick_class"))
+        range_table.add_slot("body-cell-vs_implied", _class_slot("_vs_implied_class"))
+        range_table.add_slot("body-cell-drift", _DRIFT_SLOT)
 
     def _paint(payload):
         p = payload or {}
@@ -237,6 +342,15 @@ def render():
                     ui.label("Inputs that moved").classes("text-sm font-semibold")
                     for line in drift_lines(m) or [drift_text(m)]:
                         ui.label(line).classes("text-sm tabular-nums")
+        range_table.rows = range_rows(p)
+        range_table.update()
+        range_status.text = "" if p.get("range") or not p else RANGE_OFF
+        range_details.clear()
+        with range_details:
+            for sym, lines in range_drift(p):
+                ui.label(f"{sym} inputs that moved").classes("text-sm font-semibold")
+                for line in lines:
+                    ui.label(line).classes("text-sm tabular-nums")
         board.busy.hide()
         kit.set_busy(recompute, False)
 

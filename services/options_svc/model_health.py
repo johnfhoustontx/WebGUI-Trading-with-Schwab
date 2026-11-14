@@ -404,6 +404,25 @@ def report_markdown(payload) -> str:
                              f"(chance {_f(f.get('p'), 3)}); "
                              f"no reading {_f(f['missing_before'], 2)} -> "
                              f"{_f(f['missing_after'], 2)}")
+    ranges = payload.get("range")
+    if ranges:
+        lines += ["", "## Range forecast (shadow)", "",
+                  "Pinball loss of the 10th, 50th and 90th percentiles of the log "
+                  "range still to come; a negative difference means the forecast "
+                  "was closer. Nothing uses it.", "",
+                  "| Symbol | Horizon | Loss | vs realised volatility | vs implied move "
+                  "| Inside 10-90 | Days | Drift |", "|---|---|---|---|---|---|---|---|"]
+        for e in ranges:
+            h = "rest of session" if e["horizon"] == 0 else f"{e['horizon']} min"
+            short = {k: v.replace(" the usual rate", "") for k, v in WORDS.items()}
+            dy, di = e.get("diff_yardstick") or {}, e.get("diff_implied") or {}
+            lines.append(
+                f"| {e['symbol']} | {h} | {_f(e.get('loss'), 4)} | "
+                f"{short[e['verdict_yardstick']]} {_f(dy.get('mean'), 4)} "
+                f"({_f(dy.get('lo'), 4)} to {_f(dy.get('hi'), 4)}) | "
+                f"{short[e['verdict_implied']]} {_f(di.get('mean'), 4)} "
+                f"({_f(di.get('lo'), 4)} to {_f(di.get('hi'), 4)}) | "
+                f"{_f(e.get('coverage'), 2)} | {e['days']} | {e['drift_status']} |")
     return "\n".join(lines) + "\n"
 
 

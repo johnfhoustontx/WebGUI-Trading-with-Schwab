@@ -3747,6 +3747,39 @@ carries its data date, not a clock) and a dated `report.md`, using `shared/ml`.
   `enabled` is false; the `model_health_rebuild` command (slow lane) runs it on
   demand. A failure is the degrade `options.model_health` and publishes nothing.
 
+### The range forecast (`range_forecast.py`, payload `range`)
+
+Design `docs/plans/2026-11-14-range-forecast-design.md`.
+
+- **Sessions.** `scalp.db` 5-minute bars, 08:30 to 15:00 CT; a session missing any bar
+  of the symbol or its volatility index is left out, which also drops early closes.
+- **Rows.** At each `[range]` time from `first` (08:45) to `last` (14:30) every
+  `step_min` (15), per horizon in `horizons_min` (30, 60, 0 = rest of session): the
+  target is `log((max high - min low) / close at t)` over the bars starting at or after
+  t, ending by t + horizon. A horizon past 15:00 is left out. A day needs five earlier
+  sessions.
+- **Inputs (at t).** Sums of squared 5-minute log returns over the last 30 minutes, the
+  session so far, the previous session and the mean of the previous five (logged,
+  floored at `floor`); the overnight gap `log(1 + |open / previous close - 1|)`; the
+  index close at t (logged) and its log change since the open; cumulative volume against
+  its mean at the same bar over the previous `volume_sessions` (20) sessions (`$SPX`
+  reads SPY's, `[range.volume_from]`); the log of the minutes left and of the horizon.
+- **Models.** Each a weighted ridge (`shared/ml/linear.ridge`, penalty `ridge`, inputs
+  standardised) on the log target, plus the 10th, 50th and 90th weighted percentiles of
+  its training residuals. Yardstick: the four realised-volatility inputs and the time
+  inputs. Implied: `log(iv) + 0.5 log(minutes)` and the minutes left. Forecast: every
+  input.
+- **Scoring.** Walk-forward by session: a day is forecast by fits on earlier days only,
+  once `min_train_days` (40) exist. Loss is the mean pinball loss of the three
+  percentiles (`metrics.pinball`), each day weighing one. The forecast's loss minus each
+  baseline's goes through `metrics.day_bootstrap_diff` and Model Health's verdict rule
+  with `min_days` (40). Coverage is the weighted share inside the 10th to 90th band.
+- **Drift.** The session-shuffle check on the overnight gap, the index's change since
+  the open and the volume ratio only; the volatility levels cluster for weeks and would
+  always read shifted.
+- A failure is the degrade `options.range_forecast`; the payload's `range` is then
+  `null` and the other models still publish.
+
 ## Cadences
 
 | Job | When | What |

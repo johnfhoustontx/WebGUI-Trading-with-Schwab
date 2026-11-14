@@ -73,3 +73,41 @@ def test_drift_summary_and_lines():
 def test_reliability_lists_only_filled_slices():
     assert page.reliability_lines(model()) == [
         "30% to 40%: said 36%, happened 31% (212 rows)"]
+
+
+def range_entry(**kw):
+    base = {"symbol": "SPY", "horizon": 30, "days": 114, "min_days": 40,
+            "verdict_yardstick": "beats", "verdict_implied": "matches",
+            "diff_yardstick": {"mean": -0.0041, "lo": -0.0062, "hi": -0.0019},
+            "diff_implied": {"mean": -0.001, "lo": -0.004, "hi": 0.002},
+            "coverage": 0.788, "drift_status": "steady", "drift": []}
+    base.update(kw)
+    return base
+
+
+def test_range_rows_name_the_horizon_and_both_verdicts():
+    out = page.range_rows({"range": [range_entry(), range_entry(horizon=0)]})
+    assert [r["horizon"] for r in out] == ["30 min", "Rest of session"]
+    r = out[0]
+    assert r["vs_yardstick"] == "Beats" and r["_vs_yardstick_class"] == TXT_POS
+    assert r["vs_implied"] == "Matches"
+    assert r["diff_yardstick"] == "-0.004 (-0.006 to -0.002)"
+    assert r["coverage"] == "79%" and r["days"] == "114" and r["drift"] == "Steady"
+
+
+def test_range_too_few_days_and_no_range():
+    out = page.range_rows({"range": [range_entry(days=12, verdict_yardstick="too_few_days",
+                                                 verdict_implied="too_few_days")]})
+    assert out[0]["vs_yardstick"] == "Too few days (12 of 40)"
+    assert out[0]["_vs_implied_class"] == MUTED
+    assert page.range_rows({"range": None}) == [] and page.range_rows(None) == []
+
+
+def test_range_drift_lists_each_symbol_once():
+    moved = [{"input": "iv", "psi": 0.3, "p": 0.01, "band": "shifted",
+              "missing_before": 0.0, "missing_after": 0.0}]
+    payload = {"range": [range_entry(drift_status="shifted", drift=moved),
+                         range_entry(horizon=60, drift_status="shifted", drift=moved),
+                         range_entry(symbol="QQQ")]}
+    assert page.range_drift(payload) == [
+        ("SPY", ["volatility index: shifted, stability index 0.30, chance alone 1.0%"])]

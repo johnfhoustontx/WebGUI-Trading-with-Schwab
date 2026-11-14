@@ -5215,6 +5215,18 @@ out-of-sample test. Each model's panel below the table lists the said-against-ha
 bands and the inputs that moved, with their stability index, the chance a move that
 large comes from luck, and the share of missing readings before and now.
 
+### The range forecast (shadow)
+
+The second table is the roadmap's Phase 2: a forecast of the range still to come for
+SPY, QQQ and $SPX over 30 minutes, 60 minutes and the rest of the session, made every
+15 minutes of each past session from bars that had already closed, and judged against
+recent realised volatility and the implied move from $VIX ($VXN for QQQ). It is scored
+the night it is computed on every session the store holds, so its verdict needs no
+waiting. Read it as evidence for or against building a live forecast, not as a number
+to trade: it says how far, never which way, and no page or rule reads it. Its inputs
+check skips the volatility levels, which move in long stretches and would always read
+shifted.
+
 ## User Manuals
 
 *Menu: ACCOUNT → More → User Manuals · Route `/manuals`*

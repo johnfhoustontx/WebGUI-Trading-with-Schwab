@@ -2085,6 +2085,17 @@ here changes a chance, a rule or another page.
 - It is computed **each trading night after the 16:20 scalp job**, and a dated
   report is saved beside it. **Recompute** runs it now; the table repaints only if
   a figure changed. Settings → Configuration → Model Health holds its settings.
+- **Range forecast (shadow)**, the second table, forecasts how far SPY, QQQ and
+  $SPX still travel (high minus low) over the next 30 minutes, 60 minutes and the
+  rest of the session, every 15 minutes, from bars already closed. It is scored
+  against two simple predictions: recent realised volatility, and the implied
+  move from $VIX (or $VXN for QQQ). **Beats** means its forecasts were closer
+  over whole days; **Inside 10th to 90th** should sit near 80%. It is a
+  forecast of how far, never of which way, and nothing uses it.
+- The range forecast's **Inputs** check looks only at the overnight gap, the
+  volatility index's change since the open, and volume against its usual level.
+  The volatility LEVELS are left out on purpose: they move in weeks-long
+  stretches, so they would always look shifted.
 """,
     "/social": """
 **Social Cards — the simple version**
