@@ -214,7 +214,9 @@ PHASE_8_FILES = ["status.py", "settings.py", "terminate.py", "manuals.py",
                  # ... and its public screen (2026-09-26).
                  "news_live.py",
                  # X Feed - the pure view model, its page and the page's parts.
-                 "xfeed_view.py", "xfeed.py", "xfeed_parts.py"]
+                 "xfeed_view.py", "xfeed.py", "xfeed_parts.py",
+                 # Model Health (More), ML roadmap Phase 1.
+                 "model_health.py"]
 
 
 def test_utility_pages_have_no_inline_style():

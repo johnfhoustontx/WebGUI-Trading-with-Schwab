@@ -908,6 +908,7 @@ MORE_CHILDREN = [
     ("/eod", "EOD Report", "summarize"),
     ("/blog", "Blog", "article"),
     ("/social", "Social Cards", "share"),
+    ("/model-health", "Model Health", "monitor_heart"),
 ]
 
 # Sub-menu items that used to nest under the Settings entry; Settings is now a
@@ -1208,6 +1209,7 @@ _TAB_COLOR = {
     "/send-order": "#66bb6a",            # Send Live Order — the Ledger's green
     "/live-orders": "#66bb6a",           # Today's Live Orders — the same green
     "/social": "#1d9bf0",                # Social Cards — X blue
+    "/model-health": "#ab47bc",          # Model Health — purple
     # Parchment: a pale, low-saturation tan. Every other colour in this map is
     # a saturated Material hue or a blue grey, so a paper colour is the one
     # ground left that reads as its own tab at 16px.
@@ -2750,6 +2752,13 @@ def eod_page() -> None:
     with _layout("/eod", "EOD Report"):
         from pages import eod
         eod.render()
+
+
+@_page("/model-health")
+def model_health_page() -> None:
+    with _layout("/model-health", "Model Health"):
+        from pages import model_health
+        model_health.render()
 
 
 @_page("/eod/detail")

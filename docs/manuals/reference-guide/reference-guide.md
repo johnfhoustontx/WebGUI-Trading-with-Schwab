@@ -5170,6 +5170,51 @@ did not go out is listed with the reason, rather than simply not appearing.
 
 ---
 
+## Model Health
+
+*Menu: ACCOUNT → More → Model Health · Route `/model-health`*
+
+### What it is
+
+A report card for the chances the app states. For each one it asks two questions:
+did the chance beat simply quoting the usual win rate, and do its inputs still look
+like the ones it was built on. It is the first phase of the machine learning roadmap
+(`docs/plans/2026-11-14-machine-learning-roadmap.md`), and it only reports: no
+chance, rule or page changes because of it, and no corrected figure is shown.
+
+### When to open it
+
+Before trusting a chance more than you did, or after a change in the market that
+might have moved what goes into one. A *Does not beat* verdict says the chance has
+not earned more weight than the usual rate of its group; a flagged input says the
+chance is being asked about conditions unlike the ones it learned from.
+
+### Where the data comes from
+
+The options service builds the view `options:model_health` each trading night as
+the last step of the 16:20 scalp job, and on **Recompute**. It reads the chances the
+scalp calls froze and their graded outcomes from `scalp.db`, and the captured
+signals' short-strike delta and result from `signals.db`. It also writes a dated
+report, `services/options_svc/data/model_health/<date>/report.md`, with every number
+the page shows.
+
+### Reading the screen
+
+| Column | Meaning |
+|---|---|
+| **Brier** | The mean squared gap between the chance said and what happened; lower is better. Three decimals, because the differences that matter are often in the third place. |
+| **Usual rate's Brier** | The same score for quoting the group's usual win rate, from earlier days only. |
+| **Difference (95%)** | Brier minus the usual rate's, with a range from resampling whole days. Below zero the chance was closer. |
+| **Days** | Days with results. Each day counts once, however many calls it had. |
+| **Inputs** | *Steady*, how many inputs *moved* or *shifted*, or *Too little history*. |
+
+The verdict is *Beats* when the whole range is below zero, *Does not beat* when it is
+all above, *Matches* in between, and *Too few days (n of 20)* under the floor. The
+**Weekly refit history** row under each scalp chance is the Saturday refit's own
+out-of-sample test. Each model's panel below the table lists the said-against-happened
+bands and the inputs that moved, with their stability index, the chance a move that
+large comes from luck, and the share of missing readings before and now.
+
 ## User Manuals
 
 *Menu: ACCOUNT → More → User Manuals · Route `/manuals`*

@@ -21,7 +21,7 @@ def test_shell_registers_all_pages():
         "/sentiment/momentum",
         "/trade", "/trade/evidence", "/trade/board", "/trade/plan",
         "/portfolio", "/settings",
-        "/eod", "/eod/detail", "/eod/weekly", "/send-order", "/live-orders", "/social", "/blog", "/status", "/manuals", "/terminate",
+        "/eod", "/eod/detail", "/eod/weekly", "/send-order", "/live-orders", "/social", "/model-health", "/blog", "/status", "/manuals", "/terminate",
         "/market", "/desk", "/symbol", "/news", "/news/x",
     )
     for path in expected:
@@ -100,7 +100,7 @@ def test_group_children_maps_routes_to_their_group():
     assert main._group_children("/market") == main.SENTIMENT_CHILDREN  # folded in
     more = main._group_children("/manuals")                        # Settings child
     assert ("/eod", "EOD Report", "summarize") in more             # merged into More
-    assert [r for r, _l, _i in main.MORE_CHILDREN] == ["/eod", "/blog", "/social"]
+    assert [r for r, _l, _i in main.MORE_CHILDREN] == ["/eod", "/blog", "/social", "/model-health"]
     assert ("/social", "Social Cards", "share") in more
     assert all(r != "/x" for r, _l, _i in main.MORE_CHILDREN)      # Post to X moved into it
     # Trade Analyzer became a GROUP in Phase 5 — the single-symbol card and the

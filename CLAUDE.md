@@ -457,7 +457,7 @@ maps, and anything whose change needs code to follow it.
   `scanner` (selection floors and, since 2026-10-04, `[selection]` strike rules),
   `trade_mgmt`, `paper`, `symbols`, `sectors`, `marketdata`, `services`,
   `flow_alerts`, `notify`, `commissions`, `theme`, `news`, `edge`, `market_read`,
-  `blog`, `social_cards`, `gamma_heat`, `futures_chain`, `gex_archive`, `listed_stocks`, `login_push`, `scalp`, `tos_order`, `live_orders`,
+  `blog`, `social_cards`, `gamma_heat`, `futures_chain`, `gex_archive`, `listed_stocks`, `login_push`, `scalp`, `model_health`, `tos_order`, `live_orders`,
   `sentiment` (when the live composite refuses a pre-open input), and
   the public tools' files.
 - `shared/market_calendar.py` is the single source for the NYSE calendar and the

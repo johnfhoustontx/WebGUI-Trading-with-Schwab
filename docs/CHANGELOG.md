@@ -4,7 +4,31 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-14 (**Machine learning roadmap, and its Phase 0: the `shared/ml` library.**)
+**Last updated:** 2026-11-14 (**Model Health: ML roadmap Phase 1.**)
+
+- **What.** A private page, More → **Model Health** (`/model-health`), and a nightly
+  dated report (`services/options_svc/data/model_health/<date>/report.md`), scoring
+  the app's stated chances against the usual rate of their group: the 08:36 and
+  15-minute scalp chances and the captured signals' delta win rate per
+  `scanner_type`, each with a day-clustered 95% interval and a verdict, plus the
+  weekly refit's own history and a drift check on each model's inputs. Report only:
+  nothing changes a chance, a rule or another page (the user's rule).
+- **Pieces.** `services/options_svc/model_health.py` (built nightly as the last step
+  of the 16:20 scalp pass, and by the `model_health_rebuild` command);
+  `config/model_health.toml` with its Settings entries; `shared/ml/metrics.psi` and
+  `psi_by_session`; `webgui/pages/model_health.py`.
+- **Drift needed a significance test.** On prod's data the plain index flagged almost
+  every input: five recent sessions are too few for ten bins. The index now uses fewer
+  bins for a small sample and smoothed counts, and an input is flagged only when a
+  shuffle of whole sessions says the move is unlikely by chance (`drift_p`).
+- **First reading** (copies of prod's stores, 2026-11-13 backup): both scalp chances
+  *Too few days (16 of 20)*; their weekly refit history *Does not beat* (08:36) and
+  *Matches* (15-minute); the delta win rate *Does not beat* for 0DTE, SWING and INCOME,
+  partly because the delta states expiry odds while trades close early. The short
+  delta of 0DTE and SWING signals shifted in the last five sessions; one scalp input moved.
+- **Design / plan.** `docs/plans/2026-11-14-model-health-{design,plan}.md`.
+
+**Prior —** 2026-11-14 (**Machine learning roadmap, and its Phase 0: the `shared/ml` library.**)
 
 - **What.** A roadmap for machine learning in the app
   (`docs/plans/2026-11-14-machine-learning-roadmap.md`: six phases, the screens

@@ -3715,13 +3715,45 @@ result. The page quotes the verdict of the model of the trade the row names.
   probability (`p (1 - p) x weight x scaled value x 100`, a local approximation: the
   pushes need not sum to the move from 50%), the days its weight rests on, and `assumed`.
 
+## Model Health
+
+Design `docs/plans/2026-11-14-model-health-design.md`. `services/options_svc/model_health.py`
+builds `cache:options:model_health` (published with `skip_unchanged`: the payload
+carries its data date, not a clock) and a dated `report.md`, using `shared/ml`.
+
+- **Rows.** Scalp: each frozen `chance.by_role` of a call, joined to the study's
+  outcome for the same day, slot, symbol and role at the current volatility scale.
+  Signals: `shared.calibration.priced_win_rate(entry_short_delta, strategy)` against
+  a win when `r_multiple(realized_pnl, entry_max_loss) > 0`, one model per
+  `scanner_type`, read through `tools.signal_calibration.load_rows`.
+- **Weights.** A row weighs `1 / rows of its (day, symbol, role)` (scalp) or
+  `1 / signals of its day` (signals), so each day counts once.
+- **Usual rate.** `baselines.usual_rates` over strictly earlier days, per (symbol,
+  role) for 08:36, (symbol, role, block) for 15-minute, per `scanner_type` for
+  signals. A row with no earlier day is left out.
+- **Score.** Weighted Brier of the chance and of the usual rate; the difference's 95%
+  interval comes from `metrics.day_bootstrap_diff` (`bootstrap_draws` resamples of
+  whole days). Verdict: `no_data`, then `too_few_days` (under `min_days`, 20), then
+  `beats` (interval high below 0), `does_not_beat` (low above 0), else `matches`.
+- **Drift.** Per input, `metrics.psi_by_session`: the population stability index of
+  the last `recent_sessions` (5) sessions against every earlier one, with up to ten
+  bins at the reference's quantiles (fewer for a small sample, about five readings a
+  bin), one bin for no reading, and half a count added to every bin. The chance is
+  how often a random set of 5 WHOLE sessions reads an index at least as large
+  (`drift_permutations`, 200). An input is flagged at `psi_moved` (0.10), *shifted* at
+  `psi_shifted` (0.25), and only when that chance is under `drift_p` (0.05). With
+  fewer than `min_reference_sessions` (8) earlier sessions it reads too little history.
+- **When.** The last guarded step of the 16:20 nightly scalp pass, skipped when
+  `enabled` is false; the `model_health_rebuild` command (slow lane) runs it on
+  demand. A failure is the degrade `options.model_health` and publishes nothing.
+
 ## Cadences
 
 | Job | When | What |
 |---|---|---|
 | 15-minute call | **08:51, 09:06 ... 13:51 CT** (`[intraday]` `start` / `end` / `interval_min`, grace `grace_min` 5 min; `scalp_intraday_due`) | Under the shared run lock: today's bars topped up, up to three 0DTE chains, the slot's call built, published and frozen, then the confirmation inputs recorded. About 26 requests, normal lane. |
 | Morning call | **08:36 CT** (`[slots.scalp]`, grace 20 min) | Today's bars topped up, three chains captured, the call built and published. 08:36 and not 08:35: the autoscan fetches 08:32-08:35 and Schwab refuses the first minute after the half hour. |
-| Nightly pass | **16:20 CT** (`[slots.scalp_bars]`, grace 120 min) | In order: **bar top-up** (23 symbols - the 13 in `[bars]` plus the big ten - x 2 intervals, from one bar before the store's latest, so a bar stored as a partial is replaced; a missed night is caught up by the next), the **08:36 study rebuild** (one transaction, so a reader sees the old study or the new, never half of each), the **08:36 grading**, the **intraday grading**, the **scorecard republish**, and last the **intraday study rebuild** (about a minute: 61-68 s measured on a 150-day store, so nothing above waits on it). Each step is guarded on its own: a failed step does not stop the next. After the 16:00 flow-delta report so it never competes for the proxy's 5 requests a second. |
+| Nightly pass | **16:20 CT** (`[slots.scalp_bars]`, grace 120 min) | In order: **bar top-up** (23 symbols - the 13 in `[bars]` plus the big ten - x 2 intervals, from one bar before the store's latest, so a bar stored as a partial is replaced; a missed night is caught up by the next), the **08:36 study rebuild** (one transaction, so a reader sees the old study or the new, never half of each), the **08:36 grading**, the **intraday grading**, the **scorecard republish**, the **intraday study rebuild** (about a minute: 61-68 s measured on a 150-day store, so nothing above waits on it), and last **Model Health** (`model_health.nightly`). Each step is guarded on its own: a failed step does not stop the next. After the 16:00 flow-delta report so it never competes for the proxy's 5 requests a second. |
 | Weekly refit | **Saturday 08:00 CT** (`[slots.scalp_prob] refit`, grace 180 min; the weekday is `[prob] refit_weekday`, 5; `scalp_prob_due`) | Refits the eight chance-of-target models from the stored history, walk-forward checks each and stores them as a new version in `prob_models` (`scalp_prob_fit.refit`). Not gated on a trading day, nothing fetched from Schwab, nothing published. Also on demand as `scalp_prob_refit` (slow lane, replay-guarded). |
 | Refresh | on demand (`scalp_refresh`) | `scalp_call.run`, then `scalp_intraday_call.run_slot` for the slot whose window is open (none open: only today's published slots are put back, never an off-slot call); slow lane, replay-guarded. |
 
@@ -5058,7 +5090,7 @@ the source; this table is a summary of them.
 | Service | Cadence |
 |---------|---------|
 | sentiment_svc | Composite refresh every **120 s** (`REFRESH_INTERVAL_SEC`), throttled to one refresh per **15 min** off-hours (`_OFFHOURS_INTERVAL_MIN`); directional trend recompute every **900 s** (`TREND_INTERVAL_SEC`); market-regime recompute every **5 min** (`REGIME_INTERVAL_MIN`); order-flow publish every **30 s** (`ORDER_FLOW_PUBLISH_SEC`); **momentum cascade once nightly at 16:20** (`momentum_due`); rotation at startup / on demand. |
-| options_svc | Loop tick **30 s** (`POLL_INTERVAL_SEC`). Auto-scan 15-min slots, 08:00–15:15 (`autoscan_due`); **GEX collection every 1 min**, 08:00–15:20 (`_GEX_INTERVAL_MIN`, mirroring `gex_collector.POLL_INTERVAL_MIN`); term structure every **5 min** (`TERM_POLL_INTERVAL_MIN`); **captured-signal** management every **5 min** (`_CAPTURED_MANAGE_INTERVAL_MIN`); **manual** paper entry+manage **hourly at the top of the hour, 09:00–14:00** (`_PAPER_HOURS`, `_PAPER_GRACE_MIN` = 20); paper **expiry settlement at 15:05** — a settle-only pass over the Account and the Ledger, and over the posted trade ideas' Ledger rows (`paper_settle_due`, `[slots.paper_settle]`, grace 120 min); the **trade ideas' Ledger rows** are marked every **5 min** (`idea_marks_due`, `[idea_trades] mark_interval_min`) inside 08:30–15:00 CT at minutes clear of the proxy's busy ones (the scan burst follows `[windows.scan] offset_min`), one slot at most per interval — see *Trade ideas in the Paper Ledger*; header + GEX status each tick in market hours, throttled to one per **5 min** off-hours (`periodic_refresh_due`, skip-unchanged); **Opening Scalp** morning call at **08:36** (`scalp_call_due`, `[slots.scalp]`, grace 20 min), a new 15-minute Opening Scalp call at each of **08:51, 09:06 ... 13:51** (`scalp_intraday_due`, `[intraday]`, grace 5 min) and, at **16:20**, a nightly pass of bar top-up, both study rebuilds, both gradings and the scorecard republish (`scalp_bars_due`, `[slots.scalp_bars]`, grace 120 min) and, on **Saturday at 08:00**, the weekly refit of the chance-of-target weights (`scalp_prob_due`, `[slots.scalp_prob]`, grace 180 min) — see *Opening Scalp*. |
+| options_svc | Loop tick **30 s** (`POLL_INTERVAL_SEC`). Auto-scan 15-min slots, 08:00–15:15 (`autoscan_due`); **GEX collection every 1 min**, 08:00–15:20 (`_GEX_INTERVAL_MIN`, mirroring `gex_collector.POLL_INTERVAL_MIN`); term structure every **5 min** (`TERM_POLL_INTERVAL_MIN`); **captured-signal** management every **5 min** (`_CAPTURED_MANAGE_INTERVAL_MIN`); **manual** paper entry+manage **hourly at the top of the hour, 09:00–14:00** (`_PAPER_HOURS`, `_PAPER_GRACE_MIN` = 20); paper **expiry settlement at 15:05** — a settle-only pass over the Account and the Ledger, and over the posted trade ideas' Ledger rows (`paper_settle_due`, `[slots.paper_settle]`, grace 120 min); the **trade ideas' Ledger rows** are marked every **5 min** (`idea_marks_due`, `[idea_trades] mark_interval_min`) inside 08:30–15:00 CT at minutes clear of the proxy's busy ones (the scan burst follows `[windows.scan] offset_min`), one slot at most per interval — see *Trade ideas in the Paper Ledger*; header + GEX status each tick in market hours, throttled to one per **5 min** off-hours (`periodic_refresh_due`, skip-unchanged); **Opening Scalp** morning call at **08:36** (`scalp_call_due`, `[slots.scalp]`, grace 20 min), a new 15-minute Opening Scalp call at each of **08:51, 09:06 ... 13:51** (`scalp_intraday_due`, `[intraday]`, grace 5 min) and, at **16:20**, a nightly pass of bar top-up, both study rebuilds, both gradings, the scorecard republish and Model Health (`scalp_bars_due`, `[slots.scalp_bars]`, grace 120 min) and, on **Saturday at 08:00**, the weekly refit of the chance-of-target weights (`scalp_prob_due`, `[slots.scalp_prob]`, grace 180 min) — see *Opening Scalp*. |
 | portfolio_svc | Live SSE ticks; throttled publish ≤ every **2 s** (`PUBLISH_INTERVAL_SEC`); full rebuild every **600 s** (`REBUILD_INTERVAL_SEC`), or **3600 s** off-hours (`OFFHOURS_REBUILD_INTERVAL_SEC`), or on demand. |
 | trade_svc | Analysis on demand. One scheduled job: the watchlist **dividend pull**, once a trading day at or after **06:40 CT** (`[calendar.dividends] refresh_at` in `config/news.toml`); the loop wakes every **60 s** and retries a failed pull after **15 min**. |
 | market_svc | Quote poll **3 s** RTH (`RTH_INTERVAL_SEC`), **15 s** off-hours (`OFFHOURS_INTERVAL_SEC`), **60 s** at weekends (`WEEKEND_INTERVAL_SEC`); report summary re-read when the published market report changes (a stat of `deploy/site/reports/latest.html` + `latest.txt` per poll) — no Claude call. |

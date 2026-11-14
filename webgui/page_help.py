@@ -2055,6 +2055,37 @@ An end-of-day summary of the day's options activity and paper trading.
 - **Archive** — pick a month to list that month's saved reports, newest first;
   each day opens its **Summary** or **Detail** in a new tab.
 """,
+    "/model-health": """
+**Model Health — the simple version**
+
+How well the chances the app states have matched what happened, and whether the
+inputs behind them still look like they used to. **It only reports:** nothing
+here changes a chance, a rule or another page.
+
+- **Each row is one stated chance:** the 08:36 and 15-minute scalp chances, and
+  the short strike's delta read as a win rate for each kind of captured signal.
+- **Brier** is the average squared gap between the chance said and what happened
+  (0 is perfect; lower is better). **Usual rate's Brier** is the same score for
+  simply saying the usual win rate of that group, from earlier days only.
+- **Difference (95%)** is the model's Brier minus the usual rate's, with a range
+  over whole days. Below zero the model was closer.
+- **Verdict:** *Beats* when the whole range is below zero, *Does not beat* when it
+  is all above, *Matches* in between. Under 20 days of results it reads *Too few
+  days*: a verdict on less would be noise.
+- **Weekly refit history** (under each scalp chance) is the Saturday refit's own
+  test on the weeks it had not seen. It is the refit's result, not the live one.
+- **Inputs** says whether what goes into the chance has drifted: the last 5
+  sessions against the ones before. An input is flagged only when a shuffle of
+  whole sessions says a move that large is unlikely by chance. Open a model below
+  the table for which inputs, and whether a reading simply went missing.
+- **Said against happened** lists, for each band of stated chance, the average
+  said and the share that came true.
+- **The delta win rate** states the odds of expiring out of the money, while the
+  app closes trades earlier, so part of any gap is that difference.
+- It is computed **each trading night after the 16:20 scalp job**, and a dated
+  report is saved beside it. **Recompute** runs it now; the table repaints only if
+  a figure changed. Settings → Configuration → Model Health holds its settings.
+""",
     "/social": """
 **Social Cards — the simple version**
 

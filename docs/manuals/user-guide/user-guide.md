@@ -3883,6 +3883,37 @@ of your own, and where you see every post the app has made on X.
 > `x.hashtags.marketing`. `max_tags` caps how many hashtags any post carries, and
 > `daily_cap` limits how many posts go out in a day.
 
+## Model Health
+
+**Route:** `/model-health` — a tab in the **More** group, after Social Cards.
+
+This page tells you how well the chances the app states have matched what
+happened, and whether the inputs behind them still look like they used to. **It
+only reports.** Nothing on it changes a chance, a rule or another page.
+
+- **One row per stated chance:** the 08:36 scalp chance, the 15-minute scalp
+  chance, and the short strike's delta read as a win rate for each kind of
+  captured signal (0DTE, SWING, INCOME).
+- **Brier** scores how close the chances were (0 is perfect, lower is better).
+  **Usual rate's Brier** is the score for simply saying the usual win rate of
+  that group, worked out from earlier days only. **Difference (95%)** is the
+  first minus the second, with a range over whole days.
+- **The verdict:** *Beats the usual rate* when the whole range is below zero,
+  *Does not beat the usual rate* when it is all above, *Matches the usual rate*
+  in between, and *Too few days (16 of 20)* until there are 20 days of results.
+- **Weekly refit history**, under each scalp chance, is the Saturday refit's own
+  test on weeks it had not seen. It is the refit's result, not the live one.
+- **Inputs** says whether what goes into a chance has drifted over the last 5
+  sessions. An input is flagged only when a shuffle of whole sessions says a
+  move that large is unlikely by chance. Open a model below the table to see
+  which inputs moved, and whether a reading simply went missing, and to see each
+  band of stated chance against how often it came true.
+- **The delta win rate** states the odds of expiring out of the money, but the
+  app closes trades earlier at a target or a stop, so part of any gap is that.
+- It is worked out **each trading night after the 16:20 scalp job**, and a dated
+  report is saved too. **Recompute** works it out now; the table changes only if
+  a figure changed. The settings are in Settings → Configuration → Model Health.
+
 ## User Manuals
 
 **Route:** `/manuals` — a tab in the **More** group, alongside EOD Report. (It used
