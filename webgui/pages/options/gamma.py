@@ -37,6 +37,7 @@ from shared import gamma_heat_config as _heat_cfg  # Tier-1 allow-listed: config
 from shared import public_gamma as _pg  # Tier-1 allow-listed: config + validator
 from shared import symbols as _symbols
 from . import flow_panels as _fx
+from . import gamma_oi as _oi
 from . import gamma_feed as _feed
 from . import gamma_heat as _heat
 from . import gamma_ridge as _ridge
@@ -173,7 +174,7 @@ _PLOT_MARGIN_BOTTOM = 64
 #    largest values share it and the rest grade toward the low colour. That
 #    reproduces the design's `pow(a, 1.7)` colour-position shaping without needing a
 #    non-linear axis.
-# Shared by all four intraday views AND Term via ``_coloraxis``.
+# Shared by all four intraday views via ``_coloraxis``.
 #
 # The positions and opacities are ``gamma_heat.RAMP``; the four colours are
 # the operator's (``[gamma]``), shipped as maroon and its low colour, clear at
@@ -472,7 +473,7 @@ def wall_plot_lines(spot, walls, flip=None, projected_flip=None, balanced=(),
 # Symmetric colour clamp for a heatmap z-grid: a high percentile of the absolute
 # cell, not the raw max, so a few extreme strikes do not wash out the mid-range.
 # The function lives with the other scale rules (gamma_heat.py); the old name
-# stays because the Term heatmap and the tests use it.
+# stays because the tests use it.
 _robust_zmax = _heat.robust_max
 
 
@@ -1238,7 +1239,7 @@ def heatmap_figure(rows, view="GEX", height=680, yrange=None, forward=None,
             for yi in range(len(vstrikes)) for xi in range(len(times))
             if vz[yi][xi] is not None]
     # Symmetric color clamp from the VISIBLE cells' 95th-percentile |net| (robust —
-    # same as the Term heatmap) so a few extreme strikes don't wash the mid-range
+    # not the raw max) so a few extreme strikes don't wash the mid-range
     # colors to transparent on the flatter views (Charm / DEX / Vanna). A LOCKED
     # scale replaces it with the service's fixed figure for this view and value
     # (gamma_heat.scale_max), once the session has one.
@@ -1465,7 +1466,7 @@ _HEAT_PRESS_TOOLTIP_JS = (
 # hovered panel's plot band. pointer-events:none so it never blocks the charts'
 # own tooltips (incl. the heatmap press-and-hold). MT/MB match _PLOT_MARGIN_* so the
 # plot band is located correctly; querying .highcharts-container live on each move
-# survives chart recreation (bar↔Term). Idempotent via the row._xhair latch.
+# survives chart recreation. Idempotent via the row._xhair latch.
 _CROSSHAIR_JS = (
     "(()=>{const row=document.querySelector('.gamma-xhair-row');"
     "if(!row||row._xhair)return;row._xhair=true;"
@@ -1967,77 +1968,6 @@ def net_prem_status_text(payload, now=None):
     return text
 
 
-# Hairline between adjacent expiry columns on the Term heatmap. Width 1 is the
-# thinnest a crisp SVG stroke goes; the low alpha is what makes it read as a hair
-# rather than a rule, so it separates the columns without competing with the data.
-EXPIRY_SEP_COLOR, EXPIRY_SEP_WIDTH = "rgba(255,255,255,0.22)", 1
-
-
-def expiry_separators(expirations):
-    """xAxis plotLines splitting the Term heatmap between each expiration column.
-
-    ``interpolation: True`` blends the Term view into one continuous field exactly
-    as it does intraday — but here the x axis is DAYS, not minutes, so the blending
-    is misleading: it smears one expiration's exposure into the next when nothing
-    actually varies continuously between them. A hairline on each category boundary
-    (at ``i + 0.5``, the midpoint between category centres) restores the reading
-    that each column is its own expiry. Empty for 0 or 1 expirations — there is no
-    boundary to draw."""
-    exps = expirations or []
-    return [{"value": i + 0.5, "color": EXPIRY_SEP_COLOR, "width": EXPIRY_SEP_WIDTH,
-             "zIndex": 5, "className": "gamma-expiry-sep"}
-            for i in range(len(exps) - 1)]
-
-
-def term_heatmap(term_grid):
-    """Highcharts heatmap options for the Term view (net GEX by expiry × strike).
-
-    Strikes with all-zero net across expirations are dropped. Both axes are
-    categorical (no overlay), and the color scale is clamped symmetrically to a
-    robust max so a few extreme strikes don't wash out the mid-range cells.
-
-    Note the axes being CATEGORICAL is also why this view never showed the mixed
-    strike-ladder striping the intraday heatmap did (see ``uniform_strike_grid``):
-    every strike is its own row by index, so an uneven ladder cannot collide rows
-    here. The trade-off is that the y axis is ordinal, not proportional to price —
-    a 5-wide and a 10-wide gap occupy the same height.
-    """
-    grid = term_grid or {}
-    exps = grid.get("expirations") or []
-    raw_cells = grid.get("cells") or {}
-    # Strike keys round-trip to STRINGS through Redis JSON; re-float per expiry so the
-    # numeric sort + strike labels below work (idempotent for already-float keys).
-    cells = {exp: _refloat_keys(raw_cells.get(exp) or {}) for exp in exps}
-    strikes = sorted({k for exp in exps for k, v in (cells.get(exp) or {}).items()
-                      if isinstance(k, (int, float)) and (v or {}).get("net_gex_usd")})
-    z = [[((cells.get(exp) or {}).get(s) or {}).get("net_gex_usd") for exp in exps]
-         for s in strikes]
-    data = [[xi, yi, z[yi][xi]]
-            for yi in range(len(strikes)) for xi in range(len(exps))
-            if z[yi][xi] is not None]
-    no_fade = {"inactive": {"enabled": False}, "hover": {"enabled": False}}
-    fig = _base_chart("heatmap", 680)
-    fig["chart"]["backgroundColor"] = "transparent"     # same as the candlestick graph
-    _apply_wash(fig)                                    # same wash as intraday
-    # Blended + press-and-hold tooltip, same as the intraday heatmap. The Term view
-    # is painted on chart_el (recreated on the bar↔Term kind switch), so the load
-    # hook rides this figure and fires on that recreation.
-    fig["chart"]["events"] = {":load": _HEAT_PRESS_TOOLTIP_JS}
-    fig.update({
-        "title": {"text": "Term structure (net GEX by expiry × strike)",
-                  "style": {"color": FONT}},
-        "xAxis": {**_dark_axis("Expiration"), "categories": exps,
-                  "plotLines": expiry_separators(exps)},
-        "yAxis": {**_dark_axis("Strike"), "categories": [_fmt.strike(s) for s in strikes]},
-        "colorAxis": _coloraxis(_robust_zmax(z)),
-        "series": [{"type": "heatmap", "name": "net", "data": data,
-                    "interpolation": True, "borderWidth": 0, "states": no_fade,
-                    "tooltip": {"headerFormat": "",
-                                "pointFormat": "net {point.value:,.0f}"}}],
-    })
-    return fig
-
-
 def summary_text(summary, view):
     # Spot (already the on-chart spot line) and strike-count (a data-loaded indicator
     # only) were dropped as low-value; net + flip are the actual reads.
@@ -2070,8 +2000,9 @@ _VIEWS = {"GEX": (0, "gex"), "Charm": (1, "charm"), "DEX": (2, "dex"), "Vanna": 
 
 # Subtab order. Net Prem sits beside Flow — they are the two options-FLOW views
 # (Flow is one symbol's call/put premium over the session; Net Prem is the net of
-# that across many symbols at once), so a reader comparing them doesn't cross Term.
-_VIEW_ORDER = list(_VIEWS) + ["Flow", "Net Prem", "Term"]
+# that across many symbols at once), so a reader comparing them doesn't cross
+# Open Interest (which replaced Term, net gamma by expiry, on 2026-11-14).
+_VIEW_ORDER = list(_VIEWS) + ["Flow", "Net Prem", _oi.VIEW]
 
 
 def _resolve_view(view):
@@ -2548,8 +2479,8 @@ def show_no_greeks(entry, chart_el, msg, symbol, set_summary) -> bool:
 # family the pinned screens read. Roadmap:
 # docs/plans/2026-09-21-public-gamma-any-symbol-roadmap.md, Phase 2.
 
-# No Term (decision D6: its wider chain costs Schwab calls a hot symbol must
-# not), and no Net Prem (decision D3: it stays a screen of its own).
+# No Open Interest (decision D6: its wider chain costs Schwab calls a hot
+# symbol must not), and no Net Prem (decision D3: it stays a screen of its own).
 PUBLIC_VIEW_ORDER = ["GEX", "Charm", "DEX", "Vanna", "Flow"]
 
 PUBLIC_SENDING = "Asking for live updates…"
@@ -3543,7 +3474,7 @@ def render(symbol: str | None = None, view: str | None = None,
         # place on every repaint (Highcharts diffs the new options) — rebuilding them
         # each time would flash. Message labels are toggled via set_visibility. Column
         # flex weights are set per-render from the fixed _STRIKE_HEAT_SPLIT (bars full
-        # width on Term).
+        # width on the panel views).
         # gap-0: bars + heatmap sit flush (no inter-panel gap). w-[calc(100%+1rem)] makes
         # the row 1rem wider than the content box so it extends INTO (and fills) the content
         # column's p-4 right padding — the heatmap's right edge then reaches the window edge.
@@ -3554,7 +3485,7 @@ def render(symbol: str | None = None, view: str | None = None,
         with chart_row:
             chart_box = ui.column().classes(f"min-w-0 {_INIT_FLEX['chart']}")
             with chart_box:
-                # chart_plot switches kind (bar <-> Term heatmap). Highcharts'
+                # chart_plot can switch kind. Highcharts'
                 # chart.update() leaks plotLines/colorAxis across a type switch, so the
                 # element lives in its own container and is RECREATED on kind-change
                 # (see _set_chart); same-kind repaints update in place (flicker-free).
@@ -3682,7 +3613,7 @@ def render(symbol: str | None = None, view: str | None = None,
 
     def _apply_flex(n_cols, term=False):
         """Set the bar/heatmap column widths (fixed _STRIKE_HEAT_SPLIT split), then
-        reflow so the panels fill their containers. Term → bars full width (no heatmap)."""
+        reflow so the panels fill their containers. ``term`` → full width (no heatmap)."""
         if term:
             _set_flex_class(chart_box, "chart", flex_class(1))
             _set_flex_class(heatmap_box, "heat", flex_class(0, grow2=0, basis="0px"))
@@ -3704,7 +3635,7 @@ def render(symbol: str | None = None, view: str | None = None,
     def _set_chart(fig):
         """Paint chart_plot: update in place when the chart KIND is unchanged
         (the common bar->bar repaint, flicker-free), but RECREATE the element when
-        the kind changes (bar <-> Term heatmap, Flow <-> Net Prem) so stale
+        the kind changes so stale
         plotLines/colorAxis/yAxis config from the previous figure doesn't leak
         through Highcharts' merge-based update. See ``chart_kind`` for why the
         identity is NOT just ``chart.type``."""
@@ -3766,7 +3697,8 @@ def render(symbol: str | None = None, view: str | None = None,
         # previous fragment's nodes (or to none at all on the first paint).
         # toggle_js runs even without a scrub payload — the scale toggle exists
         # in the empty state too, and must stay clickable there.
-        scripts = [s for s in (_fx.scrub_js(uid, kind, payload),
+        scripts = [s for s in (_oi.bind_js(uid, payload) if kind == "oi"
+                               else _fx.scrub_js(uid, kind, payload),
                                _fx.toggle_js(uid) if kind == "field" else "")
                    if s]
         if scripts:
@@ -3850,15 +3782,11 @@ def render(symbol: str | None = None, view: str | None = None,
 
         view = view_toggle.value
         spot = snap.get("spot")
-        if view == "Term":
-            _set_chart(term_heatmap(snap.get("term") or {}))
-            state["chart_el"].set_visibility(True)
-            heat_plot.set_visibility(False)
-            hedge_plot.set_visibility(False)
-            hedge_lbl.set_visibility(False)
-            heat_msg.set_visibility(False)
-            _apply_flex(0, term=True)
-            _set_summary(summary_text({"spot": spot, "strike_count": None}, "Term"))
+        if view == _oi.VIEW:
+            # One fragment, like Flow: the strike by expiry map and its ladder.
+            html, mdl = _oi.panel(snap.get("term"), spot, snap.get("symbol"), "oimap")
+            _show_panel(html, "oi", mdl, "oimap")
+            _set_summary(_oi.summary(mdl))
             return
         if view == "Flow":
             # Premium Divergence console panel — the call/put ribbon, the strike
@@ -4417,7 +4345,7 @@ def render(symbol: str | None = None, view: str | None = None,
 
     def _sync_spot_controls():
         # Symbol / Refresh now / Level movement / Spot / Bar all drive the
-        # SYMBOL-SCOPED views (the by-strike bars, the heatmap, Flow, Term). Net
+        # SYMBOL-SCOPED views (the by-strike bars, the heatmap, Flow, Open Interest). Net
         # Prem is symbol-INDEPENDENT — it plots a fixed 28-symbol universe from
         # its own cache key and has no spot overlay — so every one of them is a
         # dead knob there. Hide the cluster rather than leave controls that

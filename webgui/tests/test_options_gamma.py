@@ -205,48 +205,6 @@ def test_heatmap_figure_rowsize_from_visible_window_median():
     assert hm["rowsize"] == 2.5
 
 
-def test_expiry_separators_sit_between_columns():
-    """One hairline per BOUNDARY (n-1 for n expiries), at the midpoint between
-    category centres — a line ON a centre would strike through a column."""
-    lines = gamma.expiry_separators(["08/07", "08/08", "08/11", "08/12"])
-    assert [ln["value"] for ln in lines] == [0.5, 1.5, 2.5]
-    assert all(ln["width"] == 1 for ln in lines), "must stay a hairline"
-    assert all(ln["zIndex"] > 0 for ln in lines), "must draw over the blended image"
-
-
-def test_expiry_separators_empty_when_there_is_no_boundary():
-    assert gamma.expiry_separators([]) == []
-    assert gamma.expiry_separators(["08/07"]) == []
-    assert gamma.expiry_separators(None) == []
-
-
-def test_term_heatmap_separates_the_expiry_columns():
-    """The Term view blends across DAYS, where nothing varies continuously — so the
-    day boundaries have to be drawn back in."""
-    grid = {"expirations": ["08/07", "08/08", "08/11"],
-            "cells": {"08/07": {100.0: {"net_gex_usd": 5}},
-                      "08/08": {100.0: {"net_gex_usd": -3}},
-                      "08/11": {100.0: {"net_gex_usd": 2}}}}
-    fig = gamma.term_heatmap(grid)
-    assert [ln["value"] for ln in fig["xAxis"]["plotLines"]] == [0.5, 1.5]
-
-
-def test_term_heatmap_is_immune_to_an_uneven_strike_ladder():
-    """Term indexes strikes as CATEGORIES, so the mixed-ladder collision that
-    striped the intraday heatmap cannot happen here — every strike gets its own row
-    and points are addressed by index, never by strike value."""
-    grid = {"expirations": ["08/07", "08/08"],
-            "cells": {"08/07": {100.0: {"net_gex_usd": 5}, 105.0: {"net_gex_usd": 4},
-                                115.0: {"net_gex_usd": 3}},
-                      "08/08": {100.0: {"net_gex_usd": -5}, 105.0: {"net_gex_usd": -4},
-                                115.0: {"net_gex_usd": -3}}}}
-    fig = gamma.term_heatmap(grid)
-    assert fig["yAxis"]["categories"] == ["100.00", "105.00", "115.00"]
-    hm = next(s for s in fig["series"] if s["type"] == "heatmap")
-    assert sorted({p[1] for p in hm["data"]}) == [0, 1, 2]   # row INDEX, not strike
-    assert "rowsize" not in hm, "a categorical axis needs no strike-derived rowsize"
-
-
 def test_uniform_strike_grid_leaves_an_even_ladder_alone():
     """The common case ($SPX/SPY/QQQ/IWM/AMD all quote one spacing): no resampling,
     and the SAME objects back so an even chain pays nothing for the check."""
@@ -349,33 +307,6 @@ def test_heatmap_matrix_formats_epoch_ts():
     assert isinstance(x, str) and ":" in x
 
 
-def test_term_heatmap_axes_and_zero_filter():
-    tg = {"underlying_price": 450.0, "expirations": ["2026-06-18", "2026-06-19"],
-          "cells": {"2026-06-18": {450.0: {"net_gex_usd": 5}},
-                    "2026-06-19": {450.0: {"net_gex_usd": -3}, 451.0: {"net_gex_usd": 0}}}}
-    fig = gamma.term_heatmap(tg)
-    assert fig["xAxis"]["categories"] == ["2026-06-18", "2026-06-19"]
-    assert "450.00" in fig["yAxis"]["categories"]
-    assert "451" not in fig["yAxis"]["categories"]   # all-zero strike filtered out
-
-
-def test_term_heatmap_empty():
-    assert gamma.term_heatmap({})["series"][0]["data"] == []
-
-
-def test_term_heatmap_handles_json_string_strike_keys():
-    # Strike keys round-trip to STRINGS through Redis JSON. term_heatmap must
-    # numeric-sort + label them (not crash on f"{s:g}", not sort lexically).
-    tg = {"expirations": ["2026-06-18", "2026-06-19"],
-          "cells": {"2026-06-18": {"450.0": {"net_gex_usd": 5}, "1000.0": {"net_gex_usd": 9}},
-                    "2026-06-19": {"450.0": {"net_gex_usd": -3}, "451.0": {"net_gex_usd": 0}}}}
-    fig = gamma.term_heatmap(tg)
-    cats = fig["yAxis"]["categories"]
-    assert cats == ["450.00", "1000.00"]    # numeric order, not lexical "1000" < "450"
-    assert "451" not in cats                 # all-zero strike still filtered
-    assert any(p[2] == 9 for p in fig["series"][0]["data"])   # net value looked up by re-floated key
-
-
 def test_summary_text_keeps_net_and_flip_drops_spot_and_strikes():
     txt = gamma.summary_text({"spot": 450.0, "flip": 449.5, "net_total": 1234.0,
                               "strike_count": 3}, "GEX")
@@ -438,7 +369,7 @@ def test_view_label_renames_gex_and_dex():
     assert gamma._view_label("GEX") == "GAMMA"
     assert gamma._view_label("DEX") == "DELTA"
     assert gamma._view_label("Charm") == "Charm"
-    assert gamma._view_label("Term") == "Term"
+    assert gamma._view_label("Open Interest") == "Open Interest"
 
 
 def test_base_chart_sets_dark_background():
@@ -646,19 +577,6 @@ def test_wash_background_is_a_vertical_call_to_put_gradient():
     assert [s[0] for s in stops] == sorted(s[0] for s in stops)
 
 
-def test_heatmap_and_term_share_the_same_wash_and_panel_border():
-    rows = [("09:30", 450, None, None, None, 0, {448.0: 5, 450.0: -3})]
-    intraday = gamma.heatmap_figure(rows, "GEX", yrange=[440.0, 460.0])
-    tg = {"underlying_price": 450.0, "expirations": ["2026-06-18"],
-          "cells": {"2026-06-18": {450.0: {"net_gex_usd": 5},
-                                   460.0: {"net_gex_usd": -200}}}}
-    term = gamma.term_heatmap(tg)
-    for fig in (intraday, term):
-        assert fig["chart"]["plotBackgroundColor"] == gamma._wash_background()
-        assert fig["chart"]["plotBorderWidth"] == 1
-        assert fig["chart"]["plotBorderColor"] == gamma.PANEL_BORDER
-
-
 def test_all_four_intraday_views_get_the_plasma_axis_and_wash():
     # GEX / Charm / DEX / Vanna all render through heatmap_figure, so the palette
     # reaches every one of them through the shared _coloraxis.
@@ -712,25 +630,6 @@ def test_heatmap_figure_carries_press_and_hold_hook():
     assert "'mousedown'" in load and "'mouseup'" in load
 
 
-def test_term_heatmap_blended_and_dark_contrast():
-    tg = {"underlying_price": 450.0, "expirations": ["2026-06-18"],
-          "cells": {"2026-06-18": {450.0: {"net_gex_usd": 5},
-                                   460.0: {"net_gex_usd": -200}}}}
-    fig = gamma.term_heatmap(tg)
-    hm = fig["series"][0]
-    # Blended like the intraday heatmap: interpolated, no borders, no fade.
-    assert hm["interpolation"] is True and hm["borderWidth"] == 0
-    assert hm["states"]["inactive"]["enabled"] is False
-    assert fig["chart"]["backgroundColor"] == "transparent"
-    # Same wash as the intraday heatmap (and, as there, never the flat separator grey).
-    assert "linearGradient" in fig["chart"]["plotBackgroundColor"]
-    # press-and-hold tooltip hook present (Term paints on the recreated chart_el)
-    assert "'mousedown'" in fig["chart"]["events"][":load"]
-    # symmetric contrast clamp present on the color axis
-    ca = fig["colorAxis"]
-    assert ca.get("max") is not None and ca.get("min") == -ca["max"]
-
-
 def test_robust_zmax_ignores_none_and_returns_positive():
     z = [[None, 5], [-3, None], [200, 1]]
     zmax = gamma._robust_zmax(z)
@@ -748,7 +647,7 @@ def test_render_view_updates_in_place_not_clear():
     call chart_box.clear()/heatmap_box.clear() (which rebuilt the canvas)."""
     src = inspect.getsource(gamma.render)
     assert "_set_figure" in src           # in-place Highcharts update (no teardown)
-    assert "_set_chart" in src            # kind-aware recreate for the bar<->Term switch
+    assert "_set_chart" in src            # kind-aware recreate on a kind switch
     assert "chart_box.clear()" not in src   # never tear down the whole panel/messages
     assert "heatmap_box.clear()" not in src
     assert "_STRIKE_HEAT_SPLIT" in src   # the configured strike/heatmap split is wired
@@ -1826,10 +1725,10 @@ def test_net_prem_status_text_tolerates_a_naive_now_and_a_non_dict_payload():
 
 # --- view identity for the single full-width chart element -------------------
 
-def test_view_order_puts_net_prem_between_flow_and_term():
+def test_view_order_puts_net_prem_between_flow_and_open_interest():
     """Flow and Net Prem are the two options-FLOW views, so they sit together."""
     order = gamma._VIEW_ORDER
-    assert order[-3:] == ["Flow", "Net Prem", "Term"]
+    assert order[-3:] == ["Flow", "Net Prem", "Open Interest"]
     for v in gamma._VIEWS:
         assert v in order
 
@@ -1859,20 +1758,17 @@ _VIEW_FIGS = {
                                     view="DEX"),
     "Vanna": lambda: gamma.bar_figure({"spot": 100.0, "gex": {100.0: {"net": 1.0}}}, 100.0,
                                       view="Vanna"),
-    "Term": lambda: gamma.term_heatmap({"expirations": ["2026-08-07"],
-                                        "cells": {"100.0": {"2026-08-07": 1.0}}}),
 }
 
 # Views that SHARE a figure builder must share a kind (no needless recreate);
 # views with DIFFERENT builders must not collide (no merge leak).
-_VIEW_BUILDER = {"GEX": "bars", "Charm": "bars", "DEX": "bars", "Vanna": "bars",
-                 "Term": "term"}
+_VIEW_BUILDER = {"GEX": "bars", "Charm": "bars", "DEX": "bars", "Vanna": "bars"}
 
-# Flow and Net Prem are NOT Highcharts views: they render as flow_panels console
-# fragments into a ui.html element, so chart_kind never sees them and _set_chart
+# Flow, Net Prem and Open Interest are NOT Highcharts views: they render as
+# console fragments (flow_panels, gamma_oi) into a ui.html element, so chart_kind never sees them and _set_chart
 # is never called for them. Listed explicitly rather than simply omitted, so the
 # completeness guard below still fails on a NEW view that nobody registered.
-_PANEL_VIEWS = {"Flow", "Net Prem"}
+_PANEL_VIEWS = {"Flow", "Net Prem", "Open Interest"}
 
 
 def test_every_view_is_registered_for_the_chart_kind_guard():
@@ -2297,7 +2193,7 @@ def test_both_pins_are_actually_consumed_by_render():
     assert "_pinned_view = first_view(view, tab, public)" in src, (
         "the view pin never reaches the subtabs")
     assert "return _resolve_view(view)" in inspect.getsource(gamma.first_view)
-    assert gamma.first_view("Flow", "term") == "Flow"
+    assert gamma.first_view("Flow", "open-interest") == "Flow"
     assert "ui.tabs(value=_pinned_view)" in src
     assert "_set_symbol(symbol or " in src, "the symbol pin never reaches the dropdown"
 
@@ -3030,7 +2926,7 @@ def _picker(kids):
 def test_every_subtab_has_its_own_slug_and_the_slug_opens_it():
     slugs = [gamma.tab_slug(v) for v in gamma._VIEW_ORDER]
     assert slugs == ["gamma", "charm", "delta", "vanna", "flow", "net-prem",
-                     "term"]
+                     "open-interest"]
     for v in gamma._VIEW_ORDER:
         assert gamma.view_for_tab(gamma.tab_slug(v)) == v
 
@@ -3063,8 +2959,8 @@ def test_an_unknown_or_absent_tab_opens_the_default(monkeypatch):
 
 def test_a_pin_outranks_a_tab():
     """``?view=`` is a public screen of one view; a ``tab`` cannot move it."""
-    assert gamma.first_view("Flow", "term") == "Flow"
-    assert gamma.first_view(None, "term") == "Term"
+    assert gamma.first_view("Flow", "open-interest") == "Flow"
+    assert gamma.first_view(None, "open-interest") == "Open Interest"
     assert gamma.first_view(None, None) == "GEX"
 
 
@@ -4019,7 +3915,7 @@ def test_the_show_picker_is_shown_with_the_others():
     heat = _heat_controls()
     heat.sync("GEX")
     assert heat.show.visible is True
-    heat.sync("Term")
+    heat.sync("Open Interest")
     assert heat.show.visible is False
 
 
@@ -4084,7 +3980,7 @@ def test_heat_controls_fall_back_to_net_when_no_cell_has_sides():
 def test_heat_controls_show_on_the_four_greek_views_only():
     heat = _heat_controls()
     for view, shown in (("GEX", True), ("Vanna", True), ("Flow", False),
-                        ("Net Prem", False), ("Term", False)):
+                        ("Net Prem", False), ("Open Interest", False)):
         heat.sync(view)
         assert heat.value.visible is shown and heat.legend.visible is shown
         assert heat.scale.visible is shown and heat.frame.visible is shown
@@ -4695,7 +4591,8 @@ def test_the_well_is_hidden_until_its_switch_is_on():
     assert well.plot.options is None and well.reflowed == 0
 
 
-@pytest.mark.parametrize("view", ["Charm", "DEX", "Vanna", "Flow", "Net Prem", "Term"])
+@pytest.mark.parametrize("view", ["Charm", "DEX", "Vanna", "Flow", "Net Prem",
+                                  "Open Interest"])
 def test_the_well_and_its_switch_belong_to_the_gamma_view_only(view):
     """Valleys and hills are a statement about gamma. Another view's numbers
     drawn as ground would mean nothing."""
@@ -4920,7 +4817,7 @@ def test_the_ridge_plot_is_hidden_until_its_switch_is_on():
 
 @pytest.mark.parametrize("view, offered", [
     ("GEX", True), ("Charm", True), ("DEX", True), ("Vanna", True),
-    ("Flow", False), ("Net Prem", False), ("Term", False)])
+    ("Flow", False), ("Net Prem", False), ("Open Interest", False)])
 def test_the_ridge_switch_is_offered_on_the_four_greek_views(view, offered):
     panel = _ridge_panel(on=True)
     panel.paint(view, _RIDGE_SNAP, {}, "net")

@@ -4927,8 +4927,8 @@ reported as a stopped feed on the entry's reason, though they arrive on time.
   (the last taken far enough before expiry that the closing spike is not left on screen),
   marked **frozen**, and also stale when the next session is open with nothing yet; with
   neither, nothing. A stale or frozen payload drops its projected afternoon.
-- **What is not offered.** **Term**: the feed holds one expiry, so there is nothing to
-  compare (`with_term=False`). **Flow**: it prints contract counts, which the adapter scales, which is why
+- **What is not offered.** **Open Interest**: the feed holds one expiry, so there is nothing to
+  compare (`with_term=False`), and its counts are scaled by contract size. **Flow**: it prints contract counts, which the adapter scales, which is why
   it was left out; the feed's minutes are also written with no `on_chain` hook (tally,
   traded premium, unusual activity, HIRO), so none of those exist for these symbols. **Explain**,
   **Analyze** and **Briefings** fetch from Schwab or read the stock indexes. Net Prem stays: it

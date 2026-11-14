@@ -787,13 +787,13 @@ accelerate price.
   notice with the age, or **Last session** once the session is over, and no **now**
   line or projected afternoon is drawn from a stale capture. A capture a minute late is
   nothing; time with none is a blank band labelled **No capture**, never a smooth
-  change, and Smooth does not reach across it. Flow and Term are not offered for them,
+  change, and Smooth does not reach across it. Flow and Open Interest are not offered for them,
   and neither are Explain, Analyze and Briefings. The Bar and Smooth pickers still mean
   minutes, but a bar only sees the captures inside it, so one no longer than the
   capture interval holds a single reading. Their gamma flip is the **cumulative
   flip**: where net gamma, added up strike by strike from the lowest, changes sign.
   The per-strike flip other symbols use jumped between captures on these two.
-- **Gamma / Charm / Delta / Vanna / Flow / Net Prem / Term** — the small tabs at
+- **Gamma / Charm / Delta / Vanna / Flow / Net Prem / Open Interest** — the small tabs at
   the very top (under the page tabs): different lenses on dealer positioning; the
   **walls** mark likely support/resistance. The header names the one you're on,
   e.g. "Markets › Dealer Positioning › Gamma".
@@ -2418,8 +2418,9 @@ SUBTAB_HELP: dict[str, dict[str, str]] = {
                 "(call minus put).",
         "Net Prem": "Net options premium (call $ minus put $) for many symbols at "
                     "once — pick from 28 across indices, sectors and mega-caps.",
-        "Term": "Term structure — the same exposure across the next several "
-                "expirations, as a strike x expiry heat map.",
+        "Open Interest": "Open interest by strike and expiry — where the open "
+                         "contracts sit across the next five expirations, with a "
+                         "put and call ladder for the expiry you click.",
         # Net Prem group sub-tabs (they filter the symbol picker):
         "indices": "Filter the symbol list to indices & broad ETFs ($SPX, $NDX, "
                    "BIG10, SPY, QQQ, IWM, DIA). Your ticked symbols stay selected.",

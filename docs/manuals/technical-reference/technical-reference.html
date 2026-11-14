@@ -8800,8 +8800,8 @@ reported as a stopped feed on the entry's reason, though they arrive on time.</p
   (the last taken far enough before expiry that the closing spike is not left on screen),
   marked <strong>frozen</strong>, and also stale when the next session is open with nothing yet; with
   neither, nothing. A stale or frozen payload drops its projected afternoon.</li>
-<li><strong>What is not offered.</strong> <strong>Term</strong>: the feed holds one expiry, so there is nothing to
-  compare (<code>with_term=False</code>). <strong>Flow</strong>: it prints contract counts, which the adapter scales, which is why
+<li><strong>What is not offered.</strong> <strong>Open Interest</strong>: the feed holds one expiry, so there is nothing to
+  compare (<code>with_term=False</code>), and its counts are scaled by contract size. <strong>Flow</strong>: it prints contract counts, which the adapter scales, which is why
   it was left out; the feed's minutes are also written with no <code>on_chain</code> hook (tally,
   traded premium, unusual activity, HIRO), so none of those exist for these symbols. <strong>Explain</strong>,
   <strong>Analyze</strong> and <strong>Briefings</strong> fetch from Schwab or read the stock indexes. Net Prem stays: it

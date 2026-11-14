@@ -421,7 +421,7 @@ call: it shows the scans your stack already runs every 15 minutes.</p>
 <p>The public <strong>Gamma</strong> page is Dealer Positioning with its symbol dropdown: a
 visitor picks any symbol your collector gathers (the <code>symbols.toml</code> lists plus
 your Top 20 list) and switches between Gamma, Charm, Delta, Vanna and Flow.
-There is no Term tab and no Net Prem tab (Net Prem is its own screen). $SPX, SPY
+There is no Open Interest tab and no Net Prem tab (Net Prem is its own screen). $SPX, SPY
 and QQQ are always live; any other symbol goes live when a visitor picks it and
 stays live while someone watches it, up to 8 at once (Settings → Configuration
 → Public Gamma page). Picking a symbol costs no Schwab call: it reuses the chain
@@ -733,7 +733,7 @@ session.</p>
   page is for and how changing its settings changes the result.</li>
 <li><strong>Sub-tab hover tooltips</strong> — several pages have a second row of small <strong>view
   tabs</strong> beneath the main strip (for example Dealer Positioning's <strong>GEX / Charm /
-  DEX / Vanna / Flow / Net Prem / Term</strong>, the Simulator's <strong>Price &amp; Time / Volatility /
+  DEX / Vanna / Flow / Net Prem / Open Interest</strong>, the Simulator's <strong>Price &amp; Time / Volatility /
   History</strong>, and the Scanner's <strong>0-DTE / Swing / Directional</strong>). Hover an individual
   sub-tab and a one-line tip explains what that specific view shows — so you can
   learn what "Charm" or "Vanna" means without leaving the page.</li>
@@ -1147,9 +1147,9 @@ last three are different screens with their own controls.</p>
 <td>Comparing where money is going across names.</td>
 </tr>
 <tr>
-<td><strong>Term</strong></td>
-<td>The same exposure across the <strong>next five expirations</strong>.</td>
-<td>Choosing which expiry to trade.</td>
+<td><strong>Open Interest</strong></td>
+<td>Where the open contracts sit, by strike, across the <strong>next five expirations</strong>, with a put and call ladder for one expiry.</td>
+<td>Finding the strikes and the expiry that hold the positions.</td>
 </tr>
 </tbody>
 </table>
@@ -1174,10 +1174,23 @@ are easy to get wrong:</p>
   what lets you compare a big name with a small one.</li>
 </ul>
 <p>Each symbol keeps the same colour, and your group, ticks and scale are remembered.</p>
-<p><strong>Term</strong> — its vertical axis is a <strong>list of expirations, not a time scale</strong>, so the
-gap between columns says nothing about how far apart the expiries are. The hairlines
-between columns matter: the smooth shading <em>across</em> a boundary is just drawing, not a
-measurement. Read the columns, not the gradient between them.</p>
+<p><strong>Open Interest</strong> — a map of open contracts: strikes down the side, the next five
+expirations across the top, and a brighter cell where more contracts are open. Click an
+expiry (its name or any cell in its column) and the ladder on the right shows that
+expiry's puts to the left and calls to the right, strike by strike, with six figures
+above: the <strong>call wall</strong> (the strike with the most call interest above the price), the
+<strong>put wall</strong> (the most put interest below it), <strong>max pain</strong> (the strike at which the
+open contracts would be worth the least at expiry), the <strong>put / call ratio</strong> and the
+two totals. The walls are outlined on the map and the ladder, and the dashed line is the
+price. <strong>Total</strong> shades each cell by calls plus puts; <strong>Net calls less puts</strong> shades it
+by which side is larger. Hover a cell or a bar for the exact counts.</p>
+<p>The columns are a <strong>list of expirations, not a time scale</strong>: open interest is published
+once a day, so nothing here moves during the session except the price line. A count of
+open contracts says where positions sit, not who holds which side. The figures cover
+the whole chain; only the rows are cut to the strikes near the price, and a chain with
+very many strikes is drawn in wider steps, each row the sum of the strikes it holds
+(the note under the map says when). Index open interest reads zero outside the session,
+and the tab says so when that happens.</p>
 <blockquote>
 <p><strong>Premium is unsigned.</strong> Schwab publishes no options tape, so Flow and Net Prem
 show <strong>dollars through calls versus puts</strong> — a money-weighted put/call read,
@@ -1197,8 +1210,8 @@ line summary (spot, strike count, net exposure).</p>
 <p><strong>Panels:</strong></p>
 <ul>
 <li><strong>Left</strong> — a horizontal bar chart of net exposure by strike near spot, with the
-  spot line, a gamma-flip line, and call/put <strong>wall</strong> lines. (In <strong>Term</strong> view this
-  becomes a full-width expiry × strike heat map.)</li>
+  spot line, a gamma-flip line, and call/put <strong>wall</strong> lines. (The <strong>Open Interest</strong>
+  view is one full-width panel instead.)</li>
 <li><strong>Right</strong> — an <strong>intraday heat map</strong> of strike × time. Call-heavy (positive)
   strikes grade from a light purple to purple; put-heavy (negative) from a light
   maroon to maroon; near zero fades to transparent so quiet strikes read as empty. Those are the shipped
@@ -1513,7 +1526,7 @@ for round-the-clock coverage, not a promise of it.</p>
   page every</strong>, <code>fill_step_sec</code>, shipped 120 seconds). After a miss the same capture fills
   the columns until the next one, so a slower stretch keeps its width in time. The projected
   afternoon is drawn only from a current capture.</li>
-<li><strong>Not offered:</strong> Flow, Term, Explain, Analyze and Briefings (the last three read the stock
+<li><strong>Not offered:</strong> Flow, Open Interest, Explain, Analyze and Briefings (the last three read the stock
   indexes or fetch from Schwab). <strong>Net Prem</strong> stays and is unrelated to the symbol. In the
   Delta view the hedge panel may say <em>hedge n/a for this capture</em>.</li>
 </ul>

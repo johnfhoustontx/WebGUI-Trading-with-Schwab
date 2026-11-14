@@ -55,7 +55,7 @@ def documents(text, term):
     good enough. It passed the User Guide on Dealer Positioning's **Flow** sub-tab
     because the token appeared in the unrelated page name "Flow Alerts", and it
     passed **Net Prem** because the view was listed in a bare toggle line
-    ``Gamma / Charm / Delta / Vanna / Flow / Net Prem / Term`` that explained none
+    ``Gamma / Charm / Delta / Vanna / Flow / Net Prem / Open Interest`` that explained none
     of them. Both shipped undocumented behind a green test.
 
     The discriminator is whether the term is followed by a SENTENCE or sits inside a
@@ -131,7 +131,7 @@ SUBTABS_AND_SCREENS = [
     ("Dealer Positioning", "Vanna view", "Vanna"),
     ("Dealer Positioning", "Flow view", "Flow"),
     ("Dealer Positioning", "Net Prem view", "Net Prem"),
-    ("Dealer Positioning", "Term view", "Term"),
+    ("Dealer Positioning", "Open Interest view", "Open Interest"),
     ("Dealer Positioning", "Explain button", "Explain"),
     ("Dealer Positioning", "Analyze button", "Analyze"),
     ("Dealer Positioning", "Briefings button", "Briefings"),

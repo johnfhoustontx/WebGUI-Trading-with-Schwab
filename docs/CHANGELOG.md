@@ -4,7 +4,25 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-14 (**Market read: the dispersion index on the Volatility row.**)
+**Last updated:** 2026-11-14 (**Dealer Positioning: the Open Interest tab replaces Term.**)
+
+- **What.** The last subtab is now **Open Interest**: open contracts by strike across
+  the next five expirations, a put and call ladder for the expiry clicked, and that
+  expiry's call wall, put wall, max pain, put / call ratio and totals. A toggle shades
+  the map by Total or by Net calls less puts. Term (net gamma by expiry) is gone from
+  the page; `gamma.term_heatmap` and `expiry_separators` went with it.
+- **The pieces.** `GammaEngine.compute_term_grid` adds `call_oi` / `put_oi` to each
+  cell, so the snapshot's existing `term` key feeds the tab with no new fetch and no
+  new line in `compute.py`. `webgui/pages/options/gamma_oi.py` holds the model and the
+  fragment; `gamma.render` only calls it. Settings are `config/gamma_heat.toml
+  [open_interest]` (`span_pct`, `max_rows`, `cap_quantile`).
+- **Unchanged.** The collector still stores the per-expiry gamma grid every 5 minutes
+  and the Gamma Archive still copies it. The public Gamma page had no Term tab and has
+  no Open Interest tab. /ES and /NQ do not offer it: their counts are scaled.
+- **Not built.** Change in open interest from the day before. It needs one stored
+  snapshot a day, which the store does not keep.
+
+**Prior —** 2026-11-14 (**Market read: the dispersion index on the Volatility row.**)
 
 - **What.** The Desk's Volatility row ends with "dispersion (DSPX) 38.42 (+1.20%)".
   `market_read.volatility` publishes the tile's level and change as `dspx` and

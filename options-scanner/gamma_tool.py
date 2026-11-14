@@ -693,6 +693,8 @@ class GammaEngine:
                   "call_gex_usd": float,
                   "put_gex_usd":  float,
                   "net_gex_usd":  float,
+                  "call_oi":      float,     # open interest, in contracts
+                  "put_oi":       float,
               }}}
             }
         """
@@ -714,6 +716,10 @@ class GammaEngine:
             key=_exp_date,
         )[:top_n]
 
+        def _empty_term_cell() -> dict:
+            return {"call_gex_usd": 0.0, "put_gex_usd": 0.0, "net_gex_usd": 0.0,
+                    "call_oi": 0.0, "put_oi": 0.0}
+
         cells: dict = {}
         for exp_key in all_exp_keys:
             exp_date = _exp_date(exp_key)
@@ -729,10 +735,9 @@ class GammaEngine:
                 # unit as the intraday GEX path in calc_from_chain. Without the
                 # * 0.01 the term grid would be 100x (per-$1^2, not per-1%).
                 call_gex = oi_c * gamma_c * (S ** 2) * 100 * 0.01
-                cell = per_strike.setdefault(K, {
-                    "call_gex_usd": 0.0, "put_gex_usd": 0.0, "net_gex_usd": 0.0,
-                })
+                cell = per_strike.setdefault(K, _empty_term_cell())
                 cell["call_gex_usd"] = call_gex
+                cell["call_oi"] = oi_c
 
             for strike_key, contracts in put_map.get(exp_key, {}).items():
                 K = float(strike_key)
@@ -742,10 +747,9 @@ class GammaEngine:
                 # Per-1% dollar-gamma — matches call_gex above and the intraday
                 # calc_from_chain path (see the * 0.01 note there).
                 put_gex = oi_p * gamma_p * (S ** 2) * 100 * 0.01
-                cell = per_strike.setdefault(K, {
-                    "call_gex_usd": 0.0, "put_gex_usd": 0.0, "net_gex_usd": 0.0,
-                })
+                cell = per_strike.setdefault(K, _empty_term_cell())
                 cell["put_gex_usd"] = put_gex
+                cell["put_oi"] = oi_p
 
             for K, cell in per_strike.items():
                 cell["net_gex_usd"] = cell["call_gex_usd"] - cell["put_gex_usd"]

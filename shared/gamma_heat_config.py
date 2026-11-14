@@ -96,6 +96,17 @@ DEFAULTS = {
         # take the rest, and the hedge-pressure panel follows the heatmap.
         "heat_share": 0.75,
     },
+    "open_interest": {
+        # The Open Interest tab draws the strikes within this percentage of the
+        # price, each side.
+        "span_pct": 6.0,
+        # At most this many strike rows. A chain with more inside the span is
+        # drawn in wider steps, each row the sum of the strikes it holds.
+        "max_rows": 48,
+        # The colour scale tops out at this quantile of the cells on screen, so
+        # one very large strike does not wash out the rest.
+        "cap_quantile": 0.92,
+    },
 }
 
 WELL_HEIGHTS = ("root", "linear")
@@ -202,6 +213,17 @@ def lock() -> dict:
     return {"minutes": _setting("lock", "minutes", minimum=5, maximum=390),
             "quantile": _setting("lock", "quantile", minimum=0.5, maximum=1.0),
             "headroom": _setting("lock", "headroom", minimum=1.0, maximum=5.0)}
+
+
+def open_interest() -> dict:
+    """``{"span_pct", "max_rows", "cap_quantile"}`` for the Open Interest tab
+    (``pages/options/gamma_oi``). Read by the page each time it draws."""
+    return {"span_pct": _setting("open_interest", "span_pct",
+                                 minimum=1.0, maximum=30.0),
+            "max_rows": _setting("open_interest", "max_rows",
+                                 minimum=12, maximum=120),
+            "cap_quantile": _setting("open_interest", "cap_quantile",
+                                     minimum=0.5, maximum=1.0)}
 
 
 def heat_share() -> float:
