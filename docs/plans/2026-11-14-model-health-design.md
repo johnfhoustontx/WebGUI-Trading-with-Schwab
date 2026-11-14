@@ -67,11 +67,10 @@ same (day, slot, symbol, role) at the current `iv_scale`
 are `interval = scalp_study.VERDICT_INTERVAL`. `intraday_outcomes` has no
 interval column.
 
-Signals are read by a new `signal_db.get_model_health_rows(db_path=...)`
-(no existing reader carries the delta, IV rank and score), returning
-`first_seen_date, scanner_type, strategy, entry_short_delta, entry_iv_rank,
-entry_score, dte_at_entry, realized_pnl, entry_max_loss` for closed signals,
-with `structures.not_tracked_sql` in its WHERE.
+Signals are read by `tools.signal_calibration.load_rows`, the reader the
+service's existing `cache:options:calibration` already uses. It carries every
+field needed, leaves tracked rows out, and drops captures made outside the
+regular session (mispriced against the prior close). No new reader.
 
 For each scalp model the page also shows the latest weekly refit's own
 out-of-sample result, already stored in `prob_models` (`walk_forward`: `weeks`,
