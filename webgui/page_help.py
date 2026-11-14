@@ -1994,8 +1994,8 @@ A live grid of macro tickers, grouped into framed panels by category.
   for that name; the **BIG10** tile (in the Top 10 frame) shows the net of its 10
   members (the Mag-7 plus AVGO/PLTR/AMD). A dash means that name isn't in the
   collected universe.
-- **Ranked frames** — **Broad-Market ETF**, **Top 10**, **Sector SPDR**,
-  **Thematic / Industry** and **Countries** re-order themselves by the day's
+- **Ranked frames** — **Sectors**, **Broad Market**, **Top 10**,
+  **Industries** and **Countries** re-order themselves by the day's
   move, biggest gainer first, so the leaders and laggards are always at the ends.
   Every other frame keeps its curated order (VIX before its tenors; the cash
   indexes paired with their futures) because that layout is itself information.
@@ -2003,7 +2003,9 @@ A live grid of macro tickers, grouped into framed panels by category.
   ranked **stock** frames only, so a bid VIX or a rallying Treasury doesn't count
   as a decline. The BIG10 tile is skipped, since it's the average of the ten
   mega-caps already counted beside it.
-- **Hover a fund** — on a Broad-Market ETF, Sector SPDR, Thematic or Countries
+- **Sector tiles** are headed by the sector's name (Energy, Technology), with
+  the fund's symbol (XLE, XLK) on the line under the price.
+- **Hover a fund** — on a Sectors, Broad Market, Industries or Countries
   tile the card lists the fund's top five holdings with each one's price and move
   since the previous close. Foreign companies show their US line. A line that
   hasn't traded for four days reads **last** and its trade date instead of a move.

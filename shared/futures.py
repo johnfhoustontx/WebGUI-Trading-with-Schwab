@@ -4,7 +4,7 @@
 and ``tools/nq_instruments.py`` copied both, with a test to keep the copies
 equal. Equal is not current: the September 2026 contract expired on 2026-09-18,
 a quote for an expired contract returns nothing at all, and the Macro Board's
-two Equity Index Futures tiles sat blank on the public page with every test
+two Index Futures tiles sat blank on the public page with every test
 green. This module is what both of them read instead.
 
 **The cycle.** E-mini index futures list quarterly: March (H), June (M),

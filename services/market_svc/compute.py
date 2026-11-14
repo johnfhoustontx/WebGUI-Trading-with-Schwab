@@ -195,9 +195,12 @@ def _leg(raw, sym):
 
 
 def _tile_base(entry):
-    return {"display": entry["display"], "description": entry["description"],
-            "category": entry["category"], "polarity": entry["polarity"],
-            "value_only": entry["value_only"]}
+    t = {"display": entry["display"], "description": entry["description"],
+         "category": entry["category"], "polarity": entry["polarity"],
+         "value_only": entry["value_only"]}
+    if entry.get("label"):      # the name the page prints in place of the symbol
+        t["label"] = entry["label"]
+    return t
 
 
 def _attach_prem(t, e, symbol_prem):

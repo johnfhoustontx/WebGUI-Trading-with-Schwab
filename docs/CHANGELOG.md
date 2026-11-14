@@ -4,7 +4,26 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-14 (**Range forecast on Model Health: ML roadmap Phase 2, approach A.**)
+**Last updated:** 2026-11-14 (**Macro Board: the operator's frame order, new frame names, sector names, DSPX.**)
+
+- **Order.** Sectors, Broad Market, Top 10, Industries, Countries, Index Futures,
+  Cash Index ETF, Metals, Market Internals / Breadth, Volatility, Options Sentiment,
+  Currency, Fixed Income / Credit, Crypto / Alternatives
+  (`market_svc/symbols.CATEGORY_ORDER`).
+- **Renamed.** Sector SPDR → Sectors; Broad-Market ETF → Broad Market; Thematic /
+  Industry ETF → Industries; Equity Index Futures → Index Futures; Cash Index → Cash
+  Index ETF; Fixed Income / Credit ETF → Fixed Income / Credit. The name is the
+  frame's key in `cache:market:dashboard`; every reader of a frame by name was
+  renamed with it (the breadth meter and its service twin).
+- **Sector names.** A sector tile is headed "Energy", "Technology" and so on, with
+  the symbol on its third line. The name travels as a new optional tile field,
+  `label`; `display` stays the symbol because the Market read, the ticker, the
+  holdings card and the trade-idea snapshot find a tile by it. The snapshot image
+  still prints symbols.
+- **DSPX.** The Cboe S&P 500 Dispersion Index joins Volatility, quoted as `$DSPX`
+  (the proxy refuses the bare `DSPX`), inverted like the rest of the frame.
+
+**Prior —** 2026-11-14 (**Range forecast on Model Health: ML roadmap Phase 2, approach A.**)
 
 - **What.** A shadow forecast of the range still to come for SPY, QQQ and `$SPX`
   (30 minutes, 60 minutes, rest of session; 10th, 50th and 90th percentiles), made

@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-13</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-14</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -427,21 +427,29 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#related-pages_31">Related pages</a></li>
 </ul>
 </li>
+<li><a href="#model-health">Model Health</a><ul>
+<li><a href="#what-it-is_34">What it is</a></li>
+<li><a href="#when-to-open-it_6">When to open it</a></li>
+<li><a href="#where-the-data-comes-from_33">Where the data comes from</a></li>
+<li><a href="#reading-the-screen_32">Reading the screen</a></li>
+<li><a href="#the-range-forecast-shadow">The range forecast (shadow)</a></li>
+</ul>
+</li>
 <li><a href="#user-manuals">User Manuals</a></li>
 </ul>
 </li>
 <li><a href="#system">SYSTEM</a><ul>
 <li><a href="#system-status">System Status</a><ul>
-<li><a href="#what-it-is_34">What it is</a></li>
-<li><a href="#reading-the-screen_32">Reading the screen</a></li>
+<li><a href="#what-it-is_35">What it is</a></li>
+<li><a href="#reading-the-screen_33">Reading the screen</a></li>
 <li><a href="#why-it-matters_27">Why it matters</a></li>
 <li><a href="#caveats-and-gotchas_17">Caveats and gotchas</a></li>
 <li><a href="#related-pages_32">Related pages</a></li>
 </ul>
 </li>
 <li><a href="#settings">Settings</a><ul>
-<li><a href="#what-it-is_35">What it is</a></li>
-<li><a href="#reading-the-screen_33">Reading the screen</a></li>
+<li><a href="#what-it-is_36">What it is</a></li>
+<li><a href="#reading-the-screen_34">Reading the screen</a></li>
 <li><a href="#why-it-matters_28">Why it matters</a></li>
 <li><a href="#caveats-and-gotchas_18">Caveats and gotchas</a></li>
 <li><a href="#related-pages_33">Related pages</a></li>
@@ -2177,37 +2185,12 @@ intensity scales with the size of the move.</p>
 </thead>
 <tbody>
 <tr>
-<td><strong>Volatility</strong></td>
-<td>VIX, VIX1D, VIX3M, SKEW</td>
-<td>The market's expected volatility. VIX1D above VIX means near-term stress.</td>
+<td><strong>Sectors</strong></td>
+<td>The eleven S&amp;P sectors</td>
+<td>Ranked by the day's move. Each tile is headed by the sector's name (Energy, Technology) with the fund's symbol (XLE, XLK) under the price.</td>
 </tr>
 <tr>
-<td><strong>Options Sentiment</strong></td>
-<td>Put/Call, Net Prem, MGTN</td>
-<td>The app's own cap-weighted put/call and dollar-weighted premium skew.</td>
-</tr>
-<tr>
-<td><strong>Market Internals / Breadth</strong></td>
-<td>$ADVN, $DECN, the net spread, $TICK</td>
-<td>How <em>broad</em> a move is. A rally on negative breadth is narrow and fragile.</td>
-</tr>
-<tr>
-<td><strong>Currency</strong></td>
-<td>$DXY (via UUP), yen (FXY), euro (FXE), pound (FXB)</td>
-<td>Dollar strength — generally a headwind for equities and commodities. A sharp yen rally is the classic sign of the carry trade unwinding, so it shades red; the euro and pound shade green when they rise, as the mirror of a weaker dollar.</td>
-</tr>
-<tr>
-<td><strong>Cash Index</strong></td>
-<td>SPX, NDX</td>
-<td>The indices themselves, each with a call/put premium subline.</td>
-</tr>
-<tr>
-<td><strong>Equity Index Futures</strong></td>
-<td>/ES, /NQ</td>
-<td>The overnight tape, when cash is closed. Each tile names its contract in brackets (<code>/ES[Z26]</code> is December 2026) and moves to the next one by itself.</td>
-</tr>
-<tr>
-<td><strong>Broad-Market ETF</strong></td>
+<td><strong>Broad Market</strong></td>
 <td>SPY, DIA, QQQ, IWM, RSP, QQEW</td>
 <td>Ranked by the day's move. RSP and QQEW are <em>equal-weighted</em> — compare where they land against SPY and QQQ to see if the move is broad or driven by a few giants.</td>
 </tr>
@@ -2217,14 +2200,49 @@ intensity scales with the size of the move.</p>
 <td>BIG10 shows the equal-weighted average move and a breadth subline ("5/10 up").</td>
 </tr>
 <tr>
-<td><strong>Sector SPDR</strong></td>
-<td>The eleven S&amp;P sectors</td>
-<td>Ranked by the day's move.</td>
-</tr>
-<tr>
-<td><strong>Thematic / Industry ETF</strong></td>
+<td><strong>Industries</strong></td>
 <td>Semis, software, quantum, biotech, retail, metals &amp; mining, oil, transports (IYT), cybersecurity (CIBR), infrastructure (PAVE)</td>
 <td>Ranked.</td>
+</tr>
+<tr>
+<td><strong>Countries</strong></td>
+<td>Twelve single-country funds</td>
+<td>Ranked.</td>
+</tr>
+<tr>
+<td><strong>Index Futures</strong></td>
+<td>/ES, /NQ</td>
+<td>The overnight tape, when cash is closed. Each tile names its contract in brackets (<code>/ES[Z26]</code> is December 2026) and moves to the next one by itself.</td>
+</tr>
+<tr>
+<td><strong>Cash Index ETF</strong></td>
+<td>SPX, NDX</td>
+<td>The indices themselves, each with a call/put premium subline.</td>
+</tr>
+<tr>
+<td><strong>Metals</strong></td>
+<td>GLD, SLV, COPX</td>
+<td>Gold, silver and copper miners.</td>
+</tr>
+<tr>
+<td><strong>Market Internals / Breadth</strong></td>
+<td>$ADVN, $DECN, the net spread, $TICK</td>
+<td>How <em>broad</em> a move is. A rally on negative breadth is narrow and fragile.</td>
+</tr>
+<tr>
+<td><strong>Volatility</strong></td>
+<td>VIX, VIX1D, VIX3M, SKEW, DSPX</td>
+<td>The market's expected volatility. VIX1D above VIX means near-term stress. DSPX is the Cboe S&amp;P 500 Dispersion Index: how far the options market expects single stocks to move apart from each other.</td>
+</tr>
+<tr>
+<td><strong>Options Sentiment</strong></td>
+<td>Put/Call, Net Prem, MGTN</td>
+<td>The app's own cap-weighted put/call and dollar-weighted premium skew.</td>
+</tr>
+<tr>
+<td><strong>Currency</strong></td>
+<td>$DXY (via UUP), yen (FXY), euro (FXE), pound (FXB)</td>
+<td>Dollar strength — generally a headwind for equities and commodities. A sharp yen rally is the classic sign of the carry trade unwinding, so it shades red; the euro and pound shade green when they rise, as the mirror of a weaker dollar.</td>
 </tr>
 <tr>
 <td><strong>Fixed Income / Credit</strong></td>
@@ -2232,25 +2250,25 @@ intensity scales with the size of the move.</p>
 <td>HYG weak while equities rally is a classic warning.</td>
 </tr>
 <tr>
-<td><strong>Crypto / Alternatives</strong>, <strong>Countries</strong></td>
-<td></td>
-<td>Countries is ranked.</td>
+<td><strong>Crypto / Alternatives</strong></td>
+<td>GDLC, VCX</td>
+<td>A crypto basket and a private-venture fund.</td>
 </tr>
 </tbody>
 </table>
-<p><strong>Five frames re-rank themselves</strong> by the day's move — Broad-Market ETF, Top 10,
-Sector SPDR, Thematic, and Countries — so leaders and laggards are always at the ends.
+<p><strong>Five frames re-rank themselves</strong> by the day's move — Sectors, Broad Market,
+Top 10, Industries, and Countries — so leaders and laggards are always at the ends.
 <strong>Every other frame keeps its curated order on purpose</strong>: VIX before its tenors, the
 cash indices paired with their futures. That layout is itself information.</p>
 <p><strong>The top rail</strong> carries a live clock, a session indicator, an advancing/declining
 <strong>breadth meter</strong>, and an <strong>A/B skin toggle</strong> (Instrument or Heat Lattice). Tiles
 <strong>flash</strong> when their value changes.</p>
-<p><strong>What the breadth meter counts.</strong> The four <em>stock</em> frames only — Broad-Market ETF,
-Top 10, Sector SPDR and Thematic / Industry — so a bid VIX, a stronger dollar or a
+<p><strong>What the breadth meter counts.</strong> The four <em>stock</em> frames only — Sectors,
+Broad Market, Top 10 and Industries — so a bid VIX, a stronger dollar or a
 rallying Treasury does not register as a decline, and the meter reads the equity tape
 rather than the whole risk complex. The BIG10 composite is skipped, since it is the
 average of the ten mega-caps already counted beside it.</p>
-<p><strong>Hover a fund for its top holdings.</strong> On a Broad-Market ETF, Sector SPDR, Thematic
+<p><strong>Hover a fund for its top holdings.</strong> On a Sectors, Broad Market, Industries
 or Countries tile the hover card lists the fund's five largest holdings, each with its
 price and its move from the previous close, so you can see whether a sector's move is
 one giant or the whole basket. The lists are kept by hand (Schwab does not publish what
@@ -6892,6 +6910,73 @@ did not go out is listed with the reason, rather than simply not appearing.</p>
 <h3 id="related-pages_31">Related pages</h3>
 <p><a href="#blog">Blog</a> · <a href="#eod-report">EOD Report</a> · <a href="#settings">Settings</a>.</p>
 <hr />
+<h2 id="model-health">Model Health</h2>
+<p><em>Menu: ACCOUNT → More → Model Health · Route <code>/model-health</code></em></p>
+<h3 id="what-it-is_34">What it is</h3>
+<p>A report card for the chances the app states. For each one it asks two questions:
+did the chance beat simply quoting the usual win rate, and do its inputs still look
+like the ones it was built on. It is the first phase of the machine learning roadmap
+(<code>docs/plans/2026-11-14-machine-learning-roadmap.md</code>), and it only reports: no
+chance, rule or page changes because of it, and no corrected figure is shown.</p>
+<h3 id="when-to-open-it_6">When to open it</h3>
+<p>Before trusting a chance more than you did, or after a change in the market that
+might have moved what goes into one. A <em>Does not beat</em> verdict says the chance has
+not earned more weight than the usual rate of its group; a flagged input says the
+chance is being asked about conditions unlike the ones it learned from.</p>
+<h3 id="where-the-data-comes-from_33">Where the data comes from</h3>
+<p>The options service builds the view <code>options:model_health</code> each trading night as
+the last step of the 16:20 scalp job, and on <strong>Recompute</strong>. It reads the chances the
+scalp calls froze and their graded outcomes from <code>scalp.db</code>, and the captured
+signals' short-strike delta and result from <code>signals.db</code>. It also writes a dated
+report, <code>services/options_svc/data/model_health/&lt;date&gt;/report.md</code>, with every number
+the page shows.</p>
+<h3 id="reading-the-screen_32">Reading the screen</h3>
+<table>
+<thead>
+<tr>
+<th>Column</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Brier</strong></td>
+<td>The mean squared gap between the chance said and what happened; lower is better. Three decimals, because the differences that matter are often in the third place.</td>
+</tr>
+<tr>
+<td><strong>Usual rate's Brier</strong></td>
+<td>The same score for quoting the group's usual win rate, from earlier days only.</td>
+</tr>
+<tr>
+<td><strong>Difference (95%)</strong></td>
+<td>Brier minus the usual rate's, with a range from resampling whole days. Below zero the chance was closer.</td>
+</tr>
+<tr>
+<td><strong>Days</strong></td>
+<td>Days with results. Each day counts once, however many calls it had.</td>
+</tr>
+<tr>
+<td><strong>Inputs</strong></td>
+<td><em>Steady</em>, how many inputs <em>moved</em> or <em>shifted</em>, or <em>Too little history</em>.</td>
+</tr>
+</tbody>
+</table>
+<p>The verdict is <em>Beats</em> when the whole range is below zero, <em>Does not beat</em> when it is
+all above, <em>Matches</em> in between, and <em>Too few days (n of 20)</em> under the floor. The
+<strong>Weekly refit history</strong> row under each scalp chance is the Saturday refit's own
+out-of-sample test. Each model's panel below the table lists the said-against-happened
+bands and the inputs that moved, with their stability index, the chance a move that
+large comes from luck, and the share of missing readings before and now.</p>
+<h3 id="the-range-forecast-shadow">The range forecast (shadow)</h3>
+<p>The second table is the roadmap's Phase 2: a forecast of the range still to come for
+SPY, QQQ and $SPX over 30 minutes, 60 minutes and the rest of the session, made every
+15 minutes of each past session from bars that had already closed, and judged against
+recent realised volatility and the implied move from $VIX ($VXN for QQQ). It is scored
+the night it is computed on every session the store holds, so its verdict needs no
+waiting. Read it as evidence for or against building a live forecast, not as a number
+to trade: it says how far, never which way, and no page or rule reads it. Its inputs
+check skips the volatility levels, which move in long stretches and would always read
+shifted.</p>
 <h2 id="user-manuals">User Manuals</h2>
 <p><em>Menu: ACCOUNT → More → User Manuals · Route <code>/manuals</code></em></p>
 <p>Links to the five manuals, each opening in a new tab:</p>
@@ -6932,10 +7017,10 @@ did not go out is listed with the reason, rather than simply not appearing.</p>
 a trading workflow, which is exactly why they are separated.</p>
 <h2 id="system-status">System Status</h2>
 <p><em>Menu: bottom of the rail · Route <code>/status</code></em></p>
-<h3 id="what-it-is_34">What it is</h3>
+<h3 id="what-it-is_35">What it is</h3>
 <p>A live health board for every part of the stack, plus a check that each service is not
 merely running but actually <em>publishing</em>.</p>
-<h3 id="reading-the-screen_32">Reading the screen</h3>
+<h3 id="reading-the-screen_33">Reading the screen</h3>
 <p><strong>Component cards</strong> — one per process:</p>
 <table>
 <thead>
@@ -7050,10 +7135,10 @@ fetch anything.</p>
 <hr />
 <h2 id="settings">Settings</h2>
 <p><em>Menu: bottom of the rail · Route <code>/settings</code></em></p>
-<h3 id="what-it-is_35">What it is</h3>
+<h3 id="what-it-is_36">What it is</h3>
 <p>Every preference in the app, plus two things that are genuinely useful rather than
 cosmetic: <strong>API usage</strong> and <strong>Maintenance</strong>.</p>
-<h3 id="reading-the-screen_33">Reading the screen</h3>
+<h3 id="reading-the-screen_34">Reading the screen</h3>
 <p><strong>Scanner alerts.</strong> Enable the chime, pick the sound and volume, restrict alerts to
 market hours, and set a <strong>minimum score to alert</strong> — the most useful knob here, because
 it is what stops the app interrupting you for mediocre signals.</p>

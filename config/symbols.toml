@@ -49,7 +49,7 @@ big10 = ["NVDA", "MSFT", "GOOGL", "AMZN", "META",
          "AAPL", "TSLA", "AVGO", "PLTR", "AMD"]
 
 [futures]
-# The Macro Board's two Equity Index Futures tiles (/ES and /NQ) and the NQ/ES
+# The Macro Board's two Index Futures tiles (/ES and /NQ) and the NQ/ES
 # HUD quote the FRONT-MONTH contract, worked out from the date: the quarterly
 # cycle is March (H), June (M), September (U), December (Z), and a contract
 # expires on the third Friday of its month (shared/futures.py).

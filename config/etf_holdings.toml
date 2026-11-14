@@ -40,7 +40,7 @@ stale_after_h = 96
 as_of = "2026-11-10"
 
 [funds]
-# Broad-Market ETF
+# Broad Market
 SPY = ["AAPL", "NVDA", "MSFT", "AMZN", "GOOGL"]
 DIA = ["GS", "CAT", "MSFT", "AMGN", "V"]
 QQQ = ["AAPL", "NVDA", "MSFT", "AMZN", "AMD"]
@@ -49,7 +49,7 @@ QQQ = ["AAPL", "NVDA", "MSFT", "AMZN", "AMD"]
 IWM = ["GKOS", "BTSG", "FROG", "UMBF", "MOG.A"]
 RSP = ["MRNA", "PTC", "ACN", "IDXX", "MTD"]
 QQEW = ["APP", "IDXX", "ISRG", "REGN", "TXN"]
-# Sector SPDR
+# Sectors
 XLB = ["LIN", "NEM", "VMC", "ECL", "SHW"]
 XLC = ["META", "GOOGL", "APP", "DIS", "TTWO"]
 XLE = ["XOM", "CVX", "COP", "MPC", "PSX"]
@@ -61,7 +61,7 @@ XLRE = ["WELL", "PLD", "EQIX", "AMT", "SPG"]
 XLU = ["NEE", "SO", "DUK", "CEG", "AEP"]
 XLV = ["LLY", "JNJ", "ABBV", "MRK", "UNH"]
 XLY = ["AMZN", "TSLA", "HD", "MCD", "TJX"]
-# Thematic / Industry ETF
+# Industries
 SMH = ["NVDA", "TSM", "TXN", "AVGO", "AMD"]
 IGV = ["MSFT", "PLTR", "PANW", "CRWD", "ORCL"]
 # QTUM's largest holding, Global Unichip (Taipei), has no US line.

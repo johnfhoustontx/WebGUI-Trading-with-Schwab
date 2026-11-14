@@ -32,7 +32,7 @@ DASHBOARD = {
             {"display": "VIX9D", "last": 13.9, "change_pct": -1.2,
              "color_state": "risk_on_mild"},
         ]},
-        {"category": "Broad-Market ETF", "tiles": [
+        {"category": "Broad Market", "tiles": [
             {"display": "SPY", "last": 766.2, "change_pct": -0.42,
              "color_state": "risk_off_mild"},
             {"display": "QQQ", "last": 715.2, "change_pct": -0.61,

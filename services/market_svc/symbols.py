@@ -7,7 +7,8 @@ poll + coloring logic needs is a lookup here, so those stay pure + testable.
 
 Each entry:
   csv_symbol   – the symbol as written in the CSV (display fallback)
-  display      – tile label
+  display      – the tile's symbol, and its identity for every reader
+  label        – optional name the Macro Board prints instead of the symbol
   description  – short muted subtitle
   category     – one of CATEGORY_ORDER
   polarity     – "normal" (value up → risk-on/green) | "inverted" (up → risk-off/red)
@@ -17,7 +18,7 @@ Each entry:
   spread       – (leg_a, leg_b, mode) for kind=="spread"; mode ∈ {"diff_last","diff_pct"}
   source       – for kind=="external" (e.g. "sentiment_pcr")
 
-The two Equity Index Futures tiles are the one part of this that is NOT fixed
+The two Index Futures tiles are the one part of this that is NOT fixed
 data: a futures contract expires every quarter, so their display, quote symbol
 and description are worked out from the date by ``symbol_map()``. Read the map
 through that function. There is deliberately no module-level ``SYMBOL_MAP`` -
@@ -30,53 +31,64 @@ from shared import futures as _futures
 # (a comment used to say so; config/symbols.toml now enforces it).
 from shared import symbols as _shared_symbols
 
-# Frame layout order (design §5): macro gauges → tape → rotation.
+# Frame layout order, set by the operator on 2026-11-14: the rotation frames
+# first (sectors, broad market, the ten mega-caps, industries, countries), then
+# the index tape, then the macro gauges.
 CATEGORY_ORDER = [
-    "Volatility", "Options Sentiment", "Market Internals / Breadth", "Currency",
-    "Cash Index", "Equity Index Futures", "Broad-Market ETF", "Top 10",
-    "Sector SPDR", "Thematic / Industry ETF",
-    "Fixed Income / Credit ETF", "Crypto / Alternatives", "Metals", "Countries",
+    "Sectors", "Broad Market", "Top 10", "Industries", "Countries",
+    "Index Futures", "Cash Index ETF", "Metals",
+    "Market Internals / Breadth", "Volatility", "Options Sentiment", "Currency",
+    "Fixed Income / Credit", "Crypto / Alternatives",
 ]
 # "Factor / Momentum ETF" (MTUM, SPMO) was dropped 2026-09-27: measured over a
 # year of daily bars the two moved together at 0.97, and MTUM tracked SMH (0.93)
-# more closely than SPY, so the frame repeated the Thematic semis tiles.
+# more closely than SPY, so the frame repeated the Industries semis tiles.
 
 # Frames rendered as a LEADERBOARD: their tiles are emitted ranked by day
 # %-change (descending), so the strongest name sits top-left and the rank is
 # readable at a glance. These are the peer-comparison frames — one index/sector/
 # theme/country against its siblings — where the curated order carries no meaning.
 #
-# Broad-Market ETF joined the leaderboards on 2026-08-19. Its old curated order
+# Broad Market joined the leaderboards on 2026-08-19. Its old curated order
 # (SPY/DIA/QQQ/IWM then the equal-weights) was chosen to read as a fixed layout,
 # but the six ARE peers of each other — large vs mega vs small cap, cap-weighted
 # vs equal-weighted — so which one leads on the day is the single most useful
 # thing the frame can say, and a fixed order hides it.
 #
 # Every OTHER frame keeps its symbol-map order, deliberately: Volatility reads
-# VIX then its tenors, Cash Index pairs with Futures. Ranking those would
+# VIX then its tenors, Cash Index ETF pairs with Index Futures. Ranking those would
 # destroy a layout that IS the information.
 #
 # A basket tile (BIG10) is pinned leftmost within its frame — see
 # compute.rank_tiles.
-SORTED_CATEGORIES = ("Broad-Market ETF", "Top 10", "Sector SPDR",
-                     "Thematic / Industry ETF", "Countries")
+SORTED_CATEGORIES = ("Broad Market", "Top 10", "Sectors",
+                     "Industries", "Countries")
 
 # The frames an advance/decline count reads: the four EQUITY frames. Counting
 # the whole board would let a bid VIX and a rallying Treasury cancel out equity
 # selling. The Macro Board's meter keeps its own copy (webgui/pages/market.py,
 # Tier 1 cannot import this); shared/tests/test_cross_tier_mirrors.py pins the
 # two equal. Read here by market_read.breadth.
-BREADTH_CATEGORIES = ("Broad-Market ETF", "Top 10", "Sector SPDR",
-                      "Thematic / Industry ETF")
+BREADTH_CATEGORIES = ("Broad Market", "Top 10", "Sectors",
+                      "Industries")
 
 
-def _q(csv, quote, desc, cat, polarity="normal", value_only=False, prem=False):
+def _q(csv, quote, desc, cat, polarity="normal", value_only=False, prem=False,
+       label=None):
     # ``prem=True`` → the tile also shows a per-symbol call/put PREMIUM skew subline
     # (looked up in cache:options:matrix by ``quote``), for the collected-universe
     # names the user wants an options-flow read on.
-    return {"csv_symbol": csv, "display": csv, "description": desc, "category": cat,
-            "polarity": polarity, "kind": "quote", "quote_symbol": quote,
-            "value_only": value_only, "spread": None, "source": None, "prem": prem}
+    #
+    # ``label`` → the NAME the Macro Board prints on the tile in place of the
+    # symbol (a sector reads "Energy", not "XLE"). ``display`` stays the symbol:
+    # it is the tile's identity, and the Market read, the ticker, the holdings
+    # card and the trade-idea snapshot all find a tile by it.
+    e = {"csv_symbol": csv, "display": csv, "description": desc, "category": cat,
+         "polarity": polarity, "kind": "quote", "quote_symbol": quote,
+         "value_only": value_only, "spread": None, "source": None, "prem": prem}
+    if label:
+        e["label"] = label
+    return e
 
 
 def _spread(csv, leg_a, leg_b, mode, desc, cat, polarity="normal"):
@@ -115,9 +127,9 @@ def _future(root, name, cat, polarity="normal"):
 
 
 _INT = "Market Internals / Breadth"
-_SEC = "Sector SPDR"
-_THM = "Thematic / Industry ETF"
-_BRD = "Broad-Market ETF"
+_SEC = "Sectors"
+_THM = "Industries"
+_BRD = "Broad Market"
 _CTY = "Countries"
 _MAG = "Top 10"
 
@@ -129,6 +141,10 @@ _ENTRIES = [
     _q("VIX1D", "$VIX1D", "1-day volatility index", "Volatility", "inverted"),
     _q("VIX3M", "$VIX3M", "3-month volatility index", "Volatility", "inverted"),
     _q("SKEW", "$SKEW", "CBOE SKEW / tail-risk index", "Volatility", "inverted"),
+    # Cboe S&P 500 Dispersion Index. Schwab quotes it as $DSPX and refuses the
+    # bare DSPX (checked against the proxy 2026-11-14). Inverted like the rest of
+    # the frame: it is an implied-volatility reading.
+    _q("DSPX", "$DSPX", "Cboe S&P 500 Dispersion Index", "Volatility", "inverted"),
     # Options Sentiment (external — app's cap-weighted sector P/C; inverted).
     # Display is short ("Put/Call") so it fits the tile; the "cap-weighted sector"
     # detail lives in the description (hover tooltip).
@@ -161,13 +177,13 @@ _ENTRIES = [
     _q("FXE", "FXE", "Euro — Invesco CurrencyShares Euro Trust", "Currency"),
     _q("FXB", "FXB", "British pound — Invesco CurrencyShares British Pound Trust",
        "Currency"),
-    # Cash Index (prem: per-symbol call/put premium skew subline)
-    _q("SPX", "$SPX", "S&P 500 Index", "Cash Index", prem=True),
-    _q("NDX", "$NDX", "Nasdaq 100 Index", "Cash Index", prem=True),
-    # Equity Index Futures — the front-month contract, resolved by symbol_map()
-    _future("/ES", "E-mini S&P 500 future", "Equity Index Futures"),
-    _future("/NQ", "E-mini Nasdaq 100 future", "Equity Index Futures"),
-    # Broad-Market ETF (SPY/DIA/QQQ/IWM carry a premium skew subline)
+    # Cash Index ETF (prem: per-symbol call/put premium skew subline)
+    _q("SPX", "$SPX", "S&P 500 Index", "Cash Index ETF", prem=True),
+    _q("NDX", "$NDX", "Nasdaq 100 Index", "Cash Index ETF", prem=True),
+    # Index Futures — the front-month contract, resolved by symbol_map()
+    _future("/ES", "E-mini S&P 500 future", "Index Futures"),
+    _future("/NQ", "E-mini Nasdaq 100 future", "Index Futures"),
+    # Broad Market (SPY/DIA/QQQ/IWM carry a premium skew subline)
     _q("SPY", "SPY", "SPDR S&P 500 ETF", _BRD, prem=True),
     _q("DIA", "DIA", "SPDR Dow Jones Industrial Average ETF", _BRD, prem=True),
     _q("QQQ", "QQQ", "Invesco QQQ (Nasdaq 100) ETF", _BRD, prem=True),
@@ -190,7 +206,7 @@ _ENTRIES = [
     _q("AVGO", "AVGO", "Broadcom", _MAG, prem=True),
     _q("PLTR", "PLTR", "Palantir Technologies", _MAG, prem=True),
     _q("AMD", "AMD", "Advanced Micro Devices", _MAG, prem=True),
-    # Thematic / Industry ETF
+    # Industries
     _q("SMH", "SMH", "VanEck Semiconductor ETF", _THM),
     _q("IGV", "IGV", "iShares Expanded Tech-Software Sector ETF", _THM),
     _q("QTUM", "QTUM", "Defiance Quantum ETF", _THM),
@@ -202,22 +218,22 @@ _ENTRIES = [
     # CIBR + PAVE replaced XSD on 2026-11-12: XSD repeated SMH's semis read.
     _q("CIBR", "CIBR", "First Trust Nasdaq Cybersecurity ETF", _THM),
     _q("PAVE", "PAVE", "Global X U.S. Infrastructure Development ETF", _THM),
-    # Sector SPDR (all literal up=green — defensive sectors NOT inverted, per design)
-    _q("XLB", "XLB", "Materials Select Sector SPDR", _SEC),
-    _q("XLC", "XLC", "Communication Services Select Sector SPDR", _SEC),
-    _q("XLE", "XLE", "Energy Select Sector SPDR", _SEC),
-    _q("XLF", "XLF", "Financials Select Sector SPDR", _SEC),
-    _q("XLI", "XLI", "Industrials Select Sector SPDR", _SEC),
-    _q("XLK", "XLK", "Technology Select Sector SPDR", _SEC),
-    _q("XLP", "XLP", "Consumer Staples Select Sector SPDR", _SEC),
-    _q("XLRE", "XLRE", "Real Estate Select Sector SPDR", _SEC),
-    _q("XLU", "XLU", "Utilities Select Sector SPDR", _SEC),
-    _q("XLV", "XLV", "Health Care Select Sector SPDR", _SEC),
-    _q("XLY", "XLY", "Consumer Discretionary Select Sector SPDR", _SEC),
-    # Fixed Income / Credit ETF (TLT inverted — flight-to-safety)
-    _q("TLT", "TLT", "iShares 20+ Year Treasury Bond ETF", "Fixed Income / Credit ETF", "inverted"),
-    _q("HYG", "HYG", "iShares iBoxx High Yield Corp Bond ETF", "Fixed Income / Credit ETF"),
-    _q("LQD", "LQD", "iShares iBoxx Investment Grade Corp Bond ETF", "Fixed Income / Credit ETF"),
+    # Sectors (all literal up=green — defensive sectors NOT inverted, per design)
+    _q("XLB", "XLB", "Materials Select Sector SPDR", _SEC, label="Materials"),
+    _q("XLC", "XLC", "Communication Services Select Sector SPDR", _SEC, label="Communications"),
+    _q("XLE", "XLE", "Energy Select Sector SPDR", _SEC, label="Energy"),
+    _q("XLF", "XLF", "Financials Select Sector SPDR", _SEC, label="Financials"),
+    _q("XLI", "XLI", "Industrials Select Sector SPDR", _SEC, label="Industrials"),
+    _q("XLK", "XLK", "Technology Select Sector SPDR", _SEC, label="Technology"),
+    _q("XLP", "XLP", "Consumer Staples Select Sector SPDR", _SEC, label="Staples"),
+    _q("XLRE", "XLRE", "Real Estate Select Sector SPDR", _SEC, label="Real Estate"),
+    _q("XLU", "XLU", "Utilities Select Sector SPDR", _SEC, label="Utilities"),
+    _q("XLV", "XLV", "Health Care Select Sector SPDR", _SEC, label="Health Care"),
+    _q("XLY", "XLY", "Consumer Discretionary Select Sector SPDR", _SEC, label="Discretionary"),
+    # Fixed Income / Credit (TLT inverted — flight-to-safety)
+    _q("TLT", "TLT", "iShares 20+ Year Treasury Bond ETF", "Fixed Income / Credit", "inverted"),
+    _q("HYG", "HYG", "iShares iBoxx High Yield Corp Bond ETF", "Fixed Income / Credit"),
+    _q("LQD", "LQD", "iShares iBoxx Investment Grade Corp Bond ETF", "Fixed Income / Credit"),
     # Crypto / Alternatives
     _q("GDLC", "GDLC", "Grayscale CoinDesk Crypto 5 ETF", "Crypto / Alternatives"),
     _q("VCX", "VCX", "Fundrise Innovation Fund (private venture)", "Crypto / Alternatives"),

@@ -33,12 +33,12 @@ def _tile(name, pct=None, last=None, state="flat"):
 
 def _dashboard(spx=0.69, ndx=0.79):
     return {"categories": [
-        {"category": "Cash Index", "tiles": [_tile("SPX", spx, 7776.0), _tile("NDX", ndx, 31050.0)]},
+        {"category": "Cash Index ETF", "tiles": [_tile("SPX", spx, 7776.0), _tile("NDX", ndx, 31050.0)]},
         {"category": "Volatility", "tiles": [_tile("VIX", 1.57, 15.55), _tile("VIX1D", -21.0, 8.49),
                                              _tile("VIX3M", 0.2, 18.04)]},
-        {"category": "Sector SPDR", "tiles": [_tile(f"X{i}", 1.0, 10.0, "risk_on_mild")
+        {"category": "Sectors", "tiles": [_tile(f"X{i}", 1.0, 10.0, "risk_on_mild")
                                               for i in range(10)]},
-        {"category": "Fixed Income / Credit ETF",
+        {"category": "Fixed Income / Credit",
          "tiles": [_tile("TLT", -0.9, 76.8, "risk_on_mild"), _tile("HYG", -0.1, 76.8, "flat")]},
         {"category": "Currency", "tiles": [_tile("$DXY", 0.45, 29.0, "risk_off_mild")]}]}
 

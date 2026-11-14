@@ -18,7 +18,7 @@ def _map(today=_BEFORE_ROLL):
 
 
 _EXPECTED_DISPLAYS = {
-    "VIX", "VIX1D", "VIX3M", "SKEW",
+    "VIX", "VIX1D", "VIX3M", "SKEW", "DSPX",
     "Put/Call", "Net Prem", "MGTN",
     "$ADVN", "$DECN", "$ADVN-$DECN", "$TICK",
     "$DXY", "FXY", "FXE", "FXB",
@@ -37,18 +37,19 @@ _EXPECTED_DISPLAYS = {
 
 
 def test_every_csv_symbol_is_mapped():
-    # 77 tiles: base 55 + the Top 10 frame (a BIG10 composite + 10 constituents:
+    # 78 tiles: base 55 + the Top 10 frame (a BIG10 composite + 10 constituents:
     # the Mag-7 + AVGO/PLTR/AMD) + the Net Prem external tile + the $MGTN index tile
     # (CBOE Magnificent Ten, added 2026-07-21) + USO (added 2026-08-12) + IYT
     # (added 2026-09-11) + the Metals frame GLD/SLV/COPX (added 2026-09-21)
     # + EWG/EWQ country ETFs (added 2026-09-27) + the FXY/FXE/FXB currency tiles
     # (added 2026-09-27) − the MTUM/SPMO Factor frame (dropped 2026-09-27).
-    # + CIBR/PAVE − XSD in the Thematic frame (2026-11-12).
+    # + CIBR/PAVE − XSD in the Industries frame (2026-11-12).
+    # + DSPX in the Volatility frame (2026-11-14).
     # (base 55 = $PCALL+$PCSP→ONE put/call tile; HYG-LQD dropped; $ADD/$ADSPD dropped;
     # XLB added; +10 country ETFs.)
-    assert len(_map()) == 77
+    assert len(_map()) == 78
     # A future mistyped ticker/display must fail: the full display set is pinned.
-    assert len(_EXPECTED_DISPLAYS) == 77
+    assert len(_EXPECTED_DISPLAYS) == 78
     assert {t["display"] for t in _map()} == _EXPECTED_DISPLAYS
     # Every entry has a non-empty display; every quote tile has a real quote_symbol.
     for t in _map():
@@ -59,10 +60,10 @@ def test_every_csv_symbol_is_mapped():
 
 def test_categories_cover_the_expected_set_in_frame_order():
     assert S.CATEGORY_ORDER == [
-        "Volatility", "Options Sentiment", "Market Internals / Breadth", "Currency",
-        "Cash Index", "Equity Index Futures", "Broad-Market ETF", "Top 10",
-        "Sector SPDR", "Thematic / Industry ETF",
-        "Fixed Income / Credit ETF", "Crypto / Alternatives", "Metals", "Countries",
+        "Sectors", "Broad Market", "Top 10", "Industries", "Countries",
+        "Index Futures", "Cash Index ETF", "Metals",
+        "Market Internals / Breadth", "Volatility", "Options Sentiment", "Currency",
+        "Fixed Income / Credit", "Crypto / Alternatives",
     ]
     # every mapped tile's category is in the order list
     assert {t["category"] for t in _map()} <= set(S.CATEGORY_ORDER)
@@ -129,7 +130,7 @@ def test_quote_symbols_deduped():
 # ── the futures tiles follow the front month ────────────────────────────────
 
 def _futures_tiles(today):
-    return [t for t in S.symbol_map(today) if t["category"] == "Equity Index Futures"]
+    return [t for t in S.symbol_map(today) if t["category"] == "Index Futures"]
 
 
 def test_before_the_roll_the_tiles_are_the_september_contract():
@@ -167,7 +168,7 @@ def test_december_hands_to_march_of_the_next_year():
 
 
 def test_the_futures_frame_keeps_its_two_tiles_in_es_then_nq_order():
-    """Cash Index reads SPX then NDX and the futures frame pairs with it."""
+    """Cash Index ETF reads SPX then NDX and the futures frame pairs with it."""
     for today in (_BEFORE_ROLL, _AFTER_EXPIRY, date(2027, 1, 4)):
         assert [t["display"][:3] for t in _futures_tiles(today)] == ["/ES", "/NQ"]
 
@@ -217,3 +218,27 @@ def test_every_quote_tile_has_a_quote_symbol_on_either_side_of_a_roll(today):
         assert t["display"], t
         if t["kind"] == "quote":
             assert t["quote_symbol"], t
+
+
+# ── sector names and the dispersion index (2026-11-14) ──────────────────────
+def test_every_sector_tile_carries_a_name_and_keeps_its_symbol():
+    """The board prints the sector's name; ``display`` stays the symbol, because
+    the Market read, the ticker and the holdings card find a tile by it."""
+    sectors = {t["display"]: t.get("label") for t in _map() if t["category"] == "Sectors"}
+    assert sectors == {
+        "XLB": "Materials", "XLC": "Communications", "XLE": "Energy",
+        "XLF": "Financials", "XLI": "Industrials", "XLK": "Technology",
+        "XLP": "Staples", "XLRE": "Real Estate", "XLU": "Utilities",
+        "XLV": "Health Care", "XLY": "Discretionary"}
+
+
+def test_only_the_sector_tiles_carry_a_name():
+    assert {t["category"] for t in _map() if t.get("label")} == {"Sectors"}
+
+
+def test_the_dispersion_index_is_quoted_with_the_dollar_prefix():
+    """Schwab refuses the bare DSPX and answers $DSPX."""
+    tile = next(t for t in _map() if t["display"] == "DSPX")
+    assert (tile["quote_symbol"], tile["category"], tile["polarity"]) == (
+        "$DSPX", "Volatility", "inverted")
+    assert "$DSPX" in S.quote_symbols(_map())

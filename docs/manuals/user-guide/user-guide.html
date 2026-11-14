@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>User Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-13</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-14</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#introduction">Introduction</a></li>
@@ -177,6 +177,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </li>
 <li><a href="#blog">Blog</a></li>
 <li><a href="#social-cards">Social Cards</a></li>
+<li><a href="#model-health">Model Health</a></li>
 <li><a href="#user-manuals">User Manuals</a></li>
 </ul>
 </li>
@@ -2040,12 +2041,12 @@ ten mega-caps, sectors, thematic ETFs, credit, crypto, metals and countries.</p>
 <li><strong>Tile colour means risk-on (green) / risk-off (red) / no data (grey)</strong>, not
   simply up and down. Fear gauges are flipped: VIX, SKEW, put/call, TLT and UUP
   shade <strong>red when they rise</strong>.</li>
-<li>Five frames — <strong>Broad-Market ETF</strong>, <strong>Top 10</strong>, <strong>Sector SPDR</strong>, <strong>Thematic</strong> and
+<li>Five frames — <strong>Sectors</strong>, <strong>Broad Market</strong>, <strong>Top 10</strong>, <strong>Industries</strong> and
   <strong>Countries</strong> — re-order themselves by the day's move. Every other frame keeps its
   curated order on purpose.</li>
 <li>The <strong>top rail</strong> carries a clock, an advancing/declining breadth meter, and an
   <strong>A/B skin toggle</strong> that is remembered. The meter counts the four <strong>stock</strong> frames
-  only (broad ETFs, top ten, sectors, thematic), so a rising VIX or a bid Treasury is
+  only (sectors, broad market, top ten, industries), so a rising VIX or a bid Treasury is
   not counted as a decline.</li>
 <li>The two <strong>futures tiles</strong> name their contract in brackets: <code>/ES[Z26]</code> is the
   December 2026 E-mini S&amp;P 500. They move to the next quarterly contract by
@@ -2053,7 +2054,9 @@ ten mega-caps, sectors, thematic ETFs, credit, crypto, metals and countries.</p>
   Settings → Configuration → Symbols &amp; watchlists → <em>Index futures</em>; it takes
   effect on the next refresh, with no restart.</li>
 <li>Tiles <strong>flash</strong> when their value changes.</li>
-<li><strong>Hover a fund tile</strong> (Broad-Market ETF, Sector SPDR, Thematic or Countries) to
+<li>A <strong>sector tile</strong> is headed by the sector's name (Energy, Technology) and shows
+  the fund's symbol (XLE, XLK) under the price.</li>
+<li><strong>Hover a fund tile</strong> (Sectors, Broad Market, Industries or Countries) to
   see its top five holdings, each with its price and its move since the previous
   close. A foreign company is shown by its US line. A thin line that has not traded
   for four days reads <strong>last</strong> and the date it traded, not a move. The lists are kept
@@ -4571,6 +4574,49 @@ neuralstrike.co link) are built into the page, and it does not read
 <code>x.hashtags.marketing</code>. <code>max_tags</code> caps how many hashtags any post carries, and
 <code>daily_cap</code> limits how many posts go out in a day.</p>
 </blockquote>
+<h2 id="model-health">Model Health</h2>
+<p><strong>Route:</strong> <code>/model-health</code> — a tab in the <strong>More</strong> group, after Social Cards.</p>
+<p>This page tells you how well the chances the app states have matched what
+happened, and whether the inputs behind them still look like they used to. <strong>It
+only reports.</strong> Nothing on it changes a chance, a rule or another page.</p>
+<ul>
+<li><strong>One row per stated chance:</strong> the 08:36 scalp chance, the 15-minute scalp
+  chance, and the short strike's delta read as a win rate for each kind of
+  captured signal (0DTE, SWING, INCOME).</li>
+<li><strong>Brier</strong> scores how close the chances were (0 is perfect, lower is better).
+  <strong>Usual rate's Brier</strong> is the score for simply saying the usual win rate of
+  that group, worked out from earlier days only. <strong>Difference (95%)</strong> is the
+  first minus the second, with a range over whole days.</li>
+<li><strong>The verdict:</strong> <em>Beats the usual rate</em> when the whole range is below zero,
+  <em>Does not beat the usual rate</em> when it is all above, <em>Matches the usual rate</em>
+  in between, and <em>Too few days (16 of 20)</em> until there are 20 days of results.</li>
+<li><strong>Weekly refit history</strong>, under each scalp chance, is the Saturday refit's own
+  test on weeks it had not seen. It is the refit's result, not the live one.</li>
+<li><strong>Inputs</strong> says whether what goes into a chance has drifted over the last 5
+  sessions. An input is flagged only when a shuffle of whole sessions says a
+  move that large is unlikely by chance. Open a model below the table to see
+  which inputs moved, and whether a reading simply went missing, and to see each
+  band of stated chance against how often it came true.</li>
+<li><strong>The delta win rate</strong> states the odds of expiring out of the money, but the
+  app closes trades earlier at a target or a stop, so part of any gap is that.</li>
+<li>It is worked out <strong>each trading night after the 16:20 scalp job</strong>, and a dated
+  report is saved too. <strong>Recompute</strong> works it out now; the table changes only if
+  a figure changed. The settings are in Settings → Configuration → Model Health.</li>
+</ul>
+<p><strong>Range forecast (shadow)</strong> is the second table. Every 15 minutes of each past
+session it forecasts how far SPY, QQQ and $SPX would still travel (high minus
+low) over the next 30 minutes, the next 60 minutes and the rest of the session,
+using only bars that had already closed. Each forecast is a likely low, middle
+and high.</p>
+<ul>
+<li><strong>vs realised volatility</strong> and <strong>vs implied move</strong> say whether its forecasts
+  were closer than each simple prediction over whole days: <em>Beats</em>, <em>Matches</em> or
+  <em>Does not beat</em>, with the difference and its range beside it (below zero is
+  better).</li>
+<li><strong>Inside 10th to 90th</strong> is how often the real range landed between the likely
+  low and high. About 80% is right.</li>
+<li>It forecasts how far, never which way, and nothing in the app uses it yet.</li>
+</ul>
 <h2 id="user-manuals">User Manuals</h2>
 <p><strong>Route:</strong> <code>/manuals</code> — a tab in the <strong>More</strong> group, alongside EOD Report. (It used
 to be nested under Settings; it is now a peer tab.)</p>

@@ -71,7 +71,7 @@ def test_the_direction_threshold_is_read_from_config(cfg):
 # ⚠ Mirrored, to the letter, in webgui/tests/test_market.py. Two tiers cannot
 # import each other, so the same payload is counted on each side.
 BREADTH_PIN = {"categories": [
-    {"category": "Sector SPDR", "tiles": [
+    {"category": "Sectors", "tiles": [
         {"display": "XLK", "color_state": "risk_on_strong"},
         {"display": "XLE", "color_state": "risk_off_mild"},
         {"display": "XLU", "color_state": "flat"},
@@ -80,7 +80,7 @@ BREADTH_PIN = {"categories": [
         {"display": "BIG10", "color_state": "risk_on_mild", "basket": True},
         {"display": "NVDA", "color_state": "risk_on_mild"},
         {"display": "AAPL", "color_state": "risk_off_strong"}]},
-    {"category": "Broad-Market ETF", "tiles": [
+    {"category": "Broad Market", "tiles": [
         {"display": "SPY", "color_state": "risk_on_mild"}]},
     {"category": "Volatility", "tiles": [
         {"display": "VIX", "color_state": "risk_off_strong"}]}]}
@@ -89,7 +89,7 @@ def _board(up, down, flat=0):
     tiles = ([_tile(f"U{i}", 1.0, state="risk_on_mild") for i in range(up)]
              + [_tile(f"D{i}", -1.0, state="risk_off_strong") for i in range(down)]
              + [_tile(f"F{i}", 0.0) for i in range(flat)])
-    return _dash(Sector_SPDR=tiles)
+    return _dash(Sectors=tiles)
 
 
 @pytest.mark.parametrize("up,down,want", [(29, 6, T), (6, 29, H), (10, 10, N),
@@ -106,11 +106,11 @@ def test_breadth_counts_only_the_equity_frames():
     # Counted, they would cancel real equity buying.
     dash = _dash(
         Volatility=[_tile("VIX", 5.0, state="risk_off_strong")],
-        **{"Fixed Income / Credit ETF": [_tile("TLT", 1.0, state="risk_off_mild")]},
-        Sector_SPDR=[_tile("XLK", 1.0, state="risk_on_mild")],
+        **{"Fixed Income / Credit": [_tile("TLT", 1.0, state="risk_off_mild")]},
+        Sectors=[_tile("XLK", 1.0, state="risk_on_mild")],
         **{"Top 10": [_tile("NVDA", 1.0, state="risk_on_strong")],
-           "Broad-Market ETF": [_tile("SPY", 1.0, state="risk_on_mild")],
-           "Thematic / Industry ETF": [_tile("SMH", -1.0, state="risk_off_mild")]})
+           "Broad Market": [_tile("SPY", 1.0, state="risk_on_mild")],
+           "Industries": [_tile("SMH", -1.0, state="risk_off_mild")]})
     facts = mr.breadth(dash, market_read_config.DEFAULTS)["facts"]
     assert (facts["advancing"], facts["declining"]) == (3, 1)
 
@@ -123,7 +123,7 @@ def test_breadth_skips_a_basket_tile():
 
 
 @pytest.mark.parametrize("dash", [None, {}, _board(0, 0, flat=5), _board(9, 0),
-                                  _dash(Sector_SPDR=[_tile("XLK", state="no_data")])])
+                                  _dash(Sectors=[_tile("XLK", state="no_data")])])
 def test_breadth_on_too_few_priced_tiles_is_no_reading(cfg, dash):
     """One live tile out of forty would otherwise read as 100% advancing: a
     quote outage is not a tape."""
@@ -435,7 +435,7 @@ def test_the_flow_row_carries_the_estimates_own_public_flag(cfg, flag, want):
 def _cross(tlt, dxy, hyg):
     def t(name, state):
         return _tile(name, 0.5, 100.0, state) if state else _tile(name, state="no_data")
-    return _dash(**{"Fixed Income / Credit ETF": [t("TLT", tlt), t("HYG", hyg)],
+    return _dash(**{"Fixed Income / Credit": [t("TLT", tlt), t("HYG", hyg)],
                     "Currency": [t("$DXY", dxy)]})
 
 
@@ -531,9 +531,9 @@ def _inputs():
         Cash_Index=[_tile("SPX", 0.69, 7776.0), _tile("NDX", 0.79, 31050.0)],
         Volatility=[_tile("VIX", 1.57, 15.55), _tile("VIX1D", -21.0, 8.49),
                     _tile("VIX3M", 0.2, 18.04)],
-        Sector_SPDR=[_tile(f"X{i}", 1.0, state="risk_on_mild") for i in range(10)]
+        Sectors=[_tile(f"X{i}", 1.0, state="risk_on_mild") for i in range(10)]
         + [_tile("XLRE", -0.3, state="risk_off_mild")],
-        **{"Fixed Income / Credit ETF": [_tile("TLT", -0.9, 76.8, "risk_on_mild"),
+        **{"Fixed Income / Credit": [_tile("TLT", -0.9, 76.8, "risk_on_mild"),
                                           _tile("HYG", -0.1, 76.8, "flat")],
            "Currency": [_tile("$DXY", 0.45, 29.0, "risk_off_mild")]})
     return {"dashboard": dash,

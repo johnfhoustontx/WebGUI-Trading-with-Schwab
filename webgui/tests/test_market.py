@@ -169,17 +169,17 @@ def test_breadth_counts_only_the_equity_frames():
     # The rail's advance/decline is a read on the EQUITY tape, so it counts only
     # the four stock frames — a red VIX or a bid Treasury is not a decline.
     payload = {"categories": [
-        {"category": "Broad-Market ETF",
+        {"category": "Broad Market",
          "tiles": [{"color_state": "risk_on_strong"},
                    {"color_state": "risk_on_mild"},
                    {"color_state": "flat"}]},
-        {"category": "Sector SPDR",
+        {"category": "Sectors",
          "tiles": [{"color_state": "risk_off_mild"},
                    {"color_state": "no_data"}]},
         {"category": "Volatility",       # excluded frame
          "tiles": [{"color_state": "risk_off_strong"},
                    {"color_state": "risk_on_strong"}]},
-        {"category": "Fixed Income / Credit ETF",   # excluded frame
+        {"category": "Fixed Income / Credit",   # excluded frame
          "tiles": [{"color_state": "risk_off_strong"}]},
     ]}
     assert market.breadth_counts(payload) == (2, 1)
@@ -190,7 +190,7 @@ def test_breadth_counts_only_the_equity_frames():
 # counted on each side: the Macro Board's meter and the Desk's Market read must
 # print the same two numbers.
 BREADTH_PIN = {"categories": [
-    {"category": "Sector SPDR", "tiles": [
+    {"category": "Sectors", "tiles": [
         {"display": "XLK", "color_state": "risk_on_strong"},
         {"display": "XLE", "color_state": "risk_off_mild"},
         {"display": "XLU", "color_state": "flat"},
@@ -199,7 +199,7 @@ BREADTH_PIN = {"categories": [
         {"display": "BIG10", "color_state": "risk_on_mild", "basket": True},
         {"display": "NVDA", "color_state": "risk_on_mild"},
         {"display": "AAPL", "color_state": "risk_off_strong"}]},
-    {"category": "Broad-Market ETF", "tiles": [
+    {"category": "Broad Market", "tiles": [
         {"display": "SPY", "color_state": "risk_on_mild"}]},
     {"category": "Volatility", "tiles": [
         {"display": "VIX", "color_state": "risk_off_strong"}]}]}
@@ -212,7 +212,7 @@ def test_breadth_counts_what_the_market_read_counts_on_the_same_payload():
 def test_breadth_categories_are_the_four_requested_and_real_frames():
     from services.market_svc import symbols
     assert market.BREADTH_CATEGORIES == (
-        "Broad-Market ETF", "Top 10", "Sector SPDR", "Thematic / Industry ETF")
+        "Broad Market", "Top 10", "Sectors", "Industries")
     # a typo here would silently count nothing at all
     assert set(market.BREADTH_CATEGORIES) <= set(symbols.CATEGORY_ORDER)
 
@@ -226,7 +226,7 @@ def test_iyt_counts_in_the_advance_decline_meter_from_the_producer():
                        "quote": {"lastPrice": 70.0, "netPercentChange": pct}}}
         payload = compute.build_dashboard(raw, sector_pcr=None, proxy_up=True)
         thematic = next(c for c in payload["categories"]
-                        if c["category"] == "Thematic / Industry ETF")
+                        if c["category"] == "Industries")
         assert "IYT" in [t["display"] for t in thematic["tiles"]]
         assert market.breadth_counts(payload) == expected
 
@@ -302,7 +302,7 @@ def _board_payload():
         {"category": "Volatility", "tiles": [
             {"display": "VIX", "last": 16.13, "change": 0.4, "change_pct": 3.6,
              "color_state": "risk_off_mild", "description": "CBOE VIX"}]},
-        {"category": "Broad-Market ETF", "tiles": [
+        {"category": "Broad Market", "tiles": [
             {"display": "SPY", "last": 640.2, "change": 1.2, "change_pct": 0.19,
              "color_state": "risk_on_mild", "description": "S&P 500 ETF"},
             {"display": "QQQ", "last": 570.1, "change": -0.8, "change_pct": -0.14,
@@ -567,3 +567,17 @@ def test_a_line_with_no_trade_on_record_says_so():
            "traded": None}
     assert market.holding_text(row)["change"] == "no trades"
     assert market.holding_text(row)["last"] == "—"
+
+
+# ── sector names (2026-11-14) ───────────────────────────────────────────────
+def test_a_named_tile_is_headed_by_its_name_and_keeps_its_symbol_below():
+    t = {"display": "XLE", "label": "Energy",
+         "description": "Energy Select Sector SPDR"}
+    assert market.tile_heading(t) == "Energy"
+    assert market.descriptor_line(t) == "XLE"
+
+
+def test_a_tile_with_no_name_is_headed_by_its_symbol():
+    t = {"display": "SMH", "description": "Semiconductors"}
+    assert market.tile_heading(t) == "SMH"
+    assert market.descriptor_line(t) == "SEMICONDUCTORS"

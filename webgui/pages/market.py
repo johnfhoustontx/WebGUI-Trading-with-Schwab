@@ -74,20 +74,20 @@ _FAINT_TXT = f"text-[{_P['icon']}]"           # the faintest step of the ladder
 # category → left-accent hex (from the reference prototype's G array, keyed by
 # the REAL market_svc category names). Pure presentation; cyan fallback.
 _ACCENT = {
+    "Sectors": "#22D3EE",
+    "Broad Market": "#3D7BFF",
+    "Top 10": "#00E5A0",
+    "Industries": "#C86BFF",
+    "Countries": "#35E0FF",
+    "Index Futures": "#A9C3E8",
+    "Cash Index ETF": "#A9C3E8",
+    "Metals": "#FFB627",
+    "Market Internals / Breadth": "#35E0FF",
     "Volatility": "#FFB627",
     "Options Sentiment": "#C86BFF",
-    "Market Internals / Breadth": "#35E0FF",
     "Currency": "#FF7A3D",
-    "Cash Index": "#A9C3E8",
-    "Equity Index Futures": "#A9C3E8",
-    "Broad-Market ETF": "#3D7BFF",
-    "Top 10": "#00E5A0",
-    "Sector SPDR": "#22D3EE",
-    "Thematic / Industry ETF": "#C86BFF",
-    "Fixed Income / Credit ETF": "#6E82A3",
+    "Fixed Income / Credit": "#6E82A3",
     "Crypto / Alternatives": "#FF3DCB",
-    "Metals": "#FFB627",
-    "Countries": "#35E0FF",
 }
 
 
@@ -239,16 +239,26 @@ def tile_text(t):
     return {"last": last, "change": "  ".join(parts)}
 
 
+def tile_heading(t):
+    """The tile's top line: its name where the service sent one (a sector reads
+    "Energy"), else its symbol. ``display`` stays the tile's identity."""
+    return str(t.get("label") or t.get("display") or "")
+
+
 _DESC_MAX = 22
 
 
 def descriptor_line(t):
     """The tile's third line: the option-skew where a tile has it (SPX/NDX/broad
-    ETFs / Top-10 / BIG10), else the symbol's description (uppercased, truncated).
+    ETFs / Top-10 / BIG10), the symbol where the tile is headed by a name (the
+    sectors), else the symbol's description (uppercased, truncated).
     Preserves the skew line the spec requires while giving every other tile a
     glanceable descriptor."""
     if "prem_skew_pct" in t:
         return _skew_word(t.get("prem_skew_pct"))
+    if t.get("label"):
+        # The tile's top line is its name, so this line keeps the symbol.
+        return str(t.get("display") or "")
     d = (t.get("description") or "").strip().upper()
     if len(d) <= _DESC_MAX:
         return d
@@ -277,7 +287,7 @@ def tile_signature(t):
 # out and the meter sat near even on exactly the days it should read hardest.
 # Names must match ``market_svc.symbols.CATEGORY_ORDER`` — a test pins that.
 BREADTH_CATEGORIES = (
-    "Broad-Market ETF", "Top 10", "Sector SPDR", "Thematic / Industry ETF")
+    "Broad Market", "Top 10", "Sectors", "Industries")
 
 
 def breadth_counts(payload):
@@ -532,7 +542,7 @@ def render():
             "px-[11px] pt-[9px] pb-[8px] gap-0")
         with container:
             ui.element("div").classes("mb-ig")
-            ui.label(t.get("display", "")).classes(
+            ui.label(tile_heading(t)).classes(
                 f"mb-sym {_SYM_TXT} text-[11px] font-bold tracking-[.13em]")
             # ⚠ ``mb-px``'s resting colour and ``@keyframes mbpx``'s 100% stop
             # must name the SAME colour: the flare has no animation-fill-mode,

@@ -1547,12 +1547,12 @@ ten mega-caps, sectors, thematic ETFs, credit, crypto, metals and countries.
 - **Tile colour means risk-on (green) / risk-off (red) / no data (grey)**, not
   simply up and down. Fear gauges are flipped: VIX, SKEW, put/call, TLT and UUP
   shade **red when they rise**.
-- Five frames — **Broad-Market ETF**, **Top 10**, **Sector SPDR**, **Thematic** and
+- Five frames — **Sectors**, **Broad Market**, **Top 10**, **Industries** and
   **Countries** — re-order themselves by the day's move. Every other frame keeps its
   curated order on purpose.
 - The **top rail** carries a clock, an advancing/declining breadth meter, and an
   **A/B skin toggle** that is remembered. The meter counts the four **stock** frames
-  only (broad ETFs, top ten, sectors, thematic), so a rising VIX or a bid Treasury is
+  only (sectors, broad market, top ten, industries), so a rising VIX or a bid Treasury is
   not counted as a decline.
 - The two **futures tiles** name their contract in brackets: `/ES[Z26]` is the
   December 2026 E-mini S&P 500. They move to the next quarterly contract by
@@ -1560,7 +1560,9 @@ ten mega-caps, sectors, thematic ETFs, credit, crypto, metals and countries.
   Settings → Configuration → Symbols & watchlists → *Index futures*; it takes
   effect on the next refresh, with no restart.
 - Tiles **flash** when their value changes.
-- **Hover a fund tile** (Broad-Market ETF, Sector SPDR, Thematic or Countries) to
+- A **sector tile** is headed by the sector's name (Energy, Technology) and shows
+  the fund's symbol (XLE, XLK) under the price.
+- **Hover a fund tile** (Sectors, Broad Market, Industries or Countries) to
   see its top five holdings, each with its price and its move since the previous
   close. A foreign company is shown by its US line. A thin line that has not traded
   for four days reads **last** and the date it traded, not a move. The lists are kept
