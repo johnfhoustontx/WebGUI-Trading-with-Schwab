@@ -21,6 +21,34 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   and not the 18 the design estimated.
 - **Design / plan.** `docs/plans/2026-11-14-exit-chance-{design,plan}.md`.
 
+**Prior —** 2026-11-14 (**Market read: the dispersion index on the Volatility row.**)
+
+- **What.** The Desk's Volatility row ends with "dispersion (DSPX) 38.42 (+1.20%)".
+  `market_read.volatility` publishes the tile's level and change as `dspx` and
+  `dspx_pct`.
+- **It decides nothing.** The verdict rules are unchanged, and a DSPX with no quote
+  leaves the row's reading and chip as they were. No relation between dispersion and
+  the session has been measured, so no rule was written.
+
+**Prior —** 2026-11-14 (**Macro Board: the operator's frame order, new frame names, sector names, DSPX.**)
+
+- **Order.** Sectors, Broad Market, Top 10, Industries, Countries, Index Futures,
+  Cash Index ETF, Metals, Market Internals / Breadth, Volatility, Options Sentiment,
+  Currency, Fixed Income / Credit, Crypto / Alternatives
+  (`market_svc/symbols.CATEGORY_ORDER`).
+- **Renamed.** Sector SPDR → Sectors; Broad-Market ETF → Broad Market; Thematic /
+  Industry ETF → Industries; Equity Index Futures → Index Futures; Cash Index → Cash
+  Index ETF; Fixed Income / Credit ETF → Fixed Income / Credit. The name is the
+  frame's key in `cache:market:dashboard`; every reader of a frame by name was
+  renamed with it (the breadth meter and its service twin).
+- **Sector names.** A sector tile is headed "Energy", "Technology" and so on, with
+  the symbol on its third line. The name travels as a new optional tile field,
+  `label`; `display` stays the symbol because the Market read, the ticker, the
+  holdings card and the trade-idea snapshot find a tile by it. The snapshot image
+  still prints symbols.
+- **DSPX.** The Cboe S&P 500 Dispersion Index joins Volatility, quoted as `$DSPX`
+  (the proxy refuses the bare `DSPX`), inverted like the rest of the frame.
+
 **Prior —** 2026-11-14 (**Captured signals: no time stop in the first 30 minutes.**)
 
 - **Why.** The time stop (DTE <= `cut_dte` and underwater) fired on a capture's

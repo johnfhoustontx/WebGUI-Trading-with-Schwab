@@ -2,7 +2,7 @@
 
 ``services/market_svc/symbols.py`` named ``/ESU26`` and ``/NQU26`` as literals.
 The September 2026 contract expired on 2026-09-18 and the Macro Board's two
-Equity Index Futures tiles went blank, because a quote for a dead contract
+Index Futures tiles went blank, because a quote for a dead contract
 returns nothing - no error, no log line, an em-dash on the public page.
 
 Every date below is worked by hand from a calendar, never from the code under

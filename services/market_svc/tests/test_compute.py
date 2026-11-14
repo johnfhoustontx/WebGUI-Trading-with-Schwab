@@ -72,7 +72,7 @@ def test_mag7_no_data_when_members_absent():
 def test_build_dashboard_shapes_categories_in_order():
     d = compute.build_dashboard(_raw(), sector_pcr=0.99, proxy_up=True)
     cats = [c["category"] for c in d["categories"]]
-    assert cats[0] == "Volatility"          # frame order preserved
+    assert cats[0] == "Sectors"             # frame order preserved
     assert d["proxy_up"] is True
     assert "errors" not in {c["category"] for c in d["categories"]}
 
@@ -273,13 +273,13 @@ def _frame(d, category):
 def test_sector_frame_ranked_desc_by_day_pct():
     d = compute.build_dashboard(_pct_raw({"XLB": -0.5, "XLE": 2.0, "XLK": 0.3}),
                                 sector_pcr=None, proxy_up=True)
-    assert _frame(d, "Sector SPDR")[:3] == ["XLE", "XLK", "XLB"]
+    assert _frame(d, "Sectors")[:3] == ["XLE", "XLK", "XLB"]
 
 
 def test_thematic_frame_ranked_desc_by_day_pct():
     d = compute.build_dashboard(_pct_raw({"SMH": 1.1, "XBI": -2.0, "IGV": 3.4}),
                                 sector_pcr=None, proxy_up=True)
-    assert _frame(d, "Thematic / Industry ETF")[:3] == ["IGV", "SMH", "XBI"]
+    assert _frame(d, "Industries")[:3] == ["IGV", "SMH", "XBI"]
 
 
 def test_countries_frame_ranked_desc_by_day_pct():
@@ -302,7 +302,7 @@ def test_top10_frame_ranked_with_big10_pinned_leftmost():
 
 def test_ranked_frames_put_no_data_tiles_last():
     d = compute.build_dashboard(_pct_raw({"XLU": -3.0}), sector_pcr=None, proxy_up=True)
-    frame = _frame(d, "Sector SPDR")
+    frame = _frame(d, "Sectors")
     assert frame[0] == "XLU"                       # the only quoted tile leads
     assert len(frame) == 11                        # every sector tile still present
     # the 10 unquoted ones trail, in their curated symbol-map order
@@ -311,27 +311,27 @@ def test_ranked_frames_put_no_data_tiles_last():
 
 
 def test_broad_market_frame_ranked_desc_by_day_pct():
-    # Broad-Market ETF became a leaderboard on 2026-08-19: the frame reads
+    # Broad Market became a leaderboard on 2026-08-19: the frame reads
     # strongest-first, so a big QQQ move DOES move it to the head.
     d = compute.build_dashboard(_pct_raw({"SPY": -1.0, "QQQ": 2.0, "IWM": 0.5}),
                                 sector_pcr=None, proxy_up=True)
-    frame = _frame(d, "Broad-Market ETF")
+    frame = _frame(d, "Broad Market")
     assert frame[:3] == ["QQQ", "IWM", "SPY"]
     assert sorted(frame) == sorted(["SPY", "DIA", "QQQ", "IWM", "RSP", "QQEW"])
 
 
 def test_unranked_frames_keep_symbol_map_order():
-    # Cash Index pairs with Equity Index Futures and Volatility reads VIX then
+    # Cash Index ETF pairs with Index Futures and Volatility reads VIX then
     # its tenors — those orders ARE the information, so they never rank.
     d = compute.build_dashboard(_pct_raw({"$SPX": -1.0, "$NDX": 2.0}),
                                 sector_pcr=None, proxy_up=True)
-    assert _frame(d, "Cash Index") == ["SPX", "NDX"]
+    assert _frame(d, "Cash Index ETF") == ["SPX", "NDX"]
 
 
 def test_ranked_frames_are_exactly_the_five_requested():
     from services.market_svc import symbols
-    assert symbols.SORTED_CATEGORIES == ("Broad-Market ETF", "Top 10", "Sector SPDR",
-                                         "Thematic / Industry ETF", "Countries")
+    assert symbols.SORTED_CATEGORIES == ("Broad Market", "Top 10", "Sectors",
+                                         "Industries", "Countries")
     # every ranked category is a real frame (a typo would silently rank nothing)
     assert set(symbols.SORTED_CATEGORIES) <= set(symbols.CATEGORY_ORDER)
 
@@ -456,3 +456,25 @@ def test_collect_resolves_the_symbol_map_once_per_poll(monkeypatch):
     monkeypatch.setattr(compute._proxy, "health", lambda: {"up": True})
     compute.collect(Bus(fake=True))
     assert len(calls) == 1
+
+
+# ── frame order and sector names (2026-11-14) ───────────────────────────────
+def test_frames_are_published_in_the_operators_order():
+    d = compute.build_dashboard({}, sector_pcr=None, proxy_up=True)
+    assert [c["category"] for c in d["categories"]] == [
+        "Sectors", "Broad Market", "Top 10", "Industries", "Countries",
+        "Index Futures", "Cash Index ETF", "Metals",
+        "Market Internals / Breadth", "Volatility", "Options Sentiment", "Currency",
+        "Fixed Income / Credit", "Crypto / Alternatives"]
+
+
+def test_a_sector_tile_is_published_with_its_name_and_other_tiles_without():
+    d = compute.build_dashboard({}, sector_pcr=None, proxy_up=True)
+    tiles = {t["display"]: t for c in d["categories"] for t in c["tiles"]}
+    assert tiles["XLE"]["label"] == "Energy"
+    assert "label" not in tiles["SPY"]
+
+
+def test_the_volatility_frame_ends_with_the_dispersion_index():
+    d = compute.build_dashboard({}, sector_pcr=None, proxy_up=True)
+    assert _frame(d, "Volatility") == ["VIX", "VIX1D", "VIX3M", "SKEW", "DSPX"]

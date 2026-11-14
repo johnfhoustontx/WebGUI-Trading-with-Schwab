@@ -550,3 +550,25 @@ def test_the_volume_row_has_a_question_and_a_use_line_that_counts_it():
     rows = d.read_rows({"rows": [{"key": "volume", "verdict": "neutral", "facts": _VOLUME_FACTS}]})
     assert rows[0]["question"] == "Volume" and rows[0]["verdict_word"] == "Neutral"
     assert d.READ_USE_LINE.startswith("Seven readings")
+
+
+# --- the dispersion index on the Volatility row (2026-11-14) -------------------
+_VOL_FACTS = {"vix_level": 15.55, "vix_pct": 1.57, "vix1d": 8.49, "vix3m": 18.04}
+
+
+def test_volatility_reading_shows_the_dispersion_index_when_it_has_one():
+    assert d.read_reading("volatility", {**_VOL_FACTS, "dspx": 38.42, "dspx_pct": -0.5},
+                             "headwind") == (
+        "VIX 15.55 (+1.57%) · one-day 8.49 · three-month 18.04"
+        " · dispersion (DSPX) 38.42 (-0.50%)")
+
+
+def test_volatility_reading_leaves_a_missing_dispersion_index_out():
+    assert d.read_reading("volatility", {**_VOL_FACTS, "dspx": None, "dspx_pct": None},
+                             "headwind") == (
+        "VIX 15.55 (+1.57%) · one-day 8.49 · three-month 18.04")
+
+
+def test_volatility_reading_shows_a_level_with_no_change():
+    assert d.read_reading("volatility", {**_VOL_FACTS, "dspx": 38.42}, "headwind").endswith(
+        " · dispersion (DSPX) 38.42")

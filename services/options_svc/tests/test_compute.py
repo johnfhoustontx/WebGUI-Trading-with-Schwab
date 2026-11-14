@@ -5033,17 +5033,17 @@ def test_notable_movers_defensive_on_garbage():
 
 
 def test_notable_movers_skips_macro_categories_even_with_a_real_pct():
-    """A Cash Index tile ($SPX) has a legit change_pct but is not an individual
+    """A Cash Index ETF tile ($SPX) has a legit change_pct but is not an individual
     stock — it must be excluded even though it isn't value_only. Uses the REAL
     market_svc category strings (verified against symbols.py CATEGORY_ORDER),
     not the design doc's placeholder names."""
     from services.options_svc import compute
     dashboard = {"categories": [
-        {"category": "Cash Index", "tiles": [
-            {"display": "$SPX", "last": 5000.0, "change_pct": -2.5, "category": "Cash Index"},
+        {"category": "Cash Index ETF", "tiles": [
+            {"display": "$SPX", "last": 5000.0, "change_pct": -2.5, "category": "Cash Index ETF"},
         ]},
-        {"category": "Broad-Market ETF", "tiles": [
-            {"display": "SPY", "last": 500.0, "change_pct": -2.4, "category": "Broad-Market ETF"},
+        {"category": "Broad Market", "tiles": [
+            {"display": "SPY", "last": 500.0, "change_pct": -2.4, "category": "Broad Market"},
         ]},
         {"category": "Top 10", "tiles": [
             {"display": "TSLA", "last": 300.0, "change_pct": 3.3, "category": "Top 10"},
@@ -5090,15 +5090,15 @@ def test_movers_prompt_block_labels_basis_and_flow_alerts():
 def test_notable_movers_matrix_indices_excluded_via_dashboard_categories():
     """CRITICAL fix: $SPX/SPY are in the options-matrix collection universe
     (gex_collector's index base) but have no category of their own there — the
-    dashboard's OWN classification of them (Cash Index / Broad-Market ETF) must
+    dashboard's OWN classification of them (Cash Index ETF / Broad Market) must
     also filter the matrix fallback path, or an index posting a big move gets
     mislabeled as an "individual stock move" in the Claude prompt."""
     from services.options_svc import compute
     dashboard = {"categories": [
-        {"category": "Cash Index", "tiles": [
+        {"category": "Cash Index ETF", "tiles": [
             {"display": "$SPX", "change_pct": -2.5},
         ]},
-        {"category": "Broad-Market ETF", "tiles": [
+        {"category": "Broad Market", "tiles": [
             {"display": "SPY", "change_pct": -2.4},
         ]},
         {"category": "Top 10", "tiles": [

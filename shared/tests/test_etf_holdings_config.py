@@ -22,7 +22,7 @@ def _with(monkeypatch, **over):
 # ── the shipped file ─────────────────────────────────────────────────────────
 def test_shipped_file_covers_every_fund_in_the_four_frames():
     from services.market_svc import symbols as S
-    frames = ("Broad-Market ETF", "Sector SPDR", "Thematic / Industry ETF", "Countries")
+    frames = ("Broad Market", "Sectors", "Industries", "Countries")
     funds = {e["display"] for e in S.symbol_map() if e["category"] in frames}
     assert set(eh.load()["funds"]) == funds
 

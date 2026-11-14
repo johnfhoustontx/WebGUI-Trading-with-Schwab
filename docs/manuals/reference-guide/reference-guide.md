@@ -1432,21 +1432,23 @@ intensity scales with the size of the move.
 
 | Frame | Contents | What it tells you |
 |---|---|---|
-| **Volatility** | VIX, VIX1D, VIX3M, SKEW | The market's expected volatility. VIX1D above VIX means near-term stress. |
-| **Options Sentiment** | Put/Call, Net Prem, MGTN | The app's own cap-weighted put/call and dollar-weighted premium skew. |
-| **Market Internals / Breadth** | $ADVN, $DECN, the net spread, $TICK | How *broad* a move is. A rally on negative breadth is narrow and fragile. |
-| **Currency** | $DXY (via UUP), yen (FXY), euro (FXE), pound (FXB) | Dollar strength — generally a headwind for equities and commodities. A sharp yen rally is the classic sign of the carry trade unwinding, so it shades red; the euro and pound shade green when they rise, as the mirror of a weaker dollar. |
-| **Cash Index** | SPX, NDX | The indices themselves, each with a call/put premium subline. |
-| **Equity Index Futures** | /ES, /NQ | The overnight tape, when cash is closed. Each tile names its contract in brackets (`/ES[Z26]` is December 2026) and moves to the next one by itself. |
-| **Broad-Market ETF** | SPY, DIA, QQQ, IWM, RSP, QQEW | Ranked by the day's move. RSP and QQEW are *equal-weighted* — compare where they land against SPY and QQQ to see if the move is broad or driven by a few giants. |
+| **Sectors** | The eleven S&P sectors | Ranked by the day's move. Each tile is headed by the sector's name (Energy, Technology) with the fund's symbol (XLE, XLK) under the price. |
+| **Broad Market** | SPY, DIA, QQQ, IWM, RSP, QQEW | Ranked by the day's move. RSP and QQEW are *equal-weighted* — compare where they land against SPY and QQQ to see if the move is broad or driven by a few giants. |
 | **Top 10** | A **BIG10** composite plus its ten mega-cap members | BIG10 shows the equal-weighted average move and a breadth subline ("5/10 up"). |
-| **Sector SPDR** | The eleven S&P sectors | Ranked by the day's move. |
-| **Thematic / Industry ETF** | Semis, software, quantum, biotech, retail, metals & mining, oil, transports (IYT), cybersecurity (CIBR), infrastructure (PAVE) | Ranked. |
+| **Industries** | Semis, software, quantum, biotech, retail, metals & mining, oil, transports (IYT), cybersecurity (CIBR), infrastructure (PAVE) | Ranked. |
+| **Countries** | Twelve single-country funds | Ranked. |
+| **Index Futures** | /ES, /NQ | The overnight tape, when cash is closed. Each tile names its contract in brackets (`/ES[Z26]` is December 2026) and moves to the next one by itself. |
+| **Cash Index ETF** | SPX, NDX | The indices themselves, each with a call/put premium subline. |
+| **Metals** | GLD, SLV, COPX | Gold, silver and copper miners. |
+| **Market Internals / Breadth** | $ADVN, $DECN, the net spread, $TICK | How *broad* a move is. A rally on negative breadth is narrow and fragile. |
+| **Volatility** | VIX, VIX1D, VIX3M, SKEW, DSPX | The market's expected volatility. VIX1D above VIX means near-term stress. DSPX is the Cboe S&P 500 Dispersion Index: how far the options market expects single stocks to move apart from each other. |
+| **Options Sentiment** | Put/Call, Net Prem, MGTN | The app's own cap-weighted put/call and dollar-weighted premium skew. |
+| **Currency** | $DXY (via UUP), yen (FXY), euro (FXE), pound (FXB) | Dollar strength — generally a headwind for equities and commodities. A sharp yen rally is the classic sign of the carry trade unwinding, so it shades red; the euro and pound shade green when they rise, as the mirror of a weaker dollar. |
 | **Fixed Income / Credit** | TLT, HYG, LQD | HYG weak while equities rally is a classic warning. |
-| **Crypto / Alternatives**, **Countries** | | Countries is ranked. |
+| **Crypto / Alternatives** | GDLC, VCX | A crypto basket and a private-venture fund. |
 
-**Five frames re-rank themselves** by the day's move — Broad-Market ETF, Top 10,
-Sector SPDR, Thematic, and Countries — so leaders and laggards are always at the ends.
+**Five frames re-rank themselves** by the day's move — Sectors, Broad Market,
+Top 10, Industries, and Countries — so leaders and laggards are always at the ends.
 **Every other frame keeps its curated order on purpose**: VIX before its tenors, the
 cash indices paired with their futures. That layout is itself information.
 
@@ -1454,13 +1456,13 @@ cash indices paired with their futures. That layout is itself information.
 **breadth meter**, and an **A/B skin toggle** (Instrument or Heat Lattice). Tiles
 **flash** when their value changes.
 
-**What the breadth meter counts.** The four *stock* frames only — Broad-Market ETF,
-Top 10, Sector SPDR and Thematic / Industry — so a bid VIX, a stronger dollar or a
+**What the breadth meter counts.** The four *stock* frames only — Sectors,
+Broad Market, Top 10 and Industries — so a bid VIX, a stronger dollar or a
 rallying Treasury does not register as a decline, and the meter reads the equity tape
 rather than the whole risk complex. The BIG10 composite is skipped, since it is the
 average of the ten mega-caps already counted beside it.
 
-**Hover a fund for its top holdings.** On a Broad-Market ETF, Sector SPDR, Thematic
+**Hover a fund for its top holdings.** On a Sectors, Broad Market, Industries
 or Countries tile the hover card lists the fund's five largest holdings, each with its
 price and its move from the previous close, so you can see whether a sector's move is
 one giant or the whole basket. The lists are kept by hand (Schwab does not publish what
