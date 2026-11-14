@@ -34,6 +34,7 @@ from services.options_svc import push_notify
 # Strategy Finder's own scorer.
 from services.options_svc import rate_trade
 # The rescue menu's own vocabulary: what a candidate IS, for rescue_apply.
+from services.options_svc import model_health
 from services.options_svc import rescue
 from services.options_svc import scalp_call
 from services.options_svc import scalp_intraday_call
@@ -185,7 +186,7 @@ SAFE_LATE = frozenset({"refresh_paper", "paper_reload", "captured_reload",
 SLOW_LANE = frozenset({"rescan", "swing_scan", "gamma_analyze", "gamma_explain",
                        "gamma_history", "calc_rate", "dossier",
                        "x_post", "x_post_report", "scalp_refresh",
-                       "scalp_prob_refit"})
+                       "scalp_prob_refit", "model_health_rebuild"})
 
 
 def _market_state(bus):
@@ -4089,6 +4090,19 @@ def _cmd_scalp_prob_refit(bus, command):
              out.get("version"), out.get("rows"), out.get("seconds") or 0.0)
 
 
+@_command("model_health_rebuild")
+def _cmd_model_health_rebuild(bus, command):
+    # Model Health's Recompute button: score the stated chances now, as the
+    # nightly step does, whatever [model_health] enabled says. Report only.
+    # Slow lane: it reads the scalp and signal stores for seconds and touches no
+    # paper book. Not replay-guarded: a replay recomputes the same view, and an
+    # unchanged payload bumps no version (run never raises; it counts its own
+    # failure).
+    out = model_health.run(bus)
+    log.info("model_health_rebuild: %s",
+             "published" if out is not None else "failed (degraded)")
+
+
 @_command("x_post")
 def _cmd_x_post(bus, command):
     # A public post on X. Replay-guarded (see _REPLAY_GUARDED).
@@ -4217,7 +4231,10 @@ def handle_command(bus, command) -> None:
     inside its window, or put today's published slots back off one (never an
     off-slot call); ``scalp_prob_refit`` → fit the Opening Scalp's chance-of-target
     weights from the stored history and keep them as a new version (replay-guarded,
-    slow lane; publishes nothing - the next call reads the new weights); else no-op.
+    slow lane; publishes nothing - the next call reads the new weights);
+    ``model_health_rebuild`` → score the stated chances against their outcomes and
+    republish ``cache:options:model_health`` plus the dated report (report only,
+    slow lane, runs whatever ``[model_health] enabled`` says); else no-op.
 
     ⚠ This list IS the API the GUI codes against, and prose drifts:
     ``gamma_history``/``rescue_adhoc``/``sim_replay`` were implemented and missing

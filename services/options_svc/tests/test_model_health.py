@@ -385,3 +385,33 @@ def test_run_that_fails_publishes_nothing_and_counts_a_degrade(db, tmp_path, fak
     assert mh.run(fake_bus, scalp_db=db, out_dir=tmp_path / "reports") is None
     assert fake_bus.cache_get(mh.CACHE_KEY) is None
     assert _degrade.counts().get("options.model_health", 0) == before + 1
+
+
+# ── wiring ──────────────────────────────────────────────────────────────────
+def test_nightly_runs_only_when_enabled(monkeypatch, fake_bus):
+    calls = []
+    monkeypatch.setattr(mh, "run", lambda bus: calls.append(bus) or {"models": []})
+    monkeypatch.setattr(model_health_config, "enabled", lambda: False)
+    assert mh.nightly(fake_bus) is None and calls == []
+    monkeypatch.setattr(model_health_config, "enabled", lambda: True)
+    mh.nightly(fake_bus)
+    assert calls == [fake_bus]
+
+
+def test_the_recompute_command_is_registered_on_the_slow_lane(monkeypatch, fake_bus):
+    from services.options_svc import handlers
+    assert "model_health_rebuild" in handlers._COMMANDS
+    assert "model_health_rebuild" in handlers.SLOW_LANE
+    seen = []
+    monkeypatch.setattr(mh, "run", lambda bus: seen.append(bus))
+    handlers._COMMANDS["model_health_rebuild"](fake_bus, None)
+    assert seen == [fake_bus]
+
+
+def test_the_nightly_step_runs_after_the_intraday_study_rebuild():
+    import inspect
+    from services.options_svc import scheduler
+    src = inspect.getsource(scheduler)
+    rebuild = src.index("scalp_intraday_study.rebuild")
+    step = src.index("model_health.nightly")
+    assert rebuild < step

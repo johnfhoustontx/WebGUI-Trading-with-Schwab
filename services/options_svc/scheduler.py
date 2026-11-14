@@ -19,7 +19,7 @@ from datetime import timedelta
 from zoneinfo import ZoneInfo
 
 from services import _heartbeat
-from services.options_svc import compute, finder_public, flow_stream, futures_chain_watch, handlers, scalp_call, scalp_fetch, scalp_grade, scalp_intraday_call, scalp_intraday_grade, scalp_intraday_study, scalp_prob_fit, scalp_study
+from services.options_svc import compute, finder_public, flow_stream, futures_chain_watch, handlers, model_health, scalp_call, scalp_fetch, scalp_grade, scalp_intraday_call, scalp_intraday_grade, scalp_intraday_study, scalp_prob_fit, scalp_study
 from shared import market_calendar as mc
 from shared import paper_limits as _paper_limits
 from shared import scalp_config
@@ -1352,6 +1352,14 @@ async def loop(bus):
                          counts["outcomes"], counts["seconds"])
             except Exception:
                 log.exception("scalp intraday study rebuild degraded")
+            # Last of all, Model Health scores the stated chances against
+            # tonight's outcomes (report only; skipped when [model_health]
+            # enabled is false). After the rebuild, so it reads tonight's study.
+            # model_health.nightly degrades itself; guarded here as well.
+            try:
+                await loop_.run_in_executor(None, model_health.nightly, bus)
+            except Exception:
+                log.exception("model health step degraded")
 
         if bars_slot:
             branches.append(("scalp_bars", _scalp_bars_branch()))

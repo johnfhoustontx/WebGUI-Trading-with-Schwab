@@ -389,5 +389,13 @@ def run(bus, scalp_db=None, signals_db=None, out_dir=None):
     return payload
 
 
+def nightly(bus):
+    """The scheduler's step: ``run`` unless ``[model_health] enabled`` is off."""
+    if not cfg.enabled():
+        log.info("model health: skipped (enabled = false)")
+        return None
+    return run(bus)
+
+
 __all__ = ["CACHE_KEY", "Row", "verdict", "scalp_rows", "history_row", "signal_rows",
-           "drift", "score", "build", "report_markdown", "run"]
+           "drift", "score", "build", "report_markdown", "run", "nightly"]
