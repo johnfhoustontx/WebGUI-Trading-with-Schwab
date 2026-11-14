@@ -4,7 +4,24 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-14 (**Captured signals: no time stop in the first 30 minutes.**)
+**Last updated:** 2026-11-14 (**Exit chance on Model Health: ML roadmap Phase 3b.**)
+
+- **What.** A shadow score, per scanner type, of an open captured credit signal's
+  chance of still reaching its profit target before its own exits close it, made at
+  each mark from the path so far and judged against the rate by how far the trade had
+  already travelled. A third table on Model Health and a section of its report.
+  Nothing reads it; no exit rule changes.
+- **Pieces.** `services/options_svc/exit_chance.py`; `model_health.exit_entries`;
+  `[exit]` in `config/model_health.toml` with Settings entries; the page table.
+- **First reading** (2026-11-13 backup, all *Too few days*). Swing: 12 scored days,
+  1,466 marks, 60 trades; Brier 0.349 against the distance baseline's 0.279,
+  difference +0.070 (-0.023 to +0.170): so far the model is WORSE than distance. Income:
+  4 days, Brier 0.325 against 0.280. 0-DTE: 2 days, 3 marks. A day is scored only once
+  trades closed before it span 15 entry days, which is why Swing has 12 scored days
+  and not the 18 the design estimated.
+- **Design / plan.** `docs/plans/2026-11-14-exit-chance-{design,plan}.md`.
+
+**Prior —** 2026-11-14 (**Captured signals: no time stop in the first 30 minutes.**)
 
 - **Why.** The time stop (DTE <= `cut_dte` and underwater) fired on a capture's
   first mark, because a fresh spread is underwater by its bid/ask alone. On the

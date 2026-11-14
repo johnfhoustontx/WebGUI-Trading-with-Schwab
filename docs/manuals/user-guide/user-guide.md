@@ -3928,6 +3928,18 @@ and high.
   low and high. About 80% is right.
 - It forecasts how far, never which way, and nothing in the app uses it yet.
 
+**Exit chance (shadow)** is the third table. For every closed captured credit
+signal it looks at each mark before the trade first reached its profit target,
+and asks whether it still got there before its own exits closed it.
+
+- **vs distance travelled** says whether a model reading the trade's path did
+  better than the plain rate by how far the trade had already moved: *Beats*,
+  *Matches*, *Does not beat* or *Too few days*, with the difference beside it
+  (below zero is better).
+- **Marks**, **Trades** and **Days** say how much was scored. Each day counts
+  once, however many trades it held.
+- It changes no exit and nothing in the app reads it.
+
 ## User Manuals
 
 **Route:** `/manuals` — a tab in the **More** group, alongside EOD Report. (It used

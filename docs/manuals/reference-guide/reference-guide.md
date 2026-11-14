@@ -5227,6 +5227,16 @@ to trade: it says how far, never which way, and no page or rule reads it. Its in
 check skips the volatility levels, which move in long stretches and would always read
 shifted.
 
+### The exit chance (shadow)
+
+The third table is the roadmap's Phase 3b. At each mark of a closed captured credit
+signal before it first reached its profit target, it scores the chance it still did
+before its own exits closed it, against the rate by how far the trade had already
+travelled. That opponent is hard on purpose: for 0-DTE, distance alone explains most
+of the outcome. A *Beats* here is the evidence an advice chip on open positions would
+need; until then the table is a record, and no exit rule reads it. Its outcomes follow
+the exit rules running at the time, which changed between September and November.
+
 ## User Manuals
 
 *Menu: ACCOUNT → More → User Manuals · Route `/manuals`*

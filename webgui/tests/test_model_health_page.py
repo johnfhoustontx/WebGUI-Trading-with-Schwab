@@ -111,3 +111,42 @@ def test_range_drift_lists_each_symbol_once():
                          range_entry(symbol="QQQ")]}
     assert page.range_drift(payload) == [
         ("SPY", ["volatility index: shifted, stability index 0.30, chance alone 1.0%"])]
+
+
+# ── the exit chance ─────────────────────────────────────────────────────────
+def exit_entry(**kw):
+    e = {"type": "SWING", "verdict": "beats", "days": 50, "min_days": 40, "rows": 1500,
+         "trades": 200, "brier": 0.2012, "brier_distance": 0.2234,
+         "diff": {"mean": -0.022, "lo": -0.04, "hi": -0.005, "days": 50},
+         "drift_status": "steady", "drift": []}
+    e.update(kw)
+    return e
+
+
+def test_exit_rows():
+    (row,) = page.exit_rows({"exit": [exit_entry()]})
+    assert row["type"] == "SWING" and row["verdict"] == "Beats"
+    assert row["brier"] == "0.201" and row["brier_distance"] == "0.223"
+    assert row["difference"].startswith("-0.022")
+    assert row["rows"] == "1500" and row["days"] == "50" and row["trades"] == "200"
+    assert row["_verdict_class"] == page.VERDICT_CLASSES["beats"]
+
+
+def test_exit_too_few_days_and_none():
+    (row,) = page.exit_rows({"exit": [exit_entry(verdict="too_few_days", days=12)]})
+    assert row["verdict"] == "Too few days (12 of 40)"
+    assert page.exit_rows({"exit": None}) == [] and page.exit_rows(None) == []
+
+
+def test_exit_columns_use_whole_words():
+    labels = " ".join(c["label"] for c in page.exit_columns())
+    for short in ("DTE", "TP", "PnL", "P&L"):
+        assert short not in labels
+
+
+def test_exit_drift_names_inputs_in_words():
+    moved = [{"input": "cushion", "band": "moved", "psi": 0.14, "p": 0.01,
+              "missing_before": 0.0, "missing_after": 0.0}]
+    ((kind, lines),) = page.exit_drift({"exit": [exit_entry(drift=moved), exit_entry(
+        type="0DTE")]})
+    assert kind == "SWING" and lines[0].startswith("distance from the short strike")

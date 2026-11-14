@@ -103,9 +103,11 @@ It never becomes 0.
   rule with `min_days` (40 scored days). Also published: both Brier scores, the
   reliability bands, and drift on `short_delta`, `cushion` and `entry_iv_rank`, with
   the session-shuffle check.
-- **When the verdict comes.** Scored days = entry days − 15. Swing has 18 today and
-  reaches 40 after about 22 more entry days, roughly a month. 0-DTE and Income take
-  longer. Until then each row reads "too few days" and still shows the running figures.
+- **When the verdict comes.** A day is scored only once trades that CLOSED before it
+  span 15 entry days, so a swing trade's days count only after it closes. On the
+  2026-11-13 backup that left Swing 12 scored days, 0-DTE 2 and Income 4: Swing
+  reaches 40 in roughly six weeks of sessions, the others later. Until then each row
+  reads "too few days" and still shows the running figures.
 
 ## Where it lives
 
