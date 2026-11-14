@@ -20,6 +20,8 @@ def test_shipped_file_matches_the_defaults():
     assert cfg.psi_moved() == pytest.approx(0.10)
     assert cfg.psi_shifted() == pytest.approx(0.25)
     assert cfg.bootstrap_draws() == 2000
+    assert cfg.drift_permutations() == 200
+    assert cfg.drift_p() == pytest.approx(0.05)
 
 
 @pytest.mark.parametrize("key,bad,getter,want", [
@@ -29,6 +31,8 @@ def test_shipped_file_matches_the_defaults():
     ("recent_sessions", True, cfg.recent_sessions, 5),
     ("bootstrap_draws", 5, cfg.bootstrap_draws, 2000),
     ("psi_moved", -1.0, cfg.psi_moved, 0.10),
+    ("drift_permutations", 3, cfg.drift_permutations, 200),
+    ("drift_p", 0.9, cfg.drift_p, 0.05),
 ])
 def test_a_bad_value_falls_back_to_its_default(monkeypatch, key, bad, getter, want):
     monkeypatch.setattr(cfg, "load", lambda: {**cfg.DEFAULTS, key: bad})

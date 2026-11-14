@@ -3364,6 +3364,14 @@ _MODEL_HEALTH = ConfigFile(
             Field("psi_shifted", "Shifted from",
                   "Population stability index at which an input reads shifted.",
                   kind="float", min=0.0, max=5.0, step=0.01),
+            Field("drift_permutations", "Session shuffles",
+                  "The recent sessions are swapped with earlier ones this many "
+                  "times to see how far chance alone moves the index.",
+                  kind="int", min=20, max=5000, step=10),
+            Field("drift_p", "Flag below this chance",
+                  "An input is flagged only when fewer than this share of the "
+                  "shuffles moved as far as the real recent sessions did.",
+                  kind="float", min=0.001, max=0.5, step=0.005),
         )),
     ),
 )

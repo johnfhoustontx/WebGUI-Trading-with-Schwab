@@ -178,25 +178,69 @@ def test_psi_of_identical_samples_is_zero():
     assert out["missing_after"] == pytest.approx(1 / 6)
 
 
-def test_psi_on_a_two_valued_input_merges_duplicate_edges():
-    # Reference half 0, half 1; recent all 1. The reference's deciles (taken at
-    # data points) are only 0 and 1, so the bins are: below 0, 0 up to 1, 1 and
-    # up, and missing. Shares (floored at 1e-4): ref 0/.5/.5/0, recent 0/0/1/0.
-    f = 1e-4
-    want = (f - 0.5) * math.log(f / 0.5) + (1.0 - 0.5) * math.log(1.0 / 0.5)
-    out = metrics.psi([0.0, 0.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0])
+def test_psi_on_a_two_valued_input_is_one_edge_and_smoothed():
+    # Reference ten 0s and ten 1s; recent ten 1s. Two value bins (ten readings on
+    # the smaller side), split at the reference's median taken at a data point,
+    # 1: below 1, 1 and up, then missing. Counts smoothed by one half over three
+    # bins: reference 10/10/0 of 20, recent 0/10/0 of 10.
+    e = [10.5 / 21.5, 10.5 / 21.5, 0.5 / 21.5]
+    a = [0.5 / 11.5, 10.5 / 11.5, 0.5 / 11.5]
+    want = sum((ai - ei) * math.log(ai / ei) for ai, ei in zip(a, e))
+    out = metrics.psi([0.0] * 10 + [1.0] * 10, [1.0] * 10)
     assert out["psi"] == pytest.approx(want, rel=1e-9)
+
+
+def test_psi_uses_fewer_bins_for_a_small_sample():
+    # Four readings a side: one value bin, so only the missing share can move it.
+    assert metrics.psi([0.1, 0.2, 0.3, 0.4], [5.0, 6.0, 7.0, 8.0])["psi"] ==         pytest.approx(0.0, abs=1e-12)
 
 
 def test_psi_reports_a_reading_that_went_missing_as_a_missing_share():
     out = metrics.psi([0.2, 0.4, 0.6, 0.8], [None, None, None])
     assert out["missing_before"] == 0.0 and out["missing_after"] == 1.0
-    assert math.isfinite(out["psi"]) and out["psi"] > 0.25
+    e, a = [4.5 / 5, 0.5 / 5], [0.5 / 4, 3.5 / 4]
+    want = sum((ai - ei) * math.log(ai / ei) for ai, ei in zip(a, e))
+    assert out["psi"] == pytest.approx(want, rel=1e-9)
+    assert out["psi"] > 0.25
 
 
 def test_psi_with_an_empty_side_is_none():
     assert metrics.psi([], [0.1])["psi"] is None
     assert metrics.psi([0.1], [])["psi"] is None
+
+
+def _sessions(rng, n, per, shift_last=0, shift=0.0):
+    return {f"2026-01-{i + 1:02d}": [rng.normal(shift if i >= n - shift_last else 0.0)
+                                     for _ in range(per)] for i in range(n)}
+
+
+def test_session_shuffle_rarely_flags_a_steady_input():
+    # Same distribution throughout: p under 0.05 should come up about one time in
+    # twenty. Allow up to one in ten over 60 trials.
+    rng = np.random.default_rng(7)
+    flagged = sum(
+        1 for t in range(60)
+        if metrics.psi_by_session(_sessions(rng, 16, 3), 5, n_perm=99, seed=t)["p"] < 0.05)
+    assert flagged <= 6
+
+
+def test_session_shuffle_flags_a_real_shift():
+    rng = np.random.default_rng(3)
+    out = metrics.psi_by_session(_sessions(rng, 16, 20, shift_last=5, shift=2.0), 5,
+                                 n_perm=99)
+    assert out["p"] < 0.05 and out["psi"] > 0.25
+
+
+def test_session_shuffle_moves_whole_sessions():
+    # 21 identical readings within each day and days that differ: the observed
+    # last-five split is no more extreme than a random five, so p is not small.
+    by_session = {f"2026-01-{i + 1:02d}": [float(i % 4)] * 21 for i in range(16)}
+    assert metrics.psi_by_session(by_session, 5, n_perm=99)["p"] > 0.05
+
+
+def test_session_shuffle_with_no_reference_is_none():
+    out = metrics.psi_by_session({"2026-01-01": [1.0], "2026-01-02": [2.0]}, 2)
+    assert out["psi"] is None and out["p"] is None
 
 
 def test_the_library_imports_no_service_store_or_config():

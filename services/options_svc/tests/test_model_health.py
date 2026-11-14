@@ -281,6 +281,21 @@ def test_drift_flags_a_reading_that_went_missing(monkeypatch):
     assert [f["input"] for f in flagged] == ["sentiment"]
     assert flagged[0]["missing_before"] == 0.0 and flagged[0]["missing_after"] == 1.0
     assert flagged[0]["band"] == "shifted"
+    assert 0 < flagged[0]["p"] < 0.05
+
+
+def test_drift_does_not_flag_sampling_noise(monkeypatch):
+    """Every session drawn from the same spread: a few recent sessions can read
+    a high index by chance, and the session shuffle keeps that from a flag."""
+    import random
+    monkeypatch.setattr(model_health_config, "recent_sessions", lambda: 5)
+    monkeypatch.setattr(model_health_config, "min_reference_sessions", lambda: 8)
+    rng = random.Random(7)
+    days = trading_days(40)
+    inputs = [(d, {f"x{j}": rng.gauss(0, 1) for j in range(6)})
+              for d in days for _k in range(3)]
+    status, flagged = mh.drift(inputs)
+    assert status == "steady" and flagged == []
 
 
 def test_drift_with_too_little_history(monkeypatch):
@@ -300,17 +315,21 @@ def test_drift_ignores_an_input_the_reference_never_had(monkeypatch):
 
 
 def test_drift_lists_worst_first(monkeypatch):
+    import random
     monkeypatch.setattr(model_health_config, "recent_sessions", lambda: 3)
     monkeypatch.setattr(model_health_config, "min_reference_sessions", lambda: 5)
-    days = trading_days(10)
+    rng = random.Random(3)
+    days = trading_days(25)
     inputs = []
     for i, day in enumerate(days):
-        recent = i >= 7
-        inputs.append((day, {"a": (5.0 if recent else 0.1 * i),
-                             "b": (0.45 + 0.01 * i if recent else 0.1 * i)}))
+        recent = i >= 22
+        for _k in range(5):
+            inputs.append((day, {"a": rng.gauss(4.0 if recent else 0.0, 1.0),
+                                 "b": rng.gauss(1.5 if recent else 0.0, 1.0)}))
     _status, flagged = mh.drift(inputs)
     psis = [f["psi"] for f in flagged]
-    assert psis == sorted(psis, reverse=True) and flagged[0]["input"] == "a"
+    assert [f["input"] for f in flagged] == ["a", "b"]
+    assert psis == sorted(psis, reverse=True)
 
 
 # ── signals ─────────────────────────────────────────────────────────────────

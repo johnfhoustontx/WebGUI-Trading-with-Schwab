@@ -21,5 +21,11 @@ min_reference_sessions = 8
 psi_moved = 0.10
 psi_shifted = 0.25
 
+# A move is flagged only when it is also unlikely by chance: the recent sessions
+# are swapped with whole earlier sessions this many times, and the input is
+# flagged only when fewer than drift_p of the swaps moved as far.
+drift_permutations = 200
+drift_p = 0.05
+
 # Resamples of whole days for the 95% interval on the Brier difference.
 bootstrap_draws = 2000

@@ -14,6 +14,8 @@ DEFAULTS = {
     "psi_moved": 0.10,
     "psi_shifted": 0.25,
     "bootstrap_draws": 2000,
+    "drift_permutations": 200,
+    "drift_p": 0.05,
 }
 
 load, reset_cache = toml_loader(MODEL_HEALTH_TOML, DEFAULTS, label="model_health.toml")
@@ -65,5 +67,14 @@ def bootstrap_draws() -> int:
     return _number("bootstrap_draws", minimum=100, maximum=20000, integer=True)
 
 
+def drift_permutations() -> int:
+    return _number("drift_permutations", minimum=20, maximum=5000, integer=True)
+
+
+def drift_p() -> float:
+    return _number("drift_p", minimum=0.001, maximum=0.5)
+
+
 __all__ = ["DEFAULTS", "load", "reset_cache", "enabled", "min_days", "recent_sessions",
-           "min_reference_sessions", "psi_moved", "psi_shifted", "bootstrap_draws"]
+           "min_reference_sessions", "psi_moved", "psi_shifted", "bootstrap_draws",
+           "drift_permutations", "drift_p"]

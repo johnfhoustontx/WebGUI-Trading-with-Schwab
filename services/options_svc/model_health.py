@@ -51,9 +51,11 @@ LABELS = {"scalp_morning": "08:36 scalp chance",
 NOTES = {
     "scalp": "The four trades of each call pooled; the usual rate is per symbol "
              "and trade.",
-    "signals": "Many captured signals from September to November 2026 were cut by "
-               "the time stop on their first mark, so their outcomes are what was "
-               "recorded, not a hold to target.",
+    "signals": "The chance is the short strike's delta, which states the odds of "
+               "expiring out of the money; the app closes trades earlier, at a "
+               "target or a stop, so part of any gap is that difference. Many "
+               "captured signals from September to November 2026 were also cut by "
+               "the time stop on their first mark.",
 }
 
 
@@ -247,23 +249,30 @@ def drift(inputs):
     ``moved``, ``shifted``) or ``too_little_history``, and the moved and shifted
     inputs, worst first. The recent window is the last ``recent_sessions``
     sessions; the reference is every session before it. An input no reference
-    session carried is not judged."""
+    session carried is not judged. An input is flagged only when its index
+    reaches ``psi_moved`` AND a shuffle of whole sessions moved that far in
+    fewer than ``drift_p`` of the draws: with a handful of recent sessions the
+    index alone is mostly sampling noise."""
     recent_n, min_ref = cfg.recent_sessions(), cfg.min_reference_sessions()
     sessions = sorted({day for day, _r in inputs})
     if len(sessions) < recent_n + min_ref:
         return "too_little_history", []
     recent_days = set(sessions[-recent_n:])
-    ref = [r for day, r in inputs if day not in recent_days]
-    new = [r for day, r in inputs if day in recent_days]
-    names = sorted({k for r in ref for k in r})
+    names = sorted({k for day, r in inputs if day not in recent_days for k in r})
     moved, shifted = cfg.psi_moved(), cfg.psi_shifted()
+    n_perm, p_max = cfg.drift_permutations(), cfg.drift_p()
     flagged = []
     for name in names:
-        out = metrics.psi([r.get(name) for r in ref], [r.get(name) for r in new])
-        value = out["psi"]
-        if value is None or value < moved:
+        by_session = defaultdict(list)
+        for day, r in inputs:
+            by_session[day].append(r.get(name))
+        out = metrics.psi_by_session(dict(by_session), recent_n, n_perm=n_perm, seed=0)
+        if out is None:
             continue
-        flagged.append({"input": name, "psi": value,
+        value = out["psi"]
+        if value is None or value < moved or out["p"] >= p_max:
+            continue
+        flagged.append({"input": name, "psi": value, "p": out["p"],
                         "band": "shifted" if value >= shifted else "moved",
                         "missing_before": out["missing_before"],
                         "missing_after": out["missing_after"]})
@@ -362,7 +371,8 @@ def report_markdown(payload) -> str:
         if m["drift"]:
             lines += ["", "Inputs that moved:", ""]
             for f in m["drift"]:
-                lines.append(f"- {f['input']}: {f['band']}, PSI {_f(f['psi'], 2)}; "
+                lines.append(f"- {f['input']}: {f['band']}, PSI {_f(f['psi'], 2)} "
+                             f"(chance {_f(f.get('p'), 3)}); "
                              f"no reading {_f(f['missing_before'], 2)} -> "
                              f"{_f(f['missing_after'], 2)}")
     return "\n".join(lines) + "\n"
