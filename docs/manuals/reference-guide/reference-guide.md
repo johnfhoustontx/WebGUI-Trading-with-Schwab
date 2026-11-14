@@ -610,7 +610,7 @@ level on this page. Above it, expect mean-reversion; below it, expect momentum.
 | **Vanna** | How hedges change when **volatility** changes. | Volatility-event days — CPI, Fed, earnings. |
 | **Flow** | Call versus put premium through the day, as a ribbon. The **crossover** is the read. | Confirming a directional bias intraday. |
 | **Net Prem** | Net premium (call dollars − put dollars) for up to 28 symbols at once. | Comparing where money is going across names. |
-| **Open Interest** | Where the open contracts sit, by strike, across the **next expirations** (twelve unless you change it), with put and call bars for one expiry on the same strike rows and a rail placing the price among the walls and max pain. | Finding the strikes and the expiry that hold the positions. |
+| **Open Interest** | Where the open contracts sit, by strike, across **every expiration** the symbol has ($SPX: its nearest twelve), with put and call bars for one expiry on the same strike rows and a rail placing the price among the walls and max pain. | Finding the strikes and the expiry that hold the positions. |
 
 The first four share one layout and are described together below. **Flow**, **Net
 Prem** and **Open Interest** are different screens with their own controls, and each has its
@@ -879,10 +879,13 @@ Group, ticks and scale are all remembered. **Explain** works per selected symbol
 ### The Open Interest subtab — open contracts by strike and expiry
 
 A map of where the open contracts sit: strikes down the side, the **next
-expirations** across the top, and a brighter cell where more contracts are open. Twelve
-expirations are shown unless you change it (Settings → Configuration → Open Interest
-tab → **Expirations shown**, 5 to 40): five fit on screen and the scroll bar under them
-reaches the rest. It
+expirations** across the top, and a brighter cell where more contracts are open. Every
+expiration the symbol has is shown, and the scroll bar under them reaches the ones that
+do not fit. **$SPX is the exception**: its whole chain is too large to ask Schwab for,
+so it shows its nearest twelve (Settings → Configuration → Open Interest tab → **Symbols
+not shown whole** and **Expirations for those symbols**). The expirations take 60% of
+the map's width and the put and call bars 40%. Calls and puts wear the colours chosen
+for Dealer Positioning (Settings → Appearance), the same pair as the by-strike bars. It
 answers *which strikes, in which expiry, hold the positions*. It replaced the Term
 subtab (net gamma by expiry) in November 2026.
 
@@ -907,10 +910,10 @@ subtab (net gamma by expiry) in November 2026.
   calls against puts over every expiration. A count of open contracts says where
   positions sit, not who holds which side.
 - **Hover** a cell or a bar for the exact counts.
-- **How fresh the far expirations are.** A symbol's nearest expirations come with every
-  refresh. The ones past its seven-day chain need a wider request to Schwab, which is
-  repeated at most every 30 minutes per symbol (**Wider chain fetched every**). Open
-  interest is published once a day, so nothing is lost by it.
+- **How fresh it is.** The whole chain is one large request to Schwab, repeated at most
+  every 120 minutes per symbol (**Wider chain fetched every**) and reused in between.
+  Open interest is published once a day, so nothing is lost by it. If the request
+  fails, the tab shows the expirations of the seven-day chain it already has.
 
 > **Its columns are expirations, not time.** Open interest is published once a day,
 > so nothing on this tab moves during the session except the price line. A weekly and

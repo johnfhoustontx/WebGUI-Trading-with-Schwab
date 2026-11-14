@@ -1257,7 +1257,7 @@ will not match another service's, and the <em>shape</em> is what you should read
 </tr>
 <tr>
 <td><strong>Open Interest</strong></td>
-<td>Where the open contracts sit, by strike, across the <strong>next expirations</strong> (twelve unless you change it), with put and call bars for one expiry on the same strike rows and a rail placing the price among the walls and max pain.</td>
+<td>Where the open contracts sit, by strike, across <strong>every expiration</strong> the symbol has ($SPX: its nearest twelve), with put and call bars for one expiry on the same strike rows and a rail placing the price among the walls and max pain.</td>
 <td>Finding the strikes and the expiry that hold the positions.</td>
 </tr>
 </tbody>
@@ -1512,10 +1512,13 @@ failing"</strong> — an empty chart otherwise looks identical in both cases.</p
 </blockquote>
 <h3 id="the-open-interest-subtab-open-contracts-by-strike-and-expiry">The Open Interest subtab — open contracts by strike and expiry</h3>
 <p>A map of where the open contracts sit: strikes down the side, the <strong>next
-expirations</strong> across the top, and a brighter cell where more contracts are open. Twelve
-expirations are shown unless you change it (Settings → Configuration → Open Interest
-tab → <strong>Expirations shown</strong>, 5 to 40): five fit on screen and the scroll bar under them
-reaches the rest. It
+expirations</strong> across the top, and a brighter cell where more contracts are open. Every
+expiration the symbol has is shown, and the scroll bar under them reaches the ones that
+do not fit. <strong>$SPX is the exception</strong>: its whole chain is too large to ask Schwab for,
+so it shows its nearest twelve (Settings → Configuration → Open Interest tab → <strong>Symbols
+not shown whole</strong> and <strong>Expirations for those symbols</strong>). The expirations take 60% of
+the map's width and the put and call bars 40%. Calls and puts wear the colours chosen
+for Dealer Positioning (Settings → Appearance), the same pair as the by-strike bars. It
 answers <em>which strikes, in which expiry, hold the positions</em>. It replaced the Term
 subtab (net gamma by expiry) in November 2026.</p>
 <ul>
@@ -1540,10 +1543,10 @@ subtab (net gamma by expiry) in November 2026.</p>
   calls against puts over every expiration. A count of open contracts says where
   positions sit, not who holds which side.</li>
 <li><strong>Hover</strong> a cell or a bar for the exact counts.</li>
-<li><strong>How fresh the far expirations are.</strong> A symbol's nearest expirations come with every
-  refresh. The ones past its seven-day chain need a wider request to Schwab, which is
-  repeated at most every 30 minutes per symbol (<strong>Wider chain fetched every</strong>). Open
-  interest is published once a day, so nothing is lost by it.</li>
+<li><strong>How fresh it is.</strong> The whole chain is one large request to Schwab, repeated at most
+  every 120 minutes per symbol (<strong>Wider chain fetched every</strong>) and reused in between.
+  Open interest is published once a day, so nothing is lost by it. If the request
+  fails, the tab shows the expirations of the seven-day chain it already has.</li>
 </ul>
 <blockquote>
 <p><strong>Its columns are expirations, not time.</strong> Open interest is published once a day,

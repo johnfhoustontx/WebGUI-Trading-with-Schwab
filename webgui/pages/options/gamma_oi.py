@@ -36,6 +36,7 @@ import math
 
 from pages import fmt as _fmt
 from pages.options import flow_panels as _fx
+from pages.options import theme as _theme
 from pages.options.theme import FLOW_COLORS as C
 from shared import gamma_heat_config
 
@@ -58,12 +59,13 @@ BAR_H = 12.0
 HEAD_H = 62.0                   # every column's header, expiry buttons included
 HEAD_GAP = 10.0                 # clear space between a header and the rows
 STRIKE_W = 64.0
-HEAT_SHOWN = 5                  # expiries on screen before the strip scrolls
-HEAT_COL_W = 80.0               # one expiry's width once it does
+HEAT_COL_W = 80.0               # an expiry is never narrower than this
 HEAT_GAP = 3.0
-HEAT_W = HEAT_SHOWN * (HEAT_COL_W + HEAT_GAP) - HEAT_GAP
-# strike · expiry strip · puts · calls · tag
-COLUMNS = (f"{STRIKE_W:.0f}px {HEAT_W:.0f}px minmax(0,1fr) minmax(0,1fr) "
+# strike · expiry strip · puts · calls · tag. The strip takes 60% of what the
+# strike and tag columns leave and the two sides of the bars 20% each (the
+# user's split, 2026-11-14). A cell keeps its size: a wider strip shows more
+# expiries, it does not stretch them past filling the strip.
+COLUMNS = (f"{STRIKE_W:.0f}px minmax(0,6fr) minmax(0,2fr) minmax(0,2fr) "
            f"150px")
 MAP_MIN_W = 860.0
 RAIL_H = 126                    # the level rail's height
@@ -148,12 +150,23 @@ def _quantile(values, q):
     return values[min(len(values) - 1, int(q * len(values)))]
 
 
-def _label(date):
+def _label(date, year=None):
+    """``Nov 16``, with the year once an expiry falls in a later one than the
+    nearest (``Jan 15 2027``): a whole chain runs past a year, and two
+    Decembers must not share a name."""
     try:
         day = _dt.date.fromisoformat(str(date))
     except ValueError:
         return str(date)
-    return f"{day.strftime('%b')} {day.day}"
+    short = f"{day.strftime('%b')} {day.day}"
+    return short if year in (None, day.year) else f"{short} {day.year}"
+
+
+def _year(date):
+    try:
+        return _dt.date.fromisoformat(str(date)).year
+    except ValueError:
+        return None
 
 
 def _sub(date, first):
@@ -233,7 +246,7 @@ def model(term_grid, spot, cfg=None):
         call_wall, put_wall = walls(ks, spot)
         pain = max_pain(ks)
         expiries.append({
-            "date": date, "label": _label(date),
+            "date": date, "label": _label(date, _year(dates[0])),
             "sub": _sub(date, not expiries), "calls": calls, "puts": puts,
             "ratio": puts / calls if calls > 0 else None,
             "call_wall": call_wall, "put_wall": put_wall, "max_pain": pain,
@@ -336,11 +349,17 @@ T_HEAD = "text-subtitle2"        # a card's heading, and a figure in a line
 T_BIG = "text-h6"                # a tile's one large figure
 T_SMALL = "text-xs"              # captions, row labels, tags
 
+# Calls and puts wear the Dealer Positioning colours (``[gamma]``, Settings →
+# Appearance), the ones its by-strike bars wear: a colour is chosen once and
+# both tabs follow. The ground, the price and the type stay the Flow panels'.
+_GAMMA = _theme.gamma_colors(_theme.THEME)
+CALL, PUT = _GAMMA["call_low"], _GAMMA["put_low"]
+
 _DIM = _fx._tone("label", ".62")
 _FAINT = _fx._tone("label", ".42")
 _RULE = _fx._tone("ice", ".10")
 # What each level wears, on the rail, on its row's tag and in the Levels list.
-_LEVEL_COLOR = {"call": C["call"], "pain": C["ice"], "put": C["put"],
+_LEVEL_COLOR = {"call": CALL, "pain": C["ice"], "put": PUT,
                 "spot": C["spot"]}
 _LEVEL_NAME = {"call": "Call wall", "pain": "Max pain", "put": "Put wall"}
 
@@ -414,8 +433,8 @@ def _distance(level, spot):
 def _split_bar(calls, puts):
     share = calls / (calls + puts) * 100.0 if calls + puts > 0 else 50.0
     return (f'<div style="display:flex;height:8px;gap:2px">'
-            f'<div style="width:{share:.1f}%;background:{C["call"]}"></div>'
-            f'<div style="flex:1 1 0;background:{C["put"]}"></div></div>')
+            f'<div style="width:{share:.1f}%;background:{CALL}"></div>'
+            f'<div style="flex:1 1 0;background:{PUT}"></div></div>')
 
 
 def _split_head(calls, puts):
@@ -424,8 +443,8 @@ def _split_head(calls, puts):
 
     return (f'<div class="{T_SMALL}" style="display:flex;'
             f'justify-content:space-between;align-items:baseline;color:{_DIM}">'
-            f'<span>Calls {number(calls, C["call"])}</span>'
-            f'<span>{number(puts, C["put"])} Puts</span></div>')
+            f'<span>Calls {number(calls, CALL)}</span>'
+            f'<span>{number(puts, PUT)} Puts</span></div>')
 
 
 # ── the level rail ──────────────────────────────────────────────────────────
@@ -608,16 +627,13 @@ def _column(head, cells, extra=""):
 
 def _expiry_columns(mdl, u):
     """The expiry buttons over their cells, in ONE strip so they scroll
-    together. Up to ``HEAT_SHOWN`` expiries fill the strip; past that each
-    keeps its width and the strip scrolls sideways."""
+    together. The expiries share the strip while each has ``HEAT_COL_W``;
+    past that each keeps that width and the strip scrolls sideways."""
     rows, exps = mdl["rows"], mdl["expiries"]
-    if len(exps) > HEAT_SHOWN:
-        template = f"repeat({len(exps)},{HEAT_COL_W:.0f}px)"
-        width = f"width:{len(exps) * (HEAT_COL_W + HEAT_GAP) - HEAT_GAP:.0f}px;"
-    else:
-        template, width = f"repeat({len(exps)},minmax(0,1fr))", ""
-    strip = (f"display:grid;gap:{HEAT_GAP:.0f}px;{width}"
-             f"grid-template-columns:{template}")
+    least = len(exps) * (HEAT_COL_W + HEAT_GAP) - HEAT_GAP
+    strip = (f"display:grid;gap:{HEAT_GAP:.0f}px;min-width:{least:.0f}px;"
+             f"grid-template-columns:repeat({len(exps)},"
+             f"minmax({HEAT_COL_W:.0f}px,1fr))")
     buttons = "".join(
         f'<button type="button" id="{u}-e-{j}" class="{T_SMALL}" '
         f'style="{_expiry_style(j == 0)}">'
@@ -666,11 +682,11 @@ def _map(mdl, u):
             f'<div id="{u}-pr-{i}" title="{tip}" style="{row};'
             f'justify-content:flex-end;border-right:1px solid '
             f'{_fx._tone("ice", ".22")}"><div id="{u}-p-{i}" style="height:'
-            f'{BAR_H:.0f}px;background:{C["put"]};width:{put_w:.1f}%"></div></div>')
+            f'{BAR_H:.0f}px;background:{PUT};width:{put_w:.1f}%"></div></div>')
         calls_col.append(
             f'<div id="{u}-cr-{i}" title="{tip}" style="{row}">'
             f'<div id="{u}-c-{i}" style="height:{BAR_H:.0f}px;'
-            f'background:{C["call"]};width:{call_w:.1f}%"></div></div>')
+            f'background:{CALL};width:{call_w:.1f}%"></div></div>')
         text, kind = first_tags.get(i, ("", None))
         style = _tag_style(kind) if kind else "display:none"
         tag_col.append(f'<div style="{row}"><span id="{u}-t-{i}" '
@@ -702,8 +718,8 @@ def _map(mdl, u):
     note = ("One strike axis" if mdl["step"] is None else
             f"One strike axis · each row sums the strikes within "
             f"{_fmt.strike(mdl['step'])}")
-    if len(mdl["expiries"]) > HEAT_SHOWN:
-        note += f" · {len(mdl['expiries'])} expiries, scroll sideways for the rest"
+    note += (f" · {len(mdl['expiries'])} expiries, scroll sideways when they "
+             f"do not all fit")
     swatch = "width:10px;height:10px"
     item = "display:flex;align-items:center;gap:7px"
     legend = (
@@ -714,9 +730,9 @@ def _map(mdl, u):
         f'height:8px;background:linear-gradient(90deg,{_fx._tone("ice", ".08")},'
         f'{_fx._tone("ice", ".95")})"></span>'
         f'tops out at the {mdl["cap_pct"]}th percentile</span>'
-        f'<span style="{item}"><span style="{swatch};background:{C["call"]}">'
+        f'<span style="{item}"><span style="{swatch};background:{CALL}">'
         f'</span>Calls</span>'
-        f'<span style="{item}"><span style="{swatch};background:{C["put"]}">'
+        f'<span style="{item}"><span style="{swatch};background:{PUT}">'
         f'</span>Puts</span>'
         f'<span style="{item}"><span style="width:14px;border-top:1.5px dashed '
         f'{C["spot"]}"></span>Price</span>'

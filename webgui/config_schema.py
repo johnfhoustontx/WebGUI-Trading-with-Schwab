@@ -1103,15 +1103,20 @@ _GAMMA_HEAT = ConfigFile(
                  "This rank of the cells on screen. 92 ignores the largest "
                  "few, so one very large strike does not wash out the rest.",
                  lo=50, hi=100, step=1),
-            Field("open_interest.expiries", "Expirations shown",
-                  "Nearest first. Five fit the strip and the rest scroll "
-                  "sideways. More than a symbol's seven-day chain holds "
-                  "needs a wider, slower chain request from Schwab.",
+            Field("open_interest.limited_symbols", "Symbols not shown whole",
+                  "Every other symbol shows every expiration it has. These "
+                  "have chains too large to ask for whole and show the "
+                  "nearest few instead.", kind="symbols"),
+            Field("open_interest.expiries", "Expirations for those symbols",
+                  "Nearest first.",
                   kind="int", unit="expirations", min=5, max=40, step=1),
+            Field("open_interest.all_days", "Every expiration within",
+                  "How far ahead a whole chain looks.",
+                  kind="int", unit="days", min=30, max=1500, step=30),
             Field("open_interest.refresh_min", "Wider chain fetched every",
                   "At most, per symbol. Open interest is published once a "
                   "day, so a short interval buys nothing.",
-                  kind="int", unit="min", min=1, max=240, step=5),
+                  kind="int", unit="min", min=1, max=720, step=5),
         )),
     ),
 )

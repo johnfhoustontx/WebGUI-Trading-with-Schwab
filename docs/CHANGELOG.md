@@ -18,14 +18,22 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   mode chosen, and `read` writes the sentences from the model (no model call).
   `model` gains each expiry's `sub`, `pain_row`, `top_call`, `top_put` and the chain
   totals. Colours are the page's own call, put and ice, not the design's.
-- **More expirations.** The tab shows `[open_interest] expiries` of them (12, 5 to
-  40) instead of five: five fit the strip and it scrolls sideways for the rest.
-  `services/options_svc/oi_expiries.py` builds the grid; a symbol whose seven-day chain
-  holds fewer gets the wider chain request `_term_chain` already made, now kept per
-  symbol and repeated at most every `refresh_min` (30) rather than on every two-minute
-  refresh. A failed wide fetch falls back to the chain in hand. ⚠ Not measured against
-  Schwab: how long the wider request takes at 12 expirations, and whether 40 is usable
-  on `$SPX`.
+- **Every expiration.** The tab shows every expiration a symbol has instead of five,
+  and the strip scrolls sideways. `[open_interest] limited_symbols` (`$SPX`) are the
+  exception and show the nearest `expiries` (12). `services/options_svc/oi_expiries.py`
+  builds the grid: one whole-chain request (`all_days`, 1100) for a symbol, the
+  count-based `_term_chain` for a limited one, kept per symbol and repeated at most
+  every `refresh_min` (120) rather than on every two-minute refresh. The published
+  grid is cut to each cell's two counts and the strikes that hold any. A failed or
+  short answer falls back to the chain in hand and is not kept. ⚠ Not measured
+  against Schwab: how long a whole chain takes, and it runs on the main command lane
+  (`gamma_refresh` is not in `SLOW_LANE`), where a slow request delays the commands
+  behind it.
+- **60 / 40.** The expiry strip takes six parts of the map's width and each side of
+  the bars two; a cell keeps its size (80 px wide at least) and a wider strip shows
+  more expiries.
+- **Colours.** Calls and puts take `[gamma]`'s `call_low` / `put_low`, the by-strike
+  bars' pair, so one choice in Settings → Appearance colours both.
 - **Type.** The panel names no font and no pixel size: it inherits the app's family and
   uses the app's text classes, so it follows `[typography]` like the other pages. The
   letter-spaced capitals went with the mono face.

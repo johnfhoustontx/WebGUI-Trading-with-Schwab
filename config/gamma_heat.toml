@@ -118,10 +118,15 @@ max_rows = 48
 # The colour scale tops out at this rank of the cells on screen (0.92 ignores
 # the largest 8%), so one very large strike does not wash out the rest.
 cap_quantile = 0.92
-# How many expirations the tab shows, nearest first. The first five fit the
-# strip; past that it scrolls sideways. A symbol whose seven-day chain holds
-# fewer than this needs a wider, slower chain request from Schwab.
+# The tab shows EVERY expiration a symbol has, nearest first, and the strip
+# scrolls sideways for the ones that do not fit. The symbols listed here are
+# the exception: their chains are too large to ask for whole, so they show the
+# nearest `expiries`.
+limited_symbols = ["$SPX"]
 expiries = 12
-# That wider request is repeated at most this often per symbol, in minutes.
-# Open interest is published once a day, so a short interval buys nothing.
-refresh_min = 30
+# How far ahead "every expiration" looks, in days.
+all_days = 1100
+# Anything past a symbol's seven-day chain needs a wider, slower chain request
+# from Schwab. It is repeated at most this often per symbol, in minutes. Open
+# interest is published once a day, so a short interval buys nothing.
+refresh_min = 120

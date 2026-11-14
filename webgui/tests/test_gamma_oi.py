@@ -383,23 +383,68 @@ def _many(count):
                       for d in dates}}
 
 
-def test_up_to_five_expiries_fill_the_strip():
-    html, _ = oi.panel(_many(5), 100.0, "SPY", "oimap", CFG)
-    assert "repeat(5,minmax(0,1fr))" in html
-    assert "scroll sideways" not in html
+def test_the_expiries_share_the_strip_and_none_goes_under_its_width():
+    """A cell keeps its size (the user's instruction, 2026-11-14): the columns
+    share the strip while each has HEAT_COL_W, and past that the strip is
+    wider than its frame and scrolls."""
+    for count in (5, 12, 34):
+        html, mdl = oi.panel(_many(count), 100.0, "SPY", "oimap", CFG)
+        assert len(mdl["expiries"]) == count
+        least = count * (oi.HEAT_COL_W + oi.HEAT_GAP) - oi.HEAT_GAP
+        assert (f"min-width:{least:.0f}px;grid-template-columns:"
+                f"repeat({count},minmax({oi.HEAT_COL_W:.0f}px,1fr))") in html
+        strip = re.search(r'id="oimap-x" style="([^"]*)"', html).group(1)
+        assert "overflow-x:auto" in strip
+        assert f"{count} expiries, scroll sideways" in html
+        for j in range(count):
+            assert f'id="oimap-e-{j}"' in html and f'id="oimap-h-{j}"' in html
 
 
-def test_more_expiries_keep_their_width_and_the_strip_scrolls():
-    html, mdl = oi.panel(_many(12), 100.0, "SPY", "oimap", CFG)
-    assert len(mdl["expiries"]) == 12
-    width = 12 * (oi.HEAT_COL_W + oi.HEAT_GAP) - oi.HEAT_GAP
-    assert f"repeat(12,{oi.HEAT_COL_W:.0f}px)" in html
-    assert f"width:{width:.0f}px" in html and width > oi.HEAT_W
-    strip = re.search(r'id="oimap-x" style="([^"]*)"', html).group(1)
-    assert "overflow-x:auto" in strip
-    assert "12 expiries, scroll sideways for the rest" in html
-    for j in range(12):
-        assert f'id="oimap-e-{j}"' in html and f'id="oimap-h-{j}"' in html
+def test_the_matrix_takes_sixty_per_cent_and_the_bars_forty():
+    """The user's split, 2026-11-14: of the width the strike and tag columns
+    leave, the expiry strip has six parts and each side of the bars two."""
+    assert oi.COLUMNS == "64px minmax(0,6fr) minmax(0,2fr) minmax(0,2fr) 150px"
+    assert f"grid-template-columns:{oi.COLUMNS}" in _panel()[0]
+
+
+def test_an_expiry_in_a_later_year_than_the_nearest_carries_its_year():
+    grid = {"underlying_price": 100.0,
+            "expirations": ["2026-12-18", "2027-01-15", "2027-12-17"],
+            "cells": {d: {"100.0": _cell(5, 5)}
+                      for d in ("2026-12-18", "2027-01-15", "2027-12-17")}}
+    assert [e["label"] for e in _model(grid)["expiries"]] == [
+        "Dec 18", "Jan 15 2027", "Dec 17 2027"]
+
+
+def test_calls_and_puts_wear_the_dealer_positioning_colours():
+    """One choice in Settings -> Appearance colours this tab and the by-strike
+    bars beside it: the tab takes [gamma]'s two bar colours and holds no call
+    or put colour of its own."""
+    from pages.options import theme
+    chosen = theme.gamma_colors(theme.THEME)
+    assert (oi.CALL, oi.PUT) == (chosen["call_low"], chosen["put_low"])
+    html, _ = _panel()
+    assert f"background:{oi.CALL};width:" in html
+    assert f"background:{oi.PUT};width:" in html
+    source = open(oi.__file__, encoding="utf-8").read()
+    assert 'C["call' not in source and 'C["put' not in source
+    assert '"call_deep"' not in source and '"put_deep"' not in source
+
+
+def test_a_chosen_colour_reaches_the_tab(monkeypatch):
+    import importlib
+    from pages.options import theme
+    monkeypatch.setattr(theme, "gamma_colors", lambda _theme: {
+        "call": "#111111", "call_low": "#222222",
+        "put": "#333333", "put_low": "#444444"})
+    try:
+        fresh = importlib.reload(oi)
+        assert (fresh.CALL, fresh.PUT) == ("#222222", "#444444")
+        assert "background:#222222;width:" in fresh.panel(
+            _grid(), 100.0, "SPY", "oimap", CFG)[0]
+    finally:
+        monkeypatch.undo()
+        importlib.reload(oi)
 
 
 def test_the_script_keeps_the_strips_scroll_and_brings_the_chosen_expiry_in():

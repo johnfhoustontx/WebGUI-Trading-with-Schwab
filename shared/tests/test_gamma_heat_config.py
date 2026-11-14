@@ -187,3 +187,24 @@ def test_it_imports_only_the_config_loader_and_the_paths():
         elif isinstance(node, ast.ImportFrom):
             mods.add(node.module)
     assert mods == {"repo_paths", "shared.config_toml"}
+
+
+def test_the_open_interest_tab_shows_every_expiry_except_for_the_listed_symbols():
+    out = cfg.open_interest()
+    assert out["limited_symbols"] == ("$SPX",)
+    assert (out["expiries"], out["all_days"], out["refresh_min"]) == (12, 1100, 120)
+
+
+def test_the_limited_symbols_are_read_upper_case_and_a_bad_list_falls_back(monkeypatch):
+    monkeypatch.setattr(cfg, "load", lambda: {"open_interest": {
+        "limited_symbols": [" $spx ", "$ndx", ""], "all_days": 400}})
+    out = cfg.open_interest()
+    assert out["limited_symbols"] == ("$SPX", "$NDX") and out["all_days"] == 400
+    monkeypatch.setattr(cfg, "load", lambda: {"open_interest": {
+        "limited_symbols": [], "all_days": 5}})
+    assert cfg.open_interest()["limited_symbols"] == ()      # none limited
+    assert cfg.open_interest()["all_days"] == 1100
+    for bad in ("$SPX", [1, 2], None):
+        monkeypatch.setattr(cfg, "load", lambda bad=bad: {"open_interest": {
+            "limited_symbols": bad}})
+        assert cfg.open_interest()["limited_symbols"] == ("$SPX",)

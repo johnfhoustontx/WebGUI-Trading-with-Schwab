@@ -97,10 +97,14 @@ DEFAULTS = {
         "heat_share": 0.75,
     },
     "open_interest": {
-        # Expirations shown, nearest first, and how often (minutes) the wider
-        # chain request behind them is repeated per symbol.
+        # Every expiration is shown, except for the symbols listed, which
+        # show the nearest ``expiries``. ``all_days`` is how far ahead "every"
+        # looks; ``refresh_min`` how often (minutes) the wider chain request
+        # behind either is repeated per symbol.
+        "limited_symbols": ["$SPX"],
         "expiries": 12,
-        "refresh_min": 30,
+        "all_days": 1100,
+        "refresh_min": 120,
         # The Open Interest tab draws the strikes within this percentage of the
         # price, each side.
         "span_pct": 6.0,
@@ -219,15 +223,30 @@ def lock() -> dict:
             "headroom": _setting("lock", "headroom", minimum=1.0, maximum=5.0)}
 
 
+def _limited_symbols() -> tuple:
+    """The symbols whose Open Interest tab shows a set number of expirations,
+    upper case. Anything that is not a list of text is the default."""
+    default = DEFAULTS["open_interest"]["limited_symbols"]
+    table = load().get("open_interest")
+    raw = table.get("limited_symbols", default) if isinstance(table, dict) else default
+    if not isinstance(raw, list) or not all(isinstance(s, str) for s in raw):
+        raw = default
+    return tuple(s.strip().upper() for s in raw if s.strip())
+
+
 def open_interest() -> dict:
-    """``{"span_pct", "max_rows", "cap_quantile", "expiries", "refresh_min"}``
-    for the Open Interest tab. The first three are read by the page each time
-    it draws (``pages/options/gamma_oi``); the last two by the options service
-    each time it builds the grid (``options_svc/oi_expiries``)."""
-    return {"expiries": _setting("open_interest", "expiries",
+    """The Open Interest tab's settings. ``span_pct``, ``max_rows`` and
+    ``cap_quantile`` are read by the page each time it draws
+    (``pages/options/gamma_oi``); ``limited_symbols``, ``expiries``,
+    ``all_days`` and ``refresh_min`` by the options service each time it
+    builds the grid (``options_svc/oi_expiries``)."""
+    return {"limited_symbols": _limited_symbols(),
+            "expiries": _setting("open_interest", "expiries",
                                  minimum=5, maximum=40),
+            "all_days": _setting("open_interest", "all_days",
+                                 minimum=30, maximum=1500),
             "refresh_min": _setting("open_interest", "refresh_min",
-                                    minimum=1, maximum=240),
+                                    minimum=1, maximum=720),
             "span_pct": _setting("open_interest", "span_pct",
                                  minimum=1.0, maximum=30.0),
             "max_rows": _setting("open_interest", "max_rows",
