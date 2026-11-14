@@ -349,9 +349,14 @@ def exit_entries(signals_db=None):
     min_days = cfg.exit_min_days()
     out = []
     for e in raw:
-        status, flagged = drift(e.pop("inputs"))
-        out.append({**e, "min_days": min_days,
-                    "verdict": verdict(e["days"], min_days, e["diff"]),
+        inputs = e.pop("inputs")
+        word = verdict(e["days"], min_days, e["diff"])
+        if word == "no_data" and inputs:
+            # Trades exist but none could be scored yet: not enough closed
+            # history before them, which is "too few days", not "no results".
+            word = "too_few_days"
+        status, flagged = drift(inputs)
+        out.append({**e, "min_days": min_days, "verdict": word,
                     "drift_status": status, "drift": flagged})
     return out
 

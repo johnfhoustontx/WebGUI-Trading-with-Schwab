@@ -527,3 +527,12 @@ def test_report_has_exit_section(db, monkeypatch):
     assert "## Exit chance (shadow)" in report
     assert "| SWING | Too few days (12 of 40)" in report
     assert "rules running at the time" in report
+
+
+def test_exit_with_rows_but_no_scored_day_reads_too_few_days(db, monkeypatch):
+    from services.options_svc import exit_chance
+    entry = _exit_entry("0DTE", days=0)
+    entry["diff"], entry["rows"] = None, 0
+    monkeypatch.setattr(exit_chance, "evaluate", lambda db_path=None: [entry])
+    (out,) = mh.build(scalp_db=db)["exit"]
+    assert out["verdict"] == "too_few_days"

@@ -270,3 +270,14 @@ def test_evaluate_one_entry_per_type(tmp_path, monkeypatch):
     assert swing["inputs"] and set(swing["inputs"][0][1]) == set(ec.DRIFT_INPUTS)
     assert out[1]["days"] == 0 and out[1]["diff"] is None
     assert metrics.brier([0.5], [1], [1.0]) is not None
+
+
+def test_load_keeps_only_the_apps_own_exits(tmp_path):
+    path = _db(tmp_path)
+    conn = sqlite3.connect(path)
+    _insert(conn, "auto", reason="DELTA_STOP", marks=[(10, 10.0), (20, 20.0)])
+    _insert(conn, "typed", reason="took profit", marks=[(10, 10.0), (20, 20.0)])
+    _insert(conn, "blank", reason=None, marks=[(10, 10.0), (20, 20.0)])
+    conn.commit()
+    conn.close()
+    assert [t.signal_id for t in ec.load(path)] == ["auto"]

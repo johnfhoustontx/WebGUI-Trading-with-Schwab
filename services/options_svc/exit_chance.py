@@ -34,8 +34,11 @@ if str(OPTIONS_SCANNER) not in sys.path:
 
 CENTRAL = ZoneInfo("America/Chicago")
 STRATEGIES = ("PCS", "CCS", "IC")
-#: Closes that say nothing about the rules: the operator's own.
-MANUAL = ("MANUAL_CLOSE", "MANUAL")
+#: The closes the app's own rules make. Anything else is the operator's: the
+#: Close dialog's reason is free text, so a hand close is not always spelled
+#: MANUAL_CLOSE, and its exit value says nothing about the rules.
+AUTOMATIC = ("MONEY_STOP", "DELTA_STOP", "TIME_STOP", "BREAKEVEN_STOP", "MANAGE_DTE",
+             "TARGET_HIT", "TIME_EXIT", "EXPIRED")
 MINUTES_PER_YEAR = 365 * 24 * 60
 #: The model's inputs, in column order.
 INPUTS = ("pnl_frac", "peak_frac", "worst_frac", "life_used", "log_mins_left",
@@ -132,7 +135,7 @@ def load(db_path=None) -> list:
         conn.close()
     out = []
     for s in sigs:
-        if (s["legs_json"] or "").strip() or str(s["exit_reason"] or "") in MANUAL:
+        if (s["legs_json"] or "").strip() or str(s["exit_reason"] or "") not in AUTOMATIC:
             continue
         seen, closed = _when(s["first_seen_ts"]), _when(s["close_ts"])
         if seen is None or closed is None or not s["first_seen_date"]:
