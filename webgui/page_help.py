@@ -127,7 +127,8 @@ on · what is being said.*
   **Direction** (the S&P 500 and Nasdaq 100 on the day), **Breadth** (how many
   funds and stocks are rising against falling), **Structure** (where SPY and
   QQQ sit against the dealer flip and the ceiling), **Volatility** (the VIX and
-  its one-day and three-month versions), **Flow** (the bought/sold estimate,
+  its one-day and three-month versions, with the dispersion index shown beside
+  them; it does not move the chip), **Flow** (the bought/sold estimate,
   marked ≈), **Cross-asset** (Treasuries, the dollar and credit) and **Volume**
   (how SPY and QQQ have traded against their usual volume by this time of day,
   and how much of it came as prices rose). Volume is a Tailwind or a Headwind

@@ -4,7 +4,16 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-14 (**Macro Board: the operator's frame order, new frame names, sector names, DSPX.**)
+**Last updated:** 2026-11-14 (**Market read: the dispersion index on the Volatility row.**)
+
+- **What.** The Desk's Volatility row ends with "dispersion (DSPX) 38.42 (+1.20%)".
+  `market_read.volatility` publishes the tile's level and change as `dspx` and
+  `dspx_pct`.
+- **It decides nothing.** The verdict rules are unchanged, and a DSPX with no quote
+  leaves the row's reading and chip as they were. No relation between dispersion and
+  the session has been measured, so no rule was written.
+
+**Prior —** 2026-11-14 (**Macro Board: the operator's frame order, new frame names, sector names, DSPX.**)
 
 - **Order.** Sectors, Broad Market, Top 10, Industries, Countries, Index Futures,
   Cash Index ETF, Metals, Market Internals / Breadth, Volatility, Options Sentiment,

@@ -2857,6 +2857,9 @@ All bounds are inclusive. Everything between the two is `neutral`.
 - **Volatility needs all five numbers:** the VIX level and change, the one-day, the
   three-month, and the SPX change. Each rule uses one of them, and a rule that cannot
   be evaluated is not a rule that came out false, so a missing one is `none`.
+  The row also carries the `DSPX` tile's level and change as the facts `dspx` and
+  `dspx_pct`. They are shown and are in no rule: a missing one is `None` and costs
+  the row nothing.
 - **Cross-asset:** two tiles that agree decide the row whatever the third says.
   Otherwise a tile with no colour makes the row `none`, because it is the one that
   could have decided it.

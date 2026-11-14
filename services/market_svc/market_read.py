@@ -32,6 +32,8 @@ ROW_KEYS = ("direction", "breadth", "structure", "volatility", "flow", "cross_as
 # The Market Dashboard tiles each row reads, by the tile's display name.
 INDEX_TILES = ("SPX", "NDX")
 VIX_TILES = ("VIX", "VIX1D", "VIX3M")
+# Shown beside the VIX on the Volatility row. It decides nothing: see volatility().
+DISPERSION_TILE = "DSPX"
 CROSS_ASSET_TILES = ("TLT", "$DXY", "HYG")
 
 
@@ -186,14 +188,20 @@ def volatility(dashboard, cfg) -> dict:
 
     The level is published as ``vix_level``, not ``vix``: the Desk carries a
     source guard against reading the retired ``options:header`` field of that
-    name, and a fact here must not be mistaken for it."""
+    name, and a fact here must not be mistaken for it.
+
+    The dispersion index (DSPX) rides along as two facts and is in NO rule: it
+    says how far single stocks are expected to move apart, not which way the
+    market leans, and no relation to the session has been measured. So a
+    missing DSPX never costs the row its reading."""
     tiles = tiles_by_name(dashboard)
     name, name1d, name3m = VIX_TILES
     vix, vix_pct = _last(tiles, name), _pct(tiles, name)
     vix1d, vix3m = _last(tiles, name1d), _last(tiles, name3m)
     spx = _pct(tiles, INDEX_TILES[0])
     facts = {"vix_level": vix, "vix_pct": vix_pct, "vix1d": vix1d, "vix3m": vix3m,
-             "spx_pct": spx}
+             "spx_pct": spx, "dspx": _last(tiles, DISPERSION_TILE),
+             "dspx_pct": _pct(tiles, DISPERSION_TILE)}
     # EVERY part, or no reading. Each rule below needs one of them, and a
     # rule that cannot be evaluated is not a rule that came out false: with the
     # one-day VIX missing, "tailwind" would be given without the check that

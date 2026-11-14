@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-13</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-14</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -210,6 +210,10 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#the-model">The model</a></li>
 <li><a href="#the-honesty-check-walk-forward-by-week">The honesty check (walk-forward by week)</a></li>
 <li><a href="#when-it-is-fitted-and-how-a-call-uses-it">When it is fitted, and how a call uses it</a></li>
+</ul>
+</li>
+<li><a href="#model-health">Model Health</a><ul>
+<li><a href="#the-range-forecast-range_forecastpy-payload-range">The range forecast (range_forecast.py, payload range)</a></li>
 </ul>
 </li>
 <li><a href="#cadences">Cadences</a></li>
@@ -5670,7 +5674,10 @@ counted under <em>Traded volume</em> below.</p>
   otherwise read as 100% advancing. Every tile priced and none moving is <code>neutral</code>.</li>
 <li><strong>Volatility needs all five numbers:</strong> the VIX level and change, the one-day, the
   three-month, and the SPX change. Each rule uses one of them, and a rule that cannot
-  be evaluated is not a rule that came out false, so a missing one is <code>none</code>.</li>
+  be evaluated is not a rule that came out false, so a missing one is <code>none</code>.
+  The row also carries the <code>DSPX</code> tile's level and change as the facts <code>dspx</code> and
+  <code>dspx_pct</code>. They are shown and are in no rule: a missing one is <code>None</code> and costs
+  the row nothing.</li>
 <li>
 <p><strong>Cross-asset:</strong> two tiles that agree decide the row whatever the third says.
   Otherwise a tile with no colour makes the row <code>none</code>, because it is the one that
@@ -6742,6 +6749,69 @@ result. The page quotes the verdict of the model of the trade the row names.</p>
   probability (<code>p (1 - p) x weight x scaled value x 100</code>, a local approximation: the
   pushes need not sum to the move from 50%), the days its weight rests on, and <code>assumed</code>.</li>
 </ul>
+<h2 id="model-health">Model Health</h2>
+<p>Design <code>docs/plans/2026-11-14-model-health-design.md</code>. <code>services/options_svc/model_health.py</code>
+builds <code>cache:options:model_health</code> (published with <code>skip_unchanged</code>: the payload
+carries its data date, not a clock) and a dated <code>report.md</code>, using <code>shared/ml</code>.</p>
+<ul>
+<li><strong>Rows.</strong> Scalp: each frozen <code>chance.by_role</code> of a call, joined to the study's
+  outcome for the same day, slot, symbol and role at the current volatility scale.
+  Signals: <code>shared.calibration.priced_win_rate(entry_short_delta, strategy)</code> against
+  a win when <code>r_multiple(realized_pnl, entry_max_loss) &gt; 0</code>, one model per
+  <code>scanner_type</code>, read through <code>tools.signal_calibration.load_rows</code>.</li>
+<li><strong>Weights.</strong> A row weighs <code>1 / rows of its (day, symbol, role)</code> (scalp) or
+  <code>1 / signals of its day</code> (signals), so each day counts once.</li>
+<li><strong>Usual rate.</strong> <code>baselines.usual_rates</code> over strictly earlier days, per (symbol,
+  role) for 08:36, (symbol, role, block) for 15-minute, per <code>scanner_type</code> for
+  signals. A row with no earlier day is left out.</li>
+<li><strong>Score.</strong> Weighted Brier of the chance and of the usual rate; the difference's 95%
+  interval comes from <code>metrics.day_bootstrap_diff</code> (<code>bootstrap_draws</code> resamples of
+  whole days). Verdict: <code>no_data</code>, then <code>too_few_days</code> (under <code>min_days</code>, 20), then
+  <code>beats</code> (interval high below 0), <code>does_not_beat</code> (low above 0), else <code>matches</code>.</li>
+<li><strong>Drift.</strong> Per input, <code>metrics.psi_by_session</code>: the population stability index of
+  the last <code>recent_sessions</code> (5) sessions against every earlier one, with up to ten
+  bins at the reference's quantiles (fewer for a small sample, about five readings a
+  bin), one bin for no reading, and half a count added to every bin. The chance is
+  how often a random set of 5 WHOLE sessions reads an index at least as large
+  (<code>drift_permutations</code>, 200). An input is flagged at <code>psi_moved</code> (0.10), <em>shifted</em> at
+  <code>psi_shifted</code> (0.25), and only when that chance is under <code>drift_p</code> (0.05). With
+  fewer than <code>min_reference_sessions</code> (8) earlier sessions it reads too little history.</li>
+<li><strong>When.</strong> The last guarded step of the 16:20 nightly scalp pass, skipped when
+  <code>enabled</code> is false; the <code>model_health_rebuild</code> command (slow lane) runs it on
+  demand. A failure is the degrade <code>options.model_health</code> and publishes nothing.</li>
+</ul>
+<h3 id="the-range-forecast-range_forecastpy-payload-range">The range forecast (<code>range_forecast.py</code>, payload <code>range</code>)</h3>
+<p>Design <code>docs/plans/2026-11-14-range-forecast-design.md</code>.</p>
+<ul>
+<li><strong>Sessions.</strong> <code>scalp.db</code> 5-minute bars, 08:30 to 15:00 CT; a session missing any bar
+  of the symbol or its volatility index is left out, which also drops early closes.</li>
+<li><strong>Rows.</strong> At each <code>[range]</code> time from <code>first</code> (08:45) to <code>last</code> (14:30) every
+  <code>step_min</code> (15), per horizon in <code>horizons_min</code> (30, 60, 0 = rest of session): the
+  target is <code>log((max high - min low) / close at t)</code> over the bars starting at or after
+  t, ending by t + horizon. A horizon past 15:00 is left out. A day needs five earlier
+  sessions.</li>
+<li><strong>Inputs (at t).</strong> Sums of squared 5-minute log returns over the last 30 minutes, the
+  session so far, the previous session and the mean of the previous five (logged,
+  floored at <code>floor</code>); the overnight gap <code>log(1 + |open / previous close - 1|)</code>; the
+  index close at t (logged) and its log change since the open; cumulative volume against
+  its mean at the same bar over the previous <code>volume_sessions</code> (20) sessions (<code>$SPX</code>
+  reads SPY's, <code>[range.volume_from]</code>); the log of the minutes left and of the horizon.</li>
+<li><strong>Models.</strong> Each a weighted ridge (<code>shared/ml/linear.ridge</code>, penalty <code>ridge</code>, inputs
+  standardised) on the log target, plus the 10th, 50th and 90th weighted percentiles of
+  its training residuals. Yardstick: the four realised-volatility inputs and the time
+  inputs. Implied: <code>log(iv) + 0.5 log(minutes)</code> and the minutes left. Forecast: every
+  input.</li>
+<li><strong>Scoring.</strong> Walk-forward by session: a day is forecast by fits on earlier days only,
+  once <code>min_train_days</code> (40) exist. Loss is the mean pinball loss of the three
+  percentiles (<code>metrics.pinball</code>), each day weighing one. The forecast's loss minus each
+  baseline's goes through <code>metrics.day_bootstrap_diff</code> and Model Health's verdict rule
+  with <code>min_days</code> (40). Coverage is the weighted share inside the 10th to 90th band.</li>
+<li><strong>Drift.</strong> The session-shuffle check on the overnight gap, the index's change since
+  the open and the volume ratio only; the volatility levels cluster for weeks and would
+  always read shifted.</li>
+<li>A failure is the degrade <code>options.range_forecast</code>; the payload's <code>range</code> is then
+  <code>null</code> and the other models still publish.</li>
+</ul>
 <h2 id="cadences">Cadences</h2>
 <table>
 <thead>
@@ -6765,7 +6835,7 @@ result. The page quotes the verdict of the model of the trade the row names.</p>
 <tr>
 <td>Nightly pass</td>
 <td><strong>16:20 CT</strong> (<code>[slots.scalp_bars]</code>, grace 120 min)</td>
-<td>In order: <strong>bar top-up</strong> (23 symbols - the 13 in <code>[bars]</code> plus the big ten - x 2 intervals, from one bar before the store's latest, so a bar stored as a partial is replaced; a missed night is caught up by the next), the <strong>08:36 study rebuild</strong> (one transaction, so a reader sees the old study or the new, never half of each), the <strong>08:36 grading</strong>, the <strong>intraday grading</strong>, the <strong>scorecard republish</strong>, and last the <strong>intraday study rebuild</strong> (about a minute: 61-68 s measured on a 150-day store, so nothing above waits on it). Each step is guarded on its own: a failed step does not stop the next. After the 16:00 flow-delta report so it never competes for the proxy's 5 requests a second.</td>
+<td>In order: <strong>bar top-up</strong> (23 symbols - the 13 in <code>[bars]</code> plus the big ten - x 2 intervals, from one bar before the store's latest, so a bar stored as a partial is replaced; a missed night is caught up by the next), the <strong>08:36 study rebuild</strong> (one transaction, so a reader sees the old study or the new, never half of each), the <strong>08:36 grading</strong>, the <strong>intraday grading</strong>, the <strong>scorecard republish</strong>, the <strong>intraday study rebuild</strong> (about a minute: 61-68 s measured on a 150-day store, so nothing above waits on it), and last <strong>Model Health</strong> (<code>model_health.nightly</code>). Each step is guarded on its own: a failed step does not stop the next. After the 16:00 flow-delta report so it never competes for the proxy's 5 requests a second.</td>
 </tr>
 <tr>
 <td>Weekly refit</td>
@@ -7090,7 +7160,9 @@ break-even. <code>_ledger_exit_ctx</code> divides <code>max_profit_total</code> 
 row stores it already multiplied while the repricer's P&amp;L is per contract.</p>
 <p><strong>Rule 3 is profit-blind</strong> (<code>TAKE_PROFIT</code> ahead, <code>CUT</code> behind, code <code>TIME_EXIT</code>
 either way - distinct from <code>TIME_STOP</code>, which means DTE &lt;= <code>cut_dte</code> <strong>and</strong>
-underwater), and the <code>dte_at_entry &gt; exit_dte</code> condition is load-bearing: the
+underwater, and for a captured signal also held at least <code>[stops]
+time_stop_min_hold_min</code> (30) minutes since <code>first_seen_ts</code>; the paper Account and
+the Ledger pass no holding time and keep the plain rule), and the <code>dte_at_entry &gt; exit_dte</code> condition is load-bearing: the
 Market Scanner's Directional tab scans <strong>DTE 0-4</strong> and <strong>DTE 5-15</strong>, so every
 debit it can produce arrives inside 21 days and an unguarded rule would close
 100% of them on the following cycle. Those positions are bounded by their target
@@ -9030,7 +9102,7 @@ the source; this table is a summary of them.</p>
 </tr>
 <tr>
 <td>options_svc</td>
-<td>Loop tick <strong>30 s</strong> (<code>POLL_INTERVAL_SEC</code>). Auto-scan 15-min slots, 08:00–15:15 (<code>autoscan_due</code>); <strong>GEX collection every 1 min</strong>, 08:00–15:20 (<code>_GEX_INTERVAL_MIN</code>, mirroring <code>gex_collector.POLL_INTERVAL_MIN</code>); term structure every <strong>5 min</strong> (<code>TERM_POLL_INTERVAL_MIN</code>); <strong>captured-signal</strong> management every <strong>5 min</strong> (<code>_CAPTURED_MANAGE_INTERVAL_MIN</code>); <strong>manual</strong> paper entry+manage <strong>hourly at the top of the hour, 09:00–14:00</strong> (<code>_PAPER_HOURS</code>, <code>_PAPER_GRACE_MIN</code> = 20); paper <strong>expiry settlement at 15:05</strong> — a settle-only pass over the Account and the Ledger, and over the posted trade ideas' Ledger rows (<code>paper_settle_due</code>, <code>[slots.paper_settle]</code>, grace 120 min); the <strong>trade ideas' Ledger rows</strong> are marked every <strong>5 min</strong> (<code>idea_marks_due</code>, <code>[idea_trades] mark_interval_min</code>) inside 08:30–15:00 CT at minutes clear of the proxy's busy ones (the scan burst follows <code>[windows.scan] offset_min</code>), one slot at most per interval — see <em>Trade ideas in the Paper Ledger</em>; header + GEX status each tick in market hours, throttled to one per <strong>5 min</strong> off-hours (<code>periodic_refresh_due</code>, skip-unchanged); <strong>Opening Scalp</strong> morning call at <strong>08:36</strong> (<code>scalp_call_due</code>, <code>[slots.scalp]</code>, grace 20 min), a new 15-minute Opening Scalp call at each of <strong>08:51, 09:06 ... 13:51</strong> (<code>scalp_intraday_due</code>, <code>[intraday]</code>, grace 5 min) and, at <strong>16:20</strong>, a nightly pass of bar top-up, both study rebuilds, both gradings and the scorecard republish (<code>scalp_bars_due</code>, <code>[slots.scalp_bars]</code>, grace 120 min) and, on <strong>Saturday at 08:00</strong>, the weekly refit of the chance-of-target weights (<code>scalp_prob_due</code>, <code>[slots.scalp_prob]</code>, grace 180 min) — see <em>Opening Scalp</em>.</td>
+<td>Loop tick <strong>30 s</strong> (<code>POLL_INTERVAL_SEC</code>). Auto-scan 15-min slots, 08:00–15:15 (<code>autoscan_due</code>); <strong>GEX collection every 1 min</strong>, 08:00–15:20 (<code>_GEX_INTERVAL_MIN</code>, mirroring <code>gex_collector.POLL_INTERVAL_MIN</code>); term structure every <strong>5 min</strong> (<code>TERM_POLL_INTERVAL_MIN</code>); <strong>captured-signal</strong> management every <strong>5 min</strong> (<code>_CAPTURED_MANAGE_INTERVAL_MIN</code>); <strong>manual</strong> paper entry+manage <strong>hourly at the top of the hour, 09:00–14:00</strong> (<code>_PAPER_HOURS</code>, <code>_PAPER_GRACE_MIN</code> = 20); paper <strong>expiry settlement at 15:05</strong> — a settle-only pass over the Account and the Ledger, and over the posted trade ideas' Ledger rows (<code>paper_settle_due</code>, <code>[slots.paper_settle]</code>, grace 120 min); the <strong>trade ideas' Ledger rows</strong> are marked every <strong>5 min</strong> (<code>idea_marks_due</code>, <code>[idea_trades] mark_interval_min</code>) inside 08:30–15:00 CT at minutes clear of the proxy's busy ones (the scan burst follows <code>[windows.scan] offset_min</code>), one slot at most per interval — see <em>Trade ideas in the Paper Ledger</em>; header + GEX status each tick in market hours, throttled to one per <strong>5 min</strong> off-hours (<code>periodic_refresh_due</code>, skip-unchanged); <strong>Opening Scalp</strong> morning call at <strong>08:36</strong> (<code>scalp_call_due</code>, <code>[slots.scalp]</code>, grace 20 min), a new 15-minute Opening Scalp call at each of <strong>08:51, 09:06 ... 13:51</strong> (<code>scalp_intraday_due</code>, <code>[intraday]</code>, grace 5 min) and, at <strong>16:20</strong>, a nightly pass of bar top-up, both study rebuilds, both gradings, the scorecard republish and Model Health (<code>scalp_bars_due</code>, <code>[slots.scalp_bars]</code>, grace 120 min) and, on <strong>Saturday at 08:00</strong>, the weekly refit of the chance-of-target weights (<code>scalp_prob_due</code>, <code>[slots.scalp_prob]</code>, grace 180 min) — see <em>Opening Scalp</em>.</td>
 </tr>
 <tr>
 <td>portfolio_svc</td>

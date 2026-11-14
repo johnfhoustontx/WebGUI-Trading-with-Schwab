@@ -682,7 +682,9 @@ Anything in between is **Neutral**.
   date: a symbol with no ceiling, too few flagged contracts, a feed that stopped.
   Structure says *Dealer levels are not current* when the gamma collector has
   fallen behind, the same moment the Dealer positioning panel greys its levels.
-  Volatility needs the VIX, the one-day and the three-month all present. Volume
+  Volatility needs the VIX, the one-day and the three-month all present. The
+  dispersion index (DSPX) is printed at the end of that row for reference: it never
+  changes the chip, and the row reads without it when it has no quote. Volume
   needs both funds' figures, which take two finished five-minute bars after the open.
 - **Reading Volume.** "SPY 1.40 times usual" compares today so far with the median of
   the last nine sessions **at the same time of day**, so a morning is not read as

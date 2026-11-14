@@ -1532,9 +1532,17 @@ def _read_volatility(f):
     level = _finite(f.get("vix_level"))
     if level is None:
         return _DASH
-    return (f"VIX {_fmt.price(level)} ({_fmt.pct(_finite(f.get('vix_pct')), signed=True)})"
+    text = (f"VIX {_fmt.price(level)} ({_fmt.pct(_finite(f.get('vix_pct')), signed=True)})"
             f" · one-day {_fmt.price(_finite(f.get('vix1d')))}"
             f" · three-month {_fmt.price(_finite(f.get('vix3m')))}")
+    # The dispersion index is shown and decides nothing. With no level it is
+    # left out, so a reading from before it was added reads as it always did.
+    dspx = _finite(f.get("dspx"))
+    if dspx is None:
+        return text
+    dspx_pct = _finite(f.get("dspx_pct"))
+    moved = f" ({_fmt.pct(dspx_pct, signed=True)})" if dspx_pct is not None else ""
+    return f"{text} · dispersion (DSPX) {_fmt.price(dspx)}{moved}"
 
 
 def _read_flow(f, verdict):

@@ -269,10 +269,12 @@ def test_structure_at_the_stale_limit_is_still_current_and_the_limit_is_config(c
 
 # --- volatility ---------------------------------------------------------------
 
-def _vol(vix, vix_pct, vix1d=None, vix3m=None, spx=None):
-    return _dash(Volatility=[_tile("VIX", vix_pct, vix), _tile("VIX1D", None, vix1d),
-                             _tile("VIX3M", None, vix3m)],
-                 Cash_Index=[_tile("SPX", spx, 7700.0)])
+def _vol(vix, vix_pct, vix1d=None, vix3m=None, spx=None, dspx=None, dspx_pct=None):
+    tiles = [_tile("VIX", vix_pct, vix), _tile("VIX1D", None, vix1d),
+             _tile("VIX3M", None, vix3m)]
+    if dspx is not None or dspx_pct is not None:
+        tiles.append(_tile("DSPX", dspx_pct, dspx))
+    return _dash(Volatility=tiles, Cash_Index_ETF=[_tile("SPX", spx, 7700.0)])
 
 
 @pytest.mark.parametrize("kw,want", [
@@ -630,3 +632,26 @@ def test_every_tile_a_row_reads_by_name_is_one_the_dashboard_publishes():
     published = {entry.get("display") for entry in symbols.symbol_map()}
     for name in mr.INDEX_TILES + mr.VIX_TILES + mr.CROSS_ASSET_TILES:
         assert name in published, f"the dashboard publishes no tile called {name}"
+
+
+# --- the dispersion index on the Volatility row (2026-11-14) -------------------
+def test_volatility_carries_the_dispersion_index_as_facts(cfg):
+    facts = mr.volatility(_vol(**_FULL_VOL, dspx=38.42, dspx_pct=1.2), cfg)["facts"]
+    assert (facts["dspx"], facts["dspx_pct"]) == (38.42, 1.2)
+
+
+@pytest.mark.parametrize("dspx", [
+    dict(), dict(dspx=38.42, dspx_pct=9.0), dict(dspx=38.42, dspx_pct=-9.0)])
+def test_the_dispersion_index_never_moves_the_volatility_verdict(cfg, dspx):
+    """It is shown, not ruled on: absent, sharply up or sharply down, each of
+    the three verdicts comes out as it does without it."""
+    for kw, want in ((_FULL_VOL, T),
+                     (dict(vix=15.55, vix_pct=1.57, vix1d=8.49, vix3m=18.04, spx=0.69), H),
+                     (dict(vix=15.0, vix_pct=0.2, vix1d=12.0, vix3m=18.0, spx=0.5), N)):
+        assert mr.volatility(_vol(**kw, **dspx), cfg)["verdict"] == want
+
+
+def test_a_missing_dispersion_index_is_absent_not_zero(cfg):
+    row = mr.volatility(_vol(**_FULL_VOL), cfg)
+    assert row["verdict"] == T
+    assert row["facts"]["dspx"] is None and row["facts"]["dspx_pct"] is None
