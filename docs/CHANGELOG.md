@@ -4,7 +4,30 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-13 (**Paper Ledger: P&L by account under the table.**)
+**Last updated:** 2026-11-14 (**Machine learning roadmap, and its Phase 0: the `shared/ml` library.**)
+
+- **What.** A roadmap for machine learning in the app
+  (`docs/plans/2026-11-14-machine-learning-roadmap.md`: six phases, the screens
+  each one changes, the rules every model follows) and its first phase built:
+  `shared/ml`, a numpy-only library (`logistic` MAP fit and data share,
+  `walkforward`, `baselines.usual_rates`, `metrics` Brier / log loss /
+  reliability / day-clustered bootstrap). The Opening Scalp's chance-of-target
+  fit (`services/options_svc/scalp_prob_fit.py`) now runs on it, with its public
+  names and stored JSON unchanged. No screen, config or dependency change.
+- **Scope.** The smaller scope of the design: the model registry, the prediction
+  log, scikit-learn and LightGBM wait for the phases that first use them (1 and 2).
+- **Proof.** `test_scalp_prob_fit_golden.py` froze the fit's outputs to the last
+  bit before the move and passes after it; the existing scalp model tests pass
+  unedited; on a copy of prod's `scalp.db` (2026-11-13 backup), `refit` with the
+  old and the new code stored byte-identical models (8 models, 1,776 morning and
+  32,976 intraday rows).
+- **Seen on the way.** On that refit the 08:36 models do worse than the usual
+  rate out of sample (Brier 0.26 to 0.29 against 0.23 to 0.26) and the 15-minute
+  ones match it. Nothing changed because of it; it is the kind of reading the
+  roadmap's Phase 1 (Model Health) is meant to put on a page.
+- **Design / plan.** `docs/plans/2026-11-14-ml-foundation-{design,plan}.md`.
+
+**Prior —** 2026-11-13 (**Paper Ledger: P&L by account under the table.**)
 
 - **What.** `/options/paper` now shows a **P&L by account** table under the ledger: My trades, Trade idea, SPY condor and Shadow idea (each only when it has a row), plus a Total, with Trades / Open / Closed / Realized P&L / Open P&L / Total P&L / Win rate. It follows the All / My trades / Trade ideas toggle.
 - **Pieces.** `pages/options/paper.py`: `summary_columns`, `pnl_summary`, `pnl_summary_note`; the render adds the table and repaints it in `_populate`. Page only, no service or view change. Unpriced open trades are left out of Open P&L and counted in a note, never read as zero.
