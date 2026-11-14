@@ -29,3 +29,36 @@ drift_p = 0.05
 
 # Resamples of whole days for the 95% interval on the Brier difference.
 bootstrap_draws = 2000
+
+# ── The range forecast (shadow; docs/plans/2026-11-14-range-forecast-design.md)
+# Scored each night with the rest of Model Health: how far each symbol still
+# travels (high minus low) over each horizon, forecast at each mark from bars
+# already closed, against recent realised volatility and the implied move.
+[range]
+# false leaves the Range forecast table empty.
+enabled = true
+# The minutes ahead forecast; 0 is the rest of the session.
+horizons_min = [30, 60, 0]
+# The first and last forecast time (Central), and the gap between them.
+first = "08:45"
+last = "14:30"
+step_min = 15
+# Days a fit needs before it forecasts, and scored days before a verdict.
+min_train_days = 40
+min_days = 40
+# Ridge penalty on the standardised inputs (0 is plain least squares).
+ridge = 1.0
+# The smallest variance or range a logarithm reads, so a flat stretch is finite.
+floor = 1e-8
+# Earlier sessions averaged for "volume so far against its usual level".
+volume_sessions = 20
+
+# Each symbol forecast, and the volatility index read as its implied move.
+[range.symbols]
+SPY = "$VIX"
+QQQ = "$VXN"
+"$SPX" = "$VIX"
+
+# A symbol whose bars carry no volume reads this symbol's volume instead.
+[range.volume_from]
+"$SPX" = "SPY"

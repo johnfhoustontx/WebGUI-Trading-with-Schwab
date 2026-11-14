@@ -50,3 +50,37 @@ def test_shifted_below_moved_is_refused(monkeypatch):
     monkeypatch.setattr(cfg, "load",
                         lambda: {**cfg.DEFAULTS, "psi_moved": 0.3, "psi_shifted": 0.2})
     assert cfg.psi_shifted() >= cfg.psi_moved()
+
+
+# ── [range] ────────────────────────────────────────────────────────────────
+def test_shipped_range_matches_the_defaults():
+    assert cfg.range_enabled() is True
+    assert cfg.range_symbols() == {"SPY": "$VIX", "QQQ": "$VXN", "$SPX": "$VIX"}
+    assert cfg.range_volume_from() == {"$SPX": "SPY"}
+    assert cfg.range_horizons() == [30, 60, 0]
+    assert (cfg.range_first(), cfg.range_last()) == (525, 870)
+    assert cfg.range_step_min() == 15
+    assert (cfg.range_min_train_days(), cfg.range_min_days()) == (40, 40)
+    assert cfg.range_ridge() == pytest.approx(1.0)
+    assert cfg.range_volume_sessions() == 20
+
+
+def _with_range(monkeypatch, **over):
+    rng = {**cfg.DEFAULTS["range"], **over}
+    monkeypatch.setattr(cfg, "load", lambda: {**cfg.DEFAULTS, "range": rng})
+
+
+def test_bad_range_values_fall_back(monkeypatch):
+    _with_range(monkeypatch, horizons_min=[30, 7, -5, True, 30], first="9am", last="07:00",
+                step_min=0, ridge=-1, symbols={"spy lower": "$VIX"})
+    assert cfg.range_horizons() == [30]
+    assert cfg.range_first() == 525
+    assert cfg.range_last() == 525          # before the first: held at the first
+    assert cfg.range_step_min() == 15
+    assert cfg.range_ridge() == pytest.approx(1.0)
+    assert cfg.range_symbols() == {"SPY": "$VIX", "QQQ": "$VXN", "$SPX": "$VIX"}
+
+
+def test_an_empty_volume_map_is_allowed(monkeypatch):
+    _with_range(monkeypatch, volume_from={})
+    assert cfg.range_volume_from() == {}

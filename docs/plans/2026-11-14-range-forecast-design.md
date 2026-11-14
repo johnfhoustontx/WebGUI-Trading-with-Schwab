@@ -70,7 +70,7 @@ location-and-spread model). Fitted separately per symbol and horizon.
 | Name | Inputs |
 |---|---|
 | **Realised-volatility yardstick** (the HAR baseline) | the four realised-volatility inputs and the time inputs |
-| **Implied move** | implied volatility scaled to the horizon (`log(iv) + 0.5 log(minutes)`) and nothing else |
+| **Implied move** | implied volatility scaled to the horizon (`log(iv) + 0.5 log(minutes)`) and the minutes left, so it too knows ranges are wider near the open and close (added during the build: without it the implied move lost partly on time of day alone) |
 | **Forecast** | every input above |
 
 Using fitted residual percentiles for the implied move makes it a fair opponent:

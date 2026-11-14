@@ -434,3 +434,44 @@ def test_the_nightly_step_runs_after_the_intraday_study_rebuild():
     rebuild = src.index("scalp_intraday_study.rebuild")
     step = src.index("model_health.nightly")
     assert rebuild < step
+
+
+# ── the range forecast ──────────────────────────────────────────────────────
+def _range_entry(symbol="SPY", horizon=30, days=50, lo=-0.02, hi=-0.01):
+    diff = {"mean": (lo + hi) / 2, "lo": lo, "hi": hi, "days": days}
+    return {"symbol": symbol, "horizon": horizon, "vol_index": "$VIX", "days": days,
+            "rows": days * 20, "loss": 0.10, "loss_yardstick": 0.11, "loss_implied": 0.12,
+            "diff_yardstick": diff, "diff_implied": dict(diff, lo=-0.01, hi=0.01),
+            "coverage": 0.79, "last_day": "2026-11-13",
+            "inputs": [(d, {"rv_30": 1.0}) for d in trading_days(3)]}
+
+
+def test_payload_carries_the_range_verdicts(db, monkeypatch):
+    from services.options_svc import range_forecast
+    monkeypatch.setattr(range_forecast, "evaluate",
+                        lambda db_path=None: [_range_entry(), _range_entry(horizon=0, days=10)])
+    payload = mh.build(scalp_db=db)
+    first, short = payload["range"]
+    assert first["verdict_yardstick"] == "beats" and first["verdict_implied"] == "matches"
+    assert short["verdict_yardstick"] == "too_few_days"
+    assert "inputs" not in first and "last_day" not in first
+    assert first["drift_status"] == "too_little_history"
+    assert payload["data_date"] == "2026-11-13"
+    json.dumps(payload)
+
+
+def test_a_failing_range_forecast_leaves_the_rest_published(db, monkeypatch):
+    from services.options_svc import range_forecast
+
+    def boom(db_path=None):
+        raise RuntimeError("bars unreadable")
+    monkeypatch.setattr(range_forecast, "evaluate", boom)
+    before = _degrade.counts().get("options.range_forecast", 0)
+    payload = mh.build(scalp_db=db)
+    assert payload["range"] is None and len(payload["models"]) == 2
+    assert _degrade.counts().get("options.range_forecast", 0) == before + 1
+
+
+def test_range_switched_off(db, monkeypatch):
+    monkeypatch.setattr(model_health_config, "range_enabled", lambda: False)
+    assert mh.build(scalp_db=db)["range"] is None

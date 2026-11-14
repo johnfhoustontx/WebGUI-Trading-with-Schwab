@@ -34,7 +34,7 @@ from shared.ml import baselines, metrics
 from shared.numeric import finite
 
 from services import _degrade
-from services.options_svc import scalp_store, scalp_study
+from services.options_svc import range_forecast, scalp_store, scalp_study
 
 log = logging.getLogger("options_svc.model_health")
 
@@ -305,6 +305,32 @@ def score(key, label, rows, inputs, note=None, history=None) -> dict:
             "last_day": max((r.day for r in rows), default=None)}
 
 
+def range_entries(scalp_db=None):
+    """The range forecast's rows for the page: ``None`` when it is switched off
+    or failed (counted as ``options.range_forecast``), else one dict per
+    (symbol, horizon) with both verdicts and the symbol's drift."""
+    if not cfg.range_enabled():
+        return None
+    try:
+        raw = range_forecast.evaluate(scalp_db)
+    except Exception:
+        _degrade.degraded("options.range_forecast", detail="evaluate")
+        return None
+    min_days = cfg.range_min_days()
+    drift_by_symbol = {}
+    out = []
+    for e in raw:
+        inputs = e.pop("inputs")
+        if e["symbol"] not in drift_by_symbol:
+            drift_by_symbol[e["symbol"]] = drift(inputs)
+        status, flagged = drift_by_symbol[e["symbol"]]
+        out.append({**e, "min_days": min_days,
+                    "verdict_yardstick": verdict(e["days"], min_days, e["diff_yardstick"]),
+                    "verdict_implied": verdict(e["days"], min_days, e["diff_implied"]),
+                    "drift_status": status, "drift": flagged})
+    return out
+
+
 def build(scalp_db=None, signals_db=None) -> dict:
     """The payload. Raises on an unreadable store (``run`` counts it); has no
     wall-clock field, so an unchanged rerun publishes nothing new."""
@@ -325,7 +351,10 @@ def build(scalp_db=None, signals_db=None) -> dict:
         models.append(score(f"signals_{kind}", f"Delta win rate · {kind or 'unknown'}",
                             rows, inputs, NOTES["signals"]))
     last = [m.pop("last_day") for m in models]
-    return {"data_date": max((d for d in last if d), default=None), "models": models}
+    ranges = range_entries(scalp_db)
+    last += [e.pop("last_day", None) for e in ranges or ()]
+    return {"data_date": max((d for d in last if d), default=None), "models": models,
+            "range": ranges}
 
 
 # ── the report file ─────────────────────────────────────────────────────────
@@ -408,4 +437,4 @@ def nightly(bus):
 
 
 __all__ = ["CACHE_KEY", "Row", "verdict", "scalp_rows", "history_row", "signal_rows",
-           "drift", "score", "build", "report_markdown", "run", "nightly"]
+           "drift", "score", "range_entries", "build", "report_markdown", "run", "nightly"]
