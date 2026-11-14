@@ -97,6 +97,10 @@ DEFAULTS = {
         "heat_share": 0.75,
     },
     "open_interest": {
+        # Expirations shown, nearest first, and how often (minutes) the wider
+        # chain request behind them is repeated per symbol.
+        "expiries": 12,
+        "refresh_min": 30,
         # The Open Interest tab draws the strikes within this percentage of the
         # price, each side.
         "span_pct": 6.0,
@@ -216,9 +220,15 @@ def lock() -> dict:
 
 
 def open_interest() -> dict:
-    """``{"span_pct", "max_rows", "cap_quantile"}`` for the Open Interest tab
-    (``pages/options/gamma_oi``). Read by the page each time it draws."""
-    return {"span_pct": _setting("open_interest", "span_pct",
+    """``{"span_pct", "max_rows", "cap_quantile", "expiries", "refresh_min"}``
+    for the Open Interest tab. The first three are read by the page each time
+    it draws (``pages/options/gamma_oi``); the last two by the options service
+    each time it builds the grid (``options_svc/oi_expiries``)."""
+    return {"expiries": _setting("open_interest", "expiries",
+                                 minimum=5, maximum=40),
+            "refresh_min": _setting("open_interest", "refresh_min",
+                                    minimum=1, maximum=240),
+            "span_pct": _setting("open_interest", "span_pct",
                                  minimum=1.0, maximum=30.0),
             "max_rows": _setting("open_interest", "max_rows",
                                  minimum=12, maximum=120),

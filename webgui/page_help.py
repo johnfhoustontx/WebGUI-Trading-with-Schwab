@@ -2427,8 +2427,11 @@ SUBTAB_HELP: dict[str, dict[str, str]] = {
         "Net Prem": "Net options premium (call $ minus put $) for many symbols at "
                     "once — pick from 28 across indices, sectors and mega-caps.",
         "Open Interest": "Open interest by strike and expiry — where the open "
-                         "contracts sit across the next five expirations, with a "
-                         "put and call ladder for the expiry you click.",
+                         "contracts sit across the next expirations (twelve unless "
+                         "you change it; five show and the rest scroll). The "
+                         "cells and the put and call bars share one strike "
+                         "axis, and a rail on top places the price among the "
+                         "walls and max pain for the expiry you click.",
         # Net Prem group sub-tabs (they filter the symbol picker):
         "indices": "Filter the symbol list to indices & broad ETFs ($SPX, $NDX, "
                    "BIG10, SPY, QQQ, IWM, DIA). Your ticked symbols stay selected.",

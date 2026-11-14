@@ -1257,7 +1257,7 @@ will not match another service's, and the <em>shape</em> is what you should read
 </tr>
 <tr>
 <td><strong>Open Interest</strong></td>
-<td>Where the open contracts sit, by strike, across the <strong>next five expirations</strong>, with a put and call ladder for one expiry.</td>
+<td>Where the open contracts sit, by strike, across the <strong>next expirations</strong> (twelve unless you change it), with put and call bars for one expiry on the same strike rows and a rail placing the price among the walls and max pain.</td>
 <td>Finding the strikes and the expiry that hold the positions.</td>
 </tr>
 </tbody>
@@ -1511,24 +1511,39 @@ forward rather than showing a long back-history.</p>
 failing"</strong> — an empty chart otherwise looks identical in both cases.</p>
 </blockquote>
 <h3 id="the-open-interest-subtab-open-contracts-by-strike-and-expiry">The Open Interest subtab — open contracts by strike and expiry</h3>
-<p>A map of where the open contracts sit: strikes down the side, the <strong>next five
-expirations</strong> across the top, and a brighter cell where more contracts are open. It
+<p>A map of where the open contracts sit: strikes down the side, the <strong>next
+expirations</strong> across the top, and a brighter cell where more contracts are open. Twelve
+expirations are shown unless you change it (Settings → Configuration → Open Interest
+tab → <strong>Expirations shown</strong>, 5 to 40): five fit on screen and the scroll bar under them
+reaches the rest. It
 answers <em>which strikes, in which expiry, hold the positions</em>. It replaced the Term
 subtab (net gamma by expiry) in November 2026.</p>
 <ul>
-<li><strong>The map.</strong> Each cell is one strike in one expiry. <strong>Total</strong> shades it by calls plus
-  puts. <strong>Net calls less puts</strong> shades it by which side is larger, in the call colour
-  or the put colour. The outlined cells are that expiry's walls and the dashed line is
-  the price.</li>
-<li><strong>The ladder.</strong> Click an expiry (its name, or any cell in its column) and the ladder
-  on the right shows that expiry strike by strike: puts to the left, calls to the
-  right. Your choice is kept while the page refreshes.</li>
-<li><strong>The six figures</strong> above the map are for the expiry you clicked: the <strong>call wall</strong>
-  (the strike with the most call interest above the price), the <strong>put wall</strong> (the most
-  put interest below it), <strong>max pain</strong> (the strike at which all the open contracts
-  would be worth the least at expiry), the <strong>put / call ratio</strong> (put contracts divided
-  by call contracts) and the two totals.</li>
+<li><strong>Where the price sits.</strong> The line on top places the price among the levels of the
+  expiry you clicked: the <strong>put wall</strong> (the strike with the most put interest below the
+  price), <strong>max pain</strong> (the strike at which all the open contracts would be worth the
+  least at expiry) and the <strong>call wall</strong> (the most call interest above the price). Each
+  carries its distance from the price in points and per cent. Under the line are that
+  expiry's <strong>put / call ratio</strong> (put contracts divided by call contracts), its calls
+  and puts, and the ratio over every expiration shown.</li>
+<li><strong>The strike map.</strong> One strike axis. Each row holds that strike's cell in each
+  expiry, shaded by calls plus puts, and beside the cells the chosen expiry's bars:
+  puts to the left, calls to the right. The walls and max pain are named on their
+  rows, and the dashed line is the price.</li>
+<li><strong>Choosing an expiry.</strong> Click its button or any cell in its column. The bars, the
+  line on top and the side rail all change to it, and your choice is kept while the
+  page refreshes.</li>
+<li><strong>Total or Net.</strong> <strong>Total</strong> draws each side's count. <strong>Net calls less puts</strong> draws
+  only the excess of the larger side at each strike.</li>
+<li><strong>The side rail.</strong> <strong>The read</strong> states the counts and distances in sentences written
+  from the numbers; <strong>Levels</strong> lists them highest strike first; <strong>Whole chain</strong> gives
+  calls against puts over every expiration. A count of open contracts says where
+  positions sit, not who holds which side.</li>
 <li><strong>Hover</strong> a cell or a bar for the exact counts.</li>
+<li><strong>How fresh the far expirations are.</strong> A symbol's nearest expirations come with every
+  refresh. The ones past its seven-day chain need a wider request to Schwab, which is
+  repeated at most every 30 minutes per symbol (<strong>Wider chain fetched every</strong>). Open
+  interest is published once a day, so nothing is lost by it.</li>
 </ul>
 <blockquote>
 <p><strong>Its columns are expirations, not time.</strong> Open interest is published once a day,
@@ -7308,7 +7323,7 @@ in the rail is the one that stops things.</p>
 </tr>
 <tr>
 <td><strong>Dealer Positioning</strong></td>
-<td><strong>Gamma</strong> (hedging intensity) · <strong>Charm</strong> (time decay of hedges) · <strong>Delta</strong> (directional exposure) · <strong>Vanna</strong> (volatility sensitivity) · <strong>Flow</strong> (call vs put premium ribbon) · <strong>Net Prem</strong> (net premium, up to 28 symbols) · <strong>Open Interest</strong> (open contracts by strike, next five expirations)</td>
+<td><strong>Gamma</strong> (hedging intensity) · <strong>Charm</strong> (time decay of hedges) · <strong>Delta</strong> (directional exposure) · <strong>Vanna</strong> (volatility sensitivity) · <strong>Flow</strong> (call vs put premium ribbon) · <strong>Net Prem</strong> (net premium, up to 28 symbols) · <strong>Open Interest</strong> (open contracts by strike and expiration)</td>
 </tr>
 <tr>
 <td><strong>Simulator</strong></td>

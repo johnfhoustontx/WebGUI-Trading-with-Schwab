@@ -610,7 +610,7 @@ level on this page. Above it, expect mean-reversion; below it, expect momentum.
 | **Vanna** | How hedges change when **volatility** changes. | Volatility-event days — CPI, Fed, earnings. |
 | **Flow** | Call versus put premium through the day, as a ribbon. The **crossover** is the read. | Confirming a directional bias intraday. |
 | **Net Prem** | Net premium (call dollars − put dollars) for up to 28 symbols at once. | Comparing where money is going across names. |
-| **Open Interest** | Where the open contracts sit, by strike, across the **next five expirations**, with a put and call ladder for one expiry. | Finding the strikes and the expiry that hold the positions. |
+| **Open Interest** | Where the open contracts sit, by strike, across the **next expirations** (twelve unless you change it), with put and call bars for one expiry on the same strike rows and a rail placing the price among the walls and max pain. | Finding the strikes and the expiry that hold the positions. |
 
 The first four share one layout and are described together below. **Flow**, **Net
 Prem** and **Open Interest** are different screens with their own controls, and each has its
@@ -878,24 +878,39 @@ Group, ticks and scale are all remembered. **Explain** works per selected symbol
 
 ### The Open Interest subtab — open contracts by strike and expiry
 
-A map of where the open contracts sit: strikes down the side, the **next five
-expirations** across the top, and a brighter cell where more contracts are open. It
+A map of where the open contracts sit: strikes down the side, the **next
+expirations** across the top, and a brighter cell where more contracts are open. Twelve
+expirations are shown unless you change it (Settings → Configuration → Open Interest
+tab → **Expirations shown**, 5 to 40): five fit on screen and the scroll bar under them
+reaches the rest. It
 answers *which strikes, in which expiry, hold the positions*. It replaced the Term
 subtab (net gamma by expiry) in November 2026.
 
-- **The map.** Each cell is one strike in one expiry. **Total** shades it by calls plus
-  puts. **Net calls less puts** shades it by which side is larger, in the call colour
-  or the put colour. The outlined cells are that expiry's walls and the dashed line is
-  the price.
-- **The ladder.** Click an expiry (its name, or any cell in its column) and the ladder
-  on the right shows that expiry strike by strike: puts to the left, calls to the
-  right. Your choice is kept while the page refreshes.
-- **The six figures** above the map are for the expiry you clicked: the **call wall**
-  (the strike with the most call interest above the price), the **put wall** (the most
-  put interest below it), **max pain** (the strike at which all the open contracts
-  would be worth the least at expiry), the **put / call ratio** (put contracts divided
-  by call contracts) and the two totals.
+- **Where the price sits.** The line on top places the price among the levels of the
+  expiry you clicked: the **put wall** (the strike with the most put interest below the
+  price), **max pain** (the strike at which all the open contracts would be worth the
+  least at expiry) and the **call wall** (the most call interest above the price). Each
+  carries its distance from the price in points and per cent. Under the line are that
+  expiry's **put / call ratio** (put contracts divided by call contracts), its calls
+  and puts, and the ratio over every expiration shown.
+- **The strike map.** One strike axis. Each row holds that strike's cell in each
+  expiry, shaded by calls plus puts, and beside the cells the chosen expiry's bars:
+  puts to the left, calls to the right. The walls and max pain are named on their
+  rows, and the dashed line is the price.
+- **Choosing an expiry.** Click its button or any cell in its column. The bars, the
+  line on top and the side rail all change to it, and your choice is kept while the
+  page refreshes.
+- **Total or Net.** **Total** draws each side's count. **Net calls less puts** draws
+  only the excess of the larger side at each strike.
+- **The side rail.** **The read** states the counts and distances in sentences written
+  from the numbers; **Levels** lists them highest strike first; **Whole chain** gives
+  calls against puts over every expiration. A count of open contracts says where
+  positions sit, not who holds which side.
 - **Hover** a cell or a bar for the exact counts.
+- **How fresh the far expirations are.** A symbol's nearest expirations come with every
+  refresh. The ones past its seven-day chain need a wider request to Schwab, which is
+  repeated at most every 30 minutes per symbol (**Wider chain fetched every**). Open
+  interest is published once a day, so nothing is lost by it.
 
 > **Its columns are expirations, not time.** Open interest is published once a day,
 > so nothing on this tab moves during the session except the price line. A weekly and
@@ -5530,7 +5545,7 @@ Pages carrying their own subtab row, and what each subtab does.
 | Page | Subtabs |
 |---|---|
 | **Market Scanner** | **0-DTE** (expiring today) · **Swing** (multi-day credit spreads) · **Directional** (single-leg longs and shorts, scored on a *different*, non-comparable scale) |
-| **Dealer Positioning** | **Gamma** (hedging intensity) · **Charm** (time decay of hedges) · **Delta** (directional exposure) · **Vanna** (volatility sensitivity) · **Flow** (call vs put premium ribbon) · **Net Prem** (net premium, up to 28 symbols) · **Open Interest** (open contracts by strike, next five expirations) |
+| **Dealer Positioning** | **Gamma** (hedging intensity) · **Charm** (time decay of hedges) · **Delta** (directional exposure) · **Vanna** (volatility sensitivity) · **Flow** (call vs put premium ribbon) · **Net Prem** (net premium, up to 28 symbols) · **Open Interest** (open contracts by strike and expiration) |
 | **Simulator** | **Price & Time** (price and time sliders) · **Volatility** (volatility multiplier) · **History** (real historical path) |
 | **Portfolio** | **Holdings** · **Sectors** (weights vs S&P) · **Performance** (graded positions) |
 | **Rescue** | **At-Risk Board** · **Ad-hoc Trade** |

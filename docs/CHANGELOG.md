@@ -4,7 +4,36 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-14 (**Dealer Positioning: the Open Interest tab replaces Term.**)
+**Last updated:** 2026-11-14 (**Open Interest tab: one strike axis, a level rail, a side rail.**)
+
+- **What.** The tab is laid out from the operator's design. On top, a line places the
+  price among the chosen expiry's put wall, max pain and call wall, each with its
+  distance in points and per cent, over that expiry's put / call ratio, its split and
+  the whole chain's ratio. Below, the expiry cells and the put and call bars share ONE
+  strike axis (the old page had two), with the walls and max pain named on their rows.
+  A side rail states the read in sentences, lists the levels and gives the whole
+  chain's split.
+- **The pieces.** All in `webgui/pages/options/gamma_oi.py`: the fragment is HTML rows
+  rather than an SVG, the browser draws the bars from the counts for the expiry and
+  mode chosen, and `read` writes the sentences from the model (no model call).
+  `model` gains each expiry's `sub`, `pain_row`, `top_call`, `top_put` and the chain
+  totals. Colours are the page's own call, put and ice, not the design's.
+- **More expirations.** The tab shows `[open_interest] expiries` of them (12, 5 to
+  40) instead of five: five fit the strip and it scrolls sideways for the rest.
+  `services/options_svc/oi_expiries.py` builds the grid; a symbol whose seven-day chain
+  holds fewer gets the wider chain request `_term_chain` already made, now kept per
+  symbol and repeated at most every `refresh_min` (30) rather than on every two-minute
+  refresh. A failed wide fetch falls back to the chain in hand. ⚠ Not measured against
+  Schwab: how long the wider request takes at 12 expirations, and whether 40 is usable
+  on `$SPX`.
+- **Type.** The panel names no font and no pixel size: it inherits the app's family and
+  uses the app's text classes, so it follows `[typography]` like the other pages. The
+  letter-spaced capitals went with the mono face.
+- **Changed.** Total / Net now changes the bars only; the cells always show calls plus
+  puts. The design's page header, controls and status line were not rebuilt: the page
+  already has its own.
+
+**Prior —** 2026-11-14 (**Dealer Positioning: the Open Interest tab replaces Term.**)
 
 - **What.** The last subtab is now **Open Interest**: open contracts by strike across
   the next five expirations, a put and call ladder for the expiry clicked, and that

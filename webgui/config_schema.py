@@ -1089,8 +1089,9 @@ _GAMMA_HEAT = ConfigFile(
                  lo=30, hi=90, step=5),
         ), restart=(WEBGUI,)),
         Section("Open Interest tab",
-                "Open interest by strike and expiry, with a put and call "
-                "ladder for one expiry. Read each time the page draws.", (
+                "Open interest by strike and expiry, with put and call bars "
+                "for one expiry. The page reads its settings each time it "
+                "draws, the options service each time it builds the grid.", (
             Field("open_interest.span_pct", "Strikes within",
                   "Of the price, each side.",
                   kind="float", unit="%", min=1, max=30, step=0.5),
@@ -1102,6 +1103,15 @@ _GAMMA_HEAT = ConfigFile(
                  "This rank of the cells on screen. 92 ignores the largest "
                  "few, so one very large strike does not wash out the rest.",
                  lo=50, hi=100, step=1),
+            Field("open_interest.expiries", "Expirations shown",
+                  "Nearest first. Five fit the strip and the rest scroll "
+                  "sideways. More than a symbol's seven-day chain holds "
+                  "needs a wider, slower chain request from Schwab.",
+                  kind="int", unit="expirations", min=5, max=40, step=1),
+            Field("open_interest.refresh_min", "Wider chain fetched every",
+                  "At most, per symbol. Open interest is published once a "
+                  "day, so a short interval buys nothing.",
+                  kind="int", unit="min", min=1, max=240, step=5),
         )),
     ),
 )

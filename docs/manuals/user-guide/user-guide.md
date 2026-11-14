@@ -838,7 +838,7 @@ last three are different screens with their own controls.
 | **Vanna** | How hedges change when **volatility** changes. | CPI, Fed and earnings days. |
 | **Flow** | Today's call premium vs put premium for this symbol, as a ribbon. | Confirming a directional bias intraday. |
 | **Net Prem** | Net premium (call dollars − put dollars) for **many symbols at once**. | Comparing where money is going across names. |
-| **Open Interest** | Where the open contracts sit, by strike, across the **next five expirations**, with a put and call ladder for one expiry. | Finding the strikes and the expiry that hold the positions. |
+| **Open Interest** | Where the open contracts sit, by strike, across the **next expirations** (twelve unless you change it), with put and call bars for one expiry on the same strike rows and a rail placing the price among the walls and max pain. | Finding the strikes and the expiry that hold the positions. |
 
 **Each view has its own address.** The address bar follows the sub-tab you are on —
 `/options/gamma?tab=flow`, `?tab=net-prem`, `?tab=term` and so on (`gamma`,
@@ -864,16 +864,21 @@ are easy to get wrong:
 
 Each symbol keeps the same colour, and your group, ticks and scale are remembered.
 
-**Open Interest** — a map of open contracts: strikes down the side, the next five
-expirations across the top, and a brighter cell where more contracts are open. Click an
-expiry (its name or any cell in its column) and the ladder on the right shows that
-expiry's puts to the left and calls to the right, strike by strike, with six figures
-above: the **call wall** (the strike with the most call interest above the price), the
-**put wall** (the most put interest below it), **max pain** (the strike at which the
-open contracts would be worth the least at expiry), the **put / call ratio** and the
-two totals. The walls are outlined on the map and the ladder, and the dashed line is the
-price. **Total** shades each cell by calls plus puts; **Net calls less puts** shades it
-by which side is larger. Hover a cell or a bar for the exact counts.
+**Open Interest** — three parts, all for the expiry you click (its button or any cell
+in its column). **Where the price sits**, on top, is a line with the price, the **put
+wall** (the strike with the most put interest below the price), **max pain** (the strike
+at which the open contracts would be worth the least at expiry) and the **call wall**
+(the most call interest above the price), each with its distance from the price in
+points and per cent; under it are that expiry's **put / call ratio**, its calls and puts,
+and the ratio over every expiration shown. The **strike map** below has one strike axis:
+each row holds that strike's cell in each expiration (five on screen, the rest by the
+scroll bar under them; brighter where more
+contracts are open) and, beside them, the chosen expiry's puts to the left and calls to
+the right. The walls and max pain are named on their rows and the dashed line is the
+price. **Total** draws each side's count; **Net calls less puts** draws only the larger
+side's excess. To the right, **The read** states the same counts and distances in
+sentences, **Levels** lists them, and **Whole chain** gives the split over every
+expiration. Hover a cell or a bar for the exact counts.
 
 The columns are a **list of expirations, not a time scale**: open interest is published
 once a day, so nothing here moves during the session except the price line. A count of

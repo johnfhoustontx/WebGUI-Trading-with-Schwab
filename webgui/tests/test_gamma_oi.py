@@ -180,43 +180,140 @@ def _panel(grid=None):
 def test_the_panel_carries_every_id_the_script_writes_to():
     html, mdl = _panel()
     ids = set(re.findall(r'id="([^"]+)"', html))
-    want = {"oimap-sel", "oimap-g-total", "oimap-g-net", "oimap-m-total", "oimap-m-net"}
+    want = {"oimap-m-total", "oimap-m-net", "oimap-ph", "oimap-ch", "oimap-x"}
     for j in range(len(mdl["expiries"])):
-        want |= {f"oimap-{part}-{j}" for part in ("h", "hl", "lad", "st", "total", "net")}
+        want |= {f"oimap-{part}-{j}" for part in ("rail", "side", "e", "h")}
+    for i in range(len(mdl["rows"])):
+        want |= {f"oimap-{part}-{i}" for part in ("p", "c", "pr", "cr", "t")}
     assert want <= ids
     script = oi.bind_js("oimap", mdl)
     data = json.loads(script.split("var D=", 1)[1].split(", id=D.id", 1)[0])
     assert data["dates"] == EXPS and data["id"] == "oimap"
+    assert data["cells"][0][1] == [800.0, 40.0] and data["strikes"][1] == "105.00"
+    used = set(re.findall(r"el\('([a-z]+)", script))
+    assert used == {"rail", "side", "e", "h", "p", "c", "t", "ph", "ch", "m", "x"}
+    assert "['pr-'+r,'cr-'+r]" in script
 
 
-def test_the_script_shows_a_ladder_by_its_display_attribute():
-    """A ladder is an SVG group hidden by ``display="none"``. Clearing its
-    style leaves the attribute in force, so the chosen ladder stayed hidden
-    (seen in the browser, 2026-11-14). The script must set the attribute."""
+def test_the_script_draws_the_bars_from_the_counts_in_either_mode():
     script = oi.bind_js("oimap", _panel()[1])
-    assert "node.setAttribute('display', on ? 'inline' : 'none')" in script
-    assert "show(el('lad-'+i), i===j)" in script
-    assert "node.style.display" not in script
+    assert "net ? Math.max(0,p-c) : p" in script
+    assert "net ? Math.max(0,c-p) : c" in script
+    assert "net ? 'Net puts' : 'Puts'" in script
 
 
-def test_only_the_first_expirys_ladder_and_figures_show_before_the_script_runs():
+def test_only_the_first_expirys_rail_and_read_show_before_the_script_runs():
     html, _ = _panel()
-    assert '<g id="oimap-lad-0">' in html
-    assert '<g id="oimap-lad-1" display="none">' in html
-    assert 'id="oimap-st-0" style="display:grid' in html
-    assert 'id="oimap-st-1" style="display:none' in html
-    assert '<g id="oimap-g-net" display="none">' in html
+    assert 'id="oimap-rail-0" style="background' in html
+    assert re.search(r'id="oimap-rail-0" style="[^"]*display:flex', html)
+    assert re.search(r'id="oimap-rail-1" style="[^"]*display:none', html)
+    assert 'id="oimap-side-0" style="display:flex' in html
+    assert 'id="oimap-side-1" style="display:none' in html
+    assert 'id="oimap-h-0" style="cursor:pointer;opacity:1;' in html
+    assert 'id="oimap-h-1" style="cursor:pointer;opacity:0.55;' in html
+
+
+def test_every_column_gives_a_strike_the_same_height():
+    """The cells, the bars and the tags share one strike axis only while a
+    row is the same height in each. A cell with a margin above AND below
+    loses half of it to margin collapse (seen in the browser, 2026-11-14:
+    the cells ran 15 px short of the bars by the tenth row)."""
+    html, _ = _panel()
+    cell = re.search(r'title="Nov 16 · 110\.00[^"]*" style="([^"]*)"', html).group(1)
+    assert f"height:{oi.CELL_H:.0f}px" in cell
+    assert f"margin-bottom:{oi.ROW_H - oi.CELL_H:.0f}px" in cell
+    assert "margin:" not in cell.replace("margin-bottom:", "")
+    assert f"height:{oi.ROW_H:.0f}px" in re.search(
+        r'id="oimap-pr-0" title="[^"]*" style="([^"]*)"', html).group(1)
+
+
+def test_the_first_expirys_bars_are_drawn_before_the_script_runs():
+    """105.00 holds the most calls (800) and 95.00 the most puts (900): the
+    longest bar is the 100% one and the rest are its share."""
+    html, _ = _panel()
+    assert re.search(r'id="oimap-p-3" style="[^"]*width:100\.0%', html)
+    assert re.search(r'id="oimap-c-1" style="[^"]*width:88\.9%', html)
+    assert re.search(r'id="oimap-c-4" style="[^"]*width:1\.1%', html)
 
 
 def test_the_panel_names_the_symbol_and_prints_strikes_to_two_decimals():
     html, _ = _panel()
-    assert "SPY · BY STRIKE AND EXPIRY" in html
-    assert "105.00" in html and "Put / call ratio" in html and "Max pain" in html
+    assert "SPY · by strike and expiry" in html
+    assert "105.00" in html and "Put / call ratio · Nov 16" in html
+    assert "Where the price sits" in html and "Strike map" in html
+    assert "The read" in html and "Levels" in html and "Whole chain" in html
 
 
 def test_a_tooltip_gives_the_exact_counts():
     html, _ = _panel()
-    assert "<title>Nov 16 · 105.00 · calls 800 · puts 40</title>" in html
+    assert 'title="Nov 16 · 105.00 · calls 800 · puts 40"' in html
+    assert 'title="Dec 18 · 100.00 · calls 5 · puts 5"' in html
+
+
+def test_the_walls_and_max_pain_are_tagged_on_their_rows():
+    mdl = _model()
+    assert oi.tags(mdl, mdl["expiries"][0]) == {
+        1: ("Call wall", "call"), 2: ("Max pain", "pain"), 3: ("Put wall", "put")}
+    # 150.00 has no row, so the far expiry's call wall has no tag.
+    assert all(kind != "call" for _t, kind in
+               oi.tags(mdl, mdl["expiries"][2]).values())
+
+
+def test_a_summed_row_names_the_strike_and_two_levels_share_a_tag():
+    cells = {str(float(k)): _cell(10, 20) for k in range(90, 111)}
+    cells["103.0"] = _cell(900, 20)
+    grid = {"underlying_price": 100.0, "expirations": [EXPS[0]],
+            "cells": {EXPS[0]: cells}}
+    mdl = _model(grid, cfg={**CFG, "max_rows": 12})
+    exp = mdl["expiries"][0]
+    found = oi.tags(mdl, exp)
+    assert found[exp["wall_rows"][0]][0].startswith("Call wall 103.00")
+    exp = {**exp, "pain_row": exp["wall_rows"][0], "max_pain": 104.0}
+    assert oi.tags(mdl, exp)[exp["wall_rows"][0]] == (
+        "Call wall 103.00 · Max pain 104.00", "call")
+
+
+def test_an_expiry_says_its_weekday_and_which_one_is_next_or_monthly():
+    assert [e["sub"] for e in _model()["expiries"]] == [
+        "Mon · next", "Fri · monthly", "Fri · monthly"]
+
+
+def test_the_read_states_the_counts_and_distances():
+    mdl = _model()
+    lines = oi.read(mdl, mdl["expiries"][0])
+    assert lines[0] == "The price is at max pain (100.00)."
+    assert ("On Nov 16 calls outnumber puts 1.01 to 1. Over all 3 expiries calls "
+            "outnumber puts 4.97 to 1.") in lines
+    assert lines[-1] == ("The put wall at 95.00 is 5.00% below the price and "
+                         "the call wall at 105.00 is 5.00% above it.")
+
+
+def test_the_read_says_when_the_largest_strike_is_on_the_far_side():
+    grid = _grid()
+    grid["cells"][EXPS[0]]["108.0"] = _cell(0, 5000)
+    mdl = _model(grid)
+    lines = oi.read(mdl, mdl["expiries"][0])
+    assert ("The strike with the most Nov 16 puts is above the price, at "
+            "108.00.") in lines
+    assert any(line.startswith("The price is ") and "under max pain" in line
+               for line in lines)
+
+
+def test_the_read_copes_with_one_side_missing():
+    grid = {"underlying_price": 100.0, "expirations": [EXPS[0]],
+            "cells": {EXPS[0]: {"105.0": _cell(50, 0)}}}
+    mdl = _model(grid)
+    lines = oi.read(mdl, mdl["expiries"][0])
+    assert "On Nov 16 only calls are open." in lines
+    assert lines[-1] == "The call wall at 105.00 is 5.00% above the price."
+    assert "Put wall" not in oi.panel(grid, 100.0, "SPY", "oimap", CFG)[0].split("Strike map")[0]
+
+
+def test_the_rail_gives_each_levels_distance_with_a_true_minus():
+    html, _ = _panel()
+    rail = html.split('id="oimap-rail-0"', 1)[1].split('id="oimap-rail-1"', 1)[0]
+    assert "+5.00 · +5.00%" in rail and "−5.00 · −5.00%" in rail
+    assert "50% calls / 50% puts" in rail
 
 
 def test_the_empty_state_keeps_the_frame_and_has_no_script():
@@ -252,3 +349,69 @@ def test_the_settings_come_from_the_heatmap_config(monkeypatch):
                         lambda: {**CFG, "span_pct": 5.0})
     mdl, _ = oi.model(_grid(), 100.0)
     assert mdl["rows"] == [105.0, 100.0, 95.0]
+
+
+# ── type and the expiry strip ────────────────────────────────────────────────
+
+@pytest.mark.parametrize("build", [
+    lambda: _panel()[0],
+    lambda: oi.panel({}, 100.0, "SPY", "oimap", CFG)[0],
+])
+def test_the_panel_names_no_font_and_no_size_of_its_own(build):
+    """The tab wears the app's font and the app's text sizes, like the other
+    pages (the user's instruction, 2026-11-14). A font named here, or a size
+    in pixels, would stop following Settings -> Appearance."""
+    html = build()
+    assert "font-family" not in html and "font:" not in html
+    assert "font-size" not in html and "letter-spacing" not in html
+    assert "Plex" not in html and "Rajdhani" not in html
+    sizes = set(re.findall(r'class="(text-[\w-]+)"', html))
+    assert sizes and sizes <= {"text-subtitle1", "text-subtitle2", "text-h6",
+                               "text-xs"}
+
+
+def test_the_script_restyles_without_naming_a_font():
+    script = oi.bind_js("oimap", _panel()[1])
+    for banned in ("font-family", "font-size", "font:", "letter-spacing"):
+        assert banned not in script
+
+
+def _many(count):
+    dates = [f"2026-12-{day:02d}" for day in range(1, count + 1)]
+    return {"underlying_price": 100.0, "expirations": dates,
+            "cells": {d: {"100.0": _cell(5, 5), "105.0": _cell(9, 1)}
+                      for d in dates}}
+
+
+def test_up_to_five_expiries_fill_the_strip():
+    html, _ = oi.panel(_many(5), 100.0, "SPY", "oimap", CFG)
+    assert "repeat(5,minmax(0,1fr))" in html
+    assert "scroll sideways" not in html
+
+
+def test_more_expiries_keep_their_width_and_the_strip_scrolls():
+    html, mdl = oi.panel(_many(12), 100.0, "SPY", "oimap", CFG)
+    assert len(mdl["expiries"]) == 12
+    width = 12 * (oi.HEAT_COL_W + oi.HEAT_GAP) - oi.HEAT_GAP
+    assert f"repeat(12,{oi.HEAT_COL_W:.0f}px)" in html
+    assert f"width:{width:.0f}px" in html and width > oi.HEAT_W
+    strip = re.search(r'id="oimap-x" style="([^"]*)"', html).group(1)
+    assert "overflow-x:auto" in strip
+    assert "12 expiries, scroll sideways for the rest" in html
+    for j in range(12):
+        assert f'id="oimap-e-{j}"' in html and f'id="oimap-h-{j}"' in html
+
+
+def test_the_script_keeps_the_strips_scroll_and_brings_the_chosen_expiry_in():
+    script = oi.bind_js("oimap", oi.panel(_many(12), 100.0, "SPY", "oimap", CFG)[1])
+    assert "S.left=x.scrollLeft" in script and "x.scrollLeft=S.left" in script
+    assert "restore(apply())" in script
+
+
+def test_every_column_header_is_the_same_height():
+    """The expiry buttons sit in the scrolling strip and the other columns'
+    headers do not: the rows line up only while both are HEAD_H tall."""
+    html, _ = _panel()
+    assert html.count(f"height:{oi.HEAD_H:.0f}px") == 5
+    assert f"height:{oi.HEAD_H - oi.HEAD_GAP:.0f}px" in oi._expiry_style(True)
+

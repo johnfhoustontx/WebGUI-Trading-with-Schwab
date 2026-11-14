@@ -108,8 +108,8 @@ height = "root"
 heat_share = 0.75
 
 [open_interest]
-# The Open Interest tab (open interest by strike and expiry, with a put and call
-# ladder for one expiry). It draws the strikes within this percentage of the
+# The Open Interest tab (open interest by strike and expiry, with put and call
+# bars for one expiry). It draws the strikes within this percentage of the
 # price, each side. Read each time the page draws.
 span_pct = 6.0
 # At most this many strike rows. A chain with more strikes inside the span is
@@ -118,3 +118,10 @@ max_rows = 48
 # The colour scale tops out at this rank of the cells on screen (0.92 ignores
 # the largest 8%), so one very large strike does not wash out the rest.
 cap_quantile = 0.92
+# How many expirations the tab shows, nearest first. The first five fit the
+# strip; past that it scrolls sideways. A symbol whose seven-day chain holds
+# fewer than this needs a wider, slower chain request from Schwab.
+expiries = 12
+# That wider request is repeated at most this often per symbol, in minutes.
+# Open interest is published once a day, so a short interval buys nothing.
+refresh_min = 30
