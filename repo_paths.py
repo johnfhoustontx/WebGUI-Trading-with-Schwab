@@ -124,6 +124,11 @@ BACKUP_TOML = REPO_ROOT / "config" / "backup.toml"
 # day cards are listed. Read by shared/social_cards.py.
 SOCIAL_CARDS_TOML = REPO_ROOT / "config" / "social_cards.toml"
 
+# Model Health: how the app's stated chances are scored each night. Read by
+# shared/model_health_config.py. Its report lands under MODEL_HEALTH_DIR.
+MODEL_HEALTH_TOML = REPO_ROOT / "config" / "model_health.toml"
+MODEL_HEALTH_DIR = REPO_ROOT / "services" / "options_svc" / "data" / "model_health"
+
 # Opening Scalp: its tunables (shared/scalp_config.py) and its bar / chain store.
 SCALP_TOML = REPO_ROOT / "config" / "scalp.toml"
 SCALP_DB = REPO_ROOT / "services" / "options_svc" / "data" / "scalp.db"

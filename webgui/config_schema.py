@@ -3328,6 +3328,47 @@ _GEX_ARCHIVE = ConfigFile(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Model Health — config/model_health.toml
+# ─────────────────────────────────────────────────────────────────────────────
+# Read per run by options_svc's model_health, so a saved change needs no restart.
+_MODEL_HEALTH = ConfigFile(
+    name="model_health.toml", title="Model Health", icon="monitoring",
+    summary="How the app's stated chances are scored each night. It only "
+            "reports: nothing here changes a chance, a rule or another page.",
+    restart=(),
+    sections=(
+        Section("The nightly score",
+                "Runs as the last step of the 16:20 Opening Scalp job.", (
+            Field("enabled", "Score every trading night",
+                  "Off skips the nightly run. Recompute on the page still works.",
+                  kind="bool"),
+            Field("min_days", "Days before a verdict",
+                  "With fewer days of results, a model reads Too few days.",
+                  kind="int", unit="days", min=1, max=500, step=1),
+            Field("bootstrap_draws", "Resamples for the interval",
+                  "Whole days are resampled this many times for the 95% "
+                  "interval. More is steadier and slower.",
+                  kind="int", min=100, max=20000, step=100),
+        )),
+        Section("Drift",
+                "Whether a model's inputs still look like the ones it saw before.", (
+            Field("recent_sessions", "Recent window",
+                  "The last this-many sessions, compared with the ones before.",
+                  kind="int", unit="sessions", min=1, max=60, step=1),
+            Field("min_reference_sessions", "Least earlier history",
+                  "With fewer earlier sessions, drift reads too little history.",
+                  kind="int", unit="sessions", min=1, max=250, step=1),
+            Field("psi_moved", "Moved from",
+                  "Population stability index at which an input reads moved.",
+                  kind="float", min=0.0, max=5.0, step=0.01),
+            Field("psi_shifted", "Shifted from",
+                  "Population stability index at which an input reads shifted.",
+                  kind="float", min=0.0, max=5.0, step=0.01),
+        )),
+    ),
+)
+
+# ─────────────────────────────────────────────────────────────────────────────
 # The nightly backup — config/backup.toml
 # ─────────────────────────────────────────────────────────────────────────────
 # Read by tools/backup_local.py on each run, so a saved change needs no restart.
@@ -3486,7 +3527,7 @@ _XFEED = ConfigFile(
 )
 
 FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _LOGIN_PUSH, _TOS_ORDER, _LIVE_ORDERS, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _XFEED, _SECTORS, _MOMENTUM, _SENTIMENT,
-         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _FUTURES_CHAIN, _GEX_ARCHIVE, _BACKUP, _SOCIAL_CARDS, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
+         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _FUTURES_CHAIN, _GEX_ARCHIVE, _MODEL_HEALTH, _BACKUP, _SOCIAL_CARDS, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
          _MARKET_READ, _ETF_HOLDINGS, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}

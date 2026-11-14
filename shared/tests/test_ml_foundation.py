@@ -169,6 +169,36 @@ def test_day_bootstrap_of_nothing_is_none():
     assert metrics.day_bootstrap_diff([], [], [], []) is None
 
 
+# ── psi ─────────────────────────────────────────────────────────────────────
+def test_psi_of_identical_samples_is_zero():
+    sample = [0.1, 0.5, None, 0.9, 0.3, 0.7]
+    out = metrics.psi(sample, list(sample))
+    assert out["psi"] == pytest.approx(0.0, abs=1e-12)
+    assert out["missing_before"] == pytest.approx(1 / 6)
+    assert out["missing_after"] == pytest.approx(1 / 6)
+
+
+def test_psi_on_a_two_valued_input_merges_duplicate_edges():
+    # Reference half 0, half 1; recent all 1. The reference's deciles (taken at
+    # data points) are only 0 and 1, so the bins are: below 0, 0 up to 1, 1 and
+    # up, and missing. Shares (floored at 1e-4): ref 0/.5/.5/0, recent 0/0/1/0.
+    f = 1e-4
+    want = (f - 0.5) * math.log(f / 0.5) + (1.0 - 0.5) * math.log(1.0 / 0.5)
+    out = metrics.psi([0.0, 0.0, 1.0, 1.0], [1.0, 1.0, 1.0, 1.0])
+    assert out["psi"] == pytest.approx(want, rel=1e-9)
+
+
+def test_psi_reports_a_reading_that_went_missing_as_a_missing_share():
+    out = metrics.psi([0.2, 0.4, 0.6, 0.8], [None, None, None])
+    assert out["missing_before"] == 0.0 and out["missing_after"] == 1.0
+    assert math.isfinite(out["psi"]) and out["psi"] > 0.25
+
+
+def test_psi_with_an_empty_side_is_none():
+    assert metrics.psi([], [0.1])["psi"] is None
+    assert metrics.psi([0.1], [])["psi"] is None
+
+
 def test_the_library_imports_no_service_store_or_config():
     import ast
     import pathlib

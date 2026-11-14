@@ -93,4 +93,56 @@ def day_bootstrap_diff(loss_a, loss_b, days, w, n_boot=2000, seed=0, level=0.95)
     return {"mean": mean, "lo": min(lo, mean), "hi": max(hi, mean), "days": k}
 
 
-__all__ = ["brier", "log_loss", "reliability", "day_bootstrap_diff"]
+#: The least share a bin is read at, so an empty bin on one side gives a large
+#: but finite term (a numerical convention, not a tunable).
+_PSI_FLOOR = 1e-4
+
+
+def psi(reference, recent, bins=10) -> dict:
+    """The population stability index of ``recent`` against ``reference``:
+    how far the spread of an input has moved, ``sum((a - e) * ln(a / e))`` over
+    bins, ``e`` the reference's share and ``a`` the recent one's.
+
+    Bins are cut at the reference's deciles (taken at data points, so a two-valued
+    input such as a 0/1 flag gets two edges, not ten), plus one bin for a missing
+    reading (``None`` or not finite). So a reading that stops arriving moves the
+    index and shows in ``missing_after``, rather than being read as a change in
+    its value. Returns ``{"psi", "missing_before", "missing_after"}``; ``psi`` and
+    the shares are None when a side is empty."""
+    ref = list(reference or ())
+    new = list(recent or ())
+    if not ref or not new:
+        return {"psi": None,
+                "missing_before": _missing_share(ref),
+                "missing_after": _missing_share(new)}
+    ref_vals = np.array([v for v in (finite(x) for x in ref) if v is not None])
+    if ref_vals.size:
+        qs = [k / bins for k in range(1, bins)]
+        edges = np.unique(np.quantile(ref_vals, qs, method="lower"))
+    else:
+        edges = np.array([])
+    n_value_bins = len(edges) + 1
+
+    def shares(sample):
+        counts = [0] * (n_value_bins + 1)          # the last bin is "missing"
+        for x in sample:
+            v = finite(x)
+            if v is None:
+                counts[-1] += 1
+            else:
+                counts[int(np.searchsorted(edges, v, side="right"))] += 1
+        return [max(c / len(sample), _PSI_FLOOR) for c in counts]
+
+    e, a = shares(ref), shares(new)
+    value = float(sum((ai - ei) * math.log(ai / ei) for ai, ei in zip(a, e)))
+    return {"psi": value, "missing_before": _missing_share(ref),
+            "missing_after": _missing_share(new)}
+
+
+def _missing_share(sample):
+    if not sample:
+        return None
+    return sum(1 for x in sample if finite(x) is None) / len(sample)
+
+
+__all__ = ["brier", "log_loss", "reliability", "day_bootstrap_diff", "psi"]

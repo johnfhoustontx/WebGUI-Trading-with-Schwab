@@ -1,0 +1,25 @@
+# Model Health: how the app's stated chances are scored each night
+# (services/options_svc/model_health.py, the More -> Model Health page).
+# It only reports: nothing here changes a chance, a rule or another page.
+# Design: docs/plans/2026-11-14-model-health-design.md
+
+# false skips the nightly step at the end of the 16:20 scalp job. The page's
+# Recompute button still works.
+enabled = true
+
+# A model scored on fewer days than this reads "Too few days" rather than a
+# verdict.
+min_days = 20
+
+# Drift: the last this-many sessions are compared with the sessions before them...
+recent_sessions = 5
+# ...and with fewer than this many earlier sessions there is too little history.
+min_reference_sessions = 8
+
+# Drift bands on the population stability index: under psi_moved is steady, up
+# to psi_shifted is moved, above it is shifted.
+psi_moved = 0.10
+psi_shifted = 0.25
+
+# Resamples of whole days for the 95% interval on the Brier difference.
+bootstrap_draws = 2000
