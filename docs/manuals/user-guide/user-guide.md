@@ -4174,9 +4174,9 @@ Preferences, all saved on your machine:
 - **To choose the Dealer Positioning colours**, open **Settings → Appearance** and
   find the **Dealer Positioning** group. The top row is the put side and the
   bottom row the call side, and both rows run the same way. **Put** and
-  **Call** are the main colours: the heat map's largest values, and the walls,
-  the hedge panel, the gravity well, the ridge plot and the contour lines.
-  **Put low** and **Call low** are the smallest values, and the strike bars.
+  **Call** are the main colours: the heat map's largest values, the strike bars
+  on every tab, and the walls, the hedge panel, the gravity well, the ridge plot
+  and the contour lines. **Put low** and **Call low** are the smallest values.
   The heat map grades from the low colour next to zero to the main colour.
   Click a tile to pick a colour; the strip in the preview shows the whole
   scale, largest put on the left to largest call on the right, before you

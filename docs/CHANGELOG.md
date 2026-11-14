@@ -4,7 +4,20 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-14 (**Open Interest tab: one strike axis, a level rail, a side rail.**)
+**Last updated:** 2026-11-14 (**Strike bars take the main put and call colours on every tab.**)
+
+- **What.** The by-strike bars on Gamma, Charm, Delta and Vanna now wear `[gamma]`'s
+  `put` / `call`, as the Open Interest bars do (the user's choice; `put_low` /
+  `call_low` since 2026-10-28). `gamma.palette` still keeps `bar_pos` / `bar_neg`
+  apart from `pos` / `neg`, so the bars move in one place. The low pair is now the
+  heat map's smallest values, and the Open Interest tab's labels.
+- **Open Interest bars.** They carry the other tabs' bevel and glow: the same
+  `gamma.BEVEL_STOPS` and `GLOW_WIDTH`, as a CSS gradient across the bar's thickness
+  and a `box-shadow` in the bar's colour. A strike with nothing to draw has no bar at
+  all, so a glow never marks an empty row.
+- **Note.** The walls are drawn across the bars and now share their colour.
+
+**Prior —** 2026-11-14 (**Open Interest tab: one strike axis, a level rail, a side rail.**)
 
 - **What.** The tab is laid out from the operator's design. On top, a line places the
   price among the chosen expiry's put wall, max pain and call wall, each with its

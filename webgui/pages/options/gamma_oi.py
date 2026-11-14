@@ -607,6 +607,28 @@ def tags(mdl, exp):
     return found
 
 
+def _bar_look(colour):
+    """A bar's fill and glow: the bevel and the glow the by-strike bars wear on
+    the other tabs (``gamma.bevel_fill`` / ``gamma.glow``), from the SAME stops
+    and width. There the fill is one SVG gradient with the wash baked into each
+    stop; here it is the same stops as a CSS gradient across the bar's
+    thickness, light edge up. ``gamma`` imports this module, so it is imported
+    when a bar is drawn, not when this module loads."""
+    from pages.options import gamma as _gamma
+    stops = ",".join(f"{_gamma._composite(colour, overlay, alpha)} {pos * 100:.0f}%"
+                     for pos, overlay, alpha in _gamma.BEVEL_STOPS)
+    return (f"background:linear-gradient(180deg,{stops});"
+            f"box-shadow:0 0 {_gamma.GLOW_WIDTH}px {colour}")
+
+
+def _bar_style(colour, share):
+    """One bar. A bar of no length is not drawn at all: a glow around nothing
+    would still mark the row."""
+    shown = "block" if share >= 0.05 else "none"       # 0.0% once printed
+    return (f"display:{shown};height:{BAR_H:.0f}px;{_bar_look(colour)};"
+            f"width:{share:.1f}%")
+
+
 def _bar_shares(cells):
     """``(puts, calls)`` per row as a per cent of the longest bar (Total)."""
     top = max((max(c, p) for c, p in cells), default=0.0)
@@ -685,12 +707,12 @@ def _map(mdl, u):
         puts_col.append(
             f'<div id="{u}-pr-{i}" title="{tip}" style="{row};'
             f'justify-content:flex-end;border-right:1px solid '
-            f'{_fx._tone("ice", ".22")}"><div id="{u}-p-{i}" style="height:'
-            f'{BAR_H:.0f}px;background:{BAR_PUT};width:{put_w:.1f}%"></div></div>')
+            f'{_fx._tone("ice", ".22")}"><div id="{u}-p-{i}" '
+            f'style="{_bar_style(BAR_PUT, put_w)}"></div></div>')
         calls_col.append(
             f'<div id="{u}-cr-{i}" title="{tip}" style="{row}">'
-            f'<div id="{u}-c-{i}" style="height:{BAR_H:.0f}px;'
-            f'background:{BAR_CALL};width:{call_w:.1f}%"></div></div>')
+            f'<div id="{u}-c-{i}" style="{_bar_style(BAR_CALL, call_w)}">'
+            f'</div></div>')
         text, kind = first_tags.get(i, ("", None))
         style = _tag_style(kind) if kind else "display:none"
         tag_col.append(f'<div style="{row}"><span id="{u}-t-{i}" '
@@ -859,6 +881,12 @@ _BIND_JS = r"""
   function show(node, on){ if(node) node.style.display = on ? 'flex' : 'none'; }
   function count(v){ return Math.round(v).toLocaleString('en-US'); }
   function share(v, top){ return (top>0 ? v/top*100 : 0).toFixed(1)+'%'; }
+  // A bar of no length is hidden: its glow would still mark the row.
+  function bar(node, v, top){
+    if(!node) return;
+    node.style.width = share(v, top);
+    node.style.display = parseFloat(share(v, top)) > 0 ? 'block' : 'none';
+  }
   function apply(){
     var j=D.dates.indexOf(S.date); if(j<0) j=0;
     var net=(S.mode==='net'), i, r;
@@ -876,8 +904,8 @@ _BIND_JS = r"""
     for(r=0;r<cells.length;r++){
       var c=cells[r][0], p=cells[r][1];
       var pb=el('p-'+r), cb=el('c-'+r), t=el('t-'+r), tag=tags[r];
-      if(pb) pb.style.width=share(net ? Math.max(0,p-c) : p, top);
-      if(cb) cb.style.width=share(net ? Math.max(0,c-p) : c, top);
+      bar(pb, net ? Math.max(0,p-c) : p, top);
+      bar(cb, net ? Math.max(0,c-p) : c, top);
       var tip=D.labels[j]+' · '+D.strikes[r]+' · calls '+count(c)+' · puts '+count(p);
       ['pr-'+r,'cr-'+r].forEach(function(s){
         var node=el(s); if(node) node.setAttribute('title', tip);

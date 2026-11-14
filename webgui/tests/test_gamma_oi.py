@@ -426,10 +426,10 @@ def test_calls_and_puts_wear_the_dealer_positioning_colours():
     assert (oi.BAR_CALL, oi.BAR_PUT) == (chosen["call"], chosen["put"])
     assert (oi.CALL, oi.PUT) == (chosen["call_low"], chosen["put_low"])
     html, _ = _panel()
-    assert f"background:{oi.BAR_CALL};width:" in html
-    assert f"background:{oi.BAR_PUT};width:" in html
-    assert f"background:{oi.CALL};width:" not in html
-    assert f"background:{oi.PUT};width:" not in html
+    assert f"px {oi.BAR_CALL};width:" in html              # a call bar's glow
+    assert f"px {oi.BAR_PUT};width:" in html
+    assert f"px {oi.CALL};width:" not in html
+    assert f"px {oi.PUT};width:" not in html
     assert f"background:{oi.BAR_CALL}\"></span>Calls" in html       # the legend
     source = open(oi.__file__, encoding="utf-8").read()
     assert 'C["call' not in source and 'C["put' not in source
@@ -447,8 +447,8 @@ def test_a_chosen_colour_reaches_the_tab(monkeypatch):
         assert (fresh.BAR_CALL, fresh.BAR_PUT) == ("#111111", "#333333")
         assert (fresh.CALL, fresh.PUT) == ("#222222", "#444444")
         html = fresh.panel(_grid(), 100.0, "SPY", "oimap", CFG)[0]
-        assert "background:#111111;width:" in html
-        assert "background:#333333;width:" in html
+        assert "px #111111;width:" in html
+        assert "px #333333;width:" in html
         assert "color:#222222" in html and "color:#444444" in html
     finally:
         monkeypatch.undo()
@@ -467,4 +467,38 @@ def test_every_column_header_is_the_same_height():
     html, _ = _panel()
     assert html.count(f"height:{oi.HEAD_H:.0f}px") == 5
     assert f"height:{oi.HEAD_H - oi.HEAD_GAP:.0f}px" in oi._expiry_style(True)
+
+
+# ── the bars' 3D look ────────────────────────────────────────────────────────
+
+def test_the_bars_wear_the_other_tabs_bevel_and_glow():
+    """The by-strike bars on Gamma, Charm, Delta and Vanna are a bevelled fill
+    with a glow in the bar's colour. These take the SAME stops and width, so
+    the two cannot drift apart."""
+    from pages.options import gamma
+    look = oi._bar_look("#800080")
+    want = ",".join(f"{colour} {pos * 100:.0f}%"
+                    for pos, colour in gamma.bevel_fill("#800080")["stops"])
+    assert look == (f"background:linear-gradient(180deg,{want});"
+                    f"box-shadow:0 0 {gamma.GLOW_WIDTH}px #800080")
+    html, _ = _panel()
+    bar = re.search(r'id="oimap-c-1" style="([^"]*)"', html).group(1)
+    assert oi._bar_look(oi.BAR_CALL) in bar and "display:block" in bar
+    assert oi._bar_look(oi.BAR_PUT) in re.search(
+        r'id="oimap-p-3" style="([^"]*)"', html).group(1)
+
+
+def test_a_strike_with_nothing_to_draw_has_no_bar_and_so_no_glow():
+    """A glow around a bar of no length would still mark the row."""
+    html, _ = oi.panel({"underlying_price": 100.0, "expirations": [EXPS[0]],
+                        "cells": {EXPS[0]: {"105.0": _cell(900, 0),
+                                            "95.0": _cell(0, 900)}}},
+                       100.0, "SPY", "oimap", CFG)
+    assert "display:none" in re.search(r'id="oimap-p-0" style="([^"]*)"', html).group(1)
+    assert "display:block" in re.search(r'id="oimap-c-0" style="([^"]*)"', html).group(1)
+    assert oi._bar_style("#800080", 0.04).startswith("display:none")
+    assert oi._bar_style("#800080", 0.05).startswith("display:block")
+    script = oi.bind_js("oimap", _panel()[1])
+    assert "parseFloat(share(v, top)) > 0 ? 'block' : 'none'" in script
+    assert "pb.style.width" not in script and "bar(pb," in script
 

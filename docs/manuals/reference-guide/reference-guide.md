@@ -618,8 +618,8 @@ own subsection further down.
 
 **Bars (top chart).** Net exposure at each strike, ±20 strikes around the current
 price. The window is fixed so bar width stays constant all day. Call-heavy bars
-are drawn in the Call low colour and put-heavy ones in the Put low colour (light
-purple and light maroon as shipped; Settings → Appearance → Dealer Positioning
+are drawn in the Call colour and put-heavy ones in the Put colour (purple
+and maroon as shipped; Settings → Appearance → Dealer Positioning
 changes them). A tall bar is a strike where a lot of hedging
 pressure is concentrated.
 
@@ -885,8 +885,9 @@ do not fit. **$SPX is the exception**: its whole chain is too large to ask Schwa
 so it shows its nearest twelve (Settings → Configuration → Open Interest tab → **Symbols
 not shown whole** and **Expirations for those symbols**). The expirations take 60% of
 the map's width and the put and call bars 40%. Calls and puts wear the colours chosen
-for Dealer Positioning (Settings → Appearance): the bars take each side's main colour
-and the labels its paler one. It
+for Dealer Positioning (Settings → Appearance): the bars take each side's main colour,
+with the same lit edge and glow as the bars on the other tabs, and the labels its
+paler one. It
 answers *which strikes, in which expiry, hold the positions*. It replaced the Term
 subtab (net gamma by expiry) in November 2026.
 
@@ -5416,8 +5417,8 @@ fields, buttons, status colours, charts, Dealer Positioning, type and menu, with
 live preview that shows an unsaved colour before anything else does. The **Dealer
 Positioning** group is the heat map's four colours, two a side and both rows in
 the same order: the put or call colour first, for the largest values (the
-walls, hedge panel, gravity well, ridge plot and contour lines also use it), then
-its low colour, for the smallest (the strike bars also use it). The heat map
+strike bars on every tab, walls, hedge panel, gravity well, ridge plot and contour
+lines also use it), then its low colour, for the smallest. The heat map
 grades between them. **Restart now** restarts both the app and the public live
 screens, which show the same colours. The preview draws
 the resulting scale. **Save changes** writes an

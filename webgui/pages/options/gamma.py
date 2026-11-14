@@ -68,13 +68,15 @@ def palette(colours):
     fills a dark one, so both follow a chosen colour instead of staying cyan
     and magenta beside it.
 
-    The by-strike BARS wear each side's LOW colour (``bar_pos`` / ``bar_neg``;
-    the user's choice, 2026-10-28). The walls, the hedge panel, the well and
-    the ridge keep the main colour."""
+    The by-strike BARS wear each side's MAIN colour (``bar_pos`` / ``bar_neg``;
+    the user's choice, 2026-11-14, on every tab; the low colour from 2026-10-28
+    until then), as do the walls, the hedge panel, the well and the ridge. The
+    two keys stay apart from ``pos`` / ``neg`` so the bars can be moved again
+    in this one place."""
     call, put = colours["call"], colours["put"]
     return {
         "pos": call, "neg": put,
-        "bar_pos": colours["call_low"], "bar_neg": colours["put_low"],
+        "bar_pos": call, "bar_neg": put,
         "stops": _heat.ramp_stops(colours),
         "contour_above": _heat.rgba(_heat.tint(call, 0.78), 0.62),
         "contour_below": _heat.rgba(_heat.tint(put, 0.78), 0.62),
@@ -104,7 +106,7 @@ def _wash_stops(colours):
 _PAL = palette(_theme.gamma_colors(_theme.THEME))
 POS_COLOR = _PAL["pos"]
 NEG_COLOR = _PAL["neg"]
-BAR_POS_COLOR = _PAL["bar_pos"]     # the by-strike bars: each side's low colour
+BAR_POS_COLOR = _PAL["bar_pos"]     # the by-strike bars: each side's main colour
 BAR_NEG_COLOR = _PAL["bar_neg"]
 OUTAGE_COLOR = _PAL["outage"]       # /ES and /NQ: a stretch with no capture
 _NO_ROWS_TEXT = "No intraday snapshots yet (history collector not running)."
