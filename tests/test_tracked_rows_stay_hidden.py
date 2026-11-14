@@ -40,6 +40,7 @@ OWN_QUERIES = {
     "tools/signal_calibration.py": "is_tracked_type",
     "tools/measure_commission_convention.py": "not_tracked_sql",
     "tools/replay_debate.py": "not_tracked_sql",
+    "services/options_svc/exit_chance.py": "not_tracked_sql",
 }
 
 

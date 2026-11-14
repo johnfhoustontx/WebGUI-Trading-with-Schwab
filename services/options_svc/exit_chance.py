@@ -27,6 +27,7 @@ from repo_paths import OPTIONS_SCANNER
 from shared import model_health_config as cfg
 from shared import structures
 from shared import trade_mgmt
+from shared.numeric import parsed_finite
 from shared.ml import logistic, metrics
 
 if str(OPTIONS_SCANNER) not in sys.path:
@@ -91,16 +92,6 @@ def _when(text) -> datetime | None:
     return t if t.tzinfo else t.replace(tzinfo=CENTRAL)
 
 
-def _num(v) -> float | None:
-    if v is None or isinstance(v, bool):
-        return None
-    try:
-        f = float(v)
-    except (TypeError, ValueError):
-        return None
-    return f if math.isfinite(f) else None
-
-
 def _default_db():
     return OPTIONS_SCANNER / "data" / "signals.db"
 
@@ -142,30 +133,30 @@ def load(db_path=None) -> list:
             continue
         path, scales = [], []
         for m in marks.get(s["signal_id"], ()):
-            t, pct = _when(m["mark_ts"]), _num(m["pnl_pct_of_credit"])
+            t, pct = _when(m["mark_ts"]), parsed_finite(m["pnl_pct_of_credit"])
             if t is None or pct is None:
                 continue
-            pnl = _num(m["unrealized_pnl"])
+            pnl = parsed_finite(m["unrealized_pnl"])
             if pnl is not None and abs(pct) > 1e-9:
                 scales.append(pnl / (pct / 100.0))
-            path.append((t, pct / 100.0, _num(m["current_underlying"]),
-                         _num(m["current_short_delta"])))
+            path.append((t, pct / 100.0, parsed_finite(m["current_underlying"]),
+                         parsed_finite(m["current_short_delta"])))
         if len(path) < 2:
             continue
         scale = statistics.median(scales) if scales else None
         if scale is None or scale <= 0:
-            credit = _num(s["entry_credit"])
+            credit = parsed_finite(s["entry_credit"])
             scale = credit * 100.0 if credit and credit > 0 else None
-        realized = _num(s["realized_pnl"])
+        realized = parsed_finite(s["realized_pnl"])
         close_frac = realized / scale if realized is not None and scale else None
         out.append(Trade(
             signal_id=s["signal_id"], kind=str(s["scanner_type"] or ""),
             strategy=structures.normalise(s["strategy"]),
             entry_day=str(s["first_seen_date"]), first_seen=seen, closed=closed,
             expiration=str(s["expiration"] or ""),
-            short_strike=_num(s["short_strike"]), call_short=_num(s["call_short"]),
-            entry_short_delta=_num(s["entry_short_delta"]),
-            entry_iv_rank=_num(s["entry_iv_rank"]),
+            short_strike=parsed_finite(s["short_strike"]), call_short=parsed_finite(s["call_short"]),
+            entry_short_delta=parsed_finite(s["entry_short_delta"]),
+            entry_iv_rank=parsed_finite(s["entry_iv_rank"]),
             exit_reason=str(s["exit_reason"] or ""), close_frac=close_frac, marks=path))
     return out
 
