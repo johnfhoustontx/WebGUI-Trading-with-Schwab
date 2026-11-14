@@ -22,6 +22,7 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   still prints symbols.
 - **DSPX.** The Cboe S&P 500 Dispersion Index joins Volatility, quoted as `$DSPX`
   (the proxy refuses the bare `DSPX`), inverted like the rest of the frame.
+
 **Prior —** 2026-11-14 (**Captured signals: no time stop in the first 30 minutes.**)
 
 - **Why.** The time stop (DTE <= `cut_dte` and underwater) fired on a capture's
