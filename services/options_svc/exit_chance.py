@@ -248,3 +248,155 @@ def rows(trades, *, tp_frac=None, thin_min=None, min_hold=None) -> list:
                    "is_ic": 1.0 if tr.strategy == "IC" else 0.0,
                    "is_ccs": 1.0 if tr.strategy == "CCS" else 0.0}))
     return out
+
+
+# ── the baseline, the model and the walk-forward ────────────────────────────
+def bucket_rate(train_rows, w, edges):
+    """The weighted rate of ``y`` in each ``pnl_frac`` bucket of the training
+    rows (``edges`` sorted; a value equal to an edge falls in the bucket above
+    it), as a function of ``pnl_frac``. A bucket the training rows left empty
+    takes their overall rate."""
+    edges = list(edges)
+    sums = [[0.0, 0.0] for _ in range(len(edges) + 1)]
+    total = [0.0, 0.0]
+    for r, wi in zip(train_rows, w):
+        b = sums[_bucket(r.x["pnl_frac"], edges)]
+        b[0] += wi * r.y
+        b[1] += wi
+        total[0] += wi * r.y
+        total[1] += wi
+    overall = total[0] / total[1] if total[1] > 0 else 0.5
+    rates = [s[0] / s[1] if s[1] > 0 else overall for s in sums]
+    return lambda frac: rates[_bucket(frac, edges)]
+
+
+def _bucket(frac, edges) -> int:
+    return sum(1 for e in edges if frac >= e)
+
+
+def _weights(rows_) -> list:
+    """Each entry day weighs one, split equally over its trades, and each
+    trade over its rows."""
+    trades_of, rows_of = {}, {}
+    for r in rows_:
+        trades_of.setdefault(r.day, set()).add(r.trade)
+        rows_of[r.trade] = rows_of.get(r.trade, 0) + 1
+    return [1.0 / len(trades_of[r.day]) / rows_of[r.trade] for r in rows_]
+
+
+def _columns(train_rows):
+    """``(means, stds, with_missing)`` for the inputs, from the training rows.
+    An input never present in training is centred at 0 with spread 1, so its
+    standardised value is 0 and only its missing indicator carries anything."""
+    means, stds, missing = {}, {}, []
+    for name in INPUTS:
+        vals = [r.x.get(name) for r in train_rows]
+        present = [v for v in vals if v is not None]
+        if len(present) < len(vals):
+            missing.append(name)
+        if present:
+            m = float(np.mean(present))
+            s = float(np.std(present))
+        else:
+            m, s = 0.0, 1.0
+        means[name], stds[name] = m, (s if s > 1e-12 else 1.0)
+    return means, stds, missing
+
+
+def _matrix(rows_, means, stds, missing) -> np.ndarray:
+    out = np.empty((len(rows_), 1 + len(INPUTS) + len(missing)))
+    for i, r in enumerate(rows_):
+        vals = [1.0]
+        for name in INPUTS:
+            v = r.x.get(name)
+            vals.append(0.0 if v is None else (v - means[name]) / stds[name])
+        vals.extend(1.0 if r.x.get(name) is None else 0.0 for name in missing)
+        out[i] = vals
+    return out
+
+
+def _fit(train_rows, w, penalty, *, test_day=None):
+    """The fitted model as a function of a list of rows. ``test_day`` names the
+    day it is for (only for tests that look at what each fit trained on)."""
+    means, stds, missing = _columns(train_rows)
+    x = _matrix(train_rows, means, stds, missing)
+    y = np.array([r.y for r in train_rows], dtype=float)
+    prec = np.full(x.shape[1], float(penalty))
+    prec[0] = INTERCEPT_PREC
+    theta = logistic.map_fit(x, y, np.asarray(w, dtype=float), np.zeros(x.shape[1]), prec)
+    return lambda rows_: logistic.sigmoid(_matrix(rows_, means, stds, missing) @ theta)
+
+
+def _day_start(day) -> datetime:
+    return datetime.fromisoformat(day).replace(tzinfo=CENTRAL)
+
+
+def walk_forward(rows_, *, min_train_days=None, penalty=None, edges=None) -> list:
+    """``(row, p_model, p_distance, weight)`` for every scored row.
+
+    A test day is predicted by a fit on the rows of trades that had CLOSED
+    before that day began, so a trade still open then cannot lend its ending
+    to the fit. Scoring starts once those trades span ``min_train_days`` entry
+    days."""
+    min_train = cfg.exit_min_train_days() if min_train_days is None else min_train_days
+    lam = cfg.exit_penalty() if penalty is None else penalty
+    edges = cfg.exit_buckets() if edges is None else edges
+    weights = _weights(rows_)
+    by_day = {}
+    for r, w in zip(rows_, weights):
+        by_day.setdefault(r.day, []).append((r, w))
+    out = []
+    for day in sorted(by_day):
+        start = _day_start(day)
+        train = [(r, w) for r, w in zip(rows_, weights)
+                 if r.closed is not None and r.closed < start and r.day < day]
+        if len({r.day for r, _w in train}) < min_train:
+            continue
+        t_rows, t_w = [r for r, _w in train], [w for _r, w in train]
+        if len({r.y for r in t_rows}) < 2:
+            continue
+        model = _fit(t_rows, t_w, lam, test_day=day)
+        distance = bucket_rate(t_rows, t_w, edges)
+        test = by_day[day]
+        p = model([r for r, _w in test])
+        out.extend((r, float(pi), float(distance(r.x["pnl_frac"])), w)
+                   for (r, w), pi in zip(test, p))
+    return out
+
+
+def score(scored, *, n_boot=None) -> dict:
+    """The raw figures for one population: rows, days and trades scored, both
+    Brier scores, the model's minus the baseline's per day (negative is the
+    model better), the reliability bands and the last day scored."""
+    n_boot = cfg.bootstrap_draws() if n_boot is None else n_boot
+    y = [r.y for r, _p, _q, _w in scored]
+    p = [pi for _r, pi, _q, _w in scored]
+    q = [qi for _r, _p, qi, _w in scored]
+    w = [wi for _r, _p, _q, wi in scored]
+    days = [r.day for r, _p, _q, _w in scored]
+    diff = None
+    if scored:
+        diff = metrics.day_bootstrap_diff([(a - b) ** 2 for a, b in zip(p, y)],
+                                          [(a - b) ** 2 for a, b in zip(q, y)],
+                                          days, w, n_boot=n_boot)
+    return {"days": len(set(days)), "rows": len(scored),
+            "trades": len({r.trade for r, _p, _q, _w in scored}),
+            "brier": metrics.brier(p, y, w), "brier_distance": metrics.brier(q, y, w),
+            "diff": diff, "reliability": metrics.reliability(p, y, w),
+            "last_day": max(days, default=None)}
+
+
+def evaluate(db_path=None) -> list:
+    """One entry per configured scanner type the store holds: its score plus
+    ``inputs``, the drift inputs at each row as ``(day, {name: value})``."""
+    trades = load(db_path)
+    out = []
+    for kind in cfg.exit_types():
+        mine = [t for t in trades if t.kind == kind]
+        if not mine:
+            continue
+        rows_ = rows(mine)
+        entry = {"type": kind, **score(walk_forward(rows_))}
+        entry["inputs"] = [(r.day, {k: r.x.get(k) for k in DRIFT_INPUTS}) for r in rows_]
+        out.append(entry)
+    return out

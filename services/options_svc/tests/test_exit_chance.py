@@ -142,3 +142,131 @@ def test_load_reads_per_share_trade(tmp_path):
     assert t.close_frac == pytest.approx(0.80)
     assert [m[1] for m in t.marks] == pytest.approx([0.20, 0.30])
     assert t.kind == "INCOME" and t.entry_day == "2030-01-07"
+
+
+# ── walk-forward and score ──────────────────────────────────────────────────
+import random  # noqa: E402
+
+from shared.ml import metrics  # noqa: E402
+
+
+def _day(i):
+    return (T0 + timedelta(days=i)).date().isoformat()
+
+
+def _synthetic(n_days, rule, *, per_day=6, marks=4, seed=1, iv_rank=40.0):
+    """Trades that each close the same evening; ``rule(rng)`` gives
+    ``(pnl_frac, delta_change, y)`` for a trade."""
+    rng = random.Random(seed)
+    trades = []
+    for d in range(n_days):
+        start = T0 + timedelta(days=d)
+        for k in range(per_day):
+            frac, dchange, y = rule(rng)
+            tr = _trade([frac] * marks, close_frac=1.0 if y else -1.0, day=_day(d),
+                        first_seen=start, sid=f"d{d}k{k}", delta=0.15 + dchange,
+                        iv_rank=iv_rank, closed=start + timedelta(hours=6),
+                        expiration=(start + timedelta(days=10)).date().isoformat())
+            trades.append(tr)
+    return trades
+
+
+def _path_rule(rng):
+    frac = rng.choice([-0.2, 0.0, 0.2])
+    dchange = rng.choice([0.0, 0.3])
+    return frac, dchange, 0 if dchange > 0.2 else 1
+
+
+def _distance_rule(rng):
+    frac = rng.choice([-0.2, 0.2])
+    return frac, rng.choice([0.0, 0.3]), 1 if frac > 0 else 0
+
+
+def test_open_trade_not_in_training(monkeypatch):
+    trades = _synthetic(20, _path_rule)
+    # A trade entered on day 1 that closes only on day 19, at 10:00.
+    late = _trade([0.0] * 4, close_frac=1.0, day=_day(1), sid="late",
+                  first_seen=T0 + timedelta(days=1),
+                  closed=T0 + timedelta(days=19, hours=1))
+    rows_ = ec.rows(trades + [late], tp_frac=0.5, thin_min=5, min_hold=30)
+    seen = {}
+    real = ec._fit
+
+    def spy(train, *a, **kw):
+        seen.setdefault(kw.get("test_day"), {r.trade for r in train})
+        return real(train, *a, **kw)
+
+    monkeypatch.setattr(ec, "_fit", spy)
+    ec.walk_forward(rows_, min_train_days=15, penalty=1.0, edges=[0.0])
+    assert "late" not in seen[_day(19)]
+    assert "d18k0" in seen[_day(19)]
+
+
+def test_too_few_days_scores_nothing():
+    rows_ = ec.rows(_synthetic(5, _path_rule), tp_frac=0.5, thin_min=5, min_hold=30)
+    assert ec.walk_forward(rows_, min_train_days=15, penalty=1.0, edges=[0.0]) == []
+    out = ec.score([], n_boot=200)
+    assert out["days"] == 0 and out["diff"] is None and out["rows"] == 0
+
+
+def test_model_beats_distance_when_path_matters():
+    rows_ = ec.rows(_synthetic(60, _path_rule), tp_frac=0.5, thin_min=5, min_hold=30)
+    scored = ec.walk_forward(rows_, min_train_days=15, penalty=1.0, edges=[0.0])
+    out = ec.score(scored, n_boot=500)
+    assert out["days"] == 45
+    assert out["diff"]["hi"] < 0
+    assert out["brier"] < out["brier_distance"]
+
+
+def test_distance_matches_when_only_distance_matters():
+    rows_ = ec.rows(_synthetic(60, _distance_rule), tp_frac=0.5, thin_min=5, min_hold=30)
+    scored = ec.walk_forward(rows_, min_train_days=15, penalty=1.0, edges=[0.0])
+    out = ec.score(scored, n_boot=500)
+    assert out["diff"]["lo"] <= 0 <= out["diff"]["hi"] or abs(out["diff"]["mean"]) < 0.01
+
+
+def test_all_missing_column_is_finite():
+    rows_ = ec.rows(_synthetic(20, _path_rule, iv_rank=None), tp_frac=0.5, thin_min=5,
+                    min_hold=30)
+    scored = ec.walk_forward(rows_, min_train_days=15, penalty=1.0, edges=[0.0])
+    assert scored
+    assert all(0.0 < p < 1.0 and 0.0 <= q <= 1.0 for _r, p, q, _w in scored)
+
+
+def test_weights_one_per_day():
+    trades = _synthetic(20, _path_rule, per_day=3)
+    trades.append(_trade([0.0] * 12, close_frac=1.0, day=_day(17), sid="long",
+                         first_seen=T0 + timedelta(days=17),
+                         closed=T0 + timedelta(days=17, hours=6)))
+    rows_ = ec.rows(trades, tp_frac=0.5, thin_min=5, min_hold=30)
+    scored = ec.walk_forward(rows_, min_train_days=15, penalty=1.0, edges=[0.0])
+    by_day, by_trade = {}, {}
+    for r, _p, _q, w in scored:
+        by_day[r.day] = by_day.get(r.day, 0.0) + w
+        if r.day == _day(17):
+            by_trade[r.trade] = by_trade.get(r.trade, 0.0) + w
+    assert all(v == pytest.approx(1.0) for v in by_day.values())
+    assert by_trade["long"] == pytest.approx(by_trade["d17k0"])
+
+
+def test_bucket_rate_falls_back_to_overall():
+    train = [ec.Row(day="d", trade="a", x={"pnl_frac": -0.5}, y=0),
+             ec.Row(day="d", trade="b", x={"pnl_frac": -0.4}, y=1),
+             ec.Row(day="d", trade="c", x={"pnl_frac": 0.4}, y=1)]
+    rate = ec.bucket_rate(train, [1.0, 1.0, 2.0], [0.0, 0.25])
+    assert rate(-0.45) == pytest.approx(0.5)
+    assert rate(0.1) == pytest.approx(3.0 / 4.0)     # empty bucket: overall rate
+    assert rate(0.4) == pytest.approx(1.0)
+
+
+def test_evaluate_one_entry_per_type(tmp_path, monkeypatch):
+    trades = _synthetic(20, _path_rule) + [
+        _trade([0.0] * 4, close_frac=1.0, kind="0DTE", sid="z", day=_day(3))]
+    monkeypatch.setattr(ec, "load", lambda db_path=None: trades)
+    out = ec.evaluate()
+    assert [e["type"] for e in out] == ["SWING", "0DTE"]
+    swing = out[0]
+    assert swing["days"] == 20 - ec.cfg.exit_min_train_days()
+    assert swing["inputs"] and set(swing["inputs"][0][1]) == set(ec.DRIFT_INPUTS)
+    assert out[1]["days"] == 0 and out[1]["diff"] is None
+    assert metrics.brier([0.5], [1], [1.0]) is not None
