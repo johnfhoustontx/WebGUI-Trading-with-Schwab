@@ -64,6 +64,32 @@ def reliability(p, y, w, bins=10) -> list:
             for k, b in enumerate(acc)]
 
 
+def pinball(q, pred, y, w) -> float | None:
+    """The weighted mean quantile (pinball) loss of forecasts ``pred`` of the
+    ``q`` quantile; ``None`` with no positive finite total weight."""
+    total = _total(w)
+    if total is None:
+        return None
+    acc = 0.0
+    for pi, yi, wi in zip(pred, y, w):
+        d = yi - pi
+        acc += wi * max(q * d, (q - 1.0) * d)
+    return acc / total
+
+
+def weighted_quantile(values, w, q) -> float | None:
+    """The smallest value whose cumulative weight share reaches ``q`` (numpy's
+    ``inverted_cdf`` when every weight is equal); ``None`` with no weight."""
+    v = np.asarray(values, dtype=float)
+    wt = np.asarray(w, dtype=float)
+    if v.size == 0 or not wt.sum() > 0:
+        return None
+    order = np.argsort(v, kind="stable")
+    cum = np.cumsum(wt[order]) / wt.sum()
+    i = int(np.searchsorted(cum, q - 1e-12, side="left"))
+    return float(v[order][min(i, v.size - 1)])
+
+
 def day_bootstrap_diff(loss_a, loss_b, days, w, n_boot=2000, seed=0, level=0.95):
     """The weighted mean of ``loss_a - loss_b`` per item, with an interval from
     resampling whole DAYS with replacement (each day's rows travel together, so
@@ -195,5 +221,6 @@ def _missing_share(sample):
     return sum(1 for x in sample if finite(x) is None) / len(sample)
 
 
-__all__ = ["brier", "log_loss", "reliability", "day_bootstrap_diff", "psi",
+__all__ = ["brier", "log_loss", "reliability", "pinball", "weighted_quantile",
+           "day_bootstrap_diff", "psi",
            "psi_by_session"]

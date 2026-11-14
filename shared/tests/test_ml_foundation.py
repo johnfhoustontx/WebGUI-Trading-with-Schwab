@@ -247,7 +247,8 @@ def test_the_library_imports_no_service_store_or_config():
     import ast
     import pathlib
     root = pathlib.Path(__file__).resolve().parents[1] / "ml"
-    allowed = {"math", "numpy", "collections", "random", "shared.ml", "shared.numeric",
+    allowed = {"math", "numpy", "collections", "dataclasses", "random", "shared.ml",
+               "shared.numeric",
                "__future__"}
     for path in root.glob("*.py"):
         tree = ast.parse(path.read_text(encoding="utf-8"))
