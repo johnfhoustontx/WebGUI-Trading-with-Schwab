@@ -910,10 +910,11 @@ subtab (net gamma by expiry) in November 2026.
   calls against puts over every expiration. A count of open contracts says where
   positions sit, not who holds which side.
 - **Hover** a cell or a bar for the exact counts.
-- **How fresh it is.** The whole chain is one large request to Schwab, repeated at most
-  every 120 minutes per symbol (**Wider chain fetched every**) and reused in between.
-  Open interest is published once a day, so nothing is lost by it. If the request
-  fails, the tab shows the expirations of the seven-day chain it already has.
+- **How fresh it is.** The whole chain is fetched from Schwab in several requests,
+  at most every 120 minutes per symbol (**Wider chain fetched every**), and reused in
+  between. Open interest is published once a day, so nothing is lost by it. If the
+  fetch fails, the tab shows the expirations of the seven-day chain it already has
+  and tries again after 10 minutes (**A failed fetch is retried after**).
 
 > **Its columns are expirations, not time.** Open interest is published once a day,
 > so nothing on this tab moves during the session except the price line. A weekly and

@@ -1,4 +1,6 @@
 """The Open Interest tab's expirations (``services/options_svc/oi_expiries``)."""
+import inspect
+
 import pytest
 
 from services.options_svc import oi_expiries
@@ -28,101 +30,112 @@ class _Widen:
 
 
 class _Whole:
-    """The one-request whole chain every other symbol uses."""
-    def __init__(self, count=30):
-        self.calls, self.count = [], count
+    """The listed-expirations fetch every other symbol uses
+    (``compute.fetch_scan_chain``): ``(chain, expirations_not_fetched)``."""
+    def __init__(self, count=30, failed=0):
+        self.calls, self.count, self.failed = [], count, failed
 
-    def __call__(self, symbol, days):
-        self.calls.append((symbol, days))
-        return _chain(f"whole-{len(self.calls)}", self.count)
+    def __call__(self, symbol, dte_max):
+        self.calls.append((symbol, dte_max))
+        if self.count is None:
+            return None, self.failed
+        return _chain(f"whole-{len(self.calls)}", self.count), self.failed
 
 
 @pytest.fixture(autouse=True)
-def whole(monkeypatch):
+def _settings(monkeypatch):
     oi_expiries.reset()
     monkeypatch.setattr(gamma_heat_config, "open_interest", lambda: {
-        "limited_symbols": ("$SPX",), "expiries": 8, "all_days": 900,
-        "refresh_min": 30})
-    fetch = _Whole()
-    monkeypatch.setattr(oi_expiries, "fetch_whole", fetch)
-    yield fetch
+        "limited_symbols": ("$SPX",), "expiries": 8, "refresh_min": 30,
+        "retry_min": 10})
+    yield
     oi_expiries.reset()
+
+
+def _ask(symbol, whole, widen=None, base=5, at=0.0):
+    return oi_expiries.grid(_Engine(), symbol, _chain("base", base),
+                            widen or _Widen(), whole, clock=lambda: at)
 
 
 # ── every expiration ─────────────────────────────────────────────────────────
 
-def test_a_symbol_gets_every_expiration_in_one_request(whole):
-    widen = _Widen()
-    out = oi_expiries.grid(_Engine(), "SPY", _chain("base", 5), widen)
+def test_a_symbol_gets_every_listed_expiration():
+    whole, widen = _Whole(), _Widen()
+    out = _ask("SPY", whole, widen)
     assert out["from"] == "whole-1" and len(out["expirations"]) == 30
-    assert whole.calls == [("SPY", 900)] and widen.calls == []
+    assert whole.calls == [("SPY", None)] and widen.calls == []
 
 
-def test_the_whole_grid_is_kept_until_the_refresh_interval_passes(whole):
-    now = [1000.0]
-    ask = lambda: oi_expiries.grid(_Engine(), "SPY", _chain("base", 5), _Widen(),   # noqa: E731
-                                   clock=lambda: now[0])
-    assert ask()["from"] == "whole-1"
-    now[0] += 29 * 60
-    assert ask()["from"] == "whole-1" and len(whole.calls) == 1
-    now[0] += 61
-    assert ask()["from"] == "whole-2" and len(whole.calls) == 2
+def test_the_whole_grid_is_kept_until_the_refresh_interval_passes():
+    whole = _Whole()
+    assert _ask("SPY", whole, at=1000.0)["from"] == "whole-1"
+    assert _ask("SPY", whole, at=1000.0 + 29 * 60)["from"] == "whole-1"
+    assert len(whole.calls) == 1
+    assert _ask("SPY", whole, at=1000.0 + 30 * 60 + 1)["from"] == "whole-2"
 
 
-def test_each_symbol_keeps_its_own_grid(whole):
+def test_each_symbol_keeps_its_own_grid():
+    whole = _Whole()
     for symbol in ("SPY", "QQQ", "SPY"):
-        oi_expiries.grid(_Engine(), symbol, _chain("base", 5), _Widen(),
-                         clock=lambda: 5.0)
-    assert whole.calls == [("SPY", 900), ("QQQ", 900)]
+        _ask(symbol, whole, at=5.0)
+    assert whole.calls == [("SPY", None), ("QQQ", None)]
 
 
-def test_a_failed_whole_fetch_falls_back_to_the_chain_in_hand_and_is_not_kept(
-        monkeypatch, whole):
-    def broken(symbol, days):
-        raise RuntimeError("Schwab said no")
+def test_a_whole_chain_with_some_expirations_missing_is_still_used():
+    out = _ask("SPY", _Whole(count=20, failed=3))
+    assert out["from"] == "whole-1" and len(out["expirations"]) == 20
 
-    monkeypatch.setattr(oi_expiries, "fetch_whole", broken)
-    out = oi_expiries.grid(_Engine(), "SPY", _chain("base", 5), _Widen())
+
+@pytest.mark.parametrize("broken", [
+    _Whole(count=None, failed=25),            # every run failed
+    _Whole(count=2),                          # shorter than the chain in hand
+    lambda symbol, dte_max: 1 / 0,            # the fetch itself raised
+])
+def test_a_failed_whole_fetch_falls_back_and_waits_before_it_is_tried_again(broken):
+    """Seen on prod, 2026-11-14: a whole-chain request that failed was made
+    again on the page's next refresh, half a minute of waiting each time."""
+    good = _Whole()
+    out = _ask("SPY", broken, at=100.0)
     assert out["from"] == "base" and len(out["expirations"]) == 5
-    monkeypatch.setattr(oi_expiries, "fetch_whole", whole)
-    assert oi_expiries.grid(_Engine(), "SPY", _chain("base", 5),
-                            _Widen())["from"] == "whole-1"
+    assert _ask("SPY", good, at=100.0 + 9 * 60)["from"] == "base"
+    assert good.calls == []                              # not asked yet
+    assert _ask("SPY", good, at=100.0 + 10 * 60 + 1)["from"] == "whole-1"
 
 
-def test_an_answer_shorter_than_the_chain_in_hand_is_not_used_or_kept(
-        monkeypatch, whole):
-    monkeypatch.setattr(oi_expiries, "fetch_whole", _Whole(count=2))
-    out = oi_expiries.grid(_Engine(), "SPY", _chain("base", 5), _Widen())
-    assert out["from"] == "base"
-    monkeypatch.setattr(oi_expiries, "fetch_whole", whole)
-    assert oi_expiries.grid(_Engine(), "SPY", _chain("base", 5),
-                            _Widen())["from"] == "whole-1"
+def test_the_whole_chain_is_never_one_request():
+    """The first version asked Schwab for the whole chain in one call, which
+    the proxy cut off at 30 seconds every time. This module makes no request
+    of its own; compute hands it the Finder's fetch, which asks in runs."""
+    source = inspect.getsource(oi_expiries)
+    assert "get_option_chain" not in source and "_proxy" not in source
+    from services.options_svc import compute
+    assert "_oi_expiries.grid(eng, symbol, chain, _term_chain, fetch_scan_chain)" \
+        in inspect.getsource(compute.gamma_snapshot)
 
 
 # ── the limited symbols ──────────────────────────────────────────────────────
 
-def test_a_limited_symbol_whose_chain_covers_its_count_fetches_nothing(whole):
-    widen = _Widen()
-    out = oi_expiries.grid(_Engine(), "$SPX", _chain("base", 9), widen)
+def test_a_limited_symbol_whose_chain_covers_its_count_fetches_nothing():
+    whole, widen = _Whole(), _Widen()
+    out = _ask("$SPX", whole, widen, base=9)
     assert out["from"] == "base" and len(out["expirations"]) == 8
     assert widen.calls == [] and whole.calls == []
 
 
-def test_a_limited_symbol_is_widened_to_its_count_and_never_asked_for_whole(whole):
-    widen = _Widen()
-    out = oi_expiries.grid(_Engine(), "$spx", _chain("base", 5), widen)
+def test_a_limited_symbol_is_widened_to_its_count_and_never_asked_for_whole():
+    whole, widen = _Whole(), _Widen()
+    out = _ask("$spx", whole, widen)
     assert out["from"] == "wide-1" and len(out["expirations"]) == 8
     assert widen.calls == [("$spx", 8)] and whole.calls == []
 
 
-def test_the_limited_list_and_count_are_read_from_the_setting(monkeypatch, whole):
+def test_the_limited_list_and_count_are_read_from_the_setting(monkeypatch):
     monkeypatch.setattr(gamma_heat_config, "open_interest", lambda: {
-        "limited_symbols": ("SPY",), "expiries": 3, "all_days": 900,
-        "refresh_min": 30})
-    out = oi_expiries.grid(_Engine(), "SPY", _chain("base", 5), _Widen())
+        "limited_symbols": ("SPY",), "expiries": 3, "refresh_min": 30,
+        "retry_min": 10})
+    out = _ask("SPY", _Whole())
     assert len(out["expirations"]) == 3 and out["from"] == "base"
-    assert oi_expiries.grid(_Engine(), "$SPX", _chain("base", 5),
-                            _Widen())["from"] == "whole-1"
+    assert _ask("$SPX", _Whole())["from"] == "whole-1"
 
 
 # ── what is published ────────────────────────────────────────────────────────
@@ -145,34 +158,3 @@ def test_the_grid_is_cut_to_the_counts_and_the_strikes_that_hold_any():
 
 def test_something_that_is_not_a_grid_passes_through():
     assert oi_expiries.slim({}) == {} and oi_expiries.slim(None) is None
-
-
-def test_fetch_whole_asks_once_for_the_days_ahead_and_refuses_a_bad_status(monkeypatch):
-    import datetime as dt
-
-    monkeypatch.undo()                       # the real fetch_whole, not the fake
-    seen = []
-
-    class _Resp:
-        def __init__(self, status):
-            self.status_code = status
-
-        def json(self):
-            return {"ok": True}
-
-    class _Client:
-        status = 200
-
-        def get_option_chain(self, symbol, **kw):
-            seen.append((symbol, kw))
-            return _Resp(self.status)
-
-    client = _Client()
-    monkeypatch.setattr(oi_expiries._proxy, "schwab_py_client", client, raising=False)
-    assert oi_expiries.fetch_whole("SPY", 900) == {"ok": True}
-    symbol, kw = seen[0]
-    assert symbol == "SPY" and kw["contract_type"] == "ALL"
-    assert (kw["to_date"] - kw["from_date"]) == dt.timedelta(days=900)
-    client.status = 502
-    with pytest.raises(RuntimeError):
-        oi_expiries.fetch_whole("SPY", 900)

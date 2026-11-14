@@ -1110,13 +1110,14 @@ _GAMMA_HEAT = ConfigFile(
             Field("open_interest.expiries", "Expirations for those symbols",
                   "Nearest first.",
                   kind="int", unit="expirations", min=5, max=40, step=1),
-            Field("open_interest.all_days", "Every expiration within",
-                  "How far ahead a whole chain looks.",
-                  kind="int", unit="days", min=30, max=1500, step=30),
             Field("open_interest.refresh_min", "Wider chain fetched every",
                   "At most, per symbol. Open interest is published once a "
                   "day, so a short interval buys nothing.",
                   kind="int", unit="min", min=1, max=720, step=5),
+            Field("open_interest.retry_min", "A failed fetch is retried after",
+                  "Not on the page's next refresh: a request that keeps "
+                  "failing would hold up the options service each time.",
+                  kind="int", unit="min", min=1, max=120, step=1),
         )),
     ),
 )

@@ -192,18 +192,18 @@ def test_it_imports_only_the_config_loader_and_the_paths():
 def test_the_open_interest_tab_shows_every_expiry_except_for_the_listed_symbols():
     out = cfg.open_interest()
     assert out["limited_symbols"] == ("$SPX",)
-    assert (out["expiries"], out["all_days"], out["refresh_min"]) == (12, 1100, 120)
+    assert (out["expiries"], out["refresh_min"], out["retry_min"]) == (12, 120, 10)
 
 
 def test_the_limited_symbols_are_read_upper_case_and_a_bad_list_falls_back(monkeypatch):
     monkeypatch.setattr(cfg, "load", lambda: {"open_interest": {
-        "limited_symbols": [" $spx ", "$ndx", ""], "all_days": 400}})
+        "limited_symbols": [" $spx ", "$ndx", ""], "retry_min": 30}})
     out = cfg.open_interest()
-    assert out["limited_symbols"] == ("$SPX", "$NDX") and out["all_days"] == 400
+    assert out["limited_symbols"] == ("$SPX", "$NDX") and out["retry_min"] == 30
     monkeypatch.setattr(cfg, "load", lambda: {"open_interest": {
-        "limited_symbols": [], "all_days": 5}})
+        "limited_symbols": [], "retry_min": 0}})
     assert cfg.open_interest()["limited_symbols"] == ()      # none limited
-    assert cfg.open_interest()["all_days"] == 1100
+    assert cfg.open_interest()["retry_min"] == 10
     for bad in ("$SPX", [1, 2], None):
         monkeypatch.setattr(cfg, "load", lambda bad=bad: {"open_interest": {
             "limited_symbols": bad}})

@@ -124,9 +124,11 @@ cap_quantile = 0.92
 # nearest `expiries`.
 limited_symbols = ["$SPX"]
 expiries = 12
-# How far ahead "every expiration" looks, in days.
-all_days = 1100
-# Anything past a symbol's seven-day chain needs a wider, slower chain request
-# from Schwab. It is repeated at most this often per symbol, in minutes. Open
-# interest is published once a day, so a short interval buys nothing.
+# Anything past a symbol's seven-day chain is fetched from Schwab in several
+# requests, which is slow. It is repeated at most this often per symbol, in
+# minutes. Open interest is published once a day, so a short interval buys
+# nothing.
 refresh_min = 120
+# A fetch that failed is tried again after this many minutes, not on the
+# page's next refresh.
+retry_min = 10

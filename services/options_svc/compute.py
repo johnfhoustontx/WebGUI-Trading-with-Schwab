@@ -4657,7 +4657,7 @@ def gamma_snapshot(symbol: str, chain=None, with_term: bool = True,
     try:
         # The Open Interest tab's grid: as many expirations as its setting asks
         # for, widened and kept by oi_expiries (see there, and _term_chain).
-        term = (_oi_expiries.grid(eng, symbol, chain, _term_chain)
+        term = (_oi_expiries.grid(eng, symbol, chain, _term_chain, fetch_scan_chain)
                 if with_term else {})
     except Exception:
         term = {}

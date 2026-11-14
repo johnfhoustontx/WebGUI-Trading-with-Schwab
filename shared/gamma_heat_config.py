@@ -98,13 +98,13 @@ DEFAULTS = {
     },
     "open_interest": {
         # Every expiration is shown, except for the symbols listed, which
-        # show the nearest ``expiries``. ``all_days`` is how far ahead "every"
-        # looks; ``refresh_min`` how often (minutes) the wider chain request
-        # behind either is repeated per symbol.
+        # show the nearest ``expiries``. ``refresh_min`` is how often (minutes)
+        # the wider chain behind either is fetched again per symbol, and
+        # ``retry_min`` how long a failed fetch waits before it is tried again.
         "limited_symbols": ["$SPX"],
         "expiries": 12,
-        "all_days": 1100,
         "refresh_min": 120,
+        "retry_min": 10,
         # The Open Interest tab draws the strikes within this percentage of the
         # price, each side.
         "span_pct": 6.0,
@@ -238,15 +238,15 @@ def open_interest() -> dict:
     """The Open Interest tab's settings. ``span_pct``, ``max_rows`` and
     ``cap_quantile`` are read by the page each time it draws
     (``pages/options/gamma_oi``); ``limited_symbols``, ``expiries``,
-    ``all_days`` and ``refresh_min`` by the options service each time it
+    ``refresh_min`` and ``retry_min`` by the options service each time it
     builds the grid (``options_svc/oi_expiries``)."""
     return {"limited_symbols": _limited_symbols(),
             "expiries": _setting("open_interest", "expiries",
                                  minimum=5, maximum=40),
-            "all_days": _setting("open_interest", "all_days",
-                                 minimum=30, maximum=1500),
             "refresh_min": _setting("open_interest", "refresh_min",
                                     minimum=1, maximum=720),
+            "retry_min": _setting("open_interest", "retry_min",
+                                  minimum=1, maximum=120),
             "span_pct": _setting("open_interest", "span_pct",
                                  minimum=1.0, maximum=30.0),
             "max_rows": _setting("open_interest", "max_rows",

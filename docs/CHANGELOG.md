@@ -21,14 +21,19 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 - **Every expiration.** The tab shows every expiration a symbol has instead of five,
   and the strip scrolls sideways. `[open_interest] limited_symbols` (`$SPX`) are the
   exception and show the nearest `expiries` (12). `services/options_svc/oi_expiries.py`
-  builds the grid: one whole-chain request (`all_days`, 1100) for a symbol, the
-  count-based `_term_chain` for a limited one, kept per symbol and repeated at most
-  every `refresh_min` (120) rather than on every two-minute refresh. The published
-  grid is cut to each cell's two counts and the strikes that hold any. A failed or
-  short answer falls back to the chain in hand and is not kept. ⚠ Not measured
-  against Schwab: how long a whole chain takes, and it runs on the main command lane
-  (`gamma_refresh` is not in `SLOW_LANE`), where a slow request delays the commands
-  behind it.
+  builds the grid: the Finder's listed-expirations fetch (`compute.fetch_scan_chain`,
+  in runs) for a symbol, the count-based `_term_chain` for a limited one, kept per
+  symbol and repeated at most every `refresh_min` (120) rather than on every
+  two-minute refresh. The published grid is cut to each cell's two counts and the
+  strikes that hold any. A failed or short answer falls back to the chain in hand and
+  is not tried again for `retry_min` (10).
+  ⚠ **The first version asked for the whole chain in ONE request and failed on prod
+  every time** (2026-11-14, NVDA: `degraded: oi_expiries` twice, 32 s apart, the
+  proxy's 30-second limit), so the tab showed the chain in hand and the service
+  waited half a minute on each refresh. An unbounded `/chains` call is the one
+  already recorded as timing out beside `SCAN_FETCH_WORKERS`. Still not measured: how
+  long the fetch in runs takes on the main command lane (`gamma_refresh` is not in
+  `SLOW_LANE`), where it delays the commands behind it.
 - **60 / 40.** The expiry strip takes six parts of the map's width and each side of
   the bars two; a cell keeps its size (80 px wide at least) and a wider strip shows
   more expiries.
