@@ -3783,6 +3783,41 @@ Design `docs/plans/2026-11-14-range-forecast-design.md`.
 - A failure is the degrade `options.range_forecast`; the payload's `range` is then
   `null` and the other models still publish.
 
+### The exit chance (`exit_chance.py`, payload `exit`)
+
+Design `docs/plans/2026-11-14-exit-chance-design.md`.
+
+- **Trades.** Closed PCS, CCS and IC captures from `signals.db` (read-only; tracked
+  rows, `legs_json` rows and `MANUAL_CLOSE` left out) with at least two marks. Each
+  mark's fraction is its `pnl_pct_of_credit` / 100; the close's is `realized_pnl`
+  over the scale the marks imply (`unrealized_pnl` per percent, median), so an Income
+  capture stored per share is read right. `entry_credit * 100` is the fallback.
+- **Rows and label.** Every mark before the first at `[stops] tp_frac` (0.5), thinned
+  to one per `[exit] thin_min` (30) minutes. `y = 1` when a later mark or the close
+  reaches `tp_frac`. A `TIME_STOP` close within `[stops] time_stop_min_hold_min` of
+  capture is left out.
+- **Inputs (at the mark).** `pnl_frac`, `peak_frac`, `worst_frac`, `life_used`
+  (1 minus years left over years at capture, through
+  `options_calculator.expiry_time_to_years`), `log_mins_left`, `short_delta`
+  (absolute), `delta_change` (absolute now minus absolute at entry), `cushion` (spot's
+  distance from the short strike in percent of spot, positive on the safe side; an IC
+  takes its nearer side), `entry_iv_rank`, and IC and CCS indicators.
+- **Baseline.** The training rows' weighted rate of `y` in `pnl_frac` buckets (`[exit]
+  buckets`; a value on an edge falls above it; an empty bucket takes the overall
+  rate).
+- **Model.** `shared/ml/logistic.map_fit` on the inputs standardised over the training
+  rows, plus a missing indicator for each input missing there (a missing value is 0
+  after standardising, never a raw 0). Prior mean 0, precision `[exit] penalty` (1.0),
+  the intercept 1e-6.
+- **Walk-forward.** By entry day: a day's rows are predicted by a fit on rows of
+  trades that CLOSED before that day began (00:00 Central), once those span
+  `min_train_days` (15) entry days. A training set with one label only skips the day.
+- **Weights and score.** Each entry day weighs one, split over its trades and each
+  trade over its rows. Brier per row; the model minus the baseline through
+  `metrics.day_bootstrap_diff` (clustered by entry day) and Model Health's verdict rule
+  with `[exit] min_days` (40). Drift: `short_delta`, `cushion`, `entry_iv_rank`.
+- A failure is the degrade `options.exit_chance`; the payload's `exit` is then `null`.
+
 ## Cadences
 
 | Job | When | What |

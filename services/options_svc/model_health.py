@@ -16,6 +16,10 @@ days) over the same rows, each day counting once:
 * ``signals_<scanner_type>``: the captured signals' delta-implied win rate
   (``1 - |entry delta|``) against whether the signal closed with R above 0.
 
+Beside them, two shadow forecasts scored against their own baselines:
+``range`` (``range_forecast``) and ``exit`` (``exit_chance``: an open capture's
+chance of still reaching its target, against the distance it has travelled).
+
 Runs as the last step of the 16:20 scalp branch (``scheduler``) and on the
 ``model_health_rebuild`` command. Imports nothing from ``compute``.
 """
@@ -34,7 +38,7 @@ from shared.ml import baselines, metrics
 from shared.numeric import finite
 
 from services import _degrade
-from services.options_svc import range_forecast, scalp_store, scalp_study
+from services.options_svc import exit_chance, range_forecast, scalp_store, scalp_study
 
 log = logging.getLogger("options_svc.model_health")
 
@@ -331,6 +335,32 @@ def range_entries(scalp_db=None):
     return out
 
 
+def exit_entries(signals_db=None):
+    """The exit chance's rows for the page: ``None`` when it is switched off or
+    failed (counted as ``options.exit_chance``), else one dict per scanner type
+    with its verdict against the distance baseline and its drift."""
+    if not cfg.exit_enabled():
+        return None
+    try:
+        raw = exit_chance.evaluate(signals_db)
+    except Exception:
+        _degrade.degraded("options.exit_chance", detail="evaluate")
+        return None
+    min_days = cfg.exit_min_days()
+    out = []
+    for e in raw:
+        inputs = e.pop("inputs")
+        word = verdict(e["days"], min_days, e["diff"])
+        if word == "no_data" and inputs:
+            # Trades exist but none could be scored yet: not enough closed
+            # history before them, which is "too few days", not "no results".
+            word = "too_few_days"
+        status, flagged = drift(inputs)
+        out.append({**e, "min_days": min_days, "verdict": word,
+                    "drift_status": status, "drift": flagged})
+    return out
+
+
 def build(scalp_db=None, signals_db=None) -> dict:
     """The payload. Raises on an unreadable store (``run`` counts it); has no
     wall-clock field, so an unchanged rerun publishes nothing new."""
@@ -353,8 +383,10 @@ def build(scalp_db=None, signals_db=None) -> dict:
     last = [m.pop("last_day") for m in models]
     ranges = range_entries(scalp_db)
     last += [e.pop("last_day", None) for e in ranges or ()]
+    exits = exit_entries(signals_db)
+    last += [e.pop("last_day", None) for e in exits or ()]
     return {"data_date": max((d for d in last if d), default=None), "models": models,
-            "range": ranges}
+            "range": ranges, "exit": exits}
 
 
 # ── the report file ─────────────────────────────────────────────────────────
@@ -423,6 +455,27 @@ def report_markdown(payload) -> str:
                 f"{short[e['verdict_implied']]} {_f(di.get('mean'), 4)} "
                 f"({_f(di.get('lo'), 4)} to {_f(di.get('hi'), 4)}) | "
                 f"{_f(e.get('coverage'), 2)} | {e['days']} | {e['drift_status']} |")
+    exits = payload.get("exit")
+    if exits:
+        short = {k: v.replace(" the usual rate", "") for k, v in WORDS.items()}
+        lines += ["", "## Exit chance (shadow)", "",
+                  "At each mark of a closed captured credit signal, before it first "
+                  "reached its profit target, the chance it still would before its own "
+                  "exits ended it, against the rate by how far it had already travelled. "
+                  "A negative difference means the model was closer. The labels follow "
+                  "the exit rules running at the time. Nothing uses it.", "",
+                  "| Type | Verdict vs distance | Brier | Distance | Difference (95%) "
+                  "| Rows | Trades | Days | Drift |",
+                  "|---|---|---|---|---|---|---|---|---|"]
+        for e in exits:
+            word = short.get(e["verdict"], e["verdict"])
+            if e["verdict"] == "too_few_days":
+                word = f"{word} ({e['days']} of {e['min_days']})"
+            d = e.get("diff")
+            span = "-" if not d else f"{_f(d['mean'])} ({_f(d['lo'])} to {_f(d['hi'])})"
+            lines.append(f"| {e['type']} | {word} | {_f(e.get('brier'))} | "
+                         f"{_f(e.get('brier_distance'))} | {span} | {e['rows']} | "
+                         f"{e['trades']} | {e['days']} | {e['drift_status']} |")
     return "\n".join(lines) + "\n"
 
 

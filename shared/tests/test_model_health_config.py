@@ -81,6 +81,37 @@ def test_bad_range_values_fall_back(monkeypatch):
     assert cfg.range_symbols() == {"SPY": "$VIX", "QQQ": "$VXN", "$SPX": "$VIX"}
 
 
+# ── [exit] ─────────────────────────────────────────────────────────────────
+def test_exit_defaults():
+    assert cfg.exit_enabled() is True
+    assert cfg.exit_types() == ["SWING", "0DTE", "INCOME"]
+    assert cfg.exit_thin_min() == 30
+    assert (cfg.exit_min_train_days(), cfg.exit_min_days()) == (15, 40)
+    assert cfg.exit_penalty() == pytest.approx(1.0)
+    assert cfg.exit_buckets() == [-1.0, -0.5, -0.25, 0.0, 0.25]
+
+
+def _with_exit(monkeypatch, **over):
+    ex = {**cfg.DEFAULTS["exit"], **over}
+    monkeypatch.setattr(cfg, "load", lambda: {**cfg.DEFAULTS, "exit": ex})
+
+
+def test_exit_bad_values_fall_back(monkeypatch):
+    _with_exit(monkeypatch, thin_min="x", buckets=[0.5, "a"], min_days=0,
+               types=["SWING", 3, "bad type!"], penalty=-1, enabled="yes")
+    assert cfg.exit_thin_min() == 30
+    assert cfg.exit_buckets() == [-1.0, -0.5, -0.25, 0.0, 0.25]
+    assert cfg.exit_min_days() == 40
+    assert cfg.exit_types() == ["SWING"]
+    assert cfg.exit_penalty() == pytest.approx(1.0)
+    assert cfg.exit_enabled() is True
+
+
+def test_exit_buckets_are_sorted_and_deduplicated(monkeypatch):
+    _with_exit(monkeypatch, buckets=[0.25, -0.5, 0.25, 0.0])
+    assert cfg.exit_buckets() == [-0.5, 0.0, 0.25]
+
+
 def test_an_empty_volume_map_is_allowed(monkeypatch):
     _with_range(monkeypatch, volume_from={})
     assert cfg.range_volume_from() == {}

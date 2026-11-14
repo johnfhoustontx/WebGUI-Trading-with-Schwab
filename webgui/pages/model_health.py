@@ -182,7 +182,10 @@ INPUT_WORDS = {"rv_30": "realised volatility, last 30 minutes",
                "rv_5": "realised volatility, previous 5 sessions",
                "gap": "overnight gap", "iv": "volatility index",
                "iv_change": "volatility index since the open",
-               "volume": "volume against its usual level"}
+               "volume": "volume against its usual level",
+               "short_delta": "short delta now",
+               "cushion": "distance from the short strike",
+               "entry_iv_rank": "volatility rank at entry"}
 
 
 def drift_lines(model) -> list:
@@ -282,6 +285,58 @@ def range_drift(payload) -> list:
     return out
 
 
+# ── the exit chance (shadow) ────────────────────────────────────────────────
+EXIT_TITLE = "Exit chance (shadow)"
+EXIT_NOTE = ("At each mark of a closed captured credit signal, before it first reached "
+             "its profit target, the chance it still would before its own exits ended "
+             "it. Scored against the rate by how far the trade had already travelled, "
+             "learned on earlier trades only. Below zero the model was closer. The "
+             "outcomes follow the exit rules running at the time. Nothing uses it.")
+EXIT_OFF = "The exit chance is switched off or could not be scored."
+
+
+def exit_rows(payload) -> list:
+    """One row per scanner type, in the service's order."""
+    out = []
+    for e in (payload or {}).get("exit") or []:
+        e = e or {}
+        word = e.get("verdict")
+        out.append({
+            "id": str(e.get("type")),
+            "type": e.get("type") or _fmt.NO_READING,
+            "verdict": _short_verdict(word, e),
+            "_verdict_class": VERDICT_CLASSES.get(word, MUTED),
+            "difference": diff_text(e.get("diff")),
+            "brier": brier(e.get("brier")),
+            "brier_distance": brier(e.get("brier_distance")),
+            "rows": _fmt.fixed(e.get("rows"), 0),
+            "trades": _fmt.fixed(e.get("trades"), 0),
+            "days": _fmt.fixed(e.get("days"), 0),
+            "drift": drift_text(e),
+            "_drift_class": DRIFT_CLASSES.get(e.get("drift_status"), MUTED),
+        })
+    return out
+
+
+def exit_columns():
+    spec = [("type", "Scanner type"), ("verdict", "vs distance travelled"),
+            ("difference", "Brier difference (95%)"), ("brier", "Brier"),
+            ("brier_distance", "Brier, distance"), ("rows", "Marks"),
+            ("trades", "Trades"), ("days", "Days"), ("drift", "Inputs")]
+    return [{"name": f, "label": l, "field": f, "sortable": False, "align": "left"}
+            for f, l in spec]
+
+
+def exit_drift(payload) -> list:
+    """``[(scanner type, [lines])]`` for each type whose inputs moved."""
+    out = []
+    for e in (payload or {}).get("exit") or []:
+        lines = drift_lines(e)
+        if lines:
+            out.append(((e or {}).get("type"), lines))
+    return out
+
+
 def _class_slot(cls_field):
     """A cell drawn in the row's own fixed class, read from ``cls_field``."""
     return (r'''
@@ -318,6 +373,13 @@ def render():
             range_status = ui.label("").classes(f"text-sm {MUTED}")
             range_table = kit.table(range_columns(), rows_per_page=0)
             range_details = ui.column().classes("w-full gap-1")
+            ui.label(EXIT_TITLE).classes("text-base font-semibold pt-2")
+            ui.label(EXIT_NOTE).classes(f"text-sm {MUTED}")
+            exit_status = ui.label("").classes(f"text-sm {MUTED}")
+            exit_table = kit.table(exit_columns(), rows_per_page=0)
+            exit_details = ui.column().classes("w-full gap-1")
+        exit_table.add_slot("body-cell-verdict", _VERDICT_SLOT)
+        exit_table.add_slot("body-cell-drift", _DRIFT_SLOT)
         table.add_slot("body-cell-verdict", _VERDICT_SLOT)
         table.add_slot("body-cell-drift", _DRIFT_SLOT)
         range_table.add_slot("body-cell-vs_yardstick", _class_slot("_vs_yardstick_class"))
@@ -349,6 +411,15 @@ def render():
         with range_details:
             for sym, lines in range_drift(p):
                 ui.label(f"{sym} inputs that moved").classes("text-sm font-semibold")
+                for line in lines:
+                    ui.label(line).classes("text-sm tabular-nums")
+        exit_table.rows = exit_rows(p)
+        exit_table.update()
+        exit_status.text = "" if p.get("exit") or not p else EXIT_OFF
+        exit_details.clear()
+        with exit_details:
+            for kind, lines in exit_drift(p):
+                ui.label(f"{kind} inputs that moved").classes("text-sm font-semibold")
                 for line in lines:
                     ui.label(line).classes("text-sm tabular-nums")
         board.busy.hide()

@@ -2099,6 +2099,14 @@ here changes a chance, a rule or another page.
   volatility index's change since the open, and volume against its usual level.
   The volatility LEVELS are left out on purpose: they move in weeks-long
   stretches, so they would always look shifted.
+- **Exit chance (shadow)**, the third table, asks of every mark of a closed
+  captured credit signal, before it first reached its profit target: did it
+  still get there before its own exits closed it? A model reading the trade's
+  path (best and worst so far, time used, short delta, distance from the short
+  strike) is scored against the plain rate by how far the trade had already
+  travelled. **Beats** would mean the path tells more than the distance; until
+  enough days are scored it reads **Too few days**. Nothing uses it, and no exit
+  changes.
 """,
     "/social": """
 **Social Cards — the simple version**

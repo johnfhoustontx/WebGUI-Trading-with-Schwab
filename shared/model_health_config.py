@@ -3,6 +3,7 @@ chances. Read per call by ``services/options_svc/model_health.py``, so a saved
 change applies at the next run. Stdlib, ``shared.config_toml`` and
 ``repo_paths`` only. Design: docs/plans/2026-11-14-model-health-design.md
 """
+import math
 import re
 
 from repo_paths import MODEL_HEALTH_TOML
@@ -31,6 +32,15 @@ DEFAULTS = {
         "ridge": 1.0,
         "floor": 1e-8,
         "volume_sessions": 20,
+    },
+    "exit": {
+        "enabled": True,
+        "types": ["SWING", "0DTE", "INCOME"],
+        "thin_min": 30,
+        "min_train_days": 15,
+        "min_days": 40,
+        "penalty": 1.0,
+        "buckets": [-1.0, -0.5, -0.25, 0.0, 0.25],
     },
 }
 
@@ -201,9 +211,78 @@ def range_volume_sessions() -> int:
     return _range_number("volume_sessions", minimum=5, maximum=120, integer=True)
 
 
+# ── [exit]: the exit chance (docs/plans/2026-11-14-exit-chance-design.md) ────
+_TYPE_OK = re.compile(r"^[A-Z0-9_]{1,12}$")
+
+
+def _exit() -> dict:
+    cfg = load()
+    raw = cfg.get("exit") if isinstance(cfg, dict) else None
+    return raw if isinstance(raw, dict) else {}
+
+
+def _exit_number(key, *, minimum, maximum, integer=False):
+    default = DEFAULTS["exit"][key]
+    raw = _exit().get(key, default)
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return default
+    if integer and raw != int(raw):
+        return default
+    if not minimum <= raw <= maximum:
+        return default
+    return int(raw) if integer else float(raw)
+
+
+def exit_enabled() -> bool:
+    raw = _exit().get("enabled")
+    return raw if isinstance(raw, bool) else DEFAULTS["exit"]["enabled"]
+
+
+def exit_types() -> list:
+    """Scanner types scored, in the file's order; a bad entry is dropped."""
+    raw = _exit().get("types")
+    if not isinstance(raw, list):
+        return list(DEFAULTS["exit"]["types"])
+    out = []
+    for v in raw:
+        if isinstance(v, str) and _TYPE_OK.match(v) and v not in out:
+            out.append(v)
+    return out or list(DEFAULTS["exit"]["types"])
+
+
+def exit_thin_min() -> int:
+    return _exit_number("thin_min", minimum=5, maximum=240, integer=True)
+
+
+def exit_min_train_days() -> int:
+    return _exit_number("min_train_days", minimum=5, maximum=120, integer=True)
+
+
+def exit_min_days() -> int:
+    return _exit_number("min_days", minimum=10, maximum=250, integer=True)
+
+
+def exit_penalty() -> float:
+    return _exit_number("penalty", minimum=1e-6, maximum=1e3)
+
+
+def exit_buckets() -> list:
+    """The P&L-fraction bucket edges of the distance baseline, sorted; a list
+    holding anything but finite numbers (or empty, or over 12) is refused."""
+    raw = _exit().get("buckets")
+    ok = (isinstance(raw, list) and 1 <= len(raw) <= 12
+          and all(isinstance(v, (int, float)) and not isinstance(v, bool)
+                  and math.isfinite(v) for v in raw))
+    if not ok:
+        return list(DEFAULTS["exit"]["buckets"])
+    return sorted({float(v) for v in raw})
+
+
 __all__ = ["DEFAULTS", "load", "reset_cache", "enabled", "min_days", "recent_sessions",
            "min_reference_sessions", "psi_moved", "psi_shifted", "bootstrap_draws",
            "drift_permutations", "drift_p", "range_enabled", "range_symbols",
            "range_volume_from", "range_horizons", "range_first", "range_last",
            "range_step_min", "range_min_train_days", "range_min_days", "range_ridge",
-           "range_floor", "range_volume_sessions"]
+           "range_floor", "range_volume_sessions", "exit_enabled", "exit_types",
+           "exit_thin_min", "exit_min_train_days", "exit_min_days", "exit_penalty",
+           "exit_buckets"]

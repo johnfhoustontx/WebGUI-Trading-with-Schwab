@@ -214,6 +214,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 </li>
 <li><a href="#model-health">Model Health</a><ul>
 <li><a href="#the-range-forecast-range_forecastpy-payload-range">The range forecast (range_forecast.py, payload range)</a></li>
+<li><a href="#the-exit-chance-exit_chancepy-payload-exit">The exit chance (exit_chance.py, payload exit)</a></li>
 </ul>
 </li>
 <li><a href="#cadences">Cadences</a></li>
@@ -6811,6 +6812,40 @@ carries its data date, not a clock) and a dated <code>report.md</code>, using <c
   always read shifted.</li>
 <li>A failure is the degrade <code>options.range_forecast</code>; the payload's <code>range</code> is then
   <code>null</code> and the other models still publish.</li>
+</ul>
+<h3 id="the-exit-chance-exit_chancepy-payload-exit">The exit chance (<code>exit_chance.py</code>, payload <code>exit</code>)</h3>
+<p>Design <code>docs/plans/2026-11-14-exit-chance-design.md</code>.</p>
+<ul>
+<li><strong>Trades.</strong> Closed PCS, CCS and IC captures from <code>signals.db</code> (read-only; tracked
+  rows, <code>legs_json</code> rows and <code>MANUAL_CLOSE</code> left out) with at least two marks. Each
+  mark's fraction is its <code>pnl_pct_of_credit</code> / 100; the close's is <code>realized_pnl</code>
+  over the scale the marks imply (<code>unrealized_pnl</code> per percent, median), so an Income
+  capture stored per share is read right. <code>entry_credit * 100</code> is the fallback.</li>
+<li><strong>Rows and label.</strong> Every mark before the first at <code>[stops] tp_frac</code> (0.5), thinned
+  to one per <code>[exit] thin_min</code> (30) minutes. <code>y = 1</code> when a later mark or the close
+  reaches <code>tp_frac</code>. A <code>TIME_STOP</code> close within <code>[stops] time_stop_min_hold_min</code> of
+  capture is left out.</li>
+<li><strong>Inputs (at the mark).</strong> <code>pnl_frac</code>, <code>peak_frac</code>, <code>worst_frac</code>, <code>life_used</code>
+  (1 minus years left over years at capture, through
+  <code>options_calculator.expiry_time_to_years</code>), <code>log_mins_left</code>, <code>short_delta</code>
+  (absolute), <code>delta_change</code> (absolute now minus absolute at entry), <code>cushion</code> (spot's
+  distance from the short strike in percent of spot, positive on the safe side; an IC
+  takes its nearer side), <code>entry_iv_rank</code>, and IC and CCS indicators.</li>
+<li><strong>Baseline.</strong> The training rows' weighted rate of <code>y</code> in <code>pnl_frac</code> buckets (<code>[exit]
+  buckets</code>; a value on an edge falls above it; an empty bucket takes the overall
+  rate).</li>
+<li><strong>Model.</strong> <code>shared/ml/logistic.map_fit</code> on the inputs standardised over the training
+  rows, plus a missing indicator for each input missing there (a missing value is 0
+  after standardising, never a raw 0). Prior mean 0, precision <code>[exit] penalty</code> (1.0),
+  the intercept 1e-6.</li>
+<li><strong>Walk-forward.</strong> By entry day: a day's rows are predicted by a fit on rows of
+  trades that CLOSED before that day began (00:00 Central), once those span
+  <code>min_train_days</code> (15) entry days. A training set with one label only skips the day.</li>
+<li><strong>Weights and score.</strong> Each entry day weighs one, split over its trades and each
+  trade over its rows. Brier per row; the model minus the baseline through
+  <code>metrics.day_bootstrap_diff</code> (clustered by entry day) and Model Health's verdict rule
+  with <code>[exit] min_days</code> (40). Drift: <code>short_delta</code>, <code>cushion</code>, <code>entry_iv_rank</code>.</li>
+<li>A failure is the degrade <code>options.exit_chance</code>; the payload's <code>exit</code> is then <code>null</code>.</li>
 </ul>
 <h2 id="cadences">Cadences</h2>
 <table>

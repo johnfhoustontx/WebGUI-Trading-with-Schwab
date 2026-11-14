@@ -44,6 +44,8 @@ def fake_bus():
 @pytest.fixture(autouse=True)
 def _no_signals(monkeypatch):
     monkeypatch.setattr(mh, "_load_signal_rows", lambda db_path=None: [])
+    from services.options_svc import exit_chance
+    monkeypatch.setattr(exit_chance, "evaluate", lambda db_path=None: [])
     model_health_config.reset_cache()
 
 
@@ -475,3 +477,62 @@ def test_a_failing_range_forecast_leaves_the_rest_published(db, monkeypatch):
 def test_range_switched_off(db, monkeypatch):
     monkeypatch.setattr(model_health_config, "range_enabled", lambda: False)
     assert mh.build(scalp_db=db)["range"] is None
+
+
+# ── the exit chance ─────────────────────────────────────────────────────────
+def _exit_entry(kind="SWING", days=50, lo=-0.02, hi=-0.01, last="2026-11-14"):
+    diff = {"mean": (lo + hi) / 2, "lo": lo, "hi": hi, "days": days}
+    return {"type": kind, "days": days, "rows": days * 30, "trades": days * 4,
+            "brier": 0.20, "brier_distance": 0.22, "diff": diff,
+            "reliability": [[0.0, 0.1, None, None, 0]] * 10, "last_day": last,
+            "inputs": [(d, {"cushion": 1.0}) for d in trading_days(3)]}
+
+
+def test_build_carries_exit(db, monkeypatch):
+    from services.options_svc import exit_chance
+    monkeypatch.setattr(exit_chance, "evaluate", lambda db_path=None: [
+        _exit_entry(), _exit_entry("0DTE", days=4, lo=-0.1, hi=0.1)])
+    payload = mh.build(scalp_db=db)
+    swing, zero = payload["exit"]
+    assert swing["verdict"] == "beats" and zero["verdict"] == "too_few_days"
+    assert swing["min_days"] == model_health_config.exit_min_days()
+    assert "inputs" not in swing and "last_day" not in swing
+    assert swing["drift_status"] == "too_little_history"
+    assert payload["data_date"] == "2026-11-14"
+    json.dumps(payload)
+
+
+def test_exit_off_is_none(db, monkeypatch):
+    monkeypatch.setattr(model_health_config, "exit_enabled", lambda: False)
+    assert mh.build(scalp_db=db)["exit"] is None
+
+
+def test_exit_failure_degrades(db, monkeypatch):
+    from services.options_svc import exit_chance
+
+    def boom(db_path=None):
+        raise RuntimeError("signals unreadable")
+    monkeypatch.setattr(exit_chance, "evaluate", boom)
+    before = _degrade.counts().get("options.exit_chance", 0)
+    payload = mh.build(scalp_db=db)
+    assert payload["exit"] is None and len(payload["models"]) == 2
+    assert _degrade.counts().get("options.exit_chance", 0) == before + 1
+
+
+def test_report_has_exit_section(db, monkeypatch):
+    from services.options_svc import exit_chance
+    monkeypatch.setattr(exit_chance, "evaluate",
+                        lambda db_path=None: [_exit_entry(days=12, lo=-0.02, hi=0.16)])
+    report = mh.report_markdown(mh.build(scalp_db=db))
+    assert "## Exit chance (shadow)" in report
+    assert "| SWING | Too few days (12 of 40)" in report
+    assert "rules running at the time" in report
+
+
+def test_exit_with_rows_but_no_scored_day_reads_too_few_days(db, monkeypatch):
+    from services.options_svc import exit_chance
+    entry = _exit_entry("0DTE", days=0)
+    entry["diff"], entry["rows"] = None, 0
+    monkeypatch.setattr(exit_chance, "evaluate", lambda db_path=None: [entry])
+    (out,) = mh.build(scalp_db=db)["exit"]
+    assert out["verdict"] == "too_few_days"
