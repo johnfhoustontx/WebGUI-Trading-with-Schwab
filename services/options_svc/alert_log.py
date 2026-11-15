@@ -27,14 +27,18 @@ _CT = ZoneInfo("America/Chicago")
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS alerts (
-    alert_id      TEXT PRIMARY KEY,
+    alert_id      TEXT    NOT NULL,
     session_date  TEXT    NOT NULL,
     ts            INTEGER NOT NULL,
     symbol        TEXT    NOT NULL,
     type          TEXT    NOT NULL,
     side          TEXT,
     detail_json   TEXT,
-    source        TEXT    NOT NULL
+    source        TEXT    NOT NULL,
+    -- A contract-level id carries no date and the seen-set is per day, so the
+    -- same contract can fire again on a later day: the day is part of the key
+    -- (as in gex_history_db's flow_contract_days).
+    PRIMARY KEY (session_date, alert_id)
 );
 CREATE INDEX IF NOT EXISTS idx_alerts_type_day ON alerts (type, session_date);
 """
@@ -85,7 +89,8 @@ def _row(a, source):
 
 
 def record(alerts, *, source="live", db_path=None) -> int:
-    """Write each alert once (``INSERT OR IGNORE`` on its id). Returns the rows
+    """Write each alert once per day (``INSERT OR IGNORE`` on the session date
+    and its id). Returns the rows
     added. A malformed alert is skipped; a store failure raises (the caller
     counts it)."""
     rows = [r for r in (_row(a, source) for a in alerts or ()) if r is not None]

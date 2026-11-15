@@ -73,3 +73,14 @@ def test_default_path_sits_beside_the_scalp_store():
     import repo_paths
     from pathlib import Path
     assert Path(alert_log.DB_PATH).parent == Path(repo_paths.SCALP_DB).parent
+
+
+def test_same_id_on_two_days_is_two_alerts(tmp_path):
+    """A contract-level id carries no date (``SPY|uoa|call|600|2026-12-19``) and
+    the seen-set is per day, so the same contract can fire again tomorrow."""
+    db = tmp_path / "alert_log.db"
+    assert alert_log.record([_alert()], db_path=db) == 1
+    assert alert_log.record([_alert(ts=TS + 86400)], db_path=db) == 1
+    assert alert_log.record([_alert(ts=TS + 86400 + 60)], db_path=db) == 0
+    assert [r["session_date"] for r in alert_log.load(db_path=db)] == [
+        "2026-11-14", "2026-11-15"]

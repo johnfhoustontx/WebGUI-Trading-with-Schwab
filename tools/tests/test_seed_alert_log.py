@@ -51,3 +51,9 @@ def test_main_reads_a_copy_and_prints_the_count(tmp_path, capsys):
     assert seed_alert_log.main(["--db", str(tmp_path / "copy.db"),
                                 "--log", str(out)]) == 0
     assert "2 alerts added" in capsys.readouterr().out
+
+
+def test_the_same_contract_on_two_days_is_seeded_twice(tmp_path):
+    again = ("2026-11-13",) + _ROWS[0][1:8] + (1794585600, 700.0)
+    src = _source(tmp_path / "gex.db", [_ROWS[0], again])
+    assert seed_alert_log.seed(src, db_path=tmp_path / "out.db") == 2
