@@ -976,6 +976,36 @@ def test_agenda_places_a_fresh_release_at_its_release_and_says_so():
     assert a["days"][0]["items"][0]["sub"] == "Awaiting the release · Prior +0.2% m/m"
 
 
+def test_agenda_shows_no_day_before_today_and_today_leads():
+    # NOW is Fri Sep 25 20:00 CT. A dividend inside the producer's lookback, a
+    # priced IPO and yesterday's fresh release all sit on past days: none shows.
+    now = dt.datetime(2026, 9, 26, 1, 0, tzinfo=dt.timezone.utc)
+    # Thu Sep 24 22:00 CT: 22 h before NOW, inside the 24 h fresh window, so
+    # the tile is placed at that (past) release, not at its next one.
+    yesterday_release = dt.datetime(2026, 9, 25, 3, 0, tzinfo=dt.timezone.utc)
+    fresh = {**IND_WITH_NEW_OBS, "last_release_at": yesterday_release.isoformat(),
+             "latest": _obs("2026-09-01", 0.4,
+                            (yesterday_release + dt.timedelta(minutes=8)).isoformat())}
+    cal = {"events": [{"title": "Beige Book", "date": "2026-09-25"},
+                      {"title": "FOMC statement", "at": "2026-09-30T18:00:00+00:00",
+                       "date": "2026-09-30"}],
+           "dividends": [{"symbol": "JPM", "ex_date": "2026-09-23", "amount": 1.4},
+                         {"symbol": "KO", "ex_date": "2026-09-25", "amount": 0.5}],
+           "ipos": [{"symbol": "OLDC", "company": "OldCo", "date": "2026-09-22",
+                     "price": 20}],
+           "data": [fresh], "settings": CALCFG}
+    a = nv.agenda(cal, now=now)
+    heads = [d["head"] for d in a["days"]]
+    assert heads[0] == "TODAY · FRI · SEP 25" and heads[1:] == ["WED · SEP 30"]
+    titles = [i["title"] for d in a["days"] for i in d["items"]]
+    assert "JPM dividend" not in titles and not any("OLDC" in t for t in titles)
+    assert "CPI" not in titles                 # yesterday's release is a past day
+    assert titles == ["Beige Book", "KO dividend", "FOMC statement"]
+    # a kind whose every item was on a past day says it has nothing to show
+    a = nv.agenda({"data": [fresh], "settings": CALCFG}, now=now)
+    assert a["days"] == [] and "No indicators to show" in a["empty"]
+
+
 def test_agenda_multi_indicator_tiles_line_per_indicator_and_undated_tiles():
     two = [{**IND, "label": "CPI m/m"}, {**IND, "key": "core", "label": "Core CPI m/m",
                                         "high": True}]

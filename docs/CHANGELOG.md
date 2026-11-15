@@ -4,7 +4,21 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-14 (**The alert record and Alert quality on Model Health: ML roadmap Phase 4, flow half.**)
+**Last updated:** 2026-11-15 (**Market News: the Economic calendar above the SEC filings, today first, no past day.**)
+
+- **What.** On Market News → Headlines (and the public copy, which shares
+  `news.build_board`), the right column now reads Next on the calendar, the Economic
+  calendar, then the SEC filings. The calendar's agenda (`news_view.agenda`) draws no
+  day before today (Central), so today leads the card: a dividend inside the
+  producer's look-back, a priced IPO and a fresh release from an earlier day are left
+  out, and a kind left with nothing shows its empty sentence. The producer's windows
+  are unchanged. Operator's request.
+- **Tests.** `test_agenda_shows_no_day_before_today_and_today_leads` (new); the
+  layout-order tests in `test_news_page.py` and `test_news_live.py`, and the
+  clock test's dividend assertion, changed to the new behaviour. Page help, User
+  Guide, Reference Guide and `webgui-routes.md` updated.
+
+**Prior —** 2026-11-14 (**The alert record and Alert quality on Model Health: ML roadmap Phase 4, flow half.**)
 
 - **What.** Every flow alert of every type is now written once, when it fires, to
   `services/options_svc/data/alert_log.db`, kept forever and in the nightly backup.

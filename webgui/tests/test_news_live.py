@@ -433,8 +433,9 @@ def test_the_three_regions_render_in_the_private_pages_order(monkeypatch):
     i_head = texts.index("Public NVDA story")
     i_sec = texts.index(news.SEC_TITLE)
     i_cal = texts.index(news.CAL_TITLE)
-    assert i_head < i_sec < texts.index("JPM insider buys $2.0M") < i_cal
-    assert i_cal < texts.index("JPM dividend")
+    # the calendar above the filings, as on the private page (since 2026-11-15)
+    assert i_head < i_cal < texts.index("JPM dividend") < i_sec
+    assert i_sec < texts.index("JPM insider buys $2.0M")
 
 
 def test_a_cold_sec_and_calendar_say_nothing_has_been_published(monkeypatch):

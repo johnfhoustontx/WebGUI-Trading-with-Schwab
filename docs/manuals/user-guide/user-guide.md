@@ -1427,8 +1427,8 @@ News has two tabs: **Headlines** (this page, `/news`) and **X Feed** (`/news/x`,
 next section); the rail item opens Headlines.
 
 Two columns: the **headlines** and their filters on the left (two thirds of the
-width); on the right, **Next on the calendar**, the **SEC filings** and the
-**Economic calendar**. On a phone they stack in that order. Every time is Central, on
+width); on the right, **Next on the calendar**, the **Economic calendar** and the
+**SEC filings**. On a phone they stack in that order. Every time is Central, on
 a 24-hour clock.
 
 - **The filter card** at the top: a search box (*Filter by ticker or keyword* —
@@ -1474,14 +1474,9 @@ a 24-hour clock.
   time, with a countdown (*in 1d 19h*, *in 45m*, *now*), its title (a Fed speaker as
   *Vice Chair for Supervision Michelle W. Bowman — discussion*) and its date and time.
   An item with only a date is not counted down to.
-- **SEC filings** — insider **purchases** filed on Form 4 and new share offerings and
-  registrations (424B5, S-1, S-3, S-3ASR), newest first. The chips **All · Insider buys
-  · Offerings · Registrations** show one kind at a time. Each row: a dot for its impact,
-  the **form** (FORM 4 green, 424B5 red, S-1 amber, S-3 grey), the symbol (the filer's
-  own ticker whether or not the app follows it), who filed — the insider, or the
-  company and what it filed (hover for the full title) — an insider buy's dollar total
-  in green, and the time. A name opens the filing on **sec.gov** and nowhere else.
-- **Economic calendar** — one list, grouped by day (*MON · SEP 28*), each row a time,
+- **Economic calendar** — one list, grouped by day (*MON · SEP 28*), **today first**:
+  a day that has passed is not shown (so a dividend whose ex-date was earlier this
+  week, a priced IPO, or yesterday's report drops off). Each row is a time,
   a **badge**, a title and a grey subtitle. The badge tells the kinds apart:
   - **FOMC**, **SPEECH**, **TESTIMONY** or **EVENT** — the Federal Reserve's calendar
     (FOMC meetings, the Beige Book, Board speeches and testimony) plus a few other
@@ -1494,10 +1489,11 @@ a 24-hour clock.
     pay date; an IPO's its price or range and the offer size.
   - **DATA** — one row per report: CPI, PPI, Jobs (payrolls and unemployment), PCE,
     GDP, Retail sales and Jobless claims, at its next release, with the **Prior**
-    value. For a day after a release the row sits at the release and reads either
+    value. For a day after a release the row sits at the release (and is hidden
+    once that day has passed, until its next release date shows) and reads either
     **Awaiting the release** while the service checks for the new number every 2
     minutes for up to an hour, or **Actual … · Prior … · Released 7:30 AM CT** once the
-    new number has arrived (the day is added once it is no longer today). A report
+    new number has arrived. A report
     with two figures (CPI and Core CPI) shows a line for each. A report with no future
     date is listed at the end under *Date not yet published*.
   A muted note at the top of the card means a source could not be reached and the last
@@ -1509,6 +1505,13 @@ a 24-hour clock.
   its title contains one of the phrases in **Settings → Configuration → Market news
   → Other releases → Highlight events whose title contains**, and a report when its
   indicator's **High impact** switch is on.
+- **SEC filings** — insider **purchases** filed on Form 4 and new share offerings and
+  registrations (424B5, S-1, S-3, S-3ASR), newest first. The chips **All · Insider buys
+  · Offerings · Registrations** show one kind at a time. Each row: a dot for its impact,
+  the **form** (FORM 4 green, 424B5 red, S-1 amber, S-3 grey), the symbol (the filer's
+  own ticker whether or not the app follows it), who filed — the insider, or the
+  company and what it filed (hover for the full title) — an insider buy's dollar total
+  in green, and the time. A name opens the filing on **sec.gov** and nowhere else.
 - **Refresh** checks every feed now instead of waiting for the next scheduled poll
   (every 5 minutes in market hours, 15 off-hours, 60 at weekends and holidays), and
   re-checks the calendar — though each calendar source still keeps its own schedule.

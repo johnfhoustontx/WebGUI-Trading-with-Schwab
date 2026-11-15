@@ -997,9 +997,12 @@ def agenda(payload, *, now) -> dict:
     per indicator in ``lines`` when a tile carries more than one).
 
     The same rules as ``calendar_groups`` decide what is kept: a past EVENT is
-    dropped; dividends and IPOs keep the producer's windows; a data tile sits at
-    the release that made it fresh, else at its next one. A tile with no next
-    date is listed under ``undated``. ``notes`` are the stale-source sentences
+    dropped; a data tile sits at the release that made it fresh, else at its
+    next one. Then NO DAY BEFORE TODAY (Central) is shown - a dividend inside
+    the producer's lookback, a priced IPO, yesterday's release - so today's
+    items lead the card (since 2026-11-15, the operator's request); a kind left
+    with nothing gets its ``empty`` sentence. A tile with no next date is
+    listed under ``undated``. ``notes`` are the stale-source sentences
     (``"Dividend / IPO: Source unavailable ..."``); ``empty`` the plain
     sentence of each kind with nothing to show."""
     today = _today_ct(now)
@@ -1010,10 +1013,15 @@ def agenda(payload, *, now) -> dict:
     counts = [0, 0, 0]
 
     def put(key, d, item):
+        """Place ``item``; ``False`` when it falls on a day before today (a
+        past day is not shown: today leads the agenda)."""
         if key is None:
             undated.append(item)
+        elif today is not None and d < today:
+            return False
         else:
             placed.append((key, d, item))
+        return True
 
     for ev in _list(payload, "events"):
         tile = _event_tile(ev, now, today)
@@ -1026,9 +1034,9 @@ def agenda(payload, *, now) -> dict:
             title = sp["name"] + (f" — {sp['what']}" if sp["what"] != "speech" else "")
             sub = sp["role"]
         key, d, clock = _place(ev.get("at"), ev.get("date"))
-        counts[0] += 1
-        put(key, d, {"time": clock, "badge": badge, "title": title, "sub": sub,
-                     "lines": [], "high": tile["high"]})
+        if put(key, d, {"time": clock, "badge": badge, "title": title, "sub": sub,
+                        "lines": [], "high": tile["high"]}):
+            counts[0] += 1
     for raw, build, badge, date_key in (
             [(x, _dividend_tile, "DIVIDEND", "ex_date") for x in _list(payload, "dividends")]
             + [(x, _ipo_tile, "IPO", "date") for x in _list(payload, "ipos")]):
@@ -1041,9 +1049,9 @@ def agenda(payload, *, now) -> dict:
         if badge == "DIVIDEND":
             lines.insert(0, "Ex-dividend")
         key, d, _ = _place(None, raw.get(date_key))
-        counts[1] += 1
-        put(key, d, {"time": "", "badge": badge, "title": tile["title"],
-                     "sub": " · ".join(lines), "lines": [], "high": tile["high"]})
+        if put(key, d, {"time": "", "badge": badge, "title": tile["title"],
+                        "sub": " · ".join(lines), "lines": [], "high": tile["high"]}):
+            counts[1] += 1
     by_title, order = {}, []
     for ind in _list(payload, "data"):
         title = _str(ind.get("tile")).strip() or _str(ind.get("label")).strip()
@@ -1067,12 +1075,12 @@ def agenda(payload, *, now) -> dict:
         else:
             sub, lines = lines[0], []
         key, d, clock = _place(st.get("place_at"), st.get("place_date"))
-        counts[2] += 1
         item = {"time": clock, "badge": "DATA", "title": title, "sub": sub,
                 "lines": lines, "high": t["high"]}
         if key is None:
             item["sub"] = " · ".join(x for x in (NO_NEXT, sub) if x)
-        put(key, d, item)
+        if put(key, d, item):
+            counts[2] += 1
     placed.sort(key=lambda x: x[0])
     days = []
     for key, d, item in placed:

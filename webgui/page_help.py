@@ -1285,7 +1285,7 @@ helps; the word is not in the chance of target.
 **Market News — the simple version**
 
 Two columns: the **headlines** on the left; on the right what is **next on the
-calendar**, the **SEC filings** and the **economic calendar**. On a phone they
+calendar**, the **economic calendar** and the **SEC filings**. On a phone they
 stack in that order. All times are Central, on a 24-hour clock.
 
 - **Filter the headlines** with the box at the top (a ticker or any word in the
@@ -1319,12 +1319,8 @@ stack in that order. All times are Central, on a 24-hour clock.
   story about that company. **Click a ticker** to open its Symbol page.
 - **Next on the calendar** — the next scheduled event or data release that has
   a time, with a countdown (*in 1d 19h*, *in 45m*, *now*).
-- **SEC filings** — insider **purchases** (FORM 4) and new share offerings
-  (424B5) and registrations (S-1, S-3 …), newest first. The chips show one kind
-  at a time. Each row: the form, the symbol, who filed (hover for the full
-  title), an insider buy's dollar total in green, and the time. A name opens
-  the filing on sec.gov and nowhere else.
-- **Economic calendar** — one list by day. The badge says what each row is:
+- **Economic calendar** — one list by day, **today first**; a day that has
+  passed is not shown. The badge says what each row is:
   **FOMC**, a Fed **SPEECH** or **TESTIMONY** (the speaker's name, then their
   role), **DATA** (a report such as CPI or JOLTS, with its **Actual** and
   **Prior** values), a **DIVIDEND** (ex-dividend date for a ticker you follow)
@@ -1338,6 +1334,11 @@ stack in that order. All times are Central, on a 24-hour clock.
   Fed Chair's own speeches and testimony, and the CPI, PPI, jobs, PCE, GDP and
   retail-sales reports. Which ones count is in **Settings → Configuration →
   Market news**.
+- **SEC filings** — insider **purchases** (FORM 4) and new share offerings
+  (424B5) and registrations (S-1, S-3 …), newest first. The chips show one kind
+  at a time. Each row: the form, the symbol, who filed (hover for the full
+  title), an insider buy's dollar total in green, and the time. A name opens
+  the filing on sec.gov and nowhere else.
 
 The headlines refresh themselves — every 5 minutes in market hours, less often
 after the close and at weekends; the calendar keeps its own, slower schedule.

@@ -826,7 +826,8 @@ fact from the pure `pages/news_view.py`), all published by **`news_svc`** (:8216
 the **headlines** (`cache:news:feed`), the **SEC filings** (`cache:news:sec`) and the
 **calendar** (`cache:news:calendar`). Two columns at `lg` — two thirds and one third
 (`lg:grid-cols-3`), natural height, the page scrolls — stacking below `lg` in DOM
-order: filters, headlines, then the hero, SEC and calendar cards. Every region and
+order: filters, headlines, then the hero, calendar and SEC cards (the calendar moved
+above the SEC filings on 2026-11-15). Every region and
 filter is built by **`news.build_board`**, which reads no view (each page does its
 own reads and hands the payloads over) — so the public copy is the same board.
 Designs + plans:
@@ -907,6 +908,10 @@ Designs + plans:
   *Actual x · Prior y · Released 7:30 AM CT*, one line per indicator when a tile holds
   several (CPI and Core CPI). A data tile sits at the release that made it fresh, else
   at its next release; one with no next date is listed under *DATE NOT YET PUBLISHED*.
+  **No day before today (Central) is drawn** (since 2026-11-15): `agenda` drops a
+  placed item whose day is past - a dividend inside the producer's lookback, a priced
+  IPO, a fresh release from an earlier day - so TODAY leads the card; a kind left with
+  nothing gets its `empty` sentence.
   An indicator is decided
   page-side by `indicator_state`, because it is a function of `now`: within
   `actual_fresh_h` of its release it is **released** (the new value landed — first

@@ -1215,8 +1215,8 @@ every older link to `/news` still opens the same page.
 
 Two columns on one screen: the newest market **headlines** on the left (each ranked
 High, Med or Low and tagged with the tickers it names), and on the right what is
-**next on the calendar**, the **SEC filings** and insider buys, and the **economic
-calendar** — Fed events, dividends and IPOs, and the latest and next values of the
+**next on the calendar**, the **economic calendar**, and the **SEC filings** and
+insider buys — Fed events, dividends and IPOs, and the latest and next values of the
 reports that move the market. It answers *"is there news on
 this, and what is scheduled?"* without leaving the app.
 
@@ -1295,7 +1295,9 @@ buy's dollar total in green, and the time. The note *EDGAR · newest first* says
 the list is: the newest items the service keeps, not a fixed time window. A name links
 only to the filing on sec.gov.
 
-**Economic calendar.** One agenda grouped by day, all times Central. Each row is a
+**Economic calendar.** One agenda grouped by day, all times Central, **today first**:
+no day before today is shown (a dividend in the 3-day look-back, a priced IPO and a
+release from an earlier day are left out). It sits above the SEC filings. Each row is a
 time, a badge, a title and a grey subtitle; the badge tells the three kinds apart:
 
 | Badge | What it is |

@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-14</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-15</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -434,6 +434,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#reading-the-screen_32">Reading the screen</a></li>
 <li><a href="#the-range-forecast-shadow">The range forecast (shadow)</a></li>
 <li><a href="#the-exit-chance-shadow">The exit chance (shadow)</a></li>
+<li><a href="#alert-quality-shadow">Alert quality (shadow)</a></li>
 </ul>
 </li>
 <li><a href="#user-manuals">User Manuals</a></li>
@@ -1929,8 +1930,8 @@ every older link to <code>/news</code> still opens the same page.</p>
 <h3 id="what-it-is_5">What it is</h3>
 <p>Two columns on one screen: the newest market <strong>headlines</strong> on the left (each ranked
 High, Med or Low and tagged with the tickers it names), and on the right what is
-<strong>next on the calendar</strong>, the <strong>SEC filings</strong> and insider buys, and the <strong>economic
-calendar</strong> — Fed events, dividends and IPOs, and the latest and next values of the
+<strong>next on the calendar</strong>, the <strong>economic calendar</strong>, and the <strong>SEC filings</strong> and
+insider buys — Fed events, dividends and IPOs, and the latest and next values of the
 reports that move the market. It answers <em>"is there news on
 this, and what is scheduled?"</em> without leaving the app.</p>
 <h3 id="where-the-data-comes-from_4">Where the data comes from</h3>
@@ -2045,7 +2046,9 @@ Each row: a dot for its impact, the form badge (<strong>FORM 4</strong> green �
 buy's dollar total in green, and the time. The note <em>EDGAR · newest first</em> says what
 the list is: the newest items the service keeps, not a fixed time window. A name links
 only to the filing on sec.gov.</p>
-<p><strong>Economic calendar.</strong> One agenda grouped by day, all times Central. Each row is a
+<p><strong>Economic calendar.</strong> One agenda grouped by day, all times Central, <strong>today first</strong>:
+no day before today is shown (a dividend in the 3-day look-back, a priced IPO and a
+release from an earlier day are left out). It sits above the SEC filings. Each row is a
 time, a badge, a title and a grey subtitle; the badge tells the three kinds apart:</p>
 <table>
 <thead>
@@ -7019,6 +7022,16 @@ travelled. That opponent is hard on purpose: for 0-DTE, distance alone explains 
 of the outcome. A <em>Beats</em> here is the evidence an advice chip on open positions would
 need; until then the table is a record, and no exit rule reads it. Its outcomes follow
 the exit rules running at the time, which changed between September and November.</p>
+<h3 id="alert-quality-shadow">Alert quality (shadow)</h3>
+<p>The fourth table is the roadmap's Phase 4, flow half. Every flow alert is now kept
+for good (the alert list itself lasts a day, and the contract-level history 20
+sessions). For each type it asks whether the half hour after an alert ran wider
+than that symbol's usual range at that time of day, and compares that with the
+same symbol's other half hours the same day. The comparison is the point: alerts
+fire on busy days, and a busy day widens every window, so only a gap between the
+two says the alert itself told you something. It is the number that would decide
+whether HIRO and big delta earn a place in the rankings or a phone push; until it
+reads <em>Beats</em> over 40 days, nothing changes.</p>
 <h2 id="user-manuals">User Manuals</h2>
 <p><em>Menu: ACCOUNT → More → User Manuals · Route <code>/manuals</code></em></p>
 <p>Links to the five manuals, each opening in a new tab:</p>

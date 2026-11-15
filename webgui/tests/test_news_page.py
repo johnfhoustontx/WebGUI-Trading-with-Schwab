@@ -730,16 +730,18 @@ def test_the_regions_render_left_then_right_in_dom_order(monkeypatch):
     i_next = texts.index(news.NEXT_TITLE)
     i_sec = texts.index(news.SEC_TITLE)
     i_cal = texts.index(news.CAL_TITLE)
-    assert texts.index(news.SOURCES_LABEL) < i_head < i_next < i_sec < i_cal
-    assert i_sec < texts.index("ACME insider buys $136.4M") < i_cal
-    assert i_sec < texts.index("$136.4M") < i_cal          # the Form 4 value, in green
-    assert i_next < texts.index("FOMC statement") < i_sec  # the hero
+    # the right column: the hero, the Economic calendar, THEN the SEC filings
+    # (swapped 2026-11-15 at the operator's request)
+    assert texts.index(news.SOURCES_LABEL) < i_head < i_next < i_cal < i_sec
+    assert i_sec < texts.index("ACME insider buys $136.4M")
+    assert i_sec < texts.index("$136.4M")                  # the Form 4 value, in green
+    assert i_next < texts.index("FOMC statement") < i_cal  # the hero
     for chip in nv.SEC_KINDS.values():
-        assert i_sec < texts.index(chip, i_sec) < i_cal
+        assert i_sec < texts.index(chip, i_sec)
     # the agenda: a day header, the event, the dividend - one list, badges apart
-    assert i_cal < texts.index("JPM dividend")
-    assert "DIVIDEND" in texts[i_cal:] and "FOMC" in texts[i_cal:]
-    assert "WED · OCT 28" in texts[i_cal:]
+    assert i_cal < texts.index("JPM dividend") < i_sec
+    assert "DIVIDEND" in texts[i_cal:i_sec] and "FOMC" in texts[i_cal:i_sec]
+    assert "WED · OCT 28" in texts[i_cal:i_sec]
     # the grid: two thirds / one third at lg
     grids = [e for e in new if "lg:grid-cols-3" in e.classes]
     assert len(grids) == 1
@@ -770,8 +772,11 @@ def test_the_page_reads_its_clock_from_utc_now(monkeypatch):
     assert "FOMC statement" in morning and "TODAY · WED · OCT 28" in morning
     assert "FOMC statement" not in after
     assert not any("OCT 28" in text for text in after)
+    # the JPM ex-date (Oct 6) is a past day on all three: no past day is drawn
     for texts in (before, morning, after):
-        assert "JPM dividend" in texts                    # a past ex-date is kept
+        assert "JPM dividend" not in texts
+    early = _texts(dt.datetime(2026, 10, 6, 15, 0, tzinfo=dt.timezone.utc))
+    assert "JPM dividend" in early and "TODAY · TUE · OCT 6" in early
 
 
 def test_the_sec_row_links_its_symbol_and_draws_its_form_value_and_time():

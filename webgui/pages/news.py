@@ -20,11 +20,13 @@ and the first source. A high story carries a red left border and a faint wash, a
 med one an amber border.
 
 RIGHT: the NEXT ON THE CALENDAR hero (the earliest timed event or data release
-ahead, with a countdown); the SEC filings card (All / Insider buys / Offerings /
-Registrations; a form badge, the symbol, the filer, a Form 4's dollar total and
-the time); the Economic calendar card - an agenda grouped by day, every kind in
-one list told apart by its badge (FOMC, SPEECH, TESTIMONY, EVENT, DATA,
-DIVIDEND, IPO), a high-impact item with an amber border and a HIGH marker.
+ahead, with a countdown); the Economic calendar card - an agenda grouped by day,
+today first and no past day, every kind in one list told apart by its badge
+(FOMC, SPEECH, TESTIMONY, EVENT, DATA, DIVIDEND, IPO), a high-impact item with
+an amber border and a HIGH marker; then the SEC filings card (All / Insider buys
+/ Offerings / Registrations; a form badge, the symbol, the filer, a Form 4's
+dollar total and the time). The calendar sits above the filings since
+2026-11-15, at the operator's request.
 
 ``build_board`` builds every region and its filters and returns the handles the
 page feeds payloads into; the public screen (``news_live``) calls it too, so the
@@ -609,17 +611,17 @@ def build_board(*, linked, symbol="", watchlist=None):
             hero.set_visibility(False)
             with ui.column().classes(_SIDE_CARD):
                 with ui.row().classes(_CARD_HEAD):
+                    kit.section_title(CAL_TITLE)
+                    ui.label(CAL_NOTE).classes(_CARD_NOTE)
+                cal_region = kit.region("Loading the calendar…")
+            with ui.column().classes(_SIDE_CARD):
+                with ui.row().classes(_CARD_HEAD):
                     kit.section_title(SEC_TITLE)
                     ui.label(SEC_NOTE).classes(_CARD_NOTE)
                 sec_chips = ui.row().classes("w-full items-center gap-2 flex-wrap")
                 sec_region = kit.region("Loading filings…")
                 sec_more = kit.button("Show more", kind="secondary", icon="expand_more")
                 sec_more.set_visibility(False)
-            with ui.column().classes(_SIDE_CARD):
-                with ui.row().classes(_CARD_HEAD):
-                    kit.section_title(CAL_TITLE)
-                    ui.label(CAL_NOTE).classes(_CARD_NOTE)
-                cal_region = kit.region("Loading the calendar…")
 
     # ── the headline list and its filters ─────────────────────────────────
     def _filtered():
