@@ -16,9 +16,11 @@ days) over the same rows, each day counting once:
 * ``signals_<scanner_type>``: the captured signals' delta-implied win rate
   (``1 - |entry delta|``) against whether the signal closed with R above 0.
 
-Beside them, two shadow forecasts scored against their own baselines:
-``range`` (``range_forecast``) and ``exit`` (``exit_chance``: an open capture's
-chance of still reaching its target, against the distance it has travelled).
+Beside them, three shadow scores against their own baselines: ``range``
+(``range_forecast``), ``exit`` (``exit_chance``: an open capture's chance of
+still reaching its target, against the distance it has travelled) and
+``alerts`` (``alert_quality``: how often each flow alert type was followed by a
+wider range than usual, against the same symbol's other times that day).
 
 Runs as the last step of the 16:20 scalp branch (``scheduler``) and on the
 ``model_health_rebuild`` command. Imports nothing from ``compute``.
@@ -38,7 +40,8 @@ from shared.ml import baselines, metrics
 from shared.numeric import finite
 
 from services import _degrade
-from services.options_svc import exit_chance, range_forecast, scalp_store, scalp_study
+from services.options_svc import (alert_quality, exit_chance, range_forecast,
+                                  scalp_store, scalp_study)
 
 log = logging.getLogger("options_svc.model_health")
 
@@ -361,7 +364,44 @@ def exit_entries(signals_db=None):
     return out
 
 
-def build(scalp_db=None, signals_db=None) -> dict:
+#: The page's words for each alert type (mirrored on the Model Health page).
+ALERT_WORDS = {"uoa": "Unusual activity", "big_delta": "Big delta",
+               "hiro_surge": "HIRO surge", "hiro_flip": "HIRO flip",
+               "crossover": "Premium crossover", "gamma_flip": "Gamma flip"}
+DROP_WORDS = {"horizon": "too late in the session", "history": "too early in the record",
+              "price": "with no price", "base": "with no other time that day"}
+
+
+def alert_entries(log_db=None, archive_db=None):
+    """Alert quality's rows for the page: ``None`` when it is switched off or
+    failed (counted as ``options.alert_quality``), else one dict per alert type
+    with its verdict against the same symbol's other times that day."""
+    if not cfg.alerts_enabled():
+        return None
+    try:
+        raw = alert_quality.evaluate(log_path=log_db, archive_path=archive_db)
+    except Exception:
+        _degrade.degraded("options.alert_quality", detail="evaluate")
+        return None
+    min_days = cfg.alerts_min_days()
+    out = []
+    for e in raw:
+        word = verdict(e["days"], min_days, e["diff"])
+        if word == "no_data" and e.get("logged"):
+            # Alerts are recorded but none can be scored yet (too little archive
+            # before them): "too few days", not "no results".
+            word = "too_few_days"
+        out.append({**e, "min_days": min_days, "verdict": word})
+    return out
+
+
+def dropped_text(entry) -> str:
+    """``"3 too late in the session, 1 with no price"``; empty when none."""
+    d = (entry or {}).get("dropped") or {}
+    return ", ".join(f"{d[k]} {w}" for k, w in DROP_WORDS.items() if d.get(k))
+
+
+def build(scalp_db=None, signals_db=None, log_db=None, archive_db=None) -> dict:
     """The payload. Raises on an unreadable store (``run`` counts it); has no
     wall-clock field, so an unchanged rerun publishes nothing new."""
     latest = scalp_store.latest_prob_models(db_path=scalp_db) or {}
@@ -385,8 +425,10 @@ def build(scalp_db=None, signals_db=None) -> dict:
     last += [e.pop("last_day", None) for e in ranges or ()]
     exits = exit_entries(signals_db)
     last += [e.pop("last_day", None) for e in exits or ()]
+    alerts = alert_entries(log_db, archive_db)
+    last += [e.pop("last_day", None) for e in alerts or ()]
     return {"data_date": max((d for d in last if d), default=None), "models": models,
-            "range": ranges, "exit": exits}
+            "range": ranges, "exit": exits, "alerts": alerts}
 
 
 # ── the report file ─────────────────────────────────────────────────────────
@@ -476,6 +518,29 @@ def report_markdown(payload) -> str:
             lines.append(f"| {e['type']} | {word} | {_f(e.get('brier'))} | "
                          f"{_f(e.get('brier_distance'))} | {span} | {e['rows']} | "
                          f"{e['trades']} | {e['days']} | {e['drift_status']} |")
+    alerts = payload.get("alerts")
+    if alerts:
+        short = {k: v.replace(" the usual rate", "") for k, v in WORDS.items()}
+        lines += ["", "## Alert quality (shadow)", "",
+                  "For each flow alert type, how often the next half hour ran wider "
+                  "than that symbol's usual range at that time of day (the median of "
+                  "earlier sessions), against the same symbol's other times that day. "
+                  "A positive difference means the alert was followed by a wider range "
+                  "more often. Nothing uses it.", "",
+                  "| Alert | Verdict | Wider after the alert | Wider at other times "
+                  "| Difference (95%) | Alerts | Days | Left out |",
+                  "|---|---|---|---|---|---|---|---|"]
+        for e in alerts:
+            word = short.get(e["verdict"], e["verdict"])
+            if e["verdict"] == "too_few_days":
+                word = f"{word} ({e['days']} of {e['min_days']})"
+            d = e.get("diff")
+            span = ("-" if not d else
+                    f"{_f(-d['mean'])} ({_f(-d['hi'])} to {_f(-d['lo'])})")
+            lines.append(f"| {ALERT_WORDS.get(e['type'], e['type'])} | {word} | "
+                         f"{_f(e.get('hit_rate'), 2)} | {_f(e.get('base_rate'), 2)} | "
+                         f"{span} | {e['alerts']} of {e['logged']} | {e['days']} | "
+                         f"{dropped_text(e) or '-'} |")
     return "\n".join(lines) + "\n"
 
 

@@ -46,6 +46,9 @@ def _no_signals(monkeypatch):
     monkeypatch.setattr(mh, "_load_signal_rows", lambda db_path=None: [])
     from services.options_svc import exit_chance
     monkeypatch.setattr(exit_chance, "evaluate", lambda db_path=None: [])
+    from services.options_svc import alert_quality
+    monkeypatch.setattr(alert_quality, "evaluate",
+                        lambda log_path=None, archive_path=None: [])
     model_health_config.reset_cache()
 
 
@@ -536,3 +539,77 @@ def test_exit_with_rows_but_no_scored_day_reads_too_few_days(db, monkeypatch):
     monkeypatch.setattr(exit_chance, "evaluate", lambda db_path=None: [entry])
     (out,) = mh.build(scalp_db=db)["exit"]
     assert out["verdict"] == "too_few_days"
+
+
+# ── alert quality (docs/plans/2026-11-14-alert-quality-design.md) ───────────
+def _alert_entry(kind="uoa", days=45, lo=-0.15, hi=-0.05, logged=None,
+                 last="2026-11-13"):
+    diff = None if days == 0 else {"mean": (lo + hi) / 2, "lo": lo, "hi": hi,
+                                   "days": days}
+    return {"type": kind, "alerts": days * 3, "logged": days * 3 if logged is None
+            else logged, "days": days, "hit_rate": 0.61 if days else None,
+            "base_rate": 0.44 if days else None, "diff": diff,
+            "dropped": {"price": 0, "horizon": 2, "history": 0, "base": 0},
+            "last_day": last if days else None}
+
+
+def _stub_alerts(monkeypatch, entries):
+    from services.options_svc import alert_quality
+    monkeypatch.setattr(alert_quality, "evaluate",
+                        lambda log_path=None, archive_path=None: entries)
+
+
+def test_alert_entries_verdicts(db, monkeypatch):
+    _stub_alerts(monkeypatch, [_alert_entry(),
+                               _alert_entry("hiro_surge", days=9, lo=-0.3, hi=0.1)])
+    payload = mh.build(scalp_db=db)
+    uoa, hiro = payload["alerts"]
+    assert uoa["verdict"] == "beats" and hiro["verdict"] == "too_few_days"
+    assert uoa["min_days"] == model_health_config.alerts_min_days()
+    assert "last_day" not in uoa
+    assert payload["data_date"] == "2026-11-13"
+    json.dumps(payload)
+
+
+def test_logged_but_unscored_reads_too_few_days(db, monkeypatch):
+    _stub_alerts(monkeypatch, [_alert_entry(days=0, logged=12),
+                               _alert_entry("crossover", days=0, logged=0)])
+    seen, none = mh.build(scalp_db=db)["alerts"]
+    assert seen["verdict"] == "too_few_days"
+    assert none["verdict"] == "no_data"
+
+
+def test_alert_quality_failure_is_counted(db, monkeypatch):
+    from services.options_svc import alert_quality
+
+    def boom(log_path=None, archive_path=None):
+        raise RuntimeError("archive unreadable")
+    monkeypatch.setattr(alert_quality, "evaluate", boom)
+    before = _degrade.counts().get("options.alert_quality", 0)
+    payload = mh.build(scalp_db=db)
+    assert payload["alerts"] is None and len(payload["models"]) == 2
+    assert _degrade.counts().get("options.alert_quality", 0) == before + 1
+
+
+def test_alert_quality_switched_off(db, monkeypatch):
+    from services.options_svc import alert_quality
+    called = []
+    monkeypatch.setattr(alert_quality, "evaluate",
+                        lambda **k: called.append(k) or [])
+    monkeypatch.setattr(model_health_config, "alerts_enabled", lambda: False)
+    assert mh.build(scalp_db=db)["alerts"] is None
+    assert called == []
+
+
+def test_report_shows_alert_section(db, monkeypatch):
+    _stub_alerts(monkeypatch, [_alert_entry(days=9, lo=-0.15, hi=-0.05)])
+    report = mh.report_markdown(mh.build(scalp_db=db))
+    assert "## Alert quality (shadow)" in report
+    assert "| Unusual activity | Too few days (9 of 40) | 0.61 | 0.44 |" in report
+    # shown from the alert's side: alert minus base
+    assert "0.100 (0.050 to 0.150)" in report
+    assert "2 too late in the session" in report
+
+
+def test_alert_words_cover_every_type():
+    assert set(mh.ALERT_WORDS) == set(model_health_config.ALERT_TYPES)
