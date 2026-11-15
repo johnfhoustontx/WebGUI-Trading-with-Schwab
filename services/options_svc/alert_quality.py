@@ -19,7 +19,7 @@ import datetime as _dt
 import sqlite3
 import statistics
 import sys
-from bisect import bisect_right
+from bisect import bisect_left
 from collections import defaultdict
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -133,9 +133,10 @@ def usual_ranges(paths, horizon_sec, history, min_history) -> dict:
 
 
 def _start(path, ts):
-    """Index of the last point at or before ``ts`` within one grid step."""
-    i = bisect_right([p[0] for p in path], ts) - 1
-    if i < 0 or ts - path[i][0] > GRID_SEC:
+    """Index of the first point at or after ``ts``, within one grid step. Never
+    a point before: an alert fired BY a move would be scored on that move."""
+    i = bisect_left([p[0] for p in path], ts)
+    if i >= len(path) or path[i][0] - ts > GRID_SEC:
         return None
     return i
 

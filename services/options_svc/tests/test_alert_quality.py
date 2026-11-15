@@ -213,3 +213,16 @@ def test_evaluate_with_no_stores_is_no_data(tmp_path):
     assert [e["type"] for e in out] == ["uoa", "big_delta", "hiro_surge", "hiro_flip",
                                        "crossover"]
     assert all(e["diff"] is None and e["logged"] == 0 for e in out)
+
+
+def test_the_window_starts_after_the_alert_not_before():
+    """An alert fired BY a move must not be scored on that move: its window
+    starts at the first price at or after it."""
+    day = _sessions(1)[0]
+    t = _ts(day, 10, 0)
+    path = [(ts, 100.0 if ts <= t else 103.0) for ts in _grid(day)]
+    i = aq._start(path, t + 240)                 # the alert at 10:04
+    assert path[i][0] == t + 300                 # the 10:05 price
+    assert aq.window_range(path, i, H) == 0.0
+    assert path[aq._start(path, t)][0] == t      # on a grid point: that point
+    assert aq._start(path, path[-1][0] + 60) is None
