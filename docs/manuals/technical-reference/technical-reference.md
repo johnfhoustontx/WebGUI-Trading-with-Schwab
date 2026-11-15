@@ -3818,6 +3818,41 @@ Design `docs/plans/2026-11-14-exit-chance-design.md`.
   with `[exit] min_days` (40). Drift: `short_delta`, `cushion`, `entry_iv_rank`.
 - A failure is the degrade `options.exit_chance`; the payload's `exit` is then `null`.
 
+### Alert quality (`alert_quality.py`, payload `alerts`)
+
+Design `docs/plans/2026-11-14-alert-quality-design.md`.
+
+- **The record.** `handlers.run_flow_alerts` writes every fresh alert of every type
+  to `services/options_svc/data/alert_log.db` (`alert_log.record`, `INSERT OR IGNORE`
+  on the alert id, after the pushes and the cached list; a failure is the degrade
+  `options.alert_log`). Switch: `config/flow_alerts.toml [log] enabled`.
+  `tools/seed_alert_log.py` copied the unusual activity and big delta alerts held in
+  `flow_contract_days` once (`source = 'seed'`).
+- **Price path.** The Gamma Archive's `gex` view, fetched rows with a spot only, one
+  per 5-minute grid point; the futures feed left out. A session counts once archived
+  (17:00), so it is first scored the next night.
+- **Window.** From the last grid point at or before the alert (within 5 minutes):
+  (highest - lowest) / starting spot over `[alerts] horizon_min` (30). A path that
+  does not reach the full horizon (within half a grid step) gives no window.
+- **Usual range.** Per symbol and Central 5-minute slot, the median window over that
+  symbol's `history_sessions` (20) sessions BEFORE the day that hold the slot; none
+  below `min_history` (10).
+- **Label and base.** 1 when the window beats its usual range. The base is the share
+  of that symbol-day's other windows that do, leaving out every window starting
+  within `horizon_min` of ANY recorded alert on it (either side).
+- **Score.** Each day weighs one, split over its scored alerts. Hit rate and base
+  rate are those weighted means; the interval is `metrics.day_bootstrap_diff` of
+  `-label` against `-base` (negative: the alert wider more often), with Model
+  Health's verdict rule and `[alerts] min_days` (40). Recorded but unscorable alerts
+  read *Too few days*.
+- **Left out.** `price` (no point within 5 minutes before), `horizon`, `history`,
+  `base` (no other window that day), counted per type.
+- **Types.** `[alerts] types`: `uoa`, `big_delta`, `hiro_surge`, `hiro_flip`,
+  `crossover`. `gamma_flip` is recorded but not scored until the gamma regime study
+  has read.
+- A failure is the degrade `options.alert_quality`; the payload's `alerts` is then
+  `null`.
+
 ## Cadences
 
 | Job | When | What |

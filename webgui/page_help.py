@@ -2107,6 +2107,17 @@ here changes a chance, a rule or another page.
   travelled. **Beats** would mean the path tells more than the distance; until
   enough days are scored it reads **Too few days**. Nothing uses it, and no exit
   changes.
+- **Alert quality (shadow)**, the fourth table, asks of each flow alert type: was
+  the half hour after an alert wider (high minus low) than that symbol's usual
+  range at that time of day? **Wider after the alert** is how often it was;
+  **Wider at other times** is the same question asked of that symbol's other half
+  hours the same day, so a busy day lifts both. The **Difference** is the first
+  minus the second, in percentage points; **Beats** means alerts were followed by
+  a wider range more often, over whole days. **Left out** counts alerts that
+  could not be scored (too late in the session, too early in the record, no
+  price). Every alert is kept from 2026-11-14, so most types read **Too few
+  days** for months. Gamma flip alerts are kept but not scored until the gamma
+  regime study has read. Nothing changes an alert, a push or a ranking.
 """,
     "/social": """
 **Social Cards — the simple version**

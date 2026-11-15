@@ -4,7 +4,32 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-14 (**Exit chance on Model Health: ML roadmap Phase 3b.**)
+**Last updated:** 2026-11-14 (**The alert record and Alert quality on Model Health: ML roadmap Phase 4, flow half.**)
+
+- **What.** Every flow alert of every type is now written once, when it fires, to
+  `services/options_svc/data/alert_log.db`, kept forever and in the nightly backup.
+  Model Health gains a fourth table: per alert type, how often the half hour after an
+  alert ran wider than that symbol's usual range at that time of day, against the
+  same symbol's other half hours that day. Shadow: no alert, push or ranking changes.
+- **Pieces.** `alert_log.py` (the store; written from `handlers.run_flow_alerts`,
+  switch `[log] enabled` in `config/flow_alerts.toml`); `tools/seed_alert_log.py` (a
+  one-off copy of the unusual activity and big delta alerts held in
+  `flow_contract_days`); `alert_quality.py` (the scorer, reading the record and the
+  Gamma Archive); `model_health.alert_entries`; `[alerts]` in
+  `config/model_health.toml` with Settings entries; the page table.
+- **Gamma flip** is recorded but not scored until the gamma regime study has read
+  (its sessions are spoken for). Gamma features in the range forecast wait too.
+- **To run once after the promote:** `tools/seed_alert_log.py`, so the held 20
+  sessions are in the record.
+- **First reading** (2026-11-13 backup, seeded; all *Too few days*, 9 scored days).
+  Unusual activity: wider after the alert 69.0% against 60.5% at other times, +8.5
+  points (+1.9 to +13.3), 816 of 1,910 alerts scored. Big delta: 62.0% against 58.9%,
+  +3.1 points (-4.8 to +11.4), 310 of 889. Most of the rest are left out as too early
+  in the record (the first 10 archived sessions are the yardstick). The other types
+  start from nothing.
+- **Design / plan.** `docs/plans/2026-11-14-alert-quality-{design,plan}.md`.
+
+**Prior —** 2026-11-14 (**Exit chance on Model Health: ML roadmap Phase 3b.**)
 
 - **What.** A shadow score, per scanner type, of an open captured credit signal's
   chance of still reaching its profit target before its own exits close it, made at

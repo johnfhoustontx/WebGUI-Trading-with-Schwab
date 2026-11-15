@@ -3944,6 +3944,21 @@ and asks whether it still got there before its own exits closed it.
   once, however many trades it held.
 - It changes no exit and nothing in the app reads it.
 
+**Alert quality (shadow)** is the fourth table. For each flow alert type it asks
+whether the half hour after an alert was wider (high minus low) than that
+symbol's usual range at that time of day.
+
+- **Wider after the alert** is how often it was. **Wider at other times** asks the
+  same of that symbol's other half hours the same day, so a busy day lifts both.
+- **Difference** is the first minus the second, in percentage points, with its
+  range over whole days. *Beats* means alerts were followed by a wider range more
+  often.
+- **Alerts scored** shows scored of recorded; **Left out** says why the rest were
+  not scored (too late in the session, too early in the record, no price).
+- Every alert is recorded from 2026-11-14, so most types read *Too few days* for
+  months. Gamma flip alerts are recorded but not scored until the gamma regime
+  study has read. No alert, push or ranking changes.
+
 ## User Manuals
 
 **Route:** `/manuals` — a tab in the **More** group, alongside EOD Report. (It used

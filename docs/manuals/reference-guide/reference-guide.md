@@ -5239,6 +5239,18 @@ of the outcome. A *Beats* here is the evidence an advice chip on open positions 
 need; until then the table is a record, and no exit rule reads it. Its outcomes follow
 the exit rules running at the time, which changed between September and November.
 
+### Alert quality (shadow)
+
+The fourth table is the roadmap's Phase 4, flow half. Every flow alert is now kept
+for good (the alert list itself lasts a day, and the contract-level history 20
+sessions). For each type it asks whether the half hour after an alert ran wider
+than that symbol's usual range at that time of day, and compares that with the
+same symbol's other half hours the same day. The comparison is the point: alerts
+fire on busy days, and a busy day widens every window, so only a gap between the
+two says the alert itself told you something. It is the number that would decide
+whether HIRO and big delta earn a place in the rankings or a phone push; until it
+reads *Beats* over 40 days, nothing changes.
+
 ## User Manuals
 
 *Menu: ACCOUNT → More → User Manuals · Route `/manuals`*
