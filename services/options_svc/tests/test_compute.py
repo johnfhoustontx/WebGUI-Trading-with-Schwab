@@ -1563,7 +1563,7 @@ def test_reprice_captured_merges_marks_and_flags(monkeypatch):
                "recommendation": "CLOSE", "recommendation_code": "money_stop"},
     }
     monkeypatch.setitem(_sys.modules, "signal_recommender",
-                        _types.SimpleNamespace(build_mark=lambda r, rep, now, **kw: marks[r["signal_id"]]))
+                        _types.SimpleNamespace(protect_inputs=lambda *a: {}, build_mark=lambda r, rep, now, **kw: marks[r["signal_id"]]))
 
     out = compute.reprice_captured()
     by_id = {s["signal_id"]: s for s in out["signals"]}
@@ -1594,7 +1594,7 @@ def test_reprice_captured_clears_chain_cache_first(monkeypatch):
         clear_chain_cache=lambda: order.append("clear"),
         reprice_swing=lambda r, c: order.append("reprice") or {"rep": 1}))
     monkeypatch.setitem(_sys.modules, "signal_recommender", _types.SimpleNamespace(
-        build_mark=lambda r, rep, now, **kw: {"unrealized_pnl": 0.0, "recommendation": "HOLD",
+        protect_inputs=lambda *a: {}, build_mark=lambda r, rep, now, **kw: {"unrealized_pnl": 0.0, "recommendation": "HOLD",
                                         "recommendation_code": "HOLD"}))
     compute.reprice_captured()
     assert order and order[0] == "clear"      # cleared BEFORE the first reprice
@@ -1618,7 +1618,7 @@ def test_reprice_captured_skips_failed_signal(monkeypatch):
     monkeypatch.setitem(_sys.modules, "signal_repricer",
                         _types.SimpleNamespace(reprice_swing=_reprice))
     monkeypatch.setitem(_sys.modules, "signal_recommender",
-                        _types.SimpleNamespace(build_mark=lambda r, rep, now, **kw: {
+                        _types.SimpleNamespace(protect_inputs=lambda *a: {}, build_mark=lambda r, rep, now, **kw: {
                             "unrealized_pnl": 1.0, "recommendation_code": "TARGET_HIT"}))
 
     out = compute.reprice_captured()
@@ -1646,7 +1646,7 @@ def _patch_reprice_seams(monkeypatch, sigs, marks):
                             }))
     monkeypatch.setitem(_sys.modules, "signal_recommender",
                         _types.SimpleNamespace(
-                            build_mark=lambda r, rep, now, **kw: marks[r["signal_id"]]))
+                            protect_inputs=lambda *a: {}, build_mark=lambda r, rep, now, **kw: marks[r["signal_id"]]))
 
 
 def test_reprice_captured_tags_rescue_state_and_heat(monkeypatch):
@@ -1721,7 +1721,7 @@ def test_reprice_captured_hold_not_escalated(monkeypatch):
     monkeypatch.setitem(_sys.modules, "signal_repricer",
                         _types.SimpleNamespace(reprice_swing=_reprice))
     monkeypatch.setitem(_sys.modules, "signal_recommender",
-                        _types.SimpleNamespace(build_mark=lambda r, rep, now, **kw: marks[r["signal_id"]]))
+                        _types.SimpleNamespace(protect_inputs=lambda *a: {}, build_mark=lambda r, rep, now, **kw: marks[r["signal_id"]]))
     out = compute.reprice_captured()
     row = out["signals"][0]
     assert row["rescue_state"] != "tested"
@@ -1801,7 +1801,26 @@ def _patch_manage_seams(monkeypatch, sigs, reprice):
     return calls
 
 
+def _ride(monkeypatch):
+    """Pin ``[protect] captured_at_target = "ride"``: +50% ARMS break-even and
+    holds. The shipped "close" takes the profit there instead
+    (docs/plans/2026-11-15-profit-trail-design.md)."""
+    from services.options_svc import profit_trail
+    monkeypatch.setattr(profit_trail, "captured_rides", lambda: True)
+
+
+def test_manage_closes_at_50pct_as_shipped(monkeypatch):
+    """Under the shipped "close" the +50% mark is a take-profit, not an arm."""
+    calls = _patch_manage_seams(monkeypatch, [_manage_signal(be_armed=0)],
+                                {"M1": _rep(unrealized_pnl=60.0, current_value=0.40)})
+    out = compute.run_captured_manage_cycle()
+    assert calls["armed"] == []
+    assert calls["closed"] == [("M1", 0.40, "TARGET_HIT")]
+    assert out["closed"] and out["closed"][0]["signal_id"] == "M1"
+
+
 def test_manage_arms_at_50pct_no_close(monkeypatch):
+    _ride(monkeypatch)
     calls = _patch_manage_seams(monkeypatch, [_manage_signal(be_armed=0)],
                                 {"M1": _rep(unrealized_pnl=60.0, current_value=0.40)})
     out = compute.run_captured_manage_cycle()
@@ -6811,6 +6830,7 @@ def test_a_manage_cycle_writes_all_its_marks_in_one_call(monkeypatch):
 
 
 def test_a_failed_mark_write_does_not_cost_the_cycle_its_result(monkeypatch):
+    _ride(monkeypatch)
     sigs = [_manage_signal(be_armed=0)]
     calls = _patch_manage_seams(monkeypatch, sigs,
                                 {"M1": _rep(unrealized_pnl=60.0, current_value=0.40)})

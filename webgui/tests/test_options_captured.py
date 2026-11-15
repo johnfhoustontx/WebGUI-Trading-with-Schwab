@@ -423,7 +423,7 @@ def test_column_labels_say_what_the_cell_holds():
     labels = [c["label"] for c in captured.captured_columns()]
     assert labels == ["Action", "Symbol", "Strategy", "Style", "Opened",
                       "Expiry", "DTE at entry", "Entry", "Mark", "Max loss",
-                      "Open P&L", "Entry grade"]
+                      "Open P&L", "Stop", "Stop rule", "Target", "Entry grade"]
 
 
 def test_the_two_frozen_columns_say_they_are_frozen():

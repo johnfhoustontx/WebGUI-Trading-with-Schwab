@@ -367,7 +367,7 @@ directional trades on their own tab.
   Order Entry Tools → *Paste order from clipboard*. It writes every structure:
   single options, verticals, straddles, strangles, calendars, diagonals,
   butterflies, condors, iron condors and flies, and any other mix of options
-  as a CUSTOM order. A trade bought for a debit targets +100% and its stop
+  as a CUSTOM order. A trade bought for a debit targets +70% and its stop
   trails 50% below the highest mark it reaches; one sold for a credit buys
   back at half the credit and its stop trails 100% above the lowest mark, so
   it starts where the trade doubles and moves down as the trade decays
@@ -1443,8 +1443,16 @@ engine's positions live on **Paper Account**.
   them flat. They ride to the target or to expiry. There is **no automatic loss stop**: the
   research this follows closes debit spreads out before expiry rather than
   stopping them, and you can still close any row by hand at any time.
-- **Credit spreads here are not managed** — they are tracked only. The engine's
-  own book on **Paper Account** is the one that takes profit and cuts on them.
+- **Credit spreads here take the profit at +50% of the credit** and have the
+  profit trail, on the same hourly check: once a trade's best profit reaches
+  **25% of the credit**, it is closed if it falls **10 points of the credit**
+  below that best. No loss stop. Long options and debit spreads get the same
+  trail on top of the rules above, and trade ideas, the daily condor and shadow
+  ideas on their own 5-minute marks (shown as **Trailing stop**).
+- **Stop, Stop rule and Target** — the P&L at which this trade closes now, for
+  the whole position. The stop rises as the trade gains (**Trailing** once the
+  trail arms); a dash means no level, so a credit spread shows no stop until its
+  trail arms.
 - **New trades must fit this ledger's risk limits** (trade ideas are the one
   exception, below): at most $750 of max loss
   per trade; 3 positions and $750 per symbol; 5 positions and $1,500 per sector;
@@ -1521,6 +1529,15 @@ Market Scanner, and since 2026-09-11 the once-daily **Income** board too.
   work anyway is the question being measured. A cash-secured put shows no long
   strike, because it has none.
 - **Action** — what to do now: green = take profit, red = cut, amber = hold.
+- **Exits.** A signal closes at **+50% of the credit**. Below that, once its best
+  profit reaches **25% of the credit** it closes if it falls **10 points of the
+  credit** below that best — the profit trail (**TRAIL_STOP**). The break-even and
+  trail stops wait out **08:30–08:45** and **14:45–15:00 CT**: the quotes then are
+  wide, and on a past sample most break-even stops there booked a loss the stock
+  never made. The loss stops still fire.
+- **Stop, Stop rule and Target** — the Open P&L at which the signal closes now.
+  The stop starts at the loss stop and rises to **Trailing** once the trail
+  arms. The time and delta stops are not shown: they fire on time and delta.
 - **Entry vs Mark** — what you took in against what it would cost to close now;
   **Open P&L** is the difference, green in profit and red in loss. Entry is
   positive for a credit and negative for a debit, so a **Directional** signal
@@ -1594,6 +1611,14 @@ Trades you sent by hand live on **Paper Ledger**.
   at **15:05 CT**, just after the close, against that day's closing price. One
   missed then is settled the next morning against the expiration day's close,
   never against the next day's price.
+- **The profit trail** guards every position whichever way the break-even
+  lifecycle switch is set: once its best profit reaches **25% of the credit**, it
+  is closed if it falls **10 points of the credit** below that best, never below
+  break-even plus commissions (exit **TRAIL_STOP**).
+- **Stop, Stop rule and Target** — the Open P&L at which the position closes
+  now, for all its contracts. With the break-even lifecycle switch on there is
+  no Target: the position rides past +50% under its break-even stop. Turn that
+  switch off (Settings → Captured trade auto-management) to close at +50%.
 - **A cash-secured put or covered call exits on its own rules**: **+50% of the
   credit**, or **21 days to expiry while it is in profit**. It has no money, delta
   or time stop, so a losing one rides to expiry, assignment or call-away — a short

@@ -404,7 +404,8 @@ def test_vega_sign_round_trips_through_storage():
 def test_column_labels_say_what_the_cell_holds():
     labels = [c["label"] for c in paper.paper_columns()]
     assert labels == ["Symbol", "Strategy", "Strikes", "Expiry", "Contracts",
-                      "Entry", "Max loss", "P&L", "Status", "Opened"]
+                      "Entry", "Max loss", "P&L", "Stop", "Stop rule", "Target",
+                      "Status", "Opened"]
 
 
 def test_the_entry_column_is_not_called_Credit():

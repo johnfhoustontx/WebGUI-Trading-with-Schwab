@@ -551,7 +551,8 @@ def split_ledger(trades):
 # with these same helpers and headers (it imports this module), so the /eod
 # section and the weekly review cannot word one trade two ways.
 EXIT_REASON_WORDS = {"TARGET": "Target reached", "STOP": "Stopped out",
-                     "EXPIRED": "Expired", "MANUAL": "Closed by hand"}
+                     "TRAIL": "Trailing stop", "EXPIRED": "Expired",
+                     "MANUAL": "Closed by hand"}
 # The Ledger's own money convention: an entry is + for a credit received and -
 # for a debit paid; an exit is what closing cost a credit trade, or what closing
 # brought in for a debit trade.

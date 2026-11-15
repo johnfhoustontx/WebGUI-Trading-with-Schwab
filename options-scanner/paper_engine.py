@@ -1010,6 +1010,12 @@ def run_manage_cycle(client, now_date, broker=None, db_path=None, now_ct=None,
             ctx["peak_pnl_frac"] = (mfe / credit_total
                                     if mfe is not None and credit_total > 0
                                     else None)
+        # The profit trail ([protect]; docs/plans/2026-11-15-profit-trail-design.md),
+        # in BOTH modes: it protects a winner that has not reached the target, which
+        # the plain take-profit never did. ``mfe`` is this cycle's position-level
+        # best, so per contract it is divided by the quantity, like ``per_contract``.
+        ctx.update(signal_recommender.protect_inputs(
+            "account", (mfe / qty if mfe is not None and qty else None), now_ct))
         rec = signal_recommender.recommend(ctx)
         tp_frac = signal_recommender.tp_frac_for(pos.get("strategy"))
         if (lifecycle and not pos.get("be_armed") and per_contract

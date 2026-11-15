@@ -382,7 +382,7 @@ def _closed_cols() -> list[str]:
 
 _OPEN_COLS = ["Symbol", "Structure", "Grade", "Days open", "MAE $ per contract",
               "MAE % of max loss", "Open P&L"]
-_GROUP_COLS = ["Group", "Trades", "Targets", "Stops", "Expired", "By hand",
+_GROUP_COLS = ["Group", "Trades", "Targets", "Stops", "Trailing stops", "Expired", "By hand",
                "Win rate", "Average P&L", "Total P&L", "Average MAE % of max loss",
                "Average held", ""]
 
@@ -413,7 +413,7 @@ def _open_rows(lines) -> list[str]:
 
 def _group_row(x: dict, label: str) -> str:
     return ("<tr>" + _td(label) + _td(x["n"]) + _td(x["targets"]) + _td(x["stops"])
-            + _td(x["expired"]) + _td(x["manual"]) + _td(_pct(x["win_rate"]))
+            + _td(x["trails"]) + _td(x["expired"]) + _td(x["manual"]) + _td(_pct(x["win_rate"]))
             + _td(_money(x["avg_pnl"]), _pn(x["avg_pnl"]))
             + _td(_money(x["total_pnl"]), _pn(x["total_pnl"]))
             + _td(_pct(x["avg_mae_pct"])) + _td(_held(x["avg_held_h"]))

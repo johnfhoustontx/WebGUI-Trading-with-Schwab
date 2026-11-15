@@ -4,7 +4,58 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-15 (**Dealer Positioning logs where each wait goes, step by step.**)
+**Last updated:** 2026-11-15 (**Stop and Target columns on the three paper books; Ledger credit trades close at +50%; the live order's debit target is 70%.**)
+
+- **Stop and Target.** The Paper Ledger, Captured Signals and the paper Account
+  tables show **Stop**, **Stop rule** and **Target** beside their P&L: the P&L,
+  for the whole position, at which the rules close it now. The stop is the one in
+  force (loss stop, break-even, the trail or an idea's own stop) and rises as the
+  trade gains. `signal_recommender.exit_levels` reads each book's own manage ctx;
+  `services/options_svc/exit_levels.py` writes `stop_level` / `stop_kind` /
+  `target_level` on each OPEN row where the views are published. Time and delta
+  stops are not P&L levels and are not shown.
+- **Close at +50%.** The Ledger's own credit trades now take the profit at the
+  structure's target (`[protect] ledger_take_profit`, on; still no loss stop).
+  The paper Account follows its Settings switch, which prod runs ON (ride): turn
+  off "Manual paper: break-even lifecycle" to close there at +50%.
+- **Live order.** A trade bought for a debit takes profit at **+70%** (was
+  +100%), in the ThinkorSwim copy and Send Live Order (`config/tos_order.toml
+  [debit] target_pct`).
+- **Tests.** `options-scanner/tests/test_exit_levels.py` (the grid check),
+  `services/options_svc/tests/test_exit_levels.py`, `webgui/tests/test_exit_columns.py`
+  (new); the wiring and column-order tests updated.
+
+**Prior —** 2026-11-15 (**A profit trail in every paper book; captured signals take the profit at +50%.**)
+
+- **Why.** The operator asked for a trailing strategy to protect profits in Captured
+  Signals, the Paper Account and the Paper Ledger. Before it, a trade that went +40%
+  and came back to a loss was left to do so in every book, and the Ledger's own
+  credit trades had no automatic exit at all.
+- **What.** Once a trade's best reaches 25% of its credit (or debit base) it is closed
+  when it gives back 10% of that base, never below break-even plus commissions
+  (`TRAIL_STOP`; `TRAIL` on the Ledger's ideas, condor and shadow rows). The trail and
+  the break-even stop wait out 08:30–08:45 and 14:45–15:00 Central; the money, time
+  and delta stops do not. Captured signals now CLOSE at the +50% target instead of
+  arming break-even and riding (`captured_at_target`). Each book has its own switch;
+  the Account's lifecycle switch is untouched. `config/trade_mgmt.toml [protect]`,
+  Settings → Configuration → Profit trail.
+- **Measured** (prod backup 2026-11-13, 388 closed captures, 10% slippage): real
+  outcome −$6.30 a trade; target at +50% +$7.60; target and trail +$8.32. The
+  take-profit is almost all of it; the trail adds about $1 a trade, nothing at 25%
+  slippage, and a trail without a target loses. 27% of losers had been +50% up, their
+  break-even stops fired on opening and closing marks. Rerun with
+  `tools/replay_profit_trail.py`.
+- **Stores.** `trades.mfe_pnl` / `mfe_at` (additive migration), raised only.
+- **Readers.** The weekly idea review rates a trail exit `trailed` and counts it apart
+  from hand closes; `/eod` and the site's idea record name it.
+- **Effect to know.** Captured outcomes change exit rule from this date: calibration
+  studies over `signal_outcomes` straddle it.
+- **Design.** [docs/plans/2026-11-15-profit-trail-design.md](plans/2026-11-15-profit-trail-design.md).
+- **Tests.** `options-scanner/tests/test_profit_trail.py`,
+  `shared/tests/test_trade_mgmt_protect.py`,
+  `services/options_svc/tests/test_profit_trail_wiring.py` (new).
+
+**Prior —** 2026-11-15 (**Dealer Positioning logs where each wait goes, step by step.**)
 
 - **Why.** Measured on prod (market closed, $SPX): HTML at 0.41 s, page loaded
   at 0.83 s, charts with data at about 3.2 s, while the Redis reads behind them

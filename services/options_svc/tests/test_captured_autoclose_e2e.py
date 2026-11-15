@@ -40,8 +40,18 @@ def _seed_open_signal(signal_db, db_path, expiration):
 
 
 def test_captured_manage_e2e_arm_then_breakeven_close(tmp_path, monkeypatch):
+    """The RIDE path (``[protect] captured_at_target = "ride"``) with the profit
+    trail off for this book, so the break-even stop is what closes it. The
+    shipped "close" takes the profit at +50% (test_compute's
+    test_manage_closes_at_50pct_as_shipped); with the trail on, this best of
+    +$60 would close at its $50 trail level first (test_profit_trail.py)."""
     import signal_db
     import signal_repricer
+
+    from shared import trade_mgmt
+    shipped = trade_mgmt.protect()
+    monkeypatch.setattr(trade_mgmt, "protect", lambda: dict(
+        shipped, captured_at_target="ride", captured=False))
 
     db = tmp_path / "signals.db"
     # Redirect ALL signal_db access to the temp DB via the low-level connect().

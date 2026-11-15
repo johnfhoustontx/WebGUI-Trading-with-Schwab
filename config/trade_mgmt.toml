@@ -16,14 +16,14 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 [stops]
-# ⚠ Reaching tp_frac does TWO DIFFERENT THINGS depending on the book, and this
-# comment claimed only the first for months:
-#   * CAPTURED SIGNALS arm a break-even stop and keep running with the downside
-#     pinned; the [trail] ladder decides whether it then ratchets further.
-#   * The MANUAL PAPER BOOK closes outright at this fraction. It can opt into
-#     the captured behaviour — Settings → manual_paper_lifecycle_enabled,
-#     default OFF.
-# Published research is split on which is better, so neither is "the" rule; see
+# ⚠ What reaching tp_frac does depends on the book:
+#   * CAPTURED SIGNALS close here ([protect] captured_at_target = "close").
+#     Set "ride" to arm a break-even stop instead and ride under the [trail]
+#     ladder, as they did until 2026-11-15.
+#   * The PAPER ACCOUNT closes here while Settings -> manual_paper_lifecycle is
+#     off, and arms break-even and rides while it is on.
+# The 2026-11-13 replay measured closing here at about $14 a trade better than
+# riding with the ladder (see [protect]); the published research is split, see
 # docs/plans/2026-09-11-options-strategy-gap-assessment.md §3.2.
 tp_frac = 0.50            # fraction of credit captured
 
@@ -80,6 +80,55 @@ ratchet_ladder = [[0.50, 0.0], [0.65, 0.25], [0.80, 0.50]]
 # max(be_level, locked_level), so a lock only ever raises a stop already above
 # break-even. Its cost is exiting a recovered winner early (the 18 above).
 active = "ratchet"
+
+[protect]
+# ─── THE PROFIT TRAIL (docs/plans/2026-11-15-profit-trail-design.md) ────────
+#
+#   Protects a trade that has gone green but not reached its target. Once its
+#   BEST profit reaches trail_start of the credit, it is closed when its profit
+#   falls trail_giveback of the credit below that best - never below break-even
+#   plus commissions. A debit trade measures both on the base its target uses
+#   (max profit, or the debit paid). Closes as TRAIL_STOP (the Ledger's own rows:
+#   TRAIL).
+#
+#   ⚠ Measured on the 2026-11-13 prod backup, 388 closed captured PCS/CCS/IC
+#   replayed on their own 5-minute marks, 10% of the credit as slippage on every
+#   replayed exit, compared with what really happened (-$6.30 a trade):
+#     take the profit at +50%, no trail          +$7.60 a trade  (win 61%)
+#     ...and this trail (25% start, 10% back)    +$8.32 a trade  (win 62%)
+#     today's break-even + ratchet ladder         -$8.07 a trade  (win 46%)
+#     a trail INSTEAD of a target (best one)      -$2.91 a trade
+#   The take-profit is most of the gain; the trail adds about $1 a trade, all of
+#   it on 0-DTE, is slightly worse on swing trades, and nothing at 25% slippage.
+#   Sampled hourly, as the Account and the Ledger mark: +$11.03 against +$10.00
+#   for the take-profit alone. Every interval is in the design doc.
+trail_start = 0.25
+trail_giveback = 0.10
+
+# Central-time windows in which the PROTECTIVE stops (break-even, the ladder's
+# lock and the trail) wait. The marks there are priced off wide opening and
+# closing quotes: on the same backup 45 of 77 break-even stops booked a loss,
+# the exit mark had fallen a median of a full credit, and the stock had moved a
+# median 0.0%. Half of those drops had recovered by the second mark. The money,
+# time and delta stops still fire inside them. [] = no quiet windows.
+quiet_windows = ["08:30-08:45", "14:45-15:00"]
+
+# What a captured signal does at [stops] tp_frac: "close" takes the profit;
+# "ride" arms break-even and rides under the [trail] ladder (the rule from
+# 2026-07 to 2026-11-15). The paper Account does NOT read this: its own switch,
+# Settings -> "manual paper lifecycle", decides close (off) or ride (on).
+captured_at_target = "close"
+
+# Which books the trail and the quiet windows apply to. ledger is the Ledger
+# trades you booked; ledger_self_managed is its trade ideas, daily condor and
+# shadow ideas, whose results the weekly review and /eod measure.
+captured = true
+account = true
+ledger = true
+ledger_self_managed = true
+# Your own Ledger CREDIT trades also close at the structure's tp_frac (+50% of
+# the credit). They still get no money, time or delta stop: you cut losers.
+ledger_take_profit = true
 
 [structures]
 # ─── PER-STRUCTURE OVERRIDES ON EVERYTHING ABOVE ────────────────────────────

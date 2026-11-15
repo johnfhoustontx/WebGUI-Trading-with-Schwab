@@ -26,7 +26,7 @@ from nicegui import ui
 
 from pages.ui_guard import guard
 
-from . import detail, handoff
+from . import detail, exit_columns, handoff
 from .rescue import rescue_highlight
 from .theme import BADGE_ACCENT, BADGE_MUTED, MUTED
 
@@ -40,7 +40,7 @@ from .theme import BADGE_ACCENT, BADGE_MUTED, MUTED
 # bounded scrolling body, and the kit's table carries the dense/flat props.
 
 # Right-aligned columns (the kit aligns numbers right, words left).
-_NUMERIC = ("quantity", "entry_credit_total", "max_loss_total", "pnl")
+_NUMERIC = ("quantity", "entry_credit_total", "max_loss_total", "pnl") + exit_columns.NUMERIC
 
 
 def paper_columns():
@@ -75,8 +75,11 @@ def paper_columns():
     # No ``actions`` column: the selected trade's buttons live in the detail
     # panel's footer (the 2026-09-19 standard), so nothing acts on an unselected
     # row and the icon column's width goes back to the data.
-    return [{"name": f, "label": lbl, "field": f, "sortable": True, "align": "left"}
+    cols = [{"name": f, "label": lbl, "field": f, "sortable": True, "align": "left"}
             for f, lbl in spec]
+    # Stop, Stop rule and Target sit right after P&L, which they are levels of.
+    at = next(i for i, c in enumerate(cols) if c["name"] == "pnl") + 1
+    return cols[:at] + exit_columns.columns() + cols[at:]
 
 
 # P&L cell colors (green profit / red loss / grey flat-or-unknown).
@@ -265,6 +268,7 @@ def paper_rows(trades):
             "max_loss_total": _round(t.get("max_loss_total")),
             "pnl": _round(pnl),
             "_pnl_class": pnl_class(pnl),
+            **exit_columns.cells(t),
             "status": t.get("status", ""),
             "_status_class": status_badge_class(t.get("status")),
             "_tag_class": tag_class,
@@ -545,7 +549,8 @@ def render():
             with ledger.content:
                 # No selection checkbox — clicking a row selects it, which drives
                 # the detail panel and the action footer inside it.
-                table = kit.table(paper_columns(), numeric=_NUMERIC)
+                table = kit.table(paper_columns(), numeric=_NUMERIC,
+                                  decimals=exit_columns.DECIMALS)
                 # The P&L by account, under the rows it sums (same filter).
                 summary_box = ui.column().classes("w-full gap-1 pt-3")
                 with summary_box:

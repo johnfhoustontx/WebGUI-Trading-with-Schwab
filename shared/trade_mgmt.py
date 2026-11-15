@@ -68,6 +68,33 @@ DEFAULTS = {
         "default_ladder": [[0.50, 0.0]],
         "ratchet_ladder": [[0.50, 0.0], [0.65, 0.25], [0.80, 0.50]],
     },
+    "protect": {
+        # The profit-protecting trail (docs/plans/2026-11-15-profit-trail-design.md).
+        # Once a trade's BEST profit reaches trail_start of its base (the credit;
+        # for a debit, the base its target is measured on), it is closed when its
+        # profit falls trail_giveback of that base below the best. Never below
+        # break-even plus commissions. 0 for trail_start turns the trail off.
+        "trail_start": 0.25,
+        "trail_giveback": 0.10,
+        # Central-time windows in which the PROTECTIVE stops (break-even, the
+        # ladder's lock, the trail) wait: the opening and closing quotes are wide,
+        # and a mark priced off them read as a loss the stock never made. The
+        # money, time and delta stops are not affected.
+        "quiet_windows": ["08:30-08:45", "14:45-15:00"],
+        # What a captured signal does on reaching [stops] tp_frac: "close" takes
+        # the profit, "ride" arms break-even and rides under the [trail] ladder.
+        "captured_at_target": "close",
+        # Which books the trail and the quiet windows apply to.
+        "captured": True,
+        "account": True,
+        "ledger": True,
+        # The Ledger's self-managed rows (trade ideas, the daily condor, shadow
+        # ideas), apart from the operator's own Ledger trades.
+        "ledger_self_managed": True,
+        # The operator's own Ledger CREDIT trades also take the profit at the
+        # structure's tp_frac (+50%). They still have no money, time or delta stop.
+        "ledger_take_profit": True,
+    },
     "rescue": {
         # Escalation bands the rescue board owns on its own. The four values it
         # SHARES with [stops] are not repeated here - see rescue_thresholds().
@@ -204,6 +231,88 @@ def default_trail_ladder():
 
 def ratchet_trail_ladder():
     return _ladder("ratchet_ladder")
+
+
+#: The books ``[protect]`` can switch on or off by name.
+PROTECT_BOOKS = ("captured", "account", "ledger", "ledger_self_managed")
+
+#: What ``captured_at_target`` may say.
+_AT_TARGET = ("close", "ride")
+
+
+def _parse_window(text):
+    """``"08:30-08:45"`` -> ``(time(8, 30), time(8, 45))``, or None."""
+    import datetime as _dt
+    try:
+        a, b = str(text).split("-")
+        ha, ma = a.strip().split(":")
+        hb, mb = b.strip().split(":")
+        start, end = _dt.time(int(ha), int(ma)), _dt.time(int(hb), int(mb))
+    except (ValueError, TypeError):
+        return None
+    return (start, end) if start < end else None
+
+
+def protect() -> dict:
+    """The profit-protecting trail's settings, closed over the defaults.
+
+    ``{"trail_start", "trail_giveback", "quiet_windows", "captured_at_target",
+    "captured", "account", "ledger", "ledger_self_managed",
+    "ledger_take_profit"}``. ``quiet_windows``
+    is a list of ``(start, end)`` Central ``datetime.time`` pairs.
+
+    A bad value is the SHIPPED one, never a looser one: a fraction outside 0..1,
+    a give-back of 0 or more than the start (which would put the stop at or above
+    the best profit and close every trade the mark after it armed), an unknown
+    ``captured_at_target``, or a non-boolean book switch.
+    """
+    d = DEFAULTS["protect"]
+    sec = load().get("protect")
+    sec = sec if isinstance(sec, dict) else {}
+
+    def _frac(key):
+        v = sec.get(key, d[key])
+        ok = (isinstance(v, (int, float)) and not isinstance(v, bool)
+              and 0.0 <= float(v) <= 1.0)
+        return float(v) if ok else float(d[key])
+
+    start, give = _frac("trail_start"), _frac("trail_giveback")
+    if start > 0 and not (0 < give < start):
+        start, give = float(d["trail_start"]), float(d["trail_giveback"])
+
+    raw = sec.get("quiet_windows", d["quiet_windows"])
+    if not isinstance(raw, list):
+        raw = d["quiet_windows"]
+    windows = [w for w in (_parse_window(x) for x in raw) if w]
+    if raw and len(windows) != len(raw):
+        windows = [_parse_window(x) for x in d["quiet_windows"]]
+
+    at = sec.get("captured_at_target", d["captured_at_target"])
+    out = {"trail_start": start, "trail_giveback": give, "quiet_windows": windows,
+           "captured_at_target": at if at in _AT_TARGET else d["captured_at_target"]}
+    for book in PROTECT_BOOKS + ("ledger_take_profit",):
+        v = sec.get(book, d[book])
+        out[book] = v if isinstance(v, bool) else d[book]
+    return out
+
+
+def in_quiet_window(when, windows=None) -> bool:
+    """Is ``when`` (a datetime; naive means Central) inside a quiet window?
+
+    ``None`` is never inside one: a caller that does not say when the mark was
+    taken gets the stops it always had.
+    """
+    if when is None:
+        return False
+    try:
+        from zoneinfo import ZoneInfo
+        ct = ZoneInfo("America/Chicago")
+        local = when.astimezone(ct) if when.tzinfo else when
+        t = local.time().replace(tzinfo=None)
+    except (AttributeError, ValueError, TypeError):
+        return False
+    wins = protect()["quiet_windows"] if windows is None else windows
+    return any(a <= t < b for a, b in wins)
 
 
 def tracked() -> dict:

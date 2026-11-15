@@ -161,6 +161,151 @@ def _finite(value):
     return v if v == v and v not in (float("inf"), float("-inf")) else None
 
 
+# ── The profit-protecting trail ([protect] in config/trade_mgmt.toml) ────────
+# Design and the replay behind its numbers:
+# docs/plans/2026-11-15-profit-trail-design.md.
+
+def protect_inputs(book, peak_pnl, when):
+    """The ctx keys a book adds to turn the trail and the quiet windows on.
+
+    ``book`` is one of ``shared.trade_mgmt.PROTECT_BOOKS``. Returns ``{}`` when
+    ``[protect]`` switches that book off, so ``recommend`` behaves exactly as it
+    did before the trail existed. ``peak_pnl`` is the best ``unrealized_pnl``
+    the position has reached, in the SAME units (per contract); ``when`` is the
+    mark's time.
+    """
+    if not _trade_mgmt.protect().get(book):
+        return {}
+    return {"peak_pnl": peak_pnl, "mark_time": when}
+
+
+def _trail_level(ctx, base):
+    """The trail's stop in dollars, or ``None`` when it is not armed.
+
+    Armed once the best profit (``ctx["peak_pnl"]``) reaches ``trail_start`` of
+    ``base``; the stop then sits ``trail_giveback`` of ``base`` below that best,
+    and never under ``ctx["be_level"]`` (break-even plus commissions). A missing
+    peak, a missing or non-positive base, or a trail switched off is ``None``.
+    """
+    peak = _finite(ctx.get("peak_pnl"))
+    if peak is None or base is None or base <= 0:
+        return None
+    p = _trade_mgmt.protect()
+    start, give = p["trail_start"], p["trail_giveback"]
+    if start <= 0 or peak < start * base:
+        return None
+    return max(peak - give * base, _finite(ctx.get("be_level")) or 0.0)
+
+
+def _trail_exit(pnl, basis):
+    """The recommendation a trail stop that fired returns. ``basis`` names what
+    the give-back is a fraction of ("the credit", "max profit", ...)."""
+    give = _trade_mgmt.protect()["trail_giveback"]
+    return {"action": "TAKE_PROFIT" if pnl > 0 else "CUT",
+            "reason": f"trail stop: profit fell {give:.0%} of {basis} from its best",
+            "code": "TRAIL_STOP"}
+
+
+def _quiet(ctx) -> bool:
+    """Is this mark inside a quiet window, where the protective stops wait?"""
+    return _trade_mgmt.in_quiet_window(ctx.get("mark_time"))
+
+
+def _protect_base(ctx):
+    """``(dollars, basis_words)`` the trail and ``protect_only``'s target are
+    fractions of: the credit for a credit position, ``_debit_target_base`` for a
+    debit one, as in ``recommend``."""
+    if _is_debit(ctx):
+        return _debit_target_base(ctx)
+    credit = _finite(ctx.get("entry_credit"))
+    return (credit * MULTIPLIER if credit is not None and credit > 0 else None,
+            "the credit")
+
+
+def protect_only(ctx, take_profit=False):
+    """The profit trail, and with ``take_profit`` the structure's target, for a
+    book whose other exits are decided elsewhere: the Paper Ledger's own credit
+    trades (``take_profit`` is ``[protect] ledger_take_profit``; they have no
+    money, time or delta stop) and its self-managed rows (which keep their own
+    stop and target lines). ``TRAIL_STOP``, ``TARGET_HIT`` or ``HOLD``.
+
+    A missing P&L holds: a mark that was not made is never a zero.
+    """
+    hold = {"action": "HOLD", "reason": "holding", "code": "HOLD"}
+    pnl = _finite((ctx or {}).get("unrealized_pnl"))
+    if pnl is None:
+        return hold
+    base, basis = _protect_base(ctx)
+    trail = _trail_level(ctx, base)
+    if trail is not None and pnl <= trail and not _quiet(ctx):
+        return _trail_exit(pnl, basis)
+    tp_frac = tp_frac_for(ctx.get("strategy"))
+    if take_profit and base is not None and pnl >= tp_frac * base:
+        return {"action": "TAKE_PROFIT", "reason": f">={tp_frac:.0%} of {basis}",
+                "code": "TARGET_HIT"}
+    return hold
+
+
+def _highest(candidates):
+    """``(level, kind)`` of the highest stop among ``(level, kind)`` pairs whose
+    level is a number, or ``(None, None)``. On a tie the first named wins."""
+    best = (None, None)
+    for level, kind in candidates:
+        if level is not None and (best[0] is None or level > best[0]):
+            best = (level, kind)
+    return best
+
+
+def exit_levels(ctx, protect_only_book=False, take_profit=False):
+    """``{"stop", "stop_kind", "target"}``: the P&L, per contract, at which the
+    rules close this position NOW. For the Stop and Target columns of the paper
+    books (docs/plans/2026-11-15-profit-trail-design.md).
+
+    ``stop`` is the highest of the stops that are levels - the money stop, the
+    break-even / profit-lock stop once armed, the profit trail once armed, a
+    debit's percent-of-debit stop - and ``stop_kind`` names it (``"money"``,
+    ``"break-even"``, ``"trail"``, ``"debit"``). ``target`` is the profit the
+    position closes at, ``None`` where nothing does: a lifecycle position rides
+    past its target. A level that does not apply is ``None``, never 0.
+
+    ⚠ Not every stop is a P&L level: the time stop, the delta stop and the
+    manage-at-DTE exit fire on time and delta, so no column can show them. The
+    quiet windows delay the protective stops; they do not move them.
+
+    ``protect_only_book`` mirrors ``protect_only`` (the trail, plus the target
+    with ``take_profit``); otherwise the levels are ``recommend``'s, from the
+    same ctx it is given.
+    """
+    ctx = ctx or {}
+    rules = _trade_mgmt.structure_rules(ctx.get("strategy"))
+    base, _ = _protect_base(ctx)
+    trail = _trail_level(ctx, base)
+    if protect_only_book:
+        stop, kind = _highest([(trail, "trail")])
+        target = (rules["tp_frac"] * base if take_profit and base is not None else None)
+        return {"stop": stop, "stop_kind": kind, "target": target}
+    if _is_debit(ctx):
+        debit = _finite(ctx.get("entry_debit"))
+        frac = _finite(rules.get("debit_stop_frac"))
+        fixed = -frac * debit if frac is not None and debit is not None and debit > 0 else None
+        stop, kind = _highest([(trail, "trail"), (fixed, "debit")])
+        tp = _finite(rules.get("tp_frac"))
+        return {"stop": stop, "stop_kind": kind,
+                "target": tp * base if tp is not None and base is not None else None}
+    credit_total = base
+    if credit_total is None:
+        return {"stop": None, "stop_kind": None, "target": None}
+    money = -rules["stop_mult"] * credit_total if rules["loss_rules"] else None
+    be = None
+    if ctx.get("be_armed"):
+        be = max(_finite(ctx.get("be_level")) or 0.0,
+                 _locked_profit_level(ctx, credit_total))
+    stop, kind = _highest([(trail, "trail"), (be, "break-even"), (money, "money")])
+    rides = ctx.get("lifecycle")
+    return {"stop": stop, "stop_kind": kind,
+            "target": None if rides else rules["tp_frac"] * credit_total}
+
+
 def _is_debit(ctx) -> bool:
     """Is this a DEBIT position (long option / debit vertical)?
 
@@ -248,8 +393,15 @@ def _recommend_debit(ctx):
                     "reason": f"lost {stop_frac:.0%} of the debit paid",
                     "code": "DEBIT_STOP"}
 
-    # Rule 2: the profit target, on whichever denominator this structure has.
     base, basis = _debit_target_base(ctx)
+
+    # Rule 1b: the profit trail, on the same base the target is measured on.
+    # Waits out a quiet window like every protective stop.
+    trail = _trail_level(ctx, base)
+    if trail is not None and pnl <= trail and not _quiet(ctx):
+        return _trail_exit(pnl, basis)
+
+    # Rule 2: the profit target, on whichever denominator this structure has.
     tp_frac = _finite(rules.get("tp_frac"))
     if base is not None and tp_frac is not None and pnl >= tp_frac * base:
         return {"action": "TAKE_PROFIT",
@@ -272,8 +424,12 @@ def _recommend_debit(ctx):
 
 def recommend(ctx):
     """Return {'action', 'reason', 'code'}. action in HOLD/CUT/TAKE_PROFIT; code in
-    HOLD/BREAKEVEN_STOP/MONEY_STOP/DELTA_STOP/TIME_STOP/TARGET_HIT/MANAGE_DTE —
-    plus TIME_EXIT/DEBIT_STOP on the DEBIT branch.
+    HOLD/BREAKEVEN_STOP/TRAIL_STOP/MONEY_STOP/DELTA_STOP/TIME_STOP/TARGET_HIT/
+    MANAGE_DTE — plus TIME_EXIT/DEBIT_STOP on the DEBIT branch.
+
+    The profit trail (``TRAIL_STOP``) and the quiet windows apply only when the
+    caller passes ``protect_inputs(...)``'s keys (``peak_pnl``, ``mark_time``);
+    without them every rule below is what it was before the trail existed.
 
     ⚠ **A DEBIT position is DISPATCHED to ``_recommend_debit`` before any rule
     below runs.** The rules here are credit-denominated and a debit stores its
@@ -293,6 +449,8 @@ def recommend(ctx):
          while ``ctx["held_min"]`` (when a caller gives it) is under
          ``time_stop_min_hold_min``: a fresh spread is underwater by its bid/ask.
       3. Break-even stop (only when ``be_armed``): pnl <= ``be_level`` → CUT/BREAKEVEN_STOP.
+         The profit trail shares this slot (the higher stop governs) →
+         TRAIL_STOP. Neither fires inside a quiet window.
       4. Delta-stop (SOFT): a delta drift/ceiling breach → CUT/DELTA_STOP, UNLESS
          ``_recoverable(ctx)`` (defers to HOLD).
       5. +50% credit captured and not yet armed: LIFECYCLE callers
@@ -352,10 +510,26 @@ def recommend(ctx):
     # ``_locked_profit_level``). With the DEFAULT ladder the lock is $0, so this is
     # exactly the plain break-even stop; a richer ``trail_ladder`` + ``peak_pnl_frac``
     # ratchets the floor up to protect banked profit.
+    #
+    # Rule 3b, the profit trail (``[protect]``), shares this slot: whichever of
+    # the two stops is HIGHER governs. Both wait out a quiet window
+    # (``ctx["mark_time"]`` inside ``[protect] quiet_windows``), because a mark
+    # priced off the wide opening or closing quotes read as a loss the stock
+    # never made: on the 2026-11-13 backup, 45 of 77 break-even stop exits
+    # booked a loss, the median exit mark had fallen a full credit, and the
+    # stock had moved a median 0.0%. The trail needs a REAL mark: a missing P&L
+    # is not read as $0 here, which would sit under every trail level.
+    quiet = _quiet(ctx)
+    be_stop = None
     if ctx.get("be_armed"):
         be_level = ctx.get("be_level") or 0.0
-        stop_level = max(be_level, _locked_profit_level(ctx, credit_total))
-        if pnl <= stop_level:
+        be_stop = max(be_level, _locked_profit_level(ctx, credit_total))
+    trail = (_trail_level(ctx, credit_total)
+             if _finite(ctx.get("unrealized_pnl")) is not None else None)
+    if not quiet:
+        if trail is not None and pnl <= trail and (be_stop is None or trail >= be_stop):
+            return _trail_exit(pnl, "the credit")
+        if be_stop is not None and pnl <= be_stop:
             return {"action": "CUT",
                     "reason": "break-even stop (protecting the +50% give-back)",
                     "code": "BREAKEVEN_STOP"}
@@ -500,7 +674,8 @@ def _held_minutes(first_seen_ts, now):
 
 
 def build_mark(signal_row, repricer_result, now, iv_data=None, technicals=None,
-               *, be_level=None, trail_ladder=None, peak_pnl_frac=None):
+               *, be_level=None, trail_ladder=None, peak_pnl_frac=None,
+               protect=None, lifecycle=True):
     """Compose a complete signal_marks row from a repricer result.
 
     Adds current_score (via scoring.calc_composite_score), score_drift, and the
@@ -531,6 +706,10 @@ def build_mark(signal_row, repricer_result, now, iv_data=None, technicals=None,
         peak_pnl_frac: optional peak profit fraction (best ``pnl/credit_total``
             reached), paired with ``trail_ladder`` to ratchet the stop up. Default
             None → no profit lock beyond break-even.
+        protect: optional ``protect_inputs("captured", peak, now)`` — the trail's
+            best profit and the mark's time. None → no trail, no quiet windows.
+        lifecycle: True (the default) arms break-even at the target and rides;
+            False takes the profit there (``[protect] captured_at_target``).
 
     Returns:
         A mark dict ready for signal_db.insert_mark. If the repricer reported
@@ -566,7 +745,7 @@ def build_mark(signal_row, repricer_result, now, iv_data=None, technicals=None,
         # build_mark is the captured-signal path, so it opts INTO the lifecycle:
         # +50% arms break-even (HOLD) rather than the non-lifecycle TAKE_PROFIT that
         # the manual-paper manage cycle keeps.
-        "lifecycle": True,
+        "lifecycle": bool(lifecycle),
         "be_armed": bool(signal_row.get("be_armed")),
         "be_level": be_level,
         # Peak-driven profit-lock ladder (the "ratchet"). Default None → the plain
@@ -577,6 +756,9 @@ def build_mark(signal_row, repricer_result, now, iv_data=None, technicals=None,
         "short_strike": signal_row.get("short_strike"),
         "call_short": signal_row.get("call_short"),
         "strategy": signal_row.get("strategy") or signal_row.get("type"),
+        # The profit trail and the quiet windows, when the caller's book has
+        # them on ({} otherwise).
+        **(protect or {}),
     })
 
     return {
@@ -597,7 +779,8 @@ def build_mark(signal_row, repricer_result, now, iv_data=None, technicals=None,
 
 
 CLOSE_REASON_CODES = frozenset(
-    {"TARGET_HIT", "MONEY_STOP", "DELTA_STOP", "TIME_STOP", "MANAGE_DTE"}
+    {"TARGET_HIT", "MONEY_STOP", "DELTA_STOP", "TIME_STOP", "MANAGE_DTE",
+     "TRAIL_STOP"}
 )
 
 

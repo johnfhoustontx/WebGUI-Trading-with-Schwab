@@ -163,8 +163,15 @@ def test_a_losing_debit_is_HELD_with_no_stop_configured(monkeypatch):
 
 
 def test_a_CREDIT_ledger_row_is_not_touched(monkeypatch):
-    """⚠ Scope. The ledger's credit spreads stay ruleless here on purpose — the
-    control that this pass cannot start closing a second book's positions."""
+    """⚠ Scope. With ``[protect] ledger`` and ``ledger_take_profit`` both off,
+    the ledger's credit spreads stay ruleless — the control that this pass
+    cannot start closing a second book's positions. Since 2026-11-15 they ship
+    ON: the trail and the +50% target (test_profit_trail_wiring.py), at the
+    operator's request, and still no loss stop."""
+    from shared import trade_mgmt
+    shipped = trade_mgmt.protect()
+    monkeypatch.setattr(trade_mgmt, "protect", lambda: dict(
+        shipped, ledger=False, ledger_take_profit=False))
     rows = [_credit_row()]
     closed = _install(monkeypatch, rows,
                       {"c1": {"unrealized_pnl": 400.0, "current_value": 0.10,

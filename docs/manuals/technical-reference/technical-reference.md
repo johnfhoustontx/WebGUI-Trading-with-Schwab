@@ -2225,11 +2225,11 @@ smallest whole ratio, and names the structure from that geometry:
   price is the whole position's), to two decimals.
 - **Time in force**: the opening line carries none, which ThinkorSwim reads as
   DAY. The exits carry `exit_tif` (shipped `GTC`) after `LMT` and after the
-  stop's trigger `MARK`: `@TRG+100.00% LMT GTC TRG BY #1 OCO`,
+  stop's trigger `MARK`: `@TRG+70.00% LMT GTC TRG BY #1 OCO`,
   `TRSTP MARK-50.00% MARK GTC TRG BY #1 OCO`. `exit_tif = "DAY"` writes no word.
 - **Exits**, from `config/tos_order.toml` (read on every click), the opening
   line with the side reversed. The target is a percentage of the fill
-  (`target_pct`): a buy (debit) `@TRG+100.00% LMT`, a sell (credit)
+  (`target_pct`): a buy (debit) `@TRG+70.00% LMT`, a sell (credit)
   `@TRG-50.00% LMT`. The stop depends on `stop_type`:
   - `"trailing"` (shipped, 2026-11-12): `TRSTP MARK{±}{trail_pct}% MARK`, a
     trailing stop offset `trail_pct` from the moving mark and triggered on the
@@ -4141,6 +4141,73 @@ book the same number.
 ⚠ **No debit outcome data exists** - `signals.db` holds only PCS/CCS/IC and the
 ledger is empty - so 0.50 and 21 are **sourced, not fitted**. That is why they
 are config.
+
+# The profit trail (every paper book)
+
+**Files:** `options-scanner/signal_recommender.py` (`_trail_level`,
+`protect_inputs`, `protect_only`), `services/options_svc/profit_trail.py` (each
+book's inputs), `shared/trade_mgmt.py` (`protect`, `in_quiet_window`),
+`config/trade_mgmt.toml [protect]`. Design:
+`docs/plans/2026-11-15-profit-trail-design.md`.
+
+```
+armed   when  best >= trail_start x base
+stop    =     max(best - trail_giveback x base, be_level)
+exit    when  pnl <= stop, and the mark is not inside a quiet window
+```
+
+`best` is the highest per-contract P&L the position has marked, this mark
+included; `base` is the credit x 100 for a credit position and
+`_debit_target_base` for a debit one (max profit, else the debit paid);
+`be_level` is the round-trip commission where the book supplies one, else 0.
+Shipped: `trail_start` 0.25, `trail_giveback` 0.10. The exit code is
+`TRAIL_STOP` (`TRAIL` on the Ledger's self-managed rows), with action
+TAKE_PROFIT when the P&L is positive and CUT otherwise.
+
+**Where it sits.** In the credit rules it shares rule 3 with the break-even stop
+and the ladder's lock; the HIGHER of the two stops governs. In the debit rules it
+is rule 1b, after the optional debit stop and before the target. A missing P&L
+never reaches it as zero.
+
+**Quiet windows** (`quiet_windows`, shipped `08:30-08:45` and `14:45-15:00`
+Central, start inclusive, end exclusive): the break-even stop, the ladder's lock
+and the trail do not fire inside them; the money, time and delta stops do. A
+caller that passes no mark time gets no windows.
+
+| Book | Peak from | Cadence | What else changes |
+|---|---|---|---|
+| Captured signals | `signal_db.peak_unrealized`, this mark taken in | 5 minutes | `captured_at_target = "close"` takes the profit at `tp_frac` (code `TARGET_HIT`) instead of arming break-even |
+| Paper Account | `paper_positions.mfe` / quantity | hourly, 09:00-14:00 | both modes of the lifecycle switch; the switch still decides close or ride at the target |
+| Paper Ledger, own trades | `trades.mfe_pnl` (new) | hourly | a CREDIT trade gets the trail and, with `ledger_take_profit`, the structure's `tp_frac` target (`protect_only`), and no loss stop; a DEBIT trade gets the trail on top of its rules |
+| Paper Ledger, self-managed rows | `trades.mfe_pnl` | 5 minutes | checked after the row's own stop and target lines |
+
+Each book has its own switch (`captured`, `account`, `ledger`,
+`ledger_self_managed`); a book that is off passes no inputs, and every rule is
+then what it was before the trail.
+
+**The measurement** (2026-11-13 prod backup, 388 closed captured PCS/CCS/IC on
+their own 5-minute marks, 10% of the credit as slippage on every replayed exit,
+against the real outcome of -$6.30 a trade): taking the profit at +50% scored
++$7.60 a trade, adding this trail +$8.32, today's break-even plus ratchet ladder
+-$8.07, and the best trail used INSTEAD of a target -$2.91. The take-profit is
+most of the gain; the trail adds about $1 a trade, all on 0-DTE, and nothing at
+25% slippage. A rule could only exit earlier than the real close, since the marks
+end there.
+
+**The Stop and Target columns.** `signal_recommender.exit_levels(ctx)` returns the
+per-contract P&L at which the rules close a position now: `stop` is the highest
+of the money stop (`-stop_mult x credit`, when the structure has loss rules), the
+break-even / ladder lock once `be_armed`, the trail once armed, and a debit's
+`debit_stop_frac` stop; `stop_kind` names it; `target` is `tp_frac x base`, or
+`None` for a lifecycle position (it rides). `services/options_svc/exit_levels.py`
+builds each book's ctx as its manage cycle does and writes `stop_level`,
+`stop_kind`, `target_level` (position dollars) on each OPEN row of
+`cache:options:paper_trades`, `cache:options:paper_account` and
+`cache:options:captured`. A self-managed Ledger row shows its own `stop_pnl` /
+`target_pnl` lines, with the trail as the stop once it is higher. A test walks a
+P&L grid and checks `recommend` closes on a P&L stop exactly at or below `stop`
+and takes the profit exactly at or above `target`. The time stop, the delta stop
+and manage-at-DTE are not P&L levels and are not shown.
 
 # Trade ideas in the Paper Ledger
 

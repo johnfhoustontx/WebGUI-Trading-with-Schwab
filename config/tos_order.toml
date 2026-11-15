@@ -17,8 +17,8 @@ stop_type = "trailing"         # "trailing": the stop follows the mark by trail_
 
 [debit]
 # Any trade opened for a debit (bought): the target is a rise in its price,
-# the stop a fall. 100 / 50 = sell at double the debit, stop out at half of it.
-target_pct = 100.0             # take profit at this % ABOVE the debit paid
+# the stop a fall. 70 / 50 = sell at 1.7 times the debit, stop out at half of it.
+target_pct = 70.0              # take profit at this % ABOVE the debit paid (the operator's choice, 2026-11-15; was 100)
 stop_pct = 50.0                # fixed stop (and the live ticket's single-option stop) at this % BELOW the debit paid (under 100)
 trail_pct = 50.0               # trailing stop this % BELOW the highest mark since the fill (under 100)
 

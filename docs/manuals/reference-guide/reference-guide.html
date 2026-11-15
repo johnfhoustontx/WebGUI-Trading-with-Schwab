@@ -1529,9 +1529,9 @@ subtab (net gamma by expiry) in November 2026.</p>
   expiry you clicked: the <strong>put wall</strong> (the strike with the most put interest below the
   price), <strong>max pain</strong> (the strike at which all the open contracts would be worth the
   least at expiry) and the <strong>call wall</strong> (the most call interest above the price). Each
-  carries its distance from the price in points and per cent. Under the line are that
-  expiry's <strong>put / call ratio</strong> (put contracts divided by call contracts), its calls
-  and puts, and the ratio over every expiration shown.</li>
+  carries its distance from the price in points and per cent. The line is coloured
+  in the put colour below the price and the call colour above it, and the band
+  between the two walls fades from each wall's colour to almost nothing at the price.</li>
 <li><strong>The strike map.</strong> One strike axis. Each row holds that strike's cell in each
   expiry, shaded by calls plus puts, and beside the cells the chosen expiry's bars:
   puts to the left, calls to the right. The walls and max pain are named on their
@@ -1542,8 +1542,10 @@ subtab (net gamma by expiry) in November 2026.</p>
 <li><strong>Total or Net.</strong> <strong>Total</strong> draws each side's count. <strong>Net calls less puts</strong> draws
   only the excess of the larger side at each strike.</li>
 <li><strong>The side rail.</strong> <strong>The read</strong> states the counts and distances in sentences written
-  from the numbers; <strong>Levels</strong> lists them highest strike first; <strong>Whole chain</strong> gives
-  calls against puts over every expiration. A count of open contracts says where
+  from the numbers; <strong>Levels</strong> lists them highest strike first; the chosen expiry's
+  <strong>open interest</strong> card gives its calls against puts in per cent, its <strong>put / call
+  ratio</strong> (put contracts divided by call contracts), both counts and a split bar; and
+  <strong>Whole chain</strong>, under it, gives the same over every expiration. A count of open contracts says where
   positions sit, not who holds which side.</li>
 <li><strong>Hover</strong> a cell or a bar for the exact counts.</li>
 <li><strong>How fresh it is.</strong> The whole chain is fetched from Schwab in several requests,
@@ -4685,9 +4687,12 @@ figure to see how many open signals currently carry a live mark; <strong>Reprice
 prices them all.</p>
 <p><strong>Reprice now</strong> re-prices everything against current chains. <strong>Close signal</strong>, at
 the foot of the detail panel, records an exit for the row you clicked.</p>
-<p><strong>Auto-management</strong> (Settings toggle, on by default) raises the stop to break-even after
-+50%, defers delta-drift cuts on recoverable trades, and auto-closes on the exit rules or
-at expiry. Turned off, the recommendations are advisory only and you close by hand.</p>
+<p><strong>Auto-management</strong> (Settings toggle, on by default) takes the profit at +50%, closes a
+trade that gives back 10 points of the credit from a best of 25% or more (the profit
+trail), defers delta-drift cuts on recoverable trades, and auto-closes on the exit rules
+or at expiry. The break-even and trail stops wait out 08:30–08:45 and 14:45–15:00 CT,
+when the quotes are wide. Turned off, the recommendations are advisory only and you
+close by hand.</p>
 <h3 id="tracked-structures">Tracked structures</h3>
 <p>A second section under the signals, read-only. It holds what the Market Scanner
 builds that is not a credit spread (debit spreads, straddles and strangles,
@@ -7210,12 +7215,13 @@ the two can never disagree about when the app is allowed to make noise.</p>
 <p><strong>Desktop notifications.</strong> A toggle plus a permission grant.</p>
 <p><strong>Flow alerts.</strong> Whether put/call premium crossovers and unusual activity alert you.</p>
 <p><strong>Captured trade auto-management.</strong> Whether captured signals are actively managed —
-break-even stop after +50%, deferred delta cuts on recoverable trades, auto-close on the
-exit rules. Off leaves them advisory.</p>
-<p><strong>Manual paper: break-even lifecycle (experimental).</strong> Opts the manual paper account into
-the same lifecycle: arm break-even at +50% of credit instead of taking profit
-immediately, then ride toward full credit protected by a break-even stop. Off (the
-default) keeps the plain take-profit at +50%.</p>
+take the profit at +50%, the profit trail, deferred delta cuts on recoverable trades,
+auto-close on the exit rules. Off leaves them advisory.</p>
+<p><strong>Manual paper: break-even lifecycle (experimental).</strong> Opts the paper Account into
+arming break-even at +50% of credit instead of taking profit there, then riding toward
+full credit under a break-even stop and the profit-lock ladder. Off (the default) keeps
+the plain take-profit at +50%, which the 2026-11-13 replay measured as the better of
+the two. The profit trail applies either way.</p>
 <p><strong>Show the ticker.</strong> The scrolling marquee at the bottom of every page, led by the
 latest published market report's headline. <strong>Turning it off only hides the
 marquee</strong> — the report summary behind it also feeds the Desk's Market report button,

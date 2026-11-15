@@ -25,6 +25,7 @@ from services.options_svc import alert_log
 from services.options_svc import compute
 # Symbol Dossier (design 2026-09-17): one ticker's on-demand fetch.
 from services.options_svc import dossier
+from services.options_svc import exit_levels
 from services.options_svc import flow_alerts
 from services.options_svc import flow_sides_tick
 from services.options_svc import gamma_public
@@ -1348,6 +1349,8 @@ def refresh_paper_account(bus) -> None:
     the existing view shape."""
     data = compute.paper_account_view()
     _apply_rescue_overlay(data)
+    # The Stop and Target columns, read off the switch the manage cycle obeys.
+    exit_levels.account((data or {}).get("positions"), manual_paper_lifecycle_enabled(bus))
     if _valid(PaperAccountView, data, "paper_account"):
         version = bus.cache_set(CACHE_PAPER, data)
         bus.publish(EVENT_PAPER, {"version": version})
@@ -1568,6 +1571,7 @@ def refresh_paper_trades(bus, reprice: bool = True, keep_live_pnl: bool = False)
         data = compute.paper_trades_view(reprice=reprice)
         if keep_live_pnl and not reprice:
             _carry_live_pnl(bus, data)
+        exit_levels.ledger((data or {}).get("trades"))   # the Stop and Target columns
         if _valid(PaperTradesView, data, "paper_trades"):
             trades = (data or {}).get("trades") or None
             version = bus.cache_set(CACHE_PAPER_TRADES, data)
@@ -1621,6 +1625,7 @@ def _publish_captured(bus, signals) -> None:
     The summary is RE-READ on every publish rather than carried over, because a
     close changes the day's closed count and booked total as it happens.
     """
+    exit_levels.captured(signals)      # the Stop and Target columns, from the rules
     version = bus.cache_set(CACHE_CAPTURED,
                             {"signals": signals, "day": compute.captured_day_summary()})
     bus.publish(EVENT_CAPTURED, {"version": version})

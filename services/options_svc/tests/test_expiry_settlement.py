@@ -115,9 +115,14 @@ def captured(monkeypatch):
     return calls
 
 
-def test_a_captured_signal_is_not_expired_on_its_expiry_morning(captured, client):
+def test_a_captured_signal_is_not_expired_on_its_expiry_morning(captured, client, monkeypatch):
     """The defect: ``dte <= 0`` closed every signal as EXPIRED at the first
-    cycle of its expiry day, at whatever the option was marked that morning."""
+    cycle of its expiry day, at whatever the option was marked that morning.
+
+    Pinned to "ride": the stub's mark is past +50%, which the shipped "close"
+    takes as a profit, and this test is about expiry, not the target."""
+    from services.options_svc import profit_trail
+    monkeypatch.setattr(profit_trail, "captured_rides", lambda: True)
     captured["state"]["signals"] = [_signal()]
     client.last = 500.0
     out = compute.run_captured_manage_cycle(now_ct=_at(FRIDAY, 9, 5))

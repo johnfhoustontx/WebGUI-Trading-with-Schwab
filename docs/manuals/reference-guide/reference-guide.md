@@ -3276,9 +3276,12 @@ prices them all.
 **Reprice now** re-prices everything against current chains. **Close signal**, at
 the foot of the detail panel, records an exit for the row you clicked.
 
-**Auto-management** (Settings toggle, on by default) raises the stop to break-even after
-+50%, defers delta-drift cuts on recoverable trades, and auto-closes on the exit rules or
-at expiry. Turned off, the recommendations are advisory only and you close by hand.
+**Auto-management** (Settings toggle, on by default) takes the profit at +50%, closes a
+trade that gives back 10 points of the credit from a best of 25% or more (the profit
+trail), defers delta-drift cuts on recoverable trades, and auto-closes on the exit rules
+or at expiry. The break-even and trail stops wait out 08:30–08:45 and 14:45–15:00 CT,
+when the quotes are wide. Turned off, the recommendations are advisory only and you
+close by hand.
 
 ### Tracked structures
 
@@ -5414,13 +5417,14 @@ the two can never disagree about when the app is allowed to make noise.
 **Flow alerts.** Whether put/call premium crossovers and unusual activity alert you.
 
 **Captured trade auto-management.** Whether captured signals are actively managed —
-break-even stop after +50%, deferred delta cuts on recoverable trades, auto-close on the
-exit rules. Off leaves them advisory.
+take the profit at +50%, the profit trail, deferred delta cuts on recoverable trades,
+auto-close on the exit rules. Off leaves them advisory.
 
-**Manual paper: break-even lifecycle (experimental).** Opts the manual paper account into
-the same lifecycle: arm break-even at +50% of credit instead of taking profit
-immediately, then ride toward full credit protected by a break-even stop. Off (the
-default) keeps the plain take-profit at +50%.
+**Manual paper: break-even lifecycle (experimental).** Opts the paper Account into
+arming break-even at +50% of credit instead of taking profit there, then riding toward
+full credit under a break-even stop and the profit-lock ladder. Off (the default) keeps
+the plain take-profit at +50%, which the 2026-11-13 replay measured as the better of
+the two. The profit trail applies either way.
 
 **Show the ticker.** The scrolling marquee at the bottom of every page, led by the
 latest published market report's headline. **Turning it off only hides the

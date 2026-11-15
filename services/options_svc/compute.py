@@ -62,6 +62,7 @@ from services.options_svc import gamma_window as _gw  # noqa: E402  (the gamma d
 from services.options_svc import greeks_census as _census  # noqa: E402  (a chain with no Greeks at all)
 from services.options_svc import idea_ledger as _ideas  # noqa: E402  (posted-idea rows stay out of the user's book)
 from services.options_svc import oi_expiries as _oi_expiries  # noqa: E402  (the Open Interest tab's expirations)
+from services.options_svc import profit_trail as _trail  # noqa: E402  (the books' profit-trail inputs)
 from services.options_svc.hiro_store import write_rows as _write_hiro_rows  # noqa: E402  (one minute's hedging-flow rows)
 from shared.numeric import finite as _finite  # noqa: E402 - one shared definition (audit CQ-07)
 
@@ -3113,7 +3114,10 @@ def manage_ledger_trades(now_ct=None) -> int:
     for t in trades or []:
         if (t.get("status") or "").upper() != "OPEN" or _ideas.is_self_managed(t):
             continue
-        if (t.get("direction") or "").upper() != _LEDGER_MANAGED_DIRECTION:
+        # A CREDIT trade gets the profit trail and the +50% target only, each behind
+        # its [protect] switch (``profit_trail``); a DEBIT one its rules and the trail.
+        debit = (t.get("direction") or "").upper() == _LEDGER_MANAGED_DIRECTION
+        if not debit and not _trail.ledger_on():
             continue
         try:
             rep = signal_repricer.reprice_legs(t, _proxy.schwab_py_client) or {}
@@ -3122,10 +3126,13 @@ def manage_ledger_trades(now_ct=None) -> int:
             value = rep.get("current_value")
             if value is None:
                 continue
-            ctx = _ledger_exit_ctx(t, rep, today)
+            ctx = (_ledger_exit_ctx(t, rep, today) if debit
+                   else _trail.ledger_credit_ctx(t, rep))
             if ctx is None:
                 continue
-            rec = signal_recommender.recommend(ctx)
+            ctx.update(_trail.ledger_inputs(t, rep, now_ct))
+            rec = (signal_recommender.recommend(ctx) if debit
+                   else _trail.ledger_credit_rec(ctx))
             if rec.get("action") == "HOLD":
                 continue
             row = paper_trader.close_paper_trade(dict(t), float(value),
@@ -3259,7 +3266,7 @@ def analyze_paper(trade_id) -> dict:
 # imported LAZILY inside each function. ``reprice_swing`` is called with
 # ``_proxy.schwab_py_client`` (mirrors the page).
 
-_STOP_CODES = ("TARGET_HIT", "MONEY_STOP", "DELTA_STOP", "TIME_STOP")
+_STOP_CODES = ("TARGET_HIT", "MONEY_STOP", "DELTA_STOP", "TIME_STOP", "TRAIL_STOP")
 
 
 def captured_day_summary() -> dict:
@@ -3382,8 +3389,9 @@ def reprice_captured() -> dict:
     for r in sigs:
         try:
             rep = signal_repricer.reprice_swing(r, _proxy.schwab_py_client)
-            mark = signal_recommender.build_mark(r, rep, now,
-                                                 be_level=_captured_be_level(r))
+            mark = signal_recommender.build_mark(
+                r, rep, now, be_level=_captured_be_level(r),
+                **_trail.captured_kwargs(rep, now))
         except Exception:
             continue
         if not mark:
@@ -3492,19 +3500,17 @@ def close_captured(signal_id, exit_val: float, reason: str) -> None:
 
 
 # ── Captured auto-manage cycle (break-even trailing + auto-close) ─────────────
-# The close codes that auto-close an OPEN captured signal. TARGET_HIT is NOT
-# here: the recommender no longer emits it (a +50% winner now ARMS break-even
-# and rides on toward full credit, protected by the break-even stop).
+# The close codes that auto-close an OPEN captured signal.
 # ``MANAGE_DTE`` joined these on 2026-09-11 with the income capture (C1). Without
 # it a tracked income signal's only exit is EXPIRY, while the app's own policy
 # closes it at 21 DTE in profit — so the calibration would measure a
 # hold-to-expiry policy the manage cycle never executes, the exact distortion the
 # 2026-08-25 calibration records for ``rr_pct``.
 #
-# ``TARGET_HIT`` is deliberately absent: this is the LIFECYCLE path, where +50%
-# arms break-even and holds rather than taking profit, so that code cannot arise.
+# ``TARGET_HIT`` arises only under ``[protect] captured_at_target = "close"``;
+# ``TRAIL_STOP`` is the profit trail (``profit_trail.py``).
 _CAPTURED_CLOSE_CODES = ("BREAKEVEN_STOP", "MONEY_STOP", "TIME_STOP",
-                         "DELTA_STOP", "MANAGE_DTE")
+                         "DELTA_STOP", "MANAGE_DTE", "TARGET_HIT", "TRAIL_STOP")
 
 
 def _captured_be_level(row) -> float:
@@ -3641,7 +3647,8 @@ def run_captured_manage_cycle(now_ct=None) -> dict:
                 trail_ladder=signal_recommender.ACTIVE_TRAIL_LADDER,
                 peak_pnl_frac=(_peak / _credit_total
                                if _peak is not None and _credit_total > 0
-                               else None))
+                               else None),
+                **_trail.captured_kwargs(rep, now, peak=_peak))
             if not mark:
                 continue
             pending_marks.append(mark)
@@ -3649,7 +3656,9 @@ def run_captured_manage_cycle(now_ct=None) -> dict:
             # Arm break-even the first time pnl reaches +50% of the credit.
             pnl = mark.get("unrealized_pnl")
             credit = r.get("entry_credit") or 0
-            if (pnl is not None and credit and not r.get("be_armed")
+            # Only when the book RIDES a winner; under "close" it closes below.
+            if (_trail.captured_rides() and pnl is not None and credit
+                    and not r.get("be_armed")
                     and pnl >= _tp_dollars(r) * credit):
                 signal_db.set_be_armed(sid)
                 r["be_armed"] = 1

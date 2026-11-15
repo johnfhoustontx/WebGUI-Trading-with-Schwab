@@ -31,6 +31,7 @@ from pages.ui_guard import guard
 # ``money as _money`` import was silently shadowed by it, printing the track
 # record's realized P&L without its sign.
 from pages import scorecard as _scorecard
+from . import exit_columns
 from .perf_charts import equity_curve_figure, excursion_text
 # ``rescue_highlight`` was named TWICE on this line. ``heat_border_class`` is
 # not called here and stays anyway: it is a deliberate re-export, and
@@ -81,8 +82,11 @@ def position_columns():
         ("current_value", "Mark"), ("unrealized_pnl", "Open P&L"),
         ("status", "Status"),
     ]
-    return [{"name": f, "label": lbl, "field": f, "sortable": True, "align": "left"}
+    cols = [{"name": f, "label": lbl, "field": f, "sortable": True, "align": "left"}
             for f, lbl in spec]
+    # Stop, Stop rule and Target sit right after Open P&L, which they are levels of.
+    at = next(i for i, c in enumerate(cols) if c["name"] == "unrealized_pnl") + 1
+    return cols[:at] + exit_columns.columns() + cols[at:]
 
 
 def position_rows(positions):
@@ -101,6 +105,7 @@ def position_rows(positions):
             "entry_credit": _round(p.get("entry_credit")),
             "current_value": _round(p.get("current_value")),
             "unrealized_pnl": _round(p.get("unrealized_pnl")),
+            **exit_columns.cells(p),
             "status": p.get("status", ""),
             # At-risk rescue tint on the symbol cell (left border), fed from the
             # manage-cycle rescue overlay on this view. Safe no-op ('') when the
@@ -266,8 +271,9 @@ def render():
             pos_table = kit.table(
                 position_columns(),
                 numeric=("quantity", "entry_credit", "current_value",
-                         "unrealized_pnl"),
-                decimals=("entry_credit", "current_value", "unrealized_pnl"))
+                         "unrealized_pnl") + exit_columns.NUMERIC,
+                decimals=("entry_credit", "current_value", "unrealized_pnl")
+                + exit_columns.DECIMALS)
             kit.section_title("Fills log (last 100)")
             ord_table = kit.table(order_columns(), row_key="order_id",
                                   numeric=("quantity", "fill_price"),

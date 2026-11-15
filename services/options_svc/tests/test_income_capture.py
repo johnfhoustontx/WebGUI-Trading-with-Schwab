@@ -201,12 +201,13 @@ def test_the_captured_cycle_acts_on_the_21_dte_rule():
     executes — which is the exact distortion the 2026-08-25 calibration warns
     about for ``rr_pct``.
 
-    ``TARGET_HIT`` stays OUT on purpose: this path is the lifecycle, where +50%
-    ARMS break-even and holds rather than taking profit, so that code cannot
-    appear here.
+    ``TARGET_HIT`` is IN since 2026-11-15: under the shipped
+    ``[protect] captured_at_target = "close"`` the captured book takes the
+    profit at the target (docs/plans/2026-11-15-profit-trail-design.md); under
+    "ride" the code cannot arise, so its presence costs that mode nothing.
     """
     assert "MANAGE_DTE" in compute._CAPTURED_CLOSE_CODES
-    assert "TARGET_HIT" not in compute._CAPTURED_CLOSE_CODES
+    assert "TARGET_HIT" in compute._CAPTURED_CLOSE_CODES
 
 
 def test_the_captured_cycle_arms_at_the_structures_own_target():

@@ -33,7 +33,7 @@ from nicegui import ui
 
 from pages.ui_guard import guard
 
-from . import detail, handoff, tracked_view
+from . import detail, exit_columns, handoff, tracked_view
 from .rescue import rescue_highlight
 from .theme import (BADGE_MUTED, BADGE_NEG, BADGE_POS, BADGE_WARN, EYEBROW,
                     LABEL, MUTED, THEME)
@@ -60,7 +60,7 @@ def rec_class(rec):
 # over a bounded scrolling body, and the kit's table carries the dense props.
 
 # Right-aligned columns (the kit aligns numbers right, words left).
-_NUMERIC = ("credit", "current_value", "max_loss", "unrealized_pnl")
+_NUMERIC = ("credit", "current_value", "max_loss", "unrealized_pnl") + exit_columns.NUMERIC
 
 
 def pnl_color(value):
@@ -140,8 +140,11 @@ def captured_columns():
     # No ``actions`` column: the selected signal's buttons live in the detail
     # panel's footer (the 2026-09-19 standard), so nothing acts on an unselected
     # row and the icon column's width goes back to the data.
-    return [{"name": f, "label": lbl, "field": f, "sortable": True, "align": "left"}
+    cols = [{"name": f, "label": lbl, "field": f, "sortable": True, "align": "left"}
             for f, lbl in spec]
+    # Stop, Stop rule and Target sit right after Open P&L, which they are levels of.
+    at = next(i for i, c in enumerate(cols) if c["name"] == "unrealized_pnl") + 1
+    return cols[:at] + exit_columns.columns() + cols[at:]
 
 
 def _captured_at(sig):
@@ -196,6 +199,7 @@ def captured_rows(signals):
             "current_value": _round(s.get("current_value")),
             "max_loss": _round(s.get("entry_max_loss")),
             "unrealized_pnl": _round(s.get("unrealized_pnl")),
+            **exit_columns.cells(s),
             "grade": s.get("entry_grade", ""),
             "_rec_class": rec_class(s.get("recommendation") or "HOLD"),
             "_pnl_class": pnl_class(s.get("unrealized_pnl")),
@@ -384,7 +388,7 @@ def render():
             box = kit.region("Refreshing the signals…", classes="flex-grow min-w-0")
             with box.content:
                 table = kit.table(captured_columns(), numeric=_NUMERIC,
-                                  decimals=("credit", "max_loss"))
+                                  decimals=("credit", "max_loss") + exit_columns.DECIMALS)
                 # The day footer sits UNDER the table but inside the region, so
                 # a reprice's spinner covers it too - its figures are as stale
                 # as the marks above them while a reprice runs.

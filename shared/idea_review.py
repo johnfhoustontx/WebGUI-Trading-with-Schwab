@@ -57,8 +57,8 @@ DIMENSIONS = ("grade", "strategy", "trade_type", "score_band", "post_hour",
               "symbol")
 SCORE_BANDS = ("<60", "60-69", "70-79", "80+", "no score")
 
-RATINGS = ("clean win", "win after drawdown", "stopped", "expired win",
-           "expired loss", "closed by hand")
+RATINGS = ("clean win", "win after drawdown", "stopped", "trailed",
+           "expired win", "expired loss", "closed by hand")
 
 
 # ---- small readers --------------------------------------------------------
@@ -154,6 +154,10 @@ def rate(t: dict, clean_mae_pct: float) -> str:
         return "clean win" if m > -float(clean_mae_pct) else "win after drawdown"
     if reason == "STOP":
         return "stopped"
+    if reason == "TRAIL":
+        # Closed by the profit trail (config/trade_mgmt.toml [protect]): the app's
+        # own rule, not a hand close.
+        return "trailed"
     if reason == "EXPIRED" or (reason is None and t.get("status") == "EXPIRED"):
         return "expired win" if _pnl(t) > 0 else "expired loss"
     return "closed by hand"
@@ -223,8 +227,10 @@ def _fact(fid: str, rows: list[dict], min_n: int) -> dict:
         "n": n,
         "targets": reasons["TARGET"],
         "stops": reasons["STOP"],
+        "trails": reasons["TRAIL"],
         "expired": expired,
-        "manual": n - reasons["TARGET"] - reasons["STOP"] - expired,
+        "manual": (n - reasons["TARGET"] - reasons["STOP"] - reasons["TRAIL"]
+                   - expired),
         "win_rate": (100.0 * sum(1 for p in pnls if p > 0) / n) if n else None,
         "avg_pnl": total / n if n else None,
         "total_pnl": total,
@@ -384,7 +390,7 @@ def _add(out: set, v) -> None:
         out.add(str(abs(int(x))))
 
 
-_FACT_KEYS = ("n", "targets", "stops", "expired", "manual", "win_rate",
+_FACT_KEYS = ("n", "targets", "stops", "trails", "expired", "manual", "win_rate",
               "avg_pnl", "total_pnl", "avg_mae_pct", "avg_held_h")
 _CLOSED_KEYS = ("score", "entry", "exit", "realized_pnl", "mae_pct",
                 "held_h")

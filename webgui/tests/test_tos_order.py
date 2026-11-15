@@ -36,7 +36,7 @@ def test_a_debit_vertical_is_the_operators_example_exactly():
     got = tos_order.order(DEBIT_CALL)["text"]
     assert got == "\n".join([
         "BUY +1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @1.50 LMT [TO OPEN/TO OPEN]",
-        "SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @TRG+100.00% LMT GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
+        "SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL @TRG+70.00% LMT GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
         "SELL -1 VERTICAL SPX 100 (Weeklys) 30 OCT 26 5800/5810 CALL TRSTP MARK-50.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
     ])
 
@@ -172,7 +172,7 @@ def test_the_exits_reverse_the_opening_line(credit, legs, opening):
     body = opening.split(" ", 2)[2].rsplit(" @", 1)[0]
     close = "SELL -1" if bought else "BUY +1"
     effects = opening.rsplit("[", 1)[1].replace("OPEN", "CLOSE")
-    tgt, stp = ("+100.00", "-50.00") if bought else ("-50.00", "+100.00")
+    tgt, stp = ("+70.00", "-50.00") if bought else ("-50.00", "+100.00")
     assert lines[1] == f"{close} {body} @TRG{tgt}% LMT GTC TRG BY #1 OCO [{effects}"
     assert lines[2] == f"{close} {body} TRSTP MARK{stp}% MARK GTC TRG BY #1 OCO [{effects}"
 
@@ -231,7 +231,7 @@ def test_a_long_strangle_buys_and_takes_the_debit_exits():
             "text"].splitlines()
         assert lines == [
             "BUY +1 STRANGLE INTC 100 (Weeklys) 6 NOV 26 105/85 CALL/PUT @1.90 LMT [TO OPEN/TO OPEN]",
-            "SELL -1 STRANGLE INTC 100 (Weeklys) 6 NOV 26 105/85 CALL/PUT @TRG+100.00% LMT GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
+            "SELL -1 STRANGLE INTC 100 (Weeklys) 6 NOV 26 105/85 CALL/PUT @TRG+70.00% LMT GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
             "SELL -1 STRANGLE INTC 100 (Weeklys) 6 NOV 26 105/85 CALL/PUT TRSTP MARK-50.00% MARK GTC TRG BY #1 OCO [TO CLOSE/TO CLOSE]",
         ]
 

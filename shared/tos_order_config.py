@@ -18,7 +18,7 @@ DEFAULTS = {
     "quantity": 1,
     "exit_tif": "GTC",
     "stop_type": "trailing",
-    "debit": {"target_pct": 100.0, "stop_pct": 50.0, "trail_pct": 50.0},
+    "debit": {"target_pct": 70.0, "stop_pct": 50.0, "trail_pct": 50.0},
     "credit": {"target_pct": 50.0, "stop_pct": 100.0, "trail_pct": 100.0},
 }
 

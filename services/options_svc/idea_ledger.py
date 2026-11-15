@@ -33,6 +33,7 @@ if str(OPTIONS_SCANNER) not in sys.path:
 import paper_engine  # noqa: E402
 import paper_lock as _paper_lock  # noqa: E402  (the one lock for both paper books)
 import paper_trader  # noqa: E402
+import signal_recommender  # noqa: E402  (the profit trail)
 import signal_repricer  # noqa: E402
 import structure_marks  # noqa: E402
 import trades_db  # noqa: E402
@@ -40,6 +41,7 @@ import trades_db  # noqa: E402
 from services import _degrade, _proxy  # noqa: E402
 from services.options_svc import site_ideas  # noqa: E402
 from shared import paper_limits  # noqa: E402
+from shared import trade_mgmt as _trade_mgmt  # noqa: E402  (the profit trail's switch)
 from shared.numeric import parsed_finite as _finite  # noqa: E402
 
 log = logging.getLogger(__name__)
@@ -214,19 +216,49 @@ def _lower_mae(row, pnl, stamp) -> None:
         row["mae_pnl"], row["mae_at"] = round(pnl, 2), stamp
 
 
+def _raise_mfe(row, pnl, stamp) -> None:
+    """Move the best point up to ``pnl`` when it is better. It only ever rises,
+    and is unset (None) until the first mark."""
+    best = _finite(row.get("mfe_pnl"))
+    if best is None or pnl > best:
+        row["mfe_pnl"], row["mfe_at"] = round(pnl, 2), stamp
+
+
+def _trail_hit(row, pnl, when) -> bool:
+    """Has this mark given back enough from the row's best to close it on the
+    profit trail (``[protect] ledger_self_managed``)?"""
+    if not _trade_mgmt.protect()["ledger_self_managed"]:
+        return False
+    qty = int(row.get("quantity") or 1)
+    mp = _finite(row.get("max_profit_total"))
+    ctx = {"strategy": row.get("strategy"), "direction": row.get("direction"),
+           "entry_credit": row.get("entry_credit"),
+           "entry_debit": row.get("entry_debit"),
+           "max_profit": mp / qty if mp is not None and qty > 0 else None,
+           "unrealized_pnl": pnl,
+           **signal_recommender.protect_inputs("ledger_self_managed",
+                                               row.get("mfe_pnl"), when)}
+    return signal_recommender.protect_only(ctx)["code"] == "TRAIL_STOP"
+
+
 def apply_mark(t, pnl, when):
-    """``(row, "STOP" | "TARGET" | None)``: ``t`` with this mark recorded. PURE.
+    """``(row, "STOP" | "TARGET" | "TRAIL" | None)``: ``t`` with this mark recorded.
 
     The stop is checked FIRST, so a mark that satisfies both lines is a stop. Each
-    line is inclusive, and a line that is not set (None) never fires."""
+    line is inclusive, and a line that is not set (None) never fires. The profit
+    trail (``TRAIL``, config/trade_mgmt.toml ``[protect]``) is checked last, on
+    the best mark so far including this one. Pure but for reading that config."""
     row, stamp = dict(t), _stamp(when)
     row["last_mark_pnl"], row["last_mark_at"] = round(pnl, 2), stamp
     _lower_mae(row, pnl, stamp)
+    _raise_mfe(row, pnl, stamp)
     stop, target = _finite(row.get("stop_pnl")), _finite(row.get("target_pnl"))
     if stop is not None and pnl <= -stop:
         return row, "STOP"
     if target is not None and pnl >= target:
         return row, "TARGET"
+    if _trail_hit(row, pnl, when):
+        return row, "TRAIL"
     return row, None
 
 

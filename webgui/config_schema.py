@@ -343,8 +343,9 @@ _TRADE_MGMT = ConfigFile(
                 "Apply to every credit structure unless a per-structure rule "
                 "below overrides them.", (
             _pct("stops.tp_frac", "Take profit at",
-                 "Percent of the credit captured. Captured signals arm a break-even "
-                 "stop here; the manual book closes outright.",
+                 "Percent of the credit captured. Captured signals close here "
+                 "unless \"At the target\" below says ride; the paper Account "
+                 "closes or rides by its Settings switch.",
                  lo=5, hi=100, step=5),
             Field("stops.stop_mult", "Stop loss at",
                   "Cut when the loss reaches this multiple of the credit received.",
@@ -385,6 +386,34 @@ _TRADE_MGMT = ConfigFile(
                   "credit, lock in the second.", kind="ladder"),
             Field("trail.default_ladder", "Default rungs",
                   "The plain break-even stop, as a ladder.", kind="ladder"),
+        )),
+        Section("Profit trail",
+                "Protects a trade that has gone green: once its best profit "
+                "reaches the start, it is closed when it falls the give-back "
+                "below that best, and never below break-even.", (
+            _pct("protect.trail_start", "Trail starts at",
+                 "Best profit, as a percent of the credit (of the target's base "
+                 "for a debit trade). 0 turns the trail off.", lo=0, hi=100, step=5),
+            _pct("protect.trail_giveback", "Give back",
+                 "How far below its best a trade may fall before it is closed, as "
+                 "a percent of the credit. Must be below the start.",
+                 lo=1, hi=100, step=1),
+            Field("protect.quiet_windows", "Quiet windows (Central)",
+                  "Times, as HH:MM-HH:MM, in which the break-even, ladder and "
+                  "trail stops wait: the opening and closing quotes are wide. "
+                  "The money, time and delta stops still fire.", kind="phrases"),
+            Field("protect.captured_at_target", "Captured signals at the target",
+                  "\"close\" takes the profit; \"ride\" arms break-even and "
+                  "rides under the ladder.", kind="choice", choices=("close", "ride")),
+            Field("protect.captured", "Trail captured signals", "", kind="bool"),
+            Field("protect.account", "Trail the paper Account", "", kind="bool"),
+            Field("protect.ledger", "Trail my Paper Ledger trades",
+                  "The Ledger trades you booked yourself.", kind="bool"),
+            Field("protect.ledger_self_managed", "Trail the Ledger's own rows",
+                  "Trade ideas, the daily condor and shadow ideas.", kind="bool"),
+            Field("protect.ledger_take_profit", "Take profit on my Ledger credit trades",
+                  "Close the credit trades you booked at the target (+50% of the "
+                  "credit). They still have no loss stop.", kind="bool"),
         )),
         Section("Per-structure rules",
                 "Override the rules above for one structure. Blank means "
@@ -3252,7 +3281,7 @@ _TOS_ORDER = ConfigFile(
         Section("Debit trades", "Bought: the target is a rise in the "
                 "trade's price, the stop a fall.", (
             Field("debit.target_pct", "Take profit above the debit",
-                  "100 sells at double what was paid.", unit="%",
+                  "70 sells at 1.7 times what was paid; 100 at double.", unit="%",
                   min=1, max=1000, step=5),
             Field("debit.trail_pct", "Trailing stop below the highest mark",
                   "50 stops out when the trade falls to half the highest mark "
@@ -4006,6 +4035,10 @@ def cross_check(name, values):
             if isinstance(va, str) and isinstance(vb, str) and va >= vb:
                 errs.append(f"{humanize(a[1])}: the start must be before the end.")
     if name == "trade_mgmt.toml":
+        st, gb = g("protect", "trail_start"), g("protect", "trail_giveback")
+        if _real(st) and _real(gb) and st > 0 and gb >= st:
+            # the loader would put both back to the shipped values, silently
+            errs.append("Profit trail: the give-back must be smaller than the start.")
         w, c = g("rescue", "money_warn_mult"), g("rescue", "money_critical_mult")
         if None not in (w, c) and w >= c:
             errs.append("The rescue warning loss must be smaller than the critical "

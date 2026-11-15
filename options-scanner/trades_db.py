@@ -82,7 +82,11 @@ CREATE TABLE IF NOT EXISTS trades (
     entry_source TEXT,
     -- When "Delete all closed" took a closed trade-idea row off the Ledger's list.
     -- The row stays for the weekly review and /eod; NULL = still listed.
-    cleared_at TEXT
+    cleared_at TEXT,
+    -- The best per-contract P&L marked so far, for the profit trail
+    -- (config/trade_mgmt.toml [protect]). NULL until the first mark.
+    mfe_pnl REAL,
+    mfe_at TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_trades_status ON trades(status);
 CREATE INDEX IF NOT EXISTS idx_trades_symbol ON trades(symbol);
@@ -119,6 +123,7 @@ _TRADE_COLUMNS = [
     "source", "idea_id", "idea_posted", "idea_grade", "idea_score",
     "idea_label", "target_pnl", "stop_pnl", "mae_pnl", "mae_at",
     "last_mark_pnl", "last_mark_at", "entry_source", "cleared_at",
+    "mfe_pnl", "mfe_at",
 ]
 
 _EVENT_COLUMNS = [
@@ -197,7 +202,7 @@ def init_db(db_path=None):
             ("target_pnl", "REAL"), ("stop_pnl", "REAL"), ("mae_pnl", "REAL"),
             ("mae_at", "TEXT"), ("last_mark_pnl", "REAL"),
             ("last_mark_at", "TEXT"), ("entry_source", "TEXT"),
-            ("cleared_at", "TEXT"),
+            ("cleared_at", "TEXT"), ("mfe_pnl", "REAL"), ("mfe_at", "TEXT"),
         ):
             if col not in existing_cols:
                 conn.execute(f"ALTER TABLE trades ADD COLUMN {col} {col_type}")
@@ -304,6 +309,19 @@ def update_trade(conn, trade_id, trade):
     conn.execute(
         f"UPDATE trades SET {set_clause} WHERE trade_id = :trade_id", values,
     )
+
+
+def raise_peak(conn, trade_id, pnl, at):
+    """Record ``pnl`` as the trade's best mark when it beats the stored one.
+
+    One statement and no ``trade_events`` row: a mark is not a trade event (the
+    same reason ``idea_ledger._write_mark`` writes none). It can only RAISE the
+    peak, so a later, lower mark never takes back a best the trail has seen.
+    """
+    conn.execute(
+        "UPDATE trades SET mfe_pnl = :pnl, mfe_at = :at WHERE trade_id = :id "
+        "AND (mfe_pnl IS NULL OR mfe_pnl < :pnl)",
+        {"pnl": pnl, "at": at, "id": trade_id})
 
 
 def delete_trade(conn, trade_id):

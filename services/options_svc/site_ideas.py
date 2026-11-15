@@ -284,8 +284,8 @@ def _expired(facts, close, now):
 # pages do: on a SINGLE-option idea the P&L is that option's price, so while the
 # switch is off its result carries the status and exit but no dollar figure
 # (``withheld``). A multi-leg idea's net figure is shown either way.
-_LEDGER_EXIT = {"TARGET": "target", "STOP": "stop", "EXPIRED": "expired",
-                "MANUAL": "closed"}
+_LEDGER_EXIT = {"TARGET": "target", "STOP": "stop", "TRAIL": "trail",
+                "EXPIRED": "expired", "MANUAL": "closed"}
 
 
 def ledger_key(symbol, posted) -> tuple:
@@ -386,7 +386,7 @@ def _ledger_backed(i):
 
 
 # ── Which ideas a refresh touches ────────────────────────────────────────────
-_FINAL = ("target", "stop", "expired", "closed")
+_FINAL = ("target", "stop", "trail", "expired", "closed")
 # Settle only once the bars have been scanned to within this of the close (so a
 # late target hit is not missed), or give up waiting after GIVE_UP.
 SCAN_COMPLETE_SLACK = _dt.timedelta(minutes=15)

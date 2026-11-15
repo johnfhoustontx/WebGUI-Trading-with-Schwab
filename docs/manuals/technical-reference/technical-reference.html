@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-14</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-15</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -215,6 +215,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#model-health">Model Health</a><ul>
 <li><a href="#the-range-forecast-range_forecastpy-payload-range">The range forecast (range_forecast.py, payload range)</a></li>
 <li><a href="#the-exit-chance-exit_chancepy-payload-exit">The exit chance (exit_chance.py, payload exit)</a></li>
+<li><a href="#alert-quality-alert_qualitypy-payload-alerts">Alert quality (alert_quality.py, payload alerts)</a></li>
 </ul>
 </li>
 <li><a href="#cadences">Cadences</a></li>
@@ -234,6 +235,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#scope-and-absences">Scope and absences</a></li>
 </ul>
 </li>
+<li><a href="#the-profit-trail-every-paper-book">The profit trail (every paper book)</a></li>
 <li><a href="#trade-ideas-in-the-paper-ledger">Trade ideas in the Paper Ledger</a><ul>
 <li><a href="#booking">Booking</a></li>
 <li><a href="#the-5-minute-cycle">The 5-minute cycle</a></li>
@@ -4976,11 +4978,11 @@ smallest whole ratio, and names the structure from that geometry:</p>
   price is the whole position's), to two decimals.</li>
 <li><strong>Time in force</strong>: the opening line carries none, which ThinkorSwim reads as
   DAY. The exits carry <code>exit_tif</code> (shipped <code>GTC</code>) after <code>LMT</code> and after the
-  stop's trigger <code>MARK</code>: <code>@TRG+100.00% LMT GTC TRG BY #1 OCO</code>,
+  stop's trigger <code>MARK</code>: <code>@TRG+70.00% LMT GTC TRG BY #1 OCO</code>,
   <code>TRSTP MARK-50.00% MARK GTC TRG BY #1 OCO</code>. <code>exit_tif = "DAY"</code> writes no word.</li>
 <li><strong>Exits</strong>, from <code>config/tos_order.toml</code> (read on every click), the opening
   line with the side reversed. The target is a percentage of the fill
-  (<code>target_pct</code>): a buy (debit) <code>@TRG+100.00% LMT</code>, a sell (credit)
+  (<code>target_pct</code>): a buy (debit) <code>@TRG+70.00% LMT</code>, a sell (credit)
   <code>@TRG-50.00% LMT</code>. The stop depends on <code>stop_type</code>:</li>
 <li><code>"trailing"</code> (shipped, 2026-11-12): <code>TRSTP MARK{±}{trail_pct}% MARK</code>, a
     trailing stop offset <code>trail_pct</code> from the moving mark and triggered on the
@@ -6847,6 +6849,44 @@ carries its data date, not a clock) and a dated <code>report.md</code>, using <c
   with <code>[exit] min_days</code> (40). Drift: <code>short_delta</code>, <code>cushion</code>, <code>entry_iv_rank</code>.</li>
 <li>A failure is the degrade <code>options.exit_chance</code>; the payload's <code>exit</code> is then <code>null</code>.</li>
 </ul>
+<h3 id="alert-quality-alert_qualitypy-payload-alerts">Alert quality (<code>alert_quality.py</code>, payload <code>alerts</code>)</h3>
+<p>Design <code>docs/plans/2026-11-14-alert-quality-design.md</code>.</p>
+<ul>
+<li><strong>The record.</strong> <code>handlers.run_flow_alerts</code> writes every fresh alert of every type
+  to <code>services/options_svc/data/alert_log.db</code> (<code>alert_log.record</code>, <code>INSERT OR IGNORE</code>
+  on the session date and the alert id, since a contract-level id carries no date;
+  after the pushes and the cached list; a failure is the degrade
+  <code>options.alert_log</code>). Switch: <code>config/flow_alerts.toml [log] enabled</code>.
+  <code>tools/seed_alert_log.py</code> copied the unusual activity and big delta alerts held in
+  <code>flow_contract_days</code> once (<code>source = 'seed'</code>).</li>
+<li><strong>Price path.</strong> The Gamma Archive's <code>gex</code> view, fetched rows with a spot only, one
+  per 5-minute grid point; the futures feed left out. A session counts once archived
+  (17:00), so it is first scored the next night.</li>
+<li><strong>Window.</strong> From the first grid point at or after the alert (within 5 minutes;
+  never a point before it, which would hold the move that fired it):
+  (highest - lowest) / starting spot over <code>[alerts] horizon_min</code> (30). A path that
+  does not reach the full horizon (within half a grid step) gives no window.</li>
+<li><strong>Usual range.</strong> Per symbol and Central 5-minute slot, the median window over that
+  symbol's <code>history_sessions</code> (20) sessions BEFORE the day that hold the slot; none
+  below <code>min_history</code> (10).</li>
+<li><strong>Label and base.</strong> 1 when the window beats its usual range. The base is the share
+  of that symbol-day's other windows that do, leaving out every window starting
+  within <code>horizon_min</code> of ANY recorded alert on it (either side).</li>
+<li><strong>Score.</strong> Each day weighs one, split over its scored alerts. Hit rate and base
+  rate are those weighted means; the interval is <code>metrics.day_bootstrap_diff</code> of
+  <code>-label</code> against <code>-base</code> (negative: the alert wider more often), with Model
+  Health's verdict rule and <code>[alerts] min_days</code> (40). Recorded but unscorable alerts
+  read <em>Too few days</em>.</li>
+<li><strong>Read.</strong> One symbol at a time, from a floor <code>history_sessions</code> x 7/5 + 7 days
+  before its first alert, so the nightly cost stays bounded as the archive grows.</li>
+<li><strong>Left out.</strong> <code>price</code> (no point within 5 minutes after), <code>horizon</code>, <code>history</code>,
+  <code>base</code> (no other window that day), counted per type.</li>
+<li><strong>Types.</strong> <code>[alerts] types</code>: <code>uoa</code>, <code>big_delta</code>, <code>hiro_surge</code>, <code>hiro_flip</code>,
+  <code>crossover</code>. <code>gamma_flip</code> is recorded but not scored until the gamma regime study
+  has read.</li>
+<li>A failure is the degrade <code>options.alert_quality</code>; the payload's <code>alerts</code> is then
+  <code>null</code>.</li>
+</ul>
 <h2 id="cadences">Cadences</h2>
 <table>
 <thead>
@@ -7231,6 +7271,92 @@ book the same number.</p>
 <p>⚠ <strong>No debit outcome data exists</strong> - <code>signals.db</code> holds only PCS/CCS/IC and the
 ledger is empty - so 0.50 and 21 are <strong>sourced, not fitted</strong>. That is why they
 are config.</p>
+<h1 id="the-profit-trail-every-paper-book">The profit trail (every paper book)</h1>
+<p><strong>Files:</strong> <code>options-scanner/signal_recommender.py</code> (<code>_trail_level</code>,
+<code>protect_inputs</code>, <code>protect_only</code>), <code>services/options_svc/profit_trail.py</code> (each
+book's inputs), <code>shared/trade_mgmt.py</code> (<code>protect</code>, <code>in_quiet_window</code>),
+<code>config/trade_mgmt.toml [protect]</code>. Design:
+<code>docs/plans/2026-11-15-profit-trail-design.md</code>.</p>
+<pre><code>armed   when  best &gt;= trail_start x base
+stop    =     max(best - trail_giveback x base, be_level)
+exit    when  pnl &lt;= stop, and the mark is not inside a quiet window
+</code></pre>
+<p><code>best</code> is the highest per-contract P&amp;L the position has marked, this mark
+included; <code>base</code> is the credit x 100 for a credit position and
+<code>_debit_target_base</code> for a debit one (max profit, else the debit paid);
+<code>be_level</code> is the round-trip commission where the book supplies one, else 0.
+Shipped: <code>trail_start</code> 0.25, <code>trail_giveback</code> 0.10. The exit code is
+<code>TRAIL_STOP</code> (<code>TRAIL</code> on the Ledger's self-managed rows), with action
+TAKE_PROFIT when the P&amp;L is positive and CUT otherwise.</p>
+<p><strong>Where it sits.</strong> In the credit rules it shares rule 3 with the break-even stop
+and the ladder's lock; the HIGHER of the two stops governs. In the debit rules it
+is rule 1b, after the optional debit stop and before the target. A missing P&amp;L
+never reaches it as zero.</p>
+<p><strong>Quiet windows</strong> (<code>quiet_windows</code>, shipped <code>08:30-08:45</code> and <code>14:45-15:00</code>
+Central, start inclusive, end exclusive): the break-even stop, the ladder's lock
+and the trail do not fire inside them; the money, time and delta stops do. A
+caller that passes no mark time gets no windows.</p>
+<table>
+<thead>
+<tr>
+<th>Book</th>
+<th>Peak from</th>
+<th>Cadence</th>
+<th>What else changes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Captured signals</td>
+<td><code>signal_db.peak_unrealized</code>, this mark taken in</td>
+<td>5 minutes</td>
+<td><code>captured_at_target = "close"</code> takes the profit at <code>tp_frac</code> (code <code>TARGET_HIT</code>) instead of arming break-even</td>
+</tr>
+<tr>
+<td>Paper Account</td>
+<td><code>paper_positions.mfe</code> / quantity</td>
+<td>hourly, 09:00-14:00</td>
+<td>both modes of the lifecycle switch; the switch still decides close or ride at the target</td>
+</tr>
+<tr>
+<td>Paper Ledger, own trades</td>
+<td><code>trades.mfe_pnl</code> (new)</td>
+<td>hourly</td>
+<td>a CREDIT trade gets the trail and, with <code>ledger_take_profit</code>, the structure's <code>tp_frac</code> target (<code>protect_only</code>), and no loss stop; a DEBIT trade gets the trail on top of its rules</td>
+</tr>
+<tr>
+<td>Paper Ledger, self-managed rows</td>
+<td><code>trades.mfe_pnl</code></td>
+<td>5 minutes</td>
+<td>checked after the row's own stop and target lines</td>
+</tr>
+</tbody>
+</table>
+<p>Each book has its own switch (<code>captured</code>, <code>account</code>, <code>ledger</code>,
+<code>ledger_self_managed</code>); a book that is off passes no inputs, and every rule is
+then what it was before the trail.</p>
+<p><strong>The measurement</strong> (2026-11-13 prod backup, 388 closed captured PCS/CCS/IC on
+their own 5-minute marks, 10% of the credit as slippage on every replayed exit,
+against the real outcome of -$6.30 a trade): taking the profit at +50% scored
++$7.60 a trade, adding this trail +$8.32, today's break-even plus ratchet ladder
+-$8.07, and the best trail used INSTEAD of a target -$2.91. The take-profit is
+most of the gain; the trail adds about $1 a trade, all on 0-DTE, and nothing at
+25% slippage. A rule could only exit earlier than the real close, since the marks
+end there.</p>
+<p><strong>The Stop and Target columns.</strong> <code>signal_recommender.exit_levels(ctx)</code> returns the
+per-contract P&amp;L at which the rules close a position now: <code>stop</code> is the highest
+of the money stop (<code>-stop_mult x credit</code>, when the structure has loss rules), the
+break-even / ladder lock once <code>be_armed</code>, the trail once armed, and a debit's
+<code>debit_stop_frac</code> stop; <code>stop_kind</code> names it; <code>target</code> is <code>tp_frac x base</code>, or
+<code>None</code> for a lifecycle position (it rides). <code>services/options_svc/exit_levels.py</code>
+builds each book's ctx as its manage cycle does and writes <code>stop_level</code>,
+<code>stop_kind</code>, <code>target_level</code> (position dollars) on each OPEN row of
+<code>cache:options:paper_trades</code>, <code>cache:options:paper_account</code> and
+<code>cache:options:captured</code>. A self-managed Ledger row shows its own <code>stop_pnl</code> /
+<code>target_pnl</code> lines, with the trail as the stop once it is higher. A test walks a
+P&amp;L grid and checks <code>recommend</code> closes on a P&amp;L stop exactly at or below <code>stop</code>
+and takes the profit exactly at or above <code>target</code>. The time stop, the delta stop
+and manage-at-DTE are not P&amp;L levels and are not shown.</p>
 <h1 id="trade-ideas-in-the-paper-ledger">Trade ideas in the Paper Ledger</h1>
 <p><strong>Files:</strong> <code>services/options_svc/idea_ledger.py</code> (booking, marks, exits),
 <code>services/options_svc/scheduler.py</code> (<code>idea_marks_due</code>), <code>shared/idea_review.py</code>

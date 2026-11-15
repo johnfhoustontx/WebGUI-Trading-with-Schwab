@@ -79,8 +79,8 @@
 
   // ── How the idea did (site_ideas.refresh) ──────────────────────────────────
   // An idea booked into the Paper Ledger (basis "ledger") shows that row exactly:
-  // its status, its P&L per contract, closed at its target or stop or by hand
-  // ("closed"), or settled at expiry - so the site and the Ledger agree. On a
+  // its status, its P&L per contract, closed at its target, its stop, its
+  // trailing stop ("trail") or by hand ("closed"), or settled at expiry - so the site and the Ledger agree. On a
   // single-option idea the P&L is that option's price, so while the site's quotes
   // switch is off the result is "withheld": status and exit, no dollar figure, and
   // never in the dollar total.
@@ -142,6 +142,7 @@
   var EXIT_WORDS = {
     target: "Closed at its profit target",
     stop: "Stopped out",
+    trail: "Closed on its trailing stop",
     closed: "Closed by hand"
   };
 
@@ -210,8 +211,8 @@
   // never added to the total - their figure still moves. A withheld result (no
   // dollar figure) is counted and adds nothing.
   function record(days) {
-    var out = { days: days.length, ideas: 0, hit: 0, stopped: 0, expired: 0,
-                byHand: 0, open: 0, closed: 0, net: 0 };
+    var out = { days: days.length, ideas: 0, hit: 0, stopped: 0, trailed: 0,
+                expired: 0, byHand: 0, open: 0, closed: 0, net: 0 };
     days.forEach(function (d) {
       d.ideas.forEach(function (i) {
         out.ideas += 1;
@@ -219,6 +220,7 @@
         if (!r) return;
         if (r.status === "target") out.hit += 1;
         else if (r.status === "stop") out.stopped += 1;
+        else if (r.status === "trail") out.trailed += 1;
         else if (r.status === "expired") out.expired += 1;
         else if (r.status === "closed") out.byHand += 1;
         else { out.open += 1; return; }
@@ -235,6 +237,7 @@
     if (!r.ideas) return;                           // stays hidden
     while (box.firstChild) box.removeChild(box.firstChild);
     var parts = [r.hit + " hit target", r.stopped + " stopped out"];
+    if (r.trailed) parts.push(r.trailed + " closed on a trailing stop");
     if (r.expired) parts.push(r.expired + " expired");
     if (r.byHand) parts.push(r.byHand + " closed by hand");
     parts.push(r.open + " open");

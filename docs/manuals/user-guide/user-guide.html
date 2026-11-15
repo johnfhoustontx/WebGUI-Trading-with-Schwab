@@ -1179,16 +1179,17 @@ in its column). <strong>Where the price sits</strong>, on top, is a line with th
 wall</strong> (the strike with the most put interest below the price), <strong>max pain</strong> (the strike
 at which the open contracts would be worth the least at expiry) and the <strong>call wall</strong>
 (the most call interest above the price), each with its distance from the price in
-points and per cent; under it are that expiry's <strong>put / call ratio</strong>, its calls and puts,
-and the ratio over every expiration shown. The <strong>strike map</strong> below has one strike axis:
+points and per cent, on a line coloured for puts below the price and calls above it.
+The <strong>strike map</strong> below has one strike axis:
 each row holds that strike's cell in each expiration (as many as fit, the rest by the
 scroll bar under them; brighter where more
 contracts are open) and, beside them, the chosen expiry's puts to the left and calls to
 the right. The walls and max pain are named on their rows and the dashed line is the
 price. <strong>Total</strong> draws each side's count; <strong>Net calls less puts</strong> draws only the larger
 side's excess. To the right, <strong>The read</strong> states the same counts and distances in
-sentences, <strong>Levels</strong> lists them, and <strong>Whole chain</strong> gives the split over every
-expiration. Hover a cell or a bar for the exact counts.</p>
+sentences, <strong>Levels</strong> lists them, the expiry's <strong>open interest</strong> card gives its calls
+and puts in per cent with its <strong>put / call ratio</strong>, and <strong>Whole chain</strong> gives the same
+over every expiration. Hover a cell or a bar for the exact counts.</p>
 <p>The columns are a <strong>list of expirations, not a time scale</strong>: open interest is published
 once a day, so nothing here moves during the session except the price line. A count of
 open contracts says where positions sit, not who holds which side. The figures cover
@@ -2563,7 +2564,7 @@ idea can also be sent to the account from the app itself (next section).</p>
   Configuration → ThinkorSwim order sets them to DAY instead.</li>
 <li><strong>The profit target</strong> is a percentage of the fill, so ThinkorSwim prices it
   from what you actually paid. A trade bought for a <strong>debit</strong> takes profit at
-  <strong>+100%</strong> (double the debit); a trade sold for a <strong>credit</strong> buys back at
+  <strong>+70%</strong> (1.7 times the debit); a trade sold for a <strong>credit</strong> buys back at
   <strong>half the credit</strong> (−50%).</li>
 <li><strong>The stop is a trailing stop</strong> (<code>TRSTP</code>): it sits a percentage from the
   trade's <strong>mark</strong> and follows the mark when it moves your way, never back. A
@@ -3045,6 +3046,22 @@ the contract is worth when you press the button.</p>
   The open figure covers every signal still running, and shows a dash rather than
   $0.00 until you have priced them with <strong>Reprice now</strong>.</li>
 <li>When a captured signal hits a stop or target, the page raises a notification.</li>
+<li><strong>At +50% of the credit a captured signal is closed</strong> — it takes the profit.
+  (Until 2026-11-15 it armed a break-even stop and rode on; a replay of 388 closed
+  signals measured taking the profit about $14 a trade better. <strong>Profit trail</strong>
+  below has the setting that brings riding back.)</li>
+<li><strong>Profit trail.</strong> Once a trade's best profit reaches <strong>25% of the credit</strong>, it is
+  closed if it falls <strong>10 points of the credit</strong> below that best (a $1.00 credit
+  that reached +$30 closes at +$20), never below break-even plus commissions. The
+  break-even and trail stops wait out <strong>08:30–08:45</strong> and <strong>14:45–15:00 CT</strong>, when
+  quotes are wide; the loss stops do not. Numbers and switches: <strong>Settings →
+  Configuration → Exits &amp; trade management → Profit trail</strong>.</li>
+<li><strong>Stop, Stop rule and Target</strong> columns, beside the P&amp;L: the P&amp;L at which the
+  rules close the position now, in dollars for the whole position. <strong>Stop rule</strong>
+  says which stop it is (<strong>Loss stop</strong>, <strong>Break-even</strong>, <strong>Trailing</strong>, or a trade
+  idea's own stop), and the stop rises as the trade gains. A dash means no level:
+  a closed row, no stop of that kind, or a position that rides past its target.
+  The time and delta stops fire on time and delta, so no column shows them.</li>
 </ul>
 <h3 id="tracked-structures">Tracked structures</h3>
 <p>Under the signals is a second, read-only section. It holds the Market Scanner's
@@ -3252,8 +3269,22 @@ Paper Account.</p>
 <li><strong>No automatic loss stop.</strong> The research this follows closes debit spreads out
   before expiry rather than stopping them; your risk is capped at the premium paid
   regardless. Close any row by hand whenever you like.</li>
-<li><strong>Credit spreads here are tracked, not managed</strong> — only expiry settles them.
-  The engine's own book on <strong>Paper Account</strong> is the one that takes profit and cuts.</li>
+<li><strong>Credit spreads here have two automatic exits</strong>, checked hourly: they <strong>take
+  the profit at +50% of the credit</strong>, and once the best profit reaches 25% of the
+  credit they close if they give back 10 points of the credit from that best (the
+  profit trail). There is <strong>no loss stop</strong>: cutting a loser on your own trades
+  stays your call. Long options and debit spreads get the same trail on top of
+  their rules above. Each exit has its own switch under <strong>Settings → Configuration
+  → Exits &amp; trade management → Profit trail</strong>.</li>
+<li><strong>Trade ideas, the daily condor and shadow ideas</strong> keep their own stop and
+  target, and also close on the profit trail; the weekly review and <code>/eod</code> show
+  those as <strong>Trailing stop</strong>.</li>
+<li><strong>Stop, Stop rule and Target</strong> columns, beside the P&amp;L: the P&amp;L at which the
+  rules close the position now, in dollars for the whole position. <strong>Stop rule</strong>
+  says which stop it is (<strong>Loss stop</strong>, <strong>Break-even</strong>, <strong>Trailing</strong>, or a trade
+  idea's own stop), and the stop rises as the trade gains. A dash means no level:
+  a closed row, no stop of that kind, or a position that rides past its target.
+  The time and delta stops fire on time and delta, so no column shows them.</li>
 </ul>
 <blockquote>
 <p>⚠ These levels come from published practitioner guidance, <strong>not</strong> from this
@@ -3370,6 +3401,20 @@ Discord, Telegram, X, the site or the calendar. Set under Settings → Configura
   captured signals), <strong>Run manage cycle</strong> (re-price and auto-close), <strong>Reset</strong>
   (set a new starting balance).</li>
 <li><strong>Open Positions</strong> table and a <strong>Fills log</strong> (last 100 orders).</li>
+<li><strong>Profit trail</strong> (both settings of the break-even lifecycle switch). Once a trade's best profit reaches <strong>25% of the credit</strong>, it is
+  closed if it falls <strong>10 points of the credit</strong> below that best (a $1.00 credit
+  that reached +$30 closes at +$20), never below break-even plus commissions. The
+  break-even and trail stops wait out <strong>08:30–08:45</strong> and <strong>14:45–15:00 CT</strong>, when
+  quotes are wide; the loss stops do not. Numbers and switches: <strong>Settings →
+  Configuration → Exits &amp; trade management → Profit trail</strong>.</li>
+<li><strong>Stop, Stop rule and Target</strong> columns, beside the P&amp;L: the P&amp;L at which the
+  rules close the position now, in dollars for the whole position. <strong>Stop rule</strong>
+  says which stop it is (<strong>Loss stop</strong>, <strong>Break-even</strong>, <strong>Trailing</strong>, or a trade
+  idea's own stop), and the stop rises as the trade gains. A dash means no level:
+  a closed row, no stop of that kind, or a position that rides past its target.
+  The time and delta stops fire on time and delta, so no column shows them.
+  With the break-even lifecycle switch on, a position shows no Target: it rides
+  past +50% under its break-even stop.</li>
 </ul>
 <blockquote>
 <p>The entry and manage cycles also run automatically <strong>at the top of each hour,
@@ -4804,7 +4849,7 @@ a file on the server — in one place, grouped by what they do:</p>
 </tr>
 <tr>
 <td><strong>Exits &amp; trade management</strong></td>
-<td>Take profit, stop loss, time and delta stops, the profit-lock ladder, per-structure rules, Rescue board warnings</td>
+<td>Take profit, stop loss, time and delta stops, the profit-lock ladder, the profit trail, per-structure rules, Rescue board warnings</td>
 </tr>
 <tr>
 <td><strong>Paper books</strong></td>
@@ -4911,8 +4956,10 @@ have been read.</p>
 <li><strong>Captured trade auto-management</strong> — whether captured signals are actively
   managed (break-even stop after +50%, deferred delta cuts on recoverable trades,
   auto-close on the exit rules). Off leaves them advisory.</li>
-<li><strong>Manual paper: break-even lifecycle (experimental)</strong> — opts the manual paper
-  account into that same lifecycle instead of taking profit at +50% immediately.</li>
+<li><strong>Manual paper: break-even lifecycle (experimental)</strong> — on, the paper Account
+  arms break-even at +50% and rides; off, it takes the profit at +50%. The
+  2026-11-13 replay measured taking the profit better. The profit trail applies
+  either way.</li>
 <li><strong>Show the ticker</strong> — the scrolling bar at the bottom of every page, with a
   speed setting. It only shows or hides the marquee — see the note below.</li>
 <li><strong>Appearance</strong> is its own tab now (<strong>Settings → Appearance</strong>): every colour and
