@@ -3230,3 +3230,58 @@ def test_run_flow_alerts_malformed_gamma_flip_section_keeps_other_alerts(monkeyp
     handlers.run_flow_alerts(bus)
     alerts = bus.cache_get("cache:options:flow_alerts").payload["alerts"]
     assert [a["type"] for a in alerts] == ["crossover"]
+
+
+# --- the alert record (docs/plans/2026-11-14-alert-quality-design.md) ---------
+
+_REC_UOA = {"type": "uoa", "side": "call", "symbol": "SPY", "osi": "SPY X",
+            "strike": 500.0, "expiry": "2026-10-02", "dte": 1, "cost": 1.0,
+            "volume": 900, "oi": 100, "vol_oi": 9.0, "premium": 300000.0}
+
+
+def _record_setup(monkeypatch, tmp_path):
+    from services.options_svc import alert_log
+    prior = [_hrows([1e6] * 30)] * 5
+    today = _hrows([0] * 15 + [5e6] * 15)
+    bus, h, sent = _hiro_setup(monkeypatch, today, prior)
+    monkeypatch.setattr(h, "_flow_now_ts", lambda: today[-1]["ts"])
+    monkeypatch.setattr(h.compute, "take_uoa_stash", lambda: {"SPY": [_REC_UOA]})
+    monkeypatch.setattr(alert_log, "DB_PATH", tmp_path / "alert_log.db")
+    # The bought/sold tally opens the history store; not what these test.
+    monkeypatch.setattr(h.flow_sides_tick, "after_alerts", lambda *a, **k: None)
+    return bus, h, alert_log
+
+
+def test_run_flow_alerts_records_every_fresh_alert(monkeypatch, tmp_path):
+    bus, h, alert_log = _record_setup(monkeypatch, tmp_path)
+    h.run_flow_alerts(bus)
+    shown = {a["id"] for a in bus.cache_get("cache:options:flow_alerts").payload["alerts"]}
+    stored = {r["alert_id"]: r for r in alert_log.load()}
+    assert {r["type"] for r in stored.values()} == {"uoa", "hiro_surge"}
+    assert set(stored) == shown
+    assert all(r["source"] == "live" for r in stored.values())
+
+
+def test_run_flow_alerts_record_off_writes_nothing(monkeypatch, tmp_path):
+    bus, h, alert_log = _record_setup(monkeypatch, tmp_path)
+    cfg = h.flow_alerts.load_thresholds()
+    monkeypatch.setattr(h.flow_alerts, "load_thresholds",
+                        lambda: {**cfg, "log": {"enabled": False}})
+    h.run_flow_alerts(bus)
+    assert alert_log.load() == []
+    assert bus.cache_get("cache:options:flow_alerts").payload["alerts"]
+
+
+def test_run_flow_alerts_record_failure_is_counted(monkeypatch, tmp_path):
+    import sqlite3
+    from services import _degrade
+    bus, h, alert_log = _record_setup(monkeypatch, tmp_path)
+
+    def boom(*a, **k):
+        raise sqlite3.OperationalError("disk I/O error")
+    monkeypatch.setattr(alert_log, "record", boom)
+    before = _degrade.counts().get("options.alert_log", 0)
+    h.run_flow_alerts(bus)
+    assert _degrade.counts().get("options.alert_log", 0) == before + 1
+    assert bus.cache_get("cache:options:flow_alerts").payload["alerts"]
+    assert bus.cache_get(h._FLOW_COOLDOWN_KEY).payload["map"]

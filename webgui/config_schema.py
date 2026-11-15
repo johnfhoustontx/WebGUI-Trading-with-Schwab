@@ -454,6 +454,11 @@ _FLOW = ConfigFile(
             Field("enabled", "Flow alerts on",
                   "Off stops every detector and every flow push.", kind="bool"),
         )),
+        Section("Alert record",
+                "Every alert that fires is kept, so Model Health can score each "
+                "type over months. Changes nothing shown or pushed.", (
+            Field("log.enabled", "Keep every alert", "", kind="bool"),
+        )),
         Section("Premium crossover",
                 "Fires when call premium overtakes put premium (or the reverse).", (
             _pct("crossover.band", "Lead required",

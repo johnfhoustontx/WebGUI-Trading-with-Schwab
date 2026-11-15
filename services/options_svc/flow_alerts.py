@@ -59,6 +59,10 @@ _DEFAULTS = {
     # closed. ratio = (next - previous open interest) / that day's volume.
     "followup": {"enabled": True, "opened_ratio": 0.5, "closed_ratio": -0.5,
                  "keep_sessions": 20},
+    # The permanent alert record (services/options_svc/alert_log.py): every alert
+    # that fires, written once and kept, so Model Health can score each type
+    # (docs/plans/2026-11-14-alert-quality-design.md). Changes nothing shown or sent.
+    "log": {"enabled": True},
 }
 
 

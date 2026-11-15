@@ -21,6 +21,7 @@ import math
 import threading
 import time
 
+from services.options_svc import alert_log
 from services.options_svc import compute
 # Symbol Dossier (design 2026-09-17): one ticker's on-demand fetch.
 from services.options_svc import dossier
@@ -2712,6 +2713,14 @@ def run_flow_alerts(bus) -> None:
                 alerts = (prior + deduped)[-_FLOW_ALERTS_MAX:]
                 bus.cache_set(CACHE_FLOW_ALERTS, {"date": today, "alerts": alerts},
                               event=EVENT_FLOW_ALERTS)
+            # The permanent record (alert_log): after the pushes and the list, so a
+            # slow store holds back neither. Every fresh alert; the store ignores
+            # an id it already holds.
+            try:
+                if alert_log.logged_enabled():
+                    alert_log.record(fresh)
+            except Exception:
+                _degrade.degraded("options.alert_log")
         # skip_unchanged: a quiet tick leaves the cooldown map identical, so don't
         # bump the key's version (and wake version-pollers) every minute.
         bus.cache_set(_FLOW_COOLDOWN_KEY, {"date": today, "map": cooldowns},
