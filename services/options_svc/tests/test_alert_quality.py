@@ -226,3 +226,45 @@ def test_the_window_starts_after_the_alert_not_before():
     assert aq.window_range(path, i, H) == 0.0
     assert path[aq._start(path, t)][0] == t      # on a grid point: that point
     assert aq._start(path, path[-1][0] + 60) is None
+
+
+# ── a bounded nightly read (final review I2) ────────────────────────────────
+def test_load_paths_since_leaves_out_earlier_rows(tmp_path):
+    early, late = _sessions(2)
+    rows = [("SPY", "gex", _ts(d, 10, 0), 100.0, None) for d in (early, late)]
+    db = tmp_path / "archive.db"
+    _archive(db, rows)
+    assert set(aq.load_paths(db, since_ts=_ts(late, 0, 0))) == {
+        ("SPY", late.isoformat())}
+
+
+def test_evaluate_reads_one_symbol_at_a_time_from_a_floor(monkeypatch, tmp_path):
+    from shared import model_health_config as cfg
+    monkeypatch.setattr(cfg, "alerts_types", lambda: ["uoa"])
+    paths, alerts = _spike_book(14)
+    qqq = {("QQQ", d): p for (_s, d), p in paths.items()}
+    rows = [(sym, "gex", ts, s, None) for (sym, _d), p in {**paths, **qqq}.items()
+            for ts, s in p]
+    archive, log = tmp_path / "archive.db", tmp_path / "log.db"
+    _archive(archive, rows)
+    recs = [{"id": a["alert_id"] + sym, "type": "uoa", "side": "call", "symbol": sym,
+             "ts": a["ts"]} for a in alerts[5:] for sym in ("SPY", "QQQ")]
+    alert_log.record(recs, db_path=log)
+    calls, real = [], aq.load_paths
+
+    def spy(archive_path=None, symbols=None, since_ts=None):
+        calls.append((tuple(sorted(symbols)), since_ts))
+        return real(archive_path, symbols=symbols, since_ts=since_ts)
+    monkeypatch.setattr(aq, "load_paths", spy)
+    (got,) = aq.evaluate(log_path=log, archive_path=archive)
+    assert sorted(c[0] for c in calls) == [("QQQ",), ("SPY",)]
+    first_alert = min(r["ts"] for r in recs)
+    assert all(c[1] is not None and c[1] < first_alert for c in calls)
+    # The same answer as scoring the whole book at once.
+    whole = {**paths, **qqq}
+    every = alert_log.load(db_path=log)
+    usual = aq.usual_ranges(whole, H, 20, 10)
+    want = aq.score_type("uoa", every, whole, usual, H,
+                         n_boot=cfg.bootstrap_draws())
+    assert got == want
+    assert got["alerts"] == 8

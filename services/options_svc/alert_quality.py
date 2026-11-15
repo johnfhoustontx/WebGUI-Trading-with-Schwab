@@ -56,10 +56,10 @@ def _archive_path(archive_path):
     return Path(gex_archive.DB_PATH)
 
 
-def load_paths(archive_path=None, symbols=None) -> dict:
+def load_paths(archive_path=None, symbols=None, since_ts=None) -> dict:
     """``{(symbol, session date): [(ts, spot), ...]}`` from the archive's
     ``gex`` view: fetched rows with a price only, the futures feed left out.
-    ``symbols`` narrows it; a missing archive is empty."""
+    ``symbols`` and ``since_ts`` narrow it; a missing archive is empty."""
     path = _archive_path(archive_path)
     if not path.exists():
         return {}
@@ -75,6 +75,9 @@ def load_paths(archive_path=None, symbols=None) -> dict:
                 return {}
             sql += f" AND symbol IN ({', '.join('?' * len(names))})"
             args += names
+        if since_ts is not None:
+            sql += " AND ts >= ?"
+            args.append(int(since_ts))
         out = defaultdict(list)
         for sym, ts, spot in conn.execute(sql + " ORDER BY symbol, ts", args):
             out[(sym, _day(ts))].append((int(ts), float(spot)))
@@ -91,7 +94,8 @@ def window_range(path, i, horizon_sec):
         return None
     hi = lo = s0
     last = t0
-    for ts, s in path[i + 1:]:
+    for j in range(i + 1, len(path)):      # an index walk: no copy of the path
+        ts, s = path[j]
         if ts > t0 + horizon_sec:
             break
         hi, lo, last = max(hi, s), min(lo, s), ts
@@ -158,15 +162,17 @@ def _base_rate(sym, day, path, usual, near, horizon_sec):
     return sum(labels) / len(labels) if labels else None
 
 
-def score_type(kind, alerts, paths, usual, horizon_sec, n_boot) -> dict:
-    """The entry for one alert type. ``alerts`` is the whole record (every
-    type), since any alert's window is no 'other time' of its day."""
+def _collect(kind, alerts, paths, usual, horizon_sec, base_memo):
+    """``(scored, dropped, logged)`` for one alert type: each scored alert as
+    ``(day, ts, symbol, label, base rate)``. ``alerts`` is every type, since any
+    alert's window is no 'other time' of its day; ``base_memo`` is shared by the
+    types of one read."""
     near = defaultdict(list)
     for a in alerts:
         near[(a["symbol"], a["session_date"])].append(a["ts"])
     mine = [a for a in alerts if a["type"] == kind]
     dropped = dict.fromkeys(DROP_REASONS, 0)
-    base_memo, scored = {}, []
+    scored = []
     for a in mine:
         key = (a["symbol"], a["session_date"])
         path = paths.get(key)
@@ -188,36 +194,73 @@ def score_type(kind, alerts, paths, usual, horizon_sec, n_boot) -> dict:
         if base is None:
             dropped["base"] += 1
             continue
-        scored.append((a["session_date"], 1.0 if r > u else 0.0, base))
-    entry = {"type": kind, "alerts": len(scored), "logged": len(mine), "days": 0,
+        scored.append((a["session_date"], a["ts"], a["symbol"],
+                       1.0 if r > u else 0.0, base))
+    return scored, dropped, len(mine)
+
+
+def _finish(kind, scored, dropped, logged, n_boot) -> dict:
+    """The entry from the scored alerts; rows sorted so the answer does not
+    depend on the order the symbols were read in."""
+    scored = sorted(scored)
+    entry = {"type": kind, "alerts": len(scored), "logged": logged, "days": 0,
              "hit_rate": None, "base_rate": None, "diff": None, "dropped": dropped,
              "last_day": None}
     if not scored:
         return entry
     per_day = defaultdict(int)
-    for d, _l, _b in scored:
-        per_day[d] += 1
-    days = [d for d, _l, _b in scored]
+    for row in scored:
+        per_day[row[0]] += 1
+    days = [row[0] for row in scored]
     w = [1.0 / per_day[d] for d in days]
     n_days = len(per_day)
     entry.update(
         days=n_days, last_day=max(per_day),
-        hit_rate=sum(wi * l for wi, (_d, l, _b) in zip(w, scored)) / n_days,
-        base_rate=sum(wi * b for wi, (_d, _l, b) in zip(w, scored)) / n_days,
-        diff=metrics.day_bootstrap_diff([-l for _d, l, _b in scored],
-                                        [-b for _d, _l, b in scored], days, w,
+        hit_rate=sum(wi * row[3] for wi, row in zip(w, scored)) / n_days,
+        base_rate=sum(wi * row[4] for wi, row in zip(w, scored)) / n_days,
+        diff=metrics.day_bootstrap_diff([-row[3] for row in scored],
+                                        [-row[4] for row in scored], days, w,
                                         n_boot=n_boot))
     return entry
 
 
+def score_type(kind, alerts, paths, usual, horizon_sec, n_boot) -> dict:
+    """The entry for one alert type over the given paths."""
+    scored, dropped, logged = _collect(kind, alerts, paths, usual, horizon_sec, {})
+    return _finish(kind, scored, dropped, logged, n_boot)
+
+
+def _floor_ts(alerts, history) -> int:
+    """A time safely before the ``history`` sessions preceding the first alert:
+    trading sessions are at most 5 in 7 days, plus a week for holidays."""
+    days = (history * 7) // 5 + 7
+    return min(a["ts"] for a in alerts) - days * 86400
+
+
 def evaluate(log_path=None, archive_path=None) -> list:
-    """One entry per configured alert type, in the configured order."""
+    """One entry per configured alert type, in the configured order. The
+    archive is read ONE symbol at a time and only from a floor before the
+    first alert, so the nightly cost does not hold the whole archive at once."""
     horizon = cfg.alerts_horizon_min() * 60
+    history, min_history = cfg.alerts_history_sessions(), cfg.alerts_min_history()
+    kinds = cfg.alerts_types()
     alerts = alert_log.load(db_path=log_path)
-    symbols = {a["symbol"] for a in alerts}
-    paths = load_paths(archive_path, symbols=symbols) if symbols else {}
-    usual = usual_ranges(paths, horizon, cfg.alerts_history_sessions(),
-                         cfg.alerts_min_history())
+    by_symbol = defaultdict(list)
+    for a in alerts:
+        by_symbol[a["symbol"]].append(a)
+    totals = {k: ([], dict.fromkeys(DROP_REASONS, 0), 0) for k in kinds}
+    for sym in sorted(by_symbol):
+        mine = by_symbol[sym]
+        paths = load_paths(archive_path, symbols={sym},
+                           since_ts=_floor_ts(mine, history))
+        usual = usual_ranges(paths, horizon, history, min_history)
+        memo = {}
+        for k in kinds:
+            scored, dropped, logged = _collect(k, mine, paths, usual, horizon, memo)
+            rows, drops, n = totals[k]
+            rows.extend(scored)
+            for reason, count in dropped.items():
+                drops[reason] += count
+            totals[k] = (rows, drops, n + logged)
     n_boot = cfg.bootstrap_draws()
-    return [score_type(kind, alerts, paths, usual, horizon, n_boot)
-            for kind in cfg.alerts_types()]
+    return [_finish(k, *totals[k], n_boot) for k in kinds]
