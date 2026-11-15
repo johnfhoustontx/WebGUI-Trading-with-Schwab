@@ -36,6 +36,7 @@ import math
 
 from pages import fmt as _fmt
 from pages.options import flow_panels as _fx
+from pages.options import gamma_heat as _heat
 from pages.options import theme as _theme
 from pages.options.theme import FLOW_COLORS as C
 from shared import gamma_heat_config
@@ -350,14 +351,19 @@ T_BIG = "text-h6"                # a tile's one large figure
 T_SMALL = "text-xs"              # captions, row labels, tags
 
 # Calls and puts wear the Dealer Positioning colours (``[gamma]``, Settings →
-# Appearance): a colour is chosen once and both tabs follow. The BARS, the
-# split bars and the swatches take each side's MAIN colour (the user's choice,
-# 2026-11-14). Text, ticks and tag outlines take its low colour, which is the
-# paler of the pair: the shipped main colours are too dark to read as type on
-# this ground. The ground, the price and the type stay the Flow panels'.
+# Appearance): a colour is chosen once and both tabs follow. Everything here
+# takes each side's MAIN colour, as the Gamma tab's bars and walls do (the
+# user's choice, 2026-11-14 for the bars and 2026-11-15 for the rest). Text,
+# ticks and tag outlines take that main colour lifted ``TYPE_LIFT`` of the way
+# to white, so they read as type on this dark ground. They took the LOW colour
+# until 2026-11-15, which is no lighter in every theme: prod's chosen lows are
+# near black (#360000, #300047), so the labels vanished and the tab's reds and
+# blues did not match the Gamma tab's. The ground and the price stay the Flow
+# panels'.
+TYPE_LIFT = 0.35
 _GAMMA = _theme.gamma_colors(_theme.THEME)
 BAR_CALL, BAR_PUT = _GAMMA["call"], _GAMMA["put"]
-CALL, PUT = _GAMMA["call_low"], _GAMMA["put_low"]
+CALL, PUT = (_heat.tint(BAR_CALL, TYPE_LIFT), _heat.tint(BAR_PUT, TYPE_LIFT))
 
 _DIM = _fx._tone("label", ".62")
 _FAINT = _fx._tone("label", ".42")
@@ -434,11 +440,24 @@ def _distance(level, spot):
     return f"{_signed(level - spot)} · {_signed_pct(level, spot)}"
 
 
+def _rgba(colour, alpha):
+    """A ``#rrggbb`` side colour at ``alpha`` (text, pasted as written)."""
+    h = (_theme.hex6(colour) or "#ffffff").lstrip("#")
+    r, g, b = (int(h[i:i + 2], 16) for i in (0, 2, 4))
+    return f"rgba({r},{g},{b},{alpha})"
+
+
 def _split_bar(calls, puts):
+    """Calls against puts as one bar in two parts, lit and glowing like the
+    strike map's bars. A side with nothing open is not drawn: its glow would
+    still show."""
     share = calls / (calls + puts) * 100.0 if calls + puts > 0 else 50.0
-    return (f'<div style="display:flex;height:8px;gap:2px">'
-            f'<div style="width:{share:.1f}%;background:{BAR_CALL}"></div>'
-            f'<div style="flex:1 1 0;background:{BAR_PUT}"></div></div>')
+    call = (f'<div style="width:{share:.1f}%;{_bar_look(BAR_CALL)}"></div>'
+            if calls > 0 or puts <= 0 else "")
+    put = (f'<div style="flex:1 1 0;{_bar_look(BAR_PUT)}"></div>'
+           if puts > 0 or calls <= 0 else "")
+    return (f'<div style="display:flex;height:{BAR_H:.0f}px;gap:2px;'
+            f'margin:4px 0">{call}{put}</div>')
 
 
 def _split_head(calls, puts):
@@ -460,19 +479,14 @@ def _rail_marker(left, kind, value, distance, top, tick, below=False):
     name = _span(T_SMALL, _LEVEL_NAME[kind],
                  f"line-height:1;font-weight:600;color:{color};white-space:nowrap")
     strike = _span(T_HEAD, value, f"line-height:1;font-weight:600;color:{C['title']}")
-    tick_html = f'<span style="width:2px;height:{tick}px;background:{color}"></span>'
+    tick_html = (f'<span style="width:2px;height:{tick}px;background:{color};'
+                 f'box-shadow:0 0 6px {color}"></span>')
     away = _span(T_SMALL, distance, f"line-height:1;color:{_DIM};white-space:nowrap")
     parts = ((tick_html, strike, name, away) if below else
              (name, strike, tick_html, away))
     return (f'<div style="position:absolute;left:{left:.1f}%;top:{top}px;'
             f'transform:translateX(-50%);display:flex;flex-direction:column;'
             f'align-items:center;gap:5px">{"".join(parts)}</div>')
-
-
-def _tile(label, body):
-    return (f'<div style="display:flex;flex-direction:column;gap:7px;'
-            f'padding:12px 14px;background:{_fx._tone("ice", ".04")};min-width:0">'
-            f'{_span(T_SMALL, _fx._esc(label), f"color:{_DIM}")}{body}</div>')
 
 
 def _big(text):
@@ -495,13 +509,27 @@ def _rail(mdl, exp, u, j):
 
     line = RAIL_LINE
     parts = []
+    here = at(spot)
     if exp["put_wall"] is not None and exp["call_wall"] is not None:
         left, right = at(exp["put_wall"]), at(exp["call_wall"])
-        parts.append(f'<div style="position:absolute;left:{left:.1f}%;'
-                     f'width:{right - left:.1f}%;top:{line - 5}px;height:12px;'
-                     f'background:{_fx._tone("ice", ".08")}"></div>')
-    parts.append(f'<div style="position:absolute;left:0;right:0;top:{line}px;'
-                 f'height:2px;background:{_fx._tone("ice", ".16")}"></div>')
+        width = right - left
+        mid = (min(max((here - left) / width * 100.0, 0.0), 100.0)
+               if width > 0 else 50.0)
+        # The ground between the walls: the put side's colour at the put wall,
+        # fading to almost nothing at the price, rising to the call side's at
+        # the call wall, so the band reads which wall the price leans on.
+        parts.append(
+            f'<div style="position:absolute;left:{left:.1f}%;width:{width:.1f}%;'
+            f'top:{line - 6}px;height:14px;background:linear-gradient(90deg,'
+            f'{_rgba(BAR_PUT, ".42")} 0%,{_rgba(BAR_PUT, ".06")} {mid:.1f}%,'
+            f'{_rgba(BAR_CALL, ".06")} {mid:.1f}%,{_rgba(BAR_CALL, ".42")} 100%);'
+            f'box-shadow:inset 0 1px 0 {_fx._tone("ice", ".10")}"></div>')
+    # The line itself: put-coloured below the price, call-coloured above it.
+    parts.append(
+        f'<div style="position:absolute;left:0;right:0;top:{line}px;height:2px;'
+        f'background:linear-gradient(90deg,{_rgba(PUT, ".75")} 0%,'
+        f'{_rgba(PUT, ".35")} {here:.1f}%,{_rgba(CALL, ".35")} {here:.1f}%,'
+        f'{_rgba(CALL, ".75")} 100%)"></div>')
     for kind, key in (("put", "put_wall"), ("call", "call_wall")):
         if exp[key] is not None:
             parts.append(_rail_marker(at(exp[key]), kind, _fmt.strike(exp[key]),
@@ -512,7 +540,7 @@ def _rail(mdl, exp, u, j):
                                   _distance(exp["max_pain"], spot), line - 5, 14,
                                   below=True))
     parts.append(
-        f'<div style="position:absolute;left:{at(spot):.1f}%;top:0;'
+        f'<div style="position:absolute;left:{here:.1f}%;top:0;'
         f'transform:translateX(-50%);display:flex;flex-direction:column;'
         f'align-items:center;gap:5px">'
         + _span(T_SMALL, "Price", f"line-height:1;font-weight:600;color:{C['spot']}")
@@ -520,26 +548,14 @@ def _rail(mdl, exp, u, j):
                 f"line-height:1;font-weight:700;background:{C['spot']};"
                 f"color:{C['panel_to']};padding:2px 6px")
         + f'<span style="width:12px;height:12px;margin-top:1px;border-radius:50%;'
-          f'background:{C["spot"]};box-shadow:0 0 0 4px {C["panel_mid"]}"></span>'
+          f'background:{C["spot"]};box-shadow:0 0 0 4px {C["panel_mid"]},'
+          f'0 0 12px 4px {_fx._tone("spot", ".55")}"></span>'
           f'</div>')
-    for side, value in (("left", lo), ("right", hi)):
+    for side, value, colour in (("left", lo, PUT), ("right", hi, CALL)):
         parts.append(f'<div class="{T_SMALL}" style="position:absolute;{side}:0;'
-                     f'bottom:0;line-height:1;color:{_FAINT}">'
+                     f'bottom:0;line-height:1;color:{colour}">'
                      f'{_fmt.strike(value)}</div>')
 
-    ratio = _fmt.ratio(exp["ratio"]) if exp["ratio"] is not None else "—"
-    every = (_fmt.ratio(mdl["puts"] / mdl["calls"]) if mdl["calls"] > 0 else "—")
-    total = exp["calls"] + exp["puts"]
-    share = round(exp["calls"] / total * 100) if total > 0 else 0
-    tiles = "".join((
-        _tile(f"Put / call ratio · {exp['label']}", _big(ratio)),
-        '<div style="grid-column:span 2;min-width:0">'
-        + _tile(f"{exp['label']} open interest · {share}% calls / "
-                f"{100 - share if total > 0 else 0}% puts",
-                _split_head(exp["calls"], exp["puts"])
-                + _split_bar(exp["calls"], exp["puts"])) + "</div>",
-        _tile(f"Whole chain put / call · {len(mdl['expiries'])} expiries",
-              _big(every))))
     shown = "flex" if j == 0 else "none"
     return _card(
         '<div style="display:flex;flex-wrap:wrap;align-items:baseline;'
@@ -548,9 +564,7 @@ def _rail(mdl, exp, u, j):
                    f"{exp['label']} · walls and max pain over the whole chain")
         + '</div><div style="overflow-x:auto;overflow-y:hidden">'
         f'<div style="position:relative;min-width:720px;height:{RAIL_H}px">'
-        f'{"".join(parts)}</div></div>'
-        f'<div style="display:grid;gap:10px;'
-        f'grid-template-columns:repeat(4,minmax(0,1fr))">{tiles}</div>',
+        f'{"".join(parts)}</div></div>',
         f"display:{shown};flex-direction:column;gap:14px", f"{u}-rail-{j}")
 
 
@@ -736,8 +750,8 @@ def _map(mdl, u):
         + _column(("Strike", f"justify-content:flex-end;color:{_DIM}"), labels)
         + _expiry_columns(mdl, u)
         + _column((f'<span id="{u}-ph">Puts</span>',
-                   f"justify-content:flex-end;{side}color:{C['put']}"), puts_col)
-        + _column((f'<span id="{u}-ch">Calls</span>', f"{side}color:{C['call']}"),
+                   f"justify-content:flex-end;{side}color:{PUT}"), puts_col)
+        + _column((f'<span id="{u}-ch">Calls</span>', f"{side}color:{CALL}"),
                   calls_col)
         + _column(("", ""), tag_col) + spot + "</div>")
 
@@ -815,23 +829,42 @@ def _levels_card(mdl, exp):
         "display:flex;flex-direction:column;gap:12px")
 
 
+def _oi_card(title, calls, puts, foot=""):
+    """Calls against puts for one set of contracts: the split in per cent, the
+    put / call ratio, the two counts and the bar."""
+    total = calls + puts
+    share = round(calls / total * 100) if total > 0 else 0
+    split = f"{share}% calls / {100 - share}% puts" if total > 0 else ""
+    ratio = _fmt.ratio(puts / calls) if calls > 0 else "—"
+    figure = (f'<div style="display:flex;align-items:baseline;'
+              f'justify-content:space-between;gap:12px">'
+              + _span(T_SMALL, "Put / call ratio", f"color:{_DIM}")
+              + _big(ratio) + "</div>")
+    foot = _span(T_SMALL, _fx._esc(foot), f"color:{_DIM}") if foot else ""
+    return _card(
+        f'<div style="display:flex;flex-wrap:wrap;align-items:baseline;'
+        f'gap:6px 12px">{_heading(title, split)}</div>'
+        + figure + _split_head(calls, puts) + _split_bar(calls, puts) + foot,
+        "display:flex;flex-direction:column;gap:11px")
+
+
+def _expiry_card(exp):
+    return _oi_card(f"{exp['label']} open interest", exp["calls"], exp["puts"])
+
+
 def _chain_card(mdl):
     exps = mdl["expiries"]
     span = (exps[0]["label"] if len(exps) == 1 else
             f"{exps[0]['label']} – {exps[-1]['label']}")
-    return _card(
-        _heading("Whole chain") + _split_head(mdl["calls"], mdl["puts"])
-        + _split_bar(mdl["calls"], mdl["puts"])
-        + _span(T_SMALL, f"{len(exps)} expiries · {_fx._esc(span)}",
-                f"color:{_DIM}"),
-        "display:flex;flex-direction:column;gap:11px")
+    return _oi_card("Whole chain", mdl["calls"], mdl["puts"],
+                    f"{len(exps)} expiries · {span}")
 
 
 def _side(mdl, u):
     blocks = "".join(
         f'<div id="{u}-side-{j}" style="display:{"flex" if j == 0 else "none"};'
         f'flex-direction:column;gap:14px">{_read_card(mdl, exp)}'
-        f'{_levels_card(mdl, exp)}</div>'
+        f'{_levels_card(mdl, exp)}{_expiry_card(exp)}</div>'
         for j, exp in enumerate(mdl["expiries"]))
     return (f'<div style="flex:1 1 300px;min-width:0;display:flex;'
             f'flex-direction:column;gap:14px">{blocks}{_chain_card(mdl)}</div>')

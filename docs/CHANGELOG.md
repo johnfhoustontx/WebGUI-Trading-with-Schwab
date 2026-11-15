@@ -4,7 +4,30 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-15 (**Market News: the Economic calendar above the SEC filings, today first, no past day.**)
+**Last updated:** 2026-11-15 (**Open Interest: the ratios move to the side rail, 3D split bars, a coloured price line.**)
+
+- **What.** On Dealer Positioning → Open Interest (`pages/options/gamma_oi.py`) the
+  rail on top keeps only *Where the price sits*; its four tiles are gone. The chosen
+  expiry's put / call ratio and its calls / puts split are one card, "<expiry> open
+  interest · N% calls / N% puts", at the foot of that expiry's side block, directly
+  above *Whole chain*, which now carries the whole-chain ratio (it was shown twice).
+  Both split bars wear the strike map's bevel and glow (`_bar_look`); a side with
+  nothing open draws nothing. The price line is coloured: put colour below the
+  price, call colour above, the wall-to-wall band fading from each wall's main
+  colour to the price, glowing ticks and price dot. Operator's request.
+- **Colours match the Gamma tab.** The tab's text, ticks, tags, rail and swatches
+  took the `[gamma]` LOW colours; prod's Appearance override sets those near black
+  (`#360000`, `#300047`), so they vanished and the tab read differently from the
+  Gamma tab's `#b60000` / `#3c00f0`. Every call / put element now takes the MAIN
+  colour; type takes it lifted `TYPE_LIFT` (0.35) toward white
+  (`gamma_heat.tint`). The low colours no longer reach this tab.
+- **Tests.** Six new in `test_gamma_oi.py` (rail holds no tiles, each expiry's card
+  in its own block and above Whole chain, the whole-chain ratio, the split bars'
+  bevel, the rail's colours, prod's near-black lows never reach the tab); the two
+  assertions that pinned the old tiles and the two colour tests changed.
+  User Guide and Reference Guide updated.
+
+**Prior —** 2026-11-15 (**Market News: the Economic calendar above the SEC filings, today first, no past day.**)
 
 - **What.** On Market News → Headlines (and the public copy, which shares
   `news.build_board`), the right column now reads Next on the calendar, the Economic

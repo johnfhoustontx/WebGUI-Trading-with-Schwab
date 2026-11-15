@@ -895,9 +895,9 @@ subtab (net gamma by expiry) in November 2026.
   expiry you clicked: the **put wall** (the strike with the most put interest below the
   price), **max pain** (the strike at which all the open contracts would be worth the
   least at expiry) and the **call wall** (the most call interest above the price). Each
-  carries its distance from the price in points and per cent. Under the line are that
-  expiry's **put / call ratio** (put contracts divided by call contracts), its calls
-  and puts, and the ratio over every expiration shown.
+  carries its distance from the price in points and per cent. The line is coloured
+  in the put colour below the price and the call colour above it, and the band
+  between the two walls fades from each wall's colour to almost nothing at the price.
 - **The strike map.** One strike axis. Each row holds that strike's cell in each
   expiry, shaded by calls plus puts, and beside the cells the chosen expiry's bars:
   puts to the left, calls to the right. The walls and max pain are named on their
@@ -908,8 +908,10 @@ subtab (net gamma by expiry) in November 2026.
 - **Total or Net.** **Total** draws each side's count. **Net calls less puts** draws
   only the excess of the larger side at each strike.
 - **The side rail.** **The read** states the counts and distances in sentences written
-  from the numbers; **Levels** lists them highest strike first; **Whole chain** gives
-  calls against puts over every expiration. A count of open contracts says where
+  from the numbers; **Levels** lists them highest strike first; the chosen expiry's
+  **open interest** card gives its calls against puts in per cent, its **put / call
+  ratio** (put contracts divided by call contracts), both counts and a split bar; and
+  **Whole chain**, under it, gives the same over every expiration. A count of open contracts says where
   positions sit, not who holds which side.
 - **Hover** a cell or a bar for the exact counts.
 - **How fresh it is.** The whole chain is fetched from Schwab in several requests,

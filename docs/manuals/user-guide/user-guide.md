@@ -869,16 +869,17 @@ in its column). **Where the price sits**, on top, is a line with the price, the 
 wall** (the strike with the most put interest below the price), **max pain** (the strike
 at which the open contracts would be worth the least at expiry) and the **call wall**
 (the most call interest above the price), each with its distance from the price in
-points and per cent; under it are that expiry's **put / call ratio**, its calls and puts,
-and the ratio over every expiration shown. The **strike map** below has one strike axis:
+points and per cent, on a line coloured for puts below the price and calls above it.
+The **strike map** below has one strike axis:
 each row holds that strike's cell in each expiration (as many as fit, the rest by the
 scroll bar under them; brighter where more
 contracts are open) and, beside them, the chosen expiry's puts to the left and calls to
 the right. The walls and max pain are named on their rows and the dashed line is the
 price. **Total** draws each side's count; **Net calls less puts** draws only the larger
 side's excess. To the right, **The read** states the same counts and distances in
-sentences, **Levels** lists them, and **Whole chain** gives the split over every
-expiration. Hover a cell or a bar for the exact counts.
+sentences, **Levels** lists them, the expiry's **open interest** card gives its calls
+and puts in per cent with its **put / call ratio**, and **Whole chain** gives the same
+over every expiration. Hover a cell or a bar for the exact counts.
 
 The columns are a **list of expirations, not a time scale**: open interest is published
 once a day, so nothing here moves during the session except the price line. A count of

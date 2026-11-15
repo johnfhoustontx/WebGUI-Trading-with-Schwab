@@ -239,9 +239,67 @@ def test_the_first_expirys_bars_are_drawn_before_the_script_runs():
 def test_the_panel_names_the_symbol_and_prints_strikes_to_two_decimals():
     html, _ = _panel()
     assert "SPY · by strike and expiry" in html
-    assert "105.00" in html and "Put / call ratio · Nov 16" in html
+    assert "105.00" in html and "Nov 16 open interest" in html
     assert "Where the price sits" in html and "Strike map" in html
     assert "The read" in html and "Levels" in html and "Whole chain" in html
+
+
+def _side_html(html, j):
+    """The per-expiry block of the side rail: from its id to the next one's."""
+    start = html.index(f'id="oimap-side-{j}"')
+    end = html.find('id="oimap-side-', start + 1)
+    return html[start:end if end > 0 else len(html)]
+
+
+def test_the_rail_on_top_holds_only_the_line_and_no_ratio_tiles():
+    """The ratio and the split moved to the side rail (the user's request,
+    2026-11-15): the whole chain once, each expiry in its own block."""
+    html, _ = _panel()
+    rail = html[html.index('id="oimap-rail-0"'):html.index('id="oimap-rail-1"')]
+    assert "Put / call ratio" not in rail and "Whole chain" not in rail
+    assert html.count("Whole chain") == 1
+
+
+def test_each_expirys_split_and_ratio_sit_in_its_own_side_block():
+    """Nov 16: 1,660 calls and 1,645 puts, so 50% / 50% and a ratio of 0.99.
+    Nov 20: 80 calls, 110 puts: 42% / 58% and 1.38."""
+    html, _ = _panel()
+    near, mid = _side_html(html, 0), _side_html(html, 1)
+    assert "Nov 16 open interest" in near and "Nov 20" not in near
+    assert "50% calls / 50% puts" in near and ">0.99<" in near
+    assert "Nov 20 open interest" in mid
+    assert "42% calls / 58% puts" in mid and ">1.38<" in mid
+    # The expiry's card comes last in its block, so it sits on the whole
+    # chain's card, which follows every block.
+    assert near.index("Levels") < near.index("Nov 16 open interest")
+    last = _side_html(html, 2)
+    assert last.index("Dec 18 open interest") < last.index("Whole chain")
+
+
+def test_the_whole_chain_card_carries_the_ratio_over_every_expiry():
+    html, mdl = _panel()
+    card = html[html.rindex("Whole chain"):]
+    ratio = oi._fmt.ratio(mdl["puts"] / mdl["calls"])
+    assert f">{ratio}<" in card and "3 expiries · Nov 16 – Dec 18" in card
+    share = round(mdl["calls"] / (mdl["calls"] + mdl["puts"]) * 100)
+    assert f"{share}% calls / {100 - share}% puts" in card
+
+
+def test_the_split_bars_wear_the_strike_maps_bevel_and_glow():
+    bar = oi._split_bar(300, 100)
+    assert oi._bar_look(oi.BAR_CALL) in bar and oi._bar_look(oi.BAR_PUT) in bar
+    assert "width:75.0%" in bar and f"height:{oi.BAR_H:.0f}px" in bar
+    # A side with nothing open draws nothing, so no glow marks it.
+    assert oi._bar_look(oi.BAR_PUT) not in oi._split_bar(300, 0)
+    assert oi._bar_look(oi.BAR_CALL) not in oi._split_bar(0, 300)
+
+
+def test_the_rail_is_coloured_put_below_the_price_and_call_above():
+    html, _ = _panel()
+    rail = html[html.index('id="oimap-rail-0"'):html.index('id="oimap-rail-1"')]
+    assert oi._rgba(oi.BAR_PUT, ".42") in rail and oi._rgba(oi.BAR_CALL, ".42") in rail
+    assert oi._rgba(oi.PUT, ".75") in rail and oi._rgba(oi.CALL, ".75") in rail
+    assert oi._rgba("#0a0B0c", ".5") == "rgba(10,11,12,.5)"
 
 
 def test_a_tooltip_gives_the_exact_counts():
@@ -313,7 +371,7 @@ def test_the_rail_gives_each_levels_distance_with_a_true_minus():
     html, _ = _panel()
     rail = html.split('id="oimap-rail-0"', 1)[1].split('id="oimap-rail-1"', 1)[0]
     assert "+5.00 · +5.00%" in rail and "−5.00 · −5.00%" in rail
-    assert "50% calls / 50% puts" in rail
+    assert "50% calls / 50% puts" in _side_html(html, 0)
 
 
 def test_the_empty_state_keeps_the_frame_and_has_no_script():
@@ -419,12 +477,14 @@ def test_an_expiry_in_a_later_year_than_the_nearest_carries_its_year():
 def test_calls_and_puts_wear_the_dealer_positioning_colours():
     """One choice in Settings -> Appearance colours this tab and Dealer
     Positioning: the tab holds no call or put colour of its own. Its BARS take
-    each side's main colour (the user's choice, 2026-11-14), not the low one;
-    its text takes the low one, which is the paler."""
-    from pages.options import theme
+    each side's main colour (the user's choice, 2026-11-14), as the Gamma
+    tab's do; its text takes that same main colour lifted toward white, never
+    the low one (2026-11-15)."""
+    from pages.options import gamma_heat, theme
     chosen = theme.gamma_colors(theme.THEME)
     assert (oi.BAR_CALL, oi.BAR_PUT) == (chosen["call"], chosen["put"])
-    assert (oi.CALL, oi.PUT) == (chosen["call_low"], chosen["put_low"])
+    assert oi.CALL == gamma_heat.tint(chosen["call"], oi.TYPE_LIFT)
+    assert oi.PUT == gamma_heat.tint(chosen["put"], oi.TYPE_LIFT)
     html, _ = _panel()
     assert f"px {oi.BAR_CALL};width:" in html              # a call bar's glow
     assert f"px {oi.BAR_PUT};width:" in html
@@ -445,11 +505,32 @@ def test_a_chosen_colour_reaches_the_tab(monkeypatch):
     try:
         fresh = importlib.reload(oi)
         assert (fresh.BAR_CALL, fresh.BAR_PUT) == ("#111111", "#333333")
-        assert (fresh.CALL, fresh.PUT) == ("#222222", "#444444")
+        # 17 + (255 - 17) * 0.35 = 100 = 0x64; 51 + 204 * 0.35 = 122 = 0x7a.
+        assert (fresh.CALL, fresh.PUT) == ("#646464", "#7a7a7a")
         html = fresh.panel(_grid(), 100.0, "SPY", "oimap", CFG)[0]
         assert "px #111111;width:" in html
         assert "px #333333;width:" in html
-        assert "color:#222222" in html and "color:#444444" in html
+        assert "color:#646464" in html and "color:#7a7a7a" in html
+        assert "#222222" not in html and "#444444" not in html
+    finally:
+        monkeypatch.undo()
+        importlib.reload(oi)
+
+
+def test_near_black_low_colours_never_reach_the_tab(monkeypatch):
+    """Prod's Appearance override (2026-11-15) chose lows of #360000 and
+    #300047: as type they vanished on the dark ground, and the tab's reds and
+    blues stopped matching the Gamma tab's #b60000 / #3c00f0."""
+    import importlib
+    from pages.options import theme
+    monkeypatch.setattr(theme, "gamma_colors", lambda _theme: {
+        "call": "#3c00f0", "call_low": "#300047",
+        "put": "#b60000", "put_low": "#360000"})
+    try:
+        fresh = importlib.reload(oi)
+        html = fresh.panel(_grid(), 100.0, "SPY", "oimap", CFG)[0]
+        assert "#300047" not in html and "#360000" not in html
+        assert "px #3c00f0;width:" in html and "px #b60000;width:" in html
     finally:
         monkeypatch.undo()
         importlib.reload(oi)
