@@ -1922,7 +1922,7 @@ class _FakeEngine:
     def snapshot_summary(self, data, view):
         return {"spot": data.get("spot"), "flip": 5399.5, "net_total": 1.0}
 
-    def compute_term_grid(self, chain):
+    def compute_term_grid(self, chain, top_n=5):
         return {"expirations": ["2026-06-18"], "cells": {}}
 
 

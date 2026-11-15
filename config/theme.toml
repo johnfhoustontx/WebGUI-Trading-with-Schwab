@@ -62,7 +62,7 @@ cyan   = "#6b86ff"             # the "Improving" RRG accent (Deep Slate → blue
 # Two colours a side. The main colour holds that side's LARGEST values and the
 # low colour its smallest; the heat map grades between them, and is clear at
 # zero. Each side is listed largest first, the same way for puts and calls.
-# `put_low` and `call_low` are also the strike bars; `put` and `call` are the
+# `put` and `call` are also the strike bars on every tab, the
 # walls, the hedge panel, the gravity well, the ridge plot and the contour
 # lines. Edit them in Settings → Appearance, which shows
 # the ramp before you save. "#rrggbb" only: where each grade sits on the scale

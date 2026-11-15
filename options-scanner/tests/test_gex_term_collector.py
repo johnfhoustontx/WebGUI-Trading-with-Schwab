@@ -65,6 +65,20 @@ def test_compute_term_grid_put_heavy_strike_is_negative():
     assert cell["net_gex_usd"] < 0
 
 
+def test_compute_term_grid_carries_each_sides_open_interest():
+    """The Open Interest tab draws these: contracts, per expiry and strike."""
+    grid = GammaEngine().compute_term_grid(_fake_chain_7_exps(), top_n=5)
+    cell = grid["cells"]["2026-04-30"][7135.0]
+    assert (cell["call_oi"], cell["put_oi"]) == (5000.0, 4500.0)
+
+
+def test_compute_term_grid_reads_a_one_sided_strike_as_zero_on_the_other():
+    chain = _fake_chain_7_exps()
+    del chain["putExpDateMap"]["2026-04-29:0"]["7170.0"]
+    cell = GammaEngine().compute_term_grid(chain, top_n=5)["cells"]["2026-04-29"][7170.0]
+    assert (cell["call_oi"], cell["put_oi"]) == (2000.0, 0.0)
+
+
 def test_compute_term_grid_handles_missing_underlying():
     eng = GammaEngine()
     grid = eng.compute_term_grid({}, top_n=5)

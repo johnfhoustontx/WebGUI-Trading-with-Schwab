@@ -113,7 +113,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#reading-the-screen">Reading the screen</a></li>
 <li><a href="#the-flow-subtab-premium-divergence">The Flow subtab — premium divergence</a></li>
 <li><a href="#the-net-prem-subtab-many-symbols-at-once">The Net Prem subtab — many symbols at once</a></li>
-<li><a href="#the-term-subtab-exposure-across-expirations">The Term subtab — exposure across expirations</a></li>
+<li><a href="#the-open-interest-subtab-open-contracts-by-strike-and-expiry">The Open Interest subtab — open contracts by strike and expiry</a></li>
 <li><a href="#why-it-matters">Why it matters</a></li>
 <li><a href="#when-to-use-it">When to use it</a></li>
 <li><a href="#caveats-and-gotchas_1">Caveats and gotchas</a></li>
@@ -433,6 +433,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <li><a href="#where-the-data-comes-from_33">Where the data comes from</a></li>
 <li><a href="#reading-the-screen_32">Reading the screen</a></li>
 <li><a href="#the-range-forecast-shadow">The range forecast (shadow)</a></li>
+<li><a href="#the-exit-chance-shadow">The exit chance (shadow)</a></li>
 </ul>
 </li>
 <li><a href="#user-manuals">User Manuals</a></li>
@@ -1255,19 +1256,19 @@ will not match another service's, and the <em>shape</em> is what you should read
 <td>Comparing where money is going across names.</td>
 </tr>
 <tr>
-<td><strong>Term</strong></td>
-<td>The same exposure across the <strong>next five expirations</strong>.</td>
-<td>Deciding which expiry to trade.</td>
+<td><strong>Open Interest</strong></td>
+<td>Where the open contracts sit, by strike, across <strong>every expiration</strong> the symbol has ($SPX: its nearest twelve), with put and call bars for one expiry on the same strike rows and a rail placing the price among the walls and max pain.</td>
+<td>Finding the strikes and the expiry that hold the positions.</td>
 </tr>
 </tbody>
 </table>
 <p>The first four share one layout and are described together below. <strong>Flow</strong>, <strong>Net
-Prem</strong> and <strong>Term</strong> are different screens with their own controls, and each has its
+Prem</strong> and <strong>Open Interest</strong> are different screens with their own controls, and each has its
 own subsection further down.</p>
 <p><strong>Bars (top chart).</strong> Net exposure at each strike, ±20 strikes around the current
 price. The window is fixed so bar width stays constant all day. Call-heavy bars
-are drawn in the Call low colour and put-heavy ones in the Put low colour (light
-purple and light maroon as shipped; Settings → Appearance → Dealer Positioning
+are drawn in the Call colour and put-heavy ones in the Put colour (purple
+and maroon as shipped; Settings → Appearance → Dealer Positioning
 changes them). A tall bar is a strike where a lot of hedging
 pressure is concentrated.</p>
 <p><strong>Heat map (below).</strong> The same thing over time — strike on the vertical axis, clock on
@@ -1509,28 +1510,60 @@ forward rather than showing a long back-history.</p>
 <p>The status line distinguishes <strong>"not collected yet"</strong> from <strong>"the publisher is
 failing"</strong> — an empty chart otherwise looks identical in both cases.</p>
 </blockquote>
-<h3 id="the-term-subtab-exposure-across-expirations">The Term subtab — exposure across expirations</h3>
-<p>The same exposure measure, but spread across the <strong>next five expirations</strong> rather
-than across strikes within one. It answers <em>which expiry carries the positioning</em> —
-which is how you choose a DTE rather than a strike.</p>
-<p>It is drawn as a heat map with a <strong>1-pixel hairline between each expiry column</strong>, so
-you can see where one expiration ends and the next begins.</p>
+<h3 id="the-open-interest-subtab-open-contracts-by-strike-and-expiry">The Open Interest subtab — open contracts by strike and expiry</h3>
+<p>A map of where the open contracts sit: strikes down the side, the <strong>next
+expirations</strong> across the top, and a brighter cell where more contracts are open. Every
+expiration the symbol has is shown, and the scroll bar under them reaches the ones that
+do not fit. <strong>$SPX is the exception</strong>: its whole chain is too large to ask Schwab for,
+so it shows its nearest twelve (Settings → Configuration → Open Interest tab → <strong>Symbols
+not shown whole</strong> and <strong>Expirations for those symbols</strong>). The expirations take 60% of
+the map's width and the put and call bars 40%. Calls and puts wear the colours chosen
+for Dealer Positioning (Settings → Appearance): the bars take each side's main colour,
+with the same lit edge and glow as the bars on the other tabs, and the labels its
+paler one. It
+answers <em>which strikes, in which expiry, hold the positions</em>. It replaced the Term
+subtab (net gamma by expiry) in November 2026.</p>
+<ul>
+<li><strong>Where the price sits.</strong> The line on top places the price among the levels of the
+  expiry you clicked: the <strong>put wall</strong> (the strike with the most put interest below the
+  price), <strong>max pain</strong> (the strike at which all the open contracts would be worth the
+  least at expiry) and the <strong>call wall</strong> (the most call interest above the price). Each
+  carries its distance from the price in points and per cent. Under the line are that
+  expiry's <strong>put / call ratio</strong> (put contracts divided by call contracts), its calls
+  and puts, and the ratio over every expiration shown.</li>
+<li><strong>The strike map.</strong> One strike axis. Each row holds that strike's cell in each
+  expiry, shaded by calls plus puts, and beside the cells the chosen expiry's bars:
+  puts to the left, calls to the right. The walls and max pain are named on their
+  rows, and the dashed line is the price.</li>
+<li><strong>Choosing an expiry.</strong> Click its button or any cell in its column. The bars, the
+  line on top and the side rail all change to it, and your choice is kept while the
+  page refreshes.</li>
+<li><strong>Total or Net.</strong> <strong>Total</strong> draws each side's count. <strong>Net calls less puts</strong> draws
+  only the excess of the larger side at each strike.</li>
+<li><strong>The side rail.</strong> <strong>The read</strong> states the counts and distances in sentences written
+  from the numbers; <strong>Levels</strong> lists them highest strike first; <strong>Whole chain</strong> gives
+  calls against puts over every expiration. A count of open contracts says where
+  positions sit, not who holds which side.</li>
+<li><strong>Hover</strong> a cell or a bar for the exact counts.</li>
+<li><strong>How fresh it is.</strong> The whole chain is fetched from Schwab in several requests,
+  at most every 120 minutes per symbol (<strong>Wider chain fetched every</strong>), and reused in
+  between. Open interest is published once a day, so nothing is lost by it. If the
+  fetch fails, the tab shows the expirations of the seven-day chain it already has
+  and tries again after 10 minutes (<strong>A failed fetch is retried after</strong>).</li>
+</ul>
 <blockquote>
-<p><strong>Its vertical axis is categorical, not proportional.</strong> Rows are addressed by
-index (expiry 1, 2, 3…), not by time, so the spacing between columns tells you
-nothing about how far apart the expirations actually are — a weekly and a monthly
-sit one column apart either way.</p>
-<p><strong>Read the blending with care.</strong> The heat map interpolates between samples exactly
-as the intraday view does, but the intraday view's x-axis is <em>time</em>, where
-interpolating between two adjacent minutes is reasonable. Here the axis is
-<em>expirations</em>, and nothing varies continuously between one expiry and the next —
-so the smooth gradient across a column boundary is a drawing artifact, not a
-measurement. The hairlines exist to keep that visible. Read the columns, not the
-gradient between them.</p>
+<p><strong>Its columns are expirations, not time.</strong> Open interest is published once a day,
+so nothing on this tab moves during the session except the price line. A weekly and
+a monthly sit one column apart whatever the gap between them.</p>
+<p><strong>It does not say who holds which side.</strong> A count of open contracts shows where
+positions sit. Whether dealers are long or short them is an assumption the Gamma
+view makes and this tab does not.</p>
 </blockquote>
-<p><strong>A side effect worth knowing:</strong> because Term's rows are indexed rather than priced,
-it is immune to the uneven-strike-spacing problem that affects the intraday heat map
-on <code>$NDX</code> (see <em>Caveats</em> below).</p>
+<p>The figures cover the whole chain. Only the rows are cut, to the strikes within 6% of
+the price, and a chain with more than 48 strikes there is drawn in wider steps, each
+row the sum of the strikes it holds; the note under the map says when. Both numbers,
+and the rank at which the colour scale tops out, are in <strong>Settings → Configuration →
+Dealer Positioning heatmap → Open Interest tab</strong>.</p>
 <h3 id="why-it-matters">Why it matters</h3>
 <p>This is the app's edge, such as it is. Support and resistance drawn from chart patterns
 are subjective; gamma walls are computed from open interest that anyone can verify, and
@@ -1546,8 +1579,9 @@ they exert real mechanical force because dealers are contractually obliged to he
 <li><strong>Confirming a bias</strong> (<strong>Flow</strong>). Positioning tells you where dealers <em>are</em>; the
    premium ribbon tells you which way today's money is leaning, and its crossover
    dates that change to a minute.</li>
-<li><strong>Choosing an expiry, and choosing a name</strong> (<strong>Term</strong>, <strong>Net Prem</strong>). Term shows
-   which expiration carries the positioning, so a DTE choice stops being arbitrary.
+<li><strong>Choosing an expiry, and choosing a name</strong> (<strong>Open Interest</strong>, <strong>Net Prem</strong>). Open
+   Interest shows which expiration and which strikes hold the open contracts, so a DTE
+   choice stops being arbitrary.
    Net Prem is the only view that compares symbols, which is how you notice that the
    flow you are looking at is ordinary for that name — or is not.</li>
 </ol>
@@ -1567,10 +1601,10 @@ pressure panel. And any time you are choosing strikes.</p>
   resamples onto an even ladder to stop the heat map from banding; real strikes pass
   through untouched.</li>
 <li>Off-hours the page shows the <strong>last session</strong>, not live data. The status line says so.</li>
-<li><strong>Flow, Net Prem and Term each carry their own caveats</strong> — see their subsections
+<li><strong>Flow, Net Prem and Open Interest each carry their own caveats</strong> — see their subsections
   above. The two that catch people out: Net Prem's group tabs filter the <em>tick-boxes</em>
-  and not the chart, and Term's smooth gradient across a column boundary is a drawing
-  artifact rather than a measurement.</li>
+  and not the chart, and Open Interest's columns are expirations, not time, so nothing
+  on it moves during the session except the price line.</li>
 </ul>
 <h3 id="related-pages_1">Related pages</h3>
 <p><a href="#flow-alerts">Flow Alerts</a> (row click jumps here for that symbol) ·
@@ -6977,6 +7011,14 @@ waiting. Read it as evidence for or against building a live forecast, not as a n
 to trade: it says how far, never which way, and no page or rule reads it. Its inputs
 check skips the volatility levels, which move in long stretches and would always read
 shifted.</p>
+<h3 id="the-exit-chance-shadow">The exit chance (shadow)</h3>
+<p>The third table is the roadmap's Phase 3b. At each mark of a closed captured credit
+signal before it first reached its profit target, it scores the chance it still did
+before its own exits closed it, against the rate by how far the trade had already
+travelled. That opponent is hard on purpose: for 0-DTE, distance alone explains most
+of the outcome. A <em>Beats</em> here is the evidence an advice chip on open positions would
+need; until then the table is a record, and no exit rule reads it. Its outcomes follow
+the exit rules running at the time, which changed between September and November.</p>
 <h2 id="user-manuals">User Manuals</h2>
 <p><em>Menu: ACCOUNT → More → User Manuals · Route <code>/manuals</code></em></p>
 <p>Links to the five manuals, each opening in a new tab:</p>
@@ -7171,8 +7213,8 @@ fields, buttons, status colours, charts, Dealer Positioning, type and menu, with
 live preview that shows an unsaved colour before anything else does. The <strong>Dealer
 Positioning</strong> group is the heat map's four colours, two a side and both rows in
 the same order: the put or call colour first, for the largest values (the
-walls, hedge panel, gravity well, ridge plot and contour lines also use it), then
-its low colour, for the smallest (the strike bars also use it). The heat map
+strike bars on every tab, walls, hedge panel, gravity well, ridge plot and contour
+lines also use it), then its low colour, for the smallest. The heat map
 grades between them. <strong>Restart now</strong> restarts both the app and the public live
 screens, which show the same colours. The preview draws
 the resulting scale. <strong>Save changes</strong> writes an
@@ -7287,7 +7329,7 @@ in the rail is the one that stops things.</p>
 </tr>
 <tr>
 <td><strong>Dealer Positioning</strong></td>
-<td><strong>Gamma</strong> (hedging intensity) · <strong>Charm</strong> (time decay of hedges) · <strong>Delta</strong> (directional exposure) · <strong>Vanna</strong> (volatility sensitivity) · <strong>Flow</strong> (call vs put premium ribbon) · <strong>Net Prem</strong> (net premium, up to 28 symbols) · <strong>Term</strong> (next five expirations)</td>
+<td><strong>Gamma</strong> (hedging intensity) · <strong>Charm</strong> (time decay of hedges) · <strong>Delta</strong> (directional exposure) · <strong>Vanna</strong> (volatility sensitivity) · <strong>Flow</strong> (call vs put premium ribbon) · <strong>Net Prem</strong> (net premium, up to 28 symbols) · <strong>Open Interest</strong> (open contracts by strike and expiration)</td>
 </tr>
 <tr>
 <td><strong>Simulator</strong></td>

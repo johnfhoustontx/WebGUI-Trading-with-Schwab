@@ -134,8 +134,8 @@ def test_the_public_page_never_offers_a_feed_symbol():
 
 # ── what is offered ──────────────────────────────────────────────────────────
 
-def test_flow_and_term_are_hidden_for_the_feed_only():
-    assert hidden_views("FOP.NQ") == {"Flow", "Term"} and hidden_views("SPY") == frozenset()
+def test_flow_and_open_interest_are_hidden_for_the_feed_only():
+    assert hidden_views("FOP.NQ") == {"Flow", "Open Interest"} and hidden_views("SPY") == frozenset()
 
 
 def test_analysis_is_not_offered_for_the_feed():
@@ -553,7 +553,7 @@ def requests(monkeypatch):
 def test_the_page_offers_only_what_the_feed_can_show(requests):
     kids = _rendered(_feed_payload())
     _load(kids)
-    assert _tab(kids, "Flow").visible is False and _tab(kids, "Term").visible is False
+    assert _tab(kids, "Flow").visible is False and _tab(kids, "Open Interest").visible is False
     assert _tab(kids, "GEX").visible is True and _tab(kids, "Net Prem").visible is True
     for name in ("Explain", "Analyze", "Briefings"):
         assert _button(kids, name).visible is False, name
@@ -588,7 +588,7 @@ def test_a_page_load_of_an_existing_symbol_asks_for_nothing(requests):
     kids = _rendered(payload)
     _load(kids)
     assert requests == []
-    assert _tab(kids, "Flow").visible is True and _tab(kids, "Term").visible is True
+    assert _tab(kids, "Flow").visible is True and _tab(kids, "Open Interest").visible is True
     for name in ("Explain", "Analyze", "Briefings"):
         assert _button(kids, name).visible is True, name
 

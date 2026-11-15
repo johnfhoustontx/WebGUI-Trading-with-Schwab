@@ -67,7 +67,7 @@ def test_subtab_help_covers_every_sub_tab():
     expected = {
         "/options/scanner": {"0-DTE", "Swing", "Directional"},
         "/options/gamma": {"GEX", "Charm", "DEX", "Vanna", "Flow", "Net Prem",
-                           "Term", "indices", "sectors", "megacaps"},
+                           "Open Interest", "indices", "sectors", "megacaps"},
         "/options/simulator": {"Price & Time", "Volatility", "History"},
         "/options/rescue": {"At-Risk Board", "Ad-hoc Trade"},
         "/portfolio": {"Holdings", "Sectors", "Performance"},

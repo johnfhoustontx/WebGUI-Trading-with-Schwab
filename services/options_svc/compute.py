@@ -61,6 +61,7 @@ from services.options_svc import forward_grid as _forward  # noqa: E402  (the he
 from services.options_svc import gamma_window as _gw  # noqa: E402  (the gamma display window + scale lock)
 from services.options_svc import greeks_census as _census  # noqa: E402  (a chain with no Greeks at all)
 from services.options_svc import idea_ledger as _ideas  # noqa: E402  (posted-idea rows stay out of the user's book)
+from services.options_svc import oi_expiries as _oi_expiries  # noqa: E402  (the Open Interest tab's expirations)
 from services.options_svc.hiro_store import write_rows as _write_hiro_rows  # noqa: E402  (one minute's hedging-flow rows)
 from shared.numeric import finite as _finite  # noqa: E402 - one shared definition (audit CQ-07)
 
@@ -4654,10 +4655,9 @@ def gamma_snapshot(symbol: str, chain=None, with_term: bool = True,
         spot, atm_iv_from_chain(chain, spot), marks, now))
 
     try:
-        # The Term view wants the next 5 expirations regardless of the symbol's
-        # expiration cadence; widen the chain beyond the nearest-expiry GEX window
-        # only when the base chain doesn't already cover them (see _term_chain).
-        term = (eng.compute_term_grid(_term_chain(symbol, chain))
+        # The Open Interest tab's grid: as many expirations as its setting asks
+        # for, widened and kept by oi_expiries (see there, and _term_chain).
+        term = (_oi_expiries.grid(eng, symbol, chain, _term_chain, fetch_scan_chain)
                 if with_term else {})
     except Exception:
         term = {}

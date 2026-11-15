@@ -132,6 +132,15 @@ def _pin_flow_window_clock(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _reset_kept_oi_grids():
+    """``oi_expiries`` keeps a symbol's wide grid for half an hour; without a
+    reset one test's grid would answer the next test that asks for the same
+    symbol."""
+    from services.options_svc import oi_expiries
+    oi_expiries.reset()
+
+
+@pytest.fixture(autouse=True)
 def _reset_hiro_sigma_memo():
     """``handlers._HIRO_SIGMA_MEMO`` is a module-level per-day memo of the HIRO
     prior-session sigma; without a reset one test's sigma would serve the next

@@ -96,6 +96,25 @@ DEFAULTS = {
         # take the rest, and the hedge-pressure panel follows the heatmap.
         "heat_share": 0.75,
     },
+    "open_interest": {
+        # Every expiration is shown, except for the symbols listed, which
+        # show the nearest ``expiries``. ``refresh_min`` is how often (minutes)
+        # the wider chain behind either is fetched again per symbol, and
+        # ``retry_min`` how long a failed fetch waits before it is tried again.
+        "limited_symbols": ["$SPX"],
+        "expiries": 12,
+        "refresh_min": 120,
+        "retry_min": 10,
+        # The Open Interest tab draws the strikes within this percentage of the
+        # price, each side.
+        "span_pct": 6.0,
+        # At most this many strike rows. A chain with more inside the span is
+        # drawn in wider steps, each row the sum of the strikes it holds.
+        "max_rows": 48,
+        # The colour scale tops out at this quantile of the cells on screen, so
+        # one very large strike does not wash out the rest.
+        "cap_quantile": 0.92,
+    },
 }
 
 WELL_HEIGHTS = ("root", "linear")
@@ -202,6 +221,38 @@ def lock() -> dict:
     return {"minutes": _setting("lock", "minutes", minimum=5, maximum=390),
             "quantile": _setting("lock", "quantile", minimum=0.5, maximum=1.0),
             "headroom": _setting("lock", "headroom", minimum=1.0, maximum=5.0)}
+
+
+def _limited_symbols() -> tuple:
+    """The symbols whose Open Interest tab shows a set number of expirations,
+    upper case. Anything that is not a list of text is the default."""
+    default = DEFAULTS["open_interest"]["limited_symbols"]
+    table = load().get("open_interest")
+    raw = table.get("limited_symbols", default) if isinstance(table, dict) else default
+    if not isinstance(raw, list) or not all(isinstance(s, str) for s in raw):
+        raw = default
+    return tuple(s.strip().upper() for s in raw if s.strip())
+
+
+def open_interest() -> dict:
+    """The Open Interest tab's settings. ``span_pct``, ``max_rows`` and
+    ``cap_quantile`` are read by the page each time it draws
+    (``pages/options/gamma_oi``); ``limited_symbols``, ``expiries``,
+    ``refresh_min`` and ``retry_min`` by the options service each time it
+    builds the grid (``options_svc/oi_expiries``)."""
+    return {"limited_symbols": _limited_symbols(),
+            "expiries": _setting("open_interest", "expiries",
+                                 minimum=5, maximum=40),
+            "refresh_min": _setting("open_interest", "refresh_min",
+                                    minimum=1, maximum=720),
+            "retry_min": _setting("open_interest", "retry_min",
+                                  minimum=1, maximum=120),
+            "span_pct": _setting("open_interest", "span_pct",
+                                 minimum=1.0, maximum=30.0),
+            "max_rows": _setting("open_interest", "max_rows",
+                                 minimum=12, maximum=120),
+            "cap_quantile": _setting("open_interest", "cap_quantile",
+                                     minimum=0.5, maximum=1.0)}
 
 
 def heat_share() -> float:

@@ -1093,6 +1093,37 @@ _GAMMA_HEAT = ConfigFile(
                  "hedge-pressure panel under the heat map follows its width.",
                  lo=30, hi=90, step=5),
         ), restart=(WEBGUI,)),
+        Section("Open Interest tab",
+                "Open interest by strike and expiry, with put and call bars "
+                "for one expiry. The page reads its settings each time it "
+                "draws, the options service each time it builds the grid.", (
+            Field("open_interest.span_pct", "Strikes within",
+                  "Of the price, each side.",
+                  kind="float", unit="%", min=1, max=30, step=0.5),
+            Field("open_interest.max_rows", "Strike rows at most",
+                  "A chain with more strikes inside the span is drawn in "
+                  "wider steps, each row the sum of the strikes it holds.",
+                  kind="int", unit="rows", min=12, max=120, step=4),
+            _pct("open_interest.cap_quantile", "Colour scale tops out at",
+                 "This rank of the cells on screen. 92 ignores the largest "
+                 "few, so one very large strike does not wash out the rest.",
+                 lo=50, hi=100, step=1),
+            Field("open_interest.limited_symbols", "Symbols not shown whole",
+                  "Every other symbol shows every expiration it has. These "
+                  "have chains too large to ask for whole and show the "
+                  "nearest few instead.", kind="symbols"),
+            Field("open_interest.expiries", "Expirations for those symbols",
+                  "Nearest first.",
+                  kind="int", unit="expirations", min=5, max=40, step=1),
+            Field("open_interest.refresh_min", "Wider chain fetched every",
+                  "At most, per symbol. Open interest is published once a "
+                  "day, so a short interval buys nothing.",
+                  kind="int", unit="min", min=1, max=720, step=5),
+            Field("open_interest.retry_min", "A failed fetch is retried after",
+                  "Not on the page's next refresh: a request that keeps "
+                  "failing would hold up the options service each time.",
+                  kind="int", unit="min", min=1, max=120, step=1),
+        )),
     ),
 )
 

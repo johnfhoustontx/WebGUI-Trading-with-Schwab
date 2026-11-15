@@ -36,6 +36,82 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   before its first alert (12.1 s to 1.4 s, and bounded as the archive grows).
 - **Design / plan.** `docs/plans/2026-11-14-alert-quality-{design,plan}.md`.
 
+**Prior —** 2026-11-14 (**Strike bars take the main put and call colours on every tab.**)
+
+- **What.** The by-strike bars on Gamma, Charm, Delta and Vanna now wear `[gamma]`'s
+  `put` / `call`, as the Open Interest bars do (the user's choice; `put_low` /
+  `call_low` since 2026-10-28). `gamma.palette` still keeps `bar_pos` / `bar_neg`
+  apart from `pos` / `neg`, so the bars move in one place. The low pair is now the
+  heat map's smallest values, and the Open Interest tab's labels.
+- **Open Interest bars.** They carry the other tabs' bevel and glow: the same
+  `gamma.BEVEL_STOPS` and `GLOW_WIDTH`, as a CSS gradient across the bar's thickness
+  and a `box-shadow` in the bar's colour. A strike with nothing to draw has no bar at
+  all, so a glow never marks an empty row.
+- **Note.** The walls are drawn across the bars and now share their colour.
+
+**Prior —** 2026-11-14 (**Open Interest tab: one strike axis, a level rail, a side rail.**)
+
+- **What.** The tab is laid out from the operator's design. On top, a line places the
+  price among the chosen expiry's put wall, max pain and call wall, each with its
+  distance in points and per cent, over that expiry's put / call ratio, its split and
+  the whole chain's ratio. Below, the expiry cells and the put and call bars share ONE
+  strike axis (the old page had two), with the walls and max pain named on their rows.
+  A side rail states the read in sentences, lists the levels and gives the whole
+  chain's split.
+- **The pieces.** All in `webgui/pages/options/gamma_oi.py`: the fragment is HTML rows
+  rather than an SVG, the browser draws the bars from the counts for the expiry and
+  mode chosen, and `read` writes the sentences from the model (no model call).
+  `model` gains each expiry's `sub`, `pain_row`, `top_call`, `top_put` and the chain
+  totals. Colours are the page's own call, put and ice, not the design's.
+- **Every expiration.** The tab shows every expiration a symbol has instead of five,
+  and the strip scrolls sideways. `[open_interest] limited_symbols` (`$SPX`) are the
+  exception and show the nearest `expiries` (12). `services/options_svc/oi_expiries.py`
+  builds the grid: the Finder's listed-expirations fetch (`compute.fetch_scan_chain`,
+  in runs) for a symbol, the count-based `_term_chain` for a limited one, kept per
+  symbol and repeated at most every `refresh_min` (120) rather than on every
+  two-minute refresh. The published grid is cut to each cell's two counts and the
+  strikes that hold any. A failed or short answer falls back to the chain in hand and
+  is not tried again for `retry_min` (10).
+  ⚠ **The first version asked for the whole chain in ONE request and failed on prod
+  every time** (2026-11-14, NVDA: `degraded: oi_expiries` twice, 32 s apart, the
+  proxy's 30-second limit), so the tab showed the chain in hand and the service
+  waited half a minute on each refresh. An unbounded `/chains` call is the one
+  already recorded as timing out beside `SCAN_FETCH_WORKERS`. Still not measured: how
+  long the fetch in runs takes on the main command lane (`gamma_refresh` is not in
+  `SLOW_LANE`), where it delays the commands behind it.
+- **60 / 40.** The expiry strip takes six parts of the map's width and each side of
+  the bars two; a cell keeps its size (80 px wide at least) and a wider strip shows
+  more expiries.
+- **Colours.** Calls and puts take `[gamma]`'s colours, so one choice in Settings →
+  Appearance colours both tabs. The bars, the split bars and the swatches take the
+  main `call` / `put` (the user's choice); the text, ticks and tag outlines take
+  `call_low` / `put_low`, the paler pair, because the shipped main colours are too
+  dark to read as type.
+- **Type.** The panel names no font and no pixel size: it inherits the app's family and
+  uses the app's text classes, so it follows `[typography]` like the other pages. The
+  letter-spaced capitals went with the mono face.
+- **Changed.** Total / Net now changes the bars only; the cells always show calls plus
+  puts. The design's page header, controls and status line were not rebuilt: the page
+  already has its own.
+
+**Prior —** 2026-11-14 (**Dealer Positioning: the Open Interest tab replaces Term.**)
+
+- **What.** The last subtab is now **Open Interest**: open contracts by strike across
+  the next five expirations, a put and call ladder for the expiry clicked, and that
+  expiry's call wall, put wall, max pain, put / call ratio and totals. A toggle shades
+  the map by Total or by Net calls less puts. Term (net gamma by expiry) is gone from
+  the page; `gamma.term_heatmap` and `expiry_separators` went with it.
+- **The pieces.** `GammaEngine.compute_term_grid` adds `call_oi` / `put_oi` to each
+  cell, so the snapshot's existing `term` key feeds the tab with no new fetch and no
+  new line in `compute.py`. `webgui/pages/options/gamma_oi.py` holds the model and the
+  fragment; `gamma.render` only calls it. Settings are `config/gamma_heat.toml
+  [open_interest]` (`span_pct`, `max_rows`, `cap_quantile`).
+- **Unchanged.** The collector still stores the per-expiry gamma grid every 5 minutes
+  and the Gamma Archive still copies it. The public Gamma page had no Term tab and has
+  no Open Interest tab. /ES and /NQ do not offer it: their counts are scaled.
+- **Not built.** Change in open interest from the day before. It needs one stored
+  snapshot a day, which the store does not keep.
+
 **Prior —** 2026-11-14 (**Exit chance on Model Health: ML roadmap Phase 3b.**)
 
 - **What.** A shadow score, per scanner type, of an open captured credit signal's

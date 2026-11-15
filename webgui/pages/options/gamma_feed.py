@@ -18,8 +18,8 @@ its expiry. Three things follow, and all three live here:
   what it says in minutes, at ``futures_chain_config.column_step()``, the one width.
 * **What is offered.** Flow prints scaled contract counts: the adapter scales open
   interest and volume by contract size so the engine's dollars come out right, and that
-  is no number of contracts to show. Term needs more than one expiry, and a capture
-  holds one. The analysis buttons report on the stock indexes or fetch from Schwab.
+  is no number of contracts to show. Open Interest prints those counts too, and needs
+  more than one expiry where a capture holds one. The analysis buttons report on the stock indexes or fetch from Schwab.
 
 No label or status text is built from ``dte``: the adapter stamps 0 on every capture,
 including one hours from its expiry and one a day away, so it says nothing to a reader.
@@ -38,7 +38,7 @@ from pages import fmt as _fmt
 from pages import ui_kit as kit
 from shared import futures_chain, futures_chain_config
 
-_HIDDEN_VIEWS = frozenset({"Flow", "Term"})
+_HIDDEN_VIEWS = frozenset({"Flow", "Open Interest"})
 _FALLBACK_VIEW = "GEX"
 _SYMBOL_INDEPENDENT_VIEW = "Net Prem"
 _BAR_TIP = ("Bar size for candles / OHLC. Highs and lows are sampled once a capture, so "
