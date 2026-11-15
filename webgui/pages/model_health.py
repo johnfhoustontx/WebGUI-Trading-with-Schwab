@@ -337,6 +337,80 @@ def exit_drift(payload) -> list:
     return out
 
 
+# ── alert quality (shadow) ──────────────────────────────────────────────────
+ALERT_TITLE = "Alert quality (shadow)"
+ALERT_NOTE = ("For each flow alert type, how often the next half hour ran wider than "
+              "that symbol's usual range at that time of day (the median of earlier "
+              "sessions), against the same symbol's other times that day, so a busy "
+              "day lifts both. Above zero the alert was followed by a wider range more "
+              "often. Gamma flip is recorded but not scored until the gamma regime "
+              "study has read. Nothing uses it.")
+ALERT_OFF = "Alert quality is switched off or could not be scored."
+#: Mirrors ``services/options_svc/model_health.py`` (pinned by a test).
+ALERT_WORDS = {"uoa": "Unusual activity", "big_delta": "Big delta",
+               "hiro_surge": "HIRO surge", "hiro_flip": "HIRO flip",
+               "crossover": "Premium crossover", "gamma_flip": "Gamma flip"}
+DROP_WORDS = {"horizon": "too late in the session", "history": "too early in the record",
+              "price": "with no price", "base": "with no other time that day"}
+
+
+def _share(v) -> str:
+    f = _fmt.num(v)
+    return _fmt.NO_READING if f is None else _fmt.pct(100 * f)
+
+
+def points_text(diff) -> str:
+    """The alert's rate minus the other times', in percentage points, with its
+    interval: the service's difference is base minus alert, so it is turned."""
+    d = diff or {}
+    mean, lo, hi = _fmt.num(d.get("mean")), _fmt.num(d.get("lo")), _fmt.num(d.get("hi"))
+    if mean is None:
+        return _fmt.NO_READING
+    text = f"{-100 * mean:+.{_fmt.DECIMALS}f} points"
+    if lo is None or hi is None:
+        return text
+    return f"{text} ({-100 * hi:+.{_fmt.DECIMALS}f} to {-100 * lo:+.{_fmt.DECIMALS}f})"
+
+
+def dropped_text(entry) -> str:
+    """``"3 too late in the session, 1 with no price"``; empty when none."""
+    d = (entry or {}).get("dropped") or {}
+    return ", ".join(f"{d[k]} {w}" for k, w in DROP_WORDS.items()
+                     if isinstance(d.get(k), int) and d.get(k))
+
+
+def alert_rows(payload) -> list:
+    """One row per alert type, in the service's order."""
+    out = []
+    for e in (payload or {}).get("alerts") or []:
+        e = e or {}
+        word = e.get("verdict")
+        kind = e.get("type")
+        out.append({
+            "id": str(kind),
+            "type": ALERT_WORDS.get(kind, kind or _fmt.NO_READING),
+            "verdict": _short_verdict(word, e),
+            "_verdict_class": VERDICT_CLASSES.get(word, MUTED),
+            "wider_after": _share(e.get("hit_rate")),
+            "wider_other": _share(e.get("base_rate")),
+            "difference": points_text(e.get("diff")),
+            "alerts": f"{_fmt.fixed(e.get('alerts'), 0)} of {_fmt.fixed(e.get('logged'), 0)}",
+            "days": _fmt.fixed(e.get("days"), 0),
+            "left_out": dropped_text(e) or _fmt.NO_READING,
+        })
+    return out
+
+
+def alert_columns():
+    spec = [("type", "Alert"), ("verdict", "Against other times"),
+            ("wider_after", "Wider after the alert"),
+            ("wider_other", "Wider at other times"),
+            ("difference", "Difference (95%)"), ("alerts", "Alerts scored"),
+            ("days", "Days"), ("left_out", "Left out")]
+    return [{"name": f, "label": l, "field": f, "sortable": False, "align": "left"}
+            for f, l in spec]
+
+
 def _class_slot(cls_field):
     """A cell drawn in the row's own fixed class, read from ``cls_field``."""
     return (r'''
@@ -378,6 +452,11 @@ def render():
             exit_status = ui.label("").classes(f"text-sm {MUTED}")
             exit_table = kit.table(exit_columns(), rows_per_page=0)
             exit_details = ui.column().classes("w-full gap-1")
+            ui.label(ALERT_TITLE).classes("text-base font-semibold pt-2")
+            ui.label(ALERT_NOTE).classes(f"text-sm {MUTED}")
+            alert_status = ui.label("").classes(f"text-sm {MUTED}")
+            alert_table = kit.table(alert_columns(), rows_per_page=0)
+        alert_table.add_slot("body-cell-verdict", _VERDICT_SLOT)
         exit_table.add_slot("body-cell-verdict", _VERDICT_SLOT)
         exit_table.add_slot("body-cell-drift", _DRIFT_SLOT)
         table.add_slot("body-cell-verdict", _VERDICT_SLOT)
@@ -422,6 +501,9 @@ def render():
                 ui.label(f"{kind} inputs that moved").classes("text-sm font-semibold")
                 for line in lines:
                     ui.label(line).classes("text-sm tabular-nums")
+        alert_table.rows = alert_rows(p)
+        alert_table.update()
+        alert_status.text = "" if p.get("alerts") or not p else ALERT_OFF
         board.busy.hide()
         kit.set_busy(recompute, False)
 

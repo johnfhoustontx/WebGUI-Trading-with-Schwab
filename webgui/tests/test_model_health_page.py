@@ -150,3 +150,65 @@ def test_exit_drift_names_inputs_in_words():
     ((kind, lines),) = page.exit_drift({"exit": [exit_entry(drift=moved), exit_entry(
         type="0DTE")]})
     assert kind == "SWING" and lines[0].startswith("distance from the short strike")
+
+
+# ── alert quality (docs/plans/2026-11-14-alert-quality-design.md) ───────────
+def alert_entry(**kw):
+    e = {"type": "uoa", "verdict": "beats", "days": 45, "min_days": 40,
+         "alerts": 130, "logged": 140, "hit_rate": 0.61, "base_rate": 0.44,
+         "diff": {"mean": -0.17, "lo": -0.25, "hi": -0.09, "days": 45},
+         "dropped": {"price": 0, "horizon": 10, "history": 0, "base": 0}}
+    e.update(kw)
+    return e
+
+
+def test_alert_rows_read_from_the_alert_side():
+    (row,) = page.alert_rows({"alerts": [alert_entry()]})
+    assert row["type"] == "Unusual activity" and row["verdict"] == "Beats"
+    assert row["_verdict_class"] == TXT_POS
+    assert row["wider_after"] == "61.00%" and row["wider_other"] == "44.00%"
+    assert row["difference"] == "+17.00 points (+9.00 to +25.00)"
+    assert row["alerts"] == "130 of 140" and row["days"] == "45"
+
+
+def test_alert_rows_too_few_days_unknown_type_and_none():
+    (row,) = page.alert_rows({"alerts": [alert_entry(
+        type="new_kind", verdict="too_few_days", days=9, hit_rate=None,
+        base_rate=None, diff=None)]})
+    assert row["type"] == "new_kind"
+    assert row["verdict"] == "Too few days (9 of 40)"
+    assert row["wider_after"] == page._fmt.NO_READING
+    assert row["difference"] == page._fmt.NO_READING
+    assert page.alert_rows({"alerts": None}) == [] and page.alert_rows(None) == []
+
+
+def test_alert_columns_use_whole_words():
+    labels = " ".join(c["label"] for c in page.alert_columns())
+    for short in ("UOA", "uoa", "vs.", "%ile"):
+        assert short not in labels
+
+
+def test_dropped_text():
+    assert page.dropped_text({"dropped": {"horizon": 3, "history": 0, "price": 1,
+                                          "base": 0}}) == \
+        "3 too late in the session, 1 with no price"
+    assert page.dropped_text({"dropped": dict.fromkeys(
+        ("price", "horizon", "history", "base"), 0)}) == ""
+    assert page.dropped_text({}) == ""
+
+
+def _service_literal(name):
+    import ast
+    import pathlib
+    src = (pathlib.Path(__file__).resolve().parents[2] / "services" / "options_svc"
+           / "model_health.py").read_text(encoding="utf-8")
+    for node in ast.parse(src).body:
+        if isinstance(node, ast.Assign) and any(
+                getattr(t, "id", None) == name for t in node.targets):
+            return ast.literal_eval(node.value)
+    raise AssertionError(name)
+
+
+def test_alert_words_match_the_service():
+    assert page.ALERT_WORDS == _service_literal("ALERT_WORDS")
+    assert page.DROP_WORDS == _service_literal("DROP_WORDS")
