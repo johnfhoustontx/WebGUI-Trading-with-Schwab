@@ -3445,6 +3445,29 @@ _MODEL_HEALTH = ConfigFile(
                   "Edges of profit or loss as a share of the credit, for the rate it "
                   "is judged against.", kind="numbers", min=-10, max=10),
         )),
+        Section("Alert quality",
+                "For each flow alert type, how often the next half hour ran wider "
+                "than that symbol's usual range at that time of day, against the "
+                "same symbol's other times that day. Nothing uses it.", (
+            Field("alerts.enabled", "Score the alerts",
+                  "Off leaves the Alert quality table empty.", kind="bool"),
+            Field("alerts.types", "Alert types scored",
+                  "uoa, big_delta, hiro_surge, hiro_flip, crossover, gamma_flip. "
+                  "Gamma flip is left out until the gamma regime study has read.",
+                  kind="phrases"),
+            Field("alerts.horizon_min", "Range measured over",
+                  "Minutes after the alert whose high-to-low range is measured.",
+                  kind="int", unit="min", min=5, max=120, step=5),
+            Field("alerts.history_sessions", "Usual range from",
+                  "Earlier sessions whose median is the usual range.",
+                  kind="int", unit="sessions", min=5, max=60, step=1),
+            Field("alerts.min_history", "Sessions needed first",
+                  "Earlier sessions a time of day needs before an alert there is "
+                  "scored.", kind="int", unit="sessions", min=3, max=60, step=1),
+            Field("alerts.min_days", "Days before a verdict",
+                  "Scored days needed before a verdict.",
+                  kind="int", unit="days", min=5, max=250, step=1),
+        )),
     ),
 )
 

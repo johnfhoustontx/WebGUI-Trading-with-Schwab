@@ -42,6 +42,14 @@ DEFAULTS = {
         "penalty": 1.0,
         "buckets": [-1.0, -0.5, -0.25, 0.0, 0.25],
     },
+    "alerts": {
+        "enabled": True,
+        "types": ["uoa", "big_delta", "hiro_surge", "hiro_flip", "crossover"],
+        "horizon_min": 30,
+        "history_sessions": 20,
+        "min_history": 10,
+        "min_days": 40,
+    },
 }
 
 load, reset_cache = toml_loader(MODEL_HEALTH_TOML, DEFAULTS, label="model_health.toml")
@@ -278,6 +286,65 @@ def exit_buckets() -> list:
     return sorted({float(v) for v in raw})
 
 
+# ── [alerts]: alert quality (docs/plans/2026-11-14-alert-quality-design.md) ──
+# Every type a flow alert can have. ``gamma_flip`` is known but not scored by
+# default: the gamma regime study has spoken for its sessions.
+ALERT_TYPES = ("uoa", "big_delta", "hiro_surge", "hiro_flip", "crossover", "gamma_flip")
+
+
+def _alerts() -> dict:
+    cfg = load()
+    raw = cfg.get("alerts") if isinstance(cfg, dict) else None
+    return raw if isinstance(raw, dict) else {}
+
+
+def _alerts_int(key, *, minimum, maximum):
+    default = DEFAULTS["alerts"][key]
+    raw = _alerts().get(key, default)
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)) or raw != int(raw):
+        return default
+    return int(raw) if minimum <= raw <= maximum else default
+
+
+def alerts_enabled() -> bool:
+    raw = _alerts().get("enabled")
+    return raw if isinstance(raw, bool) else DEFAULTS["alerts"]["enabled"]
+
+
+def alerts_types() -> list:
+    """Alert types scored, in the file's order; an unknown entry is dropped."""
+    raw = _alerts().get("types")
+    if not isinstance(raw, list):
+        return list(DEFAULTS["alerts"]["types"])
+    out = []
+    for v in raw:
+        if isinstance(v, str) and v in ALERT_TYPES and v not in out:
+            out.append(v)
+    return out or list(DEFAULTS["alerts"]["types"])
+
+
+def alerts_horizon_min() -> int:
+    return _alerts_int("horizon_min", minimum=5, maximum=120)
+
+
+def alerts_history_sessions() -> int:
+    return _alerts_int("history_sessions", minimum=5, maximum=60)
+
+
+def alerts_min_history() -> int:
+    """Earlier sessions a slot needs before it has a usual range; never more
+    than ``alerts_history_sessions``."""
+    history = alerts_history_sessions()
+    value = _alerts_int("min_history", minimum=3, maximum=60)
+    if value > history:
+        value = DEFAULTS["alerts"]["min_history"]
+    return min(value, history)
+
+
+def alerts_min_days() -> int:
+    return _alerts_int("min_days", minimum=5, maximum=250)
+
+
 __all__ = ["DEFAULTS", "load", "reset_cache", "enabled", "min_days", "recent_sessions",
            "min_reference_sessions", "psi_moved", "psi_shifted", "bootstrap_draws",
            "drift_permutations", "drift_p", "range_enabled", "range_symbols",
@@ -285,4 +352,6 @@ __all__ = ["DEFAULTS", "load", "reset_cache", "enabled", "min_days", "recent_ses
            "range_step_min", "range_min_train_days", "range_min_days", "range_ridge",
            "range_floor", "range_volume_sessions", "exit_enabled", "exit_types",
            "exit_thin_min", "exit_min_train_days", "exit_min_days", "exit_penalty",
-           "exit_buckets"]
+           "exit_buckets", "ALERT_TYPES", "alerts_enabled", "alerts_types",
+           "alerts_horizon_min", "alerts_history_sessions", "alerts_min_history",
+           "alerts_min_days"]

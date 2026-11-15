@@ -115,3 +115,48 @@ def test_exit_buckets_are_sorted_and_deduplicated(monkeypatch):
 def test_an_empty_volume_map_is_allowed(monkeypatch):
     _with_range(monkeypatch, volume_from={})
     assert cfg.range_volume_from() == {}
+
+
+# ── [alerts] (docs/plans/2026-11-14-alert-quality-design.md) ────────────────
+def _with_alerts(monkeypatch, **over):
+    al = {**cfg.DEFAULTS["alerts"], **over}
+    monkeypatch.setattr(cfg, "load", lambda: {**cfg.DEFAULTS, "alerts": al})
+
+
+def test_alerts_defaults_and_shipped_file():
+    assert cfg.alerts_enabled() is True
+    assert cfg.alerts_types() == ["uoa", "big_delta", "hiro_surge", "hiro_flip",
+                                  "crossover"]
+    assert cfg.alerts_horizon_min() == 30
+    assert (cfg.alerts_history_sessions(), cfg.alerts_min_history()) == (20, 10)
+    assert cfg.alerts_min_days() == 40
+
+
+def test_gamma_flip_is_known_but_not_scored_by_default():
+    assert "gamma_flip" in cfg.ALERT_TYPES
+    assert "gamma_flip" not in cfg.alerts_types()
+
+
+def test_alert_types_drop_unknown_and_fall_back_when_empty(monkeypatch):
+    _with_alerts(monkeypatch, types=["uoa", "nope", "uoa", 5, "gamma_flip"])
+    assert cfg.alerts_types() == ["uoa", "gamma_flip"]
+    _with_alerts(monkeypatch, types=[])
+    assert cfg.alerts_types() == cfg.DEFAULTS["alerts"]["types"]
+    _with_alerts(monkeypatch, types="uoa")
+    assert cfg.alerts_types() == cfg.DEFAULTS["alerts"]["types"]
+
+
+def test_alert_numbers_fall_back(monkeypatch):
+    _with_alerts(monkeypatch, horizon_min=0, history_sessions=True, min_days=2.5,
+                 enabled="yes")
+    assert cfg.alerts_horizon_min() == 30
+    assert cfg.alerts_history_sessions() == 20
+    assert cfg.alerts_min_days() == 40
+    assert cfg.alerts_enabled() is True
+
+
+def test_min_history_never_above_history(monkeypatch):
+    _with_alerts(monkeypatch, min_history=30, history_sessions=20)
+    assert cfg.alerts_min_history() == 10
+    _with_alerts(monkeypatch, min_history=5, history_sessions=8)
+    assert (cfg.alerts_history_sessions(), cfg.alerts_min_history()) == (8, 5)

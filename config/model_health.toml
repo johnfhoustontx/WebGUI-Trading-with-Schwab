@@ -76,3 +76,17 @@ min_train_days = 15     # entry days of closed trades before the first fit
 min_days = 40           # scored days before a verdict
 penalty = 1.0           # prior precision on each weight: larger holds them nearer 0
 buckets = [-1.0, -0.5, -0.25, 0.0, 0.25]   # P&L / credit edges of the baseline
+
+# Alert quality (ML roadmap Phase 4, docs/plans/2026-11-14-alert-quality-design.md):
+# for each flow alert type, how often the next horizon_min minutes ran wider than
+# that symbol's usual range at that time of day, against the same symbol's other
+# windows that day. Reads the alert record (alert_log.db) and the Gamma Archive.
+# Shadow: nothing reads it. gamma_flip is recorded but left out of types until the
+# gamma regime study has read: that study has spoken for its sessions.
+[alerts]
+enabled = true
+types = ["uoa", "big_delta", "hiro_surge", "hiro_flip", "crossover"]
+horizon_min = 30        # minutes after the alert whose high-low range is measured
+history_sessions = 20   # earlier sessions the usual range is the median of
+min_history = 10        # earlier sessions a time of day needs before it is scored
+min_days = 40           # scored days before a verdict
