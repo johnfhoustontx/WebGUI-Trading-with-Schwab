@@ -72,7 +72,7 @@ and in the nightly backup** (never in `DB_EXCLUDE`), like `scalp.db` and
 
 | column | meaning |
 |---|---|
-| `alert_id` TEXT PRIMARY KEY | the alert's own `id` (already unique per fire) |
+| `alert_id` TEXT | the alert's own `id`; with `session_date` the primary key, since a contract-level id (`SPY\|uoa\|call\|600\|2026-12-19`) carries no date and the same contract can fire again on a later day |
 | `session_date` TEXT | Central date of the fire |
 | `ts` INTEGER | epoch seconds of the detecting tick |
 | `symbol`, `type`, `side` | as on the alert |
@@ -108,7 +108,8 @@ Health runs in the 16:20 nightly step and the archive at 17:00, so a session's
 alerts are first scored the next trading night (my call: no reordering of the
 nightly steps for a one-day lag).
 
-**The window's range:** from the grid point at or before the alert to the last
+**The window's range:** from the first grid point at or after the alert (never one
+before it: that would hold the move that fired the alert) to the last
 grid point within `horizon_min` (30) after it: (highest spot - lowest spot) /
 starting spot. An alert with less than a full horizon left before collection
 stops is dropped (counted, not scored).

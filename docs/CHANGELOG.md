@@ -22,11 +22,18 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 - **To run once after the promote:** `tools/seed_alert_log.py`, so the held 20
   sessions are in the record.
 - **First reading** (2026-11-13 backup, seeded; all *Too few days*, 9 scored days).
-  Unusual activity: wider after the alert 69.0% against 60.5% at other times, +8.5
-  points (+1.9 to +13.3), 816 of 1,910 alerts scored. Big delta: 62.0% against 58.9%,
-  +3.1 points (-4.8 to +11.4), 310 of 889. Most of the rest are left out as too early
-  in the record (the first 10 archived sessions are the yardstick). The other types
-  start from nothing.
+  Unusual activity: wider after the alert 67.0% against 60.7% at other times, +6.3
+  points (-1.8 to +12.0), 790 of 2,017 alerts scored. Big delta: 59.5% against 58.2%,
+  +1.2 points (-7.7 to +10.2), 259 of 943. Most of the rest are left out as too early
+  in the record (the first 10 archived sessions are the yardstick); about 1 in 9 as
+  "no price", where the archive's thinned grid has no point within 5 minutes after
+  the alert. The other types start from nothing. 1.4 s to score.
+- **Final review fixes.** The record is keyed on the day and the id (a contract-level
+  id has no date, so a contract firing again on a later day was being ignored for
+  good); the window starts at the first price AFTER the alert (it had started up to
+  5 minutes before, inside the move that fired it, and the first reading fell from
+  +8.5 to +6.3 points once fixed); the scorer reads one symbol at a time from a floor
+  before its first alert (12.1 s to 1.4 s, and bounded as the archive grows).
 - **Design / plan.** `docs/plans/2026-11-14-alert-quality-{design,plan}.md`.
 
 **Prior —** 2026-11-14 (**Exit chance on Model Health: ML roadmap Phase 3b.**)
