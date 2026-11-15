@@ -132,3 +132,12 @@ refresh_min = 120
 # A fetch that failed is tried again after this many minutes, not on the
 # page's next refresh.
 retry_min = 10
+
+[timing]
+# One log line per wait on Dealer Positioning (the page opening, a symbol
+# picked, a tab clicked), saying where the time went step by step. Read on each
+# page build. false logs nothing.
+enabled = true
+# How long the page waits for the browser to say it has drawn, in seconds.
+# Past it the line is logged without that figure (a hidden tab draws nothing).
+browser_wait_sec = 3.0

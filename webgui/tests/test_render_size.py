@@ -19,7 +19,7 @@ import pytest
 
 # module -> (most lines, most nested functions) for its ``render``.
 CEILINGS = {
-    "pages.options.gamma": (1462, 59),
+    "pages.options.gamma": (1437, 58),
     "pages.desk": (648, 18),
     "pages.options.calculator": (1027, 40),
 }

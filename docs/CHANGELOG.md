@@ -4,7 +4,34 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-15 (**Open Interest: the ratios move to the side rail, 3D split bars, a coloured price line.**)
+**Last updated:** 2026-11-15 (**Dealer Positioning logs where each wait goes, step by step.**)
+
+- **Why.** Measured on prod (market closed, $SPX): HTML at 0.41 s, page loaded
+  at 0.83 s, charts with data at about 3.2 s, while the Redis reads behind them
+  took about 0.1 s (snapshot 0.39 MB, Net Prem 0.36 MB, a view's history about
+  1 MB; read and parse). The other 2.4 s was not measured, so no prefetch could
+  be chosen on evidence.
+- **What.** `webgui/pages/options/gamma_timing.py`: one INFO line on
+  `webgui.gamma_timing` per wait, for the page opening, a symbol picked (through
+  the service's refresh) and a tab clicked: `built`, `first_read`, `published`
+  (symbol only, from the snapshot's `:ts`), time inside each read (`snap`,
+  `netprem`, `hist`) and paint (`figures`, `bar`, `heat`), `drawn` (the browser
+  answering after a paint), `total`, and `nav` (the browser's own clock, open
+  only). A line's figures are taken when the browser is asked, so a click mid-draw
+  cannot change it. `config/gamma_heat.toml [timing]` (`enabled`,
+  `browser_wait_sec`, Settings → Configuration) turns it off and sets the wait.
+- **First reading, local harness, empty bus.** Tabs drew in about 0.1 s; the
+  open's `drawn` was 2.85 s, so the browser itself may be the larger cost on
+  open. Prod lines with real data decide.
+- **Room in `render`.** The briefing-button painter moved to module level as
+  `sync_sched_buttons`, and the `render` ceiling in `test_render_size.py` was
+  lowered to 1437 lines and 58 nested functions.
+- **Tests.** `test_gamma_timing.py` (new: the line, once per wait, a symbol's
+  publish time, a browser that never answers, a click mid-draw, off, the config,
+  the wiring, the moved painter); three source pins in `test_options_gamma.py`
+  follow the timed calls.
+
+**Prior —** 2026-11-15 (**Open Interest: the ratios move to the side rail, 3D split bars, a coloured price line.**)
 
 - **What.** On Dealer Positioning → Open Interest (`pages/options/gamma_oi.py`) the
   rail on top keeps only *Where the price sits*; its four tiles are gone. The chosen

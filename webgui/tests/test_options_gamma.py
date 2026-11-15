@@ -674,7 +674,9 @@ def test_big_gamma_snapshot_read_is_off_loop():
     # resolved once at page build — the shared key, or a pinned symbol's own
     # published one; see snapshot_view.)
     # (``read_shared``: one parse per version for every tab, audit PF-07.)
-    assert "run.io_bound(bus_client.read_shared, _snap_view)" in src
+    # Timed since 2026-11-15 (gamma_timing): the read itself is unchanged.
+    flat = " ".join(src.split())
+    assert 'run.io_bound( clock.timed("snap", bus_client.read_shared), _snap_view)' in flat
     # The cheap version probes are NOT wrapped (still a plain synchronous call).
     # The literal list moved out to the pure ``polled_views`` when the pinned
     # screens stopped probing keys they draw nothing from; the property this
@@ -2161,7 +2163,9 @@ def test_page_reads_each_views_history_off_loop_from_its_own_key():
     """The four history blobs were ~1.1 MB EACH and the page draws one view at a
     time. It must fetch only the visible view's, and off the event loop."""
     src = inspect.getsource(gamma.render)
-    assert "run.io_bound(bus_client.read_shared, history_key(" in src
+    flat = " ".join(src.split())
+    assert ('run.io_bound(clock.timed("hist", bus_client.read_shared), '
+            'history_key(') in flat
     assert 'entry.get("history")' not in src, "still reading history inline"
     # switching subtabs must be able to fetch, so the handler is async + guarded
     assert "async def _on_view_change" in src
@@ -3148,7 +3152,7 @@ def test_render_asks_before_drawing_the_bars():
     """The bar figure is built only on the branch where the view is NOT flagged."""
     src = inspect.getsource(gamma.render)
     gate = src.index("if not show_no_greeks(entry,")
-    assert gate < src.index("_set_chart(bar_figure(")
+    assert gate < src.index('_set_chart(clock.timed("bar", bar_figure)(')
 
 
 def test_the_empty_states_use_the_app_s_one_empty_style():

@@ -1124,6 +1124,20 @@ _GAMMA_HEAT = ConfigFile(
                   "failing would hold up the options service each time.",
                   kind="int", unit="min", min=1, max=120, step=1),
         )),
+        Section("Load timings",
+                "One line in the web app's log each time the page opens, a "
+                "symbol is picked or a tab is clicked, saying how long each "
+                "step took: building the page, reading the data, drawing the "
+                "charts and the browser showing them. Applies to the next page "
+                "opened.", (
+            Field("timing.enabled", "Log load timings",
+                  "Off logs nothing.", kind="bool"),
+            Field("timing.browser_wait_sec", "Wait for the browser",
+                  "How long to wait for the browser to say it has drawn. Past "
+                  "it the line is logged without that figure: a hidden tab "
+                  "draws nothing.",
+                  kind="float", unit="s", min=0.5, max=10, step=0.5),
+        )),
     ),
 )
 

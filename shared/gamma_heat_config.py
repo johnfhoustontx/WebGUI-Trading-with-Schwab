@@ -115,6 +115,14 @@ DEFAULTS = {
         # one very large strike does not wash out the rest.
         "cap_quantile": 0.92,
     },
+    "timing": {
+        # One log line per wait on Dealer Positioning (the page opening, a
+        # symbol picked, a tab clicked): where the time went, step by step.
+        "enabled": True,
+        # How long the page waits for the browser to say it has drawn before
+        # logging the wait without that figure, in seconds.
+        "browser_wait_sec": 3.0,
+    },
 }
 
 WELL_HEIGHTS = ("root", "linear")
@@ -260,3 +268,15 @@ def heat_share() -> float:
     Read once when the page module loads (``gamma._STRIKE_HEAT_SPLIT``): the
     panels are created at this split, so a change needs the web app restarted."""
     return _setting("layout", "heat_share", minimum=0.3, maximum=0.9)
+
+
+def timing() -> dict:
+    """``{"enabled", "browser_wait_sec"}`` for the page's load timings
+    (``pages/options/gamma_timing.py``). Read on each page build, so a saved
+    change applies to the next page opened. ``enabled`` must be a real bool."""
+    table = load().get("timing")
+    raw = table.get("enabled") if isinstance(table, dict) else None
+    return {"enabled": raw if isinstance(raw, bool)
+            else DEFAULTS["timing"]["enabled"],
+            "browser_wait_sec": _setting("timing", "browser_wait_sec",
+                                         minimum=0.5, maximum=10.0)}

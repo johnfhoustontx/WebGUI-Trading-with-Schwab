@@ -41,6 +41,7 @@ from . import gamma_oi as _oi
 from . import gamma_feed as _feed
 from . import gamma_heat as _heat
 from . import gamma_ridge as _ridge
+from . import gamma_timing as _timing
 from . import gamma_well as _well
 from .inputs import select_all_on_focus
 from . import theme as _theme
@@ -2174,6 +2175,43 @@ def reads_snapshot(view) -> bool:
 # highlight never updates.
 _SCHED_SLOTS = (("premarket", "Premarket"), ("open", "Open"),
                 ("midday", "Midday"), ("close", "EOD recap"))
+_SCHED_HL = "bg-[#2563eb] text-white opacity-100"  # today's briefing is ready
+_SCHED_DIM = "opacity-40"                           # prior-day data, or none yet
+
+
+def sync_sched_buttons(btns, views, sched_state, titles, versions, read):
+    """Highlight a briefing button ONLY when its slot's data is from TODAY (CT).
+
+    Prior-day data (e.g. over the weekend) stays dim — and the un-highlighted
+    buttons are dimmed further. Clickable whenever data exists; disabled when a
+    slot has never run. The payload (for ``generated_at``) is read through
+    ``read`` only when a slot's version changes; the today-vs-prior compare
+    runs every tick, so a highlight also drops at midnight on a page left open
+    across the rollover. ``btns``, ``views`` and ``titles`` are keyed by slot;
+    ``sched_state`` is the page's own ``{slot: {"ver", "date", "applied"}}``.
+    Moved out of ``render`` 2026-11-15 (see tests/test_render_size.py)."""
+    today = _dt.datetime.now(ZoneInfo("America/Chicago")).date().isoformat()
+    for s, b in btns.items():
+        ver = versions.get(views[s])
+        st = sched_state[s]
+        if ver != st["ver"]:
+            st["ver"] = ver
+            ga = ((read(views[s]) or {}).get("generated_at") if ver else "") or ""
+            st["date"] = ga[:10] if len(ga) >= 10 else None
+        is_today = bool(ver) and st["date"] == today
+        key = (bool(ver), is_today)
+        if key == st["applied"]:
+            continue  # no state change → don't re-push classes every tick
+        st["applied"] = key
+        _t = titles[s]
+        if is_today:
+            b.classes(remove=_SCHED_DIM, add=_SCHED_HL)
+            b.tooltip(f"Open today's {_t} briefing")
+        else:
+            b.classes(remove=_SCHED_HL, add=_SCHED_DIM)
+            b.tooltip(f"{_t} briefing — "
+                      + ("prior day (not today's)" if ver else "not generated yet today"))
+        b.set_enabled(bool(ver))
 
 # Probed on EVERY render: the collector status strip and the symbol-independent
 # Net Prem series are drawn by every screen, pinned or not.
@@ -3146,6 +3184,7 @@ def render(symbol: str | None = None, view: str | None = None,
     # ``[flow]`` survives the kit migration entirely — .fx-pulse is the live dot
     # and .fx-panel's crosshair cursor IS the readout affordance.
     ui.add_css(FLOW_KEYFRAMES_CSS)
+    clock = _timing.for_page(lambda: (_current_symbol(), view_toggle.value))
 
     # state["snap"] is the cached snapshot from the bus (None until first read).
     # ``fetching`` is an in-flight guard so a slow off-loop big-payload read
@@ -3227,8 +3266,6 @@ def render(symbol: str | None = None, view: str | None = None,
         # ``view_toggle.value``, which is the pinned view and never moves.
         view_toggle = _PinnedView(_pinned_view)
 
-    _SCHED_HL = "bg-[#2563eb] text-white opacity-100"  # today's briefing is ready
-    _SCHED_DIM = "opacity-40"                           # prior-day data, or none yet
     sched_btns = {}
     _sched_titles = {}
 
@@ -3846,7 +3883,7 @@ def render(symbol: str | None = None, view: str | None = None,
         _hk = feed.heat_keywords(heat.read(data["gex"], rows, _strikes, entry), rows)
         yr = heat_yrange(_strikes, view_spot, spot_path, _hk["frame"], _hk["half"])
         if not show_no_greeks(entry, state["chart_el"], chart_msg, snap.get("symbol") or _current_symbol(), _set_summary):
-            _set_chart(bar_figure(data, view_spot, view=view, walls=walls, flip=flip,
+            _set_chart(clock.timed("bar", bar_figure)(data, view_spot, view=view, walls=walls, flip=flip,
                                   yrange=yr, basis=heat.basis(rows), **_hk))
             state["chart_el"].set_visibility(True)
             _set_summary(summary_text(summary, _view_label(view)))
@@ -3856,7 +3893,7 @@ def render(symbol: str | None = None, view: str | None = None,
             forward = (state.get("fwd") or {}).get(view)
             forward = feed.forward(forward, snap)
             _legend = {}
-            _set_figure(heat_plot, feed.figure(heatmap_figure(
+            _set_figure(heat_plot, feed.figure(clock.timed("heat", heatmap_figure)(
                 rows, view, yrange=yr, forward=forward, walls=walls, spot=view_spot,
                 flip=flip, levels=feed.levels(entry.get("levels"), rows),
                 show_tracks=bool(tracks_sw.value), spot_style=spot_style_sel.value,
@@ -3895,6 +3932,7 @@ def render(symbol: str | None = None, view: str | None = None,
             _set_summary(strip_state["summary"] + "  ·  "
                          + (feed.hedge_note(entry.get("hedge"))
                             or dex_hedge_suffix(entry.get("hedge"))))
+    _render_view = clock.timed("figures", _render_view)   # every caller below
 
     @guard
     def _request_refresh():
@@ -3912,6 +3950,7 @@ def render(symbol: str | None = None, view: str | None = None,
             return
         kit.symbol_error(symbol_in, None)
         bus_client.request("options", {"type": "gamma_refresh", "args": {"symbol": sym}})
+        clock.start("symbol")   # ends when the refreshed snapshot is drawn
         # No toast: the scrim over the chart row says "Loading SPY…" for exactly
         # as long as the wait lasts, which a toast cannot.
         chart_busy.show(f"Loading {_fc.display_symbol(sym)}…")
@@ -3970,7 +4009,7 @@ def render(symbol: str | None = None, view: str | None = None,
         seen["gamma"] = version
         state["fetching"] = True
         try:
-            snap = await run.io_bound(bus_client.read_shared, _sv()) or None
+            snap = await run.io_bound(clock.timed("snap", bus_client.read_shared), _sv()) or None
         finally:
             state["fetching"] = False
         # Only adopt a snapshot for the symbol currently selected — a foreign
@@ -3988,6 +4027,7 @@ def render(symbol: str | None = None, view: str | None = None,
         await _load_history(view_toggle.value)
         _render_view()
         chart_busy.hide()
+        await clock.report(ui.run_javascript, lambda: bus_client.read_meta(_sv())[1])
 
     async def _load_history(view):
         """Fetch ``view``'s history rows off-loop, once per gamma version.
@@ -4001,7 +4041,8 @@ def render(symbol: str | None = None, view: str | None = None,
             return
         state["hist_fetching"] = True
         try:
-            payload = await run.io_bound(bus_client.read_shared, history_key(view, _hsym()))
+            payload = await run.io_bound(clock.timed("hist", bus_client.read_shared),
+                                         history_key(view, _hsym()))
         finally:
             state["hist_fetching"] = False
         sym = (state.get("snap") or {}).get("symbol")
@@ -4019,7 +4060,8 @@ def render(symbol: str | None = None, view: str | None = None,
         seen["netprem"] = version
         state["np_fetching"] = True
         try:
-            state["netprem"] = await run.io_bound(bus_client.read_shared, "options:net_premium")
+            state["netprem"] = await run.io_bound(clock.timed("netprem", bus_client.read_shared),
+                                                  "options:net_premium")
         finally:
             state["np_fetching"] = False
         if view_toggle.value == "Net Prem":
@@ -4154,46 +4196,15 @@ def render(symbol: str | None = None, view: str | None = None,
     # and asserts they agree.
     _poll_views = polled_views(symbol, view)
     _sched_state = {s: {"ver": None, "date": None, "applied": None} for s in sched_btns}
-
-    def _sync_sched_btns(versions):
-        # Highlight a briefing button ONLY when its slot's data is from TODAY (CT);
-        # prior-day data (e.g. over the weekend) stays dim — and the un-highlighted
-        # buttons are dimmed further. Clickable whenever data exists; disabled when a
-        # slot has never run. The payload (for generated_at) is read only when a slot's
-        # version changes; the today-vs-prior compare runs every tick, so a highlight
-        # also drops at midnight on a page left open across the rollover.
-        import datetime as _dt
-        from zoneinfo import ZoneInfo as _ZI
-        today = _dt.datetime.now(_ZI("America/Chicago")).date().isoformat()
-        for s, b in sched_btns.items():
-            ver = versions.get(_SCHED_VIEWS[s])
-            st = _sched_state[s]
-            if ver != st["ver"]:
-                st["ver"] = ver
-                ga = ((bus_client.read(_SCHED_VIEWS[s]) or {}).get("generated_at")
-                      if ver else "") or ""
-                st["date"] = ga[:10] if len(ga) >= 10 else None
-            is_today = bool(ver) and st["date"] == today
-            key = (bool(ver), is_today)
-            if key == st["applied"]:
-                continue  # no state change → don't re-push classes every tick
-            st["applied"] = key
-            _t = _sched_titles[s]
-            if is_today:
-                b.classes(remove=_SCHED_DIM, add=_SCHED_HL)
-                b.tooltip(f"Open today's {_t} briefing")
-            else:
-                b.classes(remove=_SCHED_HL, add=_SCHED_DIM)
-                b.tooltip(f"{_t} briefing — "
-                          + ("prior day (not today's)" if ver else "not generated yet today"))
-            b.set_enabled(bool(ver))
+    _sync_sched_btns = (lambda versions: sync_sched_buttons(   # noqa: E731
+        sched_btns, _SCHED_VIEWS, _sched_state, _sched_titles, versions, bus_client.read))
 
     @guard_async
     async def _poll():
         # One coalesced 2s tick: read all view versions in a single pipelined
         # round-trip (cheap :ver counters, no payload deserialize — these stay ON
         # the event loop) and dispatch only the views that changed. Only the big
-        # gamma snapshot fetch (~14 MB) is moved off-loop, inside _maybe_repaint;
+        # gamma snapshot fetch (~0.4 MB, 2026-11-15) is moved off-loop, inside _maybe_repaint;
         # the small status/explain/analyze/sched payloads stay inline.
         # The probe LIST is polled_views(...) — pure, and a strict subset on a
         # pinned render. The dispatch below reads the same two flags, so a key
@@ -4328,6 +4339,7 @@ def render(symbol: str | None = None, view: str | None = None,
 
     @guard_async
     async def _on_view_change(e):
+        clock.start("tab")      # ends when the clicked view is drawn
         # _sync_np_controls FIRST so the Net Prem block is shown/hidden before the
         # repaint (the checkbox visibility feeds nothing but the eye, but showing a
         # stale block for a frame reads as a glitch).
@@ -4338,6 +4350,7 @@ def render(symbol: str | None = None, view: str | None = None,
         # lands on the view (no-op once cached for this gamma version).
         await _load_history(view_toggle.value)
         _render_view()
+        await clock.report(ui.run_javascript)
 
     wire_view_tabs(view_toggle, _on_view_change, view, _public)
 
@@ -4478,7 +4491,7 @@ def render(symbol: str | None = None, view: str | None = None,
 
     # Initial paint from the bus cache (graceful-empty if the service is cold).
     # The cheap :ver probes + the small gex_status/sched reads stay inline; the big
-    # gamma snapshot (~14 MB) is read OFF the event loop in _initial_load so the
+    # gamma snapshot (~0.4 MB, 2026-11-15) is read OFF the event loop in _initial_load so the
     # first page build doesn't block the loop for every connected client.
     # Seed the same views the 2 s poll will probe, and no others: a version
     # seeded for a key nobody polls is dead weight, and on a public screen it is
@@ -4529,7 +4542,8 @@ def render(symbol: str | None = None, view: str | None = None,
         if _reads_snap and not state.get("fetching"):
             state["fetching"] = True
             try:
-                state["snap"] = await run.io_bound(bus_client.read_shared, _snap_view) or None
+                state["snap"] = await run.io_bound(
+                    clock.timed("snap", bus_client.read_shared), _snap_view) or None
             finally:
                 state["fetching"] = False
         # The Net Prem payload rides the same off-loop initial read (its own key,
@@ -4538,7 +4552,7 @@ def render(symbol: str | None = None, view: str | None = None,
             state["np_fetching"] = True
             try:
                 state["netprem"] = await run.io_bound(
-                    bus_client.read_shared, "options:net_premium")
+                    clock.timed("netprem", bus_client.read_shared), "options:net_premium")
             finally:
                 state["np_fetching"] = False
         # Sync the dropdown to the symbol actually in the cache so a page (re)build
@@ -4559,6 +4573,7 @@ def render(symbol: str | None = None, view: str | None = None,
         # when there is no dropdown.
         symbol_in.on_value_change(lambda e: _on_symbol_change())
         _render_view()
+        await clock.report(ui.run_javascript)
         if handoff_sym:
             _request_refresh()
         elif feed.on:         # no chain to wait for, and the cached capture may be old
@@ -4582,3 +4597,4 @@ def render(symbol: str | None = None, view: str | None = None,
         # installer latches on the row so repeated calls are no-ops.
         ui.run_javascript(_CROSSHAIR_JS)
     ui.timer(0.4, _install_crosshair, once=True)
+    clock.mark("built")

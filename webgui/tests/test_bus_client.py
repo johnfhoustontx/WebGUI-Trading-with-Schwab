@@ -843,9 +843,13 @@ def test_the_gamma_page_reads_its_large_views_through_the_shared_copy():
     inside the page's render closure."""
     import inspect
     from pages.options import gamma
-    src = inspect.getsource(gamma)
-    assert "run.io_bound(bus_client.read_shared, _sv())" in src
-    assert "run.io_bound(bus_client.read_shared, history_key(view, _hsym()))" in src
-    assert "run.io_bound(bus_client.read_shared, _snap_view)" in src
-    assert src.count('bus_client.read_shared, "options:net_premium")') == 2
+    # Each read is wrapped in the page's load clock since 2026-11-15
+    # (gamma_timing): the wrapper times the call and changes nothing else.
+    src = " ".join(inspect.getsource(gamma).split())
+    shared = 'bus_client.read_shared)'
+    assert f'run.io_bound(clock.timed("snap", {shared}, _sv())' in src
+    assert (f'run.io_bound(clock.timed("hist", {shared}, '
+            'history_key(view, _hsym()))') in src
+    assert f'run.io_bound( clock.timed("snap", {shared}, _snap_view)' in src
+    assert src.count(f'clock.timed("netprem", {shared}, "options:net_premium")') == 2
     assert "run.io_bound(bus_client.read, " not in src
