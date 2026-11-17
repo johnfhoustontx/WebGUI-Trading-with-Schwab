@@ -18,7 +18,7 @@ Each entry:
   spread       – (leg_a, leg_b, mode) for kind=="spread"; mode ∈ {"diff_last","diff_pct"}
   source       – for kind=="external" (e.g. "sentiment_pcr")
 
-The two Index Futures tiles are the one part of this that is NOT fixed
+The Index Futures tiles are the one part of this that is NOT fixed
 data: a futures contract expires every quarter, so their display, quote symbol
 and description are worked out from the date by ``symbol_map()``. Read the map
 through that function. There is deliberately no module-level ``SYMBOL_MAP`` -
@@ -36,7 +36,7 @@ from shared import symbols as _shared_symbols
 # the index tape, then the macro gauges.
 CATEGORY_ORDER = [
     "Sectors", "Broad Market", "Top 10", "Industries", "Countries",
-    "Index Futures", "Cash Index ETF", "Metals",
+    "Index Futures", "Cash Index ETF", "Commodities",
     "Market Internals / Breadth", "Volatility", "Options Sentiment", "Currency",
     "Fixed Income / Credit", "Crypto / Alternatives",
 ]
@@ -183,6 +183,8 @@ _ENTRIES = [
     # Index Futures — the front-month contract, resolved by symbol_map()
     _future("/ES", "E-mini S&P 500 future", "Index Futures"),
     _future("/NQ", "E-mini Nasdaq 100 future", "Index Futures"),
+    _future("/YM", "E-mini Dow future", "Index Futures"),
+    _future("/RTY", "E-mini Russell 2000 future", "Index Futures"),
     # Broad Market (SPY/DIA/QQQ/IWM carry a premium skew subline)
     _q("SPY", "SPY", "SPDR S&P 500 ETF", _BRD, prem=True),
     _q("DIA", "DIA", "SPDR Dow Jones Industrial Average ETF", _BRD, prem=True),
@@ -237,10 +239,12 @@ _ENTRIES = [
     # Crypto / Alternatives
     _q("GDLC", "GDLC", "Grayscale CoinDesk Crypto 5 ETF", "Crypto / Alternatives"),
     _q("VCX", "VCX", "Fundrise Innovation Fund (private venture)", "Crypto / Alternatives"),
-    # Metals (gold, silver, copper miners; literal up=green)
-    _q("GLD", "GLD", "SPDR Gold Shares (gold bullion)", "Metals"),
-    _q("SLV", "SLV", "iShares Silver Trust (silver bullion)", "Metals"),
-    _q("COPX", "COPX", "Global X Copper Miners ETF", "Metals"),
+    # Commodities (gold, silver, copper miners, natural gas; literal up=green).
+    # The frame was "Metals" until UNG joined it on 2026-11-17.
+    _q("GLD", "GLD", "SPDR Gold Shares (gold bullion)", "Commodities"),
+    _q("SLV", "SLV", "iShares Silver Trust (silver bullion)", "Commodities"),
+    _q("COPX", "COPX", "Global X Copper Miners ETF", "Commodities"),
+    _q("UNG", "UNG", "United States Natural Gas Fund", "Commodities"),
     # Countries (single-country iShares MSCI ETFs; literal up=green)
     _q("MCHI", "MCHI", "China — iShares MSCI China ETF", _CTY),
     _q("EWJ", "EWJ", "Japan — iShares MSCI Japan ETF", _CTY),

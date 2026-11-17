@@ -1472,9 +1472,9 @@ intensity scales with the size of the move.
 | **Top 10** | A **BIG10** composite plus its ten mega-cap members | BIG10 shows the equal-weighted average move and a breadth subline ("5/10 up"). |
 | **Industries** | Semis, software, quantum, biotech, retail, metals & mining, oil, transports (IYT), cybersecurity (CIBR), infrastructure (PAVE) | Ranked. |
 | **Countries** | Twelve single-country funds | Ranked. |
-| **Index Futures** | /ES, /NQ | The overnight tape, when cash is closed. Each tile names its contract in brackets (`/ES[Z26]` is December 2026) and moves to the next one by itself. |
+| **Index Futures** | /ES, /NQ, /YM, /RTY | The overnight tape (S&P 500, Nasdaq 100, Dow, Russell 2000), when cash is closed. Each tile names its contract in brackets (`/ES[Z26]` is December 2026) and moves to the next one by itself. |
 | **Cash Index ETF** | SPX, NDX | The indices themselves, each with a call/put premium subline. |
-| **Metals** | GLD, SLV, COPX | Gold, silver and copper miners. |
+| **Commodities** | GLD, SLV, COPX, UNG | Gold, silver, copper miners and natural gas. |
 | **Market Internals / Breadth** | $ADVN, $DECN, the net spread, $TICK | How *broad* a move is. A rally on negative breadth is narrow and fragile. |
 | **Volatility** | VIX, VIX1D, VIX3M, SKEW, DSPX | The market's expected volatility. VIX1D above VIX means near-term stress. DSPX is the Cboe S&P 500 Dispersion Index: how far the options market expects single stocks to move apart from each other. |
 | **Options Sentiment** | Put/Call, Net Prem, MGTN | The app's own cap-weighted put/call and dollar-weighted premium skew. |

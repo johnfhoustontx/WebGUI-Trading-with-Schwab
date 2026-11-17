@@ -23,7 +23,7 @@ _EXPECTED_DISPLAYS = {
     "$ADVN", "$DECN", "$ADVN-$DECN", "$TICK",
     "$DXY", "FXY", "FXE", "FXB",
     "SPX", "NDX",
-    "/ES[U26]", "/NQ[U26]",
+    "/ES[U26]", "/NQ[U26]", "/YM[U26]", "/RTY[U26]",
     "SPY", "DIA", "QQQ", "IWM", "RSP", "QQEW",
     "BIG10", "NVDA", "MSFT", "GOOGL", "AMZN", "META", "AAPL", "TSLA",
     "AVGO", "PLTR", "AMD",
@@ -31,7 +31,7 @@ _EXPECTED_DISPLAYS = {
     "XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY",
     "TLT", "HYG", "LQD",
     "GDLC", "VCX",
-    "GLD", "SLV", "COPX",
+    "GLD", "SLV", "COPX", "UNG",
     "MCHI", "EWJ", "EWY", "INDA", "EWT", "EWZ", "EWA", "EWU", "EWG", "EWQ", "EWW", "EWC",
 }
 
@@ -45,11 +45,13 @@ def test_every_csv_symbol_is_mapped():
     # (added 2026-09-27) − the MTUM/SPMO Factor frame (dropped 2026-09-27).
     # + CIBR/PAVE − XSD in the Industries frame (2026-11-12).
     # + DSPX in the Volatility frame (2026-11-14).
+    # + /YM and /RTY in Index Futures, + UNG in Commodities (the frame renamed
+    # from Metals) (2026-11-17).
     # (base 55 = $PCALL+$PCSP→ONE put/call tile; HYG-LQD dropped; $ADD/$ADSPD dropped;
     # XLB added; +10 country ETFs.)
-    assert len(_map()) == 78
+    assert len(_map()) == 81
     # A future mistyped ticker/display must fail: the full display set is pinned.
-    assert len(_EXPECTED_DISPLAYS) == 78
+    assert len(_EXPECTED_DISPLAYS) == 81
     assert {t["display"] for t in _map()} == _EXPECTED_DISPLAYS
     # Every entry has a non-empty display; every quote tile has a real quote_symbol.
     for t in _map():
@@ -61,7 +63,7 @@ def test_every_csv_symbol_is_mapped():
 def test_categories_cover_the_expected_set_in_frame_order():
     assert S.CATEGORY_ORDER == [
         "Sectors", "Broad Market", "Top 10", "Industries", "Countries",
-        "Index Futures", "Cash Index ETF", "Metals",
+        "Index Futures", "Cash Index ETF", "Commodities",
         "Market Internals / Breadth", "Volatility", "Options Sentiment", "Currency",
         "Fixed Income / Credit", "Crypto / Alternatives",
     ]
@@ -134,17 +136,23 @@ def _futures_tiles(today):
 
 
 def test_before_the_roll_the_tiles_are_the_september_contract():
-    es, nq = _futures_tiles(_BEFORE_ROLL)
+    es, nq, ym, rty = _futures_tiles(_BEFORE_ROLL)
     assert (es["display"], es["quote_symbol"]) == ("/ES[U26]", "/ESU26")
     assert (nq["display"], nq["quote_symbol"]) == ("/NQ[U26]", "/NQU26")
+    assert (ym["display"], ym["quote_symbol"]) == ("/YM[U26]", "/YMU26")
+    assert (rty["display"], rty["quote_symbol"]) == ("/RTY[U26]", "/RTYU26")
     assert es["description"] == "E-mini S&P 500 future, Sep 2026"
     assert nq["description"] == "E-mini Nasdaq 100 future, Sep 2026"
+    assert ym["description"] == "E-mini Dow future, Sep 2026"
+    assert rty["description"] == "E-mini Russell 2000 future, Sep 2026"
 
 
 def test_on_the_roll_day_display_quote_and_description_all_move_together():
-    es, nq = _futures_tiles(date(2026, 9, 10))
+    es, nq, ym, rty = _futures_tiles(date(2026, 9, 10))
     assert (es["display"], es["quote_symbol"]) == ("/ES[Z26]", "/ESZ26")
     assert (nq["display"], nq["quote_symbol"]) == ("/NQ[Z26]", "/NQZ26")
+    assert (ym["display"], ym["quote_symbol"]) == ("/YM[Z26]", "/YMZ26")
+    assert (rty["display"], rty["quote_symbol"]) == ("/RTY[Z26]", "/RTYZ26")
     assert es["description"] == "E-mini S&P 500 future, Dec 2026"
     assert nq["description"] == "E-mini Nasdaq 100 future, Dec 2026"
     # csv_symbol is the display fallback, so it must not lag on the old contract
@@ -156,27 +164,30 @@ def test_after_expiry_nothing_names_the_dead_contract():
     which had expired sixteen days earlier and quotes nothing."""
     entries = S.symbol_map(_AFTER_EXPIRY)
     qs = S.quote_symbols(entries)
-    assert "/ESZ26" in qs and "/NQZ26" in qs
+    assert {"/ESZ26", "/NQZ26", "/YMZ26", "/RTYZ26"} <= set(qs)
     assert not [q for q in qs if q.endswith("U26")]
     assert not [t for t in entries if "U26" in t["display"] + t["description"]]
 
 
 def test_december_hands_to_march_of_the_next_year():
-    es, nq = _futures_tiles(date(2026, 12, 10))
+    es, nq, _ym, _rty = _futures_tiles(date(2026, 12, 10))
     assert (es["display"], es["quote_symbol"]) == ("/ES[H27]", "/ESH27")
     assert nq["description"] == "E-mini Nasdaq 100 future, Mar 2027"
 
 
-def test_the_futures_frame_keeps_its_two_tiles_in_es_then_nq_order():
-    """Cash Index ETF reads SPX then NDX and the futures frame pairs with it."""
+def test_the_futures_frame_keeps_its_tiles_in_es_nq_ym_rty_order():
+    """Cash Index ETF reads SPX then NDX and the futures frame leads with the
+    same pair; /YM and /RTY follow (2026-11-17)."""
     for today in (_BEFORE_ROLL, _AFTER_EXPIRY, date(2027, 1, 4)):
-        assert [t["display"][:3] for t in _futures_tiles(today)] == ["/ES", "/NQ"]
+        assert ([t["future_root"] for t in _futures_tiles(today)]
+                == ["/ES", "/NQ", "/YM", "/RTY"])
 
 
-def test_only_the_two_futures_tiles_differ_across_a_roll():
+def test_only_the_futures_tiles_differ_across_a_roll():
     before = {t["display"]: t for t in S.symbol_map(_BEFORE_ROLL)}
     after = {t["display"]: t for t in S.symbol_map(_AFTER_EXPIRY)}
-    assert set(before) ^ set(after) == {"/ES[U26]", "/NQ[U26]", "/ES[Z26]", "/NQ[Z26]"}
+    assert set(before) ^ set(after) == {
+        f"/{r}[{c}]" for r in ("ES", "NQ", "YM", "RTY") for c in ("U26", "Z26")}
     for name in set(before) & set(after):
         assert before[name] == after[name]
 

@@ -4,7 +4,23 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-15 (**Stop and Target columns on the three paper books; Ledger credit trades close at +50%; the live order's debit target is 70%.**)
+**Last updated:** 2026-11-17 (**Market Dashboard: tiles 10% smaller; /YM and /RTY; Metals becomes Commodities with UNG.**)
+
+- **Tiles.** Every Macro Board tile is 137x86 (was 152x96), at the same font
+  sizes: the room came out of the padding (11/9/8 px to 10/7/6) and the line
+  heights of the symbol, change and descriptor lines. Measured in the page
+  harness on live quotes: all 81 tiles one size, no text past a tile's edge, the
+  widest heading ("Communications") 107 px against 117 px inside. The descriptor
+  line truncates at 116 px (was 128).
+- **Index Futures** gains **/YM** (E-mini Dow) and **/RTY** (E-mini Russell
+  2000), front-month like /ES and /NQ (`shared/futures.py`; same quarterly
+  cycle). Schwab quoted `/YMZ26` and `/RTYZ26` through the proxy before the change.
+- **Commodities.** The Metals frame is renamed Commodities and gains **UNG**
+  (United States Natural Gas Fund).
+- **Tests.** `services/market_svc/tests/test_symbols.py` (81 tiles, the four
+  futures through a roll) and `test_compute.py` (frame order).
+
+**Prior —** 2026-11-15 (**Stop and Target columns on the three paper books; Ledger credit trades close at +50%; the live order's debit target is 70%.**)
 
 - **Stop and Target.** The Paper Ledger, Captured Signals and the paper Account
   tables show **Stop**, **Stop rule** and **Target** beside their P&L: the P&L,

@@ -81,7 +81,7 @@ _ACCENT = {
     "Countries": "#35E0FF",
     "Index Futures": "#A9C3E8",
     "Cash Index ETF": "#A9C3E8",
-    "Metals": "#FFB627",
+    "Commodities": "#FFB627",
     "Market Internals / Breadth": "#35E0FF",
     "Volatility": "#FFB627",
     "Options Sentiment": "#C86BFF",
@@ -519,7 +519,10 @@ def render():
         tx = tile_text(t)
         rc = _reactive_classes(t)
         oc = order_class(i)
-        # EVERY tile is exactly 152x96 (2026-08-16; 94 -> 96 on 2026-08-28 when
+        # EVERY tile is exactly 137x86 (2026-11-17: 10% smaller than the 152x96
+        # it was, at the SAME font sizes - the room came out of the padding and
+        # the line heights, and the widest text, "Communications", measured
+        # 107px against the 117px inside). Before that: 152x96 (2026-08-16; 94 -> 96 on 2026-08-28 when
         # the descriptor went 9px -> 10px -- the floor has to clear the TALLEST
         # tile or the two-height split below comes straight back, measured live
         # at 95.5 vs 94). It used to be `min-w-[104px]`
@@ -538,12 +541,13 @@ def render():
         container = ui.column().classes(
             f"mb-tile {_TILE_BG} border {rc['border']} {rc['opacity']} "
             f"{rc['cvar']} {rc['wash']} {rc['heat']} {oc} "
-            "rounded-[10px] w-[152px] shrink-0 grow-0 min-h-[96px] "
-            "px-[11px] pt-[9px] pb-[8px] gap-0")
+            "rounded-[10px] w-[137px] shrink-0 grow-0 min-h-[86px] "
+            "px-[10px] pt-[7px] pb-[6px] gap-0")
         with container:
             ui.element("div").classes("mb-ig")
             ui.label(tile_heading(t)).classes(
-                f"mb-sym {_SYM_TXT} text-[11px] font-bold tracking-[.13em]")
+                f"mb-sym {_SYM_TXT} text-[11px] leading-[14px] font-bold "
+                "tracking-[.13em]")
             # ⚠ ``mb-px``'s resting colour and ``@keyframes mbpx``'s 100% stop
             # must name the SAME colour: the flare has no animation-fill-mode,
             # so at 100% the label reverts to this class and any difference
@@ -552,13 +556,13 @@ def render():
                 f"mb-px {_PRICE_TXT} text-[17px] font-medium "
                 "tabular-nums mt-[3px] leading-tight")
             ch_lbl = ui.label(tx["change"]).classes(
-                f"{rc['chtext']} text-[10.5px] tabular-nums mt-[2px]")
+                f"{rc['chtext']} text-[10.5px] leading-[14px] tabular-nums mt-[2px]")
             # `mb-desc` is the hook the Skin-B text ramp needs (see
             # `build_macro_css`): on the lattice this line carries the option
             # skew over a bright heat fill, where the faint step measured 1.08:1.
             ex_lbl = ui.label(descriptor_line(t)).classes(
-                f"mb-desc {_FAINT_TXT} text-[10px] "
-                "tracking-[.05em] mt-[2px] truncate max-w-[128px]")
+                f"mb-desc {_FAINT_TXT} text-[10px] leading-[13px] "
+                "tracking-[.05em] mt-[2px] truncate max-w-[116px]")
             card = fund_card(state["holdings"], t.get("display"))
             if card is None:
                 ui.tooltip(t.get("description", ""))

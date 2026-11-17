@@ -463,7 +463,7 @@ def test_frames_are_published_in_the_operators_order():
     d = compute.build_dashboard({}, sector_pcr=None, proxy_up=True)
     assert [c["category"] for c in d["categories"]] == [
         "Sectors", "Broad Market", "Top 10", "Industries", "Countries",
-        "Index Futures", "Cash Index ETF", "Metals",
+        "Index Futures", "Cash Index ETF", "Commodities",
         "Market Internals / Breadth", "Volatility", "Options Sentiment", "Currency",
         "Fixed Income / Credit", "Crypto / Alternatives"]
 
