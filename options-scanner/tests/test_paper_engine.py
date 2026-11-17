@@ -478,8 +478,12 @@ def test_manage_cycle_lifecycle_true_breakeven_stop_closes_when_armed(tmp_path, 
         lambda trade, client: {"current_value": 0.49, "unrealized_pnl": 1.0,
             "pnl_pct_of_credit": 2.0, "current_underlying": 500.0,
             "current_short_delta": -0.10, "error": None})
+    # A pinned 11:00 CT: the break-even stop waits inside [protect]
+    # quiet_windows (08:30-08:45, 14:45-15:00), so on the wall clock this test
+    # failed whenever CI happened to run in one.
     pe.run_manage_cycle(None, "2026-06-03", _FakeBroker(0.49), db,
-                        lifecycle=True, be_level_fn=lambda p: 2.60)
+                        lifecycle=True, be_level_fn=lambda p: 2.60,
+                        now_ct=_ct(11))
     assert pdb.fetch_open_positions(db) == []                 # closed
     closed = pdb.fetch_all_positions(db)[0]
     assert closed["exit_reason"] == "BREAKEVEN_STOP"

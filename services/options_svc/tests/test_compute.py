@@ -1833,7 +1833,13 @@ def test_manage_arms_at_50pct_no_close(monkeypatch):
 def test_manage_armed_retrace_breakeven_closes(monkeypatch):
     calls = _patch_manage_seams(monkeypatch, [_manage_signal(be_armed=1)],
                                 {"M1": _rep(unrealized_pnl=1.0, current_value=0.99)})
-    out = compute.run_captured_manage_cycle()
+    # A pinned 11:00 CT on a weekday: the break-even stop waits inside [protect]
+    # quiet_windows (08:30-08:45, 14:45-15:00), so on the wall clock this test
+    # failed whenever CI happened to run in one.
+    import datetime as dt
+    from zoneinfo import ZoneInfo
+    out = compute.run_captured_manage_cycle(
+        now_ct=dt.datetime(2026, 6, 3, 11, 0, tzinfo=ZoneInfo("America/Chicago")))
     # armed + pnl retraced to <= round-trip commissions ($2.60) → BREAKEVEN_STOP.
     assert calls["closed"] == [("M1", 0.99, "BREAKEVEN_STOP")]
     assert out["closed"][0]["reason"] == "BREAKEVEN_STOP"

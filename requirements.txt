@@ -50,7 +50,7 @@ webencodings==0.5.1       # tinycss2's only dependency - pinned so the lock stay
 # that test arrived, repo-tests failed in CI while local venvs still held the old copy.
 Markdown==3.10.2          # build_docs: Markdown -> HTML
 beautifulsoup4==4.15.0    # build_docs: walks the HTML into the .docx
-soupsieve==2.9.0          # beautifulsoup4's CSS selectors - pinned so the lock stays complete
+soupsieve==4.0.0          # beautifulsoup4's CSS selectors - pinned so the lock stays complete
 python-docx==1.2.0        # build_docs: writes the .docx manuals
 
 # --- Schwab API SDK (P, O, S) ---
