@@ -25,10 +25,20 @@ of the app's paper book.
 import argparse
 import collections
 import datetime as dt
+import pathlib
 import random
 import sqlite3
+import sys
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+
+from shared import structures as _structures                 # noqa: E402
 
 LEGS = {"PCS": 2, "CCS": 2, "IC": 4}
+# The scanner's tracked structures share the table. The strategy and legs_json
+# filters below happen to leave them out today; this clause is the one rule that
+# says so (tests/test_tracked_rows_stay_hidden.py).
+_NOT_TRACKED = " AND " + _structures.not_tracked_sql("s.")
 OPEN, CLOSE = ("08:30", "08:45"), ("14:45", "15:00")
 
 
@@ -41,7 +51,7 @@ def load(db, scanner_type=None, hourly=False):
             "s.first_seen_ts, o.close_ts, o.exit_value, o.exit_reason "
             "FROM signals s JOIN signal_outcomes o USING(signal_id) "
             "WHERE s.strategy IN ('PCS','CCS','IC') AND s.legs_json IS NULL "
-            "AND o.exit_value IS NOT NULL"):
+            "AND o.exit_value IS NOT NULL" + _NOT_TRACKED):
         if (r["exit_reason"] or "").upper().startswith("MANUAL"):
             continue
         if scanner_type and r["scanner_type"] != scanner_type:
