@@ -190,6 +190,9 @@ DATA_TREES = (
     "portfolio-analyzer/data",
     "shared/data",
     "services/trade_svc/data",
+    # The Opening Scalp, alert record and live-order stores (taken by the online
+    # backup, like every *.db) and Model Health's daily reports as plain files.
+    "services/options_svc/data",
     "services/news_svc/data",
     # The site Blog's source of truth: blog.db (taken by the online backup
     # below, like every *.db) AND, as plain files, every published entry's

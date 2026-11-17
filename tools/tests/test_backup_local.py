@@ -40,6 +40,7 @@ def test_the_data_trees_are_swept_not_listed():
     "sentiment-dashboard/data",
     "trade-analyzer/data",         # the swing model artifact
     "services/trade_svc/data",
+    "services/options_svc/data",  # Model Health reports
     "shared/data",
     "schwab-proxy/data",
     "config/local",                # Settings -> Configuration overrides
