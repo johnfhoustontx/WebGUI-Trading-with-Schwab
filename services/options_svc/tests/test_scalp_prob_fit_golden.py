@@ -2,14 +2,19 @@
 
 Written on 2026-11-14 against the fit as it stood before its general parts moved
 to ``shared/ml`` (design 2026-11-14-ml-foundation). The digest covers every field
-of every model and of the walk-forward result, at full float precision, so a
-change in the last bit of any number fails here. It must never be regenerated to
-make a change pass: a moved digest means the model's numbers moved.
+of every model and of the walk-forward result, at full float precision. Those
+values are in ``fixtures/scalp_prob_fit_golden.json``, which must hash to the
+digest. The fit is compared with them number by number, floats within a relative
+1e-9: Linux computes a last bit or two differently from Windows, where they were
+frozen (changed 2026-11-17; the bit-exact digest had failed every CI run since).
+Neither the digest nor the fixture may ever be regenerated to make a change pass:
+a moved number means the model's numbers moved.
 """
 import datetime as dt
 import hashlib
 import json
 import math
+import pathlib
 import random
 
 from services.options_svc import scalp_prob_fit
@@ -82,12 +87,74 @@ def _digest(obj):
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+FIXTURE = pathlib.Path(__file__).parent / "fixtures" / "scalp_prob_fit_golden.json"
+
+# How far a float may sit from its frozen value. Linux CI computes the same fit
+# one or two units in the last place away from Windows, where the values were
+# frozen: slope_5 came out 1.0686659253922846 against 1.0686659253922843, a
+# relative 3e-16. A change to the model moves a number by far more than 1e-9;
+# the gap between platforms never comes near it.
+REL_TOL = 1e-9
+ABS_TOL = 1e-12
+
+
+def _frozen():
+    with FIXTURE.open(encoding="utf-8") as f:
+        return json.load(f)
+
+
+def _close(got, want, path="$"):
+    """Every key, every type and every non-float exactly; floats within
+    ``REL_TOL``. Returns the paths that differ, so a failure says where."""
+    if isinstance(want, dict):
+        if not isinstance(got, dict) or set(got) != set(want):
+            return [f"{path}: keys {sorted(got) if isinstance(got, dict) else got!r}"
+                    f" != {sorted(want)}"]
+        return [p for k in sorted(want) for p in _close(got[k], want[k], f"{path}.{k}")]
+    if isinstance(want, list):
+        if not isinstance(got, (list, tuple)) or len(got) != len(want):
+            return [f"{path}: {got!r} != {want!r}"]
+        return [p for i, (g, w) in enumerate(zip(got, want))
+                for p in _close(g, w, f"{path}[{i}]")]
+    if isinstance(want, float) and isinstance(got, float):
+        ok = math.isclose(got, want, rel_tol=REL_TOL, abs_tol=ABS_TOL)
+        return [] if ok else [f"{path}: {got!r} != {want!r}"]
+    if type(got) is not type(want) or got != want:
+        return [f"{path}: {got!r} != {want!r}"]
+    return []
+
+
+def test_the_fixture_is_the_frozen_values():
+    """The fixture hashes to the digest frozen on 2026-11-14, so it holds those
+    values to the last bit. A regenerated fixture fails here."""
+    assert _digest(_frozen()) == FROZEN_DIGEST
+
+
 def test_fit_and_walk_forward_match_frozen_values():
     got = _canonical()
     assert got["walk_forward"]["weeks"] > 0          # the check really scored weeks
     assert got["long_with"]["n_days"] == 90
     # Three values in the open, so a failure says roughly where it moved.
     assert got["walk_forward"]["weeks"] == 11
-    assert got["walk_forward"]["brier"] == 0.2256348751973896
-    assert got["long_with"]["weights"]["slope_5"] == 1.0686659253922843
-    assert _digest(got) == FROZEN_DIGEST
+    assert math.isclose(got["walk_forward"]["brier"], 0.2256348751973896,
+                        rel_tol=REL_TOL)
+    assert math.isclose(got["long_with"]["weights"]["slope_5"], 1.0686659253922843,
+                        rel_tol=REL_TOL)
+    diffs = _close(json.loads(json.dumps(got)), _frozen())
+    assert not diffs, "moved from the frozen values:\n" + "\n".join(diffs[:20])
+
+
+def test_the_comparison_catches_a_moved_number():
+    """A partner for the tolerance: a number moved by a real amount, a missing
+    key and a changed integer are all caught."""
+    want = _frozen()
+    moved = json.loads(json.dumps(want))
+    moved["long_with"]["weights"]["slope_5"] *= 1 + 1e-6
+    assert _close(moved, want)
+    gone = json.loads(json.dumps(want))
+    del gone["walk_forward"]["brier"]
+    assert _close(gone, want)
+    days = json.loads(json.dumps(want))
+    days["long_with"]["n_days"] += 1
+    assert _close(days, want)
+    assert _close(json.loads(json.dumps(want)), want) == []
