@@ -24,6 +24,8 @@ Plain-English definitions of the terms you'll run into trading and analyzing opt
 
 **Futures option** — An option whose underlying is a futures contract, not shares. Its multiplier is the future's dollars a point: $50 a point for /ES and $20 for /NQ (the E-mini sizes), not 100. Each series names the future it is written on (for example `/ESZ26`) and its own expiry.
 
+**Front month and the roll (futures)** — Index futures expire four times a year, and each contract is named by a letter for its month: H (March), M (June), U (September), Z (December), then the year. The *front month* is the nearest one, which is where nearly all the trading is. Traders *roll* to the next contract shortly before the front one expires. The Market Dashboard's Index Futures tiles (/ES, /NQ, /YM, /RTY) always show the front month, written like `/ES[Z26]`, and move to the next contract 8 days before expiry. /YM is the E-mini Dow ($5 a point) and /RTY the E-mini Russell 2000 ($50 a point).
+
 **Long / Short** — Long means you bought it. Short means you sold it (and owe something). "Long puts" and "short calls" are very different positions even though both are bearish.
 
 **Writing** — Selling an option you don't already own. Same thing as going short the option.
@@ -59,6 +61,8 @@ Plain-English definitions of the terms you'll run into trading and analyzing opt
 **Open interest (OI)** — How many contracts are currently alive at that strike. Builds up over time. Tells you where positions actually exist.
 
 **Volume** — How many contracts traded *today*. Volume is activity; open interest is accumulated positioning.
+
+**Relative volume** — Today's volume compared with what is usual *by this time of day*, so a quiet morning is not compared with a whole session. The Market read's Volume row compares SPY's and QQQ's five-minute bars with the median of the last nine sessions at the same time. Measured over 149 sessions, heavy volume went with a wider range for the rest of the day but did not predict its direction, so the app says how much is trading, not which way the market will go.
 
 **Expiration cycle** — Which expirations are listed. Weeklies expire every Friday, monthlies on the third Friday, quarterlies at quarter end. Big names now list Mon/Wed/Fri or daily.
 
@@ -196,6 +200,8 @@ The greeks measure how an option's price reacts to different things changing.
 
 **Dispersion** — The relationship between index volatility and the volatility of its components. Index vol is suppressed by diversification, so selling index vol against buying single-name vol is a common institutional trade. When correlation spikes, dispersion trades hurt.
 
+**Dispersion index (DSPX)** — Cboe's S&P 500 Dispersion Index: how far apart the market expects the index's stocks to move over the next 30 days, read from index and single-stock option prices. High means stocks are expected to go their own ways; low means they are expected to move together. The app shows it in the Macro Board's Volatility frame and at the end of the Market read's Volatility row, for reference only: no link between dispersion and the session has been measured, so no rule uses it.
+
 **Correlation (implied)** — Backed out from index vol versus component vols. Rises toward 1 in selloffs, which is exactly when diversification stops helping.
 
 **Volatility arbitrage** — Trading the gap between implied and expected realized volatility while hedging away direction. The purest expression is a delta-hedged straddle.
@@ -284,6 +290,8 @@ These describe what market makers are forced to do to stay hedged, and why that 
 
 **Gamma flip level (zero gamma)** — The price where aggregate dealer gamma crosses from positive to negative. Behavior of the tape often changes character at this level.
 
+**Cumulative gamma flip** — A way of finding the flip by adding up net gamma strike by strike from the lowest strike upward and taking the price where that running total changes sign (the crossing nearest the price, within 3%). It moves less than reading each strike on its own when net gamma near the price is small and keeps changing sign. The app uses it for /ES and /NQ, where the per-strike reading jumped from capture to capture; every other symbol uses the per-strike rule.
+
 **Call wall** — The strike above spot with the largest concentration of call gamma or open interest. Often acts as resistance while dealers are long gamma.
 
 **Put wall** — The equivalent below spot. Often acts as support, and a break below it can accelerate.
@@ -300,7 +308,7 @@ These describe what market makers are forced to do to stay hedged, and why that 
 
 **Max pain** — The strike where the largest dollar amount of options would expire worthless. Some traders treat it as a magnet into expiration; the evidence is mixed.
 
-**Put/call ratio** — Put volume or open interest divided by call. A crude sentiment gauge; high readings suggest fear.
+**Put/call ratio** — Put volume or open interest divided by call. A crude sentiment gauge; high readings suggest fear. The Open Interest tab on Dealer Positioning shows the open-interest ratio for the expiry you pick and for the whole chain, beside the calls / puts split.
 
 **Sweep** — An aggressive order split across multiple exchanges to fill immediately. Often read as urgent, informed buying.
 
@@ -326,6 +334,10 @@ These describe what market makers are forced to do to stay hedged, and why that 
 
 **Hedging window** — The recurring times when mechanical hedging concentrates: the open, the 3:30–4:00 close, Thursday/Friday charm decay, and monthly OPEX.
 
+**Flow alerts** — The app's six kinds of unusual-options alert, named on the Flow page by what happened. **Unusual volume**: one contract traded far above its open interest. **Outsized bet**: one contract holds an outsized share of the symbol's directional exposure. **Premium shift**: call premium overtook put premium, or the reverse. **Hedging flip**: the price crossed the gamma flip. **Hedging surge** and **Hedging reversal**: see *HIRO / hedging flow*. Every alert is now written to a permanent record when it fires, which is what *Alert quality* scores. Model Health's Alert quality table uses older names for the same six: Unusual activity, Big delta, Premium crossover, Gamma flip, HIRO surge and HIRO flip.
+
+**No Greeks (−999)** — Schwab marks a gamma, delta or volatility it did not compute as −999. The app treats that as *no reading*, never as a number. When a whole chain arrives that way, Dealer Positioning says so in a sentence in place of the strike bars and draws no walls or flip, and a wall from a chain with no gamma is not trusted anywhere else. It has happened before the open, with bid and ask also frozen at the previous close.
+
 ---
 
 ## 7. Orders, Execution, and Risk
@@ -342,7 +354,17 @@ These describe what market makers are forced to do to stay hedged, and why that 
 
 **Stop order** — An order that turns into a market order once the price reaches its activation (stop) price. It protects against a larger loss, but the fill can be well past the stop in a fast or thin market.
 
-**Trailing stop** — A stop that sits a set amount or percentage from the current price and follows it when the price moves your way, but never moves back. The app's copied ThinkorSwim order uses one by default (`TRSTP`, a percentage of the mark).
+**Trailing stop** — A stop that sits a set amount or percentage from the current price and follows it when the price moves your way, but never moves back. The app's copied ThinkorSwim order uses one by default (`TRSTP`, a percentage of the mark). The paper books' *profit trail* is the same idea applied to a position's profit.
+
+**Time in force (DAY / GTC)** — How long an unfilled order stays working. A DAY order is cancelled at the close if it has not filled; a GTC (good till cancelled) order stays until it fills or you cancel it. In the copied ThinkorSwim order the opening order is DAY and the profit target and stop are GTC, so the exits keep working on later days.
+
+**Bracket order (OCO)** — An opening order sent with a profit target and a stop attached. Neither exit works until the opening order fills, and when one exit fills the other is cancelled (OCO, *one cancels other*). Schwab's interface for programs refuses a stop on any spread, so a live spread from the app goes in as opening plus target, and you set its stop in ThinkorSwim; a single option can carry both.
+
+**Order preview** — Asking the broker to check an order (prices, your account's approval level, buying power) without placing it. Every live order in the app is previewed first, and only that previewed, unexpired, unchanged order can then be sent, once, during the regular session.
+
+**Working order** — An order the broker has accepted that has not yet filled or finished. Only a working order can be cancelled; the app's **Cancel order** acts only on an order the app itself sent, and only while Schwab still says it can be cancelled. A filled order's exits stay in ThinkorSwim.
+
+**Sizing by risk budget** — Choosing the number of contracts from how much you are willing to lose, not from a fixed count: the most contracts whose combined max loss stays inside the budget. The live-order ticket starts at the most contracts that risk $1,000 or less (1 when a single contract risks more), allows up to 50 contracts and $5,000 with a warning colour, and the Paper Ledger books trade ideas and the daily SPY condor at that same size.
 
 **Multi-leg / combo order** — Sending a spread as a single order so all legs fill together at a net price.
 
@@ -359,6 +381,24 @@ These describe what market makers are forced to do to stay hedged, and why that 
 **Break-even** — The underlying price where the trade makes nothing. For a long call it's strike + premium; for a long put it's strike − premium.
 
 **Max profit / max loss** — The best and worst outcomes at expiration. Every defined-risk structure has both; naked shorts do not.
+
+**Take-profit (target)** — Closing a winner once it has made a set share of what it could make. For a credit trade the app's target is +50% of the credit collected; captured signals and your own Ledger credit trades close there, and the paper Account does too unless its break-even lifecycle switch is on. A trade bought for a debit takes profit at +70% in the live order and the copied ThinkorSwim order.
+
+**Loss stop** — Closing a loser once the loss reaches a set size. For a credit trade the app's stop is a loss of twice the credit (a $1.00 credit is closed when buying it back would cost $3.00). Your own Ledger trades have no automatic loss stop: you cut those yourself.
+
+**Break-even stop** — A stop moved up to the entry price, so a trade that was winning cannot turn into a loss. In the app it is *armed* when a trade first reaches its target (only in a book set to keep riding instead of closing there) and closes the trade if its profit falls back to the round-trip commissions.
+
+**Profit trail** — The paper books' trailing stop on profit. Once a trade's best profit reaches 25% of its credit (or of the debit paid), it is closed if it gives back 10% of that amount from its best, and never below break-even plus commissions. It runs in Captured Signals, the paper Account and the Paper Ledger. Measured on 388 closed captures, the +50% take-profit did almost all the work; the trail added about $1 a trade.
+
+**Time stop** — Closing a losing trade because too little time is left for it to recover: in the app, when 2 or fewer days remain and the trade is underwater. A captured signal is not time-stopped in its first 30 minutes, because a fresh spread is underwater by its bid-ask spread alone.
+
+**Delta stop** — Closing a short option spread when its short leg's delta has grown too large, a sign the price is moving toward the strike: in the app, when the short delta grows by 0.12 or more from where it started, or reaches 0.45 at all. A trade with room left to recover can have this stop put off.
+
+**Quiet windows** — 08:30–08:45 and 14:45–15:00 Central, when the app's break-even stop and profit trail wait. Option quotes there are wide: on past data most break-even stops that fired there booked a loss while the stock had barely moved, and half of those drops had recovered by the next mark. The loss, time and delta stops still fire inside them.
+
+**Stop and Target (columns)** — On the Paper Ledger, Captured Signals and the paper Account: the P&L, for the whole position, at which the rules would close it right now. **Stop rule** says which stop is in force (Loss stop, Break-even, Trailing, or an idea's own stop), and the stop rises as the trade gains. Time and delta stops are not P&L levels, so they are not shown there.
+
+**ADR / OTC line** — An ADR (American depositary receipt) is a US-listed certificate for shares of a foreign company; an OTC line trades over the counter rather than on an exchange. The Macro Board's fund-holdings card uses one of these for a foreign holding. A thinly traded line can sit idle for days and still report a large "move", so a line that has not traded for four days (96 hours) shows its price with its last trade date, and one with no trade on record shows no price.
 
 **P&L attribution** — Breaking down a trade's gain or loss into how much came from direction (delta), from movement (gamma), from time (theta), and from vol (vega). Tells you whether you were right for the reason you thought.
 
@@ -447,6 +487,28 @@ Relevant if you're calculating any of this yourself rather than reading it off a
 **RSI (relative strength index)** — A momentum reading from 0 to 100 built from the average size of recent up closes against down closes (here 14 bars, Wilder's smoothing). Above 50 means recent moves have been mostly up, below 50 mostly down; near 100 or 0 is stretched. The chance of target uses its distance from 50, read for the call's direction, on 5-minute, 15-minute and hourly bars.
 
 **Breadth** — How many names in a group are doing the same thing. In the Opening Scalp's price reading it is the share of the ten big stocks, among those that moved over the last 15 minutes, that moved the same way as the call; a stock that barely moved is left out rather than counted against it. High breadth means the move is broad, not one stock's.
+
+**In sample / out of sample** — A model is *in sample* on the data it was fitted to and *out of sample* on data it never saw. Almost every model looks good in sample; only out-of-sample results say whether it learned something real. *Walk-forward* testing is the standard way of getting them.
+
+**Shadow (model or rule)** — Something the app runs and scores without letting it change anything, so it can earn a track record before anyone relies on it. Model Health's Range forecast, Exit chance and Alert quality are shadow scores, and the *shadow trade ideas* are picked after every scan and booked in the Paper Ledger but never posted.
+
+**Confidence interval (95%)** — The range a measured figure would likely fall in if the measurement were repeated, shown on Model Health as *Difference (95%)*. The app builds it by resampling whole trading days, because results on the same day move together, and treating them as independent would make the range look narrower than it is.
+
+**Model Health verdict** — How the More → Model Health page judges a model against its yardstick (usually the *base rate*, which the page calls the usual rate). **Beats**: the whole 95% interval of the difference in error is in the model's favour. **Does not beat**: the whole interval is against it. **Matches**: the interval includes zero, so no difference has been shown either way. **Too few days** (for example *16 of 20*): not enough scored days yet for any verdict. The page only reports: no verdict changes a chance, a rule or another page.
+
+**Calibration** — Whether stated chances come true as often as they say: of all the trades given 60%, about 60% should win. Model Health's *Said against happened* lines show it bucket by bucket. A model can rank trades well and still be badly calibrated, or the reverse.
+
+**Drift** — A change in the inputs a model sees compared with the data it was fitted on, such as a volatility level it has rarely met. A model can stay correct and still be working outside what it learned. Model Health's *Inputs* column says **Steady**, or names the inputs that **moved** or **shifted**, and only flags a change when shuffling whole sessions shows it is unlikely to be chance.
+
+**Permutation test** — A check of whether a difference between two groups could be luck: shuffle the group labels many times and count how often the shuffled data shows a difference as large as the real one. That share is the *p-value*; the Opening Scalp's gamma regime study uses 10,000 shuffles and needs it below 0.05, on 40 sessions decided before any result was looked at.
+
+**Percentile forecast and pinball loss** — A forecast given as a range rather than one number: the 10th percentile is a value the outcome should fall below one time in ten, the 50th is the middle, the 90th one it should stay under nine times in ten. *Pinball loss* scores each percentile by how far the outcome landed from it, with misses on the unlikely side costing more (for the 90th percentile, an outcome above it costs nine times as much as one below). *Coverage* is the share of outcomes that landed between the 10th and 90th percentiles, which should be about 80%.
+
+**Range forecast** — A shadow forecast on Model Health of how far SPY, QQQ and $SPX still travel (high minus low) over the next 30 minutes, 60 minutes and the rest of the session, made every 15 minutes from bars already closed, as 10th, 50th and 90th percentiles. It is scored against recent realised volatility and against the implied move from the volatility index.
+
+**Exit chance** — A shadow estimate, made at every mark of a captured credit signal, of its chance of still reaching its profit target before its own stops close it. It is scored against a simpler yardstick, the rate by how far the trade had already travelled toward the target.
+
+**Alert quality** — Model Health's score for each flow alert type: how often the half hour after an alert ran wider than that symbol's usual range at that time of day, against the same symbol's other half hours the same day (so a busy day lifts both). Above zero means an alert was followed by a wider range more often than other times were. It measures whether things got bigger, not which way they went.
 
 ---
 

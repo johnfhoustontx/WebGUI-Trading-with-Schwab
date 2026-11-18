@@ -67,7 +67,7 @@
 
   <div class="ns-wrap gl-wrap">
     <header class="gl-head">
-      <span class="ns-eyebrow">Options glossary · <span class="ns-count">204 terms</span></span>
+      <span class="ns-eyebrow">Options glossary · <span class="ns-count">235 terms</span></span>
       <h1 class="ns-h2">The words, in plain English.</h1>
       <p class="ns-body">Every term the app puts on screen, defined without the jargon:
         from what a contract is, to what dealer gamma means and why it moves price.
@@ -110,6 +110,8 @@
           <dd>Whatever the option is written on: a stock, an ETF, an index, a futures contract.</dd>
           <dt>Futures option</dt>
           <dd>An option whose underlying is a futures contract, not shares. Its multiplier is the future&#x27;s dollars a point: $50 a point for /ES and $20 for /NQ (the E-mini sizes), not 100. Each series names the future it is written on (for example `/ESZ26`) and its own expiry.</dd>
+          <dt>Front month and the roll (futures)</dt>
+          <dd>Index futures expire four times a year, and each contract is named by a letter for its month: H (March), M (June), U (September), Z (December), then the year. The <em>front month</em> is the nearest one, which is where nearly all the trading is. Traders <em>roll</em> to the next contract shortly before the front one expires. The Market Dashboard&#x27;s Index Futures tiles (/ES, /NQ, /YM, /RTY) always show the front month, written like `/ES[Z26]`, and move to the next contract 8 days before expiry. /YM is the E-mini Dow ($5 a point) and /RTY the E-mini Russell 2000 ($50 a point).</dd>
           <dt>Long / Short</dt>
           <dd>Long means you bought it. Short means you sold it (and owe something). &quot;Long puts&quot; and &quot;short calls&quot; are very different positions even though both are bearish.</dd>
           <dt>Writing</dt>
@@ -147,6 +149,8 @@
           <dd>How many contracts are currently alive at that strike. Builds up over time. Tells you where positions actually exist.</dd>
           <dt>Volume</dt>
           <dd>How many contracts traded <em>today</em>. Volume is activity; open interest is accumulated positioning.</dd>
+          <dt>Relative volume</dt>
+          <dd>Today&#x27;s volume compared with what is usual <em>by this time of day</em>, so a quiet morning is not compared with a whole session. The Market read&#x27;s Volume row compares SPY&#x27;s and QQQ&#x27;s five-minute bars with the median of the last nine sessions at the same time. Measured over 149 sessions, heavy volume went with a wider range for the rest of the day but did not predict its direction, so the app says how much is trading, not which way the market will go.</dd>
           <dt>Expiration cycle</dt>
           <dd>Which expirations are listed. Weeklies expire every Friday, monthlies on the third Friday, quarterlies at quarter end. Big names now list Mon/Wed/Fri or daily.</dd>
           <dt>0DTE</dt>
@@ -284,6 +288,8 @@
           <dd>CBOE&#x27;s measure of how much the market is paying for far OTM SPX puts relative to a normal distribution. High readings mean tail hedges are in demand.</dd>
           <dt>Dispersion</dt>
           <dd>The relationship between index volatility and the volatility of its components. Index vol is suppressed by diversification, so selling index vol against buying single-name vol is a common institutional trade. When correlation spikes, dispersion trades hurt.</dd>
+          <dt>Dispersion index (DSPX)</dt>
+          <dd>Cboe&#x27;s S&amp;P 500 Dispersion Index: how far apart the market expects the index&#x27;s stocks to move over the next 30 days, read from index and single-stock option prices. High means stocks are expected to go their own ways; low means they are expected to move together. The app shows it in the Macro Board&#x27;s Volatility frame and at the end of the Market read&#x27;s Volatility row, for reference only: no link between dispersion and the session has been measured, so no rule uses it.</dd>
           <dt>Correlation (implied)</dt>
           <dd>Backed out from index vol versus component vols. Rises toward 1 in selloffs, which is exactly when diversification stops helping.</dd>
           <dt>Volatility arbitrage</dt>
@@ -373,6 +379,8 @@
           <dd>Dealers are net short gamma, so they must buy as price rises and sell as it falls. This amplifies moves. Trend days, air pockets, and violent selloffs live here.</dd>
           <dt>Gamma flip level (zero gamma)</dt>
           <dd>The price where aggregate dealer gamma crosses from positive to negative. Behavior of the tape often changes character at this level.</dd>
+          <dt>Cumulative gamma flip</dt>
+          <dd>A way of finding the flip by adding up net gamma strike by strike from the lowest strike upward and taking the price where that running total changes sign (the crossing nearest the price, within 3%). It moves less than reading each strike on its own when net gamma near the price is small and keeps changing sign. The app uses it for /ES and /NQ, where the per-strike reading jumped from capture to capture; every other symbol uses the per-strike rule.</dd>
           <dt>Call wall</dt>
           <dd>The strike above spot with the largest concentration of call gamma or open interest. Often acts as resistance while dealers are long gamma.</dd>
           <dt>Put wall</dt>
@@ -390,7 +398,7 @@
           <dt>Max pain</dt>
           <dd>The strike where the largest dollar amount of options would expire worthless. Some traders treat it as a magnet into expiration; the evidence is mixed.</dd>
           <dt>Put/call ratio</dt>
-          <dd>Put volume or open interest divided by call. A crude sentiment gauge; high readings suggest fear.</dd>
+          <dd>Put volume or open interest divided by call. A crude sentiment gauge; high readings suggest fear. The Open Interest tab on Dealer Positioning shows the open-interest ratio for the expiry you pick and for the whole chain, beside the calls / puts split.</dd>
           <dt>Sweep</dt>
           <dd>An aggressive order split across multiple exchanges to fill immediately. Often read as urgent, informed buying.</dd>
           <dt>Block trade</dt>
@@ -415,6 +423,10 @@
           <dd>The stock dealers have to buy or sell, right now, to stay hedged against the options customers are trading: a customer buying calls makes a dealer buy stock, a customer buying puts makes a dealer sell it. Added up minute by minute it shows which way hedging is pushing price. HIRO is SpotGamma&#x27;s name for its own measure built from every trade on the tape. This app&#x27;s *<em>Hedging surge</em><em> and </em><em>Hedging reversal</em><em> alerts use a home-built </em>model<em> of the same idea: Schwab publishes no tape, so each contract&#x27;s trades are labelled bought or sold once a minute from where the last price sat against the bid and ask (see </em>trade classification*). Treat it as an estimate, not an observation.</dd>
           <dt>Hedging window</dt>
           <dd>The recurring times when mechanical hedging concentrates: the open, the 3:30–4:00 close, Thursday/Friday charm decay, and monthly OPEX.</dd>
+          <dt>Flow alerts</dt>
+          <dd>The app&#x27;s six kinds of unusual-options alert, named on the Flow page by what happened. *<em>Unusual volume</em><em>: one contract traded far above its open interest. </em><em>Outsized bet</em><em>: one contract holds an outsized share of the symbol&#x27;s directional exposure. </em><em>Premium shift</em><em>: call premium overtook put premium, or the reverse. </em><em>Hedging flip</em><em>: the price crossed the gamma flip. </em><em>Hedging surge</em><em> and </em><em>Hedging reversal</em><em>: see </em>HIRO / hedging flow<em>. Every alert is now written to a permanent record when it fires, which is what </em>Alert quality* scores. Model Health&#x27;s Alert quality table uses older names for the same six: Unusual activity, Big delta, Premium crossover, Gamma flip, HIRO surge and HIRO flip.</dd>
+          <dt>No Greeks (−999)</dt>
+          <dd>Schwab marks a gamma, delta or volatility it did not compute as −999. The app treats that as <em>no reading</em>, never as a number. When a whole chain arrives that way, Dealer Positioning says so in a sentence in place of the strike bars and draws no walls or flip, and a wall from a chain with no gamma is not trusted anywhere else. It has happened before the open, with bid and ask also frozen at the previous close.</dd>
         </dl>
       </section>
       <section class="gl-sec" id="orders-execution-and-risk">
@@ -433,7 +445,17 @@
           <dt>Stop order</dt>
           <dd>An order that turns into a market order once the price reaches its activation (stop) price. It protects against a larger loss, but the fill can be well past the stop in a fast or thin market.</dd>
           <dt>Trailing stop</dt>
-          <dd>A stop that sits a set amount or percentage from the current price and follows it when the price moves your way, but never moves back. The app&#x27;s copied ThinkorSwim order uses one by default (`TRSTP`, a percentage of the mark).</dd>
+          <dd>A stop that sits a set amount or percentage from the current price and follows it when the price moves your way, but never moves back. The app&#x27;s copied ThinkorSwim order uses one by default (`TRSTP`, a percentage of the mark). The paper books&#x27; <em>profit trail</em> is the same idea applied to a position&#x27;s profit.</dd>
+          <dt>Time in force (DAY / GTC)</dt>
+          <dd>How long an unfilled order stays working. A DAY order is cancelled at the close if it has not filled; a GTC (good till cancelled) order stays until it fills or you cancel it. In the copied ThinkorSwim order the opening order is DAY and the profit target and stop are GTC, so the exits keep working on later days.</dd>
+          <dt>Bracket order (OCO)</dt>
+          <dd>An opening order sent with a profit target and a stop attached. Neither exit works until the opening order fills, and when one exit fills the other is cancelled (OCO, <em>one cancels other</em>). Schwab&#x27;s interface for programs refuses a stop on any spread, so a live spread from the app goes in as opening plus target, and you set its stop in ThinkorSwim; a single option can carry both.</dd>
+          <dt>Order preview</dt>
+          <dd>Asking the broker to check an order (prices, your account&#x27;s approval level, buying power) without placing it. Every live order in the app is previewed first, and only that previewed, unexpired, unchanged order can then be sent, once, during the regular session.</dd>
+          <dt>Working order</dt>
+          <dd>An order the broker has accepted that has not yet filled or finished. Only a working order can be cancelled; the app&#x27;s *<em>Cancel order</em>* acts only on an order the app itself sent, and only while Schwab still says it can be cancelled. A filled order&#x27;s exits stay in ThinkorSwim.</dd>
+          <dt>Sizing by risk budget</dt>
+          <dd>Choosing the number of contracts from how much you are willing to lose, not from a fixed count: the most contracts whose combined max loss stays inside the budget. The live-order ticket starts at the most contracts that risk $1,000 or less (1 when a single contract risks more), allows up to 50 contracts and $5,000 with a warning colour, and the Paper Ledger books trade ideas and the daily SPY condor at that same size.</dd>
           <dt>Multi-leg / combo order</dt>
           <dd>Sending a spread as a single order so all legs fill together at a net price.</dd>
           <dt>Legging in</dt>
@@ -450,6 +472,24 @@
           <dd>The underlying price where the trade makes nothing. For a long call it&#x27;s strike + premium; for a long put it&#x27;s strike − premium.</dd>
           <dt>Max profit / max loss</dt>
           <dd>The best and worst outcomes at expiration. Every defined-risk structure has both; naked shorts do not.</dd>
+          <dt>Take-profit (target)</dt>
+          <dd>Closing a winner once it has made a set share of what it could make. For a credit trade the app&#x27;s target is +50% of the credit collected; captured signals and your own Ledger credit trades close there, and the paper Account does too unless its break-even lifecycle switch is on. A trade bought for a debit takes profit at +70% in the live order and the copied ThinkorSwim order.</dd>
+          <dt>Loss stop</dt>
+          <dd>Closing a loser once the loss reaches a set size. For a credit trade the app&#x27;s stop is a loss of twice the credit (a $1.00 credit is closed when buying it back would cost $3.00). Your own Ledger trades have no automatic loss stop: you cut those yourself.</dd>
+          <dt>Break-even stop</dt>
+          <dd>A stop moved up to the entry price, so a trade that was winning cannot turn into a loss. In the app it is <em>armed</em> when a trade first reaches its target (only in a book set to keep riding instead of closing there) and closes the trade if its profit falls back to the round-trip commissions.</dd>
+          <dt>Profit trail</dt>
+          <dd>The paper books&#x27; trailing stop on profit. Once a trade&#x27;s best profit reaches 25% of its credit (or of the debit paid), it is closed if it gives back 10% of that amount from its best, and never below break-even plus commissions. It runs in Captured Signals, the paper Account and the Paper Ledger. Measured on 388 closed captures, the +50% take-profit did almost all the work; the trail added about $1 a trade.</dd>
+          <dt>Time stop</dt>
+          <dd>Closing a losing trade because too little time is left for it to recover: in the app, when 2 or fewer days remain and the trade is underwater. A captured signal is not time-stopped in its first 30 minutes, because a fresh spread is underwater by its bid-ask spread alone.</dd>
+          <dt>Delta stop</dt>
+          <dd>Closing a short option spread when its short leg&#x27;s delta has grown too large, a sign the price is moving toward the strike: in the app, when the short delta grows by 0.12 or more from where it started, or reaches 0.45 at all. A trade with room left to recover can have this stop put off.</dd>
+          <dt>Quiet windows</dt>
+          <dd>08:30–08:45 and 14:45–15:00 Central, when the app&#x27;s break-even stop and profit trail wait. Option quotes there are wide: on past data most break-even stops that fired there booked a loss while the stock had barely moved, and half of those drops had recovered by the next mark. The loss, time and delta stops still fire inside them.</dd>
+          <dt>Stop and Target (columns)</dt>
+          <dd>On the Paper Ledger, Captured Signals and the paper Account: the P&amp;L, for the whole position, at which the rules would close it right now. *<em>Stop rule</em>* says which stop is in force (Loss stop, Break-even, Trailing, or an idea&#x27;s own stop), and the stop rises as the trade gains. Time and delta stops are not P&amp;L levels, so they are not shown there.</dd>
+          <dt>ADR / OTC line</dt>
+          <dd>An ADR (American depositary receipt) is a US-listed certificate for shares of a foreign company; an OTC line trades over the counter rather than on an exchange. The Macro Board&#x27;s fund-holdings card uses one of these for a foreign holding. A thinly traded line can sit idle for days and still report a large &quot;move&quot;, so a line that has not traded for four days (96 hours) shows its price with its last trade date, and one with no trade on record shows no price.</dd>
           <dt>P&amp;L attribution</dt>
           <dd>Breaking down a trade&#x27;s gain or loss into how much came from direction (delta), from movement (gamma), from time (theta), and from vol (vega). Tells you whether you were right for the reason you thought.</dd>
           <dt>Payoff diagram</dt>
@@ -538,6 +578,28 @@
           <dd>A momentum reading from 0 to 100 built from the average size of recent up closes against down closes (here 14 bars, Wilder&#x27;s smoothing). Above 50 means recent moves have been mostly up, below 50 mostly down; near 100 or 0 is stretched. The chance of target uses its distance from 50, read for the call&#x27;s direction, on 5-minute, 15-minute and hourly bars.</dd>
           <dt>Breadth</dt>
           <dd>How many names in a group are doing the same thing. In the Opening Scalp&#x27;s price reading it is the share of the ten big stocks, among those that moved over the last 15 minutes, that moved the same way as the call; a stock that barely moved is left out rather than counted against it. High breadth means the move is broad, not one stock&#x27;s.</dd>
+          <dt>In sample / out of sample</dt>
+          <dd>A model is <em>in sample</em> on the data it was fitted to and <em>out of sample</em> on data it never saw. Almost every model looks good in sample; only out-of-sample results say whether it learned something real. <em>Walk-forward</em> testing is the standard way of getting them.</dd>
+          <dt>Shadow (model or rule)</dt>
+          <dd>Something the app runs and scores without letting it change anything, so it can earn a track record before anyone relies on it. Model Health&#x27;s Range forecast, Exit chance and Alert quality are shadow scores, and the <em>shadow trade ideas</em> are picked after every scan and booked in the Paper Ledger but never posted.</dd>
+          <dt>Confidence interval (95%)</dt>
+          <dd>The range a measured figure would likely fall in if the measurement were repeated, shown on Model Health as <em>Difference (95%)</em>. The app builds it by resampling whole trading days, because results on the same day move together, and treating them as independent would make the range look narrower than it is.</dd>
+          <dt>Model Health verdict</dt>
+          <dd>How the More → Model Health page judges a model against its yardstick (usually the <em>base rate</em>, which the page calls the usual rate). *<em>Beats</em><em>: the whole 95% interval of the difference in error is in the model&#x27;s favour. </em><em>Does not beat</em><em>: the whole interval is against it. </em><em>Matches</em><em>: the interval includes zero, so no difference has been shown either way. </em><em>Too few days</em><em> (for example </em>16 of 20*): not enough scored days yet for any verdict. The page only reports: no verdict changes a chance, a rule or another page.</dd>
+          <dt>Calibration</dt>
+          <dd>Whether stated chances come true as often as they say: of all the trades given 60%, about 60% should win. Model Health&#x27;s <em>Said against happened</em> lines show it bucket by bucket. A model can rank trades well and still be badly calibrated, or the reverse.</dd>
+          <dt>Drift</dt>
+          <dd>A change in the inputs a model sees compared with the data it was fitted on, such as a volatility level it has rarely met. A model can stay correct and still be working outside what it learned. Model Health&#x27;s <em>Inputs</em> column says *<em>Steady</em><em>, or names the inputs that </em><em>moved</em><em> or </em><em>shifted</em>*, and only flags a change when shuffling whole sessions shows it is unlikely to be chance.</dd>
+          <dt>Permutation test</dt>
+          <dd>A check of whether a difference between two groups could be luck: shuffle the group labels many times and count how often the shuffled data shows a difference as large as the real one. That share is the <em>p-value</em>; the Opening Scalp&#x27;s gamma regime study uses 10,000 shuffles and needs it below 0.05, on 40 sessions decided before any result was looked at.</dd>
+          <dt>Percentile forecast and pinball loss</dt>
+          <dd>A forecast given as a range rather than one number: the 10th percentile is a value the outcome should fall below one time in ten, the 50th is the middle, the 90th one it should stay under nine times in ten. <em>Pinball loss</em> scores each percentile by how far the outcome landed from it, with misses on the unlikely side costing more (for the 90th percentile, an outcome above it costs nine times as much as one below). <em>Coverage</em> is the share of outcomes that landed between the 10th and 90th percentiles, which should be about 80%.</dd>
+          <dt>Range forecast</dt>
+          <dd>A shadow forecast on Model Health of how far SPY, QQQ and $SPX still travel (high minus low) over the next 30 minutes, 60 minutes and the rest of the session, made every 15 minutes from bars already closed, as 10th, 50th and 90th percentiles. It is scored against recent realised volatility and against the implied move from the volatility index.</dd>
+          <dt>Exit chance</dt>
+          <dd>A shadow estimate, made at every mark of a captured credit signal, of its chance of still reaching its profit target before its own stops close it. It is scored against a simpler yardstick, the rate by how far the trade had already travelled toward the target.</dd>
+          <dt>Alert quality</dt>
+          <dd>Model Health&#x27;s score for each flow alert type: how often the half hour after an alert ran wider than that symbol&#x27;s usual range at that time of day, against the same symbol&#x27;s other half hours the same day (so a busy day lifts both). Above zero means an alert was followed by a wider range more often than other times were. It measures whether things got bigger, not which way they went.</dd>
         </dl>
       </section>
       <section class="gl-sec" id="quick-reference">

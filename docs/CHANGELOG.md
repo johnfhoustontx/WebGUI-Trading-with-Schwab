@@ -4,7 +4,26 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-18 (**Visitor IP log for neuralstrike.co and live.neuralstrike.co.**)
+**Last updated:** 2026-11-18 (**The Options Glossary catches up with the last month: 31 new terms.**)
+
+- **What.** `docs/manuals/glossary/glossary.md` gains the vocabulary the app took on
+  from 2026-10-18 to 2026-11-17, 204 terms to 235: the paper books' exits (take-profit,
+  loss stop, break-even stop, profit trail, time stop, delta stop, quiet windows, the
+  Stop and Target columns), live orders (time in force, bracket / OCO, order preview,
+  working order, sizing by risk budget), Model Health (in / out of sample, shadow,
+  confidence interval, verdict, calibration, drift, permutation test, percentile
+  forecast and pinball loss, range forecast, exit chance, alert quality), and the
+  market screens (front month and roll, relative volume, DSPX, cumulative gamma flip,
+  the six flow alerts, no Greeks, ADR / OTC line). The put / call ratio and trailing
+  stop entries point at where the app shows them.
+- **Built.** The site page (`tools/generate_glossary_page.py`) and the in-app manual
+  (`build_docs.py glossary`).
+- **Seen on the way.** Model Health names all six flow alerts differently from the Flow
+  page (Unusual activity / Unusual volume, Big delta / Outsized bet, Premium crossover /
+  Premium shift, Gamma flip / Hedging flip, and HIRO surge / flip against Hedging surge /
+  reversal). The glossary gives both; the page labels are unchanged.
+
+**Prior —** 2026-11-18 (**Visitor IP log for neuralstrike.co and live.neuralstrike.co.**)
 
 - **Edge.** The generated Caddyfile gains a `log` block on the two public hosts
   (`deploy/caddy/generate_caddyfile.py`, `_access_log_lines`): JSON, one file per
