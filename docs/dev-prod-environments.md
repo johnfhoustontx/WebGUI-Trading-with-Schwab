@@ -836,6 +836,36 @@ flipping through all 21 in a minute, is under the default.
 step 2, then `sudo update-alternatives --set caddy /usr/bin/caddy.default &&
 sudo systemctl restart caddy`.
 
+### Visitor log (neuralstrike.co and live.)
+
+Caddy writes one JSON line per request to **neuralstrike.co** (and www.) and
+**live.neuralstrike.co**: the visitor's IP address, the time, the page, the
+answer, the referrer and the browser's own description. Nothing sits in front of
+the edge, so the address is the visitor's own. **app.neuralstrike.co is never
+logged.** On the live host NiceGUI's assets and live connection are left out, so
+a visit reads as its pages.
+
+- Files: `/var/log/caddy/site.log` and `live.log` (0644, readable without sudo).
+  A new file starts each day; rolled files are gzipped and deleted after 90 days.
+- Settings: `config/edge.toml [access_log]` (Settings → Configuration → Public
+  edge limits → Visitor log): on/off, folder, days kept, size of a busy day.
+- Applying a change, or turning it on the first time: regenerate and reload, as
+  root, exactly as in step 2 above. No rate-limit build is needed for this.
+
+Reading it, on the box from the repo root:
+
+```bash
+.venv/bin/python tools/visitor_log.py
+```
+
+`--days 7` widens the window (`0` = everything kept), `--host site|live`,
+`--ip <address>` lists one visitor's requests, `--requests` one line per request,
+`--csv > visitors.csv` for a spreadsheet. Times print in Central.
+
+⚠ The log lives in `/var/log`, outside the checkout, so the nightly backup does
+not carry it. IP addresses count as personal data under some laws (the EU's
+GDPR among them); the 90-day age-out is why.
+
 ## 9. Gotchas
 
 - **Dev's Terminate stops only dev**, structurally rather than by a filter:

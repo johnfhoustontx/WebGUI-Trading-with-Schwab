@@ -31,3 +31,20 @@ window_sec = 60
 # IPv6 visitors are grouped by this many prefix bits: one client can rotate
 # through a whole /64, so per-address counting would be no limit at all.
 ipv6_prefix = 64
+
+[access_log]
+# The visitor log: one line per request to neuralstrike.co (and www.) and to
+# live.neuralstrike.co, with the visitor's IP address, the time, the page, the
+# answer and the browser's own description of itself. Two files under `dir`,
+# site.log and live.log, in JSON. app.neuralstrike.co is never logged here.
+# Read them with tools/visitor_log.py on the box.
+#
+# IP addresses count as personal data in some places (the EU's GDPR among
+# them), which is why old entries age out rather than pile up.
+enabled = true
+# Caddy's own log folder on this box. Must be an absolute path Caddy can write.
+dir = "/var/log/caddy"
+# A new file starts every day; files older than this are deleted.
+keep_days = 90
+# A day busier than this many megabytes starts a second file that day.
+roll_size_mb = 50

@@ -1582,11 +1582,12 @@ _SCALP = ConfigFile(
 _EDGE = ConfigFile(
     name="edge.toml", title="Public edge limits", icon="speed",
     summary="How many pages one visitor may load on the public site per window, "
-            "and the largest sign-in request the edge passes on.",
+            "the largest sign-in request the edge passes on, and the visitor "
+            "log.",
     restart=(),
-    caution="Needs a Caddy built with the rate-limit module. Saving here changes "
-            "nothing until the Caddyfile is regenerated and Caddy reloaded, as "
-            "root - see the runbook's Edge rate limit section.",
+    caution="The page-load limit needs a Caddy built with the rate-limit module. "
+            "Saving here changes nothing until the Caddyfile is regenerated and "
+            "Caddy reloaded, as root - see the runbook's Edge rate limit section.",
     sections=(
         Section("Sign-in request size", "", (
             Field("limits.login_body_kb", "Largest sign-in request",
@@ -1605,6 +1606,18 @@ _EDGE = ConfigFile(
                   "Prefix bits. One IPv6 visitor can use a whole /64, so smaller "
                   "numbers group more loosely.", kind="int", unit="bits", min=1,
                   max=128, step=1),
+        )),
+        Section("Visitor log", "Every request to neuralstrike.co and "
+                "live.neuralstrike.co, with the visitor's IP address. The app's "
+                "own address is never logged. Read it with tools/visitor_log.py.", (
+            Field("access_log.enabled", "Keep a visitor log", "", kind="bool"),
+            Field("access_log.dir", "Folder", "An absolute folder Caddy can "
+                  "write to.", kind="text"),
+            Field("access_log.keep_days", "Keep for", "A new file starts each "
+                  "day; older files are deleted.", kind="int", unit="days",
+                  min=1, max=3650, step=1),
+            Field("access_log.roll_size_mb", "Start a second file past", "",
+                  kind="int", unit="MB", min=1, max=10240, step=1),
         )),
     ),
 )

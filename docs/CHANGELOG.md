@@ -4,7 +4,25 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-17 (**Market Dashboard: tiles 10% smaller; /YM and /RTY; Metals becomes Commodities with UNG.**)
+**Last updated:** 2026-11-18 (**Visitor IP log for neuralstrike.co and live.neuralstrike.co.**)
+
+- **Edge.** The generated Caddyfile gains a `log` block on the two public hosts
+  (`deploy/caddy/generate_caddyfile.py`, `_access_log_lines`): JSON, one file per
+  host under `config/edge.toml [access_log] dir` (`site.log`, `live.log`), mode
+  0644 so the operator's login can read it, a new file daily, rolled files kept
+  `keep_days` (90). The live host skips NiceGUI's assets and socket
+  (`log_skip`). The app host is not logged. A bad value turns the log off
+  rather than breaking the reload, like the rate limit. Validated with the
+  box's Caddy 2.11.9 (`caddy validate` on the full generated file).
+- **Reader.** `tools/visitor_log.py`: per-IP summary (requests, pages, first and
+  last seen in Central, most-visited page, browser), `--ip`, `--requests`,
+  `--csv`; reads the current and the rolled (gzipped) files.
+- **Settings.** Four fields under Public edge limits → Visitor log.
+- **Runbook.** `docs/dev-prod-environments.md` section 8, "Visitor log".
+- **Tests.** `deploy/caddy/tests/test_caddyfile.py` (visitor-log block),
+  `tools/tests/test_visitor_log.py`.
+
+**Prior —** 2026-11-17 (**Market Dashboard: tiles 10% smaller; /YM and /RTY; Metals becomes Commodities with UNG.**)
 
 - **Tiles.** Every Macro Board tile is 137x86 (was 152x96), at the same font
   sizes: the room came out of the padding (11/9/8 px to 10/7/6) and the line

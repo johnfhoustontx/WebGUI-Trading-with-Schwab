@@ -918,3 +918,88 @@ def test_a_retired_page_redirects_to_its_replacement(cfg):
         assert "*" not in old and old != new
         assert (site / new.lstrip("/")).is_file(), new
         assert not (site / old.lstrip("/")).exists(), f"{old} still exists"
+
+
+# --- the visitor log (config/edge.toml [access_log]) -------------------------
+#
+# One JSON line per request on the two PUBLIC hosts, with the visitor's
+# address. The app host is the operator's own traffic and is never logged here.
+
+def _with_log(monkeypatch, **cfg):
+    monkeypatch.setattr(caddy, "load_edge", lambda: {"access_log": cfg})
+
+
+_LOG_ON = {"enabled": True, "dir": "/var/log/caddy", "keep_days": 90,
+           "roll_size_mb": 50}
+
+
+def test_the_visitor_log_ships_on_and_the_file_matches_the_defaults():
+    import tomllib
+    shipped = tomllib.loads(pathlib.Path(repo_paths.EDGE_TOML).read_text("utf-8"))
+    assert shipped["access_log"] == caddy.EDGE_DEFAULTS["access_log"]
+    assert shipped["access_log"]["enabled"] is True
+
+
+def test_each_public_host_logs_to_its_own_file_and_the_app_does_not_log(monkeypatch):
+    _with_log(monkeypatch, **_LOG_ON)
+    blocks = _blocks(caddy.render())
+    assert "output file /var/log/caddy/site.log {" in blocks[repo_paths.SITE_HOST]
+    assert "output file /var/log/caddy/live.log {" in blocks[repo_paths.LIVE_HOST]
+    assert "log {" not in blocks[repo_paths.APP_HOST]
+    assert "output file" not in blocks[repo_paths.APP_HOST]
+
+
+def test_the_log_is_readable_without_sudo_and_written_as_json(monkeypatch):
+    """Caddy creates its files 0600 as its own user; the operator's login has
+    no passwordless sudo, so a 0600 log is a log nobody can read."""
+    _with_log(monkeypatch, **_LOG_ON)
+    blocks = _blocks(caddy.render())
+    for host in _PUBLIC_HOSTS:
+        assert "mode 0644" in blocks[host], host
+        assert "format json" in blocks[host], host
+
+
+def test_the_log_rolls_daily_and_ages_out_after_keep_days(monkeypatch):
+    _with_log(monkeypatch, **{**_LOG_ON, "keep_days": 30, "roll_size_mb": 20})
+    site = _blocks(caddy.render())[repo_paths.SITE_HOST]
+    assert "roll_interval 24h" in site
+    assert "roll_keep_for 720h" in site
+    assert "roll_size 20MiB" in site
+    # roll_keep is a COUNT that deletes regardless of age: it must never be the
+    # thing that decides, so it sits well above one file a day.
+    keep = int(re.search(r"roll_keep (\d+)\n", site).group(1))
+    assert keep > 30
+
+
+def test_the_live_log_leaves_out_nicegui_assets_and_the_socket(monkeypatch):
+    _with_log(monkeypatch, **_LOG_ON)
+    live = _blocks(caddy.render())[repo_paths.LIVE_HOST]
+    assert "@log_quiet path /_nicegui/* /_nicegui_ws/* /static/* /favicon.ico" in live
+    assert "log_skip @log_quiet" in live
+
+
+def test_off_emits_no_log_anywhere(monkeypatch):
+    _with_log(monkeypatch, **{**_LOG_ON, "enabled": False})
+    text = caddy.render()
+    assert "output file" not in text and "log_skip" not in text
+    assert caddy.access_log_path("site") is None
+
+
+@pytest.mark.parametrize("bad", [
+    {"enabled": "yes"}, {"dir": "var/log/caddy"}, {"dir": "/var/log/my logs"},
+    {"dir": "/var/log/{caddy}"}, {"dir": "/var/log/../../etc"}, {"dir": 5},
+    {"keep_days": 0}, {"keep_days": True}, {"keep_days": "90"},
+    {"roll_size_mb": 0}, {"roll_size_mb": 1.5},
+])
+def test_a_bad_value_turns_the_log_off_rather_than_breaking_the_reload(
+        monkeypatch, bad):
+    _with_log(monkeypatch, **{**_LOG_ON, **bad})
+    assert caddy.access_log() is None
+    assert "output file" not in caddy.render()
+
+
+def test_a_missing_section_falls_back_to_the_shipped_log(monkeypatch):
+    monkeypatch.setattr(caddy, "load_edge", lambda: {})
+    assert caddy.access_log() == {"dir": "/var/log/caddy", "keep_days": 90,
+                                  "roll_size_mb": 50}
+    assert caddy.access_log_path("live") == "/var/log/caddy/live.log"

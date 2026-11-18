@@ -50,6 +50,7 @@ when ``config/edge.toml`` turns the page-load limit on (below; runbook section
 """
 import argparse
 import pathlib
+import re
 import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
@@ -62,7 +63,10 @@ from shared.config_toml import toml_loader  # noqa: E402
 EDGE_DEFAULTS = {"live_rate_limit": {"enabled": False, "events": 30,
                                      "window_sec": 60, "ipv6_prefix": 64},
                  # The largest POST /login body the edge passes on, in KB.
-                 "limits": {"login_body_kb": 16}}
+                 "limits": {"login_body_kb": 16},
+                 # The visitor log on the two public hosts (ACCESS_LOG_FILES).
+                 "access_log": {"enabled": True, "dir": "/var/log/caddy",
+                                "keep_days": 90, "roll_size_mb": 50}}
 load_edge, reset_edge = toml_loader(EDGE_TOML, EDGE_DEFAULTS, label="edge.toml")
 
 # The requests that do NOT count toward the limit: NiceGUI's own versioned
@@ -133,6 +137,15 @@ BLOG_LIST_PAGE = "/blog.html"
 # like the Blog's.
 RETIRED_PAGES = {"/gallery.html": "/live.html"}
 
+# The visitor log: one file per PUBLIC host, under [access_log] dir. The app
+# host is deliberately absent - it is the operator's own traffic, and its
+# sign-ins have no business in a file every local user can read.
+ACCESS_LOG_FILES = {"site": "site.log", "live": "live.log"}
+
+# An absolute POSIX directory spelled with nothing Caddy would read as syntax:
+# the path is emitted as one unquoted token, so no space, quote or brace.
+ACCESS_LOG_DIR_RE = r"^/[A-Za-z0-9._/-]+$"
+
 # Where Caddy reads its config on Debian/Ubuntu when installed from the official
 # repository. Named here rather than buried in main() so the tests can assert
 # the path and moving it is one edit.
@@ -188,6 +201,81 @@ def _rate_limit_lines(rl):
             ipv6_prefix {rl['ipv6_prefix']}
         }}
     }}
+"""
+
+
+def access_log():
+    """The visitor log as ``{dir, keep_days, roll_size_mb}``, or ``None`` when off.
+
+    Like the rate limit, an unusable value turns the log OFF rather than
+    emitting a directive Caddy would reject at reload: a bad reload would take
+    the sites down, a missing log takes nothing down."""
+    cfg = (load_edge() or {}).get("access_log") or {}
+    defaults = EDGE_DEFAULTS["access_log"]
+    if cfg.get("enabled", defaults["enabled"]) is not True:
+        return None
+    d = cfg.get("dir", defaults["dir"])
+    if not isinstance(d, str) or not re.match(ACCESS_LOG_DIR_RE, d) or ".." in d:
+        return None
+    out = {"dir": d.rstrip("/") or "/"}
+    for key, lo, hi in (("keep_days", 1, 3650), ("roll_size_mb", 1, 10240)):
+        v = cfg.get(key, defaults[key])
+        if isinstance(v, bool) or not isinstance(v, int) or not lo <= v <= hi:
+            return None
+        out[key] = v
+    return out
+
+
+def access_log_path(which):
+    """The file one public host logs to (``"site"`` or ``"live"``), or ``None``
+    when the log is off. The reader (tools/visitor_log.py) asks here too, so
+    the writer and the reader cannot name different files."""
+    al = access_log()
+    if al is None:
+        return None
+    return f"{al['dir']}/{ACCESS_LOG_FILES[which]}"
+
+
+def _access_log_lines(which):
+    """The ``log`` block for one public host, or ``""`` when off.
+
+    * ``mode 0644``: Caddy runs as its own user and creates the file 0600 by
+      default, which the operator's login (no passwordless sudo) cannot read.
+      The box is single-user; the file holds visitor addresses, not secrets -
+      Caddy writes Cookie and Authorization as REDACTED unless told otherwise.
+    * A new file every day, and rolled files removed after ``keep_days``. The
+      roll by size is a ceiling for a busy day, not the schedule.
+    * ``roll_keep`` is a COUNT and deletes regardless of age, so it is set
+      well above one file a day for ``keep_days``: the age is what decides.
+    """
+    al = access_log()
+    if al is None:
+        return ""
+    keep = al["keep_days"]
+    return f"""
+    # Visitor log (config/edge.toml [access_log]): one JSON line per request,
+    # with the visitor's address. Nothing sits in front of this edge, so the
+    # address Caddy sees is the visitor's own.
+    log {{
+        output file {access_log_path(which)} {{
+            mode 0644
+            roll_size {al['roll_size_mb']}MiB
+            roll_interval 24h
+            roll_keep {keep * 3}
+            roll_keep_for {keep * 24}h
+        }}
+        format json
+    }}
+"""
+
+
+def _live_log_skip():
+    """Leave NiceGUI's own assets and its live connection out of the visitor
+    log. A page load fetches a dozen of them; the page itself is the visit."""
+    if access_log() is None:
+        return ""
+    return f"""    @log_quiet path {" ".join(RATE_LIMIT_EXEMPT)}
+    log_skip @log_quiet
 """
 
 
@@ -252,7 +340,7 @@ def _public_block():
     retired = "\n".join(f"    redir {path} {to} 308" for path, to in RETIRED_PAGES.items())
     return f"""{SITE_HOST}, www.{SITE_HOST} {{
     encode zstd gzip
-
+{_access_log_lines("site")}
     # STATIC ONLY. This tree is world-readable by definition; see the docstring.
     root * "{_site_root()}"
     file_server
@@ -435,7 +523,7 @@ def _live_block():
     encode zstd gzip
 
     header Strict-Transport-Security "{HSTS}"
-{_rate_limit_lines(live_rate_limit())}
+{_access_log_lines("live")}{_live_log_skip()}{_rate_limit_lines(live_rate_limit())}
     # Public to READ, not to ARCHIVE. Without this the origin 404s here, which
     # crawlers read as crawl-everything -- see the docstring for why that is
     # the one default worth overriding.
