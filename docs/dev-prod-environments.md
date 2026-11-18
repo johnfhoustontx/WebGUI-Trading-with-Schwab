@@ -818,7 +818,7 @@ reload; `caddy validate` failing leaves the running config untouched:
 ```bash
 cd /home/administrator/dev
 sudo .venv/bin/python -m deploy.caddy.generate_caddyfile --install
-sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
+sudo -u caddy caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
 ```
 
 **3. Verify from a workstation.** `robots.txt` is limited like a page but
@@ -851,6 +851,10 @@ a visit reads as its pages.
   edge limits → Visitor log): on/off, folder, days kept, size of a busy day.
 - Applying a change, or turning it on the first time: regenerate and reload, as
   root, exactly as in step 2 above. No rate-limit build is needed for this.
+- ⚠ Validate as the `caddy` user (`sudo -u caddy caddy validate ...`), never
+  as root: validating creates any missing log file, and a root-owned one makes
+  the reload fail with `permission denied` (the sites keep the old config).
+  Fix: `sudo chown caddy:caddy /var/log/caddy/*.log`, then reload.
 
 Reading it, on the box from the repo root:
 
@@ -1126,7 +1130,7 @@ cd /home/administrator/dev && sudo .venv/bin/python -m deploy.caddy.generate_cad
 ```
 
 ```bash
-sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
+sudo -u caddy caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
 ```
 
 **What works before the step is done.** The Blog page, uploads, previews,

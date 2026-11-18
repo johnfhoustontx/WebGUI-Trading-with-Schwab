@@ -3,7 +3,7 @@
 # ⚠ A change here does NOTHING until the Caddyfile is regenerated and Caddy is
 # reloaded, as root:
 #   sudo .venv/bin/python -m deploy.caddy.generate_caddyfile --install
-#   sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
+#   sudo -u caddy caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
 # `caddy validate` failing leaves the running Caddy untouched, so a bad value
 # (or enabling this on a Caddy without the module) never takes the sites down.
 

@@ -268,6 +268,18 @@ def test_install_writes_the_rendered_config(tmp_path):
     assert dest.read_text(encoding="utf-8") == caddy.render()
 
 
+def test_the_install_tells_you_to_validate_as_the_caddy_user(tmp_path, capsys):
+    """Validating as root creates the visitor logs root-owned, and the running
+    Caddy then refuses the reload (2026-11-18). Every instruction we print or
+    ship says ``sudo -u caddy``."""
+    assert caddy.main(["--dest", str(tmp_path / "Caddyfile")]) == 0
+    out = capsys.readouterr().out
+    assert "sudo -u caddy caddy validate" in out
+    assert "sudo caddy validate" not in out
+    for path in (pathlib.Path(caddy.__file__), pathlib.Path(repo_paths.EDGE_TOML)):
+        assert "sudo caddy validate" not in path.read_text(encoding="utf-8"), path
+
+
 # --- the live block: public BY DESIGN ----------------------------------------
 def test_the_live_host_is_reverse_proxied_to_the_live_port(cfg):
     assert f"{repo_paths.LIVE_HOST} {{" in cfg

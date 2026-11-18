@@ -11,13 +11,19 @@ Run it in the prod checkout::
 
     .venv/bin/python -m deploy.caddy.generate_caddyfile          # print it
     sudo .venv/bin/python -m deploy.caddy.generate_caddyfile --install
-    sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
+    sudo -u caddy caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy
 
 ⚠ ``--install`` writes a **root-owned system path**, so it needs sudo. Caddy runs
 as a SYSTEM unit, not a user one -- the reverse of the stack's own units. It has
 to bind :443 and must not die with a login session, and it restarts nothing on
 anyone's behalf, so the reason user units exist for the stack (a network-facing
 app restarting its own siblings without a polkit rule) does not apply here.
+
+⚠ **Validate AS the caddy user, never as root.** ``caddy validate`` opens every
+log file the config names, creating any that are missing. As root it created
+the visitor logs root-owned on 2026-11-18, and the running Caddy (user
+``caddy``) then refused the reload with ``permission denied``. The sites kept
+serving the old config; the fix was ``chown caddy:caddy`` on the two files.
 
 **Three hostnames, three ORIGINS.** ``SITE_HOST`` serves a static one-pager out
 of ``deploy/site``; ``LIVE_HOST`` proxies the PUBLIC read-only screens
@@ -632,7 +638,7 @@ def main(argv=None):
     if args.install or args.dest:
         p = install(args.dest)
         print(f"wrote {p}")
-        print(f"\nNow:  sudo caddy validate --config {p}"
+        print(f"\nNow:  sudo -u caddy caddy validate --config {p}"
               f"\n      sudo systemctl reload caddy")
         return 0
 
