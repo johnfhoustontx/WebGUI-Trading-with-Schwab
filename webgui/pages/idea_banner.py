@@ -75,9 +75,9 @@ def banner_for(payload, now: _dt.datetime, *, mode: str, prompt: dict,
     if age_min < 0 or age_min > prompt.get("banner_max_age_min", 30):
         return None
     idea = payload.get("idea") or {}
-    name = idea.get("label") or " ".join(
-        str(x) for x in (idea.get("symbol"), str(idea.get("type") or "")
-                         .replace("_", " ").title()) if x)
+    name = send_order.trade_name(
+        idea.get("label") or str(idea.get("type") or "").replace("_", " ").title(),
+        idea.get("symbol"))
     expiry = _expiry_words(idea.get("expiration"))
     text = f"New trade idea: {name}" + (f", {expiry}" if expiry else "")
     return {"trade_id": trade_id, "text": text, "href": f"/send-order?trade={trade_id}"}

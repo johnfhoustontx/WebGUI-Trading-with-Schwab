@@ -79,6 +79,18 @@ def test_a_sent_ticket_locks_the_page_and_is_followed_until_final():
     assert not so.still_working({"status": "rejected"})
 
 
+@pytest.mark.parametrize("label, symbol, want", [
+    ("Iron Butterfly", "SPY", "SPY Iron Butterfly"),
+    ("Long Call", "$SPX", "$SPX Long Call"),
+    ("SPY bull call spread", "SPY", "SPY bull call spread"),   # already named
+    (None, "QQQ", "QQQ"),
+    ("Iron Condor", None, "Iron Condor"),
+    ("SPYG Long Call", "SPY", "SPY SPYG Long Call"),           # a prefix is not the symbol
+])
+def test_trade_name_puts_the_symbol_first(label, symbol, want):
+    assert so.trade_name(label, symbol) == want
+
+
 def test_status_text():
     assert so.status_text({"status": "sent", "order_id": "9001",
                            "order_status": "PENDING_ACTIVATION"}) == \

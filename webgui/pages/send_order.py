@@ -217,6 +217,19 @@ def leg_line(leg) -> str:
             f"{str(leg.get('kind', '')).capitalize()} {leg.get('expiration', '')}: {mid_text}")
 
 
+def trade_name(label, symbol) -> str:
+    """``SPY Iron Butterfly``: the trade's name with its symbol in front. An
+    idea's label is the structure alone, so the symbol is added unless the
+    label already starts with it."""
+    label = str(label or "").strip()
+    symbol = str(symbol or "").strip()
+    if not label:
+        return symbol
+    if not symbol or label.upper().split(" ", 1)[0] == symbol.upper():
+        return label
+    return f"{symbol} {label}"
+
+
 def read_time(stamp) -> str:
     """``10:02:11`` from the service's ISO stamp (already Central)."""
     text = str(stamp or "")
@@ -357,7 +370,7 @@ def _ticket_page(view_id: str, source: dict, client: str) -> None:
     def _paint_quote():
         q = st["quote"] or {}
         if q.get("structure"):
-            title.text = (f"{q.get('idea_label') or q.get('symbol')}: "
+            title.text = (f"{trade_name(q.get('idea_label'), q.get('symbol'))}: "
                           f"{'Debit' if q.get('debit') else 'Credit'}, "
                           f"expires {q.get('expiration')}")
         legs_box.clear()
@@ -503,7 +516,9 @@ def _ticket_page(view_id: str, source: dict, client: str) -> None:
 
     def _ask_confirm():
         t = st["ticket"]
-        send_dlg.body.text = (f"{t['contracts']} x {(st['quote'] or {}).get('idea_label') or t.get('symbol')} "
+        q = st["quote"] or {}
+        name = trade_name(q.get("idea_label"), q.get("symbol") or t.get("symbol"))
+        send_dlg.body.text = (f"{t['contracts']} x {name} "
                               f"at {fmt.price(t['limit'])} limit, to the {t['alias']}. "
                               "This places a real order.")
         send_dlg.open()

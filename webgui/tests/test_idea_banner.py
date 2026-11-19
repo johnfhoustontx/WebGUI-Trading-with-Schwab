@@ -11,7 +11,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 def _posted(**kw):
     p = {"status": "posted", "at": "2026-11-06T09:00:00-06:00",
-         "idea": {"label": "PLTR Bull Call Spread", "expiration": "2026-11-21"},
+         "idea": {"symbol": "PLTR", "label": "Bull Call Spread",
+                  "expiration": "2026-11-21"},
          "ledger": {"status": "booked", "trade_id": "ab12cd34"}}
     p.update(kw)
     return p
@@ -21,6 +22,16 @@ def test_a_booked_idea_offers_its_ticket():
     got = ib.banner_for(_posted(), NOW, mode="preview", prompt=PROMPT)
     assert got == {"trade_id": "ab12cd34", "href": "/send-order?trade=ab12cd34",
                    "text": "New trade idea: PLTR Bull Call Spread, 21 Nov 26"}
+
+
+def test_the_banner_names_the_symbol():
+    """The idea's label is the structure alone ("Iron Butterfly")."""
+    idea = {"symbol": "SPY", "label": "Iron Butterfly", "expiration": "2026-11-20"}
+    got = ib.banner_for(_posted(idea=idea), NOW, mode="preview", prompt=PROMPT)
+    assert got["text"] == "New trade idea: SPY Iron Butterfly, 20 Nov 26"
+    idea = {"symbol": "QQQ", "type": "IRON_CONDOR"}                 # no label
+    got = ib.banner_for(_posted(idea=idea), NOW, mode="preview", prompt=PROMPT)
+    assert got["text"] == "New trade idea: QQQ Iron Condor"
 
 
 def test_no_banner_when_it_should_not_show():
