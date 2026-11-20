@@ -366,7 +366,7 @@
       var list = el("ul", "ns-wx-rows");
       for (var j = 0; j < (file.readings || []).length; j++) {
         var r = file.readings[j];
-        var li = el("li", "ns-wx-row" + tone(r.tone));   /* the thermometer's liquid */
+        var li = el("li", "ns-wx-row");
         li.appendChild(icon(ICONS[r.key] ? r.key : "chevron", "ns-wx-row-icon"));
         var what = el("span", "ns-wx-row-what");
         what.appendChild(el("span", "ns-wx-row-name", r.name));

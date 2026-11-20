@@ -1524,12 +1524,10 @@ body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
   min-width: 0;
   max-width: 380px;
   margin-left: auto;
-  --wx-amber: #f2b65a;
-  --wx-blue-text: #8fb8f2;
   --wx-grey: #b2b6ca;
   --wx-dim: #75798c;
   --wx-panel: #262a44;
-  --wx-tailwind: #7fd6a1;   /* the tally bar: pale green helps the market */
+  --wx-tailwind: #7fd6a1;   /* bar, values, temperature: pale green helps the market */
   --wx-headwind: #f08c86;   /* pale red hurts it */
 }
 .ns-weather[hidden] { display: none; }
@@ -1575,15 +1573,14 @@ body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
 }
 .ns-wx-svg { width: 100%; height: 100%; display: block; overflow: visible; }
 .ns-wx-thin { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-/* The thermometer's liquid follows the reading: green between, red warm, blue cold. */
-.ns-wx-liquid { fill: #3fbf78; }
-.ns-wx-row.is-warm .ns-wx-liquid { fill: #ef5144; }
-.ns-wx-row.is-cold .ns-wx-liquid { fill: #3f8ef0; }
+/* The thermometer is one neutral silver on every reading: green and red mean
+   tailwind and headwind on this card, so it never takes the tone. */
+.ns-wx-liquid { fill: #c3c8da; }
 .ns-wx-words { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .ns-wx-label { font-size: 18px; font-weight: 600; line-height: 1.3; }
 .ns-wx-temp { font-size: 46px; font-weight: 700; line-height: 1.05; letter-spacing: -0.02em; color: var(--color-neutral-300); }
-.ns-wx-temp.is-warm, .ns-wx-row-value.is-warm { color: var(--wx-amber); }
-.ns-wx-temp.is-cold, .ns-wx-row-value.is-cold { color: var(--wx-blue-text); }
+.ns-wx-temp.is-warm, .ns-wx-row-value.is-warm { color: var(--wx-tailwind); }
+.ns-wx-temp.is-cold, .ns-wx-row-value.is-cold { color: var(--wx-headwind); }
 .ns-wx-sub { font-size: 12px; color: var(--color-neutral-500); }
 .ns-wx-headline { margin: 0; font-size: 17px; font-weight: 600; line-height: 1.38; color: var(--color-neutral-100); }
 

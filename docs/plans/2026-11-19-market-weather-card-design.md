@@ -261,14 +261,16 @@ Each shape is painted by gradients lit from the upper left, defined inside the S
 icon under an id of its own (`wx-<icon>-<part>`): a `url(#…)` that resolves nowhere
 paints nothing, and `deploy/tests/test_site.py` checks every reference resolves and no
 id repeats. The soft shadow under each is a CSS `drop-shadow`. The thermometer's liquid
-follows the reading's tone (red warm, blue cold, green between; the row carries the
-tone class). Row icons grew from 22 to 28 px so the detail reads. The chevron stays a
-flat line. Warm amber `#f2b65a` still means warm and cold blue `#8fb8f2` cold in the
-temperature and the row values.
+is one neutral silver `#c3c8da` on every reading (the operator's call: green and red
+mean tailwind and headwind on this card, so it never takes the tone). Row icons grew from 22 to 28 px so the detail reads. The chevron stays a
+flat line.
 
-**The tally bar (2026-11-20, the operator's call):** a tailwind segment is pale green
-`#7fd6a1` (`--wx-tailwind`) and a headwind pale red `#f08c86` (`--wx-headwind`);
-neutral stays grey and no reading an empty outline. The two also differ in lightness.
+**Colour (2026-11-20, the operator's call):** green helps the market and red hurts it,
+everywhere on the card. A tailwind bar segment, a warm row value and a warm
+temperature are pale green `#7fd6a1` (`--wx-tailwind`); a headwind segment and a cold
+value or temperature are pale red `#f08c86` (`--wx-headwind`). Neutral stays grey on
+the bar and plain text in the values; no reading is an empty outline. The two also
+differ in lightness. Amber and blue are no longer used.
 
 ### Configuration
 

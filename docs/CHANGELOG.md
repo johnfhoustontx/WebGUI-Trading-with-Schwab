@@ -4,7 +4,18 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-20 (**The weather card's tally bar in green and red.**)
+**Last updated:** 2026-11-20 (**The weather card's values in green and red; the thermometer neutral.**)
+
+- **What.** After a mockup the operator approved, a warm row value and the large
+  temperature use the bar's pale green (`--wx-tailwind`) and a cold one its pale red
+  (`--wx-headwind`); a plain value keeps the text colour. The thermometer's liquid is one
+  neutral silver (`#c3c8da`) on every reading and the row no longer carries the tone
+  (the operator's call: green and red mean tailwind and headwind here). `--wx-amber` and
+  `--wx-blue-text`, read by nothing after this, are gone. Tests:
+  `test_the_values_follow_the_bar_green_and_red`, `test_the_thermometer_stays_neutral`
+  (replacing the tone-following thermometer test).
+
+**Prior —** 2026-11-20 (**The weather card's tally bar in green and red.**)
 
 - **What.** On the homepage card's seven-segment bar a tailwind is now pale green
   (`--wx-tailwind` `#7fd6a1`) and a headwind pale red (`--wx-headwind` `#f08c86`), at the

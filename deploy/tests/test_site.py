@@ -1797,12 +1797,23 @@ def test_the_tally_bar_is_green_for_tailwinds_and_red_for_headwinds():
     assert "var(--color-neutral-700)" in rule(r"\.ns-wx-bar\.is-none")
 
 
-def test_the_thermometer_fills_with_the_reading_s_tone():
-    """Red when warm, blue when cold, green between, as in the reference set:
-    the row carries the tone, and the liquid takes its colour from it."""
-    assert 'el("li", "ns-wx-row" + tone(r.tone))' in _weather_js()
-    assert 'class="ns-wx-liquid"' in _weather_icons()
+def test_the_values_follow_the_bar_green_and_red():
+    """The operator's call (2026-11-20): a warm (tailwind) value and the big
+    temperature read in the bar's pale green, a cold (headwind) one in its pale
+    red; a plain value keeps the text colour."""
     css = _css("assets/site.css")
-    for rule in (r"\.ns-wx-liquid \{", r"\.ns-wx-row\.is-warm \.ns-wx-liquid",
-                 r"\.ns-wx-row\.is-cold \.ns-wx-liquid"):
-        assert re.search(rule, css), rule
+    warm = re.search(r"\.ns-wx-temp\.is-warm, \.ns-wx-row-value\.is-warm \{([^}]*)\}", css)
+    cold = re.search(r"\.ns-wx-temp\.is-cold, \.ns-wx-row-value\.is-cold \{([^}]*)\}", css)
+    assert warm and "var(--wx-tailwind)" in warm.group(1)
+    assert cold and "var(--wx-headwind)" in cold.group(1)
+
+
+def test_the_thermometer_stays_neutral():
+    """The operator's call (2026-11-20): green and red mean tailwind and headwind
+    on this card, so the thermometer is one silver on every reading and never
+    takes the tone."""
+    assert 'class="ns-wx-liquid"' in _weather_icons()
+    assert 'el("li", "ns-wx-row");' in _weather_js()
+    css = _css("assets/site.css")
+    assert re.search(r"\.ns-wx-liquid \{ fill: #c3c8da; \}", css)
+    assert not re.search(r"is-(warm|cold) \.ns-wx-liquid", css)
