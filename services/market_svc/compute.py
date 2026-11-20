@@ -5,6 +5,7 @@ I/O seams (``fetch_raw_quotes`` / ``read_sector_pcr``) are thin + defensive;
 the coverage. All defensive — a fetch/parse failure degrades to no-data tiles.
 """
 import logging
+import time
 
 import requests
 
@@ -30,6 +31,9 @@ def _new_session() -> requests.Session:
     # client's helper so the label is header-safe and a dev checkout, which
     # borrows prod's proxy, is counted apart ("dev.market_svc").
     session.headers["X-Caller"] = proxy_client.caller_label("market_svc")
+    # fetch_bars goes through /passthrough, which checks X-Proxy-Secret whenever
+    # the proxy has one configured.
+    proxy_client._apply_secret(session)
     return session
 
 
@@ -59,15 +63,24 @@ def fetch_raw_quotes(syms, *, timeout=8.0):
         return {}
 
 
-def fetch_bars(symbol, *, period_days, frequency, timeout=15.0):
-    """The proxy's five-minute candles for ``symbol``, regular session only (the
-    proxy's default), or None when the fetch failed: a failure is not a session
-    with no volume. Never raises."""
+def fetch_bars(symbol, *, period_days, frequency, end_ms=None, timeout=15.0):
+    """Schwab's minute candles for ``symbol`` over the last ``period_days``
+    trading days up to ``end_ms`` (epoch ms, default now), regular session only,
+    or None when the fetch failed: a failure is not a session with no volume.
+    Never raises.
+
+    Sent through the proxy's ``/passthrough`` because it must carry ``endDate``,
+    which the proxy's ``/pricehistory`` route does not forward: without one
+    Schwab ends the series at the PREVIOUS business day's close, so today's bars
+    never came back (measured on prod 2026-11-20)."""
+    if end_ms is None:
+        end_ms = int(time.time() * 1000)
+    query = (f"symbol={symbol},periodType=day,period={int(period_days)},"
+             f"frequencyType=minute,frequency={int(frequency)},"
+             f"endDate={int(end_ms)},needExtendedHoursData=false")
     try:
-        resp = _SESSION.get(f"{PROXY_URL}/pricehistory",
-                            params={"symbol": symbol, "periodType": "day",
-                                    "period": period_days, "frequencyType": "minute",
-                                    "frequency": frequency},
+        resp = _SESSION.get(f"{PROXY_URL}/passthrough",
+                            params={"endpoint": "/pricehistory", "params": query},
                             timeout=timeout)
         if resp.status_code != 200:
             return None

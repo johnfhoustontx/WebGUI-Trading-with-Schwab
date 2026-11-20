@@ -73,8 +73,11 @@ bucket, so the range figures are a guide and are not printed by the code.
   77.7M: 0.60 to 0.72 across ten sessions. So pace compares bars with bars.
 - Stored and refetched bars agreed exactly on the older sessions, and within 1% on the
   newest. 2026-10-30's doubled volume is real (the daily bar agrees), not a change of basis.
-- The proxy's `/pricehistory` defaults to `needExtendedHoursData=false`: the bars are
-  the regular session only (78 a day, 08:30 to 14:55 CT).
+- The fetch asks for `needExtendedHoursData=false`: the bars are the regular session
+  only (78 a day, 08:30 to 14:55 CT).
+- It goes through `/passthrough` with `endDate` = now. Without an `endDate` Schwab ends
+  the series at the previous business day's close, and the proxy's `/pricehistory` route
+  sends none, so until 2026-11-20 no session's own bars ever came back.
 
 ## Where each figure comes from, and how often
 

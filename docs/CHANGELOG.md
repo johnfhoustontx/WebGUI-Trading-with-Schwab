@@ -15,6 +15,15 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   error logged. It most likely never worked live since 2026-11-01, except on a day the
   service restarted mid-session. The fix compares only a same-day session mark
   (`_same_day_mark`). Test: `test_this_mornings_before_open_fetch_does_not_stop_the_session`.
+- **And a second cause, found once the first was promoted.** The 09:31 view refreshed
+  but held 0 bars for SPY and QQQ: `compute.fetch_bars` called the proxy's
+  `/pricehistory`, which sends Schwab no `endDate`, and Schwab then ends the series at
+  the previous business day's close (10 sessions ending 11-19). It now goes through
+  `/passthrough` with `endDate` = now and the proxy secret. A dry run on prod at 09:38
+  read 13 bars against 9 baseline sessions: SPY 2.06x, QQQ 2.42x usual, heavy, a
+  Headwind row. Tests: `test_fetch_bars_asks_for_bars_up_to_now`,
+  `test_fetch_bars_ends_at_the_current_time_by_default`,
+  `test_the_market_session_carries_the_proxy_secret`.
 
 **Prior —** 2026-11-20 (**The weather card's values in green and red; the thermometer neutral.**)
 

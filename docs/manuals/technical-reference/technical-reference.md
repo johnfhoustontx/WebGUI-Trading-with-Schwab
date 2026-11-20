@@ -2789,7 +2789,7 @@ a fetch is due), `scheduler.refresh_volume`, `compute.fetch_bars`, `[volume]` in
 
 | Figure | Formula | Source |
 |---|---|---|
-| `pace` | Σ today's finished bars ÷ median over the last `baseline_sessions` (9) sessions of Σ that session's bars ending by the same clock time | `/pricehistory`, five-minute bars, regular session |
+| `pace` | Σ today's finished bars ÷ median over the last `baseline_sessions` (9) sessions of Σ that session's bars ending by the same clock time | `/passthrough` → `/pricehistory` with `endDate` = now, five-minute bars, regular session |
 | `word` | `heavy` at `pace` ≥ `heavy_ratio` (1.2), `light` at ≤ `light_ratio` (0.8), else `usual` | |
 | `up_share` | volume in bars with close > open ÷ volume in bars with close ≠ open | the same bars |
 | `sectors.up_share` | Σ `last × totalVolume` of rising funds ÷ the same for rising and falling funds; a flat fund counts on neither side | `/quotes` on `volume.sector_symbols` (11) |

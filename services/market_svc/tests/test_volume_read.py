@@ -607,12 +607,43 @@ def test_fetch_bars_never_raises(monkeypatch):
     assert compute.fetch_bars("SPY", period_days=10, frequency=5) is None
 
 
-def test_fetch_bars_asks_for_the_regular_session_only(monkeypatch):
+def _sent(monkeypatch, **kwargs):
+    """The URL and the Schwab parameters one ``fetch_bars`` call sends."""
     seen = {}
 
     def get(url, params, timeout):
-        seen.update(params)
+        seen["url"] = url
+        seen["endpoint"] = params.get("endpoint")
+        seen["schwab"] = dict(p.split("=", 1) for p in params["params"].split(","))
         return _Resp(200, {"candles": []})
     monkeypatch.setattr(compute._SESSION, "get", get)
-    compute.fetch_bars("SPY", period_days=10, frequency=5)
-    assert "needExtendedHoursData" not in seen      # the proxy's default is false
+    compute.fetch_bars("SPY", period_days=10, frequency=5, **kwargs)
+    return seen
+
+
+def test_fetch_bars_asks_for_the_regular_session_only(monkeypatch):
+    assert _sent(monkeypatch)["schwab"]["needExtendedHoursData"] == "false"
+
+
+def test_fetch_bars_asks_for_bars_up_to_now(monkeypatch):
+    # Without an endDate Schwab ends the series at the PREVIOUS business day's
+    # close, so a session's own bars never came back (found on prod 2026-11-20:
+    # 10 sessions ending 11-19 at 09:31 on 11-20, and the Volume row No reading).
+    # The proxy's /pricehistory route does not forward endDate; /passthrough does.
+    seen = _sent(monkeypatch, end_ms=1795188000000)
+    assert seen["url"].endswith("/passthrough") and seen["endpoint"] == "/pricehistory"
+    assert seen["schwab"] == {"symbol": "SPY", "periodType": "day", "period": "10",
+                              "frequencyType": "minute", "frequency": "5",
+                              "endDate": "1795188000000",
+                              "needExtendedHoursData": "false"}
+
+
+def test_fetch_bars_ends_at_the_current_time_by_default(monkeypatch):
+    monkeypatch.setattr(compute.time, "time", lambda: 1795188000.5)
+    assert _sent(monkeypatch)["schwab"]["endDate"] == "1795188000500"
+
+
+def test_the_market_session_carries_the_proxy_secret():
+    # /passthrough checks X-Proxy-Secret whenever the proxy has one configured.
+    src = inspect.getsource(compute._new_session)
+    assert "_apply_secret(session)" in src
