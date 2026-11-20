@@ -4,7 +4,20 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-19 (**The weather card opens expanded, lined up with Live Desk.**)
+**Last updated:** 2026-11-20 (**The weather card's icons, redrawn in 3D.**)
+
+- **What.** The thirteen icons in `deploy/site/assets/weather.js` are redrawn as glossy
+  clay shapes after a reference sheet the operator chose (our own drawings): white
+  clouds, a night-blue storm cloud with a gold bolt, a gold sun and crescent moon, glassy
+  blue drops, wind swirls, a gauge, an umbrella, a house and a glass thermometer whose
+  liquid is red, blue or green with the reading's tone. Gradients only, each defined in
+  its own icon (`wx-<icon>-<part>` ids); a CSS `drop-shadow` gives the float. Row icons
+  are 28 px (were 22). Still inline: no image, font or off-origin request.
+- **Tests.** `test_site.py`: every `url(#…)` in the script resolves to an id defined in
+  the icon set and no id repeats; the icons need nothing outside the script; the
+  thermometer takes the row's tone. Checked in the browser at desktop and phone width.
+
+**Prior —** 2026-11-19 (**The weather card opens expanded, lined up with Live Desk.**)
 
 - **What.** The homepage card shows its six readings from the first draw (the toggle
   still folds them away), and above 960px its right edge is the Live Desk button's. The

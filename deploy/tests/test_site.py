@@ -1752,3 +1752,44 @@ def test_the_weather_card_s_right_edge_is_the_menu_bar_s():
     assert "var(--ns-nav-pad)" in nav
     hero = re.search(r"\.ns-hero\.ns-hero--weather \{([^}]*max-width: none[^}]*)\}", css)
     assert hero and "padding-right: var(--ns-nav-pad)" in hero.group(1)
+
+
+def _weather_icons():
+    js = _weather_js()
+    start = js.index("var ICONS = {")
+    return js[start:js.index("};", start)]
+
+
+def test_every_weather_icon_paint_resolves_inside_the_script():
+    """The 3D icons (2026-11-20) paint with gradients, ``fill="url(#wx-...)"``.
+    A fragment that resolves nowhere paints NOTHING, so the shape silently
+    vanishes; and two icons defining one id would let a folded-away row's
+    hidden copy win. Every reference has its own, unique definition."""
+    js = _weather_js()
+    refs = set(re.findall(r"url\(#([\w-]+)\)", js))
+    ids = re.findall(r'\bid="([\w-]+)"', _weather_icons())
+    assert refs, "the icons paint with no gradients"
+    assert len(ids) == len(set(ids)), "an icon id is defined twice"
+    assert refs <= set(ids), f"unresolved: {sorted(refs - set(ids))}"
+    assert all(i.startswith("wx-") for i in ids)
+
+
+def test_the_weather_icons_are_drawn_inline_and_need_nothing_else():
+    icons = _weather_icons()
+    for banned in ("href", "<image", "xmlns", "url(http", "data:"):
+        assert banned not in icons, banned
+    for key in ("clear", "fair", "overcast", "showers", "storm", "fog", "moon",
+                "temperature", "coverage", "wind", "pressure", "umbrellas",
+                "shelter", "chevron"):
+        assert re.search(r"\n    %s: '<svg " % key, icons), key
+
+
+def test_the_thermometer_fills_with_the_reading_s_tone():
+    """Red when warm, blue when cold, green between, as in the reference set:
+    the row carries the tone, and the liquid takes its colour from it."""
+    assert 'el("li", "ns-wx-row" + tone(r.tone))' in _weather_js()
+    assert 'class="ns-wx-liquid"' in _weather_icons()
+    css = _css("assets/site.css")
+    for rule in (r"\.ns-wx-liquid \{", r"\.ns-wx-row\.is-warm \.ns-wx-liquid",
+                 r"\.ns-wx-row\.is-cold \.ns-wx-liquid"):
+        assert re.search(rule, css), rule

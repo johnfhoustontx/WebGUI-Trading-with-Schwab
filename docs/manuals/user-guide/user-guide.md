@@ -751,7 +751,8 @@ changes when the Market read does: every 15 minutes from 08:45 to 15:00 CT.
   away: temperature (the two indexes),
   rain coverage (markets falling), wind (the VIX), pressure (SPY against the gamma
   flip), umbrellas : sunglasses (puts to calls in the flow), and shelter (bonds and
-  credit). A row with no reading is left out.
+  credit). A row with no reading is left out. The thermometer beside temperature
+  fills red on a warm reading, blue on a cold one and green between.
 
 **When it changes face**
 

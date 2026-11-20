@@ -249,13 +249,22 @@ Matches the mockup's compact state:
 
 ### The symbols
 
-The thirteen icons on the mockup's symbol sheet, as inline SVG in `weather.js` (no
-icon font, no image requests): seven skies — sun, sun behind cloud, overcast, rain,
-storm (cloud + amber bolt), fog, moon — on a 48 grid, and six readings —
-thermometer, droplet, wind, barometer, umbrella, house — on a 24 grid. One stroke
-weight, round caps and joins, `currentColor`. Warm amber `#f2b65a` means tailwind,
-cold blue `#5b8fd9` / `#8fb8f2` means headwind; they also differ in lightness so they
-read apart without colour.
+Thirteen icons, as inline SVG in `weather.js` (no icon font, no image requests): seven
+skies — sun, sun behind cloud, overcast, rain, storm (night cloud + gold bolt), fog,
+moon — on a 48 grid, and six readings — thermometer, droplet, wind, barometer,
+umbrella, house — on a 24 grid.
+
+**Redrawn 2026-11-20 as 3D clay shapes** after a reference sheet the operator chose
+(drawn here, not copied): puffy white clouds, a night-blue storm cloud, a gold sun and
+crescent moon with sparkles, glassy blue drops, blue wind swirls, a glass thermometer.
+Each shape is painted by gradients lit from the upper left, defined inside the SAME
+icon under an id of its own (`wx-<icon>-<part>`): a `url(#…)` that resolves nowhere
+paints nothing, and `deploy/tests/test_site.py` checks every reference resolves and no
+id repeats. The soft shadow under each is a CSS `drop-shadow`. The thermometer's liquid
+follows the reading's tone (red warm, blue cold, green between; the row carries the
+tone class). Row icons grew from 22 to 28 px so the detail reads. The chevron stays a
+flat line. Warm amber `#f2b65a` still means tailwind and cold blue `#5b8fd9` /
+`#8fb8f2` headwind in the text, bars and values.
 
 ### Configuration
 
