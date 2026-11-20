@@ -20,6 +20,7 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from repo_paths import SCALP_TOML
+from shared import market_calendar as _mc
 from shared import symbols as _symbols
 from shared.config_toml import toml_loader
 
@@ -54,7 +55,6 @@ DEFAULTS = {
         "start": "08:51", "end": "13:51", "interval_min": 15, "grace_min": 5,
         "dead_zone_pct": 0.03, "breadth_agree": 0.6, "promotion_sessions": 40,
         "vwap_max_missing": 0.25, "min_brier_margin": 0.005,
-        "early_close_days": ["2026-11-27", "2026-12-24"], "early_close_time": "12:00",
         "blocks": {"morning": {"start": "08:51", "end": "09:51"},
                    "midday": {"start": "10:06", "end": "12:21"},
                    "afternoon": {"start": "12:36", "end": "13:51"}},
@@ -349,26 +349,14 @@ def intraday_slots(day) -> list:
 
 
 def early_close_days() -> set:
-    """The sessions that close early (``[intraday] early_close_days``, ISO
-    dates). A value that is not a list of ``YYYY-MM-DD`` strings reads as the
-    defaults whole; an empty list is no early closes."""
-    raw = _section("intraday").get("early_close_days")
-    try:
-        if isinstance(raw, list) and all(isinstance(d, str) and len(d) == 10 for d in raw):
-            return {date.fromisoformat(d) for d in raw}
-    except ValueError:
-        pass
-    return {date.fromisoformat(d) for d in DEFAULTS["intraday"]["early_close_days"]}
+    """The half days: the market calendar's (``[early_close] days`` in
+    ``config/sessions.toml``, moved there 2026-11-19 so every reader agrees)."""
+    return set(_mc.early_close_days())
 
 
 def early_close_time() -> str:
-    """The Central time an early session closes (``"12:00"``): an ``HH:MM`` after
-    the 08:30 open and not after ``REGULAR_CLOSE``, else the default."""
-    raw = _section("intraday").get("early_close_time")
-    got = _minutes(raw)
-    if got is None or not (_minutes("08:30") < got <= _minutes(REGULAR_CLOSE)):
-        return DEFAULTS["intraday"]["early_close_time"]
-    return raw
+    """When a half day closes, Central, as ``"HH:MM"`` (the calendar's)."""
+    return _mc.early_close_time().strftime("%H:%M")
 
 
 def early_close_on(day):

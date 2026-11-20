@@ -27,6 +27,18 @@ end   = "15:00"   # 16:00 ET
 start = "15:00"   # 16:00 ET
 end   = "15:15"   # 16:15 ET
 
+# -- Half days -----------------------------------------------------------------
+# Sessions that close early, and when (Central). A LIST, not worked out like the
+# holidays: the NYSE's July rule turns on the weekday the 4th falls on. Add next
+# year's here. A listed date that does not trade (a weekend, a holiday) is
+# ignored. Read by the Market read (its last reading is at the early close), the
+# homepage weather card (through tools/generate_market_clock.py: regenerate the
+# site's clock after a change), Traded volume and the Opening Scalp. Everything
+# else still runs to the regular close on a half day.
+[early_close]
+days = ["2026-11-27", "2026-12-24", "2027-11-26"]
+time = "12:00"   # 13:00 ET
+
 # -- Named operating windows (service cadence windows, NOT market sessions) --
 # These legitimately differ from each other and are kept distinct, not merged.
 [windows.scan]

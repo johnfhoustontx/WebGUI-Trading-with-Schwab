@@ -508,31 +508,28 @@ def test_a_longer_time_stop_makes_the_configured_schedule_unusable(monkeypatch):
 
 def test_early_close_defaults():
     sc.reset_cache()
-    assert sc.early_close_days() == {date(2026, 11, 27), date(2026, 12, 24)}
+    assert sc.early_close_days() >= {date(2026, 11, 27), date(2026, 12, 24)}
     assert sc.early_close_time() == "12:00"
     assert sc.early_close_on(date(2026, 11, 27)) == datetime(
         2026, 11, 27, 12, 0, tzinfo=ZoneInfo("America/Chicago"))
     assert sc.early_close_on(_DAY) is None
 
 
-@pytest.mark.parametrize("raw", ["2026-11-27", ["2026-13-01"], ["11/27/2026"], [20261127],
-                                 None])
-def test_unusable_early_close_days_are_the_defaults(monkeypatch, raw):
-    monkeypatch.setattr(sc, "load", lambda: {"intraday": {"early_close_days": raw}})
-    assert sc.early_close_days() == {date(2026, 11, 27), date(2026, 12, 24)}
-
-
-def test_early_close_days_are_read_and_may_be_empty(monkeypatch):
-    monkeypatch.setattr(sc, "load", lambda: {"intraday": {"early_close_days": ["2027-07-02"]}})
+def test_the_half_days_are_the_market_calendar_s(monkeypatch):
+    """Moved 2026-11-19 to ``[early_close]`` in config/sessions.toml: the scalp
+    reads the calendar's list, so the Market read and the scalp cannot disagree
+    about which day closes early. The list's validation is pinned there."""
+    from shared import market_calendar as mc
+    monkeypatch.setattr(mc, "load_config", lambda: mc._merge(
+        mc._DEFAULTS, {"early_close": {"days": ["2027-07-02"], "time": "11:30"}}))
     assert sc.early_close_days() == {date(2027, 7, 2)}
-    monkeypatch.setattr(sc, "load", lambda: {"intraday": {"early_close_days": []}})
-    assert sc.early_close_days() == set()
-
-
-@pytest.mark.parametrize("raw", ["8:00", "08:30", "15:01", "noon", 12, None])
-def test_an_unusable_early_close_time_is_the_default(monkeypatch, raw):
-    monkeypatch.setattr(sc, "load", lambda: {"intraday": {"early_close_time": raw}})
-    assert sc.early_close_time() == "12:00"
+    assert sc.early_close_time() == "11:30"
+    assert sc.early_close_on(date(2027, 7, 2)).hour == 11
+    # the scalp's own file no longer says anything about half days
+    monkeypatch.setattr(sc, "load", lambda: {"intraday": {
+        "early_close_days": ["2030-01-02"], "early_close_time": "10:00"}})
+    assert sc.early_close_days() == {date(2027, 7, 2)}
+    assert sc.early_close_time() == "11:30"
 
 
 def test_a_slot_is_cut_only_when_its_trade_passes_the_early_close(monkeypatch):
@@ -544,7 +541,9 @@ def test_a_slot_is_cut_only_when_its_trade_passes_the_early_close(monkeypatch):
     assert sc.intraday_slot_cut(half, "13:51")
     assert not sc.intraday_slot_cut(_DAY, "13:51")             # a full session
     assert not sc.intraday_slot_cut(half, "11:06", stop_min=50)  # 11:05 + 50 = 11:55
-    monkeypatch.setattr(sc, "load", lambda: {"intraday": {"early_close_time": "11:00"}})
+    from shared import market_calendar as mc
+    monkeypatch.setattr(mc, "load_config", lambda: mc._merge(
+        mc._DEFAULTS, {"early_close": {"time": "11:00"}}))
     assert sc.intraday_slot_cut(half, "10:06")                 # 10:05 + 60 = 11:05
     # the schedule itself is the same every session: the cut is the caller's
     assert sc.intraday_slots(half) == sc.intraday_slots(_DAY)

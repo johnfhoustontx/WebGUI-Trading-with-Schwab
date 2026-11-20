@@ -774,3 +774,68 @@ def test_an_unusable_scan_offset_means_the_built_in(monkeypatch, tmp_path, bad):
 def test_the_scan_offset_survives_a_malformed_file(monkeypatch, tmp_path):
     _write_cfg(monkeypatch, tmp_path, '[windows]\nscan = "oops"')
     assert mc.scan_offset_min() == 2
+
+
+# --- half days (early closes) -------------------------------------------------
+# A configured list, not derived like the holidays: the NYSE's July rule varies
+# with the weekday the 4th falls on. [early_close] in config/sessions.toml.
+
+def _sessions(monkeypatch, over):
+    monkeypatch.setattr(mc, "load_config", lambda: mc._merge(mc._DEFAULTS, over))
+
+
+def test_the_shipped_half_days_close_at_noon_central():
+    assert mc.early_close_days() >= {date(2026, 11, 27), date(2026, 12, 24)}
+    assert mc.early_close_time() == dt.time(12, 0)
+    assert mc.early_close_on(date(2026, 11, 27)) == _ct(2026, 11, 27, 12, 0)
+    assert mc.early_close_on(date(2026, 11, 27)) == _et(2026, 11, 27, 13, 0)
+
+
+def test_an_ordinary_day_has_no_early_close():
+    assert mc.early_close_on(date(2026, 11, 20)) is None
+
+
+def test_session_close_on_is_the_early_close_on_a_half_day_and_the_regular_one_otherwise():
+    assert mc.session_close_on(date(2026, 11, 27)) == _ct(2026, 11, 27, 12, 0)
+    assert mc.session_close_on(date(2026, 11, 20)) == mc.regular_close_on(date(2026, 11, 20))
+
+
+def test_regular_close_on_is_unchanged_on_a_half_day():
+    """Narrow on purpose (2026-11-19): only the callers moved to session_close_on
+    learn about half days; every other caller keeps the 15:00 close for now."""
+    assert mc.regular_close_on(date(2026, 11, 27)) == _ct(2026, 11, 27, 15, 0)
+
+
+def test_a_listed_day_that_does_not_trade_has_no_early_close(monkeypatch):
+    # 2027-12-24 is the observed Christmas holiday; 2026-11-28 is a Saturday.
+    _sessions(monkeypatch, {"early_close": {"days": ["2027-12-24", "2026-11-28"]}})
+    assert mc.early_close_on(date(2027, 12, 24)) is None
+    assert mc.early_close_on(date(2026, 11, 28)) is None
+
+
+def test_the_half_days_are_read_and_may_be_empty(monkeypatch):
+    _sessions(monkeypatch, {"early_close": {"days": ["2027-07-02"], "time": "11:30"}})
+    assert mc.early_close_days() == frozenset({date(2027, 7, 2)})
+    assert mc.early_close_on(date(2027, 7, 2)) == _ct(2027, 7, 2, 11, 30)
+    _sessions(monkeypatch, {"early_close": {"days": []}})
+    assert mc.early_close_days() == frozenset()
+    assert mc.early_close_on(date(2026, 11, 27)) is None
+
+
+@pytest.mark.parametrize("raw", ["2026-11-27", ["2026-13-01"], [20261127], [True], None])
+def test_an_unusable_half_day_list_is_the_defaults_whole(monkeypatch, raw):
+    _sessions(monkeypatch, {"early_close": {"days": raw}})
+    want = frozenset(date.fromisoformat(d) for d in mc._DEFAULTS["early_close"]["days"])
+    assert mc.early_close_days() == want
+
+
+@pytest.mark.parametrize("raw", ["08:30", "08:00", "15:30", "noon", "", 12, True])
+def test_an_unusable_early_close_time_is_the_default(monkeypatch, raw):
+    """Strictly after the open and not after the regular close."""
+    _sessions(monkeypatch, {"early_close": {"time": raw}})
+    assert mc.early_close_time() == dt.time(12, 0)
+
+
+def test_a_half_day_s_session_close_is_inside_the_regular_session():
+    close = mc.session_close_on(date(2026, 11, 27))
+    assert mc.is_regular_hours(close) is True

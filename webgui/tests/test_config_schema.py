@@ -1103,9 +1103,18 @@ def test_the_intraday_schedule_cross_check_is_the_loaders_rule(monkeypatch):
         "scalp.toml", {**base, ("intraday", "end"): "14:21"}))
 
 
+def test_the_half_days_live_in_market_hours_not_the_scalp():
+    """Moved 2026-11-19: the market calendar owns the half days, and the scalp,
+    the Market read and the homepage card all read them from there."""
+    scalp = {f.key for s in SCALP.sections for f in s.fields}
+    assert not {"intraday.early_close_days", "intraday.early_close_time"} & scalp
+    sessions = {f.key for s in cs.BY_NAME["sessions.toml"].sections for f in s.fields}
+    assert {"early_close.days", "early_close.time"} <= sessions
+
+
 def test_the_early_close_fields_parse_and_check():
-    by_key = {f.key: f for s in SCALP.sections for f in s.fields}
-    days = by_key["intraday.early_close_days"]
+    by_key = {f.key: f for s in cs.BY_NAME["sessions.toml"].sections for f in s.fields}
+    days = by_key["early_close.days"]
     assert days.kind == "dates"
     assert cs.parse(days, ["2026-12-24", "2026-11-27", "2026-12-24"]) == [
         "2026-11-27", "2026-12-24"]
@@ -1114,11 +1123,17 @@ def test_the_early_close_fields_parse_and_check():
     for bad in (["2026-13-01"], ["11/27/2026"], ["2026-1-2"]):
         with pytest.raises(ValueError, match="YYYY-MM-DD"):
             cs.parse(days, bad)
-    assert cs.parse(by_key["intraday.early_close_time"], "12:00") == "12:00"
-    for bad in ("15:30", "08:00"):
-        assert cs.cross_check("scalp.toml", {("intraday", "early_close_time"): bad})
-    assert not cs.cross_check("scalp.toml", {("intraday", "early_close_time"): "12:00"})
-    src = by_key["confirm.min_sources"]
+    assert cs.parse(by_key["early_close.time"], "12:00") == "12:00"
+    for bad in ("15:30", "08:00", "08:30"):
+        assert cs.cross_check("sessions.toml", {("early_close", "time"): bad})
+    assert not cs.cross_check("sessions.toml", {("early_close", "time"): "12:00"})
+    # Against the regular session as configured, not a literal 08:30 to 15:00.
+    assert cs.cross_check("sessions.toml", {("early_close", "time"): "12:00",
+                                            ("sessions", "regular", "end"): "11:00"})
+
+
+def test_the_scalp_confirmation_sources_are_bounded():
+    src = {f.key: f for s in SCALP.sections for f in s.fields}["confirm.min_sources"]
     assert (src.min, src.max) == (1, 4)
 
 def test_the_futures_chain_numbers_are_bounded_as_the_loader_bounds_them(monkeypatch):

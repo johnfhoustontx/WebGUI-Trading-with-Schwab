@@ -239,6 +239,10 @@ class Session(Enum):
 # still has a coherent calendar rather than crashing on a scheduler tick.
 _DEFAULTS = {
     "activation": {"extended_hours_from": "2026-08-17"},
+    # Half days: a LIST, not derived like the holidays (the NYSE's July rule
+    # turns on the weekday the 4th falls on). The day after Thanksgiving closes
+    # early every year; 2027-12-24 is the observed Christmas holiday, not a half day.
+    "early_close": {"days": ["2026-11-27", "2026-12-24", "2027-11-26"], "time": "12:00"},
     "sessions": {
         "gth": {"start": "06:30", "end": "08:25"},
         "regular": {"start": "08:30", "end": "15:00"},
@@ -604,6 +608,54 @@ def regular_close_on(d) -> datetime:
     """
     _start, end = _session_bounds("regular")
     return datetime.combine(d, end, tzinfo=CT)
+
+
+def early_close_days() -> frozenset:
+    """The half days (``[early_close] days`` in ``config/sessions.toml``, ISO
+    dates). A value that is not a list of ``YYYY-MM-DD`` strings reads as the
+    defaults whole; an empty list is no half days."""
+    raw = load_config().get("early_close", {}).get("days")
+    if isinstance(raw, list) and all(isinstance(d, str) for d in raw):
+        try:
+            return frozenset(date.fromisoformat(d) for d in raw)
+        except ValueError:
+            pass
+    return frozenset(date.fromisoformat(d) for d in _DEFAULTS["early_close"]["days"])
+
+
+def early_close_time() -> time:
+    """When a half day closes, Central (``[early_close] time``): strictly after
+    the regular open and not after the regular close, else the default."""
+    dflt = _parse_time(_DEFAULTS["early_close"]["time"], _DEFAULTS["early_close"]["time"])
+    raw = load_config().get("early_close", {}).get("time")
+    if not isinstance(raw, str) or len(raw) != 5 or raw[2] != ":":
+        return dflt
+    try:
+        got = time(int(raw[:2]), int(raw[3:]))
+    except ValueError:
+        return dflt
+    start, end = _session_bounds("regular")
+    return got if start < got <= end else dflt
+
+
+def early_close_on(d):
+    """The aware Central close of ``d`` when it is a half day that trades, else
+    ``None``. A listed date that is a weekend or a holiday is no half day."""
+    if not isinstance(d, date) or d not in early_close_days() or not is_trading_day(d):
+        return None
+    return datetime.combine(d, early_close_time(), tzinfo=CT)
+
+
+def session_close_on(d) -> datetime:
+    """When ``d``'s session actually closes: the early close on a half day,
+    else ``regular_close_on(d)``.
+
+    ⚠ Only some callers use this (2026-11-19, the narrow first step):
+    ``regular_close_on``, ``mins_to_close`` and ``session_at`` still read the
+    15:00 close on a half day, so the proxy store, the Desk's late-day setups,
+    the GEX windows, the forward grid and the range forecast do not know about
+    half days yet. Move a caller here when it should."""
+    return early_close_on(d) or regular_close_on(d)
 
 
 def regular_open_on(d) -> datetime:

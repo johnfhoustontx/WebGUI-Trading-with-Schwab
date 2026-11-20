@@ -669,6 +669,18 @@ _SESSIONS = ConfigFile(
             Field("sessions.curb.start", "Curb session start", "", kind="time"),
             Field("sessions.curb.end", "Curb session end", "", kind="time"),
         )),
+        Section("Half days",
+                "Sessions that close early, such as the day after Thanksgiving. "
+                "Listed, not worked out like the holidays, so add next year's "
+                "here. A listed date that does not trade is ignored. Read by the "
+                "Market read (its last reading is at the early close), the "
+                "homepage weather card, Traded volume and the Opening Scalp; "
+                "other screens still run to the regular close on a half day.", (
+            Field("early_close.days", "Half days", "YYYY-MM-DD.", kind="dates"),
+            Field("early_close.time", "Half days close at",
+                  "Central time: after the regular open and not after the "
+                  "regular close.", kind="time"),
+        )),
         _window("scan", "Auto-scan window",
                 "When the options service runs its 15-minute rescans.",
                 (OPTIONS, WEBGUI), extra=(
@@ -1345,14 +1357,6 @@ _SCALP = ConfigFile(
             Field("intraday.promotion_sessions", "Sessions to promote",
                   "Sessions of calls a group needs before it can be promoted.",
                   kind="int", min=1, max=1000, step=1),
-            Field("intraday.early_close_days", "Early-close days",
-                  "Sessions that close early (YYYY-MM-DD). On such a day no call "
-                  "is made whose entry plus the time stop would pass the early "
-                  "close, and the study leaves those slots out. Add next year's "
-                  "half days here.", kind="dates"),
-            Field("intraday.early_close_time", "Early close",
-                  "When an early-close session ends, Central time: after 08:30 "
-                  "and not after 15:00.", kind="time"),
         )),
         Section("Intraday blocks",
                 "The three parts of the day the study keeps apart. Every slot "
@@ -4062,6 +4066,12 @@ def cross_check(name, values):
             va, vb = values.get(a), values.get(b)
             if isinstance(va, str) and isinstance(vb, str) and va >= vb:
                 errs.append(f"{humanize(a[1])}: the start must be before the end.")
+        close = g("early_close", "time")
+        opens = g("sessions", "regular", "start") or "08:30"
+        ends = g("sessions", "regular", "end") or "15:00"
+        if isinstance(close, str) and not (str(opens) < close <= str(ends)):
+            errs.append("Half days: the early close must be after the regular open "
+                        "and not after the regular close.")
     if name == "trade_mgmt.toml":
         st, gb = g("protect", "trail_start"), g("protect", "trail_giveback")
         if _real(st) and _real(gb) and st > 0 and gb >= st:
@@ -4103,10 +4113,6 @@ def cross_check(name, values):
             errs.append("Intraday calls: the first call must not be after the last.")
         errs += _scalp_schedule_errors(first, last, g("intraday", "interval_min"),
                                        g("trade", "time_stop_min"))
-        close = g("intraday", "early_close_time")
-        if isinstance(close, str) and not "08:30" < close <= "15:00":
-            errs.append("Intraday calls: the early close must be after 08:30 and "
-                        "not after 15:00.")
         spans = [(g("intraday", "blocks", b, "start"), g("intraday", "blocks", b, "end"))
                  for b in ("morning", "midday", "afternoon")]
         if all(isinstance(t, str) for s in spans for t in s) and (

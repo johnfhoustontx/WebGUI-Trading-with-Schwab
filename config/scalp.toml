@@ -127,11 +127,9 @@ vwap_max_missing = 0.25
 min_brier_margin = 0.005
 # Sessions of calls a group needs before it can be promoted.
 promotion_sessions = 40
-# Sessions that close early (YYYY-MM-DD), and the time they close, Central. On
-# such a day no call is made whose entry + the time stop would pass the early
-# close, and the study leaves those slots out. Add next year's half days here.
-early_close_days = ["2026-11-27", "2026-12-24"]
-early_close_time = "12:00"
+# Half days are in config/sessions.toml [early_close] (moved 2026-11-19). On one
+# no call is made whose entry + the time stop would pass the early close, and the
+# study leaves those slots out.
 
 [intraday.blocks.morning]
 # The three parts of the day the study keeps apart. Each slot belongs to exactly
