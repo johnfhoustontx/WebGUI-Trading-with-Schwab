@@ -108,11 +108,11 @@ def test_bars_outside_the_regular_session_are_not_counted(cfg):
 def test_an_early_close_says_nothing_about_what_is_usual_later(cfg, monkeypatch):
     """A half day has no bars at 14:00, and counting its morning as that day's
     volume by 14:00 would drag usual down."""
-    real = vr._mc.regular_close_on
+    mc = vr._mc
     half = BEFORE[-1]
-    monkeypatch.setattr(vr._mc, "regular_close_on", lambda d: (
-        _at(d, 12, 0) if d == half else real(d)))
-    got = vr.symbol_reading("SPY", _history(1000, today_upto=(14, 0)), FRI, dt.time(14, 0), cfg)
+    monkeypatch.setattr(mc, "load_config", lambda: mc._merge(
+        mc._DEFAULTS, {"early_close": {"days": [half.isoformat()], "time": "12:00"}}))
+    got =vr.symbol_reading("SPY", _history(1000, today_upto=(14, 0)), FRI, dt.time(14, 0), cfg)
     assert got["baseline_sessions"] == 8 and got["pace"] == pytest.approx(1.0)
 
 

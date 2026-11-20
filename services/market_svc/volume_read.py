@@ -62,7 +62,7 @@ def phase_at(at) -> str:
         return CLOSED
     if at < _mc.regular_open_on(day):
         return BEFORE_OPEN
-    return SESSION if at < _mc.regular_close_on(day) else AFTER_CLOSE
+    return SESSION if at < _mc.session_close_on(day) else AFTER_CLOSE
 
 
 def due(at, last_key, cfg):
@@ -83,7 +83,7 @@ def due(at, last_key, cfg):
         key = f"{day} {phase}"
         return None if key == last_key else (key, None)
     step = cfg["refresh_min"]
-    close = _mc.regular_close_on(day)
+    close = _mc.session_close_on(day)
     # Bars count from the open, and the marks from the hour: a session opening on
     # a clock multiple of the step has the two line up, and the bar filter below
     # only ever counts a bar that has ended.
@@ -114,7 +114,7 @@ def session_bars(candles) -> dict:
         start = _dt.datetime.fromtimestamp(ms / 1000.0, _mc.CT)
         day = start.date()
         if not _mc.is_trading_day(day) or not (
-                _mc.regular_open_on(day) <= start < _mc.regular_close_on(day)):
+                _mc.regular_open_on(day) <= start < _mc.session_close_on(day)):
             continue
         out.setdefault(day, []).append((start, finite(c.get("open")),
                                         finite(c.get("close")), vol))
@@ -152,7 +152,7 @@ def symbol_reading(symbol, candles, day, clock, cfg) -> dict:
     for d in reversed(before):
         # An early close has no bars this late in the day, so it says nothing
         # about what is usual by now.
-        if _mc.regular_close_on(d).time() < clock:
+        if _mc.session_close_on(d).time() < clock:
             continue
         rows = _upto(sessions[d], clock)
         total = sum(r[3] for r in rows)
@@ -333,7 +333,7 @@ def build(candles_by_symbol, raw_sectors, at, cfg, *, ts, through=None) -> dict:
         for candles in candles_by_symbol.values():
             held.update(d for d in session_bars(candles) if d < today)
         day = max(held) if held else None
-        clock = _mc.regular_close_on(day).time() if day else None
+        clock = _mc.session_close_on(day).time() if day else None
     else:
         day = today
         clock = (through or at).time()

@@ -351,7 +351,7 @@ def _slot_time(now, interval_min):
         return None
     floored = now.replace(minute=now.minute // interval_min * interval_min,
                           second=0, microsecond=0)
-    if not (_mc.regular_open_on(day) < floored <= _mc.regular_close_on(day)):
+    if not (_mc.regular_open_on(day) < floored <= _mc.session_close_on(day)):
         return None
     return floored
 
@@ -378,13 +378,13 @@ def _on(date, slot):
 def is_final(date, slot) -> bool:
     """Whether ``slot`` is the session's last: the reading taken at the close."""
     at = _on(date, slot)
-    return at >= _mc.regular_close_on(at.date())
+    return at >= _mc.session_close_on(at.date())
 
 
 def next_slot(date, slot, interval_min):
     """The slot after ``slot``, or None when ``slot`` is the last of the day."""
     nxt = _on(date, slot) + _dt.timedelta(minutes=interval_min)
-    return nxt.strftime("%H:%M") if nxt <= _mc.regular_close_on(nxt.date()) else None
+    return nxt.strftime("%H:%M") if nxt <= _mc.session_close_on(nxt.date()) else None
 
 
 # ── a reading ────────────────────────────────────────────────────────────────

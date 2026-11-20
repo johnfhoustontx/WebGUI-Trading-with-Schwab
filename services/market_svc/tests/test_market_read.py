@@ -526,6 +526,30 @@ def test_next_slot_and_the_final_one():
     assert mr.is_final(MON, "14:45") is False
 
 
+HALF = "2026-11-27"            # the day after Thanksgiving: closes 12:00 CT
+
+
+@pytest.mark.parametrize("hhmm,want", [
+    ((11, 45), "11:45"), ((12, 0), "12:00"), ((12, 14), "12:00"),
+    ((12, 15), None), ((13, 7), None), ((15, 0), None),
+])
+def test_a_half_day_s_last_slot_is_its_early_close(hhmm, want):
+    assert mr.slot_due(_at(HALF, *hhmm), None, 15) == want
+
+
+def test_a_half_day_s_close_reading_is_final_and_has_no_next_slot():
+    assert mr.next_slot(HALF, "11:45", 15) == "12:00"
+    assert mr.next_slot(HALF, "12:00", 15) is None
+    assert mr.next_slot(HALF, "11:30", 30) == "12:00"
+    assert mr.is_final(HALF, "12:00") is True
+    assert mr.is_final(HALF, "11:45") is False
+
+
+def test_a_late_tick_after_a_half_day_s_close_publishes_nothing_more():
+    assert mr.slot_due(_at(HALF, 12, 20), "12:00", 15) is None
+    assert mr.slot_due(_at(HALF, 14, 0), "11:45", 15) is None
+
+
 # --- a reading -----------------------------------------------------------------
 
 def _inputs():
