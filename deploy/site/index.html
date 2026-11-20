@@ -90,7 +90,7 @@
   </nav>
 
   <!-- ─── Hero ─────────────────────────────────────────────────────────── -->
-  <section class="ns-wrap" style="padding-top: clamp(48px, 7vw, 104px); padding-bottom: clamp(40px, 6vw, 80px); display: flex; flex-wrap: wrap; gap: clamp(28px, 5vw, 72px); align-items: center;">
+  <section class="ns-wrap ns-hero">
     <div style="flex: 1 1 440px; min-width: 0;">
       <span class="ns-eyebrow" style="margin-bottom: 22px;">Dealer flow, measured</span>
       <h1 class="ns-h1">
@@ -107,6 +107,12 @@
         Nothing here places an order. Every position is paper, marked against the live market.
       </p>
     </div>
+    <!-- THE MARKET WEATHER CARD. Ships hidden and empty: assets/weather.js fills
+         it from weather.json (written by services/market_svc/site_weather.py after
+         each Market read slot), unhides it, and hides the mark below in its place.
+         With scripting off, no file, or a stale one, the hero is exactly the hero.
+         Design: docs/plans/2026-11-19-market-weather-card-design.md -->
+    <aside class="ns-weather" data-weather aria-label="Market weather" hidden></aside>
     <!-- The mark at hero scale. The level runs PAST the chevrons and past the
          mark's own box, so it reads as a price level crossing the page rather
          than as an icon floating in it — the same thing the app draws on every
@@ -339,5 +345,8 @@
 <!-- The trade ideas strip above. Hidden until this fills it; with scripting
      off, or before the first idea posts, the section simply is not there. -->
 <script src="assets/ideas.js" defer></script>
+<!-- The market weather card in the hero. Reads the clock data above, so it is
+     listed after market-clock.js (deploy/tests/test_site.py pins the order). -->
+<script src="assets/weather.js" defer></script>
 </body>
 </html>

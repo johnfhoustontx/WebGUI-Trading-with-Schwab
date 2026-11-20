@@ -1478,3 +1478,132 @@ body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
  * itself on a tab of its own, so an entry reads here as it was authored. An
  * entry with its own background covers this entirely. */
 .ns-report-frame[sandbox] { background: Canvas; }
+
+/* ─── The hero ──────────────────────────────────────────────────────────────
+ * Was inline on index.html's hero section; a class so the weather card can
+ * pull the hero up under the menu bar when it shows (.ns-hero--weather). */
+.ns-hero {
+  padding-top: clamp(48px, 7vw, 104px);
+  padding-bottom: clamp(40px, 6vw, 80px);
+  display: flex;
+  flex-wrap: wrap;
+  gap: clamp(28px, 5vw, 72px);
+  align-items: center;
+}
+.ns-hero.ns-hero--weather { padding-top: 20px; align-items: flex-start; }
+.ns-hero.ns-hero--weather > :first-child { padding-top: clamp(28px, 5vw, 84px); }
+.ns-hero-mark[hidden] { display: none; }
+
+/* ─── The market weather card ───────────────────────────────────────────────
+ * Drawn by assets/weather.js from weather.json. Warm amber is a tailwind, cold
+ * blue a headwind; the two also differ in lightness, so they read apart
+ * without colour. Design: docs/plans/2026-11-19-market-weather-card-design.md */
+.ns-weather {
+  flex: 0 1 380px;
+  min-width: 0;
+  max-width: 380px;
+  margin-left: auto;
+  --wx-amber: #f2b65a;
+  --wx-blue: #5b8fd9;
+  --wx-blue-text: #8fb8f2;
+  --wx-grey: #b2b6ca;
+  --wx-dim: #75798c;
+  --wx-moon: #d2cefd;
+  --wx-panel: #262a44;
+}
+.ns-weather[hidden] { display: none; }
+@media (max-width: 860px) {
+  .ns-weather { margin-left: 0; flex-basis: 100%; }
+}
+.ns-wx-card {
+  box-sizing: border-box;
+  padding: 20px;
+  border-radius: 18px;
+  border: 1px solid color-mix(in srgb, var(--color-text) 12%, transparent);
+  background: var(--color-surface);
+  color: var(--color-text);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+}
+.ns-wx-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ns-wx-eyebrow {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase;
+  color: var(--color-accent-400);
+}
+.ns-wx-live { width: 8px; height: 8px; border-radius: 50%; background: var(--wx-dim); }
+.ns-wx-live.is-on { background: #7ee0a8; }
+.ns-wx-stamp { font-size: 12px; color: var(--color-neutral-500); }
+
+.ns-wx-sky {
+  display: flex; align-items: center; gap: 18px;
+  padding: 18px; border-radius: 14px; background: var(--wx-panel);
+}
+.ns-wx-sky-showers { --wx-panel: #252a3c; }
+.ns-wx-sky-overcast, .ns-wx-sky-fog { --wx-panel: #262836; }
+.ns-wx-sky-fair { --wx-panel: #2a2a34; }
+.ns-wx-sky-clear { --wx-panel: #2c2a30; }
+.ns-wx-sky-moon { --wx-panel: #1f2238; }
+.ns-wx-icon { width: 84px; height: 84px; flex: 0 0 84px; display: block; }
+.ns-wx-svg { width: 100%; height: 100%; display: block; overflow: visible; }
+.ns-wx-line { fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.ns-wx-thin { fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.ns-wx-occlude { fill: var(--wx-panel); }
+.ns-wx-amber { color: var(--wx-amber); }
+.ns-wx-grey { color: var(--wx-grey); }
+.ns-wx-dim { color: var(--wx-dim); }
+.ns-wx-blue { color: var(--wx-blue); }
+.ns-wx-moon { color: var(--wx-moon); }
+.ns-wx-bolt { fill: var(--wx-amber); stroke: none; }
+.ns-wx-dot { fill: currentColor; stroke: none; }
+.ns-wx-words { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ns-wx-label { font-size: 18px; font-weight: 600; line-height: 1.3; }
+.ns-wx-temp { font-size: 46px; font-weight: 700; line-height: 1.05; letter-spacing: -0.02em; color: var(--color-neutral-300); }
+.ns-wx-temp.is-warm, .ns-wx-row-value.is-warm { color: var(--wx-amber); }
+.ns-wx-temp.is-cold, .ns-wx-row-value.is-cold { color: var(--wx-blue-text); }
+.ns-wx-sub { font-size: 12px; color: var(--color-neutral-500); }
+.ns-wx-headline { margin: 0; font-size: 17px; font-weight: 600; line-height: 1.38; color: var(--color-neutral-100); }
+
+.ns-wx-tally { display: flex; flex-direction: column; gap: 8px; }
+.ns-wx-bars { display: flex; gap: 4px; }
+.ns-wx-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--wx-dim); }
+.ns-wx-bar.is-tailwind { background: var(--wx-amber); }
+.ns-wx-bar.is-headwind { background: var(--wx-blue); }
+.ns-wx-bar.is-none { background: transparent; box-shadow: inset 0 0 0 1px var(--color-neutral-700); }
+.ns-wx-tally-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.ns-wx-tally-text { font-size: 12px; color: var(--wx-grey); }
+.ns-wx-chip {
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+  padding: 5px 10px; border-radius: 999px;
+  background: var(--color-accent-900); color: var(--color-accent-300);
+}
+
+.ns-wx-more { display: flex; flex-direction: column; gap: 12px; }
+.ns-wx-more[hidden] { display: none; }
+.ns-wx-rows { list-style: none; margin: 0; padding: 0; }
+.ns-wx-row {
+  display: flex; align-items: center; gap: 12px; padding: 9px 0;
+  border-top: 1px solid color-mix(in srgb, var(--color-text) 8%, transparent);
+}
+.ns-wx-row-icon { width: 22px; height: 22px; flex: 0 0 22px; color: var(--wx-grey); }
+.ns-wx-row-what { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+.ns-wx-row-name { font-size: 14px; font-weight: 500; }
+.ns-wx-row-sub { font-size: 12px; color: var(--color-neutral-500); }
+.ns-wx-row-value { font-size: 15px; font-weight: 600; white-space: nowrap; }
+.ns-wx-note { margin: 0; font-size: 11px; line-height: 1.5; color: var(--color-neutral-500); }
+
+.ns-wx-foot { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.ns-wx-toggle {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 14px;
+  border-radius: 10px; border: 1px solid color-mix(in srgb, var(--color-text) 18%, transparent);
+  background: transparent; color: var(--color-text);
+  font: inherit; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+.ns-wx-toggle:hover { border-color: var(--color-accent); }
+.ns-wx-toggle:focus-visible, .ns-wx-desk:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+.ns-wx-chevron { width: 16px; height: 16px; display: inline-block; }
+.ns-wx-toggle.is-open .ns-wx-chevron { transform: rotate(180deg); }
+.ns-wx-desk { font-size: 14px; font-weight: 600; padding: 12px 0; color: var(--color-accent-400); }
+.ns-wx-desk:hover { color: var(--color-accent-300); }

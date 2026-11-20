@@ -1673,3 +1673,46 @@ def test_the_generated_blog_is_never_committed():
         assert ignored(rel), f"{rel} is not gitignored"
     for rel in ("deploy/site/blog.html", "deploy/site/assets/blog.js"):
         assert not ignored(rel), f"{rel} is ignored, so it would never reach prod"
+
+
+# ── The market weather card (docs/plans/2026-11-19-market-weather-card-design.md) ──
+# assets/weather.js draws it from weather.json, which market_svc writes after each
+# Market read slot. The aside ships hidden and empty: with scripting off, or with no
+# file, the hero is exactly as before.
+def _weather_js():
+    return (SITE / "assets" / "weather.js").read_text("utf-8")
+
+
+def test_the_weather_card_ships_hidden_and_empty():
+    html = (SITE / "index.html").read_text("utf-8")
+    m = re.search(r'<aside class="ns-weather" data-weather[^>]*>(.*?)</aside>', html, re.S)
+    assert m, "the weather card's aside is missing"
+    assert " hidden" in m.group(0).split(">")[0]
+    assert m.group(1).strip() == ""
+
+
+def test_the_weather_card_sits_before_the_hero_mark():
+    html = (SITE / "index.html").read_text("utf-8")
+    assert html.index('class="ns-weather"') < html.index('class="ns-hero-mark"')
+
+
+def test_the_weather_script_loads_after_the_clock():
+    srcs = re.findall(r'<script src="([^"]+)" defer>', (SITE / "index.html").read_text("utf-8"))
+    assert "assets/weather.js" in srcs
+    assert srcs.index("assets/market-clock.js") < srcs.index("assets/weather.js")
+
+
+def test_the_weather_script_reaches_only_its_own_file_and_the_desk():
+    js = _weather_js()
+    assert re.findall(r'https?://[^\s"\'<>]+', js) == ["https://live.neuralstrike.co/desk"]
+    assert 'fetch("weather.json"' in js
+    assert "app.neuralstrike" not in js
+
+
+def test_the_weather_script_writes_no_file_text_as_html():
+    sets = re.findall(r"\.innerHTML\s*=\s*([^;]+);", _weather_js())
+    assert sets and all(s.strip().startswith("ICONS[") for s in sets)
+
+
+def test_the_weather_script_announces_nothing():
+    assert "aria-live" not in _weather_js()
