@@ -41,7 +41,9 @@ const cases = [
   ["yesterdays_file_mid_session_is_fog", file("2026-11-18", true, 90000), now("2026-11-19", 4, hm(12, 20)), "fog"],
   ["pre_first_slot_is_moon", file("2026-11-19", true, 60000, "15:00"), now("2026-11-20", 5, hm(9, 35)), "moon", "8:45 AM CT today"],
   ["pre_open_is_moon", file("2026-11-19", true, 50000, "15:00"), now("2026-11-20", 5, hm(7, 0)), "moon", "8:45 AM CT today"],
-  ["early_close_final_is_moon", file("2026-11-27", true, 5400, "12:00"), now("2026-11-27", 5, hm(13, 30)), "moon", "8:45 AM CT Monday"],
+  // The service does not write a 12:00 final today (half days are not modelled);
+  // this pins decide for the day it does.
+  ["final_before_regular_close_is_moon", file("2026-11-27", true, 5400, "12:00"), now("2026-11-27", 5, hm(13, 30)), "moon", "8:45 AM CT Monday"],
   ["evening_after_close_is_moon", file("2026-11-19", true, 10000, "15:00"), now("2026-11-19", 4, hm(19, 0)), "moon", "8:45 AM CT Friday"],
   ["dead_since_midday_hides_in_evening", file("2026-11-19", false, 20000, "12:00"), now("2026-11-19", 4, hm(19, 0)), "hide"],
   ["weekend_moon", file("2026-11-20", true, 100000, "15:00"), now("2026-11-21", 6, hm(10, 0)), "moon", "8:45 AM CT Monday"],

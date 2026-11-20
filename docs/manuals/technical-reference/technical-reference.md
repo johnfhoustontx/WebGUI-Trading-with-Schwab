@@ -2997,14 +2997,16 @@ only. The decision (`NS_WEATHER.decide`, checked by `node tools/check_weather_de
 CI has no node) uses the site's `NS_MARKET_CLOCK`:
 
 - **live:** today's file, not final, no older than two intervals.
-- **moon:** today's final file (this covers an early close the clock does not model),
+- **moon:** today's final file,
   or, until two intervals after the open, the previous trading day's final.
 - **fog:** in session with anything else.
 - **hide:** out of session and not the most recent session's final, a hidden file, an
   unknown `v`, or no file.
 
 **Known limitations.** The sky thresholds are starting guesses like the Market read's
-own. The card can lag a switch by one refetch.
+own. The card can lag a switch by one refetch. Half days are not modelled: `is_final`
+is true only at 15:00 CT, so after an early close the card stays `live` on frozen
+tiles until then (the Market read's own limitation above).
 
 ## Bought / sold estimate on flow alerts
 

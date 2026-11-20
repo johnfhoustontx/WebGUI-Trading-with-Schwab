@@ -753,8 +753,9 @@ changes when the Market read does: every 15 minutes from 08:45 to 15:00 CT.
 **When it changes face**
 
 - **After the close** the card shows a moon: the day's last sky, its final
-  temperature, and when the next forecast is due. On a half day this starts as soon
-  as the day's last reading is in.
+  temperature, and when the next forecast is due. On a half day (the day after
+  Thanksgiving, Christmas Eve) the Market read keeps its normal times, so the card
+  still reads *Live* after the early close and turns to the moon at 15:00 CT.
 - **Fog during the session** means readings have stopped arriving (more than two
   intervals late). The card says so and shows no sky.
 - **No card at all** (the homepage's own graphic in its place) means the Market read

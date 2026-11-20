@@ -518,6 +518,36 @@ def test_a_failed_write_is_retried_on_the_next_pass(bus, site_root, monkeypatch)
     assert len(calls) == 2
 
 
+def test_a_failing_card_write_pauses_rather_than_retrying_every_poll(bus, site_root, monkeypatch, _cfg):
+    """The poll is every three seconds; a site folder that stays unwritable must
+    not log a traceback and count a degrade twenty times a minute."""
+    from services.market_svc import site_weather
+    tries = []
+
+    def broken(payload, **kw):
+        tries.append(payload)
+        return False                       # publish() has already counted the degrade
+    monkeypatch.setattr(site_weather, "publish", broken)
+    state = {}
+    for sec in (1, 4, 7, 28):
+        scheduler.refresh_read(bus, state, now=_at(12, 46, sec))
+    assert len(tries) == 1
+    scheduler.refresh_read(bus, state, now=_at(12, 46, 32))      # past retry_sec = 30
+    assert len(tries) == 2
+
+
+def test_a_raising_card_build_pauses_too(bus, site_root, monkeypatch, _cfg):
+    from services.market_svc import site_weather
+    seen = []
+    monkeypatch.setattr(_degrade, "degraded", lambda area, **k: seen.append(area))
+    monkeypatch.setattr(site_weather, "regime_of",
+                        lambda bus: (_ for _ in ()).throw(RuntimeError("bus down")))
+    state = {}
+    for sec in (1, 4, 7, 28):
+        scheduler.refresh_read(bus, state, now=_at(12, 46, sec))
+    assert seen == ["market.weather"]
+
+
 def test_a_site_failure_does_not_cost_the_reading(bus, site_root, monkeypatch):
     from services.market_svc import site_weather
 

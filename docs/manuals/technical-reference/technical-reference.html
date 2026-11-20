@@ -5834,14 +5834,16 @@ only. The decision (<code>NS_WEATHER.decide</code>, checked by <code>node tools/
 CI has no node) uses the site's <code>NS_MARKET_CLOCK</code>:</p>
 <ul>
 <li><strong>live:</strong> today's file, not final, no older than two intervals.</li>
-<li><strong>moon:</strong> today's final file (this covers an early close the clock does not model),
+<li><strong>moon:</strong> today's final file,
   or, until two intervals after the open, the previous trading day's final.</li>
 <li><strong>fog:</strong> in session with anything else.</li>
 <li><strong>hide:</strong> out of session and not the most recent session's final, a hidden file, an
   unknown <code>v</code>, or no file.</li>
 </ul>
 <p><strong>Known limitations.</strong> The sky thresholds are starting guesses like the Market read's
-own. The card can lag a switch by one refetch.</p>
+own. The card can lag a switch by one refetch. Half days are not modelled: <code>is_final</code>
+is true only at 15:00 CT, so after an early close the card stays <code>live</code> on frozen
+tiles until then (the Market read's own limitation above).</p>
 <h2 id="bought-sold-estimate-on-flow-alerts">Bought / sold estimate on flow alerts</h2>
 <p><strong>Files:</strong> <code>services/options_svc/flow_sides.py</code> (pure arithmetic),
 <code>flow_sides_tick.py</code> (session state, the store, publishing), <code>flow_stream.py</code> (the

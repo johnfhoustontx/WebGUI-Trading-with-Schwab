@@ -140,8 +140,8 @@
     if (file.date === now.date && !file.final && now.epoch - file.ts <= 2 * interval * 60) {
       return { mode: "live" };
     }
-    /* A final reading from today is the close, even on an early-close afternoon
-       the clock does not know about. */
+    /* A final reading from today is the close. (The service marks only the
+       15:00 CT slot final: half days are not modelled anywhere yet.) */
     if (file.date === now.date && file.final) { return moon(); }
     if (trading && now.minutes >= open && now.minutes < close) {
       if (now.minutes < grace && file.final && file.date === stepTradingDay(now.date, clock, -1)) {
