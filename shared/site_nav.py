@@ -132,6 +132,7 @@ SITE_NAV_CSS = """
   --space-2: 5.6px;
   --space-3: 8.4px;
   --radius-md: 8px;
+  --ns-nav-pad: clamp(16px, 3vw, 40px);
   font-family: var(--font-body);
   font-size: 15px;
   line-height: 1.55;
@@ -149,7 +150,7 @@ SITE_NAV_CSS = """
   display: flex;
   align-items: center;
   gap: 20px;
-  padding: 16px clamp(16px, 3vw, 40px);
+  padding: 16px var(--ns-nav-pad);
   border-bottom: 1px solid var(--color-divider);
 }
 .ns-site-bar .ns-spacer { flex: 1; }

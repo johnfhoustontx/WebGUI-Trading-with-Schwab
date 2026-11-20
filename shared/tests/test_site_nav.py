@@ -149,7 +149,9 @@ def test_each_button_rule_matches_nocturne(selector):
 
 def test_the_tokens_are_the_sites_tokens():
     ours = {k: v for k, v in _OURS[".ns-site-bar"].items() if k.startswith("--")}
-    root = _NOCTURNE[":root"]
+    # nocturne.css holds the design tokens; site.css's own :root holds the
+    # menu's (--ns-nav-pad, which the hero reads too).
+    root = {**_NOCTURNE[":root"], **_SITE_CSS[":root"]}
     assert ours, "no tokens were read -- this would be vacuous"
     for name, value in ours.items():
         assert root.get(name) == value, name
