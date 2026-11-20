@@ -6,6 +6,7 @@ Design: docs/plans/2026-10-05-market-read-scorecard-design.md.
 import copy
 import datetime as dt
 import inspect
+import json
 import time
 from zoneinfo import ZoneInfo
 
@@ -418,3 +419,111 @@ def test_the_loop_refreshes_the_read_after_the_dashboard():
     assert src.index("handlers.publish, bus, payload") < src.index("refresh_read")
     # The hand-off to the executor is guarded like the two beside it.
     assert "except Exception" in src[src.index("refresh_read"):src.index("refresh_summary")]
+
+
+# --- the homepage weather card (site_weather) --------------------------------------
+
+def _card(site_root):
+    path = site_root / "weather.json"
+    return json.loads(path.read_text("utf-8")) if path.exists() else None
+
+
+def _count_publishes(monkeypatch):
+    from services.market_svc import site_weather
+    calls = []
+    real = site_weather.publish
+
+    def spy(payload, **kw):
+        calls.append(payload)
+        return real(payload, **kw)
+    monkeypatch.setattr(site_weather, "publish", spy)
+    return calls
+
+
+def test_a_slot_writes_the_card(bus, site_root):
+    assert scheduler.refresh_read(bus, {}, now=_at(12, 46)) == "12:45"
+    card = _card(site_root)
+    assert card["v"] == 1 and card["slot"] == "12:45" and "hidden" not in card
+    assert card["slot_label"] == "12:45 PM CT" and len(card["tally"]) == 7
+
+
+def test_the_card_carries_the_regime(bus, site_root):
+    from services.market_svc import site_weather
+    bus.cache_set(site_weather.REGIME_VIEW, {"label": "Balanced", "committed_label": "mean_reversion"})
+    scheduler.refresh_read(bus, {}, now=_at(12, 46))
+    assert _card(site_root)["regime"] == "Balanced"
+
+
+def test_the_card_is_not_rewritten_between_slots(bus, site_root, monkeypatch):
+    calls = _count_publishes(monkeypatch)
+    state = {}
+    scheduler.refresh_read(bus, state, now=_at(12, 46))
+    scheduler.refresh_read(bus, state, now=_at(12, 50))
+    scheduler.refresh_read(bus, state, now=_at(12, 59, 57))
+    assert len(calls) == 1
+    scheduler.refresh_read(bus, state, now=_at(13, 0, 3))
+    assert len(calls) == 2 and calls[-1]["slot"] == "13:00"
+
+
+def test_public_off_hides_between_slots(bus, _cfg, site_root):
+    state = {}
+    scheduler.refresh_read(bus, state, now=_at(12, 46))
+    _cfg["public"] = False
+    scheduler.refresh_read(bus, state, now=_at(12, 47))
+    assert _card(site_root) == {"v": 1, "hidden": True}
+    _cfg["public"] = True
+    scheduler.refresh_read(bus, state, now=_at(12, 48))
+    assert _card(site_root)["slot"] == "12:45"
+
+
+def test_switching_the_read_off_hides_the_card(bus, _cfg, site_root):
+    state = {}
+    scheduler.refresh_read(bus, state, now=_at(12, 46))
+    _cfg["enabled"] = False
+    scheduler.refresh_read(bus, state, now=_at(12, 47))
+    assert _card(site_root) == {"v": 1, "hidden": True}
+
+
+def test_weather_switch_off_hides_the_card(bus, _cfg, site_root):
+    state = {}
+    scheduler.refresh_read(bus, state, now=_at(12, 46))
+    _cfg["weather"]["enabled"] = False
+    scheduler.refresh_read(bus, state, now=_at(12, 47))
+    assert _card(site_root) == {"v": 1, "hidden": True}
+    assert _view(bus)["public"] is True               # the Desk's reading is untouched
+
+
+def test_a_restart_rewrites_the_card_once(bus, site_root, monkeypatch):
+    scheduler.refresh_read(bus, {}, now=_at(12, 46))
+    calls = _count_publishes(monkeypatch)
+    state = {}
+    scheduler.refresh_read(bus, state, now=_at(12, 50))
+    scheduler.refresh_read(bus, state, now=_at(12, 51))
+    assert len(calls) == 1 and calls[0]["slot"] == "12:45"
+
+
+def test_a_failed_write_is_retried_on_the_next_pass(bus, site_root, monkeypatch):
+    from services.market_svc import site_weather
+    results = [False, True]
+    calls = []
+
+    def flaky(payload, **kw):
+        calls.append(payload)
+        return results.pop(0)
+    monkeypatch.setattr(site_weather, "publish", flaky)
+    state = {}
+    scheduler.refresh_read(bus, state, now=_at(12, 46))
+    scheduler.refresh_read(bus, state, now=_at(12, 47))
+    scheduler.refresh_read(bus, state, now=_at(12, 48))
+    assert len(calls) == 2
+
+
+def test_a_site_failure_does_not_cost_the_reading(bus, site_root, monkeypatch):
+    from services.market_svc import site_weather
+
+    def boom(payload, **kw):
+        raise RuntimeError("disk full")
+    monkeypatch.setattr(site_weather, "publish", boom)
+    monkeypatch.setattr(_degrade, "degraded", lambda area: None)
+    assert scheduler.refresh_read(bus, {}, now=_at(12, 46)) == "12:45"
+    assert _view(bus)["slot"] == "12:45"

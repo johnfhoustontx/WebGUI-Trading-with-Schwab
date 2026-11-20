@@ -15,8 +15,19 @@ clock, because this file cannot know that its writer has died.
 
 Design: docs/plans/2026-11-19-market-weather-card-design.md.
 """
+import json
+import os
+import pathlib
+import tempfile
+
+import repo_paths
+from services import _degrade
 from services.market_svc import market_read
 from shared.numeric import finite
+
+SITE_ROOT = pathlib.Path(repo_paths.SITE_ROOT)   # tests redirect this
+FILE = "weather.json"
+REGIME_VIEW = "cache:sentiment:regime"
 
 HIDDEN = {"v": 1, "hidden": True}
 
@@ -283,3 +294,38 @@ def build(reading: dict | None, regime: dict | None, cfg: dict) -> dict:
         "regime": label if isinstance(label, str) else None,
         "readings": _readings(rows),
     }
+
+
+# ── the bus and the file ─────────────────────────────────────────────────────
+def regime_of(bus) -> dict | None:
+    """The sentiment regime's payload, or None when it is absent or malformed."""
+    env = bus.cache_get(REGIME_VIEW)
+    payload = getattr(env, "payload", None)
+    return payload if isinstance(payload, dict) else None
+
+
+def _write_atomic(path: pathlib.Path, data: bytes) -> None:
+    """The same shape as ``site_ideas._write_atomic``: a reader never sees half
+    a file, and the temp file (``.weather.json.*``, gitignored) never outlives
+    a failure."""
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.chmod(tmp, 0o644)          # served by Caddy, a different user
+        os.replace(tmp, path)
+    except BaseException:
+        pathlib.Path(tmp).unlink(missing_ok=True)
+        raise
+
+
+def publish(payload: dict, *, root: pathlib.Path | None = None) -> bool:
+    """Write ``payload`` as the site's weather.json. Never raises: a site write
+    must never cost the Market read. False (and a degrade) on any failure."""
+    try:
+        path = (pathlib.Path(root) if root is not None else SITE_ROOT) / FILE
+        _write_atomic(path, json.dumps(payload, ensure_ascii=False, indent=1).encode("utf-8"))
+        return True
+    except Exception:
+        _degrade.degraded("market.weather")
+        return False

@@ -310,3 +310,31 @@ def test_a_positive_temperature_carries_its_plus():
     out = site_weather.build(r, None, CFG)
     assert out["readings"][0]["value"] == "+1.4° · +0.1°"
     assert out["temp"]["tone"] == "warm"
+
+
+# ── writing the file ─────────────────────────────────────────────────────────
+def test_publish_writes_atomically_and_readably(site_root):
+    assert site_weather.publish({"v": 1, "sky": "fog"}) is True
+    assert json.loads((site_root / "weather.json").read_text("utf-8"))["sky"] == "fog"
+    assert not list(site_root.glob(".weather.json.*"))
+
+
+def test_publish_can_be_pointed_elsewhere(tmp_path):
+    assert site_weather.publish({"v": 1}, root=tmp_path) is True
+    assert json.loads((tmp_path / "weather.json").read_text("utf-8")) == {"v": 1}
+
+
+def test_publish_never_raises(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(site_weather._degrade, "degraded", lambda area: calls.append(area))
+    assert site_weather.publish({"v": 1}, root=tmp_path / "missing" / "dir") is False
+    assert calls == ["market.weather"]
+    assert not (tmp_path / "missing").exists()
+
+
+def test_the_regime_is_read_from_the_bus():
+    from shared.bus import Bus
+    b = Bus()
+    assert site_weather.regime_of(b) is None
+    b.cache_set(site_weather.REGIME_VIEW, {"label": "Stressed", "committed_label": "crisis"})
+    assert site_weather.regime_of(b) == {"label": "Stressed", "committed_label": "crisis"}

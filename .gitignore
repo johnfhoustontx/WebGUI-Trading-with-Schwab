@@ -147,3 +147,10 @@ deploy/site/blog.json
 # refuses a dirty tree. Each writer sweeps its own at the next start.
 deploy/site/.blog.json.*.tmp
 deploy/site/.ideas.json.*
+
+# The homepage weather card, rewritten by services/market_svc/site_weather.py after
+# each Market read slot on the box that serves the site, through a temporary name
+# beside itself. Same reason as ideas.json: tracked, the first write would dirty
+# prod's tree and tools/promote.sh refuses a dirty tree. Regenerable, so not backed up.
+deploy/site/weather.json
+deploy/site/.weather.json.*

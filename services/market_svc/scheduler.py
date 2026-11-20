@@ -28,7 +28,7 @@ from zoneinfo import ZoneInfo
 
 from services import _degrade, _heartbeat
 from services.market_svc import (compute, handlers, holdings, market_read, report_summary,
-                                 volume_read)
+                                 site_weather, volume_read)
 from shared import market_calendar as mc
 from shared import market_read_config
 from shared.numeric import finite
@@ -170,6 +170,29 @@ def _retraction(today, ts) -> dict:
     return {"enabled": False, "date": today, "ts": ts, "public": False}
 
 
+def _sync_weather(bus, state, cfg) -> None:
+    """Bring the homepage weather card (``site_weather``) in line with the
+    reading that is up and the switches, writing only when one of them changed.
+
+    Called on every ``refresh_read`` pass once ``cfg`` is loaded, so a switch
+    reaches the site within a poll, not at the next slot. The signature is
+    remembered only after a write that succeeded: a failed write is owed again
+    on the next pass. Runs AFTER the reading's own publish and catches
+    everything, so the card can never cost the Desk its reading."""
+    try:
+        last = state.get("last") if isinstance(state.get("last"), dict) else None
+        sig = (None if last is None else tuple(last.get(k) for k in
+                                               ("date", "slot", "ts", "enabled", "public")),
+               cfg["weather"]["enabled"] is True)
+        if state.get("weather_sig") == sig:
+            return
+        payload = site_weather.build(last, site_weather.regime_of(bus), cfg)
+        if site_weather.publish(payload):
+            state["weather_sig"] = sig
+    except Exception:
+        _degrade.degraded("market.weather")
+
+
 def refresh_read(bus, state, now=None, wall=None):
     """Publish the Market read when a clock slot is due; return the slot, or None.
 
@@ -205,6 +228,7 @@ def refresh_read(bus, state, now=None, wall=None):
                 # owed again, not forgotten.
                 handlers.publish_read(bus, _retraction(today, stamp))
                 state["last"] = _retraction(today, stamp)
+            _sync_weather(bus, state, cfg)
             return None
         last_slot = last.get("slot") if up and last.get("date") == today else None
         slot = market_read.slot_due(at, last_slot, cfg["interval_min"])
@@ -213,6 +237,7 @@ def refresh_read(bus, state, now=None, wall=None):
                 flagged = {**last, "public": cfg["public"] is True}
                 handlers.publish_read(bus, flagged)
                 state["last"] = flagged
+            _sync_weather(bus, state, cfg)
             return None
         wall = time.time() if wall is None else wall
         inputs = _read_inputs(bus, today, wall, cfg)
@@ -220,6 +245,7 @@ def refresh_read(bus, state, now=None, wall=None):
                                     ts=stamp, previous=last if up else None)
         handlers.publish_read(bus, reading)
         state["last"] = reading
+        _sync_weather(bus, state, cfg)
         return slot
     except Exception:
         _degrade.degraded("market.read")
