@@ -2999,6 +2999,21 @@ _MARKET_READ = ConfigFile(
                   "The Volume row reads No reading past this.",
                   kind="int", unit="sec", min=60, max=3600, step=30),
         )),
+        Section("Homepage weather card", "The card at the top right of neuralstrike.co, "
+                "drawn from each reading. It follows the public switch above.", (
+            Field("weather.enabled", "Show the weather card",
+                  "Off hides the card on the homepage within a few seconds.", kind="bool"),
+            Field("weather.min_readings", "Fog with fewer rows read than",
+                  "Of the seven rows. Too few readings shows Fog instead of a sky.",
+                  kind="int", min=1, max=7, step=1),
+            Field("weather.storm_headwinds", "Severe storm at this many headwinds",
+                  "A Stressed regime also makes a storm when headwinds outnumber "
+                  "tailwinds.", kind="int", min=1, max=7, step=1),
+            Field("weather.clear_tailwinds", "Clear skies at this many tailwinds",
+                  "And no headwind at all.", kind="int", min=1, max=7, step=1),
+            Field("weather.refetch_sec", "An open homepage re-reads the card every",
+                  "", kind="int", unit="sec", min=60, max=3600, step=30),
+        )),
     ),
 )
 

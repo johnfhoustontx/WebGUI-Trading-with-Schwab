@@ -224,3 +224,34 @@ def test_a_scalar_where_the_volume_table_belongs_falls_back(monkeypatch):
 def test_the_volume_symbols_must_be_a_list_of_names(monkeypatch, bad):
     _with(monkeypatch, volume={"symbols": bad})
     assert mr.load()["volume"]["symbols"] == ["SPY", "QQQ"]
+
+
+# ── [weather]: the homepage card (docs/plans/2026-11-19-market-weather-card-design.md)
+def test_weather_defaults():
+    assert mr.load()["weather"] == {"enabled": True, "min_readings": 4, "storm_headwinds": 5,
+                                    "clear_tailwinds": 5, "refetch_sec": 300}
+
+
+@pytest.mark.parametrize("key,bad", [("min_readings", 0), ("min_readings", 8),
+                                     ("storm_headwinds", "5"), ("clear_tailwinds", 9.5),
+                                     ("refetch_sec", 30), ("refetch_sec", 99999)])
+def test_weather_bad_values_fall_back(monkeypatch, key, bad):
+    monkeypatch.setattr(mr, "load_raw", lambda: {"weather": {key: bad}})
+    assert mr.load()["weather"][key] == mr.DEFAULTS["weather"][key]
+
+
+def test_weather_values_in_range_are_read(monkeypatch):
+    _with(monkeypatch, weather__min_readings=3, weather__storm_headwinds=6,
+          weather__clear_tailwinds=4, weather__refetch_sec=120)
+    w = mr.load()["weather"]
+    assert (w["min_readings"], w["storm_headwinds"], w["clear_tailwinds"], w["refetch_sec"]) == (3, 6, 4, 120)
+
+
+def test_weather_switch_is_on_only_for_literal_true(monkeypatch):
+    monkeypatch.setattr(mr, "load_raw", lambda: {"weather": {"enabled": "yes"}})
+    assert mr.load()["weather"]["enabled"] is False
+
+
+def test_a_scalar_weather_does_not_take_the_table_down(monkeypatch):
+    monkeypatch.setattr(mr, "load_raw", lambda: {"weather": 5})
+    assert mr.load()["weather"]["min_readings"] == 4

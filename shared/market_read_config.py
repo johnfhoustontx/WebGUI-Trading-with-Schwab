@@ -45,6 +45,10 @@ DEFAULTS = {
                "heavy_ratio": 1.2, "light_ratio": 0.8,
                "up_share_strong": 0.55, "up_share_weak": 0.45, "min_sectors": 8,
                "refresh_min": 5, "settle_sec": 90, "stale_after_sec": 600},
+    # The homepage weather card, written from each reading by market_svc's
+    # site_weather. Design: docs/plans/2026-11-19-market-weather-card-design.md.
+    "weather": {"enabled": True, "min_readings": 4, "storm_headwinds": 5,
+                "clear_tailwinds": 5, "refetch_sec": 300},
 }
 
 load_raw, reset_cache = toml_loader(MARKET_READ_TOML, DEFAULTS, label="market_read.toml")
@@ -167,4 +171,16 @@ def load() -> dict:
         "min_contracts": (int(floor) if floor is not None and floor >= 1
                           else d["flow"]["min_contracts"])}
     out["volume"] = _volume(raw)
+    out["weather"] = _weather(raw)
+    return out
+
+
+def _weather(raw) -> dict:
+    d = DEFAULTS["weather"]
+    w = _table(raw, "weather")
+    out = {"enabled": w.get("enabled") is True}
+    # Seven rows in a reading, so each count is 1..7.
+    for key in ("min_readings", "storm_headwinds", "clear_tailwinds"):
+        out[key] = _whole(w.get(key), d[key], 1, 7)
+    out["refetch_sec"] = _whole(w.get("refetch_sec"), d["refetch_sec"], 60, 3600)
     return out

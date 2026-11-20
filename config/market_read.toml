@@ -71,3 +71,13 @@ refresh_min = 5          # fetch once per this many minutes in the session
 settle_sec = 90          # ...this long after the mark, so the bar has closed. At least 60:
                          # Schwab refuses calls in the minute after the hour and half hour.
 stale_after_sec = 600    # the Volume row is "No reading" when the view is older than this
+
+[weather]
+# The market weather card at the top right of neuralstrike.co, written by the market
+# service to deploy/site/weather.json after each reading. Code writes every word.
+# Design: docs/plans/2026-11-19-market-weather-card-design.md.
+enabled = true           # write the card; false hides it on the homepage at the next poll
+min_readings = 4         # fewer rows with a reading than this (of 7) shows Fog
+storm_headwinds = 5      # this many headwinds make a Severe storm on their own
+clear_tailwinds = 5      # this many tailwinds, and no headwind, make Clear skies
+refetch_sec = 300        # how often an open homepage re-reads the card. 60 to 3600.
