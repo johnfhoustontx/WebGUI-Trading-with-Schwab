@@ -286,7 +286,7 @@
     var hero = aside.parentNode;
     var mark = document.querySelector(".ns-hero-mark");
     var file = null;
-    var open = false;
+    var open = true;                            /* the readings show until folded away */
     var shown = "";
 
     var show = function (on) {

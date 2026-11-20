@@ -87,11 +87,14 @@ a:hover { color: var(--color-accent-300); text-decoration: underline; }
 }
 
 /* ─── 3. Navigation ──────────────────────────────────────────────────── */
+/* The menu bar's side padding, read by the hero too: the weather card's right
+ * edge lines up with the Live Desk button's (.ns-hero--weather below). */
+:root { --ns-nav-pad: clamp(16px, 3vw, 40px); }
 .ns-nav {
   display: flex;
   align-items: center;
   gap: 20px;
-  padding: 16px clamp(16px, 3vw, 40px);
+  padding: 16px var(--ns-nav-pad);
   border-bottom: 1px solid var(--color-divider);
 }
 .ns-nav-tall { gap: 24px; padding: 18px clamp(20px, 5vw, 72px); }
@@ -1492,6 +1495,24 @@ body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
 }
 .ns-hero.ns-hero--weather { padding-top: 20px; align-items: flex-start; }
 .ns-hero.ns-hero--weather > :first-child { padding-top: clamp(28px, 5vw, 84px); }
+/* With the menu on one row (above 960px, see the nav's media rules), the card's
+ * right edge is the Live Desk button's. The menu bar runs the full width with
+ * --ns-nav-pad at its sides, while .ns-wrap is capped at 1200px and centred, so
+ * the hero drops the cap: its left padding keeps the headline exactly where
+ * .ns-wrap put it (a percentage padding is of the page's width), its right
+ * padding is the menu bar's, and the headline column keeps its old width. */
+@media (min-width: 961px) {
+  .ns-hero.ns-hero--weather {
+    max-width: none;
+    padding-left: max(clamp(20px, 5vw, 72px),
+                      calc((100% - 1200px) / 2 + clamp(20px, 5vw, 72px)));
+    padding-right: var(--ns-nav-pad);
+  }
+  .ns-hero.ns-hero--weather > :first-child {
+    max-width: max(440px, calc(min(100vw, 1200px) - 2 * clamp(20px, 5vw, 72px)
+                               - 380px - clamp(28px, 5vw, 72px)));
+  }
+}
 .ns-hero-mark[hidden] { display: none; }
 
 /* ─── The market weather card ───────────────────────────────────────────────

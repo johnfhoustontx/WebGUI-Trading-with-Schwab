@@ -4,7 +4,16 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-19 (**Half days in the market calendar.**)
+**Last updated:** 2026-11-19 (**The weather card opens expanded, lined up with Live Desk.**)
+
+- **What.** The homepage card shows its six readings from the first draw (the toggle
+  still folds them away), and above 960px its right edge is the Live Desk button's. The
+  menu bar runs the full width with `--ns-nav-pad` (new, in `site.css`) at its sides
+  while the hero is a capped, centred `.ns-wrap`; with the card showing, the hero drops
+  the cap, keeps the headline where it was, and takes the menu bar's right padding.
+  Measured in the browser at 980, 1100, 1440 and 1920px: the two right edges are equal.
+
+**Prior —** 2026-11-19 (**Half days in the market calendar.**)
 
 - **What.** `config/sessions.toml` gains `[early_close]` (`days`: 2026-11-27, 2026-12-24,
   2027-11-26; `time`: 12:00 CT) and `shared/market_calendar.py` gains

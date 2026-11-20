@@ -728,8 +728,9 @@ well: with that off, the public Desk shows the row as *Not shown on this screen*
 #### The market weather card on the homepage {#market-weather-card}
 
 The public homepage (neuralstrike.co) shows the latest Market read as a weather
-report. The card sits at the top right, under the menu bar; on a phone it sits below
-the headline. It is a picture of the same seven rows, not a new reading, and it
+report. The card sits at the top right, under the menu bar, its right edge in line
+with the Live Desk button; on a phone, or a window narrow enough that the menu takes two
+rows, it sits below the headline. It is a picture of the same seven rows, not a new reading, and it
 changes when the Market read does: every 15 minutes from 08:45 to 15:00 CT.
 
 - **The sky** comes from the count of tailwinds and headwinds. In order, the first
@@ -746,7 +747,8 @@ changes when the Market read does: every 15 minutes from 08:45 to 15:00 CT.
   on the board fell or rose, and where the VIX stands.
 - **The coloured bar** is the seven rows in order: amber for a tailwind, blue for a
   headwind, grey for neutral, an empty outline for no reading.
-- **Show the readings** opens six rows: temperature (the two indexes),
+- **The six readings** show under the bar, and **Hide the readings** folds them
+  away: temperature (the two indexes),
   rain coverage (markets falling), wind (the VIX), pressure (SPY against the gamma
   flip), umbrellas : sunglasses (puts to calls in the flow), and shelter (bonds and
   credit). A row with no reading is left out.

@@ -84,7 +84,9 @@ publishes, which is what makes it buildable: the card is a translation of the
    the toggle is impossible, and it would be one more renderer to keep in step.
 
 The operator chose the compact card with readings on request (over the full card,
-and over compact-only).
+and over compact-only), then, on seeing it built (2026-11-19), asked for it to stay
+expanded and for its right edge to line up with the Live Desk menu button: the
+readings now show from the first draw and the toggle folds them away.
 
 ## The design
 
@@ -237,8 +239,8 @@ Matches the mockup's compact state:
 - Headline (one sentence, about two lines).
 - Tally strip: seven bars in `ROW_KEYS` order, amber / blue / grey / outlined, with
   the text tally and the regime chip.
-- Footer: a real `<button aria-expanded>` "Show the readings" that unfolds the rows
-  in place, and "Live Desk →" to `https://live.neuralstrike.co/desk`.
+- Footer: a real `<button aria-expanded>` that folds the rows away ("Hide the
+  readings") and back ("Show the readings"), open on the first draw, and "Live Desk →" to `https://live.neuralstrike.co/desk`.
 - Expanded: the readings list and a one-line footnote ("From the Market read at
   3:00 PM CT. Measured readings, not a forecast.").
 - Phone width: the hero wraps and the card drops below the headline, full width up
@@ -272,8 +274,8 @@ Each key gets a `webgui/config_schema.py` entry (Settings → Configuration).
 
 ## Decisions and who made them
 
-- **Theirs:** a quick read of today; compact with readings on request; top right under
-  the menu bar.
+- **Theirs:** a quick read of today; compact with readings on request, then expanded
+  from the first draw; top right under the menu bar, right edge on the Live Desk button's.
 - **Mine, to check:** the sky rules and their thresholds; the regime escalating only
   when `H > T`; fog decided in the browser; the card replacing the hero mark rather
   than sitting above it; the warm/cold palette; the headline phrase table; leaving

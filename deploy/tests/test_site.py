@@ -1733,3 +1733,22 @@ def test_both_clock_readers_end_a_half_day_at_its_early_close():
     for name in ("assets/market-glow.js", "assets/weather.js"):
         js = _text(name)
         assert "clock.earlyCloses[now.date]" in js, f"{name} ignores the half days"
+
+
+def test_the_weather_card_opens_with_its_readings_shown():
+    """The operator's call (2026-11-19): the card stays expanded. The toggle is
+    kept so a visitor can still fold the six rows away."""
+    assert re.search(r"var open = true;", _weather_js())
+
+
+def test_the_weather_card_s_right_edge_is_the_menu_bar_s():
+    """The card's right edge lines up with the Live Desk button's. The menu bar
+    runs the full width with its own side padding while the hero is a capped,
+    centred .ns-wrap, so the hero drops the cap while the card shows and takes
+    the menu bar's right padding from ONE variable both rules read."""
+    css = _css("assets/site.css")
+    assert re.search(r"--ns-nav-pad:\s*clamp\(16px, 3vw, 40px\)", css)
+    nav = re.search(r"\n\.ns-nav \{(.*?)\}", css, re.S).group(1)
+    assert "var(--ns-nav-pad)" in nav
+    hero = re.search(r"\.ns-hero\.ns-hero--weather \{([^}]*max-width: none[^}]*)\}", css)
+    assert hero and "padding-right: var(--ns-nav-pad)" in hero.group(1)
