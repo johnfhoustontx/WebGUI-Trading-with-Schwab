@@ -109,6 +109,63 @@ def test_pricehistory_sends_the_same_parameters_as_before(gw):
                             "needExtendedHoursData": "false"}
 
 
+# Schwab ends a price-history series with no endDate at the PREVIOUS business
+# day's close, so a minute series asked for during the session never held one
+# of today's bars (measured on prod 2026-11-20: "1 day of 15-minute bars" at
+# 09:40 CT was 11-19 08:30-14:45). Once the session has opened the route sends
+# endDate = now; Schwab then answers through the latest bar.
+FRI = dt.date(2026, 11, 20)
+
+
+def _minute(gw, monkeypatch, now, **kw):
+    monkeypatch.setattr(schwab_proxy, "_now_ct", lambda: now)
+    g = gw(served=ms.Served("pass", 0.0, data={}))
+    schwab_proxy.get_price_history(
+        Req("x"), symbol="SPY", periodType="day", period=kw.pop("period", 1),
+        frequencyType=kw.pop("frequencyType", "minute"), frequency=15,
+        needExtendedHoursData=False, **kw)
+    return g.seen[0][1]
+
+
+def test_a_minute_series_in_the_session_ends_now(gw, monkeypatch):
+    now = dt.datetime(2026, 11, 20, 9, 40, 12, 500000, tzinfo=CT)
+    sent = _minute(gw, monkeypatch, now)
+    assert sent["endDate"] == int(now.timestamp() * 1000)
+    assert {k: v for k, v in sent.items() if k != "endDate"} == {
+        "symbol": "SPY", "periodType": "day", "period": 1,
+        "frequencyType": "minute", "frequency": 15, "needExtendedHoursData": "false"}
+
+
+def test_a_minute_series_after_the_close_still_ends_now(gw, monkeypatch):
+    now = dt.datetime(2026, 11, 20, 18, 0, tzinfo=CT)
+    assert _minute(gw, monkeypatch, now)["endDate"] == int(now.timestamp() * 1000)
+
+
+@pytest.mark.parametrize("now", [
+    dt.datetime(2026, 11, 20, 8, 29, 59, tzinfo=CT),   # before today's open
+    dt.datetime(2026, 11, 20, 3, 0, tzinfo=CT),
+    dt.datetime(2026, 11, 21, 12, 0, tzinfo=CT),       # Saturday
+    dt.datetime(2026, 11, 26, 12, 0, tzinfo=CT)])      # Thanksgiving
+def test_before_the_open_and_on_a_closed_day_a_minute_series_is_unchanged(
+        gw, monkeypatch, now):
+    # Schwab's own default then IS the last session, which is what such a
+    # caller has always been given. An endDate in a day with no bars yet was
+    # not measured, so it is not sent.
+    assert "endDate" not in _minute(gw, monkeypatch, now)
+
+
+def test_a_daily_series_never_gains_an_end_date(gw, monkeypatch):
+    # The daily bar store keys on these parameters, and today's daily bar is
+    # composed or settled by its own rules.
+    now = dt.datetime(2026, 11, 20, 9, 40, tzinfo=CT)
+    assert "endDate" not in _minute(gw, monkeypatch, now, frequencyType="daily")
+
+
+def test_the_now_clock_is_central():
+    assert schwab_proxy._now_ct().tzinfo is not None
+    assert schwab_proxy._now_ct().utcoffset() == dt.datetime.now(CT).utcoffset()
+
+
 def test_an_upstream_error_becomes_the_same_http_error_as_before(gw):
     gw(error=ms.UpstreamError(429, "slow down"))
     with pytest.raises(HTTPException) as err:

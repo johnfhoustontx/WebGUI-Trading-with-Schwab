@@ -575,9 +575,9 @@ is in git; `--install` also arms the timers). Start order: Redis (a system unit)
   `q["quote"][…]` yields `None` for every symbol with no error. A `0.00%` cell is
   not proof of a flat tape; only an omitted symbol is a real absence.
 - ⚠ Schwab price history with no `endDate` ENDS AT THE PREVIOUS BUSINESS DAY'S
-  CLOSE, and the proxy's `/pricehistory` route sends none: a caller that needs
-  today's minute bars goes through `/passthrough` with `endDate` (as
-  `market_svc.compute.fetch_bars` and `scalp_fetch` do).
+  CLOSE. The proxy's `/pricehistory` adds `endDate` = now to a MINUTE series once
+  today's session has opened (`_minute_end_ms`); before the open, on a closed
+  day and for a daily series it sends none. A `/passthrough` call sets its own.
 - A tool that calls the proxy's `/passthrough` by hand (`tools/scalp_backfill.py`)
   needs the stack's `.env` loaded (`set -a; . ./.env; set +a`): without
   `PROXY_SHARED_SECRET` every request is a 401 and nothing is written.

@@ -4,7 +4,23 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-20 (**Traded volume refreshes in the session again.**)
+**Last updated:** 2026-11-20 (**Minute bars through the proxy include today.**)
+
+- **What.** Schwab ends a price-history series sent with no `endDate` at the previous
+  business day's close, and the proxy's `/pricehistory` sent none, so every minute series
+  asked for during or after a session ended the day before. Measured on prod at 09:40 CT:
+  "1 day of 15-minute bars" was 11-19 08:30-14:45, and 2, 5 and 10 days likewise. Who read
+  yesterday as today: the sentiment Day gauge's intraday frames (its `price_now` was
+  yesterday's close, and `_session_frame` had no bars of today), the options Replay and
+  Expected Move charts in their intraday modes, the site ideas' minute prices, and the
+  options simulator's minute history. The route now adds `endDate` = now to a minute series
+  once today's regular session has opened (`schwab_proxy._minute_end_ms`). Before the open,
+  on a closed day and for a daily series it sends none, as before: Schwab's default is then
+  the last session, and an `endDate` inside a day with no bars yet was not measured. Probed
+  with `endDate` on prod: period 1/3/10 at 5/15/30 minutes all ended at the latest bar
+  today; a Saturday `endDate` gave Friday. Tests: five in `test_market_handlers.py`.
+
+**Prior —** 2026-11-20 (**Traded volume refreshes in the session again.**)
 
 - **What.** `cache:market:volume` never refreshed after the open on a day the market
   service had already published its pre-open view, so the Market read's Volume row read

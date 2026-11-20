@@ -951,6 +951,31 @@ def get_option_chain(
         return _served(lambda: _GATEWAY.chains(params, _caller(request), maxAge))
 
 
+def _now_ct() -> datetime:
+    return datetime.now(CENTRAL_TZ)
+
+
+def _minute_end_ms(frequency_type, now_ct) -> Optional[int]:
+    """The ``endDate`` (epoch ms) a MINUTE series is sent with, or None.
+
+    Schwab ends a series sent with no ``endDate`` at the PREVIOUS business day's
+    close, so during and after a session no caller ever saw that session's own
+    bars (measured on prod 2026-11-20). Once today's regular session has opened
+    it is ``now``, and Schwab answers through the latest bar, keeping ``period``
+    trading days with today counted as one. Before the open and on a day with no
+    session it is None: Schwab's default is then the last session, which is what
+    such a request has always had, and an ``endDate`` in a day with no bars yet
+    was not measured. A daily series never gets one: the daily bar store keys on
+    its parameters, and today's daily bar has rules of its own."""
+    if str(frequency_type) != "minute":
+        return None
+    today = now_ct.date()
+    if (not _market_calendar.is_trading_day(today)
+            or now_ct < _market_calendar.regular_open_on(today)):
+        return None
+    return int(now_ct.timestamp() * 1000)
+
+
 @app.get("/pricehistory")
 def get_price_history(
     request: Request,
@@ -967,6 +992,9 @@ def get_price_history(
         "frequencyType": frequencyType, "frequency": frequency,
         "needExtendedHoursData": str(needExtendedHoursData).lower(),
     }
+    end = _minute_end_ms(frequencyType, _now_ct())
+    if end is not None:
+        params["endDate"] = end
     # Schwab's price-history endpoint is /pricehistory?symbol=… — the symbol lives
     # in the query string (already in ``params``), not the path. A prior
     # ``/{symbol}/pricehistory`` first-attempt was a guaranteed 404 that fell back

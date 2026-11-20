@@ -76,8 +76,8 @@ bucket, so the range figures are a guide and are not printed by the code.
 - The fetch asks for `needExtendedHoursData=false`: the bars are the regular session
   only (78 a day, 08:30 to 14:55 CT).
 - It goes through `/passthrough` with `endDate` = now. Without an `endDate` Schwab ends
-  the series at the previous business day's close, and the proxy's `/pricehistory` route
-  sends none, so until 2026-11-20 no session's own bars ever came back.
+  the series at the previous business day's close, and until 2026-11-20 the proxy's
+  `/pricehistory` route sent none, so no session's own bars ever came back.
 
 ## Where each figure comes from, and how often
 

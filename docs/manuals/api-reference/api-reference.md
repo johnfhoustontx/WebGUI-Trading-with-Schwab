@@ -1330,7 +1330,7 @@ never use a URL as a link without checking it is http(s).
 | `/quote` | `symbol, maxAge?` | Single quote |
 | `/quotes` | `symbols` (comma-sep), `maxAge?` | Quotes, keyed by symbol |
 | `/chains` | `symbol, contractType, range, fromDate?, toDate?, strikeCount?, maxAge?` | Options chain |
-| `/pricehistory` | `symbol, periodType, period, frequencyType, frequency, needExtendedHoursData, maxAge` | Price bars. `maxAge` (seconds) is the oldest stored daily series the caller accepts; `0` forces a fetch. It can only tighten the store's own rules. ⚠ It sends no `endDate`, and Schwab then ends the series at the PREVIOUS business day's close: a caller that needs today's minute bars uses `/passthrough` with `endDate` |
+| `/pricehistory` | `symbol, periodType, period, frequencyType, frequency, needExtendedHoursData, maxAge` | Price bars. `maxAge` (seconds) is the oldest stored daily series the caller accepts; `0` forces a fetch. It can only tighten the store's own rules. ⚠ Schwab ends a series sent with no `endDate` at the PREVIOUS business day's close, so the proxy adds `endDate` = now to a minute series once today's regular session has opened; before the open, on a closed day and for a daily series it sends none (the last session) |
 | `/instruments` | `symbol, projection` (e.g. `fundamental`) | `{instruments:[{fundamental, symbol, description, ...}]}` |
 | `/passthrough` | `endpoint, params` | One of five market-data endpoints, matched exactly: `/expirationchain`, `/quotes`, `/instruments`, `/pricehistory`, `/chains`. Anything else is **400**. Needs `X-Proxy-Secret` when a secret is configured |
 
