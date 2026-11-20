@@ -724,6 +724,51 @@ button off the Desk, and turning the public switch off takes it off the public
 Desk. The Flow row follows Flow Alerts' own public switch for the estimate as
 well: with that off, the public Desk shows the row as *Not shown on this screen*.
 
+#### The market weather card on the homepage {#market-weather-card}
+
+The public homepage (neuralstrike.co) shows the latest Market read as a weather
+report. The card sits at the top right, under the menu bar; on a phone it sits below
+the headline. It is a picture of the same seven rows, not a new reading, and it
+changes when the Market read does: every 15 minutes from 08:45 to 15:00 CT.
+
+- **The sky** comes from the count of tailwinds and headwinds. In order, the first
+  that fits wins:
+  - **Fog:** fewer than four rows have a reading.
+  - **Severe storm:** five or more headwinds, or more headwinds than tailwinds
+    while the sentiment regime reads Stressed.
+  - **Clear skies:** five or more tailwinds and no headwind.
+  - **Mostly sunny:** more tailwinds than headwinds.
+  - **Scattered showers:** more headwinds than tailwinds.
+  - **Overcast:** otherwise.
+- **The temperature** is the S&P 500's move on the day, in percent.
+- **The headline** is written by the code from the same figures: how many markets
+  on the board fell or rose, and where the VIX stands.
+- **The coloured bar** is the seven rows in order: amber for a tailwind, blue for a
+  headwind, grey for neutral, an empty outline for no reading.
+- **Show the readings** opens six rows: temperature (the two indexes),
+  rain coverage (markets falling), wind (the VIX), pressure (SPY against the gamma
+  flip), umbrellas : sunglasses (puts to calls in the flow), and shelter (bonds and
+  credit). A row with no reading is left out.
+
+**When it changes face**
+
+- **After the close** the card shows a moon: the day's last sky, its final
+  temperature, and when the next forecast is due. On a half day this starts as soon
+  as the day's last reading is in.
+- **Fog during the session** means readings have stopped arriving (more than two
+  intervals late). The card says so and shows no sky.
+- **No card at all** (the homepage's own graphic in its place) means the Market read
+  is off, kept off the public screens, the card is switched off, or the last reading
+  is too old to show.
+
+**It follows the Market read's switches.** Turning the Market read off, or its public
+switch off, takes the card off the homepage the next time an open page re-reads
+it (every five minutes by default). With Flow Alerts' public
+switch off, the flow row counts as no reading on the card too.
+
+**To change it:** Settings → Configuration → **Market read → Homepage weather card**:
+the switch, the three sky thresholds, and how often an open homepage re-reads it.
+
 ## Symbol
 
 **Route:** `/symbol` — or `/symbol?symbol=MU` to open one name directly, which

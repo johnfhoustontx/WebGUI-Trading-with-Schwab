@@ -4,7 +4,30 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-18 (**The Options Glossary catches up with the last month: 31 new terms.**)
+**Last updated:** 2026-11-19 (**A market weather card on the homepage.**)
+
+- **What.** neuralstrike.co shows the latest Market read as a weather report at the
+  top right under the menu bar: a sky from the tally (fog, severe storm, scattered
+  showers, overcast, mostly sunny, clear skies), the S&P 500's move as the
+  temperature, a code-written headline, the seven rows as a coloured bar, and six
+  readings behind a toggle. After the close it shows a moon with the day's last sky
+  and the next forecast's time. No Claude call, no new Schwab call.
+- **Writer.** `services/market_svc/site_weather.py` builds `deploy/site/weather.json`
+  (gitignored) after each Market read slot and whenever the read's or the card's
+  switches change (`scheduler._sync_weather`); a failed write is a `market.weather`
+  degrade and never costs the reading. A non-public Flow row is masked in the sky, the
+  tally and the readings.
+- **Reader.** `deploy/site/assets/weather.js` (same-origin fetch, `textContent` only);
+  its freshness rules are checked by hand with `node tools/check_weather_decide.mjs`.
+- **Settings.** Market read → Homepage weather card (`[weather]` in
+  `config/market_read.toml`): the switch, three sky thresholds, the re-read interval.
+- **Seen in the browser check.** The toggle redraws the card, which dropped keyboard
+  focus; it now puts focus back on the new button.
+- **Docs.** User Guide (*The market weather card on the homepage*), Technical
+  Reference (*The homepage weather card*). Design and plan:
+  `docs/plans/2026-11-19-market-weather-card-{design,plan}.md`.
+
+**Prior —** 2026-11-18 (**The Options Glossary catches up with the last month: 31 new terms.**)
 
 - **What.** `docs/manuals/glossary/glossary.md` gains the vocabulary the app took on
   from 2026-10-18 to 2026-11-17, 204 terms to 235: the paper books' exits (take-profit,

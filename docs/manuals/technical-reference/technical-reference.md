@@ -2954,6 +2954,58 @@ while it is closed, so the report is fetched only when it is opened.
   flip for either index when this was built (2026-10-04 and 2026-10-05).
 - **No early-close handling.** On a half day the slots run to the normal close.
 
+### The homepage weather card
+
+**Files:** `services/market_svc/site_weather.py` (pure build + atomic write),
+`scheduler._sync_weather`, `deploy/site/assets/weather.js`, `[weather]` in
+`config/market_read.toml`. Design:
+`docs/plans/2026-11-19-market-weather-card-design.md`.
+
+**Writer.** After every slot publish, and on the disabled and between-slot passes,
+`refresh_read` calls `_sync_weather`. It builds `deploy/site/weather.json` (gitignored,
+like `ideas.json`) from `cache:market:read` and `cache:sentiment:regime`, and writes it
+only when `(date, slot, ts, enabled, public, weather.enabled)` has changed. The write is a
+temp file plus `os.replace`, mode 0644. A failed write is counted under the degrade area
+`market.weather` and retried on the next pass; it never costs the reading. The file is
+`{"v": 1, "hidden": true}` when the read is off, not public, the card is switched off, or
+there is no reading.
+
+**Sky** (first match wins; `H`, `T` = headwinds, tailwinds after masking a non-public
+flow row to `none`):
+
+| Sky | When |
+|---|---|
+| `fog` | fewer than `min_readings` (4) rows are not `none` |
+| `storm` | `H >= storm_headwinds` (5), or the regime's `committed_label` is `crisis` and `H > T` |
+| `clear` | `T >= clear_tailwinds` (5) and `H == 0` |
+| `fair` | `T > H` |
+| `showers` | `H > T` |
+| `overcast` | otherwise |
+
+**Headline.** Code-written: a cold sky counts declining markets on the board, a warm sky
+advancing ones ("all N markets" when every one moved that way). The VIX clause is
+*gusts to* / *sinks to* / *holds near* from `vix_move_pct`.
+
+**Readings.** One per usable row (verdict not `none`) whose essential fact is present:
+temperature (`spx_pct`, `ndx_pct`), rain coverage (declining of total), wind (VIX level
+and move), pressure (SPY spot against the flip), umbrellas : sunglasses (put to call
+split of the flow), shelter (the cross-asset row's bonds and credit).
+
+**Reader.** `weather.js` fetches the file with `cache: "no-cache"` every `refetch_sec`
+(300), re-decides every 60 s and on `visibilitychange`, and draws with `textContent`
+only. The decision (`NS_WEATHER.decide`, checked by `node tools/check_weather_decide.mjs`;
+CI has no node) uses the site's `NS_MARKET_CLOCK`:
+
+- **live:** today's file, not final, no older than two intervals.
+- **moon:** today's final file (this covers an early close the clock does not model),
+  or, until two intervals after the open, the previous trading day's final.
+- **fog:** in session with anything else.
+- **hide:** out of session and not the most recent session's final, a hidden file, an
+  unknown `v`, or no file.
+
+**Known limitations.** The sky thresholds are starting guesses like the Market read's
+own. The card can lag a switch by one refetch.
+
 ## Bought / sold estimate on flow alerts
 
 **Files:** `services/options_svc/flow_sides.py` (pure arithmetic),
