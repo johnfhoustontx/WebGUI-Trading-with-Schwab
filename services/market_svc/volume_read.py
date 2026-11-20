@@ -94,9 +94,22 @@ def due(at, last_key, cfg):
     if mark <= _mc.regular_open_on(day):
         return None
     key = f"{day} {mark:%H:%M}"
-    if last_key is not None and last_key.startswith(str(day)) and key <= last_key:
+    # Only a session mark of today is compared: "before_open" sorts after every
+    # "HH:MM", so comparing this morning's key as text would skip the session.
+    if _same_day_mark(last_key, day) and key <= last_key:
         return None
     return key, mark
+
+
+def _same_day_mark(last_key, day) -> bool:
+    """Whether ``last_key`` is a session mark (``"<day> HH:MM"``) of ``day``."""
+    if not isinstance(last_key, str) or not last_key.startswith(f"{day} "):
+        return False
+    try:
+        _dt.datetime.strptime(last_key[len(str(day)) + 1:], "%H:%M")
+    except ValueError:
+        return False
+    return True
 
 
 # ── the figures ──────────────────────────────────────────────────────────────

@@ -271,6 +271,22 @@ def test_yesterdays_close_does_not_stop_todays_first_fetch(cfg):
     assert vr.due(_at(FRI, 8, 36, 30), "2026-10-29 15:00", cfg)[0] == "2026-10-30 08:35"
 
 
+def test_this_mornings_before_open_fetch_does_not_stop_the_session(cfg):
+    # The scheduler's real sequence. "before_open" sorts after every "HH:MM", so a
+    # plain string comparison held the view on its pre-open copy all day (found
+    # on prod 2026-11-20: no session fetch since the feature went live).
+    key, _ = vr.due(_at(FRI, 6, 1), None, cfg)
+    assert key == "2026-10-30 before_open"
+    key, through = vr.due(_at(FRI, 8, 36, 30), key, cfg)
+    assert key == "2026-10-30 08:35" and through == _at(FRI, 8, 35)
+    assert vr.due(_at(FRI, 8, 38), key, cfg) is None
+    key, _ = vr.due(_at(FRI, 8, 41, 30), key, cfg)
+    assert key == "2026-10-30 08:40"
+    key, through = vr.due(_at(FRI, 15, 1, 30), key, cfg)
+    assert key == "2026-10-30 15:00" and through == _at(FRI, 15, 0)
+    assert vr.due(_at(FRI, 15, 6, 30), key, cfg) is None
+
+
 # --- the words ------------------------------------------------------------------------
 
 def _view(cfg, spy=1400, qqq=1400, *, at=None, through=None, rising=True, raw=None, upto=(12, 10)):

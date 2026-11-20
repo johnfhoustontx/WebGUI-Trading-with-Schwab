@@ -4,7 +4,19 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-20 (**The weather card's values in green and red; the thermometer neutral.**)
+**Last updated:** 2026-11-20 (**Traded volume refreshes in the session again.**)
+
+- **What.** `cache:market:volume` never refreshed after the open on a day the market
+  service had already published its pre-open view, so the Market read's Volume row read
+  "No reading" and every report after the open got the pre-open copy. Cause:
+  `volume_read.due` compared today's last key as text, and `"<day> before_open"` sorts
+  after every `"<day> HH:MM"`, so no session mark was ever due. Found on prod at 09:02 CT:
+  the view still from 07:36:30, no `/pricehistory` call for SPY/QQQ since the open, and no
+  error logged. It most likely never worked live since 2026-11-01, except on a day the
+  service restarted mid-session. The fix compares only a same-day session mark
+  (`_same_day_mark`). Test: `test_this_mornings_before_open_fetch_does_not_stop_the_session`.
+
+**Prior —** 2026-11-20 (**The weather card's values in green and red; the thermometer neutral.**)
 
 - **What.** After a mockup the operator approved, a warm row value and the large
   temperature use the bar's pale green (`--wx-tailwind`) and a cold one its pale red
