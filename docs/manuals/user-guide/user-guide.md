@@ -745,7 +745,7 @@ changes when the Market read does: every 15 minutes from 08:45 to 15:00 CT.
 - **The temperature** is the S&P 500's move on the day, in percent.
 - **The headline** is written by the code from the same figures: how many markets
   on the board fell or rose, and where the VIX stands.
-- **The coloured bar** is the seven rows in order: amber for a tailwind, blue for a
+- **The coloured bar** is the seven rows in order: green for a tailwind, red for a
   headwind, grey for neutral, an empty outline for no reading.
 - **The six readings** show under the bar, and **Hide the readings** folds them
   away: temperature (the two indexes),

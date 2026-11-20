@@ -4,7 +4,15 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-20 (**The weather card's icons, redrawn in 3D.**)
+**Last updated:** 2026-11-20 (**The weather card's tally bar in green and red.**)
+
+- **What.** On the homepage card's seven-segment bar a tailwind is now pale green
+  (`--wx-tailwind` `#7fd6a1`) and a headwind pale red (`--wx-headwind` `#f08c86`), at the
+  operator's request; neutral (grey) and no reading (an outline) are unchanged. The
+  temperature and row values keep amber for warm and blue for cold. `--wx-blue`, read by
+  nothing after this, is gone. Test: `test_the_tally_bar_is_green_for_tailwinds_and_red_for_headwinds`.
+
+**Prior —** 2026-11-20 (**The weather card's icons, redrawn in 3D.**)
 
 - **What.** The thirteen icons in `deploy/site/assets/weather.js` are redrawn as glossy
   clay shapes after a reference sheet the operator chose (our own drawings): white

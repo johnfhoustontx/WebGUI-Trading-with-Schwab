@@ -1525,11 +1525,12 @@ body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
   max-width: 380px;
   margin-left: auto;
   --wx-amber: #f2b65a;
-  --wx-blue: #5b8fd9;
   --wx-blue-text: #8fb8f2;
   --wx-grey: #b2b6ca;
   --wx-dim: #75798c;
   --wx-panel: #262a44;
+  --wx-tailwind: #7fd6a1;   /* the tally bar: pale green helps the market */
+  --wx-headwind: #f08c86;   /* pale red hurts it */
 }
 .ns-weather[hidden] { display: none; }
 @media (max-width: 860px) {
@@ -1589,8 +1590,8 @@ body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
 .ns-wx-tally { display: flex; flex-direction: column; gap: 8px; }
 .ns-wx-bars { display: flex; gap: 4px; }
 .ns-wx-bar { flex: 1; height: 6px; border-radius: 3px; background: var(--wx-dim); }
-.ns-wx-bar.is-tailwind { background: var(--wx-amber); }
-.ns-wx-bar.is-headwind { background: var(--wx-blue); }
+.ns-wx-bar.is-tailwind { background: var(--wx-tailwind); }
+.ns-wx-bar.is-headwind { background: var(--wx-headwind); }
 .ns-wx-bar.is-none { background: transparent; box-shadow: inset 0 0 0 1px var(--color-neutral-700); }
 .ns-wx-tally-line { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .ns-wx-tally-text { font-size: 12px; color: var(--wx-grey); }

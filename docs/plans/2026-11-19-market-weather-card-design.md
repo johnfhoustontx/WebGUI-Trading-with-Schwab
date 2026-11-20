@@ -263,8 +263,12 @@ paints nothing, and `deploy/tests/test_site.py` checks every reference resolves 
 id repeats. The soft shadow under each is a CSS `drop-shadow`. The thermometer's liquid
 follows the reading's tone (red warm, blue cold, green between; the row carries the
 tone class). Row icons grew from 22 to 28 px so the detail reads. The chevron stays a
-flat line. Warm amber `#f2b65a` still means tailwind and cold blue `#5b8fd9` /
-`#8fb8f2` headwind in the text, bars and values.
+flat line. Warm amber `#f2b65a` still means warm and cold blue `#8fb8f2` cold in the
+temperature and the row values.
+
+**The tally bar (2026-11-20, the operator's call):** a tailwind segment is pale green
+`#7fd6a1` (`--wx-tailwind`) and a headwind pale red `#f08c86` (`--wx-headwind`);
+neutral stays grey and no reading an empty outline. The two also differ in lightness.
 
 ### Configuration
 

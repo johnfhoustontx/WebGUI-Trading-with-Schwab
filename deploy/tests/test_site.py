@@ -1784,6 +1784,19 @@ def test_the_weather_icons_are_drawn_inline_and_need_nothing_else():
         assert re.search(r"\n    %s: '<svg " % key, icons), key
 
 
+def test_the_tally_bar_is_green_for_tailwinds_and_red_for_headwinds():
+    """The operator's call (2026-11-20): a tailwind segment is pale green and a
+    headwind pale red; neutral (grey) and no reading (an outline) are unchanged."""
+    css = _css("assets/site.css")
+    rule = lambda sel: re.search(sel + r"\s*\{([^}]*)\}", css).group(1)
+    assert "var(--wx-tailwind)" in rule(r"\.ns-wx-bar\.is-tailwind")
+    assert "var(--wx-headwind)" in rule(r"\.ns-wx-bar\.is-headwind")
+    assert re.search(r"--wx-tailwind:\s*#7fd6a1;", css)
+    assert re.search(r"--wx-headwind:\s*#f08c86;", css)
+    assert "var(--wx-dim)" in rule(r"\n\.ns-wx-bar")
+    assert "var(--color-neutral-700)" in rule(r"\.ns-wx-bar\.is-none")
+
+
 def test_the_thermometer_fills_with_the_reading_s_tone():
     """Red when warm, blue when cold, green between, as in the reference set:
     the row carries the tone, and the liquid takes its colour from it."""
