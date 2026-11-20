@@ -302,7 +302,10 @@
         if (key === shown && !force) { return; }
         shown = key;
         if (d.mode === "hide") { show(false); return; }
-        draw(aside, file, d, open, function () { open = !open; redraw(true); });
+        draw(aside, file, d, open, function () { open = !open; redraw(true);
+          var again = aside.querySelector(".ns-wx-toggle");   /* the redraw replaced it */
+          if (again) { again.focus(); }
+        });
         show(true);
       } catch (err) {
         show(false);                            /* any failure: no card, never a broken one */

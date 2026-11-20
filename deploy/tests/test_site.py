@@ -1716,3 +1716,12 @@ def test_the_weather_script_writes_no_file_text_as_html():
 
 def test_the_weather_script_announces_nothing():
     assert "aria-live" not in _weather_js()
+
+
+def test_the_weather_toggle_keeps_keyboard_focus():
+    # A toggle redraws the whole card, so the button that was pressed is replaced;
+    # without putting focus on the new one a keyboard user lands on the page body.
+    js = _weather_js()
+    m = re.search(r"function \(\) \{ open = !open; redraw\(true\);(.*?)\}\);", js, re.S)
+    assert m, "the toggle callback is missing"
+    assert ".ns-wx-toggle" in m.group(1) and ".focus()" in m.group(1)
