@@ -991,13 +991,13 @@ FxEmbed. Design and plan:
   a query, a new latest re-runs it quietly. **Load older posts** (a button, and a sentinel
   that fires near the bottom) sends `query` with `before` / `before_key` from the last post
   row.
-- **Layout**: two columns at `lg`, stacking below. LEFT, a collapsible filter card (group
+- **Layout**: two columns at `lg`, stacking below. LEFT, a collapsible filter card, folded on load (group
   tabs with counts, search where `$NVDA` searches cashtags, All / Posts / Reposts /
   Replies, one chip per account), **Most mentioned** tickers, then one line per post with
   day dividers and amber gap markers; a click opens the post under its line (full text,
   photos, a video's poster with **Play on X**, the quoted post, counts, **Open on X**).
   RIGHT, the collapsible accounts panel (add by handle or x.com link, the accounts by
-  group, change group, stop watching after a confirm, a link to Settings →
+  group, each group folded on load, change group, stop watching after a confirm, a link to Settings →
   Configuration where the interval is set). Times are Central (`America/Chicago`), 24-hour.
 - **Status line**: *Live · checking every Ns* while the accounts view's `:ts` stamp is
   within 3 intervals (`STALE_FACTOR = 3` in `pages/xfeed_parts.py`, a page constant — not

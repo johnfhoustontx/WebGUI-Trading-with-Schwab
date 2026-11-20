@@ -115,7 +115,7 @@ class XFeedPage:
         self.list_card, self.last_painted = None, None
         self.painted_new = set()
         self.acct_sig, self.acct_status, self.filter_sig = None, {}, None
-        self.collapsed_groups = set()
+        self.open_groups = set()      # account groups start folded; a click opens one
         self.stale = False
         self.search = self.group_box = self.type_box = self.chip_box = None
         self.more = self.handle_in = None
@@ -162,7 +162,7 @@ class XFeedPage:
 
     def _build_filters(self):
         with ui.column().classes(_CARD):
-            _l, _n, self.summary, body = xp.collapsible("Filters", note=False)
+            _l, _n, self.summary, body = xp.collapsible("Filters", note=False, open_=False)
             with body:
                 self.group_box = ui.row().classes(xp.SEG)
                 with ui.row().classes("w-full items-center gap-3 flex-wrap"):
@@ -563,7 +563,7 @@ class XFeedPage:
         names = self._group_names()
         if self.handle_in is not None:
             self.group_in.set_autocomplete(names)
-        sig = xp.accounts_sig(accounts, self.collapsed_groups, self.accounts_view is None)
+        sig = xp.accounts_sig(accounts, self.open_groups, self.accounts_view is None)
         if sig == self.acct_sig:
             self._refresh_checked(now)      # only the "checked …" times moved
             return
@@ -577,7 +577,7 @@ class XFeedPage:
                 kit.empty(NO_ONE)
                 return
             for title, members in xv.accounts_by_group(self.accounts_view):
-                if title and xp.draw_group_head(title, members, title in self.collapsed_groups,
+                if title and xp.draw_group_head(title, members, title not in self.open_groups,
                                                   self._toggle_group):
                     continue                # collapsed
                 for a in members:
@@ -587,7 +587,7 @@ class XFeedPage:
                         on_remove=self._ask_remove if self._may_enqueue else None)
 
     def _toggle_group(self, title):
-        self.collapsed_groups ^= {title}
+        self.open_groups ^= {title}
         self._paint_accounts()
 
     def _refresh_checked(self, now):

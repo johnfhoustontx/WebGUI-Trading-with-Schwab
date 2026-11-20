@@ -258,11 +258,11 @@ def filters_sig(f, tabs, mine, counts) -> tuple:
             tuple((a.get("handle"), counts.get(a.get("handle"), 0)) for a in mine))
 
 
-def accounts_sig(accounts, collapsed, cold) -> tuple:
+def accounts_sig(accounts, open_groups, cold) -> tuple:
     """Everything the accounts card draws except the "checked …" times."""
     return (tuple((a.get("handle"), a.get("display_name"), a.get("avatar_url"),
                    a.get("group_name"), a.get("last_error")) for a in accounts),
-            frozenset(collapsed), cold)
+            frozenset(open_groups), cold)
 
 
 def watching(n) -> str:
@@ -274,10 +274,11 @@ def shown(posts, exhausted) -> str:
 
 
 # ── painters: the cards, the filters, MOST MENTIONED ─────────────────────────
-def collapsible(title, note=True):
+def collapsible(title, note=True, *, open_=True):
     """A card head - title, note, a show/hide toggle - and the body it hides.
     Returns ``(title label, note label or None, extra row, body)``; ``extra``
-    shows only while the body is hidden (the Filters card's summary)."""
+    shows only while the body is hidden (the Filters card's summary). The body
+    starts shown unless ``open_`` is False."""
     from nicegui import ui
 
     from pages import ui_kit as kit
@@ -297,6 +298,8 @@ def collapsible(title, note=True):
         extra.set_visibility(not body.visible)
     toggle.on_click(flip)
     extra.set_visibility(False)
+    if not open_:
+        flip()
     return label, note_lbl, extra, body
 
 

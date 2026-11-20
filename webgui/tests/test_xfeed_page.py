@@ -511,6 +511,7 @@ def test_an_account_error_is_softened_as_the_old_page_did(monkeypatch):
     accounts = _accounts_view(_account("gone", "News", error="not found"),
                               _account("flaky", "News", error="HTTP 500"))
     bus = _render(monkeypatch, _views([_post(1)], accounts=accounts))
+    bus.page._toggle_group("News")                          # groups start folded
     texts = _texts(bus)
     assert "account not found" in texts and "error: HTTP 500" in texts
 
@@ -519,9 +520,36 @@ def test_accounts_are_grouped_under_their_group_names(monkeypatch):
     accounts = _accounts_view(_account("reuters", "News"), _account("zerohedge", "Finance"),
                               _account("loner"))
     bus = _render(monkeypatch, _views([_post(1)], accounts=accounts))
+    for title in ("News", "Finance", "Ungrouped"):         # every group starts folded
+        bus.page._toggle_group(title)
     texts = _texts(bus)
     for word in ("News", "Finance", "Ungrouped", "@reuters", "@zerohedge", "@loner"):
         assert word in texts, word
+
+
+def test_account_groups_start_folded_and_open_one_at_a_time(monkeypatch):
+    accounts = _accounts_view(_account("reuters", "News"), _account("zerohedge", "Finance"),
+                              _account("loner"))
+    bus = _render(monkeypatch, _views([_post(1)], accounts=accounts))
+
+    def listed():       # the accounts panel only: the filter chips name the handles too
+        from nicegui import ui
+        return {e.text for e in bus.page.acct_list.descendants()
+                if isinstance(e, (ui.label, ui.link))}
+
+    assert {"News", "Finance", "Ungrouped"} <= listed()
+    assert not {"@reuters", "@zerohedge", "@loner"} & listed()
+    bus.page._toggle_group("News")
+    assert "@reuters" in listed() and not {"@zerohedge", "@loner"} & listed()
+    bus.page._toggle_group("News")
+    assert "@reuters" not in listed()
+
+
+def test_filters_card_starts_folded_with_its_summary_showing(monkeypatch):
+    bus = _render(monkeypatch, _views([_post(1)]))
+    body = bus.page.group_box.parent_slot.parent
+    assert not body.visible
+    assert bus.page.summary.visible
 
 
 def test_nothing_that_sends_is_drawn_where_this_process_may_not_enqueue(monkeypatch):

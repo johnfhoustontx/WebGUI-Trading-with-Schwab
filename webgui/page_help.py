@@ -1376,8 +1376,8 @@ on a phone). All times are Central, on a 24-hour clock.
   missing* — marks a stretch the feed could not fully catch up on after a
   pause (it reads back 25 pages at most). Reposts from a pause are never
   filled in.
-- **Filters** (fold them away with the arrow; a short line then says which are
-  on): the **group tabs** (All, each group, Ungrouped, with post counts), the
+- **Filters** (folded when the page opens, with a short line saying which are
+  on; open them with the arrow): the **group tabs** (All, each group, Ungrouped, with post counts), the
   **search** box (words in a post, a handle or a name; **$NVDA** finds posts
   tagged with that ticker), **All / Posts / Reposts / Replies**, and one chip
   per account — click one to see only that account, click again to clear.
@@ -1392,7 +1392,8 @@ on a phone). All times are Central, on a 24-hour clock.
   account: when it was last **checked**, or the error (**account not found**
   after repeated misses). The folder button moves it to another group, to
   **Ungrouped**, or to a **New group…**; the **✕** stops watching it (you are
-  asked first). Click a group's name to fold it away.
+  asked first). Each group starts folded: click its name to open it, again to
+  fold it.
 
 The top line says **Live · checking every 60s** while the X feed service is
 publishing, and turns red — **X feed service not answering** — when it has
