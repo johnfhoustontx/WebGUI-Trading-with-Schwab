@@ -18,7 +18,7 @@ The measurement's rules, each one fixed before any outcome was read:
   boundary, the close of the last complete bar) - never a wall-clock time; the
   reading sees no bar at or after it, and the trade's path starts at it;
 * a (day, slot, symbol) has no rows when the day is a configured early close
-  (``[intraday] early_close_days``) and the slot's trade would pass it (no call
+  (``[early_close]`` in config/sessions.toml) and the slot's trade would pass it (no call
   is made there either), when the day is a short session ($SPX's
   regular bars end early: the 0DTE settlement the pricer assumes is wrong), when
   the reading has no direction, when there is no usable vol at the entry, or when

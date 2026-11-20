@@ -2952,7 +2952,9 @@ while it is closed, so the report is fetched only when it is opened.
   points; the row will read `neutral` on most days.
 - **Structure reads two symbols.** $SPX and $NDX are not read: the matrix carried no
   flip for either index when this was built (2026-10-04 and 2026-10-05).
-- **No early-close handling.** On a half day the slots run to the normal close.
+- **Half days end at their early close.** The slots, `is_final` and `next_slot` read
+  `market_calendar.session_close_on`, so on a date in `config/sessions.toml
+  [early_close] days` the 12:00 CT reading is final and nothing runs after it.
 
 ### The homepage weather card
 
@@ -3004,9 +3006,10 @@ CI has no node) uses the site's `NS_MARKET_CLOCK`:
   unknown `v`, or no file.
 
 **Known limitations.** The sky thresholds are starting guesses like the Market read's
-own. The card can lag a switch by one refetch. Half days are not modelled: `is_final`
-is true only at 15:00 CT, so after an early close the card stays `live` on frozen
-tiles until then (the Market read's own limitation above).
+own. The card can lag a switch by one refetch. On a half day the browser's clock
+(`earlyCloses` in `market-clock.js`, generated from `[early_close]`) ends the session at
+13:00 ET, so a service that stopped before the 12:00 CT final hides the card that
+afternoon rather than showing fog.
 
 ## Bought / sold estimate on flow alerts
 
@@ -3395,8 +3398,8 @@ carries its own walk-forward verdict beside it.
   A schedule that starts before 08:45, puts a slot at 08:36 (the morning call's own
   row) or whose last entry plus `[trade] time_stop_min` passes the 15:00 close reads
   as the defaults whole (`scalp_config.schedule_problem`); Settings refuses it.
-- **Half days.** On a date in `[intraday] early_close_days` (2026-11-27, 2026-12-24) the
-  session ends at `early_close_time` (12:00). A slot whose entry plus the time stop
+- **Half days.** On a date in `config/sessions.toml [early_close] days` (2026-11-27,
+  2026-12-24, 2027-11-26) the session ends at `[early_close] time` (12:00). A slot whose entry plus the time stop
   would pass that close makes no call (note "the market closes early today", nothing
   fetched or frozen), `next_slot` skips it, and the study leaves it out. At the
   defaults the last call of a half day is 10:51.
@@ -3933,8 +3936,7 @@ backup: it holds 1-minute history (about 6 weeks at Schwab) and 5-minute history
 `iv_scales`, `min_samples`, `scorecard_days`; `[news] items`; `[context] report_url`.
 For the 15-minute calls: `[intraday]` `start`, `end`, `interval_min`, `grace_min`,
 `dead_zone_pct` (0.03), `breadth_agree` (0.6), `vwap_max_missing` (0.25),
-`min_brier_margin` (0.005), `promotion_sessions` (40), `early_close_days`
-(["2026-11-27", "2026-12-24"]), `early_close_time` ("12:00"), and
+`min_brier_margin` (0.005), `promotion_sessions` (40), and
 `[intraday.blocks.<name>]` `start` / `end`; `[confirm]` `flow_window_min` (30),
 `flow_margin` (2), `netprem_margin` (0.1), `sides_majority` (0.6),
 `breadth_min_members` (5), `min_sources` (2), `max_age_min` (5), `cuts`

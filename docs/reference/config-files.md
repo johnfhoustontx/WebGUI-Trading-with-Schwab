@@ -334,8 +334,14 @@ before it, so a Cboe slip is a one-line edit), the three sessions
 (`[sessions.gth|regular|curb]`), the named operating windows
 (`[windows.scan|collection|session_flip|market_snapshot|…]`, each
 optionally carrying its own `tz` and `end_exclusive` — no shipped window sets
-either since the driver's `driver_entry` went, 2026-09-22), and
-`[alerts] fire_in_extended_hours`. Loaded by
+either since the driver's `driver_entry` went, 2026-09-22),
+`[alerts] fire_in_extended_hours`, and since 2026-11-19 **`[early_close]`** (`days`, a
+LIST of half days, and `time`, 12:00 CT). The half days are listed, not derived like the
+holidays: the NYSE's July rule turns on the weekday the 4th falls on. They reach callers
+through `early_close_on(d)` / `session_close_on(d)`, which only the Market read, Traded
+volume, the Opening Scalp and the site's generated clock use so far; `regular_close_on`,
+`mins_to_close` and `session_at` still read 15:00 on a half day. After changing the list,
+regenerate `deploy/site/assets/market-clock.js` (`python -m tools.generate_market_clock`). Loaded by
 **`shared/market_calendar.py:load_config()`** (mtime-cached, mirroring
 `flow_alerts.load_thresholds`; a malformed file degrades to built-in defaults for
 bad **values and bad shapes** and never raises). **Edit + restart the affected

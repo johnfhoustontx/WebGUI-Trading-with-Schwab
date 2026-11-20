@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-13</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-19</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -2065,7 +2065,7 @@ and <code>wall_context</code> (a list of words naming any call or put wall betwe
 target or stop). <code>note</code> is <code>no measured edge</code> (the usual), <code>flat over the last 15 minutes
 — no direction</code>, <code>no bars for the last 15 minutes yet</code>, <code>missed the call window</code> (the
 slot's trade was already over when it was built), <code>the market closes early today</code> (a
-half day in <code>[intraday] early_close_days</code>, and the slot's trade would pass the early
+half day in <code>config/sessions.toml [early_close] days</code>, and the slot's trade would pass the early
 close: no roles, nothing fetched or frozen) or <code>the call could not be built</code>.</p>
 <p><code>confirmation</code> is <code>{flow, netprem, dealer, sentiment, score, word, n_present,
 n_sources, word_note, dealer_line, truncated}</code>. Each component is <code>{verdict, raw,

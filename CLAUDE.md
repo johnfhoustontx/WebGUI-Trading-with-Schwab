@@ -463,6 +463,9 @@ maps, and anything whose change needs code to follow it.
   the public tools' files.
 - `shared/market_calendar.py` is the single source for the NYSE calendar and the
   session/window predicates. Add no holiday literal or window constant elsewhere.
+  ⚠ Half days (`[early_close]` in `sessions.toml`) reach a caller only through
+  `session_close_on`; `regular_close_on`, `mins_to_close` and `session_at` still say
+  15:00 on one. A caller that should end at the early close must move to it.
 - `options_calculator.RISK_FREE_RATE` is the one pricing rate; import it.
 - ⚠ **A timezone-naive datetime means CENTRAL time.** There is one settlement
   instant (16:00 New York) and one helper per tier

@@ -5770,7 +5770,9 @@ while it is closed, so the report is fetched only when it is opened.</p>
   points; the row will read <code>neutral</code> on most days.</li>
 <li><strong>Structure reads two symbols.</strong> $SPX and $NDX are not read: the matrix carried no
   flip for either index when this was built (2026-10-04 and 2026-10-05).</li>
-<li><strong>No early-close handling.</strong> On a half day the slots run to the normal close.</li>
+<li><strong>Half days end at their early close.</strong> The slots, <code>is_final</code> and <code>next_slot</code> read
+  <code>market_calendar.session_close_on</code>, so on a date in <code>config/sessions.toml
+  [early_close] days</code> the 12:00 CT reading is final and nothing runs after it.</li>
 </ul>
 <h3 id="the-homepage-weather-card">The homepage weather card</h3>
 <p><strong>Files:</strong> <code>services/market_svc/site_weather.py</code> (pure build + atomic write),
@@ -5841,9 +5843,10 @@ CI has no node) uses the site's <code>NS_MARKET_CLOCK</code>:</p>
   unknown <code>v</code>, or no file.</li>
 </ul>
 <p><strong>Known limitations.</strong> The sky thresholds are starting guesses like the Market read's
-own. The card can lag a switch by one refetch. Half days are not modelled: <code>is_final</code>
-is true only at 15:00 CT, so after an early close the card stays <code>live</code> on frozen
-tiles until then (the Market read's own limitation above).</p>
+own. The card can lag a switch by one refetch. On a half day the browser's clock
+(<code>earlyCloses</code> in <code>market-clock.js</code>, generated from <code>[early_close]</code>) ends the session at
+13:00 ET, so a service that stopped before the 12:00 CT final hides the card that
+afternoon rather than showing fog.</p>
 <h2 id="bought-sold-estimate-on-flow-alerts">Bought / sold estimate on flow alerts</h2>
 <p><strong>Files:</strong> <code>services/options_svc/flow_sides.py</code> (pure arithmetic),
 <code>flow_sides_tick.py</code> (session state, the store, publishing), <code>flow_stream.py</code> (the
@@ -6327,8 +6330,8 @@ carries its own walk-forward verdict beside it.</p>
   A schedule that starts before 08:45, puts a slot at 08:36 (the morning call's own
   row) or whose last entry plus <code>[trade] time_stop_min</code> passes the 15:00 close reads
   as the defaults whole (<code>scalp_config.schedule_problem</code>); Settings refuses it.</li>
-<li><strong>Half days.</strong> On a date in <code>[intraday] early_close_days</code> (2026-11-27, 2026-12-24) the
-  session ends at <code>early_close_time</code> (12:00). A slot whose entry plus the time stop
+<li><strong>Half days.</strong> On a date in <code>config/sessions.toml [early_close] days</code> (2026-11-27,
+  2026-12-24, 2027-11-26) the session ends at <code>[early_close] time</code> (12:00). A slot whose entry plus the time stop
   would pass that close makes no call (note "the market closes early today", nothing
   fetched or frozen), <code>next_slot</code> skips it, and the study leaves it out. At the
   defaults the last call of a half day is 10:51.</li>
@@ -7010,8 +7013,7 @@ backup: it holds 1-minute history (about 6 weeks at Schwab) and 5-minute history
 <code>iv_scales</code>, <code>min_samples</code>, <code>scorecard_days</code>; <code>[news] items</code>; <code>[context] report_url</code>.
 For the 15-minute calls: <code>[intraday]</code> <code>start</code>, <code>end</code>, <code>interval_min</code>, <code>grace_min</code>,
 <code>dead_zone_pct</code> (0.03), <code>breadth_agree</code> (0.6), <code>vwap_max_missing</code> (0.25),
-<code>min_brier_margin</code> (0.005), <code>promotion_sessions</code> (40), <code>early_close_days</code>
-(["2026-11-27", "2026-12-24"]), <code>early_close_time</code> ("12:00"), and
+<code>min_brier_margin</code> (0.005), <code>promotion_sessions</code> (40), and
 <code>[intraday.blocks.&lt;name&gt;]</code> <code>start</code> / <code>end</code>; <code>[confirm]</code> <code>flow_window_min</code> (30),
 <code>flow_margin</code> (2), <code>netprem_margin</code> (0.1), <code>sides_majority</code> (0.6),
 <code>breadth_min_members</code> (5), <code>min_sources</code> (2), <code>max_age_min</code> (5), <code>cuts</code>

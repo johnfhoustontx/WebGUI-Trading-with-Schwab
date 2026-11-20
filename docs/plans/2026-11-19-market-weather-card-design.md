@@ -147,9 +147,8 @@ browser: index.html → assets/market-clock.js → assets/weather.js
 - `date`, `slot`, `ts`, `final`, `next_slot` and `interval_min` are copied from the
   reading as published. `ts` is the reading's slot stamp (unix seconds), which is
   what the browser's freshness rule measures; `final` is the reading's own
-  `is_final`. Half days are not modelled (`regular_close_on` is always 15:00 CT), so
-  on one the card stays live on frozen tiles until 15:00 CT, as the Desk's Market read
-  does. The browser never
+  `is_final`, which on a half day is the early close (`session_close_on`, from
+  `config/sessions.toml [early_close]`). The browser never
   recomputes them.
 
 ### Where each reading comes from

@@ -695,7 +695,8 @@ Anything in between is **Neutral**.
 - **Since last** is the change from the previous reading: "was Neutral" when the
   chip flipped, otherwise how far the row's main number moved, or "unchanged".
 - **The head** shows when the reading was taken and when the next one is due. The
-  15:00 reading is the close and stays on screen after hours. Before the first
+  15:00 reading is the close and stays on screen after hours. On a half day the close
+  is the 12:00 reading, and no reading is taken after it. Before the first
   reading of a day you see the previous session's, greyed.
 - **Grey rows and "not updating"** mean readings have stopped arriving. What you
   see is the last one. The line beside the button greys at the same moment.
@@ -754,8 +755,7 @@ changes when the Market read does: every 15 minutes from 08:45 to 15:00 CT.
 
 - **After the close** the card shows a moon: the day's last sky, its final
   temperature, and when the next forecast is due. On a half day (the day after
-  Thanksgiving, Christmas Eve) the Market read keeps its normal times, so the card
-  still reads *Live* after the early close and turns to the moon at 15:00 CT.
+  Thanksgiving, Christmas Eve) that is the 12:00 CT reading, the last of the day.
 - **Fog during the session** means readings have stopped arriving (more than two
   intervals late). The card says so and shows no sky.
 - **No card at all** (the homepage's own graphic in its place) means the Market read
@@ -3181,9 +3181,10 @@ is a new call, not an edit of the last.
   tab never keeps showing a stale call as current. A list from an earlier day says whose
   day it is, is not today's, and draws its highlighted trades without the green.
 - **Half days.** On a day the market closes early (the day after Thanksgiving and
-  Christmas Eve, at 12:00 CT; the dates are in Settings → Configuration → Opening Scalp)
-  no call is made whose hour would run past the close: the last call is 10:51, and a
-  later slot says "The market closes early today". Add next year's half days there.
+  Christmas Eve, at 12:00 CT; the dates are in Settings → Configuration → Market hours
+  & schedules → Half days) no call is made whose hour would run past the close: the
+  last call is 10:51, and a later slot says "The market closes early today". Add next
+  year's half days there.
 - **Refresh and the 15-minute calls.** Refresh never makes an off-slot call. Inside a
   slot's five-minute window it fills in any symbol that slot has not published yet;
   outside a window it only puts today's published calls back on screen. A slot missed by
@@ -4203,7 +4204,7 @@ a file on the server — in one place, grouped by what they do:
 | **Symbols & watchlists** | What the gamma collector polls, the BIG10 basket, the Net Prem groups |
 | **Local market data** | Whether the app may reuse market data it has already fetched from Schwab instead of asking again, how old that data may be, and how often watchlist symbols are fetched. See the note below |
 | **Sector map** | Which sector each symbol counts toward for the sector cap |
-| **Opening Scalp** | The symbols it calls and the bars it keeps, strike steps and spread widths, the target, stop and time stop, the volatility multipliers the study tries (a list of numbers), the cut points between low, mid and high agreement, and the scorecard window; for the 15-minute calls, their first and last time (not before 08:45, and the last call's hour must end by 15:00), the gap, how late one may still fire, the flat band, the day's three blocks, the margin an edge must clear, the early-close days and time, and the confirmation's look-back, margins, cut points, the sources it needs for a word and the weight of each source; for the chance of target, whether it is shown at all, the moving-average and RSI lengths, the bar sizes, each factor's assumed starting weight and how tightly it is held, the weeks of history before the honesty test, the margin the chance must beat the usual rate by for its *beats the usual rate* line to read yes (the chance is shown either way), the share of a weight that must be learned from data before it stops reading *assumed*, and the weekday of the refit. The 08:36 call and 16:20 nightly pass times are under *Market hours & schedules* |
+| **Opening Scalp** | The symbols it calls and the bars it keeps, strike steps and spread widths, the target, stop and time stop, the volatility multipliers the study tries (a list of numbers), the cut points between low, mid and high agreement, and the scorecard window; for the 15-minute calls, their first and last time (not before 08:45, and the last call's hour must end by 15:00), the gap, how late one may still fire, the flat band, the day's three blocks, the margin an edge must clear, and the confirmation's look-back, margins, cut points, the sources it needs for a word and the weight of each source; for the chance of target, whether it is shown at all, the moving-average and RSI lengths, the bar sizes, each factor's assumed starting weight and how tightly it is held, the weeks of history before the honesty test, the margin the chance must beat the usual rate by for its *beats the usual rate* line to read yes (the chance is shown either way), the share of a weight that must be learned from data before it stops reading *assumed*, and the weekday of the refit. The 08:36 call and 16:20 nightly pass times are under *Market hours & schedules* |
 | **Commissions** | Schwab's per-contract rates |
 | **Ports / Environments** | Shown for reference only |
 

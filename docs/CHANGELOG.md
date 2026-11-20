@@ -4,7 +4,25 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-19 (**A market weather card on the homepage.**)
+**Last updated:** 2026-11-19 (**Half days in the market calendar.**)
+
+- **What.** `config/sessions.toml` gains `[early_close]` (`days`: 2026-11-27, 2026-12-24,
+  2027-11-26; `time`: 12:00 CT) and `shared/market_calendar.py` gains
+  `early_close_days`, `early_close_time`, `early_close_on` and `session_close_on`. The
+  list moved from the Opening Scalp's `[intraday] early_close_days` / `early_close_time`,
+  which now read it from the calendar; Settings shows it under Market hours & schedules
+  → Half days.
+- **Who reads it.** The Market read (its slots, the final reading, `next_slot`): on a
+  half day the 12:00 CT reading is the close and nothing runs on frozen tiles after it.
+  Traded volume. The Opening Scalp. The site's generated clock
+  (`tools/generate_market_clock.py` → `EARLY_CLOSES`), so the Live Desk glow goes out at
+  13:00 ET and the homepage weather card treats the afternoon as closed.
+- **Narrow on purpose (operator's choice).** `regular_close_on`, `mins_to_close` and
+  `session_at` are unchanged, so the proxy's store, the Desk's countdown and late-day
+  setups, the GEX windows, the forward grid and the range forecast still run to 15:00 on a
+  half day. Each moves to `session_close_on` on its own.
+
+**Prior —** 2026-11-19 (**A market weather card on the homepage.**)
 
 - **What.** neuralstrike.co shows the latest Market read as a weather report at the
   top right under the menu bar: a sky from the tally (fog, severe storm, scattered

@@ -45,7 +45,7 @@ Rules, each from the design or a review ruling:
   refresh inside the window may still fill it.
 * **No call after its trade is over**: after the slot's entry + ``time_stop_min``
   a symbol gets no roles and the note ``MISSED``, its reading kept; nothing is
-  fetched for it. On an early close (``[intraday] early_close_days``) a slot
+  fetched for it. On an early close (``[early_close]`` in config/sessions.toml) a slot
   whose entry + ``time_stop_min`` would pass the close is the same, with the
   note ``EARLY_CLOSE``, and ``next_slot`` skips it.
 * **Fetch only what a new call needs, on the normal lane**: today's 5-minute bars

@@ -631,7 +631,7 @@ and `wall_context` (a list of words naming any call or put wall between entry an
 target or stop). `note` is `no measured edge` (the usual), `flat over the last 15 minutes
 — no direction`, `no bars for the last 15 minutes yet`, `missed the call window` (the
 slot's trade was already over when it was built), `the market closes early today` (a
-half day in `[intraday] early_close_days`, and the slot's trade would pass the early
+half day in `config/sessions.toml [early_close] days`, and the slot's trade would pass the early
 close: no roles, nothing fetched or frozen) or `the call could not be built`.
 
 `confirmation` is `{flow, netprem, dealer, sentiment, score, word, n_present,
