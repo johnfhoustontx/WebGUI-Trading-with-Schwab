@@ -11,14 +11,10 @@
  * 2 years so a visitor in early January is not looking at a blind clock.
  * Regenerate it when the later year is the current one.
  *
- * KNOWN GAP -- EARLY CLOSES ARE NOT HANDLED (decided 2026-09-08). The NYSE shuts
- * at 13:00 ET on roughly three afternoons a year (the eves of Independence Day
- * and Christmas, and the Friday after Thanksgiving). Nothing in this repo models
- * a half day -- there is no is_half_day anywhere -- so on those afternoons this
- * data says the session runs to 16:00. It is decoration with no downstream
- * consumer, so the gap was accepted rather than papered over with another
- * hand-maintained date list. Written down here so the next reader finds it
- * before Black Friday does.
+ * HALF DAYS (since 2026-11-19) come from config/sessions.toml [early_close], a
+ * list the operator keeps (the NYSE's July rule is not derived). EARLY_CLOSES
+ * maps each one in the covered years to its Eastern close; on any other trading
+ * day the session runs to 16:00. Regenerate after changing that list.
  *
  * No dependencies, no build step, no third-party origin.
  */
@@ -49,15 +45,19 @@ window.NS_MARKET_CLOCK = (function () {
     "2027-12-24"
   ];
 
-  /* The regular session, Eastern wall clock. See the early-close gap above. */
+  /* The regular session, Eastern wall clock. */
   var OPEN_ET = "09:30";
   var CLOSE_ET = "16:00";
   var TIME_ZONE = "America/New_York";
+
+  /* Half days: ISO date -> Eastern close, replacing CLOSE_ET on that date. */
+  var EARLY_CLOSES = {"2026-11-27": "13:00", "2026-12-24": "13:00", "2027-11-26": "13:00"};
 
   return {
     holidays: HOLIDAYS,
     openET: OPEN_ET,
     closeET: CLOSE_ET,
+    earlyCloses: EARLY_CLOSES,
     timeZone: TIME_ZONE
   };
 })();

@@ -44,6 +44,11 @@ const cases = [
   // The service does not write a 12:00 final today (half days are not modelled);
   // this pins decide for the day it does.
   ["final_before_regular_close_is_moon", file("2026-11-27", true, 5400, "12:00"), now("2026-11-27", 5, hm(13, 30)), "moon", "8:45 AM CT Monday"],
+  // A half day closes at 13:00 ET: a service that stopped before the 12:00 CT
+  // final leaves a non-final file, which after the early close is no sky at all,
+  // not fog (the session is over). Before the early close it is still live.
+  ["half_day_dead_before_close_hides_after_it", file("2026-11-27", false, 6300, "11:45"), now("2026-11-27", 5, hm(13, 30)), "hide"],
+  ["half_day_morning_is_live", file("2026-11-27", false, 300, "11:30"), now("2026-11-27", 5, hm(12, 40)), "live"],
   ["evening_after_close_is_moon", file("2026-11-19", true, 10000, "15:00"), now("2026-11-19", 4, hm(19, 0)), "moon", "8:45 AM CT Friday"],
   ["dead_since_midday_hides_in_evening", file("2026-11-19", false, 20000, "12:00"), now("2026-11-19", 4, hm(19, 0)), "hide"],
   ["weekend_moon", file("2026-11-20", true, 100000, "15:00"), now("2026-11-21", 6, hm(10, 0)), "moon", "8:45 AM CT Monday"],

@@ -1725,3 +1725,11 @@ def test_the_weather_toggle_keeps_keyboard_focus():
     m = re.search(r"function \(\) \{ open = !open; redraw\(true\);(.*?)\}\);", js, re.S)
     assert m, "the toggle callback is missing"
     assert ".ns-wx-toggle" in m.group(1) and ".focus()" in m.group(1)
+
+
+def test_both_clock_readers_end_a_half_day_at_its_early_close():
+    """market-clock.js carries ``earlyCloses`` (date -> Eastern close) since
+    2026-11-19; a reader that ignores it calls a half-day afternoon open."""
+    for name in ("assets/market-glow.js", "assets/weather.js"):
+        js = _text(name)
+        assert "clock.earlyCloses[now.date]" in js, f"{name} ignores the half days"

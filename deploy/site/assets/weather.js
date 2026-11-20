@@ -124,7 +124,8 @@
   function decide(file, now, clock) {
     if (!file || file.hidden || file.v !== 1 || !clock || !now) { return { mode: "hide" }; }
     var open = minutesOfDay(clock.openET);
-    var close = minutesOfDay(clock.closeET);
+    var early = clock.earlyCloses && clock.earlyCloses[now.date];   /* a half day */
+    var close = minutesOfDay(early || clock.closeET);
     var interval = file.interval_min > 0 ? file.interval_min : 15;
     if (open === null || close === null) { return { mode: "hide" }; }
     var trading = isTradingDay(now.date, clock);
@@ -140,8 +141,8 @@
     if (file.date === now.date && !file.final && now.epoch - file.ts <= 2 * interval * 60) {
       return { mode: "live" };
     }
-    /* A final reading from today is the close. (The service marks only the
-       15:00 CT slot final: half days are not modelled anywhere yet.) */
+    /* A final reading from today is the close: 15:00 CT, or a half day's early
+       close (config/sessions.toml [early_close], which the clock also carries). */
     if (file.date === now.date && file.final) { return moon(); }
     if (trading && now.minutes >= open && now.minutes < close) {
       if (now.minutes < grace && file.final && file.date === stepTradingDay(now.date, clock, -1)) {

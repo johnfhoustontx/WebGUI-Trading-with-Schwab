@@ -89,11 +89,13 @@
     if (!clock || !clock.timeZone) { return false; }
 
     var open = minutesOfDay(clock.openET);
-    var close = minutesOfDay(clock.closeET);
-    if (open === null || close === null) { return false; }
-
     var now = nowInZone(clock.timeZone);
     if (!now) { return false; }
+
+    /* A half day closes early (clock.earlyCloses, from config/sessions.toml). */
+    var early = clock.earlyCloses && clock.earlyCloses[now.date];
+    var close = minutesOfDay(early || clock.closeET);
+    if (open === null || close === null) { return false; }
 
     if (now.weekday === 0 || now.weekday === 6) { return false; }
 

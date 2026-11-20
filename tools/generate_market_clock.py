@@ -98,6 +98,18 @@ def _eastern(t: datetime.time) -> str:
     return ct.astimezone(ZoneInfo(EASTERN)).strftime("%H:%M")
 
 
+def _early_closes_et() -> dict:
+    """Every half day in the covered years that trades, ISO date -> Eastern
+    ``"HH:MM"`` close. Straight out of ``market_calendar.early_close_on``, which
+    already drops a listed date that is a weekend or a holiday."""
+    out = {}
+    for d in sorted(mc.early_close_days()):
+        close = mc.early_close_on(d)
+        if close is not None and CURRENT_YEAR <= d.year < CURRENT_YEAR + YEARS_EMITTED:
+            out[d.isoformat()] = close.astimezone(ZoneInfo(EASTERN)).strftime("%H:%M")
+    return out
+
+
 def _session_bounds_et():
     """``(open, close)`` for the regular session, in Eastern ``"HH:MM"``.
 
@@ -125,14 +137,10 @@ _HEADER = """\
  * {years} years so a visitor in early January is not looking at a blind clock.
  * Regenerate it when the later year is the current one.
  *
- * KNOWN GAP -- EARLY CLOSES ARE NOT HANDLED (decided 2026-09-08). The NYSE shuts
- * at 13:00 ET on roughly three afternoons a year (the eves of Independence Day
- * and Christmas, and the Friday after Thanksgiving). Nothing in this repo models
- * a half day -- there is no is_half_day anywhere -- so on those afternoons this
- * data says the session runs to {close}. It is decoration with no downstream
- * consumer, so the gap was accepted rather than papered over with another
- * hand-maintained date list. Written down here so the next reader finds it
- * before Black Friday does.
+ * HALF DAYS (since 2026-11-19) come from config/sessions.toml [early_close], a
+ * list the operator keeps (the NYSE's July rule is not derived). EARLY_CLOSES
+ * maps each one in the covered years to its Eastern close; on any other trading
+ * day the session runs to {close}. Regenerate after changing that list.
  *
  * No dependencies, no build step, no third-party origin.
  */
@@ -155,6 +163,7 @@ def render() -> str:
     # nothing to see. One date per line so a yearly regeneration is a readable
     # diff instead of one 300-character line.
     dates = ",\n".join(f"    {json.dumps(d)}" for d in _holidays())
+    early = json.dumps(_early_closes_et(), sort_keys=True)
     return (
         f"{header}"
         f"window.NS_MARKET_CLOCK = (function () {{\n"
@@ -163,15 +172,19 @@ def render() -> str:
         f"  /* Full-day NYSE closures, ISO YYYY-MM-DD, sorted. */\n"
         f"  var HOLIDAYS = [\n{dates}\n  ];\n"
         f"\n"
-        f"  /* The regular session, Eastern wall clock. See the early-close gap above. */\n"
+        f"  /* The regular session, Eastern wall clock. */\n"
         f'  var OPEN_ET = "{open_et}";\n'
         f'  var CLOSE_ET = "{close_et}";\n'
         f'  var TIME_ZONE = "{EASTERN}";\n'
+        f"\n"
+        f"  /* Half days: ISO date -> Eastern close, replacing CLOSE_ET on that date. */\n"
+        f"  var EARLY_CLOSES = {early};\n"
         f"\n"
         f"  return {{\n"
         f"    holidays: HOLIDAYS,\n"
         f"    openET: OPEN_ET,\n"
         f"    closeET: CLOSE_ET,\n"
+        f"    earlyCloses: EARLY_CLOSES,\n"
         f"    timeZone: TIME_ZONE\n"
         f"  }};\n"
         f"}})();\n"

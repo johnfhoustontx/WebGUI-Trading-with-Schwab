@@ -13,7 +13,7 @@ What is pinned here is the reason this file is GENERATED rather than typed:
   2 January,
 * the session bounds come from ``config/sessions.toml`` (which states them in
   CT) rather than from a second pair of literals,
-* and the early-close gap is written down in the file itself.
+* and the half days come from the calendar too.
 """
 import json
 import re
@@ -41,14 +41,39 @@ def test_it_emits_two_years_so_a_january_visitor_is_covered():
     assert str(g.CURRENT_YEAR) in js and str(g.CURRENT_YEAR + 1) in js
 
 
-def test_the_early_close_gap_is_declared_in_the_file():
-    """DECIDED 2026-09-08: half-days are NOT handled. The NYSE closes at 13:00 ET
-    on ~3 afternoons a year and nothing in this repo knows it -- there is no
-    is_half_day anywhere. The glow is decoration with no downstream consumer, so
-    the gap was accepted; this asserts it is WRITTEN DOWN rather than left for
-    someone to find on Black Friday."""
+def _early_closes(js):
+    return json.loads(re.search(r"EARLY_CLOSES\s*=\s*(\{[^}]*\})", js).group(1))
+
+
+def test_the_emitted_half_days_are_the_calendar_s_in_eastern_time():
+    """Since 2026-11-19 the calendar knows half days ([early_close] in
+    config/sessions.toml), so the browser is told them too: the homepage weather
+    card ends the session at the early close instead of calling the afternoon fog."""
     js = g.render()
-    assert "13:00" in js and "early close" in js.lower()
+    year = g.CURRENT_YEAR
+    want = {d.isoformat(): mc.early_close_on(d).astimezone(g.ZoneInfo(g.EASTERN)).strftime("%H:%M")
+            for d in mc.early_close_days()
+            if d.year in (year, year + 1) and mc.early_close_on(d) is not None}
+    assert _early_closes(js) == want
+    if year == 2026:
+        assert _early_closes(js)["2026-11-27"] == "13:00"
+
+
+def test_a_listed_day_that_does_not_trade_is_not_emitted(monkeypatch):
+    monkeypatch.setattr(g.mc, "load_config", lambda: g.mc._merge(
+        g.mc._DEFAULTS, {"early_close": {"days": [f"{g.CURRENT_YEAR}-12-25",
+                                                   f"{g.CURRENT_YEAR}-11-27"],
+                                          "time": "11:00"}}))
+    got = _early_closes(g.render())
+    assert f"{g.CURRENT_YEAR}-12-25" not in got
+    if g.mc.is_trading_day(__import__("datetime").date(g.CURRENT_YEAR, 11, 27)):
+        assert got[f"{g.CURRENT_YEAR}-11-27"] == "12:00"
+
+
+def test_the_clock_hands_the_half_days_to_its_readers():
+    js = g.render()
+    assert "earlyCloses: EARLY_CLOSES" in js
+    assert "KNOWN GAP" not in js
 
 
 # --- the session bounds are derived, not a second pair of literals -----------
