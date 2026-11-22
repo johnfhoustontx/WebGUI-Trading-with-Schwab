@@ -1506,3 +1506,31 @@ def test_no_unit_claims_path_isolation_that_does_not_apply_here():
                     "ReadOnlyPaths=", "PrivateTmp="):
             assert key not in text, (
                 f"{name} sets {key} which a user unit on this host silently ignores")
+
+
+# --- the start fence (warm standby) -------------------------------------------
+def test_every_prod_service_requires_the_fence():
+    """The fence is applied to every .service in one place; a unit added
+    tomorrow is fenced without anyone remembering to."""
+    fence = units.fence_name()
+    for name, text in units.render_all().items():
+        if not name.endswith(".service") or name in (fence, units.notifier_name()):
+            continue
+        unit = text.split("[Service]")[0]
+        lines = unit.splitlines()
+        assert f"Requires={fence}" in lines, name
+        assert f"After={fence}" in lines, name
+
+
+def test_fence_unit_shape():
+    text = units.render_all()[units.fence_name()]
+    cp = _parse(text)
+    assert cp["Service"]["Type"] == "oneshot"
+    assert cp["Service"]["RemainAfterExit"] == "yes"
+    assert cp["Service"]["TimeoutStartSec"] == "30"
+    assert "tools/standby_fence.py" in cp["Service"]["ExecStart"]
+    # it does not wait on itself
+    assert "Requires=" not in text
+    assert f"After={units.fence_name()}" not in text
+    # a refusal pushes an alert
+    assert "OnFailure=" in text

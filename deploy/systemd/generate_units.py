@@ -1190,6 +1190,34 @@ WantedBy=timers.target
             f"trading-{ENV_NAME}-token-watch.timer": tmr}
 
 
+def fence_name():
+    """The start fence: a oneshot every stack service requires."""
+    return f"trading-{ENV_NAME}-fence.service"
+
+
+def _fence_unit():
+    """The oneshot that refuses to start the stack on a box that is not prod.
+
+    ``RemainAfterExit=yes`` so it counts as started once it passes, and every
+    service that ``Requires=`` it waits for that. A refusal fails the fence, so
+    the stack stays down; ``OnFailure=`` (added to every service) pushes the
+    alert. tools/standby_fence.py allows on any doubt and on a box with no
+    identity file, so a deploy to a box that has none changes nothing.
+    """
+    return {fence_name(): f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - start fence (this box must be prod)
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory={_workdir()}
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=America/Chicago
+TimeoutStartSec=30
+ExecStart={_python()} tools/standby_fence.py
+"""}
+
+
 def _with_failure_alert(name, text):
     """``text`` with ``OnFailure=`` naming the notifier, in its [Unit] section.
 
@@ -1205,6 +1233,21 @@ def _with_failure_alert(name, text):
     line = f"OnFailure=trading-{ENV_NAME}-notify-failure@%n.service\n"
     return head + "# Tell a person when this ends up failed (tools/notify_failure.py).\n" \
         + line + text[len(head):]
+
+
+def _with_fence(name, text):
+    """``text`` with ``Requires=`` and ``After=`` the start fence, in [Unit].
+
+    One place, like ``_with_failure_alert``: every ``.service`` except the fence
+    itself and the notifier template, so a unit added tomorrow is fenced too.
+    """
+    if not name.endswith(".service") or name in (fence_name(), notifier_name()):
+        return text
+    head = "[Unit]\n"
+    if not text.startswith(head):
+        raise ValueError(f"{name} does not start with a [Unit] section")
+    return (head + "# Start only on the box that is prod (tools/standby_fence.py).\n"
+            + f"Requires={fence_name()}\nAfter={fence_name()}\n" + text[len(head):])
 
 
 def render_all():
@@ -1223,7 +1266,9 @@ def render_all():
     out.update(_token_watch_units())
     out.update(_stock_rank_units())
     out.update(_notifier_unit())
-    return {name: _with_failure_alert(name, text) for name, text in out.items()}
+    out.update(_fence_unit())
+    return {name: _with_failure_alert(name, _with_fence(name, text))
+            for name, text in out.items()}
 
 
 def install(dest=None):
