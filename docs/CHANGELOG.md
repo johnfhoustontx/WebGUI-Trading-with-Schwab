@@ -4,7 +4,24 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-22 (**The Caddyfile generator emits cos.neuralstrike.co.**)
+**Last updated:** 2026-11-22 (**cos.neuralstrike.co is cos-hub alone; the /feed/ route is gone.**)
+
+- **Why.** The block added this morning (below) brought back X News Feed at `/feed/`
+  behind a login. That feed moved into this app as `xfeed_svc` on 2026-11-13, and the
+  standalone one was retired on 2026-11-14: `~/x-news-feed` is gone and nothing listens
+  on :4300. The route could only ever answer 502 behind its login.
+- **The change.** `_cos_block()` is now HSTS plus `reverse_proxy 127.0.0.1:8787` with
+  the edge header. Gone: the `/feed` redirect, the `handle_path /feed/*` route, the
+  `basic_auth` login, `feed_basic_auth()`, `FEED_PORT` and the generator's warning.
+  `shared/feed_basic_auth.txt` is no longer read or backed up (it moved to
+  `NOT_BACKED_UP` with its reason). It stays gitignored, because leftover copies hold
+  a bcrypt hash and this repo is public.
+- **Checked.** The output differs from the live `/etc/caddy/Caddyfile` only in the cos
+  block's removed feed lines (plus the hub's `reverse_proxy` losing the `handle`
+  wrapper it no longer needs). The cos tests were rewritten: the exact block, no
+  `/feed` or `basic_auth` anywhere, no warning when generating.
+
+**Prior —** 2026-11-22 (**The Caddyfile generator emits cos.neuralstrike.co.**)
 
 - **What happened.** The `cos.neuralstrike.co` block (cos-hub for the Chief of Staff
   phone app, and X News Feed at `/feed/`) was added to `/etc/caddy/Caddyfile` by hand
