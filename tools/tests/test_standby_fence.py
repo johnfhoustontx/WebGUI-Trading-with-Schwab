@@ -289,6 +289,21 @@ def test_probe_proxy_any_http_status_is_an_answer(monkeypatch):
     assert fence.probe_proxy("https://peer/health", 1) is True
 
 
+@pytest.mark.parametrize("code,want", [(500, True), (404, True), (401, True),
+                                       (502, None), (503, None), (504, None)])
+def test_probe_proxy_a_gateway_error_is_no_proxy(monkeypatch, code, want):
+    """A live proxy's /health answers 200; any other status from the proxy itself
+    still means it runs. A gateway error is the tailnet front (tailscale serve)
+    answering with nothing behind it, e.g. a demoted box whose serve config was
+    left in place: that is no evidence, or a healthy prod would refuse to boot."""
+    import urllib.error
+
+    def answer(url, timeout=None, context=None):
+        raise urllib.error.HTTPError(url, code, "x", {}, None)
+    monkeypatch.setattr(fence.urllib.request, "urlopen", answer)
+    assert fence.probe_proxy("https://peer/health", 1) is want
+
+
 @pytest.mark.parametrize("exc", [OSError("refused"), TimeoutError("slow")])
 def test_probe_proxy_no_connection_is_no_evidence(monkeypatch, exc):
     import urllib.error

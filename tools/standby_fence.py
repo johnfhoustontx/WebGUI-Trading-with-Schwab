@@ -34,6 +34,9 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from repo_paths import APP_HOST, ENV_NAME  # noqa: E402
 
+# A front with nothing behind it, never a proxy's own answer (see probe_proxy).
+GATEWAY_ERRORS = (502, 503, 504)
+
 
 def _config():
     """``shared.standby_config``, imported when it is needed (see the docstring)."""
@@ -104,11 +107,15 @@ def lookup(host, settings, resolve_fn=None, sleep=time.sleep, clock=time.monoton
 
 
 def probe_proxy(url, timeout_s):
-    """True when ``url`` answers with ANY HTTP status (a proxy is running there);
+    """True when ``url`` answers with an HTTP status (a proxy is running there);
     None when it was not probed or not reached: no connection, a timeout, a TLS
-    failure. The certificate is checked against the system's authorities, as
-    ``curl`` does (a tailnet name carries a public certificate). Runs on a daemon
-    thread, so a peer that accepts and then stalls cannot hold the fence."""
+    failure, or a GATEWAY error (502, 503, 504). A live proxy's ``/health``
+    answers 200 whatever its state; a gateway error is ``tailscale serve``
+    answering with no proxy behind it (a demoted box keeps its serve config), and
+    reading that as a proxy would hold a healthy prod at boot. The certificate is
+    checked against the system's authorities, as ``curl`` does (a tailnet name
+    carries a public certificate). Runs on a daemon thread, so a peer that accepts
+    and then stalls cannot hold the fence."""
     if not url:
         return None
     box: list = []
@@ -119,7 +126,7 @@ def probe_proxy(url, timeout_s):
                                         context=ssl.create_default_context()):
                 box.append(True)
         except urllib.error.HTTPError as exc:
-            box.append(True)
+            box.append(None if exc.code in GATEWAY_ERRORS else True)
             try:
                 exc.close()
             except Exception:  # noqa: BLE001 - it answered; closing is housekeeping

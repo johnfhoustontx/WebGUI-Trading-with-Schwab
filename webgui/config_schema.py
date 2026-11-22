@@ -3677,8 +3677,9 @@ _STANDBY = ConfigFile(
                   unit="seconds", min=1, max=5, step=1),
             Field("fence.peer_probe_timeout_s", "Peer probe timeout",
                   "How long the fence waits for the other server's proxy health "
-                  "address. Any answer there holds this server's stack; no "
-                  "answer is no evidence.", kind="int", unit="seconds", min=1,
+                  "address. A proxy answering there holds this server's stack; "
+                  "no answer, or a gateway error (nothing behind the address), is "
+                  "no evidence.", kind="int", unit="seconds", min=1,
                   max=8, step=1),
         )),
         Section("Morning check", "Prod's daily read of the standby's status file.", (
