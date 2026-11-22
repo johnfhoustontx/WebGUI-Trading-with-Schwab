@@ -318,12 +318,17 @@ def takeover(identity, *, peer_is_down=False, home=None, repo=None, run=subproce
     # A sync running now would move the checkout and restore data under the stack
     # about to start: stop it while nothing has changed, or refuse.
     if (unit_dir / standby_units.SERVICE).exists():
+        was_running = _ctl(run, "is-active", "--quiet", standby_units.SERVICE)[0]
         ok, text = _ctl(run, "stop", standby_units.SERVICE)
         if not ok:
             out(f"REFUSED: could not stop {standby_units.SERVICE} ({text[:200]}); "
                 "nothing was changed. Stop it by hand and run takeover again.")
             return 1
         out(f"  stopped {standby_units.SERVICE}")
+        if was_running:
+            out("  !! a sync WAS RUNNING and was stopped part-way: the checkout or the "
+                "data may be part-restored, and the result above is the night before's. "
+                "Read journalctl --user -u standby-sync before trusting the data.")
 
     def fail(what, not_done):
         out(f"\nFAILED: {what}")

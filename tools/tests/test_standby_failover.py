@@ -742,6 +742,19 @@ def test_takeover_stops_the_sync_before_removing_it(tmp_path):
     assert not (d / "standby-sync.service").exists()
 
 
+def test_takeover_warns_loudly_when_it_stopped_a_running_sync(tmp_path):
+    _app(tmp_path)
+    _units(tmp_path / "home", ["standby-sync.service"])
+    rc, _run, lines, *_ = _go(tmp_path)                  # is-active answers 0: running
+    assert rc == 0 and any("WAS RUNNING" in x for x in lines)
+    sub = tmp_path / "idle"
+    sub.mkdir()
+    _app(sub)
+    _units(sub / "home", ["standby-sync.service"])
+    rc, _run, lines, *_ = _go(sub, run=Fake(fail=lambda a: a[0] == "curl" or "is-active" in a))
+    assert rc == 0 and not any("WAS RUNNING" in x for x in lines)
+
+
 def test_takeover_refuses_when_the_sync_will_not_stop(tmp_path):
     _app(tmp_path)
     d = _units(tmp_path / "home", ["standby-sync.service", "standby-sync.timer"])
