@@ -22,7 +22,12 @@ DEV="/home/administrator/dev"
 PY="$DEV/.venv/bin/python"
 PKGS="acl age apt-transport-https build-essential caddy curl debian-archive-keyring debian-keyring fontconfig fonts-liberation fonts-noto-color-emoji fonts-noto-core google-chrome-stable net-tools pkg-config rclone redis-server rsync wget xvfb zstd"
 
+# Refuse first: under sudo $HOME is /root and the clone, keys and units would land there.
+[ "$(id -u)" -ne 0 ] || { echo "run as administrator, not with sudo; it prompts for sudo itself" >&2; exit 2; }
+[ "$HOME" = "/home/administrator" ] || { echo "refused: HOME is $HOME; run as administrator (the checkout path is fixed at /home/administrator/dev)" >&2; exit 2; }
+
 usage() {
+  echo "run as administrator; it asks for sudo itself" >&2
   echo "usage: $0 <self> <status-read-public-key> <age-public-key-line>" >&2
   echo "  <self>  this box's name, e.g. vps3" >&2
   echo "  <status-read-public-key>  \"ssh-ed25519 AAAA... standby-watch@vps2\"" >&2
@@ -162,6 +167,8 @@ fi
 
 # ---------------------------------------------------------------- the unit pair
 step "the standby unit pair"
+# Without linger a --user timer stops at logout and never starts at boot.
+sudo loginctl enable-linger "$USER"
 "$PY" -m deploy.systemd.standby_units --install
 
 # ---------------------------------------------------------------- operator blocks

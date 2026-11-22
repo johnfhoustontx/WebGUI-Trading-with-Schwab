@@ -114,3 +114,18 @@ def test_provision_script_parses():
     r = subprocess.run(["bash", "-n", str(PROVISION)], capture_output=True,
                        text=True)
     assert r.returncode == 0, r.stderr
+
+
+def test_provision_enables_linger_before_installing_units():
+    text = PROVISION.read_text(encoding="utf-8")
+    assert "loginctl enable-linger" in text
+    assert text.index("loginctl enable-linger") < text.index(
+        "standby_units --install")
+
+
+def test_provision_refuses_root_before_any_sudo():
+    text = PROVISION.read_text(encoding="utf-8")
+    assert 'id -u' in text
+    first_sudo = text.index("\nsudo ")
+    assert text.index("id -u") < first_sudo
+    assert "/home/administrator" in text[:first_sudo]
