@@ -180,6 +180,16 @@ def _directives(text, key):
             if line.startswith(want)]
 
 
+def _unit_values(text, key):
+    """The values of `key` in a unit's [Unit] section, the start fence removed.
+
+    The fence (``units.fence_name()``) is the one ordering every service carries,
+    so a test about "no Requires/After on any OTHER unit" reads through this."""
+    unit = text.split("[Service]")[0]
+    fence = units.fence_name()
+    return [v for v in _directives(unit, key) if v != fence]
+
+
 def _environment_files(text):
     """EVERY `EnvironmentFile=` value in a unit -- see `_directives`."""
     return _directives(text, "EnvironmentFile")
@@ -193,10 +203,13 @@ def test_secrets_come_from_an_EnvironmentFile():
     ``test_the_public_process_does_not_inherit_the_stacks_secrets``. Asserted as
     "some checkout env file" here so this test keeps saying the thing it means
     (secrets are not inline) rather than silently becoming a second, weaker copy
-    of the split test below."""
+    of the split test below.
+
+    The start fence is the one exception: it holds no secret, and an
+    EnvironmentFile on it would add a way for it to fail closed."""
     live = units.unit_name("webgui_live")
     for name, text in units.render_all().items():
-        if not name.endswith(".service"):
+        if not name.endswith(".service") or name == units.fence_name():
             continue
         want = ".env.live" if name == live else ".env"
         assert str(POSIX_ROOT / want) in _environment_files(text), name
@@ -289,24 +302,28 @@ def test_the_webgui_is_ordered_after_the_proxy_but_does_not_require_it(rendered)
     """restart_spec already encodes this as wait_port 0: the GUI renders a
     proxy-down banner and is fully usable without one. Ordering it after the
     proxy just means first paint usually has data; a dead proxy must not keep
-    the UI down."""
-    cp = rendered[f"trading-{ENV_NAME}-webgui.service"]
-    assert "Requires" not in cp["Unit"]
+    the UI down. The start fence is the one ordering every service carries."""
+    name = f"trading-{ENV_NAME}-webgui.service"
+    cp = rendered[name]
+    text = units.render_all()[name]
+    assert _unit_values(text, "Requires") == []
     assert "ExecStartPre" not in cp["Service"]
     if OWNS_PROXY:
-        assert cp["Unit"]["After"] == f"trading-{ENV_NAME}-proxy.service"
+        assert _unit_values(text, "After") == [f"trading-{ENV_NAME}-proxy.service"]
 
 
 def test_a_borrowed_proxy_means_no_proxy_unit(monkeypatch):
     """Ownership is encoded in which units EXIST, not in a kill-list filter.
     Dev borrows prod's proxy -- one rotating OAuth refresh token, so there can
-    be only one -- so dev's target must not pull a second one up."""
+    be only one -- so dev's target must not pull a second one up. The start
+    fence is the one ordering every service carries."""
     monkeypatch.setattr(units, "OWNS_PROXY", False)
     emitted = units.render_all()
     assert not any("proxy" in n for n in emitted)
     for key in SERVICE_PORTS:
-        cp = _parse(emitted[f"trading-{ENV_NAME}-{key}_svc.service"])
-        assert "Requires" not in cp["Unit"]
+        text = emitted[f"trading-{ENV_NAME}-{key}_svc.service"]
+        cp = _parse(text)
+        assert _unit_values(text, "Requires") == []
         assert "ExecStartPre" not in cp["Service"]
 
 
@@ -470,10 +487,12 @@ def test_the_live_unit_orders_itself_against_nothing_it_talks_to(rendered):
     nothing else. No proxy call, no Schwab call, no service call. So no
     ``After=``, no ``Requires=`` and no readiness probe: an ordering against a
     component it never speaks to reads as a real dependency and is none, and
-    the next person to touch this file would have to prove it was fake."""
+    the next person to touch this file would have to prove it was fake. The
+    start fence is the one ordering every service carries."""
     cp = rendered[units.unit_name("webgui_live")]
-    assert "Requires" not in cp["Unit"]
-    assert "After" not in cp["Unit"]
+    text = units.render_all()[units.unit_name("webgui_live")]
+    assert _unit_values(text, "Requires") == []
+    assert _unit_values(text, "After") == []
     assert "ExecStartPre" not in cp["Service"]
 
 
@@ -1234,10 +1253,11 @@ def test_the_hiro_report_is_not_a_member_of_the_fleet(rendered):
 
 
 def test_the_hiro_report_waits_for_nothing(rendered):
-    """No proxy, no Redis: a wait on either would only add a way to fail."""
+    """No proxy, no Redis: a wait on either would only add a way to fail. The
+    start fence is the one ordering every service carries."""
     text = units.render_all()[HR_SVC]
     assert _directives(text, "ExecStartPre") == []
-    assert "After" not in rendered[HR_SVC]["Unit"]
+    assert _unit_values(text, "After") == []
 
 
 def test_the_hiro_report_is_not_killed_at_the_default_start_timeout(rendered):
