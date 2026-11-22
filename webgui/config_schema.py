@@ -3619,6 +3619,53 @@ _BACKUP = ConfigFile(
     ),
 )
 
+_STANDBY = ConfigFile(
+    name="standby.toml", title="Warm standby", icon="content_copy",
+    summary="The nightly copy of the stack to the second server, and the two "
+            "servers' addresses. Which server this is lives in a file on the "
+            "machine itself, not here.",
+    restart=(),
+    sections=(
+        Section("Nightly sync", "When the standby is refreshed and what makes "
+                "it refuse a bad copy.", (
+            Field("sync.at", "Sync time (Central)",
+                  "After the nightly backup and before the morning reports.",
+                  kind="time"),
+            Field("sync.max_age_h", "Oldest copy accepted",
+                  "A takeover refuses a copy older than this.", kind="int",
+                  unit="hours", min=1, max=1440, step=1),
+            Field("sync.max_shrink_pct", "Largest shrink accepted",
+                  "A store that lost more than this share of its size since "
+                  "the last copy is not promoted.", kind="int", unit="percent",
+                  min=1, max=100, step=1),
+            Field("sync.keep", "Copies kept",
+                  "Generations kept on the standby.", kind="int", min=1,
+                  max=60, step=1),
+            Field("sync.generations", "Copies folder",
+                  "Where the standby keeps them.", kind="text"),
+            Field("sync.shrink_stores", "Stores checked for shrinking",
+                  "Paths under the checkout.", kind="phrases"),
+        )),
+        Section("Servers", "Read-only here: changing an address is done in "
+                "config/standby.toml.", (
+            Field("boxes.*.ssh", "SSH names", "", kind="phrases"),
+            Field("boxes.*.public_ip", "Public address", "", kind="text"),
+            Field("boxes.*.proxy_health", "Proxy health URL", "", kind="text"),
+        ), readonly=True),
+        Section("Neighbour apps", "Copied with the stack. Read-only here: a "
+                "list in config/local would replace the whole shipped list.", (
+            Field("neighbours.*.name", "Name", "", kind="text"),
+            Field("neighbours.*.dir", "Folder", "", kind="text"),
+            Field("neighbours.*.exclude", "Left out", "", kind="phrases",
+                  optional=True),
+            Field("neighbours.*.units", "Service units", "", kind="phrases",
+                  optional=True),
+            Field("neighbours.*.files", "Extra files", "", kind="phrases",
+                  optional=True),
+        ), readonly=True),
+    ),
+)
+
 _SOCIAL_CARDS = ConfigFile(
     name="social_cards.toml", title="Social cards", icon="image",
     summary="The preview images drawn for each blog entry and each trade idea: "
@@ -3755,7 +3802,7 @@ _XFEED = ConfigFile(
 )
 
 FILES = (_COMMANDS, _SCANNER, _PAPER, _TRADE_MGMT, _FLOW, _NOTIFY, _LOGIN_PUSH, _TOS_ORDER, _LIVE_ORDERS, _SESSIONS, _SYMBOLS, _NEWS, _BLOG, _XFEED, _SECTORS, _MOMENTUM, _SENTIMENT,
-         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _FUTURES_CHAIN, _GEX_ARCHIVE, _MODEL_HEALTH, _BACKUP, _SOCIAL_CARDS, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
+         _FINDER_PUBLIC, _RESCUE_PUBLIC, _TOOLS_PUBLIC, _GAMMA_PUBLIC, _GAMMA_HEAT, _FUTURES_CHAIN, _GEX_ARCHIVE, _MODEL_HEALTH, _BACKUP, _STANDBY, _SOCIAL_CARDS, _FEED, _SCALP, _EDGE, _SWING_MODEL, _LISTED_STOCKS, _COMMISSIONS, _MARKETDATA,
          _MARKET_READ, _ETF_HOLDINGS, _PORTS, _ENVS)
 EDITABLE = tuple(f for f in FILES if f.editable)
 BY_NAME = {f.name: f for f in FILES}

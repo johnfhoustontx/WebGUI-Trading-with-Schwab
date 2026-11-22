@@ -1,0 +1,36 @@
+# The warm standby (docs/plans/2026-11-22-warm-standby-design.md): when the
+# nightly sync runs, how it refuses a bad copy, the two boxes, and the neighbour
+# apps copied along with the stack. Which box THIS is lives in
+# ~/.config/neuralstrike/box.toml, never here: the checkout is the same on both.
+
+[sync]
+at = "22:15"                 # Central; after the 21:xx backup, before the 04:xx reports
+max_age_h = 80               # a copy older than this is refused at takeover
+max_shrink_pct = 50          # a store that lost more than this is not promoted
+keep = 3                     # generations kept on the standby
+generations = "~/standby/generations"
+shrink_stores = ["options-scanner/data/paper_account.db", "options-scanner/data/signals.db", "options-scanner/gex_history.db"]
+
+[boxes.vps2]
+ssh = ["trading-prod-2", "63.141.255.25"]
+public_ip = "63.141.255.25"
+proxy_health = "https://trading-prod-2.tail3050ed.ts.net:8100/health"
+
+[boxes.vps3]
+ssh = ["trading-standby", "192.227.249.22"]
+public_ip = "192.227.249.22"
+proxy_health = "https://trading-standby.tail3050ed.ts.net:8100/health"
+
+[[neighbours]]
+name = "cos-hub"
+dir = "cos-hub"
+exclude = [".venv", "config.local.toml.bak-*", "__pycache__"]
+units = ["cos-hub.service"]
+files = []
+
+[[neighbours]]
+name = "neuralstrike-reports"
+dir = "neuralstrike-reports"
+exclude = [".venv", "logs", "__pycache__"]
+units = ["neuralstrike-report@.service", "neuralstrike-report-failed@.service", "neuralstrike-report-*.timer", "neuralstrike-report@globex.service.d"]
+files = [".config/neuralstrike/claude.env"]

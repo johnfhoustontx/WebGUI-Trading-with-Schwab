@@ -279,13 +279,16 @@ def test_the_feed_switches_are_editable_and_named_by_feed():
 
 def test_no_other_file_has_a_read_only_field():
     """Read-only is the news feed list's and the declared regime study's
-    ``[regime]`` table; nothing else changed shape."""
+    ``[regime]`` table, and the standby's server and neighbour lists (a list
+    of tables in config/local would replace the shipped one); nothing else
+    changed shape."""
     for cfg in cs.EDITABLE:
         if cfg is NEWS:
             continue
-        allowed = "regime" if cfg.name == "scalp.toml" else None
+        allowed = {"scalp.toml": ("regime",),
+                   "standby.toml": ("boxes", "neighbours")}.get(cfg.name, ())
         assert not [p for p in store.flatten(_shipped(cfg.name))
-                    if cs.is_readonly(cfg, p) and p[0] != allowed], cfg.name
+                    if cs.is_readonly(cfg, p) and p[0] not in allowed], cfg.name
 
 
 def test_quoted_feed_names_with_spaces_and_dots_split_and_locate():

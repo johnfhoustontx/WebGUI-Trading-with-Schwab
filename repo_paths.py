@@ -120,6 +120,14 @@ GEX_ARCHIVE_TOML = REPO_ROOT / "config" / "gex_archive.toml"
 # The nightly backup's offsite compression. Read by tools/backup_local.py.
 BACKUP_TOML = REPO_ROOT / "config" / "backup.toml"
 
+# The warm standby: the sync schedule, the two boxes and the neighbour apps
+# copied with them. Read by shared/standby_config.py.
+STANDBY_TOML = REPO_ROOT / "config" / "standby.toml"
+
+# Which box this is (name, role, taking_over). MACHINE-LOCAL, never in the repo:
+# the same checkout runs on both boxes. Read/written by shared/standby_config.py.
+BOX_IDENTITY = Path.home() / ".config" / "neuralstrike" / "box.toml"
+
 # The Social Cards (blog and idea preview images): sizes, line limits, the first
 # day cards are listed. Read by shared/social_cards.py.
 SOCIAL_CARDS_TOML = REPO_ROOT / "config" / "social_cards.toml"
