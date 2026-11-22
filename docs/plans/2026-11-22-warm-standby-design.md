@@ -112,7 +112,7 @@ holds with the boxes swapped.
 ### Roles and the fence
 
 `config/standby.toml` (tracked) lists both boxes: name, ssh targets (tailnet
-first), public IP, probes. The gitignored `config/local/standby.toml` on each box
+first), public IP, probes. The file `~/.config/neuralstrike/box.toml` on each box, outside the checkout
 says which box it is (`self = "vps2"`) and its role (`role = "prod"` or
 `"standby"`), so a git checkout can never carry an identity. The peer is the
 other entry.
@@ -222,7 +222,7 @@ workstation pull), `Persistent=true`, so a run missed while vps3 was down
 happens at the next boot. Each run:
 
 1. **Refuses if this box has been promoted**: if any `trading-prod-*` unit file
-   exists, or `config/local/standby.toml` says `role = "prod"`, it exits non-zero
+   exists, or the identity file says `role = "prod"`, it exits non-zero
    without touching anything (the failover command also disables the timer;
    this is the second lock).
 2. **Finds the newest complete generation** on vps2 (`rsync --list-only` through
@@ -272,7 +272,7 @@ standby is the thing being used.
    all three answered from vps3. If the peer is half-alive and cannot be stopped,
    the operator passes `--peer-is-down` after deciding.
 2. Disables `standby-sync.timer`, writes `role = "prod"` to
-   `config/local/standby.toml`, and marks the box as taking over (for the fence).
+   the identity file, and marks the box as taking over (for the fence).
 3. Points `proxy_public_url` in `config/env.local.toml` at this box's tailnet
    name (or removes it).
 4. Runs `deploy.systemd.generate_units --install`, starts `trading-prod.target`,
@@ -381,7 +381,7 @@ proxy_health = "https://trading-standby.tail3050ed.ts.net:8100/health"
 Every probe of "the peer" is built from its `[boxes.<peer>]` entry.
 
 The box's role (`role = "standby" | "prod"`) is machine-local and lives in the
-gitignored `config/local/standby.toml`, so a git checkout can never carry it.
+identity file `~/.config/neuralstrike/box.toml`, outside the checkout. Not `config/local/`: that folder is swept into every backup, so an identity there would be restored onto the peer (found while planning). A git checkout and a backup can never carry it.
 
 ### Tests
 
