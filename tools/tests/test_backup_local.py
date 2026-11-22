@@ -477,3 +477,136 @@ def test_the_raw_feed_store_is_never_backed_up(tmp_path):
     keep.mkdir(parents=True)
     (keep / "signals.db").write_bytes(b"x" * 10)
     assert [p.name for p in bl.db_paths(tmp_path)] == ["signals.db"]
+
+
+# ── the commit and the neighbours (warm standby) ────────────────────────────
+
+import os  # noqa: E402
+import sqlite3  # noqa: E402
+import subprocess  # noqa: E402
+
+
+class _Done:
+    def __init__(self, rc=0, out="", err=""):
+        self.returncode, self.stdout, self.stderr = rc, out, err
+
+
+def _spec(**kw):
+    base = {"name": "cos-hub", "dir": "cos-hub", "exclude": [".venv", "logs"],
+            "units": [], "files": []}
+    base.update(kw)
+    return base
+
+
+def test_generation_carries_git_head(tmp_path):
+    out = tmp_path / "gen"
+    out.mkdir()
+    calls = []
+
+    def run(cmd, **kw):
+        calls.append(cmd)
+        return _Done(0, "abc123def\n")
+
+    assert bl.write_git_head(out, tmp_path, run=run) == "abc123def"
+    assert (out / bl.GIT_HEAD).read_text().strip() == "abc123def"
+    assert calls[0][:3] == ["git", "-C", str(tmp_path)] and "rev-parse" in calls[0]
+
+
+def test_git_head_failure_is_a_failure_and_blocks_ok_marker(tmp_path, monkeypatch):
+    out = tmp_path / "gen"
+    out.mkdir()
+    assert bl.write_git_head(out, tmp_path, run=lambda c, **k: _Done(128, "", "no")) is None
+    assert not (out / bl.GIT_HEAD).exists()
+    monkeypatch.setattr(bl, "REPO_ROOT", tmp_path / "repo")
+    (tmp_path / "repo" / ".git").mkdir(parents=True)
+    monkeypatch.setattr(bl, "DATA_TREES", ())
+    monkeypatch.setattr(bl, "EXTRA_FILES", ())
+    monkeypatch.setattr(bl, "backup_redis", lambda dst: (True, "stubbed"))
+    monkeypatch.setattr(bl, "write_git_head", lambda o, r, run=None: None)
+    monkeypatch.setattr(bl, "backup_neighbour", lambda *a, **k: [])
+    assert bl.main(["--dest", str(tmp_path / "o"), "--no-offsite"]) == 1
+    gen = next((tmp_path / "o").iterdir())
+    assert not (gen / bl.OK_MARKER).exists()
+
+
+def test_neighbour_sqlite_goes_through_online_backup(tmp_path):
+    home, out = tmp_path / "home", tmp_path / "gen"
+    data = home / "cos-hub" / "data"
+    data.mkdir(parents=True)
+    con = sqlite3.connect(data / "hub.sqlite3")
+    con.execute("create table t(x)")
+    con.execute("insert into t values (7)")
+    con.commit()
+    con.close()
+    (data / "hub.sqlite3-wal").write_bytes(b"wal")
+    (data / "hub.sqlite3-shm").write_bytes(b"shm")
+    assert bl.backup_neighbour(_spec(), home, out, run=lambda c, **k: _Done()) == []
+    dst = out / bl.NEIGHBOURS_DIR / "cos-hub" / "dir" / "data" / "hub.sqlite3"
+    c2 = sqlite3.connect(dst)
+    assert c2.execute("select x from t").fetchone() == (7,)
+    c2.close()
+    assert not list((out / bl.NEIGHBOURS_DIR).rglob("*-wal"))
+    assert not list((out / bl.NEIGHBOURS_DIR).rglob("*-shm"))
+
+
+def test_neighbour_excludes(tmp_path):
+    home, out = tmp_path / "home", tmp_path / "gen"
+    for rel in (".venv/x", "logs/a.jsonl", "prompts/p.md"):
+        f = home / "cos-hub" / rel
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text("1")
+    bl.backup_neighbour(_spec(), home, out, run=lambda c, **k: _Done())
+    base = out / bl.NEIGHBOURS_DIR / "cos-hub" / "dir"
+    assert (base / "prompts" / "p.md").is_file()
+    assert not (base / ".venv").exists() and not (base / "logs").exists()
+
+
+def test_neighbour_units_and_files_copied(tmp_path):
+    home, out = tmp_path / "home", tmp_path / "gen"
+    (home / "cos-hub").mkdir(parents=True)
+    ud = home / ".config" / "systemd" / "user"
+    (ud / "neuralstrike-report@globex.service.d").mkdir(parents=True)
+    (ud / "neuralstrike-report@globex.service.d" / "o.conf").write_text("[Service]")
+    for n in ("neuralstrike-report-am.timer", "neuralstrike-report-pm.timer", "other.timer"):
+        (ud / n).write_text("t")
+    env = home / ".config" / "neuralstrike" / "claude.env"
+    env.parent.mkdir(parents=True)
+    env.write_text("K=1")
+    spec = _spec(units=["neuralstrike-report-*.timer", "neuralstrike-report@globex.service.d"],
+                 files=[".config/neuralstrike/claude.env"])
+    assert bl.backup_neighbour(spec, home, out, run=lambda c, **k: _Done()) == []
+    units = out / bl.NEIGHBOURS_DIR / "cos-hub" / "units"
+    assert sorted(p.name for p in units.iterdir()) == [
+        "neuralstrike-report-am.timer", "neuralstrike-report-pm.timer",
+        "neuralstrike-report@globex.service.d"]
+    assert (units / "neuralstrike-report@globex.service.d" / "o.conf").is_file()
+    f = out / bl.NEIGHBOURS_DIR / "cos-hub" / "files" / ".config" / "neuralstrike" / "claude.env"
+    assert f.read_text() == "K=1"
+    if os.name != "nt":
+        assert f.stat().st_mode & 0o777 == 0o600
+
+
+def test_absent_neighbour_is_not_a_failure(tmp_path, capsys):
+    out = tmp_path / "gen"
+    assert bl.backup_neighbour(_spec(), tmp_path / "home", out, run=lambda c, **k: _Done()) == []
+    assert "cos-hub (absent)" in capsys.readouterr().out
+
+
+def test_venv_freeze_written_and_its_failure_counts(tmp_path):
+    home, out = tmp_path / "home", tmp_path / "gen"
+    py = home / "cos-hub" / ".venv" / "bin" / "python"
+    py.parent.mkdir(parents=True)
+    py.write_text("")
+    seen = []
+
+    def ok(cmd, **kw):
+        seen.append(cmd)
+        return _Done(0, "pkg==1\n")
+
+    assert bl.backup_neighbour(_spec(), home, out, run=ok) == []
+    assert (out / bl.NEIGHBOURS_DIR / "cos-hub" / "venv-freeze.txt").read_text() == "pkg==1\n"
+    assert seen[0] == [str(home / ".local" / "bin" / "uv"), "pip", "freeze",
+                       "--python", str(py)]
+    bad = bl.backup_neighbour(_spec(), home, tmp_path / "gen2",
+                              run=lambda c, **k: _Done(1, "", "boom"))
+    assert len(bad) == 1 and "cos-hub" in bad[0]

@@ -55,6 +55,8 @@ Usage:
 """
 import argparse
 import datetime as dt
+import fnmatch
+import glob
 import os
 import pathlib
 import shlex
@@ -66,6 +68,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from repo_paths import BACKUP_TOML, ENV_NAME, MEMURAI_PORT, REDIS_DB, REPO_ROOT  # noqa: E402
+from shared import standby_config  # noqa: E402
 from shared.config_toml import toml_loader  # noqa: E402
 
 # config/backup.toml: the offsite archive's zstd level and threads. Read on each
@@ -102,6 +105,12 @@ KEEP_WEEKLY = 4
 # never removes the newest generation carrying it, however many damaged nights
 # follow.
 OK_MARKER = "BACKUP_OK"
+# The commit the generation was taken at, and the two neighbouring projects
+# (config/standby.toml [[neighbours]]): a standby box rebuilds from ONE
+# generation, so the code's commit and the neighbours travel inside it.
+GIT_HEAD = "GIT_HEAD"
+NEIGHBOURS_DIR = "neighbours"
+SQLITE_MAGIC = b"SQLite format 3\x00"
 
 # Offsite: encrypt, then upload the CIPHERTEXT. Drive never sees plaintext.
 #
@@ -464,6 +473,128 @@ def prune(root, keep, keep_weekly=0):
     return sorted(dropped)
 
 
+def write_git_head(out, root, run=subprocess.run):
+    """Record ``git rev-parse HEAD`` of ``root`` into ``out/GIT_HEAD``.
+
+    Returns the sha, or None when git fails (the caller records the failure: a
+    generation without its commit cannot be rebuilt into the same code)."""
+    try:
+        p = run(["git", "-C", str(root), "rev-parse", "HEAD"],
+                capture_output=True, text=True, timeout=60)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  FAIL  {GIT_HEAD}: {exc}")
+        return None
+    sha = (p.stdout or "").strip()
+    if p.returncode != 0 or not sha:
+        print(f"  FAIL  {GIT_HEAD}: {(p.stderr or 'no output').strip()[:200]}")
+        return None
+    (out / GIT_HEAD).write_text(sha + "\n", encoding="utf-8")
+    print(f"  ok  {GIT_HEAD}  {sha[:12]}")
+    return sha
+
+
+def _excluded(name, patterns):
+    """True when ``name`` equals or fnmatches an exclude entry. Applied to every
+    directory and file name on the walk, so it matches any path component."""
+    return any(name == pat or fnmatch.fnmatch(name, pat) for pat in patterns)
+
+
+def _is_sqlite(path):
+    try:
+        with open(path, "rb") as fh:
+            return fh.read(16) == SQLITE_MAGIC
+    except OSError:
+        return False
+
+
+def _copy_private(src, dst):
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+    os.chmod(dst, 0o600)
+
+
+def backup_neighbour(spec, home, out, run=subprocess.run):
+    """Carry one neighbouring project into ``out/neighbours/<name>/``. Returns failures.
+
+    Layout: ``dir/`` (its tree, less ``exclude``), ``units/`` (systemd user
+    units and drop-in dirs), ``files/`` (loose files, path relative to home) and
+    ``venv-freeze.txt``. A SQLite file goes through the online backup API; its
+    -wal/-shm companions are skipped. An absent ``dir`` is not a failure (a dev
+    box has no neighbours); a venv that exists but cannot be frozen IS, because
+    the standby cannot rebuild it without the list."""
+    name = spec["name"]
+    src_dir = home / spec["dir"]
+    if not src_dir.is_dir():
+        print(f"  --  {name} (absent)")
+        return []
+    failures = []
+    base = out / NEIGHBOURS_DIR / name
+    patterns = list(spec.get("exclude", []))
+    count = 0
+    for root, dirs, files in os.walk(src_dir):
+        rootp = pathlib.Path(root)
+        dirs[:] = sorted(d for d in dirs if not _excluded(d, patterns))
+        for fname in sorted(files):
+            if _excluded(fname, patterns) or fname.endswith(("-wal", "-shm")):
+                continue
+            src = rootp / fname
+            if not src.is_file():
+                continue
+            rel = src.relative_to(src_dir)
+            dst = base / "dir" / rel
+            try:
+                if _is_sqlite(src):
+                    backup_db(src, dst)
+                    os.chmod(dst, 0o600)
+                    state = verify(dst)
+                    if state != "ok":
+                        failures.append(f"{name}/{rel.as_posix()}: integrity_check={state}")
+                else:
+                    _copy_private(src, dst)
+                count += 1
+            except Exception as exc:  # noqa: BLE001
+                failures.append(f"{name}/{rel.as_posix()}: {exc}")
+    unit_root = home / ".config" / "systemd" / "user"
+    for pattern in spec.get("units", []):
+        for hit in sorted(glob.glob(str(unit_root / pattern))):
+            src = pathlib.Path(hit)
+            try:
+                if src.is_dir():
+                    for f in sorted(src.rglob("*")):
+                        if f.is_file():
+                            _copy_private(f, base / "units" / src.name / f.relative_to(src))
+                else:
+                    _copy_private(src, base / "units" / src.name)
+            except Exception as exc:  # noqa: BLE001
+                failures.append(f"{name}/units/{src.name}: {exc}")
+    for rel in spec.get("files", []):
+        src = home / rel
+        if not src.is_file():
+            print(f"  --  {name}: {rel} (absent)")
+            continue
+        try:
+            _copy_private(src, base / "files" / rel)
+        except Exception as exc:  # noqa: BLE001
+            failures.append(f"{name}/{rel}: {exc}")
+    py = src_dir / ".venv" / "bin" / "python"
+    if py.exists():
+        uv = home / ".local" / "bin" / "uv"
+        try:
+            p = run([str(uv), "pip", "freeze", "--python", str(py)],
+                    capture_output=True, text=True, timeout=300)
+            if p.returncode != 0:
+                failures.append(f"{name}: uv pip freeze failed: "
+                                f"{(p.stderr or '').strip()[:200]}")
+            else:
+                (base).mkdir(parents=True, exist_ok=True)
+                (base / "venv-freeze.txt").write_text(p.stdout, encoding="utf-8")
+                os.chmod(base / "venv-freeze.txt", 0o600)
+        except Exception as exc:  # noqa: BLE001
+            failures.append(f"{name}: uv pip freeze failed: {exc}")
+    print(f"  {'FAIL' if failures else 'ok  '}{name}  {count} files")
+    return failures
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--dest", default=str(pathlib.Path.home() / "backups"))
@@ -531,6 +662,14 @@ def main(argv=None):
             swept_bytes += src.stat().st_size
     print(f"  ok  swept {swept} files from the data trees "
           f"({swept_bytes / 1e6:.1f} MB)")
+
+    # A tree with no .git is not a checkout (a test fixture); a real one always has it.
+    if not (REPO_ROOT / ".git").exists():
+        print(f"  --  {GIT_HEAD} (not a git checkout)")
+    elif write_git_head(out, REPO_ROOT) is None:
+        failures.append("GIT_HEAD: git rev-parse HEAD failed")
+    for spec in standby_config.neighbours():
+        failures.extend(backup_neighbour(spec, pathlib.Path.home(), out))
 
     # Mark, THEN prune. The marker is what prune protects, so a generation with
     # a failure is never the one that survives as "the last good copy" - and the
