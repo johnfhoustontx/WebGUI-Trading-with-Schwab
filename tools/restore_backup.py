@@ -48,17 +48,22 @@ import sys
 
 OK_MARKER = "BACKUP_OK"
 REDIS_DIR = "redis"
+GIT_HEAD = "GIT_HEAD"          # restated from backup_local: no repo imports here
+NEIGHBOURS_DIR = "neighbours"
 
 
 def files_in(generation: pathlib.Path) -> list:
     """Every restorable file of a generation, as paths relative to it. The Redis
-    dump and the marker are not files of the checkout."""
+    dump, the marker, the commit record and the neighbours' copies are not files
+    of the checkout."""
     out = []
     for p in sorted(generation.rglob("*")):
         if not p.is_file():
             continue
         rel = p.relative_to(generation)
-        if rel.parts[0] == REDIS_DIR or rel.name == OK_MARKER and len(rel.parts) == 1:
+        if rel.parts[0] in (REDIS_DIR, NEIGHBOURS_DIR):
+            continue
+        if len(rel.parts) == 1 and rel.name in (OK_MARKER, GIT_HEAD):
             continue
         out.append(rel)
     return out
@@ -76,17 +81,25 @@ def integrity(path: pathlib.Path) -> str:
         return f"unreadable: {exc}"
 
 
-def restore(generation, into, *, dry_run=False, force=False, out=print) -> dict:
+def restore(generation, into, *, dry_run=False, force=False, out=print,
+            allow=None) -> dict:
     """Restore ``generation`` under ``into``. Returns a summary dict:
-    ``{"restored": [...], "kept": [...], "bad": [...], "marked_ok": bool}``."""
+    ``{"restored": [...], "kept": [...], "bad": [...], "refused": [...],
+    "marked_ok": bool}``. ``allow`` (optional) takes the path relative to the
+    generation as a ``PurePosixPath``; a file it rejects is listed in
+    ``refused`` and never written, dry run or not."""
     generation, into = pathlib.Path(generation), pathlib.Path(into)
-    summary = {"restored": [], "kept": [], "bad": [],
+    summary = {"restored": [], "kept": [], "bad": [], "refused": [],
                "marked_ok": (generation / OK_MARKER).is_file()}
     if not summary["marked_ok"]:
         out(f"  !  {generation.name} has no {OK_MARKER} marker: the backup run "
             "that made it reported a failure (or predates the marker)")
     for rel in files_in(generation):
         src, dst = generation / rel, into / rel
+        if allow is not None and not allow(pathlib.PurePosixPath(*rel.parts)):
+            summary["refused"].append(str(rel))
+            out(f"  !!  {rel} (refused: not a known backup path)")
+            continue
         if dst.exists() and not force:
             summary["kept"].append(str(rel))
             out(f"  --  {rel} (already there; left alone)")
@@ -132,10 +145,12 @@ def main(argv=None) -> int:
           f"file(s) alone; {len(s['bad'])} database(s) failed their integrity check")
     for line in s["bad"]:
         print(f"  ! {line}")
+    if s["refused"]:
+        print(f"{len(s['refused'])} file(s) refused: not a known backup path")
     if (generation / REDIS_DIR).is_dir():
         print(f"Redis was NOT restored. Its dump is {generation / REDIS_DIR}; see "
               "docs/dev-prod-environments.md, \"Restoring from a backup\".")
-    return 1 if s["bad"] else 0
+    return 1 if s["bad"] or s["refused"] else 0
 
 
 if __name__ == "__main__":

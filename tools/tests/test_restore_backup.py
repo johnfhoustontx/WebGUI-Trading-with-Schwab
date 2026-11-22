@@ -167,3 +167,58 @@ def test_the_restore_tool_imports_nothing_from_the_repository():
 
 def test_both_tools_agree_on_the_marker_name():
     assert rb.OK_MARKER == bl.OK_MARKER
+
+
+# --- Task 3 of the warm standby: an allow-list, and the two new entry kinds ---
+
+def _gen(tmp_path, files):
+    g = tmp_path / "gen"
+    for rel, text in files.items():
+        p = g / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(text)
+    return g
+
+
+def test_git_head_and_neighbours_never_restored(tmp_path):
+    g = _gen(tmp_path, {"GIT_HEAD": "abc\n", "neighbours/cos/app.py": "x",
+                        "webgui/a.py": "y"})
+    into = tmp_path / "into"
+    s = rb.restore(g, into, out=lambda *_: None)
+    assert [pathlib.PurePath(r).as_posix() for r in s["restored"]] == ["webgui/a.py"]
+    assert not (into / "GIT_HEAD").exists()
+    assert not (into / "neighbours").exists()
+
+
+def test_allow_refuses_unlisted_path(tmp_path):
+    g = _gen(tmp_path, {"webgui/a.py": "y", "tools/evil.py": "boom"})
+    into = tmp_path / "into"
+    lines = []
+    s = rb.restore(g, into, out=lines.append,
+                   allow=lambda p: p.parts[0] == "webgui")
+    assert len(s["refused"]) == 1 and s["refused"][0].endswith("evil.py")
+    assert not (into / "tools" / "evil.py").exists()
+    assert (into / "webgui" / "a.py").is_file()
+    assert any("(refused: not a known backup path)" in ln for ln in lines)
+
+
+def test_allow_refuses_under_dry_run_too(tmp_path):
+    g = _gen(tmp_path, {"tools/evil.py": "boom"})
+    s = rb.restore(g, tmp_path / "into", dry_run=True, out=lambda *_: None,
+                   allow=lambda p: False)
+    assert len(s["refused"]) == 1 and s["restored"] == []
+
+
+def test_refused_makes_main_exit_1(tmp_path, monkeypatch):
+    g = _gen(tmp_path, {"tools/evil.py": "boom"})
+    real = rb.restore
+    monkeypatch.setattr(rb, "restore",
+                        lambda *a, **k: real(*a, allow=lambda p: False, **k))
+    assert rb.main([str(g), "--into", str(tmp_path / "into")]) == 1
+
+
+def test_no_allow_keeps_old_behaviour(tmp_path):
+    g = _gen(tmp_path, {"tools/evil.py": "boom"})
+    into = tmp_path / "into"
+    s = rb.restore(g, into, out=lambda *_: None)
+    assert s["refused"] == [] and (into / "tools" / "evil.py").is_file()
