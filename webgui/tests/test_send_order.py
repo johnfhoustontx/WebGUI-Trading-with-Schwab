@@ -199,8 +199,7 @@ def test_no_offer_for_what_cannot_be_sent(mode):
     naked_call = {"symbol": "SPY", "type": "NAKED_CALL", "expiration": EXP,
                   "short_strike": 110, "credit": 1.0}
     expired = {**PCS, "expiration": "2026-11-04"}
-    feed = {**PCS, "symbol": "FOP.ES"}
-    for sig in (covered, naked_call, expired, feed, {}, None):
+    for sig in (covered, naked_call, expired, {}, None):
         assert link.offer(sig, TODAY) is None, sig
 
 

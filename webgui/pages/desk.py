@@ -75,7 +75,6 @@ from pages.regime_mix import regime_picture as _regime_picture
 # imported rather than restated, for the reason at the top of this file.
 from pages import sentiment_bullbear as _bbmap
 from pages import copy as _copy  # the ONE copy (pages/copy.py)
-from pages import desk_feed as _feed_rows
 from pages import news_view as _news
 from pages import fmt as _fmt
 from pages.fmt import num as _finite  # the ONE copy (pages/fmt.py)
@@ -219,9 +218,8 @@ _ACCEL_PHRASE = {"hot": "hot", "cool": "cooling"}
 # row from 71px to 50px measured, and the panel had room for one more.
 #
 # This panel is sized to the one it shares a grid row with. Its neighbour is
-# Dealer Positioning, which shows exactly ``len(DESK_SYMBOLS)`` rows and scrolls
-# any more (``DEALER_SCROLL``) — deterministic — so the two genuinely can be
-# squared off. Re-measured live at 1920px, on the
+# Dealer Positioning, which is exactly ``len(DESK_SYMBOLS)`` rows — deterministic
+# — so the two genuinely can be squared off. Re-measured live at 1920px, on the
 # reference-scale type ladder (the panel chrome is common to both, so only the
 # head and the rows are counted):
 #
@@ -1904,15 +1902,7 @@ def tick_popups(popup, read_view, summary_view, memo):
 VIEWS = ("sentiment:regime", "sentiment:composite",
          "sentiment:history", "options:gex_status", "options:matrix",
          "options:flow_alerts", "options:flow_sides", "sentiment:bullbear",
-         "market:summary", NEWS_VIEW, READ_VIEW, _feed_rows.VIEW)
-
-
-def live_views():
-    """The views THIS process reads. The /ES and /NQ rows are private: their view is
-    never probed or read on the public origin, which never shows these symbols."""
-    if _shell.is_public():
-        return tuple(v for v in VIEWS if v != _feed_rows.VIEW)
-    return VIEWS
+         "market:summary", NEWS_VIEW, READ_VIEW)
 
 
 # Which views each region depends on. A repaint touches only the regions whose
@@ -1922,7 +1912,7 @@ _REGION_VIEWS = {
     "strip": ("sentiment:regime", "sentiment:composite",
               "sentiment:history", "options:gex_status"),
     # The dealer panel reads gex_status too: freshness is what GATES its walls.
-    "dealer": ("options:matrix", "options:gex_status", _feed_rows.VIEW),
+    "dealer": ("options:matrix", "options:gex_status"),
     "board": ("options:matrix",),
     # ONE view, and the strip must not repaint on any other: its scores move
     # once a NIGHT and its day-moves at the service's own quote cadence, so a
@@ -2954,18 +2944,15 @@ WAITING_NEWS = _copy.WAITING_NEWS
 EMPTY_NEWS = "No headlines published yet today."
 
 
-def stale_walls_note(label, subject="Walls"):
+def stale_walls_note(label):
     """Why the walls vanished from a dealer row, given a freshness label.
-
-    ``subject`` narrows it when /ES and /NQ share the panel: they have a clock of
-    their own, so the stock feed's stopping says nothing about their walls.
 
     A silently wall-less row reads as a broken page. This reads as a stopped
     feed, which is what it is — and it names the consequence rather than only
     the state, because "stale · 12m" tells a reader the feed is old without
     telling them what that costs (levels computed against a price that has
     since moved)."""
-    return (f"{subject} hidden — the gamma feed stopped updating "
+    return (f"Walls hidden — the gamma feed stopped updating "
             f"({str(label).lower()}), so these levels would be out of date.")
 
 # ── the Bull / Bear chip ─────────────────────────────────────────────────────
@@ -3323,14 +3310,6 @@ PANEL_HEADS = {
 # level was derived from. The one thing lost is that a call wall is only a
 # ceiling while price sits BELOW it — which is exactly what the structure map
 # in the next column shows.
-# How the panel holds more rows than ``DESK_SYMBOLS`` in the frame those four fill.
-# The heights are head + four rows as drawn, measured at 1920px, with and without
-# the one-line stale-walls note above them: re-measure them if a row's type changes.
-# Literal classes, because the bundled Tailwind JIT reads them off the page.
-DEALER_SCROLL = "ns-panel-scroll-y max-h-[277px] overflow-y-auto"
-DEALER_SCROLL_NOTED = "ns-panel-scroll-y max-h-[296px] overflow-y-auto"
-# The head stays put over the rows, with the panel's own ground behind it.
-DEALER_HEAD_PIN = f"sticky top-0 z-[3] bg-[{_P['card_bg']}]"
 DEALER_HEADS = ("SYMBOL", "PRICE", "FLOOR", "PRICE VS WALLS",
                 "CEILING", "FLIP LEVEL", "DEALER MODE")
 # NET PREMIUM is the one expansion that cost width: 88px against a 66px floor,
@@ -3385,7 +3364,7 @@ def _panel(title, use_line=""):
     return body, head_slot
 
 
-def _grid_head(grid, labels, extra=""):
+def _grid_head(grid, labels):
     """The column labels, on the SAME track list as the rows beneath them.
 
     ``px-1`` matches the data row's own horizontal padding (``_ROW``), which is
@@ -3398,7 +3377,7 @@ def _grid_head(grid, labels, extra=""):
     they do, would put every label over the wrong number the moment the panel
     is narrow enough to move — which is exactly when the labels matter most."""
     with ui.element("div").classes(
-            f"{grid} {_row_shell(grid)} px-1 pb-2 border-b {_HEAD_RULE} {extra}".rstrip()):
+            f"{grid} {_row_shell(grid)} px-1 pb-2 border-b {_HEAD_RULE}"):
         for index, text in enumerate(labels):
             ui.label(text).classes(
                 f"{_HEAD} {_pin_cell_class(grid, index)}".rstrip())
@@ -3502,24 +3481,16 @@ def _dealer_row(row):
     # it ("CBOE · INDEX") and this app publishes no venue for a matrix row.
     # The cell stays a single line rather than borrowing something unrelated
     # to fill the space.
-    opens = row.get("opens", True)
     el = ui.element("div").classes(
-        f"{DEALER_GRID} {_row_shell(DEALER_GRID)} {_ROW if opens else _ROW_STATIC} "
+        f"{DEALER_GRID} {_row_shell(DEALER_GRID)} {_ROW} "
         f"hover:bg-[{_HOVER}]/[0.06]")
     with el:
-        ui.label(row.get("label") or row["symbol"]).classes(
+        ui.label(row["symbol"]).classes(
             f"text-[14px] font-bold tracking-[.08em] {REF_TXT_STRONG}")
         with _stack():
             ui.label(fmt_price(row["spot"])).classes(_V_SPOT)
-            if row.get("as_of"):
-                # An /ES or /NQ capture has no prior close, and its numbers can
-                # be hours old: this line says when they are from.
-                ui.label(row["as_of"]).classes(
-                    f"{_SUB} whitespace-nowrap "
-                    f"{CON_WARN if row['stale'] else MUTED}")
-            else:
-                ui.label(fmt_signed_pct(row["day_pct"])).classes(
-                    f"{_SUB} {signed_class(row['day_pct'])}")
+            ui.label(fmt_signed_pct(row["day_pct"])).classes(
+                f"{_SUB} {signed_class(row['day_pct'])}")
         # Each wall in the same hue as its marker on the map, so the number
         # and the tick standing for it are visibly one thing. The reference
         # puts an open-interest figure under each; this app publishes no
@@ -3536,10 +3507,7 @@ def _dealer_row(row):
             _structure_map(row["structure"])
         _cell(fmt_price(row["call_wall"]), f"text-[14px] text-[{CALL_HEX}]")
         with _stack():
-            flip_label = ui.label(fmt_price(row["flip"])).classes(_V_FLIP)
-            if row.get("flip_note"):
-                # /ES and /NQ find their flip by a rule of their own.
-                flip_label.tooltip(row["flip_note"])
+            ui.label(fmt_price(row["flip"])).classes(_V_FLIP)
             # Empty string, not an em-dash: the level above it already
             # carries the dash when there is no flip to report.
             ui.label(flip_sub_text(row)).classes(
@@ -3558,44 +3526,32 @@ def _dealer_row(row):
             else:
                 ui.label(row["regime_word"]).classes(
                     f"self-start {regime_chip_class(row['regime_word'])}")
-    if opens:
-        el.on("click", lambda _e, s=row["symbol"]: _open_gamma(s))
+    el.on("click", lambda _e, s=row["symbol"]: _open_gamma(s))
 
 
-def _paint_dealer(body, matrix, gex_status, feed_view, now):
-    """The panel's body: the stock rows, then /ES and /NQ. Past
-    ``len(DESK_SYMBOLS)`` rows the frame stays its size and the body scrolls under
-    a head that stays put; at four the classes come off, so a panel with nothing to
-    scroll is exactly what it was."""
+def _paint_dealer(body, matrix, gex_status):
+    """The panel's body: one row per ``DESK_SYMBOLS`` symbol the matrix carries."""
     body.clear()
     fresh = freshness_facts(gex_status)
-    feed = _feed_rows.rows(feed_view, now)
     with body:
-        if matrix is None and not feed:
+        if matrix is None:
             kit.empty(WAITING_OPTIONS)
             return
-        stock = dealer_rows(matrix, fresh["stale"])
-        rows = stock + feed
+        rows = dealer_rows(matrix, fresh["stale"])
         if not rows:
             kit.empty(EMPTY_DEALER)
             return
-        noted = fresh["stale"] and bool(stock)
-        if noted:
+        if fresh["stale"]:
             # Say WHY the walls vanished. A silently wall-less row reads as a
             # broken page; this reads as a stopped feed, which is true.
-            ui.label(stale_walls_note(
-                fresh["label"], "Stock and index walls" if feed else "Walls"
-            )).classes(f"text-[10px] {CON_WARN} pb-1 {_PANEL_NOTE}")
+            ui.label(stale_walls_note(fresh["label"])).classes(
+                f"text-[10px] {CON_WARN} pb-1 {_PANEL_NOTE}")
         # Seven labels for seven tracks. NET GEX and the regime chip share the
         # last one — the chip is the WORD for the number above it, so the label
         # names both.
-        scrolls = len(rows) > len(DESK_SYMBOLS)
-        _grid_head(DEALER_GRID, DEALER_HEADS, DEALER_HEAD_PIN if scrolls else "")
+        _grid_head(DEALER_GRID, DEALER_HEADS)
         for row in rows:
             _dealer_row(row)
-    body.classes(remove=f"{DEALER_SCROLL} {DEALER_SCROLL_NOTED}")
-    if scrolls:
-        body.classes(add=DEALER_SCROLL_NOTED if noted else DEALER_SCROLL)
 
 
 def _board_row(row, glow):
@@ -4201,8 +4157,7 @@ def render():
 
     painters = {"strip": _paint_strip, "bullbear": _paint_bullbear,
                 "dealer": lambda: _paint_dealer(
-                    dealer_body, _view("options:matrix"),
-                    _view("options:gex_status"), _view(_feed_rows.VIEW), time.time()),
+                    dealer_body, _view("options:matrix"), _view("options:gex_status")),
                 "board": _paint_board,
                 "flow": _paint_flow, "news": _paint_news,
                 "summary": lambda: paint_report(popups, _view("market:summary")),
@@ -4333,11 +4288,6 @@ def render():
         facts = countdown_facts(datetime.now(_CT))
         clock_cap.text = facts["label"]
         clock_lbl.text = facts["text"]
-        # A capture that stops arriving bumps no version: the clock moves these.
-        phase = _feed_rows.phase(_view(_feed_rows.VIEW), time.time())
-        if state.get("feed_phase", phase) != phase:
-            painters["dealer"]()
-        state["feed_phase"] = phase
         tick_popups(popups, _view(READ_VIEW), _view("market:summary"),
                     state.setdefault("read", {}))
 
@@ -4350,11 +4300,10 @@ def render():
         view that actually moved."""
         # Probed and read by ``bus_key``: the public origin's news KEY is
         # ``news:feed_public``, while the page keeps one name for the view.
-        views = live_views()
-        keys = {v: bus_key(v) for v in views}
+        keys = {v: bus_key(v) for v in VIEWS}
         vers = await run.io_bound(bus_client.read_versions,
                                   list(keys.values()))
-        changed = [v for v in views
+        changed = [v for v in VIEWS
                    if vers.get(keys[v]) is not None
                    and vers.get(keys[v]) != state["versions"].get(v)]
         if not changed:
@@ -4373,7 +4322,7 @@ def render():
     # cold, so each shows its OWN placeholder rather than an empty card. One
     # dead service must not blank the page.
     seed = {}
-    for view in live_views():
+    for view in VIEWS:
         payload, version = bus_client.read_full(bus_key(view))
         seed[view] = payload
         state["versions"][view] = version

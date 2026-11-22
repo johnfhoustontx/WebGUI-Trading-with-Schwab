@@ -31,7 +31,7 @@ from collections import OrderedDict
 from zoneinfo import ZoneInfo
 
 from pages.options import tos_order
-from shared import futures_chain, live_order, live_orders_config
+from shared import live_order, live_orders_config
 
 _CT = ZoneInfo("America/Chicago")
 #: Tokens kept: one per click, the oldest dropped first.
@@ -70,15 +70,13 @@ def spec_for(signal):
 def offer(signal, today=None):
     """What the panel's button opens: ``{"trade": id}`` for a Ledger trade idea,
     ``{"spec": ...}`` for any other trade a ticket may send, or None (live
-    orders off, shares, an /ES or /NQ contract, or legs ``read_spec`` refuses)."""
+    orders off, shares, or legs ``read_spec`` refuses)."""
     if live_orders_config.mode() == "off":
         return None
     s = signal if isinstance(signal, dict) else {}
     idea = s.get("live_idea")
     if isinstance(idea, str) and live_order.TRADE_ID_RE.match(idea):
         return {"trade": idea}
-    if futures_chain.is_feed_symbol(str(s.get("symbol") or "")):
-        return None
     spec = spec_for(s)
     if spec is None:
         return None

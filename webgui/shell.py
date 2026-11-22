@@ -302,9 +302,6 @@ PANEL_SCROLL_CSS = f"""
    above already placed the row, and the SECOND pinned cell places itself from
    the page, which is the only place its per-panel offset is known. */
 .ns-panel-row.ns-pin-2::after {{ grid-column: 1 / 3; }}
-/* The Desk's Dealer Positioning rows past the fourth. Thin: a stock scrollbar would
-   take its width from the columns. */
-.ns-panel-scroll-y {{ scrollbar-width: thin; scrollbar-color: rgba(255,255,255,.16) transparent; }}
 """
 
 

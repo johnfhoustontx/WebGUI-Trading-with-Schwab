@@ -4,7 +4,42 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-22 (**cos.neuralstrike.co is cos-hub alone; the /feed/ route is gone.**)
+**Last updated:** 2026-11-22 (**The /ES and /NQ chain feed from ThinkorSwim is removed.**)
+
+- **Why.** The operator's call. The PC's capture task had been disabled since 2026-11-11
+  (ThinkorSwim lagged), the symbols shipped hidden from the Dealer Positioning list, and
+  nothing else read the feed.
+- **Gone.** The capture on the PC (`tools/tos_capture/`), the ingest CLI and its ssh
+  wrapper (`tools/futures_chain_cli.py`, `tools/futures_chain_remote.sh`), the stream
+  `cmd:futures_chain` and its `[stream_keep]` cap, `config/futures_chain.toml` and its
+  Settings page, `shared/futures_chain.py`, `shared/futures_chain_config.py`, the
+  `FuturesChainSnapshot` contract, the six `options_svc/futures_chain_*` modules (the
+  consumer, the adapter, the cumulative flip, the snapshot, the stopped-capture watch and
+  its `/health` block, the Desk rows), and the pages' `gamma_feed.py` and `desk_feed.py`.
+- **Dealer Positioning.** No /ES or /NQ in the list, and nothing the page did only for
+  them: the capture label, the outage band, the column-per-capture step, the candle
+  reopening after a gap, the smoothing breaks and the "cumulative flip" wording.
+  `gamma_heat.py` is back to its pre-feed text.
+- **The Desk.** The Dealer Positioning frame is the four `DESK_SYMBOLS` rows again: no
+  scrolling, no capture-time line, no flip tooltip, and `live_views()` is gone (every
+  view is read on both origins, as before).
+- **Engine and store seams.** `GammaEngine.calc_all_from_chain` no longer takes
+  `hours_left`; `RawMinute.hours_left`, `gex_history_db.SessionSpan` and
+  `FEED_SYMBOL_LIKE` are gone, so the purge, the Gamma Archive, Alert quality,
+  `measure_flow_remark` and the raw-feed shadow check no longer leave `FOP.%` out. The
+  refusals of `FOP.ES` / `FOP.NQ` in the Symbol lookup, the public Finder, the
+  collector's universe and the live-order ticket went with them: such a name is now
+  an unknown ticker like any other.
+- **Docs.** The feed's design and plan, its diagram, its CLAUDE.md section and allow-list
+  entry, its invariants section, and its chapters and rows in all five manuals and
+  `page_help.py` are removed; the manuals and the site glossary were rebuilt. Earlier
+  CHANGELOG entries about the feed stay as history.
+- **Left on the machines.** The PC's scheduled task *ToS 0DTE Capture* and
+  `%LOCALAPPDATA%\TosCapture`, any `config/local/futures_chain.toml` on prod, and the
+  Redis keys `cache:options:futures_chain*` and the `cmd:futures_chain` stream are not
+  touched by this change.
+
+**Prior —** 2026-11-22 (**cos.neuralstrike.co is cos-hub alone; the /feed/ route is gone.**)
 
 - **Why.** The block added this morning (below) brought back X News Feed at `/feed/`
   behind a login. That feed moved into this app as `xfeed_svc` on 2026-11-13, and the

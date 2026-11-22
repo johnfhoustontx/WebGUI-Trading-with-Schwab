@@ -58,7 +58,7 @@ def _archive_path(archive_path):
 
 def load_paths(archive_path=None, symbols=None, since_ts=None) -> dict:
     """``{(symbol, session date): [(ts, spot), ...]}`` from the archive's
-    ``gex`` view: fetched rows with a price only, the futures feed left out.
+    ``gex`` view: fetched rows with a price only.
     ``symbols`` and ``since_ts`` narrow it; a missing archive is empty."""
     path = _archive_path(archive_path)
     if not path.exists():
@@ -66,9 +66,8 @@ def load_paths(archive_path=None, symbols=None, since_ts=None) -> dict:
     conn = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True)
     try:
         sql = (f"SELECT symbol, ts, spot FROM snapshots WHERE view = 'gex' "
-               f"AND {gh.fetched_only_clause(conn)} AND spot > 0 "
-               f"AND symbol NOT LIKE ?")
-        args = [gh.FEED_SYMBOL_LIKE]
+               f"AND {gh.fetched_only_clause(conn)} AND spot > 0")
+        args = []
         if symbols is not None:
             names = sorted(symbols)
             if not names:

@@ -183,8 +183,7 @@ def test_load_paths_keeps_fetched_gex_rows_only(tmp_path):
     rows = [("SPY", "gex", t + 300 * i, 100.0, None) for i in range(7)]
     rows += [("SPY", "gex", t + 360, 150.0, 30.0),     # carried: a model, not a price
              ("SPY", "dex", t + 420, 150.0, None),     # another view
-             ("SPY", "gex", t + 480, 0.0, None),       # no price
-             ("FOP.ES", "gex", t, 6000.0, None)]       # the futures feed
+             ("SPY", "gex", t + 480, 0.0, None)]       # no price
     db = tmp_path / "archive.db"
     _archive(db, rows)
     paths = aq.load_paths(db)

@@ -16,12 +16,6 @@ Assembles the shared scaffold with this domain's scheduler + command handler:
 * ``tools_public.handle_math`` on ``cmd:tools_public_math`` — their pure pricing
   (reprice, implied volatility, what-if sweep), on a loop of its own so a
   snapshot fetch never stalls the reprice a visitor's every edit triggers.
-* ``futures_chain_feed.handle`` on ``cmd:futures_chain`` — the /ES and /NQ
-  0-DTE chains the capture on the PC sends (no Schwab call; nothing on this
-  stream reaches a paper book).
-* ``futures_chain_watch.tick`` - a branch of ``scheduler.loop`` (every tick, no
-  NYSE gate): the phone alert when that capture stops during the CME session.
-  ``/health`` carries the feed's report under ``futures_chain``.
 
 Importable without side effects; only starts uvicorn under ``__main__`` on the
 ``options`` service port (8211) from ``repo_paths.SERVICE_PORTS``.
@@ -37,10 +31,10 @@ if str(_REPO_ROOT) not in sys.path:
 
 from services._scaffold import make_app  # noqa: E402
 from services.options_svc import (  # noqa: E402
-    finder_public, futures_chain_feed, futures_chain_watch, gamma_public, handlers,
-    live_order_handlers, rescue_public, scheduler, tools_public)
+    finder_public, gamma_public, handlers, live_order_handlers, rescue_public,
+    scheduler, tools_public)
 from shared import (  # noqa: E402
-    futures_chain, live_order, public_gamma, public_rescue, public_scan, public_tools)
+    live_order, public_gamma, public_rescue, public_scan, public_tools)
 
 app = make_app(
     "options",
@@ -62,15 +56,9 @@ app = make_app(
                      (public_tools.TOOLS_STREAM, tools_public.handle_tools),
                      (public_tools.MATH_STREAM, tools_public.handle_math),
                      (public_gamma.STREAM, gamma_public.handle),
-                     # The /ES and /NQ chains from the PC: a stream of its own,
-                     # since each command carries a document (a low stream_keep).
-                     (futures_chain.STREAM, futures_chain_feed.handle),
                      # A trade idea sent to the Schwab account (Phase 1 of the
                      # live-order design): its own thread, never cmd:options' table.
                      (live_order.STREAM, live_order_handlers.handle)),
-    # The /ES and /NQ feed's age and state on /health: a report only, never the
-    # verdict (a PC that is off is not an options service that is down).
-    health_extra=lambda bus: {"futures_chain": futures_chain_watch.health(bus)},
 )
 
 

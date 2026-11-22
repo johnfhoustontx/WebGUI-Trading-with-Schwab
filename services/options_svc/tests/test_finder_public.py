@@ -105,18 +105,6 @@ def test_an_invalid_symbol_is_refused_without_a_scan(bus, scans):
     assert bus._r.keys("cache:options:swing_pub:*") == []
 
 
-@pytest.mark.parametrize("symbol", ["FOP.ES", "fop.nq"])
-def test_a_feed_symbol_is_refused_in_the_invalid_words_without_a_scan(bus, scans, symbol):
-    """The ticker rule passes them, so the page waits on this symbol's outcome: it is
-    recorded, and the page says what it says for any symbol it cannot scan."""
-    fp.handle(bus, _cmd(symbol))
-    assert scans.calls == []
-    state = _status(bus)
-    assert state["invalid_today"] == 1 and state["scans_today"] == 0
-    assert state["last"][symbol.upper()]["outcome"] == "invalid"
-    assert bus._r.keys("cache:options:swing_pub:*") == []
-
-
 def test_a_request_that_waited_too_long_is_dropped(bus, scans):
     """Also the replay guard: a backlog replayed at startup is older than this."""
     fp.handle(bus, _cmd("SPY", age_s=ps.limits()["max_wait_sec"] + 5))
@@ -251,15 +239,13 @@ def test_the_service_consumes_the_public_stream_on_its_own_loop():
     # public Calculator/Simulator's two (Schwab-spending tools, and pure math
     # on a loop of its own so a snapshot fetch never stalls a reprice). The
     # public Gamma page's hot-set requests joined 2026-09-22 (no Schwab call).
-    # The sixth stream is not public: the /ES and /NQ chain feed's, written from
-    # the operator's PC through the ingest CLI (2026-10-31). The seventh is not
-    # public either: a trade idea sent to the Schwab account (2026-11-05).
+    # The sixth stream is not public: a trade idea sent to the Schwab account
+    # (2026-11-05).
     assert kw["extra_consumers"] == ("((public_scan.STREAM, finder_public.handle), "
                                      "(public_rescue.STREAM, rescue_public.handle), "
                                      "(public_tools.TOOLS_STREAM, tools_public.handle_tools), "
                                      "(public_tools.MATH_STREAM, tools_public.handle_math), "
                                      "(public_gamma.STREAM, gamma_public.handle), "
-                                     "(futures_chain.STREAM, futures_chain_feed.handle), "
                                      "(live_order.STREAM, live_order_handlers.handle))")
 
 

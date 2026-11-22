@@ -329,8 +329,8 @@ def symbols_on(conn, day):
     start, end = gh._local_unix_range(day)
     return [r[0] for r in conn.execute(
         "SELECT DISTINCT symbol FROM snapshots "
-        "WHERE view = 'gex' AND ts >= ? AND ts < ? AND symbol NOT LIKE ? ORDER BY symbol",
-        (start, end, gh.FEED_SYMBOL_LIKE))]
+        "WHERE view = 'gex' AND ts >= ? AND ts < ? ORDER BY symbol",
+        (start, end))]
 
 
 def traded_rows(conn, symbol, day):

@@ -1033,8 +1033,7 @@ def test_without_a_slow_set_every_command_stays_on_the_one_lane():
 
 
 # --- a service's own keys on /health (health_extra, 2026-10-31) --------------
-# The /ES and /NQ feed reports its capture age on the options service's /health.
-# A report may ADD keys; the verdict (``up``) and the body's own keys stay the
+# A service may report something of its own on /health. A report may ADD keys; the verdict (``up``) and the body's own keys stay the
 # scaffold's, and a report that fails must not take the probe down.
 
 _BASE_HEALTH_KEYS = {"domain", "up", "reason", "scheduler_alive", "scheduler_restarts",
