@@ -1404,8 +1404,16 @@ never a second failure) and does nothing on a box that is not prod.
 
 Everything root-owned is the operator's; nothing here needs passwordless sudo.
 
-1. **Key on prod.** Create `~/.ssh/standby_watch` (`ssh-keygen -t ed25519`);
-   its **public** half is passed to `provision.sh`.
+1. **Key on prod.** On prod (vps2) run exactly this (no passphrase: the watch
+   runs with `BatchMode=yes`, so a passphrase would make every morning alert
+   "standby did not answer"):
+
+   ```bash
+   ssh-keygen -t ed25519 -f ~/.ssh/standby_watch -N '' -C standby-watch@vps2
+   ```
+
+   The contents of `~/.ssh/standby_watch.pub` are the second argument to
+   `provision.sh` in step 2.
 2. **Provision the standby.** Copy `deploy/standby/provision.sh` from prod's
    checkout to the standby and run it as `administrator`, not under sudo (it
    prompts for sudo itself, and a second run changes nothing):
