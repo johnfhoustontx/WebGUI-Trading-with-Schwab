@@ -734,11 +734,8 @@ def test_the_blog_redirects_cannot_reach_an_entry_a_typeface_or_the_page_itself(
 
 
 def test_the_blog_redirects_are_the_public_sites_only(cfg):
-    # Plus the Chief of Staff host's one redirect, /feed to /feed/, and no other.
-    cos = _block(cfg, repo_paths.COS_HOST)
-    assert re.findall(r"^[ \t]*redir\b.*$", cos, re.M) == ["    redir /feed /feed/ 308"]
-    assert len(re.findall(r"^[ \t]*redir\b", cfg, re.M)) == 2 + len(caddy.RETIRED_PAGES) + 1
-    for host in (repo_paths.APP_HOST, repo_paths.LIVE_HOST):
+    assert len(re.findall(r"^[ \t]*redir\b", cfg, re.M)) == 2 + len(caddy.RETIRED_PAGES)
+    for host in (repo_paths.APP_HOST, repo_paths.LIVE_HOST, repo_paths.COS_HOST):
         assert not re.search(r"^[ \t]*redir\b", _block(cfg, host), re.M), host
     assert cfg.isascii()
 
@@ -1022,30 +1019,16 @@ def test_a_missing_section_falls_back_to_the_shipped_log(monkeypatch):
 
 
 # --- the Chief of Staff host -------------------------------------------------
-# cos.neuralstrike.co fronts two services from OTHER repos on this box: cos-hub
-# (the Chief of Staff phone app's sync, :8787) and X News Feed at /feed/
-# (:4300). It was hand-added to /etc/caddy/Caddyfile on 2026-11-07, and the
-# visitor-log --install on 2026-11-18 deleted it: Caddy then held no cert for
-# the name and the phone app and the PC's sync were offline until 2026-11-22.
+# cos.neuralstrike.co fronts cos-hub (the Chief of Staff phone app's sync,
+# :8787), a service from ANOTHER repo on this box. It was hand-added to
+# /etc/caddy/Caddyfile on 2026-11-07, and the visitor-log --install on
+# 2026-11-18 deleted it: Caddy then held no cert for the name and the phone app
+# and the PC's sync were offline until 2026-11-22.
 #
-# ⚠ The feed's login (a bcrypt hash) is read from the gitignored
-# shared/feed_basic_auth.txt, never written here: this repository is public.
-# The hash below is made up and opens nothing.
-_FAKE_HASH = "$2a$14$" + "A" * 22 + "b" * 31
-_FAKE_LINE = f"johnf {_FAKE_HASH}"
-
-
-def _with_feed_auth(monkeypatch, tmp_path, text):
-    """Point the generator at a feed login file holding ``text`` (None: absent)."""
-    p = tmp_path / "feed_basic_auth.txt"
-    if text is not None:
-        p.write_text(text, encoding="utf-8")
-    monkeypatch.setattr(caddy, "FEED_AUTH_FILE", p)
-
-
-def _cos(monkeypatch, tmp_path, text=_FAKE_LINE):
-    _with_feed_auth(monkeypatch, tmp_path, text)
-    return _block(caddy.render(), repo_paths.COS_HOST)
+# It also carried X News Feed at /feed/ behind a basic_auth login until that
+# feed moved into this app as xfeed_svc (2026-11-13) and the standalone one was
+# retired (2026-11-14). The route came back with the block on 2026-11-22 and was
+# removed again the same day; these tests keep it out.
 
 
 def test_the_cos_host_is_served(cfg):
@@ -1054,60 +1037,42 @@ def test_the_cos_host_is_served(cfg):
     assert _block(cfg, repo_paths.COS_HOST).startswith(f"{repo_paths.COS_HOST} {{")
 
 
-def test_everything_but_the_feed_goes_to_cos_hub(monkeypatch, tmp_path):
-    block = _cos(monkeypatch, tmp_path)
-    hub = re.search(r"\n    handle \{\n        reverse_proxy 127\.0\.0\.1:(\d+) ", block)
-    assert hub, block
-    assert int(hub.group(1)) == caddy.COS_HUB_PORT == 8787
+def test_the_cos_host_is_cos_hub_and_nothing_else(cfg):
+    assert caddy.COS_HUB_PORT == 8787
+    assert _block(cfg, repo_paths.COS_HOST) == f"""{repo_paths.COS_HOST} {{
+    header Strict-Transport-Security "{caddy.HSTS}"
+
+    # Everything on this host is cos-hub (the Chief of Staff repo's unit cos-hub).
+    reverse_proxy 127.0.0.1:{caddy.COS_HUB_PORT} {{
+        header_up X-Edge 1
+    }}
+}}"""
 
 
-def test_the_feed_is_behind_its_login(monkeypatch, tmp_path):
-    block = _cos(monkeypatch, tmp_path)
-    assert "redir /feed /feed/ 308" in block
-    feed = block[block.index("handle_path /feed/* {"):]
-    feed = feed[:feed.index("\n    }\n")]
-    assert f"basic_auth {{\n            {_FAKE_LINE}\n        }}" in feed
-    assert f"reverse_proxy 127.0.0.1:{caddy.FEED_PORT} " in feed
-    assert caddy.FEED_PORT == 4300
-    assert feed.index("basic_auth") < feed.index("reverse_proxy")
+def test_the_retired_feed_route_is_gone(cfg):
+    """No /feed/ route, no login, and nothing left that reads the login file."""
+    cos = _block(cfg, repo_paths.COS_HOST)
+    assert "/feed" not in cos
+    assert "4300" not in cfg
+    assert not re.search(r"^[ \t]*basic_auth\b", cfg, re.M)
+    source = pathlib.Path(caddy.__file__).read_text(encoding="utf-8")
+    assert "feed_basic_auth" not in source
+    for name in ("FEED_PORT", "FEED_AUTH_FILE", "feed_basic_auth", "_feed_route"):
+        assert not hasattr(caddy, name), name
 
 
-def test_surrounding_whitespace_in_the_login_file_is_ignored(monkeypatch, tmp_path):
-    block = _cos(monkeypatch, tmp_path, f"\n  {_FAKE_LINE}  \n\n")
-    assert f"            {_FAKE_LINE}\n" in block
+def test_generating_warns_about_nothing(capsys):
+    assert caddy.main([]) == 0
+    assert capsys.readouterr().err == ""
 
 
-@pytest.mark.parametrize("bad", [
-    None,                                   # no file at all
-    "",
-    "johnf",
-    "johnf secret",                         # a plaintext password, not a hash
-    f"johnf {_FAKE_HASH[:-1]}",             # one character short
-    f"jo hn {_FAKE_HASH}",
-    f"johnf {_FAKE_HASH} extra",
-    f"johnf {_FAKE_HASH}\nother {_FAKE_HASH}",
-    f"johnf}} {_FAKE_HASH}",                # a brace would close the block
-    f"{_FAKE_HASH}",
-])
-def test_without_a_usable_login_the_feed_is_refused_not_opened(
-        monkeypatch, tmp_path, bad):
-    """Fail CLOSED: a missing or malformed file must never put the feed on the
-    internet without its login. The hub is unaffected."""
-    block = _cos(monkeypatch, tmp_path, bad)
-    assert caddy.feed_basic_auth() is None
-    assert f"127.0.0.1:{caddy.FEED_PORT}" not in block
-    assert not re.search(r"^[ \t]*basic_auth\b", block, re.M)
-    assert re.search(r"handle_path /feed/\* \{\n        respond \"[^\"]+\" 503", block)
-    assert f"127.0.0.1:{caddy.COS_HUB_PORT}" in block
-
-
-def test_the_feed_login_file_is_gitignored():
-    """The repo is public; a bcrypt hash in its history can be attacked offline."""
+def test_a_leftover_feed_login_file_stays_out_of_git():
+    """Copies of the retired login (a bcrypt hash) still sit in checkouts, and
+    the repo is public: a hash in its history can be attacked offline."""
     import subprocess
     res = subprocess.run(["git", "check-ignore", "-q", "shared/feed_basic_auth.txt"],
                          cwd=repo_paths.REPO_ROOT, capture_output=True)
     assert res.returncode == 0, "shared/feed_basic_auth.txt is not gitignored"
-    assert caddy.FEED_AUTH_FILE == repo_paths.SHARED_DIR / "feed_basic_auth.txt"
 
 
 def test_no_bcrypt_hash_is_committed_in_the_generator():

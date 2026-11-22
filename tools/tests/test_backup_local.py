@@ -240,7 +240,6 @@ def test_every_carried_secret_is_repo_relative():
     "shared/alphavantage_key.txt",
     "shared/massive_key.txt",
     "shared/proxy_secret.txt",          # the proxy's account routes refuse without it
-    "shared/feed_basic_auth.txt",       # the X News Feed login on cos.
     "deploy/site/ideas.json",           # the public site's published trade ideas
 ])
 def test_a_file_only_a_backup_can_bring_back_is_carried(rel):
@@ -273,6 +272,13 @@ def test_every_gitignored_secret_under_shared_is_backed_up_or_named_as_left_out(
     unaccounted = [f for f in found
                    if f not in bl.EXTRA_FILES and f not in bl.NOT_BACKED_UP]
     assert not unaccounted, unaccounted
+
+
+def test_the_retired_feed_login_is_left_out_on_purpose():
+    """Nothing reads it since cos.'s /feed/ route was removed (2026-11-22); it
+    stays gitignored only because leftover copies hold a bcrypt hash."""
+    assert "shared/feed_basic_auth.txt" not in bl.EXTRA_FILES
+    assert "shared/feed_basic_auth.txt" in bl.NOT_BACKED_UP
 
 
 def test_every_deliberate_omission_states_its_reason():
