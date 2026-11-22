@@ -8,6 +8,7 @@ at = "22:15"                 # Central; after the 21:xx backup, before the 04:xx
 max_age_h = 80               # a copy older than this is refused at takeover
 max_shrink_pct = 50          # a store that lost more than this is not promoted
 keep = 3                     # generations kept on the standby
+connect_timeout_sec = 15     # ssh connect timeout per address when pulling
 generations = "~/standby/generations"
 shrink_stores = ["options-scanner/data/paper_account.db", "options-scanner/data/signals.db", "options-scanner/gex_history.db"]
 

@@ -22,6 +22,7 @@ DEFAULTS = {
         "max_age_h": 80,
         "max_shrink_pct": 50,
         "keep": 3,
+        "connect_timeout_sec": 15,
         "generations": "~/standby/generations",
         "shrink_stores": [
             "options-scanner/data/paper_account.db",
@@ -96,6 +97,8 @@ def sync_settings() -> dict:
         "max_age_h": _int(raw.get("max_age_h"), d["max_age_h"], 1, 24 * 60),
         "max_shrink_pct": _int(raw.get("max_shrink_pct"), d["max_shrink_pct"], 1, 100),
         "keep": _int(raw.get("keep"), d["keep"], 1, 60),
+        "connect_timeout_sec": _int(raw.get("connect_timeout_sec"),
+                                    d["connect_timeout_sec"], 1, 300),
         "generations": pathlib.Path(os.path.expanduser(gen)),
         "shrink_stores": _strings(raw.get("shrink_stores"), d["shrink_stores"]),
     }

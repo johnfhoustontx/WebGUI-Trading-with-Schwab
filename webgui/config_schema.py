@@ -3641,6 +3641,10 @@ _STANDBY = ConfigFile(
             Field("sync.keep", "Copies kept",
                   "Generations kept on the standby.", kind="int", min=1,
                   max=60, step=1),
+            Field("sync.connect_timeout_sec", "Connection timeout",
+                  "How long the pull waits for each server address before "
+                  "trying the next.", kind="int", unit="seconds", min=1,
+                  max=300, step=1),
             Field("sync.generations", "Copies folder",
                   "Where the standby keeps them.", kind="text"),
             Field("sync.shrink_stores", "Stores checked for shrinking",
