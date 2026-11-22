@@ -4,13 +4,27 @@
 # ~/.config/neuralstrike/box.toml, never here: the checkout is the same on both.
 
 [sync]
-at = "22:15"                 # Central; after the 21:xx backup, before the 04:xx reports
+at = "22:15"                 # Central; after prod's 20:00 weeknight backup (Mon..Fri), before the 04:xx reports
 max_age_h = 80               # the age past which the sync fails and prod's morning watch alerts; a takeover only warns
 max_shrink_pct = 50          # a store that lost more than this is not promoted
 keep = 3                     # generations kept on the standby
 connect_timeout_sec = 15     # ssh connect timeout per address when pulling
 generations = "~/standby/generations"
 shrink_stores = ["options-scanner/data/paper_account.db", "options-scanner/data/signals.db", "options-scanner/gex_history.db"]
+
+# The start fence (tools/standby_fence.py). Its unit has TimeoutStartSec=30 and a
+# fence that times out FAILS and holds the stack, so the retried lookup plus the
+# peer probe must stay well under it; the loader refuses values past
+# shared/standby_config.FENCE_BOUNDS (largest: 15 + 8 s).
+[fence]
+lookup_timeout_s = 4         # one DNS lookup of the app name
+lookup_retry_s = 12          # a failed lookup is retried until this many seconds have passed
+lookup_pause_s = 2           # the wait between two lookups
+peer_probe_timeout_s = 5     # the peer's proxy_health probe; any HTTP status means the peer runs a proxy
+
+# Prod's morning check of the standby (tools/standby_watch.py).
+[watch]
+status_max_age_h = 26        # alert when the standby's status.json was last written longer ago than this
 
 [boxes.vps2]
 ssh = ["trading-prod-2", "63.141.255.25"]

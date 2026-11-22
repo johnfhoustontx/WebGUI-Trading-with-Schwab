@@ -30,6 +30,15 @@ DEFAULTS = {
             "options-scanner/gex_history.db",
         ],
     },
+    "fence": {
+        "lookup_timeout_s": 4,
+        "lookup_retry_s": 12,
+        "lookup_pause_s": 2,
+        "peer_probe_timeout_s": 5,
+    },
+    "watch": {
+        "status_max_age_h": 26,
+    },
     "boxes": {
         "vps2": {
             "ssh": ["trading-prod-2", "63.141.255.25"],
@@ -102,6 +111,30 @@ def sync_settings() -> dict:
         "generations": pathlib.Path(os.path.expanduser(gen)),
         "shrink_stores": _strings(raw.get("shrink_stores"), d["shrink_stores"]),
     }
+
+
+# (lowest, highest) accepted for each [fence] value. The highest are chosen so the
+# worst case (a retried lookup, then the peer probe) stays well under the fence
+# unit's TimeoutStartSec=30: a fence that times out FAILS and holds the stack.
+FENCE_BOUNDS = {
+    "lookup_timeout_s": (1, 10),
+    "lookup_retry_s": (0, 15),
+    "lookup_pause_s": (1, 5),
+    "peer_probe_timeout_s": (1, 8),
+}
+
+
+def fence_settings() -> dict:
+    """The ``[fence]`` table, each value within ``FENCE_BOUNDS`` or its default."""
+    raw, d = _table("fence"), DEFAULTS["fence"]
+    return {k: _int(raw.get(k), d[k], lo, hi) for k, (lo, hi) in FENCE_BOUNDS.items()}
+
+
+def watch_settings() -> dict:
+    """The ``[watch]`` table (prod's morning check), each value checked."""
+    raw, d = _table("watch"), DEFAULTS["watch"]
+    return {"status_max_age_h": _int(raw.get("status_max_age_h"),
+                                     d["status_max_age_h"], 1, 24 * 60)}
 
 
 def boxes() -> dict:
@@ -198,5 +231,6 @@ def peer(identity: Identity) -> tuple[str, dict]:
     return name, table[name]
 
 
-__all__ = ["DEFAULTS", "load", "reset_cache", "sync_settings", "boxes", "neighbours",
+__all__ = ["DEFAULTS", "load", "reset_cache", "sync_settings", "fence_settings",
+           "watch_settings", "FENCE_BOUNDS", "boxes", "neighbours",
            "Identity", "read_identity", "write_identity", "peer", "ROLES"]

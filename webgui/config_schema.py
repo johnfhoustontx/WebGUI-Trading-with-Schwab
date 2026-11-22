@@ -3623,6 +3623,9 @@ _BACKUP = ConfigFile(
     ),
 )
 
+_ON_BOX = (" Acts on the server where it is set; prod's override is never copied "
+           "to the standby.")
+
 _STANDBY = ConfigFile(
     name="standby.toml", title="Warm standby", icon="content_copy",
     summary="The nightly copy of the stack to the second server, and the two "
@@ -3631,29 +3634,58 @@ _STANDBY = ConfigFile(
     restart=(),
     sections=(
         Section("Nightly sync", "When the standby is refreshed and what makes "
-                "it refuse a bad copy.", (
+                "it refuse a bad copy. Each value acts on the server where it is "
+                "set: the standby's sync reads the standby's own copy, and prod's "
+                "morning check reads prod's. config/local/standby.toml is never "
+                "copied from prod to the standby, so changing a value here on prod "
+                "does not change the standby.", (
             Field("sync.at", "Sync time (Central)",
-                  "After the nightly backup and before the morning reports.",
+                  "After prod's 20:00 weeknight backup and before the morning "
+                  "reports. Read by the standby's timer: set it on the standby." + _ON_BOX,
                   kind="time"),
             Field("sync.max_age_h", "Oldest copy accepted",
                   "Past this age the sync fails and prod's morning check alerts. A takeover "
-                  "only warns.", kind="int",
+                  "only warns." + _ON_BOX, kind="int",
                   unit="hours", min=1, max=1440, step=1),
             Field("sync.max_shrink_pct", "Largest shrink accepted",
                   "A store that lost more than this share of its size since "
-                  "the last copy is not promoted.", kind="int", unit="percent",
+                  "the last copy is not promoted." + _ON_BOX, kind="int", unit="percent",
                   min=1, max=100, step=1),
             Field("sync.keep", "Copies kept",
-                  "Generations kept on the standby.", kind="int", min=1,
+                  "Generations kept on the standby." + _ON_BOX, kind="int", min=1,
                   max=60, step=1),
             Field("sync.connect_timeout_sec", "Connection timeout",
-                  "How long the pull waits for each server address before "
-                  "trying the next.", kind="int", unit="seconds", min=1,
-                  max=300, step=1),
+                  "How long the pull (and prod's morning check) waits for each "
+                  "server address before trying the next." + _ON_BOX, kind="int",
+                  unit="seconds", min=1, max=300, step=1),
             Field("sync.generations", "Copies folder",
-                  "Where the standby keeps them.", kind="text"),
+                  "Where the standby keeps them." + _ON_BOX, kind="text"),
             Field("sync.shrink_stores", "Stores checked for shrinking",
-                  "Paths under the checkout.", kind="phrases"),
+                  "Paths under the checkout." + _ON_BOX, kind="phrases"),
+        )),
+        Section("Start fence", "The check every stack service waits for at start. "
+                "Its unit gives it 30 seconds in all and a fence that runs out of "
+                "time holds the stack, so these stay small.", (
+            Field("fence.lookup_timeout_s", "Lookup timeout",
+                  "How long one DNS lookup of the app name may take.", kind="int",
+                  unit="seconds", min=1, max=10, step=1),
+            Field("fence.lookup_retry_s", "Lookup retry window",
+                  "A failed lookup is tried again until this much time has "
+                  "passed (at boot the network can come up a few seconds late). "
+                  "0 tries once.", kind="int", unit="seconds", min=0, max=15, step=1),
+            Field("fence.lookup_pause_s", "Pause between lookups", "", kind="int",
+                  unit="seconds", min=1, max=5, step=1),
+            Field("fence.peer_probe_timeout_s", "Peer probe timeout",
+                  "How long the fence waits for the other server's proxy health "
+                  "address. Any answer there holds this server's stack; no "
+                  "answer is no evidence.", kind="int", unit="seconds", min=1,
+                  max=8, step=1),
+        )),
+        Section("Morning check", "Prod's daily read of the standby's status file.", (
+            Field("watch.status_max_age_h", "Oldest status accepted",
+                  "Alert when the standby last wrote its status longer ago than "
+                  "this: its sync has not run at all.", kind="int", unit="hours",
+                  min=1, max=1440, step=1),
         )),
         Section("Servers", "Read-only here: changing an address is done in "
                 "config/standby.toml.", (

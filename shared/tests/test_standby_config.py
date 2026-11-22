@@ -41,6 +41,35 @@ def test_shipped_file_holds_two_boxes_and_two_neighbours():
     assert sc.neighbours()[1]["files"] == [".config/neuralstrike/claude.env"]
 
 
+def _from(monkeypatch, tmp_path, text):
+    f = tmp_path / "standby.toml"
+    f.write_text(text, encoding="utf-8")
+    monkeypatch.setattr(sc, "load", sc.toml_loader(f, sc.DEFAULTS, label="standby.toml")[0])
+
+
+def test_fence_and_watch_defaults(monkeypatch, tmp_path):
+    monkeypatch.setattr(sc, "load", sc.toml_loader(tmp_path / "missing.toml", sc.DEFAULTS,
+                                                   label="standby.toml")[0])
+    assert sc.fence_settings() == {"lookup_timeout_s": 4, "lookup_retry_s": 12,
+                                   "lookup_pause_s": 2, "peer_probe_timeout_s": 5}
+    assert sc.watch_settings() == {"status_max_age_h": 26}
+
+
+def test_shipped_file_matches_the_fence_and_watch_defaults():
+    assert sc.fence_settings() == sc.DEFAULTS["fence"]
+    assert sc.watch_settings() == sc.DEFAULTS["watch"]
+
+
+def test_fence_value_past_its_bound_is_its_default(monkeypatch, tmp_path):
+    _from(monkeypatch, tmp_path,
+          "[fence]\nlookup_retry_s = 60\npeer_probe_timeout_s = 7\nlookup_timeout_s = true\n"
+          "[watch]\nstatus_max_age_h = 0\n")
+    got = sc.fence_settings()
+    assert got["lookup_retry_s"] == 12 and got["peer_probe_timeout_s"] == 7
+    assert got["lookup_timeout_s"] == 4
+    assert sc.watch_settings()["status_max_age_h"] == 26
+
+
 def test_identity_round_trip(tmp_path):
     p = tmp_path / "sub" / "box.toml"
     sc.write_identity(Identity("vps3", "standby", False), p)
