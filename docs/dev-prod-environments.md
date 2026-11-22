@@ -873,29 +873,18 @@ GDPR among them); the 90-day age-out is why.
 ### The Chief of Staff host (cos.neuralstrike.co)
 
 The generator also emits `cos.neuralstrike.co`, although no code behind it is in
-this repo: `/feed/` is X News Feed (`~/x-news-feed`, user unit `x-news-feed`,
-:4300) behind its own login, and everything else is cos-hub (the Chief of Staff
-repo's system unit `cos-hub`, :8787), which the phone app and the PC sync with.
-It was added by hand on 2026-11-07, and the visitor-log install on 2026-11-18
-deleted it, because `--install` rewrites the whole file. Caddy then had no
-certificate for the name and the phone app was offline until 2026-11-22.
+this repo: the whole host is cos-hub (the Chief of Staff repo's system unit
+`cos-hub`, :8787), which the phone app and the PC sync with. It was added by
+hand on 2026-11-07, and the visitor-log install on 2026-11-18 deleted it,
+because `--install` rewrites the whole file. Caddy then had no certificate for
+the name and the phone app was offline until 2026-11-22.
 **Never add a host to `/etc/caddy/Caddyfile` by hand; add it to the generator.**
 
-The feed's login is NOT in git (this repo is public). It is one line in
-`shared/feed_basic_auth.txt` in the prod checkout, gitignored and carried by the
-nightly backup:
-
-```bash
-cd /home/administrator/dev
-caddy hash-password          # asks for the password twice, prints a $2a$... hash
-nano shared/feed_basic_auth.txt   # one line:  johnf <that hash>
-chmod 600 shared/feed_basic_auth.txt
-```
-
-To keep the current password, copy the `johnf $2a$...` line out of the live
-Caddyfile's `basic_auth` block instead of making a new hash. Without a usable file the generator warns, and `/feed/` answers 503
-instead of opening without a login; cos-hub is unaffected. A change to the file
-takes effect on the next regenerate and reload, as in step 2 above.
+The host once also served X News Feed at `/feed/` behind a login. That feed is
+this app's `xfeed_svc` now (the X News page), and the route was removed on
+2026-11-22, so `/feed/` is cos-hub's 404. A leftover
+`shared/feed_basic_auth.txt` is read by nothing; it stays gitignored because it
+holds a password hash.
 
 ## 9. Gotchas
 

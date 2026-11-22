@@ -527,8 +527,8 @@ is in git; `--install` also arms the timers). Start order: Redis (a system unit)
   never on the public domain; a link a browser opens uses `PROXY_PUBLIC_URL`.
 - ⚠ `generate_caddyfile.py --install` rewrites ALL of `/etc/caddy/Caddyfile`, so
   a host it does not emit is deleted (`cos.` was, on 2026-11-18). Every host on
-  the box goes in the generator, never by hand; its secrets are read from
-  gitignored `shared/` files, because this repo is public.
+  the box goes in the generator, never by hand; any secret a host needs is read
+  from a gitignored `shared/` file, because this repo is public.
 - The Schwab sign-in lasts 7 days from the SIGN-IN and is renewed in the app
   (Status → Authorize → `proxy.auth_exchange` → the proxy's `/auth/exchange`).
   A token refresh must never move `RefreshTokenExpiresAt`, and the recovery

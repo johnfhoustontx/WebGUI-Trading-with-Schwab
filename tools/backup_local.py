@@ -143,9 +143,6 @@ EXTRA_FILES = (
     "shared/alphavantage_key.txt",
     "shared/massive_key.txt",
     "shared/proxy_secret.txt",
-    # X News Feed's login on the cos. host, read by the Caddyfile generator: a
-    # restore without it regenerates a Caddyfile that refuses /feed/.
-    "shared/feed_basic_auth.txt",
     # The public site's manifest of published trade ideas (the cards themselves
     # are swept from deploy/site/ideas below).
     "deploy/site/ideas.json",
@@ -172,6 +169,8 @@ EXTRA_FILES = (
 NOT_BACKED_UP = {
     "shared/driver_model.txt": "belonged to the autonomous driver, removed "
                                "2026-09-22; nothing reads it",
+    "shared/feed_basic_auth.txt": "the X News Feed login for cos.'s /feed/ "
+                                  "route, removed 2026-11-22; nothing reads it",
 }
 
 # Gitignored data trees, swept WHOLE.
