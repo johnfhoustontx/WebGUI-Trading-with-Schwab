@@ -4,6 +4,7 @@
     standby_failover.py takeover [--peer-is-down]   turn THIS standby into prod
     standby_failover.py drill                       boot the restored stack as dev, then undo it
     standby_failover.py become-standby              turn a returned old prod into the standby
+    standby_failover.py stand-down                  stop this prod for a planned move (role kept)
     standby_failover.py fence-neighbours            put the start fence on the neighbour apps
 
 The roles are symmetric: every name, address and probe comes from
@@ -51,7 +52,7 @@ PREDEMOTE_DIR = "backups/predemote"
 LOOKUP_TIMEOUT_S = 5.0
 FENCE_CONF = "fence.conf"
 UNIT_SUFFIXES = (".service", ".timer")
-NOT_UNITS = ("venv-freeze.txt", "venv-pins.txt")
+NOT_UNITS = ("venv-freeze.txt", "venv-pins.txt", "python-version")
 
 
 def _unit_dir(home: pathlib.Path) -> pathlib.Path:
@@ -89,9 +90,10 @@ def probe_peer_detail(peer: dict, app_host: str, run=subprocess.run,
         except Exception:  # noqa: BLE001 - an unreachable peer is the expected answer
             return False
 
+    # No -f: a proxy answering 5xx (or any status) is still a running proxy.
     if not health:
         skipped.append(("tailnet proxy", "the peer has no proxy_health in standby.toml"))
-    elif curl(["curl", "-fsS", "--max-time", str(CURL_TIMEOUT_S), health]):
+    elif curl(["curl", "-sS", "-o", "/dev/null", "--max-time", str(CURL_TIMEOUT_S), health]):
         answered.append("tailnet proxy")
     if not ip:
         why = "the peer has no public_ip in standby.toml"
@@ -251,7 +253,8 @@ def _operator_steps(box: dict, out) -> None:
     py = ".venv/bin/python"
     out("\nSTEPS ONLY YOU CAN DO, in order:")
     out("  1. sudo ufw allow 80,443/tcp")
-    out("  2. sudo tailscale serve --bg --https=8100 http://127.0.0.1:8100")
+    port = repo_paths.PROXY_PORT
+    out(f"  2. sudo tailscale serve --bg --https={port} http://127.0.0.1:{port}")
     out("     (the peer's probes and the Authorize link reach this box's proxy through it)")
     out(f"  3. sudo {py} -m deploy.caddy.generate_caddyfile --install, then enable and start Caddy")
     out(f"  4. At Wix, point these four A records at {ip}:")
@@ -312,6 +315,15 @@ def takeover(identity, *, peer_is_down=False, home=None, repo=None, run=subproce
 
     done, unit_dir = [], _unit_dir(home)
     env_path = repo / "config" / "env.local.toml"
+    # A sync running now would move the checkout and restore data under the stack
+    # about to start: stop it while nothing has changed, or refuse.
+    if (unit_dir / standby_units.SERVICE).exists():
+        ok, text = _ctl(run, "stop", standby_units.SERVICE)
+        if not ok:
+            out(f"REFUSED: could not stop {standby_units.SERVICE} ({text[:200]}); "
+                "nothing was changed. Stop it by hand and run takeover again.")
+            return 1
+        out(f"  stopped {standby_units.SERVICE}")
 
     def fail(what, not_done):
         out(f"\nFAILED: {what}")
@@ -636,14 +648,70 @@ def become_standby(identity, *, home=None, repo=None, run=subprocess.run,
     out(f"removed {len(mine)} generated unit files; role is now standby.")
     if bad:
         out("WARNING: the sync timer is not armed: " + "; ".join(bad))
-    out("\nKEYS TO EXCHANGE with the new prod (the roles swapped):")
-    out("  - here: deploy/standby/provision.sh <this box> \"<new prod's standby_watch "
-        "public key>\" \"<age public key line>\" creates ~/.ssh/standby_pull;")
-    out("  - on the new prod: add that standby_pull public key to authorized_keys "
-        "(read-only rrsync of ~/backups) and create ~/.ssh/standby_watch whose "
-        "public half goes into this box's authorized_keys.")
+    out("\nKEYS TO EXCHANGE with the new prod (the roles swapped; exact commands in "
+        "docs/dev-prod-environments.md section 13, 'Keys after a role swap'):")
+    out("  1. on the new prod: create ~/.ssh/standby_watch if it has none "
+        "(ssh-keygen -t ed25519 -f ~/.ssh/standby_watch -N '');")
+    out("  2. here: bash deploy/standby/provision.sh <this box> \"<that key's .pub>\" "
+        "\"<age public key line>\" (pull key, status-read line, the new prod's host keys);")
+    out("  3. on the new prod: add the rrsync line provision prints to authorized_keys, "
+        "and this box's host keys to known_hosts (ssh-keyscan -t ed25519).")
     out(f"The first nightly sync replaces this box's data with the new prod's. "
         f"Its own last day is kept in {dest}.")
+    return 0
+
+
+# --- stand-down (a planned move) ----------------------------------------------------
+
+def _instances(name: str) -> str:
+    """systemctl refuses a bare template name: address its running instances."""
+    return name.replace("@.", "@*.") if "@." in name else name
+
+
+def stand_down(identity, *, home=None, run=subprocess.run, specs=None, out=print) -> int:
+    """Stop this prod's stack and neighbours for a PLANNED move, keeping its role.
+
+    The order on the other box is then ``takeover --peer-is-down``, the Wix
+    records, and ``become-standby`` here (which needs DNS to have moved, and is
+    what changes the role). Timers first so nothing restarts a stopped service,
+    the fence last. Caddy (a system unit) is not touched."""
+    home = pathlib.Path(home or pathlib.Path.home())
+    specs = standby_config.neighbours() if specs is None else specs
+    if identity is None or identity.role != "prod":
+        out("REFUSED: stand-down runs only on the box whose role is prod "
+            f"(this one is {'unconfigured' if identity is None else identity.role}).")
+        return 1
+    unit_dir = _unit_dir(home)
+    files = sorted(p.name for p in unit_dir.glob("*")
+                   if p.is_file() and p.name.endswith(UNIT_SUFFIXES)) if unit_dir.is_dir() else []
+    mine = [n for n in files if n.startswith("trading-prod") and n != gu.notifier_name()]
+    neighbour = [n for n in files if any(fnmatch.fnmatch(n, pat)
+                                         for s in specs for pat in s.get("units", []))]
+    steps = [("disable", "--now", n) for n in mine + neighbour if n.endswith(".timer")]
+    steps += [("disable", "--now", n) for n in neighbour
+              if n.endswith(".service") and "@" not in n]
+    steps += [("stop", _instances(n)) for n in neighbour if n.endswith("@.service")]
+    if (unit_dir / gu.target_name()).exists():
+        steps += [("stop", gu.target_name()), ("disable", gu.target_name())]
+    steps += [("stop", _instances(n)) for n in mine
+              if n.endswith(".service") and n != gu.fence_name()]
+    if (unit_dir / gu.fence_name()).exists():
+        steps.append(("stop", gu.fence_name()))
+    problems = []
+    for step in steps:
+        ok, text = _ctl(run, *step)
+        if not ok:
+            problems.append(f"{' '.join(step)}: {text[:120]}")
+    if problems:
+        out("FAILED: these did not stop or disable; the role is unchanged (prod):")
+        for p in problems:
+            out(f"  - {p}")
+        out("Fix them by hand (systemctl --user ...) before the other box takes over.")
+        return 1
+    out(f"{identity.self_name} is stopped and nothing of it starts at boot. Its role is "
+        "still prod and its fence still guards it.")
+    out("Next: on the other box `takeover --peer-is-down`; then move the Wix records; "
+        "then here `become-standby`.")
     return 0
 
 
@@ -657,6 +725,7 @@ def main(argv=None) -> int:
                    help="go on although the peer still answers a probe")
     sub.add_parser("drill", help="boot the restored stack as dev, then undo it")
     sub.add_parser("become-standby", help="turn a returned old prod into the standby")
+    sub.add_parser("stand-down", help="stop this prod for a planned move (keeps its role)")
     sub.add_parser("fence-neighbours", help="fence the neighbour apps' units")
     args = ap.parse_args(argv)
     identity = standby_config.read_identity()
@@ -666,6 +735,8 @@ def main(argv=None) -> int:
         return drill(identity)
     if args.cmd == "become-standby":
         return become_standby(identity)
+    if args.cmd == "stand-down":
+        return stand_down(identity)
     paths = fence_neighbours(standby_config.neighbours(), pathlib.Path.home())
     for p in paths:
         print(f"fenced {p}")

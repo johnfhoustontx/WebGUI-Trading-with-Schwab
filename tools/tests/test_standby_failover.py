@@ -123,8 +123,8 @@ def test_public_probe_targets_peer_ip_not_dns():
     curl = [c for c in run.calls if "--resolve" in c][0]
     assert "app.example.co:443:10.0.0.2" in curl
     assert curl[-1] == "https://app.example.co/login"
-    proxy = [c for c in run.calls if "-fsS" in c][0]
-    assert BOXES["vps2"]["proxy_health"] in proxy and "--max-time" in proxy
+    proxy = [c for c in run.calls if BOXES["vps2"]["proxy_health"] in c][0]
+    assert "--max-time" in proxy and "-sS" in proxy
 
 
 def test_probe_peer_names_what_answered():
@@ -195,7 +195,7 @@ def test_takeover_refuses_while_peer_answers(tmp_path):
         if answered == "ssh":
             run, connect = Fake(fail=_curl_down), _up
         else:
-            word = "-fsS" if answered == "tailnet" else "--resolve"
+            word = BOXES["vps2"]["proxy_health"] if answered == "tailnet" else "--resolve"
             run = Fake(fail=lambda a, w=word: a[0] == "curl" and w not in a)
             connect = _down
         rc, run, lines, home, repo, ipath = _go(sub, run=run, connect=connect)
@@ -702,6 +702,127 @@ def test_drill_failed_instance_stop_counts_as_stuck(tmp_path):
     rc, _r, lines, *_ = _drill(tmp_path, run=run)
     assert rc == 1 and (d / "trading-dev-notify-failure@.service").exists()
     assert any("notify-failure@*.service" in x and "Finish" in x for x in lines)
+
+
+# --- T8: any HTTP status from the tailnet proxy is an answer ----------------------
+
+def test_tailnet_probe_counts_a_5xx_as_answering():
+    """A curl stand-in that behaves like curl against a proxy answering 503: with
+    -f it exits 22, without it exits 0."""
+    class Curl503(Fake):
+        def __call__(self, argv, **kw):
+            argv = [str(a) for a in argv]
+            self.calls.append(argv)
+            if argv[0] == "curl" and BOXES["vps2"]["proxy_health"] in argv:
+                rc = 22 if any(a.startswith("-") and not a.startswith("--") and "f" in a
+                               for a in argv) else 0
+            else:
+                rc = 1
+            return subprocess.CompletedProcess(argv, rc, stdout="", stderr="")
+    assert sf.probe_peer(BOXES["vps2"], "a.co", run=Curl503(), connect=_down) == [
+        "tailnet proxy"]
+
+
+# --- takeover stops a running sync first ------------------------------------------
+
+def test_takeover_stops_the_sync_before_removing_it(tmp_path):
+    _app(tmp_path)
+    d = _units(tmp_path / "home", ["standby-sync.service", "standby-sync.timer"])
+    seen = []
+
+    class Stop(Fake):
+        def __call__(self, argv, **kw):
+            if list(argv)[:4] == ["systemctl", "--user", "stop", "standby-sync.service"]:
+                seen.append((d / "standby-sync.service").exists())
+            return super().__call__(argv, **kw)
+
+    rc, run, lines, *_ = _go(tmp_path, run=Stop(fail=_curl_down))
+    assert rc == 0, lines
+    assert seen == [True]                        # stopped while its file was still there
+    assert not (d / "standby-sync.service").exists()
+
+
+def test_takeover_refuses_when_the_sync_will_not_stop(tmp_path):
+    _app(tmp_path)
+    d = _units(tmp_path / "home", ["standby-sync.service", "standby-sync.timer"])
+    run = Fake(fail=lambda a: a[0] == "curl" or a[2:4] == ["stop", "standby-sync.service"])
+    rc, run, lines, _h, _r, ipath = _go(tmp_path, run=run)
+    assert rc == 1 and sc.read_identity(ipath) == STANDBY
+    assert (d / "standby-sync.service").exists() and not run.has("start")
+    assert any("standby-sync.service" in x and "REFUSED" in x for x in lines)
+
+
+def test_operator_steps_use_the_configured_proxy_port(tmp_path, monkeypatch):
+    monkeypatch.setattr(repo_paths, "PROXY_PORT", 8765)
+    lines = []
+    sf._operator_steps(BOXES["vps3"], lines.append)
+    serve = [x for x in lines if "tailscale serve" in x][0]
+    assert "--https=8765 http://127.0.0.1:8765" in serve and "8100" not in serve
+
+
+# --- stand-down (a planned move) ------------------------------------------------
+
+def _stand_down(tmp_path, identity=PROD, run=None, names=REAL):
+    _app(tmp_path)
+    d = _units(tmp_path / "home", list(names) + [
+        "trading-prod-backup.timer", "trading-prod-backup.service", FENCE,
+        "trading-prod-notify-failure@.service"])
+    ipath = tmp_path / "box.toml"
+    if identity is not None:
+        sc.write_identity(identity, ipath)
+    run = run or Fake()
+    lines = []
+    rc = sf.stand_down(identity, home=tmp_path / "home", run=run, specs=REAL_SPECS,
+                       out=lines.append)
+    return rc, run, lines, d, ipath
+
+
+def test_stand_down_refuses_unless_prod(tmp_path):
+    rc, run, lines, d, ipath = _stand_down(tmp_path, identity=STANDBY)
+    assert rc == 1 and not run.calls and sc.read_identity(ipath) == STANDBY
+    sub = tmp_path / "none"
+    sub.mkdir()
+    rc, run, *_ = _stand_down(sub, identity=None)
+    assert rc == 1 and not run.calls
+
+
+def test_stand_down_stops_everything_in_order_and_keeps_the_role(tmp_path):
+    rc, run, lines, d, ipath = _stand_down(tmp_path)
+    assert rc == 0, lines
+    ctl = [c[2:] for c in run.calls if c[:2] == ["systemctl", "--user"]]
+    for c in ctl:
+        assert not c[-1].endswith("@.service"), c          # never a bare template
+
+    def at(*words):
+        return next(i for i, c in enumerate(ctl) if list(words) == c)
+    timers = [at("disable", "--now", "trading-prod-backup.timer"),
+              at("disable", "--now", "neuralstrike-report-a.timer"),
+              at("disable", "--now", "neuralstrike-report-b.timer")]
+    hub = at("disable", "--now", "cos-hub.service")
+    instances = at("stop", "neuralstrike-report@*.service")
+    target = (at("stop", gu.target_name()), at("disable", gu.target_name()))
+    stack = at("stop", "trading-prod-webgui.service")
+    fence = at("stop", FENCE)
+    assert max(timers) < hub < instances < target[0] < target[1] < stack < fence
+    assert fence == len(ctl) - 1                         # the fence goes last
+    assert not [c for c in ctl if "notify-failure" in c[-1]]
+    assert sc.read_identity(ipath) == PROD               # the role is not changed
+    assert (d / gu.target_name()).exists()               # nothing deleted
+    assert any("become-standby" in x for x in lines)
+
+
+def test_stand_down_reports_a_failed_stop(tmp_path):
+    rc, _run, lines, _d, ipath = _stand_down(
+        tmp_path, run=Fake(fail=lambda a: a[-1] == "cos-hub.service"))
+    assert rc == 1 and sc.read_identity(ipath) == PROD
+    assert any("cos-hub.service" in x for x in lines)
+
+
+def test_main_has_a_stand_down_command(monkeypatch):
+    got = []
+    monkeypatch.setattr(sf, "stand_down", lambda identity, **kw: got.append(identity) or 0)
+    monkeypatch.setattr(sc, "read_identity", lambda *a, **k: PROD)
+    assert sf.main(["stand-down"]) == 0 and got == [PROD]
 
 
 def test_become_standby_failed_instance_stop_keeps_role(tmp_path):
