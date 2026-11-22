@@ -5,7 +5,7 @@
 
 [sync]
 at = "22:15"                 # Central; after the 21:xx backup, before the 04:xx reports
-max_age_h = 80               # a copy older than this is refused at takeover
+max_age_h = 80               # the age past which the sync fails and prod's morning watch alerts; a takeover only warns
 max_shrink_pct = 50          # a store that lost more than this is not promoted
 keep = 3                     # generations kept on the standby
 connect_timeout_sec = 15     # ssh connect timeout per address when pulling

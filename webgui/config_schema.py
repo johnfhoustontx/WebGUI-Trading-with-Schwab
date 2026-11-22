@@ -3636,7 +3636,8 @@ _STANDBY = ConfigFile(
                   "After the nightly backup and before the morning reports.",
                   kind="time"),
             Field("sync.max_age_h", "Oldest copy accepted",
-                  "A takeover refuses a copy older than this.", kind="int",
+                  "Past this age the sync fails and prod's morning check alerts. A takeover "
+                  "only warns.", kind="int",
                   unit="hours", min=1, max=1440, step=1),
             Field("sync.max_shrink_pct", "Largest shrink accepted",
                   "A store that lost more than this share of its size since "
