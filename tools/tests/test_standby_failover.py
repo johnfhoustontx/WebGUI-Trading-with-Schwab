@@ -678,3 +678,41 @@ def test_takeover_enables_target_and_neighbour_services_after_identity(tmp_path)
     assert run.has("enable", gu.target_name()) and run.has("enable", "cos-hub.service")
     assert not run.has("enable", "rep@.service")
     assert seen and all(i == Identity("vps3", "prod", True) for i in seen)
+
+
+def test_drill_never_stops_a_bare_template(tmp_path):
+    _app(tmp_path)
+    d = tmp_path / "home" / ".config" / "systemd" / "user"
+    names = ("trading-dev.target", "trading-dev-webgui.service",
+             "trading-dev-notify-failure@.service")
+    run = Render(d, names=names, fail=lambda a: a[:3] == ["systemctl", "--user", "stop"]
+                 and a[-1].endswith("@.service"))
+    rc, run, lines, *_ = _drill(tmp_path, run=run)
+    assert rc == 0, lines
+    assert list(d.iterdir()) == []
+    assert not any(c[-1].endswith("@.service") for c in run.calls if "stop" in c)
+    assert run.has("stop", "trading-dev-notify-failure@*.service")
+
+
+def test_drill_failed_instance_stop_counts_as_stuck(tmp_path):
+    _app(tmp_path)
+    d = tmp_path / "home" / ".config" / "systemd" / "user"
+    run = Render(d, names=("trading-dev.target", "trading-dev-notify-failure@.service"),
+                 fail=lambda a: "stop" in a and a[-1].endswith("@*.service"))
+    rc, _r, lines, *_ = _drill(tmp_path, run=run)
+    assert rc == 1 and (d / "trading-dev-notify-failure@.service").exists()
+    assert any("notify-failure@*.service" in x and "Finish" in x for x in lines)
+
+
+def test_become_standby_failed_instance_stop_keeps_role(tmp_path):
+    _app(tmp_path)
+    d = _units(tmp_path / "home", REAL)
+    run = Fake(fail=lambda a: "stop" in a and a[-1].endswith("@*.service"))
+    ipath = tmp_path / "box.toml"
+    sc.write_identity(PROD, ipath)
+    lines = []
+    rc = sf.become_standby(PROD, home=tmp_path / "home", repo=tmp_path / "repo", run=run,
+                           specs=REAL_SPECS, lookup=lambda h, t: ["10.0.0.3"],
+                           identity_path=ipath, out=lines.append)
+    assert rc == 1 and sc.read_identity(ipath) == PROD
+    assert (d / "trading-prod.target").exists()

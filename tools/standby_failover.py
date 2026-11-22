@@ -476,8 +476,11 @@ def _drill_cleanup(run, unit_dir, env_path, original, before, out) -> bool:
             "fix it by hand before anything else.")
     new = sorted(_snapshot(unit_dir) - before)
     stuck = []
-    for unit in [n for n in new if n == "trading-dev.target"] + [
-            n for n in new if n.endswith(UNIT_SUFFIXES)]:
+    stoppable = [n for n in new if n.endswith(UNIT_SUFFIXES + (".target",))]
+    # A bare template name is refused by systemctl: stop its instances by pattern.
+    targets = [n.replace("@.", "@*.") if "@." in n else n for n in stoppable]
+    for unit in [n for n in targets if n == "trading-dev.target"] + [
+            n for n in targets if n != "trading-dev.target"]:
         try:
             ok, _text = _ctl(run, "stop", unit)
         except Exception:  # noqa: BLE001 - counted as a stop that failed
@@ -597,7 +600,7 @@ def become_standby(identity, *, home=None, repo=None, run=subprocess.run,
     # The fence goes on BEFORE anything else changes: a returning box must not
     # start a second hub or second reports whichever way this run ends.
     fence_neighbours(specs, home, run)
-    problems, warnings = [], []
+    problems = []
     for unit in timers + plain:
         ok, text = _ctl(run, "disable", "--now", unit)
         if not ok:
@@ -606,7 +609,7 @@ def become_standby(identity, *, home=None, repo=None, run=subprocess.run,
         # systemctl refuses a bare template name: stop its running instances.
         ok, text = _ctl(run, "stop", unit.replace("@.", "@*."))
         if not ok:
-            warnings.append(f"{unit} instances: {text[:120]}")
+            problems.append(f"{unit} instances: {text[:120]}")
     if (unit_dir / gu.target_name()).exists():
         for verb in ("stop", "disable"):
             ok, text = _ctl(run, verb, gu.target_name())
@@ -621,8 +624,6 @@ def become_standby(identity, *, home=None, repo=None, run=subprocess.run,
         for p in problems:
             out(f"  - {p}")
         return 1
-    for w in warnings:
-        out(f"  note: {w}")
     for name in mine:
         try:
             (unit_dir / name).unlink()
