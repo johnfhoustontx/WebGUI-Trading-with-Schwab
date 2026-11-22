@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-19</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-21</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -5558,7 +5558,7 @@ a fetch is due), <code>scheduler.refresh_volume</code>, <code>compute.fetch_bars
 <tr>
 <td><code>pace</code></td>
 <td>Σ today's finished bars ÷ median over the last <code>baseline_sessions</code> (9) sessions of Σ that session's bars ending by the same clock time</td>
-<td><code>/pricehistory</code>, five-minute bars, regular session</td>
+<td><code>/passthrough</code> → <code>/pricehistory</code> with <code>endDate</code> = now, five-minute bars, regular session</td>
 </tr>
 <tr>
 <td><code>word</code></td>
@@ -7442,7 +7442,7 @@ and manage-at-DTE are not P&amp;L levels and are not shown.</p>
 book and the Trade ideas section), <code>webgui/pages/idea_review.py</code> (the archive page),
 <code>config/paper.toml</code> <code>[idea_trades]</code>, <code>config/sessions.toml</code> <code>[slots.idea_review]</code>.
 Design: <code>docs/plans/2026-10-20-trade-idea-paper-tracking-design.md</code>.</p>
-<p>Every hourly trade idea that is <strong>posted</strong> (<code>handlers.run_trade_idea</code>, after every
+<p>Every trade idea that is <strong>posted</strong> (<code>handlers.run_trade_idea</code>, after every
 send) is also booked as an OPEN row of the Paper Ledger (<code>trades.db</code>). The row is the
 card as posted - nothing is re-priced - and is identified by <code>source = "trade_idea"</code>
 and nothing else (<code>idea_ledger.is_idea</code>).</p>
@@ -7685,7 +7685,7 @@ the weekly idea review and the site's idea results never read it.</p>
 <code>[idea_shadow]</code>, <code>tools/idea_shadow_compare.py</code>. Design:
 <code>docs/plans/2026-11-06-trade-idea-quality-shadow-design.md</code>.</p>
 <p>The scheduler's 30-second tick reads <code>cache:options:scan</code>'s version; when it has
-moved, <code>run_idea_shadow</code> runs once. It reads the scan and the hourly idea's last
+moved, <code>run_idea_shadow</code> runs once. It reads the scan and the posted idea's last
 result (<code>cache:options:trade_idea</code>) and makes no Schwab or Claude call.
 <code>idea_shadow.decide</code>, in order:</p>
 <table>
@@ -7730,7 +7730,7 @@ result (<code>cache:options:trade_idea</code>) and makes no Schwab or Claude cal
 </tr>
 <tr>
 <td>Limits</td>
-<td>today's posts, hourly (seen through <code>note_clock</code>) and shadow together: <code>max_per_day</code> (10), <code>max_per_hour</code> (2, rolling 60 minutes), <code>min_gap_min</code> (20)</td>
+<td>today's posts, scheduled (seen through <code>note_clock</code>) and shadow together: <code>max_per_day</code> (10), <code>max_per_hour</code> (2, rolling 60 minutes), <code>min_gap_min</code> (20)</td>
 </tr>
 <tr>
 <td>Pick</td>

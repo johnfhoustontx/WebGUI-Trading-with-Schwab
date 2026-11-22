@@ -21,23 +21,44 @@ def toml(tmp_path, monkeypatch):
     return write
 
 
-def test_shipped_values_are_750_each():
-    assert pl.max_risk_per_trade() == 750.0
+def test_shipped_values():
+    # The Account's three caps were raised on 2026-11-21; the Ledger's were not.
+    assert pl.max_risk_per_trade() == 1500.0
+    assert pl.max_risk_per_symbol() == 1500.0
+    assert pl.max_risk_per_sector() == 3000.0
     assert pl.ledger_max_risk_per_trade() == 750.0
+    assert pl.ledger_max_risk_per_symbol() == 750.0
+    assert pl.ledger_max_risk_per_sector() == 1500.0
+
+
+def test_a_symbol_cap_never_sits_below_its_books_trade_cap():
+    """``book_caps`` sums the new trade into its symbol, so a symbol cap under the
+    per-trade cap silently refuses every trade between the two."""
+    assert pl.max_risk_per_symbol() >= pl.max_risk_per_trade()
+    assert pl.ledger_max_risk_per_symbol() >= pl.ledger_max_risk_per_trade()
 
 
 def test_the_file_overrides_each_cap(toml):
-    toml("[risk]\nmax_risk_per_trade = 300\nledger_max_risk_per_trade = 900.5\n")
+    toml("[risk]\nmax_risk_per_trade = 300\nledger_max_risk_per_trade = 900.5\n"
+         "max_risk_per_symbol = 410\nmax_risk_per_sector = 820\n"
+         "ledger_max_risk_per_symbol = 430\nledger_max_risk_per_sector = 860\n")
     assert pl.max_risk_per_trade() == 300.0
     assert pl.ledger_max_risk_per_trade() == 900.5
+    assert pl.max_risk_per_symbol() == 410.0
+    assert pl.max_risk_per_sector() == 820.0
+    assert pl.ledger_max_risk_per_symbol() == 430.0
+    assert pl.ledger_max_risk_per_sector() == 860.0
 
 
+@pytest.mark.parametrize("key", ["max_risk_per_trade", "max_risk_per_symbol",
+                                 "max_risk_per_sector", "ledger_max_risk_per_symbol",
+                                 "ledger_max_risk_per_sector"])
 @pytest.mark.parametrize("bad", ["0", "-5", "nan", "inf", "true", '"x"'])
-def test_an_unusable_cap_falls_back_to_the_default(toml, bad):
+def test_an_unusable_cap_falls_back_to_the_default(toml, key, bad):
     # A zero cap refuses every trade; a NaN makes every ">" False and switches
     # the cap off. Neither may bind.
-    toml(f"[risk]\nmax_risk_per_trade = {bad}\n")
-    assert pl.max_risk_per_trade() == 750.0
+    toml(f"[risk]\n{key} = {bad}\n")
+    assert getattr(pl, key)() == pl.DEFAULTS["risk"][key]
 
 
 def test_a_missing_file_is_the_defaults(toml):

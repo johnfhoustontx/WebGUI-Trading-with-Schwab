@@ -4,7 +4,28 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-20 (**Minute bars through the proxy include today.**)
+**Last updated:** 2026-11-21 (**Ten trade ideas a day; the Paper Account risks $1,500 a trade.**)
+
+- **Trade ideas.** `[slots.trade_idea]` adds 09:10, 10:10 and 11:10: every 30 minutes
+  from 08:40 to 11:40 CT, then hourly to 14:40, 10 posts a day (was 7). Config only;
+  the new slots sit 10 minutes past a quarter hour like the :40 ones, so each still
+  reads a finished scan. The afternoon was kept on measurement: on 779 captured
+  signals since June the morning and afternoon do the same (62.7% / 60.3% won,
+  p = 0.57), and the posted ideas' morning lead comes from one week (11-02 to 11-06).
+  User-facing text drops "hourly" (Settings, manuals, `page_help.py`, the site's
+  ideas page and home page). New test: `test_a_late_slot_cannot_run_into_the_next`.
+- **Paper Account risk.** `max_risk_per_trade` $750 → $1,500, with the Account's
+  symbol cap $750 → $1,500 and sector cap $1,500 → $3,000 (a symbol cap below the
+  trade cap would have refused every trade over $750). Both caps moved from literals
+  in `config_paper.py` to `config/paper.toml [risk]` and Settings, and the Ledger got
+  its own pair (`ledger_max_risk_per_symbol` $750, `ledger_max_risk_per_sector`
+  $1,500, applied by `paper_concentration.ledger_limits`), so the Paper button's book
+  is unchanged. The scanner's width search follows the Account's cap, so it can now
+  offer spreads up to twice as wide.
+- **Design:** [the doc](plans/2026-11-21-morning-trade-idea-slots-design.md), with the
+  measurements.
+
+**Prior —** 2026-11-20 (**Minute bars through the proxy include today.**)
 
 - **What.** Schwab ends a price-history series sent with no `endDate` at the previous
   business day's close, and the proxy's `/pricehistory` sent none, so every minute series

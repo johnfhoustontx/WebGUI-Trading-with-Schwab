@@ -732,7 +732,7 @@ TRADE_IDEAS_NOTE = (
 SHADOW_IDEAS_NOTE = (
     "Every shadow idea: a new Strong trade picked after a scan, booked on the "
     "Paper Ledger and marked like a posted idea, but never posted. It never takes "
-    "the hourly idea's trade, so it can be measured against the posted ideas. "
+    "the posted idea's trade, so it can be measured against the posted ideas. "
     "Realized profit and the closed count include only trades that have closed."
 )
 

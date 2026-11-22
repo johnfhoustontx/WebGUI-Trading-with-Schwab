@@ -315,7 +315,7 @@ one-minute GEX collection and the raw feed* has the diagrams and fields.
 | `paper_entry` | — | `cache:options:paper_account` |
 | `paper_manage` | — | `cache:options:paper_account` |
 | `paper_reset` | `{starting_balance}` | `cache:options:paper_account` |
-| `paper_create` | `{signal, qty}` — opens into the Paper **Ledger** only if every risk cap in `shared.book_caps` clears against the Ledger's own open trades ($750 per trade, plus the Account's symbol / sector / expiry / deployment caps); a refusal writes nothing | `cache:options:paper_trades` + `cache:options:paper_create` — the outcome, written on **every** answer with a 600 s TTL: `{status, symbol, type, expiration, qty, rungs[], seq, ts}` plus, by `status`: `opened` → `trade_id`; `refused` → `code` (the binding rung), `message` (a plain sentence), `max_quantity` (the largest quantity that clears every cap now; `0` when none does); `error` / `stale` → `message`. `status` is one of `opened` · `refused` · `stale` · `error`. `seq` rises on each publish, so two identical refusals are two answers; the `:ver` counter can reset to 1 when the TTL expires, so compare versions with `!=`. Each rung is `{code, kind, scope, used, after, cap, binds, skipped}` — `kind` `count` or `risk`, a skipped rung has `used`/`after`/`cap` `null` and `binds: false`; `rungs` is `[]` on `stale` and on errors raised before the caps ran. `qty` is `null` on `stale`, the as-sent value on a bad quantity, and absent when the command raised. A command that **raises** publishes an `error` (`message` *The paper ledger could not process the request.*) and is then dead-lettered |
+| `paper_create` | `{signal, qty}` — opens into the Paper **Ledger** only if every risk cap in `shared.book_caps` clears against the Ledger's own open trades (its own $750 per trade, $750 per symbol and $1,500 per sector, plus the Account's position-count and deployment caps); a refusal writes nothing | `cache:options:paper_trades` + `cache:options:paper_create` — the outcome, written on **every** answer with a 600 s TTL: `{status, symbol, type, expiration, qty, rungs[], seq, ts}` plus, by `status`: `opened` → `trade_id`; `refused` → `code` (the binding rung), `message` (a plain sentence), `max_quantity` (the largest quantity that clears every cap now; `0` when none does); `error` / `stale` → `message`. `status` is one of `opened` · `refused` · `stale` · `error`. `seq` rises on each publish, so two identical refusals are two answers; the `:ver` counter can reset to 1 when the TTL expires, so compare versions with `!=`. Each rung is `{code, kind, scope, used, after, cap, binds, skipped}` — `kind` `count` or `risk`, a skipped rung has `used`/`after`/`cap` `null` and `binds: false`; `rungs` is `[]` on `stale` and on errors raised before the caps ran. `qty` is `null` on `stale`, the as-sent value on a bad quantity, and absent when the command raised. A command that **raises** publishes an `error` (`message` *The paper ledger could not process the request.*) and is then dead-lettered |
 | `paper_reload` | — | `cache:options:paper_trades` |
 | `paper_close` | `{trade_id, debit}` — on a trade-idea row (`source == "trade_idea"`) the close is booked by `idea_ledger.manual_close`, exit reason `MANUAL`, and the typed `debit` is the stored `exit_debit` (the Ledger's convention: paid for a credit row, received for a debit row) | `cache:options:paper_trades` |
 | `paper_delete` | `{trade_id}` | `cache:options:paper_trades` |
@@ -484,7 +484,7 @@ own publish raises, and once at service start. A failure is a degrade
 are left out of `open` and out of `realized_pnl` (so out of `equity`), because they
 are not held to the caps.
 
-**Trade-idea rows on `cache:options:paper_trades`.** The hourly trade idea
+**Trade-idea rows on `cache:options:paper_trades`.** The trade idea
 (`handlers.run_trade_idea`) books each posted idea as an ordinary row of `trades.db`
 with `source = "trade_idea"` (the only marker; `notes` reads "Trade idea") through
 `idea_ledger.book`, which evaluates no cap. Beyond the Ledger's usual fields it carries
@@ -1628,7 +1628,7 @@ cache:options:gamma_briefings  events:options:gamma_briefings
 cache:options:gamma_analyze_premarket | _midday | _close    (per-slot auto briefings)
 cache:options:gamma_regime_state
 cache:options:market_snapshot  events:options:market_snapshot
-cache:options:trade_idea                                    (hourly post: last result + today's posted set)
+cache:options:trade_idea                                    (scheduled post: last result + today's posted set)
 cache:feed:shadow                                           (config/feed.toml mode "tee" only: the shadow check's counts and timings)
 cache:options:x_log                                         (every X post attempt, newest first, last 100)
 cache:options:x_count                                       (X posts made today, CT day - the daily cap)

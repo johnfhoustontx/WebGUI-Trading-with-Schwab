@@ -363,12 +363,13 @@ _DEFAULTS = {
         # time is configurable; the day is the unit's. After token_watch, so a
         # lapsing Schwab sign-in has already been reported. Read by systemd.
         "stock_rank": {"at": "08:00"},
-        # The hourly public trade idea (options_svc). At :40, after the :32
-        # autoscan has published (at :35 it raced it), and the whole regular
-        # session: the first at 08:40, the last at 14:40. No Schwab call and no
-        # Claude call -- it reads the published scan.
+        # The public trade idea (options_svc). Ten past a quarter hour, after
+        # that quarter's autoscan has published (at :35 it raced it): every 30
+        # minutes from 08:40 to 11:40, then hourly to 14:40. No Schwab call and
+        # no Claude call -- it reads the published scan.
         "trade_idea": {"grace_min": 10,
-                       "h0840": "08:40", "h0940": "09:40", "h1040": "10:40",
+                       "h0840": "08:40", "h0910": "09:10", "h0940": "09:40",
+                       "h1010": "10:10", "h1040": "10:40", "h1110": "11:10",
                        "h1140": "11:40", "h1240": "12:40", "h1340": "13:40",
                        "h1440": "14:40"},
         # The daily 0-DTE iron condor's entry into the Paper Ledger

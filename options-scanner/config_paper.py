@@ -27,7 +27,7 @@ STARTING_BALANCE     = 25_000.0
 #
 # MAX_RISK_PER_TRADE sizes the automatic Account AND the scanner's width search
 # (scanner_engine.DEFAULT_MAX_RISK_DOLLARS). $250 until 2026-09-22, when the
-# operator set it to $750 to match the Ledger.
+# operator set it to $750 to match the Ledger, and $1,500 since 2026-11-21.
 #
 # LEDGER_MAX_RISK_PER_TRADE is the Paper LEDGER's own limit (the book the webgui
 # Paper button opens into): at $250 about two thirds of Directional long options
@@ -58,8 +58,15 @@ MAX_SESSION_DRAWDOWN = 2_500.0
 # breach SKIPS the signal for this cycle rather than recording a rejected order:
 # the condition is transient, and an order row would blacklist the signal for
 # good (see that module's header).
+#
+# The two RISK caps (per symbol, per sector) come from config/paper.toml, one pair
+# per book: the Account's here, the Ledger's as LEDGER_* (paper_concentration
+# .ledger_limits swaps them in). Until 2026-11-21 both books shared $750 / $1,500, hard-coded
+# below; the Account's are $1,500 / $3,000 since, so one full-size trade still
+# fills a name and two names still fill a sector.
 MAX_POSITIONS_PER_SYMBOL = 3       # open positions in one underlying
-MAX_RISK_PER_SYMBOL      = 750.0   # summed max loss in one underlying (~3% of account)
+MAX_RISK_PER_SYMBOL      = _paper_limits.max_risk_per_symbol()   # summed max loss in one underlying
+LEDGER_MAX_RISK_PER_SYMBOL = _paper_limits.ledger_max_risk_per_symbol()
 MAX_POSITIONS_PER_EXPIRY = 5       # open positions sharing one expiration, book-wide
 
 # --- SECTOR (gap assessment B4) ---
@@ -83,12 +90,15 @@ MAX_POSITIONS_PER_EXPIRY = 5       # open positions sharing one expiration, book
 # against 0.017 ACROSS sectors, and 14 of the 15 most-correlated pairs in the
 # universe share one. Sector is a real proxy for correlation in this universe.
 #
-# $1,500 is two symbols at the full MAX_RISK_PER_SYMBOL and ~31% of the $4,837
-# deployment ceiling on the live book, so filling the book needs at least four
-# sectors. 5 positions matches MAX_POSITIONS_PER_EXPIRY for the reason that
-# number was chosen: five positions on one thing is a bet on that thing.
+# The sector cap was chosen as two symbols at the full MAX_RISK_PER_SYMBOL
+# ($1,500 when that was $750: ~31% of the $4,837 deployment ceiling on the live
+# book then, so filling the book needed at least four sectors); the Account's
+# $3,000 keeps the two-symbol rule. 5 positions matches MAX_POSITIONS_PER_EXPIRY
+# for the reason that number was chosen: five positions on one thing is a bet on
+# that thing.
 MAX_POSITIONS_PER_SECTOR = 5        # open positions in one sector, book-wide
-MAX_RISK_PER_SECTOR      = 1_500.0  # summed max loss in one sector (~6% of account)
+MAX_RISK_PER_SECTOR      = _paper_limits.max_risk_per_sector()   # summed max loss in one sector
+LEDGER_MAX_RISK_PER_SECTOR = _paper_limits.ledger_max_risk_per_sector()
 
 # Book-wide DEPLOYMENT cap: total open max loss as a fraction of session-start
 # equity (gap assessment B3). The three caps above are per symbol and per expiry;

@@ -782,7 +782,7 @@ _SESSIONS = ConfigFile(
                   kind="int", unit="min", min=1, max=480, step=1),
             Field("slots.scalp_prob.*", "", "", kind="time"),
         ), restart=(OPTIONS,)),
-        Section("Hourly trade idea (Discord and Telegram)", "", (
+        Section("Trade idea (Discord and Telegram)", "", (
             Field("slots.trade_idea.grace_min", "Fire if late by at most",
                   "Keep under 60 so a late post can't overlap the next hour.",
                   kind="int", unit="min", min=1, max=59, step=1),
@@ -1861,7 +1861,8 @@ _ENVS = ConfigFile(name="environments.toml", title="Environments", icon="dns",
 # ─────────────────────────────────────────────────────────────────────────────
 _PAPER = ConfigFile(
     name="paper.toml", title="Paper books", icon="account_balance_wallet",
-    summary="The largest loss one trade may carry in each of your two paper books.",
+    summary="The largest loss one trade, one symbol and one sector may carry in "
+            "each of your two paper books.",
     restart=(OPTIONS,),
     caution="The Account's cap also decides which spread widths the scanner "
             "offers: a width whose one contract would lose more is never shown.",
@@ -1873,6 +1874,24 @@ _PAPER = ConfigFile(
             Field("risk.ledger_max_risk_per_trade", "Paper Ledger (the Paper button)",
                   "Also the budget the Strategy Finder and Income Window size "
                   "credit spreads against, since their trades land here.",
+                  kind="money", min=1, max=100000, step=50),
+        )),
+        Section("Symbol and sector loss caps",
+                "The most all open trades in one symbol, or in one sector, may "
+                "lose together, in dollars. A symbol cap below the per-trade cap "
+                "refuses every trade bigger than it.", (
+            Field("risk.max_risk_per_symbol", "Paper Account: one symbol",
+                  "Summed max loss of the Account's open trades in one underlying.",
+                  kind="money", min=1, max=100000, step=50),
+            Field("risk.max_risk_per_sector", "Paper Account: one sector",
+                  "Summed max loss in one sector. The index products ($SPX, SPY, "
+                  "QQQ, $NDX, DIA, IWM) count as one sector.",
+                  kind="money", min=1, max=100000, step=50),
+            Field("risk.ledger_max_risk_per_symbol", "Paper Ledger: one symbol",
+                  "Summed max loss of the Ledger's open trades in one underlying.",
+                  kind="money", min=1, max=100000, step=50),
+            Field("risk.ledger_max_risk_per_sector", "Paper Ledger: one sector",
+                  "Summed max loss of the Ledger's open trades in one sector.",
                   kind="money", min=1, max=100000, step=50),
         )),
         Section("Marking positions", "", (
@@ -1891,7 +1910,7 @@ _PAPER = ConfigFile(
                   kind="money", min=0, max=5, step=0.05, restart=()),
         )),
         Section("Trade ideas in the Paper Ledger",
-                "Every hourly trade idea that is posted is also booked into the "
+                "Every trade idea that is posted is also booked into the "
                 "Paper Ledger, so it is measured like any other trade. A weekly "
                 "review reads how they did.", (
             Field("idea_trades.enabled", "Book the posted ideas",
@@ -1929,8 +1948,8 @@ _PAPER = ConfigFile(
                 "After every scan, a new candidate at the chosen grade, inside the "
                 "limits below, is booked into the Paper Ledger tagged Shadow idea "
                 "and followed like a posted idea. Nothing is posted anywhere: this "
-                "measures whether posting on quality would beat the hourly posts. "
-                "It never takes the hourly idea's trade, and the hourly posts "
+                "measures whether posting on quality would beat the scheduled posts. "
+                "It never takes the posted idea's trade, and the posted ideas "
                 "count toward none of the limits.", (
             Field("idea_shadow.mode", "Shadow ideas",
                   "shadow books the picks; off books nothing. Shadow ideas already "
@@ -1949,7 +1968,7 @@ _PAPER = ConfigFile(
                   "Since the last shadow pick.",
                   kind="int", unit="min", min=0, max=59, step=1),
             Field("idea_shadow.max_per_day", "Most shadow picks in a day",
-                  "Shadow picks only; the hourly posts are not counted.",
+                  "Shadow picks only; the posted ideas are not counted.",
                   kind="int", min=1, max=30, step=1),
             Field("idea_shadow.one_per_symbol", "One shadow pick per symbol a day",
                   "Off still never repeats the same trade.", kind="bool"),
@@ -2515,7 +2534,7 @@ NOTIFY_CATEGORY_NAMES = {
     "gamma_briefing": "Dealer Positioning briefings",
     "market_snapshot": "Market snapshot",
     "market_state": "Market state change",
-    "trade_idea": "Hourly trade idea",
+    "trade_idea": "Trade idea",
     "system": "Server alerts",
 }
 

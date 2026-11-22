@@ -1465,7 +1465,7 @@ engine's positions live on **Paper Account**.
   would (the most contracts whose max loss is $1,000 or less), or at the most
   these limits allow when that is fewer.
 - **Trade ideas live here too.** While **Book the posted ideas** is on (Settings
-  -> Configuration), each hourly trade idea is booked into this ledger as it is
+  -> Configuration), each trade idea is booked into this ledger as it is
   posted, tagged **Trade idea** beside the symbol. It books the number of
   contracts **Send Live Order** would open at for the same trade (the most whose
   max loss is $1,000 or less; 1 when one contract risks more), so this book and
@@ -1492,12 +1492,12 @@ engine's positions live on **Paper Account**.
   that is new in that scan, graded **Strong**, and fits the shadow's own limits
   (at most 2 an hour, 20 minutes apart, 10 a day, one per symbol; the hourly
   posts count toward none of them) is booked here tagged **Shadow idea**. It is
-  never the hourly idea's trade: not one already posted today, and not the one
-  the next hourly post would take. Nothing is posted anywhere.
-  They are followed exactly like the hourly ideas (5-minute checks, the same
+  never the posted idea's trade: not one already posted today, and not the one
+  the next scheduled post would take. Nothing is posted anywhere.
+  They are followed exactly like the posted ideas (5-minute checks, the same
   target and stop), show under **All** only, and never reach the site or the
   weekly review. The EOD report shows them as their own book, **Shadow ideas**.
-  They exist to be compared with the hourly posts after a few
+  They exist to be compared with the posted ideas after a few
   weeks. Settings -> Configuration -> *Shadow trade ideas in the Paper Ledger*.
 - **Send Live Order — this one is REAL money.** Every row's detail panel has
   **Send Live Order** (options only: not shares, not /ES or /NQ), and a banner
@@ -1637,8 +1637,8 @@ Trades you sent by hand live on **Paper Ledger**.
   the line says so.
 - **Why a good signal sometimes never opens.** The engine refuses a trade that
   would stack the book, and those refusals leave **no trace on this page** — only
-  in the log. Six limits, tightest first: at most **3 positions and $750** in one
-  underlying, **5 positions and $1,500** in one sector, **5 positions** sharing one
+  in the log. Six limits, tightest first: at most **3 positions and $1,500** in one
+  underlying, **5 positions and $3,000** in one sector, **5 positions** sharing one
   expiration, and **20% of the session's starting equity** at risk across the whole
   book. The sector limit is the one that surprises people: four different
   semiconductors are one bet, not four, and the watchlist is nearly half technology.
@@ -2191,7 +2191,7 @@ posted there.
   `max_tags` caps how many hashtags any post carries. A **daily cap** (`daily_cap`)
   limits how many posts go out per day; past it a post is refused.
 - **Recent posts** logs every post the app makes to X — market reports, the
-  hourly trade ideas and posts from this page — with a link to each one that
+  trade ideas and posts from this page — with a link to each one that
   went out, or the reason it did not (refused, failed, over the daily cap).
 """,
     "/blog": """
@@ -2307,7 +2307,7 @@ The General tab controls the alert chimes, notifications and the ticker.
   phone alert: ticked means it is sent there. Applies to the next alert, no
   restart. **Server alerts** is the row that tells you a part of the app is down,
   a scheduled job failed or the Schwab login is about to expire; leave it on. The
-  hourly trade idea also has **Calendar**, which creates a Google
+  trade idea also has **Calendar**, which creates a Google
   Calendar event when it posts (one-time setup in the User Guide; the Calendar ID
   goes under Configuration → Push notifications).
 - **Ticker** — the scrolling market-summary bar at the bottom of every page.

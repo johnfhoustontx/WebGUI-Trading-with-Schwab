@@ -302,20 +302,27 @@ at = "07:30"
 at = "08:00"
 
 [slots.trade_idea]
-# The hourly trade idea: ONE graded trade off the live Market Scanner, drawn as a
+# The trade idea: ONE graded trade off the live Market Scanner, drawn as a
 # branded image and posted to Discord + Telegram (gate + channel +
-# grades in shared/notifications.json "trade_idea"). At :40, so the post reads a
-# finished scan: the scan starts at :32 ([windows.scan] offset_min) and has taken
-# up to 3.5 minutes. At :35 it raced the scan, and on 2026-11-06 the 08:35 post
-# read the pre-open scan and found nothing to post. A test fails on a slot less
-# than offset_min + 6 minutes past its quarter hour. Delete a line to drop a
-# post, add one to gain one; the names are free-form but must be unique. NO
-# Schwab call and NO Claude call. grace_min < 60 so a late slot cannot overlap
-# the next hour.
+# grades in shared/notifications.json "trade_idea"). Every 30 minutes in the
+# morning (08:40 to 11:40) and every hour in the afternoon (12:40 to 14:40):
+# 10 a day. The morning posts were added on 2026-11-21 (design
+# docs/plans/2026-11-21-morning-trade-idea-slots-design.md); the measured case
+# is there. Each slot sits 10 minutes past a quarter hour, so the post reads a
+# finished scan: the scan starts 2 minutes past it ([windows.scan] offset_min)
+# and has taken up to 3.5 minutes. At :35 it raced the scan, and on 2026-11-06
+# the 08:35 post read the pre-open scan and found nothing to post. A test fails
+# on a slot less than offset_min + 6 minutes past its quarter hour. Delete a line
+# to drop a post, add one to gain one; the names are free-form but must be
+# unique. NO Schwab call and NO Claude call. grace_min must stay under the
+# shortest gap between slots (30 minutes) so a late slot cannot overlap the next.
 grace_min = 10
 h0840 = "08:40"
+h0910 = "09:10"
 h0940 = "09:40"
+h1010 = "10:10"
 h1040 = "10:40"
+h1110 = "11:10"
 h1140 = "11:40"
 h1240 = "12:40"
 h1340 = "13:40"

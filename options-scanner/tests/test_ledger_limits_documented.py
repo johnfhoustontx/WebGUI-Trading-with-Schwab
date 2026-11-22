@@ -71,13 +71,15 @@ def _dollars(value):
 
 def _expectations():
     """``(row label, value text)`` pairs: the label picks the row, the value must
-    be on it. A count is a bare whole number; money and percent are as printed."""
+    be on it. A count is a bare whole number; money and percent are as printed.
+    The three dollar caps are the LEDGER's own since 2026-11-21 (the Account's
+    were raised and the Ledger's were not); the counts and the 20% are shared."""
     return [
         ("per trade", _dollars(config_paper.LEDGER_MAX_RISK_PER_TRADE)),
         ("per symbol", str(config_paper.MAX_POSITIONS_PER_SYMBOL)),
-        ("per symbol", _dollars(config_paper.MAX_RISK_PER_SYMBOL)),
+        ("per symbol", _dollars(config_paper.LEDGER_MAX_RISK_PER_SYMBOL)),
         ("per sector", str(config_paper.MAX_POSITIONS_PER_SECTOR)),
-        ("per sector", _dollars(config_paper.MAX_RISK_PER_SECTOR)),
+        ("per sector", _dollars(config_paper.LEDGER_MAX_RISK_PER_SECTOR)),
         ("expiration", str(config_paper.MAX_POSITIONS_PER_EXPIRY)),
         ("of equity", f"{config_paper.MAX_DEPLOYED_RISK_PCT:.0%}"),
         ("of equity", _dollars(config_paper.STARTING_BALANCE)),

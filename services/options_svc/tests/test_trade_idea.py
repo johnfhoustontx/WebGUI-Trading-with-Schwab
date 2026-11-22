@@ -545,9 +545,18 @@ def test_run_never_raises_on_a_dead_bus(pushes):
 def test_the_scheduler_reads_the_configured_slots():
     assert scheduler._TRADE_IDEA_SLOTS == {
         k: (t.hour, t.minute) for k, t in mc.slot_times("trade_idea").items()}
-    assert len(scheduler._TRADE_IDEA_SLOTS) == 7
-    assert min(scheduler._TRADE_IDEA_SLOTS.values()) == (8, 40)
-    assert max(scheduler._TRADE_IDEA_SLOTS.values()) == (14, 40)
+    # Every 30 minutes in the morning, hourly in the afternoon (2026-11-21).
+    slots = sorted(scheduler._TRADE_IDEA_SLOTS.values())
+    assert slots == [(8, 40), (9, 10), (9, 40), (10, 10), (10, 40), (11, 10),
+                     (11, 40), (12, 40), (13, 40), (14, 40)]
+
+
+def test_a_late_slot_cannot_run_into_the_next():
+    """``trade_idea_due`` fires a slot up to ``grace_min`` late. A grace as long
+    as the gap to the next slot would let one late start stand in for two."""
+    mins = sorted(h * 60 + m for h, m in scheduler._TRADE_IDEA_SLOTS.values())
+    shortest_gap = min(b - a for a, b in zip(mins, mins[1:]))
+    assert scheduler._TRADE_IDEA_GRACE_MIN < shortest_gap
 
 
 # The quarter-hour scan starts [windows.scan] offset_min late and its last log

@@ -46,12 +46,19 @@ def test_equity_is_starting_balance_plus_closed_realized_pnl(ledger):
     assert state["equity"] == pytest.approx(25050.0)
 
 
-def test_limits_are_the_accounts_plus_the_per_trade_cap(ledger):
+def test_limits_are_the_accounts_counts_with_the_ledgers_own_risk_caps(ledger):
+    """Since 2026-11-21 the Ledger has its own per-trade, per-symbol and per-sector
+    risk caps; the position counts and the deployment cap are still the Account's."""
     import config_paper
     import paper_concentration
     limits = compute.ledger_book_state()["limits"]
     assert limits == {**paper_concentration.default_limits(),
-                      "max_risk_per_trade": config_paper.LEDGER_MAX_RISK_PER_TRADE}
+                      "max_risk_per_trade": config_paper.LEDGER_MAX_RISK_PER_TRADE,
+                      "max_risk_per_symbol": config_paper.LEDGER_MAX_RISK_PER_SYMBOL,
+                      "max_risk_per_sector": config_paper.LEDGER_MAX_RISK_PER_SECTOR}
+    # The Account's were raised and the Ledger's were not: they must not leak in.
+    assert (limits["max_risk_per_trade"], limits["max_risk_per_symbol"],
+            limits["max_risk_per_sector"]) == (750.0, 750.0, 1500.0)
 
 
 def test_a_non_finite_realized_pnl_is_dropped_not_summed(ledger, monkeypatch):
@@ -61,12 +68,13 @@ def test_a_non_finite_realized_pnl_is_dropped_not_summed(ledger, monkeypatch):
     assert state["realized_pnl"] == pytest.approx(20.0)
 
 
-def test_both_books_ship_a_750_per_trade_limit():
-    # The Account's was $250 until 2026-09-22 (operator decision); they stay two
-    # constants because they are two books. Values come from config/paper.toml.
+def test_each_book_ships_its_own_per_trade_limit():
+    # The Account's was $250 until 2026-09-22 and $750 until 2026-11-21, when the
+    # operator raised it to $1,500 and left the Ledger at $750 (operator
+    # decisions); two constants because two books. Values from config/paper.toml.
     import config_paper
     assert config_paper.LEDGER_MAX_RISK_PER_TRADE == 750.0
-    assert config_paper.MAX_RISK_PER_TRADE == 750.0
+    assert config_paper.MAX_RISK_PER_TRADE == 1500.0
 
 
 def test_limits_follow_the_ledger_constant_at_call_time(ledger, monkeypatch):

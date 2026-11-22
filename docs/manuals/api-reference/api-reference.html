@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>API / Developer Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-19</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-21</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -1590,7 +1590,7 @@ z
 </tr>
 <tr>
 <td><code>paper_create</code></td>
-<td><code>{signal, qty}</code> — opens into the Paper <strong>Ledger</strong> only if every risk cap in <code>shared.book_caps</code> clears against the Ledger's own open trades ($750 per trade, plus the Account's symbol / sector / expiry / deployment caps); a refusal writes nothing</td>
+<td><code>{signal, qty}</code> — opens into the Paper <strong>Ledger</strong> only if every risk cap in <code>shared.book_caps</code> clears against the Ledger's own open trades (its own $750 per trade, $750 per symbol and $1,500 per sector, plus the Account's position-count and deployment caps); a refusal writes nothing</td>
 <td><code>cache:options:paper_trades</code> + <code>cache:options:paper_create</code> — the outcome, written on <strong>every</strong> answer with a 600 s TTL: <code>{status, symbol, type, expiration, qty, rungs[], seq, ts}</code> plus, by <code>status</code>: <code>opened</code> → <code>trade_id</code>; <code>refused</code> → <code>code</code> (the binding rung), <code>message</code> (a plain sentence), <code>max_quantity</code> (the largest quantity that clears every cap now; <code>0</code> when none does); <code>error</code> / <code>stale</code> → <code>message</code>. <code>status</code> is one of <code>opened</code> · <code>refused</code> · <code>stale</code> · <code>error</code>. <code>seq</code> rises on each publish, so two identical refusals are two answers; the <code>:ver</code> counter can reset to 1 when the TTL expires, so compare versions with <code>!=</code>. Each rung is <code>{code, kind, scope, used, after, cap, binds, skipped}</code> — <code>kind</code> <code>count</code> or <code>risk</code>, a skipped rung has <code>used</code>/<code>after</code>/<code>cap</code> <code>null</code> and <code>binds: false</code>; <code>rungs</code> is <code>[]</code> on <code>stale</code> and on errors raised before the caps ran. <code>qty</code> is <code>null</code> on <code>stale</code>, the as-sent value on a bad quantity, and absent when the command raised. A command that <strong>raises</strong> publishes an <code>error</code> (<code>message</code> <em>The paper ledger could not process the request.</em>) and is then dead-lettered</td>
 </tr>
 <tr>
@@ -1887,7 +1887,7 @@ own publish raises, and once at service start. A failure is a degrade
 (<code>options.ledger_caps</code>), never a raise. No TTL. <strong>Trade-idea rows are not in it</strong>: they
 are left out of <code>open</code> and out of <code>realized_pnl</code> (so out of <code>equity</code>), because they
 are not held to the caps.</p>
-<p><strong>Trade-idea rows on <code>cache:options:paper_trades</code>.</strong> The hourly trade idea
+<p><strong>Trade-idea rows on <code>cache:options:paper_trades</code>.</strong> The trade idea
 (<code>handlers.run_trade_idea</code>) books each posted idea as an ordinary row of <code>trades.db</code>
 with <code>source = "trade_idea"</code> (the only marker; <code>notes</code> reads "Trade idea") through
 <code>idea_ledger.book</code>, which evaluates no cap. Beyond the Ledger's usual fields it carries
@@ -3721,7 +3721,7 @@ never use a URL as a link without checking it is http(s).</p>
 <tr>
 <td><code>/pricehistory</code></td>
 <td><code>symbol, periodType, period, frequencyType, frequency, needExtendedHoursData, maxAge</code></td>
-<td>Price bars. <code>maxAge</code> (seconds) is the oldest stored daily series the caller accepts; <code>0</code> forces a fetch. It can only tighten the store's own rules</td>
+<td>Price bars. <code>maxAge</code> (seconds) is the oldest stored daily series the caller accepts; <code>0</code> forces a fetch. It can only tighten the store's own rules. ⚠ Schwab ends a series sent with no <code>endDate</code> at the PREVIOUS business day's close, so the proxy adds <code>endDate</code> = now to a minute series once today's regular session has opened; before the open, on a closed day and for a daily series it sends none (the last session)</td>
 </tr>
 <tr>
 <td><code>/instruments</code></td>
@@ -4124,7 +4124,7 @@ cache:options:gamma_briefings  events:options:gamma_briefings
 cache:options:gamma_analyze_premarket | _midday | _close    (per-slot auto briefings)
 cache:options:gamma_regime_state
 cache:options:market_snapshot  events:options:market_snapshot
-cache:options:trade_idea                                    (hourly post: last result + today's posted set)
+cache:options:trade_idea                                    (scheduled post: last result + today's posted set)
 cache:feed:shadow                                           (config/feed.toml mode &quot;tee&quot; only: the shadow check's counts and timings)
 cache:options:x_log                                         (every X post attempt, newest first, last 100)
 cache:options:x_count                                       (X posts made today, CT day - the daily cap)

@@ -83,8 +83,9 @@ The app reads market data and your positions from Schwab, so you need:
   quiet — nothing else is affected, and the auto-trader safely stands down.
 - **Push notifications** (Telegram / Discord / text message) — configured in
   `shared/notifications.json` if you want alerts on your phone. Skip it and the app
-  is silent on those channels. Once they are set, the app also posts one **trade idea**
-  an hour during the regular session (08:40–14:40 CT): the best Strong or Good trade
+  is silent on those channels. Once they are set, the app also posts a **trade idea**
+  ten times a session — every 30 minutes from 08:40 to 11:40 CT, then hourly at
+  12:40, 13:40 and 14:40: the best Strong or Good trade
   on the Market Scanner, drawn as an image with its legs, grade, risk, profit,
   probability of profit and payoff chart. It picks from every Scanner table: the
   credit spreads, the Directional tab's single options, and the **Other structures**
@@ -2761,7 +2762,8 @@ A second or so after you press **Create** in the quantity box, a message answers
 ⚠ Equity counts your closed trades' realized P&L, so **Delete all closed** also
 changes the 20% limit. A $750 trade by itself uses the whole $750 allowance for its
 symbol. The limits apply to this ledger only — the Paper Account's automatic
-engine has its own, also with a $750 per-trade limit.
+engine has its own, higher ones: $1,500 per trade, $1,500 per symbol and
+$3,000 per sector.
 
 **Automatic exits (long options, debit spreads, butterflies and condors only).** Checked **hourly,
 09:00–14:00 CT** on the same run as the paper account — so a target reached at
@@ -2877,30 +2879,30 @@ under *Daily SPY condor* in the schedule.
   weekly idea review never rates it, and the EOD Report and the Symbol dossier do
   not count it as yours.
 
-**Shadow ideas.** A test of posting trade ideas on quality instead of on the hourly
+**Shadow ideas.** A test of posting trade ideas on quality instead of on the clock
 clock. After every scan (four an hour), the app looks for a trade that was not a
 candidate in the previous scan and is graded **Strong**. If one fits the limits, it
 is booked into this ledger tagged **Shadow idea**. **Nothing is posted**: not to
 Discord, Telegram, X, the site or the calendar. Set under Settings → Configuration →
 *Shadow trade ideas in the Paper Ledger* (it ships on, in shadow).
 
-- **A separate feed.** The limits count the shadow ideas only, never the hourly
-  posts: at most **2 in any 60 minutes**, at least **20 minutes** after the last
+- **A separate feed.** The limits count the shadow ideas only, never the posted
+  ideas: at most **2 in any 60 minutes**, at least **20 minutes** after the last
   shadow idea, at most **10 a day**, and one per symbol a day. A trade that sells
   premium also needs a Vol Rank of at least **50**. Only one is booked per scan, and
   only in the regular session.
-- **Never the hourly idea's trade.** A trade the hourly idea posted today is
-  skipped, and so is the one the next hourly post would take from the same scan.
+- **Never the posted idea's trade.** A trade idea posted today is
+  skipped, and so is the one the next scheduled post would take from the same scan.
   The same symbol with a different trade can still be a shadow idea.
 - **Not on the first scan of the day.** That scan only records what is there, so a
   restart or the morning's first scan never books a burst.
 - **Followed like an idea.** The same 5-minute checks, target and stop as the
-  hourly ideas. It shows under **All** only; the weekly idea review, the site and
+  posted ideas. It shows under **All** only; the weekly idea review, the site and
   the live-order banner never see it, and the Symbol dossier does not count it as
   yours. The EOD Report shows it as its own book, *Shadow ideas*, apart from both
   your trades and the posted ideas.
 - **The point** is the comparison: after a few weeks `tools/idea_shadow_compare.py`
-  sets the shadow ideas' results beside the hourly posts'. Posting on quality goes
+  sets the shadow ideas' results beside the posted ideas'. Posting on quality goes
   live only if the shadow ideas did better.
 
 ## Paper Account
@@ -3993,7 +3995,7 @@ of your own, and where you see every post the app has made on X.
 - **Post** asks you to confirm, then hands the post to the options service, which
   sends it. The result appears in the log a moment later.
 - **Recent posts** lists every post the app makes to X (the market reports, the
-  hourly trade ideas and posts from this page), with a link to each one that went
+  trade ideas and posts from this page), with a link to each one that went
   out, or the reason it did not (refused, failed, over the daily cap).
 
 > **X is off, and dry, until you set it up.** Nothing reaches X until the `x`
@@ -4266,10 +4268,10 @@ Preferences, all saved on your machine:
 - **Push notifications** — one row per kind of phone alert (new scanner signals,
   unusual options activity, premium crossover, gamma flip, hedging flow, the position action
   digest, the end-of-day summary, the Dealer Positioning briefings, the market
-  snapshot, the market state change, the hourly trade idea and **Server
+  snapshot, the market state change, the trade idea and **Server
   alerts**), with a **Discord** and a **Telegram** checkbox on each. **Ticked means that alert is
   sent there**; untick it to stop it. A change applies to the very next alert —
-  no restart. The hourly trade idea also has a **Calendar** checkbox (off until
+  no restart. The trade idea also has a **Calendar** checkbox (off until
   you tick it): see below. A ticked box still needs that channel set up in
   `shared/notifications.json` — it cannot send where there is no webhook or chat.
 - **Flow alerts** — whether put/call premium crossovers and unusual activity alert
@@ -4314,7 +4316,7 @@ Preferences, all saved on your machine:
 
 ### Google Calendar popup for the trade idea
 
-With **Calendar** ticked on the *Hourly trade idea* row, every trade idea the app
+With **Calendar** ticked on the *Trade idea* row, every trade idea the app
 posts also creates a short event (five minutes, starting five minutes after the post)
 titled with the trade, for example *Trade idea: SPY put credit spread*, with the
 full caption in its description. Your phone or computer pops it up like any other

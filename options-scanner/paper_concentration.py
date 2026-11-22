@@ -62,6 +62,18 @@ def default_limits():
     }
 
 
+def ledger_limits():
+    """The Paper LEDGER's policy: the Account's count and deployment caps, with
+    the Ledger's OWN per-trade, per-symbol and per-sector risk caps
+    (``config/paper.toml [risk] ledger_*``). Read at call time, like
+    ``default_limits``. The two books' risk caps have been apart since
+    2026-11-21, when the Account's were raised and the Ledger's were not."""
+    return dict(default_limits(),
+                max_risk_per_trade=config_paper.LEDGER_MAX_RISK_PER_TRADE,
+                max_risk_per_symbol=config_paper.LEDGER_MAX_RISK_PER_SYMBOL,
+                max_risk_per_sector=config_paper.LEDGER_MAX_RISK_PER_SECTOR)
+
+
 def _key(value):
     """Normalise a symbol for comparison. Signals arrive uppercase from the
     scanner, but a stored row that ever drifted in case would otherwise slip

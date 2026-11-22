@@ -3494,9 +3494,10 @@ limit at all — the quantity you typed was the quantity booked.
 | Per expiration | **5** open positions expiring the same day, across every symbol |
 | Whole ledger | open max loss at most **20%** of equity — $25,000 plus the realized P&L of closed trades |
 
-The last four rows are the [Paper Account](#paper-account)'s own six concentration limits.
-The per-trade limit is set separately for each book, and both are **$750** (Settings →
-Configuration → Paper books). The ledger's figure is also the budget the Strategy
+The position counts and the 20% limit are the [Paper Account](#paper-account)'s own.
+The three dollar limits — per trade, per symbol and per sector — are set separately
+for each book (Settings → Configuration → Paper books): the ledger's are **$750**,
+**$750** and **$1,500**, the Paper Account's **$1,500**, **$1,500** and **$3,000**. The ledger's figure is also the budget the Strategy
 Finder and Income Window size credit spreads against; the Paper Account's decides how
 wide the Market Scanner builds its spreads.
 
@@ -3535,7 +3536,7 @@ later, on the page you sent it from:
 ### Trade ideas in the ledger
 
 **Since 2026-10-20 the ledger also holds a third kind of row: the app's own trade
-ideas.** The hourly idea that goes to Discord, Telegram and the public site is booked
+ideas.** The trade idea that goes to Discord, Telegram and the public site is booked
 here when it is posted (while **Book the posted ideas** is on, under Settings →
 Configuration → *Trade ideas in the Paper Ledger*), so the ideas are scored by the same
 books as every trade you place. The row carries a **Trade idea** tag beside the symbol,
@@ -3684,11 +3685,11 @@ stops the day.
 
 | Limit | Default | Refuses |
 |---|---|---|
-| Risk per trade | $750 | A spread whose single contract already exceeds the cap |
+| Risk per trade | $1,500 | A spread whose single contract already exceeds the cap |
 | **Positions in one symbol** | **3** | A fourth open position in the same underlying |
-| **Risk in one symbol** | **$750** | An entry that would push one name's summed max loss past the cap |
+| **Risk in one symbol** | **$1,500** | An entry that would push one name's summed max loss past the cap |
 | **Positions in one sector** | **5** | A sixth open position in the same sector; the index products ($SPX, SPY, QQQ, $NDX, DIA, IWM) count as one group |
-| **Risk in one sector** | **$1,500** | An entry that would push one sector's summed max loss past the cap |
+| **Risk in one sector** | **$3,000** | An entry that would push one sector's summed max loss past the cap |
 | **Positions in one expiry** | **5** | A sixth open position sharing an expiration date, *across all names* |
 | **Open risk across the book** | **20%** of the session's starting equity | An entry that would push the whole book's open max loss past that share |
 | Session drawdown | $2,500 | Halts the account for the day |

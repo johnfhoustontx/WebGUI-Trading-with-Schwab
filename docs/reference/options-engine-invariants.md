@@ -165,14 +165,20 @@ refusal. Three decisions in it are load-bearing:
   whose entry cycle sized the trade first), so **any non-Account caller must refuse
   a non-positive or non-finite risk BEFORE calling `evaluate`** — or a trade with
   no readable max loss passes every risk rung.
-- **Per-trade limits are two keys, one per book, both $750 since 2026-09-22**
+- **Per-trade limits are two keys, one per book** ($750 each from 2026-09-22; the
+  Account's $1,500 since 2026-11-21)
   (`config/paper.toml` via `shared/paper_limits.py`, surfaced as module constants
   by `config_paper`). `MAX_RISK_PER_TRADE` is the Account's and also sizes the
   Market Scanner's widths (`DEFAULT_MAX_RISK_DOLLARS`); `LEDGER_MAX_RISK_PER_TRADE`
   is the Ledger's and sizes the Strategy Finder's and Income Window's credit
   spreads, because `swing_scan` passes it to `screen_spreads` at call time — their
-  trades book into the Ledger. At $750 one maximum-size trade fills its symbol's
-  $750 risk cap in either book. The six concentration caps are the Account's. Ledger equity for the deployment cap is
+  trades book into the Ledger. The symbol and sector RISK caps are also one pair
+  per book since 2026-11-21 (`paper_concentration.ledger_limits` gives the Ledger
+  its own; before, both books shared the Account's). In each book one
+  maximum-size trade fills its symbol's risk cap ($750 Ledger, $1,500 Account),
+  and a symbol cap below its book's per-trade cap would refuse every trade
+  between the two (`test_paper_limits` pins the order). The position-count and
+  deployment caps are still the Account's, shared. Ledger equity for the deployment cap is
   `STARTING_BALANCE` + realized P&L of its closed trades — it moves on a close,
   never on a mark.
 
@@ -242,7 +248,7 @@ Accepted limits:
 **Delete all closed** on the Paper Ledger removes realized history, so equity —
 and the deployment cap — moves with it; an old open row with no usable max loss
 counts **$0** toward the risk sums (it still counts toward the position caps); and
-because the $750 per-trade limit equals the $750 per-symbol risk cap, one
+because each book's per-trade limit equals its per-symbol risk cap, one
 maximum-size trade fills its symbol. Design:
 [the doc](../plans/2026-09-15-trade-checklist-and-ledger-caps-design.md).
 

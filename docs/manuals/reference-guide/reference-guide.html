@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Reference Guide</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-17</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-21</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#the-app-in-one-page">The app in one page</a><ul>
@@ -4967,9 +4967,10 @@ limit at all — the quantity you typed was the quantity booked.</p>
 </tr>
 </tbody>
 </table>
-<p>The last four rows are the <a href="#paper-account">Paper Account</a>'s own six concentration limits.
-The per-trade limit is set separately for each book, and both are <strong>$750</strong> (Settings →
-Configuration → Paper books). The ledger's figure is also the budget the Strategy
+<p>The position counts and the 20% limit are the <a href="#paper-account">Paper Account</a>'s own.
+The three dollar limits — per trade, per symbol and per sector — are set separately
+for each book (Settings → Configuration → Paper books): the ledger's are <strong>$750</strong>,
+<strong>$750</strong> and <strong>$1,500</strong>, the Paper Account's <strong>$1,500</strong>, <strong>$1,500</strong> and <strong>$3,000</strong>. The ledger's figure is also the budget the Strategy
 Finder and Income Window size credit spreads against; the Paper Account's decides how
 wide the Market Scanner builds its spreads.</p>
 <p><strong>The Paper trade box previews the same check before you send.</strong> Under the trade's
@@ -5005,7 +5006,7 @@ later, on the page you sent it from:</p>
 </ul>
 <h3 id="trade-ideas-in-the-ledger">Trade ideas in the ledger</h3>
 <p><strong>Since 2026-10-20 the ledger also holds a third kind of row: the app's own trade
-ideas.</strong> The hourly idea that goes to Discord, Telegram and the public site is booked
+ideas.</strong> The trade idea that goes to Discord, Telegram and the public site is booked
 here when it is posted (while <strong>Book the posted ideas</strong> is on, under Settings →
 Configuration → <em>Trade ideas in the Paper Ledger</em>), so the ideas are scored by the same
 books as every trade you place. The row carries a <strong>Trade idea</strong> tag beside the symbol,
@@ -5217,7 +5218,7 @@ stops the day.</p>
 <tbody>
 <tr>
 <td>Risk per trade</td>
-<td>$750</td>
+<td>$1,500</td>
 <td>A spread whose single contract already exceeds the cap</td>
 </tr>
 <tr>
@@ -5227,7 +5228,7 @@ stops the day.</p>
 </tr>
 <tr>
 <td><strong>Risk in one symbol</strong></td>
-<td><strong>$750</strong></td>
+<td><strong>$1,500</strong></td>
 <td>An entry that would push one name's summed max loss past the cap</td>
 </tr>
 <tr>
@@ -5237,7 +5238,7 @@ stops the day.</p>
 </tr>
 <tr>
 <td><strong>Risk in one sector</strong></td>
-<td><strong>$1,500</strong></td>
+<td><strong>$3,000</strong></td>
 <td>An entry that would push one sector's summed max loss past the cap</td>
 </tr>
 <tr>

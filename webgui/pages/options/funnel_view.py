@@ -515,7 +515,7 @@ def _cap_phrase(entry):
     """``"$250 "`` when the funnel names the per-trade cap, else ``""``.
 
     ⚠ The figure is NOT hardcoded. The two paper books disagree about it - the
-    Ledger's per-trade limit is $750 and the Account's $250, and the scanner's
+    Ledger's per-trade limit is $750 and the Account's $1,500, and the scanner's
     own ``DEFAULT_MAX_RISK_DOLLARS`` follows the Account's constant - so a
     number written here would be wrong for at least one reader. The funnel does
     not carry it today; the sentence simply says "the per-trade risk cap", and

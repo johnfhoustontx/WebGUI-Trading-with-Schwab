@@ -1,6 +1,6 @@
-"""The paper books' per-trade loss caps, from ``config/paper.toml``.
+"""The paper books' loss caps, from ``config/paper.toml``.
 
-Two books, two caps, one file:
+Two books, one file. Per trade:
 
 * ``max_risk_per_trade`` - the automatic Paper Account's cap on one trade. It
   also sizes the scanner's width search (``scanner_engine.DEFAULT_MAX_RISK_DOLLARS``),
@@ -9,9 +9,16 @@ Two books, two caps, one file:
   Paper button opens into. The Strategy Finder and the Income Window size their
   credit spreads against THIS one, because that is where their trades land.
 
-Both shipped at $750 (operator decision, 2026-09-22; the Account's was $250).
-They stay two keys because they are two books, and the operator may want them
-apart again.
+And the summed max loss in one underlying and in one sector
+(``shared/book_caps.py`` evaluates them), again one pair per book:
+``max_risk_per_symbol`` / ``max_risk_per_sector`` for the Account and
+``ledger_max_risk_per_symbol`` / ``ledger_max_risk_per_sector`` for the Ledger.
+Until 2026-11-21 both books shared one pair, hard-coded in ``config_paper.py``.
+
+Both per-trade caps shipped at $750 (operator decision, 2026-09-22; the Account's
+was $250). On 2026-11-21 the operator raised the Account's to $1,500, with its
+symbol cap to $1,500 (one full trade per name, as before) and its sector cap to
+$3,000 (two names per sector, as before); the Ledger kept $750 / $750 / $1,500.
 
 Read by ``options-scanner/config_paper.py``, which keeps the module-level
 constants every consumer already imports. Missing file, bad TOML or a missing or
@@ -24,8 +31,12 @@ from shared.config_toml import toml_loader
 
 DEFAULTS = {
     "risk": {
-        "max_risk_per_trade": 750.0,
+        "max_risk_per_trade": 1500.0,
         "ledger_max_risk_per_trade": 750.0,
+        "max_risk_per_symbol": 1500.0,
+        "max_risk_per_sector": 3000.0,
+        "ledger_max_risk_per_symbol": 750.0,
+        "ledger_max_risk_per_sector": 1500.0,
     },
     # A leg quoted with NO BID is still a market when its offer is at or under
     # this many dollars a share: the option is nearly worthless, which is what
@@ -236,6 +247,26 @@ def max_risk_per_trade() -> float:
 def ledger_max_risk_per_trade() -> float:
     """The Paper Ledger's per-trade cap."""
     return _dollars("ledger_max_risk_per_trade")
+
+
+def max_risk_per_symbol() -> float:
+    """The automatic Account's summed max loss in one underlying."""
+    return _dollars("max_risk_per_symbol")
+
+
+def max_risk_per_sector() -> float:
+    """The automatic Account's summed max loss in one sector."""
+    return _dollars("max_risk_per_sector")
+
+
+def ledger_max_risk_per_symbol() -> float:
+    """The Paper Ledger's summed max loss in one underlying."""
+    return _dollars("ledger_max_risk_per_symbol")
+
+
+def ledger_max_risk_per_sector() -> float:
+    """The Paper Ledger's summed max loss in one sector."""
+    return _dollars("ledger_max_risk_per_sector")
 
 
 def daily_condor() -> dict:

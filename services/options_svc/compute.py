@@ -2622,10 +2622,10 @@ def ledger_book_state(trades=None) -> dict:
     ``shared.sectors.group_key`` (an unmapped name is its own ``?SYMBOL``
     bucket). ``equity``: ``STARTING_BALANCE`` plus the realized P&L of every
     closed or expired Ledger trade - it moves when a trade closes, never on a
-    mark (operator decision). ``limits``: the Account's six caps plus the
-    Ledger's own ``LEDGER_MAX_RISK_PER_TRADE`` ($750; the Account's per-trade
-    limit stays $250), read at call time so a config edit plus a restart moves
-    them.
+    mark (operator decision). ``limits``: ``paper_concentration.ledger_limits``,
+    the Account's count and deployment caps with the Ledger's own per-trade,
+    per-symbol and per-sector risk caps, read at call time so a config edit
+    plus a restart moves them.
     """
     import config_paper
     import paper_concentration
@@ -2651,8 +2651,7 @@ def ledger_book_state(trades=None) -> dict:
         if math.isfinite(pnl):
             realized += pnl
     start = float(config_paper.STARTING_BALANCE)
-    limits = dict(paper_concentration.default_limits(),
-                  max_risk_per_trade=config_paper.LEDGER_MAX_RISK_PER_TRADE)
+    limits = paper_concentration.ledger_limits()
     return {"open": open_rows, "starting_balance": start,
             "realized_pnl": round(realized, 2),
             "equity": round(start + realized, 2), "limits": limits}

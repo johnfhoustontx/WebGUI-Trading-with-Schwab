@@ -484,7 +484,7 @@ def test_grid_rows_follow_the_file_and_offer_calendar_only_on_the_trade_idea():
     by_cat = {cat: sw for cat, _label, sw in rows}
     assert by_cat["signals"] == {"discord": True, "telegram": True}
     assert by_cat["trade_idea"] == {"discord": True, "telegram": True, "calendar": False}
-    assert dict((c, lbl) for c, lbl, _ in rows)["trade_idea"] == "Hourly trade idea"
+    assert dict((c, lbl) for c, lbl, _ in rows)["trade_idea"] == "Trade idea"
 
 
 def test_grid_rows_show_the_override_and_read_garbage_as_the_default():

@@ -18,7 +18,7 @@ def _rows(name, title):
 
 
 def test_slot_wildcards_expand_to_each_named_slot_with_a_readable_label():
-    rows = _rows("sessions.toml", "Hourly trade idea (Discord and Telegram)")
+    rows = _rows("sessions.toml", "Trade idea (Discord and Telegram)")
     labels = [label for _p, _f, label in rows]
     assert labels[0] == "Fire if late by at most"         # exact entry kept once
     assert "08:40" in labels and labels.count("Fire if late by at most") == 1
