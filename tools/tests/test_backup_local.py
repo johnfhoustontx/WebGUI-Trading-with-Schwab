@@ -610,3 +610,58 @@ def test_venv_freeze_written_and_its_failure_counts(tmp_path):
     bad = bl.backup_neighbour(_spec(), home, tmp_path / "gen2",
                               run=lambda c, **k: _Done(1, "", "boom"))
     assert len(bad) == 1 and "cos-hub" in bad[0]
+
+
+def _venv(home, cfg):
+    py = home / "cos-hub" / ".venv" / "bin" / "python"
+    py.parent.mkdir(parents=True)
+    py.write_text("")
+    if cfg is not None:
+        (home / "cos-hub" / ".venv" / "pyvenv.cfg").write_text(cfg)
+
+
+@pytest.mark.parametrize("cfg,want", [
+    ("home = /x/bin\nimplementation = CPython\nversion_info = 3.12.3\n", "3.12"),
+    ("home = /usr/bin\nversion = 3.11.9\n", "3.11"),
+])
+def test_neighbour_venv_python_version_is_recorded(tmp_path, cfg, want):
+    home, out = tmp_path / "home", tmp_path / "gen"
+    _venv(home, cfg)
+    assert bl.backup_neighbour(_spec(), home, out, run=lambda c, **k: _Done(0, "a==1\n")) == []
+    f = out / bl.NEIGHBOURS_DIR / "cos-hub" / "python-version"
+    assert f.read_text() == want + "\n"
+
+
+@pytest.mark.parametrize("cfg", [None, "home = /x\n", "version_info = banana\n"])
+def test_unreadable_python_version_is_said_not_failed(tmp_path, capsys, cfg):
+    home, out = tmp_path / "home", tmp_path / "gen"
+    _venv(home, cfg)
+    assert bl.backup_neighbour(_spec(), home, out, run=lambda c, **k: _Done(0, "a==1\n")) == []
+    assert not (out / bl.NEIGHBOURS_DIR / "cos-hub" / "python-version").exists()
+    assert "cos-hub: venv python version not recorded" in capsys.readouterr().out
+
+
+def test_unmatched_unit_glob_is_said_not_failed(tmp_path, capsys):
+    home, out = tmp_path / "home", tmp_path / "gen"
+    (home / "cos-hub").mkdir(parents=True)
+    (home / ".config" / "systemd" / "user").mkdir(parents=True)
+    spec = _spec(units=["cos-hub.service", "nothing-*.timer"])
+    assert bl.backup_neighbour(spec, home, out, run=lambda c, **k: _Done()) == []
+    text = capsys.readouterr().out
+    assert "cos-hub: unit cos-hub.service matched nothing" in text
+    assert "cos-hub: unit nothing-*.timer matched nothing" in text
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX modes")
+def test_copied_neighbour_files_keep_only_the_owner_exec_bit(tmp_path):
+    home, out = tmp_path / "home", tmp_path / "gen"
+    d = home / "cos-hub"
+    d.mkdir(parents=True)
+    (d / "run.sh").write_text("#!/bin/sh\n")
+    os.chmod(d / "run.sh", 0o755)
+    (d / "app.py").write_text("x")
+    os.chmod(d / "app.py", 0o664)
+    assert bl.backup_neighbour(_spec(), home, out, run=lambda c, **k: _Done()) == []
+    base = out / bl.NEIGHBOURS_DIR / "cos-hub" / "dir"
+    assert (base / "run.sh").stat().st_mode & 0o777 == 0o700
+    assert (base / "app.py").stat().st_mode & 0o777 == 0o600

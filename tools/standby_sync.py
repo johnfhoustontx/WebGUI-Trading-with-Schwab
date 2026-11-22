@@ -270,7 +270,9 @@ def _copy_tree(src: pathlib.Path, dst: pathlib.Path, skip_top=()) -> None:
         out = dst / rel
         out.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(f, out)
-        os.chmod(out, 0o600)
+        # Owner read/write, plus the owner's exec bit when the copy carried it
+        # (a neighbour's scripts must still run); never group or other.
+        os.chmod(out, (f.stat().st_mode & 0o700) | 0o600)
 
 
 def _check_spec(spec: dict, home: pathlib.Path, repo: pathlib.Path | None) -> None:
@@ -328,6 +330,24 @@ def _split_freeze(name: str, text: str, home: pathlib.Path, spec: dict):
     return pins, selves == 1
 
 
+PY_VERSION_RE = re.compile(r"3\.\d{1,2}")
+PY_VERSION = "python-version"
+
+
+def _python_version(src: pathlib.Path, name: str) -> str | None:
+    """The neighbour venv's recorded ``3.N``, None when the generation has none
+    (an older backup: uv picks, as before), or ``SyncError`` for anything else.
+    It is passed to ``uv venv --python``, so only that exact shape is accepted."""
+    f = src / PY_VERSION
+    if not f.is_file():
+        return None
+    text = f.read_text(encoding="utf-8").strip()
+    if not PY_VERSION_RE.fullmatch(text):
+        raise SyncError(f"neighbour {name}: {PY_VERSION} is not a 3.N version: "
+                        f"{text[:40]!r}")
+    return text
+
+
 def editable_self(freeze_text: str, home: pathlib.Path, spec: dict) -> bool:
     """True when the freeze carries the accepted line installing the neighbour's own
     project editable (``-e file://<home>/<dir>``). The nightly sync never installs
@@ -353,6 +373,7 @@ def restore_neighbours(gen: pathlib.Path, home: pathlib.Path, specs: list[dict],
         if not src.is_dir():
             continue
         _check_spec(spec, home, repo)
+        _python_version(src, spec["name"])
         if (src / "venv-freeze.txt").is_file():
             _split_freeze(spec["name"], (src / "venv-freeze.txt").read_text(
                 encoding="utf-8"), home, spec)
@@ -390,8 +411,13 @@ def restore_neighbours(gen: pathlib.Path, home: pathlib.Path, specs: list[dict],
         if not freeze.is_file():
             continue
         old = kept / "venv-freeze.txt"
+        old_version = kept / PY_VERSION
         text = freeze.read_text(encoding="utf-8")
-        if old.is_file() and old.read_text(encoding="utf-8") == text:
+        version = _python_version(src, name)
+        kept_version = (old_version.read_text(encoding="utf-8").strip()
+                        if old_version.is_file() else None)
+        if (old.is_file() and old.read_text(encoding="utf-8") == text
+                and kept_version == version):
             continue
         pins, _own = _split_freeze(name, text, home, spec)
         kept.mkdir(parents=True, exist_ok=True)
@@ -399,7 +425,8 @@ def restore_neighbours(gen: pathlib.Path, home: pathlib.Path, specs: list[dict],
         pins_file.write_text(chr(10).join(pins) + chr(10), encoding="utf-8")
         venv = home / folder / ".venv"
         uv = str(home / ".local" / "bin" / "uv")
-        p = run([uv, "venv", "--clear", str(venv)], capture_output=True, text=True,
+        pick = ["--python", version] if version else []
+        p = run([uv, "venv", "--clear", *pick, str(venv)], capture_output=True, text=True,
                 timeout=600)
         if p.returncode == 0:
             p = run([uv, "pip", "install", "--only-binary", ":all:",
@@ -411,6 +438,11 @@ def restore_neighbours(gen: pathlib.Path, home: pathlib.Path, specs: list[dict],
         kept.mkdir(parents=True, exist_ok=True)
         shutil.copy2(freeze, old)
         os.chmod(old, 0o600)
+        if version:
+            old_version.write_text(version + chr(10), encoding="utf-8")
+            os.chmod(old_version, 0o600)
+        else:
+            old_version.unlink(missing_ok=True)
 
 
 def _finished(gen_root: pathlib.Path) -> list[pathlib.Path]:

@@ -2,6 +2,7 @@
 import datetime as dt
 import errno
 import json
+import os
 import pathlib
 import sqlite3
 import subprocess
@@ -541,6 +542,62 @@ def test_two_own_editable_lines_fail(tmp_path):
     with pytest.raises(ss.SyncError, match="more than once"):
         ss.restore_neighbours(_neighbour_gen(tmp_path, _own(home) + _own(home)), home,
                               SPEC, run=FakeRun())
+
+
+def _with_version(tmp_path, version, freeze="a==1\n"):
+    gen = _neighbour_gen(tmp_path, freeze)
+    (gen / "neighbours" / "cos-hub" / "python-version").write_text(version)
+    return gen
+
+
+def test_recorded_python_version_is_passed_to_uv(tmp_path):
+    home = tmp_path / "home"
+    runner = FakeRun()
+    ss.restore_neighbours(_with_version(tmp_path, "3.12\n"), home, SPEC, run=runner)
+    venv = runner.calls[0]
+    assert venv[1:3] == ["venv", "--clear"]
+    assert venv[venv.index("--python") + 1] == "3.12"
+    assert (home / "standby" / "units" / "cos-hub" / "python-version").read_text() == "3.12\n"
+
+
+def test_no_recorded_version_keeps_todays_venv_command(tmp_path):
+    home = tmp_path / "home"
+    runner = FakeRun()
+    ss.restore_neighbours(_neighbour_gen(tmp_path), home, SPEC, run=runner)
+    assert "--python" not in runner.calls[0]
+
+
+def test_a_changed_python_version_alone_rebuilds_the_venv(tmp_path):
+    home = tmp_path / "home"
+    ss.restore_neighbours(_with_version(tmp_path, "3.11\n"), home, SPEC, run=FakeRun())
+    same = FakeRun()
+    ss.restore_neighbours(_with_version(tmp_path, "3.11\n"), home, SPEC, run=same)
+    assert same.calls == []
+    moved = FakeRun()
+    ss.restore_neighbours(_with_version(tmp_path, "3.12\n"), home, SPEC, run=moved)
+    assert len(moved.calls) == 2 and "3.12" in moved.calls[0]
+
+
+@pytest.mark.parametrize("bad", ["3.12.3", "python3.12", "3", "3.123", "3.12; rm -rf ~",
+                                 "--index-url=x", "", "4.0"])
+def test_a_bad_python_version_fails_the_night_and_writes_nothing(tmp_path, bad):
+    home = tmp_path / "home"
+    runner = FakeRun()
+    with pytest.raises(ss.SyncError, match="python-version"):
+        ss.restore_neighbours(_with_version(tmp_path, bad), home, SPEC, run=runner)
+    assert runner.calls == [] and not (home / "cos-hub").exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX modes")
+def test_restored_neighbour_files_keep_only_the_owner_exec_bit(tmp_path):
+    gen = _neighbour_gen(tmp_path)
+    script = gen / "neighbours" / "cos-hub" / "dir" / "run.sh"
+    script.write_text("#!/bin/sh\n")
+    os.chmod(script, 0o755)
+    home = tmp_path / "home"
+    ss.restore_neighbours(gen, home, SPEC, run=FakeRun())
+    assert (home / "cos-hub" / "run.sh").stat().st_mode & 0o777 == 0o700
+    assert (home / "cos-hub" / "app.py").stat().st_mode & 0o777 == 0o600
 
 
 def test_editable_self_helper(tmp_path):

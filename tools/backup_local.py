@@ -59,6 +59,7 @@ import fnmatch
 import glob
 import os
 import pathlib
+import re
 import shlex
 import shutil
 import sqlite3
@@ -508,9 +509,25 @@ def _is_sqlite(path):
 
 
 def _copy_private(src, dst):
+    """Copy ``src`` readable by its owner only, keeping the owner's exec bit
+    (a neighbour's scripts must still run on the standby); never group/other."""
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
-    os.chmod(dst, 0o600)
+    os.chmod(dst, (os.stat(src).st_mode & 0o700) | 0o600)
+
+
+PYVENV_VERSION_RE = re.compile(r"^\s*(?:version_info|version)\s*=\s*(3)\.(\d{1,2})\b", re.M)
+
+
+def venv_python_version(venv):
+    """``"3.12"`` from ``<venv>/pyvenv.cfg`` (uv writes ``version_info``, the
+    stdlib ``version``), or None when it cannot be read."""
+    try:
+        text = (pathlib.Path(venv) / "pyvenv.cfg").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    m = PYVENV_VERSION_RE.search(text)
+    return f"{m.group(1)}.{m.group(2)}" if m else None
 
 
 def backup_neighbour(spec, home, out, run=subprocess.run):
@@ -518,7 +535,8 @@ def backup_neighbour(spec, home, out, run=subprocess.run):
 
     Layout: ``dir/`` (its tree, less ``exclude``), ``units/`` (systemd user
     units and drop-in dirs), ``files/`` (loose files, path relative to home) and
-    ``venv-freeze.txt``. A SQLite file goes through the online backup API; its
+    ``venv-freeze.txt`` with ``python-version`` (the venv's ``3.N``, so the
+    standby rebuilds it on the same Python). A SQLite file goes through the online backup API; its
     -wal/-shm companions are skipped. An absent ``dir`` is not a failure (a dev
     box has no neighbours); a venv that exists but cannot be frozen IS, because
     the standby cannot rebuild it without the list."""
@@ -556,7 +574,10 @@ def backup_neighbour(spec, home, out, run=subprocess.run):
                 failures.append(f"{name}/{rel.as_posix()}: {exc}")
     unit_root = home / ".config" / "systemd" / "user"
     for pattern in spec.get("units", []):
-        for hit in sorted(glob.glob(str(unit_root / pattern))):
+        hits = sorted(glob.glob(str(unit_root / pattern)))
+        if not hits:
+            print(f"  --  {name}: unit {pattern} matched nothing")
+        for hit in hits:
             src = pathlib.Path(hit)
             try:
                 if src.is_dir():
@@ -591,6 +612,14 @@ def backup_neighbour(spec, home, out, run=subprocess.run):
                 os.chmod(base / "venv-freeze.txt", 0o600)
         except Exception as exc:  # noqa: BLE001
             failures.append(f"{name}: uv pip freeze failed: {exc}")
+        version = venv_python_version(src_dir / ".venv")
+        if version is None:
+            print(f"  --  {name}: venv python version not recorded "
+                  "(no readable pyvenv.cfg); the standby uses uv's choice")
+        else:
+            base.mkdir(parents=True, exist_ok=True)
+            (base / "python-version").write_text(version + "\n", encoding="utf-8")
+            os.chmod(base / "python-version", 0o600)
     print(f"  {'FAIL' if failures else 'ok  '}{name}  {count} files")
     return failures
 
