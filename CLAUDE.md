@@ -522,6 +522,10 @@ is in git; `--install` also arms the timers). Start order: Redis (a system unit)
   moves. Never regenerate the lock with `pip freeze`.
 - Under pytest the process presents as PROD with every suppression forced on; a
   dev branch is exercised only by monkeypatch.
+- **Which box is prod** is `~/.config/neuralstrike/box.toml` (`self`, `role`, `taking_over`),
+  never the checkout or a backup. Every prod service requires the start fence, so a
+  new unit gets it from `generate_units.render_all`; the standby is
+  [runbook section 13](docs/dev-prod-environments.md).
 - The apps bind `127.0.0.1` and Caddy fronts them (`app.` behind password + TOTP,
   `live.` with no login). **Never change a bind to `0.0.0.0`.** The proxy is
   never on the public domain; a link a browser opens uses `PROXY_PUBLIC_URL`.

@@ -4,7 +4,48 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-22 (**The Caddyfile generator emits cos.neuralstrike.co.**)
+**Last updated:** 2026-11-22 (**A warm standby on a second provider: the code is built, the rollout to vps3 is the operator's.**)
+
+- **Why.** The first server was suspended by its provider on 2026-08-30 and the
+  stack stayed dark until a replacement was restored by hand. The operator bought
+  a second box on a different provider (vps3, RackNerd) and chose a warm standby:
+  prod's code and last night's data restored into a ready, stopped checkout, one
+  command to take over, a manual DNS change at Wix. Design:
+  [the warm standby design](plans/2026-11-22-warm-standby-design.md); runbook:
+  `docs/dev-prod-environments.md` section 13.
+- **The pieces.**
+  - `tools/backup_local.py` writes `GIT_HEAD` into each generation and carries
+    the two neighbour apps (cos-hub, the market reports) under `neighbours/`;
+    `config/standby.toml` lists the boxes, the sync settings and the neighbours
+    (Settings → Configuration).
+  - `tools/standby_sync.py` + `standby-sync.timer` (22:15 CT, on the standby):
+    pulls the newest complete generation through a read-only rsync key, refuses
+    anything outside the known backup paths, a shrunken main store, a commit
+    not on `origin/main`, a generation older than the last synced, and a
+    refused neighbour file or freeze line; moves the checkout to the commit,
+    restores, integrity-checks, keeps 3 generations, writes `status.json`.
+  - `tools/standby_watch.py` + `[slots.standby_watch]` (07:40 CT, on prod):
+    pushes a Server alert when the standby did not answer, its status is
+    unreadable, the last good sync is past `max_age_h` (80) or the last run
+    failed or was refused.
+  - `tools/standby_fence.py` + `trading-prod-fence.service`: every prod service
+    requires it; it refuses on a role that is not prod, or on the public name
+    pointing at the peer. It fails open on any doubt, so it reaches vps2 through
+    an ordinary promote.
+  - `tools/standby_failover.py`: `takeover` (refuses while any of three probes of
+    the peer answers), `drill` (the dev profile, always restores the standby),
+    `become-standby` (a returned old prod) and `fence-neighbours`.
+  - `deploy/standby/provision.sh`: the one-time, idempotent setup of the standby.
+- **Decisions in the build.** The identity file is outside the checkout and every
+  backup. `config/local/standby.toml` is not restored onto the standby. A
+  takeover never refuses on stale data; it prints the age. The fence stays on
+  every prod service.
+- **Not done yet (operator).** Promote, provision vps3, write the two identity
+  files, run the first sync by hand, run the drill, lower the Wix TTL. Until
+  then nothing changes on prod except the fence unit, which passes with no
+  identity file.
+
+**Prior —** 2026-11-22 (**The Caddyfile generator emits cos.neuralstrike.co.**)
 
 - **What happened.** The `cos.neuralstrike.co` block (cos-hub for the Chief of Staff
   phone app, and X News Feed at `/feed/`) was added to `/etc/caddy/Caddyfile` by hand

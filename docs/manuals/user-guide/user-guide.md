@@ -4176,6 +4176,8 @@ notifications (Discord and Telegram, both ticked as shipped):
 | **A scheduled job failed** | The nightly backup, the end-of-day report or another timed job exited with an error. |
 | **/ES or /NQ chain capture has stopped** | Only once the /ES and /NQ feed is installed and has tried a capture: during its session, no good capture for `stale_after_sec` or a run of identical ones. Repeated at most every `alert_repeat_min`, and followed by *has resumed*. See *[/ES and /NQ](#es-and-nq)* under Dealer Positioning. |
 | **The Schwab sign-in is about to run out** | Checked every day at 07:30 CT, weekends included. Sent when 48 hours or fewer are left, when it has already expired or been rejected, and when the check cannot read the answer. |
+| **The standby box could not copy last night's backup** | Sent by the standby itself when its nightly sync (22:15 CT) fails or is refused, or when the newest backup it can see on the main box is older than 80 hours. It arrives with the title of the failed unit. |
+| **The standby is not in step with prod** | Checked every day at 07:40 CT, weekends included, from the main box. The first line says why: *standby did not answer* (it is switched off, suspended or unreachable), *standby status unreadable*, *last good sync N h ago* (more than 80 hours), or *last run failed* / *last run refused* with the reason. A second title, *The standby check is unusable*, means the standby's addresses in `config/standby.toml` are wrong. |
 
 The Schwab sign-in lasts 7 days and only you can renew it (**Re-authorize** on
 the gateway card). The warning ends with a link that opens the sign-in dialog,

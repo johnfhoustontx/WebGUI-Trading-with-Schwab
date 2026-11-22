@@ -71,7 +71,7 @@ hr { border: none; border-top: 1px solid var(--line); margin: 2em 0; }
 <div class="titleblock">
   <div class="lockup"><svg class="mark" viewBox="0 0 64 64" width="34" height="34" aria-hidden="true"><rect x="5" y="30.75" width="54" height="2.5" rx="1.25" fill="#5d5294"/><path d="M20 11 L32 23 L44 11" fill="none" stroke="#5d5294" stroke-width="4.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 53 L32 41 L44 53" fill="none" stroke="#5d5294" stroke-width="6.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="word">NeuralStrike</span></div>
   <h1>Technical Reference</h1>
-  <div class="meta">NeuralStrike · Generated 2026-11-21</div>
+  <div class="meta">NeuralStrike · Generated 2026-11-22</div>
 </div>
 <div class="toc"><span class="toctitle">Contents</span><ul>
 <li><a href="#about-this-document">About this document</a><ul>
@@ -9393,6 +9393,16 @@ firing just rewrites the previous trading day's report from the same stored minu
 <td>Schwab sign-in check</td>
 <td><strong>07:30</strong>, every day (<code>[slots.token_watch]</code>)</td>
 <td><code>tools/token_watch.py</code> reads the proxy's <code>/health</code> and sends a Server alert when the sign-in has <code>[system] token_warn_hours</code> (48) or fewer left, has expired or been rejected, or cannot be read. A systemd timer.</td>
+</tr>
+<tr>
+<td>Standby nightly sync</td>
+<td><strong>22:15</strong>, every day (<code>[sync] at</code> in <code>config/standby.toml</code>)</td>
+<td>Runs on the STANDBY box only (<code>standby-sync.timer</code>, <code>Persistent=true</code>): <code>tools/standby_sync.py</code> pulls prod's newest complete backup generation (it carries <code>BACKUP_OK</code> and <code>GIT_HEAD</code>) through a read-only rsync key, refuses a path the backup does not itself produce, a main store that shrank past <code>max_shrink_pct</code> (50), a commit not on <code>origin/main</code>, and a generation older than the last one synced; then moves the checkout to the commit, restores the data and integrity-checks every database. Keeps 3 generations; writes <code>~/standby/status.json</code>. A failure, or a newest generation older than <code>max_age_h</code> (80), sends a Server alert. Refuses on a promoted box.</td>
+</tr>
+<tr>
+<td>Standby sync check</td>
+<td><strong>07:40</strong>, every day (<code>[slots.standby_watch]</code>)</td>
+<td>Runs on PROD only (<code>trading-&lt;env&gt;-standby-watch.timer</code>): <code>tools/standby_watch.py</code> reads the standby's <code>status.json</code> over a read-only ssh key and sends a Server alert when the standby does not answer, the file is unreadable, the last good sync is older than <code>max_age_h</code>, or the last run failed or was refused. Needed because a switched-off standby sends nothing itself. A systemd timer, so moving it needs <code>generate_units --install</code>.</td>
 </tr>
 <tr>
 <td>Failure alert</td>

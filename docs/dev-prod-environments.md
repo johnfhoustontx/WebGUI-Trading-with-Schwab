@@ -983,6 +983,7 @@ takes effect on the next regenerate and reload, as in step 2 above.
 | Promotion | `tools/promote.sh` + `.claude/hooks/guard_prod_promote.py` |
 | Snapshot | `tools/snapshot_from_prod.py` |
 | Backups and restore | `tools/backup_local.py`, `tools/restore_backup.py`, `trading-prod-backup.timer`, `tools/pull_backups.ps1` (section 11) |
+| The standby and failing over | `tools/standby_*.py`, `deploy/standby/provision.sh` (section 13) |
 | Logs | `journalctl --user -u trading-{env}-{svc}`; webgui also writes `logs/webgui.log` |
 
 ---
@@ -1270,3 +1271,295 @@ mv /home/administrator/blog-aside/data /home/administrator/dev/services/blog_svc
 ```bash
 systemctl --user start trading-prod-blog_svc
 ```
+
+---
+
+## 13. The standby and failing over
+
+A second box on a different provider (today **vps3**, RackNerd, tailnet
+`trading-standby`) holds a **warm standby** of the stack. It exists because the
+first server was suspended by its provider on 2026-08-30 and everything was dark
+until a replacement was restored by hand. Design and reasons:
+[the warm standby design](plans/2026-11-22-warm-standby-design.md).
+
+**What it is, in one paragraph.** Every night the standby pulls the newest
+complete backup generation from prod and the commit prod was running, restores
+both into a ready, **stopped** checkout at `/home/administrator/dev` (the same
+path as prod), and checks every database. Nothing of the stack runs on it. If
+prod fails, the operator runs **one command** on the standby and changes the
+addresses at Wix. A failed or silent standby reaches the phone as a Server alert.
+Failover is manual on purpose: a box that wrongly decides the other is dead
+starts a second proxy and breaks the Schwab sign-in.
+
+**The roles are symmetric.** Neither box is "prod for good". `config/standby.toml`
+holds both boxes' ssh targets, public IP and proxy health URL, plus the nightly
+sync's settings. Which box THIS is lives in the **identity file**
+`~/.config/neuralstrike/box.toml` (`self`, `role`, `taking_over`), outside the
+checkout and outside every backup, so a git checkout or a restore can never carry
+it from one box to the other. Never put it under `config/local/`: that folder is
+swept into every backup. `config/local/standby.toml` is deliberately **not**
+restored onto the standby (the sync names it as skipped): each box keeps its own
+guard settings, so a standby setting changed in Settings → Configuration on one
+box must be set on the other by hand.
+
+### What runs where
+
+| | prod (vps2 today) | standby (vps3 today) |
+|---|---|---|
+| Identity | `role = "prod"` | `role = "standby"` |
+| Stack (`trading-prod.target`) | running | **not installed** |
+| `standby-sync.timer` | absent | **22:15 CT** daily, `Persistent=true` |
+| `trading-prod-standby-watch.timer` | **07:40 CT** daily | absent |
+| Start fence | on every stack service | nothing to fence |
+| Redis | the stack's | installed and empty |
+| Caddy | serving | installed, **disabled** |
+
+### The identity file
+
+```toml
+self = "vps3"            # the box's name in config/standby.toml [boxes.*]
+role = "standby"         # "prod" or "standby"
+taking_over = false      # true only between a takeover and the first time DNS shows this box
+```
+
+Written by `provision.sh` (standby) and by `standby_failover.py takeover` /
+`become-standby`; edit it by hand only to recover a failed takeover. A box with
+**no** identity file is unconfigured: the fence allows it, the sync and the watch
+do nothing. That is how the fence reaches vps2 through an ordinary promote before
+vps2 has an identity.
+
+### The start fence
+
+`trading-prod-fence.service` is a oneshot that **every** prod stack service
+requires (`generate_units.render_all` adds `Requires=` and `After=` to each
+`.service`, so a new unit is fenced without anyone remembering to). It refuses
+only on positive evidence: the role is not `prod`, or the public app name
+(`app.` host) resolves to the **peer's** public IP and this box is not marked
+`taking_over`. Any doubt allows the start (no identity, an unreadable file, a
+failed lookup), because a fence that wrongly refuses takes live trading down.
+The two neighbour apps (below) get the same fence as a drop-in.
+
+Things to know when reading it:
+
+- It prints one line to the journal:
+  `journalctl --user -u trading-prod-fence.service`. When checking a returned
+  old prod, read that line. **"lookup failed; not evidence" means the DNS rule
+  did not decide.** User units cannot order after `network-online`, so at boot
+  the lookup can fail and the fence then allows the start. The role rule still
+  holds; the DNS rule is a second line only.
+- The DNS rule can never fire if the `app` A record is behind a CDN or proxy
+  (the name would not resolve to either box's IP). It must be a plain A record.
+- **A fence that passed stays passed** until the next reboot or an explicit
+  `systemctl --user stop trading-prod-fence.service` (which also stops every
+  service that requires it). Changing the identity does not re-run it.
+- "no box identity" in its status is the expected state on a box that has not
+  been configured.
+
+### The nightly sync (`tools/standby_sync.py`, on the standby)
+
+At 22:15 CT (after the 20:00 weeknight backup and the workstation pull). Each run:
+
+1. Refuses if the box is promoted: the identity says `prod`, or
+   `trading-prod.target` is installed.
+2. Lists prod's `~/backups` through the read-only key (tailnet first, then the
+   public address) and takes the newest generation that carries **both**
+   `BACKUP_OK` and `GIT_HEAD`. On weekends and holidays nothing is newer: it
+   records "unchanged".
+3. Copies it with `rsync` into `~/standby/generations/<name>.partial`, with the
+   previous generation as the basis so only changed bytes move.
+4. Checks it. It **refuses**: any file outside the paths `backup_local.py`
+   produces (a planted script fails the night); a main store that shrank more than
+   `max_shrink_pct` (50) against the previous generation (`paper_account.db`,
+   `signals.db`, `gex_history.db`); a commit that is not on `origin/main`; a
+   generation **older than the last one synced** (it never goes backwards); a
+   neighbour file not in that neighbour's `files` list; and a neighbour
+   `venv-freeze.txt` line that is not a plain `name==version` pin (exactly one
+   `-e file://~/<its own folder>` line is accepted, and is installed only at
+   takeover). Neighbour packages install as **wheels only**.
+5. Moves the checkout to the commit (`git fetch`, `checkout --detach`;
+   `pip install -r requirements.lock` if the lock changed) and restores the data
+   with `tools/restore_backup.py`, which integrity-checks every database.
+6. Writes `SYNCED` into the generation folder **last** ("unchanged" needs it),
+   keeps 3 generations, and writes `~/standby/status.json` (`result` is `synced`,
+   `unchanged`, `failed` or `refused`).
+
+Redis is **not** restored: the stack rebuilds every cache view by itself. A failed
+night exits non-zero and the unit's `OnFailure=` sends a Server alert.
+`max_age_h` (80, which covers a weekend) is the age past which the sync fails and
+prod's morning watch alerts. **A takeover never refuses on stale data**: it prints
+the data's age loudly and goes on, because old data beats none.
+
+### The watch (`tools/standby_watch.py`, on prod, 07:40 CT)
+
+A switched-off, suspended or stalled standby sends nothing itself, so prod reads
+the standby's `status.json` through a read-only ssh key and sends a Server alert
+(*The standby is not in step with prod*) when the first of these is true:
+**standby did not answer**, **standby status unreadable**, **last run failed** or
+**refused** (with the reason), or **last good sync N h ago**. If the standby's
+addresses in `config/standby.toml` are unusable, a second alert, *The standby
+check is unusable*, says so. The watch always exits 0 (a failed alert is printed,
+never a second failure) and does nothing on a box that is not prod.
+
+### Setting a standby up (once, with the operator)
+
+Everything root-owned is the operator's; nothing here needs passwordless sudo.
+
+1. **Key on prod.** Create `~/.ssh/standby_watch` (`ssh-keygen -t ed25519`);
+   its **public** half is passed to `provision.sh`.
+2. **Provision the standby.** Copy `deploy/standby/provision.sh` from prod's
+   checkout to the standby and run it as `administrator`, not under sudo (it
+   prompts for sudo itself, and a second run changes nothing):
+
+   ```bash
+   bash provision.sh vps3 "ssh-ed25519 AAAA... standby-watch@vps2" "# public key: age1..."
+   ```
+
+   It installs the packages, uv and the Claude Code CLI, the checkout and its
+   venv, the pull key `~/.ssh/standby_pull`, the status-read `authorized_keys`
+   line, the age **public** line (the standby never holds the private key), the
+   identity file (`role = "standby"`), and the one unit pair
+   `standby-sync.service` + `.timer`. It installs **no** stack unit and leaves
+   Caddy disabled.
+3. **The three things it prints**, which are yours to do:
+   - the `authorized_keys` line to add **on prod**, which lets the standby read
+     `~/backups` and nothing else:
+     `restrict,command="/usr/bin/rrsync -ro /home/administrator/backups" ssh-ed25519 ... standby-pull@vps3`;
+   - the copy of prod's `~/.config/rclone/rclone.conf` to the standby (the Drive
+     login a promoted box needs to write its own backups), mode 600;
+   - **after the first good sync**, the Redis block: the stack's `requirepass`,
+     the read-only `live` ACL user and the `cos` user, copied from prod's
+     `ACL GETUSER` with passwords through a pipe, never an argument, then
+     `CONFIG REWRITE`.
+4. **Identity on prod.** Write `~/.config/neuralstrike/box.toml` with
+   `self = "vps2"` and `role = "prod"`. Outside market hours restart the fence
+   (`systemctl --user restart trading-prod-fence.service`) and read its journal
+   line: it must say `allow`. Then run on prod
+   `.venv/bin/python tools/standby_failover.py fence-neighbours` and check
+   `systemctl --user show cos-hub.service -p Requires` lists the fence.
+5. **Run the first sync by hand**: `systemctl --user start standby-sync.service`,
+   then `journalctl --user -u standby-sync -n 50`. The failure notifier needs the
+   restored `.env`, so a failure **before the first good sync does not push**:
+   watch this one yourself. Read `~/standby/status.json` (`"result": "synced"`).
+6. **On the first live night**, check by hand that `rsync --list-only` through
+   `rrsync -ro` really lists the generations, and that a missing file exits
+   **23**: the sync's parsing of both was tested only against fakes. Also check
+   the standby's checkout is at prod's commit, every database reports ok, and
+   `~/cos-hub` and `~/neuralstrike-reports` exist.
+7. **Run the drill** (below), then `.venv/bin/python tools/standby_watch.py` on
+   prod: it should print `standby healthy`.
+8. **Lower the TTL** of the four Wix A records (`@`, `app`, `live`, `cos`; `www`
+   is a CNAME) to the lowest Wix allows, so the DNS step of a failover is short.
+   Record the value here once it is set: **TTL: not yet set.**
+
+### The drill (monthly, on the standby)
+
+```bash
+cd /home/administrator/dev && .venv/bin/python tools/standby_failover.py drill
+```
+
+Runs the restored stack under the **dev profile**: ports +1000, Redis db 1, no
+proxy of its own, and schedulers, Claude and notifications off, so it touches
+neither Schwab nor prod and nothing leaves the box. It probes every component and
+then **always** restores the standby: the dev units are removed and
+`config/env.local.toml` is put back. If a stop fails the files are **kept** and
+the exact stop command is printed: run it, delete the files it names, and run `systemctl --user daemon-reload`. It refuses
+on a promoted box. Run it once after setup and about monthly.
+
+### Failing over (prod has failed)
+
+Decide first that prod is really down: **do not fail over a box that is still
+serving.** On the standby:
+
+```bash
+cd /home/administrator/dev && .venv/bin/python tools/standby_failover.py takeover
+```
+
+It **refuses while any of three probes answers**: the peer's proxy health over the
+tailnet, the peer's public app (the `app.` host sent to the peer's IP, so it hits
+the peer however DNS points) and the peer's public ssh port. A broken tailnet
+alone cannot let a failover through. If the peer is half-alive and cannot be
+stopped, decide that and pass `--peer-is-down`. It also refuses without an
+identity file, when the box is already prod, and when the checkout is not the
+prod profile.
+
+Then it prints the data's age and the last sync result (loudly if older than
+`max_age_h`), and:
+
+1. removes the standby sync units and writes the identity as `prod` with
+   `taking_over = true` **before** anything starts (the fence reads it);
+2. points `proxy_public_url` in `config/env.local.toml` at this box's tailnet name;
+3. installs the neighbour units, fenced, and each neighbour's editable install;
+4. runs `generate_units --install`, enables and starts `trading-prod.target` and
+   the neighbours (cos-hub, the report timers), and probes every component's
+   health.
+
+A step that fails after the identity write stops the run, prints **DONE** and
+**NOT DONE**, exits 1, and does **not** roll the identity back. Finish the NOT
+DONE steps by hand, or set `role = "standby"` and run it again.
+
+**The steps only you can do, which it prints in order:**
+
+1. `sudo ufw allow 80,443/tcp`
+2. `sudo tailscale serve --bg --https=8100 http://127.0.0.1:8100` (so the peer's
+   probes and the tailnet Authorize link reach this box's proxy)
+3. `sudo .venv/bin/python -m deploy.caddy.generate_caddyfile --install`, then
+   enable and start Caddy (certificates arrive once the new A records resolve)
+4. At Wix, point `@`, `app`, `live` and `cos` at this box's public IP
+5. Sign in to Schwab again (Status → Authorize) if the restored sign-in is past
+   its 7 days
+6. Sign Claude Code in (`claude`, then `/login`): the market reports need it, and
+   its login is deliberately not copied
+7. Re-point the two workstation tasks (the backup pull and the social-cards pull)
+   at this box
+8. When the old prod comes back, run `become-standby` on it **before** it starts
+   anything
+
+The data is as of the last synced backup (a weeknight 20:00 generation): a
+mid-session failover loses that day's minute gamma history, paper-book changes and
+flow alerts. Redis is rebuilt by the stack. The neighbours' code came from the
+backup, not from GitHub (neither is a git repo), the one place a compromised old
+prod could influence what the new one runs.
+
+### A returned old prod
+
+If the box that lost the role boots again, the fence holds the stack: the role
+rule (its identity file still says `prod`, so check what it says) and the DNS rule
+(the `app.` name now resolves to the peer). Read the fence's journal line before
+trusting it (see "lookup failed" above). To turn it into the standby run on it:
+
+```bash
+cd /home/administrator/dev && .venv/bin/python tools/standby_failover.py become-standby
+```
+
+It needs **positive** evidence that the public name no longer points at this box
+(a failed lookup refuses, unlike the fence). It then fences the neighbours first,
+takes one local backup of its own data kept under `backups/predemote/` (never
+pruned by the rotation: the only copy of the day it went down; whether any of it is
+merged back is a manual decision), stops and removes the `trading-prod-*` units
+and timers, disables the target and the neighbour services, sets
+`role = "standby"` and installs the standby sync units. Its next 22:15 sync
+replaces its data with the new prod's. Moving prod back later is the same
+procedure the other way round.
+
+### The two neighbour apps
+
+`cos-hub` (`cos.neuralstrike.co`) and the market reports
+(`~/neuralstrike-reports`) are not in this repo; `[[neighbours]]` in
+`config/standby.toml` lists them. `backup_local.py` carries them in the nightly
+generation under `neighbours/`, the standby restores them to the same paths and
+keeps their unit files in `~/standby/units/` **uninstalled**, and a takeover
+installs, fences and starts them. A third neighbour is a config entry.
+`fence-neighbours` puts the start fence on their service units (a drop-in; a
+template's drop-in covers its instances) so a returned old prod cannot start a
+second hub or a second set of reports.
+
+### Where the behaviour lives
+
+| Concern | File |
+|---|---|
+| Settings, boxes, neighbours, the identity | `config/standby.toml`, `shared/standby_config.py`, `~/.config/neuralstrike/box.toml` |
+| Nightly sync | `tools/standby_sync.py`, `deploy/systemd/standby_units.py` |
+| Morning watch | `tools/standby_watch.py`, `[slots.standby_watch]` in `config/sessions.toml` |
+| The fence | `tools/standby_fence.py`, `generate_units._fence_unit` / `_with_fence` |
+| Takeover, drill, demotion, neighbour fences | `tools/standby_failover.py` |
+| One-time provisioning | `deploy/standby/provision.sh` |

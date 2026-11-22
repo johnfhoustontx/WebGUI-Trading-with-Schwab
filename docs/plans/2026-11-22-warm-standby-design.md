@@ -1,7 +1,7 @@
 # Warm standby on a second provider: design
 
 **Date:** 2026-11-22
-**Status:** draft, awaiting the operator's approval (questions answered 2026-11-22)
+**Status:** approved and built, 2026-11-22 (rollout to vps3 pending). Built as one Python tool, `tools/standby_failover.py` (`takeover`, `drill`, `become-standby`, `fence-neighbours`), not the two shell scripts named below, and with the identity in `~/.config/neuralstrike/box.toml`. Where this document and the code differ, the code and the runbook ([section 13](../dev-prod-environments.md)) are right.
 
 ## Why
 
