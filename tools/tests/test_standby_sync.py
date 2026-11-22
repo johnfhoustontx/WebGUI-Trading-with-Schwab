@@ -484,3 +484,24 @@ def test_never_goes_backwards(tmp_path, env, monkeypatch):
     status, _, runner = _go(tmp_path, env, remote=old, now=dt.datetime(2026, 11, 22, 2, 0))
     assert status["result"] == "failed" and "backwards" in status["detail"]
     assert called == [] and old.fetched == []
+
+
+@pytest.mark.parametrize("bad", ["--extra-index-url https://evil/", "pkg @ https://evil/x.whl",
+                                 "-e git+https://evil/r.git", "-r other.txt",
+                                 "pkg==1.0 ; python_version > '3'", "-i https://evil/"])
+def test_freeze_with_anything_but_pins_fails_before_uv(tmp_path, bad):
+    home = tmp_path / "home"
+    runner = FakeRun()
+    with pytest.raises(ss.SyncError, match="cos-hub"):
+        ss.restore_neighbours(_neighbour_gen(tmp_path, f"a==1\n{bad}\n"), home, SPEC,
+                              run=runner)
+    assert runner.calls == [] and not (home / "cos-hub").exists()
+
+
+def test_clean_freeze_installs_binary_only(tmp_path):
+    runner = FakeRun()
+    ss.restore_neighbours(_neighbour_gen(tmp_path, "# c\n\nA-b_c==1.2.post1+x\n"),
+                          tmp_path / "home", SPEC, run=runner)
+    argv = runner.calls[1]
+    assert "--only-binary" in argv and argv[argv.index("--only-binary") + 1] == ":all:"
+    assert not any("index" in a or "find-links" in a for a in argv)
