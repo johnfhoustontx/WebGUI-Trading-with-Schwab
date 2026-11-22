@@ -1190,6 +1190,49 @@ WantedBy=timers.target
             f"trading-{ENV_NAME}-token-watch.timer": tmr}
 
 
+def _standby_watch_units():
+    """Prod's morning check that the standby synced: a oneshot plus its timer.
+
+    tools/standby_watch.py reads the standby's status.json over ssh and sends a
+    system alert when it is behind or silent. A switched-off standby sends
+    nothing itself. The script does nothing on a box that is not prod.
+
+    **Every day, weekends included**, after the standby's nightly sync.
+    **Persistent=true** so a check missed while the box was down runs on return.
+    """
+    at = slot_times("standby_watch")["at"]
+
+    svc = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - standby sync check
+# No PartOf and no [Install]: the timer owns this.
+
+[Service]
+Type=oneshot
+WorkingDirectory={_workdir()}
+Environment=PYTHONUNBUFFERED=1
+Environment=TZ=America/Chicago
+# The notification credentials may live here (TELEGRAM_BOT_TOKEN, ...).
+EnvironmentFile={_env_file()}
+TimeoutStartSec={NOTIFY_TIMEOUT_SEC}
+ExecStart={_python()} tools/standby_watch.py
+"""
+
+    tmr = f"""[Unit]
+Description=NeuralStrike {ENV_NAME} - standby sync check timer
+
+[Timer]
+# Derived from [slots.standby_watch] in config/sessions.toml. Every day.
+OnCalendar=*-*-* {at.hour:02d}:{at.minute:02d}:00
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target
+"""
+    return {f"trading-{ENV_NAME}-standby-watch.service": svc,
+            f"trading-{ENV_NAME}-standby-watch.timer": tmr}
+
+
 def fence_name():
     """The start fence: a oneshot every stack service requires."""
     return f"trading-{ENV_NAME}-fence.service"
@@ -1264,6 +1307,7 @@ def render_all():
     out.update(_label_journal_units())
     out.update(_swing_refit_units())
     out.update(_token_watch_units())
+    out.update(_standby_watch_units())
     out.update(_stock_rank_units())
     out.update(_notifier_unit())
     out.update(_fence_unit())

@@ -1425,6 +1425,26 @@ def test_the_token_watch_is_a_oneshot_running_the_script(rendered):
     assert "PartOf" not in rendered[TOKEN_SVC]["Unit"]
 
 
+WATCH_SVC = f"trading-{ENV_NAME}-standby-watch.service"
+WATCH_TMR = f"trading-{ENV_NAME}-standby-watch.timer"
+
+
+def test_watch_unit_rendered_from_slot(monkeypatch, rendered):
+    import datetime as _dt
+    assert {WATCH_SVC, WATCH_TMR} <= set(units.render_all())
+    assert WATCH_TMR in units.timer_units()
+    assert rendered[WATCH_TMR]["Timer"]["OnCalendar"] == "*-*-* 07:40:00"
+    assert rendered[WATCH_TMR]["Timer"]["Persistent"] == "true"
+    svc = rendered[WATCH_SVC]["Service"]
+    assert svc["Type"] == "oneshot"
+    assert svc["ExecStart"].endswith("tools/standby_watch.py")
+    assert "PartOf" not in rendered[WATCH_SVC]["Unit"]
+    monkeypatch.setattr(units, "slot_times",
+                        lambda name: {"at": _dt.time(6, 5)} if name == "standby_watch"
+                        else {"at": _dt.time(1, 1)})
+    assert "OnCalendar=*-*-* 06:05:00" in units.render_all()[WATCH_TMR]
+
+
 # --- the weekly re-rank of the listed-stocks classification file -------------
 #
 # tools/rank_listed_stocks.py refreshes the popularity ranks in

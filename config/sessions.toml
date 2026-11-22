@@ -290,6 +290,15 @@ at = "19:00"
 # moving it needs `generate_units --install` + `daemon-reload`.
 at = "07:30"
 
+[slots.standby_watch]
+# Prod's morning check that the warm standby synced (tools/standby_watch.py). It
+# reads the standby's status.json over ssh and sends a "Server alerts" push when
+# the standby is behind, failed, refused or did not answer. Runs EVERY day,
+# weekends included, after the standby's 22:15 sync. A systemd timer, like
+# [slots.token_watch]: moving it needs `generate_units --install` +
+# `daemon-reload`.
+at = "07:40"
+
 [slots.stock_rank]
 # The weekly popularity re-rank of the listed-stocks classification file
 # (tools/rank_listed_stocks.py -> options-scanner/data/

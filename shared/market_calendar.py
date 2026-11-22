@@ -358,6 +358,9 @@ _DEFAULTS = {
         # when the 7-day refresh token is inside its warning window. Early, so
         # there is time to sign in again before the open. Read by systemd.
         "token_watch": {"at": "07:30"},
+        # Prod's check that the warm standby synced (tools/standby_watch.py), after
+        # the standby's 22:15 sync. Read by systemd.
+        "standby_watch": {"at": "07:40"},
         # The weekly popularity re-rank of the listed-stocks classification
         # file (tools/rank_listed_stocks.py), on SATURDAY at this time. Only the
         # time is configurable; the day is the unit's. After token_watch, so a

@@ -806,6 +806,10 @@ _SESSIONS = ConfigFile(
                   "Once a day, every day: sends a Server alert when the 7-day "
                   "Schwab sign-in is close to running out.", kind="time",
                   restart=(TIMERS,)),
+            Field("slots.standby_watch.at", "Standby sync check",
+                  "Once a day, every day: sends a Server alert when the warm "
+                  "standby is behind, failed or silent. Must be after its "
+                  "nightly sync.", kind="time", restart=(TIMERS,)),
             Field("slots.flow_delta.at", "Flow instrumentation report", "",
                   kind="time", restart=(TIMERS,)),
             Field("slots.hiro_report.at", "Hedging-flow validation report",
