@@ -293,17 +293,49 @@ def _check_spec(spec: dict, home: pathlib.Path, repo: pathlib.Path | None) -> No
 PIN_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*==[A-Za-z0-9.+!_-]+")
 
 
-def _check_freeze(name: str, freeze: pathlib.Path) -> None:
-    """Every line of a neighbour's freeze must be a bare ``name==version`` pin: no
-    option, include, URL, path or marker, because the file comes from prod and is
-    installed on the standby every night it changes."""
-    if not freeze.is_file():
-        return
-    for line in freeze.read_text(encoding="utf-8").splitlines():
+def _self_line(home: pathlib.Path, spec: dict) -> str:
+    return "-e file://" + (pathlib.Path(home).resolve() / spec["dir"]).as_posix()
+
+
+def _is_self_line(line: str, home: pathlib.Path, spec: dict) -> bool:
+    if not line.startswith("-e file://") or line.count(" ") != 1:
+        return False
+    got = pathlib.PurePosixPath(line[len("-e file://"):])
+    want = pathlib.PurePosixPath(_self_line(home, spec)[len("-e file://"):])
+    return got == want
+
+
+def _split_freeze(name: str, text: str, home: pathlib.Path, spec: dict):
+    """``(pins, has_self)`` of a freeze, or ``SyncError``. Allowed: bare
+    ``name==version`` pins, comments, and ONE editable line for the neighbour's own
+    folder on this box (``-e file://<home>/<dir>``). Anything else comes from prod
+    and would run on the standby every night it changes."""
+    pins, selves = [], 0
+    for line in text.splitlines():
         line = line.strip()
-        if line and not line.startswith("#") and not PIN_RE.fullmatch(line):
+        if not line or line.startswith("#"):
+            continue
+        if PIN_RE.fullmatch(line):
+            pins.append(line)
+        elif _is_self_line(line, home, spec):
+            selves += 1
+        else:
             raise SyncError(f"neighbour {name}: venv-freeze.txt line is not a plain "
                             f"pin: {line[:80]!r}")
+    if selves > 1:
+        raise SyncError(f"neighbour {name}: venv-freeze.txt names its own folder "
+                        "more than once")
+    return pins, selves == 1
+
+
+def editable_self(freeze_text: str, home: pathlib.Path, spec: dict) -> bool:
+    """True when the freeze carries the accepted line installing the neighbour's own
+    project editable (``-e file://<home>/<dir>``). The nightly sync never installs
+    it (its build backend is prod-supplied code); a takeover does."""
+    try:
+        return _split_freeze(spec.get("name", "?"), freeze_text, home, spec)[1]
+    except SyncError:
+        return False
 
 
 def restore_neighbours(gen: pathlib.Path, home: pathlib.Path, specs: list[dict],
@@ -321,7 +353,9 @@ def restore_neighbours(gen: pathlib.Path, home: pathlib.Path, specs: list[dict],
         if not src.is_dir():
             continue
         _check_spec(spec, home, repo)
-        _check_freeze(spec["name"], src / "venv-freeze.txt")
+        if (src / "venv-freeze.txt").is_file():
+            _split_freeze(spec["name"], (src / "venv-freeze.txt").read_text(
+                encoding="utf-8"), home, spec)
         listed = set(spec.get("files", []))
         if (src / "files").is_dir():
             for f in sorted((src / "files").rglob("*")):
@@ -359,6 +393,10 @@ def restore_neighbours(gen: pathlib.Path, home: pathlib.Path, specs: list[dict],
         text = freeze.read_text(encoding="utf-8")
         if old.is_file() and old.read_text(encoding="utf-8") == text:
             continue
+        pins, _own = _split_freeze(name, text, home, spec)
+        kept.mkdir(parents=True, exist_ok=True)
+        pins_file = kept / "venv-pins.txt"
+        pins_file.write_text(chr(10).join(pins) + chr(10), encoding="utf-8")
         venv = home / folder / ".venv"
         uv = str(home / ".local" / "bin" / "uv")
         p = run([uv, "venv", "--clear", str(venv)], capture_output=True, text=True,
@@ -366,7 +404,7 @@ def restore_neighbours(gen: pathlib.Path, home: pathlib.Path, specs: list[dict],
         if p.returncode == 0:
             p = run([uv, "pip", "install", "--only-binary", ":all:",
                      "--python", str(venv / "bin" / "python"),
-                     "-r", str(freeze)], capture_output=True, text=True, timeout=3600)
+                     "-r", str(pins_file)], capture_output=True, text=True, timeout=3600)
         if p.returncode != 0:
             raise SyncError(f"neighbour {name}: venv rebuild failed: "
                             f"{(p.stderr or '').strip()[:200]}")

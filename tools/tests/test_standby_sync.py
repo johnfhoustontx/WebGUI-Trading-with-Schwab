@@ -505,3 +505,47 @@ def test_clean_freeze_installs_binary_only(tmp_path):
     argv = runner.calls[1]
     assert "--only-binary" in argv and argv[argv.index("--only-binary") + 1] == ":all:"
     assert not any("index" in a or "find-links" in a for a in argv)
+
+
+def _own(home, extra=""):
+    return f"-e file://{(home / 'cos-hub').resolve().as_posix()}\n{extra}"
+
+
+def test_own_editable_line_is_accepted_and_not_installed(tmp_path):
+    home = tmp_path / "home"
+    runner = FakeRun()
+    ss.restore_neighbours(_neighbour_gen(tmp_path, _own(home, "a==1\nb==2\n")), home,
+                          SPEC, run=runner)
+    argv = runner.calls[1]
+    pins = pathlib.Path(argv[argv.index("-r") + 1])
+    assert pins.name == "venv-pins.txt" and pins.read_text().split() == ["a==1", "b==2"]
+    assert "-e" not in argv and "--only-binary" in argv
+    kept = home / "standby" / "units" / "cos-hub" / "venv-freeze.txt"
+    assert kept.read_text().startswith("-e file://")
+
+
+@pytest.mark.parametrize("line", ["-e file:///etc", "-e file://{home}/other-dir",
+                                  "-e  file://{home}/cos-hub", "-e file://{home}/cos-hub/x"])
+def test_other_editable_lines_fail(tmp_path, line):
+    home = tmp_path / "home"
+    line = line.format(home=home.resolve().as_posix())
+    runner = FakeRun()
+    with pytest.raises(ss.SyncError):
+        ss.restore_neighbours(_neighbour_gen(tmp_path, f"{line}\na==1\n"), home, SPEC,
+                              run=runner)
+    assert runner.calls == []
+
+
+def test_two_own_editable_lines_fail(tmp_path):
+    home = tmp_path / "home"
+    with pytest.raises(ss.SyncError, match="more than once"):
+        ss.restore_neighbours(_neighbour_gen(tmp_path, _own(home) + _own(home)), home,
+                              SPEC, run=FakeRun())
+
+
+def test_editable_self_helper(tmp_path):
+    home = tmp_path / "home"
+    assert ss.editable_self(_own(home, "a==1\n"), home, SPEC[0])
+    assert not ss.editable_self("a==1\n", home, SPEC[0])
+    assert not ss.editable_self("-e file:///etc\n", home, SPEC[0])
+    assert not ss.editable_self(_own(home) + _own(home), home, SPEC[0])
