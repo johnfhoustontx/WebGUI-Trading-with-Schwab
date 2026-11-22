@@ -340,13 +340,28 @@ def test_takeover_probe_failure_exits_1(tmp_path):
 
 # --- drill ----------------------------------------------------------------------
 
+class Render(Fake):
+    """A Fake whose ``generate_units`` call writes the named files into the unit folder."""
+
+    def __init__(self, unit_dir, names=("trading-dev.target",), **kw):
+        super().__init__(**kw)
+        self.unit_dir, self.names = unit_dir, names
+
+    def __call__(self, argv, **kw):
+        if "generate_units" in " ".join(str(a) for a in argv):
+            self.unit_dir.mkdir(parents=True, exist_ok=True)
+            for n in self.names:
+                (self.unit_dir / n).write_text("x")
+        return super().__call__(argv, **kw)
+
+
 def _drill(tmp_path, identity=STANDBY, run=None, wait=None):
     home, repo = _app(tmp_path) if not (tmp_path / "home").exists() else (
         tmp_path / "home", tmp_path / "repo")
     for name in ("environments.toml", "ports.toml"):
         (repo / "config" / name).write_text((ROOT / "config" / name).read_text(
             encoding="utf-8"), encoding="utf-8")
-    run = run or Fake()
+    run = run or Render(home / ".config" / "systemd" / "user")
     lines = []
     rc = sf.drill(identity, home=home, repo=repo, run=run,
                   wait=wait or (lambda url, timeout: True), out=lines.append)
@@ -405,7 +420,8 @@ def test_drill_restores_env_local_on_failure(tmp_path):
     repo = tmp_path / "repo"
     env = repo / "config" / "env.local.toml"
     env.write_bytes(b'name = "prod"\n')
-    run = Fake(fail=lambda a: a[:3] == ["systemctl", "--user", "start"])
+    run = Render(tmp_path / "home" / ".config" / "systemd" / "user",
+                 fail=lambda a: a[:3] == ["systemctl", "--user", "start"])
     rc, run, lines, home, _r = _drill(tmp_path, run=run)
     assert rc == 1 and env.read_bytes() == b'name = "prod"\n'
     assert run.has("stop", "trading-dev.target")
@@ -432,6 +448,7 @@ def test_drill_refuses_a_dev_render_with_a_proxy(tmp_path):
         def __call__(self, argv, **kw):
             if "generate_units" in " ".join(argv):
                 (d / "trading-dev-proxy.service").write_text("x")
+                (d / "trading-dev.target").write_text("x")
             return super().__call__(argv, **kw)
 
     rc, run, lines, *_ = _drill(tmp_path, run=Proxy())
@@ -484,7 +501,7 @@ def test_become_standby_takes_predemote_backup_first(tmp_path):
     first_stop = next(i for i, c in enumerate(run.calls) if c[:3] == ["systemctl", "--user", "stop"]
                       or "disable" in c)
     assert first_stop > 0
-    assert run.has("stop", "trading-prod.target") and run.has("stop", "cos-hub.service")
+    assert run.has("stop", "trading-prod.target") and run.has("disable", "--now", "cos-hub.service")
     assert run.has("disable", "--now", "trading-prod-backup.timer")
     assert run.has("disable", "--now", "rep-daily.timer")
     assert not run.has("stop", "unrelated.service")
@@ -512,3 +529,152 @@ def test_become_standby_failed_stop_keeps_role(tmp_path):
 
 def test_constants_match_repo():
     assert repo_paths.ENV_NAME == "prod"      # pytest presents as prod
+
+
+# --- drill cleanup is robust ----------------------------------------------------
+
+def test_drill_removes_prod_files_a_misresolved_render_wrote(tmp_path):
+    _app(tmp_path)
+    d = tmp_path / "home" / ".config" / "systemd" / "user"
+    run = Render(d, names=("trading-prod.target", "trading-prod-proxy.service",
+                           "trading-dev.target"))
+    rc, run, lines, _h, repo = _drill(tmp_path, run=run)
+    assert rc == 1 and list(d.iterdir()) == []
+    assert not run.has("start")
+    assert any("trading-prod" in x for x in lines)
+    assert not (repo / "config" / "env.local.toml").exists()
+
+
+def test_drill_fails_when_render_wrote_no_dev_target(tmp_path):
+    _app(tmp_path)
+    d = tmp_path / "home" / ".config" / "systemd" / "user"
+    rc, run, lines, *_ = _drill(tmp_path, run=Render(d, names=("trading-dev-x.service",)))
+    assert rc == 1 and not run.has("start") and not list(d.iterdir())
+
+
+def test_drill_interrupt_in_render_cleans_up_and_reraises(tmp_path):
+    _app(tmp_path)
+    d = tmp_path / "home" / ".config" / "systemd" / "user"
+    env = tmp_path / "repo" / "config" / "env.local.toml"
+    env.write_bytes(b"a = 1\n")
+
+    class Interrupt(Render):
+        def __call__(self, argv, **kw):
+            if "generate_units" in " ".join(argv):
+                d.mkdir(parents=True, exist_ok=True)
+                (d / "trading-prod.target").write_text("x")
+                raise KeyboardInterrupt
+            return super().__call__(argv, **kw)
+
+    with pytest.raises(KeyboardInterrupt):
+        _drill(tmp_path, run=Interrupt(d))
+    assert env.read_bytes() == b"a = 1\n"
+    assert not (d / "trading-prod.target").exists()
+
+
+def test_drill_failed_stop_keeps_unit_files_and_fails(tmp_path):
+    _app(tmp_path)
+    d = tmp_path / "home" / ".config" / "systemd" / "user"
+    env = tmp_path / "repo" / "config" / "env.local.toml"
+    env.write_bytes(b"a = 1\n")
+    run = Render(d, names=("trading-dev.target", "trading-dev-webgui.service"),
+                 fail=lambda a: a[:3] == ["systemctl", "--user", "stop"]
+                 and "trading-dev-webgui.service" in a)
+    rc, _run, lines, *_ = _drill(tmp_path, run=run)
+    assert rc == 1
+    assert env.read_bytes() == b"a = 1\n"
+    assert (d / "trading-dev.target").exists() and (d / "trading-dev-webgui.service").exists()
+    text = "\n".join(lines)
+    assert "trading-dev-webgui.service" in text and "Finish by hand" in text
+    assert "PASSED" not in text
+
+
+def test_drill_restores_env_before_any_stop(tmp_path):
+    _app(tmp_path)
+    d = tmp_path / "home" / ".config" / "systemd" / "user"
+    env = tmp_path / "repo" / "config" / "env.local.toml"
+    env.write_bytes(b"a = 1\n")
+    seen = []
+
+    class Stop(Render):
+        def __call__(self, argv, **kw):
+            if argv[:3] == ["systemctl", "--user", "stop"]:
+                seen.append(env.read_bytes())
+                raise KeyboardInterrupt
+            return super().__call__(argv, **kw)
+
+    with pytest.raises(KeyboardInterrupt):
+        _drill(tmp_path, run=Stop(d))
+    assert seen == [b"a = 1\n"]
+
+
+def test_drill_rejects_an_env_local_that_does_not_say_dev(tmp_path, monkeypatch):
+    _app(tmp_path)
+    d = tmp_path / "home" / ".config" / "systemd" / "user"
+    monkeypatch.setattr(sf, "set_toml_key", lambda text, key, value: 'name = "prod"\n')
+    rc, run, lines, *_ = _drill(tmp_path, run=Render(d))
+    assert rc == 1 and not any("generate_units" in " ".join(c) for c in run.calls)
+
+
+# --- demotion on the real neighbour layout, takeover enabling -------------------
+
+REAL = ["cos-hub.service", "neuralstrike-report@.service",
+        "neuralstrike-report-failed@.service", "neuralstrike-report-a.timer",
+        "neuralstrike-report-b.timer", "trading-prod.target",
+        "trading-prod-webgui.service"]
+REAL_SPECS = [
+    {"name": "cos-hub", "dir": "cos-hub", "exclude": [], "files": [],
+     "units": ["cos-hub.service"]},
+    {"name": "reports", "dir": "r", "exclude": [], "files": [],
+     "units": ["neuralstrike-report@.service", "neuralstrike-report-failed@.service",
+               "neuralstrike-report-*.timer", "neuralstrike-report@globex.service.d"]},
+]
+
+
+def test_become_standby_on_the_real_reports_layout(tmp_path):
+    _app(tmp_path)
+    home = tmp_path / "home"
+    d = _units(home, REAL)
+    (d / "neuralstrike-report@globex.service.d").mkdir()
+    run = Fake()
+    lines = []
+    ipath = tmp_path / "box.toml"
+    sc.write_identity(PROD, ipath)
+    rc = sf.become_standby(PROD, home=home, repo=tmp_path / "repo", run=run,
+                           specs=REAL_SPECS, lookup=lambda h, t: ["10.0.0.3"],
+                           identity_path=ipath, out=lines.append)
+    assert rc == 0, lines
+    for c in run.calls:
+        if "stop" in c or "disable" in c:
+            assert not c[-1].endswith("@.service")
+    assert run.has("stop", "neuralstrike-report@*.service")
+    assert run.has("stop", "neuralstrike-report-failed@*.service")
+    assert run.has("disable", "--now", "cos-hub.service")
+    assert run.has("disable", "--now", "neuralstrike-report-a.timer")
+    assert run.has("disable", gu.target_name()) and run.has("stop", gu.target_name())
+    for unit in ("cos-hub.service", "neuralstrike-report@.service",
+                 "neuralstrike-report-failed@.service"):
+        assert FENCE in (d / (unit + ".d") / "fence.conf").read_text()
+    assert not (d / "neuralstrike-report-a.timer.d").exists()
+    assert not (d / gu.target_name()).exists()
+    assert sc.read_identity(ipath) == Identity("vps2", "standby", False)
+
+
+def test_takeover_enables_target_and_neighbour_services_after_identity(tmp_path):
+    _app(tmp_path)
+    home = tmp_path / "home"
+    _kept(home, "cos-hub", {"cos-hub.service": "[Unit]\n"})
+    _kept(home, "reports", {"rep@.service": "[Unit]\n"})
+    seen = []
+
+    class Watch(Fake):
+        def __call__(self, argv, **kw):
+            if argv[:3] == ["systemctl", "--user", "enable"]:
+                seen.append(sc.read_identity(tmp_path / "box.toml"))
+            return super().__call__(argv, **kw)
+
+    rc, run, *_ = _go(tmp_path, run=Watch(fail=_curl_down))
+    assert rc == 0
+    assert run.has("enable", gu.target_name()) and run.has("enable", "cos-hub.service")
+    assert not run.has("enable", "rep@.service")
+    assert seen and all(i == Identity("vps3", "prod", True) for i in seen)

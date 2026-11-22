@@ -366,6 +366,10 @@ def takeover(identity, *, peer_is_down=False, home=None, repo=None, run=subproce
         starts = [gu.target_name()] + [u for u in installed
                                        if u.endswith(".service") and "@" not in u]
         for unit in starts:
+            ok, text = _ctl(run, "enable", unit)
+            if not ok:
+                return fail(f"enabling {unit}: {text[:200]}", later)
+            done.append(f"enabled {unit}")
             ok, text = _ctl(run, "start", unit)
             if not ok:
                 return fail(f"starting {unit}: {text[:200]}", later)
@@ -411,6 +415,99 @@ def _dev_ports(repo: pathlib.Path) -> dict:
     return out
 
 
+def _snapshot(folder: pathlib.Path) -> set:
+    return {p.name for p in folder.iterdir()} if folder.is_dir() else set()
+
+
+def _drill_body(repo, unit_dir, before, env_path, run, wait, out) -> int:
+    _set_env_key(env_path, "name", "dev")
+    parsed = tomllib.loads(env_path.read_text(encoding="utf-8"))
+    if parsed.get("name") != "dev":
+        out('FAIL  config/env.local.toml does not say name = "dev" at the top level; '
+            "rendering now would write the PROD units. Nothing was rendered.")
+        return 1
+    ok, text = _runner(run)([sys.executable, "-m", "deploy.systemd.generate_units",
+                             "--install", "--no-activate", "--dest", str(unit_dir)])
+    new = _snapshot(unit_dir) - before
+    if not ok:
+        out(f"FAIL  rendering the dev units: {text[:300]}")
+        return 1
+    if any(n.startswith("trading-prod") for n in new):
+        out("FAIL  the render wrote trading-prod files (the profile did not resolve to "
+            "dev); they are being removed.")
+        return 1
+    if "trading-dev.target" not in new:
+        out("FAIL  the render did not write trading-dev.target.")
+        return 1
+    if "trading-dev-proxy.service" in new:
+        out("REFUSED: the dev profile rendered a proxy unit; a drill must never start "
+            "a second proxy (environments.toml [dev] owns_proxy must be false).")
+        return 1
+    ok, text = _ctl(run, "daemon-reload")
+    if ok:
+        ok, text = _ctl(run, "start", "trading-dev.target")
+    if not ok:
+        out(f"FAIL  starting trading-dev.target: {text[:300]}")
+        return 1
+    failed = 0
+    for component, port in _dev_ports(repo).items():
+        path = "/" if component in ("webgui", "webgui_live") else "/health"
+        url = f"http://127.0.0.1:{port}{path}"
+        if wait(url, HEALTH_WAIT_S):
+            out(f"PASS  {component:<14} {url}")
+        else:
+            out(f"FAIL  {component:<14} {url}")
+            failed += 1
+    return 0 if not failed else 1
+
+
+def _drill_cleanup(run, unit_dir, env_path, original, before, out) -> bool:
+    """Undo the drill. env.local.toml first; each step on its own. True only when
+    every step worked. A unit that would not stop keeps its file."""
+    good = True
+    try:
+        if original is None:
+            env_path.unlink(missing_ok=True)
+        else:
+            env_path.write_bytes(original)
+    except Exception as exc:  # noqa: BLE001 - reported, the next step still runs
+        good = False
+        out(f'!! could not restore {env_path}: {exc}. It may still say name = "dev": '
+            "fix it by hand before anything else.")
+    new = sorted(_snapshot(unit_dir) - before)
+    stuck = []
+    for unit in [n for n in new if n == "trading-dev.target"] + [
+            n for n in new if n.endswith(UNIT_SUFFIXES)]:
+        try:
+            ok, _text = _ctl(run, "stop", unit)
+        except Exception:  # noqa: BLE001 - counted as a stop that failed
+            ok = False
+        if not ok and unit not in stuck:
+            stuck.append(unit)
+    if stuck:
+        out("!! these units would not stop, so NO unit file was deleted: "
+            + ", ".join(stuck))
+        out("   Finish by hand: systemctl --user stop " + " ".join(stuck)
+            + "; then delete the files this drill added to " + str(unit_dir)
+            + " and run systemctl --user daemon-reload")
+        return False
+    for name in new:
+        try:
+            path = unit_dir / name
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path)
+            else:
+                path.unlink(missing_ok=True)
+        except Exception as exc:  # noqa: BLE001 - the next file still goes
+            good = False
+            out(f"!! could not remove {name}: {exc}")
+    try:
+        _ctl(run, "daemon-reload")
+    except Exception:  # noqa: BLE001 - a reload that cannot run is not a second failure
+        good = False
+    return good
+
+
 def drill(identity, *, home=None, repo=None, run=subprocess.run, wait=None,
           out=print) -> int:
     """Boot the restored stack under the dev profile, probe it, and put everything
@@ -428,61 +525,20 @@ def drill(identity, *, home=None, repo=None, run=subprocess.run, wait=None,
         return 1
     env_path = repo / "config" / "env.local.toml"
     original = env_path.read_bytes() if env_path.is_file() else None
-    before = {p.name for p in unit_dir.glob("trading-dev*")} if unit_dir.is_dir() else set()
-    wrote: list = []
-    failed = 0
+    before = _snapshot(unit_dir)
+    rc = 1
     try:
-        _set_env_key(env_path, "name", "dev")
-        ok, text = _runner(run)([sys.executable, "-m", "deploy.systemd.generate_units",
-                                 "--install", "--no-activate", "--dest", str(unit_dir)])
-        wrote = sorted(p.name for p in unit_dir.glob("trading-dev*")
-                       if p.name not in before)
-        if not ok:
-            out(f"FAIL  rendering the dev units: {text[:300]}")
-            return 1
-        if "trading-dev-proxy.service" in wrote or (unit_dir / "trading-dev-proxy.service").exists():
-            out("REFUSED: the dev profile rendered a proxy unit; a drill must never start "
-                "a second proxy (environments.toml [dev] owns_proxy must be false).")
-            return 1
-        ok, text = _ctl(run, "daemon-reload")
-        if ok:
-            ok, text = _ctl(run, "start", "trading-dev.target")
-        if not ok:
-            out(f"FAIL  starting trading-dev.target: {text[:300]}")
-            return 1
-        for component, port in _dev_ports(repo).items():
-            path = "/" if component in ("webgui", "webgui_live") else "/health"
-            url = f"http://127.0.0.1:{port}{path}"
-            if wait(url, HEALTH_WAIT_S):
-                out(f"PASS  {component:<14} {url}")
-            else:
-                out(f"FAIL  {component:<14} {url}")
-                failed += 1
-        out(f"\nDrill {'PASSED' if not failed else 'FAILED'}: "
-            f"{'every component answered' if not failed else f'{failed} did not answer'}.")
-        return 0 if not failed else 1
-    except Exception as exc:  # noqa: BLE001 - the finally below undoes everything
+        rc = _drill_body(repo, unit_dir, before, env_path, run, wait, out)
+    except Exception as exc:  # noqa: BLE001 - the cleanup below undoes everything
         out(f"FAIL  {type(exc).__name__}: {exc}")
-        return 1
     finally:
-        _ctl(run, "stop", "trading-dev.target")
-        for name in wrote:
-            if name.endswith(UNIT_SUFFIXES):
-                _ctl(run, "stop", name)
-        for name in wrote:
-            try:
-                (unit_dir / name).unlink()
-            except OSError:
-                pass
-        if original is None:
-            try:
-                env_path.unlink()
-            except OSError:
-                pass
-        else:
-            env_path.write_bytes(original)
-        _ctl(run, "daemon-reload")
-        out("drill units removed and config/env.local.toml restored.")
+        clean = _drill_cleanup(run, unit_dir, env_path, original, before, out)
+    if not clean:
+        out("\nDrill FAILED: the cleanup did not finish (see the !! lines above).")
+        return 1
+    out("drill units removed and config/env.local.toml restored.")
+    out(f"\nDrill {'PASSED: every component answered' if rc == 0 else 'FAILED'}.")
+    return rc
 
 
 # --- demotion -----------------------------------------------------------------------
@@ -535,14 +591,28 @@ def become_standby(identity, *, home=None, repo=None, run=subprocess.run,
                  if p.is_file() and p.name.endswith(UNIT_SUFFIXES)
                  and any(fnmatch.fnmatch(p.name, pat)
                          for s in specs for pat in s.get("units", []))]
+    templates = [n for n in neighbour if "@." in n and n.endswith(".service")]
+    plain = [n for n in neighbour if n.endswith(".service") and "@" not in n]
     timers = [n for n in mine + neighbour if n.endswith(".timer")]
-    services = [n for n in mine + neighbour if not n.endswith(".timer")]
-    problems = []
-    for unit in timers:
+    # The fence goes on BEFORE anything else changes: a returning box must not
+    # start a second hub or second reports whichever way this run ends.
+    fence_neighbours(specs, home, run)
+    problems, warnings = [], []
+    for unit in timers + plain:
         ok, text = _ctl(run, "disable", "--now", unit)
         if not ok:
             problems.append(f"{unit}: {text[:120]}")
-    for unit in services:
+    for unit in templates:
+        # systemctl refuses a bare template name: stop its running instances.
+        ok, text = _ctl(run, "stop", unit.replace("@.", "@*."))
+        if not ok:
+            warnings.append(f"{unit} instances: {text[:120]}")
+    if (unit_dir / gu.target_name()).exists():
+        for verb in ("stop", "disable"):
+            ok, text = _ctl(run, verb, gu.target_name())
+            if not ok:
+                problems.append(f"{gu.target_name()} {verb}: {text[:120]}")
+    for unit in (n for n in mine if n.endswith(".service")):
         ok, text = _ctl(run, "stop", unit)
         if not ok:
             problems.append(f"{unit}: {text[:120]}")
@@ -551,6 +621,8 @@ def become_standby(identity, *, home=None, repo=None, run=subprocess.run,
         for p in problems:
             out(f"  - {p}")
         return 1
+    for w in warnings:
+        out(f"  note: {w}")
     for name in mine:
         try:
             (unit_dir / name).unlink()
