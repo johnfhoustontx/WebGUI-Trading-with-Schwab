@@ -1,4 +1,4 @@
-"""Emit the Caddyfile that fronts this box's three public hostnames.
+"""Emit the Caddyfile that fronts this box's public hostnames.
 
 Like the systemd units, this is GENERATED and there is no Caddyfile in git.
 Every value comes from ``repo_paths`` -- the hostnames, the checkout root, the
@@ -34,6 +34,15 @@ widget inside the app's cookie scope -- and because a public origin separated
 from the trading UI by a path filter is a filter someone has to keep getting
 right, where an origin is not.
 
+``COS_HOST`` is a fourth and belongs to no code in this repo: cos-hub (the
+Chief of Staff phone app's sync) and X News Feed at ``/feed/``, both from other
+repos on this box. It is here because ``--install`` rewrites the WHOLE file:
+hand-added to /etc/caddy/Caddyfile on 2026-11-07, it was deleted by the
+visitor-log install on 2026-11-18, Caddy then held no certificate for the name,
+and the phone app was offline until 2026-11-22. The feed's login is a bcrypt
+hash read from the gitignored ``shared/feed_basic_auth.txt`` (this repository
+is public); without a usable one, ``/feed/`` is refused, never opened.
+
 **``rate_limit`` on the PUBLIC host only, and OFF unless ``config/edge.toml``
 turns it on (2026-09-21).** Caddy's rate limiter is in no prebuilt apt binary;
 it needs a custom build and a manual re-download on every Caddy release, with
@@ -61,8 +70,9 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[2]))
 
-from repo_paths import (APP_HOST, EDGE_TOML, ENV_NAME, LIVE_HOST,  # noqa: E402
-                        NICEGUI_LIVE_PORT, NICEGUI_PORT, SITE_HOST, SITE_ROOT)
+from repo_paths import (APP_HOST, COS_HOST, EDGE_TOML, ENV_NAME,  # noqa: E402
+                        LIVE_HOST, NICEGUI_LIVE_PORT, NICEGUI_PORT, SHARED_DIR,
+                        SITE_HOST, SITE_ROOT)
 from shared.blog_inbox import ENTRY_CSP  # noqa: E402
 from shared.config_toml import toml_loader  # noqa: E402
 
@@ -156,6 +166,23 @@ ACCESS_LOG_DIR_RE = r"^/[A-Za-z0-9._/-]+$"
 # repository. Named here rather than buried in main() so the tests can assert
 # the path and moving it is one edit.
 CADDY_CONFIG = "/etc/caddy/Caddyfile"
+
+# The two upstreams on COS_HOST. Literals, unlike every other port here, because
+# neither is this stack's: cos-hub is the systemd unit `cos-hub` from the Chief
+# of Staff repo, and X News Feed the user unit `x-news-feed` in ~/x-news-feed.
+# Each binds 127.0.0.1 and changes only when its own repo does.
+COS_HUB_PORT = 8787
+FEED_PORT = 4300
+
+# X News Feed's login: ONE line, "<user> <bcrypt hash>", the two words Caddy's
+# basic_auth takes (make the hash with `caddy hash-password`). Gitignored and
+# carried by tools/backup_local.py. Read whenever the Caddyfile is generated, so
+# the sudo install reads it as root.
+FEED_AUTH_FILE = SHARED_DIR / "feed_basic_auth.txt"
+FEED_AUTH_USER_RE = r"^[A-Za-z0-9._-]{1,64}$"
+# A bcrypt hash: $2a$ / $2b$ / $2y$, a two-digit cost, 53 characters of salt
+# and hash. Neither pattern admits a space, quote or brace.
+FEED_AUTH_HASH_RE = r"^\$2[aby]\$\d\d\$[./A-Za-z0-9]{53}$"
 
 
 def login_body_kb() -> int:
@@ -283,6 +310,48 @@ def _live_log_skip():
     return f"""    @log_quiet path {" ".join(RATE_LIMIT_EXEMPT)}
     log_skip @log_quiet
 """
+
+
+def feed_basic_auth():
+    """``(user, hash)`` from ``FEED_AUTH_FILE``, or ``None``. Never raises.
+
+    Anything but exactly one line of a plain user name and a bcrypt hash reads
+    as ``None`` -- a missing file, a plaintext password, a third word, a brace
+    that would close the block -- and ``None`` makes the block REFUSE ``/feed/``
+    rather than serve it without its login."""
+    try:
+        text = pathlib.Path(FEED_AUTH_FILE).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if len(lines) != 1:
+        return None
+    words = lines[0].split()
+    if len(words) != 2:
+        return None
+    user, hashed = words
+    if not re.match(FEED_AUTH_USER_RE, user) or not re.match(FEED_AUTH_HASH_RE, hashed):
+        return None
+    return user, hashed
+
+
+def _feed_route(auth):
+    """``/feed/*`` on COS_HOST: the feed behind its login, or a 503 without one."""
+    if auth is None:
+        return """    # No usable shared/feed_basic_auth.txt when this was generated, so the
+    # feed is refused rather than served without its login.
+    handle_path /feed/* {
+        respond "X News Feed: no login configured at the edge" 503
+    }"""
+    user, hashed = auth
+    return f"""    handle_path /feed/* {{
+        basic_auth {{
+            {user} {hashed}
+        }}
+        reverse_proxy 127.0.0.1:{FEED_PORT} {{
+            header_up X-Edge 1
+        }}
+    }}"""
 
 
 def _refuse_outside_prod():
@@ -606,6 +675,32 @@ def _app_block():
 }}"""
 
 
+def _cos_block():
+    """The Chief of Staff host. See the module docstring for why it is here.
+
+    Carried across from the other blocks: ``Strict-Transport-Security`` (every
+    block sends it) and the edge header on each upstream (the file-wide count
+    keeps no exceptions; neither service reads it). Deliberately NOT carried:
+    ``encode`` (the block never had it) and the visitor log (this is the
+    owner's own traffic, like the app's).
+    """
+    return f"""{COS_HOST} {{
+    header Strict-Transport-Security "{HSTS}"
+
+    # X News Feed (~/x-news-feed, user unit x-news-feed) lives at /feed/,
+    # behind its own login. Everything else on this host is cos-hub (the Chief
+    # of Staff repo's unit cos-hub).
+    redir /feed /feed/ 308
+{_feed_route(feed_basic_auth())}
+
+    handle {{
+        reverse_proxy 127.0.0.1:{COS_HUB_PORT} {{
+            header_up X-Edge 1
+        }}
+    }}
+}}"""
+
+
 def render():
     """The complete Caddyfile text."""
     _refuse_outside_prod()
@@ -615,9 +710,10 @@ def render():
               "# truth for the port and the checkout root.\n")
     # Ordered least-privileged first -- static site, public screens, then the
     # app behind its login. It is the order the design's own diagram uses, and
-    # it puts the one block that may never carry an upstream at the top.
+    # it puts the one block that may never carry an upstream at the top. The
+    # Chief of Staff host, which is not this stack's, comes last.
     return (f"{banner}\n{_public_block()}\n\n{_live_block()}\n\n"
-            f"{_app_block()}\n")
+            f"{_app_block()}\n\n{_cos_block()}\n")
 
 
 def install(dest=None):
@@ -634,6 +730,9 @@ def main(argv=None):
                     help=f"write it to {CADDY_CONFIG} (needs sudo)")
     ap.add_argument("--dest", help="write it somewhere else instead")
     args = ap.parse_args(argv)
+    if feed_basic_auth() is None:
+        print(f"warning: no usable {FEED_AUTH_FILE}, so {COS_HOST}/feed/ will "
+              f"answer 503 (one line: '<user> <bcrypt hash>')", file=sys.stderr)
 
     if args.install or args.dest:
         p = install(args.dest)

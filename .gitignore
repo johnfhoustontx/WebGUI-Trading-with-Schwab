@@ -12,6 +12,9 @@ shared/proxy_secret.txt
 shared/alphavantage_key.txt
 shared/massive_key.txt
 shared/google_calendar_sa.json
+# X News Feed's login on cos.neuralstrike.co/feed/ ("user bcrypt-hash"), read by
+# deploy/caddy/generate_caddyfile.py. A hash in a public repo can be cracked offline.
+shared/feed_basic_auth.txt
 # Belt and braces: the same names ANYWHERE, not only under shared/. A stray copy
 # of a key at the repo root was found untracked and unignored on 2026-08-22 —
 # one `git add .` from being committed. Only `shared/` is ever READ (see
@@ -21,6 +24,7 @@ shared/google_calendar_sa.json
 **/alphavantage_key.txt
 **/massive_key.txt
 **/google_calendar_sa.json
+**/feed_basic_auth.txt
 shared/driver_model.txt
 # Which environment this checkout is (dev|prod). Gitignored ON PURPOSE: a git
 # pull must never be able to carry an environment identity between checkouts.

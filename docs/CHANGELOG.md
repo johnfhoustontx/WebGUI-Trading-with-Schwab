@@ -4,7 +4,34 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-21 (**Ten trade ideas a day; the Paper Account risks $1,500 a trade.**)
+**Last updated:** 2026-11-22 (**The Caddyfile generator emits cos.neuralstrike.co.**)
+
+- **What happened.** The `cos.neuralstrike.co` block (cos-hub for the Chief of Staff
+  phone app, and X News Feed at `/feed/`) was added to `/etc/caddy/Caddyfile` by hand
+  on 2026-11-07. The visitor-log install on 2026-11-18 (`9f3b94a3`) ran
+  `generate_caddyfile.py --install`, which rewrites the whole file, and the block was
+  gone. Caddy had no certificate for the name, TLS failed, and the phone app and the
+  PC's hub sync were offline until it was restored by hand on 2026-11-22. cos-hub
+  itself ran throughout.
+- **The fix.** `repo_paths.COS_HOST` (`cos_host` in `env.local.toml`, default
+  `cos.<site_host>`) and `_cos_block()`: `/feed` redirects to `/feed/`, `/feed/*` is
+  proxied to :4300 behind `basic_auth`, everything else to :8787. Both upstreams stamp
+  the edge header and the block sends HSTS, like every other block; neither service
+  reads the header, and Caddy already forced HTTPS on the name. The ports are
+  literals: neither service is this stack's.
+- **The login stays out of git.** The repo is public, so the bcrypt line is read from
+  the new gitignored `shared/feed_basic_auth.txt`, carried by `tools/backup_local.py`.
+  A missing or malformed file makes `/feed/` answer 503 (fail closed) and the
+  generator warn; it never emits the feed without its login. Runbook: "The Chief of
+  Staff host" in `docs/dev-prod-environments.md`.
+- **Checked.** The generated file, rendered with prod's paths and the live login line,
+  differs from the live `/etc/caddy/Caddyfile` only in the cos block's indentation,
+  comments, the HSTS header and the two edge-header lines; everything above the block
+  is byte-identical to prod's current output. `caddy adapt` on vps2 parses it, with
+  and without the login file. 7 new tests (16 cases) in `deploy/caddy/tests/test_caddyfile.py`
+  (two existing ones widened: HSTS on every host, the `redir` count).
+
+**Prior —** 2026-11-21 (**Ten trade ideas a day; the Paper Account risks $1,500 a trade.**)
 
 - **Trade ideas.** `[slots.trade_idea]` adds 09:10, 10:10 and 11:10: every 30 minutes
   from 08:40 to 11:40 CT, then hourly to 14:40, 10 posts a day (was 7). Config only;
