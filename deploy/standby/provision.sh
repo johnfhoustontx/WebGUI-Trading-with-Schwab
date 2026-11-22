@@ -57,6 +57,9 @@ case "$AGE_LINE" in
 esac
 
 step() { echo; echo "== $*"; }
+# Before an append: a non-empty file whose last byte is not a newline gets one,
+# so the new line is never glued onto the end of the last key.
+ensure_newline() { if [ -s "$1" ] && [ -n "$(tail -c1 "$1")" ]; then printf '\n' >> "$1"; fi; }
 
 # ---------------------------------------------------------------- packages
 step "apt packages"
@@ -132,10 +135,61 @@ STATUS_LINE="restrict,command=\"cat /home/administrator/standby/status.json\" $S
 if grep -qxF -- "$STATUS_LINE" "$HOME/.ssh/authorized_keys"; then
   echo "status-read key already in authorized_keys"
 else
+  ensure_newline "$HOME/.ssh/authorized_keys"
   echo "$STATUS_LINE" >> "$HOME/.ssh/authorized_keys"
   echo "added the status-read key (it can read status.json and nothing else)"
 fi
 install -d -m 0700 "$HOME/standby"
+
+# ---------------------------------------------------------------- the peer's host keys
+step "the peer's ssh host keys"
+# The nightly pull runs ssh with BatchMode=yes, so an unknown host key is a
+# failed night, not a question. The peer is the box in config/standby.toml that
+# is not <self>; each of its ssh targets is scanned. COMPARE every fingerprint
+# printed below with the one the peer itself shows (run there):
+#     ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+# A mismatch means do not trust it: remove it with  ssh-keygen -R <target>.
+PEER_TARGETS="$("$PY" - "$SELF" <<'PYEOF'
+import sys
+from shared import standby_config as sc
+boxes = sc.boxes()
+if sys.argv[1] not in boxes or len(boxes) != 2:
+    sys.exit(f"config/standby.toml must hold exactly two boxes including {sys.argv[1]!r}")
+for name, entry in boxes.items():
+    if name != sys.argv[1]:
+        for target in entry["ssh"]:
+            print(target)
+PYEOF
+)"
+KNOWN="$HOME/.ssh/known_hosts"
+touch "$KNOWN"
+chmod 0600 "$KNOWN"
+for T in $PEER_TARGETS; do
+  KEYS="$(ssh-keyscan -T 10 -t ed25519 "$T" 2>/dev/null || true)"
+  if [ -z "$KEYS" ]; then
+    echo "!! $T did not answer ssh-keyscan: add its host key by hand before the first sync"
+    continue
+  fi
+  echo "  $T  (compare with the peer's: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub)"
+  printf '%s\n' "$KEYS" | ssh-keygen -lf - | sed 's/^/    /'
+  while IFS= read -r LINE; do
+    [ -n "$LINE" ] || continue
+    if grep -qxF -- "$LINE" "$KNOWN"; then
+      echo "    already in known_hosts"
+    else
+      ensure_newline "$KNOWN"
+      printf '%s\n' "$LINE" >> "$KNOWN"
+      echo "    added to known_hosts"
+    fi
+  done <<< "$KEYS"
+done
+# This box's own targets, for the matching step on the peer (printed at the end).
+SELF_TARGETS="$("$PY" - "$SELF" <<'PYEOF'
+import sys
+from shared import standby_config as sc
+print(" ".join(sc.boxes()[sys.argv[1]]["ssh"]))
+PYEOF
+)"
 
 # ---------------------------------------------------------------- age public line
 step "age public key line"
@@ -176,11 +230,24 @@ PULL_PUB="$(cat "$HOME/.ssh/standby_pull.pub")"
 cat <<EOF
 
 ============================================================================
-DONE on this box. Three things are left, all yours.
+DONE on this box. Four things are left, all yours. First check that every
+fingerprint printed under "the peer's ssh host keys" matched the peer's own.
 
-(1) ON vps2, add this line to ~/.ssh/authorized_keys (it can only read the backups):
+(1) ON THE PEER (prod), add this line to ~/.ssh/authorized_keys (it can only
+    read the backups):
 
 restrict,command="/usr/bin/rrsync -ro /home/administrator/backups" $PULL_PUB
+
+(1b) ON THE PEER (prod), seed THIS box's host keys for its morning watch (it
+    also runs ssh with BatchMode=yes). Compare the fingerprints with this box's
+    own (here: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub) before the last
+    two lines:
+
+    touch ~/.ssh/known_hosts
+    ssh-keyscan -T 10 -t ed25519 $SELF_TARGETS 2>/dev/null > ~/standby-hostkeys.txt
+    ssh-keygen -lf ~/standby-hostkeys.txt
+    [ -s ~/.ssh/known_hosts ] && [ -n "\$(tail -c1 ~/.ssh/known_hosts)" ] && echo >> ~/.ssh/known_hosts
+    grep -vxFf ~/.ssh/known_hosts ~/standby-hostkeys.txt >> ~/.ssh/known_hosts; rm ~/standby-hostkeys.txt
 
 (2) FROM THE PC, copy vps2's rclone config here once (the Drive login a promoted
     box needs to write its own backups). Adjust the host names to your ssh config:

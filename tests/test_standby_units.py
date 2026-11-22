@@ -123,6 +123,52 @@ def test_provision_enables_linger_before_installing_units():
         "standby_units --install")
 
 
+def test_provision_seeds_the_peers_host_keys_after_the_venv():
+    """I3: both pullers run with BatchMode=yes, so an unseeded host key fails the
+    first sync. The peer's ssh targets are read from standby.toml with the venv."""
+    text = PROVISION.read_text(encoding="utf-8")
+    assert "ssh-keyscan" in text and "-t ed25519" in text
+    assert text.index("uv venv --seed") < text.index("ssh-keyscan")
+    assert "sc.boxes()" in text[text.index("PEER_TARGETS="):text.index("ssh-keyscan")]
+    assert "ssh-keygen -lf -" in text                       # fingerprints printed
+    assert 'grep -qxF -- "$LINE" "$KNOWN"' in text           # only new lines appended
+    assert "ssh_host_ed25519_key.pub" in text                # what to compare against
+
+
+def test_provision_guards_every_append_with_a_newline():
+    text = PROVISION.read_text(encoding="utf-8")
+    lines = text.splitlines()
+    appends = [i for i, line in enumerate(lines)
+               if ">> \"$HOME/.ssh/authorized_keys\"" in line or '>> "$KNOWN"' in line]
+    assert len(appends) == 2
+    for i in appends:
+        assert "ensure_newline" in lines[i - 1], lines[i - 1]
+
+
+def _bash_ok():
+    if shutil.which("bash") is None:
+        return False
+    r = subprocess.run(["bash", "-c", "tail -c1 /dev/null && mktemp >/dev/null"],
+                       capture_output=True)
+    return r.returncode == 0
+
+
+@pytest.mark.skipif(not _bash_ok(), reason="no usable bash")
+def test_ensure_newline_adds_one_only_when_missing():
+    func = [line for line in PROVISION.read_text(encoding="utf-8").splitlines()
+            if line.startswith("ensure_newline() {")]
+    assert len(func) == 1
+    script = func[0] + "\n" + (
+        'f=$(mktemp)\n'
+        "printf 'ssh-ed25519 A' > \"$f\"; ensure_newline \"$f\"; printf '[%s]' \"$(od -An -c \"$f\" | tr -d ' ')\"\n"
+        "printf 'k\\n' > \"$f\"; ensure_newline \"$f\"; printf '[%s]' \"$(wc -c < \"$f\" | tr -d ' ')\"\n"
+        ": > \"$f\"; ensure_newline \"$f\"; printf '[%s]' \"$(wc -c < \"$f\" | tr -d ' ')\"\n"
+        'rm -f "$f"\n')
+    r = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    assert r.stdout == "[ssh-ed25519A\\n][2][0]", r.stdout
+
+
 def test_provision_refuses_root_before_any_sudo():
     text = PROVISION.read_text(encoding="utf-8")
     assert 'id -u' in text

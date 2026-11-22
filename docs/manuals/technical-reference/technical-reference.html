@@ -9402,7 +9402,7 @@ firing just rewrites the previous trading day's report from the same stored minu
 <tr>
 <td>Standby sync check</td>
 <td><strong>07:40</strong>, every day (<code>[slots.standby_watch]</code>)</td>
-<td>Runs on PROD only (<code>trading-&lt;env&gt;-standby-watch.timer</code>): <code>tools/standby_watch.py</code> reads the standby's <code>status.json</code> over a read-only ssh key and sends a Server alert when the standby does not answer, the file is unreadable, the last good sync is older than <code>max_age_h</code>, or the last run failed or was refused. Needed because a switched-off standby sends nothing itself. A systemd timer, so moving it needs <code>generate_units --install</code>.</td>
+<td>Runs on PROD only (<code>trading-&lt;env&gt;-standby-watch.timer</code>): <code>tools/standby_watch.py</code> reads the standby's <code>status.json</code> over a read-only ssh key and sends a Server alert when the standby does not answer, the file is unreadable, the file itself is older than <code>[watch] status_max_age_h</code> (26 h: the sync has not run), the last good sync is older than <code>max_age_h</code>, or the last run failed or was refused. Needed because a switched-off standby sends nothing itself. On a box still marked <code>taking_over</code> it first looks the public name up: pointing here, it clears the mark; not yet, it sends <em>This box is still marked as taking over</em>. A systemd timer, so moving it needs <code>generate_units --install</code>.</td>
 </tr>
 <tr>
 <td>Failure alert</td>

@@ -1322,6 +1322,11 @@ role = "standby"         # "prod" or "standby"
 taking_over = false      # true only between a takeover and the first time DNS shows this box
 ```
 
+`taking_over` is cleared by whichever sees the public name point at this box
+first: the fence at a start, or prod's 07:40 watch (below). Until then the watch
+alerts every morning, because a marker left set would let this box start a
+second stack after a later failover the other way.
+
 Written by `provision.sh` (standby) and by `standby_failover.py takeover` /
 `become-standby`; edit it by hand only to recover a failed takeover. A box with
 **no** identity file is unconfigured: the fence allows it, the sync and the watch
@@ -1333,11 +1338,20 @@ vps2 has an identity.
 `trading-prod-fence.service` is a oneshot that **every** prod stack service
 requires (`generate_units.render_all` adds `Requires=` and `After=` to each
 `.service`, so a new unit is fenced without anyone remembering to). It refuses
-only on positive evidence: the role is not `prod`, or the public app name
-(`app.` host) resolves to the **peer's** public IP and this box is not marked
-`taking_over`. Any doubt allows the start (no identity, an unreadable file, a
-failed lookup), because a fence that wrongly refuses takes live trading down.
-The two neighbour apps (below) get the same fence as a drop-in.
+only on positive evidence, in three cases: the role is not `prod`; the **peer's
+proxy answers** its `proxy_health` URL with an HTTP status (a gateway error, 502/503/504,
+is `tailscale serve` with no proxy behind it and does not count) and this box is not
+marked `taking_over` (*"the peer's proxy answers; this box is not prod"*); or the
+public app name (`app.` host) resolves to the **peer's** public IP and this box is
+not marked `taking_over`. Any doubt allows the start (no identity, an unreadable
+file, a failed lookup, a peer probe that cannot connect or times out, even a
+module that fails to import), because a fence that wrongly refuses takes live
+trading down. The two neighbour apps (below) get the same fence as a drop-in.
+
+Its limits are `config/standby.toml [fence]`: a failed DNS lookup is retried for
+`lookup_retry_s` (12 s), and the peer probe waits `peer_probe_timeout_s` (5 s).
+The unit allows 30 s in all and a fence that runs out of time **fails and holds
+the stack**, so the loader refuses values past `FENCE_BOUNDS` (at most 15 + 8 s).
 
 Things to know when reading it:
 
@@ -1345,8 +1359,17 @@ Things to know when reading it:
   `journalctl --user -u trading-prod-fence.service`. When checking a returned
   old prod, read that line. **"lookup failed; not evidence" means the DNS rule
   did not decide.** User units cannot order after `network-online`, so at boot
-  the lookup can fail and the fence then allows the start. The role rule still
-  holds; the DNS rule is a second line only.
+  the lookup can fail, even after its retries, and the fence then allows the
+  start. The role rule and the peer-proxy rule still hold; the DNS rule is one
+  line of several.
+- The peer-proxy rule fires only while the peer runs a proxy behind
+  `tailscale serve`, which only a takeover sets up. Today's standby runs none, so
+  this rule never holds today's prod.
+- **Restarting the fence restarts the whole stack**: every stack service
+  `Requires=` it, so `systemctl --user restart trading-prod-fence.service` stops
+  and starts all of them. To see what it would decide, run it by hand instead (it
+  changes nothing unless `taking_over` is true):
+  `.venv/bin/python tools/standby_fence.py`.
 - The DNS rule can never fire if the `app` A record is behind a CDN or proxy
   (the name would not resolve to either box's IP). It must be a plain A record.
 - **A fence that passed stays passed** until the next reboot or an explicit
@@ -1395,10 +1418,16 @@ A switched-off, suspended or stalled standby sends nothing itself, so prod reads
 the standby's `status.json` through a read-only ssh key and sends a Server alert
 (*The standby is not in step with prod*) when the first of these is true:
 **standby did not answer**, **standby status unreadable**, **last run failed** or
-**refused** (with the reason), or **last good sync N h ago**. If the standby's
+**refused** (with the reason), **the standby has not run since <time>** (its
+`status.json` is older than `[watch] status_max_age_h`, 26 h: the sync itself has
+stopped), or **last good sync N h ago**. If the standby's
 addresses in `config/standby.toml` are unusable, a second alert, *The standby
-check is unusable*, says so. The watch always exits 0 (a failed alert is printed,
-never a second failure) and does nothing on a box that is not prod.
+check is unusable*, says so. On a box still marked `taking_over` it first looks
+the public name up: when it points here it clears the marker (*"takeover marker
+cleared"* in its journal), and when it does not it sends *This box is still marked
+as taking over* every morning until the Wix records move. The watch always exits 0
+(a failed alert is printed, never a second failure) and does nothing on a box that
+is not prod.
 
 ### Setting a standby up (once, with the operator)
 
@@ -1424,14 +1453,40 @@ Everything root-owned is the operator's; nothing here needs passwordless sudo.
 
    It installs the packages, uv and the Claude Code CLI, the checkout and its
    venv, the pull key `~/.ssh/standby_pull`, the status-read `authorized_keys`
-   line, the age **public** line (the standby never holds the private key), the
-   identity file (`role = "standby"`), and the one unit pair
-   `standby-sync.service` + `.timer`. It installs **no** stack unit and leaves
-   Caddy disabled.
-3. **The three things it prints**, which are yours to do:
+   line, **the peer's ssh host keys** in `~/.ssh/known_hosts`, the age **public**
+   line (the standby never holds the private key), the identity file
+   (`role = "standby"`), and the one unit pair `standby-sync.service` + `.timer`.
+   It installs **no** stack unit and leaves Caddy disabled.
+
+   The host keys matter because both the pull and the watch run ssh with
+   `BatchMode=yes`: an unknown host key is "Host key verification failed", a
+   failed night, never a prompt. provision runs `ssh-keyscan -t ed25519` for each
+   of the peer's `ssh` targets in `config/standby.toml` and prints each
+   fingerprint. **Compare every one** with the peer's own, run on the peer:
+
+   ```bash
+   ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+   ```
+
+   On a mismatch do not go on: remove the entry (`ssh-keygen -R <target>`) and
+   find out why. A target that did not answer is reported with `!!`; add it the
+   same way once it does.
+3. **The things it prints**, which are yours to do:
    - the `authorized_keys` line to add **on prod**, which lets the standby read
      `~/backups` and nothing else:
      `restrict,command="/usr/bin/rrsync -ro /home/administrator/backups" ssh-ed25519 ... standby-pull@vps3`;
+   - **on prod**, the standby's host keys for the morning watch (its two
+     targets, `trading-standby` and `192.227.249.22` today). Compare the printed
+     fingerprints with the standby's own `ssh-keygen -lf
+     /etc/ssh/ssh_host_ed25519_key.pub` before the last two lines:
+
+     ```bash
+     touch ~/.ssh/known_hosts
+     ssh-keyscan -T 10 -t ed25519 trading-standby 192.227.249.22 2>/dev/null > ~/standby-hostkeys.txt
+     ssh-keygen -lf ~/standby-hostkeys.txt
+     [ -s ~/.ssh/known_hosts ] && [ -n "$(tail -c1 ~/.ssh/known_hosts)" ] && echo >> ~/.ssh/known_hosts
+     grep -vxFf ~/.ssh/known_hosts ~/standby-hostkeys.txt >> ~/.ssh/known_hosts; rm ~/standby-hostkeys.txt
+     ```
    - the copy of prod's `~/.config/rclone/rclone.conf` to the standby (the Drive
      login a promoted box needs to write its own backups), mode 600;
    - **after the first good sync**, the Redis block: the stack's `requirepass`,
@@ -1439,9 +1494,22 @@ Everything root-owned is the operator's; nothing here needs passwordless sudo.
      `ACL GETUSER` with passwords through a pipe, never an argument, then
      `CONFIG REWRITE`.
 4. **Identity on prod.** Write `~/.config/neuralstrike/box.toml` with
-   `self = "vps2"` and `role = "prod"`. Outside market hours restart the fence
-   (`systemctl --user restart trading-prod-fence.service`) and read its journal
-   line: it must say `allow`. Then run on prod
+   `self = "vps2"`, `role = "prod"` and `taking_over = false`. Then check what
+   the fence would decide with a **dry run** on prod, which starts and stops
+   nothing and, with `taking_over = false`, writes nothing:
+
+   ```bash
+   cd /home/administrator/dev && .venv/bin/python tools/standby_fence.py
+   ```
+
+   It must print exactly `fence: allow - public name points at this box`. Any
+   other `allow` line is not good enough: `lookup failed; not evidence`,
+   `unknown address; not evidence` and `an address is unknown` all mean the DNS
+   rule could not decide, so fix the cause (the `app` A record, `public_ip` in
+   `config/standby.toml`) and run it again. A `REFUSE` line means the next start
+   of the stack would be held: remove the identity file until it is understood.
+   **Do not `restart` the fence unit to check it**: every stack service requires
+   it, so a restart stops and starts the whole live stack. Then run on prod
    `.venv/bin/python tools/standby_failover.py fence-neighbours` and check
    `systemctl --user show cos-hub.service -p Requires` lists the fence.
 5. **Run the first sync by hand**: `systemctl --user start standby-sync.service`,
@@ -1493,7 +1561,9 @@ prod profile.
 Then it prints the data's age and the last sync result (loudly if older than
 `max_age_h`), and:
 
-1. removes the standby sync units and writes the identity as `prod` with
+1. stops `standby-sync.service` if it is running (and **refuses**, changing
+   nothing, if that stop fails: a sync would move the checkout under the new
+   stack), removes the standby sync units and writes the identity as `prod` with
    `taking_over = true` **before** anything starts (the fence reads it);
 2. points `proxy_public_url` in `config/env.local.toml` at this box's tailnet name;
 3. installs the neighbour units, fenced, and each neighbour's editable install;
@@ -1508,8 +1578,10 @@ DONE steps by hand, or set `role = "standby"` and run it again.
 **The steps only you can do, which it prints in order:**
 
 1. `sudo ufw allow 80,443/tcp`
-2. `sudo tailscale serve --bg --https=8100 http://127.0.0.1:8100` (so the peer's
-   probes and the tailnet Authorize link reach this box's proxy)
+2. `sudo tailscale serve --bg --https=8100 http://127.0.0.1:8100` (the proxy's
+   port from `config/ports.toml`, 8100 today, so the peer's probes and the tailnet
+   Authorize link reach this box's proxy). From then on a returning old prod's
+   fence sees this proxy answer and holds its stack.
 3. `sudo .venv/bin/python -m deploy.caddy.generate_caddyfile --install`, then
    enable and start Caddy (certificates arrive once the new A records resolve)
 4. At Wix, point `@`, `app`, `live` and `cos` at this box's public IP
@@ -1530,10 +1602,15 @@ prod could influence what the new one runs.
 
 ### A returned old prod
 
-If the box that lost the role boots again, the fence holds the stack: the role
-rule (its identity file still says `prod`, so check what it says) and the DNS rule
-(the `app.` name now resolves to the peer). Read the fence's journal line before
-trusting it (see "lookup failed" above). To turn it into the standby run on it:
+If the box that lost the role boots again, its identity file still says `prod`, so
+the role rule does not hold it. Two rules do: the **peer-proxy rule** (the new
+prod's proxy answers over the tailnet once its `tailscale serve` step is done,
+which holds the stack even before the Wix records move and even when the boot-time
+lookup fails), and the DNS rule (the `app.` name resolves to the peer once Wix has
+moved). Read the fence's journal line before trusting it (see "lookup failed"
+above): an old prod that comes back before the new prod's `tailscale serve` and
+before Wix has moved has neither rule to stop it. To turn it into the standby run
+on it:
 
 ```bash
 cd /home/administrator/dev && .venv/bin/python tools/standby_failover.py become-standby
@@ -1546,8 +1623,142 @@ pruned by the rotation: the only copy of the day it went down; whether any of it
 merged back is a manual decision), stops and removes the `trading-prod-*` units
 and timers, disables the target and the neighbour services, sets
 `role = "standby"` and installs the standby sync units. Its next 22:15 sync
-replaces its data with the new prod's. Moving prod back later is the same
-procedure the other way round.
+replaces its data with the new prod's. Then exchange the keys (next section).
+Moving prod back later, while the current prod is alive, is a **planned move**
+(below), not this procedure.
+
+### Keys after a role swap
+
+After `become-standby` the boxes have swapped roles, so the keys go the other way
+round: the new standby pulls from the new prod, and the new prod reads the new
+standby's status. `<new-prod>` / `<new-standby>` below are the box names in
+`config/standby.toml`; `<standby targets>` are the new standby's `ssh` entries
+there (for vps2 today: `trading-prod-2 63.141.255.25`).
+
+1. **On the new prod**, the watch key (skip if `~/.ssh/standby_watch` exists):
+
+   ```bash
+   ssh-keygen -t ed25519 -f ~/.ssh/standby_watch -N '' -C standby-watch@<new-prod>
+   cat ~/.ssh/standby_watch.pub
+   ```
+
+2. **On the new standby** (the demoted box), provision with that public half and
+   prod's age public line (the `# public key: age1...` line of
+   `~/.config/age/backup-key.txt` on the new prod, the public line only). It
+   creates `~/.ssh/standby_pull`, adds the status-read line, seeds the new prod's
+   host keys in `known_hosts` (compare the fingerprints as in setup step 2), and
+   leaves the existing identity alone:
+
+   ```bash
+   cd /home/administrator/dev && bash deploy/standby/provision.sh <new-standby> "ssh-ed25519 AAAA... standby-watch@<new-prod>" "# public key: age1..."
+   ```
+
+   The demoted box holds the old private age key in that file: provision then
+   leaves it untouched, which is fine (the standby only ever needs the public
+   line).
+3. **On the new prod**, add the `rrsync` line provision printed (step 1 of its
+   block) to `~/.ssh/authorized_keys`, and seed the new standby's host keys for the
+   watch, comparing the fingerprints with the new standby's own
+   `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` before the last two lines:
+
+   ```bash
+   touch ~/.ssh/known_hosts
+   ssh-keyscan -T 10 -t ed25519 <standby targets> 2>/dev/null > ~/standby-hostkeys.txt
+   ssh-keygen -lf ~/standby-hostkeys.txt
+   [ -s ~/.ssh/known_hosts ] && [ -n "$(tail -c1 ~/.ssh/known_hosts)" ] && echo >> ~/.ssh/known_hosts
+   grep -vxFf ~/.ssh/known_hosts ~/standby-hostkeys.txt >> ~/.ssh/known_hosts; rm ~/standby-hostkeys.txt
+   ```
+
+4. Run the first sync by hand and the watch, as in setup steps 5 and 7.
+
+### Moving prod on purpose (a planned move)
+
+Both boxes are healthy and prod should move, for maintenance or to move back.
+`takeover` refuses while the current prod answers, and `become-standby` refuses
+while DNS still points at it, so the old prod is first **stood down**: stopped,
+with its role kept. In this order:
+
+1. **On the current prod**, outside market hours:
+
+   ```bash
+   cd /home/administrator/dev && .venv/bin/python tools/standby_failover.py stand-down
+   ```
+
+   It disables every `trading-prod-*` and neighbour timer, disables the
+   neighbour services, stops their template instances by pattern, stops and
+   disables `trading-prod.target`, stops the stack's services and finally the
+   fence. It refuses on a box whose role is not prod, and it does **not** change
+   the role. Caddy (a system unit) keeps answering with an error page until Wix
+   moves.
+2. *(To carry today's data)* still on the current prod, take a backup with the
+   stack stopped, then on the other box pull it:
+
+   ```bash
+   cd /home/administrator/dev && .venv/bin/python tools/backup_local.py
+   ```
+
+   ```bash
+   systemctl --user start standby-sync.service && cat ~/standby/status.json
+   ```
+
+3. **On the other box**: `takeover --peer-is-down` (the stood-down box still
+   answers ssh and its Caddy, so the flag is needed), and the steps it prints.
+4. At Wix, point the four A records at the new prod.
+5. **On the old prod**, once `getent hosts app.neuralstrike.co` shows the new
+   prod: `become-standby`, then the keys (above).
+
+### After a takeover: things to know
+
+- **The new prod's checkout is on a detached HEAD** (the nightly sync checks a
+  commit out with `--detach`). `tools/promote.sh` works on it as it is: it
+  fetches `origin/main`, fast-forwards with `git merge --ff-only` and rolls back
+  with `git reset --hard`, all of which move a detached HEAD. To put the checkout
+  back on `main` without changing a file (the commit is on `origin/main`, the
+  sync refuses any other):
+
+  ```bash
+  cd /home/administrator/dev && git switch -C main HEAD && git branch -u origin/main
+  ```
+
+- **A promote of this branch that rolls back** leaves the new watch timer armed:
+  the rollback re-renders the older units but deletes nothing. Disable it by
+  hand:
+
+  ```bash
+  systemctl --user disable --now trading-prod-standby-watch.timer
+  rm -f ~/.config/systemd/user/trading-prod-standby-watch.timer ~/.config/systemd/user/trading-prod-standby-watch.service
+  systemctl --user daemon-reload
+  ```
+
+- **Aborting a half-finished takeover** (it failed after the identity write, and
+  the peer is to stay prod after all). On the box that was taking over:
+
+  ```bash
+  cd /home/administrator/dev
+  systemctl --user stop trading-prod.target
+  systemctl --user disable trading-prod.target
+  .venv/bin/python -c "from shared.standby_config import Identity, read_identity, write_identity; i = read_identity(); write_identity(Identity(i.self_name, 'standby', False))"
+  ls ~/.config/systemd/user/ | grep '^trading-prod'
+  ```
+
+  Stop and disable any neighbour unit it started (`cos-hub.service`, the
+  `neuralstrike-report-*.timer`s) and delete the neighbour unit files and `.d`
+  folders it copied in (the names kept under `~/standby/units/`; a standby keeps
+  them there, uninstalled). Then delete every `trading-prod*` file the `ls`
+  listed **except** `trading-prod-notify-failure@.service` (the standby keeps
+  that one): the sync refuses while `trading-prod.target` is installed. Put the
+  standby's units back and check the sync accepts the box again:
+
+  ```bash
+  systemctl --user daemon-reload
+  .venv/bin/python -m deploy.systemd.standby_units --install
+  systemctl --user start standby-sync.service && cat ~/standby/status.json
+  ```
+
+  If `proxy_public_url` in `config/env.local.toml` was changed, the next sync's
+  restore puts prod's copy back. If `sudo tailscale serve` or Caddy were already
+  set up, undo them too (`sudo tailscale serve reset`;
+  `sudo systemctl disable --now caddy`).
 
 ### The two neighbour apps
 
@@ -1569,5 +1780,5 @@ second hub or a second set of reports.
 | Nightly sync | `tools/standby_sync.py`, `deploy/systemd/standby_units.py` |
 | Morning watch | `tools/standby_watch.py`, `[slots.standby_watch]` in `config/sessions.toml` |
 | The fence | `tools/standby_fence.py`, `generate_units._fence_unit` / `_with_fence` |
-| Takeover, drill, demotion, neighbour fences | `tools/standby_failover.py` |
+| Takeover, drill, demotion, stand-down, neighbour fences | `tools/standby_failover.py` |
 | One-time provisioning | `deploy/standby/provision.sh` |

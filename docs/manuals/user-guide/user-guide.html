@@ -4876,7 +4876,11 @@ notifications (Discord and Telegram, both ticked as shipped):</p>
 </tr>
 <tr>
 <td><strong>The standby is not in step with prod</strong></td>
-<td>Checked every day at 07:40 CT, weekends included, from the main box. The first line says why: <em>standby did not answer</em> (it is switched off, suspended or unreachable), <em>standby status unreadable</em>, <em>last good sync N h ago</em> (more than 80 hours), or <em>last run failed</em> / <em>last run refused</em> with the reason. A second title, <em>The standby check is unusable</em>, means the standby's addresses in <code>config/standby.toml</code> are wrong.</td>
+<td>Checked every day at 07:40 CT, weekends included, from the main box. The first line says why: <em>standby did not answer</em> (it is switched off, suspended or unreachable), <em>standby status unreadable</em>, <em>the standby has not run since <time></em> (its status file is more than 26 hours old: the nightly sync itself has stopped), <em>last good sync N h ago</em> (more than 80 hours), or <em>last run failed</em> / <em>last run refused</em> with the reason. A second title, <em>The standby check is unusable</em>, means the standby's addresses in <code>config/standby.toml</code> are wrong.</td>
+</tr>
+<tr>
+<td><strong>This box is still marked as taking over</strong></td>
+<td>Checked every day at 07:40 CT on a box that took over as prod: the public name does not point at it yet (or could not be looked up). Point the Wix A records at it; the mark clears itself the first morning they do, and the alert stops.</td>
 </tr>
 </tbody>
 </table>

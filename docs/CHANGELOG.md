@@ -29,8 +29,8 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
     unreadable, the last good sync is past `max_age_h` (80) or the last run
     failed or was refused.
   - `tools/standby_fence.py` + `trading-prod-fence.service`: every prod service
-    requires it; it refuses on a role that is not prod, or on the public name
-    pointing at the peer. It fails open on any doubt, so it reaches vps2 through
+    requires it; it refuses on a role that is not prod, on the peer's proxy
+    answering, or on the public name pointing at the peer. It fails open on any doubt, so it reaches vps2 through
     an ordinary promote.
   - `tools/standby_failover.py`: `takeover` (refuses while any of three probes of
     the peer answers), `drill` (the dev profile, always restores the standby),
@@ -40,6 +40,18 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
   backup. `config/local/standby.toml` is not restored onto the standby. A
   takeover never refuses on stale data; it prints the age. The fence stays on
   every prod service.
+- **The final review's fixes.** The watch clears `taking_over` once the public name
+  points at the box (the fence only ran at a cold start) and alerts daily until it
+  does; it also alerts when `status.json` is past `[watch] status_max_age_h` (26).
+  The fence gained a second refusal (the peer's proxy answers, gateway errors not
+  counted), retries a failed lookup within its 30 s (`[fence]`), and imports its
+  config lazily so a failed import allows. `provision.sh` seeds the peer's host
+  keys (both pullers run `BatchMode=yes`). Neighbour venvs are rebuilt on the
+  recorded Python (`python-version`), scripts keep their exec bit.
+  `standby_failover.py stand-down` stops a live prod for a planned move; takeover
+  stops a running sync first. Runbook: the dry-run fence check (a fence restart
+  restarts the stack), keys after a role swap, the planned move, aborting a
+  half-finished takeover.
 - **Not done yet (operator).** Promote, provision vps3, write the two identity
   files, run the first sync by hand, run the drill, lower the Wix TTL. Until
   then nothing changes on prod except the fence unit, which passes with no
