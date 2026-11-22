@@ -240,6 +240,7 @@ def test_every_carried_secret_is_repo_relative():
     "shared/alphavantage_key.txt",
     "shared/massive_key.txt",
     "shared/proxy_secret.txt",          # the proxy's account routes refuse without it
+    "shared/feed_basic_auth.txt",       # the X News Feed login on cos.
     "deploy/site/ideas.json",           # the public site's published trade ideas
 ])
 def test_a_file_only_a_backup_can_bring_back_is_carried(rel):

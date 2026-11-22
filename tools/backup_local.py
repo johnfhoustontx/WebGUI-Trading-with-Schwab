@@ -143,6 +143,9 @@ EXTRA_FILES = (
     "shared/alphavantage_key.txt",
     "shared/massive_key.txt",
     "shared/proxy_secret.txt",
+    # X News Feed's login on the cos. host, read by the Caddyfile generator: a
+    # restore without it regenerates a Caddyfile that refuses /feed/.
+    "shared/feed_basic_auth.txt",
     # The public site's manifest of published trade ideas (the cards themselves
     # are swept from deploy/site/ideas below).
     "deploy/site/ideas.json",

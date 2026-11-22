@@ -516,6 +516,12 @@ APP_HOST  = str(_env_local.get("app_host") or f"app.{SITE_HOST}").strip().lower(
 # separated by ORIGIN rather than by a path filter someone has to get right.
 LIVE_HOST = str(_env_local.get("live_host") or f"live.{SITE_HOST}").strip().lower()
 
+# The Chief of Staff host: cos-hub (the phone app's sync) and X News Feed, two
+# services from OTHER repos on this box. This repo owns no code behind it, only
+# its block in the one Caddyfile there is: the generator rewrites the whole
+# file, so a host it does not know is a host `--install` deletes (2026-11-18).
+COS_HOST = str(_env_local.get("cos_host") or f"cos.{SITE_HOST}").strip().lower()
+
 
 def _public_proxy_url(raw, proxy_url):
     """The proxy's address as a BROWSER reaches it, or ``proxy_url``. Never raises.
