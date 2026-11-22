@@ -44,6 +44,10 @@ COMMIT_RE = re.compile(r"^[0-9a-f]{7,40}$")
 PROMOTED_TARGET = ".config/systemd/user/trading-prod.target"
 PULL_KEY = "~/.ssh/standby_pull"
 PARTIAL = ".partial"
+SYNCED = "SYNCED"                # written last: the whole night finished
+RSYNC_NO_FILE = 23               # rsync's "file not found"; any other failure is an outage
+# Settings the backup must never rewrite on the standby: they are the sync's own guards.
+SKIP_RESTORE = ("config/local/standby.toml",)
 
 
 class SyncError(Exception):
@@ -117,7 +121,12 @@ class RsyncRemote:
         target = self._pick()
         p = self._rsync(["--list-only", f"{target}:{gen}/{name}"],
                         timeout=self.timeout * 4 + 30)
-        return p.returncode == 0
+        if p.returncode == 0:
+            return True
+        if p.returncode == RSYNC_NO_FILE:
+            return False
+        raise SyncError(f"could not look for {gen}/{name} ({p.returncode}): "
+                        f"{(p.stderr or '').strip()[:200]}")
 
     def read(self, gen: str, name: str) -> str:
         target = self._pick()
@@ -264,8 +273,25 @@ def _copy_tree(src: pathlib.Path, dst: pathlib.Path, skip_top=()) -> None:
         os.chmod(out, 0o600)
 
 
+def _check_spec(spec: dict, home: pathlib.Path, repo: pathlib.Path | None) -> None:
+    name, raw = spec["name"], spec["dir"]
+    folder = pathlib.PurePosixPath(raw)
+    if (len(folder.parts) != 1 or folder.parts[0] in (".", "..") or raw.startswith(".")
+            or folder.is_absolute()):
+        raise SyncError(f"neighbour {name}: folder {raw!r} must be one plain folder "
+                        "name under home")
+    if repo is not None:
+        try:
+            checkout = pathlib.PurePosixPath(
+                pathlib.Path(repo).resolve().relative_to(pathlib.Path(home).resolve()).as_posix())
+        except ValueError:
+            checkout = None
+        if checkout is not None and checkout.parts[:1] == folder.parts:
+            raise SyncError(f"neighbour {name}: folder {raw!r} is the checkout")
+
+
 def restore_neighbours(gen: pathlib.Path, home: pathlib.Path, specs: list[dict],
-                       run=subprocess.run) -> None:
+                       run=subprocess.run, repo: pathlib.Path | None = None) -> None:
     """Put the generation's ``neighbours/<name>/`` back under ``home``.
 
     ``dir/`` over ``~/<dir>`` (its ``.venv`` untouched), ``files/`` at ``~/<rel>``
@@ -273,14 +299,26 @@ def restore_neighbours(gen: pathlib.Path, home: pathlib.Path, specs: list[dict],
     folder: the standby runs nothing). The venv is rebuilt only when the
     generation's freeze differs from the one kept from the last good night."""
     gen, home = pathlib.Path(gen), pathlib.Path(home)
+    # Check everything before writing anything: a bad night changes nothing here.
+    for spec in specs:
+        src = gen / bl.NEIGHBOURS_DIR / spec["name"]
+        if not src.is_dir():
+            continue
+        _check_spec(spec, home, repo)
+        listed = set(spec.get("files", []))
+        if (src / "files").is_dir():
+            for f in sorted((src / "files").rglob("*")):
+                if f.is_file() or f.is_symlink():
+                    rel = f.relative_to(src / "files").as_posix()
+                    if rel not in listed:
+                        raise SyncError(f"neighbour {spec['name']}: {rel} is not one "
+                                        "of its listed files")
     for spec in specs:
         name = spec["name"]
         src = gen / bl.NEIGHBOURS_DIR / name
         if not src.is_dir():
             continue
         folder = pathlib.PurePosixPath(spec["dir"])
-        if not _inside(home, folder):
-            raise SyncError(f"neighbour {name}: folder {spec['dir']!r} leaves home")
         if (src / "dir").is_dir():
             _copy_tree(src / "dir", home / folder, skip_top=(".venv",))
         if (src / "files").is_dir():
@@ -401,8 +439,12 @@ def _sync(now, status, previous, identity, remote, repo, home, settings, run_cmd
     age = generation_age_h(name, now)
     stale = age > settings["max_age_h"]
     final = gen_root / name
-    retry = (previous.get("generation") == name and previous.get("result") == "failed")
-    if final.is_dir() and not retry:
+    newest_done = [p for p in _finished(gen_root) if (p / SYNCED).is_file()]
+    if newest_done and _stamp(name) < _stamp(newest_done[-1].name):
+        raise SyncError(f"the newest complete generation on the peer ({name}) is older "
+                        f"than {newest_done[-1].name}, already synced here; "
+                        "the standby never goes backwards")
+    if (final / SYNCED).is_file():
         head = final / bl.GIT_HEAD
         status["commit"] = head.read_text(encoding="utf-8").strip() if head.is_file() else None
         if stale:
@@ -419,16 +461,23 @@ def _sync(now, status, previous, identity, remote, repo, home, settings, run_cmd
         _fetch(remote, name, final, gen_root, settings, status)
     move_code(commit, repo, run_cmd)
     out = []
-    summary = rb.restore(final, repo, force=True, allow=allowed_path, out=out.append)
-    if summary["bad"] or summary["refused"]:
-        raise SyncError("restore failed: "
-                        + "; ".join((summary["bad"] + summary["refused"])[:5]))
-    restore_neighbours(final, home, standby_config.neighbours(), run_cmd)
+    summary = rb.restore(
+        final, repo, force=True, out=out.append,
+        allow=lambda rel: allowed_path(rel) and rel.as_posix() not in SKIP_RESTORE)
+    norm = {r: r.replace("\\", "/") for r in summary["refused"]}
+    skipped = [n for n in norm.values() if n in SKIP_RESTORE]
+    refused = [r for r, n in norm.items() if n not in SKIP_RESTORE]
+    if summary["bad"] or refused:
+        raise SyncError("restore failed: " + "; ".join((summary["bad"] + refused)[:5]))
+    restore_neighbours(final, home, standby_config.neighbours(), run_cmd, repo=repo)
+    (final / SYNCED).write_text(now.isoformat(timespec="seconds"), encoding="utf-8")
     status["result"] = "synced"
+    notes = [f"not restored (this box's own setting): {', '.join(skipped)}"] if skipped else []
     if stale:
         status["result"] = "failed"
-        status["detail"] = (f"synced, but {name} is {age:.0f} h old "
-                            f"(limit {settings['max_age_h']} h)")
+        notes.append(f"synced, but {name} is {age:.0f} h old "
+                     f"(limit {settings['max_age_h']} h)")
+    status["detail"] = "; ".join(notes)
 
 
 def _fetch(remote, name, final, gen_root, settings, status) -> None:

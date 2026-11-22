@@ -317,7 +317,7 @@ def _neighbour_gen(tmp_path, freeze="a==1\n"):
     return gen
 
 
-SPEC = [{"name": "cos-hub", "dir": "cos-hub", "exclude": [], "units": [], "files": []}]
+SPEC = [{"name": "cos-hub", "dir": "cos-hub", "exclude": [], "units": [], "files": [".config/x/k.env"]}]
 
 
 def test_neighbour_venv_rebuilt_only_when_freeze_changes(tmp_path):
@@ -382,3 +382,105 @@ def test_rsync_fetch_flags(tmp_path):
     n = r.fetch(GEN, tmp_path / "d", tmp_path / "b")
     assert n == 1234 and "--no-links" in fake.argv
     assert any(a.startswith("--link-dest=") for a in fake.argv)
+
+
+def _planted(tmp_path, rel):
+    gen = _neighbour_gen(tmp_path)
+    f = gen / "neighbours" / "cos-hub" / "files" / rel
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text("evil")
+    return gen
+
+
+@pytest.mark.parametrize("rel", [".ssh/authorized_keys", "dev/x.py",
+                                 ".config/systemd/user/x.service"])
+def test_unlisted_neighbour_file_fails_and_writes_nothing(tmp_path, rel):
+    home = tmp_path / "home"
+    with pytest.raises(ss.SyncError, match="not one of its listed files"):
+        ss.restore_neighbours(_planted(tmp_path, rel), home, SPEC, run=FakeRun())
+    assert not (home / rel).exists() and not (home / "cos-hub").exists()
+
+
+@pytest.mark.parametrize("folder", ["dev", ".ssh", ".", "", "a/b", ".config"])
+def test_bad_neighbour_folder_fails(tmp_path, folder):
+    home = tmp_path / "home"
+    (home / "dev").mkdir(parents=True)
+    spec = [dict(SPEC[0], dir=folder)]
+    with pytest.raises(ss.SyncError):
+        ss.restore_neighbours(_neighbour_gen(tmp_path), home, spec, run=FakeRun(),
+                              repo=home / "dev")
+    assert not (home / "dev" / "app.py").exists()
+
+
+def test_local_standby_toml_is_skipped_not_refused(tmp_path, env):
+    repo, home = env
+    local = repo / "config" / "local"
+    local.mkdir(parents=True)
+    (local / "standby.toml").write_text("mine = 1")
+    remote = FakeRemote({GEN: FakeRemote.make(_files(
+        extra={"config/local/standby.toml": b"[sync] max_shrink_pct = 100"}))})
+    status, _, _ = _go(tmp_path, env, remote=remote)
+    assert status["result"] == "synced", status["detail"]
+    assert (local / "standby.toml").read_text() == "mine = 1"
+    assert "config/local/standby.toml" in status["detail"]
+    assert (repo / "config" / "local" / "a.toml").is_file()
+
+
+def test_local_standby_toml_not_created_when_absent(tmp_path, env):
+    remote = FakeRemote({GEN: FakeRemote.make(_files(
+        extra={"config/local/standby.toml": b"x"}))})
+    _go(tmp_path, env, remote=remote)
+    assert not (env[0] / "config" / "local" / "standby.toml").exists()
+
+
+def test_failed_restore_then_outage_then_not_unchanged(tmp_path, env, monkeypatch):
+    real = ss.rb.restore
+    monkeypatch.setattr(ss.rb, "restore", lambda *a, **k: {
+        "restored": [], "kept": [], "bad": ["x.db: corrupt"], "refused": [],
+        "marked_ok": True})
+    assert _go(tmp_path, env)[0]["result"] == "failed"
+    assert not (tmp_path / "gens" / GEN / "SYNCED").exists()
+    monkeypatch.setattr(ss.rb, "restore", real)
+
+    class Down(FakeRemote):
+        def generations(self):
+            raise ss.SyncError("the peer did not answer")
+    status, _, _ = _go(tmp_path, env, remote=Down())
+    assert status["generation"] is None and status["result"] == "failed"
+    remote = FakeRemote()
+    status, _, _ = _go(tmp_path, env, remote=remote, now=dt.datetime(2026, 11, 22, 22, 15))
+    assert status["result"] == "synced" and remote.fetched == []
+    assert (tmp_path / "gens" / GEN / "SYNCED").is_file()
+
+
+def test_has_outage_is_failure_not_absence(tmp_path):
+    def fake(argv, **kw):
+        return subprocess.CompletedProcess(argv, 255, "", "timed out")
+    r = ss.RsyncRemote(["up"], home=tmp_path, run=fake)
+    r._target = "up"
+    with pytest.raises(ss.SyncError):
+        r.has(GEN, "BACKUP_OK")
+    r._run = lambda argv, **kw: subprocess.CompletedProcess(argv, 23, "", "")
+    assert r.has(GEN, "BACKUP_OK") is False
+
+
+def test_outage_in_has_fails_night_without_fetch(tmp_path, env):
+    class Flaky(FakeRemote):
+        def has(self, gen, name):
+            raise ss.SyncError("outage")
+    remote = Flaky()
+    status, _, _ = _go(tmp_path, env, remote=remote)
+    assert status["result"] == "failed" and remote.fetched == []
+
+
+def test_never_goes_backwards(tmp_path, env, monkeypatch):
+    newer = "prod_2026-11-21_2000"
+    remote = FakeRemote({newer: FakeRemote.make()})
+    assert _go(tmp_path, env, remote=remote, now=dt.datetime(2026, 11, 22, 1, 0))[0][
+        "result"] == "synced"
+    old = FakeRemote({GEN: FakeRemote.make()})
+    called = []
+    monkeypatch.setattr(ss.rb, "restore", lambda *a, **k: called.append(1))
+    status, _, runner = _go(tmp_path, env, remote=old, now=dt.datetime(2026, 11, 22, 2, 0))
+    assert status["result"] == "failed" and "backwards" in status["detail"]
+    assert called == [] and old.fetched == []
