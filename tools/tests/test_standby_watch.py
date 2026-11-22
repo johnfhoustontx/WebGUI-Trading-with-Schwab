@@ -165,6 +165,94 @@ def test_watch_alerts_when_the_peer_has_no_ssh_target(monkeypatch):
     assert calls == [] and len(sent) == 1 and "unusable" in sent[0][0].lower()
 
 
+# --- the status file's own age ----------------------------------------------
+def test_assess_status_older_than_its_limit():
+    text = _text(checked_at="2026-11-21T05:00:00")             # 26.67 h before NOW
+    assert sw.assess(text, NOW, 80, status_max_age_h=26) \
+        == "the standby has not run since 2026-11-21T05:00:00"
+    assert sw.assess(text, NOW, 80, status_max_age_h=27) is None
+
+
+def test_assess_status_age_is_checked_before_the_last_result():
+    text = _text(result="failed", detail="disk full", checked_at="2026-11-19T22:15:00")
+    assert sw.assess(text, NOW, 80, status_max_age_h=26).startswith(
+        "the standby has not run since")
+
+
+def test_assess_unparseable_checked_at_is_unreadable():
+    assert sw.assess(_text(checked_at="yesterday"), NOW, 80, status_max_age_h=26) \
+        == "standby status unreadable"
+
+
+def test_watch_alerts_on_a_stale_status_file(monkeypatch):
+    _, sent = _wire(monkeypatch, PROD, fetched=_text(checked_at="2026-11-20T22:15:00"))
+    monkeypatch.setattr(sw.standby_config, "watch_settings", lambda: {"status_max_age_h": 26})
+    assert sw.main() == 0
+    assert len(sent) == 1 and "has not run since 2026-11-20T22:15:00" in " ".join(sent[0][1])
+
+
+# --- the takeover marker (C1) -----------------------------------------------
+def _box_file(monkeypatch, tmp_path, identity):
+    import repo_paths
+    from shared import standby_config as sc
+    path = tmp_path / "box.toml"
+    monkeypatch.setattr(repo_paths, "BOX_IDENTITY", path)
+    sc.write_identity(identity, path)
+    monkeypatch.setattr(sc, "boxes", lambda: {
+        "vps2": {"ssh": [], "public_ip": "10.0.0.2", "proxy_health": ""},
+        "vps3": {"ssh": ["vps3-ts"], "public_ip": "10.0.0.3", "proxy_health": ""}})
+    monkeypatch.setattr(sw.standby_config, "sync_settings", lambda: SETTINGS)
+    monkeypatch.setattr(sw, "fetch_status", lambda targets, timeout, **kw: None)
+    monkeypatch.setattr(sw, "_now", lambda: NOW)
+    sent = []
+    monkeypatch.setattr(sw, "_send", lambda title, lines: sent.append((title, lines)) or ["x"])
+    return path, sent
+
+
+def test_takeover_marker_is_cleared_once_dns_moves_with_no_reboot(monkeypatch, tmp_path, capsys):
+    from shared import standby_config as sc
+    path, sent = _box_file(monkeypatch, tmp_path, Identity("vps2", "prod", True))
+    # day 1: the public name still points at the old prod
+    monkeypatch.setattr(sw, "_lookup", lambda host: ["10.0.0.3"])
+    assert sw.main() == 0
+    assert sc.read_identity(path) == Identity("vps2", "prod", True)
+    marker = [s for s in sent if "taking over" in s[0].lower()]
+    assert len(marker) == 1
+    assert "does not point at it yet" in " ".join(marker[0][1])
+    # day 2: Wix moved; the watch clears the marker, no fence run, no reboot
+    sent.clear()
+    capsys.readouterr()
+    monkeypatch.setattr(sw, "_lookup", lambda host: ["10.0.0.2"])
+    assert sw.main() == 0
+    assert sc.read_identity(path) == Identity("vps2", "prod", False)
+    assert "takeover marker cleared" in capsys.readouterr().out
+    assert not [s for s in sent if "taking over" in s[0].lower()]
+    # day 3: nothing to clear, no lookup at all
+    looked = []
+    monkeypatch.setattr(sw, "_lookup", lambda host: looked.append(host) or ["10.0.0.2"])
+    assert sw.main() == 0 and looked == []
+
+
+def test_takeover_marker_alerts_every_morning_while_dns_points_at_the_peer(monkeypatch, tmp_path):
+    from shared import standby_config as sc
+    path, sent = _box_file(monkeypatch, tmp_path, Identity("vps2", "prod", True))
+    monkeypatch.setattr(sw, "_lookup", lambda host: ["10.0.0.3"])
+    for _ in range(2):
+        assert sw.main() == 0
+    assert len([s for s in sent if "taking over" in s[0].lower()]) == 2
+    assert sc.read_identity(path).taking_over is True
+
+
+def test_takeover_marker_failed_lookup_alerts_and_keeps_it(monkeypatch, tmp_path):
+    from shared import standby_config as sc
+    path, sent = _box_file(monkeypatch, tmp_path, Identity("vps2", "prod", True))
+    monkeypatch.setattr(sw, "_lookup", lambda host: None)
+    assert sw.main() == 0
+    marker = [s for s in sent if "taking over" in s[0].lower()]
+    assert len(marker) == 1 and "lookup failed" in " ".join(marker[0][1])
+    assert sc.read_identity(path).taking_over is True
+
+
 def test_watch_survives_a_failed_send(monkeypatch, capsys):
     _wire(monkeypatch, PROD, fetched=None)
 
