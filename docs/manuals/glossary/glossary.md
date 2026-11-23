@@ -84,8 +84,6 @@ Plain-English definitions of the terms you'll run into trading and analyzing opt
 
 **PM settlement** — Settles off the closing price on expiration day. SPXW (weeklies and dailies) and all equity options are PM settled.
 
-**AM Settled (in ThinkorSwim's contract description)** — The same idea as AM settlement, as a label: a futures-option series marked `(AM Settled)` expires on the morning of its date, before that day's trading, so it has nothing left to show during the session. The /ES and /NQ feed leaves such a series out.
-
 **SET** — The specific published settlement value for AM-settled SPX contracts. It's a calculated number, not a price anything actually traded at, which is why you occasionally see it land outside the day's range.
 
 **Adjusted option** — A contract whose terms were changed after a split, merger, spinoff, or special dividend. The deliverable may no longer be 100 clean shares. These trade badly, price strangely, and are usually best avoided.
@@ -290,8 +288,6 @@ These describe what market makers are forced to do to stay hedged, and why that 
 
 **Gamma flip level (zero gamma)** — The price where aggregate dealer gamma crosses from positive to negative. Behavior of the tape often changes character at this level.
 
-**Cumulative gamma flip** — A way of finding the flip by adding up net gamma strike by strike from the lowest strike upward and taking the price where that running total changes sign (the crossing nearest the price, within 3%). It moves less than reading each strike on its own when net gamma near the price is small and keeps changing sign. The app uses it for /ES and /NQ, where the per-strike reading jumped from capture to capture; every other symbol uses the per-strike rule.
-
 **Call wall** — The strike above spot with the largest concentration of call gamma or open interest. Often acts as resistance while dealers are long gamma.
 
 **Put wall** — The equivalent below spot. Often acts as support, and a break below it can accelerate.
@@ -434,7 +430,7 @@ Relevant if you're calculating any of this yourself rather than reading it off a
 
 **Black-Scholes-Merton** — The standard closed-form model for European options. Fast, analytic greeks, and the common language of the market. Its assumptions (constant volatility, lognormal returns, no jumps) are all wrong, which is precisely why the volatility surface exists — traders bend IV per strike to force the model to match reality.
 
-**Black-76** — The Black-Scholes variant for options on futures. The underlying is the future's price and carries no cost of carry, so its gamma is the normal density at d1 divided by the future's price, the volatility and the square root of the time left. The /ES and /NQ feed calculates its gamma this way, because ThinkorSwim's own gamma for them rounds to zero.
+**Black-76** — The Black-Scholes variant for options on futures. The underlying is the future's price and carries no cost of carry, so its gamma is the normal density at d1 divided by the future's price, the volatility and the square root of the time left.
 
 **Implied volatility solve** — IV isn't calculated directly; you invert the pricing model numerically until the theoretical price matches the market price. Bisection is robust, Newton-Raphson is fast, and hybrid approaches handle the deep wings where vega goes to nearly zero and the solve becomes unstable.
 

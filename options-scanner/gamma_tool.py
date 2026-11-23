@@ -762,7 +762,7 @@ class GammaEngine:
             "cells": cells,
         }
 
-    def calc_all_from_chain(self, chain, use_volume=False, now=None, hours_left=None):
+    def calc_all_from_chain(self, chain, use_volume=False, now=None):
         """Compute GEX, Charm, DEX, and Vanna in a single pass over the option chain.
 
         Equivalent to calling calc_from_chain, calc_charm_from_chain,
@@ -776,12 +776,6 @@ class GammaEngine:
         2026-10-14). The GEX collector passes the minute the chain was fetched
         for, so a minute derived later -- the raw feed's shadow check, catch-up
         after a restart -- prices exactly as it did live.
-
-        ``hours_left`` -- the hours to the contract's own expiry, for a chain
-        whose session is not the equity day (the /ES and /NQ feed, which trades
-        from the evening before). Given, it replaces the clock formula below
-        everywhere that formula is used; a negative or non-finite value floors
-        at zero as the formula does. None leaves every number as it was.
 
         Returns (gex_result, charm_result, dex_result, vanna_result). Each
         element matches the corresponding individual calc_* method's shape,
@@ -813,16 +807,10 @@ class GammaEngine:
         dte = min(dtes) if dtes else 0
         self._last_dte = dte
 
-        if hours_left is None:
-            hours_left_trading = max(
-                0.0, (CLOSE_HOUR_CT - now.hour) + (CLOSE_MIN_CT - now.minute) / 60.0,
-            )
-            T = max((dte * 24 + hours_left_trading) / (365 * 24), 1e-6)
-        else:
-            hours_left_trading = (float(hours_left)
-                                  if math.isfinite(float(hours_left)) else 0.0)
-            hours_left_trading = max(0.0, hours_left_trading)
-            T = max(hours_left_trading / (365 * 24), 1e-6)
+        hours_left_trading = max(
+            0.0, (CLOSE_HOUR_CT - now.hour) + (CLOSE_MIN_CT - now.minute) / 60.0,
+        )
+        T = max((dte * 24 + hours_left_trading) / (365 * 24), 1e-6)
         r = RISK_FREE_RATE
         weight_field = "totalVolume" if use_volume else "openInterest"
 
@@ -917,13 +905,10 @@ class GammaEngine:
 
         # DEX 0-DTE pressure — same logic as calc_dex_from_chain.
         if dte == 0 and zero_dte_contracts:
-            if hours_left is None:
-                hours_to_close = max(
-                    0.0,
-                    (CLOSE_HOUR_CT - now.hour) + (CLOSE_MIN_CT - now.minute) / 60.0,
-                )
-            else:
-                hours_to_close = hours_left_trading
+            hours_to_close = max(
+                0.0,
+                (CLOSE_HOUR_CT - now.hour) + (CLOSE_MIN_CT - now.minute) / 60.0,
+            )
             net_now, net_proj, pressure = project_0dte_pressure(
                 [(c, t) for c, t, _s in zero_dte_contracts], spot, hours_to_close,
             )

@@ -28,7 +28,6 @@ from gamma_tool import GammaEngine
 import gex_history_db as db
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # repo root
-from shared import futures_chain as _futures_chain  # noqa: E402
 from shared import symbols as _symbols  # noqa: E402
 from shared.raw_minute import RawMinute  # noqa: E402
 import iv_analysis
@@ -90,9 +89,7 @@ def collection_symbols():
         return list(SYMBOLS)
     out, seen = [], set()
     for s in list(SYMBOLS) + list(extra or []):
-        # /ES and /NQ have no chain at Schwab: the ticker rule passes their names, so
-        # a watchlist entry must not become a request every minute.
-        if s and s not in seen and not _futures_chain.is_feed_symbol(s):
+        if s and s not in seen:
             seen.add(s)
             out.append(s)
     return out
@@ -820,12 +817,8 @@ def derive_minute(engine, conn, minute: RawMinute, on_chain=None) -> None:
             # Single pass yields GEX, Charm, DEX, Vanna — all persisted below.
             # Priced AT the minute, not at the wall clock: a minute derived later
             # (the raw feed) must price exactly as it did live.
-            # Only a symbol with its own time left is handed one: every other call
-            # is the call it always was.
-            left = ({"hours_left": minute.hours_left[symbol]}
-                    if symbol in minute.hours_left else {})
             gex, charm, dex, vanna = engine.calc_all_from_chain(
-                chain, use_volume=False, now=minute_dt, **left)
+                chain, use_volume=False, now=minute_dt)
             dte = engine._last_dte
             if gex:
                 gex_summary = GammaEngine.snapshot_summary(gex)

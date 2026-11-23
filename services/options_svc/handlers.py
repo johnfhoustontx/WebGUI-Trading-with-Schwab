@@ -48,7 +48,6 @@ import os
 import json as _json
 from repo_paths import OPTIONS_TOGGLES as _OPTIONS_TOGGLES  # noqa: E402
 from shared import service_limits as _service_limits  # noqa: E402
-from shared import futures_chain
 from shared import market_calendar as mc
 from shared import public_gamma
 from shared import x_text
@@ -1839,16 +1838,9 @@ def refresh_gamma(bus, symbol="$SPX") -> None:
     A symbol the public live screens name lands in its published key too — the
     snapshot is already computed, so that write costs no chain fetch and no engine
     pass, and it keeps the public screen fresh on this path (the ``gamma_refresh``
-    command and the startup seed) for free.
-
-    An /ES or /NQ feed symbol is built from its stored chain and costs no fetch at
-    all, on this path and on the one-minute tick that calls it."""
-    if futures_chain.is_feed_symbol(symbol):
-        from services.options_svc import futures_chain_snapshot
-        snap = futures_chain_snapshot.snapshot(bus, symbol) or _empty_gamma(symbol)
-    else:
-        snap = _gamma_snapshot_or_empty(symbol)
-    _publish_gamma(bus, snap, symbol, targets=_gamma_targets(symbol))
+    command and the startup seed) for free."""
+    _publish_gamma(bus, _gamma_snapshot_or_empty(symbol), symbol,
+                   targets=_gamma_targets(symbol))
 
 
 def refresh_gamma_published(bus, symbol) -> None:
@@ -1879,10 +1871,6 @@ def refresh_gamma_hot(bus, symbol) -> bool:
     return True
 
 
-def _empty_gamma(symbol) -> dict:
-    return {"symbol": symbol, "spot": None, "dte": None, "views": {}, "term": {}}
-
-
 def _gamma_snapshot_or_empty(symbol) -> dict:
     """The snapshot, or the graceful-empty view when the chain fetch failed.
 
@@ -1892,7 +1880,7 @@ def _gamma_snapshot_or_empty(symbol) -> dict:
     blank screen and one labelled SPY showing $SPX."""
     snap = compute.gamma_snapshot(symbol)
     if snap is None:
-        return _empty_gamma(symbol)
+        return {"symbol": symbol, "spot": None, "dte": None, "views": {}, "term": {}}
     return snap
 
 
@@ -1919,10 +1907,7 @@ def _gamma_pub_targets(symbol, hot=None):
     PUBLISHED_GAMMA_HISTORY_VIEWS lists. A hot symbol (``hot``, default the
     running tick's hot set) gets the public page's views, TTL'd: all of them
     plus the main key for a visitor-picked symbol, only the missing views for a
-    permanent one. An /ES or /NQ feed symbol has none, whatever ``hot`` holds: the
-    feed is the private page's alone."""
-    if futures_chain.is_feed_symbol(symbol):
-        return ()
+    permanent one."""
     if hot is None:
         hot = gamma_public.tick_symbols()
     sym = str(symbol).strip().upper()
@@ -3256,13 +3241,9 @@ def publish_gamma_symbols(bus) -> None:
     """Compute the Gamma dropdown universe (collected symbols minus $VIX) and
     publish it to the bus so the Tier-3 Gamma page can populate its symbol
     dropdown without importing any engine. No strict contract: a small read-only
-    ``{"symbols":[...]}`` dict; ``compute.gamma_symbol_options`` is defensive.
-
-    The /ES and /NQ feed joins the PRIVATE list only, and only when switched on."""
-    from services.options_svc import futures_chain_snapshot
+    ``{"symbols":[...]}`` dict; ``compute.gamma_symbol_options`` is defensive."""
     data = {"symbols": compute.gamma_symbol_options()}
-    version = bus.cache_set(CACHE_GAMMA_SYMBOLS, {
-        "symbols": futures_chain_snapshot.private_symbol_options(data["symbols"])})
+    version = bus.cache_set(CACHE_GAMMA_SYMBOLS, data)
     bus.publish(EVENT_GAMMA_SYMBOLS, {"version": version})
     # The same list for the public Gamma page, in a key written FOR it: the
     # public process never reads the private page's key, and the hot-set worker

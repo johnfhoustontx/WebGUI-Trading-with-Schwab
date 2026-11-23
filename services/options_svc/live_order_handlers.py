@@ -63,8 +63,7 @@ import requests
 from repo_paths import PROXY_URL
 from services import _degrade
 from services.options_svc import live_order_store as store
-from shared import futures_chain, live_order, live_orders_config, market_calendar, \
-    tos_order_config
+from shared import live_order, live_orders_config, market_calendar, tos_order_config
 
 log = logging.getLogger(__name__)
 
@@ -212,8 +211,6 @@ def _read_idea(trade_id, idea_posted=None):
     if idea_posted is not None and row.get("idea_posted") != idea_posted:
         raise Refused("the Ledger's idea is not the one this ticket was opened for")
     symbol = str(row.get("symbol") or "")
-    if futures_chain.is_feed_symbol(symbol):
-        raise Refused("Schwab cannot place an order on /ES or /NQ options")
     expiration = str(row.get("expiration") or "")[:10]
     try:
         if _dt.date.fromisoformat(expiration) < _dt.datetime.fromtimestamp(_now(), _CT).date():
@@ -247,8 +244,6 @@ def _source(args):
         got = live_order.read_spec(spec, _today())
     except ValueError as e:
         raise Refused(str(e)) from None
-    if futures_chain.is_feed_symbol(got["symbol"]):
-        raise Refused("Schwab cannot place an order on /ES or /NQ options")
     return {"trade_id": quote_id, "idea_posted": None, "symbol": got["symbol"],
             "legs": got["legs"], "label": got["label"], "strategy": None,
             "posted_price": got["price"], "price_source": "panel"}

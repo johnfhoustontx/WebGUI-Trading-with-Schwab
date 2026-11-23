@@ -355,8 +355,6 @@ place.
   ticket view is built from the store without the hash or the payload's account,
   Schwab's answer is scrubbed first, and `test_send_order.py` pins that no module the
   public process loads names the keys.
-- `/ES` and `/NQ` (`futures_chain.is_feed_symbol`) are refused at the builder:
-  Schwab cannot place futures options.
 
 ## What is left out, and why
 

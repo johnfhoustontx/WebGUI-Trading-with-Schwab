@@ -26,9 +26,6 @@ controls in the browser: which expiry the bars, rail and read show, and Total
 or Net. The choice is kept on ``window`` so a repaint (one a minute) does not
 reset it. The sanitizer rules in ``flow_panels``' docstring apply here too, and
 ``tests/test_gamma_oi.py`` checks the emitted surface against the same list.
-
-The /ES and /NQ feed never shows this tab (``gamma_feed._HIDDEN_VIEWS``): its
-counts are scaled by contract size and are no number of contracts.
 """
 import datetime as _dt
 import json

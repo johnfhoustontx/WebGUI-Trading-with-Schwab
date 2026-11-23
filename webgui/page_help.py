@@ -79,9 +79,7 @@ on · what is being said.*
   read yet**, so every chip falls back to the three-month view and the strip says
   so under the count. A colour you see pre-open is **not** a statement about
   today.
-- **Dealer positioning** — one row each for **$SPX, SPY, QQQ, $NDX** (**/ES and
-  /NQ** follow once captures arrive: **scroll the panel** to reach them, and under
-  their price they say when they were captured, not a day change): price, the
+- **Dealer positioning** — one row each for **$SPX, SPY, QQQ, $NDX**: price, the
   **floor**, a little bar showing where price sits **between the walls**, the
   **ceiling** (the put and call walls — each coloured like its marker on the bar,
   and the ceiling only caps price while price is below it), the **flip level**
@@ -379,7 +377,7 @@ directional trades on their own tab.
 - **Send Live Order** (under it, while Settings → Configuration → *Live orders*
   is on) sends the same trade to your Schwab account as a REAL order, through a
   ticket (a window over the page) where you set the limit, the contracts and the account, and Schwab
-  previews it before anything is placed. Options only: no shares, no /ES or /NQ.
+  previews it before anything is placed. Options only: no shares.
 - **Probability vs Needs** (in the detail panel) — "Needs" is the win rate this
   trade's own price DEMANDS to break even. Probability above it is cushion,
   below it means the trade loses money over time even when it usually wins.
@@ -776,23 +774,6 @@ accelerate price.
 
 - **Symbol dropdown** — pick the index or stock. The page **remembers** your last
   symbol when you come back, and switching symbols refreshes automatically.
-- **/ES and /NQ** — the two futures, when the feed is switched on. Their chains do
-  not come from Schwab: **ThinkorSwim on your PC** captures the options expiring at
-  the end of the session, one capture every few minutes, from 06:00 Central that day.
-  ThinkorSwim's own gamma rounds to zero for these, so it is **calculated** from each
-  contract's implied volatility. The heat map draws one column per capture, so it holds one capture a
-  column rather than one minute. The line above the charts says when the numbers were
-  captured and which strikes were captured, and **they can go stale**: if the PC,
-  ThinkorSwim or the capture stops, the charts stay and the line turns into a **Stale**
-  notice with the age, or **Last session** once the session is over, and no **now**
-  line or projected afternoon is drawn from a stale capture. A capture a minute late is
-  nothing; time with none is a blank band labelled **No capture**, never a smooth
-  change, and Smooth does not reach across it. Flow and Open Interest are not offered for them,
-  and neither are Explain, Analyze and Briefings. The Bar and Smooth pickers still mean
-  minutes, but a bar only sees the captures inside it, so one no longer than the
-  capture interval holds a single reading. Their gamma flip is the **cumulative
-  flip**: where net gamma, added up strike by strike from the lowest, changes sign.
-  The per-strike flip other symbols use jumped between captures on these two.
 - **Gamma / Charm / Delta / Vanna / Flow / Net Prem / Open Interest** — the small tabs at
   the very top (under the page tabs): different lenses on dealer positioning; the
   **walls** mark likely support/resistance. The header names the one you're on,

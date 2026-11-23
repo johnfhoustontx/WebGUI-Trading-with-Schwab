@@ -229,9 +229,7 @@ def test_preview_refuses_with_the_switch_off(env):
     assert env.proxy.calls == []
 
 
-def test_preview_refuses_a_feed_symbol_and_sends_a_phase_2_butterfly(env):
-    env.rows[TRADE] = _row(symbol="FOP.ES")
-    assert "/ES" in _preview(env)["error"]
+def test_preview_sends_a_phase_2_butterfly(env):
     # Held as two middle legs: merged to the 1-2-1 Schwab takes.
     env.rows[TRADE] = _row(legs=[
         {"kind": "call", "side": "long", "strike": 95, "qty": 1, "expiration": EXP},
@@ -552,7 +550,6 @@ def test_a_panels_trade_is_quoted_and_previewed_from_its_own_legs(env):
 
 
 @pytest.mark.parametrize("spec, said", [
-    (_spec(symbol="FOP.ES"), "/ES"),
     (_spec(symbol="BAD KEY"), "ticker"),
     (_spec(legs=[{"kind": "call", "side": "short", "strike": 100, "expiration": EXP}]),
      "no limit"),

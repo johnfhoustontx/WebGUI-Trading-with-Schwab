@@ -35,7 +35,7 @@ from zoneinfo import ZoneInfo
 
 from services import _degrade
 from services.options_svc import raw_tee
-from shared import futures_chain, raw_store
+from shared import raw_store
 
 log = logging.getLogger(__name__)
 
@@ -139,22 +139,14 @@ def _term_diffs(live: list, shadow: list) -> list:
     return out
 
 
-def _without_feed(rows: dict) -> dict:
-    """``rows`` (keyed ``(symbol, view)``) without the /ES and /NQ feed's."""
-    feed = set(futures_chain.feed_symbols())
-    return {key: row for key, row in rows.items() if key[0] not in feed}
-
-
 def compare_minute(date_iso: str, ts: int, live_conn=None, root=None) -> dict:
     """Derive raw minute ``ts`` of session ``date_iso`` again and compare it with
     the live rows. ``{"ts", "rows", "diffs": [str], "ms", "missing_raw"}``;
     ``ms`` is the time the derive took. ``live_conn`` None opens
     ``gex_history.db`` read-only.
 
-    The /ES and /NQ feed's rows are left out, on both sides: it stores its own, not
-    through the collector, and a capture can share a minute with the poll without
-    being part of it. Any other symbol is compared, whether or not the raw minute
-    names it: a chain the raw minute lost is what this check is for."""
+    Every symbol is compared, whether or not the raw minute names it: a chain the
+    raw minute lost is what this check is for."""
     started = time.perf_counter()
     minute = raw_store.read_minute(date_iso, ts, root=root)
     if minute is None:
@@ -169,8 +161,8 @@ def compare_minute(date_iso: str, ts: int, live_conn=None, root=None) -> dict:
         own = live_conn is None
         live = gh.connect(read_only=True) if own else live_conn
         try:
-            shadow_rows = _without_feed(gh.rows_at(shadow, ts, DERIVED_VIEWS))
-            diffs = _row_diffs(_without_feed(gh.rows_at(live, ts, DERIVED_VIEWS)), shadow_rows)
+            shadow_rows = gh.rows_at(shadow, ts, DERIVED_VIEWS)
+            diffs = _row_diffs(gh.rows_at(live, ts, DERIVED_VIEWS), shadow_rows)
             if minute.term is not None:
                 ts_iso = datetime.fromtimestamp(int(ts), CT).isoformat()
                 diffs += _term_diffs(gh.load_term_snapshot(live, ts_iso, _TERM_SYMBOL),

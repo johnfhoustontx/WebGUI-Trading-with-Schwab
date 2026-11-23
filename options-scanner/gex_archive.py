@@ -146,10 +146,7 @@ def _copy_snapshots(source, archive, day, cfg) -> int:
               f"VALUES ({', '.join('?' * (len(columns) + 1))})")
     spot_at = columns.index("spot")
     written = 0
-    # The /ES and /NQ feed is not archived: its sessions are not the days this
-    # archive counts (see ``gex_history_db.FEED_SYMBOL_LIKE``).
-    keys = source.execute("SELECT DISTINCT symbol, view FROM snapshots "
-                          "WHERE symbol NOT LIKE ?", (gh.FEED_SYMBOL_LIKE,)).fetchall()
+    keys = source.execute("SELECT DISTINCT symbol, view FROM snapshots").fetchall()
     for symbol, view in keys:
         rows = source.execute(
             f"SELECT ts, {carried} FROM snapshots "

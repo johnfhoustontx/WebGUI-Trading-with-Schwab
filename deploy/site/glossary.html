@@ -67,7 +67,7 @@
 
   <div class="ns-wrap gl-wrap">
     <header class="gl-head">
-      <span class="ns-eyebrow">Options glossary · <span class="ns-count">235 terms</span></span>
+      <span class="ns-eyebrow">Options glossary · <span class="ns-count">233 terms</span></span>
       <h1 class="ns-h2">The words, in plain English.</h1>
       <p class="ns-body">Every term the app puts on screen, defined without the jargon:
         from what a contract is, to what dealer gamma means and why it moves price.
@@ -171,8 +171,6 @@
           <dd>The contract settles off the opening prices of the index components on expiration morning. SPX monthly contracts work this way, and the settlement value can differ noticeably from where the index printed at Thursday&#x27;s close.</dd>
           <dt>PM settlement</dt>
           <dd>Settles off the closing price on expiration day. SPXW (weeklies and dailies) and all equity options are PM settled.</dd>
-          <dt>AM Settled (in ThinkorSwim&#x27;s contract description)</dt>
-          <dd>The same idea as AM settlement, as a label: a futures-option series marked `(AM Settled)` expires on the morning of its date, before that day&#x27;s trading, so it has nothing left to show during the session. The /ES and /NQ feed leaves such a series out.</dd>
           <dt>SET</dt>
           <dd>The specific published settlement value for AM-settled SPX contracts. It&#x27;s a calculated number, not a price anything actually traded at, which is why you occasionally see it land outside the day&#x27;s range.</dd>
           <dt>Adjusted option</dt>
@@ -379,8 +377,6 @@
           <dd>Dealers are net short gamma, so they must buy as price rises and sell as it falls. This amplifies moves. Trend days, air pockets, and violent selloffs live here.</dd>
           <dt>Gamma flip level (zero gamma)</dt>
           <dd>The price where aggregate dealer gamma crosses from positive to negative. Behavior of the tape often changes character at this level.</dd>
-          <dt>Cumulative gamma flip</dt>
-          <dd>A way of finding the flip by adding up net gamma strike by strike from the lowest strike upward and taking the price where that running total changes sign (the crossing nearest the price, within 3%). It moves less than reading each strike on its own when net gamma near the price is small and keeps changing sign. The app uses it for /ES and /NQ, where the per-strike reading jumped from capture to capture; every other symbol uses the per-strike rule.</dd>
           <dt>Call wall</dt>
           <dd>The strike above spot with the largest concentration of call gamma or open interest. Often acts as resistance while dealers are long gamma.</dd>
           <dt>Put wall</dt>
@@ -525,7 +521,7 @@
           <dt>Black-Scholes-Merton</dt>
           <dd>The standard closed-form model for European options. Fast, analytic greeks, and the common language of the market. Its assumptions (constant volatility, lognormal returns, no jumps) are all wrong, which is precisely why the volatility surface exists — traders bend IV per strike to force the model to match reality.</dd>
           <dt>Black-76</dt>
-          <dd>The Black-Scholes variant for options on futures. The underlying is the future&#x27;s price and carries no cost of carry, so its gamma is the normal density at d1 divided by the future&#x27;s price, the volatility and the square root of the time left. The /ES and /NQ feed calculates its gamma this way, because ThinkorSwim&#x27;s own gamma for them rounds to zero.</dd>
+          <dd>The Black-Scholes variant for options on futures. The underlying is the future&#x27;s price and carries no cost of carry, so its gamma is the normal density at d1 divided by the future&#x27;s price, the volatility and the square root of the time left.</dd>
           <dt>Implied volatility solve</dt>
           <dd>IV isn&#x27;t calculated directly; you invert the pricing model numerically until the theoretical price matches the market price. Bisection is robust, Newton-Raphson is fast, and hybrid approaches handle the deep wings where vega goes to nearly zero and the solve becomes unstable.</dd>
           <dt>Binomial model (Cox-Ross-Rubinstein)</dt>
