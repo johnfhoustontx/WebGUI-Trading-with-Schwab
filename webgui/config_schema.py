@@ -1876,9 +1876,11 @@ _PAPER = ConfigFile(
                   "Also the budget the Market Scanner sizes spread widths against.",
                   kind="money", min=1, max=100000, step=50),
             Field("risk.ledger_max_risk_per_trade", "Paper Ledger (the Paper button)",
-                  "Also the budget the Strategy Finder and Income Window size "
-                  "credit spreads against, since their trades land here.",
-                  kind="money", min=1, max=100000, step=50),
+                  "0 = no per-trade limit (the symbol, sector and position caps "
+                  "still apply). Above 0 it is also the budget the Strategy "
+                  "Finder and Income Window size credit spreads against; at 0 "
+                  "they size against the Paper Account's cap.",
+                  kind="money", min=0, max=100000, step=50),
         )),
         Section("Symbol and sector loss caps",
                 "The most all open trades in one symbol, or in one sector, may "

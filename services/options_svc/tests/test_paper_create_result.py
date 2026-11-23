@@ -93,6 +93,9 @@ def test_the_real_outcome_round_trips_through_the_bus(monkeypatch, tmp_path):
     reset_fake_bus()
     bus = Bus(fake=True)
     _real_ledger(monkeypatch, tmp_path)
+    # The Ledger ships with no per-trade cap (0) since 2026-11-23; set one so the
+    # refusal under test is real.
+    monkeypatch.setattr(config_paper, "LEDGER_MAX_RISK_PER_TRADE", 750.0)
     cap = config_paper.LEDGER_MAX_RISK_PER_TRADE
     # Risk sized to sit $150 over whatever the cap is, so the refusal stays real
     # if the cap moves (at $750 this is the 10-wide $1.00-credit, $900 spread).

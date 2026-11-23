@@ -351,8 +351,9 @@ directional trades on their own tab.
   open it, so reopen it after a new scan.
 - **Click a row** for full details; the row buttons send it to the Calculator,
   paper-trade it, or chart its Expected Move.
-- **Paper-trading a row is checked against the Paper Ledger's risk limits** ($750
-  per trade, plus limits per symbol, sector, expiration and for the whole ledger).
+- **Paper-trading a row is checked against the Paper Ledger's risk limits** (per
+  symbol, sector, expiration and for the whole ledger; there is no per-trade limit
+  unless you set one in Settings → Configuration → Paper books).
   A message a moment after you send it says it opened, or why it was not — and
   when a smaller size would fit, how many contracts. Before you send, the Paper
   trade box shows each limit in green (fits) or red (breaks) for the quantity you
@@ -626,8 +627,8 @@ four top picks, and the full ranked list.
   strangles (study only), the iron butterfly, calendars, diagonals, or anything
   holding shares. The ledger also refuses a debit trade that arrives without a
   debit to pay.
-- **Paper checks the ledger's risk limits** ($750 per trade, plus limits per
-  symbol, sector, expiration and for the whole ledger). A message a moment later
+- **Paper checks the ledger's risk limits** (per symbol, sector, expiration and
+  for the whole ledger; no per-trade limit unless one is set). A message a moment later
   says the trade opened, or why it was not — and, when a smaller size would fit,
   how many contracts. The Paper trade box shows each limit in green or red for
   the quantity you type before you send.
@@ -1436,8 +1437,8 @@ engine's positions live on **Paper Account**.
   trail arms); a dash means no level, so a credit spread shows no stop until its
   trail arms.
 - **New trades must fit this ledger's risk limits** (trade ideas are the one
-  exception, below): at most $750 of max loss
-  per trade; 3 positions and $750 per symbol; 5 positions and $1,500 per sector;
+  exception, below): no limit per trade (Settings → Configuration can set one);
+  3 positions and $1,500 per symbol; 5 positions and $1,500 per sector;
   5 positions sharing one expiration; and open max loss at most 20% of equity
   ($25,000 plus your closed trades' realized P&L, so **Delete all closed** moves
   it). A trade that would break one is not written, and a message on the page you

@@ -56,9 +56,10 @@ def test_limits_are_the_accounts_counts_with_the_ledgers_own_risk_caps(ledger):
                       "max_risk_per_trade": config_paper.LEDGER_MAX_RISK_PER_TRADE,
                       "max_risk_per_symbol": config_paper.LEDGER_MAX_RISK_PER_SYMBOL,
                       "max_risk_per_sector": config_paper.LEDGER_MAX_RISK_PER_SECTOR}
-    # The Account's were raised and the Ledger's were not: they must not leak in.
+    # The Ledger ships with NO per-trade cap (0, since 2026-11-23) and its own
+    # $1,500 symbol and sector caps: the Account's must not leak in.
     assert (limits["max_risk_per_trade"], limits["max_risk_per_symbol"],
-            limits["max_risk_per_sector"]) == (750.0, 750.0, 1500.0)
+            limits["max_risk_per_sector"]) == (0.0, 1500.0, 1500.0)
 
 
 def test_a_non_finite_realized_pnl_is_dropped_not_summed(ledger, monkeypatch):
@@ -70,10 +71,11 @@ def test_a_non_finite_realized_pnl_is_dropped_not_summed(ledger, monkeypatch):
 
 def test_each_book_ships_its_own_per_trade_limit():
     # The Account's was $250 until 2026-09-22 and $750 until 2026-11-21, when the
-    # operator raised it to $1,500 and left the Ledger at $750 (operator
-    # decisions); two constants because two books. Values from config/paper.toml.
+    # operator raised it to $1,500. The Ledger's was $750 until 2026-11-23, when
+    # the operator took it off (0 = no per-trade limit). Two constants because
+    # two books. Values from config/paper.toml.
     import config_paper
-    assert config_paper.LEDGER_MAX_RISK_PER_TRADE == 750.0
+    assert config_paper.LEDGER_MAX_RISK_PER_TRADE == 0.0
     assert config_paper.MAX_RISK_PER_TRADE == 1500.0
 
 
@@ -105,7 +107,30 @@ def test_a_trade_within_every_cap_opens_and_reports_it(ledger):
     assert [t["trade_id"] for t in ledger.get_open_trades()] == [out["trade_id"]]
 
 
-def test_over_the_per_trade_cap_is_refused_and_nothing_is_written(ledger):
+@pytest.fixture
+def cap_750(monkeypatch):
+    """A $750 Ledger per-trade cap, the figure shipped until 2026-11-23: the rung
+    still binds whenever the operator sets one."""
+    import config_paper
+    monkeypatch.setattr(config_paper, "LEDGER_MAX_RISK_PER_TRADE", 750.0)
+
+
+def test_the_shipped_ledger_has_no_per_trade_cap(ledger):
+    """$900 on one trade was refused at the old $750 cap. Shipped, the per-trade
+    rung is not checked and the trade opens inside the $1,500 symbol cap."""
+    out = compute.create_paper_trade(_pcs(credit=1.00, width=10.0), 1)  # $900
+    assert out["status"] == "opened"
+    rung = next(r for r in out["rungs"] if r["code"] == "TRADE_RISK_CAP")
+    assert rung["skipped"] == "no per-trade limit" and not rung["binds"]
+
+
+def test_without_a_per_trade_cap_the_symbol_cap_still_binds(ledger):
+    out = compute.create_paper_trade(_pcs(credit=1.00, width=17.0), 1)  # $1,600
+    assert out["status"] == "refused" and out["code"] == "SYMBOL_RISK_CAP"
+    assert ledger.get_open_trades() == []
+
+
+def test_over_the_per_trade_cap_is_refused_and_nothing_is_written(ledger, cap_750):
     out = compute.create_paper_trade(_pcs(credit=1.00, width=10.0), 1)  # $900
     assert out["status"] == "refused"
     assert out["code"] == "TRADE_RISK_CAP"
@@ -114,14 +139,17 @@ def test_over_the_per_trade_cap_is_refused_and_nothing_is_written(ledger):
     assert ledger.get_open_trades() == []
 
 
-def test_quantity_counts_toward_the_per_trade_cap(ledger):
+def test_quantity_counts_toward_the_per_trade_cap(ledger, cap_750):
     out = compute.create_paper_trade(_pcs(), 4)          # 4 x $190 = $760
     assert out["status"] == "refused" and out["code"] == "TRADE_RISK_CAP"
     assert out["max_quantity"] == 3
 
 
-def test_the_account_limit_does_not_bind_the_ledger(ledger):
-    """$400 is over the Account's $250 but inside the Ledger's own $750."""
+def test_the_account_limit_does_not_bind_the_ledger(ledger, monkeypatch):
+    """$400 is over a $250 Account cap but inside the Ledger's own $750."""
+    import config_paper
+    monkeypatch.setattr(config_paper, "MAX_RISK_PER_TRADE", 250.0)
+    monkeypatch.setattr(config_paper, "LEDGER_MAX_RISK_PER_TRADE", 750.0)
     out = compute.create_paper_trade(_pcs(credit=1.00, width=5.0), 1)
     assert out["status"] == "opened"
 
@@ -193,7 +221,7 @@ def test_a_signal_missing_a_field_degrades_and_says_which(ledger, monkeypatch):
     assert ledger.get_open_trades() == []
 
 
-def test_the_suggested_quantity_really_opens(ledger):
+def test_the_suggested_quantity_really_opens(ledger, cap_750):
     """max_quantity is re-checked against what the Ledger would book."""
     out = compute.create_paper_trade(_pcs(), 4)
     assert out["status"] == "refused" and out["max_quantity"] == 3

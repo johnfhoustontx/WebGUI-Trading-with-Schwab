@@ -8,10 +8,10 @@ def test_paper_mode_is_a_bool():
 def test_risk_constants_present_and_sane():
     assert cp.STARTING_BALANCE == 25_000.0
     assert cp.MAX_RISK_PER_TRADE == 1500.0
-    assert cp.LEDGER_MAX_RISK_PER_TRADE == 750.0
+    assert cp.LEDGER_MAX_RISK_PER_TRADE == 0.0       # no per-trade limit
     assert cp.MAX_RISK_PER_SYMBOL == 1500.0
     assert cp.MAX_RISK_PER_SECTOR == 3000.0
-    assert cp.LEDGER_MAX_RISK_PER_SYMBOL == 750.0
+    assert cp.LEDGER_MAX_RISK_PER_SYMBOL == 1500.0
     assert cp.LEDGER_MAX_RISK_PER_SECTOR == 1500.0
     assert cp.MAX_SESSION_DRAWDOWN == 2_500.0
     assert cp.MIN_ENTRY_SCORE == 60

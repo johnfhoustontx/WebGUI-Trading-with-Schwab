@@ -43,6 +43,23 @@ def _root_is_protected():
     return mod.is_protected
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _grid_limits():
+    """The grid's books and candidates sit on the edges of a $750 per-trade, $750
+    per-symbol and $1,500 per-sector Ledger - the caps it shipped with until
+    2026-11-23, when the per-trade cap was taken off (0) and the symbol cap
+    raised. Pinned for the whole module (module scope, so the templates are
+    seeded and published under them too) because this file proves the preview
+    and the Ledger AGREE on every rung, which needs a per-trade rung that binds.
+    The shipped limits get their own agreement case at the end."""
+    import config_paper
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(config_paper, "LEDGER_MAX_RISK_PER_TRADE", 750.0)
+        mp.setattr(config_paper, "LEDGER_MAX_RISK_PER_SYMBOL", 750.0)
+        mp.setattr(config_paper, "LEDGER_MAX_RISK_PER_SECTOR", 1500.0)
+        yield
+
+
 @pytest.fixture
 def book_fit(monkeypatch):
     monkeypatch.syspath_prepend(str(_WEBGUI))
@@ -356,3 +373,40 @@ def test_the_quantity_rule_matches_the_ledgers(book_fit, templates, tmp_path,
         assert outcome["qty"] == book_fit.whole_quantity(qty) == 2
         assert [l["text"] for l in p["lines"]] == [
             book_caps.describe(r) for r in outcome["rungs"]]
+
+
+@pytest.mark.parametrize("qty,status,code", [
+    (1, "opened", None),                  # $900: refused at the old $750 cap
+    (2, "refused", "SYMBOL_RISK_CAP"),    # $1,800: over the $1,500 symbol cap
+])
+def test_the_shipped_limits_agree_with_no_per_trade_cap(book_fit, tmp_path, monkeypatch,
+                                                         qty, status, code):
+    """At the SHIPPED limits (no Ledger per-trade cap since 2026-11-23) the preview
+    and the Ledger still agree: the per-trade line is "Not checked" on both, and the
+    symbol cap is what binds a single trade."""
+    import config_paper
+    from shared import paper_limits
+    monkeypatch.setattr(config_paper, "LEDGER_MAX_RISK_PER_TRADE",
+                        paper_limits.ledger_max_risk_per_trade())
+    monkeypatch.setattr(config_paper, "LEDGER_MAX_RISK_PER_SYMBOL",
+                        paper_limits.ledger_max_risk_per_symbol())
+    monkeypatch.setattr(config_paper, "LEDGER_MAX_RISK_PER_SECTOR",
+                        paper_limits.ledger_max_risk_per_sector())
+    assert config_paper.LEDGER_MAX_RISK_PER_TRADE == 0.0
+    _point_ledger_at(monkeypatch, tmp_path / "shipped.db")
+    view = _published_view()
+    assert view["limits"]["max_risk_per_trade"] == 0.0
+
+    signal = _pcs("ORCL", E2, 1.00, 10.0)
+    stamped = compute.stamp_candidate(dict(signal), trade_type="SWING")
+    p = book_fit.preview(stamped, view, qty)
+    outcome = compute.create_paper_trade(dict(signal), qty)
+
+    assert outcome["status"] == status and outcome.get("code") == code, outcome
+    assert (p["breach"] is None) == (status == "opened")
+    assert [l["text"] for l in p["lines"]] == [
+        book_caps.describe(r) for r in outcome["rungs"]]
+    assert p["lines"][0]["text"] == "Not checked: no per-trade limit"
+    if status == "refused":
+        assert p["breach"]["code"] == code
+        assert p["max_quantity"] == outcome["max_quantity"] == 1

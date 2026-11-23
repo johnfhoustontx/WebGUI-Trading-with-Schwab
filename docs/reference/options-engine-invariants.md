@@ -166,13 +166,16 @@ refusal. Three decisions in it are load-bearing:
   a non-positive or non-finite risk BEFORE calling `evaluate`** — or a trade with
   no readable max loss passes every risk rung.
 - **Per-trade limits are two keys, one per book** ($750 each from 2026-09-22; the
-  Account's $1,500 since 2026-11-21)
+  Account's $1,500 since 2026-11-21; the Ledger's `0` = NO per-trade limit since
+  2026-11-23, and with it the Ledger's symbol cap went $750 -> $1,500)
   (`config/paper.toml` via `shared/paper_limits.py`, surfaced as module constants
   by `config_paper`). `MAX_RISK_PER_TRADE` is the Account's and also sizes the
   Market Scanner's widths (`DEFAULT_MAX_RISK_DOLLARS`); `LEDGER_MAX_RISK_PER_TRADE`
   is the Ledger's and sizes the Strategy Finder's and Income Window's credit
   spreads, because `swing_scan` passes it to `screen_spreads` at call time — their
-  trades book into the Ledger. The symbol and sector RISK caps are also one pair
+  trades book into the Ledger. ⚠ `0` is the one cap where zero is a setting
+  (`book_caps.evaluate` skips the per-trade rung); `swing_scan` then passes the
+  Account's cap instead, because a width budget of 0 emits no spread at all. The symbol and sector RISK caps are also one pair
   per book since 2026-11-21 (`paper_concentration.ledger_limits` gives the Ledger
   its own; before, both books shared the Account's). In each book one
   maximum-size trade fills its symbol's risk cap ($750 Ledger, $1,500 Account),

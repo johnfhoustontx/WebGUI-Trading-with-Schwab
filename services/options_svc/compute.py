@@ -1173,8 +1173,11 @@ def swing_scan(symbol, dte_min, dte_max, put_d_min, put_d_max,
                                          # the Income Window) book into the Paper
                                          # LEDGER, so the width search sizes
                                          # against that book's cap - read at call
-                                         # time - not the Account's default.
-                                         max_risk_dollars=config_paper.LEDGER_MAX_RISK_PER_TRADE,
+                                         # time. 0 there is NO per-trade limit,
+                                         # and a budget of 0 would emit no width,
+                                         # so it falls back to the Account's cap.
+                                         max_risk_dollars=(config_paper.LEDGER_MAX_RISK_PER_TRADE
+                                                           or config_paper.MAX_RISK_PER_TRADE),
                                          funnel=credit_funnel))
     if every_expiry:
         signals = _build_every_expiry(ssn, chain, symbol, spot, atm_iv, dte_min, hi,
@@ -2702,7 +2705,8 @@ def create_paper_trade(signal: dict, qty: int) -> dict:
     """Create a Paper LEDGER trade if it clears every risk cap; return the outcome.
 
     Since 2026-09-15 the Ledger enforces the Account's six caps plus its own
-    $750 per-trade limit (``LEDGER_MAX_RISK_PER_TRADE``), against its OWN open trades (design
+    per-trade limit (``LEDGER_MAX_RISK_PER_TRADE``; 0, as shipped since
+    2026-11-23, is no per-trade limit), against its OWN open trades (design
     2026-09-15-trade-checklist-and-ledger-caps). The checked risk is the
     ``max_loss_total`` of the trade ``paper_trader`` builds - the number it
     books - so the per-share/per-contract unit traps cannot separate them.

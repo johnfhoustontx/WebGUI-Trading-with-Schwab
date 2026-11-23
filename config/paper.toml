@@ -15,9 +15,12 @@
 max_risk_per_trade = 1500.0
 
 # The Paper Ledger's largest loss on one trade — the book the Paper button opens
-# into. The Strategy Finder and the Income Window size their credit spreads
-# against this cap, since that is where their trades are booked.
-ledger_max_risk_per_trade = 750.0
+# into. 0 = NO per-trade limit: the Ledger's symbol, sector, position and
+# deployment caps still apply. When it is 0 the Strategy Finder and the Income
+# Window size their credit spreads against max_risk_per_trade above; set a
+# figure here and they size against that instead. $750 until 2026-11-23, when
+# the operator took it off.
+ledger_max_risk_per_trade = 0.0
 
 # The summed max loss the Account may hold in ONE underlying, and in ONE sector
 # (config/sectors.toml groups them; the index products count as one). A symbol
@@ -28,7 +31,9 @@ max_risk_per_symbol = 1500.0
 max_risk_per_sector = 3000.0
 
 # The same two caps for the Paper Ledger, checked against its own open trades.
-ledger_max_risk_per_symbol = 750.0
+# The symbol cap was $750 until 2026-11-23; at $750 it refused every trade over
+# $750 on its own, so it was raised with the per-trade cap's removal.
+ledger_max_risk_per_symbol = 1500.0
 ledger_max_risk_per_sector = 1500.0
 
 [marks]

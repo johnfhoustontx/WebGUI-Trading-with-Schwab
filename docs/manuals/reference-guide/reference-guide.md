@@ -2780,8 +2780,9 @@ re-marks everything as new; that is page-side state, and deliberate.
 
 **Row actions** send a signal to the [Calculator](#calculator), open its
 [Expected Move](#expected-move), or paper-trade it. A paper trade goes to the
-[Paper Ledger](#paper-ledger) only if it fits that ledger's risk limits ($750 per
-trade, plus limits per symbol, sector, expiration and for the whole ledger). The
+[Paper Ledger](#paper-ledger) only if it fits that ledger's risk limits (per
+symbol, sector, expiration and for the whole ledger; no per-trade limit unless one
+is set). The
 Paper trade box shows each limit in green or red for the quantity typed before you
 send, and a message a moment later says whether it opened — or why not, and how many
 contracts would fit when a smaller size would.
@@ -2800,7 +2801,7 @@ detail panel.
 
 | Check | What it reads | Green | Amber |
 |---|---|---|---|
-| **Paper book** | the [Paper Ledger's](#paper-ledger) limits against its own open trades, for one contract | it fits, with the largest quantity that would | — (this one is **red** when it does not: *over $750 per trade*, *symbol full*, *sector risk full* …) |
+| **Paper book** | the [Paper Ledger's](#paper-ledger) limits against its own open trades, for one contract | it fits, with the largest quantity that would | — (this one is **red** when it does not: *symbol full*, *symbol risk full*, *sector risk full* …) |
 | **Earnings** | whether the company reports before the trade expires | no report scheduled, or one **after** expiry | a report **before** expiry, or on expiry day, with the date |
 | **Vol rank** | how rich this symbol's premium is against the floor the scan applies | at least **10 points above** the floor | inside those 10 points |
 | **Cost to trade** | the round-trip bid-ask as a share of the credit or debit | **10%** or less | more, and worded *very wide* above **25%** |
@@ -3487,23 +3488,26 @@ limit at all — the quantity you typed was the quantity booked.
 
 | Limit | Level |
 |---|---|
-| Per trade | at most **$750** of max loss |
-| Per symbol | **3** open positions and **$750** of max loss |
+| Per trade | no limit — Settings → Configuration → Paper books can set one |
+| Per symbol | **3** open positions and **$1,500** of max loss |
 | Per sector | **5** open positions and **$1,500** of max loss — the index products ($SPX, SPY, QQQ, $NDX, DIA, IWM) count as one group |
 | Per expiration | **5** open positions expiring the same day, across every symbol |
 | Whole ledger | open max loss at most **20%** of equity — $25,000 plus the realized P&L of closed trades |
 
 The position counts and the 20% limit are the [Paper Account](#paper-account)'s own.
 The three dollar limits — per trade, per symbol and per sector — are set separately
-for each book (Settings → Configuration → Paper books): the ledger's are **$750**,
-**$750** and **$1,500**, the Paper Account's **$1,500**, **$1,500** and **$3,000**. The ledger's figure is also the budget the Strategy
-Finder and Income Window size credit spreads against; the Paper Account's decides how
-wide the Market Scanner builds its spreads.
+for each book (Settings → Configuration → Paper books): the ledger's are **none**
+(a per-trade limit of 0 is no limit; it was $750 until 2026-11-23), **$1,500** and
+**$1,500**, the Paper Account's **$1,500**, **$1,500** and **$3,000**. The Paper
+Account's per-trade figure decides how wide the Market Scanner builds its spreads,
+and — while the ledger has no per-trade limit — how wide the Strategy Finder and
+Income Window build theirs; set a ledger figure and those two size against it.
 
 **The Paper trade box previews the same check before you send.** Under the trade's
 *Risk $X per contract* it shows one line per limit for the quantity typed — green
-when it fits (*Position 2 of 3 in ORCL*), red when it breaks (*Risks $950, over the
-$750 per-trade limit*), grey when it was not checked. A red line greys out
+when it fits (*Position 2 of 3 in ORCL*), red when it breaks (*ORCL risk would
+reach $1,800 of $1,500*), grey when it was not checked (*Not checked: no per-trade
+limit*). A red line greys out
 **Create** and says *Up to N contracts fit.* (or that no quantity fits), and the
 **Quantity** box drops back to the largest quantity that fits when you leave it; 100
 is the box's own ceiling. The box opens at the size the live order ticket would (the
@@ -3518,7 +3522,7 @@ preview is never a refusal.
 later, on the page you sent it from:
 
 - *Paper ledger: opened 2 × SPY Credit spread — put.*
-- *Paper ledger: not opened — risks $900, over the $750 per-trade limit. Up to 1
+- *Paper ledger: not opened — ORCL risk would reach $1,800 of $1,500. Up to 1
   contract fits.* **Up to N contracts fit** is the largest size of the same trade that
   clears every limit now; it is left off when not even one does.
 - *Paper ledger: not opened — ORCL already holds 3 of 3 positions.*
@@ -3527,8 +3531,8 @@ later, on the page you sent it from:
 
 - **Delete all closed moves the 20% limit**, because equity is built from the
   realized P&L of closed trades and deleting them deletes that history.
-- **One $750 trade fills its symbol**: the per-trade limit and the per-symbol risk
-  limit are the same number.
+- **One $1,500 trade fills its symbol and its sector**: with no per-trade limit,
+  the per-symbol and per-sector risk limits ($1,500 each) are what bound one trade.
 - **An old open row whose max loss cannot be read counts $0** toward the dollar
   limits, though it still counts toward the position limits.
 

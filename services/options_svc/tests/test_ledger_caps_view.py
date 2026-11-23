@@ -88,7 +88,8 @@ def test_the_real_book_round_trips(monkeypatch, tmp_path):
     handlers.refresh_ledger_caps(bus)
     p = bus.cache_get(handlers.CACHE_LEDGER_CAPS).payload
     assert p["open"][0]["max_loss_total"] == 190.0
-    assert p["limits"]["max_risk_per_trade"] == 750.0
+    assert p["limits"]["max_risk_per_trade"] == 0.0         # no per-trade cap, shipped
+    assert p["limits"]["max_risk_per_symbol"] == 1500.0
     assert p["equity"] == 25000.0
 
 

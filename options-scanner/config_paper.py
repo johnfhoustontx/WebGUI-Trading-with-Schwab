@@ -32,7 +32,8 @@ STARTING_BALANCE     = 25_000.0
 # LEDGER_MAX_RISK_PER_TRADE is the Paper LEDGER's own limit (the book the webgui
 # Paper button opens into): at $250 about two thirds of Directional long options
 # could not be opened by hand (measured on prod 2026-09-15); at $750 about a
-# fifth. Operator decision, 2026-09-15.
+# fifth. Operator decision, 2026-09-15. Since 2026-11-23 it ships 0.0 = NO
+# per-trade limit (the operator took the $750 off); book_caps skips the rung.
 import pathlib as _pathlib
 import sys as _sys
 
@@ -63,7 +64,8 @@ MAX_SESSION_DRAWDOWN = 2_500.0
 # per book: the Account's here, the Ledger's as LEDGER_* (paper_concentration
 # .ledger_limits swaps them in). Until 2026-11-21 both books shared $750 / $1,500, hard-coded
 # below; the Account's are $1,500 / $3,000 since, so one full-size trade still
-# fills a name and two names still fill a sector.
+# fills a name and two names still fill a sector. The Ledger's symbol cap went
+# $750 -> $1,500 on 2026-11-23, with its per-trade cap's removal.
 MAX_POSITIONS_PER_SYMBOL = 3       # open positions in one underlying
 MAX_RISK_PER_SYMBOL      = _paper_limits.max_risk_per_symbol()   # summed max loss in one underlying
 LEDGER_MAX_RISK_PER_SYMBOL = _paper_limits.ledger_max_risk_per_symbol()

@@ -64,8 +64,8 @@ import config_paper as _config_paper
 # orders (21.9%) rejected RISK_TOO_HIGH across 35 dates, 75 of them MU.
 #
 # The MANUAL book's cap is the default because run_full_scan's captured signals
-# feed that entry cycle. It is config/paper.toml's max_risk_per_trade ($750
-# since 2026-09-22).
+# feed that entry cycle. It is config/paper.toml's max_risk_per_trade ($1,500
+# since 2026-11-21).
 DEFAULT_MAX_RISK_DOLLARS = _config_paper.MAX_RISK_PER_TRADE
 
 _CONTRACT_MULT = 100.0                       # shares per option contract

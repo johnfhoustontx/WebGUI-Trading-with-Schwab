@@ -6,8 +6,9 @@ Two books, one file. Per trade:
   also sizes the scanner's width search (``scanner_engine.DEFAULT_MAX_RISK_DOLLARS``),
   so a width whose single contract busts it is never emitted.
 * ``ledger_max_risk_per_trade`` - the Paper Ledger's cap, the book the webgui
-  Paper button opens into. The Strategy Finder and the Income Window size their
-  credit spreads against THIS one, because that is where their trades land.
+  Paper button opens into. ``0`` means NO per-trade limit (shipped so since
+  2026-11-23); then the Strategy Finder and the Income Window size their credit
+  spreads against the Account's cap instead of this one.
 
 And the summed max loss in one underlying and in one sector
 (``shared/book_caps.py`` evaluates them), again one pair per book:
@@ -19,6 +20,9 @@ Both per-trade caps shipped at $750 (operator decision, 2026-09-22; the Account'
 was $250). On 2026-11-21 the operator raised the Account's to $1,500, with its
 symbol cap to $1,500 (one full trade per name, as before) and its sector cap to
 $3,000 (two names per sector, as before); the Ledger kept $750 / $750 / $1,500.
+On 2026-11-23 the operator took the Ledger's $750 per-trade cap off completely
+(``0``) and raised its symbol cap to $1,500, so a single Paper trade up to the
+$1,500 sector cap can open.
 
 Read by ``options-scanner/config_paper.py``, which keeps the module-level
 constants every consumer already imports. Missing file, bad TOML or a missing or
@@ -32,10 +36,10 @@ from shared.config_toml import toml_loader
 DEFAULTS = {
     "risk": {
         "max_risk_per_trade": 1500.0,
-        "ledger_max_risk_per_trade": 750.0,
+        "ledger_max_risk_per_trade": 0.0,      # 0 = no per-trade limit
         "max_risk_per_symbol": 1500.0,
         "max_risk_per_sector": 3000.0,
-        "ledger_max_risk_per_symbol": 750.0,
+        "ledger_max_risk_per_symbol": 1500.0,
         "ledger_max_risk_per_sector": 1500.0,
     },
     # A leg quoted with NO BID is still a market when its offer is at or under
@@ -245,8 +249,19 @@ def max_risk_per_trade() -> float:
 
 
 def ledger_max_risk_per_trade() -> float:
-    """The Paper Ledger's per-trade cap."""
-    return _dollars("ledger_max_risk_per_trade")
+    """The Paper Ledger's per-trade cap, or ``0.0`` for NO per-trade limit.
+
+    The one cap where zero is a setting rather than a typo: ``book_caps.evaluate``
+    already skips the per-trade rung when the cap is falsy ("no per-trade
+    limit"), and every other rung still binds. A negative, NaN or non-number
+    value reads as the shipped default."""
+    sec = load().get("risk")
+    raw = sec.get("ledger_max_risk_per_trade") if isinstance(sec, dict) else None
+    default = DEFAULTS["risk"]["ledger_max_risk_per_trade"]
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        return default
+    val = float(raw)
+    return val if math.isfinite(val) and val >= 0 else default
 
 
 def max_risk_per_symbol() -> float:

@@ -2556,8 +2556,8 @@ message says why. The limits:
 
 | Limit | Level |
 | --- | --- |
-| Per trade | at most **$750** of max loss |
-| Per symbol | **3** open positions and **$750** of max loss |
+| Per trade | no limit — Settings → Configuration → Paper books can set one |
+| Per symbol | **3** open positions and **$1,500** of max loss |
 | Per sector | **5** open positions and **$1,500** of max loss (the index products — $SPX, SPY, QQQ, $NDX, DIA, IWM — share one group) |
 | Per expiration | **5** open positions expiring the same day, across every symbol |
 | Whole ledger | open max loss at most **20%** of equity — $25,000 plus the realized P&L of your closed trades |
@@ -2568,8 +2568,8 @@ $190 per contract*), and one line for each limit, worked out for the quantity yo
 type:
 
 - **green** — this trade fits that limit: *Position 2 of 3 in ORCL*, *ORCL risk
-  would reach $380 of $750*;
-- **red** — this quantity breaks it: *Risks $950, over the $750 per-trade limit*,
+  would reach $380 of $1,500*;
+- **red** — this quantity breaks it: *ORCL risk would reach $1,800 of $1,500*,
   *ORCL already holds 3 of 3 positions*;
 - **grey** — *Not checked*, with the reason.
 
@@ -2595,7 +2595,7 @@ again.
 A second or so after you press **Create** in the quantity box, a message answers the click:
 
 - *Paper ledger: opened 2 × SPY Credit spread — put.*
-- *Paper ledger: not opened — risks $900, over the $750 per-trade limit. Up to 1
+- *Paper ledger: not opened — ORCL risk would reach $1,800 of $1,500. Up to 1
   contract fits.* — **Up to N contracts fit** is the largest quantity of the same
   trade that would clear every limit right now; send again with that number. It is
   left off when not even one contract fits.
@@ -2603,8 +2603,8 @@ A second or so after you press **Create** in the quantity box, a message answers
   position in that symbol, sector or expiration first.
 
 ⚠ Equity counts your closed trades' realized P&L, so **Delete all closed** also
-changes the 20% limit. A $750 trade by itself uses the whole $750 allowance for its
-symbol. The limits apply to this ledger only — the Paper Account's automatic
+changes the 20% limit. With no per-trade limit, the $1,500 symbol and sector limits
+are what bound one trade: a $1,500 trade by itself fills both. The limits apply to this ledger only — the Paper Account's automatic
 engine has its own, higher ones: $1,500 per trade, $1,500 per symbol and
 $3,000 per sector.
 

@@ -74,8 +74,10 @@ def _expectations():
     be on it. A count is a bare whole number; money and percent are as printed.
     The three dollar caps are the LEDGER's own since 2026-11-21 (the Account's
     were raised and the Ledger's were not); the counts and the 20% are shared."""
+    per_trade = config_paper.LEDGER_MAX_RISK_PER_TRADE
     return [
-        ("per trade", _dollars(config_paper.LEDGER_MAX_RISK_PER_TRADE)),
+        # 0 is NO per-trade limit (shipped since 2026-11-23), stated in words.
+        ("per trade", _dollars(per_trade) if per_trade else "no limit"),
         ("per symbol", str(config_paper.MAX_POSITIONS_PER_SYMBOL)),
         ("per symbol", _dollars(config_paper.LEDGER_MAX_RISK_PER_SYMBOL)),
         ("per sector", str(config_paper.MAX_POSITIONS_PER_SECTOR)),

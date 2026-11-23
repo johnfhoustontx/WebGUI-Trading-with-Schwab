@@ -22,12 +22,13 @@ def toml(tmp_path, monkeypatch):
 
 
 def test_shipped_values():
-    # The Account's three caps were raised on 2026-11-21; the Ledger's were not.
+    # The Account's three caps were raised on 2026-11-21. On 2026-11-23 the
+    # Ledger's per-trade cap was taken off (0) and its symbol cap raised.
     assert pl.max_risk_per_trade() == 1500.0
     assert pl.max_risk_per_symbol() == 1500.0
     assert pl.max_risk_per_sector() == 3000.0
-    assert pl.ledger_max_risk_per_trade() == 750.0
-    assert pl.ledger_max_risk_per_symbol() == 750.0
+    assert pl.ledger_max_risk_per_trade() == 0.0
+    assert pl.ledger_max_risk_per_symbol() == 1500.0
     assert pl.ledger_max_risk_per_sector() == 1500.0
 
 
@@ -36,6 +37,21 @@ def test_a_symbol_cap_never_sits_below_its_books_trade_cap():
     per-trade cap silently refuses every trade between the two."""
     assert pl.max_risk_per_symbol() >= pl.max_risk_per_trade()
     assert pl.ledger_max_risk_per_symbol() >= pl.ledger_max_risk_per_trade()
+
+
+def test_zero_switches_the_ledger_per_trade_cap_off(toml):
+    # The one cap where 0 is a setting: book_caps skips the rung ("no per-trade
+    # limit"). Every other cap still treats 0 as unusable (below).
+    toml("[risk]\nledger_max_risk_per_trade = 750\n")
+    assert pl.ledger_max_risk_per_trade() == 750.0
+    toml("[risk]\nledger_max_risk_per_trade = 0\n")
+    assert pl.ledger_max_risk_per_trade() == 0.0
+
+
+@pytest.mark.parametrize("bad", ["-5", "nan", "inf", "true", '"x"'])
+def test_an_unusable_ledger_per_trade_cap_reads_as_no_limit(toml, bad):
+    toml(f"[risk]\nledger_max_risk_per_trade = {bad}\n")
+    assert pl.ledger_max_risk_per_trade() == pl.DEFAULTS["risk"]["ledger_max_risk_per_trade"]
 
 
 def test_the_file_overrides_each_cap(toml):
@@ -63,7 +79,8 @@ def test_an_unusable_cap_falls_back_to_the_default(toml, key, bad):
 
 def test_a_missing_file_is_the_defaults(toml):
     toml("")
-    assert math.isclose(pl.ledger_max_risk_per_trade(), 750.0)
+    assert pl.ledger_max_risk_per_trade() == 0.0
+    assert math.isclose(pl.ledger_max_risk_per_symbol(), 1500.0)
 
 
 def test_the_shipped_file_matches_the_defaults():

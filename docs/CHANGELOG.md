@@ -4,7 +4,33 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-22 (**A warm standby on a second provider: the code is built, the rollout to vps3 is the operator's.**)
+**Last updated:** 2026-11-23 (**The Paper Ledger's $750 per-trade cap is off; its symbol cap is $1,500.**)
+
+- **Why.** The operator asked for the $750 blocker on the Market Scanner's Paper
+  button to come off completely. The Ledger had two $750 caps: per trade and per
+  symbol. Removing only the first would still refuse every trade over $750 through
+  the second, so the operator chose: per-trade cap off, symbol cap raised to
+  $1,500 (the sector cap's figure).
+- **The pieces.**
+  - `shared/paper_limits.ledger_max_risk_per_trade` reads `0` as NO per-trade
+    limit (the one cap where zero is a setting; a negative, NaN or non-number
+    still reads as the default, now `0`). `book_caps.evaluate` already skipped the
+    rung on a falsy cap ("Not checked: no per-trade limit"), so the Ledger, the
+    published `options:ledger_caps` view and the Paper dialog's preview follow
+    with no change of their own.
+  - `config/paper.toml`: `ledger_max_risk_per_trade = 0.0`,
+    `ledger_max_risk_per_symbol = 1500.0`. Settings → Configuration accepts 0.
+  - `compute.swing_scan`: the Strategy Finder and Income Window sized their credit
+    spreads against the Ledger cap; a budget of 0 emits no width, so with no
+    Ledger cap they size against the Account's `MAX_RISK_PER_TRADE` ($1,500).
+  - Unchanged: the Ledger's $1,500 sector cap, its position-count caps and the 20%
+    deployment cap; the Paper Account's caps.
+  - Tests: the grid in `test_preview_agrees_with_ledger.py` pins the old $750 /
+    $750 / $1,500 trio for the module (it proves agreement on every rung) and gains
+    an agreement case at the shipped limits. Manuals, `page_help.py` and the
+    routes doc no longer quote $750.
+
+**Prior —** 2026-11-22 (**A warm standby on a second provider: the code is built, the rollout to vps3 is the operator's.**)
 
 - **Why.** The first server was suspended by its provider on 2026-08-30 and the
   stack stayed dark until a replacement was restored by hand. The operator bought

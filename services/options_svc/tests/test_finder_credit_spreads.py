@@ -16,12 +16,23 @@ def _scan():
 
 def test_the_width_search_is_sized_against_the_ledger_cap(income_seams, monkeypatch):  # noqa: F811 - a fixture
     # Patched to a value neither book ships, so the test proves WHICH constant
-    # is read - both caps ship at $750 - and that it is read at call time.
+    # is read, and that it is read at call time.
     import config_paper
     monkeypatch.setattr(config_paper, "LEDGER_MAX_RISK_PER_TRADE", 123.0)
     monkeypatch.setattr(config_paper, "MAX_RISK_PER_TRADE", 456.0)
     _scan()
     assert income_seams["screen"]["kw"]["max_risk_dollars"] == 123.0
+
+
+def test_no_ledger_per_trade_cap_sizes_against_the_account_cap(income_seams, monkeypatch):  # noqa: F811 - a fixture
+    # 0 is "no per-trade limit" on the Ledger (shipped since 2026-11-23). Passed
+    # through, a budget of 0 would size every width out and the Finder and the
+    # Income Window would list no credit spread at all.
+    import config_paper
+    monkeypatch.setattr(config_paper, "LEDGER_MAX_RISK_PER_TRADE", 0.0)
+    monkeypatch.setattr(config_paper, "MAX_RISK_PER_TRADE", 456.0)
+    _scan()
+    assert income_seams["screen"]["kw"]["max_risk_dollars"] == 456.0
 
 
 def test_the_reject_tally_rides_back_on_the_result(income_seams):  # noqa: F811 - a fixture
