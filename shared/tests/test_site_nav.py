@@ -6,7 +6,9 @@ the site's own declarations); every address in it is a page on the public site
 -- never the live origin's, never the app's; and a framed document shows ONE
 logo whether it is framed or opened on its own.
 """
+import datetime as dt
 import html
+import json
 import pathlib
 import re
 import subprocess
@@ -133,7 +135,7 @@ _OURS = _rules(site_nav.SITE_NAV_CSS)
 _FROM_SITE = (".ns-nav", ".ns-spacer", ".ns-brand", ".ns-brand .ns-brand-b",
               ".ns-lockup", ".ns-mark", ".ns-mark-rule", ".ns-mark-fig", ".ns-crumb",
               ".ns-navlink", ".ns-navlink:hover", '.ns-navlink[aria-current="page"]',
-              "a", "a:hover")
+              "a", "a:hover", ".ns-navlink.ns-has-new", ".ns-new")
 _FROM_NOCTURNE = (".btn", ".btn-primary", ".btn-primary:hover", ".btn-primary:active")
 
 
@@ -280,3 +282,99 @@ def test_page_parts_refuses_a_page_with_two_menus(tmp_path):
 
 def test_page_parts_of_a_missing_page_is_none(tmp_path):
     assert site_nav.page_parts(tmp_path, "nope.html") is None
+
+
+# ── the "new" tag on Blog ────────────────────────────────────────────────────
+
+_UTC = dt.timezone.utc
+_AT = dt.datetime(2026, 11, 24, 15, 0, tzinfo=_UTC)
+
+
+def _blog_list(tmp_path, body):
+    path = tmp_path / "blog.json"
+    path.write_text(body if isinstance(body, str) else json.dumps(body), encoding="utf-8")
+    return path
+
+
+def test_blog_is_new_before_new_until_and_not_from_it(tmp_path):
+    path = _blog_list(tmp_path, {"entries": [], "new_until": "2026-11-24T15:00:00+00:00"})
+    assert site_nav.blog_is_new(_AT - dt.timedelta(seconds=1), path=path) is True
+    assert site_nav.blog_is_new(_AT, path=path) is False
+    assert site_nav.blog_is_new(_AT + dt.timedelta(days=1), path=path) is False
+
+
+@pytest.mark.parametrize("body", [
+    "", "not json", "[]", {"entries": []}, {"new_until": None}, {"new_until": 5},
+    {"new_until": "soon"}, {"new_until": "2026-12-01T00:00:00"},   # no offset
+])
+def test_anything_but_a_readable_new_until_is_not_new(tmp_path, body):
+    assert site_nav.blog_is_new(_AT, path=_blog_list(tmp_path, body)) is False
+
+
+def test_no_list_at_all_is_not_new(tmp_path):
+    assert site_nav.blog_is_new(_AT, path=tmp_path / "missing.json") is False
+
+
+@pytest.fixture
+def window_open(tmp_path, monkeypatch):
+    monkeypatch.setattr(site_nav, "BLOG_LIST", _blog_list(
+        tmp_path, {"entries": [], "new_until": "2999-01-01T00:00:00+00:00"}))
+
+
+def test_the_tag_goes_on_the_blog_link_and_nothing_else(window_open):
+    nav = site_nav.site_nav_html("The Desk", mark_new=True)
+    assert nav.count(site_nav.NEW_BADGE_HTML) == 1
+    link = re.search(r'<a [^>]*href="https://[^"]*/blog\.html"[^>]*>(.*?)</a>', nav, re.S)
+    assert link, "no Blog link in the menu"
+    assert link.group(1) == "Blog" + site_nav.NEW_BADGE_HTML
+    assert 'class="ns-navlink ns-has-new"' in link.group(0)
+    assert 'aria-label="Blog, new entry"' in link.group(0)
+
+
+def test_no_tag_unless_asked(window_open):
+    nav = site_nav.site_nav_html("The Desk")
+    assert "ns-new" not in nav and "ns-has-new" not in nav
+
+
+def test_no_tag_once_the_window_has_passed(tmp_path, monkeypatch):
+    monkeypatch.setattr(site_nav, "BLOG_LIST", _blog_list(
+        tmp_path, {"entries": [], "new_until": "2000-01-01T00:00:00+00:00"}))
+    nav = site_nav.site_nav_html("The Desk", mark_new=True)
+    assert 'class="ns-navlink' in nav and "ns-has-new" not in nav
+
+
+def test_the_tag_keeps_the_current_page_mark_on_blog(window_open):
+    nav = site_nav.site_nav_html(current=site_nav.BLOG, mark_new=True)
+    link = re.search(r'<a [^>]*href="https://[^"]*/blog\.html"[^>]*>', nav).group(0)
+    assert 'aria-current="page"' in link and "ns-has-new" in link
+
+
+def test_a_document_never_carries_the_tag(window_open):
+    """A document is built once and kept, so a tag in it would outlive its
+    window: ``inject_into_document`` never asks for one."""
+    doc = "<html><head></head><body><p>x</p></body></html>"
+    out = site_nav.inject_into_document(doc, current=site_nav.REPORT)
+    assert "ns-doc-bar" in out, "no bar was injected -- this would be vacuous"
+    assert site_nav.NEW_BADGE_HTML not in out and 'class="ns-navlink ns-has-new"' not in out
+
+
+def test_the_tag_is_the_option_signals_new_badge():
+    """The same tag the app puts on an unseen signal (scanner.py _SYMBOL_SLOT):
+    the word, the blue and the size."""
+    scanner = (pathlib.Path(repo_paths.REPO_ROOT) / "webgui" / "pages" / "options"
+               / "scanner.py").read_text(encoding="utf-8")
+    slot = re.search(r'<q-badge v-if="props.row._new" label="(\w+)"\s+class="([^"]*)"', scanner)
+    assert slot, "the scanner's new badge moved; re-read it"
+    assert slot.group(1) == site_nav.NEW_TEXT
+    assert "bg-[#1565c0]" in slot.group(2) and "text-[9px]" in slot.group(2)
+    rule = _OURS[".ns-site-bar .ns-new"]
+    assert rule["background"] == "#1565c0" and rule["font-size"] == "9px"
+
+
+def test_the_tag_slopes_down_to_the_right_and_glows():
+    rule = _OURS[".ns-site-bar .ns-new"]
+    angle = re.fullmatch(r"rotate\((\d+(?:\.\d+)?)deg\)", rule["transform"])
+    assert angle and 0 < float(angle.group(1)) < 45, rule["transform"]
+    assert "ns-new-glow" in rule["animation"]
+    assert "@keyframes ns-new-glow" in site_nav.SITE_NAV_CSS
+    assert "prefers-reduced-motion" in site_nav.SITE_NAV_CSS

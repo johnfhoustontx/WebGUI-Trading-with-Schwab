@@ -598,6 +598,37 @@ private Social Cards page lists with a Download, a caption and a Post to X.
   process can read like every `cache:blog:*` view; it carries only what the public
   site already shows.
 
+## The "new" tag on the menu
+
+For `[site] new_badge_hours` (48 as shipped) after an entry is first published,
+the site's menu shows a small glowing "new" on **Blog**: the app's Option Signals
+"new" badge (`webgui/pages/options/scanner.py`, `_SYMBOL_SLOT`), tilted 14 degrees
+so it slopes down to the right.
+
+- **One decision, in one place.** `sitewriter.new_until` writes the end of the
+  window into `blog.json`: the newest FIRST publication plus the hours, in UTC
+  seconds, or `null`. A revision does not count, as it does not move an entry up
+  the list. Nothing else holds a number of hours.
+- **The site's pages** (the six tracked pages, and every trade-idea page, which
+  `trade_pages.py` writes with the same scripts) load `assets/blog-new.js`, which
+  fetches `blog.json`, compares the visitor's clock with `new_until`, adds the tag
+  to `nav a[href="blog.html"]`, and takes it off at that moment on a page left
+  open. Any failure leaves the menu as it was.
+- **The live screens** have no script of their own in the menu, so
+  `live_main._header` calls `site_nav_html(mark_new=True)`, which asks
+  `site_nav.blog_is_new()` (the same `blog.json`, read from disk) when the page
+  is built and draws the tag inside the window. A screen left open past the
+  window keeps it until it is reloaded. `live_main.py` never names the Blog
+  itself: `webgui/tests/test_blog.py` keeps the word out of the public
+  process's own source.
+- **Not on an entry's page or in a framed document.** An entry's page runs no
+  script by rule, and a document gains its bar once, when it is written, so a
+  tag there would outlive its window (`inject_into_document` never asks for one).
+  On an entry's page the reader is already in the Blog.
+- The look is `.ns-new` in `site.css`, copied into `site_nav.SITE_NAV_CSS`;
+  `shared/tests/test_site_nav.py` compares the two, and `deploy/tests/test_site.py`
+  checks that the script, the stylesheet and the live menu use the same classes.
+
 ## The public files
 
 All under `deploy/site/`, all gitignored generated state like `ideas/` and
@@ -606,7 +637,7 @@ All under `deploy/site/`, all gitignored generated state like `ideas/` and
 
 | Path | Purpose |
 |---|---|
-| `blog.json` | The list `assets/blog.js` draws |
+| `blog.json` | The list `assets/blog.js` draws, and `new_until`: when the menu's "new" tag on Blog comes off. See [The "new" tag](#the-new-tag-on-the-menu) |
 | `blog/<address>/card.png` · `card.jpg` · `card.json` | The entry's social card (2400 x 1260), its JPEG copy, and `{"digest": ...}`, what the card was drawn from. See [The social card](#the-social-card) |
 | `blog/<address>/index.html` | The entry's page: the site menu around a frame |
 | `blog/<address>/entry.html` | The entry itself, with the site's top bar put in (`shared/site_nav.inject_into_document`); the store keeps it as cleaned |

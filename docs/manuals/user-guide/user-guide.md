@@ -3765,6 +3765,11 @@ removes its card too.
    address. The full public address is printed under the box.
 5. Press **Publish** and confirm. The entry is on the public site at once.
 
+For two days after you publish a new entry, **Blog** in the site's menu carries a
+small glowing **new** tag, on every page of the site and on the live screens.
+Replacing an existing entry does not bring the tag back. The two days are set
+under Settings → Configuration → Site blog (0 turns the tag off).
+
 - **What cleaning removes:** scripts, forms, event handlers, embedded frames,
   images, and links out to other sites' stylesheets. The typefaces the document
   asks Google Fonts for are copied onto this server instead, and the draft says

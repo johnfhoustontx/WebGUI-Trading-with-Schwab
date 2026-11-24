@@ -531,7 +531,7 @@ def test_a_failed_site_write_is_reported_and_degrades(bus, site, monkeypatch, ca
 
 def test_publishing_with_the_site_switched_off_says_so(bus, site, monkeypatch):
     filed = upload(bus)
-    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": False, "republish_min": 30})
+    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": False, "republish_min": 30, "new_badge_hours": 48})
     answer = publish(bus, filed["draft_id"])
     assert answer["ok"] is True
     assert answer["message"] == handlers.MESSAGES["published_site_off"]
@@ -700,7 +700,7 @@ def test_unpublishing_with_the_site_switched_off_says_the_page_is_still_up(
     slug = published(bus)
     before = site_files(site)
     assert f"blog/{slug}/index.html" in before
-    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": False, "republish_min": 30})
+    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": False, "republish_min": 30, "new_badge_hours": 48})
 
     answer = send(bus, "unpublish", slug=slug)
 
@@ -715,7 +715,7 @@ def test_unpublishing_with_the_site_switched_off_says_the_page_is_still_up(
 
 
 def test_unpublishing_nothing_with_the_site_switched_off_is_still_no_entry(bus, monkeypatch):
-    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": False, "republish_min": 30})
+    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": False, "republish_min": 30, "new_badge_hours": 48})
     answer = send(bus, "unpublish", slug="never-published")
     assert answer["ok"] is False and answer["message"] == handlers.MESSAGES["no_entry"]
 

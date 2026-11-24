@@ -191,6 +191,7 @@ def page_html(parts, row, pid, site_host, *, image_height=630) -> str:
         '<script src="assets/ideas.js" defer></script>\n'
         '<script src="assets/market-clock.js" defer></script>\n'
         '<script src="assets/market-glow.js" defer></script>\n'
+        '<script src="assets/blog-new.js" defer></script>\n'
         "</body>\n"
         "</html>\n"
     )

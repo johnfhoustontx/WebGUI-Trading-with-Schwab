@@ -170,12 +170,12 @@ def test_a_later_pass_catches_the_site_up_once_it_is_switched_back_on(monkeypatc
     and is OK, so nothing is ``pending`` - a later pass that rebuilt only while
     something was pending left the entry off the site until the next restart
     or the next publish."""
-    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": False, "republish_min": 30})
+    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": False, "republish_min": 30, "new_badge_hours": 48})
     an_entry()
     scheduler.first_pass(Bus())
     assert site_files() == {"blog.html"} and sitewriter.pending() is False
 
-    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": True, "republish_min": 30})
+    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": True, "republish_min": 30, "new_badge_hours": 48})
     scheduler.later_pass(Bus())
 
     assert site_files() == {"blog.html", "blog.json", "blog/sitemap.txt",
@@ -188,13 +188,13 @@ def test_a_later_pass_takes_down_what_was_unpublished_while_the_site_was_off(mon
     an_entry()
     scheduler.first_pass(Bus())
     assert "blog/first-entry/index.html" in site_files()
-    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": False, "republish_min": 30})
+    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": False, "republish_min": 30, "new_badge_hours": 48})
     with store_mod.Store() as st:
         assert st.unpublish("first-entry")
     scheduler.later_pass(Bus())
     assert "blog/first-entry/index.html" in site_files()      # off: nothing removed
 
-    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": True, "republish_min": 30})
+    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": True, "republish_min": 30, "new_badge_hours": 48})
     scheduler.later_pass(Bus())
 
     assert "blog/first-entry/index.html" not in site_files()
@@ -223,7 +223,7 @@ def test_a_later_pass_rebuilds_while_the_last_rebuild_fell_short(monkeypatch):
 
 def test_the_interval_is_the_configured_one(monkeypatch):
     assert scheduler.interval_s() == blog_inbox.DEFAULTS["site"]["republish_min"] * 60
-    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": True, "republish_min": 5})
+    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": True, "republish_min": 5, "new_badge_hours": 48})
     assert scheduler.interval_s() == 300
 
 
@@ -285,7 +285,7 @@ class Harness:
 
 
 def test_the_loop_runs_the_first_pass_once_then_later_passes_on_the_interval(monkeypatch):
-    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": True, "republish_min": 2})
+    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": True, "republish_min": 2, "new_badge_hours": 48})
     wakes = 9                                       # 9 x 30 s = four and a half minutes
     h = Harness(monkeypatch, wakes).run()
 
@@ -315,7 +315,7 @@ def test_a_failed_first_pass_stays_the_first_pass_and_is_tried_at_the_next_wake(
 
 
 def test_a_failed_later_pass_does_not_end_the_loop(monkeypatch):
-    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": True, "republish_min": 1})
+    monkeypatch.setattr(blog_inbox, "site", lambda: {"enabled": True, "republish_min": 1, "new_badge_hours": 48})
 
     def later(bus):
         raise OSError(MARKER)

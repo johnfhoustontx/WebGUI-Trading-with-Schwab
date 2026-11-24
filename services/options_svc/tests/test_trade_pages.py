@@ -107,6 +107,8 @@ def test_page_html_carries_the_preview_tags(root):
     assert "data-idea-page" in page
     assert f'data-src="/t/{pid}/trade.json"' in page
     assert '<script src="assets/ideas.js" defer></script>' in page
+    # The menu's "new" tag on Blog, as on every page carrying the site's menu.
+    assert '<script src="assets/blog-new.js" defer></script>' in page
     assert "SPY &lt;b&gt;" in page and "SPY <b>" not in page
 
 

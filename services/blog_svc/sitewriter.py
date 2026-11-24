@@ -130,12 +130,37 @@ def read_parts(root) -> dict | None:
 
 # ── pure: the list, and one entry's page ─────────────────────────────────────
 
-def manifest(entries, updated, cards=frozenset()) -> dict:
+def new_until(entries, hours):
+    """PURE. Until when the site's menu shows "new" on Blog: the newest FIRST
+    publication plus ``hours``, as UTC ISO seconds, or ``None`` (no window, no
+    entry, or no publication time that reads with its offset). A revision does
+    not count, as it does not move an entry up the list. ``assets/blog-new.js``
+    and ``shared.site_nav.blog_is_new`` compare the clock with this and nothing
+    else, so the window is decided here, once."""
+    if not isinstance(hours, (int, float)) or isinstance(hours, bool) or hours <= 0:
+        return None
+    newest = None
+    for entry in entries:
+        try:
+            when = dt.datetime.fromisoformat(entry["published_at"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if when.utcoffset() is None:
+            continue
+        newest = when if newest is None or when > newest else newest
+    if newest is None:
+        return None
+    until = (newest + dt.timedelta(hours=hours)).astimezone(dt.timezone.utc)
+    return until.replace(microsecond=0).isoformat()
+
+
+def manifest(entries, updated, cards=frozenset(), new_hours=0) -> dict:
     """PURE. What ``blog.json`` holds: each entry's address, title, summary,
     tags, its two dates and whether it has a card (its slug is in ``cards``),
     newest FIRST publication first (a revision does not move an entry up).
     Never a document. ``card`` is a flag, not a path: the list builds the
-    card's address from the slug it has already checked."""
+    card's address from the slug it has already checked. ``new_until`` is
+    ``new_until(entries, new_hours)``: the menu's "new" tag on Blog."""
     rows = [{"slug": entry["slug"], "title": entry["title"], "summary": entry["summary"],
              "tags": list(entry["tags"]), "published": entry["published_at"],
              "updated": entry["updated_at"], "card": entry["slug"] in cards}
@@ -144,7 +169,8 @@ def manifest(entries, updated, cards=frozenset()) -> dict:
     # Stored times are UTC in one spelling (``store._iso``), so text order is
     # time order.
     rows.sort(key=lambda row: row["published"], reverse=True)
-    return {"updated": updated, "entries": rows}
+    return {"updated": updated, "entries": rows,
+            "new_until": new_until(entries, new_hours)}
 
 
 def _day(iso) -> str:
@@ -480,13 +506,15 @@ def _write_entry(blog, parts, store, row, report) -> bool:
 
 def _manifest_bytes(path, listing, updated):
     """The bytes ``blog.json`` should hold, or ``None`` when the one on disk
-    already lists exactly these entries (its ``updated`` is then left alone)."""
+    already lists exactly these entries with the same ``new_until`` (its
+    ``updated`` is then left alone: it is when the LIST last changed)."""
     try:
         old = json.loads(path.read_bytes().decode("utf-8"))
     except (OSError, ValueError):
         old = None
     if (isinstance(old, dict) and isinstance(old.get("updated"), str)
-            and old.get("entries") == listing["entries"]):
+            and old.get("entries") == listing["entries"]
+            and "new_until" in old and old["new_until"] == listing["new_until"]):
         return None
     return json.dumps(listing, indent=1).encode("utf-8")
 
@@ -497,7 +525,7 @@ def _write_lists(root, listed, updated, report) -> None:
     now, the rule ``card_rows`` lists by."""
     cards = {row["slug"] for row in listed
              if _card_current(root / BLOG_DIR / row["slug"], card_mod.digest(row))}
-    listing = manifest(listed, updated, cards)
+    listing = manifest(listed, updated, cards, blog_inbox.site()["new_badge_hours"])
     lines = "".join(f"https://{repo_paths.SITE_HOST}/{BLOG_DIR}/{row['slug']}/\n"
                     for row in listing["entries"])
     try:

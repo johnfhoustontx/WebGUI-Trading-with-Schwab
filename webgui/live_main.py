@@ -424,8 +424,12 @@ LIVE_HEADER_CSS = """
 
 
 def _header(screen) -> None:
-    """The site's menu with the screen's name, or the plain lockup without it."""
-    nav = site_nav.site_nav_html(screen.title)
+    """The site's menu with the screen's name, or the plain lockup without it.
+
+    ``mark_new``: the menu's "new" tag is decided as the page is built, from the
+    site's own list (``site_nav``), as the site's pages decide it in the
+    browser. A screen left open past the window keeps it until reloaded."""
+    nav = site_nav.site_nav_html(screen.title, mark_new=True)
     if nav:
         ui.html(nav).classes(_SITE_BAR)
         return

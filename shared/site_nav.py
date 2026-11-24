@@ -36,7 +36,9 @@ whole menu rather than passing it through, and ``site_nav_html`` then answers
 
 Pure: stdlib and ``repo_paths`` only, no NiceGUI, so it can be tested as text.
 """
+import datetime as dt
 import html
+import json
 import pathlib
 import re
 
@@ -71,6 +73,48 @@ _HOST_RE = re.compile(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0
 # page you are on, as live.html marks it. A document names its own section.
 LIVE_DESK, BLOG, REPORT = "live.html", "blog.html", "report.html"
 
+# ── the "new" tag on Blog ────────────────────────────────────────────────────
+# For ``[site] new_badge_hours`` (config/blog.toml) after an entry is first
+# published, the menu shows a small glowing "new" on Blog. The window is decided
+# ONCE, by the blog writer, as ``blog.json``'s ``new_until``
+# (``services/blog_svc/sitewriter.new_until``): the site's pages read it in the
+# browser (``assets/blog-new.js``), and the live screens' menu reads it here
+# when the page is built. The tag is the app's Option Signals "new" badge
+# (``webgui/pages/options/scanner.py`` ``_SYMBOL_SLOT``), tilted and glowing.
+BLOG_LIST = pathlib.Path(repo_paths.SITE_ROOT) / "blog.json"
+NEW_CLASS, NEW_LINK_CLASS = "ns-new", "ns-has-new"
+NEW_TEXT, NEW_LABEL = "new", "Blog, new entry"
+NEW_BADGE_HTML = f'<span class="{NEW_CLASS}" aria-hidden="true">{NEW_TEXT}</span>'
+
+
+def blog_is_new(now=None, *, path=None) -> bool:
+    """Whether the clock is before ``blog.json``'s ``new_until``.
+
+    ``now`` is an aware datetime (``None``: the current time). Never raises: no
+    file, a file that does not parse, no ``new_until``, or a time with no offset
+    all answer ``False`` -- a missing tag is the quiet failure."""
+    try:
+        raw = json.loads(pathlib.Path(path or BLOG_LIST).read_text(encoding="utf-8"))
+        until = dt.datetime.fromisoformat(raw["new_until"])
+        if until.utcoffset() is None:
+            return False
+        moment = dt.datetime.now(dt.timezone.utc) if now is None else now
+        return moment < until
+    except (OSError, UnicodeDecodeError, ValueError, TypeError, KeyError, AttributeError):
+        return False
+
+
+def _mark_new(nav, base) -> str:
+    """``nav`` with the "new" tag on its Blog link; unchanged unless there is
+    exactly one such link."""
+    link = re.compile(r'<a class="ns-navlink"( href="' + re.escape(f"{base}{BLOG}")
+                      + r'"[^>]*)>(.*?)</a>', re.S)
+    if len(link.findall(nav)) != 1:
+        return nav
+    return link.sub(lambda m: (f'<a class="ns-navlink {NEW_LINK_CLASS}"{m.group(1)} '
+                               f'aria-label="{NEW_LABEL}">{m.group(2)}{NEW_BADGE_HTML}</a>'),
+                    nav, count=1)
+
 # The site self-hosts Inter (site.css). The live process already takes its two
 # faces from Google Fonts ([typography].font_url, [brand].font_url), so the
 # menu's face comes from there too rather than as a new route on this origin.
@@ -87,14 +131,17 @@ def _absolute(href, base):
 
 
 def site_nav_html(screen_title="", *, site_host=None, page=None,
-                  current=LIVE_DESK) -> str:
+                  current=LIVE_DESK, mark_new=False) -> str:
     """The site's menu with absolute addresses, or ``""`` when it cannot be built.
 
     ``screen_title`` is set after the wordmark as the site's own breadcrumb
     (``.ns-crumb``), so a visitor still reads which screen this is. ``current``
     is the menu item marked as the page you are on. The sticky class is
     dropped: a live screen pins its own table headers to the top of the window,
-    and a pinned menu would sit over them.
+    and a pinned menu would sit over them. ``mark_new`` asks ``blog_is_new``
+    now and, inside the window, puts the "new" tag on Blog. Only a page built
+    per visit may pass it: a document built once and kept would carry the tag
+    past its window.
 
     Never raises: a missing file, a second menu, an odd address or a bad host
     all answer ``""``."""
@@ -117,6 +164,8 @@ def site_nav_html(screen_title="", *, site_host=None, page=None,
     nav = _HREF_RE.sub(lambda m: f'href="{_absolute(m.group(1), base)}"', nav)
     nav = nav.replace(f'href="{base}{current}"',
                       f'href="{base}{current}" aria-current="page"', 1)
+    if mark_new and blog_is_new():
+        nav = _mark_new(nav, base)
     if screen_title:
         crumb = f'<span class="ns-crumb">{html.escape(str(screen_title))}</span>'
         nav = nav.replace('<span class="ns-spacer"></span>',
@@ -215,6 +264,39 @@ SITE_NAV_CSS = """
 @media (max-width: 960px) {
   .ns-site-bar .ns-nav { flex-wrap: wrap; gap: 10px 14px; }
   .ns-site-bar .ns-nav .ns-spacer { flex: 0 0 100%; height: 0; }
+  /* The gap narrows here, so the "new" tag's tail would touch the next link. */
+  .ns-site-bar .ns-navlink.ns-has-new { margin-right: 8px; }
+}
+.ns-site-bar .ns-navlink.ns-has-new { position: relative; }
+.ns-site-bar .ns-new {
+  position: absolute;
+  top: -13px;
+  right: -17px;
+  display: inline-block;
+  padding: 0 4px;
+  min-height: 12px;
+  font-size: 9px;
+  font-weight: 400;
+  line-height: 12px;
+  letter-spacing: normal;
+  text-transform: none;
+  text-decoration: none;
+  white-space: nowrap;
+  color: #ffffff;
+  background: #1565c0;
+  border-radius: 4px;
+  transform: rotate(14deg);
+  transform-origin: left center;
+  pointer-events: none;
+  box-shadow: 0 0 5px rgba(21, 101, 192, 0.9), 0 0 12px rgba(30, 136, 229, 0.55);
+  animation: ns-new-glow 2.4s ease-in-out infinite;
+}
+@keyframes ns-new-glow {
+  0%, 100% { box-shadow: 0 0 4px rgba(21, 101, 192, 0.8), 0 0 9px rgba(30, 136, 229, 0.4); }
+  50% { box-shadow: 0 0 7px rgba(30, 136, 229, 1), 0 0 18px rgba(30, 136, 229, 0.75), 0 0 28px rgba(66, 165, 245, 0.35); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ns-site-bar .ns-new { animation: none; }
 }
 """
 

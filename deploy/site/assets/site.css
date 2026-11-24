@@ -211,6 +211,8 @@ a.ns-brand:hover { color: var(--color-accent); text-decoration: none; }
 @media (max-width: 960px) {
   .ns-nav { flex-wrap: wrap; gap: 10px 14px; }
   .ns-nav .ns-spacer { flex: 0 0 100%; height: 0; }
+  /* The gap narrows here, so the "new" tag's tail would touch the next link. */
+  .ns-navlink.ns-has-new { margin-right: 8px; }
 }
 @media (max-width: 700px) {
   /* The one site menu wraps to three rows (~140px) on a 375px phone; pinned, it
@@ -268,6 +270,44 @@ a.ns-brand:hover { color: var(--color-accent); text-decoration: none; }
   border-color: var(--ns-open);
 }
 .ns-market-open:active { background: color-mix(in srgb, var(--ns-open) 22%, transparent); }
+
+/* The Blog menu item's "new" tag: for [site] new_badge_hours (config/blog.toml)
+ * after an entry is first published. assets/blog-new.js adds it here from
+ * blog.json's new_until; shared/site_nav.py draws the same tag into the live
+ * screens' menu and copies these declarations (shared/tests/test_site_nav.py
+ * compares them). The tag is the app's Option Signals "new" badge, tilted 14
+ * degrees so it slopes down to the right, with a slow glow. */
+.ns-navlink.ns-has-new { position: relative; }
+.ns-new {
+  position: absolute;
+  top: -13px;
+  right: -17px;
+  display: inline-block;
+  padding: 0 4px;
+  min-height: 12px;
+  font-size: 9px;
+  font-weight: 400;
+  line-height: 12px;
+  letter-spacing: normal;
+  text-transform: none;
+  text-decoration: none;
+  white-space: nowrap;
+  color: #ffffff;
+  background: #1565c0;
+  border-radius: 4px;
+  transform: rotate(14deg);
+  transform-origin: left center;
+  pointer-events: none;
+  box-shadow: 0 0 5px rgba(21, 101, 192, 0.9), 0 0 12px rgba(30, 136, 229, 0.55);
+  animation: ns-new-glow 2.4s ease-in-out infinite;
+}
+@keyframes ns-new-glow {
+  0%, 100% { box-shadow: 0 0 4px rgba(21, 101, 192, 0.8), 0 0 9px rgba(30, 136, 229, 0.4); }
+  50% { box-shadow: 0 0 7px rgba(30, 136, 229, 1), 0 0 18px rgba(30, 136, 229, 0.75), 0 0 28px rgba(66, 165, 245, 0.35); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ns-new { animation: none; }
+}
 
 /* ─── 5. Shared marks ────────────────────────────────────────────────────
  * The accent eyebrow: a 40px rule, then small uppercase text.

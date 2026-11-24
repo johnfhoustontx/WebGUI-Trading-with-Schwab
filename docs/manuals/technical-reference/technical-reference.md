@@ -4724,6 +4724,7 @@ edit, restart the blog service; the web app needs no restart.
 |---|---|---|---|
 | `enabled` | `true` | — | Off: drafts can still be uploaded and previewed, and Publish and Unpublish still change the store, but nothing is written to or removed from the public site: an entry unpublished while it is off stays on the site. The answer says so each time. Switched back on, the site catches up at the next pass below. |
 | `republish_min` | 30 | 1–1440 | Minutes between passes. Each pass re-publishes the drafts and entries lists and checks the site's blog files against the store, rewriting only what differs. Both also happen on every change; the pass heals a flushed Redis, retries a site write that failed, and catches the site up after `enabled` is switched back on. |
+| `new_badge_hours` | 48 | 0–720 | How long the site's menu shows a glowing "new" tag on **Blog** after an entry is first published (a revision does not count); 0 never shows it. The blog service writes the end of the window into `blog.json` as `new_until` (newest first publication + this many hours, UTC), and that is the only place the window is decided: the site's pages compare the visitor's clock with it in the browser (`assets/blog-new.js`), and the live screens' menu compares the server's clock with it when the page is built (`shared/site_nav.blog_is_new`). A changed value reaches the site at the next pass. |
 
 **`[limits]`**
 

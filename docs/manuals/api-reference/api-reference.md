@@ -1097,7 +1097,7 @@ services/blog_svc/data/            repo_paths.BLOG_DATA (gitignored; in the nigh
   fonts/<20 hex>.woff2             one pool of typefaces, named by content
 
 deploy/site/                       repo_paths.SITE_ROOT (the blog paths below are gitignored)
-  blog.json                        {"updated", "entries": [{slug, title, summary, tags, published, updated}]}
+  blog.json                        {"updated", "entries": [{slug, title, summary, tags, published, updated, card}], "new_until"}
   blog/<slug>/index.html           the entry's page: the site menu around a sandboxed frame
   blog/<slug>/entry.html           the entry document
   blog/fonts/<20 hex>.woff2        the typefaces published entries use

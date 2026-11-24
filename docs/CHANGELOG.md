@@ -4,7 +4,27 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-23 (**Trade ideas and market reports post to Facebook and Instagram by themselves.**)
+**Last updated:** 2026-11-24 (**A glowing "new" tag on the site's Blog menu item for two days after an entry is published.**)
+
+- **Why.** The operator asked for it, and picked the look from mockups: the
+  app's own Option Signals "new" badge, tilted 14 degrees so it slopes down to
+  the right, with a slow glow ([design](plans/2026-11-24-blog-new-badge-design.md)).
+- **The pieces.**
+  - `config/blog.toml [site] new_badge_hours` (48, 0 to 720, 0 = off), in
+    Settings → Configuration → Site blog.
+  - `blog_svc/sitewriter.new_until`: `blog.json` gains `new_until`, the newest
+    first publication plus the hours, in UTC. The one place the window is decided.
+  - `deploy/site/assets/blog-new.js`, loaded by the six site pages and every
+    trade-idea page: compares the visitor's clock with `new_until` and adds the
+    tag to `nav a[href="blog.html"]`.
+  - `shared/site_nav.py`: `blog_is_new()` and `site_nav_html(mark_new=True)`;
+    `live_main._header` uses them, so the live screens' menu shows the tag too.
+  - `.ns-new` in `site.css`, copied into `SITE_NAV_CSS`.
+- **Not shown** on a Blog entry's own page or in a framed document (neither runs
+  a script, and a tag written into them would outlive its window).
+- **Not verified on the real site** until the next entry is published.
+
+**Prior —** 2026-11-23 (**Trade ideas and market reports post to Facebook and Instagram by themselves.**)
 
 - **Why.** The operator's Meta Business Suite joins the Facebook Page and the
   Instagram account; the goal is traffic to neuralstrike.co. Part 2 of the Meta

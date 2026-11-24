@@ -250,6 +250,10 @@ DEFAULTS = {
         # a flushed Redis, retries a failed site write, and catches the site up
         # after ``enabled`` is switched back on.
         "republish_min": 30,
+        # Hours the site's menu shows a "new" tag on Blog after an entry is
+        # first published (a revision does not count). 0 = never shown. Written
+        # into blog.json as ``new_until`` (``services/blog_svc/sitewriter``).
+        "new_badge_hours": 48,
     },
     "limits": {
         # The largest document accepted, in KB of UTF-8, BEFORE cleaning. The
@@ -340,6 +344,7 @@ DEFAULTS = {
 # is held to (``existing_slug``).
 BOUNDS = {
     ("site", "republish_min"): (1, 1440),
+    ("site", "new_badge_hours"): (0, 720),
     ("limits", "max_html_kb"): (1, 4096),
     ("limits", "max_drafts"): (1, 200),
     ("limits", "title_chars"): (1, 300),
@@ -423,7 +428,8 @@ def limits() -> dict:
 def site() -> dict:
     """The validated ``[site]`` table."""
     return {"enabled": _flag("site", "enabled"),
-            "republish_min": _bounded("site", "republish_min")}
+            "republish_min": _bounded("site", "republish_min"),
+            "new_badge_hours": _bounded("site", "new_badge_hours")}
 
 
 def _subsets(raw) -> list:

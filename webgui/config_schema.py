@@ -2401,6 +2401,12 @@ _BLOG = ConfigFile(
                   "against what is published on the same timer, and only what "
                   "differs is rewritten.", kind="int", unit="min",
                   min=1, max=1440, step=1),
+            Field("site.new_badge_hours", "Show \"new\" on the Blog menu for",
+                  "After an entry is first published, the public site's menu "
+                  "shows a small glowing \"new\" tag on Blog for this many "
+                  "hours. Editing an entry later does not bring it back. 0 "
+                  "never shows it. Takes effect at the next refresh above.",
+                  kind="int", unit="h", min=0, max=720, step=1),
         )),
         Section("Drafts", "What is accepted as a draft from an upload on the "
                 "Blog page.", (

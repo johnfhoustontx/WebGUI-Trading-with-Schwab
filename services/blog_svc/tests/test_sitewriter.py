@@ -335,6 +335,60 @@ def test_the_manifest_says_which_entries_have_a_card():
     assert all(row["card"] is False for row in sw.manifest(rows, NOW)["entries"])
 
 
+# ── the "new" tag on the site's Blog menu item ──────────────────────────────
+
+def test_new_until_is_the_newest_first_publication_plus_the_window():
+    """The site's menu shows "new" on Blog until ``new_until``. It is counted
+    from the newest FIRST publication: a revision (``updated``) moves nothing."""
+    rows = [entry(slug="old", published_at="2026-10-01T09:00:00+00:00",
+                  updated_at="2026-10-09T09:00:00+00:00"),
+            entry(slug="new", published_at="2026-10-05T14:30:15.123456+00:00")]
+    out = sw.manifest(rows, NOW, new_hours=48)
+    assert out["new_until"] == "2026-10-07T14:30:15+00:00"
+
+
+def test_new_until_is_in_utc_whatever_offset_the_entry_carries():
+    rows = [entry(published_at="2026-10-05T09:00:00-05:00")]
+    assert sw.manifest(rows, NOW, new_hours=1)["new_until"] == "2026-10-05T15:00:00+00:00"
+
+
+@pytest.mark.parametrize("hours", [0, None])
+def test_no_window_means_no_new_tag(hours):
+    rows = [entry(published_at=at(1))]
+    kwargs = {} if hours is None else {"new_hours": hours}
+    assert sw.manifest(rows, NOW, **kwargs)["new_until"] is None
+
+
+def test_no_entry_means_no_new_tag():
+    assert sw.manifest([], NOW, new_hours=48)["new_until"] is None
+
+
+def test_an_unreadable_publication_time_is_skipped_not_guessed():
+    rows = [entry(slug="bad", published_at="yesterday"),
+            entry(slug="naive", published_at="2026-10-09T09:00:00"),
+            entry(slug="good", published_at="2026-10-05T09:00:00+00:00")]
+    assert sw.manifest(rows, NOW, new_hours=2)["new_until"] == "2026-10-05T11:00:00+00:00"
+
+
+def test_a_changed_window_rewrites_the_list(site, monkeypatch):
+    """The list is rewritten when ``new_until`` alone changes, so a new
+    ``new_badge_hours`` reaches the site at the next pass."""
+    monkeypatch.setattr(repo_paths, "SITE_HOST", HOST)
+    store = FakeStore()
+    store.add("first", published=at(1))
+    monkeypatch.setattr(blog_inbox, "site", lambda: {
+        "enabled": True, "republish_min": 30, "new_badge_hours": 48})
+    sw.rebuild(site, store, NOW)
+    first = json.loads((site / "blog.json").read_text(encoding="utf-8"))
+    assert first["new_until"] is not None
+    monkeypatch.setattr(blog_inbox, "site", lambda: {
+        "enabled": True, "republish_min": 30, "new_badge_hours": 0})
+    sw.rebuild(site, store, "2026-10-07T18:00:00+00:00")
+    second = json.loads((site / "blog.json").read_text(encoding="utf-8"))
+    assert second["new_until"] is None
+    assert second["entries"] == first["entries"]
+
+
 # ── rebuild ──────────────────────────────────────────────────────────────────
 
 def test_rebuild_writes_pages_documents_fonts_manifest_and_sitemap(site, monkeypatch):
@@ -363,7 +417,9 @@ def test_rebuild_writes_pages_documents_fonts_manifest_and_sitemap(site, monkeyp
     page = files["blog/second/index.html"].decode("utf-8")
     assert page == sw.entry_page(sw.read_parts(site), store.rows["second"], HOST, card=True)
     manifest = json.loads(files["blog.json"].decode("utf-8"))
-    assert manifest == sw.manifest(store.entries(), NOW, cards={"first", "second"})
+    assert manifest == sw.manifest(store.entries(), NOW, cards={"first", "second"},
+                                   new_hours=blog_inbox.site()["new_badge_hours"])
+    assert manifest["new_until"] == "2026-10-04T12:00:00+00:00"   # second + 48 h
     assert [row["slug"] for row in manifest["entries"]] == ["second", "first"]
     assert all(row["card"] is True for row in manifest["entries"])
     assert files["blog/sitemap.txt"] == (b"https://example.test/blog/second/\n"
@@ -397,7 +453,7 @@ def test_rebuild_with_nothing_published_writes_an_empty_list(site):
     out = sw.rebuild(site, FakeStore(), NOW)
     assert out["ok"] is True
     files = tree(site)
-    assert json.loads(files["blog.json"]) == {"updated": NOW, "entries": []}
+    assert json.loads(files["blog.json"]) == {"updated": NOW, "entries": [], "new_until": None}
     assert files["blog/sitemap.txt"] == b""
 
 

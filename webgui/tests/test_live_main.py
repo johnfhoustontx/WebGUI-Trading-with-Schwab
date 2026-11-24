@@ -512,6 +512,34 @@ def test_every_published_screen_carries_the_site_menu(monkeypatch):
             f"{screen.route} renders no site menu"
 
 
+def _blog_list(tmp_path, new_until):
+    import json
+    path = tmp_path / "blog.json"
+    path.write_text(json.dumps({"entries": [], "new_until": new_until}), encoding="utf-8")
+    return path
+
+
+def test_the_menu_shows_new_on_blog_inside_the_window(monkeypatch, tmp_path):
+    """The site's pages put "new" on Blog in the browser; a live screen puts it
+    there when the page is built, from the same ``blog.json``."""
+    import live_screens
+    from shared import site_nav
+
+    monkeypatch.setattr(site_nav, "BLOG_LIST", _blog_list(tmp_path, "2999-01-01T00:00:00+00:00"))
+    markup = "".join(_markup(_rendered(live_screens.SCREENS[0], monkeypatch)))
+    assert markup.count(site_nav.NEW_BADGE_HTML) == 1, "no new tag on Blog"
+
+
+def test_the_menu_shows_no_new_tag_once_the_window_has_passed(monkeypatch, tmp_path):
+    import live_screens
+    from shared import site_nav
+
+    monkeypatch.setattr(site_nav, "BLOG_LIST", _blog_list(tmp_path, "2000-01-01T00:00:00+00:00"))
+    markup = "".join(_markup(_rendered(live_screens.SCREENS[0], monkeypatch)))
+    assert 'class="ns-navlink' in markup, "no menu was built -- this would be vacuous"
+    assert site_nav.NEW_BADGE_HTML not in markup
+
+
 def test_the_header_names_the_screen_it_is(monkeypatch):
     """The other half of "whose screen is this": WHICH screen, as the site's
     breadcrumb after the logo.

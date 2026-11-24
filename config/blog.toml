@@ -15,6 +15,10 @@ enabled = true
 # what catches the site up after `enabled` is switched back on. A site that
 # already agrees with the store is not rewritten.
 republish_min = 30
+# How many hours the site's menu shows a small glowing "new" tag on Blog after
+# an entry is first published (editing an entry later does not bring it back).
+# 0 = never shown. 0 to 720. Takes effect at the next refresh above.
+new_badge_hours = 48
 
 [limits]
 # The largest document accepted, in KB of UTF-8, measured BEFORE cleaning. The

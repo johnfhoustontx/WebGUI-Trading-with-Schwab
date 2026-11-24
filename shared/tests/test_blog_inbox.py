@@ -763,7 +763,7 @@ def test_the_fonts_and_site_sections_have_the_shipped_values():
                           "max_files": 24, "max_file_kb": 400, "max_total_mb": 12,
                           "max_rules": 96, "timeout_sec": 10, "total_sec": 30,
                           "user_agent": SHIPPED_USER_AGENT}
-    assert bi.site() == {"enabled": True, "republish_min": 30}
+    assert bi.site() == {"enabled": True, "republish_min": 30, "new_badge_hours": 48}
 
 
 def test_the_bytes_a_typeface_copy_may_hold_are_bounded():
@@ -937,7 +937,7 @@ def test_a_value_inside_its_bounds_is_read(monkeypatch):
                 "timeout_sec": 4, "max_links": 2, "max_css_kb": 64, "total_sec": 12,
                 "max_rules": 40, "user_agent": "Mozilla/5.0 (a newer browser)",
                 "max_total_mb": 30},
-         site={"enabled": False, "republish_min": 5})
+         site={"enabled": False, "republish_min": 5, "new_badge_hours": 0})
     assert bi.limits()["max_drafts"] == 3
     assert bi.limits()["clean_sec"] == 45 and isinstance(bi.limits()["clean_sec"], int)
     assert bi.limits()["title_chars"] == 140            # an unnamed key keeps its default
@@ -947,13 +947,14 @@ def test_a_value_inside_its_bounds_is_read(monkeypatch):
                           "max_rules": 40,
                           "timeout_sec": 4, "total_sec": 12,
                           "user_agent": "Mozilla/5.0 (a newer browser)"}
-    assert bi.site() == {"enabled": False, "republish_min": 5}
+    assert bi.site() == {"enabled": False, "republish_min": 5, "new_badge_hours": 0}
 
 
 BAD_TOML = """
 [site]
 enabled = "yes"
 republish_min = 0
+new_badge_hours = -3
 
 [limits]
 max_html_kb = 99999999

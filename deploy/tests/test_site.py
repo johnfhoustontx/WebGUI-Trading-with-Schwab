@@ -979,15 +979,17 @@ def test_every_image_declares_its_size(pages):
 # --- C5. the market glow, which is decoration with a data dependency --------
 
 GLOW_SCRIPTS = ('<script src="assets/market-clock.js" defer>',
-                '<script src="assets/market-glow.js" defer>')
+                '<script src="assets/market-glow.js" defer>',
+                '<script src="assets/blog-new.js" defer>')
 
 
 def _scripts_besides_the_glow(markup):
-    """Every <script> opening tag on a page except the market glow's two.
+    """Every <script> opening tag on a page except the menu's own three.
 
     The pages that pin "runs nothing" still pin it for everything else: the
-    glow is the one script each page carries on purpose (the nav button is on
-    every page), and the exception names its two files exactly rather than
+    market glow (two files, for the Live Desk button) and the "new" tag on Blog
+    (one) are the scripts each page carries on purpose, because the menu is on
+    every page, and the exception names the three files exactly rather than
     excusing anything under ``assets/``."""
     return [tag for tag in re.findall(r"<script\b[^>]*>", markup)
             if tag not in GLOW_SCRIPTS]
@@ -1041,7 +1043,7 @@ def test_the_glow_script_does_not_reach_off_origin():
     inside a script, which is the one place an off-origin fetch would now be
     easiest to add and hardest to notice.
     """
-    for name in ("assets/market-glow.js", "assets/live.js"):
+    for name in ("assets/market-glow.js", "assets/live.js", "assets/blog-new.js"):
         js = _text(name)
         assert "http://" not in js and "https://" not in js, name
 
@@ -1081,6 +1083,48 @@ def test_every_page_has_the_link_the_glow_selects():
         navs = re.findall(r"<nav\b.*?</nav>", _markup(name), re.S)
         assert any('href="live.html"' in nav for nav in navs), (
             f"{name}: no nav link to live.html for the glow to light")
+
+
+# --- C6. the "new" tag on the menu's Blog link --------------------------------
+
+def test_every_page_loads_the_new_tag_script_deferred():
+    """Every page carries the menu, so every page carries the tag. Deferred,
+    or it runs before the menu it marks exists."""
+    for name in PAGES:
+        tags = [t for t in re.findall(r"<script\b[^>]*>", _markup(name)) if "blog-new" in t]
+        assert tags == ['<script src="assets/blog-new.js" defer>'], name
+
+
+def test_every_page_has_the_link_the_new_tag_selects():
+    """The script finds Blog with ``nav a[href="blog.html"]`` and says nothing
+    when there is none."""
+    js = _text("assets/blog-new.js")
+    assert "'nav a[href=\"blog.html\"]'" in js
+    for name in PAGES:
+        navs = re.findall(r"<nav\b.*?</nav>", _markup(name), re.S)
+        assert any('href="blog.html"' in nav for nav in navs), name
+
+
+def test_the_new_tag_script_and_the_stylesheet_and_the_live_menu_agree():
+    """Three files joined by strings: the classes the script adds, the rules
+    that draw them, and the classes the live screens' menu writes. Renamed in
+    one, the tag silently never appears."""
+    from shared import site_nav
+    js, css = _text("assets/blog-new.js"), _css("assets/site.css")
+    for cls in (site_nav.NEW_CLASS, site_nav.NEW_LINK_CLASS):
+        assert f'"{cls}"' in js, cls
+    assert ".ns-navlink.ns-has-new" in css and re.search(r"(^|\s)\.ns-new\s*\{", css, re.M)
+    assert f'var TEXT = "{site_nav.NEW_TEXT}"' in js
+    assert f'var LABEL = "{site_nav.NEW_LABEL}"' in js
+
+
+def test_the_new_tag_script_reads_the_window_and_never_decides_it():
+    """The window is ``blog.json``'s ``new_until``, decided by the blog
+    writer. A number of hours here would be a second copy of the setting."""
+    js = _text("assets/blog-new.js")
+    assert 'fetch("blog.json"' in js and "new_until" in js
+    assert "innerHTML" not in js and "insertAdjacentHTML" not in js
+    assert not re.search(r"\b48\b|3600|86400", js)
 
 
 # --- G. the market report ----------------------------------------------------
