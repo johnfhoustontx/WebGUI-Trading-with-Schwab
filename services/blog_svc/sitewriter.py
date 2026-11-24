@@ -89,17 +89,9 @@ _CARD_FILES = (CARD_PNG, CARD_JPG, CARD_META)
 AREA = "blog.site"
 
 # The menu, over the RAW file (deploy/tests/test_site.py pins this expression
-# from the site's side, as SERVICE_NAV_RE). Exactly one match is accepted.
-NAV_RE = re.compile(r'<nav class="ns-nav.*?</nav>', re.S)
-# The rest is looked for with the comments taken out, so a link that is only
-# quoted in one is not copied into every entry page.
-_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
-_ICON_RE = re.compile(r'<link rel="(?:icon|apple-touch-icon)"[^>]*>')
-_STYLE_RE = re.compile(r'<link rel="stylesheet"[^>]*>')
-_FOOT_RE = re.compile(r'<footer class="ns-foot ns-live-foot">(.*?)</footer>', re.S)
-# The stylesheet the entry page's own classes are defined in. A page without it
-# is the menu and a frame with no layout.
-_SITE_CSS = 'href="assets/site.css"'
+# from the site's side, as SERVICE_NAV_RE). The reader itself lives in
+# shared/site_nav.page_parts, which the trade and report pages share.
+NAV_RE = site_nav.PAGE_NAV_RE
 
 _CT = ZoneInfo("America/Chicago")
 # Written out, not ``%B``: that one follows the process's locale.
@@ -132,27 +124,8 @@ _STATE = {"ok": True}
 
 def read_parts(root) -> dict | None:
     """What an entry page takes from the tracked ``blog.html`` under ``root``:
-    ``{"nav", "icons", "styles", "footer"}``, each exactly as that file has it.
-    ``None`` when the file is not there or ANY of them is missing.
-
-    Read as bytes and decoded, so no newline is translated: the menu is the
-    file's own bytes."""
-    try:
-        raw = (pathlib.Path(root) / TEMPLATE).read_bytes().decode("utf-8")
-    except (OSError, UnicodeDecodeError):
-        return None
-    navs = NAV_RE.findall(raw)
-    markup = _COMMENT_RE.sub("", raw)
-    icons, styles = _ICON_RE.findall(markup), _STYLE_RE.findall(markup)
-    feet = _FOOT_RE.findall(markup)
-    if len(navs) != 1 or len(feet) != 1 or not icons:
-        return None
-    if not any(_SITE_CSS in link for link in styles):
-        return None
-    pieces = (navs[0], feet[0], *icons, *styles)
-    if any("<script" in piece.lower() for piece in pieces):
-        return None                 # an entry page runs nothing, whatever the tracked page does
-    return {"nav": navs[0], "icons": tuple(icons), "styles": tuple(styles), "footer": feet[0]}
+    ``{"nav", "icons", "styles", "footer"}`` (``site_nav.page_parts``)."""
+    return site_nav.page_parts(root, TEMPLATE)
 
 
 # ── pure: the list, and one entry's page ─────────────────────────────────────

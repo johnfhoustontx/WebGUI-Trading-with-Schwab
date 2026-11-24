@@ -51,6 +51,17 @@ MENU_PAGE = pathlib.Path(repo_paths.SITE_ROOT) / "blog.html"
 # import a service). Exactly one match is accepted.
 _NAV_RE = re.compile(r'<nav class="ns-nav.*?</nav>', re.S)
 _HREF_RE = re.compile(r'href="([^"]*)"')
+# The public name of the menu pattern: services/blog_svc/sitewriter.NAV_RE is
+# this object, and deploy/tests/test_site.py pins it from the site's side.
+PAGE_NAV_RE = _NAV_RE
+# ``page_parts``: the rest is looked for with the comments taken out, so a link
+# that is only quoted in one is not copied into every generated page.
+_COMMENT_RE = re.compile(r"<!--.*?-->", re.S)
+_ICON_RE = re.compile(r'<link rel="(?:icon|apple-touch-icon)"[^>]*>')
+_STYLE_RE = re.compile(r'<link rel="stylesheet"[^>]*>')
+_FOOT_RE = re.compile(r'<footer class="ns-foot ns-live-foot">(.*?)</footer>', re.S)
+# The stylesheet a generated page's own classes are defined in.
+_SITE_CSS = 'href="assets/site.css"'
 # A plain page on the site, with an optional fragment: report.html,
 # index.html#community. Nothing with a scheme, a host, a slash or a dot-dot.
 _PLAIN_HREF_RE = re.compile(r"[a-z0-9-]+\.html(#[a-z0-9-]+)?")
@@ -276,6 +287,34 @@ DOCUMENT_CSS = _DOC_FONT_CSS + SITE_NAV_CSS + f"""
 
 _HEAD_END_RE = re.compile(r"</head\s*>", re.I)
 _BODY_OPEN_RE = re.compile(r"<body\b[^>]*>", re.I)
+
+
+def page_parts(root, template):
+    """What a generated page takes from the tracked ``template`` under ``root``:
+    ``{"nav", "icons", "styles", "footer"}``, each exactly as that file has it.
+    ``None`` when the file is not there or ANY of them is missing.
+
+    Used by the blog writer (``blog.html``) and the trade and report pages
+    (``ideas.html``, ``report.html``), which live in different services and so
+    share it here. Read as bytes and decoded, so no newline is translated: the
+    menu is the file's own bytes. A piece holding a script is refused: a
+    generated page adds the scripts it runs itself."""
+    try:
+        raw = (pathlib.Path(root) / template).read_bytes().decode("utf-8")
+    except (OSError, UnicodeDecodeError):
+        return None
+    navs = PAGE_NAV_RE.findall(raw)
+    markup = _COMMENT_RE.sub("", raw)
+    icons, styles = _ICON_RE.findall(markup), _STYLE_RE.findall(markup)
+    feet = _FOOT_RE.findall(markup)
+    if len(navs) != 1 or len(feet) != 1 or not icons:
+        return None
+    if not any(_SITE_CSS in link for link in styles):
+        return None
+    pieces = (navs[0], feet[0], *icons, *styles)
+    if any("<script" in piece.lower() for piece in pieces):
+        return None
+    return {"nav": navs[0], "icons": tuple(icons), "styles": tuple(styles), "footer": feet[0]}
 
 
 def framed_src(url) -> str:

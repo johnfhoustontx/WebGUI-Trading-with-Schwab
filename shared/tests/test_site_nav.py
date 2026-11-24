@@ -258,3 +258,25 @@ def test_it_imports_nothing_but_the_stdlib_and_repo_paths():
                    if m.split(".")[0] not in sys.stdlib_module_names
                    and not m.startswith("_sysconfigdata")}
     assert not third_party, sorted(third_party)
+
+
+# ── page_parts: what a generated page takes from a tracked one ──────────────
+
+def test_page_parts_reads_the_tracked_ideas_page():
+    parts = site_nav.page_parts(_SITE, "ideas.html")
+    assert parts is not None
+    assert 'aria-current' in parts["nav"]
+    assert any('assets/site.css' in link for link in parts["styles"])
+    assert parts["icons"] and parts["footer"]
+
+
+def test_page_parts_refuses_a_page_with_two_menus(tmp_path):
+    nav = '<nav class="ns-nav">x</nav>'
+    (tmp_path / "two.html").write_text(
+        f'<link rel="icon" href="a.svg"><link rel="stylesheet" href="assets/site.css">'
+        f'{nav}{nav}<footer class="ns-foot ns-live-foot">f</footer>', encoding="utf-8")
+    assert site_nav.page_parts(tmp_path, "two.html") is None
+
+
+def test_page_parts_of_a_missing_page_is_none(tmp_path):
+    assert site_nav.page_parts(tmp_path, "nope.html") is None
