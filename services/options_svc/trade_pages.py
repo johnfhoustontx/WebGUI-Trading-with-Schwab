@@ -203,7 +203,7 @@ def _json_bytes(data) -> bytes:
     return json.dumps(data, indent=1, sort_keys=True).encode("utf-8")
 
 
-def _jpeg(png):
+def card_jpeg(png):
     """``(1200-wide JPEG bytes, height)`` of the card, or ``(None, None)``."""
     try:
         from PIL import Image
@@ -234,7 +234,7 @@ def write(root, row, png):
         parts = _site_nav.page_parts(root, TEMPLATE)
         if pid is None or parts is None or not png:
             return None
-        jpg, height = _jpeg(png)
+        jpg, height = card_jpeg(png)
         web = _site.webp_copy(png)
         if not jpg or not web:
             return None

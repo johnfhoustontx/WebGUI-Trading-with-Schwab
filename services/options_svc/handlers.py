@@ -3144,8 +3144,9 @@ def write_site_sitemaps() -> None:
     """Write the trade and report pages' sitemaps (robots.txt names both), so
     each exists, empty if need be, from this service's first start. Never raises."""
     try:
-        from services.options_svc import site_ideas, trade_pages
+        from services.options_svc import report_pages, site_ideas, trade_pages
         trade_pages.write_sitemap(site_ideas.SITE_ROOT)
+        report_pages.write_sitemap(site_ideas.SITE_ROOT)
     except Exception:  # noqa: BLE001
         log.warning("site sitemaps: write failed", exc_info=True)
 

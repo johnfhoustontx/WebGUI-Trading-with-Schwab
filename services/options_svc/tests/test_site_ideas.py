@@ -342,3 +342,4 @@ def test_startup_writes_the_page_sitemaps(tmp_path, monkeypatch):
     monkeypatch.setattr(S, "SITE_ROOT", tmp_path)
     handlers.write_site_sitemaps()
     assert (tmp_path / "t" / "sitemap.txt").read_text(encoding="utf-8") == ""
+    assert (tmp_path / "r" / "sitemap.txt").read_text(encoding="utf-8") == ""
