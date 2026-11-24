@@ -385,10 +385,11 @@ def caption(idea):
     return "Trade idea: " + " · ".join(bits)
 
 
-def x_text(idea, x_cfg, *, today):
+def x_text(idea, x_cfg, *, today, link=None):
     """The trade idea for X: the caption, the link, and capped tags led by the
-    symbol's cashtag (plus #0DTE when it expires within a day). A malformed
-    ``x_cfg`` degrades to no configured tags, never to an exception."""
+    symbol's cashtag (plus #0DTE when it expires within a day). ``link`` (the
+    trade's own page) replaces ``[x] link`` when given. A malformed ``x_cfg``
+    degrades to no configured tags, never to an exception."""
     from shared import x_text as xt
     x_cfg = x_cfg if isinstance(x_cfg, dict) else {}
     derived = [f"${str(idea.get('symbol') or '').lstrip('$')}"]
@@ -399,7 +400,7 @@ def x_text(idea, x_cfg, *, today):
     configured = tags_cfg.get("trade_idea") if isinstance(tags_cfg, dict) else None
     tags = xt.hashtags(derived, configured if isinstance(configured, list) else None,
                        max_tags=xt.max_tags_from(x_cfg.get("max_tags")))
-    return xt.fit_text(caption(idea), x_cfg.get("link") or "", tags)
+    return xt.fit_text(caption(idea), link or x_cfg.get("link") or "", tags)
 
 
 def filename(idea, now):

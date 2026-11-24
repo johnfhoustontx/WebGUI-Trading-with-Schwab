@@ -120,6 +120,17 @@ The app reads market data and your positions from Schwab, so you need:
   booking off) is still *modelled* from the stock price under the app's exit rules,
   and says so. It refreshes every 15 minutes during the session (*Result refresh* in
   the same section).
+  **Each trade also has a page of its own**, at
+  `neuralstrike.co/t/<date>-<time>-<symbol>/` (for example
+  `neuralstrike.co/t/2026-11-23-1035-SPY/`): the card, the trade's details in
+  words and its result, which follows the Ledger the same way while the trade is
+  open and stays as it closed afterwards. The pages are never taken down, so a link
+  to one keeps working after the card has left `ideas.html`. Clicking a card on
+  the home page or `ideas.html` opens its page, and the post on X links it.
+  **Each market report has one too**, at `neuralstrike.co/r/<date>-<n>-<slot>/`
+  (for example `neuralstrike.co/r/2026-11-23-4-midday/`): a lasting copy of that
+  report, where `report.html` always shows the newest. It is written when the
+  report is posted to X, and that post links it.
 - **The watchlist workbook** `options-scanner/data/Top 20.xlsx` — sets which stocks
   the scanner watches. Without it, the app falls back to the core index symbols.
 

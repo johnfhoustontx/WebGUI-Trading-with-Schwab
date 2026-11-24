@@ -338,6 +338,22 @@ target, a gap through a stop filled at the open, scanned incrementally
 (`checked_to`).
 ⚠ The options_svc conftest redirects `site_ideas.SITE_ROOT`;
 a test that posts without it writes cards into this checkout.
+**`deploy/site/t/` and `deploy/site/r/` are the same, and are NEVER pruned** (since
+2026-11-23): one page per posted trade idea (`options_svc/trade_pages.py`,
+`/t/<YYYY-MM-DD>-<HHMM>-<SYMBOL>/`: `index.html`, `trade.json`, `card.jpg` at 1200
+wide for link previews, `card.webp`) and one per market report posted to X
+(`options_svc/report_pages.py`, `/r/<YYYY-MM-DD>-<n>-<slot>/`: `index.html`, a
+lasting `report.html` copy, `card.jpg`). Each directory has a `sitemap.txt` that
+`robots.txt` names. A trade page is written in `site_ideas.publish`, which now runs
+BEFORE X so X can link it; its result is rewritten on every refresh while its id is
+in `t/open.json`, and leaves that list once final (closed, or the Ledger read
+clean and holds no row: `untracked`). An unreadable Ledger finalises nothing. A
+report page is written in the `x_post_report` handler before the post, only when
+`reports/latest.txt` names the payload's day and slot (else a newer report has
+replaced it, and the post links `report_url` as before); a folder already there is
+never rewritten. Both page builders take the site's menu, icons and footer from the
+tracked `ideas.html` / `report.html` (`shared.site_nav.page_parts`), so a menu change
+reaches them without a code change.
 **`deploy/site/reports/` is the same** — the market reports `report.html` frames, uploaded
 from the operator's workstation by tooling that lives outside this repo
 (`D:\NeuralStrike Reports\tools\publish.py`, which refuses to upload until prod ignores

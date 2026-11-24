@@ -4,7 +4,41 @@ The running log of dated session entries ("**Last updated** / **Prior —**") th
 
 ---
 
-**Last updated:** 2026-11-23 (**The Paper Ledger's $750 per-trade cap is off; its symbol cap is $1,500.**)
+**Last updated:** 2026-11-23 (**A page per trade idea and per market report on neuralstrike.co; X links them.**)
+
+- **Why.** The goal of posting to social networks is traffic to the site. A post
+  that links `ideas.html` or `report.html` lands on whatever is newest, not on the
+  trade or report the post was about; the cards leave `ideas.html` after six
+  posting days. Part 1 of the Meta posting build
+  ([design](plans/2026-11-23-meta-posting-design.md),
+  [plan](plans/2026-11-23-meta-posting-plan.md)).
+- **The pieces.**
+  - `shared/site_nav.page_parts`: the site's menu, icons, styles and footer read
+    from a tracked page; `blog_svc/sitewriter.read_parts` now calls it.
+  - `options_svc/trade_pages.py`: `/t/<YYYY-MM-DD>-<HHMM>-<SYMBOL>/` with the card
+    (JPEG 1200 wide for previews, WebP for the page), `trade.json`, the facts in
+    words, preview tags; an open list and a sitemap. Never pruned.
+  - `site_ideas`: `publish` writes the page and the row's `page`; `refresh`
+    rewrites every open page, including ones past `keep_days`, from the Ledger,
+    and finalises a page once closed or untracked.
+  - `assets/ideas.js`: a card links its page; a `[data-idea-page]` element draws
+    one idea from its `trade.json`.
+  - `options_svc/report_pages.py`: `/r/<YYYY-MM-DD>-<n>-<slot>/`, a lasting copy of
+    the report framed by the site's page, written once, only while
+    `reports/latest.txt` still names that report.
+  - `run_trade_idea` order is now: private sends → site → X → social cards →
+    Ledger. X links the trade's page when it has one, else `[x] link`; the report
+    post links its page, else `report_url`.
+  - `.gitignore` (`deploy/site/t/`, `deploy/site/r/`), `robots.txt` sitemaps, a
+    startup write of both sitemaps, and Caddy: the pages revalidate and the cards
+    get `must-revalidate`.
+- **Operator step after the promote.** Run
+  `deploy/caddy/generate_caddyfile.py --install` on the box for the Caddy change,
+  then check one page in Facebook's Sharing Debugger.
+
+---
+
+**Prior —** 2026-11-23 (**The Paper Ledger's $750 per-trade cap is off; its symbol cap is $1,500.**)
 
 - **Why.** The operator asked for the $750 blocker on the Market Scanner's Paper
   button to come off completely. The Ledger had two $750 caps: per trade and per

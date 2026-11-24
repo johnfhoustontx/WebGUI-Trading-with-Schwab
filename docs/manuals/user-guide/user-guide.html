@@ -312,7 +312,18 @@ just click <strong>Authorize</strong> again.</p>
   idea the Ledger does not hold (posted before the Ledger booked ideas, or with idea
   booking off) is still <em>modelled</em> from the stock price under the app's exit rules,
   and says so. It refreshes every 15 minutes during the session (<em>Result refresh</em> in
-  the same section).</li>
+  the same section).
+  <strong>Each trade also has a page of its own</strong>, at
+  <code>neuralstrike.co/t/&lt;date&gt;-&lt;time&gt;-&lt;symbol&gt;/</code> (for example
+  <code>neuralstrike.co/t/2026-11-23-1035-SPY/</code>): the card, the trade's details in
+  words and its result, which follows the Ledger the same way while the trade is
+  open and stays as it closed afterwards. The pages are never taken down, so a link
+  to one keeps working after the card has left <code>ideas.html</code>. Clicking a card on
+  the home page or <code>ideas.html</code> opens its page, and the post on X links it.
+  <strong>Each market report has one too</strong>, at <code>neuralstrike.co/r/&lt;date&gt;-&lt;n&gt;-&lt;slot&gt;/</code>
+  (for example <code>neuralstrike.co/r/2026-11-23-4-midday/</code>): a lasting copy of that
+  report, where <code>report.html</code> always shows the newest. It is written when the
+  report is posted to X, and that post links it.</li>
 <li><strong>The watchlist workbook</strong> <code>options-scanner/data/Top 20.xlsx</code> — sets which stocks
   the scanner watches. Without it, the app falls back to the core index symbols.</li>
 </ul>

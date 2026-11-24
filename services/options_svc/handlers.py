@@ -3034,8 +3034,9 @@ def run_trade_idea(bus, slot, now=None) -> dict:
     if sent:
         result["status"] = "posted"
         result["posted"] = trade_idea.next_posted(posted, idea, today)
-        result["x"] = _post_trade_idea_x(bus, idea, png, now)
-        result["site"] = _publish_trade_idea_site(idea, png, now)
+        # The site first, so the trade's own page exists when X links it.
+        result["site"], result["page"] = _publish_trade_idea_site(idea, png, now)
+        result["x"] = _post_trade_idea_x(bus, idea, png, now, link=result["page"])
         publish_idea_cards(bus)
         result["ledger"] = _book_trade_idea_ledger(idea, now)
     else:
@@ -3120,24 +3121,32 @@ def _book_trade_idea_ledger(idea, now) -> dict:
         return {"status": "failed"}
 
 
-def _publish_trade_idea_site(idea, png, now) -> bool:
-    """Put a POSTED card on the public site (neuralstrike.co: the home page strip
-    and ideas.html) through ``site_ideas.publish``. Runs after every other send and
-    never raises: a site write must never cost a post. A text-only post (the card
-    failed to render) has nothing to show, so it publishes nothing."""
+def _publish_trade_idea_site(idea, png, now):
+    """Put a POSTED card on the public site (neuralstrike.co: the home page strip,
+    ideas.html and the trade's own page) through ``site_ideas.publish``. Runs
+    before X, so X can link the page, and never raises: a site write must never
+    cost a post. A text-only post (the card failed to render) has nothing to
+    show, so it publishes nothing.
+
+    Returns ``(published, page)``: whether the card reached the site, and the
+    address of the trade's own page, or None when it has none (the switch off, a
+    page write that failed)."""
     if not png:
-        return False
+        return False, None
     try:
         from services.options_svc import site_ideas, trade_idea
         from shared.notify import switches
         cfg = switches.site_settings()
         if not cfg["trade_ideas"]:
-            return False
-        return site_ideas.publish(idea, png, trade_idea.caption(idea), now,
-                                  keep_days=cfg["keep_days"])
+            return False, None
+        if not site_ideas.publish(idea, png, trade_idea.caption(idea), now,
+                                  keep_days=cfg["keep_days"]):
+            return False, None
+        row = site_ideas.entry(idea.get("symbol"), None, None, None, now)
+        return True, site_ideas.page_address(row)
     except Exception:  # noqa: BLE001
         _degrade.degraded("options.run_trade_idea.site")
-        return False
+        return False, None
 
 
 def write_site_sitemaps() -> None:
@@ -3201,14 +3210,16 @@ def refresh_site_idea_results(now=None, bus=None) -> int:
         return 0
 
 
-def _post_trade_idea_x(bus, idea, png, now) -> dict:
-    """X after the private sends; a failure here is recorded, never raised.
+def _post_trade_idea_x(bus, idea, png, now, link=None) -> dict:
+    """X after the private sends and the site; a failure here is recorded, never
+    raised. ``link`` is the trade's own page when it has one, else the post links
+    ``[x] link``.
 
     Returns ``x_post.post``'s result dict (JSON-safe) for ``cache:options:trade_idea``."""
     from services.options_svc import trade_idea
     try:
         cfg = push_notify.load_config()
-        text = trade_idea.x_text(idea, cfg.get("x") or {}, today=now.date())
+        text = trade_idea.x_text(idea, cfg.get("x") or {}, today=now.date(), link=link)
         out = x_post.post(bus, text, png, kind="trade_idea", now=now, config=cfg,
                           meta={"symbol": idea.get("symbol"), "id": idea.get("id")})
         return out if isinstance(out, dict) else {"ok": False, "error": "no result"}
@@ -3531,6 +3542,17 @@ def _remember_report(bus, ident, done):
     bus.cache_set(X_REPORTS_KEY, {"posted": ([ident] + done)[:X_REPORTS_KEEP]})
 
 
+def _report_page(report, png):
+    """The report's own page on the site, written when it is missing; its address,
+    or None. Never raises: a page must never cost a post."""
+    try:
+        from services.options_svc import report_pages, site_ideas
+        return report_pages.write(site_ideas.SITE_ROOT, report, png)
+    except Exception:  # noqa: BLE001
+        log.warning("x report: page write failed", exc_info=True)
+        return None
+
+
 def run_x_post_report(bus, args, now=None):
     """Post one published market report to X, once. Never raises.
 
@@ -3568,9 +3590,12 @@ def run_x_post_report(bus, args, now=None):
         tags = x_text.hashtags(_REPORT_TAGS, _x_configured_tags(x, "report"),
                                max_tags=x_text.max_tags_from(x.get("max_tags")))
         label = str(report.get("slot_label") or "").strip() or "Market report"
-        link = str(report.get("report_url") or "").strip() or str(x.get("link") or "")
-        text = x_text.fit_text(f"{label}: {str(report['headline']).strip()}", link, tags)
         png = report_card.render_report_png(report, now=now)
+        # The report's own page (report_pages.py): report.html shows a newer
+        # report by the next slot, so a post links the page when it has one.
+        link = (_report_page(report, png)
+                or str(report.get("report_url") or "").strip() or str(x.get("link") or ""))
+        text = x_text.fit_text(f"{label}: {str(report['headline']).strip()}", link, tags)
         out = x_post.post(bus, text, png, kind="report", config=cfg, now=now,
                           meta={"report": ident})
         if out.get("ok") or out.get("unknown"):
