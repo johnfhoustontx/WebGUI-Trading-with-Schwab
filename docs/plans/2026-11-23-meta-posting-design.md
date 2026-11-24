@@ -327,3 +327,5 @@ live in config. The X lists are unchanged.
   idea, with the quotes switch on and off.
 - Confirm Instagram's current hashtag cap in its own composer before turning
   Instagram on.
+
+Plan: [2026-11-23-meta-posting-plan.md](2026-11-23-meta-posting-plan.md).
