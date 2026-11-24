@@ -23,6 +23,10 @@
   var STRIP_COUNT = 3;
   var DAY = /^\d{4}-\d{2}-\d{2}$/;
   var REF = /^ideas\/\d{4}-\d{2}-\d{2}\/[A-Za-z0-9-]+\.(png|webp)$/;
+  // A trade's own page (services/options_svc/trade_pages.py): its folder, and
+  // the images in it. ideas/<day>/ is pruned after keep_days; t/<id>/ never is.
+  var PAGE_LINK = /^t\/\d{4}-\d{2}-\d{2}-\d{4}-[A-Za-z0-9-]+\/$/;
+  var PAGE_REF = /^t\/\d{4}-\d{2}-\d{2}-\d{4}-[A-Za-z0-9-]+\/card\.(jpg|webp)$/;
 
   function todayCT() {
     // en-CA formats as YYYY-MM-DD.
@@ -303,9 +307,13 @@
 
   function card(idea, eager) {
     var a = el("a", "ns-idea-card");
-    a.href = idea.full;
-    a.target = "_blank";
-    a.rel = "noopener";
+    if (PAGE_LINK.test(str(idea.page)) && !onPage) {
+      a.href = "/" + idea.page;           // the trade's own page, same tab
+    } else {
+      a.href = idea.full;
+      a.target = "_blank";
+      a.rel = "noopener";
+    }
 
     var img = el("img");
     img.src = idea.img;
@@ -403,6 +411,16 @@
     show(want);
   }
 
+  // ONE trade, on its own page: the row from the page's trade.json, drawn by
+  // the same card() and resultBlock() the list uses, so the words agree.
+  var onPage = false;
+  function renderOne(root, idea) {
+    if (!idea || !PAGE_REF.test(str(idea.img)) || !PAGE_REF.test(str(idea.full))) return;
+    onPage = true;
+    while (root.firstChild) root.removeChild(root.firstChild);
+    root.appendChild(card(idea, true));
+  }
+
   function start(manifest) {
     var days = clean(manifest);
     var strip = document.querySelector("[data-ideas-strip]");
@@ -411,6 +429,15 @@
     if (page) renderPage(page, days);
   }
 
+  var single = document.querySelector("[data-idea-page]");
+  if (single) {
+    var src = str(single.dataset.src);
+    if (/^\/t\/\d{4}-\d{2}-\d{2}-\d{4}-[A-Za-z0-9-]+\/trade\.json$/.test(src)) {
+      fetch(src, { cache: "no-cache" })
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (idea) { renderOne(single, idea); }, function () { /* noscript text stays */ });
+    }
+  }
   fetch("ideas.json", { cache: "no-cache" })
     .then(function (r) { return r.ok ? r.json() : null; })
     .then(start, function () { start(null); });

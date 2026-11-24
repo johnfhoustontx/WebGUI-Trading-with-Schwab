@@ -1230,6 +1230,41 @@ def test_idea_card_shape_follows_the_row():
     assert re.search(r"\.ns-idea-card img\.ns-card-wide\s*\{[^}]*aspect-ratio:\s*40\s*/\s*21", css)
 
 
+def test_ideas_js_knows_the_trade_page():
+    """A trade's own page (services/options_svc/trade_pages.py) mounts ONE card
+    from its own trade.json, named by the element, and the list links each card
+    to that page when the row has one, in the same tab."""
+    js = _text("assets/ideas.js")
+    assert "[data-idea-page]" in js
+    assert "dataset.src" in js
+    assert r"/^t\/\d{4}-\d{2}-\d{2}-\d{4}-[A-Za-z0-9-]+\/$/" in js
+    body = re.search(r"function card\(idea, eager\)\s*\{(.*?)\n  \}", js, re.S).group(1)
+    assert "PAGE_LINK.test(str(idea.page))" in body
+
+
+def test_trade_page_ref_accepts_the_page_images():
+    """On its own page a card's images are the page folder's, not ideas/<day>/
+    (which is pruned after keep_days)."""
+    js = _text("assets/ideas.js")
+    assert r"/^t\/\d{4}-\d{2}-\d{2}-\d{4}-[A-Za-z0-9-]+\/card\.(jpg|webp)$/" in js
+
+
+def test_the_generated_trade_and_report_pages_are_never_committed():
+    import subprocess
+    root = pathlib.Path(repo_paths.REPO_ROOT)
+    for rel in ("deploy/site/t/2026-11-23-0930-SPY/index.html",
+                "deploy/site/t/sitemap.txt",
+                "deploy/site/r/2026-11-23-3-midday/index.html"):
+        out = subprocess.run(["git", "check-ignore", "-q", rel], cwd=root)
+        assert out.returncode == 0, f"{rel} is not gitignored"
+
+
+def test_robots_names_the_trade_and_report_sitemaps():
+    robots = _text("robots.txt")
+    assert "Sitemap: https://neuralstrike.co/t/sitemap.txt" in robots
+    assert "Sitemap: https://neuralstrike.co/r/sitemap.txt" in robots
+
+
 def test_the_sitemap_lists_the_ideas_page():
     assert "https://neuralstrike.co/ideas.html" in _text("sitemap.txt").split()
 

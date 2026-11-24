@@ -1189,6 +1189,19 @@ body:has(.ns-market-open) .ns-desk-dot { animation: ns-desk-pulse 2s infinite; }
   color: transparent;            /* no alt-text spill if a card 404s; see .ns-live-tile img */
 }
 .ns-idea-card img.ns-card-wide { aspect-ratio: 40 / 21; }   /* 1200x630 */
+
+/* A trade's own page (/t/<id>/): its one card, then the trade written out. */
+[data-idea-page] { grid-template-columns: minmax(0, 760px); }
+.ns-idea-facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 6px 18px;
+  max-width: 760px;
+  margin: clamp(16px, 2vw, 24px) 0 0;
+  font-size: 15px;
+}
+.ns-idea-facts dt { color: color-mix(in srgb, var(--color-text) 62%, transparent); }
+.ns-idea-facts dd { margin: 0; font-variant-numeric: tabular-nums; }
 .ns-idea-meta {
   display: flex;
   gap: 10px;
