@@ -4,7 +4,9 @@ The page composes; the options service posts. ``Post`` enqueues an ``x_post``
 command on ``cmd:options`` and the service fits the text, attaches the image
 and posts through ``shared/notify/x_post`` — which logs every attempt (market
 reports, hourly trade ideas and posts from here) to ``cache:options:x_log``,
-the table at the foot of the composer.
+the table at the foot of the composer. Under it, ``cache:options:meta_log``:
+the Facebook and Instagram posts ``shared/notify/meta_post`` makes by itself
+for each trade idea and market report (this page sends nothing there).
 
 Tier-1: the live count and preview are ``shared.x_text`` — the SAME weighted
 length and fitting the service posts with, so what the page shows is what goes
@@ -29,6 +31,7 @@ from pages.view_watch import watch_view
 from shared import x_text
 
 VIEW = "options:x_log"
+META_VIEW = "options:meta_log"
 DEFAULT_LINK = "https://neuralstrike.co"
 DEFAULT_TAGS = "#options #trading"
 IMAGE_MAX_BYTES = 5_000_000
@@ -50,6 +53,18 @@ COLUMNS = [
     {"name": "text", "label": "Text", "field": "text"},
     {"name": "detail", "label": "Link or reason", "field": "detail"},
 ]
+
+_NETWORK = {"facebook": "Facebook", "instagram": "Instagram"}
+
+META_COLUMNS = [
+    {"name": "when", "label": "When", "field": "when"},
+    {"name": "network", "label": "Network", "field": "network"},
+    {"name": "kind", "label": "Source", "field": "kind"},
+    {"name": "status", "label": "Status", "field": "status"},
+    {"name": "reason", "label": "Reason", "field": "reason"},
+    {"name": "link", "label": "Link", "field": "link"},
+]
+
 
 
 # ── pure helpers ────────────────────────────────────────────────────────────
@@ -117,6 +132,37 @@ def log_rows(payload):
                                   .replace("_", " ").capitalize()),
             "text": _short(p.get("text")),
             "detail": str(p.get("url") or p.get("reason") or ""),
+        })
+    return rows
+
+
+def meta_log_rows(payload):
+    """The Facebook and Instagram log as table rows, newest first. PURE.
+
+    A Facebook post that went out links the post itself; every other row links
+    the trade's or report's page (Instagram's post address needs a second call
+    the service does not make)."""
+    posts = payload.get("posts") if isinstance(payload, dict) else None
+    if not isinstance(posts, list):
+        return []
+    rows = []
+    for p in posts:
+        if not isinstance(p, dict) or p.get("network") not in _NETWORK:
+            continue
+        status = p.get("status")
+        post_id = str(p.get("id") or "")
+        link = (f"https://facebook.com/{post_id}"
+                if p["network"] == "facebook" and status == "posted" and post_id
+                else str(p.get("link") or ""))
+        rows.append({
+            "id": len(rows),
+            "when": _when(p.get("at")),
+            "network": _NETWORK[p["network"]],
+            "kind": _KIND.get(p.get("kind"), "Unknown"),
+            "status": _STATUS.get(status, str(status or "unknown")
+                                  .replace("_", " ").capitalize()),
+            "reason": str(p.get("reason") or ""),
+            "link": link,
         })
     return rows
 
@@ -190,6 +236,8 @@ def build() -> Composer:
 
     kit.section_title("Recent posts")
     log_box = ui.column().classes("w-full gap-2")
+    kit.section_title("Facebook and Instagram")
+    meta_box = ui.column().classes("w-full gap-2")
 
     confirm = kit.confirm("Post to X?", "", confirm_text="Post", on_confirm=lambda: _send())
 
@@ -280,6 +328,18 @@ def build() -> Composer:
             else:
                 kit.empty("Nothing posted yet.")
 
+    @guard
+    def _repaint_meta():
+        rows = meta_log_rows(bus_client.read(META_VIEW))
+        meta_box.clear()
+        with meta_box:
+            if rows:
+                kit.table(META_COLUMNS, rows, row_key="id")
+            else:
+                kit.empty("Nothing posted to Facebook or Instagram yet. Each trade "
+                          "idea and market report posts there by itself once the "
+                          "meta block of the notifications file is set up.")
+
     for field in (body, link, tags):
         field.on_value_change(_repaint_preview)
     upload.on_upload(_on_upload)
@@ -289,6 +349,8 @@ def build() -> Composer:
 
     _repaint_preview()
     _repaint_log()
+    _repaint_meta()
     watch_view(VIEW, _repaint_log)
+    watch_view(META_VIEW, _repaint_meta)
     return Composer(card=card, body=body, link=link, tags=tags,
                     set_image=_set_image, repaint=_repaint_preview)

@@ -2175,6 +2175,26 @@ posted there.
 - **Recent posts** logs every post the app makes to X — market reports, the
   trade ideas and posts from this page — with a link to each one that
   went out, or the reason it did not (refused, failed, over the daily cap).
+
+**Facebook and Instagram**
+
+Every trade idea and every market report also posts **by itself** to the
+Facebook Page and the Instagram account: nothing on this page sends it. The
+table under Recent posts logs each one, one row per network.
+
+- **Facebook** posts the caption with the trade's or report's own page as its
+  link, so Facebook shows the card. A row that went out links the Facebook post.
+- **Instagram** posts the card with a caption that writes the page's address out
+  and says *Link in bio.*: Instagram does not make a link in a caption work.
+- **It is off, and dry, until you set it up.** Nothing reaches Meta until the
+  `meta` block in `shared/notifications.json` has the Page id, the Instagram
+  account id and an access token, and `enabled` is on. While `meta.dry_run` is
+  on every post is logged as *Dry run*. An idea or report with no page of its
+  own (the site switch off) is not posted to either.
+- **A network that fails** is tried again only when the same market report comes
+  back, never once it posted or may have (*Unknown*). The hashtags, the daily
+  caps and the caption's wording are in Settings → Configuration → Facebook and
+  Instagram.
 """,
     "/blog": """
 **Blog — the simple version**

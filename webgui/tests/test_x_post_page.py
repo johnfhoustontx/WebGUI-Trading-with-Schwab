@@ -168,3 +168,57 @@ def test_the_log_renders_as_a_table_or_an_empty_line(monkeypatch):
     assert table.rows[0]["status"] == "Dry run"
     host2, _ = _render(monkeypatch, None)
     assert "Nothing posted yet." in [e.text for e in _one(host2, ui.label)]
+
+
+# ── Facebook and Instagram (options:meta_log) ───────────────────────────────
+_PAGE = "https://neuralstrike.co/t/2026-11-23-1035-SPY/"
+
+
+def test_meta_log_rows_names_the_network():
+    rows = page.meta_log_rows({"posts": [
+        {"at": "2026-11-23T10:35:00-06:00", "kind": "trade_idea", "network": "facebook",
+         "status": "posted", "id": "111_222", "reason": None, "link": _PAGE},
+        {"at": "2026-11-23T10:35:00-06:00", "kind": "report", "network": "instagram",
+         "status": "dry_run", "id": None, "reason": None, "link": _PAGE}]})
+    assert [(r["network"], r["kind"], r["status"]) for r in rows] == [
+        ("Facebook", "Trade idea", "Posted"), ("Instagram", "Market report", "Dry run")]
+    assert rows[0]["link"] == "https://facebook.com/111_222"
+    assert rows[1]["link"] == _PAGE
+    assert rows[0]["when"] == "Nov 23 10:35"
+    assert rows[0]["id"] != rows[1]["id"]
+
+
+def test_a_refused_meta_row_shows_its_reason():
+    (row,) = page.meta_log_rows({"posts": [
+        {"at": "2026-11-23T10:35:00-06:00", "kind": "trade_idea", "network": "facebook",
+         "status": "refused", "id": None, "reason": "no credentials", "link": _PAGE}]})
+    assert row["status"] == "Refused" and row["reason"] == "no credentials"
+    assert row["link"] == _PAGE
+
+
+def test_meta_log_rows_tolerates_garbage():
+    assert page.meta_log_rows(None) == []
+    assert page.meta_log_rows({"posts": 5}) == []
+    rows = page.meta_log_rows({"posts": [
+        "x", {"kind": "trade_idea"}, {"network": "myspace", "status": "posted"},
+        {"network": "instagram", "status": None, "at": "garbage", "id": 7}]})
+    assert [(r["network"], r["status"], r["when"]) for r in rows] == [
+        ("Instagram", "Unknown", "")]
+    assert rows[0]["link"] == ""
+
+
+def test_the_meta_log_renders_under_recent_posts(monkeypatch):
+    from nicegui import ui
+    import bus_client
+    payloads = {"options:x_log": None, "options:meta_log": {"posts": [
+        {"at": "2026-11-23T10:35:00-06:00", "kind": "trade_idea", "network": "instagram",
+         "status": "posted", "id": "m1", "reason": None, "link": _PAGE}]}}
+    host, _ = _render(monkeypatch)
+    monkeypatch.setattr(bus_client, "read", lambda view: payloads.get(view))
+    with ui.card() as host:
+        page.build()
+    titles = [e.text for e in _one(host, ui.label)]
+    assert "Facebook and Instagram" in titles
+    assert titles.index("Facebook and Instagram") > titles.index("Recent posts")
+    (table,) = _one(host, ui.table)
+    assert table.rows[0]["network"] == "Instagram"
