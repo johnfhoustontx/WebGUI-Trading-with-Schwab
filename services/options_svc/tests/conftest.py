@@ -200,6 +200,14 @@ def _x_posts_log_in_tmp(tmp_path, monkeypatch):
     monkeypatch.setattr(x_post, "X_POSTS_LOG", tmp_path / "x_posts.jsonl")
 
 
+@pytest.fixture(autouse=True)
+def _meta_posts_log_in_tmp(tmp_path, monkeypatch):
+    """The same for ``meta_posts.jsonl``: every trade idea with a page tries
+    Facebook and Instagram, and even a refusal appends a line."""
+    from shared.notify import meta_post
+    monkeypatch.setattr(meta_post, "META_POSTS_LOG", tmp_path / "meta_posts.jsonl")
+
+
 class _NoExpirationList:
     """A non-200 proxy response: ``option_expirations`` reads it as ``[]``."""
     status_code = 503

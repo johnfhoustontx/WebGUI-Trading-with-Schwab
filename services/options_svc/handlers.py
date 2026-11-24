@@ -51,7 +51,7 @@ from shared import service_limits as _service_limits  # noqa: E402
 from shared import market_calendar as mc
 from shared import public_gamma
 from shared import x_text
-from shared.notify import x_post
+from shared.notify import meta_post, x_post
 from shared.notify.channels import _today_ct
 from shared.symbols import clean_symbol
 from shared.contracts.options import (LedgerCaps, PaperAccountView,
@@ -3037,6 +3037,7 @@ def run_trade_idea(bus, slot, now=None) -> dict:
         # The site first, so the trade's own page exists when X links it.
         result["site"], result["page"] = _publish_trade_idea_site(idea, png, now)
         result["x"] = _post_trade_idea_x(bus, idea, png, now, link=result["page"])
+        result["meta"] = _post_trade_idea_meta(bus, idea, result["page"], now)
         publish_idea_cards(bus)
         result["ledger"] = _book_trade_idea_ledger(idea, now)
     else:
@@ -3226,6 +3227,71 @@ def _post_trade_idea_x(bus, idea, png, now, link=None) -> dict:
     except Exception as exc:  # noqa: BLE001 -- X must never cost the private post
         _degrade.degraded("options.run_trade_idea.x")
         return {"ok": False, "error": type(exc).__name__}
+
+
+META_IDEAS_KEY = "cache:options:meta_ideas"
+META_REPORTS_KEY = "cache:options:meta_reports"
+META_SEEN_KEEP = 100
+
+
+def _meta_seen(bus, key):
+    """``{network: [ids…]}`` already posted (or maybe posted), newest first."""
+    env = bus.cache_get(key)
+    p = env.payload if env is not None else None
+    p = p if isinstance(p, dict) else {}
+    return {n: [str(i) for i in p.get(n) or [] if i is not None]
+            if isinstance(p.get(n), list) else [] for n in meta_post.NETWORKS}
+
+
+def _meta_remember(bus, key, seen, ident, networks):
+    for n in networks:
+        seen[n] = ([ident] + [i for i in seen[n] if i != ident])[:META_SEEN_KEEP]
+    bus.cache_set(key, seen)
+
+
+def _post_meta(bus, key, ident, *, kind, body, symbol, address, now, meta):
+    """Post ``body`` to the networks that do not yet hold ``ident``, linking
+    ``address`` (its ``card.jpg`` is Instagram's image), and remember each network
+    that posted or may have. Returns ``meta_post.post``'s answer."""
+    from services.options_svc import trade_pages   # its CARD_JPG is report_pages' too
+    from shared import meta_text
+    seen = _meta_seen(bus, key)
+    todo = tuple(n for n in meta_post.NETWORKS if ident not in seen[n])
+    if not todo:
+        return {"skipped": "already posted"}
+    settings = meta_text.config()
+    out = meta_post.post(
+        bus, kind=kind, networks=todo, now=now, config=push_notify.load_config(),
+        settings=settings, link=address, image_url=address + trade_pages.CARD_JPG,
+        fb_text=meta_text.facebook_text(body, meta_text.tags(kind, "facebook", symbol,
+                                                             cfg=settings)),
+        ig_text=meta_text.instagram_text(body, kind, address,
+                                         meta_text.tags(kind, "instagram", symbol,
+                                                        cfg=settings), cfg=settings),
+        meta=meta)
+    done = [n for n in todo
+            if (out.get(n) or {}).get("status") in ("posted", "unknown")]
+    if done:
+        _meta_remember(bus, key, seen, ident, done)
+    return out
+
+
+def _post_trade_idea_meta(bus, idea, address, now) -> dict:
+    """Facebook and Instagram after X. Needs the trade's own page: Facebook links
+    it and Instagram's image is its ``card.jpg``, so with no page nothing is
+    posted. Never raises: Meta must never cost the post, the Ledger or the cards."""
+    if not address:
+        return {"skipped": "no page"}
+    try:
+        from services.options_svc import trade_idea
+        pid = str(address).rstrip("/").rsplit("/", 1)[-1]
+        return _post_meta(bus, META_IDEAS_KEY, pid, kind="trade_idea",
+                          body=trade_idea.caption(idea), symbol=idea.get("symbol"),
+                          address=address, now=now,
+                          meta={"symbol": idea.get("symbol"), "page": pid})
+    except Exception as exc:  # noqa: BLE001
+        _degrade.degraded("options.run_trade_idea.meta")
+        return {"error": type(exc).__name__}
 
 
 def run_eod_summary(bus, slot=None) -> None:
@@ -3573,9 +3639,7 @@ def run_x_post_report(bus, args, now=None):
         cfg, x = _x_config()
         done = _posted_reports(bus)
         ident = _report_identity(report)
-        if ident in done:
-            log.info("x report: %s already handled", ident)
-            return None
+        x_done = ident in done
         try:
             age_min = (time.time() - float(args.get("mtime"))) / 60.0
         except (TypeError, ValueError):
@@ -3585,25 +3649,52 @@ def run_x_post_report(bus, args, now=None):
         if age_min is None or not (age_min <= max_age):
             log.info("x report: skipping %s (age %s min, max %s)", ident,
                      "unknown" if age_min is None else f"{age_min:.0f}", max_age)
-            _remember_report(bus, ident, done)
+            # Remembered everywhere: a stale report may be yesterday's, so it
+            # never posts, even when it comes back with a fresh mtime.
+            if not x_done:
+                _remember_report(bus, ident, done)
+            _meta_remember(bus, META_REPORTS_KEY, _meta_seen(bus, META_REPORTS_KEY),
+                           ident, meta_post.NETWORKS)
             return None
-        tags = x_text.hashtags(_REPORT_TAGS, _x_configured_tags(x, "report"),
-                               max_tags=x_text.max_tags_from(x.get("max_tags")))
         label = str(report.get("slot_label") or "").strip() or "Market report"
+        headline = str(report["headline"]).strip()
         png = report_card.render_report_png(report, now=now)
         # The report's own page (report_pages.py): report.html shows a newer
         # report by the next slot, so a post links the page when it has one.
-        link = (_report_page(report, png)
-                or str(report.get("report_url") or "").strip() or str(x.get("link") or ""))
-        text = x_text.fit_text(f"{label}: {str(report['headline']).strip()}", link, tags)
-        out = x_post.post(bus, text, png, kind="report", config=cfg, now=now,
-                          meta={"report": ident})
-        if out.get("ok") or out.get("unknown"):
-            _remember_report(bus, ident, done)
+        address = _report_page(report, png)
+        out = None
+        if x_done:
+            log.info("x report: %s already handled", ident)
+        else:
+            tags = x_text.hashtags(_REPORT_TAGS, _x_configured_tags(x, "report"),
+                                   max_tags=x_text.max_tags_from(x.get("max_tags")))
+            link = (address or str(report.get("report_url") or "").strip()
+                    or str(x.get("link") or ""))
+            text = x_text.fit_text(f"{label}: {headline}", link, tags)
+            out = x_post.post(bus, text, png, kind="report", config=cfg, now=now,
+                              meta={"report": ident})
+            if out.get("ok") or out.get("unknown"):
+                _remember_report(bus, ident, done)
+        _post_report_meta(bus, report, address, ident, f"{label}: {headline}", now)
         return out
     except Exception:
         _degrade.degraded("options.x_post_report")
         return None
+
+
+def _post_report_meta(bus, report, address, ident, body, now):
+    """Facebook and Instagram for a report, each once (``META_REPORTS_KEY``). Needs
+    the report's own page. Never raises."""
+    if not address:
+        log.info("meta report: %s has no page; not posted", ident)
+        return {"skipped": "no page"}
+    try:
+        return _post_meta(bus, META_REPORTS_KEY, ident, kind="report", body=body,
+                          symbol=None, address=address, now=now,
+                          meta={"report": ident})
+    except Exception as exc:  # noqa: BLE001
+        _degrade.degraded("options.x_post_report.meta")
+        return {"error": type(exc).__name__}
 
 
 def run_x_post(bus, args, now=None):
